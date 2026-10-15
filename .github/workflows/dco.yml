@@ -1,0 +1,57 @@
+# DCO check: every commit in a pull request must carry a Signed-off-by line
+# whose email matches the commit's author email.
+#
+# Why a workflow and not the DCO GitHub App:
+# - It lives in the repo, so it is reviewed and versioned like any other code.
+# - No third-party app gets access to the repository; the job's token is read-only.
+# - It uses no third-party actions, so there is nothing to pin by SHA. It fetches
+#   the public repo over HTTPS with plain git.
+# - Its failure output follows the house style: what is wrong, then a "fix:" line.
+# Cost: we maintain about 30 lines of shell. The app's "remediation commit" feature is not offered.
+
+name: DCO
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dco-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  dco:
+    name: DCO
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check Signed-off-by on every commit
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          git init -q work
+          cd work
+          git fetch -q --filter=blob:none "$REPO_URL" \
+            "+refs/heads/${BASE_REF}:refs/dco/base" \
+            "+refs/pull/${PR_NUMBER}/head:refs/dco/head"
+          fail=0
+          count=0
+          for c in $(git rev-list --no-merges refs/dco/base..refs/dco/head); do
+            count=$((count + 1))
+            email=$(git log -1 --format=%ae "$c")
+            if ! git log -1 --format='%(trailers:key=Signed-off-by,valueonly)' "$c" | grep -qiF "<${email}>"; then
+              echo "::error::${c:0:12}: no Signed-off-by line matching the author <${email}>"
+              echo "    fix: git rebase --signoff origin/${BASE_REF} && git push --force-with-lease"
+              fail=1
+            fi
+          done
+          if [ "$fail" -eq 0 ]; then
+            echo "All ${count} commit(s) are signed off."
+          fi
+          exit "$fail"
