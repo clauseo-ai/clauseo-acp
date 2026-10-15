@@ -25,3 +25,4 @@
 ## Sign-off
 
 - [ ] Every commit is signed off (`git commit -s`).
+- [ ] Outside contributor: CLA signed (cla/signatures/<login>.md)

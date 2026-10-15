@@ -1,0 +1,68 @@
+# CLA check: every login in a pull request must have signed the CLA (version 1.0), or be exempt.
+# Signatures are files in the pull request's own tree (see cla/README.md), so a contributor
+# signs in the same pull request as their first change.
+#
+# Why a workflow and not a CLA app or a bot:
+# - It lives in the repo, so the check is reviewed and versioned like any other code.
+# - No third-party app gets access to the repository or to the signatures; the job's token is read-only.
+# - It uses no third-party actions, so there is nothing to pin by SHA. It fetches the public repo
+#   over HTTPS with plain git, and reads commit authors with the gh CLI that the runner includes.
+# - The check script comes from the base branch, so a pull request cannot change the check that runs on it.
+# - Its failure output follows the house style: what is wrong, then a "fix:" line.
+# Cost: we maintain the script in .github/scripts/cla-check.sh. Signatures are plain files, not records in a service.
+
+name: CLA
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: cla-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  cla:
+    name: CLA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Fetch the base branch and the pull request
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          git init -q work
+          cd work
+          git fetch -q "$REPO_URL" \
+            "+refs/heads/${BASE_REF}:refs/cla/base" \
+            "+refs/pull/${PR_NUMBER}/head:refs/cla/head"
+          # The check comes from the base branch, so this pull request cannot change it.
+          git show refs/cla/base:.github/scripts/cla-check.sh > /tmp/cla-check.sh
+
+      - name: Build the list of logins to check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          commits=$(gh api "repos/$REPO/pulls/$PR_NUMBER/commits" --paginate \
+            --jq '.[] | (.author.login // ("UNLINKED:" + .commit.author.email))')
+          logins=$(printf '%s\n%s\n' "$PR_AUTHOR" "$commits" | tr '\n' ' ')
+          echo "LOGINS=$logins" >> "$GITHUB_ENV"
+
+      - name: Check the CLA for every login
+        env:
+          TREE_REF: refs/cla/head
+          # The founders are covered by their IP assignment to the company, so they need no signature.
+          EXEMPT: "ro-hansolo shamilrshd"
+        working-directory: work
+        run: bash /tmp/cla-check.sh

@@ -10,12 +10,14 @@ Clauseo is GPL-3.0. Most code here is written by coding agents and checked by pe
    a `target/` folder between agents.
 4. **Commit with sign-off.** `git commit -s` on every commit (the DCO,
    https://developercertificate.org). The `Signed-off-by` email must match the author email.
-5. **Run the check.** `cargo xtask check` must pass.
-6. **Open a pull request** with the template filled in, including the brief's checks and their output.
-7. **Get one approval.** Someone other than the author approves. Changes under these paths also need
+5. **Sign the CLA** (outside contributors, on your first pull request). Add your signature file as
+   described in `cla/README.md`. The founders are covered by their agreement with the company.
+6. **Run the check.** `cargo xtask check` must pass.
+7. **Open a pull request** with the template filled in, including the brief's checks and their output.
+8. **Get one approval.** Someone other than the author approves. Changes under these paths also need
    their code owner (see `.github/CODEOWNERS`): `crates/protocol`, `crates/reducer`, `crates/store`,
    `crates/matters`, `crates/host`, `crates/acp`, `crates/sandbox`.
-8. **Merge** once CI is green.
+9. **Merge** once CI is green.
 
 ## If a check fails
 
