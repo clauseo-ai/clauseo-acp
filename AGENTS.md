@@ -45,6 +45,7 @@ this. Use the words in `GLOSSARY.md` exactly.
   and agent credentials.
 - Never kill a process by name. Kill only the PID you started.
 - Never open a `.env` file or print a secret.
+- Never create or edit CLA.md or anything in cla/. Signing is done by the person, never by an agent.
 
 ## Rules the checks enforce
 
