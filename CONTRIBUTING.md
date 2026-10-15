@@ -1,6 +1,6 @@
 # Contributing
 
-Clauseo is GPL-3.0. Most code here is written by coding agents and checked by people.
+Clauseo is GPL-3.0-or-later. Most code here is written by coding agents and checked by people.
 
 ## Steps
 
@@ -26,5 +26,5 @@ Clauseo is GPL-3.0. Most code here is written by coding agents and checked by pe
 
 ## Licence
 
-Contributions are licensed under the GPL-3.0, as in `LICENSE`. Code copied from another project keeps
+Contributions are licensed under the GPL-3.0-or-later, as in `LICENSE`. Code copied from another project keeps
 its licence text in `LICENSES/` and an SPDX header in each copied file.
