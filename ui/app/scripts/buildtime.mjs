@@ -24,9 +24,11 @@ import { fileURLToPath } from "node:url";
 import {
   AppGuard,
   ConflictError,
+  MIN_NODE,
   appPaths,
   initialJs,
   marked,
+  nodeAtLeast,
   parseRuns,
   recoverApp,
   restoreFailure,
@@ -296,11 +298,12 @@ async function onSignal(state, signal) {
 }
 
 async function main() {
-  const major = Number(process.versions.node.split(".")[0]);
-  if (major < 24) {
-    throw new Error(`Node ${process.versions.node} is too old; install Node 24 or later`);
-  }
   const runs = parseRuns(process.argv.slice(2));
+  if (!nodeAtLeast(process.versions.node, MIN_NODE)) {
+    const message = `Node ${process.versions.node} is too old for ui/ (engines: >=${MIN_NODE})`;
+    report(runs, [], [{ message, fix: `install Node ${MIN_NODE} or later` }]);
+    return;
+  }
   if (!existsSync(join(APP_DIR, "node_modules"))) {
     throw new Error("ui/app/node_modules is missing; run `pnpm -C ui install --frozen-lockfile`");
   }

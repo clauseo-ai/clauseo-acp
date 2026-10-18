@@ -50,6 +50,21 @@ export function parseRuns(argv) {
   return runs;
 }
 
+/** The oldest Node the app's dependencies run on: `engines` in ui/package.json (babel 8). */
+export const MIN_NODE = "24.11.0";
+
+/** Whether the Node version `version` (`24.11.0`, a leading `v` allowed) is `min` or later. */
+export function nodeAtLeast(version, min) {
+  const parts = (text) => text.replace(/^v/, "").split(/[.-]/).slice(0, 3).map(Number);
+  const [have, want] = [parts(version), parts(min)];
+  for (let i = 0; i < 3; i += 1) {
+    if ((have[i] ?? 0) !== (want[i] ?? 0)) {
+      return (have[i] ?? 0) > (want[i] ?? 0);
+    }
+  }
+  return true;
+}
+
 /** Characters that make a package.json script more than a plain command and its arguments. */
 const SHELL_SYNTAX = /[&|;<>()$`'"\\*?{}[\]~#]/;
 
