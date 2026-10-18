@@ -62,23 +62,19 @@ impl Unit {
 
 /// Which gate a budget is enforced by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum Gate {
-    #[serde(rename = "pr")]
     Pr,
-    #[serde(rename = "release")]
     Release,
-    #[serde(rename = "alert")]
     Alert,
-    #[serde(rename = "local")]
     Local,
 }
 
 /// Whether the row's `measured` value came from this repo's own tooling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum Status {
-    #[serde(rename = "unmeasured")]
     Unmeasured,
-    #[serde(rename = "measured")]
     Measured,
 }
 
@@ -289,7 +285,18 @@ fn check_id(
 
 /// Every required key is there. A row that lacks one gets the fix for that key.
 fn check_required(row: &Row, name: &str, header: u32, found: &mut Vec<Violation>) {
-    let mut need = |missing: bool, key: &str, fix: &str| {
+    #[rustfmt::skip]
+    let required = [
+        (row.id.is_none(), "id", r#"add id = "snake_case_name", unique in budgets.toml"#),
+        (row.metric.is_none(), "metric", r#"add metric = "what is measured""#),
+        (row.limit.is_none(), "limit", "add limit = <number> in the row's unit"),
+        (row.unit.is_none(), "unit", r#"add unit = "s", "ms", "MB", "KB" or "count""#),
+        (row.gate.is_none(), "gate", r#"add gate = "pr", "release", "alert" or "local""#),
+        (row.measured_by.is_none(), "measured_by", r#"add measured_by = "the tool or method""#),
+        (row.status.is_none(), "status", r#"add status = "unmeasured" or "measured""#),
+        (row.source.is_none(), "source", r#"add source = "the plan section it comes from""#),
+    ];
+    for (missing, key, fix) in required {
         if missing {
             let message = if key == "id" {
                 "budget has no id".to_owned()
@@ -298,47 +305,7 @@ fn check_required(row: &Row, name: &str, header: u32, found: &mut Vec<Violation>
             };
             found.push(problem(header, message, fix));
         }
-    };
-    need(
-        row.id.is_none(),
-        "id",
-        r#"add id = "snake_case_name", unique in budgets.toml"#,
-    );
-    need(
-        row.metric.is_none(),
-        "metric",
-        r#"add metric = "what is measured""#,
-    );
-    need(
-        row.limit.is_none(),
-        "limit",
-        "add limit = <number> in the row's unit",
-    );
-    need(
-        row.unit.is_none(),
-        "unit",
-        r#"add unit = "s", "ms", "MB", "KB" or "count""#,
-    );
-    need(
-        row.gate.is_none(),
-        "gate",
-        r#"add gate = "pr", "release", "alert" or "local""#,
-    );
-    need(
-        row.measured_by.is_none(),
-        "measured_by",
-        r#"add measured_by = "the tool or method""#,
-    );
-    need(
-        row.status.is_none(),
-        "status",
-        r#"add status = "unmeasured" or "measured""#,
-    );
-    need(
-        row.source.is_none(),
-        "source",
-        r#"add source = "the plan section it comes from""#,
-    );
+    }
 }
 
 /// `measured` and `measured_on` are set together, and a row with status `measured` has a value.
