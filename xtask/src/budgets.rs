@@ -15,21 +15,14 @@ use toml::Spanned;
 /// The file's name, at the repo root.
 pub(crate) const FILE: &str = "budgets.toml";
 
-/// One budget row that passed every rule.
+/// One budget row that passed every rule. Only the fields `buildtime` reads are kept; the other
+/// keys are checked when the file is read and then dropped.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Budget {
     pub id: String,
-    pub metric: String,
     pub limit: f64,
     pub unit: Unit,
     pub gate: Gate,
-    pub measured_by: String,
-    pub status: Status,
-    pub measured: Option<f64>,
-    pub measured_on: Option<String>,
-    pub source: String,
-    /// The line of the row's `[[budget]]` header.
-    pub line: u32,
 }
 
 /// The unit a limit is in.
@@ -120,10 +113,10 @@ pub(crate) fn parse(text: &str) -> (Vec<Budget>, Vec<Violation>) {
     let mut budgets = Vec::new();
     let mut first_headers = HashMap::new();
     for row in file.budget {
-        let header = header_line(text, row.span().start);
+        let header = line_number(text, row.span().start);
         let row = row.into_inner();
         if check_row(&row, text, header, &mut first_headers, &mut violations) {
-            budgets.extend(into_budget(row, header));
+            budgets.extend(into_budget(row));
         }
     }
     violations.sort_by_key(|violation| violation.line);
@@ -171,19 +164,6 @@ fn syntax_problem(text: &str, error: &toml::de::Error) -> Violation {
 fn line_number(text: &str, offset: usize) -> u32 {
     let head = text.get(..offset).unwrap_or(text);
     u32::try_from(head.matches('\n').count() + 1).unwrap_or(u32::MAX)
-}
-
-/// The line of the `[[budget]]` header a row starts under: the last line at or before `offset`
-/// whose trimmed text starts with `[[`.
-fn header_line(text: &str, offset: usize) -> u32 {
-    let row_line = line_number(text, offset);
-    text.lines()
-        .zip(1..)
-        .take_while(|&(_, number)| number <= row_line)
-        .filter(|(line, _)| line.trim().starts_with("[["))
-        .map(|(_, number)| number)
-        .last()
-        .unwrap_or(row_line)
 }
 
 /// The line a value starts on.
@@ -339,20 +319,13 @@ fn check_measured(row: &Row, name: &str, header: u32, found: &mut Vec<Violation>
     }
 }
 
-/// The row as a `Budget`. `None` when a required key is missing.
-fn into_budget(row: Row, line: u32) -> Option<Budget> {
+/// The row as a `Budget`. `None` when a required key is missing, which `check_row` reports first.
+fn into_budget(row: Row) -> Option<Budget> {
     Some(Budget {
         id: row.id?.into_inner(),
-        metric: row.metric?.into_inner(),
         limit: row.limit?.into_inner(),
         unit: row.unit?.into_inner(),
         gate: row.gate?.into_inner(),
-        measured_by: row.measured_by?.into_inner(),
-        status: row.status?.into_inner(),
-        measured: row.measured.map(Spanned::into_inner),
-        measured_on: row.measured_on.map(Spanned::into_inner),
-        source: row.source?.into_inner(),
-        line,
     })
 }
 
