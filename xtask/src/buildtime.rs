@@ -12,7 +12,7 @@
 //! through both halves. Only `clock::timed` reads the clock, and only
 //! `process.rs` starts processes; the web half's Node script does its own timing.
 
-mod lock;
+pub(crate) mod lock;
 mod marker;
 mod probe;
 mod profile;

@@ -45,6 +45,15 @@ pub(crate) fn acquire(path: &Path) -> Result<File, Failure> {
     }
 }
 
+/// True when another open handle holds the lock on the file at `path`. A free lock is taken and
+/// released at once. A missing file is never created and reads as free, as does any error.
+pub(crate) fn is_held(path: &Path) -> bool {
+    let Ok(file) = OpenOptions::new().read(true).write(true).open(path) else {
+        return false;
+    };
+    matches!(file.try_lock(), Err(TryLockError::WouldBlock))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,7 +70,9 @@ mod tests {
             "another buildtime run is in progress in this checkout"
         );
         assert_eq!(second.fix, "wait for it to finish, or stop it");
+        assert!(is_held(&path));
         drop(first);
+        assert!(!is_held(&path));
         let third = acquire(&path).expect("the lock is free once the first run ends");
         drop(third);
     }
