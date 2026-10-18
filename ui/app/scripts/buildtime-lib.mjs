@@ -1,6 +1,7 @@
 // The parts of buildtime.mjs that can be tested without a browser or a dev server, kept apart so
-// buildtime-lib.test.mjs can test them: argument parsing, the commands from package.json, sizing
-// the initial JS of a build, and the guard over src/App.tsx.
+// buildtime-lib.test.mjs can test them: argument parsing, the Node version, the commands from
+// package.json, sizing the initial JS of a build, and the guard over src/App.tsx. The guard's
+// rules are written out here only, above `BACKUP_DIR`; everything else points at them.
 
 import {
   closeSync,
@@ -160,17 +161,19 @@ export function initialJs(dist) {
   return { bytes, files };
 }
 
-// The guard over src/App.tsx. It follows xtask's guard over a marker file (probe.rs, marker.rs):
+// The guard over src/App.tsx, the one place its rules are written:
 // - Before the first edit, the original bytes are copied to `target/xtask/buildtime/<repo path>`.
 //   An existing copy is never replaced.
 // - Every write, to App.tsx or to the copy, goes to a temporary file in the same folder, then is
 //   renamed over the target, so a kill never leaves half a file.
-// - The original goes back only while App.tsx holds exactly the bytes last written. Anything else
-//   is the developer's edit: nothing more is written, both files stay, and a ConflictError names
-//   them.
+// - The original goes back only while App.tsx holds exactly the bytes last written, after the
+//   probe and on SIGINT, SIGTERM and SIGHUP. Anything else is the developer's edit: nothing more
+//   is written, both files stay, and a ConflictError names them. Any failed restore fails the run
+//   and keeps the copy (`restoreFailure`).
 // - A killed run leaves its copy. The next run's `recoverApp` puts it back only when App.tsx is
-//   the copy plus one `data-buildtime="<n>"` at ROOT_TAG. xtask's own leftover restore leaves
-//   `target/xtask/buildtime/ui/` to this script.
+//   the copy plus one `data-buildtime="<n>"` at ROOT_TAG. xtask's own leftover restore
+//   (probe.rs) leaves `target/xtask/buildtime/ui/` to this script, and xtask's buildtime lock
+//   (lock.rs) covers the copy when xtask runs the script.
 
 /** Where the copies wait, under the repo root. xtask's buildtime lock covers it. */
 export const BACKUP_DIR = "target/xtask/buildtime";
