@@ -1,4 +1,4 @@
-//! Workspace automation: `cargo xtask check [--quick]`, `cargo xtask setup` and
+//! Workspace automation: `cargo xtask check [--quick]`, `cargo xtask setup [--binaries]` and
 //! `cargo xtask buildtime [rust|web|all] [--runs N] [--json]`.
 //!
 //! For people and agents:
@@ -9,6 +9,7 @@
 //!   and its planted cases go in one `checks::planted::cases!` list.
 //! - Pin a tool: one `Tool` in `setup::TOOLS` for a cargo crate, else one `Binary` in
 //!   `setup::BINARIES`.
+//! - `setup` prints a `Binary`'s install command; `setup --binaries` also runs it.
 //! - Budgets live in `budgets.toml` at the repo root; `budgets.rs` reads them for the check and for
 //!   `buildtime`.
 //! - Failures print as `path:line: what`, then `    fix: ...`. A failure with no location prints
@@ -62,7 +63,14 @@ enum Commands {
     },
     /// Install the pinned cargo tools (`cargo install --locked <tool> --version <version>`), print
     /// the install commands for gitleaks and lefthook, and check their versions against the pins.
-    Setup,
+    Setup {
+        /// Also run each pinned binary's install command (gitleaks, lefthook), not only print it.
+        ///
+        /// A failed install fails setup and names the command to run by hand. Versions are
+        /// checked either way.
+        #[arg(long)]
+        binaries: bool,
+    },
     /// Time the build loop against `budgets.toml`: the Rust half, the web half, or both (the
     /// default).
     Buildtime {
@@ -81,7 +89,7 @@ enum Commands {
 fn main() -> ExitCode {
     match Cli::parse().command {
         Commands::Check { quick } => check::run(quick),
-        Commands::Setup => setup::run(),
+        Commands::Setup { binaries } => setup::run(binaries),
         Commands::Buildtime { half, runs, json } => buildtime::run(half, runs, json),
     }
 }

@@ -1,9 +1,11 @@
 //! `cargo xtask setup`: installs the pinned cargo tools, and prints the install command for the
-//! pinned tools that are not cargo crates, then checks their versions.
+//! pinned tools that are not cargo crates, then checks their versions. With `--binaries` it also
+//! runs those install commands, and a failed one fails setup with the command to run by hand.
 
 use crate::output::Printer;
 use crate::process::{self, Cmd, Program};
 use crate::workspace;
+use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -104,13 +106,25 @@ fn lefthook_unix(os: &str, arch: &str, version: &str) -> Option<String> {
     ))
 }
 
+/// The `winget` command that installs `binary` on Windows.
+fn winget(binary: &Binary) -> Cmd {
+    Cmd::new(
+        Program::Named("winget"),
+        [
+            "install",
+            "--id",
+            binary.winget,
+            "--version",
+            binary.version,
+            "--exact",
+        ],
+    )
+}
+
 /// The command that installs `binary` on `os`/`arch`, or where to download it by hand.
 pub(crate) fn install_command(binary: &Binary, os: &str, arch: &str) -> String {
     if os == "windows" {
-        return format!(
-            "winget install --id {} --version {} --exact",
-            binary.winget, binary.version
-        );
+        return winget(binary).to_string();
     }
     (binary.unix)(os, arch, binary.version).unwrap_or_else(|| {
         format!(
@@ -118,6 +132,16 @@ pub(crate) fn install_command(binary: &Binary, os: &str, arch: &str) -> String {
             binary.version, binary.repo
         )
     })
+}
+
+/// The program and arguments that run what `install_command` shows: `winget` on Windows, and
+/// `sh -c` with the shell command elsewhere. `None` where no release asset exists, so nothing runs.
+pub(crate) fn install_cmd(binary: &Binary, os: &str, arch: &str) -> Option<Cmd> {
+    if os == "windows" {
+        return Some(winget(binary));
+    }
+    let script = (binary.unix)(os, arch, binary.version)?;
+    Some(Cmd::new(Program::Named("sh"), ["-c", script.as_str()]))
 }
 
 /// How the installed version compares with the pin.
@@ -145,14 +169,31 @@ pub(crate) fn compare_version(
     }
 }
 
-/// Installs each cargo tool, then prints the install command for each binary and checks its
-/// version. Continues past failures; fails if any failed.
-pub(crate) fn run() -> ExitCode {
+/// Runs a command in a directory and returns whether it succeeded; `Err` means it could not start.
+/// Production passes `process::run_inherit`, so the output goes to the terminal.
+type Runner<'a> = dyn FnMut(&Cmd, &Path) -> io::Result<bool> + 'a;
+
+/// Installs each cargo tool, then, with `binaries`, runs each binary's install command. Then
+/// prints the install command for each binary and checks its version. Continues past failures;
+/// fails if any failed.
+pub(crate) fn run(binaries: bool) -> ExitCode {
     let mut out = Printer::stdout();
     let root = workspace::workspace_root();
     let mut any_failed = false;
     for tool in TOOLS {
         any_failed |= !install_tool(&mut out, tool, &root);
+    }
+    if binaries {
+        let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
+        let installed = install_binaries(
+            &mut out,
+            BINARIES,
+            os,
+            arch,
+            &root,
+            &mut process::run_inherit,
+        );
+        any_failed |= !installed;
     }
     for binary in BINARIES {
         any_failed |= !check_binary(&mut out, binary, &root);
@@ -164,6 +205,71 @@ pub(crate) fn run() -> ExitCode {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+/// Runs the install command of each binary for `os`/`arch` in `root`, printing each one before
+/// it runs. Continues past failures. Returns whether every binary was installed.
+fn install_binaries<W: Write>(
+    out: &mut Printer<W>,
+    binaries: &[Binary],
+    os: &str,
+    arch: &str,
+    root: &Path,
+    runner: &mut Runner<'_>,
+) -> bool {
+    let mut all_installed = true;
+    for binary in binaries {
+        all_installed &= install_binary(out, binary, os, arch, root, runner);
+    }
+    all_installed
+}
+
+/// Runs the install command of one binary. A platform with no release asset runs nothing and
+/// fails with the download text as its fix. A failure, whether the command exits non-zero or
+/// cannot start, fails with that command as the fix.
+fn install_binary<W: Write>(
+    out: &mut Printer<W>,
+    binary: &Binary,
+    os: &str,
+    arch: &str,
+    root: &Path,
+    runner: &mut Runner<'_>,
+) -> bool {
+    let text = install_command(binary, os, arch);
+    let Some(cmd) = install_cmd(binary, os, arch) else {
+        out.failure(
+            &format!(
+                "{} has no release for {os}-{arch}, so it is not installed",
+                binary.name
+            ),
+            &text,
+        );
+        return false;
+    };
+    out.note(format!(
+        "installing {} {}: {text}",
+        binary.name, binary.version
+    ));
+    let fix =
+        format!("run `{text}` by hand and check its output, then run cargo xtask setup again");
+    match runner(&cmd, root) {
+        Ok(true) => true,
+        Ok(false) => {
+            out.failure(&format!("installing {} failed", binary.name), &fix);
+            false
+        }
+        Err(error) => {
+            out.failure(
+                &format!(
+                    "could not start {} to install {}: {error}",
+                    cmd.program.name(),
+                    binary.name
+                ),
+                &fix,
+            );
+            false
+        }
     }
 }
 
@@ -240,6 +346,8 @@ fn check_binary(out: &mut Printer<std::io::Stdout>, binary: &Binary, root: &Path
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
+    use std::path::PathBuf;
 
     fn binary(name: &str) -> &'static Binary {
         BINARIES.iter().find(|b| b.name == name).unwrap()
@@ -314,5 +422,145 @@ mod tests {
             compare_version("2.2.1", Err("not found".into())),
             VersionCheck::Missing("not found".into())
         );
+    }
+
+    /// The platforms `--binaries` must install on: macOS, Linux and Windows, on both arches.
+    const PLATFORMS: [(&str, &str); 6] = [
+        ("macos", "aarch64"),
+        ("macos", "x86_64"),
+        ("linux", "aarch64"),
+        ("linux", "x86_64"),
+        ("windows", "x86_64"),
+        ("windows", "aarch64"),
+    ];
+
+    /// The command the install of `binary` must run on `os`/`arch`, built from the pin.
+    fn expected_cmd(binary: &Binary, os: &str, arch: &str) -> Cmd {
+        if os == "windows" {
+            Cmd::new(
+                Program::Named("winget"),
+                [
+                    "install",
+                    "--id",
+                    binary.winget,
+                    "--version",
+                    binary.version,
+                    "--exact",
+                ],
+            )
+        } else {
+            let script = install_command(binary, os, arch);
+            Cmd::new(Program::Named("sh"), ["-c", script.as_str()])
+        }
+    }
+
+    /// The failure line for a failed install of `text`, the command that runs it.
+    fn fix_for(text: &str) -> String {
+        format!(
+            "    fix: run `{text}` by hand and check its output, then run cargo xtask setup again"
+        )
+    }
+
+    #[test]
+    fn install_runs_the_pinned_command_for_each_os_and_arch() {
+        for (os, arch) in PLATFORMS {
+            let dir = Scratch::new("setup-install-each");
+            let mut ran = Vec::new();
+            let mut runner = |cmd: &Cmd, root: &Path| -> io::Result<bool> {
+                ran.push((cmd.clone(), root.to_path_buf()));
+                Ok(true)
+            };
+            let mut out = Printer::new(Vec::new(), false);
+            let installed = install_binaries(&mut out, BINARIES, os, arch, &dir, &mut runner);
+            assert!(installed, "{os}-{arch}");
+            let expected: Vec<(Cmd, PathBuf)> = BINARIES
+                .iter()
+                .map(|b| (expected_cmd(b, os, arch), dir.to_path_buf()))
+                .collect();
+            assert_eq!(ran, expected, "{os}-{arch}");
+        }
+    }
+
+    #[test]
+    fn a_failed_install_names_the_command_as_the_fix() {
+        let dir = Scratch::new("setup-install-exit");
+        let gitleaks = binary("gitleaks");
+        let text = install_command(gitleaks, "macos", "aarch64");
+        let mut runner = |_: &Cmd, _: &Path| -> io::Result<bool> { Ok(false) };
+        let mut out = Printer::new(Vec::new(), false);
+        let installed = install_binaries(
+            &mut out,
+            std::slice::from_ref(gitleaks),
+            "macos",
+            "aarch64",
+            &dir,
+            &mut runner,
+        );
+        assert!(!installed);
+        let printed = String::from_utf8(out.into_inner()).expect("utf-8");
+        assert_eq!(
+            printed,
+            format!(
+                "installing gitleaks 8.30.1: {text}\ninstalling gitleaks failed\n{}\n",
+                fix_for(&text)
+            )
+        );
+    }
+
+    #[test]
+    fn a_command_that_cannot_start_names_the_command_as_the_fix() {
+        let dir = Scratch::new("setup-install-start");
+        let lefthook = binary("lefthook");
+        let text = install_command(lefthook, "linux", "x86_64");
+        let mut runner = |_: &Cmd, _: &Path| -> io::Result<bool> {
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "No such file or directory",
+            ))
+        };
+        let mut out = Printer::new(Vec::new(), false);
+        let installed = install_binaries(
+            &mut out,
+            std::slice::from_ref(lefthook),
+            "linux",
+            "x86_64",
+            &dir,
+            &mut runner,
+        );
+        assert!(!installed);
+        let printed = String::from_utf8(out.into_inner()).expect("utf-8");
+        assert_eq!(
+            printed,
+            format!(
+                "installing lefthook 2.2.1: {text}\n\
+                 could not start sh to install lefthook: No such file or directory\n{}\n",
+                fix_for(&text)
+            )
+        );
+    }
+
+    #[test]
+    fn a_platform_with_no_release_runs_nothing_and_fails_with_the_download_text() {
+        let dir = Scratch::new("setup-install-no-asset");
+        let mut calls = 0;
+        let mut runner = |_: &Cmd, _: &Path| -> io::Result<bool> {
+            calls += 1;
+            Ok(true)
+        };
+        let mut out = Printer::new(Vec::new(), false);
+        let installed =
+            install_binaries(&mut out, BINARIES, "freebsd", "x86_64", &dir, &mut runner);
+        assert!(!installed);
+        assert_eq!(calls, 0);
+        let lines: Vec<String> = BINARIES
+            .iter()
+            .map(|binary| {
+                let text = install_command(binary, "freebsd", "x86_64");
+                let message = "has no release for freebsd-x86_64, so it is not installed";
+                format!("{} {message}\n    fix: {text}\n", binary.name)
+            })
+            .collect();
+        let printed = String::from_utf8(out.into_inner()).expect("utf-8");
+        assert_eq!(printed, lines.concat());
     }
 }
