@@ -1,7 +1,8 @@
 //! How a run is shown: the text table, the failures, and the JSON object. Stdout is the table
 //! or the object; diagnostics go through the printer that `buildtime::run` picks.
 
-use super::{Out, Outcome, ProbeResult, ProbeStatus, RustRun, WEB_MESSAGE};
+use super::verdict::{Outcome, ProbeResult, ProbeStatus};
+use super::{Out, RustRun, WEB_MESSAGE};
 use serde::Serialize;
 
 /// The result table: a header, then one line per probe. Measured probes align their columns; a
@@ -115,6 +116,9 @@ pub(super) struct ProbeJson {
     budget_id: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     budget_s: Option<f64>,
+    /// The not-incremental warning of a measured probe. Absent when the build was incremental.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    warning: Option<String>,
 }
 
 pub(super) fn probe_json(result: &ProbeResult) -> ProbeJson {
@@ -127,6 +131,7 @@ pub(super) fn probe_json(result: &ProbeResult) -> ProbeJson {
         max_s: None,
         budget_id: None,
         budget_s: None,
+        warning: None,
     };
     match &result.outcome {
         Outcome::Skipped(reason) => json.reason = Some((*reason).to_owned()),
@@ -135,8 +140,10 @@ pub(super) fn probe_json(result: &ProbeResult) -> ProbeJson {
             stats,
             budget_id,
             budget_s,
+            warning,
             ..
         } => {
+            json.warning.clone_from(warning);
             json.median_s = Some(stats.median);
             json.min_s = Some(stats.min);
             json.max_s = Some(stats.max);
