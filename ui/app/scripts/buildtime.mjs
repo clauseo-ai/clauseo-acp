@@ -156,7 +156,9 @@ async function launchBrowser() {
   }
 }
 
-/** Writes the edit `n` and waits until the page's #app-root shows it. Resolves with the ms taken. */
+/**
+ * Writes the edit `n` and waits until the page's #app-root shows it. Resolves with the ms taken.
+ */
 async function timedEdit(page, guard, n) {
   const text = marked(guard.original.toString("utf8"), n);
   const started = performance.now();

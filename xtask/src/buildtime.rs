@@ -1,6 +1,6 @@
-//! `cargo xtask buildtime [rust|web|all] [--runs N] [--json]`: times the edit loop of the app and of
-//! the protocol crate (the Rust half), and of the frontend in `ui/app` (the web half, `web.rs`),
-//! against the rows of `budgets.toml`. `all` runs the Rust half, then the web half.
+//! `cargo xtask buildtime [rust|web|all] [--runs N] [--json]`: times the edit loop of the app and
+//! of the protocol crate (the Rust half), and of the frontend in `ui/app` (the web half,
+//! `web.rs`), against the rows of `budgets.toml`. `all` runs the Rust half, then the web half.
 //!
 //! A probe writes the next value of its crate's `BUILDTIME_MARKER`, runs `cargo <sub> -v` as a
 //! warm-up that is not counted, then times `cargo <sub>` runs. The warm-up's rustc lines are the
@@ -39,7 +39,8 @@ use std::process::ExitCode;
 use verdict::{Failure, Outcome, ProbeResult, ProbeStatus, passes};
 use web::WebRun;
 
-/// The fix for a probe whose warm-up shows its crate builds without incremental in CI. Cargo turns incremental off whenever CI is set, unless this is set.
+/// The fix for a probe whose warm-up shows its crate builds without incremental in CI. Cargo turns
+/// incremental off whenever CI is set, unless this is set.
 const INCREMENTAL_FIX: &str =
     "set CARGO_INCREMENTAL=1 for the run (cargo turns incremental off whenever CI is set)";
 

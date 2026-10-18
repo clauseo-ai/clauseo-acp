@@ -68,8 +68,9 @@ pub(crate) fn run_probe(
 /// Runs the warm-up (`cargo <subcommand> -v`) and then `runs` timed runs of `cargo <subcommand>`.
 /// Each run writes the marker's next value first, so cargo rebuilds the crate each time. The file
 /// is put back before this returns, on success and on failure, unless someone edited it during the
-/// run: then nothing more is written, the copy is kept, and the probe fails with a conflict. `runner` runs a command and returns
-/// its captured output; production passes `process::capture`.
+/// run: then nothing more is written, the copy is kept, and the probe fails with a conflict.
+/// `runner` runs a command and returns its captured output; production passes
+/// `process::capture`.
 pub(crate) fn measure(
     root: &Path,
     marker: &Marker,
@@ -181,8 +182,8 @@ pub(crate) fn judge_warm_up(
 /// written. A copy goes back only where the file differs from it by the marker's number. A file
 /// that changed otherwise, or is gone, is a conflict: nothing is written then, and each conflict
 /// is named. A file without a marker line is not a copy and is left alone. A temporary file of an
-/// interrupted save is deleted. Everything under `SCRIPT_OWNED` is skipped. Returns one line per restored file,
-/// `restored <path> from an interrupted buildtime run`.
+/// interrupted save is deleted. Everything under `SCRIPT_OWNED` is skipped. Returns one line per
+/// restored file, `restored <path> from an interrupted buildtime run`.
 pub(crate) fn restore_leftovers(root: &Path) -> Result<Vec<String>, Failure> {
     let base = root.join(BACKUP_DIR);
     let mut files = Vec::new();
