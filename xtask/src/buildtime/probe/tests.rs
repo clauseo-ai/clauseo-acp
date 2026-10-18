@@ -306,7 +306,7 @@ fn a_second_save_of_the_same_file_fails_and_leaves_the_file_alone() {
     assert_eq!(
         failure.message,
         format!(
-            "a saved copy of {REL} already exists at target/xtask/buildtime/{REL}; an earlier restore failed"
+            "a saved copy of {REL} already exists at target/xtask/buildtime/{REL}; an earlier probe kept it (a conflict or a failed restore)"
         )
     );
     assert_eq!(
