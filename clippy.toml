@@ -18,4 +18,7 @@ disallowed-methods = [
   { path = "tauri::AppHandle::plugin", reason = "register plugins with plugin_rust_only in crates/desktop/src/rust_only.rs, which drops the script a plugin injects into the page" },
   { path = "tauri::AppHandle::plugin_boxed", reason = "register plugins with plugin_rust_only in crates/desktop/src/rust_only.rs, which drops the script a plugin injects into the page" },
   { path = "tauri::Manager::add_capability", reason = "grants webview permissions at runtime, where no check sees them; permissions live in crates/desktop/capabilities/" },
+  { path = "tauri::Context::runtime_authority_mut", reason = "its add_capability grants webview permissions before the app runs, where no check sees them; permissions live in crates/desktop/capabilities/" },
+  { path = "tauri::ipc::RuntimeAuthority::add_capability", reason = "grants webview permissions at runtime, where no check sees them; permissions live in crates/desktop/capabilities/" },
+  { path = "tauri::Context::config_mut", reason = "tauri.conf.json is the checked config; changing it in Rust skips the tauri-config check" },
 ]
