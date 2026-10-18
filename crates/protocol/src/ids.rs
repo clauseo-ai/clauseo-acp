@@ -1,0 +1,425 @@
+//! Ids and the small validated values every other type is built from.
+//!
+//! Clauseo mints its ids as v7 UUIDs in the host; this crate only checks them. Constructors and
+//! `Deserialize` apply the same rules, because the webview is untrusted.
+
+use std::fmt;
+use std::str::FromStr;
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use uuid::Uuid;
+
+use crate::Error;
+
+/// The largest integer a JavaScript `number` holds exactly (2^53 - 1). Every 64-bit value in this
+/// crate is at most this, so TypeScript reads it as a `number`.
+pub const MAX_SAFE: u64 = (1 << 53) - 1;
+
+/// Parses the 36-character hyphenated UUID text, the one form ids take in text.
+pub(crate) fn parse_uuid_text(text: &str, kind: &'static str) -> Result<Uuid, Error> {
+    if text.len() != 36 {
+        return Err(Error::UuidText { kind });
+    }
+    Uuid::try_parse(text).ok().ok_or(Error::UuidText { kind })
+}
+
+fn check_v7(id: Uuid, kind: &'static str) -> Result<Uuid, Error> {
+    if id.get_version_num() == 7 && id.get_variant() == uuid::Variant::RFC4122 {
+        Ok(id)
+    } else {
+        Err(Error::NotV7 {
+            kind,
+            version: id.get_version_num(),
+        })
+    }
+}
+
+fn check_not_nil(id: Uuid, kind: &'static str) -> Result<Uuid, Error> {
+    if id.is_nil() {
+        Err(Error::NilUuid { kind })
+    } else {
+        Ok(id)
+    }
+}
+
+/// Defines a newtype over [`Uuid`] whose constructor and `Deserialize` run `$check`.
+macro_rules! uuid_id {
+    ($(#[$meta:meta])* $name:ident, $check:path, $rule:literal) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        #[cfg_attr(feature = "specta", derive(specta::Type), specta(type = String))]
+        pub struct $name(Uuid);
+
+        impl $name {
+            /// The nil UUID, for placeholder values in `ALL` constants; it never passes `new`.
+            pub const NIL: Self = Self(Uuid::nil());
+
+            #[doc = concat!("Wraps `id`. ", $rule)]
+            pub fn new(id: Uuid) -> Result<Self, Error> {
+                $check(id, stringify!($name)).map(Self)
+            }
+
+            /// The UUID inside.
+            pub const fn as_uuid(&self) -> Uuid {
+                self.0
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                fmt::Display::fmt(&self.0.hyphenated(), f)
+            }
+        }
+
+        /// uuid's own form: hyphenated text in JSON, 16 bytes in `MessagePack`.
+        impl Serialize for $name {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                self.0.serialize(serializer)
+            }
+        }
+
+        impl FromStr for $name {
+            type Err = Error;
+
+            /// Parses the 36-character hyphenated form and applies `new`'s rule.
+            fn from_str(text: &str) -> Result<Self, Error> {
+                Self::new(parse_uuid_text(text, stringify!($name))?)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                Self::new(Uuid::deserialize(deserializer)?).map_err(de::Error::custom)
+            }
+        }
+    };
+}
+
+uuid_id!(
+    /// One event in the log.
+    ///
+    /// It must be a v7 UUID.
+    EventId,
+    check_v7,
+    "It must be a v7 UUID."
+);
+uuid_id!(
+    /// A matter: a folder or a scratch space the lawyer works in.
+    ///
+    /// It must be a v7 UUID.
+    MatterId,
+    check_v7,
+    "It must be a v7 UUID."
+);
+uuid_id!(
+    /// A thread: one conversation with an agent inside a matter.
+    ///
+    /// It must be a v7 UUID.
+    ThreadId,
+    check_v7,
+    "It must be a v7 UUID."
+);
+uuid_id!(
+    /// A turn: one prompt and everything the agent does to answer it.
+    ///
+    /// It must be a v7 UUID.
+    TurnId,
+    check_v7,
+    "It must be a v7 UUID."
+);
+uuid_id!(
+    /// A message, the lawyer's or the agent's.
+    ///
+    /// It must be a v7 UUID.
+    MessageId,
+    check_v7,
+    "It must be a v7 UUID."
+);
+uuid_id!(
+    /// A tool call. Clauseo mints it; the agent's own id is kept as `acp_id`.
+    ///
+    /// It must be a v7 UUID.
+    ToolCallId,
+    check_v7,
+    "It must be a v7 UUID."
+);
+uuid_id!(
+    /// A permission request the agent made.
+    ///
+    /// It must be a v7 UUID.
+    PermissionRequestId,
+    check_v7,
+    "It must be a v7 UUID."
+);
+uuid_id!(
+    /// An elicitation (a form or a link) the agent asked the lawyer to fill in.
+    ///
+    /// It must be a v7 UUID.
+    ElicitationId,
+    check_v7,
+    "It must be a v7 UUID."
+);
+uuid_id!(
+    /// A checkpoint of a matter's files. The git commit id stays inside `matters` and `store`.
+    ///
+    /// It must be a v7 UUID.
+    CheckpointId,
+    check_v7,
+    "It must be a v7 UUID."
+);
+uuid_id!(
+    /// A command, generated by the client that sends it, so a retry can be recognised.
+    ///
+    /// It may be any UUID except the nil UUID.
+    CommandId,
+    check_not_nil,
+    "It may be any UUID except the nil UUID."
+);
+uuid_id!(
+    /// An opaque handle the host gives the client for a file; commands never name paths.
+    ///
+    /// It must be a v7 UUID.
+    FileRefId,
+    check_v7,
+    "It must be a v7 UUID."
+);
+uuid_id!(
+    /// An opaque handle the host gives the client for a folder; commands never name paths.
+    ///
+    /// It must be a v7 UUID.
+    FolderRefId,
+    check_v7,
+    "It must be a v7 UUID."
+);
+uuid_id!(
+    /// One run of a view; a new epoch tells the client to drop its copy and start again.
+    ///
+    /// It must be a v7 UUID.
+    ViewEpoch,
+    check_v7,
+    "It must be a v7 UUID."
+);
+
+fn check_range(value: u64, min: u64, kind: &'static str) -> Result<u64, Error> {
+    if (min..=MAX_SAFE).contains(&value) {
+        Ok(value)
+    } else {
+        Err(Error::OutOfRange {
+            kind,
+            value: i128::from(value),
+            min: i128::from(min),
+            max: i128::from(MAX_SAFE),
+        })
+    }
+}
+
+/// Defines a newtype over `u64` in `$min..=MAX_SAFE`, a `number` in TypeScript.
+// specta: `u32` and `i32` render as TypeScript `number`; `f64` would render `number | null`.
+macro_rules! safe_u64 {
+    ($(#[$meta:meta])* $name:ident, $min:literal) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+                #[cfg_attr(feature = "specta", derive(specta::Type), specta(type = u32))]
+        pub struct $name(u64);
+
+        impl $name {
+            #[doc = concat!("Wraps `value`, which must be in ", stringify!($min), "..=[`MAX_SAFE`].")]
+            pub fn new(value: u64) -> Result<Self, Error> {
+                check_range(value, $min, stringify!($name)).map(Self)
+            }
+
+            /// The number inside.
+            pub const fn get(self) -> u64 {
+                self.0
+            }
+
+            /// The next value, or an error past [`MAX_SAFE`].
+            pub fn next(self) -> Result<Self, Error> {
+                check_range(self.0.saturating_add(1), $min, stringify!($name)).map(Self)
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                fmt::Display::fmt(&self.0, f)
+            }
+        }
+
+        impl Serialize for $name {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.serialize_u64(self.0)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                Self::new(u64::deserialize(deserializer)?).map_err(de::Error::custom)
+            }
+        }
+    };
+}
+
+safe_u64!(
+    /// An event's position in its stream: gapless, starting at 1, assigned by the host at commit.
+    Seq, 1
+);
+safe_u64!(
+    /// A view patch position in one stream, starting at 0 before the first patch.
+    Cursor, 0
+);
+
+impl Seq {
+    /// The first event of every stream.
+    pub const FIRST: Self = Self(1);
+}
+
+impl Cursor {
+    /// The position before any patch.
+    pub const ZERO: Self = Self(0);
+}
+
+/// Milliseconds since the Unix epoch, UTC. Display only: order by [`Seq`], never by time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "specta", derive(specta::Type), specta(type = i32))]
+pub struct Timestamp(i64);
+
+impl Timestamp {
+    /// The epoch itself, for placeholder values.
+    pub const ZERO: Self = Self(0);
+
+    /// Wraps `millis`, whose magnitude must be at most [`MAX_SAFE`].
+    pub fn new(millis: i64) -> Result<Self, Error> {
+        if millis.unsigned_abs() <= MAX_SAFE {
+            Ok(Self(millis))
+        } else {
+            let max = i128::from(MAX_SAFE);
+            Err(Error::OutOfRange {
+                kind: "Timestamp",
+                value: i128::from(millis),
+                min: -max,
+                max,
+            })
+        }
+    }
+
+    /// Milliseconds since the Unix epoch.
+    pub const fn as_millis(self) -> i64 {
+        self.0
+    }
+}
+
+impl Serialize for Timestamp {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_i64(self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for Timestamp {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::new(i64::deserialize(deserializer)?).map_err(de::Error::custom)
+    }
+}
+
+/// A 32-byte BLAKE3 digest naming a blob. Its text form, in every serde format, is 64 lowercase
+/// hex characters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "specta", derive(specta::Type), specta(type = String))]
+pub struct BlobHash([u8; 32]);
+
+impl BlobHash {
+    /// Wraps a digest. Every 32 bytes are a valid hash.
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// The digest's bytes.
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl fmt::Display for BlobHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.iter().try_for_each(|byte| write!(f, "{byte:02x}"))
+    }
+}
+
+pub(crate) fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
+}
+
+impl FromStr for BlobHash {
+    type Err = Error;
+
+    /// Parses exactly 64 lowercase hex characters.
+    fn from_str(text: &str) -> Result<Self, Error> {
+        let rule = Error::Format {
+            kind: "BlobHash",
+            rule: "expected 64 lowercase hex characters",
+        };
+        let (pairs, rest) = text.as_bytes().as_chunks::<2>();
+        if pairs.len() != 32 || !rest.is_empty() {
+            return Err(rule);
+        }
+        let mut bytes = [0u8; 32];
+        for (out, &[high, low]) in bytes.iter_mut().zip(pairs) {
+            match (hex_value(high), hex_value(low)) {
+                (Some(high), Some(low)) => *out = (high << 4) | low,
+                _ => return Err(rule),
+            }
+        }
+        Ok(Self(bytes))
+    }
+}
+
+impl Serialize for BlobHash {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for BlobHash {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_str(FromStrVisitor::<Self>::new(
+            "a 64-character lowercase hex hash",
+        ))
+    }
+}
+
+/// A `Deserialize` visitor that parses a borrowed `&str` with `T::from_str`, never building a
+/// `String` first. `StreamId` and `EntryId` use it too.
+pub(crate) struct FromStrVisitor<T> {
+    expecting: &'static str,
+    target: std::marker::PhantomData<T>,
+}
+
+impl<T> FromStrVisitor<T> {
+    pub(crate) const fn new(expecting: &'static str) -> Self {
+        Self {
+            expecting,
+            target: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<T: FromStr<Err = Error>> de::Visitor<'_> for FromStrVisitor<T> {
+    type Value = T;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.expecting)
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<T, E> {
+        v.parse().map_err(E::custom)
+    }
+}
+
+mod strings;
+pub use strings::{AgentId, AgentSessionId, ContentId, MatterPath};
+
+#[cfg(test)]
+mod tests;

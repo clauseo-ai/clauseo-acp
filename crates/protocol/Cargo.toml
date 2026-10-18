@@ -1,0 +1,27 @@
+[package]
+name = "clauseo-protocol"
+version = "0.1.0"
+description = "Every type that crosses the Clauseo host boundary: events, commands, view patches, errors."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Off by default; only the app turns it on to export TypeScript types.
+specta = ["dep:specta"]
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["serde"] }
+compact_str = { workspace = true, features = ["serde"] }
+thiserror = { workspace = true }
+specta = { workspace = true, optional = true, features = ["derive"] }
+
+[dev-dependencies]
+proptest = { workspace = true }
+rmp-serde = { workspace = true }
+
+[lints]
+workspace = true
