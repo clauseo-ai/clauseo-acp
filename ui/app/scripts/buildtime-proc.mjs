@@ -150,6 +150,10 @@ async function stopPosix(child) {
   return poll(() => !alive(child), DRAIN_MS);
 }
 
+// On Windows this returns at once when the direct child has exited, so a grandchild that outlives
+// a tool exiting normally stays up, and `taskkill /T` has no tree left to walk. No current tool
+// does that: tsc's wrapper waits for its binary. With no leader here, a terminated xtask (the
+// SIGKILL of Windows) leaves its children running.
 async function stopWindows(child) {
   if (exited(child)) {
     return true;
