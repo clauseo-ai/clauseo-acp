@@ -4,14 +4,14 @@
 use crate::checks;
 
 /// One line of a TOML file, with the most recent table header above it (`""` before the first).
-pub(super) struct Line<'a> {
+pub(crate) struct Line<'a> {
     pub no: u32,
     pub table: &'a str,
     pub text: &'a str,
 }
 
 /// The lines of `text`, each with its table header.
-pub(super) fn lines(text: &str) -> Vec<Line<'_>> {
+pub(crate) fn lines(text: &str) -> Vec<Line<'_>> {
     let mut table = "";
     let mut lines = Vec::new();
     for (index, line) in text.lines().enumerate() {
@@ -28,19 +28,28 @@ pub(super) fn lines(text: &str) -> Vec<Line<'_>> {
 }
 
 /// A crate's own dependency table: `[dependencies]` or `[target.<cfg>.dependencies]`.
-pub(super) fn is_dependency_table(header: &str) -> bool {
+pub(crate) fn is_dependency_table(header: &str) -> bool {
     header == "[dependencies]"
         || (header.starts_with("[target.") && header.ends_with(".dependencies]"))
 }
 
+/// A table whose entries are built into the crate: `[dependencies]`, `[build-dependencies]` and
+/// their `[target.<cfg>.*]` forms; not `[dev-dependencies]`.
+pub(crate) fn is_normal_or_build_table(header: &str) -> bool {
+    header == "[dependencies]"
+        || header == "[build-dependencies]"
+        || (header.starts_with("[target.")
+            && (header.ends_with(".dependencies]") || header.ends_with(".build-dependencies]")))
+}
+
 /// The root manifest's `[workspace.dependencies]` table.
-pub(super) fn is_workspace_table(header: &str) -> bool {
+pub(crate) fn is_workspace_table(header: &str) -> bool {
     header == "[workspace.dependencies]"
 }
 
 /// The line that declares dependency `key`: its `key =` (or `key.`) line in a table that
 /// `in_table` accepts, or a `[<table>.key]` header whose table `in_table` accepts.
-pub(super) fn declaration<'a, 'l>(
+pub(crate) fn declaration<'a, 'l>(
     lines: &'l [Line<'a>],
     key: &str,
     in_table: impl Fn(&str) -> bool,
@@ -57,7 +66,7 @@ pub(super) fn declaration<'a, 'l>(
 }
 
 /// The first line from `declared` onward, in the same table, that holds `needle`.
-pub(super) fn in_entry<'a, 'l>(
+pub(crate) fn in_entry<'a, 'l>(
     lines: &'l [Line<'a>],
     declared: &Line<'a>,
     needle: &str,

@@ -18,12 +18,14 @@ mod capabilities;
     )
 )]
 pub(crate) mod crates_table;
+mod dependencies;
 pub(crate) mod exceptions;
 mod file_size;
 mod json_text;
 pub(crate) mod planted;
 mod plugins;
 mod tauri_config;
+pub(crate) mod toml_lines;
 
 use crate::violation::Violation;
 use crate::workspace::Context;
@@ -151,6 +153,7 @@ pub(crate) const ALL: &[StaticCheck] = &[
     plugins::CHECK,
     tauri_config::CHECK,
     buildtime_edits::CHECK,
+    dependencies::CHECK,
     file_size::CHECK,
 ];
 

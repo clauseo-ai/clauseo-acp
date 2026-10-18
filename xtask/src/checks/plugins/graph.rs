@@ -7,7 +7,7 @@
 //! checks against the same graph for every target.
 
 use super::FIXED_PLUGINS;
-use super::toml_lines::{declaration, lines};
+use crate::checks::toml_lines::{declaration, lines};
 use crate::checks::{self, violation};
 use crate::violation::Violation;
 use crate::workspace::{PackageDependencies, ResolvedGraph, ResolvedNode};

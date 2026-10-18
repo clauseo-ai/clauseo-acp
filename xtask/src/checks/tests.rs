@@ -66,6 +66,8 @@ fn the_real_repo_passes_every_static_check() {
     for check in ALL {
         let report = if check.name == plugins::CHECK.name {
             check.judge(plugins::check_without_graph(&ctx))
+        } else if check.name == dependencies::CHECK.name {
+            check.judge(dependencies::check_without_graph(&ctx))
         } else {
             check.report(&ctx)
         };

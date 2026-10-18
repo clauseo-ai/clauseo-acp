@@ -33,13 +33,14 @@
 //! The Tauri config and `build.rs` belong to the `tauri-config` check.
 
 mod graph;
-mod toml_lines;
 
+use crate::checks::toml_lines::{
+    Line, declaration, in_entry, is_dependency_table, is_workspace_table, lines,
+};
 use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
 use crate::violation::Violation;
 use crate::workspace::{self, CargoDependency, Context, PackageDependencies};
 use std::collections::BTreeMap;
-use toml_lines::{Line, declaration, in_entry, is_dependency_table, is_workspace_table, lines};
 
 const WORKSPACE_MANIFEST: &str = "Cargo.toml";
 
