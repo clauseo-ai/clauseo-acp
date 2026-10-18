@@ -38,7 +38,8 @@ pub(crate) struct Sources<'a> {
 /// The static reading, first match wins: `CARGO_INCREMENTAL`, `CARGO_BUILD_INCREMENTAL`,
 /// `[build] incremental` in `.cargo/config.toml`, then `CI` (off),
 /// `CARGO_PROFILE_DEV_INCREMENTAL`, `[profile.dev] incremental` in `.cargo/config.toml`,
-/// `[profile.dev] incremental` in `Cargo.toml`, then cargo's dev default, which is on. `source` names the one that decided.
+/// `[profile.dev] incremental` in `Cargo.toml`, then cargo's dev default, which is on. `source`
+/// names the one that decided.
 pub(crate) fn resolve(sources: &Sources<'_>) -> Incremental {
     if let Some(value) = sources.cargo_incremental {
         return decided(value == "1", format!("CARGO_INCREMENTAL={value}"));
