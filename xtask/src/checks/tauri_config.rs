@@ -8,7 +8,8 @@
 //! `"v1Compatible"`, which needs the updater's `zip` feature that the workspace leaves off.
 //! No platform config (`tauri.<platform>.conf.json`, `.json5` or `Tauri.<platform>.toml`) exists:
 //! Tauri merges one over `tauri.conf.json` and could turn a setting back on for one OS.
-//! In `build.rs`: an `AppManifest` is declared. Each failing setting points at its key's line,
+//! In `build.rs`: an `AppManifest` is declared (`app_manifest(` and `AppManifest::new()`, outside
+//! comments), and `capabilities_path_pattern(` does not point Tauri at another folder. Each failing setting points at its key's line,
 //! found under its parent object (`json_text::key_line`), or at line 1.
 //! The pure functions take file contents and paths; `run` reads the files from the repo.
 
@@ -40,7 +41,8 @@ const PUBKEY_FIX: &str =
     "set plugins.updater.pubkey to the release public key before adding endpoints";
 const V1_FIX: &str = "the updater is built without its zip feature, so v1Compatible artifacts cannot be installed; use true";
 const DANGEROUS_FIX: &str = "remove it: each `dangerous*` setting switches off a Tauri safeguard";
-const APP_MANIFEST_FIX: &str = "call `tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[])))`: without a manifest Tauri skips the access check for app commands";
+const APP_MANIFEST_FIX: &str = "pass `tauri_build::AppManifest::new()` to `tauri_build::Attributes::new().app_manifest(...)` in `tauri_build::try_build`: without a manifest Tauri skips the access check for app commands";
+const PATH_PATTERN_FIX: &str = "remove it: capabilities live in the crate's capabilities folder, the one the capabilities check scans";
 
 /// The platforms Tauri merges a platform config for, over `tauri.conf.json`.
 const PLATFORMS: [&str; 5] = ["macos", "windows", "linux", "ios", "android"];
@@ -299,17 +301,46 @@ fn collect_dangerous(value: &Value, path: &mut Vec<String>, found: &mut Vec<Vec<
     }
 }
 
-/// `build.rs` at `path` must call `app_manifest(`. A missing file counts as no manifest.
+/// `build.rs` at `path` must declare an `AppManifest` and must not move the capabilities folder.
+/// Comments are stripped first (`strip_comments`), so a commented-out call does not count. A
+/// missing file counts as no manifest.
 pub(crate) fn build_rs_violations(path: &str, text: Option<&str>) -> Vec<Violation> {
-    if text.is_some_and(|text| text.contains("app_manifest(")) {
-        return Vec::new();
+    let code = text.map(strip_comments).unwrap_or_default();
+    let mut found = Vec::new();
+    if !code.contains("app_manifest(") || !code.contains("AppManifest::new()") {
+        found.push(violation(
+            path,
+            1,
+            "build.rs declares no AppManifest",
+            APP_MANIFEST_FIX,
+        ));
     }
-    vec![violation(
-        path,
-        1,
-        "build.rs declares no AppManifest",
-        APP_MANIFEST_FIX,
-    )]
+    if let Some(index) = code
+        .lines()
+        .position(|line| line.contains("capabilities_path_pattern("))
+    {
+        found.push(violation(
+            path,
+            checks::line_at(index),
+            "build.rs calls `capabilities_path_pattern(`",
+            PATH_PATTERN_FIX,
+        ));
+    }
+    found
+}
+
+/// `text` with everything from `//` to the end of each line removed, line count kept. A simple
+/// per-line strip: it does not know string literals (a `"//"` in a string cuts the line there) or
+/// block comments. That is enough for a short `build.rs`, and a cut string can only hide a call,
+/// which then fails the check.
+fn strip_comments(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            line.find("//")
+                .map_or(line, |start| line.get(..start).unwrap_or(line))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]

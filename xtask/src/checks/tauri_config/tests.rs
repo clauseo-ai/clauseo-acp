@@ -343,6 +343,43 @@ fn build_rs_without_app_manifest_fails_at_line_one() {
 }
 
 #[test]
+fn a_commented_out_manifest_does_not_count() {
+    let build = "crates/desktop/build.rs";
+    let commented = "// app_manifest( removed, AppManifest::new() too\nfn main() {\n    tauri_build::build();\n}\n";
+    assert_eq!(build_rs_violations(build, Some(commented)).len(), 1);
+    let half = "fn main() {\n    let a = Attributes::new().app_manifest(manifest()); // AppManifest::new()\n}\n";
+    assert_eq!(build_rs_violations(build, Some(half)).len(), 1);
+}
+
+#[test]
+fn a_manifest_with_commands_passes() {
+    let build = "crates/desktop/build.rs";
+    let with_commands = BUILD.replace(
+        "AppManifest::new()",
+        "AppManifest::new().commands(&[\"open_matter\"])",
+    );
+    assert_eq!(build_rs_violations(build, Some(&with_commands)), Vec::new());
+}
+
+#[test]
+fn capabilities_path_pattern_fails_at_its_line() {
+    let build = "crates/desktop/build.rs";
+    let text = BUILD.replace(
+        "tauri_build::AppManifest::new())",
+        "tauri_build::AppManifest::new())\n            .capabilities_path_pattern(\"elsewhere/*\")",
+    );
+    assert_eq!(
+        build_rs_violations(build, Some(&text)),
+        vec![violation(
+            build,
+            line_of(&text, "capabilities_path_pattern("),
+            "build.rs calls `capabilities_path_pattern(`",
+            PATH_PATTERN_FIX,
+        )]
+    );
+}
+
+#[test]
 fn the_check_is_registered_after_plugins() {
     let names: Vec<&str> = crate::checks::ALL.iter().map(|check| check.name).collect();
     assert_eq!(
