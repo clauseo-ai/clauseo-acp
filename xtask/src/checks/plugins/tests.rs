@@ -1,6 +1,7 @@
 //! Tests for the `plugins` check. Each case is a tiny scratch workspace (a root `Cargo.toml`,
 //! member manifests and empty `src/lib.rs` files) that `run` reads through the real
 //! `cargo metadata --no-deps`, so cargo itself resolves the renames and inheritance under test.
+//! They skip the graph rules, which need a lockfile: `graph/tests.rs` covers those.
 
 use super::*;
 use crate::checks::tests::desktop_context;
@@ -86,7 +87,7 @@ impl Workspace {
             members: workspace::load_members(&self.dir).expect("cargo metadata runs"),
             ..desktop_context(&self.dir)
         };
-        run(&ctx)
+        check(&ctx, None)
     }
 }
 
@@ -371,6 +372,29 @@ fn another_member_with_wry_fails() {
             line_of(core, "wry = "),
             "`clauseo-core` depends on `wry`",
             MEMBER_FIX,
+        )]
+    );
+}
+
+#[test]
+fn a_path_dependency_on_an_excluded_crate_fails() {
+    let root = ROOT.replace(
+        "members = [\"crates/*\"]\n",
+        "members = [\"crates/*\"]\nexclude = [\"evil\"]\n",
+    );
+    let desktop = format!("{DESKTOP}evil = {{ path = \"../../evil\" }}\n");
+    let ws = Workspace::new("excluded", &root, &desktop, &[]);
+    fs::create_dir_all(ws.dir.join("evil/src")).expect("create the excluded crate");
+    fs::write(ws.dir.join("evil/src/lib.rs"), "").expect("write lib.rs");
+    let evil = "[package]\nname = \"evil\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[dependencies]\ntauri-runtime-wry = { version = \"2\", features = [\"devtools\"] }\n";
+    fs::write(ws.dir.join("evil/Cargo.toml"), evil).expect("write the excluded manifest");
+    assert_eq!(
+        ws.violations(),
+        vec![violation(
+            DESKTOP_PATH,
+            line_of(&ws.desktop, "evil = "),
+            "`clauseo-desktop` depends on `evil` by path, but `evil` is not a workspace member, so these checks and clippy never see it",
+            OUTSIDE_FIX,
         )]
     );
 }

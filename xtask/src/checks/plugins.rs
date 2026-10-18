@@ -15,17 +15,29 @@
 //!   such as `tauri-runtime-wry` or `wry` has its own `devtools` feature, which the `tauri` checks
 //!   never see. Build dependencies (`tauri-build`) and dev-dependencies are not checked;
 //! - no other member depends on any family member: cargo unifies features, so a member pulled
-//!   into the desktop crate would bring its Tauri features along.
+//!   into the desktop crate would bring its Tauri features along;
+//! - no member depends by path, in any table, on a package that is not a member (a crate under
+//!   `[workspace] exclude`): `cargo metadata --no-deps` and clippy never see such a crate.
+//!
+//! The rules above see workspace members only. A crate under `[workspace] exclude` pulled in by
+//! path, or a crates.io or git dependency, never appears in `--no-deps` output, yet it can turn
+//! on `devtools` or bring a plugin. So `graph.rs` also reads the graph cargo resolved, from one
+//! `cargo metadata --locked` run with deps: no `tauri`, `tauri-runtime`, `tauri-runtime-wry` or
+//! `wry` node has `devtools` among its resolved features (nor `tauri` `protocol-asset`), and a
+//! `tauri-plugin-*` outside the fixed set is in the desktop crate's tree only when fixed plugins
+//! alone depend on it (as `tauri-plugin-fs` comes in through the dialog plugin).
 //!
 //! The manifest text is read only for line numbers: the member's `Cargo.toml`, or the root one
 //! when the setting lives in `[workspace.dependencies]`, else line 1.
 //! The Tauri config and `build.rs` belong to the `tauri-config` check.
 
+mod graph;
 mod toml_lines;
 
 use crate::checks::{self, StaticCheck, violation};
 use crate::violation::Violation;
 use crate::workspace::{self, CargoDependency, Context, PackageDependencies};
+use std::collections::BTreeMap;
 use toml_lines::{Line, declaration, in_entry, is_dependency_table, is_workspace_table, lines};
 
 const WORKSPACE_MANIFEST: &str = "Cargo.toml";
@@ -52,6 +64,7 @@ const OPTIONAL_FIX: &str = "drop `optional = true` and any feature that enables 
 const FAMILY_FIX: &str = "depend on `tauri` and the fixed plugins only: other Tauri crates can switch on features such as devtools that the tauri entry's checks never see";
 const MEMBER_FIX: &str =
     "only crates/desktop depends on Tauri; move the code there or behind the host interface";
+const OUTSIDE_FIX: &str = "add it to the workspace members, or remove the dependency";
 const METADATA_FIX: &str = "fix the manifest until `cargo metadata --no-deps` succeeds: this check reads the dependencies from it";
 
 /// Fails on every Tauri dependency of a workspace member outside the fixed set or its rules.
@@ -61,6 +74,13 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
 };
 
 fn run(ctx: &Context) -> Vec<Violation> {
+    check(ctx, Some(&["--locked"]))
+}
+
+/// The check, reading the resolved graph with `cargo metadata <graph_flags>`, or skipping the
+/// graph rules when `graph_flags` is `None` (tests of scratch workspaces that name registry
+/// crates, which resolve only with a lockfile and the crates downloaded).
+fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Vec<Violation> {
     let dir = match checks::desktop_dir(ctx) {
         Ok(dir) => dir,
         Err(violation) => return vec![violation],
@@ -82,16 +102,8 @@ fn run(ctx: &Context) -> Vec<Violation> {
         (Ok(desktop), Ok(root)) => (desktop, root),
         (Err(violation), _) | (_, Err(violation)) => return vec![violation],
     };
-    let mut found = match packages.get(checks::DESKTOP_PACKAGE) {
-        Some(deps) => violations(
-            deps,
-            &Manifests {
-                desktop_path: &manifest,
-                desktop: &desktop,
-                root: &root,
-            },
-        ),
-        None => vec![violation(
+    let Some(desktop_deps) = packages.get(checks::DESKTOP_PACKAGE) else {
+        return vec![violation(
             &manifest,
             1,
             format!(
@@ -99,23 +111,96 @@ fn run(ctx: &Context) -> Vec<Violation> {
                 checks::DESKTOP_PACKAGE
             ),
             METADATA_FIX,
-        )],
+        )];
     };
-    for member in ctx
-        .members
-        .iter()
-        .filter(|m| m.name != checks::DESKTOP_PACKAGE)
-    {
+    let mut found = violations(
+        desktop_deps,
+        &Manifests {
+            desktop_path: &manifest,
+            desktop: &desktop,
+            root: &root,
+        },
+    );
+    for member in &ctx.members {
         let Some(deps) = packages.get(&member.name) else {
             continue;
         };
         let path = checks::join(&member.dir, "Cargo.toml");
-        match read(&path) {
-            Ok(text) => found.extend(member_violations(&member.name, &path, &text, deps)),
-            Err(violation) => found.push(violation),
+        let text = if member.name == checks::DESKTOP_PACKAGE {
+            desktop.clone()
+        } else {
+            match read(&path) {
+                Ok(text) => {
+                    found.extend(member_violations(&member.name, &path, &text, deps));
+                    text
+                }
+                Err(violation) => {
+                    found.push(violation);
+                    continue;
+                }
+            }
+        };
+        found.extend(path_violations(&member.name, &path, &text, deps, &packages));
+    }
+    if let Some(flags) = graph_flags {
+        let desktop = graph::Desktop {
+            path: &manifest,
+            text: &desktop,
+            deps: desktop_deps,
+        };
+        match workspace::load_resolved_graph(&ctx.root, flags) {
+            Ok(resolved) => found.extend(graph::violations(&resolved, &desktop)),
+            Err(error) => found.push(violation(
+                &manifest,
+                1,
+                format!("could not read the resolved dependency graph: {error}"),
+                graph::GRAPH_FIX,
+            )),
         }
     }
     found
+}
+
+/// One violation for each path dependency of member `name` whose package is not a workspace
+/// member (`members` holds the members' dependencies by name), such as a crate under
+/// `[workspace] exclude`: `cargo metadata --no-deps` and clippy never see it.
+fn path_violations(
+    name: &str,
+    path: &str,
+    text: &str,
+    deps: &PackageDependencies,
+    members: &BTreeMap<String, PackageDependencies>,
+) -> Vec<Violation> {
+    let lines = lines(text);
+    deps.dependencies
+        .iter()
+        .filter(|dep| dep.path.is_some() && !members.contains_key(&dep.name))
+        .map(|dep| {
+            let line = declaration(&lines, dep.key(), any_dependency_table).map_or(1, |l| l.no);
+            violation(
+                path,
+                line,
+                format!(
+                    "`{name}` depends on `{dep}` by path, but `{dep}` is not a workspace member, so these checks and clippy never see it",
+                    dep = dep.name
+                ),
+                OUTSIDE_FIX,
+            )
+        })
+        .collect()
+}
+
+/// Any table a dependency can be declared in: normal, dev and build, with or without a target.
+fn any_dependency_table(header: &str) -> bool {
+    let header = header
+        .strip_prefix("[target.")
+        .and_then(|rest| rest.rsplit_once('.').map(|(_, table)| table))
+        .map_or(header, |table| table);
+    let table = header.trim_start_matches('[').trim_end_matches(']');
+    matches!(
+        table,
+        "dependencies" | "dev-dependencies" | "build-dependencies"
+    )
 }
 
 /// The violations of member `name`, which is not the desktop crate, whose manifest at `path`
