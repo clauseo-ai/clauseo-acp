@@ -17,7 +17,6 @@
 // SIGHUP. A killed run is settled at the start of the next one (`recoverApp`). A developer's edit
 // is never overwritten: both files stay, and the conflict fails the run.
 
-import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
@@ -32,6 +31,7 @@ import {
   recoverApp,
   scriptCommand,
 } from "./buildtime-lib.mjs";
+import { runTool, start, stop, stopAll } from "./buildtime-proc.mjs";
 
 const APP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const UI_DIR = resolve(APP_DIR, "..");
@@ -43,95 +43,16 @@ const READY_TIMEOUT_MS = 60_000;
 const EDIT_TIMEOUT_MS = 10_000;
 /** How long one tool run may take before it is stopped and its probe fails. */
 const TOOL_TIMEOUT_MS = 120_000;
-/** How long a child has between SIGTERM and SIGKILL, and how long a stop waits for it to exit. */
-const KILL_GRACE_MS = 5_000;
-const EXIT_WAIT_MS = 5_000;
 
 function note(text) {
   process.stderr.write(`buildtime.mjs: ${text}\n`);
 }
 
 /**
- * Stops a child this script started, by its handle: SIGTERM, then SIGKILL after KILL_GRACE_MS if it
- * is still running. On Windows, `taskkill /T /F` on the child's PID, which takes its tree.
- */
-function stopChild(child) {
-  if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-  if (process.platform === "win32") {
-    spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-    return;
-  }
-  child.kill("SIGTERM");
-  const timer = setTimeout(() => {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
-  }, KILL_GRACE_MS);
-  timer.unref();
-  child.once("exit", () => clearTimeout(timer));
-}
-
-/** Stops `child` and waits up to EXIT_WAIT_MS for it to exit. Resolves with whether it did. */
-function stopAndWait(child) {
-  if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
-    return Promise.resolve(true);
-  }
-  return new Promise((done) => {
-    const timer = setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null && process.platform !== "win32") {
-        child.kill("SIGKILL");
-      }
-      note(`pid ${child.pid} did not exit within ${EXIT_WAIT_MS} ms of SIGTERM; sent SIGKILL`);
-      done(false);
-    }, EXIT_WAIT_MS);
-    child.once("exit", () => {
-      clearTimeout(timer);
-      done(true);
-    });
-    stopChild(child);
-  });
-}
-
-/**
- * Runs `node ...argv` in ui/app. Resolves with its exit code, wall time and output, and
- * `timedOut` when it ran past TOOL_TIMEOUT_MS and was stopped.
- */
-function runTool(argv, state) {
-  return new Promise((done) => {
-    const started = performance.now();
-    const child = spawn(process.execPath, argv, {
-      cwd: APP_DIR,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    state.tool = child;
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      stopChild(child);
-    }, TOOL_TIMEOUT_MS);
-    const chunks = [];
-    child.stdout.on("data", (chunk) => chunks.push(chunk));
-    child.stderr.on("data", (chunk) => chunks.push(chunk));
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      done({ code: -1, ms: performance.now() - started, output: String(error), timedOut });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      state.tool = undefined;
-      const ms = performance.now() - started;
-      done({ code, ms, output: Buffer.concat(chunks).toString("utf8"), timedOut });
-    });
-  });
-}
-
-/**
  * The package.json script `script` timed: one warm-up run, then `runs` timed runs. A non-zero exit,
  * or a script that cannot run without a shell, makes the probe a failure.
  */
-async function timeScript(probe, script, runs, state) {
+async function timeScript(probe, script, runs) {
   const command = `pnpm -C ui/app run ${script}`;
   let tool;
   try {
@@ -141,7 +62,7 @@ async function timeScript(probe, script, runs, state) {
   }
   const samples = [];
   for (let run = 0; run <= runs; run += 1) {
-    const result = await runTool(tool.argv, state);
+    const result = await runTool(tool.argv, { cwd: APP_DIR, timeoutMs: TOOL_TIMEOUT_MS });
     if (result.timedOut) {
       const message = `\`${tool.text}\` did not finish within ${TOOL_TIMEOUT_MS / 1000} s; stopped it`;
       return { probe, failed: { message, command, output: result.output } };
@@ -177,16 +98,15 @@ function startVite(port, state) {
   return new Promise((done, fail) => {
     const { argv } = scriptCommand(APP_DIR, UI_DIR, "dev");
     const started = performance.now();
-    const child = spawn(process.execPath, [...argv, "--port", String(port), "--strictPort"], {
+    const child = start([...argv, "--port", String(port), "--strictPort"], {
       cwd: APP_DIR,
-      stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, NO_COLOR: "1" },
     });
     state.vite = child;
     let output = "";
     let ready = false;
     const timer = setTimeout(() => {
-      stopChild(child);
+      void stop(child);
       fail(new Error(`vite printed no "ready in" line within ${READY_TIMEOUT_MS} ms\n${output}`));
     }, READY_TIMEOUT_MS);
     const onData = (chunk) => {
@@ -281,7 +201,7 @@ async function measureDev(runs, state) {
           samples.push(ms);
         }
         if (run < runs) {
-          await stopAndWait(state.vite);
+          await stop(state.vite);
         }
       }
       devStart = { probe: "dev_start", samples_ms: samples };
@@ -335,7 +255,7 @@ async function cleanUp(state) {
   if (browser !== undefined) {
     await browser.close().catch(() => {});
   }
-  await stopAndWait(state.vite);
+  await stop(state.vite);
 }
 
 /** The output line: the contract is in xtask/src/buildtime/web.rs. */
@@ -349,11 +269,16 @@ function report(runs, probes, failures) {
 }
 
 /**
- * On SIGINT, SIGTERM or SIGHUP: puts App.tsx back under the guard's rule (or names the conflict),
- * stops the children, and exits with 128 + the signal's number. Playwright closes its browser as
- * the process exits.
+ * On SIGINT, SIGTERM or SIGHUP: puts App.tsx back under the guard's rule (or names why it could
+ * not), stops every child's process group (they are detached, so the terminal's signal does not
+ * reach them), and exits with 128 + the signal's number. Playwright closes its browser as the
+ * process exits. A second signal while it stops changes nothing.
  */
-function onSignal(state, signal) {
+async function onSignal(state, signal) {
+  if (state.stopping) {
+    return;
+  }
+  state.stopping = true;
   try {
     state.guard?.restore();
   } catch (error) {
@@ -366,8 +291,7 @@ function onSignal(state, signal) {
       // stderr may be gone after SIGHUP; the copy stays for the next run either way.
     }
   }
-  stopChild(state.tool);
-  stopChild(state.vite);
+  await stopAll();
   process.exit(128 + { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 }[signal]);
 }
 
@@ -384,7 +308,7 @@ async function main() {
     guard: undefined,
     browser: undefined,
     vite: undefined,
-    tool: undefined,
+    stopping: false,
     failures: [],
   };
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
@@ -404,10 +328,10 @@ async function main() {
   }
 
   const probes = [
-    await timeScript("tsc", "typecheck", runs, state),
-    await timeScript("oxlint_type_aware", "lint:types", runs, state),
+    await timeScript("tsc", "typecheck", runs),
+    await timeScript("oxlint_type_aware", "lint:types", runs),
   ];
-  const build = await timeScript("vite_build", "build", runs, state);
+  const build = await timeScript("vite_build", "build", runs);
   probes.push(build);
   if (build.failed === undefined) {
     try {
@@ -433,4 +357,6 @@ try {
     `buildtime.mjs: ${error instanceof Error ? error.message : String(error)}\n`,
   );
   process.exitCode = 1;
+} finally {
+  await stopAll();
 }
