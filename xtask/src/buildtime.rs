@@ -28,13 +28,14 @@ use crate::process::{self, Cmd, Program};
 use crate::workspace::{self, Member};
 use clap::ValueEnum;
 use profile::{Incremental, Sources};
+use report::WebJson;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
 use verdict::{Failure, Outcome, ProbeResult, ProbeStatus, passes};
-use web::{WebJson, WebOutcome, WebRun};
+use web::WebRun;
 
 /// The fix for a probe whose warm-up shows its crate builds without incremental in CI. Cargo turns incremental off whenever CI is set, unless this is set.
 const INCREMENTAL_FIX: &str =
@@ -214,23 +215,18 @@ fn measure_rust(
     let results = plan(PROBES, &members)
         .into_iter()
         .map(|planned| match planned {
-            Planned::Skip(probe) => ProbeResult {
-                name: probe.name,
-                outcome: Outcome::Skipped("crate not present"),
-            },
-            Planned::Run { probe, dir } if kept.contains(&dir) => ProbeResult {
-                name: probe.name,
-                outcome: Outcome::Skipped(KEPT_COPY),
-            },
+            Planned::Skip(probe) => {
+                rust_result(&probe, Outcome::Skipped("crate not present".into()))
+            }
+            Planned::Run { probe, dir } if kept.contains(&dir) => {
+                rust_result(&probe, Outcome::Skipped(KEPT_COPY.into()))
+            }
             Planned::Run { probe, dir } => {
                 let outcome = probe::run_probe(root, &dir, &probe, &budgets, runs, ci, &mut runner);
                 if matches!(outcome, Outcome::Failed(_)) && probe::holds_kept_copy(root, &dir) {
                     kept.push(dir);
                 }
-                ProbeResult {
-                    name: probe.name,
-                    outcome,
-                }
+                rust_result(&probe, outcome)
             }
         })
         .collect();
@@ -241,6 +237,16 @@ fn measure_rust(
         runs,
         results,
     })
+}
+
+/// A Rust probe's result: it measures seconds, and a failure or a gated overrun fails the run.
+fn rust_result(probe: &Probe, outcome: Outcome) -> ProbeResult {
+    ProbeResult {
+        name: probe.name,
+        unit: budgets::Unit::S,
+        reported_only: false,
+        outcome,
+    }
 }
 
 /// Why a probe is skipped after an earlier probe on its crate kept the saved copy.
@@ -318,7 +324,7 @@ pub(crate) fn run(half: Half, runs: u32, json: bool) -> ExitCode {
             }
         }
         report::print_failures(&rust.results, &mut diag);
-        report_over_budget(&rust.results, rust.ci, &mut diag);
+        report_over_budget(&rust.results, rust.ci, OVER_FIX, &mut diag);
     }
     let web = (half != Half::Rust).then(|| {
         let ci = check::is_ci(env::var("CI").ok().as_deref());
@@ -356,43 +362,25 @@ fn measure_web(
     let run = web::measure(root, runs, ci, &budgets, diag)?;
     if !json {
         out.note(format!("web: node {}", run.node));
-        for line in web::table_lines(&run.results) {
+        for line in report::table_lines(&run.results) {
             out.note(line);
         }
         out.note(web::REPORTED_LINE);
     }
-    for result in &run.results {
-        if let WebOutcome::Failed(failure) = &result.outcome {
-            if let Some(output) = &failure.output {
-                diag.captured_output(output);
-            }
-            diag.failure(&failure.message, &failure.fix);
-        }
-    }
-    let over: Vec<(&str, bool)> = run
-        .results
-        .iter()
-        .filter(|result| result.status() == ProbeStatus::Over)
-        .map(|result| (result.probe.name, result.fails_run(ci)))
-        .collect();
-    over_budget_notes(&over, ci, WEB_OVER_FIX, diag);
+    report::print_failures(&run.results, diag);
+    report_over_budget(&run.results, ci, WEB_OVER_FIX, diag);
     Ok(run)
 }
 
-/// Names the over-budget probes. Those that fail the run get a failure with its fix. Those only
-/// reported get a note: "CI reports only" in CI, and "reported only" locally, for an alert gate.
-fn report_over_budget(results: &[ProbeResult], ci: bool, diag: &mut Out) {
+/// Names the over-budget probes. Those that fail the run get a failure with `fix`. Those only
+/// reported get a note: "CI reports only" in CI, and "reported only" locally, for an alert gate or
+/// a reported-only probe.
+fn report_over_budget(results: &[ProbeResult], ci: bool, fix: &str, diag: &mut Out) {
     let over: Vec<(&str, bool)> = results
         .iter()
-        .filter(|result| result.outcome.status() == ProbeStatus::Over)
-        .map(|result| (result.name, result.outcome.fails_run(ci)))
+        .filter(|result| result.status() == ProbeStatus::Over)
+        .map(|result| (result.name, result.fails_run(ci)))
         .collect();
-    over_budget_notes(&over, ci, OVER_FIX, diag);
-}
-
-/// The over-budget lines for `over`, each probe's name and whether it fails the run: a note for
-/// the probes only reported, then a failure with `fix` for those that fail.
-fn over_budget_notes(over: &[(&str, bool)], ci: bool, fix: &str, diag: &mut Out) {
     let failing: Vec<&str> = over
         .iter()
         .filter(|(_, fails)| *fails)

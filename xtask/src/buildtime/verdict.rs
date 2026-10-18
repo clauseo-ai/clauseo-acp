@@ -1,10 +1,12 @@
 //! What a probe came to, and whether the run passes: the statistics of the timed runs, a probe's
-//! failure, its status against the budget, and the verdict over all of them.
+//! failure, its status against the budget, and the verdict over all of them. Both halves share
+//! these types: a Rust probe measures seconds, a web probe seconds, milliseconds or kilobytes.
 
 use crate::budgets::{Budget, Gate, Unit};
 use serde::Serialize;
 
-/// The median, minimum and maximum of the timed runs, in seconds.
+/// The median, minimum and maximum of the timed runs. Unit-free: the values are in whatever unit
+/// the probe measures (`ProbeResult::unit`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Stats {
     pub median: f64,
@@ -70,31 +72,51 @@ impl ProbeStatus {
     }
 }
 
-/// What one probe came to. A measured probe carries its budget row's gate, and a warning when its
-/// build was not incremental.
+/// What one probe came to. A measured probe carries its samples and their stats in the probe's
+/// unit, its budget (none for a probe without a row, which is only reported), and a warning when
+/// its build was not incremental.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Outcome {
-    Skipped(&'static str),
+    Skipped(String),
     Failed(Failure),
     Measured {
+        samples: Vec<f64>,
         stats: Stats,
-        budget_id: &'static str,
-        budget_s: f64,
-        gate: Gate,
+        budget: Option<Limit>,
         warning: Option<String>,
     },
 }
 
 impl Outcome {
-    /// `ok` when the median is within the budget, `over` when it is not.
+    /// The outcome of `samples` against `budget`. No samples fails the probe.
+    pub(crate) fn of_samples(name: &str, samples: Vec<f64>, budget: Option<Limit>) -> Outcome {
+        match stats(&samples) {
+            Some(stats) => Outcome::Measured {
+                samples,
+                stats,
+                budget,
+                warning: None,
+            },
+            None => Outcome::Failed(Failure::new(
+                format!("no timed runs for {name}"),
+                "run `cargo xtask buildtime` with --runs 1 or more",
+            )),
+        }
+    }
+
+    /// `ok` when the median is within the budget, `over` when it is not, `reported` with no
+    /// budget.
     pub(crate) fn status(&self) -> ProbeStatus {
         match self {
             Outcome::Skipped(_) => ProbeStatus::Skipped,
             Outcome::Failed(_) => ProbeStatus::Failed,
+            Outcome::Measured { budget: None, .. } => ProbeStatus::Reported,
             Outcome::Measured {
-                stats, budget_s, ..
+                stats,
+                budget: Some(budget),
+                ..
             } => {
-                if stats.median <= *budget_s {
+                if stats.median <= budget.value {
                     ProbeStatus::Ok
                 } else {
                     ProbeStatus::Over
@@ -102,15 +124,35 @@ impl Outcome {
             }
         }
     }
+}
 
-    /// Whether this probe fails the run: a failure always does, and an over-budget probe does when
-    /// its gate says so for this machine.
+/// One probe: its name, the unit of its values, whether it is reported only, and its outcome.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ProbeResult {
+    pub name: &'static str,
+    pub unit: Unit,
+    /// The probe never fails the run: not when it is over budget, and not when it fails.
+    pub reported_only: bool,
+    pub outcome: Outcome,
+}
+
+impl ProbeResult {
+    pub(crate) fn status(&self) -> ProbeStatus {
+        self.outcome.status()
+    }
+
+    /// Whether this probe fails the run. A reported-only probe never does. Otherwise a failure
+    /// always does, and an over-budget probe does when its gate says so for this machine.
     pub(crate) fn fails_run(&self, ci: bool) -> bool {
-        match self {
+        if self.reported_only {
+            return false;
+        }
+        match &self.outcome {
             Outcome::Skipped(_) => false,
             Outcome::Failed(_) => true,
-            Outcome::Measured { gate, .. } => {
-                self.status() == ProbeStatus::Over && over_budget_fails(*gate, ci)
+            Outcome::Measured { budget, .. } => {
+                self.status() == ProbeStatus::Over
+                    && budget.is_some_and(|budget| over_budget_fails(budget.gate, ci))
             }
         }
     }
@@ -126,49 +168,55 @@ pub(crate) fn over_budget_fails(gate: Gate, ci: bool) -> bool {
     }
 }
 
-/// One probe's name and outcome.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ProbeResult {
-    pub name: &'static str,
-    pub outcome: Outcome,
-}
-
-/// A budget row's limit in seconds, and its gate.
+/// A budget row's id, its limit in the probe's unit, and its gate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Limit {
-    pub seconds: f64,
+    pub id: &'static str,
+    pub value: f64,
     pub gate: Gate,
 }
 
-/// The limit of the budget row `id`, in seconds, and its gate. A missing row, or a unit other than
-/// `s` or `ms`, fails the probe.
-pub(crate) fn budget_limit(budgets: &[Budget], id: &str) -> Result<Limit, Failure> {
-    let Some(budget) = budgets.iter().find(|budget| budget.id == id) else {
+/// The factor from a budget row's unit to a probe's unit, or `None` when they do not convert.
+fn factor(row: Unit, probe: Unit) -> Option<f64> {
+    match (row, probe) {
+        _ if row == probe => Some(1.0),
+        (Unit::Ms, Unit::S) => Some(0.001),
+        (Unit::S, Unit::Ms) => Some(1000.0),
+        _ => None,
+    }
+}
+
+/// The budget row `id` with its limit in `unit`, the unit the probe measures, and its gate. A
+/// missing row, or a row in a unit that does not convert to `unit`, fails the probe.
+pub(crate) fn budget_limit(
+    budgets: &[Budget],
+    id: &'static str,
+    unit: Unit,
+) -> Result<Limit, Failure> {
+    let Some(row) = budgets.iter().find(|budget| budget.id == id) else {
         return Err(Failure::new(
             format!("no budget row {id} in budgets.toml"),
             format!("add a [[budget]] row with id = \"{id}\" to budgets.toml"),
         ));
     };
-    let seconds = match budget.unit {
-        Unit::S => budget.limit,
-        Unit::Ms => budget.limit / 1000.0,
-        other => {
-            return Err(Failure::new(
-                format!(
-                    "budget {id} is in {}, and buildtime compares s or ms",
-                    other.label()
-                ),
-                format!("set unit = \"s\" or \"ms\" on budget {id}"),
-            ));
-        }
+    let Some(factor) = factor(row.unit, unit) else {
+        return Err(Failure::new(
+            format!(
+                "budget {id} is in {}, and this probe measures {}",
+                row.unit.label(),
+                unit.label()
+            ),
+            format!("set unit = \"{}\" on budget {id}", unit.label()),
+        ));
     };
     Ok(Limit {
-        seconds,
-        gate: budget.gate,
+        id,
+        value: row.limit * factor,
+        gate: row.gate,
     })
 }
 
 /// Whether the run passes: no probe fails it.
 pub(crate) fn passes(results: &[ProbeResult], ci: bool) -> bool {
-    !results.iter().any(|result| result.outcome.fails_run(ci))
+    !results.iter().any(|result| result.fails_run(ci))
 }

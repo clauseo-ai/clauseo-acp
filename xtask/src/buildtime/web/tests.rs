@@ -2,10 +2,12 @@
 //! and the `--json` shape of `web` and of `all`.
 
 use super::super::profile::Incremental;
-use super::super::report::{json_object, web_json};
-use super::super::verdict::Outcome;
-use super::super::{ProbeResult, RustRun};
+use super::super::report::{WebJson, json_object, print_failures, table_lines, web_json};
+use super::super::verdict::{Limit, ProbeStatus, Stats};
+use super::super::{PROBES, RustRun, rust_result};
 use super::*;
+use crate::budgets::Gate;
+use crate::output::Printer;
 
 fn budget(id: &str, limit: f64, unit: Unit, gate: Gate) -> Budget {
     Budget {
@@ -36,14 +38,14 @@ const ALL_OK: &str = r#"{"node":"v24.1.0","runs":3,"probes":[
   {"probe":"hmr","samples_ms":[80,100,90]}
 ]}"#;
 
-fn results_of(json: &str) -> Vec<WebResult> {
+fn results_of(json: &str) -> Vec<ProbeResult> {
     results(&parse_report(json).expect("valid script json"), &budgets())
 }
 
-fn find<'a>(results: &'a [WebResult], name: &str) -> &'a WebResult {
+fn find<'a>(results: &'a [ProbeResult], name: &str) -> &'a ProbeResult {
     results
         .iter()
-        .find(|result| result.probe.name == name)
+        .find(|result| result.name == name)
         .expect("the probe is in the results")
 }
 
@@ -51,10 +53,10 @@ fn close(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-9
 }
 
-fn measured(result: &WebResult) -> (Stats, Option<WebBudget>) {
+fn measured(result: &ProbeResult) -> (Stats, Option<Limit>) {
     match &result.outcome {
-        WebOutcome::Measured { stats, budget } => (*stats, *budget),
-        other => panic!("{} is not measured: {other:?}", result.probe.name),
+        Outcome::Measured { stats, budget, .. } => (*stats, *budget),
+        other => panic!("{} is not measured: {other:?}", result.name),
     }
 }
 
@@ -67,7 +69,7 @@ fn with(probe: &str, replacement: &str) -> String {
     format!("{}{replacement}{}", &ALL_OK[..start], &ALL_OK[end..])
 }
 
-fn web_run(results: Vec<WebResult>, ci: bool) -> WebRun {
+fn web_run(results: Vec<ProbeResult>, ci: bool) -> WebRun {
     WebRun {
         node: "v24.1.0".into(),
         runs: 3,
@@ -80,10 +82,7 @@ fn web_run(results: Vec<WebResult>, ci: bool) -> WebRun {
 fn numbers_convert_to_each_probes_unit_with_their_budget() {
     let results = results_of(ALL_OK);
     assert_eq!(
-        results
-            .iter()
-            .map(|result| result.probe.name)
-            .collect::<Vec<_>>(),
+        results.iter().map(|result| result.name).collect::<Vec<_>>(),
         [
             "tsc",
             "oxlint_type_aware",
@@ -97,13 +96,13 @@ fn numbers_convert_to_each_probes_unit_with_their_budget() {
     assert!(close(tsc.median, 0.2) && close(tsc.min, 0.1) && close(tsc.max, 0.3));
     let tsc_budget = tsc_budget.expect("tsc has a budget");
     assert_eq!(tsc_budget.id, "tsc_noemit");
-    assert!(close(tsc_budget.limit, 2.0));
+    assert!(close(tsc_budget.value, 2.0));
     let (js, js_budget) = measured(find(&results, "initial_js"));
     assert!(close(js.median, 51.114), "bytes become KB of 1000 bytes");
-    assert!(close(js_budget.expect("a budget").limit, 180.0));
+    assert!(close(js_budget.expect("a budget").value, 180.0));
     let (hmr, hmr_budget) = measured(find(&results, "hmr"));
     assert!(close(hmr.median, 90.0));
-    assert!(close(hmr_budget.expect("a budget").limit, 100.0));
+    assert!(close(hmr_budget.expect("a budget").value, 100.0));
     let (dev, dev_budget) = measured(find(&results, "dev_start"));
     assert!(close(dev.median, 183.4));
     assert_eq!(dev_budget, None);
@@ -119,7 +118,7 @@ fn a_failed_probe_carries_the_tools_output_and_a_command_to_reproduce_it() {
     let results = results_of(&json);
     let tsc = find(&results, "tsc");
     assert_eq!(tsc.status(), ProbeStatus::Failed);
-    let WebOutcome::Failed(failure) = &tsc.outcome else {
+    let Outcome::Failed(failure) = &tsc.outcome else {
         panic!("tsc failed");
     };
     assert_eq!(failure.message, "`tsc --noEmit` exited with 2");
@@ -150,10 +149,60 @@ fn a_skipped_hmr_is_reported_and_does_not_fail_the_run() {
     assert_eq!(hmr.status(), ProbeStatus::Skipped);
     assert_eq!(
         hmr.outcome,
-        WebOutcome::Skipped("no Chrome or Chromium found (set CHROME_PATH)".into())
+        Outcome::Skipped("no Chrome or Chromium found (set CHROME_PATH)".into())
     );
     assert_eq!(find(&results, "dev_start").status(), ProbeStatus::Reported);
     assert!(web_run(results, false).passed());
+}
+
+#[test]
+fn a_failed_hmr_dev_start_or_initial_js_shows_failed_prints_its_lines_and_passes() {
+    let cases = [
+        ("hmr", 6, "hmr failed: Timeout 10000ms exceeded"),
+        (
+            "dev_start",
+            5,
+            "dev_start failed: vite exited with 1 before it was ready",
+        ),
+        (
+            "initial_js",
+            4,
+            "could not size the initial JS: no module script",
+        ),
+    ];
+    for (name, row, message) in cases {
+        let failed = format!(
+            r#"{{"probe":"{name}","failed":{{"message":"{message}","command":"node ui/app/scripts/buildtime.mjs --runs 3","output":"the tool's output"}}}}"#
+        );
+        let results = results_of(&with(name, &failed));
+        let result = find(&results, name);
+        assert_eq!(result.status(), ProbeStatus::Failed, "{name}");
+        assert!(
+            !result.fails_run(false) && !result.fails_run(true),
+            "{name}"
+        );
+        assert!(web_run(results.clone(), false).passed(), "{name}");
+        assert!(web_run(results.clone(), true).passed(), "{name} in CI");
+        assert_eq!(
+            table_lines(&results)[row],
+            format!("{name:<19}failed (see below)")
+        );
+        let mut diag = Printer::new(Vec::new(), false);
+        print_failures(&results, &mut diag);
+        assert_eq!(
+            String::from_utf8(diag.into_inner()).expect("utf-8"),
+            format!(
+                "the tool's output\n{message} (reported only; the run still passes)\n    fix: run `node ui/app/scripts/buildtime.mjs --runs 3` to see the error, and fix it\n"
+            )
+        );
+        let web = WebJson::of(&Ok(web_run(results, false)));
+        let json: serde_json::Value = serde_json::from_str(&web_json(&web)).expect("valid json");
+        let probe = &json["web"]["probes"][row - 1];
+        assert_eq!(probe["status"], "failed");
+        assert_eq!(probe["reported_only"], true);
+        assert_eq!(probe["reason"], message);
+        assert_eq!(json["passed"], true);
+    }
 }
 
 #[test]
@@ -162,7 +211,7 @@ fn json_that_xtask_cannot_read_or_a_missing_or_misshapen_probe_fails() {
     assert!(error.starts_with("ui/app/scripts/buildtime.mjs printed JSON that xtask cannot read"));
 
     let missing = results_of(&with("vite_build", r#"{"probe":"other","samples_ms":[1]}"#));
-    let WebOutcome::Failed(failure) = &find(&missing, "vite_build").outcome else {
+    let Outcome::Failed(failure) = &find(&missing, "vite_build").outcome else {
         panic!("a missing probe fails");
     };
     assert_eq!(
@@ -184,7 +233,7 @@ fn a_missing_row_or_a_row_in_another_unit_fails_the_probe() {
     rows.retain(|row| !(row.id == "vite_build_warm" && row.unit == Unit::S));
     let results = results(&parse_report(ALL_OK).expect("valid"), &rows);
     let message = |name: &str| match &find(&results, name).outcome {
-        WebOutcome::Failed(failure) => failure.message.clone(),
+        Outcome::Failed(failure) => failure.message.clone(),
         other => panic!("{name} should fail: {other:?}"),
     };
     assert_eq!(message("tsc"), "no budget row tsc_noemit in budgets.toml");
@@ -201,11 +250,11 @@ fn a_limit_in_ms_converts_to_a_probe_in_seconds() {
     rows.push(budget("tsc_noemit", 1500.0, Unit::Ms, Gate::Local));
     let results = results(&parse_report(ALL_OK).expect("valid"), &rows);
     let (_, limit) = measured(find(&results, "tsc"));
-    assert!(close(limit.expect("a budget").limit, 1.5));
+    assert!(close(limit.expect("a budget").value, 1.5));
 }
 
 /// Every probe of `ALL_OK` far over its budget.
-fn all_over() -> Vec<WebResult> {
+fn all_over() -> Vec<ProbeResult> {
     let tight: Vec<Budget> = budgets()
         .into_iter()
         .map(|row| Budget {
@@ -241,9 +290,10 @@ fn over_budget_initial_js_hmr_and_dev_start_are_only_reported() {
     let initial = find(&results, "initial_js");
     assert_eq!(
         measured(initial).1.map(|budget| budget.gate),
-        Some(Gate::Alert),
-        "the row's pr gate is not applied yet"
+        Some(Gate::Pr),
+        "the row keeps its pr gate"
     );
+    assert!(initial.reported_only, "but the probe is reported only");
     let dev = find(&results, "dev_start");
     assert_eq!(dev.status(), ProbeStatus::Reported);
     assert!(!dev.fails_run(false));
@@ -294,6 +344,30 @@ fn the_web_json_carries_every_probe_with_its_unit_and_gating() {
     assert_eq!(half["node"], "v24.1.0");
     assert_eq!(half["probes"].as_array().map(Vec::len), Some(6));
     let tsc = &half["probes"][0];
+    let mut tsc_keys: Vec<&str> = tsc
+        .as_object()
+        .expect("an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    tsc_keys.sort_unstable();
+    assert_eq!(
+        tsc_keys,
+        [
+            "budget",
+            "budget_id",
+            "max",
+            "median",
+            "min",
+            "probe",
+            "reported_only",
+            "samples",
+            "status",
+            "unit"
+        ],
+        "the same shape as a Rust probe"
+    );
+    assert_eq!(tsc["samples"], serde_json::json!([0.2, 0.1, 0.3]));
     assert_eq!(tsc["probe"], "tsc");
     assert_eq!(tsc["status"], "over");
     assert_eq!(tsc["unit"], "s");
@@ -330,10 +404,10 @@ fn the_all_json_nests_the_web_half_under_web() {
         },
         ci: false,
         runs: 3,
-        results: vec![ProbeResult {
-            name: "check_desktop",
-            outcome: Outcome::Skipped("crate not present"),
-        }],
+        results: vec![rust_result(
+            &PROBES[0],
+            Outcome::Skipped("crate not present".into()),
+        )],
     };
     let web = WebJson::of(&Ok(web_run(results_of(ALL_OK), false)));
     let json: serde_json::Value =
