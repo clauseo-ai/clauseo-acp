@@ -245,6 +245,81 @@ fn an_optional_tauri_feature_reference_fails() {
 }
 
 #[test]
+fn a_tauri_runtime_feature_fails_in_the_desktop_or_the_workspace_entry() {
+    let ws = Workspace::desktop_with(
+        "runtime",
+        "tauri-runtime.workspace = true\n",
+        "tauri-runtime = { workspace = true, default-features = true, features = [\"devtools\"] }\n",
+    );
+    assert_eq!(
+        ws.violations(),
+        vec![violation(
+            DESKTOP_PATH,
+            line_of(&ws.desktop, "tauri-runtime ="),
+            "`tauri-runtime` enables the `devtools` feature",
+            RUNTIME_FIX,
+        )]
+    );
+    let root = ROOT.replace(
+        "tauri-runtime = \"2\"\n",
+        "tauri-runtime = { version = \"2\", features = [\"macos-private-api\"] }\n",
+    );
+    let ws = Workspace::new("runtime-root", &root, DESKTOP, &[]);
+    assert_eq!(
+        ws.violations(),
+        vec![violation(
+            WORKSPACE_MANIFEST,
+            line_of(&ws.root, "macos-private-api"),
+            "`tauri-runtime` enables the `macos-private-api` feature",
+            RUNTIME_FIX,
+        )]
+    );
+}
+
+#[test]
+fn another_member_with_tauri_fails_even_through_a_path_dependency() {
+    let core = r#"[package]
+name = "clauseo-core"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+tauri = { version = "2", features = ["devtools"] }
+tauri-plugin-fs = "2"
+
+[target.'cfg(unix)'.dependencies]
+rt = { package = "tauri-runtime", version = "2" }
+
+[dev-dependencies]
+tauri-plugin-shell = "2"
+
+[build-dependencies]
+tauri-plugin-os = "2"
+"#;
+    let desktop = format!("{DESKTOP}clauseo-core = {{ path = \"../core\" }}\n");
+    let ws = Workspace::new("member", ROOT, &desktop, &[("crates/core", core)]);
+    let path = "crates/core/Cargo.toml";
+    let at =
+        |needle: &str, message: &str| violation(path, line_of(core, needle), message, MEMBER_FIX);
+    let mut found = ws.violations();
+    found.sort_by_key(|v| v.line);
+    assert_eq!(
+        found,
+        vec![
+            at("tauri = ", "`clauseo-core` depends on `tauri`"),
+            at(
+                "tauri-plugin-fs",
+                "`clauseo-core` depends on `tauri-plugin-fs`"
+            ),
+            at(
+                "rt = ",
+                "`clauseo-core` depends on `tauri-runtime` (as `rt`)"
+            ),
+        ]
+    );
+}
+
+#[test]
 fn the_check_is_registered_under_its_name() {
     assert!(
         crate::checks::ALL

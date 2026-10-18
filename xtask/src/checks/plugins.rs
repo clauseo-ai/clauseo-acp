@@ -1,14 +1,18 @@
-//! The `plugins` check: the cargo side of the desktop crate, its fixed plugin set and `tauri`
-//! features.
+//! The `plugins` check: the cargo side of Tauri in the workspace. The desktop crate has the fixed
+//! plugin set and safe `tauri` and `tauri-runtime` features, and no other member depends on Tauri.
 //!
-//! The dependencies come from `cargo metadata --no-deps`, which resolves workspace inheritance and
-//! renames, so a renamed or inherited entry counts under its real package. Among normal
-//! dependencies, with or without a target: the `tauri-plugin-*` packages are exactly
-//! `FIXED_PLUGINS`, none of them is optional (the set sits behind no cargo feature), `tauri`'s
-//! merged features include neither `devtools` nor `protocol-asset`, and no `[features]` entry
-//! turns either on through `tauri`'s key.
+//! The dependencies of every member come from one `cargo metadata --no-deps` run, which resolves
+//! workspace inheritance and renames, so a renamed or inherited entry counts under its real
+//! package. Among normal dependencies, with or without a target:
+//! - in the desktop crate, the `tauri-plugin-*` packages are exactly `FIXED_PLUGINS`, none of them
+//!   optional (the set sits behind no cargo feature); `tauri`'s merged features include neither
+//!   `devtools` nor `protocol-asset`, and no `[features]` entry turns either on through
+//!   `tauri`'s key; `tauri-runtime` enables no feature (it has `devtools` and
+//!   `macos-private-api`, and no default features, so `default-features` does not matter);
+//! - no other member depends on `tauri`, `tauri-runtime` or a `tauri-plugin-*`: cargo unifies
+//!   features, so a member pulled into the desktop crate would bring its Tauri features along.
 //!
-//! The manifest text is read only for line numbers: the desktop `Cargo.toml`, or the root one
+//! The manifest text is read only for line numbers: the member's `Cargo.toml`, or the root one
 //! when the setting lives in `[workspace.dependencies]`, else line 1.
 //! The Tauri config and `build.rs` belong to the `tauri-config` check.
 
@@ -37,11 +41,14 @@ const FIXED_PLUGINS: [&str; 8] = [
 const FORBIDDEN_FEATURES: [&str; 2] = ["devtools", "protocol-asset"];
 
 const FEATURE_FIX: &str = "remove it: devtools let script in the page open the inspector, and `protocol-asset` serves files from disk to the webview";
+const RUNTIME_FIX: &str = "remove it: tauri-runtime is there only to name a type, and its `devtools` and `macos-private-api` features would reach the binary through it";
 const PLUGIN_FIX: &str = "remove it: the plugin set is fixed (each change forces a near-cold rebuild and widens what the webview can reach); changing it needs a decision recorded in a task brief";
 const OPTIONAL_FIX: &str = "drop `optional = true` and any feature that enables it: the plugin set is fixed and sits behind no cargo feature, so every build ships the same plugins";
+const MEMBER_FIX: &str =
+    "only crates/desktop depends on Tauri; move the code there or behind the host interface";
 const METADATA_FIX: &str = "fix the manifest until `cargo metadata --no-deps` succeeds: this check reads the dependencies from it";
 
-/// Fails on every dependency of the desktop crate outside the fixed plugin set or its rules.
+/// Fails on every Tauri dependency of a workspace member outside the fixed set or its rules.
 pub(crate) const CHECK: StaticCheck = StaticCheck {
     name: "plugins",
     run,
@@ -69,7 +76,7 @@ fn run(ctx: &Context) -> Vec<Violation> {
         (Ok(desktop), Ok(root)) => (desktop, root),
         (Err(violation), _) | (_, Err(violation)) => return vec![violation],
     };
-    match packages.get(checks::DESKTOP_PACKAGE) {
+    let mut found = match packages.get(checks::DESKTOP_PACKAGE) {
         Some(deps) => violations(
             deps,
             &Manifests {
@@ -87,7 +94,52 @@ fn run(ctx: &Context) -> Vec<Violation> {
             ),
             METADATA_FIX,
         )],
+    };
+    for member in ctx
+        .members
+        .iter()
+        .filter(|m| m.name != checks::DESKTOP_PACKAGE)
+    {
+        let Some(deps) = packages.get(&member.name) else {
+            continue;
+        };
+        let path = checks::join(&member.dir, "Cargo.toml");
+        match read(&path) {
+            Ok(text) => found.extend(member_violations(&member.name, &path, &text, deps)),
+            Err(violation) => found.push(violation),
+        }
     }
+    found
+}
+
+/// The violations of member `name`, which is not the desktop crate, whose manifest at `path`
+/// holds `text`: one for each normal dependency on `tauri`, `tauri-runtime` or a
+/// `tauri-plugin-*`, at the line that declares it, else line 1.
+pub(crate) fn member_violations(
+    name: &str,
+    path: &str,
+    text: &str,
+    deps: &PackageDependencies,
+) -> Vec<Violation> {
+    let lines = lines(text);
+    deps.dependencies
+        .iter()
+        .filter(|dep| dep.is_normal() && is_tauri(&dep.name))
+        .map(|dep| {
+            let line = declaration(&lines, dep.key(), is_dependency_table).map_or(1, |l| l.no);
+            violation(
+                path,
+                line,
+                format!("`{name}` depends on `{}`{}", dep.name, as_key(dep)),
+                MEMBER_FIX,
+            )
+        })
+        .collect()
+}
+
+/// True for `tauri`, `tauri-runtime` and every `tauri-plugin-*` package.
+fn is_tauri(package: &str) -> bool {
+    package == "tauri" || package == "tauri-runtime" || package.starts_with("tauri-plugin-")
 }
 
 /// ` (as `key`)` when the dependency is renamed, else empty.
@@ -119,6 +171,25 @@ pub(crate) fn violations(deps: &PackageDependencies, manifests: &Manifests<'_>) 
     let mut found = plugin_violations(&normal, &locate);
     found.extend(tauri_feature_violations(&normal, &locate));
     found.extend(feature_table_violations(deps, &normal, &locate));
+    found.extend(runtime_feature_violations(&normal, &locate));
+    found
+}
+
+/// Every feature that a `tauri-runtime` entry enables. It has no default features (checked
+/// against tauri-runtime 2.12.2), so only the listed ones count.
+fn runtime_feature_violations(normal: &[&CargoDependency], locate: &Locator<'_>) -> Vec<Violation> {
+    let mut found = Vec::new();
+    for dep in normal.iter().filter(|dep| dep.name == "tauri-runtime") {
+        for feature in &dep.features {
+            let (path, line) = locate.feature(dep.key(), feature);
+            found.push(violation(
+                path,
+                line,
+                format!("`tauri-runtime` enables the `{feature}` feature"),
+                RUNTIME_FIX,
+            ));
+        }
+    }
     found
 }
 
