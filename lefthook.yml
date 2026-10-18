@@ -5,8 +5,11 @@ pre-commit:
     typos:    { run: "typos {staged_files}" }
     taplo:    { glob: "*.toml", run: "taplo fmt --check {staged_files}" }
     gitleaks: { run: gitleaks git --staged --redact --no-banner }
-    oxfmt:    { root: "ui/app/", glob: "*.{ts,tsx,js,mjs,cjs,json,html,css,md}", run: "pnpm exec oxfmt --check {staged_files}" }
-    oxlint:   { root: "ui/app/", glob: "*.{ts,tsx,js,mjs,cjs}", run: "pnpm exec oxlint {staged_files}" }
+    # lefthook 2.2.1: `root` runs the command there and `glob` matches the path under it (`./app/src/App.tsx`),
+    # so `**/` reaches nested files. `exclude` matches the repo path (`ui/pnpm-lock.yaml`). oxfmt refuses
+    # a file list of only ignored files, so the lockfile is excluded.
+    oxfmt:    { root: "ui/", glob: "**/*.{ts,tsx,js,mjs,cjs,json,jsonc,yaml,yml,html,css,md}", exclude: "**/pnpm-lock.yaml", run: "pnpm run fmt:check {staged_files}" }
+    oxlint:   { root: "ui/app/", glob: "**/*.{ts,tsx,js,mjs,cjs}", run: "pnpm run lint {staged_files}" }
 pre-push:
   commands:
     check: { run: cargo xtask check --quick }
