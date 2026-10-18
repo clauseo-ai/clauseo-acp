@@ -2,12 +2,12 @@
 //! so does tool output: it streams when stdout is a terminal and is held back otherwise.
 
 use crate::checks::StaticCheck;
+use crate::clock::timed;
 use crate::output::Printer;
 use crate::process::{Captured, Cmd};
 use crate::steps::{Step, ToolStep};
 use crate::workspace::Context;
 use std::io::{self, Write};
-use std::time::Instant;
 
 /// Runs a tool command and passes each chunk of its output to the sink as it arrives.
 pub(crate) type Exec<'a> = dyn FnMut(&Cmd, &mut dyn FnMut(&[u8])) -> io::Result<Captured> + 'a;
@@ -124,15 +124,6 @@ fn run_tool<W: Write>(
             secs,
         },
     }
-}
-
-/// Runs `work` and returns its value with the seconds it took. The clock read for the check steps;
-/// `buildtime` has its own, for the build timings.
-#[expect(clippy::disallowed_methods, reason = "xtask runs tools and times them")]
-fn timed<T>(work: impl FnOnce() -> T) -> (T, f64) {
-    let started = Instant::now();
-    let value = work();
-    (value, started.elapsed().as_secs_f64())
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 //!
 //! A probe writes the next value of its crate's `BUILDTIME_MARKER`, runs cargo, and times it. The
 //! first run is a warm-up and is not counted. The file is restored after every probe, even when
-//! cargo fails. Only `timed` below reads the clock, and only `process.rs` starts processes.
+//! cargo fails. Only `clock::timed` reads the clock, and only `process.rs` starts processes.
 
 mod marker;
 mod profile;
@@ -14,6 +14,7 @@ mod tests;
 
 use crate::budgets::{self, Budget, Unit};
 use crate::check;
+use crate::clock::timed;
 use crate::output::Printer;
 use crate::process::{self, Cmd, Program};
 use crate::workspace::{self, Member};
@@ -24,7 +25,6 @@ use serde::Serialize;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
-use std::time::Instant;
 
 /// The web half's message, until R4 builds it.
 const WEB_MESSAGE: &str = "not implemented until R4";
@@ -218,14 +218,6 @@ pub(crate) fn budget_seconds(budgets: &[Budget], id: &str) -> Result<f64, Failur
             format!("set unit = \"s\" or \"ms\" on budget {id}"),
         )),
     }
-}
-
-/// Runs `work` and returns its value with the seconds it took. The clock read for the build timings.
-#[expect(clippy::disallowed_methods, reason = "xtask runs tools and times them")]
-fn timed<T>(work: impl FnOnce() -> T) -> (T, f64) {
-    let started = Instant::now();
-    let value = work();
-    (value, started.elapsed().as_secs_f64())
 }
 
 /// Runs the cargo command of `probe` against the marker in `dir`, and returns its outcome.

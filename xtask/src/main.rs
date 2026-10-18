@@ -17,6 +17,7 @@ mod buildtime;
 mod changes;
 mod check;
 mod checks;
+mod clock;
 mod output;
 mod parse;
 mod process;
