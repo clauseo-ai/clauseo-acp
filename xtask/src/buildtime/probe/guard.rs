@@ -51,7 +51,11 @@ impl Guard {
                     "a saved copy of {rel} already exists at {}; an earlier probe kept it (a conflict or a failed restore)",
                     copy_name(rel)
                 ),
-                format!("restore {rel} from that copy by hand, then delete it"),
+                format!(
+                    "compare {rel} with {}, keep what you want, then delete {}",
+                    copy_name(rel),
+                    copy_name(rel)
+                ),
             )),
             Err(error) => Err(Failure::new(
                 format!("could not back up {rel} before editing it: {error}"),

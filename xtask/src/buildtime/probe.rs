@@ -283,5 +283,21 @@ fn repo_path(path: &Path) -> String {
         .join("/")
 }
 
+/// Whether a saved copy of a file in the crate at `dir` is still under `target/xtask/buildtime/`.
+/// After a failed probe, that means the probe kept it (a conflict or a failed restore): leftovers
+/// from earlier runs are restored or refused before any probe starts.
+pub(crate) fn holds_kept_copy(root: &Path, dir: &str) -> bool {
+    has_file(&root.join(BACKUP_DIR).join(dir))
+}
+
+fn has_file(path: &Path) -> bool {
+    fs::read_dir(path).is_ok_and(|entries| {
+        entries.flatten().any(|entry| {
+            let path = entry.path();
+            path.is_file() || (path.is_dir() && has_file(&path))
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests;
