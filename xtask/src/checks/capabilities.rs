@@ -2,6 +2,10 @@
 //!
 //! Each line is checked on its own. A line with `remote`, with `core:default`, and with a
 //! permission under a forbidden prefix fails once for each of them.
+//!
+//! Only `*.json`, `*.json5` and `*.toml` files are scanned, at any depth: those are the only files
+//! Tauri loads from the capabilities folder. Anything else there (a Finder `.DS_Store`, a Vim swap
+//! file, a `main.json~` backup) never reaches the app, so it is skipped.
 
 use crate::checks::{self, StaticCheck};
 use crate::violation::Violation;
@@ -10,8 +14,11 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// The capability files, at the repo root. Every file under it is read, whatever its extension.
+/// The capability files, at the repo root.
 const DIR: &str = "crates/desktop/capabilities";
+
+/// The extensions of the capability files Tauri reads.
+const EXTENSIONS: [&str; 3] = ["json", "json5", "toml"];
 
 /// Permission prefixes that name a plugin's API. The webview gets none of them.
 const FORBIDDEN_PREFIXES: [&str; 5] = ["fs:", "shell:", "http:", "opener:", "dialog:"];
@@ -44,7 +51,8 @@ fn run(ctx: &Context) -> Vec<Violation> {
     found
 }
 
-/// Every file under `dir`, recursively, sorted by path. Fails when `dir` cannot be listed.
+/// Every file under `dir` with one of `EXTENSIONS`, recursively, sorted by path. Fails when `dir`
+/// cannot be listed.
 fn capability_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     let mut pending = vec![dir.to_path_buf()];
@@ -53,13 +61,20 @@ fn capability_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
             let path = entry?.path();
             if path.is_dir() {
                 pending.push(path);
-            } else {
+            } else if is_capability_file(&path) {
                 files.push(path);
             }
         }
     }
     files.sort();
     Ok(files)
+}
+
+/// True when Tauri would load `path` as a capability file: its extension is one of `EXTENSIONS`.
+fn is_capability_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| EXTENSIONS.contains(&extension))
 }
 
 /// The violations in one capability file. `path` is repo-relative and `text` is the file.
@@ -201,6 +216,25 @@ mod tests {
                 .iter()
                 .any(|check| check.name == "capabilities")
         );
+    }
+
+    #[test]
+    fn a_ds_store_and_a_backup_file_are_ignored() {
+        let dir = Scratch::new("capabilities-ignored");
+        let caps = dir.join(DIR);
+        fs::create_dir_all(&caps).expect("create the capability dir");
+        fs::write(caps.join("main.json"), CLEAN).expect("write main.json");
+        fs::write(
+            caps.join(".DS_Store"),
+            b"\x00\x00\x00\x01Bud1\xff\xfe\x00remote",
+        )
+        .expect("write .DS_Store");
+        fs::write(caps.join("main.json~"), "[\"core:default\"]").expect("write main.json~");
+        let ctx = Context {
+            root: dir.to_path_buf(),
+            members: Vec::new(),
+        };
+        assert_eq!(run(&ctx), Vec::new());
     }
 
     #[test]
