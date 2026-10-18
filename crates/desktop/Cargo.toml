@@ -9,10 +9,6 @@ publish.workspace = true
 [lib]
 crate-type = ["rlib"]
 
-[package.metadata.cargo-shear]
-# serde_json is used only inside the code tauri::generate_context! writes, where cargo-shear cannot see it.
-ignored = ["serde_json"]
-
 [lints]
 workspace = true
 
@@ -21,6 +17,7 @@ tauri-build.workspace = true
 
 [dependencies]
 tauri.workspace = true
+tauri-runtime.workspace = true
 tauri-plugin-single-instance.workspace = true
 tauri-plugin-deep-link.workspace = true
 tauri-plugin-updater.workspace = true
