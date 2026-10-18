@@ -365,7 +365,7 @@ fn an_edit_during_the_run_survives_and_keeps_the_copy_and_fails_the_probe() {
     assert_eq!(
         failure.message,
         format!(
-            "{REL} changed after a running buildtime run; its saved copy is target/xtask/buildtime/{REL}"
+            "{REL} changed during this buildtime run; its saved copy is target/xtask/buildtime/{REL}"
         )
     );
     assert_eq!(
@@ -393,7 +393,7 @@ fn an_edit_before_the_restore_survives_and_keeps_the_copy() {
     assert!(
         failure
             .message
-            .starts_with(&format!("{REL} changed after a running"))
+            .starts_with(&format!("{REL} changed during this"))
     );
     assert_eq!(file_text(&dir), EDITED_MID_RUN);
     assert_eq!(fs::read_to_string(backup_of(&dir)).expect("kept"), ORIGINAL);
