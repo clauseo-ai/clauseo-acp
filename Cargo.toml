@@ -64,7 +64,7 @@ disallowed_types = "deny"
 
 [profile.dev]
 debug = "line-tables-only"
-incremental = true         # cargo turns it off whenever CI is set; CARGO_INCREMENTAL=1 keeps it
+incremental = true         # CI turns this off; set CARGO_INCREMENTAL=1 where incremental matters
 [profile.dev.package."*"]
 debug = false
 
