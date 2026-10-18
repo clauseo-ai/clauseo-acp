@@ -235,16 +235,9 @@ fn a_missing_row_or_another_unit_fails_the_probe_clearly() {
 fn budget(id: &str, unit: Unit, limit: f64) -> Budget {
     Budget {
         id: id.into(),
-        metric: "m".into(),
         limit,
         unit,
         gate: budgets::Gate::Pr,
-        measured_by: "x".into(),
-        status: budgets::Status::Unmeasured,
-        measured: None,
-        measured_on: None,
-        source: "s".into(),
-        line: 1,
     }
 }
 

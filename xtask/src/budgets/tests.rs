@@ -45,24 +45,23 @@ fn a_valid_row_parses_with_every_field() {
     );
     let row = valid_row(&text);
     assert_eq!(row.id, "cold_start");
-    assert_eq!(row.metric, "cold start to interactive");
     assert!(close(row.limit, 1500.0));
     assert_eq!(row.unit, Unit::Ms);
     assert_eq!(row.gate, Gate::Release);
-    assert_eq!(row.measured_by, "marks across Rust and JS");
-    assert_eq!(row.status, Status::Measured);
-    assert!(row.measured.is_some_and(|m| close(m, 1200.0)));
-    assert_eq!(row.measured_on.as_deref(), Some("macos-arm64-laptop"));
-    assert_eq!(row.source, "synthesis §4");
-    assert_eq!(row.line, 1);
 }
 
 #[test]
-fn an_unmeasured_row_has_no_measured_fields() {
+fn an_unmeasured_row_parses_and_keeps_only_what_buildtime_reads() {
     let row = valid_row(ROW);
-    assert_eq!(row.status, Status::Unmeasured);
-    assert!(row.measured.is_none());
-    assert!(row.measured_on.is_none());
+    assert_eq!(
+        row,
+        Budget {
+            id: "cold_start".into(),
+            limit: 1500.0,
+            unit: Unit::Ms,
+            gate: Gate::Release,
+        }
+    );
 }
 
 #[test]
@@ -336,6 +335,27 @@ fn the_header_line_of_a_row_after_others_is_its_own_header() {
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert_eq!(violations[0].line, 13, "{violations:?}");
     assert_eq!(violations[0].message, "budget warm_start has no gate");
+}
+
+#[test]
+fn a_row_line_is_its_header_whatever_lies_above_it() {
+    // The first row's metric is a multi-line string with a line that starts with `[[`. The second
+    // row's header has comments and blank lines below it, and is written `[[ budget ]]`.
+    let first = ROW.replace(
+        "metric = \"cold start to interactive\"",
+        "metric = '''\n[[ fake ]]\ncold start\n'''",
+    );
+    let second = "\n# a note\n\n[[ budget ]]\n   # indented\n\nid = \"b_c\"\nmetric = \"m\"\nlimit = 1\nunit = \"count\"\nmeasured_by = \"x\"\nstatus = \"unmeasured\"\nsource = \"s\"\n";
+    let text = format!("{first}{second}");
+    let header = text
+        .lines()
+        .position(|line| line == "[[ budget ]]")
+        .map_or(0, |index| index + 1);
+    let (budgets, violations) = parse(&text);
+    assert_eq!(budgets.len(), 1, "the first row is still a budget");
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert_eq!(violations[0].line, u32::try_from(header).unwrap_or(0));
+    assert_eq!(violations[0].message, "budget b_c has no gate");
 }
 
 #[test]
