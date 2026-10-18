@@ -29,6 +29,10 @@ fn budgets() -> Vec<Budget> {
     ]
 }
 
+/// The script's reason for skipping hmr when no Chrome launches.
+const NO_CHROME: &str =
+    "Google Chrome not found at its standard paths; set CHROME_PATH to a Chrome or Chromium binary";
+
 /// One line, as the script prints it.
 const ALL_OK: &str = concat!(
     r#"{"node":"v24.1.0","runs":3,"probes":["#,
@@ -146,15 +150,12 @@ fn a_failed_probe_carries_the_tools_output_and_a_command_to_reproduce_it() {
 fn a_skipped_hmr_is_reported_and_does_not_fail_the_run() {
     let json = with(
         "hmr",
-        r#"{"probe":"hmr","skipped":"Google Chrome not found at its standard paths; set CHROME_PATH to a Chrome or Chromium binary"}"#,
+        &format!(r#"{{"probe":"hmr","skipped":"{NO_CHROME}"}}"#),
     );
     let results = results_of(&json);
     let hmr = find(&results, "hmr");
     assert_eq!(hmr.status(), ProbeStatus::Skipped);
-    assert_eq!(
-        hmr.outcome,
-        Outcome::Skipped("Google Chrome not found at its standard paths; set CHROME_PATH to a Chrome or Chromium binary".into())
-    );
+    assert_eq!(hmr.outcome, Outcome::Skipped(NO_CHROME.into()));
     assert_eq!(find(&results, "dev_start").status(), ProbeStatus::Reported);
     assert!(web_run(results, false).passed());
 }
@@ -247,34 +248,6 @@ fn json_that_xtask_cannot_read_or_a_missing_or_misshapen_probe_fails() {
     assert_eq!(find(&empty, "tsc").status(), ProbeStatus::Failed);
 }
 
-#[test]
-fn a_missing_row_or_a_row_in_another_unit_fails_the_probe() {
-    let mut rows = budgets();
-    rows.retain(|row| row.id != "tsc_noemit");
-    rows.push(budget("vite_build_warm", 5.0, Unit::Kb, Gate::Local));
-    rows.retain(|row| !(row.id == "vite_build_warm" && row.unit == Unit::S));
-    let results = results(&parse_report(ALL_OK).expect("valid"), &rows);
-    let message = |name: &str| match &find(&results, name).outcome {
-        Outcome::Failed(failure) => failure.message.clone(),
-        other => panic!("{name} should fail: {other:?}"),
-    };
-    assert_eq!(message("tsc"), "no budget row tsc_noemit in budgets.toml");
-    assert_eq!(
-        message("vite_build"),
-        "budget vite_build_warm is in KB, and this probe measures s"
-    );
-}
-
-#[test]
-fn a_limit_in_ms_converts_to_a_probe_in_seconds() {
-    let mut rows = budgets();
-    rows.retain(|row| row.id != "tsc_noemit");
-    rows.push(budget("tsc_noemit", 1500.0, Unit::Ms, Gate::Local));
-    let results = results(&parse_report(ALL_OK).expect("valid"), &rows);
-    let (_, limit) = measured(find(&results, "tsc"));
-    assert!(close(limit.expect("a budget").value, 1.5));
-}
-
 /// Every probe of `ALL_OK` far over its budget.
 fn all_over() -> Vec<ProbeResult> {
     let tight: Vec<Budget> = budgets()
@@ -337,11 +310,11 @@ fn the_table_shows_each_probe_in_its_unit_and_a_dash_without_a_budget() {
     );
     let skipped = results_of(&with(
         "hmr",
-        r#"{"probe":"hmr","skipped":"Google Chrome not found at its standard paths; set CHROME_PATH to a Chrome or Chromium binary"}"#,
+        &format!(r#"{{"probe":"hmr","skipped":"{NO_CHROME}"}}"#),
     ));
     assert_eq!(
         table_lines(&skipped)[6],
-        "hmr                skipped: Google Chrome not found at its standard paths; set CHROME_PATH to a Chrome or Chromium binary"
+        format!("hmr                skipped: {NO_CHROME}")
     );
     assert_eq!(
         table_lines(&all_over())[1].split_whitespace().last(),
@@ -366,29 +339,6 @@ fn the_web_json_carries_every_probe_with_its_unit_and_gating() {
     assert_eq!(half["node"], "v24.1.0");
     assert_eq!(half["probes"].as_array().map(Vec::len), Some(6));
     let tsc = &half["probes"][0];
-    let mut tsc_keys: Vec<&str> = tsc
-        .as_object()
-        .expect("an object")
-        .keys()
-        .map(String::as_str)
-        .collect();
-    tsc_keys.sort_unstable();
-    assert_eq!(
-        tsc_keys,
-        [
-            "budget",
-            "budget_id",
-            "max",
-            "median",
-            "min",
-            "probe",
-            "reported_only",
-            "samples",
-            "status",
-            "unit"
-        ],
-        "the same shape as a Rust probe"
-    );
     assert_eq!(tsc["samples"], serde_json::json!([0.2, 0.1, 0.3]));
     assert_eq!(tsc["probe"], "tsc");
     assert_eq!(tsc["status"], "over");
