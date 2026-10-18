@@ -18,7 +18,7 @@
 //! The script times `tsc --noEmit`, `oxlint --type-aware` and `vite build` (one warm-up, then N
 //! runs each), sizes the initial JS of that build, starts the Vite dev server on a free port
 //! (`dev_start`), and times N edits of `src/App.tsx` until headless Chrome shows them (`hmr`). It
-//! stops only the processes it started.
+//! stops only the processes it started, each with its process group (`buildtime-proc.mjs`).
 //!
 //! App.tsx follows the rules of `probe.rs`: a copy of the original in
 //! `target/xtask/buildtime/ui/app/src/App.tsx` before the first edit, every write through a
