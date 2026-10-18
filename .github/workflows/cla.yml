@@ -7,14 +7,20 @@
 # - No third-party app gets access to the repository or to the signatures; the job's token is read-only.
 # - It uses no third-party actions, so there is nothing to pin by SHA. It fetches the public repo
 #   over HTTPS with plain git, and reads commit authors with the gh CLI that the runner includes.
-# - The check script comes from the base branch, so a pull request cannot change the check that runs on it.
+# - The workflow and its check script come from the base branch (pull_request_target), so a pull request
+#   cannot change the check that runs on it, including the EXEMPT list.
+# - pull_request_target is safe here because the job never runs code from the pull request: it reads the
+#   pull request's files as git data and its commit authors from the API, with a read-only token.
+#   Keep it that way: never check out, build or source anything from refs/cla/head.
 # - Its failure output follows the house style: what is wrong, then a "fix:" line.
 # Cost: we maintain the script in .github/scripts/cla-check.sh. Signatures are plain files, not records in a service.
 
 name: CLA
 
 on:
-  pull_request:
+  # Not pull_request: that runs the workflow file from the pull request itself, so a pull request could
+  # edit EXEMPT, or the steps, and pass its own check.
+  pull_request_target:
     types: [opened, synchronize, reopened]
 
 permissions:
