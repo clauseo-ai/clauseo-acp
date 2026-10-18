@@ -1,15 +1,16 @@
 //! `budgets.toml`: one `[[budget]]` table per metric the plan budgets.
 //!
-//! This is a line reader, not a TOML parser. It reads only the shape the file uses: `[[budget]]`
-//! headers, and `key = "text"` or `key = number` lines, each with an optional `# comment`. Every
-//! problem is a `Violation` at the line that causes it, and a row with any problem is not returned.
-
-mod lex;
+//! The `toml` crate reads the file into `File` and `Row`. A `Row` names every key a row may have,
+//! each with its type and its enum values, and `deny_unknown_fields` rejects any other key. Each
+//! value keeps its span, so a problem is reported at the line that causes it. The rules that `toml`
+//! cannot express stay here: required keys, `snake_case` and unique ids, `measured` and `measured_on`
+//! set together, and a limit that is zero or more.
 
 use crate::violation::Violation;
-use lex::{Line, Value, read_line};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
+use toml::Spanned;
 
 /// The file's name, at the repo root.
 pub(crate) const FILE: &str = "budgets.toml";
@@ -32,12 +33,17 @@ pub(crate) struct Budget {
 }
 
 /// The unit a limit is in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub(crate) enum Unit {
+    #[serde(rename = "s")]
     S,
+    #[serde(rename = "ms")]
     Ms,
+    #[serde(rename = "MB")]
     Mb,
+    #[serde(rename = "KB")]
     Kb,
+    #[serde(rename = "count")]
     Count,
 }
 
@@ -55,153 +61,74 @@ impl Unit {
 }
 
 /// Which gate a budget is enforced by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub(crate) enum Gate {
+    #[serde(rename = "pr")]
     Pr,
+    #[serde(rename = "release")]
     Release,
+    #[serde(rename = "alert")]
     Alert,
+    #[serde(rename = "local")]
     Local,
 }
 
 /// Whether the row's `measured` value came from this repo's own tooling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub(crate) enum Status {
+    #[serde(rename = "unmeasured")]
     Unmeasured,
+    #[serde(rename = "measured")]
     Measured,
 }
 
-const UNITS: &[(&str, Unit)] = &[
-    ("s", Unit::S),
-    ("ms", Unit::Ms),
-    ("MB", Unit::Mb),
-    ("KB", Unit::Kb),
-    ("count", Unit::Count),
-];
-const GATES: &[(&str, Gate)] = &[
-    ("pr", Gate::Pr),
-    ("release", Gate::Release),
-    ("alert", Gate::Alert),
-    ("local", Gate::Local),
-];
-const STATUSES: &[(&str, Status)] = &[
-    ("unmeasured", Status::Unmeasured),
-    ("measured", Status::Measured),
-];
-
-/// The type a key's value must have.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Text,
-    Number,
+/// The file as `toml` reads it. `budget` is empty when there is no table, which is a rule of its own.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct File {
+    #[serde(default)]
+    budget: Vec<Spanned<Row>>,
 }
 
-/// The ten keys a row may have, with the type each takes.
-const KEYS: &[(&str, Kind)] = &[
-    ("id", Kind::Text),
-    ("metric", Kind::Text),
-    ("limit", Kind::Number),
-    ("unit", Kind::Text),
-    ("gate", Kind::Text),
-    ("measured_by", Kind::Text),
-    ("status", Kind::Text),
-    ("measured", Kind::Number),
-    ("measured_on", Kind::Text),
-    ("source", Kind::Text),
-];
-
-/// The keys every row needs, with the fix for a row that lacks one.
-const REQUIRED: &[(&str, &str)] = &[
-    (
-        "id",
-        r#"add id = "snake_case_name", unique in budgets.toml"#,
-    ),
-    ("metric", r#"add metric = "what is measured""#),
-    ("limit", "add limit = <number> in the row's unit"),
-    ("unit", r#"add unit = "s", "ms", "MB", "KB" or "count""#),
-    ("gate", r#"add gate = "pr", "release", "alert" or "local""#),
-    ("measured_by", r#"add measured_by = "the tool or method""#),
-    ("status", r#"add status = "unmeasured" or "measured""#),
-    ("source", r#"add source = "the plan section it comes from""#),
-];
-
-const FORMAT_FIX: &str =
-    r#"budgets.toml holds only [[budget]] headers and key = "text" or key = number lines"#;
-
-const UNKNOWN_KEY_FIX: &str = "use one of the ten keys: id, metric, limit, unit, gate, measured_by, status, measured, measured_on, source";
-
-/// One `key = value` line, with its line number.
-struct Pair<'a> {
-    key: &'a str,
-    value: Value,
-    line: u32,
-}
-
-/// One `[[budget]]` table: its header line, its pairs, and whether a line in it was unreadable.
-struct Table<'a> {
-    header: u32,
-    pairs: Vec<Pair<'a>>,
-    broken: bool,
-}
-
-/// What a row's keys hold. A key that is present but wrong stays unset, and a violation says so.
-#[derive(Default)]
-struct Values {
-    id: Option<String>,
-    metric: Option<String>,
-    limit: Option<f64>,
-    unit: Option<Unit>,
-    gate: Option<Gate>,
-    measured_by: Option<String>,
-    status: Option<Status>,
-    measured: Option<f64>,
-    measured_on: Option<String>,
-    source: Option<String>,
+/// One `[[budget]]` table. Its fields are the only keys a row may have; a key it lacks is `None`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Row {
+    id: Option<Spanned<String>>,
+    metric: Option<Spanned<String>>,
+    limit: Option<Spanned<f64>>,
+    unit: Option<Spanned<Unit>>,
+    gate: Option<Spanned<Gate>>,
+    measured_by: Option<Spanned<String>>,
+    status: Option<Spanned<Status>>,
+    measured: Option<Spanned<f64>>,
+    measured_on: Option<Spanned<String>>,
+    source: Option<Spanned<String>>,
 }
 
 /// Reads `text` as `budgets.toml`. Returns the rows without problems, in file order, and every
 /// problem found, sorted by line.
 pub(crate) fn parse(text: &str) -> (Vec<Budget>, Vec<Violation>) {
+    let file: File = match toml::from_str(text) {
+        Ok(file) => file,
+        Err(error) => return (Vec::new(), vec![syntax_problem(text, &error)]),
+    };
     let mut violations = Vec::new();
-    let mut tables: Vec<Table<'_>> = Vec::new();
-    for (index, raw) in text.lines().enumerate() {
-        let line = u32::try_from(index + 1).unwrap_or(u32::MAX);
-        match read_line(raw) {
-            Line::Blank => {}
-            Line::Header => tables.push(Table {
-                header: line,
-                pairs: Vec::new(),
-                broken: false,
-            }),
-            Line::Pair { key, value } => match tables.last_mut() {
-                Some(table) => table.pairs.push(Pair { key, value, line }),
-                None => violations.push(problem(
-                    line,
-                    format!("key {key} is outside a [[budget]] table"),
-                    "move it under a [[budget]] header",
-                )),
-            },
-            Line::Unreadable => {
-                violations.push(problem(line, "cannot read this line", FORMAT_FIX));
-                if let Some(table) = tables.last_mut() {
-                    table.broken = true;
-                }
-            }
-        }
-    }
-    if tables.is_empty() {
+    if file.budget.is_empty() {
         violations.push(problem(
             1,
             "no [[budget]] tables",
             "add a [[budget]] table for each budget the plan sets",
         ));
     }
-
     let mut budgets = Vec::new();
-    let mut first_lines = HashMap::new();
-    for table in &tables {
-        let (found, budget) = check_table(table, &mut first_lines);
-        violations.extend(found);
-        budgets.extend(budget);
+    let mut first_headers = HashMap::new();
+    for row in file.budget {
+        let header = header_line(text, row.span().start);
+        let row = row.into_inner();
+        if check_row(&row, text, header, &mut first_headers, &mut violations) {
+            budgets.extend(into_budget(row, header));
+        }
     }
     violations.sort_by_key(|violation| violation.line);
     (budgets, violations)
@@ -233,251 +160,191 @@ fn problem(line: u32, message: impl Into<String>, fix: impl Into<String>) -> Vio
     }
 }
 
+/// A file `toml` cannot read: one violation, at the line of the error.
+fn syntax_problem(text: &str, error: &toml::de::Error) -> Violation {
+    let line = error.span().map_or(1, |span| line_number(text, span.start));
+    let first = error.message().lines().next().unwrap_or_default().trim();
+    problem(
+        line,
+        format!("budgets.toml is not valid: {first}"),
+        "fix the line above; each row is a [[budget]] table of the ten keys listed at the top of budgets.toml",
+    )
+}
+
+/// The 1-based line that byte `offset` of `text` is on.
+fn line_number(text: &str, offset: usize) -> u32 {
+    let head = text.get(..offset).unwrap_or(text);
+    u32::try_from(head.matches('\n').count() + 1).unwrap_or(u32::MAX)
+}
+
+/// The line of the `[[budget]]` header a row starts under: the last line at or before `offset`
+/// whose trimmed text starts with `[[`.
+fn header_line(text: &str, offset: usize) -> u32 {
+    let row_line = line_number(text, offset);
+    text.lines()
+        .zip(1..)
+        .take_while(|&(_, number)| number <= row_line)
+        .filter(|(line, _)| line.trim().starts_with("[["))
+        .map(|(_, number)| number)
+        .last()
+        .unwrap_or(row_line)
+}
+
+/// The line a value starts on.
+fn line_of<T>(value: &Spanned<T>, text: &str) -> u32 {
+    line_number(text, value.span().start)
+}
+
 /// `^[a-z][a-z0-9]*(_[a-z0-9]+)*$`.
 fn is_snake_case(text: &str) -> bool {
     text.starts_with(|c: char| c.is_ascii_lowercase())
-        && text.split('_').all(|part| {
-            !part.is_empty()
-                && part
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-        })
+        && text.split('_').all(|part| lower_or_digits(part, &[]))
 }
 
 /// `^[a-z0-9_]+(-[a-z0-9_]+)*$`.
 fn is_measured_on(text: &str) -> bool {
-    text.split('-').all(|part| {
-        !part.is_empty()
-            && part
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-    })
+    text.split('-').all(|part| lower_or_digits(part, b"_"))
 }
 
-/// The name a row's messages use: its id, or its line when the id is missing or not text.
-fn row_name(table: &Table<'_>) -> String {
-    let id = table
-        .pairs
-        .iter()
-        .find(|pair| pair.key == "id")
-        .and_then(|pair| pair.value.text());
-    id.map_or_else(|| format!("at line {}", table.header), str::to_owned)
+/// Whether `part` is one or more lowercase letters or digits, or any byte in `extra`.
+fn lower_or_digits(part: &str, extra: &[u8]) -> bool {
+    !part.is_empty()
+        && part
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || extra.contains(&b))
 }
 
-/// Checks one table. Returns its problems, and its budget when it has none.
-fn check_table(
-    table: &Table<'_>,
-    first_lines: &mut HashMap<String, u32>,
-) -> (Vec<Violation>, Option<Budget>) {
-    let name = row_name(table);
-    let mut found = Vec::new();
-    let mut values = Values::default();
-    let mut seen: Vec<&str> = Vec::new();
-    for pair in &table.pairs {
-        if seen.contains(&pair.key) {
-            found.push(problem(
-                pair.line,
-                format!("budget {name}: {} appears twice", pair.key),
-                format!("keep one {} line in this table", pair.key),
-            ));
-            continue;
-        }
-        seen.push(pair.key);
-        read_pair(
-            pair,
-            &name,
-            table.header,
-            first_lines,
-            &mut values,
-            &mut found,
-        );
-    }
-    check_row(table, &name, &seen, &values, &mut found);
-
-    let budget = if found.is_empty() && !table.broken {
-        into_budget(values, table.header)
-    } else {
-        None
-    };
-    (found, budget)
+/// The name a row's messages use: its id, or its header line when the id is missing.
+fn row_name(row: &Row, header: u32) -> String {
+    row.id
+        .as_ref()
+        .map_or_else(|| format!("at line {header}"), |id| id.get_ref().clone())
 }
 
-/// Checks one key's type and value, and stores the value.
-fn read_pair(
-    pair: &Pair<'_>,
-    name: &str,
-    header: u32,
-    first_lines: &mut HashMap<String, u32>,
-    values: &mut Values,
-    found: &mut Vec<Violation>,
-) {
-    let line = pair.line;
-    let Some(kind) = KEYS
-        .iter()
-        .find(|(key, _)| *key == pair.key)
-        .map(|(_, kind)| *kind)
-    else {
-        found.push(problem(
-            line,
-            format!("budget {name}: unknown key {}", pair.key),
-            UNKNOWN_KEY_FIX,
-        ));
-        return;
-    };
-    match (kind, &pair.value) {
-        (Kind::Text, Value::Number(_)) => found.push(problem(
-            line,
-            format!("budget {name}: {} must be a string", pair.key),
-            format!("write {} as a quoted string", pair.key),
-        )),
-        (Kind::Number, Value::Text(_)) => found.push(problem(
-            line,
-            format!("budget {name}: {} must be a number", pair.key),
-            format!("write {} as a number, without quotes", pair.key),
-        )),
-        (Kind::Text, Value::Text(text)) => {
-            read_text(
-                pair.key,
-                text,
-                line,
-                name,
-                header,
-                first_lines,
-                values,
-                found,
-            );
-        }
-        (Kind::Number, Value::Number(number)) => {
-            read_number(pair.key, *number, line, name, values, found);
-        }
-    }
-}
-
-fn read_text(
-    key: &str,
-    text: &str,
-    line: u32,
-    name: &str,
-    header: u32,
-    first_lines: &mut HashMap<String, u32>,
-    values: &mut Values,
-    found: &mut Vec<Violation>,
-) {
-    match key {
-        "id" => {
-            if !is_snake_case(text) {
-                found.push(problem(
-                    line,
-                    format!("budget {name}: id must be snake_case"),
-                    "rename the id to lowercase words joined by _, such as window_visible",
-                ));
-            }
-            match first_lines.get(text) {
-                Some(first) => found.push(problem(
-                    line,
-                    format!("budget {text} is defined twice (first at line {first})"),
-                    "give this row a new id, or remove one of the two tables",
-                )),
-                None => {
-                    first_lines.insert(text.to_owned(), header);
-                }
-            }
-            values.id = Some(text.to_owned());
-        }
-        "metric" => values.metric = Some(text.to_owned()),
-        "measured_by" => values.measured_by = Some(text.to_owned()),
-        "source" => values.source = Some(text.to_owned()),
-        "measured_on" => {
-            if !is_measured_on(text) {
-                found.push(problem(
-                    line,
-                    format!("budget {name}: measured_on must be lowercase words joined by -"),
-                    "write measured_on as lowercase words joined by -, such as macos-arm64",
-                ));
-            }
-            values.measured_on = Some(text.to_owned());
-        }
-        "unit" => values.unit = read_choice(UNITS, key, text, line, name, found),
-        "gate" => values.gate = read_choice(GATES, key, text, line, name, found),
-        "status" => values.status = read_choice(STATUSES, key, text, line, name, found),
-        _ => {}
-    }
-}
-
-/// Looks `text` up in `choices`, and reports it when it is not there.
-fn read_choice<T: Copy>(
-    choices: &[(&str, T)],
-    key: &str,
-    text: &str,
-    line: u32,
-    name: &str,
-    found: &mut Vec<Violation>,
-) -> Option<T> {
-    let value = choices
-        .iter()
-        .find(|(choice, _)| *choice == text)
-        .map(|(_, value)| *value);
-    if value.is_none() {
-        let names: Vec<&str> = choices.iter().map(|(choice, _)| *choice).collect();
-        let quoted: Vec<String> = names.iter().map(|choice| format!("\"{choice}\"")).collect();
-        found.push(problem(
-            line,
-            format!(
-                "budget {name}: {key} \"{text}\" is not one of {}",
-                names.join(", ")
-            ),
-            format!("set {key} to one of {}", quoted.join(", ")),
-        ));
-    }
-    value
-}
-
-fn read_number(
-    key: &str,
-    number: f64,
-    line: u32,
-    name: &str,
-    values: &mut Values,
-    found: &mut Vec<Violation>,
-) {
-    match key {
-        "limit" => {
-            if !(number.is_finite() && number >= 0.0) {
-                found.push(problem(
-                    line,
-                    format!("budget {name}: limit must be zero or more"),
-                    "set limit to zero or more, in the row's unit",
-                ));
-            }
-            values.limit = Some(number);
-        }
-        "measured" => values.measured = Some(number),
-        _ => {}
-    }
-}
-
-/// The row-level rules: every required key is there, and `measured` and `measured_on` agree.
+/// Checks one row, and returns whether it has no problem. Problems go to `found`.
 fn check_row(
-    table: &Table<'_>,
-    name: &str,
-    seen: &[&str],
-    values: &Values,
+    row: &Row,
+    text: &str,
+    header: u32,
+    first_headers: &mut HashMap<String, u32>,
+    found: &mut Vec<Violation>,
+) -> bool {
+    let before = found.len();
+    let name = row_name(row, header);
+    if let Some(id) = &row.id {
+        check_id(id, text, header, first_headers, found);
+    }
+    if let Some(limit) = &row.limit
+        && !(limit.get_ref().is_finite() && *limit.get_ref() >= 0.0)
+    {
+        found.push(problem(
+            line_of(limit, text),
+            format!("budget {name}: limit must be zero or more"),
+            "set limit to zero or more, in the row's unit",
+        ));
+    }
+    if let Some(measured_on) = &row.measured_on
+        && !is_measured_on(measured_on.get_ref())
+    {
+        found.push(problem(
+            line_of(measured_on, text),
+            format!("budget {name}: measured_on must be lowercase words joined by -"),
+            "write measured_on as lowercase words joined by -, such as macos-arm64",
+        ));
+    }
+    check_required(row, &name, header, found);
+    check_measured(row, &name, header, found);
+    found.len() == before
+}
+
+/// The id is `snake_case`, and no earlier row has it. `first_headers` maps each id to the
+/// header line of the row that first had it.
+fn check_id(
+    id: &Spanned<String>,
+    text: &str,
+    header: u32,
+    first_headers: &mut HashMap<String, u32>,
     found: &mut Vec<Violation>,
 ) {
-    let header = table.header;
-    for (key, fix) in REQUIRED {
-        if seen.contains(key) {
-            continue;
-        }
-        let message = if *key == "id" {
-            "budget has no id".to_owned()
-        } else {
-            format!("budget {name} has no {key}")
-        };
-        found.push(problem(header, message, *fix));
+    let line = line_of(id, text);
+    let value = id.get_ref();
+    if !is_snake_case(value) {
+        found.push(problem(
+            line,
+            format!("budget {value}: id must be snake_case"),
+            "rename the id to lowercase words joined by _, such as window_visible",
+        ));
     }
-    let has_measured = seen.contains(&"measured");
-    let has_measured_on = seen.contains(&"measured_on");
+    match first_headers.get(value) {
+        Some(first) => found.push(problem(
+            line,
+            format!("budget {value} is defined twice (first at line {first})"),
+            "give this row a new id, or remove one of the two tables",
+        )),
+        None => {
+            first_headers.insert(value.clone(), header);
+        }
+    }
+}
+
+/// Every required key is there. A row that lacks one gets the fix for that key.
+fn check_required(row: &Row, name: &str, header: u32, found: &mut Vec<Violation>) {
+    let mut need = |missing: bool, key: &str, fix: &str| {
+        if missing {
+            let message = if key == "id" {
+                "budget has no id".to_owned()
+            } else {
+                format!("budget {name} has no {key}")
+            };
+            found.push(problem(header, message, fix));
+        }
+    };
+    need(
+        row.id.is_none(),
+        "id",
+        r#"add id = "snake_case_name", unique in budgets.toml"#,
+    );
+    need(
+        row.metric.is_none(),
+        "metric",
+        r#"add metric = "what is measured""#,
+    );
+    need(
+        row.limit.is_none(),
+        "limit",
+        "add limit = <number> in the row's unit",
+    );
+    need(
+        row.unit.is_none(),
+        "unit",
+        r#"add unit = "s", "ms", "MB", "KB" or "count""#,
+    );
+    need(
+        row.gate.is_none(),
+        "gate",
+        r#"add gate = "pr", "release", "alert" or "local""#,
+    );
+    need(
+        row.measured_by.is_none(),
+        "measured_by",
+        r#"add measured_by = "the tool or method""#,
+    );
+    need(
+        row.status.is_none(),
+        "status",
+        r#"add status = "unmeasured" or "measured""#,
+    );
+    need(
+        row.source.is_none(),
+        "source",
+        r#"add source = "the plan section it comes from""#,
+    );
+}
+
+/// `measured` and `measured_on` are set together, and a row with status `measured` has a value.
+fn check_measured(row: &Row, name: &str, header: u32, found: &mut Vec<Violation>) {
+    let has_measured = row.measured.is_some();
+    let has_measured_on = row.measured_on.is_some();
     if has_measured && !has_measured_on {
         found.push(problem(
             header,
@@ -492,7 +359,11 @@ fn check_row(
             "add measured = <number> in the row's unit, or remove measured_on",
         ));
     }
-    if values.status == Some(Status::Measured) && !has_measured {
+    let is_measured = row
+        .status
+        .as_ref()
+        .is_some_and(|status| *status.get_ref() == Status::Measured);
+    if is_measured && !has_measured {
         found.push(problem(
             header,
             format!("budget {name} is measured but has no measured value"),
@@ -501,19 +372,19 @@ fn check_row(
     }
 }
 
-/// The row as a `Budget`. `None` when a required key is missing or wrong.
-fn into_budget(values: Values, line: u32) -> Option<Budget> {
+/// The row as a `Budget`. `None` when a required key is missing.
+fn into_budget(row: Row, line: u32) -> Option<Budget> {
     Some(Budget {
-        id: values.id?,
-        metric: values.metric?,
-        limit: values.limit?,
-        unit: values.unit?,
-        gate: values.gate?,
-        measured_by: values.measured_by?,
-        status: values.status?,
-        measured: values.measured,
-        measured_on: values.measured_on,
-        source: values.source?,
+        id: row.id?.into_inner(),
+        metric: row.metric?.into_inner(),
+        limit: row.limit?.into_inner(),
+        unit: row.unit?.into_inner(),
+        gate: row.gate?.into_inner(),
+        measured_by: row.measured_by?.into_inner(),
+        status: row.status?.into_inner(),
+        measured: row.measured.map(Spanned::into_inner),
+        measured_on: row.measured_on.map(Spanned::into_inner),
+        source: row.source?.into_inner(),
         line,
     })
 }

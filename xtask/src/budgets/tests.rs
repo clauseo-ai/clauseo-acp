@@ -1,4 +1,4 @@
-//! Tests for `budgets.rs`: the rules, one per failure, and the real file.
+//! Tests for `budgets.rs`: what `toml` accepts, each rule the file adds, and the real file.
 
 use super::*;
 
@@ -26,6 +26,13 @@ fn one_violation(text: &str) -> Violation {
     violations[0].clone()
 }
 
+fn valid_row(text: &str) -> Budget {
+    let (budgets, violations) = parse(text);
+    assert!(violations.is_empty(), "{violations:?}");
+    assert_eq!(budgets.len(), 1, "{budgets:?}");
+    budgets[0].clone()
+}
+
 fn close(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-9
 }
@@ -36,10 +43,7 @@ fn a_valid_row_parses_with_every_field() {
         "status = \"unmeasured\"\n",
         "status = \"measured\"\nmeasured = 1200\nmeasured_on = \"macos-arm64-laptop\"\n",
     );
-    let (budgets, violations) = parse(&text);
-    assert!(violations.is_empty(), "{violations:?}");
-    assert_eq!(budgets.len(), 1);
-    let row = &budgets[0];
+    let row = valid_row(&text);
     assert_eq!(row.id, "cold_start");
     assert_eq!(row.metric, "cold start to interactive");
     assert!(close(row.limit, 1500.0));
@@ -55,20 +59,51 @@ fn a_valid_row_parses_with_every_field() {
 
 #[test]
 fn an_unmeasured_row_has_no_measured_fields() {
-    let (budgets, violations) = parse(ROW);
-    assert!(violations.is_empty(), "{violations:?}");
-    assert_eq!(budgets[0].status, Status::Unmeasured);
-    assert!(budgets[0].measured.is_none());
-    assert!(budgets[0].measured_on.is_none());
+    let row = valid_row(ROW);
+    assert_eq!(row.status, Status::Unmeasured);
+    assert!(row.measured.is_none());
+    assert!(row.measured_on.is_none());
 }
 
 #[test]
-fn a_comment_after_the_header_and_after_values_is_allowed() {
-    let text = "[[budget]] # the first\nid = \"a_b\" # name\nmetric = \"m\"\nlimit = 0 # zero\nunit = \"count\"\ngate = \"alert\"\nmeasured_by = \"x\"\nstatus = \"unmeasured\"\nsource = \"s\"\n";
-    let (budgets, violations) = parse(text);
-    assert!(violations.is_empty(), "{violations:?}");
-    assert_eq!(budgets[0].unit, Unit::Count);
-    assert_eq!(budgets[0].gate, Gate::Alert);
+fn an_integer_limit_reads_as_a_number() {
+    let row = valid_row(&ROW.replace("limit = 1500.0", "limit = 15"));
+    assert!(close(row.limit, 15.0), "{}", row.limit);
+}
+
+#[test]
+fn valid_toml_the_old_reader_rejected_now_parses() {
+    let cases = [
+        ROW.replace("limit = 1500.0", "limit = 15_000"),
+        ROW.replace("limit = 1500.0", "limit = 1e3"),
+        ROW.replace("limit = 1500.0", "limit = +1.0"),
+        ROW.replace("gate = \"release\"", "\"gate\" = \"release\""),
+        ROW.replace("metric = \"cold start to interactive\"", "metric = 'x'"),
+        ROW.replace("[[budget]]", "[[ budget ]]"),
+    ];
+    for text in cases {
+        let row = valid_row(&text);
+        assert_eq!(row.id, "cold_start");
+    }
+    assert!(close(
+        valid_row(&ROW.replace("limit = 1500.0", "limit = 15_000")).limit,
+        15_000.0
+    ));
+    assert!(close(
+        valid_row(&ROW.replace("limit = 1500.0", "limit = 1e3")).limit,
+        1000.0
+    ));
+}
+
+#[test]
+fn a_leading_zero_is_invalid_toml() {
+    let violation = one_violation(&ROW.replace("limit = 1500.0", "limit = 01"));
+    assert_eq!(violation.line, 4);
+    assert!(
+        violation.message.starts_with("budgets.toml is not valid: "),
+        "{violation:?}"
+    );
+    assert!(violation.fix.starts_with("fix the line above;"));
 }
 
 #[test]
@@ -113,91 +148,85 @@ fn a_duplicate_id_is_reported_at_the_second_id_line() {
 }
 
 #[test]
-fn an_unknown_key_lists_the_ten_keys_in_its_fix() {
+fn an_unknown_key_is_one_violation_at_its_line() {
     let text = ROW.replace(
         "source = \"synthesis §4\"\n",
         "source = \"synthesis §4\"\ncolour = \"red\"\n",
     );
     let violation = one_violation(&text);
     assert_eq!(violation.line, 10);
-    assert_eq!(violation.message, "budget cold_start: unknown key colour");
-    assert!(violation.fix.starts_with("use one of the ten keys:"));
-    assert!(violation.fix.contains("measured_on, source"));
+    assert!(
+        violation.message.starts_with("budgets.toml is not valid: "),
+        "{violation:?}"
+    );
+    assert!(violation.message.contains("colour"), "{violation:?}");
+    assert!(violation.message.contains("measured_on"), "{violation:?}");
 }
 
 #[test]
-fn a_unit_outside_the_set_is_reported_at_its_line() {
-    let text = ROW.replace("unit = \"ms\"", "unit = \"seconds\"");
-    let violation = one_violation(&text);
+fn a_misspelt_key_names_the_key_and_its_line() {
+    let violation = one_violation(&ROW.replace("gate = \"release\"", "gatee = \"pr\""));
+    assert_eq!(violation.line, 6);
+    assert!(violation.message.contains("gatee"), "{violation:?}");
+}
+
+#[test]
+fn a_unit_outside_the_set_is_one_violation_at_its_line() {
+    let violation = one_violation(&ROW.replace("unit = \"ms\"", "unit = \"seconds\""));
     assert_eq!(violation.line, 5);
-    assert_eq!(
-        violation.message,
-        "budget cold_start: unit \"seconds\" is not one of s, ms, MB, KB, count"
-    );
-    assert_eq!(
-        violation.fix,
-        "set unit to one of \"s\", \"ms\", \"MB\", \"KB\", \"count\""
-    );
+    assert!(violation.message.starts_with("budgets.toml is not valid: "));
+    assert!(violation.message.contains("seconds"), "{violation:?}");
 }
 
 #[test]
 fn a_gate_and_a_status_outside_their_sets_are_reported() {
     let gate = one_violation(&ROW.replace("gate = \"release\"", "gate = \"nightly\""));
-    assert_eq!(
-        gate.message,
-        "budget cold_start: gate \"nightly\" is not one of pr, release, alert, local"
-    );
+    assert_eq!(gate.line, 6);
+    assert!(gate.message.contains("nightly"), "{gate:?}");
     let status = one_violation(&ROW.replace("status = \"unmeasured\"", "status = \"done\""));
-    assert_eq!(
-        status.message,
-        "budget cold_start: status \"done\" is not one of unmeasured, measured"
-    );
+    assert_eq!(status.line, 8);
+    assert!(status.message.contains("done"), "{status:?}");
 }
 
 #[test]
-fn a_string_where_a_number_goes_is_reported() {
+fn a_string_where_a_number_goes_is_one_violation_at_its_line() {
     let violation = one_violation(&ROW.replace("limit = 1500.0", "limit = \"1500\""));
     assert_eq!(violation.line, 4);
-    assert_eq!(
-        violation.message,
-        "budget cold_start: limit must be a number"
-    );
+    assert!(violation.message.starts_with("budgets.toml is not valid: "));
 }
 
 #[test]
-fn a_number_where_a_string_goes_is_reported() {
+fn a_number_where_a_string_goes_is_one_violation() {
     let violation =
         one_violation(&ROW.replace("metric = \"cold start to interactive\"", "metric = 4"));
-    assert_eq!(
-        violation.message,
-        "budget cold_start: metric must be a string"
-    );
+    assert_eq!(violation.line, 3);
+    assert!(violation.message.starts_with("budgets.toml is not valid: "));
 }
 
 #[test]
-fn a_negative_or_huge_limit_is_reported() {
+fn a_negative_or_infinite_limit_is_reported() {
     let negative = one_violation(&ROW.replace("limit = 1500.0", "limit = -1.0"));
+    assert_eq!(negative.line, 4);
     assert_eq!(
         negative.message,
         "budget cold_start: limit must be zero or more"
     );
-    let huge =
-        one_violation(&ROW.replace("limit = 1500.0", &format!("limit = 1{}", "0".repeat(400))));
+    let infinite = one_violation(&ROW.replace("limit = 1500.0", "limit = inf"));
     assert_eq!(
-        huge.message,
+        infinite.message,
         "budget cold_start: limit must be zero or more"
     );
 }
 
 #[test]
-fn a_key_given_twice_is_reported_at_the_second_line() {
+fn a_key_given_twice_is_one_violation_at_the_second_line() {
     let text = ROW.replace(
         "source = \"synthesis §4\"\n",
         "source = \"a\"\nsource = \"b\"\n",
     );
     let violation = one_violation(&text);
     assert_eq!(violation.line, 10);
-    assert_eq!(violation.message, "budget cold_start: source appears twice");
+    assert!(violation.message.starts_with("budgets.toml is not valid: "));
 }
 
 #[test]
@@ -264,46 +293,11 @@ fn a_measured_status_without_a_value_is_reported_at_the_header() {
 }
 
 #[test]
-fn a_line_it_cannot_read_is_reported_and_its_row_dropped() {
-    let text = format!("{ROW}this is not a key\n");
-    let (budgets, violations) = parse(&text);
-    assert_eq!(budgets.len(), 0);
-    assert_eq!(violations.len(), 1, "{violations:?}");
-    assert_eq!(violations[0].line, 10);
-    assert_eq!(violations[0].message, "cannot read this line");
-    assert_eq!(violations[0].fix, FORMAT_FIX);
-}
-
-#[test]
-fn unquoted_text_and_bad_escapes_cannot_be_read() {
-    let cases = [
-        (ROW.replace("unit = \"ms\"", "unit = ms"), 5),
-        (ROW.replace("unit = \"ms\"", "unit = \"a\\n\""), 5),
-        (ROW.replace("limit = 1500.0", "limit = 1e3"), 4),
-    ];
-    for (text, line) in cases {
-        let violations = only_violations(&text);
-        assert!(
-            violations
-                .iter()
-                .any(|v| v.line == line && v.message == "cannot read this line"),
-            "{violations:?}"
-        );
-    }
-}
-
-#[test]
-fn a_key_before_the_first_header_is_outside_a_table() {
+fn a_key_before_the_first_header_is_one_violation() {
     let text = format!("id = \"x\"\n{ROW}");
-    let (budgets, violations) = parse(&text);
-    assert_eq!(budgets.len(), 1, "the table after it still parses");
-    assert_eq!(violations.len(), 1, "{violations:?}");
-    assert_eq!(violations[0].line, 1);
-    assert_eq!(
-        violations[0].message,
-        "key id is outside a [[budget]] table"
-    );
-    assert_eq!(violations[0].fix, "move it under a [[budget]] header");
+    let violation = one_violation(&text);
+    assert_eq!(violation.line, 1);
+    assert!(violation.message.starts_with("budgets.toml is not valid: "));
 }
 
 #[test]
@@ -312,6 +306,36 @@ fn a_file_without_tables_is_reported_on_line_1() {
     assert_eq!(violations.len(), 1);
     assert_eq!(violations[0].line, 1);
     assert_eq!(violations[0].message, "no [[budget]] tables");
+}
+
+#[test]
+fn the_header_line_is_the_row_header_above_its_first_key() {
+    let text = format!("# the plan\n\n{}", ROW.replace("gate = \"release\"\n", ""));
+    let violation = one_violation(&text);
+    assert_eq!(violation.line, 3, "{violation:?}");
+    assert_eq!(violation.message, "budget cold_start has no gate");
+}
+
+#[test]
+fn the_header_line_skips_comments_and_blank_lines_below_the_header() {
+    let text = "[[budget]]\n# a note\n\n   # indented note\nid = \"a_b\"\nmetric = \"m\"\nlimit = 0\nunit = \"count\"\nmeasured_by = \"x\"\nstatus = \"unmeasured\"\nsource = \"s\"\n";
+    let violation = one_violation(text);
+    assert_eq!(violation.line, 1, "{violation:?}");
+    assert_eq!(violation.message, "budget a_b has no gate");
+}
+
+#[test]
+fn the_header_line_of_a_row_after_others_is_its_own_header() {
+    let text = format!(
+        "{ROW}\n# next\n\n{}",
+        ROW.replace("cold_start", "warm_start")
+            .replace("gate = \"release\"\n", "")
+    );
+    let (budgets, violations) = parse(&text);
+    assert_eq!(budgets.len(), 1, "the first row is still a budget");
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert_eq!(violations[0].line, 13, "{violations:?}");
+    assert_eq!(violations[0].message, "budget warm_start has no gate");
 }
 
 #[test]
