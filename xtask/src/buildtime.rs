@@ -5,8 +5,10 @@
 //! warm-up that is not counted, then times `cargo <sub>` runs. The warm-up's rustc lines are the
 //! authority on whether the crate was rebuilt and whether it was built with incremental. The file
 //! is put back after every probe, and at the start of the next run if this one was interrupted
-//! (`probe.rs`). Only `clock::timed` reads the clock, and only `process.rs` starts processes.
+//! (`probe.rs`), but never over an edit made during the run. One run at a time holds the checkout's
+//! lock (`lock.rs`). Only `clock::timed` reads the clock, and only `process.rs` starts processes.
 
+mod lock;
 mod marker;
 mod probe;
 mod profile;
@@ -33,8 +35,7 @@ use verdict::{Failure, Outcome, ProbeResult, ProbeStatus, passes};
 /// The web half's message, until R4 builds it.
 const WEB_MESSAGE: &str = "not implemented until R4";
 
-/// The fix for a run that refuses because CI is set, and for a probe whose crate builds without
-/// incremental in CI. Cargo turns incremental off whenever CI is set, unless this is set.
+/// The fix for a probe whose warm-up shows its crate builds without incremental in CI. Cargo turns incremental off whenever CI is set, unless this is set.
 const INCREMENTAL_FIX: &str =
     "set CARGO_INCREMENTAL=1 for the run (cargo turns incremental off whenever CI is set)";
 
@@ -130,9 +131,10 @@ fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Runs the Rust half. Puts back any file an interrupted run left, then reads the budgets and the
-/// incremental setting, then times the probes. Prints the rustc and profile lines when not `json`.
-/// `Err` holds one line per reason the run cannot start; the reason is printed before it returns.
+/// Runs the Rust half. Takes the checkout's lock, puts back any file an interrupted run left, then
+/// reads the budgets and the expected incremental setting, then times the probes, holding the lock
+/// to the end. Prints the rustc and profile lines when not `json`. `Err` holds one line per reason
+/// the run cannot start; the reason is printed before it returns.
 fn measure_rust(
     root: &Path,
     runs: u32,
@@ -140,6 +142,10 @@ fn measure_rust(
     out: &mut Out,
     diag: &mut Out,
 ) -> Result<RustRun, Vec<String>> {
+    let _lock = match lock::acquire(&root.join(lock::LOCK_PATH)) {
+        Ok(file) => file,
+        Err(failure) => return Err(stop(diag, &failure.message, &failure.fix)),
+    };
     let leftovers = match probe::restore_leftovers(root) {
         Ok(lines) => lines,
         Err(failure) => return Err(stop(diag, &failure.message, &failure.fix)),
@@ -190,22 +196,7 @@ fn measure_rust(
     let ci = check::is_ci(env::var("CI").ok().as_deref());
     if !json {
         out.note(&rustc);
-        let state = if incremental.on { "on" } else { "off" };
-        out.note(format!(
-            "profile: dev, incremental {state} ({})",
-            incremental.source
-        ));
-    }
-    if ci && !incremental.on {
-        let message = if incremental.source == profile::CI_SOURCE {
-            "refusing to measure: incremental is off because CI is set".to_owned()
-        } else {
-            format!(
-                "refusing to measure: CI is set and incremental is off ({})",
-                incremental.source
-            )
-        };
-        return Err(stop(diag, &message, INCREMENTAL_FIX));
+        out.note(profile_line(&incremental));
     }
     let members = match workspace::load_members(root) {
         Ok(members) => members,
@@ -234,6 +225,16 @@ fn measure_rust(
         runs,
         results,
     })
+}
+
+/// The profile line. The resolver reads only some of cargo's config files, so its answer is an
+/// expectation; each probe's warm-up rustc line decides, and refuses a non-incremental build in CI.
+fn profile_line(incremental: &Incremental) -> String {
+    let state = if incremental.on { "on" } else { "off" };
+    format!(
+        "profile: dev, incremental expected {state} ({}); each probe's warm-up rustc line decides",
+        incremental.source
+    )
 }
 
 /// `rustc -V`, trimmed.

@@ -160,6 +160,7 @@ pub(super) fn probe_json(result: &ProbeResult) -> ProbeJson {
 struct Report<'a> {
     rustc: &'a str,
     profile: &'static str,
+    /// The expected setting; each probe's warm-up decides what the build really used.
     incremental: bool,
     ci: bool,
     runs: u32,

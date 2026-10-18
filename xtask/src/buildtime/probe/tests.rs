@@ -1,5 +1,7 @@
-//! Tests for `probe.rs`: the restore of the marker file on every path, and the warm-up judgement.
+//! Tests for `probe.rs`: the restore of the marker file on every path, the guard against edits made
+//! during a run, and the warm-up judgement.
 
+use super::guard::save_fix;
 use super::*;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -290,12 +292,14 @@ fn a_stray_file_without_a_marker_is_ignored() {
 #[test]
 fn a_second_save_of_the_same_file_fails_and_leaves_the_file_alone() {
     let dir = scratch("second-save");
-    let first = Guard::save(&dir, &marker()).expect("the first save");
+    let mut first = Guard::save(&dir, &marker()).expect("the first save");
     assert!(
         !dir.join(BACKUP_DIR).join(format!("{REL}.tmp")).exists(),
         "the temporary file is gone after a save"
     );
-    fs::write(dir.join(REL), BUMPED).expect("the probe edits the file");
+    first
+        .write(BUMPED.to_owned())
+        .expect("the probe edits the file");
     let Err(failure) = Guard::save(&dir, &marker()) else {
         panic!("a second save is refused");
     };
@@ -330,4 +334,104 @@ fn the_temporary_file_of_an_interrupted_save_is_deleted() {
     assert!(!tmp.exists());
     assert_eq!(file_text(&dir), ORIGINAL);
     cleanup(&dir);
+}
+
+/// The file as someone saved it while the probe ran.
+const EDITED_MID_RUN: &str = "//! desktop\n\npub const BUILDTIME_MARKER: u64 = 42;\n\npub fn f() {}\n// a line typed mid-run\n";
+
+#[test]
+fn an_edit_during_the_run_survives_and_keeps_the_copy_and_fails_the_probe() {
+    let dir = scratch("edit-mid-run");
+    let file = dir.join(REL);
+    let mut calls = 0;
+    let mut runner = |cmd: &Cmd| -> io::Result<Captured> {
+        calls += 1;
+        if calls == 2 {
+            fs::write(&file, EDITED_MID_RUN).expect("someone saves the file");
+        }
+        let output = if cmd.args.iter().any(|arg| arg == "-v") {
+            RUSTC.to_owned()
+        } else {
+            String::new()
+        };
+        Ok(Captured {
+            success: true,
+            output,
+        })
+    };
+    let failure = measure(&dir, &marker(), CHECK, 3, false, &mut runner)
+        .expect_err("an edit during the run fails the probe");
+    assert_eq!(calls, 2, "no run starts after the edit is found");
+    assert_eq!(
+        failure.message,
+        format!(
+            "{REL} changed after a running buildtime run; its saved copy is target/xtask/buildtime/{REL}"
+        )
+    );
+    assert_eq!(
+        failure.fix,
+        format!("compare the two, keep what you want, then delete target/xtask/buildtime/{REL}")
+    );
+    assert_eq!(
+        fs::read(dir.join(REL)).expect("the file is readable"),
+        EDITED_MID_RUN.as_bytes()
+    );
+    assert_eq!(
+        fs::read_to_string(backup_of(&dir)).expect("the copy is kept"),
+        ORIGINAL
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn an_edit_before_the_restore_survives_and_keeps_the_copy() {
+    let dir = scratch("edit-before-restore");
+    let mut guard = Guard::save(&dir, &marker()).expect("the save");
+    guard.write(BUMPED.to_owned()).expect("the bump");
+    fs::write(dir.join(REL), EDITED_MID_RUN).expect("someone saves the file");
+    let failure = guard.restore().expect_err("the restore finds the edit");
+    assert!(
+        failure
+            .message
+            .starts_with(&format!("{REL} changed after a running"))
+    );
+    assert_eq!(file_text(&dir), EDITED_MID_RUN);
+    assert_eq!(fs::read_to_string(backup_of(&dir)).expect("kept"), ORIGINAL);
+    cleanup(&dir);
+}
+
+#[test]
+fn a_dropped_guard_restores_only_the_bytes_it_wrote() {
+    let dir = scratch("drop-after-edit");
+    let mut guard = Guard::save(&dir, &marker()).expect("the save");
+    guard.write(BUMPED.to_owned()).expect("the bump");
+    fs::write(dir.join(REL), EDITED_MID_RUN).expect("someone saves the file");
+    drop(guard);
+    assert_eq!(
+        file_text(&dir),
+        EDITED_MID_RUN,
+        "the edit is not overwritten"
+    );
+    assert_eq!(fs::read_to_string(backup_of(&dir)).expect("kept"), ORIGINAL);
+    cleanup(&dir);
+
+    let dir = scratch("drop-untouched");
+    let mut guard = Guard::save(&dir, &marker()).expect("the save");
+    guard.write(BUMPED.to_owned()).expect("the bump");
+    drop(guard);
+    assert_eq!(file_text(&dir), ORIGINAL, "the guard's own bump is undone");
+    assert!(!backup_of(&dir).exists());
+    cleanup(&dir);
+}
+
+#[test]
+fn a_filesystem_without_hard_links_gets_its_own_fix() {
+    assert_eq!(
+        save_fix(io::ErrorKind::Unsupported),
+        "the filesystem of target/xtask/buildtime has no hard links; run from a checkout on a filesystem that has them"
+    );
+    assert_eq!(
+        save_fix(io::ErrorKind::PermissionDenied),
+        "make sure target/xtask/buildtime is writable, then run again"
+    );
 }

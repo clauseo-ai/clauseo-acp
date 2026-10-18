@@ -348,3 +348,18 @@ fn the_json_of_a_probe_carries_its_warning_only_when_there_is_one() {
     let plain = serde_json::to_value(probe_json(&measured(0.5, 1.0))).unwrap_or_default();
     assert!(plain.get("warning").is_none());
 }
+
+#[test]
+fn the_profile_line_is_an_expectation_that_the_warm_up_decides() {
+    let off = Incremental {
+        on: false,
+        source: profile::CI_SOURCE.to_owned(),
+    };
+    assert_eq!(
+        profile_line(&off),
+        format!(
+            "profile: dev, incremental expected off ({}); each probe's warm-up rustc line decides",
+            profile::CI_SOURCE
+        )
+    );
+}
