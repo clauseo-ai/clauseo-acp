@@ -10,6 +10,14 @@
 mod budgets;
 mod buildtime_edits;
 mod capabilities;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the checks that read the Crates table (dependencies, core-io) come next"
+    )
+)]
+pub(crate) mod crates_table;
 mod json_text;
 pub(crate) mod planted;
 mod plugins;
