@@ -190,7 +190,8 @@ pub(super) fn probe_json(result: &ProbeResult) -> ProbeJson {
     json
 }
 
-/// The web half in the JSON report: measured, or stopped before it measured.
+/// The web half in the JSON report: measured, or stopped before it measured. `errors` of a
+/// measured half are the failures that are no probe's (a conflict over `ui/app/src/App.tsx`).
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub(crate) enum WebJson {
@@ -200,6 +201,8 @@ pub(crate) enum WebJson {
         runs: u32,
         passed: bool,
         probes: Vec<ProbeJson>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        errors: Vec<String>,
     },
     Stopped {
         passed: bool,
@@ -217,6 +220,11 @@ impl WebJson {
                 runs: run.runs,
                 passed: run.passed(),
                 probes: run.results.iter().map(probe_json).collect(),
+                errors: run
+                    .failures
+                    .iter()
+                    .map(|failure| failure.message.clone())
+                    .collect(),
             },
             Err(errors) => WebJson::Stopped {
                 passed: false,

@@ -10,24 +10,36 @@
 // and no pnpm in it, and it runs the same on Windows. Each timed probe gets one warm-up run, then N
 // timed runs.
 //
-// The HMR probe edits src/App.tsx while it runs and always puts back its exact bytes: in `finally`,
-// on SIGINT and SIGTERM, and at the start of the next run if this one was killed outright.
+// The HMR probe edits src/App.tsx while it runs, under the guard in buildtime-lib.mjs: a copy of
+// the original under target/xtask/buildtime/ first, every write through a temporary file, and the
+// original put back only over bytes this script wrote, in `finally` and on SIGINT, SIGTERM and
+// SIGHUP. A killed run is settled at the start of the next one (`recoverApp`). A developer's edit
+// is never overwritten: both files stay, and the conflict fails the run.
 //
 // Output: { "node": "v24.x", "runs": N, "probes": [ { "probe": name, ...one of } ] } where each
 // probe carries exactly one of `samples_ms` (numbers), `bytes` (a number), `skipped` (why) or
 // `failed` ({ "message", "command", "output" }).
 
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { initialJs, marked, parseRuns, scriptCommand } from "./buildtime-lib.mjs";
+import {
+  AppGuard,
+  ConflictError,
+  appPaths,
+  initialJs,
+  marked,
+  parseRuns,
+  recoverApp,
+  scriptCommand,
+} from "./buildtime-lib.mjs";
 
 const APP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const UI_DIR = resolve(APP_DIR, "..");
-const APP_TSX = join(APP_DIR, "src", "App.tsx");
-const MARK = /\s+data-buildtime="[^"]*"/g;
+/** App.tsx, which the hmr probe edits, and its saved copy under the repo root. */
+const APP_PATHS = appPaths(resolve(UI_DIR, ".."), "ui/app/src/App.tsx");
 
 /** How long the dev server may take to print its "ready in" line, and an HMR edit to land. */
 const READY_TIMEOUT_MS = 60_000;
@@ -227,10 +239,10 @@ async function launchBrowser() {
 }
 
 /** Writes the edit `n` and waits until the page's #app-root shows it. Resolves with the ms taken. */
-async function timedEdit(page, original, n) {
-  const text = marked(original, n);
+async function timedEdit(page, guard, n) {
+  const text = marked(guard.original.toString("utf8"), n);
   const started = performance.now();
-  writeFileSync(APP_TSX, text);
+  guard.write(text);
   await page.waitForFunction(
     (want) => document.querySelector("#app-root")?.getAttribute("data-buildtime") === want,
     String(n),
@@ -239,15 +251,22 @@ async function timedEdit(page, original, n) {
   return performance.now() - started;
 }
 
+/** Records a conflict over App.tsx in `state.failures`, where it fails the run. */
+function recordConflict(state, error) {
+  if (error instanceof ConflictError) {
+    state.failures.push({ message: error.message, fix: error.fix });
+  }
+}
+
 /** The dev_start and hmr probes. Leaves App.tsx as it found it and stops what it started. */
 async function measureDev(runs, state) {
   const command = `node ui/app/scripts/buildtime.mjs --runs ${runs}`;
   const failed = (probe, error) => ({
     probe,
     failed: {
-      message: `${probe} failed: ${String(error).split("\n")[0]}`,
+      message: `${probe} failed: ${String(error.message ?? error).split("\n")[0]}`,
       command,
-      output: String(error),
+      output: String(error.stack ?? error),
     },
   });
   let devStart;
@@ -283,16 +302,19 @@ async function measureDev(runs, state) {
       const page = await state.browser.newPage();
       await page.goto(`http://localhost:${port}/`);
       await page.waitForSelector("#app-root", { state: "attached" });
-      const original = state.original.toString("utf8");
+      // Checks ROOT_TAG before anything is saved or written.
+      marked(readFileSync(APP_PATHS.app, "utf8"), 0);
+      state.guard = new AppGuard(APP_PATHS);
       const samples = [];
       for (let run = 0; run <= runs; run += 1) {
-        const ms = await timedEdit(page, original, run + 1);
+        const ms = await timedEdit(page, state.guard, run + 1);
         if (run > 0) {
           samples.push(ms);
         }
       }
       hmr = { probe: "hmr", samples_ms: samples };
     } catch (error) {
+      recordConflict(state, error);
       hmr = failed("hmr", error);
     }
     return [devStart, hmr];
@@ -301,9 +323,16 @@ async function measureDev(runs, state) {
   }
 }
 
-/** Puts App.tsx back to its original bytes, closes the browser and stops Vite. Safe to repeat. */
+/** Puts App.tsx back under the guard's rule, closes the browser and stops Vite. Safe to repeat. */
 async function cleanUp(state) {
-  restoreApp(state);
+  try {
+    state.guard?.restore();
+  } catch (error) {
+    recordConflict(state, error);
+    if (!(error instanceof ConflictError)) {
+      throw error;
+    }
+  }
   const browser = state.browser;
   state.browser = undefined;
   if (browser !== undefined) {
@@ -312,21 +341,37 @@ async function cleanUp(state) {
   await stopAndWait(state.vite);
 }
 
-function restoreApp(state) {
-  if (state.original !== undefined && !readFileSync(APP_TSX).equals(state.original)) {
-    writeFileSync(APP_TSX, state.original);
+/** The output line: the contract is in xtask/src/buildtime/web.rs. */
+function report(runs, probes, failures) {
+  const out = { node: process.version, runs, probes };
+  if (failures.length > 0) {
+    out.failures = failures;
+    process.exitCode = 1;
   }
+  process.stdout.write(`${JSON.stringify(out)}\n`);
 }
 
-/** Removes a `data-buildtime` attribute that a killed run left in App.tsx. Returns the bytes. */
-function recoverApp() {
-  const text = readFileSync(APP_TSX, "utf8");
-  if (!text.includes("data-buildtime=")) {
-    return readFileSync(APP_TSX);
+/**
+ * On SIGINT, SIGTERM or SIGHUP: puts App.tsx back under the guard's rule (or names the conflict),
+ * stops the children, and exits with 128 + the signal's number. Playwright closes its browser as
+ * the process exits.
+ */
+function onSignal(state, signal) {
+  try {
+    state.guard?.restore();
+  } catch (error) {
+    try {
+      note(error.message);
+      if (error.fix !== undefined) {
+        note(`    fix: ${error.fix}`);
+      }
+    } catch {
+      // stderr may be gone after SIGHUP; the copy stays for the next run either way.
+    }
   }
-  writeFileSync(APP_TSX, text.replace(MARK, ""));
-  note("src/App.tsx held a data-buildtime attribute from an interrupted run; removed it");
-  return readFileSync(APP_TSX);
+  stopChild(state.tool);
+  stopChild(state.vite);
+  process.exit(128 + { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 }[signal]);
 }
 
 async function main() {
@@ -338,16 +383,28 @@ async function main() {
   if (!existsSync(join(APP_DIR, "node_modules"))) {
     throw new Error("ui/app/node_modules is missing; run `pnpm -C ui install --frozen-lockfile`");
   }
-  const state = { original: undefined, browser: undefined, vite: undefined, tool: undefined };
-  const onSignal = (signal) => {
-    restoreApp(state);
-    stopChild(state.tool);
-    stopChild(state.vite);
-    process.exit(signal === "SIGINT" ? 130 : 143);
+  const state = {
+    guard: undefined,
+    browser: undefined,
+    vite: undefined,
+    tool: undefined,
+    failures: [],
   };
-  process.on("SIGINT", onSignal);
-  process.on("SIGTERM", onSignal);
-  state.original = recoverApp();
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.on(signal, () => onSignal(state, signal));
+  }
+  try {
+    const line = recoverApp(APP_PATHS);
+    if (line !== undefined) {
+      note(line);
+    }
+  } catch (error) {
+    if (!(error instanceof ConflictError)) {
+      throw error;
+    }
+    report(runs, [], [{ message: error.message, fix: error.fix }]);
+    return;
+  }
 
   const probes = [
     await timeScript("tsc", "typecheck", runs, state),
@@ -369,7 +426,7 @@ async function main() {
     probes.push({ probe: "initial_js", skipped: "vite build failed" });
   }
   probes.push(...(await measureDev(runs, state)));
-  process.stdout.write(`${JSON.stringify({ node: process.version, runs, probes })}\n`);
+  report(runs, probes, state.failures);
 }
 
 try {

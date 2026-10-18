@@ -5,6 +5,11 @@
 //! when the probe ends, and on a panic, but never over an edit made during the run. A killed run
 //! leaves its copy, and the next `buildtime rust` run puts it back only where the file differs by
 //! the marker's number alone (`restore_leftovers`).
+//!
+//! `target/xtask/buildtime/ui/` is not this module's: the web half's script keeps its copy of
+//! `ui/app/src/App.tsx` there and settles it at the start of every web run, under its own rule
+//! (only its `data-buildtime` attribute may differ; `ui/app/scripts/buildtime-lib.mjs`).
+//! `restore_leftovers` never reads, restores or deletes anything under it.
 
 mod guard;
 
@@ -177,7 +182,7 @@ pub(crate) fn judge_warm_up(
 /// written. A copy goes back only where the file differs from it by the marker's number. A file
 /// that changed otherwise, or is gone, is a conflict: nothing is written then, and each conflict
 /// is named. A file without a marker line is not a copy and is left alone. A temporary file of an
-/// interrupted save is deleted. Returns one line per restored file,
+/// interrupted save is deleted. Everything under `SCRIPT_OWNED` is skipped. Returns one line per restored file,
 /// `restored <path> from an interrupted buildtime run`.
 pub(crate) fn restore_leftovers(root: &Path) -> Result<Vec<String>, Failure> {
     let base = root.join(BACKUP_DIR);
@@ -198,6 +203,9 @@ pub(crate) fn restore_leftovers(root: &Path) -> Result<Vec<String>, Failure> {
             continue;
         };
         let rel = repo_path(relative);
+        if rel.starts_with(SCRIPT_OWNED) {
+            continue;
+        }
         if Path::new(&rel).extension().is_some_and(|ext| ext == "tmp") {
             fs::remove_file(&file).map_err(|error| {
                 Failure::new(
@@ -248,6 +256,9 @@ pub(crate) fn restore_leftovers(root: &Path) -> Result<Vec<String>, Failure> {
     }
     Ok(lines)
 }
+
+/// The part of the backup folder that the web half's script owns, as a repo path prefix.
+pub(crate) const SCRIPT_OWNED: &str = "ui/";
 
 /// The conflicts as one failure: their messages and fixes, joined.
 fn combine(conflicts: &[Failure]) -> Failure {

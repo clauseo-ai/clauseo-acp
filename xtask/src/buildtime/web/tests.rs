@@ -75,6 +75,7 @@ fn web_run(results: Vec<ProbeResult>, ci: bool) -> WebRun {
         runs: 3,
         ci,
         results,
+        failures: Vec::new(),
     }
 }
 
@@ -440,4 +441,71 @@ fn the_all_json_nests_the_web_half_under_web() {
             .expect("valid json");
     assert_eq!(json["web"]["passed"], false);
     assert_eq!(json["passed"], false);
+}
+
+const CONFLICT: &str = r#"{"message":"ui/app/src/App.tsx changed during this buildtime run; its saved copy is target/xtask/buildtime/ui/app/src/App.tsx","fix":"compare the two, keep what you want, then delete target/xtask/buildtime/ui/app/src/App.tsx"}"#;
+
+fn read(stdout: &str, success: bool) -> Read {
+    read_output(
+        stdout,
+        success,
+        "node ui/app/scripts/buildtime.mjs --runs 3",
+        &budgets(),
+        3,
+        false,
+    )
+}
+
+#[test]
+fn a_conflict_during_the_run_fails_it_and_keeps_the_measurements() {
+    let stdout = format!(
+        r#"{},"failures":[{CONFLICT}]}}"#,
+        &ALL_OK[..ALL_OK.len() - 1]
+    );
+    let Read::Run(run) = read(&stdout, false) else {
+        panic!("a measured run");
+    };
+    assert!(!run.passed(), "the conflict fails the run");
+    assert_eq!(run.results.len(), 6);
+    assert_eq!(
+        run.failures,
+        [Failure::new(
+            "ui/app/src/App.tsx changed during this buildtime run; its saved copy is target/xtask/buildtime/ui/app/src/App.tsx",
+            "compare the two, keep what you want, then delete target/xtask/buildtime/ui/app/src/App.tsx"
+        )]
+    );
+    let json: serde_json::Value =
+        serde_json::from_str(&web_json(&WebJson::of(&Ok(run)))).expect("valid json");
+    assert_eq!(json["passed"], false);
+    assert_eq!(
+        json["web"]["errors"][0],
+        "ui/app/src/App.tsx changed during this buildtime run; its saved copy is target/xtask/buildtime/ui/app/src/App.tsx"
+    );
+}
+
+#[test]
+fn a_conflict_left_by_an_interrupted_run_stops_the_half() {
+    let stdout = format!(r#"{{"node":"v24.1.0","runs":3,"probes":[],"failures":[{CONFLICT}]}}"#);
+    let Read::Stopped(failures) = read(&stdout, false) else {
+        panic!("a stopped half");
+    };
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].fix.starts_with("compare the two"));
+}
+
+#[test]
+fn a_non_zero_exit_fails_the_run_even_with_a_report() {
+    let Read::Run(run) = read(ALL_OK, false) else {
+        panic!("a measured run");
+    };
+    assert!(!run.passed());
+    assert_eq!(
+        run.failures[0].message,
+        "`node ui/app/scripts/buildtime.mjs --runs 3` exited non-zero after it reported"
+    );
+    let Read::Run(clean) = read(ALL_OK, true) else {
+        panic!("a measured run");
+    };
+    assert!(clean.passed() && clean.failures.is_empty());
+    assert!(matches!(read("Error: boom", false), Read::Unreadable(_)));
 }

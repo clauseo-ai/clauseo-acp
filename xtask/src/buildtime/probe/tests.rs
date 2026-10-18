@@ -427,3 +427,28 @@ fn a_kept_copy_marks_its_crate_so_later_probes_on_it_are_skipped() {
         "another crate holds none"
     );
 }
+
+#[test]
+fn the_scripts_app_copy_and_its_temporary_file_are_left_to_the_script() {
+    let dir = scratch("buildtime-app-copy");
+    let app_copy = dir.join(BACKUP_DIR).join("ui/app/src/App.tsx");
+    let app_tmp = dir
+        .join(BACKUP_DIR)
+        .join("ui/app/src/.App.tsx.buildtime.tmp");
+    let marker_tmp = dir.join(BACKUP_DIR).join("ui/app/src/lib.rs.tmp");
+    fs::create_dir_all(app_copy.parent().expect("a parent")).expect("create the copy dir");
+    // Even a copy that looks like a marker file is not read as one.
+    fs::write(&app_copy, ORIGINAL).expect("write the App.tsx copy");
+    fs::write(&app_tmp, "half").expect("write the temporary file");
+    fs::write(&marker_tmp, "half").expect("write a .tmp file");
+    assert_eq!(restore_leftovers(&dir), Ok(Vec::new()));
+    assert_eq!(
+        fs::read_to_string(&app_copy).ok().as_deref(),
+        Some(ORIGINAL)
+    );
+    assert!(app_tmp.exists() && marker_tmp.exists());
+    assert!(
+        !dir.join("ui/app/src/App.tsx").exists(),
+        "nothing is restored"
+    );
+}
