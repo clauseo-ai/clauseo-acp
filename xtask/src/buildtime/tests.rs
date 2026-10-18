@@ -1,4 +1,5 @@
-//! Tests for `buildtime.rs`: the statistics, the verdict, the plan, the budget lookup and the output.
+//! Tests for `buildtime.rs`: the statistics, the verdict, the plan, the budget lookup and the
+//! output.
 
 use super::report::{error_json, json_object, probe_json, table_lines, warning_lines};
 use super::verdict::*;

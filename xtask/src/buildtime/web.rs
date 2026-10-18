@@ -1,5 +1,5 @@
-//! The web half: `node ui/app/scripts/buildtime.mjs --runs N` measures the frontend's edit loop and
-//! reports it as JSON; this module reads it, computes the statistics with `verdict::stats`,
+//! The web half: `node ui/app/scripts/buildtime.mjs --runs N` measures the frontend's edit loop
+//! and reports it as JSON; this module reads it, computes the statistics with `verdict::stats`,
 //! compares them with the rows of `budgets.toml`, and shows the result.
 //!
 //! The script's output contract, kept here only (the script points at it):
@@ -27,10 +27,10 @@
 //! `ui/app/scripts/buildtime-lib.mjs`. The lock (`lock.rs`) covers the copy when xtask runs the
 //! script.
 //!
-//! Gating: `tsc`, `oxlint_type_aware` and `vite_build` follow their row's gate like the Rust probes,
-//! and fail the run when they fail (the tool exits non-zero). `initial_js`, `dev_start` and `hmr`
-//! are reported only: over budget or failed, they show in the table, a failure prints its lines,
-//! and the run still passes. A skipped probe (no Chrome) never fails the run.
+//! Gating: `tsc`, `oxlint_type_aware` and `vite_build` follow their row's gate like the Rust
+//! probes, and fail the run when they fail (the tool exits non-zero). `initial_js`, `dev_start`
+//! and `hmr` are reported only: over budget or failed, they show in the table, a failure prints
+//! its lines, and the run still passes. A skipped probe (no Chrome) never fails the run.
 
 #[cfg(test)]
 mod tests;

@@ -95,7 +95,8 @@ fn build_table_in_config_comes_third() {
 
 #[test]
 fn ci_present_turns_incremental_off_whatever_its_value() {
-    // Cargo reads only whether CI is present, so CI=1, CI=true, CI=0, CI=false and CI= are one input.
+    // Cargo reads only whether CI is present, so CI=1, CI=true, CI=0, CI=false and CI= are one
+    // input.
     for value in ["1", "true", "0", "false", ""] {
         let present = Some(value).is_some();
         let off = resolve(&Sources {
