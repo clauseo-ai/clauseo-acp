@@ -30,7 +30,8 @@ pub(super) fn steps() -> Vec<ToolStep> {
 }
 
 /// `pnpm -C <dir> run <script> <args>`: a script that the package.json in `dir` defines. pnpm passes
-/// the trailing args to the script's command.
+/// the trailing args to the script's command. So each script must be one tool invocation: in
+/// `"typecheck": "tsc --noEmit && foo"` the args would reach `foo`, not `tsc`.
 fn script(dir: &str, name: &str, args: &[&str]) -> Cmd {
     Cmd::new(
         Program::Pnpm,
@@ -200,7 +201,6 @@ fn oxfmt_path(line: &str) -> Option<&str> {
     (numeric && !path.is_empty()).then_some(path)
 }
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
