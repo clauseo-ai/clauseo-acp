@@ -1,10 +1,20 @@
 //! Workspace automation: `cargo xtask check [--quick]` and `cargo xtask setup`.
+//!
+//! For people and agents:
+//! - Add an external step: one `ToolStep` entry in `steps::plan`. Its `parse` turns the output into findings.
+//! - Add a static check: a new file in `src/checks/` with a `StaticCheck`, plus one line in `checks::ALL`.
+//! - Pin a tool: one `Tool` entry in `setup::TOOLS`.
+//! - Failures print as `path:line: what`, then `    fix: ...`. A failure with no location prints the tool's output, then a `fix:` line.
+//! - Only `process.rs` starts processes and only `output.rs` prints. Keep it that way.
 
 mod changes;
 mod check;
+mod checks;
+mod output;
 mod parse;
+mod process;
+mod setup;
 mod steps;
-mod tools;
 mod violation;
 mod workspace;
 
@@ -34,6 +44,6 @@ enum Commands {
 fn main() -> ExitCode {
     match Cli::parse().command {
         Commands::Check { quick } => check::run(quick),
-        Commands::Setup => tools::setup(),
+        Commands::Setup => setup::run(),
     }
 }

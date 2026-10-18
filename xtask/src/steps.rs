@@ -1,300 +1,521 @@
-//! The external steps: `fmt`, `clippy` and `nextest`. Each returns an `Outcome` for the orchestrator to print.
+//! Steps as data. `plan` lists what runs and in what order, and `run_all` is the one loop that runs it.
+//! Adding an external step is one `ToolStep` in `plan`.
 
+use crate::checks::{self, StaticCheck};
+use crate::output;
 use crate::parse;
+use crate::process::{Captured, Cmd, Program};
 use crate::violation::Violation;
-use crate::workspace::{Context, Member, package_for};
-use std::io::{self, Read};
-use std::path::Path;
-use std::process::Command;
+use crate::workspace::Context;
+use std::io;
+use std::time::Instant;
+
+const NO_PACKAGES: &str = "no changed packages";
 
 /// Which packages a cargo step covers.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope {
+    /// Every member of the workspace.
     Workspace,
+    /// These members. Never empty: build it with `Scope::packages`.
     Packages(Vec<String>),
+    /// No members. Steps that need packages are skipped.
+    Nothing,
 }
 
 impl Scope {
-    fn selectors(&self) -> Vec<String> {
+    /// `Packages(names)`, or `Nothing` when `names` is empty. An empty list must never reach cargo,
+    /// where it would mean every member.
+    pub fn packages(names: Vec<String>) -> Scope {
+        if names.is_empty() {
+            Scope::Nothing
+        } else {
+            Scope::Packages(names)
+        }
+    }
+
+    /// The cargo selector arguments, or `None` for `Nothing`.
+    fn selectors(&self) -> Option<Vec<String>> {
         match self {
-            Scope::Workspace => vec!["--workspace".into()],
-            Scope::Packages(names) => names
-                .iter()
-                .flat_map(|name| ["-p".to_string(), name.clone()])
-                .collect(),
+            Scope::Workspace => Some(vec!["--workspace".into()]),
+            Scope::Packages(names) => Some(
+                names
+                    .iter()
+                    .flat_map(|name| ["-p".to_string(), name.clone()])
+                    .collect(),
+            ),
+            Scope::Nothing => None,
         }
     }
 }
 
-/// Output printed under a failure when nothing could be parsed: the tool's output, then a `fix:` line.
-#[derive(Debug)]
-pub struct Raw {
-    pub output: String,
-    pub fix: String,
+/// A problem a tool reported. An error fails the step; a warning is printed and counted.
+pub struct Finding {
+    pub violation: Violation,
+    pub is_error: bool,
 }
 
-/// What one step found.
-#[derive(Debug, Default)]
-pub struct Outcome {
-    pub failed: bool,
-    pub warnings: usize,
-    pub violations: Vec<Violation>,
-    pub raw: Option<Raw>,
+/// An external tool run as `cmd`.
+pub struct ToolStep {
+    pub name: &'static str,
+    /// Exactly what runs, and what the header prints.
+    pub cmd: Cmd,
+    /// The `file:line` findings in the output. Returns none when the output has no locations.
+    pub parse: fn(&str, &Context, &Cmd) -> Vec<Finding>,
+    /// The fix line for a failure with no `file:line`, or for a program that cannot start.
+    /// `None` means the program could not start; `Some` is the captured output.
+    pub fix: fn(&Cmd, Option<&str>) -> String,
 }
 
-/// Exit status and merged stdout/stderr of a cargo command.
-pub struct Captured {
-    pub success: bool,
-    pub output: String,
+pub enum Step {
+    Tool(ToolStep),
+    Static(&'static StaticCheck),
+    Skipped {
+        name: &'static str,
+        reason: &'static str,
+    },
 }
 
-/// Runs `cargo <args>` in `root`, with stdout and stderr merged into one stream.
-pub fn capture(root: &Path, args: &[String]) -> io::Result<Captured> {
-    let (mut reader, writer) = std::io::pipe()?;
-    let mut command = Command::new("cargo");
-    command
-        .args(args)
-        .current_dir(root)
-        .stdout(writer.try_clone()?)
-        .stderr(writer);
-    let mut child = command.spawn()?;
-    // The command still holds the write end of the pipe; drop it so the reader sees EOF.
-    drop(command);
-    let mut bytes = Vec::new();
-    reader.read_to_end(&mut bytes)?;
-    let status = child.wait()?;
-    Ok(Captured {
-        success: status.success(),
-        output: String::from_utf8_lossy(&bytes).into_owned(),
-    })
+/// The summary entry for one step.
+pub struct StepResult {
+    pub name: String,
+    pub status: StepStatus,
 }
 
-/// The shell-like form of `cargo <args>`, for display.
-pub fn display(args: &[String]) -> String {
-    format!("cargo {}", args.join(" "))
+#[derive(Debug, PartialEq)]
+pub enum StepStatus {
+    Ran {
+        failed: bool,
+        warnings: usize,
+        secs: f64,
+    },
+    Skipped(&'static str),
 }
 
-fn owned(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|s| s.to_string()).collect()
-}
-
-fn spawn_failure(error: io::Error) -> Outcome {
-    Outcome {
-        failed: true,
-        violations: vec![Violation {
-            path: "rust-toolchain.toml".into(),
-            line: 1,
-            message: format!("could not run `cargo`: {error}"),
-            fix: "install Rust with rustup and put `cargo` on PATH; the pinned toolchain is in rust-toolchain.toml".into(),
-        }],
-        ..Outcome::default()
+/// The steps for `scope`, in run order: fmt, every static check, clippy, nextest.
+/// With `Scope::Nothing`, clippy and nextest are skipped. `ci` picks the CI variants of the
+/// clippy and nextest commands.
+pub fn plan(scope: &Scope, ci: bool) -> Vec<Step> {
+    let mut steps = vec![Step::Tool(fmt_step())];
+    steps.extend(checks::ALL.iter().map(Step::Static));
+    match scope.selectors() {
+        Some(selectors) => {
+            steps.push(Step::Tool(clippy_step(&selectors, ci)));
+            steps.push(Step::Tool(nextest_step(&selectors, ci)));
+        }
+        None => {
+            steps.push(Step::Skipped {
+                name: "clippy",
+                reason: NO_PACKAGES,
+            });
+            steps.push(Step::Skipped {
+                name: "nextest",
+                reason: NO_PACKAGES,
+            });
+        }
     }
+    steps
 }
 
-fn root_str(ctx: &Context) -> String {
-    ctx.root.to_string_lossy().into_owned()
-}
-
-/// `cargo fmt --all -- --check`.
-pub fn fmt(ctx: &Context) -> Outcome {
-    let args = owned(&["fmt", "--all", "--", "--check"]);
-    let captured = match capture(&ctx.root, &args) {
-        Ok(captured) => captured,
-        Err(error) => return spawn_failure(error),
-    };
-    if captured.success {
-        return Outcome::default();
-    }
-    let diffs = parse::fmt_diffs(&captured.output, &root_str(ctx));
-    if diffs.is_empty() {
-        return Outcome {
-            failed: true,
-            raw: Some(Raw {
-                output: captured.output,
-                fix: "run `cargo fmt --all -- --check` to reproduce".into(),
-            }),
-            ..Outcome::default()
-        };
-    }
-    Outcome {
-        failed: true,
-        violations: diffs
-            .into_iter()
-            .map(|(path, line)| Violation {
-                path,
-                line,
-                message: "rustfmt would reformat this code".into(),
-                fix: "run `cargo fmt --all`".into(),
-            })
-            .collect(),
-        ..Outcome::default()
-    }
-}
-
-/// Arguments of the clippy step: `clippy <scope> --all-targets --message-format=short`,
-/// plus `-- -D warnings` in CI.
-pub fn clippy_args(scope: &Scope, ci: bool) -> Vec<String> {
-    let mut args = owned(&["clippy"]);
-    args.extend(scope.selectors());
-    args.extend(owned(&["--all-targets", "--message-format=short"]));
-    if ci {
-        args.extend(owned(CI_CLIPPY_SUFFIX));
-    }
-    args
-}
-
-/// Appended to clippy's command in CI so warnings fail the step.
-const CI_CLIPPY_SUFFIX: &[&str] = &["--", "-D", "warnings"];
-
-/// Arguments of the nextest step: `nextest run <scope> --no-tests=pass`, plus `--profile ci` in CI.
-pub fn nextest_args(scope: &Scope, ci: bool) -> Vec<String> {
-    let mut args = owned(&["nextest", "run"]);
-    args.extend(scope.selectors());
-    args.extend(owned(&["--no-tests=pass"]));
-    if ci {
-        args.extend(owned(&["--profile", "ci"]));
-    }
-    args
-}
-
-/// Runs the clippy step (see `clippy_args`).
-pub fn clippy(ctx: &Context, scope: &Scope, ci: bool) -> Outcome {
-    let suffix: &[&str] = if ci { CI_CLIPPY_SUFFIX } else { &[] };
-    let args = clippy_args(scope, ci);
-    let captured = match capture(&ctx.root, &args) {
-        Ok(captured) => captured,
-        Err(error) => return spawn_failure(error),
-    };
-
-    let diags = parse::clippy_diags(&captured.output, &root_str(ctx));
-    let errors = diags.iter().filter(|d| d.is_error).count();
-    let warnings = diags.len() - errors;
-    let violations = diags
-        .into_iter()
-        .map(|d| {
-            let fix = clippy_fix(&d.path, &ctx.members, scope, suffix);
-            Violation {
-                path: d.path,
-                line: d.line,
-                message: d.message,
-                fix,
+/// Runs every step in order, even after one fails. Prints each step as it goes and returns one
+/// result per step. `exec` runs a tool command; production passes `process::capture`.
+pub fn run_all(
+    steps: Vec<Step>,
+    ctx: &Context,
+    exec: &mut dyn FnMut(&Cmd) -> io::Result<Captured>,
+) -> Vec<StepResult> {
+    let mut results = Vec::new();
+    for step in steps {
+        let result = match step {
+            Step::Skipped { name, reason } => {
+                output::header(name, format!("skipped ({reason})"));
+                StepResult {
+                    name: name.into(),
+                    status: StepStatus::Skipped(reason),
+                }
             }
-        })
-        .collect();
-    let failed = !captured.success;
-    let raw = (failed && errors == 0).then(|| Raw {
-        output: captured.output,
-        fix: format!("run `{}` to reproduce", clippy_repro(scope, suffix, None)),
-    });
-    Outcome {
-        failed,
-        warnings,
-        violations,
-        raw,
+            Step::Static(check) => run_static(check, ctx),
+            Step::Tool(tool) => run_tool(&tool, ctx, exec),
+        };
+        results.push(result);
+    }
+    results
+}
+
+fn run_static(check: &StaticCheck, ctx: &Context) -> StepResult {
+    output::header(check.name, "built-in static check");
+    let (violations, secs) = timed(|| (check.run)(ctx));
+    for found in &violations {
+        output::violation(found);
+    }
+    StepResult {
+        name: check.name.into(),
+        status: StepStatus::Ran {
+            failed: !violations.is_empty(),
+            warnings: 0,
+            secs,
+        },
     }
 }
 
-/// The command a developer runs to see the full clippy output for `path`.
-fn clippy_fix(path: &str, members: &[Member], scope: &Scope, suffix: &[&str]) -> String {
-    let package = package_for(path, members).map(|m| m.name.as_str());
-    format!(
-        "`{}` shows the full diagnostic and clippy's suggested change",
-        clippy_repro(scope, suffix, package)
-    )
-}
-
-fn clippy_repro(scope: &Scope, suffix: &[&str], package: Option<&str>) -> String {
-    let selectors = match (package, scope) {
-        (Some(name), _) => format!("-p {name}"),
-        (None, Scope::Workspace) => "--workspace".to_string(),
-        (None, Scope::Packages(_)) => scope.selectors().join(" "),
+fn run_tool(
+    tool: &ToolStep,
+    ctx: &Context,
+    exec: &mut dyn FnMut(&Cmd) -> io::Result<Captured>,
+) -> StepResult {
+    output::header(tool.name, &tool.cmd);
+    let (captured, secs) = timed(|| exec(&tool.cmd));
+    let (failed, warnings) = match captured {
+        Ok(captured) => {
+            let findings = (tool.parse)(&captured.output, ctx, &tool.cmd);
+            for finding in &findings {
+                output::violation(&finding.violation);
+            }
+            let has_error = findings.iter().any(|f| f.is_error);
+            let warnings = findings.iter().filter(|f| !f.is_error).count();
+            let failed = !captured.success;
+            if failed && !has_error {
+                output::failure(
+                    &format!(
+                        "`{}` failed without a file:line; its output is above",
+                        tool.cmd
+                    ),
+                    &(tool.fix)(&tool.cmd, Some(&captured.output)),
+                );
+            }
+            (failed, warnings)
+        }
+        Err(error) => {
+            let message = format!("could not run `{}`: {error}", tool.cmd.program.name());
+            output::failure(&message, &(tool.fix)(&tool.cmd, None));
+            (true, 0)
+        }
     };
-    let suffix = if suffix.is_empty() {
-        String::new()
-    } else {
-        format!(" {}", suffix.join(" "))
-    };
-    format!("cargo clippy {selectors} --all-targets{suffix}")
-}
-
-/// Runs the nextest step (see `nextest_args`).
-pub fn nextest(ctx: &Context, scope: &Scope, ci: bool) -> Outcome {
-    let args = nextest_args(scope, ci);
-    let captured = match capture(&ctx.root, &args) {
-        Ok(captured) => captured,
-        Err(error) => return spawn_failure(error),
-    };
-    if captured.success {
-        return Outcome::default();
+    StepResult {
+        name: tool.name.into(),
+        status: StepStatus::Ran {
+            failed,
+            warnings,
+            secs,
+        },
     }
-    let fix = if captured.output.contains("no such command: `nextest`") {
-        "run `cargo xtask setup`".to_string()
-    } else {
-        format!("run `{}` to reproduce", display(&args))
-    };
-    Outcome {
-        failed: true,
-        raw: Some(Raw {
-            output: captured.output,
-            fix,
-        }),
-        ..Outcome::default()
+}
+
+/// Runs `work` and returns its value with the seconds it took. The only clock read in xtask.
+fn timed<T>(work: impl FnOnce() -> T) -> (T, f64) {
+    let started = Instant::now();
+    let value = work();
+    (value, started.elapsed().as_secs_f64())
+}
+
+fn reproduce(cmd: &Cmd, _output: Option<&str>) -> String {
+    format!("run `{cmd}` to reproduce")
+}
+
+fn fmt_step() -> ToolStep {
+    ToolStep {
+        name: "fmt",
+        cmd: Cmd::new(Program::Cargo, ["fmt", "--all", "--", "--check"]),
+        parse: parse::fmt_findings,
+        fix: reproduce,
+    }
+}
+
+fn clippy_step(selectors: &[String], ci: bool) -> ToolStep {
+    let mut args = vec!["clippy".to_string()];
+    args.extend(selectors.iter().cloned());
+    args.extend(["--all-targets", "--message-format=short"].map(String::from));
+    if ci {
+        args.extend(["--", "-D", "warnings"].map(String::from));
+    }
+    ToolStep {
+        name: "clippy",
+        cmd: Cmd::new(Program::Cargo, args),
+        parse: parse::clippy_findings,
+        fix: reproduce,
+    }
+}
+
+fn nextest_step(selectors: &[String], ci: bool) -> ToolStep {
+    let mut args = vec!["nextest".to_string(), "run".to_string()];
+    args.extend(selectors.iter().cloned());
+    args.push("--no-tests=pass".into());
+    if ci {
+        args.extend(["--profile", "ci"].map(String::from));
+    }
+    ToolStep {
+        name: "nextest",
+        cmd: Cmd::new(Program::Cargo, args),
+        parse: parse_none,
+        fix: nextest_fix,
+    }
+}
+
+fn parse_none(_output: &str, _ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
+    Vec::new()
+}
+
+fn nextest_fix(cmd: &Cmd, output: Option<&str>) -> String {
+    match output {
+        None => "run `cargo xtask setup`".into(),
+        Some(text) if text.contains("no such command: `nextest`") => {
+            "run `cargo xtask setup`".into()
+        }
+        Some(_) => reproduce(cmd, output),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workspace::Member;
+    use std::path::PathBuf;
+
+    fn context(members: Vec<Member>) -> Context {
+        Context {
+            root: PathBuf::from("/ws"),
+            members,
+        }
+    }
+
+    fn member(name: &str, dir: &str) -> Member {
+        Member {
+            name: name.into(),
+            dir: dir.into(),
+            path_deps: Vec::new(),
+        }
+    }
+
+    fn ok_output(cmd: &Cmd) -> Captured {
+        Captured {
+            success: true,
+            output: cmd.to_string(),
+        }
+    }
+
+    fn no_findings(_output: &str, _ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
+        Vec::new()
+    }
+
+    fn fake_tool(name: &'static str, program: &'static str, args: &[&str]) -> Step {
+        Step::Tool(ToolStep {
+            name,
+            cmd: Cmd::new(Program::Named(program), args),
+            parse: no_findings,
+            fix: reproduce,
+        })
+    }
+
+    fn one_violation(_ctx: &Context) -> Vec<Violation> {
+        vec![Violation {
+            path: "docs/a.md".into(),
+            line: 2,
+            message: "bad link".into(),
+            fix: "fix the link".into(),
+        }]
+    }
+
+    static FAILING_CHECK: StaticCheck = StaticCheck {
+        name: "fake-static",
+        run: one_violation,
+    };
+
+    fn tool_commands(steps: &[Step]) -> Vec<String> {
+        steps
+            .iter()
+            .filter_map(|step| match step {
+                Step::Tool(tool) => Some(tool.cmd.to_string()),
+                _ => None,
+            })
+            .collect()
+    }
 
     #[test]
-    fn clippy_header_matches_the_command_run_in_ci() {
+    fn a_failing_step_does_not_stop_the_later_ones() {
+        let steps = vec![
+            fake_tool("first", "fake", &["fail"]),
+            Step::Static(&FAILING_CHECK),
+            fake_tool("last", "fake", &["pass"]),
+        ];
+        let mut calls = Vec::new();
+        let mut exec = |cmd: &Cmd| {
+            calls.push(cmd.to_string());
+            Ok(Captured {
+                success: !cmd.args.iter().any(|arg| arg == "fail"),
+                output: "boom\n".into(),
+            })
+        };
+        let results = run_all(steps, &context(Vec::new()), &mut exec);
+        assert_eq!(results.len(), 3);
+        assert!(matches!(
+            results[0].status,
+            StepStatus::Ran { failed: true, .. }
+        ));
+        assert!(matches!(
+            results[1].status,
+            StepStatus::Ran { failed: true, .. }
+        ));
+        assert!(matches!(
+            results[2].status,
+            StepStatus::Ran { failed: false, .. }
+        ));
         assert_eq!(
-            display(&clippy_args(&Scope::Workspace, true)),
-            "cargo clippy --workspace --all-targets --message-format=short -- -D warnings"
-        );
-        assert_eq!(
-            display(&clippy_args(&Scope::Workspace, false)),
-            "cargo clippy --workspace --all-targets --message-format=short"
+            calls,
+            vec!["fake fail".to_string(), "fake pass".to_string()]
         );
     }
 
     #[test]
-    fn nextest_header_matches_the_command_run_in_ci() {
+    fn a_program_that_cannot_start_fails_its_step_and_the_next_step_runs() {
+        let steps = vec![
+            fake_tool("missing", "missing", &["x"]),
+            fake_tool("present", "fake", &["x"]),
+        ];
+        let mut exec = |cmd: &Cmd| {
+            if cmd.program.name() == "missing" {
+                Err(io::Error::new(io::ErrorKind::NotFound, "no such file"))
+            } else {
+                Ok(ok_output(cmd))
+            }
+        };
+        let results = run_all(steps, &context(Vec::new()), &mut exec);
+        assert_eq!(results.len(), 2);
+        assert!(matches!(
+            results[0].status,
+            StepStatus::Ran { failed: true, .. }
+        ));
+        assert!(matches!(
+            results[1].status,
+            StepStatus::Ran { failed: false, .. }
+        ));
+    }
+
+    #[test]
+    fn an_empty_package_list_is_nothing_and_skips_clippy_and_nextest() {
+        assert_eq!(Scope::packages(vec![]), Scope::Nothing);
+        let steps = plan(&Scope::Nothing, false);
+        assert_eq!(steps.len(), 3);
+        assert!(matches!(&steps[0], Step::Tool(tool) if tool.name == "fmt"));
+        assert!(matches!(
+            steps[1],
+            Step::Skipped {
+                name: "clippy",
+                reason: "no changed packages"
+            }
+        ));
+        assert!(matches!(
+            steps[2],
+            Step::Skipped {
+                name: "nextest",
+                reason: "no changed packages"
+            }
+        ));
+    }
+
+    #[test]
+    fn plan_commands_for_the_workspace_in_both_modes() {
         assert_eq!(
-            display(&nextest_args(&Scope::Workspace, true)),
-            "cargo nextest run --workspace --no-tests=pass --profile ci"
+            tool_commands(&plan(&Scope::Workspace, false)),
+            [
+                "cargo fmt --all -- --check",
+                "cargo clippy --workspace --all-targets --message-format=short",
+                "cargo nextest run --workspace --no-tests=pass",
+            ]
         );
         assert_eq!(
-            display(&nextest_args(&Scope::Workspace, false)),
-            "cargo nextest run --workspace --no-tests=pass"
+            tool_commands(&plan(&Scope::Workspace, true)),
+            [
+                "cargo fmt --all -- --check",
+                "cargo clippy --workspace --all-targets --message-format=short -- -D warnings",
+                "cargo nextest run --workspace --no-tests=pass --profile ci",
+            ]
         );
     }
 
     #[test]
-    fn clippy_fix_names_the_owning_package() {
-        let members = vec![Member {
-            name: "xtask".into(),
-            dir: "xtask".into(),
-            path_deps: vec![],
-        }];
-        let fix = clippy_fix("xtask/src/main.rs", &members, &Scope::Workspace, &[]);
+    fn clippy_command_for_named_packages() {
+        let scope = Scope::packages(vec!["a".into(), "b".into()]);
         assert_eq!(
-            fix,
-            "`cargo clippy -p xtask --all-targets` shows the full diagnostic and clippy's suggested change"
+            tool_commands(&plan(&scope, false))[1],
+            "cargo clippy -p a -p b --all-targets --message-format=short"
         );
     }
 
     #[test]
-    fn clippy_fix_falls_back_to_the_step_command_in_ci() {
-        let fix = clippy_fix(
-            "docs/x.md",
-            &[],
-            &Scope::Packages(vec!["a".into(), "b".into()]),
-            &["--", "-D", "warnings"],
-        );
+    fn clippy_repro_narrows_to_the_owning_package_in_ci() {
+        let members = vec![member("xtask", "xtask")];
+        let steps = plan(&Scope::Workspace, true);
+        let Step::Tool(clippy) = &steps[1] else {
+            panic!("clippy is a tool step");
+        };
+        let output = "xtask/src/main.rs:4:9: error: unused variable: `unused`\n";
+        let findings = (clippy.parse)(output, &context(members), &clippy.cmd);
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].is_error);
         assert_eq!(
-            fix,
-            "`cargo clippy -p a -p b --all-targets -- -D warnings` shows the full diagnostic and clippy's suggested change"
+            findings[0].violation.fix,
+            "`cargo clippy -p xtask --all-targets -- -D warnings` shows the full diagnostic and clippy's suggested change"
         );
+    }
+
+    #[test]
+    fn clippy_repro_narrows_to_the_owning_package_without_ci() {
+        let members = vec![member("a", "crates/a"), member("b", "crates/b")];
+        let steps = plan(&Scope::packages(vec!["a".into(), "b".into()]), false);
+        let Step::Tool(clippy) = &steps[1] else {
+            panic!("clippy is a tool step");
+        };
+        let output = "crates/a/src/lib.rs:1:1: warning: unused import\n";
+        let findings = (clippy.parse)(output, &context(members), &clippy.cmd);
+        assert_eq!(findings.len(), 1);
+        assert!(!findings[0].is_error);
+        assert_eq!(
+            findings[0].violation.fix,
+            "`cargo clippy -p a --all-targets` shows the full diagnostic and clippy's suggested change"
+        );
+    }
+
+    #[test]
+    fn clippy_keeps_the_selectors_when_no_package_owns_the_file() {
+        let steps = plan(&Scope::packages(vec!["a".into(), "b".into()]), false);
+        let Step::Tool(clippy) = &steps[1] else {
+            panic!("clippy is a tool step");
+        };
+        let output = "docs/x.md:3:1: warning: stray text\n";
+        let findings = (clippy.parse)(output, &context(Vec::new()), &clippy.cmd);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].violation.fix,
+            "`cargo clippy -p a -p b --all-targets` shows the full diagnostic and clippy's suggested change"
+        );
+    }
+
+    #[test]
+    fn nextest_points_at_setup_when_the_subcommand_is_missing() {
+        let cmd = Cmd::new(Program::Cargo, ["nextest", "run"]);
+        assert_eq!(
+            nextest_fix(&cmd, Some("error: no such command: `nextest`\n")),
+            "run `cargo xtask setup`"
+        );
+        assert_eq!(nextest_fix(&cmd, None), "run `cargo xtask setup`");
+        assert_eq!(
+            nextest_fix(&cmd, Some("1 test failed")),
+            "run `cargo nextest run` to reproduce"
+        );
+    }
+
+    #[test]
+    fn a_clean_run_reports_no_failure() {
+        let steps = vec![fake_tool("quiet", "fake", &["x"])];
+        let mut exec = |cmd: &Cmd| Ok(ok_output(cmd));
+        let results = run_all(steps, &context(Vec::new()), &mut exec);
+        assert!(matches!(
+            results[0].status,
+            StepStatus::Ran {
+                failed: false,
+                warnings: 0,
+                ..
+            }
+        ));
     }
 }
