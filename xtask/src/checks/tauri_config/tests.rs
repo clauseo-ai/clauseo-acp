@@ -330,6 +330,41 @@ fn run_passes_a_clean_tree_and_fails_a_planted_setting_with_its_path() {
 }
 
 #[test]
+fn every_platform_config_name_is_covered() {
+    let names = platform_configs();
+    assert_eq!(names.len(), 15);
+    for name in [
+        "tauri.macos.conf.json",
+        "tauri.windows.conf.json5",
+        "Tauri.linux.toml",
+        "tauri.ios.conf.json",
+        "Tauri.android.toml",
+    ] {
+        assert!(names.contains(&name.to_owned()), "{name}");
+    }
+}
+
+#[test]
+fn run_fails_on_a_platform_config() {
+    let dir = Scratch::new("tauri-config-platform");
+    fs::create_dir_all(dir.join("crates/desktop")).expect("create the desktop dir");
+    fs::write(dir.join("crates/desktop/build.rs"), BUILD).expect("write build.rs");
+    fs::write(dir.join("crates/desktop/tauri.conf.json"), CONF).expect("write tauri.conf.json");
+    let platform = "crates/desktop/tauri.macos.conf.json";
+    fs::write(dir.join(platform), "{\"app\":{\"withGlobalTauri\":true}}")
+        .expect("write the platform config");
+    assert_eq!(
+        run(&desktop_context(&dir)),
+        vec![violation(
+            platform,
+            1,
+            "platform config `crates/desktop/tauri.macos.conf.json` overrides tauri.conf.json",
+            PLATFORM_FIX,
+        )]
+    );
+}
+
+#[test]
 fn run_fails_once_when_the_desktop_crate_is_not_a_member() {
     let dir = Scratch::new("tauri-config-no-member");
     let ctx = Context {
