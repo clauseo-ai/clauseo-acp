@@ -24,7 +24,7 @@ const EXTENSIONS: [&str; 3] = ["json", "json5", "toml"];
 const FORBIDDEN_PREFIXES: [&str; 5] = ["fs:", "shell:", "http:", "opener:", "dialog:"];
 
 const FIX_CORE: &str = "list only the narrow permissions the window needs; `core:default` also grants event emit and devtools toggling";
-const FIX_REMOTE: &str = "remove the `remote` block: a remote page must never reach the IPC";
+const FIX_REMOTE: &str = "remove the remote block, or reword the text: a remote page must never reach the IPC, and `remote` is matched anywhere";
 const FIX_PREFIX: &str = "do it in Rust behind a validated command; the webview gets no fs, shell, http, opener or dialog permission";
 
 /// Fails on every forbidden string in a capability file.
@@ -83,7 +83,7 @@ pub(crate) fn scan(path: &str, text: &str) -> Vec<Violation> {
     for (index, line) in text.lines().enumerate() {
         let mut problems: Vec<(String, &str)> = Vec::new();
         if line.contains("remote") {
-            problems.push(("capability allows `remote` URLs".to_owned(), FIX_REMOTE));
+            problems.push(("capability file mentions `remote`".to_owned(), FIX_REMOTE));
         }
         if line.contains("core:default") {
             problems.push(("capability grants `core:default`".to_owned(), FIX_CORE));
@@ -165,8 +165,26 @@ mod tests {
         let text = "{\n  \"remote\": { \"urls\": [\"https://*\"] }\n}";
         assert_eq!(
             scan(PATH, text),
-            vec![violation(2, "capability allows `remote` URLs", FIX_REMOTE)]
+            vec![violation(
+                2,
+                "capability file mentions `remote`",
+                FIX_REMOTE
+            )]
         );
+    }
+
+    #[test]
+    fn remote_in_prose_fails_with_the_reword_hint() {
+        let text = "{\n  \"description\": \"never loads a remote page\"\n}";
+        assert_eq!(
+            scan(PATH, text),
+            vec![violation(
+                2,
+                "capability file mentions `remote`",
+                FIX_REMOTE
+            )]
+        );
+        assert!(FIX_REMOTE.contains("or reword the text"));
     }
 
     #[test]
