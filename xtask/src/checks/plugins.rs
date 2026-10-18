@@ -20,12 +20,13 @@
 //!   `[workspace] exclude`): `cargo metadata --no-deps` and clippy never see such a crate.
 //!
 //! The rules above see workspace members only. A crate under `[workspace] exclude` pulled in by
-//! path, or a crates.io or git dependency, never appears in `--no-deps` output, yet it can turn
-//! on `devtools` or bring a plugin. So `graph.rs` also reads the graph cargo resolved, from one
-//! `cargo metadata --locked` run with deps: no `tauri`, `tauri-runtime`, `tauri-runtime-wry` or
-//! `wry` node has `devtools` among its resolved features (nor `tauri` `protocol-asset`), and a
-//! `tauri-plugin-*` outside the fixed set is in the desktop crate's tree only when fixed plugins
-//! alone depend on it (as `tauri-plugin-fs` comes in through the dialog plugin).
+//! path, or a crates.io or git dependency, never appears in `--no-deps` output, yet it can bring
+//! a plugin. So `graph.rs` also reads the graph cargo resolved, from one
+//! `cargo metadata --locked --offline` run with deps: a `tauri-plugin-*` outside the fixed set is
+//! in the desktop crate's tree only when fixed plugins alone depend on it (as `tauri-plugin-fs`
+//! comes in through the dialog plugin). A feature such a crate turns on (`devtools` in tauri,
+//! tauri-runtime, tauri-runtime-wry or wry, `protocol-asset` in tauri) is banned in deny.toml's
+//! `[[bans.features]]`, which the `deny` step checks against the resolved graph.
 //!
 //! The manifest text is read only for line numbers: the member's `Cargo.toml`, or the root one
 //! when the setting lives in `[workspace.dependencies]`, else line 1.
@@ -73,8 +74,17 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
     run,
 };
 
+/// `--offline`: the check never downloads. `cargo xtask check` runs `deny` first, which fetches
+/// every target's crates; elsewhere a missing crate fails with `GRAPH_FIX`.
 fn run(ctx: &Context) -> Vec<Violation> {
-    check(ctx, Some(&["--locked"]))
+    check(ctx, Some(&["--locked", "--offline"]))
+}
+
+/// The check without the resolved-graph rule, for the real-repo test: that graph needs every
+/// target's crates downloaded, and tests use no network. `graph/tests.rs` covers the rule offline.
+#[cfg(test)]
+pub(crate) fn check_without_graph(ctx: &Context) -> Vec<Violation> {
+    check(ctx, None)
 }
 
 /// The check, reading the resolved graph with `cargo metadata <graph_flags>`, or skipping the

@@ -61,74 +61,6 @@ fn desktop(deps: &str) -> String {
 }
 
 #[test]
-fn devtools_turned_on_by_a_transitive_dependency_fails_at_the_dependency_that_brings_it() {
-    let desktop = desktop(
-        "[dependencies]\nmid = { path = \"../../vendor/mid\" }\ntauri = { path = \"../../vendor/tauri\", features = [\"protocol-asset\"] }\n",
-    );
-    let ws = workspace(
-        "devtools",
-        &desktop,
-        &[
-            (
-                "mid",
-                "[dependencies]\nwry = { path = \"../wry\", features = [\"devtools\"] }\n",
-            ),
-            ("wry", "[features]\ndevtools = []\n"),
-            (
-                "tauri",
-                "[features]\nprotocol-asset = []\ndevtools = []\n\n[dependencies]\nwry = { path = \"../wry\" }\n",
-            ),
-        ],
-    );
-    let fix = |name: &str, why: &str| {
-        format!("find what enables it with `cargo tree -e features -i {name}` and remove it: {why}")
-    };
-    assert_eq!(
-        violations_in(&ws, &desktop),
-        vec![
-            // Both `mid` and `tauri` reach `wry`, so no single dependency is to blame.
-            violation(
-                DESKTOP_PATH,
-                1,
-                "`wry` is built with its `devtools` feature (resolved by cargo)",
-                fix("wry", DEVTOOLS_WHY),
-            ),
-            violation(
-                DESKTOP_PATH,
-                line_of(&desktop, "tauri = "),
-                "`tauri` is built with its `protocol-asset` feature (resolved by cargo)",
-                fix("tauri", ASSET_WHY),
-            ),
-        ]
-    );
-}
-
-#[test]
-fn devtools_reached_through_one_dependency_points_at_it() {
-    let desktop = desktop("[dependencies]\nmid = { path = \"../../vendor/mid\" }\n");
-    let ws = workspace(
-        "devtools-one",
-        &desktop,
-        &[
-            (
-                "mid",
-                "[dependencies]\ntauri-runtime-wry = { path = \"../tauri-runtime-wry\", features = [\"devtools\"] }\n",
-            ),
-            ("tauri-runtime-wry", "[features]\ndevtools = []\n"),
-        ],
-    );
-    let found = violations_in(&ws, &desktop);
-    assert_eq!(found.len(), 1);
-    assert_eq!(
-        (found[0].line, found[0].message.as_str()),
-        (
-            line_of(&desktop, "mid = "),
-            "`tauri-runtime-wry` is built with its `devtools` feature (resolved by cargo)"
-        )
-    );
-}
-
-#[test]
 fn a_plugin_outside_the_set_fails_unless_only_fixed_plugins_pull_it_in() {
     let desktop = desktop(
         "[dependencies]\ntauri-plugin-dialog = { path = \"../../vendor/tauri-plugin-dialog\" }\ntauri-plugin = { path = \"../../vendor/tauri-plugin\" }\nmid = { path = \"../../vendor/mid\" }\n\n[build-dependencies]\ntauri-plugin-yy = { path = \"../../vendor/tauri-plugin-yy\" }\n\n[dev-dependencies]\ntauri-plugin-dev = { path = \"../../vendor/tauri-plugin-dev\" }\n",
@@ -174,10 +106,6 @@ fn a_plugin_outside_the_set_fails_unless_only_fixed_plugins_pull_it_in() {
 #[test]
 fn a_clean_graph_passes() {
     let desktop = desktop("[dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n");
-    let ws = workspace(
-        "clean",
-        &desktop,
-        &[("tauri", "[features]\ndevtools = []\nprotocol-asset = []\n")],
-    );
+    let ws = workspace("clean", &desktop, &[("tauri", "")]);
     assert_eq!(violations_in(&ws, &desktop), Vec::new());
 }
