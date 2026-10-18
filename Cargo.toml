@@ -32,7 +32,16 @@ tauri-plugin-os = "2.4.0"
 tauri-plugin-notification = "2.7.0"
 # tauri::generate_context! writes the plugin configuration as serde_json values, and
 # crates/desktop/src/rust_only.rs names serde_json::Value in the plugin hooks it forwards.
-serde_json = "1"
+serde_json = "1.0.154"
+# clauseo-protocol: the host boundary types (features go on the crate's own lines).
+serde = "1"
+uuid = "1"
+thiserror = "2.0"
+compact_str = "0.10.0"
+specta = "=2.0.0-rc.25"
+# Test-only: property tests, and R7's MessagePack form.
+proptest = "1.12"
+rmp-serde = "1.3.1"
 
 [workspace.lints.rust]
 unsafe_code = "deny"               # deny, not forbid: an FFI module overrides with #[expect(unsafe_code, reason = "…")]
