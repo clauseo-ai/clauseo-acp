@@ -29,6 +29,7 @@ import {
   marked,
   parseRuns,
   recoverApp,
+  restoreFailure,
   scriptCommand,
 } from "./buildtime-lib.mjs";
 import { runTool, start, stop, stopAll } from "./buildtime-proc.mjs";
@@ -240,15 +241,15 @@ async function measureDev(runs, state) {
   }
 }
 
-/** Puts App.tsx back under the guard's rule, closes the browser and stops Vite. Safe to repeat. */
+/**
+ * Puts App.tsx back under the guard's rule, closes the browser and stops Vite. Each step runs
+ * whatever the one before it did: a failed restore becomes a run failure. Safe to repeat.
+ */
 async function cleanUp(state) {
   try {
     state.guard?.restore();
   } catch (error) {
-    recordConflict(state, error);
-    if (!(error instanceof ConflictError)) {
-      throw error;
-    }
+    state.failures.push(restoreFailure(APP_PATHS, error));
   }
   const browser = state.browser;
   state.browser = undefined;
@@ -282,11 +283,10 @@ async function onSignal(state, signal) {
   try {
     state.guard?.restore();
   } catch (error) {
+    const failure = restoreFailure(APP_PATHS, error);
     try {
-      note(error.message);
-      if (error.fix !== undefined) {
-        note(`    fix: ${error.fix}`);
-      }
+      note(failure.message);
+      note(`    fix: ${failure.fix}`);
     } catch {
       // stderr may be gone after SIGHUP; the copy stays for the next run either way.
     }

@@ -169,6 +169,21 @@ export class ConflictError extends Error {
   }
 }
 
+/**
+ * The run failure for an error from `AppGuard.restore`: a ConflictError as it is; any other error
+ * (EPERM from the rename while a scanner holds the file, say) named with the copy, which stays
+ * for the next run's `recoverApp`.
+ */
+export function restoreFailure(paths, error) {
+  if (error instanceof ConflictError) {
+    return { message: error.message, fix: error.fix };
+  }
+  return {
+    message: `could not put back ${paths.rel}: ${error?.message ?? String(error)}; its saved copy is ${paths.backupRel}`,
+    fix: `the next \`cargo xtask buildtime web\` restores ${paths.rel} from ${paths.backupRel}; or copy it back by hand`,
+  };
+}
+
 /** The file at repo path `rel` under `root`, its copy, and the folder copies live in. */
 export function appPaths(root, rel) {
   return {
