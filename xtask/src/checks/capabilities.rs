@@ -14,7 +14,7 @@
 //! file, a `main.json~` backup) never reaches the app, so it is skipped.
 
 use crate::checks::json_text::{key_line, line_index_of};
-use crate::checks::{self, StaticCheck};
+use crate::checks::{self, Inspection, Noun, StaticCheck};
 use crate::violation::Violation;
 use crate::workspace::Context;
 use serde_json::Value;
@@ -48,27 +48,34 @@ const ESCAPED: &str = " (written with escapes)";
 /// Fails on every forbidden string in a capability file.
 pub(crate) const CHECK: StaticCheck = StaticCheck {
     name: "capabilities",
+    counts: Noun {
+        one: "capability file",
+        many: "capability files",
+    },
+    place: "in the desktop crate's capabilities/",
     run,
 };
 
-fn run(ctx: &Context) -> Vec<Violation> {
+/// Counts the capability files read; the inline objects in the Tauri config are not counted.
+fn run(ctx: &Context) -> Inspection {
     let desktop = match checks::desktop_dir(ctx) {
         Ok(dir) => dir,
-        Err(violation) => return vec![violation],
+        Err(violation) => return Inspection::stopped(violation),
     };
     let rel = checks::join(desktop, DIR);
     let files = match capability_files(&ctx.root.join(&rel)) {
         Ok(files) => files,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return vec![checks::violation(
+            return Inspection::stopped(checks::violation(
                 &rel,
                 1,
                 format!("the capabilities folder `{rel}` is missing"),
                 "restore it with main.json: Tauri reads the window's grants from it, and this check guards them",
-            )];
+            ));
         }
-        Err(error) => return vec![checks::unreadable(&rel, &error)],
+        Err(error) => return Inspection::stopped(checks::unreadable(&rel, &error)),
     };
+    let mut read = 0;
     let mut found = Vec::new();
     let conf = checks::join(desktop, TAURI_CONF);
     // A missing or unreadable config is the `tauri-config` check's failure, reported there once.
@@ -78,11 +85,14 @@ fn run(ctx: &Context) -> Vec<Violation> {
     for file in &files {
         let path = checks::repo_path(&ctx.root, file);
         match fs::read_to_string(file) {
-            Ok(text) => found.extend(scan(&path, &text)),
+            Ok(text) => {
+                read += 1;
+                found.extend(scan(&path, &text));
+            }
             Err(error) => found.push(checks::unreadable(&path, &error)),
         }
     }
-    found
+    Inspection::new(read, found)
 }
 
 /// Every file under `dir` with one of `EXTENSIONS`, recursively, sorted by path. Fails when `dir`

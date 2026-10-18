@@ -2,11 +2,16 @@
 //!
 //! One file per check in `src/checks/`, registered in `ALL` below. `steps::plan` runs every entry
 //! after the tool steps and before nextest.
+//!
+//! Every check counts what it inspected. `StaticCheck::report` is the one place that judges a run:
+//! it fails on any violation, and on a count of zero, since a check that inspected nothing proves
+//! nothing (its inputs moved or vanished). The runner and the tests both go through it.
 
 mod budgets;
 mod buildtime_edits;
 mod capabilities;
 mod json_text;
+pub(crate) mod planted;
 mod plugins;
 mod tauri_config;
 
@@ -16,10 +21,117 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-/// A check written in Rust. It fails iff it returns violations.
+/// A check written in Rust. Run it through `report`, which fails it on any violation and on an
+/// inspection of zero items.
 pub(crate) struct StaticCheck {
     pub name: &'static str,
-    pub run: fn(&Context) -> Vec<Violation>,
+    /// What the check counts, e.g. `capability file`.
+    pub counts: Noun,
+    /// Where it looks, as the end of a sentence, e.g. `in the desktop crate's capabilities/`.
+    pub place: &'static str,
+    pub run: fn(&Context) -> Inspection,
+}
+
+/// A noun in the singular and the plural, for counts such as `1 capability file`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Noun {
+    pub one: &'static str,
+    pub many: &'static str,
+}
+
+impl Noun {
+    /// `n` and the noun, singular for 1: `1 capability file`, `0 capability files`.
+    pub(crate) fn count(self, n: usize) -> String {
+        let noun = if n == 1 { self.one } else { self.many };
+        format!("{n} {noun}")
+    }
+}
+
+/// What one run of a check saw: how many items it inspected, what it found wrong, and notes that
+/// print but never fail (e.g. a file close to the size limit).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct Inspection {
+    pub inspected: usize,
+    pub violations: Vec<Violation>,
+    pub notes: Vec<String>,
+}
+
+impl Inspection {
+    /// `inspected` items and these violations, with no notes.
+    pub(crate) fn new(inspected: usize, violations: Vec<Violation>) -> Inspection {
+        Inspection {
+            inspected,
+            violations,
+            notes: Vec::new(),
+        }
+    }
+
+    /// Nothing inspected, because `violation` stopped the check before it could look.
+    pub(crate) fn stopped(violation: Violation) -> Inspection {
+        Inspection::new(0, vec![violation])
+    }
+}
+
+/// The failure of a check that inspected nothing. It has no `file:line`: the items are missing,
+/// not wrong, so there is no line to point at. Printed with `Printer::failure`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NothingInspected {
+    pub message: String,
+    pub fix: String,
+}
+
+/// A check's run, judged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Report {
+    pub inspection: Inspection,
+    /// `Some` when the check inspected nothing.
+    pub nothing_inspected: Option<NothingInspected>,
+    /// `1 capability file inspected`, for the result and summary lines.
+    pub counted: String,
+}
+
+impl Report {
+    /// True when the check found a violation or inspected nothing.
+    pub(crate) fn failed(&self) -> bool {
+        !self.inspection.violations.is_empty() || self.nothing_inspected.is_some()
+    }
+}
+
+impl StaticCheck {
+    /// Runs the check on `ctx` and judges the result (see `judge`).
+    pub(crate) fn report(&self, ctx: &Context) -> Report {
+        self.judge((self.run)(ctx))
+    }
+
+    /// Judges one inspection: a count of zero adds the `NothingInspected` failure.
+    pub(crate) fn judge(&self, inspection: Inspection) -> Report {
+        let nothing_inspected = (inspection.inspected == 0).then(|| self.nothing_inspected());
+        Report {
+            counted: format!("{} inspected", self.counts.count(inspection.inspected)),
+            inspection,
+            nothing_inspected,
+        }
+    }
+
+    /// The failure for an inspection of zero items: `0 capability files inspected in the desktop
+    /// crate's capabilities/`, with a fix that names what the check looks for, where, and its file.
+    pub(crate) fn nothing_inspected(&self) -> NothingInspected {
+        NothingInspected {
+            message: format!("{} inspected {}", self.counts.count(0), self.place),
+            fix: format!(
+                "{name} looks for {many} {place}; restore them, or update {source} if they moved",
+                name = self.name,
+                many = self.counts.many,
+                place = self.place,
+                source = self.source(),
+            ),
+        }
+    }
+
+    /// The repo-relative file that defines the check: `xtask/src/checks/<name>.rs`, `-` as `_`.
+    pub(crate) fn source(&self) -> String {
+        format!("xtask/src/checks/{}.rs", self.name.replace('-', "_"))
+    }
 }
 
 /// Every static check, in run order.
@@ -126,83 +238,4 @@ pub(crate) fn line_at(index: usize) -> u32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::scratch::Scratch;
-
-    #[test]
-    fn a_missing_file_reads_as_none_and_a_present_one_as_its_text() {
-        let dir = Scratch::new("checks-read");
-        assert_eq!(read_repo_file(&dir, "a.txt"), Ok(None));
-        fs::write(dir.join("a.txt"), "hello").expect("write the file");
-        assert_eq!(read_repo_file(&dir, "a.txt"), Ok(Some("hello".to_owned())));
-    }
-
-    #[test]
-    fn a_path_is_repo_relative_with_slashes() {
-        let root = Path::new("/ws");
-        assert_eq!(
-            repo_path(root, Path::new("/ws/crates/desktop/x.json")),
-            "crates/desktop/x.json"
-        );
-    }
-
-    /// A context whose members include the desktop crate at `crates/desktop`.
-    pub(crate) fn desktop_context(root: &Path) -> Context {
-        Context {
-            root: root.to_path_buf(),
-            members: vec![crate::workspace::Member {
-                name: DESKTOP_PACKAGE.to_owned(),
-                dir: "crates/desktop".to_owned(),
-                path_deps: Vec::new(),
-            }],
-        }
-    }
-
-    #[test]
-    fn the_desktop_dir_comes_from_the_member_with_its_package_name() {
-        let mut ctx = desktop_context(Path::new("/ws"));
-        ctx.members[0].dir = "apps/shell".to_owned();
-        assert_eq!(desktop_dir(&ctx), Ok("apps/shell"));
-    }
-
-    #[test]
-    fn a_missing_desktop_member_is_one_violation_at_the_root_manifest() {
-        let ctx = Context {
-            root: Path::new("/ws").to_path_buf(),
-            members: Vec::new(),
-        };
-        assert_eq!(
-            desktop_dir(&ctx),
-            Err(violation(
-                "Cargo.toml",
-                1,
-                "the desktop crate (package `clauseo-desktop`) is not a workspace member",
-                "restore crates/desktop or update xtask/src/checks: these checks guard its capabilities, plugins and Tauri config",
-            ))
-        );
-    }
-
-    #[test]
-    fn the_real_repo_passes_every_static_check() {
-        let root = crate::workspace::workspace_root();
-        let ctx = Context {
-            members: crate::workspace::load_members(&root).expect("cargo metadata runs"),
-            root,
-        };
-        for check in ALL {
-            let found = if check.name == plugins::CHECK.name {
-                plugins::check_without_graph(&ctx)
-            } else {
-                (check.run)(&ctx)
-            };
-            assert_eq!((check.name, found), (check.name, Vec::new()));
-        }
-    }
-
-    #[test]
-    fn line_numbers_start_at_one() {
-        assert_eq!(line_at(0), 1);
-        assert_eq!(line_at(4), 5);
-    }
-}
+mod tests;

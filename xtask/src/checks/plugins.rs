@@ -35,7 +35,7 @@
 mod graph;
 mod toml_lines;
 
-use crate::checks::{self, StaticCheck, violation};
+use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
 use crate::violation::Violation;
 use crate::workspace::{self, CargoDependency, Context, PackageDependencies};
 use std::collections::BTreeMap;
@@ -71,49 +71,55 @@ const METADATA_FIX: &str = "fix the manifest until `cargo metadata --no-deps` su
 /// Fails on every Tauri dependency of a workspace member outside the fixed set or its rules.
 pub(crate) const CHECK: StaticCheck = StaticCheck {
     name: "plugins",
+    counts: Noun {
+        one: "direct dependency",
+        many: "direct dependencies",
+    },
+    place: "of the desktop crate (package `clauseo-desktop`) in `cargo metadata`",
     run,
 };
 
 /// `--offline`: the check never downloads. `cargo xtask check` runs `deny` first, which fetches
 /// every target's crates; elsewhere a missing crate fails with `GRAPH_FIX`.
-fn run(ctx: &Context) -> Vec<Violation> {
+fn run(ctx: &Context) -> Inspection {
     check(ctx, Some(&["--locked", "--offline"]))
 }
 
 /// The check without the resolved-graph rule, for the real-repo test: that graph needs every
 /// target's crates downloaded, and tests use no network. `graph/tests.rs` covers the rule offline.
 #[cfg(test)]
-pub(crate) fn check_without_graph(ctx: &Context) -> Vec<Violation> {
+pub(crate) fn check_without_graph(ctx: &Context) -> Inspection {
     check(ctx, None)
 }
 
 /// The check, reading the resolved graph with `cargo metadata <graph_flags>`, or skipping the
 /// graph rules when `graph_flags` is `None` (tests of scratch workspaces that name registry
-/// crates, which resolve only with a lockfile and the crates downloaded).
-fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Vec<Violation> {
+/// crates, which resolve only with a lockfile and the crates downloaded). Counts the desktop
+/// crate's direct dependencies, of every kind.
+fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
     let dir = match checks::desktop_dir(ctx) {
         Ok(dir) => dir,
-        Err(violation) => return vec![violation],
+        Err(violation) => return Inspection::stopped(violation),
     };
     let manifest = checks::join(dir, "Cargo.toml");
     let packages = match workspace::load_workspace_dependencies(&ctx.root) {
         Ok(packages) => packages,
         Err(error) => {
-            return vec![violation(
+            return Inspection::stopped(violation(
                 &manifest,
                 1,
                 format!("could not read the workspace's dependencies: {error}"),
                 METADATA_FIX,
-            )];
+            ));
         }
     };
     let read = |rel: &str| checks::read_repo_file(&ctx.root, rel).map(Option::unwrap_or_default);
     let (desktop, root) = match (read(&manifest), read(WORKSPACE_MANIFEST)) {
         (Ok(desktop), Ok(root)) => (desktop, root),
-        (Err(violation), _) | (_, Err(violation)) => return vec![violation],
+        (Err(violation), _) | (_, Err(violation)) => return Inspection::stopped(violation),
     };
     let Some(desktop_deps) = packages.get(checks::DESKTOP_PACKAGE) else {
-        return vec![violation(
+        return Inspection::stopped(violation(
             &manifest,
             1,
             format!(
@@ -121,7 +127,7 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Vec<Violation> {
                 checks::DESKTOP_PACKAGE
             ),
             METADATA_FIX,
-        )];
+        ));
     };
     let mut found = violations(
         desktop_deps,
@@ -168,7 +174,7 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Vec<Violation> {
             )),
         }
     }
-    found
+    Inspection::new(desktop_deps.dependencies.len(), found)
 }
 
 /// One violation for each path dependency of member `name` whose package is not a workspace

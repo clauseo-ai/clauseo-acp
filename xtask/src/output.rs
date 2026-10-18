@@ -94,6 +94,11 @@ impl<W: Write> Printer<W> {
         }
     }
 
+    /// The line that ends a static check's step: its summary line, with the count.
+    pub(crate) fn result(&mut self, result: &StepResult) {
+        self.line(summary_line(result));
+    }
+
     /// The closing `summary:` block, one line per step.
     pub(crate) fn summary(&mut self, results: &[StepResult]) {
         self.line("summary:");
@@ -104,6 +109,7 @@ impl<W: Write> Printer<W> {
 }
 
 /// `fmt ok (0.0 s)`, `clippy ok (1 warning, 0.1 s)`, `clippy FAILED (0.2 s)`,
+/// `capabilities ok (1 capability file inspected, 0.0 s)`,
 /// `nextest ok (skipped: no changed packages)`.
 pub(crate) fn summary_line(result: &StepResult) -> String {
     match &result.status {
@@ -112,9 +118,10 @@ pub(crate) fn summary_line(result: &StepResult) -> String {
             failed,
             warnings,
             secs,
+            inspected,
         } => {
             let status = if *failed { "FAILED" } else { "ok" };
-            let mut parts = Vec::new();
+            let mut parts: Vec<String> = inspected.iter().cloned().collect();
             if *warnings > 0 {
                 let noun = if *warnings == 1 {
                     "warning"
@@ -140,6 +147,7 @@ mod tests {
                 failed,
                 warnings,
                 secs,
+                inspected: None,
             },
         }
     }
@@ -158,6 +166,27 @@ mod tests {
         assert_eq!(
             summary_line(&ran("clippy", true, 0, 0.2)),
             "clippy FAILED (0.2 s)"
+        );
+    }
+
+    #[test]
+    fn a_static_check_shows_its_count_and_fails_on_zero() {
+        let counted = |inspected: &str, failed| StepResult {
+            name: "capabilities".into(),
+            status: StepStatus::Ran {
+                failed,
+                warnings: 0,
+                secs: 0.0,
+                inspected: Some(inspected.into()),
+            },
+        };
+        assert_eq!(
+            summary_line(&counted("1 capability file inspected", false)),
+            "capabilities ok (1 capability file inspected, 0.0 s)"
+        );
+        assert_eq!(
+            summary_line(&counted("0 capability files inspected", true)),
+            "capabilities FAILED (0 capability files inspected, 0.0 s)"
         );
     }
 

@@ -24,6 +24,8 @@ pub(crate) enum StepStatus {
         failed: bool,
         warnings: usize,
         secs: f64,
+        /// `1 capability file inspected` for a static check; `None` for a tool.
+        inspected: Option<String>,
     },
     Skipped(&'static str),
 }
@@ -55,20 +57,32 @@ pub(crate) fn run_all<W: Write>(
     results
 }
 
+/// Runs one static check through `StaticCheck::report`: prints its violations, its failure for
+/// inspecting nothing, its notes, then a result line with the count, e.g.
+/// `capabilities ok (1 capability file inspected, 0.0 s)`.
 fn run_static<W: Write>(check: &StaticCheck, ctx: &Context, out: &mut Printer<W>) -> StepResult {
     out.header(check.name, "built-in static check");
-    let (violations, secs) = timed(|| (check.run)(ctx));
-    for found in &violations {
+    let (report, secs) = timed(|| check.report(ctx));
+    for found in &report.inspection.violations {
         out.violation(found);
     }
-    StepResult {
+    if let Some(nothing) = &report.nothing_inspected {
+        out.failure(&nothing.message, &nothing.fix);
+    }
+    for note in &report.inspection.notes {
+        out.note(format_args!("note: {note}"));
+    }
+    let result = StepResult {
         name: check.name.into(),
         status: StepStatus::Ran {
-            failed: !violations.is_empty(),
+            failed: report.failed(),
             warnings: 0,
             secs,
+            inspected: Some(report.counted),
         },
-    }
+    };
+    out.result(&result);
+    result
 }
 
 fn run_tool<W: Write>(
@@ -122,6 +136,7 @@ fn run_tool<W: Write>(
             failed,
             warnings,
             secs,
+            inspected: None,
         },
     }
 }
@@ -129,6 +144,7 @@ fn run_tool<W: Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::checks::{Inspection, Noun};
     use crate::process::Program;
     use crate::violation::{Finding, Violation};
     use std::path::PathBuf;
@@ -169,19 +185,114 @@ mod tests {
         })
     }
 
-    fn one_violation(_ctx: &Context) -> Vec<Violation> {
-        vec![Violation {
-            path: "docs/a.md".into(),
-            line: 2,
-            message: "bad link".into(),
-            fix: "fix the link".into(),
-        }]
+    fn one_violation(_ctx: &Context) -> Inspection {
+        Inspection::new(
+            1,
+            vec![Violation {
+                path: "docs/a.md".into(),
+                line: 2,
+                message: "bad link".into(),
+                fix: "fix the link".into(),
+            }],
+        )
     }
+
+    fn one_clean_doc_with_a_note(_ctx: &Context) -> Inspection {
+        Inspection {
+            inspected: 1,
+            violations: Vec::new(),
+            notes: vec!["docs/a.md has 550 of 600 lines; split it now".into()],
+        }
+    }
+
+    fn nothing(_ctx: &Context) -> Inspection {
+        Inspection::default()
+    }
+
+    const DOCS: Noun = Noun {
+        one: "doc",
+        many: "docs",
+    };
 
     static FAILING_CHECK: StaticCheck = StaticCheck {
         name: "fake-static",
+        counts: DOCS,
+        place: "in docs/",
         run: one_violation,
     };
+
+    static NOTING_CHECK: StaticCheck = StaticCheck {
+        name: "fake-static",
+        counts: DOCS,
+        place: "in docs/",
+        run: one_clean_doc_with_a_note,
+    };
+
+    static EMPTY_CHECK: StaticCheck = StaticCheck {
+        name: "fake-static",
+        counts: DOCS,
+        place: "in docs/",
+        run: nothing,
+    };
+
+    #[test]
+    fn a_static_check_prints_its_findings_notes_and_count() {
+        let mut out = Printer::new(Vec::new(), false);
+        let results = run_all(
+            vec![Step::Static(&FAILING_CHECK), Step::Static(&NOTING_CHECK)],
+            &context(),
+            &mut out,
+            &mut noisy_pass,
+        );
+        assert!(matches!(
+            results[1].status,
+            StepStatus::Ran { failed: false, .. }
+        ));
+        assert_eq!(
+            without_secs(&text(out)),
+            "==> fake-static: built-in static check\n\
+             docs/a.md:2: bad link\n\
+             \x20   fix: fix the link\n\
+             fake-static FAILED (1 doc inspected, S)\n\
+             ==> fake-static: built-in static check\n\
+             note: docs/a.md has 550 of 600 lines; split it now\n\
+             fake-static ok (1 doc inspected, S)\n"
+        );
+    }
+
+    #[test]
+    fn a_static_check_that_inspects_nothing_fails_without_a_location() {
+        let mut out = Printer::new(Vec::new(), false);
+        let results = run_all(
+            vec![Step::Static(&EMPTY_CHECK)],
+            &context(),
+            &mut out,
+            &mut noisy_pass,
+        );
+        assert!(matches!(
+            results[0].status,
+            StepStatus::Ran { failed: true, .. }
+        ));
+        assert_eq!(
+            without_secs(&text(out)),
+            "==> fake-static: built-in static check\n\
+             0 docs inspected in docs/\n\
+             \x20   fix: fake-static looks for docs in docs/; restore them, or update xtask/src/checks/fake_static.rs if they moved\n\
+             fake-static FAILED (0 docs inspected, S)\n"
+        );
+    }
+
+    /// `printed` with each `<n>.<n> s)` timing replaced by `S)`, since the clock is real.
+    fn without_secs(printed: &str) -> String {
+        printed
+            .lines()
+            .map(|line| match line.rsplit_once(", ") {
+                Some((head, tail)) if tail.ends_with(" s)") => format!("{head}, S)"),
+                _ => line.to_owned(),
+            })
+            .map(|line| line + "\n")
+            .collect()
+    }
 
     /// A passing cargo run: noisy output, streamed to the sink in two chunks.
     #[expect(

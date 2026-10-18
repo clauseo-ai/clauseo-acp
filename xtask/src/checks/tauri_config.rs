@@ -12,10 +12,11 @@
 //! comments), and `capabilities_path_pattern(` does not point Tauri at another folder. Each failing
 //! setting points at its key's line, found under its parent object (`json_text::key_line`), or at
 //! line 1.
-//! The pure functions take file contents and paths; `run` reads the files from the repo.
+//! The pure functions take file contents and paths; `run` reads the files from the repo and counts
+//! the ones it found: `tauri.conf.json`, `build.rs` and each platform config.
 
 use crate::checks::json_text::key_line;
-use crate::checks::{self, StaticCheck, violation};
+use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
 use crate::violation::Violation;
 use crate::workspace::Context;
 use serde_json::Value;
@@ -53,32 +54,44 @@ pub(crate) const PINNED_CSP: &str = "default-src 'self'; script-src 'self'; styl
 /// Fails on every unsafe setting in `tauri.conf.json` and on a `build.rs` without an `AppManifest`.
 pub(crate) const CHECK: StaticCheck = StaticCheck {
     name: "tauri-config",
+    counts: Noun {
+        one: "config file",
+        many: "config files",
+    },
+    place: "in the desktop crate (tauri.conf.json and build.rs)",
     run,
 };
 
-fn run(ctx: &Context) -> Vec<Violation> {
+fn run(ctx: &Context) -> Inspection {
     let desktop = match checks::desktop_dir(ctx) {
         Ok(dir) => dir,
-        Err(violation) => return vec![violation],
+        Err(violation) => return Inspection::stopped(violation),
     };
+    let mut read = 0;
     let conf = checks::join(desktop, TAURI_CONF);
     let mut found = match checks::read_repo_file(&ctx.root, &conf) {
-        Ok(text) => conf_violations(&conf, text.as_deref()),
+        Ok(text) => {
+            read += usize::from(text.is_some());
+            conf_violations(&conf, text.as_deref())
+        }
         Err(violation) => vec![violation],
     };
-    found.extend(
-        platform_configs()
-            .into_iter()
-            .map(|name| checks::join(desktop, &name))
-            .filter(|rel| ctx.root.join(rel).exists())
-            .map(|rel| platform_violation(&rel)),
-    );
+    let platform: Vec<String> = platform_configs()
+        .into_iter()
+        .map(|name| checks::join(desktop, &name))
+        .filter(|rel| ctx.root.join(rel).exists())
+        .collect();
+    read += platform.len();
+    found.extend(platform.iter().map(|rel| platform_violation(rel)));
     let build = checks::join(desktop, BUILD_RS);
     found.extend(match checks::read_repo_file(&ctx.root, &build) {
-        Ok(text) => build_rs_violations(&build, text.as_deref()),
+        Ok(text) => {
+            read += usize::from(text.is_some());
+            build_rs_violations(&build, text.as_deref())
+        }
         Err(violation) => vec![violation],
     });
-    found
+    Inspection::new(read, found)
 }
 
 /// Every unsafe setting in the Tauri config at `path`. `None` means the file is missing; a missing

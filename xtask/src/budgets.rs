@@ -97,11 +97,20 @@ struct Row {
 
 /// Reads `text` as `budgets.toml`. Returns the rows without problems, in file order, and every
 /// problem found, sorted by line.
+#[cfg(test)]
 pub(crate) fn parse(text: &str) -> (Vec<Budget>, Vec<Violation>) {
+    let (_, budgets, violations) = parse_counted(text);
+    (budgets, violations)
+}
+
+/// `parse`, plus the number of `[[budget]]` rows read, with or without problems. A file `toml`
+/// cannot read has none.
+fn parse_counted(text: &str) -> (usize, Vec<Budget>, Vec<Violation>) {
     let file: File = match toml::from_str(text) {
         Ok(file) => file,
-        Err(error) => return (Vec::new(), vec![syntax_problem(text, &error)]),
+        Err(error) => return (0, Vec::new(), vec![syntax_problem(text, &error)]),
     };
+    let rows = file.budget.len();
     let mut violations = Vec::new();
     if file.budget.is_empty() {
         violations.push(problem(
@@ -120,23 +129,39 @@ pub(crate) fn parse(text: &str) -> (Vec<Budget>, Vec<Violation>) {
         }
     }
     violations.sort_by_key(|violation| violation.line);
-    (budgets, violations)
+    (rows, budgets, violations)
 }
 
 /// Reads `budgets.toml` under `root`. `Err` holds every problem, including an unreadable file.
 pub(crate) fn load(root: &Path) -> Result<Vec<Budget>, Vec<Violation>> {
-    let text = std::fs::read_to_string(root.join(FILE)).map_err(|error| {
-        vec![problem(
-            1,
-            format!("cannot read budgets.toml: {error}"),
-            "restore budgets.toml at the repo root",
-        )]
-    })?;
-    let (budgets, violations) = parse(&text);
+    let (_, budgets, violations) = read(root);
     if violations.is_empty() {
         Ok(budgets)
     } else {
         Err(violations)
+    }
+}
+
+/// Reads `budgets.toml` under `root`: the number of rows read, with or without problems, and
+/// every problem, including an unreadable file (which has no rows).
+pub(crate) fn inspect(root: &Path) -> (usize, Vec<Violation>) {
+    let (rows, _, violations) = read(root);
+    (rows, violations)
+}
+
+/// `parse_counted` on `budgets.toml` under `root`; an unreadable file is one problem, no rows.
+fn read(root: &Path) -> (usize, Vec<Budget>, Vec<Violation>) {
+    match std::fs::read_to_string(root.join(FILE)) {
+        Ok(text) => parse_counted(&text),
+        Err(error) => (
+            0,
+            Vec::new(),
+            vec![problem(
+                1,
+                format!("cannot read budgets.toml: {error}"),
+                "restore budgets.toml at the repo root",
+            )],
+        ),
     }
 }
 

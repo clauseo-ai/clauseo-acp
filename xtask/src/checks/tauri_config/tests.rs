@@ -436,11 +436,11 @@ fn run_passes_a_clean_tree_and_fails_a_planted_setting_with_its_path() {
     fs::create_dir_all(dir.join("crates/desktop")).expect("create the desktop dir");
     fs::write(dir.join("crates/desktop/build.rs"), BUILD).expect("write build.rs");
     fs::write(dir.join(conf), CONF).expect("write tauri.conf.json");
-    assert_eq!(run(&ctx), Vec::new());
+    assert_eq!(run(&ctx), Inspection::new(2, Vec::new()));
     let planted = CONF.replace("\"withGlobalTauri\": false", "\"withGlobalTauri\": true");
     fs::write(dir.join(conf), &planted).expect("write tauri.conf.json");
     assert_eq!(
-        run(&ctx),
+        run(&ctx).violations,
         vec![violation(
             conf,
             line_of(&planted, "withGlobalTauri"),
@@ -476,12 +476,15 @@ fn run_fails_on_a_platform_config() {
         .expect("write the platform config");
     assert_eq!(
         run(&desktop_context(&dir)),
-        vec![violation(
-            platform,
-            1,
-            "platform config `crates/desktop/tauri.macos.conf.json` overrides tauri.conf.json",
-            PLATFORM_FIX,
-        )]
+        Inspection::new(
+            3,
+            vec![violation(
+                platform,
+                1,
+                "platform config `crates/desktop/tauri.macos.conf.json` overrides tauri.conf.json",
+                PLATFORM_FIX,
+            )]
+        )
     );
 }
 
@@ -492,7 +495,7 @@ fn run_fails_once_when_the_desktop_crate_is_not_a_member() {
         root: dir.to_path_buf(),
         members: Vec::new(),
     };
-    let found = run(&ctx);
+    let found = run(&ctx).violations;
     assert_eq!(found.len(), 1);
     assert_eq!((found[0].path.as_str(), found[0].line), ("Cargo.toml", 1));
 }

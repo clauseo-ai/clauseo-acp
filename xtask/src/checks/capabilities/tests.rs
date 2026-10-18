@@ -280,7 +280,7 @@ fn run_scans_inline_capabilities_in_the_config() {
     fs::create_dir_all(&caps).expect("create the capability dir");
     fs::write(caps.join("main.json"), CLEAN).expect("write main.json");
     fs::write(dir.join("crates/desktop/tauri.conf.json"), CONF).expect("write the config");
-    let found = run(&desktop_context(&dir));
+    let found = run(&desktop_context(&dir)).violations;
     assert_eq!(found.len(), 2);
     assert!(
         found
@@ -301,7 +301,7 @@ fn a_ds_store_and_a_backup_file_are_ignored() {
     )
     .expect("write .DS_Store");
     fs::write(caps.join("main.json~"), "[\"core:default\"]").expect("write main.json~");
-    assert_eq!(run(&desktop_context(&dir)), Vec::new());
+    assert_eq!(run(&desktop_context(&dir)), Inspection::new(1, Vec::new()));
 }
 
 #[test]
@@ -311,7 +311,7 @@ fn a_missing_desktop_member_fails_at_the_root_manifest() {
         root: dir.to_path_buf(),
         members: Vec::new(),
     };
-    let found = run(&ctx);
+    let found = run(&ctx).violations;
     assert_eq!(found.len(), 1);
     assert_eq!((found[0].path.as_str(), found[0].line), ("Cargo.toml", 1));
 }
@@ -320,7 +320,7 @@ fn a_missing_desktop_member_fails_at_the_root_manifest() {
 fn a_missing_capabilities_folder_fails() {
     let dir = Scratch::new("capabilities-missing");
     assert_eq!(
-        run(&desktop_context(&dir)),
+        run(&desktop_context(&dir)).violations,
         vec![Violation {
             path: "crates/desktop/capabilities".to_owned(),
             line: 1,
@@ -338,7 +338,7 @@ fn a_moved_desktop_crate_is_found_by_its_package_name() {
     fs::write(caps.join("main.json"), "[\"core:default\"]").expect("write main.json");
     let mut ctx = desktop_context(&dir);
     ctx.members[0].dir = "apps/shell".to_owned();
-    let found = run(&ctx);
+    let found = run(&ctx).violations;
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].path, "apps/shell/capabilities/main.json");
 }
@@ -356,9 +356,12 @@ fn run_reads_nested_capability_files_and_reports_their_repo_path() {
     .expect("write local.toml");
     assert_eq!(
         run(&desktop_context(&dir)),
-        vec![Violation {
-            path: "crates/desktop/capabilities/extra/local.toml".to_owned(),
-            ..violation(1, "capability grants `fs:allow-read`", FIX_PREFIX)
-        }]
+        Inspection::new(
+            2,
+            vec![Violation {
+                path: "crates/desktop/capabilities/extra/local.toml".to_owned(),
+                ..violation(1, "capability grants `fs:allow-read`", FIX_PREFIX)
+            }]
+        )
     );
 }

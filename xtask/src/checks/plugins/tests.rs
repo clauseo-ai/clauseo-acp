@@ -81,8 +81,13 @@ impl Workspace {
         Workspace::new(name, ROOT, &DESKTOP.replacen(from, to, 1), &[])
     }
 
-    /// `run` on the workspace, with the members `cargo metadata` lists.
+    /// The violations of `inspection`.
     fn violations(&self) -> Vec<Violation> {
+        self.inspection().violations
+    }
+
+    /// `run` on the workspace without the resolved graph, with the members `cargo metadata` lists.
+    fn inspection(&self) -> Inspection {
         let ctx = Context {
             members: workspace::load_members(&self.dir).expect("cargo metadata runs"),
             ..desktop_context(&self.dir)
@@ -101,10 +106,10 @@ fn line_of(text: &str, needle: &str) -> u32 {
 }
 
 #[test]
-fn the_fixed_plugin_set_passes() {
+fn the_fixed_plugin_set_passes_and_counts_each_direct_dependency() {
     assert_eq!(
-        Workspace::new("clean", ROOT, DESKTOP, &[]).violations(),
-        Vec::new()
+        Workspace::new("clean", ROOT, DESKTOP, &[]).inspection(),
+        Inspection::new(10, Vec::new())
     );
 }
 
@@ -415,7 +420,7 @@ fn run_fails_once_when_the_desktop_crate_is_not_a_member() {
         root: dir.to_path_buf(),
         members: Vec::new(),
     };
-    let found = run(&ctx);
+    let found = run(&ctx).violations;
     assert_eq!(found.len(), 1);
     assert_eq!((found[0].path.as_str(), found[0].line), ("Cargo.toml", 1));
 }
