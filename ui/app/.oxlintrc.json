@@ -16,13 +16,37 @@
           }
         ]
       }
+    ],
+    "no-restricted-globals": [
+      "error",
+      {
+        "name": "__TAURI_INTERNALS__",
+        "message": "Tauri's injected globals are reached only under src/transport/; everything else talks to the host through HostTransport."
+      },
+      {
+        "name": "__TAURI__",
+        "message": "Tauri's injected globals are reached only under src/transport/; everything else talks to the host through HostTransport."
+      }
+    ],
+    "no-restricted-properties": [
+      "error",
+      {
+        "property": "__TAURI_INTERNALS__",
+        "message": "Tauri's injected globals are reached only under src/transport/; everything else talks to the host through HostTransport."
+      },
+      {
+        "property": "__TAURI__",
+        "message": "Tauri's injected globals are reached only under src/transport/; everything else talks to the host through HostTransport."
+      }
     ]
   },
   "overrides": [
     {
       "files": ["src/transport/**"],
       "rules": {
-        "no-restricted-imports": "off"
+        "no-restricted-imports": "off",
+        "no-restricted-globals": "off",
+        "no-restricted-properties": "off"
       }
     }
   ],
