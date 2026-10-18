@@ -1,7 +1,7 @@
 //! The frontend steps: `pnpm install` for the `ui` workspace, then the package.json scripts that
-//! run tsc, oxlint, oxfmt, vitest and vite build. The scripts are the one source of each command; xtask
-//! only appends the flags its parsers need. Each builder says what one tool runs and how its output
-//! is read. `plan` decides whether they run or are skipped; the pnpm version is pinned by
+//! run tsc, oxlint, oxfmt, vitest and vite build. The scripts are the one source of each command;
+//! xtask only appends the flags its parsers need. Each builder says what one tool runs and how its
+//! output is read. `plan` decides whether they run or are skipped; the pnpm version is pinned by
 //! `packageManager` in `ui/package.json`.
 
 use super::ToolStep;

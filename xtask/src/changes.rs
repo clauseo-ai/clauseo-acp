@@ -14,7 +14,8 @@ pub(crate) enum Selection {
     Packages(Vec<String>),
 }
 
-/// Repo-root files whose change selects every package: they change how everything builds or is checked.
+/// Repo-root files whose change selects every package: they change how everything builds or is
+/// checked.
 const ALL_PACKAGES_FILES: &[&str] = &[
     "Cargo.toml",
     "Cargo.lock",

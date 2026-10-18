@@ -83,15 +83,15 @@ fn hunk_changed_line(start: u32, body: &[&str]) -> u32 {
 pub(crate) struct Diag {
     pub path: String,
     pub line: u32,
-    /// Includes the level and, from JSON, the lint: `warning: unused variable: x (unused_variables)`
-    /// or `error[E0425]: cannot find value`.
+    /// Includes the level and, from JSON, the lint:
+    /// `warning: unused variable: x (unused_variables)` or `error[E0425]: cannot find value`.
     pub message: String,
     pub is_error: bool,
 }
 
-/// Every short-form diagnostic in `output`, deduplicated by (path, line, message). A line is either one of
-/// cargo's JSON messages, whose `rendered` text is read and whose lint name is appended, or plain
-/// `path:line:col: warning|error...` text. Lines without a file prefix are ignored.
+/// Every short-form diagnostic in `output`, deduplicated by (path, line, message). A line is either
+/// one of cargo's JSON messages, whose `rendered` text is read and whose lint name is appended, or
+/// plain `path:line:col: warning|error...` text. Lines without a file prefix are ignored.
 pub(crate) fn short_diags(output: &str, root: &str) -> Vec<Diag> {
     let mut diags: Vec<Diag> = Vec::new();
     for line in output.lines() {
@@ -192,7 +192,8 @@ fn short_line(line: &str, root: &str) -> Option<Diag> {
     })
 }
 
-/// Findings for `cargo fmt --check` output: one per file it would change, fixed by `cargo fmt --all`.
+/// Findings for `cargo fmt --check` output: one per file it would change, fixed by
+/// `cargo fmt --all`.
 pub(crate) fn fmt_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
     fmt_diffs(output, &root_str(ctx))
         .into_iter()

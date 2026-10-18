@@ -3,8 +3,8 @@
 //! The `toml` crate reads the file into `File` and `Row`. A `Row` names every key a row may have,
 //! each with its type and its enum values, and `deny_unknown_fields` rejects any other key. Each
 //! value keeps its span, so a problem is reported at the line that causes it. The rules that `toml`
-//! cannot express stay here: required keys, `snake_case` and unique ids, `measured` and `measured_on`
-//! set together, and a limit that is zero or more.
+//! cannot express stay here: required keys, `snake_case` and unique ids, `measured` and
+//! `measured_on` set together, and a limit that is zero or more.
 
 use crate::violation::Violation;
 use serde::Deserialize;
@@ -71,7 +71,8 @@ pub(crate) enum Status {
     Measured,
 }
 
-/// The file as `toml` reads it. `budget` is empty when there is no table, which is a rule of its own.
+/// The file as `toml` reads it. `budget` is empty when there is no table, which is a rule of its
+/// own.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct File {

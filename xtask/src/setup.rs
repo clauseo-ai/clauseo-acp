@@ -68,8 +68,8 @@ pub(crate) const BINARIES: &[Binary] = &[
     },
 ];
 
-/// Cargo's bin directory in shell syntax: `$CARGO_HOME/bin`, or `~/.cargo/bin` without `CARGO_HOME`.
-/// `cargo install` puts the other tools there, so it is already on PATH.
+/// Cargo's bin directory in shell syntax: `$CARGO_HOME/bin`, or `~/.cargo/bin` without
+/// `CARGO_HOME`. `cargo install` puts the other tools there, so it is already on PATH.
 const CARGO_BIN: &str = "${CARGO_HOME:-$HOME/.cargo}/bin";
 
 fn gitleaks_unix(os: &str, arch: &str, version: &str) -> Option<String> {

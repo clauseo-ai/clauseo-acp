@@ -1,5 +1,5 @@
-//! The only place xtask writes to stdout. Every line the xtask shows goes through a `Printer`, so the
-//! output format and the live-or-captured rule live in one place.
+//! The only place xtask writes to stdout. Every line the xtask shows goes through a `Printer`, so
+//! the output format and the live-or-captured rule live in one place.
 
 use crate::steps::{StepResult, StepStatus};
 use crate::violation::Violation;

@@ -1,6 +1,6 @@
-//! Steps as data. `plan` lists what runs and in what order, and `run_all` is the one loop that runs it.
-//! Adding an external step is one `ToolStep` in `plan.rs`, or in `policy.rs` for a repo-policy tool,
-//! or in `ui.rs` for a frontend tool.
+//! Steps as data. `plan` lists what runs and in what order, and `run_all` is the one loop that runs
+//! it. Adding an external step is one `ToolStep` in `plan.rs`, or in `policy.rs` for a repo-policy
+//! tool, or in `ui.rs` for a frontend tool.
 
 mod plan;
 mod policy;

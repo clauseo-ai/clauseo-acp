@@ -1,7 +1,7 @@
 //! The repo-policy steps: licences, advisories and bans (cargo-deny), unused dependencies
 //! (cargo-shear), spelling (typos), TOML formatting (taplo) and secrets in this branch's commits
-//! (gitleaks). Each builder says what one tool runs and how its output is read. The tools are pinned
-//! in `setup.rs`.
+//! (gitleaks). Each builder says what one tool runs and how its output is read. The tools are
+//! pinned in `setup.rs`.
 
 use super::ToolStep;
 use super::plan::{parse_none, setup_or, setup_or_reproduce};
