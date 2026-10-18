@@ -30,16 +30,6 @@ tauri = "2.12.4"
 tauri-plugin-os = "2.4.0"
 "#;
 
-const CONF: &str = r#"{
-  "app": {
-"withGlobalTauri": false,
-"windows": []
-  }
-}
-"#;
-
-const BUILD: &str = "fn main() {\n    tauri_build::try_build(\n        tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new()),\n    );\n}\n";
-
 /// Line number of the first line of `text` that contains `needle`.
 fn line_of(text: &str, needle: &str) -> u32 {
     let index = text
@@ -193,58 +183,6 @@ fn a_devtools_reference_in_features_fails_at_its_line() {
 }
 
 #[test]
-fn with_global_tauri_true_or_missing_fails_and_false_passes() {
-    let truthy = CONF.replace("false", "true");
-    assert_eq!(
-        check_global_tauri(Some(&truthy)),
-        vec![violation(
-            TAURI_CONF,
-            3,
-            "app.withGlobalTauri must be false",
-            GLOBAL_TAURI_FIX,
-        )]
-    );
-    let missing = "{\n  \"app\": {}\n}\n";
-    assert_eq!(
-        check_global_tauri(Some(missing)),
-        vec![violation(
-            TAURI_CONF,
-            1,
-            "app.withGlobalTauri must be false",
-            GLOBAL_TAURI_FIX,
-        )]
-    );
-    assert_eq!(check_global_tauri(Some(CONF)), Vec::new());
-}
-
-#[test]
-fn a_missing_or_invalid_tauri_conf_fails_at_line_one() {
-    assert_eq!(check_global_tauri(None)[0].line, 1);
-    let invalid = check_global_tauri(Some("{ \"app\": "));
-    assert_eq!(invalid.len(), 1);
-    assert!(
-        invalid[0]
-            .message
-            .starts_with("`crates/desktop/tauri.conf.json` is not valid JSON")
-    );
-}
-
-#[test]
-fn build_rs_without_app_manifest_fails_at_line_one() {
-    assert_eq!(
-        check_app_manifest(Some("fn main() {}\n")),
-        vec![violation(
-            BUILD_RS,
-            1,
-            "build.rs declares no AppManifest",
-            APP_MANIFEST_FIX,
-        )]
-    );
-    assert_eq!(check_app_manifest(None).len(), 1);
-    assert_eq!(check_app_manifest(Some(BUILD)), Vec::new());
-}
-
-#[test]
 fn the_check_is_registered_under_its_name() {
     assert!(
         crate::checks::ALL
@@ -256,12 +194,7 @@ fn the_check_is_registered_under_its_name() {
 #[test]
 fn run_passes_a_clean_tree_and_fails_a_planted_plugin_with_its_path() {
     let dir = Scratch::new("plugins-run");
-    let files = [
-        (DESKTOP_MANIFEST, DESKTOP),
-        (WORKSPACE_MANIFEST, WORKSPACE),
-        (TAURI_CONF, CONF),
-        (BUILD_RS, BUILD),
-    ];
+    let files = [(DESKTOP_MANIFEST, DESKTOP), (WORKSPACE_MANIFEST, WORKSPACE)];
     let write_all = |desktop: &str| {
         for (rel, text) in files {
             let text = if rel == DESKTOP_MANIFEST {

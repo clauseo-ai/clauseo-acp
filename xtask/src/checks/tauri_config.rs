@@ -1,0 +1,221 @@
+//! The `tauri-config` check: the security settings of the desktop crate's `tauri.conf.json` and
+//! `build.rs`.
+//!
+//! In `tauri.conf.json`: the global Tauri object is off, the prototype is frozen, the CSP is set
+//! and allows neither eval nor inline script (the dev CSP may allow inline script), no window is
+//! built from config, the asset protocol is off, and no `dangerous*` key appears at any depth.
+//! In `build.rs`: an `AppManifest` is declared. Each failing setting points at its key's line,
+//! found under its parent object (`json_text::key_line`), or at line 1.
+//! The pure functions take file contents and paths; `run` reads the files from the repo.
+
+use crate::checks::json_text::key_line;
+use crate::checks::{self, StaticCheck, violation};
+use crate::violation::Violation;
+use crate::workspace::Context;
+use serde_json::Value;
+
+const TAURI_CONF: &str = "crates/desktop/tauri.conf.json";
+const BUILD_RS: &str = "crates/desktop/build.rs";
+
+const CONF_MISSING_FIX: &str =
+    "restore it: Tauri reads the window's security settings from it, and this check guards them";
+const CONF_INVALID_FIX: &str = "fix the JSON syntax: Tauri cannot read the file either";
+const GLOBAL_TAURI_FIX: &str = "set `\"withGlobalTauri\": false` under `app`: the global object hands every script in the page the whole IPC API";
+const FREEZE_FIX: &str = "set `\"freezePrototype\": true` under app.security: a frozen prototype stops script in the page from hijacking the objects the IPC bridge uses";
+const CSP_MISSING_FIX: &str =
+    "restore app.security.csp: without a CSP any injected script runs and reaches the IPC";
+const CSP_UNSAFE_FIX: &str =
+    "remove it from app.security.csp: it lets injected script run, and that script reaches the IPC";
+const DEV_CSP_FIX: &str = "remove `'unsafe-eval'` from app.security.devCsp: dev builds may allow 'unsafe-inline' for hot reload, but never eval";
+const WINDOWS_FIX: &str =
+    "build windows in crates/desktop/src/lib.rs: a config window skips use_https_scheme(true)";
+const ASSET_FIX: &str = "set app.security.assetProtocol.enable to false: the asset protocol serves files from disk to the webview";
+const DANGEROUS_FIX: &str = "remove it: each `dangerous*` setting switches off a Tauri safeguard";
+const APP_MANIFEST_FIX: &str = "call `tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[])))`: without a manifest Tauri skips the access check for app commands";
+
+/// The CSP sources that let injected script run.
+const UNSAFE_SOURCES: [&str; 2] = ["'unsafe-eval'", "'unsafe-inline'"];
+
+/// Fails on every unsafe setting in `tauri.conf.json` and on a `build.rs` without an `AppManifest`.
+pub(crate) const CHECK: StaticCheck = StaticCheck {
+    name: "tauri-config",
+    run,
+};
+
+fn run(ctx: &Context) -> Vec<Violation> {
+    let mut found = match checks::read_repo_file(&ctx.root, TAURI_CONF) {
+        Ok(text) => conf_violations(TAURI_CONF, text.as_deref()),
+        Err(violation) => vec![violation],
+    };
+    found.extend(match checks::read_repo_file(&ctx.root, BUILD_RS) {
+        Ok(text) => build_rs_violations(BUILD_RS, text.as_deref()),
+        Err(violation) => vec![violation],
+    });
+    found
+}
+
+/// Every unsafe setting in the Tauri config at `path`. `None` means the file is missing; a missing
+/// file or invalid JSON is one violation at line 1.
+pub(crate) fn conf_violations(path: &str, text: Option<&str>) -> Vec<Violation> {
+    let Some(text) = text else {
+        return vec![violation(
+            path,
+            1,
+            format!("`{path}` is missing"),
+            CONF_MISSING_FIX,
+        )];
+    };
+    let conf: Value = match serde_json::from_str(text) {
+        Ok(conf) => conf,
+        Err(error) => {
+            return vec![violation(
+                path,
+                1,
+                format!("`{path}` is not valid JSON: {error}"),
+                CONF_INVALID_FIX,
+            )];
+        }
+    };
+    let at = |keys: &[&str], message: String, fix: &str| {
+        violation(path, key_line(text, keys), message, fix)
+    };
+    let mut found = Vec::new();
+    if conf.pointer("/app/withGlobalTauri") != Some(&Value::Bool(false)) {
+        found.push(at(
+            &["app", "withGlobalTauri"],
+            "app.withGlobalTauri must be false".to_owned(),
+            GLOBAL_TAURI_FIX,
+        ));
+    }
+    if conf.pointer("/app/security/freezePrototype") != Some(&Value::Bool(true)) {
+        found.push(at(
+            &["app", "security", "freezePrototype"],
+            "app.security.freezePrototype must be true".to_owned(),
+            FREEZE_FIX,
+        ));
+    }
+    let csp_keys = ["app", "security", "csp"];
+    match conf.pointer("/app/security/csp").and_then(csp_text) {
+        Some(csp) if !csp.trim().is_empty() => {
+            for source in UNSAFE_SOURCES.iter().filter(|source| csp.contains(*source)) {
+                found.push(at(
+                    &csp_keys,
+                    format!("app.security.csp allows `{source}`"),
+                    CSP_UNSAFE_FIX,
+                ));
+            }
+        }
+        _ => found.push(at(
+            &csp_keys,
+            "app.security.csp is missing or empty".to_owned(),
+            CSP_MISSING_FIX,
+        )),
+    }
+    if let Some(dev) = conf.pointer("/app/security/devCsp").and_then(csp_text)
+        && dev.contains("'unsafe-eval'")
+    {
+        found.push(at(
+            &["app", "security", "devCsp"],
+            "app.security.devCsp allows `'unsafe-eval'`".to_owned(),
+            DEV_CSP_FIX,
+        ));
+    }
+    if !conf
+        .pointer("/app/windows")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty)
+    {
+        found.push(at(
+            &["app", "windows"],
+            "app.windows must be an empty array".to_owned(),
+            WINDOWS_FIX,
+        ));
+    }
+    if conf.pointer("/app/security/assetProtocol/enable") == Some(&Value::Bool(true)) {
+        found.push(at(
+            &["app", "security", "assetProtocol", "enable"],
+            "app.security.assetProtocol.enable is true".to_owned(),
+            ASSET_FIX,
+        ));
+    }
+    for keys in dangerous_keys(&conf) {
+        let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+        found.push(at(
+            &keys,
+            format!("`{}` switches off a Tauri safeguard", keys.join(".")),
+            DANGEROUS_FIX,
+        ));
+    }
+    found
+}
+
+/// A CSP as one string: Tauri takes a string, or an object of directives whose sources are a
+/// string or a list of strings. `None` for any other value.
+fn csp_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Object(directives) => Some(
+            directives
+                .iter()
+                .map(|(name, sources)| {
+                    let sources = match sources {
+                        Value::Array(items) => items
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                        other => other.as_str().unwrap_or_default().to_owned(),
+                    };
+                    format!("{name} {sources}")
+                })
+                .collect::<Vec<_>>()
+                .join("; "),
+        ),
+        _ => None,
+    }
+}
+
+/// The key path of every object key, at any depth, whose name starts with `dangerous`, in
+/// document order. Array elements add no key to the path.
+fn dangerous_keys(value: &Value) -> Vec<Vec<String>> {
+    let mut found = Vec::new();
+    collect_dangerous(value, &mut Vec::new(), &mut found);
+    found
+}
+
+fn collect_dangerous(value: &Value, path: &mut Vec<String>, found: &mut Vec<Vec<String>>) {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map {
+                path.push(key.clone());
+                if key.starts_with("dangerous") {
+                    found.push(path.clone());
+                }
+                collect_dangerous(child, path, found);
+                path.pop();
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_dangerous(item, path, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `build.rs` at `path` must call `app_manifest(`. A missing file counts as no manifest.
+pub(crate) fn build_rs_violations(path: &str, text: Option<&str>) -> Vec<Violation> {
+    if text.is_some_and(|text| text.contains("app_manifest(")) {
+        return Vec::new();
+    }
+    vec![violation(
+        path,
+        1,
+        "build.rs declares no AppManifest",
+        APP_MANIFEST_FIX,
+    )]
+}
+
+#[cfg(test)]
+mod tests;

@@ -5,7 +5,9 @@
 
 mod budgets;
 mod capabilities;
+mod json_text;
 mod plugins;
+mod tauri_config;
 
 use crate::violation::Violation;
 use crate::workspace::Context;
@@ -20,7 +22,12 @@ pub(crate) struct StaticCheck {
 }
 
 /// Every static check, in run order.
-pub(crate) const ALL: &[StaticCheck] = &[budgets::CHECK, capabilities::CHECK, plugins::CHECK];
+pub(crate) const ALL: &[StaticCheck] = &[
+    budgets::CHECK,
+    capabilities::CHECK,
+    plugins::CHECK,
+    tauri_config::CHECK,
+];
 
 /// Reads `root/rel` as text. `Ok(None)` when the file does not exist; any other read error is a
 /// violation at line 1.
@@ -50,6 +57,21 @@ pub(crate) fn repo_path(root: &Path, path: &Path) -> String {
         .map(|part| part.as_os_str().to_string_lossy().into_owned())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// A violation at `path:line`.
+pub(crate) fn violation(
+    path: &str,
+    line: u32,
+    message: impl Into<String>,
+    fix: impl Into<String>,
+) -> Violation {
+    Violation {
+        path: path.to_owned(),
+        line,
+        message: message.into(),
+        fix: fix.into(),
+    }
 }
 
 /// The 1-based line number of the line at `index`, counting from 0 as `str::lines` does.
