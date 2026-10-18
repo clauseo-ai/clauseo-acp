@@ -1,9 +1,12 @@
 //! Timing one probe on the marker file: the edits, the cargo runs, and putting the file back.
 //!
 //! Before the first edit, the original is copied to `target/xtask/buildtime/<repo path>`, and a
-//! copy is never replaced. A guard puts the original back and deletes the copy when the probe ends,
-//! and on a panic. A killed run leaves its copy, and the next `buildtime rust` run puts it back only
-//! where the file differs by the marker's number alone (`restore_leftovers`).
+//! copy is never replaced. A guard (`probe/guard.rs`) puts the original back and deletes the copy
+//! when the probe ends, and on a panic, but never over an edit made during the run. A killed run
+//! leaves its copy, and the next `buildtime rust` run puts it back only where the file differs by
+//! the marker's number alone (`restore_leftovers`).
+
+mod guard;
 
 use super::marker::{self, Leftover, Marker, bump_marker, leftover};
 use super::profile::warm_up_incremental;
@@ -12,12 +15,10 @@ use super::{INCREMENTAL_FIX, Probe};
 use crate::budgets::Budget;
 use crate::clock::timed;
 use crate::process::{Captured, Cmd, Program};
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use guard::{BACKUP_DIR, Guard, conflict, copy_name, prune};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
-
-/// Where the copies of the original files wait, under the repo root.
-const BACKUP_DIR: &str = "target/xtask/buildtime";
 
 /// The timed runs of one probe, and the warning that its build was not incremental, if it was not.
 #[derive(Debug, Clone, PartialEq)]
@@ -68,7 +69,8 @@ pub(crate) fn run_probe(
 
 /// Runs the warm-up (`cargo <subcommand> -v`) and then `runs` timed runs of `cargo <subcommand>`.
 /// Each run writes the marker's next value first, so cargo rebuilds the crate each time. The file
-/// is put back before this returns, on success and on failure. `runner` runs a command and returns
+/// is put back before this returns, on success and on failure, unless someone edited it during the
+/// run: then nothing more is written, the copy is kept, and the probe fails with a conflict. `runner` runs a command and returns
 /// its captured output; production passes `process::capture`.
 pub(crate) fn measure(
     root: &Path,
@@ -78,8 +80,8 @@ pub(crate) fn measure(
     ci: bool,
     runner: &mut dyn FnMut(&Cmd) -> io::Result<Captured>,
 ) -> Result<Samples, Failure> {
-    let guard = Guard::save(root, marker)?;
-    let edited = edit_and_run(&guard, marker, probe, runs, ci, runner);
+    let mut guard = Guard::save(root, marker)?;
+    let edited = edit_and_run(&mut guard, marker, probe, runs, ci, runner);
     let restored = guard.restore();
     match (edited, restored) {
         (Ok(samples), Ok(())) => Ok(samples),
@@ -96,29 +98,23 @@ pub(crate) fn measure(
 /// The edit-and-run loop of `measure`: the warm-up, then the timed runs. The warm-up's output is
 /// judged before any timed run, so a probe that cannot be trusted stops after one run.
 fn edit_and_run(
-    guard: &Guard,
+    guard: &mut Guard,
     marker: &Marker,
     probe: Probe,
     runs: u32,
     ci: bool,
     runner: &mut dyn FnMut(&Cmd) -> io::Result<Captured>,
 ) -> Result<Samples, Failure> {
-    let mut current = guard.original.clone();
     let mut secs = Vec::new();
     let mut warning = None;
     for run in 0..=runs {
-        current = bump_marker(&current).ok_or_else(|| {
+        let next = bump_marker(&guard.last).ok_or_else(|| {
             Failure::new(
                 format!("{} lost its marker line", marker.path),
                 "restore the BUILDTIME_MARKER line by hand",
             )
         })?;
-        fs::write(&guard.path, &current).map_err(|error| {
-            Failure::new(
-                format!("could not write {}: {error}", marker.path),
-                "make sure the file is writable",
-            )
-        })?;
+        guard.write(next)?;
         let warm_up = run == 0;
         let cmd = if warm_up {
             Cmd::new(Program::Cargo, [probe.subcommand, "-v"])
@@ -180,140 +176,6 @@ pub(crate) fn judge_warm_up(
             "warning: {} builds without incremental; its timing is not comparable with the budget",
             probe.package
         ))),
-    }
-}
-
-/// A marker file's original text, and the copy of it that waits under `target/xtask/buildtime`.
-/// `restore` puts the original back and deletes the copy. A guard dropped before that puts it back
-/// too. A failed write keeps the copy, and the failure's fix names it.
-struct Guard {
-    path: PathBuf,
-    rel: String,
-    original: String,
-    base: PathBuf,
-    backup: PathBuf,
-    pending: bool,
-}
-
-impl Guard {
-    /// Saves the original of `marker` as its copy. Nothing is edited when the save fails, and an
-    /// existing copy is never replaced.
-    fn save(root: &Path, marker: &Marker) -> Result<Guard, Failure> {
-        let base = root.join(BACKUP_DIR);
-        let backup = base.join(&marker.path);
-        match write_new_copy(&backup, &marker.text) {
-            Ok(true) => Ok(Guard {
-                path: root.join(&marker.path),
-                rel: marker.path.clone(),
-                original: marker.text.clone(),
-                base,
-                backup,
-                pending: true,
-            }),
-            Ok(false) => Err(Failure::new(
-                format!(
-                    "a saved copy of {} already exists at {}; an earlier restore failed",
-                    marker.path,
-                    copy_name(&marker.path)
-                ),
-                format!(
-                    "restore {} from that copy by hand, then delete it",
-                    marker.path
-                ),
-            )),
-            Err(error) => Err(Failure::new(
-                format!(
-                    "could not back up {} before editing it: {error}",
-                    marker.path
-                ),
-                format!("make sure {BACKUP_DIR} is writable, then run again"),
-            )),
-        }
-    }
-
-    /// The original text back in the file, then the copy deleted.
-    fn put_back(&self) -> Result<(), Failure> {
-        fs::write(&self.path, self.original.as_bytes()).map_err(|error| {
-            Failure::new(
-                format!("could not restore {}: {error}", self.rel),
-                format!(
-                    "copy {} over {}; it holds the original text",
-                    self.backup.display(),
-                    self.rel
-                ),
-            )
-        })?;
-        fs::remove_file(&self.backup).map_err(|error| {
-            Failure::new(
-                format!(
-                    "restored {} but could not delete its copy {}: {error}",
-                    self.rel,
-                    self.backup.display()
-                ),
-                format!(
-                    "delete {}; the file is already restored",
-                    self.backup.display()
-                ),
-            )
-        })?;
-        prune(&self.base, &self.backup);
-        Ok(())
-    }
-
-    /// Puts the original back and deletes the copy.
-    fn restore(mut self) -> Result<(), Failure> {
-        self.pending = false;
-        self.put_back()
-    }
-}
-
-impl Drop for Guard {
-    fn drop(&mut self) {
-        // A panic or an early return lands here. A failed write keeps the copy for the next run,
-        // and there is no way to print from a drop, so the outcome is not kept.
-        if self.pending {
-            let _restored = self.put_back().is_ok();
-        }
-    }
-}
-
-/// Writes `text` to `backup` without ever replacing a file there. The bytes go to `<backup>.tmp`,
-/// which is then hard-linked to `backup`: a link fails when `backup` exists, so the check and the
-/// create are one step. Returns `false` when `backup` already existed. A temporary file is always
-/// removed again, and the copy is synced before it is linked.
-fn write_new_copy(backup: &Path, text: &str) -> io::Result<bool> {
-    if let Some(dir) = backup.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    let mut tmp_name = backup.as_os_str().to_owned();
-    tmp_name.push(".tmp");
-    let tmp = PathBuf::from(tmp_name);
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
-    let linked = file
-        .write_all(text.as_bytes())
-        .and_then(|()| file.sync_all())
-        .and_then(|()| fs::hard_link(&tmp, backup));
-    let removed = fs::remove_file(&tmp);
-    match linked {
-        Ok(()) => removed.map(|()| true),
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
-        Err(error) => Err(error),
-    }
-}
-
-/// The copy's path under the repo root, as the messages print it.
-fn copy_name(rel: &str) -> String {
-    format!("{BACKUP_DIR}/{rel}")
-}
-
-/// Removes the directories between `file` and `base` that are now empty.
-fn prune(base: &Path, file: &Path) {
-    let mut dir = file.parent();
-    while let Some(current) = dir.filter(|d| d.starts_with(base) && *d != base) {
-        if fs::remove_dir(current).is_err() {
-            break;
-        }
-        dir = current.parent();
     }
 }
 
@@ -391,17 +253,6 @@ pub(crate) fn restore_leftovers(root: &Path) -> Result<Vec<String>, Failure> {
         lines.push(format!("restored {rel} from an interrupted buildtime run"));
     }
     Ok(lines)
-}
-
-/// A conflict: the file and its saved copy are kept, and the fix says what to do with them.
-fn conflict(rel: &str, what: &str) -> Failure {
-    Failure::new(
-        format!("{rel} {what}; its saved copy is {}", copy_name(rel)),
-        format!(
-            "compare the two, keep what you want, then delete {}",
-            copy_name(rel)
-        ),
-    )
 }
 
 /// The conflicts as one failure: their messages and fixes, joined.
