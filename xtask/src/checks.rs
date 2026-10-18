@@ -168,6 +168,18 @@ mod tests {
     }
 
     #[test]
+    fn the_real_repo_passes_every_static_check() {
+        let root = crate::workspace::workspace_root();
+        let ctx = Context {
+            members: crate::workspace::load_members(&root).expect("cargo metadata runs"),
+            root,
+        };
+        for check in ALL {
+            assert_eq!((check.name, (check.run)(&ctx)), (check.name, Vec::new()));
+        }
+    }
+
+    #[test]
     fn line_numbers_start_at_one() {
         assert_eq!(line_at(0), 1);
         assert_eq!(line_at(4), 5);
