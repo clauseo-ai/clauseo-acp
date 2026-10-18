@@ -11,7 +11,7 @@ const CHUNK: usize = 8 * 1024;
 
 /// The program a command runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Program {
+pub(crate) enum Program {
     /// The cargo that started this xtask (the `CARGO` env var), falling back to `cargo`.
     Cargo,
     /// A program found on `PATH`.
@@ -20,7 +20,7 @@ pub enum Program {
 
 impl Program {
     /// The name people see: `cargo`, or the named program.
-    pub fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         match *self {
             Program::Cargo => "cargo",
             Program::Named(name) => name,
@@ -39,13 +39,13 @@ impl Program {
 
 /// A program and its arguments. Displays as the shell-like form: `cargo fmt --all -- --check`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Cmd {
+pub(crate) struct Cmd {
     pub program: Program,
     pub args: Vec<String>,
 }
 
 impl Cmd {
-    pub fn new<I, S>(program: Program, args: I) -> Cmd
+    pub(crate) fn new<I, S>(program: Program, args: I) -> Cmd
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
@@ -54,7 +54,7 @@ impl Cmd {
             program,
             args: args
                 .into_iter()
-                .map(|arg| arg.as_ref().to_string())
+                .map(|arg| arg.as_ref().to_owned())
                 .collect(),
         }
     }
@@ -68,13 +68,13 @@ impl fmt::Display for Cmd {
 }
 
 /// Exit status and merged stdout and stderr of a command run by `capture`.
-pub struct Captured {
+pub(crate) struct Captured {
     pub success: bool,
     pub output: String,
 }
 
 /// Exit status and separate stdout and stderr of a command run by `run_quiet`.
-pub struct Quiet {
+pub(crate) struct Quiet {
     pub success: bool,
     pub stdout: String,
     pub stderr: String,
@@ -82,7 +82,12 @@ pub struct Quiet {
 
 /// Runs `cmd` in `root` with stdout and stderr merged into one stream. Each chunk read is passed
 /// to `on_output` as it arrives, and kept for the returned `output`.
-pub fn capture(cmd: &Cmd, root: &Path, on_output: &mut dyn FnMut(&[u8])) -> io::Result<Captured> {
+#[expect(clippy::disallowed_methods, reason = "xtask runs tools and times them")]
+pub(crate) fn capture(
+    cmd: &Cmd,
+    root: &Path,
+    on_output: &mut dyn FnMut(&[u8]),
+) -> io::Result<Captured> {
     let (mut reader, writer) = std::io::pipe()?;
     let mut command = cmd.program.command();
     command
@@ -115,7 +120,8 @@ pub fn capture(cmd: &Cmd, root: &Path, on_output: &mut dyn FnMut(&[u8])) -> io::
 }
 
 /// Runs `cmd` in `root` and returns its stdout and stderr separately.
-pub fn run_quiet(cmd: &Cmd, root: &Path) -> io::Result<Quiet> {
+#[expect(clippy::disallowed_methods, reason = "xtask runs tools and times them")]
+pub(crate) fn run_quiet(cmd: &Cmd, root: &Path) -> io::Result<Quiet> {
     let output = cmd
         .program
         .command()
@@ -130,7 +136,7 @@ pub fn run_quiet(cmd: &Cmd, root: &Path) -> io::Result<Quiet> {
 }
 
 /// Runs `cmd` in `root` with its output going straight to the terminal. Returns whether it succeeded.
-pub fn run_inherit(cmd: &Cmd, root: &Path) -> io::Result<bool> {
+pub(crate) fn run_inherit(cmd: &Cmd, root: &Path) -> io::Result<bool> {
     let status = cmd
         .program
         .command()
@@ -161,7 +167,7 @@ mod tests {
         );
         let mut seen = Vec::new();
         let captured = capture(&cmd, Path::new("."), &mut |chunk| {
-            seen.extend_from_slice(chunk)
+            seen.extend_from_slice(chunk);
         })
         .expect("sh runs");
         assert!(!captured.success);

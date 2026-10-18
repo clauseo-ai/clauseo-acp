@@ -8,53 +8,57 @@ use std::io::{self, IsTerminal, Write};
 
 /// Writes the xtask's lines to `out`. When `live`, tool output streams as it arrives; otherwise it
 /// is held back and only a failure shows it.
-pub struct Printer<W: Write> {
+pub(crate) struct Printer<W: Write> {
     out: W,
     live: bool,
 }
 
 impl Printer<io::Stdout> {
     /// The printer for this process's stdout. Live when stdout is a terminal.
-    pub fn stdout() -> Self {
+    pub(crate) fn stdout() -> Self {
         Printer::new(io::stdout(), io::stdout().is_terminal())
     }
 }
 
+#[expect(
+    clippy::let_underscore_must_use,
+    reason = "a closed stdout must not stop the check"
+)]
 impl<W: Write> Printer<W> {
-    pub fn new(out: W, live: bool) -> Self {
+    pub(crate) fn new(out: W, live: bool) -> Self {
         Printer { out, live }
     }
 
     /// The writer back, for tests that read what was printed.
     #[cfg(test)]
-    pub fn into_inner(self) -> W {
+    pub(crate) fn into_inner(self) -> W {
         self.out
     }
 
     // Every write below ignores its error: a closed stdout must not stop the check.
 
     /// `==> name: command`, which starts a step.
-    pub fn header(&mut self, name: &str, command: impl Display) {
+    pub(crate) fn header(&mut self, name: &str, command: impl Display) {
         let _ = writeln!(self.out, "==> {name}: {command}");
     }
 
     /// One line of plain text.
-    pub fn note(&mut self, text: impl Display) {
+    pub(crate) fn note(&mut self, text: impl Display) {
         let _ = writeln!(self.out, "{text}");
     }
 
     /// One finding: `path:line: what`, then its `    fix: ...` line.
-    pub fn violation(&mut self, found: &Violation) {
+    pub(crate) fn violation(&mut self, found: &Violation) {
         let _ = writeln!(self.out, "{found}");
     }
 
     /// A failure with no file and line: the message on one line, then its fix.
-    pub fn failure(&mut self, message: &str, fix: &str) {
+    pub(crate) fn failure(&mut self, message: &str, fix: &str) {
         let _ = writeln!(self.out, "{message}\n    fix: {fix}");
     }
 
     /// One chunk of raw tool output. Written and flushed only when live.
-    pub fn tool_output(&mut self, chunk: &[u8]) {
+    pub(crate) fn tool_output(&mut self, chunk: &[u8]) {
         if self.live {
             let _ = self.out.write_all(chunk);
             let _ = self.out.flush();
@@ -63,7 +67,7 @@ impl<W: Write> Printer<W> {
 
     /// The whole captured output of a failed tool. Written only when not live, since a live run
     /// has already streamed it. A missing final newline is added.
-    pub fn captured_output(&mut self, text: &str) {
+    pub(crate) fn captured_output(&mut self, text: &str) {
         if self.live || text.is_empty() {
             return;
         }
@@ -74,7 +78,7 @@ impl<W: Write> Printer<W> {
     }
 
     /// The closing `summary:` block, one line per step.
-    pub fn summary(&mut self, results: &[StepResult]) {
+    pub(crate) fn summary(&mut self, results: &[StepResult]) {
         let _ = writeln!(self.out, "summary:");
         for result in results {
             let _ = writeln!(self.out, "{}", summary_line(result));
@@ -84,7 +88,7 @@ impl<W: Write> Printer<W> {
 
 /// `fmt ok (0.0 s)`, `clippy ok (1 warning, 0.1 s)`, `clippy FAILED (0.2 s)`,
 /// `nextest ok (skipped: no changed packages)`.
-pub fn summary_line(result: &StepResult) -> String {
+pub(crate) fn summary_line(result: &StepResult) -> String {
     match &result.status {
         StepStatus::Skipped(reason) => format!("{} ok (skipped: {reason})", result.name),
         StepStatus::Ran {
@@ -160,6 +164,6 @@ mod tests {
 
         let mut live = Printer::new(Vec::new(), true);
         live.captured_output("already streamed\n");
-        assert!(live.into_inner().is_empty());
+        assert_eq!(live.into_inner(), b"");
     }
 }

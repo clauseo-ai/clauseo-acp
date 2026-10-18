@@ -9,7 +9,7 @@ use std::io;
 use std::process::ExitCode;
 
 /// Runs the whole check. `quick` limits clippy and nextest to changed packages.
-pub fn run(quick: bool) -> ExitCode {
+pub(crate) fn run(quick: bool) -> ExitCode {
     let mut out = Printer::stdout();
     let root = workspace::workspace_root();
     let ci = is_ci(std::env::var("CI").ok().as_deref());
@@ -44,7 +44,7 @@ pub fn run(quick: bool) -> ExitCode {
 }
 
 /// CI mode: `CI` is set, is not empty, and is not `0` or `false` in any case.
-pub fn is_ci(value: Option<&str>) -> bool {
+pub(crate) fn is_ci(value: Option<&str>) -> bool {
     match value {
         None | Some("") => false,
         Some(value) => !(value == "0" || value.eq_ignore_ascii_case("false")),
@@ -97,7 +97,7 @@ fn quick_scope(out: &mut Printer<io::Stdout>, ctx: &Context, members_error: Opti
 
 fn list_or_none(names: &[String]) -> String {
     if names.is_empty() {
-        "none".to_string()
+        "none".to_owned()
     } else {
         names.join(", ")
     }

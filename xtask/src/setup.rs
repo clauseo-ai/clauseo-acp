@@ -6,18 +6,18 @@ use crate::workspace;
 use std::process::ExitCode;
 
 /// A tool `cargo xtask setup` installs at a pinned version.
-pub struct Tool {
+pub(crate) struct Tool {
     pub name: &'static str,
     pub version: &'static str,
 }
 
-pub const TOOLS: &[Tool] = &[Tool {
+pub(crate) const TOOLS: &[Tool] = &[Tool {
     name: "cargo-nextest",
     version: "0.9.148",
 }];
 
 /// Installs each tool, printing its command first. Continues past failures; fails if any failed.
-pub fn run() -> ExitCode {
+pub(crate) fn run() -> ExitCode {
     let mut out = Printer::stdout();
     let root = workspace::workspace_root();
     let mut any_failed = false;

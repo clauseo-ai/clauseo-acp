@@ -10,16 +10,16 @@ use std::io::{self, Write};
 use std::time::Instant;
 
 /// Runs a tool command and passes each chunk of its output to the sink as it arrives.
-pub type Exec<'a> = dyn FnMut(&Cmd, &mut dyn FnMut(&[u8])) -> io::Result<Captured> + 'a;
+pub(crate) type Exec<'a> = dyn FnMut(&Cmd, &mut dyn FnMut(&[u8])) -> io::Result<Captured> + 'a;
 
 /// The summary entry for one step.
-pub struct StepResult {
+pub(crate) struct StepResult {
     pub name: String,
     pub status: StepStatus,
 }
 
 #[derive(Debug, PartialEq)]
-pub enum StepStatus {
+pub(crate) enum StepStatus {
     Ran {
         failed: bool,
         warnings: usize,
@@ -31,7 +31,7 @@ pub enum StepStatus {
 /// Runs every step in order, even after one fails. Prints each step as it goes and returns one
 /// result per step. `exec` runs a tool command and passes each chunk of its output to the sink as
 /// it arrives; production passes `process::capture`.
-pub fn run_all<W: Write>(
+pub(crate) fn run_all<W: Write>(
     steps: Vec<Step>,
     ctx: &Context,
     out: &mut Printer<W>,
@@ -117,6 +117,7 @@ fn run_tool<W: Write>(
 }
 
 /// Runs `work` and returns its value with the seconds it took. The only clock read in xtask.
+#[expect(clippy::disallowed_methods, reason = "xtask runs tools and times them")]
 fn timed<T>(work: impl FnOnce() -> T) -> (T, f64) {
     let started = Instant::now();
     let value = work();
@@ -180,6 +181,10 @@ mod tests {
     };
 
     /// A passing cargo run: noisy output, streamed to the sink in two chunks.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "must match the Exec type, which returns io::Result"
+    )]
     fn noisy_pass(_cmd: &Cmd, sink: &mut dyn FnMut(&[u8])) -> io::Result<Captured> {
         sink(b"   Compiling foo v0.1.0\n");
         sink(b"running 3 tests\n");
@@ -190,6 +195,10 @@ mod tests {
     }
 
     /// A failing run whose only output is `boom`, with no file and line.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "must match the Exec type, which returns io::Result"
+    )]
     fn boom_fail(_cmd: &Cmd, sink: &mut dyn FnMut(&[u8])) -> io::Result<Captured> {
         sink(b"boom\n");
         Ok(Captured {
@@ -228,10 +237,7 @@ mod tests {
             results[2].status,
             StepStatus::Ran { failed: false, .. }
         ));
-        assert_eq!(
-            calls,
-            vec!["fake fail".to_string(), "fake pass".to_string()]
-        );
+        assert_eq!(calls, vec!["fake fail".to_owned(), "fake pass".to_owned()]);
     }
 
     #[test]

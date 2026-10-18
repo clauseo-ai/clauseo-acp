@@ -3,7 +3,7 @@ use std::fmt;
 /// One problem a check found. Displays as `path:line: message` and an indented `fix:` line.
 /// Whole-file problems use line 1.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Violation {
+pub(crate) struct Violation {
     pub path: String,
     pub line: u32,
     pub message: String,
@@ -21,7 +21,7 @@ impl fmt::Display for Violation {
 }
 
 /// A problem a tool reported. An error fails the step; a warning is printed and counted.
-pub struct Finding {
+pub(crate) struct Finding {
     pub violation: Violation,
     pub is_error: bool,
 }

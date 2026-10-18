@@ -11,29 +11,77 @@ license = "GPL-3.0-or-later"
 publish = false
 
 [workspace.lints.rust]
+unsafe_code = "deny"               # deny, not forbid: an FFI module overrides with #[expect(unsafe_code, reason = "…")]
+missing_docs = "warn"              # every pub item; pub is rare because of the next line
+unreachable_pub = "warn"           # pub(crate) by default; visibility says what the interface is
+elided_lifetimes_in_paths = "warn" # Foo<'_> shows a borrow to the reader
+unused_qualifications = "allow"
 
 [workspace.lints.clippy]
+# Groups: keep style on (unlike Zed) because our --quick lane is fast; pedantic on with a short allow list.
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"            # session::SessionId reads fine
+must_use_candidate = "allow"                 # noise; we mark #[must_use] where dropping is a bug
+missing_errors_doc = "allow"                 # the Error enum documents its variants
+missing_panics_doc = "allow"                 # library code may not panic anyway
+similar_names = "allow"                      # noisy on (x, y), (row, col)
+return_self_not_must_use = "allow"           # builder style
+too_many_arguments = "allow"                 # Zed's reason: reducing it fights the borrow checker
+
+# Nursery picks
+redundant_clone = "warn"  # Zed denies it; clones are the commonest waste
+needless_collect = "warn" # allocation for nothing
+
+# Restriction picks, each with its reason
+allow_attributes = "deny"                # only #[expect], which fails when it goes stale
+allow_attributes_without_reason = "deny"
+unwrap_used = "deny"                     # library code returns errors (tests allowed via clippy.toml)
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"                    # use tracing; stdout belongs to binaries
+print_stderr = "deny"
+exit = "deny"                            # only main decides process exit
+mem_forget = "deny"
+let_underscore_must_use = "deny"         # Zed rule: never discard a fallible result silently
+unused_result_ok = "deny"                # .ok() to drop an error is the same smell
+map_err_ignore = "deny"                  # keep the source error
+mod_module_files = "deny"                # foo.rs + foo/, never foo/mod.rs (Zed convention)
+clone_on_ref_ptr = "warn"                # Arc::clone(&x) makes refcount traffic visible
+rc_buffer = "warn"                       # Arc<str>, not Arc<String>
+str_to_string = "warn"                   # to_owned() for &str, one spelling
+get_unwrap = "deny"
+undocumented_unsafe_blocks = "deny"      # every unsafe block has // SAFETY:
+partial_pub_fields = "warn"              # a struct is either plain data or encapsulated, not half
+infinite_loop = "warn"                   # a loop without break returns !
+renamed_function_params = "warn"         # trait impls keep the trait's parameter names
+multiple_inherent_impl = "warn"          # one inherent impl block per type
+large_include_file = "deny"
+disallowed_methods = "deny"
+disallowed_types = "deny"
 
 [profile.dev]
 debug = "line-tables-only"
-incremental = true            # survives CI=1 in agent harnesses
+incremental = true         # survives CI=1 in agent harnesses
 [profile.dev.package."*"]
 debug = false
 
-[profile.release]             # CI artifacts only
+[profile.release] # CI artifacts only
 codegen-units = 1
 lto = true
 opt-level = 3
 panic = "abort"
 strip = true
 
-[profile.preview]             # "feel the app": 207 s cold, 11.7 s per app edit (a Linux VM)
+[profile.preview] # "feel the app": 207 s cold, 11.7 s per app edit (a Linux VM)
 inherits = "release"
 lto = false
 codegen-units = 16
 incremental = true
 
-[profile.dbg]                 # debugger sessions
+[profile.dbg] # debugger sessions
 inherits = "dev"
 debug = "full"
 [profile.dbg.package."*"]

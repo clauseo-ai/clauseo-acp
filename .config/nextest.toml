@@ -1,8 +1,8 @@
 [profile.default]
-slow-timeout = { period = "10s", terminate-after = 3 }   # unit tests are fast; 30 s kills a hung test
+slow-timeout = { period = "10s", terminate-after = 3 } # unit tests are fast; 30 s kills a hung test
 fail-fast = false
 
 [profile.ci]
-retries = 0          # flakes are bugs; reproduce with SEED
+retries = 0                        # flakes are bugs; reproduce with SEED
 failure-output = "immediate-final"
 junit = { path = "junit.xml" }

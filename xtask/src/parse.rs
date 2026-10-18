@@ -6,14 +6,14 @@ use crate::workspace::{Context, Member, package_for};
 
 /// Repo-relative, `/`-separated form of a path a tool printed.
 /// `root` is the workspace root as the tool printed it (absolute, or `C:\...` on Windows).
-pub fn rel_path(raw: &str, root: &str) -> String {
+pub(crate) fn rel_path(raw: &str, root: &str) -> String {
     let path = raw.trim().replace('\\', "/");
     let root = root.replace('\\', "/");
     let root = root.trim_end_matches('/');
     let rel = path
         .strip_prefix(&format!("{root}/"))
         .unwrap_or(path.as_str());
-    rel.strip_prefix("./").unwrap_or(rel).to_string()
+    rel.strip_prefix("./").unwrap_or(rel).to_owned()
 }
 
 /// `(path, line)` for each file `cargo fmt --check` would change. Accepts the current
@@ -21,7 +21,7 @@ pub fn rel_path(raw: &str, root: &str) -> String {
 ///
 /// The header's line is where the hunk's context starts, not the changed line. The reported
 /// line is the first removed or added line of the hunk (see `hunk_changed_line`).
-pub fn fmt_diffs(output: &str, root: &str) -> Vec<(String, u32)> {
+pub(crate) fn fmt_diffs(output: &str, root: &str) -> Vec<(String, u32)> {
     let mut found: Vec<(String, u32)> = Vec::new();
     let lines: Vec<&str> = output.lines().collect();
     for (index, line) in lines.iter().enumerate() {
@@ -75,7 +75,7 @@ fn hunk_changed_line(start: u32, body: &[&str]) -> u32 {
 
 /// One clippy diagnostic from `--message-format=short`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Diag {
+pub(crate) struct Diag {
     pub path: String,
     pub line: u32,
     /// Includes the level, e.g. `warning: unused variable: x` or `error[E0425]: cannot find value`.
@@ -85,7 +85,7 @@ pub struct Diag {
 
 /// Every `path:line:col: warning|error...` diagnostic in `output`, deduplicated by
 /// (path, line, message). Lines without a file prefix are ignored.
-pub fn clippy_diags(output: &str, root: &str) -> Vec<Diag> {
+pub(crate) fn clippy_diags(output: &str, root: &str) -> Vec<Diag> {
     let mut diags: Vec<Diag> = Vec::new();
     for line in output.lines() {
         let Some(diag) = clippy_line(line, root) else {
@@ -125,7 +125,7 @@ fn clippy_line(line: &str, root: &str) -> Option<Diag> {
 }
 
 /// Findings for `cargo fmt --check` output: one per file it would change, fixed by `cargo fmt --all`.
-pub fn fmt_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
+pub(crate) fn fmt_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
     fmt_diffs(output, &root_str(ctx))
         .into_iter()
         .map(|(path, line)| Finding {
@@ -142,7 +142,7 @@ pub fn fmt_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
 
 /// Findings for clippy's `--message-format=short` output. Each fix line is the command that shows
 /// the full diagnostic, built from the args that ran (see `clippy_repro`).
-pub fn clippy_findings(output: &str, ctx: &Context, cmd: &Cmd) -> Vec<Finding> {
+pub(crate) fn clippy_findings(output: &str, ctx: &Context, cmd: &Cmd) -> Vec<Finding> {
     clippy_diags(output, &root_str(ctx))
         .into_iter()
         .map(|diag| {
@@ -181,7 +181,7 @@ fn clippy_repro(cmd: &Cmd, path: &str, members: &[Member]) -> Cmd {
     let mut rest = cmd.args.iter();
     args.extend(rest.next().cloned());
     if let Some(owner) = owner {
-        args.extend(["-p".to_string(), owner.name.clone()]);
+        args.extend(["-p".to_owned(), owner.name.clone()]);
     }
     while let Some(arg) = rest.next() {
         match arg.as_str() {
@@ -277,7 +277,7 @@ mod tests {
         let out = "Diff in /ws/xtask/src/main.rs:3:\n-fn  bad( ){}\n+fn bad() {}\n";
         assert_eq!(
             fmt_diffs(out, "/ws"),
-            vec![("xtask/src/main.rs".to_string(), 3)]
+            vec![("xtask/src/main.rs".to_owned(), 3)]
         );
     }
 
@@ -287,7 +287,7 @@ mod tests {
         let out = "Diff in /ws/xtask/src/main.rs:37:\n         Commands::Setup => tools::setup(),\n     }\n }\n-fn  bad( ){}\n+fn bad() {}\n\n";
         assert_eq!(
             fmt_diffs(out, "/ws"),
-            vec![("xtask/src/main.rs".to_string(), 40)]
+            vec![("xtask/src/main.rs".to_owned(), 40)]
         );
     }
 
@@ -297,7 +297,7 @@ mod tests {
         let out = "Diff in /ws/xtask/src/main.rs:37:\n         Commands::Setup => setup::run(),\n     }\n }\n+fn added() {}\n\n";
         assert_eq!(
             fmt_diffs(out, "/ws"),
-            vec![("xtask/src/main.rs".to_string(), 40)]
+            vec![("xtask/src/main.rs".to_owned(), 40)]
         );
     }
 
@@ -309,8 +309,8 @@ mod tests {
         assert_eq!(
             fmt_diffs(out, "/ws"),
             vec![
-                ("xtask/src/main.rs".to_string(), 3),
-                ("xtask/src/lib.rs".to_string(), 9)
+                ("xtask/src/main.rs".to_owned(), 3),
+                ("xtask/src/lib.rs".to_owned(), 9)
             ]
         );
     }
@@ -320,14 +320,14 @@ mod tests {
         let out = "Diff in C:\\ws\\xtask\\src\\main.rs:7:\n";
         assert_eq!(
             fmt_diffs(out, "C:\\ws"),
-            vec![("xtask/src/main.rs".to_string(), 7)]
+            vec![("xtask/src/main.rs".to_owned(), 7)]
         );
     }
 
     #[test]
     fn fmt_finds_nothing_in_a_syntax_error() {
         let out = "error: expected one of `!` or `::`, found `(`\n --> xtask/src/main.rs:1:4\n";
-        assert!(fmt_diffs(out, "/ws").is_empty());
+        assert_eq!(fmt_diffs(out, "/ws"), Vec::<(String, u32)>::new());
     }
 
     #[test]
