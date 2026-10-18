@@ -365,7 +365,9 @@ fn measure_web(
         for line in report::table_lines(&run.results) {
             out.note(line);
         }
-        out.note(web::REPORTED_LINE);
+        if let Some(line) = web::reported_line(web::WEB_PROBES) {
+            out.note(line);
+        }
     }
     report::print_failures(&run.results, diag);
     report_over_budget(&run.results, ci, WEB_OVER_FIX, diag);

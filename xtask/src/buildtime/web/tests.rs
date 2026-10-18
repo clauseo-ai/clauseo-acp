@@ -386,6 +386,22 @@ fn the_web_json_carries_every_probe_with_its_unit_and_gating() {
 }
 
 #[test]
+fn the_reported_only_line_names_the_probes_whose_gating_says_so() {
+    assert_eq!(
+        reported_line(WEB_PROBES).as_deref(),
+        Some("reported only, never fail the run: initial_js, dev_start, hmr")
+    );
+    let gated: Vec<WebProbe> = WEB_PROBES
+        .iter()
+        .map(|probe| WebProbe {
+            gating: Gating::Row,
+            ..*probe
+        })
+        .collect();
+    assert_eq!(reported_line(&gated), None);
+}
+
+#[test]
 fn a_web_half_that_could_not_start_prints_its_errors_and_fails() {
     let web = WebJson::of(&Err(vec!["ui/app/node_modules is missing".to_owned()]));
     assert_eq!(
