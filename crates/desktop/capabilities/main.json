@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The main window. Grants nothing: every permission widens what script in the page can reach.",
+  "windows": ["main"],
+  "permissions": []
+}
