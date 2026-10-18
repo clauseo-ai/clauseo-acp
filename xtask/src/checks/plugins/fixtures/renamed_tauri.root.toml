@@ -1,0 +1,14 @@
+[workspace]
+resolver = "3"
+members = ["crates/desktop"]
+
+[workspace.dependencies]
+tauri-plugin-single-instance = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-os = "2"
+tauri-plugin-notification = "2"
+t = { package = "tauri", version = "2", features = ["devtools"] }
