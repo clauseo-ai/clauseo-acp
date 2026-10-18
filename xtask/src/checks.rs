@@ -4,6 +4,7 @@
 //! after the tool steps and before nextest.
 
 mod budgets;
+mod buildtime_edits;
 mod capabilities;
 mod json_text;
 mod plugins;
@@ -27,6 +28,7 @@ pub(crate) const ALL: &[StaticCheck] = &[
     capabilities::CHECK,
     plugins::CHECK,
     tauri_config::CHECK,
+    buildtime_edits::CHECK,
 ];
 
 /// The package name of the desktop crate. The checks find its directory through `Context::members`,

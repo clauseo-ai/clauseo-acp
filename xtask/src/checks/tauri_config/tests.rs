@@ -410,7 +410,13 @@ fn the_check_is_registered_after_plugins() {
     let names: Vec<&str> = crate::checks::ALL.iter().map(|check| check.name).collect();
     assert_eq!(
         names,
-        ["budgets", "capabilities", "plugins", "tauri-config"]
+        [
+            "budgets",
+            "capabilities",
+            "plugins",
+            "tauri-config",
+            "buildtime-edits"
+        ]
     );
 }
 
