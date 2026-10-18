@@ -1,0 +1,7 @@
+target/
+node_modules/
+dist/
+.claude/worktrees/
+CLAUDE.local.md
+*.local.*
+.env*
