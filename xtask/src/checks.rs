@@ -191,7 +191,12 @@ mod tests {
             root,
         };
         for check in ALL {
-            assert_eq!((check.name, (check.run)(&ctx)), (check.name, Vec::new()));
+            let found = if check.name == plugins::CHECK.name {
+                plugins::check_without_graph(&ctx)
+            } else {
+                (check.run)(&ctx)
+            };
+            assert_eq!((check.name, found), (check.name, Vec::new()));
         }
     }
 

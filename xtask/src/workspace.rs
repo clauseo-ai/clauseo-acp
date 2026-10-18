@@ -146,11 +146,11 @@ pub(crate) struct PackageId {
     pub version: String,
 }
 
-/// One entry of `resolve.nodes`: a package, its resolved features and its dependencies.
+/// One entry of `resolve.nodes`: a package and its dependencies. Its resolved features are not
+/// read here: deny.toml's `[[bans.features]]` checks them.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub(crate) struct ResolvedNode {
     pub id: String,
-    pub features: Vec<String>,
     pub deps: Vec<NodeDep>,
 }
 
@@ -349,7 +349,7 @@ mod tests {
         let graph = parse_resolved_graph(json).expect("sample parses");
         assert_eq!(graph.members, ["app 0"]);
         assert_eq!(graph.packages["wry 1"].version, "0.53.0");
-        assert_eq!(graph.nodes[1].features, ["devtools"]);
+        assert_eq!(graph.nodes[1].id, "wry 1");
         let kind = &graph.nodes[0].deps[0].dep_kinds[0];
         assert_eq!(
             (kind.kind.as_deref(), kind.target.as_deref()),

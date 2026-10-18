@@ -57,6 +57,25 @@ deny = [
   ], reason = "house style: no async traits across crates" },
 ]
 
+# devtools let script in the page open the inspector, and `protocol-asset` serves files from disk to
+# the webview. cargo-deny checks the features cargo resolves for every target above, so a crate that
+# turns one on anywhere in the graph (a registry, git or excluded path crate included) fails here.
+[[bans.features]]
+crate = "tauri"
+deny = ["devtools", "protocol-asset"]
+
+[[bans.features]]
+crate = "tauri-runtime"
+deny = ["devtools"]
+
+[[bans.features]]
+crate = "tauri-runtime-wry"
+deny = ["devtools"]
+
+[[bans.features]]
+crate = "wry"
+deny = ["devtools"]
+
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"

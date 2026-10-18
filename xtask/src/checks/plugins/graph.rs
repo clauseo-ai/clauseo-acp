@@ -1,9 +1,10 @@
-//! The rules of the `plugins` check that read the dependency graph cargo resolved, with deps:
-//! no Tauri crate is built with `devtools` (nor `tauri` with `protocol-asset`), and no
-//! `tauri-plugin-*` outside the fixed set is in the desktop crate's tree unless only fixed
-//! plugins pull it in. `cargo metadata --no-deps` lists workspace members only, so a crate under
-//! `[workspace] exclude` pulled in by path, or a registry or git dependency that turns those
-//! features on, shows up only here.
+//! The rule of the `plugins` check that reads the dependency graph cargo resolved, with deps: no
+//! `tauri-plugin-*` outside the fixed set is in the desktop crate's tree unless only fixed plugins
+//! pull it in. `cargo metadata --no-deps` lists workspace members only, so a crate under
+//! `[workspace] exclude` pulled in by path, or a registry or git dependency, shows up only here.
+//! The resolved features (no `devtools` in tauri, tauri-runtime, tauri-runtime-wry or wry, no
+//! `protocol-asset` in tauri) are banned in deny.toml's `[[bans.features]]`, which cargo-deny
+//! checks against the same graph for every target.
 
 use super::FIXED_PLUGINS;
 use super::toml_lines::{declaration, lines};
@@ -12,17 +13,12 @@ use crate::violation::Violation;
 use crate::workspace::{PackageDependencies, ResolvedGraph, ResolvedNode};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// The crates whose resolved features must not include `devtools`.
-const DEVTOOLS_CRATES: [&str; 4] = ["tauri", "tauri-runtime", "tauri-runtime-wry", "wry"];
-
 /// The plugin-authoring library every plugin depends on. It is not a plugin.
 const PLUGIN_LIBRARY: &str = "tauri-plugin";
 
-const DEVTOOLS_WHY: &str = "devtools let script in the page open the inspector";
-const ASSET_WHY: &str = "`protocol-asset` serves files from disk to the webview";
 const TREE_FIX: &str =
     "only the fixed plugins and what they pull in may be in the desktop crate's tree";
-pub(super) const GRAPH_FIX: &str = "fix the manifests or the lockfile until `cargo metadata --format-version 1 --locked` succeeds: this check reads the resolved features from it";
+pub(super) const GRAPH_FIX: &str = "make `cargo metadata --format-version 1 --locked --offline` succeed: run `cargo fetch --locked` when it fails on a missing download, else fix the manifests or the lockfile; this check reads the resolved graph from it";
 
 /// Where the graph violations point: the desktop manifest and the desktop crate's dependencies
 /// from `cargo metadata --no-deps`, which give the line of a direct dependency.
@@ -46,50 +42,10 @@ pub(super) fn violations(graph: &ResolvedGraph, desktop: &Desktop<'_>) -> Vec<Vi
             GRAPH_FIX,
         )];
     };
-    let mut found = feature_violations(&tree, root, desktop);
-    found.extend(plugin_violations(&tree, root, desktop));
+    let mut found = plugin_violations(&tree, root, desktop);
     found.sort_by(|a, b| (a.line, &a.message).cmp(&(b.line, &b.message)));
     found.dedup();
     found
-}
-
-/// `devtools` in the resolved features of a `DEVTOOLS_CRATES` node, and `protocol-asset` in
-/// `tauri`'s, anywhere in the graph.
-fn feature_violations(tree: &Tree<'_>, root: &str, desktop: &Desktop<'_>) -> Vec<Violation> {
-    let mut found = Vec::new();
-    for node in &tree.graph.nodes {
-        let name = tree.name(&node.id);
-        if !DEVTOOLS_CRATES.contains(&name) {
-            continue;
-        }
-        let enabled = [
-            ("devtools", has(node, "devtools"), DEVTOOLS_WHY),
-            (
-                "protocol-asset",
-                name == "tauri" && has(node, "protocol-asset"),
-                ASSET_WHY,
-            ),
-        ];
-        for (feature, on, why) in enabled {
-            if !on {
-                continue;
-            }
-            found.push(violation(
-                desktop.path,
-                responsible_line(tree, root, &node.id, desktop),
-                format!("`{name}` is built with its `{feature}` feature (resolved by cargo)"),
-                format!(
-                    "find what enables it with `cargo tree -e features -i {name}` and remove it: {why}"
-                ),
-            ));
-        }
-    }
-    found
-}
-
-/// True when `feature` is among the resolved features of `node`.
-fn has(node: &ResolvedNode, feature: &str) -> bool {
-    node.features.iter().any(|f| f == feature)
 }
 
 /// Each `tauri-plugin-*` outside the fixed set in the desktop crate's tree that a package other
