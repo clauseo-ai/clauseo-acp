@@ -19,11 +19,10 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { brotliCompressSync, constants as zlib } from "node:zlib";
+import { initialJs, marked, parseRuns } from "./buildtime-lib.mjs";
 
 const APP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const APP_TSX = join(APP_DIR, "src", "App.tsx");
-const ROOT_TAG = '<div id="app-root"';
 const MARK = /\s+data-buildtime="[^"]*"/g;
 
 /** How long the dev server may take to print its "ready in" line, and an HMR edit to land. */
@@ -32,18 +31,6 @@ const EDIT_TIMEOUT_MS = 10_000;
 
 function note(text) {
   process.stderr.write(`buildtime.mjs: ${text}\n`);
-}
-
-function parseRuns(argv) {
-  const at = argv.indexOf("--runs");
-  if (at === -1) {
-    return 5;
-  }
-  const runs = Number(argv[at + 1]);
-  if (!Number.isInteger(runs) || runs < 1) {
-    throw new Error(`--runs takes a whole number of 1 or more, got ${argv[at + 1]}`);
-  }
-  return runs;
 }
 
 /** The JS entry of `bin` in the package `pkg`, from ui/app/node_modules. */
@@ -94,36 +81,6 @@ async function timeTool(probe, tool, args, runs) {
     }
   }
   return { probe, samples_ms: samples };
-}
-
-/**
- * The initial JS of the build in dist/: the `<script type="module" src>` entry plus every
- * `<link rel="modulepreload" href>` of dist/index.html, each brotli-compressed at quality 11, in
- * bytes. xtask reports it in KB of 1000 bytes, as Vite's own `kB` output does.
- */
-function initialJs() {
-  const dist = join(APP_DIR, "dist");
-  const html = readFileSync(join(dist, "index.html"), "utf8");
-  const files = [];
-  for (const tag of html.match(/<script\b[^>]*>|<link\b[^>]*>/g) ?? []) {
-    const isEntry = tag.startsWith("<script") && /\btype="module"/.test(tag);
-    const isPreload = tag.startsWith("<link") && /\brel="modulepreload"/.test(tag);
-    const url = /\b(?:src|href)="([^"]+)"/.exec(tag)?.[1];
-    if ((isEntry || isPreload) && url !== undefined) {
-      files.push(url.replace(/^\//, ""));
-    }
-  }
-  if (files.length === 0) {
-    throw new Error("dist/index.html has no module script");
-  }
-  let bytes = 0;
-  for (const file of files) {
-    const compressed = brotliCompressSync(readFileSync(join(dist, file)), {
-      params: { [zlib.BROTLI_PARAM_QUALITY]: 11 },
-    });
-    bytes += compressed.length;
-  }
-  return { probe: "initial_js", bytes, files };
 }
 
 /** A port nothing listens on now, from the OS. */
@@ -202,14 +159,6 @@ async function launchBrowser() {
     note(`could not launch Chrome: ${String(error).split("\n")[0]}`);
     return undefined;
   }
-}
-
-/** App.tsx with `data-buildtime="<n>"` on #app-root. */
-function marked(original, n) {
-  if (!original.includes(ROOT_TAG)) {
-    throw new Error(`src/App.tsx has no ${ROOT_TAG}`);
-  }
-  return original.replace(ROOT_TAG, `${ROOT_TAG} data-buildtime="${n}"`);
 }
 
 /** Writes the edit `n` and waits until the page's #app-root shows it. Resolves with the ms taken. */
@@ -337,7 +286,7 @@ async function main() {
   probes.push(build);
   if (build.failed === undefined) {
     try {
-      probes.push(initialJs());
+      probes.push({ probe: "initial_js", ...initialJs(join(APP_DIR, "dist")) });
     } catch (error) {
       const message = `could not size the initial JS: ${String(error)}`;
       probes.push({
