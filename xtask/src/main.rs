@@ -1,10 +1,11 @@
 //! Workspace automation: `cargo xtask check [--quick]` and `cargo xtask setup`.
 //!
 //! For people and agents:
-//! - Add an external step: one `ToolStep` entry in `steps::plan`. Its `parse` turns the output into findings.
+//! - Add an external step: one `ToolStep` in `steps/plan.rs`. Its `parse` turns the output into findings.
 //! - Add a static check: a new file in `src/checks/` with a `StaticCheck`, plus one line in `checks::ALL`.
 //! - Pin a tool: one `Tool` entry in `setup::TOOLS`.
-//! - Failures print as `path:line: what`, then `    fix: ...`. A failure with no location prints the tool's output, then a `fix:` line.
+//! - Failures print as `path:line: what`, then `    fix: ...`. A failure with no location prints the tool's output once, then a `fix:` line.
+//! - Live tool output appears only when stdout is a terminal. Otherwise a passing tool prints its header and our findings only.
 //! - Only `process.rs` starts processes and only `output.rs` prints. Keep it that way.
 
 mod changes;

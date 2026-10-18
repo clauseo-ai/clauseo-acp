@@ -20,6 +20,12 @@ impl fmt::Display for Violation {
     }
 }
 
+/// A problem a tool reported. An error fails the step; a warning is printed and counted.
+pub struct Finding {
+    pub violation: Violation,
+    pub is_error: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

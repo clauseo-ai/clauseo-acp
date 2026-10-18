@@ -1,8 +1,7 @@
 //! Parsers for the text that rustfmt and clippy print, and the findings they become.
 
 use crate::process::Cmd;
-use crate::steps::Finding;
-use crate::violation::Violation;
+use crate::violation::{Finding, Violation};
 use crate::workspace::{Context, Member, package_for};
 
 /// Repo-relative, `/`-separated form of a path a tool printed.

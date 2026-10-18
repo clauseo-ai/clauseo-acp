@@ -1,44 +1,84 @@
-//! The only module that prints. Every line the xtask shows goes through one of these functions,
-//! so the output format lives in one place.
+//! The only place xtask writes to stdout. Every line the xtask shows goes through a `Printer`, so the
+//! output format and the live-or-captured rule live in one place.
 
 use crate::steps::{StepResult, StepStatus};
 use crate::violation::Violation;
 use std::fmt::Display;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 
-/// `==> name: command`, which starts a step.
-pub fn header(name: &str, command: impl Display) {
-    println!("==> {name}: {command}");
+/// Writes the xtask's lines to `out`. When `live`, tool output streams as it arrives; otherwise it
+/// is held back and only a failure shows it.
+pub struct Printer<W: Write> {
+    out: W,
+    live: bool,
 }
 
-/// One line of plain text.
-pub fn note(text: impl Display) {
-    println!("{text}");
+impl Printer<io::Stdout> {
+    /// The printer for this process's stdout. Live when stdout is a terminal.
+    pub fn stdout() -> Self {
+        Printer::new(io::stdout(), io::stdout().is_terminal())
+    }
 }
 
-/// One finding: `path:line: what`, then its `    fix: ...` line.
-pub fn violation(found: &Violation) {
-    println!("{found}");
-}
+impl<W: Write> Printer<W> {
+    pub fn new(out: W, live: bool) -> Self {
+        Printer { out, live }
+    }
 
-/// A failure with no file and line: the message on one line, then its fix.
-pub fn failure(message: &str, fix: &str) {
-    println!("{message}\n    fix: {fix}");
-}
+    /// The writer back, for tests that read what was printed.
+    #[cfg(test)]
+    pub fn into_inner(self) -> W {
+        self.out
+    }
 
-/// Raw tool output, written as it arrives, so tool output and our lines share one ordered stream.
-pub fn tool_output(chunk: &[u8]) {
-    let mut stdout = io::stdout().lock();
-    // A closed stdout is not a reason to stop checking, so write errors are ignored.
-    let _ = stdout.write_all(chunk);
-    let _ = stdout.flush();
-}
+    // Every write below ignores its error: a closed stdout must not stop the check.
 
-/// The closing `summary:` block, one line per step.
-pub fn summary(results: &[StepResult]) {
-    println!("summary:");
-    for result in results {
-        println!("{}", summary_line(result));
+    /// `==> name: command`, which starts a step.
+    pub fn header(&mut self, name: &str, command: impl Display) {
+        let _ = writeln!(self.out, "==> {name}: {command}");
+    }
+
+    /// One line of plain text.
+    pub fn note(&mut self, text: impl Display) {
+        let _ = writeln!(self.out, "{text}");
+    }
+
+    /// One finding: `path:line: what`, then its `    fix: ...` line.
+    pub fn violation(&mut self, found: &Violation) {
+        let _ = writeln!(self.out, "{found}");
+    }
+
+    /// A failure with no file and line: the message on one line, then its fix.
+    pub fn failure(&mut self, message: &str, fix: &str) {
+        let _ = writeln!(self.out, "{message}\n    fix: {fix}");
+    }
+
+    /// One chunk of raw tool output. Written and flushed only when live.
+    pub fn tool_output(&mut self, chunk: &[u8]) {
+        if self.live {
+            let _ = self.out.write_all(chunk);
+            let _ = self.out.flush();
+        }
+    }
+
+    /// The whole captured output of a failed tool. Written only when not live, since a live run
+    /// has already streamed it. A missing final newline is added.
+    pub fn captured_output(&mut self, text: &str) {
+        if self.live || text.is_empty() {
+            return;
+        }
+        let _ = self.out.write_all(text.as_bytes());
+        if !text.ends_with('\n') {
+            let _ = self.out.write_all(b"\n");
+        }
+    }
+
+    /// The closing `summary:` block, one line per step.
+    pub fn summary(&mut self, results: &[StepResult]) {
+        let _ = writeln!(self.out, "summary:");
+        for result in results {
+            let _ = writeln!(self.out, "{}", summary_line(result));
+        }
     }
 }
 
@@ -110,5 +150,16 @@ mod tests {
             summary_line(&skipped),
             "nextest ok (skipped: no changed packages)"
         );
+    }
+
+    #[test]
+    fn captured_output_is_written_only_when_not_live_and_ends_with_a_newline() {
+        let mut quiet = Printer::new(Vec::new(), false);
+        quiet.captured_output("no newline");
+        assert_eq!(quiet.into_inner(), b"no newline\n");
+
+        let mut live = Printer::new(Vec::new(), true);
+        live.captured_output("already streamed\n");
+        assert!(live.into_inner().is_empty());
     }
 }
