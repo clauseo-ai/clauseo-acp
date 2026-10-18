@@ -188,6 +188,10 @@ fn a_url_or_a_file_list_as_frontend_dist_fails_at_its_line() {
         "\"http://localhost:1420\"",
         "\"tauri://localhost\"",
         "\"HTTPS:evil.example\"",
+        "\"file:/x\"",
+        "\"ftp:host\"",
+        "\"data:text/html,x\"",
+        "\"C:\\\\dist\"",
     ] {
         let (text, found) = with(dist, &format!("\"frontendDist\": {value}"));
         assert_eq!(
@@ -199,6 +203,10 @@ fn a_url_or_a_file_list_as_frontend_dist_fails_at_its_line() {
                 FRONTEND_FIX,
             )]
         );
+    }
+    for local in ["\"../../ui/app/dist\"", "\"dist\"", "\"./out/web\""] {
+        let (_, found) = with(dist, &format!("\"frontendDist\": {local}"));
+        assert_eq!(found, Vec::<Violation>::new(), "{local} is a local folder");
     }
     let (_, found) = with(dist, "\"frontendDist\": [\"index.html\"]");
     assert_eq!(
