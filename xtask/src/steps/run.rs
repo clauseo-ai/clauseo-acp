@@ -126,7 +126,8 @@ fn run_tool<W: Write>(
     }
 }
 
-/// Runs `work` and returns its value with the seconds it took. The only clock read in xtask.
+/// Runs `work` and returns its value with the seconds it took. The clock read for the check steps;
+/// `buildtime` has its own, for the build timings.
 #[expect(clippy::disallowed_methods, reason = "xtask runs tools and times them")]
 fn timed<T>(work: impl FnOnce() -> T) -> (T, f64) {
     let started = Instant::now();
