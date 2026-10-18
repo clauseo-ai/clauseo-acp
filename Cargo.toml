@@ -64,7 +64,7 @@ disallowed_types = "deny"
 
 [profile.dev]
 debug = "line-tables-only"
-incremental = true         # survives CI=1 in agent harnesses
+incremental = true         # cargo turns it off whenever CI is set; CARGO_INCREMENTAL=1 keeps it
 [profile.dev.package."*"]
 debug = false
 
