@@ -3,7 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brotliCompressSync, constants as zlib } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
-import { initialJs, parseRuns, resolveBin, scriptCommand, splitCommand } from "./buildtime-lib.mjs";
+import {
+  ROOT_TAG,
+  initialJs,
+  marked,
+  parseRuns,
+  resolveBin,
+  scriptCommand,
+  splitCommand,
+} from "./buildtime-lib.mjs";
 
 const dirs = [];
 
@@ -25,6 +33,23 @@ function brotli(text) {
     params: { [zlib.BROTLI_PARAM_QUALITY]: 11 },
   }).length;
 }
+
+describe("marked", () => {
+  const app = 'export function App() {\n  return <div id="app-root" />;\n}\n';
+
+  it("adds the attribute right after ROOT_TAG", () => {
+    expect(marked(app, 7)).toBe(
+      'export function App() {\n  return <div id="app-root" data-buildtime="7" />;\n}\n',
+    );
+  });
+
+  it("refuses an App.tsx where ROOT_TAG is missing or appears twice", () => {
+    const twice = `// edits ${ROOT_TAG}\n${app}`;
+    for (const text of ["export function App() { return null; }\n", twice]) {
+      expect(() => marked(text, 1)).toThrow("ROOT_TAG must appear exactly once in src/App.tsx");
+    }
+  });
+});
 
 describe("parseRuns", () => {
   it("reads --runs and defaults to 5", () => {
