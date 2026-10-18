@@ -159,6 +159,15 @@ describe("resolveBin and scriptCommand", () => {
   });
 });
 
+describe("the real ui/app/package.json", () => {
+  it("has the four scripts buildtime runs, each one plain command with an installed bin", () => {
+    for (const script of ["typecheck", "lint:types", "build", "dev"]) {
+      const { argv } = scriptCommand(APP_DIR, resolve(APP_DIR, ".."), script);
+      expect(existsSync(argv[0])).toBe(true);
+    }
+  });
+});
+
 describe("initialJs", () => {
   it("sums the brotli size of the entry and both modulepreloads", () => {
     const dist = scratch();
