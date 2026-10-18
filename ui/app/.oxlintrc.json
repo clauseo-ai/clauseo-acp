@@ -38,7 +38,8 @@
         "property": "__TAURI__",
         "message": "Tauri's injected globals are reached only under src/transport/; everything else talks to the host through HostTransport."
       }
-    ]
+    ],
+    "no-alert": "error"
   },
   "overrides": [
     {
