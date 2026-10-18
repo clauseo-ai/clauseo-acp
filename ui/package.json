@@ -1,13 +1,16 @@
 {
   "private": true,
-  "packageManager": "pnpm@12.14.0",
-  "engines": {
-    "node": ">=24"
-  },
   "scripts": {
-    "tauri": "cd ../crates/desktop && tauri"
+    "tauri": "cd ../crates/desktop && tauri",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.12.2"
-  }
+    "@tauri-apps/cli": "2.12.2",
+    "oxfmt": "0.72.0"
+  },
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "packageManager": "pnpm@12.14.0"
 }

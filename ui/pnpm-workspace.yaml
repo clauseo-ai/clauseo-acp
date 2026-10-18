@@ -1,10 +1,10 @@
 packages:
   - "app"
 
-minimumReleaseAge: 10080        # 7 days, in minutes; pnpm 11 default is 1440
-minimumReleaseAgeExclude: []    # add exact name@version only for urgent security fixes, with a dated comment
+minimumReleaseAge: 10080 # 7 days, in minutes; pnpm 11 default is 1440
+minimumReleaseAgeExclude: [] # add exact name@version only for urgent security fixes, with a dated comment
 trustPolicy: no-downgrade
 blockExoticSubdeps: true
 strictDepBuilds: true
-allowBuilds:                    # empty: add a package only when an install fails without it, with a comment saying why
-savePrefix: ""                  # exact versions in package.json
+allowBuilds: # empty: add a package only when an install fails without it, with a comment saying why
+savePrefix: "" # exact versions in package.json
