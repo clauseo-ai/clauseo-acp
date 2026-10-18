@@ -6,7 +6,8 @@
 //! warm-up that is not counted, then times `cargo <sub>` runs. The warm-up's rustc lines are the
 //! authority on whether the crate was rebuilt and whether it was built with incremental. The file
 //! is put back after every probe, and at the start of the next run if this one was interrupted
-//! (`probe.rs`), but never over an edit made during the run. One run at a time holds the checkout's
+//! (`probe.rs`), but never over an edit made during the run. The web half's edit of
+//! `ui/app/src/App.tsx` follows the same rules, in its script (`web.rs`). One run at a time holds the checkout's
 //! lock (`lock.rs`), through both halves. Only `clock::timed` reads the clock, and only
 //! `process.rs` starts processes; the web half's Node script does its own timing.
 
@@ -370,6 +371,9 @@ fn measure_web(
         }
     }
     report::print_failures(&run.results, diag);
+    for failure in &run.failures {
+        diag.failure(&failure.message, &failure.fix);
+    }
     report_over_budget(&run.results, ci, WEB_OVER_FIX, diag);
     Ok(run)
 }

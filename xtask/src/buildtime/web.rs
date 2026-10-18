@@ -5,7 +5,17 @@
 //! The script times `tsc --noEmit`, `oxlint --type-aware` and `vite build` (one warm-up, then N
 //! runs each), sizes the initial JS of that build, starts the Vite dev server on a free port
 //! (`dev_start`), and times N edits of `src/App.tsx` until headless Chrome shows them (`hmr`). It
-//! puts App.tsx back to its exact bytes, and stops only the Vite process and the browser it started.
+//! stops only the processes it started.
+//!
+//! App.tsx follows the rules of `probe.rs`: a copy of the original in
+//! `target/xtask/buildtime/ui/app/src/App.tsx` before the first edit, every write through a
+//! temporary file and a rename, and the original put back only over bytes the script wrote, also
+//! on SIGINT, SIGTERM and SIGHUP. The leftover rule lives in the script, in one place
+//! (`recoverApp` in `ui/app/scripts/buildtime-lib.mjs`): at the start of every run it puts the
+//! copy back only when App.tsx differs from it by one `data-buildtime` attribute at `ROOT_TAG`.
+//! `probe::restore_leftovers` skips `target/xtask/buildtime/ui/`. A developer's edit is never
+//! overwritten: both files stay, and the conflict fails the run. The lock (`lock.rs`) covers the
+//! copy when xtask runs the script.
 //!
 //! Gating: `tsc`, `oxlint_type_aware` and `vite_build` follow their row's gate like the Rust probes,
 //! and fail the run when they fail (the tool exits non-zero). `initial_js`, `dev_start` and `hmr`
@@ -102,6 +112,16 @@ pub(crate) fn reported_line(probes: &[WebProbe]) -> Option<String> {
 pub(crate) struct ScriptReport {
     pub node: String,
     pub probes: Vec<ScriptProbe>,
+    #[serde(default)]
+    pub failures: Vec<RunFailure>,
+}
+
+/// A failure that is no probe's, such as a conflict over `ui/app/src/App.tsx`. It always fails
+/// the run.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RunFailure {
+    pub message: String,
+    pub fix: String,
 }
 
 /// One probe as the script reports it: exactly one of `samples_ms`, `bytes`, `skipped`, `failed`.
@@ -195,12 +215,14 @@ pub(crate) struct WebRun {
     pub runs: u32,
     pub ci: bool,
     pub results: Vec<ProbeResult>,
+    /// The script's failures that are no probe's. Each fails the run.
+    pub failures: Vec<Failure>,
 }
 
 impl WebRun {
-    /// Whether no web probe fails the run.
+    /// Whether the run passes: no failure outside the probes, and no probe that fails it.
     pub(crate) fn passed(&self) -> bool {
-        passes(&self.results, self.ci)
+        self.failures.is_empty() && passes(&self.results, self.ci)
     }
 }
 
@@ -234,18 +256,78 @@ pub(crate) fn measure(
             ));
         }
     };
-    if !quiet.success {
-        diag.captured_output(&quiet.stderr);
-        return Err(stop(diag, &format!("`{cmd}` failed"), &rerun));
+    let read = read_output(
+        &quiet.stdout,
+        quiet.success,
+        &cmd.to_string(),
+        budgets,
+        runs,
+        ci,
+    );
+    if !matches!(read, Read::Unreadable(_)) {
+        for line in quiet.stderr.lines().filter(|line| !line.trim().is_empty()) {
+            diag.note(line);
+        }
     }
-    for line in quiet.stderr.lines().filter(|line| !line.trim().is_empty()) {
-        diag.note(line);
+    match read {
+        Read::Run(run) => Ok(run),
+        Read::Stopped(failures) => Err(failures
+            .iter()
+            .flat_map(|failure| stop(diag, &failure.message, &failure.fix))
+            .collect()),
+        Read::Unreadable(_) if !quiet.success => {
+            diag.captured_output(&quiet.stderr);
+            Err(stop(diag, &format!("`{cmd}` failed"), &rerun))
+        }
+        Read::Unreadable(message) => Err(stop(diag, &message, &rerun)),
     }
-    let report = parse_report(&quiet.stdout).map_err(|message| stop(diag, &message, &rerun))?;
-    Ok(WebRun {
+}
+
+/// What the script's output comes to.
+#[derive(Debug)]
+pub(crate) enum Read {
+    /// The half was measured.
+    Run(WebRun),
+    /// The script stopped before it measured, with failures (a conflict left by an interrupted run).
+    Stopped(Vec<Failure>),
+    /// The output holds no report xtask can read; the parse error.
+    Unreadable(String),
+}
+
+/// Reads the script's stdout and exit status. A report is read whatever the exit status, since the
+/// script exits non-zero when it reports failures; a non-zero exit with a report but no failures
+/// adds one. `cmd` is the command as the fix prints it.
+pub(crate) fn read_output(
+    stdout: &str,
+    success: bool,
+    cmd: &str,
+    budgets: &[Budget],
+    runs: u32,
+    ci: bool,
+) -> Read {
+    let report = match parse_report(stdout) {
+        Ok(report) => report,
+        Err(message) => return Read::Unreadable(message),
+    };
+    let mut failures: Vec<Failure> = report
+        .failures
+        .iter()
+        .map(|failure| Failure::new(one_line(&failure.message), failure.fix.clone()))
+        .collect();
+    if report.probes.is_empty() && !failures.is_empty() {
+        return Read::Stopped(failures);
+    }
+    if !success && failures.is_empty() {
+        failures.push(Failure::new(
+            format!("`{cmd}` exited non-zero after it reported"),
+            format!("run `{cmd}` to see the error"),
+        ));
+    }
+    Read::Run(WebRun {
         results: results(&report, budgets),
         node: report.node,
         runs,
         ci,
+        failures,
     })
 }
