@@ -42,7 +42,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run fmt, the static checks, clippy and nextest. Failures print as `path:line: what` and `fix:`.
+    /// Run fmt, the static checks, clippy, the ui steps and nextest. Failures print as `path:line: what` and `fix:`.
     Check {
         /// Only check packages changed since `git merge-base HEAD origin/main`, and their dependents.
         #[arg(long)]

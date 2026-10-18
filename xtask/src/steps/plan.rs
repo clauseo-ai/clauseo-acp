@@ -3,6 +3,7 @@
 //! `policy.rs` for a repo-policy tool.
 
 use super::policy;
+use super::ui;
 use crate::checks;
 use crate::parse;
 use crate::process::{Cmd, Program};
@@ -13,10 +14,16 @@ use crate::workspace::Context;
 const NO_PACKAGES: &str = "no changed packages";
 
 /// The steps for `scope`, in run order: fmt, clippy, deny, shear, typos, taplo, gitleaks, every
-/// static check, nextest. With `Scope::Nothing`, clippy and nextest are skipped; the others never
-/// depend on the scope. `ci` picks the CI variants of the clippy and nextest commands.
-/// `gitleaks_range` is the git range gitleaks scans (`<base>..HEAD`), or `None` for all history.
-pub(crate) fn plan(scope: &Scope, ci: bool, gitleaks_range: Option<&str>) -> Vec<Step> {
+/// static check, the six ui steps, nextest. With `Scope::Nothing`, clippy and nextest are skipped;
+/// the others never depend on the scope. `ci` picks the CI variants of the clippy and nextest
+/// commands. `gitleaks_range` is the git range gitleaks scans (`<base>..HEAD`), or `None` for all
+/// history. `pnpm_found` says whether pnpm starts: without it, the ui steps are skipped unless `ci`.
+pub(crate) fn plan(
+    scope: &Scope,
+    ci: bool,
+    gitleaks_range: Option<&str>,
+    pnpm_found: bool,
+) -> Vec<Step> {
     let selectors = scope.selectors();
     let mut steps = vec![Step::Tool(fmt_step())];
     steps.push(match &selectors {
@@ -34,6 +41,7 @@ pub(crate) fn plan(scope: &Scope, ci: bool, gitleaks_range: Option<&str>) -> Vec
         .map(Step::Tool),
     );
     steps.extend(checks::ALL.iter().map(Step::Static));
+    steps.extend(ui_steps(pnpm_found, ci));
     steps.push(match &selectors {
         Some(selectors) => Step::Tool(nextest_step(selectors, ci)),
         None => skipped("nextest"),
@@ -46,6 +54,23 @@ fn skipped(name: &'static str) -> Step {
         name,
         reason: NO_PACKAGES,
     }
+}
+
+/// The ui steps. Without pnpm they are skipped locally; in CI they run, and fail there.
+fn ui_steps(pnpm_found: bool, ci: bool) -> Vec<Step> {
+    ui::steps()
+        .into_iter()
+        .map(|tool| {
+            if pnpm_found || ci {
+                Step::Tool(tool)
+            } else {
+                Step::Skipped {
+                    name: tool.name,
+                    reason: ui::NO_PNPM,
+                }
+            }
+        })
+        .collect()
 }
 
 pub(super) fn reproduce(cmd: &Cmd, _output: Option<&str>) -> String {
@@ -152,20 +177,50 @@ mod tests {
             .map(|step| match step {
                 Step::Tool(tool) => tool.name.to_owned(),
                 Step::Static(check) => check.name.to_owned(),
-                Step::Skipped { name, reason } => {
-                    assert_eq!(*reason, "no changed packages");
-                    format!("{name} skipped")
-                }
+                Step::Skipped { name, .. } => format!("{name} skipped"),
             })
             .collect()
     }
 
-    /// The names a plan should have: the tool steps around every registered static check.
-    fn expected_names(clippy: &str, nextest: &str) -> Vec<String> {
+    /// The reason of each skipped step, by name, in plan order.
+    fn skip_reasons(steps: &[Step]) -> Vec<(&'static str, &'static str)> {
+        steps
+            .iter()
+            .filter_map(|step| match step {
+                Step::Skipped { name, reason } => Some((*name, *reason)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The ui step names, in run order, when they run.
+    const UI: [&str; 6] = [
+        "pnpm-install",
+        "tsc",
+        "oxlint",
+        "oxfmt",
+        "vitest",
+        "vite-build",
+    ];
+
+    /// The ui step names, in run order, when they are skipped.
+    const UI_SKIPPED: [&str; 6] = [
+        "pnpm-install skipped",
+        "tsc skipped",
+        "oxlint skipped",
+        "oxfmt skipped",
+        "vitest skipped",
+        "vite-build skipped",
+    ];
+
+    /// The names a plan should have: the tool steps around every registered static check, then
+    /// the ui steps (`ui`: running or skipped), then nextest.
+    fn expected_names(clippy: &str, ui: [&str; 6], nextest: &str) -> Vec<String> {
         let mut names: Vec<String> = ["fmt", clippy, "deny", "shear", "typos", "taplo", "gitleaks"]
             .map(str::to_owned)
             .to_vec();
         names.extend(checks::ALL.iter().map(|check| check.name.to_owned()));
+        names.extend(ui.map(str::to_owned));
         names.push(nextest.to_owned());
         names
     }
@@ -173,24 +228,29 @@ mod tests {
     #[test]
     fn an_empty_package_list_is_nothing_and_skips_only_clippy_and_nextest() {
         assert_eq!(Scope::packages(vec![]), Scope::Nothing);
+        let steps = plan(&Scope::Nothing, false, None, true);
         assert_eq!(
-            step_names(&plan(&Scope::Nothing, false, None)),
-            expected_names("clippy skipped", "nextest skipped")
+            step_names(&steps),
+            expected_names("clippy skipped", UI, "nextest skipped")
+        );
+        assert_eq!(
+            skip_reasons(&steps),
+            [("clippy", NO_PACKAGES), ("nextest", NO_PACKAGES)]
         );
     }
 
     #[test]
     fn plan_runs_every_step_in_order_for_the_workspace() {
         assert_eq!(
-            step_names(&plan(&Scope::Workspace, false, None)),
-            expected_names("clippy", "nextest")
+            step_names(&plan(&Scope::Workspace, false, None, true)),
+            expected_names("clippy", UI, "nextest")
         );
     }
 
     #[test]
     fn plan_commands_for_the_workspace_in_both_modes() {
         assert_eq!(
-            tool_commands(&plan(&Scope::Workspace, false, Some("abc..HEAD"))),
+            tool_commands(&plan(&Scope::Workspace, false, Some("abc..HEAD"), true)),
             [
                 "cargo fmt --all -- --check",
                 "cargo clippy --workspace --all-targets --message-format=json-diagnostic-short",
@@ -199,17 +259,81 @@ mod tests {
                 "typos --format brief",
                 "taplo fmt --check",
                 "gitleaks git --redact --no-banner --verbose --no-color --log-opts=abc..HEAD",
+                "pnpm -C ui install --frozen-lockfile",
+                "pnpm -C ui/app exec tsc --noEmit --pretty false",
+                "pnpm -C ui/app exec oxlint --format unix",
+                "pnpm -C ui/app exec oxfmt --check",
+                "pnpm -C ui/app exec vitest run",
+                "pnpm -C ui/app exec vite build",
                 "cargo nextest run --workspace --no-tests=pass",
             ]
         );
-        let ci = tool_commands(&plan(&Scope::Workspace, true, Some("abc..HEAD")));
+        let ci = tool_commands(&plan(&Scope::Workspace, true, Some("abc..HEAD"), true));
         assert_eq!(
             ci[1],
             "cargo clippy --workspace --all-targets --message-format=json-diagnostic-short -- -D warnings"
         );
         assert_eq!(
-            ci[7],
-            "cargo nextest run --workspace --no-tests=pass --profile ci"
+            ci.last().map(String::as_str),
+            Some("cargo nextest run --workspace --no-tests=pass --profile ci")
+        );
+    }
+
+    #[test]
+    fn the_ui_steps_run_in_order_after_the_static_checks_and_before_nextest() {
+        let steps = plan(&Scope::Workspace, false, None, true);
+        let names = step_names(&steps);
+        let first = names.iter().position(|name| name == "pnpm-install");
+        let last = names.iter().position(|name| name == "vite-build");
+        let (Some(first), Some(last)) = (first, last) else {
+            panic!("the ui steps are in the plan: {names:?}");
+        };
+        assert_eq!(names[first..=last], UI);
+        assert_eq!(names[first - 1], checks::ALL[checks::ALL.len() - 1].name);
+        assert_eq!(names[last + 1], "nextest");
+    }
+
+    #[test]
+    fn without_pnpm_locally_the_ui_steps_are_skipped_with_the_note() {
+        let steps = plan(&Scope::Workspace, false, None, false);
+        assert_eq!(
+            step_names(&steps),
+            expected_names("clippy", UI_SKIPPED, "nextest")
+        );
+        let ui_reasons: Vec<(&str, &str)> = skip_reasons(&steps)
+            .into_iter()
+            .filter(|(name, _)| UI.contains(name))
+            .collect();
+        assert_eq!(
+            ui_reasons,
+            UI.map(|name| {
+                (
+                    name,
+                    "pnpm not found; install pnpm 12.14.0 to run the ui steps",
+                )
+            })
+        );
+        assert!(
+            tool_commands(&steps)
+                .iter()
+                .all(|cmd| !cmd.starts_with("pnpm"))
+        );
+    }
+
+    #[test]
+    fn in_ci_the_ui_steps_run_even_without_pnpm() {
+        let steps = plan(&Scope::Workspace, true, None, false);
+        assert_eq!(step_names(&steps), expected_names("clippy", UI, "nextest"));
+        assert_eq!(
+            tool_commands(&steps)[7..13],
+            [
+                "pnpm -C ui install --frozen-lockfile",
+                "pnpm -C ui/app exec tsc --noEmit --pretty false",
+                "pnpm -C ui/app exec oxlint --format unix",
+                "pnpm -C ui/app exec oxfmt --check",
+                "pnpm -C ui/app exec vitest run",
+                "pnpm -C ui/app exec vite build",
+            ]
         );
     }
 
@@ -217,7 +341,7 @@ mod tests {
     fn clippy_command_for_named_packages() {
         let scope = Scope::packages(vec!["a".into(), "b".into()]);
         assert_eq!(
-            tool_commands(&plan(&scope, false, None))[1],
+            tool_commands(&plan(&scope, false, None, true))[1],
             "cargo clippy -p a -p b --all-targets --message-format=json-diagnostic-short"
         );
     }
@@ -225,7 +349,7 @@ mod tests {
     #[test]
     fn clippy_repro_narrows_to_the_owning_package_in_ci() {
         let members = vec![member("xtask", "xtask")];
-        let steps = plan(&Scope::Workspace, true, None);
+        let steps = plan(&Scope::Workspace, true, None, true);
         let Step::Tool(clippy) = &steps[1] else {
             panic!("clippy is a tool step");
         };
@@ -242,7 +366,12 @@ mod tests {
     #[test]
     fn clippy_repro_narrows_to_the_owning_package_without_ci() {
         let members = vec![member("a", "crates/a"), member("b", "crates/b")];
-        let steps = plan(&Scope::packages(vec!["a".into(), "b".into()]), false, None);
+        let steps = plan(
+            &Scope::packages(vec!["a".into(), "b".into()]),
+            false,
+            None,
+            true,
+        );
         let Step::Tool(clippy) = &steps[1] else {
             panic!("clippy is a tool step");
         };
@@ -258,7 +387,12 @@ mod tests {
 
     #[test]
     fn clippy_keeps_the_selectors_when_no_package_owns_the_file() {
-        let steps = plan(&Scope::packages(vec!["a".into(), "b".into()]), false, None);
+        let steps = plan(
+            &Scope::packages(vec!["a".into(), "b".into()]),
+            false,
+            None,
+            true,
+        );
         let Step::Tool(clippy) = &steps[1] else {
             panic!("clippy is a tool step");
         };
