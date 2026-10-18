@@ -48,7 +48,7 @@ impl Guard {
             }),
             Ok(false) => Err(Failure::new(
                 format!(
-                    "a saved copy of {rel} already exists at {}; an earlier restore failed",
+                    "a saved copy of {rel} already exists at {}; an earlier probe kept it (a conflict or a failed restore)",
                     copy_name(rel)
                 ),
                 format!("restore {rel} from that copy by hand, then delete it"),
