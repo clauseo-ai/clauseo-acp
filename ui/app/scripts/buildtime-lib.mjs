@@ -1,7 +1,7 @@
 // The pure parts of buildtime.mjs, kept apart so buildtime-lib.test.mjs can test them: argument
-// parsing and sizing the initial JS of a build.
+// parsing, the commands from package.json, and sizing the initial JS of a build.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { brotliCompressSync, constants as zlib } from "node:zlib";
 
@@ -33,6 +33,69 @@ export function parseRuns(argv) {
     throw new Error(`--runs takes a whole number of 1 or more, got ${value}`);
   }
   return runs;
+}
+
+/** Characters that make a package.json script more than a plain command and its arguments. */
+const SHELL_SYNTAX = /[&|;<>()$`'"\\*?{}[\]~#]/;
+
+/**
+ * The words of the package.json script `text`, split on spaces. Throws on shell syntax (`&&`,
+ * `|`, quotes, `$`, globs, `VAR=value`): the script runs it without a shell, so it must be one
+ * plain command.
+ */
+export function splitCommand(name, text) {
+  if (typeof text !== "string" || text.trim() === "") {
+    throw new Error(`ui/app/package.json has no script "${name}"`);
+  }
+  if (SHELL_SYNTAX.test(text) || text.trim().split(/ +/)[0].includes("=")) {
+    throw new Error(
+      `ui/app/package.json script "${name}" is \`${text}\`; buildtime runs scripts without a shell, so keep it one plain command`,
+    );
+  }
+  return text.trim().split(/ +/);
+}
+
+function readJson(path) {
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
+/**
+ * The JS entry of the bin `name`: the first direct dependency, in `dirs` order, whose
+ * package.json `bin` provides it, read from `<dir>/node_modules/<dependency>`. A string `bin`
+ * provides the package's own name without its scope. Throws when no dependency provides it.
+ */
+export function resolveBin(name, dirs) {
+  for (const dir of dirs) {
+    const manifest = readJson(join(dir, "package.json"));
+    const deps = Object.keys({ ...manifest.dependencies, ...manifest.devDependencies });
+    for (const dep of deps) {
+      const pkgDir = join(dir, "node_modules", dep);
+      if (!existsSync(join(pkgDir, "package.json"))) {
+        continue;
+      }
+      const pkg = readJson(join(pkgDir, "package.json"));
+      const own = String(pkg.name ?? dep).replace(/^@[^/]+\//, "");
+      const entry =
+        typeof pkg.bin === "string" ? (own === name ? pkg.bin : undefined) : pkg.bin?.[name];
+      if (typeof entry === "string") {
+        return join(pkgDir, entry);
+      }
+    }
+  }
+  throw new Error(
+    `no dependency in ${dirs.map((dir) => join(dir, "package.json")).join(" or ")} provides the bin "${name}"; run \`pnpm -C ui install --frozen-lockfile\``,
+  );
+}
+
+/**
+ * The package.json script `script` of the app in `appDir`, ready to run without a shell or pnpm:
+ * `argv` is the bin's JS entry and the script's arguments, for `process.execPath`. Bins are looked
+ * up in the app, then in the ui workspace root (`rootDir`).
+ */
+export function scriptCommand(appDir, rootDir, script) {
+  const scripts = readJson(join(appDir, "package.json")).scripts ?? {};
+  const [bin, ...args] = splitCommand(script, scripts[script]);
+  return { argv: [resolveBin(bin, [appDir, rootDir]), ...args], text: scripts[script] };
 }
 
 /**
