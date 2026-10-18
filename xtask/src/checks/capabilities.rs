@@ -173,14 +173,14 @@ pub(crate) fn inline_violations(path: &str, text: &str) -> Vec<Violation> {
     locate(path, text, from, Some(line), findings)
 }
 
-/// A forbidden key or string value, before it is located in the text.
+/// A key or string value that trips one or more rules, before it is located in the text.
 struct Finding {
     /// The decoded key or string.
     needle: String,
     /// The key that holds a string value; `None` for a key.
     key: Option<String>,
-    message: String,
-    fix: &'static str,
+    /// The message and fix of each rule it trips, all reported at the string's one location.
+    problems: Vec<(String, &'static str)>,
 }
 
 /// Collects a finding for every forbidden key and string value in `value`, at any depth. `key`
@@ -189,12 +189,7 @@ fn walk(value: &Value, key: Option<&str>, found: &mut Vec<Finding>) {
     match value {
         Value::Object(map) => {
             for (name, child) in map {
-                found.extend(problems(name, false).map(|(message, fix)| Finding {
-                    needle: name.clone(),
-                    key: None,
-                    message,
-                    fix,
-                }));
+                push(found, name, None, problems(name, false));
                 walk(child, Some(name), found);
             }
         }
@@ -203,21 +198,30 @@ fn walk(value: &Value, key: Option<&str>, found: &mut Vec<Finding>) {
                 walk(item, key, found);
             }
         }
-        Value::String(text) => {
-            found.extend(problems(text, true).map(|(message, fix)| Finding {
-                needle: text.clone(),
-                key: key.map(str::to_owned),
-                message,
-                fix,
-            }));
-        }
+        Value::String(text) => push(found, text, key, problems(text, true)),
         _ => {}
+    }
+}
+
+/// Adds a finding for `needle` when `problems` is not empty.
+fn push(
+    found: &mut Vec<Finding>,
+    needle: &str,
+    key: Option<&str>,
+    problems: Vec<(String, &'static str)>,
+) {
+    if !problems.is_empty() {
+        found.push(Finding {
+            needle: needle.to_owned(),
+            key: key.map(str::to_owned),
+            problems,
+        });
     }
 }
 
 /// The messages and fixes for one decoded key or string value. Only a value can grant a
 /// permission by its prefix.
-fn problems(text: &str, is_value: bool) -> impl Iterator<Item = (String, &'static str)> {
+fn problems(text: &str, is_value: bool) -> Vec<(String, &'static str)> {
     let mut found = Vec::new();
     if text.contains("remote") {
         found.push(("capability file mentions `remote`".to_owned(), FIX_REMOTE));
@@ -232,12 +236,13 @@ fn problems(text: &str, is_value: bool) -> impl Iterator<Item = (String, &'stati
     {
         found.push((format!("capability grants `{text}`"), FIX_PREFIX));
     }
-    found.into_iter()
+    found
 }
 
-/// The violations for `findings`, each at the line in `text` (searched from byte `from` on) of
-/// its string, else of its key, else at `fallback` or line 1; the last two say the string is
-/// written with escapes. Sorted by line, in walk order within a line.
+/// The violations for `findings`. Each finding is located once, and all its problems are reported
+/// there: at the line in `text` (searched from byte `from` on) of its string, else of its key,
+/// else at `fallback` or line 1; the last two say the string is written with escapes. Sorted by
+/// line, in walk order within a line.
 fn locate(
     path: &str,
     text: &str,
@@ -246,30 +251,36 @@ fn locate(
     findings: Vec<Finding>,
 ) -> Vec<Violation> {
     let mut seen = HashMap::new();
-    let mut found: Vec<Violation> = findings
-        .into_iter()
-        .map(|finding| {
-            if let Some(line) = find(text, from, &finding.needle, &mut seen) {
-                return checks::violation(path, line, finding.message, finding.fix);
-            }
-            let line = finding
-                .key
-                .as_deref()
-                .filter(|_| fallback.is_none())
-                .and_then(|key| find(text, from, key, &mut HashMap::new()))
-                .or(fallback)
-                .unwrap_or(1);
-            checks::violation(path, line, finding.message + ESCAPED, finding.fix)
-        })
-        .collect();
+    let mut found: Vec<Violation> = Vec::new();
+    for finding in findings {
+        let (line, suffix) = find(text, from, &finding.needle, &mut seen).map_or_else(
+            || {
+                let line = finding
+                    .key
+                    .as_deref()
+                    .filter(|_| fallback.is_none())
+                    .and_then(|key| find(text, from, key, &mut HashMap::new()))
+                    .or(fallback)
+                    .unwrap_or(1);
+                (line, ESCAPED)
+            },
+            |line| (line, ""),
+        );
+        found.extend(
+            finding
+                .problems
+                .into_iter()
+                .map(|(message, fix)| checks::violation(path, line, message + suffix, fix)),
+        );
+    }
     found.sort_by_key(|violation| violation.line);
     found
 }
 
 /// The line of the next unclaimed occurrence of `needle` in `text` from byte `from`, spelled as
 /// the first of these that occurs at all: quoted with `"`, quoted with `'`, bare (a TOML key).
-/// `seen` counts the occurrences already claimed, so a string written twice points at both of its
-/// lines, and a third finding of it at none.
+/// `seen` counts the occurrences already claimed, one per decoded string, so a string written
+/// twice points at both of its lines, and a third occurrence of it at none.
 fn find(text: &str, from: usize, needle: &str, seen: &mut HashMap<String, usize>) -> Option<u32> {
     let rest = text.get(from..)?;
     let candidate = [
