@@ -1,16 +1,17 @@
 //! The `tauri-config` check: the security settings of the desktop crate's `tauri.conf.json` and
 //! `build.rs`.
 //!
-//! In `tauri.conf.json`: the global Tauri object is off, the prototype is frozen, the CSP is set
-//! and allows neither eval nor inline script (the dev CSP may allow inline script), no window is
-//! built from config, the asset protocol is off, and no `dangerous*` key appears at any depth.
+//! In `tauri.conf.json`: the global Tauri object is off, the prototype is frozen, the CSP is
+//! exactly `PINNED_CSP`, `build.frontendDist` is a local folder (no URL, no file list), no window
+//! is built from config, the asset protocol is off, and no `dangerous*` key appears at any depth.
 //! The updater has a public key once it has endpoints, and `bundle.createUpdaterArtifacts` is not
 //! `"v1Compatible"`, which needs the updater's `zip` feature that the workspace leaves off.
 //! No platform config (`tauri.<platform>.conf.json`, `.json5` or `Tauri.<platform>.toml`) exists:
 //! Tauri merges one over `tauri.conf.json` and could turn a setting back on for one OS.
 //! In `build.rs`: an `AppManifest` is declared (`app_manifest(` and `AppManifest::new()`, outside
-//! comments), and `capabilities_path_pattern(` does not point Tauri at another folder. Each failing setting points at its key's line,
-//! found under its parent object (`json_text::key_line`), or at line 1.
+//! comments), and `capabilities_path_pattern(` does not point Tauri at another folder. Each failing
+//! setting points at its key's line, found under its parent object (`json_text::key_line`), or at
+//! line 1.
 //! The pure functions take file contents and paths; `run` reads the files from the repo.
 
 use crate::checks::json_text::key_line;
@@ -28,11 +29,9 @@ const CONF_MISSING_FIX: &str =
 const CONF_INVALID_FIX: &str = "fix the JSON syntax: Tauri cannot read the file either";
 const GLOBAL_TAURI_FIX: &str = "set `\"withGlobalTauri\": false` under `app`: the global object hands every script in the page the whole IPC API";
 const FREEZE_FIX: &str = "set `\"freezePrototype\": true` under app.security: a frozen prototype stops script in the page from hijacking the objects the IPC bridge uses";
-const CSP_MISSING_FIX: &str =
-    "restore app.security.csp: without a CSP any injected script runs and reaches the IPC";
-const CSP_UNSAFE_FIX: &str =
-    "remove it from app.security.csp: it lets injected script run, and that script reaches the IPC";
-const DEV_CSP_FIX: &str = "remove `'unsafe-eval'` from app.security.devCsp: dev builds may allow 'unsafe-inline' for hot reload, but never eval";
+const CSP_PINNED_FIX: &str = "set app.security.csp to the string in PINNED_CSP: the policy is pinned in xtask/src/checks/tauri_config.rs and changes only together with that const, in review";
+const FRONTEND_FIX: &str =
+    "frontendDist must be the local dist folder; a URL makes the release app load a remote site";
 const WINDOWS_FIX: &str =
     "build windows in crates/desktop/src/lib.rs: a config window skips use_https_scheme(true)";
 const ASSET_FIX: &str = "set app.security.assetProtocol.enable to false: the asset protocol serves files from disk to the webview";
@@ -47,8 +46,9 @@ const PATH_PATTERN_FIX: &str = "remove it: capabilities live in the crate's capa
 /// The platforms Tauri merges a platform config for, over `tauri.conf.json`.
 const PLATFORMS: [&str; 5] = ["macos", "windows", "linux", "ios", "android"];
 
-/// The CSP sources that let injected script run.
-const UNSAFE_SOURCES: [&str; 2] = ["'unsafe-eval'", "'unsafe-inline'"];
+/// The one CSP `app.security.csp` may hold. The policy is decided, so a change to it is an edit
+/// here too, which puts it in front of a reviewer.
+pub(crate) const PINNED_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: clauseo-file: http://clauseo-file.localhost https://clauseo-file.localhost; font-src 'self'; connect-src ipc: http://ipc.localhost https://ipc.localhost; worker-src 'self'; frame-src 'self'; child-src 'self'; object-src 'none'; media-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types clauseo-sanitize";
 
 /// Fails on every unsafe setting in `tauri.conf.json` and on a `build.rs` without an `AppManifest`.
 pub(crate) const CHECK: StaticCheck = StaticCheck {
@@ -108,6 +108,7 @@ pub(crate) fn conf_violations(path: &str, text: Option<&str>) -> Vec<Violation> 
     };
     let mut found = app_violations(&conf, &at);
     found.extend(csp_violations(&conf, &at));
+    found.extend(frontend_violations(&conf, &at));
     found.extend(updater_violations(&conf, &at));
     for keys in dangerous_keys(&conf) {
         let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
@@ -161,36 +162,41 @@ fn app_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
     found
 }
 
-/// The CSP is set and allows neither eval nor inline script; the dev CSP allows no eval.
+/// The CSP is exactly `PINNED_CSP`: a string, not an object of directives.
 fn csp_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
-    let mut found = Vec::new();
-    let csp_keys = ["app", "security", "csp"];
-    match conf.pointer("/app/security/csp").and_then(csp_text) {
-        Some(csp) if !csp.trim().is_empty() => {
-            for source in UNSAFE_SOURCES.iter().filter(|source| csp.contains(*source)) {
-                found.push(at(
-                    &csp_keys,
-                    format!("app.security.csp allows `{source}`"),
-                    CSP_UNSAFE_FIX,
-                ));
-            }
-        }
-        _ => found.push(at(
-            &csp_keys,
-            "app.security.csp is missing or empty".to_owned(),
-            CSP_MISSING_FIX,
-        )),
-    }
-    if let Some(dev) = conf.pointer("/app/security/devCsp").and_then(csp_text)
-        && dev.contains("'unsafe-eval'")
-    {
-        found.push(at(
-            &["app", "security", "devCsp"],
-            "app.security.devCsp allows `'unsafe-eval'`".to_owned(),
-            DEV_CSP_FIX,
-        ));
-    }
-    found
+    let message = match conf.pointer("/app/security/csp") {
+        Some(Value::String(csp)) if csp == PINNED_CSP => return Vec::new(),
+        Some(Value::String(_)) => "app.security.csp is not the pinned policy",
+        Some(Value::Object(_)) => "app.security.csp is an object, not the pinned policy string",
+        Some(_) => "app.security.csp is not a string",
+        None => "app.security.csp is missing",
+    };
+    vec![at(
+        &["app", "security", "csp"],
+        message.to_owned(),
+        CSP_PINNED_FIX,
+    )]
+}
+
+/// `build.frontendDist` names the local dist folder: not a URL, which Tauri would load as a remote
+/// site, and not an array, which Tauri reads as a list of files to embed.
+fn frontend_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
+    let message = match conf.pointer("/build/frontendDist") {
+        Some(Value::String(dist)) if is_url(dist) => "build.frontendDist is a URL",
+        Some(Value::Array(_)) => "build.frontendDist is a list of files, not the dist folder",
+        _ => return Vec::new(),
+    };
+    vec![at(
+        &["build", "frontendDist"],
+        message.to_owned(),
+        FRONTEND_FIX,
+    )]
+}
+
+/// True when `text` has a URL scheme: it contains `://` or starts with `http:` or `https:`.
+fn is_url(text: &str) -> bool {
+    let lower = text.trim().to_ascii_lowercase();
+    lower.contains("://") || lower.starts_with("http:") || lower.starts_with("https:")
 }
 
 /// Endpoints need the public key that verifies updates, and no artifacts in the v1 format, which
@@ -244,32 +250,6 @@ fn platform_violation(path: &str) -> Violation {
         format!("platform config `{path}` overrides tauri.conf.json"),
         PLATFORM_FIX,
     )
-}
-
-/// A CSP as one string: Tauri takes a string, or an object of directives whose sources are a
-/// string or a list of strings. `None` for any other value.
-fn csp_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::Object(directives) => Some(
-            directives
-                .iter()
-                .map(|(name, sources)| {
-                    let sources = match sources {
-                        Value::Array(items) => items
-                            .iter()
-                            .filter_map(Value::as_str)
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                        other => other.as_str().unwrap_or_default().to_owned(),
-                    };
-                    format!("{name} {sources}")
-                })
-                .collect::<Vec<_>>()
-                .join("; "),
-        ),
-        _ => None,
-    }
 }
 
 /// The key path of every object key, at any depth, whose name starts with `dangerous`, in
