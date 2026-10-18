@@ -63,7 +63,9 @@ pub(crate) const WEB_PROBES: &[WebProbe] = &[
         unit: Unit::S,
         gating: Gating::Row,
     },
-    // Recorded only: its PR gate starts later.
+    // Reported only, although its `budgets.toml` row says `gate = "pr"`: it stays reported only
+    // until the app milestone's first transcript PR. Turning the gate on means changing this one
+    // entry to `Gating::Row`; the reported-only line and the JSON follow from it.
     WebProbe {
         name: "initial_js",
         budget_id: Some("initial_js"),
@@ -84,9 +86,16 @@ pub(crate) const WEB_PROBES: &[WebProbe] = &[
     },
 ];
 
-/// The line under the web table that names the probes that never fail the run on their numbers.
-pub(crate) const REPORTED_LINE: &str =
-    "reported only: initial_js (its PR gate starts later), dev_start, hmr";
+/// The line under the web table that names the probes of `probes` that never fail the run, or
+/// `None` when every probe can.
+pub(crate) fn reported_line(probes: &[WebProbe]) -> Option<String> {
+    let names: Vec<&str> = probes
+        .iter()
+        .filter(|probe| probe.gating == Gating::ReportedOnly)
+        .map(|probe| probe.name)
+        .collect();
+    (!names.is_empty()).then(|| format!("reported only, never fail the run: {}", names.join(", ")))
+}
 
 /// The object the script prints on stdout.
 #[derive(Debug, Deserialize)]
