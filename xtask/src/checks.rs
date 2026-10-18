@@ -18,6 +18,14 @@ mod capabilities;
     )
 )]
 pub(crate) mod crates_table;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the checks with exception files (core-io, file-size) come next"
+    )
+)]
+pub(crate) mod exceptions;
 mod json_text;
 pub(crate) mod planted;
 mod plugins;
