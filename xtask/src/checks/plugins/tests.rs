@@ -226,12 +226,12 @@ fn devtools_in_the_desktop_entry_fails_at_its_line() {
 fn an_optional_tauri_feature_reference_fails() {
     let desktop = DESKTOP.replacen(
         "tauri.workspace = true\n",
-        "tauri = { workspace = true, optional = true }\ntauri-x = { path = \"../x\" }\n",
+        "tauri = { workspace = true, optional = true }\ntauri-x = { path = \"../x\", package = \"helper-x\" }\n",
         1,
     );
     let desktop =
         format!("{desktop}\n[features]\ninspect = [\"tauri?/devtools\", \"tauri-x/devtools\"]\n");
-    let x = "[package]\nname = \"tauri-x\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[features]\ndevtools = []\n";
+    let x = "[package]\nname = \"helper-x\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[features]\ndevtools = []\n";
     let ws = Workspace::new("optional-tauri", ROOT, &desktop, &[("crates/x", x)]);
     assert_eq!(
         ws.violations(),
@@ -316,6 +316,62 @@ tauri-plugin-os = "2"
                 "`clauseo-core` depends on `tauri-runtime` (as `rt`)"
             ),
         ]
+    );
+}
+
+#[test]
+fn tauri_runtime_wry_with_devtools_in_the_desktop_crate_fails() {
+    let desktop = format!(
+        "{DESKTOP}tauri-runtime-wry = {{ version = \"2.12.2\", features = [\"devtools\"] }}\n"
+    );
+    let ws = Workspace::new("runtime-wry", ROOT, &desktop, &[]);
+    assert_eq!(
+        ws.violations(),
+        vec![violation(
+            DESKTOP_PATH,
+            line_of(&ws.desktop, "tauri-runtime-wry"),
+            "`tauri-runtime-wry` is a Tauri crate outside the allowed set",
+            FAMILY_FIX,
+        )]
+    );
+}
+
+#[test]
+fn wry_in_the_desktop_crate_fails() {
+    let desktop = format!(
+        "{DESKTOP}\n[target.'cfg(unix)'.dependencies]\nwry = {{ version = \"0.53\", features = [\"devtools\"] }}\n"
+    );
+    let ws = Workspace::new("wry", ROOT, &desktop, &[]);
+    assert_eq!(
+        ws.violations(),
+        vec![violation(
+            DESKTOP_PATH,
+            line_of(&ws.desktop, "wry = "),
+            "`wry` is a Tauri crate outside the allowed set",
+            FAMILY_FIX,
+        )]
+    );
+}
+
+#[test]
+fn tauri_build_as_a_build_dependency_passes() {
+    let desktop = format!("{DESKTOP}\n[build-dependencies]\ntauri-build = \"2\"\n");
+    let ws = Workspace::new("tauri-build", ROOT, &desktop, &[]);
+    assert_eq!(ws.violations(), Vec::new());
+}
+
+#[test]
+fn another_member_with_wry_fails() {
+    let core = "[package]\nname = \"clauseo-core\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[dependencies]\nwry = \"0.53\"\n";
+    let ws = Workspace::new("member-wry", ROOT, DESKTOP, &[("crates/core", core)]);
+    assert_eq!(
+        ws.violations(),
+        vec![violation(
+            "crates/core/Cargo.toml",
+            line_of(core, "wry = "),
+            "`clauseo-core` depends on `wry`",
+            MEMBER_FIX,
+        )]
     );
 }
 
