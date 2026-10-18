@@ -1,6 +1,7 @@
 //! Tests for `probe.rs`: the restore of the marker file on every path, the guard against edits made
 //! during a run, and the warm-up judgement.
 
+use super::super::scratch::Scratch;
 use super::guard::save_fix;
 use super::*;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -17,23 +18,15 @@ const CHECK: Probe = Probe {
     subcommand: "check",
 };
 
-/// A scratch repo for one test: its own directory under the temp dir, cleared before and after.
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("xtask-buildtime-{name}-{}", std::process::id()));
-    if dir.exists() {
-        fs::remove_dir_all(&dir).expect("clear the old scratch dir");
-    }
+/// A scratch repo for one test, holding the marker file. It is removed when the test ends, also
+/// when the test fails.
+fn scratch(name: &str) -> Scratch {
+    let dir = Scratch::new(name);
     let file = dir.join(REL);
     fs::create_dir_all(file.parent().expect("the file has a parent"))
         .expect("create the crate dir");
     fs::write(&file, ORIGINAL).expect("write the marker file");
     dir
-}
-
-fn cleanup(dir: &Path) {
-    if dir.exists() {
-        fs::remove_dir_all(dir).expect("remove the scratch dir");
-    }
 }
 
 fn marker() -> Marker {
@@ -65,7 +58,6 @@ fn a_failing_cargo_puts_the_original_bytes_back_and_leaves_no_copy() {
     assert_eq!(failure.message, "cargo check -v failed");
     assert_eq!(file_text(&dir), ORIGINAL);
     assert!(!backup_of(&dir).exists());
-    cleanup(&dir);
 }
 
 #[test]
@@ -79,7 +71,6 @@ fn a_spawn_error_puts_the_original_bytes_back_and_leaves_no_copy() {
     assert!(failure.message.contains("no cargo here"));
     assert_eq!(file_text(&dir), ORIGINAL);
     assert!(!backup_of(&dir).exists());
-    cleanup(&dir);
 }
 
 #[test]
@@ -92,7 +83,6 @@ fn a_panicking_runner_restores_the_file_on_the_spot() {
     assert!(outcome.is_err(), "the panic reaches the caller");
     assert_eq!(file_text(&dir), ORIGINAL);
     assert!(!backup_of(&dir).exists());
-    cleanup(&dir);
 }
 
 #[test]
@@ -110,7 +100,6 @@ fn a_leftover_copy_is_put_back_and_deleted_and_named() {
     assert_eq!(file_text(&dir), ORIGINAL);
     assert!(!backup_of(&dir).exists());
     assert!(!dir.join(BACKUP_DIR).join("crates").exists());
-    cleanup(&dir);
 }
 
 #[test]
@@ -118,7 +107,6 @@ fn no_leftover_copies_means_nothing_is_printed() {
     let dir = scratch("no-leftovers");
     assert_eq!(restore_leftovers(&dir), Ok(Vec::new()));
     assert_eq!(file_text(&dir), ORIGINAL);
-    cleanup(&dir);
 }
 
 #[test]
@@ -152,7 +140,6 @@ fn a_successful_run_returns_the_samples_and_leaves_the_original_bytes() {
     );
     assert_eq!(file_text(&dir), ORIGINAL);
     assert!(!backup_of(&dir).exists());
-    cleanup(&dir);
 }
 
 #[test]
@@ -178,7 +165,6 @@ fn a_crate_that_is_not_rebuilt_fails_before_any_timed_run_and_restores() {
     );
     assert_eq!(calls, 1, "only the warm-up runs");
     assert_eq!(file_text(&dir), ORIGINAL);
-    cleanup(&dir);
 }
 
 #[test]
@@ -213,7 +199,6 @@ fn a_non_incremental_build_warns_locally_and_is_refused_in_ci() {
     );
     assert_eq!(refused.fix, INCREMENTAL_FIX);
     assert_eq!(file_text(&dir), ORIGINAL);
-    cleanup(&dir);
 }
 
 #[test]
@@ -257,7 +242,6 @@ fn a_conflict_leaves_both_files_untouched_and_names_the_copy() {
         fs::read_to_string(backup_of(&dir)).expect("the copy is kept"),
         ORIGINAL
     );
-    cleanup(&dir);
 }
 
 #[test]
@@ -271,7 +255,6 @@ fn a_missing_file_is_a_conflict_and_the_copy_is_kept() {
     assert!(failure.message.starts_with(&format!("{REL} is missing")));
     assert!(backup_of(&dir).exists());
     assert!(!dir.join(REL).exists());
-    cleanup(&dir);
 }
 
 #[test]
@@ -286,7 +269,6 @@ fn a_stray_file_without_a_marker_is_ignored() {
         "Bud1 junk"
     );
     assert_eq!(file_text(&dir), ORIGINAL);
-    cleanup(&dir);
 }
 
 #[test]
@@ -324,7 +306,6 @@ fn a_second_save_of_the_same_file_fails_and_leaves_the_file_alone() {
     first.restore().expect("the first guard restores");
     assert_eq!(file_text(&dir), ORIGINAL);
     assert!(!backup_of(&dir).exists());
-    cleanup(&dir);
 }
 
 #[test]
@@ -336,7 +317,6 @@ fn the_temporary_file_of_an_interrupted_save_is_deleted() {
     assert_eq!(restore_leftovers(&dir), Ok(Vec::new()));
     assert!(!tmp.exists());
     assert_eq!(file_text(&dir), ORIGINAL);
-    cleanup(&dir);
 }
 
 /// The file as someone saved it while the probe ran.
@@ -383,7 +363,6 @@ fn an_edit_during_the_run_survives_and_keeps_the_copy_and_fails_the_probe() {
         fs::read_to_string(backup_of(&dir)).expect("the copy is kept"),
         ORIGINAL
     );
-    cleanup(&dir);
 }
 
 #[test]
@@ -400,7 +379,6 @@ fn an_edit_before_the_restore_survives_and_keeps_the_copy() {
     );
     assert_eq!(file_text(&dir), EDITED_MID_RUN);
     assert_eq!(fs::read_to_string(backup_of(&dir)).expect("kept"), ORIGINAL);
-    cleanup(&dir);
 }
 
 #[test]
@@ -416,7 +394,6 @@ fn a_dropped_guard_restores_only_the_bytes_it_wrote() {
         "the edit is not overwritten"
     );
     assert_eq!(fs::read_to_string(backup_of(&dir)).expect("kept"), ORIGINAL);
-    cleanup(&dir);
 
     let dir = scratch("drop-untouched");
     let mut guard = Guard::save(&dir, &marker()).expect("the save");
@@ -424,7 +401,6 @@ fn a_dropped_guard_restores_only_the_bytes_it_wrote() {
     drop(guard);
     assert_eq!(file_text(&dir), ORIGINAL, "the guard's own bump is undone");
     assert!(!backup_of(&dir).exists());
-    cleanup(&dir);
 }
 
 #[test]
@@ -450,5 +426,4 @@ fn a_kept_copy_marks_its_crate_so_later_probes_on_it_are_skipped() {
         !holds_kept_copy(&dir, "crates/other"),
         "another crate holds none"
     );
-    cleanup(&dir);
 }

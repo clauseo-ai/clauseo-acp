@@ -46,11 +46,12 @@ pub(crate) fn acquire(path: &Path) -> Result<File, Failure> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::scratch::Scratch;
     use super::*;
 
     #[test]
     fn a_second_lock_fails_while_the_first_is_held_and_works_after() {
-        let dir = std::env::temp_dir().join(format!("xtask-buildtime-lock-{}", std::process::id()));
+        let dir = Scratch::new("lock");
         let path = dir.join("target/xtask/buildtime.lock");
         let first = acquire(&path).expect("the first run takes the lock");
         let second = acquire(&path).expect_err("the second run is refused");
@@ -62,6 +63,5 @@ mod tests {
         drop(first);
         let third = acquire(&path).expect("the lock is free once the first run ends");
         drop(third);
-        fs::remove_dir_all(&dir).expect("remove the scratch dir");
     }
 }
