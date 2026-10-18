@@ -1,33 +1,43 @@
 //! `cargo xtask buildtime [rust|web|all] [--runs N] [--json]`: times the edit loop of the app and of
 //! the protocol crate against the rows of `budgets.toml`. The web half is not built until R4.
 //!
-//! A probe writes the next value of its crate's `BUILDTIME_MARKER`, runs cargo, and times it. The
-//! first run is a warm-up and is not counted. The file is restored after every probe, even when
-//! cargo fails. Only `clock::timed` reads the clock, and only `process.rs` starts processes.
+//! A probe writes the next value of its crate's `BUILDTIME_MARKER`, runs `cargo <sub> -v` as a
+//! warm-up that is not counted, then times `cargo <sub>` runs. The warm-up's rustc lines are the
+//! authority on whether the crate was rebuilt and whether it was built with incremental. The file
+//! is put back after every probe, and at the start of the next run if this one was interrupted
+//! (`probe.rs`). Only `clock::timed` reads the clock, and only `process.rs` starts processes.
 
 mod marker;
+mod probe;
 mod profile;
 mod report;
 
 #[cfg(test)]
 mod tests;
 
-use crate::budgets::{self, Budget, Unit};
+use crate::budgets::{self, Budget, Gate, Unit};
 use crate::check;
-use crate::clock::timed;
 use crate::output::Printer;
 use crate::process::{self, Cmd, Program};
 use crate::workspace::{self, Member};
 use clap::ValueEnum;
-use marker::{Marker, bump_marker};
-use profile::Incremental;
+use profile::{Incremental, Sources};
 use serde::Serialize;
+use std::env;
+use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
 /// The web half's message, until R4 builds it.
 const WEB_MESSAGE: &str = "not implemented until R4";
+
+/// The fix for a run whose crate builds without incremental in CI, and for a refused run.
+const INCREMENTAL_FIX: &str =
+    "unset CARGO_INCREMENTAL (or set it to 1) and keep incremental = true in [profile.dev]";
+
+/// The fix for a probe over its budget that fails the run.
+const OVER_FIX: &str = "find what slowed the loop (`cargo build --timings` shows where the time goes); a limit in budgets.toml changes only with a reviewed measurement";
 
 /// Which half of the build loop to time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -74,7 +84,8 @@ const PROBES: &[Probe] = &[
     },
 ];
 
-/// What a probe does on this machine: run in the member's directory, or be skipped.
+/// What a probe does on this machine. `Run` carries the member's directory, where the marker file
+/// is. Cargo itself runs at the repo root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Planned {
     Run { probe: Probe, dir: String },
@@ -160,7 +171,8 @@ impl ProbeStatus {
     }
 }
 
-/// What one probe came to.
+/// What one probe came to. A measured probe carries its budget row's gate, and a warning when its
+/// build was not incremental.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Outcome {
     Skipped(&'static str),
@@ -169,6 +181,8 @@ pub(crate) enum Outcome {
         stats: Stats,
         budget_id: &'static str,
         budget_s: f64,
+        gate: Gate,
+        warning: Option<String>,
     },
 }
 
@@ -189,6 +203,28 @@ impl Outcome {
             }
         }
     }
+
+    /// Whether this probe fails the run: a failure always does, and an over-budget probe does when
+    /// its gate says so for this machine.
+    pub(crate) fn fails_run(&self, ci: bool) -> bool {
+        match self {
+            Outcome::Skipped(_) => false,
+            Outcome::Failed(_) => true,
+            Outcome::Measured { gate, .. } => {
+                self.status() == ProbeStatus::Over && over_budget_fails(*gate, ci)
+            }
+        }
+    }
+}
+
+/// Whether an over-budget probe fails the run. `local` fails here and is only reported in CI, `pr`
+/// and `release` fail everywhere, and `alert` is only reported.
+pub(crate) fn over_budget_fails(gate: Gate, ci: bool) -> bool {
+    match gate {
+        Gate::Local => !ci,
+        Gate::Alert => false,
+        Gate::Pr | Gate::Release => true,
+    }
 }
 
 /// One probe's name and outcome.
@@ -198,189 +234,123 @@ pub(crate) struct ProbeResult {
     pub outcome: Outcome,
 }
 
-/// The limit of the budget row `id`, in seconds. A missing row, or a unit other than `s` or `ms`,
-/// fails the probe.
-pub(crate) fn budget_seconds(budgets: &[Budget], id: &str) -> Result<f64, Failure> {
+/// A budget row's limit in seconds, and its gate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Limit {
+    pub seconds: f64,
+    pub gate: Gate,
+}
+
+/// The limit of the budget row `id`, in seconds, and its gate. A missing row, or a unit other than
+/// `s` or `ms`, fails the probe.
+pub(crate) fn budget_limit(budgets: &[Budget], id: &str) -> Result<Limit, Failure> {
     let Some(budget) = budgets.iter().find(|budget| budget.id == id) else {
         return Err(Failure::new(
             format!("no budget row {id} in budgets.toml"),
             format!("add a [[budget]] row with id = \"{id}\" to budgets.toml"),
         ));
     };
-    match budget.unit {
-        Unit::S => Ok(budget.limit),
-        Unit::Ms => Ok(budget.limit / 1000.0),
-        other => Err(Failure::new(
-            format!(
-                "budget {id} is in {}, and buildtime compares s or ms",
-                other.label()
-            ),
-            format!("set unit = \"s\" or \"ms\" on budget {id}"),
-        )),
-    }
-}
-
-/// Runs the cargo command of `probe` against the marker in `dir`, and returns its outcome.
-fn run_probe(root: &Path, dir: &str, probe: &Probe, budgets: &[Budget], runs: u32) -> Outcome {
-    let budget_s = match budget_seconds(budgets, probe.budget_id) {
-        Ok(seconds) => seconds,
-        Err(failure) => return Outcome::Failed(failure),
+    let seconds = match budget.unit {
+        Unit::S => budget.limit,
+        Unit::Ms => budget.limit / 1000.0,
+        other => {
+            return Err(Failure::new(
+                format!(
+                    "budget {id} is in {}, and buildtime compares s or ms",
+                    other.label()
+                ),
+                format!("set unit = \"s\" or \"ms\" on budget {id}"),
+            ));
+        }
     };
-    let Some(marker) = marker::find(root, dir) else {
-        let lib = marker::in_crate(dir, "src/lib.rs");
-        return Outcome::Failed(Failure::new(
-            format!("{lib}:1: no pub const BUILDTIME_MARKER: u64 in src/lib.rs or src/main.rs"),
-            "add pub const BUILDTIME_MARKER: u64 = 0; to the crate root",
-        ));
-    };
-    match measure(root, &marker, probe.subcommand, runs) {
-        Err(failure) => Outcome::Failed(failure),
-        Ok(samples) => match stats(&samples) {
-            Some(stats) => Outcome::Measured {
-                stats,
-                budget_id: probe.budget_id,
-                budget_s,
-            },
-            None => Outcome::Failed(Failure::new(
-                format!("no timed runs for {}", probe.name),
-                "run `cargo xtask buildtime` with --runs 1 or more",
-            )),
-        },
-    }
+    Ok(Limit {
+        seconds,
+        gate: budget.gate,
+    })
 }
 
-/// Runs the warm-up and the timed runs of `cargo <subcommand>`, then restores the marker file.
-/// Each run writes the next value, so cargo rebuilds the crate each time.
-fn measure(root: &Path, marker: &Marker, subcommand: &str, runs: u32) -> Result<Vec<f64>, Failure> {
-    let path = root.join(&marker.path);
-    let cmd = Cmd::new(Program::Cargo, [subcommand]);
-    let mut samples = Vec::new();
-    let edited = edit_and_run(&path, marker, &cmd, root, runs, &mut samples);
-    let restored = std::fs::write(&path, &marker.text);
-    match (edited, restored) {
-        (Ok(()), Ok(())) => Ok(samples),
-        (Ok(()), Err(error)) => Err(Failure::new(
-            format!("could not restore {}: {error}", marker.path),
-            format!(
-                "restore {} from git: git checkout -- {}",
-                marker.path, marker.path
-            ),
-        )),
-        (Err(failure), Ok(())) => Err(failure),
-        (Err(mut failure), Err(error)) => {
-            failure.message = format!(
-                "{}; and could not restore {}: {error}",
-                failure.message, marker.path
-            );
-            Err(failure)
-        }
-    }
-}
-
-/// The loop of `measure`: one warm-up run, then `runs` timed runs, each with a new marker value.
-fn edit_and_run(
-    path: &Path,
-    marker: &Marker,
-    cmd: &Cmd,
-    root: &Path,
-    runs: u32,
-    samples: &mut Vec<f64>,
-) -> Result<(), Failure> {
-    let mut current = marker.text.clone();
-    for run in 0..=runs {
-        current = bump_marker(&current).ok_or_else(|| {
-            Failure::new(
-                format!("{} lost its marker line", marker.path),
-                "restore the BUILDTIME_MARKER line by hand",
-            )
-        })?;
-        std::fs::write(path, &current).map_err(|error| {
-            Failure::new(
-                format!("could not write {}: {error}", marker.path),
-                "make sure the file is writable",
-            )
-        })?;
-        let (captured, secs) = timed(|| process::capture(cmd, root, &mut |_: &[u8]| {}));
-        let captured = captured.map_err(|error| {
-            Failure::new(
-                format!("could not run `{cmd}`: {error}"),
-                format!("run `{cmd}` to see the error"),
-            )
-        })?;
-        if !captured.success {
-            return Err(Failure {
-                message: format!("{cmd} failed"),
-                fix: format!("run `{cmd}` to see the error"),
-                output: Some(captured.output),
-            });
-        }
-        if run > 0 {
-            samples.push(secs);
-        }
-    }
-    Ok(())
-}
-
-/// Whether a run passes. Any failed probe fails it. An over-budget probe fails it locally, and
-/// passes it in CI, where the table is reported and not enforced.
-pub(crate) fn passes(statuses: &[ProbeStatus], ci: bool) -> bool {
-    if statuses.contains(&ProbeStatus::Failed) {
-        return false;
-    }
-    ci || !statuses.contains(&ProbeStatus::Over)
+/// Whether the run passes: no probe fails it.
+pub(crate) fn passes(results: &[ProbeResult], ci: bool) -> bool {
+    !results.iter().any(|result| result.outcome.fails_run(ci))
 }
 
 /// The Rust half, once it has been measured.
-struct RustRun {
+pub(crate) struct RustRun {
     rustc: String,
     incremental: Incremental,
     ci: bool,
+    runs: u32,
     results: Vec<ProbeResult>,
 }
 
-/// Runs the Rust half. Prints the rustc and profile lines when not `json`. Returns `None` after
-/// printing the reason when the run cannot start.
+/// Prints a failure that stops the run, and returns its line for the JSON errors.
+fn stop(diag: &mut Out, message: &str, fix: &str) -> Vec<String> {
+    diag.failure(message, fix);
+    vec![one_line(message)]
+}
+
+/// `text` on one line: every run of whitespace, newlines included, becomes one space.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Runs the Rust half. Puts back any file an interrupted run left, then reads the budgets and the
+/// incremental setting, then times the probes. Prints the rustc and profile lines when not `json`.
+/// `Err` holds one line per reason the run cannot start; the reason is printed before it returns.
 fn measure_rust(
     root: &Path,
     runs: u32,
     json: bool,
     out: &mut Out,
     diag: &mut Out,
-) -> Option<RustRun> {
+) -> Result<RustRun, Vec<String>> {
+    let leftovers = match probe::restore_leftovers(root) {
+        Ok(lines) => lines,
+        Err(failure) => return Err(stop(diag, &failure.message, &failure.fix)),
+    };
+    for line in &leftovers {
+        diag.note(line);
+    }
     let budgets = match budgets::load(root) {
         Ok(budgets) => budgets,
         Err(violations) => {
+            let mut errors = Vec::new();
             for violation in &violations {
                 diag.violation(violation);
+                errors.push(one_line(&format!(
+                    "{}:{}: {}",
+                    violation.path, violation.line, violation.message
+                )));
             }
-            return None;
+            return Err(errors);
         }
     };
     let rustc = match rustc_version(root) {
         Ok(version) => version,
-        Err(failure) => {
-            diag.failure(&failure.message, &failure.fix);
-            return None;
-        }
+        Err(failure) => return Err(stop(diag, &failure.message, &failure.fix)),
     };
-    let manifest = match std::fs::read_to_string(root.join("Cargo.toml")) {
+    let manifest = match fs::read_to_string(root.join("Cargo.toml")) {
         Ok(manifest) => manifest,
         Err(error) => {
-            diag.failure(
+            return Err(stop(
+                diag,
                 &format!("cannot read Cargo.toml: {error}"),
                 "restore Cargo.toml at the repo root",
-            );
-            return None;
+            ));
         }
     };
-    let incremental = profile::resolve(
-        std::env::var("CARGO_INCREMENTAL").ok().as_deref(),
-        std::env::var("CARGO_PROFILE_DEV_INCREMENTAL")
-            .ok()
-            .as_deref(),
-        &manifest,
-    );
-    let ci = check::is_ci(std::env::var("CI").ok().as_deref());
+    let cargo_incremental = env::var("CARGO_INCREMENTAL").ok();
+    let build_incremental = env::var("CARGO_BUILD_INCREMENTAL").ok();
+    let profile_dev_incremental = env::var("CARGO_PROFILE_DEV_INCREMENTAL").ok();
+    let config_toml = fs::read_to_string(root.join(".cargo/config.toml")).ok();
+    let incremental = profile::resolve(&Sources {
+        cargo_incremental: cargo_incremental.as_deref(),
+        build_incremental: build_incremental.as_deref(),
+        profile_dev_incremental: profile_dev_incremental.as_deref(),
+        config_toml: config_toml.as_deref(),
+        manifest: Some(&manifest),
+    });
+    let ci = check::is_ci(env::var("CI").ok().as_deref());
     if !json {
         out.note(&rustc);
         let state = if incremental.on { "on" } else { "off" };
@@ -390,22 +360,23 @@ fn measure_rust(
         ));
     }
     if ci && !incremental.on {
-        diag.failure(
-            &format!(
-                "refusing to measure: CI is set and incremental is off ({})",
-                incremental.source
-            ),
-            "unset CARGO_INCREMENTAL (or set it to 1) and keep incremental = true in [profile.dev]",
+        let message = format!(
+            "refusing to measure: CI is set and incremental is off ({})",
+            incremental.source
         );
-        return None;
+        let fix = format!(
+            "remove or change {}, and keep incremental = true in [profile.dev]",
+            incremental.source
+        );
+        return Err(stop(diag, &message, &fix));
     }
     let members = match workspace::load_members(root) {
         Ok(members) => members,
         Err(error) => {
-            diag.failure(&error, "run `cargo metadata` to see the error");
-            return None;
+            return Err(stop(diag, &error, "run `cargo metadata` to see the error"));
         }
     };
+    let mut runner = |cmd: &Cmd| process::capture(cmd, root, &mut |_: &[u8]| {});
     let results = plan(PROBES, &members)
         .into_iter()
         .map(|planned| match planned {
@@ -415,14 +386,15 @@ fn measure_rust(
             },
             Planned::Run { probe, dir } => ProbeResult {
                 name: probe.name,
-                outcome: run_probe(root, &dir, &probe, &budgets, runs),
+                outcome: probe::run_probe(root, &dir, &probe, &budgets, runs, ci, &mut runner),
             },
         })
         .collect();
-    Some(RustRun {
+    Ok(RustRun {
         rustc,
         incremental,
         ci,
+        runs,
         results,
     })
 }
@@ -465,13 +437,23 @@ pub(crate) fn run(half: Half, runs: u32, json: bool) -> ExitCode {
         }
         return ExitCode::SUCCESS;
     }
-    let Some(rust) = measure_rust(&root, runs, json, &mut out, &mut diag) else {
-        return ExitCode::FAILURE;
+    let rust = match measure_rust(&root, runs, json, &mut out, &mut diag) {
+        Ok(rust) => rust,
+        Err(errors) => {
+            if json {
+                out.note(report::error_json(&errors));
+            }
+            return ExitCode::FAILURE;
+        }
     };
+    let passed = passes(&rust.results, rust.ci);
     if json {
-        out.note(report::json_object(&rust, half == Half::All));
+        out.note(report::json_object(&rust, passed, half == Half::All));
     } else {
         for line in report::table_lines(&rust.results) {
+            out.note(line);
+        }
+        for line in report::warning_lines(&rust.results) {
             out.note(line);
         }
         if half == Half::All {
@@ -479,27 +461,39 @@ pub(crate) fn run(half: Half, runs: u32, json: bool) -> ExitCode {
         }
     }
     report::print_failures(&rust.results, &mut diag);
-
-    let statuses: Vec<ProbeStatus> = rust.results.iter().map(|r| r.outcome.status()).collect();
-    let over: Vec<&str> = rust
-        .results
-        .iter()
-        .filter(|r| r.outcome.status() == ProbeStatus::Over)
-        .map(|r| r.name)
-        .collect();
-    if !over.is_empty() {
-        if rust.ci {
-            diag.note("over budget: CI only reports it");
-        } else {
-            diag.failure(
-                &format!("over budget: {}", over.join(", ")),
-                "find what slowed the loop (`cargo build --timings` shows where the time goes); a limit in budgets.toml changes only with a reviewed measurement",
-            );
-        }
-    }
-    if passes(&statuses, rust.ci) {
+    report_over_budget(&rust.results, rust.ci, &mut diag);
+    if passed {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
     }
+}
+
+/// Names the over-budget probes. Those that fail the run get a failure with its fix. Those only
+/// reported get a note: "CI reports only" in CI, and "reported only" locally, for an alert gate.
+fn report_over_budget(results: &[ProbeResult], ci: bool, diag: &mut Out) {
+    let (failing, reported): (Vec<&ProbeResult>, Vec<&ProbeResult>) = results
+        .iter()
+        .filter(|result| result.outcome.status() == ProbeStatus::Over)
+        .partition(|result| result.outcome.fails_run(ci));
+    if !reported.is_empty() {
+        let names = names(&reported);
+        if ci {
+            diag.note(format!("over budget, CI reports only: {names}"));
+        } else {
+            diag.note(format!("over budget, reported only: {names}"));
+        }
+    }
+    if !failing.is_empty() {
+        diag.failure(&format!("over budget: {}", names(&failing)), OVER_FIX);
+    }
+}
+
+/// The probe names, comma-separated.
+fn names(results: &[&ProbeResult]) -> String {
+    results
+        .iter()
+        .map(|result| result.name)
+        .collect::<Vec<_>>()
+        .join(", ")
 }

@@ -1,6 +1,6 @@
 //! Tests for `buildtime.rs`: the statistics, the verdict, the plan, the budget lookup and the output.
 
-use super::report::{probe_json, table_lines, web_json};
+use super::report::{error_json, json_object, probe_json, table_lines, warning_lines, web_json};
 use super::*;
 
 fn member(name: &str, dir: &str) -> Member {
@@ -16,6 +16,10 @@ fn close(a: f64, b: f64) -> bool {
 }
 
 fn measured(median: f64, budget_s: f64) -> ProbeResult {
+    measured_gated(Gate::Local, median, budget_s)
+}
+
+fn measured_gated(gate: Gate, median: f64, budget_s: f64) -> ProbeResult {
     ProbeResult {
         name: "check_desktop",
         outcome: Outcome::Measured {
@@ -26,6 +30,25 @@ fn measured(median: f64, budget_s: f64) -> ProbeResult {
             },
             budget_id: "cargo_check_app_edit",
             budget_s,
+            gate,
+            warning: None,
+        },
+    }
+}
+
+fn over_budget(name: &'static str, gate: Gate) -> ProbeResult {
+    ProbeResult {
+        name,
+        outcome: Outcome::Measured {
+            stats: Stats {
+                median: 2.0,
+                min: 2.0,
+                max: 2.0,
+            },
+            budget_id: "cargo_check_app_edit",
+            budget_s: 1.0,
+            gate,
+            warning: None,
         },
     }
 }
@@ -73,23 +96,79 @@ fn a_probe_within_its_budget_is_ok_and_one_over_it_is_over() {
 }
 
 #[test]
-fn an_over_budget_run_fails_locally_and_passes_in_ci() {
-    let statuses = [ProbeStatus::Ok, ProbeStatus::Over];
-    assert!(!passes(&statuses, false));
-    assert!(passes(&statuses, true));
+fn an_over_budget_local_probe_fails_locally_and_passes_in_ci() {
+    let results = [
+        measured_gated(Gate::Local, 0.5, 1.0),
+        over_budget("build_desktop", Gate::Local),
+    ];
+    assert!(!passes(&results, false));
+    assert!(passes(&results, true));
+}
+
+#[test]
+fn every_gate_decides_an_over_budget_probe_with_and_without_ci() {
+    assert!(over_budget_fails(Gate::Local, false));
+    assert!(!over_budget_fails(Gate::Local, true));
+    assert!(!over_budget_fails(Gate::Alert, false));
+    assert!(!over_budget_fails(Gate::Alert, true));
+    assert!(over_budget_fails(Gate::Pr, false));
+    assert!(over_budget_fails(Gate::Pr, true));
+    assert!(over_budget_fails(Gate::Release, false));
+    assert!(over_budget_fails(Gate::Release, true));
+}
+
+#[test]
+fn an_over_budget_probe_fails_the_run_only_when_its_gate_says_so() {
+    for ci in [false, true] {
+        assert!(
+            !passes(&[over_budget("x", Gate::Pr)], ci),
+            "pr fails with ci={ci}"
+        );
+        assert!(
+            !passes(&[over_budget("x", Gate::Release)], ci),
+            "release fails with ci={ci}"
+        );
+        assert!(
+            passes(&[over_budget("x", Gate::Alert)], ci),
+            "alert passes with ci={ci}"
+        );
+        assert_eq!(
+            passes(&[over_budget("x", Gate::Local)], ci),
+            ci,
+            "local passes only in ci={ci}"
+        );
+    }
 }
 
 #[test]
 fn a_failed_probe_fails_even_in_ci() {
-    assert!(!passes(&[ProbeStatus::Failed], true));
-    assert!(!passes(&[ProbeStatus::Over, ProbeStatus::Failed], true));
-    assert!(!passes(&[ProbeStatus::Failed], false));
+    let failed = ProbeResult {
+        name: "check_desktop",
+        outcome: Outcome::Failed(Failure::new("cargo check failed", "run `cargo check`")),
+    };
+    assert!(!passes(std::slice::from_ref(&failed), true));
+    assert!(!passes(std::slice::from_ref(&failed), false));
+    let with_over = [over_budget("build_desktop", Gate::Local), failed];
+    assert!(!passes(&with_over, true));
 }
 
 #[test]
 fn skipped_and_ok_probes_pass() {
-    assert!(passes(&[ProbeStatus::Skipped, ProbeStatus::Ok], false));
+    assert!(passes(&[skipped(), measured(0.5, 1.0)], false));
     assert!(passes(&[], false));
+}
+
+#[test]
+fn a_probe_that_was_not_incremental_warns_under_the_table() {
+    let mut warned = measured(0.5, 1.0);
+    if let Outcome::Measured { warning, .. } = &mut warned.outcome {
+        *warning = Some("warning: clauseo-desktop builds without incremental; its timing is not comparable with the budget".into());
+    }
+    assert_eq!(
+        warning_lines(&[measured(0.5, 1.0), warned]),
+        vec!["warning: clauseo-desktop builds without incremental; its timing is not comparable with the budget".to_owned()]
+    );
+    assert_eq!(warning_lines(&[measured(0.5, 1.0)]), Vec::<String>::new());
 }
 
 #[test]
@@ -113,7 +192,7 @@ fn probes_whose_package_is_missing_are_planned_as_skipped() {
 }
 
 #[test]
-fn probes_run_in_the_member_directory_when_it_is_present() {
+fn probes_find_their_marker_in_the_member_directory_but_run_at_the_root() {
     let members = vec![member("clauseo-desktop", "crates/desktop")];
     let planned = plan(&PROBES[..2], &members);
     assert!(matches!(
@@ -125,20 +204,26 @@ fn probes_run_in_the_member_directory_when_it_is_present() {
 #[test]
 fn a_limit_in_seconds_or_milliseconds_converts_to_seconds() {
     let budgets = vec![budget("a", Unit::S, 5.0), budget("b", Unit::Ms, 250.0)];
-    assert!(close(budget_seconds(&budgets, "a").unwrap_or(0.0), 5.0));
-    assert!(close(budget_seconds(&budgets, "b").unwrap_or(0.0), 0.25));
+    let seconds = budget_limit(&budgets, "a").expect("a row in seconds");
+    assert!(close(seconds.seconds, 5.0));
+    let millis = budget_limit(&budgets, "b").expect("a row in ms");
+    assert!(close(millis.seconds, 0.25));
+}
+
+#[test]
+fn a_limit_carries_its_row_gate() {
+    let mut row = budget("a", Unit::S, 5.0);
+    row.gate = Gate::Release;
+    let limit = budget_limit(&[row], "a").expect("a row in seconds");
+    assert_eq!(limit.gate, Gate::Release);
 }
 
 #[test]
 fn a_missing_row_or_another_unit_fails_the_probe_clearly() {
     let budgets = vec![budget("mb", Unit::Mb, 60.0)];
-    let missing = budget_seconds(&budgets, "nope")
-        .err()
-        .unwrap_or_else(|| Failure::new("", ""));
+    let missing = budget_limit(&budgets, "nope").expect_err("no such row");
     assert_eq!(missing.message, "no budget row nope in budgets.toml");
-    let unit = budget_seconds(&budgets, "mb")
-        .err()
-        .unwrap_or_else(|| Failure::new("", ""));
+    let unit = budget_limit(&budgets, "mb").expect_err("a unit in MB");
     assert_eq!(
         unit.message,
         "budget mb is in MB, and buildtime compares s or ms"
@@ -202,6 +287,54 @@ fn the_json_of_a_measured_probe_has_its_stats_and_budget() {
 }
 
 #[test]
-fn the_web_only_json_is_one_field() {
-    assert_eq!(web_json(), r#"{"web":"not implemented until R4"}"#);
+fn the_web_only_json_names_the_web_half_and_passes() {
+    assert_eq!(
+        web_json(),
+        r#"{"web":"not implemented until R4","passed":true}"#
+    );
+}
+
+fn rust_run(results: Vec<ProbeResult>, ci: bool) -> RustRun {
+    RustRun {
+        rustc: "rustc 1.99.0".into(),
+        incremental: Incremental {
+            on: true,
+            source: "cargo default".into(),
+        },
+        ci,
+        runs: 3,
+        results,
+    }
+}
+
+#[test]
+fn the_json_object_has_the_run_count_and_the_verdict() {
+    let run = rust_run(vec![measured(0.5, 1.0), skipped()], false);
+    let json: serde_json::Value =
+        serde_json::from_str(&json_object(&run, true, false)).expect("valid json");
+    assert_eq!(json["runs"], 3);
+    assert_eq!(json["passed"], true);
+    assert_eq!(json["probes"][1]["status"], "skipped");
+    assert!(json.get("web").is_none());
+
+    let failing = rust_run(vec![over_budget("build_desktop", Gate::Pr)], false);
+    let json: serde_json::Value =
+        serde_json::from_str(&json_object(&failing, false, true)).expect("valid json");
+    assert_eq!(json["passed"], false);
+    assert_eq!(json["web"], "not implemented until R4");
+}
+
+#[test]
+fn the_error_json_is_one_line_per_error_and_never_empty() {
+    assert_eq!(
+        error_json(&["budgets.toml:39: budget x has no gate".to_owned()]),
+        r#"{"passed":false,"errors":["budgets.toml:39: budget x has no gate"]}"#
+    );
+    assert_eq!(error_json(&[]), r#"{"passed":false,"errors":[]}"#);
+}
+
+#[test]
+fn a_stopped_run_prints_its_reason_on_one_line() {
+    let errors = [one_line("refusing to measure:\n  CI is set")];
+    assert_eq!(errors[0], "refusing to measure: CI is set");
 }

@@ -70,6 +70,20 @@ fn join_cells(cells: &[impl AsRef<str>], widths: &[usize]) -> String {
         .join("  ")
 }
 
+/// The warning under the table: one line for each measured probe whose build was not incremental.
+pub(super) fn warning_lines(results: &[ProbeResult]) -> Vec<String> {
+    results
+        .iter()
+        .filter_map(|result| match &result.outcome {
+            Outcome::Measured {
+                warning: Some(warning),
+                ..
+            } => Some(warning.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The output of each failed probe: cargo's output when it ran, then the failure and its fix.
 pub(super) fn print_failures(results: &[ProbeResult], diag: &mut Out) {
     let failures = results.iter().filter_map(|result| match &result.outcome {
@@ -121,6 +135,7 @@ pub(super) fn probe_json(result: &ProbeResult) -> ProbeJson {
             stats,
             budget_id,
             budget_s,
+            ..
         } => {
             json.median_s = Some(stats.median);
             json.min_s = Some(stats.min);
@@ -132,22 +147,34 @@ pub(super) fn probe_json(result: &ProbeResult) -> ProbeJson {
     json
 }
 
-/// The JSON object of a run: the Rust half, and `web` when both halves ran.
+/// The JSON object of a run: the Rust half, and `web` when both halves ran. `runs` counts the timed
+/// runs per probe, after the warm-up. `passed` is the verdict of the run.
 #[derive(Serialize)]
 struct Report<'a> {
     rustc: &'a str,
     profile: &'static str,
     incremental: bool,
     ci: bool,
+    runs: u32,
+    passed: bool,
     probes: Vec<ProbeJson>,
     #[serde(skip_serializing_if = "Option::is_none")]
     web: Option<&'static str>,
 }
 
-/// The JSON object of `web` alone.
+/// The JSON object of `web` alone. The web half is not built yet, so it does not fail.
 #[derive(Serialize)]
 pub(super) struct WebOnly {
     pub(super) web: &'static str,
+    pub(super) passed: bool,
+}
+
+/// The JSON object of a run that stopped before it measured: `passed` is false, and `errors` holds
+/// one line per reason.
+#[derive(Serialize)]
+struct Errors<'a> {
+    passed: bool,
+    errors: &'a [String],
 }
 
 pub(super) fn json_line<T: Serialize>(value: &T) -> String {
@@ -155,19 +182,32 @@ pub(super) fn json_line<T: Serialize>(value: &T) -> String {
 }
 
 /// The JSON object of a measured run. `web` adds the web field, which only `all` prints.
-pub(super) fn json_object(run: &RustRun, web: bool) -> String {
+pub(super) fn json_object(run: &RustRun, passed: bool, web: bool) -> String {
     let report = Report {
         rustc: &run.rustc,
         profile: "dev",
         incremental: run.incremental.on,
         ci: run.ci,
+        runs: run.runs,
+        passed,
         probes: run.results.iter().map(probe_json).collect(),
         web: web.then_some(WEB_MESSAGE),
     };
     json_line(&report)
 }
 
+/// The JSON object of a run that stopped before it measured: one line per error.
+pub(super) fn error_json(errors: &[String]) -> String {
+    json_line(&Errors {
+        passed: false,
+        errors,
+    })
+}
+
 /// The JSON object of `web` alone.
 pub(super) fn web_json() -> String {
-    json_line(&WebOnly { web: WEB_MESSAGE })
+    json_line(&WebOnly {
+        web: WEB_MESSAGE,
+        passed: true,
+    })
 }
