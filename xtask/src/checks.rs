@@ -1,7 +1,9 @@
 //! Static checks: Rust code that inspects the repo instead of running a tool.
 //!
 //! One file per check in `src/checks/`, registered in `ALL` below. `steps::plan` runs every entry
-//! after fmt and before clippy.
+//! after the tool steps and before nextest.
+
+mod budgets;
 
 use crate::violation::Violation;
 use crate::workspace::Context;
@@ -13,4 +15,4 @@ pub(crate) struct StaticCheck {
 }
 
 /// Every static check, in run order.
-pub(crate) const ALL: &[StaticCheck] = &[];
+pub(crate) const ALL: &[StaticCheck] = &[budgets::CHECK];
