@@ -1,19 +1,17 @@
-//! The `plugins` check: the fixed plugin set and the security settings of `crates/desktop`.
+//! The `plugins` check: the cargo side of `crates/desktop`, its fixed plugin set and `tauri` features.
 //!
-//! Four things must hold. The `tauri-plugin-*` dependencies are exactly `FIXED_PLUGINS`. `tauri`
+//! Two things must hold. The `tauri-plugin-*` dependencies are exactly `FIXED_PLUGINS`. `tauri`
 //! enables neither `devtools` nor `protocol-asset`, in its entry, its workspace entry or a feature
-//! list. `app.withGlobalTauri` in `tauri.conf.json` is `false`. `build.rs` declares an `AppManifest`.
+//! list. The Tauri config and `build.rs` belong to the `tauri-config` check.
 //! The pure functions take file contents; `run` reads the files from the repo.
 
-use crate::checks::{self, StaticCheck};
+use crate::checks::{self, StaticCheck, violation};
 use crate::violation::Violation;
 use crate::workspace::Context;
 use std::path::Path;
 
 const DESKTOP_MANIFEST: &str = "crates/desktop/Cargo.toml";
 const WORKSPACE_MANIFEST: &str = "Cargo.toml";
-const TAURI_CONF: &str = "crates/desktop/tauri.conf.json";
-const BUILD_RS: &str = "crates/desktop/build.rs";
 
 /// The only `tauri-plugin-*` packages a desktop build may depend on.
 const FIXED_PLUGINS: [&str; 8] = [
@@ -40,11 +38,8 @@ const FEATURE_REFS: [(&str, &str); 4] = [
 
 const FEATURE_FIX: &str = "remove it: devtools let script in the page open the inspector, and `protocol-asset` serves files from disk to the webview";
 const PLUGIN_FIX: &str = "remove it: the plugin set is fixed (each change forces a near-cold rebuild and widens what the webview can reach); changing it needs a decision recorded in a task brief";
-const GLOBAL_TAURI_FIX: &str = "set `\"withGlobalTauri\": false` under `app`: the global object hands every script in the page the whole IPC API";
-const APP_MANIFEST_FIX: &str = "call `tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[])))`: without a manifest Tauri skips the access check for app commands";
 
-/// Fails on every problem in the desktop manifest, the workspace `tauri` entry, the Tauri config
-/// and `build.rs`. Passes when the desktop manifest is missing, so a tree without desktop passes.
+/// Fails on every problem in the desktop manifest and the workspace `tauri` entry. Passes when the desktop manifest is missing, so a tree without desktop passes.
 pub(crate) const CHECK: StaticCheck = StaticCheck {
     name: "plugins",
     run,
@@ -60,8 +55,6 @@ fn run(ctx: &Context) -> Vec<Violation> {
     found.extend(with_file(&ctx.root, WORKSPACE_MANIFEST, |workspace| {
         tauri_feature_violations(&desktop, workspace)
     }));
-    found.extend(with_file(&ctx.root, TAURI_CONF, check_global_tauri));
-    found.extend(with_file(&ctx.root, BUILD_RS, check_app_manifest));
     found
 }
 
@@ -228,70 +221,6 @@ fn feature_table_violations(doc: &toml::Table, lines: &[Line<'_>]) -> Vec<Violat
         }
     }
     found
-}
-
-/// `app.withGlobalTauri` must be present and exactly `false`. A missing file or invalid JSON is a
-/// violation at line 1.
-fn check_global_tauri(text: Option<&str>) -> Vec<Violation> {
-    let Some(text) = text else {
-        return vec![violation(
-            TAURI_CONF,
-            1,
-            format!("`{TAURI_CONF}` is missing"),
-            GLOBAL_TAURI_FIX,
-        )];
-    };
-    let value: serde_json::Value = match serde_json::from_str(text) {
-        Ok(value) => value,
-        Err(error) => {
-            return vec![violation(
-                TAURI_CONF,
-                1,
-                format!("`{TAURI_CONF}` is not valid JSON: {error}"),
-                "fix the JSON syntax so `app.withGlobalTauri` can be read",
-            )];
-        }
-    };
-    if value.pointer("/app/withGlobalTauri") == Some(&serde_json::Value::Bool(false)) {
-        return Vec::new();
-    }
-    let line = text
-        .lines()
-        .position(|line| line.contains("\"withGlobalTauri\""))
-        .map_or(1, checks::line_at);
-    vec![violation(
-        TAURI_CONF,
-        line,
-        "app.withGlobalTauri must be false",
-        GLOBAL_TAURI_FIX,
-    )]
-}
-
-/// `build.rs` must call `app_manifest(`. A missing file counts as no manifest.
-fn check_app_manifest(text: Option<&str>) -> Vec<Violation> {
-    if text.is_some_and(|text| text.contains("app_manifest(")) {
-        return Vec::new();
-    }
-    vec![violation(
-        BUILD_RS,
-        1,
-        "build.rs declares no AppManifest",
-        APP_MANIFEST_FIX,
-    )]
-}
-
-fn violation(
-    path: &str,
-    line: u32,
-    message: impl Into<String>,
-    fix: impl Into<String>,
-) -> Violation {
-    Violation {
-        path: path.to_owned(),
-        line,
-        message: message.into(),
-        fix: fix.into(),
-    }
 }
 
 /// Parses a manifest. A syntax error is one violation at line 1.
