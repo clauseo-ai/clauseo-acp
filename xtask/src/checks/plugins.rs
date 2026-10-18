@@ -1,6 +1,8 @@
 //! The `plugins` check: the cargo side of Tauri in the workspace. The desktop crate has the fixed
 //! plugin set and safe `tauri` and `tauri-runtime` features, and no other member depends on Tauri.
 //!
+//! The Tauri family is `wry`, `tao` and every package whose name starts with `tauri`.
+//!
 //! The dependencies of every member come from one `cargo metadata --no-deps` run, which resolves
 //! workspace inheritance and renames, so a renamed or inherited entry counts under its real
 //! package. Among normal dependencies, with or without a target:
@@ -9,8 +11,11 @@
 //!   `devtools` nor `protocol-asset`, and no `[features]` entry turns either on through
 //!   `tauri`'s key; `tauri-runtime` enables no feature (it has `devtools` and
 //!   `macos-private-api`, and no default features, so `default-features` does not matter);
-//! - no other member depends on `tauri`, `tauri-runtime` or a `tauri-plugin-*`: cargo unifies
-//!   features, so a member pulled into the desktop crate would bring its Tauri features along.
+//! - in the desktop crate, the only other family members are `tauri` and `tauri-runtime`: a crate
+//!   such as `tauri-runtime-wry` or `wry` has its own `devtools` feature, which the `tauri` checks
+//!   never see. Build dependencies (`tauri-build`) and dev-dependencies are not checked;
+//! - no other member depends on any family member: cargo unifies features, so a member pulled
+//!   into the desktop crate would bring its Tauri features along.
 //!
 //! The manifest text is read only for line numbers: the member's `Cargo.toml`, or the root one
 //! when the setting lives in `[workspace.dependencies]`, else line 1.
@@ -44,6 +49,7 @@ const FEATURE_FIX: &str = "remove it: devtools let script in the page open the i
 const RUNTIME_FIX: &str = "remove it: tauri-runtime is there only to name a type, and its `devtools` and `macos-private-api` features would reach the binary through it";
 const PLUGIN_FIX: &str = "remove it: the plugin set is fixed (each change forces a near-cold rebuild and widens what the webview can reach); changing it needs a decision recorded in a task brief";
 const OPTIONAL_FIX: &str = "drop `optional = true` and any feature that enables it: the plugin set is fixed and sits behind no cargo feature, so every build ships the same plugins";
+const FAMILY_FIX: &str = "depend on `tauri` and the fixed plugins only: other Tauri crates can switch on features such as devtools that the tauri entry's checks never see";
 const MEMBER_FIX: &str =
     "only crates/desktop depends on Tauri; move the code there or behind the host interface";
 const METADATA_FIX: &str = "fix the manifest until `cargo metadata --no-deps` succeeds: this check reads the dependencies from it";
@@ -113,8 +119,8 @@ fn run(ctx: &Context) -> Vec<Violation> {
 }
 
 /// The violations of member `name`, which is not the desktop crate, whose manifest at `path`
-/// holds `text`: one for each normal dependency on `tauri`, `tauri-runtime` or a
-/// `tauri-plugin-*`, at the line that declares it, else line 1.
+/// holds `text`: one for each normal dependency on a Tauri family member, at the line that
+/// declares it, else line 1.
 pub(crate) fn member_violations(
     name: &str,
     path: &str,
@@ -137,9 +143,9 @@ pub(crate) fn member_violations(
         .collect()
 }
 
-/// True for `tauri`, `tauri-runtime` and every `tauri-plugin-*` package.
+/// True for the Tauri family: `wry`, `tao` and every package whose name starts with `tauri`.
 fn is_tauri(package: &str) -> bool {
-    package == "tauri" || package == "tauri-runtime" || package.starts_with("tauri-plugin-")
+    package == "wry" || package == "tao" || package.starts_with("tauri")
 }
 
 /// ` (as `key`)` when the dependency is renamed, else empty.
@@ -169,10 +175,37 @@ pub(crate) fn violations(deps: &PackageDependencies, manifests: &Manifests<'_>) 
         .filter(|dep| dep.is_normal())
         .collect();
     let mut found = plugin_violations(&normal, &locate);
+    found.extend(family_violations(&normal, &locate));
     found.extend(tauri_feature_violations(&normal, &locate));
     found.extend(feature_table_violations(deps, &normal, &locate));
     found.extend(runtime_feature_violations(&normal, &locate));
     found
+}
+
+/// Each family member other than `tauri`, `tauri-runtime` and the `tauri-plugin-*` packages, which
+/// `plugin_violations` judges.
+fn family_violations(normal: &[&CargoDependency], locate: &Locator<'_>) -> Vec<Violation> {
+    normal
+        .iter()
+        .filter(|dep| {
+            let name = dep.name.as_str();
+            is_tauri(name)
+                && name != "tauri"
+                && name != "tauri-runtime"
+                && !name.starts_with("tauri-plugin-")
+        })
+        .map(|dep| {
+            locate.dependency(
+                dep.key(),
+                format!(
+                    "`{}`{} is a Tauri crate outside the allowed set",
+                    dep.name,
+                    as_key(dep)
+                ),
+                FAMILY_FIX,
+            )
+        })
+        .collect()
 }
 
 /// Every feature that a `tauri-runtime` entry enables. It has no default features (checked
