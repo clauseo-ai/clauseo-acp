@@ -75,7 +75,7 @@ pub(crate) struct PackageDependencies {
     pub features: BTreeMap<String, Vec<String>>,
 }
 
-/// The parts of a package that `parse_package_dependencies` reads.
+/// The parts of a package that `parse_workspace_dependencies` reads.
 #[derive(Deserialize)]
 struct PackageWithDependencies {
     name: String,
@@ -83,7 +83,7 @@ struct PackageWithDependencies {
     dependencies: PackageDependencies,
 }
 
-/// The packages of `cargo metadata` JSON, for `parse_package_dependencies`.
+/// The packages of `cargo metadata` JSON, for `parse_workspace_dependencies`.
 #[derive(Deserialize)]
 struct DependencyMetadata {
     packages: Vec<PackageWithDependencies>,
@@ -101,13 +101,12 @@ pub(crate) fn load_members(root: &Path) -> Result<Vec<Member>, String> {
     parse_metadata(&run_metadata(root)?)
 }
 
-/// Runs `cargo metadata` in `root` and returns the dependencies and `[features]` of the
-/// workspace member named `package`.
-pub(crate) fn load_package_dependencies(
+/// Runs `cargo metadata` in `root` and returns the dependencies and `[features]` of every
+/// workspace member, by package name.
+pub(crate) fn load_workspace_dependencies(
     root: &Path,
-    package: &str,
-) -> Result<PackageDependencies, String> {
-    parse_package_dependencies(&run_metadata(root)?, package)
+) -> Result<BTreeMap<String, PackageDependencies>, String> {
+    parse_workspace_dependencies(&run_metadata(root)?)
 }
 
 /// The stdout of `cargo metadata --format-version 1 --no-deps` run in `root`.
@@ -124,19 +123,17 @@ fn run_metadata(root: &Path) -> Result<String, String> {
     Ok(quiet.stdout)
 }
 
-/// Reads the dependencies and `[features]` of `package` from `cargo metadata` JSON.
-pub(crate) fn parse_package_dependencies(
+/// Reads the dependencies and `[features]` of every package in `cargo metadata` JSON, by name.
+pub(crate) fn parse_workspace_dependencies(
     json: &str,
-    package: &str,
-) -> Result<PackageDependencies, String> {
+) -> Result<BTreeMap<String, PackageDependencies>, String> {
     let metadata: DependencyMetadata =
         serde_json::from_str(json).map_err(|e| format!("bad `cargo metadata` JSON: {e}"))?;
-    metadata
+    Ok(metadata
         .packages
         .into_iter()
-        .find(|candidate| candidate.name == package)
-        .map(|found| found.dependencies)
-        .ok_or_else(|| format!("`cargo metadata` lists no package `{package}`"))
+        .map(|package| (package.name, package.dependencies))
+        .collect())
 }
 
 /// Reads `cargo metadata --no-deps` JSON. Paths are made relative to `workspace_root`.
@@ -220,14 +217,16 @@ mod tests {
     }
 
     #[test]
-    fn parses_one_package_s_dependencies_and_features() {
+    fn parses_every_package_s_dependencies_and_features() {
         let json = r#"{"packages": [
             {"name": "other", "dependencies": [], "features": {}},
             {"name": "app", "features": {"x": ["t/devtools"]}, "dependencies": [
                 {"name": "tauri", "rename": "t", "kind": null, "target": "cfg(unix)",
                  "optional": false, "features": ["devtools"], "req": "^2"}]}
         ]}"#;
-        let deps = parse_package_dependencies(json, "app").expect("sample parses");
+        let packages = parse_workspace_dependencies(json).expect("sample parses");
+        assert_eq!(packages.keys().collect::<Vec<_>>(), ["app", "other"]);
+        let deps = &packages["app"];
         assert_eq!(deps.dependencies.len(), 1);
         let tauri = &deps.dependencies[0];
         assert_eq!((tauri.name.as_str(), tauri.key()), ("tauri", "t"));
@@ -235,7 +234,7 @@ mod tests {
         assert_eq!(tauri.target.as_deref(), Some("cfg(unix)"));
         assert_eq!(tauri.features, ["devtools"]);
         assert_eq!(deps.features["x"], ["t/devtools"]);
-        assert!(parse_package_dependencies(json, "missing").is_err());
+        assert!(parse_workspace_dependencies("{").is_err());
     }
 
     #[test]
