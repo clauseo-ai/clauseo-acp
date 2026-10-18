@@ -6,6 +6,13 @@
 //! details in a global. This app calls plugins from Rust only, so those scripts are dead weight
 //! on every page load and turn plain web features into native actions. Wrapping a plugin in
 //! `RustOnly` keeps everything it does in Rust and drops the script.
+//!
+//! Only the script goes: a plugin's commands stay registered (`extend_api` is passed through), so
+//! the page can still invoke whatever `capabilities/main.json` grants, which today is nothing.
+//!
+//! `plugin_rust_only` is the one way to register a plugin. clippy's `disallowed-methods`
+//! (`clippy.toml`) forbids `Builder::plugin`, `Builder::plugin_boxed`, `AppHandle::plugin`,
+//! `AppHandle::plugin_boxed` and `Manager::add_capability` everywhere else.
 
 use tauri::ipc::Invoke;
 use tauri::plugin::Plugin;
@@ -13,14 +20,30 @@ use tauri::webview::PageLoadPayload;
 use tauri::{AppHandle, RunEvent, Runtime, Url, Webview, Window};
 use tauri_runtime::webview::InitializationScript;
 
+/// Registers a plugin inside `RustOnly`.
+pub(crate) trait PluginRustOnly<R: Runtime> {
+    /// `Builder::plugin`, with the plugin's page script dropped.
+    fn plugin_rust_only(self, plugin: impl Plugin<R> + 'static) -> Self;
+}
+
+impl<R: Runtime> PluginRustOnly<R> for tauri::Builder<R> {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the one place a plugin is registered, always inside RustOnly"
+    )]
+    fn plugin_rust_only(self, plugin: impl Plugin<R> + 'static) -> Self {
+        self.plugin(RustOnly::new(plugin))
+    }
+}
+
 /// A plugin with every hook passed through except its page script. It holds the plugin as a trait
 /// object, so the wrapper is compiled once rather than once per plugin type, which keeps the
 /// edit-to-binary loop as fast as without it.
-pub(crate) struct RustOnly<R: Runtime>(Box<dyn Plugin<R>>);
+struct RustOnly<R: Runtime>(Box<dyn Plugin<R>>);
 
 impl<R: Runtime> RustOnly<R> {
     /// Wraps `plugin`.
-    pub(crate) fn new(plugin: impl Plugin<R> + 'static) -> Self {
+    fn new(plugin: impl Plugin<R> + 'static) -> Self {
         RustOnly(Box::new(plugin))
     }
 }
