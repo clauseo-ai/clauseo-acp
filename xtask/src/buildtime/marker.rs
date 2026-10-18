@@ -1,4 +1,5 @@
-//! The marker line each probe edits: where it is, what it holds, and the next value to write.
+//! The marker line each probe edits: where it is, what it holds, the next value to write, and
+//! whether a saved copy of the file may be put back.
 
 use std::path::Path;
 
@@ -32,12 +33,31 @@ pub(crate) fn find(root: &Path, dir: &str) -> Option<Marker> {
 /// `text` with the marker's number raised by one, every other byte unchanged. `None` when there is
 /// no marker line, or its number does not fit.
 pub(crate) fn bump_marker(text: &str) -> Option<String> {
+    rewrite_first_marker(text, |indent, number, tail| {
+        let next = number.parse::<u64>().ok()?.checked_add(1)?;
+        Some(format!("{indent}{PREFIX}{next}{tail}"))
+    })
+}
+
+/// `text` with the number of its first marker line removed. `None` when there is no marker line.
+fn blank_marker_number(text: &str) -> Option<String> {
+    rewrite_first_marker(text, |indent, _number, tail| {
+        Some(format!("{indent}{PREFIX}{tail}"))
+    })
+}
+
+/// `text` with its first marker line replaced by `rewrite(indent, number, tail)`. Every other line
+/// is kept as it is. `None` when there is no marker line, or `rewrite` refuses it.
+fn rewrite_first_marker(
+    text: &str,
+    rewrite: impl Fn(&str, &str, &str) -> Option<String>,
+) -> Option<String> {
     let mut out = String::with_capacity(text.len() + 1);
     let mut found = false;
     for line in text.split_inclusive('\n') {
-        match (found, bump_line(line)) {
-            (false, Some(bumped)) => {
-                out.push_str(&bumped);
+        match (found, marker_parts(line)) {
+            (false, Some((indent, number, tail))) => {
+                out.push_str(&rewrite(indent, number, tail)?);
                 found = true;
             }
             _ => out.push_str(line),
@@ -46,8 +66,9 @@ pub(crate) fn bump_marker(text: &str) -> Option<String> {
     found.then_some(out)
 }
 
-/// The bumped form of one line, or `None` when the line is not the marker.
-fn bump_line(line: &str) -> Option<String> {
+/// The indent, the number and the tail (from `;` on) of a marker line, or `None` when the line is
+/// not one.
+fn marker_parts(line: &str) -> Option<(&str, &str, &str)> {
     let body = line.trim_start();
     let indent = &line[..line.len() - body.len()];
     let rest = body.strip_prefix(PREFIX)?;
@@ -56,8 +77,35 @@ fn bump_line(line: &str) -> Option<String> {
     if digits == 0 || !tail.starts_with(';') {
         return None;
     }
-    let next = number.parse::<u64>().ok()?.checked_add(1)?;
-    Some(format!("{indent}{PREFIX}{next}{tail}"))
+    Some((indent, number, tail))
+}
+
+/// What an interrupted run's saved copy means for the repo file as it is now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Leftover {
+    /// The copy has no marker line, so it is not a saved marker file (a stray `.DS_Store`, say).
+    NotACopy,
+    /// The file equals the copy except for the marker's number: only the bump is undone.
+    Restore,
+    /// The file is gone.
+    Missing,
+    /// The file changed in some other way since the copy was saved, or lost its marker line.
+    Conflict,
+}
+
+/// Whether the saved `copy` of a marker file may be put back over the file as it is now (`repo`,
+/// `None` when the file is gone). Only the marker's number may differ.
+pub(crate) fn leftover(repo: Option<&str>, copy: &str) -> Leftover {
+    let Some(saved) = blank_marker_number(copy) else {
+        return Leftover::NotACopy;
+    };
+    let Some(repo) = repo else {
+        return Leftover::Missing;
+    };
+    match blank_marker_number(repo) {
+        Some(now) if now == saved => Leftover::Restore,
+        _ => Leftover::Conflict,
+    }
 }
 
 #[cfg(test)]
@@ -107,5 +155,41 @@ mod tests {
             "crates/desktop/src/lib.rs"
         );
         assert_eq!(in_crate("", "src/lib.rs"), "src/lib.rs");
+    }
+
+    #[test]
+    fn a_copy_without_a_marker_line_is_not_a_copy() {
+        assert_eq!(
+            leftover(Some("anything at all\n"), ".DS_Store junk"),
+            Leftover::NotACopy
+        );
+        assert_eq!(leftover(None, ""), Leftover::NotACopy);
+    }
+
+    #[test]
+    fn the_same_file_with_only_the_marker_bumped_is_restored() {
+        let copy = "//! crate\npub const BUILDTIME_MARKER: u64 = 41;\n";
+        let bumped = "//! crate\npub const BUILDTIME_MARKER: u64 = 148;\n";
+        assert_eq!(leftover(Some(bumped), copy), Leftover::Restore);
+        assert_eq!(leftover(Some(copy), copy), Leftover::Restore);
+    }
+
+    #[test]
+    fn a_real_edit_elsewhere_is_a_conflict() {
+        let copy = "//! crate\npub const BUILDTIME_MARKER: u64 = 41;\npub fn f() {}\n";
+        let edited = "//! crate\npub const BUILDTIME_MARKER: u64 = 42;\npub fn f() { 1 }\n";
+        assert_eq!(leftover(Some(edited), copy), Leftover::Conflict);
+    }
+
+    #[test]
+    fn a_file_that_lost_its_marker_line_is_a_conflict() {
+        let copy = "pub const BUILDTIME_MARKER: u64 = 41;\n";
+        assert_eq!(leftover(Some("pub fn f() {}\n"), copy), Leftover::Conflict);
+    }
+
+    #[test]
+    fn a_missing_file_is_missing() {
+        let copy = "pub const BUILDTIME_MARKER: u64 = 41;\n";
+        assert_eq!(leftover(None, copy), Leftover::Missing);
     }
 }

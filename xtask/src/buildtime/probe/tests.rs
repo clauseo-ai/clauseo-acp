@@ -228,3 +228,106 @@ fn the_warm_up_judgement_covers_present_absent_and_not_incremental() {
     let refused = judge_warm_up(RUSTC_NOT_INCREMENTAL, CHECK, true).expect_err("CI refuses");
     assert_eq!(refused.fix, INCREMENTAL_FIX);
 }
+
+/// The repo file as an interrupted run left it: the marker bumped, and one real edit elsewhere.
+const EDITED_AND_BUMPED: &str = "//! desktop, edited by hand\n\npub const BUILDTIME_MARKER: u64 = 42;\n\npub fn f() -> u8 { 1 }\n";
+
+#[test]
+fn a_conflict_leaves_both_files_untouched_and_names_the_copy() {
+    let dir = scratch("conflict");
+    fs::write(dir.join(REL), EDITED_AND_BUMPED).expect("the user edited the file");
+    fs::create_dir_all(backup_of(&dir).parent().expect("has a parent"))
+        .expect("create the backup dir");
+    fs::write(backup_of(&dir), ORIGINAL).expect("the interrupted run left the copy");
+    let failure = restore_leftovers(&dir).expect_err("a changed file is a conflict");
+    assert_eq!(
+        failure.message,
+        format!(
+            "{REL} changed after an interrupted buildtime run; its saved copy is target/xtask/buildtime/{REL}"
+        )
+    );
+    assert_eq!(
+        failure.fix,
+        format!("compare the two, keep what you want, then delete target/xtask/buildtime/{REL}")
+    );
+    assert_eq!(file_text(&dir), EDITED_AND_BUMPED);
+    assert_eq!(
+        fs::read_to_string(backup_of(&dir)).expect("the copy is kept"),
+        ORIGINAL
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn a_missing_file_is_a_conflict_and_the_copy_is_kept() {
+    let dir = scratch("missing");
+    fs::remove_file(dir.join(REL)).expect("the file is gone");
+    fs::create_dir_all(backup_of(&dir).parent().expect("has a parent"))
+        .expect("create the backup dir");
+    fs::write(backup_of(&dir), ORIGINAL).expect("the interrupted run left the copy");
+    let failure = restore_leftovers(&dir).expect_err("a missing file is a conflict");
+    assert!(failure.message.starts_with(&format!("{REL} is missing")));
+    assert!(backup_of(&dir).exists());
+    assert!(!dir.join(REL).exists());
+    cleanup(&dir);
+}
+
+#[test]
+fn a_stray_file_without_a_marker_is_ignored() {
+    let dir = scratch("stray");
+    let stray = dir.join(BACKUP_DIR).join(".DS_Store");
+    fs::create_dir_all(dir.join(BACKUP_DIR)).expect("create the backup dir");
+    fs::write(&stray, "Bud1 junk").expect("the stray file is there");
+    assert_eq!(restore_leftovers(&dir), Ok(Vec::new()));
+    assert_eq!(
+        fs::read_to_string(&stray).expect("the stray file is left alone"),
+        "Bud1 junk"
+    );
+    assert_eq!(file_text(&dir), ORIGINAL);
+    cleanup(&dir);
+}
+
+#[test]
+fn a_second_save_of_the_same_file_fails_and_leaves_the_file_alone() {
+    let dir = scratch("second-save");
+    let first = Guard::save(&dir, &marker()).expect("the first save");
+    assert!(
+        !dir.join(BACKUP_DIR).join(format!("{REL}.tmp")).exists(),
+        "the temporary file is gone after a save"
+    );
+    fs::write(dir.join(REL), BUMPED).expect("the probe edits the file");
+    let Err(failure) = Guard::save(&dir, &marker()) else {
+        panic!("a second save is refused");
+    };
+    assert_eq!(
+        failure.message,
+        format!(
+            "a saved copy of {REL} already exists at target/xtask/buildtime/{REL}; an earlier restore failed"
+        )
+    );
+    assert_eq!(
+        failure.fix,
+        format!("restore {REL} from that copy by hand, then delete it")
+    );
+    assert_eq!(file_text(&dir), BUMPED, "the file is not touched");
+    assert_eq!(
+        fs::read_to_string(backup_of(&dir)).expect("the first copy is kept"),
+        ORIGINAL
+    );
+    first.restore().expect("the first guard restores");
+    assert_eq!(file_text(&dir), ORIGINAL);
+    assert!(!backup_of(&dir).exists());
+    cleanup(&dir);
+}
+
+#[test]
+fn the_temporary_file_of_an_interrupted_save_is_deleted() {
+    let dir = scratch("tmp-leftover");
+    let tmp = dir.join(BACKUP_DIR).join(format!("{REL}.tmp"));
+    fs::create_dir_all(tmp.parent().expect("has a parent")).expect("create the backup dir");
+    fs::write(&tmp, ORIGINAL).expect("the interrupted save left its temporary file");
+    assert_eq!(restore_leftovers(&dir), Ok(Vec::new()));
+    assert!(!tmp.exists());
+    assert_eq!(file_text(&dir), ORIGINAL);
+    cleanup(&dir);
+}

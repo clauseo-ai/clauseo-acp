@@ -1,20 +1,19 @@
 //! Timing one probe on the marker file: the edits, the cargo runs, and putting the file back.
 //!
-//! Before the first edit, the original text is copied to `target/xtask/buildtime/<repo-relative
-//! path>` under the repo root. A guard puts the original back and deletes the copy when the probe
-//! ends, whether cargo succeeded or not. A guard dropped without that (a panic) restores on the
-//! spot. A run that is killed leaves the copy behind, and the next `buildtime rust` run puts it back
-//! before it measures anything (`restore_leftovers`).
+//! Before the first edit, the original is copied to `target/xtask/buildtime/<repo path>`, and a
+//! copy is never replaced. A guard puts the original back and deletes the copy when the probe ends,
+//! and on a panic. A killed run leaves its copy, and the next `buildtime rust` run puts it back only
+//! where the file differs by the marker's number alone (`restore_leftovers`).
 
-use super::marker::{self, Marker, bump_marker};
+use super::marker::{self, Leftover, Marker, bump_marker, leftover};
 use super::profile::warm_up_incremental;
 use super::verdict::{Failure, Outcome, budget_limit, stats};
 use super::{INCREMENTAL_FIX, Probe};
 use crate::budgets::Budget;
 use crate::clock::timed;
 use crate::process::{Captured, Cmd, Program};
-use std::fs;
-use std::io;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 /// Where the copies of the original files wait, under the repo root.
@@ -197,17 +196,13 @@ struct Guard {
 }
 
 impl Guard {
-    /// Copies the original of `marker` to its backup path. Nothing is edited when the copy fails.
+    /// Saves the original of `marker` as its copy. Nothing is edited when the save fails, and an
+    /// existing copy is never replaced.
     fn save(root: &Path, marker: &Marker) -> Result<Guard, Failure> {
         let base = root.join(BACKUP_DIR);
         let backup = base.join(&marker.path);
-        let copied = match backup.parent() {
-            Some(dir) => fs::create_dir_all(dir),
-            None => Ok(()),
-        }
-        .and_then(|()| fs::write(&backup, marker.text.as_bytes()));
-        match copied {
-            Ok(()) => Ok(Guard {
+        match write_new_copy(&backup, &marker.text) {
+            Ok(true) => Ok(Guard {
                 path: root.join(&marker.path),
                 rel: marker.path.clone(),
                 original: marker.text.clone(),
@@ -215,6 +210,17 @@ impl Guard {
                 backup,
                 pending: true,
             }),
+            Ok(false) => Err(Failure::new(
+                format!(
+                    "a saved copy of {} already exists at {}; an earlier restore failed",
+                    marker.path,
+                    copy_name(&marker.path)
+                ),
+                format!(
+                    "restore {} from that copy by hand, then delete it",
+                    marker.path
+                ),
+            )),
             Err(error) => Err(Failure::new(
                 format!(
                     "could not back up {} before editing it: {error}",
@@ -271,6 +277,35 @@ impl Drop for Guard {
     }
 }
 
+/// Writes `text` to `backup` without ever replacing a file there. The bytes go to `<backup>.tmp`,
+/// which is then hard-linked to `backup`: a link fails when `backup` exists, so the check and the
+/// create are one step. Returns `false` when `backup` already existed. A temporary file is always
+/// removed again, and the copy is synced before it is linked.
+fn write_new_copy(backup: &Path, text: &str) -> io::Result<bool> {
+    if let Some(dir) = backup.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let mut tmp_name = backup.as_os_str().to_owned();
+    tmp_name.push(".tmp");
+    let tmp = PathBuf::from(tmp_name);
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+    let linked = file
+        .write_all(text.as_bytes())
+        .and_then(|()| file.sync_all())
+        .and_then(|()| fs::hard_link(&tmp, backup));
+    let removed = fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => removed.map(|()| true),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+/// The copy's path under the repo root, as the messages print it.
+fn copy_name(rel: &str) -> String {
+    format!("{BACKUP_DIR}/{rel}")
+}
+
 /// Removes the directories between `file` and `base` that are now empty.
 fn prune(base: &Path, file: &Path) {
     let mut dir = file.parent();
@@ -282,40 +317,98 @@ fn prune(base: &Path, file: &Path) {
     }
 }
 
-/// Puts back every file that an interrupted run left in `target/xtask/buildtime`: the file gets the
-/// copy's bytes, and the copy is deleted. Returns one line per file, `restored <path> from an
-/// interrupted buildtime run`. The first file that cannot be put back stops the walk.
+/// Looks at every file an interrupted run left in `target/xtask/buildtime`, before anything is
+/// written. A copy goes back only where the file differs from it by the marker's number. A file
+/// that changed otherwise, or is gone, is a conflict: nothing is written then, and each conflict
+/// is named. A file without a marker line is not a copy and is left alone. A temporary file of an
+/// interrupted save is deleted. Returns one line per restored file,
+/// `restored <path> from an interrupted buildtime run`.
 pub(crate) fn restore_leftovers(root: &Path) -> Result<Vec<String>, Failure> {
     let base = root.join(BACKUP_DIR);
-    let mut backups = Vec::new();
+    let mut files = Vec::new();
     if base.is_dir() {
-        collect_files(&base, &mut backups).map_err(|error| {
+        collect_files(&base, &mut files).map_err(|error| {
             Failure::new(
                 format!("could not read {BACKUP_DIR}: {error}"),
                 format!("look in {BACKUP_DIR} by hand, then run again"),
             )
         })?;
     }
-    backups.sort();
-    let mut lines = Vec::new();
-    for backup in backups {
-        let Ok(relative) = backup.strip_prefix(&base) else {
+    files.sort();
+    let mut plans = Vec::new();
+    let mut conflicts = Vec::new();
+    for file in files {
+        let Ok(relative) = file.strip_prefix(&base) else {
             continue;
         };
         let rel = repo_path(relative);
-        let restored = fs::read(&backup)
-            .and_then(|bytes| fs::write(root.join(&rel), bytes))
-            .and_then(|()| fs::remove_file(&backup));
+        if Path::new(&rel).extension().is_some_and(|ext| ext == "tmp") {
+            fs::remove_file(&file).map_err(|error| {
+                Failure::new(
+                    format!("could not delete {}: {error}", copy_name(&rel)),
+                    format!("delete {} by hand", file.display()),
+                )
+            })?;
+            continue;
+        }
+        let bytes = fs::read(&file).map_err(|error| {
+            Failure::new(
+                format!("could not read {}: {error}", copy_name(&rel)),
+                format!("look at {} by hand, then run again", file.display()),
+            )
+        })?;
+        let Ok(copy_text) = String::from_utf8(bytes.clone()) else {
+            continue;
+        };
+        let repo_text = fs::read_to_string(root.join(&rel)).ok();
+        match leftover(repo_text.as_deref(), &copy_text) {
+            Leftover::NotACopy => {}
+            Leftover::Restore => plans.push((file, rel, bytes)),
+            Leftover::Missing => {
+                conflicts.push(conflict(
+                    &rel,
+                    "is missing after an interrupted buildtime run",
+                ));
+            }
+            Leftover::Conflict => {
+                conflicts.push(conflict(&rel, "changed after an interrupted buildtime run"));
+            }
+        }
+    }
+    if !conflicts.is_empty() {
+        return Err(combine(&conflicts));
+    }
+    let mut lines = Vec::new();
+    for (copy, rel, bytes) in plans {
+        let restored = fs::write(root.join(&rel), &bytes).and_then(|()| fs::remove_file(&copy));
         if let Err(error) = restored {
             return Err(Failure::new(
                 format!("could not restore {rel} from its copy: {error}"),
-                format!("copy {} over {rel} by hand", backup.display()),
+                format!("copy {} over {rel} by hand", copy.display()),
             ));
         }
-        prune(&base, &backup);
+        prune(&base, &copy);
         lines.push(format!("restored {rel} from an interrupted buildtime run"));
     }
     Ok(lines)
+}
+
+/// A conflict: the file and its saved copy are kept, and the fix says what to do with them.
+fn conflict(rel: &str, what: &str) -> Failure {
+    Failure::new(
+        format!("{rel} {what}; its saved copy is {}", copy_name(rel)),
+        format!(
+            "compare the two, keep what you want, then delete {}",
+            copy_name(rel)
+        ),
+    )
+}
+
+/// The conflicts as one failure: their messages and fixes, joined.
+fn combine(conflicts: &[Failure]) -> Failure {
+    let messages: Vec<String> = conflicts.iter().map(|c| c.message.clone()).collect();
+    let fixes: Vec<String> = conflicts.iter().map(|c| c.fix.clone()).collect();
+    Failure::new(messages.join("; "), fixes.join("; "))
 }
 
 /// Every file under `dir`, recursively.
