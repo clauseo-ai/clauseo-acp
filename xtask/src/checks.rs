@@ -61,8 +61,8 @@ pub(crate) fn join(dir: &str, name: &str) -> String {
 
 /// `text` with everything from `//` to the end of each line removed, line count kept. A simple
 /// per-line strip: it does not know string literals (a `"//"` in a string cuts the line there) or
-/// block comments. That is enough for a short `build.rs` or the desktop crate's few source files, and a cut string can only hide a call,
-/// which then fails the check.
+/// block comments. A cut line can hide a call: a required call then fails the check, but a
+/// forbidden one after the cut passes, so the scan is best effort.
 pub(crate) fn strip_comments(text: &str) -> String {
     text.lines()
         .map(|line| {
