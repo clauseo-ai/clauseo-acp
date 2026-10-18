@@ -17,7 +17,8 @@ const NO_PACKAGES: &str = "no changed packages";
 /// static check, the six ui steps, nextest. With `Scope::Nothing`, clippy and nextest are skipped;
 /// the others never depend on the scope. `ci` picks the CI variants of the clippy and nextest
 /// commands. `gitleaks_range` is the git range gitleaks scans (`<base>..HEAD`), or `None` for all
-/// history. `pnpm_found` says whether pnpm starts: without it, the ui steps are skipped unless `ci`.
+/// history. `pnpm_found` says whether pnpm starts: without it, the ui steps are skipped unless
+/// `ci`.
 pub(crate) fn plan(
     scope: &Scope,
     ci: bool,
