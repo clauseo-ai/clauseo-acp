@@ -218,17 +218,17 @@ const NO_CHROME =
 
 /**
  * Headless Google Chrome through playwright-core (`channel: "chrome"`, its standard install paths),
- * or the Chrome or Chromium binary at CHROME_PATH. `undefined` when none can be launched.
+ * or the Chrome or Chromium binary at CHROME_PATH. `undefined` when no Chrome is installed; a
+ * CHROME_PATH binary that does not launch throws, so hmr fails rather than being skipped.
  */
 async function launchBrowser() {
   const { chromium } = await import("playwright-core");
   const chromePath = process.env.CHROME_PATH;
-  const options =
-    chromePath === undefined || chromePath === ""
-      ? { headless: true, channel: "chrome" }
-      : { headless: true, executablePath: chromePath };
+  if (chromePath !== undefined && chromePath !== "") {
+    return chromium.launch({ headless: true, executablePath: chromePath });
+  }
   try {
-    return await chromium.launch(options);
+    return await chromium.launch({ headless: true, channel: "chrome" });
   } catch (error) {
     note(`could not launch Chrome: ${String(error).split("\n")[0]}`);
     return undefined;
@@ -291,11 +291,11 @@ async function measureDev(runs, state) {
         { probe: "hmr", skipped: "the dev server did not start" },
       ];
     }
-    state.browser = await launchBrowser();
-    if (state.browser === undefined) {
-      return [devStart, { probe: "hmr", skipped: NO_CHROME }];
-    }
     try {
+      state.browser = await launchBrowser();
+      if (state.browser === undefined) {
+        return [devStart, { probe: "hmr", skipped: NO_CHROME }];
+      }
       const page = await state.browser.newPage();
       await page.goto(`http://localhost:${port}/`);
       await page.waitForSelector("#app-root", { state: "attached" });
