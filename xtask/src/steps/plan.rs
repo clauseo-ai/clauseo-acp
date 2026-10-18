@@ -170,6 +170,29 @@ mod tests {
             .collect()
     }
 
+    /// The command of each tool step named in `names`, in plan order.
+    fn commands_named(steps: &[Step], names: &[&str]) -> Vec<String> {
+        steps
+            .iter()
+            .filter_map(|step| match step {
+                Step::Tool(tool) if names.contains(&tool.name) => Some(tool.cmd.to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The tool step named `name`. A plan without one fails the test here.
+    fn tool<'a>(steps: &'a [Step], name: &str) -> &'a ToolStep {
+        let found = steps.iter().find_map(|step| match step {
+            Step::Tool(found) if found.name == name => Some(found),
+            _ => None,
+        });
+        let Some(found) = found else {
+            panic!("the plan has a `{name}` tool step");
+        };
+        found
+    }
+
     /// Each step's name, with `skipped` after the name of a skipped step.
     fn step_names(steps: &[Step]) -> Vec<String> {
         steps
@@ -268,14 +291,14 @@ mod tests {
                 "cargo nextest run --workspace --no-tests=pass",
             ]
         );
-        let ci = tool_commands(&plan(&Scope::Workspace, true, Some("abc..HEAD"), true));
+        let ci = plan(&Scope::Workspace, true, Some("abc..HEAD"), true);
         assert_eq!(
-            ci[1],
+            tool(&ci, "clippy").cmd.to_string(),
             "cargo clippy --workspace --all-targets --message-format=json-diagnostic-short -- -D warnings"
         );
         assert_eq!(
-            ci.last().map(String::as_str),
-            Some("cargo nextest run --workspace --no-tests=pass --profile ci")
+            tool(&ci, "nextest").cmd.to_string(),
+            "cargo nextest run --workspace --no-tests=pass --profile ci"
         );
     }
 
@@ -317,7 +340,7 @@ mod tests {
         let steps = plan(&Scope::Workspace, true, None, false);
         assert_eq!(step_names(&steps), expected_names("clippy", UI, "nextest"));
         assert_eq!(
-            tool_commands(&steps)[7..13],
+            commands_named(&steps, &UI),
             [
                 "pnpm -C ui install --frozen-lockfile",
                 "pnpm -C ui/app run typecheck --pretty false",
@@ -333,7 +356,9 @@ mod tests {
     fn clippy_command_for_named_packages() {
         let scope = Scope::packages(vec!["a".into(), "b".into()]);
         assert_eq!(
-            tool_commands(&plan(&scope, false, None, true))[1],
+            tool(&plan(&scope, false, None, true), "clippy")
+                .cmd
+                .to_string(),
             "cargo clippy -p a -p b --all-targets --message-format=json-diagnostic-short"
         );
     }
@@ -342,9 +367,7 @@ mod tests {
     fn clippy_repro_narrows_to_the_owning_package_in_ci() {
         let members = vec![member("xtask", "xtask")];
         let steps = plan(&Scope::Workspace, true, None, true);
-        let Step::Tool(clippy) = &steps[1] else {
-            panic!("clippy is a tool step");
-        };
+        let clippy = tool(&steps, "clippy");
         let output = "xtask/src/main.rs:4:9: error: unused variable: `unused`\n";
         let findings = (clippy.parse)(output, &context(members), &clippy.cmd);
         assert_eq!(findings.len(), 1);
@@ -364,9 +387,7 @@ mod tests {
             None,
             true,
         );
-        let Step::Tool(clippy) = &steps[1] else {
-            panic!("clippy is a tool step");
-        };
+        let clippy = tool(&steps, "clippy");
         let output = "crates/a/src/lib.rs:1:1: warning: unused import\n";
         let findings = (clippy.parse)(output, &context(members), &clippy.cmd);
         assert_eq!(findings.len(), 1);
@@ -385,9 +406,7 @@ mod tests {
             None,
             true,
         );
-        let Step::Tool(clippy) = &steps[1] else {
-            panic!("clippy is a tool step");
-        };
+        let clippy = tool(&steps, "clippy");
         let output = "docs/x.md:3:1: warning: stray text\n";
         let findings = (clippy.parse)(output, &context(Vec::new()), &clippy.cmd);
         assert_eq!(findings.len(), 1);
