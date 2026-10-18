@@ -1,5 +1,5 @@
-//! Tests for the `plugins` check. Each case is a tiny scratch workspace (a root `Cargo.toml`, member
-//! manifests and empty `src/lib.rs` files) that `run` reads through the real
+//! Tests for the `plugins` check. Each case is a tiny scratch workspace (a root `Cargo.toml`,
+//! member manifests and empty `src/lib.rs` files) that `run` reads through the real
 //! `cargo metadata --no-deps`, so cargo itself resolves the renames and inheritance under test.
 
 use super::*;

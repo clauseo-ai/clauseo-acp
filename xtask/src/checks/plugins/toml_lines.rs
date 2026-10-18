@@ -68,7 +68,8 @@ pub(super) fn in_entry<'a, 'l>(
         .find(|line| line.text.contains(needle))
 }
 
-/// True when `line` starts an entry for `key`: `key =` or `key.`, with the key bare or double-quoted.
+/// True when `line` starts an entry for `key`: `key =` or `key.`, with the key bare or
+/// double-quoted.
 fn declares_key(line: &str, key: &str) -> bool {
     let line = line.trim_start();
     let rest = line.strip_prefix(key).or_else(|| {
