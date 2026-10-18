@@ -14,6 +14,11 @@
 ```
 ```
 
+## Performance
+
+<!-- Each speed or memory comparison you made (AGENTS.md, Performance): what you compared, the machine,
+     the medians, and what you kept. Write "none" only if nothing in this change had a faster alternative. -->
+
 ## Not verified
 
 <!-- What you did not check, and why. -->

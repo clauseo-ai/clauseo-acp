@@ -67,6 +67,14 @@ this. Use the words in `GLOSSARY.md` exactly.
 
 - Budgets live in `budgets.toml`. Never trade a budget for tidiness.
 - The blank app is the control for every memory and start-up budget. Keep it blank.
+- Take every speed or memory win, however small. Lawyers keep Clauseo open while they work, and the
+  same few paths run all day: streaming an agent's answer to the screen, saving each event, versioning
+  the matter after every turn, reopening long conversations. A few percent saved on one of those paths
+  repeats thousands of times a day, and many small savings together are what make the app feel
+  instant, the way a car maker that shaves a few grams off every part ends up with a much lighter car.
+  So when two ways to do something both meet the brief, measure both and keep the faster one, even
+  when the gap looks too small to notice. List each comparison in the pull request under Performance:
+  what you compared, the machine, the medians, and what you kept.
 
 ## How you work
 
