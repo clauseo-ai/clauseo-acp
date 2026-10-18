@@ -11,11 +11,14 @@ import { brotliCompressSync, constants as zlib } from "node:zlib";
  */
 export const ROOT_TAG = '<div id="app-root"';
 
-/** `original` with `data-buildtime="<n>"` added right after the first ROOT_TAG. */
+/**
+ * `original` with `data-buildtime="<n>"` added right after ROOT_TAG. Throws unless ROOT_TAG
+ * appears exactly once, so the edit can only land on the element's opening tag.
+ */
 export function marked(original, n) {
   const at = original.indexOf(ROOT_TAG);
-  if (at === -1) {
-    throw new Error(`src/App.tsx has no ${ROOT_TAG}`);
+  if (at === -1 || original.indexOf(ROOT_TAG, at + 1) !== -1) {
+    throw new Error(`ROOT_TAG must appear exactly once in src/App.tsx (ROOT_TAG is ${ROOT_TAG})`);
   }
   const end = at + ROOT_TAG.length;
   return `${original.slice(0, end)} data-buildtime="${n}"${original.slice(end)}`;
