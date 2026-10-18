@@ -44,10 +44,10 @@ Clauseo app process (Rust)
 
 ## Crates
 
-Rust crates live in `crates/<name>`, package `clauseo-<name>`. The frontend is a pnpm workspace under
-`ui/`. `cargo xtask check` reads the table below and fails if a crate depends on anything in its
-"Never depends on" column, directly or through another crate. Rows marked `planned` are checked once
-the crate exists. Every crate that exists must have a row.
+Rust crates live in a folder under crates/ named after the crate, package `clauseo-<name>`. The
+frontend is a pnpm workspace under `ui/`. `cargo xtask check` reads the table below and fails if a
+crate depends on anything in its "Never depends on" column, directly or through another crate. Rows
+marked `planned` are checked once the crate exists. Every crate that exists must have a row.
 
 | Crate | Owns | May depend on | Never depends on | Status |
 |---|---|---|---|---|
@@ -73,11 +73,15 @@ the crate exists. Every crate that exists must have a row.
 | `mcp` | The `clauseo-mcp` sidecar: research tools, Word tracked changes, citation checks, views | legal, citations, stetdoc-core, rmcp | tauri | planned |
 
 The broker (keys, cache and limits for outside services, plus the socket the sandboxed sidecar
-reaches) is a module of `host`, not a crate. Frontend packages: `ui/app` (exists), `ui/components`
-and `ui/bindings` (planned). Nothing in `ui/` imports Tauri APIs outside `ui/app/src/transport/`.
+reaches) is a module of `host`, not a crate. Frontend packages: `ui/app` (exists),
+plus components and bindings packages under `ui/` (planned). Nothing in `ui/` imports Tauri APIs
+outside `ui/app/src/transport/`.
 
-"fs" and "process" in the table mean the standard library's file, network, process, environment and
-clock APIs; `cargo xtask check` greps for them in those crates.
+"fs", "process" and "any I/O" in the "Never depends on" column mean the standard library's APIs,
+not the `process` crate. In those crates `cargo xtask check` parses every `.rs` file with `syn` and
+bans `std::fs`, `std::net`, `std::process`, `std::env`, `std::time::Instant::now` and
+`std::time::SystemTime::now`. Exceptions, one path per line with a reason, live in the core-io
+exceptions file under `xtask/`.
 
 ## Seams left open on purpose
 
@@ -106,4 +110,12 @@ clock APIs; `cargo xtask check` greps for them in those crates.
 ## Decision records
 
 Changes to the event schema, error codes, a crate's public interface, the dependency table above or
-the Rust-to-webview boundary need a record in `docs/decisions/`.
+the Rust-to-webview boundary need a record in `docs/decisions/` (copy
+[the template](docs/decisions/TEMPLATE.md)). The first is
+[0001: the Rust-to-webview boundary](docs/decisions/0001-rust-webview-boundary.md).
+
+## Security
+
+[`docs/threat-model.md`](docs/threat-model.md) lists the assets, the trust boundaries, and what
+stops an attacker at the webview, the agents, the sandbox and the egress proxy, each marked built or
+designed.

@@ -10,6 +10,7 @@ Clauseo is GPL-3.0-or-later. Most code here is written by coding agents and chec
    a `target/` folder between agents.
 4. **Commit with sign-off.** `git commit -s` on every commit (the DCO,
    https://developercertificate.org). The `Signed-off-by` email must match the author email.
+   The DCO workflow, `.github/workflows/dco.yml`, fails a pull request with a commit that lacks it.
 5. **Sign the CLA** (outside contributors, on your first pull request). Add your signature file as
    described in `cla/README.md`. The founders are covered by their agreement with the company.
 6. **Run the check.** `cargo xtask check` must pass.
