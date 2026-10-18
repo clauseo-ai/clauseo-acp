@@ -2,6 +2,7 @@
 
 use crate::process::{self, Cmd, Program};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// A workspace member package.
@@ -40,6 +41,54 @@ struct Dependency {
     path: Option<PathBuf>,
 }
 
+/// One dependency of a package as `cargo metadata` reports it, with workspace inheritance
+/// resolved: `name` is the real package, `rename` the key it goes by in the manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub(crate) struct CargoDependency {
+    pub name: String,
+    pub rename: Option<String>,
+    /// `None` for a normal dependency, else `"dev"` or `"build"`.
+    pub kind: Option<String>,
+    /// The `cfg(...)` or target triple of a `[target.*.dependencies]` entry.
+    pub target: Option<String>,
+    pub optional: bool,
+    /// The features the entry enables, its own and its workspace entry's merged.
+    pub features: Vec<String>,
+}
+
+impl CargoDependency {
+    /// The key the dependency goes by in the manifest and in `[features]`: its rename, else its name.
+    pub(crate) fn key(&self) -> &str {
+        self.rename.as_deref().unwrap_or(&self.name)
+    }
+
+    /// True for a `[dependencies]` or `[target.*.dependencies]` entry, false for dev and build.
+    pub(crate) fn is_normal(&self) -> bool {
+        matches!(self.kind.as_deref(), None | Some("normal"))
+    }
+}
+
+/// One package's dependencies and its `[features]` table, from `cargo metadata`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub(crate) struct PackageDependencies {
+    pub dependencies: Vec<CargoDependency>,
+    pub features: BTreeMap<String, Vec<String>>,
+}
+
+/// The parts of a package that `parse_package_dependencies` reads.
+#[derive(Deserialize)]
+struct PackageWithDependencies {
+    name: String,
+    #[serde(flatten)]
+    dependencies: PackageDependencies,
+}
+
+/// The packages of `cargo metadata` JSON, for `parse_package_dependencies`.
+#[derive(Deserialize)]
+struct DependencyMetadata {
+    packages: Vec<PackageWithDependencies>,
+}
+
 /// The workspace root: the parent of this crate's directory (`xtask/`).
 pub(crate) fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -49,6 +98,20 @@ pub(crate) fn workspace_root() -> PathBuf {
 
 /// Runs `cargo metadata` in `root` and returns the workspace members.
 pub(crate) fn load_members(root: &Path) -> Result<Vec<Member>, String> {
+    parse_metadata(&run_metadata(root)?)
+}
+
+/// Runs `cargo metadata` in `root` and returns the dependencies and `[features]` of the
+/// workspace member named `package`.
+pub(crate) fn load_package_dependencies(
+    root: &Path,
+    package: &str,
+) -> Result<PackageDependencies, String> {
+    parse_package_dependencies(&run_metadata(root)?, package)
+}
+
+/// The stdout of `cargo metadata --format-version 1 --no-deps` run in `root`.
+fn run_metadata(root: &Path) -> Result<String, String> {
     let cmd = Cmd::new(
         Program::Cargo,
         ["metadata", "--format-version", "1", "--no-deps"],
@@ -58,7 +121,22 @@ pub(crate) fn load_members(root: &Path) -> Result<Vec<Member>, String> {
     if !quiet.success {
         return Err(format!("`cargo metadata` failed: {}", quiet.stderr.trim()));
     }
-    parse_metadata(&quiet.stdout)
+    Ok(quiet.stdout)
+}
+
+/// Reads the dependencies and `[features]` of `package` from `cargo metadata` JSON.
+pub(crate) fn parse_package_dependencies(
+    json: &str,
+    package: &str,
+) -> Result<PackageDependencies, String> {
+    let metadata: DependencyMetadata =
+        serde_json::from_str(json).map_err(|e| format!("bad `cargo metadata` JSON: {e}"))?;
+    metadata
+        .packages
+        .into_iter()
+        .find(|candidate| candidate.name == package)
+        .map(|found| found.dependencies)
+        .ok_or_else(|| format!("`cargo metadata` lists no package `{package}`"))
 }
 
 /// Reads `cargo metadata --no-deps` JSON. Paths are made relative to `workspace_root`.
@@ -139,6 +217,25 @@ mod tests {
         assert_eq!(members[1].name, "b");
         assert_eq!(members[1].dir, "crates/b");
         assert_eq!(members[1].path_deps, vec!["crates/a".to_owned()]);
+    }
+
+    #[test]
+    fn parses_one_package_s_dependencies_and_features() {
+        let json = r#"{"packages": [
+            {"name": "other", "dependencies": [], "features": {}},
+            {"name": "app", "features": {"x": ["t/devtools"]}, "dependencies": [
+                {"name": "tauri", "rename": "t", "kind": null, "target": "cfg(unix)",
+                 "optional": false, "features": ["devtools"], "req": "^2"}]}
+        ]}"#;
+        let deps = parse_package_dependencies(json, "app").expect("sample parses");
+        assert_eq!(deps.dependencies.len(), 1);
+        let tauri = &deps.dependencies[0];
+        assert_eq!((tauri.name.as_str(), tauri.key()), ("tauri", "t"));
+        assert!(tauri.is_normal());
+        assert_eq!(tauri.target.as_deref(), Some("cfg(unix)"));
+        assert_eq!(tauri.features, ["devtools"]);
+        assert_eq!(deps.features["x"], ["t/devtools"]);
+        assert!(parse_package_dependencies(json, "missing").is_err());
     }
 
     #[test]
