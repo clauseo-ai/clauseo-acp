@@ -6,7 +6,12 @@
 //! the next web run, and it is easy to commit. Every file under `ui/app/src` is read, bytes that
 //! are not UTF-8 replaced, and each line holding `data-buildtime=` fails. A missing `ui/app/src`
 //! passes.
+//!
+//! A live run holds the edit for real. So when the attribute is found, the check tries the
+//! buildtime lock (`target/xtask/buildtime.lock`, released at once): when another process holds
+//! it, the violation says a run is in progress instead of calling the edit a leftover.
 
+use crate::buildtime::lock;
 use crate::checks::{self, StaticCheck};
 use crate::violation::Violation;
 use crate::workspace::Context;
@@ -22,6 +27,8 @@ const MARKER: &str = "data-buildtime=";
 
 const MESSAGE: &str = "an interrupted `cargo xtask buildtime web` left its edit here";
 const FIX: &str = "run `cargo xtask buildtime web` once to restore the file from target/xtask/buildtime, or remove the attribute by hand";
+const LIVE_MESSAGE: &str = "a `cargo xtask buildtime` run is in progress and holds this edit";
+const LIVE_FIX: &str = "rerun the check when that run ends";
 
 /// Fails on every line under `ui/app/src` that holds the probe's attribute.
 pub(crate) const CHECK: StaticCheck = StaticCheck {
@@ -36,10 +43,18 @@ fn run(ctx: &Context) -> Vec<Violation> {
     }
     files.sort();
     let mut found = Vec::new();
+    let mut held = None;
     for file in &files {
         let path = checks::repo_path(&ctx.root, file);
         match fs::read(file) {
-            Ok(bytes) => found.extend(scan(&path, &String::from_utf8_lossy(&bytes))),
+            Ok(bytes) => {
+                let text = String::from_utf8_lossy(&bytes);
+                if text.contains(MARKER) {
+                    let held =
+                        *held.get_or_insert_with(|| lock::is_held(&ctx.root.join(lock::LOCK_PATH)));
+                    found.extend(scan(&path, &text, held));
+                }
+            }
             Err(error) => found.push(checks::unreadable(&path, &error)),
         }
     }
@@ -64,12 +79,18 @@ fn collect(dir: &Path, found: &mut Vec<PathBuf>) -> io::Result<()> {
     Ok(())
 }
 
-/// One violation for each line of `text`, the file at `path`, that holds the probe's attribute.
-fn scan(path: &str, text: &str) -> Vec<Violation> {
+/// One violation for each line of `text`, the file at `path`, that holds the probe's attribute,
+/// worded for a live run when `held` (the buildtime lock is held), else for a leftover.
+fn scan(path: &str, text: &str, held: bool) -> Vec<Violation> {
+    let (message, fix) = if held {
+        (LIVE_MESSAGE, LIVE_FIX)
+    } else {
+        (MESSAGE, FIX)
+    };
     text.lines()
         .enumerate()
         .filter(|(_, line)| line.contains(MARKER))
-        .map(|(index, _)| checks::violation(path, checks::line_at(index), MESSAGE, FIX))
+        .map(|(index, _)| checks::violation(path, checks::line_at(index), message, fix))
         .collect()
 }
 
@@ -108,6 +129,41 @@ mod tests {
         fs::write(dir.join("ui/app/src/App.tsx"), "<main data-test=\"1\" />\n")
             .expect("write App.tsx");
         assert_eq!(run(&desktop_context(&dir)), Vec::new());
+    }
+
+    #[test]
+    fn a_held_buildtime_lock_says_a_run_is_in_progress_and_a_free_one_says_interrupted() {
+        let dir = Scratch::new("buildtime-edits-lock");
+        fs::create_dir_all(dir.join("ui/app/src")).expect("create the src dir");
+        fs::write(
+            dir.join("ui/app/src/App.tsx"),
+            "<main data-buildtime=\"2\" />\n",
+        )
+        .expect("write App.tsx");
+        let held = lock::acquire(&dir.join(lock::LOCK_PATH)).expect("take the lock");
+        assert_eq!(
+            run(&desktop_context(&dir)),
+            vec![checks::violation(
+                "ui/app/src/App.tsx",
+                1,
+                LIVE_MESSAGE,
+                LIVE_FIX
+            )]
+        );
+        drop(held);
+        assert_eq!(
+            run(&desktop_context(&dir)),
+            vec![checks::violation("ui/app/src/App.tsx", 1, MESSAGE, FIX)]
+        );
+    }
+
+    #[test]
+    fn a_clean_tree_never_creates_the_lock_file() {
+        let dir = Scratch::new("buildtime-edits-no-lock");
+        fs::create_dir_all(dir.join("ui/app/src")).expect("create the src dir");
+        fs::write(dir.join("ui/app/src/App.tsx"), "<main />\n").expect("write App.tsx");
+        assert_eq!(run(&desktop_context(&dir)), Vec::new());
+        assert!(!dir.join(lock::LOCK_PATH).exists());
     }
 
     #[test]
