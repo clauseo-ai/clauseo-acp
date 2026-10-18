@@ -1,7 +1,8 @@
-//! The frontend steps: `pnpm install` for the `ui` workspace, then tsc, oxlint, oxfmt, vitest and
-//! vite build in `ui/app`. Each builder says what one tool runs and how its output is read. `plan`
-//! decides whether they run or are skipped; the pnpm version is pinned by `packageManager` in
-//! `ui/package.json`.
+//! The frontend steps: `pnpm install` for the `ui` workspace, then the package.json scripts that run
+//! tsc, oxlint, oxfmt, vitest and vite build. The scripts are the one source of each command; xtask
+//! only appends the flags its parsers need. Each builder says what one tool runs and how its output
+//! is read. `plan` decides whether they run or are skipped; the pnpm version is pinned by
+//! `packageManager` in `ui/package.json`.
 
 use super::ToolStep;
 use super::plan::{parse_none, reproduce};
@@ -27,11 +28,12 @@ pub(super) fn steps() -> Vec<ToolStep> {
     ]
 }
 
-/// `pnpm -C ui/app exec <args>`: a tool that `ui/app` installed.
-fn app_exec(args: &[&str]) -> Cmd {
+/// `pnpm -C <dir> run <script> <args>`: a script that the package.json in `dir` defines. pnpm passes
+/// the trailing args to the script's command.
+fn script(dir: &str, name: &str, args: &[&str]) -> Cmd {
     Cmd::new(
         Program::Named("pnpm"),
-        ["-C", "ui/app", "exec"]
+        ["-C", dir, "run", name]
             .into_iter()
             .chain(args.iter().copied()),
     )
@@ -53,7 +55,7 @@ fn install_step() -> ToolStep {
 fn tsc_step() -> ToolStep {
     ToolStep {
         name: "tsc",
-        cmd: app_exec(&["tsc", "--noEmit", "--pretty", "false"]),
+        cmd: script("ui/app", "typecheck", &["--pretty", "false"]),
         parse: tsc_findings,
         fix: ui_fix,
         render: None,
@@ -63,7 +65,7 @@ fn tsc_step() -> ToolStep {
 fn oxlint_step() -> ToolStep {
     ToolStep {
         name: "oxlint",
-        cmd: app_exec(&["oxlint", "--format", "unix"]),
+        cmd: script("ui/app", "lint", &["--format", "unix"]),
         parse: oxlint_findings,
         fix: ui_fix,
         render: None,
@@ -73,7 +75,7 @@ fn oxlint_step() -> ToolStep {
 fn oxfmt_step() -> ToolStep {
     ToolStep {
         name: "oxfmt",
-        cmd: app_exec(&["oxfmt", "--check"]),
+        cmd: script("ui", "fmt:check", &[]),
         parse: oxfmt_findings,
         fix: ui_fix,
         render: None,
@@ -83,7 +85,7 @@ fn oxfmt_step() -> ToolStep {
 fn vitest_step() -> ToolStep {
     ToolStep {
         name: "vitest",
-        cmd: app_exec(&["vitest", "run"]),
+        cmd: script("ui/app", "test", &[]),
         parse: parse_none,
         fix: ui_fix,
         render: None,
@@ -93,7 +95,7 @@ fn vitest_step() -> ToolStep {
 fn vite_build_step() -> ToolStep {
     ToolStep {
         name: "vite-build",
-        cmd: app_exec(&["vite", "build"]),
+        cmd: script("ui/app", "build", &[]),
         parse: parse_none,
         fix: ui_fix,
         render: None,
@@ -109,11 +111,12 @@ fn ui_fix(cmd: &Cmd, output: Option<&str>) -> String {
     }
 }
 
-/// Repo-relative form of a path a ui tool printed. tsc and oxlint print paths relative to `ui/app`.
-fn app_path(raw: &str) -> String {
+/// Repo-relative form of a path a ui tool printed. The tool ran in `base` (`ui/app` for tsc and
+/// oxlint, `ui` for oxfmt), so its paths are relative to that directory.
+fn ui_path(base: &str, raw: &str) -> String {
     let path = raw.trim().replace('\\', "/");
     format!(
-        "ui/app/{}",
+        "{base}/{}",
         path.strip_prefix("./").unwrap_or(path.as_str())
     )
 }
@@ -133,10 +136,10 @@ fn tsc_finding(line: &str) -> Option<Finding> {
     }
     Some(Finding {
         violation: Violation {
-            path: app_path(path),
+            path: ui_path("ui/app", path),
             line: line_no,
             message: message.to_owned(),
-            fix: "`pnpm -C ui/app exec tsc --noEmit` shows the full error".into(),
+            fix: "`pnpm -C ui/app run typecheck` shows the full error".into(),
         },
         is_error: message.starts_with("error "),
     })
@@ -163,10 +166,10 @@ fn oxlint_finding(line: &str) -> Option<Finding> {
         .is_some_and(|(_, rule)| rule.starts_with("Error/"));
     Some(Finding {
         violation: Violation {
-            path: app_path(path),
+            path: ui_path("ui/app", path),
             line: line_no,
             message: message.to_owned(),
-            fix: "`pnpm -C ui/app exec oxlint` shows the rule's help; fix the code, do not disable the rule"
+            fix: "`pnpm -C ui/app run lint` shows the rule's help; fix the code, do not disable the rule"
                 .into(),
         },
         is_error,
@@ -181,10 +184,10 @@ fn oxfmt_findings(output: &str, _ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
         .filter_map(oxfmt_path)
         .map(|path| Finding {
             violation: Violation {
-                path: app_path(path),
+                path: ui_path("ui", path),
                 line: 1,
                 message: "oxfmt would reformat this file".into(),
-                fix: "run `pnpm -C ui/app exec oxfmt`".into(),
+                fix: "run `pnpm -C ui run fmt` to reformat it".into(),
             },
             is_error: true,
         })
@@ -199,6 +202,7 @@ fn oxfmt_path(line: &str) -> Option<&str> {
     (numeric && !path.is_empty()).then_some(path)
 }
 
+#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,30 +241,24 @@ mod tests {
     }
 
     #[test]
-    fn commands_are_the_pinned_ui_invocations() {
+    fn commands_are_the_package_scripts_with_the_parse_flags() {
         assert_eq!(
             install_step().cmd.to_string(),
             "pnpm -C ui install --frozen-lockfile"
         );
         assert_eq!(
             tsc_step().cmd.to_string(),
-            "pnpm -C ui/app exec tsc --noEmit --pretty false"
+            "pnpm -C ui/app run typecheck --pretty false"
         );
         assert_eq!(
             oxlint_step().cmd.to_string(),
-            "pnpm -C ui/app exec oxlint --format unix"
+            "pnpm -C ui/app run lint --format unix"
         );
-        assert_eq!(
-            oxfmt_step().cmd.to_string(),
-            "pnpm -C ui/app exec oxfmt --check"
-        );
-        assert_eq!(
-            vitest_step().cmd.to_string(),
-            "pnpm -C ui/app exec vitest run"
-        );
+        assert_eq!(oxfmt_step().cmd.to_string(), "pnpm -C ui run fmt:check");
+        assert_eq!(vitest_step().cmd.to_string(), "pnpm -C ui/app run test");
         assert_eq!(
             vite_build_step().cmd.to_string(),
-            "pnpm -C ui/app exec vite build"
+            "pnpm -C ui/app run build"
         );
     }
 
@@ -273,14 +271,16 @@ mod tests {
         );
         assert_eq!(
             ui_fix(&cmd, Some("FAIL  src/App.test.tsx")),
-            "run `pnpm -C ui/app exec vitest run` to reproduce"
+            "run `pnpm -C ui/app run test` to reproduce"
         );
     }
 
-    /// Real `pnpm -C ui/app exec tsc --noEmit --pretty false` output, with two errors planted in
-    /// `src/zz_planted.tsx`.
-    const TSC_FAILING: &str = "src/zz_planted.tsx(1,24): error TS2307: Cannot find module '@tauri-apps/api/core' or its corresponding type declarations.\n\
-        src/zz_planted.tsx(2,14): error TS2322: Type 'string' is not assignable to type 'number'.\n";
+    /// Real `pnpm -C ui/app run typecheck --pretty false` output with two errors planted in
+    /// `src/zz_planted.tsx`: pnpm's echo of the script and its `[ELIFECYCLE]` line are in it.
+    const TSC_FAILING: &str = "$ tsc --noEmit --pretty false\n\
+        src/zz_planted.tsx(1,24): error TS2307: Cannot find module '@tauri-apps/api/core' or its corresponding type declarations.\n\
+        src/zz_planted.tsx(2,7): error TS2322: Type 'string' is not assignable to type 'number'.\n\
+        [ELIFECYCLE] Command failed with exit code 1.\n";
 
     #[test]
     fn tsc_turns_each_error_line_into_a_finding_under_ui_app() {
@@ -304,27 +304,32 @@ mod tests {
         );
         assert_eq!(
             tsc_findings(TSC_FAILING, &context(), &cmd)[0].violation.fix,
-            "`pnpm -C ui/app exec tsc --noEmit` shows the full error"
+            "`pnpm -C ui/app run typecheck` shows the full error"
         );
     }
 
     #[test]
     fn tsc_finds_nothing_in_a_clean_run() {
-        // Real output of a passing run: tsc prints nothing.
+        // Real output of a passing run: pnpm echoes the script, tsc prints nothing.
         assert_eq!(
-            findings(tsc_findings, &tsc_step().cmd, ""),
+            findings(
+                tsc_findings,
+                &tsc_step().cmd,
+                "$ tsc --noEmit --pretty false\n"
+            ),
             Vec::<Row>::new()
         );
     }
 
-    /// Real `pnpm -C ui/app exec oxlint --format unix` output: an error and a warning, planted in
-    /// `src/zz_fmt2.ts` and `src/zz_planted.tsx`, the warning from `-W no-unused-vars`.
-    const OXLINT_FAILING: &str = "src/zz_fmt2.ts:1:9: Variable 'b' is declared but never used. Unused variables should start with a '_'. [Error/eslint(no-unused-vars)]\n\
+    /// Real `pnpm -C ui/app run lint --format unix` output with an error planted in
+    /// `src/zz_planted.tsx`.
+    const OXLINT_FAILING: &str = "$ oxlint --format unix\n\
         src/zz_planted.tsx:1:1: '@tauri-apps/api/core' import is restricted from being used by a pattern. [Error/eslint(no-restricted-imports)]\n\
         \n\
-        2 problems\n";
+        1 problem\n\
+        [ELIFECYCLE] Command failed with exit code 1.\n";
 
-    /// The same two lines when `no-unused-vars` is only a warning (`oxlint -W no-unused-vars`).
+    /// The same kind of line when `no-unused-vars` is only a warning (`oxlint -W no-unused-vars`).
     const OXLINT_WARNING: &str = "src/zz_fmt2.ts:1:9: Variable 'b' is declared but never used. Unused variables should start with a '_'. [Warning/eslint(no-unused-vars)]\n\
         \n\
         1 problem\n";
@@ -334,20 +339,12 @@ mod tests {
         let cmd = oxlint_step().cmd;
         assert_eq!(
             findings(oxlint_findings, &cmd, OXLINT_FAILING),
-            [
-                row(
-                    "ui/app/src/zz_fmt2.ts",
-                    1,
-                    "Variable 'b' is declared but never used. Unused variables should start with a '_'. [Error/eslint(no-unused-vars)]",
-                    true,
-                ),
-                row(
-                    "ui/app/src/zz_planted.tsx",
-                    1,
-                    "'@tauri-apps/api/core' import is restricted from being used by a pattern. [Error/eslint(no-restricted-imports)]",
-                    true,
-                ),
-            ]
+            [row(
+                "ui/app/src/zz_planted.tsx",
+                1,
+                "'@tauri-apps/api/core' import is restricted from being used by a pattern. [Error/eslint(no-restricted-imports)]",
+                true,
+            )]
         );
     }
 
@@ -360,27 +357,35 @@ mod tests {
 
     #[test]
     fn oxlint_finds_nothing_in_a_clean_run() {
-        // Real output of a passing run: oxlint prints nothing.
+        // Real output of a passing run: pnpm echoes the script, oxlint prints nothing.
         assert_eq!(
-            findings(oxlint_findings, &oxlint_step().cmd, ""),
+            findings(
+                oxlint_findings,
+                &oxlint_step().cmd,
+                "$ oxlint --format unix\n"
+            ),
             Vec::<Row>::new()
         );
     }
 
-    /// Real `pnpm -C ui/app exec oxfmt --check` output with two files planted unformatted.
-    const OXFMT_FAILING: &str = "Checking formatting...\n\
+    /// Real `pnpm -C ui run fmt:check` output with two files planted unformatted in `ui/app/src`.
+    /// oxfmt names them relative to `ui/`.
+    const OXFMT_FAILING: &str = "$ oxfmt --check\n\
+        Checking formatting...\n\
         \n\
-        src/zz_fmt.ts (0ms)\n\
-        src/zz_fmt2.ts (0ms)\n\
+        app/src/zz_fmt.ts (0ms)\n\
+        app/src/zz_planted.tsx (0ms)\n\
         \n\
         Format issues found in above 2 files. Run without `--check` to fix.\n\
-        Finished in 148ms on 13 files using 12 threads.\n";
+        Finished in 124ms on 16 files using 12 threads.\n\
+        [ELIFECYCLE] Command failed with exit code 1.\n";
 
-    /// Real `pnpm -C ui/app exec oxfmt --check` output for a clean tree.
-    const OXFMT_CLEAN: &str = "Checking formatting...\n\
+    /// Real `pnpm -C ui run fmt:check` output for a clean tree.
+    const OXFMT_CLEAN: &str = "$ oxfmt --check\n\
+        Checking formatting...\n\
         \n\
         All matched files use the correct format.\n\
-        Finished in 121ms on 10 files using 12 threads.\n";
+        Finished in 146ms on 14 files using 12 threads.\n";
 
     #[test]
     fn oxfmt_names_each_unformatted_file_at_line_one() {
@@ -395,7 +400,7 @@ mod tests {
                     true
                 ),
                 row(
-                    "ui/app/src/zz_fmt2.ts",
+                    "ui/app/src/zz_planted.tsx",
                     1,
                     "oxfmt would reformat this file",
                     true
@@ -406,7 +411,21 @@ mod tests {
             oxfmt_findings(OXFMT_FAILING, &context(), &cmd)[0]
                 .violation
                 .fix,
-            "run `pnpm -C ui/app exec oxfmt`"
+            "run `pnpm -C ui run fmt` to reformat it"
+        );
+    }
+
+    #[test]
+    fn oxfmt_names_a_file_at_the_ui_root_under_ui() {
+        // oxfmt runs in `ui/`, so `ui/package.json` is printed as `package.json`.
+        assert_eq!(
+            findings(oxfmt_findings, &oxfmt_step().cmd, "package.json (0ms)\n"),
+            [row(
+                "ui/package.json",
+                1,
+                "oxfmt would reformat this file",
+                true
+            )]
         );
     }
 

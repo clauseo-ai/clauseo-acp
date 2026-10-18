@@ -260,11 +260,11 @@ mod tests {
                 "taplo fmt --check",
                 "gitleaks git --redact --no-banner --verbose --no-color --log-opts=abc..HEAD",
                 "pnpm -C ui install --frozen-lockfile",
-                "pnpm -C ui/app exec tsc --noEmit --pretty false",
-                "pnpm -C ui/app exec oxlint --format unix",
-                "pnpm -C ui/app exec oxfmt --check",
-                "pnpm -C ui/app exec vitest run",
-                "pnpm -C ui/app exec vite build",
+                "pnpm -C ui/app run typecheck --pretty false",
+                "pnpm -C ui/app run lint --format unix",
+                "pnpm -C ui run fmt:check",
+                "pnpm -C ui/app run test",
+                "pnpm -C ui/app run build",
                 "cargo nextest run --workspace --no-tests=pass",
             ]
         );
@@ -328,11 +328,11 @@ mod tests {
             tool_commands(&steps)[7..13],
             [
                 "pnpm -C ui install --frozen-lockfile",
-                "pnpm -C ui/app exec tsc --noEmit --pretty false",
-                "pnpm -C ui/app exec oxlint --format unix",
-                "pnpm -C ui/app exec oxfmt --check",
-                "pnpm -C ui/app exec vitest run",
-                "pnpm -C ui/app exec vite build",
+                "pnpm -C ui/app run typecheck --pretty false",
+                "pnpm -C ui/app run lint --format unix",
+                "pnpm -C ui run fmt:check",
+                "pnpm -C ui/app run test",
+                "pnpm -C ui/app run build",
             ]
         );
     }
