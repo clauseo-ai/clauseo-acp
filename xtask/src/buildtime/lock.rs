@@ -1,6 +1,6 @@
-//! One `buildtime rust` run per checkout. Two runs would take each other's saved copies for
-//! leftovers, so a run holds an exclusive lock on `target/xtask/buildtime.lock` from before the
-//! leftover restore to its end. The OS drops the lock when the process ends, killed or not, so a
+//! One `buildtime` run per checkout. Two runs would take each other's saved copies for leftovers,
+//! or edit `ui/app/src/App.tsx` at once, so a run holds an exclusive lock on
+//! `target/xtask/buildtime.lock` from before the leftover restore to the end of its last half. The OS drops the lock when the process ends, killed or not, so a
 //! lock is never stale and nothing cleans it up.
 
 use super::verdict::Failure;

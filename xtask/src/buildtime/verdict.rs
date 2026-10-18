@@ -46,7 +46,8 @@ impl Failure {
     }
 }
 
-/// The status of a probe, as the table and the JSON print it.
+/// The status of a probe, as the table and the JSON print it. `Reported` is a measured probe with
+/// no budget row (the web half's `dev_start`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ProbeStatus {
@@ -54,6 +55,7 @@ pub(crate) enum ProbeStatus {
     Ok,
     Over,
     Failed,
+    Reported,
 }
 
 impl ProbeStatus {
@@ -63,6 +65,7 @@ impl ProbeStatus {
             ProbeStatus::Ok => "ok",
             ProbeStatus::Over => "over",
             ProbeStatus::Failed => "failed",
+            ProbeStatus::Reported => "reported",
         }
     }
 }

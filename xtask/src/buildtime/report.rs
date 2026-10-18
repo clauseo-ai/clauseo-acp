@@ -2,26 +2,33 @@
 //! or the object; diagnostics go through the printer that `buildtime::run` picks.
 
 use super::verdict::{Outcome, ProbeResult, ProbeStatus};
-use super::{Out, RustRun, WEB_MESSAGE};
+use super::web::WebJson;
+use super::{Out, RustRun};
 use serde::Serialize;
 
 /// The result table: a header, then one line per probe. Measured probes align their columns; a
 /// skipped or failed probe prints its state in place of the columns.
 pub(super) fn table_lines(results: &[ProbeResult]) -> Vec<String> {
-    const NAME_HEADER: &str = "probe";
-    const COLUMNS: [&str; 5] = ["median", "min", "max", "budget", "status"];
-    let name_width = results
-        .iter()
-        .map(|result| result.name.len())
-        .chain([NAME_HEADER.len()])
-        .max()
-        .unwrap_or(0);
     let rows: Vec<(&str, Result<[String; 5], String>)> = results
         .iter()
         .map(|result| (result.name, cells(&result.outcome)))
         .collect();
+    aligned_table(&rows)
+}
+
+/// The table of `rows`: a header, then one line per row. Each row is its name and either its five
+/// cells, aligned in columns, or the text it prints in place of them. The web half uses it too.
+pub(super) fn aligned_table(rows: &[(&str, Result<[String; 5], String>)]) -> Vec<String> {
+    const NAME_HEADER: &str = "probe";
+    const COLUMNS: [&str; 5] = ["median", "min", "max", "budget", "status"];
+    let name_width = rows
+        .iter()
+        .map(|(name, _)| name.len())
+        .chain([NAME_HEADER.len()])
+        .max()
+        .unwrap_or(0);
     let mut widths = COLUMNS.map(str::len);
-    for (_, row) in &rows {
+    for (_, row) in rows {
         if let Ok(row) = row {
             for (width, cell) in widths.iter_mut().zip(row) {
                 *width = (*width).max(cell.len());
@@ -31,7 +38,7 @@ pub(super) fn table_lines(results: &[ProbeResult]) -> Vec<String> {
     let line =
         |name: &str, body: &str| format!("{name:<name_width$}  {body}").trim_end().to_owned();
     let mut lines = vec![line(NAME_HEADER, &join_cells(&COLUMNS, &widths))];
-    for (name, row) in &rows {
+    for (name, row) in rows {
         lines.push(match row {
             Ok(row) => line(name, &join_cells(row, &widths)),
             Err(text) => line(name, text),
@@ -167,14 +174,14 @@ struct Report<'a> {
     passed: bool,
     probes: Vec<ProbeJson>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    web: Option<&'static str>,
+    web: Option<&'a WebJson>,
 }
 
-/// The JSON object of `web` alone. The web half is not built yet, so it does not fail.
+/// The JSON object of `web` alone: the web half, and the verdict of the run.
 #[derive(Serialize)]
-pub(super) struct WebOnly {
-    pub(super) web: &'static str,
-    pub(super) passed: bool,
+struct WebOnly<'a> {
+    web: &'a WebJson,
+    passed: bool,
 }
 
 /// The JSON object of a run that stopped before it measured: `passed` is false, and `errors` holds
@@ -189,8 +196,9 @@ pub(super) fn json_line<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap_or_else(|error| format!("{{\"error\":\"{error}\"}}"))
 }
 
-/// The JSON object of a measured run. `web` adds the web field, which only `all` prints.
-pub(super) fn json_object(run: &RustRun, passed: bool, web: bool) -> String {
+/// The JSON object of a measured run. `web` adds the web half, which only `all` has. `passed` is
+/// the verdict over both halves.
+pub(super) fn json_object(run: &RustRun, passed: bool, web: Option<&WebJson>) -> String {
     let report = Report {
         rustc: &run.rustc,
         profile: "dev",
@@ -199,7 +207,7 @@ pub(super) fn json_object(run: &RustRun, passed: bool, web: bool) -> String {
         runs: run.runs,
         passed,
         probes: run.results.iter().map(probe_json).collect(),
-        web: web.then_some(WEB_MESSAGE),
+        web,
     };
     json_line(&report)
 }
@@ -212,10 +220,10 @@ pub(super) fn error_json(errors: &[String]) -> String {
     })
 }
 
-/// The JSON object of `web` alone.
-pub(super) fn web_json() -> String {
+/// The JSON object of `web` alone: the web half under `web`, measured or stopped, and its verdict.
+pub(super) fn web_json(web: &WebJson) -> String {
     json_line(&WebOnly {
-        web: WEB_MESSAGE,
-        passed: true,
+        web,
+        passed: web.passed(),
     })
 }

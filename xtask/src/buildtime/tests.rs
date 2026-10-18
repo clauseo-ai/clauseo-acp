@@ -1,6 +1,6 @@
 //! Tests for `buildtime.rs`: the statistics, the verdict, the plan, the budget lookup and the output.
 
-use super::report::{error_json, json_object, probe_json, table_lines, warning_lines, web_json};
+use super::report::{error_json, json_object, probe_json, table_lines, warning_lines};
 use super::verdict::*;
 use super::*;
 use crate::budgets::{Budget, Gate, Unit};
@@ -281,14 +281,6 @@ fn the_json_of_a_measured_probe_has_its_stats_and_budget() {
     assert!(json.get("reason").is_none());
 }
 
-#[test]
-fn the_web_only_json_names_the_web_half_and_passes() {
-    assert_eq!(
-        web_json(),
-        r#"{"web":"not implemented until R4","passed":true}"#
-    );
-}
-
 fn rust_run(results: Vec<ProbeResult>, ci: bool) -> RustRun {
     RustRun {
         rustc: "rustc 1.99.0".into(),
@@ -306,7 +298,7 @@ fn rust_run(results: Vec<ProbeResult>, ci: bool) -> RustRun {
 fn the_json_object_has_the_run_count_and_the_verdict() {
     let run = rust_run(vec![measured(0.5, 1.0), skipped()], false);
     let json: serde_json::Value =
-        serde_json::from_str(&json_object(&run, true, false)).expect("valid json");
+        serde_json::from_str(&json_object(&run, true, None)).expect("valid json");
     assert_eq!(json["runs"], 3);
     assert_eq!(json["passed"], true);
     assert_eq!(json["probes"][1]["status"], "skipped");
@@ -314,9 +306,8 @@ fn the_json_object_has_the_run_count_and_the_verdict() {
 
     let failing = rust_run(vec![over_budget("build_desktop", Gate::Pr)], false);
     let json: serde_json::Value =
-        serde_json::from_str(&json_object(&failing, false, true)).expect("valid json");
+        serde_json::from_str(&json_object(&failing, false, None)).expect("valid json");
     assert_eq!(json["passed"], false);
-    assert_eq!(json["web"], "not implemented until R4");
 }
 
 #[test]
