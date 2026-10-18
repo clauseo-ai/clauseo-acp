@@ -43,13 +43,16 @@ impl Program {
     }
 }
 
-/// The file names pnpm may have on Windows, in the order they are looked for within one directory.
-const WINDOWS_PNPM: [&str; 2] = ["pnpm.cmd", "pnpm.exe"];
+/// The file names pnpm may have on Windows, in the order they are looked for within one
+/// directory: `.exe` before `.cmd`, as in Windows' default `PATHEXT` (`.COM;.EXE;.BAT;.CMD`).
+const WINDOWS_PNPM: [&str; 2] = ["pnpm.exe", "pnpm.cmd"];
 
-/// The program to start for pnpm. On Windows it is the file that cmd and PowerShell would run: the
-/// first directory on `PATH` that holds `pnpm.cmd` or `pnpm.exe`, as a full path. `Command` then runs
-/// that file without searching `PATH` again. Rust 1.77+ runs a `.cmd` file with its arguments
-/// escaped, so they reach the script unchanged. Elsewhere it is `pnpm`.
+/// The program to start for pnpm. On Windows it is the file that cmd and PowerShell would run with
+/// the default `PATHEXT`: in the first directory on `PATH` that holds `pnpm.exe` or `pnpm.cmd`,
+/// the `.exe` if both are there, as a full path. A `PATHEXT` changed from the default may pick
+/// differently. `Command` then runs that file without searching `PATH` again. Rust 1.77+ runs a
+/// `.cmd` file with its arguments escaped, so they reach the script unchanged. Elsewhere it is
+/// `pnpm`.
 fn pnpm_file() -> PathBuf {
     if cfg!(windows) {
         let path = std::env::var_os("PATH").unwrap_or_default();
@@ -61,7 +64,7 @@ fn pnpm_file() -> PathBuf {
 
 /// The pnpm file in the first directory on `path` that holds one of `names`, with `exists` saying
 /// whether a path is a file. Directories are walked in PATH order, and within one directory the
-/// names are tried in the order given. So a `pnpm.exe` in an earlier directory beats a `pnpm.cmd`
+/// names are tried in the order given. So a `pnpm.cmd` in an earlier directory beats a `pnpm.exe`
 /// in a later one, the same as the developer's shell. The result is `dir.join(name)`. When no
 /// directory holds a match, it is the bare `pnpm`.
 fn resolve_pnpm(path: &OsStr, names: &[&str], exists: impl Fn(&Path) -> bool) -> PathBuf {
@@ -174,7 +177,8 @@ pub(crate) fn run_quiet(cmd: &Cmd, root: &Path) -> io::Result<Quiet> {
     })
 }
 
-/// Runs `cmd` in `root` with its output going straight to the terminal. Returns whether it succeeded.
+/// Runs `cmd` in `root` with its output going straight to the terminal. Returns whether it
+/// succeeded.
 pub(crate) fn run_inherit(cmd: &Cmd, root: &Path) -> io::Result<bool> {
     let status = cmd
         .program
@@ -257,14 +261,14 @@ mod tests {
     }
 
     #[test]
-    fn a_cmd_beats_an_exe_in_the_same_directory() {
+    fn an_exe_beats_a_cmd_in_the_same_directory() {
         let files = [
-            at("/usr/local/node", "pnpm.exe"),
             at("/usr/local/node", "pnpm.cmd"),
+            at("/usr/local/node", "pnpm.exe"),
         ];
         assert_eq!(
             resolve_pnpm(&path_of(&DIRS), &WINDOWS_PNPM, only(&files)),
-            at("/usr/local/node", "pnpm.cmd")
+            at("/usr/local/node", "pnpm.exe")
         );
     }
 

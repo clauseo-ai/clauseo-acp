@@ -1,5 +1,5 @@
-//! The frontend steps: `pnpm install` for the `ui` workspace, then the package.json scripts that run
-//! tsc, oxlint, oxfmt, vitest and vite build. The scripts are the one source of each command; xtask
+//! The frontend steps: `pnpm install` for the `ui` workspace, then the package.json scripts that
+//! run tsc, oxlint, oxfmt, vitest and vite build. The scripts are the one source of each command; xtask
 //! only appends the flags its parsers need. Each builder says what one tool runs and how its output
 //! is read. `plan` decides whether they run or are skipped; the pnpm version is pinned by
 //! `packageManager` in `ui/package.json`.
@@ -29,8 +29,8 @@ pub(super) fn steps() -> Vec<ToolStep> {
     ]
 }
 
-/// `pnpm -C <dir> run <script> <args>`: a script that the package.json in `dir` defines. pnpm passes
-/// the trailing args to the script's command. So each script must be one tool invocation: in
+/// `pnpm -C <dir> run <script> <args>`: a script that the package.json in `dir` defines. pnpm
+/// passes the trailing args to the script's command. So each script must be one tool invocation: in
 /// `"typecheck": "tsc --noEmit && foo"` the args would reach `foo`, not `tsc`.
 fn script(dir: &str, name: &str, args: &[&str]) -> Cmd {
     Cmd::new(
