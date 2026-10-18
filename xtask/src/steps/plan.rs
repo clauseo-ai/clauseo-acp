@@ -1,6 +1,8 @@
 //! The steps `cargo xtask check` runs. `plan` lists them in order; each builder says what one tool
-//! runs and how its output is read. Adding an external step is one `ToolStep` here.
+//! runs and how its output is read. Adding an external step is one `ToolStep` here, or in
+//! `policy.rs` for a repo-policy tool.
 
+use super::policy;
 use crate::checks;
 use crate::parse;
 use crate::process::{Cmd, Program};
@@ -10,29 +12,44 @@ use crate::workspace::Context;
 
 const NO_PACKAGES: &str = "no changed packages";
 
-/// The steps for `scope`, in run order: fmt, every static check, clippy, nextest.
-/// With `Scope::Nothing`, clippy and nextest are skipped. `ci` picks the CI variants of the
-/// clippy and nextest commands.
-pub(crate) fn plan(scope: &Scope, ci: bool) -> Vec<Step> {
+/// The steps for `scope`, in run order: fmt, clippy, deny, shear, typos, taplo, gitleaks, every
+/// static check, nextest. With `Scope::Nothing`, clippy and nextest are skipped; the others never
+/// depend on the scope. `ci` picks the CI variants of the clippy and nextest commands.
+/// `gitleaks_base` is the commit this branch forked from; gitleaks scans the commits after it, or
+/// all history when it is `None`.
+pub(crate) fn plan(scope: &Scope, ci: bool, gitleaks_base: Option<&str>) -> Vec<Step> {
+    let selectors = scope.selectors();
     let mut steps = vec![Step::Tool(fmt_step())];
+    steps.push(match &selectors {
+        Some(selectors) => Step::Tool(clippy_step(selectors, ci)),
+        None => skipped("clippy"),
+    });
+    steps.extend(
+        [
+            policy::deny_step(),
+            policy::shear_step(),
+            policy::typos_step(),
+            policy::taplo_step(),
+            policy::gitleaks_step(gitleaks_base),
+        ]
+        .map(Step::Tool),
+    );
     steps.extend(checks::ALL.iter().map(Step::Static));
-    if let Some(selectors) = scope.selectors() {
-        steps.push(Step::Tool(clippy_step(&selectors, ci)));
-        steps.push(Step::Tool(nextest_step(&selectors, ci)));
-    } else {
-        steps.push(Step::Skipped {
-            name: "clippy",
-            reason: NO_PACKAGES,
-        });
-        steps.push(Step::Skipped {
-            name: "nextest",
-            reason: NO_PACKAGES,
-        });
-    }
+    steps.push(match &selectors {
+        Some(selectors) => Step::Tool(nextest_step(selectors, ci)),
+        None => skipped("nextest"),
+    });
     steps
 }
 
-fn reproduce(cmd: &Cmd, _output: Option<&str>) -> String {
+fn skipped(name: &'static str) -> Step {
+    Step::Skipped {
+        name,
+        reason: NO_PACKAGES,
+    }
+}
+
+pub(super) fn reproduce(cmd: &Cmd, _output: Option<&str>) -> String {
     format!("run `{cmd}` to reproduce")
 }
 
@@ -42,13 +59,14 @@ fn fmt_step() -> ToolStep {
         cmd: Cmd::new(Program::Cargo, ["fmt", "--all", "--", "--check"]),
         parse: parse::fmt_findings,
         fix: reproduce,
+        render: None,
     }
 }
 
 fn clippy_step(selectors: &[String], ci: bool) -> ToolStep {
     let mut args = vec!["clippy".to_owned()];
     args.extend(selectors.iter().cloned());
-    args.extend(["--all-targets", "--message-format=short"].map(String::from));
+    args.extend(["--all-targets", "--message-format=json-diagnostic-short"].map(String::from));
     if ci {
         args.extend(["--", "-D", "warnings"].map(String::from));
     }
@@ -57,6 +75,7 @@ fn clippy_step(selectors: &[String], ci: bool) -> ToolStep {
         cmd: Cmd::new(Program::Cargo, args),
         parse: parse::clippy_findings,
         fix: reproduce,
+        render: Some(parse::clippy_render),
     }
 }
 
@@ -72,20 +91,19 @@ fn nextest_step(selectors: &[String], ci: bool) -> ToolStep {
         cmd: Cmd::new(Program::Cargo, args),
         parse: parse_none,
         fix: nextest_fix,
+        render: None,
     }
 }
 
-/// nextest's output has no `file:line` to parse, so it yields no findings.
-fn parse_none(_output: &str, _ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
+/// For output with no `file:line` to parse (nextest, cargo-deny, cargo-shear): no findings.
+pub(super) fn parse_none(_output: &str, _ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
     Vec::new()
 }
 
 fn nextest_fix(cmd: &Cmd, output: Option<&str>) -> String {
     match output {
         None => "run `cargo xtask setup`".into(),
-        Some(text) if text.contains("no such command: `nextest`") => {
-            "run `cargo xtask setup`".into()
-        }
+        Some(text) if text.contains("no such command") => "run `cargo xtask setup`".into(),
         Some(_) => reproduce(cmd, output),
     }
 }
@@ -121,45 +139,71 @@ mod tests {
             .collect()
     }
 
+    /// Each step's name, with `skipped` after the name of a skipped step.
+    fn step_names(steps: &[Step]) -> Vec<String> {
+        steps
+            .iter()
+            .map(|step| match step {
+                Step::Tool(tool) => tool.name.to_owned(),
+                Step::Static(check) => check.name.to_owned(),
+                Step::Skipped { name, reason } => {
+                    assert_eq!(*reason, "no changed packages");
+                    format!("{name} skipped")
+                }
+            })
+            .collect()
+    }
+
+    /// The names a plan should have: the tool steps around every registered static check.
+    fn expected_names(clippy: &str, nextest: &str) -> Vec<String> {
+        let mut names: Vec<String> = ["fmt", clippy, "deny", "shear", "typos", "taplo", "gitleaks"]
+            .map(str::to_owned)
+            .to_vec();
+        names.extend(checks::ALL.iter().map(|check| check.name.to_owned()));
+        names.push(nextest.to_owned());
+        names
+    }
+
     #[test]
-    fn an_empty_package_list_is_nothing_and_skips_clippy_and_nextest() {
+    fn an_empty_package_list_is_nothing_and_skips_only_clippy_and_nextest() {
         assert_eq!(Scope::packages(vec![]), Scope::Nothing);
-        let steps = plan(&Scope::Nothing, false);
-        assert_eq!(steps.len(), 3);
-        assert!(matches!(&steps[0], Step::Tool(tool) if tool.name == "fmt"));
-        assert!(matches!(
-            steps[1],
-            Step::Skipped {
-                name: "clippy",
-                reason: "no changed packages"
-            }
-        ));
-        assert!(matches!(
-            steps[2],
-            Step::Skipped {
-                name: "nextest",
-                reason: "no changed packages"
-            }
-        ));
+        assert_eq!(
+            step_names(&plan(&Scope::Nothing, false, None)),
+            expected_names("clippy skipped", "nextest skipped")
+        );
+    }
+
+    #[test]
+    fn plan_runs_every_step_in_order_for_the_workspace() {
+        assert_eq!(
+            step_names(&plan(&Scope::Workspace, false, None)),
+            expected_names("clippy", "nextest")
+        );
     }
 
     #[test]
     fn plan_commands_for_the_workspace_in_both_modes() {
         assert_eq!(
-            tool_commands(&plan(&Scope::Workspace, false)),
+            tool_commands(&plan(&Scope::Workspace, false, Some("abc"))),
             [
                 "cargo fmt --all -- --check",
-                "cargo clippy --workspace --all-targets --message-format=short",
+                "cargo clippy --workspace --all-targets --message-format=json-diagnostic-short",
+                "cargo deny --locked check",
+                "cargo shear --deny-warnings",
+                "typos --format brief",
+                "taplo fmt --check",
+                "gitleaks git --redact --no-banner --verbose --no-color --log-opts=abc..HEAD",
                 "cargo nextest run --workspace --no-tests=pass",
             ]
         );
+        let ci = tool_commands(&plan(&Scope::Workspace, true, Some("abc")));
         assert_eq!(
-            tool_commands(&plan(&Scope::Workspace, true)),
-            [
-                "cargo fmt --all -- --check",
-                "cargo clippy --workspace --all-targets --message-format=short -- -D warnings",
-                "cargo nextest run --workspace --no-tests=pass --profile ci",
-            ]
+            ci[1],
+            "cargo clippy --workspace --all-targets --message-format=json-diagnostic-short -- -D warnings"
+        );
+        assert_eq!(
+            ci[7],
+            "cargo nextest run --workspace --no-tests=pass --profile ci"
         );
     }
 
@@ -167,15 +211,15 @@ mod tests {
     fn clippy_command_for_named_packages() {
         let scope = Scope::packages(vec!["a".into(), "b".into()]);
         assert_eq!(
-            tool_commands(&plan(&scope, false))[1],
-            "cargo clippy -p a -p b --all-targets --message-format=short"
+            tool_commands(&plan(&scope, false, None))[1],
+            "cargo clippy -p a -p b --all-targets --message-format=json-diagnostic-short"
         );
     }
 
     #[test]
     fn clippy_repro_narrows_to_the_owning_package_in_ci() {
         let members = vec![member("xtask", "xtask")];
-        let steps = plan(&Scope::Workspace, true);
+        let steps = plan(&Scope::Workspace, true, None);
         let Step::Tool(clippy) = &steps[1] else {
             panic!("clippy is a tool step");
         };
@@ -192,7 +236,7 @@ mod tests {
     #[test]
     fn clippy_repro_narrows_to_the_owning_package_without_ci() {
         let members = vec![member("a", "crates/a"), member("b", "crates/b")];
-        let steps = plan(&Scope::packages(vec!["a".into(), "b".into()]), false);
+        let steps = plan(&Scope::packages(vec!["a".into(), "b".into()]), false, None);
         let Step::Tool(clippy) = &steps[1] else {
             panic!("clippy is a tool step");
         };
@@ -208,7 +252,7 @@ mod tests {
 
     #[test]
     fn clippy_keeps_the_selectors_when_no_package_owns_the_file() {
-        let steps = plan(&Scope::packages(vec!["a".into(), "b".into()]), false);
+        let steps = plan(&Scope::packages(vec!["a".into(), "b".into()]), false, None);
         let Step::Tool(clippy) = &steps[1] else {
             panic!("clippy is a tool step");
         };

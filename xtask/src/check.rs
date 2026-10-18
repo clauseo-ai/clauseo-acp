@@ -27,7 +27,8 @@ pub(crate) fn run(quick: bool) -> ExitCode {
     } else {
         Scope::Workspace
     };
-    let steps = steps::plan(&scope, ci);
+    let base = gitleaks_base(&mut out, &ctx);
+    let steps = steps::plan(&scope, ci, base.as_deref());
     let mut exec =
         |cmd: &Cmd, on_output: &mut dyn FnMut(&[u8])| process::capture(cmd, &ctx.root, on_output);
     let results = steps::run_all(steps, &ctx, &mut out, &mut exec);
@@ -91,6 +92,20 @@ fn quick_scope(out: &mut Printer<io::Stdout>, ctx: &Context, members_error: Opti
                 ));
             }
             Scope::packages(names)
+        }
+    }
+}
+
+/// The commit gitleaks starts after: where this branch forked from `origin/main`. Without it,
+/// gitleaks scans all history, and says so.
+fn gitleaks_base(out: &mut Printer<io::Stdout>, ctx: &Context) -> Option<String> {
+    match changes::merge_base(&ctx.root) {
+        Ok(base) => Some(base),
+        Err(error) => {
+            out.note(format!(
+                "gitleaks: all history (no merge-base with origin/main: {error})"
+            ));
+            None
         }
     }
 }

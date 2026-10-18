@@ -78,7 +78,14 @@ fn run_tool<W: Write>(
     exec: &mut Exec<'_>,
 ) -> StepResult {
     out.header(tool.name, &tool.cmd);
-    let (captured, secs) = timed(|| exec(&tool.cmd, &mut |chunk| out.tool_output(chunk)));
+    let stream = tool.render.is_none();
+    let (captured, secs) = timed(|| {
+        exec(&tool.cmd, &mut |chunk| {
+            if stream {
+                out.tool_output(chunk);
+            }
+        })
+    });
     let (failed, warnings) = match captured {
         Ok(captured) => {
             let findings = (tool.parse)(&captured.output, ctx, &tool.cmd);
@@ -89,7 +96,10 @@ fn run_tool<W: Write>(
             let warnings = findings.iter().filter(|f| !f.is_error).count();
             let failed = !captured.success;
             if failed && !has_error {
-                out.captured_output(&captured.output);
+                match tool.render {
+                    None => out.captured_output(&captured.output),
+                    Some(render) => out.held_output(&render(&captured.output)),
+                }
                 out.failure(
                     &format!(
                         "`{}` failed without a file:line; its output is above",
@@ -163,6 +173,7 @@ mod tests {
             cmd: Cmd::new(Program::Named(program), args),
             parse: no_findings,
             fix: reproduce,
+            render: None,
         })
     }
 
@@ -326,6 +337,47 @@ mod tests {
         assert_eq!(
             printed,
             "==> broken: fake fail\nboom\n\
+             `fake fail` failed without a file:line; its output is above\n\
+             \x20   fix: run `fake fail` to reproduce\n"
+        );
+    }
+
+    fn shout(output: &str) -> String {
+        output.to_uppercase()
+    }
+
+    fn rendered_tool(name: &'static str, args: &[&str]) -> Step {
+        Step::Tool(ToolStep {
+            name,
+            cmd: Cmd::new(Program::Named("fake"), args),
+            parse: no_findings,
+            fix: reproduce,
+            render: Some(shout),
+        })
+    }
+
+    #[test]
+    fn live_a_rendered_tool_never_streams_and_a_failure_prints_the_rendered_output() {
+        let mut out = Printer::new(Vec::new(), true);
+        run_all(
+            vec![rendered_tool("json", &["pass"])],
+            &context(),
+            &mut out,
+            &mut noisy_pass,
+        );
+        assert_eq!(text(out), "==> json: fake pass\n");
+
+        let mut out = Printer::new(Vec::new(), true);
+        run_all(
+            vec![rendered_tool("json", &["fail"])],
+            &context(),
+            &mut out,
+            &mut boom_fail,
+        );
+        assert_eq!(
+            text(out),
+            "==> json: fake fail\n\
+             BOOM\n\
              `fake fail` failed without a file:line; its output is above\n\
              \x20   fix: run `fake fail` to reproduce\n"
         );

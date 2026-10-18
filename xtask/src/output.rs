@@ -68,7 +68,15 @@ impl<W: Write> Printer<W> {
     /// The whole captured output of a failed tool. Written only when not live, since a live run
     /// has already streamed it. A missing final newline is added.
     pub(crate) fn captured_output(&mut self, text: &str) {
-        if self.live || text.is_empty() {
+        if !self.live {
+            self.held_output(text);
+        }
+    }
+
+    /// Output that was never streamed (a tool whose raw output is for machines), written live or
+    /// not. A missing final newline is added.
+    pub(crate) fn held_output(&mut self, text: &str) {
+        if text.is_empty() {
             return;
         }
         let _ = self.out.write_all(text.as_bytes());

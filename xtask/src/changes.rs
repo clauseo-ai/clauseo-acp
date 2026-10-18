@@ -68,12 +68,7 @@ pub(crate) fn direct_members(changed: &[String], members: &[Member]) -> Vec<Stri
 /// Tracked changes against the merge-base with `origin/main`, plus untracked files.
 /// Errors when the merge-base cannot be found or git fails.
 pub(crate) fn changed_files(root: &Path) -> Result<Vec<String>, String> {
-    let base = git(root, &["merge-base", "HEAD", "origin/main"])?
-        .trim()
-        .to_owned();
-    if base.is_empty() {
-        return Err("`git merge-base HEAD origin/main` printed nothing".into());
-    }
+    let base = merge_base(root)?;
     let tracked = git(
         root,
         &["diff", "-z", "--name-only", "--no-renames", base.as_str()],
@@ -81,6 +76,17 @@ pub(crate) fn changed_files(root: &Path) -> Result<Vec<String>, String> {
     let untracked = git(root, &["ls-files", "-z", "--others", "--exclude-standard"])?;
     let files: BTreeSet<String> = split_nul(&tracked).chain(split_nul(&untracked)).collect();
     Ok(files.into_iter().collect())
+}
+
+/// The commit this branch forked from: `git merge-base HEAD origin/main`.
+pub(crate) fn merge_base(root: &Path) -> Result<String, String> {
+    let base = git(root, &["merge-base", "HEAD", "origin/main"])?
+        .trim()
+        .to_owned();
+    if base.is_empty() {
+        return Err("`git merge-base HEAD origin/main` printed nothing".into());
+    }
+    Ok(base)
 }
 
 fn split_nul(text: &str) -> impl Iterator<Item = String> + '_ {
