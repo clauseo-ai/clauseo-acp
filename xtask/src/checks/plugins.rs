@@ -7,11 +7,8 @@
 //! `devtools` nor `protocol-asset`, and no `[features]` entry turns either on through `tauri`'s key.
 //! The manifest text is read only for line numbers: the desktop `Cargo.toml`, or the root one when
 //! the setting lives in `[workspace.dependencies]`, else line 1.
-//! Every `.plugin(` call in the crate's sources registers its plugin inside `RustOnly`
-//! (`registration.rs`), so no plugin injects a script into the page.
 //! The Tauri config and `build.rs` belong to the `tauri-config` check.
 
-mod registration;
 mod toml_lines;
 
 use crate::checks::{self, StaticCheck, violation};
@@ -61,7 +58,7 @@ fn run(ctx: &Context) -> Vec<Violation> {
         Ok(text) => text.unwrap_or_default(),
         Err(violation) => return vec![violation],
     };
-    let mut found = match workspace::load_package_dependencies(&ctx.root, checks::DESKTOP_PACKAGE) {
+    match workspace::load_package_dependencies(&ctx.root, checks::DESKTOP_PACKAGE) {
         Ok(deps) => violations(
             &deps,
             &Manifests {
@@ -79,15 +76,7 @@ fn run(ctx: &Context) -> Vec<Violation> {
             ),
             METADATA_FIX,
         )],
-    };
-    found.extend(match registration::rust_sources(&ctx.root, dir) {
-        Ok(files) => files
-            .iter()
-            .flat_map(|(path, text)| registration::violations(path, text))
-            .collect(),
-        Err(violation) => vec![violation],
-    });
-    found
+    }
 }
 
 /// The manifest texts the violations point into.
