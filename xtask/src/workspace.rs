@@ -1,7 +1,8 @@
 //! Workspace layout read from `cargo metadata`, and the context handed to static checks.
 
+use crate::process::{self, Cmd, Program};
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// A workspace member package.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +20,26 @@ pub struct Context {
     pub members: Vec<Member>,
 }
 
+/// The parts of `cargo metadata --format-version 1 --no-deps` that xtask reads.
+#[derive(Deserialize)]
+struct Metadata {
+    workspace_root: PathBuf,
+    packages: Vec<Package>,
+}
+
+#[derive(Deserialize)]
+struct Package {
+    name: String,
+    manifest_path: PathBuf,
+    dependencies: Vec<Dependency>,
+}
+
+#[derive(Deserialize)]
+struct Dependency {
+    /// Set for path dependencies.
+    path: Option<PathBuf>,
+}
+
 /// The workspace root: the parent of this crate's directory (`xtask/`).
 pub fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -28,61 +49,39 @@ pub fn workspace_root() -> PathBuf {
 
 /// Runs `cargo metadata` in `root` and returns the workspace members.
 pub fn load_members(root: &Path) -> Result<Vec<Member>, String> {
-    let output = Command::new("cargo")
-        .args(["metadata", "--format-version", "1", "--no-deps"])
-        .current_dir(root)
-        .output()
+    let cmd = Cmd::new(
+        Program::Cargo,
+        ["metadata", "--format-version", "1", "--no-deps"],
+    );
+    let quiet = process::run_quiet(&cmd, root)
         .map_err(|e| format!("could not run `cargo metadata`: {e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "`cargo metadata` failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+    if !quiet.success {
+        return Err(format!("`cargo metadata` failed: {}", quiet.stderr.trim()));
     }
-    parse_metadata(&String::from_utf8_lossy(&output.stdout))
+    parse_metadata(&quiet.stdout)
 }
 
 /// Reads `cargo metadata --no-deps` JSON. Paths are made relative to `workspace_root`.
 pub fn parse_metadata(json: &str) -> Result<Vec<Member>, String> {
-    let value: serde_json::Value =
+    let metadata: Metadata =
         serde_json::from_str(json).map_err(|e| format!("bad `cargo metadata` JSON: {e}"))?;
-    let base = value
-        .get("workspace_root")
-        .and_then(|v| v.as_str())
-        .ok_or("`cargo metadata` has no workspace_root")?;
-    let base = Path::new(base);
-    let packages = value
-        .get("packages")
-        .and_then(|v| v.as_array())
-        .ok_or("`cargo metadata` has no packages")?;
+    let base = metadata.workspace_root.as_path();
 
     let mut members = Vec::new();
-    for pkg in packages {
-        let name = pkg
-            .get("name")
-            .and_then(|v| v.as_str())
-            .ok_or("`cargo metadata` package has no name")?
-            .to_string();
-        let manifest = pkg
-            .get("manifest_path")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| format!("package {name} has no manifest_path"))?;
-        let dir = Path::new(manifest)
+    for package in &metadata.packages {
+        let dir = package
+            .manifest_path
             .parent()
             .and_then(|p| relative(p, base))
-            .ok_or_else(|| format!("package {name} is outside the workspace"))?;
-        let path_deps = pkg
-            .get("dependencies")
-            .and_then(|v| v.as_array())
-            .map(|deps| {
-                deps.iter()
-                    .filter_map(|d| d.get("path").and_then(|p| p.as_str()))
-                    .filter_map(|p| relative(Path::new(p), base))
-                    .collect()
-            })
-            .unwrap_or_default();
+            .ok_or_else(|| format!("package {} is outside the workspace", package.name))?;
+        let path_deps = package
+            .dependencies
+            .iter()
+            .filter_map(|dep| dep.path.as_deref())
+            .filter_map(|p| relative(p, base))
+            .collect();
         members.push(Member {
-            name,
+            name: package.name.clone(),
             dir,
             path_deps,
         });

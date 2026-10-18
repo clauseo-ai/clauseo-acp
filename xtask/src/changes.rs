@@ -1,9 +1,9 @@
 //! `--quick` change detection: which packages changed since `origin/main`, and who depends on them.
 
+use crate::process::{self, Cmd, Program};
 use crate::workspace::{Member, package_for};
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::process::Command;
 
 /// Which packages `--quick` checks.
 #[derive(Debug, PartialEq, Eq)]
@@ -14,13 +14,24 @@ pub enum Selection {
     Packages(Vec<String>),
 }
 
-/// Files whose change selects every package.
-const ALL_PACKAGES_FILES: &[&str] = &["Cargo.toml", "Cargo.lock", "rust-toolchain.toml"];
+/// Repo-root files whose change selects every package: they change how everything builds or is checked.
+const ALL_PACKAGES_FILES: &[&str] = &[
+    "Cargo.toml",
+    "Cargo.lock",
+    "rust-toolchain.toml",
+    ".cargo/config.toml",
+    ".config/nextest.toml",
+    "clippy.toml",
+    "deny.toml",
+];
+
+/// Directory whose any change selects every package: the xtask itself.
+const ALL_PACKAGES_DIR: &str = "xtask/";
 
 /// Pure selection: `changed` are repo-relative `/`-separated paths.
 pub fn select(changed: &[String], members: &[Member]) -> Selection {
     for file in changed {
-        if ALL_PACKAGES_FILES.contains(&file.as_str()) || file.starts_with("xtask/") {
+        if ALL_PACKAGES_FILES.contains(&file.as_str()) || file.starts_with(ALL_PACKAGES_DIR) {
             return Selection::All(format!("{file} changed"));
         }
     }
@@ -79,19 +90,12 @@ fn split_nul(text: &str) -> impl Iterator<Item = String> + '_ {
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(root)
-        .output()
-        .map_err(|e| format!("could not run git: {e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "`git {}` failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+    let cmd = Cmd::new(Program::Named("git"), args);
+    let quiet = process::run_quiet(&cmd, root).map_err(|e| format!("could not run git: {e}"))?;
+    if !quiet.success {
+        return Err(format!("`{cmd}` failed: {}", quiet.stderr.trim()));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(quiet.stdout)
 }
 
 #[cfg(test)]
@@ -137,6 +141,19 @@ mod tests {
     fn xtask_change_selects_all() {
         let sel = select(&files(&["xtask/src/x.rs"]), &workspace());
         assert!(matches!(sel, Selection::All(_)));
+    }
+
+    #[test]
+    fn config_and_lint_files_select_all() {
+        for f in [
+            ".cargo/config.toml",
+            ".config/nextest.toml",
+            "clippy.toml",
+            "deny.toml",
+        ] {
+            let sel = select(&files(&[f]), &workspace());
+            assert!(matches!(sel, Selection::All(_)), "{f} should select all");
+        }
     }
 
     #[test]
