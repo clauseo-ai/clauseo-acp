@@ -4,6 +4,8 @@
 //! In `tauri.conf.json`: the global Tauri object is off, the prototype is frozen, the CSP is set
 //! and allows neither eval nor inline script (the dev CSP may allow inline script), no window is
 //! built from config, the asset protocol is off, and no `dangerous*` key appears at any depth.
+//! No platform config (`tauri.<platform>.conf.json`, `.json5` or `Tauri.<platform>.toml`) exists:
+//! Tauri merges one over `tauri.conf.json` and could turn a setting back on for one OS.
 //! In `build.rs`: an `AppManifest` is declared. Each failing setting points at its key's line,
 //! found under its parent object (`json_text::key_line`), or at line 1.
 //! The pure functions take file contents and paths; `run` reads the files from the repo.
@@ -31,8 +33,12 @@ const DEV_CSP_FIX: &str = "remove `'unsafe-eval'` from app.security.devCsp: dev 
 const WINDOWS_FIX: &str =
     "build windows in crates/desktop/src/lib.rs: a config window skips use_https_scheme(true)";
 const ASSET_FIX: &str = "set app.security.assetProtocol.enable to false: the asset protocol serves files from disk to the webview";
+const PLATFORM_FIX: &str = "put the setting in tauri.conf.json: a platform config overrides the checked settings on one OS";
 const DANGEROUS_FIX: &str = "remove it: each `dangerous*` setting switches off a Tauri safeguard";
 const APP_MANIFEST_FIX: &str = "call `tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[])))`: without a manifest Tauri skips the access check for app commands";
+
+/// The platforms Tauri merges a platform config for, over `tauri.conf.json`.
+const PLATFORMS: [&str; 5] = ["macos", "windows", "linux", "ios", "android"];
 
 /// The CSP sources that let injected script run.
 const UNSAFE_SOURCES: [&str; 2] = ["'unsafe-eval'", "'unsafe-inline'"];
@@ -53,6 +59,13 @@ fn run(ctx: &Context) -> Vec<Violation> {
         Ok(text) => conf_violations(&conf, text.as_deref()),
         Err(violation) => vec![violation],
     };
+    found.extend(
+        platform_configs()
+            .into_iter()
+            .map(|name| checks::join(desktop, &name))
+            .filter(|rel| ctx.root.join(rel).exists())
+            .map(|rel| platform_violation(&rel)),
+    );
     let build = checks::join(desktop, BUILD_RS);
     found.extend(match checks::read_repo_file(&ctx.root, &build) {
         Ok(text) => build_rs_violations(&build, text.as_deref()),
@@ -154,6 +167,30 @@ pub(crate) fn conf_violations(path: &str, text: Option<&str>) -> Vec<Violation> 
         ));
     }
     found
+}
+
+/// The file names of every platform config Tauri would merge over `tauri.conf.json`.
+fn platform_configs() -> Vec<String> {
+    PLATFORMS
+        .iter()
+        .flat_map(|platform| {
+            [
+                format!("tauri.{platform}.conf.json"),
+                format!("tauri.{platform}.conf.json5"),
+                format!("Tauri.{platform}.toml"),
+            ]
+        })
+        .collect()
+}
+
+/// The violation for the platform config at `path`, which exists.
+fn platform_violation(path: &str) -> Violation {
+    violation(
+        path,
+        1,
+        format!("platform config `{path}` overrides tauri.conf.json"),
+        PLATFORM_FIX,
+    )
 }
 
 /// A CSP as one string: Tauri takes a string, or an object of directives whose sources are a
