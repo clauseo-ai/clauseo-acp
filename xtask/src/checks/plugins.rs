@@ -46,9 +46,20 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
 };
 
 fn run(ctx: &Context) -> Vec<Violation> {
-    let desktop = match checks::read_repo_file(&ctx.root, DESKTOP_MANIFEST) {
+    let manifest = match checks::desktop_dir(ctx) {
+        Ok(dir) => checks::join(dir, "Cargo.toml"),
+        Err(violation) => return vec![violation],
+    };
+    let desktop = match checks::read_repo_file(&ctx.root, &manifest) {
         Ok(Some(text)) => text,
-        Ok(None) => return Vec::new(),
+        Ok(None) => {
+            return vec![checks::violation(
+                &manifest,
+                1,
+                format!("`{manifest}` is missing"),
+                "restore it: cargo metadata lists the crate, so its manifest must exist",
+            )];
+        }
         Err(violation) => return vec![violation],
     };
     let mut found = plugin_set_violations(&desktop);
