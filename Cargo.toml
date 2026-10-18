@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+# crates/.gitkeep keeps this glob valid until the first crate exists: cargo refuses a member glob
+# that matches nothing and skips matches that are not directories. Delete it with the first crate.
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-or-later"
+publish = false
+
+[workspace.lints.rust]
+
+[workspace.lints.clippy]
+
+[profile.dev]
+debug = "line-tables-only"
+incremental = true            # survives CI=1 in agent harnesses
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]             # CI artifacts only
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
+
+[profile.preview]             # "feel the app": 207 s cold, 11.7 s per app edit (a Linux VM)
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+
+[profile.dbg]                 # debugger sessions
+inherits = "dev"
+debug = "full"
+[profile.dbg.package."*"]
+debug = "full"
