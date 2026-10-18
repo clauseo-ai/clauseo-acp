@@ -4,6 +4,8 @@
 //! In `tauri.conf.json`: the global Tauri object is off, the prototype is frozen, the CSP is set
 //! and allows neither eval nor inline script (the dev CSP may allow inline script), no window is
 //! built from config, the asset protocol is off, and no `dangerous*` key appears at any depth.
+//! The updater has a public key once it has endpoints, and `bundle.createUpdaterArtifacts` is not
+//! `"v1Compatible"`, which needs the updater's `zip` feature that the workspace leaves off.
 //! No platform config (`tauri.<platform>.conf.json`, `.json5` or `Tauri.<platform>.toml`) exists:
 //! Tauri merges one over `tauri.conf.json` and could turn a setting back on for one OS.
 //! In `build.rs`: an `AppManifest` is declared. Each failing setting points at its key's line,
@@ -34,6 +36,9 @@ const WINDOWS_FIX: &str =
     "build windows in crates/desktop/src/lib.rs: a config window skips use_https_scheme(true)";
 const ASSET_FIX: &str = "set app.security.assetProtocol.enable to false: the asset protocol serves files from disk to the webview";
 const PLATFORM_FIX: &str = "put the setting in tauri.conf.json: a platform config overrides the checked settings on one OS";
+const PUBKEY_FIX: &str =
+    "set plugins.updater.pubkey to the release public key before adding endpoints";
+const V1_FIX: &str = "the updater is built without its zip feature, so v1Compatible artifacts cannot be installed; use true";
 const DANGEROUS_FIX: &str = "remove it: each `dangerous*` setting switches off a Tauri safeguard";
 const APP_MANIFEST_FIX: &str = "call `tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[])))`: without a manifest Tauri skips the access check for app commands";
 
@@ -99,6 +104,25 @@ pub(crate) fn conf_violations(path: &str, text: Option<&str>) -> Vec<Violation> 
     let at = |keys: &[&str], message: String, fix: &str| {
         violation(path, key_line(text, keys), message, fix)
     };
+    let mut found = app_violations(&conf, &at);
+    found.extend(csp_violations(&conf, &at));
+    found.extend(updater_violations(&conf, &at));
+    for keys in dangerous_keys(&conf) {
+        let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+        found.push(at(
+            &keys,
+            format!("`{}` switches off a Tauri safeguard", keys.join(".")),
+            DANGEROUS_FIX,
+        ));
+    }
+    found
+}
+
+/// Builds the violation for a message and fix at the line of the key on a path.
+type At<'a> = dyn Fn(&[&str], String, &str) -> Violation + 'a;
+
+/// The global object, the frozen prototype, config windows and the asset protocol.
+fn app_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
     let mut found = Vec::new();
     if conf.pointer("/app/withGlobalTauri") != Some(&Value::Bool(false)) {
         found.push(at(
@@ -114,6 +138,30 @@ pub(crate) fn conf_violations(path: &str, text: Option<&str>) -> Vec<Violation> 
             FREEZE_FIX,
         ));
     }
+    if !conf
+        .pointer("/app/windows")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty)
+    {
+        found.push(at(
+            &["app", "windows"],
+            "app.windows must be an empty array".to_owned(),
+            WINDOWS_FIX,
+        ));
+    }
+    if conf.pointer("/app/security/assetProtocol/enable") == Some(&Value::Bool(true)) {
+        found.push(at(
+            &["app", "security", "assetProtocol", "enable"],
+            "app.security.assetProtocol.enable is true".to_owned(),
+            ASSET_FIX,
+        ));
+    }
+    found
+}
+
+/// The CSP is set and allows neither eval nor inline script; the dev CSP allows no eval.
+fn csp_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
+    let mut found = Vec::new();
     let csp_keys = ["app", "security", "csp"];
     match conf.pointer("/app/security/csp").and_then(csp_text) {
         Some(csp) if !csp.trim().is_empty() => {
@@ -140,30 +188,33 @@ pub(crate) fn conf_violations(path: &str, text: Option<&str>) -> Vec<Violation> 
             DEV_CSP_FIX,
         ));
     }
-    if !conf
-        .pointer("/app/windows")
+    found
+}
+
+/// Endpoints need the public key that verifies updates, and no artifacts in the v1 format, which
+/// needs the updater's `zip` feature.
+fn updater_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
+    let mut found = Vec::new();
+    let has_endpoints = conf
+        .pointer("/plugins/updater/endpoints")
         .and_then(Value::as_array)
-        .is_some_and(Vec::is_empty)
-    {
+        .is_some_and(|endpoints| !endpoints.is_empty());
+    let has_pubkey = conf
+        .pointer("/plugins/updater/pubkey")
+        .and_then(Value::as_str)
+        .is_some_and(|key| !key.trim().is_empty());
+    if has_endpoints && !has_pubkey {
         found.push(at(
-            &["app", "windows"],
-            "app.windows must be an empty array".to_owned(),
-            WINDOWS_FIX,
+            &["plugins", "updater", "endpoints"],
+            "plugins.updater has endpoints but no pubkey".to_owned(),
+            PUBKEY_FIX,
         ));
     }
-    if conf.pointer("/app/security/assetProtocol/enable") == Some(&Value::Bool(true)) {
+    if conf.pointer("/bundle/createUpdaterArtifacts") == Some(&Value::from("v1Compatible")) {
         found.push(at(
-            &["app", "security", "assetProtocol", "enable"],
-            "app.security.assetProtocol.enable is true".to_owned(),
-            ASSET_FIX,
-        ));
-    }
-    for keys in dangerous_keys(&conf) {
-        let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
-        found.push(at(
-            &keys,
-            format!("`{}` switches off a Tauri safeguard", keys.join(".")),
-            DANGEROUS_FIX,
+            &["bundle", "createUpdaterArtifacts"],
+            "bundle.createUpdaterArtifacts is \"v1Compatible\"".to_owned(),
+            V1_FIX,
         ));
     }
     found
