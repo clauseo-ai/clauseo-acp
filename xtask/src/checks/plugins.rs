@@ -1,12 +1,15 @@
-//! The `plugins` check: the cargo side of the desktop crate, its fixed plugin set and `tauri` features.
+//! The `plugins` check: the cargo side of the desktop crate, its fixed plugin set and `tauri`
+//! features.
 //!
-//! The dependencies come from `cargo metadata`, which resolves workspace inheritance and renames,
-//! so a renamed or inherited entry counts under its real package. Among normal dependencies, with
-//! or without a target: the `tauri-plugin-*` packages are exactly `FIXED_PLUGINS`, none of them is
-//! optional (the set sits behind no cargo feature), `tauri`'s merged features include neither
-//! `devtools` nor `protocol-asset`, and no `[features]` entry turns either on through `tauri`'s key.
-//! The manifest text is read only for line numbers: the desktop `Cargo.toml`, or the root one when
-//! the setting lives in `[workspace.dependencies]`, else line 1.
+//! The dependencies come from `cargo metadata --no-deps`, which resolves workspace inheritance and
+//! renames, so a renamed or inherited entry counts under its real package. Among normal
+//! dependencies, with or without a target: the `tauri-plugin-*` packages are exactly
+//! `FIXED_PLUGINS`, none of them is optional (the set sits behind no cargo feature), `tauri`'s
+//! merged features include neither `devtools` nor `protocol-asset`, and no `[features]` entry
+//! turns either on through `tauri`'s key.
+//!
+//! The manifest text is read only for line numbers: the desktop `Cargo.toml`, or the root one
+//! when the setting lives in `[workspace.dependencies]`, else line 1.
 //! The Tauri config and `build.rs` belong to the `tauri-config` check.
 
 mod toml_lines;
@@ -50,32 +53,49 @@ fn run(ctx: &Context) -> Vec<Violation> {
         Err(violation) => return vec![violation],
     };
     let manifest = checks::join(dir, "Cargo.toml");
-    let desktop = match checks::read_repo_file(&ctx.root, &manifest) {
-        Ok(text) => text.unwrap_or_default(),
-        Err(violation) => return vec![violation],
+    let packages = match workspace::load_workspace_dependencies(&ctx.root) {
+        Ok(packages) => packages,
+        Err(error) => {
+            return vec![violation(
+                &manifest,
+                1,
+                format!("could not read the workspace's dependencies: {error}"),
+                METADATA_FIX,
+            )];
+        }
     };
-    let root = match checks::read_repo_file(&ctx.root, WORKSPACE_MANIFEST) {
-        Ok(text) => text.unwrap_or_default(),
-        Err(violation) => return vec![violation],
+    let read = |rel: &str| checks::read_repo_file(&ctx.root, rel).map(Option::unwrap_or_default);
+    let (desktop, root) = match (read(&manifest), read(WORKSPACE_MANIFEST)) {
+        (Ok(desktop), Ok(root)) => (desktop, root),
+        (Err(violation), _) | (_, Err(violation)) => return vec![violation],
     };
-    match workspace::load_package_dependencies(&ctx.root, checks::DESKTOP_PACKAGE) {
-        Ok(deps) => violations(
-            &deps,
+    match packages.get(checks::DESKTOP_PACKAGE) {
+        Some(deps) => violations(
+            deps,
             &Manifests {
                 desktop_path: &manifest,
                 desktop: &desktop,
                 root: &root,
             },
         ),
-        Err(error) => vec![violation(
+        None => vec![violation(
             &manifest,
             1,
             format!(
-                "could not read the dependencies of `{}`: {error}",
+                "`cargo metadata` lists no package `{}`",
                 checks::DESKTOP_PACKAGE
             ),
             METADATA_FIX,
         )],
+    }
+}
+
+/// ` (as `key`)` when the dependency is renamed, else empty.
+fn as_key(dep: &CargoDependency) -> String {
+    if dep.key() == dep.name {
+        String::new()
+    } else {
+        format!(" (as `{}`)", dep.key())
     }
 }
 
@@ -109,11 +129,7 @@ fn plugin_violations(normal: &[&CargoDependency], locate: &Locator<'_>) -> Vec<V
         .iter()
         .filter(|dep| dep.name.starts_with("tauri-plugin-"));
     for dep in plugins {
-        let as_key = if dep.key() == dep.name {
-            String::new()
-        } else {
-            format!(" (as `{}`)", dep.key())
-        };
+        let as_key = as_key(dep);
         if !FIXED_PLUGINS.contains(&dep.name.as_str()) {
             found.push(locate.dependency(
                 dep.key(),

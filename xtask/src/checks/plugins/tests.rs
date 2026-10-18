@@ -1,56 +1,92 @@
-//! Tests for the `plugins` check. The pure rules run on `cargo metadata` JSON copied from small
-//! scratch workspaces (`fixtures/<case>.json`, trimmed to the fields xtask reads, with the root
-//! path replaced by `/ws`), next to the two manifests that produced it. `run` calls the real
-//! `cargo metadata` on a scratch workspace.
+//! Tests for the `plugins` check. Each case is a tiny scratch workspace (a root `Cargo.toml`, member
+//! manifests and empty `src/lib.rs` files) that `run` reads through the real
+//! `cargo metadata --no-deps`, so cargo itself resolves the renames and inheritance under test.
 
 use super::*;
 use crate::checks::tests::desktop_context;
 use crate::scratch::Scratch;
-use crate::workspace::parse_package_dependencies;
 use std::fs;
 
 const DESKTOP_PATH: &str = "crates/desktop/Cargo.toml";
 
-/// One fixture: the parsed metadata, the desktop manifest and the root manifest.
-struct Case {
-    deps: PackageDependencies,
-    desktop: String,
+/// The root manifest of a clean workspace.
+const ROOT: &str = r#"[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.dependencies]
+tauri = "2"
+tauri-runtime = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-os = "2"
+tauri-plugin-notification = "2"
+"#;
+
+/// The desktop manifest of a clean workspace.
+const DESKTOP: &str = r#"[package]
+name = "clauseo-desktop"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+tauri.workspace = true
+tauri-runtime.workspace = true
+tauri-plugin-single-instance.workspace = true
+tauri-plugin-deep-link.workspace = true
+tauri-plugin-updater.workspace = true
+tauri-plugin-window-state.workspace = true
+tauri-plugin-dialog.workspace = true
+tauri-plugin-opener.workspace = true
+tauri-plugin-os.workspace = true
+tauri-plugin-notification.workspace = true
+"#;
+
+/// A scratch workspace and the files written into it.
+struct Workspace {
+    dir: Scratch,
     root: String,
+    desktop: String,
 }
 
-macro_rules! case {
-    ($name:literal) => {
-        Case {
-            deps: parse_package_dependencies(
-                include_str!(concat!("fixtures/", $name, ".json")),
-                "clauseo-desktop",
-            )
-            .expect("the fixture parses"),
-            desktop: include_str!(concat!("fixtures/", $name, ".desktop.toml")).to_owned(),
-            root: include_str!(concat!("fixtures/", $name, ".root.toml")).to_owned(),
+impl Workspace {
+    /// A workspace named `name` (unique, as `Scratch` requires) with the root manifest `root`, the
+    /// desktop manifest `desktop` and one crate per `(dir, manifest)` in `others`.
+    fn new(name: &str, root: &str, desktop: &str, others: &[(&str, &str)]) -> Workspace {
+        let dir = Scratch::new(&format!("plugins-{name}"));
+        fs::write(dir.join("Cargo.toml"), root).expect("write the root manifest");
+        for (crate_dir, manifest) in [("crates/desktop", desktop)].iter().chain(others) {
+            fs::create_dir_all(dir.join(crate_dir).join("src")).expect("create the crate dirs");
+            fs::write(dir.join(crate_dir).join("src/lib.rs"), "").expect("write lib.rs");
+            fs::write(dir.join(crate_dir).join("Cargo.toml"), manifest).expect("write a manifest");
         }
-    };
-}
-
-impl Case {
-    fn violations(&self) -> Vec<Violation> {
-        violations(
-            &self.deps,
-            &Manifests {
-                desktop_path: DESKTOP_PATH,
-                desktop: &self.desktop,
-                root: &self.root,
-            },
-        )
+        Workspace {
+            dir,
+            root: root.to_owned(),
+            desktop: desktop.to_owned(),
+        }
     }
 
-    /// The dependency named `name` (the first, if there are several).
-    fn dep(&mut self, name: &str) -> &mut CargoDependency {
-        self.deps
-            .dependencies
-            .iter_mut()
-            .find(|dep| dep.name == name)
-            .expect("the fixture has the dependency")
+    /// The clean workspace with `from` replaced by `to` in the desktop manifest.
+    fn desktop_with(name: &str, from: &str, to: &str) -> Workspace {
+        assert!(
+            DESKTOP.contains(from),
+            "the desktop manifest contains {from}"
+        );
+        Workspace::new(name, ROOT, &DESKTOP.replacen(from, to, 1), &[])
+    }
+
+    /// `run` on the workspace, with the members `cargo metadata` lists.
+    fn violations(&self) -> Vec<Violation> {
+        let ctx = Context {
+            members: workspace::load_members(&self.dir).expect("cargo metadata runs"),
+            ..desktop_context(&self.dir)
+        };
+        run(&ctx)
     }
 }
 
@@ -59,23 +95,32 @@ fn line_of(text: &str, needle: &str) -> u32 {
     let index = text
         .lines()
         .position(|line| line.contains(needle))
-        .expect("the needle is in the fixture");
+        .expect("the needle is in the manifest");
     checks::line_at(index)
 }
 
 #[test]
 fn the_fixed_plugin_set_passes() {
-    assert_eq!(case!("clean").violations(), Vec::new());
+    assert_eq!(
+        Workspace::new("clean", ROOT, DESKTOP, &[]).violations(),
+        Vec::new()
+    );
 }
 
 #[test]
 fn an_optional_fixed_plugin_behind_a_feature_fails() {
-    let case = case!("optional");
+    let desktop = DESKTOP.replacen(
+        "tauri-plugin-dialog.workspace = true\n",
+        "tauri-plugin-dialog = { workspace = true, optional = true }\n",
+        1,
+    );
+    let desktop = format!("{desktop}\n[features]\ndefault = [\"tauri-plugin-dialog\"]\n");
+    let ws = Workspace::new("optional", ROOT, &desktop, &[]);
     assert_eq!(
-        case.violations(),
+        ws.violations(),
         vec![violation(
             DESKTOP_PATH,
-            line_of(&case.desktop, "optional = true"),
+            line_of(&ws.desktop, "optional = true"),
             "`tauri-plugin-dialog` is optional",
             OPTIONAL_FIX,
         )]
@@ -84,12 +129,14 @@ fn an_optional_fixed_plugin_behind_a_feature_fails() {
 
 #[test]
 fn a_plugin_renamed_in_workspace_dependencies_counts_under_its_package() {
-    let case = case!("renamed_plugin");
+    let root = format!("{ROOT}files = {{ package = \"tauri-plugin-fs\", version = \"2\" }}\n");
+    let desktop = format!("{DESKTOP}files.workspace = true\n");
+    let ws = Workspace::new("renamed-plugin", &root, &desktop, &[]);
     assert_eq!(
-        case.violations(),
+        ws.violations(),
         vec![violation(
             DESKTOP_PATH,
-            line_of(&case.desktop, "files.workspace = true"),
+            line_of(&ws.desktop, "files.workspace = true"),
             "`tauri-plugin-fs` (as `files`) is not in the fixed plugin set",
             PLUGIN_FIX,
         )]
@@ -98,19 +145,27 @@ fn a_plugin_renamed_in_workspace_dependencies_counts_under_its_package() {
 
 #[test]
 fn a_renamed_tauri_with_devtools_and_a_feature_through_its_rename_fail() {
-    let case = case!("renamed_tauri");
+    let root = ROOT.replace(
+        "tauri = \"2\"\n",
+        "t = { package = \"tauri\", version = \"2\", features = [\"devtools\"] }\n",
+    );
+    let desktop = format!(
+        "{}\n[features]\nasset = [\"t/protocol-asset\"]\n",
+        DESKTOP.replace("tauri.workspace = true\n", "t.workspace = true\n")
+    );
+    let ws = Workspace::new("renamed-tauri", &root, &desktop, &[]);
     assert_eq!(
-        case.violations(),
+        ws.violations(),
         vec![
             violation(
                 WORKSPACE_MANIFEST,
-                line_of(&case.root, "package = \"tauri\""),
+                line_of(&ws.root, "package = \"tauri\""),
                 "`tauri` enables the `devtools` feature",
                 FEATURE_FIX,
             ),
             violation(
                 DESKTOP_PATH,
-                line_of(&case.desktop, "t/protocol-asset"),
+                line_of(&ws.desktop, "t/protocol-asset"),
                 "`[features]` enables the `tauri` feature `protocol-asset` through `t/protocol-asset`",
                 FEATURE_FIX,
             ),
@@ -120,12 +175,15 @@ fn a_renamed_tauri_with_devtools_and_a_feature_through_its_rename_fail() {
 
 #[test]
 fn a_target_plugin_counts_and_a_dev_plugin_does_not() {
-    let case = case!("target");
+    let desktop = format!(
+        "{DESKTOP}\n[target.'cfg(windows)'.dependencies]\ntauri-plugin-fs = \"2\"\n\n[dev-dependencies]\ntauri-plugin-shell = \"2\"\n"
+    );
+    let ws = Workspace::new("target", ROOT, &desktop, &[]);
     assert_eq!(
-        case.violations(),
+        ws.violations(),
         vec![violation(
             DESKTOP_PATH,
-            line_of(&case.desktop, "tauri-plugin-fs"),
+            line_of(&ws.desktop, "tauri-plugin-fs"),
             "`tauri-plugin-fs` is not in the fixed plugin set",
             PLUGIN_FIX,
         )]
@@ -134,18 +192,12 @@ fn a_target_plugin_counts_and_a_dev_plugin_does_not() {
 
 #[test]
 fn a_missing_plugin_fails_at_the_dependencies_header() {
-    let mut case = case!("clean");
-    case.deps
-        .dependencies
-        .retain(|dep| dep.name != "tauri-plugin-os");
-    case.desktop = case
-        .desktop
-        .replace("tauri-plugin-os.workspace = true\n", "");
+    let ws = Workspace::desktop_with("missing", "tauri-plugin-os.workspace = true\n", "");
     assert_eq!(
-        case.violations(),
+        ws.violations(),
         vec![violation(
             DESKTOP_PATH,
-            line_of(&case.desktop, "[dependencies]"),
+            line_of(&ws.desktop, "[dependencies]"),
             "`tauri-plugin-os` is missing from the fixed plugin set",
             "add it back under [dependencies]: `tauri-plugin-os.workspace = true`",
         )]
@@ -154,17 +206,16 @@ fn a_missing_plugin_fails_at_the_dependencies_header() {
 
 #[test]
 fn devtools_in_the_desktop_entry_fails_at_its_line() {
-    let mut case = case!("clean");
-    case.dep("tauri").features = vec!["devtools".to_owned()];
-    case.desktop = case.desktop.replace(
+    let ws = Workspace::desktop_with(
+        "devtools",
         "tauri.workspace = true\n",
         "tauri = { workspace = true, features = [\n  \"devtools\",\n] }\n",
     );
     assert_eq!(
-        case.violations(),
+        ws.violations(),
         vec![violation(
             DESKTOP_PATH,
-            line_of(&case.desktop, "\"devtools\""),
+            line_of(&ws.desktop, "\"devtools\""),
             "`tauri` enables the `devtools` feature",
             FEATURE_FIX,
         )]
@@ -173,18 +224,20 @@ fn devtools_in_the_desktop_entry_fails_at_its_line() {
 
 #[test]
 fn an_optional_tauri_feature_reference_fails() {
-    let mut case = case!("clean");
-    case.deps.features.insert(
-        "inspect".to_owned(),
-        vec!["tauri?/devtools".to_owned(), "tauri-x/devtools".to_owned()],
+    let desktop = DESKTOP.replacen(
+        "tauri.workspace = true\n",
+        "tauri = { workspace = true, optional = true }\ntauri-x = { path = \"../x\" }\n",
+        1,
     );
-    case.desktop
-        .push_str("\n[features]\ninspect = [\"tauri?/devtools\", \"tauri-x/devtools\"]\n");
+    let desktop =
+        format!("{desktop}\n[features]\ninspect = [\"tauri?/devtools\", \"tauri-x/devtools\"]\n");
+    let x = "[package]\nname = \"tauri-x\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[features]\ndevtools = []\n";
+    let ws = Workspace::new("optional-tauri", ROOT, &desktop, &[("crates/x", x)]);
     assert_eq!(
-        case.violations(),
+        ws.violations(),
         vec![violation(
             DESKTOP_PATH,
-            line_of(&case.desktop, "inspect ="),
+            line_of(&ws.desktop, "inspect ="),
             "`[features]` enables the `tauri` feature `devtools` through `tauri?/devtools`",
             FEATURE_FIX,
         )]
@@ -197,32 +250,6 @@ fn the_check_is_registered_under_its_name() {
         crate::checks::ALL
             .iter()
             .any(|check| check.name == "plugins")
-    );
-}
-
-#[test]
-fn run_reads_real_cargo_metadata_and_fails_a_planted_plugin() {
-    let dir = Scratch::new("plugins-run");
-    let clean = case!("clean");
-    fs::create_dir_all(dir.join("crates/desktop/src")).expect("create the crate dirs");
-    fs::write(dir.join("Cargo.toml"), &clean.root).expect("write the root manifest");
-    fs::write(dir.join("crates/desktop/src/lib.rs"), "").expect("write lib.rs");
-    fs::write(dir.join(DESKTOP_PATH), &clean.desktop).expect("write the desktop manifest");
-    let ctx = Context {
-        members: workspace::load_members(&dir).expect("cargo metadata runs"),
-        ..desktop_context(&dir)
-    };
-    assert_eq!(run(&ctx), Vec::new());
-    let planted = format!("{}tauri-plugin-fs = \"2\"\n", clean.desktop);
-    fs::write(dir.join(DESKTOP_PATH), &planted).expect("write the desktop manifest");
-    assert_eq!(
-        run(&ctx),
-        vec![violation(
-            DESKTOP_PATH,
-            line_of(&planted, "tauri-plugin-fs"),
-            "`tauri-plugin-fs` is not in the fixed plugin set",
-            PLUGIN_FIX,
-        )]
     );
 }
 
