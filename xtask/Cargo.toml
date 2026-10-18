@@ -11,6 +11,10 @@ workspace = true
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+# The core-io check: `span-locations` gives real line numbers to the tokens syn parses.
+proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
+# The core-io check parses the Rust sources of the crates that must not do I/O.
+syn = { version = "3.0.9", features = ["full", "visit"] }
 toml = "1"

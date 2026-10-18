@@ -101,14 +101,6 @@ fn a_package_maps_to_its_row() {
     assert_eq!(name("clauseo-fake-agent"), Some("fake_agent"));
     assert_eq!(name("desktop"), None);
     assert_eq!(name("clauseo-"), None);
-    assert_eq!(
-        table.row("fake_agent").map(CrateRow::package),
-        Some("clauseo-fake_agent".to_owned())
-    );
-    assert_eq!(
-        table.row("xtask").map(CrateRow::package),
-        Some("xtask".to_owned())
-    );
 }
 
 #[test]

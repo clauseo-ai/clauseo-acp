@@ -10,13 +10,7 @@
 mod budgets;
 mod buildtime_edits;
 mod capabilities;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the checks for the other Crates table columns (dependencies, core-io) come next"
-    )
-)]
+mod core_io;
 pub(crate) mod crates_table;
 mod dependencies;
 mod docs;
@@ -155,6 +149,7 @@ pub(crate) const ALL: &[StaticCheck] = &[
     tauri_config::CHECK,
     buildtime_edits::CHECK,
     dependencies::CHECK,
+    core_io::CHECK,
     docs::CHECK,
     file_size::CHECK,
 ];

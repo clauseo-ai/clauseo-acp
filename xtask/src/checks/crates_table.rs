@@ -126,11 +126,6 @@ impl CrateRow {
             )
         })
     }
-
-    /// The cargo package of this row: `xtask` for `xtask`, else `clauseo-<name>`.
-    pub(crate) fn package(&self) -> String {
-        package_of(&self.name)
-    }
 }
 
 impl CratesTable {
