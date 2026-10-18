@@ -193,10 +193,19 @@ fn frontend_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
     )]
 }
 
-/// True when `text` has a URL scheme: it contains `://` or starts with `http:` or `https:`.
+/// True when `text` starts with a URL scheme, `^[A-Za-z][A-Za-z0-9+.-]*:`, the syntax
+/// `url::Url::parse` accepts. Tauri tries `Url` first for `frontendDist`, so anything with a
+/// scheme (`file:`, `ftp:`, `data:` as well as `http:`) is a URL to it. A Windows drive path
+/// (`C:\\dist`) matches too, and Tauri would misread it as a URL anyway.
 fn is_url(text: &str) -> bool {
-    let lower = text.trim().to_ascii_lowercase();
-    lower.contains("://") || lower.starts_with("http:") || lower.starts_with("https:")
+    let Some((scheme, _)) = text.trim().split_once(':') else {
+        return false;
+    };
+    let mut chars = scheme.chars();
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
 }
 
 /// Endpoints need the public key that verifies updates, and no artifacts in the v1 format, which
