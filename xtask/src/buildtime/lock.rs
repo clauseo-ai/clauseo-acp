@@ -46,12 +46,12 @@ pub(crate) fn acquire(path: &Path) -> Result<File, Failure> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::scratch::Scratch;
     use super::*;
+    use crate::scratch::Scratch;
 
     #[test]
     fn a_second_lock_fails_while_the_first_is_held_and_works_after() {
-        let dir = Scratch::new("lock");
+        let dir = Scratch::new("buildtime-lock");
         let path = dir.join("target/xtask/buildtime.lock");
         let first = acquire(&path).expect("the first run takes the lock");
         let second = acquire(&path).expect_err("the second run is refused");

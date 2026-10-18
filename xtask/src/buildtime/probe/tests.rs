@@ -1,9 +1,9 @@
 //! Tests for `probe.rs`: the restore of the marker file on every path, the guard against edits made
 //! during a run, and the warm-up judgement.
 
-use super::super::scratch::Scratch;
 use super::guard::save_fix;
 use super::*;
+use crate::scratch::Scratch;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 const REL: &str = "crates/desktop/src/lib.rs";
@@ -19,9 +19,9 @@ const CHECK: Probe = Probe {
 };
 
 /// A scratch repo for one test, holding the marker file. It is removed when the test ends, also
-/// when the test fails.
+/// when the test fails. `name` must be unique among these tests (see `Scratch::new`).
 fn scratch(name: &str) -> Scratch {
-    let dir = Scratch::new(name);
+    let dir = Scratch::new(&format!("buildtime-{name}"));
     let file = dir.join(REL);
     fs::create_dir_all(file.parent().expect("the file has a parent"))
         .expect("create the crate dir");
