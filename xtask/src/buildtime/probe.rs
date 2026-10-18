@@ -10,9 +10,9 @@ mod guard;
 
 use super::marker::{self, Leftover, Marker, bump_marker, leftover};
 use super::profile::warm_up_incremental;
-use super::verdict::{Failure, Outcome, budget_limit, stats};
+use super::verdict::{Failure, Outcome, budget_limit};
 use super::{INCREMENTAL_FIX, Probe};
-use crate::budgets::Budget;
+use crate::budgets::{Budget, Unit};
 use crate::clock::timed;
 use crate::process::{Captured, Cmd, Program};
 use guard::{BACKUP_DIR, Guard, conflict, copy_name, prune};
@@ -38,7 +38,7 @@ pub(crate) fn run_probe(
     ci: bool,
     runner: &mut dyn FnMut(&Cmd) -> io::Result<Captured>,
 ) -> Outcome {
-    let limit = match budget_limit(budgets, probe.budget_id) {
+    let limit = match budget_limit(budgets, probe.budget_id, Unit::S) {
         Ok(limit) => limit,
         Err(failure) => return Outcome::Failed(failure),
     };
@@ -51,19 +51,13 @@ pub(crate) fn run_probe(
     };
     match measure(root, &marker, *probe, runs, ci, runner) {
         Err(failure) => Outcome::Failed(failure),
-        Ok(samples) => match stats(&samples.secs) {
-            Some(stats) => Outcome::Measured {
-                stats,
-                budget_id: probe.budget_id,
-                budget_s: limit.seconds,
-                gate: limit.gate,
-                warning: samples.warning,
-            },
-            None => Outcome::Failed(Failure::new(
-                format!("no timed runs for {}", probe.name),
-                "run `cargo xtask buildtime` with --runs 1 or more",
-            )),
-        },
+        Ok(samples) => {
+            let mut outcome = Outcome::of_samples(probe.name, samples.secs, Some(limit));
+            if let Outcome::Measured { warning, .. } = &mut outcome {
+                *warning = samples.warning;
+            }
+            outcome
+        }
     }
 }
 

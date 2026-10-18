@@ -22,51 +22,55 @@ fn measured(median: f64, budget_s: f64) -> ProbeResult {
 }
 
 fn measured_gated(gate: Gate, median: f64, budget_s: f64) -> ProbeResult {
-    ProbeResult {
-        name: "check_desktop",
-        outcome: Outcome::Measured {
+    probe_named(
+        "check_desktop",
+        Outcome::Measured {
+            samples: vec![median],
             stats: Stats {
                 median,
                 min: median,
                 max: median,
             },
-            budget_id: "cargo_check_app_edit",
-            budget_s,
-            gate,
+            budget: Some(Limit {
+                id: "cargo_check_app_edit",
+                value: budget_s,
+                gate,
+            }),
             warning: None,
         },
-    }
+    )
+}
+
+fn probe_named(name: &'static str, outcome: Outcome) -> ProbeResult {
+    rust_result(
+        &Probe {
+            name,
+            package: "clauseo-desktop",
+            budget_id: "cargo_check_app_edit",
+            subcommand: "check",
+        },
+        outcome,
+    )
 }
 
 fn over_budget(name: &'static str, gate: Gate) -> ProbeResult {
-    ProbeResult {
-        name,
-        outcome: Outcome::Measured {
-            stats: Stats {
-                median: 2.0,
-                min: 2.0,
-                max: 2.0,
-            },
-            budget_id: "cargo_check_app_edit",
-            budget_s: 1.0,
-            gate,
-            warning: None,
-        },
-    }
+    let mut result = measured_gated(gate, 2.0, 1.0);
+    result.name = name;
+    result
 }
 
 fn skipped() -> ProbeResult {
-    ProbeResult {
-        name: "check_desktop",
-        outcome: Outcome::Skipped("crate not present"),
-    }
+    probe_named(
+        "check_desktop",
+        Outcome::Skipped("crate not present".into()),
+    )
 }
 
 fn failed() -> ProbeResult {
-    ProbeResult {
-        name: "check_desktop",
-        outcome: Outcome::Failed(Failure::new("cargo check failed", "run `cargo check`")),
-    }
+    probe_named(
+        "check_desktop",
+        Outcome::Failed(Failure::new("cargo check failed", "run `cargo check`")),
+    )
 }
 
 #[test]
@@ -92,9 +96,9 @@ fn stats_of_no_samples_is_none() {
 
 #[test]
 fn a_probe_within_its_budget_is_ok_and_one_over_it_is_over() {
-    assert_eq!(measured(0.5, 1.0).outcome.status(), ProbeStatus::Ok);
-    assert_eq!(measured(1.0, 1.0).outcome.status(), ProbeStatus::Ok);
-    assert_eq!(measured(1.5, 1.0).outcome.status(), ProbeStatus::Over);
+    assert_eq!(measured(0.5, 1.0).status(), ProbeStatus::Ok);
+    assert_eq!(measured(1.0, 1.0).status(), ProbeStatus::Ok);
+    assert_eq!(measured(1.5, 1.0).status(), ProbeStatus::Over);
 }
 
 #[test]
@@ -144,10 +148,7 @@ fn an_over_budget_probe_fails_the_run_only_when_its_gate_says_so() {
 
 #[test]
 fn a_failed_probe_fails_even_in_ci() {
-    let failed = ProbeResult {
-        name: "check_desktop",
-        outcome: Outcome::Failed(Failure::new("cargo check failed", "run `cargo check`")),
-    };
+    let failed = failed();
     assert!(!passes(std::slice::from_ref(&failed), true));
     assert!(!passes(std::slice::from_ref(&failed), false));
     let with_over = [over_budget("build_desktop", Gate::Local), failed];
@@ -204,32 +205,42 @@ fn probes_find_their_marker_in_the_member_directory_but_run_at_the_root() {
 }
 
 #[test]
-fn a_limit_in_seconds_or_milliseconds_converts_to_seconds() {
+fn a_limit_converts_to_the_unit_the_probe_measures() {
     let budgets = vec![budget("a", Unit::S, 5.0), budget("b", Unit::Ms, 250.0)];
-    let seconds = budget_limit(&budgets, "a").expect("a row in seconds");
-    assert!(close(seconds.seconds, 5.0));
-    let millis = budget_limit(&budgets, "b").expect("a row in ms");
-    assert!(close(millis.seconds, 0.25));
+    let seconds = budget_limit(&budgets, "a", Unit::S).expect("a row in seconds");
+    assert!(close(seconds.value, 5.0));
+    assert_eq!(seconds.id, "a");
+    let millis = budget_limit(&budgets, "b", Unit::S).expect("a row in ms");
+    assert!(close(millis.value, 0.25));
+    let back = budget_limit(&budgets, "a", Unit::Ms).expect("seconds to ms");
+    assert!(close(back.value, 5000.0));
+    let kb = budget_limit(&[budget("k", Unit::Kb, 180.0)], "k", Unit::Kb).expect("KB to KB");
+    assert!(close(kb.value, 180.0));
 }
 
 #[test]
 fn a_limit_carries_its_row_gate() {
     let mut row = budget("a", Unit::S, 5.0);
     row.gate = Gate::Release;
-    let limit = budget_limit(&[row], "a").expect("a row in seconds");
+    let limit = budget_limit(&[row], "a", Unit::S).expect("a row in seconds");
     assert_eq!(limit.gate, Gate::Release);
 }
 
 #[test]
 fn a_missing_row_or_another_unit_fails_the_probe_clearly() {
     let budgets = vec![budget("mb", Unit::Mb, 60.0)];
-    let missing = budget_limit(&budgets, "nope").expect_err("no such row");
+    let missing = budget_limit(&budgets, "nope", Unit::S).expect_err("no such row");
     assert_eq!(missing.message, "no budget row nope in budgets.toml");
-    let unit = budget_limit(&budgets, "mb").expect_err("a unit in MB");
+    assert_eq!(
+        missing.fix,
+        "add a [[budget]] row with id = \"nope\" to budgets.toml"
+    );
+    let unit = budget_limit(&budgets, "mb", Unit::S).expect_err("a unit in MB");
     assert_eq!(
         unit.message,
-        "budget mb is in MB, and buildtime compares s or ms"
+        "budget mb is in MB, and this probe measures s"
     );
+    assert_eq!(unit.fix, "set unit = \"s\" on budget mb");
 }
 
 fn budget(id: &str, unit: Unit, limit: f64) -> Budget {
@@ -267,18 +278,17 @@ fn the_json_of_a_skipped_probe_has_only_its_state_and_reason() {
     let json = serde_json::to_string(&probe_json(&skipped())).unwrap_or_default();
     assert_eq!(
         json,
-        r#"{"probe":"check_desktop","status":"skipped","reason":"crate not present"}"#
+        r#"{"probe":"check_desktop","status":"skipped","unit":"s","reported_only":false,"reason":"crate not present"}"#
     );
 }
 
 #[test]
-fn the_json_of_a_measured_probe_has_its_stats_and_budget() {
+fn the_json_of_a_measured_probe_has_its_unit_stats_samples_and_budget() {
     let json = serde_json::to_value(probe_json(&measured(0.5, 1.0))).unwrap_or_default();
-    assert_eq!(json["status"], "ok");
-    assert_eq!(json["budget_id"], "cargo_check_app_edit");
-    assert_eq!(json["budget_s"], 1.0);
-    assert_eq!(json["median_s"], 0.5);
-    assert!(json.get("reason").is_none());
+    assert_eq!(
+        json.to_string(),
+        r#"{"budget":1.0,"budget_id":"cargo_check_app_edit","max":0.5,"median":0.5,"min":0.5,"probe":"check_desktop","reported_only":false,"samples":[0.5],"status":"ok","unit":"s"}"#
+    );
 }
 
 fn rust_run(results: Vec<ProbeResult>, ci: bool) -> RustRun {
