@@ -262,6 +262,50 @@ fn a_dangerous_key_at_any_depth_fails() {
 }
 
 #[test]
+fn updater_endpoints_without_a_pubkey_fail() {
+    let (text, found) = with(
+        "\"endpoints\": []",
+        "\"endpoints\": [\"https://releases.example/latest.json\"]",
+    );
+    assert_eq!(
+        found,
+        vec![violation(
+            PATH,
+            line_of(&text, "\"endpoints\""),
+            "plugins.updater has endpoints but no pubkey",
+            PUBKEY_FIX,
+        )]
+    );
+    let keyed = text.replace(
+        "\"pubkey\": \"\"",
+        "\"pubkey\": \"dW50cnVzdGVkIGNvbW1lbnQ=\"",
+    );
+    assert_eq!(conf_violations(PATH, Some(&keyed)), Vec::new());
+}
+
+#[test]
+fn v1_compatible_updater_artifacts_fail() {
+    let (text, found) = with(
+        "\"icon\": []",
+        "\"icon\": [],\n    \"createUpdaterArtifacts\": \"v1Compatible\"",
+    );
+    assert_eq!(
+        found,
+        vec![violation(
+            PATH,
+            line_of(&text, "createUpdaterArtifacts"),
+            "bundle.createUpdaterArtifacts is \"v1Compatible\"",
+            V1_FIX,
+        )]
+    );
+    let (_, found) = with(
+        "\"icon\": []",
+        "\"icon\": [],\n    \"createUpdaterArtifacts\": true",
+    );
+    assert_eq!(found, Vec::new());
+}
+
+#[test]
 fn a_missing_or_invalid_tauri_conf_fails_once_at_line_one() {
     assert_eq!(
         conf_violations(PATH, None),
