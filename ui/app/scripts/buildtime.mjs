@@ -98,7 +98,6 @@ function freePort() {
 function startVite(port, state) {
   return new Promise((done, fail) => {
     const { argv } = scriptCommand(APP_DIR, UI_DIR, "dev");
-    const started = performance.now();
     const child = start([...argv, "--port", String(port), "--strictPort"], {
       cwd: APP_DIR,
       env: { ...process.env, NO_COLOR: "1" },
@@ -115,7 +114,7 @@ function startVite(port, state) {
       if (!ready && /ready in/.test(output)) {
         ready = true;
         clearTimeout(timer);
-        done(performance.now() - started);
+        done(performance.now() - child.startedAt);
       }
     };
     child.stdout.on("data", onData);
