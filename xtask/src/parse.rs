@@ -1,4 +1,8 @@
 //! Parsers for the text that rustfmt and clippy print, and the findings they become.
+//!
+//! Clippy runs with `--message-format=json-diagnostic-short`: the short text form (`path:line:col:
+//! level: message`) does not name the lint, and the JSON does. Each JSON message carries the short
+//! text in `rendered`, which is what people see.
 
 use crate::process::Cmd;
 use crate::violation::{Finding, Violation};
@@ -73,22 +77,30 @@ fn hunk_changed_line(start: u32, body: &[&str]) -> u32 {
     start
 }
 
-/// One clippy diagnostic from `--message-format=short`.
+/// One clippy diagnostic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Diag {
     pub path: String,
     pub line: u32,
-    /// Includes the level, e.g. `warning: unused variable: x` or `error[E0425]: cannot find value`.
+    /// Includes the level and, from JSON, the lint: `warning: unused variable: x (unused_variables)`
+    /// or `error[E0425]: cannot find value`.
     pub message: String,
     pub is_error: bool,
 }
 
-/// Every `path:line:col: warning|error...` diagnostic in `output`, deduplicated by
-/// (path, line, message). Lines without a file prefix are ignored.
+/// Every diagnostic in `output`, deduplicated by (path, line, message). A line is either one of
+/// cargo's JSON messages, whose `rendered` text is read and whose lint name is appended, or plain
+/// `path:line:col: warning|error...` text. Lines without a file prefix are ignored.
 pub(crate) fn clippy_diags(output: &str, root: &str) -> Vec<Diag> {
     let mut diags: Vec<Diag> = Vec::new();
     for line in output.lines() {
-        let Some(diag) = clippy_line(line, root) else {
+        let diag = match json_message(line) {
+            Some(message) => message.rendered.lines().next().and_then(|text| {
+                clippy_line(text, root).map(|diag| with_lint(diag, message.code.as_deref()))
+            }),
+            None => clippy_line(line, root),
+        };
+        let Some(diag) = diag else {
             continue;
         };
         let duplicate = diags
@@ -99,6 +111,61 @@ pub(crate) fn clippy_diags(output: &str, root: &str) -> Vec<Diag> {
         }
     }
     diags
+}
+
+/// What people read of clippy's JSON output: each diagnostic's `rendered` text, and every line
+/// that is not JSON (cargo's own messages). Other JSON messages, such as artifacts, are dropped.
+pub(crate) fn clippy_render(output: &str) -> String {
+    let mut text = String::new();
+    for line in output.lines() {
+        if line.starts_with('{') {
+            if let Some(message) = json_message(line) {
+                text.push_str(message.rendered.trim_end());
+                text.push('\n');
+            }
+        } else {
+            text.push_str(line);
+            text.push('\n');
+        }
+    }
+    text
+}
+
+/// The parts of a cargo `compiler-message` that xtask reads.
+struct JsonMessage {
+    rendered: String,
+    /// The lint or error code: `clippy::unwrap_used`, `unused_variables`, `E0425`.
+    code: Option<String>,
+}
+
+/// The diagnostic in one line of cargo's JSON output, or `None` for any other line.
+fn json_message(line: &str) -> Option<JsonMessage> {
+    if !line.starts_with('{') {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    if value.get("reason")?.as_str()? != "compiler-message" {
+        return None;
+    }
+    let message = value.get("message")?;
+    Some(JsonMessage {
+        rendered: message.get("rendered")?.as_str()?.to_owned(),
+        code: message
+            .get("code")
+            .and_then(|code| code.get("code"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned),
+    })
+}
+
+/// Appends ` (code)` to the message, unless the text already shows it as `error[code]`.
+fn with_lint(mut diag: Diag, code: Option<&str>) -> Diag {
+    if let Some(code) = code
+        && !diag.message.contains(&format!("[{code}]"))
+    {
+        diag.message = format!("{} ({code})", diag.message);
+    }
+    diag
 }
 
 fn clippy_line(line: &str, root: &str) -> Option<Diag> {
@@ -140,7 +207,7 @@ pub(crate) fn fmt_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Findi
         .collect()
 }
 
-/// Findings for clippy's `--message-format=short` output. Each fix line is the command that shows
+/// Findings for clippy's output (see `clippy_diags`). Each fix line is the command that shows
 /// the full diagnostic, built from the args that ran (see `clippy_repro`).
 pub(crate) fn clippy_findings(output: &str, ctx: &Context, cmd: &Cmd) -> Vec<Finding> {
     clippy_diags(output, &root_str(ctx))
@@ -173,7 +240,7 @@ fn clippy_fix(cmd: &Cmd, path: &str, members: &[Member]) -> String {
 }
 
 /// The clippy command narrowed to the package that owns `path`, built from the args that ran.
-/// Drops `--workspace`, every `-p <name>` and `--message-format=short`, then inserts `-p <owner>`
+/// Drops `--workspace`, every `-p <name>` and `--message-format=...`, then inserts `-p <owner>`
 /// after `clippy`. With no owner, the original selectors stay.
 fn clippy_repro(cmd: &Cmd, path: &str, members: &[Member]) -> Cmd {
     let owner = package_for(path, members);
@@ -190,7 +257,7 @@ fn clippy_repro(cmd: &Cmd, path: &str, members: &[Member]) -> Cmd {
                 args.push(arg.clone());
                 args.extend(rest.by_ref().cloned());
             }
-            "--message-format=short" => {}
+            format if format.starts_with("--message-format=") => {}
             "--workspace" if owner.is_some() => {}
             "-p" if owner.is_some() => {
                 rest.next();
@@ -373,5 +440,51 @@ mod tests {
         let diags = clippy_diags(out, "/ws");
         assert_eq!(diags.len(), 1);
         assert!(!diags[0].is_error);
+    }
+
+    const JSON_OUTPUT: &str = concat!(
+        r#"{"reason":"compiler-artifact","target":{"name":"serde"}}"#,
+        "\n",
+        r#"{"reason":"compiler-message","message":{"rendered":"/ws/xtask/src/check.rs:13:14: error: used `unwrap()` on an `Option` value\n","code":{"code":"clippy::unwrap_used","explanation":null},"level":"error"}}"#,
+        "\n",
+        r#"{"reason":"compiler-message","message":{"rendered":"xtask/src/main.rs:6:5: error[E0425]: cannot find value `y` in this scope\n","code":{"code":"E0425"},"level":"error"}}"#,
+        "\n",
+        r#"{"reason":"compiler-message","message":{"rendered":"warning: 1 warning emitted\n","code":null,"level":"warning"}}"#,
+        "\n",
+        "error: could not compile `xtask` (bin \"xtask\") due to 2 previous errors\n",
+    );
+
+    #[test]
+    fn clippy_json_names_the_lint_and_does_not_repeat_an_error_code() {
+        let diags = clippy_diags(JSON_OUTPUT, "/ws");
+        assert_eq!(
+            diags,
+            vec![
+                Diag {
+                    path: "xtask/src/check.rs".into(),
+                    line: 13,
+                    message: "error: used `unwrap()` on an `Option` value (clippy::unwrap_used)"
+                        .into(),
+                    is_error: true,
+                },
+                Diag {
+                    path: "xtask/src/main.rs".into(),
+                    line: 6,
+                    message: "error[E0425]: cannot find value `y` in this scope".into(),
+                    is_error: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn clippy_render_keeps_rendered_text_and_plain_lines_and_drops_other_json() {
+        assert_eq!(
+            clippy_render(JSON_OUTPUT),
+            "/ws/xtask/src/check.rs:13:14: error: used `unwrap()` on an `Option` value\n\
+             xtask/src/main.rs:6:5: error[E0425]: cannot find value `y` in this scope\n\
+             warning: 1 warning emitted\n\
+             error: could not compile `xtask` (bin \"xtask\") due to 2 previous errors\n"
+        );
     }
 }

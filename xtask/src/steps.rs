@@ -1,7 +1,8 @@
 //! Steps as data. `plan` lists what runs and in what order, and `run_all` is the one loop that runs it.
-//! Adding an external step is one `ToolStep` in `plan.rs`.
+//! Adding an external step is one `ToolStep` in `plan.rs`, or in `policy.rs` for a repo-policy tool.
 
 mod plan;
+mod policy;
 mod run;
 
 pub(crate) use plan::plan;
@@ -59,6 +60,10 @@ pub(crate) struct ToolStep {
     /// The fix line for a failure with no `file:line`, or for a program that cannot start.
     /// `None` means the program could not start; `Some` is the captured output.
     pub fix: fn(&Cmd, Option<&str>) -> String,
+    /// `None`: the output is for people, so it streams live on a terminal and a failure with no
+    /// `file:line` prints it as is. `Some`: the output is for machines (clippy's JSON), so it never
+    /// streams, and such a failure prints what this function makes of it.
+    pub render: Option<fn(&str) -> String>,
 }
 
 pub(crate) enum Step {
