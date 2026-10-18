@@ -9,6 +9,7 @@ import {
   ROOT_TAG,
   appPaths,
   recoverApp,
+  restoreFailure,
   tmpOf,
   unmarked,
   initialJs,
@@ -280,6 +281,19 @@ describe("the App.tsx guard", () => {
     expect(() => guard.restore()).toThrow(ConflictError);
     expect(read(paths.app)).toBe("export {};\n");
     expect(read(paths.backup)).toBe(ORIGINAL);
+  });
+
+  it("turns a failed restore into a run failure that names the copy", () => {
+    const paths = appPaths("/repo", REL);
+    const conflict = new ConflictError("changed", "compare them");
+    expect(restoreFailure(paths, conflict)).toEqual({ message: "changed", fix: "compare them" });
+    const eperm = Object.assign(new Error("EPERM: operation not permitted, rename"), {
+      code: "EPERM",
+    });
+    expect(restoreFailure(paths, eperm)).toEqual({
+      message: `could not put back ${REL}: EPERM: operation not permitted, rename; its saved copy is target/xtask/buildtime/${REL}`,
+      fix: `the next \`cargo xtask buildtime web\` restores ${REL} from target/xtask/buildtime/${REL}; or copy it back by hand`,
+    });
   });
 
   it("refuses to start over an existing copy and leaves App.tsx alone", () => {
