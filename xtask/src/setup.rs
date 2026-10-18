@@ -1,6 +1,6 @@
 //! `cargo xtask setup`: installs the pinned tools.
 
-use crate::output;
+use crate::output::Printer;
 use crate::process::{self, Cmd, Program};
 use crate::workspace;
 use std::process::ExitCode;
@@ -18,6 +18,7 @@ pub const TOOLS: &[Tool] = &[Tool {
 
 /// Installs each tool, printing its command first. Continues past failures; fails if any failed.
 pub fn run() -> ExitCode {
+    let mut out = Printer::stdout();
     let root = workspace::workspace_root();
     let mut any_failed = false;
     for tool in TOOLS {
@@ -25,16 +26,16 @@ pub fn run() -> ExitCode {
             Program::Cargo,
             ["install", "--locked", tool.name, "--version", tool.version],
         );
-        output::note(&cmd);
+        out.note(&cmd);
         let fix = format!("run `{cmd}` to reproduce");
         match process::run_inherit(&cmd, &root) {
             Ok(true) => {}
             Ok(false) => {
-                output::failure(&format!("installing {} failed", tool.name), &fix);
+                out.failure(&format!("installing {} failed", tool.name), &fix);
                 any_failed = true;
             }
             Err(error) => {
-                output::failure(
+                out.failure(
                     &format!("could not run cargo to install {}: {error}", tool.name),
                     &fix,
                 );
