@@ -77,7 +77,8 @@ fn hunk_changed_line(start: u32, body: &[&str]) -> u32 {
     start
 }
 
-/// One clippy diagnostic.
+/// One diagnostic in the short `path:line:col: level: message` form that clippy (through cargo's
+/// JSON `rendered` field) and `typos --format brief` print.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Diag {
     pub path: String,
@@ -88,17 +89,17 @@ pub(crate) struct Diag {
     pub is_error: bool,
 }
 
-/// Every diagnostic in `output`, deduplicated by (path, line, message). A line is either one of
+/// Every short-form diagnostic in `output`, deduplicated by (path, line, message). A line is either one of
 /// cargo's JSON messages, whose `rendered` text is read and whose lint name is appended, or plain
 /// `path:line:col: warning|error...` text. Lines without a file prefix are ignored.
-pub(crate) fn clippy_diags(output: &str, root: &str) -> Vec<Diag> {
+pub(crate) fn short_diags(output: &str, root: &str) -> Vec<Diag> {
     let mut diags: Vec<Diag> = Vec::new();
     for line in output.lines() {
         let diag = match json_message(line) {
             Some(message) => message.rendered.lines().next().and_then(|text| {
-                clippy_line(text, root).map(|diag| with_lint(diag, message.code.as_deref()))
+                short_line(text, root).map(|diag| with_lint(diag, message.code.as_deref()))
             }),
-            None => clippy_line(line, root),
+            None => short_line(line, root),
         };
         let Some(diag) = diag else {
             continue;
@@ -168,7 +169,7 @@ fn with_lint(mut diag: Diag, code: Option<&str>) -> Diag {
     diag
 }
 
-fn clippy_line(line: &str, root: &str) -> Option<Diag> {
+fn short_line(line: &str, root: &str) -> Option<Diag> {
     let at = [": warning", ": error"]
         .iter()
         .filter_map(|marker| line.find(*marker))
@@ -207,10 +208,10 @@ pub(crate) fn fmt_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Findi
         .collect()
 }
 
-/// Findings for clippy's output (see `clippy_diags`). Each fix line is the command that shows
+/// Findings for clippy's output (see `short_diags`). Each fix line is the command that shows
 /// the full diagnostic, built from the args that ran (see `clippy_repro`).
 pub(crate) fn clippy_findings(output: &str, ctx: &Context, cmd: &Cmd) -> Vec<Finding> {
-    clippy_diags(output, &root_str(ctx))
+    short_diags(output, &root_str(ctx))
         .into_iter()
         .map(|diag| {
             let fix = clippy_fix(cmd, &diag.path, &ctx.members);
@@ -401,7 +402,7 @@ mod tests {
     fn clippy_parses_warning_and_error_lines() {
         let out = "xtask/src/main.rs:4:9: warning: unused variable: `x`\n\
                    xtask/src/main.rs:6:5: error[E0425]: cannot find value `y` in this scope\n";
-        let diags = clippy_diags(out, "/ws");
+        let diags = short_diags(out, "/ws");
         assert_eq!(
             diags,
             vec![
@@ -424,7 +425,7 @@ mod tests {
     #[test]
     fn clippy_parses_windows_drive_paths() {
         let out = "C:\\ws\\xtask\\src\\main.rs:4:9: error: unused variable: `unused`\n";
-        let diags = clippy_diags(out, "C:\\ws");
+        let diags = short_diags(out, "C:\\ws");
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].path, "xtask/src/main.rs");
         assert_eq!(diags[0].line, 4);
@@ -437,7 +438,7 @@ mod tests {
                    error: could not compile `xtask` (bin \"xtask\") due to 1 previous error\n\
                    xtask/src/main.rs:4:9: warning: unused variable: `x`\n\
                    xtask/src/main.rs:4:9: warning: unused variable: `x`\n";
-        let diags = clippy_diags(out, "/ws");
+        let diags = short_diags(out, "/ws");
         assert_eq!(diags.len(), 1);
         assert!(!diags[0].is_error);
     }
@@ -456,7 +457,7 @@ mod tests {
 
     #[test]
     fn clippy_json_names_the_lint_and_does_not_repeat_an_error_code() {
-        let diags = clippy_diags(JSON_OUTPUT, "/ws");
+        let diags = short_diags(JSON_OUTPUT, "/ws");
         assert_eq!(
             diags,
             vec![

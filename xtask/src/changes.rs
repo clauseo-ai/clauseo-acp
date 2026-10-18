@@ -89,6 +89,53 @@ pub(crate) fn merge_base(root: &Path) -> Result<String, String> {
     Ok(base)
 }
 
+/// The commits gitleaks scans.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ScanRange {
+    /// The commits after this one, the merge-base with `origin/main`.
+    Since(String),
+    /// Only the last commit: HEAD is the merge-base, as on `main` itself after a push.
+    LastCommit,
+    /// Everything, with the reason: no merge-base, or HEAD is the merge-base and has no parent.
+    AllHistory(String),
+}
+
+impl ScanRange {
+    /// The `--log-opts` range, or `None` for all history.
+    pub(crate) fn log_opts(&self) -> Option<String> {
+        match self {
+            ScanRange::Since(base) => Some(format!("{base}..HEAD")),
+            ScanRange::LastCommit => Some("HEAD~1..HEAD".into()),
+            ScanRange::AllHistory(_) => None,
+        }
+    }
+}
+
+/// What gitleaks scans in `root` (see `choose_range`).
+pub(crate) fn scan_range(root: &Path) -> ScanRange {
+    let base = match merge_base(root) {
+        Ok(base) => base,
+        Err(error) => {
+            return ScanRange::AllHistory(format!("no merge-base with origin/main: {error}"));
+        }
+    };
+    let head = git(root, &["rev-parse", "HEAD"]).map(|text| text.trim().to_owned());
+    let has_parent = git(root, &["rev-parse", "--verify", "--quiet", "HEAD~1"]).is_ok();
+    choose_range(base, head.ok().as_deref(), has_parent)
+}
+
+/// The commits after `base`. When HEAD is `base` (on `main`), that range is empty, so the last
+/// commit instead, or all history for a root commit.
+pub(crate) fn choose_range(base: String, head: Option<&str>, has_parent: bool) -> ScanRange {
+    if head != Some(base.as_str()) {
+        ScanRange::Since(base)
+    } else if has_parent {
+        ScanRange::LastCommit
+    } else {
+        ScanRange::AllHistory("HEAD is the merge-base with origin/main and has no parent".into())
+    }
+}
+
 fn split_nul(text: &str) -> impl Iterator<Item = String> + '_ {
     text.split('\0')
         .filter(|s| !s.is_empty())
@@ -198,5 +245,26 @@ mod tests {
     fn split_nul_drops_empty_entries() {
         let parts: Vec<String> = split_nul("a.rs\0crates/b/x.rs\0\0").collect();
         assert_eq!(parts, vec!["a.rs".to_owned(), "crates/b/x.rs".to_owned()]);
+    }
+
+    #[test]
+    fn a_branch_scans_its_own_commits() {
+        let range = choose_range("abc".into(), Some("def"), true);
+        assert_eq!(range, ScanRange::Since("abc".into()));
+        assert_eq!(range.log_opts().as_deref(), Some("abc..HEAD"));
+    }
+
+    #[test]
+    fn on_main_the_merge_base_is_head_so_the_last_commit_is_scanned() {
+        let range = choose_range("abc".into(), Some("abc"), true);
+        assert_eq!(range, ScanRange::LastCommit);
+        assert_eq!(range.log_opts().as_deref(), Some("HEAD~1..HEAD"));
+    }
+
+    #[test]
+    fn a_root_commit_on_main_scans_all_history() {
+        let range = choose_range("abc".into(), Some("abc"), false);
+        assert!(matches!(range, ScanRange::AllHistory(_)));
+        assert_eq!(range.log_opts(), None);
     }
 }

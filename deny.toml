@@ -15,8 +15,7 @@ yanked = "deny"
 ignore = []
 
 [licenses]
-# Each licence must allow distribution inside a GPL-3.0 binary. No LGPL or GPL dependencies, so a
-# build can always also ship under other terms.
+# Each licence must allow distribution inside a GPL-3.0 binary.
 allow = [
   "MIT",
   "MIT-0",
@@ -34,9 +33,10 @@ allow = [
   "MPL-2.0",                        # file-level copyleft, compatible with GPL-3 via its secondary-licence clause
   "CDLA-Permissive-2.0",
 ]
-# Not allowed: AGPL-3.0 (network clause would bind every firm deployment; Zed bans it too),
-# GPL-2.0-only and LGPL-2.1-only (incompatible with GPL-3), SSPL, BUSL, OpenSSL/SSLeay (old OpenSSL licence
-# is GPL-incompatible per the FSF; Zed allows it, we do not), CC-BY-NC, any "Commons Clause".
+# Not allowed: every copyleft licence (GPL, LGPL, AGPL in any version), so a build can always also
+# ship under other terms. MPL-2.0 above is the one exception: its copyleft stays inside its own files.
+# Also out: SSPL, BUSL, CC-BY-NC and any "Commons Clause" (not open source), and OpenSSL/SSLeay (the old
+# OpenSSL licence is GPL-incompatible per the FSF).
 confidence-threshold = 0.93
 private = { ignore = true } # our publish = false crates
 

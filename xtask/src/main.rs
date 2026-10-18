@@ -9,8 +9,9 @@
 //! - Budgets live in `budgets.toml` at the repo root; `budgets.rs` reads them for the check and for `buildtime`.
 //! - Failures print as `path:line: what`, then `    fix: ...`. A failure with no location prints the tool's output once, then a `fix:` line.
 //! - Live tool output appears only when stdout is a terminal. Otherwise a passing tool prints its header and our findings only.
-//! - Only `process.rs` starts processes and only `output.rs` prints. Keep it that way. Each clock read and each
-//!   process start carries `#[expect(clippy::disallowed_methods, reason = "xtask runs tools and times them")]`.
+//! - Only `process.rs` starts processes and only `output.rs` prints. Keep it that way. The one clock read
+//!   (`clock.rs`) and each call to a disallowed method (`Command::spawn`, `Command::output`) carry
+//!   `#[expect(clippy::disallowed_methods, reason = "xtask runs tools and times them")]`.
 
 mod budgets;
 mod buildtime;
@@ -45,7 +46,8 @@ enum Commands {
         #[arg(long)]
         quick: bool,
     },
-    /// Install the pinned tools with `cargo install --locked <tool> --version <version>`.
+    /// Install the pinned cargo tools (`cargo install --locked <tool> --version <version>`), print the
+    /// install commands for gitleaks and lefthook, and check their versions against the pins.
     Setup,
     /// Time the build loop against `budgets.toml`: the Rust half, the web half, or both (the default).
     Buildtime {

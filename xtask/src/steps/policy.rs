@@ -4,21 +4,11 @@
 //! in `setup.rs`.
 
 use super::ToolStep;
-use super::plan::{parse_none, reproduce};
-use crate::parse::{clippy_diags, rel_path};
+use super::plan::{parse_none, setup_or, setup_or_reproduce};
+use crate::parse::{rel_path, short_diags};
 use crate::process::{Cmd, Program};
 use crate::violation::{Finding, Violation};
 use crate::workspace::Context;
-
-/// Points at `cargo xtask setup` when the tool is missing: it could not start, or cargo has no
-/// such subcommand. Otherwise `otherwise`.
-fn setup_or(output: Option<&str>, otherwise: String) -> String {
-    match output {
-        None => "run `cargo xtask setup`".into(),
-        Some(text) if text.contains("no such command") => "run `cargo xtask setup`".into(),
-        Some(_) => otherwise,
-    }
-}
 
 pub(super) fn deny_step() -> ToolStep {
     ToolStep {
@@ -61,14 +51,14 @@ pub(super) fn typos_step() -> ToolStep {
         name: "typos",
         cmd: Cmd::new(Program::Named("typos"), ["--format", "brief"]),
         parse: typos_findings,
-        fix: tool_fix,
+        fix: setup_or_reproduce,
         render: None,
     }
 }
 
 /// The `path:line:col: error: ...` lines from `typos --format brief`.
 fn typos_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
-    clippy_diags(output, &ctx.root.to_string_lossy())
+    short_diags(output, &ctx.root.to_string_lossy())
         .into_iter()
         .map(|diag| Finding {
             violation: Violation {
@@ -93,20 +83,21 @@ pub(super) fn taplo_step() -> ToolStep {
         name: "taplo",
         cmd: Cmd::new(Program::Named("taplo"), ["fmt", "--check"]),
         parse: taplo_findings,
-        fix: tool_fix,
+        fix: setup_or_reproduce,
         render: None,
     }
 }
 
-/// One finding per `... the file is not properly formatted path="<path>"` line.
+/// One finding per `... the file is not properly formatted path="<path>"` line. taplo prints the
+/// path in Rust's debug form, so a Windows path arrives as `C:\\ws\\deny.toml`.
 fn taplo_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
     const MARKER: &str = "not properly formatted path=\"";
     output
         .lines()
         .filter_map(|line| {
             let start = line.find(MARKER)? + MARKER.len();
-            let raw = line.get(start..)?.split('"').next()?;
-            let path = repo_path(raw, ctx);
+            let raw = debug_string(line.get(start..)?)?;
+            let path = repo_path(&raw, ctx);
             Some(Finding {
                 violation: Violation {
                     message: "taplo would reformat this file".into(),
@@ -120,22 +111,51 @@ fn taplo_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
         .collect()
 }
 
+/// The text of a Rust debug-form string up to its closing quote: `\\` and `\"` are unescaped.
+/// `None` when the closing quote is missing.
+fn debug_string(after_quote: &str) -> Option<String> {
+    let mut text = String::new();
+    let mut chars = after_quote.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return Some(text),
+            '\\' => text.push(chars.next()?),
+            _ => text.push(c),
+        }
+    }
+    None
+}
+
 /// Repo-relative form of an absolute path a tool printed. Tries the root as given and its
 /// canonical form, since a tool may print either (`/tmp` and `/private/tmp` on macOS).
 fn repo_path(raw: &str, ctx: &Context) -> String {
-    let given = ctx.root.to_string_lossy();
-    let path = rel_path(raw, &given);
-    if path != raw.trim().replace('\\', "/") {
-        return path;
+    let mut roots = vec![ctx.root.to_string_lossy().into_owned()];
+    if let Ok(canonical) = std::fs::canonicalize(&ctx.root) {
+        roots.push(canonical.to_string_lossy().into_owned());
     }
-    match std::fs::canonicalize(&ctx.root) {
-        Ok(canonical) => rel_path(raw, &canonical.to_string_lossy()),
-        Err(_) => path,
-    }
+    relative_to_any(raw, &roots)
 }
 
-/// gitleaks over the commits after `base` (`<base>..HEAD`), or over all history without a base.
-pub(super) fn gitleaks_step(base: Option<&str>) -> ToolStep {
+/// `raw` relative to the first of `roots` it lies under, `/`-separated, or all of `raw` when it
+/// lies under none. Windows verbatim prefixes (`\\?\`, which `canonicalize` adds there) are
+/// dropped from both sides first.
+fn relative_to_any(raw: &str, roots: &[String]) -> String {
+    let raw = strip_verbatim(raw);
+    let whole = raw.trim().replace('\\', "/");
+    roots
+        .iter()
+        .map(|root| rel_path(raw, strip_verbatim(root)))
+        .find(|rel| *rel != whole)
+        .unwrap_or(whole)
+}
+
+fn strip_verbatim(path: &str) -> &str {
+    path.strip_prefix(r"\\?\").unwrap_or(path)
+}
+
+/// gitleaks over the commits in `range` (a git range such as `<base>..HEAD`), or over all history
+/// without one.
+pub(super) fn gitleaks_step(range: Option<&str>) -> ToolStep {
     let mut args = vec![
         "git".to_owned(),
         "--redact".to_owned(),
@@ -143,14 +163,14 @@ pub(super) fn gitleaks_step(base: Option<&str>) -> ToolStep {
         "--verbose".to_owned(),
         "--no-color".to_owned(),
     ];
-    if let Some(base) = base {
-        args.push(format!("--log-opts={base}..HEAD"));
+    if let Some(range) = range {
+        args.push(format!("--log-opts={range}"));
     }
     ToolStep {
         name: "gitleaks",
         cmd: Cmd::new(Program::Named("gitleaks"), args),
         parse: gitleaks_findings,
-        fix: tool_fix,
+        fix: setup_or_reproduce,
         render: None,
     }
 }
@@ -227,11 +247,6 @@ fn strip_ansi(text: &str) -> String {
     out
 }
 
-/// For a program on `PATH`: setup when it cannot start, else the command that reproduces.
-fn tool_fix(cmd: &Cmd, output: Option<&str>) -> String {
-    setup_or(output, reproduce(cmd, output))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,7 +266,7 @@ mod tests {
         assert_eq!(typos_step().cmd.to_string(), "typos --format brief");
         assert_eq!(taplo_step().cmd.to_string(), "taplo fmt --check");
         assert_eq!(
-            gitleaks_step(Some("abc123")).cmd.to_string(),
+            gitleaks_step(Some("abc123..HEAD")).cmd.to_string(),
             "gitleaks git --redact --no-banner --verbose --no-color --log-opts=abc123..HEAD"
         );
         assert_eq!(
@@ -270,9 +285,9 @@ mod tests {
         );
         assert!(deny_fix(&cmd, Some("error[banned]: ...")).contains("never loosen deny.toml"));
         let typos = typos_step().cmd;
-        assert_eq!(tool_fix(&typos, None), "run `cargo xtask setup`");
+        assert_eq!(setup_or_reproduce(&typos, None), "run `cargo xtask setup`");
         assert_eq!(
-            tool_fix(&typos, Some("boom")),
+            setup_or_reproduce(&typos, Some("boom")),
             "run `typos --format brief` to reproduce"
         );
     }
@@ -306,6 +321,38 @@ mod tests {
         assert_eq!(findings[0].violation.path, "deny.toml");
         assert_eq!(findings[0].violation.line, 1);
         assert_eq!(findings[0].violation.fix, "run `taplo fmt deny.toml`");
+    }
+
+    #[test]
+    fn taplo_findings_read_a_windows_path_in_debug_form() {
+        let ctx = Context {
+            root: PathBuf::from(r"C:\ws"),
+            members: Vec::new(),
+        };
+        let out = r#"ERROR taplo:format_files: the file is not properly formatted path="C:\\ws\\xtask\\Cargo.toml""#;
+        let findings = taplo_findings(out, &ctx, &taplo_step().cmd);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].violation.path, "xtask/Cargo.toml");
+    }
+
+    #[test]
+    fn a_path_is_made_relative_to_a_verbatim_canonical_root() {
+        let roots = [r"C:\link".to_owned(), r"\\?\C:\ws".to_owned()];
+        assert_eq!(relative_to_any(r"C:\ws\deny.toml", &roots), "deny.toml");
+        assert_eq!(relative_to_any(r"\\?\C:\ws\a\b.toml", &roots), "a/b.toml");
+        assert_eq!(
+            relative_to_any("/elsewhere/x.toml", &roots),
+            "/elsewhere/x.toml"
+        );
+    }
+
+    #[test]
+    fn debug_strings_unescape_backslashes_and_quotes() {
+        assert_eq!(
+            debug_string(r#"C:\\a\"b" rest"#).as_deref(),
+            Some(r#"C:\a"b"#)
+        );
+        assert_eq!(debug_string("no closing quote"), None);
     }
 
     #[test]
