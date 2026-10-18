@@ -1,6 +1,6 @@
 //! `cargo xtask check`: works out the scope, plans the steps, runs them, prints the summary.
 
-use crate::changes::{self, Selection};
+use crate::changes::{self, ScanRange, Selection};
 use crate::output::Printer;
 use crate::process::{self, Cmd};
 use crate::steps::{self, Scope, StepStatus};
@@ -27,8 +27,8 @@ pub(crate) fn run(quick: bool) -> ExitCode {
     } else {
         Scope::Workspace
     };
-    let base = gitleaks_base(&mut out, &ctx);
-    let steps = steps::plan(&scope, ci, base.as_deref());
+    let range = gitleaks_range(&mut out, &ctx);
+    let steps = steps::plan(&scope, ci, range.as_deref());
     let mut exec =
         |cmd: &Cmd, on_output: &mut dyn FnMut(&[u8])| process::capture(cmd, &ctx.root, on_output);
     let results = steps::run_all(steps, &ctx, &mut out, &mut exec);
@@ -96,18 +96,18 @@ fn quick_scope(out: &mut Printer<io::Stdout>, ctx: &Context, members_error: Opti
     }
 }
 
-/// The commit gitleaks starts after: where this branch forked from `origin/main`. Without it,
-/// gitleaks scans all history, and says so.
-fn gitleaks_base(out: &mut Printer<io::Stdout>, ctx: &Context) -> Option<String> {
-    match changes::merge_base(&ctx.root) {
-        Ok(base) => Some(base),
-        Err(error) => {
-            out.note(format!(
-                "gitleaks: all history (no merge-base with origin/main: {error})"
-            ));
-            None
+/// The `--log-opts` range gitleaks scans (see `changes::scan_range`), or `None` for all history.
+/// Prints the choice when it is not this branch's own commits.
+fn gitleaks_range(out: &mut Printer<io::Stdout>, ctx: &Context) -> Option<String> {
+    let range = changes::scan_range(&ctx.root);
+    match &range {
+        ScanRange::Since(_) => {}
+        ScanRange::LastCommit => {
+            out.note("gitleaks: the last commit (HEAD is the merge-base with origin/main)");
         }
+        ScanRange::AllHistory(why) => out.note(format!("gitleaks: all history ({why})")),
     }
+    range.log_opts()
 }
 
 fn list_or_none(names: &[String]) -> String {

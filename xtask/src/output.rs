@@ -20,10 +20,6 @@ impl Printer<io::Stdout> {
     }
 }
 
-#[expect(
-    clippy::let_underscore_must_use,
-    reason = "a closed stdout must not stop the check"
-)]
 impl<W: Write> Printer<W> {
     pub(crate) fn new(out: W, live: bool) -> Self {
         Printer { out, live }
@@ -35,33 +31,45 @@ impl<W: Write> Printer<W> {
         self.out
     }
 
-    // Every write below ignores its error: a closed stdout must not stop the check.
+    /// Every write goes through here. It writes and flushes `bytes` and ignores the error on
+    /// purpose: a closed stdout must not stop the check.
+    #[expect(
+        clippy::let_underscore_must_use,
+        reason = "a closed stdout must not stop the check"
+    )]
+    fn put(&mut self, bytes: &[u8]) {
+        let _ = self.out.write_all(bytes).and_then(|()| self.out.flush());
+    }
+
+    /// `text` and a newline.
+    fn line(&mut self, text: impl Display) {
+        self.put(format!("{text}\n").as_bytes());
+    }
 
     /// `==> name: command`, which starts a step.
     pub(crate) fn header(&mut self, name: &str, command: impl Display) {
-        let _ = writeln!(self.out, "==> {name}: {command}");
+        self.line(format_args!("==> {name}: {command}"));
     }
 
     /// One line of plain text.
     pub(crate) fn note(&mut self, text: impl Display) {
-        let _ = writeln!(self.out, "{text}");
+        self.line(text);
     }
 
     /// One finding: `path:line: what`, then its `    fix: ...` line.
     pub(crate) fn violation(&mut self, found: &Violation) {
-        let _ = writeln!(self.out, "{found}");
+        self.line(found);
     }
 
     /// A failure with no file and line: the message on one line, then its fix.
     pub(crate) fn failure(&mut self, message: &str, fix: &str) {
-        let _ = writeln!(self.out, "{message}\n    fix: {fix}");
+        self.line(format_args!("{message}\n    fix: {fix}"));
     }
 
-    /// One chunk of raw tool output. Written and flushed only when live.
+    /// One chunk of raw tool output. Written only when live.
     pub(crate) fn tool_output(&mut self, chunk: &[u8]) {
         if self.live {
-            let _ = self.out.write_all(chunk);
-            let _ = self.out.flush();
+            self.put(chunk);
         }
     }
 
@@ -79,17 +87,18 @@ impl<W: Write> Printer<W> {
         if text.is_empty() {
             return;
         }
-        let _ = self.out.write_all(text.as_bytes());
-        if !text.ends_with('\n') {
-            let _ = self.out.write_all(b"\n");
+        if text.ends_with('\n') {
+            self.put(text.as_bytes());
+        } else {
+            self.line(text);
         }
     }
 
     /// The closing `summary:` block, one line per step.
     pub(crate) fn summary(&mut self, results: &[StepResult]) {
-        let _ = writeln!(self.out, "summary:");
+        self.line("summary:");
         for result in results {
-            let _ = writeln!(self.out, "{}", summary_line(result));
+            self.line(summary_line(result));
         }
     }
 }

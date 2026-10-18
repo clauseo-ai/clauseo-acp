@@ -15,9 +15,8 @@ const NO_PACKAGES: &str = "no changed packages";
 /// The steps for `scope`, in run order: fmt, clippy, deny, shear, typos, taplo, gitleaks, every
 /// static check, nextest. With `Scope::Nothing`, clippy and nextest are skipped; the others never
 /// depend on the scope. `ci` picks the CI variants of the clippy and nextest commands.
-/// `gitleaks_base` is the commit this branch forked from; gitleaks scans the commits after it, or
-/// all history when it is `None`.
-pub(crate) fn plan(scope: &Scope, ci: bool, gitleaks_base: Option<&str>) -> Vec<Step> {
+/// `gitleaks_range` is the git range gitleaks scans (`<base>..HEAD`), or `None` for all history.
+pub(crate) fn plan(scope: &Scope, ci: bool, gitleaks_range: Option<&str>) -> Vec<Step> {
     let selectors = scope.selectors();
     let mut steps = vec![Step::Tool(fmt_step())];
     steps.push(match &selectors {
@@ -30,7 +29,7 @@ pub(crate) fn plan(scope: &Scope, ci: bool, gitleaks_base: Option<&str>) -> Vec<
             policy::shear_step(),
             policy::typos_step(),
             policy::taplo_step(),
-            policy::gitleaks_step(gitleaks_base),
+            policy::gitleaks_step(gitleaks_range),
         ]
         .map(Step::Tool),
     );
@@ -90,7 +89,7 @@ fn nextest_step(selectors: &[String], ci: bool) -> ToolStep {
         name: "nextest",
         cmd: Cmd::new(Program::Cargo, args),
         parse: parse_none,
-        fix: nextest_fix,
+        fix: setup_or_reproduce,
         render: None,
     }
 }
@@ -100,12 +99,19 @@ pub(super) fn parse_none(_output: &str, _ctx: &Context, _cmd: &Cmd) -> Vec<Findi
     Vec::new()
 }
 
-fn nextest_fix(cmd: &Cmd, output: Option<&str>) -> String {
+/// Points at `cargo xtask setup` when the tool is missing: it could not start (`None`), or cargo
+/// has no such subcommand. Otherwise `otherwise`.
+pub(super) fn setup_or(output: Option<&str>, otherwise: String) -> String {
     match output {
-        None => "run `cargo xtask setup`".into(),
-        Some(text) if text.contains("no such command") => "run `cargo xtask setup`".into(),
-        Some(_) => reproduce(cmd, output),
+        Some(text) if !text.contains("no such command") => otherwise,
+        _ => "run `cargo xtask setup`".into(),
     }
+}
+
+/// The fix for a pinned tool with no `file:line` in its output: setup when it is missing, else the
+/// command that reproduces the failure.
+pub(super) fn setup_or_reproduce(cmd: &Cmd, output: Option<&str>) -> String {
+    setup_or(output, reproduce(cmd, output))
 }
 
 #[cfg(test)]
@@ -184,7 +190,7 @@ mod tests {
     #[test]
     fn plan_commands_for_the_workspace_in_both_modes() {
         assert_eq!(
-            tool_commands(&plan(&Scope::Workspace, false, Some("abc"))),
+            tool_commands(&plan(&Scope::Workspace, false, Some("abc..HEAD"))),
             [
                 "cargo fmt --all -- --check",
                 "cargo clippy --workspace --all-targets --message-format=json-diagnostic-short",
@@ -196,7 +202,7 @@ mod tests {
                 "cargo nextest run --workspace --no-tests=pass",
             ]
         );
-        let ci = tool_commands(&plan(&Scope::Workspace, true, Some("abc")));
+        let ci = tool_commands(&plan(&Scope::Workspace, true, Some("abc..HEAD")));
         assert_eq!(
             ci[1],
             "cargo clippy --workspace --all-targets --message-format=json-diagnostic-short -- -D warnings"
@@ -269,12 +275,12 @@ mod tests {
     fn nextest_points_at_setup_when_the_subcommand_is_missing() {
         let cmd = Cmd::new(Program::Cargo, ["nextest", "run"]);
         assert_eq!(
-            nextest_fix(&cmd, Some("error: no such command: `nextest`\n")),
+            setup_or_reproduce(&cmd, Some("error: no such command: `nextest`\n")),
             "run `cargo xtask setup`"
         );
-        assert_eq!(nextest_fix(&cmd, None), "run `cargo xtask setup`");
+        assert_eq!(setup_or_reproduce(&cmd, None), "run `cargo xtask setup`");
         assert_eq!(
-            nextest_fix(&cmd, Some("1 test failed")),
+            setup_or_reproduce(&cmd, Some("1 test failed")),
             "run `cargo nextest run` to reproduce"
         );
     }

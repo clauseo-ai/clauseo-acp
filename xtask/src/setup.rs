@@ -46,7 +46,7 @@ pub(crate) struct Binary {
     pub repo: &'static str,
     /// Its winget package id, for Windows.
     pub winget: &'static str,
-    /// The macOS or Linux command that installs the release binary into `~/.cargo/bin`, for
+    /// The macOS or Linux command that installs the release binary into `CARGO_BIN`, for
     /// `(os, arch, version)` as in `std::env::consts`; `None` where no release asset exists.
     pub unix: fn(&str, &str, &str) -> Option<String>,
 }
@@ -68,6 +68,10 @@ pub(crate) const BINARIES: &[Binary] = &[
     },
 ];
 
+/// Cargo's bin directory in shell syntax: `$CARGO_HOME/bin`, or `~/.cargo/bin` without `CARGO_HOME`.
+/// `cargo install` puts the other tools there, so it is already on PATH.
+const CARGO_BIN: &str = "${CARGO_HOME:-$HOME/.cargo}/bin";
+
 fn gitleaks_unix(os: &str, arch: &str, version: &str) -> Option<String> {
     let os = match os {
         "macos" => "darwin",
@@ -80,7 +84,7 @@ fn gitleaks_unix(os: &str, arch: &str, version: &str) -> Option<String> {
         _ => return None,
     };
     Some(format!(
-        "curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v{version}/gitleaks_{version}_{os}_{arch}.tar.gz | tar -xz -C ~/.cargo/bin gitleaks"
+        "curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v{version}/gitleaks_{version}_{os}_{arch}.tar.gz | tar -xz -C \"{CARGO_BIN}\" gitleaks"
     ))
 }
 
@@ -96,7 +100,7 @@ fn lefthook_unix(os: &str, arch: &str, version: &str) -> Option<String> {
         _ => return None,
     };
     Some(format!(
-        "curl -sSfL -o ~/.cargo/bin/lefthook https://github.com/evilmartians/lefthook/releases/download/v{version}/lefthook_{version}_{os}_{arch} && chmod +x ~/.cargo/bin/lefthook"
+        "curl -sSfL -o \"{CARGO_BIN}/lefthook\" https://github.com/evilmartians/lefthook/releases/download/v{version}/lefthook_{version}_{os}_{arch} && chmod +x \"{CARGO_BIN}/lefthook\""
     ))
 }
 
@@ -121,15 +125,22 @@ pub(crate) fn install_command(binary: &Binary, os: &str, arch: &str) -> String {
 pub(crate) enum VersionCheck {
     Matches,
     Differs(String),
+    /// Found, but `<name> version` failed; holds what it printed on stderr.
+    Broken(String),
+    /// Could not start; holds the error.
     Missing(String),
 }
 
 /// Reads `<name> version` output: the trimmed stdout must equal the pin.
-pub(crate) fn compare_version(pinned: &str, ran: Result<(bool, String), String>) -> VersionCheck {
+/// `ran` is the exit status, stdout and stderr of `<name> version`, or why it could not start.
+pub(crate) fn compare_version(
+    pinned: &str,
+    ran: Result<(bool, String, String), String>,
+) -> VersionCheck {
     match ran {
-        Ok((true, stdout)) if stdout.trim() == pinned => VersionCheck::Matches,
-        Ok((true, stdout)) => VersionCheck::Differs(stdout.trim().to_owned()),
-        Ok((false, _)) => VersionCheck::Missing("`version` failed".into()),
+        Ok((true, stdout, _)) if stdout.trim() == pinned => VersionCheck::Matches,
+        Ok((true, stdout, _)) => VersionCheck::Differs(stdout.trim().to_owned()),
+        Ok((false, _, stderr)) => VersionCheck::Broken(stderr.trim().to_owned()),
         Err(error) => VersionCheck::Missing(error),
     }
 }
@@ -184,7 +195,7 @@ fn check_binary(out: &mut Printer<std::io::Stdout>, binary: &Binary, root: &Path
     out.note(format!("{} {}: {install}", binary.name, binary.version));
     let cmd = Cmd::new(Program::Named(binary.name), ["version"]);
     let ran = process::run_quiet(&cmd, root)
-        .map(|quiet| (quiet.success, quiet.stdout))
+        .map(|quiet| (quiet.success, quiet.stdout, quiet.stderr))
         .map_err(|error| format!("`{cmd}` could not start: {error}"));
     match compare_version(binary.version, ran) {
         VersionCheck::Matches => {
@@ -198,6 +209,21 @@ fn check_binary(out: &mut Printer<std::io::Stdout>, binary: &Binary, root: &Path
                     binary.name, binary.version
                 ),
                 &format!("run `{install}`"),
+            );
+            false
+        }
+        VersionCheck::Broken(stderr) => {
+            out.failure(
+                &format!(
+                    "{} is installed, but `{cmd}` failed: {}",
+                    binary.name,
+                    if stderr.is_empty() {
+                        "no output"
+                    } else {
+                        stderr.as_str()
+                    }
+                ),
+                &format!("reinstall it: run `{install}`"),
             );
             false
         }
@@ -243,7 +269,7 @@ mod tests {
         let lefthook = binary("lefthook");
         assert_eq!(
             install_command(gitleaks, "macos", "aarch64"),
-            "curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz | tar -xz -C ~/.cargo/bin gitleaks"
+            r#"curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz | tar -xz -C "${CARGO_HOME:-$HOME/.cargo}/bin" gitleaks"#
         );
         assert!(
             install_command(gitleaks, "linux", "x86_64")
@@ -251,7 +277,7 @@ mod tests {
         );
         assert_eq!(
             install_command(lefthook, "macos", "x86_64"),
-            "curl -sSfL -o ~/.cargo/bin/lefthook https://github.com/evilmartians/lefthook/releases/download/v2.2.1/lefthook_2.2.1_MacOS_x86_64 && chmod +x ~/.cargo/bin/lefthook"
+            r#"curl -sSfL -o "${CARGO_HOME:-$HOME/.cargo}/bin/lefthook" https://github.com/evilmartians/lefthook/releases/download/v2.2.1/lefthook_2.2.1_MacOS_x86_64 && chmod +x "${CARGO_HOME:-$HOME/.cargo}/bin/lefthook""#
         );
         assert!(
             install_command(lefthook, "linux", "aarch64").contains("lefthook_2.2.1_Linux_arm64")
@@ -273,17 +299,17 @@ mod tests {
     #[test]
     fn version_check_wants_the_exact_pin() {
         assert_eq!(
-            compare_version("8.30.1", Ok((true, "8.30.1\n".into()))),
+            compare_version("8.30.1", Ok((true, "8.30.1\n".into(), String::new()))),
             VersionCheck::Matches
         );
         assert_eq!(
-            compare_version("2.2.1", Ok((true, "2.2.2\n".into()))),
+            compare_version("2.2.1", Ok((true, "2.2.2\n".into(), String::new()))),
             VersionCheck::Differs("2.2.2".into())
         );
-        assert!(matches!(
-            compare_version("2.2.1", Ok((false, String::new()))),
-            VersionCheck::Missing(_)
-        ));
+        assert_eq!(
+            compare_version("2.2.1", Ok((false, String::new(), "boom\n".into()))),
+            VersionCheck::Broken("boom".into())
+        );
         assert_eq!(
             compare_version("2.2.1", Err("not found".into())),
             VersionCheck::Missing("not found".into())
