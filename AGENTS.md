@@ -24,7 +24,8 @@ this. Use the words in `GLOSSARY.md` exactly.
 - `cargo xtask check --quick`: changed crates only. Run it before every report.
 - `cargo xtask check`: exactly CI's fast lane plus this OS's tests.
 - `cargo xtask buildtime`: build-loop timings against `budgets.toml`.
-- `cargo xtask setup`: pinned cargo tools; `cargo xtask setup --binaries` adds gitleaks, lefthook.
+- `cargo xtask setup`: installs the pinned cargo tools and checks gitleaks and lefthook.
+- `cargo xtask setup --binaries`: also installs gitleaks and lefthook.
 - `pnpm -C ui install --frozen-lockfile`: frontend dependencies.
 
 ## Map

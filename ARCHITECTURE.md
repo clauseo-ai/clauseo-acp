@@ -44,10 +44,11 @@ Clauseo app process (Rust)
 
 ## Crates
 
-Rust crates live in a folder under crates/ named after the crate, package `clauseo-<name>`. The
-frontend is a pnpm workspace under `ui/`. `cargo xtask check` reads the table below and fails if a
-crate depends on anything in its "Never depends on" column, directly or through another crate. Rows
-marked `planned` are checked once the crate exists. Every crate that exists must have a row.
+Each Rust crate lives in a folder under `crates/` named after its row below, and its package is
+that name with a `clauseo-` prefix (`crates/desktop` is `clauseo-desktop`). The frontend is a
+pnpm workspace under `ui/`. `cargo xtask check` reads the table below and fails if a crate depends
+on anything in its "Never depends on" column, directly or through another crate. Rows marked
+`planned` are checked once the crate exists. Every crate that exists must have a row.
 
 | Crate | Owns | May depend on | Never depends on | Status |
 |---|---|---|---|---|

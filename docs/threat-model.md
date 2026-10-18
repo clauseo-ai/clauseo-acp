@@ -37,7 +37,7 @@ converted document. From there they can call any IPC command the page can reach.
 - `built`: An `AppManifest` in `build.rs`, so app commands go through the access check; the command
   list is empty
 - `built`: No global Tauri object, a frozen prototype, no asset protocol (`tauri-config` check); no
-  devtools (`plugins` check and `deny.toml`)
+  devtools (`deny.toml` bans the feature)
 - `designed`: Rust validates every command (types, opaque ids, allowed values); files are named by
   opaque ids, never paths
 - `designed`: A minimal command surface: send, subscribe, acknowledge, answer a permission, pick a
