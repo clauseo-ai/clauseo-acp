@@ -81,8 +81,8 @@ outside `ui/app/src/transport/`.
 "fs", "process" and "any I/O" in the "Never depends on" column mean the standard library's APIs,
 not the `process` crate. In those crates `cargo xtask check` parses every `.rs` file with `syn` and
 bans `std::fs`, `std::net`, `std::process`, `std::env`, `std::time::Instant::now` and
-`std::time::SystemTime::now`. Exceptions, one path per line with a reason, live in the core-io
-exceptions file under `xtask/`.
+`std::time::SystemTime::now`. Exceptions, one path per line with a reason, live in
+`xtask/core-io-exceptions.txt`.
 
 ## Seams left open on purpose
 
