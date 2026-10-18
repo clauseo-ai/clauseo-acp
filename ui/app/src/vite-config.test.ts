@@ -25,19 +25,25 @@ test("vite.config.ts builds App.tsx with the React Compiler", async () => {
 
 test("the dev CSP is the production CSP plus inline script and style and Vite's websocket", () => {
   const production = tauriConf.app.security.csp;
-  const dev = devCsp(production);
+  const dev = devCsp(production, 1420);
   expect(dev).toContain("script-src 'self' 'unsafe-inline';");
   expect(dev).toContain("style-src 'self' 'unsafe-inline';");
-  expect(dev).toContain("ws://localhost:*");
   expect(dev).toContain("require-trusted-types-for 'script'");
   // Every production directive survives, in order, with only those additions.
   const strip = (policy: string) =>
-    policy.replaceAll(" 'unsafe-inline'", "").replace(" ws://localhost:*", "");
+    policy.replaceAll(" 'unsafe-inline'", "").replace(" ws://localhost:1420", "");
   expect(strip(dev)).toBe(production.replaceAll(/\s*;\s*/g, "; "));
 });
 
+test("the dev CSP allows Vite's websocket on its own port and no other", () => {
+  const dev = devCsp(tauriConf.app.security.csp, 51234);
+  const connect = dev.split("; ").find((directive) => directive.startsWith("connect-src"));
+  expect(connect?.endsWith(" ws://localhost:51234")).toBe(true);
+  expect(dev).not.toContain("localhost:*");
+});
+
 test("the dev CSP refuses a production CSP without a directive it adds to", () => {
-  expect(() => devCsp("default-src 'self'; style-src 'self'; connect-src ipc:")).toThrow(
+  expect(() => devCsp("default-src 'self'; style-src 'self'; connect-src ipc:", 1420)).toThrow(
     /no script-src/,
   );
 });
