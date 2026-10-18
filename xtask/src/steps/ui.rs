@@ -11,10 +11,11 @@ use crate::violation::{Finding, Violation};
 use crate::workspace::Context;
 
 /// Why the ui steps are skipped on a machine without pnpm. CI never skips them.
-pub(super) const NO_PNPM: &str = "pnpm not found; install pnpm 12.14.0 to run the ui steps";
+pub(super) const NO_PNPM: &str =
+    "pnpm not found; install the version in ui/package.json \"packageManager\" to run the ui steps";
 
-/// The fix when pnpm cannot start: install the pinned version, then the workspace.
-const PNPM_FIX: &str = "install pnpm 12.14.0 (the `packageManager` in ui/package.json), then run `pnpm -C ui install --frozen-lockfile`";
+/// The fix when pnpm cannot start: install the version `ui/package.json` names, then the workspace.
+const PNPM_FIX: &str = "install the pnpm version in ui/package.json `packageManager`, then run `pnpm -C ui install --frozen-lockfile`";
 
 /// The six ui steps in run order: the install, then the four checks and the two builds.
 pub(super) fn steps() -> Vec<ToolStep> {
@@ -264,7 +265,7 @@ mod tests {
         let cmd = vitest_step().cmd;
         assert_eq!(
             ui_fix(&cmd, None),
-            "install pnpm 12.14.0 (the `packageManager` in ui/package.json), then run `pnpm -C ui install --frozen-lockfile`"
+            "install the pnpm version in ui/package.json `packageManager`, then run `pnpm -C ui install --frozen-lockfile`"
         );
         assert_eq!(
             ui_fix(&cmd, Some("FAIL  src/App.test.tsx")),

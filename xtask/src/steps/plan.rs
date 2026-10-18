@@ -304,15 +304,7 @@ mod tests {
             .into_iter()
             .filter(|(name, _)| UI.contains(name))
             .collect();
-        assert_eq!(
-            ui_reasons,
-            UI.map(|name| {
-                (
-                    name,
-                    "pnpm not found; install pnpm 12.14.0 to run the ui steps",
-                )
-            })
-        );
+        assert_eq!(ui_reasons, UI.map(|name| (name, ui::NO_PNPM)));
         assert!(
             tool_commands(&steps)
                 .iter()
