@@ -2,6 +2,7 @@
 //! on a scratch tree laid out like the repo.
 
 use super::*;
+use crate::checks::tests::desktop_context;
 use crate::scratch::Scratch;
 use std::fs;
 
@@ -207,10 +208,7 @@ fn run_passes_a_clean_tree_and_fails_a_planted_plugin_with_its_path() {
             fs::write(path, text).expect("write the file");
         }
     };
-    let ctx = Context {
-        root: dir.to_path_buf(),
-        members: Vec::new(),
-    };
+    let ctx = desktop_context(&dir);
     write_all(DESKTOP);
     assert_eq!(run(&ctx), Vec::new());
     let planted = DESKTOP.replace(
@@ -230,11 +228,13 @@ fn run_passes_a_clean_tree_and_fails_a_planted_plugin_with_its_path() {
 }
 
 #[test]
-fn run_passes_when_the_desktop_manifest_is_missing() {
-    let dir = Scratch::new("plugins-missing");
+fn run_fails_once_when_the_desktop_crate_is_not_a_member() {
+    let dir = Scratch::new("plugins-no-member");
     let ctx = Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
     };
-    assert_eq!(run(&ctx), Vec::new());
+    let found = run(&ctx);
+    assert_eq!(found.len(), 1);
+    assert_eq!((found[0].path.as_str(), found[0].line), ("Cargo.toml", 1));
 }

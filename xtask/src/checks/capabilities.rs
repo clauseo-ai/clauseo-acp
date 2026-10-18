@@ -14,8 +14,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-/// The capability files, at the repo root.
-const DIR: &str = "crates/desktop/capabilities";
+/// The capability folder, inside the desktop crate's directory.
+const DIR: &str = "capabilities";
 
 /// The extensions of the capability files Tauri reads.
 const EXTENSIONS: [&str; 3] = ["json", "json5", "toml"];
@@ -34,11 +34,22 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
 };
 
 fn run(ctx: &Context) -> Vec<Violation> {
-    let dir = ctx.root.join(DIR);
-    let files = match capability_files(&dir) {
+    let desktop = match checks::desktop_dir(ctx) {
+        Ok(dir) => dir,
+        Err(violation) => return vec![violation],
+    };
+    let rel = checks::join(desktop, DIR);
+    let files = match capability_files(&ctx.root.join(&rel)) {
         Ok(files) => files,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Vec::new(),
-        Err(error) => return vec![checks::unreadable(DIR, &error)],
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return vec![checks::violation(
+                &rel,
+                1,
+                format!("the capabilities folder `{rel}` is missing"),
+                "restore it with main.json: Tauri reads the window's grants from it, and this check guards them",
+            )];
+        }
+        Err(error) => return vec![checks::unreadable(&rel, &error)],
     };
     let mut found = Vec::new();
     for file in &files {
@@ -123,177 +134,4 @@ fn forbidden_permissions(line: &str) -> Vec<&str> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::scratch::Scratch;
-    use crate::workspace::Context;
-
-    const PATH: &str = "crates/desktop/capabilities/main.json";
-
-    const CLEAN: &str = r#"{
-  "identifier": "main",
-  "description": "Grants nothing: refs: and prose are fine.",
-  "windows": ["main"],
-  "permissions": []
-}"#;
-
-    fn violation(line: u32, message: &str, fix: &str) -> Violation {
-        Violation {
-            path: PATH.to_owned(),
-            line,
-            message: message.to_owned(),
-            fix: fix.to_owned(),
-        }
-    }
-
-    #[test]
-    fn a_capability_with_an_empty_list_passes() {
-        assert_eq!(scan(PATH, CLEAN), Vec::new());
-    }
-
-    #[test]
-    fn core_default_fails_at_its_line() {
-        let text = "{\n  \"permissions\": [\n    \"core:default\"\n  ]\n}";
-        assert_eq!(
-            scan(PATH, text),
-            vec![violation(3, "capability grants `core:default`", FIX_CORE)]
-        );
-    }
-
-    #[test]
-    fn remote_fails_at_its_line() {
-        let text = "{\n  \"remote\": { \"urls\": [\"https://*\"] }\n}";
-        assert_eq!(
-            scan(PATH, text),
-            vec![violation(
-                2,
-                "capability file mentions `remote`",
-                FIX_REMOTE
-            )]
-        );
-    }
-
-    #[test]
-    fn remote_in_prose_fails_with_the_reword_hint() {
-        let text = "{\n  \"description\": \"never loads a remote page\"\n}";
-        assert_eq!(
-            scan(PATH, text),
-            vec![violation(
-                2,
-                "capability file mentions `remote`",
-                FIX_REMOTE
-            )]
-        );
-        assert!(FIX_REMOTE.contains("or reword the text"));
-    }
-
-    #[test]
-    fn a_quoted_fs_permission_fails_and_names_the_whole_string() {
-        let text = "  \"permissions\": [\"fs:allow-read\"]";
-        assert_eq!(
-            scan(PATH, text),
-            vec![violation(
-                1,
-                "capability grants `fs:allow-read`",
-                FIX_PREFIX
-            )]
-        );
-    }
-
-    #[test]
-    fn an_identifier_object_with_a_prefix_fails_and_single_quotes_count() {
-        let object = "{ \"identifier\": \"fs:scope\" }";
-        assert_eq!(
-            scan(PATH, object)[0].message,
-            "capability grants `fs:scope`"
-        );
-        let single = "permissions = ['shell:allow-open']";
-        assert_eq!(
-            scan(PATH, single)[0].message,
-            "capability grants `shell:allow-open`"
-        );
-    }
-
-    #[test]
-    fn a_line_with_core_default_and_a_prefix_fails_twice() {
-        let text = "[\"core:default\", \"dialog:allow-ask\"]";
-        let messages: Vec<String> = scan(PATH, text).into_iter().map(|v| v.message).collect();
-        assert_eq!(
-            messages,
-            [
-                "capability grants `core:default`",
-                "capability grants `dialog:allow-ask`"
-            ]
-        );
-    }
-
-    #[test]
-    fn the_check_is_registered_under_its_name() {
-        assert!(
-            crate::checks::ALL
-                .iter()
-                .any(|check| check.name == "capabilities")
-        );
-    }
-
-    #[test]
-    fn a_ds_store_and_a_backup_file_are_ignored() {
-        let dir = Scratch::new("capabilities-ignored");
-        let caps = dir.join(DIR);
-        fs::create_dir_all(&caps).expect("create the capability dir");
-        fs::write(caps.join("main.json"), CLEAN).expect("write main.json");
-        fs::write(
-            caps.join(".DS_Store"),
-            b"\x00\x00\x00\x01Bud1\xff\xfe\x00remote",
-        )
-        .expect("write .DS_Store");
-        fs::write(caps.join("main.json~"), "[\"core:default\"]").expect("write main.json~");
-        let ctx = Context {
-            root: dir.to_path_buf(),
-            members: Vec::new(),
-        };
-        assert_eq!(run(&ctx), Vec::new());
-    }
-
-    #[test]
-    fn a_missing_directory_passes() {
-        let dir = Scratch::new("capabilities-missing");
-        let ctx = Context {
-            root: dir.to_path_buf(),
-            members: Vec::new(),
-        };
-        assert_eq!(run(&ctx), Vec::new());
-    }
-
-    #[test]
-    fn run_reads_nested_capability_files_and_reports_their_repo_path() {
-        let dir = Scratch::new("capabilities-run");
-        let nested = dir.join("crates/desktop/capabilities/extra");
-        fs::create_dir_all(&nested).expect("create the capability dirs");
-        fs::write(dir.join("crates/desktop/capabilities/main.json"), CLEAN)
-            .expect("write main.json");
-        fs::write(
-            nested.join("local.toml"),
-            "permissions = [\"fs:allow-read\"]\n",
-        )
-        .expect("write local.toml");
-        let ctx = Context {
-            root: dir.to_path_buf(),
-            members: Vec::new(),
-        };
-        assert_eq!(
-            run(&ctx),
-            vec![violation(
-                1,
-                "capability grants `fs:allow-read`",
-                FIX_PREFIX
-            )]
-            .into_iter()
-            .map(|v| Violation {
-                path: "crates/desktop/capabilities/extra/local.toml".to_owned(),
-                ..v
-            })
-            .collect::<Vec<_>>()
-        );
-    }
-}
+mod tests;

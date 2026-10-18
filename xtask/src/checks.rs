@@ -29,6 +29,36 @@ pub(crate) const ALL: &[StaticCheck] = &[
     tauri_config::CHECK,
 ];
 
+/// The package name of the desktop crate. The checks find its directory through `Context::members`,
+/// so a moved crate is still checked and a missing one fails instead of passing quietly.
+pub(crate) const DESKTOP_PACKAGE: &str = "clauseo-desktop";
+
+/// The repo-relative directory of the desktop crate. When it is not a workspace member, the one
+/// violation at `Cargo.toml:1` that every desktop check reports.
+pub(crate) fn desktop_dir(ctx: &Context) -> Result<&str, Violation> {
+    ctx.members
+        .iter()
+        .find(|member| member.name == DESKTOP_PACKAGE)
+        .map(|member| member.dir.as_str())
+        .ok_or_else(|| {
+            violation(
+                "Cargo.toml",
+                1,
+                format!("the desktop crate (package `{DESKTOP_PACKAGE}`) is not a workspace member"),
+                "restore crates/desktop or update xtask/src/checks: these checks guard its capabilities, plugins and Tauri config",
+            )
+        })
+}
+
+/// `dir/name`, or `name` when `dir` is the repo root.
+pub(crate) fn join(dir: &str, name: &str) -> String {
+    if dir.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{dir}/{name}")
+    }
+}
+
 /// Reads `root/rel` as text. `Ok(None)` when the file does not exist; any other read error is a
 /// violation at line 1.
 pub(crate) fn read_repo_file(root: &Path, rel: &str) -> Result<Option<String>, Violation> {
@@ -98,6 +128,42 @@ mod tests {
         assert_eq!(
             repo_path(root, Path::new("/ws/crates/desktop/x.json")),
             "crates/desktop/x.json"
+        );
+    }
+
+    /// A context whose members include the desktop crate at `crates/desktop`.
+    pub(crate) fn desktop_context(root: &Path) -> Context {
+        Context {
+            root: root.to_path_buf(),
+            members: vec![crate::workspace::Member {
+                name: DESKTOP_PACKAGE.to_owned(),
+                dir: "crates/desktop".to_owned(),
+                path_deps: Vec::new(),
+            }],
+        }
+    }
+
+    #[test]
+    fn the_desktop_dir_comes_from_the_member_with_its_package_name() {
+        let mut ctx = desktop_context(Path::new("/ws"));
+        ctx.members[0].dir = "apps/shell".to_owned();
+        assert_eq!(desktop_dir(&ctx), Ok("apps/shell"));
+    }
+
+    #[test]
+    fn a_missing_desktop_member_is_one_violation_at_the_root_manifest() {
+        let ctx = Context {
+            root: Path::new("/ws").to_path_buf(),
+            members: Vec::new(),
+        };
+        assert_eq!(
+            desktop_dir(&ctx),
+            Err(violation(
+                "Cargo.toml",
+                1,
+                "the desktop crate (package `clauseo-desktop`) is not a workspace member",
+                "restore crates/desktop or update xtask/src/checks: these checks guard its capabilities, plugins and Tauri config",
+            ))
         );
     }
 

@@ -2,6 +2,7 @@
 //! scratch tree laid out like the repo.
 
 use super::*;
+use crate::checks::tests::desktop_context;
 use crate::scratch::Scratch;
 use std::fs;
 
@@ -309,23 +310,33 @@ fn the_check_is_registered_after_plugins() {
 #[test]
 fn run_passes_a_clean_tree_and_fails_a_planted_setting_with_its_path() {
     let dir = Scratch::new("tauri-config-run");
-    let ctx = Context {
-        root: dir.to_path_buf(),
-        members: Vec::new(),
-    };
+    let ctx = desktop_context(&dir);
+    let conf = "crates/desktop/tauri.conf.json";
     fs::create_dir_all(dir.join("crates/desktop")).expect("create the desktop dir");
-    fs::write(dir.join(BUILD_RS), BUILD).expect("write build.rs");
-    fs::write(dir.join(TAURI_CONF), CONF).expect("write tauri.conf.json");
+    fs::write(dir.join("crates/desktop/build.rs"), BUILD).expect("write build.rs");
+    fs::write(dir.join(conf), CONF).expect("write tauri.conf.json");
     assert_eq!(run(&ctx), Vec::new());
     let planted = CONF.replace("\"withGlobalTauri\": false", "\"withGlobalTauri\": true");
-    fs::write(dir.join(TAURI_CONF), &planted).expect("write tauri.conf.json");
+    fs::write(dir.join(conf), &planted).expect("write tauri.conf.json");
     assert_eq!(
         run(&ctx),
         vec![violation(
-            TAURI_CONF,
+            conf,
             line_of(&planted, "withGlobalTauri"),
             "app.withGlobalTauri must be false",
             GLOBAL_TAURI_FIX,
         )]
     );
+}
+
+#[test]
+fn run_fails_once_when_the_desktop_crate_is_not_a_member() {
+    let dir = Scratch::new("tauri-config-no-member");
+    let ctx = Context {
+        root: dir.to_path_buf(),
+        members: Vec::new(),
+    };
+    let found = run(&ctx);
+    assert_eq!(found.len(), 1);
+    assert_eq!((found[0].path.as_str(), found[0].line), ("Cargo.toml", 1));
 }

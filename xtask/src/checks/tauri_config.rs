@@ -14,8 +14,9 @@ use crate::violation::Violation;
 use crate::workspace::Context;
 use serde_json::Value;
 
-const TAURI_CONF: &str = "crates/desktop/tauri.conf.json";
-const BUILD_RS: &str = "crates/desktop/build.rs";
+/// The files this check reads, inside the desktop crate's directory.
+const TAURI_CONF: &str = "tauri.conf.json";
+const BUILD_RS: &str = "build.rs";
 
 const CONF_MISSING_FIX: &str =
     "restore it: Tauri reads the window's security settings from it, and this check guards them";
@@ -43,12 +44,18 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
 };
 
 fn run(ctx: &Context) -> Vec<Violation> {
-    let mut found = match checks::read_repo_file(&ctx.root, TAURI_CONF) {
-        Ok(text) => conf_violations(TAURI_CONF, text.as_deref()),
+    let desktop = match checks::desktop_dir(ctx) {
+        Ok(dir) => dir,
+        Err(violation) => return vec![violation],
+    };
+    let conf = checks::join(desktop, TAURI_CONF);
+    let mut found = match checks::read_repo_file(&ctx.root, &conf) {
+        Ok(text) => conf_violations(&conf, text.as_deref()),
         Err(violation) => vec![violation],
     };
-    found.extend(match checks::read_repo_file(&ctx.root, BUILD_RS) {
-        Ok(text) => build_rs_violations(BUILD_RS, text.as_deref()),
+    let build = checks::join(desktop, BUILD_RS);
+    found.extend(match checks::read_repo_file(&ctx.root, &build) {
+        Ok(text) => build_rs_violations(&build, text.as_deref()),
         Err(violation) => vec![violation],
     });
     found
