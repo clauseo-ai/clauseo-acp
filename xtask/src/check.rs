@@ -2,10 +2,11 @@
 
 use crate::changes::{self, ScanRange, Selection};
 use crate::output::Printer;
-use crate::process::{self, Cmd};
+use crate::process::{self, Cmd, Program};
 use crate::steps::{self, Scope, StepStatus};
 use crate::workspace::{self, Context};
 use std::io;
+use std::path::Path;
 use std::process::ExitCode;
 
 /// Runs the whole check. `quick` limits clippy and nextest to changed packages.
@@ -28,7 +29,7 @@ pub(crate) fn run(quick: bool) -> ExitCode {
         Scope::Workspace
     };
     let range = gitleaks_range(&mut out, &ctx, ci);
-    let steps = steps::plan(&scope, ci, range.as_deref());
+    let steps = steps::plan(&scope, ci, range.as_deref(), pnpm_found(&ctx.root));
     let mut exec =
         |cmd: &Cmd, on_output: &mut dyn FnMut(&[u8])| process::capture(cmd, &ctx.root, on_output);
     let results = steps::run_all(steps, &ctx, &mut out, &mut exec);
@@ -42,6 +43,11 @@ pub(crate) fn run(quick: bool) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// Whether `pnpm` starts. Without it the ui steps are skipped outside CI (see `steps::plan`).
+fn pnpm_found(root: &Path) -> bool {
+    process::run_quiet(&Cmd::new(Program::Named("pnpm"), ["--version"]), root).is_ok()
 }
 
 /// CI mode: `CI` is set, is not empty, and is not `0` or `false` in any case.
