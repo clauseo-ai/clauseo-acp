@@ -330,9 +330,5 @@ fn a_missing_file_is_one_violation_on_line_1() {
     assert_eq!(violations[0].fix, "restore budgets.toml at the repo root");
 }
 
-#[test]
-fn the_real_budgets_toml_parses_with_no_violations() {
-    let (budgets, violations) = parse(include_str!("../../../budgets.toml"));
-    assert!(violations.is_empty(), "{violations:?}");
-    assert!(budgets.len() >= 25, "only {} rows", budgets.len());
-}
+// The repo's own budgets.toml is checked by the `budgets` step of `cargo xtask check`, not by a
+// test here, so a bad row is reported once, with its file and line.
