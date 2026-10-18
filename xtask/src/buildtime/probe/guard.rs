@@ -81,9 +81,9 @@ impl Guard {
     fn unchanged(&mut self) -> Result<(), Failure> {
         let found = match fs::read(&self.path) {
             Ok(bytes) if bytes == self.last.as_bytes() => return Ok(()),
-            Ok(_) => conflict(&self.rel, "changed after a running buildtime run"),
+            Ok(_) => conflict(&self.rel, "changed during this buildtime run"),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                conflict(&self.rel, "is missing after a running buildtime run")
+                conflict(&self.rel, "went missing during this buildtime run")
             }
             Err(error) => Failure::new(
                 format!("could not read {}: {error}", self.rel),
