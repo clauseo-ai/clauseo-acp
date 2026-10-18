@@ -113,6 +113,67 @@ fn the_check_is_registered_under_its_name() {
     );
 }
 
+const CONF: &str = r#"{
+  "app": {
+    "security": {
+      "capabilities": [
+        "main",
+        {
+          "identifier": "inline",
+          "windows": ["main"],
+          "permissions": ["core:default", "fs:allow-read"]
+        }
+      ]
+    }
+  }
+}"#;
+
+#[test]
+fn an_inline_capability_object_fails_at_its_lines_in_the_config() {
+    let conf = "crates/desktop/tauri.conf.json";
+    let line = 9;
+    assert!(
+        CONF.lines()
+            .nth(8)
+            .is_some_and(|text| text.contains("core:default"))
+    );
+    let at = |message: &str, fix: &str| Violation {
+        path: conf.to_owned(),
+        ..violation(line, message, fix)
+    };
+    assert_eq!(
+        inline_violations(conf, CONF),
+        vec![
+            at("capability grants `core:default`", FIX_CORE),
+            at("capability grants `fs:allow-read`", FIX_PREFIX),
+        ]
+    );
+}
+
+#[test]
+fn string_capabilities_and_an_invalid_config_pass_inline() {
+    let conf = "crates/desktop/tauri.conf.json";
+    let names = "{\"app\": {\"security\": {\"capabilities\": [\"main\", \"fs:x\"]}}}";
+    assert_eq!(inline_violations(conf, names), Vec::new());
+    assert_eq!(inline_violations(conf, "{ \"app\": "), Vec::new());
+}
+
+#[test]
+fn run_scans_inline_capabilities_in_the_config() {
+    let dir = Scratch::new("capabilities-inline");
+    let caps = dir.join("crates/desktop/capabilities");
+    fs::create_dir_all(&caps).expect("create the capability dir");
+    fs::write(caps.join("main.json"), CLEAN).expect("write main.json");
+    fs::write(dir.join("crates/desktop/tauri.conf.json"), CONF).expect("write the config");
+    let found = run(&desktop_context(&dir));
+    assert_eq!(found.len(), 2);
+    assert!(
+        found
+            .iter()
+            .all(|v| v.path == "crates/desktop/tauri.conf.json" && v.line == 9)
+    );
+}
+
 #[test]
 fn a_ds_store_and_a_backup_file_are_ignored() {
     let dir = Scratch::new("capabilities-ignored");
