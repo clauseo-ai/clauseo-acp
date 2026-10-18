@@ -1,7 +1,9 @@
 //! Tests for `buildtime.rs`: the statistics, the verdict, the plan, the budget lookup and the output.
 
 use super::report::{error_json, json_object, probe_json, table_lines, warning_lines, web_json};
+use super::verdict::*;
 use super::*;
+use crate::budgets::{Budget, Gate, Unit};
 
 fn member(name: &str, dir: &str) -> Member {
     Member {
@@ -337,4 +339,19 @@ fn the_error_json_is_one_line_per_error_and_never_empty() {
 fn a_stopped_run_prints_its_reason_on_one_line() {
     let errors = [one_line("refusing to measure:\n  CI is set")];
     assert_eq!(errors[0], "refusing to measure: CI is set");
+}
+
+#[test]
+fn the_json_of_a_probe_carries_its_warning_only_when_there_is_one() {
+    let mut warned = measured(0.5, 1.0);
+    if let Outcome::Measured { warning, .. } = &mut warned.outcome {
+        *warning = Some("warning: clauseo-desktop builds without incremental; its timing is not comparable with the budget".into());
+    }
+    let json = serde_json::to_value(probe_json(&warned)).unwrap_or_default();
+    assert_eq!(
+        json["warning"],
+        "warning: clauseo-desktop builds without incremental; its timing is not comparable with the budget"
+    );
+    let plain = serde_json::to_value(probe_json(&measured(0.5, 1.0))).unwrap_or_default();
+    assert!(plain.get("warning").is_none());
 }

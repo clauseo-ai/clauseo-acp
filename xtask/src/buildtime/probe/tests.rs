@@ -1,0 +1,230 @@
+//! Tests for `probe.rs`: the restore of the marker file on every path, and the warm-up judgement.
+
+use super::*;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
+const REL: &str = "crates/desktop/src/lib.rs";
+const ORIGINAL: &str = "//! desktop\n\npub const BUILDTIME_MARKER: u64 = 41;\n\npub fn f() {}\n";
+const BUMPED: &str = "//! desktop\n\npub const BUILDTIME_MARKER: u64 = 42;\n\npub fn f() {}\n";
+const RUSTC: &str = "     Running `/rust/bin/rustc --crate-name clauseo_desktop --edition=2024 crates/desktop/src/lib.rs --crate-type lib -C embed-bitcode=no -C incremental=/ws/target/debug/incremental -C metadata=4a2f`";
+const RUSTC_NOT_INCREMENTAL: &str = "     Running `/rust/bin/rustc --crate-name clauseo_desktop --edition=2024 crates/desktop/src/lib.rs --crate-type lib -C embed-bitcode=no -C metadata=4a2f`";
+const CHECK: Probe = Probe {
+    name: "check_desktop",
+    package: "clauseo-desktop",
+    budget_id: "cargo_check_app_edit",
+    subcommand: "check",
+};
+
+/// A scratch repo for one test: its own directory under the temp dir, cleared before and after.
+fn scratch(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("xtask-buildtime-{name}-{}", std::process::id()));
+    if dir.exists() {
+        fs::remove_dir_all(&dir).expect("clear the old scratch dir");
+    }
+    let file = dir.join(REL);
+    fs::create_dir_all(file.parent().expect("the file has a parent"))
+        .expect("create the crate dir");
+    fs::write(&file, ORIGINAL).expect("write the marker file");
+    dir
+}
+
+fn cleanup(dir: &Path) {
+    if dir.exists() {
+        fs::remove_dir_all(dir).expect("remove the scratch dir");
+    }
+}
+
+fn marker() -> Marker {
+    Marker {
+        path: REL.into(),
+        text: ORIGINAL.into(),
+    }
+}
+
+fn file_text(dir: &Path) -> String {
+    fs::read_to_string(dir.join(REL)).expect("the marker file is readable")
+}
+
+fn backup_of(dir: &Path) -> PathBuf {
+    dir.join(BACKUP_DIR).join(REL)
+}
+
+#[test]
+fn a_failing_cargo_puts_the_original_bytes_back_and_leaves_no_copy() {
+    let dir = scratch("failing-cargo");
+    let mut runner = |_: &Cmd| -> io::Result<Captured> {
+        Ok(Captured {
+            success: false,
+            output: "error[E0432]: unresolved import\n".into(),
+        })
+    };
+    let failure = measure(&dir, &marker(), CHECK, 2, false, &mut runner)
+        .expect_err("a failing cargo fails the probe");
+    assert_eq!(failure.message, "cargo check -v failed");
+    assert_eq!(file_text(&dir), ORIGINAL);
+    assert!(!backup_of(&dir).exists());
+    cleanup(&dir);
+}
+
+#[test]
+fn a_spawn_error_puts_the_original_bytes_back_and_leaves_no_copy() {
+    let dir = scratch("spawn-error");
+    let mut runner = |_: &Cmd| -> io::Result<Captured> {
+        Err(io::Error::new(io::ErrorKind::NotFound, "no cargo here"))
+    };
+    let failure = measure(&dir, &marker(), CHECK, 2, false, &mut runner)
+        .expect_err("a spawn error fails the probe");
+    assert!(failure.message.contains("no cargo here"));
+    assert_eq!(file_text(&dir), ORIGINAL);
+    assert!(!backup_of(&dir).exists());
+    cleanup(&dir);
+}
+
+#[test]
+fn a_panicking_runner_restores_the_file_on_the_spot() {
+    let dir = scratch("panicking-runner");
+    let mut runner = |_: &Cmd| -> io::Result<Captured> { panic!("cargo exploded") };
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        measure(&dir, &marker(), CHECK, 2, false, &mut runner)
+    }));
+    assert!(outcome.is_err(), "the panic reaches the caller");
+    assert_eq!(file_text(&dir), ORIGINAL);
+    assert!(!backup_of(&dir).exists());
+    cleanup(&dir);
+}
+
+#[test]
+fn a_leftover_copy_is_put_back_and_deleted_and_named() {
+    let dir = scratch("leftover");
+    fs::write(dir.join(REL), BUMPED).expect("the interrupted run left the bump");
+    fs::create_dir_all(backup_of(&dir).parent().expect("has a parent"))
+        .expect("create the backup dir");
+    fs::write(backup_of(&dir), ORIGINAL).expect("the interrupted run left the copy");
+    let lines = restore_leftovers(&dir).expect("the leftover restores");
+    assert_eq!(
+        lines,
+        vec![format!("restored {REL} from an interrupted buildtime run")]
+    );
+    assert_eq!(file_text(&dir), ORIGINAL);
+    assert!(!backup_of(&dir).exists());
+    assert!(!dir.join(BACKUP_DIR).join("crates").exists());
+    cleanup(&dir);
+}
+
+#[test]
+fn no_leftover_copies_means_nothing_is_printed() {
+    let dir = scratch("no-leftovers");
+    assert_eq!(restore_leftovers(&dir), Ok(Vec::new()));
+    assert_eq!(file_text(&dir), ORIGINAL);
+    cleanup(&dir);
+}
+
+#[test]
+fn a_successful_run_returns_the_samples_and_leaves_the_original_bytes() {
+    let dir = scratch("success");
+    let mut calls = Vec::new();
+    let mut runner = |cmd: &Cmd| -> io::Result<Captured> {
+        calls.push(cmd.to_string());
+        let output = if cmd.args.iter().any(|arg| arg == "-v") {
+            RUSTC.to_owned()
+        } else {
+            String::new()
+        };
+        Ok(Captured {
+            success: true,
+            output,
+        })
+    };
+    let samples =
+        measure(&dir, &marker(), CHECK, 3, false, &mut runner).expect("the probe measures");
+    assert_eq!(samples.secs.len(), 3);
+    assert_eq!(samples.warning, None);
+    assert_eq!(
+        calls,
+        vec![
+            "cargo check -v",
+            "cargo check",
+            "cargo check",
+            "cargo check"
+        ]
+    );
+    assert_eq!(file_text(&dir), ORIGINAL);
+    assert!(!backup_of(&dir).exists());
+    cleanup(&dir);
+}
+
+#[test]
+fn a_crate_that_is_not_rebuilt_fails_before_any_timed_run_and_restores() {
+    let dir = scratch("not-rebuilt");
+    let mut calls = 0;
+    let mut runner = |_: &Cmd| -> io::Result<Captured> {
+        calls += 1;
+        Ok(Captured {
+            success: true,
+            output: "    Fresh clauseo-desktop v0.1.0\n".into(),
+        })
+    };
+    let failure = measure(&dir, &marker(), CHECK, 5, false, &mut runner)
+        .expect_err("a crate cargo did not rebuild fails the probe");
+    assert_eq!(
+        failure.message,
+        "`cargo check` did not rebuild clauseo-desktop after its marker changed; it is not in the default members' build graph"
+    );
+    assert_eq!(
+        failure.fix,
+        "add clauseo-desktop to the build graph of the default members (default-members in Cargo.toml)"
+    );
+    assert_eq!(calls, 1, "only the warm-up runs");
+    assert_eq!(file_text(&dir), ORIGINAL);
+    cleanup(&dir);
+}
+
+#[test]
+fn a_non_incremental_build_warns_locally_and_is_refused_in_ci() {
+    let dir = scratch("not-incremental");
+    let mut runner = |cmd: &Cmd| -> io::Result<Captured> {
+        let output = if cmd.args.iter().any(|arg| arg == "-v") {
+            RUSTC_NOT_INCREMENTAL.to_owned()
+        } else {
+            String::new()
+        };
+        Ok(Captured {
+            success: true,
+            output,
+        })
+    };
+    let samples =
+        measure(&dir, &marker(), CHECK, 1, false, &mut runner).expect("locally it is measured");
+    assert_eq!(
+        samples.warning.as_deref(),
+        Some(
+            "warning: clauseo-desktop builds without incremental; its timing is not comparable with the budget"
+        )
+    );
+    assert_eq!(file_text(&dir), ORIGINAL);
+
+    let refused =
+        measure(&dir, &marker(), CHECK, 1, true, &mut runner).expect_err("in CI it is refused");
+    assert_eq!(
+        refused.message,
+        "refusing to measure: CI is set and clauseo-desktop builds without incremental"
+    );
+    assert_eq!(refused.fix, INCREMENTAL_FIX);
+    assert_eq!(file_text(&dir), ORIGINAL);
+    cleanup(&dir);
+}
+
+#[test]
+fn the_warm_up_judgement_covers_present_absent_and_not_incremental() {
+    assert_eq!(judge_warm_up(RUSTC, CHECK, true), Ok(None));
+    assert!(judge_warm_up("", CHECK, false).is_err());
+    let warning = judge_warm_up(RUSTC_NOT_INCREMENTAL, CHECK, false);
+    assert_eq!(
+            warning,
+            Ok(Some(
+                "warning: clauseo-desktop builds without incremental; its timing is not comparable with the budget".to_owned()
+            ))
+        );
+    let refused = judge_warm_up(RUSTC_NOT_INCREMENTAL, CHECK, true).expect_err("CI refuses");
+    assert_eq!(refused.fix, INCREMENTAL_FIX);
+}
