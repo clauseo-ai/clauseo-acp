@@ -482,7 +482,8 @@ fn a_non_zero_exit_fails_the_run_even_with_a_report() {
 }
 
 /// The stdout of a real run, so the parser is tied to what the script really prints. Refresh it
-/// after changing the script's output: from the repo root, with Chrome installed,
+/// after changing the script's output: from the repo root, with Chrome installed and with no other
+/// buildtime run going (this runs the script without xtask's lock, which covers App.tsx),
 /// `node ui/app/scripts/buildtime.mjs --runs 1 > xtask/src/buildtime/web/script-output.json`.
 const REAL_OUTPUT: &str = include_str!("script-output.json");
 
