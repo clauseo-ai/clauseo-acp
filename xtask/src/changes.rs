@@ -82,13 +82,6 @@ pub(crate) fn changed_files(root: &Path) -> Result<Vec<String>, String> {
 /// Every file in the repo that git tracks or would track: tracked files still on disk, plus
 /// untracked files that `.gitignore` does not exclude. Repo-relative, `/`-separated, sorted.
 /// Errors when git fails, e.g. outside a git repo.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the checks that list repo files (docs, file-size) come next"
-    )
-)]
 pub(crate) fn repo_files(root: &Path) -> Result<Vec<String>, String> {
     let listed = git(
         root,

@@ -18,14 +18,8 @@ mod capabilities;
     )
 )]
 pub(crate) mod crates_table;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the checks with exception files (core-io, file-size) come next"
-    )
-)]
 pub(crate) mod exceptions;
+mod file_size;
 mod json_text;
 pub(crate) mod planted;
 mod plugins;
@@ -157,6 +151,7 @@ pub(crate) const ALL: &[StaticCheck] = &[
     plugins::CHECK,
     tauri_config::CHECK,
     buildtime_edits::CHECK,
+    file_size::CHECK,
 ];
 
 /// The package name of the desktop crate. The checks find its directory through `Context::members`,

@@ -423,7 +423,8 @@ fn the_check_is_registered_after_plugins() {
             "capabilities",
             "plugins",
             "tauri-config",
-            "buildtime-edits"
+            "buildtime-edits",
+            "file-size"
         ]
     );
 }

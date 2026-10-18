@@ -177,7 +177,7 @@ mod tests {
     fn the_check_is_registered_last() {
         assert_eq!(
             crate::checks::ALL.last().map(|check| check.name),
-            Some("buildtime-edits")
+            Some("file-size")
         );
     }
 }

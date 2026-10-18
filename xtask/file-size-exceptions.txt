@@ -1,0 +1,4 @@
+# Files the file-size check (xtask/src/checks/file_size.rs) may keep over 600 lines.
+# One entry per line: the repo-relative path, whitespace, then why the file stays whole.
+# Blank lines and lines starting with # are skipped. Delete an entry once its file is at most
+# 600 lines: an entry for a file that is gone or short fails the check.
