@@ -205,6 +205,9 @@ fn measure_rust(
         }
     };
     let mut runner = |cmd: &Cmd| process::capture(cmd, root, &mut |_: &[u8]| {});
+    // Crates whose saved copy a failed probe kept. Later probes on them are skipped, so the run
+    // reports the conflict once and never prints a second fix that could undo it.
+    let mut kept: Vec<String> = Vec::new();
     let results = plan(PROBES, &members)
         .into_iter()
         .map(|planned| match planned {
@@ -212,10 +215,20 @@ fn measure_rust(
                 name: probe.name,
                 outcome: Outcome::Skipped("crate not present"),
             },
-            Planned::Run { probe, dir } => ProbeResult {
+            Planned::Run { probe, dir } if kept.contains(&dir) => ProbeResult {
                 name: probe.name,
-                outcome: probe::run_probe(root, &dir, &probe, &budgets, runs, ci, &mut runner),
+                outcome: Outcome::Skipped(KEPT_COPY),
             },
+            Planned::Run { probe, dir } => {
+                let outcome = probe::run_probe(root, &dir, &probe, &budgets, runs, ci, &mut runner);
+                if matches!(outcome, Outcome::Failed(_)) && probe::holds_kept_copy(root, &dir) {
+                    kept.push(dir);
+                }
+                ProbeResult {
+                    name: probe.name,
+                    outcome,
+                }
+            }
         })
         .collect();
     Ok(RustRun {
@@ -226,6 +239,9 @@ fn measure_rust(
         results,
     })
 }
+
+/// Why a probe is skipped after an earlier probe on its crate kept the saved copy.
+const KEPT_COPY: &str = "an earlier probe on this crate kept its saved copy; resolve that first";
 
 /// The profile line. The resolver reads only some of cargo's config files, so its answer is an
 /// expectation; each probe's warm-up rustc line decides, and refuses a non-incremental build in CI.

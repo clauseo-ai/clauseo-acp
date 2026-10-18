@@ -311,7 +311,10 @@ fn a_second_save_of_the_same_file_fails_and_leaves_the_file_alone() {
     );
     assert_eq!(
         failure.fix,
-        format!("restore {REL} from that copy by hand, then delete it")
+        format!(
+            "compare {REL} with target/xtask/buildtime/{REL}, keep what you want, then delete target/xtask/buildtime/{REL}"
+        ),
+        "the same fix as a conflict: it never says to copy the original over the file"
     );
     assert_eq!(file_text(&dir), BUMPED, "the file is not touched");
     assert_eq!(
@@ -434,4 +437,18 @@ fn a_filesystem_without_hard_links_gets_its_own_fix() {
         save_fix(io::ErrorKind::PermissionDenied),
         "make sure target/xtask/buildtime is writable, then run again"
     );
+}
+
+#[test]
+fn a_kept_copy_marks_its_crate_so_later_probes_on_it_are_skipped() {
+    let dir = scratch("kept-copy");
+    let crate_dir = REL.split("/src/").next().expect("REL is inside a crate");
+    assert!(!holds_kept_copy(&dir, crate_dir), "no copy yet");
+    let _kept = Guard::save(&dir, &marker()).expect("the save");
+    assert!(holds_kept_copy(&dir, crate_dir), "the copy is there");
+    assert!(
+        !holds_kept_copy(&dir, "crates/other"),
+        "another crate holds none"
+    );
+    cleanup(&dir);
 }
