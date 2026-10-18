@@ -142,14 +142,14 @@ fn a_failed_probe_carries_the_tools_output_and_a_command_to_reproduce_it() {
 fn a_skipped_hmr_is_reported_and_does_not_fail_the_run() {
     let json = with(
         "hmr",
-        r#"{"probe":"hmr","skipped":"no Chrome or Chromium found (set CHROME_PATH)"}"#,
+        r#"{"probe":"hmr","skipped":"Google Chrome not found at its standard paths; set CHROME_PATH to a Chrome or Chromium binary"}"#,
     );
     let results = results_of(&json);
     let hmr = find(&results, "hmr");
     assert_eq!(hmr.status(), ProbeStatus::Skipped);
     assert_eq!(
         hmr.outcome,
-        Outcome::Skipped("no Chrome or Chromium found (set CHROME_PATH)".into())
+        Outcome::Skipped("Google Chrome not found at its standard paths; set CHROME_PATH to a Chrome or Chromium binary".into())
     );
     assert_eq!(find(&results, "dev_start").status(), ProbeStatus::Reported);
     assert!(web_run(results, false).passed());
@@ -315,11 +315,11 @@ fn the_table_shows_each_probe_in_its_unit_and_a_dash_without_a_budget() {
     );
     let skipped = results_of(&with(
         "hmr",
-        r#"{"probe":"hmr","skipped":"no Chrome or Chromium found (set CHROME_PATH)"}"#,
+        r#"{"probe":"hmr","skipped":"Google Chrome not found at its standard paths; set CHROME_PATH to a Chrome or Chromium binary"}"#,
     ));
     assert_eq!(
         table_lines(&skipped)[6],
-        "hmr                skipped: no Chrome or Chromium found (set CHROME_PATH)"
+        "hmr                skipped: Google Chrome not found at its standard paths; set CHROME_PATH to a Chrome or Chromium binary"
     );
     assert_eq!(
         table_lines(&all_over())[1].split_whitespace().last(),

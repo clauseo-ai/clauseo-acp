@@ -150,7 +150,14 @@ function startVite(port, state) {
   });
 }
 
-/** Headless Chrome through playwright-core, or `undefined` when none can be launched. */
+/** Why hmr is skipped when no browser launches. Only CHROME_PATH finds a Chromium. */
+const NO_CHROME =
+  "Google Chrome not found at its standard paths; set CHROME_PATH to a Chrome or Chromium binary";
+
+/**
+ * Headless Google Chrome through playwright-core (`channel: "chrome"`, its standard install paths),
+ * or the Chrome or Chromium binary at CHROME_PATH. `undefined` when none can be launched.
+ */
 async function launchBrowser() {
   const { chromium } = await import("playwright-core");
   const chromePath = process.env.CHROME_PATH;
@@ -204,7 +211,7 @@ async function measureDev(runs, state) {
     }
     state.browser = await launchBrowser();
     if (state.browser === undefined) {
-      return [devStart, { probe: "hmr", skipped: "no Chrome or Chromium found (set CHROME_PATH)" }];
+      return [devStart, { probe: "hmr", skipped: NO_CHROME }];
     }
     try {
       const page = await state.browser.newPage();
