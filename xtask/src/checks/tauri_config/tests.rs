@@ -9,7 +9,8 @@ use std::fs;
 /// A config that passes every rule, shaped like the committed one.
 const CONF: &str = r#"{
   "build": {
-    "devUrl": "http://localhost:1420"
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../../ui/app/dist"
   },
   "app": {
     "withGlobalTauri": false,
@@ -17,8 +18,7 @@ const CONF: &str = r#"{
     "security": {
       "freezePrototype": true,
       "capabilities": ["main"],
-      "csp": "default-src 'self'; script-src 'self'",
-      "devCsp": "default-src 'self'; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: clauseo-file: http://clauseo-file.localhost https://clauseo-file.localhost; font-src 'self'; connect-src ipc: http://ipc.localhost https://ipc.localhost; worker-src 'self'; frame-src 'self'; child-src 'self'; object-src 'none'; media-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types clauseo-sanitize"
     }
   },
   "bundle": {
@@ -115,73 +115,99 @@ fn freeze_prototype_false_fails() {
     );
 }
 
+/// The `"csp": ...` entry of `CONF`.
+fn csp_entry() -> String {
+    format!("\"csp\": \"{PINNED_CSP}\"")
+}
+
 #[test]
-fn an_empty_or_missing_csp_fails() {
-    let (text, found) = with(
-        "\"csp\": \"default-src 'self'; script-src 'self'\"",
-        "\"csp\": \"\"",
+fn the_fixture_holds_the_pinned_csp() {
+    assert!(CONF.contains(&csp_entry()));
+}
+
+#[test]
+fn a_csp_other_than_the_pinned_string_fails_at_its_line() {
+    for csp in [
+        "default-src *; script-src * data:",
+        "default-src 'self'; script-src 'self' https://cdn.example",
+        "",
+    ] {
+        let (text, found) = with(&csp_entry(), &format!("\"csp\": \"{csp}\""));
+        assert_eq!(
+            found,
+            vec![violation(
+                PATH,
+                line_of(&text, "\"csp\""),
+                "app.security.csp is not the pinned policy",
+                CSP_PINNED_FIX,
+            )]
+        );
+    }
+    let trimmed = PINNED_CSP.replace("; require-trusted-types-for 'script'", "");
+    let (_, found) = with(&csp_entry(), &format!("\"csp\": \"{trimmed}\""));
+    assert_eq!(
+        found[0].message,
+        "app.security.csp is not the pinned policy"
+    );
+    assert!(CSP_PINNED_FIX.contains("pinned in xtask/src/checks/tauri_config.rs"));
+}
+
+#[test]
+fn a_csp_object_or_a_missing_csp_fails() {
+    let (_, found) = with(
+        &csp_entry(),
+        "\"csp\": { \"default-src\": \"'self'\", \"script-src\": [\"'self'\"] }",
     );
     assert_eq!(
-        found,
-        vec![violation(
-            PATH,
-            line_of(&text, "\"csp\""),
-            "app.security.csp is missing or empty",
-            CSP_MISSING_FIX,
-        )]
+        found[0].message,
+        "app.security.csp is an object, not the pinned policy string"
     );
-    let (_, found) = with("\"csp\": \"default-src 'self'; script-src 'self'\",", "");
-    assert_eq!(found[0].message, "app.security.csp is missing or empty");
+    let (_, found) = with(&format!("[\"main\"],\n      {}", csp_entry()), "[\"main\"]");
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].message, "app.security.csp is missing");
     assert_eq!(found[0].line, 1);
 }
 
 #[test]
-fn unsafe_eval_or_inline_in_the_csp_fails() {
-    let (text, found) = with(
-        "script-src 'self'\"",
-        "script-src 'self' 'unsafe-eval' 'unsafe-inline'\"",
-    );
-    let line = line_of(&text, "\"csp\"");
-    assert_eq!(
-        found,
-        vec![
-            violation(
-                PATH,
-                line,
-                "app.security.csp allows `'unsafe-eval'`",
-                CSP_UNSAFE_FIX
-            ),
-            violation(
-                PATH,
-                line,
-                "app.security.csp allows `'unsafe-inline'`",
-                CSP_UNSAFE_FIX
-            ),
-        ]
-    );
-}
-
-#[test]
-fn a_csp_object_is_read_as_its_directives() {
+fn a_dev_csp_is_not_checked() {
     let (_, found) = with(
-        "\"csp\": \"default-src 'self'; script-src 'self'\"",
-        "\"csp\": { \"default-src\": \"'self'\", \"script-src\": [\"'self'\", \"'unsafe-eval'\"] }",
+        &csp_entry(),
+        &format!(
+            "{},\n      \"devCsp\": \"script-src 'unsafe-eval'\"",
+            csp_entry()
+        ),
     );
-    assert_eq!(found.len(), 1);
-    assert_eq!(found[0].message, "app.security.csp allows `'unsafe-eval'`");
+    assert_eq!(found, Vec::new());
 }
 
 #[test]
-fn unsafe_eval_in_the_dev_csp_fails_but_unsafe_inline_passes() {
-    let (text, found) = with("'unsafe-inline'\"", "'unsafe-inline' 'unsafe-eval'\"");
+fn a_url_or_a_file_list_as_frontend_dist_fails_at_its_line() {
+    let dist = "\"frontendDist\": \"../../ui/app/dist\"";
+    for value in [
+        "\"https://evil.example\"",
+        "\"http://localhost:1420\"",
+        "\"tauri://localhost\"",
+        "\"HTTPS:evil.example\"",
+    ] {
+        let (text, found) = with(dist, &format!("\"frontendDist\": {value}"));
+        assert_eq!(
+            found,
+            vec![violation(
+                PATH,
+                line_of(&text, "frontendDist"),
+                "build.frontendDist is a URL",
+                FRONTEND_FIX,
+            )]
+        );
+    }
+    let (_, found) = with(dist, "\"frontendDist\": [\"index.html\"]");
     assert_eq!(
-        found,
-        vec![violation(
-            PATH,
-            line_of(&text, "devCsp"),
-            "app.security.devCsp allows `'unsafe-eval'`",
-            DEV_CSP_FIX,
-        )]
+        found[0].message,
+        "build.frontendDist is a list of files, not the dist folder"
+    );
+    assert_eq!(
+        FRONTEND_FIX,
+        "frontendDist must be the local dist folder; a URL makes the release app load a remote site"
     );
 }
 
