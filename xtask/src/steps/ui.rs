@@ -32,7 +32,7 @@ pub(super) fn steps() -> Vec<ToolStep> {
 /// the trailing args to the script's command.
 fn script(dir: &str, name: &str, args: &[&str]) -> Cmd {
     Cmd::new(
-        Program::Named("pnpm"),
+        Program::Pnpm,
         ["-C", dir, "run", name]
             .into_iter()
             .chain(args.iter().copied()),
@@ -42,10 +42,7 @@ fn script(dir: &str, name: &str, args: &[&str]) -> Cmd {
 fn install_step() -> ToolStep {
     ToolStep {
         name: "pnpm-install",
-        cmd: Cmd::new(
-            Program::Named("pnpm"),
-            ["-C", "ui", "install", "--frozen-lockfile"],
-        ),
+        cmd: Cmd::new(Program::Pnpm, ["-C", "ui", "install", "--frozen-lockfile"]),
         parse: parse_none,
         fix: ui_fix,
         render: None,

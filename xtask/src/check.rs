@@ -29,7 +29,7 @@ pub(crate) fn run(quick: bool) -> ExitCode {
         Scope::Workspace
     };
     let range = gitleaks_range(&mut out, &ctx, ci);
-    let steps = steps::plan(&scope, ci, range.as_deref(), pnpm_found(&ctx.root));
+    let steps = steps::plan(&scope, ci, range.as_deref(), ci || pnpm_found(&ctx.root));
     let mut exec =
         |cmd: &Cmd, on_output: &mut dyn FnMut(&[u8])| process::capture(cmd, &ctx.root, on_output);
     let results = steps::run_all(steps, &ctx, &mut out, &mut exec);
@@ -45,9 +45,10 @@ pub(crate) fn run(quick: bool) -> ExitCode {
     }
 }
 
-/// Whether `pnpm` starts. Without it the ui steps are skipped outside CI (see `steps::plan`).
+/// Whether `pnpm` starts. Outside CI, without it, the ui steps are skipped (see `steps::plan`). CI
+/// runs the ui steps whatever this says, so it does not probe there.
 fn pnpm_found(root: &Path) -> bool {
-    process::run_quiet(&Cmd::new(Program::Named("pnpm"), ["--version"]), root).is_ok()
+    process::run_quiet(&Cmd::new(Program::Pnpm, ["--version"]), root).is_ok()
 }
 
 /// CI mode: `CI` is set, is not empty, and is not `0` or `false` in any case.
