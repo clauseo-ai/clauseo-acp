@@ -14,11 +14,12 @@ mod capabilities;
     not(test),
     expect(
         dead_code,
-        reason = "the checks that read the Crates table (dependencies, core-io) come next"
+        reason = "the checks for the other Crates table columns (dependencies, core-io) come next"
     )
 )]
 pub(crate) mod crates_table;
 mod dependencies;
+mod docs;
 pub(crate) mod exceptions;
 mod file_size;
 mod json_text;
@@ -154,6 +155,7 @@ pub(crate) const ALL: &[StaticCheck] = &[
     tauri_config::CHECK,
     buildtime_edits::CHECK,
     dependencies::CHECK,
+    docs::CHECK,
     file_size::CHECK,
 ];
 
