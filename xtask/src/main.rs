@@ -22,6 +22,8 @@ mod clock;
 mod output;
 mod parse;
 mod process;
+#[cfg(test)]
+mod scratch;
 mod setup;
 mod steps;
 mod violation;

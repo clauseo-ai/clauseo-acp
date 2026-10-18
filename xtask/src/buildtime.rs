@@ -13,8 +13,6 @@ mod marker;
 mod probe;
 mod profile;
 mod report;
-#[cfg(test)]
-mod scratch;
 mod verdict;
 
 #[cfg(test)]
