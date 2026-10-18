@@ -32,28 +32,88 @@ const MARK = /\s+data-buildtime="[^"]*"/g;
 /** How long the dev server may take to print its "ready in" line, and an HMR edit to land. */
 const READY_TIMEOUT_MS = 60_000;
 const EDIT_TIMEOUT_MS = 10_000;
+/** How long one tool run may take before it is stopped and its probe fails. */
+const TOOL_TIMEOUT_MS = 120_000;
+/** How long a child has between SIGTERM and SIGKILL, and how long a stop waits for it to exit. */
+const KILL_GRACE_MS = 5_000;
+const EXIT_WAIT_MS = 5_000;
 
 function note(text) {
   process.stderr.write(`buildtime.mjs: ${text}\n`);
 }
 
-/** Runs `node ...argv` in ui/app. Resolves with its exit code, wall time and output. */
-function runTool(argv) {
+/**
+ * Stops a child this script started, by its handle: SIGTERM, then SIGKILL after KILL_GRACE_MS if it
+ * is still running. On Windows, `taskkill /T /F` on the child's PID, which takes its tree.
+ */
+function stopChild(child) {
+  if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+  if (process.platform === "win32") {
+    spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+    return;
+  }
+  child.kill("SIGTERM");
+  const timer = setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
+  }, KILL_GRACE_MS);
+  timer.unref();
+  child.once("exit", () => clearTimeout(timer));
+}
+
+/** Stops `child` and waits up to EXIT_WAIT_MS for it to exit. Resolves with whether it did. */
+function stopAndWait(child) {
+  if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve(true);
+  }
+  return new Promise((done) => {
+    const timer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null && process.platform !== "win32") {
+        child.kill("SIGKILL");
+      }
+      note(`pid ${child.pid} did not exit within ${EXIT_WAIT_MS} ms of SIGTERM; sent SIGKILL`);
+      done(false);
+    }, EXIT_WAIT_MS);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      done(true);
+    });
+    stopChild(child);
+  });
+}
+
+/**
+ * Runs `node ...argv` in ui/app. Resolves with its exit code, wall time and output, and
+ * `timedOut` when it ran past TOOL_TIMEOUT_MS and was stopped.
+ */
+function runTool(argv, state) {
   return new Promise((done) => {
     const started = performance.now();
     const child = spawn(process.execPath, argv, {
       cwd: APP_DIR,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    state.tool = child;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stopChild(child);
+    }, TOOL_TIMEOUT_MS);
     const chunks = [];
     child.stdout.on("data", (chunk) => chunks.push(chunk));
     child.stderr.on("data", (chunk) => chunks.push(chunk));
     child.on("error", (error) => {
-      done({ code: -1, ms: performance.now() - started, output: String(error) });
+      clearTimeout(timer);
+      done({ code: -1, ms: performance.now() - started, output: String(error), timedOut });
     });
     child.on("close", (code) => {
+      clearTimeout(timer);
+      state.tool = undefined;
       const ms = performance.now() - started;
-      done({ code, ms, output: Buffer.concat(chunks).toString("utf8") });
+      done({ code, ms, output: Buffer.concat(chunks).toString("utf8"), timedOut });
     });
   });
 }
@@ -62,7 +122,7 @@ function runTool(argv) {
  * The package.json script `script` timed: one warm-up run, then `runs` timed runs. A non-zero exit,
  * or a script that cannot run without a shell, makes the probe a failure.
  */
-async function timeScript(probe, script, runs) {
+async function timeScript(probe, script, runs, state) {
   const command = `pnpm -C ui/app run ${script}`;
   let tool;
   try {
@@ -72,7 +132,11 @@ async function timeScript(probe, script, runs) {
   }
   const samples = [];
   for (let run = 0; run <= runs; run += 1) {
-    const result = await runTool(tool.argv);
+    const result = await runTool(tool.argv, state);
+    if (result.timedOut) {
+      const message = `\`${tool.text}\` did not finish within ${TOOL_TIMEOUT_MS / 1000} s; stopped it`;
+      return { probe, failed: { message, command, output: result.output } };
+    }
     if (result.code !== 0) {
       const message = `\`${tool.text}\` exited with ${result.code}`;
       return { probe, failed: { message, command, output: result.output } };
@@ -96,18 +160,6 @@ function freePort() {
   });
 }
 
-/** Stops the Vite process this script started, by its handle; on Windows its whole tree. */
-function stopChild(child) {
-  if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-  if (process.platform === "win32") {
-    spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-  } else {
-    child.kill("SIGTERM");
-  }
-}
-
 /**
  * Starts the dev server (the `dev` script) on `port`. Resolves once it prints "ready in", with the
  * time it took.
@@ -125,6 +177,7 @@ function startVite(port, state) {
     let output = "";
     let ready = false;
     const timer = setTimeout(() => {
+      stopChild(child);
       fail(new Error(`vite printed no "ready in" line within ${READY_TIMEOUT_MS} ms\n${output}`));
     }, READY_TIMEOUT_MS);
     const onData = (chunk) => {
@@ -199,10 +252,23 @@ async function measureDev(runs, state) {
   });
   let devStart;
   let hmr;
+  let port;
   try {
-    const port = await freePort();
     try {
-      devStart = { probe: "dev_start", samples_ms: [await startVite(port, state)] };
+      // One warm-up start, then `runs` timed starts. Each start but the last is stopped; the last
+      // server stays up for the HMR runs.
+      const samples = [];
+      for (let run = 0; run <= runs; run += 1) {
+        port = await freePort();
+        const ms = await startVite(port, state);
+        if (run > 0) {
+          samples.push(ms);
+        }
+        if (run < runs) {
+          await stopAndWait(state.vite);
+        }
+      }
+      devStart = { probe: "dev_start", samples_ms: samples };
     } catch (error) {
       return [
         failed("dev_start", error),
@@ -243,12 +309,7 @@ async function cleanUp(state) {
   if (browser !== undefined) {
     await browser.close().catch(() => {});
   }
-  const vite = state.vite;
-  if (vite !== undefined && vite.exitCode === null && vite.signalCode === null) {
-    const exited = new Promise((done) => vite.once("exit", done));
-    stopChild(vite);
-    await exited;
-  }
+  await stopAndWait(state.vite);
 }
 
 function restoreApp(state) {
@@ -277,9 +338,10 @@ async function main() {
   if (!existsSync(join(APP_DIR, "node_modules"))) {
     throw new Error("ui/app/node_modules is missing; run `pnpm -C ui install --frozen-lockfile`");
   }
-  const state = { original: undefined, browser: undefined, vite: undefined };
+  const state = { original: undefined, browser: undefined, vite: undefined, tool: undefined };
   const onSignal = (signal) => {
     restoreApp(state);
+    stopChild(state.tool);
     stopChild(state.vite);
     process.exit(signal === "SIGINT" ? 130 : 143);
   };
@@ -288,10 +350,10 @@ async function main() {
   state.original = recoverApp();
 
   const probes = [
-    await timeScript("tsc", "typecheck", runs),
-    await timeScript("oxlint_type_aware", "lint:types", runs),
+    await timeScript("tsc", "typecheck", runs, state),
+    await timeScript("oxlint_type_aware", "lint:types", runs, state),
   ];
-  const build = await timeScript("vite_build", "build", runs);
+  const build = await timeScript("vite_build", "build", runs, state);
   probes.push(build);
   if (build.failed === undefined) {
     try {
