@@ -11,11 +11,9 @@
 // and no pnpm in it, and it runs the same on Windows. Each timed probe gets one warm-up run, then N
 // timed runs.
 //
-// The HMR probe edits src/App.tsx while it runs, under the guard in buildtime-lib.mjs: a copy of
-// the original under target/xtask/buildtime/ first, every write through a temporary file, and the
-// original put back only over bytes this script wrote, in `finally` and on SIGINT, SIGTERM and
-// SIGHUP. A killed run is settled at the start of the next one (`recoverApp`). A developer's edit
-// is never overwritten: both files stay, and the conflict fails the run.
+// The HMR probe edits src/App.tsx while it runs, under the guard whose rules are written out in
+// buildtime-lib.mjs, above `BACKUP_DIR`. Every child (the tools and Vite) starts, runs and stops
+// through buildtime-proc.mjs, which stops it with everything it started.
 
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";

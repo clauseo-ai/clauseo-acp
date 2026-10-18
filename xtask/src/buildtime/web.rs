@@ -21,15 +21,11 @@
 //! (`dev_start`), and times N edits of `src/App.tsx` until headless Chrome shows them (`hmr`). It
 //! stops only the processes it started, each with its process group (`buildtime-proc.mjs`).
 //!
-//! App.tsx follows the rules of `probe.rs`: a copy of the original in
-//! `target/xtask/buildtime/ui/app/src/App.tsx` before the first edit, every write through a
-//! temporary file and a rename, and the original put back only over bytes the script wrote, also
-//! on SIGINT, SIGTERM and SIGHUP. The leftover rule lives in the script, in one place
-//! (`recoverApp` in `ui/app/scripts/buildtime-lib.mjs`): at the start of every run it puts the
-//! copy back only when App.tsx differs from it by one `data-buildtime` attribute at `ROOT_TAG`.
-//! `probe::restore_leftovers` skips `target/xtask/buildtime/ui/`. A developer's edit is never
-//! overwritten: both files stay, and the conflict fails the run. The lock (`lock.rs`) covers the
-//! copy when xtask runs the script.
+//! The `hmr` probe edits App.tsx under the script's guard. Its rules (the copy under
+//! `target/xtask/buildtime/`, the restore, and the leftover rule that `probe::restore_leftovers`
+//! leaves to it) are written out in one place, above `BACKUP_DIR` in
+//! `ui/app/scripts/buildtime-lib.mjs`. The lock (`lock.rs`) covers the copy when xtask runs the
+//! script.
 //!
 //! Gating: `tsc`, `oxlint_type_aware` and `vite_build` follow their row's gate like the Rust probes,
 //! and fail the run when they fail (the tool exits non-zero). `initial_js`, `dev_start` and `hmr`
