@@ -1,6 +1,7 @@
-// The web half of `cargo xtask buildtime`: times the frontend's edit loop and prints one JSON
-// object on stdout. xtask computes the statistics and compares them with budgets.toml; this script
-// only measures. Notes for people go to stderr.
+// The web half of `cargo xtask buildtime`: times the frontend's edit loop and reports it as JSON.
+// xtask computes the statistics and compares them with budgets.toml; this script only measures.
+// The output contract (stdout, exit status, stderr) is in the module doc of
+// xtask/src/buildtime/web.rs; change the two together.
 //
 //   node ui/app/scripts/buildtime.mjs [--runs N]
 //
@@ -15,10 +16,6 @@
 // original put back only over bytes this script wrote, in `finally` and on SIGINT, SIGTERM and
 // SIGHUP. A killed run is settled at the start of the next one (`recoverApp`). A developer's edit
 // is never overwritten: both files stay, and the conflict fails the run.
-//
-// Output: { "node": "v24.x", "runs": N, "probes": [ { "probe": name, ...one of } ] } where each
-// probe carries exactly one of `samples_ms` (numbers), `bytes` (a number), `skipped` (why) or
-// `failed` ({ "message", "command", "output" }).
 
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";

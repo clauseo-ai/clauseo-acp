@@ -1,6 +1,19 @@
 //! The web half: `node ui/app/scripts/buildtime.mjs --runs N` measures the frontend's edit loop and
-//! prints one JSON object; this module reads it, computes the statistics with `verdict::stats`,
+//! reports it as JSON; this module reads it, computes the statistics with `verdict::stats`,
 //! compares them with the rows of `budgets.toml`, and shows the result.
+//!
+//! The script's output contract, kept here only (the script points at it):
+//! - stdout: the last non-empty line is one JSON object. Lines before it are ignored, so a stray
+//!   line from a library cannot break the run.
+//!   `{"node": "v24.x", "runs": N, "probes": [...], "failures": [...]}`. Each probe is
+//!   `{"probe": name}` plus exactly one of `"samples_ms": [numbers]` (timed runs, warm-up left
+//!   out), `"bytes": number` (with `"files"`), `"skipped": "why"` or
+//!   `"failed": {"message", "command", "output"}`, where `command` reproduces the failure.
+//!   `failures` is optional: `[{"message", "fix"}]` for what is no probe's (a conflict over
+//!   `ui/app/src/App.tsx`); each fails the run. With `probes` empty, the script stopped before it
+//!   measured.
+//! - exit status: 0, or 1 when it reports `failures`. A crash exits 1 with no JSON line.
+//! - stderr: notes for people, printed as they are.
 //!
 //! The script times `tsc --noEmit`, `oxlint --type-aware` and `vite build` (one warm-up, then N
 //! runs each), sizes the initial JS of that build, starts the Vite dev server on a free port
@@ -143,9 +156,12 @@ pub(crate) struct ScriptFailure {
     pub output: String,
 }
 
-/// Reads the script's stdout.
+/// Reads the script's stdout: its last non-empty line, as the module doc says.
 pub(crate) fn parse_report(stdout: &str) -> Result<ScriptReport, String> {
-    serde_json::from_str(stdout.trim())
+    let Some(line) = stdout.lines().rev().find(|line| !line.trim().is_empty()) else {
+        return Err(format!("{SCRIPT} printed nothing on stdout"));
+    };
+    serde_json::from_str(line.trim())
         .map_err(|error| format!("{SCRIPT} printed JSON that xtask cannot read: {error}"))
 }
 

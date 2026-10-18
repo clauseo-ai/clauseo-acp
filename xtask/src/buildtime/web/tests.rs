@@ -29,14 +29,17 @@ fn budgets() -> Vec<Budget> {
     ]
 }
 
-const ALL_OK: &str = r#"{"node":"v24.1.0","runs":3,"probes":[
-  {"probe":"tsc","samples_ms":[200,100,300]},
-  {"probe":"oxlint_type_aware","samples_ms":[400,420,410]},
-  {"probe":"vite_build","samples_ms":[500,700,600]},
-  {"probe":"initial_js","bytes":51114,"files":["assets/index.js"]},
-  {"probe":"dev_start","samples_ms":[183.4]},
-  {"probe":"hmr","samples_ms":[80,100,90]}
-]}"#;
+/// One line, as the script prints it.
+const ALL_OK: &str = concat!(
+    r#"{"node":"v24.1.0","runs":3,"probes":["#,
+    r#"{"probe":"tsc","samples_ms":[200,100,300]},"#,
+    r#"{"probe":"oxlint_type_aware","samples_ms":[400,420,410]},"#,
+    r#"{"probe":"vite_build","samples_ms":[500,700,600]},"#,
+    r#"{"probe":"initial_js","bytes":51114,"files":["assets/index.js"]},"#,
+    r#"{"probe":"dev_start","samples_ms":[183.4]},"#,
+    r#"{"probe":"hmr","samples_ms":[80,100,90]}"#,
+    "]}"
+);
 
 fn results_of(json: &str) -> Vec<ProbeResult> {
     results(&parse_report(json).expect("valid script json"), &budgets())
@@ -204,6 +207,24 @@ fn a_failed_hmr_dev_start_or_initial_js_shows_failed_prints_its_lines_and_passes
         assert_eq!(probe["reason"], message);
         assert_eq!(json["passed"], true);
     }
+}
+
+#[test]
+fn only_the_last_non_empty_line_of_stdout_is_read() {
+    let noisy =
+        format!("(node:123) ExperimentalWarning: a stray line\n{{\"not\": \"it\"}}\n{ALL_OK}\n\n");
+    let report = parse_report(&noisy).expect("the last line is the report");
+    assert_eq!(report.node, "v24.1.0");
+    assert_eq!(report.probes.len(), 6);
+    assert_eq!(
+        parse_report("\n  \n").expect_err("nothing"),
+        "ui/app/scripts/buildtime.mjs printed nothing on stdout"
+    );
+    let trailing = format!("{ALL_OK}\nlate noise");
+    assert!(
+        parse_report(&trailing).is_err(),
+        "a stray last line is not the report"
+    );
 }
 
 #[test]
