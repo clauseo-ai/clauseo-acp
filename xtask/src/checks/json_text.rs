@@ -5,28 +5,78 @@ use crate::checks;
 use std::ops::Range;
 
 /// The line of the key at `path`, such as `["app", "security", "csp"]`, in the JSON `text`. Each
-/// key is searched from the line of its parent key onward, so a key of the same name under another
-/// object earlier in the file is not taken. Line 1 when a key on the path is not found.
+/// key is searched only among the keys of its parent's object, up to the brace that closes it, so
+/// a key of the same name under another object is not taken. Line 1 when a key on the path is not
+/// found.
 pub(crate) fn key_line(text: &str, path: &[&str]) -> u32 {
     key_index(text, path).map_or(1, checks::line_at)
 }
 
 /// The 0-based index of the line `key_line` finds, or `None`.
 pub(crate) fn key_index(text: &str, path: &[&str]) -> Option<usize> {
-    let lines: Vec<&str> = text.lines().collect();
-    let mut found = None;
+    let mut object = 0;
+    let mut key_at = None;
     for key in path {
-        let needle = format!("\"{key}\"");
-        let from = found.unwrap_or(0);
-        let index = lines
-            .iter()
-            .enumerate()
-            .skip(from)
-            .find(|(_, line)| declares(line, &needle))
-            .map(|(index, _)| index)?;
-        found = Some(index);
+        let (start, value) = member(text, object, key)?;
+        key_at = Some(start);
+        object = value;
     }
-    found
+    key_at.map(|offset| line_index_of(text, offset))
+}
+
+/// The key `key` among the direct members of the object that opens at or after byte `from` of
+/// `text`: the byte offset of its opening quote and of its value. The search ends at the brace that
+/// closes the object. Strings are skipped with their escapes, so a brace inside one does not
+/// count. A key is compared as written, escapes and all.
+fn member(text: &str, from: usize, key: &str) -> Option<(usize, usize)> {
+    let rest = text.get(from..)?;
+    let open = from + rest.find(|c: char| !c.is_whitespace())?;
+    if !text.get(open..)?.starts_with('{') {
+        return None;
+    }
+    let mut depth = 0_usize;
+    let mut chars = text.get(open..)?.char_indices();
+    while let Some((offset, c)) = chars.next() {
+        match c {
+            '{' | '[' => depth += 1,
+            '}' | ']' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return None;
+                }
+            }
+            '"' => {
+                let start = open + offset;
+                let end = string_end(text, start)?;
+                while chars.next().is_some_and(|(next, _)| open + next + 1 < end) {}
+                let after = text.get(end..)?;
+                let colon = after.len() - after.trim_start().len();
+                if depth == 1
+                    && after.trim_start().starts_with(':')
+                    && text.get(start + 1..end - 1) == Some(key)
+                {
+                    return Some((start, end + colon + 1));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The byte just past the closing quote of the string whose opening quote is at `start`.
+fn string_end(text: &str, start: usize) -> Option<usize> {
+    let mut escaped = false;
+    for (offset, c) in text.get(start + 1..)?.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if c == '\\' {
+            escaped = true;
+        } else if c == '"' {
+            return Some(start + 1 + offset + 1);
+        }
+    }
+    None
 }
 
 /// The byte ranges in `text` of the object elements, in order, of the array that the key at `path`
@@ -103,15 +153,6 @@ pub(crate) fn line_index_of(text: &str, offset: usize) -> usize {
         .map_or(0, |head| head.matches('\n').count())
 }
 
-/// True when `line` holds `needle` (a quoted key) followed by a `:`, so a string value equal to
-/// the key's name does not count.
-fn declares(line: &str, needle: &str) -> bool {
-    line.match_indices(needle).any(|(start, _)| {
-        line.get(start + needle.len()..)
-            .is_some_and(|rest| rest.trim_start().starts_with(':'))
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,6 +198,19 @@ mod tests {
         );
         assert!(object_elements(text, &["app", "missing"]).is_none());
         assert!(object_elements("{\"caps\": \"main\"}", &["caps"]).is_none());
+    }
+
+    #[test]
+    fn the_search_stops_at_the_end_of_the_parent_object() {
+        let text = "{\n  \"app\": {\n    \"security\": {\n      \"freezePrototype\": true\n    }\n  },\n  \"plugins\": {\n    \"x\": { \"csp\": \"y\" }\n  }\n}";
+        assert_eq!(key_line(text, &["app", "security", "csp"]), 1);
+        assert_eq!(key_line(text, &["plugins", "x", "csp"]), 8);
+    }
+
+    #[test]
+    fn a_key_inside_a_string_or_a_nested_object_is_not_a_member() {
+        let text = "{\n  \"a\": \"\\\"b\\\": {\",\n  \"c\": { \"b\": 1 },\n  \"b\": 2\n}";
+        assert_eq!(key_line(text, &["b"]), 4);
     }
 
     #[test]
