@@ -302,10 +302,10 @@ fn collect_dangerous(value: &Value, path: &mut Vec<String>, found: &mut Vec<Vec<
 }
 
 /// `build.rs` at `path` must declare an `AppManifest` and must not move the capabilities folder.
-/// Comments are stripped first (`strip_comments`), so a commented-out call does not count. A
+/// Comments are stripped first (`checks::strip_comments`), so a commented-out call does not count. A
 /// missing file counts as no manifest.
 pub(crate) fn build_rs_violations(path: &str, text: Option<&str>) -> Vec<Violation> {
-    let code = text.map(strip_comments).unwrap_or_default();
+    let code = text.map(checks::strip_comments).unwrap_or_default();
     let mut found = Vec::new();
     if !code.contains("app_manifest(") || !code.contains("AppManifest::new()") {
         found.push(violation(
@@ -327,20 +327,6 @@ pub(crate) fn build_rs_violations(path: &str, text: Option<&str>) -> Vec<Violati
         ));
     }
     found
-}
-
-/// `text` with everything from `//` to the end of each line removed, line count kept. A simple
-/// per-line strip: it does not know string literals (a `"//"` in a string cuts the line there) or
-/// block comments. That is enough for a short `build.rs`, and a cut string can only hide a call,
-/// which then fails the check.
-fn strip_comments(text: &str) -> String {
-    text.lines()
-        .map(|line| {
-            line.find("//")
-                .map_or(line, |start| line.get(..start).unwrap_or(line))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 #[cfg(test)]

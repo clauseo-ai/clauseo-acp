@@ -59,6 +59,20 @@ pub(crate) fn join(dir: &str, name: &str) -> String {
     }
 }
 
+/// `text` with everything from `//` to the end of each line removed, line count kept. A simple
+/// per-line strip: it does not know string literals (a `"//"` in a string cuts the line there) or
+/// block comments. That is enough for a short `build.rs` or the desktop crate's few source files, and a cut string can only hide a call,
+/// which then fails the check.
+pub(crate) fn strip_comments(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            line.find("//")
+                .map_or(line, |start| line.get(..start).unwrap_or(line))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Reads `root/rel` as text. `Ok(None)` when the file does not exist; any other read error is a
 /// violation at line 1.
 pub(crate) fn read_repo_file(root: &Path, rel: &str) -> Result<Option<String>, Violation> {
