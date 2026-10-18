@@ -11,8 +11,10 @@
 //! the page can still invoke whatever `capabilities/main.json` grants, which today is nothing.
 //!
 //! `plugin_rust_only` is the one way to register a plugin. clippy's `disallowed-methods`
-//! (`clippy.toml`) forbids `Builder::plugin`, `Builder::plugin_boxed`, `AppHandle::plugin`,
-//! `AppHandle::plugin_boxed` and `Manager::add_capability` everywhere else.
+//! (`clippy.toml`) forbids `Builder::plugin`, `Builder::plugin_boxed`, `AppHandle::plugin` and
+//! `AppHandle::plugin_boxed` everywhere else. The same list forbids the runtime permission grants
+//! (`Manager::add_capability`, `Context::runtime_authority_mut`,
+//! `RuntimeAuthority::add_capability`) and `Context::config_mut`.
 
 use tauri::ipc::Invoke;
 use tauri::plugin::Plugin;
