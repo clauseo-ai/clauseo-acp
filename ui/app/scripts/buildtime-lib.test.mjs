@@ -1,13 +1,16 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { brotliCompressSync, constants as zlib } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   AppGuard,
   ConflictError,
+  MIN_NODE,
   ROOT_TAG,
   appPaths,
+  nodeAtLeast,
   recoverApp,
   restoreFailure,
   tmpOf,
@@ -19,6 +22,8 @@ import {
   scriptCommand,
   splitCommand,
 } from "./buildtime-lib.mjs";
+
+const APP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const dirs = [];
 
@@ -71,6 +76,23 @@ describe("parseRuns", () => {
     expect(() => parseRuns(["--runs", "x"])).toThrow(
       "--runs takes a whole number of 1 or more, got x",
     );
+  });
+});
+
+describe("nodeAtLeast", () => {
+  it("compares major, minor and patch as numbers", () => {
+    expect(MIN_NODE).toBe("24.11.0");
+    expect(nodeAtLeast("24.11.0", MIN_NODE)).toBe(true);
+    expect(nodeAtLeast("v24.11.1", MIN_NODE)).toBe(true);
+    expect(nodeAtLeast("26.0.0", MIN_NODE)).toBe(true);
+    expect(nodeAtLeast("24.2.0", MIN_NODE)).toBe(false);
+    expect(nodeAtLeast("24.0.0", MIN_NODE)).toBe(false);
+    expect(nodeAtLeast("v22.20.0", MIN_NODE)).toBe(false);
+  });
+
+  it("matches the engines field of ui/package.json", () => {
+    const ui = JSON.parse(readFileSync(join(APP_DIR, "..", "package.json"), "utf8"));
+    expect(ui.engines?.node).toBe(`>=${MIN_NODE}`);
   });
 });
 

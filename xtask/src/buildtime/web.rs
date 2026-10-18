@@ -10,8 +10,9 @@
 //!   out), `"bytes": number` (with `"files"`), `"skipped": "why"` or
 //!   `"failed": {"message", "command", "output"}`, where `command` reproduces the failure.
 //!   `failures` is optional: `[{"message", "fix"}]` for what is no probe's (a conflict over
-//!   `ui/app/src/App.tsx`); each fails the run. With `probes` empty, the script stopped before it
-//!   measured.
+//!   `ui/app/src/App.tsx`, a restore that failed); each fails the run. With `probes` empty, the
+//!   script stopped before it measured (a conflict left by an interrupted run, or a Node older
+//!   than 24.11).
 //! - exit status: 0, or 1 when it reports `failures`. A crash exits 1 with no JSON line.
 //! - stderr: notes for people, printed as they are.
 //!
@@ -268,7 +269,7 @@ pub(crate) fn measure(
             return Err(stop(
                 diag,
                 &format!("could not run `node`: {error}"),
-                "install Node 24 or later",
+                "install Node 24.11 or later",
             ));
         }
     };
@@ -304,7 +305,8 @@ pub(crate) fn measure(
 pub(crate) enum Read {
     /// The half was measured.
     Run(WebRun),
-    /// The script stopped before it measured, with failures (a conflict left by an interrupted run).
+    /// The script stopped before it measured, with failures (a conflict left by an interrupted run,
+    /// or a Node that is too old).
     Stopped(Vec<Failure>),
     /// The output holds no report xtask can read; the parse error.
     Unreadable(String),
