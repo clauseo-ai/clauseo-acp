@@ -12,6 +12,8 @@
 //! - Only `process.rs` starts processes and only `output.rs` prints. Keep it that way. The one clock read
 //!   (`clock.rs`) and each call to a disallowed method (`Command::spawn`, `Command::output`) carry
 //!   `#[expect(clippy::disallowed_methods, reason = "xtask runs tools and times them")]`.
+//! - `buildtime web` runs `node ui/app/scripts/buildtime.mjs`, which times the frontend tools with
+//!   Node's own clock and prints JSON; xtask computes the statistics and judges them against budgets.
 
 mod budgets;
 mod buildtime;

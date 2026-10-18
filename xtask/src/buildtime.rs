@@ -1,12 +1,14 @@
 //! `cargo xtask buildtime [rust|web|all] [--runs N] [--json]`: times the edit loop of the app and of
-//! the protocol crate against the rows of `budgets.toml`. The web half is not built until R4.
+//! the protocol crate (the Rust half), and of the frontend in `ui/app` (the web half, `web.rs`),
+//! against the rows of `budgets.toml`. `all` runs the Rust half, then the web half.
 //!
 //! A probe writes the next value of its crate's `BUILDTIME_MARKER`, runs `cargo <sub> -v` as a
 //! warm-up that is not counted, then times `cargo <sub>` runs. The warm-up's rustc lines are the
 //! authority on whether the crate was rebuilt and whether it was built with incremental. The file
 //! is put back after every probe, and at the start of the next run if this one was interrupted
 //! (`probe.rs`), but never over an edit made during the run. One run at a time holds the checkout's
-//! lock (`lock.rs`). Only `clock::timed` reads the clock, and only `process.rs` starts processes.
+//! lock (`lock.rs`), through both halves. Only `clock::timed` reads the clock, and only
+//! `process.rs` starts processes; the web half's Node script does its own timing.
 
 mod lock;
 mod marker;
@@ -14,6 +16,7 @@ mod probe;
 mod profile;
 mod report;
 mod verdict;
+mod web;
 
 #[cfg(test)]
 mod tests;
@@ -31,13 +34,14 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
 use verdict::{Failure, Outcome, ProbeResult, ProbeStatus, passes};
-
-/// The web half's message, until R4 builds it.
-const WEB_MESSAGE: &str = "not implemented until R4";
+use web::{WebJson, WebOutcome, WebRun};
 
 /// The fix for a probe whose warm-up shows its crate builds without incremental in CI. Cargo turns incremental off whenever CI is set, unless this is set.
 const INCREMENTAL_FIX: &str =
     "set CARGO_INCREMENTAL=1 for the run (cargo turns incremental off whenever CI is set)";
+
+/// The fix for a web probe over its budget that fails the run.
+const WEB_OVER_FIX: &str = "find what slowed the loop (the tool's own output shows where the time goes); a limit in budgets.toml changes only with a reviewed measurement";
 
 /// The fix for a probe over its budget that fails the run.
 const OVER_FIX: &str = "find what slowed the loop (`cargo build --timings` shows where the time goes); a limit in budgets.toml changes only with a reviewed measurement";
@@ -131,9 +135,25 @@ fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Runs the Rust half. Takes the checkout's lock, puts back any file an interrupted run left, then
-/// reads the budgets and the expected incremental setting, then times the probes, holding the lock
-/// to the end. Prints the rustc and profile lines when not `json`. `Err` holds one line per reason
+/// Reads `budgets.toml`. `Err` holds one line per problem; each is printed before it returns.
+fn load_budgets(root: &Path, diag: &mut Out) -> Result<Vec<budgets::Budget>, Vec<String>> {
+    budgets::load(root).map_err(|violations| {
+        violations
+            .iter()
+            .map(|violation| {
+                diag.violation(violation);
+                one_line(&format!(
+                    "{}:{}: {}",
+                    violation.path, violation.line, violation.message
+                ))
+            })
+            .collect()
+    })
+}
+
+/// Runs the Rust half, under the checkout's lock that the caller holds. Puts back any file an
+/// interrupted run left, then reads the budgets and the expected incremental setting, then times
+/// the probes. Prints the rustc and profile lines when not `json`. `Err` holds one line per reason
 /// the run cannot start; the reason is printed before it returns.
 fn measure_rust(
     root: &Path,
@@ -142,10 +162,6 @@ fn measure_rust(
     out: &mut Out,
     diag: &mut Out,
 ) -> Result<RustRun, Vec<String>> {
-    let _lock = match lock::acquire(&root.join(lock::LOCK_PATH)) {
-        Ok(file) => file,
-        Err(failure) => return Err(stop(diag, &failure.message, &failure.fix)),
-    };
     let leftovers = match probe::restore_leftovers(root) {
         Ok(lines) => lines,
         Err(failure) => return Err(stop(diag, &failure.message, &failure.fix)),
@@ -153,20 +169,7 @@ fn measure_rust(
     for line in &leftovers {
         diag.note(line);
     }
-    let budgets = match budgets::load(root) {
-        Ok(budgets) => budgets,
-        Err(violations) => {
-            let mut errors = Vec::new();
-            for violation in &violations {
-                diag.violation(violation);
-                errors.push(one_line(&format!(
-                    "{}:{}: {}",
-                    violation.path, violation.line, violation.message
-                )));
-            }
-            return Err(errors);
-        }
-    };
+    let budgets = load_budgets(root, diag)?;
     let rustc = match rustc_version(root) {
         Ok(version) => version,
         Err(failure) => return Err(stop(diag, &failure.message, &failure.fix)),
@@ -272,7 +275,8 @@ fn rustc_version(root: &Path) -> Result<String, Failure> {
 /// A printer for lines that may be redirected: stdout for the table, stderr for JSON-mode errors.
 type Out = Printer<Box<dyn Write>>;
 
-/// Runs `cargo xtask buildtime`. Returns the exit code.
+/// Runs `cargo xtask buildtime`. Takes the checkout's lock for the whole run, then runs the Rust
+/// half, the web half, or the Rust half then the web half. Returns the exit code.
 pub(crate) fn run(half: Half, runs: u32, json: bool) -> ExitCode {
     let root = workspace::workspace_root();
     let mut out: Out = Printer::new(Box::new(io::stdout()), false);
@@ -282,40 +286,55 @@ pub(crate) fn run(half: Half, runs: u32, json: bool) -> ExitCode {
         Box::new(io::stdout())
     };
     let mut diag: Out = Printer::new(sink, false);
-
-    if half == Half::Web {
+    let stopped = |out: &mut Out, errors: &[String]| {
         if json {
-            out.note(report::web_json());
-        } else {
-            out.note(format!("web: {WEB_MESSAGE}"));
+            out.note(report::error_json(errors));
         }
-        return ExitCode::SUCCESS;
-    }
-    let rust = match measure_rust(&root, runs, json, &mut out, &mut diag) {
-        Ok(rust) => rust,
-        Err(errors) => {
-            if json {
-                out.note(report::error_json(&errors));
-            }
-            return ExitCode::FAILURE;
+        ExitCode::FAILURE
+    };
+
+    let _lock = match lock::acquire(&root.join(lock::LOCK_PATH)) {
+        Ok(file) => file,
+        Err(failure) => {
+            let errors = stop(&mut diag, &failure.message, &failure.fix);
+            return stopped(&mut out, &errors);
         }
     };
-    let passed = passes(&rust.results, rust.ci);
-    if json {
-        out.note(report::json_object(&rust, passed, half == Half::All));
+    let rust = if half == Half::Web {
+        None
     } else {
-        for line in report::table_lines(&rust.results) {
-            out.note(line);
+        match measure_rust(&root, runs, json, &mut out, &mut diag) {
+            Ok(rust) => Some(rust),
+            Err(errors) => return stopped(&mut out, &errors),
         }
-        for line in report::warning_lines(&rust.results) {
-            out.note(line);
+    };
+    if let Some(rust) = &rust {
+        if !json {
+            for line in report::table_lines(&rust.results) {
+                out.note(line);
+            }
+            for line in report::warning_lines(&rust.results) {
+                out.note(line);
+            }
         }
-        if half == Half::All {
-            out.note(format!("web: {WEB_MESSAGE}"));
+        report::print_failures(&rust.results, &mut diag);
+        report_over_budget(&rust.results, rust.ci, &mut diag);
+    }
+    let web = (half != Half::Rust).then(|| {
+        let ci = check::is_ci(env::var("CI").ok().as_deref());
+        WebJson::of(&measure_web(&root, runs, ci, json, &mut out, &mut diag))
+    });
+    let rust_passed = rust
+        .as_ref()
+        .is_none_or(|rust| passes(&rust.results, rust.ci));
+    let passed = rust_passed && web.as_ref().is_none_or(WebJson::passed);
+    if json {
+        match (&rust, &web) {
+            (Some(rust), web) => out.note(report::json_object(rust, passed, web.as_ref())),
+            (None, Some(web)) => out.note(report::web_json(web)),
+            (None, None) => {}
         }
     }
-    report::print_failures(&rust.results, &mut diag);
-    report_over_budget(&rust.results, rust.ci, &mut diag);
     if passed {
         ExitCode::SUCCESS
     } else {
@@ -323,15 +342,69 @@ pub(crate) fn run(half: Half, runs: u32, json: bool) -> ExitCode {
     }
 }
 
+/// Runs the web half: reads the budgets, runs the script, then prints the node line, the table and
+/// the reported-only line when not `json`, and the failures and over-budget probes to `diag`.
+fn measure_web(
+    root: &Path,
+    runs: u32,
+    ci: bool,
+    json: bool,
+    out: &mut Out,
+    diag: &mut Out,
+) -> Result<WebRun, Vec<String>> {
+    let budgets = load_budgets(root, diag)?;
+    let run = web::measure(root, runs, ci, &budgets, diag)?;
+    if !json {
+        out.note(format!("web: node {}", run.node));
+        for line in web::table_lines(&run.results) {
+            out.note(line);
+        }
+        out.note(web::REPORTED_LINE);
+    }
+    for result in &run.results {
+        if let WebOutcome::Failed(failure) = &result.outcome {
+            if let Some(output) = &failure.output {
+                diag.captured_output(output);
+            }
+            diag.failure(&failure.message, &failure.fix);
+        }
+    }
+    let over: Vec<(&str, bool)> = run
+        .results
+        .iter()
+        .filter(|result| result.status() == ProbeStatus::Over)
+        .map(|result| (result.probe.name, result.fails_run(ci)))
+        .collect();
+    over_budget_notes(&over, ci, WEB_OVER_FIX, diag);
+    Ok(run)
+}
+
 /// Names the over-budget probes. Those that fail the run get a failure with its fix. Those only
 /// reported get a note: "CI reports only" in CI, and "reported only" locally, for an alert gate.
 fn report_over_budget(results: &[ProbeResult], ci: bool, diag: &mut Out) {
-    let (failing, reported): (Vec<&ProbeResult>, Vec<&ProbeResult>) = results
+    let over: Vec<(&str, bool)> = results
         .iter()
         .filter(|result| result.outcome.status() == ProbeStatus::Over)
-        .partition(|result| result.outcome.fails_run(ci));
+        .map(|result| (result.name, result.outcome.fails_run(ci)))
+        .collect();
+    over_budget_notes(&over, ci, OVER_FIX, diag);
+}
+
+/// The over-budget lines for `over`, each probe's name and whether it fails the run: a note for
+/// the probes only reported, then a failure with `fix` for those that fail.
+fn over_budget_notes(over: &[(&str, bool)], ci: bool, fix: &str, diag: &mut Out) {
+    let failing: Vec<&str> = over
+        .iter()
+        .filter(|(_, fails)| *fails)
+        .map(|(name, _)| *name)
+        .collect();
+    let reported: Vec<&str> = over
+        .iter()
+        .filter(|(_, fails)| !*fails)
+        .map(|(name, _)| *name)
+        .collect();
     if !reported.is_empty() {
-        let names = names(&reported);
+        let names = reported.join(", ");
         if ci {
             diag.note(format!("over budget, CI reports only: {names}"));
         } else {
@@ -339,15 +412,6 @@ fn report_over_budget(results: &[ProbeResult], ci: bool, diag: &mut Out) {
         }
     }
     if !failing.is_empty() {
-        diag.failure(&format!("over budget: {}", names(&failing)), OVER_FIX);
+        diag.failure(&format!("over budget: {}", failing.join(", ")), fix);
     }
-}
-
-/// The probe names, comma-separated.
-fn names(results: &[&ProbeResult]) -> String {
-    results
-        .iter()
-        .map(|result| result.name)
-        .collect::<Vec<_>>()
-        .join(", ")
 }
