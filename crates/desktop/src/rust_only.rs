@@ -14,7 +14,9 @@
 //! (`clippy.toml`) forbids `Builder::plugin`, `Builder::plugin_boxed`, `AppHandle::plugin` and
 //! `AppHandle::plugin_boxed` everywhere else. The same list forbids the runtime permission grants
 //! (`Manager::add_capability`, `Context::runtime_authority_mut`,
-//! `RuntimeAuthority::add_capability`) and `Context::config_mut`.
+//! `RuntimeAuthority::add_capability`, `RuntimeAuthority::__allow_command`) and the ways to build
+//! or change the context outside `generate_context!` (`Context::new`, `Context::config_mut`,
+//! `Context::set_assets`).
 
 use tauri::ipc::Invoke;
 use tauri::plugin::Plugin;

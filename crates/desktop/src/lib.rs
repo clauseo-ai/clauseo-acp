@@ -6,7 +6,8 @@
 //! - Plugins are called from Rust only. Each is registered with `plugin_rust_only`, which drops the
 //!   script a plugin would inject into the page (`rust_only.rs`). clippy's `disallowed-methods`
 //!   (`clippy.toml`) forbids the other public ways we know of to register a plugin, grant a
-//!   permission at runtime or change the config after `tauri-config` has checked it.
+//!   permission at runtime, or build or change the context (its config, assets and permissions)
+//!   after `tauri-config` has checked it.
 //! - The eight plugins below are the whole set. `cargo xtask check` fails on any other
 //!   `tauri-plugin-*` dependency, and on the `devtools` or `protocol-asset` features of `tauri`.
 //! - This blank app is the control for every memory and start-up budget. Keep it blank.
@@ -26,6 +27,11 @@ const MAIN_WINDOW: &str = "main";
 
 /// Builds the app and runs it until it exits.
 pub fn run() -> tauri::Result<()> {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "generate_context! expands to Context::new; it is the one place a context is built"
+    )]
+    let context = tauri::generate_context!();
     tauri::Builder::default()
         // First, so a second launch ends before any other plugin starts.
         .plugin_rust_only(tauri_plugin_single_instance::init(
@@ -45,7 +51,7 @@ pub fn run() -> tauri::Result<()> {
         .plugin_rust_only(tauri_plugin_os::init())
         .plugin_rust_only(tauri_plugin_notification::init())
         .setup(|app| Ok(open_main_window(app)?))
-        .run(tauri::generate_context!())
+        .run(context)
 }
 
 /// Builds the `main` window in code, not in `tauri.conf.json`, so builds can add webview arguments
