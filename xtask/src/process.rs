@@ -1,6 +1,7 @@
 //! The only module that starts processes. Every other module goes through `capture`, `run_quiet`
 //! or `run_inherit`, so the rules about how commands run live in one place.
 
+use std::ffi::OsStr;
 use std::fmt;
 use std::io::{self, Read};
 use std::path::Path;
@@ -16,14 +17,18 @@ pub(crate) enum Program {
     Cargo,
     /// A program found on `PATH`.
     Named(&'static str),
+    /// pnpm. On Windows it may be `pnpm.cmd` (npm and corepack install that), so it is resolved
+    /// by `pnpm_file`.
+    Pnpm,
 }
 
 impl Program {
-    /// The name people see: `cargo`, or the named program.
+    /// The name people see: `cargo`, the named program, or `pnpm`.
     pub(crate) fn name(&self) -> &'static str {
         match *self {
             Program::Cargo => "cargo",
             Program::Named(name) => name,
+            Program::Pnpm => "pnpm",
         }
     }
 
@@ -33,8 +38,40 @@ impl Program {
                 Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
             }
             Program::Named(name) => Command::new(name),
+            Program::Pnpm => Command::new(pnpm_file()),
         }
     }
+}
+
+/// The file names pnpm may have on Windows, in the order they are looked for.
+const WINDOWS_PNPM: [&str; 2] = ["pnpm.cmd", "pnpm.exe"];
+
+/// The program to start for pnpm. On Windows, `Command` finds a program on `PATH` only by the exact
+/// name it is given, so `pnpm.cmd` is looked for first, then `pnpm.exe`, then plain `pnpm`. Rust
+/// 1.77+ runs a `.cmd` file with its arguments escaped, so they reach the script unchanged.
+/// Elsewhere it is `pnpm`.
+fn pnpm_file() -> &'static str {
+    if cfg!(windows) {
+        std::env::var_os("PATH")
+            .and_then(|path| resolve_pnpm(&path, &WINDOWS_PNPM, Path::is_file))
+            .unwrap_or("pnpm")
+    } else {
+        "pnpm"
+    }
+}
+
+/// The first of `names` that a directory on `path` holds, with `exists` saying whether a path is a
+/// file. Every directory is checked for one name before the next name is tried, so `pnpm.cmd` in
+/// any directory beats `pnpm.exe` in the first. `None` when no name is found.
+fn resolve_pnpm(
+    path: &OsStr,
+    names: &[&'static str],
+    exists: impl Fn(&Path) -> bool,
+) -> Option<&'static str> {
+    names
+        .iter()
+        .copied()
+        .find(|name| std::env::split_paths(path).any(|dir| exists(&dir.join(name))))
 }
 
 /// A program and its arguments. Displays as the shell-like form: `cargo fmt --all -- --check`.
@@ -149,6 +186,8 @@ pub(crate) fn run_inherit(cmd: &Cmd, root: &Path) -> io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
 
     #[test]
     fn cmd_displays_its_program_then_its_args() {
@@ -156,6 +195,64 @@ mod tests {
         assert_eq!(cmd.to_string(), "cargo fmt --all -- --check");
         let named = Cmd::new(Program::Named("git"), Vec::<String>::new());
         assert_eq!(named.to_string(), "git");
+        let pnpm = Cmd::new(Program::Pnpm, ["--version"]);
+        assert_eq!(pnpm.to_string(), "pnpm --version");
+    }
+
+    /// The path of `name` in `dir`.
+    fn at(dir: &str, name: &str) -> PathBuf {
+        Path::new(dir).join(name)
+    }
+
+    /// A PATH value of `dirs`, joined the way the OS joins one.
+    fn path_of(dirs: &[&str]) -> OsString {
+        std::env::join_paths(dirs).expect("test directories hold no separator")
+    }
+
+    /// An `exists` predicate that holds for exactly `files`.
+    fn only(files: &[PathBuf]) -> impl Fn(&Path) -> bool + '_ {
+        move |file| files.iter().any(|held| held == file)
+    }
+
+    /// The directories of the PATH the tests search: the first holds no pnpm, the second one.
+    const DIRS: [&str; 2] = ["/tools/bin", "/usr/local/node"];
+
+    #[test]
+    fn pnpm_resolves_to_a_cmd_file_on_path() {
+        let files = [at("/usr/local/node", "pnpm.cmd")];
+        assert_eq!(
+            resolve_pnpm(&path_of(&DIRS), &WINDOWS_PNPM, only(&files)),
+            Some("pnpm.cmd")
+        );
+    }
+
+    #[test]
+    fn pnpm_resolves_to_an_exe_when_there_is_no_cmd() {
+        let files = [at("/tools/bin", "pnpm.exe")];
+        assert_eq!(
+            resolve_pnpm(&path_of(&DIRS), &WINDOWS_PNPM, only(&files)),
+            Some("pnpm.exe")
+        );
+    }
+
+    #[test]
+    fn pnpm_resolves_to_no_name_when_neither_is_on_path() {
+        assert_eq!(
+            resolve_pnpm(&path_of(&DIRS), &WINDOWS_PNPM, only(&[])),
+            None
+        );
+    }
+
+    #[test]
+    fn a_cmd_file_beats_an_exe_earlier_on_path() {
+        let files = [
+            at("/tools/bin", "pnpm.exe"),
+            at("/usr/local/node", "pnpm.cmd"),
+        ];
+        assert_eq!(
+            resolve_pnpm(&path_of(&DIRS), &WINDOWS_PNPM, only(&files)),
+            Some("pnpm.cmd")
+        );
     }
 
     #[cfg(unix)]
