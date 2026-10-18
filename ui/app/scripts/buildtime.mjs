@@ -4,8 +4,11 @@
 //
 //   node ui/app/scripts/buildtime.mjs [--runs N]
 //
-// Each tool runs as `process.execPath <its JS entry>`, so the timing has no shell and no pnpm in it,
-// and it runs the same on Windows. Each timed probe gets one warm-up run, then N timed runs.
+// The commands are the scripts of ui/app/package.json: `typecheck` (tsc), `lint:types`
+// (oxlint_type_aware), `build` (vite_build), and `dev` with `--port <p> --strictPort` (dev_start,
+// hmr). Each runs as `process.execPath <its bin's JS entry> ...args`, so the timing has no shell
+// and no pnpm in it, and it runs the same on Windows. Each timed probe gets one warm-up run, then N
+// timed runs.
 //
 // The HMR probe edits src/App.tsx while it runs and always puts back its exact bytes: in `finally`,
 // on SIGINT and SIGTERM, and at the start of the next run if this one was killed outright.
@@ -19,9 +22,10 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { initialJs, marked, parseRuns } from "./buildtime-lib.mjs";
+import { initialJs, marked, parseRuns, scriptCommand } from "./buildtime-lib.mjs";
 
 const APP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const UI_DIR = resolve(APP_DIR, "..");
 const APP_TSX = join(APP_DIR, "src", "App.tsx");
 const MARK = /\s+data-buildtime="[^"]*"/g;
 
@@ -33,22 +37,11 @@ function note(text) {
   process.stderr.write(`buildtime.mjs: ${text}\n`);
 }
 
-/** The JS entry of `bin` in the package `pkg`, from ui/app/node_modules. */
-function binEntry(pkg, bin) {
-  const dir = join(APP_DIR, "node_modules", pkg);
-  const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
-  const entry = typeof manifest.bin === "string" ? manifest.bin : manifest.bin?.[bin];
-  if (typeof entry !== "string") {
-    throw new Error(`${pkg}/package.json has no bin "${bin}"`);
-  }
-  return join(dir, entry);
-}
-
-/** Runs `node <entry> ...args` in ui/app. Resolves with its exit code, wall time and output. */
-function runTool(entry, args) {
+/** Runs `node ...argv` in ui/app. Resolves with its exit code, wall time and output. */
+function runTool(argv) {
   return new Promise((done) => {
     const started = performance.now();
-    const child = spawn(process.execPath, [entry, ...args], {
+    const child = spawn(process.execPath, argv, {
       cwd: APP_DIR,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -65,15 +58,23 @@ function runTool(entry, args) {
   });
 }
 
-/** One warm-up run, then `runs` timed runs. A non-zero exit makes the probe a failure. */
-async function timeTool(probe, tool, args, runs) {
-  const command = `pnpm -C ui/app exec ${tool.bin} ${args.join(" ")}`;
-  const entry = binEntry(tool.pkg, tool.bin);
+/**
+ * The package.json script `script` timed: one warm-up run, then `runs` timed runs. A non-zero exit,
+ * or a script that cannot run without a shell, makes the probe a failure.
+ */
+async function timeScript(probe, script, runs) {
+  const command = `pnpm -C ui/app run ${script}`;
+  let tool;
+  try {
+    tool = scriptCommand(APP_DIR, UI_DIR, script);
+  } catch (error) {
+    return { probe, failed: { message: String(error.message ?? error), command, output: "" } };
+  }
   const samples = [];
   for (let run = 0; run <= runs; run += 1) {
-    const result = await runTool(entry, args);
+    const result = await runTool(tool.argv);
     if (result.code !== 0) {
-      const message = `\`${tool.bin} ${args.join(" ")}\` exited with ${result.code}`;
+      const message = `\`${tool.text}\` exited with ${result.code}`;
       return { probe, failed: { message, command, output: result.output } };
     }
     if (run > 0) {
@@ -107,15 +108,19 @@ function stopChild(child) {
   }
 }
 
-/** Starts the dev server on `port`. Resolves once it prints "ready in", with the time it took. */
+/**
+ * Starts the dev server (the `dev` script) on `port`. Resolves once it prints "ready in", with the
+ * time it took.
+ */
 function startVite(port, state) {
   return new Promise((done, fail) => {
+    const { argv } = scriptCommand(APP_DIR, UI_DIR, "dev");
     const started = performance.now();
-    const child = spawn(
-      process.execPath,
-      [binEntry("vite", "vite"), "--port", String(port), "--strictPort"],
-      { cwd: APP_DIR, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_COLOR: "1" } },
-    );
+    const child = spawn(process.execPath, [...argv, "--port", String(port), "--strictPort"], {
+      cwd: APP_DIR,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, NO_COLOR: "1" },
+    });
     state.vite = child;
     let output = "";
     let ready = false;
@@ -275,14 +280,11 @@ async function main() {
   process.on("SIGTERM", onSignal);
   state.original = recoverApp();
 
-  const tsc = { pkg: "@typescript/native", bin: "tsc" };
-  const oxlint = { pkg: "oxlint", bin: "oxlint" };
-  const vite = { pkg: "vite", bin: "vite" };
   const probes = [
-    await timeTool("tsc", tsc, ["--noEmit"], runs),
-    await timeTool("oxlint_type_aware", oxlint, ["--type-aware"], runs),
+    await timeScript("tsc", "typecheck", runs),
+    await timeScript("oxlint_type_aware", "lint:types", runs),
   ];
-  const build = await timeTool("vite_build", vite, ["build"], runs);
+  const build = await timeScript("vite_build", "build", runs);
   probes.push(build);
   if (build.failed === undefined) {
     try {
@@ -291,7 +293,7 @@ async function main() {
       const message = `could not size the initial JS: ${String(error)}`;
       probes.push({
         probe: "initial_js",
-        failed: { message, command: "pnpm -C ui/app exec vite build", output: "" },
+        failed: { message, command: "pnpm -C ui/app run build", output: "" },
       });
     }
   } else {
