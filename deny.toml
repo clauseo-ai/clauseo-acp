@@ -12,7 +12,12 @@ targets = [
 [advisories]
 yanked = "deny"
 # Each ignore entry: { id = "RUSTSEC-…", reason = "…, revisit by YYYY-MM-DD" }
-ignore = []
+ignore = [
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is unmaintained; linux only, via glib-macros 0.18 -> gtk 0.18 -> muda -> tauri, revisit by 2027-01-18" },
+  { id = "RUSTSEC-2026-0370", reason = "zvariant is unmaintained (merged into zbus 6); linux only, via zbus 5 -> tauri-plugin-notification, -opener, -single-instance, revisit by 2027-01-18" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names is unmaintained (merged into zbus 6); linux only, via zbus 5 -> tauri-plugin-notification, -opener, -single-instance, revisit by 2027-01-18" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive is unmaintained (merged into zbus 6); linux only, via zvariant 5 -> zbus 5 -> tauri-plugin-notification, -opener, -single-instance, revisit by 2027-01-18" },
+]
 
 [licenses]
 # Each licence must allow distribution inside a GPL-3.0 binary.
@@ -46,7 +51,10 @@ wildcards = "deny"
 allow-wildcard-paths = true
 deny = [
   { crate = "openssl-sys", reason = "use rustls; no system OpenSSL on Windows laptops" },
-  { crate = "async-trait", reason = "house style: no async traits across crates" },
+  # zbus 5 (linux D-Bus, via tauri-plugin-notification, -opener, -single-instance) is the one crate allowed to use it.
+  { crate = "async-trait", wrappers = [
+    "zbus",
+  ], reason = "house style: no async traits across crates" },
 ]
 
 [sources]

@@ -1,14 +1,35 @@
 [workspace]
 resolver = "3"
-# crates/.gitkeep keeps this glob valid until the first crate exists: cargo refuses a member glob
-# that matches nothing and skips matches that are not directories. Delete it with the first crate.
 members = ["crates/*", "xtask"]
+default-members = ["crates/desktop"]
 
 [workspace.package]
 edition = "2024"
 rust-version = "1.99"
 license = "GPL-3.0-or-later"
 publish = false
+
+[workspace.dependencies]
+# One Tauri release: tauri 2.12.4, its tauri-build, and the plugins published with it. The plugin
+# set is fixed (`cargo xtask check` enforces it); each change forces a near-cold rebuild.
+tauri = "2.12.4"
+tauri-build = "2.7.3"
+tauri-plugin-single-instance = { version = "2.5.4", features = ["deep-link"] }
+tauri-plugin-deep-link = "2.6.2"
+# No `zip` feature: it only unpacks v1-style zipped Windows installers and compressed AppImages, and
+# its zip 4 dependency carries RUSTSEC-2026-0367, -0368 and -0369. macOS updates need only tar and flate2.
+# So `bundle.createUpdaterArtifacts` must never be "v1Compatible": that format needs the `zip` feature.
+tauri-plugin-updater = { version = "2.14.0", default-features = false, features = [
+  "rustls-tls",
+  "system-proxy",
+] }
+tauri-plugin-window-state = "2.5.0"
+tauri-plugin-dialog = "2.8.3"
+tauri-plugin-opener = "2.7.2"
+tauri-plugin-os = "2.4.0"
+tauri-plugin-notification = "2.7.0"
+# tauri::generate_context! writes the plugin configuration as serde_json values.
+serde_json = "1"
 
 [workspace.lints.rust]
 unsafe_code = "deny"               # deny, not forbid: an FFI module overrides with #[expect(unsafe_code, reason = "…")]

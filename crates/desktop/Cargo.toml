@@ -1,0 +1,32 @@
+[package]
+name = "clauseo-desktop"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[package.metadata.cargo-shear]
+# serde_json is used only inside the code tauri::generate_context! writes, where cargo-shear cannot see it.
+ignored = ["serde_json"]
+
+[lints]
+workspace = true
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+tauri.workspace = true
+tauri-plugin-single-instance.workspace = true
+tauri-plugin-deep-link.workspace = true
+tauri-plugin-updater.workspace = true
+tauri-plugin-window-state.workspace = true
+tauri-plugin-dialog.workspace = true
+tauri-plugin-opener.workspace = true
+tauri-plugin-os.workspace = true
+tauri-plugin-notification.workspace = true
+serde_json.workspace = true
