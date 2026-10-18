@@ -1,0 +1,4 @@
+# `taplo fmt --check` runs on every TOML file in the repo, from `cargo xtask check` and the pre-commit
+# hook. Run `taplo fmt` to fix. Formatting uses taplo's defaults.
+include = ["**/*.toml"]
+exclude = ["target/**", "**/node_modules/**"]

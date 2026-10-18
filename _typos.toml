@@ -1,0 +1,4 @@
+# typos checks spelling in code, docs and file names, from `cargo xtask check` and the pre-commit
+# hook. Add a word under [default.extend-words] only when it is a real name or term, never to hide a typo.
+[files]
+extend-exclude = ["Cargo.lock", "ui/pnpm-lock.yaml"]

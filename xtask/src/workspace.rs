@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 /// A workspace member package.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Member {
+pub(crate) struct Member {
     pub name: String,
     /// Directory relative to the workspace root, `/`-separated.
     pub dir: String,
@@ -15,7 +15,7 @@ pub struct Member {
 }
 
 /// Passed to every static check.
-pub struct Context {
+pub(crate) struct Context {
     pub root: PathBuf,
     pub members: Vec<Member>,
 }
@@ -41,14 +41,14 @@ struct Dependency {
 }
 
 /// The workspace root: the parent of this crate's directory (`xtask/`).
-pub fn workspace_root() -> PathBuf {
+pub(crate) fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
 }
 
 /// Runs `cargo metadata` in `root` and returns the workspace members.
-pub fn load_members(root: &Path) -> Result<Vec<Member>, String> {
+pub(crate) fn load_members(root: &Path) -> Result<Vec<Member>, String> {
     let cmd = Cmd::new(
         Program::Cargo,
         ["metadata", "--format-version", "1", "--no-deps"],
@@ -62,7 +62,7 @@ pub fn load_members(root: &Path) -> Result<Vec<Member>, String> {
 }
 
 /// Reads `cargo metadata --no-deps` JSON. Paths are made relative to `workspace_root`.
-pub fn parse_metadata(json: &str) -> Result<Vec<Member>, String> {
+pub(crate) fn parse_metadata(json: &str) -> Result<Vec<Member>, String> {
     let metadata: Metadata =
         serde_json::from_str(json).map_err(|e| format!("bad `cargo metadata` JSON: {e}"))?;
     let base = metadata.workspace_root.as_path();
@@ -102,12 +102,12 @@ fn relative(path: &Path, base: &Path) -> Option<String> {
 }
 
 /// True when the repo-relative `file` lies inside the repo-relative directory `dir`.
-pub fn is_under(file: &str, dir: &str) -> bool {
+pub(crate) fn is_under(file: &str, dir: &str) -> bool {
     dir.is_empty() || file == dir || file.starts_with(&format!("{dir}/"))
 }
 
 /// The member whose directory is the longest prefix of `file`.
-pub fn package_for<'a>(file: &str, members: &'a [Member]) -> Option<&'a Member> {
+pub(crate) fn package_for<'a>(file: &str, members: &'a [Member]) -> Option<&'a Member> {
     members
         .iter()
         .filter(|m| is_under(file, &m.dir))
@@ -135,10 +135,10 @@ mod tests {
         assert_eq!(members.len(), 2);
         assert_eq!(members[0].name, "a");
         assert_eq!(members[0].dir, "crates/a");
-        assert!(members[0].path_deps.is_empty());
+        assert_eq!(members[0].path_deps, Vec::<String>::new());
         assert_eq!(members[1].name, "b");
         assert_eq!(members[1].dir, "crates/b");
-        assert_eq!(members[1].path_deps, vec!["crates/a".to_string()]);
+        assert_eq!(members[1].path_deps, vec!["crates/a".to_owned()]);
     }
 
     #[test]

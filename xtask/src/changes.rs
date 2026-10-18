@@ -7,7 +7,7 @@ use std::path::Path;
 
 /// Which packages `--quick` checks.
 #[derive(Debug, PartialEq, Eq)]
-pub enum Selection {
+pub(crate) enum Selection {
     /// Every package, with the reason.
     All(String),
     /// These packages (sorted by name); empty means nothing changed.
@@ -29,7 +29,7 @@ const ALL_PACKAGES_FILES: &[&str] = &[
 const ALL_PACKAGES_DIR: &str = "xtask/";
 
 /// Pure selection: `changed` are repo-relative `/`-separated paths.
-pub fn select(changed: &[String], members: &[Member]) -> Selection {
+pub(crate) fn select(changed: &[String], members: &[Member]) -> Selection {
     for file in changed {
         if ALL_PACKAGES_FILES.contains(&file.as_str()) || file.starts_with(ALL_PACKAGES_DIR) {
             return Selection::All(format!("{file} changed"));
@@ -56,7 +56,7 @@ pub fn select(changed: &[String], members: &[Member]) -> Selection {
 }
 
 /// Names of the members that own at least one changed file (before dependents are added).
-pub fn direct_members(changed: &[String], members: &[Member]) -> Vec<String> {
+pub(crate) fn direct_members(changed: &[String], members: &[Member]) -> Vec<String> {
     let names: BTreeSet<String> = changed
         .iter()
         .filter_map(|file| package_for(file, members))
@@ -67,10 +67,10 @@ pub fn direct_members(changed: &[String], members: &[Member]) -> Vec<String> {
 
 /// Tracked changes against the merge-base with `origin/main`, plus untracked files.
 /// Errors when the merge-base cannot be found or git fails.
-pub fn changed_files(root: &Path) -> Result<Vec<String>, String> {
+pub(crate) fn changed_files(root: &Path) -> Result<Vec<String>, String> {
     let base = git(root, &["merge-base", "HEAD", "origin/main"])?
         .trim()
-        .to_string();
+        .to_owned();
     if base.is_empty() {
         return Err("`git merge-base HEAD origin/main` printed nothing".into());
     }
@@ -86,7 +86,7 @@ pub fn changed_files(root: &Path) -> Result<Vec<String>, String> {
 fn split_nul(text: &str) -> impl Iterator<Item = String> + '_ {
     text.split('\0')
         .filter(|s| !s.is_empty())
-        .map(str::to_string)
+        .map(str::to_owned)
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
@@ -106,12 +106,12 @@ mod tests {
         Member {
             name: name.into(),
             dir: dir.into(),
-            path_deps: path_deps.iter().map(|s| s.to_string()).collect(),
+            path_deps: path_deps.iter().map(ToString::to_string).collect(),
         }
     }
 
     fn files(list: &[&str]) -> Vec<String> {
-        list.iter().map(|s| s.to_string()).collect()
+        list.iter().map(ToString::to_string).collect()
     }
 
     fn workspace() -> Vec<Member> {
@@ -191,6 +191,6 @@ mod tests {
     #[test]
     fn split_nul_drops_empty_entries() {
         let parts: Vec<String> = split_nul("a.rs\0crates/b/x.rs\0\0").collect();
-        assert_eq!(parts, vec!["a.rs".to_string(), "crates/b/x.rs".to_string()]);
+        assert_eq!(parts, vec!["a.rs".to_owned(), "crates/b/x.rs".to_owned()]);
     }
 }

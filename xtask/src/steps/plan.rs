@@ -13,24 +13,21 @@ const NO_PACKAGES: &str = "no changed packages";
 /// The steps for `scope`, in run order: fmt, every static check, clippy, nextest.
 /// With `Scope::Nothing`, clippy and nextest are skipped. `ci` picks the CI variants of the
 /// clippy and nextest commands.
-pub fn plan(scope: &Scope, ci: bool) -> Vec<Step> {
+pub(crate) fn plan(scope: &Scope, ci: bool) -> Vec<Step> {
     let mut steps = vec![Step::Tool(fmt_step())];
     steps.extend(checks::ALL.iter().map(Step::Static));
-    match scope.selectors() {
-        Some(selectors) => {
-            steps.push(Step::Tool(clippy_step(&selectors, ci)));
-            steps.push(Step::Tool(nextest_step(&selectors, ci)));
-        }
-        None => {
-            steps.push(Step::Skipped {
-                name: "clippy",
-                reason: NO_PACKAGES,
-            });
-            steps.push(Step::Skipped {
-                name: "nextest",
-                reason: NO_PACKAGES,
-            });
-        }
+    if let Some(selectors) = scope.selectors() {
+        steps.push(Step::Tool(clippy_step(&selectors, ci)));
+        steps.push(Step::Tool(nextest_step(&selectors, ci)));
+    } else {
+        steps.push(Step::Skipped {
+            name: "clippy",
+            reason: NO_PACKAGES,
+        });
+        steps.push(Step::Skipped {
+            name: "nextest",
+            reason: NO_PACKAGES,
+        });
     }
     steps
 }
@@ -49,7 +46,7 @@ fn fmt_step() -> ToolStep {
 }
 
 fn clippy_step(selectors: &[String], ci: bool) -> ToolStep {
-    let mut args = vec!["clippy".to_string()];
+    let mut args = vec!["clippy".to_owned()];
     args.extend(selectors.iter().cloned());
     args.extend(["--all-targets", "--message-format=short"].map(String::from));
     if ci {
@@ -64,7 +61,7 @@ fn clippy_step(selectors: &[String], ci: bool) -> ToolStep {
 }
 
 fn nextest_step(selectors: &[String], ci: bool) -> ToolStep {
-    let mut args = vec!["nextest".to_string(), "run".to_string()];
+    let mut args = vec!["nextest".to_owned(), "run".to_owned()];
     args.extend(selectors.iter().cloned());
     args.push("--no-tests=pass".into());
     if ci {

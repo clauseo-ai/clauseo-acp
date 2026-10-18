@@ -1,0 +1,433 @@
+# Every budget the plan sets, one [[budget]] table per metric. `cargo xtask check` validates each row;
+# `cargo xtask buildtime` compares its probes with the rows it measures.
+#
+# id           snake_case, unique
+# metric       what is measured
+# limit        the most it may be, in `unit`
+# unit         s, ms, MB, KB or count
+# gate         pr (blocks merges), release (blocks release tags), alert (reports only),
+#              local (fails locally, alerts in CI)
+# measured_by  the tool or method
+# status       unmeasured or measured: whether this repo's own tooling has measured the row
+# measured     optional: the last measured value, in `unit` (for unmeasured rows, an earlier lab number)
+# measured_on  optional, required with measured: os-arch-machine kind, never a private host name
+# source       the plan section the budget comes from
+#
+# Not a row yet: sandbox overhead per agent. Its budget is set after measuring our own launcher and
+# proxy (synthesis §4; doc 21).
+
+[[budget]]
+id = "window_visible"
+metric = "native window visible after launch"
+limit = 250.0
+unit = "ms"
+gate = "alert"
+measured_by = "in-process marks"
+status = "unmeasured"
+source = "synthesis §4; doc 15"
+
+[[budget]]
+id = "cold_start_interactive"
+metric = "cold start to interactive, median"
+limit = 1500.0
+unit = "ms"
+gate = "release"
+measured_by = "marks across Rust and JS"
+status = "unmeasured"
+source = "synthesis §4; doc 15"
+
+[[budget]]
+id = "warm_start_interactive"
+metric = "warm start to interactive"
+limit = 800.0
+unit = "ms"
+gate = "release"
+measured_by = "marks across Rust and JS"
+status = "unmeasured"
+source = "synthesis §4; doc 15"
+
+[[budget]]
+id = "idle_memory_over_blank"
+metric = "idle private memory of the app and WebView2 process group over a blank Tauri app, no agents"
+limit = 60.0
+unit = "MB"
+gate = "release"
+measured_by = "process-group accounting against a blank control"
+status = "unmeasured"
+source = "synthesis §4; doc 15"
+
+[[budget]]
+id = "idle_memory_total"
+metric = "idle private memory, absolute"
+limit = 250.0
+unit = "MB"
+gate = "alert"
+measured_by = "process-group accounting"
+status = "unmeasured"
+source = "synthesis §4; doc 15"
+
+[[budget]]
+id = "idle_memory_host"
+metric = "idle private memory of the Rust host"
+limit = 40.0
+unit = "MB"
+gate = "alert"
+measured_by = "process-group accounting"
+status = "unmeasured"
+source = "synthesis §4; doc 15"
+
+[[budget]]
+id = "js_heap_idle"
+metric = "JS heap after GC, idle"
+limit = 20.0
+unit = "MB"
+gate = "pr"
+measured_by = "CDP in headless Chromium"
+status = "unmeasured"
+source = "synthesis §4; doc 15; doc 14"
+
+[[budget]]
+id = "js_heap_ten_threads"
+metric = "JS heap after GC with 10 threads open"
+limit = 80.0
+unit = "MB"
+gate = "pr"
+measured_by = "CDP in headless Chromium"
+status = "unmeasured"
+source = "synthesis §4; doc 15; doc 14"
+
+[[budget]]
+id = "js_heap_growth_thread_switches"
+metric = "JS heap growth over 50 thread switches (must stay under)"
+limit = 5.0
+unit = "MB"
+gate = "pr"
+measured_by = "CDP in headless Chromium"
+status = "unmeasured"
+source = "synthesis §4; doc 15; doc 14"
+
+[[budget]]
+id = "keystroke_latency_p95"
+metric = "keystroke latency, p95"
+limit = 32.0
+unit = "ms"
+gate = "alert"
+measured_by = "Event Timing"
+status = "unmeasured"
+source = "synthesis §4; doc 15"
+
+[[budget]]
+id = "keystroke_handler"
+metric = "keystroke handler time"
+limit = 4.0
+unit = "ms"
+gate = "alert"
+measured_by = "Event Timing"
+status = "unmeasured"
+source = "synthesis §4; doc 15"
+
+[[budget]]
+id = "long_frames_streaming"
+metric = "animation frames over 50 ms while streaming at 4x CPU throttle"
+limit = 0.0
+unit = "count"
+gate = "alert"
+measured_by = "Long Animation Frames"
+status = "unmeasured"
+source = "synthesis §4; doc 14; doc 15"
+
+[[budget]]
+id = "react_commits_per_frame"
+metric = "React commits per frame while streaming"
+limit = 1.0
+unit = "count"
+gate = "pr"
+measured_by = "test scheduler and React Profiler"
+status = "unmeasured"
+source = "synthesis §4; doc 14; doc 15"
+
+[[budget]]
+id = "react_commits_unchanged_rows"
+metric = "React commits for unchanged rows while streaming"
+limit = 0.0
+unit = "count"
+gate = "pr"
+measured_by = "test scheduler and React Profiler"
+status = "unmeasured"
+source = "synthesis §4; doc 14; doc 15"
+
+[[budget]]
+id = "idle_timers_frames"
+metric = "timers or animation frames running while idle"
+limit = 0.0
+unit = "count"
+gate = "pr"
+measured_by = "headless check"
+status = "unmeasured"
+source = "synthesis §4; doc 15"
+
+[[budget]]
+id = "initial_js"
+metric = "initial JavaScript, brotli"
+limit = 180.0
+unit = "KB"
+gate = "pr"
+measured_by = "bundle analysis"
+status = "unmeasured"
+source = "synthesis §4; doc 14; doc 17"
+
+[[budget]]
+id = "checkpoint_per_turn"
+metric = "checkpoint per turn for a matter of 500 documents with 3 changed (proposed)"
+limit = 200.0
+unit = "ms"
+gate = "alert"
+measured_by = "bench on a fixture folder"
+status = "unmeasured"
+source = "synthesis §4"
+
+[[budget]]
+id = "reducer_apply"
+metric = "reducer apply, one event"
+limit = 0.05
+unit = "ms"
+gate = "pr"
+measured_by = "gungraun instruction-count proxy"
+status = "unmeasured"
+source = "synthesis §4; doc 04"
+
+[[budget]]
+id = "reopen_20k_events"
+metric = "reopen a 20k-event thread from its snapshot"
+limit = 100.0
+unit = "ms"
+gate = "release"
+measured_by = "fixture bench"
+status = "unmeasured"
+source = "synthesis §4; doc 04"
+
+[[budget]]
+id = "live_agents_8gb"
+metric = "live agents on an 8 GB machine"
+limit = 2.0
+unit = "count"
+gate = "alert"
+measured_by = "design rule"
+status = "unmeasured"
+source = "synthesis §4; doc 15"
+
+[[budget]]
+id = "agent_idle_stop"
+metric = "idle time before a live agent is stopped"
+limit = 600.0
+unit = "s"
+gate = "alert"
+measured_by = "design rule"
+status = "unmeasured"
+source = "synthesis §4; doc 15"
+
+[[budget]]
+id = "cargo_check_app_edit"
+metric = "cargo check after editing the app crate"
+limit = 1.0
+unit = "s"
+gate = "local"
+measured_by = "cargo xtask buildtime rust"
+status = "unmeasured"
+measured = 0.46
+measured_on = "linux-x86_64-vm"
+source = "synthesis §4; doc 17 §3.4"
+
+[[budget]]
+id = "cargo_build_app_edit"
+metric = "cargo build after editing the app crate (edit to binary)"
+limit = 5.0
+unit = "s"
+gate = "local"
+measured_by = "cargo xtask buildtime rust"
+status = "unmeasured"
+measured = 1.33
+measured_on = "linux-x86_64-vm"
+source = "synthesis §4; doc 17 §3.4"
+
+[[budget]]
+id = "hot_reload_component_edit"
+metric = "hot reload after a component-only edit"
+limit = 100.0
+unit = "ms"
+gate = "local"
+measured_by = "cargo xtask buildtime web"
+status = "unmeasured"
+measured = 32.0
+measured_on = "linux-x86_64-vm"
+source = "synthesis §4; doc 17 §3.4"
+
+[[budget]]
+id = "fresh_agent_worktree"
+metric = "fresh agent worktree, end to end"
+limit = 30.0
+unit = "s"
+gate = "alert"
+measured_by = "worktree script"
+status = "unmeasured"
+measured = 20.0
+measured_on = "linux-x86_64-vm"
+source = "synthesis §4; doc 17 §3.4"
+
+[[budget]]
+id = "check_quick"
+metric = "cargo xtask check --quick, warm"
+limit = 30.0
+unit = "s"
+gate = "alert"
+measured_by = "cargo xtask check --quick"
+status = "unmeasured"
+source = "synthesis §4; doc 07"
+
+[[budget]]
+id = "pre_commit_hook"
+metric = "lefthook pre-commit hook"
+limit = 3.0
+unit = "s"
+gate = "alert"
+measured_by = "lefthook run pre-commit"
+status = "unmeasured"
+source = "synthesis §4; doc 07"
+
+[[budget]]
+id = "plan_usage_read_claude_p95"
+metric = "plan usage read for Claude, p95"
+limit = 10.0
+unit = "s"
+gate = "alert"
+measured_by = "usage-read timings"
+status = "unmeasured"
+source = "synthesis §4; doc 30"
+
+[[budget]]
+id = "plan_usage_read_codex_p95"
+metric = "plan usage read for Codex, p95"
+limit = 3.0
+unit = "s"
+gate = "alert"
+measured_by = "usage-read timings"
+status = "unmeasured"
+source = "synthesis §4; doc 30"
+
+[[budget]]
+id = "plan_usage_idle_readers"
+metric = "usage reader processes running while idle"
+limit = 0.0
+unit = "count"
+gate = "alert"
+measured_by = "idle quiescence check"
+status = "unmeasured"
+source = "synthesis §4; doc 30"
+
+[[budget]]
+id = "cargo_check_protocol_edit"
+metric = "cargo check after editing the protocol crate"
+limit = 1.5
+unit = "s"
+gate = "local"
+measured_by = "cargo xtask buildtime rust"
+status = "unmeasured"
+measured = 0.65
+measured_on = "linux-x86_64-vm"
+source = "doc 17 §3.4"
+
+[[budget]]
+id = "cargo_build_protocol_edit"
+metric = "cargo build after editing the protocol crate"
+limit = 3.5
+unit = "s"
+gate = "local"
+measured_by = "cargo xtask buildtime rust"
+status = "unmeasured"
+measured = 1.47
+measured_on = "linux-x86_64-vm"
+source = "doc 17 §3.4"
+
+[[budget]]
+id = "reducer_test_edit"
+metric = "cargo test -p clauseo-reducer after an edit"
+limit = 1.0
+unit = "s"
+gate = "local"
+measured_by = "cargo xtask buildtime rust"
+status = "unmeasured"
+measured = 0.28
+measured_on = "linux-x86_64-vm"
+source = "doc 17 §3.4"
+
+[[budget]]
+id = "bindings_regen"
+metric = "TypeScript bindings regeneration"
+limit = 4.0
+unit = "s"
+gate = "local"
+measured_by = "bindings export test, timed"
+status = "unmeasured"
+measured = 1.68
+measured_on = "linux-x86_64-vm"
+source = "doc 17 §3.4"
+
+[[budget]]
+id = "tsc_noemit"
+metric = "tsc --noEmit"
+limit = 2.0
+unit = "s"
+gate = "local"
+measured_by = "cargo xtask buildtime web"
+status = "unmeasured"
+measured = 0.21
+measured_on = "linux-x86_64-vm"
+source = "doc 17 §3.4"
+
+[[budget]]
+id = "oxlint_type_aware"
+metric = "oxlint --type-aware"
+limit = 2.0
+unit = "s"
+gate = "local"
+measured_by = "cargo xtask buildtime web"
+status = "unmeasured"
+measured = 0.26
+measured_on = "linux-x86_64-vm"
+source = "doc 17 §3.4"
+
+[[budget]]
+id = "vite_build_warm"
+metric = "vite build, warm"
+limit = 5.0
+unit = "s"
+gate = "local"
+measured_by = "cargo xtask buildtime web"
+status = "unmeasured"
+measured = 0.65
+measured_on = "linux-x86_64-vm"
+source = "doc 17 §3.4"
+
+[[budget]]
+id = "release_binary_size"
+metric = "release binary size, Linux, stripped"
+limit = 15.0
+unit = "MB"
+gate = "pr"
+measured_by = "file size of the release binary"
+status = "unmeasured"
+measured = 6.8
+measured_on = "linux-x86_64-vm"
+source = "doc 17 §3.4"
+
+[[budget]]
+id = "deb_size"
+metric = ".deb package size"
+limit = 8.0
+unit = "MB"
+gate = "pr"
+measured_by = "file size of the .deb"
+status = "unmeasured"
+measured = 3.1
+measured_on = "linux-x86_64-vm"
+source = "doc 17 §3.4"

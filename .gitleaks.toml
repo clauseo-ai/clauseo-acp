@@ -1,0 +1,5 @@
+# gitleaks with its default rules. `cargo xtask check` scans this branch's commits; the pre-commit
+# hook scans staged changes. Allowlist only a fake secret in a test fixture, by path, with a comment
+# saying why.
+[extend]
+useDefault = true

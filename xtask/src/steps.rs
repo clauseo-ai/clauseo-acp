@@ -4,8 +4,8 @@
 mod plan;
 mod run;
 
-pub use plan::plan;
-pub use run::{StepResult, StepStatus, run_all};
+pub(crate) use plan::plan;
+pub(crate) use run::{StepResult, StepStatus, run_all};
 
 use crate::checks::StaticCheck;
 use crate::process::Cmd;
@@ -14,7 +14,7 @@ use crate::workspace::Context;
 
 /// Which packages a cargo step covers.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Scope {
+pub(crate) enum Scope {
     /// Every member of the workspace.
     Workspace,
     /// These members. Never empty: build it with `Scope::packages`.
@@ -26,7 +26,7 @@ pub enum Scope {
 impl Scope {
     /// `Packages(names)`, or `Nothing` when `names` is empty. An empty list must never reach cargo,
     /// where it would mean every member.
-    pub fn packages(names: Vec<String>) -> Scope {
+    pub(crate) fn packages(names: Vec<String>) -> Scope {
         if names.is_empty() {
             Scope::Nothing
         } else {
@@ -41,7 +41,7 @@ impl Scope {
             Scope::Packages(names) => Some(
                 names
                     .iter()
-                    .flat_map(|name| ["-p".to_string(), name.clone()])
+                    .flat_map(|name| ["-p".to_owned(), name.clone()])
                     .collect(),
             ),
             Scope::Nothing => None,
@@ -50,7 +50,7 @@ impl Scope {
 }
 
 /// An external tool run as `cmd`.
-pub struct ToolStep {
+pub(crate) struct ToolStep {
     pub name: &'static str,
     /// Exactly what runs, and what the header prints.
     pub cmd: Cmd,
@@ -61,7 +61,7 @@ pub struct ToolStep {
     pub fix: fn(&Cmd, Option<&str>) -> String,
 }
 
-pub enum Step {
+pub(crate) enum Step {
     Tool(ToolStep),
     Static(&'static StaticCheck),
     Skipped {

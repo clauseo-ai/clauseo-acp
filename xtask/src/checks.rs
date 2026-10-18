@@ -7,10 +7,10 @@ use crate::violation::Violation;
 use crate::workspace::Context;
 
 /// A check written in Rust. It fails iff it returns violations.
-pub struct StaticCheck {
+pub(crate) struct StaticCheck {
     pub name: &'static str,
     pub run: fn(&Context) -> Vec<Violation>,
 }
 
 /// Every static check, in run order.
-pub const ALL: &[StaticCheck] = &[];
+pub(crate) const ALL: &[StaticCheck] = &[];

@@ -1,0 +1,16 @@
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-print-in-tests = true
+allow-dbg-in-tests = true
+avoid-breaking-exported-api = false
+too-many-lines-threshold = 120
+disallowed-methods = [
+  { path = "std::thread::sleep", reason = "blocks; tests use an injected clock" },
+  { path = "std::process::Command::output", reason = "agents and tools are launched by the `process` crate", replacement = "async_process::Command::output" },
+  { path = "std::process::Command::spawn", reason = "agents and tools are launched by the `process` crate", replacement = "async_process::Command::spawn" },
+  { path = "serde_json::from_reader", reason = "slow; read to a buffer first", replacement = "serde_json::from_slice" },
+  { path = "std::time::Instant::now", reason = "the core takes time as input" },
+  { path = "std::time::SystemTime::now", reason = "the core takes time as input" },
+]
