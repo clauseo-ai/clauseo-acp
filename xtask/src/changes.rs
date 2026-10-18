@@ -94,9 +94,10 @@ pub(crate) fn merge_base(root: &Path) -> Result<String, String> {
 pub(crate) enum ScanRange {
     /// The commits after this one, the merge-base with `origin/main`.
     Since(String),
-    /// Only the last commit: HEAD is the merge-base, as on `main` itself after a push.
+    /// Only the last commit: HEAD is the merge-base, as on `main` itself, outside CI.
     LastCommit,
-    /// Everything, with the reason: no merge-base, or HEAD is the merge-base and has no parent.
+    /// Everything, with the reason: no merge-base; HEAD is the merge-base in CI (a push to
+    /// `main` may hold several commits); or HEAD is the merge-base and has no parent.
     AllHistory(String),
 }
 
@@ -112,7 +113,7 @@ impl ScanRange {
 }
 
 /// What gitleaks scans in `root` (see `choose_range`).
-pub(crate) fn scan_range(root: &Path) -> ScanRange {
+pub(crate) fn scan_range(root: &Path, ci: bool) -> ScanRange {
     let base = match merge_base(root) {
         Ok(base) => base,
         Err(error) => {
@@ -121,14 +122,24 @@ pub(crate) fn scan_range(root: &Path) -> ScanRange {
     };
     let head = git(root, &["rev-parse", "HEAD"]).map(|text| text.trim().to_owned());
     let has_parent = git(root, &["rev-parse", "--verify", "--quiet", "HEAD~1"]).is_ok();
-    choose_range(base, head.ok().as_deref(), has_parent)
+    choose_range(base, head.ok().as_deref(), has_parent, ci)
 }
 
-/// The commits after `base`. When HEAD is `base` (on `main`), that range is empty, so the last
-/// commit instead, or all history for a root commit.
-pub(crate) fn choose_range(base: String, head: Option<&str>, has_parent: bool) -> ScanRange {
+/// The commits after `base`. When HEAD is `base` (on `main`), that range is empty. In CI that is a
+/// push to `main`, which may bring several commits, so all history; locally the last commit, or
+/// all history for a root commit.
+pub(crate) fn choose_range(
+    base: String,
+    head: Option<&str>,
+    has_parent: bool,
+    ci: bool,
+) -> ScanRange {
     if head != Some(base.as_str()) {
         ScanRange::Since(base)
+    } else if ci {
+        ScanRange::AllHistory(
+            "CI on the merge-base with origin/main, as after a push to main".into(),
+        )
     } else if has_parent {
         ScanRange::LastCommit
     } else {
@@ -249,21 +260,28 @@ mod tests {
 
     #[test]
     fn a_branch_scans_its_own_commits() {
-        let range = choose_range("abc".into(), Some("def"), true);
+        let range = choose_range("abc".into(), Some("def"), true, true);
         assert_eq!(range, ScanRange::Since("abc".into()));
         assert_eq!(range.log_opts().as_deref(), Some("abc..HEAD"));
     }
 
     #[test]
     fn on_main_the_merge_base_is_head_so_the_last_commit_is_scanned() {
-        let range = choose_range("abc".into(), Some("abc"), true);
+        let range = choose_range("abc".into(), Some("abc"), true, false);
         assert_eq!(range, ScanRange::LastCommit);
         assert_eq!(range.log_opts().as_deref(), Some("HEAD~1..HEAD"));
     }
 
     #[test]
+    fn in_ci_on_main_a_push_may_hold_several_commits_so_all_history_is_scanned() {
+        let range = choose_range("abc".into(), Some("abc"), true, true);
+        assert!(matches!(range, ScanRange::AllHistory(_)));
+        assert_eq!(range.log_opts(), None);
+    }
+
+    #[test]
     fn a_root_commit_on_main_scans_all_history() {
-        let range = choose_range("abc".into(), Some("abc"), false);
+        let range = choose_range("abc".into(), Some("abc"), false, false);
         assert!(matches!(range, ScanRange::AllHistory(_)));
         assert_eq!(range.log_opts(), None);
     }

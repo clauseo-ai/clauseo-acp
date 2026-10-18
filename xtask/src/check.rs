@@ -27,7 +27,7 @@ pub(crate) fn run(quick: bool) -> ExitCode {
     } else {
         Scope::Workspace
     };
-    let range = gitleaks_range(&mut out, &ctx);
+    let range = gitleaks_range(&mut out, &ctx, ci);
     let steps = steps::plan(&scope, ci, range.as_deref());
     let mut exec =
         |cmd: &Cmd, on_output: &mut dyn FnMut(&[u8])| process::capture(cmd, &ctx.root, on_output);
@@ -98,8 +98,8 @@ fn quick_scope(out: &mut Printer<io::Stdout>, ctx: &Context, members_error: Opti
 
 /// The `--log-opts` range gitleaks scans (see `changes::scan_range`), or `None` for all history.
 /// Prints the choice when it is not this branch's own commits.
-fn gitleaks_range(out: &mut Printer<io::Stdout>, ctx: &Context) -> Option<String> {
-    let range = changes::scan_range(&ctx.root);
+fn gitleaks_range(out: &mut Printer<io::Stdout>, ctx: &Context, ci: bool) -> Option<String> {
+    let range = changes::scan_range(&ctx.root, ci);
     match &range {
         ScanRange::Since(_) => {}
         ScanRange::LastCommit => {
