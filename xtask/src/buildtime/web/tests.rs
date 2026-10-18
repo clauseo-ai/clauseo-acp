@@ -530,3 +530,32 @@ fn a_non_zero_exit_fails_the_run_even_with_a_report() {
     assert!(clean.passed() && clean.failures.is_empty());
     assert!(matches!(read("Error: boom", false), Read::Unreadable(_)));
 }
+
+/// The stdout of a real run, so the parser is tied to what the script really prints. Refresh it
+/// after changing the script's output: from the repo root, with Chrome installed,
+/// `node ui/app/scripts/buildtime.mjs --runs 1 > xtask/src/buildtime/web/script-output.json`.
+const REAL_OUTPUT: &str = include_str!("script-output.json");
+
+#[test]
+fn the_output_of_a_real_script_run_reads_into_all_six_probes() {
+    let Read::Run(run) = read_output(REAL_OUTPUT, true, "node", &budgets(), 1, false) else {
+        panic!("the real output is a measured run");
+    };
+    let names: Vec<&str> = run.results.iter().map(|result| result.name).collect();
+    assert_eq!(
+        names,
+        WEB_PROBES
+            .iter()
+            .map(|probe| probe.name)
+            .collect::<Vec<_>>()
+    );
+    for result in &run.results {
+        assert!(
+            matches!(result.outcome, Outcome::Measured { .. }),
+            "{} was measured in the real run: {:?}",
+            result.name,
+            result.outcome
+        );
+    }
+    assert_eq!(run.failures, []);
+}

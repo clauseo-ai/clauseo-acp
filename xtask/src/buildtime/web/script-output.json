@@ -1,0 +1,1 @@
+{"node":"v26.12.0","runs":1,"probes":[{"probe":"tsc","samples_ms":[86.80516599999999]},{"probe":"oxlint_type_aware","samples_ms":[184.954]},{"probe":"vite_build","samples_ms":[196.27966700000002]},{"probe":"initial_js","bytes":51102,"files":["assets/index-IR7VzCTA.js"]},{"probe":"dev_start","samples_ms":[123.82175000000007]},{"probe":"hmr","samples_ms":[101.04341700000009]}]}
