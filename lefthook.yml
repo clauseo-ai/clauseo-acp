@@ -1,9 +1,9 @@
 pre-commit:
   parallel: true
   commands:
-    fmt:      { glob: "*.rs",   run: cargo fmt -- --check {staged_files} }
-    typos:    { run: typos {staged_files} }
-    taplo:    { glob: "*.toml", run: taplo fmt --check {staged_files} }
+    fmt:      { glob: "*.rs",   run: "cargo fmt -- --check {staged_files}" }
+    typos:    { run: "typos {staged_files}" }
+    taplo:    { glob: "*.toml", run: "taplo fmt --check {staged_files}" }
     gitleaks: { run: gitleaks git --staged --redact --no-banner }
 pre-push:
   commands:
