@@ -3,10 +3,14 @@
 //! Each line is checked on its own. A line with `remote`, with `core:default`, and with a
 //! permission under a forbidden prefix fails once for each of them.
 //!
+//! Capability objects written inline in `app.security.capabilities` of `tauri.conf.json` are
+//! scanned the same way, at their lines in that file.
+//!
 //! Only `*.json`, `*.json5` and `*.toml` files are scanned, at any depth: those are the only files
 //! Tauri loads from the capabilities folder. Anything else there (a Finder `.DS_Store`, a Vim swap
 //! file, a `main.json~` backup) never reaches the app, so it is skipped.
 
+use crate::checks::json_text::{self, key_line};
 use crate::checks::{self, StaticCheck};
 use crate::violation::Violation;
 use crate::workspace::Context;
@@ -16,6 +20,10 @@ use std::path::{Path, PathBuf};
 
 /// The capability folder, inside the desktop crate's directory.
 const DIR: &str = "capabilities";
+
+/// The Tauri config, inside the desktop crate's directory. Its `app.security.capabilities` may
+/// hold capability objects inline.
+const TAURI_CONF: &str = "tauri.conf.json";
 
 /// The extensions of the capability files Tauri reads.
 const EXTENSIONS: [&str; 3] = ["json", "json5", "toml"];
@@ -52,6 +60,11 @@ fn run(ctx: &Context) -> Vec<Violation> {
         Err(error) => return vec![checks::unreadable(&rel, &error)],
     };
     let mut found = Vec::new();
+    let conf = checks::join(desktop, TAURI_CONF);
+    // A missing or unreadable config is the `tauri-config` check's failure, reported there once.
+    if let Ok(Some(text)) = checks::read_repo_file(&ctx.root, &conf) {
+        found.extend(inline_violations(&conf, &text));
+    }
     for file in &files {
         let path = checks::repo_path(&ctx.root, file);
         match fs::read_to_string(file) {
@@ -109,6 +122,50 @@ pub(crate) fn scan(path: &str, text: &str) -> Vec<Violation> {
             line: checks::line_at(index),
             message,
             fix: fix.to_owned(),
+        }));
+    }
+    found
+}
+
+/// The violations in the capability objects written inline in `app.security.capabilities` of the
+/// Tauri config at `path`, each scanned like a capability file, at its own lines. String elements
+/// name capability files and pass. A config that is not valid JSON passes here: `tauri-config`
+/// fails on it. When an object cannot be located in the text, its violations point at the
+/// `capabilities` key.
+pub(crate) fn inline_violations(path: &str, text: &str) -> Vec<Violation> {
+    let keys = ["app", "security", "capabilities"];
+    let Ok(conf) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Vec::new();
+    };
+    let objects: Vec<&serde_json::Value> = conf
+        .pointer("/app/security/capabilities")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|element| element.is_object())
+        .collect();
+    let spans =
+        json_text::object_elements(text, &keys).filter(|spans| spans.len() == objects.len());
+    let Some(spans) = spans else {
+        let line = key_line(text, &keys);
+        return objects
+            .iter()
+            .flat_map(|object| {
+                scan(
+                    path,
+                    &serde_json::to_string_pretty(object).unwrap_or_default(),
+                )
+            })
+            .map(|found| Violation { line, ..found })
+            .collect();
+    };
+    let mut found = Vec::new();
+    for span in spans {
+        let offset = u32::try_from(json_text::line_index_of(text, span.start)).unwrap_or(u32::MAX);
+        let object = text.get(span).unwrap_or_default();
+        found.extend(scan(path, object).into_iter().map(|violation| Violation {
+            line: violation.line.saturating_add(offset),
+            ..violation
         }));
     }
     found
