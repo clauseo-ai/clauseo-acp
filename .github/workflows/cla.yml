@@ -63,6 +63,8 @@ jobs:
         env:
           TREE_REF: refs/cla/head
           # The founders are covered by their IP assignment to the company, so they need no signature.
-          EXEMPT: "ro-hansolo shamilrshd"
+          # max-clauseo-agent is the company's automation account. It opens pull requests but authors
+          # no commits: every commit is authored and signed off by a person, whose login is still checked.
+          EXEMPT: "ro-hansolo shamilrshd max-clauseo-agent"
         working-directory: work
         run: bash /tmp/cla-check.sh
