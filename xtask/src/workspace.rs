@@ -57,7 +57,8 @@ pub(crate) struct CargoDependency {
 }
 
 impl CargoDependency {
-    /// The key the dependency goes by in the manifest and in `[features]`: its rename, else its name.
+    /// The key the dependency goes by in the manifest and in `[features]`: its rename, else its
+    /// name.
     pub(crate) fn key(&self) -> &str {
         self.rename.as_deref().unwrap_or(&self.name)
     }

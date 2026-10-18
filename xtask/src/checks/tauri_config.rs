@@ -282,8 +282,8 @@ fn collect_dangerous(value: &Value, path: &mut Vec<String>, found: &mut Vec<Vec<
 }
 
 /// `build.rs` at `path` must declare an `AppManifest` and must not move the capabilities folder.
-/// Comments are stripped first (`checks::strip_comments`), so a commented-out call does not count. A
-/// missing file counts as no manifest.
+/// Comments are stripped first (`checks::strip_comments`), so a commented-out call does not count.
+/// A missing file counts as no manifest.
 pub(crate) fn build_rs_violations(path: &str, text: Option<&str>) -> Vec<Violation> {
     let code = text.map(checks::strip_comments).unwrap_or_default();
     let mut found = Vec::new();
