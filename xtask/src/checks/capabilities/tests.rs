@@ -185,6 +185,18 @@ fn a_line_with_core_default_and_a_prefix_fails_twice() {
 }
 
 #[test]
+fn one_string_that_trips_two_rules_points_both_at_its_line_without_escapes() {
+    let text = "{\n  \"identifier\": \"main\",\n  \"description\": \"remote pages never get core:default\"\n}";
+    assert_eq!(
+        scan(PATH, text),
+        vec![
+            violation(3, "capability file mentions `remote`", FIX_REMOTE),
+            violation(3, "capability grants `core:default`", FIX_CORE),
+        ]
+    );
+}
+
+#[test]
 fn the_check_is_registered_under_its_name() {
     assert!(
         crate::checks::ALL
