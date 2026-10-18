@@ -9,8 +9,6 @@
     "typecheck": "tsc --noEmit",
     "lint": "oxlint",
     "lint:types": "oxlint --type-aware",
-    "fmt": "oxfmt",
-    "fmt:check": "oxfmt --check",
     "test": "vitest run"
   },
   "dependencies": {
@@ -25,7 +23,6 @@
     "@typescript/native": "npm:typescript@7.0.2",
     "@vitejs/plugin-react": "6.1.2",
     "babel-plugin-react-compiler": "1.0.0",
-    "oxfmt": "0.72.0",
     "oxlint": "1.87.0",
     "oxlint-tsgolint": "7.0.2004",
     "playwright-core": "1.64.0",

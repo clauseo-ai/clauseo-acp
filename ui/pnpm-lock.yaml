@@ -169,6 +169,9 @@ importers:
       '@tauri-apps/cli':
         specifier: 2.12.2
         version: 2.12.2
+      oxfmt:
+        specifier: 0.72.0
+        version: 0.72.0
 
   app:
     dependencies:
@@ -200,9 +203,6 @@ importers:
       babel-plugin-react-compiler:
         specifier: 1.0.0
         version: 1.0.0
-      oxfmt:
-        specifier: 0.72.0
-        version: 0.72.0
       oxlint:
         specifier: 1.87.0
         version: 1.87.0(oxlint-tsgolint@7.0.2004)
