@@ -12,7 +12,8 @@ use tauri::{App, AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 /// Bumped by `cargo xtask buildtime` to time an edit to this crate. Nothing reads it.
 pub const BUILDTIME_MARKER: u64 = 0;
 
-/// The label of the one window.
+/// The label of the one window. `capabilities/main.json` grants by this label (`"windows": ["main"]`),
+/// so rename both together: a window whose label no capability names gets no IPC at all.
 const MAIN_WINDOW: &str = "main";
 
 /// Builds the app and runs it until it exits.
@@ -37,10 +38,12 @@ pub fn run() -> tauri::Result<()> {
 }
 
 /// Builds the `main` window in code, not in `tauri.conf.json`, so builds can add webview arguments
-/// here. The https scheme is fixed before the first release: changing it moves web storage.
+/// here. The https scheme is fixed before the first release: changing it moves web storage. The
+/// title is `productName` from `tauri.conf.json`.
 fn open_main_window(app: &App) -> tauri::Result<()> {
+    let title = app.package_info().name.clone();
     WebviewWindowBuilder::new(app, MAIN_WINDOW, WebviewUrl::App("index.html".into()))
-        .title("Clauseo")
+        .title(title)
         .use_https_scheme(true)
         .build()?;
     Ok(())
