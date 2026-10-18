@@ -1,19 +1,24 @@
 //! The `capabilities` check: no capability file grants what the webview must never reach.
 //!
-//! Each line is checked on its own. A line with `remote`, with `core:default`, and with a
-//! permission under a forbidden prefix fails once for each of them.
+//! Each file is parsed (`.json` with `serde_json`, `.toml` with `toml`), so escapes are decoded
+//! as Tauri decodes them, and every key and string value is checked: one that contains `remote` or
+//! `core:default`, and a string value that starts with a forbidden prefix, fails once each. A
+//! `.json5` file passes only when it is plain JSON. The raw text is used only to find the line: the
+//! string's own, else its key's, else line 1, the last two marked "(written with escapes)".
 //!
 //! Capability objects written inline in `app.security.capabilities` of `tauri.conf.json` are
-//! scanned the same way, at their lines in that file.
+//! walked the same way, at the line of the matching string, else of the `capabilities` key.
 //!
 //! Only `*.json`, `*.json5` and `*.toml` files are scanned, at any depth: those are the only files
 //! Tauri loads from the capabilities folder. Anything else there (a Finder `.DS_Store`, a Vim swap
 //! file, a `main.json~` backup) never reaches the app, so it is skipped.
 
-use crate::checks::json_text::{self, key_line};
+use crate::checks::json_text::{key_line, line_index_of};
 use crate::checks::{self, StaticCheck};
 use crate::violation::Violation;
 use crate::workspace::Context;
+use serde_json::Value;
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -34,6 +39,11 @@ const FORBIDDEN_PREFIXES: [&str; 5] = ["fs:", "shell:", "http:", "opener:", "dia
 const FIX_CORE: &str = "list only the narrow permissions the window needs; `core:default` also grants event emit and devtools toggling";
 const FIX_REMOTE: &str = "remove the remote block, or reword the text: a remote page must never reach the IPC, and `remote` is matched anywhere";
 const FIX_PREFIX: &str = "do it in Rust behind a validated command; the webview gets no fs, shell, http, opener or dialog permission";
+const FIX_JSON5: &str = "rename it to .json and write plain JSON: xtask cannot decode json5, so it cannot check the grants";
+const FIX_SYNTAX: &str = "fix the syntax: Tauri cannot read the file either";
+
+/// Appended to a message whose string is not found in the raw text, which spells it with escapes.
+const ESCAPED: &str = " (written with escapes)";
 
 /// Fails on every forbidden string in a capability file.
 pub(crate) const CHECK: StaticCheck = StaticCheck {
@@ -101,93 +111,178 @@ fn is_capability_file(path: &Path) -> bool {
         .is_some_and(|extension| EXTENSIONS.contains(&extension))
 }
 
-/// The violations in one capability file. `path` is repo-relative and `text` is the file.
+/// The violations in one capability file. `path` is repo-relative and `text` is the file; the
+/// extension of `path` picks the parser.
 pub(crate) fn scan(path: &str, text: &str) -> Vec<Violation> {
-    let mut found = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        let mut problems: Vec<(String, &str)> = Vec::new();
-        if line.contains("remote") {
-            problems.push(("capability file mentions `remote`".to_owned(), FIX_REMOTE));
+    let at_one = |message: String, fix: &str| vec![checks::violation(path, 1, message, fix)];
+    let extension = Path::new(path).extension().and_then(|ext| ext.to_str());
+    let value = if extension == Some("toml") {
+        match toml::from_str::<toml::Value>(text).map(serde_json::to_value) {
+            Ok(Ok(value)) => value,
+            Ok(Err(error)) => {
+                return at_one(format!("could not read `{path}`: {error}"), FIX_SYNTAX);
+            }
+            Err(error) => {
+                return at_one(format!("`{path}` is not valid TOML: {error}"), FIX_SYNTAX);
+            }
         }
-        if line.contains("core:default") {
-            problems.push(("capability grants `core:default`".to_owned(), FIX_CORE));
+    } else {
+        match serde_json::from_str::<Value>(text) {
+            Ok(value) => value,
+            Err(_) if extension == Some("json5") => {
+                return at_one(
+                    "json5 capability files are not supported; use .json".to_owned(),
+                    FIX_JSON5,
+                );
+            }
+            Err(error) => {
+                return at_one(format!("`{path}` is not valid JSON: {error}"), FIX_SYNTAX);
+            }
         }
-        problems.extend(
-            forbidden_permissions(line)
-                .into_iter()
-                .map(|permission| (format!("capability grants `{permission}`"), FIX_PREFIX)),
-        );
-        found.extend(problems.into_iter().map(|(message, fix)| Violation {
-            path: path.to_owned(),
-            line: checks::line_at(index),
-            message,
-            fix: fix.to_owned(),
-        }));
-    }
-    found
+    };
+    let mut findings = Vec::new();
+    walk(&value, None, &mut findings);
+    locate(path, text, 0, None, findings)
 }
 
 /// The violations in the capability objects written inline in `app.security.capabilities` of the
-/// Tauri config at `path`, each scanned like a capability file, at its own lines. String elements
-/// name capability files and pass. A config that is not valid JSON passes here: `tauri-config`
-/// fails on it. When an object cannot be located in the text, its violations point at the
-/// `capabilities` key.
+/// Tauri config at `path`. String elements name capability files and pass. A config that is not
+/// valid JSON passes here: `tauri-config` fails on it. Each violation points at the line of its
+/// string, searched from the `capabilities` key on, else at that key.
 pub(crate) fn inline_violations(path: &str, text: &str) -> Vec<Violation> {
     let keys = ["app", "security", "capabilities"];
-    let Ok(conf) = serde_json::from_str::<serde_json::Value>(text) else {
+    let Ok(conf) = serde_json::from_str::<Value>(text) else {
         return Vec::new();
     };
-    let objects: Vec<&serde_json::Value> = conf
+    let mut findings = Vec::new();
+    for object in conf
         .pointer("/app/security/capabilities")
-        .and_then(serde_json::Value::as_array)
+        .and_then(Value::as_array)
         .into_iter()
         .flatten()
         .filter(|element| element.is_object())
-        .collect();
-    let spans =
-        json_text::object_elements(text, &keys).filter(|spans| spans.len() == objects.len());
-    let Some(spans) = spans else {
-        let line = key_line(text, &keys);
-        return objects
-            .iter()
-            .flat_map(|object| {
-                scan(
-                    path,
-                    &serde_json::to_string_pretty(object).unwrap_or_default(),
-                )
-            })
-            .map(|found| Violation { line, ..found })
-            .collect();
-    };
-    let mut found = Vec::new();
-    for span in spans {
-        let offset = u32::try_from(json_text::line_index_of(text, span.start)).unwrap_or(u32::MAX);
-        let object = text.get(span).unwrap_or_default();
-        found.extend(scan(path, object).into_iter().map(|violation| Violation {
-            line: violation.line.saturating_add(offset),
-            ..violation
-        }));
+    {
+        walk(object, None, &mut findings);
     }
+    let line = key_line(text, &keys);
+    let from: usize = text
+        .split_inclusive('\n')
+        .take(usize::try_from(line.saturating_sub(1)).unwrap_or(0))
+        .map(str::len)
+        .sum();
+    locate(path, text, from, Some(line), findings)
+}
+
+/// A forbidden key or string value, before it is located in the text.
+struct Finding {
+    /// The decoded key or string.
+    needle: String,
+    /// The key that holds a string value; `None` for a key.
+    key: Option<String>,
+    message: String,
+    fix: &'static str,
+}
+
+/// Collects a finding for every forbidden key and string value in `value`, at any depth. `key`
+/// is the key that holds `value`, if any; array elements keep their array's key.
+fn walk(value: &Value, key: Option<&str>, found: &mut Vec<Finding>) {
+    match value {
+        Value::Object(map) => {
+            for (name, child) in map {
+                found.extend(problems(name, false).map(|(message, fix)| Finding {
+                    needle: name.clone(),
+                    key: None,
+                    message,
+                    fix,
+                }));
+                walk(child, Some(name), found);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                walk(item, key, found);
+            }
+        }
+        Value::String(text) => {
+            found.extend(problems(text, true).map(|(message, fix)| Finding {
+                needle: text.clone(),
+                key: key.map(str::to_owned),
+                message,
+                fix,
+            }));
+        }
+        _ => {}
+    }
+}
+
+/// The messages and fixes for one decoded key or string value. Only a value can grant a
+/// permission by its prefix.
+fn problems(text: &str, is_value: bool) -> impl Iterator<Item = (String, &'static str)> {
+    let mut found = Vec::new();
+    if text.contains("remote") {
+        found.push(("capability file mentions `remote`".to_owned(), FIX_REMOTE));
+    }
+    if text.contains("core:default") {
+        found.push(("capability grants `core:default`".to_owned(), FIX_CORE));
+    }
+    if is_value
+        && FORBIDDEN_PREFIXES
+            .iter()
+            .any(|prefix| text.starts_with(prefix))
+    {
+        found.push((format!("capability grants `{text}`"), FIX_PREFIX));
+    }
+    found.into_iter()
+}
+
+/// The violations for `findings`, each at the line in `text` (searched from byte `from` on) of
+/// its string, else of its key, else at `fallback` or line 1; the last two say the string is
+/// written with escapes. Sorted by line, in walk order within a line.
+fn locate(
+    path: &str,
+    text: &str,
+    from: usize,
+    fallback: Option<u32>,
+    findings: Vec<Finding>,
+) -> Vec<Violation> {
+    let mut seen = HashMap::new();
+    let mut found: Vec<Violation> = findings
+        .into_iter()
+        .map(|finding| {
+            if let Some(line) = find(text, from, &finding.needle, &mut seen) {
+                return checks::violation(path, line, finding.message, finding.fix);
+            }
+            let line = finding
+                .key
+                .as_deref()
+                .filter(|_| fallback.is_none())
+                .and_then(|key| find(text, from, key, &mut HashMap::new()))
+                .or(fallback)
+                .unwrap_or(1);
+            checks::violation(path, line, finding.message + ESCAPED, finding.fix)
+        })
+        .collect();
+    found.sort_by_key(|violation| violation.line);
     found
 }
 
-/// The permission strings on `line` that start with a forbidden prefix, each up to its closing
-/// quote. A prefix counts only right after a `"` or a `'`, so prose such as `refs:` does not match.
-fn forbidden_permissions(line: &str) -> Vec<&str> {
-    let mut found = Vec::new();
-    for (start, quote) in line.char_indices().filter(|(_, c)| *c == '"' || *c == '\'') {
-        let Some(rest) = line.get(start + quote.len_utf8()..) else {
-            continue;
-        };
-        if FORBIDDEN_PREFIXES
-            .iter()
-            .any(|prefix| rest.starts_with(prefix))
-        {
-            let end = rest.find(quote).unwrap_or(rest.len());
-            found.push(rest.get(..end).unwrap_or(rest));
-        }
-    }
-    found
+/// The line of the next unclaimed occurrence of `needle` in `text` from byte `from`, spelled as
+/// the first of these that occurs at all: quoted with `"`, quoted with `'`, bare (a TOML key).
+/// `seen` counts the occurrences already claimed, so a string written twice points at both of its
+/// lines, and a third finding of it at none.
+fn find(text: &str, from: usize, needle: &str, seen: &mut HashMap<String, usize>) -> Option<u32> {
+    let rest = text.get(from..)?;
+    let candidate = [
+        format!("\"{needle}\""),
+        format!("'{needle}'"),
+        needle.to_owned(),
+    ]
+    .into_iter()
+    .find(|candidate| rest.contains(candidate.as_str()))?;
+    let claimed = seen.get(&candidate).copied().unwrap_or(0);
+    let (offset, _) = rest.match_indices(candidate.as_str()).nth(claimed)?;
+    seen.insert(candidate, claimed + 1);
+    Some(checks::line_at(line_index_of(text, from + offset)))
 }
 
 #[cfg(test)]
