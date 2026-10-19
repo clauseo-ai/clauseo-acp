@@ -381,6 +381,17 @@ fn the_fixed_set_inspects_its_ten_direct_dependencies() {
     assert_eq!(fixed_plugin_set_passes().inspected, 10);
 }
 
+/// A build dependency counts, as the graph rule reads it; a dev-dependency does not.
+#[test]
+fn a_build_dependency_counts_and_a_dev_dependency_does_not() {
+    let desktop = format!(
+        "{DESKTOP}\n[build-dependencies]\ntauri-build = \"2\"\n\n[dev-dependencies]\nserde = \"1\"\n"
+    );
+    let dir = write_workspace("counts_build_not_dev", ROOT, &desktop, &[]);
+    let found = inspect(&dir);
+    assert_eq!((found.inspected, found.violations), (11, Vec::new()));
+}
+
 /// `cargo metadata` fails when the root manifest's `tauri` requirement does not parse. Its
 /// message ends with cargo's stderr, which names the scratch directory (with its pid), so no
 /// planted case can hold the text exactly: this test checks the parts that do not vary.

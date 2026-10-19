@@ -104,8 +104,8 @@ fn run(ctx: &Context) -> Inspection {
 /// The check, reading the desktop crate's graph with `cargo tree` (`checks::graph::load_tree`,
 /// then `graph_flags`), or skipping the graph rule when `graph_flags` is
 /// `None` (tests of scratch workspaces that name registry crates, which resolve only with a
-/// lockfile and the crates downloaded). Counts the desktop
-/// crate's direct dependencies, of every kind.
+/// lockfile and the crates downloaded). Counts the desktop crate's normal and build direct
+/// dependencies, the ones its rules read; dev-dependencies are not counted.
 fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
     let dir = match checks::desktop_dir(ctx) {
         Ok(dir) => dir,
@@ -179,7 +179,12 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
             Err(failed) => found.push(failed),
         }
     }
-    Inspection::new(desktop_deps.dependencies.len(), found)
+    let read_by_rules = desktop_deps
+        .dependencies
+        .iter()
+        .filter(|dep| dep.kind.as_deref() != Some("dev"))
+        .count();
+    Inspection::new(read_by_rules, found)
 }
 
 /// One violation for each path dependency of member `name` whose package is not a workspace
