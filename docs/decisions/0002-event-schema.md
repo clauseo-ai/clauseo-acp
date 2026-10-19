@@ -34,6 +34,8 @@ pub struct Envelope {
   "message":"01920000-0000-7000-8000-000000000004","kind":"answer","text":"Done."}}}
 ```
 
+- `Envelope::is_supported()` is true when `schema_version <= SCHEMA_VERSION`. A store that reads an
+  envelope from a newer Clauseo returns `store.newer_version` instead of reading it as this version.
 - Order by `seq`, never by `ts`. Events are append-only: a correction is a new event, and nothing
   rewrites one. Old events are upcast on read, never rewritten.
 - `DomainEvent::kind()` returns the event's key (`"text_appended"`), or the stored kind of an
@@ -41,8 +43,13 @@ pub struct Envelope {
 - Ids are newtypes over a UUID in its 36-character text. Clauseo mints every id as UUIDv7 except
   `CommandId`, which the client generates; `protocol` itself never mints an id or reads a clock. ACP
   session, tool-call and message ids are attributes, never keys. No path is ever an id.
-- `Seq`, `Cursor`, `Timestamp` and every other 64-bit number stay below 2^53, so TypeScript reads
-  them as a `number`.
+- `Seq`, `Cursor`, `Timestamp` and every other 64-bit number stay at most 2^53 - 1, so TypeScript
+  reads them as a `number`: a larger value is refused on encode and on decode.
+- `MatterPath` is matter-relative with `/` separators. It refuses an empty, `.` or `..` segment, a
+  leading `/`, `\`, NUL and other control characters, a first segment of the form `X:` (a drive),
+  a segment over 255 bytes and a path over 4096 bytes. It allows `:` elsewhere, since macOS file
+  names may hold one; on Windows `matters` must refuse a path holding `:`, which names an alternate
+  data stream there.
 
 ### Kinds
 
@@ -162,12 +169,18 @@ failing. This version never produces one, except `ContentBlock::Unsupported` for
 - `DomainEvent::Unknown { kind, payload }`: the payload is kept as `RawPayload` and written back under
   its own kind, byte for byte in the format it came from; it still advances `seq`.
 - `ContentBlock::Unsupported { kind, raw_from, raw }`: the whole unknown block kept as compact JSON.
+  When this version's decoder captures it (`raw_from: clauseo`), `raw` is the block as read, written
+  as JSON: a block read from a MessagePack row writes its binary values (uuids) as JSON arrays of
+  numbers, where the wire form has strings. An upcaster reading `raw_from: clauseo` must accept both
+  forms. This follows from holding the captured value as `RawPayload` rather than a
+  `serde_json::Value`, which cannot read MessagePack's binary values.
 - `ErrorCode::Unknown`: the original code moves into `HostError.message`.
 - Unit-only enums with a unit `Unknown`: `ToolKind`, `ToolCallStatus`, `PermissionKind`, `StopReason`,
   `NoticeLevel`, `Deliverable`, `CheckpointKind`, `ExpiryReason`, `RenameSource`, `Delivery`,
   `SkippedFileReason`. A command carrying `Delivery::Unknown` is refused with `command.invalid`.
 - Enums with data, with `Unknown { kind }` (the payload is dropped in memory; the log keeps the
   original event): `DetachReason`, `LimitSource`, `SteerOutcome`.
+- Serialising an `Unknown` whose kind is one this version knows is an error, so a value that would not decode again never reaches the log.
 - Every other enum is closed.
 
 ### Inline limit
@@ -183,11 +196,20 @@ Message text stays a `String` and streams as `AppendText` patches under the same
 
 ### Freeze rules
 
-- Additive changes keep `schema_version`: a new kind, a new `Option` field that is left out when
-  `None`, or a new variant in one of the enums that decode unknown values. Each still needs a decision
-  record and Rohan's approval.
-- Renaming, removing or retyping anything, or a new variant in a closed enum, bumps `schema_version`
-  and adds an upcaster in `protocol`.
+`schema_version` versions the stored log: `Envelope` and `DomainEvent`, with every type they hold.
+
+- Log types. Additive changes keep `schema_version`: a new kind, a new `Option` field that is left
+  out when `None`, or a new variant in one of the enums that decode unknown values. Each still needs a
+  decision record and Rohan's approval. Renaming, removing or retyping anything, or a new variant in a
+  closed enum, bumps `schema_version` and adds an upcaster in `protocol`.
+- Types outside the log. A new `HostCommand` or `HostQuery` variant (client to host only; an older
+  host refuses it as `command.invalid`), or a new `QueryResult`, `HostEvent`, `ViewPatchBody` or
+  `ViewEntry` variant, is additive: it needs a decision record and Rohan's approval, and no
+  `schema_version` bump. Renaming, removing or retyping one of these needs the same, plus a plan for
+  the clients that use it.
+- Some of those types are stored by their consumers, who version them: view entries live in
+  `reducer`'s snapshots under its own `reducer_schema`, and `CommandOutcome` in `store`'s
+  receipts.
 - Golden snapshots of one canonical example per kind, view patch, host event, command and content
   variant pin the JSON; a changed snapshot is a schema change.
 
