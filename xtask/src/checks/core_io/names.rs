@@ -1,26 +1,32 @@
 //! Name resolution for the core-io check: what a path written in a held crate may point at.
 //!
-//! The first pass records, for every module of the crate, the names its `use` items, `type`
-//! aliases and `extern crate` items bind, and the modules it glob-imports. `Table::resolve` then
-//! follows a written path through those bindings to every place it may name: a path inside `std`,
-//! or a path inside this crate.
+//! The first pass records, for every module of every crate root (the library, `main.rs`, each
+//! binary), the names its `use` items, `type` aliases and `extern crate` items bind, the modules
+//! it glob-imports, and every associated type. `Table::resolve` then follows a written path
+//! through those bindings to every place it may name: a path inside `std`, or a path inside the
+//! crate. `Self` inside an `impl` stands for the impl's self type. Raw identifiers count without
+//! their `r#`. Code inside a macro call or a `macro_rules!` rule that parses as items,
+//! statements or expressions is read like the code around it.
 //!
-//! Scopes are over-approximated, which can only make the check stricter: a `use` in a function
-//! body binds its name for the whole module; a name with several bindings (a `use` in one
-//! function and a `type` in another) may point at any of them; `std` and every
-//! `extern crate std as x` name are reachable from every module, even where a local item shadows
-//! them. A file's module path comes from its place under `src/` (`a/b.rs` and `a/b/mod.rs` are
-//! `crate::a::b`); `#[path]` attributes are not followed, and `src/bin/x.rs` counts as
-//! `crate::bin::x`.
+//! Scopes are approximated: a `use` in a function body binds its name for the whole module; a
+//! name with several bindings may point at any of them; `std` and every
+//! `extern crate std as x` name are reachable everywhere, even where a local item shadows them;
+//! an associated type is known by its name alone, so `X::now` fails when any associated type
+//! `X` of the crate is a clock. The modules come from the `mod` items (see `files.rs`); a file
+//! that no root reaches is placed by its path under `src/`.
 
+use super::bans;
+use super::tokens::{self, Body};
 use proc_macro2::Span;
 use std::collections::{BTreeMap, BTreeSet};
+use syn::ext::IdentExt;
 use syn::visit::{self, Visit};
 
-/// A module path inside the crate, without the leading `crate`: `[]` is the crate root.
+/// A module path. A library module has no prefix (`[]` is the library root); a module of a
+/// binary starts with that binary's root, a segment no identifier can spell (`{bin x}`).
 pub(super) type Module = Vec<String>;
 
-/// A path as written: its segments and whether it starts with `::`.
+/// A path as written: its segments (without `r#`) and whether it starts with `::`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Written {
     pub segments: Vec<String>,
@@ -32,7 +38,7 @@ pub(super) struct Written {
 pub(super) enum Target {
     /// A path inside the standard library, starting with `std`.
     Std(Vec<String>),
-    /// A path inside this crate, without the leading `crate`.
+    /// A path inside the crate, its root first (see `Module`).
     Crate(Vec<String>),
 }
 
@@ -45,17 +51,25 @@ pub(super) struct Table {
     globs: BTreeMap<Module, Vec<Written>>,
     /// The names of `extern crate std as <name>;`.
     std_names: BTreeSet<String>,
+    /// The names of `extern crate self as <name>;`, each with the roots it names.
+    crate_names: BTreeMap<String, BTreeSet<Module>>,
+    /// Every associated type by name, with its module and the type it is bound to.
+    associated: BTreeMap<String, Vec<(Module, Written)>>,
 }
 
 /// How deep `Table::resolve` follows bindings before it stops; a cycle stops sooner.
 const DEPTH: usize = 64;
 
+/// The bindings followed so far, to stop on a cycle.
+type Stack = Vec<(Module, String)>;
+
 impl Table {
-    /// Records the bindings of one parsed file, whose own module is `module`.
+    /// Records the bindings of one parsed file, whose module is `module`.
     pub(super) fn add_file(&mut self, module: &[String], file: &syn::File) {
         Collector {
             table: self,
             module: module.to_vec(),
+            self_types: Vec::new(),
         }
         .visit_file(file);
     }
@@ -65,12 +79,20 @@ impl Table {
         self.resolve_in(module, path, &mut Vec::new())
     }
 
-    fn resolve_in(
-        &self,
-        module: &[String],
-        path: &Written,
-        stack: &mut Vec<(Module, String)>,
-    ) -> BTreeSet<Target> {
+    /// The clock an associated type called `name` may be bound to, if any.
+    pub(super) fn associated_clock(&self, name: &str) -> Option<&'static str> {
+        self.associated
+            .get(name)
+            .into_iter()
+            .flatten()
+            .flat_map(|(module, path)| self.resolve(module, path))
+            .find_map(|target| match target {
+                Target::Std(path) => bans::clock(&path),
+                Target::Crate(_) => None,
+            })
+    }
+
+    fn resolve_in(&self, module: &[String], path: &Written, stack: &mut Stack) -> BTreeSet<Target> {
         let mut found = BTreeSet::new();
         let Some((first, rest)) = path.segments.split_first() else {
             return found;
@@ -78,11 +100,14 @@ impl Table {
         if first == "std" || self.std_names.contains(first) {
             found.insert(Target::Std(std_path(rest)));
         }
+        for root in self.crate_names.get(first).into_iter().flatten() {
+            found.extend(self.walk(root, rest, stack));
+        }
         if path.leading_colon {
             return found;
         }
         match first.as_str() {
-            "crate" => found.extend(self.walk(&[], rest, stack)),
+            "crate" => found.extend(self.walk(root_of(module), rest, stack)),
             "self" => found.extend(self.walk(module, rest, stack)),
             "super" => found.extend(self.walk(parent(module), rest, stack)),
             _ => {
@@ -95,12 +120,7 @@ impl Table {
     }
 
     /// The places `rest` names, read from inside the crate module `module`.
-    fn walk(
-        &self,
-        module: &[String],
-        rest: &[String],
-        stack: &mut Vec<(Module, String)>,
-    ) -> BTreeSet<Target> {
+    fn walk(&self, module: &[String], rest: &[String], stack: &mut Stack) -> BTreeSet<Target> {
         let Some((first, tail)) = rest.split_first() else {
             return BTreeSet::from([Target::Crate(module.to_vec())]);
         };
@@ -118,12 +138,7 @@ impl Table {
     }
 
     /// `target` followed by the segments `rest`.
-    fn extend(
-        &self,
-        target: Target,
-        rest: &[String],
-        stack: &mut Vec<(Module, String)>,
-    ) -> BTreeSet<Target> {
+    fn extend(&self, target: Target, rest: &[String], stack: &mut Stack) -> BTreeSet<Target> {
         match target {
             Target::Std(mut path) => {
                 path.extend(rest.iter().cloned());
@@ -135,12 +150,7 @@ impl Table {
 
     /// Every place the name `name` may point at in `module`: an item of that module of the same
     /// name, what a binding of the name points at, and the name in each glob-imported module.
-    fn name(
-        &self,
-        module: &[String],
-        name: &str,
-        stack: &mut Vec<(Module, String)>,
-    ) -> BTreeSet<Target> {
+    fn name(&self, module: &[String], name: &str, stack: &mut Stack) -> BTreeSet<Target> {
         let mut item = module.to_vec();
         item.push(name.to_owned());
         let mut found = BTreeSet::from([Target::Crate(item)]);
@@ -171,9 +181,57 @@ fn std_path(rest: &[String]) -> Vec<String> {
     path
 }
 
-/// The parent of `module`; the crate root is its own parent.
+/// The crate root `module` belongs to: its binary root segment, or `[]` for the library.
+fn root_of(module: &[String]) -> &[String] {
+    match module.first() {
+        Some(first) if first.starts_with('{') => module.get(..1).unwrap_or_default(),
+        _ => &[],
+    }
+}
+
+/// The parent of `module`; a crate root is its own parent.
 fn parent(module: &[String]) -> &[String] {
-    module.split_last().map_or(module, |(_, parent)| parent)
+    if module.len() > root_of(module).len() {
+        module.split_last().map_or(module, |(_, parent)| parent)
+    } else {
+        module
+    }
+}
+
+/// An identifier as a name: without the `r#` of a raw identifier.
+pub(super) fn name_of(ident: &proc_macro2::Ident) -> String {
+    ident.unraw().to_string()
+}
+
+/// The path of a type, looking through parentheses and invisible groups; `None` for any other
+/// type and for a qualified path.
+pub(super) fn type_path(ty: &syn::Type) -> Option<&syn::Path> {
+    match ty {
+        syn::Type::Paren(inner) => type_path(&inner.elem),
+        syn::Type::Group(inner) => type_path(&inner.elem),
+        syn::Type::Path(path) if path.qself.is_none() => Some(&path.path),
+        _ => None,
+    }
+}
+
+/// `path` with a leading `Self` replaced by `self_type`, the self type of the enclosing impl.
+pub(super) fn with_self(path: Written, self_type: Option<&Written>) -> Written {
+    match (path.segments.split_first(), self_type) {
+        (Some((first, rest)), Some(self_type)) if first == "Self" && !path.leading_colon => {
+            let mut segments = self_type.segments.clone();
+            segments.extend(rest.iter().cloned());
+            Written {
+                segments,
+                leading_colon: self_type.leading_colon,
+            }
+        }
+        _ => path,
+    }
+}
+
+/// The self type of an impl, as a path, when it is one.
+pub(super) fn impl_self_type(item: &syn::ItemImpl) -> Option<Written> {
+    type_path(&item.self_ty).map(written)
 }
 
 /// One leaf of a `use` tree.
@@ -210,7 +268,7 @@ fn collect_leaves(
     };
     match tree {
         syn::UseTree::Path(path) => {
-            prefix.push(path.ident.to_string());
+            prefix.push(name_of(&path.ident));
             collect_leaves(&path.tree, prefix, leading_colon, leaves);
             prefix.pop();
         }
@@ -224,7 +282,7 @@ fn collect_leaves(
         }
         syn::UseTree::Rename(rename) => {
             let (segments, _) = imported(prefix, &rename.ident);
-            let bound = rename.rename.to_string();
+            let bound = name_of(&rename.rename);
             leaves.push(Leaf::Bind {
                 path: written(segments),
                 name: (bound != "_").then_some(bound),
@@ -250,18 +308,18 @@ fn imported(prefix: &[String], ident: &syn::Ident) -> (Vec<String>, Option<Strin
         let bound = segments.last().cloned();
         (segments, bound)
     } else {
-        segments.push(ident.to_string());
-        (segments, Some(ident.to_string()))
+        segments.push(name_of(ident));
+        (segments, Some(name_of(ident)))
     }
 }
 
-/// The segments of a `syn::Path`, as written.
+/// The segments of a `syn::Path`, as written, without `r#`.
 pub(super) fn written(path: &syn::Path) -> Written {
     Written {
         segments: path
             .segments
             .iter()
-            .map(|segment| segment.ident.to_string())
+            .map(|segment| name_of(&segment.ident))
             .collect(),
         leading_colon: path.leading_colon.is_some(),
     }
@@ -271,23 +329,53 @@ pub(super) fn written(path: &syn::Path) -> Written {
 struct Collector<'t> {
     table: &'t mut Table,
     module: Module,
+    /// The self type of each enclosing impl (`None` for a trait or a self type that is no path).
+    self_types: Vec<Option<Written>>,
 }
 
 impl Collector<'_> {
     fn bind(&mut self, name: String, path: Written) {
+        let path = self.with_self(path);
         self.table
             .bindings
             .entry((self.module.clone(), name))
             .or_default()
             .push(path);
     }
+
+    fn with_self(&self, path: Written) -> Written {
+        with_self(path, self.self_types.last().and_then(Option::as_ref))
+    }
+
+    fn associated(&mut self, ident: &syn::Ident, ty: &syn::Type) {
+        if let Some(path) = type_path(ty) {
+            let path = self.with_self(written(path));
+            self.table
+                .associated
+                .entry(name_of(ident))
+                .or_default()
+                .push((self.module.clone(), path));
+        }
+    }
 }
 
 impl<'ast> Visit<'ast> for Collector<'_> {
     fn visit_item_mod(&mut self, i: &'ast syn::ItemMod) {
-        self.module.push(i.ident.to_string());
+        self.module.push(name_of(&i.ident));
         visit::visit_item_mod(self, i);
         self.module.pop();
+    }
+
+    fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
+        self.self_types.push(impl_self_type(i));
+        visit::visit_item_impl(self, i);
+        self.self_types.pop();
+    }
+
+    fn visit_item_trait(&mut self, i: &'ast syn::ItemTrait) {
+        self.self_types.push(None);
+        visit::visit_item_trait(self, i);
+        self.self_types.pop();
     }
 
     fn visit_item_use(&mut self, i: &'ast syn::ItemUse) {
@@ -310,19 +398,46 @@ impl<'ast> Visit<'ast> for Collector<'_> {
     }
 
     fn visit_item_type(&mut self, i: &'ast syn::ItemType) {
-        if let syn::Type::Path(alias) = &*i.ty
-            && alias.qself.is_none()
-        {
-            self.bind(i.ident.to_string(), written(&alias.path));
+        if let Some(alias) = type_path(&i.ty) {
+            self.bind(name_of(&i.ident), written(alias));
         }
         visit::visit_item_type(self, i);
     }
 
-    fn visit_item_extern_crate(&mut self, i: &'ast syn::ItemExternCrate) {
-        if i.ident == "std"
-            && let Some((_, rename)) = &i.rename
-        {
-            self.table.std_names.insert(rename.to_string());
+    fn visit_impl_item_type(&mut self, i: &'ast syn::ImplItemType) {
+        self.associated(&i.ident, &i.ty);
+        visit::visit_impl_item_type(self, i);
+    }
+
+    fn visit_trait_item_type(&mut self, i: &'ast syn::TraitItemType) {
+        if let Some((_, ty)) = &i.default {
+            self.associated(&i.ident, ty);
         }
+        visit::visit_trait_item_type(self, i);
+    }
+
+    fn visit_item_extern_crate(&mut self, i: &'ast syn::ItemExternCrate) {
+        let Some((_, rename)) = &i.rename else {
+            return;
+        };
+        let name = name_of(rename);
+        if i.ident == "std" {
+            self.table.std_names.insert(name);
+        } else if i.ident == "self" {
+            let root = root_of(&self.module).to_vec();
+            self.table.crate_names.entry(name).or_default().insert(root);
+        }
+    }
+
+    fn visit_macro(&mut self, i: &'ast syn::Macro) {
+        for body in tokens::bodies(i) {
+            match body {
+                Body::Items(items) => items.iter().for_each(|item| Visit::visit_item(self, item)),
+                Body::Stmts(stmts) => stmts.iter().for_each(|stmt| Visit::visit_stmt(self, stmt)),
+                Body::Exprs(exprs) => exprs.iter().for_each(|expr| Visit::visit_expr(self, expr)),
+                Body::Tokens(_) => {}
+            }
+        }
+        visit::visit_macro(self, i);
     }
 }

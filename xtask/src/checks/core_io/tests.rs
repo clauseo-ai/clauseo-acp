@@ -1,9 +1,16 @@
 //! The planted cases of the core-io check and its other tests. Each case builds a scratch repo
 //! with an `ARCHITECTURE.md` whose `protocol` row holds core I/O, and the sources of
-//! `clauseo-protocol` under `crates/protocol/src/`.
+//! `clauseo-protocol` under `crates/protocol/src/`. The cases with sources of their own are in
+//! `tests/cases.rs`.
+
+mod cases;
+
+pub(super) use cases::*;
 
 use super::*;
+use crate::checks::crates_table::Status;
 use crate::scratch::Scratch;
+use std::fs;
 
 /// A Crates table with one held row (`protocol`, line 8) and one that is not (`xtask`).
 const ARCHITECTURE: &str = "# Architecture\n\n## Crates\n\n\
@@ -12,33 +19,69 @@ const ARCHITECTURE: &str = "# Architecture\n\n## Crates\n\n\
     | `xtask` | checks | none of ours | tauri | exists |\n\
     | `protocol` | events | serde | tauri, fs, process | exists |\n";
 
-/// Runs the check on a scratch repo with `files` (paths under `crates/protocol/src/`, text) and,
-/// when given, `exceptions` as the exception file.
-fn run_on(case: &str, files: &[(&str, &str)], exceptions: Option<&str>) -> Inspection {
+/// The inputs of one scratch repo besides `ARCHITECTURE.md`.
+#[derive(Default)]
+struct Repo<'a> {
+    /// Paths under `crates/protocol/src/`, with their text.
+    files: &'a [(&'a str, &'a str)],
+    /// The exception file.
+    exceptions: Option<&'a str>,
+    /// `crates/protocol/Cargo.toml`.
+    manifest: Option<&'a str>,
+}
+
+/// Writes `repo` into a scratch dir named after `case`; returns the dir.
+fn scratch(case: &str, repo: &Repo<'_>) -> Scratch {
     let dir = Scratch::new(&format!("core-io-{case}"));
     fs::write(dir.join(crates_table::FILE), ARCHITECTURE).expect("write ARCHITECTURE.md");
-    for (path, text) in files {
+    fs::create_dir_all(dir.join("crates/protocol")).expect("create the crate dir");
+    for (path, text) in repo.files {
         let path = dir.join("crates/protocol/src").join(path);
         fs::create_dir_all(path.parent().expect("a parent")).expect("create the src dir");
         fs::write(path, text).expect("write the source");
     }
-    if let Some(text) = exceptions {
+    if let Some(text) = repo.exceptions {
         fs::create_dir_all(dir.join("xtask")).expect("create xtask/");
         fs::write(dir.join(EXCEPTIONS), text).expect("write the exceptions");
     }
+    if let Some(text) = repo.manifest {
+        fs::write(dir.join("crates/protocol/Cargo.toml"), text).expect("write Cargo.toml");
+    }
+    dir
+}
+
+/// The workspace members of every case: `clauseo-protocol` at `crates/protocol`.
+fn members() -> Vec<Member> {
+    vec![Member {
+        name: "clauseo-protocol".to_owned(),
+        dir: "crates/protocol".to_owned(),
+        path_deps: Vec::new(),
+    }]
+}
+
+/// Runs the check on a scratch repo holding `repo`.
+fn run_repo(case: &str, repo: &Repo<'_>) -> Inspection {
+    let dir = scratch(case, repo);
     run(&Context {
         root: dir.to_path_buf(),
-        members: vec![Member {
-            name: "clauseo-protocol".to_owned(),
-            dir: "crates/protocol".to_owned(),
-            path_deps: Vec::new(),
-        }],
+        members: members(),
     })
+}
+
+/// Runs the check on a crate with `files` under `src/`.
+fn run_on(case: &str, files: &[(&str, &str)]) -> Inspection {
+    run_repo(
+        case,
+        &Repo {
+            files,
+            ..Repo::default()
+        },
+    )
 }
 
 /// Runs the check on a crate whose only file is `src/lib.rs`, holding `text`.
 fn lib(case: &str, text: &str) -> Inspection {
-    run_on(case, &[("lib.rs", text)], None)
+    run_on(case, &[("lib.rs", text)])
 }
 
 /// A banned module and an item of it, for the module cases.
@@ -95,6 +138,7 @@ enum Shape {
     SelfAlias,
     Rename,
     Value,
+    Raw,
 }
 
 /// The source of `lib.rs` for one module case.
@@ -105,33 +149,34 @@ fn module_source(banned: &Banned, shape: Shape) -> String {
         call,
         value,
     } = banned;
+    let body = |line: String| format!("pub fn f() {{\n    {line}\n}}\n");
     match shape {
         Shape::Use => format!("use std::{m};\n"),
         Shape::Group => format!("use std::{{{m}, io}};\n"),
         Shape::Nested => format!("use std::{{io, {{{m}::{item}}}}};\n"),
-        Shape::StdAlias => {
-            format!("use std as s;\n\npub fn f() {{\n    let _ = s::{m}::{call};\n}}\n")
-        }
-        Shape::LeadingColon => format!("pub fn f() {{\n    let _ = ::std::{m}::{call};\n}}\n"),
-        Shape::Qualified => format!("pub fn f() {{\n    let _ = std::{m}::{call};\n}}\n"),
-        Shape::ExternCrate => {
-            format!("extern crate std as x;\n\npub fn f() {{\n    let _ = x::{m}::{call};\n}}\n")
-        }
-        Shape::FnBody => {
-            format!("pub fn f() {{\n    use std::{m};\n    let _ = {m}::{call};\n}}\n")
-        }
+        Shape::StdAlias => format!(
+            "use std as s;\n\n{}",
+            body(format!("let _ = s::{m}::{call};"))
+        ),
+        Shape::LeadingColon => body(format!("let _ = ::std::{m}::{call};")),
+        Shape::Qualified => body(format!("let _ = std::{m}::{call};")),
+        Shape::ExternCrate => format!(
+            "extern crate std as x;\n\n{}",
+            body(format!("let _ = x::{m}::{call};"))
+        ),
+        Shape::FnBody => body(format!("use std::{m};\n    let _ = {m}::{call};")),
         Shape::InlineMod => format!("mod inner {{\n    pub use std::{m}::{item};\n}}\n"),
         Shape::Glob => "use std::*;\n".to_owned(),
-        Shape::Macro => format!("pub fn f() {{\n    let _ = vec![std::{m}::{call}];\n}}\n"),
-        Shape::SelfAlias => {
-            format!("use std::{{self as t}};\n\npub fn f() {{\n    let _ = t::{m}::{call};\n}}\n")
-        }
+        Shape::Macro => body(format!("let _ = vec![std::{m}::{call}];")),
+        Shape::SelfAlias => format!(
+            "use std::{{self as t}};\n\n{}",
+            body(format!("let _ = t::{m}::{call};"))
+        ),
         Shape::Rename => {
             format!("use std::{m} as f;\n\npub fn g() {{\n    let _ = f::{call};\n}}\n")
         }
-        Shape::Value => {
-            format!("pub fn f() {{\n    let g = std::{m}::{value};\n    drop(g);\n}}\n")
-        }
+        Shape::Value => body(format!("let g = std::{m}::{value};\n    drop(g);")),
+        Shape::Raw => body(format!("let _ = std::r#{m}::{call};")),
     }
 }
 
@@ -149,24 +194,26 @@ module_cases! {
     fs_leading_colon = FS LeadingColon; fs_qualified = FS Qualified;
     fs_extern_crate = FS ExternCrate; fs_fn_body = FS FnBody; fs_inline_mod = FS InlineMod;
     fs_glob = FS Glob; fs_macro = FS Macro; fs_self_alias = FS SelfAlias; fs_rename = FS Rename;
-    fs_value = FS Value;
+    fs_value = FS Value; fs_raw = FS Raw;
     net_use = NET Use; net_group = NET Group; net_nested = NET Nested;
     net_std_alias = NET StdAlias; net_leading_colon = NET LeadingColon;
     net_qualified = NET Qualified; net_extern_crate = NET ExternCrate; net_fn_body = NET FnBody;
     net_inline_mod = NET InlineMod; net_glob = NET Glob; net_macro = NET Macro;
     net_self_alias = NET SelfAlias; net_rename = NET Rename; net_value = NET Value;
+    net_raw = NET Raw;
     process_use = PROCESS Use; process_group = PROCESS Group; process_nested = PROCESS Nested;
     process_std_alias = PROCESS StdAlias; process_leading_colon = PROCESS LeadingColon;
     process_qualified = PROCESS Qualified; process_extern_crate = PROCESS ExternCrate;
     process_fn_body = PROCESS FnBody; process_inline_mod = PROCESS InlineMod;
     process_glob = PROCESS Glob; process_macro = PROCESS Macro;
     process_self_alias = PROCESS SelfAlias; process_rename = PROCESS Rename;
-    process_value = PROCESS Value;
+    process_value = PROCESS Value; process_raw = PROCESS Raw;
     env_use = ENV Use; env_group = ENV Group; env_nested = ENV Nested;
     env_std_alias = ENV StdAlias; env_leading_colon = ENV LeadingColon;
     env_qualified = ENV Qualified; env_extern_crate = ENV ExternCrate; env_fn_body = ENV FnBody;
     env_inline_mod = ENV InlineMod; env_glob = ENV Glob; env_macro = ENV Macro;
     env_self_alias = ENV SelfAlias; env_rename = ENV Rename; env_value = ENV Value;
+    env_raw = ENV Raw;
 }
 
 /// The ways a clock case reaches `<clock>::now`.
@@ -177,24 +224,29 @@ enum ClockShape {
     TypeAlias,
     Qualified,
     Glob,
+    SelfInImpl,
+    ParenAlias,
 }
 
 /// The source of `lib.rs` for one clock case.
 fn clock_source(clock: &str, shape: ClockShape) -> String {
+    let call = |line: &str| format!("\npub fn f() {{\n    let _ = {line};\n}}\n");
     match shape {
-        ClockShape::Use => {
-            format!("use std::time::{clock};\n\npub fn f() {{\n    let _ = {clock}::now();\n}}\n")
-        }
-        ClockShape::Rename => {
-            format!("use std::time::{clock} as I;\n\npub fn f() {{\n    let _ = I::now();\n}}\n")
-        }
-        ClockShape::TypeAlias => {
-            format!("type T = std::time::{clock};\n\npub fn f() {{\n    let _ = T::now();\n}}\n")
-        }
-        ClockShape::Qualified => {
-            format!("pub fn f() {{\n    let _ = <std::time::{clock}>::now();\n}}\n")
-        }
+        ClockShape::Use => format!(
+            "use std::time::{clock};\n{}",
+            call(&format!("{clock}::now()"))
+        ),
+        ClockShape::Rename => format!("use std::time::{clock} as I;\n{}", call("I::now()")),
+        ClockShape::TypeAlias => format!("type T = std::time::{clock};\n{}", call("T::now()")),
+        ClockShape::Qualified => call(&format!("<std::time::{clock}>::now()"))
+            .trim_start()
+            .to_owned(),
         ClockShape::Glob => "use std::time::*;\n".to_owned(),
+        ClockShape::SelfInImpl => format!(
+            "pub trait N {{\n    fn n() -> Self;\n}}\n\nimpl N for std::time::{clock} {{\n    \
+             fn n() -> Self {{\n        Self::now()\n    }}\n}}\n"
+        ),
+        ClockShape::ParenAlias => format!("type T = (std::time::{clock});\n{}", call("T::now()")),
     }
 }
 
@@ -210,99 +262,17 @@ macro_rules! clock_cases {
 clock_cases! {
     instant_use = "Instant" Use; instant_rename = "Instant" Rename;
     instant_type_alias = "Instant" TypeAlias; instant_qualified = "Instant" Qualified;
-    instant_glob = "Instant" Glob;
+    instant_glob = "Instant" Glob; instant_self_in_impl = "Instant" SelfInImpl;
+    instant_paren_alias = "Instant" ParenAlias;
     system_time_use = "SystemTime" Use; system_time_rename = "SystemTime" Rename;
     system_time_type_alias = "SystemTime" TypeAlias;
     system_time_qualified = "SystemTime" Qualified; system_time_glob = "SystemTime" Glob;
-}
-
-pub(super) fn use_then_call() -> Inspection {
-    lib(
-        "use-then-call",
-        "use std::fs;\n\npub fn f() {\n    let _ = fs::read(\"a\");\n}\n",
-    )
-}
-
-pub(super) fn alias_in_another_file() -> Inspection {
-    run_on(
-        "alias-in-another-file",
-        &[
-            (
-                "lib.rs",
-                "mod clock;\n\npub fn f() {\n    let _ = clock::Clock::now();\n}\n",
-            ),
-            ("clock.rs", "pub type Clock = std::time::Instant;\n"),
-        ],
-        None,
-    )
-}
-
-pub(super) fn std_reexported_from_the_root() -> Inspection {
-    run_on(
-        "std-reexported",
-        &[
-            ("lib.rs", "pub use std as s;\nmod a;\n"),
-            (
-                "a.rs",
-                "pub fn f() {\n    let _ = crate::s::fs::read(\"a\");\n}\n",
-            ),
-        ],
-        None,
-    )
-}
-
-pub(super) fn does_not_parse() -> Inspection {
-    lib("does-not-parse", "pub fn f() {}\n\npub fn g( {\n")
-}
-
-pub(super) fn no_sources() -> Inspection {
-    run_on("no-sources", &[], None)
-}
-
-pub(super) fn stale_exception() -> Inspection {
-    run_on(
-        "stale-exception",
-        &[("lib.rs", "pub fn f() {}\n")],
-        Some("# header\ncrates/protocol/src/gone.rs  reads fixtures\n"),
-    )
-}
-
-pub(super) fn allowed_items() -> Inspection {
-    lib(
-        "allowed-items",
-        "use std::io::Error;\nuse std::time::Duration;\n\n\
-         pub fn f(d: Duration) -> Error {\n    let _ = std::time::Duration::from_secs(1);\n    \
-         Error::other(format!(\"{d:?}\"))\n}\n",
-    )
-}
-
-pub(super) fn instant_as_a_type() -> Inspection {
-    lib(
-        "instant-as-a-type",
-        "use std::time::Instant;\n\n\
-         pub fn elapsed(start: Instant, end: std::time::Instant) -> std::time::Duration {\n    \
-         end - start\n}\n",
-    )
-}
-
-pub(super) fn listed_exception() -> Inspection {
-    run_on(
-        "listed-exception",
-        &[("lib.rs", "use std::fs;\n")],
-        Some("crates/protocol/src/lib.rs  reads test fixtures\n"),
-    )
-}
-
-pub(super) fn local_names_like_banned_ones() -> Inspection {
-    lib(
-        "local-names",
-        "mod fs {\n    pub fn read(_: &str) {}\n}\n\npub fn f() {\n    fs::read(\"a\");\n    \
-         let _ = other::time::Instant::now();\n}\n",
-    )
+    system_time_self_in_impl = "SystemTime" SelfInImpl;
+    system_time_paren_alias = "SystemTime" ParenAlias;
 }
 
 #[test]
-fn every_row_counts_and_a_planned_held_row_is_not_checked() {
+fn every_row_counts_when_no_member_is_held() {
     let dir = Scratch::new("core-io-count");
     fs::write(dir.join(crates_table::FILE), ARCHITECTURE).expect("write ARCHITECTURE.md");
     let found = run(&Context {
@@ -326,33 +296,86 @@ fn a_missing_table_inspects_nothing() {
 
 #[test]
 fn module_paths_follow_the_file_layout() {
-    assert_eq!(module_of("lib.rs"), Vec::<String>::new());
-    assert_eq!(module_of("main.rs"), Vec::<String>::new());
-    assert_eq!(module_of("a.rs"), ["a"]);
-    assert_eq!(module_of("a/mod.rs"), ["a"]);
-    assert_eq!(module_of("a/b.rs"), ["a", "b"]);
+    assert_eq!(files::module_of("lib.rs"), Vec::<String>::new());
+    assert_eq!(files::module_of("main.rs"), Vec::<String>::new());
+    assert_eq!(files::module_of("a.rs"), ["a"]);
+    assert_eq!(files::module_of("a/mod.rs"), ["a"]);
+    assert_eq!(files::module_of("a/b.rs"), ["a", "b"]);
 }
 
 #[test]
-fn each_site_is_reported_once_at_its_own_line() {
+fn sites_of_one_kind_are_reported_once_per_line() {
     let found = lib(
         "lines",
-        "use std::{\n    io,\n    fs::File,\n};\n\npub fn f() {\n    let _ = <std::fs::File>::open(\"a\");\n    \
+        "use std::{\n    io,\n    fs::File,\n};\n\npub fn f() {\n    \
+         let _ = <std::fs::File>::open(\"a\");\n    \
          let _ = std::fs::read(\"a\"); let _ = std::fs::read(\"b\");\n}\n",
     );
     let lines: Vec<u32> = found.violations.iter().map(|v| v.line).collect();
-    assert_eq!(lines, [3, 7, 8, 8]);
+    assert_eq!(lines, [3, 7, 8]);
 }
 
 #[test]
-fn zz_dump() {
-    for case in super::PLANTED {
-        let found = (case.run)();
-        eprintln!("== {} ({})", case.name, found.inspected);
-        for v in &found.violations {
-            eprintln!("{v}");
-        }
-    }
+fn a_clock_only_row_bans_only_the_clocks() {
+    let dir = scratch(
+        "clock-only",
+        &Repo {
+            files: &[(
+                "lib.rs",
+                "use std::fs;\n\npub fn f() {\n    let _ = std::time::Instant::now();\n}\n",
+            )],
+            ..Repo::default()
+        },
+    );
+    let row = CrateRow {
+        line: 8,
+        name: "protocol".to_owned(),
+        owns: String::new(),
+        may_depend_on: Vec::new(),
+        never: vec![Never::Io(IoWord::Clock)],
+        status: Status::Exists,
+    };
+    let found = check_crate(&dir, &members()[0], &row, &[]);
+    let lines: Vec<(u32, &str)> = found.iter().map(|v| (v.line, v.message.as_str())).collect();
+    assert_eq!(
+        lines,
+        [(
+            4,
+            "clauseo-protocol uses std::time::Instant::now, which ARCHITECTURE.md forbids in \
+             this crate"
+        )]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_under_src_fails_at_the_crate_s_row() {
+    let dir = scratch(
+        "symlink",
+        &Repo {
+            files: &[("lib.rs", "mod io;\n")],
+            ..Repo::default()
+        },
+    );
+    fs::write(dir.join("crates/protocol/io.rs"), "use std::fs;\n").expect("write io.rs");
+    std::os::unix::fs::symlink("../io.rs", dir.join("crates/protocol/src/io.rs"))
+        .expect("make the symlink");
+    let found: Vec<String> = run(&Context {
+        root: dir.to_path_buf(),
+        members: members(),
+    })
+    .violations
+    .iter()
+    .map(ToString::to_string)
+    .collect();
+    assert_eq!(
+        found,
+        [
+            "ARCHITECTURE.md:8: `crates/protocol/src/io.rs` in clauseo-protocol is a symlink, \
+             which core-io does not follow\n    fix: replace the symlink with the file or folder \
+             it points to, so the code sits under `crates/protocol/src/`"
+        ]
+    );
 }
 
 #[test]
