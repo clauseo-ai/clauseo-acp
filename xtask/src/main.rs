@@ -62,12 +62,13 @@ enum Commands {
         quick: bool,
     },
     /// Install the pinned cargo tools (`cargo install --locked <tool> --version <version>`), print
-    /// the install commands for gitleaks and lefthook, and check their versions against the pins.
+    /// how to install gitleaks and lefthook, and check their versions against the pins.
     Setup {
-        /// Also run each pinned binary's install command (gitleaks, lefthook), not only print it.
+        /// Also install gitleaks and lefthook where the version check fails, then check again.
         ///
-        /// A failed install fails setup and names the command to run by hand. Versions are
-        /// checked either way.
+        /// A binary already at its pin is left alone. On macOS and Linux the release asset is
+        /// moved into `CARGO_HOME/bin` only if its sha256 matches the pin; on Windows winget runs.
+        /// A failed install fails setup with a fix line. Versions are checked either way.
         #[arg(long)]
         binaries: bool,
     },

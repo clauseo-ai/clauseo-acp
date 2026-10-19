@@ -1,0 +1,362 @@
+//! Installing a pinned binary: on macOS and Linux, download the release asset, check its pinned
+//! sha256 and only then move the binary into `CARGO_HOME/bin`; on Windows, run winget, which
+//! checks the installer hash from its own manifest.
+
+use super::{Binary, Machine, Packing, Runner};
+use crate::output::Printer;
+use crate::process::{Cmd, Ended, Output, Program};
+use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
+use std::fs;
+use std::io::{self, Write};
+use std::path::Path;
+use std::time::Duration;
+
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_mins(10);
+const UNPACK_TIMEOUT: Duration = Duration::from_secs(60);
+const WINGET_TIMEOUT: Duration = Duration::from_mins(30);
+
+/// How a binary installs on one OS and arch.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Install {
+    /// Windows: this winget command.
+    Winget(Cmd),
+    /// macOS and Linux: this release asset.
+    Download(Download),
+    /// No release asset with a pinned sha256 exists for this OS and arch.
+    NoRelease,
+}
+
+/// A release asset to download, and the sha256 it must have.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Download {
+    /// Its file name.
+    pub asset: String,
+    pub url: String,
+    pub sha256: &'static str,
+    pub packing: Packing,
+}
+
+/// How `binary` installs on `os`/`arch`, as in `std::env::consts`.
+pub(crate) fn install_plan(binary: &Binary, os: &str, arch: &str) -> Install {
+    if os == "windows" {
+        return Install::Winget(winget(binary));
+    }
+    let pinned = binary
+        .sha256
+        .iter()
+        .find(|pin| pin.os == os && pin.arch == arch);
+    match ((binary.asset)(os, arch, binary.version), pinned) {
+        (Some(asset), Some(pin)) => Install::Download(Download {
+            url: format!(
+                "https://github.com/{}/releases/download/v{}/{asset}",
+                binary.repo, binary.version
+            ),
+            asset,
+            sha256: pin.sha256,
+            packing: binary.packing,
+        }),
+        _ => Install::NoRelease,
+    }
+}
+
+/// What to do to install `binary` on `os`/`arch`: the line `setup` prints, and the fix of a
+/// version check that fails.
+pub(crate) fn how_to_install(binary: &Binary, os: &str, arch: &str) -> String {
+    match install_plan(binary, os, arch) {
+        Install::Winget(cmd) => format!("run `{cmd}`"),
+        Install::Download(download) => format!(
+            "run `cargo xtask setup --binaries`, which downloads {} and installs {} only if its \
+             sha256 matches the pin",
+            download.url, binary.name
+        ),
+        Install::NoRelease => format!(
+            "download v{} for {os}-{arch} from https://github.com/{}/releases and put it on PATH",
+            binary.version, binary.repo
+        ),
+    }
+}
+
+/// The `winget` command that installs `binary` on Windows. It runs without prompts: winget asks
+/// nothing about source or package agreements, and never goes interactive.
+pub(crate) fn winget(binary: &Binary) -> Cmd {
+    Cmd::new(
+        Program::Named("winget"),
+        [
+            "install",
+            "--id",
+            binary.winget,
+            "--version",
+            binary.version,
+            "--exact",
+            "--accept-source-agreements",
+            "--accept-package-agreements",
+            "--disable-interactivity",
+        ],
+    )
+}
+
+/// Installs `binary` on `machine`, printing what it does. Every failure prints its message and
+/// fix. Returns whether it installed.
+pub(crate) fn install_binary<W: Write>(
+    out: &mut Printer<W>,
+    binary: &Binary,
+    machine: &Machine<'_>,
+    root: &Path,
+    runner: &mut Runner<'_>,
+) -> bool {
+    let (os, arch) = (machine.os, machine.arch);
+    match install_plan(binary, os, arch) {
+        Install::NoRelease => {
+            out.failure(
+                &format!(
+                    "{} has no release for {os}-{arch}, so it is not installed",
+                    binary.name
+                ),
+                &how_to_install(binary, os, arch),
+            );
+            false
+        }
+        Install::Winget(cmd) => run_winget(out, binary, &cmd, root, runner),
+        Install::Download(download) => {
+            let Some(bin) = &machine.cargo_bin else {
+                out.failure(
+                    &format!(
+                        "{} is not installed: neither CARGO_HOME nor the home directory is set, \
+                         so there is no cargo bin directory to put it in",
+                        binary.name
+                    ),
+                    "set CARGO_HOME to cargo's home directory, then run cargo xtask setup \
+                     --binaries again",
+                );
+                return false;
+            };
+            download_into(out, binary, &download, bin, runner)
+        }
+    }
+}
+
+fn run_winget<W: Write>(
+    out: &mut Printer<W>,
+    binary: &Binary,
+    cmd: &Cmd,
+    root: &Path,
+    runner: &mut Runner<'_>,
+) -> bool {
+    out.note(format!(
+        "installing {} {}: {cmd}",
+        binary.name, binary.version
+    ));
+    let fix = format!("run `{cmd}` by hand and check its output, then run cargo xtask setup again");
+    let message = match runner(cmd, root, Output::Inherit, WINGET_TIMEOUT) {
+        Ok(Ended::Exited(ran)) if ran.success => return true,
+        Ok(Ended::Exited(_)) => format!("installing {} failed", binary.name),
+        Ok(Ended::TimedOut) => format!(
+            "installing {} did not finish within {} min, so it was stopped",
+            binary.name,
+            WINGET_TIMEOUT.as_secs() / 60
+        ),
+        Err(error) => format!("could not run winget to install {}: {error}", binary.name),
+    };
+    out.failure(&message, &fix);
+    false
+}
+
+/// A failure's message and fix.
+type Failure = (String, String);
+
+/// The fix after a failure on the way to `bin`, when trying again is all there is to do.
+fn retry_fix(bin: &Path) -> String {
+    format!(
+        "check that you can write to {}, then run cargo xtask setup --binaries again",
+        bin.display()
+    )
+}
+
+/// Downloads `download` into a staging directory inside `bin`, so the last move is a rename on one
+/// filesystem, and moves the binary into `bin` only when the download's sha256 is the pinned one.
+/// The staging directory is removed either way, so a failure leaves `bin` as it was.
+fn download_into<W: Write>(
+    out: &mut Printer<W>,
+    binary: &Binary,
+    download: &Download,
+    bin: &Path,
+    runner: &mut Runner<'_>,
+) -> bool {
+    out.note(format!(
+        "installing {} {}: downloading {}",
+        binary.name, binary.version, download.url
+    ));
+    let staging = bin.join(format!(
+        ".xtask-setup-{}-{}",
+        binary.name,
+        std::process::id()
+    ));
+    let placed = fresh_dir(bin, &staging)
+        .and_then(|()| fetch_check_place(binary, download, &staging, bin, runner));
+    let mut ok = match placed {
+        Ok(()) => {
+            out.note(format!(
+                "installed {} {} to {}: its sha256 matches the pin",
+                binary.name,
+                binary.version,
+                bin.display()
+            ));
+            true
+        }
+        Err((message, fix)) => {
+            out.failure(&message, &fix);
+            false
+        }
+    };
+    match fs::remove_dir_all(&staging) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => {
+            out.failure(
+                &format!("could not remove {}: {error}", staging.display()),
+                &format!("remove {} by hand", staging.display()),
+            );
+            ok = false;
+        }
+        _ => {}
+    }
+    ok
+}
+
+/// Makes `bin` if needed, and `staging` inside it empty.
+fn fresh_dir(bin: &Path, staging: &Path) -> Result<(), Failure> {
+    let made = fs::create_dir_all(bin).and_then(|()| match fs::remove_dir_all(staging) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => fs::create_dir(staging),
+    });
+    made.map_err(|error| {
+        (
+            format!("could not make {}: {error}", staging.display()),
+            retry_fix(bin),
+        )
+    })
+}
+
+/// Downloads into `staging`, checks the sha256, unpacks if needed, and renames the binary into
+/// `bin`.
+fn fetch_check_place(
+    binary: &Binary,
+    download: &Download,
+    staging: &Path,
+    bin: &Path,
+    runner: &mut Runner<'_>,
+) -> Result<(), Failure> {
+    let (name, asset, url) = (binary.name, download.asset.as_str(), download.url.as_str());
+    let curl = Cmd::new(Program::Named("curl"), ["-sSfL", "-o", asset, url]);
+    let fix = format!(
+        "run `{curl}` by hand in an empty directory and check its output, then run cargo xtask \
+         setup --binaries again"
+    );
+    let what = format!("downloading {url}");
+    run_step(runner, &curl, staging, DOWNLOAD_TIMEOUT, &what, &fix)?;
+    let file = staging.join(asset);
+    let found = sha256_of(&file).map_err(|error| {
+        (
+            format!("could not read the download of {url}: {error}"),
+            retry_fix(bin),
+        )
+    })?;
+    if found != download.sha256 {
+        return Err((
+            format!(
+                "{url} has sha256 {found}, but the pin is {}, so {name} is not installed",
+                download.sha256
+            ),
+            "run cargo xtask setup --binaries again. If the sha256 still differs, the file at \
+             that URL is not the one the pin was taken from: do not install it by hand"
+                .to_owned(),
+        ));
+    }
+    let unpacked = match download.packing {
+        Packing::Bare => file,
+        Packing::TarGz => {
+            let tar = Cmd::new(Program::Named("tar"), ["-xzf", asset, name]);
+            let fix = format!(
+                "the download matched its sha256, so check tar: run `{tar}` by hand on a \
+                 download of {url} and check its output, then run cargo xtask setup --binaries \
+                 again"
+            );
+            run_step(
+                runner,
+                &tar,
+                staging,
+                UNPACK_TIMEOUT,
+                &format!("unpacking {asset}"),
+                &fix,
+            )?;
+            staging.join(name)
+        }
+    };
+    let destination = bin.join(name);
+    ready_to_run(&unpacked)
+        .and_then(|()| fs::rename(&unpacked, &destination))
+        .map_err(|error| {
+            (
+                format!("could not move {name} into {}: {error}", bin.display()),
+                retry_fix(bin),
+            )
+        })
+}
+
+/// Runs one step of a download through `runner`. `what` names the step in its failure.
+fn run_step(
+    runner: &mut Runner<'_>,
+    cmd: &Cmd,
+    dir: &Path,
+    timeout: Duration,
+    what: &str,
+    fix: &str,
+) -> Result<(), Failure> {
+    let message = match runner(cmd, dir, Output::Quiet, timeout) {
+        Ok(Ended::Exited(ran)) if ran.success => return Ok(()),
+        Ok(Ended::Exited(ran)) => {
+            let said = ran.stderr.trim();
+            format!(
+                "{what} failed: {}",
+                if said.is_empty() { "no output" } else { said }
+            )
+        }
+        Ok(Ended::TimedOut) => format!(
+            "{what} did not finish within {} s, so it was stopped",
+            timeout.as_secs()
+        ),
+        Err(error) => format!(
+            "{what} failed: could not run {}: {error}",
+            cmd.program.name()
+        ),
+    };
+    Err((message, fix.to_owned()))
+}
+
+/// The sha256 of `file`'s bytes, in lowercase hex.
+pub(crate) fn sha256_of(file: &Path) -> io::Result<String> {
+    let digest = Sha256::digest(fs::read(file)?);
+    let mut hex = String::with_capacity(64);
+    for byte in digest {
+        write!(hex, "{byte:02x}").map_err(io::Error::other)?;
+    }
+    Ok(hex)
+}
+
+/// Fails unless `file` is a regular file, and on Unix makes it executable.
+fn ready_to_run(file: &Path) -> io::Result<()> {
+    if !fs::symlink_metadata(file)?.is_file() {
+        return Err(io::Error::other(format!(
+            "{} is not a regular file",
+            file.display()
+        )));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(file, fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;

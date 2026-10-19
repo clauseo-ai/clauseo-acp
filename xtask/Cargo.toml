@@ -17,6 +17,8 @@ pulldown-cmark = { version = "0.13.4", default-features = false }
 proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
+# `setup --binaries` checks each downloaded release asset against its pinned sha256.
+sha2 = "0.10.9"
 # The core-io check parses the Rust sources of the crates that must not do I/O.
 syn = { version = "3.0.9", features = ["full", "visit"] }
 toml = "1"

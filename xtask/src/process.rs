@@ -1,11 +1,14 @@
 //! The only module that starts processes. Every other module goes through `capture`, `run_quiet`
-//! or `run_inherit`, so the rules about how commands run live in one place.
+//! or `run_timed`, so the rules about how commands run live in one place.
 
 use std::ffi::OsStr;
 use std::fmt;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::thread;
+use std::time::Duration;
 
 /// Size of each read from a running command's output pipe.
 const CHUNK: usize = 8 * 1024;
@@ -29,6 +32,8 @@ pub(crate) enum Program {
 
 /// The variables `git rev-parse --local-env-vars` lists (git 2.54): each points git at a
 /// particular repository, index or object store instead of the one found from the working dir.
+/// A git upgrade that changes the list fails
+/// `git_local_env_is_what_git_rev_parse_local_env_vars_lists`, which runs that command.
 const GIT_LOCAL_ENV: [&str; 15] = [
     "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     "GIT_CONFIG",
@@ -149,6 +154,7 @@ pub(crate) struct Captured {
 }
 
 /// Exit status and separate stdout and stderr of a command run by `run_quiet`.
+#[derive(Debug)]
 pub(crate) struct Quiet {
     pub success: bool,
     pub stdout: String,
@@ -210,138 +216,120 @@ pub(crate) fn run_quiet(cmd: &Cmd, root: &Path) -> io::Result<Quiet> {
     })
 }
 
-/// Runs `cmd` in `root` with its output going straight to the terminal. Returns whether it
-/// succeeded.
-pub(crate) fn run_inherit(cmd: &Cmd, root: &Path) -> io::Result<bool> {
-    let status = cmd
-        .program
-        .command()
-        .args(&cmd.args)
-        .current_dir(root)
-        .status()?;
-    Ok(status.success())
+/// Where the output of a command run by `run_timed` goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Output {
+    /// Straight to the terminal. The command stays in the terminal's process group, so Ctrl-C
+    /// stops it as it stops xtask.
+    Inherit,
+    /// Kept, stdout and stderr apart, with stdin closed. On Unix the command runs in a process
+    /// group of its own, so a timeout kills everything it started.
+    Quiet,
+}
+
+/// How a command run by `run_timed` ended.
+#[derive(Debug)]
+pub(crate) enum Ended {
+    /// It exited. With `Output::Inherit`, `stdout` and `stderr` are empty.
+    Exited(Quiet),
+    /// It was still running at the timeout, so it was killed.
+    TimedOut,
+}
+
+/// How long `run_timed` waits, after killing a command, for its output pipes to close.
+const KILL_GRACE: Duration = Duration::from_secs(5);
+
+/// Runs `cmd` in `root` and kills it if it runs longer than `timeout`. On a timeout it kills, on
+/// Unix, the command's process group with `Output::Quiet` and the command alone with
+/// `Output::Inherit`; on Windows, the command and every process it started (`taskkill /T`).
+#[expect(clippy::disallowed_methods, reason = "xtask runs tools and times them")]
+pub(crate) fn run_timed(
+    cmd: &Cmd,
+    root: &Path,
+    output: Output,
+    timeout: Duration,
+) -> io::Result<Ended> {
+    let mut command = cmd.program.command();
+    command.args(&cmd.args).current_dir(root);
+    if output == Output::Quiet {
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    }
+    let child = command.spawn()?;
+    let pid = child.id();
+    let (done, finished) = mpsc::channel();
+    thread::spawn(move || {
+        // The receiver is gone only after a timeout, when nobody wants the output any more.
+        drop(done.send(child.wait_with_output()));
+    });
+    match finished.recv_timeout(timeout) {
+        Ok(ran) => Ok(Ended::Exited(quiet_of(&ran?))),
+        Err(RecvTimeoutError::Timeout) => {
+            let killed = kill(pid, output);
+            // The waiter ends once the killed processes have closed the pipes. A process that left
+            // the group may hold them longer; it is not waited for past the grace period.
+            let late = finished.recv_timeout(KILL_GRACE);
+            match (killed, late) {
+                (Ok(()), _) => Ok(Ended::TimedOut),
+                // The kill found nothing to kill: the command exited just at the timeout.
+                (Err(_), Ok(Ok(ran))) => Ok(Ended::Exited(quiet_of(&ran))),
+                (Err(error), _) => Err(io::Error::other(format!(
+                    "`{cmd}` ran past its timeout of {} s and could not be stopped: {error}",
+                    timeout.as_secs()
+                ))),
+            }
+        }
+        Err(RecvTimeoutError::Disconnected) => Err(io::Error::other(format!(
+            "the thread waiting for `{cmd}` stopped without its exit status"
+        ))),
+    }
+}
+
+/// The exit status and output of a finished command.
+fn quiet_of(ran: &std::process::Output) -> Quiet {
+    Quiet {
+        success: ran.status.success(),
+        stdout: String::from_utf8_lossy(&ran.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&ran.stderr).into_owned(),
+    }
+}
+
+/// The command that kills what `run_timed` started as `pid`: see `run_timed` for what each
+/// `output` and OS kills.
+fn kill_cmd(pid: u32, output: Output) -> Cmd {
+    if cfg!(windows) {
+        Cmd::new(
+            Program::Named("taskkill"),
+            ["/PID".to_owned(), pid.to_string(), "/T".into(), "/F".into()],
+        )
+    } else if output == Output::Quiet {
+        // A negative pid names the process group the command leads.
+        Cmd::new(Program::Named("kill"), ["-KILL", "--", &format!("-{pid}")])
+    } else {
+        Cmd::new(
+            Program::Named("kill"),
+            ["-KILL".to_owned(), pid.to_string()],
+        )
+    }
+}
+
+/// Runs `kill_cmd`. Fails when the kill could not start or exited non-zero.
+fn kill(pid: u32, output: Output) -> io::Result<()> {
+    let cmd = kill_cmd(pid, output);
+    let killed = run_quiet(&cmd, Path::new("."))?;
+    if killed.success {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "`{cmd}` failed: {}",
+            killed.stderr.trim()
+        )))
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::ffi::OsString;
-
-    #[test]
-    fn git_runs_without_the_variables_that_point_it_at_another_repo() {
-        let git = Program::Git.command();
-        let removed: Vec<&OsStr> = git
-            .get_envs()
-            .filter(|(_, value)| value.is_none())
-            .map(|(name, _)| name)
-            .collect();
-        for name in GIT_LOCAL_ENV {
-            assert!(removed.contains(&OsStr::new(name)), "{name} is removed");
-        }
-        assert_eq!(git.get_program(), "git");
-    }
-
-    #[test]
-    fn cmd_displays_its_program_then_its_args() {
-        let cmd = Cmd::new(Program::Cargo, ["fmt", "--all", "--", "--check"]);
-        assert_eq!(cmd.to_string(), "cargo fmt --all -- --check");
-        let named = Cmd::new(Program::Named("git"), Vec::<String>::new());
-        assert_eq!(named.to_string(), "git");
-        let pnpm = Cmd::new(Program::Pnpm, ["--version"]);
-        assert_eq!(pnpm.to_string(), "pnpm --version");
-    }
-
-    /// The path of `name` in `dir`.
-    fn at(dir: &str, name: &str) -> PathBuf {
-        Path::new(dir).join(name)
-    }
-
-    /// A PATH value of `dirs`, joined the way the OS joins one.
-    fn path_of(dirs: &[&str]) -> OsString {
-        std::env::join_paths(dirs).expect("test directories hold no separator")
-    }
-
-    /// An `exists` predicate that holds for exactly `files`.
-    fn only(files: &[PathBuf]) -> impl Fn(&Path) -> bool + '_ {
-        move |file| files.iter().any(|held| held == file)
-    }
-
-    /// The directories of the PATH the tests search: the first holds no pnpm, the second one.
-    const DIRS: [&str; 2] = ["/tools/bin", "/usr/local/node"];
-
-    #[test]
-    fn pnpm_resolves_to_a_cmd_file_on_path() {
-        let files = [at("/usr/local/node", "pnpm.cmd")];
-        assert_eq!(
-            resolve_pnpm(&path_of(&DIRS), &WINDOWS_PNPM, only(&files)),
-            at("/usr/local/node", "pnpm.cmd")
-        );
-    }
-
-    #[test]
-    fn pnpm_resolves_to_an_exe_when_there_is_no_cmd() {
-        let files = [at("/tools/bin", "pnpm.exe")];
-        assert_eq!(
-            resolve_pnpm(&path_of(&DIRS), &WINDOWS_PNPM, only(&files)),
-            at("/tools/bin", "pnpm.exe")
-        );
-    }
-
-    #[test]
-    fn pnpm_resolves_to_bare_pnpm_when_neither_is_on_path() {
-        assert_eq!(
-            resolve_pnpm(&path_of(&DIRS), &WINDOWS_PNPM, only(&[])),
-            PathBuf::from("pnpm")
-        );
-    }
-
-    #[test]
-    fn an_exe_in_an_earlier_directory_beats_a_cmd_in_a_later_one() {
-        let files = [
-            at("/tools/bin", "pnpm.exe"),
-            at("/usr/local/node", "pnpm.cmd"),
-        ];
-        assert_eq!(
-            resolve_pnpm(&path_of(&DIRS), &WINDOWS_PNPM, only(&files)),
-            at("/tools/bin", "pnpm.exe")
-        );
-    }
-
-    #[test]
-    fn an_exe_beats_a_cmd_in_the_same_directory() {
-        let files = [
-            at("/usr/local/node", "pnpm.cmd"),
-            at("/usr/local/node", "pnpm.exe"),
-        ];
-        assert_eq!(
-            resolve_pnpm(&path_of(&DIRS), &WINDOWS_PNPM, only(&files)),
-            at("/usr/local/node", "pnpm.exe")
-        );
-    }
-
-    #[test]
-    fn the_resolved_path_is_the_directory_joined_with_the_name() {
-        let files = [at("/usr/local/node", "pnpm.exe")];
-        let resolved = resolve_pnpm(&path_of(&DIRS), &WINDOWS_PNPM, only(&files));
-        assert_eq!(resolved.parent(), Some(Path::new("/usr/local/node")));
-        assert_eq!(resolved.file_name(), Some(OsStr::new("pnpm.exe")));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn capture_merges_stdout_and_stderr_and_reports_the_exit_status() {
-        let cmd = Cmd::new(
-            Program::Named("sh"),
-            ["-c", "echo out; echo err >&2; exit 3"],
-        );
-        let mut seen = Vec::new();
-        let captured = capture(&cmd, Path::new("."), &mut |chunk| {
-            seen.extend_from_slice(chunk);
-        })
-        .expect("sh runs");
-        assert!(!captured.success);
-        assert!(captured.output.contains("out"));
-        assert!(captured.output.contains("err"));
-        assert_eq!(seen, captured.output.as_bytes());
-    }
-}
+mod tests;

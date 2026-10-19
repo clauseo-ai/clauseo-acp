@@ -1,11 +1,112 @@
-//! Tests for `setup.rs`: the pins, the install commands, the version check and the install loop.
+//! Tests for `setup.rs`: the pins, the install command for each OS and arch, and `run`. The
+//! expected commands are written out here from `version` and `repo`, never built by the code under
+//! test.
 
 use super::*;
+use crate::process::Quiet;
 use crate::scratch::Scratch;
-use std::path::PathBuf;
 
-fn binary(name: &str) -> &'static Binary {
+pub(super) fn binary(name: &str) -> &'static Binary {
     BINARIES.iter().find(|b| b.name == name).unwrap()
+}
+
+/// The platforms `--binaries` must install on: macOS, Linux and Windows, on both arches.
+pub(super) const PLATFORMS: [(&str, &str); 6] = [
+    ("macos", "aarch64"),
+    ("macos", "x86_64"),
+    ("linux", "aarch64"),
+    ("linux", "x86_64"),
+    ("windows", "x86_64"),
+    ("windows", "aarch64"),
+];
+
+/// The release asset of `b` for a macOS or Linux `os`/`arch`. Each asset's OS and arch spelling
+/// is written here once.
+pub(super) fn expected_asset(b: &Binary, os: &str, arch: &str) -> String {
+    let v = b.version;
+    match (b.name, os, arch) {
+        ("gitleaks", "macos", "aarch64") => format!("gitleaks_{v}_darwin_arm64.tar.gz"),
+        ("gitleaks", "macos", "x86_64") => format!("gitleaks_{v}_darwin_x64.tar.gz"),
+        ("gitleaks", "linux", "aarch64") => format!("gitleaks_{v}_linux_arm64.tar.gz"),
+        ("gitleaks", "linux", "x86_64") => format!("gitleaks_{v}_linux_x64.tar.gz"),
+        ("lefthook", "macos", "aarch64") => format!("lefthook_{v}_MacOS_arm64"),
+        ("lefthook", "macos", "x86_64") => format!("lefthook_{v}_MacOS_x86_64"),
+        ("lefthook", "linux", "aarch64") => format!("lefthook_{v}_Linux_arm64"),
+        ("lefthook", "linux", "x86_64") => format!("lefthook_{v}_Linux_x86_64"),
+        other => panic!("no asset written out for {other:?}"),
+    }
+}
+
+/// The download URL of `asset`, a release asset of `b`.
+pub(super) fn expected_url(b: &Binary, asset: &str) -> String {
+    format!(
+        "https://github.com/{}/releases/download/v{}/{asset}",
+        b.repo, b.version
+    )
+}
+
+/// The winget command that installs `b`.
+pub(super) fn expected_winget(b: &Binary) -> String {
+    format!(
+        "winget install --id {} --version {} --exact --accept-source-agreements \
+         --accept-package-agreements --disable-interactivity",
+        b.winget, b.version
+    )
+}
+
+/// A command that exited, with what it printed.
+#[expect(clippy::unnecessary_wraps, reason = "it is what a runner returns")]
+pub(super) fn exited(success: bool, stdout: &str, stderr: &str) -> io::Result<Ended> {
+    Ok(Ended::Exited(Quiet {
+        success,
+        stdout: stdout.to_owned(),
+        stderr: stderr.to_owned(),
+    }))
+}
+
+/// A Linux x86-64 machine whose cargo bin is `bin`, on PATH when `on_path`.
+pub(super) fn linux(bin: &Path, on_path: bool) -> Machine<'static> {
+    let path = if on_path {
+        std::env::join_paths([Path::new("/usr/bin"), bin]).unwrap()
+    } else {
+        OsString::from("/usr/bin")
+    };
+    Machine {
+        os: "linux",
+        arch: "x86_64",
+        cargo_bin: Some(bin.to_path_buf()),
+        path,
+    }
+}
+
+/// The pinned asset of a fake tool, and its sha256.
+pub(super) const ASSET_BYTES: &[u8] = b"faketool release asset";
+pub(super) const ASSET_SHA256: &str =
+    "19cf8bf2081d3eb1a73334c744a60f5f6accf3bd217bd1ee94a2319500a89d7e";
+
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "it is a `Binary::asset`, which returns an Option"
+)]
+fn fake_asset(os: &str, arch: &str, version: &str) -> Option<String> {
+    Some(format!("faketool_{version}_{os}_{arch}"))
+}
+
+/// A tool whose Linux x86-64 asset is `ASSET_BYTES`, held as `packing`.
+pub(super) fn fake_tool(packing: Packing) -> Binary {
+    Binary {
+        name: "faketool",
+        version: "fake-version",
+        sha256: &[AssetSha256 {
+            os: "linux",
+            arch: "x86_64",
+            sha256: ASSET_SHA256,
+        }],
+        repo: "example/faketool",
+        winget: "Example.FakeTool",
+        asset: fake_asset,
+        packing,
+    }
 }
 
 #[test]
@@ -27,89 +128,57 @@ fn the_cargo_tools_are_pinned() {
 }
 
 #[test]
-fn install_commands_fetch_the_pinned_release_for_each_os() {
-    let gitleaks = binary("gitleaks");
-    let lefthook = binary("lefthook");
-    assert_eq!(
-        install_command(gitleaks, "macos", "aarch64"),
-        r#"curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz | tar -xz -C "${CARGO_HOME:-$HOME/.cargo}/bin" gitleaks"#
-    );
-    assert!(
-        install_command(gitleaks, "linux", "x86_64").contains("gitleaks_8.30.1_linux_x64.tar.gz")
-    );
-    assert_eq!(
-        install_command(lefthook, "macos", "x86_64"),
-        r#"curl -sSfL -o "${CARGO_HOME:-$HOME/.cargo}/bin/lefthook" https://github.com/evilmartians/lefthook/releases/download/v2.2.1/lefthook_2.2.1_MacOS_x86_64 && chmod +x "${CARGO_HOME:-$HOME/.cargo}/bin/lefthook""#
-    );
-    assert!(install_command(lefthook, "linux", "aarch64").contains("lefthook_2.2.1_Linux_arm64"));
-    assert_eq!(
-        install_command(gitleaks, "windows", "aarch64"),
-        "winget install --id Gitleaks.Gitleaks --version 8.30.1 --exact --accept-source-agreements --accept-package-agreements --disable-interactivity"
-    );
-    assert_eq!(
-        install_command(lefthook, "windows", "x86_64"),
-        "winget install --id evilmartians.lefthook --version 2.2.1 --exact --accept-source-agreements --accept-package-agreements --disable-interactivity"
-    );
-    assert_eq!(
-        install_command(lefthook, "freebsd", "x86_64"),
-        "download v2.2.1 for freebsd-x86_64 from https://github.com/evilmartians/lefthook/releases and put it on PATH"
-    );
-}
-
-#[test]
-fn version_check_wants_the_exact_pin() {
-    assert_eq!(
-        compare_version("8.30.1", Ok((true, "8.30.1\n".into(), String::new()))),
-        VersionCheck::Matches
-    );
-    assert_eq!(
-        compare_version("2.2.1", Ok((true, "2.2.2\n".into(), String::new()))),
-        VersionCheck::Differs("2.2.2".into())
-    );
-    assert_eq!(
-        compare_version("2.2.1", Ok((false, String::new(), "boom\n".into()))),
-        VersionCheck::Broken("boom".into())
-    );
-    assert_eq!(
-        compare_version("2.2.1", Err("not found".into())),
-        VersionCheck::Missing("not found".into())
-    );
-}
-
-/// The platforms `--binaries` must install on: macOS, Linux and Windows, on both arches.
-const PLATFORMS: [(&str, &str); 6] = [
-    ("macos", "aarch64"),
-    ("macos", "x86_64"),
-    ("linux", "aarch64"),
-    ("linux", "x86_64"),
-    ("windows", "x86_64"),
-    ("windows", "aarch64"),
-];
-
-/// The command the install of `binary` must run on `os`/`arch`, built from the pin.
-fn expected_cmd(binary: &Binary, os: &str, arch: &str) -> Cmd {
-    if os == "windows" {
-        winget(binary)
-    } else {
-        let script = install_command(binary, os, arch);
-        Cmd::new(Program::Named("sh"), ["-c", script.as_str()])
+fn each_binary_pins_one_sha256_per_unix_platform() {
+    for b in BINARIES {
+        let pinned: Vec<(&str, &str)> = b.sha256.iter().map(|p| (p.os, p.arch)).collect();
+        let unix: Vec<(&str, &str)> = PLATFORMS
+            .into_iter()
+            .filter(|(os, _)| *os != "windows")
+            .collect();
+        assert_eq!(pinned, unix, "{}", b.name);
+        for pin in b.sha256 {
+            assert_eq!(pin.sha256.len(), 64, "{} {}-{}", b.name, pin.os, pin.arch);
+            assert!(
+                pin.sha256
+                    .bytes()
+                    .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)),
+                "{} {}-{} is lowercase hex",
+                b.name,
+                pin.os,
+                pin.arch
+            );
+        }
     }
 }
 
-/// The failure line for a failed install of `text`, the command that runs it.
-fn fix_for(text: &str) -> String {
-    format!("    fix: run `{text}` by hand and check its output, then run cargo xtask setup again")
-}
-
 #[test]
-fn the_printed_winget_command_is_the_one_that_runs() {
-    for binary in BINARIES {
-        for arch in ["x86_64", "aarch64"] {
-            let shown = install_command(binary, "windows", arch);
-            let runs = install_cmd(binary, "windows", arch).expect("winget runs on windows");
-            assert_eq!(shown, runs.to_string());
-            assert_eq!(runs, winget(binary));
+fn install_commands_fetch_the_pinned_release_for_each_os() {
+    for b in BINARIES {
+        for (os, arch) in PLATFORMS {
+            let expected = if os == "windows" {
+                format!("run `{}`", expected_winget(b))
+            } else {
+                let url = expected_url(b, &expected_asset(b, os, arch));
+                format!(
+                    "run `cargo xtask setup --binaries`, which downloads {url} and installs {} \
+                     only if its sha256 matches the pin",
+                    b.name
+                )
+            };
+            assert_eq!(
+                install::how_to_install(b, os, arch),
+                expected,
+                "{os}-{arch}"
+            );
         }
+        assert_eq!(
+            install::how_to_install(b, "freebsd", "x86_64"),
+            format!(
+                "download v{} for freebsd-x86_64 from https://github.com/{}/releases and put it \
+                 on PATH",
+                b.version, b.repo
+            )
+        );
     }
 }
 
@@ -117,218 +186,197 @@ fn the_printed_winget_command_is_the_one_that_runs() {
 fn install_runs_the_pinned_command_for_each_os_and_arch() {
     for (os, arch) in PLATFORMS {
         let dir = Scratch::new("setup-install-each");
-        let mut ran = Vec::new();
-        let mut runner = |cmd: &Cmd, root: &Path| -> io::Result<bool> {
-            ran.push((cmd.clone(), root.to_path_buf()));
-            Ok(true)
+        let bin = dir.join("bin");
+        let mut ran: Vec<(String, PathBuf)> = Vec::new();
+        // Each download gets bytes that match no pin, so each install stops after its download.
+        let mut runner = |cmd: &Cmd, at: &Path, _: Output, _: Duration| -> io::Result<Ended> {
+            ran.push((cmd.to_string(), at.to_path_buf()));
+            if cmd.program == Program::Named("curl") {
+                std::fs::write(at.join(&cmd.args[2]), b"not a release")?;
+            }
+            exited(true, "", "")
+        };
+        let machine = Machine {
+            os,
+            arch,
+            ..linux(&bin, true)
         };
         let mut out = Printer::new(Vec::new(), false);
-        let installed = install_binaries(&mut out, BINARIES, os, arch, &dir, &mut runner);
-        assert_eq!(installed, vec![true; BINARIES.len()], "{os}-{arch}");
-        let expected: Vec<(Cmd, PathBuf)> = BINARIES
+        for b in BINARIES {
+            install::install_binary(&mut out, b, &machine, &dir, &mut runner);
+        }
+        let expected: Vec<(String, PathBuf)> = BINARIES
             .iter()
-            .map(|b| (expected_cmd(b, os, arch), dir.to_path_buf()))
+            .map(|b| {
+                if os == "windows" {
+                    (expected_winget(b), dir.to_path_buf())
+                } else {
+                    let asset = expected_asset(b, os, arch);
+                    let url = expected_url(b, &asset);
+                    let staging = format!(".xtask-setup-{}-{}", b.name, std::process::id());
+                    (format!("curl -sSfL -o {asset} {url}"), bin.join(staging))
+                }
+            })
             .collect();
         assert_eq!(ran, expected, "{os}-{arch}");
     }
 }
 
-#[test]
-fn a_failed_install_names_the_command_as_the_fix() {
-    let dir = Scratch::new("setup-install-exit");
-    let gitleaks = binary("gitleaks");
-    let text = install_command(gitleaks, "macos", "aarch64");
-    let mut runner = |_: &Cmd, _: &Path| -> io::Result<bool> { Ok(false) };
-    let mut out = Printer::new(Vec::new(), false);
-    let installed = install_binaries(
-        &mut out,
-        std::slice::from_ref(gitleaks),
-        "macos",
-        "aarch64",
-        &dir,
-        &mut runner,
-    );
-    assert_eq!(installed, [false]);
-    let printed = String::from_utf8(out.into_inner()).expect("utf-8");
-    assert_eq!(
-        printed,
-        format!(
-            "installing gitleaks 8.30.1: {text}\ninstalling gitleaks failed\n{}\n",
-            fix_for(&text)
-        )
-    );
-}
-
-#[test]
-fn a_command_that_cannot_start_names_the_command_as_the_fix() {
-    let dir = Scratch::new("setup-install-start");
-    let lefthook = binary("lefthook");
-    let text = install_command(lefthook, "linux", "x86_64");
-    let mut runner = |_: &Cmd, _: &Path| -> io::Result<bool> {
-        Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "No such file or directory",
-        ))
+/// What `run_with` ran, as shell-like text, for a tool whose `version` prints each entry of
+/// `versions` in turn (`None`: it cannot start).
+fn run_fake(
+    machine: &Machine<'_>,
+    tool: &Binary,
+    install: bool,
+    versions: &[Option<&str>],
+) -> (bool, Vec<String>, String) {
+    let mut ran = Vec::new();
+    let mut versions = versions.iter();
+    let mut runner = |cmd: &Cmd, at: &Path, _: Output, _: Duration| -> io::Result<Ended> {
+        ran.push(cmd.to_string());
+        match cmd.program {
+            Program::Named("curl") => std::fs::write(at.join(&cmd.args[2]), ASSET_BYTES)?,
+            Program::Named("faketool") => {
+                return match versions.next().expect("a version for each check") {
+                    Some(version) => exited(true, &format!("{version}\n"), ""),
+                    None => Err(io::Error::new(io::ErrorKind::NotFound, "not found")),
+                };
+            }
+            _ => {}
+        }
+        exited(true, "", "")
     };
     let mut out = Printer::new(Vec::new(), false);
-    let installed = install_binaries(
+    let root = Path::new(".");
+    let ok = run_with(
         &mut out,
-        std::slice::from_ref(lefthook),
-        "linux",
-        "x86_64",
-        &dir,
+        machine,
+        TOOLS,
+        std::slice::from_ref(tool),
+        install,
+        root,
         &mut runner,
     );
-    assert_eq!(installed, [false]);
-    let printed = String::from_utf8(out.into_inner()).expect("utf-8");
-    assert_eq!(
-        printed,
-        format!(
-            "installing lefthook 2.2.1: {text}\n\
-                 could not start sh to install lefthook: No such file or directory\n{}\n",
-            fix_for(&text)
-        )
-    );
+    let printed = String::from_utf8(out.into_inner()).unwrap();
+    (ok, ran, printed)
 }
 
-#[test]
-fn a_platform_with_no_release_runs_nothing_and_fails_with_the_download_text() {
-    let dir = Scratch::new("setup-install-no-asset");
-    let mut calls = 0;
-    let mut runner = |_: &Cmd, _: &Path| -> io::Result<bool> {
-        calls += 1;
-        Ok(true)
-    };
-    let mut out = Printer::new(Vec::new(), false);
-    let installed = install_binaries(&mut out, BINARIES, "freebsd", "x86_64", &dir, &mut runner);
-    assert_eq!(installed, [false, false]);
-    assert_eq!(calls, 0);
-    let lines: Vec<String> = BINARIES
+/// The `cargo install` commands for `TOOLS`, which `run` runs first.
+fn cargo_installs() -> Vec<String> {
+    TOOLS
         .iter()
-        .map(|binary| {
-            let text = install_command(binary, "freebsd", "x86_64");
-            let message = "has no release for freebsd-x86_64, so it is not installed";
-            format!("{} {message}\n    fix: {text}\n", binary.name)
-        })
-        .collect();
-    let printed = String::from_utf8(out.into_inner()).expect("utf-8");
-    assert_eq!(printed, lines.concat());
+        .map(|t| format!("cargo install --locked {} --version {}", t.name, t.version))
+        .collect()
 }
 
 #[test]
-fn a_plain_setup_repeats_the_install_command_as_the_fix() {
-    let gitleaks = binary("gitleaks");
-    let install = install_command(gitleaks, "macos", "aarch64");
-    assert_eq!(
-        version_failure(
-            gitleaks,
-            &VersionCheck::Differs("8.21.0".into()),
-            &install,
-            false,
-            "macos",
+fn run_checks_the_version_after_the_install() {
+    let dir = Scratch::new("setup-run-installs");
+    let bin = dir.join("bin");
+    let tool = fake_tool(Packing::Bare);
+    let v = tool.version;
+    let (ok, ran, printed) = run_fake(&linux(&bin, true), &tool, true, &[None, Some(v)]);
+    assert!(ok, "{printed}");
+    let asset = format!("faketool_{v}_linux_x86_64");
+    let url = format!("https://github.com/example/faketool/releases/download/v{v}/{asset}");
+    let mut expected = cargo_installs();
+    expected.extend([
+        "faketool version".to_owned(),
+        format!("curl -sSfL -o {asset} {url}"),
+        "faketool version".to_owned(),
+    ]);
+    assert_eq!(ran, expected);
+    assert_eq!(std::fs::read(bin.join("faketool")).unwrap(), ASSET_BYTES);
+    assert!(printed.ends_with(&format!(
+        "installed faketool {v} to {}: its sha256 matches the pin\nfaketool version {v} ok\n\
+         hooks: run `lefthook install` once per clone to turn on the pre-commit and pre-push \
+         hooks\n",
+        bin.display()
+    )));
+}
+
+#[test]
+fn a_second_run_on_a_warm_machine_installs_nothing() {
+    let dir = Scratch::new("setup-run-warm");
+    let bin = dir.join("bin");
+    let tool = fake_tool(Packing::TarGz);
+    for os in ["linux", "windows"] {
+        let machine = Machine {
+            os,
+            ..linux(&bin, true)
+        };
+        let (ok, ran, printed) = run_fake(&machine, &tool, true, &[Some(tool.version)]);
+        assert!(ok, "{printed}");
+        let mut expected = cargo_installs();
+        expected.push("faketool version".to_owned());
+        assert_eq!(ran, expected, "{os}");
+        assert!(!bin.exists(), "{os}: nothing was written");
+    }
+}
+
+#[test]
+fn an_install_whose_bin_is_not_on_path_says_to_put_it_there() {
+    let dir = Scratch::new("setup-run-off-path");
+    let bin = dir.join("bin");
+    let tool = fake_tool(Packing::Bare);
+    let (ok, ran, printed) = run_fake(&linux(&bin, false), &tool, true, &[None, None]);
+    assert!(!ok);
+    assert_eq!(ran.last().map(String::as_str), Some("faketool version"));
+    let shown = bin.display();
+    assert!(
+        printed.contains(&format!(
+            "faketool was installed, but this shell cannot run it (`faketool version` could not \
+             start: not found)\n    fix: faketool was installed to {shown}, which is not on PATH: \
+             put {shown} on PATH (in your shell profile, for every new shell), then run cargo \
+             xtask setup again\n"
+        )),
+        "{printed}"
+    );
+}
+
+#[test]
+fn a_plain_setup_checks_the_version_and_installs_nothing() {
+    let dir = Scratch::new("setup-run-plain");
+    let bin = dir.join("bin");
+    let tool = fake_tool(Packing::Bare);
+    let (ok, ran, printed) = run_fake(&linux(&bin, true), &tool, false, &[None]);
+    assert!(!ok);
+    let mut expected = cargo_installs();
+    expected.push("faketool version".to_owned());
+    assert_eq!(ran, expected);
+    assert!(!bin.exists());
+    let how = install::how_to_install(&tool, "linux", "x86_64");
+    assert!(printed.contains(&format!(
+        "faketool is not installed (`faketool version` could not start: not found)\n    fix: \
+         {how}\n"
+    )));
+}
+
+#[test]
+fn a_version_check_that_hangs_or_cannot_run_is_a_failed_run_not_a_missing_binary() {
+    let tool = fake_tool(Packing::Bare);
+    let cases: [(io::Result<Ended>, &str); 3] = [
+        (Ok(Ended::TimedOut), "it did not finish within 30 s"),
+        (
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Permission denied",
+            )),
+            "Permission denied",
         ),
-        Some((
-            "gitleaks version is 8.21.0, the pin is 8.30.1".into(),
-            format!("run `{install}`"),
-        ))
-    );
-}
-
-#[test]
-fn after_an_install_a_mismatch_names_where_it_went_and_the_likely_cause() {
-    let gitleaks = binary("gitleaks");
-    let install = install_command(gitleaks, "macos", "aarch64");
-    let found = VersionCheck::Differs("8.21.0".into());
-    assert_eq!(
-        version_failure(gitleaks, &found, &install, true, "macos"),
-        Some((
-            "gitleaks version is 8.21.0, the pin is 8.30.1".into(),
-            "gitleaks was installed to $CARGO_HOME/bin, or ~/.cargo/bin without CARGO_HOME, \
-             but this shell does not run that copy. Another copy earlier on PATH, or a PATH \
-             not yet refreshed, is the likely cause: run `which -a gitleaks` to list the \
-             copies, or open a new shell and run cargo xtask setup again"
-                .into(),
-        ))
-    );
-    assert_eq!(
-        version_failure(gitleaks, &found, &install, true, "windows"),
-        Some((
-            "gitleaks version is 8.21.0, the pin is 8.30.1".into(),
-            "gitleaks was installed to winget's Links folder, usually \
-             %LOCALAPPDATA%\\Microsoft\\WinGet\\Links, but this shell does not run that copy. \
-             Another copy earlier on PATH, or a PATH not yet refreshed, is the likely cause: \
-             run `where gitleaks` to list the copies, or open a new shell and run cargo xtask \
-             setup again"
-                .into(),
-        ))
-    );
-}
-
-#[test]
-fn after_an_install_a_missing_binary_is_installed_but_not_run() {
-    let lefthook = binary("lefthook");
-    let install = install_command(lefthook, "linux", "x86_64");
-    let why = "`lefthook version` could not start: No such file or directory";
-    assert_eq!(
-        version_failure(
-            lefthook,
-            &VersionCheck::Missing(why.into()),
-            &install,
-            true,
-            "linux",
+        (
+            Err(io::Error::new(io::ErrorKind::NotFound, "not found")),
+            "",
         ),
-        Some((
-            format!("lefthook was installed, but this shell cannot run it ({why})"),
-            "lefthook was installed to $CARGO_HOME/bin, or ~/.cargo/bin without CARGO_HOME, \
-             but this shell does not run that copy. Another copy earlier on PATH, or a PATH \
-             not yet refreshed, is the likely cause: run `which -a lefthook` to list the \
-             copies, or open a new shell and run cargo xtask setup again"
-                .into(),
-        ))
-    );
-    assert_eq!(
-        version_failure(
-            lefthook,
-            &VersionCheck::Missing(why.into()),
-            &install,
-            false,
-            "linux",
-        ),
-        Some((
-            format!("lefthook is not installed ({why})"),
-            format!("run `{install}`"),
-        ))
-    );
-}
-
-#[test]
-fn a_binary_that_broke_after_an_install_is_reinstalled_as_before() {
-    let gitleaks = binary("gitleaks");
-    let install = install_command(gitleaks, "linux", "x86_64");
-    let broken = VersionCheck::Broken(String::new());
-    assert_eq!(
-        version_failure(gitleaks, &broken, &install, true, "linux"),
-        Some((
-            "gitleaks is installed, but `gitleaks version` failed: no output".into(),
-            format!("reinstall it: run `{install}`"),
-        ))
-    );
-}
-
-#[test]
-fn a_matching_version_has_no_failure_either_way() {
-    let gitleaks = binary("gitleaks");
-    let install = install_command(gitleaks, "linux", "x86_64");
-    for installed_now in [false, true] {
-        assert_eq!(
-            version_failure(
-                gitleaks,
-                &VersionCheck::Matches,
-                &install,
-                installed_now,
-                "linux",
-            ),
-            None
-        );
+    ];
+    for (ended, said) in cases {
+        let mut ended = Some(ended);
+        let mut runner = |_: &Cmd, _: &Path, _: Output, _: Duration| ended.take().unwrap();
+        let expected = if said.is_empty() {
+            VersionCheck::Missing("`faketool version` could not start: not found".into())
+        } else {
+            VersionCheck::Broken(said.into())
+        };
+        assert_eq!(check_version(&tool, Path::new("."), &mut runner), expected);
     }
 }
