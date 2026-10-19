@@ -75,7 +75,7 @@ to write instead.
 | `process` | Spawning, graceful shutdown, process-tree kill, restart supervisor, the `Launcher` trait | protocol, async-process | tauri | planned |
 | `acp` | Wrapper over `agent-client-protocol` | protocol, agent-client-protocol | tauri, tokio | planned |
 | `host` | Own thread and executor: sessions, commands, permissions, subscriptions, checkpoints per turn | protocol, reducer, store, matters, process, acp, settings | tauri, tokio, agents | planned |
-| `fake_agent` | Scripted ACP agent for tests | agent-client-protocol | | planned |
+| `fake_agent` | Scripted ACP agent for tests | agent-client-protocol, serde, serde_json | | exists |
 | `cli` | Headless client for agents and CI | host, settings | tauri | planned |
 | `transport_ws` | Dev and test only WebSocket transport, random token | host | tauri | planned |
 | `sandbox` | Policy model, tier detection, per-OS launchers, per-matter agent state folders, egress proxy, denial events | protocol, process | tauri | planned |
