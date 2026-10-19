@@ -53,10 +53,6 @@ here and adds the rule to "Rules the checks enforce" in `AGENTS.md`.
   and watch it fail.
   Replaced by: mutation testing of the diff with cargo-mutants.
   Why: a launch check and a compiler test passed with the thing they guard removed (PR #8).
-- A check that finds nothing to inspect fails; it never passes quietly.
-  Replaced by: the check runner failing any check that inspected nothing.
-  Why: the plugins check would have found nothing and passed if `crates/desktop` moved or was
-  renamed (PR #8).
 - Only buildtime edits a tracked file today. Its guard is `xtask/src/buildtime/probe/guard.rs` in
   Rust and `ui/app/scripts/buildtime-lib.mjs` in scripts. The next tool that needs to edit a tracked
   file moves the guard out of buildtime instead of copying it, and never writes a second guard.
@@ -69,12 +65,6 @@ here and adds the rule to "Rules the checks enforce" in `AGENTS.md`.
   Replaced by: a process API in `xtask/src/process.rs` that cannot start a child without a timeout
   and always kills the whole tree.
   Why: it took three rounds in PR #8 to stop tsc's native binary and Vite.
-- When a file you touch passes 500 lines, split it in the same pull request. The cap is 600.
-  Replaced by: a note from the `file-size` check on each changed file past 500 lines.
-  Why: review asked for splits at 509 to 561 lines four times (PR #5, PR #6, PR #8).
-- Wrap comments and doc comments at 100 columns. rustfmt does not wrap them.
-  Replaced by: the `file-size` check failing any Rust comment past column 100.
-  Why: long doc lines came back in three rounds of PR #8.
 - Tests never touch the network.
   Replaced by: CI running the tests with the network cut off.
   Why: `cargo test -p xtask` quietly downloaded crates (PR #8).
