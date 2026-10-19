@@ -1,7 +1,8 @@
 # Code owners for clauseo-ai/clauseo-acp.
 #
-# Only the core crates and the CLA paths have an owner. Everything else has none: one approval from
-# anyone other than the author is enough. GitHub never counts an author's own approval.
+# The core crates, the CLA paths, CI and the policy files have an owner. Everything else has none:
+# one approval from anyone other than the author is enough. GitHub never counts an author's own
+# approval.
 #
 # A change to a core crate also needs the code owner's approval.
 # The egress proxy lives in crates/sandbox, so that line covers it.
@@ -18,3 +19,24 @@
 /CLA.md               @ro-hansolo
 /cla/entities/        @ro-hansolo
 /.github/             @ro-hansolo
+
+# Policy: the files that set lints, bans, budgets, hooks, the toolchain, formatting and webview
+# permissions, and xtask, whose checks are that policy in code. A change here needs the code
+# owner's approval even when another reviewer has approved the pull request.
+/xtask/                              @ro-hansolo
+/clippy.toml                         @ro-hansolo
+/deny.toml                           @ro-hansolo
+/budgets.toml                        @ro-hansolo
+/lefthook.yml                        @ro-hansolo
+/.config/                            @ro-hansolo
+/.cargo/                             @ro-hansolo
+/rust-toolchain.toml                 @ro-hansolo
+/rustfmt.toml                        @ro-hansolo
+/taplo.toml                          @ro-hansolo
+/_typos.toml                         @ro-hansolo
+/.gitleaks.toml                      @ro-hansolo
+/ui/pnpm-workspace.yaml              @ro-hansolo
+/ui/app/.oxlintrc.json               @ro-hansolo
+/ui/.oxfmtrc.json                    @ro-hansolo
+/crates/desktop/capabilities/        @ro-hansolo
+/crates/desktop/tauri.conf.json      @ro-hansolo
