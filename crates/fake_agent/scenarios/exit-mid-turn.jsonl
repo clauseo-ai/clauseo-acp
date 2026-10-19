@@ -1,0 +1,6 @@
+{"scenario":"exit-mid-turn","description":"One prompt, one chunk, 200 stderr lines of 40 bytes (past a 4 KiB tail), then exit 1","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Starting on the answer."}}}}
+{"stderr":{"line":"fake_agent exit-mid-turn stderr filler.","repeat":200}}
+{"exit":{"code":1}}
