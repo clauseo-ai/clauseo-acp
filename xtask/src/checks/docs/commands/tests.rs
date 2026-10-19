@@ -134,7 +134,7 @@ fn a_backslash_continues_a_code_line_onto_the_next() {
         },
     ];
     assert_eq!(
-        logical_lines(&lines),
+        logical_lines(&lines, false),
         [
             (7, "cargo xtask check --frobnicate".to_owned()),
             (9, "echo done".to_owned()),
@@ -338,14 +338,8 @@ fn a_session_line_is_read_from_after_its_prompt_and_output_is_not() {
         after_prompt("  % cargo xtask check"),
         Some("cargo xtask check")
     );
-    assert_eq!(
-        after_prompt("# cargo xtask check"),
-        Some("cargo xtask check")
-    );
-    assert_eq!(
-        after_prompt("> cargo xtask check"),
-        Some("cargo xtask check")
-    );
+    assert_eq!(after_prompt("# then run cargo xtask check again"), None);
+    assert_eq!(after_prompt("> cargo xtask check passes now"), None);
     assert_eq!(
         after_prompt("PS> cargo xtask check"),
         Some("cargo xtask check")
@@ -358,4 +352,55 @@ fn a_session_line_is_read_from_after_its_prompt_and_output_is_not() {
     assert!(is_one_of("Console", &SESSIONS));
     assert!(is_one_of("PWSH", &SHELLS));
     assert!(!is_one_of("rust", &SHELLS));
+}
+
+#[test]
+fn a_plain_block_reads_only_a_line_that_starts_with_the_command() {
+    assert_eq!(
+        Reading::Plain.text("cargo xtask check"),
+        Some("cargo xtask check")
+    );
+    assert_eq!(
+        Reading::Plain.text("$ cargo xtask check"),
+        Some("cargo xtask check")
+    );
+    assert_eq!(
+        Reading::Plain.text("% cargo +nightly xtask check"),
+        Some("cargo +nightly xtask check")
+    );
+    assert_eq!(
+        Reading::Plain.text("error: run cargo xtask setup first"),
+        None
+    );
+    assert_eq!(
+        Reading::Plain.text("Run cargo xtask to see the commands."),
+        None
+    );
+    assert_eq!(Reading::Plain.text("sudo cargo xtask check"), None);
+    assert_eq!(
+        Reading::Shell.text("sudo cargo xtask check"),
+        Some("sudo cargo xtask check")
+    );
+    assert_eq!(Reading::of(""), Reading::Plain);
+    assert_eq!(Reading::of("Terminal"), Reading::Session);
+    assert_eq!(Reading::of("bash"), Reading::Shell);
+    assert_eq!(Reading::of("rust"), Reading::Skip);
+}
+
+#[test]
+fn a_continued_session_line_drops_its_continuation_prompt() {
+    let line = |line, text: &str| CodeLine {
+        line,
+        text: text.to_owned(),
+        block: 0,
+        info: "console".to_owned(),
+    };
+    assert_eq!(
+        logical_lines(&[line(1, "$ cargo xtask \\"), line(2, "> check")], true),
+        [(1, "$ cargo xtask check".to_owned())]
+    );
+    assert_eq!(
+        logical_lines(&[line(1, "cargo xtask \\"), line(2, "> out")], false),
+        [(1, "cargo xtask > out".to_owned())]
+    );
 }

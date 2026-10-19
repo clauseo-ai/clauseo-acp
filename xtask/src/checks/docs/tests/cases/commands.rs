@@ -282,3 +282,33 @@ pub(crate) fn prose_in_code_blocks_passes() -> Inspection {
         )],
     )
 }
+
+/// The reviewer's later false failures: a `# ` comment and a `> ` quoted line in a console
+/// block, and output and prose in no-info and indented blocks.
+pub(crate) fn output_and_comments_in_sessions_and_plain_blocks_pass() -> Inspection {
+    docs(
+        "session-and-plain-prose",
+        vec![(
+            "GUIDE.md",
+            "```console\n# then run cargo xtask check again\n> cargo xtask check passes now\n```\n\n\
+             ```\nRun cargo xtask to see the commands.\n```\n\n\
+             ```\n$ cargo xtask check\nerror: run cargo xtask setup first\n```\n\n\
+             Output:\n\n    error: run cargo xtask setup first\n"
+                .to_owned(),
+        )],
+    )
+}
+
+/// A continued session line: `$ cargo xtask \\` then `> check` reads as `cargo xtask check`
+/// and passes; the same with `> frobnicate` fails at the first line.
+pub(crate) fn continued_session_line() -> Inspection {
+    docs(
+        "continued-session",
+        vec![(
+            "GUIDE.md",
+            "```console\n$ cargo xtask \\\n> check\n```\n\n\
+             ```terminal\n$ cargo xtask \\\n> frobnicate\n```\n"
+                .to_owned(),
+        )],
+    )
+}

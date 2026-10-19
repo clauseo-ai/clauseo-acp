@@ -347,6 +347,15 @@ crate::checks::planted::cases! {
     /// Only shell blocks (no info string, or a shell one) and the prompted lines of session blocks
     /// are read: the reviewer's prose lines in rust, console output, markdown and yaml pass.
     prose_in_code_blocks_passes: Passes, inspects 4 => super::cases::prose_in_code_blocks_passes,
+    /// A `# ` comment and a `> ` quoted line in a console block, and output and prose in no-info
+    /// and indented blocks, are not commands.
+    output_and_comments_in_sessions_and_plain_blocks_pass: Passes,
+        inspects 4 => super::cases::output_and_comments_in_sessions_and_plain_blocks_pass,
+    /// A prompted line ending in `\\` continues onto the next, its `> ` cut: `check` passes,
+    /// `frobnicate` (in a `terminal` block) fails at the prompted line.
+    continued_session_line: FailsWith(&[
+        bad_command!(7, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]), inspects 4 => super::cases::continued_session_line,
     /// A command run in the background: the `&` is shell syntax, not an argument.
     background_command_passes: Passes, inspects 4 => super::cases::background_command_passes,
     /// A `text` or `text,ignore` block holds output, so a failing command shown in it is not read.

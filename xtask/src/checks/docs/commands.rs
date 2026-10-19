@@ -7,17 +7,19 @@
 //! the clap tree in `main.rs`. A part that holds `cargo xtask` but that `shlex` cannot split (a
 //! quote left open) fails.
 //!
-//! What is read: every inline code span, whole; every line of a code block with no info string or
-//! a shell one (`SHELLS`); and in a session block (`SESSIONS`), only a line that starts with a
-//! prompt (`$ `, `% `, `# `, `> `, `PS> `, `PS <path>> `), from after the prompt, since the
-//! other lines are output. A block with any other info string (`rust`, `yaml`, `md`, `text`, ...)
-//! holds code or prose in which `cargo xtask` is a mention, and is not read. The info string's
-//! first word, cut at `,` or whitespace, is matched in any case.
+//! What is read, by where the text is:
+//! - an inline code span: the whole span, `cargo xtask` found anywhere in its words;
+//! - a code block with a shell info word (`SHELLS`): every line, found anywhere;
+//! - a code block with no info string, or an indented one: a line that starts (after an optional
+//!   `$ ` or `% ` prompt) with `cargo [+toolchain] xtask`, since such a block holds output and
+//!   prose as often as commands;
+//! - a session block (`SESSIONS`): a line that starts with a prompt (`PROMPTS`, or
+//!   `PS <path>> `), from after the prompt; the other lines are output. A prompted line that ends
+//!   in `\` continues onto the next, with that line's `> ` continuation prompt cut.
 //!
-//! A span that is exactly `cargo xtask` names the tool in prose and is not read. A `<...>` word
-//! (`<command>`) or a `...` word is a placeholder: in the subcommand's place the command is not
-//! read; elsewhere the words before it are parsed, and an error that only says a word is missing
-//! is not one, since the placeholder stands for that word.
+//! A block with any other info string (`rust`, `yaml`, `md`, `text`, ...) holds code or prose
+//! in which `cargo xtask` is a mention, and is not read. The info string's first word, cut at `,`
+//! or whitespace, is matched in any case.
 
 use super::markdown::{CodeLine, Scan};
 use crate::Cli;
@@ -65,8 +67,9 @@ const SHELLS: [&str; 10] = [
 ];
 
 /// The info words of a code block that shows a shell session: prompted commands and their output.
-const SESSIONS: [&str; 5] = [
+const SESSIONS: [&str; 6] = [
     "console",
+    "terminal",
     "shell-session",
     "sh-session",
     "pwsh-session",
@@ -74,7 +77,61 @@ const SESSIONS: [&str; 5] = [
 ];
 
 /// The prompts a session line starts with. `PS <path>> ` is read apart (see `after_prompt`).
-const PROMPTS: [&str; 5] = ["$ ", "% ", "# ", "> ", "PS> "];
+/// `# ` and `> ` are not prompts: in a session they start a comment or a quoted output line as
+/// often.
+const PROMPTS: [&str; 3] = ["$ ", "% ", "PS> "];
+
+/// The prompts a line of a block with no info string may start with.
+const PLAIN_PROMPTS: [&str; 2] = ["$ ", "% "];
+
+/// The prompt a continued session line starts with, cut before the lines are joined.
+const CONTINUATION: &str = "> ";
+
+/// How the command rule reads a code block, by its info word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reading {
+    /// A shell block: every line, `cargo xtask` found anywhere.
+    Shell,
+    /// A session block: prompted lines only, from after the prompt.
+    Session,
+    /// No info string: lines that start with `cargo [+toolchain] xtask`, after a prompt.
+    Plain,
+    /// Any other info string: not read.
+    Skip,
+}
+
+impl Reading {
+    /// The reading of a block whose info word is `info` (empty when it has none).
+    fn of(info: &str) -> Reading {
+        if info.is_empty() {
+            Reading::Plain
+        } else if is_one_of(info, &SHELLS) {
+            Reading::Shell
+        } else if is_one_of(info, &SESSIONS) {
+            Reading::Session
+        } else {
+            Reading::Skip
+        }
+    }
+
+    /// The text of a logical line this reading reads, or `None` when it does not read it.
+    fn text(self, line: &str) -> Option<&str> {
+        match self {
+            Reading::Shell => Some(line),
+            Reading::Session => after_prompt(line),
+            Reading::Plain => {
+                let line = line.trim_start();
+                let rest = PLAIN_PROMPTS
+                    .iter()
+                    .find_map(|prompt| line.strip_prefix(prompt))
+                    .unwrap_or(line);
+                let words: Vec<&str> = rest.split_whitespace().take(3).collect();
+                (words.first() == Some(&"cargo") && xtask_at(&words).is_some()).then_some(rest)
+            }
+            Reading::Skip => None,
+        }
+    }
+}
 
 /// The span that names the tool in prose, not a command to run.
 const TOOL: &str = "cargo xtask";
@@ -103,18 +160,11 @@ pub(super) fn problems(file: &str, scan: &Scan) -> Vec<Violation> {
         .code
         .chunk_by(|a, b| a.block == b.block)
         .flat_map(|block| {
-            let info = block.first().map_or("", |line| line.info.as_str());
-            let session = is_one_of(info, &SESSIONS);
-            let read = session || info.is_empty() || is_one_of(info, &SHELLS);
-            logical_lines(if read { block } else { &[] })
+            let reading = Reading::of(block.first().map_or("", |line| line.info.as_str()));
+            let read = if reading == Reading::Skip { &[] } else { block };
+            logical_lines(read, reading == Reading::Session)
                 .into_iter()
-                .filter_map(move |(line, text)| {
-                    if session {
-                        after_prompt(&text).map(|rest| (line, rest.to_owned()))
-                    } else {
-                        Some((line, text))
-                    }
-                })
+                .filter_map(move |(line, text)| Some((line, reading.text(&text)?.to_owned())))
         });
     spans
         .chain(code)
@@ -160,12 +210,16 @@ fn after_prompt(text: &str) -> Option<&str> {
 }
 
 /// The lines of one code block as logical lines: a line ending in a backslash continues onto the
-/// next, and the pair is one line, with the first line's number.
-fn logical_lines(lines: &[CodeLine]) -> Vec<(u32, String)> {
+/// next, and the pair is one line, with the first line's number. With `session`, a continued
+/// line's `> ` prompt is cut first.
+fn logical_lines(lines: &[CodeLine], session: bool) -> Vec<(u32, String)> {
     let mut logical = Vec::new();
     let mut open: Option<(u32, String)> = None;
     for line in lines {
-        let text = line.text.trim();
+        let mut text = line.text.trim();
+        if session && open.is_some() {
+            text = text.strip_prefix(CONTINUATION).unwrap_or(text).trim_start();
+        }
         let (body, continues) = text
             .strip_suffix('\\')
             .map_or((text, false), |body| (body.trim_end(), true));
