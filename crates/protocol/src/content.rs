@@ -63,6 +63,7 @@ pub enum ContentBlock {
         /// Its size in bytes, at most [`MAX_SAFE`](crate::MAX_SAFE).
         #[serde(skip_serializing_if = "Option::is_none", default)]
         #[cfg_attr(feature = "specta", specta(type = Option<u32>))]
+        #[serde(with = "crate::number::safe_opt")]
         size: Option<u64>,
     },
     /// A resource embedded in the message: its text or its base64 bytes.
@@ -175,7 +176,7 @@ struct ResourceLinkData {
     title: Option<String>,
     #[serde(default)]
     description: Option<String>,
-    #[serde(default)]
+    #[serde(default, with = "crate::number::safe_opt")]
     size: Option<u64>,
 }
 

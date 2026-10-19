@@ -60,10 +60,12 @@ pub struct ContextUsage {
     /// Tokens in the context, at most [`MAX_SAFE`](crate::MAX_SAFE).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[cfg_attr(feature = "specta", specta(type = Option<u32>))]
+    #[serde(with = "crate::number::safe_opt")]
     pub context_used: Option<u64>,
     /// The context window's size in tokens, at most [`MAX_SAFE`](crate::MAX_SAFE).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[cfg_attr(feature = "specta", specta(type = Option<u32>))]
+    #[serde(with = "crate::number::safe_opt")]
     pub context_size: Option<u64>,
     /// The session's cost so far.
     #[serde(skip_serializing_if = "Option::is_none", default)]

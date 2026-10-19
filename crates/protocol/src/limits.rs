@@ -185,7 +185,7 @@ enum_with_all! {
             updated_at: Timestamp = Timestamp::ZERO,
         },
         /// A state from a newer Clauseo; written back as the plain string `kind`.
-        #[serde(untagged, serialize_with = "serialize_kind")]
+        #[serde(untagged, serialize_with = "serialize_kind::<LimitSource, _>")]
         #[cfg_attr(feature = "specta", specta(type = String))]
         Unknown {
             /// The state's key as read.

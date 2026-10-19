@@ -64,6 +64,20 @@ macro_rules! domain_events {
                     Self::Unknown { kind, .. } => kind,
                 }
             }
+
+            /// True for the kinds logged in a matter's stream (`matter_created`,
+            /// `checkpoint_recorded`, `outside_edits`, `version_restored`); every other kind,
+            /// `Unknown` included, belongs to a thread's stream (QR5.1). The host checks it
+            /// against the envelope's `StreamId` before committing.
+            pub const fn is_matter_level(&self) -> bool {
+                matches!(
+                    self,
+                    Self::MatterCreated(_)
+                        | Self::CheckpointRecorded(_)
+                        | Self::OutsideEdits(_)
+                        | Self::VersionRestored(_)
+                )
+            }
         }
 
         $(
@@ -78,7 +92,14 @@ macro_rules! domain_events {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
                 match self {
                     $(Self::$variant(payload) => serialize_one_key(serializer, $kind, payload),)+
-                    Self::Unknown { kind, payload } => serialize_one_key(serializer, kind, payload),
+                    Self::Unknown { kind, payload } => {
+                        if Kind::from_key(kind).is_some() {
+                            return Err(serde::ser::Error::custom(format_args!(
+                                "DomainEvent::Unknown under the known kind {kind:?}"
+                            )));
+                        }
+                        serialize_one_key(serializer, kind, payload)
+                    }
                 }
             }
         }
@@ -211,3 +232,18 @@ domain_events! {
     /// An earlier version was restored (matter stream; host, matters).
     VersionRestored(VersionRestored) = "version_restored",
 }
+
+// The boxed variants also convert from the bare payload, so a caller never boxes by hand.
+macro_rules! from_unboxed {
+    ($($variant:ident),+) => {
+        $(
+            impl From<$variant> for DomainEvent {
+                fn from(payload: $variant) -> Self {
+                    Self::$variant(Box::new(payload))
+                }
+            }
+        )+
+    };
+}
+
+from_unboxed!(ContentAppended, ToolCallStarted, ToolCallUpdated);

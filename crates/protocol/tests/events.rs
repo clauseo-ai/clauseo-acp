@@ -13,6 +13,10 @@ pub mod examples;
 #[path = "events/unknown_variants.rs"]
 mod unknown_variants;
 
+#[cfg(test)]
+#[path = "events/rules.rs"]
+mod rules;
+
 use clauseo_protocol::{
     DomainEvent, ElicitationRequest, ElicitationRequested, Envelope, PromptBlock, RawPayload,
     SCHEMA_VERSION, StopReason, StreamId, ToolCallStarted, TurnEnded, TurnStarted,

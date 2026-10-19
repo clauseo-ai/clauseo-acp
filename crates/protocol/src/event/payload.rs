@@ -285,10 +285,12 @@ pub struct UsageUpdated {
     /// Tokens in the context now.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[cfg_attr(feature = "specta", specta(type = Option<u32>))]
+    #[serde(with = "crate::number::safe_opt")]
     pub context_used: Option<u64>,
     /// The context's size in tokens.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[cfg_attr(feature = "specta", specta(type = Option<u32>))]
+    #[serde(with = "crate::number::safe_opt")]
     pub context_size: Option<u64>,
     /// The session's cost so far, shown only to pay-as-you-go accounts.
     #[serde(skip_serializing_if = "Option::is_none", default)]

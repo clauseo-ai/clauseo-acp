@@ -9,7 +9,8 @@
 //!   one pass: a string becomes a unit variant or `Unknown`; a map's key is matched as a borrowed
 //!   `&str` and its payload decoded straight into its type; an unknown key becomes `Unknown`.
 //!   Their `Serialize` is derived, with the `Unknown { kind }` variant marked
-//!   `#[serde(untagged, serialize_with = "serialize_kind")]` so it writes back the plain string.
+//!   `#[serde(untagged, serialize_with = "serialize_kind::<TheEnum, _>")]` so it writes back the
+//!   plain string (and refuses a kind the type knows).
 //!   [`enum_with_all!`] writes such an enum with its `ALL` and `variant_name` from one list.
 
 use std::borrow::Cow;
@@ -110,8 +111,19 @@ macro_rules! enum_with_all {
 pub(crate) use enum_with_all;
 
 /// Writes an unknown variant's kind back as a plain string. Use it as the
-/// `#[serde(untagged, serialize_with = "...")]` of a derived `Unknown { kind }` variant.
-pub(crate) fn serialize_kind<S: Serializer>(kind: &str, serializer: S) -> Result<S::Ok, S::Error> {
+/// `#[serde(untagged, serialize_with = "serialize_kind::<TheEnum, _>")]` of a derived
+/// `Unknown { kind }` variant. A kind `T` knows (a unit or a data kind) is an error: written,
+/// it would decode as that variant, or fail to decode at all.
+pub(crate) fn serialize_kind<T: OpenDataEnum, S: Serializer>(
+    kind: &str,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    if T::DATA_KINDS.contains(&kind) || T::unit(kind).is_some() {
+        return Err(serde::ser::Error::custom(format_args!(
+            "{}: Unknown under the known kind {kind:?}",
+            T::EXPECTING
+        )));
+    }
     serializer.serialize_str(kind)
 }
 
