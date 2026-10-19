@@ -159,7 +159,7 @@ struct SpawnChildBody {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ExitBody {
-    code: i32,
+    code: i64,
 }
 
 /// A step after parsing, with the `raw` flag that only the static checks read.
@@ -245,9 +245,14 @@ pub(super) fn step(value: Value) -> Result<Body, String> {
         "spawn_child" => StepKind::SpawnChild {
             pid_file: body::<SpawnChildBody>(&key, value)?.pid_file,
         },
-        "exit" => StepKind::Exit {
-            code: body::<ExitBody>(&key, value)?.code,
-        },
+        "exit" => {
+            let code = body::<ExitBody>(&key, value)?.code;
+            // Unix keeps only the low 8 bits of an exit code, so refuse what it would change.
+            match i32::try_from(code) {
+                Ok(code) if (0..=255).contains(&code) => StepKind::Exit { code },
+                _ => return Err(format!("exit: code {code} is outside 0..=255")),
+            }
+        }
         "include" => {
             return Ok(Body {
                 kind: Parsed::Include(body(&key, value)?),

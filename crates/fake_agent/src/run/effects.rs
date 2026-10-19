@@ -14,7 +14,7 @@ pub(super) fn write_stderr(text: &str) -> std::io::Result<()> {
 
 /// Writes `line` to stderr `repeat` times, in one write.
 pub(super) fn stderr_step(line: &str, repeat: u32) -> std::io::Result<()> {
-    let mut text = String::with_capacity((line.len() + 1) * repeat as usize);
+    let mut text = String::with_capacity((line.len() + 1).saturating_mul(repeat as usize));
     for _ in 0..repeat {
         text.push_str(line);
         text.push('\n');
