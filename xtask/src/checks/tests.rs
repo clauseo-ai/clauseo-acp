@@ -248,6 +248,24 @@ fn a_count_above_zero_passes_unless_there_are_violations_and_notes_never_fail() 
     assert_eq!(report.counted, "2 capability files inspected");
 }
 
+/// A failure in `inspection.failures` fails the report even when nothing is a violation and
+/// something was inspected, so a check that reports a failure after looking still fails.
+#[test]
+fn a_failure_with_no_violation_and_something_inspected_fails_the_report() {
+    let check = fake(|_| Inspection {
+        inspected: 1,
+        failures: vec![Failure {
+            message: "could not list the repo's files".to_owned(),
+            fix: "install git".to_owned(),
+        }],
+        ..Inspection::default()
+    });
+    let report = check.report(&desktop_context(Path::new("/ws")));
+    assert_eq!(report.inspection.violations, Vec::new());
+    assert_eq!(report.nothing_inspected, None);
+    assert!(report.failed());
+}
+
 #[test]
 fn a_git_that_cannot_start_says_so_and_tells_to_install_it() {
     let error = GitError::NotStarted("No such file or directory (os error 2)".to_owned());
