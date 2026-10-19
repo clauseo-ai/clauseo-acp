@@ -13,7 +13,7 @@ workspace = true
 clap = { version = "4", features = ["derive"] }
 # The docs check reads Markdown with it: code spans, links, reference definitions, code blocks.
 pulldown-cmark = { version = "0.13.4", default-features = false }
-# The core-io check: `span-locations` gives real line numbers to the tokens syn parses.
+# The tauri-config check: `span-locations` gives the line of a syntax error in build.rs.
 proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
@@ -21,6 +21,6 @@ serde_json.workspace = true
 sha2 = "0.10.9"
 # The docs check splits the `cargo xtask` commands in the docs into words as a shell does.
 shlex = "2.0.1"
-# The core-io check parses the Rust sources of the crates that must not do I/O.
-syn = { version = "3.0.9", features = ["full", "visit"] }
+# The tauri-config check parses `crates/desktop/build.rs` before it reads its tokens.
+syn = { version = "3.0.9", features = ["full"] }
 toml = "1"
