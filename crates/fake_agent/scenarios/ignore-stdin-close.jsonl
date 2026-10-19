@@ -1,0 +1,2 @@
+{"scenario":"ignore-stdin-close","description":"Handshake, then keeps running when stdin closes, so shutdown must escalate to SIGTERM","on_stdin_close":"hang"}
+{"include":"handshake.jsonl"}

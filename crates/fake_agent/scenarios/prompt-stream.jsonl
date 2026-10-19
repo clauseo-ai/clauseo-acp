@@ -1,0 +1,12 @@
+{"scenario":"prompt-stream","description":"One prompt: three thought chunks (m-thought-1), five answer chunks (m-answer-1), end_turn","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_thought_chunk","messageId":"m-thought-1","content":{"type":"text","text":"Reading the "}}}}
+{"update":{"update":{"sessionUpdate":"agent_thought_chunk","messageId":"m-thought-1","content":{"type":"text","text":"indemnity clause "}}}}
+{"update":{"update":{"sessionUpdate":"agent_thought_chunk","messageId":"m-thought-1","content":{"type":"text","text":"first."}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause "}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"caps liability "}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"at the fees "}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"paid in the "}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"last twelve months."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

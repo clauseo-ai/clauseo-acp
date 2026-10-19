@@ -1,0 +1,8 @@
+{"scenario":"permission-cancelled","description":"perm-1 is pending when the turn is cancelled: the client must answer it cancelled; a late update; then cancelled","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t-edit-1","title":"Edit brief.txt","name":"Edit","kind":"edit","status":"pending","locations":[{"path":"{{cwd}}/brief.txt"}]}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"t-edit-1","title":"Edit brief.txt","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"allow-always","name":"Always allow","kind":"allow_always"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"},{"optionId":"reject-always","name":"Always reject","kind":"reject_always"}]}}}
+{"note":"Either order: the cancel notification and the cancelled answer to perm-1.","all":[{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}},{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"cancelled"}}}}]}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t-edit-1","status":"failed"}}}
+{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}

@@ -1,0 +1,22 @@
+[package]
+name = "clauseo-fake_agent"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "fake_agent"
+path = "src/main.rs"
+
+# Only these four. `manifest_has_only_allowed_dependencies` reads this file and fails on any other
+# dependency (dev and build included) and on any feature turned on for agent-client-protocol.
+[dependencies]
+agent-client-protocol = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
