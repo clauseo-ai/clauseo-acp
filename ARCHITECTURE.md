@@ -80,11 +80,11 @@ plus components and bindings packages under `ui/` (planned). Nothing in `ui/` im
 outside `ui/app/src/transport/`.
 
 "fs", "process", "any I/O" and "clock" in the "Never depends on" column mean the standard
-library's APIs, not the `process` crate, and cover the crate's own code. In those crates
-`cargo xtask check` parses every `.rs` file under `src/` with `syn` and bans `std::fs`,
-`std::net`, `std::process`, `std::env`, `std::time::Instant::now` and
-`std::time::SystemTime::now`. Exceptions, one path per line with a reason, live in
-`xtask/core-io-exceptions.txt`.
+library's APIs, not the `process` crate, and cover the crate's own code. `cargo xtask check`
+parses every `.rs` file under the crate's `src/` with `syn`. "fs", "process" or "any I/O" bans
+`std::fs`, `std::net`, `std::process`, `std::env` (and their `std::os` counterparts),
+`std::time::Instant::now` and `std::time::SystemTime::now`; "clock" alone bans the two `now`
+functions. Exceptions, one path per line with a reason, live in `xtask/core-io-exceptions.txt`.
 
 ## Seams left open on purpose
 
