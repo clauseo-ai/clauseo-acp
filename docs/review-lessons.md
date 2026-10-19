@@ -57,10 +57,9 @@ here and adds the rule to "Rules the checks enforce" in `AGENTS.md`.
   Replaced by: the check runner failing any check that inspected nothing.
   Why: the plugins check would have found nothing and passed if `crates/desktop` moved or was
   renamed (PR #8).
-- Only buildtime edits a tracked file today, through its guard:
-  `xtask/src/buildtime/probe/guard.rs` in Rust, `ui/app/scripts/buildtime-lib.mjs` in scripts. The
-  next tool that needs to edit a tracked file moves the guard out of buildtime instead of copying
-  it, and never writes a second guard.
+- Only buildtime edits a tracked file today. Its guard is `xtask/src/buildtime/probe/guard.rs` in
+  Rust and `ui/app/scripts/buildtime-lib.mjs` in scripts. The next tool that needs to edit a tracked
+  file moves the guard out of buildtime instead of copying it, and never writes a second guard.
   Replaced by: clippy `disallowed-methods` and an oxlint import ban on file-writing calls outside
   the guard.
   Why: the second tool that edited a file repeated the defects the first had fixed (PR #6, PR #8).
