@@ -58,9 +58,11 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         one: "config file",
         many: "config files",
     },
-    place: "in the desktop crate (tauri.conf.json and build.rs)",
-    source: "xtask/src/checks/tauri_config.rs",
+    place: || format!("in the desktop crate ({TAURI_CONF} and {BUILD_RS})"),
+    source: file!(),
     run,
+    #[cfg(test)]
+    planted: &[],
 };
 
 fn run(ctx: &Context) -> Inspection {

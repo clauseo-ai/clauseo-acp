@@ -74,22 +74,27 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         one: "direct dependency",
         many: "direct dependencies",
     },
-    place: "of the desktop crate (package `clauseo-desktop`) in `cargo metadata`",
-    source: "xtask/src/checks/plugins.rs",
+    place: || {
+        format!(
+            "of the desktop crate (package `{}`) in `cargo metadata`",
+            checks::DESKTOP_PACKAGE
+        )
+    },
+    source: file!(),
     run,
+    #[cfg(test)]
+    planted: &[],
 };
 
 /// `--offline`: the check never downloads. `cargo xtask check` runs `deny` first, which fetches
-/// every target's crates; elsewhere a missing crate fails with `GRAPH_FIX`.
+/// every target's crates; elsewhere a missing crate fails with `GRAPH_FIX`. The resolved-graph
+/// rule runs only when `ctx.load_resolved_graph` allows it; `graph/tests.rs` covers it offline.
 fn run(ctx: &Context) -> Inspection {
-    check(ctx, Some(&["--locked", "--offline"]))
-}
-
-/// The check without the resolved-graph rule, for the real-repo test: that graph needs every
-/// target's crates downloaded, and tests use no network. `graph/tests.rs` covers the rule offline.
-#[cfg(test)]
-pub(crate) fn check_without_graph(ctx: &Context) -> Inspection {
-    check(ctx, None)
+    check(
+        ctx,
+        ctx.load_resolved_graph
+            .then_some(&["--locked", "--offline"][..]),
+    )
 }
 
 /// The check, reading the resolved graph with `cargo metadata <graph_flags>`, or skipping the

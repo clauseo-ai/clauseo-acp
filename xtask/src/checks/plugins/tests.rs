@@ -90,6 +90,7 @@ impl Workspace {
     fn inspection(&self) -> Inspection {
         let ctx = Context {
             members: workspace::load_members(&self.dir).expect("cargo metadata runs"),
+            load_resolved_graph: false,
             ..desktop_context(&self.dir)
         };
         check(&ctx, None)
@@ -419,6 +420,7 @@ fn run_fails_once_when_the_desktop_crate_is_not_a_member() {
     let ctx = Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        load_resolved_graph: false,
     };
     let found = run(&ctx).violations;
     assert_eq!(found.len(), 1);

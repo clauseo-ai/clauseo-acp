@@ -57,17 +57,22 @@ pub(crate) fn run_all<W: Write>(
     results
 }
 
-/// Runs one static check through `StaticCheck::report`: prints its violations, its failure for
-/// inspecting nothing, its notes, then a result line with the count, e.g.
-/// `capabilities ok (1 capability file inspected, 0.0 s)`.
+/// Runs one static check through `StaticCheck::report`: prints its violations, its failures
+/// without a location (the one for inspecting nothing last), its notes, then a result line with
+/// the count, e.g. `capabilities ok (1 capability file inspected, 0.0 s)`.
 fn run_static<W: Write>(check: &StaticCheck, ctx: &Context, out: &mut Printer<W>) -> StepResult {
     out.header(check.name, "built-in static check");
     let (report, secs) = timed(|| check.report(ctx));
     for found in &report.inspection.violations {
         out.violation(found);
     }
-    if let Some(nothing) = &report.nothing_inspected {
-        out.failure(&nothing.message, &nothing.fix);
+    for failure in report
+        .inspection
+        .failures
+        .iter()
+        .chain(&report.nothing_inspected)
+    {
+        out.failure(&failure.message, &failure.fix);
     }
     for note in &report.inspection.notes {
         out.note(format_args!("note: {note}"));
@@ -153,6 +158,7 @@ mod tests {
         Context {
             root: PathBuf::from("/ws"),
             members: Vec::new(),
+            load_resolved_graph: false,
         }
     }
 
@@ -200,8 +206,8 @@ mod tests {
     fn one_clean_doc_with_a_note(_ctx: &Context) -> Inspection {
         Inspection {
             inspected: 1,
-            violations: Vec::new(),
             notes: vec!["docs/a.md has 550 of 600 lines; split it now".into()],
+            ..Inspection::default()
         }
     }
 
@@ -214,29 +220,29 @@ mod tests {
         many: "docs",
     };
 
-    static FAILING_CHECK: StaticCheck = StaticCheck {
-        name: "fake-static",
-        counts: DOCS,
-        place: "in docs/",
-        source: "xtask/src/checks/fake_static.rs",
-        run: one_violation,
-    };
+    static FAILING_CHECK: StaticCheck = StaticCheck::fake(
+        "fake-static",
+        DOCS,
+        || "in docs/".to_owned(),
+        "xtask/src/checks/fake_static.rs",
+        one_violation,
+    );
 
-    static NOTING_CHECK: StaticCheck = StaticCheck {
-        name: "fake-static",
-        counts: DOCS,
-        place: "in docs/",
-        source: "xtask/src/checks/fake_static.rs",
-        run: one_clean_doc_with_a_note,
-    };
+    static NOTING_CHECK: StaticCheck = StaticCheck::fake(
+        "fake-static",
+        DOCS,
+        || "in docs/".to_owned(),
+        "xtask/src/checks/fake_static.rs",
+        one_clean_doc_with_a_note,
+    );
 
-    static EMPTY_CHECK: StaticCheck = StaticCheck {
-        name: "fake-static",
-        counts: DOCS,
-        place: "in docs/",
-        source: "xtask/src/checks/fake_static.rs",
-        run: nothing,
-    };
+    static EMPTY_CHECK: StaticCheck = StaticCheck::fake(
+        "fake-static",
+        DOCS,
+        || "in docs/".to_owned(),
+        "xtask/src/checks/fake_static.rs",
+        nothing,
+    );
 
     #[test]
     fn a_static_check_prints_its_findings_notes_and_count() {

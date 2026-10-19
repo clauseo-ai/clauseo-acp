@@ -21,7 +21,11 @@ pub(crate) fn run(quick: bool) -> ExitCode {
             (Vec::new(), Some(error))
         }
     };
-    let ctx = Context { root, members };
+    let ctx = Context {
+        root,
+        members,
+        load_resolved_graph: true,
+    };
 
     let scope = if quick {
         quick_scope(&mut out, &ctx, members_error.as_deref())

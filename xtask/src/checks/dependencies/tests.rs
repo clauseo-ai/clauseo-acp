@@ -3,7 +3,7 @@
 //! crates such as `tauri`, so the real `cargo metadata --offline` resolves the graph without the
 //! network. With no lockfile, cargo writes one inside the scratch dir.
 
-mod planted;
+pub(super) mod planted;
 
 use super::*;
 use crate::scratch::Scratch;
@@ -66,6 +66,7 @@ fn run_on(dir: &Scratch) -> Inspection {
     let ctx = Context {
         root: dir.to_path_buf(),
         members: workspace::load_members(dir).expect("cargo metadata runs"),
+        load_resolved_graph: false,
     };
     check(&ctx, Some(&["--offline"]))
 }
@@ -302,6 +303,7 @@ fn a_lockfile_behind_the_manifests_fails_at_the_root_manifest_without_rewriting_
     let ctx = Context {
         root: dir.to_path_buf(),
         members: workspace::load_members(&dir).expect("cargo metadata runs"),
+        load_resolved_graph: false,
     };
     assert_eq!(check(&ctx, Some(&["--offline"])).violations, Vec::new());
     let lock = fs::read_to_string(dir.join("Cargo.lock")).expect("cargo wrote a lockfile");
@@ -380,8 +382,9 @@ fn without_the_graph_only_rows_are_matched() {
     let ctx = Context {
         root: dir.to_path_buf(),
         members: workspace::load_members(&dir).expect("cargo metadata runs"),
+        load_resolved_graph: false,
     };
-    assert_eq!(check_without_graph(&ctx), Inspection::new(1, Vec::new()));
+    assert_eq!(run(&ctx), Inspection::new(1, Vec::new()));
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! Planted cases of the file-size check, and tests of its helpers. Each planted case writes its
 //! files into a scratch git repo and runs the real `run` on it.
 
-mod planted;
+pub(super) mod planted;
 
 use super::*;
 use crate::process::{self, Cmd, Program};
@@ -28,6 +28,7 @@ fn run_on(case: &str, files: &[(&str, String)]) -> Inspection {
     run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        load_resolved_graph: false,
     })
 }
 
@@ -202,6 +203,7 @@ fn an_unreadable_listed_file_is_not_called_stale() {
     let found = run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        load_resolved_graph: false,
     });
     let paths: Vec<&str> = found.violations.iter().map(|v| v.path.as_str()).collect();
     assert_eq!(paths, ["src/bad.rs"], "{:?}", found.violations);
@@ -213,6 +215,7 @@ fn not_a_git_repo_inspects_nothing() {
     let found = run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        load_resolved_graph: false,
     });
     assert_eq!(found, Inspection::default());
 }

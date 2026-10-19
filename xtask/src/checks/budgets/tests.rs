@@ -1,6 +1,6 @@
 //! Tests of the budgets check; the planted cases are in `tests/planted.rs`.
 
-mod planted;
+pub(super) mod planted;
 
 use super::*;
 use crate::scratch::Scratch;
@@ -21,6 +21,7 @@ fn run_on(case: &str, text: &str) -> Inspection {
     run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        load_resolved_graph: false,
     })
 }
 

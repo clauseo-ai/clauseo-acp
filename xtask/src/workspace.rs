@@ -19,6 +19,10 @@ pub(crate) struct Member {
 pub(crate) struct Context {
     pub root: PathBuf,
     pub members: Vec<Member>,
+    /// Whether checks may load the dependency graph cargo resolved (`cargo metadata` with deps,
+    /// `--locked --offline`). That graph needs every target's crates downloaded, so tests of the
+    /// real repo, which use no network, leave it off; `cargo xtask check` turns it on.
+    pub load_resolved_graph: bool,
 }
 
 /// The parts of `cargo metadata --format-version 1 --no-deps` that xtask reads.

@@ -52,9 +52,11 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         one: "capability file",
         many: "capability files",
     },
-    place: "in the desktop crate's capabilities/",
-    source: "xtask/src/checks/capabilities.rs",
+    place: || format!("in the desktop crate's {DIR}/"),
+    source: file!(),
     run,
+    #[cfg(test)]
+    planted: &[],
 };
 
 /// Counts the capability files read; the inline objects in the Tauri config are not counted.

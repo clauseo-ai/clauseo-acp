@@ -4,7 +4,7 @@
 //! `tests/cases.rs`.
 
 mod cases;
-mod planted;
+pub(super) mod planted;
 
 use cases::*;
 
@@ -68,6 +68,7 @@ fn run_repo(case: &str, repo: &Repo<'_>) -> Inspection {
     run(&Context {
         root: dir.to_path_buf(),
         members: members(),
+        load_resolved_graph: false,
     })
 }
 
@@ -281,6 +282,7 @@ fn every_row_counts_when_no_member_is_held() {
     let found = run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        load_resolved_graph: false,
     });
     assert_eq!(found, Inspection::new(2, Vec::new()));
 }
@@ -292,6 +294,7 @@ fn a_missing_table_inspects_nothing() {
         run(&Context {
             root: dir.to_path_buf(),
             members: Vec::new(),
+            load_resolved_graph: false,
         }),
         Inspection::default()
     );
@@ -334,6 +337,7 @@ fn a_symlink_under_src_fails_at_the_crate_s_row() {
     let found: Vec<String> = run(&Context {
         root: dir.to_path_buf(),
         members: members(),
+        load_resolved_graph: false,
     })
     .violations
     .iter()

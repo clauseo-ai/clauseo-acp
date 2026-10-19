@@ -3,9 +3,16 @@
 //! One file per check in `src/checks/`, registered in `ALL` below. `steps::plan` runs every entry
 //! after the tool steps and before nextest.
 //!
-//! Every check counts what it inspected. `StaticCheck::report` is the one place that judges a run:
-//! it fails on any violation, and on a count of zero, since a check that inspected nothing proves
-//! nothing (its inputs moved or vanished). The runner and the tests both go through it.
+//! To add a check, copy `checks/budgets.rs` with `checks/budgets/tests.rs` and
+//! `checks/budgets/tests/planted.rs`, the smallest check in the full shape: a `CHECK` whose
+//! `place` comes from the consts its code reads, a `run` that counts what it inspected, and a
+//! `cases!` list of planted cases that `CHECK.planted` points at. Then add it to `ALL`.
+//!
+//! Every check counts what it inspected. `StaticCheck::judge` is the one place that judges a run:
+//! it fails on any violation or failure, and on a count of zero, since a check that inspected
+//! nothing proves nothing (its inputs moved or vanished). The runner reaches it through
+//! `StaticCheck::report` (a check's `run` is private to this module) and every planted case
+//! through `planted::verify_named`.
 
 mod budgets;
 mod buildtime_edits;
@@ -22,24 +29,36 @@ mod plugins;
 mod tauri_config;
 pub(crate) mod toml_lines;
 
+use crate::changes::GitError;
 use crate::violation::Violation;
 use crate::workspace::Context;
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::Path;
 
 /// A check written in Rust. Run it through `report`, which fails it on any violation and on an
-/// inspection of zero items.
+/// inspection of zero items. Only `name` is public: the rest is read here, so nothing outside
+/// this module can call `run` and skip the judging.
+#[expect(
+    clippy::partial_pub_fields,
+    reason = "the runner and the plan read the name; the rest stays private so nothing outside \
+              checks can call run and skip the judging"
+)]
 pub(crate) struct StaticCheck {
     pub name: &'static str,
     /// What the check counts, e.g. `capability file`.
-    pub counts: Noun,
+    counts: Noun,
     /// Where it looks, as the end of a sentence, e.g. `in the desktop crate's capabilities/`.
-    pub place: &'static str,
-    /// The repo-relative file that says where the check looks, which the zero-inspected fix
-    /// names: for most checks its own file, for the Crates-table checks `crates_table.rs`.
-    pub source: &'static str,
-    pub run: fn(&Context) -> Inspection,
+    /// Built from the consts the check's code reads, so it cannot go stale when they change.
+    place: fn() -> String,
+    /// The repo-relative file of the check, `file!()` in its `CHECK`, which the zero-inspected
+    /// fix names.
+    source: &'static str,
+    run: fn(&Context) -> Inspection,
+    /// The check's planted cases, the `PLANTED` of its `tests/planted.rs`.
+    #[cfg(test)]
+    planted: &'static [planted::Planted],
 }
 
 /// A noun in the singular and the plural, for counts such as `1 capability file`.
@@ -63,6 +82,8 @@ impl Noun {
 pub(crate) struct Inspection {
     pub inspected: usize,
     pub violations: Vec<Violation>,
+    /// Failures with no `file:line`, such as git failing to list the repo's files.
+    pub failures: Vec<Failure>,
     pub notes: Vec<String>,
 }
 
@@ -72,6 +93,7 @@ impl Inspection {
         Inspection {
             inspected,
             violations,
+            failures: Vec::new(),
             notes: Vec::new(),
         }
     }
@@ -82,12 +104,20 @@ impl Inspection {
     }
 }
 
-/// The failure of a check that inspected nothing. It has no `file:line`: the items are missing,
-/// not wrong, so there is no line to point at. Printed with `Printer::failure`.
+/// A failure with no `file:line`, printed with `Printer::failure`: a check that inspected nothing
+/// (the items are missing, not wrong, so there is no line to point at), or a tool the check needs
+/// that failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct NothingInspected {
+pub(crate) struct Failure {
     pub message: String,
     pub fix: String,
+}
+
+impl fmt::Display for Failure {
+    /// As `Printer::failure` prints it: `what`, then `    fix: ...`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}\n    fix: {}", self.message, self.fix)
+    }
 }
 
 /// A check's run, judged.
@@ -95,15 +125,31 @@ pub(crate) struct NothingInspected {
 pub(crate) struct Report {
     pub inspection: Inspection,
     /// `Some` when the check inspected nothing.
-    pub nothing_inspected: Option<NothingInspected>,
+    pub nothing_inspected: Option<Failure>,
     /// `1 capability file inspected`, for the result and summary lines.
     pub counted: String,
 }
 
 impl Report {
-    /// True when the check found a violation or inspected nothing.
+    /// True when the check found a violation or a failure, or inspected nothing.
     pub(crate) fn failed(&self) -> bool {
-        !self.inspection.violations.is_empty() || self.nothing_inspected.is_some()
+        !self.inspection.violations.is_empty()
+            || !self.inspection.failures.is_empty()
+            || self.nothing_inspected.is_some()
+    }
+
+    /// Every violation and failure as it prints, in the order the runner prints them.
+    #[cfg(test)]
+    pub(crate) fn printed(&self) -> Vec<String> {
+        let violations = self.inspection.violations.iter().map(ToString::to_string);
+        let failures = self
+            .inspection
+            .failures
+            .iter()
+            .chain(&self.nothing_inspected);
+        violations
+            .chain(failures.map(ToString::to_string))
+            .collect()
     }
 }
 
@@ -113,9 +159,11 @@ impl StaticCheck {
         self.judge((self.run)(ctx))
     }
 
-    /// Judges one inspection: a count of zero adds the `NothingInspected` failure.
-    pub(crate) fn judge(&self, inspection: Inspection) -> Report {
-        let nothing_inspected = (inspection.inspected == 0).then(|| self.nothing_inspected());
+    /// Judges one inspection: a count of zero adds the zero-inspected failure.
+    fn judge(&self, inspection: Inspection) -> Report {
+        let stopped = !inspection.violations.is_empty() || !inspection.failures.is_empty();
+        let nothing_inspected =
+            (inspection.inspected == 0).then(|| self.nothing_inspected(stopped));
         Report {
             counted: format!("{} inspected", self.counts.count(inspection.inspected)),
             inspection,
@@ -124,20 +172,48 @@ impl StaticCheck {
     }
 
     /// The failure for an inspection of zero items: `0 capability files inspected in the desktop
-    /// crate's capabilities/`, with a fix that names what the check looks for, where, and its file.
-    pub(crate) fn nothing_inspected(&self) -> NothingInspected {
-        NothingInspected {
-            message: format!("{} inspected {}", self.counts.count(0), self.place),
-            fix: format!(
+    /// crate's capabilities/`. When the check `stopped` on a failure of its own, the fix sends
+    /// the reader to that failure; else it names what the check looks for, where, and its file.
+    pub(crate) fn nothing_inspected(&self, stopped: bool) -> Failure {
+        let place = (self.place)();
+        let fix = if stopped {
+            STOPPED_FIX.to_owned()
+        } else {
+            format!(
                 "{name} looks for {many} {place}; restore them, or update {source} if they moved",
                 name = self.name,
                 many = self.counts.many,
-                place = self.place,
                 source = self.source,
-            ),
+            )
+        };
+        Failure {
+            message: format!("{} inspected {place}", self.counts.count(0)),
+            fix,
+        }
+    }
+
+    /// A check for the runner's tests, with no planted cases.
+    #[cfg(test)]
+    pub(crate) const fn fake(
+        name: &'static str,
+        counts: Noun,
+        place: fn() -> String,
+        source: &'static str,
+        run: fn(&Context) -> Inspection,
+    ) -> StaticCheck {
+        StaticCheck {
+            name,
+            counts,
+            place,
+            source,
+            run,
+            planted: &[],
         }
     }
 }
+
+/// The zero-inspected fix of a check that reported a failure before it inspected anything.
+const STOPPED_FIX: &str = "the check stopped before it could look; fix the failure above first";
 
 /// Every static check, in run order.
 pub(crate) const ALL: &[StaticCheck] = &[
@@ -194,6 +270,29 @@ pub(crate) fn strip_comments(text: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// The inspection of a check that reads the repo's files but could not list them, because
+/// `git ls-files` failed. `check` is the check's name, for the fix.
+pub(crate) fn unlisted(check: &str, error: &GitError) -> Inspection {
+    let fix = match error {
+        GitError::NotStarted(_) => {
+            format!(
+                "install git and put it on PATH: {check} lists the files it reads with `git ls-files`"
+            )
+        }
+        GitError::Failed { .. } => format!(
+            "run the check inside a git checkout, or fix what git reports: {check} lists the files \
+             it reads with `git ls-files`"
+        ),
+    };
+    Inspection {
+        failures: vec![Failure {
+            message: format!("could not list the repo's files: {error}"),
+            fix,
+        }],
+        ..Inspection::default()
+    }
 }
 
 /// Reads `root/rel` as text. `Ok(None)` when the file does not exist; any other read error is a

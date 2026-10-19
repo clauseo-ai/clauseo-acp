@@ -25,23 +25,23 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         one: "workspace crate with a Crates table row",
         many: "workspace crates with a Crates table row",
     },
-    place: "in the Crates table of ARCHITECTURE.md",
-    source: "xtask/src/checks/crates_table.rs",
+    place: || format!("in the Crates table of {}", crates_table::FILE),
+    source: file!(),
     run,
+    #[cfg(test)]
+    planted: tests::planted::PLANTED,
 };
 
 /// `--locked`, so the check never rewrites `Cargo.lock`; `--offline`, so it never downloads.
 /// `cargo xtask check` runs `deny` first, which fetches every target's crates; elsewhere a missing
-/// crate fails with a fix that says to fetch it.
+/// crate fails with a fix that says to fetch it. The graph walk runs only when
+/// `ctx.load_resolved_graph` allows it; `tests.rs` covers it on scratch workspaces.
 fn run(ctx: &Context) -> Inspection {
-    check(ctx, Some(&["--locked", "--offline"]))
-}
-
-/// The check without the graph walk, for the real-repo test: that graph needs every target's
-/// crates downloaded, and tests use no network. `tests.rs` covers the walk on scratch workspaces.
-#[cfg(test)]
-pub(crate) fn check_without_graph(ctx: &Context) -> Inspection {
-    check(ctx, None)
+    check(
+        ctx,
+        ctx.load_resolved_graph
+            .then_some(&["--locked", "--offline"][..]),
+    )
 }
 
 /// The check, reading the resolved graph with `cargo metadata <graph_flags>` (after

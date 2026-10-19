@@ -3,6 +3,7 @@
 use crate::process::{self, Cmd, Program};
 use crate::workspace::{Member, package_for};
 use std::collections::BTreeSet;
+use std::fmt;
 use std::path::Path;
 
 /// Which packages `--quick` checks.
@@ -80,9 +81,10 @@ pub(crate) fn changed_files(root: &Path) -> Result<Vec<String>, String> {
 }
 
 /// Every file in the repo that git tracks or would track: tracked files still on disk, plus
-/// untracked files that `.gitignore` does not exclude. Repo-relative, `/`-separated, sorted.
-/// Errors when git fails, e.g. outside a git repo.
-pub(crate) fn repo_files(root: &Path) -> Result<Vec<String>, String> {
+/// untracked files that `.gitignore` does not exclude (`--others`), so a new file is seen before
+/// anyone adds it, as `--quick` sees it. Repo-relative, `/`-separated, sorted. Errors when git
+/// cannot start, or fails, e.g. outside a git repo.
+pub(crate) fn repo_files(root: &Path) -> Result<Vec<String>, GitError> {
     let listed = git(
         root,
         &[
@@ -174,11 +176,40 @@ fn split_nul(text: &str) -> impl Iterator<Item = String> + '_ {
         .map(str::to_owned)
 }
 
-fn git(root: &Path, args: &[&str]) -> Result<String, String> {
+/// Why a git command gave no output to read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum GitError {
+    /// git did not start, e.g. it is not installed; the OS error.
+    NotStarted(String),
+    /// git ran and failed, e.g. outside a git repo.
+    Failed { command: String, stderr: String },
+}
+
+impl fmt::Display for GitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GitError::NotStarted(error) => write!(f, "could not run git: {error}"),
+            GitError::Failed { command, stderr } => write!(f, "`{command}` failed: {stderr}"),
+        }
+    }
+}
+
+impl From<GitError> for String {
+    fn from(error: GitError) -> String {
+        error.to_string()
+    }
+}
+
+/// The stdout of `git <args>` run in `root`.
+fn git(root: &Path, args: &[&str]) -> Result<String, GitError> {
     let cmd = Cmd::new(Program::Git, args);
-    let quiet = process::run_quiet(&cmd, root).map_err(|e| format!("could not run git: {e}"))?;
+    let quiet =
+        process::run_quiet(&cmd, root).map_err(|error| GitError::NotStarted(error.to_string()))?;
     if !quiet.success {
-        return Err(format!("`{cmd}` failed: {}", quiet.stderr.trim()));
+        return Err(GitError::Failed {
+            command: cmd.to_string(),
+            stderr: quiet.stderr.trim().to_owned(),
+        });
     }
     Ok(quiet.stdout)
 }
@@ -325,8 +356,15 @@ mod tests {
     }
 
     #[test]
-    fn repo_files_fail_outside_a_git_repo() {
+    fn repo_files_fail_outside_a_git_repo_with_git_s_command_and_error() {
         let dir = crate::scratch::Scratch::new("changes-repo-files-none");
-        assert!(repo_files(&dir).is_err());
+        let Err(GitError::Failed { command, stderr }) = repo_files(&dir) else {
+            panic!("expected git to fail outside a repo");
+        };
+        assert_eq!(
+            command,
+            "git ls-files -z --cached --others --exclude-standard"
+        );
+        assert!(stderr.contains("not a git repository"), "{stderr}");
     }
 }

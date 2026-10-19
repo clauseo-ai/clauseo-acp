@@ -27,16 +27,25 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         one: "Markdown file",
         many: "Markdown files",
     },
-    place: "in the repo's git-tracked or unignored *.md files",
-    source: "xtask/src/checks/docs.rs",
+    place: || {
+        format!(
+            "in the repo's git-tracked or unignored .{} files",
+            EXTENSIONS.join(" and .")
+        )
+    },
+    source: file!(),
     run,
+    #[cfg(test)]
+    planted: tests::planted::PLANTED,
 };
+
+/// The extensions of a Markdown file, matched in any case.
+const EXTENSIONS: [&str; 2] = ["md", "markdown"];
 
 fn run(ctx: &Context) -> Inspection {
     match changes::repo_files(&ctx.root) {
         Ok(files) => inspect(&ctx.root, &files),
-        // Not a git repo, so there are no files to read. The runner reports the zero.
-        Err(_) => Inspection::default(),
+        Err(error) => checks::unlisted(CHECK.name, &error),
     }
 }
 
@@ -70,7 +79,11 @@ fn is_markdown(file: &str) -> bool {
     Path::new(file)
         .extension()
         .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown"))
+        .is_some_and(|ext| {
+            EXTENSIONS
+                .iter()
+                .any(|known| ext.eq_ignore_ascii_case(known))
+        })
 }
 
 /// The names of the Crates-table rows whose status is `planned`. A table that does not read

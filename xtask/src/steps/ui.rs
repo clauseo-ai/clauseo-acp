@@ -210,6 +210,7 @@ mod tests {
         Context {
             root: PathBuf::from("/ws"),
             members: Vec::new(),
+            load_resolved_graph: false,
         }
     }
 

@@ -310,6 +310,7 @@ fn a_missing_desktop_member_fails_at_the_root_manifest() {
     let ctx = Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        load_resolved_graph: false,
     };
     let found = run(&ctx).violations;
     assert_eq!(found.len(), 1);

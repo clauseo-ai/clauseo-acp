@@ -9,7 +9,13 @@ crate::checks::planted::cases! {
          fix: set limit to zero or more, in the row's unit",
     ]) => super::negative_limit,
     /// A file that is not TOML fails.
-    not_toml: Fails => super::not_toml,
+    not_toml: FailsWith(&[
+        "budgets.toml:1: budgets.toml is not valid: unclosed array table, expected `]`\n    \
+         fix: fix the line above; each row is a [[budget]] table of the ten keys listed at the top \
+         of budgets.toml",
+        "0 budget rows inspected in budgets.toml at the repo root\n    \
+         fix: the check stopped before it could look; fix the failure above first",
+    ]) => super::not_toml,
     /// A row with every required key passes.
     valid_row: Passes => super::valid_row,
 }

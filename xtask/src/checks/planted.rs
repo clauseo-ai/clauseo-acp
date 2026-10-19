@@ -21,16 +21,15 @@
 //! The expectation is a variant of `Expect`, written without the type. The functions take no
 //! argument and return an `Inspection`.
 
-/// What a planted case must produce.
+/// What a planted case must produce, judged by the check's own `StaticCheck::judge`.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Expect {
-    /// At least one violation.
-    Fails,
-    /// Exactly these violations, each as it prints (`path:line: what\n    fix: ...`), in order.
+    /// Exactly these violations and failures, each as it prints (`path:line: what\n    fix: ...`,
+    /// or `what\n    fix: ...` for one without a location), in the order the runner prints them.
+    /// The zero-inspected failure is one of them when the case inspected nothing.
     FailsWith(&'static [&'static str]),
-    /// No violation, and at least one item inspected: a pass that inspected nothing proves
-    /// nothing.
+    /// The check passes: no violation, no failure, and at least one item inspected.
     Passes,
 }
 
@@ -41,56 +40,51 @@ pub(crate) struct Planted {
     /// The case's name, also the name of its test.
     pub name: &'static str,
     pub expect: Expect,
-    /// Builds the input and runs the check on it.
-    pub run: fn() -> crate::checks::Inspection,
+    /// Builds the input and runs the check's code on it.
+    pub run: fn() -> Inspection,
 }
 
 #[cfg(test)]
 impl Planted {
-    /// Runs the case. `Err` says how the result differs from `expect`.
-    pub(crate) fn verdict(&self) -> Result<(), String> {
-        judge(self.expect, &(self.run)())
-    }
-}
-
-/// Whether `found` meets `expect`; `Err` says how it does not.
-#[cfg(test)]
-fn judge(expect: Expect, found: &crate::checks::Inspection) -> Result<(), String> {
-    let printed: Vec<String> = found.violations.iter().map(ToString::to_string).collect();
-    match expect {
-        Expect::Fails if printed.is_empty() => Err(format!(
-            "expected at least one violation, found none ({} inspected)",
-            found.inspected
-        )),
-        Expect::FailsWith(expected) if printed != expected => Err(format!(
-            "expected these violations:\n{}\nfound:\n{}",
-            expected.join("\n"),
-            printed.join("\n")
-        )),
-        Expect::Passes if !printed.is_empty() => Err(format!(
-            "expected no violation, found:\n{}",
-            printed.join("\n")
-        )),
-        Expect::Passes if found.inspected == 0 => {
-            Err("expected a pass, but the check inspected nothing".to_owned())
+    /// Runs the case and judges it as `check`. `Err` says how the result differs from `expect`.
+    pub(crate) fn verdict(&self, check: &StaticCheck) -> Result<(), String> {
+        let report = check.judge((self.run)());
+        let printed = report.printed();
+        match self.expect {
+            Expect::FailsWith([]) => {
+                Err("FailsWith needs at least one failure; a case that passes is Passes".to_owned())
+            }
+            Expect::FailsWith(expected) if printed != expected => Err(format!(
+                "expected these failures:\n{}\nfound:\n{}",
+                expected.join("\n"),
+                printed.join("\n")
+            )),
+            Expect::Passes if report.failed() => {
+                Err(format!("expected a pass, found:\n{}", printed.join("\n")))
+            }
+            Expect::FailsWith(_) | Expect::Passes => Ok(()),
         }
-        Expect::Fails | Expect::FailsWith(_) | Expect::Passes => Ok(()),
     }
 }
 
-/// Runs the case called `name` in `cases` and panics with its verdict when it fails. The body of
-/// every test `cases!` makes.
+/// Runs the case called `name` in `check.planted` and panics with its verdict when it fails.
+/// The body of every test `cases!` makes, so a case in a list that `CHECK.planted` does not
+/// point at fails too.
 #[cfg(test)]
-pub(crate) fn verify_named(cases: &[Planted], name: &str) {
-    let Some(case) = cases.iter().find(|case| case.name == name) else {
-        panic!("no planted case `{name}`");
+pub(crate) fn verify_named(check: &StaticCheck, name: &str) {
+    let Some(case) = check.planted.iter().find(|case| case.name == name) else {
+        panic!(
+            "no planted case `{name}` in the planted list of {}",
+            check.name
+        );
     };
-    if let Err(why) = case.verdict() {
+    if let Err(why) = case.verdict(check) {
         panic!("planted case `{name}`: {why}");
     }
 }
 
 /// Makes `PLANTED` and the `planted` test module from one list of cases. See the module docs.
+#[cfg(test)]
 macro_rules! cases {
     ($(
         $(#[doc = $doc:literal])*
@@ -110,18 +104,22 @@ macro_rules! cases {
             $(#[doc = $doc])*
             #[test]
             fn $name() {
-                $crate::checks::planted::verify_named(PLANTED, stringify!($name));
+                $crate::checks::planted::verify_named(&super::super::CHECK, stringify!($name));
             }
         )+
     };
 }
 
+#[cfg(test)]
 pub(crate) use cases;
+
+#[cfg(test)]
+use crate::checks::{Inspection, StaticCheck};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::checks::{Inspection, violation};
+    use crate::checks::{Noun, violation};
 
     fn clean() -> Inspection {
         Inspection::new(1, Vec::new())
@@ -135,50 +133,83 @@ mod tests {
         Inspection::new(1, vec![violation("a.toml", 2, "bad", "fix it")])
     }
 
-    fn case(expect: Expect, run: fn() -> Inspection) -> Planted {
+    fn stopped() -> Inspection {
+        Inspection::stopped(violation("a.toml", 1, "gone", "restore it"))
+    }
+
+    const CHECK: StaticCheck = StaticCheck::fake(
+        "fake",
+        Noun {
+            one: "row",
+            many: "rows",
+        },
+        || "in a.toml".to_owned(),
+        "xtask/src/checks/fake.rs",
+        |_| Inspection::default(),
+    );
+
+    fn verdict(expect: Expect, run: fn() -> Inspection) -> Result<(), String> {
         Planted {
             name: "case",
             expect,
             run,
         }
-    }
-
-    #[test]
-    fn fails_needs_a_violation() {
-        assert_eq!(case(Expect::Fails, one_violation).verdict(), Ok(()));
-        assert_eq!(
-            case(Expect::Fails, clean).verdict(),
-            Err("expected at least one violation, found none (1 inspected)".to_owned())
-        );
+        .verdict(&CHECK)
     }
 
     #[test]
     fn fails_with_needs_the_exact_text() {
-        let exact = case(
-            Expect::FailsWith(&["a.toml:2: bad\n    fix: fix it"]),
-            one_violation,
-        );
-        assert_eq!(exact.verdict(), Ok(()));
-        let other = case(
-            Expect::FailsWith(&["a.toml:3: bad\n    fix: fix it"]),
-            one_violation,
+        assert_eq!(
+            verdict(
+                Expect::FailsWith(&["a.toml:2: bad\n    fix: fix it"]),
+                one_violation
+            ),
+            Ok(())
         );
         assert_eq!(
-            other.verdict(),
-            Err("expected these violations:\na.toml:3: bad\n    fix: fix it\nfound:\na.toml:2: bad\n    fix: fix it".to_owned())
+            verdict(
+                Expect::FailsWith(&["a.toml:3: bad\n    fix: fix it"]),
+                one_violation
+            ),
+            Err("expected these failures:\na.toml:3: bad\n    fix: fix it\nfound:\na.toml:2: bad\n    fix: fix it".to_owned())
+        );
+        assert_eq!(
+            verdict(Expect::FailsWith(&[]), clean),
+            Err("FailsWith needs at least one failure; a case that passes is Passes".to_owned())
+        );
+    }
+
+    #[test]
+    fn fails_with_includes_the_zero_inspected_failure_judged_by_the_check() {
+        assert_eq!(
+            verdict(
+                Expect::FailsWith(&[
+                    "a.toml:1: gone\n    fix: restore it",
+                    "0 rows inspected in a.toml\n    fix: the check stopped before it could look; fix the failure above first",
+                ]),
+                stopped
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            verdict(
+                Expect::FailsWith(&["a.toml:1: gone\n    fix: restore it"]),
+                stopped
+            ),
+            Err("expected these failures:\na.toml:1: gone\n    fix: restore it\nfound:\na.toml:1: gone\n    fix: restore it\n0 rows inspected in a.toml\n    fix: the check stopped before it could look; fix the failure above first".to_owned())
         );
     }
 
     #[test]
     fn passes_needs_no_violation_and_something_inspected() {
-        assert_eq!(case(Expect::Passes, clean).verdict(), Ok(()));
+        assert_eq!(verdict(Expect::Passes, clean), Ok(()));
         assert_eq!(
-            case(Expect::Passes, one_violation).verdict(),
-            Err("expected no violation, found:\na.toml:2: bad\n    fix: fix it".to_owned())
+            verdict(Expect::Passes, one_violation),
+            Err("expected a pass, found:\na.toml:2: bad\n    fix: fix it".to_owned())
         );
         assert_eq!(
-            case(Expect::Passes, empty).verdict(),
-            Err("expected a pass, but the check inspected nothing".to_owned())
+            verdict(Expect::Passes, empty),
+            Err("expected a pass, found:\n0 rows inspected in a.toml\n    fix: fake looks for rows in a.toml; restore them, or update xtask/src/checks/fake.rs if they moved".to_owned())
         );
     }
 }

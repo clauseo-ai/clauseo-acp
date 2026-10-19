@@ -1,7 +1,7 @@
 //! Tests of the docs check's file list, and of the check as one run.
 
 mod cases;
-mod planted;
+pub(super) mod planted;
 
 use super::*;
 use crate::process::{self, Cmd, Program};
@@ -19,19 +19,22 @@ fn only_the_markdown_files_of_a_git_repo_are_counted() {
     let found = run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        load_resolved_graph: false,
     });
     assert_eq!(found.inspected, 1);
 }
 
 #[test]
-fn a_folder_that_is_not_a_git_repo_inspects_nothing_and_reports_no_violation() {
+fn a_folder_that_is_not_a_git_repo_inspects_nothing_and_says_git_s_error() {
     let dir = Scratch::new("docs-no-git");
     fs::write(dir.join("NOTES.md"), "# Notes\n").expect("write a doc");
     let found = run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        load_resolved_graph: false,
     });
-    assert_eq!(found, Inspection::default());
+    let error = crate::changes::repo_files(&dir).expect_err("not a git repo");
+    assert_eq!(found, checks::unlisted("docs", &error));
 }
 
 #[test]

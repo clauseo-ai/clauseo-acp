@@ -256,6 +256,7 @@ mod tests {
         Context {
             root: PathBuf::from("/ws"),
             members: Vec::new(),
+            load_resolved_graph: false,
         }
     }
 
@@ -328,6 +329,7 @@ mod tests {
         let ctx = Context {
             root: PathBuf::from(r"C:\ws"),
             members: Vec::new(),
+            load_resolved_graph: false,
         };
         let out = r#"ERROR taplo:format_files: the file is not properly formatted path="C:\\ws\\xtask\\Cargo.toml""#;
         let findings = taplo_findings(out, &ctx, &taplo_step().cmd);

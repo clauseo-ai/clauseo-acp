@@ -37,9 +37,11 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         one: "UI source file",
         many: "UI source files",
     },
-    place: "under ui/app/src",
-    source: "xtask/src/checks/buildtime_edits.rs",
+    place: || format!("under {SRC}"),
+    source: file!(),
     run,
+    #[cfg(test)]
+    planted: &[],
 };
 
 fn run(ctx: &Context) -> Inspection {

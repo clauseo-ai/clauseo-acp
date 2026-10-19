@@ -29,6 +29,7 @@ pub(crate) fn desktop_context(root: &Path) -> Context {
             dir: "crates/desktop".to_owned(),
             path_deps: Vec::new(),
         }],
+        load_resolved_graph: false,
     }
 }
 
@@ -44,6 +45,7 @@ fn a_missing_desktop_member_is_one_violation_at_the_root_manifest() {
     let ctx = Context {
         root: Path::new("/ws").to_path_buf(),
         members: Vec::new(),
+        load_resolved_graph: false,
     };
     assert_eq!(
         desktop_dir(&ctx),
@@ -61,16 +63,11 @@ fn the_real_repo_passes_every_static_check() {
     let root = crate::workspace::workspace_root();
     let ctx = Context {
         members: crate::workspace::load_members(&root).expect("cargo metadata runs"),
+        load_resolved_graph: false,
         root,
     };
     for check in ALL {
-        let report = if check.name == plugins::CHECK.name {
-            check.judge(plugins::check_without_graph(&ctx))
-        } else if check.name == dependencies::CHECK.name {
-            check.judge(dependencies::check_without_graph(&ctx))
-        } else {
-            check.report(&ctx)
-        };
+        let report = check.report(&ctx);
         assert_eq!(
             (
                 check.name,
@@ -93,13 +90,16 @@ fn every_check_inspects_nothing_in_an_empty_repo() {
     let ctx = Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        load_resolved_graph: false,
     };
     for check in ALL {
         let report = check.report(&ctx);
         assert_eq!((check.name, report.inspection.inspected), (check.name, 0));
+        let stopped =
+            !report.inspection.violations.is_empty() || !report.inspection.failures.is_empty();
         assert_eq!(
             (check.name, report.nothing_inspected),
-            (check.name, Some(check.nothing_inspected()))
+            (check.name, Some(check.nothing_inspected(stopped)))
         );
     }
 }
@@ -119,16 +119,16 @@ fn every_check_names_a_source_file_that_exists() {
 
 /// A check named `tauri-config` that counts capability files and returns what `run` returns.
 fn fake(run: fn(&Context) -> Inspection) -> StaticCheck {
-    StaticCheck {
-        name: "tauri-config",
-        counts: Noun {
+    StaticCheck::fake(
+        "tauri-config",
+        Noun {
             one: "capability file",
             many: "capability files",
         },
-        place: "in the desktop crate's capabilities/",
-        source: "xtask/src/checks/tauri_config.rs",
+        || "in the desktop crate's capabilities/".to_owned(),
+        "xtask/src/checks/tauri_config.rs",
         run,
-    }
+    )
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn zero_inspected_fails_without_a_location_and_names_where_the_check_looked() {
     assert_eq!(report.counted, "0 capability files inspected");
     assert_eq!(
         report.nothing_inspected,
-        Some(NothingInspected {
+        Some(Failure {
             message: "0 capability files inspected in the desktop crate's capabilities/".to_owned(),
             fix: "tauri-config looks for capability files in the desktop crate's capabilities/; restore them, or update xtask/src/checks/tauri_config.rs if they moved".to_owned(),
         })
@@ -150,8 +150,8 @@ fn zero_inspected_fails_without_a_location_and_names_where_the_check_looked() {
 fn a_count_above_zero_passes_unless_there_are_violations_and_notes_never_fail() {
     let check = fake(|_| Inspection {
         inspected: 1,
-        violations: Vec::new(),
         notes: vec!["a.rs has 550 of 600 lines; split it now".to_owned()],
+        ..Inspection::default()
     });
     let report = check.report(&desktop_context(Path::new("/ws")));
     assert!(!report.failed());

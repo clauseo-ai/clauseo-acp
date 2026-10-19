@@ -30,10 +30,18 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         one: "source file",
         many: "source files",
     },
-    place: "in the repo's .rs, .ts, .tsx, .mts and .cts files",
-    source: "xtask/src/checks/file_size.rs",
+    place: || {
+        let (last, rest) = SOURCE_EXTENSIONS.split_last().unwrap_or((&"", &[]));
+        format!("in the repo's .{} and .{last} files", rest.join(", ."))
+    },
+    source: file!(),
     run,
+    #[cfg(test)]
+    planted: tests::planted::PLANTED,
 };
+
+/// The extensions of the files this check reads, matched in any case.
+const SOURCE_EXTENSIONS: [&str; 5] = ["rs", "ts", "tsx", "mts", "cts"];
 
 /// Lists the repo's source files and inspects each one. Not a git repo: nothing is listed, so
 /// nothing is inspected and the runner reports the zero.
@@ -63,16 +71,14 @@ fn run(ctx: &Context) -> Inspection {
     Inspection {
         inspected: sources.len(),
         violations,
+        failures: Vec::new(),
         notes: notes(&ctx.root, &sizes),
     }
 }
 
-/// True for the files this check reads: `.rs`, `.ts`, `.tsx`, `.mts` and `.cts`, in any case.
+/// True for the files this check reads: one of `SOURCE_EXTENSIONS`, in any case.
 fn is_source(file: &str) -> bool {
-    matches!(
-        extension(file).as_deref(),
-        Some("rs" | "ts" | "tsx" | "mts" | "cts")
-    )
+    extension(file).is_some_and(|ext| SOURCE_EXTENSIONS.contains(&ext.as_str()))
 }
 
 /// True for a `.rs` file, the only kind whose comments are checked.

@@ -12,9 +12,11 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         one: "budget row",
         many: "budget rows",
     },
-    place: "in budgets.toml at the repo root",
-    source: "xtask/src/budgets.rs",
+    place: || format!("in {} at the repo root", budgets::FILE),
+    source: file!(),
     run,
+    #[cfg(test)]
+    planted: tests::planted::PLANTED,
 };
 
 fn run(ctx: &Context) -> Inspection {

@@ -82,6 +82,8 @@ crate::checks::planted::cases! {
     std_module_in_never: FailsWith(&[
         "ARCHITECTURE.md:7: `net` in the Never depends on column of `protocol` names a standard library module, not a crate, so nothing would enforce it\n    \
          fix: write `any I/O` (or `fs` or `process`) instead of `net`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now",
+        "0 workspace crates with a Crates table row inspected in the Crates table of ARCHITECTURE.md\n    \
+         fix: the check stopped before it could look; fix the failure above first",
     ]) => super::std_module_in_never,
     /// tauri as a dev-dependency passes.
     dev_dependency_passes: Passes => super::dev_dependency_passes,
