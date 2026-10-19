@@ -456,7 +456,8 @@ impl<'ast> Visit<'ast> for Collector<'_> {
                 Body::Items(items) => items.iter().for_each(|item| Visit::visit_item(self, item)),
                 Body::Stmts(stmts) => stmts.iter().for_each(|stmt| Visit::visit_stmt(self, stmt)),
                 Body::Exprs(exprs) => exprs.iter().for_each(|expr| Visit::visit_expr(self, expr)),
-                Body::Tokens(_) => {}
+                Body::Type(ty) => Visit::visit_type(self, &ty),
+                Body::Tokens(_) | Body::Unreadable(_) => {}
             }
         }
         visit::visit_macro(self, i);

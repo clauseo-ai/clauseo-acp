@@ -3,10 +3,11 @@
 //! It visits every `use` leaf, every path (in expressions, patterns, types and attributes) and
 //! every qualified path `<T>::f`, and resolves each through the crate's `Table`. A macro's own
 //! path is read only to find `include!`. Macro bodies that parse are visited like other code;
-//! the rest, and the tokens of attribute lists, are walked for chains (`tokens.rs`). A path that
-//! resolves through a metavariable's placeholder fails when what the metavariable could expand to
-//! reaches a banned path (`bans.rs`). It also fails `#[path]` on a module and `include!`,
-//! which pull in code the check never parses.
+//! the arguments of a macro call that parse as no code, and the tokens of attribute lists, are
+//! walked for chains (`tokens.rs`). A path that resolves through a metavariable's placeholder
+//! fails when what the metavariable could expand to reaches a banned path (`bans.rs`). It also
+//! fails `#[path]` on a module, `include!` and a `macro_rules!` rule whose body does not parse,
+//! which hold code the check never reads.
 
 use super::bans::Bans;
 use super::files;
@@ -39,6 +40,8 @@ pub(super) enum Reach {
     },
     /// A call of `include!`.
     Include,
+    /// A `macro_rules!` rule whose body does not parse (see `tokens.rs`).
+    UnreadableRule,
 }
 
 /// One offending site in a file. Two sites of one kind on one line are one.
@@ -319,6 +322,8 @@ impl<'ast> Visit<'ast> for Finder<'_> {
                 Body::Stmts(stmts) => stmts.iter().for_each(|stmt| Visit::visit_stmt(self, stmt)),
                 Body::Exprs(exprs) => exprs.iter().for_each(|expr| Visit::visit_expr(self, expr)),
                 Body::Tokens(tokens) => self.check_tokens(tokens),
+                Body::Type(ty) => Visit::visit_type(self, &ty),
+                Body::Unreadable(span) => self.add(span, Reach::UnreadableRule),
             }
         }
     }

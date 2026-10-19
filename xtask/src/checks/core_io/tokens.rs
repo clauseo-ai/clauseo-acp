@@ -1,26 +1,26 @@
 //! Macro tokens for the core-io check. `syn` leaves the arguments of a macro call and the rules
-//! of a `macro_rules!` as tokens. `bodies` parses them as items, statements or expressions when
-//! it can, so they are read like other code. In a `macro_rules!`, each metavariable `$x` first
-//! becomes a placeholder identifier (see `is_placeholder`; one before an item keyword, which can
-//! only be a visibility, is dropped), `$crate` becomes `crate`, and each
-//! repetition `$( ... )` with its separator and `*`, `+` or `?` becomes its inner tokens, once,
-//! so most rule bodies parse. `chains` walks the tokens that still do not parse (a macro of its
-//! own syntax, the arguments of an attribute) for `a::b::c` paths.
+//! of a `macro_rules!` as tokens. `bodies` parses them as items, statements, expressions or a
+//! type, so they are read like other code.
+//!
+//! In a `macro_rules!` rule, each metavariable `$x` of the rule's matcher is first replaced by
+//! something of its fragment kind that parses where it stands: `{}` for a `block`, a placeholder
+//! lifetime for a `lifetime`, `0` for a `literal`, nothing for a `vis` or an `item`, and a
+//! placeholder identifier for the rest (see `is_placeholder`). `$crate` becomes `crate`. Each
+//! repetition `$( ... )` with its separator and `*`, `+` or `?` becomes its inner tokens, twice
+//! when its separator or its edges are `::`, so a path it builds still has a placeholder segment
+//! after the first one. A rule body that parses as none of those is `Body::Unreadable`, and the
+//! check fails it. `chains` walks what remains as tokens for `a::b::c` paths: the arguments of a
+//! macro call that parse as no code (a macro of its own syntax) and the arguments of attributes.
 
 use super::names::{self, Written};
-use proc_macro2::{Delimiter, Group, Ident, Spacing, Span, TokenStream, TokenTree};
+use proc_macro2::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenStream, TokenTree};
+use std::collections::BTreeMap;
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 
 /// How a placeholder starts; the metavariable's name follows. Nobody writes such a name, so a
 /// path segment that starts with it stands for whatever the metavariable expands to.
 const PLACEHOLDER: &str = "__core_io_metavariable__";
-
-/// The keywords that can start an item after its visibility.
-const ITEM_KEYWORDS: [&str; 14] = [
-    "async", "const", "enum", "extern", "fn", "impl", "mod", "static", "struct", "trait", "type",
-    "union", "unsafe", "use",
-];
 
 /// True when `segment` is the placeholder of a metavariable.
 pub(super) fn is_placeholder(segment: &str) -> bool {
@@ -47,25 +47,61 @@ pub(super) enum Body {
     Stmts(Vec<syn::Stmt>),
     /// Comma-separated expressions, as in `vec![a, b]` or `format!("{}", a)`.
     Exprs(Vec<syn::Expr>),
-    /// Tokens that parse as none of those.
+    Type(Box<syn::Type>),
+    /// The arguments of a macro call that parse as none of those.
     Tokens(TokenStream),
+    /// A `macro_rules!` rule whose body parses as none of those, or a `macro_rules!` whose
+    /// rules have another shape; the span of its opening delimiter.
+    Unreadable(Span),
 }
 
 /// The code of `mac`: one body per rule of a `macro_rules!` (its matchers skipped), else one.
 pub(super) fn bodies(mac: &syn::Macro) -> Vec<Body> {
     if !mac.path.is_ident("macro_rules") {
-        return vec![parse(mac.tokens.clone())];
+        let tokens = mac.tokens.clone();
+        return vec![parse(tokens.clone()).unwrap_or(Body::Tokens(tokens))];
     }
-    let tokens = substitute(mac.tokens.clone());
-    match rule_bodies(tokens.clone()) {
-        Some(rules) => rules.into_iter().map(parse).collect(),
-        None => vec![parse(tokens)],
+    let Some(rules) = rules(mac.tokens.clone()) else {
+        return vec![Body::Unreadable(mac.delimiter.span().open())];
+    };
+    rules
+        .into_iter()
+        .map(|(matcher, body)| {
+            let mut kinds = BTreeMap::new();
+            fragments(matcher.stream(), &mut kinds);
+            parse(substitute(body.stream(), &kinds))
+                .unwrap_or_else(|| Body::Unreadable(body.span_open()))
+        })
+        .collect()
+}
+
+/// Records the fragment kind of each `$name:kind` in `matcher`, its repetitions included.
+fn fragments(matcher: TokenStream, kinds: &mut BTreeMap<String, String>) {
+    let tokens: Vec<TokenTree> = matcher.into_iter().collect();
+    for (index, token) in tokens.iter().enumerate() {
+        match (token, tokens.get(index + 1..index + 4)) {
+            (TokenTree::Group(group), _) => fragments(group.stream(), kinds),
+            (
+                TokenTree::Punct(dollar),
+                Some(
+                    [
+                        TokenTree::Ident(name),
+                        TokenTree::Punct(colon),
+                        TokenTree::Ident(kind),
+                    ],
+                ),
+            ) if dollar.as_char() == '$' && colon.as_char() == ':' => {
+                kinds.insert(names::name_of(name), kind.to_string());
+            }
+            _ => {}
+        }
     }
 }
 
-/// `tokens` with each metavariable replaced by its placeholder, `$crate` by `crate`, and each
-/// repetition by its inner tokens.
-fn substitute(tokens: TokenStream) -> TokenStream {
+/// `tokens` with each metavariable in `kinds` replaced by what parses in its place (see the
+/// module docs), `$crate` by `crate`, and each repetition by its inner tokens. A `$name` that
+/// the matcher does not bind stays, as in the body of a `macro_rules!` written inside the rule.
+fn substitute(tokens: TokenStream, kinds: &BTreeMap<String, String>) -> TokenStream {
     let tokens: Vec<TokenTree> = tokens.into_iter().collect();
     let mut out: Vec<TokenTree> = Vec::new();
     let mut index = 0;
@@ -73,36 +109,44 @@ fn substitute(tokens: TokenStream) -> TokenStream {
         index += 1;
         match (token, tokens.get(index)) {
             (TokenTree::Group(group), _) => {
-                let mut inner = Group::new(group.delimiter(), substitute(group.stream()));
+                let mut inner = Group::new(group.delimiter(), substitute(group.stream(), kinds));
                 inner.set_span(group.span());
                 out.push(TokenTree::Group(inner));
+            }
+            (TokenTree::Punct(dollar), Some(TokenTree::Ident(ident)))
+                if dollar.as_char() == '$' && ident == "crate" =>
+            {
+                out.push(TokenTree::Ident(Ident::new("crate", ident.span())));
+                index += 1;
             }
             (TokenTree::Punct(dollar), Some(TokenTree::Ident(ident)))
                 if dollar.as_char() == '$' =>
             {
                 let name = names::name_of(ident);
-                let text = if name == "crate" {
-                    name
-                } else {
-                    format!("{PLACEHOLDER}{name}")
-                };
-                // Before an item keyword the metavariable can only be a visibility (`$vis fn`),
-                // which names no path; dropping it lets the item parse.
-                let visibility = matches!(
-                    tokens.get(index + 1),
-                    Some(TokenTree::Ident(next)) if ITEM_KEYWORDS.iter().any(|word| next == word)
-                );
-                if !visibility {
-                    out.push(TokenTree::Ident(Ident::new(&text, ident.span())));
+                match kinds.get(&name) {
+                    Some(kind) => {
+                        out.extend(fragment(kind, &name, ident.span()));
+                        index += 1;
+                    }
+                    None => out.push(token.clone()),
                 }
-                index += 1;
             }
             (TokenTree::Punct(dollar), Some(TokenTree::Group(group)))
                 if dollar.as_char() == '$' && group.delimiter() == Delimiter::Parenthesis =>
             {
                 match repetition_end(&tokens, index + 1) {
                     Some(end) => {
-                        out.extend(substitute(group.stream()));
+                        let inner: Vec<TokenTree> =
+                            substitute(group.stream(), kinds).into_iter().collect();
+                        let separator = tokens.get(index + 1..end - 1).unwrap_or_default();
+                        let path_sep = is_path_sep(separator, 0);
+                        out.extend(inner.iter().cloned());
+                        if path_sep || builds_a_path(&inner) {
+                            if path_sep {
+                                out.extend(separator.iter().cloned());
+                            }
+                            out.extend(inner);
+                        }
                         index = end;
                     }
                     None => out.push(token.clone()),
@@ -114,8 +158,38 @@ fn substitute(tokens: TokenStream) -> TokenStream {
     out.into_iter().collect()
 }
 
+/// What stands in for the metavariable `name` of fragment kind `kind`, with `span`.
+fn fragment(kind: &str, name: &str, span: Span) -> Vec<TokenTree> {
+    let placeholder = Ident::new(&format!("{PLACEHOLDER}{name}"), span);
+    match kind {
+        "block" => {
+            let mut block = Group::new(Delimiter::Brace, TokenStream::new());
+            block.set_span(span);
+            vec![TokenTree::Group(block)]
+        }
+        "lifetime" => {
+            let mut quote = Punct::new('\'', Spacing::Joint);
+            quote.set_span(span);
+            vec![TokenTree::Punct(quote), TokenTree::Ident(placeholder)]
+        }
+        "literal" => {
+            let mut zero = Literal::u8_unsuffixed(0);
+            zero.set_span(span);
+            vec![TokenTree::Literal(zero)]
+        }
+        "vis" | "item" => Vec::new(),
+        _ => vec![TokenTree::Ident(placeholder)],
+    }
+}
+
+/// True when `tokens` start or end with `::`, so repeating them builds a longer path.
+fn builds_a_path(tokens: &[TokenTree]) -> bool {
+    is_path_sep(tokens, 0) || tokens.len() >= 2 && is_path_sep(tokens, tokens.len() - 2)
+}
+
 /// The index after the `*`, `+` or `?` that ends a repetition whose group ends before `at`,
-/// past a separator of one token (`,`, `;`, `=>`) when there is one; `None` for another shape.
+/// past a separator of one token (`,`, `;`, `=>`, `::`) when there is one; `None` for another
+/// shape.
 fn repetition_end(tokens: &[TokenTree], at: usize) -> Option<usize> {
     let op = |index: usize, ops: &str| {
         tokens
@@ -137,13 +211,15 @@ fn repetition_end(tokens: &[TokenTree], at: usize) -> Option<usize> {
     None
 }
 
-/// The expansion of each rule `(matcher) => { expansion };`, or `None` for another shape.
-fn rule_bodies(tokens: TokenStream) -> Option<Vec<TokenStream>> {
+/// Each rule `(matcher) => { expansion };`, or `None` for another shape.
+fn rules(tokens: TokenStream) -> Option<Vec<(Group, Group)>> {
     let tokens: Vec<TokenTree> = tokens.into_iter().collect();
-    let mut bodies = Vec::new();
+    let mut rules = Vec::new();
     let mut index = 0;
     while index < tokens.len() {
-        let matcher = matches!(tokens.get(index), Some(TokenTree::Group(_)));
+        let Some(TokenTree::Group(matcher)) = tokens.get(index) else {
+            return None;
+        };
         let arrow = matches!(
             tokens.get(index + 1),
             Some(TokenTree::Punct(eq)) if eq.as_char() == '=' && eq.spacing() == Spacing::Joint
@@ -151,31 +227,33 @@ fn rule_bodies(tokens: TokenStream) -> Option<Vec<TokenStream>> {
         let Some(TokenTree::Group(body)) = tokens.get(index + 3) else {
             return None;
         };
-        if !matcher || !arrow || body.delimiter() == Delimiter::None {
+        if !arrow || body.delimiter() == Delimiter::None {
             return None;
         }
-        bodies.push(body.stream());
+        rules.push((matcher.clone(), body.clone()));
         index += 4;
         if tokens.get(index).is_some_and(|semi| is_punct(semi, ';')) {
             index += 1;
         }
     }
-    Some(bodies)
+    Some(rules)
 }
 
-/// `tokens` as items, else statements, else comma-separated expressions, else tokens.
-fn parse(tokens: TokenStream) -> Body {
+/// `tokens` as items, else statements, else comma-separated expressions, else a type.
+fn parse(tokens: TokenStream) -> Option<Body> {
     if let Ok(file) = syn::parse2::<syn::File>(tokens.clone()) {
-        return Body::Items(file.items);
+        return Some(Body::Items(file.items));
     }
     if let Ok(stmts) = syn::Block::parse_within.parse2(tokens.clone()) {
-        return Body::Stmts(stmts);
+        return Some(Body::Stmts(stmts));
     }
     let exprs = Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated;
     if let Ok(exprs) = exprs.parse2(tokens.clone()) {
-        return Body::Exprs(exprs.into_iter().collect());
+        return Some(Body::Exprs(exprs.into_iter().collect()));
     }
-    Body::Tokens(tokens)
+    syn::parse2::<syn::Type>(tokens)
+        .ok()
+        .map(|ty| Body::Type(Box::new(ty)))
 }
 
 /// One `a::b::c`, `::a::b` or `<a::b>::c` chain of a token stream, and the span of its start.

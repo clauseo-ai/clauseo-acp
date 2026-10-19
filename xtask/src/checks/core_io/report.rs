@@ -60,6 +60,16 @@ pub(super) fn site(path: &str, package: &str, src: &str, site: Site) -> Violatio
                  include!, so core-io parses it"
             ),
         ),
+        Reach::UnreadableRule => (
+            format!(
+                "{package} has a macro_rules! rule whose body core-io cannot parse, even with each \
+                 metavariable replaced by a placeholder of its kind, so core-io cannot check it"
+            ),
+            format!(
+                "restructure the rule so its body is items, statements, expressions or a type \
+                 (move the rest into a helper rule or a function), {except}"
+            ),
+        ),
     };
     violation(path, site.line, message, fix)
 }

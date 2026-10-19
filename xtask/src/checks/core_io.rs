@@ -9,8 +9,8 @@
 //! path goes through it.
 //!
 //! Not covered: methods that touch the disk or the clock without naming a banned path
-//! (`Path::exists`, `Path::metadata`,
-//! `Path::read_dir`, `Path::canonicalize`, `UNIX_EPOCH.elapsed()`, `Instant::elapsed`),
+//! (`Path::exists`, `Path::metadata`, `Path::read_dir`, `Path::canonicalize`,
+//! `UNIX_EPOCH.elapsed()`, `Instant::elapsed`),
 //! `std::io::stdin` and the other standard streams, `build.rs`, `tests/` and `benches/`, and
 //! code another crate runs for this one (a dependency, a proc macro).
 //!
@@ -18,7 +18,8 @@
 //! crate's `src/` with `syn`, places each file in its crate roots (`files.rs`), resolves names
 //! (`names.rs`) and reports each site that reaches a banned path (`sites.rs`, `bans.rs`). Code
 //! the check would not parse fails on its own: a symlink under `src/`, a `#[path]` module, an
-//! `include!`, and a `[lib]` or `[[bin]]` path outside `src/` in the crate's `Cargo.toml`.
+//! `include!`, a `macro_rules!` rule whose body does not parse (`tokens.rs`), and a `[lib]` or
+//! `[[bin]]` path outside `src/` in the crate's `Cargo.toml`.
 //!
 //! Exceptions are whole files of held crates, listed in `xtask/core-io-exceptions.txt` (see
 //! `exceptions.rs`). It counts the Crates-table rows it classified, held or not.

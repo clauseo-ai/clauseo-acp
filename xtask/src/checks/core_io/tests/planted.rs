@@ -280,6 +280,22 @@ crate::checks::planted::cases! {
     cfg_attr_on_a_mod: FailsWith(&[uses!("m.rs", 2, "std::fs")]) => super::cfg_attr_on_a_mod,
     /// `std::os::<any>::prelude` re-exports the platform I/O traits.
     os_prelude_glob: FailsWith(&[glob!(1, "std::os::unix::prelude", "std::os::unix::prelude")]) => super::os_prelude_glob,
+    /// Rule bodies that parse only with each metavariable replaced by its fragment kind: a
+    /// `block` and a `lifetime`.
+    rule_block_use_group: FailsWith(&[uses!("lib.rs", 1, "std::fs")]) => super::rule_block_use_group,
+    rule_block_std_alias: FailsWith(&[uses!("lib.rs", 1, "std::fs")]) => super::rule_block_std_alias,
+    rule_lifetime: FailsWith(&[uses!("lib.rs", 1, "std::fs")]) => super::rule_lifetime,
+    /// A rule body that parses as no code fails closed.
+    rule_body_does_not_parse: FailsWith(&[
+        "crates/protocol/src/lib.rs:1: clauseo-protocol has a macro_rules! rule whose body \
+         core-io cannot parse, even with each metavariable replaced by a placeholder of its kind, \
+         so core-io cannot check it\n    \
+         fix: restructure the rule so its body is items, statements, expressions or a type (move \
+         the rest into a helper rule or a function), or add `crates/protocol/src/lib.rs <reason>` \
+         to xtask/core-io-exceptions.txt",
+    ]) => super::rule_body_does_not_parse,
+    /// A repetition joined by `::` builds a path of any length.
+    rule_repetition_builds_a_path: FailsWith(&[metavariable!(1, "$p::$p::read", all_bans!())]) => super::rule_repetition_builds_a_path,
     /// `#[path]` inside nested `cfg_attr`s.
     cfg_attr_nested_path: FailsWith(&[
         "crates/protocol/src/lib.rs:1: clauseo-protocol loads module `io` from `../io.rs` \

@@ -1,12 +1,14 @@
 //! The planted cases of the core-io check and its other tests. Each case builds a scratch repo
 //! with an `ARCHITECTURE.md` whose `protocol` row holds core I/O, and the sources of
 //! `clauseo-protocol` under `crates/protocol/src/`. The cases with sources of their own are in
-//! `tests/cases.rs`.
+//! `tests/cases.rs`, those for `macro_rules!` bodies in `tests/rules.rs`.
 
 mod cases;
 pub(super) mod planted;
+mod rules;
 
 use cases::*;
+use rules::*;
 
 use super::*;
 use crate::scratch::Scratch;
