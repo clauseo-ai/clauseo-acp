@@ -103,7 +103,7 @@ fn a_failed_download_leaves_bin_untouched_and_names_curl_as_the_fix() {
          xtask setup --binaries again",
         expected_curl(&asset, &url)
     );
-    let cases: [(&str, io::Result<Ended>); 3] = [
+    let cases: [(&str, io::Result<Ended>); 4] = [
         (
             "failed: curl: (22) The requested URL returned error: 404",
             exited(
@@ -111,6 +111,16 @@ fn a_failed_download_leaves_bin_untouched_and_names_curl_as_the_fix() {
                 "",
                 "curl: (22) The requested URL returned error: 404\n\
                  curl: (22) The requested URL returned error: 404\n",
+            ),
+        ),
+        (
+            "failed: curl: (28) Operation timed out after 300002 milliseconds with 0 bytes \
+             received",
+            exited(
+                false,
+                "",
+                "curl: (28) Operation timed out after 300001 milliseconds with 0 bytes received\n\
+                 curl: (28) Operation timed out after 300002 milliseconds with 0 bytes received\n",
             ),
         ),
         (

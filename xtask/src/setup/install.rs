@@ -365,13 +365,14 @@ fn run_step(
     let message = match runner(cmd, dir, Output::Quiet, timeout) {
         Ok(Ended::Exited(ran)) if ran.success => return Ok(()),
         Ok(Ended::Exited(ran)) => {
-            // A retried curl prints its error once per attempt; each line is said once.
-            let mut lines: Vec<&str> = ran.stderr.trim().lines().collect();
-            lines.dedup();
-            let said = lines.join("\n");
+            // A retried curl prints one error line per attempt; only the last attempt's is said.
+            let mut said = ran.stderr.trim();
+            if cmd.program == Program::Named("curl") {
+                said = said.lines().last().unwrap_or_default();
+            }
             format!(
                 "{what} failed: {}",
-                if said.is_empty() { "no output" } else { &said }
+                if said.is_empty() { "no output" } else { said }
             )
         }
         Ok(Ended::TimedOut) => format!(
