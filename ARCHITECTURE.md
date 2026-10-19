@@ -92,11 +92,16 @@ reaches) is a module of `host`, not a crate. Frontend packages: `ui/app` (exists
 `ui/app/src/transport/`.
 
 "fs", "process", "any I/O" and "clock" in the "Never depends on" column mean the standard
-library's APIs, not the `process` crate, and cover the crate's own code. `cargo xtask check`
-parses every `.rs` file under the crate's `src/` with `syn`. "fs", "process" or "any I/O" bans
-the file, network, process and environment APIs and the functions that read the clock; "clock"
-alone bans only the functions that read the clock. The banned paths are the paths in
-`xtask/src/checks/core_io/bans.rs`. Exceptions, one path per line with a reason, live in `xtask/core-io-exceptions.txt`.
+library's APIs, not the `process` crate, and cover the crate's own code. "fs", "process" or "any
+I/O" bans the file, network, process and environment APIs, the standard streams, and the
+functions that read the disk or the clock (`Path::exists`, `Instant::elapsed`); "clock" alone
+bans only the two clock `now` functions, which the root `clippy.toml` bans in every crate. clippy
+enforces the bans after macro expansion: a crate whose row lists "fs", "process" or "any I/O"
+has its own `clippy.toml`, the root `clippy.toml` with the `disallowed-methods` and
+`disallowed-types` arrays of `xtask/core-io-bans.toml` appended, and `cargo xtask check` fails
+when that file is missing or parses to anything else. An exception is
+`#[expect(clippy::disallowed_methods, reason = "..")]` (or `disallowed_types`) on the code that
+needs it.
 
 ## Seams left open on purpose
 

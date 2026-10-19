@@ -20,7 +20,7 @@
 //! - an I/O word in other letter case (`FS`, `Any I/O`): rejected with the exact word to write,
 //!   not read as a crates.io name;
 //! - `std`, or a standard library module that core-io bans whole (`net`, `env`, `os`: see
-//!   `core_io/bans.rs`): rejected, since it names no crate we use and the I/O words are how the
+//!   `core_io.rs`): rejected, since it names no crate we use and the I/O words are how the
 //!   table bans those APIs. `time` is the crates.io crate;
 //! - a row's name: that row's crate, the package `clauseo-<name>` (`xtask` for `xtask`);
 //! - a row's package, in lowercase, `-` and `_` read the same (`clauseo-process`, since a bare

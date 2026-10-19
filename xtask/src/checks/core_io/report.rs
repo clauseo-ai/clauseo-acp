@@ -1,117 +1,126 @@
 //! The text of every core-io violation, so each message and its fix live side by side.
 
-use super::EXCEPTIONS;
-use super::sites::{Reach, Site};
-use crate::checks::crates_table;
-use crate::checks::exceptions::Exception;
-use crate::checks::violation;
+use super::clippy_toml::{LIST, ROOT};
+use crate::checks::{crates_table, violation};
 use crate::violation::Violation;
 
-/// The violation for one site in the file `path` of `package`, whose sources are in `src`.
-pub(super) fn site(path: &str, package: &str, src: &str, site: Site) -> Violation {
-    let except = format!("or add `{path} <reason>` to {EXCEPTIONS}");
-    let (message, fix) = match site.reach {
-        Reach::Uses(banned) => (
-            format!("{package} uses {banned}, which ARCHITECTURE.md forbids in this crate"),
-            format!(
-                "take what {banned} gives as a parameter, or move this code to a crate that may \
-                 do I/O, {except}"
-            ),
-        ),
-        Reach::Glob { prefix, reaches } => (
-            format!(
-                "{package} glob-imports {prefix}::*, which reaches {}; ARCHITECTURE.md forbids \
-                 that in this crate",
-                reaches.join(", ")
-            ),
-            format!("import the items you use from {prefix} by name instead, {except}"),
-        ),
-        Reach::Metavariable { written, reaches } => (
-            format!(
-                "{package} builds `{written}` from a macro metavariable, which may expand to {}; \
-                 core-io cannot see the expansion, and ARCHITECTURE.md forbids those in this \
-                 crate",
-                reaches.join(", ")
-            ),
-            format!(
-                "write the path out in full instead of building it from a metavariable, {except}"
-            ),
-        ),
-        Reach::PathAttribute { module, path: file } => (
-            match file {
-                Some(file) => format!(
-                    "{package} loads module `{module}` from `{file}` with #[path], and core-io \
-                     parses only the module files Rust finds without it"
-                ),
-                None => format!(
-                    "{package} loads module `{module}` with #[path], and core-io parses only the \
-                     module files Rust finds without it"
-                ),
-            },
-            format!(
-                "drop #[path] and keep the module as `{module}.rs` or `{module}/mod.rs` beside \
-                 its parent module under `{src}/`, so core-io parses it"
-            ),
-        ),
-        Reach::Include => (
-            format!("{package} pulls in code with include!, which core-io does not parse"),
-            format!(
-                "turn the included file into a module under `{src}/` (`mod name;`) instead of \
-                 include!, so core-io parses it"
-            ),
-        ),
-        Reach::UnreadableRule => (
-            format!(
-                "{package} has a macro_rules! rule whose body core-io cannot parse, even with each \
-                 metavariable replaced by a placeholder of its kind, so core-io cannot check it"
-            ),
-            format!(
-                "restructure the rule so its body is items, statements, expressions or a type \
-                 (move the rest into a helper rule or a function), {except}"
-            ),
-        ),
-    };
-    violation(path, site.line, message, fix)
+/// The fix's lead-in before the file to write at `path`.
+fn write_this(path: &str, text: &str) -> String {
+    format!(
+        "write `{path}` with exactly this text, the root {ROOT} with the arrays of {LIST} \
+         appended (clippy reads only the nearest clippy.toml):\n{text}"
+    )
 }
 
-/// The violation for `path`, which `syn` could not parse (the error at `line`).
-pub(super) fn unparsed(path: &str, line: u32, error: &syn::Error) -> Violation {
+/// The violation at the row (line `line` of `ARCHITECTURE.md`) of `package`, whose
+/// `clippy.toml` at `path` is missing; `words` are the I/O words of its row.
+pub(super) fn missing_crate_file(
+    line: u32,
+    package: &str,
+    words: &str,
+    path: &str,
+    text: &str,
+) -> Violation {
+    violation(
+        crates_table::FILE,
+        line,
+        format!(
+            "{package}'s row bans I/O (Never depends on: {words}), but `{path}` is missing, so \
+             clippy does not ban the standard library's I/O in it"
+        ),
+        write_this(path, text),
+    )
+}
+
+/// The violation for the `clippy.toml` at `path` of `package`, which parses but differs from
+/// the root file plus the list in the keys `keys`.
+pub(super) fn crate_file_differs(
+    path: &str,
+    package: &str,
+    keys: &[String],
+    text: &str,
+) -> Violation {
+    let keys: Vec<String> = keys.iter().map(|key| format!("`{key}`")).collect();
+    violation(
+        path,
+        1,
+        format!(
+            "`{path}` of {package} is not the root {ROOT} plus {LIST}: it differs in {}",
+            keys.join(", ")
+        ),
+        write_this(path, text),
+    )
+}
+
+/// The violation for a crate's `clippy.toml` at `path`, which is not TOML (the error at `line`).
+pub(super) fn crate_file_not_toml(
+    path: &str,
+    line: u32,
+    error: &toml::de::Error,
+    text: &str,
+) -> Violation {
+    let first = error.message().lines().next().unwrap_or_default().trim();
     violation(
         path,
         line,
-        format!("`{path}` does not parse as Rust ({error}), so core-io cannot check it"),
-        "fix the syntax; if rustc accepts the file, report that syn cannot parse it, so xtask \
-         can be fixed",
+        format!("`{path}` is not valid TOML ({first})"),
+        write_this(path, text),
     )
 }
 
-/// The violation for an exception whose path is not a file.
-pub(super) fn not_a_file(entry: &Exception) -> Violation {
+/// The violation for the root file or the list, missing at `rel`.
+pub(super) fn missing_input(rel: &str) -> Violation {
     violation(
-        EXCEPTIONS,
-        entry.line,
-        format!(
-            "`{}` is not a file in this repo, so its core-io exception is stale",
-            entry.path
-        ),
-        "delete this line, or correct the path if the file moved",
+        rel,
+        1,
+        format!("`{rel}` is missing, and core-io builds each core crate's clippy.toml from it"),
+        format!("restore `{rel}` from git"),
     )
 }
 
-/// The violation for an exception whose file is in no crate that core-io checks.
-pub(super) fn outside_held_crates(entry: &Exception) -> Violation {
+/// The violation for the root file or the list at `rel`, which `toml` could not read.
+pub(super) fn not_toml(rel: &str, line: u32, error: &toml::de::Error) -> Violation {
+    let first = error.message().lines().next().unwrap_or_default().trim();
+    let fix = if rel == LIST {
+        "fix the line above: the file holds only `disallowed-methods` and `disallowed-types`, \
+         arrays of `{ path, reason }` tables, each with an optional `replacement` and \
+         `allow-invalid`"
+    } else {
+        "fix the line above so clippy and core-io can read the file"
+    };
+    violation(rel, line, format!("`{rel}` is not valid: {first}"), fix)
+}
+
+/// The violation for the root file's `key`, at `line`, which is not an array to append to.
+pub(super) fn root_not_an_array(key: &str, line: u32) -> Violation {
     violation(
-        EXCEPTIONS,
-        entry.line,
+        ROOT,
+        line,
         format!(
-            "`{}` is in no crate whose row bans I/O, so its core-io exception is stale",
-            entry.path
+            "`{key}` in {ROOT} is not an array, so core-io cannot append {LIST}'s `{key}` to it"
         ),
-        "delete this line",
+        format!("write `{key}` as an array of `{{ path, reason }}` tables"),
     )
 }
 
-/// The violation at the crate's row in `ARCHITECTURE.md`, for a problem with its sources.
-pub(super) fn at_row(line: u32, message: String, fix: String) -> Violation {
-    violation(crates_table::FILE, line, message, fix)
+/// The violation for an entry of the list's `key` whose reason is empty.
+pub(super) fn empty_reason(key: &str, path: &str, line: u32) -> Violation {
+    violation(
+        LIST,
+        line,
+        format!(
+            "the `{key}` entry for `{path}` has an empty reason, which clippy prints with each hit"
+        ),
+        "say why a core crate may not use the item, and what to do instead",
+    )
+}
+
+/// The violation for an entry of the list's `key` whose path an earlier entry already names.
+pub(super) fn listed_twice(key: &str, path: &str, line: u32) -> Violation {
+    violation(
+        LIST,
+        line,
+        format!("`{path}` is listed twice in `{key}`"),
+        "delete this entry",
+    )
 }

@@ -235,7 +235,7 @@ fn the_real_architecture_md_parses() {
     assert!(table.row("protocol").is_some_and(CrateRow::holds_core_io));
 }
 
-/// `std`, and each std module that core-io bans whole or in part (`core_io/bans.rs`), fails.
+/// `std`, and each std module that core-io bans whole or in part (`core_io.rs`), fails.
 #[test]
 fn a_std_module_in_the_never_column_fails_at_its_row() {
     let text = doc("| `reducer` | things | | net, tauri, env, os, std | planned |\n");

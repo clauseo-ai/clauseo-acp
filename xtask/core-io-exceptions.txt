@@ -1,9 +1,0 @@
-# core-io exceptions: files of a crate that must not do I/O (its Crates-table row in
-# ARCHITECTURE.md lists fs, process, any I/O or clock under "Never depends on") that may still
-# reach the paths in xtask/src/checks/core_io/bans.rs. Read by xtask/src/checks/core_io.rs.
-#
-# Format: one repo-relative file path per line, then whitespace, then why the file is exempt.
-# Blank lines and lines starting with # are skipped. A listed path that is not a file fails.
-#
-# Example (not an entry):
-#   crates/protocol/src/fixtures.rs  reads test fixtures from disk
