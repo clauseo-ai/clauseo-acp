@@ -1,6 +1,6 @@
 //! The core-io planted cases with sources of their own.
 
-use super::{Repo, lib, run_on, run_repo};
+use super::{ARCHITECTURE, Repo, lib, run_on, run_repo};
 use crate::checks::Inspection;
 
 pub(in crate::checks::core_io) fn raw_std() -> Inspection {
@@ -283,5 +283,41 @@ pub(in crate::checks::core_io) fn local_names_like_banned_ones() -> Inspection {
         "local-names",
         "mod fs {\n    pub fn read(_: &str) {}\n}\n\npub fn f() {\n    fs::read(\"a\");\n    \
          let _ = other::time::Instant::now();\n}\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn metavariable_type_binding() -> Inspection {
+    rule("metavariable-type", "$t:ty", "type A = $t;")
+}
+
+pub(in crate::checks::core_io) fn metavariable_use_binding() -> Inspection {
+    rule("metavariable-use", "$p:path", "use $p as I;")
+}
+
+pub(in crate::checks::core_io) fn include_alias() -> Inspection {
+    lib(
+        "include-alias",
+        "use std::include as inc;\n\ninc!(\"../io.rs\");\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn core_include() -> Inspection {
+    lib("core-include", "core::include!(\"../io.rs\");\n")
+}
+
+/// A row whose Never list is `clock` alone: `std::fs` passes, `Instant::now` fails.
+pub(in crate::checks::core_io) fn clock_only_row() -> Inspection {
+    let architecture = ARCHITECTURE.replace("tauri, fs, process", "clock");
+    run_repo(
+        "clock-only-row",
+        &Repo {
+            files: &[(
+                "lib.rs",
+                "pub fn f() {\n    let _ = std::fs::read(\"a\");\n    \
+                 let _ = std::time::Instant::now();\n}\n",
+            )],
+            architecture: Some(&architecture),
+            ..Repo::default()
+        },
     )
 }

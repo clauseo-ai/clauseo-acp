@@ -78,6 +78,8 @@ pub(super) enum Kind {
     ThenMetavariable(String),
     /// `$x::a::b` or `<$x>::a::b`: the segments after the metavariable `x`.
     Metavariable(String),
+    /// `type A = $t` or `use $p`: a binding to whatever the metavariable expands to.
+    Binding(String),
 }
 
 /// One chain of a token stream: its segments, the span of its start and how it is written.
@@ -99,7 +101,22 @@ pub(super) fn chains(tokens: TokenStream) -> Vec<Chain> {
                 found.extend(chains(group.stream()));
                 index + 1
             }
-            TokenTree::Ident(_) => path_chain(&tokens, index, false, &mut found),
+            TokenTree::Ident(ident) => match binding(&tokens, index) {
+                Some((written, end)) => {
+                    let span = ident.span();
+                    let path = Written {
+                        segments: Vec::new(),
+                        leading_colon: false,
+                    };
+                    found.push(Chain {
+                        path,
+                        span,
+                        kind: Kind::Binding(written),
+                    });
+                    end
+                }
+                None => path_chain(&tokens, index, false, &mut found),
+            },
             TokenTree::Punct(_) if is_path_sep(&tokens, index) => {
                 if matches!(tokens.get(index + 2), Some(TokenTree::Ident(_))) {
                     path_chain(&tokens, index + 2, true, &mut found)
@@ -112,6 +129,35 @@ pub(super) fn chains(tokens: TokenStream) -> Vec<Chain> {
         };
     }
     found
+}
+
+/// `type A = $t` or `use $p` (also `use ::$p`) at `index`: how it is written and the index after
+/// the metavariable.
+fn binding(tokens: &[TokenTree], index: usize) -> Option<(String, usize)> {
+    let Some(TokenTree::Ident(keyword)) = tokens.get(index) else {
+        return None;
+    };
+    if keyword == "type" {
+        let Some(TokenTree::Ident(alias)) = tokens.get(index + 1) else {
+            return None;
+        };
+        let equals = tokens.get(index + 2).is_some_and(|eq| is_punct(eq, '='));
+        let name = metavariable_at(tokens, index + 3).filter(|_| equals)?;
+        Some((
+            format!("type {} = ${name}", names::name_of(alias)),
+            index + 5,
+        ))
+    } else if keyword == "use" {
+        let start = if is_path_sep(tokens, index + 1) {
+            index + 3
+        } else {
+            index + 1
+        };
+        let name = metavariable_at(tokens, start)?;
+        Some((format!("use ${name}"), start + 2))
+    } else {
+        None
+    }
 }
 
 /// Reads the path chain whose first identifier is at `start`; returns the index after it.

@@ -97,7 +97,8 @@ impl Table {
         let Some((first, rest)) = path.segments.split_first() else {
             return found;
         };
-        if first == "std" || self.std_names.contains(first) {
+        // `core` counts as `std`: it re-exports nothing banned, and `core::include` is `include`.
+        if first == "std" || first == "core" || self.std_names.contains(first) {
             found.insert(Target::Std(std_path(rest)));
         }
         for root in self.crate_names.get(first).into_iter().flatten() {

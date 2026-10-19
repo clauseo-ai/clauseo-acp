@@ -8,7 +8,6 @@ mod cases;
 pub(super) use cases::*;
 
 use super::*;
-use crate::checks::crates_table::Status;
 use crate::scratch::Scratch;
 use std::fs;
 
@@ -28,12 +27,15 @@ struct Repo<'a> {
     exceptions: Option<&'a str>,
     /// `crates/protocol/Cargo.toml`.
     manifest: Option<&'a str>,
+    /// `ARCHITECTURE.md` in place of `ARCHITECTURE`.
+    architecture: Option<&'a str>,
 }
 
 /// Writes `repo` into a scratch dir named after `case`; returns the dir.
 fn scratch(case: &str, repo: &Repo<'_>) -> Scratch {
     let dir = Scratch::new(&format!("core-io-{case}"));
-    fs::write(dir.join(crates_table::FILE), ARCHITECTURE).expect("write ARCHITECTURE.md");
+    let architecture = repo.architecture.unwrap_or(ARCHITECTURE);
+    fs::write(dir.join(crates_table::FILE), architecture).expect("write ARCHITECTURE.md");
     fs::create_dir_all(dir.join("crates/protocol")).expect("create the crate dir");
     for (path, text) in repo.files {
         let path = dir.join("crates/protocol/src").join(path);
@@ -313,38 +315,6 @@ fn sites_of_one_kind_are_reported_once_per_line() {
     );
     let lines: Vec<u32> = found.violations.iter().map(|v| v.line).collect();
     assert_eq!(lines, [3, 7, 8]);
-}
-
-#[test]
-fn a_clock_only_row_bans_only_the_clocks() {
-    let dir = scratch(
-        "clock-only",
-        &Repo {
-            files: &[(
-                "lib.rs",
-                "use std::fs;\n\npub fn f() {\n    let _ = std::time::Instant::now();\n}\n",
-            )],
-            ..Repo::default()
-        },
-    );
-    let row = CrateRow {
-        line: 8,
-        name: "protocol".to_owned(),
-        owns: String::new(),
-        may_depend_on: Vec::new(),
-        never: vec![Never::Io(IoWord::Clock)],
-        status: Status::Exists,
-    };
-    let found = check_crate(&dir, &members()[0], &row, &[]);
-    let lines: Vec<(u32, &str)> = found.iter().map(|v| (v.line, v.message.as_str())).collect();
-    assert_eq!(
-        lines,
-        [(
-            4,
-            "clauseo-protocol uses std::time::Instant::now, which ARCHITECTURE.md forbids in \
-             this crate"
-        )]
-    );
 }
 
 #[cfg(unix)]

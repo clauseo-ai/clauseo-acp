@@ -151,6 +151,10 @@ impl Finder<'_> {
                         self.add(span, Reach::Metavariable { written, reaches });
                     }
                 }
+                Kind::Binding(written) => {
+                    let reaches = self.bans.reaches(&["std".to_owned()]);
+                    self.add(span, Reach::Metavariable { written, reaches });
+                }
                 Kind::Metavariable(name) => {
                     let reaches = self.bans.metavariable_reaches(&path.segments);
                     if !reaches.is_empty() {
@@ -261,12 +265,13 @@ impl<'ast> Visit<'ast> for Finder<'_> {
 
     fn visit_macro(&mut self, i: &'ast syn::Macro) {
         let name = names::written(&i.path);
-        let include = match name.segments.as_slice() {
-            [include] => include == "include",
-            [krate, include] => include == "include" && (krate == "std" || krate == "core"),
-            _ => false,
+        let prelude = name.segments == ["include"] && !name.leading_colon;
+        let include = || {
+            self.std_targets(&name)
+                .iter()
+                .any(|path| path.as_slice() == ["std", "include"])
         };
-        if include {
+        if prelude || include() {
             self.add(i.bang_token.spans[0], Reach::Include);
         }
         for body in tokens::bodies(i) {

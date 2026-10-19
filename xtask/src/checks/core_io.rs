@@ -414,6 +414,24 @@ crate::checks::planted::cases! {
     use_then_call: FailsWith(&[uses!("lib.rs", 1, "std::fs"), uses!("lib.rs", 4, "std::fs")]) => tests::use_then_call,
     alias_in_another_file: FailsWith(&[uses!("lib.rs", 4, "std::time::Instant::now")]) => tests::alias_in_another_file,
     std_reexported_from_the_root: FailsWith(&[uses!("a.rs", 2, "std::fs")]) => tests::std_reexported_from_the_root,
+    /// Paths a metavariable feeds into a `type` alias or a `use`.
+    metavariable_type_binding: FailsWith(&[metavariable!(3, "type A = $t", all_bans!())]) => tests::metavariable_type_binding,
+    metavariable_use_binding: FailsWith(&[metavariable!(3, "use $p", all_bans!())]) => tests::metavariable_use_binding,
+    /// `include!` through an alias, and `core::include!`.
+    include_alias: FailsWith(&[
+        "crates/protocol/src/lib.rs:3: clauseo-protocol pulls in code with include!, which core-io \
+         does not parse\n    \
+         fix: turn the included file into a module under `crates/protocol/src/` (`mod name;`) \
+         instead of include!, so core-io parses it",
+    ]) => tests::include_alias,
+    core_include: FailsWith(&[
+        "crates/protocol/src/lib.rs:1: clauseo-protocol pulls in code with include!, which core-io \
+         does not parse\n    \
+         fix: turn the included file into a module under `crates/protocol/src/` (`mod name;`) \
+         instead of include!, so core-io parses it",
+    ]) => tests::core_include,
+    /// A row with only `clock` bans the clocks' `now` and nothing else.
+    clock_only_row: FailsWith(&[uses!("lib.rs", 3, "std::time::Instant::now")]) => tests::clock_only_row,
     /// Code the check would not parse fails on its own.
     path_attribute: FailsWith(&[
         "crates/protocol/src/lib.rs:1: clauseo-protocol loads module `io` from `../io.rs` \
