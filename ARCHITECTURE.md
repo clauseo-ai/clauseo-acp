@@ -31,7 +31,8 @@ Clauseo app process (Rust)
 2. `desktop` deserialises and validates the command in Rust (types, opaque ids, allowed values), then
    forwards it over `async-channel` to the host thread. Rust-side validation is the security boundary.
 3. The host checks it against current state, assigns the next gapless `seq` in the event's stream
-   (a thread's or a matter's), and commits the event to `store` before acting or publishing. Text deltas are the exception: they reach the screen in 16 ms batches
+   (a thread's or a matter's), and commits the event to `store` before acting or publishing. Text
+   deltas are the exception: they reach the screen in 16 ms batches
    and disk in batches of at most 250 ms.
 4. `reducer` folds events into thread and matter state and view patches (`Upsert`, `Remove`,
    `AppendText`, `Reset`), each with a per-stream `cursor`.
@@ -69,7 +70,7 @@ to write instead.
 |---|---|---|---|---|
 | `xtask` | check, ci, buildtime, budgets, doc checks | none of ours | tauri | exists |
 | `desktop` | Tauri shell: fixed plugin set, AppManifest, capabilities; later commands and the Channel bridge | host, settings, tauri | | exists |
-| `protocol` | Event envelope, domain events, commands, view patches, ids, error codes, account limit types | serde, serde_json, uuid, compact_str, specta | tauri, tokio, fs, process | exists |
+| `protocol` | Event envelope, domain events, commands, view patches, ids, error codes | serde, serde_json, uuid, compact_str, specta | tauri, tokio, fs, process | exists |
 | `reducer` | Pure fold from events to thread state and view patches | protocol | any I/O, clock, tauri | planned |
 | `store` | SQLite log, snapshots, blobs, receipts, writer thread | protocol, rusqlite | tauri | planned |
 | `matters` | Shadow repos via gix: checkpoints, undo, restore, compare, retention, file watching | protocol, gix, notify | tauri | planned |

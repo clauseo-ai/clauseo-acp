@@ -26,12 +26,13 @@ Shown as the sidebar dot (`ThreadSummary.status`) and in the thread header (`Hea
 | Needs you: a permission or elicitation is pending | `ThreadStatus::NeedsYou` | the pending `ViewEntry::Permission` or `ViewEntry::Elicitation` |
 | Waiting for another thread in the matter to finish | `ThreadStatus::Queued` | `behind`: the thread holding the matter; its title from `ThreadSummary` |
 | Paused at the usage limit | `ThreadStatus::PausedAtLimit` | `resets_at` when known; section 8 |
-| Agent exited | `ThreadStatus::AgentExited` | the last `DetachReason::Exited` (exit code; the stderr tail is redacted and never shown). Restart action: `HostCommand::RestartAgent`, refused with `ErrorCode::ThreadTurnRunning` during a turn |
-| Agent stopped while idle (M2 emits it) | `ThreadStatus::IdleStopped` | `DetachReason::IdleStopped`; resuming is in section 10 |
+| Agent exited | `ThreadStatus::AgentExited` | the status only (the exit code is in the log's `DetachReason::Exited`, not in a view entry; the stderr tail is never shown). Restart action: `HostCommand::RestartAgent`, refused with `ErrorCode::ThreadTurnRunning` during a turn |
+| Agent stopped while idle (M2 emits it) | `ThreadStatus::IdleStopped` | the status only (logged as `DetachReason::IdleStopped`); resuming is in section 10 |
 | Archived | `ThreadStatus::Archived` | title, agent; read-only |
 
-Detach reasons the header can explain: `DetachReason::Exited`, `DetachReason::Closed`,
-`DetachReason::Restarting`, `DetachReason::IdleStopped`, and `DetachReason::Unknown`.
+Detach reasons are in the log only (`agent_session_detached`, read through `SubscribeEvents`); no view
+entry carries them in M1: `DetachReason::Exited`, `DetachReason::Closed`, `DetachReason::Restarting`,
+`DetachReason::IdleStopped`, and `DetachReason::Unknown`.
 
 ## 2. Transcript entries
 
@@ -104,7 +105,7 @@ undone, and token usage (`usage`: total, input, output, thought, cached) when th
 | Stopped at the token limit | `StopReason::MaxTokens` | files changed; the queue is held |
 | Stopped at the agent's turn-request limit | `StopReason::MaxTurnRequests` | as above |
 | Agent refused | `StopReason::Refusal` | as above |
-| Cancelled (by the lawyer, send now, or a removed queued prompt) | `StopReason::Cancelled` | as above; a removed queued prompt has no files |
+| Cancelled (by the lawyer or by send now) | `StopReason::Cancelled` | as above; a queued prompt removed before it started gets no step card, only `UserMessageStatus::Removed` |
 | Stopped at the usage limit | `StopReason::AtLimit` | as above; the `ViewEntry::LimitStop` card in section 8 |
 | Failed | `StopReason::Failed` | `failure`: the error code (section 9); the event's detail is never shown |
 | Stop reason from a newer Clauseo | `StopReason::Unknown` | as failed, without a code |
@@ -118,7 +119,8 @@ undone, and token usage (`usage`: total, input, output, thought, cached) when th
 | File skipped for a reason from a newer Clauseo | `SkippedFileReason::Unknown` | path |
 | Checkpoint missing, undo impossible | no `checkpoint_after`, `undo_possible` false | shown, never silent |
 | Step already undone | `undone` true | the undo marker (section 2) |
-| Undo disabled while a turn runs in the matter | `undo_possible` false; the command fails with `ErrorCode::MatterTurnRunning` | the running thread |
+| Undo disabled while a turn runs in this thread | `undo_possible` false | the step |
+| Undo refused: a turn runs in another thread of the matter | the host checks when the command arrives: `ErrorCode::MatterTurnRunning` | the code only (retryable) |
 | Undo with a choice per file | `HostCommand::UndoStep` with `FileChoice::Undo`, `FileChoice::Keep` | the step's files |
 
 ## 4. Approvals
@@ -134,7 +136,7 @@ undone, and token usage (`usage`: total, input, output, thought, cached) when th
 | Permission the agent is waiting on | `Deliverable::Live` | as above |
 | Permission that can no longer reach the agent | `Deliverable::NotResumable` | as above; answering is not possible |
 | Deliverability from a newer Clauseo | `Deliverable::Unknown` | as not resumable |
-| Tool call touches a location outside the matter | `ToolLocation::Outside` on the tool call | display text, flagged |
+| Tool call touches a location outside the matter | `ToolLocation::Outside` on the `ViewEntry::ToolCall` the permission's `tool_call` names | display text, flagged |
 | Permission answered | `PermissionState::Resolved` with `PermissionChoice::Selected` | option id and kind, by whom (`Principal::LocalDesktop`) |
 | Permission cancelled | `PermissionState::Resolved` with `PermissionChoice::Cancelled` | by whom |
 | Permission expired | `PermissionState::Expired` | one reason below |
@@ -142,7 +144,7 @@ undone, and token usage (`usage`: total, input, output, thought, cached) when th
 | Permission expired: the turn ended | `ExpiryReason::TurnEnded` | the request |
 | Permission expired: the host restarted | `ExpiryReason::HostRestarted` | the request |
 | Expiry reason from a newer Clauseo | `ExpiryReason::Unknown` | the request |
-| Answer came too late or twice | `ErrorCode::PermissionNotPending` | the settled request |
+| Answer came too late or twice | `ErrorCode::PermissionNotPending` | the entry's current state |
 | Answer names an option not offered | `ErrorCode::PermissionUnknownOption` | the request |
 | Elicitation pending | `ViewEntry::Elicitation` with `ElicitationState::Pending` | the request below |
 | Elicitation form | `ElicitationRequest::Form` | message; schema with string, number, boolean and enum fields |
@@ -152,7 +154,7 @@ undone, and token usage (`usage`: total, input, output, thought, cached) when th
 | Elicitation declined | `ElicitationOutcome::Declined` | by whom |
 | Elicitation cancelled | `ElicitationOutcome::Cancelled` | by whom |
 | Elicitation expired | `ElicitationState::Expired`: `ExpiryReason::AgentExited`, `ExpiryReason::TurnEnded`, `ExpiryReason::HostRestarted`, `ExpiryReason::Unknown` | as for permissions |
-| Elicitation answered too late | `ErrorCode::ElicitationNotPending` | the settled request |
+| Elicitation answered too late | `ErrorCode::ElicitationNotPending` | the entry's current state |
 | Elicitation values do not match the schema | `ErrorCode::ElicitationInvalidValues` | the form, to correct |
 
 ## 5. Composer
@@ -165,29 +167,33 @@ undone, and token usage (`usage`: total, input, output, thought, cached) when th
 | Slash commands | `AvailableCommand` | name, description, input hint |
 | Send, queued when a turn runs | `Delivery::Queue` | `HostCommand::SendPrompt` without `delivery` means queue |
 | Send now | `Delivery::SendNow` | cancels the running turn, then sends this prompt |
-| Steer | `Delivery::Steer` | added to the running turn where the agent can (`SteeringCapability`), else sent now |
+| Steer | `Delivery::Steer` | the host steers where the agent can, else sends now; the result arrives as the entry's `steer`. No view entry says whether the agent steers natively (that is in the log's `agent_session_attached` capabilities) |
 | Delivery from a newer client | `Delivery::Unknown` | never run; refused with `ErrorCode::CommandInvalid` |
 | Queued prompts, in order | `ViewEntry::UserMessage` per queued turn | content; actions `HostCommand::EditQueuedPrompt`, `HostCommand::RemoveQueuedPrompt`, `HostCommand::SendQueuedNow` |
-| Queue held after a stop other than a normal finish | last step's stop reason is not `StopReason::EndTurn`, queued turns remain | the stop reason; `HostCommand::ResumeQueue` |
+| Queue held after a stop other than a normal finish | the last step's stop is not `StopReason::EndTurn` and entries with `UserMessageStatus::Queued` remain | the stop reason; `HostCommand::ResumeQueue` |
 | Queue full | `ErrorCode::ThreadQueueFull` | retryable: the prompt can be sent once a queued turn starts |
 | Edit, remove or send now refused: the turn already started | `ErrorCode::ThreadTurnNotQueued` | the turn's current state |
-| Close to the limit (at least 95% used, or the window's warning) | `LimitMeter`, `LimitWindow.warning` | used percent, window label, reset time; section 8 |
+| Close to the limit (at least 95% used, or the window's warning) | `AgentLimitsView.meter` (`LimitMeter`, tone `MeterTone::Near`) | tone, used percent, window label, reset time; section 8 |
 | Context usage | `HeaderEntry.usage` (`ContextUsage`) | context used, context size, cost |
-| Cost line, pay as you go only (doc 30 §5.6) | `BillingKind::PayAsYouGo` with `Cost` | amount and currency, an estimate; hidden for `BillingKind::Plan` |
+| Cost line, pay as you go only (doc 30 §5.6) | `AgentLimitsView.billing` is `BillingKind::PayAsYouGo`; `ContextUsage.cost` | amount and currency, an estimate; hidden for `BillingKind::Plan` |
 
 ## 6. Versions
 
 The matter's stream: one `ViewEntry::MatterHeader` and one `ViewEntry::Version` per checkpoint, across
 every thread in the matter.
 
+Every `ViewEntry::Version` has its checkpoint, kind and time (`ts`), plus thread and turn when the
+checkpoint was recorded with them. Only `OutsideEdits` versions carry `files`; a turn's files are on
+its step card, and compare (below) lists the files between any two versions.
+
 | State | Type and variant | Data the screen gets |
 |---|---|---|
-| Import of the folder | `ViewEntry::Version` with `CheckpointKind::Import` | time (`ts`), files touched |
-| Before an agent's turn | `CheckpointKind::BeforeTurn` | thread and turn (an agent in a thread) |
-| After an agent's turn | `CheckpointKind::AfterTurn` | thread and turn, files touched |
-| Edits made outside Clauseo | `CheckpointKind::OutsideEdits` | files touched (the lawyer, outside Clauseo) |
-| Undo of a step | `CheckpointKind::Undo` | the undone step's thread and turn |
-| Restore of a version | `CheckpointKind::Restore` | the version restored from |
+| Import of the folder | `ViewEntry::Version` with `CheckpointKind::Import` | time |
+| Before an agent's turn | `CheckpointKind::BeforeTurn` | time, thread and turn (an agent in a thread) |
+| After an agent's turn | `CheckpointKind::AfterTurn` | time, thread and turn |
+| Edits made outside Clauseo | `CheckpointKind::OutsideEdits` | time, `files` (the lawyer, outside Clauseo) |
+| Undo of a step | `CheckpointKind::Undo` | time, thread and turn when recorded; restored and kept paths are on the undo marker (`MarkerKind::StepUndone`) |
+| Restore of a version | `CheckpointKind::Restore` | time; the version restored from and the scope are on the restore marker (`MarkerKind::VersionRestored`) |
 | Checkpoint of a kind from a newer Clauseo | `CheckpointKind::Unknown` | time only |
 | Compare two versions | `HostQuery::CompareVersions` returns `QueryResult::FileChanges` | per file: change kind, sizes, may include the lawyer's edits |
 | Restore the whole matter | `RestoreScope::Matter` | `HostCommand::RestoreVersion` |
@@ -224,20 +230,20 @@ writes the tones in camel case; the wire uses snake case (`at_limit`).
 | Loading, first read | `LimitSource::Loading` | no numbers; `Freshness::Loading` |
 | Unavailable, never read or read failed | `LimitSource::Unavailable` with `UnavailableReason::NeverRead`, `UnavailableReason::ReadFailed` | a try-again action; chat never blocked; `Freshness::Unavailable` |
 | Unavailable, the sign-in lacks the profile scope | `UnavailableReason::MissingScope` | a sign-in-again action; `Freshness::MissingScope` |
-| Not applicable (API key, Bedrock, Vertex) | `LimitSource::NotApplicable` | billing provider (`BillingProvider`), the cost line; no bars; `Freshness::NotApplicable` |
-| Live only, from the agent's signal while it works | `LimitSource::LiveOnly` | live bars with the update time; `Freshness::LiveOnly` |
+| Not applicable (API key, Bedrock, Vertex) | `LimitSource::NotApplicable` | `BillingKind::PayAsYouGo`, `at_limit_text`, the cost line; no bars; `Freshness::NotApplicable`. The provider (`BillingProvider`) is only in `AccountLimits`, not in `AgentLimitsView` |
+| Live only, from the agent's signal while it works | `LimitSource::LiveOnly` | live bars, the update time (`checked_at`); `Freshness::LiveOnly` |
 | Freshness from a newer Clauseo | `LimitSource::Unknown` | as unavailable |
 | Reset time passed, one row | `WindowFreshness::ResetPassed` | the reset time, refreshing; never the old percentage |
-| At the limit, the agent pauses | `AtLimitBehaviour::Pauses` | `at_limit_text` |
-| At the limit, extra usage | `AtLimitBehaviour::ExtraUsage` | whether extra usage is on |
-| At the limit, credits | `AtLimitBehaviour::Credits` | whether the plan has credits |
-| At-limit card, reset time known | `ViewEntry::LimitStop` with `resets_at` | thread, turn, window, reset time, `LimitStopReason::PlanWindow`; partial output and the checkpoint stay |
+| At the limit, the agent pauses | `AtLimitBehaviour::Pauses` | `at_limit_text`, which M2 `limits` writes from the behaviour |
+| At the limit, extra usage | `AtLimitBehaviour::ExtraUsage` | as above (whether extra usage is on is folded into the text) |
+| At the limit, credits | `AtLimitBehaviour::Credits` | as above (whether the plan has credits is folded into the text) |
+| At-limit card, reset time known | `ViewEntry::LimitStop` with `resets_at` | turn, window, reset time, `LimitStopReason::PlanWindow`; partial output and the checkpoint stay |
 | At-limit card, reset time unknown | `ViewEntry::LimitStop` without `resets_at` | as above |
 | At-limit card, workspace reasons | `LimitStopReason::WorkspaceCredits`, `LimitStopReason::WorkspaceSpendCap`, `LimitStopReason::Temporary` | as above |
 | At-limit card actions: continue at the reset (sandboxed matter only), notify, ask the other signed-in agent | planned: M2 `limits` | reset time, the other agent's sign-in state |
 | Sidebar paused | `ThreadStatus::PausedAtLimit` | reset time |
 | Assistant-picker line | `AgentLimitsView.meter` per `AgentKind::Claude`, `AgentKind::Codex` | tightest window: used percent, label |
-| Plan and usage settings page | `LimitsView` | per agent: plan, `Billing::Plan` or `Billing::PayAsYouGo`, each `LimitWindowView` (label, used percent, tone, reset time, freshness), at-limit text, check time |
+| Plan and usage settings page | `LimitsView` | per agent: plan, `BillingKind::Plan` or `BillingKind::PayAsYouGo`, each `LimitWindowView` (label, used percent, tone, reset time, freshness), at-limit text, check time |
 
 ## 9. Errors
 
