@@ -1,0 +1,15 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"matter_created\")"
+---
+{
+  "matter_created": {
+    "name": "Smith v Jones",
+    "kind": "folder",
+    "import": {
+      "files": 12,
+      "bytes": 4000000,
+      "cloud_only": 1
+    }
+  }
+}

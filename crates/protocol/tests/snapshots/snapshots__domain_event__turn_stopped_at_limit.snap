@@ -1,0 +1,13 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"turn_stopped_at_limit\")"
+---
+{
+  "turn_stopped_at_limit": {
+    "thread": "01900000-0000-7000-8000-000000000002",
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "window": "five_hour",
+    "resets_at": 1760000000000,
+    "reason": "plan_window"
+  }
+}

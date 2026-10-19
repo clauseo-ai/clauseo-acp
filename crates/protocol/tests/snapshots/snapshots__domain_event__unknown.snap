@@ -1,0 +1,12 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "DomainEvent::Unknown\n{ kind: \"later_kind\".to_owned(), payload: raw(r#\"{\"z\":1,\"a\":[true]}\"#), }"
+---
+{
+  "later_kind": {
+    "z": 1,
+    "a": [
+      true
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::SetConfigOption\n{\n    thread: thread_id(2), option_id: short(\"model\"), value:\n    ConfigValue::Select(short(\"opus\")),\n}"
+---
+{
+  "set_config_option": {
+    "thread": "01900000-0000-7000-8000-000000000002",
+    "option_id": "model",
+    "value": {
+      "select": "opus"
+    }
+  }
+}

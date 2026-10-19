@@ -1,0 +1,14 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"usage_updated\")"
+---
+{
+  "usage_updated": {
+    "context_used": 1200,
+    "context_size": 200000,
+    "cost": {
+      "amount": 0.42,
+      "currency": "USD"
+    }
+  }
+}

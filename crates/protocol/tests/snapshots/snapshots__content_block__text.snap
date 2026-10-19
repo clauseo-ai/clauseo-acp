@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "ContentBlock::Text { text: \"Summarise\".to_owned() }"
+---
+{
+  "text": {
+    "text": "Summarise"
+  }
+}

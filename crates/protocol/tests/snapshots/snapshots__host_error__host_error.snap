@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: error
+---
+{
+  "code": "thread.queue_full",
+  "message": "10 turns are already queued",
+  "retryable": true
+}

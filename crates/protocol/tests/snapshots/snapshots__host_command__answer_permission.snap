@@ -1,0 +1,11 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::AnswerPermission\n{\n    thread: thread_id(2), request: permission_request_id(10), option_id:\n    short(\"allow\"),\n}"
+---
+{
+  "answer_permission": {
+    "thread": "01900000-0000-7000-8000-000000000002",
+    "request": "01900000-0000-7000-8000-00000000000a",
+    "option_id": "allow"
+  }
+}
