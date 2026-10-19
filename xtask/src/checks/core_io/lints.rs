@@ -1,9 +1,17 @@
-//! What else decides whether clippy reports the calls the list bans: the lint levels. A held
-//! crate's `Cargo.toml` must inherit the workspace lints (`[lints] workspace = true`, beside which
-//! cargo takes no other lint key), the root `[workspace.lints.clippy]` may set
-//! `disallowed_methods` and `disallowed_types` only to a level that reports, and the repo's
-//! `.cargo/config.toml` may not name them in rustflags. `#![allow(..)]` in the code is denied by
-//! the workspace lint `allow_attributes`; `#[expect(..)]` is the exception route.
+//! Where lint configuration may live, so nothing turns the list's bans off: the root
+//! `clippy.toml` and the held crates' own files (checked in `core_io.rs`), and the root
+//! `[workspace.lints]`, and nowhere else. So:
+//! - every member's `Cargo.toml` says `[lints] workspace = true` (beside which cargo takes no
+//!   other lint key);
+//! - `[workspace.lints.clippy]` sets `all`, `style`, `disallowed_methods` and
+//!   `disallowed_types` only to a level that reports, at any priority;
+//! - there is no legacy `.cargo/config`, which cargo reads instead of `.cargo/config.toml`;
+//! - `.cargo/config.toml` has no `rustflags` key at any depth (where `-A` or `--cap-lints`
+//!   would silence the bans) and no `[env]` entry starting with `CLIPPY_` (cargo sets those on
+//!   every clippy-driver it starts, `CLIPPY_CONF_DIR` among them).
+//!
+//! `#![allow(..)]` in the code is denied by the workspace lint `allow_attributes`;
+//! `#[expect(..)]` is the exception route.
 
 use super::report;
 use crate::checks;
@@ -13,8 +21,8 @@ use std::path::Path;
 use toml::Spanned;
 use toml::de::{DeString, DeTable, DeValue};
 
-/// The lints the list feeds, as cargo and rustc write them with `_`.
-const LINTS: [&str; 2] = ["disallowed_methods", "disallowed_types"];
+/// The lints the list feeds and the groups that hold them, as cargo writes them with `_`.
+const LINTS: [&str; 4] = ["all", "style", "disallowed_methods", "disallowed_types"];
 
 /// The levels at which those lints report a call.
 const REPORTING: [&str; 3] = ["warn", "deny", "forbid"];
@@ -22,10 +30,13 @@ const REPORTING: [&str; 3] = ["warn", "deny", "forbid"];
 /// The repo's root manifest.
 pub(super) const ROOT_MANIFEST: &str = "Cargo.toml";
 
-/// The repo's cargo config, the one file cargo reads its rustflags from inside the repo.
+/// The repo's cargo config.
 pub(super) const CARGO_CONFIG: &str = ".cargo/config.toml";
 
-/// The violation for the held crate `member` when its `Cargo.toml` does not say
+/// The legacy name of the cargo config, which cargo reads instead of `CARGO_CONFIG`.
+pub(super) const LEGACY_CARGO_CONFIG: &str = ".cargo/config";
+
+/// The violation for the member `member` when its `Cargo.toml` does not say
 /// `[lints] workspace = true`.
 pub(super) fn crate_manifest(root: &Path, member: &Member) -> Vec<Violation> {
     let path = checks::join(&member.dir, "Cargo.toml");
@@ -57,7 +68,7 @@ pub(super) fn crate_manifest(root: &Path, member: &Member) -> Vec<Violation> {
 }
 
 /// The violations for a `[workspace.lints.clippy]` entry of the root manifest that sets one of
-/// `LINTS` to a level that does not report.
+/// `LINTS` to a level that does not report, whatever its priority.
 pub(super) fn workspace_lints(root: &Path) -> Vec<Violation> {
     let text = match checks::read_repo_file(root, ROOT_MANIFEST) {
         Ok(Some(text)) => text,
@@ -93,66 +104,70 @@ pub(super) fn workspace_lints(root: &Path) -> Vec<Violation> {
     found
 }
 
-/// The violations for each flag in the rustflags of `.cargo/config.toml` (`build.rustflags` and
-/// every `target.<triple or cfg>.rustflags`) that names one of `LINTS`.
+/// The violations for the cargo config: a legacy `.cargo/config`, and in `.cargo/config.toml`
+/// each `rustflags` key at any depth and each `[env]` entry whose name starts with `CLIPPY_`.
 pub(super) fn cargo_config(root: &Path) -> Vec<Violation> {
+    let mut found = Vec::new();
+    match checks::read_repo_file(root, LEGACY_CARGO_CONFIG) {
+        Ok(Some(_)) => found.push(report::legacy_cargo_config(
+            LEGACY_CARGO_CONFIG,
+            CARGO_CONFIG,
+        )),
+        Ok(None) => {}
+        Err(unreadable) => found.push(unreadable),
+    }
     let text = match checks::read_repo_file(root, CARGO_CONFIG) {
         Ok(Some(text)) => text,
-        Ok(None) => return Vec::new(),
-        Err(unreadable) => return vec![unreadable],
+        Ok(None) => return found,
+        Err(unreadable) => {
+            found.push(unreadable);
+            return found;
+        }
     };
     let doc = match DeTable::parse(&text) {
         Ok(doc) => doc,
-        Err(error) => return vec![not_toml(CARGO_CONFIG, &text, &error)],
-    };
-    let build = table_at(doc.get_ref(), "build").map(|build| ("build.rustflags".to_owned(), build));
-    let targets = table_at(doc.get_ref(), "target")
-        .into_iter()
-        .flat_map(|targets| targets.iter())
-        .filter_map(|(name, target)| {
-            let table = target.get_ref().as_table()?;
-            Some((format!("target.{}.rustflags", name.get_ref()), table))
-        });
-    let mut found = Vec::new();
-    for (key, table) in build.into_iter().chain(targets) {
-        let Some((_, flags)) = entry(table, "rustflags") else {
-            continue;
-        };
-        for (flag, offset) in flags_of(flags) {
-            let named = LINTS.iter().any(|lint| lint_name(&flag).contains(lint));
-            if named {
-                let line = line_of(&text, offset);
-                found.push(report::rustflag_names_a_ban(
-                    CARGO_CONFIG,
-                    line,
-                    &key,
-                    &flag,
-                ));
-            }
+        Err(error) => {
+            found.push(not_toml(CARGO_CONFIG, &text, &error));
+            return found;
         }
+    };
+    let mut rustflags = Vec::new();
+    rustflags_keys(doc.get_ref(), "", &mut rustflags);
+    for (key, offset) in rustflags {
+        let line = line_of(&text, offset);
+        found.push(report::rustflags_in_config(CARGO_CONFIG, line, &key));
     }
+    let env = table_at(doc.get_ref(), "env")
+        .into_iter()
+        .flat_map(|env| env.iter());
+    for (name, _) in env.filter(|(name, _)| name.get_ref().starts_with("CLIPPY_")) {
+        let line = line_of(&text, name.span().start);
+        found.push(report::clippy_env_in_config(
+            CARGO_CONFIG,
+            line,
+            name.get_ref(),
+        ));
+    }
+    found.sort_by_key(|violation| (violation.path != LEGACY_CARGO_CONFIG, violation.line));
     found
 }
 
-/// Each flag of a rustflags value, a string of space-separated flags or an array of them, with
-/// the byte offset of the string it is in.
-fn flags_of(value: &Spanned<DeValue<'_>>) -> Vec<(String, usize)> {
-    let strings: Vec<(&str, usize)> = match value.get_ref() {
-        DeValue::String(flags) => vec![(&**flags, value.span().start)],
-        DeValue::Array(items) => items
-            .iter()
-            .filter_map(|item| Some((item.get_ref().as_str()?, item.span().start)))
-            .collect(),
-        _ => Vec::new(),
-    };
-    strings
-        .into_iter()
-        .flat_map(|(flags, offset)| {
-            flags
-                .split_whitespace()
-                .map(move |flag| (flag.to_owned(), offset))
-        })
-        .collect()
+/// Pushes onto `found` the dotted path and key offset of each `rustflags` key in `table` (whose
+/// own path is `prefix`) and in every table under it.
+fn rustflags_keys(table: &DeTable<'_>, prefix: &str, found: &mut Vec<(String, usize)>) {
+    for (name, value) in table {
+        let path = if prefix.is_empty() {
+            name.get_ref().to_string()
+        } else {
+            format!("{prefix}.{}", name.get_ref())
+        };
+        if name.get_ref() == "rustflags" {
+            found.push((path.clone(), name.span().start));
+        }
+        if let Some(inner) = value.get_ref().as_table() {
+            rustflags_keys(inner, &path, found);
+        }
+    }
 }
 
 /// `name` with each `-` read as `_`, as rustc reads a lint name.

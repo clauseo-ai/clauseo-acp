@@ -9,14 +9,20 @@
 //! to anything else; its fix prints the file to write. A row that lists only `clock` needs no
 //! file: the root `clippy.toml` bans both clocks' `now` for every crate that reads it.
 //!
-//! So that every crate reads the file meant for it, the check fails every other `clippy.toml`
-//! and every `.clippy.toml` in git's list of the repo's files (tracked, and untracked but not
-//! ignored): clippy reads the nearest one walking up from the crate, a `.clippy.toml` before a
-//! `clippy.toml`. xtask runs cargo without `CLIPPY_CONF_DIR` (`process.rs`). So that clippy
-//! reports what the file bans, a held crate's `Cargo.toml` must say `[lints] workspace = true`,
-//! the root `[workspace.lints.clippy]` may set `disallowed_methods` and `disallowed_types` only to
-//! `warn`, `deny` or `forbid`, and `.cargo/config.toml` may not name them in rustflags
-//! (`lints.rs`).
+//! The boundary is one rule: lint configuration lives only in the root `clippy.toml`, the held
+//! crates' own `clippy.toml`, and the root `[workspace.lints]`, and nowhere else. So the check
+//! fails:
+//! - every other `clippy.toml` and every `.clippy.toml` in git's list of the repo's files
+//!   (tracked, and untracked but not ignored): clippy reads the nearest one walking up from the
+//!   crate, a `.clippy.toml` before a `clippy.toml`;
+//! - a member's `Cargo.toml` without `[lints] workspace = true`, any member, held or not;
+//! - `[workspace.lints.clippy]` setting `all`, `style`, `disallowed_methods` or
+//!   `disallowed_types` to a level that does not report, at any priority;
+//! - a legacy `.cargo/config`, which cargo reads instead of `.cargo/config.toml`;
+//! - in `.cargo/config.toml`, a `rustflags` key at any depth and an `[env]` entry starting
+//!   with `CLIPPY_` (`lints.rs`).
+//!
+//! xtask also runs cargo without `CLIPPY_CONF_DIR` in its own environment (`process.rs`).
 //!
 //! An exception is `#[expect(clippy::disallowed_methods, reason = "..")]` (or
 //! `disallowed_types`) on the code that needs it. `tests/clippy.rs` runs clippy with the
@@ -26,8 +32,9 @@
 //! `benches/` and `#[cfg(test)]` code alike. Not covered: code behind another target's `cfg`
 //! (clippy lints it only on that target), code another crate runs for this one (a dependency, a
 //! proc macro), an item a newer toolchain adds that the list does not name, a clippy config git
-//! ignores, and cargo config or `CLIPPY_CONF_DIR` outside the repo when clippy runs without
-//! xtask. It counts the Crates-table rows it classified, held or not.
+//! ignores, cargo config outside the repo (parent folders, `CARGO_HOME`), `RUSTFLAGS` in the
+//! environment, and `CLIPPY_CONF_DIR` when clippy runs without xtask. It counts the Crates-table
+//! rows it classified, held or not.
 
 mod clippy_toml;
 mod lints;
@@ -91,6 +98,8 @@ fn run(ctx: &Context) -> Inspection {
     let mut violations = Vec::new();
     for (member, row) in &held {
         violations.extend(check_crate(&ctx.root, member, row, &expected));
+    }
+    for member in &ctx.members {
         violations.extend(lints::crate_manifest(&ctx.root, member));
     }
     let allowed: BTreeSet<String> = held

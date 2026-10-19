@@ -174,19 +174,19 @@ pub(super) fn lints_not_inherited(
     let (message, fix) = if has_table {
         (
             format!(
-                "`{path}` sets {package}'s own lints instead of `[lints] workspace = true`, so it \
-                 can turn off clippy's disallowed_methods and disallowed_types, which ban I/O here"
+                "`{path}` sets {package}'s own lints instead of `[lints] workspace = true`; lint \
+                 levels live only in the root [workspace.lints], so that no crate can turn off the \
+                 bans of the root {ROOT} or {LIST}"
             ),
             "replace the table with `[lints]` and `workspace = true` (cargo takes no other lint \
-             key beside it); an exception is `#[expect(clippy::disallowed_methods, reason = \"..\")]` \
-             at the call",
+             key beside it); to let one call through, put \
+             `#[expect(clippy::disallowed_methods, reason = \"..\")]` on it",
         )
     } else {
         (
             format!(
-                "`{path}` has no `[lints] workspace = true`, so {package} does not get the \
-                 workspace's lint levels, which keep clippy's disallowed_methods and disallowed_types \
-                 reporting I/O here"
+                "`{path}` has no `[lints] workspace = true`, so {package} does not get the lint \
+                 levels of the root [workspace.lints], the one place they are set"
             ),
             "add `[lints]` with `workspace = true`",
         )
@@ -194,35 +194,59 @@ pub(super) fn lints_not_inherited(
     violation(path, line, message, fix)
 }
 
-/// The violation for the root manifest's `[workspace.lints.clippy]` entry `name`, at `line`,
-/// whose level `level` does not report.
+/// The violation for the root manifest's `[workspace.lints.clippy]` entry `name` (one of the two
+/// lints or a group that holds them), at `line`, whose level `level` does not report.
 pub(super) fn workspace_lint_level(path: &str, line: u32, name: &str, level: &str) -> Violation {
-    let lint = name.replace('-', "_");
     violation(
         path,
         line,
         format!(
-            "`[workspace.lints.clippy]` sets `{name}` to `{level}`, so clippy does not report \
-             the calls {LIST} bans in the crates whose row bans I/O"
+            "`[workspace.lints.clippy]` sets `{name}` to `{level}`, which can stop clippy \
+             reporting the calls {ROOT} and {LIST} ban"
         ),
         format!(
-            "set `{name}` to \"warn\" (CI denies warnings) or \"deny\", or remove it; an \
-             exception is `#[expect(clippy::{lint}, reason = \"..\")]` at the call"
+            "set `{name}` to \"warn\" or \"deny\", or remove it; to let one call through, put \
+             `#[expect(clippy::disallowed_methods, reason = \"..\")]` on it"
         ),
     )
 }
 
-/// The violation for `flag` in `key` of the cargo config at `path`, at `line`, which names
-/// one of the lints the list feeds.
-pub(super) fn rustflag_names_a_ban(path: &str, line: u32, key: &str, flag: &str) -> Violation {
+/// The violation for the `rustflags` key `key` of the cargo config at `path`, at `line`.
+pub(super) fn rustflags_in_config(path: &str, line: u32, key: &str) -> Violation {
     violation(
         path,
         line,
         format!(
-            "`{key}` passes `{flag}` to rustc, which sets the level of a lint {LIST} feeds for \
-             every crate, past [workspace.lints]"
+            "`{path}` sets `{key}`, where `-A`, `--cap-lints` or `-A clippy::style` would \
+             silence the bans of {ROOT} and {LIST} for every crate; lint levels live only in the \
+             root [workspace.lints]"
         ),
-        "remove the flag: the lint levels live in the root Cargo.toml's [workspace.lints.clippy], \
-         and an exception is `#[expect(clippy::disallowed_methods, reason = \"..\")]` at the call",
+        "remove the key; set lint levels in the root Cargo.toml's [workspace.lints]",
+    )
+}
+
+/// The violation for the `[env]` entry `name` of the cargo config at `path`, at `line`.
+pub(super) fn clippy_env_in_config(path: &str, line: u32, name: &str) -> Violation {
+    violation(
+        path,
+        line,
+        format!(
+            "`{path}` sets `{name}` in [env], which cargo passes to every clippy-driver it starts; \
+             `CLIPPY_CONF_DIR` there points clippy away from the {ROOT} files core-io checks"
+        ),
+        "remove the entry; clippy settings go in the root clippy.toml",
+    )
+}
+
+/// The violation for the legacy cargo config `legacy`, which cargo reads instead of `config`.
+pub(super) fn legacy_cargo_config(legacy: &str, config: &str) -> Violation {
+    violation(
+        legacy,
+        1,
+        format!(
+            "`{legacy}` is the legacy name of `{config}`; cargo reads it instead when both exist, \
+             and core-io checks only `{config}`"
+        ),
+        format!("move what `{legacy}` holds into `{config}` and delete `{legacy}`"),
     )
 }

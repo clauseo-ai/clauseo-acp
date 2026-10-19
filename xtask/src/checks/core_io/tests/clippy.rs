@@ -8,8 +8,8 @@
 //! It also fails on a compile error in a form, and on a warning about the `clippy.toml` itself
 //! other than "does not refer to a reachable" for exactly the entries of the other OS family
 //! (`std::os::windows::` on unix, `std::os::unix::` on Windows). So a misspelled entry fails
-//! here: a `std::os::unix` one on the unix CI legs, a `std::os::windows` one on the Windows leg,
-//! any other one everywhere.
+//! here: a `std::os::unix` one when the test runs on unix, a `std::os::windows` one when it runs
+//! on Windows, any other one everywhere.
 
 mod forms;
 

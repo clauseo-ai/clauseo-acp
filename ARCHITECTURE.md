@@ -99,9 +99,12 @@ bans only the two clock `now` functions, which the root `clippy.toml` bans in ev
 enforces the bans after macro expansion: a crate whose row lists "fs", "process" or "any I/O"
 has its own `clippy.toml`, the root `clippy.toml` with the `disallowed-methods` and
 `disallowed-types` arrays of `xtask/core-io-bans.toml` appended, and `cargo xtask check` fails
-when that file is missing or parses to anything else, when any other `clippy.toml` or a
-`.clippy.toml` is in the repo (clippy reads only the nearest one), and when the crate's
-`Cargo.toml` lacks `[lints] workspace = true`. An exception is
+when that file is missing or parses to anything else. Lint configuration lives only in the
+root `clippy.toml`, those crates' own files and the root `[workspace.lints]`: `cargo xtask check`
+also fails any other `clippy.toml` or `.clippy.toml`, a member's `Cargo.toml` without
+`[lints] workspace = true`, `[workspace.lints.clippy]` turning off `all`, `style` or either
+lint, a legacy `.cargo/config`, and `rustflags` or a `CLIPPY_` entry in `[env]` in
+`.cargo/config.toml`. An exception is
 `#[expect(clippy::disallowed_methods, reason = "..")]` (or `disallowed_types`) on the code that
 needs it.
 
