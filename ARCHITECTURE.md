@@ -36,11 +36,13 @@ Clauseo app process (Rust)
 4. `reducer` folds events into thread and matter state and view patches (`Upsert`, `Remove`,
    `AppendText`, `Reset`), each with a per-stream `cursor`.
 5. The host sends patches to each subscribed window over its Channel. The webview applies only the
-   next cursor of each stream, so replays and duplicates are no-ops, and acknowledges what it applied.
+   next cursor of each stream, so replays and duplicates are no-ops, and acknowledges what it applied
+   (`Ack { stream, epoch, cursor }`).
 6. Agent traffic goes the other way: ACP over stdio into `acp`, then to the host as events.
    `matters` checkpoints the matter folder before and after every turn.
-7. A reload, renderer crash or stall recovers per stream through `subscribe(stream, after_cursor)`,
-   which returns the tail or a `Reset` with a view snapshot.
+7. A reload, renderer crash or stall recovers per stream through `Subscribe { stream, after }`
+   (`after` is the last epoch and cursor), which returns the tail or a `Reset` with a view snapshot.
+   `SubscribeEvents { stream, after_seq }` serves envelopes by `seq` instead.
 
 ## Crates
 

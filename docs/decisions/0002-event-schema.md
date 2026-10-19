@@ -89,7 +89,7 @@ event; the host commits every logged one. `?` marks an optional field, left out 
 | `version_restored` | from, checkpoint, scope | host, matters | yes | M |
 | `patches` (`HostEvent`) | `PatchBatch`: stream, epoch, patches | host | no | the subscribed stream |
 | `events` (`HostEvent`) | envelopes, replayed then live | host | no | the subscribed stream |
-| `caught_up` (`HostEvent`) | stream, last_seq; once, between replay and live | host | no | the subscribed stream |
+| `caught_up` (`HostEvent`) | stream, last_seq; once per `SubscribeEvents`, between replay and live | host | no | the subscribed stream |
 | `account_limits_changed` (`HostEvent`) | `AccountLimits` | limits, through the host | no | none |
 
 - Exactly one `turn_ended` per turn, including errors, cancels and a queued turn cancelled before it
@@ -103,15 +103,18 @@ event; the host commits every logged one. `?` marks an optional field, left out 
 ### View patches and entries
 
 - `ViewPatch { cursor, body }`; `ViewPatchBody` is `Upsert { entry }`, `Remove { entry_id }`,
-  `AppendText { message_id, from_len, text }` or `Reset { view_snapshot }`. A `PatchBatch` carries the
+  `AppendText { message_id, from_len, text }` or `Reset { view_snapshot }`. A `ViewSnapshot` holds
+  the header, about 200 recent entries and `has_older`. A `PatchBatch` carries the
   stream and the `ViewEpoch` once. The webview applies only the next cursor, and `AppendText` only
   when its text length equals `from_len`, counted in UTF-16 code units (`utf16_len`).
 - Cursors live in host memory: text reaches the screen before its event is durable, so a cursor is
-  never a `seq`. The host mints a `ViewEpoch` each time it loads a stream. `subscribe(stream,
-  after_cursor)`, sent with the epoch, returns the tail, or a `Reset` with about 200 recent entries
-  when the epoch differs or the tail is gone. `subscribe_events(stream, after_seq)` serves envelopes by
-  `seq`, then `caught_up`, then live ones, with no gap or duplicate. Acknowledgements carry the applied
-  cursor.
+  never a `seq`. The host mints a `ViewEpoch` each time it loads a stream.
+- `Subscribe { stream, after: Option<ViewPosition { epoch, cursor }> }` returns the tail after that
+  position, or a `Reset` when `after` is missing, the epoch differs or the tail is gone. Older
+  entries page in through `HostQuery::PageEntries`.
+- `SubscribeEvents { stream, after_seq: Option<Seq> }` serves envelopes by `seq`, then `caught_up`,
+  then live ones, with no gap or duplicate (`cli` and a later phone client use it).
+- `Ack { stream, epoch, cursor }` carries the cursor the client applied.
 - Entries carry no `id` field. Each entry starts with `order` (the `seq` of the event that created it;
   entries sort by it) and holds the domain id it is built from. A client keys an entry as
   `<variant key>:<id>`, the text form of `EntryId`:
