@@ -15,10 +15,17 @@ the same thing. Lawyer-facing words are marked (UI).
 | Session | An ACP session, the adapter's view of a thread. Not shown to lawyers. | |
 | Host | The Rust session host: one thread that owns sessions, commands, permissions and subscriptions. | backend, server, core (for the host alone) |
 | Core crates | `protocol`, `reducer`, `store`, `matters`, `host`, `acp`, `sandbox` (with the egress proxy). | |
-| Event | One entry in the append-only log, with `event_id`, `thread_id`, `seq` and `kind`. | message, record |
-| `seq` | Gapless per-thread number the host assigns to each event. | index, offset |
-| Cursor | Per-thread number on view patches; the webview applies only the next one. | version (for this) |
+| Event | One entry in the append-only log, with `event_id`, `stream`, `seq` and kind. | message, record |
+| Stream | The log of one thread or one matter (`thread:<uuid>`, `matter:<uuid>`); `seq` and cursors count per stream. | channel, topic, feed |
+| Domain event | An event the log stores (`DomainEvent`): what happened in a thread or matter. | host event, notification |
+| Host event | What a subscriber receives (`HostEvent`): patches, events, caught up, account limits. Never logged. | domain event, push |
+| `seq` | Gapless per-stream number the host assigns to each event. | index, offset |
+| Cursor | Per-stream number on view patches; the webview applies only the next one. | version (for this) |
 | View patch | `Upsert`, `Remove`, `AppendText` or `Reset`, sent from host to UI. | diff, delta |
+| Error code | The stable dotted string a failed host call carries (`store.disk_full`); the UI picks copy by it. | error message, status |
+| Queued prompt | A prompt sent while a turn runs in its thread; it waits as its own turn and can be edited, removed or sent now. | pending message, draft |
+| Send now | Cancel the running turn and send this prompt next. | interrupt, force send |
+| Steer | Add a prompt to the running turn where the agent can, else send it now. | inject, nudge |
 | Subscriber | Anything that receives view patches for a thread (a window now, a phone later). | listener |
 | Checkpoint | A commit in the matter's shadow repository, taken before and after each turn. | snapshot (taken for store snapshots) |
 | Snapshot | A stored fold of a thread's events, so reopening skips the full log. | checkpoint |
