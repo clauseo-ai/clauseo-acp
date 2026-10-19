@@ -289,10 +289,10 @@ fn the_json_of_a_skipped_probe_has_only_its_state_and_reason() {
 
 #[test]
 fn the_json_of_a_measured_probe_has_its_unit_stats_samples_and_budget() {
-    let json = serde_json::to_value(probe_json(&measured(0.5, 1.0))).unwrap_or_default();
+    let json = serde_json::to_string(&probe_json(&measured(0.5, 1.0))).unwrap_or_default();
     assert_eq!(
-        json.to_string(),
-        r#"{"budget":1.0,"budget_id":"cargo_check_app_edit","max":0.5,"median":0.5,"min":0.5,"probe":"check_desktop","reported_only":false,"samples":[0.5],"status":"ok","unit":"s"}"#
+        json,
+        r#"{"probe":"check_desktop","status":"ok","unit":"s","median":0.5,"min":0.5,"max":0.5,"samples":[0.5],"budget":1.0,"budget_id":"cargo_check_app_edit","reported_only":false}"#
     );
 }
 
