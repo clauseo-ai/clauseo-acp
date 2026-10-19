@@ -20,7 +20,7 @@
 //!   `disallowed_types` to a level that does not report, at any priority;
 //! - a legacy `.cargo/config`, which cargo reads instead of `.cargo/config.toml`;
 //! - in `.cargo/config.toml`, a `rustflags` key at any depth and an `[env]` entry starting
-//!   with `CLIPPY_` (`lints.rs`).
+//!   with `CLIPPY_` in any case (`lints.rs`).
 //!
 //! xtask also runs cargo without `CLIPPY_CONF_DIR` in its own environment (`process.rs`).
 //!

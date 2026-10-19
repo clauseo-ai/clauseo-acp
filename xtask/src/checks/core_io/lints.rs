@@ -140,7 +140,7 @@ pub(super) fn cargo_config(root: &Path) -> Vec<Violation> {
     let env = table_at(doc.get_ref(), "env")
         .into_iter()
         .flat_map(|env| env.iter());
-    for (name, _) in env.filter(|(name, _)| name.get_ref().starts_with("CLIPPY_")) {
+    for (name, _) in env.filter(|(name, _)| is_clippy_env(name.get_ref())) {
         let line = line_of(&text, name.span().start);
         found.push(report::clippy_env_in_config(
             CARGO_CONFIG,
@@ -168,6 +168,13 @@ fn rustflags_keys(table: &DeTable<'_>, prefix: &str, found: &mut Vec<(String, us
             rustflags_keys(inner, &path, found);
         }
     }
+}
+
+/// True when the `[env]` entry `name` starts with `CLIPPY_` in any ASCII case: Windows reads
+/// environment names ignoring case, so `Clippy_Conf_Dir` there is `CLIPPY_CONF_DIR`.
+fn is_clippy_env(name: &str) -> bool {
+    name.get(.."CLIPPY_".len())
+        .is_some_and(|head| head.eq_ignore_ascii_case("CLIPPY_"))
 }
 
 /// `name` with each `-` read as `_`, as rustc reads a lint name.

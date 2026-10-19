@@ -213,6 +213,14 @@ pub(in crate::checks::core_io) fn clippy_env_in_cargo_config() -> Inspection {
     )
 }
 
+/// The reviewer's case: `CLIPPY_CONF_DIR` in mixed case, which Windows reads as the same name.
+pub(in crate::checks::core_io) fn clippy_env_in_another_case() -> Inspection {
+    good_crate_and(
+        "clippy-env-case",
+        &[(".cargo/config.toml", "[env]\nClippy_Conf_Dir = \"/\"\n")],
+    )
+}
+
 /// A cargo config with an alias, an `[env]` entry and a build setting passes.
 pub(in crate::checks::core_io) fn cargo_config_without_lint_settings() -> Inspection {
     good_crate_and(

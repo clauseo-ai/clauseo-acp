@@ -248,5 +248,7 @@ crate::checks::planted::cases! {
         clippy_env!(3, "CLIPPY_CONF_DIR"),
         clippy_env!(4, "CLIPPY_ARGS"),
     ]), inspects 3 => super::clippy_env_in_cargo_config,
+    /// Windows reads environment names ignoring case.
+    clippy_env_in_another_case: FailsWith(&[clippy_env!(2, "Clippy_Conf_Dir")]), inspects 3 => super::clippy_env_in_another_case,
     cargo_config_without_lint_settings: Passes, inspects 3 => super::cargo_config_without_lint_settings,
 }
