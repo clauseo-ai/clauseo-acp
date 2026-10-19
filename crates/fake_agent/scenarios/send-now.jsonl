@@ -1,0 +1,9 @@
+{"scenario":"send-now","description":"Prompt 1 streams; the client sends session/cancel and the response is cancelled; then prompt 2 (Use the 2019 version instead) runs to end_turn","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause caps liability at "}}}}
+{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}
+{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Use the 2019 version instead"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Using the 2019 version. "}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

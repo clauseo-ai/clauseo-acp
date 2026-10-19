@@ -1,0 +1,6 @@
+{"scenario":"session-failure","description":"One turn that fails with an AIR sessionFailure: a session_info_update carrying only the _meta, and end_turn with the same _meta","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Checking the clause. "}}}}
+{"update":{"update":{"sessionUpdate":"session_info_update","_meta":{"jetbrains":{"air":{"version":1,"sessionFailure":{"id":"t1:error","revision":1,"category":"limit","severity":"error","title":"You've hit your usage limit.","actions":[]}}}}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn","_meta":{"jetbrains":{"air":{"version":1,"sessionFailure":{"id":"t1:error","revision":1,"category":"limit","severity":"error","title":"You've hit your usage limit.","actions":[]}}}}}}}

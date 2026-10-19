@@ -1,0 +1,10 @@
+{"scenario":"notice-compaction","description":"A notice, then a compaction: start, two summary chunks, end","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"notice","severity":"warning","title":"Context is nearly full","description":"Older turns will be summarised."}}}
+{"update":{"update":{"sessionUpdate":"compaction_update","compactionId":"c-1","status":"in_progress"}}}
+{"update":{"update":{"sessionUpdate":"compaction_summary_chunk","compactionId":"c-1","content":{"type":"text","text":"The lease was reviewed in March. "}}}}
+{"update":{"update":{"sessionUpdate":"compaction_summary_chunk","compactionId":"c-1","content":{"type":"text","text":"Clause 4 caps the liability."}}}}
+{"update":{"update":{"sessionUpdate":"compaction_update","compactionId":"c-1","status":"completed"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The earlier turns are summarised."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

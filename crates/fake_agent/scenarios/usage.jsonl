@@ -1,0 +1,6 @@
+{"scenario":"usage","description":"A usage_update with used, size and a USD cost, sent before end_turn","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause is standard."}}}}
+{"update":{"update":{"sessionUpdate":"usage_update","used":1520,"size":200000,"cost":{"amount":0.0123,"currency":"USD"}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

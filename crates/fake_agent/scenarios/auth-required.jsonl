@@ -1,0 +1,9 @@
+{"scenario":"auth-required","description":"initialize advertises an agent auth method; session/new fails with auth_required; authenticate is answered; a second session/new succeeds","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[{"id":"fake-login","name":"Log in to fake_agent","description":"The agent signs in by itself"}],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","mcpServers":[]}}}
+{"respond":{"to":"new","error":{"code":-32000,"message":"Authentication required"}}}
+{"expect":{"method":"authenticate","as":"auth","params":{"methodId":"fake-login"}}}
+{"respond":{"to":"auth","result":{}}}
+{"expect":{"method":"session/new","as":"new2","params":{"cwd":"{{any}}","mcpServers":[]}}}
+{"respond":{"to":"new2","result":{"sessionId":"sess-1"}}}

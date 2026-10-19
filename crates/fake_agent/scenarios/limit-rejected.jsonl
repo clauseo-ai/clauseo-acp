@@ -1,0 +1,9 @@
+{"scenario":"limit-rejected","description":"One turn at the limit: writes notes/draft.txt, then a rejected usage_update, then a usage-limit message, then end_turn (M2 keeps the file change's checkpoint)","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"write_file":{"path":"notes/draft.txt","content":"Draft clause\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-write-draft","title":"Edit notes/draft.txt","name":"Edit","kind":"edit","status":"completed","content":[{"type":"diff","path":"{{cwd}}/notes/draft.txt","newText":"Draft clause\n"}],"locations":[{"path":"{{cwd}}/notes/draft.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Here is the draft clause. "}}}}
+{"update":{"update":{"sessionUpdate":"usage_update","used":200000,"size":200000,"_meta":{"_claude/rateLimit":{"status":"rejected","resetsAt":1792310400,"rateLimitType":"five_hour","utilization":1,"overageStatus":"rejected","isUsingOverage":false,"surpassedThreshold":0.95}}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"You've hit your usage limit · resets 3pm"}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

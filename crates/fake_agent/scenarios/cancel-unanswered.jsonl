@@ -1,0 +1,5 @@
+{"scenario":"cancel-unanswered","description":"Streaming answer, then session/cancel; the prompt is never answered, so the client's 5 s fallback must end the turn locally","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause "}}}}
+{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}
