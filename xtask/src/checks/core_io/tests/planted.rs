@@ -42,43 +42,43 @@ macro_rules! stopped {
     };
 }
 
-crate::checks::planted::cases_uncounted! {
+crate::checks::planted::cases! {
     /// A held crate without `clippy.toml` fails at its row, with the file to write.
     missing_crate_file: FailsWith(&[concat!(
         "ARCHITECTURE.md:8: clauseo-protocol's row bans I/O (Never depends on: fs, process), but \
          `crates/protocol/clippy.toml` is missing, so clippy does not ban the standard library's \
          I/O in it\n",
         write_crate_file!()
-    )]) => super::missing_crate_file,
+    )]), inspects 3 => super::missing_crate_file,
     /// A file that is the root alone lacks the list's entries.
     crate_file_differs: FailsWith(&[concat!(
         "crates/protocol/clippy.toml:1: `crates/protocol/clippy.toml` of clauseo-protocol is not \
          the root clippy.toml plus xtask/core-io-bans.toml: it differs in `disallowed-methods`, \
          `disallowed-types`\n",
         write_crate_file!()
-    )]) => super::crate_file_differs,
+    )]), inspects 3 => super::crate_file_differs,
     crate_file_not_toml: FailsWith(&[concat!(
         "crates/protocol/clippy.toml:2: `crates/protocol/clippy.toml` is not valid TOML \
          (unclosed array, expected `]`)\n",
         write_crate_file!()
-    )]) => super::crate_file_not_toml,
+    )]), inspects 3 => super::crate_file_not_toml,
     /// The generated file passes, and so does one with the same tables written another way.
-    crate_file_matches: Passes => super::crate_file_matches,
-    crate_file_reformatted: Passes => super::crate_file_reformatted,
+    crate_file_matches: Passes, inspects 3 => super::crate_file_matches,
+    crate_file_reformatted: Passes, inspects 3 => super::crate_file_reformatted,
     /// A row with `clock` alone needs no file, nor does a crate with no row.
-    clock_only_row: Passes => super::clock_only_row,
-    crate_without_row: Passes => super::crate_without_row,
+    clock_only_row: Passes, inspects 3 => super::clock_only_row,
+    crate_without_row: Passes, inspects 3 => super::crate_without_row,
     /// Problems with the inputs stop the check.
     list_missing: FailsWith(&[
         "xtask/core-io-bans.toml:1: `xtask/core-io-bans.toml` is missing, and core-io builds \
          each core crate's clippy.toml from it\n    fix: restore `xtask/core-io-bans.toml` from git",
         stopped!(),
-    ]) => super::list_missing,
+    ]), inspects 0 => super::list_missing,
     root_missing: FailsWith(&[
         "clippy.toml:1: `clippy.toml` is missing, and core-io builds each core crate's \
          clippy.toml from it\n    fix: restore `clippy.toml` from git",
         stopped!(),
-    ]) => super::root_missing,
+    ]), inspects 0 => super::root_missing,
     list_unknown_key: FailsWith(&[
         "xtask/core-io-bans.toml:4: `xtask/core-io-bans.toml` is not valid: unknown field \
          `disallowed-macros`, expected `disallowed-methods` or `disallowed-types`\n    \
@@ -86,7 +86,7 @@ crate::checks::planted::cases_uncounted! {
          `disallowed-types`, arrays of `{ path, reason }` tables, each with an optional \
          `replacement` and `allow-invalid`",
         stopped!(),
-    ]) => super::list_unknown_key,
+    ]), inspects 0 => super::list_unknown_key,
     list_entry_problems: FailsWith(&[
         "xtask/core-io-bans.toml:3: the `disallowed-methods` entry for `std::fs::read` has an \
          empty reason, which clippy prints with each hit\n    \
@@ -94,11 +94,11 @@ crate::checks::planted::cases_uncounted! {
         "xtask/core-io-bans.toml:3: `std::fs::read` is listed twice in `disallowed-methods`\n    \
          fix: delete this entry",
         stopped!(),
-    ]) => super::list_entry_problems,
+    ]), inspects 0 => super::list_entry_problems,
     root_array_is_a_string: FailsWith(&[
         "clippy.toml:2: `disallowed-types` in clippy.toml is not an array, so core-io cannot \
          append xtask/core-io-bans.toml's `disallowed-types` to it\n    \
          fix: write `disallowed-types` as an array of `{ path, reason }` tables",
         stopped!(),
-    ]) => super::root_array_is_a_string,
+    ]), inspects 0 => super::root_array_is_a_string,
 }
