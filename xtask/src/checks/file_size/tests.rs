@@ -51,6 +51,13 @@ pub(super) fn tsx_601_lines() -> Inspection {
     run_on("tsx-601-lines", &[("ui/Big.tsx", lines(601))])
 }
 
+pub(super) fn mts_and_upper_case_rs_601_lines() -> Inspection {
+    run_on(
+        "mts-and-upper-case-rs-601-lines",
+        &[("ui/big.mts", lines(601)), ("src/LIB.RS", lines(601))],
+    )
+}
+
 pub(super) fn stale_exception_gone() -> Inspection {
     run_on(
         "stale-exception-gone",

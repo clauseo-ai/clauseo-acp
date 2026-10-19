@@ -1,6 +1,7 @@
-//! The `file-size` check: every `.rs`, `.ts` and `.tsx` file in the repo has at most 600 lines,
-//! unless `xtask/file-size-exceptions.txt` lists it, and every comment in a `.rs` file stays
-//! within 100 columns. A changed file of 501 to 600 lines gets a note, which never fails.
+//! The `file-size` check: every Rust and TypeScript file in the repo (`.rs`, `.ts`, `.tsx`, `.mts`,
+//! `.cts`, in any case) has at most 600 lines, unless `xtask/file-size-exceptions.txt` lists it,
+//! and every comment in a `.rs` file stays within 100 columns. A changed file of 501 to 600 lines
+//! gets a note, which never fails.
 
 mod lexer;
 
@@ -29,7 +30,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         one: "source file",
         many: "source files",
     },
-    place: "in the repo's .rs, .ts and .tsx files",
+    place: "in the repo's .rs, .ts, .tsx, .mts and .cts files",
     source: "xtask/src/checks/file_size.rs",
     run,
 };
@@ -66,19 +67,25 @@ fn run(ctx: &Context) -> Inspection {
     }
 }
 
-/// True for the files this check reads: `.rs`, `.ts` and `.tsx`.
+/// True for the files this check reads: `.rs`, `.ts`, `.tsx`, `.mts` and `.cts`, in any case.
 fn is_source(file: &str) -> bool {
-    matches!(extension(file), Some("rs" | "ts" | "tsx"))
+    matches!(
+        extension(file).as_deref(),
+        Some("rs" | "ts" | "tsx" | "mts" | "cts")
+    )
 }
 
 /// True for a `.rs` file, the only kind whose comments are checked.
 fn is_rust(file: &str) -> bool {
-    extension(file) == Some("rs")
+    extension(file).as_deref() == Some("rs")
 }
 
-/// The extension of `file`, if it has one.
-fn extension(file: &str) -> Option<&str> {
-    Path::new(file).extension().and_then(|ext| ext.to_str())
+/// The extension of `file` in lowercase, if it has one, so `lib.RS` counts as Rust.
+fn extension(file: &str) -> Option<String> {
+    Path::new(file)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
 }
 
 /// The violation for a file of `lines` lines that is over the limit and not exempt, at line 1.
@@ -137,7 +144,7 @@ fn stale_message(
 ) -> Option<String> {
     if !sources.contains(&entry.path) {
         return Some(format!(
-            "`{}` is listed as an exception, but the check inspects no .rs, .ts or .tsx file at \
+            "`{}` is listed as an exception, but the check inspects no Rust or TypeScript file at \
              that path",
             entry.path
         ));
@@ -191,10 +198,17 @@ crate::checks::planted::cases! {
         "ui/Big.tsx:1: this file has 601 lines; the limit is 600\n    \
          fix: split it into smaller modules, or list it in xtask/file-size-exceptions.txt with a reason",
     ]) => tests::tsx_601_lines,
+    /// A `.mts` file of 601 lines fails the same way, and so does an upper-case `.RS` file.
+    mts_and_upper_case_rs_601_lines: FailsWith(&[
+        "src/LIB.RS:1: this file has 601 lines; the limit is 600\n    \
+         fix: split it into smaller modules, or list it in xtask/file-size-exceptions.txt with a reason",
+        "ui/big.mts:1: this file has 601 lines; the limit is 600\n    \
+         fix: split it into smaller modules, or list it in xtask/file-size-exceptions.txt with a reason",
+    ]) => tests::mts_and_upper_case_rs_601_lines,
     /// An exception for a path that no longer exists fails at its line in the exception file.
     stale_exception_gone: FailsWith(&[
         "xtask/file-size-exceptions.txt:2: `src/gone.rs` is listed as an exception, but the \
-         check inspects no .rs, .ts or .tsx file at that path\n    \
+         check inspects no Rust or TypeScript file at that path\n    \
          fix: delete this line from xtask/file-size-exceptions.txt",
     ]) => tests::stale_exception_gone,
     /// An exception for a file of 450 lines fails: it needs no exception.
