@@ -218,13 +218,14 @@ pub(crate) fn quoted_subcommand_passes() -> Inspection {
     )
 }
 
-/// A `text` block that shows a failing command and its error, as output.
+/// A `text` and a `text,ignore` block that show a failing command and its error, as output.
 pub(crate) fn text_block_output_passes() -> Inspection {
     docs(
         "text-block",
         vec![(
             "GUIDE.md",
-            "```text\n$ cargo xtask frobnicate\nerror: unrecognized subcommand 'frobnicate'\n```\n"
+            "```text\n$ cargo xtask frobnicate\nerror: unrecognized subcommand 'frobnicate'\n```\n\n\
+             ```text,ignore\n$ cargo xtask frobnicate\n```\n"
                 .to_owned(),
         )],
     )
@@ -237,5 +238,29 @@ pub(crate) fn open_quote_command_fails() -> Inspection {
             "GUIDE.md",
             "```sh\ncargo xtask check --name \"open\n```\n".to_owned(),
         )],
+    )
+}
+
+/// The reviewer's forms: flags after `sudo`, `env` and `time`, `nohup`, a substitution in an
+/// assignment, and the `%` and `PS>` prompts.
+pub(crate) fn wrapped_commands_fail() -> Inspection {
+    docs(
+        "wrapped-commands",
+        vec![(
+            "GUIDE.md",
+            "```sh\nsudo -E cargo xtask frobnicate\nsudo -u me cargo xtask frobnicate\n\
+             env -i cargo xtask frobnicate\ntime -p cargo xtask frobnicate\n\
+             nohup cargo xtask frobnicate\nx=$(cargo xtask frobnicate)\n```\n\n\
+             ```console\n% cargo xtask frobnicate\n```\n\n\
+             ```powershell\nPS> cargo xtask frobnicate\n```\n"
+                .to_owned(),
+        )],
+    )
+}
+
+pub(crate) fn background_command_passes() -> Inspection {
+    docs(
+        "background-command",
+        vec![("GUIDE.md", "Run `cargo xtask check &`.\n".to_owned())],
     )
 }

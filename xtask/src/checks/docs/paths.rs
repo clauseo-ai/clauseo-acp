@@ -10,8 +10,9 @@
 //! planned, and, in `ARCHITECTURE.md` only (the file that says what is planned), a path written
 //! `` `path` (planned) ``. In any other file the marker is not read and the path must exist. The
 //! marker holds both ways, as the table's Status does: a marked path that exists fails, so the
-//! marker is dropped when the path lands, and so does one that differs from a listed path only in
-//! case. The cost: a marked path with a typo passes until a file by that name appears.
+//! marker is dropped when the path lands, and so does one that differs from a listed path, or
+//! whose folder differs from a listed folder, only in case. The cost: a marked path with a typo
+//! passes until a file by that name appears.
 //!
 //! A missing path that is on disk but not listed fails with a message that says git ignores it.
 
@@ -82,14 +83,7 @@ fn problem(
                 format!("drop the{PLANNED} after `{path}`"),
             ))
         } else {
-            tree.ignoring_case(&key).map(|real| {
-                violation(
-                    file,
-                    span.line,
-                    format!("`{path}` is marked{PLANNED}, but `{real}` exists, in another case"),
-                    format!("write `{real}`, and drop the{PLANNED} after it"),
-                )
-            })
+            case_problem(tree, file, span.line, path, &key)
         };
     }
     if exists || is_planned(path, planned) {
@@ -108,6 +102,29 @@ fn problem(
         span.line,
         format!("`{path}` does not exist"),
         format!("create `{path}`, or correct or remove the reference"),
+    ))
+}
+
+/// The violation for `path` (`key` as the tree holds it), marked planned and not listed, when
+/// it, or failing that one of the folders it starts with, is listed in another case.
+fn case_problem(tree: &Tree, file: &str, line: u32, path: &str, key: &str) -> Option<Violation> {
+    if let Some(real) = tree.ignoring_case(key) {
+        return Some(violation(
+            file,
+            line,
+            format!("`{path}` is marked{PLANNED}, but `{real}` exists, in another case"),
+            format!("write `{real}`, and drop the{PLANNED} after it"),
+        ));
+    }
+    let folders = key.match_indices('/').filter_map(|(at, _)| key.get(..at));
+    let (folder, real) = folders
+        .filter(|folder| !tree.contains(folder))
+        .find_map(|folder| tree.ignoring_case(folder).map(|real| (folder, real)))?;
+    Some(violation(
+        file,
+        line,
+        format!("`{path}` is marked{PLANNED}, but its folder `{folder}` exists as `{real}`"),
+        format!("write the path under `{real}`, as git lists it"),
     ))
 }
 

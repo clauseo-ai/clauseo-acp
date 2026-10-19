@@ -75,3 +75,7 @@ pub(crate) fn planned_existing_path_fails() -> Inspection {
 pub(crate) fn planned_case_variant_fails() -> Inspection {
     architecture("planned-case", "Next: `docs/REAL.md` (planned).\n")
 }
+
+pub(crate) fn planned_folder_case_variant_fails() -> Inspection {
+    architecture("planned-folder-case", "Next: `Docs/new.md` (planned).\n")
+}

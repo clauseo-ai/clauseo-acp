@@ -184,6 +184,12 @@ crate::checks::planted::cases! {
         "ARCHITECTURE.md:10: `docs/REAL.md` is marked (planned), but `docs/real.md` exists, in \
          another case\n    fix: write `docs/real.md`, and drop the (planned) after it",
     ]), inspects 4 => super::cases::planned_case_variant_fails,
+    /// In `ARCHITECTURE.md`, a marked path whose folder differs from a listed folder only in case
+    /// fails, naming the listed folder.
+    planned_folder_case_variant_fails: FailsWith(&[
+        "ARCHITECTURE.md:10: `Docs/new.md` is marked (planned), but its folder `Docs` exists as \
+         `docs`\n    fix: write the path under `docs`, as git lists it",
+    ]), inspects 4 => super::cases::planned_folder_case_variant_fails,
     /// Outside `ARCHITECTURE.md` the marker is not read: Rohan's three marked spans fail.
     planned_marker_outside_architecture_fails: FailsWith(&[
         bad_path!(1, "crates/nope/lib.rs"),
@@ -325,7 +331,21 @@ crate::checks::planted::cases! {
     ]), inspects 4 => super::cases::quoted_assignment_command_fails,
     /// Quotes around a word are read as a shell reads them: `cargo xtask "check"` parses.
     quoted_subcommand_passes: Passes, inspects 4 => super::cases::quoted_subcommand_passes,
-    /// A `text` block holds output, so a failing command shown in it is not read.
+    /// `cargo xtask` is found anywhere in a line's words, so a wrapper with flags, `nohup`, a
+    /// substitution or another prompt does not hide the command.
+    wrapped_commands_fail: FailsWith(&[
+        bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+        bad_command!(3, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+        bad_command!(4, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+        bad_command!(5, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+        bad_command!(6, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+        bad_command!(7, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+        bad_command!(11, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+        bad_command!(15, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]), inspects 4 => super::cases::wrapped_commands_fail,
+    /// A command run in the background: the `&` is shell syntax, not an argument.
+    background_command_passes: Passes, inspects 4 => super::cases::background_command_passes,
+    /// A `text` or `text,ignore` block holds output, so a failing command shown in it is not read.
     text_block_output_passes: Passes, inspects 4 => super::cases::text_block_output_passes,
     /// A command line with a quote left open does not split into words, and fails.
     open_quote_command_fails: FailsWith(&[

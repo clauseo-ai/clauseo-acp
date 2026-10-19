@@ -97,23 +97,18 @@ fn a_command_is_found_after_a_prompt_assignments_and_separators() {
 }
 
 #[test]
-fn a_command_inside_other_words_or_after_a_comment_is_not_one_of_these() {
-    assert_eq!(commands_of("the cargo xtask command"), Vec::<String>::new());
+fn a_command_is_found_anywhere_in_the_words_but_not_in_other_words_or_a_comment() {
+    assert_eq!(
+        commands_of("the cargo xtask command"),
+        ["cargo xtask command"]
+    );
     assert_eq!(commands_of("cargo xtasks check"), Vec::<String>::new());
+    assert_eq!(commands_of("mycargo xtask check"), Vec::<String>::new());
     assert_eq!(commands_of("# cargo xtask check"), Vec::<String>::new());
     assert_eq!(
         commands_of("cargo xtask check  # changed crates only"),
         ["cargo xtask check"]
     );
-}
-
-#[test]
-fn an_assignment_is_a_name_then_equals() {
-    assert!(is_assignment("A_1=x"));
-    assert!(is_assignment("A="));
-    assert!(!is_assignment("1A=x"));
-    assert!(!is_assignment("--x=1"));
-    assert!(!is_assignment("cargo"));
 }
 
 #[test]
@@ -232,7 +227,7 @@ fn shell_redirections_and_a_closing_paren_are_not_arguments() {
 }
 
 #[test]
-fn a_subshell_substitution_or_prefix_word_before_the_command_is_skipped() {
+fn whatever_comes_before_the_command_is_skipped() {
     assert_eq!(
         commands_of("(cd x && cargo xtask frobnicate)"),
         ["cargo xtask frobnicate"]
@@ -243,7 +238,31 @@ fn a_subshell_substitution_or_prefix_word_before_the_command_is_skipped() {
         ["cargo xtask check"]
     );
     assert_eq!(commands_of("exec cargo xtask check"), ["cargo xtask check"]);
-    assert_eq!(commands_of("echo cargo xtask check"), Vec::<String>::new());
+    assert_eq!(commands_of("echo cargo xtask check"), ["cargo xtask check"]);
+    for text in [
+        "sudo -E cargo xtask frobnicate",
+        "sudo -u me cargo xtask frobnicate",
+        "env -i cargo xtask frobnicate",
+        "time -p cargo xtask frobnicate",
+        "nohup cargo xtask frobnicate",
+        "x=$(cargo xtask frobnicate)",
+        "% cargo xtask frobnicate",
+        "PS> cargo xtask frobnicate",
+        "echo `cargo xtask frobnicate`",
+    ] {
+        assert_eq!(commands_of(text), ["cargo xtask frobnicate"], "{text}");
+    }
+}
+
+#[test]
+fn shell_punctuation_after_a_word_ends_the_command() {
+    assert_eq!(commands_of("cargo xtask check &"), ["cargo xtask check"]);
+    assert_eq!(commands_of("cargo xtask check&"), ["cargo xtask check"]);
+    assert_eq!(commands_of("$(cargo xtask)"), ["cargo xtask"]);
+    assert_eq!(
+        commands_of("(cargo +nightly xtask check)"),
+        ["cargo xtask check"]
+    );
 }
 
 #[test]

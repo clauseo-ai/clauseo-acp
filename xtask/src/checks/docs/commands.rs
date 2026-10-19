@@ -1,10 +1,12 @@
 //! `cargo xtask` commands in the docs. Every code span and every line of a code block must parse,
-//! wherever `cargo xtask` starts a command in it: after a `$` prompt, after `sudo` or `VAR=value`
-//! assignments, or after `&&`, `||`, `;` or `|`. Each part between those operators is split
-//! into words with `shlex`, as a shell splits it, so quotes are read (`cargo xtask "check"`,
-//! `FOO="a b" cargo xtask check`), and the words parse against the clap tree in `main.rs`. A part
-//! that holds `cargo xtask` but that `shlex` cannot split (a quote left open) fails. A `text`
-//! code block holds output, not commands, and is not read (see `markdown::scan`).
+//! wherever `cargo [+toolchain] xtask` appears in it. The text is cut at `&&`, `||`, `;` and `|`,
+//! and each part is split into words with `shlex`, as a shell splits it, so quotes are read
+//! (`cargo xtask "check"`, `FOO="a b" cargo xtask check`). The command is found anywhere in the
+//! words, so what comes before it (a prompt such as `$`, `%` or `PS>`, `sudo -E`, `env -i`,
+//! `nohup`, `x=$(`) needs no list. The words after `xtask` stop at shell syntax and parse against
+//! the clap tree in `main.rs`. A part that holds `cargo xtask` but that `shlex` cannot split (a
+//! quote left open) fails. A `text` code block holds output, not commands, and is not read (see
+//! `markdown::scan`).
 //!
 //! A span that is exactly `cargo xtask` names the tool in prose and is not read. A `<...>` word
 //! (`<command>`) or a `...` word is a placeholder: in the subcommand's place the command is not
@@ -34,6 +36,10 @@ pub(super) use command_fix;
 
 /// The one fix for every command that does not parse.
 const FIX: &str = command_fix!();
+
+/// What ends a word as shell syntax: a redirection (`2>&1`, `> out`, `<`), a closing parenthesis
+/// or backtick, and an operator glued to the word (`check;`, `check&`).
+const SHELL_PUNCTUATION: [char; 7] = ['>', '<', ')', '`', ';', '&', '|'];
 
 /// The fix for a command line that `shlex` cannot split into words.
 const UNSPLIT_FIX: &str = "close the quote or escape that is left open, or remove the command";
@@ -116,7 +122,7 @@ fn logical_lines(lines: &[Line]) -> Vec<(u32, String)> {
 }
 
 /// The xtask commands in `text`, each part between the operators (see `parts`) split with
-/// `shlex`. Each part may begin with a `$` prompt, `sudo` and `NAME=value` assignments.
+/// `shlex`.
 fn commands_in(text: &str) -> Vec<Found> {
     parts(text)
         .into_iter()
@@ -171,39 +177,58 @@ fn parts(text: &str) -> Vec<&str> {
     parts
 }
 
-/// True when the words of `part`, cut at whitespace, hold `cargo` then `xtask`.
+/// True when the words of `part`, cut at whitespace, hold `cargo [+toolchain] xtask`.
 fn names_the_tool(part: &str) -> bool {
     let words: Vec<&str> = part.split_whitespace().collect();
-    words.windows(2).any(|pair| {
-        pair.first().map(|w| w.trim_start_matches(['(', '$'])) == Some("cargo")
-            && pair.get(1) == Some(&"xtask")
+    xtask_at(&words).is_some()
+}
+
+/// The index of the `xtask` word of the first `cargo [+toolchain] xtask` in `words`. The
+/// `xtask` word may carry shell punctuation (`$(cargo xtask)`).
+fn xtask_at<S: AsRef<str>>(words: &[S]) -> Option<usize> {
+    let word = |at: usize| words.get(at).map(AsRef::as_ref);
+    (0..words.len()).find_map(|at| {
+        if !word(at).is_some_and(is_cargo) {
+            return None;
+        }
+        let toolchain = word(at + 1).is_some_and(|w| w.len() > 1 && w.starts_with('+'));
+        let next = if toolchain { at + 2 } else { at + 1 };
+        word(next)
+            .is_some_and(|w| unpunctuated(w).0 == "xtask")
+            .then_some(next)
     })
 }
 
-/// The command `words`, a part of a line split by `shlex`, hold, when they hold one (see
-/// `commands_in`). Before `cargo`, a `(` or `$(`, a `sudo`, `time`, `env` or `exec`, and
-/// assignments are skipped, and a `+<toolchain>` right after `cargo` is skipped too
-/// (`cargo +nightly xtask`). After it, the words stop at a redirection (`2>&1`, `> out`, `<`)
-/// or a closing parenthesis, which are shell syntax, and at a placeholder. A placeholder in the
-/// subcommand's place gives no command.
+/// True for a word that runs cargo: `cargo`, or a word that ends in `cargo` right after a `(`
+/// (`(cargo`, `$(cargo`, `x=$(cargo`) or a backtick.
+fn is_cargo(word: &str) -> bool {
+    word == "cargo" || ["(cargo", "`cargo"].iter().any(|end| word.ends_with(end))
+}
+
+/// `word` up to its first `SHELL_PUNCTUATION`, and true when something was cut.
+fn unpunctuated(word: &str) -> (&str, bool) {
+    match word.find(SHELL_PUNCTUATION) {
+        Some(cut) => (word.get(..cut).unwrap_or_default(), true),
+        None => (word, false),
+    }
+}
+
+/// The command `split`, a part of a line split by `shlex`, holds, when it holds one (see
+/// `xtask_at`). The words after `xtask` stop at a word with `SHELL_PUNCTUATION` (the text before
+/// it is kept unless it is a redirection's file descriptor, `2` in `2>&1`), and at a placeholder.
+/// A placeholder in the subcommand's place gives no command.
 fn command_of(split: &[String]) -> Option<Command> {
-    let mut words: Vec<String> = Vec::new();
+    let at = xtask_at(split)?;
+    let mut words = vec!["cargo".to_owned(), "xtask".to_owned()];
     let mut placeholder = false;
-    for raw in split.iter().map(String::as_str) {
-        if words.is_empty() {
-            let word = raw.trim_start_matches(['(', '$']);
-            if word.is_empty() || is_prefix_word(word) {
-                continue;
-            }
-            if word != "cargo" {
-                return None;
-            }
-            words.push(word.to_owned());
-            continue;
-        }
-        if words.len() == 1 && raw.len() > 1 && raw.starts_with('+') {
-            continue;
-        }
+    // `$(cargo xtask)`: the punctuation on `xtask` ends the command there.
+    let ended = split.get(at).is_some_and(|word| unpunctuated(word).1);
+    let after = if ended {
+        &[]
+    } else {
+        split.get(at + 1..).unwrap_or_default()
+    };
+    for raw in after.iter().map(String::as_str) {
         if raw.starts_with('#') {
             break;
         }
@@ -214,20 +239,16 @@ fn command_of(split: &[String]) -> Option<Command> {
             placeholder = true;
             break;
         }
-        match raw.find(['>', '<', ')']) {
-            Some(cut) => {
-                let before = raw.get(..cut).unwrap_or_default().trim_end_matches('&');
-                if !before.is_empty() && !before.bytes().all(|b| b.is_ascii_digit()) {
-                    words.push(before.to_owned());
-                }
-                break;
-            }
-            None => words.push(raw.to_owned()),
+        let (head, cut) = unpunctuated(raw);
+        let descriptor = cut && head.bytes().all(|b| b.is_ascii_digit());
+        if !head.is_empty() && !descriptor {
+            words.push(head.to_owned());
+        }
+        if cut {
+            break;
         }
     }
-    let is_command = words.first().map(String::as_str) == Some("cargo")
-        && words.get(1).map(String::as_str) == Some("xtask");
-    is_command.then_some(Command { words, placeholder })
+    Some(Command { words, placeholder })
 }
 
 /// True for a placeholder word: `<name>` (no other `<` or `>` in it), or a word holding `...`.
@@ -237,21 +258,6 @@ fn is_placeholder(word: &str) -> bool {
         .and_then(|rest| rest.strip_suffix('>'))
         .is_some_and(|name| !name.is_empty() && !name.contains(['<', '>']));
     named || word.contains("...")
-}
-
-/// A word that may come before `cargo` in a command: a prompt, an assignment, or a word that runs
-/// the command (`sudo`, `time`, `env`, `exec`).
-fn is_prefix_word(word: &str) -> bool {
-    matches!(word, "$" | "sudo" | "time" | "env" | "exec") || is_assignment(word)
-}
-
-/// True for a shell `NAME=value` word: a name of letters, digits and `_` that does not start with
-/// a digit, then `=`.
-fn is_assignment(word: &str) -> bool {
-    word.split_once('=').is_some_and(|(name, _)| {
-        name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
-            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-    })
 }
 
 /// The violation for `command` (as written, from `line`) when it does not parse.

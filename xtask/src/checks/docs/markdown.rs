@@ -17,7 +17,8 @@ pub(super) struct Scan {
     /// Inline links and images, HTML link attributes and reference definitions.
     pub links: Vec<Link>,
     /// The lines of fenced and indented code blocks, in file order, fence lines left out. A
-    /// fenced block whose info string starts with `text` holds output, not code, and is left out.
+    /// fenced block whose info string's first word is `text` holds output, not code, and is left
+    /// out.
     pub code: Vec<Line>,
 }
 
@@ -172,11 +173,12 @@ fn read(text: &str, line_of: &dyn Fn(usize) -> u32, scan: &mut Scan) {
     }
 }
 
-/// True for a fenced block whose info string's first word is `text`, in any case: output.
+/// True for a fenced block whose info string's first word (cut at `,` or whitespace) is `text`,
+/// in any case: output. An info string of `text,ignore` counts.
 fn is_output(kind: &CodeBlockKind<'_>) -> bool {
     match kind {
         CodeBlockKind::Fenced(info) => info
-            .split_whitespace()
+            .split(|c: char| c == ',' || c.is_whitespace())
             .next()
             .is_some_and(|word| word.eq_ignore_ascii_case("text")),
         CodeBlockKind::Indented => false,
