@@ -8,8 +8,9 @@
 //! `"v1Compatible"`, which needs the updater's `zip` feature that the workspace leaves off.
 //! No platform config (`tauri.<platform>.conf.json`, `.json5` or `Tauri.<platform>.toml`) exists:
 //! Tauri merges one over `tauri.conf.json` and could turn a setting back on for one OS.
-//! In `build.rs`: an `AppManifest` is declared (`app_manifest(` and `AppManifest::new()`, outside
-//! comments), and `capabilities_path_pattern(` does not point Tauri at another folder. Each failing
+//! In `build.rs`, parsed with syn: an `AppManifest` is declared (`app_manifest(` and
+//! `AppManifest::new()` are called), and `capabilities_path_pattern(` does not point Tauri at
+//! another folder. Each failing
 //! setting points at its key's line, found under its parent object (`json_text::key_line`), or at
 //! line 1.
 //! The pure functions take file contents and paths; `run` reads the files from the repo and counts
@@ -19,7 +20,9 @@ use crate::checks::json_text::key_line;
 use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
 use crate::violation::Violation;
 use crate::workspace::Context;
+use proc_macro2::{Delimiter, TokenStream, TokenTree};
 use serde_json::Value;
+use syn::ext::IdentExt;
 
 /// The files this check reads, inside the desktop crate's directory.
 const TAURI_CONF: &str = "tauri.conf.json";
@@ -42,6 +45,7 @@ const PUBKEY_FIX: &str =
 const V1_FIX: &str = "the updater is built without its zip feature, so v1Compatible artifacts cannot be installed; use true";
 const DANGEROUS_FIX: &str = "remove it: each `dangerous*` setting switches off a Tauri safeguard";
 const APP_MANIFEST_FIX: &str = "pass `tauri_build::AppManifest::new()` to `tauri_build::Attributes::new().app_manifest(...)` in `tauri_build::try_build`: without a manifest Tauri skips the access check for app commands";
+const BUILD_RS_SYNTAX_FIX: &str = "fix the syntax: cargo cannot build the crate either";
 const PATH_PATTERN_FIX: &str = "remove it: capabilities live in the crate's capabilities folder, the one the capabilities check scans";
 
 /// The platforms Tauri merges a platform config for, over `tauri.conf.json`.
@@ -306,13 +310,30 @@ fn collect_dangerous(value: &Value, path: &mut Vec<String>, found: &mut Vec<Vec<
     }
 }
 
-/// `build.rs` at `path` must declare an `AppManifest` and must not move the capabilities folder.
-/// Comments are stripped first (`checks::strip_comments`), so a commented-out call does not count.
-/// A missing file counts as no manifest.
+/// `build.rs` at `path` must declare an `AppManifest` (call `app_manifest(...)` and
+/// `AppManifest::new()`) and must not move the capabilities folder (call
+/// `capabilities_path_pattern(...)`). The file is parsed with syn and its tokens are walked,
+/// macro arguments included, so a call written only in a comment or a string does not count, and
+/// one after a string that holds `//` does. A missing file counts as no manifest; a file that is
+/// not valid Rust fails at the parse error's line.
 pub(crate) fn build_rs_violations(path: &str, text: Option<&str>) -> Vec<Violation> {
-    let code = text.map(checks::strip_comments).unwrap_or_default();
+    let mut calls = BuildCalls::default();
+    if let Some(text) = text {
+        match parse_rust(text) {
+            Ok(tokens) => calls.find(tokens),
+            Err(error) => {
+                let line = u32::try_from(error.span().start().line).unwrap_or(1).max(1);
+                return vec![violation(
+                    path,
+                    line,
+                    format!("build.rs is not valid Rust: {error}"),
+                    BUILD_RS_SYNTAX_FIX,
+                )];
+            }
+        }
+    }
     let mut found = Vec::new();
-    if !code.contains("app_manifest(") || !code.contains("AppManifest::new()") {
+    if !calls.app_manifest || !calls.manifest_new {
         found.push(violation(
             path,
             1,
@@ -320,18 +341,77 @@ pub(crate) fn build_rs_violations(path: &str, text: Option<&str>) -> Vec<Violati
             APP_MANIFEST_FIX,
         ));
     }
-    if let Some(index) = code
-        .lines()
-        .position(|line| line.contains("capabilities_path_pattern("))
-    {
+    if let Some(line) = calls.path_pattern {
         found.push(violation(
             path,
-            checks::line_at(index),
+            line,
             "build.rs calls `capabilities_path_pattern(`",
             PATH_PATTERN_FIX,
         ));
     }
     found
+}
+
+/// The tokens of `text`, once syn has parsed it as a Rust file.
+fn parse_rust(text: &str) -> syn::Result<TokenStream> {
+    let tokens: TokenStream = text.parse()?;
+    syn::parse2::<syn::File>(tokens.clone())?;
+    Ok(tokens)
+}
+
+/// The calls in `build.rs` that its rule looks for.
+#[derive(Default)]
+struct BuildCalls {
+    /// `app_manifest(...)` is called.
+    app_manifest: bool,
+    /// `AppManifest::new()` is called.
+    manifest_new: bool,
+    /// The line of the first `capabilities_path_pattern(...)` call.
+    path_pattern: Option<u32>,
+}
+
+impl BuildCalls {
+    /// Records the calls in `tokens`, inside every group (macro arguments too). A call is a name,
+    /// raw or not, followed by a parenthesized group and not after `fn`.
+    fn find(&mut self, tokens: TokenStream) {
+        let trees: Vec<TokenTree> = tokens.into_iter().collect();
+        for (index, tree) in trees.iter().enumerate() {
+            let ident = match tree {
+                TokenTree::Group(group) => {
+                    self.find(group.stream());
+                    continue;
+                }
+                TokenTree::Ident(ident) => ident.unraw(),
+                TokenTree::Punct(_) | TokenTree::Literal(_) => continue,
+            };
+            let args = match trees.get(index + 1) {
+                Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Parenthesis => {
+                    group.stream()
+                }
+                _ => continue,
+            };
+            let before = |back: usize| index.checked_sub(back).and_then(|at| trees.get(at));
+            if matches!(before(1), Some(TokenTree::Ident(word)) if word == "fn") {
+                continue;
+            }
+            if ident == "app_manifest" {
+                self.app_manifest = true;
+            } else if ident == "capabilities_path_pattern" {
+                let line = u32::try_from(ident.span().start().line).unwrap_or(1);
+                self.path_pattern.get_or_insert(line);
+            } else if ident == "new" && args.is_empty() && after_app_manifest_path(&before) {
+                self.manifest_new = true;
+            }
+        }
+    }
+}
+
+/// True when the three tokens before a name are `AppManifest`, `:` and `:`.
+fn after_app_manifest_path<'a>(before: &impl Fn(usize) -> Option<&'a TokenTree>) -> bool {
+    let colon = |back| matches!(before(back), Some(TokenTree::Punct(p)) if p.as_char() == ':');
+    colon(1)
+        && colon(2)
+        && matches!(before(3), Some(TokenTree::Ident(name)) if name.unraw() == "AppManifest")
 }
 
 #[cfg(test)]

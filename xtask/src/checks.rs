@@ -258,20 +258,6 @@ pub(crate) fn join(dir: &str, name: &str) -> String {
     }
 }
 
-/// `text` with everything from `//` to the end of each line removed, line count kept. A simple
-/// per-line strip: it does not know string literals (a `"//"` in a string cuts the line there) or
-/// block comments. A cut line can hide a call: a required call then fails the check, but a
-/// forbidden one after the cut passes, so the scan is best effort.
-pub(crate) fn strip_comments(text: &str) -> String {
-    text.lines()
-        .map(|line| {
-            line.find("//")
-                .map_or(line, |start| line.get(..start).unwrap_or(line))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 /// The inspection of a check that reads the repo's files but could not list them, because
 /// `git ls-files` failed. `check` is the check's name, for the fix.
 pub(crate) fn unlisted(check: &str, error: &GitError) -> Inspection {
