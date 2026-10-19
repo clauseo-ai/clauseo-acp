@@ -54,6 +54,12 @@ pub(super) fn expected_winget(b: &Binary) -> String {
     )
 }
 
+/// The file a curl command writes: the argument after `-o`.
+pub(super) fn curl_output(cmd: &Cmd) -> &str {
+    let at = cmd.args.iter().position(|arg| arg == "-o").unwrap();
+    &cmd.args[at + 1]
+}
+
 /// A command that exited, with what it printed.
 #[expect(clippy::unnecessary_wraps, reason = "it is what a runner returns")]
 pub(super) fn exited(success: bool, stdout: &str, stderr: &str) -> io::Result<Ended> {
@@ -192,7 +198,7 @@ fn install_runs_the_pinned_command_for_each_os_and_arch() {
         let mut runner = |cmd: &Cmd, at: &Path, _: Output, _: Duration| -> io::Result<Ended> {
             ran.push((cmd.to_string(), at.to_path_buf()));
             if cmd.program == Program::Named("curl") {
-                std::fs::write(at.join(&cmd.args[2]), b"not a release")?;
+                std::fs::write(at.join(curl_output(cmd)), b"not a release")?;
             }
             exited(true, "", "")
         };
@@ -214,7 +220,10 @@ fn install_runs_the_pinned_command_for_each_os_and_arch() {
                     let asset = expected_asset(b, os, arch);
                     let url = expected_url(b, &asset);
                     let staging = format!(".xtask-setup-{}-{}", b.name, std::process::id());
-                    (format!("curl -sSfL -o {asset} {url}"), bin.join(staging))
+                    (
+                        format!("curl -sSfL --max-time 600 -o {asset} {url}"),
+                        bin.join(staging),
+                    )
                 }
             })
             .collect();
@@ -235,7 +244,7 @@ fn run_fake(
     let mut runner = |cmd: &Cmd, at: &Path, _: Output, _: Duration| -> io::Result<Ended> {
         ran.push(cmd.to_string());
         match cmd.program {
-            Program::Named("curl") => std::fs::write(at.join(&cmd.args[2]), ASSET_BYTES)?,
+            Program::Named("curl") => std::fs::write(at.join(curl_output(cmd)), ASSET_BYTES)?,
             Program::Named("faketool") => {
                 return match versions.next().expect("a version for each check") {
                     Some(version) => exited(true, &format!("{version}\n"), ""),
@@ -282,7 +291,7 @@ fn run_checks_the_version_after_the_install() {
     let mut expected = cargo_installs();
     expected.extend([
         "faketool version".to_owned(),
-        format!("curl -sSfL -o {asset} {url}"),
+        format!("curl -sSfL --max-time 600 -o {asset} {url}"),
         "faketool version".to_owned(),
     ]);
     assert_eq!(ran, expected);
@@ -379,4 +388,30 @@ fn a_version_check_that_hangs_or_cannot_run_is_a_failed_run_not_a_missing_binary
         };
         assert_eq!(check_version(&tool, Path::new("."), &mut runner), expected);
     }
+}
+
+#[test]
+fn after_a_failed_install_the_version_failure_does_not_repeat_the_install() {
+    let dir = Scratch::new("setup-run-install-fails");
+    let bin = dir.join("bin");
+    // Pinned to a sha256 that the fake download does not have.
+    let tool = Binary {
+        sha256: &[AssetSha256 {
+            os: "linux",
+            arch: "x86_64",
+            sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+        }],
+        ..fake_tool(Packing::Bare)
+    };
+    let (ok, ran, printed) = run_fake(&linux(&bin, true), &tool, true, &[None, None]);
+    assert!(!ok);
+    assert_eq!(ran.last().map(String::as_str), Some("faketool version"));
+    assert!(
+        printed.contains(
+            "faketool is not installed (`faketool version` could not start: not found)\n    fix: \
+             the install of faketool above failed: do what its fix says, then run cargo xtask \
+             setup again\n"
+        ),
+        "{printed}"
+    );
 }

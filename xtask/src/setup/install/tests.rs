@@ -5,7 +5,8 @@ use super::*;
 use crate::scratch::Scratch;
 use crate::setup::BINARIES;
 use crate::setup::tests::{
-    ASSET_BYTES, binary, exited, expected_asset, expected_url, expected_winget, fake_tool, linux,
+    ASSET_BYTES, binary, curl_output, exited, expected_asset, expected_url, expected_winget,
+    fake_tool, linux,
 };
 use std::path::PathBuf;
 
@@ -41,8 +42,8 @@ fn install_with(
     let mut runner = |cmd: &Cmd, at: &Path, _: Output, _: Duration| -> io::Result<Ended> {
         ran.push((cmd.to_string(), at.to_path_buf()));
         match cmd.program {
-            Program::Named("curl") => fs::write(at.join(&cmd.args[2]), asset_bytes)?,
-            Program::Named("tar") => fs::write(at.join(&cmd.args[2]), ASSET_BYTES)?,
+            Program::Named("curl") => fs::write(at.join(curl_output(cmd)), asset_bytes)?,
+            Program::Named("tar") => fs::write(at.join(cmd.args.last().unwrap()), ASSET_BYTES)?,
             _ => return other(cmd),
         }
         exited(true, "", "")
@@ -85,6 +86,28 @@ fn a_download_whose_sha256_differs_leaves_bin_untouched() {
              it by hand\n",
             lefthook.version
         )
+    );
+}
+
+#[test]
+fn leftovers_of_an_interrupted_run_are_removed_and_nothing_else_in_bin() {
+    let dir = Scratch::new("setup-install-leftovers");
+    let bin = dir.join("bin");
+    let stale = bin.join(".xtask-setup-gitleaks-99999");
+    fs::create_dir_all(&stale).unwrap();
+    fs::write(stale.join("gitleaks_unverified.tar.gz"), b"half a download").unwrap();
+    fs::write(bin.join(".xtask-setup-lefthook-1"), b"a stray file").unwrap();
+    fs::write(bin.join("lefthook"), b"the working lefthook").unwrap();
+    fs::write(bin.join(".xtask-other"), b"not ours").unwrap();
+    // The download matches no pin, so the install itself adds nothing either.
+    let (ok, _, _) = install_with(binary("lefthook"), &linux(&bin, true), SWAPPED, &mut never);
+    assert!(!ok);
+    assert_eq!(
+        files_in(&bin),
+        [
+            (".xtask-other".to_owned(), b"not ours".to_vec()),
+            ("lefthook".to_owned(), b"the working lefthook".to_vec()),
+        ]
     );
 }
 
@@ -134,7 +157,7 @@ fn a_matching_tar_gz_is_unpacked_in_staging_then_moved_into_bin() {
             cmd
         })
         .collect();
-    assert_eq!(ran[1], format!("tar -xzf {asset} faketool"));
+    assert_eq!(ran[1], format!("tar --no-same-owner -xzf {asset} faketool"));
     assert_eq!(
         files_in(&bin),
         [("faketool".to_owned(), ASSET_BYTES.to_vec())]
@@ -149,7 +172,7 @@ fn a_failed_download_leaves_bin_untouched_and_names_curl_as_the_fix() {
     let asset = expected_asset(gitleaks, "linux", "x86_64");
     let url = expected_url(gitleaks, &asset);
     let fix = format!(
-        "    fix: run `curl -sSfL -o {asset} {url}` by hand in an empty directory and check its \
+        "    fix: run `curl -sSfL --max-time 600 -o {asset} {url}` by hand in an empty directory and check its \
          output, then run cargo xtask setup --binaries again"
     );
     let cases: [(&str, io::Result<Ended>); 3] = [

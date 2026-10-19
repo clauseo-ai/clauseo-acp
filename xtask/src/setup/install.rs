@@ -188,7 +188,7 @@ fn download_into<W: Write>(
         binary.name, binary.version, download.url
     ));
     let staging = bin.join(format!(
-        ".xtask-setup-{}-{}",
+        "{STAGING_PREFIX}{}-{}",
         binary.name,
         std::process::id()
     ));
@@ -222,18 +222,45 @@ fn download_into<W: Write>(
     ok
 }
 
-/// Makes `bin` if needed, and `staging` inside it empty.
+/// The start of the name of every staging directory `setup` makes in bin.
+const STAGING_PREFIX: &str = ".xtask-setup-";
+
+/// Makes `bin` if needed, removes every entry in it whose name starts with `STAGING_PREFIX`,
+/// and makes `staging` there, empty. Only `setup` makes such entries, so each one left is from a
+/// run that was interrupted (Ctrl-C, a kill) before it removed its own. Two setups at once would
+/// remove each other's: the other one's download then fails, and bin is still never half-written.
 fn fresh_dir(bin: &Path, staging: &Path) -> Result<(), Failure> {
-    let made = fs::create_dir_all(bin).and_then(|()| match fs::remove_dir_all(staging) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-        _ => fs::create_dir(staging),
-    });
+    let made = fs::create_dir_all(bin)
+        .and_then(|()| remove_staging_leftovers(bin))
+        .and_then(|()| fs::create_dir(staging));
     made.map_err(|error| {
         (
             format!("could not make {}: {error}", staging.display()),
             retry_fix(bin),
         )
     })
+}
+
+/// Removes every entry in `bin` whose name starts with `STAGING_PREFIX`. A symlink is removed,
+/// never followed.
+fn remove_staging_leftovers(bin: &Path) -> io::Result<()> {
+    for entry in fs::read_dir(bin)? {
+        let entry = entry?;
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(STAGING_PREFIX)
+        {
+            continue;
+        }
+        let path = entry.path();
+        if fs::symlink_metadata(&path)?.is_dir() {
+            fs::remove_dir_all(&path)?;
+        } else {
+            fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
 }
 
 /// Downloads into `staging`, checks the sha256, unpacks if needed, and renames the binary into
@@ -246,7 +273,12 @@ fn fetch_check_place(
     runner: &mut Runner<'_>,
 ) -> Result<(), Failure> {
     let (name, asset, url) = (binary.name, download.asset.as_str(), download.url.as_str());
-    let curl = Cmd::new(Program::Named("curl"), ["-sSfL", "-o", asset, url]);
+    // curl's own limit ends it even when xtask is gone (Ctrl-C reaches xtask, not curl's group).
+    let max_time = DOWNLOAD_TIMEOUT.as_secs().to_string();
+    let curl = Cmd::new(
+        Program::Named("curl"),
+        ["-sSfL", "--max-time", &max_time, "-o", asset, url],
+    );
     let fix = format!(
         "run `{curl}` by hand in an empty directory and check its output, then run cargo xtask \
          setup --binaries again"
@@ -274,7 +306,10 @@ fn fetch_check_place(
     let unpacked = match download.packing {
         Packing::Bare => file,
         Packing::TarGz => {
-            let tar = Cmd::new(Program::Named("tar"), ["-xzf", asset, name]);
+            let tar = Cmd::new(
+                Program::Named("tar"),
+                ["--no-same-owner", "-xzf", asset, name],
+            );
             let fix = format!(
                 "the download matched its sha256, so check tar: run `{tar}` by hand on a \
                  download of {url} and check its output, then run cargo xtask setup --binaries \

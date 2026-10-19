@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-use version::{VersionCheck, compare_version};
+use version::{Attempt, VersionCheck, compare_version};
 
 /// A cargo crate `cargo xtask setup` installs at a pinned version.
 pub(crate) struct Tool {
@@ -269,21 +269,21 @@ fn setup_binary<W: Write>(
     let how = install::how_to_install(binary, machine.os, machine.arch);
     out.note(format!("{} {}: {how}", binary.name, binary.version));
     let mut check = check_version(binary, root, runner);
-    let mut installed_now = false;
-    let mut install_ok = true;
+    let mut attempt = Attempt::None;
     if install && check != VersionCheck::Matches {
-        installed_now = install::install_binary(out, binary, machine, root, runner);
-        install_ok = installed_now;
+        attempt = if install::install_binary(out, binary, machine, root, runner) {
+            Attempt::Installed
+        } else {
+            Attempt::Failed
+        };
         check = check_version(binary, root, runner);
     }
-    if let Some((message, fix)) =
-        version::version_failure(binary, &check, &how, installed_now, machine)
-    {
+    if let Some((message, fix)) = version::version_failure(binary, &check, &how, attempt, machine) {
         out.failure(&message, &fix);
         return false;
     }
     out.note(format!("{} version {} ok", binary.name, binary.version));
-    install_ok
+    attempt != Attempt::Failed
 }
 
 /// Runs `<name> version` and compares what it prints with the pin.
