@@ -19,6 +19,11 @@
 <!-- Each speed or memory comparison you made (AGENTS.md, Performance): what you compared, the machine,
      the medians, and what you kept. Write "none" only if nothing in this change had a faster alternative. -->
 
+## Deviations
+
+<!-- Each difference from the brief and why, including changed output formats and who reads them.
+     Write "none" if there are none. Update after each review round. -->
+
 ## Not verified
 
 <!-- What you did not check, and why. -->

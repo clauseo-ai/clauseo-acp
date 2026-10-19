@@ -12,6 +12,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 - `ARCHITECTURE.md`: crate map, dependency rules, seams, event flow.
 - `GLOSSARY.md`: one name per thing.
 - `CONTRIBUTING.md`: the steps from task to merge.
+- `docs/review-lessons.md`: rules from past reviews, each with the defect it prevents.
 - The contract at the top of each crate you touch (`//!` in `lib.rs`).
 - Plans and task briefs live in the private repo, cloned next to this one as `../clauseo-acp-private`
   (start at `../clauseo-acp-private/START-HERE.md`). Outside contributors will not have it; this repo
@@ -82,6 +83,10 @@ this. Use the words in `GLOSSARY.md` exactly.
 - Commit with `git commit -s`.
 - Run `cargo xtask check --quick` before you report.
 - Report what you verified, with the command and its result, and what you did not verify.
+- In the pull request, list every difference from the brief under Deviations and every path you
+  never ran (Windows, SIGKILL, a missing tool) under Not verified. Update both after each review.
+- Give each fact one home: a version, a key list, a policy string, a type, a rule's wording. Derive
+  the rest from it; where two files cannot share it, add a test that fails when they disagree.
 - Touch only the files your brief lists. If the brief is wrong or silent, stop and say so.
 - Do not merge. A person reviews and merges.
 
@@ -91,6 +96,8 @@ this. Use the words in `GLOSSARY.md` exactly.
 - Every acceptance check in the brief passes, with output in the pull request.
 - Tests sit at the interface and include a failing case.
 - Docs you changed still pass the doc checks.
+- Every comment, doc, help text, test name and PR sentence about what you changed is still true,
+  and claims only what a test or command showed.
 
 ## Changing this file
 
