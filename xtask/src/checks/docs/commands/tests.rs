@@ -114,17 +114,23 @@ fn a_command_is_found_anywhere_in_the_words_but_not_in_other_words_or_a_comment(
 #[test]
 fn a_backslash_continues_a_code_line_onto_the_next() {
     let lines = [
-        Line {
+        CodeLine {
             line: 7,
             text: "cargo xtask check \\".to_owned(),
+            block: 0,
+            info: String::new(),
         },
-        Line {
+        CodeLine {
             line: 8,
             text: "  --frobnicate".to_owned(),
+            block: 0,
+            info: String::new(),
         },
-        Line {
+        CodeLine {
             line: 9,
             text: "echo done".to_owned(),
+            block: 0,
+            info: String::new(),
         },
     ];
     assert_eq!(
@@ -320,4 +326,36 @@ fn a_part_with_an_open_quote_fails_only_when_it_names_the_tool() {
     let found = unsplit("a.md", 2, "cargo xtask \"check");
     assert_eq!(found.line, 2);
     assert_eq!(found.fix, UNSPLIT_FIX);
+}
+
+#[test]
+fn a_session_line_is_read_from_after_its_prompt_and_output_is_not() {
+    assert_eq!(
+        after_prompt("$ cargo xtask check"),
+        Some("cargo xtask check")
+    );
+    assert_eq!(
+        after_prompt("  % cargo xtask check"),
+        Some("cargo xtask check")
+    );
+    assert_eq!(
+        after_prompt("# cargo xtask check"),
+        Some("cargo xtask check")
+    );
+    assert_eq!(
+        after_prompt("> cargo xtask check"),
+        Some("cargo xtask check")
+    );
+    assert_eq!(
+        after_prompt("PS> cargo xtask check"),
+        Some("cargo xtask check")
+    );
+    assert_eq!(
+        after_prompt("PS C:\\repo> cargo xtask check"),
+        Some("cargo xtask check")
+    );
+    assert_eq!(after_prompt("error: run cargo xtask setup first"), None);
+    assert!(is_one_of("Console", &SESSIONS));
+    assert!(is_one_of("PWSH", &SHELLS));
+    assert!(!is_one_of("rust", &SHELLS));
 }

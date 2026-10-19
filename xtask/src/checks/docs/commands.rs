@@ -5,15 +5,21 @@
 //! words, so what comes before it (a prompt such as `$`, `%` or `PS>`, `sudo -E`, `env -i`,
 //! `nohup`, `x=$(`) needs no list. The words after `xtask` stop at shell syntax and parse against
 //! the clap tree in `main.rs`. A part that holds `cargo xtask` but that `shlex` cannot split (a
-//! quote left open) fails. A `text` code block holds output, not commands, and is not read (see
-//! `markdown::scan`).
+//! quote left open) fails.
+//!
+//! What is read: every inline code span, whole; every line of a code block with no info string or
+//! a shell one (`SHELLS`); and in a session block (`SESSIONS`), only a line that starts with a
+//! prompt (`$ `, `% `, `# `, `> `, `PS> `, `PS <path>> `), from after the prompt, since the
+//! other lines are output. A block with any other info string (`rust`, `yaml`, `md`, `text`, ...)
+//! holds code or prose in which `cargo xtask` is a mention, and is not read. The info string's
+//! first word, cut at `,` or whitespace, is matched in any case.
 //!
 //! A span that is exactly `cargo xtask` names the tool in prose and is not read. A `<...>` word
 //! (`<command>`) or a `...` word is a placeholder: in the subcommand's place the command is not
 //! read; elsewhere the words before it are parsed, and an error that only says a word is missing
 //! is not one, since the placeholder stands for that word.
 
-use super::markdown::{Line, Scan};
+use super::markdown::{CodeLine, Scan};
 use crate::Cli;
 use crate::checks::violation;
 use crate::violation::Violation;
@@ -44,6 +50,32 @@ const SHELL_PUNCTUATION: [char; 7] = ['>', '<', ')', '`', ';', '&', '|'];
 /// The fix for a command line that `shlex` cannot split into words.
 const UNSPLIT_FIX: &str = "close the quote or escape that is left open, or remove the command";
 
+/// The info words of a code block whose every line is a shell line.
+const SHELLS: [&str; 10] = [
+    "sh",
+    "bash",
+    "zsh",
+    "fish",
+    "shell",
+    "powershell",
+    "pwsh",
+    "ps1",
+    "cmd",
+    "bat",
+];
+
+/// The info words of a code block that shows a shell session: prompted commands and their output.
+const SESSIONS: [&str; 5] = [
+    "console",
+    "shell-session",
+    "sh-session",
+    "pwsh-session",
+    "ps1-session",
+];
+
+/// The prompts a session line starts with. `PS <path>> ` is read apart (see `after_prompt`).
+const PROMPTS: [&str; 5] = ["$ ", "% ", "# ", "> ", "PS> "];
+
 /// The span that names the tool in prose, not a command to run.
 const TOOL: &str = "cargo xtask";
 
@@ -67,7 +99,23 @@ pub(super) fn problems(file: &str, scan: &Scan) -> Vec<Violation> {
         .iter()
         .filter(|span| span.text != TOOL)
         .map(|span| (span.line, span.text.clone()));
-    let code = logical_lines(&scan.code);
+    let code = scan
+        .code
+        .chunk_by(|a, b| a.block == b.block)
+        .flat_map(|block| {
+            let info = block.first().map_or("", |line| line.info.as_str());
+            let session = is_one_of(info, &SESSIONS);
+            let read = session || info.is_empty() || is_one_of(info, &SHELLS);
+            logical_lines(if read { block } else { &[] })
+                .into_iter()
+                .filter_map(move |(line, text)| {
+                    if session {
+                        after_prompt(&text).map(|rest| (line, rest.to_owned()))
+                    } else {
+                        Some((line, text))
+                    }
+                })
+        });
     spans
         .chain(code)
         .flat_map(|(line, text)| {
@@ -93,9 +141,27 @@ fn unsplit(file: &str, line: u32, part: &str) -> Violation {
     )
 }
 
-/// The lines of code blocks as logical lines: a line ending in a backslash continues onto the
+/// True when `info` is one of `words`, in any case.
+fn is_one_of(info: &str, words: &[&str]) -> bool {
+    words.iter().any(|word| info.eq_ignore_ascii_case(word))
+}
+
+/// What follows the prompt of a session line, or `None` for a line with no prompt (output).
+fn after_prompt(text: &str) -> Option<&str> {
+    let text = text.trim_start();
+    PROMPTS
+        .iter()
+        .find_map(|prompt| text.strip_prefix(prompt))
+        .or_else(|| {
+            text.strip_prefix("PS ")?
+                .split_once("> ")
+                .map(|(_, rest)| rest)
+        })
+}
+
+/// The lines of one code block as logical lines: a line ending in a backslash continues onto the
 /// next, and the pair is one line, with the first line's number.
-fn logical_lines(lines: &[Line]) -> Vec<(u32, String)> {
+fn logical_lines(lines: &[CodeLine]) -> Vec<(u32, String)> {
     let mut logical = Vec::new();
     let mut open: Option<(u32, String)> = None;
     for line in lines {

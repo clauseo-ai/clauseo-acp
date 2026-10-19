@@ -242,7 +242,7 @@ pub(crate) fn open_quote_command_fails() -> Inspection {
 }
 
 /// The reviewer's forms: flags after `sudo`, `env` and `time`, `nohup`, a substitution in an
-/// assignment, and the `%` and `PS>` prompts.
+/// assignment, and the `%`, `PS>` and `PS <path>>` prompts in a console block.
 pub(crate) fn wrapped_commands_fail() -> Inspection {
     docs(
         "wrapped-commands",
@@ -251,8 +251,8 @@ pub(crate) fn wrapped_commands_fail() -> Inspection {
             "```sh\nsudo -E cargo xtask frobnicate\nsudo -u me cargo xtask frobnicate\n\
              env -i cargo xtask frobnicate\ntime -p cargo xtask frobnicate\n\
              nohup cargo xtask frobnicate\nx=$(cargo xtask frobnicate)\n```\n\n\
-             ```console\n% cargo xtask frobnicate\n```\n\n\
-             ```powershell\nPS> cargo xtask frobnicate\n```\n"
+             ```console\n% cargo xtask frobnicate\nPS> cargo xtask frobnicate\n\
+             PS C:\\repo> cargo xtask frobnicate\n```\n"
                 .to_owned(),
         )],
     )
@@ -262,5 +262,23 @@ pub(crate) fn background_command_passes() -> Inspection {
     docs(
         "background-command",
         vec![("GUIDE.md", "Run `cargo xtask check &`.\n".to_owned())],
+    )
+}
+
+/// The reviewer's prose lines, each in its kind of block: a mention of `cargo xtask` in rust,
+/// markdown and yaml blocks, and output in a console block, is not a command.
+pub(crate) fn prose_in_code_blocks_passes() -> Inspection {
+    docs(
+        "prose-in-code-blocks",
+        vec![(
+            "GUIDE.md",
+            "```rust\n// run cargo xtask check after editing\n\
+             /// Checked by cargo xtask check on every push.\n```\n\n\
+             ```console\n$ cargo xtask check\nerror: run cargo xtask setup first\n```\n\n\
+             ```markdown\n- [ ] cargo xtask check passes\n```\n\n\
+             ```md\nRun cargo xtask to see the commands.\n```\n\n\
+             ```yaml\n- name: cargo xtask check (quick)\n```\n"
+                .to_owned(),
+        )],
     )
 }

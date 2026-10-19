@@ -1,8 +1,8 @@
 //! Reads the Markdown the docs check needs with `pulldown-cmark`: inline code spans, links (inline
 //! links and images, reference definitions, and the `href` and `src` of raw HTML `<a>` and
-//! `<img>` tags) and the lines of code blocks other than `text` blocks. The body of an HTML
-//! comment is read as Markdown too: agents read the raw files, so a path or command in a comment
-//! is read like any other.
+//! `<img>` tags) and the lines of code blocks, each with its block and info word. The body of an
+//! HTML comment is read as Markdown too: agents read the raw files, so a path or command in a
+//! comment is read like any other.
 
 mod html;
 
@@ -16,10 +16,8 @@ pub(super) struct Scan {
     pub spans: Vec<Span>,
     /// Inline links and images, HTML link attributes and reference definitions.
     pub links: Vec<Link>,
-    /// The lines of fenced and indented code blocks, in file order, fence lines left out. A
-    /// fenced block whose info string's first word is `text` holds output, not code, and is left
-    /// out.
-    pub code: Vec<Line>,
+    /// The lines of fenced and indented code blocks, in file order, fence lines left out.
+    pub code: Vec<CodeLine>,
 }
 
 /// An inline code span.
@@ -47,11 +45,15 @@ pub(super) struct Link {
 
 /// One line of a code block.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Line {
+pub(super) struct CodeLine {
     /// The 1-based line in the file.
     pub line: u32,
     /// The line's code, container markers and the block's indent removed.
     pub text: String,
+    /// Which code block of the file holds the line, counted from 0.
+    pub block: usize,
+    /// The first word of the block's info string (see `info_word`), as written.
+    pub info: String,
 }
 
 /// Reads `text`, the contents of one Markdown file.
@@ -94,7 +96,8 @@ fn read(text: &str, line_of: &dyn Fn(usize) -> u32, scan: &mut Scan) {
             line: line_of(start),
             target,
         }));
-    let mut code: Option<Pieces> = None;
+    // The open code block, with its info word.
+    let mut code: Option<(Pieces, String)> = None;
     let mut html: Option<Pieces> = None;
     // The text after the last code span, while only text and line breaks have followed it.
     let mut after: Option<String> = None;
@@ -140,15 +143,15 @@ fn read(text: &str, line_of: &dyn Fn(usize) -> u32, scan: &mut Scan) {
                 target: dest_url.to_string(),
             }),
             Event::Start(Tag::CodeBlock(kind)) => {
-                code = (!is_output(&kind)).then(Pieces::default);
+                code = Some((Pieces::default(), info_word(&kind)));
             }
             Event::End(TagEnd::CodeBlock) => {
-                if let Some(block) = code.take() {
-                    block.code_lines(line_of, &mut scan.code);
+                if let Some((block, info)) = code.take() {
+                    block.code_lines(line_of, &info, &mut scan.code);
                 }
             }
             Event::Text(piece) => {
-                if let Some(block) = code.as_mut() {
+                if let Some((block, _)) = code.as_mut() {
                     block.push(&piece, range.start);
                 }
             }
@@ -173,15 +176,16 @@ fn read(text: &str, line_of: &dyn Fn(usize) -> u32, scan: &mut Scan) {
     }
 }
 
-/// True for a fenced block whose info string's first word (cut at `,` or whitespace) is `text`,
-/// in any case: output. An info string of `text,ignore` counts.
-fn is_output(kind: &CodeBlockKind<'_>) -> bool {
+/// The first word of a code block's info string, cut at `,` or whitespace: `sh` for
+/// ```sh,ignore. Empty for an indented block or a fence with no info string.
+fn info_word(kind: &CodeBlockKind<'_>) -> String {
     match kind {
         CodeBlockKind::Fenced(info) => info
             .split(|c: char| c == ',' || c.is_whitespace())
             .next()
-            .is_some_and(|word| word.eq_ignore_ascii_case("text")),
-        CodeBlockKind::Indented => false,
+            .unwrap_or_default()
+            .to_owned(),
+        CodeBlockKind::Indented => String::new(),
     }
 }
 
@@ -248,13 +252,17 @@ impl Pieces {
         line_of(source).saturating_add(u32::try_from(breaks).unwrap_or(u32::MAX))
     }
 
-    /// Adds each line of the block to `code`, at its file line.
-    fn code_lines(&self, line_of: &dyn Fn(usize) -> u32, code: &mut Vec<Line>) {
+    /// Adds each line of the block to `code`, at its file line, with the block's `info` word and
+    /// the next block number.
+    fn code_lines(&self, line_of: &dyn Fn(usize) -> u32, info: &str, code: &mut Vec<CodeLine>) {
+        let block = code.last().map_or(0, |last| last.block + 1);
         let mut offset = 0;
         for raw in self.text.split_inclusive('\n') {
-            code.push(Line {
+            code.push(CodeLine {
                 line: self.line(offset, line_of),
                 text: raw.trim_end_matches(['\n', '\r']).to_owned(),
+                block,
+                info: info.to_owned(),
             });
             offset += raw.len();
         }

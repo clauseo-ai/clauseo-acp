@@ -341,8 +341,12 @@ crate::checks::planted::cases! {
         bad_command!(6, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
         bad_command!(7, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
         bad_command!(11, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-        bad_command!(15, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+        bad_command!(12, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+        bad_command!(13, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
     ]), inspects 4 => super::cases::wrapped_commands_fail,
+    /// Only shell blocks (no info string, or a shell one) and the prompted lines of session blocks
+    /// are read: the reviewer's prose lines in rust, console output, markdown and yaml pass.
+    prose_in_code_blocks_passes: Passes, inspects 4 => super::cases::prose_in_code_blocks_passes,
     /// A command run in the background: the `&` is shell syntax, not an argument.
     background_command_passes: Passes, inspects 4 => super::cases::background_command_passes,
     /// A `text` or `text,ignore` block holds output, so a failing command shown in it is not read.
