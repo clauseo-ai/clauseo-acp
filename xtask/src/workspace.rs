@@ -19,8 +19,8 @@ pub(crate) struct Member {
 pub(crate) struct Context {
     pub root: PathBuf,
     pub members: Vec<Member>,
-    /// Whether checks may load the dependency graph cargo resolved (`cargo metadata` with deps for
-    /// plugins, `cargo tree` per crate for dependencies, both `--locked --offline`). That graph
+    /// Whether checks may load the dependency graph cargo resolved (`cargo tree --locked
+    /// --offline` per crate, for plugins and dependencies: `checks::graph`). That graph
     /// needs every target's crates downloaded, so tests of the real repo, which use no network,
     /// leave it off; `cargo xtask check` turns it on.
     pub load_resolved_graph: bool,
@@ -130,87 +130,6 @@ fn run_metadata(root: &Path) -> Result<String, String> {
         return Err(format!("`cargo metadata` failed: {}", quiet.stderr.trim()));
     }
     Ok(quiet.stdout)
-}
-
-/// The dependency graph cargo resolved for the whole workspace, registry and git crates and
-/// crates outside the workspace included, from `cargo metadata` without `--no-deps`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ResolvedGraph {
-    /// The package ids of the workspace members.
-    pub members: Vec<String>,
-    /// Every package in the graph, by package id.
-    pub packages: BTreeMap<String, PackageId>,
-    /// One node per package, with the features cargo turned on for it.
-    pub nodes: Vec<ResolvedNode>,
-}
-
-/// The name and version behind a package id.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub(crate) struct PackageId {
-    pub name: String,
-    pub version: String,
-}
-
-/// One entry of `resolve.nodes`: a package and its dependencies. Its resolved features are not
-/// read here: deny.toml's `[[bans.features]]` checks them.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub(crate) struct ResolvedNode {
-    pub id: String,
-    pub deps: Vec<NodeDep>,
-}
-
-/// One edge of a resolved node: the package id it points at and how it is depended on.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub(crate) struct NodeDep {
-    pub pkg: String,
-    pub dep_kinds: Vec<DepKind>,
-}
-
-/// One way an edge is declared: `kind` is `None` for normal, else `"dev"` or `"build"`.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub(crate) struct DepKind {
-    pub kind: Option<String>,
-    /// The `cfg(...)` or target triple of a target-specific entry.
-    pub target: Option<String>,
-}
-
-/// The parts of `cargo metadata` JSON (with deps) that `parse_resolved_graph` reads.
-#[derive(Deserialize)]
-struct GraphMetadata {
-    workspace_members: Vec<String>,
-    packages: Vec<GraphPackage>,
-    resolve: Option<Resolve>,
-}
-
-#[derive(Deserialize)]
-struct GraphPackage {
-    id: String,
-    #[serde(flatten)]
-    name: PackageId,
-}
-
-#[derive(Deserialize)]
-struct Resolve {
-    nodes: Vec<ResolvedNode>,
-}
-
-/// Reads the resolved graph out of `cargo metadata` JSON run with dependencies. The one loader
-/// that runs cargo for it is `checks::graph::load_resolved_graph`.
-pub(crate) fn parse_resolved_graph(json: &str) -> Result<ResolvedGraph, String> {
-    let metadata: GraphMetadata =
-        serde_json::from_str(json).map_err(|e| format!("bad `cargo metadata` JSON: {e}"))?;
-    let resolve = metadata
-        .resolve
-        .ok_or("`cargo metadata` has no `resolve` section: was it run with `--no-deps`?")?;
-    Ok(ResolvedGraph {
-        members: metadata.workspace_members,
-        packages: metadata
-            .packages
-            .into_iter()
-            .map(|package| (package.id, package.name))
-            .collect(),
-        nodes: resolve.nodes,
-    })
 }
 
 /// Reads the dependencies and `[features]` of every package in `cargo metadata` JSON, by name.
@@ -325,29 +244,6 @@ mod tests {
         assert_eq!(tauri.features, ["devtools"]);
         assert_eq!(deps.features["x"], ["t/devtools"]);
         assert!(parse_workspace_dependencies("{").is_err());
-    }
-
-    #[test]
-    fn parses_the_resolved_graph_and_rejects_metadata_without_one() {
-        let json = r#"{"workspace_members": ["app 0"],
-            "packages": [{"id": "app 0", "name": "app", "version": "0.0.0", "dependencies": []},
-                         {"id": "wry 1", "name": "wry", "version": "0.53.0"}],
-            "resolve": {"root": null, "nodes": [
-                {"id": "app 0", "features": [], "dependencies": ["wry 1"], "deps": [
-                    {"name": "wry", "pkg": "wry 1",
-                     "dep_kinds": [{"kind": null, "target": "cfg(unix)"}]}]},
-                {"id": "wry 1", "features": ["devtools"], "dependencies": [], "deps": []}]}}"#;
-        let graph = parse_resolved_graph(json).expect("sample parses");
-        assert_eq!(graph.members, ["app 0"]);
-        assert_eq!(graph.packages["wry 1"].version, "0.53.0");
-        assert_eq!(graph.nodes[1].id, "wry 1");
-        let kind = &graph.nodes[0].deps[0].dep_kinds[0];
-        assert_eq!(
-            (kind.kind.as_deref(), kind.target.as_deref()),
-            (None, Some("cfg(unix)"))
-        );
-        let no_deps = r#"{"workspace_members": [], "packages": [], "resolve": null}"#;
-        assert!(parse_resolved_graph(no_deps).is_err());
     }
 
     #[test]

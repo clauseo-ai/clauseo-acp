@@ -8,10 +8,11 @@
 //! status says.
 //!
 //! The Never entries that name a crate (ours, `clauseo-<name>`, or a crates.io package) are looked
-//! up in each checked crate's own graph, from one `cargo tree -p <crate> --all-features` run per
-//! crate whose row bans a crate (see `graph.rs`): normal and build edges, for every target, the
-//! crate's optional dependencies included, directly or through other crates, and no feature that
-//! only another member turns on. The I/O words belong to the core-io check.
+//! up in each checked crate's own graph (`checks::graph`, which `plugins` reads too), from one
+//! `cargo tree -p <crate> --all-features` run per crate whose row bans a crate: a crate whose row
+//! bans none has nothing to look up. Normal and build edges count, for every target, the crate's
+//! optional dependencies included, directly or through other crates, and no feature that only
+//! another member turns on. The I/O words belong to the core-io check.
 
 mod graph;
 
@@ -53,8 +54,8 @@ fn run(ctx: &Context) -> Inspection {
     )
 }
 
-/// The check, reading each checked crate's graph with `cargo tree` (`graph::tree_args`, then
-/// `graph_flags`), or matching rows only when `graph_flags` is `None`.
+/// The check, reading each checked crate's graph with `cargo tree` (`checks::graph::tree_args`,
+/// then `graph_flags`), or matching rows only when `graph_flags` is `None`.
 fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
     let table = match crates_table::load(&ctx.root) {
         Ok(table) => table,
@@ -122,8 +123,8 @@ fn walk(
         Ok(text) => text.unwrap_or_default(),
         Err(unreadable) => return vec![unreadable],
     };
-    match graph::load(root, &member.name, flags) {
-        Ok(lines) => graph::violations(
+    match checks::graph::load_tree(root, &member.name, flags) {
+        Ok(tree) => graph::violations(
             &graph::Crate {
                 package: &member.name,
                 manifest: &manifest,
@@ -131,7 +132,7 @@ fn walk(
                 row,
                 deps,
             },
-            &lines,
+            &tree,
         ),
         Err(failed) => vec![failed],
     }

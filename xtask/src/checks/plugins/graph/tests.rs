@@ -1,8 +1,9 @@
 //! Tests for the graph rules of the `plugins` check. Each case is a scratch workspace of path
 //! crates named like the registry crates they stand for (`wry`, `tauri`, `tauri-plugin-*`), so
-//! the real `cargo metadata --offline` resolves the graph without a lockfile or the network.
+//! the real `cargo tree --offline` resolves the graph without a lockfile or the network.
 
 use super::*;
+use crate::checks;
 use crate::scratch::Scratch;
 use crate::workspace;
 use std::fs;
@@ -32,11 +33,11 @@ fn workspace(name: &str, desktop: &str, crates: &[(&str, &str)]) -> Scratch {
 
 /// The graph violations of the workspace in `dir`, whose desktop manifest is `desktop`.
 fn violations_in(dir: &Scratch, desktop: &str) -> Vec<Violation> {
-    let graph = crate::checks::graph::load_resolved_graph(dir, &["--offline"])
-        .expect("cargo metadata runs");
+    let tree = checks::graph::load_tree(dir, checks::DESKTOP_PACKAGE, &["--offline"])
+        .expect("cargo tree runs");
     let packages = workspace::load_workspace_dependencies(dir).expect("cargo metadata runs");
     violations(
-        &graph,
+        &tree,
         &Desktop {
             path: DESKTOP_PATH,
             text: desktop,
@@ -133,6 +134,64 @@ fn a_plugin_behind_an_optional_dependency_of_a_desktop_feature_fails() {
             DESKTOP_PATH,
             line_of(&desktop, "mid = "),
             "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `mid`, which is not a fixed plugin",
+            TREE_FIX,
+        )]
+    );
+}
+
+/// A vendored `spec` whose optional `tauri-plugin-zz` sits behind its `zz` feature, used by the
+/// desktop crate as `desktop_spec`; the workspace member `other` uses it as `other_spec`, and
+/// the desktop crate's dev-dependency `devonly` turns `zz` on.
+fn spec_feature(name: &str, desktop_spec: &str, other_spec: &str) -> Vec<Violation> {
+    let desktop = desktop(&format!(
+        "[dependencies]\n{desktop_spec}\n\n[dev-dependencies]\ndevonly = {{ path = \"../../vendor/devonly\" }}\n"
+    ));
+    let spec_line = "spec = { path = \"../spec\", features = [\"zz\"] }";
+    let ws = workspace(
+        name,
+        &desktop,
+        &[
+            (
+                "spec",
+                "[dependencies]\ntauri-plugin-zz = { path = \"../tauri-plugin-zz\", optional = true }\n\n[features]\nzz = [\"dep:tauri-plugin-zz\"]\n",
+            ),
+            ("tauri-plugin-zz", ""),
+            ("devonly", &format!("[dependencies]\n{spec_line}\n")),
+            ("other", &format!("[dependencies]\n{other_spec}\n")),
+        ],
+    );
+    let root = "[workspace]\nresolver = \"3\"\nmembers = [\"crates/desktop\", \"vendor/other\"]\n";
+    fs::write(ws.join("Cargo.toml"), root).expect("write the root manifest");
+    violations_in(&ws, &desktop)
+}
+
+#[test]
+fn a_plugin_behind_a_feature_only_another_member_or_a_dev_dependency_turns_on_passes() {
+    let found = spec_feature(
+        "other-member",
+        "spec = { path = \"../../vendor/spec\" }",
+        "spec = { path = \"../spec\", features = [\"zz\"] }",
+    );
+    assert_eq!(found, Vec::new());
+}
+
+#[test]
+fn a_plugin_behind_a_feature_the_desktop_crate_turns_on_fails() {
+    let desktop_spec = "spec = { path = \"../../vendor/spec\", features = [\"zz\"] }";
+    let found = spec_feature(
+        "desktop-feature",
+        desktop_spec,
+        "spec = { path = \"../spec\" }",
+    );
+    let desktop = desktop(&format!(
+        "[dependencies]\n{desktop_spec}\n\n[dev-dependencies]\ndevonly = {{ path = \"../../vendor/devonly\" }}\n"
+    ));
+    assert_eq!(
+        found,
+        vec![violation(
+            DESKTOP_PATH,
+            line_of(&desktop, "spec = "),
+            "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `spec`, which is not a fixed plugin",
             TREE_FIX,
         )]
     );

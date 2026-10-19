@@ -163,7 +163,7 @@ crate::checks::planted::cases! {
          fix: the check stopped before it could look; fix the failure above first",
     ]) => super::desktop_crate_missing,
     /// A plugin outside the fixed set behind an optional desktop dependency (feature `extra`)
-    /// fails at that dependency's line: the resolved graph is read with all features.
+    /// fails at that dependency's line: the desktop crate's graph is read with all its features.
     plugin_behind_an_optional_desktop_feature: FailsWith(&[
         "crates/desktop/Cargo.toml:17: `tauri-plugin-zz` 2.0.0 is in the desktop crate's tree \
          through `mid`, which is not a fixed plugin\n    \

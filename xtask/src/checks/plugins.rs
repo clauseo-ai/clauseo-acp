@@ -21,14 +21,15 @@
 //!
 //! The rules above see workspace members only. A crate under `[workspace] exclude` pulled in by
 //! path, or a crates.io or git dependency, never appears in `--no-deps` output, yet it can bring
-//! a plugin. So `graph.rs` also reads the graph cargo resolved, from one
-//! `cargo metadata --all-features --locked --offline` run with deps (all features, so a plugin
-//! behind an optional dependency of a desktop feature counts): a `tauri-plugin-*` outside the
-//! fixed set is in the desktop crate's tree only when fixed plugins alone depend on it (as
+//! a plugin. So `graph.rs` also reads the desktop crate's own dependency graph, from the
+//! `cargo tree -p clauseo-desktop --all-features --locked --offline` run that `checks::graph`
+//! builds for `dependencies` too (normal and build edges for every target, all of the desktop
+//! crate's features, so a plugin behind an optional dependency of a desktop feature counts, and
+//! no feature that only another member or a dev-dependency turns on): a `tauri-plugin-*` outside
+//! the fixed set is in that graph only when fixed plugins alone depend on it (as
 //! `tauri-plugin-fs` comes in through the dialog plugin). A feature such a crate turns on
 //! (`devtools` in tauri, tauri-runtime, tauri-runtime-wry or wry, `protocol-asset` in tauri) is
-//! banned in deny.toml's `[[bans.features]]`, which the `deny` step checks against the resolved
-//! graph.
+//! banned in deny.toml's `[[bans.features]]`, which the `deny` step checks.
 //!
 //! The manifest text is read only for line numbers: the member's `Cargo.toml`, or the root one
 //! when the setting lives in `[workspace.dependencies]`, else line 1.
@@ -90,8 +91,8 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
 
 /// `--offline`: the check never downloads. `cargo xtask check` runs `deny` first, which fetches
 /// every target's crates; elsewhere a missing crate fails with a fix that says to fetch it. The
-/// resolved-graph rule runs only when `ctx.load_resolved_graph` allows it; `graph/tests.rs` covers
-/// it offline.
+/// graph rule runs only when `ctx.load_resolved_graph` allows it; `graph/tests.rs` and
+/// `tests/resolved.rs` cover it offline.
 fn run(ctx: &Context) -> Inspection {
     check(
         ctx,
@@ -100,8 +101,8 @@ fn run(ctx: &Context) -> Inspection {
     )
 }
 
-/// The check, reading the resolved graph with `cargo metadata --all-features <graph_flags>`
-/// (`checks::graph::load_resolved_graph`), or skipping the graph rules when `graph_flags` is
+/// The check, reading the desktop crate's graph with `cargo tree` (`checks::graph::load_tree`,
+/// then `graph_flags`), or skipping the graph rule when `graph_flags` is
 /// `None` (tests of scratch workspaces that name registry crates, which resolve only with a
 /// lockfile and the crates downloaded). Counts the desktop
 /// crate's direct dependencies, of every kind.
@@ -173,8 +174,8 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
             text: &desktop,
             deps: desktop_deps,
         };
-        match checks::graph::load_resolved_graph(&ctx.root, flags) {
-            Ok(resolved) => found.extend(graph::violations(&resolved, &desktop)),
+        match checks::graph::load_tree(&ctx.root, checks::DESKTOP_PACKAGE, flags) {
+            Ok(tree) => found.extend(graph::violations(&tree, &desktop)),
             Err(failed) => found.push(failed),
         }
     }

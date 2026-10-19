@@ -423,7 +423,8 @@ fn an_entry_whose_line_cannot_be_found_says_so() {
         tauri(),
     ];
     let dir = workspace("unlocated", PROTOCOL_ROW, "", &crates);
-    let lines = graph::load(&dir, "clauseo-protocol", &["--offline"]).expect("cargo tree runs");
+    let tree = checks::graph::load_tree(&dir, "clauseo-protocol", &["--offline"])
+        .expect("cargo tree runs");
     let table = crates_table::load(&dir).expect("the table parses");
     let row = table.row("protocol").expect("the row is there");
     let found = graph::violations(
@@ -434,7 +435,7 @@ fn an_entry_whose_line_cannot_be_found_says_so() {
             row,
             deps: None,
         },
-        &lines,
+        &tree,
     );
     let printed: Vec<(u32, String)> = found.iter().map(|v| (v.line, v.message.clone())).collect();
     assert_eq!(

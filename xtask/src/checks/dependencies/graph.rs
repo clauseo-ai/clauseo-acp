@@ -1,28 +1,20 @@
 //! The graph walk of the `dependencies` check: is a package that a crate's row forbids anywhere
 //! in that crate's own normal or build dependency graph?
 //!
-//! Each checked crate's graph comes from its own `cargo tree` run (see `tree_args`):
-//! `-p <crate> --all-features`, so the crate's optional dependencies count but a feature that
-//! another workspace member turns on does not (one workspace-wide resolve would merge them, and
-//! blame the crate for an edge only the other member's build has); `--target all`, so every
-//! target's dependencies count; `-e normal,build`, since dev-dependencies never reach the built
-//! crate; `--no-dedupe`, so a package reached twice prints in full both times instead of as
-//! `(*)`. With `--prefix depth --format {p}` each line is `<depth><name> v<version>`, then the
-//! source in parentheses for a path or git package and `(proc-macro)` for a proc macro; a line
-//! in any other shape fails the check. The depth-1 line above a forbidden package is the direct
-//! dependency that brings it in. `cargo metadata --no-deps` gives that dependency's key, renames
-//! and workspace inheritance resolved, so a violation points at the line of the crate's
-//! `Cargo.toml` that declares it.
+//! Each checked crate's graph comes from its own `cargo tree` run, read by `checks::graph`
+//! (which says which edges count). The search starts from each direct dependency, so the
+//! violation names the dependency that brings the forbidden package in. `cargo metadata
+//! --no-deps` gives that dependency's key, renames and workspace inheritance resolved, so a
+//! violation points at the line of the crate's `Cargo.toml` that declares it.
 
 use super::and_list;
 use crate::checks::crates_table::{self, CrateRow};
-use crate::checks::graph::{ROOT_MANIFEST, cargo_stdout};
+use crate::checks::graph::Tree;
 use crate::checks::toml_lines::{BUILT, Manifest};
 use crate::checks::violation;
 use crate::violation::Violation;
 use crate::workspace::PackageDependencies;
 use std::collections::BTreeMap;
-use std::path::Path;
 
 /// One workspace crate to walk from, with its manifest, its row and its declared dependencies.
 pub(super) struct Crate<'a> {
@@ -36,125 +28,29 @@ pub(super) struct Crate<'a> {
     pub deps: Option<&'a PackageDependencies>,
 }
 
-/// One line of the `cargo tree` output: a package at a depth, the crate itself at 0.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct TreeLine {
-    pub depth: usize,
-    pub name: String,
-}
-
-/// The arguments of the `cargo tree` run for `package`, then `flags`.
-pub(super) fn tree_args<'a>(package: &'a str, flags: &[&'a str]) -> Vec<&'a str> {
-    let mut args = vec![
-        "tree",
-        "-p",
-        package,
-        "-e",
-        "normal,build",
-        "--all-features",
-        "--target",
-        "all",
-        "--prefix",
-        "depth",
-        "--no-dedupe",
-        "--format",
-        "{p}",
-    ];
-    args.extend_from_slice(flags);
-    args
-}
-
-/// The dependency tree of the workspace crate `package`, from `cargo tree` run in `root` with
-/// `flags` after `tree_args`. `Err` is the violation to report, at `Cargo.toml:1`.
-pub(super) fn load(root: &Path, package: &str, flags: &[&str]) -> Result<Vec<TreeLine>, Violation> {
-    let args = tree_args(package, flags);
-    let stdout = cargo_stdout(root, &args)?;
-    parse_tree(&stdout, package).map_err(|error| {
-        violation(
-            ROOT_MANIFEST,
-            1,
-            format!("could not read the output of `cargo {}`: {error}", args.join(" ")),
-            "update `parse_tree` in xtask/src/checks/dependencies/graph.rs to the lines this cargo prints: the check reads each crate's dependency graph from them",
-        )
-    })
-}
-
-/// Reads `cargo tree --prefix depth --format {p}` output for `package`: its first line is
-/// `package` at depth 0, and each later line at most one deeper than the line before it.
-pub(super) fn parse_tree(stdout: &str, package: &str) -> Result<Vec<TreeLine>, String> {
-    let mut lines: Vec<TreeLine> = Vec::new();
-    for (index, text) in stdout.lines().enumerate() {
-        let line = parse_line(text)
-            .ok_or_else(|| format!("line {} `{text}` is not `<depth><name> v<version>` followed by `(<source>)` or `(proc-macro)`", index + 1))?;
-        let deepest = lines.last().map_or(0, |last| last.depth + 1);
-        let expected_root = lines.is_empty() && (line.depth != 0 || line.name != package);
-        if expected_root || (!lines.is_empty() && (line.depth == 0 || line.depth > deepest)) {
-            return Err(format!(
-                "line {} `{text}` breaks the tree: the first line is `{package}` at depth 0, and each later line is one to {deepest} deep",
-                index + 1
-            ));
-        }
-        lines.push(line);
-    }
-    if lines.is_empty() {
-        return Err(format!("it printed no line for `{package}`"));
-    }
-    Ok(lines)
-}
-
-/// One line, or `None` when it has another shape: `<depth><name> v<version>`, then
-/// ` (proc-macro)` for a proc macro, then ` (<source>)` for a package not from crates.io (a
-/// path may hold parentheses, so the source runs to the line's last `)`), as cargo 1.99's
-/// `{p}` writes them. A trailing `(*)`, a subtree cargo did not repeat, is another shape: with
-/// `--no-dedupe` it never prints, and the walk needs every subtree.
-fn parse_line(text: &str) -> Option<TreeLine> {
-    let name_start = text.find(|c: char| !c.is_ascii_digit())?;
-    let depth = text.get(..name_start)?.parse().ok()?;
-    let (name, rest) = text.get(name_start..)?.split_once(' ')?;
-    let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
-    if !name.chars().all(is_name_char) {
-        return None;
-    }
-    let (version, rest) = rest.split_once(' ').unwrap_or((rest, ""));
-    let version = version.strip_prefix('v')?;
-    if !version.starts_with(|c: char| c.is_ascii_digit()) || rest.ends_with("(*)") {
-        return None;
-    }
-    let rest = rest
-        .strip_prefix("(proc-macro)")
-        .unwrap_or(rest)
-        .trim_start();
-    if !rest.is_empty() {
-        let source = rest.strip_prefix('(')?.strip_suffix(')')?;
-        if source.is_empty() {
-            return None;
-        }
-    }
-    Some(TreeLine {
-        depth,
-        name: name.to_owned(),
-    })
-}
-
 /// One violation per direct dependency of `krate` and package of its row's Never list that the
-/// dependency is or brings in, for the crate's tree `lines`, through a shortest path.
-pub(super) fn violations(krate: &Crate<'_>, lines: &[TreeLine]) -> Vec<Violation> {
+/// dependency is or brings in, for the crate's graph `tree`, through a shortest path (the first
+/// in `cargo tree`'s order among equals).
+pub(super) fn violations(krate: &Crate<'_>, tree: &Tree) -> Vec<Violation> {
     let forbidden = forbidden(krate.row);
-    let mut path: Vec<&str> = Vec::new();
     let mut shortest: BTreeMap<(&str, String), Vec<&str>> = BTreeMap::new();
-    for line in lines.iter().skip(1) {
-        path.truncate(line.depth.saturating_sub(1));
-        path.push(&line.name);
-        let folded = crates_table::fold(&line.name);
-        let Some(direct) = path.first().copied() else {
-            continue;
-        };
-        if forbidden.contains(&folded) {
+    for &direct in tree.deps(Tree::ROOT) {
+        let reach = tree.reach(direct);
+        for &package in reach.order() {
+            let folded = crates_table::fold(tree.name(package));
+            if !forbidden.contains(&folded) {
+                continue;
+            }
+            let path: Vec<&str> = reach
+                .path(package)
+                .into_iter()
+                .map(|id| tree.name(id))
+                .collect();
             let known = shortest
-                .entry((direct, folded))
+                .entry((tree.name(direct), folded))
                 .or_insert_with(|| path.clone());
             if known.len() > path.len() {
-                known.clone_from(&path);
+                *known = path;
             }
         }
     }
