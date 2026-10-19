@@ -30,6 +30,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         many: "Markdown files",
     },
     place: "in the repo's git-tracked or unignored *.md files",
+    source: "xtask/src/checks/docs.rs",
     run,
 };
 

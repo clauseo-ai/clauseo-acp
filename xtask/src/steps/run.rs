@@ -218,6 +218,7 @@ mod tests {
         name: "fake-static",
         counts: DOCS,
         place: "in docs/",
+        source: "xtask/src/checks/fake_static.rs",
         run: one_violation,
     };
 
@@ -225,6 +226,7 @@ mod tests {
         name: "fake-static",
         counts: DOCS,
         place: "in docs/",
+        source: "xtask/src/checks/fake_static.rs",
         run: one_clean_doc_with_a_note,
     };
 
@@ -232,6 +234,7 @@ mod tests {
         name: "fake-static",
         counts: DOCS,
         place: "in docs/",
+        source: "xtask/src/checks/fake_static.rs",
         run: nothing,
     };
 

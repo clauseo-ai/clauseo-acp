@@ -36,6 +36,9 @@ pub(crate) struct StaticCheck {
     pub counts: Noun,
     /// Where it looks, as the end of a sentence, e.g. `in the desktop crate's capabilities/`.
     pub place: &'static str,
+    /// The repo-relative file that says where the check looks, which the zero-inspected fix
+    /// names: for most checks its own file, for the Crates-table checks `crates_table.rs`.
+    pub source: &'static str,
     pub run: fn(&Context) -> Inspection,
 }
 
@@ -130,14 +133,9 @@ impl StaticCheck {
                 name = self.name,
                 many = self.counts.many,
                 place = self.place,
-                source = self.source(),
+                source = self.source,
             ),
         }
-    }
-
-    /// The repo-relative file that defines the check: `xtask/src/checks/<name>.rs`, `-` as `_`.
-    pub(crate) fn source(&self) -> String {
-        format!("xtask/src/checks/{}.rs", self.name.replace('-', "_"))
     }
 }
 

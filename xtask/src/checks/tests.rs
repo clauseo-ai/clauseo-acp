@@ -105,14 +105,14 @@ fn every_check_inspects_nothing_in_an_empty_repo() {
 }
 
 #[test]
-fn every_check_names_its_own_source_file() {
+fn every_check_names_a_source_file_that_exists() {
     let root = crate::workspace::workspace_root();
     for check in ALL {
         assert!(
-            root.join(check.source()).is_file(),
+            root.join(check.source).is_file(),
             "{} has no {}",
             check.name,
-            check.source()
+            check.source
         );
     }
 }
@@ -126,6 +126,7 @@ fn fake(run: fn(&Context) -> Inspection) -> StaticCheck {
             many: "capability files",
         },
         place: "in the desktop crate's capabilities/",
+        source: "xtask/src/checks/tauri_config.rs",
         run,
     }
 }

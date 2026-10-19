@@ -77,6 +77,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         many: "direct dependencies",
     },
     place: "of the desktop crate (package `clauseo-desktop`) in `cargo metadata`",
+    source: "xtask/src/checks/plugins.rs",
     run,
 };
 

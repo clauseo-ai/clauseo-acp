@@ -13,6 +13,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         many: "budget rows",
     },
     place: "in budgets.toml at the repo root",
+    source: "xtask/src/budgets.rs",
     run,
 };
 

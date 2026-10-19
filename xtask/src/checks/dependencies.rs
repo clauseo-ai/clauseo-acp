@@ -26,6 +26,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         many: "workspace crates with a Crates table row",
     },
     place: "in the Crates table of ARCHITECTURE.md",
+    source: "xtask/src/checks/crates_table.rs",
     run,
 };
 

@@ -59,6 +59,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         many: "config files",
     },
     place: "in the desktop crate (tauri.conf.json and build.rs)",
+    source: "xtask/src/checks/tauri_config.rs",
     run,
 };
 

@@ -38,6 +38,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         many: "UI source files",
     },
     place: "under ui/app/src",
+    source: "xtask/src/checks/buildtime_edits.rs",
     run,
 };
 

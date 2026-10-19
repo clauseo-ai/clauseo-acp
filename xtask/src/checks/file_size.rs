@@ -30,6 +30,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         many: "source files",
     },
     place: "in the repo's .rs, .ts and .tsx files",
+    source: "xtask/src/checks/file_size.rs",
     run,
 };
 

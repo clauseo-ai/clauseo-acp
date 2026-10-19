@@ -53,6 +53,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         many: "capability files",
     },
     place: "in the desktop crate's capabilities/",
+    source: "xtask/src/checks/capabilities.rs",
     run,
 };
 
