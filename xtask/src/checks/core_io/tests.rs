@@ -4,8 +4,9 @@
 //! `tests/cases.rs`.
 
 mod cases;
+mod planted;
 
-pub(super) use cases::*;
+use cases::*;
 
 use super::*;
 use crate::scratch::Scratch;

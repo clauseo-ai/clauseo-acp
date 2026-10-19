@@ -1,5 +1,8 @@
 //! Tests of the docs check's file list, and of the check as one run.
 
+mod cases;
+mod planted;
+
 use super::*;
 use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;

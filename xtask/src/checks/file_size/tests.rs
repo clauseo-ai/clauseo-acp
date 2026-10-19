@@ -1,6 +1,8 @@
 //! Planted cases of the file-size check, and tests of its helpers. Each planted case writes its
 //! files into a scratch git repo and runs the real `run` on it.
 
+mod planted;
+
 use super::*;
 use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;

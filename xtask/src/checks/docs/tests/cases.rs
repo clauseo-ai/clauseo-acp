@@ -2,8 +2,8 @@
 //! `inspect` on the Markdown files it wrote. A required file a case does not write is valid, so
 //! each case shows only the problem it plants.
 
-use super::inspect;
 use crate::checks::Inspection;
+use crate::checks::docs::inspect;
 use crate::scratch::Scratch;
 use std::fmt::Write;
 use std::fs;

@@ -1,22 +1,25 @@
 //! Planted violations: inputs a check must fail on (the ways around it included) and inputs it
 //! must pass, kept as one list per check so a registry can collect them.
 //!
-//! Each case is a function that builds its own input (a scratch dir, a scratch workspace or a
-//! string) and runs the check on it. `cases!`, written once at the top level of a check's file,
-//! turns the list into `PLANTED`, a `&[Planted]`, and into one `#[test]` per case in a module
-//! named `planted`, so `cargo test -p xtask planted` lists `checks::<check>::planted::<case>`:
+//! Every check keeps them in one place, out of its production file:
+//!
+//! - `<check>/tests/planted.rs` holds the one `cases!` list, declared from `<check>/tests.rs`.
+//!   `cases!` turns the list into `PLANTED`, a `&[Planted]`, and into one `#[test]` per case, so
+//!   `cargo test -p xtask planted` lists `checks::<check>::tests::planted::<case>`.
+//! - The functions that build each case's input live in the check's tests module,
+//!   `<check>/tests.rs`, or in `<check>/tests/cases.rs` when they would push `tests.rs` past 500
+//!   lines. Never in `planted.rs` itself: each case's test takes its name there.
 //!
 //! ```ignore
 //! crate::checks::planted::cases! {
 //!     /// A row whose limit is below zero.
-//!     negative_limit: FailsWith(&["budgets.toml:3: ...\n    fix: ..."]) => tests::negative_limit,
-//!     broken_toml: Fails => tests::broken_toml,
-//!     valid_row: Passes => tests::valid_row,
+//!     negative_limit: FailsWith(&["budgets.toml:3: ...\n    fix: ..."]) => super::negative_limit,
+//!     valid_row: Passes => super::valid_row,
 //! }
 //! ```
 //!
-//! The expectation is a variant of `Expect`, written without the type. The functions return an
-//! `Inspection` and live in the check's test module, visible to the check's file.
+//! The expectation is a variant of `Expect`, written without the type. The functions take no
+//! argument and return an `Inspection`.
 
 /// What a planted case must produce.
 #[cfg(test)]
@@ -103,17 +106,13 @@ macro_rules! cases {
             },
         )+];
 
-        /// One test per planted case, named after it.
-        #[cfg(test)]
-        mod planted {
-            $(
-                $(#[doc = $doc])*
-                #[test]
-                fn $name() {
-                    $crate::checks::planted::verify_named(super::PLANTED, stringify!($name));
-                }
-            )+
-        }
+        $(
+            $(#[doc = $doc])*
+            #[test]
+            fn $name() {
+                $crate::checks::planted::verify_named(PLANTED, stringify!($name));
+            }
+        )+
     };
 }
 

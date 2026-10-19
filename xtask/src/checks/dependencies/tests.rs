@@ -3,6 +3,8 @@
 //! crates such as `tauri`, so the real `cargo metadata --offline` resolves the graph without the
 //! network. With no lockfile, cargo writes one inside the scratch dir.
 
+mod planted;
+
 use super::*;
 use crate::scratch::Scratch;
 use crate::workspace;
