@@ -10,11 +10,12 @@
 //! APIs, as `ARCHITECTURE.md` defines them: `fs`, `process` and `any I/O` each mean the file,
 //! network, process, environment and clock APIs; `clock` alone means the two clock `now`
 //! functions. They win over a row of the same name (`process`).
-//! A standard library module's name (`std`, `net`, `env`, `time`, `io`) is rejected: it names
-//! no crate, and the I/O words are how the table bans those APIs. A crate name that is a row of
+//! `std`, and a standard library module that core-io bans whole (`net`, `env`, `os`: see
+//! `core_io/bans.rs`), are rejected: they name no crate we use, and the I/O words are how the
+//! table bans those APIs. `time` is the crates.io crate. A crate name that is a row of
 //! the table is our package `clauseo-<name>`; any other is the crates.io package of that name.
 
-use crate::checks::{self, violation};
+use crate::checks::{self, core_io, violation};
 use crate::violation::Violation;
 use std::path::Path;
 
@@ -32,9 +33,6 @@ const COLUMNS: [&str; 5] = [
     "Never depends on",
     "Status",
 ];
-
-/// Standard library modules a Never entry might name by mistake for an I/O word.
-const STD_MODULES: [&str; 5] = ["std", "net", "env", "time", "io"];
 
 const SHAPE_FIX: &str = "keep the Crates table in ARCHITECTURE.md as one pipe table with the columns Crate | Owns | May depend on | Never depends on | Status: xtask/src/checks/crates_table.rs reads it";
 
@@ -355,7 +353,7 @@ fn classify(raw: &[RawRow], found: &mut Vec<Violation>) -> Vec<CrateRow> {
         for entry in &row.never {
             if let Some(word) = IoWord::parse(entry) {
                 never.push(Never::Io(word));
-            } else if STD_MODULES.contains(&entry.as_str()) {
+            } else if core_io::holds_banned_modules(entry) {
                 found.push(violation(
                     FILE,
                     row.line,

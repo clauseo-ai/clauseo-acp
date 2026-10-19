@@ -30,6 +30,8 @@ mod report;
 mod sites;
 mod tokens;
 
+pub(crate) use bans::holds_banned_modules;
+
 use crate::checks::crates_table::{self, CrateRow, IoWord, Never};
 use crate::checks::exceptions::{self, Exception};
 use crate::checks::{self, Inspection, Noun, StaticCheck};

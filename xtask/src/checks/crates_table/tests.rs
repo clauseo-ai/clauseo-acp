@@ -241,16 +241,48 @@ fn the_real_architecture_md_parses() {
     assert!(table.row("protocol").is_some_and(CrateRow::holds_core_io));
 }
 
+/// `std`, and each std module that core-io bans whole or in part (`core_io/bans.rs`), fails.
 #[test]
 fn a_std_module_in_the_never_column_fails_at_its_row() {
-    let text = doc("| `reducer` | things | | net, tauri | planned |\n");
+    let text = doc("| `reducer` | things | | net, tauri, env, os, std | planned |\n");
     assert_eq!(
         parse(&text),
-        Err(vec![violation(
-            FILE,
-            7,
-            "`net` in the Never depends on column of `reducer` names a standard library module, not a crate, so nothing would enforce it",
-            "write `any I/O` (or `fs` or `process`) instead of `net`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now",
-        )])
+        Err(vec![
+            violation(
+                FILE,
+                7,
+                "`net` in the Never depends on column of `reducer` names a standard library module, not a crate, so nothing would enforce it",
+                "write `any I/O` (or `fs` or `process`) instead of `net`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now",
+            ),
+            violation(
+                FILE,
+                7,
+                "`env` in the Never depends on column of `reducer` names a standard library module, not a crate, so nothing would enforce it",
+                "write `any I/O` (or `fs` or `process`) instead of `env`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now",
+            ),
+            violation(
+                FILE,
+                7,
+                "`os` in the Never depends on column of `reducer` names a standard library module, not a crate, so nothing would enforce it",
+                "write `any I/O` (or `fs` or `process`) instead of `os`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now",
+            ),
+            violation(
+                FILE,
+                7,
+                "`std` in the Never depends on column of `reducer` names a standard library module, not a crate, so nothing would enforce it",
+                "write `any I/O` (or `fs` or `process`) instead of `std`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now",
+            ),
+        ])
+    );
+}
+
+/// `time` is a crates.io crate; core-io bans only two functions inside `std::time`.
+#[test]
+fn time_in_the_never_column_is_the_crates_io_crate() {
+    let text = doc("| `reducer` | things | | time, fs | planned |\n");
+    let table = parse(&text).expect("the table parses");
+    assert_eq!(
+        table.rows[0].never,
+        vec![Never::External("time".into()), Never::Io(IoWord::Fs)]
     );
 }

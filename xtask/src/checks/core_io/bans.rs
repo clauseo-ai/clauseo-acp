@@ -151,3 +151,20 @@ fn filled(pattern: &[&str], prefix: &[String]) -> String {
         .collect();
     tokens::join(&filled)
 }
+
+/// True when `name` is `std` or a standard library module that holds a module pattern
+/// (`net`, `env`, `os`, also `fs` and `process`); false for `time`, where only the clocks'
+/// `now` functions are banned. The Crates table rejects such a name in a Never cell, where an
+/// I/O word belongs: `fs`, `process` and `any I/O` each ban every module pattern.
+pub(crate) fn holds_banned_modules(name: &str) -> bool {
+    let prefix: Vec<String> = if name == "std" {
+        vec![name.to_owned()]
+    } else {
+        vec!["std".to_owned(), name.to_owned()]
+    };
+    PATTERNS.iter().any(|pattern| {
+        pattern.kind == Kind::Module
+            && pattern.path.len() >= prefix.len()
+            && matches(pattern.path, &prefix)
+    })
+}
