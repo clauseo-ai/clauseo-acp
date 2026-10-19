@@ -1,0 +1,2 @@
+{"scenario":"grandchild","description":"No handshake: starts a grandchild that ignores stdin, writes its PID to grandchild.pid, and holds","on_stdin_close":"hang"}
+{"spawn_child":{"pid_file":"grandchild.pid"}}

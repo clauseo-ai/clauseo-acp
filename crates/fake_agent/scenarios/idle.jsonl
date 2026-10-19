@@ -1,0 +1,1 @@
+{"scenario":"idle","description":"No handshake and no steps: reads stdin and exits 0 on EOF, for S7","on_stdin_close":"exit"}

@@ -1,0 +1,7 @@
+{"scenario":"malformed-line","description":"A chunk, a truncated session/update line, a chunk, end_turn","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Before the broken line. "}}}}
+{"send_line":"{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"sess-1\",\"update\":{\"sessionUpdate\":\"agent_mess"}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"After the broken line."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

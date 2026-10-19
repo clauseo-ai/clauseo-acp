@@ -1,0 +1,21 @@
+{"scenario":"files-multi-turn","description":"Three turns in one session: create two files; edit one and move the other; delete one","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"write_file":{"path":"notes/a.txt","content":"Alpha\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-write-a","title":"Write notes/a.txt","name":"Write","kind":"edit","status":"completed","content":[{"type":"diff","path":"{{cwd}}/notes/a.txt","newText":"Alpha\n"}],"locations":[{"path":"{{cwd}}/notes/a.txt"}]}}}
+{"write_file":{"path":"notes/b.txt","content":"Beta\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-write-b","title":"Write notes/b.txt","name":"Write","kind":"edit","status":"completed","content":[{"type":"diff","path":"{{cwd}}/notes/b.txt","newText":"Beta\n"}],"locations":[{"path":"{{cwd}}/notes/b.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Created two notes."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"write_file":{"path":"notes/a.txt","content":"Alpha, revised\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t2-edit-a","title":"Edit notes/a.txt","name":"Edit","kind":"edit","status":"completed","content":[{"type":"diff","path":"{{cwd}}/notes/a.txt","oldText":"Alpha\n","newText":"Alpha, revised\n"}],"locations":[{"path":"{{cwd}}/notes/a.txt"}]}}}
+{"move_file":{"from":"notes/b.txt","to":"archive/b.txt"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t2-move-b","title":"Move notes/b.txt to archive/b.txt","name":"Move","kind":"move","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Moved notes/b.txt to archive/b.txt"}}],"locations":[{"path":"{{cwd}}/notes/b.txt"},{"path":"{{cwd}}/archive/b.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Revised one note and archived the other."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/prompt","as":"p3","params":{"sessionId":"sess-1"}}}
+{"delete_file":{"path":"notes/a.txt"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t3-delete-a","title":"Delete notes/a.txt","name":"Delete","kind":"delete","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Deleted notes/a.txt"}}],"locations":[{"path":"{{cwd}}/notes/a.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-3","content":{"type":"text","text":"Deleted the revised note."}}}}
+{"respond":{"to":"p3","result":{"stopReason":"end_turn"}}}
