@@ -1,10 +1,15 @@
 //! `clippy_bans_every_planted_call`: builds one scratch crate whose `clippy.toml` is the file
 //! core-io asks each core crate to have (the repo's root `clippy.toml` plus
-//! `xtask/core-io-bans.toml`), with one module per form in `forms.rs`, runs the pinned clippy on
-//! it offline, and asserts that each must-fail module gets a `disallowed_methods` or
-//! `disallowed_types` hit inside its own file and each must-pass module gets none. It also fails
-//! on a compile error in a form and on a warning about the `clippy.toml` itself (a path that
-//! does not resolve), so a misspelled entry in the list fails here.
+//! `xtask/core-io-bans.toml`) with every `allow-invalid` taken out, with one module per form in
+//! `forms.rs`, runs the pinned clippy on it offline, and asserts that each must-fail module gets
+//! a `disallowed_methods` or `disallowed_types` hit inside its own file (naming the form's item,
+//! when it has one) and each must-pass module gets none.
+//!
+//! It also fails on a compile error in a form, and on a warning about the `clippy.toml` itself
+//! other than "does not refer to a reachable" for exactly the entries of the other OS family
+//! (`std::os::windows::` on unix, `std::os::unix::` on Windows). So a misspelled entry fails
+//! here: a `std::os::unix` one on the unix CI legs, a `std::os::windows` one on the Windows leg,
+//! any other one everywhere.
 
 mod forms;
 
@@ -13,10 +18,11 @@ use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;
 use forms::{Form, Must};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 use std::time::Instant;
+use toml::{Table, Value as Toml};
 
 /// The lints whose hits count.
 const LINTS: [&str; 2] = ["clippy::disallowed_methods", "clippy::disallowed_types"];
@@ -30,7 +36,8 @@ fn clippy_bans_every_planted_call() {
         .filter(|form| form.only.here())
         .collect();
     let dir = Scratch::new("core-io-clippy");
-    write_crate(&dir, &repo, &expected.text, &forms);
+    let config = clippy_toml::render(&without_allow_invalid(&expected.table));
+    write_crate(&dir, &repo, &config, &forms);
 
     #[expect(
         clippy::disallowed_methods,
@@ -56,7 +63,9 @@ fn clippy_bans_every_planted_call() {
         started.elapsed()
     );
 
-    let mut hits: BTreeMap<String, usize> = BTreeMap::new();
+    // The text of each hit, by the file it is in.
+    let mut hits: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut unreachable = BTreeSet::new();
     let mut problems = Vec::new();
     for message in ran.stdout.lines().filter_map(compiler_message) {
         let code = message
@@ -64,13 +73,21 @@ fn clippy_bans_every_planted_call() {
             .and_then(Value::as_str)
             .unwrap_or_default();
         let level = message["level"].as_str().unwrap_or_default();
+        let text = message["message"].as_str().unwrap_or_default();
         let rendered = message["rendered"].as_str().unwrap_or_default();
         let files = primary_files(&message);
         if LINTS.contains(&code) {
             for file in files {
-                *hits.entry(file).or_default() += 1;
+                hits.entry(file).or_default().push(text.to_owned());
             }
-        } else if level == "error" || files.iter().any(|file| file.ends_with("clippy.toml")) {
+        } else if files.iter().any(|file| file.ends_with("clippy.toml")) {
+            match unreachable_path(text) {
+                Some(path) => {
+                    unreachable.insert(path);
+                }
+                None => problems.push(rendered.to_owned()),
+            }
+        } else if level == "error" {
             problems.push(rendered.to_owned());
         }
     }
@@ -80,18 +97,36 @@ fn clippy_bans_every_planted_call() {
         problems.join("\n"),
         ran.stderr
     );
+    assert_eq!(
+        unreachable,
+        other_family_entries(&expected.table),
+        "clippy must find every list entry but those of the other OS family"
+    );
     let wrong: Vec<String> = forms
         .iter()
         .filter_map(|form| {
             let found = hits
                 .get(&format!("src/{}.rs", form.name))
-                .copied()
-                .unwrap_or(0);
-            match (form.must, found) {
-                (Must::Fail, 0) => Some(format!("{}: no hit, but it must fail", form.name)),
-                (Must::Pass, n) if n > 0 => {
-                    Some(format!("{}: {n} hit(s), but it must pass", form.name))
+                .map_or(&[][..], Vec::as_slice);
+            let names_item = |item: &str| {
+                let quoted = format!("`{item}`");
+                found.iter().any(|hit| hit.contains(&quoted))
+            };
+            match (form.must, &form.item) {
+                (Must::Fail, _) if found.is_empty() => {
+                    Some(format!("{}: no hit, but it must fail", form.name))
                 }
+                (Must::Fail, Some(item)) if !names_item(item) => Some(format!(
+                    "{}: no hit names `{item}`, only: {}",
+                    form.name,
+                    found.join("; ")
+                )),
+                (Must::Pass, _) if !found.is_empty() => Some(format!(
+                    "{}: {} hit(s), but it must pass: {}",
+                    form.name,
+                    found.len(),
+                    found.join("; ")
+                )),
                 _ => None,
             }
         })
@@ -150,4 +185,47 @@ fn primary_files(message: &Value) -> Vec<String> {
         .filter_map(|span| span["file_name"].as_str())
         .map(|file| file.replace('\\', "/"))
         .collect()
+}
+
+/// `table` with `allow-invalid` taken out of every entry, so clippy warns about each path it
+/// cannot find.
+fn without_allow_invalid(table: &Table) -> Table {
+    let mut table = table.clone();
+    for (_, rows) in &mut table {
+        let Some(rows) = rows.as_array_mut() else {
+            continue;
+        };
+        for row in rows.iter_mut().filter_map(Toml::as_table_mut) {
+            row.remove("allow-invalid");
+        }
+    }
+    table
+}
+
+/// The paths of `table`'s `disallowed-methods` and `disallowed-types` entries in the other OS
+/// family's `std::os` module, which clippy cannot find on this host.
+fn other_family_entries(table: &Table) -> BTreeSet<String> {
+    let other = if cfg!(windows) {
+        "std::os::unix::"
+    } else {
+        "std::os::windows::"
+    };
+    ["disallowed-methods", "disallowed-types"]
+        .into_iter()
+        .filter_map(|key| table.get(key).and_then(Toml::as_array))
+        .flatten()
+        .filter_map(|row| row.get("path").and_then(Toml::as_str))
+        .filter(|path| path.starts_with(other))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The path in clippy's warning that a config entry names nothing it can find, the
+/// `std::os::windows::fs::symlink_dir` of "`` `std::os::windows::fs::symlink_dir` does not refer
+/// to a reachable function ``".
+fn unreachable_path(message: &str) -> Option<String> {
+    let rest = message.strip_prefix('`')?;
+    let (path, tail) = rest.split_once('`')?;
+    tail.starts_with(" does not refer to a reachable")
+        .then(|| path.to_owned())
 }

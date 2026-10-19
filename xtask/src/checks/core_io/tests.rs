@@ -1,12 +1,16 @@
-//! The planted cases of the core-io check and its other tests. Each case builds a scratch repo
-//! with an `ARCHITECTURE.md` whose `protocol` row holds core I/O, a small root `clippy.toml` and
-//! list, and whatever `crates/protocol/clippy.toml` the case needs. `tests/clippy.rs` runs clippy
-//! itself on the forms the bans must catch.
+//! The planted cases of the core-io check and its other tests. Each case builds a scratch git
+//! repo with an `ARCHITECTURE.md` whose `protocol` row holds core I/O, a small root `clippy.toml`
+//! and list, manifests that inherit the workspace lints, and whatever other files the case needs.
+//! `tests/clippy.rs` runs clippy itself on the forms the bans must catch.
 
+mod cases;
 mod clippy;
 pub(super) mod planted;
 
+use cases::*;
+
 use super::*;
+use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;
 use std::fs;
 
@@ -29,11 +33,21 @@ const LIST_TOML: &str = "disallowed-methods = [\n  \
     disallowed-types = [\n  { path = \"std::fs::File\", reason = \"no files\", \
     allow-invalid = true },\n]\n";
 
+/// The scratch repo's root `Cargo.toml`.
+const ROOT_MANIFEST: &str = "[workspace]\nmembers = [\"crates/*\"]\n\n\
+    [workspace.lints.clippy]\ndisallowed_methods = \"deny\"\n";
+
+/// The scratch repo's `crates/protocol/Cargo.toml`.
+const CRATE_MANIFEST: &str =
+    "[package]\nname = \"clauseo-protocol\"\n\n[lints]\nworkspace = true\n";
+
 /// The inputs of one scratch repo.
 #[derive(Default)]
 struct Repo<'a> {
     /// `crates/protocol/clippy.toml`, if any.
     crate_file: Option<&'a str>,
+    /// More files, written last, so one can replace a manifest: (repo-relative path, text).
+    files: &'a [(&'a str, &'a str)],
     /// `ARCHITECTURE.md` in place of `ARCHITECTURE`.
     architecture: Option<&'a str>,
     /// The root `clippy.toml`, `ROOT_TOML` by default.
@@ -65,9 +79,12 @@ impl<'a> Input<'a> {
     }
 }
 
-/// Writes `repo` into a scratch dir named after `case`; returns the dir.
+/// Writes `repo` into a scratch git repo named after `case`; returns the dir.
 fn scratch(case: &str, repo: &Repo<'_>) -> Scratch {
     let dir = Scratch::new(&format!("core-io-{case}"));
+    let init = Cmd::new(Program::Git, ["init", "-q"]);
+    let quiet = process::run_quiet(&init, &dir).expect("run git init");
+    assert!(quiet.success, "git init failed: {}", quiet.stderr);
     let architecture = repo.architecture.unwrap_or(ARCHITECTURE);
     fs::write(dir.join(crates_table::FILE), architecture).expect("write ARCHITECTURE.md");
     fs::create_dir_all(dir.join("crates/protocol")).expect("create the crate dir");
@@ -80,6 +97,15 @@ fn scratch(case: &str, repo: &Repo<'_>) -> Scratch {
     }
     if let Some(text) = repo.crate_file {
         fs::write(dir.join("crates/protocol/clippy.toml"), text).expect("write clippy.toml");
+    }
+    let defaults = [
+        (lints::ROOT_MANIFEST, ROOT_MANIFEST),
+        ("crates/protocol/Cargo.toml", CRATE_MANIFEST),
+    ];
+    for (path, text) in defaults.iter().chain(repo.files) {
+        let path = dir.join(path);
+        fs::create_dir_all(path.parent().expect("a file has a parent")).expect("create dirs");
+        fs::write(path, text).expect("write a file");
     }
     dir
 }
@@ -118,9 +144,10 @@ fn with_crate_file(case: &str, crate_file: &str) -> Inspection {
     )
 }
 
-/// What `crates/protocol/clippy.toml` must be in the scratch repo.
-fn expected() -> Expected {
-    let dir = scratch("expected", &Repo::default());
+/// What `crates/protocol/clippy.toml` must be in the scratch repo, built in a scratch repo of
+/// its own named after `case`.
+fn expected(case: &str) -> Expected {
+    let dir = scratch(&format!("{case}-expected"), &Repo::default());
     clippy_toml::load(&dir).expect("the scratch inputs load")
 }
 
@@ -133,7 +160,7 @@ pub(super) fn crate_file_differs() -> Inspection {
 }
 
 pub(super) fn crate_file_matches() -> Inspection {
-    with_crate_file("crate-file-matches", &expected().text)
+    with_crate_file("crate-file-matches", &expected("crate-file-matches").text)
 }
 
 /// The same tables as the generated file, written as arrays of tables, in another key order
@@ -275,7 +302,7 @@ fn banned_module_names_are_std_and_its_io_modules() {
 /// The generated file parses back to the table it was rendered from.
 #[test]
 fn the_generated_file_parses_to_the_expected_table() {
-    let expected = expected();
+    let expected = expected("parses");
     let parsed: toml::Table = toml::from_str(&expected.text).expect("the generated file parses");
     assert_eq!(parsed, expected.table);
 }

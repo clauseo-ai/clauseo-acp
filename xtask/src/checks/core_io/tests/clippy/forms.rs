@@ -4,6 +4,7 @@
 //! module name, whether it must fail or pass, the targets it builds on, and its source.
 
 mod cases;
+mod reads;
 mod review;
 mod rules;
 
@@ -42,6 +43,8 @@ pub(super) struct Form {
     pub must: Must,
     pub only: Only,
     pub source: String,
+    /// The item a hit in the form's file must name, when the form is there for one entry.
+    pub item: Option<String>,
 }
 
 /// A form that must fail on every target.
@@ -60,6 +63,15 @@ pub(super) fn form(name: &str, must: Must, only: Only, source: &str) -> Form {
         must,
         only,
         source: source.to_owned(),
+        item: None,
+    }
+}
+
+impl Form {
+    /// The form, whose hits must name `item`: deleting `item` from the list fails it.
+    pub(super) fn naming(mut self, item: &str) -> Form {
+        self.item = Some(item.to_owned());
+        self
     }
 }
 
@@ -83,6 +95,7 @@ pub(super) fn forms() -> Vec<Form> {
     all.extend(cases::passing());
     all.extend(rules::failing());
     all.extend(rules::passing());
+    all.extend(reads::forms());
     all.extend(review::forms());
     all
 }

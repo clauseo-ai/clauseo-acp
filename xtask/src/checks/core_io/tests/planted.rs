@@ -25,9 +25,10 @@ macro_rules! crate_file {
 macro_rules! write_crate_file {
     () => {
         concat!(
-            "    fix: write `crates/protocol/clippy.toml` with exactly this text, the root \
+            "    fix: write `crates/protocol/clippy.toml` with exactly the text below, the root \
              clippy.toml with the arrays of xtask/core-io-bans.toml appended (clippy reads only \
-             the nearest clippy.toml):\n",
+             the nearest clippy.toml), then run `cargo clean -p clauseo-protocol`: cargo does not \
+             lint a crate again when its clippy.toml appears after it last linted it\n",
             crate_file!()
         )
     };
@@ -39,6 +40,55 @@ macro_rules! stopped {
     () => {
         "0 Crates table rows inspected in the Crates table of ARCHITECTURE.md\n    \
          fix: the check stopped before it could look; fix the failure above first"
+    };
+}
+
+/// The violation for the stray clippy config `$path`, a `clippy.toml` in `$dir`.
+#[cfg(test)]
+macro_rules! stray {
+    ($path:literal, $dir:literal) => {
+        concat!(
+            $path, ":1: `", $path, "` is a clippy.toml other than the root one and those core-io \
+             writes for the crates whose row bans fs, process or any I/O; clippy reads only the \
+             nearest one, so it replaces the root clippy.toml's bans for the crates under `", $dir,
+            "/`\n    fix: delete `", $path, "`: clippy settings go in the root clippy.toml, which \
+             every crate reads, and core-io prints the file each crate whose row bans fs, process \
+             or any I/O needs"
+        )
+    };
+}
+
+/// The violation for the root manifest's `$name` at `$line`, set to `$level`.
+#[cfg(test)]
+macro_rules! lint_level {
+    ($line:literal, $name:literal, $level:literal, $lint:literal) => {
+        concat!(
+            "Cargo.toml:", $line, ": `[workspace.lints.clippy]` sets `", $name, "` to `", $level,
+            "`, so clippy does not report the calls xtask/core-io-bans.toml bans in the crates whose \
+             row bans I/O\n    fix: set `", $name, "` to \"warn\" (CI denies warnings) or \"deny\", \
+             or remove it; an exception is `#[expect(clippy::", $lint, ", reason = \"..\")]` at the \
+             call"
+        )
+    };
+}
+
+/// The violation for `$flag` in `$key` of `.cargo/config.toml` at `$line`.
+#[cfg(test)]
+macro_rules! rustflag {
+    ($line:literal, $key:literal, $flag:literal) => {
+        concat!(
+            ".cargo/config.toml:",
+            $line,
+            ": `",
+            $key,
+            "` passes `",
+            $flag,
+            "` to rustc, which sets \
+             the level of a lint xtask/core-io-bans.toml feeds for every crate, past \
+             [workspace.lints]\n    fix: remove the flag: the lint levels live in the root \
+             Cargo.toml's [workspace.lints.clippy], and an exception is \
+             `#[expect(clippy::disallowed_methods, reason = \"..\")]` at the call"
+        )
     };
 }
 
@@ -101,4 +151,49 @@ crate::checks::planted::cases! {
          fix: write `disallowed-types` as an array of `{ path, reason }` tables",
         stopped!(),
     ]), inspects 0 => super::root_array_is_a_string,
+    /// Any other clippy config fails: clippy reads only the nearest one, and `.clippy.toml` first.
+    dot_clippy_toml_beside_the_crate_file: FailsWith(&[
+        "crates/protocol/.clippy.toml:1: `crates/protocol/.clippy.toml` is a .clippy.toml, which \
+         clippy reads instead of a clippy.toml beside it or above it, so it replaces the root \
+         clippy.toml's bans, and a core crate's list, for the crates under `crates/protocol/`\n    \
+         fix: delete `crates/protocol/.clippy.toml`: clippy settings go in the root clippy.toml, \
+         which every crate reads, and core-io prints the file each crate whose row bans fs, \
+         process or any I/O needs",
+    ]), inspects 3 => super::dot_clippy_toml_beside_the_crate_file,
+    dot_clippy_toml_at_the_root: FailsWith(&[
+        ".clippy.toml:1: `.clippy.toml` is a .clippy.toml, which clippy reads instead of a \
+         clippy.toml beside it or above it, so it replaces the root clippy.toml's bans, and a core \
+         crate's list, for every crate in the repo\n    \
+         fix: delete `.clippy.toml`: clippy settings go in the root clippy.toml, which every \
+         crate reads, and core-io prints the file each crate whose row bans fs, process or any \
+         I/O needs",
+    ]), inspects 3 => super::dot_clippy_toml_at_the_root,
+    clippy_toml_in_crates: FailsWith(&[stray!("crates/clippy.toml", "crates")]), inspects 3 => super::clippy_toml_in_crates,
+    clippy_toml_in_xtask: FailsWith(&[stray!("xtask/clippy.toml", "xtask")]), inspects 3 => super::clippy_toml_in_xtask,
+    clippy_toml_of_a_crate_without_a_row: FailsWith(&[stray!("crates/extra/clippy.toml", "crates/extra")]), inspects 3 => super::clippy_toml_of_a_crate_without_a_row,
+    clippy_toml_of_a_clock_only_crate: FailsWith(&[stray!("crates/protocol/clippy.toml", "crates/protocol")]), inspects 3 => super::clippy_toml_of_a_clock_only_crate,
+    /// A held crate inherits the workspace lints, which keep the bans reporting.
+    crate_lints_not_inherited: FailsWith(&[
+        "crates/protocol/Cargo.toml:1: `crates/protocol/Cargo.toml` has no `[lints] workspace = \
+         true`, so clauseo-protocol does not get the workspace's lint levels, which keep clippy's \
+         disallowed_methods and disallowed_types reporting I/O here\n    \
+         fix: add `[lints]` with `workspace = true`",
+    ]), inspects 3 => super::crate_lints_not_inherited,
+    crate_lints_of_its_own: FailsWith(&[
+        "crates/protocol/Cargo.toml:4: `crates/protocol/Cargo.toml` sets clauseo-protocol's own \
+         lints instead of `[lints] workspace = true`, so it can turn off clippy's \
+         disallowed_methods and disallowed_types, which ban I/O here\n    \
+         fix: replace the table with `[lints]` and `workspace = true` (cargo takes no other lint \
+         key beside it); an exception is `#[expect(clippy::disallowed_methods, reason = \"..\")]` \
+         at the call",
+    ]), inspects 3 => super::crate_lints_of_its_own,
+    workspace_lint_allowed: FailsWith(&[
+        lint_level!(6, "disallowed_types", "allow", "disallowed_types"),
+        lint_level!(7, "disallowed-methods", "expect", "disallowed_methods"),
+    ]), inspects 3 => super::workspace_lint_allowed,
+    workspace_lints_that_report: Passes, inspects 3 => super::workspace_lints_that_report,
+    /// Rustflags in the cargo config that name a ban.
+    rustflags_in_build: FailsWith(&[rustflag!(5, "build.rustflags", "clippy::disallowed_methods")]), inspects 3 => super::rustflags_in_build,
+    rustflags_in_a_target: FailsWith(&[rustflag!(2, "target.cfg(unix).rustflags", "-Aclippy::disallowed-types")]), inspects 3 => super::rustflags_in_a_target,
+    rustflags_without_a_ban: Passes, inspects 3 => super::rustflags_without_a_ban,
 }
