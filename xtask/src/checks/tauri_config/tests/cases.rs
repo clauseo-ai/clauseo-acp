@@ -101,6 +101,14 @@ pub(super) fn endpoints_with_pubkey_passes() -> Inspection {
     )
 }
 
+pub(super) fn updater_artifacts_true_passes() -> Inspection {
+    conf_case(
+        "updater-artifacts-true",
+        "\"icon\": []",
+        "\"icon\": [],\n    \"createUpdaterArtifacts\": true",
+    )
+}
+
 pub(super) fn asset_protocol_disabled_passes() -> Inspection {
     conf_case(
         "asset-protocol-disabled",

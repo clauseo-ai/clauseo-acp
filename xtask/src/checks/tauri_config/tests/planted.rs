@@ -11,6 +11,8 @@ crate::checks::planted::cases! {
     dev_csp_not_checked: Passes => super::cases::dev_csp_not_checked,
     /// Updater endpoints with a public key pass.
     endpoints_with_pubkey_passes: Passes => super::cases::endpoints_with_pubkey_passes,
+    /// `bundle.createUpdaterArtifacts` set to `true` passes: only `"v1Compatible"` fails.
+    updater_artifacts_true_passes: Passes => super::cases::updater_artifacts_true_passes,
     /// The asset protocol switched off passes.
     asset_protocol_disabled_passes: Passes => super::cases::asset_protocol_disabled_passes,
     /// A missing `tauri.conf.json` fails at line 1.
