@@ -21,8 +21,9 @@
 
 ## Deviations
 
-<!-- Each difference from the brief and why, including changed output formats and who reads them.
-     Write "none" if there are none. Update after each review round. -->
+<!-- Each difference from the brief (or the issue, when there is no brief) and why, including
+     changed output formats and who reads them. Write "none" if there are none. Update after each
+     review round. -->
 
 ## Not verified
 
