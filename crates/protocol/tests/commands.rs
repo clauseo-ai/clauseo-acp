@@ -8,8 +8,9 @@ pub mod fixtures;
 use clauseo_protocol::{
     CommandEnvelope, ConfigValue, Delivery, ElicitationResponse, Error, ErrorCode, FileChoice,
     FileDecision, HostCommand, HostQuery, MAX_BLOB_READ_BYTES, MAX_ELICITATION_VALUES_BYTES,
-    MAX_ID_TEXT_BYTES, MAX_PAGE_ENTRIES, MAX_PROMPT_FILES, MAX_PROMPT_TEXT_BYTES, MAX_TITLE_CHARS,
-    MatterSource, Principal, PromptBlock, RawPayload, RestoreScope, StreamId,
+    MAX_ID_TEXT_BYTES, MAX_MATTER_NAME_BYTES, MAX_PAGE_ENTRIES, MAX_PROMPT_BLOCKS,
+    MAX_PROMPT_FILES, MAX_PROMPT_TEXT_BYTES, MAX_TITLE_CHARS, MatterSource, Principal, PromptBlock,
+    RawPayload, RestoreScope, StreamId,
 };
 
 use fixtures::{
@@ -426,7 +427,7 @@ fn matter_name_rules() {
     for reserved in ["CON", "con", "Nul.txt", "com1", "LPT9.doc", "aux.tar.gz"] {
         bad(reserved);
     }
-    for near in ["CONSOLE", "com10", "lpt0", "my con", "nul_x"] {
+    for near in ["CONSOLE", "com10", "lpt00", "my con", "nul_x"] {
         ok(near);
     }
 }
@@ -466,4 +467,78 @@ fn title_visibility() {
     };
     assert!(invalid(&create("a\u{202E}b").validate()));
     assert!(invalid(&create("\u{200B}").validate()));
+}
+
+#[test]
+fn limits_are_public() {
+    assert_eq!(MAX_PROMPT_BLOCKS, 100);
+    assert_eq!(MAX_MATTER_NAME_BYTES, 255);
+}
+
+#[test]
+fn separators_marks_and_fillers() {
+    let rename = |title: &str| HostCommand::RenameThread {
+        thread: thread_id(1),
+        title: title.into(),
+    };
+    let ok = |title: &str| assert!(rename(title).validate().is_ok(), "{title:?} refused");
+    let bad = |title: &str| assert!(invalid(&rename(title).validate()), "{title:?} accepted");
+    // Line and paragraph separators are refused; a plain space is not.
+    ok("a b");
+    bad("a\u{2028}b");
+    bad("a\u{2029}b");
+    // Bidi marks are allowed inside text, embeddings and isolates are not.
+    for mark in ['\u{200E}', '\u{200F}', '\u{061C}'] {
+        ok(&format!("\u{5e9}{mark}1"));
+    }
+    bad("a\u{202B}b");
+    bad("a\u{2067}b");
+    // Marks, the soft hyphen and Hangul fillers show nothing.
+    for invisible in [
+        '\u{200E}', '\u{200F}', '\u{061C}', '\u{00AD}', '\u{3164}', '\u{115F}', '\u{1160}',
+        '\u{FFA0}',
+    ] {
+        bad(&format!(" {invisible}"));
+        ok(&format!("{invisible}x"));
+    }
+    // Prompts use the same visibility test.
+    let builders: [fn(Vec<PromptBlock>) -> HostCommand; 2] = [send_prompt, edit_queued];
+    for build in builders {
+        assert!(invalid(&build(vec![text("\u{200B}")]).validate()));
+        assert!(invalid(&build(vec![text("\u{3164}\u{00AD}")]).validate()));
+        assert!(
+            build(vec![text("\u{200B}"), files(1).remove(0)])
+                .validate()
+                .is_ok()
+        );
+        assert!(build(vec![text("\u{200B}x")]).validate().is_ok());
+    }
+}
+
+#[test]
+fn more_reserved_names() {
+    let create = |name: &str| HostCommand::CreateMatter {
+        name: name.to_owned(),
+        source: MatterSource::ExistingFolder {
+            folder: folder_ref_id(3),
+        },
+    };
+    let names = [
+        "COM0",
+        "lpt0.txt",
+        "CONIN$",
+        "conout$.log",
+        "COM¹",
+        "com².doc",
+        "COM³",
+        "LPT¹",
+        "lpt²",
+        "LPT³.x",
+    ];
+    for name in names {
+        assert!(invalid(&create(name).validate()), "{name:?} accepted");
+    }
+    for name in ["COM⁴", "CONIN", "CONOUT$X", "LPT¹0", "com0x"] {
+        assert!(create(name).validate().is_ok(), "{name:?} refused");
+    }
 }

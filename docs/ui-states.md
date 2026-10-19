@@ -11,6 +11,9 @@ backticks, written as `StopReason::EndTurn` is.
 A variant named `Unknown` is a value from a newer Clauseo that this version does not know. It is
 never produced by this version, so each needs only a neutral fallback.
 
+Paths (`MatterPath`) may hold bidi marks such as U+200F, so every path is shown bidi-isolated
+(`<bdi>` or `unicode-bidi: isolate`).
+
 Wire names are snake case (`at_limit`, `send_now`); the tables use the Rust names. The event schema is
 in [0002](decisions/0002-event-schema.md), the error codes in [0003](decisions/0003-error-codes.md).
 

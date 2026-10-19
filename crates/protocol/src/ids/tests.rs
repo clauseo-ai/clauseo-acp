@@ -160,8 +160,19 @@ fn matter_paths_refuse_drives_controls_and_long_names() {
     for good in ["ab:c", "notes/C:x", "1:/a", "x/a:b"] {
         assert!(MatterPath::new(good).is_ok(), "{good:?}");
     }
-    for control in ["a\u{1}b", "a\tb", "a\nb", "a\u{1f}", "a\u{7f}b", "a\0b"] {
+    for control in [
+        "a\u{1}b", "a\tb", "a\nb", "a\u{1f}", "a\u{7f}b", "a\0b", "a\u{85}b", "a\u{9b}b", "\u{80}",
+    ] {
         assert!(MatterPath::new(control).is_err(), "{control:?}");
+    }
+    // Format characters stay allowed: real Hebrew and Arabic names hold bidi marks.
+    for format in [
+        "\u{5e9}\u{5dc}\u{5d5}\u{5dd}\u{200f}.docx",
+        "a\u{200e}b",
+        "a\u{a0}b",
+        "a\u{202e}b",
+    ] {
+        assert!(MatterPath::new(format).is_ok(), "{format:?}");
     }
     let segment = "s".repeat(255);
     assert!(MatterPath::new(&segment).is_ok());
