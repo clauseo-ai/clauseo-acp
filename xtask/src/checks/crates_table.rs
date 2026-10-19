@@ -4,7 +4,11 @@
 //! on`, `Never depends on` and `Status`. There is no Markdown parser among our dependencies, so
 //! it is read by hand: each line from the first `|` line of the section to the first line that
 //! does not start with `|` is a row; a row is split on `|` (a `\|` is a literal pipe), each cell
-//! trimmed and its backticks removed. The second line must be the `|---|` separator.
+//! trimmed and its backticks removed. The second line must be the `|---|` separator. Markdown
+//! also reads a line without a leading pipe as a row, and a blank line ends the table, so the
+//! next non-blank line of the section after the table must hold no `|`: rows past the end
+//! would be dropped without a word. Only the Crate, Never depends on and Status cells are read;
+//! the others must be there, so every row has five cells.
 //!
 //! "Never depends on" entries are I/O words or crate names. The I/O words name standard library
 //! APIs, as `ARCHITECTURE.md` defines them: `fs`, `process` and `any I/O` each mean the file,
@@ -12,12 +16,26 @@
 //! functions. They win over a row of the same name (`process`).
 //! `std`, and a standard library module that core-io bans whole (`net`, `env`, `os`: see
 //! `core_io/bans.rs`), are rejected: they name no crate we use, and the I/O words are how the
-//! table bans those APIs. `time` is the crates.io crate. A crate name that is a row of
-//! the table is our package `clauseo-<name>`; any other is the crates.io package of that name.
+//! table bans those APIs. `time` is the crates.io crate. A crate name that is a row of the
+//! table, or `clauseo-` followed by one (`clauseo-process`, since a bare `process` is the I/O
+//! word), is our package `clauseo-<name>`; any other name is the crates.io package of that name.
+//! A name that looks like ours but is no row is rejected, so a typo never turns into a ban on a
+//! crates.io package nobody uses: `clauseo-` followed by no row, a name holding `_` (our row
+//! names hold `_`, crates.io names are written with `-` here, and cargo reads the two the
+//! same), and a name one edit from a row name once `-` and `_` are folded.
+//!
+//! A ban names exactly one package. `tauri` bans the package `tauri`, not `tauri-runtime`,
+//! `tauri-utils`, `wry` or a fork under another name; banning a family means listing each of
+//! its packages.
 
 use crate::checks::{self, core_io, violation};
 use crate::violation::Violation;
 use std::path::Path;
+
+mod lines;
+mod names;
+
+use lines::{cells, entries, is_crate_name, is_package_name, is_rule, is_table_line, past_the_end};
 
 /// The file, at the repo root.
 pub(crate) const FILE: &str = "ARCHITECTURE.md";
@@ -49,9 +67,6 @@ pub(crate) struct CrateRow {
     pub line: u32,
     /// The crate's name without backticks: `xtask`, `desktop`, `fake_agent`.
     pub name: String,
-    pub owns: String,
-    /// The "May depend on" entries, as written (backticks removed), e.g. `none of ours`.
-    pub may_depend_on: Vec<String>,
     pub never: Vec<Never>,
     pub status: Status,
 }
@@ -128,10 +143,11 @@ impl CrateRow {
 
 impl CratesTable {
     /// The row of a workspace member, by its package name: `xtask` is row `xtask`, and
-    /// `clauseo-<name>` is row `<name>` (a `-` in `<name>` also matches a `_` in the row).
+    /// `clauseo-<name>` is row `<name>` (a `-` in `<name>` also matches a `_` in the row, see
+    /// `fold`).
     pub(crate) fn row_for_package(&self, package: &str) -> Option<&CrateRow> {
-        let name = row_name(package)?;
-        self.row(name).or_else(|| self.row(&name.replace('-', "_")))
+        let name = fold(row_name(package)?);
+        self.row(&name)
     }
 
     /// The row called `name`.
@@ -151,8 +167,14 @@ pub(crate) fn row_name(package: &str) -> Option<&str> {
     }
 }
 
+/// `name` with every `-` written `_`: cargo treats the two as the same in a package name, so a
+/// row `transport_ws` is the package `clauseo-transport-ws`, and a ban matches either spelling.
+pub(crate) fn fold(name: &str) -> String {
+    name.replace('-', "_")
+}
+
 /// The package of row `name`: `xtask`, else `clauseo-<name>`.
-fn package_of(name: &str) -> String {
+pub(crate) fn package_of(name: &str) -> String {
     if name == "xtask" {
         name.to_owned()
     } else {
@@ -225,6 +247,21 @@ pub(crate) fn parse(text: &str) -> Result<CratesTable, Vec<Violation>> {
         .map(|(index, line)| (checks::line_at(index), cells(line)))
         .collect();
     let mut found = Vec::new();
+    let after = start + table.len();
+    if let Some((index, line)) = lines
+        .iter()
+        .enumerate()
+        .take(section_end)
+        .skip(after)
+        .find(|(_, line)| !line.trim().is_empty())
+        && line.contains('|')
+    {
+        found.push(past_the_end(
+            checks::line_at(after - 1),
+            checks::line_at(index),
+            line,
+        ));
+    }
     let header_line = checks::line_at(start);
     if table.first().map(|(_, cells)| cells.as_slice())
         != Some(COLUMNS.map(String::from).as_slice())
@@ -280,15 +317,13 @@ pub(crate) fn parse(text: &str) -> Result<CratesTable, Vec<Violation>> {
 struct RawRow {
     line: u32,
     name: String,
-    owns: String,
-    may_depend_on: Vec<String>,
     never: Vec<String>,
     status: Status,
 }
 
 /// The row at `line`, or `None` with its problems added to `found`.
 fn raw_row(line: u32, cells: &[String], found: &mut Vec<Violation>) -> Option<RawRow> {
-    let [name, owns, may, never, status] = cells else {
+    let [name, _owns, _may, never, status] = cells else {
         found.push(violation(
             FILE,
             line,
@@ -326,8 +361,6 @@ fn raw_row(line: u32, cells: &[String], found: &mut Vec<Violation>) -> Option<Ra
     Some(RawRow {
         line,
         name: name.clone(),
-        owns: owns.clone(),
-        may_depend_on: entries(may),
         never: entries(never),
         status: status?,
     })
@@ -368,7 +401,19 @@ fn classify(raw: &[RawRow], found: &mut Vec<Violation>) -> Vec<CrateRow> {
             } else if raw.iter().any(|other| other.name == *entry) {
                 never.push(Never::Workspace(entry.clone()));
             } else if is_package_name(entry) {
-                never.push(Never::External(entry.clone()));
+                let rows: Vec<&str> = raw.iter().map(|other| other.name.as_str()).collect();
+                match names::crate_entry(entry, &rows) {
+                    Ok(entry) => never.push(entry),
+                    Err(problem) => found.push(violation(
+                        FILE,
+                        row.line,
+                        format!(
+                            "`{entry}` in the Never depends on column of `{}` {}",
+                            row.name, problem.what
+                        ),
+                        problem.fix,
+                    )),
+                }
             } else {
                 found.push(violation(
                     FILE,
@@ -384,76 +429,11 @@ fn classify(raw: &[RawRow], found: &mut Vec<Violation>) -> Vec<CrateRow> {
         rows.push(CrateRow {
             line: row.line,
             name: row.name.clone(),
-            owns: row.owns.clone(),
-            may_depend_on: row.may_depend_on.clone(),
             never,
             status: row.status,
         });
     }
     rows
-}
-
-/// True for a line of a pipe table: it starts with `|` after any indent.
-fn is_table_line(line: &str) -> bool {
-    line.trim_start().starts_with('|')
-}
-
-/// The cells of a table line: split on `|` (not `\|`, which is a literal pipe), the outer pipes
-/// dropped, each cell trimmed and its backticks removed.
-fn cells(line: &str) -> Vec<String> {
-    let line = line.trim();
-    let inner = line.strip_prefix('|').unwrap_or(line);
-    let inner = match inner.strip_suffix('|') {
-        Some(rest) if !rest.ends_with('\\') => rest,
-        _ => inner,
-    };
-    let mut found = Vec::new();
-    let mut cell = String::new();
-    let mut chars = inner.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\\' if chars.peek() == Some(&'|') => {
-                cell.push('|');
-                chars.next();
-            }
-            '|' => found.push(std::mem::take(&mut cell)),
-            '`' => {}
-            _ => cell.push(c),
-        }
-    }
-    found.push(cell);
-    found.iter().map(|cell| cell.trim().to_owned()).collect()
-}
-
-/// The comma-separated entries of a cell, trimmed, empty ones dropped.
-fn entries(cell: &str) -> Vec<String> {
-    cell.split(',')
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .map(str::to_owned)
-        .collect()
-}
-
-/// True for a separator cell: `---`, with an optional `:` at either end.
-fn is_rule(cell: &str) -> bool {
-    let dashes = cell.trim_start_matches(':').trim_end_matches(':');
-    !dashes.is_empty() && dashes.chars().all(|c| c == '-')
-}
-
-/// `^[a-z][a-z0-9_]*$`: a directory under `crates/`.
-fn is_crate_name(text: &str) -> bool {
-    text.starts_with(|c: char| c.is_ascii_lowercase())
-        && text
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-}
-
-/// `^[A-Za-z0-9_-]+$`: what crates.io accepts as a package name.
-fn is_package_name(text: &str) -> bool {
-    !text.is_empty()
-        && text
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 #[cfg(test)]

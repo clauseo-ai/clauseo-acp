@@ -1,7 +1,7 @@
 //! Tests for the `dependencies` check. Each case is a scratch workspace with an `ARCHITECTURE.md`
 //! and path crates; crates under `vendor/` (excluded from the workspace) stand in for registry
-//! crates such as `tauri`, so the real `cargo metadata --offline` resolves the graph without the
-//! network. With no lockfile, cargo writes one inside the scratch dir.
+//! crates such as `tauri`, so the real `cargo tree --offline` resolves each crate's graph without
+//! the network. With no lockfile, cargo writes one inside the scratch dir.
 
 pub(super) mod planted;
 
@@ -10,6 +10,9 @@ use crate::scratch::Scratch;
 use crate::workspace;
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+pub(super) mod table;
+pub(super) mod tree;
 
 /// Numbers scratch dirs, so a case run twice in one process never shares a dir.
 static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -235,17 +238,17 @@ pub(super) fn workspace_crate_spelled_with_dash() -> Inspection {
     run_on(&workspace("dash-workspace", rows, "", &crates))
 }
 
-pub(super) fn crates_io_spelled_with_dash() -> Inspection {
-    let rows = "| `protocol` | events | serde | async_process | exists |\n";
+pub(super) fn crates_io_spelled_with_underscore() -> Inspection {
+    let rows = "| `protocol` | events | serde | async-process | exists |\n";
     let crates = [
         (
             "crates/protocol".to_owned(),
             manifest(
                 "clauseo-protocol",
-                "[dependencies]\nasync-process = { path = \"../../vendor/async-process\" }\n",
+                "[dependencies]\nasync_process = { path = \"../../vendor/async_process\" }\n",
             ),
         ),
-        vendor("async-process", ""),
+        vendor("async_process", ""),
     ];
     run_on(&workspace("dash-crates-io", rows, "", &crates))
 }
@@ -282,15 +285,6 @@ pub(super) fn clean_workspace_passes() -> Inspection {
         "[dependencies]\nserde = { path = \"../../vendor/serde\" }\n",
         vec![vendor("serde", "")],
     )
-}
-
-#[test]
-fn the_fix_of_a_failed_metadata_run_fits_its_cause() {
-    let lock = "error: the lock file /ws/Cargo.lock needs to be updated but --locked was passed to prevent this";
-    assert!(graph::failure_fix(lock).contains("cargo update --workspace"));
-    let offline = "error: no matching package named `serde` found\nAs a reminder, you're using offline mode (--offline)";
-    assert!(graph::failure_fix(offline).contains("cargo fetch --locked"));
-    assert!(graph::failure_fix("error: bad manifest").contains("fix what cargo reports"));
 }
 
 #[test]
@@ -428,15 +422,19 @@ fn an_entry_whose_line_cannot_be_found_says_so() {
         tauri(),
     ];
     let dir = workspace("unlocated", PROTOCOL_ROW, "", &crates);
-    let graph = graph::Graph::load(&dir, &["--offline"]).expect("cargo metadata runs");
+    let lines = graph::load(&dir, "clauseo-protocol", &["--offline"]).expect("cargo tree runs");
     let table = crates_table::load(&dir).expect("the table parses");
     let row = table.row("protocol").expect("the row is there");
-    let found = graph.violations(&graph::Crate {
-        package: "clauseo-protocol",
-        manifest: "crates/protocol/Cargo.toml",
-        text: "",
-        row,
-    });
+    let found = graph::violations(
+        &graph::Crate {
+            package: "clauseo-protocol",
+            manifest: "crates/protocol/Cargo.toml",
+            text: "",
+            row,
+            deps: None,
+        },
+        &lines,
+    );
     let printed: Vec<(u32, String)> = found.iter().map(|v| (v.line, v.message.clone())).collect();
     assert_eq!(
         printed,
@@ -445,4 +443,50 @@ fn an_entry_whose_line_cannot_be_found_says_so() {
             "clauseo-protocol depends on tauri, which ARCHITECTURE.md forbids (xtask found no line declaring `tauri` in crates/protocol/Cargo.toml, so this points at line 1)".to_owned()
         )]
     );
+}
+
+/// A workspace with protocol and desktop, both using a vendored `spec` whose optional `tauri`
+/// sits behind its `tauri` feature; `protocol_spec` and `desktop_spec` are their `spec` lines.
+fn spec_feature(name: &str, protocol_spec: &str, desktop_spec: &str) -> Inspection {
+    let rows = format!("{PROTOCOL_ROW}| `desktop` | shell | protocol, tauri | | exists |\n");
+    let crates = [
+        (
+            "crates/protocol".to_owned(),
+            manifest(
+                "clauseo-protocol",
+                &format!("[dependencies]\n{protocol_spec}\n"),
+            ),
+        ),
+        (
+            "crates/desktop".to_owned(),
+            manifest(
+                "clauseo-desktop",
+                &format!(
+                    "[dependencies]\n{desktop_spec}\nclauseo-protocol = {{ path = \"../protocol\" }}\n"
+                ),
+            ),
+        ),
+        vendor(
+            "spec",
+            "[dependencies]\ntauri = { path = \"../tauri\", optional = true }\n\n[features]\ntauri = [\"dep:tauri\"]\n",
+        ),
+        tauri(),
+    ];
+    run_on(&workspace(name, &rows, "", &crates))
+}
+
+pub(super) fn feature_turned_on_by_another_crate_passes() -> Inspection {
+    spec_feature(
+        "spec-desktop",
+        "spec = { path = \"../../vendor/spec\" }",
+        "spec = { path = \"../../vendor/spec\", features = [\"tauri\"] }",
+    )
+}
+
+pub(super) fn feature_turned_on_by_the_crate_itself() -> Inspection {
+    spec_feature(
+        "spec-protocol",
+        "spec = { path = \"../../vendor/spec\", features = [\"tauri\"] }",
+        "spec = { path = \"../../vendor/spec\" }",
+    )
 }

@@ -2,21 +2,25 @@
 //! `ARCHITECTURE.md`, and no crate depends on what its row lists under "Never depends on".
 //!
 //! A crate matches its row through `CratesTable::row_for_package`; one without a row fails at the
-//! table's last row, where the new row goes. The count is the crates matched to a row. A row whose
-//! crate does not exist is never looked at, whatever its status; a crate that exists is checked
-//! whatever its status says.
+//! table's last row, where the new row goes. The count is the crates matched to a row. The Status
+//! column must be true: an `exists` row with no workspace crate, and a `planned` row whose crate
+//! is a workspace member, each fail at the row. A crate that exists is checked whatever its
+//! status says.
 //!
 //! The Never entries that name a crate (ours, `clauseo-<name>`, or a crates.io package) are looked
-//! up in the graph cargo resolved, from one `cargo metadata --all-features` run with deps (see
-//! `graph.rs`): normal and build edges, for every target, optional dependencies included, directly
-//! or through other crates. The I/O words belong to the core-io check.
+//! up in each checked crate's own graph, from one `cargo tree -p <crate> --all-features` run per
+//! crate whose row bans a crate (see `graph.rs`): normal and build edges, for every target, the
+//! crate's optional dependencies included, directly or through other crates, and no feature that
+//! only another member turns on. The I/O words belong to the core-io check.
 
 mod graph;
 
-use crate::checks::crates_table::{self, CratesTable};
+use crate::checks::crates_table::{self, CrateRow, CratesTable, Status};
 use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
 use crate::violation::Violation;
-use crate::workspace::{Context, Member};
+use crate::workspace::{self, Context, Member, PackageDependencies};
+use std::collections::BTreeMap;
+use std::path::Path;
 
 /// Fails on a workspace crate without a row, and on a dependency its row forbids.
 pub(crate) const CHECK: StaticCheck = StaticCheck {
@@ -44,8 +48,8 @@ fn run(ctx: &Context) -> Inspection {
     )
 }
 
-/// The check, reading the resolved graph with `cargo metadata <graph_flags>` (after
-/// `--format-version 1 --all-features`), or matching rows only when `graph_flags` is `None`.
+/// The check, reading each checked crate's graph with `cargo tree` (`graph::tree_args`, then
+/// `graph_flags`), or matching rows only when `graph_flags` is `None`.
 fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
     let table = match crates_table::load(&ctx.root) {
         Ok(table) => table,
@@ -59,23 +63,22 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
             None => found.push(no_row(&table, member)),
         }
     }
-    let needs_graph = matched
+    found.extend(status_violations(&table, &matched));
+    let walked: Vec<_> = matched
         .iter()
-        .any(|(_, row)| row.never.iter().any(|entry| entry.package().is_some()));
-    if let (Some(flags), true) = (graph_flags, needs_graph) {
-        match graph::Graph::load(&ctx.root, flags) {
-            Ok(graph) => {
-                for (member, row) in &matched {
-                    let manifest = checks::join(&member.dir, "Cargo.toml");
-                    match checks::read_repo_file(&ctx.root, &manifest) {
-                        Ok(text) => found.extend(graph.violations(&graph::Crate {
-                            package: &member.name,
-                            manifest: &manifest,
-                            text: text.as_deref().unwrap_or_default(),
-                            row,
-                        })),
-                        Err(unreadable) => found.push(unreadable),
-                    }
+        .filter(|(_, row)| !graph::forbidden(row).is_empty())
+        .collect();
+    if let (Some(flags), false) = (graph_flags, walked.is_empty()) {
+        match declared_dependencies(&ctx.root) {
+            Ok(declared) => {
+                for (member, row) in walked {
+                    found.extend(walk(
+                        &ctx.root,
+                        member,
+                        row,
+                        declared.get(&member.name),
+                        flags,
+                    ));
                 }
             }
             Err(failed) => found.push(failed),
@@ -86,10 +89,99 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
     Inspection::new(matched.len(), found)
 }
 
+/// The dependencies of every workspace member, by package, from `cargo metadata --no-deps`.
+fn declared_dependencies(root: &Path) -> Result<BTreeMap<String, PackageDependencies>, Violation> {
+    let args = ["metadata", "--format-version", "1", "--no-deps"];
+    let stdout = checks::graph::cargo_stdout(root, &args)?;
+    workspace::parse_workspace_dependencies(&stdout).map_err(|error| {
+        violation(
+            checks::graph::ROOT_MANIFEST,
+            1,
+            format!("could not read the output of `cargo {}`: {error}", args.join(" ")),
+            "update xtask/src/workspace.rs to the JSON this cargo writes: this check reads each crate's dependencies from it",
+        )
+    })
+}
+
+/// The violations in the graph of `member`, whose row is `row` and whose declared dependencies
+/// are `deps`: its `cargo tree` run with `flags`, or the failure to read it.
+fn walk(
+    root: &Path,
+    member: &Member,
+    row: &CrateRow,
+    deps: Option<&PackageDependencies>,
+    flags: &[&str],
+) -> Vec<Violation> {
+    let manifest = checks::join(&member.dir, "Cargo.toml");
+    let text = match checks::read_repo_file(root, &manifest) {
+        Ok(text) => text.unwrap_or_default(),
+        Err(unreadable) => return vec![unreadable],
+    };
+    match graph::load(root, &member.name, flags) {
+        Ok(lines) => graph::violations(
+            &graph::Crate {
+                package: &member.name,
+                manifest: &manifest,
+                text: &text,
+                row,
+                deps,
+            },
+            &lines,
+        ),
+        Err(failed) => vec![failed],
+    }
+}
+
+/// One violation per row whose Status is wrong: `exists` with no workspace crate, or `planned`
+/// for a crate of `matched`, the members with the row each matched.
+fn status_violations(table: &CratesTable, matched: &[(&Member, &CrateRow)]) -> Vec<Violation> {
+    let mut found = Vec::new();
+    for row in &table.rows {
+        let member = matched
+            .iter()
+            .find(|(_, matched_row)| matched_row.line == row.line)
+            .map(|(member, _)| *member);
+        match (row.status, member) {
+            (Status::Exists, None) => found.push(violation(
+                crates_table::FILE,
+                row.line,
+                format!(
+                    "the row `{}` says `exists`, but no workspace crate is its package `{}`",
+                    row.name,
+                    crates_table::package_of(&row.name)
+                ),
+                "change the Status to `planned`: a row is `exists` only while its crate is a workspace member",
+            )),
+            (Status::Planned, Some(member)) => found.push(violation(
+                crates_table::FILE,
+                row.line,
+                format!(
+                    "the row `{}` says `planned`, but its crate `{}` ({}) is a workspace member",
+                    row.name,
+                    member.name,
+                    place(member)
+                ),
+                "change the Status to `exists`: the crate exists",
+            )),
+            _ => {}
+        }
+    }
+    found
+}
+
+/// Where `member` lives, for a message: its directory, or `at the repo root`.
+fn place(member: &Member) -> &str {
+    if member.dir.is_empty() {
+        "at the repo root"
+    } else {
+        member.dir.as_str()
+    }
+}
+
 /// The violation for `member`, which has no row: at the table's last row, where the new row goes.
 fn no_row(table: &CratesTable, member: &Member) -> Violation {
     let line = table.rows.last().map_or(1, |row| row.line);
-    let fix = match crates_table::row_name(&member.name).map(|name| name.replace('-', "_")) {
+    let fix = match crates_table::row_name(&member.name).map(crates_table::fold) {
         Some(name) => format!(
             "add a row `| `{name}` | <what it owns> | <crates it may depend on> | <crates it never depends on> | exists |` to the Crates table in ARCHITECTURE.md"
         ),
@@ -101,11 +193,7 @@ fn no_row(table: &CratesTable, member: &Member) -> Violation {
         format!(
             "workspace crate `{}` ({}) has no row in the Crates table",
             member.name,
-            if member.dir.is_empty() {
-                "at the repo root"
-            } else {
-                member.dir.as_str()
-            }
+            place(member)
         ),
         fix,
     )

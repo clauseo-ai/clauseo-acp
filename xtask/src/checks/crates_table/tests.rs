@@ -13,12 +13,10 @@ fn doc(rows: &str) -> String {
     format!("# Architecture\n\n## Crates\n\n{HEADER}{rows}\n## Seams\n\n| a | b |\n")
 }
 
-fn row(line: u32, name: &str, may: &[&str], never: Vec<Never>, status: Status) -> CrateRow {
+fn row(line: u32, name: &str, never: Vec<Never>, status: Status) -> CrateRow {
     CrateRow {
         line,
         name: name.to_owned(),
-        owns: "things".to_owned(),
-        may_depend_on: may.iter().map(|entry| (*entry).to_owned()).collect(),
         never,
         status,
     }
@@ -36,21 +34,18 @@ fn rows_keep_their_line_and_lose_their_backticks() {
             row(
                 7,
                 "xtask",
-                &["none of ours"],
                 vec![Never::External("tauri".into())],
                 Status::Exists
             ),
             row(
                 8,
                 "agents",
-                &["protocol", "process"],
                 vec![Never::External("tauri".into())],
                 Status::Planned
             ),
             row(
                 9,
                 "host",
-                &[],
                 vec![
                     Never::External("tauri".into()),
                     Never::External("tokio".into()),
@@ -80,7 +75,7 @@ fn a_row_of_the_table_bans_our_package_and_any_other_name_a_crates_io_one() {
 
 #[test]
 fn every_io_word_holds_the_crate_to_core_io_and_a_crate_name_does_not() {
-    let with = |never: Vec<Never>| row(1, "x", &[], never, Status::Planned).holds_core_io();
+    let with = |never: Vec<Never>| row(1, "x", never, Status::Planned).holds_core_io();
     assert!(with(vec![Never::Io(IoWord::Fs)]));
     assert!(with(vec![Never::Io(IoWord::Process)]));
     assert!(with(vec![Never::Io(IoWord::AnyIo)]));
@@ -209,8 +204,8 @@ fn a_missing_separator_and_an_empty_table_fail() {
 #[test]
 fn an_escaped_pipe_stays_in_its_cell_and_alignment_colons_are_a_separator() {
     let text = "## Crates\n\n| Crate | Owns | May depend on | Never depends on | Status |\n|:--|---|---|---|--:|\n| `x` | a \\| b | | | exists |\n";
-    let table = parse(text).expect("the table parses");
-    assert_eq!(table.rows[0].owns, "a | b");
+    assert_eq!(parse(text).map(|table| table.rows.len()), Ok(1));
+    assert_eq!(cells("| `x` | a \\| b | | | exists |")[1], "a | b");
 }
 
 #[test]
@@ -285,4 +280,81 @@ fn time_in_the_never_column_is_the_crates_io_crate() {
         table.rows[0].never,
         vec![Never::External("time".into()), Never::Io(IoWord::Fs)]
     );
+}
+
+#[test]
+fn a_row_after_a_blank_line_or_without_a_leading_pipe_fails_and_prose_after_the_table_passes() {
+    let blank =
+        doc("| `xtask` | things | | tauri | exists |\n\n| `desktop` | things | | | exists |\n");
+    assert_eq!(
+        parse(&blank),
+        Err(vec![violation(
+            FILE,
+            9,
+            "the Crates table ends at line 7, but line 9 after it holds a `|`, so the rows from there on are not read",
+            "remove the blank lines between line 7 and line 9, so the row joins the table, or move the text at line 9 out of the `## Crates` section: a blank line ends the table",
+        )])
+    );
+    let no_pipe =
+        doc("| `xtask` | things | | tauri | exists |\n`desktop` | things | | | exists |\n");
+    assert_eq!(
+        parse(&no_pipe).map_err(|found| found.iter().map(|v| v.line).collect::<Vec<_>>()),
+        Err(vec![8])
+    );
+    let prose = doc("| `xtask` | things | | tauri | exists |\n\nRows marked planned wait.\n");
+    assert_eq!(parse(&prose).map(|table| table.rows.len()), Ok(1));
+}
+
+#[test]
+fn clauseo_and_a_row_name_bans_that_row_s_crate() {
+    let text = doc(
+        "| `host` | things | | clauseo-process, clauseo-transport-ws | planned |\n\
+         | `process` | things | | | planned |\n\
+         | `transport_ws` | things | | | planned |\n",
+    );
+    let table = parse(&text).expect("the table parses");
+    assert_eq!(
+        table.row("host").map(|row| row.never.clone()),
+        Some(vec![
+            Never::Workspace("process".into()),
+            Never::Workspace("transport_ws".into()),
+        ])
+    );
+}
+
+#[test]
+fn a_row_name_written_with_a_dash_is_rejected_as_ours() {
+    let text = doc("| `host` | things | | transport-ws | planned |\n\
+         | `transport_ws` | things | | | planned |\n");
+    assert_eq!(
+        parse(&text),
+        Err(vec![violation(
+            FILE,
+            7,
+            "`transport-ws` in the Never depends on column of `host` is the row `transport_ws` written with `-` for `_`, and as written it would ban a crates.io package `transport-ws` instead of our `clauseo-transport_ws`",
+            "write `transport_ws` to ban our crate `clauseo-transport_ws`: xtask/src/checks/crates_table.rs rejects a name within one edit of a row name once `-` is read as `_`",
+        )])
+    );
+}
+
+#[test]
+fn one_edit_means_one_insert_delete_or_replace() {
+    use super::names::within_one_edit;
+    assert!(within_one_edit("agents", "agents"));
+    assert!(within_one_edit("agent", "agents"));
+    assert!(within_one_edit("agentss", "agents"));
+    assert!(within_one_edit("agbnts", "agents"));
+    assert!(within_one_edit("gents", "agents"));
+    assert!(!within_one_edit("agnet", "agents"));
+    assert!(!within_one_edit("tauri", "agents"));
+    assert!(!within_one_edit("tokio", "acp"));
+}
+
+#[test]
+fn a_ban_names_one_package_so_tauri_is_only_tauri() {
+    let text = doc("| `xtask` | things | | tauri | exists |\n");
+    let table = parse(&text).expect("the table parses");
+    let row = table.row("xtask").expect("the row is there");
+    let banned: Vec<String> = row.never.iter().filter_map(Never::package).collect();
+    assert_eq!(banned, ["tauri"]);
 }
