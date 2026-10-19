@@ -127,4 +127,6 @@ alone bans only the functions that read the clock. The banned paths are the path
 ## Decision records
 
 Changes to the event schema, error codes, a crate's public interface, the dependency table above or
-the Rust-to-webview boundary need a record in `docs/decisions/`.
+the Rust-to-webview boundary need a record in `docs/decisions/`. Anyone who adds a Tauri command, or
+anything else the webview can reach, reads `docs/decisions/0001-rust-webview-boundary.md` and
+`docs/threat-model.md` first.
