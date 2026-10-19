@@ -20,7 +20,32 @@ pub(crate) enum Program {
     /// pnpm. On Windows it may be `pnpm.cmd` (npm and corepack install that), so it is resolved
     /// by `pnpm_file`.
     Pnpm,
+    /// git, with the repository-local variables in `GIT_LOCAL_ENV` removed, so it finds the repo
+    /// from its working directory. Git hooks export some of them (`GIT_DIR`, `GIT_INDEX_FILE`),
+    /// and a test that runs git in a scratch dir from inside a hook would otherwise act on the
+    /// real repo.
+    Git,
 }
+
+/// The variables `git rev-parse --local-env-vars` lists (git 2.54): each points git at a
+/// particular repository, index or object store instead of the one found from the working dir.
+const GIT_LOCAL_ENV: [&str; 15] = [
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+];
 
 impl Program {
     /// The name people see: `cargo`, the named program, or `pnpm`.
@@ -29,6 +54,7 @@ impl Program {
             Program::Cargo => "cargo",
             Program::Named(name) => name,
             Program::Pnpm => "pnpm",
+            Program::Git => "git",
         }
     }
 
@@ -39,6 +65,13 @@ impl Program {
             }
             Program::Named(name) => Command::new(name),
             Program::Pnpm => Command::new(pnpm_file()),
+            Program::Git => {
+                let mut git = Command::new("git");
+                for name in GIT_LOCAL_ENV {
+                    git.env_remove(name);
+                }
+                git
+            }
         }
     }
 }
@@ -193,6 +226,20 @@ pub(crate) fn run_inherit(cmd: &Cmd, root: &Path) -> io::Result<bool> {
 mod tests {
     use super::*;
     use std::ffi::OsString;
+
+    #[test]
+    fn git_runs_without_the_variables_that_point_it_at_another_repo() {
+        let git = Program::Git.command();
+        let removed: Vec<&OsStr> = git
+            .get_envs()
+            .filter(|(_, value)| value.is_none())
+            .map(|(name, _)| name)
+            .collect();
+        for name in GIT_LOCAL_ENV {
+            assert!(removed.contains(&OsStr::new(name)), "{name} is removed");
+        }
+        assert_eq!(git.get_program(), "git");
+    }
 
     #[test]
     fn cmd_displays_its_program_then_its_args() {

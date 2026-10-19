@@ -8,7 +8,7 @@ use std::fs;
 #[test]
 fn only_the_markdown_files_of_a_git_repo_are_counted() {
     let dir = Scratch::new("docs-git-count");
-    let git = Cmd::new(Program::Named("git"), ["init", "-q"]);
+    let git = Cmd::new(Program::Git, ["init", "-q"]);
     let quiet = process::run_quiet(&git, &dir).expect("git runs");
     assert!(quiet.success, "git init failed: {}", quiet.stderr);
     fs::write(dir.join("NOTES.md"), "# Notes\n").expect("write a doc");

@@ -175,7 +175,7 @@ fn split_nul(text: &str) -> impl Iterator<Item = String> + '_ {
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
-    let cmd = Cmd::new(Program::Named("git"), args);
+    let cmd = Cmd::new(Program::Git, args);
     let quiet = process::run_quiet(&cmd, root).map_err(|e| format!("could not run git: {e}"))?;
     if !quiet.success {
         return Err(format!("`{cmd}` failed: {}", quiet.stderr.trim()));
