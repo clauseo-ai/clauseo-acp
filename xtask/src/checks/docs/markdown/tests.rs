@@ -1,327 +1,85 @@
-//! Tests of the Markdown reader: fences, code spans, links and reference definitions, with lines.
+//! Tests of what the walk over `pulldown-cmark`'s events keeps, and the lines it gives each item.
+//! How Markdown parses is the parser's business; these pin the walk.
 
 use super::*;
 
-/// The spans of `text` as `(line, content)`.
-fn spans(text: &str) -> Vec<(u32, String)> {
+/// The spans of `text` as `line: text`.
+fn spans(text: &str) -> Vec<String> {
     scan(text)
         .spans
         .into_iter()
-        .map(|span| (span.line, span.text))
+        .map(|span| format!("{}: {}", span.line, span.text))
         .collect()
 }
 
-/// The link destinations of `text` as `(line, target)`.
-fn targets(text: &str) -> Vec<(u32, String)> {
+/// The links of `text` as `line: target`.
+fn links(text: &str) -> Vec<String> {
     scan(text)
         .links
         .into_iter()
-        .map(|link| (link.line, link.target))
+        .map(|link| format!("{}: {}", link.line, link.target))
         .collect()
 }
 
-#[test]
-fn spans_and_links_carry_their_line_numbers() {
-    assert_eq!(
-        spans("See `a` and [x](b.md).\n\nNext `c`\n"),
-        [(1, "a".to_owned()), (3, "c".to_owned())]
-    );
-    assert_eq!(
-        targets("See `a` and [x](b.md).\n"),
-        [(1, "b.md".to_owned())]
-    );
-}
-
-#[test]
-fn a_fenced_block_hides_its_spans_and_links_and_keeps_its_lines() {
-    let text = "```\n`crates/x`\n[a](b.md)\n```\nafter `d`\n";
-    assert_eq!(spans(text), [(5, "d".to_owned())]);
-    assert_eq!(targets(text), []);
-    let fenced: Vec<(u32, String)> = scan(text)
-        .code
-        .into_iter()
-        .map(|line| (line.line, line.text))
-        .collect();
-    assert_eq!(
-        fenced,
-        [(2, "`crates/x`".to_owned()), (3, "[a](b.md)".to_owned())]
-    );
-}
-
-#[test]
-fn a_tilde_fence_closes_only_with_a_tilde_fence() {
-    assert_eq!(spans("~~~\n```\n~~~\n`x`\n"), [(4, "x".to_owned())]);
-}
-
-#[test]
-fn a_fence_closes_only_with_a_run_at_least_as_long_as_its_opening() {
-    assert_eq!(spans("````\n```\n````\n`x`\n"), [(4, "x".to_owned())]);
-    assert_eq!(spans("````\n`y`\n`````\n`x`\n"), [(4, "x".to_owned())]);
-}
-
-#[test]
-fn an_unclosed_fence_runs_to_the_end_of_the_file() {
-    assert_eq!(spans("```\n`x`\n"), []);
-}
-
-#[test]
-fn a_backtick_fence_with_a_backtick_in_its_info_string_is_text() {
-    assert_eq!(scan("```a`b\n").code, []);
-}
-
-#[test]
-fn a_span_can_be_opened_by_several_backticks_and_hold_one() {
-    assert_eq!(spans("``a ` b``"), [(1, "a ` b".to_owned())]);
-    assert_eq!(spans("``crates/x``"), [(1, "crates/x".to_owned())]);
-}
-
-#[test]
-fn an_unmatched_backtick_is_text() {
-    assert_eq!(spans("a ` b"), []);
-    assert_eq!(spans("a `` b ` c"), []);
-}
-
-#[test]
-fn an_escaped_backtick_does_not_open_a_span() {
-    assert_eq!(spans("\\`a` b"), []);
-}
-
-#[test]
-fn a_span_may_run_over_lines_of_its_paragraph() {
-    assert_eq!(spans("`a\nb`\n"), [(1, "a b".to_owned())]);
-}
-
-#[test]
-fn a_span_is_trimmed_and_its_line_breaks_become_spaces() {
-    assert_eq!(spans("`  a  `"), [(1, "a".to_owned())]);
-}
-
-#[test]
-fn a_span_in_an_html_comment_counts() {
-    assert_eq!(spans("<!-- `crates/x/` -->"), [(1, "crates/x/".to_owned())]);
-}
-
-#[test]
-fn escaped_brackets_are_text_not_links() {
-    assert_eq!(targets("\\[x](y.md) [z\\](w.md)"), []);
-}
-
-#[test]
-fn a_bracket_inside_a_span_opens_no_link() {
-    assert_eq!(targets("`[`](x.md)"), []);
-}
-
-#[test]
-fn link_titles_angle_brackets_and_balanced_parentheses_are_read() {
-    assert_eq!(
-        targets("[a](b.md \"t\") [c](<d e.md>) [f](g(1).md 'x') [h](i.md)"),
-        [
-            (1, "b.md".to_owned()),
-            (1, "d e.md".to_owned()),
-            (1, "g(1).md".to_owned()),
-            (1, "i.md".to_owned()),
-        ]
-    );
-}
-
-#[test]
-fn an_image_is_a_link_and_an_anchor_stays_in_the_target() {
-    assert_eq!(
-        targets("![alt](img.png) [x](y.md#z)"),
-        [(1, "img.png".to_owned()), (1, "y.md#z".to_owned())]
-    );
-}
-
-#[test]
-fn a_link_with_brackets_in_its_text_is_one_link_at_its_opening_bracket() {
-    assert_eq!(targets("x\n[a [b] c](d.md)"), [(2, "d.md".to_owned())]);
-}
-
-#[test]
-fn text_that_is_not_an_inline_link_is_no_link() {
-    assert_eq!(targets("[x](y.md"), []);
-    assert_eq!(targets("[x] (y.md)"), []);
-    assert_eq!(targets("[x](y.md \"unclosed)"), []);
-}
-
-#[test]
-fn reference_definitions_are_links_except_footnotes_and_indented_lines() {
-    let text = "[one]: a.md\n[four]: <c d.md> \"title\"\n[^two]: note\n    [three]: b.md\n";
-    assert_eq!(
-        targets(text),
-        [(1, "a.md".to_owned()), (2, "c d.md".to_owned())]
-    );
-}
-
-#[test]
-fn a_reference_definition_needs_a_label_with_text() {
-    assert_eq!(targets("[ ]: a.md\n"), []);
-}
-
-#[test]
-fn a_definition_needs_a_destination_and_at_most_a_title_after_it() {
-    assert_eq!(targets("[Note]: this is a note\n"), []);
-    assert_eq!(
-        targets("[Note]: a.md \"the title\"\n"),
-        [(1, "a.md".to_owned())]
-    );
-    assert_eq!(targets("[Note]: a.md (title)\n"), [(1, "a.md".to_owned())]);
-    assert_eq!(targets("[Note]: a.md 'it'\n"), [(1, "a.md".to_owned())]);
-}
-
-#[test]
-fn a_definition_does_not_continue_a_paragraph_but_follows_a_heading() {
-    assert_eq!(targets("Some text\n[x]: a.md\n"), []);
-    assert_eq!(targets("# Title\n[x]: a.md\n"), [(2, "a.md".to_owned())]);
-    assert_eq!(
-        targets("[x]: a.md\n[y]: b.md\nmore text\n[z]: c.md\n"),
-        [(1, "a.md".to_owned()), (2, "b.md".to_owned())]
-    );
-}
-
-#[test]
-fn a_span_on_a_heading_line_is_read_on_its_own() {
-    assert_eq!(
-        spans("# `crates/x`\n`y`\n"),
-        [(1, "crates/x".to_owned()), (2, "y".to_owned())]
-    );
-    assert_eq!(spans("#hashtag `z`\n"), [(1, "z".to_owned())]);
-}
-
-/// The code lines of `text` as `(line, text)`.
-fn code(text: &str) -> Vec<(u32, String)> {
+/// The code lines of `text` as `line: text`.
+fn code(text: &str) -> Vec<String> {
     scan(text)
         .code
         .into_iter()
-        .map(|line| (line.line, line.text))
+        .map(|line| format!("{}: {}", line.line, line.text))
         .collect()
 }
 
 #[test]
-fn an_indented_code_block_after_a_blank_line_is_code_and_its_end_is_text() {
-    let text = "Text.\n\n    cargo xtask x\n    more\n\n    gap\nafter `s`\n";
+fn a_span_is_at_the_line_of_its_backticks_with_its_line_break_a_space() {
+    assert_eq!(spans("# T\n\nsee `a\nb` and `c`\n"), ["3: a b", "4: c"]);
+}
+
+#[test]
+fn inline_links_images_and_definitions_are_read_and_reference_uses_are_not() {
+    let text = "[a](x.md) ![i](y.png)\n\n[use][d] [d]\n\n[d]: z.md\n";
+    assert_eq!(links(text), ["5: z.md", "1: x.md", "1: y.png"]);
+}
+
+#[test]
+fn a_definition_is_at_its_label_s_line_and_an_unused_one_is_read() {
+    assert_eq!(links("Text.\n\n[g]:\n  nope.md\n"), ["3: nope.md"]);
+}
+
+#[test]
+fn code_lines_keep_their_file_lines_in_fences_quotes_and_items() {
+    assert_eq!(code("```\na\n\nb\n```\n"), ["2: a", "3: ", "4: b"]);
     assert_eq!(
-        code(text),
-        [
-            (3, "    cargo xtask x".to_owned()),
-            (4, "    more".to_owned()),
-            (6, "    gap".to_owned()),
-        ]
+        code("- item\n\n  > ```\n  > a\n  > b\n  > ```\n"),
+        ["4: a", "5: b"]
     );
-    assert_eq!(spans(text), [(7, "s".to_owned())]);
+    assert_eq!(code("Text.\n\n\ta\n\tb\n"), ["3: a", "4: b"]);
 }
 
 #[test]
-fn an_indented_line_that_continues_a_paragraph_is_text() {
-    assert_eq!(spans("text\n    `x`\n"), [(2, "x".to_owned())]);
-    assert_eq!(code("text\n    `x`\n"), []);
+fn html_tags_and_comments_are_read_at_their_lines() {
+    let text = "<div>\n<a href=\"x.md\">x</a>\n<!-- `p`\n`q` [l](c.md) -->\n</div>\n";
+    let found = scan(text);
+    let spans: Vec<(u32, &str)> = found
+        .spans
+        .iter()
+        .map(|s| (s.line, s.text.as_str()))
+        .collect();
+    assert_eq!(spans, [(3, "p"), (4, "q")]);
+    let links: Vec<(u32, &str)> = found
+        .links
+        .iter()
+        .map(|l| (l.line, l.target.as_str()))
+        .collect();
+    assert_eq!(links, [(2, "x.md"), (4, "c.md")]);
 }
 
 #[test]
-fn list_items_and_block_quotes_hold_spans_at_their_lines() {
+fn an_inline_tag_is_read_and_text_in_code_is_not() {
+    assert_eq!(links("See <img src='a.png'> here.\n"), ["1: a.png"]);
     assert_eq!(
-        spans("- `a`\n- `b`\n\n> `q`\n"),
-        [
-            (1, "a".to_owned()),
-            (2, "b".to_owned()),
-            (4, "q".to_owned()),
-        ]
+        links("```\n<a href=\"x.md\">\n[l](y.md)\n```\n"),
+        Vec::<String>::new()
     );
-}
-
-#[test]
-fn a_fence_in_a_block_quote_holds_its_lines_as_code() {
-    assert_eq!(code("> ```\n> `x`\n> ```\n"), [(2, "> `x`".to_owned())]);
-}
-
-#[test]
-fn a_fence_indented_three_spaces_opens_and_four_does_not() {
-    assert_eq!(code("   ```\n[x](y.md)\n   ```\n").len(), 1);
-    assert_eq!(targets("    ```\n[x](y.md)\n"), [(2, "y.md".to_owned())]);
-}
-
-#[test]
-fn a_fence_in_a_list_item_opens_at_the_item_text() {
-    let text = "1. item\n\n   ```sh\n   cargo xtask check\n   ```\n";
-    assert_eq!(code(text), [(4, "   cargo xtask check".to_owned())]);
-}
-
-#[test]
-fn a_fence_can_open_on_a_list_marker_line() {
-    assert_eq!(
-        code("- ```sh\n  cargo xtask check\n  ```\n"),
-        [(2, "  cargo xtask check".to_owned())]
-    );
-}
-
-#[test]
-fn html_links_read_href_of_a_and_src_of_img() {
-    assert_eq!(
-        targets("<a href=\"a.md\">x</a> <a href='b.md' title=\"t\">y</a> <a href=c.md>z</a>"),
-        [
-            (1, "a.md".to_owned()),
-            (1, "b.md".to_owned()),
-            (1, "c.md".to_owned())
-        ]
-    );
-    assert_eq!(
-        targets("<img alt=\"x\" src=\"p.png\"/> <img src='q.png'>"),
-        [(1, "p.png".to_owned()), (1, "q.png".to_owned())]
-    );
-}
-
-#[test]
-fn other_tags_and_attributes_are_no_link() {
-    assert_eq!(targets("<a name=\"n\">x</a> <abbr href=\"n.md\">"), []);
-    assert_eq!(targets("<a href=\"\">x</a> <a href=\"unclosed"), []);
-    assert_eq!(targets("<https://example.com/x>"), []);
-}
-
-#[test]
-fn a_definition_destination_may_be_on_the_next_line() {
-    assert_eq!(
-        targets("[g]:\n  nope.md \"t\"\n"),
-        [(1, "nope.md".to_owned())]
-    );
-    assert_eq!(targets("[g]:\n"), []);
-    assert_eq!(targets("[g]:\n  nope.md extra\n"), []);
-}
-
-#[test]
-fn a_closing_fence_indented_four_spaces_is_code_and_does_not_close() {
-    let text = "~~~\n    ~~~\n~~~\n[x](nope.md)\n";
-    assert_eq!(code(text), [(2, "    ~~~".to_owned())]);
-    assert_eq!(targets(text), [(4, "nope.md".to_owned())]);
-}
-
-#[test]
-fn an_unclosed_fence_in_a_block_quote_ends_with_the_quote() {
-    assert_eq!(
-        targets("> ~~~\n> code\n\n[x](nope.md)\n"),
-        [(4, "nope.md".to_owned())]
-    );
-    assert_eq!(code("> ~~~\n> code\n"), [(2, "> code".to_owned())]);
-}
-
-#[test]
-fn an_unclosed_fence_in_a_list_item_ends_with_the_item() {
-    assert_eq!(
-        targets("- ~~~\n  code\n\ntext [x](nope.md)\n"),
-        [(4, "nope.md".to_owned())]
-    );
-    assert_eq!(targets("- ~~~\n  [x](nope.md)\n"), []);
-}
-
-#[test]
-fn a_definition_after_a_list_item_quote_setext_or_rule_is_read() {
-    assert_eq!(targets("- text\n- [g]: a.md\n"), [(2, "a.md".to_owned())]);
-    assert_eq!(targets("Text\n> [g]: a.md\n"), [(2, "a.md".to_owned())]);
-    assert_eq!(targets("Title\n---\n[g]: a.md\n"), [(3, "a.md".to_owned())]);
-    assert_eq!(targets("Title\n===\n[g]: a.md\n"), [(3, "a.md".to_owned())]);
-    assert_eq!(targets("Text\n***\n[g]: a.md\n"), [(3, "a.md".to_owned())]);
-}
-
-#[test]
-fn a_fence_after_a_lazy_item_line_is_a_top_level_fence() {
-    assert_eq!(targets("- a\n```\n[x](nope.md)\n"), []);
+    assert_eq!(spans("```\n`a`\n```\n"), Vec::<String>::new());
 }

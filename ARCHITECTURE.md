@@ -2,7 +2,7 @@
 
 Clauseo runs coding agents (Claude Code, Codex) for lawyers, on the lawyer's machine, inside an
 OS sandbox, with every matter versioned so any step can be undone. This file is the map. Detail lives
-in each crate's `//!` contract. Keep this file under 300 lines.
+in each crate's `//!` contract. Keep this file to at most 300 lines.
 
 ## Bird's-eye view
 
@@ -44,9 +44,8 @@ Clauseo app process (Rust)
 
 ## Crates
 
-Each Rust crate lives in a folder under `crates/` named after its row below, and its package is
-that name with a `clauseo-` prefix (`crates/desktop` is `clauseo-desktop`); `xtask` keeps its own
-folder and name. The frontend is a pnpm workspace under `ui/`. `cargo xtask check` reads the table
+Rust crates live in `crates/<name>`, package `clauseo-<name>`. The frontend is a pnpm workspace
+under `ui/`. `cargo xtask check` reads the table
 below and fails if a crate depends on a crate in its "Never depends on" column, directly or through
 another crate. Rows marked `planned` are checked once the crate exists. Every crate that exists
 must have a row.
@@ -75,8 +74,8 @@ must have a row.
 | `mcp` | The `clauseo-mcp` sidecar: research tools, Word tracked changes, citation checks, views | legal, citations, stetdoc-core, rmcp | tauri | planned |
 
 The broker (keys, cache and limits for outside services, plus the socket the sandboxed sidecar
-reaches) is a module of `host`, not a crate. Frontend packages: `ui/app` (exists), and components
-and bindings packages under `ui/` (planned). Nothing in `ui/` imports Tauri APIs outside
+reaches) is a module of `host`, not a crate. Frontend packages: `ui/app` (exists), ui/components
+and ui/bindings (planned). Nothing in `ui/` imports Tauri APIs outside
 `ui/app/src/transport/`.
 
 "fs", "process", "any I/O" and "clock" in the "Never depends on" column mean the standard

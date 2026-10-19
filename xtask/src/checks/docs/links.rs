@@ -1,28 +1,29 @@
 //! Relative links: each link destination that is not an absolute URL, a pure `#anchor` or a link
 //! into the `clauseo-acp-private` folder beside the repo must resolve to a file or folder in the
-//! repo.
+//! repo: a file or folder git lists (see `Tree`), named with the same case. `..` is resolved
+//! against the linking file's folder, and a link that climbs above the root fails.
 
 use super::markdown::Link;
+use super::tree::Tree;
 use crate::checks::violation;
 use crate::violation::Violation;
-use std::path::Path;
 
 /// The folder beside the repo that may be absent. Links into it are not checked.
 const PRIVATE_FOLDER: &str = "clauseo-acp-private";
 
 /// The broken relative links of `file` (repo-relative), one violation each, at the link's line.
-pub(super) fn problems(root: &Path, file: &str, links: &[Link]) -> Vec<Violation> {
+pub(super) fn problems(tree: &Tree, file: &str, links: &[Link]) -> Vec<Violation> {
     links
         .iter()
-        .filter_map(|link| problem(root, file, link))
+        .filter_map(|link| problem(tree, file, link))
         .collect()
 }
 
 /// The violation for `link` when it is a relative link that does not resolve inside the repo.
-fn problem(root: &Path, file: &str, link: &Link) -> Option<Violation> {
+fn problem(tree: &Tree, file: &str, link: &Link) -> Option<Violation> {
     let path = relative_path(&link.target)?;
     match resolve(dir_of(file), &percent_decode(path)) {
-        Target::Inside(rel) if root.join(&rel).exists() => None,
+        Target::Inside(rel) if tree.contains(&rel) => None,
         Target::Inside(rel) => Some(violation(
             file,
             link.line,
@@ -39,13 +40,14 @@ fn problem(root: &Path, file: &str, link: &Link) -> Option<Violation> {
     }
 }
 
-/// The path part of a link destination, anchor cut, or `None` for a destination this check does
-/// not resolve: an absolute URL (any scheme, or `//host`), a pure `#anchor`, or an empty path.
+/// The path part of a link destination, cut at the first `?` or `#` (a query such as `?plain=1`,
+/// or an anchor), or `None` for a destination this check does not resolve: an absolute URL (any
+/// scheme, or `//host`), a pure `#anchor`, or an empty path.
 fn relative_path(target: &str) -> Option<&str> {
     if target.starts_with('#') || target.starts_with("//") || has_scheme(target) {
         return None;
     }
-    let path = target.split_once('#').map_or(target, |(path, _)| path);
+    let path = target.split(['?', '#']).next().unwrap_or_default();
     (!path.is_empty()).then_some(path)
 }
 

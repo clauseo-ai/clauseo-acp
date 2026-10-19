@@ -22,9 +22,13 @@ fn absolute_urls_pure_anchors_and_empty_destinations_are_not_checked() {
 }
 
 #[test]
-fn the_anchor_is_cut_and_the_path_kept() {
+fn the_anchor_or_query_is_cut_at_whichever_comes_first_and_the_path_kept() {
     assert_eq!(path("nope.md#x"), Some("nope.md"));
     assert_eq!(path("docs/a.md"), Some("docs/a.md"));
+    assert_eq!(path("docs/a.md?plain=1"), Some("docs/a.md"));
+    assert_eq!(path("docs/a.md?plain=1#L3"), Some("docs/a.md"));
+    assert_eq!(path("docs/a.md#x?y"), Some("docs/a.md"));
+    assert_eq!(path("?plain=1"), None);
 }
 
 #[test]

@@ -9,6 +9,9 @@ use std::fmt::Write;
 use std::fs;
 use std::path::Path;
 
+mod commands;
+pub(super) use commands::*;
+
 /// A valid `AGENTS.md`.
 const AGENTS: &str = "# Agents\n\nRules for coding agents.\n";
 
@@ -24,8 +27,9 @@ const CLAUDE: &str = "@AGENTS.md\n";
 
 /// Builds a scratch repo named after `case` with `files` (each a repo-relative path and its text)
 /// and the three required files, valid unless `files` gives one, then inspects the `.md` files.
-/// `omit` names a required file that is not written at all.
-fn build(case: &str, files: Vec<(&str, String)>, omit: Option<&str>) -> Inspection {
+/// `omit` names a required file that is not written at all. `local` files are written but not
+/// listed, as git leaves out an ignored file.
+fn build(case: &str, files: Vec<(&str, String)>, omit: Option<&str>, local: &[&str]) -> Inspection {
     let dir = Scratch::new(&format!("docs-{case}"));
     let mut all = vec![
         ("AGENTS.md", AGENTS.to_owned()),
@@ -42,6 +46,9 @@ fn build(case: &str, files: Vec<(&str, String)>, omit: Option<&str>) -> Inspecti
         write(&dir, name, &text);
         names.push(name.to_owned());
     }
+    for name in local {
+        write(&dir, name, "# Local\n");
+    }
     names.sort();
     inspect(&dir, &names)
 }
@@ -56,7 +63,7 @@ fn write(dir: &Path, name: &str, text: &str) {
 
 /// `build` with every required file written.
 fn docs(case: &str, files: Vec<(&str, String)>) -> Inspection {
-    build(case, files, None)
+    build(case, files, None, &[])
 }
 
 /// `lines` lines of `"line N"`, each ending in a newline.
@@ -113,44 +120,10 @@ pub(super) fn path_in_html_comment() -> Inspection {
     )
 }
 
-pub(super) fn double_backtick_span() -> Inspection {
-    docs(
-        "double-backtick-span",
-        vec![("GUIDE.md", "Use ``crates/gone/x.rs`` here.\n".to_owned())],
-    )
-}
-
 pub(super) fn unplanned_crate_path() -> Inspection {
     docs(
         "unplanned-crate-path",
         vec![("GUIDE.md", "See `crates/store/src/lib.rs`.\n".to_owned())],
-    )
-}
-
-pub(super) fn unknown_xtask_subcommand() -> Inspection {
-    docs(
-        "unknown-xtask-subcommand",
-        vec![("GUIDE.md", "Run `cargo xtask frobnicate` now.\n".to_owned())],
-    )
-}
-
-pub(super) fn unknown_xtask_flag() -> Inspection {
-    docs(
-        "unknown-xtask-flag",
-        vec![(
-            "GUIDE.md",
-            "Run `cargo xtask check --frobnicate`.\n".to_owned(),
-        )],
-    )
-}
-
-pub(super) fn unknown_xtask_command_in_fence() -> Inspection {
-    docs(
-        "unknown-xtask-command-in-fence",
-        vec![(
-            "GUIDE.md",
-            "```sh\ncargo xtask frobnicate\n```\n".to_owned(),
-        )],
     )
 }
 
@@ -180,7 +153,7 @@ pub(super) fn claude_extra_line() -> Inspection {
 }
 
 pub(super) fn missing_agents() -> Inspection {
-    build("missing-agents", Vec::new(), Some("AGENTS.md"))
+    build("missing-agents", Vec::new(), Some("AGENTS.md"), &[])
 }
 
 pub(super) fn clean_docs_pass() -> Inspection {
@@ -190,6 +163,7 @@ pub(super) fn clean_docs_pass() -> Inspection {
         A [matter link](../clauseo-acp-private/START-HERE.md) is not checked.\n\n\
         The planned crate: `crates/protocol/src/lib.rs` and `crates/protocol/`.\n\n\
         The real paths: `xtask/src/main.rs`, `docs/notes.md`, `.github/`.\n\n\
+        A [query](docs/notes.md?plain=1) and [a climb back in](docs/../xtask/src/main.rs).\n\n\
         Run `cargo xtask check --quick`, `cargo xtask check --help`, or\n\
         `cargo xtask buildtime`.\n\n\
         <!-- a comment with `xtask/` in it -->\n\n\
@@ -225,41 +199,6 @@ pub(super) fn claude_without_newline_passes() -> Inspection {
     )
 }
 
-pub(super) fn escaped_brackets_and_fences_pass() -> Inspection {
-    let guide = "Not a link: \\[text](gone.md) and [text\\](gone.md).\n\n\
-        Not a span: \\`crates/gone/x` here.\n\n\
-        ````md\n\
-        ```\n\
-        [in a fence](gone.md) `crates/gone/x`\n\
-        ```\n\
-        ````\n";
-    docs("escaped-brackets", vec![("GUIDE.md", guide.to_owned())])
-}
-
-pub(super) fn indented_four_fence_is_code_not_a_fence() -> Inspection {
-    docs(
-        "indented-four-fence",
-        vec![("GUIDE.md", "Text.\n\n    ```\n[x](nope.md)\n".to_owned())],
-    )
-}
-
-pub(super) fn fence_indented_three_hides_its_contents() -> Inspection {
-    docs(
-        "fence-indented-three",
-        vec![("GUIDE.md", "   ```\n[x](nope.md)\n   ```\n".to_owned())],
-    )
-}
-
-pub(super) fn fence_in_list_item_hides_its_contents() -> Inspection {
-    docs(
-        "fence-in-list-item",
-        vec![(
-            "GUIDE.md",
-            "- item\n\n  ```\n  [x](nope.md)\n  ```\n".to_owned(),
-        )],
-    )
-}
-
 pub(super) fn html_link_to_a_missing_file_fails() -> Inspection {
     docs(
         "html-link",
@@ -271,97 +210,6 @@ pub(super) fn html_image_to_a_missing_file_fails() -> Inspection {
     docs(
         "html-image",
         vec![("GUIDE.md", "<img alt=\"x\" src='nope.png'>\n".to_owned())],
-    )
-}
-
-pub(super) fn definition_destination_on_next_line_fails() -> Inspection {
-    docs(
-        "definition-next-line",
-        vec![("GUIDE.md", "See [g].\n\n[g]:\n  nope.md\n".to_owned())],
-    )
-}
-
-pub(super) fn definition_in_list_item_fails() -> Inspection {
-    docs(
-        "definition-list-item",
-        vec![("GUIDE.md", "- [g]: nope.md\n".to_owned())],
-    )
-}
-
-pub(super) fn definition_in_block_quote_fails() -> Inspection {
-    docs(
-        "definition-block-quote",
-        vec![("GUIDE.md", "> [g]: nope.md\n".to_owned())],
-    )
-}
-
-pub(super) fn prompt_command_in_fence_fails() -> Inspection {
-    docs(
-        "prompt-command",
-        vec![(
-            "GUIDE.md",
-            "```sh\n$ cargo xtask frobnicate\n```\n".to_owned(),
-        )],
-    )
-}
-
-pub(super) fn env_assignment_command_in_span_fails() -> Inspection {
-    docs(
-        "env-command",
-        vec![(
-            "GUIDE.md",
-            "Run `RUST_LOG=1 cargo xtask frobnicate`.\n".to_owned(),
-        )],
-    )
-}
-
-pub(super) fn chained_command_in_span_fails() -> Inspection {
-    docs(
-        "chained-command",
-        vec![(
-            "GUIDE.md",
-            "Run `cargo xtask check && cargo xtask frobnicate`.\n".to_owned(),
-        )],
-    )
-}
-
-pub(super) fn indented_code_command_fails() -> Inspection {
-    docs(
-        "indented-code-command",
-        vec![(
-            "GUIDE.md",
-            "Text.\n\n    cargo xtask frobnicate\n".to_owned(),
-        )],
-    )
-}
-
-pub(super) fn list_marker_fence_command_fails() -> Inspection {
-    docs(
-        "list-marker-fence",
-        vec![(
-            "GUIDE.md",
-            "- ```sh\n  cargo xtask frobnicate\n  ```\n".to_owned(),
-        )],
-    )
-}
-
-pub(super) fn help_with_an_unknown_subcommand_fails() -> Inspection {
-    docs(
-        "help-unknown-subcommand",
-        vec![(
-            "GUIDE.md",
-            "Run `cargo xtask --help frobnicate`.\n".to_owned(),
-        )],
-    )
-}
-
-pub(super) fn help_with_an_unknown_flag_fails() -> Inspection {
-    docs(
-        "help-unknown-flag",
-        vec![(
-            "GUIDE.md",
-            "Run `cargo xtask check --help --frobnicate`.\n".to_owned(),
-        )],
     )
 }
 
@@ -379,108 +227,122 @@ pub(super) fn markdown_extension_is_checked() -> Inspection {
     )
 }
 
-pub(super) fn indented_closing_fence_does_not_close() -> Inspection {
+/// `GUIDE.md` holding `text`, beside the file `xtask/src/main.rs`.
+fn guide(case: &str, text: &str) -> Inspection {
     docs(
-        "indented-closing-fence",
-        vec![("GUIDE.md", "~~~\n    ~~~\n~~~\n[x](nope.md)\n".to_owned())],
+        case,
+        vec![
+            ("GUIDE.md", text.to_owned()),
+            ("xtask/src/main.rs", "fn main() {}\n".to_owned()),
+        ],
     )
 }
 
-pub(super) fn quoted_fence_ends_with_its_quote() -> Inspection {
+pub(super) fn query_is_cut_before_the_lookup() -> Inspection {
+    let text = "Raw: [real](docs/real.md?plain=1), [line](docs/real.md?plain=1#L2).\n\
+        Gone: [nope](nope.md?plain=1).\n";
     docs(
-        "quoted-fence",
-        vec![("GUIDE.md", "> ~~~\n> code\n\n[x](nope.md)\n".to_owned())],
+        "query-cut",
+        vec![
+            ("GUIDE.md", text.to_owned()),
+            ("docs/real.md", "# Real\n".to_owned()),
+        ],
     )
 }
 
-pub(super) fn list_item_fence_ends_with_its_item() -> Inspection {
+pub(super) fn dot_dot_path_and_link_fail() -> Inspection {
+    guide("dot-dot", "See `crates/../../x` and [x](crates/../../x).\n")
+}
+
+pub(super) fn case_mismatch_fails() -> Inspection {
     docs(
-        "list-item-fence",
-        vec![(
-            "GUIDE.md",
-            "- ~~~\n  code\n\ntext [x](nope.md)\n".to_owned(),
-        )],
+        "case-mismatch",
+        vec![
+            (
+                "GUIDE.md",
+                "See [x](docs/REAL.md) and `docs/REAL.md`.\n".to_owned(),
+            ),
+            ("docs/real.md", "# Real\n".to_owned()),
+        ],
     )
 }
 
-pub(super) fn definition_after_a_list_item_fails() -> Inspection {
-    docs(
-        "definition-after-list-item",
-        vec![("GUIDE.md", "- text\n- [g]: nope.md\n".to_owned())],
+pub(super) fn unlisted_local_file_fails() -> Inspection {
+    let files = vec![(
+        "GUIDE.md",
+        "See [x](local.md) and `docs/local.md`.\n".to_owned(),
+    )];
+    build(
+        "unlisted-local",
+        files,
+        None,
+        &["local.md", "docs/local.md"],
     )
 }
 
-pub(super) fn definition_after_a_quote_line_fails() -> Inspection {
-    docs(
-        "definition-after-quote",
-        vec![("GUIDE.md", "Text\n> [g]: nope.md\n".to_owned())],
+pub(super) fn repeats_on_one_line_are_reported_once() -> Inspection {
+    guide(
+        "repeats",
+        "See [a](nope.md), [b](gone.md) and [c](nope.md).\n",
     )
 }
 
-pub(super) fn definition_after_a_setext_heading_fails() -> Inspection {
-    docs(
-        "definition-after-setext",
-        vec![("GUIDE.md", "Title\n---\n[g]: nope.md\n".to_owned())],
+pub(super) fn path_in_inline_html_comment() -> Inspection {
+    guide(
+        "inline-comment",
+        "Text <!-- keep `crates/gone/` out --> more.\n",
     )
 }
 
-pub(super) fn definition_after_a_thematic_break_fails() -> Inspection {
-    docs(
-        "definition-after-rule",
-        vec![("GUIDE.md", "Text\n***\n[g]: nope.md\n".to_owned())],
+pub(super) fn path_in_multiline_html_comment() -> Inspection {
+    guide(
+        "multiline-comment",
+        "<!--\nA note.\n`crates/gone/` is gone.\n-->\n",
     )
 }
 
-pub(super) fn stderr_redirect_passes() -> Inspection {
-    docs(
-        "stderr-redirect",
-        vec![("GUIDE.md", "Run `cargo xtask check 2>&1`.\n".to_owned())],
+pub(super) fn path_with_angle_brackets_passes() -> Inspection {
+    guide("path-angles", "Crates live in `crates/<name>/`.\n")
+}
+
+pub(super) fn path_with_an_open_angle_passes() -> Inspection {
+    guide("path-open-angle", "Not a path: `crates/<name`.\n")
+}
+
+pub(super) fn path_with_a_close_angle_passes() -> Inspection {
+    guide("path-close-angle", "Not a path: `crates/name>`.\n")
+}
+
+pub(super) fn path_with_a_star_passes() -> Inspection {
+    guide("path-star", "Globs: `xtask/**` and `docs/*.md`.\n")
+}
+
+pub(super) fn path_with_a_question_mark_passes() -> Inspection {
+    guide("path-question", "A wildcard: `docs/000?.md`.\n")
+}
+
+pub(super) fn path_with_a_brace_passes() -> Inspection {
+    guide("path-brace", "Packages: `ui/{app,components}`.\n")
+}
+
+pub(super) fn path_with_an_ellipsis_passes() -> Inspection {
+    guide("path-ellipsis", "Any crate: `crates/...`.\n")
+}
+
+pub(super) fn path_with_a_line_and_column_passes() -> Inspection {
+    guide(
+        "path-line",
+        "See `xtask/src/main.rs:1` and `xtask/src/main.rs:1:4`.\n",
     )
 }
 
-pub(super) fn stdout_redirect_passes() -> Inspection {
-    docs(
-        "stdout-redirect",
-        vec![(
-            "GUIDE.md",
-            "Run `cargo xtask check > out.txt`.\n".to_owned(),
-        )],
-    )
+pub(super) fn missing_path_with_a_line_fails() -> Inspection {
+    guide("missing-path-line", "See `crates/gone.rs:12`.\n")
 }
 
-pub(super) fn subshell_with_valid_command_passes() -> Inspection {
-    docs(
-        "subshell-valid",
-        vec![(
-            "GUIDE.md",
-            "Run `(cd x && cargo xtask check)`.\n".to_owned(),
-        )],
-    )
-}
-
-pub(super) fn subshell_with_unknown_subcommand_fails() -> Inspection {
-    docs(
-        "subshell-unknown",
-        vec![(
-            "GUIDE.md",
-            "Run `(cd x && cargo xtask frobnicate)`.\n".to_owned(),
-        )],
-    )
-}
-
-pub(super) fn command_substitution_fails() -> Inspection {
-    docs(
-        "command-substitution",
-        vec![("GUIDE.md", "Run `$(cargo xtask frobnicate)`.\n".to_owned())],
-    )
-}
-
-pub(super) fn time_and_env_prefix_fails() -> Inspection {
-    docs(
-        "time-env-prefix",
-        vec![(
-            "GUIDE.md",
-            "Run `time env cargo xtask frobnicate`.\n".to_owned(),
-        )],
+pub(super) fn fence_in_quote_in_list_item_hides_its_contents() -> Inspection {
+    guide(
+        "fence-quote-item",
+        "- item\n\n  > ```\n  > [x](nope.md) `crates/gone/`\n  > ```\n",
     )
 }

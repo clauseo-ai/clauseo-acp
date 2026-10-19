@@ -7,12 +7,23 @@ use super::*;
 fn error_for(command: &str) -> Option<String> {
     let mut argv = vec!["cargo xtask"];
     argv.extend(command.split_whitespace().skip(2));
-    parse(&argv).err()
+    parse(&argv, false).err()
 }
 
-/// The commands `commands_in` finds in `text`.
+/// The commands `commands_in` finds in `text`, as their words.
 fn commands_of(text: &str) -> Vec<String> {
     commands_in(text)
+        .into_iter()
+        .map(|command| command.text)
+        .collect()
+}
+
+/// `text` as a command with no placeholder after it.
+fn command(text: &str) -> Command {
+    Command {
+        text: text.to_owned(),
+        placeholder: false,
+    }
 }
 
 #[test]
@@ -132,7 +143,7 @@ fn a_backslash_continues_a_code_line_onto_the_next() {
 
 #[test]
 fn a_violation_names_the_command_and_gives_clap_s_first_line_when_it_is_short() {
-    let found = problem("a.md", 3, "cargo xtask frobnicate").expect("it does not parse");
+    let found = problem("a.md", 3, &command("cargo xtask frobnicate")).expect("it does not parse");
     assert_eq!(
         found.message,
         "the xtask command `cargo xtask frobnicate` does not parse: error: unrecognized subcommand 'frobnicate'"
@@ -141,14 +152,62 @@ fn a_violation_names_the_command_and_gives_clap_s_first_line_when_it_is_short() 
 }
 
 #[test]
-fn a_bare_command_or_help_is_read_without_clap_s_help_text() {
-    assert_eq!(error_for("cargo xtask"), Some(String::new()));
+fn a_bare_command_names_no_subcommand_and_bare_help_parses() {
+    assert_eq!(
+        error_for("cargo xtask").as_deref(),
+        Some("it names no subcommand")
+    );
     assert_eq!(error_for("cargo xtask -h"), None);
-    let found = problem("a.md", 1, "cargo xtask").expect("it does not parse");
+    let found = problem("a.md", 1, &command("cargo xtask")).expect("it does not parse");
     assert_eq!(
         found.message,
-        "the xtask command `cargo xtask` does not parse"
+        "the xtask command `cargo xtask` does not parse: it names no subcommand"
     );
+}
+
+#[test]
+fn a_placeholder_word_is_a_name_in_angle_brackets_or_an_ellipsis() {
+    for word in ["<command>", "<n>", "...", "<path>..."] {
+        assert!(is_placeholder(word), "{word} is a placeholder");
+    }
+    for word in ["<", ">", "<>", "<in", "out>", "2>&1", "check", "<a<b>"] {
+        assert!(!is_placeholder(word), "{word} is not a placeholder");
+    }
+}
+
+#[test]
+fn a_placeholder_for_the_subcommand_gives_no_command_and_a_later_one_cuts_the_words() {
+    assert_eq!(
+        commands_of("cargo xtask <command> --help"),
+        Vec::<String>::new()
+    );
+    assert_eq!(commands_of("cargo xtask ..."), Vec::<String>::new());
+    assert_eq!(
+        commands_in("cargo xtask buildtime --runs <n> --json"),
+        [Command {
+            text: "cargo xtask buildtime --runs".to_owned(),
+            placeholder: true,
+        }]
+    );
+}
+
+#[test]
+fn before_a_placeholder_a_missing_word_parses_and_a_wrong_one_does_not() {
+    let cut = |text: &str| {
+        let mut argv = vec!["cargo xtask"];
+        argv.extend(text.split_whitespace().skip(2));
+        parse(&argv, true).err()
+    };
+    assert_eq!(cut("cargo xtask buildtime --runs"), None);
+    assert_eq!(
+        cut("cargo xtask frobnicate").as_deref(),
+        Some("error: unrecognized subcommand 'frobnicate'")
+    );
+    assert_eq!(
+        cut("cargo xtask check --frobnicate").as_deref(),
+        Some("error: unexpected argument '--frobnicate' found")
+    );
+    assert!(error_for("cargo xtask buildtime --runs").is_some());
 }
 
 #[test]

@@ -20,7 +20,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 
 ## Commands
 
-<!-- Name only commands that exist. A check fails on any xtask command here that does not parse. -->
+<!-- Name only commands that exist. A check fails on any `cargo xtask ...` here that does not parse. -->
 - `cargo xtask check --quick`: changed crates only. Run it before every report.
 - `cargo xtask check`: exactly CI's fast lane plus this OS's tests.
 - `cargo xtask buildtime`: build-loop timings against `budgets.toml`.
@@ -57,7 +57,7 @@ this. Use the words in `GLOSSARY.md` exactly.
   or `dialog:`.
 - Only `#[expect(lint, reason = "...")]` may silence a lint. `#[allow]` fails.
 - No `unwrap`, `expect`, `panic!`, `todo!` or `println!` outside tests and `main`.
-- Files stay under 600 lines.
+- A source file has at most 600 lines.
 - Rust comments stay within 100 columns; a file past 500 lines gets a note to split it.
 - A check that inspects nothing fails.
 - Component files in `ui/` export only components.
@@ -106,4 +106,4 @@ this. Use the words in `GLOSSARY.md` exactly.
 ## Changing this file
 
 Propose additions in your pull request. Add a line only if it is non-obvious, keeps coming up, and
-tells the reader what to do. Rules are traps, not maps. Stay under 120 lines and 8 KiB.
+tells the reader what to do. Rules are traps, not maps. Keep this file to at most 120 lines and 8 KiB.
