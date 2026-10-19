@@ -95,15 +95,15 @@ pub(crate) fn matches(
     }
 }
 
-/// Checks that every pointer in `off` is off in `actual`: missing, `null`, `false`, or an object
-/// whose values are all off.
+/// Checks that every pointer in `off` is off in `actual`: missing, `null`, `false`, or a
+/// non-empty object whose values are all off. An empty object is on.
 pub(crate) fn check_off(actual: Option<&Value>, off: &[String]) -> Result<(), String> {
     for pointer in off {
         let found = actual.and_then(|value| value.pointer(pointer));
         if !is_off(found) {
             let got = found.map_or_else(String::new, short);
             return Err(format!(
-                "{pointer}: expected off (missing, null, false or all off), got {got}"
+                "{pointer}: expected off (missing, null, false, or a non-empty object of off values), got {got}"
             ));
         }
     }
@@ -113,7 +113,8 @@ pub(crate) fn check_off(actual: Option<&Value>, off: &[String]) -> Result<(), St
 fn is_off(value: Option<&Value>) -> bool {
     match value {
         None | Some(Value::Null | Value::Bool(false)) => true,
-        Some(Value::Object(map)) => map.values().all(|v| is_off(Some(v))),
+        // An empty object is on: in schema 1.11.0 `subagents: {}` is the advertisement.
+        Some(Value::Object(map)) => !map.is_empty() && map.values().all(|v| is_off(Some(v))),
         Some(_) => false,
     }
 }
@@ -169,14 +170,34 @@ mod tests {
             Err("/a~0~1: missing, expected 1".to_owned())
         );
 
+        // `{}` matches any object, and only an object.
+        assert_eq!(
+            matches(&json!({"plan": {}}), Some(&json!({"plan": {"x": 1}})), ""),
+            Ok(())
+        );
+        assert!(matches(&json!({"plan": {}}), Some(&json!({"plan": null})), "").is_err());
+        assert!(matches(&json!({"plan": {}}), Some(&json!({"plan": false})), "").is_err());
+
         let caps = json!({"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false,
-            "auth": {"terminal": true}, "plan": {}});
-        let off = ["/fs", "/terminal", "/subagents", "/plan"].map(str::to_owned);
+            "auth": {"terminal": true}, "plan": {}, "nested": {"a": {"b": null}}});
+        let off = ["/fs", "/terminal", "/subagents", "/nested"].map(str::to_owned);
         assert_eq!(check_off(Some(&caps), &off), Ok(()));
+        // An empty object is on: `subagents: {}` advertises subagents in schema 1.11.0.
+        assert_eq!(
+            check_off(Some(&json!({"subagents": {}})), &off),
+            Err(
+                "/subagents: expected off (missing, null, false, or a non-empty object of off \
+                 values), got {}"
+                    .to_owned()
+            )
+        );
+        assert!(check_off(Some(&json!({"nested": {"a": {}}})), &off).is_err());
+        assert!(check_off(Some(&caps), &["/plan".to_owned()]).is_err());
         assert_eq!(
             check_off(Some(&caps), &["/auth".to_owned()]),
             Err(
-                r#"/auth: expected off (missing, null, false or all off), got {"terminal":true}"#
+                "/auth: expected off (missing, null, false, or a non-empty object of off values), \
+                 got {\"terminal\":true}"
                     .to_owned()
             )
         );
