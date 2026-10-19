@@ -106,7 +106,7 @@ fn check_matter_path(value: &str) -> Result<(), &'static str> {
     if value.contains('\\') {
         return Err("must not contain a backslash");
     }
-    if value.bytes().any(|byte| byte < 0x20 || byte == 0x7F) {
+    if value.chars().any(char::is_control) {
         return Err("must not contain a control character");
     }
     // A drive form: `C:`, `C:x`, `C:/...`.
@@ -143,12 +143,15 @@ checked_string!(
     ContentId, check_content_id
 );
 checked_string!(
-    /// A path inside a matter: `/` separators, no leading `/`, no `\`, no control character
-    /// (NUL to 0x1F and DEL), no empty, `.` or `..` segment, no drive form (`C:`, `C:x`,
-    /// `C:/..`), at most 255 bytes per segment and 4096 bytes in all. Never an id: commands name
-    /// files by [`FileRefId`].
+    /// A path inside a matter: `/` separators, no leading `/`, no `\`, no Unicode control
+    /// character (`char::is_control`: C0, DEL and C1), no empty, `.` or `..` segment, no drive
+    /// form (`C:`, `C:x`, `C:/..`), at most 255 bytes per segment and 4096 bytes in all. Never an
+    /// id: commands name files by [`FileRefId`].
     ///
-    /// A `:` elsewhere is allowed, because macOS file names may hold one. On Windows a `:` names an
-    /// alternate data stream, so `matters` must refuse a path containing `:` there.
+    /// Bidi marks and other format characters are allowed (Hebrew and Arabic file names hold
+    /// U+200F), so the UI shows a path bidi-isolated. A `:` elsewhere is allowed, because macOS
+    /// file names may hold one. On Windows `matters` must refuse a path with a `:` (an alternate
+    /// data stream), a part that is a device name (CON, PRN, AUX, NUL, COM0 to COM9, LPT0 to
+    /// LPT9, CONIN$, CONOUT$, with any extension) and a part ending in a dot or a space.
     MatterPath, check_matter_path
 );

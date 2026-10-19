@@ -46,10 +46,13 @@ pub struct Envelope {
 - `Seq`, `Cursor`, `Timestamp` and every other 64-bit number stay at most 2^53 - 1, so TypeScript
   reads them as a `number`: a larger value is refused on encode and on decode.
 - `MatterPath` is matter-relative with `/` separators. It refuses an empty, `.` or `..` segment, a
-  leading `/`, `\`, NUL and other control characters, a first segment of the form `X:` (a drive),
-  a segment over 255 bytes and a path over 4096 bytes. It allows `:` elsewhere, since macOS file
-  names may hold one; on Windows `matters` must refuse a path holding `:`, which names an alternate
-  data stream there.
+  leading `/`, `\`, every Unicode control character (`char::is_control`: C0, DEL and C1), a first
+  segment of the form `X:` (a drive), a segment over 255 bytes and a path over 4096 bytes. It allows
+  bidi marks and other format characters, since Hebrew and Arabic file names hold U+200F, so the UI
+  shows every path bidi-isolated. It allows `:` elsewhere, since macOS file names may hold one. On
+  Windows `matters` must refuse a path with a `:` (an alternate data stream), a part that is a
+  device name (CON, PRN, AUX, NUL, COM0 to COM9, LPT0 to LPT9, CONIN$, CONOUT$, with any
+  extension) and a part ending in a dot or a space.
 
 ### Kinds
 

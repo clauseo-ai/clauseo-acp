@@ -102,8 +102,8 @@ pub use approval::{
 };
 pub use command::{
     CommandEnvelope, CommandOutcome, ConfigValue, HostCommand, MAX_ELICITATION_VALUES_BYTES,
-    MAX_FILE_LIST, MAX_ID_TEXT_BYTES, MAX_PROMPT_FILES, MAX_PROMPT_TEXT_BYTES, MAX_TITLE_CHARS,
-    MatterSource,
+    MAX_FILE_LIST, MAX_ID_TEXT_BYTES, MAX_MATTER_NAME_BYTES, MAX_PROMPT_BLOCKS, MAX_PROMPT_FILES,
+    MAX_PROMPT_TEXT_BYTES, MAX_TITLE_CHARS, MatterSource,
 };
 pub use compact_str::CompactString;
 pub use content::{ContentBlock, PromptBlock, RawFrom, ToolCallContent};

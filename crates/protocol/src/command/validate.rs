@@ -25,10 +25,10 @@ pub const MAX_PROMPT_TEXT_BYTES: usize = 256 * 1024;
 pub const MAX_PROMPT_FILES: usize = 50;
 
 /// Most blocks of any kind in one prompt.
-const MAX_PROMPT_BLOCKS: usize = 100;
+pub const MAX_PROMPT_BLOCKS: usize = 100;
 
 /// Most UTF-8 bytes in a matter name: a folder name's limit on common file systems.
-const MAX_MATTER_NAME_BYTES: usize = 255;
+pub const MAX_MATTER_NAME_BYTES: usize = 255;
 
 /// Most characters (`char`s, Unicode scalar values) in a thread title or a matter name.
 pub const MAX_TITLE_CHARS: usize = 200;
@@ -83,18 +83,20 @@ impl HostCommand {
     /// Checks lengths, counts and formats, never state. Ids and paths were already checked when
     /// they were decoded or built.
     ///
-    /// - `SendPrompt` and `EditQueuedPrompt`: 1 to 100 blocks, no empty text block, at least
-    ///   one non-whitespace character of text or one file, at most [`MAX_PROMPT_TEXT_BYTES`] of
-    ///   text and [`MAX_PROMPT_FILES`] file references; a `Delivery::Unknown` (a newer client's
-    ///   mode) is refused, never run as another mode.
+    /// - `SendPrompt` and `EditQueuedPrompt`: 1 to [`MAX_PROMPT_BLOCKS`] blocks, no empty text
+    ///   block, at least one visible character of text (as titles count it) or one file, at most
+    ///   [`MAX_PROMPT_TEXT_BYTES`] of text and [`MAX_PROMPT_FILES`] file references; a
+    ///   `Delivery::Unknown` (a newer client's mode) is refused, never run as another mode.
     /// - Titles and names (`RenameThread.title`, `CreateMatter.name`): at most
     ///   [`MAX_TITLE_CHARS`] characters, at least one visible character (not only whitespace or
-    ///   U+200B to U+200D, U+2060, U+FEFF), no control character and no bidirectional control
-    ///   (U+202A to U+202E, U+2066 to U+2069).
-    /// - `CreateMatter.name` also works as a folder name on every system: at most 255 bytes, not
-    ///   `.` or `..`, none of `< > : " / \ | ? *`, no trailing dot or space, no leading space,
-    ///   not a Windows device name (CON, PRN, AUX, NUL, COM1 to COM9, LPT1 to LPT9) with or
-    ///   without an extension, in any case.
+    ///   U+200B to U+200F, U+2060, U+FEFF, U+061C, U+00AD, U+3164, U+115F, U+1160, U+FFA0), no
+    ///   control character, no bidi control (U+202A to U+202E, U+2066 to U+2069) and no line or
+    ///   paragraph separator (U+2028, U+2029).
+    /// - `CreateMatter.name` also works as a folder name on every system: at most
+    ///   [`MAX_MATTER_NAME_BYTES`] bytes, not `.` or `..`, none of `< > : " / \ | ? *`, no
+    ///   trailing dot or space, no leading space, not a Windows device name (CON, PRN, AUX, NUL,
+    ///   CONIN$, CONOUT$, COM0 to COM9, COM¹ to COM³, LPT0 to LPT9, LPT¹ to LPT³) with or without
+    ///   an extension, in any case.
     /// - `option_id`, `mode_id` and a select value: 1 to [`MAX_ID_TEXT_BYTES`] bytes.
     /// - `AnswerElicitation` with `Accept`: the values are a JSON object of at most
     ///   [`MAX_ELICITATION_VALUES_BYTES`] as compact JSON.
@@ -199,7 +201,7 @@ fn check_prompt(kind: &'static str, content: &[PromptBlock]) -> Result<(), Error
             }
             PromptBlock::Text { text } => {
                 text_bytes = text_bytes.saturating_add(text.len());
-                visible_text = visible_text || !text.trim().is_empty();
+                visible_text = visible_text || !text.chars().all(is_invisible);
             }
             PromptBlock::File { .. } => files += 1,
         }
@@ -224,15 +226,35 @@ fn check_prompt(kind: &'static str, content: &[PromptBlock]) -> Result<(), Error
     Ok(())
 }
 
-/// Bidirectional embedding, override and isolate controls, which can make a title read as
-/// something else (U+202A to U+202E, U+2066 to U+2069).
-fn is_bidi_control(c: char) -> bool {
-    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+/// Characters a title refuses besides controls: the bidi embeddings, overrides and isolates,
+/// which can make a title read as something else (U+202A to U+202E, U+2066 to U+2069), and the
+/// line and paragraph separators (U+2028, U+2029), since a title is one line. The bidi marks
+/// U+200E, U+200F and U+061C stay allowed.
+fn is_refused_in_title(c: char) -> bool {
+    matches!(
+        c,
+        '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{2028}' | '\u{2029}'
+    )
 }
 
-/// Whitespace, or a zero-width character (U+200B to U+200D, U+2060, U+FEFF).
+/// Whether a character shows nothing: whitespace, the zero-width characters (U+200B to U+200D,
+/// U+2060, U+FEFF), the bidi marks (U+200E, U+200F, U+061C), the soft hyphen (U+00AD) and the
+/// Hangul fillers (U+3164, U+115F, U+1160, U+FFA0).
 fn is_invisible(c: char) -> bool {
-    c.is_whitespace() || matches!(c, '\u{200B}'..='\u{200D}' | '\u{2060}' | '\u{FEFF}')
+    c.is_whitespace()
+        || matches!(
+            c,
+            '\u{200B}'
+                ..='\u{200F}'
+                    | '\u{2060}'
+                    | '\u{FEFF}'
+                    | '\u{061C}'
+                    | '\u{00AD}'
+                    | '\u{3164}'
+                    | '\u{115F}'
+                    | '\u{1160}'
+                    | '\u{FFA0}'
+        )
 }
 
 fn check_title(kind: &'static str, title: &str) -> Result<(), Error> {
@@ -251,19 +273,24 @@ fn check_title(kind: &'static str, title: &str) -> Result<(), Error> {
             MAX_TITLE_CHARS,
         ));
     }
-    if title.chars().any(|c| c.is_control() || is_bidi_control(c)) {
+    if title
+        .chars()
+        .any(|c| c.is_control() || is_refused_in_title(c))
+    {
         return Err(Error::Format {
             kind,
-            rule: "a title or name holds no control or bidirectional control character",
+            rule: "a title or name holds no control, bidi control or line separator character",
         });
     }
     Ok(())
 }
 
-/// Windows device names, refused as a folder name with or without an extension.
-const RESERVED_NAMES: [&str; 22] = [
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+/// Windows device names, refused as a folder name with or without an extension, in any case
+/// (`eq_ignore_ascii_case`, so the superscript digits must be listed as they are).
+const RESERVED_NAMES: [&str; 32] = [
+    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "COM0", "COM1", "COM2", "COM3", "COM4",
+    "COM5", "COM6", "COM7", "COM8", "COM9", "COM¹", "COM²", "COM³", "LPT0", "LPT1", "LPT2", "LPT3",
+    "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9", "LPT¹", "LPT²", "LPT³",
 ];
 
 /// A matter name may become a folder name (for `NewFolder`), so it is checked as one on every
