@@ -23,6 +23,8 @@ specta = { workspace = true, optional = true, features = ["derive"] }
 insta = { workspace = true, features = ["json"] }
 proptest = { workspace = true }
 rmp-serde = { workspace = true }
+specta-serde = { workspace = true }
+specta-typescript = { workspace = true }
 
 [lints]
 workspace = true

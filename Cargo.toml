@@ -44,6 +44,9 @@ proptest = "1.12"
 rmp-serde = "1.3.1"
 # Golden snapshots of the wire form (clauseo-protocol); the json feature goes on the crate line.
 insta = "1.49"
+# Test-only: the TypeScript export; specta-serde applies the serde attributes (the one for rc.25).
+specta-serde = "=0.0.12"
+specta-typescript = "=0.0.12"
 
 [workspace.lints.rust]
 unsafe_code = "deny"               # deny, not forbid: an FFI module overrides with #[expect(unsafe_code, reason = "…")]

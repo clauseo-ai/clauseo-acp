@@ -176,9 +176,11 @@ impl<'de> Visitor<'de> for RawVisitor {
     reason = "only its specta::Type impl is used, to describe RawPayload"
 )]
 enum JsonValue {
-    Null,
+    // `()` renders `null`; a unit variant would render as the string "Null".
+    Null(()),
     Bool(bool),
-    Number(f64),
+    // `i32` renders `number`; `f64` would add a second `| null`.
+    Number(i32),
     Text(String),
     List(Vec<JsonValue>),
     Object(std::collections::BTreeMap<String, JsonValue>),

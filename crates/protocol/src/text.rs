@@ -132,7 +132,8 @@ impl TextOrBlob {
 /// A blob: its BLAKE3 hash, its size and the first bytes of its text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "BlobRefWire")]
-#[cfg_attr(feature = "specta", derive(specta::Type))]
+// specta: `try_from` only adds checks; the TypeScript shape is the struct's own fields.
+#[cfg_attr(feature = "specta", derive(specta::Type), specta(skip_attr = "serde"))]
 pub struct BlobRef {
     /// The blob's BLAKE3 digest.
     pub hash: BlobHash,
