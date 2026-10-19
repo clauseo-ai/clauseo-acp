@@ -3,6 +3,8 @@
 
 use super::*;
 use crate::scratch::Scratch;
+#[cfg(unix)]
+use crate::setup::AssetSha256;
 use crate::setup::BINARIES;
 use crate::setup::tests::{
     ASSET_BYTES, binary, curl_output, exited, expected_asset, expected_url, expected_winget,
@@ -86,28 +88,6 @@ fn a_download_whose_sha256_differs_leaves_bin_untouched() {
              it by hand\n",
             lefthook.version
         )
-    );
-}
-
-#[test]
-fn leftovers_of_an_interrupted_run_are_removed_and_nothing_else_in_bin() {
-    let dir = Scratch::new("setup-install-leftovers");
-    let bin = dir.join("bin");
-    let stale = bin.join(".xtask-setup-gitleaks-99999");
-    fs::create_dir_all(&stale).unwrap();
-    fs::write(stale.join("gitleaks_unverified.tar.gz"), b"half a download").unwrap();
-    fs::write(bin.join(".xtask-setup-lefthook-1"), b"a stray file").unwrap();
-    fs::write(bin.join("lefthook"), b"the working lefthook").unwrap();
-    fs::write(bin.join(".xtask-other"), b"not ours").unwrap();
-    // The download matches no pin, so the install itself adds nothing either.
-    let (ok, _, _) = install_with(binary("lefthook"), &linux(&bin, true), SWAPPED, &mut never);
-    assert!(!ok);
-    assert_eq!(
-        files_in(&bin),
-        [
-            (".xtask-other".to_owned(), b"not ours".to_vec()),
-            ("lefthook".to_owned(), b"the working lefthook".to_vec()),
-        ]
     );
 }
 
@@ -278,4 +258,106 @@ fn sha256_of_hashes_the_file_bytes() {
     let file = dir.join("asset");
     fs::write(&file, SWAPPED).unwrap();
     assert_eq!(sha256_of(&file).unwrap(), SWAPPED_SHA256);
+}
+
+/// Makes `name.tar.gz` in `dir` with the system tar, from a `gitleaks` (a file holding
+/// `ASSET_BYTES`, or with `link` a symlink to `LICENSE`) and a `LICENSE`. Returns its path.
+#[cfg(unix)]
+fn real_tar_gz(dir: &Path, name: &str, link: bool) -> PathBuf {
+    let src = dir.join(format!("{name}-src"));
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("LICENSE"), b"the license").unwrap();
+    if link {
+        std::os::unix::fs::symlink("LICENSE", src.join("gitleaks")).unwrap();
+    } else {
+        fs::write(src.join("gitleaks"), ASSET_BYTES).unwrap();
+    }
+    let archive = dir.join(format!("{name}.tar.gz"));
+    let archive_arg = archive.display().to_string();
+    let tar = Cmd::new(
+        Program::Named("tar"),
+        ["-czf", archive_arg.as_str(), "gitleaks", "LICENSE"],
+    );
+    let made = crate::process::run_quiet(&tar, &src).expect("tar runs");
+    assert!(made.success, "{tar}: {}", made.stderr);
+    archive
+}
+
+/// Installs a tool named gitleaks whose asset is `archive`, pinned to its real sha256, with the
+/// download faked as a copy of `archive` and the extract run by the real `tar`.
+#[cfg(unix)]
+fn install_real_tar_gz(archive: &Path, bin: &Path) -> (bool, String) {
+    let pin: &'static str = Box::leak(sha256_of(archive).unwrap().into_boxed_str());
+    let pins: &'static [AssetSha256] = Box::leak(Box::new([AssetSha256 {
+        os: "linux",
+        arch: "x86_64",
+        sha256: pin,
+    }]));
+    let tool = Binary {
+        name: "gitleaks",
+        sha256: pins,
+        ..fake_tool(Packing::TarGz)
+    };
+    let mut runner = |cmd: &Cmd, at: &Path, output: Output, timeout: Duration| match cmd.program {
+        Program::Named("curl") => {
+            fs::copy(archive, at.join(curl_output(cmd)))?;
+            exited(true, "", "")
+        }
+        Program::Named("tar") => crate::process::run_timed(cmd, at, output, timeout),
+        _ => panic!("{cmd} was not expected to run"),
+    };
+    let mut out = Printer::new(Vec::new(), false);
+    let ok = install_binary(
+        &mut out,
+        &tool,
+        &linux(bin, true),
+        Path::new("."),
+        &mut runner,
+    );
+    (ok, String::from_utf8(out.into_inner()).unwrap())
+}
+
+#[cfg(unix)]
+#[test]
+fn the_real_tar_extract_installs_only_gitleaks_from_a_release_like_archive() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = Scratch::new("setup-install-real-tar");
+    let archive = real_tar_gz(&dir, "good", false);
+    let bin = dir.join("bin");
+    let (ok, printed) = install_real_tar_gz(&archive, &bin);
+    assert!(ok, "{printed}");
+    assert_eq!(
+        files_in(&bin),
+        [("gitleaks".to_owned(), ASSET_BYTES.to_vec())]
+    );
+    let mode = fs::metadata(bin.join("gitleaks"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o755);
+}
+
+#[cfg(unix)]
+#[test]
+fn the_real_tar_extract_refuses_a_gitleaks_member_that_is_a_symlink() {
+    let dir = Scratch::new("setup-install-real-tar-link");
+    let archive = real_tar_gz(&dir, "link", true);
+    let bin = dir.join("bin");
+    fs::create_dir(&bin).unwrap();
+    fs::write(bin.join("gitleaks"), b"the working gitleaks").unwrap();
+    let before = files_in(&bin);
+    let (ok, printed) = install_real_tar_gz(&archive, &bin);
+    assert!(!ok);
+    assert_eq!(files_in(&bin), before);
+    let staging = bin.join(format!(".xtask-setup-gitleaks-{}", std::process::id()));
+    assert!(
+        printed.ends_with(&format!(
+            "could not move gitleaks into {}: {} is not a regular file\n    fix: check that you \
+             can write to {}, then run cargo xtask setup --binaries again\n",
+            bin.display(),
+            staging.join("gitleaks").display(),
+            bin.display()
+        )),
+        "{printed}"
+    );
 }

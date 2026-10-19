@@ -247,6 +247,9 @@ fn run_with<W: Write>(
     for tool in tools {
         all_ok &= install_tool(out, tool, root, runner);
     }
+    if install {
+        all_ok &= install::clear_staging_leftovers(out, machine);
+    }
     for binary in binaries {
         all_ok &= setup_binary(out, binary, machine, install, root, runner);
     }

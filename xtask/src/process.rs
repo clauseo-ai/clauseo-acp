@@ -269,10 +269,15 @@ pub(crate) fn run_timed(
     match finished.recv_timeout(timeout) {
         Ok(ran) => Ok(Ended::Exited(quiet_of(&ran?))),
         Err(RecvTimeoutError::Timeout) => {
-            // If the command exits just now, the waiter may reap it before the kill runs, and the
-            // pid could in theory name a new process. macOS and Linux hand out pids in rising
-            // order and wrap only after the whole range, so one freed microseconds ago is not
-            // reused before the kill.
+            // A command that exited just at the timeout is not killed: its status is here already.
+            if let Ok(ran) = finished.try_recv() {
+                return Ok(Ended::Exited(quiet_of(&ran?)));
+            }
+            // What is left is the few instructions between the waiter reaping the command and
+            // sending its status, where the pid is free again. macOS and Linux hand out pids in
+            // rising order and wrap only after the whole range, so no new process gets it then.
+            // Windows reuses pids sooner, so there a new process would have to start and take that
+            // exact pid within those instructions for taskkill to hit it; that risk is accepted.
             let killed = kill(pid, output);
             // The waiter ends once the killed processes have closed the pipes. A process that left
             // the group may hold them longer; it is not waited for past the grace period.

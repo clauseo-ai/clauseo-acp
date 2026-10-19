@@ -225,20 +225,53 @@ fn download_into<W: Write>(
 /// The start of the name of every staging directory `setup` makes in bin.
 const STAGING_PREFIX: &str = ".xtask-setup-";
 
-/// Makes `bin` if needed, removes every entry in it whose name starts with `STAGING_PREFIX`,
-/// and makes `staging` there, empty. Only `setup` makes such entries, so each one left is from a
-/// run that was interrupted (Ctrl-C, a kill) before it removed its own. Two setups at once would
-/// remove each other's: the other one's download then fails, and bin is still never half-written.
+/// Makes `bin` if needed, and `staging` in it, empty.
 fn fresh_dir(bin: &Path, staging: &Path) -> Result<(), Failure> {
-    let made = fs::create_dir_all(bin)
-        .and_then(|()| remove_staging_leftovers(bin))
-        .and_then(|()| fs::create_dir(staging));
+    let made = fs::create_dir_all(bin).and_then(|()| match fs::remove_dir_all(staging) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => fs::create_dir(staging),
+    });
     made.map_err(|error| {
         (
             format!("could not make {}: {error}", staging.display()),
             retry_fix(bin),
         )
     })
+}
+
+/// Removes the staging leftovers in `machine`'s cargo bin, on macOS and Linux, printing a failure
+/// when that fails. Returns whether it worked. `setup --binaries` runs it first, whether or not
+/// anything downloads. Only `setup` makes `STAGING_PREFIX` entries, so each one left is from a
+/// run that was interrupted (Ctrl-C, a kill) before it removed its own. Two setups at once would
+/// remove each other's: the other one's download then fails, and bin is still never half-written.
+pub(crate) fn clear_staging_leftovers<W: Write>(
+    out: &mut Printer<W>,
+    machine: &Machine<'_>,
+) -> bool {
+    let Some(bin) = machine
+        .cargo_bin
+        .as_deref()
+        .filter(|_| machine.os != "windows")
+    else {
+        return true;
+    };
+    match remove_staging_leftovers(bin) {
+        Ok(()) => true,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => true,
+        Err(error) => {
+            out.failure(
+                &format!(
+                    "could not remove what an interrupted setup left in {}: {error}",
+                    bin.display()
+                ),
+                &format!(
+                    "remove the {STAGING_PREFIX}* entries in {} by hand",
+                    bin.display()
+                ),
+            );
+            false
+        }
+    }
 }
 
 /// Removes every entry in `bin` whose name starts with `STAGING_PREFIX`. A symlink is removed,

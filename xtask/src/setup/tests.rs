@@ -415,3 +415,62 @@ fn after_a_failed_install_the_version_failure_does_not_repeat_the_install() {
         "{printed}"
     );
 }
+
+/// Fills `bin` with what an interrupted setup leaves (a staging dir with half a download, a stray
+/// staging file) and two entries that are not setup's.
+fn plant_leftovers(bin: &Path) {
+    let stale = bin.join(".xtask-setup-gitleaks-99999");
+    std::fs::create_dir_all(&stale).unwrap();
+    std::fs::write(stale.join("gitleaks_unverified.tar.gz"), b"half a download").unwrap();
+    std::fs::write(bin.join(".xtask-setup-lefthook-1"), b"a stray file").unwrap();
+    std::fs::write(bin.join("lefthook"), b"the working lefthook").unwrap();
+    std::fs::write(bin.join(".xtask-other"), b"not ours").unwrap();
+}
+
+/// The names in `dir`, sorted.
+fn names_in(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_binaries_run_removes_leftovers_of_an_interrupted_run_even_when_nothing_downloads() {
+    let dir = Scratch::new("setup-run-leftovers-warm");
+    let bin = dir.join("bin");
+    plant_leftovers(&bin);
+    let tool = fake_tool(Packing::Bare);
+    let (ok, ran, printed) = run_fake(&linux(&bin, true), &tool, true, &[Some(tool.version)]);
+    assert!(ok, "{printed}");
+    assert!(!ran.iter().any(|cmd| cmd.starts_with("curl")), "{ran:?}");
+    assert_eq!(names_in(&bin), [".xtask-other", "lefthook"]);
+    assert_eq!(
+        std::fs::read(bin.join("lefthook")).unwrap(),
+        b"the working lefthook"
+    );
+}
+
+#[test]
+fn a_binaries_run_removes_leftovers_of_an_interrupted_run_before_it_downloads() {
+    let dir = Scratch::new("setup-run-leftovers-download");
+    let bin = dir.join("bin");
+    plant_leftovers(&bin);
+    let tool = fake_tool(Packing::Bare);
+    let (ok, _, printed) = run_fake(&linux(&bin, true), &tool, true, &[None, Some(tool.version)]);
+    assert!(ok, "{printed}");
+    assert_eq!(names_in(&bin), [".xtask-other", "faketool", "lefthook"]);
+}
+
+#[test]
+fn a_plain_setup_leaves_bin_alone() {
+    let dir = Scratch::new("setup-run-leftovers-plain");
+    let bin = dir.join("bin");
+    plant_leftovers(&bin);
+    let before = names_in(&bin);
+    let tool = fake_tool(Packing::Bare);
+    run_fake(&linux(&bin, true), &tool, false, &[Some(tool.version)]);
+    assert_eq!(names_in(&bin), before);
+}
