@@ -1,7 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "xtask"]
-default-members = ["crates/desktop"]
+# `cargo xtask buildtime` times edits to clauseo-protocol with cargo at the root, so it must be in
+# the default members' graph; until desktop depends on it (through host), it is listed itself.
+default-members = ["crates/desktop", "crates/protocol"]
 
 [workspace.package]
 edition = "2024"
