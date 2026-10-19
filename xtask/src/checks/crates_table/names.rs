@@ -2,7 +2,7 @@
 //! written `clauseo-<row>`, a crates.io package, or a name that looks like ours and is rejected
 //! (see the module doc of `crates_table.rs`).
 
-use super::{Never, fold, package_of};
+use super::{IoWord, Never, fold, package_of};
 
 /// Why an entry was rejected: the end of the message after "`<entry>` in the Never depends on
 /// column of `<row>`", and the fix.
@@ -46,7 +46,8 @@ pub(super) fn crate_entry(entry: &str, rows: &[&str]) -> Result<Never, Rejected>
                 package = package_of(row)
             ),
             fix: format!(
-                "write `{row}` to ban our crate `{package}`, or `{entry} {CRATES_IO}` if you mean the crates.io package: xtask/src/checks/crates_table.rs rejects a name within one edit of a row name (ignoring case, reading `-` as `_`, a swap of two letters counting as one edit)",
+                "write `{ban}` to ban our crate `{package}`, or `{entry} {CRATES_IO}` if you mean the crates.io package: the module doc of xtask/src/checks/crates_table.rs lists which names read as ours",
+                ban = ban_spelling(row),
                 package = package_of(row)
             ),
         });
@@ -56,7 +57,7 @@ pub(super) fn crate_entry(entry: &str, rows: &[&str]) -> Result<Never, Rejected>
         return Err(Rejected {
             what: "holds `_` but is no row of the Crates table, and only our row names are written with `_`".to_owned(),
             fix: format!(
-                "write `{dashed}` for the crates.io package (cargo reads `-` and `_` in a package name the same), or the row name of the crate you mean if it is ours"
+                "write `{dashed}` for the crates.io package (this check reads `-` and `_` the same), or the row name of the crate you mean if it is ours"
             ),
         });
     }
@@ -80,8 +81,13 @@ fn clauseo_entry(entry: &str, folded: &str, rows: &[&str]) -> Result<Never, Reje
                 package = package_of(row)
             ),
             fix: format!(
-                "write `{package}` (or the row name `{row}`) to ban our crate, or `{entry} {CRATES_IO}` if you mean the crates.io package",
-                package = package_of(row)
+                "write `{package}`{or_row} to ban our crate, or `{entry} {CRATES_IO}` if you mean the crates.io package",
+                package = package_of(row),
+                or_row = if ban_spelling(row) == **row {
+                    format!(" (or the row name `{row}`)")
+                } else {
+                    String::new()
+                }
             ),
         }),
         None => match rows.iter().find(|row| **row == rest) {
@@ -91,7 +97,8 @@ fn clauseo_entry(entry: &str, folded: &str, rows: &[&str]) -> Result<Never, Reje
                     package = package_of(row)
                 ),
                 fix: format!(
-                    "write `{row}` to ban our crate `{package}`, or `{entry} {CRATES_IO}` if you mean the crates.io package",
+                    "write `{ban}` to ban our crate `{package}`, or `{entry} {CRATES_IO}` if you mean the crates.io package",
+                    ban = ban_spelling(row),
                     package = package_of(row)
                 ),
             }),
@@ -100,7 +107,7 @@ fn clauseo_entry(entry: &str, folded: &str, rows: &[&str]) -> Result<Never, Reje
                     "starts with `clauseo-`, but `{rest}` is no row of the Crates table, so it names none of our crates"
                 ),
                 fix: format!(
-                    "write the row name of the crate you mean ({}), add a row `{rest}` for the crate, or write `{entry} {CRATES_IO}` if you mean the crates.io package",
+                    "write the name that bans the crate you mean ({}), add a row `{rest}` for the crate, or write `{entry} {CRATES_IO}` if you mean the crates.io package",
                     near_rows_hint(rest, rows)
                 ),
             }),
@@ -108,18 +115,28 @@ fn clauseo_entry(entry: &str, folded: &str, rows: &[&str]) -> Result<Never, Reje
     }
 }
 
-/// The part of the fix that says which row names to pick from: those one edit from `name`, else
-/// the Crate column.
+/// The part of the fix that says which names to pick from: how to ban each row one edit from
+/// `name` (see `ban_spelling`), else the Crate column.
 fn near_rows_hint(name: &str, rows: &[&str]) -> String {
     let near: Vec<String> = rows
         .iter()
         .filter(|row| within_one_edit(name, row))
-        .map(|row| format!("`{row}`"))
+        .map(|row| format!("`{}`", ban_spelling(row)))
         .collect();
     if near.is_empty() {
         "a name in the Crate column".to_owned()
     } else {
         format!("perhaps {}", near.join(" or "))
+    }
+}
+
+/// How a Never cell names our crate of row `row`: the row name, or the package `clauseo-<row>`
+/// when the row name is an I/O word, which the cell reads as the word (`process`).
+fn ban_spelling(row: &str) -> String {
+    if IoWord::parse(row).is_some() {
+        package_of(row)
+    } else {
+        row.to_owned()
     }
 }
 

@@ -59,3 +59,27 @@ pub(in crate::checks::dependencies) fn clauseo_before_a_row_whose_package_has_no
 pub(in crate::checks::dependencies) fn io_word_in_other_case() -> Inspection {
     host("io-word-case", "FS, Clock, Any I/O", "", &[])
 }
+
+pub(in crate::checks::dependencies) fn crates_io_name_in_capitals_bans_the_package() -> Inspection {
+    let crates = [
+        (
+            "crates/protocol".to_owned(),
+            manifest(
+                "clauseo-protocol",
+                "[dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n",
+            ),
+        ),
+        vendor("tauri", ""),
+    ];
+    let rows = "| `protocol` | events | serde | Tauri | exists |\n";
+    run_on(&workspace("capitals-ban", rows, "", &crates))
+}
+
+pub(in crate::checks::dependencies) fn typo_of_a_row_named_like_an_io_word() -> Inspection {
+    let crates = [(
+        "crates/host".to_owned(),
+        manifest("clauseo-host", "[dependencies]\n"),
+    )];
+    let rows = "| `host` | sessions | protocol | tauri, procesz | exists |\n| `process` | runner | protocol | tauri | planned |\n";
+    run_on(&workspace("io-word-row", rows, "", &crates))
+}

@@ -5,31 +5,42 @@
 //! renders it (GFM): the first table of the section, a row without a leading pipe included, a
 //! `\|` being a pipe inside a cell, and a code span's text without its backticks. A blank line
 //! ends a table, and GFM shows a `|` line after it as text, so a line of the section after the
-//! table that starts with `|`, or a second table, fails: no row is dropped without a word.
+//! table that starts with `|`, or a second table, fails. A line GFM does not read as part of the
+//! table is not a row: a row written with no pipe at either end after a blank line is a
+//! paragraph, and its crate, having no row, fails the `dependencies` check once it exists.
 //! Only the Crate, Never depends on and Status cells are read; the others must be there, so
 //! every row has five cells, counted as written (GFM pads a short row and cuts a long one).
 //!
-//! "Never depends on" entries are I/O words or crate names. The I/O words name standard library
-//! APIs, as `ARCHITECTURE.md` defines them: `fs`, `process` and `any I/O` each mean the file,
-//! network, process, environment and clock APIs; `clock` alone means the two clock `now`
-//! functions. They win over a row of the same name (`process`). One written with other letter
-//! case (`FS`, `Any I/O`) is rejected with the exact word to write, not read as a crates.io name.
-//! `std`, and a standard library module that core-io bans whole (`net`, `env`, `os`: see
-//! `core_io/bans.rs`), are rejected: they name no crate we use, and the I/O words are how the
-//! table bans those APIs. `time` is the crates.io crate. A crate name that is a row of the
-//! table, or exactly a row's package (`clauseo-process`, since a bare `process` is the I/O
-//! word), is that row's crate; any other name is the crates.io package of that name.
-//! A name that looks like ours but is neither is rejected, so a typo never turns into a ban on a
-//! crates.io package nobody uses: a name starting with `clauseo-` in any case (`clauseo-xtask`
-//! too: the xtask row's package is `xtask`), a name holding `_` (our row names hold `_`,
-//! crates.io names are written with `-` here, and cargo reads the two the same), and a name
-//! within one edit of a row name, ignoring case, reading `-` as `_`, a swap of two adjacent
-//! letters counting as one edit. `<name> (crates.io)` names the crates.io package `<name>` and
-//! skips those rules, for a real crate that sits one edit from a row (`rmcp`, near `mcp`).
+//! This doc is the one home of the exact rules for the "Never depends on" entries;
+//! `ARCHITECTURE.md` says what a row's author needs, and defines the I/O words (`fs`,
+//! `process`, `any I/O`, `clock`). An entry is read as the first of these that fits:
+//! - `<name> (crates.io)`: the crates.io package `<name>`, whatever the rules below say of it,
+//!   for a real crate that sits one edit from a row (`rmcp`, near `mcp`);
+//! - an I/O word, exactly as written. It wins over a row of the same name (`process`);
+//! - an I/O word in other letter case (`FS`, `Any I/O`): rejected with the exact word to write,
+//!   not read as a crates.io name;
+//! - `std`, or a standard library module that core-io bans whole (`net`, `env`, `os`: see
+//!   `core_io/bans.rs`): rejected, since it names no crate we use and the I/O words are how the
+//!   table bans those APIs. `time` is the crates.io crate;
+//! - a row's name: that row's crate, the package `clauseo-<name>` (`xtask` for `xtask`);
+//! - a row's package, in lowercase, `-` and `_` read the same (`clauseo-process`, since a bare
+//!   `process` is the I/O word): that row's crate;
+//! - any other name starting with `clauseo-` in any letter case: rejected, `clauseo-xtask` too
+//!   (the xtask row's package is `xtask`);
+//! - a name at most one edit from a row name, comparing in lowercase with `-` read as `_` (see
+//!   `fold`), an inserted, deleted or replaced letter or a swap of two adjacent letters each
+//!   counting as one edit: rejected as a likely typo of that row (`procesz`, `Mcp`,
+//!   `fake-agent`);
+//! - any other name holding `_`: rejected, since only our row names are written with `_` and
+//!   a crates.io name is written here with `-` (this check reads the two the same);
+//! - any other package name: the crates.io package of that name;
+//! - anything else: rejected as neither an I/O word nor a crate name.
 //!
-//! A ban names exactly one package. `tauri` bans the package `tauri`, not `tauri-runtime`,
-//! `tauri-utils`, `wry` or a fork under another name; banning a family means listing each of
-//! its packages.
+//! A rejected look-alike never turns into a ban on a crates.io package nobody uses, and its fix
+//! says how to write the ban either way. A ban names exactly one package. `tauri` bans the
+//! package `tauri` (in any letter case: crates.io names are unique ignoring case), not
+//! `tauri-runtime`, `tauri-utils`, `wry` or a fork under another name; banning a family means
+//! listing each of its packages.
 
 use crate::checks::{self, core_io, violation};
 use crate::violation::Violation;
@@ -182,10 +193,11 @@ pub(crate) fn row_name(package: &str) -> Option<&str> {
     }
 }
 
-/// `name` with every `-` written `_`: cargo treats the two as the same in a package name, so a
-/// row `transport_ws` is the package `clauseo-transport-ws`, and a ban matches either spelling.
+/// `name` in lowercase with every `-` written `_`: crates.io names are unique ignoring case
+/// and `-` against `_`, so a row `transport_ws` is the package `clauseo-transport-ws`, and a
+/// ban (`Tauri`) matches the package (`tauri`) whatever the spelling.
 pub(crate) fn fold(name: &str) -> String {
-    name.replace('-', "_")
+    name.to_ascii_lowercase().replace('-', "_")
 }
 
 /// The package of row `name`: `xtask`, else `clauseo-<name>`.

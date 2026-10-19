@@ -376,7 +376,7 @@ fn a_row_name_written_with_a_dash_is_rejected_as_ours() {
             FILE,
             7,
             "`transport-ws` in the Never depends on column of `host` is the row `transport_ws` written with `-` for `_`, and as written it would ban a crates.io package `transport-ws` instead of our `clauseo-transport_ws`",
-            "write `transport_ws` to ban our crate `clauseo-transport_ws`, or `transport-ws (crates.io)` if you mean the crates.io package: xtask/src/checks/crates_table.rs rejects a name within one edit of a row name (ignoring case, reading `-` as `_`, a swap of two letters counting as one edit)",
+            "write `transport_ws` to ban our crate `clauseo-transport_ws`, or `transport-ws (crates.io)` if you mean the crates.io package: the module doc of xtask/src/checks/crates_table.rs lists which names read as ours",
         )])
     );
 }
@@ -428,6 +428,28 @@ fn a_crates_io_marker_names_the_package_whatever_the_look_alike_rules_say() {
         parse(&bad).map_err(|found| found.iter().map(|v| v.message.clone()).collect::<Vec<_>>()),
         Err(vec![
             "`not a name (crates.io)` in the Never depends on column of `host` is neither an I/O word nor a crate name".to_owned()
+        ])
+    );
+}
+
+#[test]
+fn a_look_alike_of_a_row_named_like_an_io_word_is_told_to_write_its_package() {
+    let text = doc(
+        "| `host` | things | | clauseo-procesz, Clauseo-Process | planned |\n\
+         | `process` | things | | | planned |\n",
+    );
+    let at = |what: &str, fix: &str| violation(FILE, 7, what, fix);
+    assert_eq!(
+        parse(&text),
+        Err(vec![
+            at(
+                "`clauseo-procesz` in the Never depends on column of `host` starts with `clauseo-`, but `procesz` is no row of the Crates table, so it names none of our crates",
+                "write the name that bans the crate you mean (perhaps `clauseo-process`), add a row `procesz` for the crate, or write `clauseo-procesz (crates.io)` if you mean the crates.io package",
+            ),
+            at(
+                "`Clauseo-Process` in the Never depends on column of `host` is the package `clauseo-process` written with other letter case",
+                "write `clauseo-process` to ban our crate, or `Clauseo-Process (crates.io)` if you mean the crates.io package",
+            ),
         ])
     );
 }
