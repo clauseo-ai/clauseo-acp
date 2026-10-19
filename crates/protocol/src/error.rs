@@ -64,6 +64,18 @@ pub enum Error {
         /// The string given.
         code: String,
     },
+    /// A command or query is over one of the size limits `validate()` checks.
+    #[error("{kind}: {what} is {size}, over the limit of {max}")]
+    TooLarge {
+        /// The command, query or type being checked, such as `"SendPrompt"`.
+        kind: &'static str,
+        /// What was measured, as a fixed phrase such as `"prompt text in bytes"`.
+        what: &'static str,
+        /// The size found.
+        size: usize,
+        /// The largest size allowed.
+        max: usize,
+    },
     /// A value has no JSON text form (a map key that is binary, a list or a map), so it cannot be
     /// written as compact JSON text.
     #[error("no JSON text form")]
@@ -85,7 +97,8 @@ impl Error {
             | Self::OutOfRange { .. }
             | Self::Format { .. }
             | Self::UnknownPrefix { .. }
-            | Self::UnknownErrorCode { .. } => ErrorCode::CommandInvalid,
+            | Self::UnknownErrorCode { .. }
+            | Self::TooLarge { .. } => ErrorCode::CommandInvalid,
             Self::NotJson(_) => ErrorCode::Internal,
         }
     }

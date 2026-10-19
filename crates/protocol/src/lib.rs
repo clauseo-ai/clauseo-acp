@@ -13,7 +13,12 @@
 //! Everything public is re-exported here; modules are private. Start with [`Envelope`] and
 //! [`DomainEvent`] (one payload struct per kind, `DomainEvent::KINDS`, `DomainEvent::kind`),
 //! then [`StreamId`], [`Seq`], the uuid ids such as [`ThreadId`], [`ContentBlock`],
-//! [`RawPayload`], [`TextOrBlob`], [`AccountLimits`], [`ErrorCode`] and [`HostError`]. The serde
+//! [`RawPayload`], [`TextOrBlob`], [`AccountLimits`], [`ErrorCode`] and [`HostError`]. Clients
+//! send a [`CommandEnvelope`] around a [`HostCommand`] (checked by [`HostCommand::validate`],
+//! answered by a [`CommandOutcome`]) and read with a [`HostQuery`] ([`QueryResult`]). Subscribers
+//! receive [`HostEvent`]s: [`PatchBatch`]es of [`ViewPatch`]es over [`ViewEntry`]s (keyed by
+//! [`ViewEntry::id`], sorted by [`ViewEntry::order`]), or envelopes; [`Subscribe`],
+//! [`SubscribeEvents`] and [`Ack`] are the subscription calls' parameters. The serde
 //! form is the wire form: snake case, external tagging (a unit variant is a plain string, a data
 //! variant a one-key object, an event `{"<kind>": {...}}`), `None` fields left out, and
 //! `StreamId` and `EntryId` as one plain string `<kind>:<uuid>`. Events accept fields they do
@@ -31,6 +36,10 @@
 //!   values becomes its catch-all (`Unknown`, `Unsupported`) instead of failing, and an unknown
 //!   payload held as [`RawPayload`] writes back as it was read, in JSON and in `MessagePack`.
 //! - Error codes are append-only; a code's meaning never changes.
+//! - `validate()` checks shape only (lengths, counts, formats); state checks are the host's.
+//! - A view entry's inline cost ([`ViewEntry::inline_len`]) is UTF-8 bytes after JSON escaping,
+//!   without the quotes, summed over the entry's `Inline` values, `Vec` items included; the host
+//!   keeps it within [`INLINE_LIMIT_BYTES`]. Large variants are boxed (`ViewPatch` <= 64 bytes).
 //! - [`SCHEMA_VERSION`] changes only when a field is renamed, removed or retyped, with an upcaster
 //!   here.
 //!
@@ -45,7 +54,9 @@
 //! decoder, `ids.rs` and `stream.rs` for the ids, `raw.rs` for unknown payloads, `text.rs`
 //! for inline costs, `open_enum.rs` for how unknown variants decode, `content.rs`, `tool.rs`,
 //! `session.rs`, `turn.rs`, `approval.rs` and `matter.rs` for the payload types,
-//! `limits.rs` for account limits, `error_code.rs` for the codes.
+//! `limits.rs` for account limits, `error_code.rs` for the codes, `command.rs` and
+//! `command/validate.rs` for commands and their limits, `query.rs`, `view.rs` (entries in
+//! `view/entry.rs`) and `patch.rs` for what subscribers receive.
 
 #![deny(
     clippy::indexing_slicing,
@@ -56,6 +67,7 @@
 )]
 
 mod approval;
+mod command;
 mod content;
 mod envelope;
 mod error;
@@ -65,16 +77,24 @@ mod ids;
 mod limits;
 mod matter;
 mod open_enum;
+mod patch;
+mod query;
 mod raw;
 mod session;
 mod stream;
 mod text;
 mod tool;
 mod turn;
+mod view;
 
 pub use approval::{
     Deliverable, ElicitationOutcome, ElicitationRequest, ElicitationResponse, ExpiryReason,
     PermissionChoice, PermissionKind, PermissionOption, Principal,
+};
+pub use command::{
+    CommandEnvelope, CommandOutcome, ConfigValue, HostCommand, MAX_ELICITATION_VALUES_BYTES,
+    MAX_FILE_LIST, MAX_ID_TEXT_BYTES, MAX_PROMPT_FILES, MAX_PROMPT_TEXT_BYTES, MAX_TITLE_CHARS,
+    MatterSource,
 };
 pub use compact_str::CompactString;
 pub use content::{ContentBlock, PromptBlock, RawFrom, ToolCallContent};
@@ -104,6 +124,14 @@ pub use matter::{
     CheckpointKind, CheckpointRecorded, FileChoice, FileDecision, ImportSummary, MatterCreated,
     MatterKind, OutsideEdits, RestoreScope, VersionRestored,
 };
+pub use patch::{
+    Ack, HostEvent, PatchBatch, Subscribe, SubscribeEvents, ViewPatch, ViewPatchBody, ViewPosition,
+    ViewSnapshot,
+};
+pub use query::{
+    BlobRange, HostQuery, MAX_BLOB_READ_BYTES, MAX_PAGE_ENTRIES, MatterSummary, QueryResult,
+    ThreadSummary,
+};
 pub use raw::RawPayload;
 pub use session::{
     AgentCapabilities, AvailableCommand, CompactionStatus, ConfigCategory, ConfigChoice,
@@ -118,6 +146,12 @@ pub use text::{
 pub use tool::{ToolCallPatch, ToolCallStarted, ToolCallStatus, ToolKind, ToolLocation};
 pub use turn::{
     ChangeKind, Delivery, FileChange, SkippedFile, SkippedFileReason, SteerOutcome, StopReason,
+};
+pub use view::{
+    AgentContentEntry, AssistantMessageEntry, ContextUsage, ElicitationEntry, ElicitationState,
+    HeaderEntry, LimitStopEntry, MarkerEntry, MarkerKind, MatterHeaderEntry, NoticeEntry,
+    PermissionEntry, PermissionState, StepEntry, ThreadStatus, ToolCallEntry, UserMessageEntry,
+    UserMessageStatus, VersionEntry, ViewEntry,
 };
 
 /// The envelope's `schema_version` this crate writes: 1 at the freeze.
