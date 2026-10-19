@@ -33,16 +33,19 @@ converted document. From there they can call any IPC command the page can reach.
 - `built`: The one capability file grants no permission today; the `capabilities` check fails on
   `remote`, `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`
 - `built`: A pinned CSP: no remote images or connections, no `unsafe-eval`, `object-src 'none'`,
-  `base-uri 'none'`, Trusted Types; the `tauri-config` check pins the string
+  `base-uri 'none'`, Trusted Types enforced with one allowed policy, `clauseo-sanitize` (defence in
+  depth: engines without support ignore it); the `tauri-config` check pins the string
 - `built`: An `AppManifest` in `build.rs`, so app commands go through the access check; the command
   list is empty
-- `built`: No global Tauri object, a frozen prototype, no asset protocol (`tauri-config` check); no
-  devtools (`deny.toml` bans the feature)
+- `built`: No global Tauri object and a frozen prototype (`tauri-config` check); no asset protocol
+  (`tauri-config` check, and `deny.toml` bans tauri's `protocol-asset` feature); no devtools in
+  release builds (`deny.toml` bans the feature; Tauri turns devtools on in debug builds)
 - `designed`: Rust validates every command (types, opaque ids, allowed values); files are named by
   opaque ids, never paths
 - `designed`: A minimal command surface: send, subscribe, acknowledge, answer a permission, pick a
   folder, open a file or link
-- `designed`: Escalations only through native dialogs drawn by Rust, never a webview confirm
+- `designed`: Escalations only through native dialogs drawn by Rust, never a webview confirm; a
+  denial card only offers the escalation, and accepting it opens a native dialog
 - `designed`: The webview never navigates; links go through one `open_external` (https, http,
   mailto) with a native confirm; `open_file` opens only document types inside a matter
 - `designed`: Markdown renders without raw HTML; DOMPurify only on the few HTML-string paths
@@ -60,7 +63,8 @@ any ACP message, including permission requests with misleading text.
 - `designed`: Auto mode is on by default only where the sandbox is active; in tier C the adapters'
   ask modes apply and the matter shows Not protected
 - `designed`: A human approves only escalations: paths outside the matter, new web domains, sandbox
-  off, full-access modes, "always allow", all through native dialogs or denial cards
+  off, full-access modes, "always allow", all through native dialogs drawn by Rust or a denial card that
+  opens one
 - `designed`: Permission answers are checked against the options offered; options are labelled by
   kind, not by the agent's text
 - `designed`: ACP message sizes are capped; Clauseo advertises no file or terminal access to the
@@ -97,4 +101,5 @@ lawyer's documents somewhere.
 - `designed`: The sandbox allows no network except Clauseo's local proxy; raw sockets are refused
 - `designed`: The proxy is CONNECT-only, with an allowlist of domains measured per agent
 - `designed`: It never intercepts TLS; upstream it follows the OS proxy settings
-- `designed`: A blocked domain becomes a denial event and an "Allow this site?" card
+- `designed`: A blocked domain becomes a denial event and an "Allow this site?" card that opens a
+  native dialog
