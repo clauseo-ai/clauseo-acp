@@ -243,3 +243,12 @@ fn a_subshell_substitution_or_prefix_word_before_the_command_is_skipped() {
     assert_eq!(commands_of("exec cargo xtask check"), ["cargo xtask check"]);
     assert_eq!(commands_of("echo cargo xtask check"), Vec::<String>::new());
 }
+
+#[test]
+fn a_toolchain_after_cargo_is_skipped() {
+    assert_eq!(
+        commands_of("cargo +nightly xtask check"),
+        ["cargo xtask check"]
+    );
+    assert_eq!(commands_of("cargo + xtask check"), Vec::<String>::new());
+}

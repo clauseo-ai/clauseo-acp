@@ -101,7 +101,8 @@ fn commands_in(text: &str) -> Vec<Command> {
 }
 
 /// The command a part of a line holds, when it holds one (see `commands_in`). Before `cargo`, a
-/// `(` or `$(`, a `time`, `env` or `exec`, and assignments are skipped. After it, the words stop
+/// `(` or `$(`, a `time`, `env` or `exec`, and assignments are skipped, and a `+<toolchain>`
+/// right after `cargo` is skipped too (`cargo +nightly xtask`). After it, the words stop
 /// at a redirection (`2>&1`, `> out`, `<`) or a closing parenthesis, which are shell syntax, and
 /// at a placeholder. A placeholder in the subcommand's place gives no command.
 fn command_of(part: &str) -> Option<Command> {
@@ -117,6 +118,9 @@ fn command_of(part: &str) -> Option<Command> {
                 return None;
             }
             words.push(word);
+            continue;
+        }
+        if words.len() == 1 && raw.len() > 1 && raw.starts_with('+') {
             continue;
         }
         if raw.starts_with('#') {

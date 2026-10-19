@@ -352,3 +352,44 @@ pub(super) fn no_markdown_and_no_required_files() -> Inspection {
     let dir = Scratch::new("docs-no-markdown");
     inspect(&dir, &[])
 }
+
+pub(super) fn path_with_an_anchor_passes() -> Inspection {
+    guide("path-anchor", "See `xtask/src/main.rs#sec`.\n")
+}
+
+pub(super) fn path_with_a_line_range_passes() -> Inspection {
+    guide("path-line-range", "See `xtask/src/main.rs:1-3`.\n")
+}
+
+pub(super) fn path_with_trailing_punctuation_passes() -> Inspection {
+    guide(
+        "path-punctuation",
+        "See `xtask/src/main.rs,` `xtask/src/main.rs.` `xtask/src/main.rs;` `xtask/src/main.rs:`.\n",
+    )
+}
+
+pub(super) fn span_with_whitespace_passes() -> Inspection {
+    guide("span-whitespace", "See `crates/gone.rs (line 3)`.\n")
+}
+
+pub(super) fn wrong_case_top_folder_fails() -> Inspection {
+    guide("wrong-case-top-folder", "See `Xtask/src/main.rs`.\n")
+}
+
+pub(super) fn planned_missing_path_passes() -> Inspection {
+    guide(
+        "planned-missing",
+        "Packages: `ui/components` (planned) and `ui/bindings` (planned).\n",
+    )
+}
+
+pub(super) fn planned_existing_path_fails() -> Inspection {
+    guide(
+        "planned-existing",
+        "The entry: `xtask/src/main.rs` (planned).\n",
+    )
+}
+
+pub(super) fn unmarked_missing_path_fails() -> Inspection {
+    guide("unmarked-missing", "Packages: `ui/components` and more.\n")
+}

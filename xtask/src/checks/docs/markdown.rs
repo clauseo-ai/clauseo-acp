@@ -26,7 +26,13 @@ pub(super) struct Span {
     pub line: u32,
     /// The content, with each line break as a space and the ends trimmed.
     pub text: String,
+    /// True when the text right after the span starts with ` (planned)` (a line break counts as
+    /// the space), read from the events that follow it.
+    pub planned: bool,
 }
+
+/// The marker that says the backticked path before it does not exist yet.
+pub(super) const PLANNED: &str = " (planned)";
 
 /// A link destination, backslash escapes and entities read, anchor and query kept.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,12 +93,33 @@ fn read(text: &str, line_of: &dyn Fn(usize) -> u32, scan: &mut Scan) {
         }));
     let mut code: Option<Pieces> = None;
     let mut html: Option<Pieces> = None;
+    // The text after the last code span, while only text and line breaks have followed it.
+    let mut after: Option<String> = None;
     for (event, range) in events {
+        after = match (after.take(), &event) {
+            (Some(mut text), Event::Text(piece)) => {
+                text.push_str(piece);
+                Some(text)
+            }
+            (Some(mut text), Event::SoftBreak) => {
+                text.push(' ');
+                Some(text)
+            }
+            (Some(text), _) => {
+                mark_planned(&text, scan);
+                None
+            }
+            (None, _) => None,
+        };
         match event {
-            Event::Code(span) => scan.spans.push(Span {
-                line: line_of(range.start),
-                text: span.trim().to_owned(),
-            }),
+            Event::Code(span) => {
+                scan.spans.push(Span {
+                    line: line_of(range.start),
+                    text: span.trim().to_owned(),
+                    planned: false,
+                });
+                after = Some(String::new());
+            }
             // A reference link's destination is its definition's, which is read at its own line.
             Event::Start(
                 Tag::Link {
@@ -135,6 +162,16 @@ fn read(text: &str, line_of: &dyn Fn(usize) -> u32, scan: &mut Scan) {
             }
             _ => {}
         }
+    }
+    if let Some(text) = after {
+        mark_planned(&text, scan);
+    }
+}
+
+/// Marks the last span planned when `after`, the text that follows it, starts with `PLANNED`.
+fn mark_planned(after: &str, scan: &mut Scan) {
+    if let Some(span) = scan.spans.last_mut() {
+        span.planned = after.starts_with(PLANNED);
     }
 }
 

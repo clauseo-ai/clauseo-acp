@@ -186,3 +186,7 @@ pub(crate) fn unknown_subcommand_before_a_placeholder_fails() -> Inspection {
         "Run `cargo xtask frobnicate <x>`.\n",
     )
 }
+
+pub(crate) fn toolchain_command_fails() -> Inspection {
+    guide("toolchain", "Run `cargo +nightly xtask frobnicate`.\n")
+}

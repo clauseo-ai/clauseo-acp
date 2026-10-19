@@ -83,3 +83,25 @@ fn an_inline_tag_is_read_and_text_in_code_is_not() {
     );
     assert_eq!(spans("```\n`a`\n```\n"), Vec::<String>::new());
 }
+
+/// The spans of `text` that the planned marker follows.
+fn planned(text: &str) -> Vec<String> {
+    scan(text)
+        .spans
+        .into_iter()
+        .filter(|span| span.planned)
+        .map(|span| span.text)
+        .collect()
+}
+
+#[test]
+fn the_planned_marker_is_the_text_right_after_a_span() {
+    assert_eq!(
+        planned("`a` (planned), `b` (planned) and `c`.\n"),
+        ["a", "b"]
+    );
+    assert_eq!(planned("`a`\n(planned) here\n"), ["a"]);
+    assert_eq!(planned("`a` is (planned)\n"), Vec::<String>::new());
+    assert_eq!(planned("`a` *(planned)*\n"), Vec::<String>::new());
+    assert_eq!(planned("`a`\n\n(planned)\n"), Vec::<String>::new());
+}

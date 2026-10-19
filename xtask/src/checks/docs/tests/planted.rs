@@ -139,6 +139,29 @@ crate::checks::planted::cases! {
     missing_path_with_a_line_fails: FailsWith(&[
         bad_path!(1, "crates/gone.rs"),
     ]) => super::cases::missing_path_with_a_line_fails,
+    /// An anchor is cut before the lookup: `xtask/src/main.rs#sec`.
+    path_with_an_anchor_passes: Passes => super::cases::path_with_an_anchor_passes,
+    /// A line range is cut like a line: `xtask/src/main.rs:1-3`.
+    path_with_a_line_range_passes: Passes => super::cases::path_with_a_line_range_passes,
+    /// Trailing `,`, `.`, `;` and `:` are punctuation, not part of the path.
+    path_with_trailing_punctuation_passes: Passes => super::cases::path_with_trailing_punctuation_passes,
+    /// A span with whitespace is prose, not a path: `crates/gone.rs (line 3)`.
+    span_with_whitespace_passes: Passes => super::cases::span_with_whitespace_passes,
+    /// A top folder in the wrong case is still a repo path, and fails the exact lookup.
+    wrong_case_top_folder_fails: FailsWith(&[
+        bad_path!(1, "Xtask/src/main.rs"),
+    ]) => super::cases::wrong_case_top_folder_fails,
+    /// A path marked `(planned)` that does not exist passes.
+    planned_missing_path_passes: Passes => super::cases::planned_missing_path_passes,
+    /// A path marked `(planned)` that exists fails: the marker is dropped when the path lands.
+    planned_existing_path_fails: FailsWith(&[
+        "GUIDE.md:1: `xtask/src/main.rs` exists, but the text marks it (planned)\n    \
+         fix: drop the (planned) after `xtask/src/main.rs`",
+    ]) => super::cases::planned_existing_path_fails,
+    /// The same missing path without the marker still fails.
+    unmarked_missing_path_fails: FailsWith(&[
+        bad_path!(1, "ui/components"),
+    ]) => super::cases::unmarked_missing_path_fails,
     /// An `xtask` subcommand that clap does not know fails at its line, with clap's first line.
     unknown_xtask_subcommand: FailsWith(&[
         bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
@@ -174,6 +197,10 @@ crate::checks::planted::cases! {
     unknown_subcommand_before_a_placeholder_fails: FailsWith(&[
         bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
     ]) => super::cases::unknown_subcommand_before_a_placeholder_fails,
+    /// A `+<toolchain>` after `cargo` does not hide the command.
+    toolchain_command_fails: FailsWith(&[
+        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]) => super::cases::toolchain_command_fails,
     /// `AGENTS.md` at 121 lines fails at line 121, the first line over the limit.
     agents_121_lines: FailsWith(&[
         "AGENTS.md:121: AGENTS.md has 121 lines, over the limit of 120\n    \
