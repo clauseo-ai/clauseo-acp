@@ -39,11 +39,6 @@ macro_rules! domain_events {
         /// One event of a stream's log. Each known variant holds the payload struct of the same
         /// name; see the module docs for the wire form.
         #[derive(Debug, Clone, PartialEq)]
-        #[cfg_attr(
-            feature = "specta",
-            derive(specta::Type),
-            specta(type = shape::DomainEvent)
-        )]
         pub enum DomainEvent {
             $($(#[$doc])* $variant($ty),)+
             /// A kind this version does not know, from a newer Clauseo. It still advances
@@ -117,15 +112,23 @@ macro_rules! domain_events {
             }
         }
 
-        /// What specta exports for `DomainEvent`: the known kinds as one-key objects, no
-        /// `Unknown`, so the TypeScript matches the JSON.
+        // specta: `DomainEvent`'s type is `shape::DomainEvent`'s, the known kinds as one-key
+        // objects and no `Unknown`, so the TypeScript matches the JSON. Delegating (rather than
+        // `specta(type = ...)` with an inlined stand-in) leaves one entry of that name, not two.
+        #[cfg(feature = "specta")]
+        impl specta::Type for DomainEvent {
+            fn definition(types: &mut specta::Types) -> specta::datatype::DataType {
+                <shape::DomainEvent as specta::Type>::definition(types)
+            }
+        }
+
         #[cfg(feature = "specta")]
         mod shape {
             use super::*;
 
-            // Inlined, so `DomainEvent` is the only exported type of that name.
+            /// One event of a stream's log. Each known variant holds the payload struct of the
+            /// same name; see the module docs for the wire form.
             #[derive(serde::Serialize, specta::Type)]
-            #[specta(inline)]
             #[expect(dead_code, reason = "only its specta::Type impl is used")]
             pub(super) enum DomainEvent {
                 $($(#[$doc])* #[serde(rename = $kind)] $variant($ty),)+
