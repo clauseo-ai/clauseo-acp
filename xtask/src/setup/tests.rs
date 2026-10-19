@@ -115,22 +115,29 @@ pub(super) fn fake_tool(packing: Packing) -> Binary {
     }
 }
 
+/// Each tool in `TOOLS`, the one place the versions live, is pinned to an exact `x.y.z` (what
+/// `cargo install --version` then installs and nothing newer), and named once.
 #[test]
 fn the_cargo_tools_are_pinned() {
-    let pins: Vec<String> = TOOLS
-        .iter()
-        .map(|t| format!("{} {}", t.name, t.version))
-        .collect();
-    assert_eq!(
-        pins,
-        [
-            "cargo-nextest 0.9.148",
-            "cargo-deny 0.20.2",
-            "cargo-shear 1.14.0",
-            "typos-cli 1.51.1",
-            "taplo-cli 0.10.0",
-        ]
-    );
+    let exact = |v: &str| {
+        let parts: Vec<&str> = v.split('.').collect();
+        parts.len() == 3
+            && parts
+                .iter()
+                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    };
+    for t in TOOLS {
+        assert!(
+            exact(t.version),
+            "{} {} is not an exact x.y.z",
+            t.name,
+            t.version
+        );
+    }
+    let mut names: Vec<&str> = TOOLS.iter().map(|t| t.name).collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), TOOLS.len(), "a tool is pinned twice");
 }
 
 #[test]
@@ -336,8 +343,8 @@ fn an_install_whose_bin_is_not_on_path_says_to_put_it_there() {
         printed.contains(&format!(
             "faketool was installed, but this shell cannot run it (`faketool version` could not \
              start: not found)\n    fix: faketool was installed to {shown}, which is not on PATH: \
-             put {shown} on PATH (in your shell profile, for every new shell), then run cargo \
-             xtask setup again\n"
+             put it on PATH (in your shell profile, for every new shell), then run cargo xtask \
+             setup again\n"
         )),
         "{printed}"
     );

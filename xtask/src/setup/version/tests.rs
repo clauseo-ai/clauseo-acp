@@ -82,78 +82,29 @@ fn a_plain_setup_repeats_how_to_install_as_the_fix() {
 }
 
 #[test]
-fn after_an_install_another_version_earlier_on_path_is_named() {
-    assert_eq!(
-        fix_for(&differs(), Attempt::Installed, true),
-        "gitleaks was installed to /home/dev/.cargo/bin, but this shell runs another copy that \
-         comes earlier on PATH: run `which -a gitleaks` to list the copies, then remove the other \
-         one or put /home/dev/.cargo/bin before it on PATH"
-    );
-}
-
-#[test]
-fn after_an_install_to_a_bin_off_path_with_another_copy_the_fix_says_put_bin_before_it() {
-    let expected = "gitleaks was installed to /home/dev/.cargo/bin, which is not on PATH, so this \
-                    shell runs another copy: put /home/dev/.cargo/bin on PATH before that copy \
-                    (in your shell profile, for every new shell; `which -a gitleaks` lists the \
-                    copies), then run cargo xtask setup again";
-    assert_eq!(fix_for(&differs(), Attempt::Installed, false), expected);
-    assert_eq!(fix_for(&broken(), Attempt::Installed, false), expected);
-}
-
-#[test]
-fn after_an_install_a_failing_run_with_bin_on_path_asks_which_copy_ran() {
-    let file = bin().join("gitleaks").display().to_string();
-    assert_eq!(
-        fix_for(&broken(), Attempt::Installed, true),
-        format!(
-            "gitleaks was installed to /home/dev/.cargo/bin, but `gitleaks version` fails in \
-             this shell: run `which -a gitleaks` to see which copy runs. If it is {file}, run \
-             `{file} version` to see why it fails; otherwise remove the other copy or put \
-             /home/dev/.cargo/bin before it on PATH"
-        )
-    );
-}
-
-#[test]
 fn after_an_install_to_a_bin_off_path_the_fix_says_to_put_it_on_path() {
-    let lefthook = binary("lefthook");
-    let why = "`lefthook version` could not start: No such file or directory";
-    let missing = VersionCheck::Missing(why.into());
-    let machine = linux(&bin(), false);
-    assert_eq!(
-        version_failure(lefthook, &missing, "HOW", Attempt::Installed, &machine),
-        Some((
-            format!("lefthook was installed, but this shell cannot run it ({why})"),
-            "lefthook was installed to /home/dev/.cargo/bin, which is not on PATH: put \
-             /home/dev/.cargo/bin on PATH (in your shell profile, for every new shell), then run \
-             cargo xtask setup again"
-                .into(),
-        ))
-    );
-    assert_eq!(
-        version_failure(lefthook, &missing, "HOW", Attempt::None, &machine),
-        Some((format!("lefthook is not installed ({why})"), "HOW".into()))
-    );
+    for check in [differs(), missing(), broken()] {
+        assert_eq!(
+            fix_for(&check, Attempt::Installed, false),
+            "gitleaks was installed to /home/dev/.cargo/bin, which is not on PATH: put it on PATH \
+             (in your shell profile, for every new shell), then run cargo xtask setup again",
+            "{check:?}"
+        );
+    }
 }
 
 #[test]
-fn after_an_install_to_a_bin_on_path_a_binary_that_cannot_start_names_the_file() {
-    let file = bin().join("gitleaks").display().to_string();
-    assert_eq!(
-        fix_for(&missing(), Attempt::Installed, true),
-        format!(
-            "gitleaks was installed to /home/dev/.cargo/bin, which is on PATH, but it could not be \
-             started: run `{file}` to see why, then run cargo xtask setup again"
-        )
-    );
-}
-
-#[test]
-fn after_an_install_on_windows_the_fix_names_the_winget_links_folder() {
+fn after_an_install_otherwise_the_fix_asks_which_copy_runs() {
+    for check in [differs(), missing(), broken()] {
+        assert_eq!(
+            fix_for(&check, Attempt::Installed, true),
+            "run `which -a gitleaks` to see which copy of gitleaks this shell runs",
+            "{check:?}"
+        );
+    }
     let windows = Machine {
         os: "windows",
-        ..linux(&bin(), true)
+        ..linux(&bin(), false)
     };
     let fix = version_failure(
         binary("gitleaks"),
@@ -164,10 +115,7 @@ fn after_an_install_on_windows_the_fix_names_the_winget_links_folder() {
     );
     assert_eq!(
         fix.expect("a failed check").1,
-        "gitleaks was installed to winget's Links folder, usually \
-         %LOCALAPPDATA%\\Microsoft\\WinGet\\Links, but this shell does not run that copy. \
-         Another copy earlier on PATH, or a PATH not yet refreshed, is the likely cause: run \
-         `where gitleaks` to list the copies, or open a new shell and run cargo xtask setup again"
+        "run `where gitleaks` to see which copy of gitleaks this shell runs"
     );
 }
 

@@ -80,7 +80,7 @@ pub(crate) fn version_failure(
     let fix = match (attempt, check) {
         (Attempt::None, VersionCheck::Broken(_)) => format!("reinstall it: {how}"),
         (Attempt::None, _) => how.to_owned(),
-        (Attempt::Installed, _) => after_install_fix(machine, name, check),
+        (Attempt::Installed, _) => after_install_fix(machine, name),
         (Attempt::Failed, _) => format!(
             "the install of {name} above failed: do what its fix says, then run cargo xtask \
              setup again"
@@ -89,54 +89,24 @@ pub(crate) fn version_failure(
     Some((message, fix))
 }
 
-/// The fix when this run installed `name` and `check` still does not give the pinned copy: where
-/// the install put it, and the likely cause. Running the install again would change neither.
-fn after_install_fix(machine: &Machine<'_>, name: &str, check: &VersionCheck) -> String {
-    if machine.os == "windows" {
-        return format!(
-            "{name} was installed to winget's Links folder, usually \
-             %LOCALAPPDATA%\\Microsoft\\WinGet\\Links, but this shell does not run that copy. \
-             Another copy earlier on PATH, or a PATH not yet refreshed, is the likely cause: run \
-             `where {name}` to list the copies, or open a new shell and run cargo xtask setup again"
-        );
-    }
-    // An install on macOS or Linux has a bin directory: without one it fails before this.
-    let Some(bin) = &machine.cargo_bin else {
-        return format!("run `which -a {name}` to list the copies of {name} on PATH");
-    };
-    let bin_shown = bin.display();
-    let installed = format!("{name} was installed to {bin_shown}");
-    let profile = "in your shell profile, for every new shell";
-    match (check, on_path(bin, &machine.path)) {
-        // A copy at another version ran, so it is the one this shell finds first.
-        (VersionCheck::Differs(_), true) => format!(
-            "{installed}, but this shell runs another copy that comes earlier on PATH: run \
-             `which -a {name}` to list the copies, then remove the other one or put {bin_shown} \
-             before it on PATH"
+/// The fix when this run installed `name` and the check still does not give the pinned copy.
+/// Running the install again would not change that. Either bin is off PATH, or some copy earlier
+/// on PATH (or the new one) runs and is not the pinned version.
+fn after_install_fix(machine: &Machine<'_>, name: &str) -> String {
+    match &machine.cargo_bin {
+        Some(bin) if machine.os != "windows" && !on_path(bin, &machine.path) => format!(
+            "{name} was installed to {}, which is not on PATH: put it on PATH (in your shell \
+             profile, for every new shell), then run cargo xtask setup again",
+            bin.display()
         ),
-        (VersionCheck::Differs(_) | VersionCheck::Broken(_), false) => format!(
-            "{installed}, which is not on PATH, so this shell runs another copy: put {bin_shown} on \
-             PATH before that copy ({profile}; `which -a {name}` lists the copies), then run \
-             cargo xtask setup again"
-        ),
-        // Some copy ran and failed: the new one, or another that comes earlier on PATH.
-        (VersionCheck::Broken(_), true) => format!(
-            "{installed}, but `{name} version` fails in this shell: run `which -a {name}` to see \
-             which copy runs. If it is {}, run `{} version` to see why it fails; otherwise remove \
-             the other copy or put {bin_shown} before it on PATH",
-            bin.join(name).display(),
-            bin.join(name).display()
-        ),
-        (_, false) => format!(
-            "{installed}, which is not on PATH: put {bin_shown} on PATH ({profile}), then run cargo \
-             xtask setup again"
-        ),
-        // Nothing ran although bin is on PATH: the installed file itself cannot start here.
-        (_, true) => format!(
-            "{installed}, which is on PATH, but it could not be started: run \
-             `{}` to see why, then run cargo xtask setup again",
-            bin.join(name).display()
-        ),
+        _ => {
+            let which = if machine.os == "windows" {
+                "where"
+            } else {
+                "which -a"
+            };
+            format!("run `{which} {name}` to see which copy of {name} this shell runs")
+        }
     }
 }
 
