@@ -209,7 +209,7 @@ mod tests {
         );
         assert_eq!(
             verdict(Expect::Passes, empty),
-            Err("expected a pass, found:\n0 rows inspected in a.toml\n    fix: fake looks for rows in a.toml; restore them, or update xtask/src/checks/fake.rs if they moved".to_owned())
+            Err("expected a pass, found:\n0 rows inspected in a.toml\n    fix: fake looks for rows in a.toml; restore them, or, if they moved, update the consts xtask/src/checks/fake.rs builds that place from".to_owned())
         );
     }
 }

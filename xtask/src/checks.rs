@@ -180,7 +180,8 @@ impl StaticCheck {
             STOPPED_FIX.to_owned()
         } else {
             format!(
-                "{name} looks for {many} {place}; restore them, or update {source} if they moved",
+                "{name} looks for {many} {place}; restore them, or, if they moved, update the \
+                 consts {source} builds that place from",
                 name = self.name,
                 many = self.counts.many,
                 source = self.source,

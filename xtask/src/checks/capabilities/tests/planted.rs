@@ -24,7 +24,8 @@ crate::checks::planted::cases! {
     empty_folder: FailsWith(&[
         "0 capability files inspected in the desktop crate's capabilities/\n    \
          fix: capabilities looks for capability files in the desktop crate's capabilities/; restore them, \
-         or update xtask/src/checks/capabilities.rs if they moved",
+         or, if they moved, update the consts xtask/src/checks/capabilities.rs builds that \
+         place from",
     ]) => super::cases::empty_folder,
     /// `core:default` as a string value fails at the line of that string.
     core_default_value: FailsWith(&[

@@ -160,7 +160,7 @@ fn zero_inspected_fails_without_a_location_and_names_where_the_check_looked() {
         report.nothing_inspected,
         Some(Failure {
             message: "0 capability files inspected in the desktop crate's capabilities/".to_owned(),
-            fix: "tauri-config looks for capability files in the desktop crate's capabilities/; restore them, or update xtask/src/checks/tauri_config.rs if they moved".to_owned(),
+            fix: "tauri-config looks for capability files in the desktop crate's capabilities/; restore them, or, if they moved, update the consts xtask/src/checks/tauri_config.rs builds that place from".to_owned(),
         })
     );
 }

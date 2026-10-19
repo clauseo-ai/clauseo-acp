@@ -40,13 +40,13 @@ crate::checks::planted::cases! {
     /// A `ui/app/src` that is missing inspects nothing, and the zero line names the fix.
     missing_src: FailsWith(&[
         "0 UI source files inspected under ui/app/src\n    \
-         fix: buildtime-edits looks for UI source files under ui/app/src; restore them, or update \
-         xtask/src/checks/buildtime_edits.rs if they moved",
+         fix: buildtime-edits looks for UI source files under ui/app/src; restore them, or, if \
+         they moved, update the consts xtask/src/checks/buildtime_edits.rs builds that place from",
     ]) => super::missing_src,
     /// An empty `ui/app/src` inspects nothing the same way.
     empty_src: FailsWith(&[
         "0 UI source files inspected under ui/app/src\n    \
-         fix: buildtime-edits looks for UI source files under ui/app/src; restore them, or update \
-         xtask/src/checks/buildtime_edits.rs if they moved",
+         fix: buildtime-edits looks for UI source files under ui/app/src; restore them, or, if \
+         they moved, update the consts xtask/src/checks/buildtime_edits.rs builds that place from",
     ]) => super::empty_src,
 }

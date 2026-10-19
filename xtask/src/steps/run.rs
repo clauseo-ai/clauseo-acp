@@ -286,7 +286,7 @@ mod tests {
             without_secs(&text(out)),
             "==> fake-static: built-in static check\n\
              0 docs inspected in docs/\n\
-             \x20   fix: fake-static looks for docs in docs/; restore them, or update xtask/src/checks/fake_static.rs if they moved\n\
+             \x20   fix: fake-static looks for docs in docs/; restore them, or, if they moved, update the consts xtask/src/checks/fake_static.rs builds that place from\n\
              fake-static FAILED (0 docs inspected, S)\n"
         );
     }
