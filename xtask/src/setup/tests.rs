@@ -124,7 +124,7 @@ fn install_runs_the_pinned_command_for_each_os_and_arch() {
         };
         let mut out = Printer::new(Vec::new(), false);
         let installed = install_binaries(&mut out, BINARIES, os, arch, &dir, &mut runner);
-        assert!(installed, "{os}-{arch}");
+        assert_eq!(installed, vec![true; BINARIES.len()], "{os}-{arch}");
         let expected: Vec<(Cmd, PathBuf)> = BINARIES
             .iter()
             .map(|b| (expected_cmd(b, os, arch), dir.to_path_buf()))
@@ -148,7 +148,7 @@ fn a_failed_install_names_the_command_as_the_fix() {
         &dir,
         &mut runner,
     );
-    assert!(!installed);
+    assert_eq!(installed, [false]);
     let printed = String::from_utf8(out.into_inner()).expect("utf-8");
     assert_eq!(
         printed,
@@ -179,7 +179,7 @@ fn a_command_that_cannot_start_names_the_command_as_the_fix() {
         &dir,
         &mut runner,
     );
-    assert!(!installed);
+    assert_eq!(installed, [false]);
     let printed = String::from_utf8(out.into_inner()).expect("utf-8");
     assert_eq!(
         printed,
@@ -201,7 +201,7 @@ fn a_platform_with_no_release_runs_nothing_and_fails_with_the_download_text() {
     };
     let mut out = Printer::new(Vec::new(), false);
     let installed = install_binaries(&mut out, BINARIES, "freebsd", "x86_64", &dir, &mut runner);
-    assert!(!installed);
+    assert_eq!(installed, [false, false]);
     assert_eq!(calls, 0);
     let lines: Vec<String> = BINARIES
         .iter()
@@ -213,4 +213,122 @@ fn a_platform_with_no_release_runs_nothing_and_fails_with_the_download_text() {
         .collect();
     let printed = String::from_utf8(out.into_inner()).expect("utf-8");
     assert_eq!(printed, lines.concat());
+}
+
+#[test]
+fn a_plain_setup_repeats_the_install_command_as_the_fix() {
+    let gitleaks = binary("gitleaks");
+    let install = install_command(gitleaks, "macos", "aarch64");
+    assert_eq!(
+        version_failure(
+            gitleaks,
+            &VersionCheck::Differs("8.21.0".into()),
+            &install,
+            false,
+            "macos",
+        ),
+        Some((
+            "gitleaks version is 8.21.0, the pin is 8.30.1".into(),
+            format!("run `{install}`"),
+        ))
+    );
+}
+
+#[test]
+fn after_an_install_a_mismatch_names_where_it_went_and_the_likely_cause() {
+    let gitleaks = binary("gitleaks");
+    let install = install_command(gitleaks, "macos", "aarch64");
+    let found = VersionCheck::Differs("8.21.0".into());
+    assert_eq!(
+        version_failure(gitleaks, &found, &install, true, "macos"),
+        Some((
+            "gitleaks version is 8.21.0, the pin is 8.30.1".into(),
+            "gitleaks was installed to $CARGO_HOME/bin, or ~/.cargo/bin without CARGO_HOME, \
+             but this shell does not run that copy. Another copy earlier on PATH, or a PATH \
+             not yet refreshed, is the likely cause: run `which -a gitleaks` to list the \
+             copies, or open a new shell and run cargo xtask setup again"
+                .into(),
+        ))
+    );
+    assert_eq!(
+        version_failure(gitleaks, &found, &install, true, "windows"),
+        Some((
+            "gitleaks version is 8.21.0, the pin is 8.30.1".into(),
+            "gitleaks was installed to winget's Links folder, usually \
+             %LOCALAPPDATA%\\Microsoft\\WinGet\\Links, but this shell does not run that copy. \
+             Another copy earlier on PATH, or a PATH not yet refreshed, is the likely cause: \
+             run `where gitleaks` to list the copies, or open a new shell and run cargo xtask \
+             setup again"
+                .into(),
+        ))
+    );
+}
+
+#[test]
+fn after_an_install_a_missing_binary_is_installed_but_not_run() {
+    let lefthook = binary("lefthook");
+    let install = install_command(lefthook, "linux", "x86_64");
+    let why = "`lefthook version` could not start: No such file or directory";
+    assert_eq!(
+        version_failure(
+            lefthook,
+            &VersionCheck::Missing(why.into()),
+            &install,
+            true,
+            "linux",
+        ),
+        Some((
+            format!("lefthook was installed, but this shell cannot run it ({why})"),
+            "lefthook was installed to $CARGO_HOME/bin, or ~/.cargo/bin without CARGO_HOME, \
+             but this shell does not run that copy. Another copy earlier on PATH, or a PATH \
+             not yet refreshed, is the likely cause: run `which -a lefthook` to list the \
+             copies, or open a new shell and run cargo xtask setup again"
+                .into(),
+        ))
+    );
+    assert_eq!(
+        version_failure(
+            lefthook,
+            &VersionCheck::Missing(why.into()),
+            &install,
+            false,
+            "linux",
+        ),
+        Some((
+            format!("lefthook is not installed ({why})"),
+            format!("run `{install}`"),
+        ))
+    );
+}
+
+#[test]
+fn a_binary_that_broke_after_an_install_is_reinstalled_as_before() {
+    let gitleaks = binary("gitleaks");
+    let install = install_command(gitleaks, "linux", "x86_64");
+    let broken = VersionCheck::Broken(String::new());
+    assert_eq!(
+        version_failure(gitleaks, &broken, &install, true, "linux"),
+        Some((
+            "gitleaks is installed, but `gitleaks version` failed: no output".into(),
+            format!("reinstall it: run `{install}`"),
+        ))
+    );
+}
+
+#[test]
+fn a_matching_version_has_no_failure_either_way() {
+    let gitleaks = binary("gitleaks");
+    let install = install_command(gitleaks, "linux", "x86_64");
+    for installed_now in [false, true] {
+        assert_eq!(
+            version_failure(
+                gitleaks,
+                &VersionCheck::Matches,
+                &install,
+                installed_now,
+                "linux",
+            ),
+            None
+        );
+    }
 }

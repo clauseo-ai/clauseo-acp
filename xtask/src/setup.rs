@@ -187,9 +187,10 @@ pub(crate) fn run(binaries: bool) -> ExitCode {
     for tool in TOOLS {
         any_failed |= !install_tool(&mut out, tool, &root);
     }
+    let mut installed = vec![false; BINARIES.len()];
     if binaries {
         let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
-        let installed = install_binaries(
+        installed = install_binaries(
             &mut out,
             BINARIES,
             os,
@@ -197,10 +198,10 @@ pub(crate) fn run(binaries: bool) -> ExitCode {
             &root,
             &mut process::run_inherit,
         );
-        any_failed |= !installed;
+        any_failed |= installed.contains(&false);
     }
-    for binary in BINARIES {
-        any_failed |= !check_binary(&mut out, binary, &root);
+    for (binary, &installed_now) in BINARIES.iter().zip(&installed) {
+        any_failed |= !check_binary(&mut out, binary, &root, installed_now);
     }
     out.note(
         "hooks: run `lefthook install` once per clone to turn on the pre-commit and pre-push hooks",
@@ -213,7 +214,7 @@ pub(crate) fn run(binaries: bool) -> ExitCode {
 }
 
 /// Runs the install command of each binary for `os`/`arch` in `root`, printing each one before
-/// it runs. Continues past failures. Returns whether every binary was installed.
+/// it runs. Continues past failures. Returns, for each binary, whether this run installed it.
 fn install_binaries<W: Write>(
     out: &mut Printer<W>,
     binaries: &[Binary],
@@ -221,12 +222,12 @@ fn install_binaries<W: Write>(
     arch: &str,
     root: &Path,
     runner: &mut Runner<'_>,
-) -> bool {
-    let mut all_installed = true;
+) -> Vec<bool> {
+    let mut installed = Vec::with_capacity(binaries.len());
     for binary in binaries {
-        all_installed &= install_binary(out, binary, os, arch, root, runner);
+        installed.push(install_binary(out, binary, os, arch, root, runner));
     }
-    all_installed
+    installed
 }
 
 /// Runs the install command of one binary. A platform with no release asset runs nothing and
@@ -300,51 +301,101 @@ fn install_tool(out: &mut Printer<std::io::Stdout>, tool: &Tool, root: &Path) ->
     }
 }
 
-fn check_binary(out: &mut Printer<std::io::Stdout>, binary: &Binary, root: &Path) -> bool {
-    let install = install_command(binary, std::env::consts::OS, std::env::consts::ARCH);
+/// Checks `binary`'s version against its pin and reports it. `installed_now` says this run
+/// installed it, so a failed check says where the install put it.
+fn check_binary(
+    out: &mut Printer<std::io::Stdout>,
+    binary: &Binary,
+    root: &Path,
+    installed_now: bool,
+) -> bool {
+    let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
+    let install = install_command(binary, os, arch);
     out.note(format!("{} {}: {install}", binary.name, binary.version));
-    let cmd = Cmd::new(Program::Named(binary.name), ["version"]);
+    let cmd = version_cmd(binary);
     let ran = process::run_quiet(&cmd, root)
         .map(|quiet| (quiet.success, quiet.stdout, quiet.stderr))
         .map_err(|error| format!("`{cmd}` could not start: {error}"));
-    match compare_version(binary.version, ran) {
-        VersionCheck::Matches => {
-            out.note(format!("{} version {} ok", binary.name, binary.version));
-            true
+    let check = compare_version(binary.version, ran);
+    if let Some((message, fix)) = version_failure(binary, &check, &install, installed_now, os) {
+        out.failure(&message, &fix);
+        return false;
+    }
+    out.note(format!("{} version {} ok", binary.name, binary.version));
+    true
+}
+
+/// `<name> version`, the command that prints the installed version.
+fn version_cmd(binary: &Binary) -> Cmd {
+    Cmd::new(Program::Named(binary.name), ["version"])
+}
+
+/// The message and fix for a version check that failed, or `None` when it matched. `install` is
+/// the command for this OS, which a plain fix repeats. When `installed_now` is set, this run has
+/// just installed the binary and it still does not give the pin, so the fix names where the
+/// install put it and the likely cause instead of repeating `install`.
+fn version_failure(
+    binary: &Binary,
+    check: &VersionCheck,
+    install: &str,
+    installed_now: bool,
+    os: &str,
+) -> Option<(String, String)> {
+    let name = binary.name;
+    let install_fix = || {
+        if installed_now {
+            after_install_fix(os, name)
+        } else {
+            format!("run `{install}`")
         }
-        VersionCheck::Differs(found) => {
-            out.failure(
-                &format!(
-                    "{} version is {found}, the pin is {}",
-                    binary.name, binary.version
-                ),
-                &format!("run `{install}`"),
-            );
-            false
-        }
-        VersionCheck::Broken(stderr) => {
-            out.failure(
-                &format!(
-                    "{} is installed, but `{cmd}` failed: {}",
-                    binary.name,
-                    if stderr.is_empty() {
-                        "no output"
-                    } else {
-                        stderr.as_str()
-                    }
-                ),
-                &format!("reinstall it: run `{install}`"),
-            );
-            false
-        }
+    };
+    match check {
+        VersionCheck::Matches => None,
+        VersionCheck::Differs(found) => Some((
+            format!("{name} version is {found}, the pin is {}", binary.version),
+            install_fix(),
+        )),
+        VersionCheck::Broken(stderr) => Some((
+            format!(
+                "{name} is installed, but `{}` failed: {}",
+                version_cmd(binary),
+                if stderr.is_empty() {
+                    "no output"
+                } else {
+                    stderr.as_str()
+                }
+            ),
+            format!("reinstall it: run `{install}`"),
+        )),
+        VersionCheck::Missing(why) if installed_now => Some((
+            format!("{name} was installed, but this shell cannot run it ({why})"),
+            install_fix(),
+        )),
         VersionCheck::Missing(why) => {
-            out.failure(
-                &format!("{} is not installed ({why})", binary.name),
-                &format!("run `{install}`"),
-            );
-            false
+            Some((format!("{name} is not installed ({why})"), install_fix()))
         }
     }
+}
+
+/// The fix when this run installed `name` and this shell still does not give the pinned copy: where
+/// the install put it, and the likely cause. Running the install again would change neither.
+fn after_install_fix(os: &str, name: &str) -> String {
+    let (place, lookup) = if os == "windows" {
+        (
+            "winget's Links folder, usually %LOCALAPPDATA%\\Microsoft\\WinGet\\Links",
+            "where",
+        )
+    } else {
+        (
+            "$CARGO_HOME/bin, or ~/.cargo/bin without CARGO_HOME",
+            "which -a",
+        )
+    };
+    format!(
+        "{name} was installed to {place}, but this shell does not run that copy. Another copy \
+         earlier on PATH, or a PATH not yet refreshed, is the likely cause: run `{lookup} {name}` \
+         to list the copies, or open a new shell and run cargo xtask setup again"
+    )
 }
 
 #[cfg(test)]
