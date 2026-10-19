@@ -9,7 +9,10 @@
 # env.rs, process.rs, net/, os/unix/{fs.rs,process.rs,net/} and os/windows/{fs.rs,process.rs}.
 # It names every stable public function and type (traits included) of std::fs, std::env,
 # std::process and std::net, and of std::os::{unix,windows}::{fs,net,process}, written out
-# because clippy bans items, not modules; then the disk, clock and stream reads outside them.
+# because clippy bans items, not modules; then the disk, clock and stream reads outside them,
+# and the trait methods and functions elsewhere in std that do I/O without a value of a banned
+# type (ToSocketAddrs::to_socket_addrs, IsTerminal::is_terminal, Termination::report,
+# thread::available_parallelism, Backtrace::capture and force_capture).
 # Left out:
 # - unstable items (std::fs::Dir, std::os::windows::net, ...): stable Rust cannot name them;
 # - the core::net types std::net re-exports (IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr,
@@ -17,11 +20,18 @@
 #   ban core::net's own data types, which do no I/O;
 # - the constants of std::env::consts, which clippy cannot ban and which read nothing at run time;
 # - methods of the types below and of their extension traits: they need a value of a banned type;
-# - std::time::Instant::now and std::time::SystemTime::now, which the root clippy.toml bans.
+# - std::time::Instant::now and std::time::SystemTime::now, which the root clippy.toml bans;
+# - std::os::fd (raw and owned handles): making one from nothing takes unsafe code, which the
+#   workspace lints deny;
+# - waits with a timeout (thread::park_timeout, Condvar::wait_timeout, mpsc recv_timeout): they
+#   read the clock to wait, not to hand time to the caller;
+# - RandomState::new and HashMap::new, which read OS randomness once per thread;
+# - print!, eprintln! and dbg!: macros, not functions; the workspace lints deny print_stdout,
+#   print_stderr and dbg_macro, and core-io requires `[lints] workspace = true`.
 # allow-invalid = true marks the std::os::unix and std::os::windows entries: clippy warns about a
 # path that does not resolve on the target it builds for, and each of those modules exists on
 # one family only.
-# 63 disallowed-methods and 56 disallowed-types entries.
+# 69 disallowed-methods and 56 disallowed-types entries.
 
 disallowed-methods = [
   # std::fs
@@ -92,6 +102,14 @@ disallowed-methods = [
   { path = "std::io::stderr", reason = "the standard streams are I/O; a crate whose ARCHITECTURE.md row bans I/O takes input and returns output as values" },
   { path = "std::io::stdin", reason = "the standard streams are I/O; a crate whose ARCHITECTURE.md row bans I/O takes input and returns output as values" },
   { path = "std::io::stdout", reason = "the standard streams are I/O; a crate whose ARCHITECTURE.md row bans I/O takes input and returns output as values" },
+  # Trait methods and functions outside the modules above that do I/O on a value of a type that
+  # is not banned (a str, a Result, an fd handle) or on no value at all
+  { path = "std::net::ToSocketAddrs::to_socket_addrs", reason = "resolves a host name (DNS) for a str, a String or a (host, port) pair; a crate whose ARCHITECTURE.md row bans I/O opens no socket and resolves no name" },
+  { path = "std::io::IsTerminal::is_terminal", reason = "asks the OS whether a handle is a terminal; a crate whose ARCHITECTURE.md row bans I/O takes the answer as a parameter" },
+  { path = "std::process::Termination::report", reason = "prints an Err to stderr; a crate whose ARCHITECTURE.md row bans I/O returns the error as a value" },
+  { path = "std::thread::available_parallelism", reason = "asks the OS (cgroup files under /proc on Linux); a crate whose ARCHITECTURE.md row bans I/O takes the count as a parameter" },
+  { path = "std::backtrace::Backtrace::capture", reason = "reads RUST_LIB_BACKTRACE and RUST_BACKTRACE from the environment, and printing it reads the executable's debug info; a crate whose ARCHITECTURE.md row bans I/O returns errors as values" },
+  { path = "std::backtrace::Backtrace::force_capture", reason = "printing it reads the executable's debug info from disk; a crate whose ARCHITECTURE.md row bans I/O returns errors as values" },
 ]
 
 disallowed-types = [
