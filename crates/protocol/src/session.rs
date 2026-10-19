@@ -86,7 +86,7 @@ enum_with_all! {
         /// Clauseo stopped the idle agent to save memory.
         IdleStopped,
         /// A reason from a newer Clauseo; written back as the plain string `kind`.
-        #[serde(untagged, serialize_with = "serialize_kind")]
+        #[serde(untagged, serialize_with = "serialize_kind::<DetachReason, _>")]
         #[cfg_attr(feature = "specta", specta(type = String))]
         Unknown {
             /// The reason's key as read.
@@ -157,7 +157,9 @@ pub struct ConfigOption {
     pub kind: ConfigOptionKind,
 }
 
-/// What a config option configures. ACP's categories; a missing or unknown one is `Other`.
+/// What a config option configures: ACP's categories plus `Other`. The enum is closed, so a
+/// string it does not list fails to decode; `acp` (R10) maps ACP's missing or unknown category to
+/// `Other` before the event is built.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -279,24 +281,30 @@ pub struct Cost {
 pub struct TurnUsage {
     /// Every token the turn used.
     #[cfg_attr(feature = "specta", specta(type = u32))]
+    #[serde(with = "crate::number::safe")]
     pub total: u64,
     /// Input tokens.
     #[cfg_attr(feature = "specta", specta(type = u32))]
+    #[serde(with = "crate::number::safe")]
     pub input: u64,
     /// Output tokens.
     #[cfg_attr(feature = "specta", specta(type = u32))]
+    #[serde(with = "crate::number::safe")]
     pub output: u64,
     /// Thinking tokens, when reported apart.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[cfg_attr(feature = "specta", specta(type = Option<u32>))]
+    #[serde(with = "crate::number::safe_opt")]
     pub thought: Option<u64>,
     /// Input tokens read from the agent's cache.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[cfg_attr(feature = "specta", specta(type = Option<u32>))]
+    #[serde(with = "crate::number::safe_opt")]
     pub cached_read: Option<u64>,
     /// Input tokens written to the agent's cache.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[cfg_attr(feature = "specta", specta(type = Option<u32>))]
+    #[serde(with = "crate::number::safe_opt")]
     pub cached_write: Option<u64>,
 }
 

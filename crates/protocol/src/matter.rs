@@ -26,6 +26,7 @@ pub struct ImportSummary {
     pub files: u32,
     /// Their total size in bytes.
     #[cfg_attr(feature = "specta", specta(type = u32))]
+    #[serde(with = "crate::number::safe")]
     pub bytes: u64,
     /// Cloud placeholders skipped because their content is not on this computer.
     pub cloud_only: u32,

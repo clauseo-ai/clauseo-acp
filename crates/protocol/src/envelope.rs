@@ -49,4 +49,12 @@ impl Envelope {
             event,
         }
     }
+
+    /// True when this version can read the envelope: its `schema_version` is at most
+    /// [`SCHEMA_VERSION`]. Older versions are upcast on read. A reader that finds a newer one
+    /// (written by a newer Clauseo) stops and returns `store.newer_version` rather than
+    /// guessing at fields whose meaning may have changed.
+    pub const fn is_supported(&self) -> bool {
+        self.schema_version <= SCHEMA_VERSION
+    }
 }

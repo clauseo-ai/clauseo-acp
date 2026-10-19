@@ -53,6 +53,7 @@ pub enum HostQuery {
         hash: BlobHash,
         /// The first byte to read, at most [`MAX_SAFE`].
         #[cfg_attr(feature = "specta", specta(type = u32))]
+        #[serde(with = "crate::number::safe")]
         offset: u64,
         /// How many bytes, 1 to [`MAX_BLOB_READ_BYTES`].
         len: u32,
@@ -157,9 +158,11 @@ pub struct ThreadSummary {
 pub struct BlobRange {
     /// The byte where `text` starts.
     #[cfg_attr(feature = "specta", specta(type = u32))]
+    #[serde(with = "crate::number::safe")]
     pub offset: u64,
     /// The byte just after `text`.
     #[cfg_attr(feature = "specta", specta(type = u32))]
+    #[serde(with = "crate::number::safe")]
     pub end: u64,
     /// The text.
     pub text: String,

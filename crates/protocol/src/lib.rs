@@ -31,7 +31,15 @@
 //! - No I/O, no clock, no randomness, no id minting: the host mints ids and passes time in.
 //! - Constructors and `Deserialize` check the same rules (the webview is untrusted): Clauseo ids
 //!   are v7 UUIDs, `Seq` starts at 1, and every 64-bit number stays at most [`MAX_SAFE`]
-//!   (2^53 - 1), so TypeScript reads it as a `number`.
+//!   (2^53 - 1), so TypeScript reads it as a `number`. A plain `u64` field refuses a larger
+//!   value on encode and on decode (`number.rs`); producers of agent-reported counts cap them
+//!   with [`clamp_safe`].
+//! - Serialising an `Unknown` whose kind is one of its type's known kinds is an error, so the
+//!   log never holds an entry that would decode as a different, malformed variant.
+//! - An [`Envelope`] newer than [`SCHEMA_VERSION`] is not [`Envelope::is_supported`]; a reader
+//!   returns `store.newer_version` for it.
+//! - Matter-level events ([`DomainEvent::is_matter_level`]) go in a matter's stream, every other
+//!   kind in a thread's.
 //! - Events are append-only and decode in one pass. A newer value in an enum that decodes unknown
 //!   values becomes its catch-all (`Unknown`, `Unsupported`) instead of failing, and an unknown
 //!   payload held as [`RawPayload`] writes back as it was read, in JSON and in `MessagePack`.
@@ -76,6 +84,7 @@ mod event;
 mod ids;
 mod limits;
 mod matter;
+mod number;
 mod open_enum;
 mod patch;
 mod query;
@@ -124,6 +133,7 @@ pub use matter::{
     CheckpointKind, CheckpointRecorded, FileChoice, FileDecision, ImportSummary, MatterCreated,
     MatterKind, OutsideEdits, RestoreScope, VersionRestored,
 };
+pub use number::clamp_safe;
 pub use patch::{
     Ack, HostEvent, PatchBatch, Subscribe, SubscribeEvents, ViewPatch, ViewPatchBody, ViewPosition,
     ViewSnapshot,

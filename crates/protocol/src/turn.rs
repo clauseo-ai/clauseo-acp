@@ -45,7 +45,7 @@ enum_with_all! {
             turn: TurnId = TurnId::NIL,
         },
         /// An outcome from a newer Clauseo; written back as the plain string `kind`.
-        #[serde(untagged, serialize_with = "serialize_kind")]
+        #[serde(untagged, serialize_with = "serialize_kind::<SteerOutcome, _>")]
         #[cfg_attr(feature = "specta", specta(type = String))]
         Unknown {
             /// The outcome's key as read.
@@ -128,6 +128,7 @@ pub struct FileChange {
     /// Its size in bytes after the change (before it, for a deleted file), at most
     /// [`MAX_SAFE`](crate::MAX_SAFE).
     #[cfg_attr(feature = "specta", specta(type = u32))]
+    #[serde(with = "crate::number::safe")]
     pub size_bytes: u64,
     /// The watcher saw it change during the turn with no matching agent tool call, so it may
     /// hold the lawyer's own edits. Undo shows it unticked.
