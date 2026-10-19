@@ -1,0 +1,14 @@
+{"scenario":"cancel-late-updates","description":"Streaming answer; after session/cancel, two late chunks and a tool_call_update arrive before the cancelled response, then one chunk after it; a second prompt ends end_turn","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-late-1","title":"Search for \"cap\"","name":"Grep","kind":"search","status":"in_progress","locations":[{"path":"{{cwd}}/brief.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause "}}}}
+{"expect":{"method":"session/cancel","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"caps liability "}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"at the fees "}}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-late-1","status":"completed"}}}
+{"respond":{"to":"p1","result":{"stopReason":"cancelled"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Still writing."}}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Second answer."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

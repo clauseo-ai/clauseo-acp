@@ -1,0 +1,7 @@
+{"scenario":"unknown-update","description":"A chunk, a session/update whose sessionUpdate name is in neither the stable nor the unstable schema, a chunk, end_turn","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Before the unknown update. "}}}}
+{"update":{"update":{"sessionUpdate":"_clauseo_test_unknown","messageId":"m-answer-1","content":{"type":"text","text":"Never shown."}},"raw":true}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"After the unknown update."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

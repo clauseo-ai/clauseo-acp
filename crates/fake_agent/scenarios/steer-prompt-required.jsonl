@@ -1,0 +1,13 @@
+{"scenario":"steer-prompt-required","description":"claude-agent-acp steering after the turn ended: prompt 1 ends first, the steer is answered promptRequired/noRunningTurn, and the client sends the steer as prompt 2","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"_meta":{"claudeCode":{"promptQueueing":true}}},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"},"_meta":{"steering":{"supported":true}}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","mcpServers":[]}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause "}}}}
+{"expect":{"method":"_session/steering","as":"steer","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Focus on clause 4"}],"_meta":{"steering":{"idleBehavior":"promptRequired"}}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"respond":{"to":"steer","result":{"outcome":"promptRequired","reason":"noRunningTurn"},"raw":true}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Focus on clause 4"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Focusing on clause 4."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}
