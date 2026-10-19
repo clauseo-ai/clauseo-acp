@@ -482,3 +482,10 @@ pub(in crate::checks::core_io) fn macro_rule_module_named_by_a_metavariable() ->
 pub(in crate::checks::core_io) fn metavariable_glob() -> Inspection {
     rule("metavariable-glob", "$x:ident", "use std::$x::*;")
 }
+
+pub(in crate::checks::core_io) fn cfg_attr_nested_path() -> Inspection {
+    lib(
+        "cfg-attr-nested-path",
+        "#[cfg_attr(unix, cfg_attr(test, path = \"../io.rs\"))]\nmod io;\n",
+    )
+}

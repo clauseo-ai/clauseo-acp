@@ -280,4 +280,11 @@ crate::checks::planted::cases! {
     cfg_attr_on_a_mod: FailsWith(&[uses!("m.rs", 2, "std::fs")]) => super::cfg_attr_on_a_mod,
     /// `std::os::<any>::prelude` re-exports the platform I/O traits.
     os_prelude_glob: FailsWith(&[glob!(1, "std::os::unix::prelude", "std::os::unix::prelude")]) => super::os_prelude_glob,
+    /// `#[path]` inside nested `cfg_attr`s.
+    cfg_attr_nested_path: FailsWith(&[
+        "crates/protocol/src/lib.rs:1: clauseo-protocol loads module `io` from `../io.rs` \
+         with #[path], and core-io parses only the module files Rust finds without it\n    \
+         fix: drop #[path] and keep the module as `io.rs` or `io/mod.rs` beside its \
+         parent module under `crates/protocol/src/`, so core-io parses it",
+    ]) => super::cfg_attr_nested_path,
 }

@@ -284,19 +284,14 @@ fn follow(
     }
 }
 
-/// Each `#[path]` on `item`, also one inside `#[cfg_attr(<predicate>, ...)]`: the span of its
-/// `#` and the path when it is a string.
+/// Each `#[path]` on `item`, also one inside `#[cfg_attr(<predicate>, ...)]` at any depth: the
+/// span of its `#` and the path when it is a string.
 pub(super) fn path_attributes(item: &syn::ItemMod) -> Vec<(Span, Option<String>)> {
     let mut found = Vec::new();
     for attr in &item.attrs {
-        let metas: Vec<syn::Meta> = if attr.path().is_ident("cfg_attr") {
-            attr.parse_args_with(Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated)
-                .map(|metas| metas.into_iter().skip(1).collect())
-                .unwrap_or_default()
-        } else {
-            vec![attr.meta.clone()]
-        };
-        for meta in metas.iter().filter(|meta| meta.path().is_ident("path")) {
+        let mut metas = Vec::new();
+        path_metas(&attr.meta, &mut metas);
+        for meta in metas {
             let path = match meta {
                 syn::Meta::NameValue(syn::MetaNameValue {
                     value:
@@ -312,6 +307,20 @@ pub(super) fn path_attributes(item: &syn::ItemMod) -> Vec<(Span, Option<String>)
         }
     }
     found
+}
+
+/// Each `path` meta in `meta`, reading through nested `cfg_attr(<predicate>, ...)`.
+fn path_metas(meta: &syn::Meta, found: &mut Vec<syn::Meta>) {
+    if meta.path().is_ident("path") {
+        found.push(meta.clone());
+    } else if let syn::Meta::List(list) = meta
+        && list.path.is_ident("cfg_attr")
+    {
+        let parser = Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+        for inner in list.parse_args_with(parser).into_iter().flatten().skip(1) {
+            path_metas(&inner, found);
+        }
+    }
 }
 
 /// The library module of a file at `relative` under `src/`: `lib.rs` and `main.rs` are the root,
