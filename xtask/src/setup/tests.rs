@@ -44,11 +44,11 @@ fn install_commands_fetch_the_pinned_release_for_each_os() {
     assert!(install_command(lefthook, "linux", "aarch64").contains("lefthook_2.2.1_Linux_arm64"));
     assert_eq!(
         install_command(gitleaks, "windows", "aarch64"),
-        "winget install --id Gitleaks.Gitleaks --version 8.30.1 --exact"
+        "winget install --id Gitleaks.Gitleaks --version 8.30.1 --exact --accept-source-agreements --accept-package-agreements --disable-interactivity"
     );
     assert_eq!(
         install_command(lefthook, "windows", "x86_64"),
-        "winget install --id evilmartians.lefthook --version 2.2.1 --exact"
+        "winget install --id evilmartians.lefthook --version 2.2.1 --exact --accept-source-agreements --accept-package-agreements --disable-interactivity"
     );
     assert_eq!(
         install_command(lefthook, "freebsd", "x86_64"),
@@ -89,17 +89,7 @@ const PLATFORMS: [(&str, &str); 6] = [
 /// The command the install of `binary` must run on `os`/`arch`, built from the pin.
 fn expected_cmd(binary: &Binary, os: &str, arch: &str) -> Cmd {
     if os == "windows" {
-        Cmd::new(
-            Program::Named("winget"),
-            [
-                "install",
-                "--id",
-                binary.winget,
-                "--version",
-                binary.version,
-                "--exact",
-            ],
-        )
+        winget(binary)
     } else {
         let script = install_command(binary, os, arch);
         Cmd::new(Program::Named("sh"), ["-c", script.as_str()])
@@ -109,6 +99,18 @@ fn expected_cmd(binary: &Binary, os: &str, arch: &str) -> Cmd {
 /// The failure line for a failed install of `text`, the command that runs it.
 fn fix_for(text: &str) -> String {
     format!("    fix: run `{text}` by hand and check its output, then run cargo xtask setup again")
+}
+
+#[test]
+fn the_printed_winget_command_is_the_one_that_runs() {
+    for binary in BINARIES {
+        for arch in ["x86_64", "aarch64"] {
+            let shown = install_command(binary, "windows", arch);
+            let runs = install_cmd(binary, "windows", arch).expect("winget runs on windows");
+            assert_eq!(shown, runs.to_string());
+            assert_eq!(runs, winget(binary));
+        }
+    }
 }
 
 #[test]

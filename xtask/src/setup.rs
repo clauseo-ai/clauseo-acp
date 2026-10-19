@@ -106,7 +106,8 @@ fn lefthook_unix(os: &str, arch: &str, version: &str) -> Option<String> {
     ))
 }
 
-/// The `winget` command that installs `binary` on Windows.
+/// The `winget` command that installs `binary` on Windows. It runs without prompts: winget asks
+/// nothing about source or package agreements, and never goes interactive.
 fn winget(binary: &Binary) -> Cmd {
     Cmd::new(
         Program::Named("winget"),
@@ -117,6 +118,9 @@ fn winget(binary: &Binary) -> Cmd {
             "--version",
             binary.version,
             "--exact",
+            "--accept-source-agreements",
+            "--accept-package-agreements",
+            "--disable-interactivity",
         ],
     )
 }
