@@ -38,7 +38,19 @@ pub enum Error {
         /// The error from the operating system.
         source: std::io::Error,
     },
-    /// The `fake_agent` binary is not where [`crate::bin_path`] looked.
+    /// `std::env::current_exe` failed, so [`crate::bin_path`] cannot find the profile folder.
+    #[error("cannot find the running executable (std::env::current_exe): {source}")]
+    CurrentExe {
+        /// The error from the operating system.
+        source: std::io::Error,
+    },
+    /// `CLAUSEO_FAKE_AGENT_BIN` names a file that does not exist.
+    #[error("{}: no such file, named by CLAUSEO_FAKE_AGENT_BIN", path.display())]
+    BinaryVarNotFound {
+        /// The path the variable holds.
+        path: PathBuf,
+    },
+    /// The `fake_agent` binary is not in the target profile folder [`crate::bin_path`] looked in.
     #[error("{}: no such file; run `cargo build -p clauseo-fake_agent`", path.display())]
     BinaryNotFound {
         /// Where it looked.
