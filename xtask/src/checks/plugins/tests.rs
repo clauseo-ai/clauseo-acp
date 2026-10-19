@@ -1,10 +1,12 @@
 //! Tests for the `plugins` check. Each case is a tiny scratch workspace (a root `Cargo.toml`,
 //! member manifests and empty `src/lib.rs` files) that `run` reads through the real
 //! `cargo metadata --no-deps`, so cargo itself resolves the renames and inheritance under test.
-//! They skip the graph rules, which need a lockfile: `graph/tests.rs` covers those.
+//! They skip the graph rules, except the cases in `tests/resolved.rs`, which patch every registry
+//! crate to a path crate so the graph resolves offline; `graph/tests.rs` covers the rest.
 //! The planted cases are in `tests/planted.rs`; their builders are the functions below.
 
 pub(super) mod planted;
+pub(super) mod resolved;
 
 use super::*;
 use crate::checks::tests::desktop_context;
