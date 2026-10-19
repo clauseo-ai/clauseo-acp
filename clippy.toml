@@ -23,5 +23,6 @@ disallowed-methods = [
   { path = "tauri::Context::config_mut", reason = "tauri.conf.json is the checked config; changing it in Rust skips the tauri-config check" },
   { path = "tauri::Context::new", reason = "only generate_context! builds the context, from the checked tauri.conf.json and capabilities" },
   { path = "tauri::Context::set_assets", reason = "the app serves only the checked frontendDist that generate_context! embeds" },
+  { path = "tauri_build::Attributes::capabilities_path_pattern", reason = "moves the capabilities folder away from crates/desktop/capabilities/, where the capabilities check reads them" },
   { path = "tauri::ipc::RuntimeAuthority::__allow_command", reason = "grants a command with no capability, where no check sees it; permissions live in crates/desktop/capabilities/" },
 ]

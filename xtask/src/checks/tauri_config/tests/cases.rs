@@ -109,20 +109,6 @@ pub(super) fn asset_protocol_disabled_passes() -> Inspection {
     )
 }
 
-pub(super) fn path_pattern_in_comment_passes() -> Inspection {
-    build_case(
-        "path-pattern-in-comment",
-        &format!("{BUILD}// .capabilities_path_pattern(\"x/*\")\n"),
-    )
-}
-
-pub(super) fn fn_named_like_the_call_passes() -> Inspection {
-    build_case(
-        "fn-named-like-the-call",
-        &format!("{BUILD}fn capabilities_path_pattern(_pattern: &str) {{}}\n"),
-    )
-}
-
 pub(super) fn conf_missing() -> Inspection {
     run_files("conf-missing", &[(BUILD_RS, BUILD.as_bytes())])
 }
@@ -325,6 +311,13 @@ pub(super) fn app_manifest_in_string_only() -> Inspection {
     )
 }
 
+pub(super) fn app_manifest_only_defined() -> Inspection {
+    build_case(
+        "app-manifest-only-defined",
+        "fn main() {\n    let _ = tauri_build::AppManifest::new();\n    tauri_build::build();\n}\nfn app_manifest(_manifest: tauri_build::AppManifest) {}\n",
+    )
+}
+
 pub(super) fn build_rs_not_valid_rust() -> Inspection {
     build_case("build-rs-not-valid-rust", "fn main() {\n    let x = ;\n}\n")
 }
@@ -336,34 +329,6 @@ pub(super) fn build_rs_not_utf8() -> Inspection {
             (TAURI_CONF, CONF.as_bytes()),
             (BUILD_RS, &[0xff, 0xfe, b'f']),
         ],
-    )
-}
-
-pub(super) fn build_rs_calls_path_pattern() -> Inspection {
-    build_case(
-        "build-rs-calls-path-pattern",
-        "fn main() {\n    tauri_build::try_build(\n        tauri_build::Attributes::new()\n            .app_manifest(tauri_build::AppManifest::new())\n            .capabilities_path_pattern(\"elsewhere/*\"),\n    );\n}\n",
-    )
-}
-
-pub(super) fn path_pattern_after_slashes_string() -> Inspection {
-    build_case(
-        "path-pattern-after-slashes-string",
-        "fn main() {\n    tauri_build::try_build(\n        tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new()),\n    );\n    let _ = (\"//\", tauri_build::Attributes::new().capabilities_path_pattern(\"x/*\"));\n}\n",
-    )
-}
-
-pub(super) fn path_pattern_in_macro() -> Inspection {
-    build_case(
-        "path-pattern-in-macro",
-        "fn main() {\n    let attrs = tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new());\n    let _ = format!(\"{:?}\", attrs.capabilities_path_pattern(\"x/*\"));\n    tauri_build::try_build(attrs);\n}\n",
-    )
-}
-
-pub(super) fn path_pattern_raw_ident() -> Inspection {
-    build_case(
-        "path-pattern-raw-ident",
-        "fn main() {\n    tauri_build::try_build(\n        tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new()).r#capabilities_path_pattern(\"x/*\"),\n    );\n}\n",
     )
 }
 

@@ -9,10 +9,10 @@
 //! No platform config (`tauri.<platform>.conf.json`, `.json5` or `Tauri.<platform>.toml`) exists:
 //! Tauri merges one over `tauri.conf.json` and could turn a setting back on for one OS.
 //! In `build.rs`, parsed with syn: an `AppManifest` is declared (`app_manifest(` and
-//! `AppManifest::new()` are called), and `capabilities_path_pattern(` does not point Tauri at
-//! another folder. Each failing
-//! setting points at its key's line, found under its parent object (`json_text::key_line`), or at
-//! line 1.
+//! `AppManifest::new()` are called). Moving the capabilities folder with
+//! `capabilities_path_pattern` is banned in clippy.toml's `disallowed-methods`, not here: clippy
+//! resolves the path, so a fn pointer or a macro cannot hide the call. Each failing setting points
+//! at its key's line, found under its parent object (`json_text::key_line`), or at line 1.
 //! The pure functions take file contents and paths; `run` reads the files from the repo and counts
 //! the ones it found: `tauri.conf.json`, `build.rs` and each platform config.
 
@@ -46,7 +46,6 @@ const V1_FIX: &str = "the updater is built without its zip feature, so v1Compati
 const DANGEROUS_FIX: &str = "remove it: each `dangerous*` setting switches off a Tauri safeguard";
 const APP_MANIFEST_FIX: &str = "pass `tauri_build::AppManifest::new()` to `tauri_build::Attributes::new().app_manifest(...)` in `tauri_build::try_build`: without a manifest Tauri skips the access check for app commands";
 const BUILD_RS_SYNTAX_FIX: &str = "fix the syntax: cargo cannot build the crate either";
-const PATH_PATTERN_FIX: &str = "remove it: capabilities live in the crate's capabilities folder, the one the capabilities check scans";
 
 /// The platforms Tauri merges a platform config for, over `tauri.conf.json`.
 const PLATFORMS: [&str; 5] = ["macos", "windows", "linux", "ios", "android"];
@@ -311,11 +310,9 @@ fn collect_dangerous(value: &Value, path: &mut Vec<String>, found: &mut Vec<Vec<
 }
 
 /// `build.rs` at `path` must declare an `AppManifest` (call `app_manifest(...)` and
-/// `AppManifest::new()`) and must not move the capabilities folder (call
-/// `capabilities_path_pattern(...)`). The file is parsed with syn and its tokens are walked,
-/// macro arguments included, so a call written only in a comment or a string does not count, and
-/// one after a string that holds `//` does. A missing file counts as no manifest; a file that is
-/// not valid Rust fails at the parse error's line.
+/// `AppManifest::new()`). The file is parsed with syn and its tokens are walked, macro arguments
+/// included, so a call written only in a comment or a string does not count. A missing file counts
+/// as no manifest; a file that is not valid Rust fails at the parse error's line.
 pub(crate) fn build_rs_violations(path: &str, text: Option<&str>) -> Vec<Violation> {
     let mut calls = BuildCalls::default();
     if let Some(text) = text {
@@ -341,14 +338,6 @@ pub(crate) fn build_rs_violations(path: &str, text: Option<&str>) -> Vec<Violati
             APP_MANIFEST_FIX,
         ));
     }
-    if let Some(line) = calls.path_pattern {
-        found.push(violation(
-            path,
-            line,
-            "build.rs calls `capabilities_path_pattern(`",
-            PATH_PATTERN_FIX,
-        ));
-    }
     found
 }
 
@@ -366,8 +355,6 @@ struct BuildCalls {
     app_manifest: bool,
     /// `AppManifest::new()` is called.
     manifest_new: bool,
-    /// The line of the first `capabilities_path_pattern(...)` call.
-    path_pattern: Option<u32>,
 }
 
 impl BuildCalls {
@@ -396,9 +383,6 @@ impl BuildCalls {
             }
             if ident == "app_manifest" {
                 self.app_manifest = true;
-            } else if ident == "capabilities_path_pattern" {
-                let line = u32::try_from(ident.span().start().line).unwrap_or(1);
-                self.path_pattern.get_or_insert(line);
             } else if ident == "new" && args.is_empty() && after_app_manifest_path(&before) {
                 self.manifest_new = true;
             }

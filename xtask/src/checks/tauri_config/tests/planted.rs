@@ -13,10 +13,6 @@ crate::checks::planted::cases! {
     endpoints_with_pubkey_passes: Passes => super::cases::endpoints_with_pubkey_passes,
     /// The asset protocol switched off passes.
     asset_protocol_disabled_passes: Passes => super::cases::asset_protocol_disabled_passes,
-    /// A `capabilities_path_pattern(` call in a line comment does not count.
-    path_pattern_in_comment_passes: Passes => super::cases::path_pattern_in_comment_passes,
-    /// A function named `capabilities_path_pattern` is a definition, not a call.
-    fn_named_like_the_call_passes: Passes => super::cases::fn_named_like_the_call_passes,
     /// A missing `tauri.conf.json` fails at line 1.
     conf_missing: FailsWith(&[
         "crates/desktop/tauri.conf.json:1: `crates/desktop/tauri.conf.json` is missing\n    \
@@ -197,6 +193,13 @@ crate::checks::planted::cases! {
          `tauri_build::Attributes::new().app_manifest(...)` in `tauri_build::try_build`: without a \
          manifest Tauri skips the access check for app commands",
     ]) => super::cases::app_manifest_in_string_only,
+    /// A function named `app_manifest` is a definition, not a call, so the file fails at line 1.
+    app_manifest_only_defined: FailsWith(&[
+        "crates/desktop/build.rs:1: build.rs declares no AppManifest\n    \
+         fix: pass `tauri_build::AppManifest::new()` to \
+         `tauri_build::Attributes::new().app_manifest(...)` in `tauri_build::try_build`: without a \
+         manifest Tauri skips the access check for app commands",
+    ]) => super::cases::app_manifest_only_defined,
     /// A `build.rs` that is not Rust fails at the line of the syntax error.
     build_rs_not_valid_rust: FailsWith(&[
         "crates/desktop/build.rs:2: build.rs is not valid Rust: expected an expression\n    \
@@ -208,30 +211,6 @@ crate::checks::planted::cases! {
          contain valid UTF-8\n    \
          fix: make the file readable as UTF-8 text",
     ]) => super::cases::build_rs_not_utf8,
-    /// A `.capabilities_path_pattern(` call fails at its line.
-    build_rs_calls_path_pattern: FailsWith(&[
-        "crates/desktop/build.rs:5: build.rs calls `capabilities_path_pattern(`\n    \
-         fix: remove it: capabilities live in the crate's capabilities folder, the one the \
-         capabilities check scans",
-    ]) => super::cases::build_rs_calls_path_pattern,
-    /// The call after a string that holds `//` on the same line fails at its line.
-    path_pattern_after_slashes_string: FailsWith(&[
-        "crates/desktop/build.rs:5: build.rs calls `capabilities_path_pattern(`\n    \
-         fix: remove it: capabilities live in the crate's capabilities folder, the one the \
-         capabilities check scans",
-    ]) => super::cases::path_pattern_after_slashes_string,
-    /// The call inside a macro's arguments fails at its line.
-    path_pattern_in_macro: FailsWith(&[
-        "crates/desktop/build.rs:3: build.rs calls `capabilities_path_pattern(`\n    \
-         fix: remove it: capabilities live in the crate's capabilities folder, the one the \
-         capabilities check scans",
-    ]) => super::cases::path_pattern_in_macro,
-    /// The raw identifier `r#capabilities_path_pattern(` fails at its line.
-    path_pattern_raw_ident: FailsWith(&[
-        "crates/desktop/build.rs:3: build.rs calls `capabilities_path_pattern(`\n    \
-         fix: remove it: capabilities live in the crate's capabilities folder, the one the \
-         capabilities check scans",
-    ]) => super::cases::path_pattern_raw_ident,
     /// A crate that is not a workspace member stops the check: nothing is inspected.
     desktop_crate_missing: FailsWith(&[
         "Cargo.toml:1: the desktop crate (package `clauseo-desktop`) is not a workspace \
