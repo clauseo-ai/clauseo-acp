@@ -32,9 +32,15 @@ here and adds the rule to "Rules the checks enforce" in `AGENTS.md`.
   Why: pnpm lookup and `~/.cargo/bin` would have failed, or run another program, on Windows or with
   `CARGO_HOME` set (PR #6, PR #8).
 - Test side effects through an injected runner on a scratch directory (`xtask/src/scratch.rs`), not
-  only the pure functions around them. Find steps and rows by name, not by position. Build fixtures
-  in the test, through the real tool, rather than committing captured output.
-  Why: a hard-coded slice index and 649 lines of captured `cargo metadata` (PR #8).
+  only the pure functions around them.
+  Why: all 17 buildtime tests were on pure functions, so none checked the file's bytes after a
+  failing cargo or a spawn error (PR #6).
+- Find steps and rows by name, not by position.
+  Why: a test took the ui steps as the slice `[7..13]`, so a new step before them would break it
+  with a slice error that says nothing useful (PR #8).
+- Build fixtures in the test, through the real tool, rather than committing captured output.
+  Why: 649 lines of captured `cargo metadata` that nothing said how to refresh, and that tested a
+  captured file instead of how cargo resolves the renames (PR #8).
 
 ## Until the checks land
 
@@ -44,14 +50,19 @@ here and adds the rule to "Rules the checks enforce" in `AGENTS.md`.
   Replaced by: the planted-violation test, which fails any check that ships no bypass forms.
   Why: PR #8 took five rounds; each found a new way around the last fix.
 - Before you report, break what each new check, test or probe guards (remove it, move it, empty it)
-  and watch it fail. A check that finds nothing to inspect fails; it never passes quietly.
-  Replaced by: the check runner failing any check that inspected nothing, and mutation testing of
-  the diff with cargo-mutants.
+  and watch it fail.
+  Replaced by: mutation testing of the diff with cargo-mutants.
   Why: a launch check and a compiler test passed with the thing they guard removed (PR #8).
-- Edit a tracked file only through the existing guard: `xtask/src/buildtime/probe/guard.rs` in
-  Rust, `ui/app/scripts/buildtime-lib.mjs` in scripts. Reuse it; never write a second guard.
+- A check that finds nothing to inspect fails; it never passes quietly.
+  Replaced by: the check runner failing any check that inspected nothing.
+  Why: the plugins check would have found nothing and passed if `crates/desktop` moved or was
+  renamed (PR #8).
+- Only buildtime edits a tracked file today, through its guard:
+  `xtask/src/buildtime/probe/guard.rs` in Rust, `ui/app/scripts/buildtime-lib.mjs` in scripts. The
+  next tool that needs to edit a tracked file moves the guard out of buildtime instead of copying
+  it, and never writes a second guard.
   Replaced by: clippy `disallowed-methods` and an oxlint import ban on file-writing calls outside
-  those modules.
+  the guard.
   Why: the second tool that edited a file repeated the defects the first had fixed (PR #6, PR #8).
 - Every child process has a timeout, and stopping it stops its whole process tree, also when the
   parent gets SIGKILL. Test the stop on a real tree with a wrapper that starts a grandchild, as
