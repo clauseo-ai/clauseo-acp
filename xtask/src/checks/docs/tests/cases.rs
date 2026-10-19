@@ -393,3 +393,7 @@ pub(super) fn planned_existing_path_fails() -> Inspection {
 pub(super) fn unmarked_missing_path_fails() -> Inspection {
     guide("unmarked-missing", "Packages: `ui/components` and more.\n")
 }
+
+pub(super) fn trailing_dot_dot_fails() -> Inspection {
+    guide("trailing-dot-dot", "Up: `crates/a/..` and `crates/..`.\n")
+}

@@ -1,13 +1,15 @@
 //! Backticked repo paths: a code span that starts with one of the repo's top-level folders (in any
 //! case) must name a file or folder git lists (see `Tree`), with the same case. A span that is a
 //! pattern, a placeholder or prose rather than a path (it holds `<`, `>`, `*`, `?`, `{`, `...` or
-//! whitespace) is not read. Before the lookup an anchor (`#sec`) is cut, then trailing `,.;:`,
-//! then a trailing `:<line>`, `:<line>:<col>` or `:<line>-<line>`. A path with a `..` part fails.
+//! whitespace) is not read. An anchor (`#sec`) and trailing `,;:` are cut, and then a path with a
+//! `..` part fails, so a sentence's period cannot turn `crates/..` into `crates/.`. Before the
+//! lookup one trailing `.` is cut, then trailing `,;:` again, then a trailing `:<line>`,
+//! `:<line>:<col>` or `:<line>-<line>`.
 //!
 //! A path that does not exist yet is marked: `crates/<row>` while its Crates-table row is
 //! planned, and any path written `` `path` (planned) ``. The marker holds both ways, as the
 //! table's Status does: a marked path that exists fails, so the marker is dropped when the path
-//! lands.
+//! lands. The cost: a marked path with a typo passes until a file by that name appears.
 
 use super::markdown::{PLANNED, Span};
 use super::tree::Tree;
@@ -21,8 +23,9 @@ const FOLDERS: [&str; 6] = ["crates/", "ui/", "xtask/", "docs/", "LICENSES/", ".
 /// `docs/*.md`, `ui/{app,components}`, `crates/...`), not a path to look up.
 const PATTERN: [&str; 6] = ["<", ">", "*", "?", "{", "..."];
 
-/// Punctuation that ends a sentence or a list after a path, not part of it.
-const TRAILING: [char; 4] = [',', '.', ';', ':'];
+/// Punctuation that ends a clause or a list after a path, not part of it. A sentence's `.` is
+/// cut separately, once, after the `..` check.
+const TRAILING: [char; 3] = [',', ';', ':'];
 
 /// One violation per repo path in `spans` that does not exist, climbs with `..`, or is marked
 /// planned but exists, at the span's line. `planned` holds the names of the Crates-table rows
@@ -46,15 +49,16 @@ fn problem(tree: &Tree, file: &str, span: &Span, planned: &[String]) -> Option<V
     if !is_repo_path(text) || is_pattern || text.contains(char::is_whitespace) {
         return None;
     }
-    let path = bare(text);
-    if path.split('/').any(|part| part == "..") {
+    let cut = without_anchor(text);
+    if cut.split('/').any(|part| part == "..") {
         return Some(violation(
             file,
             span.line,
-            format!("`{path}` has a `..` part"),
+            format!("`{cut}` has a `..` part"),
             "write the path from the repo root, without `..`",
         ));
     }
+    let path = bare(cut);
     let exists = tree.contains(&normalized(path));
     if span.planned {
         return exists.then(|| {
@@ -86,9 +90,16 @@ fn is_repo_path(text: &str) -> bool {
     })
 }
 
-/// The path a span names: anchor cut, then trailing punctuation, then a line location.
-fn bare(text: &str) -> &str {
+/// `text` without an anchor and trailing `,;:`; dots are left for the `..` check.
+fn without_anchor(text: &str) -> &str {
     let path = text.split('#').next().unwrap_or_default();
+    path.trim_end_matches(TRAILING)
+}
+
+/// The path `cut` (see `without_anchor`) names: one sentence-ending `.` cut, then trailing `,;:`,
+/// then a line location.
+fn bare(cut: &str) -> &str {
+    let path = cut.strip_suffix('.').unwrap_or(cut);
     without_location(path.trim_end_matches(TRAILING))
 }
 
@@ -154,11 +165,20 @@ mod tests {
 
     #[test]
     fn an_anchor_trailing_punctuation_and_a_location_are_cut_in_that_order() {
-        assert_eq!(bare("docs/a.md#sec"), "docs/a.md");
-        assert_eq!(bare("docs/a.md,"), "docs/a.md");
-        assert_eq!(bare("docs/a.md:12."), "docs/a.md");
-        assert_eq!(bare("docs/a.md#L3:"), "docs/a.md");
-        assert_eq!(bare(".github/"), ".github/");
+        let path = |text| bare(without_anchor(text));
+        assert_eq!(path("docs/a.md#sec"), "docs/a.md");
+        assert_eq!(path("docs/a.md,"), "docs/a.md");
+        assert_eq!(path("docs/a.md:12."), "docs/a.md");
+        assert_eq!(path("docs/a.md#L3:"), "docs/a.md");
+        assert_eq!(path("docs/a.md.,"), "docs/a.md");
+        assert_eq!(path(".github/"), ".github/");
+    }
+
+    #[test]
+    fn dots_stay_for_the_dot_dot_check_and_only_one_is_cut_after_it() {
+        assert_eq!(without_anchor("crates/a/..,"), "crates/a/..");
+        assert_eq!(without_anchor("crates/.."), "crates/..");
+        assert_eq!(bare("crates/a/x.."), "crates/a/x.");
     }
 
     #[test]

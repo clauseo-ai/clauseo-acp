@@ -58,11 +58,12 @@ ban.
 
 A "Never depends on" entry that is a row's name bans that crate; any other name means the
 crates.io package of that name. A name that starts with `clauseo-`, holds a `_` or is one edit
-from a row's name (ignoring case; a swap of two letters is one edit) is rejected as a likely typo,
-except a row's own package name: "process" in the column means the standard library's API
-(below), so `clauseo-process` is how a row bans the process crate. To ban a crates.io package
-that such a name would reject, mark it: `rmcp (crates.io)`. A ban names exactly one package. Banning a family means listing each one: `tauri`
-does not cover `tauri-runtime`, `tauri-utils` or `wry`.
+from a row's name (ignoring case; a swap of two adjacent letters is one edit) is rejected as a
+likely typo, except a row's own package name: "process" in the column means the standard
+library's API (below), so `clauseo-process` is how a row bans the process crate. To ban a
+crates.io package that such a name would reject, mark it: `rmcp (crates.io)`. A ban names exactly
+one package. Banning a family means listing each one: `tauri` does not cover `tauri-runtime`,
+`tauri-utils` or `wry`.
 
 | Crate | Owns | May depend on | Never depends on | Status |
 |---|---|---|---|---|

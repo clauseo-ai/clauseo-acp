@@ -151,6 +151,13 @@ crate::checks::planted::cases! {
     wrong_case_top_folder_fails: FailsWith(&[
         bad_path!(1, "Xtask/src/main.rs"),
     ]) => super::cases::wrong_case_top_folder_fails,
+    /// A trailing `..` is a `..` part, not punctuation: `crates/a/..` and `crates/..` fail.
+    trailing_dot_dot_fails: FailsWith(&[
+        "GUIDE.md:1: `crates/..` has a `..` part\n    \
+         fix: write the path from the repo root, without `..`",
+        "GUIDE.md:1: `crates/a/..` has a `..` part\n    \
+         fix: write the path from the repo root, without `..`",
+    ]) => super::cases::trailing_dot_dot_fails,
     /// A path marked `(planned)` that does not exist passes.
     planned_missing_path_passes: Passes => super::cases::planned_missing_path_passes,
     /// A path marked `(planned)` that exists fails: the marker is dropped when the path lands.
