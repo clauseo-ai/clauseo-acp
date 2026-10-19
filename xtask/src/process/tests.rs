@@ -1,6 +1,7 @@
 //! Tests for `process.rs`: how git, pnpm and timed commands run.
 
 use super::*;
+#[cfg(unix)]
 use crate::scratch::Scratch;
 use std::ffi::OsString;
 
