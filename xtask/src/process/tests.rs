@@ -123,17 +123,41 @@ fn capture_merges_stdout_and_stderr_and_reports_the_exit_status() {
     assert_eq!(seen, captured.output.as_bytes());
 }
 
+/// The names in `listed`, the output of `git rev-parse --local-env-vars`, that `GIT_LOCAL_ENV`
+/// does not hold.
+fn missing_from_git_local_env(listed: &str) -> Vec<&str> {
+    listed
+        .lines()
+        .filter(|name| !GIT_LOCAL_ENV.contains(name))
+        .collect()
+}
+
 #[test]
-fn git_local_env_is_what_git_rev_parse_local_env_vars_lists() {
+fn every_variable_the_local_git_lists_is_in_git_local_env() {
     let cmd = Cmd::new(Program::Git, ["rev-parse", "--local-env-vars"]);
     let listed = run_quiet(&cmd, Path::new(".")).expect("git runs");
     assert!(listed.success, "`{cmd}` failed: {}", listed.stderr);
-    let listed: Vec<&str> = listed.stdout.lines().collect();
     assert_eq!(
-        listed, GIT_LOCAL_ENV,
-        "`{cmd}` lists other variables than GIT_LOCAL_ENV in xtask/src/process.rs: update \
-         GIT_LOCAL_ENV to the list git prints"
+        missing_from_git_local_env(&listed.stdout),
+        Vec::<&str>::new(),
+        "`{cmd}` lists variables GIT_LOCAL_ENV in xtask/src/process.rs lacks: add them"
     );
+}
+
+/// `git rev-parse --local-env-vars` as git 2.39 prints it, with `GIT_SUPER_PREFIX`.
+const GIT_2_39_LOCAL_ENV: &str = "GIT_ALTERNATE_OBJECT_DIRECTORIES\nGIT_CONFIG\n\
+    GIT_CONFIG_PARAMETERS\nGIT_CONFIG_COUNT\nGIT_OBJECT_DIRECTORY\nGIT_DIR\nGIT_WORK_TREE\n\
+    GIT_IMPLICIT_WORK_TREE\nGIT_GRAFT_FILE\nGIT_INDEX_FILE\nGIT_NO_REPLACE_OBJECTS\n\
+    GIT_REPLACE_REF_BASE\nGIT_PREFIX\nGIT_SUPER_PREFIX\nGIT_SHALLOW_FILE\nGIT_COMMON_DIR\n";
+
+#[test]
+fn an_older_git_list_passes_and_a_list_with_an_unknown_name_fails() {
+    assert_eq!(
+        missing_from_git_local_env(GIT_2_39_LOCAL_ENV),
+        Vec::<&str>::new()
+    );
+    let newer = format!("{GIT_2_39_LOCAL_ENV}GIT_SOMETHING_NEW\n");
+    assert_eq!(missing_from_git_local_env(&newer), ["GIT_SOMETHING_NEW"]);
 }
 
 #[test]
