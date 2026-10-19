@@ -296,6 +296,11 @@ crate::checks::planted::cases! {
     ]) => super::rule_body_does_not_parse,
     /// A repetition joined by `::` builds a path of any length.
     rule_repetition_builds_a_path: FailsWith(&[metavariable!(1, "$p::$p::read", all_bans!())]) => super::rule_repetition_builds_a_path,
+    /// `Self::now` in an inherent impl that defines `now` is that method.
+    rule_defines_its_own_now: Passes => super::rule_defines_its_own_now,
+    /// `T::C` and `Self::C` read the binding in scope, not one of the same name elsewhere.
+    associated_type_bound_in_scope: Passes => super::associated_type_bound_in_scope,
+    associated_type_self_in_scope: Passes => super::associated_type_self_in_scope,
     /// `#[path]` inside nested `cfg_attr`s.
     cfg_attr_nested_path: FailsWith(&[
         "crates/protocol/src/lib.rs:1: clauseo-protocol loads module `io` from `../io.rs` \

@@ -5,13 +5,15 @@
 //! path is read only to find `include!`. Macro bodies that parse are visited like other code;
 //! the arguments of a macro call that parse as no code, and the tokens of attribute lists, are
 //! walked for chains (`tokens.rs`). A path that resolves through a metavariable's placeholder
-//! fails when what the metavariable could expand to reaches a banned path (`bans.rs`). It also
-//! fails `#[path]` on a module, `include!` and a `macro_rules!` rule whose body does not parse,
-//! which hold code the check never reads.
+//! fails when what the metavariable could expand to reaches a banned path (`bans.rs`).
+//! `Self::X` and `T::X` read the associated type in scope (`scopes.rs`). It also fails `#[path]`
+//! on a module, `include!` and a `macro_rules!` rule whose body does not parse, which hold code
+//! the check never reads.
 
 use super::bans::Bans;
 use super::files;
 use super::names::{self, Leaf, Module, Table, Target, Written};
+use super::scopes::{self, Param, SelfScope};
 use super::tokens::{self, Body, Chain};
 use proc_macro2::{Span, TokenStream};
 use std::collections::BTreeSet;
@@ -58,7 +60,7 @@ pub(super) fn sites(table: &Table, bans: Bans, module: &[String], file: &syn::Fi
         table,
         bans,
         module: module.to_vec(),
-        self_types: Vec::new(),
+        scopes: Vec::new(),
         params: Vec::new(),
         found: BTreeSet::new(),
     };
@@ -71,10 +73,10 @@ struct Finder<'t> {
     table: &'t Table,
     bans: Bans,
     module: Module,
-    /// The self type of each enclosing impl (`None` for a trait or a self type that is no path).
-    self_types: Vec<Option<Written>>,
-    /// The generic type parameters in scope.
-    params: Vec<String>,
+    /// What `Self` means in each enclosing impl or trait, innermost last.
+    scopes: Vec<SelfScope>,
+    /// The type parameters in scope, innermost last.
+    params: Vec<Param>,
     found: BTreeSet<Site>,
 }
 
@@ -91,18 +93,56 @@ impl Finder<'_> {
     }
 
     /// Every place `path` may point at: through its bindings, `Self` read as the impl's self
-    /// type, and through each associated type of its name when it is `Self::C::...` or
-    /// `T::C::...` for a type parameter `T`.
+    /// type, and through an associated type when it is `Self::C::...` or `T::C::...` for a type
+    /// parameter `T` (see `associated`). `Self::f` for a method `f` of the enclosing inherent
+    /// impl is that method and points at nothing outside the crate.
     fn targets(&self, path: &Written) -> BTreeSet<Target> {
-        let self_type = self.self_types.last().and_then(Option::as_ref);
+        let scope = self.scopes.last();
+        if let (Some(scope), [first, name]) = (scope, path.segments.as_slice())
+            && first == "Self"
+            && scope.methods.contains(name)
+        {
+            return BTreeSet::new();
+        }
+        let self_type = scope.and_then(|scope| scope.self_type.as_ref());
         let mut found = self
             .table
             .resolve(&self.module, &names::with_self(path.clone(), self_type));
         if let [first, name, rest @ ..] = path.segments.as_slice()
             && !path.leading_colon
-            && (first == "Self" || self.params.contains(first))
         {
-            found.extend(self.table.associated(name, rest));
+            found.extend(self.associated(first, name, rest));
+        }
+        found
+    }
+
+    /// Every place `<first>::<name>::<rest>` may point at through the associated type `name`:
+    /// for `Self`, the one the enclosing impl or trait sets; for a type parameter, the ones the
+    /// bounds and `where` clauses in scope pin. When nothing in scope sets it, every associated
+    /// type of that name in the crate. Nothing for any other `first`.
+    fn associated(&self, first: &str, name: &str, rest: &[String]) -> BTreeSet<Target> {
+        let scoped: Vec<&Written> = if first == "Self" {
+            match self.scopes.last() {
+                Some(scope) => scope.types.get(name).into_iter().collect(),
+                None => return BTreeSet::new(),
+            }
+        } else if self.params.iter().any(|param| param.name == first) {
+            self.params
+                .iter()
+                .filter(|param| param.name == first)
+                .flat_map(|param| param.types.get(name).into_iter().flatten())
+                .collect()
+        } else {
+            return BTreeSet::new();
+        };
+        if scoped.is_empty() {
+            return self.table.associated(name, rest);
+        }
+        let mut found = BTreeSet::new();
+        for binding in scoped {
+            let mut path = binding.clone();
+            path.segments.extend(rest.iter().cloned());
+            found.extend(self.table.resolve(&self.module, &path));
         }
         found
     }
@@ -196,9 +236,8 @@ impl Finder<'_> {
     /// Runs `visit` with the type parameters of `generics` in scope.
     fn with_params(&mut self, generics: Option<&syn::Generics>, visit: impl FnOnce(&mut Self)) {
         let depth = self.params.len();
-        let params = generics.into_iter().flat_map(syn::Generics::type_params);
         self.params
-            .extend(params.map(|param| names::name_of(&param.ident)));
+            .extend(generics.into_iter().flat_map(scopes::params));
         visit(self);
         self.params.truncate(depth);
     }
@@ -241,15 +280,15 @@ impl<'ast> Visit<'ast> for Finder<'_> {
     }
 
     fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
-        self.self_types.push(names::impl_self_type(i));
+        self.scopes.push(scopes::impl_scope(i));
         visit::visit_item_impl(self, i);
-        self.self_types.pop();
+        self.scopes.pop();
     }
 
     fn visit_item_trait(&mut self, i: &'ast syn::ItemTrait) {
-        self.self_types.push(None);
+        self.scopes.push(scopes::trait_scope(i));
         visit::visit_item_trait(self, i);
-        self.self_types.pop();
+        self.scopes.pop();
     }
 
     fn visit_item_use(&mut self, i: &'ast syn::ItemUse) {

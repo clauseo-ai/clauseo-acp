@@ -347,6 +347,34 @@ pub(in crate::checks::core_io) fn os_prelude_glob() -> Inspection {
     lib("os-prelude-glob", "use std::os::unix::prelude::*;\n")
 }
 
+/// A local `L` whose `now` is not a clock's, then `rest`.
+fn local_now(case: &str, rest: &str) -> Inspection {
+    lib(
+        case,
+        &format!(
+            "pub struct L;\n\nimpl L {{\n    pub fn now() -> L {{\n        L\n    }}\n}}\n\n{rest}"
+        ),
+    )
+}
+
+pub(in crate::checks::core_io) fn associated_type_bound_in_scope() -> Inspection {
+    local_now(
+        "associated-type-bound-in-scope",
+        "pub trait K {\n    type C;\n}\n\npub trait K2 {\n    type C;\n}\n\n\
+         pub fn a<T: K<C = std::time::Instant>>() {}\n\n\
+         pub fn b<U: K2<C = L>>() {\n    let _ = U::C::now();\n}\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn associated_type_self_in_scope() -> Inspection {
+    local_now(
+        "associated-type-self-in-scope",
+        "pub trait K {\n    type Output;\n    fn k();\n}\n\npub struct Z;\n\nimpl K for Z {\n    \
+         type Output = std::time::Instant;\n    fn k() {}\n}\n\npub struct Y;\n\nimpl K for Y {\n    \
+         type Output = L;\n    fn k() {\n        let _ = Self::Output::now();\n    }\n}\n",
+    )
+}
+
 pub(in crate::checks::core_io) fn cfg_attr_nested_path() -> Inspection {
     lib(
         "cfg-attr-nested-path",

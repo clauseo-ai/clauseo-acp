@@ -13,10 +13,10 @@
 //! Scopes are approximated: a `use` in a function body binds its name for the whole module; a
 //! name with several bindings may point at any of them; `std` and every
 //! `extern crate std as x` name are reachable everywhere, even where a local item shadows them;
-//! an associated type is known by its name alone, so `Self::X::now`, `T::X::now` (`T` a type
-//! parameter) and `<_ as _>::X::now` fail when any associated type `X` of the crate is a clock.
-//! The modules come from the `mod` items (see `files.rs`); a file that no root reaches is
-//! placed by its path under `src/`.
+//! `<_ as _>::X` may be any associated type `X` of the crate, and so may `Self::X` and `T::X`
+//! where nothing in scope sets `X` (the second pass reads what the enclosing impl or trait and
+//! the bounds on `T` set, `scopes.rs`). The modules come from the `mod` items (see
+//! `files.rs`); a file that no root reaches is placed by its path under `src/`.
 
 use super::tokens::{self, Body};
 use proc_macro2::Span;

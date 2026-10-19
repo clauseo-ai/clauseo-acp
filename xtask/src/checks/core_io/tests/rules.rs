@@ -160,3 +160,13 @@ pub(in crate::checks::core_io) fn rule_repetition_builds_a_path() -> Inspection 
          pub fn f() {\n    let _ = m!(std fs);\n}\n",
     )
 }
+
+pub(in crate::checks::core_io) fn rule_defines_its_own_now() -> Inspection {
+    lib(
+        "rule-defines-its-own-now",
+        "macro_rules! ts {\n    ($n:ident) => {\n        pub struct $n(u64);\n\n        \
+         impl $n {\n            pub fn now() -> Self {\n                $n(0)\n            }\n\n            \
+         pub fn later() -> Self {\n                Self::now()\n            }\n        }\n    };\n}\n\n\
+         ts!(Stamp);\n",
+    )
+}

@@ -28,6 +28,7 @@ mod bans;
 mod files;
 mod names;
 mod report;
+mod scopes;
 mod sites;
 mod tokens;
 
