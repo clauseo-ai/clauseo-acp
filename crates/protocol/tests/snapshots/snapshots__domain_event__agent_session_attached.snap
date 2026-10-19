@@ -1,0 +1,27 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"agent_session_attached\")"
+---
+{
+  "agent_session_attached": {
+    "session": "sess-1",
+    "agent_version": "0.9.0",
+    "capabilities": {
+      "load_session": true,
+      "prompt": {
+        "image": true,
+        "audio": false,
+        "embedded_context": true
+      },
+      "session": {
+        "list": true,
+        "resume": true,
+        "close": false
+      },
+      "steering": {
+        "native": true,
+        "idle_fallback_to_host": false
+      }
+    }
+  }
+}

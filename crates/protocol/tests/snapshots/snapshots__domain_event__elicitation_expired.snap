@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"elicitation_expired\")"
+---
+{
+  "elicitation_expired": {
+    "elicitation": "01900000-0000-7000-8000-00000000000d",
+    "reason": "agent_exited"
+  }
+}

@@ -1,0 +1,11 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "ToolCallContent::Content(ContentBlock::Text\n{ text: \"Clause 4 applies.\".to_owned(), })"
+---
+{
+  "content": {
+    "text": {
+      "text": "Clause 4 applies."
+    }
+  }
+}

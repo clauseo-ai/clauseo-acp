@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"thread_renamed\")"
+---
+{
+  "thread_renamed": {
+    "title": "Draft SPA v2",
+    "by": "agent"
+  }
+}

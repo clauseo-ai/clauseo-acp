@@ -1,0 +1,23 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "ToolCallContent::Diff\n{\n    path: ToolLocation::Inside { path: path(\"a.md\"), line: None }, old:\n    Some(TextOrBlob::Inline(\"old\\n\".to_owned())), new:\n    TextOrBlob::Blob(sample_blob(8, 9000)),\n}"
+---
+{
+  "diff": {
+    "path": {
+      "inside": {
+        "path": "a.md"
+      }
+    },
+    "old": {
+      "inline": "old\n"
+    },
+    "new": {
+      "blob": {
+        "hash": "0808080808080808080808080808080808080808080808080808080808080808",
+        "size_bytes": 9000,
+        "preview": "preview"
+      }
+    }
+  }
+}

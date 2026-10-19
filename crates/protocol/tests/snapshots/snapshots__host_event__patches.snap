@@ -1,0 +1,22 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostEvent::Patches(patch_batch())"
+---
+{
+  "patches": {
+    "stream": "thread:01900000-0000-7000-8000-000000000002",
+    "epoch": "01900000-0000-7000-8000-000000000032",
+    "patches": [
+      {
+        "cursor": 1,
+        "body": {
+          "append_text": {
+            "message_id": "01900000-0000-7000-8000-000000000009",
+            "from_len": 9,
+            "text": " ends"
+          }
+        }
+      }
+    ]
+  }
+}

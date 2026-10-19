@@ -1,0 +1,27 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"config_options_replaced\")"
+---
+{
+  "config_options_replaced": {
+    "options": [
+      {
+        "id": "model",
+        "name": "Model",
+        "category": "model",
+        "kind": {
+          "select": {
+            "current_value": "opus",
+            "options": [
+              {
+                "value": "opus",
+                "name": "Opus",
+                "description": "Largest"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

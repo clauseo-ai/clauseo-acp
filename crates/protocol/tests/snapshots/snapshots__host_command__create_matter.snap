@@ -1,0 +1,14 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::CreateMatter\n{\n    name: \"Smith v Jones\".to_owned(), source: MatterSource::NewFolder\n    { folder: folder_ref_id(1) },\n}"
+---
+{
+  "create_matter": {
+    "name": "Smith v Jones",
+    "source": {
+      "new_folder": {
+        "folder": "01900000-0000-7000-8000-000000000001"
+      }
+    }
+  }
+}

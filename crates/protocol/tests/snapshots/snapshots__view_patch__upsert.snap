@@ -1,0 +1,17 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "ViewPatchBody::Upsert { entry: Box::new(assistant_entry()) }"
+---
+{
+  "upsert": {
+    "entry": {
+      "assistant_message": {
+        "order": 3,
+        "message": "01900000-0000-7000-8000-000000000009",
+        "turn": "01900000-0000-7000-8000-000000000003",
+        "kind": "answer",
+        "text": "The lease ends in 2030."
+      }
+    }
+  }
+}

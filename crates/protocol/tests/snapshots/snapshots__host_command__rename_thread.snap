@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::RenameThread\n{ thread: thread_id(2), title: short(\"Draft SPA v2\"), }"
+---
+{
+  "rename_thread": {
+    "thread": "01900000-0000-7000-8000-000000000002",
+    "title": "Draft SPA v2"
+  }
+}

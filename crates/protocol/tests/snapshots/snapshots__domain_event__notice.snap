@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"notice\")"
+---
+{
+  "notice": {
+    "level": "warning",
+    "text": "Context nearly full"
+  }
+}

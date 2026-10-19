@@ -42,6 +42,8 @@ specta = "=2.0.0-rc.25"
 # Test-only: property tests, and R7's MessagePack form.
 proptest = "1.12"
 rmp-serde = "1.3.1"
+# Golden snapshots of the wire form (clauseo-protocol); the json feature goes on the crate line.
+insta = "1.49"
 
 [workspace.lints.rust]
 unsafe_code = "deny"               # deny, not forbid: an FFI module overrides with #[expect(unsafe_code, reason = "…")]

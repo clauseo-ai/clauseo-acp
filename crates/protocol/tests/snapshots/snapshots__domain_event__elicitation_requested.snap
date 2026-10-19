@@ -1,0 +1,22 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"elicitation_requested\")"
+---
+{
+  "elicitation_requested": {
+    "elicitation": "01900000-0000-7000-8000-00000000000c",
+    "request": {
+      "form": {
+        "message": "Which party?",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "party": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

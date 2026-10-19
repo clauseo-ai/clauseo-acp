@@ -1,0 +1,15 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::RestoreVersion\n{\n    matter: matter_id(1), checkpoint: checkpoint_id(17), scope:\n    RestoreScope::Files(vec![path(\"a.docx\")]),\n}"
+---
+{
+  "restore_version": {
+    "matter": "01900000-0000-7000-8000-000000000001",
+    "checkpoint": "01900000-0000-7000-8000-000000000011",
+    "scope": {
+      "files": [
+        "a.docx"
+      ]
+    }
+  }
+}
