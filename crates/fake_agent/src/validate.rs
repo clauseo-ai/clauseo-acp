@@ -147,9 +147,15 @@ fn contained(sent: &Value, back: &Value, pointer: &str) -> Result<(), String> {
 /// `ToolCall.kind` and `ToolCall.status`. `defaults_match_the_sdk` checks the values.
 const SKIPPED_DEFAULTS: &[(&str, &str)] = &[("kind", "other"), ("status", "pending")];
 
-/// Whether leaving out key `key` with value `value` loses nothing. The SDK skips `None`, empty
-/// lists and maps, and the fields in [`SKIPPED_DEFAULTS`] when they hold their default; a value
-/// that is none of those was refused or replaced.
+/// Fields of the messages an agent sends that the SDK leaves out when they are empty:
+/// `ToolCall.content` and `.locations`, and `args` and `env` of a terminal auth method and of
+/// `terminal/create`. `skipped_when_empty_matches_the_sdk` proves each is really left out.
+const SKIPPED_WHEN_EMPTY: &[&str] = &["content", "locations", "args", "env"];
+
+/// Whether leaving out key `key` with value `value` loses nothing: an empty value (`null`, `[]`,
+/// `{}`) under a key in [`SKIPPED_WHEN_EMPTY`], or a default under a key in
+/// [`SKIPPED_DEFAULTS`]. Anything else, an empty value under a misspelt key included, was refused
+/// or replaced.
 fn dropped(key: &str, value: &Value, pointer: &str) -> Result<(), String> {
     let empty = match value {
         Value::Null => true,
@@ -157,7 +163,7 @@ fn dropped(key: &str, value: &Value, pointer: &str) -> Result<(), String> {
         Value::Object(map) => map.is_empty(),
         _ => false,
     };
-    if empty {
+    if empty && SKIPPED_WHEN_EMPTY.contains(&key) {
         return Ok(());
     }
     match SKIPPED_DEFAULTS.iter().find(|(name, _)| *name == key) {
@@ -190,8 +196,29 @@ mod tests {
             ]
         );
         let update = json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Look",
-            "kind": "other", "status": "pending", "content": [], "unknownKey": {}});
+            "kind": "other", "status": "pending", "content": [], "locations": null});
         assert_eq!(validate(&Sent::Update(&update)), Ok(()));
+        let update = json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Look",
+            "unknownKey": {}});
+        assert_eq!(
+            validate(&Sent::Update(&update)),
+            Err(Problem::Invalid(
+                "/update/unknownKey: {} does not survive the SDK schema (dropped)".to_owned()
+            ))
+        );
+        let result = json!({"protocolVersion": 1,
+            "agentCapabilities": {"sessionCapabilities": {"lists": {}}}});
+        assert_eq!(
+            validate(&Sent::Result {
+                method: "initialize",
+                result: &result
+            }),
+            Err(Problem::Invalid(
+                "/result/agentCapabilities/sessionCapabilities/lists: {} does not survive the SDK \
+                 schema (dropped)"
+                    .to_owned()
+            ))
+        );
         let update = json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Look",
             "extra": "x"});
         assert_eq!(
@@ -200,6 +227,35 @@ mod tests {
                 r#"/update/extra: "x" does not survive the SDK schema (dropped)"#.to_owned()
             ))
         );
+    }
+
+    /// Each key in `SKIPPED_WHEN_EMPTY` is left out by the SDK when empty, in a type whose
+    /// messages `fake_agent` sends; and every key the SDK leaves out is in the list.
+    #[test]
+    fn skipped_when_empty_matches_the_sdk() {
+        fn written<T: DeserializeOwned + Serialize>(value: &Value) -> Value {
+            serde_json::to_value(T::deserialize(value).unwrap()).unwrap()
+        }
+        let mut skipped = Vec::new();
+        let mut collect = |sent: &Value, back: &Value| {
+            for key in sent.as_object().unwrap().keys() {
+                if back.get(key).is_none() {
+                    skipped.push(key.clone());
+                }
+            }
+        };
+        let call = json!({"sessionUpdate": "tool_call", "toolCallId": "t", "title": "x",
+            "content": [], "locations": []});
+        collect(&call, &written::<acp::SessionUpdate>(&call));
+        let terminal = json!({"type": "terminal", "id": "t", "name": "x", "args": [], "env": {}});
+        collect(&terminal, &written::<acp::AuthMethod>(&terminal));
+        let create = json!({"sessionId": "s", "command": "c", "args": [], "env": []});
+        collect(&create, &written::<acp::CreateTerminalRequest>(&create));
+        skipped.sort();
+        skipped.dedup();
+        let mut listed: Vec<String> = SKIPPED_WHEN_EMPTY.iter().map(|k| (*k).to_owned()).collect();
+        listed.sort();
+        assert_eq!(skipped, listed);
     }
 
     #[test]
