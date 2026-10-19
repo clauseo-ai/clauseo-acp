@@ -13,5 +13,3 @@ Each copied file starts with two lines (with the comment syntax of its language)
 | File | Project |
 |---|---|
 | [MIT-t3code.txt](MIT-t3code.txt) | T3 Code, https://github.com/pingdotgg/t3code |
-
-No T3 Code file is copied yet. The licence is here so the first copied file has it in place.
