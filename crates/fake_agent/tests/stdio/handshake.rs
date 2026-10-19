@@ -44,49 +44,103 @@ fn initialize_caps_over_stdio() {
     agent.expect_exit(0);
 }
 
+/// Sets the value at `pointer`, creating the last key if it is missing.
+fn set(params: &mut Value, pointer: &str, value: Value) {
+    let (parent, key) = pointer.rsplit_once('/').unwrap();
+    params
+        .pointer_mut(parent)
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .insert(key.to_owned(), value);
+}
+
+/// Sends `params` as `initialize` and returns the agent's stderr after it exits 3.
+fn refused(test: &str, params: Value) -> String {
+    let dir = Scratch::new(test);
+    let mut agent = Agent::start("initialize-caps", dir.path());
+    agent.send(&request(0, "initialize", params));
+    agent.expect_exit(3).stderr
+}
+
+const AT: &str = "fake_agent: initialize-caps.jsonl:2: initialize params: ";
+const OFF: &str = "expected off (missing, null, false, or a non-empty object of off values)";
+
 #[test]
 fn initialize_caps_refuses_other_capabilities() {
     let cases = [
         (
             "/clientCapabilities/fs/readTextFile",
             json!(true),
-            "fake_agent: initialize-caps.jsonl:2: initialize params: /clientCapabilities/fs: expected \
-             off (missing, null, false or all off), got {\"readTextFile\":true,\"writeTextFile\":false}",
+            format!(
+                "/clientCapabilities/fs: {OFF}, got {{\"readTextFile\":true,\"writeTextFile\":false}}"
+            ),
+        ),
+        (
+            "/clientCapabilities/subagents",
+            json!({}),
+            format!("/clientCapabilities/subagents: {OFF}, got {{}}"),
+        ),
+        (
+            "/clientCapabilities/terminal",
+            json!(true),
+            format!("/clientCapabilities/terminal: {OFF}, got true"),
         ),
         (
             "/clientCapabilities/auth/terminal",
             json!(false),
-            "fake_agent: initialize-caps.jsonl:2: initialize params: /clientCapabilities/auth/terminal: \
-             expected true, got false",
+            "/clientCapabilities/auth/terminal: expected true, got false".to_owned(),
         ),
         (
             "/clientCapabilities/_meta/jetbrains/air/capabilities",
             json!([]),
-            "fake_agent: initialize-caps.jsonl:2: initialize params: \
-             /clientCapabilities/_meta/jetbrains/air/capabilities: expected 1 items, got 0",
+            "/clientCapabilities/_meta/jetbrains/air/capabilities: expected 1 items, got 0"
+                .to_owned(),
         ),
     ];
     for (index, (pointer, value, message)) in cases.into_iter().enumerate() {
-        let dir = Scratch::new(&format!("initialize_caps_refuses_{index}"));
         let mut params = clauseo_initialize();
-        *params.pointer_mut(pointer).unwrap() = value;
-        let mut agent = Agent::start("initialize-caps", dir.path());
-        agent.send(&request(0, "initialize", params));
-        let finished = agent.expect_exit(3);
-        assert_eq!(finished.stderr, format!("{message}\n"));
+        set(&mut params, pointer, value);
+        let stderr = refused(&format!("initialize_caps_refuses_{index}"), params);
+        assert_eq!(stderr, format!("{AT}{message}\n"));
     }
-    let dir = Scratch::new("initialize_caps_refuses_plan");
+}
+
+/// Each presence-only capability must be an object: `null`, `false` or a missing key is no
+/// advertisement in schema 1.11.0.
+#[test]
+fn initialize_caps_refuses_null_or_false_capabilities() {
+    let pointers = [
+        "/clientCapabilities/elicitation/form",
+        "/clientCapabilities/elicitation/url",
+        "/clientCapabilities/session/notices",
+        "/clientCapabilities/session/compaction",
+        "/clientCapabilities/session/configOptions/boolean",
+        "/clientCapabilities/plan",
+    ];
+    for (index, pointer) in pointers.into_iter().enumerate() {
+        for value in [json!(null), json!(false)] {
+            let mut params = clauseo_initialize();
+            set(&mut params, pointer, value.clone());
+            let stderr = refused(
+                &format!("initialize_caps_refuses_absent_{index}_{value}"),
+                params,
+            );
+            assert_eq!(
+                stderr,
+                format!("{AT}{pointer}: expected an object, got {value}\n")
+            );
+        }
+    }
     let mut params = clauseo_initialize();
     params["clientCapabilities"]
         .as_object_mut()
         .unwrap()
         .remove("plan");
-    let mut agent = Agent::start("initialize-caps", dir.path());
-    agent.send(&request(0, "initialize", params));
+    let stderr = refused("initialize_caps_refuses_missing_plan", params);
     assert_eq!(
-        agent.expect_exit(3).stderr,
-        "fake_agent: initialize-caps.jsonl:2: initialize params: /clientCapabilities/plan: missing, \
-         expected \"{{any}}\"\n"
+        stderr,
+        format!("{AT}/clientCapabilities/plan: missing, expected {{}}\n")
     );
 }
 
