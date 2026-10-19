@@ -117,6 +117,13 @@ impl Agent {
         stdin.flush().unwrap();
     }
 
+    /// Writes `text` with no `\n` added.
+    pub(crate) fn send_unterminated(&mut self, text: &str) {
+        let stdin = self.stdin.as_mut().expect("stdin is closed");
+        stdin.write_all(text.as_bytes()).unwrap();
+        stdin.flush().unwrap();
+    }
+
     /// Closes the agent's stdin.
     pub(crate) fn close_stdin(&mut self) {
         self.stdin = None;
