@@ -61,7 +61,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
 fn run(ctx: &Context) -> Inspection {
     let table = match crates_table::load(&ctx.root) {
         Ok(table) => table,
-        Err(error) => return Inspection::new(0, error.into_violations()),
+        Err(error) => return Inspection::stopped_on(error.into_violations()),
     };
     let held: Vec<(&Member, &CrateRow)> = ctx
         .members

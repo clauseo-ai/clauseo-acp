@@ -29,7 +29,12 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
         one: "workspace crate with a Crates table row",
         many: "workspace crates with a Crates table row",
     },
-    place: || format!("in the Crates table of {}", crates_table::FILE),
+    place: || {
+        format!(
+            "among the workspace members and the Crates table of {}",
+            crates_table::FILE
+        )
+    },
     source: file!(),
     run,
     #[cfg(test)]
@@ -53,7 +58,7 @@ fn run(ctx: &Context) -> Inspection {
 fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
     let table = match crates_table::load(&ctx.root) {
         Ok(table) => table,
-        Err(error) => return Inspection::new(0, error.into_violations()),
+        Err(error) => return Inspection::stopped_on(error.into_violations()),
     };
     let mut found = Vec::new();
     let mut matched = Vec::new();

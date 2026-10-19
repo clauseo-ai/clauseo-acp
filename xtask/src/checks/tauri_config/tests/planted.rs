@@ -241,4 +241,19 @@ crate::checks::planted::cases! {
         "0 config files inspected in the desktop crate (tauri.conf.json and build.rs)\n    \
          fix: the check stopped before it could look; fix the failure above first",
     ]) => super::cases::desktop_crate_missing,
+    /// Neither config file exists: the check looked and found none, so the zero line gets the
+    /// normal fix, not the stopped one.
+    both_config_files_missing: FailsWith(&[
+        "crates/desktop/tauri.conf.json:1: `crates/desktop/tauri.conf.json` is missing\n    \
+         fix: restore it: Tauri reads the window's security settings from it, and this check \
+         guards them",
+        "crates/desktop/build.rs:1: build.rs declares no AppManifest\n    \
+         fix: pass `tauri_build::AppManifest::new()` to \
+         `tauri_build::Attributes::new().app_manifest(...)` in `tauri_build::try_build`: without a \
+         manifest Tauri skips the access check for app commands",
+        "0 config files inspected in the desktop crate (tauri.conf.json and build.rs)\n    \
+         fix: tauri-config looks for config files in the desktop crate (tauri.conf.json and \
+         build.rs); restore them, or, if they moved, update the consts \
+         xtask/src/checks/tauri_config.rs builds that place from",
+    ]) => super::cases::both_config_files_missing,
 }

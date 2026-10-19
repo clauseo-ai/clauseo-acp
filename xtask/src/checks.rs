@@ -86,6 +86,9 @@ pub(crate) struct Inspection {
     /// Failures with no `file:line`, such as git failing to list the repo's files.
     pub failures: Vec<Failure>,
     pub notes: Vec<String>,
+    /// True when a violation or failure stopped the check before it could look at its items
+    /// (`stopped`, `stopped_on`, `checks::unlisted`). False when it looked and found none.
+    pub stopped: bool,
 }
 
 impl Inspection {
@@ -96,12 +99,22 @@ impl Inspection {
             violations,
             failures: Vec::new(),
             notes: Vec::new(),
+            stopped: false,
         }
     }
 
     /// Nothing inspected, because `violation` stopped the check before it could look.
     pub(crate) fn stopped(violation: Violation) -> Inspection {
-        Inspection::new(0, vec![violation])
+        Inspection::stopped_on(vec![violation])
+    }
+
+    /// Nothing inspected, because `violations` stopped the check before it could look. With no
+    /// violation the check did not stop: it looked and found nothing.
+    pub(crate) fn stopped_on(violations: Vec<Violation>) -> Inspection {
+        Inspection {
+            stopped: !violations.is_empty(),
+            ..Inspection::new(0, violations)
+        }
     }
 }
 
@@ -160,9 +173,11 @@ impl StaticCheck {
         self.judge((self.run)(ctx))
     }
 
-    /// Judges one inspection: a count of zero adds the zero-inspected failure.
+    /// Judges one inspection: a count of zero adds the zero-inspected failure, with the stopped
+    /// fix only when the check says it stopped and printed why.
     fn judge(&self, inspection: Inspection) -> Report {
-        let stopped = !inspection.violations.is_empty() || !inspection.failures.is_empty();
+        let stopped = inspection.stopped
+            && (!inspection.violations.is_empty() || !inspection.failures.is_empty());
         let nothing_inspected =
             (inspection.inspected == 0).then(|| self.nothing_inspected(stopped));
         Report {
@@ -279,6 +294,7 @@ pub(crate) fn unlisted(check: &str, error: &GitError) -> Inspection {
             message: format!("could not list the repo's files: {error}"),
             fix,
         }],
+        stopped: true,
         ..Inspection::default()
     }
 }

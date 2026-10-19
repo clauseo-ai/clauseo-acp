@@ -85,7 +85,9 @@ crate::checks::planted::cases! {
         "bad.rs:1: could not read `bad.rs`: stream did not contain valid UTF-8\n    \
          fix: make the file readable as UTF-8 text",
         "0 source files inspected in the repo's .rs, .ts, .tsx, .mts and .cts files\n    \
-         fix: the check stopped before it could look; fix the failure above first",
+         fix: file-size looks for source files in the repo's .rs, .ts, .tsx, .mts and .cts files; \
+         restore them, or, if they moved, update the consts xtask/src/checks/file_size.rs builds \
+         that place from",
     ]) => super::only_file_unreadable,
     /// A file of 650 lines listed in the exception file, with a reason, passes.
     listed_600_plus_file_passes: Passes => super::listed_600_plus_file_passes,

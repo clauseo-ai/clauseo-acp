@@ -82,7 +82,7 @@ crate::checks::planted::cases! {
     std_module_in_never: FailsWith(&[
         "ARCHITECTURE.md:7: `net` in the Never depends on column of `protocol` names a standard library module, not a crate, so nothing would enforce it\n    \
          fix: write `any I/O` (or `fs` or `process`) instead of `net`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now",
-        "0 workspace crates with a Crates table row inspected in the Crates table of ARCHITECTURE.md\n    \
+        "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
          fix: the check stopped before it could look; fix the failure above first",
     ]) => super::std_module_in_never,
     /// tauri as a dev-dependency passes.
@@ -102,14 +102,14 @@ crate::checks::planted::cases! {
     row_without_leading_pipe: FailsWith(&[
         "ARCHITECTURE.md:8: the Crates table ends at line 7, but line 8 after it holds a `|`, so the rows from there on are not read\n    \
          fix: start line 8 with `|` if it is a row (Markdown reads a row without a leading pipe, xtask/src/checks/crates_table.rs does not), else write it without a `|`",
-        "0 workspace crates with a Crates table row inspected in the Crates table of ARCHITECTURE.md\n    \
+        "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
          fix: the check stopped before it could look; fix the failure above first",
     ]) => super::table::row_without_leading_pipe,
     /// `agent`, one edit from the row `agents`, is no crates.io ban.
     misspelt_row_in_never: FailsWith(&[
         "ARCHITECTURE.md:7: `agent` in the Never depends on column of `host` is one edit from the row `agents`, so it reads as a typo of it, and as written it would ban a crates.io package `agent` instead of our `clauseo-agents`\n    \
          fix: write `agents` to ban our crate `clauseo-agents`: xtask/src/checks/crates_table.rs rejects a name within one edit of a row name once `-` is read as `_`",
-        "0 workspace crates with a Crates table row inspected in the Crates table of ARCHITECTURE.md\n    \
+        "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
          fix: the check stopped before it could look; fix the failure above first",
     ]) => super::table::misspelt_row_in_never,
     /// `clauseo-agents` bans the row `agents`'s crate.
@@ -123,14 +123,14 @@ crate::checks::planted::cases! {
     clauseo_prefix_without_row: FailsWith(&[
         "ARCHITECTURE.md:7: `clauseo-nosuchrow` in the Never depends on column of `host` starts with `clauseo-`, but `nosuchrow` is no row of the Crates table, so it names none of our crates\n    \
          fix: write the row name of the crate you mean (a name in the Crate column), or add a row `nosuchrow` for the crate",
-        "0 workspace crates with a Crates table row inspected in the Crates table of ARCHITECTURE.md\n    \
+        "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
          fix: the check stopped before it could look; fix the failure above first",
     ]) => super::table::clauseo_prefix_without_row,
     /// A crates.io name written with `_` fails at the row.
     underscore_in_crates_io_name: FailsWith(&[
         "ARCHITECTURE.md:7: `serde_json` in the Never depends on column of `host` holds `_` but is no row of the Crates table, and only our row names are written with `_`\n    \
          fix: write `serde-json` for the crates.io package (cargo reads `-` and `_` in a package name the same), or the row name of the crate you mean if it is ours",
-        "0 workspace crates with a Crates table row inspected in the Crates table of ARCHITECTURE.md\n    \
+        "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
          fix: the check stopped before it could look; fix the failure above first",
     ]) => super::table::underscore_in_crates_io_name,
     /// An `exists` row with no workspace crate fails at the row.

@@ -263,4 +263,18 @@ crate::checks::planted::cases! {
     agents_at_120_lines_and_8192_bytes_passes: Passes => super::cases::agents_at_120_lines_and_8192_bytes_passes,
     /// `CLAUDE.md` without a final newline is still exactly `@AGENTS.md`.
     claude_without_newline_passes: Passes => super::cases::claude_without_newline_passes,
+    /// No Markdown file at all: the check looked and found none, so the zero line gets the normal
+    /// fix, not the stopped one.
+    no_markdown_and_no_required_files: FailsWith(&[
+        "AGENTS.md:1: AGENTS.md does not exist\n    \
+         fix: create AGENTS.md at the repo root, or restore it from git history",
+        "ARCHITECTURE.md:1: ARCHITECTURE.md does not exist\n    \
+         fix: create ARCHITECTURE.md at the repo root, or restore it from git history",
+        "CLAUDE.md:1: CLAUDE.md does not exist\n    \
+         fix: create CLAUDE.md holding only `@AGENTS.md`, or restore it from git history",
+        "0 Markdown files inspected in the repo's git-tracked or unignored .md and .markdown files\n    \
+         fix: docs looks for Markdown files in the repo's git-tracked or unignored .md and \
+         .markdown files; restore them, or, if they moved, update the consts \
+         xtask/src/checks/docs.rs builds that place from",
+    ]) => super::cases::no_markdown_and_no_required_files,
 }

@@ -92,16 +92,72 @@ fn every_check_inspects_nothing_in_an_empty_repo() {
         members: Vec::new(),
         load_resolved_graph: false,
     };
+    for name in STOPS_IN_AN_EMPTY_REPO {
+        assert!(
+            ALL.iter().any(|check| check.name == name),
+            "no check {name}"
+        );
+    }
     for check in ALL {
         let report = check.report(&ctx);
         assert_eq!((check.name, report.inspection.inspected), (check.name, 0));
-        let stopped =
-            !report.inspection.violations.is_empty() || !report.inspection.failures.is_empty();
-        assert_eq!(
-            (check.name, report.nothing_inspected),
-            (check.name, Some(check.nothing_inspected(stopped)))
-        );
+        let fix = report.nothing_inspected.map(|failure| failure.fix);
+        if STOPS_IN_AN_EMPTY_REPO.contains(&check.name) {
+            assert_eq!(
+                (check.name, fix.as_deref()),
+                (check.name, Some(STOPPED_FIX))
+            );
+        } else {
+            let normal = format!(
+                "{} looks for {} {}; restore them, or, if they moved, update the consts {} builds \
+                 that place from",
+                check.name,
+                check.counts.many,
+                (check.place)(),
+                check.source
+            );
+            assert_eq!((check.name, fix), (check.name, Some(normal)));
+        }
     }
+}
+
+/// The checks that stop before they look in an empty folder with no workspace members: the
+/// desktop checks find no desktop crate, and docs and file-size cannot list files without git.
+/// The others look and find nothing: budgets reads no budgets.toml, buildtime-edits no
+/// ui/app/src, dependencies and core-io no Crates table.
+const STOPS_IN_AN_EMPTY_REPO: [&str; 5] = [
+    "capabilities",
+    "plugins",
+    "tauri-config",
+    "docs",
+    "file-size",
+];
+
+#[test]
+fn a_violation_with_nothing_inspected_gets_the_stopped_fix_only_when_the_check_stopped() {
+    let gone = || violation("a.json", 1, "gone", "restore it");
+    let check = fake(|_| Inspection::default());
+    let looked = check.judge(Inspection::new(0, vec![gone()]));
+    assert_eq!(
+        looked.nothing_inspected.map(|failure| failure.fix),
+        Some(
+            "tauri-config looks for capability files in the desktop crate's capabilities/; \
+             restore them, or, if they moved, update the consts xtask/src/checks/tauri_config.rs \
+             builds that place from"
+                .to_owned()
+        )
+    );
+    let stopped = check.judge(Inspection::stopped(gone()));
+    assert_eq!(
+        stopped.nothing_inspected.map(|failure| failure.fix),
+        Some(STOPPED_FIX.to_owned())
+    );
+    let silent = check.judge(Inspection::stopped_on(Vec::new()));
+    assert_ne!(
+        silent.nothing_inspected.map(|failure| failure.fix),
+        Some(STOPPED_FIX.to_owned()),
+        "a stop with nothing printed above must not send the reader above"
+    );
 }
 
 /// Every entry in `ALL` is a whole check: a unique name, the file it lives in, a place, and

@@ -82,6 +82,7 @@ fn run(ctx: &Context) -> Inspection {
         violations,
         failures: Vec::new(),
         notes: notes(&ctx.root, &sizes),
+        stopped: false,
     }
 }
 

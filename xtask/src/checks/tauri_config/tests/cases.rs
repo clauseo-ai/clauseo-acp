@@ -375,3 +375,8 @@ pub(super) fn desktop_crate_missing() -> Inspection {
         load_resolved_graph: false,
     })
 }
+
+/// The desktop crate with neither tauri.conf.json nor build.rs: the check looks and finds none.
+pub(super) fn both_config_files_missing() -> Inspection {
+    run_files("both-config-files-missing", &[])
+}

@@ -14,7 +14,8 @@ crate::checks::planted::cases! {
          fix: fix the line above; each row is a [[budget]] table of the ten keys listed at the top \
          of budgets.toml",
         "0 budget rows inspected in budgets.toml at the repo root\n    \
-         fix: the check stopped before it could look; fix the failure above first",
+         fix: budgets looks for budget rows in budgets.toml at the repo root; restore them, or, if \
+         they moved, update the consts xtask/src/checks/budgets.rs builds that place from",
     ]) => super::not_toml,
     /// A row with every required key passes.
     valid_row: Passes => super::valid_row,

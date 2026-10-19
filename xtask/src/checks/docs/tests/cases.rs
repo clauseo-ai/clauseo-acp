@@ -346,3 +346,9 @@ pub(super) fn fence_in_quote_in_list_item_hides_its_contents() -> Inspection {
         "- item\n\n  > ```\n  > [x](nope.md) `crates/gone/`\n  > ```\n",
     )
 }
+
+/// A repo with no Markdown file at all, required ones included: the check looks and finds none.
+pub(super) fn no_markdown_and_no_required_files() -> Inspection {
+    let dir = Scratch::new("docs-no-markdown");
+    inspect(&dir, &[])
+}
