@@ -25,17 +25,58 @@ fn every_bundled_scenario_validates() {
     assert_eq!(finished.stdout, format!("ok {}\n", SCENARIOS.len()));
 }
 
+/// Every `agentInfo.version` in `value`, with its JSON pointer.
+fn agent_versions(value: &serde_json::Value, pointer: &str, found: &mut Vec<(String, String)>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map {
+                let at = format!("{pointer}/{key}");
+                if key == "agentInfo" {
+                    found.push((at.clone(), child["version"].to_string()));
+                }
+                agent_versions(child, &at, found);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                agent_versions(child, &format!("{pointer}/{index}"), found);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The crate version has one home, Cargo.toml; every `agentInfo` in every bundled scenario and
+/// common include must carry it.
 #[test]
-fn handshake_names_the_crate_version() {
-    let text = std::fs::read_to_string(scenarios_dir().join("common/handshake.jsonl")).unwrap();
-    let version = format!(
-        r#""agentInfo":{{"name":"fake_agent","version":"{}"}}"#,
-        env!("CARGO_PKG_VERSION")
-    );
-    assert!(
-        text.contains(&version),
-        "handshake.jsonl must carry {version}"
-    );
+fn every_agent_info_names_the_crate_version() {
+    let mut files: Vec<std::path::PathBuf> =
+        SCENARIOS.iter().map(|name| scenario_path(name)).collect();
+    for entry in std::fs::read_dir(scenarios_dir().join("common")).unwrap() {
+        files.push(entry.unwrap().path());
+    }
+    let want = format!("\"{}\"", env!("CARGO_PKG_VERSION"));
+    let mut carrying = Vec::new();
+    for file in &files {
+        let name = file.file_name().unwrap().to_string_lossy().into_owned();
+        let text = std::fs::read_to_string(file).unwrap();
+        for (index, line) in text.lines().enumerate() {
+            let value: serde_json::Value = serde_json::from_str(line).unwrap();
+            let mut found = Vec::new();
+            agent_versions(&value, "", &mut found);
+            for (pointer, version) in found {
+                assert_eq!(version, want, "{name}:{}: {pointer}", index + 1);
+                carrying.push(name.clone());
+            }
+        }
+    }
+    carrying.dedup();
+    for name in ["handshake.jsonl", "initialize-caps.jsonl"] {
+        assert!(
+            carrying.iter().any(|c| c == name),
+            "{name} has no agentInfo: {carrying:?}"
+        );
+    }
 }
 
 #[test]
