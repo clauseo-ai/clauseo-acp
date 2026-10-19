@@ -21,7 +21,9 @@
 # Policy: the files that set lints, compiler flags, dependencies, bans, budgets, hooks, the
 # toolchain, formatting and webview permissions, and xtask, whose checks are that policy in
 # code. A change here needs the code owner's approval even when another reviewer has approved
-# the pull request.
+# the pull request. A name without a leading slash matches in every folder, and a `*` covers
+# another name for the same file: each of those tools also reads a copy outside the root or under
+# another name.
 /xtask/                              @ro-hansolo
 /Cargo.toml                          @ro-hansolo
 /crates/*/Cargo.toml                 @ro-hansolo
@@ -39,6 +41,7 @@ rustfmt.toml                         @ro-hansolo
 *typos.toml                          @ro-hansolo
 /.gitleaks.toml                      @ro-hansolo
 /ui/pnpm-workspace.yaml              @ro-hansolo
+/ui/**/package.json                  @ro-hansolo
 /ui/app/tsconfig.json                @ro-hansolo
 .oxlintrc.json                       @ro-hansolo
 /ui/.oxfmtrc.json                    @ro-hansolo
