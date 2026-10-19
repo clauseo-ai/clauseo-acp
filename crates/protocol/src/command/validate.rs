@@ -24,6 +24,12 @@ pub const MAX_PROMPT_TEXT_BYTES: usize = 256 * 1024;
 /// Most `File` blocks in one prompt.
 pub const MAX_PROMPT_FILES: usize = 50;
 
+/// Most blocks of any kind in one prompt.
+const MAX_PROMPT_BLOCKS: usize = 100;
+
+/// Most UTF-8 bytes in a matter name: a folder name's limit on common file systems.
+const MAX_MATTER_NAME_BYTES: usize = 255;
+
 /// Most characters (`char`s, Unicode scalar values) in a thread title or a matter name.
 pub const MAX_TITLE_CHARS: usize = 200;
 
@@ -77,13 +83,18 @@ impl HostCommand {
     /// Checks lengths, counts and formats, never state. Ids and paths were already checked when
     /// they were decoded or built.
     ///
-    /// - `SendPrompt` and `EditQueuedPrompt`: at least one block, at most
-    ///   [`MAX_PROMPT_TEXT_BYTES`] of text and [`MAX_PROMPT_FILES`] file references; a
-    ///   `Delivery::Unknown` (a newer client's mode) is refused, never run as another mode.
-    /// - `CreateMatter.name`: 1 to [`MAX_TITLE_CHARS`] characters, not only whitespace, no control
-    ///   character, no `/` or `\`, not `.` or `..` (it may become a folder name).
-    /// - `RenameThread.title`: 1 to [`MAX_TITLE_CHARS`] characters, not only whitespace, no
-    ///   control character.
+    /// - `SendPrompt` and `EditQueuedPrompt`: 1 to 100 blocks, no empty text block, at least
+    ///   one non-whitespace character of text or one file, at most [`MAX_PROMPT_TEXT_BYTES`] of
+    ///   text and [`MAX_PROMPT_FILES`] file references; a `Delivery::Unknown` (a newer client's
+    ///   mode) is refused, never run as another mode.
+    /// - Titles and names (`RenameThread.title`, `CreateMatter.name`): at most
+    ///   [`MAX_TITLE_CHARS`] characters, at least one visible character (not only whitespace or
+    ///   U+200B to U+200D, U+2060, U+FEFF), no control character and no bidirectional control
+    ///   (U+202A to U+202E, U+2066 to U+2069).
+    /// - `CreateMatter.name` also works as a folder name on every system: at most 255 bytes, not
+    ///   `.` or `..`, none of `< > : " / \ | ? *`, no trailing dot or space, no leading space,
+    ///   not a Windows device name (CON, PRN, AUX, NUL, COM1 to COM9, LPT1 to LPT9) with or
+    ///   without an extension, in any case.
     /// - `option_id`, `mode_id` and a select value: 1 to [`MAX_ID_TEXT_BYTES`] bytes.
     /// - `AnswerElicitation` with `Accept`: the values are a JSON object of at most
     ///   [`MAX_ELICITATION_VALUES_BYTES`] as compact JSON.
@@ -167,11 +178,29 @@ fn check_prompt(kind: &'static str, content: &[PromptBlock]) -> Result<(), Error
             rule: "a prompt has at least one block",
         });
     }
+    if content.len() > MAX_PROMPT_BLOCKS {
+        return Err(too_large(
+            kind,
+            "prompt blocks",
+            content.len(),
+            MAX_PROMPT_BLOCKS,
+        ));
+    }
     let mut text_bytes = 0usize;
     let mut files = 0usize;
+    let mut visible_text = false;
     for block in content {
         match block {
-            PromptBlock::Text { text } => text_bytes = text_bytes.saturating_add(text.len()),
+            PromptBlock::Text { text } if text.is_empty() => {
+                return Err(Error::Format {
+                    kind,
+                    rule: "a text block is not empty",
+                });
+            }
+            PromptBlock::Text { text } => {
+                text_bytes = text_bytes.saturating_add(text.len());
+                visible_text = visible_text || !text.trim().is_empty();
+            }
             PromptBlock::File { .. } => files += 1,
         }
     }
@@ -186,14 +215,31 @@ fn check_prompt(kind: &'static str, content: &[PromptBlock]) -> Result<(), Error
     if files > MAX_PROMPT_FILES {
         return Err(too_large(kind, "file references", files, MAX_PROMPT_FILES));
     }
+    if !visible_text && files == 0 {
+        return Err(Error::Format {
+            kind,
+            rule: "a prompt holds a non-whitespace character of text or a file",
+        });
+    }
     Ok(())
 }
 
+/// Bidirectional embedding, override and isolate controls, which can make a title read as
+/// something else (U+202A to U+202E, U+2066 to U+2069).
+fn is_bidi_control(c: char) -> bool {
+    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Whitespace, or a zero-width character (U+200B to U+200D, U+2060, U+FEFF).
+fn is_invisible(c: char) -> bool {
+    c.is_whitespace() || matches!(c, '\u{200B}'..='\u{200D}' | '\u{2060}' | '\u{FEFF}')
+}
+
 fn check_title(kind: &'static str, title: &str) -> Result<(), Error> {
-    if title.trim().is_empty() {
+    if title.chars().all(is_invisible) {
         return Err(Error::Format {
             kind,
-            rule: "a title or name is not empty or only whitespace",
+            rule: "a title or name has a visible character",
         });
     }
     let chars = title.chars().count();
@@ -205,23 +251,50 @@ fn check_title(kind: &'static str, title: &str) -> Result<(), Error> {
             MAX_TITLE_CHARS,
         ));
     }
-    if title.chars().any(char::is_control) {
+    if title.chars().any(|c| c.is_control() || is_bidi_control(c)) {
         return Err(Error::Format {
             kind,
-            rule: "a title or name holds no control character",
+            rule: "a title or name holds no control or bidirectional control character",
         });
     }
     Ok(())
 }
 
-/// A matter name may become a folder name (for `NewFolder`), so it is checked as one for every
-/// source: the same name rules whichever way the matter was made.
+/// Windows device names, refused as a folder name with or without an extension.
+const RESERVED_NAMES: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// A matter name may become a folder name (for `NewFolder`), so it is checked as one on every
+/// system for every source: the same name rules whichever way the matter was made.
 fn check_folder_name(name: &str) -> Result<(), Error> {
-    if name.contains(['/', '\\']) || name == "." || name == ".." {
-        return Err(Error::Format {
+    let refuse = |rule| {
+        Err(Error::Format {
             kind: "CreateMatter",
-            rule: "a matter name holds no `/` or `\\` and is not `.` or `..`",
-        });
+            rule,
+        })
+    };
+    if name.len() > MAX_MATTER_NAME_BYTES {
+        return Err(too_large(
+            "CreateMatter",
+            "matter name in UTF-8 bytes",
+            name.len(),
+            MAX_MATTER_NAME_BYTES,
+        ));
+    }
+    if name == "." || name == ".." {
+        return refuse("a matter name is not `.` or `..`");
+    }
+    if name.contains(['<', '>', ':', '"', '/', '\\', '|', '?', '*']) {
+        return refuse("a matter name holds none of < > : \" / \\ | ? *");
+    }
+    if name.ends_with(['.', ' ']) || name.starts_with(' ') {
+        return refuse("a matter name does not end with a dot or a space, or start with a space");
+    }
+    let stem = name.split('.').next().unwrap_or(name);
+    if RESERVED_NAMES.iter().any(|r| r.eq_ignore_ascii_case(stem)) {
+        return refuse("a matter name is not a Windows device name such as CON or COM1");
     }
     Ok(())
 }
