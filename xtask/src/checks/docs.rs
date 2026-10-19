@@ -267,6 +267,62 @@ crate::checks::planted::cases! {
         "guide.markdown:1: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
          fix: create `nope.md`, or correct or remove the link",
     ]) => cases::markdown_extension_is_checked,
+    /// A closing fence indented four spaces is text, so the fence it meant to close stays open.
+    indented_closing_fence_does_not_close: FailsWith(&[
+        "GUIDE.md:4: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]) => cases::indented_closing_fence_does_not_close,
+    /// An unclosed fence in a block quote ends with the quote.
+    quoted_fence_ends_with_its_quote: FailsWith(&[
+        "GUIDE.md:4: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]) => cases::quoted_fence_ends_with_its_quote,
+    /// An unclosed fence in a list item ends with the item.
+    list_item_fence_ends_with_its_item: FailsWith(&[
+        "GUIDE.md:4: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]) => cases::list_item_fence_ends_with_its_item,
+    /// A reference definition that starts a list item is read.
+    definition_after_a_list_item_fails: FailsWith(&[
+        "GUIDE.md:2: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]) => cases::definition_after_a_list_item_fails,
+    /// A block quote interrupts a paragraph, so a definition in it is read.
+    definition_after_a_quote_line_fails: FailsWith(&[
+        "GUIDE.md:2: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]) => cases::definition_after_a_quote_line_fails,
+    /// A setext underline ends the heading, so a definition after it is read.
+    definition_after_a_setext_heading_fails: FailsWith(&[
+        "GUIDE.md:3: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]) => cases::definition_after_a_setext_heading_fails,
+    /// A thematic break ends a paragraph, so a definition after it is read.
+    definition_after_a_thematic_break_fails: FailsWith(&[
+        "GUIDE.md:3: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]) => cases::definition_after_a_thematic_break_fails,
+    /// A stderr redirection after a command is shell syntax, not an argument.
+    stderr_redirect_passes: Passes => cases::stderr_redirect_passes,
+    /// A stdout redirection after a command is shell syntax, not an argument.
+    stdout_redirect_passes: Passes => cases::stdout_redirect_passes,
+    /// A command in a subshell is read, and its closing parenthesis is not an argument.
+    subshell_with_valid_command_passes: Passes => cases::subshell_with_valid_command_passes,
+    /// A command in a subshell is checked, and fails on its unknown subcommand.
+    subshell_with_unknown_subcommand_fails: FailsWith(&[
+        "GUIDE.md:1: the xtask command `cargo xtask frobnicate` does not parse: error: unrecognized subcommand 'frobnicate'\n    \
+         fix: correct it to a command that `cargo xtask --help` lists (`cargo xtask <command> --help` lists its flags), or remove it",
+    ]) => cases::subshell_with_unknown_subcommand_fails,
+    /// A command in a command substitution is checked.
+    command_substitution_fails: FailsWith(&[
+        "GUIDE.md:1: the xtask command `cargo xtask frobnicate` does not parse: error: unrecognized subcommand 'frobnicate'\n    \
+         fix: correct it to a command that `cargo xtask --help` lists (`cargo xtask <command> --help` lists its flags), or remove it",
+    ]) => cases::command_substitution_fails,
+    /// A `time` and `env` before the command are skipped, and the command is checked.
+    time_and_env_prefix_fails: FailsWith(&[
+        "GUIDE.md:1: the xtask command `cargo xtask frobnicate` does not parse: error: unrecognized subcommand 'frobnicate'\n    \
+         fix: correct it to a command that `cargo xtask --help` lists (`cargo xtask <command> --help` lists its flags), or remove it",
+    ]) => cases::time_and_env_prefix_fails,
     /// A repo without `AGENTS.md` fails at line 1, the whole-file line.
     missing_agents: FailsWith(&[
         "AGENTS.md:1: AGENTS.md does not exist\n    \

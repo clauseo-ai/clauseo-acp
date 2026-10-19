@@ -70,14 +70,45 @@ fn commands_in(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// The command a part of a line holds, when it holds one (see `commands_in`).
+/// The command a part of a line holds, when it holds one (see `commands_in`). Before `cargo`, a
+/// `(` or `$(`, a `time`, `env` or `exec`, and assignments are skipped. After it, the words stop
+/// at a redirection (`2>&1`, `> out`, `<`) or a closing parenthesis, which are shell syntax.
 fn command_of(part: &str) -> Option<String> {
-    let words: Vec<&str> = part
-        .split_whitespace()
-        .skip_while(|word| *word == "$" || is_assignment(word))
-        .take_while(|word| !word.starts_with('#'))
-        .collect();
-    (words.first() == Some(&"cargo") && words.get(1) == Some(&"xtask")).then(|| words.join(" "))
+    let mut words: Vec<&str> = Vec::new();
+    for raw in part.split_whitespace() {
+        if words.is_empty() {
+            let word = raw.trim_start_matches(['(', '$']);
+            if word.is_empty() || is_prefix_word(word) {
+                continue;
+            }
+            if word != "cargo" {
+                return None;
+            }
+            words.push(word);
+            continue;
+        }
+        if raw.starts_with('#') {
+            break;
+        }
+        match raw.find(['>', '<', ')']) {
+            Some(cut) => {
+                let before = raw.get(..cut).unwrap_or_default().trim_end_matches('&');
+                if !before.is_empty() && !before.bytes().all(|b| b.is_ascii_digit()) {
+                    words.push(before);
+                }
+                break;
+            }
+            None => words.push(raw),
+        }
+    }
+    let is_command = words.first() == Some(&"cargo") && words.get(1) == Some(&"xtask");
+    is_command.then(|| words.join(" "))
+}
+
+/// A word that may come before `cargo` in a command: a prompt, an assignment, or a word that runs
+/// the command (`time`, `env`, `exec`).
+fn is_prefix_word(word: &str) -> bool {
+    matches!(word, "$" | "time" | "env" | "exec") || is_assignment(word)
 }
 
 /// True for a shell `NAME=value` word: a name of letters, digits and `_` that does not start with

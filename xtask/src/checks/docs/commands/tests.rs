@@ -150,3 +150,37 @@ fn a_bare_command_or_help_is_read_without_clap_s_help_text() {
         "the xtask command `cargo xtask` does not parse"
     );
 }
+
+#[test]
+fn shell_redirections_and_a_closing_paren_are_not_arguments() {
+    assert_eq!(commands_of("cargo xtask check 2>&1"), ["cargo xtask check"]);
+    assert_eq!(
+        commands_of("cargo xtask check > out.txt"),
+        ["cargo xtask check"]
+    );
+    assert_eq!(
+        commands_of("cargo xtask check >>out.txt"),
+        ["cargo xtask check"]
+    );
+    assert_eq!(
+        commands_of("cargo xtask check &> out"),
+        ["cargo xtask check"]
+    );
+    assert_eq!(commands_of("cargo xtask check < in"), ["cargo xtask check"]);
+    assert_eq!(commands_of("(cargo xtask check)"), ["cargo xtask check"]);
+}
+
+#[test]
+fn a_subshell_substitution_or_prefix_word_before_the_command_is_skipped() {
+    assert_eq!(
+        commands_of("(cd x && cargo xtask frobnicate)"),
+        ["cargo xtask frobnicate"]
+    );
+    assert_eq!(commands_of("$(cargo xtask check)"), ["cargo xtask check"]);
+    assert_eq!(
+        commands_of("time env cargo xtask check"),
+        ["cargo xtask check"]
+    );
+    assert_eq!(commands_of("exec cargo xtask check"), ["cargo xtask check"]);
+    assert_eq!(commands_of("echo cargo xtask check"), Vec::<String>::new());
+}

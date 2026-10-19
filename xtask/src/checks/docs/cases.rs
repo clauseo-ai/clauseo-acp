@@ -255,7 +255,7 @@ pub(super) fn fence_in_list_item_hides_its_contents() -> Inspection {
         "fence-in-list-item",
         vec![(
             "GUIDE.md",
-            "- item\n\n  ```\n[x](nope.md)\n  ```\n".to_owned(),
+            "- item\n\n  ```\n  [x](nope.md)\n  ```\n".to_owned(),
         )],
     )
 }
@@ -376,5 +376,111 @@ pub(super) fn markdown_extension_is_checked() -> Inspection {
     docs(
         "markdown-extension",
         vec![("guide.markdown", "See [x](nope.md).\n".to_owned())],
+    )
+}
+
+pub(super) fn indented_closing_fence_does_not_close() -> Inspection {
+    docs(
+        "indented-closing-fence",
+        vec![("GUIDE.md", "~~~\n    ~~~\n~~~\n[x](nope.md)\n".to_owned())],
+    )
+}
+
+pub(super) fn quoted_fence_ends_with_its_quote() -> Inspection {
+    docs(
+        "quoted-fence",
+        vec![("GUIDE.md", "> ~~~\n> code\n\n[x](nope.md)\n".to_owned())],
+    )
+}
+
+pub(super) fn list_item_fence_ends_with_its_item() -> Inspection {
+    docs(
+        "list-item-fence",
+        vec![(
+            "GUIDE.md",
+            "- ~~~\n  code\n\ntext [x](nope.md)\n".to_owned(),
+        )],
+    )
+}
+
+pub(super) fn definition_after_a_list_item_fails() -> Inspection {
+    docs(
+        "definition-after-list-item",
+        vec![("GUIDE.md", "- text\n- [g]: nope.md\n".to_owned())],
+    )
+}
+
+pub(super) fn definition_after_a_quote_line_fails() -> Inspection {
+    docs(
+        "definition-after-quote",
+        vec![("GUIDE.md", "Text\n> [g]: nope.md\n".to_owned())],
+    )
+}
+
+pub(super) fn definition_after_a_setext_heading_fails() -> Inspection {
+    docs(
+        "definition-after-setext",
+        vec![("GUIDE.md", "Title\n---\n[g]: nope.md\n".to_owned())],
+    )
+}
+
+pub(super) fn definition_after_a_thematic_break_fails() -> Inspection {
+    docs(
+        "definition-after-rule",
+        vec![("GUIDE.md", "Text\n***\n[g]: nope.md\n".to_owned())],
+    )
+}
+
+pub(super) fn stderr_redirect_passes() -> Inspection {
+    docs(
+        "stderr-redirect",
+        vec![("GUIDE.md", "Run `cargo xtask check 2>&1`.\n".to_owned())],
+    )
+}
+
+pub(super) fn stdout_redirect_passes() -> Inspection {
+    docs(
+        "stdout-redirect",
+        vec![(
+            "GUIDE.md",
+            "Run `cargo xtask check > out.txt`.\n".to_owned(),
+        )],
+    )
+}
+
+pub(super) fn subshell_with_valid_command_passes() -> Inspection {
+    docs(
+        "subshell-valid",
+        vec![(
+            "GUIDE.md",
+            "Run `(cd x && cargo xtask check)`.\n".to_owned(),
+        )],
+    )
+}
+
+pub(super) fn subshell_with_unknown_subcommand_fails() -> Inspection {
+    docs(
+        "subshell-unknown",
+        vec![(
+            "GUIDE.md",
+            "Run `(cd x && cargo xtask frobnicate)`.\n".to_owned(),
+        )],
+    )
+}
+
+pub(super) fn command_substitution_fails() -> Inspection {
+    docs(
+        "command-substitution",
+        vec![("GUIDE.md", "Run `$(cargo xtask frobnicate)`.\n".to_owned())],
+    )
+}
+
+pub(super) fn time_and_env_prefix_fails() -> Inspection {
+    docs(
+        "time-env-prefix",
+        vec![(
+            "GUIDE.md",
+            "Run `time env cargo xtask frobnicate`.\n".to_owned(),
+        )],
     )
 }

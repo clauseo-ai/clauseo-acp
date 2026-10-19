@@ -8,7 +8,7 @@ mod definition;
 mod inline;
 
 use crate::checks;
-use containers::{Containers, Content, strip_quotes};
+use containers::{Containers, Content, leading_spaces, strip_quotes};
 
 /// What `scan` found in one Markdown file, outside the constructs the check does not read.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -53,21 +53,27 @@ pub(super) fn scan(text: &str) -> Scan {
     let mut block: Vec<(u32, &str)> = Vec::new();
     let mut fence: Option<Fence> = None;
     let mut indented = false;
+    let mut quoted_before = false;
     let mut containers = Containers::default();
     for (index, line) in text.lines().enumerate() {
         let number = checks::line_at(index);
+        let quoted = strip_quotes(line).len() != line.len();
+        let starts_quote = quoted && !quoted_before;
+        quoted_before = quoted;
         if let Some(open) = fence {
-            let text = if open.quoted {
-                strip_quotes(line)
-            } else {
-                line
-            };
-            if open.closes(text) {
-                fence = None;
-            } else {
-                scan.code.push(code_line(number, line));
+            match open.line_kind(line) {
+                LineKind::Code => {
+                    scan.code.push(code_line(number, line));
+                    containers.skip(line.trim().is_empty());
+                    continue;
+                }
+                LineKind::Close => {
+                    fence = None;
+                    containers.skip(false);
+                    continue;
+                }
+                LineKind::Outside => fence = None,
             }
-            continue;
         }
         let Some(content) = containers.strip(line) else {
             if !indented {
@@ -86,18 +92,36 @@ pub(super) fn scan(text: &str) -> Scan {
         if let Some(opened) = opens_fence(&content) {
             read_block(&block, &mut scan);
             block.clear();
+            let base = if quoted {
+                0
+            } else {
+                containers.fence_base(content.column, content.starts_item)
+            };
             fence = Some(Fence {
-                quoted: strip_quotes(line).len() != line.len(),
+                quoted,
+                base,
                 ..opened
             });
         } else if content.indent >= 4 && block.is_empty() {
             indented = true;
             scan.code.push(code_line(number, line));
+        } else if content.indent <= 3
+            && (is_thematic_break(content.body)
+                || (!block.is_empty() && is_setext_underline(content.body)))
+        {
+            // A rule ends a paragraph; an underline under one makes it a heading. Either way the
+            // block's text is read, and the line itself is not text.
+            read_block(&block, &mut scan);
+            block.clear();
         } else if content.indent <= 3 && is_heading(content.body) {
             read_block(&block, &mut scan);
             block.clear();
             read_block(&[(number, content.body)], &mut scan);
         } else {
+            if content.starts_item || starts_quote {
+                read_block(&block, &mut scan);
+                block.clear();
+            }
             block.push((number, content.body));
         }
     }
@@ -128,9 +152,23 @@ struct Fence {
     marker: u8,
     /// How many markers open the block; the closing run must be at least as long.
     len: usize,
-    /// True when the fence opens inside a block quote, so its closing line may carry the quote's
-    /// marker too.
+    /// True when the fence opens inside a block quote: its lines carry the quote's marker, and it
+    /// ends with the quote.
     quoted: bool,
+    /// The content column of the list item the fence opens in, 0 outside any item. Its lines
+    /// belong to the item while indented to this column, and it ends with the item.
+    base: usize,
+}
+
+/// How a line reads inside an open fence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineKind {
+    /// A line of the fence's code.
+    Code,
+    /// The closing fence.
+    Close,
+    /// Not in the fence: its block quote or list item has ended, so the fence ended with it.
+    Outside,
 }
 
 impl Fence {
@@ -148,12 +186,38 @@ impl Fence {
             marker,
             len,
             quoted: false,
+            base: 0,
         })
     }
 
-    /// True when `line` closes this fence: the same marker, at least as many times as it
-    /// opened, and nothing else on the line. Any indent closes, which checks more text than
-    /// `CommonMark` would.
+    /// How `line` reads inside this fence. A quoted fence ends at a line without the quote's
+    /// marker (a blank line too). Otherwise a line indented less than the fence's item ends it.
+    /// A closing fence is indented at most three spaces past the fence's container.
+    fn line_kind(self, line: &str) -> LineKind {
+        let (text, base) = if self.quoted {
+            let text = strip_quotes(line);
+            if text.len() == line.len() {
+                return LineKind::Outside;
+            }
+            (text, 0)
+        } else {
+            if line.trim().is_empty() {
+                return LineKind::Code;
+            }
+            if leading_spaces(line) < self.base {
+                return LineKind::Outside;
+            }
+            (line, self.base)
+        };
+        if leading_spaces(text).saturating_sub(base) <= 3 && self.closes(text) {
+            LineKind::Close
+        } else {
+            LineKind::Code
+        }
+    }
+
+    /// True when `line` is a closing fence: the same marker, at least as many times as it opened,
+    /// and nothing else on the line.
     fn closes(self, line: &str) -> bool {
         let body = line.trim_start();
         let len = body.bytes().take_while(|byte| *byte == self.marker).count();
@@ -185,6 +249,21 @@ fn read_block(block: &[(u32, &str)], scan: &mut Scan) {
             .map_or(1, |(_, number)| *number)
     };
     inline::read(&source, &line_of, scan);
+}
+
+/// True for a thematic break: three or more `*`, `-` or `_`, with spaces allowed between them.
+fn is_thematic_break(body: &str) -> bool {
+    let marks: String = body.chars().filter(|c| !c.is_whitespace()).collect();
+    let first = marks.chars().next();
+    marks.len() >= 3
+        && matches!(first, Some('*' | '-' | '_'))
+        && marks.chars().all(|c| Some(c) == first)
+}
+
+/// True for a setext underline: a run of `=`, or of `-`, that follows a paragraph.
+fn is_setext_underline(body: &str) -> bool {
+    let text = body.trim_end();
+    !text.is_empty() && (text.bytes().all(|b| b == b'=') || text.bytes().all(|b| b == b'-'))
 }
 
 /// True for an ATX heading: one to six `#`, then a space or the end of the line.

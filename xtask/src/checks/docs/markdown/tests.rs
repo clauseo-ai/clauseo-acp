@@ -286,3 +286,42 @@ fn a_definition_destination_may_be_on_the_next_line() {
     assert_eq!(targets("[g]:\n"), []);
     assert_eq!(targets("[g]:\n  nope.md extra\n"), []);
 }
+
+#[test]
+fn a_closing_fence_indented_four_spaces_is_code_and_does_not_close() {
+    let text = "~~~\n    ~~~\n~~~\n[x](nope.md)\n";
+    assert_eq!(code(text), [(2, "    ~~~".to_owned())]);
+    assert_eq!(targets(text), [(4, "nope.md".to_owned())]);
+}
+
+#[test]
+fn an_unclosed_fence_in_a_block_quote_ends_with_the_quote() {
+    assert_eq!(
+        targets("> ~~~\n> code\n\n[x](nope.md)\n"),
+        [(4, "nope.md".to_owned())]
+    );
+    assert_eq!(code("> ~~~\n> code\n"), [(2, "> code".to_owned())]);
+}
+
+#[test]
+fn an_unclosed_fence_in_a_list_item_ends_with_the_item() {
+    assert_eq!(
+        targets("- ~~~\n  code\n\ntext [x](nope.md)\n"),
+        [(4, "nope.md".to_owned())]
+    );
+    assert_eq!(targets("- ~~~\n  [x](nope.md)\n"), []);
+}
+
+#[test]
+fn a_definition_after_a_list_item_quote_setext_or_rule_is_read() {
+    assert_eq!(targets("- text\n- [g]: a.md\n"), [(2, "a.md".to_owned())]);
+    assert_eq!(targets("Text\n> [g]: a.md\n"), [(2, "a.md".to_owned())]);
+    assert_eq!(targets("Title\n---\n[g]: a.md\n"), [(3, "a.md".to_owned())]);
+    assert_eq!(targets("Title\n===\n[g]: a.md\n"), [(3, "a.md".to_owned())]);
+    assert_eq!(targets("Text\n***\n[g]: a.md\n"), [(3, "a.md".to_owned())]);
+}
+
+#[test]
+fn a_fence_after_a_lazy_item_line_is_a_top_level_fence() {
+    assert_eq!(targets("- a\n```\n[x](nope.md)\n"), []);
+}

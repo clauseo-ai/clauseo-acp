@@ -17,6 +17,10 @@ pub(super) struct Containers {
 pub(super) struct Content<'a> {
     /// The spaces before the text, measured from the innermost open item's content column.
     pub indent: usize,
+    /// The spaces before the text, measured from the margin (after any block-quote markers).
+    pub column: usize,
+    /// True when the line opens a list item, which always starts a new block.
+    pub starts_item: bool,
     /// The text after the indent.
     pub body: &'a str,
 }
@@ -50,8 +54,26 @@ impl Containers {
         let base = self.items.last().copied().unwrap_or(0);
         Some(Content {
             indent: indent.saturating_sub(base),
+            column: indent,
+            starts_item: false,
             body,
         })
+    }
+
+    /// Records a blank line (`blank`) or a line of text that is not a container's, inside a fence
+    /// whose lines the caller reads itself: a blank line still ends a lazy paragraph later.
+    pub(super) fn skip(&mut self, blank: bool) {
+        self.after_blank = blank;
+    }
+
+    /// The content column of the item a fence opened on a line at `column` belongs to, or 0
+    /// outside any item. A line that does not open an item closes the items it is not inside
+    /// first, since a fence cannot be a lazy continuation.
+    pub(super) fn fence_base(&mut self, column: usize, starts_item: bool) -> usize {
+        if !starts_item {
+            self.close_items_above(column);
+        }
+        self.items.last().copied().unwrap_or(0)
     }
 
     /// Opens the item that `body` starts at `indent`, closing the items it is not inside, and
@@ -65,6 +87,8 @@ impl Containers {
         let rest = text.get(inner..).unwrap_or_default();
         (!rest.is_empty()).then_some(Content {
             indent: inner,
+            column: indent,
+            starts_item: true,
             body: rest,
         })
     }
@@ -123,7 +147,7 @@ fn list_item(body: &str) -> Option<Item> {
 }
 
 /// The number of spaces that `text` starts with.
-fn leading_spaces(text: &str) -> usize {
+pub(super) fn leading_spaces(text: &str) -> usize {
     text.len() - text.trim_start_matches(' ').len()
 }
 
