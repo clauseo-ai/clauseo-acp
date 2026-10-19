@@ -103,6 +103,10 @@ fn blob_ref_rejects_large_values() {
     let hash = BlobHash::from_bytes([1; 32]);
     assert!(BlobRef::new(hash, 1 << 53, String::new()).is_err());
     assert!(BlobRef::new(hash, 0, "x".repeat(PREVIEW_BYTES + 1)).is_err());
+    let at_limit = BlobRef::new(hash, (1 << 53) - 1, "x".repeat(PREVIEW_BYTES)).unwrap();
+    assert_eq!(at_limit.hash(), hash);
+    assert_eq!(at_limit.size_bytes(), (1 << 53) - 1);
+    assert_eq!(at_limit.preview().len(), PREVIEW_BYTES);
     let hex = "01".repeat(32);
     let too_big = format!(r#"{{"hash":"{hex}","size_bytes":9007199254740992,"preview":""}}"#);
     assert!(serde_json::from_str::<BlobRef>(&too_big).is_err());

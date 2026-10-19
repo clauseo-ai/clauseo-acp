@@ -150,3 +150,65 @@ fn errors_map_to_command_invalid() {
     let error = ThreadId::from_str(V4).unwrap_err();
     assert_eq!(error.code(), crate::ErrorCode::CommandInvalid);
 }
+
+#[test]
+fn matter_paths_refuse_drives_controls_and_long_names() {
+    for drive in ["C:", "C:x", "c:/Users/a.docx", "z:a/b"] {
+        assert!(MatterPath::new(drive).is_err(), "{drive:?}");
+    }
+    // A `:` elsewhere is a legal macOS file name character.
+    for good in ["ab:c", "notes/C:x", "1:/a", "x/a:b"] {
+        assert!(MatterPath::new(good).is_ok(), "{good:?}");
+    }
+    for control in ["a\u{1}b", "a\tb", "a\nb", "a\u{1f}", "a\u{7f}b", "a\0b"] {
+        assert!(MatterPath::new(control).is_err(), "{control:?}");
+    }
+    let segment = "s".repeat(255);
+    assert!(MatterPath::new(&segment).is_ok());
+    assert!(MatterPath::new(&format!("a/{segment}")).is_ok());
+    assert!(MatterPath::new(&format!("{segment}s")).is_err());
+    assert!(MatterPath::new(&format!("a/{segment}s/b")).is_err());
+    // 4096 bytes: 15 segments of 255 bytes, one of 254, then `/x`, with 16 slashes in all.
+    let mut at_limit = vec![segment.as_str(); 15].join("/");
+    at_limit.push('/');
+    at_limit.push_str(&"s".repeat(254));
+    at_limit.push_str("/x");
+    assert_eq!(at_limit.len(), 4096);
+    assert!(MatterPath::new(&at_limit).is_ok());
+    at_limit.push('x');
+    assert!(MatterPath::new(&at_limit).is_err());
+    assert!(json::<MatterPath>(r#""C:/x""#).is_err());
+    assert!(json::<MatterPath>(r#""a\u0001""#).is_err());
+}
+
+#[test]
+fn uuid_ids_decode_only_the_hyphenated_text_or_16_bytes() {
+    let simple = V7.replace('-', "");
+    let braced = format!("{{{V7}}}");
+    let urn = format!("urn:uuid:{V7}");
+    for form in [simple, braced, urn] {
+        assert!(json::<ThreadId>(&format!("\"{form}\"")).is_err(), "{form}");
+    }
+    assert!(json::<ThreadId>(&format!("\"{V7}\"")).is_ok());
+    // MessagePack: a str, or bin of another length, is refused.
+    let as_str = rmp_serde::to_vec_named(V7).unwrap();
+    assert!(rmp_serde::from_slice::<ThreadId>(&as_str).is_err());
+    let id = ThreadId::from_str(V7).unwrap();
+    let mut short =
+        rmp_serde::to_vec_named(&serde_bytes_of(&id.as_uuid().as_bytes()[..15])).unwrap();
+    assert!(rmp_serde::from_slice::<ThreadId>(&short).is_err());
+    short = rmp_serde::to_vec_named(&serde_bytes_of(&[7u8; 17])).unwrap();
+    assert!(rmp_serde::from_slice::<ThreadId>(&short).is_err());
+    let packed = rmp_serde::to_vec_named(&id).unwrap();
+    assert_eq!(rmp_serde::from_slice::<ThreadId>(&packed).unwrap(), id);
+    // CommandId keeps its own rule: any version, never nil, strict forms alike.
+    assert!(json::<CommandId>(&format!("\"{V4}\"")).is_ok());
+    assert!(json::<CommandId>(&format!("\"{}\"", V4.replace('-', ""))).is_err());
+    let nil = rmp_serde::to_vec_named(&Uuid::nil()).unwrap();
+    assert!(rmp_serde::from_slice::<CommandId>(&nil).is_err());
+}
+
+/// Bytes that serialise as `MessagePack` bin.
+fn serde_bytes_of(bytes: &[u8]) -> crate::RawPayload {
+    crate::RawPayload::Bytes(bytes.into())
+}

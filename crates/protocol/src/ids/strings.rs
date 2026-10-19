@@ -90,19 +90,39 @@ fn check_agent_session_id(value: &str) -> Result<(), &'static str> {
     }
 }
 
+/// The most bytes in one segment of a [`MatterPath`]: the common file-name limit (APFS, NTFS,
+/// ext4).
+pub(crate) const MAX_SEGMENT_BYTES: usize = 255;
+/// The most bytes in a whole [`MatterPath`].
+pub(crate) const MAX_PATH_BYTES: usize = 4096;
+
 fn check_matter_path(value: &str) -> Result<(), &'static str> {
     if value.is_empty() {
         return Err("must not be empty");
     }
-    if value.contains(['\\', '\0']) {
-        return Err("must not contain a backslash or NUL");
+    if value.len() > MAX_PATH_BYTES {
+        return Err("longer than 4096 bytes");
     }
-    // A leading `/` makes an empty first segment, a trailing one an empty last segment.
-    if value
-        .split('/')
-        .any(|segment| matches!(segment, "" | "." | ".."))
+    if value.contains('\\') {
+        return Err("must not contain a backslash");
+    }
+    if value.bytes().any(|byte| byte < 0x20 || byte == 0x7F) {
+        return Err("must not contain a control character");
+    }
+    // A drive form: `C:`, `C:x`, `C:/...`.
+    if let [first, b':', ..] = value.as_bytes()
+        && first.is_ascii_alphabetic()
     {
-        return Err("must be relative, with no empty, `.` or `..` segment");
+        return Err("must not start with a drive letter and `:`");
+    }
+    for segment in value.split('/') {
+        // A leading `/` makes an empty first segment, a trailing one an empty last segment.
+        if matches!(segment, "" | "." | "..") {
+            return Err("must be relative, with no empty, `.` or `..` segment");
+        }
+        if segment.len() > MAX_SEGMENT_BYTES {
+            return Err("has a segment longer than 255 bytes");
+        }
     }
     Ok(())
 }
@@ -123,7 +143,12 @@ checked_string!(
     ContentId, check_content_id
 );
 checked_string!(
-    /// A path inside a matter: `/` separators, no leading `/`, no `\` or NUL, and no empty, `.` or
-    /// `..` segment. Never an id: commands name files by [`FileRefId`].
+    /// A path inside a matter: `/` separators, no leading `/`, no `\`, no control character
+    /// (NUL to 0x1F and DEL), no empty, `.` or `..` segment, no drive form (`C:`, `C:x`,
+    /// `C:/..`), at most 255 bytes per segment and 4096 bytes in all. Never an id: commands name
+    /// files by [`FileRefId`].
+    ///
+    /// A `:` elsewhere is allowed, because macOS file names may hold one. On Windows a `:` names an
+    /// alternate data stream, so `matters` must refuse a path containing `:` there.
     MatterPath, check_matter_path
 );
