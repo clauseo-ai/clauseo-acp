@@ -11,6 +11,7 @@ use crate::workspace;
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+pub(super) mod names;
 pub(super) mod table;
 pub(super) mod tree;
 

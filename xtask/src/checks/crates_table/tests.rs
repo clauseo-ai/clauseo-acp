@@ -172,7 +172,7 @@ fn a_short_row_a_repeated_row_and_a_bad_never_entry_fail_at_their_lines() {
                 FILE,
                 9,
                 "`no network` in the Never depends on column of `desktop` is neither an I/O word nor a crate name",
-                "write fs, process, any I/O, clock, a crate of the table or a crates.io package name, separated by commas"
+                "write fs, process, any I/O, clock, a crate of the table or a crates.io package name (as `<name> (crates.io)` to mark it as one), separated by commas"
             ),
         ])
     );
@@ -205,7 +205,6 @@ fn a_missing_separator_and_an_empty_table_fail() {
 fn an_escaped_pipe_stays_in_its_cell_and_alignment_colons_are_a_separator() {
     let text = "## Crates\n\n| Crate | Owns | May depend on | Never depends on | Status |\n|:--|---|---|---|--:|\n| `x` | a \\| b | | | exists |\n";
     assert_eq!(parse(text).map(|table| table.rows.len()), Ok(1));
-    assert_eq!(cells("| `x` | a \\| b | | | exists |")[1], "a | b");
 }
 
 #[test]
@@ -283,7 +282,27 @@ fn time_in_the_never_column_is_the_crates_io_crate() {
 }
 
 #[test]
-fn a_row_after_a_blank_line_or_without_a_leading_pipe_fails_and_prose_after_the_table_passes() {
+fn a_row_without_a_leading_pipe_is_a_row_and_a_row_after_a_blank_line_fails() {
+    let no_pipe =
+        doc("| `xtask` | things | | tauri | exists |\n`desktop` | things | | tokio | exists |\n");
+    let table = parse(&no_pipe).expect("the table parses");
+    assert_eq!(
+        table.rows,
+        vec![
+            row(
+                7,
+                "xtask",
+                vec![Never::External("tauri".into())],
+                Status::Exists
+            ),
+            row(
+                8,
+                "desktop",
+                vec![Never::External("tokio".into())],
+                Status::Exists
+            ),
+        ]
+    );
     let blank =
         doc("| `xtask` | things | | tauri | exists |\n\n| `desktop` | things | | | exists |\n");
     assert_eq!(
@@ -291,18 +310,43 @@ fn a_row_after_a_blank_line_or_without_a_leading_pipe_fails_and_prose_after_the_
         Err(vec![violation(
             FILE,
             9,
-            "the Crates table ends at line 7, but line 9 after it holds a `|`, so the rows from there on are not read",
-            "remove the blank lines between line 7 and line 9, so the row joins the table, or move the text at line 9 out of the `## Crates` section: a blank line ends the table",
+            "the Crates table ends at line 7, but line 9 after it starts with `|`, so a row there is not part of the table",
+            "remove the blank lines between line 7 and line 9, so the row joins the table, or move the text at line 9 out of the `## Crates` section: a blank line ends a table",
         )])
     );
-    let no_pipe =
-        doc("| `xtask` | things | | tauri | exists |\n`desktop` | things | | | exists |\n");
+    let second =
+        doc("| `xtask` | things | | tauri | exists |\n\n| a | b |\n|---|---|\n| c | d |\n");
     assert_eq!(
-        parse(&no_pipe).map_err(|found| found.iter().map(|v| v.line).collect::<Vec<_>>()),
-        Err(vec![8])
+        parse(&second).map_err(|found| found.iter().map(|v| v.line).collect::<Vec<_>>()),
+        Err(vec![9])
     );
-    let prose = doc("| `xtask` | things | | tauri | exists |\n\nRows marked planned wait.\n");
+    let prose = doc(
+        "| `xtask` | things | | tauri | exists |\n\nUse `a | b` in shell; rows marked planned wait.\n",
+    );
     assert_eq!(parse(&prose).map(|table| table.rows.len()), Ok(1));
+}
+
+#[test]
+fn a_short_or_long_row_is_counted_as_written_not_as_gfm_pads_or_cuts_it() {
+    let text =
+        doc("| `xtask` | things | | tauri | exists | extra |\n| `desktop` | things | | exists |\n");
+    assert_eq!(
+        parse(&text),
+        Err(vec![
+            violation(
+                FILE,
+                7,
+                "this Crates table row has 6 cells, not 5",
+                SHAPE_FIX
+            ),
+            violation(
+                FILE,
+                8,
+                "this Crates table row has 4 cells, not 5",
+                SHAPE_FIX
+            ),
+        ])
+    );
 }
 
 #[test]
@@ -332,7 +376,7 @@ fn a_row_name_written_with_a_dash_is_rejected_as_ours() {
             FILE,
             7,
             "`transport-ws` in the Never depends on column of `host` is the row `transport_ws` written with `-` for `_`, and as written it would ban a crates.io package `transport-ws` instead of our `clauseo-transport_ws`",
-            "write `transport_ws` to ban our crate `clauseo-transport_ws`: xtask/src/checks/crates_table.rs rejects a name within one edit of a row name once `-` is read as `_`",
+            "write `transport_ws` to ban our crate `clauseo-transport_ws`, or `transport-ws (crates.io)` if you mean the crates.io package: xtask/src/checks/crates_table.rs rejects a name within one edit of a row name (ignoring case, reading `-` as `_`, a swap of two letters counting as one edit)",
         )])
     );
 }
@@ -345,7 +389,11 @@ fn one_edit_means_one_insert_delete_or_replace() {
     assert!(within_one_edit("agentss", "agents"));
     assert!(within_one_edit("agbnts", "agents"));
     assert!(within_one_edit("gents", "agents"));
+    assert!(within_one_edit("agnets", "agents"));
+    assert!(within_one_edit("gaents", "agents"));
+    assert!(within_one_edit("agenst", "agents"));
     assert!(!within_one_edit("agnet", "agents"));
+    assert!(!within_one_edit("gaenst", "agents"));
     assert!(!within_one_edit("tauri", "agents"));
     assert!(!within_one_edit("tokio", "acp"));
 }
@@ -357,4 +405,29 @@ fn a_ban_names_one_package_so_tauri_is_only_tauri() {
     let row = table.row("xtask").expect("the row is there");
     let banned: Vec<String> = row.never.iter().filter_map(Never::package).collect();
     assert_eq!(banned, ["tauri"]);
+}
+
+#[test]
+fn a_crates_io_marker_names_the_package_whatever_the_look_alike_rules_say() {
+    let text = doc(
+        "| `host` | things | | rmcp (crates.io), agents (crates.io), serde_json (crates.io) | planned |\n\
+         | `mcp` | things | | | planned |\n\
+         | `agents` | things | | | planned |\n",
+    );
+    let table = parse(&text).expect("the table parses");
+    assert_eq!(
+        table.row("host").map(|row| row.never.clone()),
+        Some(vec![
+            Never::External("rmcp".into()),
+            Never::External("agents".into()),
+            Never::External("serde_json".into()),
+        ])
+    );
+    let bad = doc("| `host` | things | | not a name (crates.io) | planned |\n");
+    assert_eq!(
+        parse(&bad).map_err(|found| found.iter().map(|v| v.message.clone()).collect::<Vec<_>>()),
+        Err(vec![
+            "`not a name (crates.io)` in the Never depends on column of `host` is neither an I/O word nor a crate name".to_owned()
+        ])
+    );
 }

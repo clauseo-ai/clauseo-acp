@@ -1,14 +1,13 @@
 //! The Crates table of `ARCHITECTURE.md`, read for the checks that enforce it.
 //!
 //! The table sits under `## Crates`: a pipe table with the columns `Crate`, `Owns`, `May depend
-//! on`, `Never depends on` and `Status`. There is no Markdown parser among our dependencies, so
-//! it is read by hand: each line from the first `|` line of the section to the first line that
-//! does not start with `|` is a row; a row is split on `|` (a `\|` is a literal pipe), each cell
-//! trimmed and its backticks removed. The second line must be the `|---|` separator. Markdown
-//! also reads a line without a leading pipe as a row, and a blank line ends the table, so the
-//! next non-blank line of the section after the table must hold no `|`: rows past the end
-//! would be dropped without a word. Only the Crate, Never depends on and Status cells are read;
-//! the others must be there, so every row has five cells.
+//! on`, `Never depends on` and `Status`. `table.rs` reads it with `pulldown-cmark` as GitHub
+//! renders it (GFM): the first table of the section, a row without a leading pipe included, a
+//! `\|` being a pipe inside a cell, and a code span's text without its backticks. A blank line
+//! ends a table, and GFM shows a `|` line after it as text, so a line of the section after the
+//! table that starts with `|`, or a second table, fails: no row is dropped without a word.
+//! Only the Crate, Never depends on and Status cells are read; the others must be there, so
+//! every row has five cells, counted as written (GFM pads a short row and cuts a long one).
 //!
 //! "Never depends on" entries are I/O words or crate names. The I/O words name standard library
 //! APIs, as `ARCHITECTURE.md` defines them: `fs`, `process` and `any I/O` each mean the file,
@@ -17,12 +16,15 @@
 //! `std`, and a standard library module that core-io bans whole (`net`, `env`, `os`: see
 //! `core_io/bans.rs`), are rejected: they name no crate we use, and the I/O words are how the
 //! table bans those APIs. `time` is the crates.io crate. A crate name that is a row of the
-//! table, or `clauseo-` followed by one (`clauseo-process`, since a bare `process` is the I/O
-//! word), is our package `clauseo-<name>`; any other name is the crates.io package of that name.
-//! A name that looks like ours but is no row is rejected, so a typo never turns into a ban on a
-//! crates.io package nobody uses: `clauseo-` followed by no row, a name holding `_` (our row
-//! names hold `_`, crates.io names are written with `-` here, and cargo reads the two the
-//! same), and a name one edit from a row name once `-` and `_` are folded.
+//! table, or exactly a row's package (`clauseo-process`, since a bare `process` is the I/O
+//! word), is that row's crate; any other name is the crates.io package of that name.
+//! A name that looks like ours but is neither is rejected, so a typo never turns into a ban on a
+//! crates.io package nobody uses: a name starting with `clauseo-` in any case (`clauseo-xtask`
+//! too: the xtask row's package is `xtask`), a name holding `_` (our row names hold `_`,
+//! crates.io names are written with `-` here, and cargo reads the two the same), and a name
+//! within one edit of a row name, ignoring case, reading `-` as `_`, a swap of two adjacent
+//! letters counting as one edit. `<name> (crates.io)` names the crates.io package `<name>` and
+//! skips those rules, for a real crate that sits one edit from a row (`rmcp`, near `mcp`).
 //!
 //! A ban names exactly one package. `tauri` bans the package `tauri`, not `tauri-runtime`,
 //! `tauri-utils`, `wry` or a fork under another name; banning a family means listing each of
@@ -32,10 +34,14 @@ use crate::checks::{self, core_io, violation};
 use crate::violation::Violation;
 use std::path::Path;
 
-mod lines;
+mod cells;
 mod names;
+mod table;
 
-use lines::{cells, entries, is_crate_name, is_package_name, is_rule, is_table_line, past_the_end};
+use cells::{entries, is_crate_name, is_package_name};
+
+/// The number of columns, as a pattern.
+const COLUMNS_LEN: usize = COLUMNS.len();
 
 /// The file, at the repo root.
 pub(crate) const FILE: &str = "ARCHITECTURE.md";
@@ -214,90 +220,37 @@ pub(crate) fn load(root: &Path) -> Result<CratesTable, LoadError> {
 /// Reads the Crates table from `text`, the contents of `ARCHITECTURE.md`. `Err` holds every
 /// problem found, sorted by line.
 pub(crate) fn parse(text: &str) -> Result<CratesTable, Vec<Violation>> {
-    let lines: Vec<&str> = text.lines().collect();
-    let Some(heading) = lines.iter().position(|line| line.trim_end() == SECTION) else {
-        return Err(vec![violation(
-            FILE,
-            1,
-            format!("ARCHITECTURE.md has no `{SECTION}` section"),
-            SHAPE_FIX,
-        )]);
-    };
-    let section_end = lines
-        .iter()
-        .enumerate()
-        .skip(heading + 1)
-        .find(|(_, line)| line.starts_with("# ") || line.starts_with("## "))
-        .map_or(lines.len(), |(index, _)| index);
-    let section = lines.get(heading + 1..section_end).unwrap_or_default();
-    let Some(first) = section.iter().position(|line| is_table_line(line)) else {
-        return Err(vec![violation(
-            FILE,
-            checks::line_at(heading),
-            format!("the `{SECTION}` section has no table"),
-            SHAPE_FIX,
-        )]);
-    };
-    let start = heading + 1 + first;
-    let table: Vec<(u32, Vec<String>)> = lines
-        .iter()
-        .enumerate()
-        .skip(start)
-        .take_while(|(_, line)| is_table_line(line))
-        .map(|(index, line)| (checks::line_at(index), cells(line)))
-        .collect();
-    let mut found = Vec::new();
-    let after = start + table.len();
-    if let Some((index, line)) = lines
-        .iter()
-        .enumerate()
-        .take(section_end)
-        .skip(after)
-        .find(|(_, line)| !line.trim().is_empty())
-        && line.contains('|')
-    {
-        found.push(past_the_end(
-            checks::line_at(after - 1),
-            checks::line_at(index),
-            line,
-        ));
-    }
-    let header_line = checks::line_at(start);
-    if table.first().map(|(_, cells)| cells.as_slice())
-        != Some(COLUMNS.map(String::from).as_slice())
-    {
-        let written = table
-            .first()
-            .map(|(_, cells)| cells.join(" | "))
-            .unwrap_or_default();
+    let table = table::read(text).map_err(|problem| vec![problem])?;
+    let header_line = table.header_line;
+    if table.header != COLUMNS.map(String::from) {
         return Err(vec![violation(
             FILE,
             header_line,
             format!(
-                "the Crates table's columns are `{written}`, not `{}`",
+                "the Crates table's columns are `{}`, not `{}`",
+                table.header.join(" | "),
                 COLUMNS.join(" | ")
             ),
             SHAPE_FIX,
         )]);
     }
-    match table.get(1) {
-        Some((_, cells)) if cells.len() == COLUMNS.len() && cells.iter().all(|c| is_rule(c)) => {}
-        _ => {
-            return Err(vec![violation(
-                FILE,
-                header_line + 1,
-                "the Crates table's header is not followed by its `|---|` separator line",
-                SHAPE_FIX,
-            )]);
-        }
-    }
-    let raw: Vec<RawRow> = table
+    let mut found: Vec<Violation> = table
+        .stray
         .iter()
-        .skip(2)
-        .filter_map(|(line, cells)| raw_row(*line, cells, &mut found))
+        .map(|line| {
+            after_the_table(
+                table.rows.last().map_or(header_line + 1, |row| row.line),
+                *line,
+            )
+        })
+        .collect();
+    let raw: Vec<RawRow> = table
+        .rows
+        .iter()
+        .filter_map(|row| raw_row(row, &mut found))
         .collect();
     let rows = classify(&raw, &mut found);
-    if table.len() == 2 {
+    if table.rows.is_empty() {
         found.push(violation(
             FILE,
             header_line,
@@ -313,6 +266,22 @@ pub(crate) fn parse(text: &str) -> Result<CratesTable, Vec<Violation>> {
     }
 }
 
+/// The violation for line `line` of the `## Crates` section, after the table (whose last line
+/// is `end`), which starts with `|` or starts a second table: GFM shows it outside the table,
+/// so a row written there would never be read.
+fn after_the_table(end: u32, line: u32) -> Violation {
+    violation(
+        FILE,
+        line,
+        format!(
+            "the Crates table ends at line {end}, but line {line} after it starts with `|`, so a row there is not part of the table"
+        ),
+        format!(
+            "remove the blank lines between line {end} and line {line}, so the row joins the table, or move the text at line {line} out of the `{SECTION}` section: a blank line ends a table"
+        ),
+    )
+}
+
 /// A row split into cells, before its "Never depends on" entries are classified.
 struct RawRow {
     line: u32,
@@ -321,15 +290,17 @@ struct RawRow {
     status: Status,
 }
 
-/// The row at `line`, or `None` with its problems added to `found`.
-fn raw_row(line: u32, cells: &[String], found: &mut Vec<Violation>) -> Option<RawRow> {
-    let [name, _owns, _may, never, status] = cells else {
+/// The body row `row`, or `None` with its problems added to `found`.
+fn raw_row(row: &table::Row, found: &mut Vec<Violation>) -> Option<RawRow> {
+    let line = row.line;
+    let ([name, _owns, _may, never, status], COLUMNS_LEN) = (row.cells.as_slice(), row.written)
+    else {
         found.push(violation(
             FILE,
             line,
             format!(
                 "this Crates table row has {} cells, not {}",
-                cells.len(),
+                row.written,
                 COLUMNS.len()
             ),
             SHAPE_FIX,
@@ -384,7 +355,11 @@ fn classify(raw: &[RawRow], found: &mut Vec<Violation>) -> Vec<CrateRow> {
         }
         let mut never = Vec::new();
         for entry in &row.never {
-            if let Some(word) = IoWord::parse(entry) {
+            if let Some(name) = names::marked_crates_io(entry)
+                && is_package_name(name)
+            {
+                never.push(Never::External(name.to_owned()));
+            } else if let Some(word) = IoWord::parse(entry) {
                 never.push(Never::Io(word));
             } else if core_io::holds_banned_modules(entry) {
                 found.push(violation(
@@ -422,7 +397,7 @@ fn classify(raw: &[RawRow], found: &mut Vec<Violation>) -> Vec<CrateRow> {
                         "`{entry}` in the Never depends on column of `{}` is neither an I/O word nor a crate name",
                         row.name
                     ),
-                    "write fs, process, any I/O, clock, a crate of the table or a crates.io package name, separated by commas",
+                    "write fs, process, any I/O, clock, a crate of the table or a crates.io package name (as `<name> (crates.io)` to mark it as one), separated by commas",
                 ));
             }
         }

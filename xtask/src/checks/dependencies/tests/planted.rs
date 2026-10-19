@@ -98,17 +98,19 @@ crate::checks::planted::cases! {
         "crates/protocol/Cargo.toml:7: clauseo-protocol depends on tauri through spec, which ARCHITECTURE.md forbids\n    \
          fix: move the code that uses `spec` into a crate whose row allows tauri, then remove `spec` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on tauri",
     ]) => super::feature_turned_on_by_the_crate_itself,
-    /// A row without a leading pipe ends the table; the rows below it would be dropped.
+    /// A row without a leading pipe is a row, as GitHub shows it: host's ban on agents, written
+    /// in such a row, still fails host's dependency on clauseo-agents.
     row_without_leading_pipe: FailsWith(&[
-        "ARCHITECTURE.md:8: the Crates table ends at line 7, but line 8 after it holds a `|`, so the rows from there on are not read\n    \
-         fix: start line 8 with `|` if it is a row (Markdown reads a row without a leading pipe, xtask/src/checks/crates_table.rs does not), else write it without a `|`",
-        "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
-         fix: the check stopped before it could look; fix the failure above first",
+        "crates/host/Cargo.toml:7: clauseo-host depends on clauseo-agents, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `clauseo-agents` into a crate whose row allows clauseo-agents, then remove `clauseo-agents` from crates/host/Cargo.toml: the row at ARCHITECTURE.md:8 says clauseo-host never depends on clauseo-agents",
     ]) => super::table::row_without_leading_pipe,
+    /// Prose with a `|` in a code span after the table is not a row.
+    prose_with_a_pipe_after_the_table_passes: Passes
+        => super::table::prose_with_a_pipe_after_the_table_passes,
     /// `agent`, one edit from the row `agents`, is no crates.io ban.
     misspelt_row_in_never: FailsWith(&[
         "ARCHITECTURE.md:7: `agent` in the Never depends on column of `host` is one edit from the row `agents`, so it reads as a typo of it, and as written it would ban a crates.io package `agent` instead of our `clauseo-agents`\n    \
-         fix: write `agents` to ban our crate `clauseo-agents`: xtask/src/checks/crates_table.rs rejects a name within one edit of a row name once `-` is read as `_`",
+         fix: write `agents` to ban our crate `clauseo-agents`, or `agent (crates.io)` if you mean the crates.io package: xtask/src/checks/crates_table.rs rejects a name within one edit of a row name (ignoring case, reading `-` as `_`, a swap of two letters counting as one edit)",
         "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
          fix: the check stopped before it could look; fix the failure above first",
     ]) => super::table::misspelt_row_in_never,
@@ -122,7 +124,7 @@ crate::checks::planted::cases! {
     /// `clauseo-` followed by no row fails at the row.
     clauseo_prefix_without_row: FailsWith(&[
         "ARCHITECTURE.md:7: `clauseo-nosuchrow` in the Never depends on column of `host` starts with `clauseo-`, but `nosuchrow` is no row of the Crates table, so it names none of our crates\n    \
-         fix: write the row name of the crate you mean (a name in the Crate column), or add a row `nosuchrow` for the crate",
+         fix: write the row name of the crate you mean (a name in the Crate column), add a row `nosuchrow` for the crate, or write `clauseo-nosuchrow (crates.io)` if you mean the crates.io package",
         "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
          fix: the check stopped before it could look; fix the failure above first",
     ]) => super::table::clauseo_prefix_without_row,
@@ -150,4 +152,39 @@ crate::checks::planted::cases! {
         "crates/protocol/Cargo.toml:8: clauseo-protocol depends on tauri through right and inner, which ARCHITECTURE.md forbids\n    \
          fix: move the code that uses `right` into a crate whose row allows tauri, then remove `right` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on tauri",
     ]) => super::tree::two_paths_each_fail,
+    crates_io_marker_passes: Passes => super::names::crates_io_marker_passes,
+    crates_io_marker_bans_the_package: FailsWith(&[
+        "crates/host/Cargo.toml:7: clauseo-host depends on rmcp, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `rmcp` into a crate whose row allows rmcp, then remove `rmcp` from crates/host/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-host never depends on rmcp",
+    ]) => super::names::crates_io_marker_bans_the_package,
+    crates_io_name_one_edit_from_a_row: FailsWith(&[
+        "ARCHITECTURE.md:7: `rmcp` in the Never depends on column of `host` is one edit from the row `mcp`, so it reads as a typo of it, and as written it would ban a crates.io package `rmcp` instead of our `clauseo-mcp`\n    \
+         fix: write `mcp` to ban our crate `clauseo-mcp`, or `rmcp (crates.io)` if you mean the crates.io package: xtask/src/checks/crates_table.rs rejects a name within one edit of a row name (ignoring case, reading `-` as `_`, a swap of two letters counting as one edit)",
+        "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
+         fix: the check stopped before it could look; fix the failure above first",
+    ]) => super::names::crates_io_name_one_edit_from_a_row,
+    row_name_in_capitals: FailsWith(&[
+        "ARCHITECTURE.md:7: `AGENTS` in the Never depends on column of `host` is the row `agents` written with other letter case, and as written it would ban a crates.io package `AGENTS` instead of our `clauseo-agents`\n    \
+         fix: write `agents` to ban our crate `clauseo-agents`, or `AGENTS (crates.io)` if you mean the crates.io package: xtask/src/checks/crates_table.rs rejects a name within one edit of a row name (ignoring case, reading `-` as `_`, a swap of two letters counting as one edit)",
+        "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
+         fix: the check stopped before it could look; fix the failure above first",
+    ]) => super::names::row_name_in_capitals,
+    package_name_in_other_case: FailsWith(&[
+        "ARCHITECTURE.md:7: `Clauseo-agents` in the Never depends on column of `host` is the package `clauseo-agents` written with other letter case\n    \
+         fix: write `clauseo-agents` (or the row name `agents`) to ban our crate, or `Clauseo-agents (crates.io)` if you mean the crates.io package",
+        "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
+         fix: the check stopped before it could look; fix the failure above first",
+    ]) => super::names::package_name_in_other_case,
+    row_name_with_two_letters_swapped: FailsWith(&[
+        "ARCHITECTURE.md:7: `agnets` in the Never depends on column of `host` is one edit from the row `agents`, so it reads as a typo of it, and as written it would ban a crates.io package `agnets` instead of our `clauseo-agents`\n    \
+         fix: write `agents` to ban our crate `clauseo-agents`, or `agnets (crates.io)` if you mean the crates.io package: xtask/src/checks/crates_table.rs rejects a name within one edit of a row name (ignoring case, reading `-` as `_`, a swap of two letters counting as one edit)",
+        "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
+         fix: the check stopped before it could look; fix the failure above first",
+    ]) => super::names::row_name_with_two_letters_swapped,
+    clauseo_before_a_row_whose_package_has_no_prefix: FailsWith(&[
+        "ARCHITECTURE.md:7: `clauseo-xtask` in the Never depends on column of `host` is not our package: the row `xtask`'s package is `xtask`\n    \
+         fix: write `xtask` to ban our crate `xtask`, or `clauseo-xtask (crates.io)` if you mean the crates.io package",
+        "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
+         fix: the check stopped before it could look; fix the failure above first",
+    ]) => super::names::clauseo_before_a_row_whose_package_has_no_prefix,
 }

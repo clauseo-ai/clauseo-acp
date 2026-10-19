@@ -23,8 +23,17 @@ fn host_using_agents(name: &str, rows: &str) -> Inspection {
 pub(in crate::checks::dependencies) fn row_without_leading_pipe() -> Inspection {
     host_using_agents(
         "no-leading-pipe",
-        "| `host` | sessions | protocol | tauri, agents | exists |\n`legal` | data | protocol | tauri | planned |\n| `agents` | registry | protocol | tauri | planned |\n",
+        "| `agents` | registry | protocol | tauri | planned |\n`host` | sessions | protocol | tauri, agents | exists |\n",
     )
+}
+
+pub(in crate::checks::dependencies) fn prose_with_a_pipe_after_the_table_passes() -> Inspection {
+    let rows = format!("{PROTOCOL_ROW}\nUse `a | b` in shell.\n");
+    let crates = [(
+        "crates/protocol".to_owned(),
+        manifest("clauseo-protocol", ""),
+    )];
+    run_on(&workspace("prose-pipe", &rows, "", &crates))
 }
 
 pub(in crate::checks::dependencies) fn misspelt_row_in_never() -> Inspection {
