@@ -24,38 +24,41 @@ fn json_round_trips_to_identical_bytes() {
     let keys: Vec<_> = entries.iter().map(|(key, _)| key.clone()).collect();
     assert_eq!(
         keys.first(),
-        Some(&RawPayload::Str("zeta".to_owned())),
+        Some(&RawPayload::Str("zeta".into())),
         "order kept"
     );
-    assert!(entries.contains(&(RawPayload::Str("min".to_owned()), RawPayload::I64(i64::MIN))));
-    assert!(entries.contains(&(RawPayload::Str("max".to_owned()), RawPayload::U64(u64::MAX))));
+    assert!(entries.contains(&(RawPayload::Str("min".into()), RawPayload::I64(i64::MIN))));
+    assert!(entries.contains(&(RawPayload::Str("max".into()), RawPayload::U64(u64::MAX))));
     assert_eq!(serde_json::to_string(&raw).unwrap(), json);
     assert_eq!(raw.to_json_text().unwrap(), json);
 }
 
 #[test]
 fn msgpack_round_trips_to_identical_bytes() {
-    let value = RawPayload::Map(vec![
-        (RawPayload::Str("zeta".to_owned()), RawPayload::U64(1)),
-        (
-            RawPayload::Str("alpha".to_owned()),
-            RawPayload::Seq(vec![
-                RawPayload::I64(-4),
-                RawPayload::Seq(vec![RawPayload::Null, RawPayload::Bool(false)]),
-            ]),
-        ),
-        (RawPayload::Str("min".to_owned()), RawPayload::I64(i64::MIN)),
-        (RawPayload::Str("max".to_owned()), RawPayload::U64(u64::MAX)),
-        (RawPayload::Str("f".to_owned()), RawPayload::F64(-0.1)),
-        (
-            RawPayload::Str("bin".to_owned()),
-            RawPayload::Bytes(vec![0, 255, 7]),
-        ),
-        (
-            RawPayload::U64(7),
-            RawPayload::Str("integer key".to_owned()),
-        ),
-    ]);
+    let value = RawPayload::Map(
+        vec![
+            (RawPayload::Str("zeta".into()), RawPayload::U64(1)),
+            (
+                RawPayload::Str("alpha".into()),
+                RawPayload::Seq(
+                    vec![
+                        RawPayload::I64(-4),
+                        RawPayload::Seq(vec![RawPayload::Null, RawPayload::Bool(false)].into()),
+                    ]
+                    .into(),
+                ),
+            ),
+            (RawPayload::Str("min".into()), RawPayload::I64(i64::MIN)),
+            (RawPayload::Str("max".into()), RawPayload::U64(u64::MAX)),
+            (RawPayload::Str("f".into()), RawPayload::F64(-0.1)),
+            (
+                RawPayload::Str("bin".into()),
+                RawPayload::Bytes(vec![0, 255, 7].into()),
+            ),
+            (RawPayload::U64(7), RawPayload::Str("integer key".into())),
+        ]
+        .into(),
+    );
     let bytes = rmp_serde::to_vec_named(&value).unwrap();
     assert_eq!(rmp_serde::from_slice::<RawPayload>(&bytes).unwrap(), value);
     assert_eq!(msgpack_round_trip(&bytes), bytes);
@@ -113,12 +116,12 @@ fn non_canonical_input_writes_back_canonical() {
 
 #[test]
 fn json_text_of_a_binary_key_is_an_error() {
-    let value = RawPayload::Map(vec![(RawPayload::Bytes(vec![1]), RawPayload::Null)]);
+    let value = RawPayload::Map(vec![(RawPayload::Bytes(vec![1].into()), RawPayload::Null)].into());
     assert!(matches!(
         value.to_json_text(),
         Err(crate::Error::NotJson(_))
     ));
-    let bytes = RawPayload::Seq(vec![RawPayload::Bytes(vec![1, 2])]);
+    let bytes = RawPayload::Seq(vec![RawPayload::Bytes(vec![1, 2].into())].into());
     assert_eq!(bytes.to_json_text().unwrap(), "[[1,2]]");
 }
 
@@ -127,6 +130,12 @@ fn serde_json_value_cannot_do_this() {
     // The reason RawPayload exists: Value sorts keys and refuses binary data.
     let value: serde_json::Value = serde_json::from_str(r#"{"b":1,"a":2}"#).unwrap();
     assert_eq!(value.to_string(), r#"{"a":2,"b":1}"#);
-    let bin = rmp_serde::to_vec_named(&RawPayload::Bytes(vec![1])).unwrap();
+    let bin = rmp_serde::to_vec_named(&RawPayload::Bytes(vec![1].into())).unwrap();
     assert!(rmp_serde::from_slice::<serde_json::Value>(&bin).is_err());
+}
+
+#[test]
+fn raw_payload_is_24_bytes() {
+    // Boxed slices and strings are 16 bytes each; a Vec or String would make it 32.
+    assert_eq!(std::mem::size_of::<RawPayload>(), 24);
 }

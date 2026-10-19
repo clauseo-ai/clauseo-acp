@@ -46,7 +46,8 @@ fn check_not_nil(id: Uuid, kind: &'static str) -> Result<Uuid, Error> {
 macro_rules! uuid_id {
     ($(#[$meta:meta])* $name:ident, $check:path, $rule:literal) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
+        #[serde(try_from = "Uuid")]
         #[cfg_attr(feature = "specta", derive(specta::Type), specta(type = String))]
         pub struct $name(Uuid);
 
@@ -87,9 +88,12 @@ macro_rules! uuid_id {
             }
         }
 
-        impl<'de> Deserialize<'de> for $name {
-            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                Self::new(Uuid::deserialize(deserializer)?).map_err(de::Error::custom)
+        /// Runs the same check as `new`, so `Deserialize` (through `try_from`) and `new` agree.
+        impl TryFrom<Uuid> for $name {
+            type Error = Error;
+
+            fn try_from(id: Uuid) -> Result<Self, Error> {
+                Self::new(id)
             }
         }
     };
