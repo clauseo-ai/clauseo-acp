@@ -57,3 +57,49 @@ fn violations_are_listed_by_file_then_line() {
         .collect();
     assert_eq!(places, ["a.md:3", "a.md:5", "b.md:3"]);
 }
+
+#[test]
+fn only_the_markdown_files_it_read_are_counted() {
+    let dir = Scratch::new("docs-count-read");
+    fs::write(dir.join("a.md"), "# A\n").expect("write a doc");
+    fs::write(dir.join("bad.md"), [0xff, 0xfe, b'\n']).expect("write a doc that is not UTF-8");
+    let listed = ["a.md", "bad.md", "gone.md"].map(str::to_owned);
+    let found = inspect(&dir, &listed);
+    assert_eq!(
+        found.inspected, 1,
+        "a.md is read; bad.md is unreadable, gone.md is not there"
+    );
+    assert!(
+        found
+            .violations
+            .iter()
+            .any(|violation| violation.path == "bad.md"),
+        "the unreadable file is reported: {:?}",
+        found.violations
+    );
+}
+
+#[test]
+fn a_link_to_a_file_git_ignores_fails_in_a_real_repo() {
+    let dir = Scratch::new("docs-git-ignored");
+    let git = Cmd::new(Program::Git, ["init", "-q"]);
+    let quiet = process::run_quiet(&git, &dir).expect("git runs");
+    assert!(quiet.success, "git init failed: {}", quiet.stderr);
+    fs::write(dir.join(".gitignore"), "local.md\n").expect("write .gitignore");
+    fs::write(dir.join("local.md"), "# Local\n").expect("write the ignored file");
+    fs::write(dir.join("GUIDE.md"), "See [x](local.md).\n").expect("write a doc");
+    let found = run(&Context {
+        root: dir.to_path_buf(),
+        members: Vec::new(),
+        load_resolved_graph: false,
+    });
+    let printed: Vec<String> = found.violations.iter().map(ToString::to_string).collect();
+    assert!(
+        printed.contains(
+            &"GUIDE.md:1: the relative link `local.md` does not resolve: `local.md` does not exist\n    \
+              fix: create `local.md`, or correct or remove the link"
+                .to_owned()
+        ),
+        "the ignored file does not count: {printed:?}"
+    );
+}
