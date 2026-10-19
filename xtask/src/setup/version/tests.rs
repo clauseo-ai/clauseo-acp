@@ -115,7 +115,8 @@ fn after_an_install_otherwise_the_fix_asks_which_copy_runs() {
     );
     assert_eq!(
         fix.expect("a failed check").1,
-        "run `where gitleaks` to see which copy of gitleaks this shell runs"
+        "open a new shell, which picks up the PATH winget set, then run `where gitleaks` to see \
+         which copy of gitleaks it runs"
     );
 }
 

@@ -109,7 +109,8 @@ fn a_failed_download_leaves_bin_untouched_and_names_curl_as_the_fix() {
             exited(
                 false,
                 "",
-                "curl: (22) The requested URL returned error: 404\n",
+                "curl: (22) The requested URL returned error: 404\n\
+                 curl: (22) The requested URL returned error: 404\n",
             ),
         ),
         (
@@ -208,18 +209,20 @@ fn sha256_of_hashes_the_file_bytes() {
     assert_eq!(sha256_of(&file).unwrap(), SWAPPED_SHA256);
 }
 
-/// Makes `name.tar.gz` in `dir` with the system tar, from a `gitleaks` (a file holding
-/// `ASSET_BYTES`, or with `link` a symlink to `LICENSE`) and a `LICENSE`. Returns its path.
+/// Makes `<member>.tar.gz` in `dir` with the system tar, from a `LICENSE` and a `gitleaks` that is
+/// a file holding `ASSET_BYTES` ("file"), a symlink to `LICENSE` ("link") or a directory ("dir").
+/// Returns its path.
 #[cfg(unix)]
-fn real_tar_gz(dir: &Path, name: &str, link: bool) -> PathBuf {
-    let src = dir.join(format!("{name}-src"));
+fn real_tar_gz(dir: &Path, member: &str) -> PathBuf {
+    let src = dir.join(format!("{member}-src"));
     fs::create_dir_all(&src).unwrap();
     fs::write(src.join("LICENSE"), b"the license").unwrap();
-    if link {
-        std::os::unix::fs::symlink("LICENSE", src.join("gitleaks")).unwrap();
-    } else {
-        fs::write(src.join("gitleaks"), ASSET_BYTES).unwrap();
+    match member {
+        "file" => fs::write(src.join("gitleaks"), ASSET_BYTES).unwrap(),
+        "link" => std::os::unix::fs::symlink("LICENSE", src.join("gitleaks")).unwrap(),
+        _ => fs::create_dir(src.join("gitleaks")).unwrap(),
     }
+    let name = member;
     let archive = dir.join(format!("{name}.tar.gz"));
     let archive_arg = archive.display().to_string();
     let tar = Cmd::new(
@@ -267,11 +270,13 @@ fn install_real_tar_gz(archive: &Path, bin: &Path) -> (bool, String) {
 
 #[cfg(unix)]
 #[test]
-fn the_real_tar_extract_installs_only_gitleaks_from_a_release_like_archive() {
+fn the_real_tar_extract_replaces_gitleaks_in_bin_from_a_release_like_archive() {
     use std::os::unix::fs::PermissionsExt;
     let dir = Scratch::new("setup-install-real-tar");
-    let archive = real_tar_gz(&dir, "good", false);
+    let archive = real_tar_gz(&dir, "file");
     let bin = dir.join("bin");
+    fs::create_dir(&bin).unwrap();
+    fs::write(bin.join("gitleaks"), b"an old gitleaks").unwrap();
     let (ok, printed) = install_real_tar_gz(&archive, &bin);
     assert!(ok, "{printed}");
     assert_eq!(
@@ -287,16 +292,24 @@ fn the_real_tar_extract_installs_only_gitleaks_from_a_release_like_archive() {
 
 #[cfg(unix)]
 #[test]
-fn the_real_tar_extract_refuses_a_gitleaks_member_that_is_a_symlink() {
-    let dir = Scratch::new("setup-install-real-tar-link");
-    let archive = real_tar_gz(&dir, "link", true);
-    let bin = dir.join("bin");
-    fs::create_dir(&bin).unwrap();
-    fs::write(bin.join("gitleaks"), b"the working gitleaks").unwrap();
-    let before = files_in(&bin);
-    let (ok, printed) = install_real_tar_gz(&archive, &bin);
-    assert!(!ok);
-    assert_eq!(files_in(&bin), before);
+fn the_real_tar_extract_refuses_a_gitleaks_member_that_is_a_symlink_or_a_directory() {
+    for member in ["link", "dir"] {
+        let dir = Scratch::new(&format!("setup-install-real-tar-{member}"));
+        let archive = real_tar_gz(&dir, member);
+        let bin = dir.join("bin");
+        fs::create_dir(&bin).unwrap();
+        fs::write(bin.join("gitleaks"), b"the working gitleaks").unwrap();
+        let before = files_in(&bin);
+        let (ok, printed) = install_real_tar_gz(&archive, &bin);
+        assert!(!ok, "{member}");
+        assert_eq!(files_in(&bin), before, "{member}");
+        refused(&printed);
+    }
+}
+
+/// Asserts that `printed` ends with the failure for an asset with no regular file named gitleaks.
+#[cfg(unix)]
+fn refused(printed: &str) {
     let asset = "faketool_fake-version_linux_x86_64";
     let url =
         format!("https://github.com/example/faketool/releases/download/vfake-version/{asset}");
@@ -311,12 +324,15 @@ fn the_real_tar_extract_refuses_a_gitleaks_member_that_is_a_symlink() {
 }
 
 #[test]
-fn curl_retries_and_its_own_limit_fires_before_run_timed_stops_it() {
+fn the_download_commands_and_curl_stopping_itself_before_run_timed_does() {
     let (asset, url) = ("a.tar.gz", "https://example.com/a.tar.gz");
     assert_eq!(curl_cmd(asset, url).to_string(), expected_curl(asset, url));
-    // Four attempts of 300 s each, and the 1, 2 and 4 s curl waits between them.
-    let curl_at_most = Duration::from_secs(4 * 300 + 1 + 2 + 4);
-    assert!(DOWNLOAD_TIMEOUT > curl_at_most);
+    assert_eq!(
+        tar_cmd(asset, "gitleaks").to_string(),
+        "tar --no-same-owner -xzf a.tar.gz gitleaks"
+    );
+    // The last retry starts within 900 s and runs at most 300 s.
+    assert!(DOWNLOAD_TIMEOUT > Duration::from_mins(15 + 5));
     assert_eq!(DOWNLOAD_TIMEOUT, Duration::from_mins(21));
 }
 

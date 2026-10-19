@@ -7,21 +7,28 @@ use crate::output::Printer;
 use crate::process::{Cmd, Ended, Output, Program};
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
-use std::fs::{self, File, TryLockError};
+use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::time::Duration;
+
+mod staging;
+
+pub(crate) use staging::lock_bin_and_sweep;
 
 /// curl's `--retry`: a failed attempt (a reset, a 502 from GitHub) is tried again this many times.
 const CURL_RETRIES: u64 = 3;
 /// curl's `--max-time`, the limit on each attempt, in seconds.
 const CURL_MAX_TIME_S: u64 = 5 * 60;
-/// What curl may take beyond its attempts: the waits between them (1, 2 then 4 s) and startup.
+/// curl's `--retry-max-time`: no retry starts this long after the first attempt did, and curl
+/// gives up rather than wait out a `Retry-After` that would pass it.
+const CURL_RETRY_MAX_TIME_S: u64 = 3 * CURL_MAX_TIME_S;
+/// What curl may take beyond its limits, to start up and exit.
 const CURL_MARGIN_S: u64 = 60;
-/// `run_timed`'s limit for curl: every attempt at its `--max-time`, plus the margin. It is longer
-/// than curl's own limits together, so curl always stops itself first and says why.
+/// `run_timed`'s limit for curl: the last retry starts by `--retry-max-time` and runs at most
+/// `--max-time`, plus the margin. So curl always stops itself first and says why.
 const DOWNLOAD_TIMEOUT: Duration =
-    Duration::from_secs((CURL_RETRIES + 1) * CURL_MAX_TIME_S + CURL_MARGIN_S);
+    Duration::from_secs(CURL_RETRY_MAX_TIME_S + CURL_MAX_TIME_S + CURL_MARGIN_S);
 const UNPACK_TIMEOUT: Duration = Duration::from_secs(60);
 const WINGET_TIMEOUT: Duration = Duration::from_mins(30);
 
@@ -197,11 +204,12 @@ fn download_into<W: Write>(
         binary.name, binary.version, download.url
     ));
     let staging = bin.join(format!(
-        "{STAGING_PREFIX}{}-{}",
+        "{}{}-{}",
+        staging::STAGING_PREFIX,
         binary.name,
         std::process::id()
     ));
-    let placed = fresh_dir(bin, &staging)
+    let placed = staging::fresh_dir(bin, &staging)
         .and_then(|()| fetch_check_place(binary, download, &staging, bin, runner));
     let mut ok = match placed {
         Ok(()) => {
@@ -229,113 +237,6 @@ fn download_into<W: Write>(
         _ => {}
     }
     ok
-}
-
-/// The start of the name of every staging directory `setup` makes in bin.
-const STAGING_PREFIX: &str = ".xtask-setup-";
-
-/// Makes `bin` if needed, and `staging` in it, empty.
-fn fresh_dir(bin: &Path, staging: &Path) -> Result<(), Failure> {
-    let made = fs::create_dir_all(bin).and_then(|()| match fs::remove_dir_all(staging) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-        _ => fs::create_dir(staging),
-    });
-    made.map_err(|error| {
-        (
-            format!("could not make {}: {error}", staging.display()),
-            retry_fix(bin),
-        )
-    })
-}
-
-/// The file in bin whose exclusive lock `setup --binaries` holds for the whole run, so one run at a
-/// time uses bin. It is never deleted, and `STAGING_PREFIX` does not match it.
-const RUN_LOCK: &str = ".xtask-setup.lock";
-
-/// On macOS and Linux, takes the run lock in `machine`'s cargo bin, waiting while another
-/// `setup --binaries` holds it, then removes every `STAGING_PREFIX` entry. With the lock held no
-/// other run uses one, so each is from a run that was interrupted (Ctrl-C, a kill). Prints a
-/// failure for what fails. Returns the lock, held until dropped, and whether both steps worked.
-pub(crate) fn lock_bin_and_sweep<W: Write>(
-    out: &mut Printer<W>,
-    machine: &Machine<'_>,
-) -> (Option<File>, bool) {
-    let Some(bin) = machine
-        .cargo_bin
-        .as_deref()
-        .filter(|_| machine.os != "windows")
-    else {
-        return (None, true);
-    };
-    let lock = match lock_run(out, bin) {
-        Ok(lock) => lock,
-        Err(error) => {
-            out.failure(
-                &format!("could not lock {}: {error}", bin.join(RUN_LOCK).display()),
-                &format!(
-                    "check that you can write to {} and that its filesystem supports file locks, \
-                     then run cargo xtask setup --binaries again",
-                    bin.display()
-                ),
-            );
-            return (None, false);
-        }
-    };
-    let swept = remove_staging_leftovers(bin);
-    if let Err(error) = &swept {
-        out.failure(
-            &format!(
-                "could not remove what an interrupted setup left in {}: {error}",
-                bin.display()
-            ),
-            &format!(
-                "remove the {STAGING_PREFIX}* entries in {} by hand",
-                bin.display()
-            ),
-        );
-    }
-    (Some(lock), swept.is_ok())
-}
-
-/// Opens `RUN_LOCK` in `bin`, making both if needed, and takes its exclusive lock, waiting while
-/// another run holds it.
-fn lock_run<W: Write>(out: &mut Printer<W>, bin: &Path) -> io::Result<File> {
-    fs::create_dir_all(bin)?;
-    let lock = File::create(bin.join(RUN_LOCK))?;
-    match lock.try_lock() {
-        Ok(()) => {}
-        Err(TryLockError::WouldBlock) => {
-            out.note(format!(
-                "another cargo xtask setup --binaries is using {}: waiting for it to finish",
-                bin.display()
-            ));
-            lock.lock()?;
-        }
-        Err(TryLockError::Error(error)) => return Err(error),
-    }
-    Ok(lock)
-}
-
-/// Removes every entry in `bin` whose name starts with `STAGING_PREFIX`. A symlink is removed,
-/// never followed.
-fn remove_staging_leftovers(bin: &Path) -> io::Result<()> {
-    for entry in fs::read_dir(bin)? {
-        let entry = entry?;
-        if !entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with(STAGING_PREFIX)
-        {
-            continue;
-        }
-        let path = entry.path();
-        if fs::symlink_metadata(&path)?.is_dir() {
-            fs::remove_dir_all(&path)?;
-        } else {
-            fs::remove_file(&path)?;
-        }
-    }
-    Ok(())
 }
 
 /// Downloads into `staging`, checks the sha256, unpacks if needed, and renames the binary into
@@ -376,10 +277,7 @@ fn fetch_check_place(
     let unpacked = match download.packing {
         Packing::Bare => file,
         Packing::TarGz => {
-            let tar = Cmd::new(
-                Program::Named("tar"),
-                ["--no-same-owner", "-xzf", asset, name],
-            );
+            let tar = tar_cmd(asset, name);
             let fix = format!(
                 "the download matched its sha256, so check tar: run `{tar}` by hand on a \
                  download of {url} and check its output, then run cargo xtask setup --binaries \
@@ -434,6 +332,8 @@ fn curl_cmd(asset: &str, url: &str) -> Cmd {
             "--retry",
             &CURL_RETRIES.to_string(),
             "--retry-all-errors",
+            "--retry-max-time",
+            &CURL_RETRY_MAX_TIME_S.to_string(),
             "--connect-timeout",
             "30",
             "--max-time",
@@ -442,6 +342,14 @@ fn curl_cmd(asset: &str, url: &str) -> Cmd {
             asset,
             url,
         ],
+    )
+}
+
+/// The tar command that unpacks only `name` from `asset`, owned by the user who runs it.
+fn tar_cmd(asset: &str, name: &str) -> Cmd {
+    Cmd::new(
+        Program::Named("tar"),
+        ["--no-same-owner", "-xzf", asset, name],
     )
 }
 
@@ -457,10 +365,13 @@ fn run_step(
     let message = match runner(cmd, dir, Output::Quiet, timeout) {
         Ok(Ended::Exited(ran)) if ran.success => return Ok(()),
         Ok(Ended::Exited(ran)) => {
-            let said = ran.stderr.trim();
+            // A retried curl prints its error once per attempt; each line is said once.
+            let mut lines: Vec<&str> = ran.stderr.trim().lines().collect();
+            lines.dedup();
+            let said = lines.join("\n");
             format!(
                 "{what} failed: {}",
-                if said.is_empty() { "no output" } else { said }
+                if said.is_empty() { "no output" } else { &said }
             )
         }
         Ok(Ended::TimedOut) => format!(

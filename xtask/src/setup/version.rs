@@ -99,14 +99,12 @@ fn after_install_fix(machine: &Machine<'_>, name: &str) -> String {
              profile, for every new shell), then run cargo xtask setup again",
             bin.display()
         ),
-        _ => {
-            let which = if machine.os == "windows" {
-                "where"
-            } else {
-                "which -a"
-            };
-            format!("run `{which} {name}` to see which copy of {name} this shell runs")
-        }
+        // A shell opened before winget ran lacks the PATH winget set.
+        _ if machine.os == "windows" => format!(
+            "open a new shell, which picks up the PATH winget set, then run `where {name}` to see \
+             which copy of {name} it runs"
+        ),
+        _ => format!("run `which -a {name}` to see which copy of {name} this shell runs"),
     }
 }
 
