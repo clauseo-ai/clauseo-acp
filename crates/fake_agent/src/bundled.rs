@@ -1,6 +1,5 @@
 //! The compiled-in scenarios, and the paths other crates' tests use.
 
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use crate::Error;
@@ -88,31 +87,44 @@ pub fn scenario_path(name: &str) -> PathBuf {
 /// The `fake_agent` binary for another crate's tests: `CLAUSEO_FAKE_AGENT_BIN` if set, else
 /// `fake_agent` in the target profile folder of the running test binary.
 ///
-/// Cargo does not build a dependency's binaries for `cargo nextest run -p <other>`; the error
-/// says to run `cargo build -p clauseo-fake_agent`.
+/// Cargo does not build a dependency's binaries for `cargo nextest run -p <other>`, so a missing
+/// profile binary's error says to run `cargo build -p clauseo-fake_agent`. A missing file named by
+/// the variable gets an error that names the variable instead.
 pub fn bin_path() -> Result<PathBuf, Error> {
-    let exe = std::env::current_exe().map_err(|source| Error::Io {
-        path: PathBuf::from("current_exe"),
-        source,
-    })?;
-    let path = bin_path_from(
-        std::env::var_os("CLAUSEO_FAKE_AGENT_BIN"),
-        &exe,
-        std::env::consts::EXE_SUFFIX,
-    );
-    if path.is_file() {
-        Ok(path)
-    } else {
-        Err(Error::BinaryNotFound { path })
+    if let Some(var) = std::env::var_os(BIN_VAR).filter(|v| !v.is_empty()) {
+        return existing(PathBuf::from(var), Source::Var);
+    }
+    let exe = std::env::current_exe().map_err(|source| Error::CurrentExe { source })?;
+    existing(
+        profile_bin(&exe, std::env::consts::EXE_SUFFIX),
+        Source::Profile,
+    )
+}
+
+/// The variable that overrides where [`bin_path`] looks.
+const BIN_VAR: &str = "CLAUSEO_FAKE_AGENT_BIN";
+
+/// Where a candidate binary path came from, so a missing file gets the right advice.
+#[derive(Debug, Clone, Copy)]
+enum Source {
+    /// `CLAUSEO_FAKE_AGENT_BIN`.
+    Var,
+    /// The target profile folder of the running test binary.
+    Profile,
+}
+
+/// `path` if it is a file, else the error that fits where it came from.
+fn existing(path: PathBuf, source: Source) -> Result<PathBuf, Error> {
+    match (path.is_file(), source) {
+        (true, _) => Ok(path),
+        (false, Source::Var) => Err(Error::BinaryVarNotFound { path }),
+        (false, Source::Profile) => Err(Error::BinaryNotFound { path }),
     }
 }
 
-/// Where [`bin_path`] looks, given the override, the running executable and the platform's
+/// `fake_agent` in the target profile folder of executable `exe`, with the platform's
 /// executable suffix. A test binary lives in `target/<profile>/deps/`.
-fn bin_path_from(var: Option<OsString>, exe: &Path, suffix: &str) -> PathBuf {
-    if let Some(var) = var.filter(|v| !v.is_empty()) {
-        return PathBuf::from(var);
-    }
+fn profile_bin(exe: &Path, suffix: &str) -> PathBuf {
     let mut folder = exe.parent().unwrap_or_else(|| Path::new("")).to_owned();
     if folder.file_name().is_some_and(|name| name == "deps") {
         folder.pop();
@@ -190,24 +202,45 @@ mod tests {
     fn bin_path_finds_the_profile_folder() {
         let unix = Path::new("/w/target/debug/deps/acp-1a2b");
         assert_eq!(
-            bin_path_from(None, unix, ""),
+            profile_bin(unix, ""),
             Path::new("/w/target/debug/fake_agent")
         );
         let plain = Path::new("/w/target/release/host");
         assert_eq!(
-            bin_path_from(None, plain, ""),
+            profile_bin(plain, ""),
             Path::new("/w/target/release/fake_agent")
         );
         let windows = Path::new("C:/w/target/debug/deps/acp-1a2b.exe");
         assert_eq!(
-            bin_path_from(None, windows, ".exe"),
+            profile_bin(windows, ".exe"),
             Path::new("C:/w/target/debug/fake_agent.exe")
         );
-        let set = Some(OsString::from("/opt/fake_agent"));
-        assert_eq!(bin_path_from(set, unix, ""), Path::new("/opt/fake_agent"));
+    }
+
+    #[test]
+    fn a_missing_binary_names_where_it_came_from() {
+        let missing = Path::new(env!("CARGO_MANIFEST_DIR")).join("no-such-fake_agent");
+        let from_var = existing(missing.clone(), Source::Var)
+            .unwrap_err()
+            .to_string();
         assert_eq!(
-            bin_path_from(Some(OsString::new()), unix, ""),
-            Path::new("/w/target/debug/fake_agent")
+            from_var,
+            format!(
+                "{}: no such file, named by CLAUSEO_FAKE_AGENT_BIN",
+                missing.display()
+            )
         );
+        let from_profile = existing(missing.clone(), Source::Profile)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            from_profile,
+            format!(
+                "{}: no such file; run `cargo build -p clauseo-fake_agent`",
+                missing.display()
+            )
+        );
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        assert_eq!(existing(manifest.clone(), Source::Var).unwrap(), manifest);
     }
 }
