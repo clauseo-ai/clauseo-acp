@@ -1,0 +1,53 @@
+# PR text check: the pull request description keeps every "## " section of the pull request
+# template, and none is left empty. The logic is in .github/scripts/pr-text.sh, so it runs locally
+# too.
+#
+# - The template comes from the base commit, so a pull request cannot pass by deleting a heading
+#   from the template. The script comes from the pull request, like every other check on it.
+# - The description reaches the script only through the PR_BODY environment variable, never inside
+#   a run: script, where its text would be run as shell.
+# - It uses no third-party actions, so there is nothing to pin by SHA. It fetches the public repo
+#   over HTTPS with plain git, and the job's token is read-only.
+# - "edited" runs it again when the description changes.
+
+name: PR text
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-text-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-text:
+    name: pr-text
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Fetch the base commit and the pull request
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          git init -q work
+          cd work
+          git fetch -q --no-tags --depth 1 "$REPO_URL" \
+            "+${BASE_SHA}:refs/pr-text/base" \
+            "+refs/pull/${PR_NUMBER}/head:refs/pr-text/head"
+
+      - name: Check the description against the template
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        working-directory: work
+        run: |
+          set -euo pipefail
+          git show refs/pr-text/base:.github/pull_request_template.md > "$RUNNER_TEMP/template.md"
+          git show refs/pr-text/head:.github/scripts/pr-text.sh > "$RUNNER_TEMP/pr-text.sh"
+          bash "$RUNNER_TEMP/pr-text.sh" "$RUNNER_TEMP/template.md"
