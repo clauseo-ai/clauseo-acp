@@ -55,3 +55,7 @@ pub(in crate::checks::dependencies) fn clauseo_before_a_row_whose_package_has_no
 -> Inspection {
     host("clauseo-xtask", "clauseo-xtask", "", &[])
 }
+
+pub(in crate::checks::dependencies) fn io_word_in_other_case() -> Inspection {
+    host("io-word-case", "FS, Clock, Any I/O", "", &[])
+}

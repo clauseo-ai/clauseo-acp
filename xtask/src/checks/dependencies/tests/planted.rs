@@ -187,4 +187,15 @@ crate::checks::planted::cases! {
         "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
          fix: the check stopped before it could look; fix the failure above first",
     ]) => super::names::clauseo_before_a_row_whose_package_has_no_prefix,
+    /// An I/O word in other letter case (`FS`, `Clock`, `Any I/O`) is no crates.io ban.
+    io_word_in_other_case: FailsWith(&[
+        "ARCHITECTURE.md:7: `FS` in the Never depends on column of `host` is the I/O word `fs` written with other letter case, and as written it would ban a crates.io package instead\n    \
+         fix: write `fs` to ban the standard library's APIs it names, or `FS (crates.io)` if you mean the crates.io package",
+        "ARCHITECTURE.md:7: `Clock` in the Never depends on column of `host` is the I/O word `clock` written with other letter case, and as written it would ban a crates.io package instead\n    \
+         fix: write `clock` to ban the standard library's APIs it names, or `Clock (crates.io)` if you mean the crates.io package",
+        "ARCHITECTURE.md:7: `Any I/O` in the Never depends on column of `host` is the I/O word `any I/O` written with other letter case\n    \
+         fix: write `any I/O` to ban the standard library's APIs it names",
+        "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
+         fix: the check stopped before it could look; fix the failure above first",
+    ]) => super::names::io_word_in_other_case,
 }

@@ -12,7 +12,8 @@
 //! "Never depends on" entries are I/O words or crate names. The I/O words name standard library
 //! APIs, as `ARCHITECTURE.md` defines them: `fs`, `process` and `any I/O` each mean the file,
 //! network, process, environment and clock APIs; `clock` alone means the two clock `now`
-//! functions. They win over a row of the same name (`process`).
+//! functions. They win over a row of the same name (`process`). One written with other letter
+//! case (`FS`, `Any I/O`) is rejected with the exact word to write, not read as a crates.io name.
 //! `std`, and a standard library module that core-io bans whole (`net`, `env`, `os`: see
 //! `core_io/bans.rs`), are rejected: they name no crate we use, and the I/O words are how the
 //! table bans those APIs. `time` is the crates.io crate. A crate name that is a row of the
@@ -121,10 +122,18 @@ impl IoWord {
 
     /// The word `text` names, if any.
     fn parse(text: &str) -> Option<IoWord> {
-        [IoWord::Fs, IoWord::Process, IoWord::AnyIo, IoWord::Clock]
-            .into_iter()
-            .find(|word| word.word() == text)
+        IoWord::ALL.into_iter().find(|word| word.word() == text)
     }
+
+    /// The word `text` names once letter case is ignored (`FS`, `Any I/O`), if any.
+    fn parse_ignoring_case(text: &str) -> Option<IoWord> {
+        IoWord::ALL
+            .into_iter()
+            .find(|word| word.word().eq_ignore_ascii_case(text))
+    }
+
+    /// Every I/O word.
+    const ALL: [IoWord; 4] = [IoWord::Fs, IoWord::Process, IoWord::AnyIo, IoWord::Clock];
 }
 
 impl Never {
@@ -282,6 +291,32 @@ fn after_the_table(end: u32, line: u32) -> Violation {
     )
 }
 
+/// The violation for `entry`, in the Never cell of row `row` at `line`: the I/O word `word`
+/// with other letter case. Only a package name could be a crates.io ban, so only then does the
+/// message say so and the fix offer the `(crates.io)` marker.
+fn io_word_in_other_case(entry: &str, word: IoWord, row: &str, line: u32) -> Violation {
+    let exact = word.word();
+    let (would, or_marker) = if is_package_name(entry) {
+        (
+            ", and as written it would ban a crates.io package instead",
+            format!(
+                ", or `{entry} {}` if you mean the crates.io package",
+                names::CRATES_IO
+            ),
+        )
+    } else {
+        ("", String::new())
+    };
+    violation(
+        FILE,
+        line,
+        format!(
+            "`{entry}` in the Never depends on column of `{row}` is the I/O word `{exact}` written with other letter case{would}"
+        ),
+        format!("write `{exact}` to ban the standard library's APIs it names{or_marker}"),
+    )
+}
+
 /// A row split into cells, before its "Never depends on" entries are classified.
 struct RawRow {
     line: u32,
@@ -361,6 +396,8 @@ fn classify(raw: &[RawRow], found: &mut Vec<Violation>) -> Vec<CrateRow> {
                 never.push(Never::External(name.to_owned()));
             } else if let Some(word) = IoWord::parse(entry) {
                 never.push(Never::Io(word));
+            } else if let Some(word) = IoWord::parse_ignoring_case(entry) {
+                found.push(io_word_in_other_case(entry, word, &row.name, row.line));
             } else if core_io::holds_banned_modules(entry) {
                 found.push(violation(
                     FILE,
