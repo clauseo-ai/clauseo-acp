@@ -15,7 +15,11 @@ source = \"synthesis §4\"
 ";
 
 fn only_violations(text: &str) -> Vec<Violation> {
-    let (budgets, violations) = parse(text);
+    let Read {
+        budgets,
+        violations,
+        ..
+    } = parse_counted(text);
     assert!(budgets.is_empty(), "expected no rows, got {budgets:?}");
     violations
 }
@@ -27,7 +31,11 @@ fn one_violation(text: &str) -> Violation {
 }
 
 fn valid_row(text: &str) -> Budget {
-    let (budgets, violations) = parse(text);
+    let Read {
+        budgets,
+        violations,
+        ..
+    } = parse_counted(text);
     assert!(violations.is_empty(), "{violations:?}");
     assert_eq!(budgets.len(), 1, "{budgets:?}");
     budgets[0].clone()
@@ -135,7 +143,11 @@ fn a_row_without_an_id_is_reported_at_its_header() {
 #[test]
 fn a_duplicate_id_is_reported_at_the_second_id_line() {
     let text = format!("{ROW}{ROW}");
-    let (budgets, violations) = parse(&text);
+    let Read {
+        budgets,
+        violations,
+        ..
+    } = parse_counted(&text);
     assert_eq!(budgets.len(), 1, "the first row is still a budget");
     assert_eq!(violations.len(), 1, "{violations:?}");
     let violation = &violations[0];
@@ -330,7 +342,11 @@ fn the_header_line_of_a_row_after_others_is_its_own_header() {
         ROW.replace("cold_start", "warm_start")
             .replace("gate = \"release\"\n", "")
     );
-    let (budgets, violations) = parse(&text);
+    let Read {
+        budgets,
+        violations,
+        ..
+    } = parse_counted(&text);
     assert_eq!(budgets.len(), 1, "the first row is still a budget");
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert_eq!(violations[0].line, 13, "{violations:?}");
@@ -351,7 +367,11 @@ fn a_row_line_is_its_header_whatever_lies_above_it() {
         .lines()
         .position(|line| line == "[[ budget ]]")
         .map_or(0, |index| index + 1);
-    let (budgets, violations) = parse(&text);
+    let Read {
+        budgets,
+        violations,
+        ..
+    } = parse_counted(&text);
     assert_eq!(budgets.len(), 1, "the first row is still a budget");
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert_eq!(violations[0].line, u32::try_from(header).unwrap_or(0));

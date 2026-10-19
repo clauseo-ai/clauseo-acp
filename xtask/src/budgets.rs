@@ -96,14 +96,6 @@ struct Row {
     source: Option<Spanned<String>>,
 }
 
-/// Reads `text` as `budgets.toml`. Returns the rows without problems, in file order, and every
-/// problem found, sorted by line.
-#[cfg(test)]
-pub(crate) fn parse(text: &str) -> (Vec<Budget>, Vec<Violation>) {
-    let read = parse_counted(text);
-    (read.budgets, read.violations)
-}
-
 /// What reading `budgets.toml` found.
 pub(crate) struct Read {
     /// The `[[budget]]` rows read, with or without problems.
@@ -116,8 +108,9 @@ pub(crate) struct Read {
     pub unreadable: bool,
 }
 
-/// `parse`, plus the number of `[[budget]]` rows read, with or without problems. A file `toml`
-/// cannot read has none.
+/// Reads `text` as `budgets.toml`: the rows read, with or without problems (a file `toml`
+/// cannot read has none), the rows without problems in file order, and every problem, sorted
+/// by line.
 fn parse_counted(text: &str) -> Read {
     let file: File = match toml::from_str(text) {
         Ok(file) => file,
@@ -170,16 +163,10 @@ pub(crate) fn load(root: &Path) -> Result<Vec<Budget>, Vec<Violation>> {
 /// Reads `budgets.toml` under `root`: the rows read, with or without problems, every problem,
 /// including a file that is missing or unreadable (which has no rows), and whether the file was
 /// there but could not be read or parsed.
-pub(crate) fn inspect(root: &Path) -> Read {
-    read(root)
-}
-
-/// `parse_counted` on `budgets.toml` under `root`; a file that cannot be read is one problem,
-/// no rows, and unreadable unless it is missing.
-fn read(root: &Path) -> Read {
+pub(crate) fn read(root: &Path) -> Read {
     match std::fs::read_to_string(root.join(FILE)) {
         Ok(text) => parse_counted(&text),
-        Err(error) => Read {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Read {
             rows: 0,
             budgets: Vec::new(),
             violations: vec![problem(
@@ -187,7 +174,15 @@ fn read(root: &Path) -> Read {
                 format!("cannot read budgets.toml: {error}"),
                 "restore budgets.toml at the repo root",
             )],
-            unreadable: error.kind() != std::io::ErrorKind::NotFound,
+            unreadable: false,
+        },
+        // The file is there, so its violation is the one `checks::unreadable` gives any path that
+        // cannot be read: its fix says what the error means.
+        Err(error) => Read {
+            rows: 0,
+            budgets: Vec::new(),
+            violations: vec![crate::checks::unreadable(FILE, &error)],
+            unreadable: true,
         },
     }
 }

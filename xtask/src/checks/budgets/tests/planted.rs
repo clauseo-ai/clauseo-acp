@@ -18,8 +18,8 @@ crate::checks::planted::cases! {
     ]) => super::not_toml,
     /// A file that is not UTF-8 is there but cannot be read: the check stopped on it.
     not_utf8: FailsWith(&[
-        "budgets.toml:1: cannot read budgets.toml: stream did not contain valid UTF-8\n    \
-         fix: restore budgets.toml at the repo root",
+        "budgets.toml:1: could not read `budgets.toml`: stream did not contain valid UTF-8\n    \
+         fix: make the file readable as UTF-8 text",
         "0 budget rows inspected in budgets.toml at the repo root\n    \
          fix: the check stopped before it could look; fix the failure above first",
     ]) => super::not_utf8,
