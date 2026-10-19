@@ -14,9 +14,8 @@ Clauseo is GPL-3.0-or-later. Most code here is written by coding agents and chec
    described in `cla/README.md`. The founders are covered by their agreement with the company.
 6. **Run the check.** `cargo xtask check` must pass.
 7. **Open a pull request** with the template filled in, including the brief's checks and their output.
-8. **Get one approval.** Someone other than the author approves. Changes under these paths also need
-   their code owner (see `.github/CODEOWNERS`): `crates/protocol`, `crates/reducer`, `crates/store`,
-   `crates/matters`, `crates/host`, `crates/acp`, `crates/sandbox`.
+8. **Get one approval.** Someone other than the author approves. A change to a path in
+   `.github/CODEOWNERS` also needs that path's code owner.
 9. **Merge** once CI is green.
 
 ## If a check fails
