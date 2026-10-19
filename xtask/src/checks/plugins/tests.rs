@@ -378,7 +378,9 @@ pub(super) fn desktop_crate_missing() -> Inspection {
 /// The fixed set inspects its ten normal dependencies, the count the zero-inspected rule reads.
 #[test]
 fn the_fixed_set_inspects_its_ten_direct_dependencies() {
-    assert_eq!(fixed_plugin_set_passes().inspected, 10);
+    // Its own scratch dir: the planted case `fixed_plugin_set_passes` runs in another thread.
+    let dir = write_workspace("fixed_set_count", ROOT, DESKTOP, &[]);
+    assert_eq!(inspect(&dir).inspected, 10);
 }
 
 /// A build dependency counts, as the graph rule reads it; a dev-dependency does not.
