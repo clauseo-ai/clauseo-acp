@@ -1,0 +1,263 @@
+# CI: the fast lane (`cargo xtask check` on Linux) and the blank app built and tested on every
+# target.
+#
+# - No version is written here. Rust comes from rust-toolchain.toml, pnpm from "packageManager" and
+#   Node from "engines.node" in ui/package.json, and the cargo tools and gitleaks from
+#   `cargo xtask setup --binaries`.
+# - A pull request that touches only Markdown or docs/ still runs the fast lane, and the build jobs
+#   still start but skip every step. A job skipped as a whole would report its check under the
+#   unexpanded name "build (${{ matrix.target }})", and a required check that never reports blocks
+#   the merge.
+# - The Linux job runs the tests with the network cut off, so a test that reaches the network fails.
+# - Every action is pinned by commit SHA, with its tag in a comment.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # Every push to main is checked; a pull request keeps only its newest run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.filter.outputs.build }}
+    steps:
+      - name: Decide whether the build jobs run
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != pull_request ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git init -q work
+          cd work
+          git fetch -q --no-tags --filter=blob:none "$REPO_URL" \
+            "+refs/heads/${BASE_REF}:refs/ci/base" \
+            "+refs/pull/${PR_NUMBER}/head:refs/ci/head"
+          code=$(git diff --name-only refs/ci/base...refs/ci/head | grep -vE '\.md$|^docs/' || true)
+          if [ -n "$code" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Only Markdown or docs/ changed: the build jobs skip their steps."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  fast-lane:
+    name: fast-lane
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      # Full history: `cargo xtask check` diffs against the merge-base with origin/main, and a
+      # shallow clone has none.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      # clippy builds the desktop crate, which links WebKitGTK.
+      - name: Install the Linux system packages Tauri needs
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends libwebkit2gtk-4.1-dev
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Show the pnpm and Node versions against ui/package.json
+        run: |
+          echo "pnpm $(pnpm -v), ui/package.json wants $(node -p 'require("./ui/package.json").packageManager')"
+          echo "node $(node -v), ui/package.json wants $(node -p 'require("./ui/package.json").engines.node')"
+
+      # The pinned cargo tools build once per change to their pins, not once per run.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+          key: cargo-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('xtask/src/setup.rs') }}
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: "false"
+
+      - name: Install the pinned tools
+        run: cargo xtask setup --binaries
+
+      - name: cargo xtask check
+        run: CI=1 cargo xtask check
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: changes
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, runner: macos-15, native: true }
+          # Cross-compiled on the arm64 runner, so it is built but not linted or tested.
+          - { target: x86_64-apple-darwin, runner: macos-15, native: false }
+          # The oldest glibc we support; release packages are built here later.
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-22.04, native: true }
+          - { target: x86_64-pc-windows-msvc, runner: windows-2025, native: true }
+          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, native: true }
+    env:
+      TARGET: ${{ matrix.target }}
+      EXE: clauseo-desktop${{ contains(matrix.target, '-windows-') && '.exe' || '' }}
+      BUILD: ${{ needs.changes.outputs.build }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Skip, only Markdown or docs/ changed
+        if: env.BUILD != 'true'
+        run: echo "Only Markdown or docs/ changed; nothing to build."
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.BUILD == 'true'
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml, and the target
+        if: env.BUILD == 'true'
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+
+      - name: Install the Linux system packages Tauri needs
+        if: env.BUILD == 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends libwebkit2gtk-4.1-dev xvfb
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: env.BUILD == 'true'
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: env.BUILD == 'true'
+        with:
+          node-version-file: ui/package.json
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: env.BUILD == 'true' && matrix.native
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+          key: cargo-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('xtask/src/setup.rs') }}
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: env.BUILD == 'true'
+        with:
+          key: ${{ matrix.target }}
+          cache-bin: "false"
+
+      - name: Install the ui workspace
+        if: env.BUILD == 'true'
+        run: pnpm -C ui install --frozen-lockfile
+
+      # `tauri build` turns on `custom-protocol`, so the binary embeds ui/app/dist. A plain
+      # `cargo build` would load devUrl instead.
+      - name: Build the app
+        if: env.BUILD == 'true'
+        run: pnpm -C ui tauri build --no-bundle --target "$TARGET"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: env.BUILD == 'true'
+        with:
+          name: clauseo-desktop-${{ matrix.target }}
+          path: target/${{ env.TARGET }}/release/${{ env.EXE }}
+          if-no-files-found: error
+
+      # The app must still be running when the timeout stops it (exit 124), without a panic.
+      - name: Launch the app under xvfb
+        if: env.BUILD == 'true' && runner.os == 'Linux'
+        run: |
+          status=0
+          xvfb-run -a timeout 15 "target/$TARGET/release/$EXE" > launch.log 2>&1 || status=$?
+          cat launch.log
+          if [ "$status" -ne 124 ]; then
+            echo "::error::the app exited with $status before the 15 s timeout; expected 124"
+            exit 1
+          fi
+          if grep -n 'panicked' launch.log; then
+            echo "::error::the app panicked"
+            exit 1
+          fi
+
+      # cfg-gated code is linted only on its own OS.
+      - name: clippy
+        if: env.BUILD == 'true' && matrix.native
+        run: cargo clippy --workspace --all-targets --target "$TARGET" -- -D warnings
+
+      # Only the tests need a pinned tool (nextest), so the app is built, uploaded and launched
+      # before the tools are installed.
+      - name: Install the pinned tools
+        if: env.BUILD == 'true' && matrix.native
+        run: cargo xtask setup --binaries
+
+      - name: Test
+        if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux'
+        run: cargo nextest run --workspace --profile ci --no-tests=pass
+
+      - name: Build the tests
+        if: env.BUILD == 'true' && runner.os == 'Linux'
+        run: cargo nextest run --workspace --profile ci --no-tests=pass --no-run
+
+      # A new network namespace with only loopback, entered as root and then dropped back to the
+      # runner user. sudo may replace PATH, HOME and the cargo and rustup homes, so they go through
+      # RUN_* variables. The script reads every value from the environment; none is pasted in.
+      - name: Test without the network
+        if: env.BUILD == 'true' && runner.os == 'Linux'
+        run: |
+          RUN_UID=$(id -u) RUN_GID=$(id -g) RUN_PATH=$PATH RUN_HOME=$HOME \
+          RUN_CARGO_HOME=${CARGO_HOME:-$HOME/.cargo} RUN_RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup} \
+            sudo --preserve-env unshare --net -- sh -euc '
+              ip link set lo up
+              ip -brief address show dev lo
+              as_runner() {
+                setpriv --reuid="$RUN_UID" --regid="$RUN_GID" --init-groups \
+                  env PATH="$RUN_PATH" HOME="$RUN_HOME" CARGO_HOME="$RUN_CARGO_HOME" \
+                  RUSTUP_HOME="$RUN_RUSTUP_HOME" CARGO_NET_OFFLINE=true "$@"
+              }
+              echo "uid inside the namespace: $(as_runner id -u)"
+              as_runner cargo nextest run --workspace --profile ci --no-tests=pass
+            '
