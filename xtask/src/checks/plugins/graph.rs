@@ -1,7 +1,8 @@
-//! The rule of the `plugins` check that reads the dependency graph cargo resolved, with deps: no
-//! `tauri-plugin-*` outside the fixed set is in the desktop crate's tree unless only fixed plugins
-//! pull it in. `cargo metadata --no-deps` lists workspace members only, so a crate under
-//! `[workspace] exclude` pulled in by path, or a registry or git dependency, shows up only here.
+//! The rule of the `plugins` check that reads the dependency graph cargo resolved, with deps and
+//! all features (`checks::graph::load_resolved_graph`): no `tauri-plugin-*` outside the fixed
+//! set is in the desktop crate's tree unless only fixed plugins pull it in. `cargo metadata
+//! --no-deps` lists workspace members only, so a crate under `[workspace] exclude` pulled in by
+//! path, or a registry or git dependency, shows up only here.
 //! The resolved features (no `devtools` in tauri, tauri-runtime, tauri-runtime-wry or wry, no
 //! `protocol-asset` in tauri) are banned in deny.toml's `[[bans.features]]`, which cargo-deny
 //! checks against the same graph for every target.
@@ -18,7 +19,7 @@ const PLUGIN_LIBRARY: &str = "tauri-plugin";
 
 const TREE_FIX: &str =
     "only the fixed plugins and what they pull in may be in the desktop crate's tree";
-pub(super) const GRAPH_FIX: &str = "make `cargo metadata --format-version 1 --locked --offline` succeed: run `cargo fetch --locked` when it fails on a missing download, else fix the manifests or the lockfile; this check reads the resolved graph from it";
+pub(super) const GRAPH_FIX: &str = "make `cargo metadata --format-version 1 --all-features --locked --offline` succeed: run `cargo fetch --locked` when it fails on a missing download, else fix the manifests or the lockfile; this check reads the resolved graph from it";
 
 /// Where the graph violations point: the desktop manifest and the desktop crate's dependencies
 /// from `cargo metadata --no-deps`, which give the line of a direct dependency.

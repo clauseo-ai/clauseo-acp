@@ -23,6 +23,7 @@ mod dependencies;
 mod docs;
 pub(crate) mod exceptions;
 mod file_size;
+pub(crate) mod graph;
 mod json_text;
 pub(crate) mod planted;
 mod plugins;

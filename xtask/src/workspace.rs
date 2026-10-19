@@ -193,22 +193,8 @@ struct Resolve {
     nodes: Vec<ResolvedNode>,
 }
 
-/// Runs `cargo metadata --format-version 1 <flags>` with dependencies in `root` and returns the
-/// resolved graph. The check passes `--locked`, so CI may fetch but never moves the lockfile;
-/// tests of scratch workspaces without a lockfile pass `--offline`.
-pub(crate) fn load_resolved_graph(root: &Path, flags: &[&str]) -> Result<ResolvedGraph, String> {
-    let mut args = vec!["metadata", "--format-version", "1"];
-    args.extend_from_slice(flags);
-    let cmd = Cmd::new(Program::Cargo, args);
-    let quiet = process::run_quiet(&cmd, root)
-        .map_err(|e| format!("could not run `cargo metadata`: {e}"))?;
-    if !quiet.success {
-        return Err(format!("`cargo metadata` failed: {}", quiet.stderr.trim()));
-    }
-    parse_resolved_graph(&quiet.stdout)
-}
-
-/// Reads the resolved graph out of `cargo metadata` JSON run with dependencies.
+/// Reads the resolved graph out of `cargo metadata` JSON run with dependencies. The one loader
+/// that runs cargo for it is `checks::graph::load_resolved_graph`.
 pub(crate) fn parse_resolved_graph(json: &str) -> Result<ResolvedGraph, String> {
     let metadata: GraphMetadata =
         serde_json::from_str(json).map_err(|e| format!("bad `cargo metadata` JSON: {e}"))?;

@@ -32,7 +32,8 @@ fn workspace(name: &str, desktop: &str, crates: &[(&str, &str)]) -> Scratch {
 
 /// The graph violations of the workspace in `dir`, whose desktop manifest is `desktop`.
 fn violations_in(dir: &Scratch, desktop: &str) -> Vec<Violation> {
-    let graph = workspace::load_resolved_graph(dir, &["--offline"]).expect("cargo metadata runs");
+    let graph = crate::checks::graph::load_resolved_graph(dir, &["--offline"])
+        .expect("cargo metadata runs");
     let packages = workspace::load_workspace_dependencies(dir).expect("cargo metadata runs");
     violations(
         &graph,
@@ -108,4 +109,31 @@ fn a_clean_graph_passes() {
     let desktop = desktop("[dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n");
     let ws = workspace("clean", &desktop, &[("tauri", "")]);
     assert_eq!(violations_in(&ws, &desktop), Vec::new());
+}
+
+#[test]
+fn a_plugin_behind_an_optional_dependency_of_a_desktop_feature_fails() {
+    let desktop = desktop(
+        "[dependencies]\nmid = { path = \"../../vendor/mid\", optional = true }\n\n[features]\nextra = [\"dep:mid\"]\n",
+    );
+    let ws = workspace(
+        "optional",
+        &desktop,
+        &[
+            (
+                "mid",
+                "[dependencies]\ntauri-plugin-zz = { path = \"../tauri-plugin-zz\" }\n",
+            ),
+            ("tauri-plugin-zz", ""),
+        ],
+    );
+    assert_eq!(
+        violations_in(&ws, &desktop),
+        vec![violation(
+            DESKTOP_PATH,
+            line_of(&desktop, "mid = "),
+            "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `mid`, which is not a fixed plugin",
+            TREE_FIX,
+        )]
+    );
 }
