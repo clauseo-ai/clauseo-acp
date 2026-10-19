@@ -20,11 +20,11 @@ fn the_fix_of_a_failed_run_fits_its_cause() {
 fn the_tree_run_resolves_the_crate_alone_with_all_its_features_for_every_target() {
     assert_eq!(
         tree_args("clauseo-protocol", &["--locked", "--offline"]).join(" "),
-        "tree -p clauseo-protocol -e normal,build --all-features --target all --prefix depth --format {p} --locked --offline"
+        "tree -p clauseo-protocol -e normal,build --all-features --target all --prefix depth --format {p} [{f}] --locked --offline"
     );
 }
 
-/// Each package of `tree` as `name version: dep, dep`, in the tree's order.
+/// Each node of `tree` as `name version: dep, dep`, in the tree's order.
 fn listed(tree: &Tree) -> Vec<String> {
     (0..tree.packages.len())
         .map(|id| {
@@ -41,12 +41,12 @@ fn listed(tree: &Tree) -> Vec<String> {
 
 #[test]
 fn every_line_shape_cargo_prints_parses() {
-    let out = "0clauseo-protocol v0.1.0 (/ws/crates/protocol)\n\
-               1serde v1.0.229\n\
-               2serde_derive v1.0.229 (proc-macro)\n\
-               1pm v0.1.0 (proc-macro) (/ws/vendor/pm (old))\n\
-               1gitdep v0.2.0-rc.1 (https://example.com/r.git#0123abcd)\n\
-               1win v0.1.0 (C:\\ws\\vendor\\win)\n";
+    let out = "0clauseo-protocol v0.1.0 (/ws/crates/protocol) []\n\
+               1serde v1.0.229 [alloc,default,derive,serde_derive,std]\n\
+               2serde_derive v1.0.229 (proc-macro) [default]\n\
+               1pm v0.1.0 (proc-macro) (/ws/vendor/pm (old) [x]) [a-b,c_d,e+f,g.h,i/j]\n\
+               1gitdep v0.2.0-rc.1 (https://example.com/r.git#0123abcd) []\n\
+               1win v0.1.0 (C:\\ws\\vendor\\win) []\n";
     let tree = Tree::parse(out, "clauseo-protocol").expect("it parses");
     assert_eq!(
         listed(&tree),
@@ -62,14 +62,14 @@ fn every_line_shape_cargo_prints_parses() {
 }
 
 #[test]
-fn a_starred_line_is_the_package_printed_before_with_everything_under_it() {
-    let out = "0clauseo-protocol v0.1.0 (/ws)\n\
-               1left v0.1.0 (/ws/vendor/left)\n\
-               2inner v0.1.0 (/ws/vendor/inner)\n\
-               3tauri v0.1.0 (/ws/vendor/tauri)\n\
-               1right v0.1.0 (/ws/vendor/right)\n\
-               2inner v0.1.0 (/ws/vendor/inner) (*)\n\
-               2tauri v0.1.0 (/ws/vendor/tauri)\n";
+fn a_starred_line_is_the_node_printed_before_with_everything_under_it() {
+    let out = "0clauseo-protocol v0.1.0 (/ws) []\n\
+               1left v0.1.0 (/ws/vendor/left) []\n\
+               2inner v0.1.0 (/ws/vendor/inner) []\n\
+               3tauri v0.1.0 (/ws/vendor/tauri) []\n\
+               1right v0.1.0 (/ws/vendor/right) []\n\
+               2inner v0.1.0 (/ws/vendor/inner) [] (*)\n\
+               2tauri v0.1.0 (/ws/vendor/tauri) []\n";
     let tree = Tree::parse(out, "clauseo-protocol").expect("it parses");
     assert_eq!(
         listed(&tree),
@@ -88,34 +88,58 @@ fn a_starred_line_is_the_package_printed_before_with_everything_under_it() {
     assert_eq!(names(&tree.reach(1).path(3)), ["left", "inner", "tauri"]);
 }
 
+/// A package built for the host by a build dependency with other features than its target build
+/// is two nodes: what one build pulls in is never under the other.
 #[test]
-fn a_package_printed_in_full_twice_has_the_packages_under_both() {
-    let out = "0clauseo-protocol v0.1.0 (/ws)\n\
-               1cc v1.0.0\n\
-               2jobserver v0.1.0\n\
-               1mid v0.1.0\n\
-               2cc v1.0.0\n\
-               3shlex v1.3.0\n";
+fn a_package_built_twice_with_other_features_is_two_nodes() {
+    let out = "0clauseo-protocol v0.1.0 (/ws) []\n\
+               1x v0.1.0 []\n\
+               2foo v0.1.0 []\n\
+               1y v0.1.0 []\n\
+               2foo v0.1.0 [f]\n\
+               3b v0.1.0 []\n";
+    let tree = Tree::parse(out, "clauseo-protocol").expect("it parses");
+    assert_eq!(
+        listed(&tree),
+        [
+            "clauseo-protocol 0.1.0: x, y",
+            "x 0.1.0: foo",
+            "foo 0.1.0: ",
+            "y 0.1.0: foo",
+            "foo 0.1.0: b",
+            "b 0.1.0: ",
+        ]
+    );
+    assert_eq!(tree.reach(1).order(), [1, 2]);
+}
+
+#[test]
+fn a_package_printed_in_full_twice_with_the_same_features_is_one_node() {
+    let out = "0clauseo-protocol v0.1.0 (/ws) []\n\
+               1cc v1.0.0 []\n\
+               2jobserver v0.1.0 []\n\
+               1mid v0.1.0 []\n\
+               2cc v1.0.0 []\n\
+               3jobserver v0.1.0 []\n";
     let tree = Tree::parse(out, "clauseo-protocol").expect("it parses");
     assert_eq!(
         listed(&tree),
         [
             "clauseo-protocol 0.1.0: cc, mid",
-            "cc 1.0.0: jobserver, shlex",
+            "cc 1.0.0: jobserver",
             "jobserver 0.1.0: ",
             "mid 0.1.0: cc",
-            "shlex 1.3.0: ",
         ]
     );
 }
 
 #[test]
 fn a_line_of_another_shape_or_out_of_order_is_an_error() {
-    let root = "0clauseo-protocol v0.1.0 (/ws)\n";
+    let root = "0clauseo-protocol v0.1.0 (/ws) []\n";
     let parse = |rest: &str| Tree::parse(&format!("{root}{rest}"), "clauseo-protocol");
     let shape = |n: usize, text: &str| {
         Err(format!(
-            "line {n} `{text}` is not `<depth><name> v<version>` followed by `(proc-macro)`, `(<source>)` or `(*)`"
+            "line {n} `{text}` is not `<depth><name> v<version>` followed by `(proc-macro)`, `(<source>)`, `[<features>]` and `(*)`"
         ))
     };
     let order = |n: usize, text: &str, deepest: usize| {
@@ -123,30 +147,36 @@ fn a_line_of_another_shape_or_out_of_order_is_an_error() {
             "line {n} `{text}` breaks the tree: the first line is `clauseo-protocol` at depth 0, and each later line is one to {deepest} deep"
         ))
     };
-    assert_eq!(parse("├── serde v1.0.0\n"), shape(2, "├── serde v1.0.0"));
-    assert_eq!(parse("1serde 1.0.0\n"), shape(2, "1serde 1.0.0"));
-    assert_eq!(parse("1serde v1.0.0 /ws\n"), shape(2, "1serde v1.0.0 /ws"));
-    assert_eq!(parse("1serde v1.0.0 ()\n"), shape(2, "1serde v1.0.0 ()"));
+    for bad in [
+        "├── serde v1.0.0 []",
+        "1serde 1.0.0 []",
+        "1serde v1.0.0",
+        "1serde v1.0.0 /ws []",
+        "1serde v1.0.0 () []",
+        "1serde v1.0.0 [a b]",
+        "1serde v1.0.0 [] (*) (*)",
+        "",
+    ] {
+        assert_eq!(parse(&format!("{bad}\n")), shape(2, bad));
+    }
+    assert_eq!(parse("3serde v1.0.0 []\n"), order(2, "3serde v1.0.0 []", 1));
+    assert_eq!(parse("0other v1.0.0 []\n"), order(2, "0other v1.0.0 []", 1));
     assert_eq!(
-        parse("1serde v1.0.0 (*) (*)\n"),
-        shape(2, "1serde v1.0.0 (*) (*)")
+        parse("1serde v1.0.0 [] (*)\n"),
+        Err(
+            "line 2 `1serde v1.0.0 [] (*)` marks a package not printed before with `(*)`"
+                .to_owned()
+        )
     );
-    assert_eq!(parse("\n"), shape(2, ""));
-    assert_eq!(parse("3serde v1.0.0\n"), order(2, "3serde v1.0.0", 1));
-    assert_eq!(parse("0other v1.0.0\n"), order(2, "0other v1.0.0", 1));
+    let under_a_star = "1a v1.0.0 []\n2b v1.0.0 []\n1a v1.0.0 [] (*)\n2b v1.0.0 []\n";
+    assert_eq!(parse(under_a_star), order(5, "2b v1.0.0 []", 1));
     assert_eq!(
-        parse("1serde v1.0.0 (*)\n"),
-        Err("line 2 `1serde v1.0.0 (*)` marks a package not printed before with `(*)`".to_owned())
-    );
-    let under_a_star = "1a v1.0.0\n2b v1.0.0\n1a v1.0.0 (*)\n2b v1.0.0\n";
-    assert_eq!(parse(under_a_star), order(5, "2b v1.0.0", 1));
-    assert_eq!(
-        Tree::parse("0other v1.0.0\n", "clauseo-protocol"),
-        order(1, "0other v1.0.0", 0)
+        Tree::parse("0other v1.0.0 []\n", "clauseo-protocol"),
+        order(1, "0other v1.0.0 []", 0)
     );
     assert_eq!(
-        Tree::parse("0clauseo-protocol v0.1.0 (*)\n", "clauseo-protocol"),
-        order(1, "0clauseo-protocol v0.1.0 (*)", 0)
+        Tree::parse("0clauseo-protocol v0.1.0 [] (*)\n", "clauseo-protocol"),
+        order(1, "0clauseo-protocol v0.1.0 [] (*)", 0)
     );
     assert_eq!(
         Tree::parse("", "clauseo-protocol"),

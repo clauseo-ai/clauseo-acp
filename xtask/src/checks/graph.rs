@@ -7,14 +7,16 @@
 //! workspace member turns on does not (one workspace-wide resolve would merge them, and blame the
 //! crate for an edge only the other member's build has); `--target all`, so every target's
 //! dependencies count; `-e normal,build`, since dev-dependencies never reach the built crate.
-//! With `--prefix depth --format {p}` each line is `<depth><name> v<version>`, then
+//! With `--prefix depth --format "{p} [{f}]"` each line is `<depth><name> v<version>`, then
 //! `(proc-macro)` for a proc macro, then the source in parentheses for a path or git package,
-//! then ` (*)` for a package printed before. Cargo prints a package's subtree in full the first
-//! time and marks each later line of it `(*)`, so the graph maps each line's text, without the
-//! `(*)`, to the packages under it, and a `(*)` line is a reference to that entry. The output
-//! stays the size of the graph, not of the number of paths through it. A package that prints in
-//! full twice (built for the host and for a target with different features) gets the packages
-//! under both, so the graph never misses an edge, and may show one the other build alone has.
+//! then the features cargo turned on in brackets, then ` (*)` for a node printed before. Cargo
+//! prints a node's subtree in full the first time and marks each later line of it `(*)`, so the
+//! graph maps each line's text, without the `(*)`, to the nodes under it, and a `(*)` line is a
+//! reference to that entry. The output stays the size of the graph, not of the number of paths
+//! through it. A package built twice with different features (for the host by a build
+//! dependency, and for the target) is two cargo nodes with different children; the features
+//! keep their lines apart, so each is its own entry and no path runs through the other's
+//! children. Two lines of one text are two builds with the same features, so the same children.
 //! A line in any other shape fails the check.
 
 use crate::checks::violation;
@@ -78,7 +80,7 @@ pub(crate) fn tree_args<'a>(package: &'a str, flags: &[&'a str]) -> Vec<&'a str>
         "--prefix",
         "depth",
         "--format",
-        "{p}",
+        "{p} [{f}]",
     ];
     args.extend_from_slice(flags);
     args
@@ -99,7 +101,7 @@ pub(crate) fn load_tree(root: &Path, package: &str, flags: &[&str]) -> Result<Tr
     })
 }
 
-/// One package of a graph: its name, its version and the packages it depends on.
+/// One node of a graph: a package with one set of features, and the nodes it depends on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Package {
     name: String,
@@ -192,9 +194,9 @@ impl Tree {
         Reach { order, from }
     }
 
-    /// Reads `cargo tree --prefix depth --format {p}` output for `package`: its first line is
-    /// `package` at depth 0, each later line is at least one deep and at most one deeper than
-    /// the line before it, no line sits under a `(*)` line, and a `(*)` line names a package
+    /// Reads `cargo tree --prefix depth --format "{p} [{f}]"` output for `package`: its first
+    /// line is `package` at depth 0, each later line is at least one deep and at most one deeper
+    /// than the line before it, no line sits under a `(*)` line, and a `(*)` line names a node
     /// printed before.
     pub(crate) fn parse(stdout: &str, package: &str) -> Result<Tree, String> {
         let mut packages: Vec<Package> = Vec::new();
@@ -204,7 +206,7 @@ impl Tree {
         let mut path: Vec<usize> = Vec::new();
         let mut last_starred = false;
         for (number, text) in stdout.lines().enumerate().map(|(n, t)| (n + 1, t)) {
-            let line = parse_line(text).ok_or_else(|| format!("line {number} `{text}` is not `<depth><name> v<version>` followed by `(proc-macro)`, `(<source>)` or `(*)`"))?;
+            let line = parse_line(text).ok_or_else(|| format!("line {number} `{text}` is not `<depth><name> v<version>` followed by `(proc-macro)`, `(<source>)`, `[<features>]` and `(*)`"))?;
             let deepest = if path.is_empty() || last_starred {
                 path.len()
             } else {
@@ -254,18 +256,19 @@ impl Tree {
 /// One line of `cargo tree` output.
 struct Line<'a> {
     depth: usize,
-    /// The line after its depth, without ` (*)`: the same text for every line of one package.
+    /// The line after its depth, without ` (*)`: the same text for every line of one node.
     key: &'a str,
     name: &'a str,
     version: &'a str,
-    /// True for a ` (*)` line, a package printed in full before.
+    /// True for a ` (*)` line, a node printed in full before.
     starred: bool,
 }
 
 /// One line, or `None` when it has another shape: `<depth><name> v<version>`, then
 /// ` (proc-macro)` for a proc macro, then ` (<source>)` for a package not from crates.io (a
-/// path may hold parentheses, so the source runs to the line's last `)`), then ` (*)` for a
-/// package printed before, as cargo 1.99's `{p}` writes them.
+/// path may hold parentheses, so the source runs to the line's last `)`), then ` [<features>]`
+/// (comma-separated, maybe empty), then ` (*)` for a node printed before, as cargo 1.99's
+/// `{p} [{f}]` writes them. The key is the line without ` (*)`, features included.
 fn parse_line(text: &str) -> Option<Line<'_>> {
     let name_start = text.find(|c: char| !c.is_ascii_digit())?;
     let depth = text.get(..name_start)?.parse().ok()?;
@@ -274,7 +277,12 @@ fn parse_line(text: &str) -> Option<Line<'_>> {
         Some(key) => (key, true),
         None => (rest, false),
     };
-    let (name, rest) = key.split_once(' ')?;
+    let (package, features) = key.strip_suffix(']')?.rsplit_once(" [")?;
+    let is_feature_char = |c: char| c.is_ascii_alphanumeric() || "-_+./,".contains(c);
+    if !features.chars().all(is_feature_char) {
+        return None;
+    }
+    let (name, rest) = package.split_once(' ')?;
     let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
     if name.is_empty() || !name.chars().all(is_name_char) {
         return None;

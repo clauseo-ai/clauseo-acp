@@ -154,6 +154,12 @@ crate::checks::planted::cases! {
         "crates/protocol/Cargo.toml:8: clauseo-protocol depends on tauri through right and inner, which ARCHITECTURE.md forbids\n    \
          fix: move the code that uses `right` into a crate whose row allows tauri, then remove `right` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on tauri",
     ]), inspects 1 => super::tree::two_paths_each_fail,
+    /// A package built for the host with a feature its target build lacks is two nodes: the
+    /// package that feature pulls in is blamed on the build dependency only.
+    host_build_feature_blames_only_its_path: FailsWith(&[
+        "crates/protocol/Cargo.toml:10: clauseo-protocol depends on b through y and foo, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `y` into a crate whose row allows b, then remove `y` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
+    ]), inspects 1 => super::tree::host_build_feature_blames_only_its_path,
     crates_io_marker_passes: Passes, inspects 1 => super::names::crates_io_marker_passes,
     crates_io_marker_bans_the_package: FailsWith(&[
         "crates/host/Cargo.toml:7: clauseo-host depends on rmcp, which ARCHITECTURE.md forbids\n    \
