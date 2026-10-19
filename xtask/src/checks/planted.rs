@@ -11,7 +11,7 @@
 //!   lines. Never in `planted.rs` itself: each case's test takes its name there.
 //!
 //! ```ignore
-//! crate::checks::planted::cases_uncounted! {
+//! crate::checks::planted::cases! {
 //!     /// A row whose limit is below zero: the one row is read, and it fails.
 //!     negative_limit: FailsWith(&["budgets.toml:3: ...\n    fix: ..."]),
 //!         inspects 1 => super::negative_limit,
@@ -44,9 +44,8 @@ pub(crate) struct Planted {
     /// The case's name, also the name of its test.
     pub name: &'static str,
     pub expect: Expect,
-    /// How many items the check must report inspecting. `cases!` always sets it. `None` only in
-    /// a list still written with `cases_uncounted!`.
-    pub inspects: Option<usize>,
+    /// How many items the check must report inspecting for this input.
+    pub inspects: usize,
     /// Builds the input and runs the check's code on it.
     pub run: fn() -> Inspection,
 }
@@ -58,12 +57,10 @@ impl Planted {
     pub(crate) fn verdict(&self, check: &StaticCheck) -> Result<(), String> {
         let report = check.judge((self.run)());
         let printed = report.printed();
-        if let Some(want) = self.inspects
-            && want != report.inspection.inspected
-        {
+        if self.inspects != report.inspection.inspected {
             return Err(format!(
-                "expected {want} inspected, found {}",
-                report.inspection.inspected
+                "expected {} inspected, found {}",
+                self.inspects, report.inspection.inspected
             ));
         }
         match self.expect {
@@ -112,36 +109,7 @@ macro_rules! cases {
             $crate::checks::planted::Planted {
                 name: stringify!($name),
                 expect: $crate::checks::planted::Expect::$expect $( ( $($arg)* ) )?,
-                inspects: Some($inspects),
-                run: $run,
-            },
-        )+];
-
-        $(
-            $(#[doc = $doc])*
-            #[test]
-            fn $name() {
-                $crate::checks::planted::verify_named(&super::super::CHECK, stringify!($name));
-            }
-        )+
-    };
-}
-
-/// The same as `cases!` without `inspects N`, for a list not yet converted. Removed once every
-/// list uses `cases!`.
-#[cfg(test)]
-macro_rules! cases_uncounted {
-    ($(
-        $(#[doc = $doc:literal])*
-        $name:ident : $expect:ident $( ( $($arg:tt)* ) )? => $run:path
-    ),+ $(,)?) => {
-        /// This check's planted cases: inputs it must fail on and inputs it must pass.
-        #[cfg(test)]
-        pub(crate) const PLANTED: &[$crate::checks::planted::Planted] = &[$(
-            $crate::checks::planted::Planted {
-                name: stringify!($name),
-                expect: $crate::checks::planted::Expect::$expect $( ( $($arg)* ) )?,
-                inspects: None,
+                inspects: $inspects,
                 run: $run,
             },
         )+];
@@ -157,7 +125,7 @@ macro_rules! cases_uncounted {
 }
 
 #[cfg(test)]
-pub(crate) use {cases, cases_uncounted};
+pub(crate) use cases;
 
 #[cfg(test)]
 use crate::checks::{Inspection, StaticCheck};
@@ -194,11 +162,7 @@ mod tests {
         |_| Inspection::default(),
     );
 
-    fn verdict(
-        expect: Expect,
-        inspects: Option<usize>,
-        run: fn() -> Inspection,
-    ) -> Result<(), String> {
+    fn verdict(expect: Expect, inspects: usize, run: fn() -> Inspection) -> Result<(), String> {
         Planted {
             name: "case",
             expect,
@@ -213,7 +177,7 @@ mod tests {
         assert_eq!(
             verdict(
                 Expect::FailsWith(&["a.toml:2: bad\n    fix: fix it"]),
-                None,
+                1,
                 one_violation
             ),
             Ok(())
@@ -221,13 +185,13 @@ mod tests {
         assert_eq!(
             verdict(
                 Expect::FailsWith(&["a.toml:3: bad\n    fix: fix it"]),
-                None,
+                1,
                 one_violation
             ),
             Err("expected these failures:\na.toml:3: bad\n    fix: fix it\nfound:\na.toml:2: bad\n    fix: fix it".to_owned())
         );
         assert_eq!(
-            verdict(Expect::FailsWith(&[]), None, clean),
+            verdict(Expect::FailsWith(&[]), 1, clean),
             Err("FailsWith needs at least one failure; a case that passes is Passes".to_owned())
         );
     }
@@ -240,7 +204,7 @@ mod tests {
                     "a.toml:1: gone\n    fix: restore it",
                     "0 rows inspected in a.toml\n    fix: the check stopped before it could look; fix the failure above first",
                 ]),
-                None,
+                0,
                 stopped
             ),
             Ok(())
@@ -248,7 +212,7 @@ mod tests {
         assert_eq!(
             verdict(
                 Expect::FailsWith(&["a.toml:1: gone\n    fix: restore it"]),
-                None,
+                0,
                 stopped
             ),
             Err("expected these failures:\na.toml:1: gone\n    fix: restore it\nfound:\na.toml:1: gone\n    fix: restore it\n0 rows inspected in a.toml\n    fix: the check stopped before it could look; fix the failure above first".to_owned())
@@ -257,13 +221,13 @@ mod tests {
 
     #[test]
     fn passes_needs_no_violation_and_something_inspected() {
-        assert_eq!(verdict(Expect::Passes, None, clean), Ok(()));
+        assert_eq!(verdict(Expect::Passes, 1, clean), Ok(()));
         assert_eq!(
-            verdict(Expect::Passes, None, one_violation),
+            verdict(Expect::Passes, 1, one_violation),
             Err("expected a pass, found:\na.toml:2: bad\n    fix: fix it".to_owned())
         );
         assert_eq!(
-            verdict(Expect::Passes, None, empty),
+            verdict(Expect::Passes, 0, empty),
             Err("expected a pass, found:\n0 rows inspected in a.toml\n    fix: fake looks for rows in a.toml; restore them, or, if they moved, update the consts xtask/src/checks/fake.rs builds that place from".to_owned())
         );
     }
@@ -271,22 +235,22 @@ mod tests {
     #[test]
     fn a_count_that_differs_fails_the_case_and_says_both_numbers() {
         assert_eq!(
-            verdict(Expect::Passes, Some(1), clean),
+            verdict(Expect::Passes, 1, clean),
             Ok(()),
             "a case that states the count it reads passes"
         );
         assert_eq!(
-            verdict(Expect::Passes, Some(2), clean),
+            verdict(Expect::Passes, 2, clean),
             Err("expected 2 inspected, found 1".to_owned())
         );
         assert_eq!(
-            verdict(Expect::Passes, Some(0), clean),
+            verdict(Expect::Passes, 0, clean),
             Err("expected 0 inspected, found 1".to_owned())
         );
         assert_eq!(
             verdict(
                 Expect::FailsWith(&["a.toml:2: bad\n    fix: fix it"]),
-                Some(2),
+                2,
                 one_violation
             ),
             Err("expected 2 inspected, found 1".to_owned()),
