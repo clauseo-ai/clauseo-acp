@@ -44,8 +44,7 @@ converted document. From there they can call any IPC command the page can reach.
   opaque ids, never paths
 - `designed`: A minimal command surface: send, subscribe, acknowledge, answer a permission, pick a
   folder, open a file or link
-- `designed`: Escalations only through native dialogs drawn by Rust, never a webview confirm; a
-  denial card only offers the escalation, and accepting it opens a native dialog
+- `designed`: Escalations only through native dialogs drawn by Rust, never a webview confirm.
 - `designed`: The webview never navigates; links go through one `open_external` (https, http,
   mailto) with a native confirm; `open_file` opens only document types inside a matter
 - `designed`: Markdown renders without raw HTML; DOMPurify only on the few HTML-string paths

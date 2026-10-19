@@ -17,8 +17,9 @@ message that fails stalls its ordered queue.
   capability lists its permissions explicitly (never `core:default`).
 - The command surface stays minimal: send a command to the host, subscribe, acknowledge, answer a
   permission, pick a folder, open a file or link.
-- `open_external` opens only https, http and mailto links, after a native confirm. `open_file`
-  opens only document types inside a matter.
+- `open_external` is the only path for external links, since the webview never navigates. It
+  opens only https, http and mailto links, after a native confirm. `open_file` opens only document
+  types inside a matter.
 - Files are named by opaque ids the host issues, never by paths. Paths reach the UI for display
   only.
 - The host sends view patches (`Upsert`, `Remove`, `AppendText`, `Reset`), each with a per-thread
@@ -37,12 +38,11 @@ message that fails stalls its ordered queue.
   elicitation URLs.
 - A denial card in the webview only offers an escalation. Accepting it opens a native dialog drawn
   by Rust, and nothing in the webview grants one.
-- The webview never navigates. External links go through one `open_external`.
-- A strict CSP: no remote images or connections, no `unsafe-eval`, Trusted Types.
-- Trusted Types is enforced, not report-only. PR #8 checked it on WKWebView with an `innerHTML`
-  control that threw. Engines without support ignore the directive, so it is defence in depth, not
-  the main control. The only allowed policy is `clauseo-sanitize`. Nothing creates it yet; the
-  first code that needs an HTML string adds it.
+- A strict CSP: no remote images or connections, no `unsafe-eval`. Trusted Types is enforced, not
+  report-only. PR #8 checked it on WKWebView with an `innerHTML` control that threw. Engines without
+  support ignore the directive, so it is defence in depth, not the main control. The only allowed
+  policy is `clauseo-sanitize`. Nothing creates it yet; the first code that needs an HTML string
+  adds it.
 - Release builds have no devtools, no global Tauri object and no asset protocol.
 
 ## Consequences
