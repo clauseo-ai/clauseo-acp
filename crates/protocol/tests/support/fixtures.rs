@@ -13,9 +13,9 @@
 use std::fmt::Debug;
 
 use clauseo_protocol::{
-    CheckpointId, CommandId, CompactString, DomainEvent, ElicitationId, Envelope, EventId,
-    MatterId, MatterPath, MessageId, PermissionRequestId, RawPayload, Seq, StreamId, ThreadId,
-    Timestamp, ToolCallId, TurnId,
+    AgentId, BlobHash, BlobRef, CheckpointId, CommandId, CompactString, DomainEvent, ElicitationId,
+    Envelope, EventId, FileRefId, FolderRefId, MatterId, MatterPath, MessageId,
+    PermissionRequestId, RawPayload, Seq, StreamId, ThreadId, Timestamp, ToolCallId, TurnId,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -83,6 +83,41 @@ pub fn elicitation_id(n: u64) -> ElicitationId {
 /// A `CommandId` from `v7(n)`.
 pub fn command_id(n: u64) -> CommandId {
     CommandId::new(v7(n)).unwrap()
+}
+
+/// A `FileRefId` from `v7(n)`.
+pub fn file_ref_id(n: u64) -> FileRefId {
+    FileRefId::new(v7(n)).unwrap()
+}
+
+/// A `FolderRefId` from `v7(n)`.
+pub fn folder_ref_id(n: u64) -> FolderRefId {
+    FolderRefId::new(v7(n)).unwrap()
+}
+
+/// A `Seq` of `n`.
+pub fn seq(n: u64) -> Seq {
+    Seq::new(n).unwrap()
+}
+
+/// A blob of `size_bytes` whose hash bytes are all `byte`, with a short preview.
+pub fn blob(byte: u8, size_bytes: u64) -> BlobRef {
+    BlobRef::new(
+        BlobHash::from_bytes([byte; 32]),
+        size_bytes,
+        "preview".to_owned(),
+    )
+    .unwrap()
+}
+
+/// An `AgentId`.
+pub fn agent(text: &str) -> AgentId {
+    AgentId::new(text).unwrap()
+}
+
+/// What `serde_json` writes for `text`, in bytes, less the two quotes: the oracle for inline costs.
+pub fn json_cost(text: &str) -> usize {
+    serde_json::to_string(text).unwrap().len() - 2
 }
 
 /// A matter-relative path.
