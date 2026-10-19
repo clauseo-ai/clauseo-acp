@@ -1,12 +1,15 @@
 //! The `core-io` check. A crate whose Crates-table row in `ARCHITECTURE.md` lists `fs`,
-//! `process` or `any I/O` under "Never depends on" must not name these standard-library paths:
+//! `process` or `any I/O` under "Never depends on" must not name the paths in
+//! `xtask/src/checks/core_io/bans.rs`: a module there bans every path inside it and itself, a
+//! clock's `now` bans that function. A row that lists only `clock` bans the clocks alone.
 //!
-//! - `std::fs`, `std::net`, `std::process`, `std::env`: any path inside them, or naming them;
-//! - `std::os::<any>::fs`, `std::os::<any>::net`, `std::os::<any>::process`: the same;
-//! - `std::time::Instant::now` and `std::time::SystemTime::now`.
+//! In a `macro_rules!` body, a path through a metavariable fails when what the metavariable
+//! could expand to reaches a banned path (`std::$x`, `$t::now`, `Self::now` in
+//! `impl N for $t`); an alias or an associated type bound to a metavariable fails only where a
+//! path goes through it.
 //!
-//! A row that lists only `clock` bans the two `now` functions alone. Not covered: methods that
-//! touch the disk or the clock without naming a banned path (`Path::exists`, `Path::metadata`,
+//! Not covered: methods that touch the disk or the clock without naming a banned path
+//! (`Path::exists`, `Path::metadata`,
 //! `Path::read_dir`, `Path::canonicalize`, `UNIX_EPOCH.elapsed()`, `Instant::elapsed`),
 //! `std::io::stdin` and the other standard streams, `build.rs`, `tests/` and `benches/`, and
 //! code another crate runs for this one (a dependency, a proc macro).
@@ -29,7 +32,7 @@ mod tokens;
 
 use crate::checks::crates_table::{self, CrateRow, IoWord, Never};
 use crate::checks::exceptions::{self, Exception};
-use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
+use crate::checks::{self, Inspection, Noun, StaticCheck};
 use crate::violation::Violation;
 use crate::workspace::{self, Context, Member};
 use bans::Bans;
@@ -116,7 +119,7 @@ fn check_crate(
             )
         })
         .collect();
-    let targets = target_paths(root, member, &src, &mut violations);
+    let targets = files::targets(root, member, &src, &mut violations);
     if listing.files.is_empty() {
         violations.push(report::at_row(
             row.line,
@@ -181,55 +184,6 @@ fn check_crate(
         );
     }
     violations
-}
-
-/// The `[lib]` and `[[bin]]` paths of the crate's `Cargo.toml`; a path outside `src` and a
-/// manifest that cannot be read go to `violations`.
-fn target_paths(
-    root: &Path,
-    member: &Member,
-    src: &str,
-    violations: &mut Vec<Violation>,
-) -> Vec<files::TargetPath> {
-    let manifest = checks::join(&member.dir, "Cargo.toml");
-    let text = match checks::read_repo_file(root, &manifest) {
-        Ok(Some(text)) => text,
-        Ok(None) => return Vec::new(),
-        Err(unreadable) => {
-            violations.push(unreadable);
-            return Vec::new();
-        }
-    };
-    let targets = match files::target_paths(&text) {
-        Ok(targets) => targets,
-        Err(error) => {
-            let start = error.span().map_or(0, |span| span.start);
-            let head = text.get(..start).unwrap_or(&text);
-            let line = u32::try_from(head.matches('\n').count() + 1).unwrap_or(u32::MAX);
-            violations.push(violation(
-                &manifest,
-                line,
-                format!(
-                    "core-io cannot read the target paths of `{manifest}`: {}",
-                    error.message()
-                ),
-                "fix the manifest so cargo and core-io can read it",
-            ));
-            return Vec::new();
-        }
-    };
-    for target in targets.iter().filter(|target| target.in_src.is_none()) {
-        violations.push(violation(
-            &manifest,
-            target.line,
-            format!(
-                "{}'s {} path `{}` is outside `{src}/`, and core-io parses only that folder",
-                member.name, target.table, target.path
-            ),
-            format!("move the target's root file under `{src}/` and set `path` to it"),
-        ));
-    }
-    targets
 }
 
 /// The I/O words that make `row` hold core I/O, as the table writes them.

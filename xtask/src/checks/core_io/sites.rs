@@ -1,15 +1,17 @@
 //! The second pass of the core-io check: every place a parsed file reaches a banned path.
 //!
-//! It visits every `use` leaf, every path (in expressions, patterns, types, attributes and
-//! macro names) and every qualified path `<T>::f`, and resolves each through the crate's
-//! `Table`. Macro bodies that parse are visited like other code; the rest, and the tokens of
-//! attribute lists, are walked for chains (`tokens.rs`). A chain that a metavariable continues
-//! or starts fails when its expansion could reach a banned path. It also fails `#[path]` on a
-//! module and `include!`, which pull in code the check never parses.
+//! It visits every `use` leaf, every path (in expressions, patterns, types and attributes) and
+//! every qualified path `<T>::f`, and resolves each through the crate's `Table`. A macro's own
+//! path is read only to find `include!`. Macro bodies that parse are visited like other code;
+//! the rest, and the tokens of attribute lists, are walked for chains (`tokens.rs`). A path that
+//! resolves through a metavariable's placeholder fails when what the metavariable could expand to
+//! reaches a banned path (`bans.rs`). It also fails `#[path]` on a module and `include!`,
+//! which pull in code the check never parses.
 
 use super::bans::Bans;
+use super::files;
 use super::names::{self, Leaf, Module, Table, Target, Written};
-use super::tokens::{self, Body, Chain, Kind};
+use super::tokens::{self, Body, Chain};
 use proc_macro2::{Span, TokenStream};
 use std::collections::BTreeSet;
 use syn::visit::{self, Visit};
@@ -24,7 +26,8 @@ pub(super) enum Reach {
         prefix: String,
         reaches: Vec<String>,
     },
-    /// A path built from a macro metavariable (`std::$x`, `$t::now`), which may reach these.
+    /// A path that resolves through a macro metavariable (`std::$x`, `$t::now`), written up to
+    /// the metavariable or from it on, which may reach these.
     Metavariable {
         written: String,
         reaches: Vec<String>,
@@ -53,6 +56,7 @@ pub(super) fn sites(table: &Table, bans: Bans, module: &[String], file: &syn::Fi
         bans,
         module: module.to_vec(),
         self_types: Vec::new(),
+        params: Vec::new(),
         found: BTreeSet::new(),
     };
     finder.visit_file(file);
@@ -66,18 +70,15 @@ struct Finder<'t> {
     module: Module,
     /// The self type of each enclosing impl (`None` for a trait or a self type that is no path).
     self_types: Vec<Option<Written>>,
+    /// The generic type parameters in scope.
+    params: Vec<String>,
     found: BTreeSet<Site>,
 }
 
 impl Finder<'_> {
     /// Every path inside `std` that `path` may point at, `Self` read as the impl's self type.
     fn std_targets(&self, path: &Written) -> Vec<Vec<String>> {
-        let path = names::with_self(
-            path.clone(),
-            self.self_types.last().and_then(Option::as_ref),
-        );
-        self.table
-            .resolve(&self.module, &path)
+        self.targets(path)
             .into_iter()
             .filter_map(|target| match target {
                 Target::Std(found) => Some(found),
@@ -86,26 +87,59 @@ impl Finder<'_> {
             .collect()
     }
 
-    /// The first banned path `path` may reach, if any: through its bindings, or as
-    /// `<associated type that is a clock>::now`.
-    fn reach(&self, path: &Written) -> Option<String> {
-        let direct = self
-            .std_targets(path)
-            .into_iter()
-            .find_map(|found| self.bans.banned(&found));
-        direct.or_else(|| match path.segments.as_slice() {
-            [.., associated, now] if now == "now" => self
-                .table
-                .associated_clock(associated)
-                .map(|clock| format!("std::time::{clock}::now")),
-            _ => None,
-        })
+    /// Every place `path` may point at: through its bindings, `Self` read as the impl's self
+    /// type, and through each associated type of its name when it is `Self::C::...` or
+    /// `T::C::...` for a type parameter `T`.
+    fn targets(&self, path: &Written) -> BTreeSet<Target> {
+        let self_type = self.self_types.last().and_then(Option::as_ref);
+        let mut found = self
+            .table
+            .resolve(&self.module, &names::with_self(path.clone(), self_type));
+        if let [first, name, rest @ ..] = path.segments.as_slice()
+            && !path.leading_colon
+            && (first == "Self" || self.params.contains(first))
+        {
+            found.extend(self.table.associated(name, rest));
+        }
+        found
+    }
+
+    /// What reaching `targets` does wrong, if anything: a banned path inside `std`, else a
+    /// path through a metavariable that may expand to a banned path.
+    fn judge(&self, targets: BTreeSet<Target>) -> Option<Reach> {
+        let mut built = None;
+        for target in targets {
+            let (written, reaches) = match target {
+                Target::Std(path) => {
+                    if let Some(banned) = self.bans.banned(&path) {
+                        return Some(Reach::Uses(banned));
+                    }
+                    let Some(at) = path.iter().position(|seg| tokens::is_placeholder(seg)) else {
+                        continue;
+                    };
+                    let reaches = self.bans.std_metavariable(&path).unwrap_or_default();
+                    (tokens::join(path.get(..=at).unwrap_or_default()), reaches)
+                }
+                Target::Crate(path) => {
+                    let Some(at) = path.iter().position(|seg| tokens::is_placeholder(seg)) else {
+                        continue;
+                    };
+                    let from = path.get(at..).unwrap_or_default();
+                    let rest = from.get(1..).unwrap_or_default();
+                    (tokens::join(from), self.bans.metavariable_reaches(rest))
+                }
+            };
+            if built.is_none() && !reaches.is_empty() {
+                built = Some(Reach::Metavariable { written, reaches });
+            }
+        }
+        built
     }
 
     /// Adds a site at `span` when `path` may reach a banned path.
     fn check(&mut self, path: &Written, span: Span) {
-        if let Some(reach) = self.reach(path) {
-            self.add(span, Reach::Uses(reach));
+        if let Some(reach) = self.judge(self.targets(path)) {
+            self.add(span, reach);
         }
     }
 
@@ -114,11 +148,12 @@ impl Finder<'_> {
         self.found.insert(Site { line, reach });
     }
 
-    /// Checks a qualified path `<T>::rest` as the path `T::rest`, at the `<`. When `T` itself is
-    /// banned (`<std::fs::File>::open`), the site is `T`'s, found when `T` is visited.
+    /// Checks a qualified path `<T>::rest` as the path `T::rest`, at the `<`. When `T` itself
+    /// reaches a banned path (`<std::fs::File>::open`), the site is `T`'s, found when `T` is
+    /// visited.
     fn visit_qualified(&mut self, qself: &syn::QSelf, path: &syn::Path) {
         if let Some(ty) = names::type_path(&qself.ty)
-            && self.reach(&names::written(ty)).is_none()
+            && self.judge(self.targets(&names::written(ty))).is_none()
         {
             let mut joined = names::written(ty);
             joined.segments.extend(names::written(path).segments);
@@ -130,78 +165,74 @@ impl Finder<'_> {
         }
     }
 
-    /// The banned paths a glob of, or a metavariable after, the std paths of `path` reach.
+    /// Checks `<T as K>::C::rest` through each associated type `C` of the crate, at the `<`.
+    fn check_as_trait(&mut self, qself: &syn::QSelf, path: &syn::Path) {
+        let tail = names::written(path).segments.split_off(qself.position);
+        if let [name, rest @ ..] = tail.as_slice()
+            && let Some(reach) = self.judge(self.table.associated(name, rest))
+        {
+            self.add(qself.lt_token.spans[0], reach);
+        }
+    }
+
+    /// The banned paths a glob of the std paths of `path` reaches.
     fn reaches(&self, path: &Written) -> Option<(String, Vec<String>)> {
         self.std_targets(path).into_iter().find_map(|found| {
             let reaches = self.bans.reaches(&found);
-            (!reaches.is_empty()).then(|| (found.join("::"), reaches))
+            (!reaches.is_empty()).then(|| (tokens::join(&found), reaches))
         })
     }
 
-    /// Checks the chains of tokens that did not parse (see the module docs).
+    /// Checks the chains of tokens that did not parse.
     fn check_tokens(&mut self, tokens: TokenStream) {
-        for Chain { path, span, kind } in tokens::chains(tokens) {
-            match kind {
-                Kind::Path => self.check(&path, span),
-                Kind::ThenMetavariable(name) => {
-                    if let Some(banned) = self.reach(&path) {
-                        self.add(span, Reach::Uses(banned));
-                    } else if let Some((prefix, reaches)) = self.reaches(&path) {
-                        let written = format!("{prefix}::${name}");
-                        self.add(span, Reach::Metavariable { written, reaches });
-                    }
-                }
-                Kind::Binding(written) => {
-                    let reaches = self.bans.reaches(&["std".to_owned()]);
-                    self.add(span, Reach::Metavariable { written, reaches });
-                }
-                Kind::Metavariable(name) => {
-                    let reaches = self.bans.metavariable_reaches(&path.segments);
-                    if !reaches.is_empty() {
-                        let written = format!("${name}::{}", path.segments.join("::"));
-                        self.add(span, Reach::Metavariable { written, reaches });
-                    }
-                }
-            }
+        for Chain { path, span } in tokens::chains(tokens) {
+            self.check(&path, span);
         }
     }
 
-    /// Fails `#[path]` (also inside `cfg_attr`) on a module.
-    fn check_path_attribute(&mut self, item: &syn::ItemMod) {
-        for attr in &item.attrs {
-            let metas: Vec<syn::Meta> = if attr.path().is_ident("cfg_attr") {
-                attr.parse_args_with(
-                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
-                )
-                .map(|metas| metas.into_iter().skip(1).collect())
-                .unwrap_or_default()
-            } else {
-                vec![attr.meta.clone()]
-            };
-            for meta in metas.iter().filter(|meta| meta.path().is_ident("path")) {
-                let path = match meta {
-                    syn::Meta::NameValue(syn::MetaNameValue {
-                        value:
-                            syn::Expr::Lit(syn::ExprLit {
-                                lit: syn::Lit::Str(path),
-                                ..
-                            }),
-                        ..
-                    }) => Some(path.value()),
-                    _ => None,
-                };
-                let module = names::name_of(&item.ident);
-                let span = attr.pound_token.spans[0];
-                self.add(span, Reach::PathAttribute { module, path });
-            }
-        }
+    /// Runs `visit` with the type parameters of `generics` in scope.
+    fn with_params(&mut self, generics: Option<&syn::Generics>, visit: impl FnOnce(&mut Self)) {
+        let depth = self.params.len();
+        let params = generics.into_iter().flat_map(syn::Generics::type_params);
+        self.params
+            .extend(params.map(|param| names::name_of(&param.ident)));
+        visit(self);
+        self.params.truncate(depth);
     }
 }
 
 impl<'ast> Visit<'ast> for Finder<'_> {
+    fn visit_item(&mut self, i: &'ast syn::Item) {
+        let generics = match i {
+            syn::Item::Enum(item) => Some(&item.generics),
+            syn::Item::Fn(item) => Some(&item.sig.generics),
+            syn::Item::Impl(item) => Some(&item.generics),
+            syn::Item::Struct(item) => Some(&item.generics),
+            syn::Item::Trait(item) => Some(&item.generics),
+            syn::Item::TraitAlias(item) => Some(&item.generics),
+            syn::Item::Type(item) => Some(&item.generics),
+            syn::Item::Union(item) => Some(&item.generics),
+            _ => None,
+        };
+        self.with_params(generics, |me| visit::visit_item(me, i));
+    }
+
+    fn visit_impl_item_fn(&mut self, i: &'ast syn::ImplItemFn) {
+        self.with_params(Some(&i.sig.generics), |me| visit::visit_impl_item_fn(me, i));
+    }
+
+    fn visit_trait_item_fn(&mut self, i: &'ast syn::TraitItemFn) {
+        self.with_params(Some(&i.sig.generics), |me| {
+            visit::visit_trait_item_fn(me, i);
+        });
+    }
+
     fn visit_item_mod(&mut self, i: &'ast syn::ItemMod) {
-        self.check_path_attribute(i);
-        self.module.push(names::name_of(&i.ident));
+        for (span, path) in files::path_attributes(i) {
+            let module = names::name_of(&i.ident);
+            self.add(span, Reach::PathAttribute { module, path });
+        }
+        self.module.push(names::module_name(&i.ident));
         visit::visit_item_mod(self, i);
         self.module.pop();
     }
@@ -228,6 +259,8 @@ impl<'ast> Visit<'ast> for Finder<'_> {
                 Leaf::Glob { prefix, span } => {
                     if let Some((prefix, reaches)) = self.reaches(&prefix) {
                         self.add(span, Reach::Glob { prefix, reaches });
+                    } else if let Some(built) = self.judge(self.targets(&prefix)) {
+                        self.add(span, built);
                     }
                 }
             }
@@ -252,25 +285,31 @@ impl<'ast> Visit<'ast> for Finder<'_> {
                 }
                 self.visit_qualified(qself, &i.path);
             }
-            _ => visit::visit_expr_path(self, i),
+            Some(qself) => {
+                self.check_as_trait(qself, &i.path);
+                visit::visit_expr_path(self, i);
+            }
+            None => visit::visit_expr_path(self, i),
         }
     }
 
     fn visit_type_path(&mut self, i: &'ast syn::TypePath) {
         match &i.qself {
             Some(qself) if qself.position == 0 => self.visit_qualified(qself, &i.path),
-            _ => visit::visit_type_path(self, i),
+            Some(qself) => {
+                self.check_as_trait(qself, &i.path);
+                visit::visit_type_path(self, i);
+            }
+            None => visit::visit_type_path(self, i),
         }
     }
 
+    /// Reads the macro's own path only for `include!`: `std::env!` is the compile-time macro,
+    /// not the module.
     fn visit_macro(&mut self, i: &'ast syn::Macro) {
         let name = names::written(&i.path);
         let prelude = name.segments == ["include"] && !name.leading_colon;
-        let include = || {
-            self.std_targets(&name)
-                .iter()
-                .any(|path| path.as_slice() == ["std", "include"])
-        };
+        let include = || self.std_targets(&name).iter().any(|path| is_include(path));
         if prelude || include() {
             self.add(i.bang_token.spans[0], Reach::Include);
         }
@@ -282,11 +321,15 @@ impl<'ast> Visit<'ast> for Finder<'_> {
                 Body::Tokens(tokens) => self.check_tokens(tokens),
             }
         }
-        visit::visit_macro(self, i);
     }
 
     fn visit_meta_list(&mut self, i: &'ast syn::MetaList) {
         self.check_tokens(i.tokens.clone());
         visit::visit_meta_list(self, i);
     }
+}
+
+/// True for `std::include` and `core::include`.
+fn is_include(path: &[String]) -> bool {
+    matches!(path, [root, name] if name == "include" && (root == "std" || root == "core"))
 }

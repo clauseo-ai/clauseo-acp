@@ -1,12 +1,45 @@
 //! Macro tokens for the core-io check. `syn` leaves the arguments of a macro call and the rules
 //! of a `macro_rules!` as tokens. `bodies` parses them as items, statements or expressions when
-//! it can, so they are read like other code; `chains` walks the tokens that do not parse (a rule
-//! with metavariables, a macro of its own syntax) for `a::b::c` paths.
+//! it can, so they are read like other code. In a `macro_rules!`, each metavariable `$x` first
+//! becomes a placeholder identifier (see `is_placeholder`; one before an item keyword, which can
+//! only be a visibility, is dropped), `$crate` becomes `crate`, and each
+//! repetition `$( ... )` with its separator and `*`, `+` or `?` becomes its inner tokens, once,
+//! so most rule bodies parse. `chains` walks the tokens that still do not parse (a macro of its
+//! own syntax, the arguments of an attribute) for `a::b::c` paths.
 
 use super::names::{self, Written};
-use proc_macro2::{Delimiter, Spacing, Span, TokenStream, TokenTree};
+use proc_macro2::{Delimiter, Group, Ident, Spacing, Span, TokenStream, TokenTree};
 use syn::parse::Parser;
 use syn::punctuated::Punctuated;
+
+/// How a placeholder starts; the metavariable's name follows. Nobody writes such a name, so a
+/// path segment that starts with it stands for whatever the metavariable expands to.
+const PLACEHOLDER: &str = "__core_io_metavariable__";
+
+/// The keywords that can start an item after its visibility.
+const ITEM_KEYWORDS: [&str; 14] = [
+    "async", "const", "enum", "extern", "fn", "impl", "mod", "static", "struct", "trait", "type",
+    "union", "unsafe", "use",
+];
+
+/// True when `segment` is the placeholder of a metavariable.
+pub(super) fn is_placeholder(segment: &str) -> bool {
+    segment.starts_with(PLACEHOLDER)
+}
+
+/// `segment` as the macro writes it: `$x` for the placeholder of `$x`, else itself.
+pub(super) fn render(segment: &str) -> String {
+    match segment.strip_prefix(PLACEHOLDER) {
+        Some(name) => format!("${name}"),
+        None => segment.to_owned(),
+    }
+}
+
+/// `path` joined with `::`, each placeholder written as its metavariable.
+pub(super) fn join(path: &[String]) -> String {
+    let parts: Vec<String> = path.iter().map(|seg| render(seg)).collect();
+    parts.join("::")
+}
 
 /// The code of one macro call or of one `macro_rules!` rule.
 pub(super) enum Body {
@@ -20,12 +53,88 @@ pub(super) enum Body {
 
 /// The code of `mac`: one body per rule of a `macro_rules!` (its matchers skipped), else one.
 pub(super) fn bodies(mac: &syn::Macro) -> Vec<Body> {
-    if mac.path.is_ident("macro_rules")
-        && let Some(rules) = rule_bodies(mac.tokens.clone())
-    {
-        return rules.into_iter().map(parse).collect();
+    if !mac.path.is_ident("macro_rules") {
+        return vec![parse(mac.tokens.clone())];
     }
-    vec![parse(mac.tokens.clone())]
+    let tokens = substitute(mac.tokens.clone());
+    match rule_bodies(tokens.clone()) {
+        Some(rules) => rules.into_iter().map(parse).collect(),
+        None => vec![parse(tokens)],
+    }
+}
+
+/// `tokens` with each metavariable replaced by its placeholder, `$crate` by `crate`, and each
+/// repetition by its inner tokens.
+fn substitute(tokens: TokenStream) -> TokenStream {
+    let tokens: Vec<TokenTree> = tokens.into_iter().collect();
+    let mut out: Vec<TokenTree> = Vec::new();
+    let mut index = 0;
+    while let Some(token) = tokens.get(index) {
+        index += 1;
+        match (token, tokens.get(index)) {
+            (TokenTree::Group(group), _) => {
+                let mut inner = Group::new(group.delimiter(), substitute(group.stream()));
+                inner.set_span(group.span());
+                out.push(TokenTree::Group(inner));
+            }
+            (TokenTree::Punct(dollar), Some(TokenTree::Ident(ident)))
+                if dollar.as_char() == '$' =>
+            {
+                let name = names::name_of(ident);
+                let text = if name == "crate" {
+                    name
+                } else {
+                    format!("{PLACEHOLDER}{name}")
+                };
+                // Before an item keyword the metavariable can only be a visibility (`$vis fn`),
+                // which names no path; dropping it lets the item parse.
+                let visibility = matches!(
+                    tokens.get(index + 1),
+                    Some(TokenTree::Ident(next)) if ITEM_KEYWORDS.iter().any(|word| next == word)
+                );
+                if !visibility {
+                    out.push(TokenTree::Ident(Ident::new(&text, ident.span())));
+                }
+                index += 1;
+            }
+            (TokenTree::Punct(dollar), Some(TokenTree::Group(group)))
+                if dollar.as_char() == '$' && group.delimiter() == Delimiter::Parenthesis =>
+            {
+                match repetition_end(&tokens, index + 1) {
+                    Some(end) => {
+                        out.extend(substitute(group.stream()));
+                        index = end;
+                    }
+                    None => out.push(token.clone()),
+                }
+            }
+            _ => out.push(token.clone()),
+        }
+    }
+    out.into_iter().collect()
+}
+
+/// The index after the `*`, `+` or `?` that ends a repetition whose group ends before `at`,
+/// past a separator of one token (`,`, `;`, `=>`) when there is one; `None` for another shape.
+fn repetition_end(tokens: &[TokenTree], at: usize) -> Option<usize> {
+    let op = |index: usize, ops: &str| {
+        tokens
+            .get(index)
+            .is_some_and(|token| ops.chars().any(|op| is_punct(token, op)))
+    };
+    if op(at, "*+?") {
+        return Some(at + 1);
+    }
+    // A separator is one token; `=>` and the like are joined punctuation.
+    for len in 1..=3 {
+        let sep = tokens.get(at..at + len)?;
+        let one = len == 1 && !matches!(sep.first(), Some(TokenTree::Group(_)));
+        let joined = sep.iter().all(|token| matches!(token, TokenTree::Punct(_)));
+        if (one || joined) && op(at + len, "*+") {
+            return Some(at + len + 1);
+        }
+    }
+    None
 }
 
 /// The expansion of each rule `(matcher) => { expansion };`, or `None` for another shape.
@@ -69,25 +178,11 @@ fn parse(tokens: TokenStream) -> Body {
     Body::Tokens(tokens)
 }
 
-/// How a chain of tokens is written.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum Kind {
-    /// `a::b::c`, `::a::b` or `<a::b>::c`.
-    Path,
-    /// `a::b::$x`: the path, continued by the metavariable `x`.
-    ThenMetavariable(String),
-    /// `$x::a::b` or `<$x>::a::b`: the segments after the metavariable `x`.
-    Metavariable(String),
-    /// `type A = $t` or `use $p`: a binding to whatever the metavariable expands to.
-    Binding(String),
-}
-
-/// One chain of a token stream: its segments, the span of its start and how it is written.
+/// One `a::b::c`, `::a::b` or `<a::b>::c` chain of a token stream, and the span of its start.
 #[derive(Debug, Clone)]
 pub(super) struct Chain {
     pub path: Written,
     pub span: Span,
-    pub kind: Kind,
 }
 
 /// The chains of a token stream and its groups.
@@ -101,63 +196,17 @@ pub(super) fn chains(tokens: TokenStream) -> Vec<Chain> {
                 found.extend(chains(group.stream()));
                 index + 1
             }
-            TokenTree::Ident(ident) => match binding(&tokens, index) {
-                Some((written, end)) => {
-                    let span = ident.span();
-                    let path = Written {
-                        segments: Vec::new(),
-                        leading_colon: false,
-                    };
-                    found.push(Chain {
-                        path,
-                        span,
-                        kind: Kind::Binding(written),
-                    });
-                    end
-                }
-                None => path_chain(&tokens, index, false, &mut found),
-            },
-            TokenTree::Punct(_) if is_path_sep(&tokens, index) => {
-                if matches!(tokens.get(index + 2), Some(TokenTree::Ident(_))) {
-                    path_chain(&tokens, index + 2, true, &mut found)
-                } else {
-                    index + 2
-                }
+            TokenTree::Ident(_) => path_chain(&tokens, index, false, &mut found),
+            TokenTree::Punct(_)
+                if is_path_sep(&tokens, index)
+                    && matches!(tokens.get(index + 2), Some(TokenTree::Ident(_))) =>
+            {
+                path_chain(&tokens, index + 2, true, &mut found)
             }
-            TokenTree::Punct(punct) => metavariable_chain(&tokens, index, punct.span(), &mut found),
-            TokenTree::Literal(_) => index + 1,
+            TokenTree::Punct(_) | TokenTree::Literal(_) => index + 1,
         };
     }
     found
-}
-
-/// `type A = $t` or `use $p` (also `use ::$p`) at `index`: how it is written and the index after
-/// the metavariable.
-fn binding(tokens: &[TokenTree], index: usize) -> Option<(String, usize)> {
-    let Some(TokenTree::Ident(keyword)) = tokens.get(index) else {
-        return None;
-    };
-    if keyword == "type" {
-        let Some(TokenTree::Ident(alias)) = tokens.get(index + 1) else {
-            return None;
-        };
-        let equals = tokens.get(index + 2).is_some_and(|eq| is_punct(eq, '='));
-        let name = metavariable_at(tokens, index + 3).filter(|_| equals)?;
-        Some((
-            format!("type {} = ${name}", names::name_of(alias)),
-            index + 5,
-        ))
-    } else if keyword == "use" {
-        let start = if is_path_sep(tokens, index + 1) {
-            index + 3
-        } else {
-            index + 1
-        };
-        let name = metavariable_at(tokens, start)?;
-        Some((format!("use ${name}"), start + 2))
-    } else {
-        None
-    }
 }
 
 /// Reads the path chain whose first identifier is at `start`; returns the index after it.
@@ -187,63 +236,8 @@ fn path_chain(tokens: &[TokenTree], start: usize, leading: bool, found: &mut Vec
         span = tokens.get(start - 1).map_or(span, TokenTree::span);
         end = follow(tokens, end + 1, &mut path.segments);
     }
-    let kind = match metavariable_at(tokens, end + 2) {
-        Some(name) if is_path_sep(tokens, end) => {
-            end += 4;
-            Kind::ThenMetavariable(name)
-        }
-        _ => Kind::Path,
-    };
-    found.push(Chain { path, span, kind });
+    found.push(Chain { path, span });
     end
-}
-
-/// Reads `$x::a::b`, `<$x>::a::b` or `$crate::a` at the punctuation at `index`; returns the
-/// index after what it read.
-fn metavariable_chain(
-    tokens: &[TokenTree],
-    index: usize,
-    span: Span,
-    found: &mut Vec<Chain>,
-) -> usize {
-    let (name, after) = match tokens.get(index) {
-        Some(token) if is_punct(token, '$') => match metavariable_at(tokens, index) {
-            Some(name) => (name, index + 2),
-            None => return index + 1,
-        },
-        Some(token) if is_punct(token, '<') => match metavariable_at(tokens, index + 1) {
-            Some(name) if tokens.get(index + 3).is_some_and(|gt| is_punct(gt, '>')) => {
-                (name, index + 4)
-            }
-            _ => return index + 1,
-        },
-        _ => return index + 1,
-    };
-    let mut rest = Vec::new();
-    let end = follow(tokens, after, &mut rest);
-    if !rest.is_empty() {
-        found.push(Chain {
-            path: Written {
-                segments: rest,
-                leading_colon: false,
-            },
-            span,
-            kind: Kind::Metavariable(name),
-        });
-    }
-    end
-}
-
-/// The name of the metavariable `$name` at `index`; `None` for `$crate` and anything else.
-fn metavariable_at(tokens: &[TokenTree], index: usize) -> Option<String> {
-    match (tokens.get(index), tokens.get(index + 1)) {
-        (Some(dollar), Some(TokenTree::Ident(ident)))
-            if is_punct(dollar, '$') && ident != "crate" =>
-        {
-            Some(names::name_of(ident))
-        }
-        _ => None,
-    }
 }
 
 /// Appends each `:: ident` from `index` on to `segments`; returns the index after the last.

@@ -2,20 +2,22 @@
 //!
 //! The first pass records, for every module of every crate root (the library, `main.rs`, each
 //! binary), the names its `use` items, `type` aliases and `extern crate` items bind, the modules
-//! it glob-imports, and every associated type. `Table::resolve` then follows a written path
-//! through those bindings to every place it may name: a path inside `std`, or a path inside the
-//! crate. `Self` inside an `impl` stands for the impl's self type. Raw identifiers count without
-//! their `r#`. Code inside a macro call or a `macro_rules!` rule that parses as items,
-//! statements or expressions is read like the code around it.
+//! it glob-imports, and every associated type (set in an impl, a trait or a bound such as
+//! `T: K<C = X>`). `Table::resolve` then follows a written path through those bindings to every
+//! place it may name: a path inside `std` or `core`, or a path inside the crate. `Self` inside
+//! an `impl` stands for the impl's self type. Raw identifiers count without their `r#`. Code
+//! inside a macro call or a `macro_rules!` rule that parses as items, statements or expressions
+//! is read like the code around it; a metavariable there is a placeholder segment
+//! (`tokens.rs`), which resolves like any name the crate does not bind.
 //!
 //! Scopes are approximated: a `use` in a function body binds its name for the whole module; a
 //! name with several bindings may point at any of them; `std` and every
 //! `extern crate std as x` name are reachable everywhere, even where a local item shadows them;
-//! an associated type is known by its name alone, so `X::now` fails when any associated type
-//! `X` of the crate is a clock. The modules come from the `mod` items (see `files.rs`); a file
-//! that no root reaches is placed by its path under `src/`.
+//! an associated type is known by its name alone, so `Self::X::now`, `T::X::now` (`T` a type
+//! parameter) and `<_ as _>::X::now` fail when any associated type `X` of the crate is a clock.
+//! The modules come from the `mod` items (see `files.rs`); a file that no root reaches is
+//! placed by its path under `src/`.
 
-use super::bans;
 use super::tokens::{self, Body};
 use proc_macro2::Span;
 use std::collections::{BTreeMap, BTreeSet};
@@ -36,7 +38,7 @@ pub(super) struct Written {
 /// One place a path may point at.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Target {
-    /// A path inside the standard library, starting with `std`.
+    /// A path inside the standard library, starting with `std` (or `core`, written as such).
     Std(Vec<String>),
     /// A path inside the crate, its root first (see `Module`).
     Crate(Vec<String>),
@@ -79,17 +81,16 @@ impl Table {
         self.resolve_in(module, path, &mut Vec::new())
     }
 
-    /// The clock an associated type called `name` may be bound to, if any.
-    pub(super) fn associated_clock(&self, name: &str) -> Option<&'static str> {
-        self.associated
-            .get(name)
-            .into_iter()
-            .flatten()
-            .flat_map(|(module, path)| self.resolve(module, path))
-            .find_map(|target| match target {
-                Target::Std(path) => bans::clock(&path),
-                Target::Crate(_) => None,
-            })
+    /// Every place `<associated type called name>::<rest>` may point at, through each
+    /// associated type of that name in the crate.
+    pub(super) fn associated(&self, name: &str, rest: &[String]) -> BTreeSet<Target> {
+        let mut found = BTreeSet::new();
+        for (module, path) in self.associated.get(name).into_iter().flatten() {
+            let mut path = path.clone();
+            path.segments.extend(rest.iter().cloned());
+            found.extend(self.resolve(module, &path));
+        }
+        found
     }
 
     fn resolve_in(&self, module: &[String], path: &Written, stack: &mut Stack) -> BTreeSet<Target> {
@@ -97,9 +98,12 @@ impl Table {
         let Some((first, rest)) = path.segments.split_first() else {
             return found;
         };
-        // `core` counts as `std`: it re-exports nothing banned, and `core::include` is `include`.
-        if first == "std" || first == "core" || self.std_names.contains(first) {
-            found.insert(Target::Std(std_path(rest)));
+        if first == "std" || self.std_names.contains(first) {
+            found.insert(Target::Std(std_path("std", rest)));
+        }
+        // `core` holds none of the banned paths, but `core::include!` is `include!`.
+        if first == "core" {
+            found.insert(Target::Std(std_path("core", rest)));
         }
         for root in self.crate_names.get(first).into_iter().flatten() {
             found.extend(self.walk(root, rest, stack));
@@ -175,9 +179,9 @@ impl Table {
     }
 }
 
-/// `std` followed by `rest`.
-fn std_path(rest: &[String]) -> Vec<String> {
-    let mut path = vec!["std".to_owned()];
+/// `root` (`std` or `core`) followed by `rest`.
+fn std_path(root: &str, rest: &[String]) -> Vec<String> {
+    let mut path = vec![root.to_owned()];
     path.extend(rest.iter().cloned());
     path
 }
@@ -202,6 +206,17 @@ fn parent(module: &[String]) -> &[String] {
 /// An identifier as a name: without the `r#` of a raw identifier.
 pub(super) fn name_of(ident: &proc_macro2::Ident) -> String {
     ident.unraw().to_string()
+}
+
+/// The module segment of `mod <ident>`. A module named by a metavariable gets a segment no
+/// identifier can spell, so the paths inside it do not read as built from that metavariable.
+pub(super) fn module_name(ident: &proc_macro2::Ident) -> String {
+    let name = name_of(ident);
+    if tokens::is_placeholder(&name) {
+        format!("<mod {}>", tokens::render(&name))
+    } else {
+        name
+    }
 }
 
 /// The path of a type, looking through parentheses and invisible groups; `None` for any other
@@ -362,7 +377,7 @@ impl Collector<'_> {
 
 impl<'ast> Visit<'ast> for Collector<'_> {
     fn visit_item_mod(&mut self, i: &'ast syn::ItemMod) {
-        self.module.push(name_of(&i.ident));
+        self.module.push(module_name(&i.ident));
         visit::visit_item_mod(self, i);
         self.module.pop();
     }
@@ -408,6 +423,11 @@ impl<'ast> Visit<'ast> for Collector<'_> {
     fn visit_impl_item_type(&mut self, i: &'ast syn::ImplItemType) {
         self.associated(&i.ident, &i.ty);
         visit::visit_impl_item_type(self, i);
+    }
+
+    fn visit_assoc_type(&mut self, i: &'ast syn::AssocType) {
+        self.associated(&i.ident, &i.ty);
+        visit::visit_assoc_type(self, i);
     }
 
     fn visit_trait_item_type(&mut self, i: &'ast syn::TraitItemType) {

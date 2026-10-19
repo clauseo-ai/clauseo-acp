@@ -1,14 +1,18 @@
 //! The sources of a held crate: every `.rs` file under its `src/`, the symlinks there (which the
-//! check does not follow), the target paths its `Cargo.toml` sets, and the module each file
-//! is, found by following `mod` items from each crate root.
+//! check does not follow), the target paths its `Cargo.toml` sets (failing those outside `src/`),
+//! and the module each file is, found by following `mod` items from each crate root.
 
 use super::names::{self, Module};
-use crate::checks;
+use crate::checks::{self, violation};
+use crate::violation::Violation;
+use crate::workspace::Member;
+use proc_macro2::Span;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Component, Path};
+use syn::punctuated::Punctuated;
 
 /// What is under a crate's `src/`, repo-relative and sorted.
 #[derive(Debug, Default)]
@@ -94,6 +98,55 @@ pub(super) fn target_paths(text: &str) -> Result<Vec<TargetPath>, toml::de::Erro
         .collect())
 }
 
+/// The `[lib]` and `[[bin]]` paths of the crate's `Cargo.toml`; a path outside `src` and a
+/// manifest that cannot be read go to `violations`.
+pub(super) fn targets(
+    root: &Path,
+    member: &Member,
+    src: &str,
+    violations: &mut Vec<Violation>,
+) -> Vec<TargetPath> {
+    let manifest = checks::join(&member.dir, "Cargo.toml");
+    let text = match checks::read_repo_file(root, &manifest) {
+        Ok(Some(text)) => text,
+        Ok(None) => return Vec::new(),
+        Err(unreadable) => {
+            violations.push(unreadable);
+            return Vec::new();
+        }
+    };
+    let targets = match target_paths(&text) {
+        Ok(targets) => targets,
+        Err(error) => {
+            let start = error.span().map_or(0, |span| span.start);
+            let head = text.get(..start).unwrap_or(&text);
+            let line = u32::try_from(head.matches('\n').count() + 1).unwrap_or(u32::MAX);
+            violations.push(violation(
+                &manifest,
+                line,
+                format!(
+                    "core-io cannot read the target paths of `{manifest}`: {}",
+                    error.message()
+                ),
+                "fix the manifest so cargo and core-io can read it",
+            ));
+            return Vec::new();
+        }
+    };
+    for target in targets.iter().filter(|target| target.in_src.is_none()) {
+        violations.push(violation(
+            &manifest,
+            target.line,
+            format!(
+                "{}'s {} path `{}` is outside `{src}/`, and core-io parses only that folder",
+                member.name, target.table, target.path
+            ),
+            format!("move the target's root file under `{src}/` and set `path` to it"),
+        ));
+    }
+    targets
+}
+
 /// `path` (relative to the crate) relative to `src/`, when it lies there without `..`.
 fn in_src(path: &str) -> Option<String> {
     let mut parts = Path::new(path)
@@ -154,8 +207,8 @@ pub(super) fn roots(src: &str, files: &[String], targets: &[TargetPath]) -> Vec<
 }
 
 /// Every file's placements: each root, then each file a root reaches through `mod` items (not
-/// those with `#[path]`, which the check fails on its own). A file no root reaches is placed by
-/// its path under `src` in the library.
+/// those with `#[path]`, also inside `cfg_attr`, which the check fails on its own). A file no
+/// root reaches is placed by its path under `src` in the library.
 pub(super) fn place(
     src: &str,
     roots: &[(String, Module)],
@@ -210,11 +263,7 @@ fn follow(
         let syn::Item::Mod(item) = item else {
             continue;
         };
-        if item
-            .attrs
-            .iter()
-            .any(|attr| attr.path().is_ident("path") || attr.path().is_ident("cfg_attr"))
-        {
+        if !path_attributes(item).is_empty() {
             continue;
         }
         let name = names::name_of(&item.ident);
@@ -233,6 +282,36 @@ fn follow(
             reach(&nested, &child_dir, &child, parsed, placed);
         }
     }
+}
+
+/// Each `#[path]` on `item`, also one inside `#[cfg_attr(<predicate>, ...)]`: the span of its
+/// `#` and the path when it is a string.
+pub(super) fn path_attributes(item: &syn::ItemMod) -> Vec<(Span, Option<String>)> {
+    let mut found = Vec::new();
+    for attr in &item.attrs {
+        let metas: Vec<syn::Meta> = if attr.path().is_ident("cfg_attr") {
+            attr.parse_args_with(Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated)
+                .map(|metas| metas.into_iter().skip(1).collect())
+                .unwrap_or_default()
+        } else {
+            vec![attr.meta.clone()]
+        };
+        for meta in metas.iter().filter(|meta| meta.path().is_ident("path")) {
+            let path = match meta {
+                syn::Meta::NameValue(syn::MetaNameValue {
+                    value:
+                        syn::Expr::Lit(syn::ExprLit {
+                            lit: syn::Lit::Str(path),
+                            ..
+                        }),
+                    ..
+                }) => Some(path.value()),
+                _ => None,
+            };
+            found.push((attr.pound_token.spans[0], path));
+        }
+    }
+    found
 }
 
 /// The library module of a file at `relative` under `src/`: `lib.rs` and `main.rs` are the root,

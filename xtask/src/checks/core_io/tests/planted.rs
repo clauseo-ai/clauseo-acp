@@ -62,7 +62,8 @@ macro_rules! metavariable {
 macro_rules! all_bans {
     () => {
         "std::fs, std::net, std::process, std::env, std::os::*::fs, std::os::*::net, \
-         std::os::*::process, std::time::Instant::now, std::time::SystemTime::now"
+         std::os::*::process, std::os::*::prelude, std::time::Instant::now, \
+         std::time::SystemTime::now"
     };
 }
 
@@ -155,8 +156,8 @@ crate::checks::planted::cases! {
     os_unix_net: FailsWith(&[uses!("lib.rs", 1, "std::os::unix::net")]) => super::os_unix_net,
     os_unix_process: FailsWith(&[uses!("lib.rs", 1, "std::os::unix::process")]) => super::os_unix_process,
     os_windows_fs: FailsWith(&[uses!("lib.rs", 2, "std::os::windows::fs")]) => super::os_windows_fs,
-    os_glob: FailsWith(&[glob!(1, "std::os", "std::os::*::fs, std::os::*::net, std::os::*::process")]) => super::os_glob,
-    os_unix_glob: FailsWith(&[glob!(1, "std::os::unix", "std::os::unix::fs, std::os::unix::net, std::os::unix::process")]) => super::os_unix_glob,
+    os_glob: FailsWith(&[glob!(1, "std::os", "std::os::*::fs, std::os::*::net, std::os::*::process, std::os::*::prelude")]) => super::os_glob,
+    os_unix_glob: FailsWith(&[glob!(1, "std::os::unix", "std::os::unix::fs, std::os::unix::net, std::os::unix::process, std::os::unix::prelude")]) => super::os_unix_glob,
     /// Paths a macro metavariable starts or continues.
     metavariable_module: FailsWith(&[metavariable!(3, "std::$x", all_bans!())]) => super::metavariable_module,
     metavariable_now: FailsWith(&[metavariable!(3, "$t::now", "std::time::Instant::now, std::time::SystemTime::now")]) => super::metavariable_now,
@@ -174,8 +175,8 @@ crate::checks::planted::cases! {
     alias_in_another_file: FailsWith(&[uses!("lib.rs", 4, "std::time::Instant::now")]) => super::alias_in_another_file,
     std_reexported_from_the_root: FailsWith(&[uses!("a.rs", 2, "std::fs")]) => super::std_reexported_from_the_root,
     /// Paths a metavariable feeds into a `type` alias or a `use`.
-    metavariable_type_binding: FailsWith(&[metavariable!(3, "type A = $t", all_bans!())]) => super::metavariable_type_binding,
-    metavariable_use_binding: FailsWith(&[metavariable!(3, "use $p", all_bans!())]) => super::metavariable_use_binding,
+    metavariable_type_binding: FailsWith(&[metavariable!(5, "$t::now", "std::time::Instant::now, std::time::SystemTime::now")]) => super::metavariable_type_binding,
+    metavariable_use_binding: FailsWith(&[metavariable!(5, "$p::fs::read", "std::fs")]) => super::metavariable_use_binding,
     /// `include!` through an alias, and `core::include!`.
     include_alias: FailsWith(&[
         "crates/protocol/src/lib.rs:3: clauseo-protocol pulls in code with include!, which core-io \
@@ -251,4 +252,32 @@ crate::checks::planted::cases! {
     listed_exception: Passes => super::listed_exception,
     /// A local `fs` module and another crate's `time::Instant` are not std's.
     local_names_like_banned_ones: Passes => super::local_names_like_banned_ones,
+    /// The review's forms in `macro_rules!` bodies: a use group, a rename, two metavariables
+    /// and `Self`.
+    macro_rule_use_group: FailsWith(&[uses!("lib.rs", 1, "std::fs")]) => super::macro_rule_use_group,
+    macro_rule_std_alias: FailsWith(&[uses!("lib.rs", 1, "std::fs")]) => super::macro_rule_std_alias,
+    macro_rule_two_metavariables: FailsWith(&[metavariable!(1, "$a::$b::read", all_bans!())]) => super::macro_rule_two_metavariables,
+    macro_rule_self_now: FailsWith(&[metavariable!(9, "$t::now", "std::time::Instant::now, std::time::SystemTime::now")]) => super::macro_rule_self_now,
+    /// A `$vis` before an item keeps the rule body parseable.
+    macro_rule_visibility: FailsWith(&[uses!("lib.rs", 4, "std::fs"), uses!("lib.rs", 5, "std::fs")]) => super::macro_rule_visibility,
+    /// A repetition `$( ... )*` is read as its inner tokens.
+    macro_rule_repetition: FailsWith(&[uses!("lib.rs", 1, "std::fs")]) => super::macro_rule_repetition,
+    /// The paths inside `mod $m` are not built from `$m`.
+    macro_rule_module_named_by_a_metavariable: Passes => super::macro_rule_module_named_by_a_metavariable,
+    /// A glob of a path through std that a metavariable continues.
+    metavariable_glob: FailsWith(&[metavariable!(3, "std::$x", all_bans!())]) => super::metavariable_glob,
+    /// An associated type or an alias bound to a metavariable fails only when used.
+    macro_rule_newtype_deref: Passes => super::macro_rule_newtype_deref,
+    macro_rule_ops_two_types: Passes => super::macro_rule_ops_two_types,
+    metavariable_alias_unused: Passes => super::metavariable_alias_unused,
+    /// An associated type pinned in a bound, and a local type named like an associated one.
+    associated_type_in_a_bound: FailsWith(&[uses!("lib.rs", 6, "std::time::Instant::now")]) => super::associated_type_in_a_bound,
+    associated_name_like_a_local_type: Passes => super::associated_name_like_a_local_type,
+    /// `core::net` is no I/O, and `std::env!` is the compile-time macro.
+    core_net: Passes => super::core_net,
+    std_env_macro: Passes => super::std_env_macro,
+    /// A `cfg_attr` without `path` on a `mod` keeps the module in its crate root.
+    cfg_attr_on_a_mod: FailsWith(&[uses!("m.rs", 2, "std::fs")]) => super::cfg_attr_on_a_mod,
+    /// `std::os::<any>::prelude` re-exports the platform I/O traits.
+    os_prelude_glob: FailsWith(&[glob!(1, "std::os::unix::prelude", "std::os::unix::prelude")]) => super::os_prelude_glob,
 }
