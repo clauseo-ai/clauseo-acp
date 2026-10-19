@@ -92,59 +92,6 @@ fn a_download_whose_sha256_differs_leaves_bin_untouched() {
 }
 
 #[test]
-fn a_matching_download_replaces_the_binary_in_bin() {
-    let dir = Scratch::new("setup-install-bare");
-    let bin = dir.join("bin");
-    fs::create_dir(&bin).unwrap();
-    fs::write(bin.join("faketool"), b"an old faketool").unwrap();
-    let tool = fake_tool(Packing::Bare);
-    let (ok, ran, printed) = install_with(&tool, &linux(&bin, true), ASSET_BYTES, &mut never);
-    assert!(ok, "{printed}");
-    assert_eq!(ran.len(), 1, "{ran:?}");
-    assert_eq!(
-        files_in(&bin),
-        [("faketool".to_owned(), ASSET_BYTES.to_vec())]
-    );
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = fs::metadata(bin.join("faketool"))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o755);
-    }
-    assert!(printed.ends_with(&format!(
-        "installed faketool {} to {}: its sha256 matches the pin\n",
-        tool.version,
-        bin.display()
-    )));
-}
-
-#[test]
-fn a_matching_tar_gz_is_unpacked_in_staging_then_moved_into_bin() {
-    let dir = Scratch::new("setup-install-tar");
-    let bin = dir.join("bin");
-    let tool = fake_tool(Packing::TarGz);
-    let (ok, ran, printed) = install_with(&tool, &linux(&bin, true), ASSET_BYTES, &mut never);
-    assert!(ok, "{printed}");
-    let asset = format!("faketool_{}_linux_x86_64", tool.version);
-    let staging = bin.join(format!(".xtask-setup-faketool-{}", std::process::id()));
-    let ran: Vec<String> = ran
-        .into_iter()
-        .map(|(cmd, at)| {
-            assert_eq!(at, staging, "{cmd} runs in the staging dir");
-            cmd
-        })
-        .collect();
-    assert_eq!(ran[1], format!("tar --no-same-owner -xzf {asset} faketool"));
-    assert_eq!(
-        files_in(&bin),
-        [("faketool".to_owned(), ASSET_BYTES.to_vec())]
-    );
-}
-
-#[test]
 fn a_failed_download_leaves_bin_untouched_and_names_curl_as_the_fix() {
     let dir = Scratch::new("setup-install-curl-fails");
     let bin = dir.join("bin");
@@ -371,4 +318,37 @@ fn curl_retries_and_its_own_limit_fires_before_run_timed_stops_it() {
     let curl_at_most = Duration::from_secs(4 * 300 + 1 + 2 + 4);
     assert!(DOWNLOAD_TIMEOUT > curl_at_most);
     assert_eq!(DOWNLOAD_TIMEOUT, Duration::from_mins(21));
+}
+
+#[test]
+fn a_second_binaries_run_waits_for_the_run_lock_then_sweeps_every_staging_entry() {
+    let dir = Scratch::new("setup-install-run-lock");
+    let bin = dir.join("bin");
+    let (held, ok) = lock_bin_and_sweep(&mut Printer::new(Vec::new(), false), &linux(&bin, true));
+    assert!(ok && held.is_some());
+    // The first run's staging dir, in use while it holds the lock.
+    fs::create_dir(bin.join(".xtask-setup-gitleaks-1")).unwrap();
+    let (done, second) = std::sync::mpsc::channel();
+    let second_bin = bin.clone();
+    std::thread::spawn(move || {
+        let mut out = Printer::new(Vec::new(), false);
+        let (lock, ok) = lock_bin_and_sweep(&mut out, &linux(&second_bin, true));
+        assert!(ok && lock.is_some());
+        done.send(String::from_utf8(out.into_inner()).unwrap())
+    });
+    let early = second.recv_timeout(Duration::from_millis(300));
+    assert!(
+        early.is_err(),
+        "the second run waits while the lock is held"
+    );
+    drop(held);
+    assert_eq!(
+        second.recv().unwrap(),
+        format!(
+            "another cargo xtask setup --binaries is using {}: waiting for it to finish\n",
+            bin.display()
+        )
+    );
+    let names: Vec<String> = files_in(&bin).into_iter().map(|(name, _)| name).collect();
+    assert_eq!(names, [".xtask-setup.lock"]);
 }

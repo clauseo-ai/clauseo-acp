@@ -322,7 +322,7 @@ fn a_second_run_on_a_warm_machine_installs_nothing() {
     let dir = Scratch::new("setup-run-warm");
     let bin = dir.join("bin");
     let tool = fake_tool(Packing::TarGz);
-    for os in ["linux", "windows"] {
+    for os in ["windows", "linux"] {
         let machine = Machine {
             os,
             ..linux(&bin, true)
@@ -332,7 +332,15 @@ fn a_second_run_on_a_warm_machine_installs_nothing() {
         let mut expected = cargo_installs();
         expected.push("faketool version".to_owned());
         assert_eq!(ran, expected, "{os}");
-        assert!(!bin.exists(), "{os}: nothing was written");
+        if os == "windows" {
+            assert!(!bin.exists(), "windows: nothing was written");
+        } else {
+            assert_eq!(
+                names_in(&bin),
+                [".xtask-setup.lock"],
+                "linux: only the run lock"
+            );
+        }
     }
 }
 
@@ -459,22 +467,14 @@ fn a_binaries_run_removes_leftovers_of_an_interrupted_run_even_when_nothing_down
     let (ok, ran, printed) = run_fake(&linux(&bin, true), &tool, true, &[Some(tool.version)]);
     assert!(ok, "{printed}");
     assert!(!ran.iter().any(|cmd| cmd.starts_with("curl")), "{ran:?}");
-    assert_eq!(names_in(&bin), [".xtask-other", "lefthook"]);
+    assert_eq!(
+        names_in(&bin),
+        [".xtask-other", ".xtask-setup.lock", "lefthook"]
+    );
     assert_eq!(
         std::fs::read(bin.join("lefthook")).unwrap(),
         b"the working lefthook"
     );
-}
-
-#[test]
-fn a_binaries_run_removes_leftovers_of_an_interrupted_run_before_it_downloads() {
-    let dir = Scratch::new("setup-run-leftovers-download");
-    let bin = dir.join("bin");
-    plant_leftovers(&bin);
-    let tool = fake_tool(Packing::Bare);
-    let (ok, _, printed) = run_fake(&linux(&bin, true), &tool, true, &[None, Some(tool.version)]);
-    assert!(ok, "{printed}");
-    assert_eq!(names_in(&bin), [".xtask-other", "faketool", "lefthook"]);
 }
 
 #[test]

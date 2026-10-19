@@ -247,9 +247,14 @@ fn run_with<W: Write>(
     for tool in tools {
         all_ok &= install_tool(out, tool, root, runner);
     }
-    if install {
-        all_ok &= install::clear_staging_leftovers(out, machine);
-    }
+    // Held to the end of the run.
+    let _lock = if install {
+        let (lock, ok) = install::lock_bin_and_sweep(out, machine);
+        all_ok &= ok;
+        lock
+    } else {
+        None
+    };
     for binary in binaries {
         all_ok &= setup_binary(out, binary, machine, install, root, runner);
     }
