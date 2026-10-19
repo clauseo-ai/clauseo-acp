@@ -20,7 +20,7 @@ Shown as the sidebar dot (`ThreadSummary.status`) and in the thread header (`Hea
 
 | State | Type and variant | Data the screen gets |
 |---|---|---|
-| Idle, ready for a prompt | `ThreadStatus::Idle` | title, agent, mode, config options, commands, plan, usage |
+| Idle, ready for a prompt | `ThreadStatus::Idle` | title, agent, mode, config options, commands, plan, context usage (`ContextUsage`) |
 | Agent starting | `ThreadStatus::Starting` | as idle; the agent has no session yet |
 | Turn running | `ThreadStatus::Running` | as idle; also while prompts of the same thread wait in its queue |
 | Needs you: a permission or elicitation is pending | `ThreadStatus::NeedsYou` | the pending `ViewEntry::Permission` or `ViewEntry::Elicitation` |
@@ -36,15 +36,18 @@ Detach reasons the header can explain: `DetachReason::Exited`, `DetachReason::Cl
 ## 2. Transcript entries
 
 Entries sort by `order`. Text streams through `ViewPatchBody::AppendText`; everything else arrives as
-`ViewPatchBody::Upsert`.
+`ViewPatchBody::Upsert`. Opening a thread, or a lost cursor, sends `ViewPatchBody::Reset` with a
+`ViewSnapshot`: the header, about 200 recent entries, and `has_older` when older entries exist. Older
+entries page in on scroll through `HostQuery::PageEntries`, which returns `QueryResult::Entries`.
 
 | State | Type and variant | Data the screen gets |
 |---|---|---|
-| User message, sent | `ViewEntry::UserMessage` with `Delivery::Queue` | content blocks (text, attached files), turn |
-| User message, queued behind a running turn | `ViewEntry::UserMessage`, turn has `turn_queued` and no `turn_started` | content, `behind_turn`; edit, remove and send now in section 5 |
-| User message, edited while queued | `ViewEntry::UserMessage` after `queued_prompt_edited` | the new content; same turn, same place |
+| User message, sent | `ViewEntry::UserMessage` with `UserMessageStatus::Sent`, `Delivery::Queue` | content blocks (text, attached files), turn, delivery |
+| User message, queued behind a running turn | `UserMessageStatus::Queued` | content, turn; edit, remove and send now in section 5 |
+| User message, edited while queued | `UserMessageStatus::Queued` with `edited` | the new content; same turn, same place |
+| User message, removed from the queue or cancelled before it started | `UserMessageStatus::Removed` | the text stays, so it can be sent again |
 | User message, sent now | `Delivery::SendNow` | content; the running turn ends `StopReason::Cancelled` |
-| User message, steered | `Delivery::Steer` | content; then one steer outcome below |
+| User message, steered | `Delivery::Steer` | content; then the entry's `steer` holds one outcome below |
 | Steer taken into the running turn | `SteerOutcome::Injected` | the turn that answers it |
 | Steer moved to the next turn (the turn had just ended) | `SteerOutcome::Requeued` | the new turn, which starts next |
 | Steer sent as send now (no real steer for this agent) | `SteerOutcome::SentNow` | the new turn; the running one is cancelled |
@@ -85,14 +88,15 @@ Entries sort by `order`. Text streams through `ViewPatchBody::AppendText`; every
 | Notice, information | `ViewEntry::Notice` with `NoticeLevel::Info` | text |
 | Notice, warning | `NoticeLevel::Warning` | text |
 | Notice level from a newer Clauseo | `NoticeLevel::Unknown` | text |
-| Compaction started and completed | `ViewEntry::Marker` with `CompactionStatus::Started`, `CompactionStatus::Completed` | summary (inline or blob) when completed |
-| Undo marker | `ViewEntry::Marker` from `step_undone` | the step's turn, restored paths, kept paths |
-| Restore marker | `ViewEntry::Marker` from `version_restored` | the version restored from, scope |
+| Compaction started and completed | `ViewEntry::Marker` with `MarkerKind::Compaction`: `CompactionStatus::Started`, `CompactionStatus::Completed` | summary (inline or blob) when completed |
+| Undo marker | `ViewEntry::Marker` with `MarkerKind::StepUndone` | the step's turn, the new checkpoint, restored paths, kept paths |
+| Restore marker | `ViewEntry::Marker` with `MarkerKind::VersionRestored` | the version restored from, the new checkpoint, scope |
 
 ## 3. Step card
 
-One `ViewEntry::Step` per ended turn: stop reason, files changed, checkpoint present or not, whether
-undo is possible.
+One `ViewEntry::Step` per ended turn: stop reason, the failure code (`failure`) when it failed, files
+changed, skipped files, the after-turn checkpoint or none, `undo_possible`, `undone` once the step was
+undone, and token usage (`usage`: total, input, output, thought, cached) when the agent reported it.
 
 | State | Type and variant | Data the screen gets |
 |---|---|---|
@@ -102,7 +106,7 @@ undo is possible.
 | Agent refused | `StopReason::Refusal` | as above |
 | Cancelled (by the lawyer, send now, or a removed queued prompt) | `StopReason::Cancelled` | as above; a removed queued prompt has no files |
 | Stopped at the usage limit | `StopReason::AtLimit` | as above; the `ViewEntry::LimitStop` card in section 8 |
-| Failed | `StopReason::Failed` | the `turn_failed` code (section 9); its detail is never shown |
+| Failed | `StopReason::Failed` | `failure`: the error code (section 9); the event's detail is never shown |
 | Stop reason from a newer Clauseo | `StopReason::Unknown` | as failed, without a code |
 | File added | `ChangeKind::Added` | path, size, after content id |
 | File modified | `ChangeKind::Modified` | path, size, before and after content ids |
@@ -112,8 +116,9 @@ undo is possible.
 | File skipped: over the size cap | `SkippedFileReason::OverSizeCap` | path |
 | File skipped: cloud-only | `SkippedFileReason::CloudOnly` | path |
 | File skipped for a reason from a newer Clauseo | `SkippedFileReason::Unknown` | path |
-| Checkpoint missing, undo impossible | `turn_ended` without `checkpoint_after` | shown, never silent |
-| Undo disabled while a turn runs in the matter | `ErrorCode::MatterTurnRunning` | the running thread |
+| Checkpoint missing, undo impossible | no `checkpoint_after`, `undo_possible` false | shown, never silent |
+| Step already undone | `undone` true | the undo marker (section 2) |
+| Undo disabled while a turn runs in the matter | `undo_possible` false; the command fails with `ErrorCode::MatterTurnRunning` | the running thread |
 | Undo with a choice per file | `HostCommand::UndoStep` with `FileChoice::Undo`, `FileChoice::Keep` | the step's files |
 
 ## 4. Approvals
@@ -125,24 +130,28 @@ undo is possible.
 | Permission option: reject once | `PermissionKind::RejectOnce` | as above |
 | Permission option: always reject | `PermissionKind::RejectAlways` | as above |
 | Permission option of a kind from a newer Clauseo | `PermissionKind::Unknown` | the agent's label only |
-| Permission the agent is waiting on | `Deliverable::Live` | `ViewEntry::Permission`: options, the tool call it is for |
+| Permission pending | `ViewEntry::Permission` with `PermissionState::Pending` | options, the tool call it is for, deliverable |
+| Permission the agent is waiting on | `Deliverable::Live` | as above |
 | Permission that can no longer reach the agent | `Deliverable::NotResumable` | as above; answering is not possible |
 | Deliverability from a newer Clauseo | `Deliverable::Unknown` | as not resumable |
 | Tool call touches a location outside the matter | `ToolLocation::Outside` on the tool call | display text, flagged |
-| Permission answered | `PermissionChoice::Selected` | option id and kind, by whom (`Principal::LocalDesktop`) |
-| Permission cancelled | `PermissionChoice::Cancelled` | by whom |
+| Permission answered | `PermissionState::Resolved` with `PermissionChoice::Selected` | option id and kind, by whom (`Principal::LocalDesktop`) |
+| Permission cancelled | `PermissionState::Resolved` with `PermissionChoice::Cancelled` | by whom |
+| Permission expired | `PermissionState::Expired` | one reason below |
 | Permission expired: the agent exited | `ExpiryReason::AgentExited` | the request |
 | Permission expired: the turn ended | `ExpiryReason::TurnEnded` | the request |
 | Permission expired: the host restarted | `ExpiryReason::HostRestarted` | the request |
 | Expiry reason from a newer Clauseo | `ExpiryReason::Unknown` | the request |
 | Answer came too late or twice | `ErrorCode::PermissionNotPending` | the settled request |
 | Answer names an option not offered | `ErrorCode::PermissionUnknownOption` | the request |
+| Elicitation pending | `ViewEntry::Elicitation` with `ElicitationState::Pending` | the request below |
 | Elicitation form | `ElicitationRequest::Form` | message; schema with string, number, boolean and enum fields |
 | Elicitation link | `ElicitationRequest::Url` | message, URL |
+| Elicitation answered | `ElicitationState::Resolved` | outcome below, by whom |
 | Elicitation accepted | `ElicitationOutcome::Accepted` | by whom; the values are never logged |
 | Elicitation declined | `ElicitationOutcome::Declined` | by whom |
 | Elicitation cancelled | `ElicitationOutcome::Cancelled` | by whom |
-| Elicitation expired | `ExpiryReason::AgentExited`, `ExpiryReason::TurnEnded`, `ExpiryReason::HostRestarted`, `ExpiryReason::Unknown` | as for permissions |
+| Elicitation expired | `ElicitationState::Expired`: `ExpiryReason::AgentExited`, `ExpiryReason::TurnEnded`, `ExpiryReason::HostRestarted`, `ExpiryReason::Unknown` | as for permissions |
 | Elicitation answered too late | `ErrorCode::ElicitationNotPending` | the settled request |
 | Elicitation values do not match the schema | `ErrorCode::ElicitationInvalidValues` | the form, to correct |
 
@@ -163,7 +172,7 @@ undo is possible.
 | Queue full | `ErrorCode::ThreadQueueFull` | retryable: the prompt can be sent once a queued turn starts |
 | Edit, remove or send now refused: the turn already started | `ErrorCode::ThreadTurnNotQueued` | the turn's current state |
 | Close to the limit (at least 95% used, or the window's warning) | `LimitMeter`, `LimitWindow.warning` | used percent, window label, reset time; section 8 |
-| Context usage | header usage from `usage_updated` | context used, context size |
+| Context usage | `HeaderEntry.usage` (`ContextUsage`) | context used, context size, cost |
 | Cost line, pay as you go only (doc 30 §5.6) | `BillingKind::PayAsYouGo` with `Cost` | amount and currency, an estimate; hidden for `BillingKind::Plan` |
 
 ## 6. Versions
@@ -173,7 +182,7 @@ every thread in the matter.
 
 | State | Type and variant | Data the screen gets |
 |---|---|---|
-| Import of the folder | `CheckpointKind::Import` | time, files touched |
+| Import of the folder | `ViewEntry::Version` with `CheckpointKind::Import` | time (`ts`), files touched |
 | Before an agent's turn | `CheckpointKind::BeforeTurn` | thread and turn (an agent in a thread) |
 | After an agent's turn | `CheckpointKind::AfterTurn` | thread and turn, files touched |
 | Edits made outside Clauseo | `CheckpointKind::OutsideEdits` | files touched (the lawyer, outside Clauseo) |
@@ -192,7 +201,7 @@ every thread in the matter.
 
 | State | Type and variant | Data the screen gets |
 |---|---|---|
-| Scratch matter, created on first start | `MatterKind::Scratch` | name |
+| Scratch matter, created on first start | `ViewEntry::MatterHeader` with `MatterKind::Scratch` | name |
 | New folder | `MatterKind::Folder` from `MatterSource::NewFolder` | name, import summary |
 | Existing folder | `MatterKind::Folder` from `MatterSource::ExistingFolder` | name, import summary: files, bytes, cloud-only files |
 | Folder refused (drive root, home or system folder) | `ErrorCode::MatterFolderRefused` | choose another folder |

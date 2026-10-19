@@ -26,7 +26,7 @@ the same thing. Lawyer-facing words are marked (UI).
 | Queued prompt | A prompt sent while a turn runs in its thread; it waits as its own turn and can be edited, removed or sent now. | pending message, draft |
 | Send now | Cancel the running turn and send this prompt next. | interrupt, force send |
 | Steer | Add a prompt to the running turn where the agent can, else send it now. | inject, nudge |
-| Subscriber | Anything that receives view patches for a thread (a window now, a phone later). | listener |
+| Subscriber | Anything that receives view patches for a stream (a window now, a phone later). | listener |
 | Checkpoint | A commit in the matter's shadow repository, taken before and after each turn. | snapshot (taken for store snapshots) |
 | Snapshot | A stored fold of a thread's events, so reopening skips the full log. | checkpoint |
 | Versions (UI) | What lawyers see of checkpoints. | git, commits, history (in UI) |
