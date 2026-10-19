@@ -56,7 +56,8 @@ pub(crate) struct Agent {
     child: Child,
     stdin: Option<ChildStdin>,
     stdout: BufReader<ChildStdout>,
-    stderr: BufReader<ChildStderr>,
+    /// `None` once [`Agent::finish`] has handed it to its reader thread.
+    stderr: Option<BufReader<ChildStderr>>,
 }
 
 /// What an agent left behind when it exited.
@@ -90,7 +91,7 @@ impl Agent {
             .unwrap();
         let stdin = child.stdin.take();
         let stdout = BufReader::new(child.stdout.take().unwrap());
-        let stderr = BufReader::new(child.stderr.take().unwrap());
+        let stderr = Some(BufReader::new(child.stderr.take().unwrap()));
         Self {
             child,
             stdin,
@@ -126,7 +127,7 @@ impl Agent {
         let mut line = String::new();
         if self.stdout.read_line(&mut line).unwrap() == 0 {
             let mut stderr = String::new();
-            self.stderr.read_to_string(&mut stderr).unwrap();
+            self.stderr_reader().read_to_string(&mut stderr).unwrap();
             panic!("stdout closed; stderr:\n{stderr}");
         }
         assert!(line.ends_with('\n'), "line without \\n: {line}");
@@ -149,7 +150,7 @@ impl Agent {
     pub(crate) fn stderr_line(&mut self) -> String {
         let mut line = String::new();
         assert_ne!(
-            self.stderr.read_line(&mut line).unwrap(),
+            self.stderr_reader().read_line(&mut line).unwrap(),
             0,
             "stderr closed"
         );
@@ -157,13 +158,26 @@ impl Agent {
         line
     }
 
+    fn stderr_reader(&mut self) -> &mut BufReader<ChildStderr> {
+        self.stderr.as_mut().unwrap()
+    }
+
     /// Closes stdin, reads stdout and stderr to EOF, and waits for the exit.
+    ///
+    /// Stderr is read on its own thread while this one reads stdout. A Windows pipe holds only
+    /// 4 KiB, so reading one after the other would deadlock on an agent that writes more stderr
+    /// (exit-mid-turn writes 8,000 bytes) before it closes stdout.
     pub(crate) fn finish(mut self) -> Finished {
         self.close_stdin();
+        let mut reader = self.stderr.take().unwrap();
+        let stderr_thread = std::thread::spawn(move || {
+            let mut stderr = String::new();
+            reader.read_to_string(&mut stderr).unwrap();
+            stderr
+        });
         let mut stdout = String::new();
         self.stdout.read_to_string(&mut stdout).unwrap();
-        let mut stderr = String::new();
-        self.stderr.read_to_string(&mut stderr).unwrap();
+        let stderr = stderr_thread.join().unwrap();
         let status = self.child.wait().unwrap();
         Finished {
             status,
@@ -262,12 +276,12 @@ pub(crate) fn result(id: u64, result: Value) -> Value {
 }
 
 /// Kills a process the test started and read the PID of: `kill -9` on Unix, `taskkill /F` on
-/// Windows. Never by name.
+/// Windows. Never by name. Returns whether the kill command succeeded.
 #[expect(
     clippy::disallowed_methods,
     reason = "kills the grandchild PID this test read"
 )]
-pub(crate) fn kill_pid(pid: u32) {
+pub(crate) fn kill_pid(pid: u32) -> bool {
     let pid = pid.to_string();
     let mut command = if cfg!(windows) {
         let mut command = Command::new("taskkill");
@@ -280,9 +294,35 @@ pub(crate) fn kill_pid(pid: u32) {
     };
     let status = command
         .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
-        .unwrap()
-        .wait()
-        .unwrap();
-    assert!(status.success(), "could not kill {pid}");
+        .and_then(|mut child| child.wait());
+    status.is_ok_and(|status| status.success())
+}
+
+/// Kills a PID the test read (the grandchild) when dropped, so a failed assert cannot leave a
+/// `--hold` process running.
+pub(crate) struct PidGuard {
+    pid: Option<u32>,
+}
+
+impl PidGuard {
+    pub(crate) fn new(pid: u32) -> Self {
+        Self { pid: Some(pid) }
+    }
+
+    /// Kills the process now and asserts the kill succeeded.
+    pub(crate) fn kill(mut self) {
+        let pid = self.pid.take().unwrap();
+        assert!(kill_pid(pid), "could not kill {pid}");
+    }
+}
+
+impl Drop for PidGuard {
+    fn drop(&mut self) {
+        if let Some(pid) = self.pid.take() {
+            // Already unwinding from a failed assert: never panic here.
+            let _killed = kill_pid(pid);
+        }
+    }
 }
