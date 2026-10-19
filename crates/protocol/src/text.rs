@@ -130,18 +130,18 @@ impl TextOrBlob {
 }
 
 /// A blob: its BLAKE3 hash, its size and the first bytes of its text.
+///
+/// Its fields are private so every value passed [`BlobRef::new`]'s checks; `Deserialize` runs
+/// the same checks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "BlobRefWire")]
 // specta: `try_from` only adds checks; the TypeScript shape is the struct's own fields.
 #[cfg_attr(feature = "specta", derive(specta::Type), specta(skip_attr = "serde"))]
 pub struct BlobRef {
-    /// The blob's BLAKE3 digest.
-    pub hash: BlobHash,
-    /// The blob's size in bytes, at most [`MAX_SAFE`](crate::MAX_SAFE).
+    hash: BlobHash,
     #[cfg_attr(feature = "specta", specta(type = u32))]
-    pub size_bytes: u64,
-    /// The start of the text, at most [`PREVIEW_BYTES`] (see [`preview`]).
-    pub preview: String,
+    size_bytes: u64,
+    preview: String,
 }
 
 impl BlobRef {
@@ -167,6 +167,21 @@ impl BlobRef {
             size_bytes,
             preview,
         })
+    }
+
+    /// The blob's BLAKE3 digest.
+    pub const fn hash(&self) -> BlobHash {
+        self.hash
+    }
+
+    /// The blob's size in bytes, at most [`MAX_SAFE`](crate::MAX_SAFE).
+    pub const fn size_bytes(&self) -> u64 {
+        self.size_bytes
+    }
+
+    /// The start of the text, at most [`PREVIEW_BYTES`] (see [`preview`]).
+    pub fn preview(&self) -> &str {
+        &self.preview
     }
 }
 

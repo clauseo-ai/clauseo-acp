@@ -23,6 +23,58 @@ pub(crate) fn parse_uuid_text(text: &str, kind: &'static str) -> Result<Uuid, Er
     Uuid::try_parse(text).ok().ok_or(Error::UuidText { kind })
 }
 
+/// A uuid read strictly: in a human-readable format only the 36-character hyphenated text
+/// (uuid's own `Deserialize` also takes the simple, braced and urn forms), otherwise exactly 16
+/// bytes. The ids decode through it with `try_from`, which measured faster in `MessagePack`
+/// than a hand-written `Deserialize` (see the R5 benchmark notes).
+pub(crate) struct StrictUuid(Uuid);
+
+impl<'de> Deserialize<'de> for StrictUuid {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let id = if deserializer.is_human_readable() {
+            deserializer.deserialize_str(UuidVisitor { text: true })?
+        } else {
+            deserializer.deserialize_bytes(UuidVisitor { text: false })?
+        };
+        Ok(Self(id))
+    }
+}
+
+struct UuidVisitor {
+    /// Text in a human-readable format, bytes otherwise; each refuses the other, because a
+    /// format may hand either to any visitor (rmp-serde's `deserialize_bytes` reads a str too).
+    text: bool,
+}
+
+impl de::Visitor<'_> for UuidVisitor {
+    type Value = Uuid;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(if self.text {
+            "a hyphenated UUID"
+        } else {
+            "16 bytes"
+        })
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<Uuid, E> {
+        if !self.text {
+            return Err(E::invalid_type(de::Unexpected::Str(v), &self));
+        }
+        parse_uuid_text(v, "Uuid").map_err(E::custom)
+    }
+
+    fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<Uuid, E> {
+        if self.text {
+            return Err(E::invalid_type(de::Unexpected::Bytes(v), &self));
+        }
+        match <[u8; 16]>::try_from(v) {
+            Ok(bytes) => Ok(Uuid::from_bytes(bytes)),
+            Err(_) => Err(E::invalid_length(v.len(), &self)),
+        }
+    }
+}
+
 fn check_v7(id: Uuid, kind: &'static str) -> Result<Uuid, Error> {
     if id.get_version_num() == 7 && id.get_variant() == uuid::Variant::RFC4122 {
         Ok(id)
@@ -47,7 +99,7 @@ macro_rules! uuid_id {
     ($(#[$meta:meta])* $name:ident, $check:path, $rule:literal) => {
         $(#[$meta])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
-        #[serde(try_from = "Uuid")]
+        #[serde(try_from = "StrictUuid")]
         #[cfg_attr(feature = "specta", derive(specta::Type), specta(type = String))]
         pub struct $name(Uuid);
 
@@ -88,12 +140,12 @@ macro_rules! uuid_id {
             }
         }
 
-        /// Runs the same check as `new`, so `Deserialize` (through `try_from`) and `new` agree.
-        impl TryFrom<Uuid> for $name {
+        /// `Deserialize` goes through this: the strict uuid form, then `new`'s rule.
+        impl TryFrom<StrictUuid> for $name {
             type Error = Error;
 
-            fn try_from(id: Uuid) -> Result<Self, Error> {
-                Self::new(id)
+            fn try_from(id: StrictUuid) -> Result<Self, Error> {
+                Self::new(id.0)
             }
         }
     };
