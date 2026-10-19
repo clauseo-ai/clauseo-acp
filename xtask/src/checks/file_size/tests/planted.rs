@@ -79,15 +79,13 @@ crate::checks::planted::cases! {
         "0 source files inspected in the repo's .rs, .ts, .tsx, .mts and .cts files\n    \
          fix: the check stopped before it could look; fix the failure above first",
     ]) => super::not_a_git_repo,
-    /// A file that is not UTF-8 fails and is not counted, so a repo of only that file inspected
-    /// nothing.
+    /// A file that is not UTF-8 fails and is not counted; with no other file read, the check
+    /// stopped on it.
     only_file_unreadable: FailsWith(&[
         "bad.rs:1: could not read `bad.rs`: stream did not contain valid UTF-8\n    \
          fix: make the file readable as UTF-8 text",
         "0 source files inspected in the repo's .rs, .ts, .tsx, .mts and .cts files\n    \
-         fix: file-size looks for source files in the repo's .rs, .ts, .tsx, .mts and .cts files; \
-         restore them, or, if they moved, update the consts xtask/src/checks/file_size.rs builds \
-         that place from",
+         fix: the check stopped before it could look; fix the failure above first",
     ]) => super::only_file_unreadable,
     /// A file of 650 lines listed in the exception file, with a reason, passes.
     listed_600_plus_file_passes: Passes => super::listed_600_plus_file_passes,

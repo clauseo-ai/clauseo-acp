@@ -8,15 +8,21 @@ crate::checks::planted::cases! {
         "budgets.toml:4: budget window_visible: limit must be zero or more\n    \
          fix: set limit to zero or more, in the row's unit",
     ]) => super::negative_limit,
-    /// A file that is not TOML fails.
+    /// A file that is not TOML fails, and the check stopped on it: no row was looked at.
     not_toml: FailsWith(&[
         "budgets.toml:1: budgets.toml is not valid: unclosed array table, expected `]`\n    \
          fix: fix the line above; each row is a [[budget]] table of the ten keys listed at the top \
          of budgets.toml",
         "0 budget rows inspected in budgets.toml at the repo root\n    \
-         fix: budgets looks for budget rows in budgets.toml at the repo root; restore them, or, if \
-         they moved, update the consts xtask/src/checks/budgets.rs builds that place from",
+         fix: the check stopped before it could look; fix the failure above first",
     ]) => super::not_toml,
+    /// A file that is not UTF-8 is there but cannot be read: the check stopped on it.
+    not_utf8: FailsWith(&[
+        "budgets.toml:1: cannot read budgets.toml: stream did not contain valid UTF-8\n    \
+         fix: restore budgets.toml at the repo root",
+        "0 budget rows inspected in budgets.toml at the repo root\n    \
+         fix: the check stopped before it could look; fix the failure above first",
+    ]) => super::not_utf8,
     /// A row with every required key passes.
     valid_row: Passes => super::valid_row,
 }

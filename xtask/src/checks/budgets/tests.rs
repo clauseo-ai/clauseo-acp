@@ -15,7 +15,7 @@ fn row(limit: &str) -> String {
 }
 
 /// Runs the check on a scratch repo whose `budgets.toml` is `text`.
-fn run_on(case: &str, text: &str) -> Inspection {
+fn run_on(case: &str, text: impl AsRef<[u8]>) -> Inspection {
     let dir = Scratch::new(&format!("planted-budgets-{case}"));
     std::fs::write(dir.join(budgets::FILE), text).expect("write budgets.toml");
     run(&Context {
@@ -26,22 +26,26 @@ fn run_on(case: &str, text: &str) -> Inspection {
 }
 
 pub(super) fn negative_limit() -> Inspection {
-    run_on("negative-limit", &row("limit = -1.0"))
+    run_on("negative-limit", row("limit = -1.0"))
 }
 
 pub(super) fn not_toml() -> Inspection {
     run_on("not-toml", "[[budget]\nid = \n")
 }
 
+pub(super) fn not_utf8() -> Inspection {
+    run_on("not-utf8", b"[[budget]]\nid = \"\xff\"\n")
+}
+
 pub(super) fn valid_row() -> Inspection {
-    run_on("valid-row", &row("limit = 250.0"))
+    run_on("valid-row", row("limit = 250.0"))
 }
 
 #[test]
 fn rows_with_problems_still_count() {
     let found = run_on(
         "count",
-        &format!("{}\n{}", row("limit = -1.0"), row("limit = 1.0")),
+        format!("{}\n{}", row("limit = -1.0"), row("limit = 1.0")),
     );
     assert_eq!(found.inspected, 2);
     assert_eq!(found.violations.len(), 2);

@@ -61,6 +61,7 @@ fn run(ctx: &Context) -> Inspection {
     let exempt: BTreeSet<&str> = exceptions.iter().map(|entry| entry.path.as_str()).collect();
     let mut sizes = Vec::new();
     let mut read = 0;
+    let mut unreadable = 0;
     for file in &sources {
         match checks::read_repo_file(&ctx.root, file) {
             Ok(Some(text)) => {
@@ -73,16 +74,22 @@ fn run(ctx: &Context) -> Inspection {
                 }
             }
             Ok(None) => {}
-            Err(violation) => violations.push(violation),
+            Err(violation) => {
+                unreadable += 1;
+                violations.push(violation);
+            }
         }
     }
     violations.extend(stale_exceptions(&exceptions, &sources, &sizes));
+    // Source files that are there but could not be read, and none that could: the check found
+    // its input and stopped on it, which the read failures above say.
+    let stopped = read == 0 && unreadable > 0;
     Inspection {
         inspected: read,
         violations,
         failures: Vec::new(),
         notes: notes(&ctx.root, &sizes),
-        stopped: false,
+        stopped,
     }
 }
 

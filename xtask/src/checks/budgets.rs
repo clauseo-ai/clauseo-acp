@@ -19,9 +19,14 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
     planted: tests::planted::PLANTED,
 };
 
+/// A file that is there but cannot be read or parsed stops the check: no row was looked at.
 fn run(ctx: &Context) -> Inspection {
-    let (rows, violations) = budgets::inspect(&ctx.root);
-    Inspection::new(rows, violations)
+    let read = budgets::inspect(&ctx.root);
+    if read.unreadable {
+        Inspection::stopped_on(read.violations)
+    } else {
+        Inspection::new(read.rows, read.violations)
+    }
 }
 
 #[cfg(test)]
