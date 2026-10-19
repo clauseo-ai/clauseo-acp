@@ -10,18 +10,18 @@ fn error_for(command: &str) -> Option<String> {
     parse(&argv, false).err()
 }
 
-/// The commands `commands_in` finds in `text`, as their words.
+/// The commands `commands_in` finds in `text`, as their words joined by spaces.
 fn commands_of(text: &str) -> Vec<String> {
     commands_in(text)
         .into_iter()
-        .map(|command| command.text)
+        .map(|found| found.expect("it splits").words.join(" "))
         .collect()
 }
 
 /// `text` as a command with no placeholder after it.
 fn command(text: &str) -> Command {
     Command {
-        text: text.to_owned(),
+        words: text.split_whitespace().map(str::to_owned).collect(),
         placeholder: false,
     }
 }
@@ -184,10 +184,12 @@ fn a_placeholder_for_the_subcommand_gives_no_command_and_a_later_one_cuts_the_wo
     assert_eq!(commands_of("cargo xtask ..."), Vec::<String>::new());
     assert_eq!(
         commands_in("cargo xtask buildtime --runs <n> --json"),
-        [Command {
-            text: "cargo xtask buildtime --runs".to_owned(),
+        [Ok(Command {
+            words: ["cargo", "xtask", "buildtime", "--runs"]
+                .map(str::to_owned)
+                .to_vec(),
             placeholder: true,
-        }]
+        })]
     );
 }
 
@@ -251,4 +253,52 @@ fn a_toolchain_after_cargo_is_skipped() {
         ["cargo xtask check"]
     );
     assert_eq!(commands_of("cargo + xtask check"), Vec::<String>::new());
+}
+
+#[test]
+fn words_are_split_as_a_shell_splits_them() {
+    assert_eq!(commands_of("cargo xtask \"check\""), ["cargo xtask check"]);
+    assert_eq!(
+        commands_of("FOO=\"a b\" cargo xtask frobnicate"),
+        ["cargo xtask frobnicate"]
+    );
+    assert_eq!(
+        commands_of("sudo cargo xtask frobnicate"),
+        ["cargo xtask frobnicate"]
+    );
+    assert_eq!(
+        commands_of("echo 'a && b; c | d' && cargo xtask check"),
+        ["cargo xtask check"]
+    );
+    assert_eq!(
+        commands_of("cargo xtask check # it's fine; really"),
+        ["cargo xtask check"]
+    );
+}
+
+#[test]
+fn the_operators_are_read_outside_quotes_escapes_and_comments() {
+    assert_eq!(
+        parts("a && b || c; d | e"),
+        ["a ", " b ", " c", " d ", " e"]
+    );
+    assert_eq!(parts("a 2>&1 &"), ["a 2>&1 &"]);
+    assert_eq!(
+        parts("echo \"x;y\" 'p|q' a\\;b"),
+        ["echo \"x;y\" 'p|q' a\\;b"]
+    );
+    assert_eq!(parts("a # b; c"), ["a # b; c"]);
+    assert_eq!(parts("a#b; c"), ["a#b", " c"]);
+}
+
+#[test]
+fn a_part_with_an_open_quote_fails_only_when_it_names_the_tool() {
+    assert_eq!(
+        commands_in("cargo xtask check --x \"open"),
+        [Err("cargo xtask check --x \"open".to_owned())]
+    );
+    assert_eq!(commands_in("echo \"open"), Vec::<Found>::new());
+    let found = unsplit("a.md", 2, "cargo xtask \"check");
+    assert_eq!(found.line, 2);
+    assert_eq!(found.fix, UNSPLIT_FIX);
 }

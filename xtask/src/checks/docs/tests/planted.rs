@@ -306,6 +306,24 @@ crate::checks::planted::cases! {
     time_and_env_prefix_fails: FailsWith(&[
         bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
     ]) => super::cases::time_and_env_prefix_fails,
+    /// A `sudo` before the command is skipped, and the command is checked.
+    sudo_command_fails: FailsWith(&[
+        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]) => super::cases::sudo_command_fails,
+    /// A quoted assignment with a space before the command is one word, and is skipped.
+    quoted_assignment_command_fails: FailsWith(&[
+        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]) => super::cases::quoted_assignment_command_fails,
+    /// Quotes around a word are read as a shell reads them: `cargo xtask "check"` parses.
+    quoted_subcommand_passes: Passes => super::cases::quoted_subcommand_passes,
+    /// A `text` block holds output, so a failing command shown in it is not read.
+    text_block_output_passes: Passes => super::cases::text_block_output_passes,
+    /// A command line with a quote left open does not split into words, and fails.
+    open_quote_command_fails: FailsWith(&[
+        "GUIDE.md:2: the xtask command line `cargo xtask check --name \"open` does not split into \
+         words: a quote or escape is left open\n    \
+         fix: close the quote or escape that is left open, or remove the command",
+    ]) => super::cases::open_quote_command_fails,
     /// A repo without `AGENTS.md` fails at line 1, the whole-file line.
     missing_agents: FailsWith(&[
         "AGENTS.md:1: AGENTS.md does not exist\n    \

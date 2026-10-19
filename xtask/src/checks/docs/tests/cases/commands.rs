@@ -190,3 +190,52 @@ pub(crate) fn unknown_subcommand_before_a_placeholder_fails() -> Inspection {
 pub(crate) fn toolchain_command_fails() -> Inspection {
     guide("toolchain", "Run `cargo +nightly xtask frobnicate`.\n")
 }
+
+pub(crate) fn sudo_command_fails() -> Inspection {
+    docs(
+        "sudo-command",
+        vec![(
+            "GUIDE.md",
+            "Run `sudo cargo xtask frobnicate`.\n".to_owned(),
+        )],
+    )
+}
+
+pub(crate) fn quoted_assignment_command_fails() -> Inspection {
+    docs(
+        "quoted-assignment",
+        vec![(
+            "GUIDE.md",
+            "Run `FOO=\"a b\" cargo xtask frobnicate`.\n".to_owned(),
+        )],
+    )
+}
+
+pub(crate) fn quoted_subcommand_passes() -> Inspection {
+    docs(
+        "quoted-subcommand",
+        vec![("GUIDE.md", "Run `cargo xtask \"check\"`.\n".to_owned())],
+    )
+}
+
+/// A `text` block that shows a failing command and its error, as output.
+pub(crate) fn text_block_output_passes() -> Inspection {
+    docs(
+        "text-block",
+        vec![(
+            "GUIDE.md",
+            "```text\n$ cargo xtask frobnicate\nerror: unrecognized subcommand 'frobnicate'\n```\n"
+                .to_owned(),
+        )],
+    )
+}
+
+pub(crate) fn open_quote_command_fails() -> Inspection {
+    docs(
+        "open-quote",
+        vec![(
+            "GUIDE.md",
+            "```sh\ncargo xtask check --name \"open\n```\n".to_owned(),
+        )],
+    )
+}

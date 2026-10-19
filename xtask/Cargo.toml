@@ -19,6 +19,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 # `setup --binaries` checks each downloaded release asset against its pinned sha256.
 sha2 = "0.10.9"
+# The docs check splits the `cargo xtask` commands in the docs into words as a shell does.
+shlex = "2.0.1"
 # The core-io check parses the Rust sources of the crates that must not do I/O.
 syn = { version = "3.0.9", features = ["full", "visit"] }
 toml = "1"

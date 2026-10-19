@@ -1,12 +1,13 @@
 //! Reads the Markdown the docs check needs with `pulldown-cmark`: inline code spans, links (inline
 //! links and images, reference definitions, and the `href` and `src` of raw HTML `<a>` and
-//! `<img>` tags) and the lines of code blocks. The body of an HTML comment is read as Markdown
-//! too: agents read the raw files, so a path or command in a comment is read like any other.
+//! `<img>` tags) and the lines of code blocks other than `text` blocks. The body of an HTML
+//! comment is read as Markdown too: agents read the raw files, so a path or command in a comment
+//! is read like any other.
 
 mod html;
 
 use crate::checks;
-use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
 
 /// What `scan` found in one Markdown file.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -15,7 +16,8 @@ pub(super) struct Scan {
     pub spans: Vec<Span>,
     /// Inline links and images, HTML link attributes and reference definitions.
     pub links: Vec<Link>,
-    /// The lines of fenced and indented code blocks, in file order, fence lines left out.
+    /// The lines of fenced and indented code blocks, in file order, fence lines left out. A
+    /// fenced block whose info string starts with `text` holds output, not code, and is left out.
     pub code: Vec<Line>,
 }
 
@@ -136,7 +138,9 @@ fn read(text: &str, line_of: &dyn Fn(usize) -> u32, scan: &mut Scan) {
                 line: line_of(range.start),
                 target: dest_url.to_string(),
             }),
-            Event::Start(Tag::CodeBlock(_)) => code = Some(Pieces::default()),
+            Event::Start(Tag::CodeBlock(kind)) => {
+                code = (!is_output(&kind)).then(Pieces::default);
+            }
             Event::End(TagEnd::CodeBlock) => {
                 if let Some(block) = code.take() {
                     block.code_lines(line_of, &mut scan.code);
@@ -165,6 +169,17 @@ fn read(text: &str, line_of: &dyn Fn(usize) -> u32, scan: &mut Scan) {
     }
     if let Some(text) = after {
         mark_planned(&text, scan);
+    }
+}
+
+/// True for a fenced block whose info string's first word is `text`, in any case: output.
+fn is_output(kind: &CodeBlockKind<'_>) -> bool {
+    match kind {
+        CodeBlockKind::Fenced(info) => info
+            .split_whitespace()
+            .next()
+            .is_some_and(|word| word.eq_ignore_ascii_case("text")),
+        CodeBlockKind::Indented => false,
     }
 }
 
