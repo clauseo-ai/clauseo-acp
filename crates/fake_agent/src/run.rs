@@ -262,7 +262,14 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
         match self.input.read_line(&mut line) {
             Ok(0) => Err(Stop::StdinClosed),
             Ok(_) => {
-                let line = line.strip_suffix('\n').unwrap_or(&line);
+                // `read_line` stops at EOF too: text without `\n` is a line the client never
+                // finished before closing stdin.
+                let Some(line) = line.strip_suffix('\n') else {
+                    return Err(Stop::Fail(
+                        at.clone(),
+                        "client line has no newline before stdin closed".to_owned(),
+                    ));
+                };
                 let line = line.strip_suffix('\r').unwrap_or(line);
                 classify(line).map_err(|m| Stop::Fail(at.clone(), m))
             }

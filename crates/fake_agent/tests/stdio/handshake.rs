@@ -172,3 +172,22 @@ fn message_after_the_last_step_is_a_mismatch() {
     let dir = Scratch::new("idle_exits_0_on_eof");
     Agent::start("idle", dir.path()).expect_exit(0);
 }
+
+#[test]
+fn last_line_without_newline_is_a_mismatch() {
+    let line = request(0, "initialize", json!({"protocolVersion": 1})).to_string();
+    for scenario in ["idle", "prompt-stream"] {
+        let dir = Scratch::new(&format!("last_line_without_newline_{scenario}"));
+        let mut agent = Agent::start(scenario, dir.path());
+        agent.send_unterminated(&line);
+        let at = if scenario == "idle" {
+            "idle.jsonl:1"
+        } else {
+            "handshake.jsonl:1"
+        };
+        assert_eq!(
+            agent.expect_exit(3).stderr,
+            format!("fake_agent: {at}: client line has no newline before stdin closed\n")
+        );
+    }
+}
