@@ -1,0 +1,35 @@
+{"scenario":"tool-calls","description":"Ten tool kinds, each with name and locations: pending, in_progress, completed and one failed; one update replaces content wholesale","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-read-1","title":"Read brief.txt","name":"Read","kind":"read","status":"pending","locations":[{"path":"{{cwd}}/brief.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-read-1","status":"in_progress"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-read-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Read 42 lines."}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-edit-1","title":"Edit brief.txt","name":"Edit","kind":"edit","status":"pending","locations":[{"path":"{{cwd}}/brief.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-edit-1","status":"in_progress"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-edit-1","status":"completed","content":[{"type":"diff","path":"{{cwd}}/brief.txt","oldText":"Clause 4 draft\n","newText":"Clause 4 final\n"}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-delete-1","title":"Delete old.txt","name":"Delete","kind":"delete","status":"pending","locations":[{"path":"{{cwd}}/old.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-delete-1","status":"in_progress"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-delete-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Deleted old.txt"}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-move-1","title":"Move notes/b.txt to archive/b.txt","name":"Move","kind":"move","status":"pending","locations":[{"path":"{{cwd}}/notes/b.txt"},{"path":"{{cwd}}/archive/b.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-move-1","status":"in_progress"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-move-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Moved notes/b.txt to archive/b.txt"}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-search-1","title":"Search for \"indemnity\"","name":"Grep","kind":"search","status":"pending","locations":[{"path":"{{cwd}}/notes"}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-search-1","status":"in_progress"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-search-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"3 matches"}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-execute-1","title":"Run the checks","name":"Bash","kind":"execute","status":"pending","locations":[{"path":"{{cwd}}"}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-execute-1","status":"in_progress","content":[{"type":"content","content":{"type":"text","text":"Running the checks"}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-execute-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"4 passed"}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-think-1","title":"Weigh the cap against the fees","name":"Think","kind":"think","status":"pending","locations":[{"path":"{{cwd}}/brief.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-think-1","status":"in_progress"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-think-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"The cap is below the fees."}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-switch-1","title":"Switch to plan mode","name":"SwitchMode","kind":"switch_mode","status":"pending","locations":[{"path":"{{cwd}}"}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-switch-1","status":"in_progress"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-switch-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Switched to plan mode"}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-fetch-1","title":"Fetch the terms page","name":"WebFetch","kind":"fetch","status":"pending","locations":[{"path":"{{cwd}}/terms.html"}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-fetch-1","status":"in_progress"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-fetch-1","status":"failed","content":[{"type":"content","content":{"type":"text","text":"Timed out after 30 s"}}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-other-1","title":"Ask the document service","name":"Mcp","kind":"other","status":"pending","locations":[{"path":"{{cwd}}/brief.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-other-1","status":"in_progress"}}}
+{"update":{"update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-other-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Service answered"}}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Ran all ten tool calls."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

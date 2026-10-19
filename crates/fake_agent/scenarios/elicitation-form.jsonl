@@ -1,0 +1,7 @@
+{"scenario":"elicitation-form","description":"Mid-turn elicitation/create in form mode with a requested schema; the client accepts with content; end_turn","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Before I answer, I need one fact. "}}}}
+{"request":{"id":"elicit-1","method":"elicitation/create","params":{"mode":"form","sessionId":"sess-1","message":"Which party is liable for the cap?","requestedSchema":{"type":"object","properties":{"party":{"type":"string","title":"Liable party"}},"required":["party"]}}}}
+{"expect_response":{"id":"elicit-1","result":{"action":"accept","content":{"party":"Tenant"}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

@@ -26,15 +26,38 @@ macro_rules! bundled {
 
 bundled! {
     scenarios: [
+        "auth-required",
+        "cancel-late-updates",
+        "cancel-unanswered",
+        "elicitation-form",
+        "elicitation-url",
         "exit-mid-turn",
         "files-multi-turn",
+        "files-one-turn",
         "grandchild",
         "idle",
         "ignore-stdin-close",
         "initialize-caps",
+        "limit-codex-error",
+        "limit-rejected",
+        "limit-warning",
+        "load-replay",
         "malformed-line",
+        "notice-compaction",
         "permission-cancelled",
+        "permission-kinds",
+        "plan",
         "prompt-stream",
+        "queue-two-prompts",
+        "send-now",
+        "session-failure",
+        "session-state",
+        "steer-fallback",
+        "steer-injected",
+        "steer-prompt-required",
+        "tool-calls",
+        "unknown-update",
+        "usage",
     ],
     common: ["handshake"],
 }
@@ -100,6 +123,7 @@ fn bin_path_from(var: Option<OsString>, exe: &Path, suffix: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scenario::{Reply, Scenario, StepKind};
 
     fn stems(folder: &Path) -> Vec<String> {
         let mut stems: Vec<String> = std::fs::read_dir(folder)
@@ -132,6 +156,34 @@ mod tests {
                 std::fs::read_to_string(scenario_path(name)).unwrap()
             );
         }
+    }
+
+    #[test]
+    fn auth_required_code_matches_sdk() {
+        let expected = i64::from(i32::from(agent_client_protocol::ErrorCode::AuthRequired));
+        let scenario = Scenario::parse("auth-required", text("auth-required").unwrap()).unwrap();
+        let session_new: Vec<&str> = scenario
+            .steps
+            .iter()
+            .filter_map(|step| match &step.kind {
+                StepKind::Expect(expect) if expect.method == "session/new" => {
+                    expect.label.as_deref()
+                }
+                _ => None,
+            })
+            .collect();
+        let codes: Vec<i64> = scenario
+            .steps
+            .iter()
+            .filter_map(|step| match &step.kind {
+                StepKind::Respond {
+                    to,
+                    reply: Reply::Error(error),
+                } if session_new.contains(&to.as_str()) => error["code"].as_i64(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(codes, [expected], "the auth-required error to session/new");
     }
 
     #[test]

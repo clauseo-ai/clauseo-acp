@@ -1,0 +1,8 @@
+{"scenario":"plan","description":"Three full plan updates in one turn, with the entry statuses changing each time","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"plan","entries":[{"content":"Read the indemnity clause","priority":"high","status":"in_progress"},{"content":"Check the liability cap","priority":"high","status":"pending"},{"content":"Summarise for the client","priority":"medium","status":"pending"}]}}}
+{"update":{"update":{"sessionUpdate":"plan","entries":[{"content":"Read the indemnity clause","priority":"high","status":"completed"},{"content":"Check the liability cap","priority":"high","status":"in_progress"},{"content":"Summarise for the client","priority":"medium","status":"pending"}]}}}
+{"update":{"update":{"sessionUpdate":"plan","entries":[{"content":"Read the indemnity clause","priority":"high","status":"completed"},{"content":"Check the liability cap","priority":"high","status":"completed"},{"content":"Summarise for the client","priority":"medium","status":"completed"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The plan is done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

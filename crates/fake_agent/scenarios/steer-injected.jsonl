@@ -1,0 +1,12 @@
+{"scenario":"steer-injected","description":"claude-agent-acp steering: a _session/steering request during the turn is answered injected; the turn then ends normally","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"_meta":{"claudeCode":{"promptQueueing":true}}},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"},"_meta":{"steering":{"supported":true}}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","mcpServers":[]}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause "}}}}
+{"expect":{"method":"_session/steering","as":"steer","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Focus on clause 4"}],"_meta":{"steering":{"idleBehavior":"promptRequired"}}}}}
+{"respond":{"to":"steer","result":{"outcome":"injected"},"raw":true}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"caps liability "}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"at the fees paid."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

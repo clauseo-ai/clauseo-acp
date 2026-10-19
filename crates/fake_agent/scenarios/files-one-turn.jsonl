@@ -1,0 +1,11 @@
+{"scenario":"files-one-turn","description":"One turn that creates notes/a.txt, edits brief.txt and deletes old.txt, each beside a tool_call naming its file. The test seeds brief.txt with 'Clause 4 draft' and old.txt first","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"write_file":{"path":"notes/a.txt","content":"Alpha\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-create-a","title":"Write notes/a.txt","name":"Write","kind":"edit","status":"completed","content":[{"type":"diff","path":"{{cwd}}/notes/a.txt","newText":"Alpha\n"}],"locations":[{"path":"{{cwd}}/notes/a.txt"}]}}}
+{"write_file":{"path":"brief.txt","content":"Clause 4 final\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-edit-brief","title":"Edit brief.txt","name":"Edit","kind":"edit","status":"completed","content":[{"type":"diff","path":"{{cwd}}/brief.txt","oldText":"Clause 4 draft\n","newText":"Clause 4 final\n"}],"locations":[{"path":"{{cwd}}/brief.txt"}]}}}
+{"delete_file":{"path":"old.txt"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-delete-old","title":"Delete old.txt","name":"Delete","kind":"delete","status":"completed","content":[{"type":"content","content":{"type":"text","text":"Deleted old.txt"}}],"locations":[{"path":"{{cwd}}/old.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Created one note, edited the brief and deleted the old file."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

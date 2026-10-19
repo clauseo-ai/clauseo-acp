@@ -28,3 +28,6 @@ mod process;
 #[cfg(test)]
 #[path = "stdio/stream.rs"]
 mod stream;
+#[cfg(test)]
+#[path = "stdio/turns.rs"]
+mod turns;

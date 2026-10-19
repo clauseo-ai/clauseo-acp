@@ -1,0 +1,9 @@
+{"scenario":"load-replay","description":"session/load instead of session/new: a past turn is replayed as updates (with a completed diff tool call) before the load response","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/load","as":"load","params":{"sessionId":"sess-1","cwd":"{{any}}","mcpServers":[]}}}
+{"update":{"update":{"sessionUpdate":"user_message_chunk","messageId":"m-user-0","content":{"type":"text","text":"Tighten clause 4"}}}}
+{"update":{"update":{"sessionUpdate":"agent_thought_chunk","messageId":"m-thought-0","content":{"type":"text","text":"Reading clause 4 first."}}}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"tc-edit-0","title":"Edit brief.txt","name":"Edit","kind":"edit","status":"completed","content":[{"type":"diff","path":"{{cwd}}/brief.txt","oldText":"Clause 4 draft\n","newText":"Clause 4 final\n"}],"locations":[{"path":"{{cwd}}/brief.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-0","content":{"type":"text","text":"I changed clause 4 to the final wording."}}}}
+{"respond":{"to":"load","result":{}}}

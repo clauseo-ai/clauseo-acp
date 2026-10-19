@@ -1,0 +1,10 @@
+{"scenario":"session-state","description":"Commands, mode and session title during a turn; then set_config_option, and a config_option_update sent between turns","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"review","description":"Review the document for risky clauses"},{"name":"summarise","description":"Summarise the open document"}]}}}
+{"update":{"update":{"sessionUpdate":"current_mode_update","currentModeId":"plan"}}}
+{"update":{"update":{"sessionUpdate":"session_info_update","title":"Lease review"}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/set_config_option","as":"config","params":{"sessionId":"sess-1","configId":"model","value":"deep"}}}
+{"respond":{"to":"config","result":{"configOptions":[{"id":"model","name":"Model","type":"select","currentValue":"deep","options":[{"value":"fast","name":"Fast"},{"value":"deep","name":"Deep"}]}]}}}
+{"update":{"update":{"sessionUpdate":"config_option_update","configOptions":[{"id":"model","name":"Model","type":"select","currentValue":"deep","options":[{"value":"fast","name":"Fast"},{"value":"deep","name":"Deep"}]}]}}}

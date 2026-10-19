@@ -1,0 +1,5 @@
+{"scenario":"limit-codex-error","description":"codex-acp's form of the limit: a chunk, then the prompt answered with JSON-RPC error -32603 and a usage-limit message (no sessionFailure)","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Here is the draft clause. "}}}}
+{"respond":{"to":"p1","error":{"code":-32603,"message":"You've hit your usage limit · resets 3pm"}}}
