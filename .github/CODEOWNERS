@@ -18,9 +18,10 @@
 /cla/entities/        @ro-hansolo
 /.github/             @ro-hansolo
 
-# Policy: the files that set lints, bans, budgets, hooks, the toolchain, formatting and webview
-# permissions, and xtask, whose checks are that policy in code. A change here needs the code
-# owner's approval even when another reviewer has approved the pull request.
+# Policy: the files that set lints, compiler flags, dependencies, bans, budgets, hooks, the
+# toolchain, formatting and webview permissions, and xtask, whose checks are that policy in
+# code. A change here needs the code owner's approval even when another reviewer has approved
+# the pull request.
 /xtask/                              @ro-hansolo
 /Cargo.toml                          @ro-hansolo
 /crates/*/Cargo.toml                 @ro-hansolo
