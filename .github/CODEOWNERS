@@ -21,9 +21,8 @@
 # Policy: the files that set lints, compiler flags, dependencies, bans, budgets, hooks, the
 # toolchain, formatting and webview permissions, and xtask, whose checks are that policy in
 # code. A change here needs the code owner's approval even when another reviewer has approved
-# the pull request. A name without a leading slash matches in every folder, and a `*` covers
-# another name for the same file: each of those tools also reads a copy outside the root or under
-# another name.
+# the pull request. A name without a leading slash matches in every folder, because the tool also
+# reads a copy outside the root. A * in a file name covers the other names the tool reads for it.
 /xtask/                              @ro-hansolo
 /Cargo.toml                          @ro-hansolo
 /crates/*/Cargo.toml                 @ro-hansolo
