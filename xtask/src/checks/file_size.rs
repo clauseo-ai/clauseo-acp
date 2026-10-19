@@ -2,6 +2,12 @@
 //! `.cts`, in any case) has at most 600 lines, unless `xtask/file-size-exceptions.txt` lists it,
 //! and every comment in a `.rs` file stays within 100 columns. A changed file of 501 to 600 lines
 //! gets a note, which never fails.
+//!
+//! The files come from `git ls-files --cached --others --exclude-standard` (`changes::repo_files`):
+//! tracked files, and also untracked files that `.gitignore` does not exclude. The untracked ones
+//! are read on purpose: the check catches a new file before anyone adds it, and it sees what
+//! `--quick` sees. Do not tighten it to tracked files only. When git cannot list the files, the
+//! check fails with git's error. It counts the files it read.
 
 mod lexer;
 
@@ -14,7 +20,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 /// The most lines a source file may have, unless it is an exception.
-const LINE_LIMIT: usize = 600;
+pub(super) const LINE_LIMIT: usize = 600;
 /// A changed file over this many lines gets a note.
 const NOTE_FROM: usize = 500;
 /// The last column a comment may reach, in characters.
@@ -43,19 +49,22 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
 /// The extensions of the files this check reads, matched in any case.
 const SOURCE_EXTENSIONS: [&str; 5] = ["rs", "ts", "tsx", "mts", "cts"];
 
-/// Lists the repo's source files and inspects each one. Not a git repo: nothing is listed, so
-/// nothing is inspected and the runner reports the zero.
+/// Lists the repo's source files and inspects each one. When git cannot list them, the failure
+/// says git's error.
 fn run(ctx: &Context) -> Inspection {
-    let Ok(files) = changes::repo_files(&ctx.root) else {
-        return Inspection::default();
+    let files = match changes::repo_files(&ctx.root) {
+        Ok(files) => files,
+        Err(error) => return checks::unlisted(CHECK.name, &error),
     };
     let sources: Vec<String> = files.into_iter().filter(|file| is_source(file)).collect();
     let (exceptions, mut violations) = exceptions::load(&ctx.root, EXCEPTIONS);
     let exempt: BTreeSet<&str> = exceptions.iter().map(|entry| entry.path.as_str()).collect();
     let mut sizes = Vec::new();
+    let mut read = 0;
     for file in &sources {
         match checks::read_repo_file(&ctx.root, file) {
             Ok(Some(text)) => {
+                read += 1;
                 let lines = text.lines().count();
                 sizes.push((file.clone(), lines));
                 violations.extend(size_violation(file, lines, exempt.contains(file.as_str())));
@@ -69,7 +78,7 @@ fn run(ctx: &Context) -> Inspection {
     }
     violations.extend(stale_exceptions(&exceptions, &sources, &sizes));
     Inspection {
-        inspected: sources.len(),
+        inspected: read,
         violations,
         failures: Vec::new(),
         notes: notes(&ctx.root, &sizes),

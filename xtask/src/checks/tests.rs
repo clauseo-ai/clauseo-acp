@@ -165,6 +165,23 @@ fn a_count_above_zero_passes_unless_there_are_violations_and_notes_never_fail() 
 }
 
 #[test]
+fn a_git_that_cannot_start_says_so_and_tells_to_install_it() {
+    let error = GitError::NotStarted("No such file or directory (os error 2)".to_owned());
+    let report = fake(|_| Inspection::default()).judge(unlisted("file-size", &error));
+    assert_eq!(
+        report.printed(),
+        [
+            "could not list the repo's files: could not run git: No such file or directory (os \
+             error 2)\n    \
+             fix: install git and put it on PATH: file-size lists the files it reads with \
+             `git ls-files`",
+            "0 capability files inspected in the desktop crate's capabilities/\n    \
+             fix: the check stopped before it could look; fix the failure above first",
+        ]
+    );
+}
+
+#[test]
 fn line_numbers_start_at_one() {
     assert_eq!(line_at(0), 1);
     assert_eq!(line_at(4), 5);

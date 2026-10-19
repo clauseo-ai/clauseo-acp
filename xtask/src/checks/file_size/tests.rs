@@ -209,15 +209,24 @@ fn an_unreadable_listed_file_is_not_called_stale() {
     assert_eq!(paths, ["src/bad.rs"], "{:?}", found.violations);
 }
 
-#[test]
-fn not_a_git_repo_inspects_nothing() {
-    let dir = Scratch::new("file-size-not-git");
-    let found = run(&Context {
+pub(super) fn not_a_git_repo() -> Inspection {
+    let dir = Scratch::new("planted-file-size-not-a-git-repo");
+    fs::write(dir.join("lib.rs"), "fn f() {}\n").expect("write a source");
+    run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
         load_resolved_graph: false,
-    });
-    assert_eq!(found, Inspection::default());
+    })
+}
+
+pub(super) fn only_file_unreadable() -> Inspection {
+    let dir = repo("only-file-unreadable", &[]);
+    fs::write(dir.join("bad.rs"), [0xff, 0xfe, b'\n']).expect("write bytes");
+    run(&Context {
+        root: dir.to_path_buf(),
+        members: Vec::new(),
+        load_resolved_graph: false,
+    })
 }
 
 #[test]
