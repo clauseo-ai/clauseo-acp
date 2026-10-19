@@ -8,6 +8,9 @@
 //!   [`OpenDataEnum`] by hand and its `Deserialize` calls [`deserialize_open`], which decodes in
 //!   one pass: a string becomes a unit variant or `Unknown`; a map's key is matched as a borrowed
 //!   `&str` and its payload decoded straight into its type; an unknown key becomes `Unknown`.
+//!   Their `Serialize` is derived, with the `Unknown { kind }` variant marked
+//!   `#[serde(untagged, serialize_with = "serialize_kind")]` so it writes back the plain string.
+//!   [`enum_with_all!`] writes such an enum with its `ALL` and `variant_name` from one list.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -29,13 +32,6 @@ pub(crate) use count_idents;
 /// It derives `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq`, `Hash`, serde and (under the `specta`
 /// feature) `specta::Type`, with `rename_all = "snake_case"`. Doc comments and other attributes on
 /// the enum and on each variant pass through. `Unknown` comes last, in the enum and in `ALL`.
-#[cfg_attr(
-    not(test),
-    expect(
-        unused_macros,
-        reason = "A2's unit-only enums use it; remove this then"
-    )
-)]
 macro_rules! open_unit_enum {
     (
         $(#[$meta:meta])*
@@ -69,14 +65,55 @@ macro_rules! open_unit_enum {
         }
     };
 }
-#[cfg_attr(
-    not(test),
-    expect(
-        unused_imports,
-        reason = "A2's unit-only enums use it; remove this then"
-    )
-)]
 pub(crate) use open_unit_enum;
+
+/// Writes an enum of unit and struct variants with `ALL` and `variant_name`, from one list, so
+/// `ALL` cannot miss a variant.
+///
+/// Each struct field is written `name: Type = placeholder`; `ALL` builds each data variant from
+/// the placeholders (nil ids, zero timestamps, empty strings), which must be `const`. Nothing is
+/// derived: the caller writes the derives, and every attribute passes through.
+macro_rules! enum_with_all {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $name:ident {
+            $(
+                $(#[$variant_meta:meta])*
+                $variant:ident $({
+                    $($(#[$field_meta:meta])* $field:ident: $ty:ty = $placeholder:expr),+ $(,)?
+                })?
+            ),+ $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        $vis enum $name {
+            $(
+                $(#[$variant_meta])*
+                $variant $({ $($(#[$field_meta])* $field: $ty),+ })?,
+            )+
+        }
+
+        impl $name {
+            /// Every variant, in declaration order; data variants hold placeholder data.
+            $vis const ALL: [Self; $crate::open_enum::count_idents!($($variant)+)] =
+                [$(Self::$variant $({ $($field: $placeholder),+ })?,)+];
+
+            /// The Rust name of the variant, such as `"Unknown"`.
+            $vis const fn variant_name(&self) -> &'static str {
+                match self {
+                    $(Self::$variant { .. } => stringify!($variant),)+
+                }
+            }
+        }
+    };
+}
+pub(crate) use enum_with_all;
+
+/// Writes an unknown variant's kind back as a plain string. Use it as the
+/// `#[serde(untagged, serialize_with = "...")]` of a derived `Unknown { kind }` variant.
+pub(crate) fn serialize_kind<S: Serializer>(kind: &str, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(kind)
+}
 
 /// A string read without copying when the input allows it (`serde_json` without escapes,
 /// rmp-serde from a slice), and copied otherwise. Use it for map keys matched as `&str`.
@@ -119,13 +156,6 @@ impl<'de: 'a, 'a> Visitor<'de> for BorrowedStrVisitor<'a> {
 
 /// An enum with data whose unknown values decode to a catch-all. Implement it by hand and call
 /// [`deserialize_open`] from `Deserialize`.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "A2's DetachReason, LimitSource and SteerOutcome use it; remove this then"
-    )
-)]
 pub(crate) trait OpenDataEnum: Sized {
     /// What the decoder expected, for error messages, such as `"a detach reason"`.
     const EXPECTING: &'static str;
@@ -152,13 +182,6 @@ pub(crate) trait OpenDataEnum: Sized {
 }
 
 /// Decodes an [`OpenDataEnum`] in one pass, from any self-describing format.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "A2's DetachReason, LimitSource and SteerOutcome use it; remove this then"
-    )
-)]
 pub(crate) fn deserialize_open<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
@@ -167,13 +190,6 @@ where
     deserializer.deserialize_any(OpenVisitor(PhantomData))
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "A2's DetachReason, LimitSource and SteerOutcome use it; remove this then"
-    )
-)]
 struct OpenVisitor<T>(PhantomData<T>);
 
 impl<'de, T: OpenDataEnum> Visitor<'de> for OpenVisitor<T> {
@@ -211,13 +227,6 @@ impl<'de, T: OpenDataEnum> Visitor<'de> for OpenVisitor<T> {
 }
 
 /// Writes a one-key map `{key: value}`, the form of a data variant.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "A2's DetachReason, LimitSource and SteerOutcome use it; remove this then"
-    )
-)]
 pub(crate) fn serialize_one_key<S, V>(
     serializer: S,
     key: &str,
