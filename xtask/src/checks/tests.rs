@@ -160,6 +160,29 @@ fn a_violation_with_nothing_inspected_gets_the_stopped_fix_only_when_the_check_s
     );
 }
 
+/// No two entries in `ALL` share a place or a source, so a check copied from another one that
+/// keeps its `place` (say, built from `budgets::FILE`) or its `source` fails here.
+#[test]
+fn no_two_checks_share_a_place_or_a_source() {
+    let mut places = std::collections::BTreeMap::new();
+    let mut sources = std::collections::BTreeMap::new();
+    for check in ALL {
+        if let Some(other) = places.insert((check.place)(), check.name) {
+            panic!(
+                "{} and {other} share the place `{}`",
+                check.name,
+                (check.place)()
+            );
+        }
+        if let Some(other) = sources.insert(check.source, check.name) {
+            panic!(
+                "{} and {other} share the source {}",
+                check.name, check.source
+            );
+        }
+    }
+}
+
 /// Every entry in `ALL` is a whole check: a unique name, the file it lives in, a place, and
 /// planted cases that include a pass and a failure. A check left out of `ALL` is caught by the
 /// compiler instead: nothing outside tests reads its `CHECK`, so clippy's dead-code lint fails.
