@@ -291,13 +291,19 @@ pub(crate) fn read_repo_file(root: &Path, rel: &str) -> Result<Option<String>, V
     }
 }
 
-/// The violation for `path`, which exists but cannot be read as UTF-8 text.
+/// The violation for `path`, which the check could not read. The fix asks for UTF-8 text only
+/// when that is the error; otherwise it sends the reader to the OS error in the message.
 pub(crate) fn unreadable(path: &str, error: &io::Error) -> Violation {
+    let fix = if error.kind() == io::ErrorKind::InvalidData {
+        "make the file readable as UTF-8 text"
+    } else {
+        "fix what the error says so the check can read it: restore or replace the file or folder"
+    };
     Violation {
         path: path.to_owned(),
         line: 1,
         message: format!("could not read `{path}`: {error}"),
-        fix: "make the file readable as UTF-8 text".to_owned(),
+        fix: fix.to_owned(),
     }
 }
 

@@ -136,7 +136,11 @@ pub(crate) fn scan(path: &str, text: &str) -> Vec<Violation> {
                 return at_one(format!("could not read `{path}`: {error}"), FIX_SYNTAX);
             }
             Err(error) => {
-                return at_one(format!("`{path}` is not valid TOML: {error}"), FIX_SYNTAX);
+                let line = error
+                    .span()
+                    .map_or(1, |span| checks::line_at(line_index_of(text, span.start)));
+                let message = format!("`{path}` is not valid TOML: {}", error.message());
+                return vec![checks::violation(path, line, message, FIX_SYNTAX)];
             }
         }
     } else {
@@ -149,7 +153,9 @@ pub(crate) fn scan(path: &str, text: &str) -> Vec<Violation> {
                 );
             }
             Err(error) => {
-                return at_one(format!("`{path}` is not valid JSON: {error}"), FIX_SYNTAX);
+                let line = u32::try_from(error.line()).unwrap_or(1).max(1);
+                let message = format!("`{path}` is not valid JSON: {error}");
+                return vec![checks::violation(path, line, message, FIX_SYNTAX)];
             }
         }
     };

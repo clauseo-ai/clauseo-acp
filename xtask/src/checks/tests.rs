@@ -182,6 +182,26 @@ fn a_git_that_cannot_start_says_so_and_tells_to_install_it() {
 }
 
 #[test]
+fn an_unreadable_path_asks_for_utf8_only_when_that_is_the_error() {
+    let not_text = io::Error::new(
+        io::ErrorKind::InvalidData,
+        "stream did not contain valid UTF-8",
+    );
+    assert_eq!(
+        unreadable("a.rs", &not_text).to_string(),
+        "a.rs:1: could not read `a.rs`: stream did not contain valid UTF-8\n    \
+         fix: make the file readable as UTF-8 text"
+    );
+    let gone = io::Error::new(io::ErrorKind::NotFound, "No such file or directory");
+    assert_eq!(
+        unreadable("src", &gone).to_string(),
+        "src:1: could not read `src`: No such file or directory\n    \
+         fix: fix what the error says so the check can read it: restore or replace the file or \
+         folder"
+    );
+}
+
+#[test]
 fn line_numbers_start_at_one() {
     assert_eq!(line_at(0), 1);
     assert_eq!(line_at(4), 5);
