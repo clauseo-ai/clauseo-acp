@@ -79,12 +79,12 @@ fn a_row_of_the_table_bans_our_package_and_any_other_name_a_crates_io_one() {
 }
 
 #[test]
-fn core_io_is_fs_process_or_any_io_and_not_the_clock_alone() {
+fn every_io_word_holds_the_crate_to_core_io_and_a_crate_name_does_not() {
     let with = |never: Vec<Never>| row(1, "x", &[], never, Status::Planned).holds_core_io();
     assert!(with(vec![Never::Io(IoWord::Fs)]));
     assert!(with(vec![Never::Io(IoWord::Process)]));
     assert!(with(vec![Never::Io(IoWord::AnyIo)]));
-    assert!(!with(vec![Never::Io(IoWord::Clock)]));
+    assert!(with(vec![Never::Io(IoWord::Clock)]));
     assert!(!with(vec![Never::Workspace("process".into())]));
 }
 
@@ -239,4 +239,18 @@ fn the_real_architecture_md_parses() {
         ])
     );
     assert!(table.row("protocol").is_some_and(CrateRow::holds_core_io));
+}
+
+#[test]
+fn a_std_module_in_the_never_column_fails_at_its_row() {
+    let text = doc("| `reducer` | things | | net, tauri | planned |\n");
+    assert_eq!(
+        parse(&text),
+        Err(vec![violation(
+            FILE,
+            7,
+            "`net` in the Never depends on column of `reducer` names a standard library module, not a crate, so nothing would enforce it",
+            "write `fs`, `process`, `any I/O` or `clock` instead of `net`: each bans the standard library's file, network, process, environment and clock APIs",
+        )])
+    );
 }

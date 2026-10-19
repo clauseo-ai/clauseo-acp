@@ -1,123 +1,199 @@
-//! Line numbers in Cargo manifests. `cargo metadata` gives the dependencies; these helpers find the
-//! line of the manifest text that declares one, so a violation can point at it.
+//! Line numbers in Cargo manifests. `cargo metadata` gives the dependencies; these helpers parse
+//! the manifest with the `toml` crate and read its spans, so a violation can point at the line
+//! that declares a dependency (or names a feature), whatever the spelling: a comment after a
+//! table header, a quoted key (`'tauri' = ...`), a `[dependencies.tauri]` table, a dotted
+//! `tauri.workspace = true`, or a `[target.'cfg(...)'.dependencies]` table.
 
 use crate::checks;
+use toml::Spanned;
+use toml::de::{DeString, DeTable, DeValue};
 
-/// One line of a TOML file, with the most recent table header above it (`""` before the first).
-pub(crate) struct Line<'a> {
-    pub no: u32,
-    pub table: &'a str,
-    pub text: &'a str,
+/// The tables a package declares dependencies in, each also under `[target.<cfg>]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    /// `[dependencies]`.
+    Normal,
+    /// `[build-dependencies]`.
+    Build,
+    /// `[dev-dependencies]`.
+    Dev,
 }
 
-/// The lines of `text`, each with its table header.
-pub(crate) fn lines(text: &str) -> Vec<Line<'_>> {
-    let mut table = "";
-    let mut lines = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        if line.trim_start().starts_with('[') {
-            table = line.trim();
+impl Kind {
+    /// The table's name in the manifest.
+    fn table(self) -> &'static str {
+        match self {
+            Kind::Normal => "dependencies",
+            Kind::Build => "build-dependencies",
+            Kind::Dev => "dev-dependencies",
         }
-        lines.push(Line {
-            no: checks::line_at(index),
-            table,
-            text: line,
-        });
     }
-    lines
 }
 
-/// A crate's own dependency table: `[dependencies]` or `[target.<cfg>.dependencies]`.
-pub(crate) fn is_dependency_table(header: &str) -> bool {
-    header == "[dependencies]"
-        || (header.starts_with("[target.") && header.ends_with(".dependencies]"))
+/// `[dependencies]` only.
+pub(crate) const NORMAL: &[Kind] = &[Kind::Normal];
+/// What is built into the crate: `[dependencies]` and `[build-dependencies]`.
+pub(crate) const BUILT: &[Kind] = &[Kind::Normal, Kind::Build];
+/// Every dependency table: normal, build and dev.
+pub(crate) const ANY: &[Kind] = &[Kind::Normal, Kind::Build, Kind::Dev];
+
+/// A parsed manifest. Text that is not TOML locates nothing: every lookup gives `None`.
+pub(crate) struct Manifest<'a> {
+    text: &'a str,
+    doc: Option<Spanned<DeTable<'a>>>,
 }
 
-/// A table whose entries are built into the crate: `[dependencies]`, `[build-dependencies]` and
-/// their `[target.<cfg>.*]` forms; not `[dev-dependencies]`.
-pub(crate) fn is_normal_or_build_table(header: &str) -> bool {
-    header == "[dependencies]"
-        || header == "[build-dependencies]"
-        || (header.starts_with("[target.")
-            && (header.ends_with(".dependencies]") || header.ends_with(".build-dependencies]")))
+impl<'a> Manifest<'a> {
+    /// Parses `text`.
+    pub(crate) fn parse(text: &'a str) -> Manifest<'a> {
+        Manifest {
+            text,
+            doc: DeTable::parse(text).ok(),
+        }
+    }
+
+    /// The first line that declares dependency `key` in a table of `kinds`, with or without a
+    /// target: the line of the key itself (in a `[<table>.key]` header, that header's line).
+    pub(crate) fn declaration(&self, key: &str, kinds: &[Kind]) -> Option<u32> {
+        self.entries(key, kinds)
+            .map(|(key, _)| self.line(key.span().start))
+            .min()
+    }
+
+    /// The line where the entry for `key` (in `kinds`) lists `feature` in its `features`.
+    pub(crate) fn feature_in_entry(&self, key: &str, kinds: &[Kind], feature: &str) -> Option<u32> {
+        self.entries(key, kinds)
+            .filter_map(|(_, value)| self.feature_line(value, feature))
+            .min()
+    }
+
+    /// The line where the `[workspace.dependencies]` entry for `key` lists `feature`.
+    pub(crate) fn workspace_feature(&self, key: &str, feature: &str) -> Option<u32> {
+        let table = self.root().and_then(|root| table_at(root, "workspace"))?;
+        let (_, value) = entry(table_at(table, "dependencies")?, key)?;
+        self.feature_line(value, feature)
+    }
+
+    /// The line of the first `[features]` item that is exactly `item`.
+    pub(crate) fn feature_item(&self, item: &str) -> Option<u32> {
+        let features = self.root().and_then(|root| table_at(root, "features"))?;
+        features
+            .values()
+            .filter_map(|value| value.get_ref().as_array())
+            .flat_map(|items| items.iter())
+            .find(|value| value.get_ref().as_str() == Some(item))
+            .map(|value| self.line(value.span().start))
+    }
+
+    /// The line of the `[dependencies]` table's key: its header, or its first dotted entry.
+    pub(crate) fn dependencies_header(&self) -> Option<u32> {
+        let (key, _) = entry(self.root()?, Kind::Normal.table())?;
+        Some(self.line(key.span().start))
+    }
+
+    /// The root table.
+    fn root(&self) -> Option<&DeTable<'a>> {
+        self.doc.as_ref().map(Spanned::get_ref)
+    }
+
+    /// Every entry for `key` in the tables of `kinds`, top-level and under each target.
+    fn entries<'s>(
+        &'s self,
+        key: &'s str,
+        kinds: &'s [Kind],
+    ) -> impl Iterator<Item = Entry<'s, 'a>> + 's {
+        let root = self.root();
+        let targets = root
+            .and_then(|root| table_at(root, "target"))
+            .into_iter()
+            .flat_map(|targets| targets.values())
+            .filter_map(|target| target.get_ref().as_table());
+        root.into_iter()
+            .chain(targets)
+            .flat_map(move |scope| {
+                kinds
+                    .iter()
+                    .filter_map(move |kind| table_at(scope, kind.table()))
+            })
+            .filter_map(move |table| entry(table, key))
+    }
+
+    /// The line of `feature` in the `features` array of the dependency entry `value`.
+    fn feature_line(&self, value: &Spanned<DeValue<'a>>, feature: &str) -> Option<u32> {
+        let features = value
+            .get_ref()
+            .as_table()?
+            .iter()
+            .find_map(|(name, list)| {
+                (name.get_ref() == "features")
+                    .then(|| list.get_ref().as_array())
+                    .flatten()
+            })?;
+        features
+            .iter()
+            .find(|item| item.get_ref().as_str() == Some(feature))
+            .map(|item| self.line(item.span().start))
+    }
+
+    /// The 1-based line of byte `offset`.
+    fn line(&self, offset: usize) -> u32 {
+        let before = self.text.get(..offset).unwrap_or(self.text);
+        checks::line_at(before.matches('\n').count())
+    }
 }
 
-/// The root manifest's `[workspace.dependencies]` table.
-pub(crate) fn is_workspace_table(header: &str) -> bool {
-    header == "[workspace.dependencies]"
+/// A key and its value, both with their spans.
+type Entry<'s, 'a> = (&'s Spanned<DeString<'a>>, &'s Spanned<DeValue<'a>>);
+
+/// The entry `key` of `table`.
+fn entry<'s, 'a>(table: &'s DeTable<'a>, key: &str) -> Option<Entry<'s, 'a>> {
+    table.iter().find(|(name, _)| name.get_ref() == key)
 }
 
-/// The line that declares dependency `key`: its `key =` (or `key.`) line in a table that
-/// `in_table` accepts, or a `[<table>.key]` header whose table `in_table` accepts.
-pub(crate) fn declaration<'a, 'l>(
-    lines: &'l [Line<'a>],
-    key: &str,
-    in_table: impl Fn(&str) -> bool,
-) -> Option<&'l Line<'a>> {
-    let suffix = format!(".{key}]");
-    lines.iter().find(|line| {
-        let header = line
-            .table
-            .strip_suffix(&suffix)
-            .map(|head| format!("{head}]"));
-        (in_table(line.table) && declares_key(line.text, key))
-            || header.is_some_and(|header| in_table(&header))
-    })
-}
-
-/// The first line from `declared` onward, in the same table, that holds `needle`.
-pub(crate) fn in_entry<'a, 'l>(
-    lines: &'l [Line<'a>],
-    declared: &Line<'a>,
-    needle: &str,
-) -> Option<&'l Line<'a>> {
-    lines
-        .iter()
-        .filter(|line| line.no >= declared.no && line.table == declared.table)
-        .find(|line| line.text.contains(needle))
-}
-
-/// True when `line` starts an entry for `key`: `key =` or `key.`, with the key bare or
-/// double-quoted.
-fn declares_key(line: &str, key: &str) -> bool {
-    let line = line.trim_start();
-    let rest = line.strip_prefix(key).or_else(|| {
-        line.strip_prefix('"')
-            .and_then(|line| line.strip_prefix(key))
-            .and_then(|line| line.strip_prefix('"'))
-    });
-    rest.is_some_and(|rest| {
-        let rest = rest.trim_start();
-        rest.starts_with('=') || rest.starts_with('.')
-    })
+/// The table under `key` in `table`.
+fn table_at<'s, 'a>(table: &'s DeTable<'a>, key: &str) -> Option<&'s DeTable<'a>> {
+    entry(table, key).and_then(|(_, value)| value.get_ref().as_table())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const TEXT: &str = "[dependencies]\ntauri-x = \"1\"\ntauri = { version = \"2\", features = [\n  \"devtools\",\n] }\n\n[target.'cfg(unix)'.dependencies.os]\nversion = \"2\"\n\n[workspace.dependencies]\n\"t\".workspace = true\n";
+    const TEXT: &str = "[dependencies] # runtime\ntauri-x = \"1\"\ntauri = { version = \"2\", features = [\n  \"devtools\",\n] }\n'quoted' = \"1\"\ndotted.workspace = true\n\n[target.'cfg(unix)'.dependencies.os]\nversion = \"2\"\n\n[build-dependencies]\nbuilt = \"1\"\n\n[workspace.dependencies]\n\"t\" = { version = \"1\", features = [\"x\"] }\n\n[features]\nall = [\"tauri/devtools\"]\n";
 
     #[test]
     fn a_key_is_found_by_its_own_line_or_its_table_header() {
-        let lines = lines(TEXT);
-        let tauri = declaration(&lines, "tauri", is_dependency_table).map(|line| line.no);
-        assert_eq!(tauri, Some(3));
-        let os = declaration(&lines, "os", is_dependency_table).map(|line| line.no);
-        assert_eq!(os, Some(7));
-        let quoted = declaration(&lines, "t", is_workspace_table).map(|line| line.no);
-        assert_eq!(quoted, Some(11));
-        assert!(declaration(&lines, "t", is_dependency_table).is_none());
+        let manifest = Manifest::parse(TEXT);
+        assert_eq!(manifest.declaration("tauri", NORMAL), Some(3));
+        assert_eq!(manifest.declaration("quoted", NORMAL), Some(6));
+        assert_eq!(manifest.declaration("dotted", NORMAL), Some(7));
+        assert_eq!(manifest.declaration("os", NORMAL), Some(9));
+        assert_eq!(manifest.declaration("built", NORMAL), None);
+        assert_eq!(manifest.declaration("built", BUILT), Some(13));
+        assert_eq!(manifest.declaration("t", ANY), None);
+        assert_eq!(manifest.dependencies_header(), Some(1));
     }
 
     #[test]
-    fn a_feature_is_found_inside_its_entry() {
-        let lines = lines(TEXT);
-        let tauri = declaration(&lines, "tauri", is_dependency_table).expect("declared");
+    fn a_feature_is_found_inside_its_entry_or_the_features_table() {
+        let manifest = Manifest::parse(TEXT);
         assert_eq!(
-            in_entry(&lines, tauri, "\"devtools\"").map(|line| line.no),
+            manifest.feature_in_entry("tauri", NORMAL, "devtools"),
             Some(4)
         );
-        assert!(in_entry(&lines, tauri, "\"protocol-asset\"").is_none());
+        assert_eq!(
+            manifest.feature_in_entry("tauri", NORMAL, "protocol-asset"),
+            None
+        );
+        assert_eq!(manifest.workspace_feature("t", "x"), Some(16));
+        assert_eq!(manifest.feature_item("tauri/devtools"), Some(19));
+        assert_eq!(manifest.feature_item("other"), None);
+    }
+
+    #[test]
+    fn text_that_is_not_toml_locates_nothing() {
+        let manifest = Manifest::parse("[dependencies\ntauri = ");
+        assert_eq!(manifest.declaration("tauri", ANY), None);
+        assert_eq!(manifest.dependencies_header(), None);
     }
 }

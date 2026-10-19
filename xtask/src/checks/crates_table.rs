@@ -7,10 +7,11 @@
 //! trimmed and its backticks removed. The second line must be the `|---|` separator.
 //!
 //! "Never depends on" entries are I/O words or crate names. The I/O words (`fs`, `process`,
-//! `any I/O`, `clock`) mean the standard library's file, network, process, environment and clock
-//! APIs, as `ARCHITECTURE.md` defines them, and win over a row of the same name (`process`). A
-//! crate name that is a row of the table is our package `clauseo-<name>`; any other is the
-//! crates.io package of that name.
+//! `any I/O`, `clock`) each mean the standard library's file, network, process, environment and
+//! clock APIs, as `ARCHITECTURE.md` defines them, and win over a row of the same name (`process`).
+//! A standard library module's name (`std`, `net`, `env`, `time`, `io`) is rejected: it names
+//! no crate, and the I/O words are how the table bans those APIs. A crate name that is a row of
+//! the table is our package `clauseo-<name>`; any other is the crates.io package of that name.
 
 use crate::checks::{self, violation};
 use crate::violation::Violation;
@@ -30,6 +31,9 @@ const COLUMNS: [&str; 5] = [
     "Never depends on",
     "Status",
 ];
+
+/// Standard library modules a Never entry might name by mistake for an I/O word.
+const STD_MODULES: [&str; 5] = ["std", "net", "env", "time", "io"];
 
 const SHAPE_FIX: &str = "keep the Crates table in ARCHITECTURE.md as one pipe table with the columns Crate | Owns | May depend on | Never depends on | Status: xtask/src/checks/crates_table.rs reads it";
 
@@ -80,7 +84,7 @@ pub(crate) enum IoWord {
     Process,
     /// `any I/O`: the same APIs.
     AnyIo,
-    /// `clock`: the clock APIs.
+    /// `clock`: the same APIs.
     Clock,
 }
 
@@ -117,14 +121,9 @@ impl Never {
 
 impl CrateRow {
     /// True when the crate must not touch the standard library's I/O: its Never list has `fs`,
-    /// `process` or `any I/O`.
+    /// `process`, `any I/O` or `clock`, each of which holds it to the whole core-io ban.
     pub(crate) fn holds_core_io(&self) -> bool {
-        self.never.iter().any(|entry| {
-            matches!(
-                entry,
-                Never::Io(IoWord::Fs | IoWord::Process | IoWord::AnyIo)
-            )
-        })
+        self.never.iter().any(|entry| matches!(entry, Never::Io(_)))
     }
 }
 
@@ -355,6 +354,18 @@ fn classify(raw: &[RawRow], found: &mut Vec<Violation>) -> Vec<CrateRow> {
         for entry in &row.never {
             if let Some(word) = IoWord::parse(entry) {
                 never.push(Never::Io(word));
+            } else if STD_MODULES.contains(&entry.as_str()) {
+                found.push(violation(
+                    FILE,
+                    row.line,
+                    format!(
+                        "`{entry}` in the Never depends on column of `{}` names a standard library module, not a crate, so nothing would enforce it",
+                        row.name
+                    ),
+                    format!(
+                        "write `fs`, `process`, `any I/O` or `clock` instead of `{entry}`: each bans the standard library's file, network, process, environment and clock APIs"
+                    ),
+                ));
             } else if raw.iter().any(|other| other.name == *entry) {
                 never.push(Never::Workspace(entry.clone()));
             } else if is_package_name(entry) {

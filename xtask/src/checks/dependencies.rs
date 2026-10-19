@@ -89,7 +89,7 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
 /// The violation for `member`, which has no row: at the table's last row, where the new row goes.
 fn no_row(table: &CratesTable, member: &Member) -> Violation {
     let line = table.rows.last().map_or(1, |row| row.line);
-    let fix = match crates_table::row_name(&member.name) {
+    let fix = match crates_table::row_name(&member.name).map(|name| name.replace('-', "_")) {
         Some(name) => format!(
             "add a row `| `{name}` | <what it owns> | <crates it may depend on> | <crates it never depends on> | exists |` to the Crates table in ARCHITECTURE.md"
         ),
@@ -132,25 +132,75 @@ crate::checks::planted::cases! {
          fix: move the code that uses `mid` into a crate whose row allows tauri, then remove `mid` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on tauri",
     ]) => tests::transitive,
     /// tauri as a build dependency fails.
-    build_dependency: Fails => tests::build_dependency,
+    build_dependency: FailsWith(&[
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on tauri, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `tauri` into a crate whose row allows tauri, then remove `tauri` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on tauri",
+    ]) => tests::build_dependency,
     /// tauri under another key (`t = { package = "tauri", ... }`) fails at that key.
     renamed: FailsWith(&[
         "crates/protocol/Cargo.toml:7: clauseo-protocol depends on tauri, which ARCHITECTURE.md forbids\n    \
          fix: move the code that uses `t` into a crate whose row allows tauri, then remove `t` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on tauri",
     ]) => tests::renamed,
     /// tauri for Windows only fails on any host.
-    target_windows: Fails => tests::target_windows,
+    target_windows: FailsWith(&[
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on tauri, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `tauri` into a crate whose row allows tauri, then remove `tauri` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on tauri",
+    ]) => tests::target_windows,
     /// `tauri.workspace = true` fails at the crate's own line.
-    inherited: Fails => tests::inherited,
+    inherited: FailsWith(&[
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on tauri, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `tauri` into a crate whose row allows tauri, then remove `tauri` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on tauri",
+    ]) => tests::inherited,
     /// An optional tauri behind a feature fails, and the fix names the feature items too.
-    optional_feature: Fails => tests::optional_feature,
+    optional_feature: FailsWith(&[
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on tauri, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `tauri` into a crate whose row allows tauri, then remove `tauri` and every `[features]` item that enables it from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on tauri",
+    ]) => tests::optional_feature,
     /// A workspace crate with no row fails at the table's last row.
     no_row: FailsWith(&[
         "ARCHITECTURE.md:7: workspace crate `clauseo-store` (crates/store) has no row in the Crates table\n    \
          fix: add a row `| `store` | <what it owns> | <crates it may depend on> | <crates it never depends on> | exists |` to the Crates table in ARCHITECTURE.md",
     ]) => tests::no_row,
     /// host depending on our agents crate, which its row forbids, fails.
-    forbidden_workspace_crate: Fails => tests::forbidden_workspace_crate,
+    forbidden_workspace_crate: FailsWith(&[
+        "crates/host/Cargo.toml:7: clauseo-host depends on clauseo-agents, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `clauseo-agents` into a crate whose row allows clauseo-agents, then remove `clauseo-agents` from crates/host/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-host never depends on clauseo-agents",
+    ]) => tests::forbidden_workspace_crate,
+    /// A comment after the `[dependencies]` header still finds the entry's line.
+    comment_after_header: FailsWith(&[
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on tauri, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `tauri` into a crate whose row allows tauri, then remove `tauri` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on tauri",
+    ]) => tests::comment_after_header,
+    /// A quoted key (`'tauri' = ...`) still finds the entry's line.
+    quoted_key: FailsWith(&[
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on tauri, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `tauri` into a crate whose row allows tauri, then remove `tauri` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on tauri",
+    ]) => tests::quoted_key,
+    /// A `[dependencies.tauri]` table points at its header.
+    table_header: FailsWith(&[
+        "crates/protocol/Cargo.toml:6: clauseo-protocol depends on tauri, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `tauri` into a crate whose row allows tauri, then remove `tauri` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on tauri",
+    ]) => tests::table_header,
+    /// A package with a `-` and no row gets a row name the table accepts (`_`, not `-`).
+    dash_package_without_row: FailsWith(&[
+        "ARCHITECTURE.md:7: workspace crate `clauseo-fake-agent` (crates/fake_agent) has no row in the Crates table\n    \
+         fix: add a row `| `fake_agent` | <what it owns> | <crates it may depend on> | <crates it never depends on> | exists |` to the Crates table in ARCHITECTURE.md",
+    ]) => tests::dash_package_without_row,
+    /// A ban on our `transport_ws` catches the package spelled `clauseo-transport-ws`.
+    workspace_crate_spelled_with_dash: FailsWith(&[
+        "crates/host/Cargo.toml:7: clauseo-host depends on clauseo-transport-ws, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `clauseo-transport-ws` into a crate whose row allows clauseo-transport-ws, then remove `clauseo-transport-ws` from crates/host/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-host never depends on clauseo-transport-ws",
+    ]) => tests::workspace_crate_spelled_with_dash,
+    /// A ban on `async_process` catches the package spelled `async-process`.
+    crates_io_spelled_with_dash: FailsWith(&[
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on async-process, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `async-process` into a crate whose row allows async-process, then remove `async-process` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on async-process",
+    ]) => tests::crates_io_spelled_with_dash,
+    /// A standard library module in the Never column fails at its row.
+    std_module_in_never: FailsWith(&[
+        "ARCHITECTURE.md:7: `net` in the Never depends on column of `protocol` names a standard library module, not a crate, so nothing would enforce it\n    \
+         fix: write `fs`, `process`, `any I/O` or `clock` instead of `net`: each bans the standard library's file, network, process, environment and clock APIs",
+    ]) => tests::std_module_in_never,
     /// tauri as a dev-dependency passes.
     dev_dependency_passes: Passes => tests::dev_dependency_passes,
     /// A planned row whose crate does not exist is skipped.

@@ -7,7 +7,7 @@
 //! checks against the same graph for every target.
 
 use super::FIXED_PLUGINS;
-use crate::checks::toml_lines::{declaration, lines};
+use crate::checks::toml_lines::{BUILT, Manifest};
 use crate::checks::{self, violation};
 use crate::violation::Violation;
 use crate::workspace::{PackageDependencies, ResolvedGraph, ResolvedNode};
@@ -106,13 +106,9 @@ fn responsible_line(tree: &Tree<'_>, root: &str, target: &str, desktop: &Desktop
     let Some(dep) = desktop.deps.dependencies.iter().find(|d| d.name == name) else {
         return 1;
     };
-    let in_table = |header: &str| {
-        header == "[dependencies]"
-            || header == "[build-dependencies]"
-            || (header.starts_with("[target.")
-                && (header.ends_with(".dependencies]") || header.ends_with(".build-dependencies]")))
-    };
-    declaration(&lines(desktop.text), dep.key(), in_table).map_or(1, |line| line.no)
+    Manifest::parse(desktop.text)
+        .declaration(dep.key(), BUILT)
+        .unwrap_or(1)
 }
 
 /// The resolved graph indexed by package id, following normal and build edges for every target.

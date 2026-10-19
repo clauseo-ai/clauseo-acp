@@ -10,7 +10,7 @@
 
 use super::and_list;
 use crate::checks::crates_table::{self, CrateRow};
-use crate::checks::toml_lines::{declaration, is_normal_or_build_table, lines};
+use crate::checks::toml_lines::{BUILT, Manifest};
 use crate::checks::violation;
 use crate::process::{self, Cmd, Program};
 use crate::violation::Violation;
@@ -78,6 +78,7 @@ impl Graph {
             .never
             .iter()
             .filter_map(crates_table::Never::package)
+            .map(|package| fold(&package))
             .collect();
         forbidden.sort();
         forbidden.dedup();
@@ -99,22 +100,17 @@ impl Graph {
         let direct: BTreeSet<&str> = tree.edges(root).collect();
         let mut found = Vec::new();
         for dep in direct {
-            for (package, path) in tree.first_paths(dep, &forbidden) {
-                found.push(self.violation(krate, &tree, package, &path));
+            for path in tree.first_paths(dep, &forbidden) {
+                found.push(self.violation(krate, &tree, &path));
             }
         }
         found
     }
 
-    /// The violation for `path`, from a direct dependency of `krate` to the forbidden `package`.
-    fn violation(
-        &self,
-        krate: &Crate<'_>,
-        tree: &Tree<'_>,
-        package: &str,
-        path: &[&str],
-    ) -> Violation {
+    /// The violation for `path`, from a direct dependency of `krate` to a forbidden package.
+    fn violation(&self, krate: &Crate<'_>, tree: &Tree<'_>, path: &[&str]) -> Violation {
         let names: Vec<String> = path.iter().map(|id| tree.name(id).to_owned()).collect();
+        let package = names.last().map_or("", String::as_str);
         let direct = names.first().map_or(package, String::as_str);
         let entries: Vec<_> = self
             .declared
@@ -130,19 +126,25 @@ impl Graph {
         if keys.is_empty() {
             keys.push(direct.to_owned());
         }
-        let manifest_lines = lines(krate.text);
-        let line = keys
+        let manifest = Manifest::parse(krate.text);
+        let declared = keys
             .iter()
-            .filter_map(|key| declaration(&manifest_lines, key, is_normal_or_build_table))
-            .map(|line| line.no)
-            .min()
-            .unwrap_or(1);
+            .filter_map(|key| manifest.declaration(key, BUILT))
+            .min();
         let through = match names.split_last() {
             Some((_, between)) if !between.is_empty() => format!(" through {}", and_list(between)),
             _ => String::new(),
         };
         let quoted: Vec<String> = keys.iter().map(|key| format!("`{key}`")).collect();
         let quoted = and_list(&quoted);
+        let unlocated = if declared.is_none() {
+            format!(
+                " (xtask found no line declaring {quoted} in {}, so this points at line 1)",
+                krate.manifest
+            )
+        } else {
+            String::new()
+        };
         let features = if entries.iter().any(|dep| dep.optional) {
             " and every `[features]` item that enables it"
         } else {
@@ -150,9 +152,9 @@ impl Graph {
         };
         violation(
             krate.manifest,
-            line,
+            declared.unwrap_or(1),
             format!(
-                "{} depends on {package}{through}, which ARCHITECTURE.md forbids",
+                "{} depends on {package}{through}, which ARCHITECTURE.md forbids{unlocated}",
                 krate.package
             ),
             format!(
@@ -219,21 +221,18 @@ impl<'a> Tree<'a> {
             .map(|dep| dep.pkg.as_str())
     }
 
-    /// For each package of `wanted` that `start` is or reaches, a shortest path from `start` to
-    /// it (both ends included), found breadth first.
-    fn first_paths<'w>(
-        &self,
-        start: &'a str,
-        wanted: &'w [String],
-    ) -> Vec<(&'w str, Vec<&'a str>)> {
+    /// For each package of `wanted` (names folded, see `fold`) that `start` is or reaches, a
+    /// shortest path from `start` to it (both ends included), found breadth first.
+    fn first_paths(&self, start: &'a str, wanted: &[String]) -> Vec<Vec<&'a str>> {
         let mut parent: BTreeMap<&'a str, &'a str> = BTreeMap::new();
         let mut seen = BTreeSet::from([start]);
         let mut queue = VecDeque::from([start]);
-        let mut found: Vec<(&'w str, Vec<&'a str>)> = Vec::new();
+        let mut done: BTreeSet<&str> = BTreeSet::new();
+        let mut found: Vec<Vec<&'a str>> = Vec::new();
         while let Some(id) = queue.pop_front() {
-            let name = self.name(id);
-            if let Some(package) = wanted.iter().find(|package| *package == name)
-                && !found.iter().any(|(done, _)| *done == package)
+            let name = fold(self.name(id));
+            if let Some(package) = wanted.iter().find(|package| **package == name)
+                && done.insert(package.as_str())
             {
                 let mut path = vec![id];
                 let mut at = id;
@@ -242,7 +241,7 @@ impl<'a> Tree<'a> {
                     at = up;
                 }
                 path.reverse();
-                found.push((package.as_str(), path));
+                found.push(path);
             }
             for dep in self.edges(id) {
                 if seen.insert(dep) {
@@ -253,4 +252,10 @@ impl<'a> Tree<'a> {
         }
         found
     }
+}
+
+/// `name` with every `-` written `_`: cargo treats the two as the same in a package name, so a
+/// ban on `transport_ws` or `async_process` matches `clauseo-transport-ws` or `async-process`.
+fn fold(name: &str) -> String {
+    name.replace('-', "_")
 }

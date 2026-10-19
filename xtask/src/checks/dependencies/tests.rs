@@ -176,6 +176,86 @@ pub(super) fn forbidden_workspace_crate() -> Inspection {
     run_on(&workspace("workspace-crate", rows, "", &crates))
 }
 
+pub(super) fn comment_after_header() -> Inspection {
+    protocol(
+        "comment",
+        "[dependencies] # runtime\ntauri = { path = \"../../vendor/tauri\" }\n",
+        vec![tauri()],
+    )
+}
+
+pub(super) fn quoted_key() -> Inspection {
+    protocol(
+        "quoted",
+        "[dependencies]\n'tauri' = { path = \"../../vendor/tauri\" }\n",
+        vec![tauri()],
+    )
+}
+
+pub(super) fn table_header() -> Inspection {
+    protocol(
+        "table-header",
+        "[dependencies.tauri]\npath = \"../../vendor/tauri\"\n",
+        vec![tauri()],
+    )
+}
+
+pub(super) fn dash_package_without_row() -> Inspection {
+    let crates = [
+        (
+            "crates/protocol".to_owned(),
+            manifest("clauseo-protocol", ""),
+        ),
+        (
+            "crates/fake_agent".to_owned(),
+            manifest("clauseo-fake-agent", ""),
+        ),
+    ];
+    run_on(&workspace("dash-no-row", PROTOCOL_ROW, "", &crates))
+}
+
+pub(super) fn workspace_crate_spelled_with_dash() -> Inspection {
+    let rows = "| `host` | sessions | protocol | transport_ws | exists |\n| `transport_ws` | dev transport | host | tauri | exists |\n";
+    let crates = [
+        (
+            "crates/host".to_owned(),
+            manifest(
+                "clauseo-host",
+                "[dependencies]\nclauseo-transport-ws = { path = \"../transport_ws\" }\n",
+            ),
+        ),
+        (
+            "crates/transport_ws".to_owned(),
+            manifest("clauseo-transport-ws", ""),
+        ),
+    ];
+    run_on(&workspace("dash-workspace", rows, "", &crates))
+}
+
+pub(super) fn crates_io_spelled_with_dash() -> Inspection {
+    let rows = "| `protocol` | events | serde | async_process | exists |\n";
+    let crates = [
+        (
+            "crates/protocol".to_owned(),
+            manifest(
+                "clauseo-protocol",
+                "[dependencies]\nasync-process = { path = \"../../vendor/async-process\" }\n",
+            ),
+        ),
+        vendor("async-process", ""),
+    ];
+    run_on(&workspace("dash-crates-io", rows, "", &crates))
+}
+
+pub(super) fn std_module_in_never() -> Inspection {
+    let rows = "| `protocol` | events | serde | net, tauri | exists |\n";
+    let crates = [(
+        "crates/protocol".to_owned(),
+        manifest("clauseo-protocol", ""),
+    )];
+    run_on(&workspace("std-module", rows, "", &crates))
+}
+
 pub(super) fn dev_dependency_passes() -> Inspection {
     protocol(
         "dev",
@@ -336,5 +416,37 @@ fn the_check_is_registered_under_its_name() {
         crate::checks::ALL
             .iter()
             .any(|check| check.name == "dependencies")
+    );
+}
+
+#[test]
+fn an_entry_whose_line_cannot_be_found_says_so() {
+    let crates = [
+        (
+            "crates/protocol".to_owned(),
+            manifest(
+                "clauseo-protocol",
+                "[dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n",
+            ),
+        ),
+        tauri(),
+    ];
+    let dir = workspace("unlocated", PROTOCOL_ROW, "", &crates);
+    let graph = graph::Graph::load(&dir, &["--offline"]).expect("cargo metadata runs");
+    let table = crates_table::load(&dir).expect("the table parses");
+    let row = table.row("protocol").expect("the row is there");
+    let found = graph.violations(&graph::Crate {
+        package: "clauseo-protocol",
+        manifest: "crates/protocol/Cargo.toml",
+        text: "",
+        row,
+    });
+    let printed: Vec<(u32, String)> = found.iter().map(|v| (v.line, v.message.clone())).collect();
+    assert_eq!(
+        printed,
+        [(
+            1,
+            "clauseo-protocol depends on tauri, which ARCHITECTURE.md forbids (xtask found no line declaring `tauri` in crates/protocol/Cargo.toml, so this points at line 1)".to_owned()
+        )]
     );
 }

@@ -34,9 +34,7 @@
 
 mod graph;
 
-use crate::checks::toml_lines::{
-    Line, declaration, in_entry, is_dependency_table, is_workspace_table, lines,
-};
+use crate::checks::toml_lines::{ANY, Manifest, NORMAL};
 use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
 use crate::violation::Violation;
 use crate::workspace::{self, CargoDependency, Context, PackageDependencies};
@@ -189,12 +187,12 @@ fn path_violations(
     deps: &PackageDependencies,
     members: &BTreeMap<String, PackageDependencies>,
 ) -> Vec<Violation> {
-    let lines = lines(text);
+    let manifest = Manifest::parse(text);
     deps.dependencies
         .iter()
         .filter(|dep| dep.path.is_some() && !members.contains_key(&dep.name))
         .map(|dep| {
-            let line = declaration(&lines, dep.key(), any_dependency_table).map_or(1, |l| l.no);
+            let line = manifest.declaration(dep.key(), ANY).unwrap_or(1);
             violation(
                 path,
                 line,
@@ -208,19 +206,6 @@ fn path_violations(
         .collect()
 }
 
-/// Any table a dependency can be declared in: normal, dev and build, with or without a target.
-fn any_dependency_table(header: &str) -> bool {
-    let header = header
-        .strip_prefix("[target.")
-        .and_then(|rest| rest.rsplit_once('.').map(|(_, table)| table))
-        .map_or(header, |table| table);
-    let table = header.trim_start_matches('[').trim_end_matches(']');
-    matches!(
-        table,
-        "dependencies" | "dev-dependencies" | "build-dependencies"
-    )
-}
-
 /// The violations of member `name`, which is not the desktop crate, whose manifest at `path`
 /// holds `text`: one for each normal dependency on a Tauri family member, at the line that
 /// declares it, else line 1.
@@ -230,12 +215,12 @@ pub(crate) fn member_violations(
     text: &str,
     deps: &PackageDependencies,
 ) -> Vec<Violation> {
-    let lines = lines(text);
+    let manifest = Manifest::parse(text);
     deps.dependencies
         .iter()
         .filter(|dep| dep.is_normal() && is_tauri(&dep.name))
         .map(|dep| {
-            let line = declaration(&lines, dep.key(), is_dependency_table).map_or(1, |l| l.no);
+            let line = manifest.declaration(dep.key(), NORMAL).unwrap_or(1);
             violation(
                 path,
                 line,
@@ -420,55 +405,46 @@ fn feature_table_violations(
 /// Finds the lines that violations point at, in the desktop and root manifests.
 struct Locator<'a> {
     desktop_path: &'a str,
-    desktop: Vec<Line<'a>>,
-    root: Vec<Line<'a>>,
+    desktop: Manifest<'a>,
+    root: Manifest<'a>,
 }
 
 impl<'a> Locator<'a> {
     fn new(manifests: &Manifests<'a>) -> Self {
         Locator {
             desktop_path: manifests.desktop_path,
-            desktop: lines(manifests.desktop),
-            root: lines(manifests.root),
+            desktop: Manifest::parse(manifests.desktop),
+            root: Manifest::parse(manifests.root),
         }
     }
 
     /// A violation at the desktop line that declares `key`, else at line 1.
     fn dependency(&self, key: &str, message: String, fix: &str) -> Violation {
-        let line = declaration(&self.desktop, key, is_dependency_table).map_or(1, |line| line.no);
+        let line = self.desktop.declaration(key, NORMAL).unwrap_or(1);
         violation(self.desktop_path, line, message, fix)
     }
 
     /// The `[dependencies]` header of the desktop manifest, else line 1.
     fn dependencies_header(&self) -> u32 {
-        self.desktop
-            .iter()
-            .find(|line| line.text.trim() == "[dependencies]")
-            .map_or(1, |line| line.no)
+        self.desktop.dependencies_header().unwrap_or(1)
     }
 
     /// Where the entry for `key` names `feature`: in the desktop entry, else in the root's
     /// `[workspace.dependencies]` entry, else the desktop declaration, else line 1.
     fn feature(&self, key: &str, feature: &str) -> (&'a str, u32) {
-        let quoted = format!("\"{feature}\"");
-        let own = declaration(&self.desktop, key, is_dependency_table);
-        if let Some(line) = own.and_then(|declared| in_entry(&self.desktop, declared, &quoted)) {
-            return (self.desktop_path, line.no);
+        if let Some(line) = self.desktop.feature_in_entry(key, NORMAL, feature) {
+            return (self.desktop_path, line);
         }
-        let inherited = declaration(&self.root, key, is_workspace_table);
-        if let Some(line) = inherited.and_then(|declared| in_entry(&self.root, declared, &quoted)) {
-            return (WORKSPACE_MANIFEST, line.no);
+        if let Some(line) = self.root.workspace_feature(key, feature) {
+            return (WORKSPACE_MANIFEST, line);
         }
-        (self.desktop_path, own.map_or(1, |line| line.no))
+        let own = self.desktop.declaration(key, NORMAL);
+        (self.desktop_path, own.unwrap_or(1))
     }
 
     /// The `[features]` line of the desktop manifest that holds `"item"`, else line 1.
     fn feature_item(&self, item: &str) -> u32 {
-        let quoted = format!("\"{item}\"");
-        self.desktop
-            .iter()
-            .find(|line| line.table == "[features]" && line.text.contains(&quoted))
-            .map_or(1, |line| line.no)
+        self.desktop.feature_item(item).unwrap_or(1)
     }
 }
 
