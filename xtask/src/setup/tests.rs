@@ -54,6 +54,15 @@ pub(super) fn expected_winget(b: &Binary) -> String {
     )
 }
 
+/// The curl command that downloads `url` to `asset`: three retries, any error retried, 30 s to
+/// connect and 300 s for each attempt.
+pub(super) fn expected_curl(asset: &str, url: &str) -> String {
+    format!(
+        "curl -sSfL --retry 3 --retry-all-errors --connect-timeout 30 --max-time 300 -o {asset} \
+         {url}"
+    )
+}
+
 /// The file a curl command writes: the argument after `-o`.
 pub(super) fn curl_output(cmd: &Cmd) -> &str {
     let at = cmd.args.iter().position(|arg| arg == "-o").unwrap();
@@ -227,10 +236,7 @@ fn install_runs_the_pinned_command_for_each_os_and_arch() {
                     let asset = expected_asset(b, os, arch);
                     let url = expected_url(b, &asset);
                     let staging = format!(".xtask-setup-{}-{}", b.name, std::process::id());
-                    (
-                        format!("curl -sSfL --max-time 600 -o {asset} {url}"),
-                        bin.join(staging),
-                    )
+                    (expected_curl(&asset, &url), bin.join(staging))
                 }
             })
             .collect();
@@ -298,7 +304,7 @@ fn run_checks_the_version_after_the_install() {
     let mut expected = cargo_installs();
     expected.extend([
         "faketool version".to_owned(),
-        format!("curl -sSfL --max-time 600 -o {asset} {url}"),
+        expected_curl(&asset, &url),
         "faketool version".to_owned(),
     ]);
     assert_eq!(ran, expected);

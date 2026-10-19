@@ -12,7 +12,20 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::time::Duration;
 
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_mins(10);
+mod staging;
+
+pub(crate) use staging::clear_staging_leftovers;
+
+/// curl's `--retry`: a failed attempt (a reset, a 502 from GitHub) is tried again this many times.
+const CURL_RETRIES: u64 = 3;
+/// curl's `--max-time`, the limit on each attempt, in seconds.
+const CURL_MAX_TIME_S: u64 = 5 * 60;
+/// What curl may take beyond its attempts: the waits between them (1, 2 then 4 s) and startup.
+const CURL_MARGIN_S: u64 = 60;
+/// `run_timed`'s limit for curl: every attempt at its `--max-time`, plus the margin. It is longer
+/// than curl's own limits together, so curl always stops itself first and says why.
+const DOWNLOAD_TIMEOUT: Duration =
+    Duration::from_secs((CURL_RETRIES + 1) * CURL_MAX_TIME_S + CURL_MARGIN_S);
 const UNPACK_TIMEOUT: Duration = Duration::from_secs(60);
 const WINGET_TIMEOUT: Duration = Duration::from_mins(30);
 
@@ -187,13 +200,19 @@ fn download_into<W: Write>(
         "installing {} {}: downloading {}",
         binary.name, binary.version, download.url
     ));
-    let staging = bin.join(format!(
-        "{STAGING_PREFIX}{}-{}",
-        binary.name,
-        std::process::id()
-    ));
-    let placed = fresh_dir(bin, &staging)
-        .and_then(|()| fetch_check_place(binary, download, &staging, bin, runner));
+    let name = format!("{}-{}", binary.name, std::process::id());
+    // The lock is held until the staging dir is removed, so a sweep never takes it from this run.
+    let (staging, lock) = match staging::fresh_dir(bin, &name) {
+        Ok(made) => made,
+        Err(error) => {
+            out.failure(
+                &format!("could not make a staging dir in {}: {error}", bin.display()),
+                &retry_fix(bin),
+            );
+            return false;
+        }
+    };
+    let placed = fetch_check_place(binary, download, &staging, bin, runner);
     let mut ok = match placed {
         Ok(()) => {
             out.note(format!(
@@ -219,81 +238,8 @@ fn download_into<W: Write>(
         }
         _ => {}
     }
+    drop(lock);
     ok
-}
-
-/// The start of the name of every staging directory `setup` makes in bin.
-const STAGING_PREFIX: &str = ".xtask-setup-";
-
-/// Makes `bin` if needed, and `staging` in it, empty.
-fn fresh_dir(bin: &Path, staging: &Path) -> Result<(), Failure> {
-    let made = fs::create_dir_all(bin).and_then(|()| match fs::remove_dir_all(staging) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-        _ => fs::create_dir(staging),
-    });
-    made.map_err(|error| {
-        (
-            format!("could not make {}: {error}", staging.display()),
-            retry_fix(bin),
-        )
-    })
-}
-
-/// Removes the staging leftovers in `machine`'s cargo bin, on macOS and Linux, printing a failure
-/// when that fails. Returns whether it worked. `setup --binaries` runs it first, whether or not
-/// anything downloads. Only `setup` makes `STAGING_PREFIX` entries, so each one left is from a
-/// run that was interrupted (Ctrl-C, a kill) before it removed its own. Two setups at once would
-/// remove each other's: the other one's download then fails, and bin is still never half-written.
-pub(crate) fn clear_staging_leftovers<W: Write>(
-    out: &mut Printer<W>,
-    machine: &Machine<'_>,
-) -> bool {
-    let Some(bin) = machine
-        .cargo_bin
-        .as_deref()
-        .filter(|_| machine.os != "windows")
-    else {
-        return true;
-    };
-    match remove_staging_leftovers(bin) {
-        Ok(()) => true,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => true,
-        Err(error) => {
-            out.failure(
-                &format!(
-                    "could not remove what an interrupted setup left in {}: {error}",
-                    bin.display()
-                ),
-                &format!(
-                    "remove the {STAGING_PREFIX}* entries in {} by hand",
-                    bin.display()
-                ),
-            );
-            false
-        }
-    }
-}
-
-/// Removes every entry in `bin` whose name starts with `STAGING_PREFIX`. A symlink is removed,
-/// never followed.
-fn remove_staging_leftovers(bin: &Path) -> io::Result<()> {
-    for entry in fs::read_dir(bin)? {
-        let entry = entry?;
-        if !entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with(STAGING_PREFIX)
-        {
-            continue;
-        }
-        let path = entry.path();
-        if fs::symlink_metadata(&path)?.is_dir() {
-            fs::remove_dir_all(&path)?;
-        } else {
-            fs::remove_file(&path)?;
-        }
-    }
-    Ok(())
 }
 
 /// Downloads into `staging`, checks the sha256, unpacks if needed, and renames the binary into
@@ -306,12 +252,7 @@ fn fetch_check_place(
     runner: &mut Runner<'_>,
 ) -> Result<(), Failure> {
     let (name, asset, url) = (binary.name, download.asset.as_str(), download.url.as_str());
-    // curl's own limit ends it even when xtask is gone (Ctrl-C reaches xtask, not curl's group).
-    let max_time = DOWNLOAD_TIMEOUT.as_secs().to_string();
-    let curl = Cmd::new(
-        Program::Named("curl"),
-        ["-sSfL", "--max-time", &max_time, "-o", asset, url],
-    );
+    let curl = curl_cmd(asset, url);
     let fix = format!(
         "run `{curl}` by hand in an empty directory and check its output, then run cargo xtask \
          setup --binaries again"
@@ -359,8 +300,23 @@ fn fetch_check_place(
             staging.join(name)
         }
     };
+    let regular = fs::symlink_metadata(&unpacked).map_err(|error| {
+        (
+            format!("could not read {}: {error}", unpacked.display()),
+            retry_fix(bin),
+        )
+    })?;
+    if !regular.is_file() {
+        return Err((
+            format!("{asset} holds no regular file named {name}, so {name} is not installed"),
+            format!(
+                "the release at {url} holds no regular file named {name}: check the asset layout \
+                 before bumping the pin"
+            ),
+        ));
+    }
     let destination = bin.join(name);
-    ready_to_run(&unpacked)
+    make_executable(&unpacked)
         .and_then(|()| fs::rename(&unpacked, &destination))
         .map_err(|error| {
             (
@@ -368,6 +324,29 @@ fn fetch_check_place(
                 retry_fix(bin),
             )
         })
+}
+
+/// The curl command that downloads `url` to `asset`. A failed attempt (a reset, a 502) is tried
+/// again `CURL_RETRIES` times; `--retry-all-errors` is needed for a reset, which curl 8.7 (macOS)
+/// does not retry otherwise. A retry truncates what the attempt before wrote. curl's own limits
+/// end it even when xtask is gone (Ctrl-C reaches xtask, not curl's group).
+fn curl_cmd(asset: &str, url: &str) -> Cmd {
+    Cmd::new(
+        Program::Named("curl"),
+        [
+            "-sSfL",
+            "--retry",
+            &CURL_RETRIES.to_string(),
+            "--retry-all-errors",
+            "--connect-timeout",
+            "30",
+            "--max-time",
+            &CURL_MAX_TIME_S.to_string(),
+            "-o",
+            asset,
+            url,
+        ],
+    )
 }
 
 /// Runs one step of a download through `runner`. `what` names the step in its failure.
@@ -410,14 +389,8 @@ pub(crate) fn sha256_of(file: &Path) -> io::Result<String> {
     Ok(hex)
 }
 
-/// Fails unless `file` is a regular file, and on Unix makes it executable.
-fn ready_to_run(file: &Path) -> io::Result<()> {
-    if !fs::symlink_metadata(file)?.is_file() {
-        return Err(io::Error::other(format!(
-            "{} is not a regular file",
-            file.display()
-        )));
-    }
+/// On Unix makes `file` executable.
+fn make_executable(file: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

@@ -7,8 +7,8 @@ use crate::scratch::Scratch;
 use crate::setup::AssetSha256;
 use crate::setup::BINARIES;
 use crate::setup::tests::{
-    ASSET_BYTES, binary, curl_output, exited, expected_asset, expected_url, expected_winget,
-    fake_tool, linux,
+    ASSET_BYTES, binary, curl_output, exited, expected_asset, expected_curl, expected_url,
+    expected_winget, fake_tool, linux,
 };
 use std::path::PathBuf;
 
@@ -152,8 +152,9 @@ fn a_failed_download_leaves_bin_untouched_and_names_curl_as_the_fix() {
     let asset = expected_asset(gitleaks, "linux", "x86_64");
     let url = expected_url(gitleaks, &asset);
     let fix = format!(
-        "    fix: run `curl -sSfL --max-time 600 -o {asset} {url}` by hand in an empty directory and check its \
-         output, then run cargo xtask setup --binaries again"
+        "    fix: run `{}` by hand in an empty directory and check its output, then run cargo \
+         xtask setup --binaries again",
+        expected_curl(&asset, &url)
     );
     let cases: [(&str, io::Result<Ended>); 3] = [
         (
@@ -165,7 +166,7 @@ fn a_failed_download_leaves_bin_untouched_and_names_curl_as_the_fix() {
             ),
         ),
         (
-            "did not finish within 600 s, so it was stopped",
+            "did not finish within 1260 s, so it was stopped",
             Ok(Ended::TimedOut),
         ),
         (
@@ -349,15 +350,25 @@ fn the_real_tar_extract_refuses_a_gitleaks_member_that_is_a_symlink() {
     let (ok, printed) = install_real_tar_gz(&archive, &bin);
     assert!(!ok);
     assert_eq!(files_in(&bin), before);
-    let staging = bin.join(format!(".xtask-setup-gitleaks-{}", std::process::id()));
+    let asset = "faketool_fake-version_linux_x86_64";
+    let url =
+        format!("https://github.com/example/faketool/releases/download/vfake-version/{asset}");
     assert!(
         printed.ends_with(&format!(
-            "could not move gitleaks into {}: {} is not a regular file\n    fix: check that you \
-             can write to {}, then run cargo xtask setup --binaries again\n",
-            bin.display(),
-            staging.join("gitleaks").display(),
-            bin.display()
+            "{asset} holds no regular file named gitleaks, so gitleaks is not installed\n    fix: \
+             the release at {url} holds no regular file named gitleaks: check the asset layout \
+             before bumping the pin\n"
         )),
         "{printed}"
     );
+}
+
+#[test]
+fn curl_retries_and_its_own_limit_fires_before_run_timed_stops_it() {
+    let (asset, url) = ("a.tar.gz", "https://example.com/a.tar.gz");
+    assert_eq!(curl_cmd(asset, url).to_string(), expected_curl(asset, url));
+    // Four attempts of 300 s each, and the 1, 2 and 4 s curl waits between them.
+    let curl_at_most = Duration::from_secs(4 * 300 + 1 + 2 + 4);
+    assert!(DOWNLOAD_TIMEOUT > curl_at_most);
+    assert_eq!(DOWNLOAD_TIMEOUT, Duration::from_mins(21));
 }
