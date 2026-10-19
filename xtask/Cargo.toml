@@ -11,9 +11,9 @@ workspace = true
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-# The core-io check: `span-locations` gives real line numbers to the tokens syn parses.
 # The docs check reads Markdown with it: code spans, links, reference definitions, code blocks.
 pulldown-cmark = { version = "0.13.4", default-features = false }
+# The core-io check: `span-locations` gives real line numbers to the tokens syn parses.
 proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
