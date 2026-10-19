@@ -36,25 +36,19 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
 
 fn run(ctx: &Context) -> Inspection {
     match changes::repo_files(&ctx.root) {
-        Ok(files) => {
-            let markdown: Vec<String> = files
-                .into_iter()
-                .filter(|file| Path::new(file).extension().is_some_and(|ext| ext == "md"))
-                .collect();
-            inspect(&ctx.root, &markdown)
-        }
+        Ok(files) => inspect(&ctx.root, &files),
         // Not a git repo, so there are no files to read. The runner reports the zero.
         Err(_) => Inspection::default(),
     }
 }
 
-/// Checks the Markdown files `markdown` (repo-relative) under `root`, and the required files.
+/// Checks the Markdown files among `files` (repo-relative) under `root`, and the required files.
 /// Counts each Markdown file it could read.
-fn inspect(root: &Path, markdown: &[String]) -> Inspection {
+fn inspect(root: &Path, files: &[String]) -> Inspection {
     let planned = planned_rows(root);
     let mut inspected = 0;
     let mut violations = Vec::new();
-    for file in markdown {
+    for file in files.iter().filter(|file| is_markdown(file)) {
         match checks::read_repo_file(root, file) {
             Ok(Some(text)) => {
                 inspected += 1;
@@ -71,6 +65,14 @@ fn inspect(root: &Path, markdown: &[String]) -> Inspection {
     violations.sort_by(|a, b| (a.path.as_str(), a.line).cmp(&(b.path.as_str(), b.line)));
     violations.dedup();
     Inspection::new(inspected, violations)
+}
+
+/// True for a Markdown file by its extension, in any case: `.md` or `.markdown`.
+fn is_markdown(file: &str) -> bool {
+    Path::new(file)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown"))
 }
 
 /// The names of the Crates-table rows whose status is `planned`. A table that does not read
@@ -186,6 +188,85 @@ crate::checks::planted::cases! {
         "CLAUDE.md:2: CLAUDE.md must hold only `@AGENTS.md`\n    \
          fix: move what CLAUDE.md holds besides `@AGENTS.md` into AGENTS.md, then keep only `@AGENTS.md` in CLAUDE.md",
     ]) => cases::claude_extra_line,
+    /// An indented code block is not a fence: the link after it is checked.
+    indented_four_fence_is_code_not_a_fence: FailsWith(&[
+        "GUIDE.md:4: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]) => cases::indented_four_fence_is_code_not_a_fence,
+    /// A fence indented up to three spaces opens, so its contents are not read.
+    fence_indented_three_hides_its_contents: Passes => cases::fence_indented_three_hides_its_contents,
+    /// A fence inside a list item, indented to the item's text, opens and hides its contents.
+    fence_in_list_item_hides_its_contents: Passes => cases::fence_in_list_item_hides_its_contents,
+    /// An `<a href>` to a missing file fails at the tag's line.
+    html_link_to_a_missing_file_fails: FailsWith(&[
+        "GUIDE.md:1: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]) => cases::html_link_to_a_missing_file_fails,
+    /// An `<img src>` to a missing file fails, with the quotes around it removed.
+    html_image_to_a_missing_file_fails: FailsWith(&[
+        "GUIDE.md:1: the relative link `nope.png` does not resolve: `nope.png` does not exist\n    \
+         fix: create `nope.png`, or correct or remove the link",
+    ]) => cases::html_image_to_a_missing_file_fails,
+    /// A reference definition whose destination is on the next line fails at its label's line.
+    definition_destination_on_next_line_fails: FailsWith(&[
+        "GUIDE.md:3: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]) => cases::definition_destination_on_next_line_fails,
+    /// A reference definition inside a list item is read.
+    definition_in_list_item_fails: FailsWith(&[
+        "GUIDE.md:1: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]) => cases::definition_in_list_item_fails,
+    /// A reference definition inside a block quote is read.
+    definition_in_block_quote_fails: FailsWith(&[
+        "GUIDE.md:1: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]) => cases::definition_in_block_quote_fails,
+    /// A `$ ` prompt before `cargo xtask` in a fence does not hide the command.
+    prompt_command_in_fence_fails: FailsWith(&[
+        "GUIDE.md:2: the xtask command `cargo xtask frobnicate` does not parse: error: unrecognized subcommand 'frobnicate'\n    \
+         fix: correct it to a command that `cargo xtask --help` lists (`cargo xtask <command> --help` lists its flags), or remove it",
+    ]) => cases::prompt_command_in_fence_fails,
+    /// `VAR=value` before `cargo xtask` in a span does not hide the command.
+    env_assignment_command_in_span_fails: FailsWith(&[
+        "GUIDE.md:1: the xtask command `cargo xtask frobnicate` does not parse: error: unrecognized subcommand 'frobnicate'\n    \
+         fix: correct it to a command that `cargo xtask --help` lists (`cargo xtask <command> --help` lists its flags), or remove it",
+    ]) => cases::env_assignment_command_in_span_fails,
+    /// A command after `&&` in a span is checked on its own.
+    chained_command_in_span_fails: FailsWith(&[
+        "GUIDE.md:1: the xtask command `cargo xtask frobnicate` does not parse: error: unrecognized subcommand 'frobnicate'\n    \
+         fix: correct it to a command that `cargo xtask --help` lists (`cargo xtask <command> --help` lists its flags), or remove it",
+    ]) => cases::chained_command_in_span_fails,
+    /// An indented code block line that starts a command is checked.
+    indented_code_command_fails: FailsWith(&[
+        "GUIDE.md:3: the xtask command `cargo xtask frobnicate` does not parse: error: unrecognized subcommand 'frobnicate'\n    \
+         fix: correct it to a command that `cargo xtask --help` lists (`cargo xtask <command> --help` lists its flags), or remove it",
+    ]) => cases::indented_code_command_fails,
+    /// A fence that opens on a list-marker line is a fence, and its command is checked.
+    list_marker_fence_command_fails: FailsWith(&[
+        "GUIDE.md:2: the xtask command `cargo xtask frobnicate` does not parse: error: unrecognized subcommand 'frobnicate'\n    \
+         fix: correct it to a command that `cargo xtask --help` lists (`cargo xtask <command> --help` lists its flags), or remove it",
+    ]) => cases::list_marker_fence_command_fails,
+    /// `--help` does not hide an unknown subcommand after it.
+    help_with_an_unknown_subcommand_fails: FailsWith(&[
+        "GUIDE.md:1: the xtask command `cargo xtask --help frobnicate` does not parse: error: unrecognized subcommand 'frobnicate'\n    \
+         fix: correct it to a command that `cargo xtask --help` lists (`cargo xtask <command> --help` lists its flags), or remove it",
+    ]) => cases::help_with_an_unknown_subcommand_fails,
+    /// `--help` does not hide an unknown flag after it.
+    help_with_an_unknown_flag_fails: FailsWith(&[
+        "GUIDE.md:1: the xtask command `cargo xtask check --help --frobnicate` does not parse: error: unexpected argument '--frobnicate' found\n    \
+         fix: correct it to a command that `cargo xtask --help` lists (`cargo xtask <command> --help` lists its flags), or remove it",
+    ]) => cases::help_with_an_unknown_flag_fails,
+    /// A `.MD` file is a Markdown file, and its links are checked.
+    uppercase_md_extension_is_checked: FailsWith(&[
+        "GUIDE.MD:1: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]) => cases::uppercase_md_extension_is_checked,
+    /// A `.markdown` file is a Markdown file, and its links are checked.
+    markdown_extension_is_checked: FailsWith(&[
+        "guide.markdown:1: the relative link `nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]) => cases::markdown_extension_is_checked,
     /// A repo without `AGENTS.md` fails at line 1, the whole-file line.
     missing_agents: FailsWith(&[
         "AGENTS.md:1: AGENTS.md does not exist\n    \

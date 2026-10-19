@@ -235,3 +235,146 @@ pub(super) fn escaped_brackets_and_fences_pass() -> Inspection {
         ````\n";
     docs("escaped-brackets", vec![("GUIDE.md", guide.to_owned())])
 }
+
+pub(super) fn indented_four_fence_is_code_not_a_fence() -> Inspection {
+    docs(
+        "indented-four-fence",
+        vec![("GUIDE.md", "Text.\n\n    ```\n[x](nope.md)\n".to_owned())],
+    )
+}
+
+pub(super) fn fence_indented_three_hides_its_contents() -> Inspection {
+    docs(
+        "fence-indented-three",
+        vec![("GUIDE.md", "   ```\n[x](nope.md)\n   ```\n".to_owned())],
+    )
+}
+
+pub(super) fn fence_in_list_item_hides_its_contents() -> Inspection {
+    docs(
+        "fence-in-list-item",
+        vec![(
+            "GUIDE.md",
+            "- item\n\n  ```\n[x](nope.md)\n  ```\n".to_owned(),
+        )],
+    )
+}
+
+pub(super) fn html_link_to_a_missing_file_fails() -> Inspection {
+    docs(
+        "html-link",
+        vec![("GUIDE.md", "<a href=\"nope.md\">x</a>\n".to_owned())],
+    )
+}
+
+pub(super) fn html_image_to_a_missing_file_fails() -> Inspection {
+    docs(
+        "html-image",
+        vec![("GUIDE.md", "<img alt=\"x\" src='nope.png'>\n".to_owned())],
+    )
+}
+
+pub(super) fn definition_destination_on_next_line_fails() -> Inspection {
+    docs(
+        "definition-next-line",
+        vec![("GUIDE.md", "See [g].\n\n[g]:\n  nope.md\n".to_owned())],
+    )
+}
+
+pub(super) fn definition_in_list_item_fails() -> Inspection {
+    docs(
+        "definition-list-item",
+        vec![("GUIDE.md", "- [g]: nope.md\n".to_owned())],
+    )
+}
+
+pub(super) fn definition_in_block_quote_fails() -> Inspection {
+    docs(
+        "definition-block-quote",
+        vec![("GUIDE.md", "> [g]: nope.md\n".to_owned())],
+    )
+}
+
+pub(super) fn prompt_command_in_fence_fails() -> Inspection {
+    docs(
+        "prompt-command",
+        vec![(
+            "GUIDE.md",
+            "```sh\n$ cargo xtask frobnicate\n```\n".to_owned(),
+        )],
+    )
+}
+
+pub(super) fn env_assignment_command_in_span_fails() -> Inspection {
+    docs(
+        "env-command",
+        vec![(
+            "GUIDE.md",
+            "Run `RUST_LOG=1 cargo xtask frobnicate`.\n".to_owned(),
+        )],
+    )
+}
+
+pub(super) fn chained_command_in_span_fails() -> Inspection {
+    docs(
+        "chained-command",
+        vec![(
+            "GUIDE.md",
+            "Run `cargo xtask check && cargo xtask frobnicate`.\n".to_owned(),
+        )],
+    )
+}
+
+pub(super) fn indented_code_command_fails() -> Inspection {
+    docs(
+        "indented-code-command",
+        vec![(
+            "GUIDE.md",
+            "Text.\n\n    cargo xtask frobnicate\n".to_owned(),
+        )],
+    )
+}
+
+pub(super) fn list_marker_fence_command_fails() -> Inspection {
+    docs(
+        "list-marker-fence",
+        vec![(
+            "GUIDE.md",
+            "- ```sh\n  cargo xtask frobnicate\n  ```\n".to_owned(),
+        )],
+    )
+}
+
+pub(super) fn help_with_an_unknown_subcommand_fails() -> Inspection {
+    docs(
+        "help-unknown-subcommand",
+        vec![(
+            "GUIDE.md",
+            "Run `cargo xtask --help frobnicate`.\n".to_owned(),
+        )],
+    )
+}
+
+pub(super) fn help_with_an_unknown_flag_fails() -> Inspection {
+    docs(
+        "help-unknown-flag",
+        vec![(
+            "GUIDE.md",
+            "Run `cargo xtask check --help --frobnicate`.\n".to_owned(),
+        )],
+    )
+}
+
+pub(super) fn uppercase_md_extension_is_checked() -> Inspection {
+    docs(
+        "uppercase-md",
+        vec![("GUIDE.MD", "See [x](nope.md).\n".to_owned())],
+    )
+}
+
+pub(super) fn markdown_extension_is_checked() -> Inspection {
+    docs(
+        "markdown-extension",
+        vec![("guide.markdown", "See [x](nope.md).\n".to_owned())],
+    )
+}
