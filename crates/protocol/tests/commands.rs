@@ -117,7 +117,9 @@ fn command_rejects_unknown_field() {
     let RawPayload::Map(fields) = entry(entry(&mut packed, "command"), "send_prompt") else {
         panic!("not a map");
     };
-    fields.push((RawPayload::Str("priority".to_owned()), RawPayload::U64(1)));
+    let mut extended = fields.to_vec();
+    extended.push((RawPayload::Str("priority".into()), RawPayload::U64(1)));
+    *fields = extended.into();
     let bytes = rmp_serde::to_vec_named(&packed).unwrap();
     assert!(rmp_serde::from_slice::<CommandEnvelope>(&bytes).is_err());
 }
@@ -329,7 +331,7 @@ fn unknown_delivery_refused_by_validate() {
     *entry(
         entry(entry(&mut packed, "command"), "send_prompt"),
         "delivery",
-    ) = RawPayload::Str("teleport".to_owned());
+    ) = RawPayload::Str("teleport".into());
     let bytes = rmp_serde::to_vec_named(&packed).unwrap();
     let unpacked: CommandEnvelope = rmp_serde::from_slice(&bytes).unwrap();
     for envelope in [decoded, unpacked] {

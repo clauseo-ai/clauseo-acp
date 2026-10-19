@@ -282,7 +282,7 @@ impl OpenDataEnum for ContentBlock {
     fn unknown(kind: &str) -> Self {
         // A plain string: a unit kind a newer Clauseo added. Its JSON is the string itself, which
         // always has a JSON form.
-        let raw = RawPayload::Str(kind.to_owned()).to_json_text().ok();
+        let raw = RawPayload::Str(kind.into()).to_json_text().ok();
         Self::Unsupported {
             kind: kind.to_owned(),
             raw_from: RawFrom::Clauseo,
@@ -292,7 +292,7 @@ impl OpenDataEnum for ContentBlock {
 
     fn unknown_data<'de, A: MapAccess<'de>>(kind: &str, map: &mut A) -> Result<Self, A::Error> {
         let payload: RawPayload = map.next_value()?;
-        let whole = RawPayload::Map(vec![(RawPayload::Str(kind.to_owned()), payload)]);
+        let whole = RawPayload::Map(vec![(RawPayload::Str(kind.into()), payload)].into());
         Self::unsupported(kind, &whole)
     }
 }

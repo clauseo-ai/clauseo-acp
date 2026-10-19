@@ -106,14 +106,17 @@ fn unknown_kind_round_trips_verbatim() {
 fn unknown_kind_round_trips_verbatim_in_messagepack() {
     // The stored form R7 writes: a named-map envelope with binary ids, and a payload holding
     // binary data, an integer key and keys in no sorted order.
-    let payload = RawPayload::Map(vec![
-        (
-            RawPayload::Str("z".to_owned()),
-            RawPayload::Bytes(vec![0, 159, 255]),
-        ),
-        (RawPayload::U64(7), RawPayload::I64(-9)),
-        (RawPayload::Str("a".to_owned()), RawPayload::F64(1.5)),
-    ]);
+    let payload = RawPayload::Map(
+        vec![
+            (
+                RawPayload::Str("z".into()),
+                RawPayload::Bytes(vec![0, 159, 255].into()),
+            ),
+            (RawPayload::U64(7), RawPayload::I64(-9)),
+            (RawPayload::Str("a".into()), RawPayload::F64(1.5)),
+        ]
+        .into(),
+    );
     let event = DomainEvent::Unknown {
         kind: "later_kind".to_owned(),
         payload,
@@ -130,7 +133,7 @@ fn unknown_kind_round_trips_verbatim_in_messagepack() {
         panic!("not a map: {as_raw:?}");
     };
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].0, RawPayload::Str("later_kind".to_owned()));
+    assert_eq!(entries[0].0, RawPayload::Str("later_kind".into()));
 
     // `serde_json::Value` cannot hold the binary payload, which is why `RawPayload` exists.
     assert!(rmp_serde::from_slice::<serde_json::Value>(&alone).is_err());
@@ -199,7 +202,7 @@ fn none_fields_are_omitted() {
     assert!(
         !entries
             .iter()
-            .any(|(k, _)| *k == RawPayload::Str("command_id".to_owned()))
+            .any(|(k, _)| *k == RawPayload::Str("command_id".into()))
     );
     assert_eq!(rmp_serde::from_slice::<Envelope>(&packed).unwrap(), quiet);
 
@@ -252,9 +255,11 @@ fn known_kind_with_bad_payload_is_an_error() {
     let good_packed = packed_raw(&expected);
     let bad_payloads = [
         (|payload: &mut RawPayload| remove_entry(payload, "checkpoint_before")) as fn(&mut _),
-        |payload| *entry(payload, "turn") = RawPayload::Bytes(vec![7; 15]),
-        |payload| *entry(payload, "turn") = RawPayload::Bytes(Uuid::nil().as_bytes().to_vec()),
-        |payload| *payload = RawPayload::Str("x".to_owned()),
+        |payload| *entry(payload, "turn") = RawPayload::Bytes(vec![7; 15].into()),
+        |payload| {
+            *entry(payload, "turn") = RawPayload::Bytes(Uuid::nil().as_bytes().to_vec().into());
+        },
+        |payload| *payload = RawPayload::Str("x".into()),
         |payload| *payload = RawPayload::Null,
     ];
     let bytes = rmp_serde::to_vec_named(&good_packed).unwrap();
@@ -293,7 +298,7 @@ fn domain_event_kind_is_the_key() {
             panic!("{} is not a map", event.kind());
         };
         assert_eq!(entries.len(), 1, "{}", event.kind());
-        assert_eq!(entries[0].0, RawPayload::Str(event.kind().to_owned()));
+        assert_eq!(entries[0].0, RawPayload::Str(event.kind().into()));
     }
     let archived = serde_json::to_string(&events[2]).unwrap();
     assert_eq!(archived, r#"{"thread_archived":{}}"#);
@@ -361,7 +366,9 @@ fn newer_optional_field_is_ignored() {
         let RawPayload::Map(entries) = map else {
             panic!("not a map: {map:?}");
         };
-        entries.push((RawPayload::Str("later".to_owned()), raw(r#"{"x":[1]}"#)));
+        let mut extended = entries.to_vec();
+        extended.push((RawPayload::Str("later".into()), raw(r#"{"x":[1]}"#)));
+        *entries = extended.into();
     };
     later(&mut packed);
     later(entry(entry(&mut packed, "event"), "turn_ended"));

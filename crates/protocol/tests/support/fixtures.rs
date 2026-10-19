@@ -152,7 +152,7 @@ pub fn entry<'a>(map: &'a mut RawPayload, key: &str) -> &'a mut RawPayload {
     };
     let found = entries
         .iter_mut()
-        .find(|(k, _)| *k == RawPayload::Str(key.to_owned()));
+        .find(|(k, _)| *k == RawPayload::Str(key.into()));
     &mut found.unwrap().1
 }
 
@@ -161,7 +161,9 @@ pub fn remove_entry(map: &mut RawPayload, key: &str) {
     let RawPayload::Map(entries) = map else {
         panic!("not a map: {map:?}");
     };
-    entries.retain(|(k, _)| *k != RawPayload::Str(key.to_owned()));
+    let mut kept = entries.to_vec();
+    kept.retain(|(k, _)| *k != RawPayload::Str(key.into()));
+    *entries = kept.into();
 }
 
 /// Checks that `value` decodes back to itself from JSON and from `MessagePack`
