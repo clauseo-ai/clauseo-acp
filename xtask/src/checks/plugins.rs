@@ -83,7 +83,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
     source: file!(),
     run,
     #[cfg(test)]
-    planted: &[],
+    planted: tests::planted::PLANTED,
 };
 
 /// `--offline`: the check never downloads. `cargo xtask check` runs `deny` first, which fetches

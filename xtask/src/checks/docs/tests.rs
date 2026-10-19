@@ -57,8 +57,3 @@ fn violations_are_listed_by_file_then_line() {
         .collect();
     assert_eq!(places, ["a.md:3", "a.md:5", "b.md:3"]);
 }
-
-#[test]
-fn the_check_is_registered_under_its_name() {
-    assert!(crate::checks::ALL.iter().any(|check| check.name == "docs"));
-}

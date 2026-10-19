@@ -416,15 +416,6 @@ fn and_lists_read_as_english() {
 }
 
 #[test]
-fn the_check_is_registered_under_its_name() {
-    assert!(
-        crate::checks::ALL
-            .iter()
-            .any(|check| check.name == "dependencies")
-    );
-}
-
-#[test]
 fn an_entry_whose_line_cannot_be_found_says_so() {
     let crates = [
         (

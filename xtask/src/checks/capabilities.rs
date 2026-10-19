@@ -56,7 +56,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
     source: file!(),
     run,
     #[cfg(test)]
-    planted: &[],
+    planted: tests::planted::PLANTED,
 };
 
 /// Counts the capability files read; the inline objects in the Tauri config are not counted.

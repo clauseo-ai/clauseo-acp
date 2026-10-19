@@ -46,12 +46,3 @@ fn rows_with_problems_still_count() {
     assert_eq!(found.inspected, 2);
     assert_eq!(found.violations.len(), 2);
 }
-
-#[test]
-fn the_check_is_registered_under_its_name() {
-    assert!(
-        crate::checks::ALL
-            .iter()
-            .any(|check| check.name == "budgets")
-    );
-}

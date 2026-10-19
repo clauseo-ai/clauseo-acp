@@ -352,12 +352,3 @@ fn a_symlink_under_src_fails_at_the_crate_s_row() {
         ]
     );
 }
-
-#[test]
-fn the_check_is_registered_under_its_name() {
-    assert!(
-        crate::checks::ALL
-            .iter()
-            .any(|check| check.name == "core-io")
-    );
-}

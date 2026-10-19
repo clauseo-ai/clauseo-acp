@@ -1,10 +1,11 @@
-//! Tests for the `tauri-config` check: each rule on a failing and a passing config, and `run` on a
-//! scratch tree laid out like the repo.
+//! Tests for the `tauri-config` check: each rule on a failing and a passing config, and of the
+//! pure build.rs rules. The scratch-tree cases are in `tests/planted.rs`, built in
+//! `tests/cases.rs`.
+
+mod cases;
+pub(super) mod planted;
 
 use super::*;
-use crate::checks::tests::desktop_context;
-use crate::scratch::Scratch;
-use std::fs;
 
 /// A config that passes every rule, shaped like the committed one.
 const CONF: &str = r#"{
@@ -361,91 +362,6 @@ fn a_missing_or_invalid_tauri_conf_fails_once_at_line_one() {
 }
 
 #[test]
-fn build_rs_without_app_manifest_fails_at_line_one() {
-    let build = "crates/desktop/build.rs";
-    assert_eq!(
-        build_rs_violations(build, Some("fn main() {}\n")),
-        vec![violation(
-            build,
-            1,
-            "build.rs declares no AppManifest",
-            APP_MANIFEST_FIX
-        )]
-    );
-    assert_eq!(build_rs_violations(build, None).len(), 1);
-    assert_eq!(build_rs_violations(build, Some(BUILD)), Vec::new());
-}
-
-#[test]
-fn a_commented_out_manifest_does_not_count() {
-    let build = "crates/desktop/build.rs";
-    let commented = "// app_manifest( removed, AppManifest::new() too\nfn main() {\n    tauri_build::build();\n}\n";
-    assert_eq!(build_rs_violations(build, Some(commented)).len(), 1);
-    let half = "fn main() {\n    let a = Attributes::new().app_manifest(manifest()); // AppManifest::new()\n}\n";
-    assert_eq!(build_rs_violations(build, Some(half)).len(), 1);
-}
-
-#[test]
-fn a_manifest_with_commands_passes() {
-    let build = "crates/desktop/build.rs";
-    let with_commands = BUILD.replace(
-        "AppManifest::new()",
-        "AppManifest::new().commands(&[\"open_matter\"])",
-    );
-    assert_eq!(build_rs_violations(build, Some(&with_commands)), Vec::new());
-}
-
-#[test]
-fn capabilities_path_pattern_fails_at_its_line() {
-    let build = "crates/desktop/build.rs";
-    let text = BUILD.replace(
-        "tauri_build::AppManifest::new())",
-        "tauri_build::AppManifest::new())\n            .capabilities_path_pattern(\"elsewhere/*\")",
-    );
-    assert_eq!(
-        build_rs_violations(build, Some(&text)),
-        vec![violation(
-            build,
-            line_of(&text, "capabilities_path_pattern("),
-            "build.rs calls `capabilities_path_pattern(`",
-            PATH_PATTERN_FIX,
-        )]
-    );
-}
-
-#[test]
-fn the_check_is_registered_after_plugins() {
-    let at = |name| {
-        crate::checks::ALL
-            .iter()
-            .position(|check| check.name == name)
-    };
-    assert!(matches!((at("plugins"), at("tauri-config")), (Some(p), Some(t)) if p < t));
-}
-
-#[test]
-fn run_passes_a_clean_tree_and_fails_a_planted_setting_with_its_path() {
-    let dir = Scratch::new("tauri-config-run");
-    let ctx = desktop_context(&dir);
-    let conf = "crates/desktop/tauri.conf.json";
-    fs::create_dir_all(dir.join("crates/desktop")).expect("create the desktop dir");
-    fs::write(dir.join("crates/desktop/build.rs"), BUILD).expect("write build.rs");
-    fs::write(dir.join(conf), CONF).expect("write tauri.conf.json");
-    assert_eq!(run(&ctx), Inspection::new(2, Vec::new()));
-    let planted = CONF.replace("\"withGlobalTauri\": false", "\"withGlobalTauri\": true");
-    fs::write(dir.join(conf), &planted).expect("write tauri.conf.json");
-    assert_eq!(
-        run(&ctx).violations,
-        vec![violation(
-            conf,
-            line_of(&planted, "withGlobalTauri"),
-            "app.withGlobalTauri must be false",
-            GLOBAL_TAURI_FIX,
-        )]
-    );
-}
-
-#[test]
 fn every_platform_config_name_is_covered() {
     let names = platform_configs();
     assert_eq!(names.len(), 15);
@@ -458,40 +374,4 @@ fn every_platform_config_name_is_covered() {
     ] {
         assert!(names.contains(&name.to_owned()), "{name}");
     }
-}
-
-#[test]
-fn run_fails_on_a_platform_config() {
-    let dir = Scratch::new("tauri-config-platform");
-    fs::create_dir_all(dir.join("crates/desktop")).expect("create the desktop dir");
-    fs::write(dir.join("crates/desktop/build.rs"), BUILD).expect("write build.rs");
-    fs::write(dir.join("crates/desktop/tauri.conf.json"), CONF).expect("write tauri.conf.json");
-    let platform = "crates/desktop/tauri.macos.conf.json";
-    fs::write(dir.join(platform), "{\"app\":{\"withGlobalTauri\":true}}")
-        .expect("write the platform config");
-    assert_eq!(
-        run(&desktop_context(&dir)),
-        Inspection::new(
-            3,
-            vec![violation(
-                platform,
-                1,
-                "platform config `crates/desktop/tauri.macos.conf.json` overrides tauri.conf.json",
-                PLATFORM_FIX,
-            )]
-        )
-    );
-}
-
-#[test]
-fn run_fails_once_when_the_desktop_crate_is_not_a_member() {
-    let dir = Scratch::new("tauri-config-no-member");
-    let ctx = Context {
-        root: dir.to_path_buf(),
-        members: Vec::new(),
-        load_resolved_graph: false,
-    };
-    let found = run(&ctx).violations;
-    assert_eq!(found.len(), 1);
-    assert_eq!((found[0].path.as_str(), found[0].line), ("Cargo.toml", 1));
 }

@@ -1,4 +1,8 @@
-//! Tests for the `capabilities` check: `scan` on single files, and `run` on scratch trees.
+//! Tests for the `capabilities` check: `scan` and `inline_violations` on strings. The `run`
+//! cases on scratch trees are the planted cases in `tests/planted.rs`, built below.
+
+mod cases;
+pub(super) mod planted;
 
 use super::*;
 use crate::checks::tests::desktop_context;
@@ -196,15 +200,6 @@ fn one_string_that_trips_two_rules_points_both_at_its_line_without_escapes() {
     );
 }
 
-#[test]
-fn the_check_is_registered_under_its_name() {
-    assert!(
-        crate::checks::ALL
-            .iter()
-            .any(|check| check.name == "capabilities")
-    );
-}
-
 const CONF: &str = r#"{
   "app": {
     "security": {
@@ -271,98 +266,4 @@ fn string_capabilities_and_an_invalid_config_pass_inline() {
     let names = "{\"app\": {\"security\": {\"capabilities\": [\"main\", \"fs:x\"]}}}";
     assert_eq!(inline_violations(conf, names), Vec::new());
     assert_eq!(inline_violations(conf, "{ \"app\": "), Vec::new());
-}
-
-#[test]
-fn run_scans_inline_capabilities_in_the_config() {
-    let dir = Scratch::new("capabilities-inline");
-    let caps = dir.join("crates/desktop/capabilities");
-    fs::create_dir_all(&caps).expect("create the capability dir");
-    fs::write(caps.join("main.json"), CLEAN).expect("write main.json");
-    fs::write(dir.join("crates/desktop/tauri.conf.json"), CONF).expect("write the config");
-    let found = run(&desktop_context(&dir)).violations;
-    assert_eq!(found.len(), 2);
-    assert!(
-        found
-            .iter()
-            .all(|v| v.path == "crates/desktop/tauri.conf.json" && v.line == 9)
-    );
-}
-
-#[test]
-fn a_ds_store_and_a_backup_file_are_ignored() {
-    let dir = Scratch::new("capabilities-ignored");
-    let caps = dir.join("crates/desktop/capabilities");
-    fs::create_dir_all(&caps).expect("create the capability dir");
-    fs::write(caps.join("main.json"), CLEAN).expect("write main.json");
-    fs::write(
-        caps.join(".DS_Store"),
-        b"\x00\x00\x00\x01Bud1\xff\xfe\x00remote",
-    )
-    .expect("write .DS_Store");
-    fs::write(caps.join("main.json~"), "[\"core:default\"]").expect("write main.json~");
-    assert_eq!(run(&desktop_context(&dir)), Inspection::new(1, Vec::new()));
-}
-
-#[test]
-fn a_missing_desktop_member_fails_at_the_root_manifest() {
-    let dir = Scratch::new("capabilities-no-member");
-    let ctx = Context {
-        root: dir.to_path_buf(),
-        members: Vec::new(),
-        load_resolved_graph: false,
-    };
-    let found = run(&ctx).violations;
-    assert_eq!(found.len(), 1);
-    assert_eq!((found[0].path.as_str(), found[0].line), ("Cargo.toml", 1));
-}
-
-#[test]
-fn a_missing_capabilities_folder_fails() {
-    let dir = Scratch::new("capabilities-missing");
-    assert_eq!(
-        run(&desktop_context(&dir)).violations,
-        vec![Violation {
-            path: "crates/desktop/capabilities".to_owned(),
-            line: 1,
-            message: "the capabilities folder `crates/desktop/capabilities` is missing".to_owned(),
-            fix: "restore it with main.json: Tauri reads the window's grants from it, and this check guards them".to_owned(),
-        }]
-    );
-}
-
-#[test]
-fn a_moved_desktop_crate_is_found_by_its_package_name() {
-    let dir = Scratch::new("capabilities-moved");
-    let caps = dir.join("apps/shell/capabilities");
-    fs::create_dir_all(&caps).expect("create the capability dir");
-    fs::write(caps.join("main.json"), "[\"core:default\"]").expect("write main.json");
-    let mut ctx = desktop_context(&dir);
-    ctx.members[0].dir = "apps/shell".to_owned();
-    let found = run(&ctx).violations;
-    assert_eq!(found.len(), 1);
-    assert_eq!(found[0].path, "apps/shell/capabilities/main.json");
-}
-
-#[test]
-fn run_reads_nested_capability_files_and_reports_their_repo_path() {
-    let dir = Scratch::new("capabilities-run");
-    let nested = dir.join("crates/desktop/capabilities/extra");
-    fs::create_dir_all(&nested).expect("create the capability dirs");
-    fs::write(dir.join("crates/desktop/capabilities/main.json"), CLEAN).expect("write main.json");
-    fs::write(
-        nested.join("local.toml"),
-        "permissions = [\"fs:allow-read\"]\n",
-    )
-    .expect("write local.toml");
-    assert_eq!(
-        run(&desktop_context(&dir)),
-        Inspection::new(
-            2,
-            vec![Violation {
-                path: "crates/desktop/capabilities/extra/local.toml".to_owned(),
-                ..violation(1, "capability grants `fs:allow-read`", FIX_PREFIX)
-            }]
-        )
-    );
 }

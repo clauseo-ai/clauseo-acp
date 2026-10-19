@@ -258,12 +258,3 @@ fn a_changed_file_list_that_fails_gives_one_note_saying_so() {
         "{found:?}"
     );
 }
-
-#[test]
-fn the_check_is_registered_under_its_name() {
-    assert!(
-        crate::checks::ALL
-            .iter()
-            .any(|check| check.name == CHECK.name)
-    );
-}

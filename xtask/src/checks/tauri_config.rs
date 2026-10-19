@@ -66,7 +66,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
     source: file!(),
     run,
     #[cfg(test)]
-    planted: &[],
+    planted: tests::planted::PLANTED,
 };
 
 fn run(ctx: &Context) -> Inspection {
