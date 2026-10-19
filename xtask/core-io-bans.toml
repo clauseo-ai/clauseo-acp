@@ -1,0 +1,159 @@
+# What a crate whose Crates-table row in ARCHITECTURE.md lists `fs`, `process` or `any I/O`
+# may not call or name. clippy reads only the nearest clippy.toml, so each such crate has
+# `crates/<name>/clippy.toml`: the root clippy.toml with these two arrays appended to its own
+# (root entries first). `cargo xtask check` (core-io) fails when that file is missing or parses
+# to anything else, and its fix prints the file to write. An exception is
+# `#[expect(clippy::disallowed_methods, reason = "..")]` (or `disallowed_types`) at the call.
+#
+# Read from the std source of the pinned toolchain, 1.99.0 (rust-src, library/std/src): fs.rs,
+# env.rs, process.rs, net/, os/unix/{fs.rs,process.rs,net/} and os/windows/{fs.rs,process.rs}.
+# It names every stable public function and type (traits included) of std::fs, std::env,
+# std::process and std::net, and of std::os::{unix,windows}::{fs,net,process}, written out
+# because clippy bans items, not modules; then the disk, clock and stream reads outside them.
+# Left out:
+# - unstable items (std::fs::Dir, std::os::windows::net, ...): stable Rust cannot name them;
+# - the core::net types std::net re-exports (IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr,
+#   SocketAddrV4, SocketAddrV6, AddrParseError): clippy matches the item, so banning them would
+#   ban core::net's own data types, which do no I/O;
+# - the constants of std::env::consts, which clippy cannot ban and which read nothing at run time;
+# - methods of the types below and of their extension traits: they need a value of a banned type;
+# - std::time::Instant::now and std::time::SystemTime::now, which the root clippy.toml bans.
+# allow-invalid = true marks the std::os::unix and std::os::windows entries: clippy warns about a
+# path that does not resolve on the target it builds for, and each of those modules exists on
+# one family only.
+# 63 disallowed-methods and 56 disallowed-types entries.
+
+disallowed-methods = [
+  # std::fs
+  { path = "std::fs::canonicalize", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::copy", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::create_dir", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::create_dir_all", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::exists", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::hard_link", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::metadata", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::read", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::read_dir", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::read_link", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::read_to_string", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::remove_dir", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::remove_dir_all", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::remove_file", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::rename", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::set_permissions", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::set_times", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::set_times_nofollow", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::soft_link", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::symlink_metadata", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::write", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  # std::env
+  { path = "std::env::args", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::args_os", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::current_dir", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::current_exe", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::home_dir", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::join_paths", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::remove_var", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::set_current_dir", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::set_var", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::split_paths", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::temp_dir", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::var", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::var_os", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::vars", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::vars_os", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  # std::process
+  { path = "std::process::abort", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  { path = "std::process::exit", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  { path = "std::process::id", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  # std::os::unix and std::os::windows: each is missing on the other family, hence allow-invalid
+  { path = "std::os::unix::fs::chown", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::unix::fs::chroot", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::unix::fs::fchown", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::unix::fs::lchown", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::unix::fs::symlink", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::unix::process::parent_id", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O", allow-invalid = true },
+  { path = "std::os::windows::fs::symlink_dir", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::windows::fs::symlink_file", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  # Reads of the disk, the clock and the standard streams outside the modules above
+  { path = "std::path::Path::canonicalize", reason = "reads the disk; a crate whose ARCHITECTURE.md row bans I/O takes what it reads as a parameter" },
+  { path = "std::path::Path::exists", reason = "reads the disk; a crate whose ARCHITECTURE.md row bans I/O takes what it reads as a parameter" },
+  { path = "std::path::Path::is_dir", reason = "reads the disk; a crate whose ARCHITECTURE.md row bans I/O takes what it reads as a parameter" },
+  { path = "std::path::Path::is_file", reason = "reads the disk; a crate whose ARCHITECTURE.md row bans I/O takes what it reads as a parameter" },
+  { path = "std::path::Path::is_symlink", reason = "reads the disk; a crate whose ARCHITECTURE.md row bans I/O takes what it reads as a parameter" },
+  { path = "std::path::Path::metadata", reason = "reads the disk; a crate whose ARCHITECTURE.md row bans I/O takes what it reads as a parameter" },
+  { path = "std::path::Path::read_dir", reason = "reads the disk; a crate whose ARCHITECTURE.md row bans I/O takes what it reads as a parameter" },
+  { path = "std::path::Path::read_link", reason = "reads the disk; a crate whose ARCHITECTURE.md row bans I/O takes what it reads as a parameter" },
+  { path = "std::path::Path::symlink_metadata", reason = "reads the disk; a crate whose ARCHITECTURE.md row bans I/O takes what it reads as a parameter" },
+  { path = "std::path::Path::try_exists", reason = "reads the disk; a crate whose ARCHITECTURE.md row bans I/O takes what it reads as a parameter" },
+  { path = "std::path::absolute", reason = "reads the disk; a crate whose ARCHITECTURE.md row bans I/O takes what it reads as a parameter" },
+  { path = "std::time::Instant::elapsed", reason = "reads the clock; the core takes time as input" },
+  { path = "std::time::SystemTime::elapsed", reason = "reads the clock; the core takes time as input" },
+  { path = "std::io::stderr", reason = "the standard streams are I/O; a crate whose ARCHITECTURE.md row bans I/O takes input and returns output as values" },
+  { path = "std::io::stdin", reason = "the standard streams are I/O; a crate whose ARCHITECTURE.md row bans I/O takes input and returns output as values" },
+  { path = "std::io::stdout", reason = "the standard streams are I/O; a crate whose ARCHITECTURE.md row bans I/O takes input and returns output as values" },
+]
+
+disallowed-types = [
+  # std::fs
+  { path = "std::fs::DirBuilder", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::DirEntry", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::File", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::FileTimes", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::FileType", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::Metadata", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::OpenOptions", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::Permissions", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::ReadDir", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  { path = "std::fs::TryLockError", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter" },
+  # std::env
+  { path = "std::env::Args", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::ArgsOs", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::JoinPathsError", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::SplitPaths", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::VarError", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::Vars", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  { path = "std::env::VarsOs", reason = "a crate whose ARCHITECTURE.md row bans I/O reads no environment; take the value as a parameter" },
+  # std::process
+  { path = "std::process::Child", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  { path = "std::process::ChildStderr", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  { path = "std::process::ChildStdin", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  { path = "std::process::ChildStdout", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  { path = "std::process::Command", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  { path = "std::process::CommandArgs", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  { path = "std::process::CommandEnvs", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  { path = "std::process::ExitCode", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  { path = "std::process::ExitStatus", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  { path = "std::process::Output", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  { path = "std::process::Stdio", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  { path = "std::process::Termination", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O" },
+  # std::net: its own items; the core::net types it re-exports are left out (see the header)
+  { path = "std::net::Incoming", reason = "a crate whose ARCHITECTURE.md row bans I/O opens no socket; leave that to a crate that may do I/O" },
+  { path = "std::net::Shutdown", reason = "a crate whose ARCHITECTURE.md row bans I/O opens no socket; leave that to a crate that may do I/O" },
+  { path = "std::net::TcpListener", reason = "a crate whose ARCHITECTURE.md row bans I/O opens no socket; leave that to a crate that may do I/O" },
+  { path = "std::net::TcpStream", reason = "a crate whose ARCHITECTURE.md row bans I/O opens no socket; leave that to a crate that may do I/O" },
+  { path = "std::net::ToSocketAddrs", reason = "a crate whose ARCHITECTURE.md row bans I/O opens no socket; leave that to a crate that may do I/O" },
+  { path = "std::net::UdpSocket", reason = "a crate whose ARCHITECTURE.md row bans I/O opens no socket; leave that to a crate that may do I/O" },
+  # std::os::unix and std::os::windows: each is missing on the other family, hence allow-invalid
+  { path = "std::os::unix::fs::DirBuilderExt", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::unix::fs::DirEntryExt", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::unix::fs::FileExt", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::unix::fs::FileTypeExt", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::unix::fs::MetadataExt", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::unix::fs::OpenOptionsExt", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::unix::fs::PermissionsExt", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::unix::net::Incoming", reason = "a crate whose ARCHITECTURE.md row bans I/O opens no socket; leave that to a crate that may do I/O", allow-invalid = true },
+  { path = "std::os::unix::net::SocketAddr", reason = "a crate whose ARCHITECTURE.md row bans I/O opens no socket; leave that to a crate that may do I/O", allow-invalid = true },
+  { path = "std::os::unix::net::UnixDatagram", reason = "a crate whose ARCHITECTURE.md row bans I/O opens no socket; leave that to a crate that may do I/O", allow-invalid = true },
+  { path = "std::os::unix::net::UnixListener", reason = "a crate whose ARCHITECTURE.md row bans I/O opens no socket; leave that to a crate that may do I/O", allow-invalid = true },
+  { path = "std::os::unix::net::UnixStream", reason = "a crate whose ARCHITECTURE.md row bans I/O opens no socket; leave that to a crate that may do I/O", allow-invalid = true },
+  { path = "std::os::unix::process::CommandExt", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O", allow-invalid = true },
+  { path = "std::os::unix::process::ExitStatusExt", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O", allow-invalid = true },
+  { path = "std::os::windows::fs::FileExt", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::windows::fs::FileTimesExt", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::windows::fs::FileTypeExt", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::windows::fs::MetadataExt", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::windows::fs::OpenOptionsExt", reason = "a crate whose ARCHITECTURE.md row bans I/O reads and writes no files; take what it reads as a parameter", allow-invalid = true },
+  { path = "std::os::windows::process::CommandExt", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O", allow-invalid = true },
+  { path = "std::os::windows::process::ExitStatusExt", reason = "a crate whose ARCHITECTURE.md row bans I/O starts, ends and inspects no process; leave that to a crate that may do I/O", allow-invalid = true },
+]
