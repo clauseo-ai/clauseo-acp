@@ -20,6 +20,17 @@ fn git_runs_without_the_variables_that_point_it_at_another_repo() {
 }
 
 #[test]
+fn cargo_runs_without_clippy_conf_dir() {
+    let cargo = Program::Cargo.command();
+    let removed: Vec<&OsStr> = cargo
+        .get_envs()
+        .filter(|(_, value)| value.is_none())
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(removed, [OsStr::new(CLIPPY_CONF_DIR)]);
+}
+
+#[test]
 fn cmd_displays_its_program_then_its_args() {
     let cmd = Cmd::new(Program::Cargo, ["fmt", "--all", "--", "--check"]);
     assert_eq!(cmd.to_string(), "cargo fmt --all -- --check");

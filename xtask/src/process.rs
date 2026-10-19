@@ -16,7 +16,8 @@ const CHUNK: usize = 8 * 1024;
 /// The program a command runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Program {
-    /// The cargo that started this xtask (the `CARGO` env var), falling back to `cargo`.
+    /// The cargo that started this xtask (the `CARGO` env var), falling back to `cargo`, with
+    /// `CLIPPY_CONF_DIR` removed, so clippy reads the `clippy.toml` files core-io checks.
     Cargo,
     /// A program found on `PATH`.
     Named(&'static str),
@@ -29,6 +30,10 @@ pub(crate) enum Program {
     /// real repo.
     Git,
 }
+
+/// The variable that points clippy at a config folder of its choosing, removed for every cargo
+/// command xtask runs.
+const CLIPPY_CONF_DIR: &str = "CLIPPY_CONF_DIR";
 
 /// The variables `git rev-parse --local-env-vars` lists: each points git at a particular
 /// repository, index or object store instead of the one found from the working dir. It is git
@@ -68,7 +73,12 @@ impl Program {
     fn command(&self) -> Command {
         match *self {
             Program::Cargo => {
-                Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+                let mut cargo =
+                    Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+                // clippy reads its config from this folder when it is set, instead of the
+                // crate's clippy.toml that core-io checks.
+                cargo.env_remove(CLIPPY_CONF_DIR);
+                cargo
             }
             Program::Named(name) => Command::new(name),
             Program::Pnpm => Command::new(pnpm_file()),
