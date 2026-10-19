@@ -99,6 +99,12 @@ fn clauseo_entry(entry: &str, folded: &str, rows: &[&str]) -> Result<Never, Reje
                 }
             ),
         }),
+        None if rest.is_empty() => Err(Rejected {
+            what: format!("is `{entry}` with no row name after it, so it names none of our crates"),
+            fix: format!(
+                "write the name that bans the crate you mean (a name in the Crate column), or `{entry} {CRATES_IO}` if you mean the crates.io package"
+            ),
+        }),
         None => match rows.iter().find(|row| **row == rest) {
             Some(row) => Err(Rejected {
                 what: format!(

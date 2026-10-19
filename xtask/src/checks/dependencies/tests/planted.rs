@@ -217,6 +217,20 @@ crate::checks::planted::cases! {
         "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
          fix: the check stopped before it could look; fix the failure above first",
     ]), inspects 0 => super::names::std_module_in_other_case,
+    /// `clauseo_` with nothing after it names no row.
+    clauseo_prefix_alone: FailsWith(&[
+        "ARCHITECTURE.md:7: `clauseo_` in the Never depends on column of `host` is `clauseo_` with no row name after it, so it names none of our crates\n    \
+         fix: write the name that bans the crate you mean (a name in the Crate column), or `clauseo_ (crates.io)` if you mean the crates.io package",
+        "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
+         fix: the check stopped before it could look; fix the failure above first",
+    ]), inspects 0 => super::names::clauseo_prefix_alone,
+    /// The package of row `transport_ws` is `clauseo-transport_ws`, and the fix names it so.
+    underscore_row_package_after_clauseo_underscore: FailsWith(&[
+        "ARCHITECTURE.md:7: `clauseo_transport_ws` in the Never depends on column of `host` is the package `clauseo-transport_ws` written with `_` after `clauseo`\n    \
+         fix: write `clauseo-transport_ws` (or the row name `transport_ws`) to ban our crate, or `clauseo_transport_ws (crates.io)` if you mean the crates.io package",
+        "0 workspace crates with a Crates table row inspected among the workspace members and the Crates table of ARCHITECTURE.md\n    \
+         fix: the check stopped before it could look; fix the failure above first",
+    ]), inspects 0 => super::names::underscore_row_package_after_clauseo_underscore,
     /// An I/O word in other letter case (`FS`, `Clock`, `Any I/O`) is no crates.io ban.
     io_word_in_other_case: FailsWith(&[
         "ARCHITECTURE.md:7: `FS` in the Never depends on column of `host` is the I/O word `fs` written with other letter case, and as written it would ban a crates.io package instead\n    \

@@ -195,7 +195,7 @@ pub(crate) fn row_name(package: &str) -> Option<&str> {
 }
 
 /// `name` in lowercase with every `-` written `_`: crates.io names are unique ignoring case
-/// and `-` against `_`, so a row `transport_ws` is the package `clauseo-transport-ws`, and a
+/// and `-` against `_`, so a row `transport_ws` matches `clauseo-transport-ws` too, and a
 /// ban (`Tauri`) matches the package (`tauri`) whatever the spelling.
 pub(crate) fn fold(name: &str) -> String {
     name.to_ascii_lowercase().replace('-', "_")

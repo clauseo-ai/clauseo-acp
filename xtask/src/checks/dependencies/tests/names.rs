@@ -87,3 +87,17 @@ pub(in crate::checks::dependencies) fn typo_of_a_row_named_like_an_io_word() -> 
 pub(in crate::checks::dependencies) fn std_module_in_other_case() -> Inspection {
     host("std-case", "Std, NET", "", &[])
 }
+
+pub(in crate::checks::dependencies) fn clauseo_prefix_alone() -> Inspection {
+    host("clauseo-alone", "clauseo_", "", &[])
+}
+
+pub(in crate::checks::dependencies) fn underscore_row_package_after_clauseo_underscore()
+-> Inspection {
+    let crates = [(
+        "crates/host".to_owned(),
+        manifest("clauseo-host", "[dependencies]\n"),
+    )];
+    let rows = "| `host` | sessions | protocol | tauri, clauseo_transport_ws | exists |\n| `transport_ws` | websocket | host | tauri | planned |\n";
+    run_on(&workspace("clauseo-underscore-row", rows, "", &crates))
+}
