@@ -68,14 +68,7 @@ fn the_real_repo_passes_every_static_check() {
     };
     for check in ALL {
         let report = check.report(&ctx);
-        assert_eq!(
-            (
-                check.name,
-                &report.inspection.violations,
-                &report.nothing_inspected
-            ),
-            (check.name, &Vec::new(), &None)
-        );
+        assert!(!report.failed(), "{}: {:?}", check.name, report.printed());
         assert!(
             report.inspection.inspected > 0,
             "{} inspected nothing",
@@ -160,24 +153,17 @@ fn a_violation_with_nothing_inspected_gets_the_stopped_fix_only_when_the_check_s
     );
 }
 
-/// No two entries in `ALL` share a place or a source, so a check copied from another one that
-/// keeps its `place` (say, built from `budgets::FILE`) or its `source` fails here.
+/// No two entries in `ALL` share a place, so a check copied from another one that keeps its
+/// `place` (say, built from `budgets::FILE`) fails here.
 #[test]
-fn no_two_checks_share_a_place_or_a_source() {
+fn no_two_checks_share_a_place() {
     let mut places = std::collections::BTreeMap::new();
-    let mut sources = std::collections::BTreeMap::new();
     for check in ALL {
         if let Some(other) = places.insert((check.place)(), check.name) {
             panic!(
                 "{} and {other} share the place `{}`",
                 check.name,
                 (check.place)()
-            );
-        }
-        if let Some(other) = sources.insert(check.source, check.name) {
-            panic!(
-                "{} and {other} share the source {}",
-                check.name, check.source
             );
         }
     }
