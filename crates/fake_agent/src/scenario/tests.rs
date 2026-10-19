@@ -161,6 +161,21 @@ fn static_checks_name_file_and_line() {
 }
 
 #[test]
+fn exit_code_outside_a_byte_is_load_error() {
+    for code in ["256", "-1", "4294967296"] {
+        let step = format!(r#"{{"exit":{{"code":{code}}}}}"#);
+        assert_eq!(
+            load_error(&[&step], &[]),
+            format!("t.jsonl:2: exit: code {code} is outside 0..=255")
+        );
+    }
+    for code in ["0", "1", "255"] {
+        let step = format!(r#"{{"exit":{{"code":{code}}}}}"#);
+        assert!(parse_text(&[&step], &[]).is_ok(), "{code}");
+    }
+}
+
+#[test]
 fn labels_in_all_count_after_the_all_step() {
     let request = r#"{"request":{"id":"perm-1","method":"session/request_permission","raw":true}}"#;
     let prompt = r#"{"expect":{"method":"session/prompt","as":"p1"}}"#;
