@@ -149,7 +149,7 @@ pub(in crate::checks::core_io) fn rule_lifetime() -> Inspection {
 pub(in crate::checks::core_io) fn rule_body_does_not_parse() -> Inspection {
     lib(
         "rule-body-does-not-parse",
-        "macro_rules! arms { ($($p:pat => $e:expr),*) => { $($p => $e),* }; }\n",
+        "macro_rules! half { ($n:ident) => { fn $n }; }\n",
     )
 }
 
@@ -168,5 +168,55 @@ pub(in crate::checks::core_io) fn rule_defines_its_own_now() -> Inspection {
          impl $n {\n            pub fn now() -> Self {\n                $n(0)\n            }\n\n            \
          pub fn later() -> Self {\n                Self::now()\n            }\n        }\n    };\n}\n\n\
          ts!(Stamp);\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn rule_pattern_ref() -> Inspection {
+    lib(
+        "rule-pattern-ref",
+        "macro_rules! some_ref { ($x:ident) => { Some(ref $x) }; }\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn rule_pattern_tuple() -> Inspection {
+    lib(
+        "rule-pattern-tuple",
+        "macro_rules! pair { ($x:ident) => { (mut $x, _) }; }\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn rule_pattern_binding() -> Inspection {
+    lib(
+        "rule-pattern-binding",
+        "macro_rules! small { ($x:ident) => { $x @ 1..=5 }; }\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn rule_match_arms() -> Inspection {
+    lib(
+        "rule-match-arms",
+        "macro_rules! arms { ($($p:pat => $e:expr),*) => { $($p => $e),* }; }\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn rule_match_arms_are_read() -> Inspection {
+    lib(
+        "rule-match-arms-are-read",
+        "macro_rules! read_arm { ($e:expr) => { Some(_) => std::fs::read($e), None => () }; }\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn rule_struct_fields() -> Inspection {
+    lib(
+        "rule-struct-fields",
+        "macro_rules! fields { ($($n:ident: $t:ty),*) => { $(pub $n: $t),* }; }\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn rule_leading_colon_repetition() -> Inspection {
+    lib(
+        "rule-leading-colon-repetition",
+        "macro_rules! m { ($($p:ident)*) => { $(::$p)*::read(\"a\") }; }\n\n\
+         pub fn f() {\n    let _ = m!(std fs);\n}\n",
     )
 }

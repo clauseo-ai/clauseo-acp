@@ -1,6 +1,6 @@
 //! Macro tokens for the core-io check. `syn` leaves the arguments of a macro call and the rules
-//! of a `macro_rules!` as tokens. `bodies` parses them as items, statements, expressions or a
-//! type, so they are read like other code.
+//! of a `macro_rules!` as tokens. `bodies` parses them as items, statements, expressions, a
+//! type, a pattern, match arms or named fields, so they are read like other code.
 //!
 //! In a `macro_rules!` rule, each metavariable `$x` of the rule's matcher is first replaced by
 //! something of its fragment kind that parses where it stands: `{}` for a `block`, a placeholder
@@ -9,14 +9,17 @@
 //! repetition `$( ... )` with its separator and `*`, `+` or `?` becomes its inner tokens, twice
 //! when its separator or its edges are `::`, so a path it builds still has a placeholder segment
 //! after the first one. A rule body that parses as none of those is `Body::Unreadable`, and the
-//! check fails it. `chains` walks what remains as tokens for `a::b::c` paths: the arguments of a
-//! macro call that parse as no code (a macro of its own syntax) and the arguments of attributes.
+//! check fails it; a nested `macro_rules!` that escapes its own `$` with `$$` (an unstable
+//! feature) is one such body. `chains` walks what remains as tokens for `a::b::c` paths: the
+//! arguments of a macro call that parse as no code (a macro of its own syntax) and the arguments
+//! of attributes.
 
 use super::names::{self, Written};
 use proc_macro2::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenStream, TokenTree};
 use std::collections::BTreeMap;
-use syn::parse::Parser;
+use syn::parse::{ParseStream, Parser};
 use syn::punctuated::Punctuated;
+use syn::visit::Visit;
 
 /// How a placeholder starts; the metavariable's name follows. Nobody writes such a name, so a
 /// path segment that starts with it stands for whatever the metavariable expands to.
@@ -48,11 +51,33 @@ pub(super) enum Body {
     /// Comma-separated expressions, as in `vec![a, b]` or `format!("{}", a)`.
     Exprs(Vec<syn::Expr>),
     Type(Box<syn::Type>),
+    /// A pattern, as in `Some(ref $x)`.
+    Pat(Box<syn::Pat>),
+    /// Match arms, as in `$($p => $e),*`.
+    Arms(Vec<syn::Arm>),
+    /// Named struct fields, as in `$($n: $t),*`.
+    Fields(Vec<syn::Field>),
     /// The arguments of a macro call that parse as none of those.
     Tokens(TokenStream),
     /// A `macro_rules!` rule whose body parses as none of those, or a `macro_rules!` whose
     /// rules have another shape; the span of its opening delimiter.
     Unreadable(Span),
+}
+
+impl Body {
+    /// Visits the code of the body with `visitor`; nothing for tokens or an unreadable rule.
+    pub(super) fn visit<'a>(&'a self, visitor: &mut impl Visit<'a>) {
+        match self {
+            Body::Items(items) => items.iter().for_each(|item| visitor.visit_item(item)),
+            Body::Stmts(stmts) => stmts.iter().for_each(|stmt| visitor.visit_stmt(stmt)),
+            Body::Exprs(exprs) => exprs.iter().for_each(|expr| visitor.visit_expr(expr)),
+            Body::Type(ty) => visitor.visit_type(ty),
+            Body::Pat(pat) => visitor.visit_pat(pat),
+            Body::Arms(arms) => arms.iter().for_each(|arm| visitor.visit_arm(arm)),
+            Body::Fields(fields) => fields.iter().for_each(|field| visitor.visit_field(field)),
+            Body::Tokens(_) | Body::Unreadable(_) => {}
+        }
+    }
 }
 
 /// The code of `mac`: one body per rule of a `macro_rules!` (its matchers skipped), else one.
@@ -239,7 +264,8 @@ fn rules(tokens: TokenStream) -> Option<Vec<(Group, Group)>> {
     Some(rules)
 }
 
-/// `tokens` as items, else statements, else comma-separated expressions, else a type.
+/// `tokens` as items, else statements, comma-separated expressions, a type, a pattern, match
+/// arms or named fields, the first that parses.
 fn parse(tokens: TokenStream) -> Option<Body> {
     if let Ok(file) = syn::parse2::<syn::File>(tokens.clone()) {
         return Some(Body::Items(file.items));
@@ -251,9 +277,32 @@ fn parse(tokens: TokenStream) -> Option<Body> {
     if let Ok(exprs) = exprs.parse2(tokens.clone()) {
         return Some(Body::Exprs(exprs.into_iter().collect()));
     }
-    syn::parse2::<syn::Type>(tokens)
+    if let Ok(ty) = syn::parse2::<syn::Type>(tokens.clone()) {
+        return Some(Body::Type(Box::new(ty)));
+    }
+    if let Ok(pat) = syn::Pat::parse_multi_with_leading_vert.parse2(tokens.clone()) {
+        return Some(Body::Pat(Box::new(pat)));
+    }
+    let arms = |input: ParseStream<'_>| {
+        let mut arms = Vec::new();
+        while !input.is_empty() {
+            arms.push(input.parse::<syn::Arm>()?);
+        }
+        Ok(arms)
+    };
+    if let Ok(arms) = arms.parse2(tokens.clone()) {
+        return Some(Body::Arms(arms));
+    }
+    let fields = |input: ParseStream<'_>| {
+        Punctuated::<syn::Field, syn::Token![,]>::parse_terminated_with(
+            input,
+            syn::Field::parse_named,
+        )
+    };
+    fields
+        .parse2(tokens)
         .ok()
-        .map(|ty| Body::Type(Box::new(ty)))
+        .map(|fields| Body::Fields(fields.into_iter().collect()))
 }
 
 /// One `a::b::c`, `::a::b` or `<a::b>::c` chain of a token stream, and the span of its start.

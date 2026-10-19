@@ -18,7 +18,7 @@
 //! the bounds on `T` set, `scopes.rs`). The modules come from the `mod` items (see
 //! `files.rs`); a file that no root reaches is placed by its path under `src/`.
 
-use super::tokens::{self, Body};
+use super::tokens;
 use proc_macro2::Span;
 use std::collections::{BTreeMap, BTreeSet};
 use syn::ext::IdentExt;
@@ -40,7 +40,8 @@ pub(super) struct Written {
 pub(super) enum Target {
     /// A path inside the standard library, starting with `std` (or `core`, written as such).
     Std(Vec<String>),
-    /// A path inside the crate, its root first (see `Module`).
+    /// A path inside the crate, its root first (see `Module`); also `$p::...` for a
+    /// metavariable `$p` written as `::$p::...`.
     Crate(Vec<String>),
 }
 
@@ -109,6 +110,10 @@ impl Table {
             found.extend(self.walk(root, rest, stack));
         }
         if path.leading_colon {
+            // `::$p::...` names whatever crate `$p` expands to, so it is built from `$p`.
+            if tokens::is_placeholder(first) {
+                found.insert(Target::Crate(path.segments.clone()));
+            }
             return found;
         }
         match first.as_str() {
@@ -452,13 +457,7 @@ impl<'ast> Visit<'ast> for Collector<'_> {
 
     fn visit_macro(&mut self, i: &'ast syn::Macro) {
         for body in tokens::bodies(i) {
-            match body {
-                Body::Items(items) => items.iter().for_each(|item| Visit::visit_item(self, item)),
-                Body::Stmts(stmts) => stmts.iter().for_each(|stmt| Visit::visit_stmt(self, stmt)),
-                Body::Exprs(exprs) => exprs.iter().for_each(|expr| Visit::visit_expr(self, expr)),
-                Body::Type(ty) => Visit::visit_type(self, &ty),
-                Body::Tokens(_) | Body::Unreadable(_) => {}
-            }
+            body.visit(self);
         }
         visit::visit_macro(self, i);
     }

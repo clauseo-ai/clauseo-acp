@@ -357,12 +357,9 @@ impl<'ast> Visit<'ast> for Finder<'_> {
         }
         for body in tokens::bodies(i) {
             match body {
-                Body::Items(items) => items.iter().for_each(|item| Visit::visit_item(self, item)),
-                Body::Stmts(stmts) => stmts.iter().for_each(|stmt| Visit::visit_stmt(self, stmt)),
-                Body::Exprs(exprs) => exprs.iter().for_each(|expr| Visit::visit_expr(self, expr)),
                 Body::Tokens(tokens) => self.check_tokens(tokens),
-                Body::Type(ty) => Visit::visit_type(self, &ty),
                 Body::Unreadable(span) => self.add(span, Reach::UnreadableRule),
+                code => code.visit(self),
             }
         }
     }

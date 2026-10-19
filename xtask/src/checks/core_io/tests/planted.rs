@@ -308,4 +308,13 @@ crate::checks::planted::cases! {
          fix: drop #[path] and keep the module as `io.rs` or `io/mod.rs` beside its \
          parent module under `crates/protocol/src/`, so core-io parses it",
     ]) => super::cfg_attr_nested_path,
+    /// Rule bodies that are a pattern, match arms or named fields are read, not failed.
+    rule_pattern_ref: Passes => super::rule_pattern_ref,
+    rule_pattern_tuple: Passes => super::rule_pattern_tuple,
+    rule_pattern_binding: Passes => super::rule_pattern_binding,
+    rule_match_arms: Passes => super::rule_match_arms,
+    rule_match_arms_are_read: FailsWith(&[uses!("lib.rs", 1, "std::fs")]) => super::rule_match_arms_are_read,
+    rule_struct_fields: Passes => super::rule_struct_fields,
+    /// A repetition that starts with `::` builds a path of any length from the crate root.
+    rule_leading_colon_repetition: FailsWith(&[metavariable!(1, "$p::$p::read", all_bans!())]) => super::rule_leading_colon_repetition,
 }
