@@ -250,7 +250,7 @@ fn a_std_module_in_the_never_column_fails_at_its_row() {
             FILE,
             7,
             "`net` in the Never depends on column of `reducer` names a standard library module, not a crate, so nothing would enforce it",
-            "write `fs`, `process`, `any I/O` or `clock` instead of `net`: each bans the standard library's file, network, process, environment and clock APIs",
+            "write `any I/O` (or `fs` or `process`) instead of `net`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now",
         )])
     );
 }

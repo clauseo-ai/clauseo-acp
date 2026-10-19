@@ -6,9 +6,10 @@
 //! does not start with `|` is a row; a row is split on `|` (a `\|` is a literal pipe), each cell
 //! trimmed and its backticks removed. The second line must be the `|---|` separator.
 //!
-//! "Never depends on" entries are I/O words or crate names. The I/O words (`fs`, `process`,
-//! `any I/O`, `clock`) each mean the standard library's file, network, process, environment and
-//! clock APIs, as `ARCHITECTURE.md` defines them, and win over a row of the same name (`process`).
+//! "Never depends on" entries are I/O words or crate names. The I/O words name standard library
+//! APIs, as `ARCHITECTURE.md` defines them: `fs`, `process` and `any I/O` each mean the file,
+//! network, process, environment and clock APIs; `clock` alone means the two clock `now`
+//! functions. They win over a row of the same name (`process`).
 //! A standard library module's name (`std`, `net`, `env`, `time`, `io`) is rejected: it names
 //! no crate, and the I/O words are how the table bans those APIs. A crate name that is a row of
 //! the table is our package `clauseo-<name>`; any other is the crates.io package of that name.
@@ -84,7 +85,7 @@ pub(crate) enum IoWord {
     Process,
     /// `any I/O`: the same APIs.
     AnyIo,
-    /// `clock`: the same APIs.
+    /// `clock`: only `Instant::now` and `SystemTime::now`.
     Clock,
 }
 
@@ -120,8 +121,8 @@ impl Never {
 }
 
 impl CrateRow {
-    /// True when the crate must not touch the standard library's I/O: its Never list has `fs`,
-    /// `process`, `any I/O` or `clock`, each of which holds it to the whole core-io ban.
+    /// True when the core-io check reads the crate: its Never list has `fs`, `process` or
+    /// `any I/O` (the whole ban) or `clock` (the two `now` functions only).
     pub(crate) fn holds_core_io(&self) -> bool {
         self.never.iter().any(|entry| matches!(entry, Never::Io(_)))
     }
@@ -363,7 +364,7 @@ fn classify(raw: &[RawRow], found: &mut Vec<Violation>) -> Vec<CrateRow> {
                         row.name
                     ),
                     format!(
-                        "write `fs`, `process`, `any I/O` or `clock` instead of `{entry}`: each bans the standard library's file, network, process, environment and clock APIs"
+                        "write `any I/O` (or `fs` or `process`) instead of `{entry}`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now"
                     ),
                 ));
             } else if raw.iter().any(|other| other.name == *entry) {

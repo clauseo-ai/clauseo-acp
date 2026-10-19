@@ -199,7 +199,7 @@ crate::checks::planted::cases! {
     /// A standard library module in the Never column fails at its row.
     std_module_in_never: FailsWith(&[
         "ARCHITECTURE.md:7: `net` in the Never depends on column of `protocol` names a standard library module, not a crate, so nothing would enforce it\n    \
-         fix: write `fs`, `process`, `any I/O` or `clock` instead of `net`: each bans the standard library's file, network, process, environment and clock APIs",
+         fix: write `any I/O` (or `fs` or `process`) instead of `net`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now",
     ]) => tests::std_module_in_never,
     /// tauri as a dev-dependency passes.
     dev_dependency_passes: Passes => tests::dev_dependency_passes,
