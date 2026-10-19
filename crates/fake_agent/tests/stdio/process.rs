@@ -1,6 +1,6 @@
 //! `ignore-stdin-close` and `grandchild`, for S7's shutdown and tree-kill tests.
 
-use crate::harness::{Agent, Scratch, kill_pid};
+use crate::harness::{Agent, PidGuard, Scratch};
 
 #[test]
 fn ignore_stdin_close_keeps_running() {
@@ -26,11 +26,13 @@ fn grandchild_writes_pid() {
         .unwrap()
         .parse()
         .unwrap();
+    // Armed before any assert, so a failure below still kills the grandchild.
+    let grandchild = PidGuard::new(pid);
     let written = std::fs::read_to_string(dir.path().join("grandchild.pid")).unwrap();
     assert_eq!(written, format!("{pid}\n"));
     assert_ne!(pid, agent.pid());
     agent.kill();
-    kill_pid(pid);
+    grandchild.kill();
     let finished = agent.finish();
     assert!(!finished.status.success());
 }
