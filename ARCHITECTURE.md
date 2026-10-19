@@ -50,6 +50,19 @@ below and fails if a crate depends on a crate in its "Never depends on" column, 
 another crate. Rows marked `planned` are checked once the crate exists. Every crate that exists
 must have a row.
 
+A dependency counts when it is a normal or build dependency, on any target, with every feature of
+the crate itself turned on; dev dependencies never count. Each crate's own graph is resolved, so a
+feature that another workspace crate turns on does not count. A dependency's own build
+dependencies count too: a crate whose dependency uses tokio only in its `build.rs` fails a tokio
+ban.
+
+A "Never depends on" entry that is a row's name bans that crate; any other name means the
+crates.io package of that name. A name that starts with `clauseo-`, holds a `_` or is one edit
+from a row's name is rejected as a likely typo, except a row's own package name: "process" in the
+column means the standard library's API (below), so `clauseo-process` is how a row bans the
+process crate. A ban names exactly one package. Banning a family means listing each one: `tauri`
+does not cover `tauri-runtime`, `tauri-utils` or `wry`.
+
 | Crate | Owns | May depend on | Never depends on | Status |
 |---|---|---|---|---|
 | `xtask` | check, ci, buildtime, budgets, doc checks | none of ours | tauri | exists |
@@ -81,9 +94,9 @@ and ui/bindings (planned). Nothing in `ui/` imports Tauri APIs outside
 "fs", "process", "any I/O" and "clock" in the "Never depends on" column mean the standard
 library's APIs, not the `process` crate, and cover the crate's own code. `cargo xtask check`
 parses every `.rs` file under the crate's `src/` with `syn`. "fs", "process" or "any I/O" bans
-`std::fs`, `std::net`, `std::process`, `std::env` (and their `std::os` counterparts),
-`std::time::Instant::now` and `std::time::SystemTime::now`; "clock" alone bans the two `now`
-functions. Exceptions, one path per line with a reason, live in `xtask/core-io-exceptions.txt`.
+the file, network, process and environment APIs and the functions that read the clock; "clock"
+alone bans only the functions that read the clock. The banned paths are the paths in
+`xtask/src/checks/core_io/bans.rs`. Exceptions, one path per line with a reason, live in `xtask/core-io-exceptions.txt`.
 
 ## Seams left open on purpose
 
