@@ -45,10 +45,11 @@ Clauseo app process (Rust)
 ## Crates
 
 Each Rust crate lives in a folder under `crates/` named after its row below, and its package is
-that name with a `clauseo-` prefix (`crates/desktop` is `clauseo-desktop`). The frontend is a
-pnpm workspace under `ui/`. `cargo xtask check` reads the table below and fails if a crate depends
-on anything in its "Never depends on" column, directly or through another crate. Rows marked
-`planned` are checked once the crate exists. Every crate that exists must have a row.
+that name with a `clauseo-` prefix (`crates/desktop` is `clauseo-desktop`); `xtask` keeps its own
+folder and name. The frontend is a pnpm workspace under `ui/`. `cargo xtask check` reads the table
+below and fails if a crate depends on a crate in its "Never depends on" column, directly or through
+another crate. Rows marked `planned` are checked once the crate exists. Every crate that exists
+must have a row.
 
 | Crate | Owns | May depend on | Never depends on | Status |
 |---|---|---|---|---|
@@ -78,9 +79,10 @@ reaches) is a module of `host`, not a crate. Frontend packages: `ui/app` (exists
 plus components and bindings packages under `ui/` (planned). Nothing in `ui/` imports Tauri APIs
 outside `ui/app/src/transport/`.
 
-"fs", "process" and "any I/O" in the "Never depends on" column mean the standard library's APIs,
-not the `process` crate. In those crates `cargo xtask check` parses every `.rs` file with `syn` and
-bans `std::fs`, `std::net`, `std::process`, `std::env`, `std::time::Instant::now` and
+"fs", "process", "any I/O" and "clock" in the "Never depends on" column mean the standard
+library's APIs, not the `process` crate, and cover the crate's own code. In those crates
+`cargo xtask check` parses every `.rs` file under `src/` with `syn` and bans `std::fs`,
+`std::net`, `std::process`, `std::env`, `std::time::Instant::now` and
 `std::time::SystemTime::now`. Exceptions, one path per line with a reason, live in
 `xtask/core-io-exceptions.txt`.
 

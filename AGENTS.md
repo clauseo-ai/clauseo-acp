@@ -58,6 +58,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 - Only `#[expect(lint, reason = "...")]` may silence a lint. `#[allow]` fails.
 - No `unwrap`, `expect`, `panic!`, `todo!` or `println!` outside tests and `main`.
 - Files stay under 600 lines.
+- Rust comments stay within 100 columns; a file past 500 lines gets a note to split it.
 - Component files in `ui/` export only components.
 
 ## Testing

@@ -30,8 +30,8 @@ converted document. From there they can call any IPC command the page can reach.
 
 **What stops them.**
 
-- `built`: Capability files grant nothing; the `capabilities` check fails on `remote`,
-  `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`
+- `built`: The one capability file grants no permission today; the `capabilities` check fails on
+  `remote`, `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`
 - `built`: A pinned CSP: no remote images or connections, no `unsafe-eval`, `object-src 'none'`,
   `base-uri 'none'`, Trusted Types; the `tauri-config` check pins the string
 - `built`: An `AppManifest` in `build.rs`, so app commands go through the access check; the command
