@@ -96,10 +96,10 @@ fn a_link_to_a_file_git_ignores_fails_in_a_real_repo() {
     let printed: Vec<String> = found.violations.iter().map(ToString::to_string).collect();
     assert!(
         printed.contains(
-            &"GUIDE.md:1: the relative link `local.md` does not resolve: `local.md` does not exist\n    \
-              fix: create `local.md`, or correct or remove the link"
+            &"GUIDE.md:1: the relative link `local.md` does not resolve: `local.md` is on disk, \
+              but git ignores it\n    fix: link a file git tracks, or remove the link"
                 .to_owned()
         ),
-        "the ignored file does not count: {printed:?}"
+        "the ignored file does not count, and the fix says git ignores it: {printed:?}"
     );
 }

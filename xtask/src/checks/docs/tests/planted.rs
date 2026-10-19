@@ -93,10 +93,13 @@ crate::checks::planted::cases! {
         bad_path!(1, "docs/REAL.md"),
         bad_link!("GUIDE.md", 1, "docs/REAL.md"),
     ]) => super::cases::case_mismatch_fails,
-    /// A file on disk that git does not list (an ignored local file) does not exist for the docs.
+    /// A file on disk that git does not list (an ignored local file) does not exist for the docs,
+    /// and the message says git ignores it rather than asking to create it.
     unlisted_local_file_fails: FailsWith(&[
-        bad_path!(1, "docs/local.md"),
-        bad_link!("GUIDE.md", 1, "local.md"),
+        "GUIDE.md:1: `docs/local.md` is on disk, but git ignores it\n    \
+         fix: name a file git tracks, or remove the reference",
+        "GUIDE.md:1: the relative link `local.md` does not resolve: `local.md` is on disk, but \
+         git ignores it\n    fix: link a file git tracks, or remove the link",
     ]) => super::cases::unlisted_local_file_fails,
     /// The same broken link twice on one line, around another, is reported once.
     repeats_on_one_line_are_reported_once: FailsWith(&[
@@ -133,20 +136,24 @@ crate::checks::planted::cases! {
     path_with_a_brace_passes: Passes => super::cases::path_with_a_brace_passes,
     /// An ellipsis is not a path: `crates/...`.
     path_with_an_ellipsis_passes: Passes => super::cases::path_with_an_ellipsis_passes,
-    /// A trailing `:<line>` and `:<line>:<col>` are cut before the lookup.
-    path_with_a_line_and_column_passes: Passes => super::cases::path_with_a_line_and_column_passes,
+    /// A trailing `:<line>` is cut before the lookup.
+    path_with_a_line_passes: Passes => super::cases::path_with_a_line_passes,
     /// After the `:<line>` is cut, a missing file still fails, named without the line.
     missing_path_with_a_line_fails: FailsWith(&[
         bad_path!(1, "crates/gone.rs"),
     ]) => super::cases::missing_path_with_a_line_fails,
     /// An anchor is cut before the lookup: `xtask/src/main.rs#sec`.
     path_with_an_anchor_passes: Passes => super::cases::path_with_an_anchor_passes,
-    /// A line range is cut like a line: `xtask/src/main.rs:1-3`.
-    path_with_a_line_range_passes: Passes => super::cases::path_with_a_line_range_passes,
     /// Trailing `,`, `.`, `;` and `:` are punctuation, not part of the path.
     path_with_trailing_punctuation_passes: Passes => super::cases::path_with_trailing_punctuation_passes,
-    /// A span with whitespace is prose, not a path: `crates/gone.rs (line 3)`.
-    span_with_whitespace_passes: Passes => super::cases::span_with_whitespace_passes,
+    /// The first word of a span is the path: `crates/nope/lib.rs and more` and
+    /// `crates/nope.rs --flag` fail, `crates/host/src/main.rs --help` passes.
+    first_word_is_the_path: FailsWith(&[
+        bad_path!(1, "crates/nope.rs"),
+        bad_path!(1, "crates/nope/lib.rs"),
+    ]) => super::cases::first_word_is_the_path,
+    /// A first word that is a pattern is not read: `crates/<name>/src and more`.
+    first_word_pattern_passes: Passes => super::cases::first_word_pattern_passes,
     /// A top folder in the wrong case is still a repo path, and fails the exact lookup.
     wrong_case_top_folder_fails: FailsWith(&[
         bad_path!(1, "Xtask/src/main.rs"),
@@ -158,13 +165,26 @@ crate::checks::planted::cases! {
         "GUIDE.md:1: `crates/a/..` has a `..` part\n    \
          fix: write the path from the repo root, without `..`",
     ]) => super::cases::trailing_dot_dot_fails,
-    /// A path marked `(planned)` that does not exist passes.
+    /// In `ARCHITECTURE.md`, a path marked `(planned)` that does not exist passes.
     planned_missing_path_passes: Passes => super::cases::planned_missing_path_passes,
-    /// A path marked `(planned)` that exists fails: the marker is dropped when the path lands.
+    /// In `ARCHITECTURE.md`, a path marked `(planned)` that exists fails: the marker is dropped
+    /// when the path lands.
     planned_existing_path_fails: FailsWith(&[
-        "GUIDE.md:1: `xtask/src/main.rs` exists, but the text marks it (planned)\n    \
+        "ARCHITECTURE.md:10: `xtask/src/main.rs` exists, but the text marks it (planned)\n    \
          fix: drop the (planned) after `xtask/src/main.rs`",
     ]) => super::cases::planned_existing_path_fails,
+    /// In `ARCHITECTURE.md`, a marked path that differs from a listed one only in case fails,
+    /// naming the listed one.
+    planned_case_variant_fails: FailsWith(&[
+        "ARCHITECTURE.md:10: `docs/REAL.md` is marked (planned), but `docs/real.md` exists, in \
+         another case\n    fix: write `docs/real.md`, and drop the (planned) after it",
+    ]) => super::cases::planned_case_variant_fails,
+    /// Outside `ARCHITECTURE.md` the marker is not read: Rohan's three marked spans fail.
+    planned_marker_outside_architecture_fails: FailsWith(&[
+        bad_path!(1, "crates/nope/lib.rs"),
+        bad_path!(1, "docs/REAL.md"),
+        bad_path!(1, "ui/componnets"),
+    ]) => super::cases::planned_marker_outside_architecture_fails,
     /// The same missing path without the marker still fails.
     unmarked_missing_path_fails: FailsWith(&[
         bad_path!(1, "ui/components"),

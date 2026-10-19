@@ -1,35 +1,52 @@
 //! Relative links: each link destination that is not an absolute URL, a pure `#anchor` or a link
 //! into the `clauseo-acp-private` folder beside the repo must resolve to a file or folder in the
 //! repo: a file or folder git lists (see `Tree`), named with the same case. `..` is resolved
-//! against the linking file's folder, and a link that climbs above the root fails.
+//! against the linking file's folder, and a link that climbs above the root fails. A target that
+//! is on disk but not listed fails with a message that says git ignores it.
+//!
+//! A label defined twice (`[e]: a.md` and later `[e]: nope.md`) is read once: pulldown-cmark's
+//! `reference_definitions()` keeps only the first definition, so a broken repeat is never read.
 
 use super::markdown::Link;
-use super::tree::Tree;
+use super::tree::{self, Tree};
 use crate::checks::violation;
 use crate::violation::Violation;
+use std::path::Path;
 
 /// The folder beside the repo that may be absent. Links into it are not checked.
 const PRIVATE_FOLDER: &str = "clauseo-acp-private";
 
 /// The broken relative links of `file` (repo-relative), one violation each, at the link's line.
-pub(super) fn problems(tree: &Tree, file: &str, links: &[Link]) -> Vec<Violation> {
+/// `root` is the repo on disk, read only to word the message for a target git does not list.
+pub(super) fn problems(tree: &Tree, root: &Path, file: &str, links: &[Link]) -> Vec<Violation> {
     links
         .iter()
-        .filter_map(|link| problem(tree, file, link))
+        .filter_map(|link| problem(tree, root, file, link))
         .collect()
 }
 
 /// The violation for `link` when it is a relative link that does not resolve inside the repo.
-fn problem(tree: &Tree, file: &str, link: &Link) -> Option<Violation> {
+fn problem(tree: &Tree, root: &Path, file: &str, link: &Link) -> Option<Violation> {
     let path = relative_path(&link.target)?;
     match resolve(dir_of(file), &percent_decode(path)) {
         Target::Inside(rel) if tree.contains(&rel) => None,
-        Target::Inside(rel) => Some(violation(
-            file,
-            link.line,
-            format!("the relative link `{path}` does not resolve: `{rel}` does not exist"),
-            format!("create `{rel}`, or correct or remove the link"),
-        )),
+        Target::Inside(rel) => match tree::on_disk(root, &rel) {
+            Some(found) => Some(violation(
+                file,
+                link.line,
+                format!(
+                    "the relative link `{path}` does not resolve: {}",
+                    found.reason(&rel)
+                ),
+                "link a file git tracks, or remove the link",
+            )),
+            None => Some(violation(
+                file,
+                link.line,
+                format!("the relative link `{path}` does not resolve: `{rel}` does not exist"),
+                format!("create `{rel}`, or correct or remove the link"),
+            )),
+        },
         Target::Outside { private: true } => None,
         Target::Outside { private: false } => Some(violation(
             file,

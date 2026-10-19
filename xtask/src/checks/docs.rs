@@ -6,7 +6,7 @@
 //! The files come from `changes::repo_files`: tracked files and also untracked files that are not
 //! ignored (`git ls-files --others`). That is on purpose, not a slip: it catches a new file before
 //! anyone adds it, and it matches what `--quick` sees. Links and paths are looked up in the same
-//! list, so an ignored local file does not count as existing.
+//! list, so an ignored local file does not count as existing; the disk is read only to say so.
 
 mod commands;
 mod links;
@@ -68,7 +68,7 @@ fn inspect(root: &Path, files: &[String]) -> Inspection {
         match checks::read_repo_file(root, file) {
             Ok(Some(text)) => {
                 inspected += 1;
-                violations.extend(file_problems(&tree, file, &text, &planned));
+                violations.extend(file_problems(&tree, root, file, &text, &planned));
             }
             Ok(None) => {}
             Err(unreadable) => violations.push(unreadable),
@@ -116,11 +116,18 @@ fn planned_rows(root: &Path) -> Vec<String> {
     )
 }
 
-/// Every problem in one Markdown file: its links, its repo paths and its xtask commands.
-fn file_problems(tree: &Tree, file: &str, text: &str, planned: &[String]) -> Vec<Violation> {
+/// Every problem in one Markdown file under `root`: its links, its repo paths and its xtask
+/// commands.
+fn file_problems(
+    tree: &Tree,
+    root: &Path,
+    file: &str,
+    text: &str,
+    planned: &[String],
+) -> Vec<Violation> {
     let scan = markdown::scan(text);
-    let mut found = links::problems(tree, file, &scan.links);
-    found.extend(paths::problems(tree, file, &scan.spans, planned));
+    let mut found = links::problems(tree, root, file, &scan.links);
+    found.extend(paths::problems(tree, root, file, &scan.spans, planned));
     found.extend(commands::problems(file, &scan));
     found
 }
