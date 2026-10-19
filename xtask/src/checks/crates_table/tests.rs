@@ -453,3 +453,33 @@ fn a_look_alike_of_a_row_named_like_an_io_word_is_told_to_write_its_package() {
         ])
     );
 }
+
+#[test]
+fn a_row_package_written_with_an_underscore_after_clauseo_is_told_to_write_the_package() {
+    let text = doc(
+        "| `host` | things | | clauseo_process, Clauseo_Process | planned |\n\
+         | `process` | things | | | planned |\n",
+    );
+    let fix = |entry: &str| {
+        format!(
+            "write `clauseo-process` to ban our crate, or `{entry} (crates.io)` if you mean the crates.io package"
+        )
+    };
+    assert_eq!(
+        parse(&text),
+        Err(vec![
+            violation(
+                FILE,
+                7,
+                "`clauseo_process` in the Never depends on column of `host` is the package `clauseo-process` written with `_` after `clauseo`",
+                fix("clauseo_process"),
+            ),
+            violation(
+                FILE,
+                7,
+                "`Clauseo_Process` in the Never depends on column of `host` is the package `clauseo-process` written with other letter case and `_` after `clauseo`",
+                fix("Clauseo_Process"),
+            ),
+        ])
+    );
+}

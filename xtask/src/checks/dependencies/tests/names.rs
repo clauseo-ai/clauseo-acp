@@ -83,3 +83,7 @@ pub(in crate::checks::dependencies) fn typo_of_a_row_named_like_an_io_word() -> 
     let rows = "| `host` | sessions | protocol | tauri, procesz | exists |\n| `process` | runner | protocol | tauri | planned |\n";
     run_on(&workspace("io-word-row", rows, "", &crates))
 }
+
+pub(in crate::checks::dependencies) fn std_module_in_other_case() -> Inspection {
+    host("std-case", "Std, NET", "", &[])
+}

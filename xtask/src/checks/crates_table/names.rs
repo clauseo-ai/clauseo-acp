@@ -26,7 +26,7 @@ pub(super) fn marked_crates_io(entry: &str) -> Option<&str> {
 pub(super) fn crate_entry(entry: &str, rows: &[&str]) -> Result<Never, Rejected> {
     let lower = entry.to_ascii_lowercase();
     let folded = fold(&lower);
-    if lower.starts_with("clauseo-") {
+    if folded.starts_with("clauseo_") {
         return clauseo_entry(entry, &folded, rows);
     }
     if let Some(row) = rows.iter().find(|row| within_one_edit(&folded, row)) {
@@ -64,8 +64,9 @@ pub(super) fn crate_entry(entry: &str, rows: &[&str]) -> Result<Never, Rejected>
     Ok(Never::External(entry.to_owned()))
 }
 
-/// The entry `entry`, which starts with `clauseo-` in any case (`folded` is it in lowercase with
-/// `-` read as `_`): our crate when it is exactly the package of a row, else rejected.
+/// The entry `entry`, which starts with `clauseo-` or `clauseo_` in any case (`folded` is it in
+/// lowercase with `-` read as `_`): our crate when it is a row's package written in lowercase
+/// with `clauseo-`, else rejected.
 fn clauseo_entry(entry: &str, folded: &str, rows: &[&str]) -> Result<Never, Rejected> {
     let rest = folded.strip_prefix("clauseo_").unwrap_or(folded);
     let own = rows
@@ -77,8 +78,16 @@ fn clauseo_entry(entry: &str, folded: &str, rows: &[&str]) -> Result<Never, Reje
         }
         Some(row) => Err(Rejected {
             what: format!(
-                "is the package `{package}` written with other letter case",
-                package = package_of(row)
+                "is the package `{package}` written with {ways}",
+                package = package_of(row),
+                ways = match (
+                    entry != entry.to_ascii_lowercase(),
+                    entry.to_ascii_lowercase().starts_with("clauseo-")
+                ) {
+                    (true, true) => "other letter case",
+                    (true, false) => "other letter case and `_` after `clauseo`",
+                    _ => "`_` after `clauseo`",
+                }
             ),
             fix: format!(
                 "write `{package}`{or_row} to ban our crate, or `{entry} {CRATES_IO}` if you mean the crates.io package",
@@ -104,7 +113,8 @@ fn clauseo_entry(entry: &str, folded: &str, rows: &[&str]) -> Result<Never, Reje
             }),
             None => Err(Rejected {
                 what: format!(
-                    "starts with `clauseo-`, but `{rest}` is no row of the Crates table, so it names none of our crates"
+                    "starts with `{prefix}`, but `{rest}` is no row of the Crates table, so it names none of our crates",
+                    prefix = entry.get(..8).unwrap_or(entry)
                 ),
                 fix: format!(
                     "write the name that bans the crate you mean ({}), add a row `{rest}` for the crate, or write `{entry} {CRATES_IO}` if you mean the crates.io package",

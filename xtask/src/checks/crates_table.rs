@@ -20,13 +20,14 @@
 //! - an I/O word in other letter case (`FS`, `Any I/O`): rejected with the exact word to write,
 //!   not read as a crates.io name;
 //! - `std`, or a standard library module that core-io bans whole (`net`, `env`, `os`: see
-//!   `core_io.rs`): rejected, since it names no crate we use and the I/O words are how the
-//!   table bans those APIs. `time` is the crates.io crate;
+//!   `core_io.rs`), in any letter case (`Std`, `NET`): rejected, since it names no crate we use
+//!   and the I/O words are how the table bans those APIs. `time` is the crates.io crate;
 //! - a row's name: that row's crate, the package `clauseo-<name>` (`xtask` for `xtask`);
-//! - a row's package, in lowercase, `-` and `_` read the same (`clauseo-process`, since a bare
-//!   `process` is the I/O word): that row's crate;
-//! - any other name starting with `clauseo-` in any letter case: rejected, `clauseo-xtask` too
-//!   (the xtask row's package is `xtask`);
+//! - a row's package, in lowercase and starting `clauseo-`, `-` and `_` read the same after
+//!   that (`clauseo-process`, since a bare `process` is the I/O word): that row's crate;
+//! - any other name starting with `clauseo-` or `clauseo_` in any letter case: rejected, with
+//!   the package to write when it is a row's (`clauseo_process`, `Clauseo-Process`), and
+//!   `clauseo-xtask` too (the xtask row's package is `xtask`);
 //! - a name at most one edit from a row name, comparing in lowercase with `-` read as `_` (see
 //!   `fold`), an inserted, deleted or replaced letter or a swap of two adjacent letters each
 //!   counting as one edit: rejected as a likely typo of that row (`procesz`, `Mcp`,
@@ -410,7 +411,9 @@ fn classify(raw: &[RawRow], found: &mut Vec<Violation>) -> Vec<CrateRow> {
                 never.push(Never::Io(word));
             } else if let Some(word) = IoWord::parse_ignoring_case(entry) {
                 found.push(io_word_in_other_case(entry, word, &row.name, row.line));
-            } else if core_io::holds_banned_modules(entry) {
+            } else if core_io::holds_banned_modules(entry)
+                || core_io::holds_banned_modules(&entry.to_ascii_lowercase())
+            {
                 found.push(violation(
                     FILE,
                     row.line,

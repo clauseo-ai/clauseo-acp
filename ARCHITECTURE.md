@@ -60,8 +60,8 @@ A "Never depends on" entry that is a row's name bans that crate; any other name 
 crates.io package of that name. The I/O words (below) win over a row of the same name, so
 `clauseo-process` is how a row bans the process crate. One name bans one package: `tauri` does
 not cover `tauri-runtime`, `tauri-utils` or `wry`, so banning a family means listing each one.
-The check rejects a name that looks like a typo of one of ours and says how to write it either
-way.
+The check rejects an entry it could misread, such as a likely typo of one of ours, and says what
+to write instead.
 
 | Crate | Owns | May depend on | Never depends on | Status |
 |---|---|---|---|---|
