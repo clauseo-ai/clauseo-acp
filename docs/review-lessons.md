@@ -44,6 +44,3 @@ here and adds the rule to "Rules the checks enforce" in `AGENTS.md`.
 
 ## Until the checks land
 
-- Tests never touch the network.
-  Replaced by: CI running the tests with the network cut off.
-  Why: `cargo test -p xtask` quietly downloaded crates (PR #8).

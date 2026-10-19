@@ -72,11 +72,11 @@ this. Use the words in `GLOSSARY.md` exactly.
   `ui/app/scripts/buildtime-proc.mjs` in scripts, each with a timeout and a whole-tree kill.
 - Each pinned version has one home.
 - Component files in `ui/` export only components.
+- Tests never reach the network; CI's Linux job runs them with it cut off.
 
 ## Testing
 
-- Tests are deterministic: no sleeps, no network, no real agent. A scripted `fake_agent` arrives with
-  the core crates.
+- Tests are deterministic: no sleeps, no real agent. A scripted `fake_agent` comes with core crates.
 
 ## Performance
 
