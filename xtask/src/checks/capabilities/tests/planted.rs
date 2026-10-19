@@ -2,7 +2,7 @@
 //! test per case (see `checks/planted.rs`). The functions that build each input live in
 //! the check's tests module.
 
-crate::checks::planted::cases! {
+crate::checks::planted::cases_uncounted! {
     /// A capability file that grants nothing forbidden passes.
     clean_capability: Passes => super::cases::clean_capability,
     /// A workspace with no desktop crate stops at the root manifest, and the zero line says so.

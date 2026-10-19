@@ -2,7 +2,7 @@
 //! test per case (see `checks/planted.rs`). The functions that build each input live in
 //! the check's tests module.
 
-crate::checks::planted::cases! {
+crate::checks::planted::cases_uncounted! {
     /// A crate that depends on tauri in `[dependencies]` fails at that line.
     direct: FailsWith(&[
         "crates/protocol/Cargo.toml:7: clauseo-protocol depends on tauri, which ARCHITECTURE.md forbids\n    \

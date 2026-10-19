@@ -42,7 +42,7 @@ macro_rules! stopped {
     };
 }
 
-crate::checks::planted::cases! {
+crate::checks::planted::cases_uncounted! {
     /// A held crate without `clippy.toml` fails at its row, with the file to write.
     missing_crate_file: FailsWith(&[concat!(
         "ARCHITECTURE.md:8: clauseo-protocol's row bans I/O (Never depends on: fs, process), but \

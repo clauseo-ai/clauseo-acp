@@ -2,7 +2,7 @@
 //! test per case (see `checks/planted.rs`). The functions that build each input live in
 //! the check's tests module.
 
-crate::checks::planted::cases! {
+crate::checks::planted::cases_uncounted! {
     /// A `.rs` file of 601 lines fails at line 1 and names the limit and the two fixes.
     rs_601_lines: FailsWith(&[
         "src/big.rs:1: this file has 601 lines; the limit is 600\n    \

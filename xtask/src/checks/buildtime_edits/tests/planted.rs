@@ -2,7 +2,7 @@
 //! test per case (see `checks/planted.rs`). The functions that build each input live in
 //! the check's tests module.
 
-crate::checks::planted::cases! {
+crate::checks::planted::cases_uncounted! {
     /// A clean `ui/app/src`, with a nested file and no attribute, passes.
     clean_src_passes: Passes => super::clean_src_passes,
     /// An attribute left in `App.tsx` with the lock free fails at its line, worded as a leftover.

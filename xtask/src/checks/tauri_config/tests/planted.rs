@@ -2,7 +2,7 @@
 //! test per case (see `checks/planted.rs`). The functions that build each input live in
 //! `tests/cases.rs`.
 
-crate::checks::planted::cases! {
+crate::checks::planted::cases_uncounted! {
     /// A valid `tauri.conf.json` and `build.rs` pass.
     clean_tree: Passes => super::cases::clean_tree,
     /// `AppManifest::new().commands(...)` is still a manifest, so the file passes.

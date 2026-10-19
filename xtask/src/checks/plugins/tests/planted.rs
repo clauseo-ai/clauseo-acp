@@ -2,7 +2,7 @@
 //! test per case (see `checks/planted.rs`). The functions that build each input live in the
 //! check's tests module.
 
-crate::checks::planted::cases! {
+crate::checks::planted::cases_uncounted! {
     /// The fixed plugin set in the desktop crate, with its two Tauri crates, passes.
     fixed_plugin_set_passes: Passes => super::fixed_plugin_set_passes,
     /// `tauri-build` as a build dependency of the desktop crate passes.

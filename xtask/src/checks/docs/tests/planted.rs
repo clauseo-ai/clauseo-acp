@@ -54,7 +54,7 @@ macro_rules! bad_path {
     };
 }
 
-crate::checks::planted::cases! {
+crate::checks::planted::cases_uncounted! {
     /// A backticked repo path that does not exist fails at the span's line.
     missing_backticked_path: FailsWith(&[
         bad_path!(1, "crates/nope/src/lib.rs"),
