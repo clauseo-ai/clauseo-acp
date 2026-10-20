@@ -24,3 +24,14 @@ copy_vcs = true
 # on macOS and Linux, where `cargo xtask mutants` runs, a mutant there builds the same binary and no
 # test can tell it apart. Its code runs only in a Windows build (S1's Windows CI job).
 exclude_globs = ["xtask/src/process/windows.rs"]
+
+# No test can make these happen without fault injection in std (xtask/src/process/running.rs):
+# - `Running::keep` only keeps the error of a failed pipe read, wait or killpg, which a live
+#   child's pipes and group never give.
+# - `read_all` retries a read that failed with EINTR. xtask installs no signal handler, so a pipe
+#   read is never interrupted and the retry never runs.
+exclude_re = [
+  'running\.rs:\d+:\d+: replace Running::keep with \(\)$',
+  'running\.rs:\d+:\d+: replace match guard error\.kind\(\) == io::ErrorKind::Interrupted with (true|false) in read_all$',
+  'running\.rs:\d+:\d+: replace == with != in read_all$',
+]

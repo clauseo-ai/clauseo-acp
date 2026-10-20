@@ -33,7 +33,7 @@ pub(super) const KILL_GRACE: Duration = Duration::from_secs(5);
 /// How long a run waits for the output pipes once the command has exited or its tree was killed.
 const DRAIN: Duration = Duration::from_secs(1);
 /// Size of each read from a running command's output pipe.
-const CHUNK: usize = 8 * 1024;
+const CHUNK: usize = 8192; // 8 KiB
 
 /// Held while the pipes of a command are made and it starts. On macOS std makes a pipe and only
 /// then marks its ends close-on-exec (`std/src/sys/pipe/unix.rs`), so a command started by
