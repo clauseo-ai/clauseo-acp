@@ -234,7 +234,7 @@ fn a_registry_declaration_is_not_matched_to_a_git_package_of_its_name() {
         vec![violation(
             "crates/protocol/Cargo.toml",
             7,
-            "clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s1` and `s2` are declared at lines 7 and 10 of crates/protocol/Cargo.toml, and each declaration brings b in",
+            "clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s1` and `s2` are declared at lines 7 and 10 of crates/protocol/Cargo.toml, and each declaration brings `b` in",
             "move the code that uses `s1` and `s2` into a crate whose row allows b, then remove `s1` and `s2` from lines 7 and 10 of crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
         )]
     );

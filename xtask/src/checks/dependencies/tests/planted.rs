@@ -161,14 +161,14 @@ crate::checks::planted::cases! {
     /// `s` declared twice, where both declarations bring b in, names both lines in the message
     /// and the fix, since removing one would leave b in.
     declared_twice_names_both_lines: FailsWith(&[
-        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s` is declared at lines 7 and 10 of crates/protocol/Cargo.toml, and each declaration brings b in\n    \
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s` is declared at lines 7 and 10 of crates/protocol/Cargo.toml, and each declaration brings `b` in\n    \
          fix: move the code that uses `s` into a crate whose row allows b, then remove `s` from lines 7 and 10 of crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
     ]), inspects 1 => super::tree::declared_twice_names_both_lines,
     /// `s` declared in `[dependencies]` with `f1` and in a `[target.'cfg(windows)'.dependencies]`
     /// table with `f3`, where only `f3` brings b in. Cargo builds both lines as one package, so
     /// the violation says one or more of them brings b in and names both lines in the fix.
     declared_twice_in_one_section: FailsWith(&[
-        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s` is declared at lines 7 and 10 of crates/protocol/Cargo.toml. Cargo builds these declarations as one package, and one or more of them brings b in\n    \
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s` is declared at lines 7 and 10 of crates/protocol/Cargo.toml. Cargo builds these declarations as one package, and one or more of them brings `b` in\n    \
          fix: move the code that uses `s` into a crate whose row allows b, then remove `s` from lines 7 and 10 of crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
     ]), inspects 1 => super::tree::declared_twice_in_one_section,
     /// `s1` and `s2` declare two path packages named `s`, and only `s` 2.0.0, at line 10, brings
@@ -180,7 +180,7 @@ crate::checks::planted::cases! {
     ]), inspects 1 => super::tree::two_paths_of_one_name_blame_the_one_that_brings_it_in,
     /// Both packages named `s` bring b in, so the violation names both keys and both lines.
     two_paths_of_one_name_both_bring_it_in: FailsWith(&[
-        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s1` and `s2` are declared at lines 7 and 10 of crates/protocol/Cargo.toml, and each declaration brings b in\n    \
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s1` and `s2` are declared at lines 7 and 10 of crates/protocol/Cargo.toml, and each declaration brings `b` in\n    \
          fix: move the code that uses `s1` and `s2` into a crate whose row allows b, then remove `s1` and `s2` from lines 7 and 10 of crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
     ]), inspects 1 => super::tree::two_paths_of_one_name_both_bring_it_in,
     crates_io_marker_passes: Passes, inspects 1 => super::names::crates_io_marker_passes,

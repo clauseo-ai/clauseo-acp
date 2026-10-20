@@ -174,6 +174,7 @@ impl Blamed {
     /// lines of a group that is not known may each bring it in.
     pub(crate) fn declared(&self, manifest: &str, package: &str) -> String {
         let groups = self.groups.as_slice();
+        let package = format!("`{package}`");
         let verb = if self.keys.len() == 1 { "is" } else { "are" };
         let head = format!(
             "{} {verb} declared at lines {} of {manifest}",

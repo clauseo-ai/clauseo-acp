@@ -67,10 +67,7 @@ fn violation_for(tree: &Tree, target: usize, dependent: usize, desktop: &Desktop
         [first, _, ..] => violation(
             desktop.path,
             *first,
-            format!(
-                "{message}. {}",
-                blamed.declared(desktop.path, &format!("`{name}`"))
-            ),
+            format!("{message}. {}", blamed.declared(desktop.path, name)),
             format!(
                 "remove {} from lines {} of {}: {TREE_FIX}",
                 blamed.keys_text(),
