@@ -229,6 +229,16 @@ pub(in crate::checks::core_io) fn items_named_cfg() -> Inspection {
     )
 }
 
+/// The review's case: `doc` passes where `test` does, `not(doc)` included, as the usual import
+/// for a doc link uses it.
+pub(in crate::checks::core_io) fn cfg_doc_passes() -> Inspection {
+    with_file(
+        "cfg-doc",
+        "#[cfg(doc)]\nuse crate::FileRefId;\n#[cfg(not(doc))]\npub fn f() {}\n\
+         #[cfg_attr(doc, derive(Debug))]\npub struct S;\n",
+    )
+}
+
 pub(in crate::checks::core_io) fn source_not_lexed() -> Inspection {
     with_file("not-lexed", "pub fn f() {}\n\npub fn g() {\n")
 }

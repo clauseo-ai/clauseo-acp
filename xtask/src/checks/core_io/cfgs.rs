@@ -1,11 +1,12 @@
 //! The cfg rule of a held crate. clippy lints the crate once per target kind with every feature
 //! on, so code is linted only when its cfg holds in that build. `test` holds in the test build,
-//! `not(test)` in the others, and a positive feature holds under `--all-features`. Any other
-//! name, or a feature under a `not`, can leave code out of every clippy run.
+//! `not(test)` in the others, and a positive feature holds under `--all-features`. `doc` holds
+//! only when rustdoc documents the crate, and is false in every clippy run as in every build. Any
+//! other name, or a feature under a `not`, can leave code out of every clippy run.
 //!
 //! Each `.rs` file of the crate is lexed, and every token tree is walked, macro bodies and macro
 //! call arguments included. The predicate of each `cfg` and `cfg_attr` at the start of any
-//! bracket group or inside a `cfg_attr` is built only from `all`, `any`, `not`, `test` and
+//! bracket group or inside a `cfg_attr` is built only from `all`, `any`, `not`, `test`, `doc` and
 //! `feature = "<literal>"`, with no `feature` under a `not`. Any bracket group counts, since a
 //! macro can join a `#` to brackets passed separately. The name `cfg_select` fails wherever it
 //! stands, a `use` included, since `cfg_select!` builds only the arm whose cfg holds and an alias
@@ -28,8 +29,8 @@ use std::str::FromStr;
 /// What a held crate's file may not hold, found at a line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Finding {
-    /// A cfg predicate with a form other than `all`, `any`, `not`, `test` and a positive feature,
-    /// described as the fix names it.
+    /// A cfg predicate with a form other than `all`, `any`, `not`, `test`, `doc` and a positive
+    /// feature, described as the fix names it.
     Predicate(String),
     /// An attribute whose name is a metavariable, or a `#` before a metavariable.
     MetavariableAttribute,
@@ -283,7 +284,7 @@ fn predicate(trees: &[TokenTree], negated: bool) -> Result<(), (Finding, u32)> {
     };
     let name = ident_name(ident);
     match (name.as_str(), &trees[1..]) {
-        ("test", []) => Ok(()),
+        ("test" | "doc", []) => Ok(()),
         ("feature", [TokenTree::Punct(eq), TokenTree::Literal(literal)])
             if eq.as_char() == '=' && literal.to_string().starts_with(['"', 'r']) =>
         {
@@ -312,7 +313,7 @@ fn predicate(trees: &[TokenTree], negated: bool) -> Result<(), (Finding, u32)> {
             }
             Ok(())
         }
-        ("feature" | "all" | "any" | "not" | "test", _) => Err(not_a_predicate(line)),
+        ("feature" | "all" | "any" | "not" | "test" | "doc", _) => Err(not_a_predicate(line)),
         _ => Err((Finding::Predicate(format!("the name `{name}`")), line)),
     }
 }

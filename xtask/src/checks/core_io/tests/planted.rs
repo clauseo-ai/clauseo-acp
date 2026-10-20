@@ -106,12 +106,13 @@ macro_rules! cfg_form {
             $form,
             "; clippy lints clauseo-protocol once per target kind with every \
              feature on, so only a cfg built from `test` and positive features holds in one of \
-             its runs, and code behind any other can be left out of every clippy run\n    \
+             its runs, `doc` holds only when rustdoc documents the crate, and code behind any \
+             other cfg can be left out of every clippy run\n    \
              fix: remove ",
             $form,
             " from this cfg; the cfgs of a crate whose row bans I/O use \
-             only `test` and features, joined by `all`, `any` and `not`, with no feature under \
-             a `not`"
+             only `test`, `doc` and features, joined by `all`, `any` and `not`, with no feature \
+             under a `not`"
         )
     };
 }
@@ -137,8 +138,8 @@ macro_rules! cfg_select {
             "crates/protocol/src/hidden.rs:", $line, ": `crates/protocol/src/hidden.rs` names \
              `cfg_select`, whose macro builds only the first arm whose cfg holds, so the arms \
              clippy's build does not take can hold code clippy never lints\n    fix: write each \
-             arm as an item under `#[cfg(..)]` built from `test` and positive features; a crate \
-             whose row bans I/O does not name `cfg_select` at all, not even in a `use`"
+             arm as an item under `#[cfg(..)]` built from `test`, `doc` and positive features; \
+             a crate whose row bans I/O does not name `cfg_select` at all, not even in a `use`"
         )
     };
 }
@@ -339,8 +340,8 @@ crate::checks::planted::cases! {
         "crates/protocol/src/hidden.rs:1: `crates/protocol/src/hidden.rs` puts a `cfg` inside a \
          `cfg_attr`, which keeps the item whenever the `cfg_attr`'s predicate is false, so a \
          feature there acts like a `not(feature)` and can leave code out of every clippy run\n    \
-         fix: write the condition as one `#[cfg(..)]` outside any `cfg_attr`, built from `test` \
-         and positive features",
+         fix: write the condition as one `#[cfg(..)]` outside any `cfg_attr`, built from `test`, \
+         `doc` and positive features",
     ]), inspects 3 => super::cfg_inside_cfg_attr,
     cfg_attr_not_feature: FailsWith(&[cfg_form!(1, "a feature under `not`")]), inspects 3 => super::cfg_attr_not_feature,
     cfg_metavariable_in_a_macro_body: FailsWith(&[cfg_form!(3, "a metavariable")]), inspects 3 => super::cfg_metavariable_in_a_macro_body,
@@ -363,6 +364,7 @@ crate::checks::planted::cases! {
          fix: fix the Rust syntax that starts at this line, such as a bracket or a string left open",
     ]), inspects 3 => super::source_not_lexed,
     cfg_rule_passes: Passes, inspects 3 => super::cfg_rule_passes,
+    cfg_doc_passes: Passes, inspects 3 => super::cfg_doc_passes,
     attribute_split_across_a_macro: FailsWith(&[
         "crates/protocol/src/hidden.rs:2: `crates/protocol/src/hidden.rs` writes an attribute whose name is a metavariable, so a macro \
          of clauseo-protocol can build a cfg that core-io does not see\n    \

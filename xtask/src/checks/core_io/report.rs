@@ -345,12 +345,13 @@ pub(super) fn cfg_rule(path: &str, line: u32, finding: &Finding, package: &str) 
             format!(
                 "`{path}` has a cfg with {form}; clippy lints {package} once per target kind with \
                  every feature on, so only a cfg built from `test` and positive features holds in \
-                 one of its runs, and code behind any other can be left out of every clippy run"
+                 one of its runs, `doc` holds only when rustdoc documents the crate, and code \
+                 behind any other cfg can be left out of every clippy run"
             ),
             format!(
                 "remove {form} from this cfg; the cfgs of a crate whose row bans I/O use only \
-                 `test` and features, joined by `all`, `any` and `not`, with no feature under a \
-                 `not`"
+                 `test`, `doc` and features, joined by `all`, `any` and `not`, with no feature \
+                 under a `not`"
             ),
         ),
         Finding::MetavariableAttribute => (
@@ -379,19 +380,19 @@ pub(super) fn cfg_rule(path: &str, line: u32, finding: &Finding, package: &str) 
                 "`{path}` names `cfg_select`, whose macro builds only the first arm whose cfg \
                  holds, so the arms clippy's build does not take can hold code clippy never lints"
             ),
-            "write each arm as an item under `#[cfg(..)]` built from `test` and positive \
-             features; a crate whose row bans I/O does not name `cfg_select` at all, not even in \
-             a `use`"
+            "write each arm as an item under `#[cfg(..)]` built from `test`, `doc` and \
+             positive features; a crate whose row bans I/O does not name `cfg_select` at all, \
+             not even in a `use`"
                 .to_owned(),
         ),
         Finding::CfgInCfgAttr => (
             format!(
                 "`{path}` puts a `cfg` inside a `cfg_attr`, which keeps the item whenever the \
-                 `cfg_attr`'s predicate is false, so a feature there acts like a `not(feature)` and \
-                 can leave code out of every clippy run"
+                 `cfg_attr`'s predicate is false, so a feature there acts like a `not(feature)` \
+                 and can leave code out of every clippy run"
             ),
-            "write the condition as one `#[cfg(..)]` outside any `cfg_attr`, built from `test` \
-             and positive features"
+            "write the condition as one `#[cfg(..)]` outside any `cfg_attr`, built from `test`, \
+             `doc` and positive features"
                 .to_owned(),
         ),
         Finding::Include => (
