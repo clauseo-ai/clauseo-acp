@@ -27,7 +27,8 @@
 //! builds for `dependencies` too (normal and build edges for every target, all of the desktop
 //! crate's features, so a plugin behind an optional dependency of a desktop feature counts, and
 //! no feature that only another member or a dev-dependency turns on): a `tauri-plugin-*` outside
-//! the fixed set is in that graph only when fixed plugins alone depend on it (as
+//! the fixed set, or another crate than the desktop crate that depends on `tauri` (a plugin by
+//! another name), is in that graph only when fixed plugins alone depend on it (as
 //! `tauri-plugin-fs` comes in through the dialog plugin). A feature such a crate turns on
 //! (`devtools` in tauri, tauri-runtime, tauri-runtime-wry or wry, `protocol-asset` in tauri) is
 //! banned in deny.toml's `[[bans.features]]`, which the `deny` step checks.

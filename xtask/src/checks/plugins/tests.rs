@@ -350,6 +350,18 @@ pub(super) fn path_dependency_on_excluded_crate() -> Repo {
     Repo::cargo(dir)
 }
 
+pub(super) fn build_dependency_path_to_excluded_crate() -> Repo {
+    let root = ROOT.replace(
+        "members = [\"crates/*\"]\n",
+        "members = [\"crates/*\"]\nexclude = [\"evil\"]\n",
+    );
+    let desktop = format!("{DESKTOP}\n[build-dependencies]\nevil = {{ path = \"../../evil\" }}\n");
+    let dir = write_workspace("build_path_excluded", &root, &desktop, &[]);
+    write_file(&dir, "evil/Cargo.toml", &member("evil", ""));
+    write_file(&dir, "evil/src/lib.rs", "");
+    Repo::cargo(dir)
+}
+
 pub(super) fn desktop_crate_missing() -> Repo {
     let dir = Scratch::new("planted-plugins-desktop_crate_missing");
     write_file(&dir, "Cargo.toml", ROOT);
