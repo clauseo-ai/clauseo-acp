@@ -405,6 +405,17 @@ pub(super) fn cfg_rule(path: &str, line: u32, finding: &Finding, package: &str) 
              use `if cfg!(..)`, which compiles both branches"
                 .to_owned(),
         ),
+        Finding::TtFragment => (
+            format!(
+                "`{path}` names `tt`, a name a crate whose row bans I/O never uses, since a \
+                 `tt` fragment can take a lone `#` out of an attribute and a macro of {package} \
+                 can join it to other brackets into an attribute that core-io does not see"
+            ),
+            "give the macros of a crate whose row bans I/O no `tt` fragment and use a typed \
+             fragment such as `item`, `expr`, `ident`, `ty` or `meta`; rename an identifier \
+             named `tt`"
+                .to_owned(),
+        ),
         Finding::CfgInCfgAttr => (
             format!(
                 "`{path}` puts a `cfg` inside a `cfg_attr`, which keeps the item whenever the \

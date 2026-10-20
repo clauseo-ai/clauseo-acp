@@ -153,12 +153,50 @@ pub(in crate::checks::core_io) fn attribute_built_across_two_macros() -> Inspect
     )
 }
 
-/// Indexing after a metavariable bound as `tt`, which passes, since no `#` stands alone.
-pub(in crate::checks::core_io) fn indexing_after_a_tt_passes() -> Inspection {
+/// Indexing after a metavariable bound as `expr`, which cannot take a lone `#`.
+pub(in crate::checks::core_io) fn indexing_after_an_expr_passes() -> Inspection {
+    with_file(
+        "indexing-expr",
+        "macro_rules! first { ($a:expr) => { $a[0] }; }\n\
+         pub fn f(v: &[u8]) -> u8 {\n    first!(v)\n}\n",
+    )
+}
+
+/// The same indexing after a metavariable bound as `tt`, which fails for the name `tt`.
+pub(in crate::checks::core_io) fn indexing_after_a_tt() -> Inspection {
     with_file(
         "indexing-tt",
         "macro_rules! first { ($a:tt) => { $a[0] }; }\n\
          pub fn f(v: &[u8]) -> u8 {\n    first!(v)\n}\n",
+    )
+}
+
+/// The review's case: the caller writes a whole `#[..]`, the matcher takes its `#` alone as a
+/// `tt`, and the transcriber puts it before other brackets.
+pub(in crate::checks::core_io) fn hash_split_from_a_whole_attribute() -> Inspection {
+    with_file(
+        "split-attribute",
+        "macro_rules! split { ($h:tt $_b:tt $($t:tt)*) => { $h [$($t)*] pub fn hidden() {} }; }\n\
+         split!(#[allow(unused)] cfg(not(feature = \"specta\")));\n",
+    )
+}
+
+/// The same with a doc comment, which lexes as `#[doc = ".."]`.
+pub(in crate::checks::core_io) fn hash_split_from_a_doc_comment() -> Inspection {
+    with_file(
+        "split-doc",
+        "macro_rules! split { ($h:tt $_b:tt $($t:tt)*) => { $h [$($t)*] pub fn hidden() {} }; }\n\
+         split!(\n    /// Docs.\n    cfg(not(feature = \"specta\"))\n);\n",
+    )
+}
+
+/// The same with the split `#` passed to a second macro, whose transcriber writes `$a $b`.
+pub(in crate::checks::core_io) fn hash_split_across_two_macros() -> Inspection {
+    with_file(
+        "split-two-macros",
+        "macro_rules! join { ($a:tt $b:tt) => { $a $b pub fn hidden() {} }; }\n\
+         macro_rules! split { ($h:tt $_b:tt $($t:tt)*) => { join!($h [$($t)*]); }; }\n\
+         split!(#[allow(unused)] cfg(not(feature = \"specta\")));\n",
     )
 }
 

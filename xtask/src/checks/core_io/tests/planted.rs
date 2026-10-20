@@ -284,17 +284,22 @@ crate::checks::planted::cases! {
     attribute_name_metavariable: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::attribute_name_metavariable,
     /// A transcriber may write `#[$m]` only when its arm binds `$m` as `#[$m:meta]`.
     forwarded_attributes_pass: Passes, inspects 3 => super::forwarded_attributes_pass,
-    forwarded_attribute_as_tt: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::forwarded_attribute_as_tt,
+    forwarded_attribute_as_tt: FailsWith(&[tt_fragment!(2), metavariable_attribute!(3)]), inspects 3 => super::forwarded_attribute_as_tt,
     forwarded_attribute_as_ident: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::forwarded_attribute_as_ident,
     forwarded_cfg_at_the_call: FailsWith(&[cfg_form!(7, "the name `clippy`")]), inspects 3 => super::forwarded_cfg_at_the_call,
     /// A definition inside a transcriber or a macro call's arguments gets the full rules.
-    forwarded_meta_in_a_nested_definition: FailsWith(&[metavariable_attribute!(4), metavariable_attribute!(4)]), inspects 3 => super::forwarded_meta_in_a_nested_definition,
-    definition_shape_in_call_arguments: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::definition_shape_in_call_arguments,
+    forwarded_meta_in_a_nested_definition: FailsWith(&[tt_fragment!(2), metavariable_attribute!(4), metavariable_attribute!(4)]), inspects 3 => super::forwarded_meta_in_a_nested_definition,
+    definition_shape_in_call_arguments: FailsWith(&[tt_fragment!(1), tt_fragment!(2), metavariable_attribute!(3)]), inspects 3 => super::definition_shape_in_call_arguments,
     /// A `#` followed by neither brackets nor `!` and brackets fails, wherever it stands.
-    hash_joins_written_brackets: FailsWith(&[hash_without_brackets!(2)]), inspects 3 => super::hash_joins_written_brackets,
-    attribute_built_across_two_macros: FailsWith(&[hash_without_brackets!(2)]), inspects 3 => super::attribute_built_across_two_macros,
+    hash_joins_written_brackets: FailsWith(&[tt_fragment!(1), tt_fragment!(1), hash_without_brackets!(2)]), inspects 3 => super::hash_joins_written_brackets,
+    attribute_built_across_two_macros: FailsWith(&[tt_fragment!(1), tt_fragment!(1), tt_fragment!(2), hash_without_brackets!(2)]), inspects 3 => super::attribute_built_across_two_macros,
     indexing_after_an_ident_passes: Passes, inspects 3 => super::indexing_after_an_ident_passes,
-    indexing_after_a_tt_passes: Passes, inspects 3 => super::indexing_after_a_tt_passes,
+    indexing_after_an_expr_passes: Passes, inspects 3 => super::indexing_after_an_expr_passes,
+    /// The name `tt` fails wherever it stands, since only a `tt` fragment can take a lone `#`.
+    indexing_after_a_tt: FailsWith(&[tt_fragment!(1)]), inspects 3 => super::indexing_after_a_tt,
+    hash_split_from_a_whole_attribute: FailsWith(&[tt_fragment!(1), tt_fragment!(1), tt_fragment!(1)]), inspects 3 => super::hash_split_from_a_whole_attribute,
+    hash_split_from_a_doc_comment: FailsWith(&[tt_fragment!(1), tt_fragment!(1), tt_fragment!(1)]), inspects 3 => super::hash_split_from_a_doc_comment,
+    hash_split_across_two_macros: FailsWith(&[tt_fragment!(1), tt_fragment!(1), tt_fragment!(2), tt_fragment!(2), tt_fragment!(2)]), inspects 3 => super::hash_split_across_two_macros,
     path_attribute: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute,
     path_attribute_in_cfg_attr: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute_in_cfg_attr,
     /// A literal `path` on a top-level `mod name;` passes when it names a file core-io lexes.
@@ -318,12 +323,15 @@ crate::checks::planted::cases! {
     cfg_rule_passes: Passes, inspects 3 => super::cfg_rule_passes,
     cfg_doc_passes: Passes, inspects 3 => super::cfg_doc_passes,
     attribute_split_across_a_macro: FailsWith(&[
+        tt_fragment!(2),
+        tt_fragment!(2),
         hash_without_brackets!(2),
         cfg_form!(4, "the name `panic`"),
     ]), inspects 3 => super::attribute_split_across_a_macro,
-    hash_from_a_metavariable: FailsWith(&[cfg_form!(2, "the name `panic`"), hash_without_brackets!(4)]), inspects 3 => super::hash_from_a_metavariable,
-    path_with_a_metavariable: FailsWith(&[path_attribute!(3)]), inspects 3 => super::path_with_a_metavariable,
+    hash_from_a_metavariable: FailsWith(&[tt_fragment!(2), tt_fragment!(2), cfg_form!(2, "the name `panic`"), hash_without_brackets!(4)]), inspects 3 => super::hash_from_a_metavariable,
+    path_with_a_metavariable: FailsWith(&[tt_fragment!(2), path_attribute!(3)]), inspects 3 => super::path_with_a_metavariable,
     include_with_a_metavariable: FailsWith(&[
+        tt_fragment!(2),
         "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs` calls `include!`, which can bring into clauseo-protocol code \
          from a file core-io does not read\n    \
          fix: move the code into a module at its default path; use `include_str!` or \

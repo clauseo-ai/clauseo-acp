@@ -83,9 +83,9 @@ fn forms_beyond_the_planted_cases() {
 fn macro_arms() {
     let attribute = |line| (Finding::MetavariableAttribute, line);
     let cases = [
-        ("macro_rules! m { ($i:ident $x:tt) => {}; }", vec![]),
-        ("macro_rules! m { ($h:tt $i:ident!) => {} }", vec![]),
-        ("macro_rules! m { (#[path $e:tt]) => {} }", vec![]),
+        ("macro_rules! m { ($i:ident $x:expr) => {}; }", vec![]),
+        ("macro_rules! m { ($h:ident $i:ident!) => {} }", vec![]),
+        ("macro_rules! m { (#[path $e:expr]) => {} }", vec![]),
         ("macro_rules! m { (#[$a:meta]) => { #[$a] } }", vec![]),
         (
             "macro_rules! m { (#[$a:meta]) => {}; (#[$b:meta]) => { #[$a] } }",
@@ -124,7 +124,7 @@ fn macro_arms() {
             vec![(Finding::Predicate("the name `unix`".to_owned()), 1)],
         ),
         (
-            "macro_rules! m { ($v:ident $t:tt) => { $v[0]; $crate[0]; $t[0]; $u[0]; $($t),*[0] } }",
+            "macro_rules! m { ($v:ident $t:expr) => { $v[0]; $crate[0]; $t[0]; $u[0]; $($t),*[0] } }",
             vec![],
         ),
     ];
@@ -147,16 +147,38 @@ fn every_hash_is_followed_by_brackets() {
         ("m!(#);", vec![hash(1)]),
         ("m!(#!);", vec![hash(1)]),
         ("m!(#(test) #{test} #! !);", vec![hash(1), hash(1), hash(1)]),
-        ("macro_rules! m { (#$h:tt) => {} }", vec![hash(1)]),
+        ("macro_rules! m { (#$h:ident) => {} }", vec![hash(1)]),
         ("macro_rules! m { () => { # x } }", vec![hash(1)]),
         (
-            "macro_rules! m { ($($h:tt)?) => { $($h)? [test] } }",
+            "macro_rules! m { ($($h:ident)?) => { $($h)? [test] } }",
             vec![],
         ),
         (
             "m! { macro_rules! n { (#[$a:meta]) => { #[$a] } } }",
             vec![(Finding::MetavariableAttribute, 1); 2],
         ),
+    ];
+    for (source, expected) in cases {
+        assert_eq!(findings(source), expected, "{source}");
+    }
+}
+
+/// The name `tt` fails wherever it stands: a raw `r#tt`, a fragment kind in a nested definition
+/// or in a call's arguments, and an identifier. A kind passed in as `$h:$k` fails at the call.
+#[test]
+fn the_name_tt_fails_everywhere() {
+    let tt = |line| (Finding::TtFragment, line);
+    let cases = [
+        ("let tt = 1; let r#tt = 2;", vec![tt(1), tt(1)]),
+        (
+            "macro_rules! m { () => { macro_rules! n { ($h:tt) => {} } } }",
+            vec![tt(1)],
+        ),
+        (
+            "macro_rules! m { ($k:ident) => { m2!($h:$k); } }\nm!(tt);",
+            vec![tt(2)],
+        ),
+        ("let ttt = 1; let t = 2; \"tt\";", vec![]),
     ];
     for (source, expected) in cases {
         assert_eq!(findings(source), expected, "{source}");

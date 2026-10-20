@@ -87,3 +87,18 @@ macro_rules! cfg_select {
         )
     };
 }
+
+/// The violation for the name `tt` at line `$line` of `crates/protocol/src/hidden.rs`.
+#[cfg(test)]
+macro_rules! tt_fragment {
+    ($line:literal) => {
+        concat!(
+            "crates/protocol/src/hidden.rs:", $line, ": `crates/protocol/src/hidden.rs` names \
+             `tt`, a name a crate whose row bans I/O never uses, since a `tt` fragment can take \
+             a lone `#` out of an attribute and a macro of clauseo-protocol can join it to other \
+             brackets into an attribute that core-io does not see\n    fix: give the macros of a \
+             crate whose row bans I/O no `tt` fragment and use a typed fragment such as `item`, \
+             `expr`, `ident`, `ty` or `meta`; rename an identifier named `tt`"
+        )
+    };
+}

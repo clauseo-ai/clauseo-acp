@@ -22,10 +22,15 @@
 //!
 //! Every `#` is followed by a bracket group, or by `!` and a bracket group, in matchers,
 //! transcribers and macro call arguments alike. Otherwise a macro could join a `#` to brackets
-//! passed separately and build an attribute that the rule does not see. An attribute whose name is
-//! a metavariable fails, and so does a macro call whose name is a metavariable, such as `$x!`. A
-//! metavariable right after `path` or `include` fails too. Otherwise a macro could build a `cfg`,
-//! a `path` or an `include!` from what its caller passes.
+//! passed separately and build an attribute that the rule does not see. The name `tt` fails
+//! wherever it stands, in the matcher of every `macro_rules!` too, because a `tt` fragment is
+//! the one fragment that can take a lone `#` out of an attribute the caller writes whole, a doc
+//! comment included, and the transcriber can then put that `#` before other brackets. Failing
+//! the name itself also covers a nested definition and a fragment kind passed in as `$h:$k`.
+//!
+//! An attribute whose name is a metavariable fails, and so does a macro call whose name is a
+//! metavariable, such as `$x!`. A metavariable right after `path` or `include` fails too.
+//! Otherwise a macro could build a `cfg`, a `path` or an `include!` from what its caller passes.
 //!
 //! The metavariable rules skip the matcher of each arm of a `macro_rules!`, which only matches
 //! tokens. A transcriber may write `#[$m]` when the same arm's matcher binds `$m` as
@@ -72,6 +77,8 @@ pub(super) enum Finding {
     Include,
     /// The name `cfg_select`, whose macro builds only the arm whose cfg holds.
     CfgSelect,
+    /// The name `tt`, whose fragment can take a lone `#` out of an attribute.
+    TtFragment,
     /// A `cfg` among the attributes of a `cfg_attr`, at any depth of `cfg_attr`.
     CfgInCfgAttr,
     /// A macro call whose name is a metavariable, such as `$x!`.
@@ -209,6 +216,7 @@ fn walk(tokens: TokenStream, scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
                 let line = line_of(ident.span().start().line);
                 match ident_name(ident).as_str() {
                     "cfg_select" => hits.push((Finding::CfgSelect, line)),
+                    "tt" => hits.push((Finding::TtFragment, line)),
                     "include" if starts_with_punct(rest, '!') => {
                         hits.push((Finding::Include, line));
                     }
