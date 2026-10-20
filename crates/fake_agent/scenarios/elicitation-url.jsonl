@@ -1,0 +1,8 @@
+{"scenario":"elicitation-url","description":"Mid-turn elicitation/create in URL mode; the client answers; the agent sends elicitation/complete; end_turn","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Sign the contract to continue. "}}}}
+{"request":{"id":"elicit-1","method":"elicitation/create","params":{"mode":"url","sessionId":"sess-1","elicitationId":"el-1","message":"Sign the contract in your browser","url":"https://sign.example.com/contract/42"}}}
+{"expect_response":{"id":"elicit-1","result":{"action":"accept"}}}
+{"notify":{"method":"elicitation/complete","params":{"elicitationId":"el-1"}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

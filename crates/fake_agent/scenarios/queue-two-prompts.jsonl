@@ -1,0 +1,10 @@
+{"scenario":"queue-two-prompts","description":"Prompt 1 asks permission (four kinds) and ends; only then does the client send prompt 2. A second session/prompt before prompt 1's response is a mismatch","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-perm-1","title":"Edit clause 4","kind":"edit","status":"pending"},"options":[{"optionId":"allow-once","name":"Allow once","kind":"allow_once"},{"optionId":"allow-always","name":"Always allow","kind":"allow_always"},{"optionId":"reject-once","name":"Reject","kind":"reject_once"},{"optionId":"reject-always","name":"Always reject","kind":"reject_always"}]}}}
+{"note":"A second session/prompt is a mismatch only while prompt 1 waits here for perm-1's answer; once answered, a sequential agent cannot see an early second prompt without timing, so it is read at the next expect","expect_response":{"id":"perm-1","result":"{{any}}"}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Clause 4 is fine. "}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Second question"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"Second answer."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

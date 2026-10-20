@@ -1,0 +1,6 @@
+{"scenario":"limit-warning","description":"One turn whose usage_update carries claude-agent-acp's rate-limit warning (allowed_warning, five_hour, utilization 0.96); end_turn","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Checking the last clause. "}}}}
+{"update":{"update":{"sessionUpdate":"usage_update","used":190000,"size":200000,"_meta":{"_claude/rateLimit":{"status":"allowed_warning","resetsAt":1792310400,"rateLimitType":"five_hour","utilization":0.96,"overageStatus":"allowed","isUsingOverage":false,"surpassedThreshold":0.95}}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
