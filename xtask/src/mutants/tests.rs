@@ -423,9 +423,26 @@ fn a_run_past_the_cap_lists_the_mutants_it_had_missed() {
         &Run::WritesThenTimesOut(outcomes),
     );
     assert!(!passed);
-    let temp = std::env::temp_dir()
-        .join(format!("xtask-mutants-cap-partial-{}", std::process::id()))
-        .join("tmp");
+    // The scratch dir's name ends in a counter (`Scratch::new`), so the last line is matched by
+    // its start and end around it.
+    let (printed, removed) = printed
+        .trim_end()
+        .rsplit_once('\n')
+        .expect("the run prints a line after the summary");
+    let scratch =
+        std::env::temp_dir().join(format!("xtask-mutants-cap-partial-{}-", std::process::id()));
+    let removed_start = format!(
+        "removed 1 build dir cargo-mutants left in {}",
+        scratch.display()
+    );
+    assert!(
+        removed.starts_with(&removed_start)
+            && removed.ends_with(&format!(
+                "{}tmp when it was stopped",
+                std::path::MAIN_SEPARATOR
+            )),
+        "{removed}"
+    );
     assert_eq!(
         printed,
         format!(
@@ -435,9 +452,7 @@ fn a_run_past_the_cap_lists_the_mutants_it_had_missed() {
              xtask/src/main.rs:106: missed mutant: no test fails on `replace double -> u32 with \
              0`\n{MISSED_FIX}\n\
              mutants FAILED at the cap, after 2 mutants tested: 1 missed, 1 caught, 0 timed out, \
-             0 unviable\n\
-             removed 1 build dir cargo-mutants left in {} when it was stopped\n",
-            temp.display()
+             0 unviable"
         )
     );
 }
