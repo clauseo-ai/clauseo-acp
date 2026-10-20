@@ -161,4 +161,67 @@ crate::checks::planted::cases! {
          did not find expected node content\n    fix: make the file valid YAML at this line: \
          pins parses it to find the versions it holds",
     ]), inspects 2 => super::cases::workflow_not_yaml,
+    /// The pnpm version in a run step is a copy of its home and fails at its line.
+    pnpm_copy_in_a_run_step: FailsWith(&[
+        ".github/workflows/ci.yml:4: `7.8.9` is the pnpm version `packageManager` in ui/package.json pins\n    \
+         fix: remove the version from the workflow: pnpm/action-setup with \
+         `package_json_file: ui/package.json` installs the pnpm `packageManager` names",
+    ]), inspects 2 => super::cases::pnpm_copy_in_a_run_step,
+    /// The Node major.minor on a block scalar's third line fails at that line.
+    node_major_minor_in_a_block_scalar: FailsWith(&[
+        ".github/workflows/ci.yml:6: `6.7` is the major.minor of the minimum Node `engines.node` in ui/package.json sets\n    \
+         fix: remove the version from the workflow: actions/setup-node with \
+         `node-version-file: ui/package.json` installs a Node that `engines.node` allows",
+    ]), inspects 2 => super::cases::node_major_minor_in_a_block_scalar,
+    /// A copy in a flow mapping fails at its line.
+    rust_copy_in_a_flow_mapping: FailsWith(&[
+        ".github/workflows/ci.yml:3: `3.4.5` is the Rust version `channel` in rust-toolchain.toml pins\n    \
+         fix: remove the version from the workflow: a `run: rustup \
+         toolchain install` step with no argument installs the toolchain rust-toolchain.toml names",
+    ]), inspects 2 => super::cases::rust_copy_in_a_flow_mapping,
+    /// A copy under a quoted key fails: keys are matched as YAML reads them.
+    copy_under_a_quoted_key: FailsWith(&[
+        ".github/workflows/ci.yml:2: `7.8.9` is the pnpm version `packageManager` in ui/package.json pins\n    \
+         fix: remove the version from the workflow: pnpm/action-setup with \
+         `package_json_file: ui/package.json` installs the pnpm `packageManager` names",
+    ]), inspects 2 => super::cases::copy_under_a_quoted_key,
+    /// A copy behind an anchor fails once, at the anchored value, however often it is used.
+    copy_through_an_alias: FailsWith(&[
+        ".github/workflows/ci.yml:1: `3.4.5` is the Rust version `channel` in rust-toolchain.toml pins\n    \
+         fix: remove the version from the workflow: a `run: rustup \
+         toolchain install` step with no argument installs the toolchain rust-toolchain.toml names",
+    ]), inspects 2 => super::cases::copy_through_an_alias,
+    /// A copy in a flow sequence fails at its line.
+    copy_in_a_flow_sequence: FailsWith(&[
+        ".github/workflows/ci.yml:5: `6.7.0` is the minimum Node `engines.node` in ui/package.json sets\n    \
+         fix: remove the version from the workflow: actions/setup-node with \
+         `node-version-file: ui/package.json` installs a Node that `engines.node` allows",
+    ]), inspects 2 => super::cases::copy_in_a_flow_sequence,
+    /// A workflow with an upper-case `.YML` extension is read too.
+    an_upper_case_yml_extension: FailsWith(&[
+        ".github/workflows/CI.YML:4: `3.4.5` is the Rust version `channel` in rust-toolchain.toml pins\n    \
+         fix: remove the version from the workflow: a `run: rustup \
+         toolchain install` step with no argument installs the toolchain rust-toolchain.toml names",
+    ]), inspects 2 => super::cases::an_upper_case_yml_extension,
+    /// A workflow in a subfolder is not one GitHub runs, so it is not read.
+    a_workflow_in_a_subfolder_passes: Passes,
+        inspects 1 => super::cases::a_workflow_in_a_subfolder_passes,
+    /// The root manifest's own `[package] rust-version` is a copy too.
+    rust_version_in_a_root_package: FailsWith(&[
+        "Cargo.toml:3: rust-version \"3.3\" is not the major.minor of the Rust version \
+         `channel` in rust-toolchain.toml pins (3.4.5)\n    fix: set rust-version to \"3.4\", \
+         the major.minor of `channel` in rust-toolchain.toml, the one home of the Rust version",
+    ]), inspects 1 => super::cases::rust_version_in_a_root_package,
+    /// A member's quoted `"rust-version"` key in a quoted table is read.
+    rust_version_in_a_quoted_member_key: FailsWith(&[
+        "crates/desktop/Cargo.toml:3: rust-version \"2.4\" is not the major.minor of the Rust version \
+         `channel` in rust-toolchain.toml pins (3.4.5)\n    fix: set rust-version to \"3.4\", \
+         the major.minor of `channel` in rust-toolchain.toml, the one home of the Rust version",
+    ]), inspects 2 => super::cases::rust_version_in_a_quoted_member_key,
+    /// A member whose package is an inline table is read.
+    rust_version_in_an_inline_member_table: FailsWith(&[
+        "crates/desktop/Cargo.toml:1: rust-version \"2.4\" is not the major.minor of the Rust version \
+         `channel` in rust-toolchain.toml pins (3.4.5)\n    fix: set rust-version to \"3.4\", \
+         the major.minor of `channel` in rust-toolchain.toml, the one home of the Rust version",
+    ]), inspects 2 => super::cases::rust_version_in_an_inline_member_table,
 }
