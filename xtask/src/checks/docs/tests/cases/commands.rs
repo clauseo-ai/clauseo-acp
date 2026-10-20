@@ -40,6 +40,16 @@ pub(crate) fn trailing_backslash_command_fails() -> Inspection {
     )
 }
 
+pub(crate) fn continued_command_fails() -> Inspection {
+    docs(
+        "continued-command",
+        vec![(
+            "GUIDE.md",
+            "```sh\ncargo xtask \\\nfrobnicate\n```\n".to_owned(),
+        )],
+    )
+}
+
 pub(crate) fn prompt_command_in_fence_fails() -> Inspection {
     docs(
         "prompt-command",

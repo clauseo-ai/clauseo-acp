@@ -1,13 +1,18 @@
 //! `cargo xtask` commands in the docs. An inline code span is read whole. A code block is read
 //! line by line when its info word is in `SHELLS`, when it has no info string, or when it is
 //! indented. A session block is read only on its lines that start with a prompt from `PROMPTS`,
-//! and only from after that prompt. Other code blocks are not read. Each read line loses a
-//! trailing `\` and is split into words once, with `shlex`, or on whitespace when `shlex` cannot
-//! split it. Every `cargo` in the words, with its flags and `+toolchain` skipped, followed by
-//! `xtask`, starts a command. The words after `xtask` stop at shell syntax and parse against the
-//! clap tree in `main.rs`.
+//! and only from after that prompt. Other code blocks are not read. A read line that ends in its
+//! block's continuation character is joined with the next line of the block, and so on down a
+//! chain of them, and the joined text is reported at the first line. The continuation character
+//! is a backtick in a PowerShell block, `^` in a `cmd` or `bat` block, and `\` in every other
+//! block that is read. In a session block the next line is read after a leading `> `, with or
+//! without a prompt. A continuation character is dropped only in a code block, and only when no
+//! line follows it in its block. A span keeps its text as written. Each joined text is split into
+//! words once, with `shlex`, or on whitespace when `shlex` cannot split it. Every `cargo` in the
+//! words, with its flags and `+toolchain` skipped, followed by `xtask`, starts a command. The
+//! words after `xtask` stop at shell syntax and parse against the clap tree in `main.rs`.
 
-use super::markdown::Scan;
+use super::markdown::{CodeLine, Scan};
 use crate::Cli;
 use crate::checks::violation;
 use crate::violation::Violation;
@@ -59,6 +64,12 @@ const SESSIONS: [&str; 6] = [
     "ps1-session",
 ];
 
+/// The info words of the PowerShell code blocks, whose continuation character is a backtick.
+const POWERSHELLS: [&str; 5] = ["powershell", "pwsh", "ps1", "pwsh-session", "ps1-session"];
+
+/// The info words of a code block whose continuation character is `^`.
+const CMDS: [&str; 2] = ["cmd", "bat"];
+
 /// The prompts a session line starts with. `# ` and `> ` are not prompts: in a session they start
 /// a comment or a quoted output line as often.
 const PROMPTS: [&str; 3] = ["$ ", "% ", "PS> "];
@@ -71,7 +82,7 @@ const TOOL: &str = "cargo xtask";
 struct Command {
     /// Its words as a shell splits them, starting `cargo`, `xtask`, up to the first placeholder.
     words: Vec<String>,
-    /// True when a placeholder, or the end of a line ending in `\`, followed these words.
+    /// True when a placeholder followed these words.
     placeholder: bool,
 }
 
@@ -81,19 +92,49 @@ pub(super) fn problems(file: &str, scan: &Scan) -> Vec<Violation> {
         .spans
         .iter()
         .filter(|span| span.text != TOOL)
-        .map(|span| (span.line, span.text.as_str()));
-    let code = scan
-        .code
-        .iter()
-        .filter_map(|line| Some((line.line, read_line(&line.info, &line.text)?)));
+        .map(|span| (span.line, span.text.clone()));
     spans
-        .chain(code)
+        .chain(read_texts(&scan.code))
         .flat_map(|(line, text)| {
-            commands_in(text)
+            commands_in(&text)
                 .into_iter()
                 .filter_map(move |command| problem(file, line, &command))
         })
         .collect()
+}
+
+/// The text of each read line of `code`, with the lines it continues joined onto it, each paired
+/// with the line it starts on. Only the next line of the file is joined on, since a fence or a
+/// blank line always lies between two blocks.
+fn read_texts(code: &[CodeLine]) -> Vec<(u32, String)> {
+    let mut texts = Vec::new();
+    let mut index = 0;
+    while let Some(first) = code.get(index) {
+        index += 1;
+        let Some(read) = read_line(&first.info, &first.text) else {
+            continue;
+        };
+        let mark = continuation(&first.info);
+        let mut text = String::new();
+        let mut piece = read;
+        let mut line = first.line;
+        loop {
+            let Some(rest) = piece.trim_end().strip_suffix(mark) else {
+                text.push_str(piece);
+                break;
+            };
+            text.push_str(rest.trim_end());
+            let Some(next) = code.get(index).filter(|next| next.line == line + 1) else {
+                break;
+            };
+            text.push(' ');
+            piece = continued_text(&next.info, &next.text);
+            line = next.line;
+            index += 1;
+        }
+        texts.push((first.line, text));
+    }
+    texts
 }
 
 /// The text of a line of a code block whose info word is `info` (empty for a block with no info
@@ -108,6 +149,28 @@ fn read_line<'a>(info: &str, line: &'a str) -> Option<&'a str> {
     }
 }
 
+/// The text of a line that continues a read line in a block whose info word is `info`. In a
+/// session block it is read after a leading `> `, prompted or not.
+fn continued_text<'a>(info: &str, line: &'a str) -> &'a str {
+    if is_one_of(info, &SESSIONS) {
+        let text = line.trim_start();
+        text.strip_prefix("> ").unwrap_or(text)
+    } else {
+        line
+    }
+}
+
+/// The character that continues a line of a block whose info word is `info`.
+fn continuation(info: &str) -> char {
+    if is_one_of(info, &POWERSHELLS) {
+        '`'
+    } else if is_one_of(info, &CMDS) {
+        '^'
+    } else {
+        '\\'
+    }
+}
+
 /// True when `info` is one of `words`, in any case.
 fn is_one_of(info: &str, words: &[&str]) -> bool {
     words.iter().any(|word| info.eq_ignore_ascii_case(word))
@@ -119,29 +182,18 @@ fn after_prompt(text: &str) -> Option<&str> {
     PROMPTS.iter().find_map(|prompt| text.strip_prefix(prompt))
 }
 
-/// The xtask commands in `line`, split into words as a shell splits them. A trailing `\` is
-/// dropped first. The next line is not read with this one, so the last command on a line that
-/// ends in `\` is treated as if a placeholder followed it. A line `shlex` cannot split is split
-/// on whitespace instead, with the `"` and `'` at each word's ends trimmed, so an odd quote does
-/// not hide the commands on it.
+/// The xtask commands in `line`, split into words as a shell splits them. A line `shlex` cannot
+/// split is split on whitespace instead, with the `"` and `'` at each word's ends trimmed, so an
+/// odd quote does not hide the commands on it.
 fn commands_in(line: &str) -> Vec<Command> {
-    let line = line.trim_end();
-    let (line, continued) = match line.strip_suffix('\\') {
-        Some(rest) => (rest, true),
-        None => (line, false),
-    };
     let words = shlex::split(line).unwrap_or_else(|| {
         line.split_whitespace()
             .map(|word| word.trim_matches(['"', '\'']).to_owned())
             .collect()
     });
-    let mut commands: Vec<Command> = (0..words.len())
+    (0..words.len())
         .filter_map(|at| command_at(&words, at))
-        .collect();
-    if let Some(last) = commands.last_mut().filter(|_| continued) {
-        last.placeholder = true;
-    }
-    commands
+        .collect()
 }
 
 /// The command that starts at word `at` of `words`: `cargo`, then any `+toolchain` and flags

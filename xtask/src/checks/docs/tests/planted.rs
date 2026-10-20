@@ -274,6 +274,11 @@ crate::checks::planted::cases! {
     trailing_backslash_command_fails: FailsWith(&[
         bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
     ]), inspects 4 => super::cases::trailing_backslash_command_fails,
+    /// A `\` that ends a line joins it with the next one, so `cargo xtask \` and `frobnicate` fail
+    /// as one command, reported at the first line.
+    continued_command_fails: FailsWith(&[
+        bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]), inspects 4 => super::cases::continued_command_fails,
     /// A `$ ` prompt before `cargo xtask` in a fence does not hide the command.
     prompt_command_in_fence_fails: FailsWith(&[
         bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),

@@ -276,38 +276,182 @@ fn cargo_flags_and_a_toolchain_before_xtask_are_skipped() {
     assert_reads("cargo --color always xtask x", &[]);
 }
 
-#[test]
-fn a_trailing_backslash_is_dropped_before_the_split() {
-    assert_reads("cargo xtask frobnicate \\", &["cargo xtask frobnicate"]);
-    assert_reads("cargo xtask check\\  ", &["cargo xtask check"]);
+/// The lines of a code block with info word `info`, numbered from 1 as `scan` numbers them.
+fn block(info: &str, lines: &[&str]) -> Vec<CodeLine> {
+    lines
+        .iter()
+        .enumerate()
+        .map(|(index, text)| CodeLine {
+            line: 1 + u32::try_from(index).unwrap_or(u32::MAX),
+            text: (*text).to_owned(),
+            info: info.to_owned(),
+        })
+        .collect()
+}
+
+/// What `read_texts` reads from a block with info word `info` and `lines`, as `(line, text)`.
+fn read_of(info: &str, lines: &[&str]) -> Vec<(u32, String)> {
+    read_texts(&block(info, lines))
+}
+
+/// The violations `problems` reports for a block with info word `info` and `lines`, as
+/// `(line, message)`.
+fn problems_of(info: &str, lines: &[&str]) -> Vec<(u32, String)> {
+    let scan = Scan {
+        code: block(info, lines),
+        ..Scan::default()
+    };
+    problems("a.md", &scan)
+        .into_iter()
+        .map(|found| (found.line, found.message))
+        .collect()
+}
+
+/// The message for `command`, which does not parse with clap's first line `error`.
+fn does_not_parse(command: &str, error: &str) -> String {
+    format!("the xtask command `{command}` does not parse: {error}")
 }
 
 #[test]
-fn a_command_continued_on_the_next_line_may_lack_a_word() {
-    let placeholders = |line: &str| -> Vec<bool> {
-        commands_in(line)
-            .iter()
-            .map(|command| command.placeholder)
-            .collect()
-    };
-    assert_eq!(placeholders("cargo xtask \\"), [true]);
+fn a_trailing_backslash_is_dropped_before_the_split() {
     assert_eq!(
-        placeholders("cargo xtask check && cargo xtask \\"),
-        [false, true]
+        read_of("sh", &["cargo xtask frobnicate \\"]),
+        [(1, "cargo xtask frobnicate".to_owned())]
     );
-    assert_eq!(placeholders("cargo xtask check"), [false]);
-    let unfinished = commands_in("cargo xtask \\");
-    assert!(
-        unfinished
-            .iter()
-            .all(|command| problem("a.md", 1, command).is_none())
+    assert_eq!(
+        read_of("sh", &["cargo xtask check\\  "]),
+        [(1, "cargo xtask check".to_owned())]
     );
-    let misspelt = commands_in("cargo xtask frobnicate \\");
-    assert_eq!(misspelt.len(), 1);
-    assert!(
-        misspelt
-            .iter()
-            .all(|command| problem("a.md", 1, command).is_some())
+}
+
+#[test]
+fn a_continued_line_is_joined_with_the_next_line_of_its_block() {
+    assert_eq!(
+        read_of("sh", &["cargo xtask \\", "frobnicate"]),
+        [(1, "cargo xtask frobnicate".to_owned())]
+    );
+    assert_eq!(
+        read_of("sh", &["cargo xtask \\", "check \\", "--quick"]),
+        [(1, "cargo xtask check --quick".to_owned())]
+    );
+    let apart = [
+        CodeLine {
+            line: 1,
+            text: "cargo xtask check \\".to_owned(),
+            info: "sh".to_owned(),
+        },
+        CodeLine {
+            line: 3,
+            text: "--quick".to_owned(),
+            info: "sh".to_owned(),
+        },
+    ];
+    assert_eq!(
+        read_texts(&apart),
+        [
+            (1, "cargo xtask check".to_owned()),
+            (3, "--quick".to_owned())
+        ]
+    );
+}
+
+#[test]
+fn each_block_has_its_own_continuation_character() {
+    let joined = [(1, "cargo xtask check --quick".to_owned())];
+    assert_eq!(
+        read_of("powershell", &["cargo xtask check `", "--quick"]),
+        joined
+    );
+    assert_eq!(read_of("pwsh", &["cargo xtask check `", "--quick"]), joined);
+    assert_eq!(read_of("cmd", &["cargo xtask check ^", "--quick"]), joined);
+    assert_eq!(read_of("bat", &["cargo xtask check ^", "--quick"]), joined);
+    let apart = [
+        (1, "cargo xtask check \\".to_owned()),
+        (2, "--quick".to_owned()),
+    ];
+    assert_eq!(
+        read_of("powershell", &["cargo xtask check \\", "--quick"]),
+        apart
+    );
+    assert_eq!(
+        read_of("sh", &["cargo xtask check ^", "--quick"]),
+        [
+            (1, "cargo xtask check ^".to_owned()),
+            (2, "--quick".to_owned()),
+        ]
+    );
+    assert_eq!(
+        read_of("text", &["cargo xtask check \\", "--quick"]),
+        Vec::new()
+    );
+}
+
+#[test]
+fn a_session_continuation_is_read_after_a_chevron_or_without_one() {
+    let joined = [(1, "cargo xtask check --quick".to_owned())];
+    assert_eq!(
+        read_of("console", &["$ cargo xtask check \\", "> --quick"]),
+        joined
+    );
+    assert_eq!(
+        read_of("console", &["$ cargo xtask check \\", "--quick"]),
+        joined
+    );
+    assert_eq!(
+        read_of("ps1-session", &["PS> cargo xtask check `", "> --quick"]),
+        joined
+    );
+    assert_eq!(
+        read_of("console", &["cargo xtask check \\", "--quick"]),
+        Vec::new()
+    );
+}
+
+#[test]
+fn a_continued_command_is_checked_at_its_first_line() {
+    let unknown = "error: unrecognized subcommand 'frobnicate'";
+    let flag = "error: unexpected argument '--quik' found";
+    assert_eq!(
+        problems_of("sh", &["cargo xtask \\", "frobnicate"]),
+        [(1, does_not_parse("cargo xtask frobnicate", unknown))]
+    );
+    assert_eq!(
+        problems_of("sh", &["cargo xtask check \\", "--quik"]),
+        [(1, does_not_parse("cargo xtask check --quik", flag))]
+    );
+    assert_eq!(
+        problems_of("console", &["$ cargo xtask check \\", "> --quik"]),
+        [(1, does_not_parse("cargo xtask check --quik", flag))]
+    );
+    assert_eq!(
+        problems_of("powershell", &["cargo xtask check `", "--quik"]),
+        [(1, does_not_parse("cargo xtask check --quik", flag))]
+    );
+    assert_eq!(
+        problems_of("cmd", &["cargo xtask check ^", "--quik"]),
+        [(1, does_not_parse("cargo xtask check --quik", flag))]
+    );
+    assert_eq!(
+        problems_of("sh", &["cargo xtask check \\", "--quick"]),
+        Vec::new()
+    );
+}
+
+#[test]
+fn a_continuation_with_no_line_after_it_is_dropped_and_its_command_checked() {
+    assert_eq!(
+        problems_of("sh", &["cargo xtask frobnicate \\"]),
+        [(
+            1,
+            does_not_parse(
+                "cargo xtask frobnicate",
+                "error: unrecognized subcommand 'frobnicate'"
+            )
+        )]
+    );
+    assert_eq!(
+        problems_of("sh", &["cargo xtask \\"]),
+        [(1, does_not_parse("cargo xtask", "it names no subcommand"))]
     );
 }
 
