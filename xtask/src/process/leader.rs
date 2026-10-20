@@ -15,8 +15,9 @@
 //! The leader also inherits every descriptor xtask inherited without close-on-exec, and holds it
 //! until it exits.
 //!
-//! A leader found dead (someone killed it) is replaced before the next command starts, or when a
-//! write to it fails: xtask keeps the groups it registered, and tells them all to the new leader.
+//! A leader that died (someone killed it) is replaced at the next command's start, when the write
+//! of its `+<group>` fails: xtask keeps the groups it registered, and tells them all to the new
+//! leader.
 //!
 //! Not covered: a command whose start returned in xtask but whose `+<group>` write had not happened
 //! when xtask died (a few instructions after `spawn`), a process that left its group (`setsid`),
@@ -50,7 +51,7 @@ struct Leader {
     /// The write end of the leader's stdin. It closes when xtask exits, or when a dead leader is
     /// replaced.
     pipe: io::PipeWriter,
-    /// Waited for only to see whether it died: a live leader outlives xtask.
+    /// Waited for only once replaced: a live leader outlives xtask.
     child: Child,
     /// The groups registered and not released, which a new leader is told when this one dies.
     groups: BTreeSet<Pid>,
@@ -59,14 +60,9 @@ struct Leader {
 static LEADER: Mutex<Option<Leader>> = Mutex::new(None);
 
 impl Leader {
-    /// Whether it still runs. Only a leader that has surely exited counts as dead: replacing a
-    /// live one would close its stdin, and it would stop every group xtask still runs.
-    fn alive(&mut self) -> bool {
-        !matches!(self.child.try_wait(), Ok(Some(_)))
-    }
-
-    /// A new leader, told every group of this one, which then gets SIGKILL (it stops nothing
-    /// then) and is reaped. On failure this one is kept, groups and all.
+    /// A new leader, told every group of this one, which then gets SIGKILL and is reaped. Killed,
+    /// not just let go: a live leader whose stdin closed would stop every group xtask still runs.
+    /// On failure this one is kept, groups and all.
     fn replace(&mut self) -> io::Result<Leader> {
         let next = start(self.groups.clone())?;
         drop(self.child.kill());
@@ -75,22 +71,18 @@ impl Leader {
     }
 }
 
-/// Starts the leader if it is not running yet, and replaces it if it died. Called before each
-/// command starts, so its `register` is one write.
+/// Starts the leader if it was never started. Called before each command starts, so its
+/// `register` is one write.
 pub(super) fn ensure() -> io::Result<()> {
     let mut slot = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
-    let Some(leader) = slot.as_mut() else {
+    if slot.is_none() {
         *slot = Some(start(BTreeSet::new())?);
-        return Ok(());
-    };
-    if !leader.alive() {
-        let next = leader.replace()?;
-        *slot = Some(next);
     }
     Ok(())
 }
 
-/// Tells the leader to stop `group` if xtask dies. A leader that cannot be told is replaced.
+/// Tells the leader to stop `group` if xtask dies. A leader that cannot be told has died, and
+/// is replaced.
 pub(super) fn register(group: Pid) -> io::Result<()> {
     let mut slot = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
     let Some(leader) = slot.as_mut() else {
@@ -130,7 +122,7 @@ pub(super) fn release(group: Pid) {
 }
 
 /// Kills the leader with SIGKILL and reaps it, leaving it in place, so the next command finds it
-/// dead. For the hidden `process-test restarted-leader` mode only.
+/// dead. For the hidden `process-test restarted-leader` mode and the tests only.
 pub(super) fn kill_for_test() {
     let mut slot = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(leader) = slot.as_mut() {

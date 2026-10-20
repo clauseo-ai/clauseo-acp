@@ -32,7 +32,7 @@ fn the_leader_subcommand_parses_and_is_hidden_from_help() {
 }
 
 #[test]
-fn a_dead_leader_is_replaced_before_the_next_command() {
+fn a_dead_leader_is_replaced_when_the_next_command_starts() {
     let cmd = Cmd::new(Program::Named("true"), Vec::<String>::new(), TEST_TIMEOUT);
     run_quiet(&cmd, Path::new(".")).expect("true runs, and the leader starts");
     kill_for_test();
