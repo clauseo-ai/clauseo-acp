@@ -156,6 +156,24 @@ pub(in crate::checks::core_io) fn macro_name_metavariable() -> Inspection {
     )
 }
 
+/// The review's case: `#` and its brackets come into the macro body as separate tokens.
+pub(in crate::checks::core_io) fn attribute_split_across_a_macro() -> Inspection {
+    with_file(
+        "attr-split",
+        "macro_rules! a {\n    ($x:tt $($t:tt)*) => { #$x $($t)* };\n}\n\
+         a! { [cfg(panic = \"abort\")] pub fn f() {} }\n",
+    )
+}
+
+/// The review's case: the `#` comes in as a metavariable before the brackets.
+pub(in crate::checks::core_io) fn hash_from_a_metavariable() -> Inspection {
+    with_file(
+        "attr-hash-metavariable",
+        "macro_rules! b {\n    ($h:tt $($t:tt)*) => { $h[cfg(panic = \"abort\")] $($t)* };\n}\n\
+         b! { # pub fn f() {} }\n",
+    )
+}
+
 /// Items named `cfg` and `cfg_attr` are not cfgs.
 pub(in crate::checks::core_io) fn items_named_cfg() -> Inspection {
     with_file(

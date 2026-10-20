@@ -4,13 +4,14 @@
 //! name, or a feature under a `not`, can leave code out of every clippy run.
 //!
 //! Each `.rs` file of the crate is lexed, and every token tree is walked, macro bodies and macro
-//! call arguments included. The predicate of each `cfg` and `cfg_attr` attribute, at the top of
-//! `#[..]` or `#![..]` or inside a `cfg_attr`, and of each `cfg!` is built only from `all`,
-//! `any`, `not`, `test` and `feature = "<literal>"`, with no `feature` under a `not`. An
-//! attribute or a macro call whose name is a metavariable fails, since a macro could build a `cfg`
-//! or an `include!` from a passed name. A `path` attribute, `include!` and any symlink under the
-//! crate's folder fail, so every module file sits at its default path under the crate, ends in
-//! `.rs` and is lexed here.
+//! call arguments included. The predicate of each `cfg` and `cfg_attr` at the start of any
+//! bracket group or inside a `cfg_attr`, and of each `cfg!`, is built only from `all`, `any`,
+//! `not`, `test` and `feature = "<literal>"`, with no `feature` under a `not`. Any bracket group
+//! counts, since a macro can join a `#` to brackets passed separately. An attribute or a macro
+//! call whose name is a metavariable fails, and so does a `#` before a metavariable, since a macro
+//! could build a `cfg` or an `include!` from a passed name. A `path` attribute, `include!` and
+//! any symlink under the crate's folder fail, so every module file sits at its default path
+//! under the crate, ends in `.rs` and is lexed here.
 
 use super::report;
 use crate::checks;
@@ -26,7 +27,7 @@ pub(super) enum Finding {
     /// A cfg predicate with a form other than `all`, `any`, `not`, `test` and a positive feature,
     /// described as the fix names it.
     Predicate(String),
-    /// An attribute whose name is a metavariable.
+    /// An attribute whose name is a metavariable, or a `#` before a metavariable.
     MetavariableAttribute,
     /// A `path` attribute.
     PathAttribute,
@@ -98,7 +99,12 @@ fn walk(tokens: TokenStream, hits: &mut Vec<(Finding, u32)>) {
     for (index, tree) in trees.iter().enumerate() {
         let rest = &trees[index + 1..];
         match tree {
-            TokenTree::Group(group) => walk(group.stream(), hits),
+            TokenTree::Group(group) => {
+                if group.delimiter() == Delimiter::Bracket {
+                    attribute_head(&group.stream().into_iter().collect::<Vec<_>>(), hits);
+                }
+                walk(group.stream(), hits);
+            }
             TokenTree::Ident(ident) if starts_with_punct(rest, '!') => {
                 match ident_name(ident).as_str() {
                     "cfg" => cfg_group(&rest[1..], true, hits),
@@ -118,10 +124,14 @@ fn walk(tokens: TokenStream, hits: &mut Vec<(Finding, u32)>) {
                 } else {
                     rest
                 };
-                if let Some(TokenTree::Group(group)) = rest.first()
-                    && group.delimiter() == Delimiter::Bracket
-                {
-                    attribute(&group.stream().into_iter().collect::<Vec<_>>(), hits);
+                match rest.first() {
+                    Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => {
+                        if let Some(first) = group.stream().into_iter().next() {
+                            metavariable_name(&first, hits);
+                        }
+                    }
+                    Some(other) => metavariable_name(other, hits),
+                    None => {}
                 }
             }
             TokenTree::Ident(_) | TokenTree::Punct(_) | TokenTree::Literal(_) => {}
@@ -195,23 +205,39 @@ fn cfg_attr(rest: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
     }
 }
 
-/// Checks the tokens of one attribute, inside `#[..]` or after the predicate of `cfg_attr`. Its
-/// name may be neither a metavariable nor `path`, and a `cfg` or `cfg_attr` predicate must be
-/// allowed.
+/// Checks the tokens of one attribute after the predicate of `cfg_attr`: its name may not be a
+/// metavariable, and its head is checked as `attribute_head` checks it.
 fn attribute(tokens: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
-    match tokens.first() {
-        Some(TokenTree::Punct(dollar)) if dollar.as_char() == '$' => {
-            hits.push((
-                Finding::MetavariableAttribute,
-                line_of(dollar.span().start().line),
-            ));
+    if let Some(first) = tokens.first() {
+        metavariable_name(first, hits);
+    }
+    attribute_head(tokens, hits);
+}
+
+/// Pushes a metavariable attribute finding when `tree`, which stands where an attribute's name
+/// belongs, is `$`.
+fn metavariable_name(tree: &TokenTree, hits: &mut Vec<(Finding, u32)>) {
+    if is_punct(tree, '$') {
+        hits.push((
+            Finding::MetavariableAttribute,
+            line_of(tree.span().start().line),
+        ));
+    }
+}
+
+/// Checks `tokens` as the inside of an attribute, whether or not a `#` stands before them, since a
+/// macro can put the `#` and the brackets together from separate tokens. A `path = ..` fails,
+/// and a `cfg` or `cfg_attr` predicate must be allowed.
+fn attribute_head(tokens: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
+    let Some(TokenTree::Ident(ident)) = tokens.first() else {
+        return;
+    };
+    match ident_name(ident).as_str() {
+        "path" if starts_with_punct(&tokens[1..], '=') => {
+            hits.push((Finding::PathAttribute, line_of(ident.span().start().line)));
         }
-        Some(TokenTree::Ident(ident)) => match ident_name(ident).as_str() {
-            "path" => hits.push((Finding::PathAttribute, line_of(ident.span().start().line))),
-            "cfg" => cfg_group(&tokens[1..], false, hits),
-            "cfg_attr" => cfg_attr(&tokens[1..], hits),
-            _ => {}
-        },
+        "cfg" => cfg_group(&tokens[1..], false, hits),
+        "cfg_attr" => cfg_attr(&tokens[1..], hits),
         _ => {}
     }
 }
@@ -356,6 +382,11 @@ mod tests {
             ),
             ("let cfg = 1; include_bytes!(\"x\"); path::x();", vec![]),
             ("self.cfg(); fn cfg(x: u8) {} cfg_attr(unix);", vec![]),
+            (
+                "let a = [path, cfg]; vec![$x]; m!([path = \"x\"]);",
+                vec![(Finding::PathAttribute, 1)],
+            ),
+            ("#!$a", vec![(Finding::MetavariableAttribute, 1)]),
             (
                 "$($m)*!(x); $crate::m!(); $i::x!();",
                 vec![(Finding::MetavariableMacro, 1)],

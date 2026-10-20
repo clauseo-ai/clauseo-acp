@@ -340,6 +340,13 @@ crate::checks::planted::cases! {
          fix: fix the Rust syntax that starts at this line, such as a bracket or a string left open",
     ]), inspects 3 => super::source_not_lexed,
     cfg_rule_passes: Passes, inspects 3 => super::cfg_rule_passes,
+    attribute_split_across_a_macro: FailsWith(&[
+        "crates/protocol/src/hidden.rs:2: `crates/protocol/src/hidden.rs` writes an attribute whose name is a metavariable, so a macro \
+         of clauseo-protocol can build a cfg that core-io does not see\n    \
+         fix: write the attribute's name in the macro body itself",
+        cfg_form!(4, "the name `panic`"),
+    ]), inspects 3 => super::attribute_split_across_a_macro,
+    hash_from_a_metavariable: FailsWith(&[cfg_form!(2, "the name `panic`")]), inspects 3 => super::hash_from_a_metavariable,
     items_named_cfg: Passes, inspects 3 => super::items_named_cfg,
     macro_name_metavariable: FailsWith(&[
         "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs` calls a macro whose name is a metavariable, so a macro of \

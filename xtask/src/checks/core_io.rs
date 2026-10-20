@@ -33,9 +33,10 @@
 //! leave code out of every clippy run, so a held crate's cfgs use only `test` and positive
 //! features. Every `.rs` file in git's list under the crate's folder is lexed with proc-macro2,
 //! macro bodies and macro call arguments included. The predicate of each `cfg` and `cfg_attr`
-//! attribute, at the top of `#[..]` or `#![..]` or inside a `cfg_attr`, and of each `cfg!` is
-//! built only from `all`, `any`, `not`, `test` and `feature = "<literal>"`, with no `feature`
-//! under a `not`. An attribute or a macro call whose name is a metavariable fails, since a macro
+//! at the start of any bracket group or inside a `cfg_attr`, since a macro can join a `#` to
+//! brackets passed separately, and of each `cfg!` is built only from `all`, `any`, `not`,
+//! `test` and `feature = "<literal>"`, with no `feature` under a `not`. An attribute or a macro
+//! call whose name is a metavariable fails, and so does a `#` before a metavariable, since a macro
 //! could build a `cfg` or an `include!` from a passed name. A `path` attribute, `include!` and
 //! every symlink git lists under the folder fail, file or folder target alike, so every module
 //! file sits at its default path in the folder itself and is lexed. A file that does not lex fails
