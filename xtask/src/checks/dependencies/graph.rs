@@ -5,20 +5,17 @@
 //! (which says which edges count). The search starts from each direct dependency, so the
 //! violation names the dependency that brings the forbidden package in. `cargo metadata
 //! --no-deps` gives that dependency's key, renames and workspace inheritance resolved, so a
-//! violation points at the line of the crate's `Cargo.toml` that declares it. A direct dependency
-//! declared in both `[dependencies]` and `[build-dependencies]` is blamed on the line of each
-//! section whose node brings the package in (`Tree::sections`), and names each of those lines.
-//! Lines of one node, such as a `[dependencies]` line and a `[target.*.dependencies]` line of
-//! the same package, are one package to cargo, so the violation says one or more of them brings
-//! the package in (`checks::graph::declared`).
+//! violation points at the line of the crate's `Cargo.toml` that declares it. Each declaration
+//! is matched to the node it produced, and only the declarations whose node brings the package in
+//! are blamed, each by its own key. When there are several, the violation names each line and
+//! says what is known about them (`checks::graph::blame`).
 
 use crate::checks::and_list;
 use crate::checks::crates_table::{self, CrateRow};
-use crate::checks::graph::{self, Section, Tree};
-use crate::checks::toml_lines::Manifest;
+use crate::checks::graph::{self, Tree};
 use crate::checks::violation;
 use crate::violation::Violation;
-use crate::workspace::{CargoDependency, PackageDependencies};
+use crate::workspace::PackageDependencies;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// One workspace crate to walk from, with its manifest, its row and its declared dependencies.
@@ -57,7 +54,7 @@ pub(super) fn violations(krate: &Crate<'_>, tree: &Tree) -> Vec<Violation> {
                     path: path.clone(),
                     nodes: BTreeSet::new(),
                 });
-            known.nodes.insert(tree.sections(direct).to_vec());
+            known.nodes.insert(direct);
             if known.path.len() > path.len() {
                 known.path = path;
             }
@@ -65,16 +62,15 @@ pub(super) fn violations(krate: &Crate<'_>, tree: &Tree) -> Vec<Violation> {
     }
     shortest
         .values()
-        .map(|blame| violation_for(krate, blame))
+        .map(|blame| violation_for(krate, tree, blame))
         .collect()
 }
 
 /// What one violation blames: a shortest path of package names from a direct dependency to a
-/// forbidden package, and the sections of each node of the direct dependencies of that name that
-/// reaches it.
+/// forbidden package, and the direct dependencies of that name that reach it.
 struct Blame<'a> {
     path: Vec<&'a str>,
-    nodes: BTreeSet<Vec<Section>>,
+    nodes: BTreeSet<usize>,
 }
 
 /// The packages `row` bans, names folded (see `crates_table::fold`), sorted, each once.
@@ -91,49 +87,20 @@ pub(super) fn forbidden(row: &CrateRow) -> Vec<String> {
 }
 
 /// The violation for `blame`, a path of package names from a direct dependency of `krate` to a
-/// forbidden package. It points at the first line that declares the direct dependency in a
-/// section whose node brings the package in and, when there are several such lines, names every
-/// one, since removing only some of them may leave the path in place.
-fn violation_for(krate: &Crate<'_>, blame: &Blame<'_>) -> Violation {
+/// forbidden package in `tree`. It points at the first line that declares a node that brings the
+/// package in and, when there are several such lines, names every one, since removing only some
+/// of them may leave the path in place.
+fn violation_for(krate: &Crate<'_>, tree: &Tree, blame: &Blame<'_>) -> Violation {
     let names = &blame.path;
     let package = names.last().copied().unwrap_or_default();
     let direct = names.first().copied().unwrap_or(package);
-    let manifest = Manifest::parse(krate.text);
-    let entries: Vec<(&CargoDependency, Section)> = krate
-        .deps
-        .dependencies
-        .iter()
-        .filter(|dep| dep.name == direct)
-        .filter_map(|dep| Some((dep, Section::of_kind(dep.kind.as_deref())?)))
-        .filter(|(_, section)| blame.nodes.iter().flatten().any(|node| node == section))
-        .collect();
-    let mut keys: Vec<String> = entries
-        .iter()
-        .map(|(dep, _)| dep.key().to_owned())
-        .collect();
-    keys.sort();
-    keys.dedup();
+    let nodes: Vec<usize> = blame.nodes.iter().copied().collect();
+    let blamed = graph::blame(tree, &nodes, krate.deps, krate.text);
+    let mut keys = blamed.keys.clone();
     if keys.is_empty() {
         keys.push(direct.to_owned());
     }
-    let nodes: Vec<Vec<u32>> = blame
-        .nodes
-        .iter()
-        .map(|sections| {
-            let mut lines: Vec<u32> = entries
-                .iter()
-                .filter(|(_, section)| sections.contains(section))
-                .flat_map(|(dep, section)| manifest.declarations(dep.key(), section.tables()))
-                .collect();
-            lines.sort_unstable();
-            lines.dedup();
-            lines
-        })
-        .filter(|lines| !lines.is_empty())
-        .collect();
-    let mut lines: Vec<u32> = nodes.iter().flatten().copied().collect();
-    lines.sort_unstable();
-    lines.dedup();
+    let lines = &blamed.lines;
     let through = match names.split_last() {
         Some((_, between)) if !between.is_empty() => {
             let between: Vec<String> = between.iter().map(|name| (*name).to_owned()).collect();
@@ -143,7 +110,7 @@ fn violation_for(krate: &Crate<'_>, blame: &Blame<'_>) -> Violation {
     };
     let quoted: Vec<String> = keys.iter().map(|key| format!("`{key}`")).collect();
     let quoted = and_list(&quoted);
-    let features = if entries.iter().any(|(dep, _)| dep.optional) {
+    let features = if blamed.optional {
         " and every `[features]` item that enables it"
     } else {
         ""
@@ -155,7 +122,7 @@ fn violation_for(krate: &Crate<'_>, blame: &Blame<'_>) -> Violation {
             format!(
                 "{} depends on {package}{through}, which ARCHITECTURE.md forbids. {}",
                 krate.package,
-                graph::declared(&quoted, krate.manifest, package, &nodes)
+                blamed.declared(krate.manifest, package)
             ),
             format!(
                 "move the code that uses {quoted} into a crate whose row allows {package}, then remove {quoted} from lines {at} of {manifest}{features}: the row at ARCHITECTURE.md:{row} says {krate} never depends on {package}",

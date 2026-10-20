@@ -171,6 +171,18 @@ crate::checks::planted::cases! {
         "crates/protocol/Cargo.toml:7: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s` is declared at lines 7 and 10 of crates/protocol/Cargo.toml. Cargo builds these declarations as one package, and one or more of them brings b in\n    \
          fix: move the code that uses `s` into a crate whose row allows b, then remove `s` from lines 7 and 10 of crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
     ]), inspects 1 => super::tree::declared_twice_in_one_section,
+    /// `s1` and `s2` declare two path packages named `s`, and only `s` 2.0.0, at line 10, brings
+    /// b in. Each declaration is matched to its own package by its path, so only line 10 is
+    /// blamed, by its key `s2`.
+    two_paths_of_one_name_blame_the_one_that_brings_it_in: FailsWith(&[
+        "crates/protocol/Cargo.toml:10: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `s2` into a crate whose row allows b, then remove `s2` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
+    ]), inspects 1 => super::tree::two_paths_of_one_name_blame_the_one_that_brings_it_in,
+    /// Both packages named `s` bring b in, so the violation names both keys and both lines.
+    two_paths_of_one_name_both_bring_it_in: FailsWith(&[
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s1` and `s2` are declared at lines 7 and 10 of crates/protocol/Cargo.toml, and each declaration brings b in\n    \
+         fix: move the code that uses `s1` and `s2` into a crate whose row allows b, then remove `s1` and `s2` from lines 7 and 10 of crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
+    ]), inspects 1 => super::tree::two_paths_of_one_name_both_bring_it_in,
     crates_io_marker_passes: Passes, inspects 1 => super::names::crates_io_marker_passes,
     crates_io_marker_bans_the_package: FailsWith(&[
         "crates/host/Cargo.toml:7: clauseo-host depends on rmcp, which ARCHITECTURE.md forbids\n    \

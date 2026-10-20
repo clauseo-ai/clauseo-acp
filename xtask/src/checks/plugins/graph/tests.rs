@@ -181,6 +181,52 @@ fn a_plugin_behind_one_of_two_normal_declarations_says_one_or_more_bring_it_in()
     );
 }
 
+/// The desktop crate declares `s1 = { package = "s", path = "../../vendor/s1" }` at line 7 and
+/// `s2`, the same for `vendor/s2`, at line 10. They are two packages named `s`, 1.0.0 and
+/// 2.0.0. Each item of `bodies` is the manifest body of one of them.
+fn two_paths_of_one_name(name: &str, bodies: [&str; 2]) -> Vec<Violation> {
+    let desktop = desktop(
+        "[dependencies]\ns1 = { package = \"s\", path = \"../../vendor/s1\" }\n\n[target.'cfg(windows)'.dependencies]\ns2 = { package = \"s\", path = \"../../vendor/s2\" }\n",
+    );
+    let ws = workspace(name, &desktop, &[("tauri-plugin-zz", "")]);
+    // A path dependency under the root is a member unless excluded, and two members cannot
+    // share a name.
+    let root =
+        "[workspace]\nresolver = \"3\"\nmembers = [\"crates/desktop\"]\nexclude = [\"vendor\"]\n";
+    fs::write(ws.join("Cargo.toml"), root).expect("write the root manifest");
+    for (s_dir, version, body) in [("s1", "1.0.0", bodies[0]), ("s2", "2.0.0", bodies[1])] {
+        let manifest = format!(
+            "[package]\nname = \"s\"\nversion = \"{version}\"\nedition = \"2024\"\n\n{body}"
+        );
+        let dir = ws.join("vendor").join(s_dir);
+        fs::create_dir_all(dir.join("src")).expect("create the crate dirs");
+        fs::write(dir.join("src/lib.rs"), "").expect("write lib.rs");
+        fs::write(dir.join("Cargo.toml"), manifest).expect("write a manifest");
+    }
+    violations_in(&ws, &desktop)
+}
+
+#[test]
+fn two_packages_of_one_name_are_blamed_by_their_own_keys() {
+    let plugin = "[dependencies]\ntauri-plugin-zz = { path = \"../tauri-plugin-zz\" }\n";
+    let message = "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `s`, which is not a fixed plugin";
+    assert_eq!(
+        two_paths_of_one_name("one-name-s2", ["", plugin]),
+        vec![violation(DESKTOP_PATH, 10, message, TREE_FIX)]
+    );
+    assert_eq!(
+        two_paths_of_one_name("one-name-both", [plugin, plugin]),
+        vec![violation(
+            DESKTOP_PATH,
+            7,
+            format!(
+                "{message}. `s1` and `s2` are declared at lines 7 and 10 of crates/desktop/Cargo.toml, and each declaration brings `tauri-plugin-zz` in"
+            ),
+            "remove `s1` and `s2` from lines 7 and 10 of crates/desktop/Cargo.toml: only the fixed plugins and what they pull in may be in the desktop crate's tree",
+        )]
+    );
+}
+
 #[test]
 fn a_clean_graph_passes() {
     let desktop = desktop("[dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n");

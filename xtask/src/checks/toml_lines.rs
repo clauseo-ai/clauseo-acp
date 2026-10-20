@@ -70,6 +70,37 @@ impl<'a> Manifest<'a> {
         lines
     }
 
+    /// The line that declares dependency `key` in a table of `kinds` under the target `target`,
+    /// as `cargo metadata` writes it, or in the tables with no target for `None`. Spaces in a
+    /// target do not count, since cargo may write a `cfg(...)` with other spacing than the
+    /// manifest's.
+    pub(crate) fn declaration_under(
+        &self,
+        key: &str,
+        kinds: &[Kind],
+        target: Option<&str>,
+    ) -> Option<u32> {
+        let root = self.root()?;
+        let scope = match target {
+            None => root,
+            Some(target) => {
+                let bare = |text: &str| text.split_whitespace().collect::<String>();
+                table_at(root, "target")?
+                    .iter()
+                    .find(|(name, _)| bare(name.get_ref()) == bare(target))?
+                    .1
+                    .get_ref()
+                    .as_table()?
+            }
+        };
+        kinds
+            .iter()
+            .filter_map(|kind| table_at(scope, kind.table()))
+            .filter_map(|table| entry(table, key))
+            .map(|(key, _)| self.line(key.span().start))
+            .min()
+    }
+
     /// The line where the entry for `key` (in `kinds`) lists `feature` in its `features`.
     pub(crate) fn feature_in_entry(&self, key: &str, kinds: &[Kind], feature: &str) -> Option<u32> {
         self.entries(key, kinds)
@@ -183,6 +214,11 @@ mod tests {
         assert_eq!(manifest.declarations("built", BUILD), [13]);
         assert_eq!(manifest.declaration("t", ANY), None);
         assert_eq!(manifest.dependencies_header(), Some(1));
+        assert_eq!(manifest.declaration_under("tauri", NORMAL, None), Some(3));
+        assert_eq!(manifest.declaration_under("os", NORMAL, None), None);
+        let unix = Some("cfg( unix )");
+        assert_eq!(manifest.declaration_under("os", NORMAL, unix), Some(9));
+        assert_eq!(manifest.declaration_under("tauri", NORMAL, unix), None);
     }
 
     #[test]

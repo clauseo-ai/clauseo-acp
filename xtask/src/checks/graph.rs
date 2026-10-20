@@ -148,47 +148,13 @@ impl Section {
     }
 }
 
-/// What is known about the manifest lines that declare one direct dependency, `quoted`, which
-/// brings `package` in. `nodes` holds the lines of each graph node of that dependency that
-/// reaches `package`. Cargo builds the lines of one node as one package, so a node of several
-/// lines says only that one or more of them brings `package` in. With every node on one line,
-/// each line brings it in.
-pub(crate) fn declared(quoted: &str, manifest: &str, package: &str, nodes: &[Vec<u32>]) -> String {
-    let mut all: Vec<u32> = nodes.iter().flatten().copied().collect();
-    all.sort_unstable();
-    all.dedup();
-    let at = |lines: &[u32]| {
-        let lines: Vec<String> = lines.iter().map(u32::to_string).collect();
-        crate::checks::and_list(&lines)
-    };
-    let head = format!("{quoted} is declared at lines {} of {manifest}", at(&all));
-    let one_or_more = format!("one or more of them brings {package} in");
-    match nodes {
-        _ if nodes.iter().all(|lines| lines.len() == 1) => {
-            format!("{head}, and each declaration brings {package} in")
-        }
-        [_] => format!("{head}. Cargo builds these declarations as one package, and {one_or_more}"),
-        _ => {
-            let sentences: Vec<String> = nodes
-                .iter()
-                .map(|lines| match lines.as_slice() {
-                    [line] => format!("The declaration at line {line} brings {package} in"),
-                    _ => format!(
-                        "Cargo builds the declarations at lines {} as one package, and {one_or_more}",
-                        at(lines)
-                    ),
-                })
-                .collect();
-            format!("{head}. {}", sentences.join(". "))
-        }
-    }
-}
-
 /// One node of a graph: a package with one set of features, and the nodes it depends on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Package {
     name: String,
     version: String,
+    /// The source cargo prints in parentheses for a path or git package, else `None`.
+    source: Option<String>,
     deps: Vec<usize>,
     /// For a direct dependency of the crate, the sections its lines came under, each once.
     sections: Vec<Section>,
@@ -245,6 +211,13 @@ impl Tree {
         self.packages
             .get(package)
             .map_or("", |p| p.version.as_str())
+    }
+
+    /// The folder of `package`, which is the source cargo prints for it when that is an absolute
+    /// path, as it is for a path package. `None` for a registry or git package.
+    pub(crate) fn source_path(&self, package: usize) -> Option<&Path> {
+        let source = self.packages.get(package)?.source.as_deref()?;
+        Some(Path::new(source)).filter(|path| path.is_absolute())
     }
 
     /// The sections the lines of the direct dependency `package` came under: `Build` as well as
@@ -344,6 +317,7 @@ impl Tree {
                     packages.push(Package {
                         name: line.name.to_owned(),
                         version: line.version.to_owned(),
+                        source: line.source.map(str::to_owned),
                         deps: Vec::new(),
                         sections: Vec::new(),
                     });
@@ -396,6 +370,8 @@ struct Line<'a> {
     key: &'a str,
     name: &'a str,
     version: &'a str,
+    /// The source in parentheses, for a path or git package.
+    source: Option<&'a str>,
     /// True for a ` (*)` line, a node printed in full before.
     starred: bool,
 }
@@ -461,20 +437,29 @@ fn node_line(text: &str, depth: usize) -> Option<Line<'_>> {
         .strip_prefix("(proc-macro)")
         .unwrap_or(rest)
         .trim_start();
-    if !rest.is_empty() {
+    let source = if rest.is_empty() {
+        None
+    } else {
         let source = rest.strip_prefix('(')?.strip_suffix(')')?;
         if source.is_empty() || source == "*" {
             return None;
         }
-    }
+        Some(source)
+    };
     Some(Line {
         depth,
         key,
         name,
         version,
+        source,
         starred,
     })
 }
+
+mod declared;
+mod version;
+
+pub(crate) use declared::blame;
 
 #[cfg(test)]
 mod tests;
