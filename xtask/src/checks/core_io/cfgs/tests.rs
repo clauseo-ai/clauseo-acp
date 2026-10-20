@@ -7,7 +7,10 @@ fn findings(source: &str) -> Vec<(Finding, u32)> {
     let mut hits = Vec::new();
     walk(
         TokenStream::from_str(source).expect("the source lexes"),
-        Scope::outside(),
+        Scope {
+            definitions: true,
+            ..Scope::outside()
+        },
         &mut hits,
     );
     hits
@@ -167,6 +170,7 @@ fn path_attributes_pass_only_on_a_top_level_module_declaration() {
     let findings_at_top = |source: &str| {
         let mut hits = Vec::new();
         let scope = Scope {
+            definitions: true,
             top: Some(&top),
             ..Scope::outside()
         };

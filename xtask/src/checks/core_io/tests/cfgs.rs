@@ -237,6 +237,37 @@ pub(in crate::checks::core_io) fn forwarded_attribute_as_ident() -> Inspection {
     )
 }
 
+/// A `macro_rules!` inside a transcriber: the outer macro fills in both the inner matcher's
+/// `#[$m:meta]` and the inner `#[$m]`, so the caller never writes brackets.
+pub(in crate::checks::core_io) fn forwarded_meta_in_a_nested_definition() -> Inspection {
+    with_file(
+        "forwarded-nested",
+        r#"macro_rules! outer {
+    ($m:meta $(, $k:tt)?) => {
+        macro_rules! inner {
+            ($(#[$m:meta] $k)?) => { #[$m] pub fn g() { let _ = std::fs::read("x"); } }
+        }
+        inner!();
+    };
+}
+outer!(cfg(any()));
+"#,
+    )
+}
+
+/// A `macro_rules!` in a macro call's arguments is no definition, so its "matcher" gets the
+/// full rules.
+pub(in crate::checks::core_io) fn definition_shape_in_call_arguments() -> Inspection {
+    with_file(
+        "definition-in-call",
+        r#"macro_rules! emit { (macro_rules! $n:ident { ($($c:tt)*) => {} }) => { $($c)* }; }
+macro_rules! a { ($($p:tt)*) => { emit! { macro_rules! fake {
+    (#[$($p)*] pub fn h() { let _ = std::fs::read("x"); }) => {} } } }; }
+a!(cfg(any()));
+"#,
+    )
+}
+
 /// The review's case: a forwarding macro that passes, called with a cfg clippy never sees, which
 /// fails where the caller writes it.
 pub(in crate::checks::core_io) fn forwarded_cfg_at_the_call() -> Inspection {

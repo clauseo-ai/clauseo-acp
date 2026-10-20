@@ -18,7 +18,8 @@
 //! metavariable or a metavariable after `path` or `include`, since a macro could build a `cfg`, a
 //! `path` or an `include!` from what its caller passes. These metavariable rules skip the matcher
 //! of each `macro_rules!` arm, and a transcriber may write `#[$m]` when its arm's matcher binds
-//! `$m` as `#[$m:meta]`. `macros.rs` reads the arms.
+//! `$m` as `#[$m:meta]`, but only for a definition outside every transcriber and every macro
+//! call's arguments. `macros.rs` reads the arms.
 //!
 //! `include!` and every symlink under the crate's folder fail. A `path` attribute passes only in
 //! the one place where core-io can follow it to a file it lexes, and `paths.rs` says where that
@@ -68,6 +69,10 @@ struct Scope<'a> {
     /// True on the matcher side of a `macro_rules!` arm, where the metavariable rules do not
     /// apply.
     matcher: bool,
+    /// True where a `macro_rules!` is a definition whose arms the rules can read: outside every
+    /// transcriber and every macro call's arguments. Elsewhere another macro can fill in or
+    /// rewrite its tokens, so its arms get the full rules.
+    definitions: bool,
     /// The names the arm's matcher binds as `#[$m:meta]`, which its transcriber may write as
     /// `#[$m]`.
     metas: &'a BTreeSet<String>,
@@ -81,6 +86,7 @@ impl Scope<'static> {
     fn outside() -> Self {
         Scope {
             matcher: false,
+            definitions: false,
             metas: &NO_NAMES,
             top: None,
         }
@@ -128,6 +134,7 @@ pub(super) fn cfg_rule(root: &Path, member: &Member, entries: &[String]) -> Vec<
                     lexed: &lexed,
                 };
                 let scope = Scope {
+                    definitions: true,
                     top: Some(&top),
                     ..Scope::outside()
                 };
@@ -160,10 +167,19 @@ fn walk(tokens: TokenStream, scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
     for (index, tree) in trees.iter().enumerate() {
         let rest = &trees[index + 1..];
         match tree {
-            TokenTree::Group(inner) if macros::holds_arms(&trees[..index]) => {
-                macros::arms(inner, hits);
+            TokenTree::Group(inner) if !scope.matcher && macros::holds_arms(&trees[..index]) => {
+                macros::arms(inner, scope, hits);
             }
             TokenTree::Group(inner) => {
+                // A group after `!` is a macro call's arguments, or an inner attribute.
+                let scope = if index > 0 && is_punct(&trees[index - 1], '!') {
+                    Scope {
+                        definitions: false,
+                        ..scope
+                    }
+                } else {
+                    scope
+                };
                 let path_passes = scope.top.is_some_and(|top| {
                     index > 0
                         && is_punct(&trees[index - 1], '#')

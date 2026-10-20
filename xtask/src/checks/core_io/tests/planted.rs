@@ -371,6 +371,9 @@ crate::checks::planted::cases! {
     forwarded_attribute_as_tt: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::forwarded_attribute_as_tt,
     forwarded_attribute_as_ident: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::forwarded_attribute_as_ident,
     forwarded_cfg_at_the_call: FailsWith(&[cfg_form!(7, "the name `clippy`")]), inspects 3 => super::forwarded_cfg_at_the_call,
+    /// A definition inside a transcriber or a macro call's arguments gets the full rules.
+    forwarded_meta_in_a_nested_definition: FailsWith(&[metavariable_attribute!(4), metavariable_attribute!(4)]), inspects 3 => super::forwarded_meta_in_a_nested_definition,
+    definition_shape_in_call_arguments: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::definition_shape_in_call_arguments,
     path_attribute: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute,
     path_attribute_in_cfg_attr: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute_in_cfg_attr,
     /// A literal `path` on a top-level `mod name;` passes when it names a file core-io lexes.
