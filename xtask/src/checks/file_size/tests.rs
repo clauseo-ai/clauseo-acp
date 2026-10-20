@@ -6,7 +6,6 @@ pub(super) mod planted;
 use super::*;
 use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;
-use std::fs;
 
 /// A scratch git repo named after `case`, with each `(path, text)` of `files` written into it.
 fn repo(case: &str, files: &[(&str, String)]) -> Scratch {
@@ -16,8 +15,8 @@ fn repo(case: &str, files: &[(&str, String)]) -> Scratch {
     assert!(quiet.success, "git init failed: {}", quiet.stderr);
     for (path, text) in files {
         let full = dir.join(path);
-        fs::create_dir_all(full.parent().expect("a file has a parent")).expect("create dirs");
-        fs::write(full, text).expect("write a file");
+        Scratch::create_dir_all(full.parent().expect("a file has a parent")).expect("create dirs");
+        Scratch::write(full, text).expect("write a file");
     }
     dir
 }
@@ -197,9 +196,9 @@ fn a_listed_file_over_the_limit_still_has_its_comments_checked() {
 #[test]
 fn an_unreadable_listed_file_is_not_called_stale() {
     let dir = repo("unreadable-listed", &[("src/bad.rs", String::new())]);
-    fs::write(dir.join("src/bad.rs"), [0xff, 0xfe, b'\n']).expect("write bytes");
-    fs::create_dir_all(dir.join("xtask")).expect("create xtask");
-    fs::write(dir.join(EXCEPTIONS), "src/bad.rs not UTF-8\n").expect("write exceptions");
+    Scratch::write(dir.join("src/bad.rs"), [0xff, 0xfe, b'\n']).expect("write bytes");
+    Scratch::create_dir_all(dir.join("xtask")).expect("create xtask");
+    Scratch::write(dir.join(EXCEPTIONS), "src/bad.rs not UTF-8\n").expect("write exceptions");
     let found = run(&Context {
         root: dir.to_path_buf(),
         members: Ok(Vec::new()),
@@ -211,7 +210,7 @@ fn an_unreadable_listed_file_is_not_called_stale() {
 
 pub(super) fn not_a_git_repo() -> Inspection {
     let dir = Scratch::new("planted-file-size-not-a-git-repo");
-    fs::write(dir.join("lib.rs"), "fn f() {}\n").expect("write a source");
+    Scratch::write(dir.join("lib.rs"), "fn f() {}\n").expect("write a source");
     run(&Context {
         root: dir.to_path_buf(),
         members: Ok(Vec::new()),
@@ -221,7 +220,7 @@ pub(super) fn not_a_git_repo() -> Inspection {
 
 pub(super) fn only_file_unreadable() -> Inspection {
     let dir = repo("only-file-unreadable", &[]);
-    fs::write(dir.join("bad.rs"), [0xff, 0xfe, b'\n']).expect("write bytes");
+    Scratch::write(dir.join("bad.rs"), [0xff, 0xfe, b'\n']).expect("write bytes");
     run(&Context {
         root: dir.to_path_buf(),
         members: Ok(Vec::new()),

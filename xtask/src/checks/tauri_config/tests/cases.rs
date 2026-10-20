@@ -5,14 +5,13 @@
 use super::*;
 use crate::checks::tests::desktop_context;
 use crate::scratch::Scratch;
-use std::fs;
 
 /// Runs the check on a scratch repo whose desktop crate holds `files`, each a name and its bytes.
 fn run_files(case: &str, files: &[(&str, &[u8])]) -> Inspection {
     let dir = Scratch::new(&format!("planted-tauri-config-{case}"));
-    fs::create_dir_all(dir.join("crates/desktop")).expect("create the desktop dir");
+    Scratch::create_dir_all(dir.join("crates/desktop")).expect("create the desktop dir");
     for (name, bytes) in files {
-        fs::write(dir.join("crates/desktop").join(name), bytes).expect("write a desktop file");
+        Scratch::write(dir.join("crates/desktop").join(name), bytes).expect("write a desktop file");
     }
     run(&desktop_context(&dir))
 }

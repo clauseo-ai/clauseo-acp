@@ -358,13 +358,15 @@ mod tests {
     fn repo_files_are_tracked_and_unignored_files_on_disk() {
         let dir = crate::scratch::Scratch::new("changes-repo-files");
         git(&dir, &["init", "-q"]).expect("git init");
-        std::fs::write(dir.join(".gitignore"), "ignored.rs\n").expect("write .gitignore");
-        std::fs::create_dir_all(dir.join("src")).expect("create src");
+        crate::scratch::Scratch::write(dir.join(".gitignore"), "ignored.rs\n")
+            .expect("write .gitignore");
+        crate::scratch::Scratch::create_dir_all(dir.join("src")).expect("create src");
         for file in ["src/kept.rs", "src/gone.rs", "new.ts", "ignored.rs"] {
-            std::fs::write(dir.join(file), "x\n").expect("write a file");
+            crate::scratch::Scratch::write(dir.join(file), "x\n").expect("write a file");
         }
         git(&dir, &["add", "src/kept.rs", "src/gone.rs"]).expect("git add");
-        std::fs::remove_file(dir.join("src/gone.rs")).expect("remove a tracked file");
+        crate::scratch::Scratch::remove_file(dir.join("src/gone.rs"))
+            .expect("remove a tracked file");
         assert_eq!(
             repo_files(&dir),
             Ok(files(&[".gitignore", "new.ts", "src/kept.rs"]))

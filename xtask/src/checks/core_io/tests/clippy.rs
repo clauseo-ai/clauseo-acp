@@ -28,7 +28,6 @@ use crate::steps::plan::CLIPPY_FLAGS;
 use forms::{Form, Must};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::path::Path;
 use std::time::Instant;
 use toml::{Table, Value as Toml};
@@ -196,16 +195,16 @@ fn wrong_forms(forms: &[Form], run: &Run) -> Vec<String> {
 /// `config`, the repo's `rust-toolchain.toml`, so the pinned clippy runs, and `src/lib.rs`,
 /// which starts with `forbid_line()` and declares one module per form, each in `src/<name>.rs`.
 fn write_crate(dir: &Path, repo: &Path, config: &str, forms: &[Form]) {
-    fs::create_dir_all(dir.join("src")).expect("create src/");
-    fs::write(
+    Scratch::create_dir_all(dir.join("src")).expect("create src/");
+    Scratch::write(
         dir.join("Cargo.toml"),
         "[package]\nname = \"planted\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\
          publish = false\n\n[features]\nio = []\n\n[lints.clippy]\ndisallowed_methods = \"allow\"\n\
          disallowed_types = \"allow\"\n\n[workspace]\n",
     )
     .expect("write Cargo.toml");
-    fs::write(dir.join("clippy.toml"), config).expect("write clippy.toml");
-    fs::copy(
+    Scratch::write(dir.join("clippy.toml"), config).expect("write clippy.toml");
+    Scratch::copy(
         repo.join("rust-toolchain.toml"),
         dir.join("rust-toolchain.toml"),
     )
@@ -213,14 +212,14 @@ fn write_crate(dir: &Path, repo: &Path, config: &str, forms: &[Form]) {
     let mut lib = vec![forbid_line(), "#![allow(unused)]".to_owned()];
     for form in forms {
         lib.push(format!("pub mod {};", form.name));
-        fs::write(
+        Scratch::write(
             dir.join("src").join(format!("{}.rs", form.name)),
             &form.source,
         )
         .expect("write a form");
     }
     lib.push(String::new());
-    fs::write(dir.join("src/lib.rs"), lib.join("\n")).expect("write lib.rs");
+    Scratch::write(dir.join("src/lib.rs"), lib.join("\n")).expect("write lib.rs");
 }
 
 /// The `message` of a `compiler-message` line of cargo's JSON output.
