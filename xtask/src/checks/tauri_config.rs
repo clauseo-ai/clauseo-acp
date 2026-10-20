@@ -31,25 +31,6 @@ use syn::ext::IdentExt;
 const TAURI_CONF: &str = "tauri.conf.json";
 const BUILD_RS: &str = "build.rs";
 
-const CONF_MISSING_FIX: &str =
-    "restore it: Tauri reads the window's security settings from it, and this check guards them";
-const CONF_INVALID_FIX: &str = "fix the JSON syntax: Tauri cannot read the file either";
-const GLOBAL_TAURI_FIX: &str = "set `\"withGlobalTauri\": false` under `app`: the global object hands every script in the page the whole IPC API";
-const FREEZE_FIX: &str = "set `\"freezePrototype\": true` under app.security: a frozen prototype stops script in the page from hijacking the objects the IPC bridge uses";
-const CSP_PINNED_FIX: &str = "set app.security.csp to the string in PINNED_CSP: the policy is pinned in xtask/src/checks/tauri_config.rs and changes only together with that const, in review";
-const FRONTEND_FIX: &str =
-    "frontendDist must be the local dist folder; a URL makes the release app load a remote site";
-const WINDOWS_FIX: &str =
-    "build windows in crates/desktop/src/lib.rs: a config window skips use_https_scheme(true)";
-const ASSET_FIX: &str = "set app.security.assetProtocol.enable to false: the asset protocol serves files from disk to the webview";
-const PLATFORM_FIX: &str = "put the setting in tauri.conf.json: a platform config overrides the checked settings on one OS";
-const PUBKEY_FIX: &str =
-    "set plugins.updater.pubkey to the release public key before adding endpoints";
-const V1_FIX: &str = "the updater is built without its zip feature, so v1Compatible artifacts cannot be installed; use true";
-const DANGEROUS_FIX: &str = "remove it: each `dangerous*` setting switches off a Tauri safeguard";
-const APP_MANIFEST_FIX: &str = "pass `tauri_build::AppManifest::new()` to `tauri_build::Attributes::new().app_manifest(...)` in `tauri_build::try_build`: without a manifest Tauri skips the access check for app commands";
-const BUILD_RS_SYNTAX_FIX: &str = "fix the syntax: cargo cannot build the crate either";
-
 /// The platforms Tauri merges a platform config for, over `tauri.conf.json`.
 const PLATFORMS: [&str; 5] = ["macos", "windows", "linux", "ios", "android"];
 
@@ -111,7 +92,7 @@ pub(crate) fn conf_violations(path: &str, text: Option<&str>) -> Vec<Violation> 
             path,
             1,
             format!("`{path}` is missing"),
-            CONF_MISSING_FIX,
+            Fix::ConfMissing,
         )];
     };
     let conf: Value = match serde_json::from_str(text) {
@@ -121,11 +102,11 @@ pub(crate) fn conf_violations(path: &str, text: Option<&str>) -> Vec<Violation> 
                 path,
                 1,
                 format!("`{path}` is not valid JSON: {error}"),
-                CONF_INVALID_FIX,
+                Fix::ConfInvalid,
             )];
         }
     };
-    let at = |keys: &[&str], message: String, fix: &str| {
+    let at = |keys: &[&str], message: String, fix: Fix| {
         violation(path, key_line(text, keys), message, fix)
     };
     let mut found = app_violations(&conf, &at);
@@ -137,14 +118,14 @@ pub(crate) fn conf_violations(path: &str, text: Option<&str>) -> Vec<Violation> 
         found.push(at(
             &keys,
             format!("`{}` switches off a Tauri safeguard", keys.join(".")),
-            DANGEROUS_FIX,
+            Fix::Dangerous,
         ));
     }
     found
 }
 
 /// Builds the violation for a message and fix at the line of the key on a path.
-type At<'a> = dyn Fn(&[&str], String, &str) -> Violation + 'a;
+type At<'a> = dyn Fn(&[&str], String, Fix) -> Violation + 'a;
 
 /// The global object, the frozen prototype, config windows and the asset protocol.
 fn app_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
@@ -153,14 +134,14 @@ fn app_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
         found.push(at(
             &["app", "withGlobalTauri"],
             "app.withGlobalTauri must be false".to_owned(),
-            GLOBAL_TAURI_FIX,
+            Fix::GlobalTauri,
         ));
     }
     if conf.pointer("/app/security/freezePrototype") != Some(&Value::Bool(true)) {
         found.push(at(
             &["app", "security", "freezePrototype"],
             "app.security.freezePrototype must be true".to_owned(),
-            FREEZE_FIX,
+            Fix::FreezePrototype,
         ));
     }
     if !conf
@@ -171,14 +152,14 @@ fn app_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
         found.push(at(
             &["app", "windows"],
             "app.windows must be an empty array".to_owned(),
-            WINDOWS_FIX,
+            Fix::Windows,
         ));
     }
     if conf.pointer("/app/security/assetProtocol/enable") == Some(&Value::Bool(true)) {
         found.push(at(
             &["app", "security", "assetProtocol", "enable"],
             "app.security.assetProtocol.enable is true".to_owned(),
-            ASSET_FIX,
+            Fix::AssetProtocol,
         ));
     }
     found
@@ -196,7 +177,7 @@ fn csp_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
     vec![at(
         &["app", "security", "csp"],
         message.to_owned(),
-        CSP_PINNED_FIX,
+        Fix::CspPinned,
     )]
 }
 
@@ -211,7 +192,7 @@ fn frontend_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
     vec![at(
         &["build", "frontendDist"],
         message.to_owned(),
-        FRONTEND_FIX,
+        Fix::Frontend,
     )]
 }
 
@@ -246,14 +227,14 @@ fn updater_violations(conf: &Value, at: &At<'_>) -> Vec<Violation> {
         found.push(at(
             &["plugins", "updater", "endpoints"],
             "plugins.updater has endpoints but no pubkey".to_owned(),
-            PUBKEY_FIX,
+            Fix::Pubkey,
         ));
     }
     if conf.pointer("/bundle/createUpdaterArtifacts") == Some(&Value::from("v1Compatible")) {
         found.push(at(
             &["bundle", "createUpdaterArtifacts"],
             "bundle.createUpdaterArtifacts is \"v1Compatible\"".to_owned(),
-            V1_FIX,
+            Fix::V1Compatible,
         ));
     }
     found
@@ -279,7 +260,7 @@ fn platform_violation(path: &str) -> Violation {
         path,
         1,
         format!("platform config `{path}` overrides tauri.conf.json"),
-        PLATFORM_FIX,
+        Fix::Platform,
     )
 }
 
@@ -327,7 +308,7 @@ pub(crate) fn build_rs_violations(path: &str, text: Option<&str>) -> Vec<Violati
                     path,
                     line,
                     format!("build.rs is not valid Rust: {error}"),
-                    BUILD_RS_SYNTAX_FIX,
+                    Fix::BuildRsSyntax,
                 )];
             }
         }
@@ -338,7 +319,7 @@ pub(crate) fn build_rs_violations(path: &str, text: Option<&str>) -> Vec<Violati
             path,
             1,
             "build.rs declares no AppManifest",
-            APP_MANIFEST_FIX,
+            Fix::AppManifest,
         ));
     }
     found
