@@ -1,26 +1,44 @@
-//! The cfgs clippy never leaves off in a held crate: clippy lints it with `cfg(clippy)` set and
-//! with `debug_assertions` on, so code behind `not(clippy)` or `not(debug_assertions)` is never
-//! linted. Each `.rs` file of the crate is lexed, macro bodies included, and every identifier
-//! `clippy` or `debug_assertions` fails, but `clippy` directly before `::`, a lint path.
+//! The cfg rule of a held crate. clippy lints the crate once per target kind with every feature
+//! on, so code is linted only when its cfg holds in that build. `test` holds in the test build,
+//! `not(test)` in the others, and a positive feature holds under `--all-features`. Any other
+//! name, or a feature under a `not`, can leave code out of every clippy run.
+//!
+//! Each `.rs` file of the crate is lexed, and every token tree is walked, macro bodies and macro
+//! call arguments included. The predicate of each `cfg(..)`, `cfg!(..)` and `cfg_attr(..)` is
+//! built only from `all`, `any`, `not`, `test` and `feature = "<literal>"`, with no `feature`
+//! under a `not`. An attribute whose name is a metavariable fails, since a macro could build a
+//! `cfg` from a passed name. A `path` attribute and `include!` fail, so every module file sits at
+//! its default path under the crate, ends in `.rs` and is lexed here.
 
 use super::report;
 use crate::checks;
 use crate::violation::Violation;
 use crate::workspace::{self, Member};
-use proc_macro2::{Spacing, TokenStream, TokenTree};
+use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
 use std::path::Path;
 use std::str::FromStr;
 
-/// The cfg names that clippy always sets.
-const ALWAYS_SET: [&str; 2] = ["clippy", "debug_assertions"];
+/// What a held crate's file may not hold, found at a line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Finding {
+    /// A cfg predicate with a form other than `all`, `any`, `not`, `test` and a positive feature,
+    /// described as the fix names it.
+    Predicate(String),
+    /// An attribute whose name is a metavariable.
+    MetavariableAttribute,
+    /// A `path` attribute.
+    PathAttribute,
+    /// A call of `include!`.
+    Include,
+}
 
 /// The violations for the held crate `member`'s `.rs` files among `files` (git's list): each
-/// file that does not lex, and each use of a name in `ALWAYS_SET` outside a lint path.
-pub(super) fn always_set_cfgs(root: &Path, member: &Member, files: &[String]) -> Vec<Violation> {
+/// file that does not lex, and each `Finding` in the others.
+pub(super) fn cfg_rule(root: &Path, member: &Member, files: &[String]) -> Vec<Violation> {
     let mut found = Vec::new();
     let sources = files
         .iter()
-        .filter(|file| file.ends_with(".rs") && workspace::is_under(file, &member.dir));
+        .filter(|file| is_rust_file(file) && workspace::is_under(file, &member.dir));
     for path in sources {
         let text = match checks::read_repo_file(root, path) {
             Ok(Some(text)) => text,
@@ -35,8 +53,8 @@ pub(super) fn always_set_cfgs(root: &Path, member: &Member, files: &[String]) ->
             Ok(tokens) => {
                 let mut hits = Vec::new();
                 walk(tokens, &mut hits);
-                for (name, line) in hits {
-                    found.push(report::always_set_cfg(path, line, &name, &member.name));
+                for (finding, line) in hits {
+                    found.push(report::cfg_rule(path, line, &finding, &member.name));
                 }
             }
             Err(error) => {
@@ -48,22 +66,39 @@ pub(super) fn always_set_cfgs(root: &Path, member: &Member, files: &[String]) ->
     found
 }
 
-/// Pushes onto `hits` the name and line of each identifier in `tokens`, groups included, that
-/// is in `ALWAYS_SET`, but `clippy` directly followed by `::`.
-fn walk(tokens: TokenStream, hits: &mut Vec<(String, u32)>) {
+/// True when `file` ends in `.rs` in any case, which a case-insensitive file system opens for a
+/// module.
+fn is_rust_file(file: &str) -> bool {
+    Path::new(file)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("rs"))
+}
+
+/// Pushes onto `hits` each `Finding` in `tokens` and its line, groups included.
+fn walk(tokens: TokenStream, hits: &mut Vec<(Finding, u32)>) {
     let trees: Vec<TokenTree> = tokens.into_iter().collect();
     for (index, tree) in trees.iter().enumerate() {
+        let rest = &trees[index + 1..];
         match tree {
             TokenTree::Group(group) => walk(group.stream(), hits),
-            TokenTree::Ident(ident) => {
-                let text = ident.to_string();
-                let name = text.strip_prefix("r#").unwrap_or(&text);
-                if !ALWAYS_SET.contains(&name) {
-                    continue;
+            TokenTree::Ident(ident) => match ident_name(ident).as_str() {
+                "cfg" => cfg_call(rest, hits),
+                "cfg_attr" => cfg_attr(rest, hits),
+                "include" if starts_with_punct(rest, '!') => {
+                    hits.push((Finding::Include, line_of(ident.span().start().line)));
                 }
-                let lint_path = name == "clippy" && is_path_separator(&trees[index + 1..]);
-                if !lint_path {
-                    hits.push((name.to_owned(), line_of(ident.span().start().line)));
+                _ => {}
+            },
+            TokenTree::Punct(punct) if punct.as_char() == '#' => {
+                let rest = if starts_with_punct(rest, '!') {
+                    &rest[1..]
+                } else {
+                    rest
+                };
+                if let Some(TokenTree::Group(group)) = rest.first()
+                    && group.delimiter() == Delimiter::Bracket
+                {
+                    attribute(&group.stream().into_iter().collect::<Vec<_>>(), hits);
                 }
             }
             TokenTree::Punct(_) | TokenTree::Literal(_) => {}
@@ -71,17 +106,215 @@ fn walk(tokens: TokenStream, hits: &mut Vec<(String, u32)>) {
     }
 }
 
-/// True when `rest` starts with `::`, two `:` with nothing between them.
-fn is_path_separator(rest: &[TokenTree]) -> bool {
-    match rest {
-        [TokenTree::Punct(first), TokenTree::Punct(second), ..] => {
-            first.as_char() == ':' && first.spacing() == Spacing::Joint && second.as_char() == ':'
+/// Checks what follows `cfg`, `rest`: a parenthesized predicate directly, or a group of any
+/// delimiter after `!`, as in `cfg!(..)`.
+fn cfg_call(rest: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
+    let (next, is_macro) = match rest {
+        [TokenTree::Punct(bang), next, ..] if bang.as_char() == '!' => (next, true),
+        [next, ..] => (next, false),
+        [] => return,
+    };
+    match next {
+        TokenTree::Group(group) if is_macro || group.delimiter() == Delimiter::Parenthesis => {
+            let trees: Vec<TokenTree> = group.stream().into_iter().collect();
+            if let Err(hit) = whole_predicate(&trees, group) {
+                hits.push(hit);
+            }
         }
-        _ => false,
+        other => metavariable_in_place(other, hits),
     }
+}
+
+/// Pushes a metavariable finding when `tree`, which stands where a cfg's group belongs, is `$`.
+fn metavariable_in_place(tree: &TokenTree, hits: &mut Vec<(Finding, u32)>) {
+    if is_punct(tree, '$') {
+        hits.push((metavariable(), line_of(tree.span().start().line)));
+    }
+}
+
+/// The finding for a metavariable in place of a predicate.
+fn metavariable() -> Finding {
+    Finding::Predicate("a metavariable".to_owned())
+}
+
+/// Checks what follows `cfg_attr`, `rest`: in its parenthesized group the first comma-separated
+/// part is a predicate, and each attribute after it is checked as one.
+fn cfg_attr(rest: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
+    let group = match rest.first() {
+        Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Parenthesis => group,
+        Some(other) => return metavariable_in_place(other, hits),
+        None => return,
+    };
+    let trees: Vec<TokenTree> = group.stream().into_iter().collect();
+    let mut parts = trees.split(|tree| is_punct(tree, ','));
+    let predicate = parts.next().unwrap_or_default();
+    if let Err(hit) = whole_predicate(predicate, group) {
+        hits.push(hit);
+    }
+    for part in parts {
+        attribute(part, hits);
+    }
+}
+
+/// Checks the tokens of one attribute, inside `#[..]` or after the predicate of `cfg_attr`: its
+/// name may be neither a metavariable nor `path`.
+fn attribute(tokens: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
+    match tokens.first() {
+        Some(TokenTree::Punct(dollar)) if dollar.as_char() == '$' => {
+            hits.push((
+                Finding::MetavariableAttribute,
+                line_of(dollar.span().start().line),
+            ));
+        }
+        Some(TokenTree::Ident(ident)) if ident_name(ident) == "path" => {
+            hits.push((Finding::PathAttribute, line_of(ident.span().start().line)));
+        }
+        _ => {}
+    }
+}
+
+/// `Ok` when `trees`, the contents of `group`, are one allowed predicate, with an optional
+/// trailing comma; else the first `Finding` and its line.
+fn whole_predicate(trees: &[TokenTree], group: &Group) -> Result<(), (Finding, u32)> {
+    let trees = match trees {
+        [most @ .., last] if is_punct(last, ',') => most,
+        _ => trees,
+    };
+    if trees.is_empty() {
+        return Err(not_a_predicate(line_of(group.span().start().line)));
+    }
+    predicate(trees, false)
+}
+
+/// `Ok` when `trees` are exactly one allowed predicate; `negated` is true under a `not`.
+fn predicate(trees: &[TokenTree], negated: bool) -> Result<(), (Finding, u32)> {
+    let first = &trees[0];
+    let line = line_of(first.span().start().line);
+    let TokenTree::Ident(ident) = first else {
+        if is_punct(first, '$') {
+            return Err((metavariable(), line));
+        }
+        return Err(not_a_predicate(line));
+    };
+    let name = ident_name(ident);
+    match (name.as_str(), &trees[1..]) {
+        ("test", []) => Ok(()),
+        ("feature", [TokenTree::Punct(eq), TokenTree::Literal(literal)])
+            if eq.as_char() == '=' && literal.to_string().starts_with(['"', 'r']) =>
+        {
+            if negated {
+                Err((Finding::Predicate("a feature under `not`".to_owned()), line))
+            } else {
+                Ok(())
+            }
+        }
+        ("all" | "any" | "not", [TokenTree::Group(group)])
+            if group.delimiter() == Delimiter::Parenthesis =>
+        {
+            let inner: Vec<TokenTree> = group.stream().into_iter().collect();
+            let mut parts: Vec<&[TokenTree]> = inner.split(|tree| is_punct(tree, ',')).collect();
+            if parts.last().is_some_and(|part| part.is_empty()) {
+                parts.pop();
+            }
+            if name == "not" && parts.len() != 1 {
+                return Err(not_a_predicate(line));
+            }
+            for part in parts {
+                if part.is_empty() {
+                    return Err(not_a_predicate(line));
+                }
+                predicate(part, negated || name == "not")?;
+            }
+            Ok(())
+        }
+        ("feature" | "all" | "any" | "not" | "test", _) => Err(not_a_predicate(line)),
+        _ => Err((Finding::Predicate(format!("the name `{name}`")), line)),
+    }
+}
+
+/// The finding for tokens at `line` that are not a cfg predicate.
+fn not_a_predicate(line: u32) -> (Finding, u32) {
+    (
+        Finding::Predicate("a form that is not a predicate".to_owned()),
+        line,
+    )
+}
+
+/// The name of `ident`, without the `r#` of a raw identifier.
+fn ident_name(ident: &proc_macro2::Ident) -> String {
+    let text = ident.to_string();
+    text.strip_prefix("r#")
+        .map_or_else(|| text.clone(), str::to_owned)
+}
+
+/// True when `tree` is the punctuation `ch`.
+fn is_punct(tree: &TokenTree, ch: char) -> bool {
+    matches!(tree, TokenTree::Punct(punct) if punct.as_char() == ch)
+}
+
+/// True when `rest` starts with the punctuation `ch`.
+fn starts_with_punct(rest: &[TokenTree], ch: char) -> bool {
+    rest.first().is_some_and(|tree| is_punct(tree, ch))
 }
 
 /// A 1-based line from a span's line.
 fn line_of(line: usize) -> u32 {
     u32::try_from(line).unwrap_or(u32::MAX).max(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The findings of `source`, each as its kind and line.
+    fn findings(source: &str) -> Vec<(Finding, u32)> {
+        let mut hits = Vec::new();
+        walk(
+            TokenStream::from_str(source).expect("the source lexes"),
+            &mut hits,
+        );
+        hits
+    }
+
+    /// Forms the planted cases do not show: other delimiters, a metavariable in place of the
+    /// group, a nested `not`, and predicates that are malformed.
+    #[test]
+    fn forms_beyond_the_planted_cases() {
+        let name = |name: &str| Finding::Predicate(format!("the name `{name}`"));
+        let malformed = || Finding::Predicate("a form that is not a predicate".to_owned());
+        let negated = || Finding::Predicate("a feature under `not`".to_owned());
+        let cases = [
+            ("cfg!{unix}", vec![(name("unix"), 1)]),
+            ("#[cfg $p]", vec![(metavariable(), 1)]),
+            ("#[cfg_attr $p]", vec![(metavariable(), 1)]),
+            ("#[cfg_attr($p, derive(Debug))]", vec![(metavariable(), 1)]),
+            ("#![$a(x)]", vec![(Finding::MetavariableAttribute, 1)]),
+            (
+                "#[cfg_attr(test, $a)]",
+                vec![(Finding::MetavariableAttribute, 1)],
+            ),
+            ("#[cfg(not(not(feature = \"a\")))]", vec![(negated(), 1)]),
+            (
+                "#[cfg(not(all(test, feature = \"a\")))]",
+                vec![(negated(), 1)],
+            ),
+            ("#[cfg(feature)]", vec![(malformed(), 1)]),
+            ("#[cfg(test, unix)]", vec![(malformed(), 1)]),
+            ("#[cfg(not(test, test))]", vec![(malformed(), 1)]),
+            ("#[cfg()]", vec![(malformed(), 1)]),
+            (
+                "#[cfg_attr(test, cfg_attr(unix, derive(Debug)))]",
+                vec![(name("unix"), 1)],
+            ),
+            ("r#include!(\"x.rs\");", vec![(Finding::Include, 1)]),
+            (
+                "#[cfg(test,)] #[cfg(any())] #[cfg(all(test,))] fn f() {}",
+                vec![],
+            ),
+            ("let cfg = 1; include_bytes!(\"x\"); path::x();", vec![]),
+        ];
+        for (source, expected) in cases {
+            assert_eq!(findings(source), expected, "{source}");
+        }
+    }
 }

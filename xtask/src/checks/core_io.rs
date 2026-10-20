@@ -26,13 +26,17 @@
 //! the crate (`roots.rs`).
 //!
 //! clippy sees all of a held crate's code. The clippy step runs with `--all-targets` and
-//! `--all-features` (`steps/plan.rs`), so tests, benches, code behind a feature and
-//! `required-features` targets are linted. clippy lints with `cfg(clippy)` set and in the debug
-//! profile, so a held crate never names `clippy` or `debug_assertions`, the cfgs behind which
-//! code would go unlinted. Every `.rs` file in git's list under the crate's folder is lexed with
-//! proc-macro2, macro bodies included, and each identifier `clippy` or `debug_assertions` fails,
-//! raw form included, but `clippy` directly before `::`, a lint path. A file that does not lex
-//! fails at the line the lexer names (`cfgs.rs`).
+//! `--all-features` (`steps/plan.rs`), so clippy lints the crate once per target kind with every
+//! feature on, and code is linted only when its cfg holds in that build. `test` holds in the test
+//! build, `not(test)` in the others, and a positive feature in all of them. Any other cfg can
+//! leave code out of every clippy run, so a held crate's cfgs use only `test` and positive
+//! features. Every `.rs` file in git's list under the crate's folder is lexed with proc-macro2,
+//! macro bodies and macro call arguments included. The predicate of each `cfg(..)`, `cfg!(..)`
+//! and `cfg_attr(..)` is built only from `all`, `any`, `not`, `test` and `feature = "<literal>"`,
+//! with no `feature` under a `not`. An attribute whose name is a metavariable fails, since a macro
+//! could build a `cfg` from a passed name. A `path` attribute and `include!` fail, so every module
+//! file sits at its default path under the crate and is lexed. A file that does not lex fails at
+//! the line the lexer names (`cfgs.rs`).
 //!
 //! Lint configuration lives only in the root `clippy.toml`, the own `clippy.toml` of each crate
 //! whose row lists `fs`, `process` or `any I/O`, and the root `[workspace.lints]`. So the check
@@ -59,14 +63,11 @@
 //! ban must catch or must pass, and one per form the forbid line must refuse.
 //!
 //! The file covers every target of the package clippy lints, `#[cfg(test)]` code included. Not
-//! covered: code behind another target's `cfg`, which clippy lints only on that target, code
-//! another crate runs for this one (a dependency, a proc macro), an item a newer toolchain adds
-//! that the list does not name, a clippy config git ignores, cargo config outside the repo
-//! (parent folders, `CARGO_HOME`), `RUSTFLAGS` and `RUSTC_WRAPPER` in the environment,
-//! `CLIPPY_CONF_DIR` when clippy runs without xtask, a crate that is not a workspace member, and
-//! a `clippy` or `debug_assertions` cfg in a file outside the crate's folder that `#[path]` or
-//! `include!` brings into the crate. It counts the
-//! Crates-table rows it classified, held or not.
+//! covered: code another crate runs for this one (a dependency, a proc macro), an item a newer
+//! toolchain adds that the list does not name, a clippy config git ignores, cargo config outside
+//! the repo (parent folders, `CARGO_HOME`), `RUSTFLAGS` and `RUSTC_WRAPPER` in the environment,
+//! `CLIPPY_CONF_DIR` when clippy runs without xtask, and a crate that is not a workspace member.
+//! It counts the Crates-table rows it classified, held or not.
 
 mod cfgs;
 mod clippy_toml;
@@ -137,7 +138,7 @@ fn run(ctx: &Context) -> Inspection {
         }
         violations.extend(roots::forbid_lines(&ctx.root, member));
         violations.extend(roots::build_script(&ctx.root, member));
-        violations.extend(cfgs::always_set_cfgs(&ctx.root, member, &files));
+        violations.extend(cfgs::cfg_rule(&ctx.root, member, &files));
     }
     for member in &ctx.members {
         violations.extend(lints::crate_manifest(&ctx.root, member));

@@ -74,17 +74,37 @@ macro_rules! no_forbid {
     };
 }
 
-/// The violation for the name `$name` at line `$line` of `crates/protocol/src/hidden.rs`.
+/// The violation for a cfg with `$form` at line `$line` of `crates/protocol/src/hidden.rs`.
 #[cfg(test)]
-macro_rules! always_set {
-    ($line:literal, $name:literal) => {
+macro_rules! cfg_form {
+    ($line:literal, $form:literal) => {
         concat!(
-            "crates/protocol/src/hidden.rs:", $line, ": `crates/protocol/src/hidden.rs` names `",
-            $name, "` outside a lint path; clippy lints clauseo-protocol with `cfg(clippy)` set \
-             and in the debug profile, so code behind `not(clippy)` or `not(debug_assertions)` is \
-             never linted\n    fix: remove the cfg that names `", $name, "` here, or rename the \
-             item if `", $name, "` is not a cfg; a crate whose row bans I/O builds the same code \
-             under clippy and in every profile"
+            "crates/protocol/src/hidden.rs:",
+            $line,
+            ": `crates/protocol/src/hidden.rs` has a cfg \
+             with ",
+            $form,
+            "; clippy lints clauseo-protocol once per target kind with every \
+             feature on, so only a cfg built from `test` and positive features holds in one of \
+             its runs, and code behind any other can be left out of every clippy run\n    \
+             fix: remove ",
+            $form,
+            " from this cfg; the cfgs of a crate whose row bans I/O use \
+             only `test` and features, joined by `all`, `any` and `not`, with no feature under \
+             a `not`"
+        )
+    };
+}
+
+/// The violation for a `path` attribute at line `$line` of `crates/protocol/src/hidden.rs`.
+#[cfg(test)]
+macro_rules! path_attribute {
+    ($line:literal) => {
+        concat!(
+            "crates/protocol/src/hidden.rs:", $line, ": `crates/protocol/src/hidden.rs` gives a \
+             module a `path` attribute, which can bring into clauseo-protocol a file core-io does \
+             not read\n    fix: remove the `path` attribute and move the module to its default \
+             path"
         )
     };
 }
@@ -272,18 +292,38 @@ crate::checks::planted::cases! {
          [package], but clauseo-protocol's row bans I/O and such a crate has no build script\n    \
          fix: delete the `build` key, and the script it names if there is one",
     ]), inspects 3 => super::package_build_set,
-    /// A held crate never names the cfgs clippy always sets, but in a lint path.
-    cfg_not_clippy: FailsWith(&[always_set!(1, "clippy")]), inspects 3 => super::cfg_not_clippy,
-    cfg_not_debug_assertions: FailsWith(&[always_set!(3, "debug_assertions")]), inspects 3 => super::cfg_not_debug_assertions,
-    cfg_attr_clippy: FailsWith(&[always_set!(1, "clippy")]), inspects 3 => super::cfg_attr_clippy,
-    cfg_in_a_macro_body: FailsWith(&[always_set!(3, "clippy")]), inspects 3 => super::cfg_in_a_macro_body,
+    /// A held crate's cfgs use only `test` and positive features, and its files have no
+    /// metavariable attribute name, `path` attribute or `include!`.
+    cfg_not_clippy: FailsWith(&[cfg_form!(1, "the name `clippy`")]), inspects 3 => super::cfg_not_clippy,
+    cfg_not_debug_assertions: FailsWith(&[cfg_form!(3, "the name `debug_assertions`")]), inspects 3 => super::cfg_not_debug_assertions,
+    cfg_attr_clippy: FailsWith(&[cfg_form!(1, "the name `clippy`"), path_attribute!(1)]), inspects 3 => super::cfg_attr_clippy,
+    cfg_in_a_macro_body: FailsWith(&[cfg_form!(3, "the name `clippy`")]), inspects 3 => super::cfg_in_a_macro_body,
+    cfg_not_feature: FailsWith(&[cfg_form!(2, "a feature under `not`")]), inspects 3 => super::cfg_not_feature,
+    cfg_panic_abort: FailsWith(&[cfg_form!(1, "the name `panic`")]), inspects 3 => super::cfg_panic_abort,
+    cfg_unix: FailsWith(&[cfg_form!(1, "the name `unix`")]), inspects 3 => super::cfg_unix,
+    cfg_custom_name: FailsWith(&[cfg_form!(1, "the name `hidden`")]), inspects 3 => super::cfg_custom_name,
+    cfg_macro_debug_assertions: FailsWith(&[cfg_form!(2, "the name `debug_assertions`")]), inspects 3 => super::cfg_macro_debug_assertions,
+    cfg_attr_not_feature: FailsWith(&[cfg_form!(1, "a feature under `not`")]), inspects 3 => super::cfg_attr_not_feature,
+    cfg_metavariable_in_a_macro_body: FailsWith(&[cfg_form!(3, "a metavariable")]), inspects 3 => super::cfg_metavariable_in_a_macro_body,
+    attribute_name_metavariable: FailsWith(&[
+        "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs` writes an attribute whose name is a metavariable, so a macro \
+         of clauseo-protocol can build a cfg that core-io does not see\n    \
+         fix: write the attribute's name in the macro body itself",
+    ]), inspects 3 => super::attribute_name_metavariable,
+    path_attribute: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute,
+    path_attribute_in_cfg_attr: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute_in_cfg_attr,
+    include_macro: FailsWith(&[
+        "crates/protocol/src/hidden.rs:2: `crates/protocol/src/hidden.rs` calls `include!`, which can bring into clauseo-protocol code \
+         from a file core-io does not read\n    \
+         fix: move the code into a module at its default path; use `include_str!` or \
+         `include_bytes!` for data",
+    ]), inspects 3 => super::include_macro,
     source_not_lexed: FailsWith(&[
-        "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs`, a file of \
-         clauseo-protocol, does not lex as Rust from this line, so core-io cannot look for \
-         `cfg(clippy)` or `debug_assertions` in it\n    \
+        "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs`, a file of clauseo-protocol, does not lex as Rust from this \
+         line, so core-io cannot check its cfgs\n    \
          fix: fix the Rust syntax that starts at this line, such as a bracket or a string left open",
     ]), inspects 3 => super::source_not_lexed,
-    clippy_only_in_lint_paths: Passes, inspects 3 => super::clippy_only_in_lint_paths,
+    cfg_rule_passes: Passes, inspects 3 => super::cfg_rule_passes,
     forbid_in_every_root: Passes, inspects 3 => super::forbid_in_every_root,
     /// An alias named after an external cargo command xtask runs fails; the repo's `xtask` alias
     /// and one named after a built-in command, which cargo ignores, pass.

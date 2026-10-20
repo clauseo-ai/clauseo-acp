@@ -1,5 +1,5 @@
-//! The core-io planted cases about the cfgs clippy always sets: `clippy` and `debug_assertions`
-//! in a held crate's files.
+//! The core-io planted cases about the cfg rule: a held crate's cfgs use only `test` and positive
+//! features, and its files have no metavariable attribute name, `path` attribute or `include!`.
 
 use super::{Repo, expected, run_repo};
 use crate::checks::Inspection;
@@ -36,6 +36,7 @@ pub(in crate::checks::core_io) fn cfg_not_debug_assertions() -> Inspection {
     )
 }
 
+/// A name and a `path` attribute in one `cfg_attr`.
 pub(in crate::checks::core_io) fn cfg_attr_clippy() -> Inspection {
     with_file(
         "cfg-attr-clippy",
@@ -52,16 +53,94 @@ pub(in crate::checks::core_io) fn cfg_in_a_macro_body() -> Inspection {
     )
 }
 
+/// The review's case: `--all-features` lints only the positive side of a feature.
+pub(in crate::checks::core_io) fn cfg_not_feature() -> Inspection {
+    with_file(
+        "cfg-not-feature",
+        "pub fn f() {}\n#[cfg(not(feature = \"x\"))]\npub fn g() {}\n",
+    )
+}
+
+/// The review's case: clippy lints an unwinding profile, and the release profile aborts.
+pub(in crate::checks::core_io) fn cfg_panic_abort() -> Inspection {
+    with_file("cfg-panic", "#[cfg(panic = \"abort\")]\npub fn g() {}\n")
+}
+
+pub(in crate::checks::core_io) fn cfg_unix() -> Inspection {
+    with_file("cfg-unix", "#[cfg(any(test, unix))]\npub fn g() {}\n")
+}
+
+pub(in crate::checks::core_io) fn cfg_custom_name() -> Inspection {
+    with_file(
+        "cfg-custom",
+        "#[cfg(all(feature = \"a\", hidden))]\npub fn g() {}\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn cfg_macro_debug_assertions() -> Inspection {
+    with_file(
+        "cfg-macro-debug",
+        "pub fn g() -> bool {\n    cfg!(debug_assertions)\n}\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn cfg_attr_not_feature() -> Inspection {
+    with_file(
+        "cfg-attr-not-feature",
+        "#[cfg_attr(not(feature = \"x\"), derive(Debug))]\npub struct S;\n",
+    )
+}
+
+/// A predicate a macro takes from its caller.
+pub(in crate::checks::core_io) fn cfg_metavariable_in_a_macro_body() -> Inspection {
+    with_file(
+        "cfg-metavariable",
+        "macro_rules! m {\n    ($p:meta) => {\n        #[cfg($p)]\n        pub fn g() {}\n    \
+         };\n}\n",
+    )
+}
+
+/// An attribute name a macro takes from its caller, which `m!(cfg)` makes a cfg.
+pub(in crate::checks::core_io) fn attribute_name_metavariable() -> Inspection {
+    with_file(
+        "attr-metavariable",
+        "macro_rules! m {\n    ($a:ident) => {\n        #[$a(not(clippy))]\n        pub fn g() {}\n    \
+         };\n}\nm!(cfg);\n",
+    )
+}
+
+/// The review's case: a module file that is not `.rs`, which core-io would not lex.
+pub(in crate::checks::core_io) fn path_attribute() -> Inspection {
+    with_file("path-attr", "#[path = \"x.txt\"]\nmod x;\n")
+}
+
+pub(in crate::checks::core_io) fn path_attribute_in_cfg_attr() -> Inspection {
+    with_file(
+        "path-cfg-attr",
+        "#[cfg_attr(test, path = \"y.rs\")]\nmod y;\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn include_macro() -> Inspection {
+    with_file("include-macro", "pub fn f() {}\ninclude!(\"x.rs\");\n")
+}
+
 pub(in crate::checks::core_io) fn source_not_lexed() -> Inspection {
     with_file("not-lexed", "pub fn f() {}\n\npub fn g() {\n")
 }
 
-/// `clippy::` in lint paths, and `clippy` in comments and strings, passes.
-pub(in crate::checks::core_io) fn clippy_only_in_lint_paths() -> Inspection {
+/// `test`, positive features, `include_str!`, and `clippy` in lint paths, comments and strings,
+/// pass.
+pub(in crate::checks::core_io) fn cfg_rule_passes() -> Inspection {
     with_file(
-        "clippy-lint-paths",
-        "//! Not behind cfg(clippy).\n#![expect(clippy::too_many_lines, reason = \"a table\")]\n\
-         #[expect(clippy :: needless_return, reason = \"x\")]\npub fn f() -> &'static str {\n    \
+        "cfg-rule-passes",
+        "//! Not behind cfg(clippy).\n\
+         #![forbid(clippy::disallowed_methods, clippy::disallowed_types)]\n\
+         #[cfg(test)]\nmod tests {}\n#[cfg(not(test))]\npub fn f() {}\n\
+         #[cfg_attr(feature = \"specta\", derive(Debug))]\npub struct S;\n\
+         #[cfg(all(test, any(feature = \"a\", feature = \"b\")))]\npub fn g() {}\n\
+         pub const DATA: &str = include_str!(\"data.txt\");\n\
+         #[expect(clippy :: needless_return, reason = \"x\")]\npub fn h() -> &'static str {\n    \
          return \"clippy\";\n}\n",
     )
 }

@@ -1,5 +1,6 @@
 //! The text of every core-io violation, so each message and its fix live side by side.
 
+use super::cfgs::Finding;
 use super::clippy_toml::{LIST, ROOT};
 use crate::checks::{crates_table, violation};
 use crate::violation::Violation;
@@ -338,23 +339,46 @@ pub(super) fn root_not_rust(path: &str, package: &str, line: u32, error: &syn::E
     )
 }
 
-/// The violation for the name `name` (`clippy` or `debug_assertions`) at `line` of `path`, a
-/// file of `package`, outside a lint path.
-pub(super) fn always_set_cfg(path: &str, line: u32, name: &str, package: &str) -> Violation {
-    violation(
-        path,
-        line,
-        format!(
-            "`{path}` names `{name}` outside a lint path; clippy lints {package} with \
-             `cfg(clippy)` set and in the debug profile, so code behind `not(clippy)` or \
-             `not(debug_assertions)` is never linted"
+/// The violation for `finding` at `line` of `path`, a file of `package`.
+pub(super) fn cfg_rule(path: &str, line: u32, finding: &Finding, package: &str) -> Violation {
+    let (message, fix) = match finding {
+        Finding::Predicate(form) => (
+            format!(
+                "`{path}` has a cfg with {form}; clippy lints {package} once per target kind with \
+                 every feature on, so only a cfg built from `test` and positive features holds in \
+                 one of its runs, and code behind any other can be left out of every clippy run"
+            ),
+            format!(
+                "remove {form} from this cfg; the cfgs of a crate whose row bans I/O use only \
+                 `test` and features, joined by `all`, `any` and `not`, with no feature under a \
+                 `not`"
+            ),
         ),
-        format!(
-            "remove the cfg that names `{name}` here, or rename the item if `{name}` is not a \
-             cfg; a crate whose row bans I/O builds the same code under clippy and in every \
-             profile"
+        Finding::MetavariableAttribute => (
+            format!(
+                "`{path}` writes an attribute whose name is a metavariable, so a macro of \
+                 {package} can build a cfg that core-io does not see"
+            ),
+            "write the attribute's name in the macro body itself".to_owned(),
         ),
-    )
+        Finding::PathAttribute => (
+            format!(
+                "`{path}` gives a module a `path` attribute, which can bring into {package} a \
+                 file core-io does not read"
+            ),
+            "remove the `path` attribute and move the module to its default path".to_owned(),
+        ),
+        Finding::Include => (
+            format!(
+                "`{path}` calls `include!`, which can bring into {package} code from a file \
+                 core-io does not read"
+            ),
+            "move the code into a module at its default path; use `include_str!` or \
+             `include_bytes!` for data"
+                .to_owned(),
+        ),
+    };
+    violation(path, line, message, fix)
 }
 
 /// The violation for `path`, a file of `package` that does not lex as Rust from `line`.
@@ -364,7 +388,7 @@ pub(super) fn source_not_lexed(path: &str, line: u32, package: &str) -> Violatio
         line,
         format!(
             "`{path}`, a file of {package}, does not lex as Rust from this line, so core-io \
-             cannot look for `cfg(clippy)` or `debug_assertions` in it"
+             cannot check its cfgs"
         ),
         "fix the Rust syntax that starts at this line, such as a bracket or a string left open",
     )
