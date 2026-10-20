@@ -2,7 +2,7 @@
 //! The rest of the matching of each declaration to its node runs in the tests of `dependencies`
 //! and `plugins`.
 
-use super::{Group, declared, produced, satisfies};
+use super::{Blamed, Group, produced, satisfies};
 use crate::checks::graph::{Section, Tree};
 use crate::workspace::CargoDependency;
 
@@ -14,10 +14,23 @@ fn group(lines: &[u32], known: bool) -> Group {
     }
 }
 
+/// What `Blamed::declared` says for the keys `keys` and the groups `groups`, which bring `b`
+/// in, in Cargo.toml.
+fn declared(keys: &[&str], groups: &[Group]) -> String {
+    let mut lines: Vec<u32> = groups.iter().flat_map(|g| g.lines.clone()).collect();
+    lines.sort_unstable();
+    let blamed = Blamed {
+        keys: keys.iter().map(|key| (*key).to_owned()).collect(),
+        lines,
+        optional: false,
+        groups: groups.to_vec(),
+    };
+    blamed.declared("Cargo.toml", "b")
+}
+
 #[test]
 fn declared_says_each_line_brings_the_package_in_only_when_each_node_has_one_line() {
-    let s = ["s".to_owned()];
-    let say = |groups: &[Group]| declared(&s, "Cargo.toml", "b", groups);
+    let say = |groups: &[Group]| declared(&["s"], groups);
     assert_eq!(
         say(&[group(&[7], true), group(&[10], true)]),
         "`s` is declared at lines 7 and 10 of Cargo.toml, and each declaration brings b in"
@@ -37,8 +50,7 @@ fn declared_says_each_line_brings_the_package_in_only_when_each_node_has_one_lin
 
 #[test]
 fn declared_says_lines_not_matched_to_one_node_may_bring_the_package_in() {
-    let keys = ["s1".to_owned(), "s2".to_owned()];
-    let say = |groups: &[Group]| declared(&keys, "Cargo.toml", "b", groups);
+    let say = |groups: &[Group]| declared(&["s1", "s2"], groups);
     assert_eq!(
         say(&[group(&[7, 10], false)]),
         "`s1` and `s2` are declared at lines 7 and 10 of Cargo.toml. xtask could not tell which \

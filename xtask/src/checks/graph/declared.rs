@@ -45,12 +45,10 @@ pub(crate) struct Blamed {
     pub groups: Vec<Group>,
 }
 
-impl Blamed {
-    /// What is known about the blamed lines, of the manifest at `manifest`, that bring
-    /// `package` in. It is meant for two lines or more.
-    pub(crate) fn declared(&self, manifest: &str, package: &str) -> String {
-        declared(&self.keys, manifest, package, &self.groups)
-    }
+/// `lines` as one list, such as `7 and 10`.
+fn lines_text(lines: &[u32]) -> String {
+    let lines: Vec<String> = lines.iter().map(u32::to_string).collect();
+    and_list(&lines)
 }
 
 /// The declarations among `deps`, the crate's dependencies as `cargo metadata` lists them, that
@@ -157,60 +155,63 @@ fn satisfies(req: &str, version: &str) -> Option<bool> {
     Some(req.matches(&version))
 }
 
-/// What is known about the manifest lines that declare the direct dependency keys `keys`, which
-/// bring `package` in, given in `groups`. Cargo builds the lines of a known group as one package,
-/// so a known group of several lines says only that one or more of them brings `package` in.
-/// With every group known and on one line, each line brings it in. The lines of a group that is
-/// not known may each bring it in.
-pub(crate) fn declared(keys: &[String], manifest: &str, package: &str, groups: &[Group]) -> String {
-    let mut all: Vec<u32> = groups
-        .iter()
-        .flat_map(|g| g.lines.iter().copied())
-        .collect();
-    all.sort_unstable();
-    all.dedup();
-    let at = |lines: &[u32]| {
-        let lines: Vec<String> = lines.iter().map(u32::to_string).collect();
-        and_list(&lines)
-    };
-    let quoted: Vec<String> = keys.iter().map(|key| format!("`{key}`")).collect();
-    let verb = if keys.len() == 1 { "is" } else { "are" };
-    let head = format!(
-        "{} {verb} declared at lines {} of {manifest}",
-        and_list(&quoted),
-        at(&all)
-    );
-    let one_or_more = format!("one or more of them brings {package} in");
-    let not_told = "xtask could not tell which package cargo builds";
-    match groups {
-        _ if groups.iter().all(|g| g.known && g.lines.len() == 1) => {
-            format!("{head}, and each declaration brings {package} in")
-        }
-        [only] if only.known => {
-            format!("{head}. Cargo builds these declarations as one package, and {one_or_more}")
-        }
-        [_] => format!(
-            "{head}. {not_told} for each of these declarations, so each of them may bring {package} in"
-        ),
-        _ => {
-            let sentences: Vec<String> = groups
+impl Blamed {
+    /// The keys, each in backticks, as one list such as `` `s1` and `s2` ``.
+    pub(crate) fn keys_text(&self) -> String {
+        let quoted: Vec<String> = self.keys.iter().map(|key| format!("`{key}`")).collect();
+        and_list(&quoted)
+    }
+
+    /// The lines as one list, such as `7 and 10`.
+    pub(crate) fn lines_text(&self) -> String {
+        lines_text(&self.lines)
+    }
+
+    /// What is known about the blamed lines, of the manifest at `manifest`, that bring
+    /// `package` in. It is meant for two lines or more. Cargo builds the lines of a known group
+    /// as one package, so a known group of several lines says only that one or more of them
+    /// brings `package` in. With every group known and on one line, each line brings it in. The
+    /// lines of a group that is not known may each bring it in.
+    pub(crate) fn declared(&self, manifest: &str, package: &str) -> String {
+        let groups = self.groups.as_slice();
+        let verb = if self.keys.len() == 1 { "is" } else { "are" };
+        let head = format!(
+            "{} {verb} declared at lines {} of {manifest}",
+            self.keys_text(),
+            self.lines_text()
+        );
+        let one_or_more = format!("one or more of them brings {package} in");
+        let not_told = "xtask could not tell which package cargo builds";
+        match groups {
+            _ if groups.iter().all(|g| g.known && g.lines.len() == 1) => {
+                format!("{head}, and each declaration brings {package} in")
+            }
+            [only] if only.known => {
+                format!("{head}. Cargo builds these declarations as one package, and {one_or_more}")
+            }
+            [_] => format!(
+                "{head}. {not_told} for each of these declarations, so each of them may bring {package} in"
+            ),
+            _ => {
+                let sentences: Vec<String> = groups
                 .iter()
                 .map(|group| match (group.known, group.lines.as_slice()) {
                     (true, [line]) => format!("The declaration at line {line} brings {package} in"),
                     (true, lines) => format!(
                         "Cargo builds the declarations at lines {} as one package, and {one_or_more}",
-                        at(lines)
+                        lines_text(lines)
                     ),
                     (false, [line]) => format!(
                         "{not_told} for the declaration at line {line}, so it may bring {package} in"
                     ),
                     (false, lines) => format!(
                         "{not_told} for the declarations at lines {}, so each of them may bring {package} in",
-                        at(lines)
+                        lines_text(lines)
                     ),
                 })
                 .collect();
-            format!("{head}. {}", sentences.join(". "))
+                format!("{head}. {}", sentences.join(". "))
+            }
         }
     }
 }

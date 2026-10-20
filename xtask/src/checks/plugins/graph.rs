@@ -8,7 +8,6 @@
 //! checks for every target.
 
 use super::FIXED_PLUGINS;
-use crate::checks::and_list;
 use crate::checks::graph::{self, Tree};
 use crate::checks::violation;
 use crate::violation::Violation;
@@ -65,24 +64,20 @@ fn violation_for(tree: &Tree, target: usize, dependent: usize, desktop: &Desktop
     );
     let blamed = graph::blame(tree, &responsible(tree, target), desktop.deps, desktop.text);
     match blamed.lines.as_slice() {
-        [first, _, ..] => {
-            let at: Vec<String> = blamed.lines.iter().map(u32::to_string).collect();
-            let quoted: Vec<String> = blamed.keys.iter().map(|key| format!("`{key}`")).collect();
-            violation(
-                desktop.path,
-                *first,
-                format!(
-                    "{message}. {}",
-                    blamed.declared(desktop.path, &format!("`{name}`"))
-                ),
-                format!(
-                    "remove {} from lines {} of {}: {TREE_FIX}",
-                    and_list(&quoted),
-                    and_list(&at),
-                    desktop.path
-                ),
-            )
-        }
+        [first, _, ..] => violation(
+            desktop.path,
+            *first,
+            format!(
+                "{message}. {}",
+                blamed.declared(desktop.path, &format!("`{name}`"))
+            ),
+            format!(
+                "remove {} from lines {} of {}: {TREE_FIX}",
+                blamed.keys_text(),
+                blamed.lines_text(),
+                desktop.path
+            ),
+        ),
         lines => violation(
             desktop.path,
             lines.first().copied().unwrap_or(1),

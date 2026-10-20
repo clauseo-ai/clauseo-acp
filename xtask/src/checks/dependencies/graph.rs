@@ -96,10 +96,11 @@ fn violation_for(krate: &Crate<'_>, tree: &Tree, blame: &Blame<'_>) -> Violation
     let direct = names.first().copied().unwrap_or(package);
     let nodes: Vec<usize> = blame.nodes.iter().copied().collect();
     let blamed = graph::blame(tree, &nodes, krate.deps, krate.text);
-    let mut keys = blamed.keys.clone();
-    if keys.is_empty() {
-        keys.push(direct.to_owned());
-    }
+    let quoted = if blamed.keys.is_empty() {
+        format!("`{direct}`")
+    } else {
+        blamed.keys_text()
+    };
     let lines = &blamed.lines;
     let through = match names.split_last() {
         Some((_, between)) if !between.is_empty() => {
@@ -108,16 +109,13 @@ fn violation_for(krate: &Crate<'_>, tree: &Tree, blame: &Blame<'_>) -> Violation
         }
         _ => String::new(),
     };
-    let quoted: Vec<String> = keys.iter().map(|key| format!("`{key}`")).collect();
-    let quoted = and_list(&quoted);
     let features = if blamed.optional {
         " and every `[features]` item that enables it"
     } else {
         ""
     };
     let (message, fix) = if let [_, _, ..] = lines.as_slice() {
-        let at: Vec<String> = lines.iter().map(u32::to_string).collect();
-        let at = and_list(&at);
+        let at = blamed.lines_text();
         (
             format!(
                 "{} depends on {package}{through}, which ARCHITECTURE.md forbids. {}",
