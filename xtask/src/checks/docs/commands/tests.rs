@@ -323,8 +323,24 @@ fn a_line_shlex_cannot_split_is_split_on_whitespace() {
     );
     assert_reads(
         "cargo xtask check --quick \"open",
-        &["cargo xtask check --quick \"open"],
+        &["cargo xtask check --quick open"],
     );
+}
+
+#[test]
+fn the_quotes_on_a_split_word_are_trimmed_so_its_command_parses() {
+    for line in [
+        "cargo xtask buildtime \"rust\" --runs 3 | grep \"won't",
+        "cargo xtask buildtime rust --runs \"3\" && echo \"it's done",
+    ] {
+        assert_reads(line, &["cargo xtask buildtime rust --runs 3"]);
+        assert!(
+            commands_in(line)
+                .iter()
+                .all(|command| problem("a.md", 1, command).is_none()),
+            "{line}"
+        );
+    }
 }
 
 #[test]

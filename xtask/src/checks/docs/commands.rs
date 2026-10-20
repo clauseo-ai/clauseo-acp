@@ -122,15 +122,19 @@ fn after_prompt(text: &str) -> Option<&str> {
 /// The xtask commands in `line`, split into words as a shell splits them. A trailing `\` is
 /// dropped first. The next line is not read with this one, so the last command on a line that
 /// ends in `\` is treated as if a placeholder followed it. A line `shlex` cannot split is split
-/// on whitespace instead, so an odd quote does not hide the commands on it.
+/// on whitespace instead, with the `"` and `'` at each word's ends trimmed, so an odd quote does
+/// not hide the commands on it.
 fn commands_in(line: &str) -> Vec<Command> {
     let line = line.trim_end();
     let (line, continued) = match line.strip_suffix('\\') {
         Some(rest) => (rest, true),
         None => (line, false),
     };
-    let words =
-        shlex::split(line).unwrap_or_else(|| line.split_whitespace().map(str::to_owned).collect());
+    let words = shlex::split(line).unwrap_or_else(|| {
+        line.split_whitespace()
+            .map(|word| word.trim_matches(['"', '\'']).to_owned())
+            .collect()
+    });
     let mut commands: Vec<Command> = (0..words.len())
         .filter_map(|at| command_at(&words, at))
         .collect();
