@@ -117,6 +117,10 @@ fn pnpm_file() -> PathBuf {
 /// names are tried in the order given. So a `pnpm.cmd` in an earlier directory beats a `pnpm.exe`
 /// in a later one, the same as the developer's shell. The result is `dir.join(name)`. When no
 /// directory holds a match, it is the bare `pnpm`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one program lookup on PATH; clippy.toml bans split_paths everywhere else"
+)]
 fn resolve_pnpm(path: &OsStr, names: &[&str], exists: impl Fn(&Path) -> bool) -> PathBuf {
     for dir in std::env::split_paths(path) {
         for name in names {

@@ -5,6 +5,7 @@
 use super::{Binary, Machine, Packing, Runner};
 use crate::output::Printer;
 use crate::process::{Cmd, Ended, Output, Program};
+use crate::write;
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 use std::fs;
@@ -226,7 +227,7 @@ fn download_into<W: Write>(
             false
         }
     };
-    match fs::remove_dir_all(&staging) {
+    match write::remove_staging_dir(&staging) {
         Err(error) if error.kind() != io::ErrorKind::NotFound => {
             out.failure(
                 &format!("could not remove {}: {error}", staging.display()),
@@ -310,14 +311,12 @@ fn fetch_check_place(
         ));
     }
     let destination = bin.join(name);
-    make_executable(&unpacked)
-        .and_then(|()| fs::rename(&unpacked, &destination))
-        .map_err(|error| {
-            (
-                format!("could not move {name} into {}: {error}", bin.display()),
-                retry_fix(bin),
-            )
-        })
+    write::install_executable(&unpacked, &destination).map_err(|error| {
+        (
+            format!("could not move {name} into {}: {error}", bin.display()),
+            retry_fix(bin),
+        )
+    })
 }
 
 /// The curl command that downloads `url` to `asset`. A failed attempt (a reset, a 502) is tried
@@ -406,16 +405,6 @@ pub(crate) fn sha256_of(file: &Path) -> io::Result<String> {
         write!(hex, "{byte:02x}").map_err(io::Error::other)?;
     }
     Ok(hex)
-}
-
-/// On Unix makes `file` executable.
-fn make_executable(file: &Path) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(file, fs::Permissions::from_mode(0o755))?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

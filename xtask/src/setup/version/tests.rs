@@ -1,6 +1,7 @@
 //! Tests for `version.rs`: the version check and the text of each failure.
 
 use super::*;
+use crate::scratch::Scratch;
 use crate::setup::tests::{binary, linux};
 use std::path::PathBuf;
 
@@ -157,8 +158,8 @@ fn a_bin_with_a_trailing_slash_on_path_is_on_path() {
 fn a_bin_reached_through_a_symlink_is_on_path() {
     let dir = crate::scratch::Scratch::new("setup-version-symlink");
     let real = dir.join("real-cargo-home");
-    std::fs::create_dir_all(real.join("bin")).unwrap();
-    std::os::unix::fs::symlink(&real, dir.join("linked-cargo-home")).unwrap();
+    Scratch::create_dir_all(real.join("bin")).unwrap();
+    Scratch::symlink(&real, dir.join("linked-cargo-home")).unwrap();
     let path = std::env::join_paths([real.join("bin")]).unwrap();
     assert!(on_path(&dir.join("linked-cargo-home").join("bin"), &path));
     let linked = std::env::join_paths([dir.join("linked-cargo-home").join("bin")]).unwrap();

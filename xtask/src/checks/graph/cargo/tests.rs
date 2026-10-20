@@ -1,6 +1,7 @@
 //! Tests of the fix for a failed cargo run.
 
 use super::*;
+use crate::scratch::Scratch;
 
 /// The reminder cargo adds to every resolution error under `--offline`.
 const OFFLINE_NOTE: &str = "note: offline mode (via `--offline`) can sometimes cause surprising \
@@ -19,7 +20,7 @@ const LOCK: &str = "version = 4\n\n\
 /// A workspace root whose Cargo.lock holds `lock`.
 fn root_with_lock(name: &str, lock: &str) -> crate::scratch::Scratch {
     let dir = crate::scratch::Scratch::new(name);
-    std::fs::write(dir.join("Cargo.lock"), lock).expect("write Cargo.lock");
+    Scratch::write(dir.join("Cargo.lock"), lock).expect("write Cargo.lock");
     dir
 }
 

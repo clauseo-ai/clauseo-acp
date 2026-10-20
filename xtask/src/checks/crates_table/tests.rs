@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::scratch::Scratch;
-use std::fs;
 
 const HEADER: &str =
     "| Crate | Owns | May depend on | Never depends on | Status |\n|---|---|---|---|---|\n";
@@ -212,7 +211,8 @@ fn load_reads_the_file_and_a_missing_file_has_no_location() {
     let dir = Scratch::new("crates-table-load");
     assert_eq!(load(&dir), Err(LoadError::Missing));
     assert_eq!(LoadError::Missing.into_violations(), Vec::new());
-    fs::write(dir.join(FILE), doc("| `xtask` | things | | | exists |\n")).expect("write the doc");
+    Scratch::write(dir.join(FILE), doc("| `xtask` | things | | | exists |\n"))
+        .expect("write the doc");
     assert_eq!(load(&dir).map(|table| table.rows.len()), Ok(1));
 }
 

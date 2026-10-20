@@ -1,7 +1,8 @@
 //! Timing one probe on the marker file: the edits, the cargo runs, and putting the file back.
 //!
 //! Before the first edit, the original is copied to `target/xtask/buildtime/<repo path>`, and a
-//! copy is never replaced. A guard (`probe/guard.rs`) puts the original back and deletes the copy
+//! copy is never replaced. The tracked-file guard (`Guard` in `xtask/src/write/guard.rs`) puts the
+//! original back and deletes the copy
 //! when the probe ends, and on a panic, but never over an edit made during the run. A killed run
 //! leaves its copy, and the next `buildtime rust` run puts it back only where the file differs by
 //! the marker's number alone (`restore_leftovers`).
@@ -10,8 +11,6 @@
 //! `ui/app/src/App.tsx` there, under the rules written out in `ui/app/scripts/buildtime-lib.mjs`.
 //! `restore_leftovers` never reads, restores or deletes anything under it.
 
-mod guard;
-
 use super::marker::{self, Leftover, Marker, bump_marker, leftover};
 use super::profile::warm_up_incremental;
 use super::verdict::{Failure, Outcome, budget_limit};
@@ -19,10 +18,19 @@ use super::{INCREMENTAL_FIX, Probe};
 use crate::budgets::{Budget, Unit};
 use crate::clock::timed;
 use crate::process::{Captured, Cmd, Program};
-use guard::{BACKUP_DIR, Guard, conflict, copy_name, prune};
+use crate::write::{self, Backups, Guard};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+
+/// Where the probes' copies of the marker files wait, and what the guard's messages call a run.
+pub(crate) const BACKUPS: Backups = Backups {
+    dir: "target/xtask/buildtime",
+    run: "buildtime run",
+};
+
+/// Where the copies of the original files wait, under the repo root.
+pub(crate) const BACKUP_DIR: &str = BACKUPS.dir;
 
 /// The timed runs of one probe, and the warning that its build was not incremental, if it was not.
 #[derive(Debug, Clone, PartialEq)]
@@ -79,9 +87,9 @@ pub(crate) fn measure(
     ci: bool,
     runner: &mut dyn FnMut(&Cmd) -> io::Result<Captured>,
 ) -> Result<Samples, Failure> {
-    let mut guard = Guard::save(root, marker)?;
+    let mut guard = Guard::save(root, BACKUPS, &marker.path, &marker.text)?;
     let edited = edit_and_run(&mut guard, marker, probe, runs, ci, runner);
-    let restored = guard.restore();
+    let restored = guard.restore().map_err(Failure::from);
     match (edited, restored) {
         (Ok(samples), Ok(())) => Ok(samples),
         (Ok(_), Err(restore)) => Err(restore),
@@ -207,9 +215,9 @@ pub(crate) fn restore_leftovers(root: &Path) -> Result<Vec<String>, Failure> {
             continue;
         }
         if Path::new(&rel).extension().is_some_and(|ext| ext == "tmp") {
-            fs::remove_file(&file).map_err(|error| {
+            write::discard_interrupted_save(&file).map_err(|error| {
                 Failure::new(
-                    format!("could not delete {}: {error}", copy_name(&rel)),
+                    format!("could not delete {}: {error}", BACKUPS.copy_name(&rel)),
                     format!("delete {} by hand", file.display()),
                 )
             })?;
@@ -217,7 +225,7 @@ pub(crate) fn restore_leftovers(root: &Path) -> Result<Vec<String>, Failure> {
         }
         let bytes = fs::read(&file).map_err(|error| {
             Failure::new(
-                format!("could not read {}: {error}", copy_name(&rel)),
+                format!("could not read {}: {error}", BACKUPS.copy_name(&rel)),
                 format!("look at {} by hand, then run again", file.display()),
             )
         })?;
@@ -229,13 +237,18 @@ pub(crate) fn restore_leftovers(root: &Path) -> Result<Vec<String>, Failure> {
             Leftover::NotACopy => {}
             Leftover::Restore => plans.push((file, rel, bytes)),
             Leftover::Missing => {
-                conflicts.push(conflict(
-                    &rel,
-                    "is missing after an interrupted buildtime run",
-                ));
+                conflicts.push(
+                    BACKUPS
+                        .conflict(&rel, "is missing after an interrupted buildtime run")
+                        .into(),
+                );
             }
             Leftover::Conflict => {
-                conflicts.push(conflict(&rel, "changed after an interrupted buildtime run"));
+                conflicts.push(
+                    BACKUPS
+                        .conflict(&rel, "changed after an interrupted buildtime run")
+                        .into(),
+                );
             }
         }
     }
@@ -244,14 +257,12 @@ pub(crate) fn restore_leftovers(root: &Path) -> Result<Vec<String>, Failure> {
     }
     let mut lines = Vec::new();
     for (copy, rel, bytes) in plans {
-        let restored = fs::write(root.join(&rel), &bytes).and_then(|()| fs::remove_file(&copy));
-        if let Err(error) = restored {
+        if let Err(error) = BACKUPS.restore_leftover(root, &rel, &copy, &bytes) {
             return Err(Failure::new(
                 format!("could not restore {rel} from its copy: {error}"),
                 format!("copy {} over {rel} by hand", copy.display()),
             ));
         }
-        prune(&base, &copy);
         lines.push(format!("restored {rel} from an interrupted buildtime run"));
     }
     Ok(lines)

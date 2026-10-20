@@ -6,7 +6,6 @@ use crate::checks::Inspection;
 use crate::checks::docs::inspect;
 use crate::scratch::Scratch;
 use std::fmt::Write;
-use std::fs;
 use std::path::Path;
 
 mod commands;
@@ -58,9 +57,9 @@ fn build(case: &str, files: Vec<(&str, String)>, omit: Option<&str>, local: &[&s
 /// Writes `text` to `dir/name`, making its folder first.
 fn write(dir: &Path, name: &str, text: &str) {
     if let Some(parent) = Path::new(name).parent() {
-        fs::create_dir_all(dir.join(parent)).expect("create the folder");
+        Scratch::create_dir_all(dir.join(parent)).expect("create the folder");
     }
-    fs::write(dir.join(name), text).expect("write a doc");
+    Scratch::write(dir.join(name), text).expect("write a doc");
 }
 
 /// `build` with every required file written.

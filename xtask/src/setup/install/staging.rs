@@ -4,7 +4,8 @@
 use super::{Failure, retry_fix};
 use crate::output::Printer;
 use crate::setup::Machine;
-use std::fs::{self, File, TryLockError};
+use crate::write;
+use std::fs::{File, TryLockError};
 use std::io::{self, Write};
 use std::path::Path;
 
@@ -13,11 +14,7 @@ pub(super) const STAGING_PREFIX: &str = ".xtask-setup-";
 
 /// Makes `bin` if needed, and `staging` in it, empty.
 pub(super) fn fresh_dir(bin: &Path, staging: &Path) -> Result<(), Failure> {
-    let made = fs::create_dir_all(bin).and_then(|()| match fs::remove_dir_all(staging) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-        _ => fs::create_dir(staging),
-    });
-    made.map_err(|error| {
+    write::reset_staging_dir(bin, staging).map_err(|error| {
         (
             format!("could not make {}: {error}", staging.display()),
             retry_fix(bin),
@@ -57,7 +54,7 @@ pub(crate) fn lock_bin_and_sweep<W: Write>(
             return (None, true);
         }
     };
-    let swept = remove_staging_leftovers(bin);
+    let swept = write::remove_staging_leftovers(bin, STAGING_PREFIX);
     if let Err(error) = &swept {
         out.failure(
             &format!(
@@ -77,9 +74,7 @@ pub(crate) fn lock_bin_and_sweep<W: Write>(
 /// run holds it. The lock file is opened for reading, so one the user cannot write still locks. It
 /// is created only when it is missing.
 fn lock_run<W: Write>(out: &mut Printer<W>, bin: &Path) -> io::Result<File> {
-    fs::create_dir_all(bin)?;
-    let path = bin.join(RUN_LOCK);
-    let lock = File::open(&path).or_else(|_| File::create(&path))?;
+    let lock = write::open_run_lock(bin, RUN_LOCK)?;
     match lock.try_lock() {
         Ok(()) => {}
         Err(TryLockError::WouldBlock) => {
@@ -92,26 +87,4 @@ fn lock_run<W: Write>(out: &mut Printer<W>, bin: &Path) -> io::Result<File> {
         Err(TryLockError::Error(error)) => return Err(error),
     }
     Ok(lock)
-}
-
-/// Removes every entry in `bin` whose name starts with `STAGING_PREFIX`. A symlink is removed,
-/// never followed.
-fn remove_staging_leftovers(bin: &Path) -> io::Result<()> {
-    for entry in fs::read_dir(bin)? {
-        let entry = entry?;
-        if !entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with(STAGING_PREFIX)
-        {
-            continue;
-        }
-        let path = entry.path();
-        if fs::symlink_metadata(&path)?.is_dir() {
-            fs::remove_dir_all(&path)?;
-        } else {
-            fs::remove_file(&path)?;
-        }
-    }
-    Ok(())
 }
