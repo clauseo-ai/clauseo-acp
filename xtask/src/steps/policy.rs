@@ -24,7 +24,8 @@ fn deny_fix(cmd: &Cmd, output: Option<&str>) -> String {
     setup_or(
         output,
         format!(
-            "run `{cmd}`, then replace or drop the dependency it names; never loosen deny.toml to pass"
+            "run `{cmd}`; when it names a dependency, replace or drop it and never loosen deny.toml \
+             to pass, and when it prints a cargo error instead, fix that error first"
         ),
     )
 }
@@ -42,7 +43,9 @@ pub(super) fn shear_step() -> ToolStep {
 fn shear_fix(_cmd: &Cmd, output: Option<&str>) -> String {
     setup_or(
         output,
-        "remove the unused dependency from its Cargo.toml (`cargo shear --fix` does it)".into(),
+        "when cargo shear names an unused dependency, remove it from its Cargo.toml (`cargo shear \
+         --fix` does it), and when it prints a cargo error instead, fix that error first"
+            .into(),
     )
 }
 
