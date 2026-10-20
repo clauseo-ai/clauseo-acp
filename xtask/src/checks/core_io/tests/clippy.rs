@@ -21,6 +21,7 @@
 mod forms;
 
 use super::clippy_toml;
+use crate::checks::core_io::roots::forbid_line;
 use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;
 use crate::steps::plan::CLIPPY_FLAGS;
@@ -37,9 +38,6 @@ const LINTS: [&str; 2] = ["clippy::disallowed_methods", "clippy::disallowed_type
 
 /// The error an `allow` or `expect` of a forbidden lint gets, which counts as a hit too.
 const FORBID_ERROR: &str = "E0453";
-
-/// The line every scratch crate's root starts with, as core-io asks of a held crate.
-const FORBID_LINE: &str = "#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]";
 
 /// What one clippy run reported.
 struct Run {
@@ -196,7 +194,7 @@ fn wrong_forms(forms: &[Form], run: &Run) -> Vec<String> {
 /// Writes a scratch crate into `dir`: a manifest with no dependency, its own workspace, a feature
 /// `io` that is off by default and the two lints set to `allow`, `clippy.toml` holding
 /// `config`, the repo's `rust-toolchain.toml`, so the pinned clippy runs, and `src/lib.rs`,
-/// which starts with `FORBID_LINE` and declares one module per form, each in `src/<name>.rs`.
+/// which starts with `forbid_line()` and declares one module per form, each in `src/<name>.rs`.
 fn write_crate(dir: &Path, repo: &Path, config: &str, forms: &[Form]) {
     fs::create_dir_all(dir.join("src")).expect("create src/");
     fs::write(
@@ -212,7 +210,7 @@ fn write_crate(dir: &Path, repo: &Path, config: &str, forms: &[Form]) {
         dir.join("rust-toolchain.toml"),
     )
     .expect("copy rust-toolchain.toml");
-    let mut lib = vec![FORBID_LINE.to_owned(), "#![allow(unused)]".to_owned()];
+    let mut lib = vec![forbid_line(), "#![allow(unused)]".to_owned()];
     for form in forms {
         lib.push(format!("pub mod {};", form.name));
         fs::write(

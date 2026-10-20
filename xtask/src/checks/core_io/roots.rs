@@ -1,5 +1,5 @@
 //! A held crate's target roots and build script. Every target root sits under the crate's folder
-//! and carries `FORBID_LINE` among its inner attributes, and the crate has no build script.
+//! and carries `forbid_line()` among its inner attributes, and the crate has no build script.
 
 use super::clippy_toml::line_number;
 use super::report;
@@ -14,6 +14,12 @@ use toml::de::DeTable;
 
 /// The lints the forbid attribute names, in the order it names them.
 const FORBIDDEN: [&str; 2] = ["clippy::disallowed_methods", "clippy::disallowed_types"];
+
+/// The attribute every target root of a held crate carries, built from `FORBIDDEN`. The check,
+/// its fix and the clippy harness all use this one text.
+pub(super) fn forbid_line() -> String {
+    format!("#![forbid({})]", FORBIDDEN.join(", "))
+}
 
 /// The kind of a build script target, which `build_script` covers.
 const BUILD_SCRIPT_KIND: &str = "custom-build";

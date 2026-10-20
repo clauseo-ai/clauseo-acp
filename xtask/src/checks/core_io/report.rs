@@ -2,6 +2,7 @@
 
 use super::cfgs::Finding;
 use super::clippy_toml::{LIST, ROOT};
+use super::roots::forbid_line;
 use crate::checks::{crates_table, violation};
 use crate::violation::Violation;
 
@@ -280,24 +281,21 @@ pub(super) fn legacy_cargo_config(legacy: &str, config: &str) -> Violation {
     )
 }
 
-/// The attribute every target root of a held crate carries, as the fix prints it.
-pub(super) const FORBID_LINE: &str =
-    "#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]";
-
 /// The violation for the target root `path` of `package`, a target of kind `kinds`, whose
-/// inner attributes lack `FORBID_LINE`.
+/// inner attributes lack `forbid_line()`.
 pub(super) fn missing_forbid(path: &str, package: &str, kinds: &str) -> Violation {
+    let line = forbid_line();
     violation(
         path,
         1,
         format!(
-            "`{path}`, the root of {package}'s {kinds} target, does not carry `{FORBID_LINE}` \
+            "`{path}`, the root of {package}'s {kinds} target, does not carry `{line}` \
              outside any `cfg_attr`, so an `allow` or `expect` in the target can turn off the \
              bans of {ROOT} and {LIST}"
         ),
         format!(
             "add this line to the inner attributes at the top of `{path}`, not under \
-             `cfg_attr`\n{FORBID_LINE}"
+             `cfg_attr`\n{line}"
         ),
     )
 }
@@ -325,16 +323,17 @@ pub(super) fn root_outside(
 /// The violation for the target root `path` of `package`, which syn cannot parse (the error
 /// `error` at `line`).
 pub(super) fn root_not_rust(path: &str, package: &str, line: u32, error: &syn::Error) -> Violation {
+    let forbid = forbid_line();
     violation(
         path,
         line,
         format!(
             "`{path}`, a target root of {package}, does not parse as Rust ({error}), so core-io \
-             cannot find `{FORBID_LINE}` in it"
+             cannot find `{forbid}` in it"
         ),
         format!(
             "fix the syntax error, and make sure this line is among the inner attributes at the \
-             top of `{path}`\n{FORBID_LINE}"
+             top of `{path}`\n{forbid}"
         ),
     )
 }
