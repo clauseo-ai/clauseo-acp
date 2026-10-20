@@ -159,6 +159,63 @@ crate::checks::planted::cases! {
          fix: put the setting in tauri.conf.json: a platform config overrides the checked settings \
          on one OS",
     ]), inspects 3 => super::cases::platform_config_toml,
+    /// A platform config `tauri.android.conf.json` fails the same way.
+    platform_config_android: FailsWith(&[
+        "crates/desktop/tauri.android.conf.json:1: platform config \
+         `crates/desktop/tauri.android.conf.json` overrides tauri.conf.json\n    \
+         fix: put the setting in tauri.conf.json: a platform config overrides the checked settings \
+         on one OS",
+    ]), inspects 3 => super::cases::platform_config_android,
+    /// A platform config `Tauri.ios.toml` fails the same way.
+    platform_config_ios_toml: FailsWith(&[
+        "crates/desktop/Tauri.ios.toml:1: platform config \
+         `crates/desktop/Tauri.ios.toml` overrides tauri.conf.json\n    \
+         fix: put the setting in tauri.conf.json: a platform config overrides the checked settings \
+         on one OS",
+    ]), inspects 3 => super::cases::platform_config_ios_toml,
+    /// A platform config named in capitals fails under its own name, on any disk.
+    platform_config_other_case: FailsWith(&[
+        "crates/desktop/TAURI.MACOS.CONF.JSON:1: platform config \
+         `crates/desktop/TAURI.MACOS.CONF.JSON` overrides tauri.conf.json\n    \
+         fix: put the setting in tauri.conf.json: a platform config overrides the checked settings \
+         on one OS",
+    ]), inspects 3 => super::cases::platform_config_other_case,
+    /// `tauri.conf.json5` alone, which Tauri would read, fails as a missing `tauri.conf.json`.
+    main_config_json5_only: FailsWith(&[
+        "crates/desktop/tauri.conf.json:1: `crates/desktop/tauri.conf.json` is missing\n    \
+         fix: restore it: Tauri reads the window's security settings from it, and this check \
+         guards them",
+    ]), inspects 1 => super::cases::main_config_json5_only,
+    /// `Tauri.toml` alone, which Tauri would read, fails as a missing `tauri.conf.json`.
+    main_config_toml_only: FailsWith(&[
+        "crates/desktop/tauri.conf.json:1: `crates/desktop/tauri.conf.json` is missing\n    \
+         fix: restore it: Tauri reads the window's security settings from it, and this check \
+         guards them",
+    ]), inspects 1 => super::cases::main_config_toml_only,
+    /// `withGlobalTauri` false then true: the last wins, so it fails at the first key's line.
+    duplicate_key_unsafe_last: FailsWith(&[
+        "crates/desktop/tauri.conf.json:7: app.withGlobalTauri must be false\n    \
+         fix: set `\"withGlobalTauri\": false` under `app`: the global object hands every script \
+         in the page the whole IPC API",
+    ]), inspects 2 => super::cases::duplicate_key_unsafe_last,
+    /// A `config_path(...)` call in `build.rs` fails at its line.
+    build_rs_config_path: FailsWith(&[
+        "crates/desktop/build.rs:3: build.rs calls `config_path`\n    \
+         fix: remove it and put the setting in tauri.conf.json: Tauri reads or merges a config \
+         passed in code past this check",
+    ]), inspects 2 => super::cases::build_rs_config_path,
+    /// `env::set_var(\"TAURI_CONFIG\", ...)` in `build.rs` fails at its line.
+    build_rs_sets_env_config: FailsWith(&[
+        "crates/desktop/build.rs:2: build.rs names `TAURI_CONFIG`\n    \
+         fix: remove it and put the setting in tauri.conf.json: Tauri reads or merges a config \
+         passed in code past this check",
+    ]), inspects 2 => super::cases::build_rs_sets_env_config,
+    /// `cargo:rustc-env=TAURI_CONFIG=...` printed by `build.rs` fails at its line.
+    build_rs_rustc_env_config: FailsWith(&[
+        "crates/desktop/build.rs:2: build.rs names `TAURI_CONFIG`\n    \
+         fix: remove it and put the setting in tauri.conf.json: Tauri reads or merges a config \
+         passed in code past this check",
+    ]), inspects 2 => super::cases::build_rs_rustc_env_config,
     /// A missing `build.rs` fails as having no manifest, at line 1.
     build_rs_missing: FailsWith(&[
         "crates/desktop/build.rs:1: build.rs declares no AppManifest\n    \

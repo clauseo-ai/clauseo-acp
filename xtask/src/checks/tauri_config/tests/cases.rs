@@ -372,3 +372,91 @@ pub(super) fn desktop_crate_missing() -> Repo {
 pub(super) fn both_config_files_missing() -> Repo {
     run_files("both-config-files-missing", &[])
 }
+pub(super) fn platform_config_android() -> Repo {
+    platform_case(
+        "platform-config-android",
+        "tauri.android.conf.json",
+        "{\"app\":{\"withGlobalTauri\":true}}",
+    )
+}
+
+pub(super) fn platform_config_ios_toml() -> Repo {
+    platform_case(
+        "platform-config-ios-toml",
+        "Tauri.ios.toml",
+        "[app]\nwithGlobalTauri = true\n",
+    )
+}
+
+/// A platform config named in capitals: a macOS or Windows disk hands it to Tauri all the same.
+pub(super) fn platform_config_other_case() -> Repo {
+    platform_case(
+        "platform-config-other-case",
+        "TAURI.MACOS.CONF.JSON",
+        "{\"app\":{\"withGlobalTauri\":true}}",
+    )
+}
+
+/// `tauri.conf.json5` as the only main config: Tauri reads it when `tauri.conf.json` is missing.
+pub(super) fn main_config_json5_only() -> Repo {
+    run_files(
+        "main-config-json5-only",
+        &[
+            ("tauri.conf.json5", b"{ app: { withGlobalTauri: true } }"),
+            (BUILD_RS, BUILD.as_bytes()),
+        ],
+    )
+}
+
+/// `Tauri.toml` as the only main config: Tauri reads it when `tauri.conf.json` is missing.
+pub(super) fn main_config_toml_only() -> Repo {
+    run_files(
+        "main-config-toml-only",
+        &[
+            ("Tauri.toml", b"[app]\nwithGlobalTauri = true\n"),
+            (BUILD_RS, BUILD.as_bytes()),
+        ],
+    )
+}
+
+/// `withGlobalTauri` written twice, the safe value first: the last one wins, as in Tauri.
+pub(super) fn duplicate_key_unsafe_last() -> Repo {
+    conf_case(
+        "duplicate-key-unsafe-last",
+        "\"withGlobalTauri\": false,",
+        "\"withGlobalTauri\": false,\n    \"withGlobalTauri\": true,",
+    )
+}
+
+/// `Attributes::config_path` points tauri-build at another config, on line 3.
+pub(super) fn build_rs_config_path() -> Repo {
+    build_case(
+        "build-rs-config-path",
+        &BUILD.replace(
+            "tauri_build::Attributes::new()",
+            "tauri_build::Attributes::new().config_path(\"other.conf.json\")",
+        ),
+    )
+}
+
+/// `build.rs` sets `TAURI_CONFIG`, which tauri-build merges over `tauri.conf.json`, on line 2.
+pub(super) fn build_rs_sets_env_config() -> Repo {
+    build_case(
+        "build-rs-sets-env-config",
+        &BUILD.replace(
+            "fn main() {\n",
+            "fn main() {\n    unsafe { std::env::set_var(\"TAURI_CONFIG\", \"{}\") };\n",
+        ),
+    )
+}
+
+/// `build.rs` hands `TAURI_CONFIG` to rustc, so `generate_context!` merges it, on line 2.
+pub(super) fn build_rs_rustc_env_config() -> Repo {
+    build_case(
+        "build-rs-rustc-env-config",
+        &BUILD.replace(
+            "fn main() {\n",
+            "fn main() {\n    println!(\"cargo:rustc-env=TAURI_CONFIG={{}}\");\n",
+        ),
+    )
+}

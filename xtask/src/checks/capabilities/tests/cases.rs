@@ -247,3 +247,100 @@ pub(super) fn not_utf8_capability() -> Repo {
     Scratch::write(dir.join(PATH), b"{\"identifier\": \"main\"}\xff").expect("write main.json");
     Repo::desktop(dir)
 }
+
+/// A TOML basic string that spells `core:default` with a `\u` escape, under `permissions` on
+/// line 3.
+pub(super) fn escaped_toml_value() -> Repo {
+    run_on(
+        "escaped-toml-value",
+        &[(
+            "crates/desktop/capabilities/main.toml",
+            "identifier = \"main\"\nwindows = [\"main\"]\npermissions = [\"core:\\u0064efault\"]\n",
+        )],
+    )
+}
+
+/// A `.json5` file that is plain JSON and spells `core:default` with a `\u` escape.
+pub(super) fn escaped_json5_value() -> Repo {
+    run_on(
+        "escaped-json5-value",
+        &[(
+            "crates/desktop/capabilities/main.json5",
+            "{\n  \"identifier\": \"main\",\n  \"permissions\": [\"core:\\u0064efault\"]\n}",
+        )],
+    )
+}
+
+/// A TOML literal string `'core:default'` on line 2.
+pub(super) fn toml_literal_string() -> Repo {
+    run_on(
+        "toml-literal-string",
+        &[(
+            "crates/desktop/capabilities/main.toml",
+            "identifier = 'main'\npermissions = ['core:default']\n",
+        )],
+    )
+}
+
+/// A `[remote]` table with its URLs, on line 3.
+pub(super) fn toml_remote_table() -> Repo {
+    run_on(
+        "toml-remote-table",
+        &[(
+            "crates/desktop/capabilities/main.toml",
+            "identifier = \"main\"\n\n[remote]\nurls = [\"https://*.example.com\"]\n",
+        )],
+    )
+}
+
+/// A scoped permission object whose `identifier` is `fs:allow-read`, on line 5.
+pub(super) fn prefix_in_identifier_object() -> Repo {
+    run_on(
+        "prefix-in-identifier-object",
+        &[(
+            PATH,
+            "{\n  \"identifier\": \"main\",\n  \"permissions\": [\n    {\n      \"identifier\": \"fs:allow-read\",\n      \"allow\": [{ \"path\": \"$HOME/**\" }]\n    }\n  ]\n}",
+        )],
+    )
+}
+
+/// A file holding a list of capabilities under `capabilities`, one granting `opener:default` on
+/// line 6.
+pub(super) fn capability_list_file() -> Repo {
+    run_on(
+        "capability-list-file",
+        &[(
+            PATH,
+            "{\n  \"capabilities\": [\n    { \"identifier\": \"a\", \"permissions\": [] },\n    {\n      \"identifier\": \"b\",\n      \"permissions\": [\"opener:default\"]\n    }\n  ]\n}",
+        )],
+    )
+}
+
+/// A hidden `.extra.json` beside `main.json`: Tauri's `capabilities/**/*` glob matches it.
+pub(super) fn hidden_file() -> Repo {
+    run_on(
+        "hidden-file",
+        &[
+            (PATH, CLEAN),
+            (
+                "crates/desktop/capabilities/.extra.json",
+                "{\n  \"permissions\": [\"http:default\"]\n}",
+            ),
+        ],
+    )
+}
+
+/// An inline capability in `tauri.conf.json` that spells `core:default` with a `\u` escape: it
+/// points at the `capabilities` key, line 4.
+pub(super) fn inline_escaped() -> Repo {
+    run_on(
+        "inline-escaped",
+        &[
+            (PATH, CLEAN),
+            (
+                "crates/desktop/tauri.conf.json",
+                "{\n  \"app\": {\n    \"security\": {\n      \"capabilities\": [\n        { \"identifier\": \"inline\", \"permissions\": [\"core:\\u0064efault\"] }\n      ]\n    }\n  }\n}",
+            ),
+        ],
+    )
+}
