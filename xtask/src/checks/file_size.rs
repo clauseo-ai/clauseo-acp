@@ -121,7 +121,7 @@ fn size_violation(file: &str, lines: usize, exempt: bool) -> Option<Violation> {
             file,
             1,
             format!("this file has {lines} lines; the limit is {LINE_LIMIT}"),
-            format!("split it into smaller modules, or list it in {EXCEPTIONS} with a reason"),
+            Fix::SplitOrExempt,
         )
     })
 }
@@ -139,7 +139,7 @@ fn comment_violations(file: &str, text: &str) -> Vec<Violation> {
                     "this comment reaches column {}; the limit is {COLUMN_LIMIT}",
                     reach.column
                 ),
-                format!("wrap the comment at {COLUMN_LIMIT} columns"),
+                Fix::WrapComment,
             )
         })
         .collect()
@@ -151,12 +151,12 @@ fn stale_exceptions(
     sources: &[String],
     sizes: &[(String, usize)],
 ) -> Vec<Violation> {
-    let fix = format!("delete this line from {EXCEPTIONS}");
     exceptions
         .iter()
         .filter_map(|entry| {
-            stale_message(entry, sources, sizes)
-                .map(|message| checks::violation(EXCEPTIONS, entry.line, message, fix.as_str()))
+            stale_message(entry, sources, sizes).map(|message| {
+                checks::violation(EXCEPTIONS, entry.line, message, Fix::DeleteException)
+            })
         })
         .collect()
 }

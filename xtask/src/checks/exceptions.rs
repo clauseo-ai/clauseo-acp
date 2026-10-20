@@ -49,7 +49,9 @@ pub(crate) fn parse(file: &str, text: &str) -> (Vec<Exception>, Vec<Violation>) 
                 file,
                 line,
                 format!("`{path}` has no reason"),
-                format!("write why `{path}` is exempt after the path, on the same line"),
+                Fix::WriteReason {
+                    path: path.to_owned(),
+                },
             ));
             continue;
         }
@@ -58,7 +60,7 @@ pub(crate) fn parse(file: &str, text: &str) -> (Vec<Exception>, Vec<Violation>) 
                 file,
                 line,
                 format!("`{path}` is listed twice"),
-                "delete this line and keep the reason on the first one",
+                Fix::DeleteDuplicate,
             ));
             continue;
         }

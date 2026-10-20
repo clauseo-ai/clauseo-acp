@@ -16,6 +16,7 @@
 //!
 //! A missing path that is on disk but not listed fails with a message that says git ignores it.
 
+use super::Fix;
 use super::markdown::{PLANNED, Span};
 use super::tree::{self, Tree};
 use crate::checks::violation;
@@ -68,7 +69,7 @@ fn problem(
             file,
             span.line,
             format!("`{cut}` has a `..` part"),
-            "write the path from the repo root, without `..`",
+            Fix::NoDotParts,
         ));
     }
     let path = bare(cut);
@@ -80,7 +81,9 @@ fn problem(
                 file,
                 span.line,
                 format!("`{path}` exists, but the text marks it{PLANNED}"),
-                format!("drop the{PLANNED} after `{path}`"),
+                Fix::DropPlanned {
+                    path: path.to_owned(),
+                },
             ))
         } else {
             case_problem(tree, file, span.line, path, &key)
@@ -94,14 +97,16 @@ fn problem(
             file,
             span.line,
             found.reason(path),
-            "name a file git tracks, or remove the reference",
+            Fix::NameTrackedFile,
         ));
     }
     Some(violation(
         file,
         span.line,
         format!("`{path}` does not exist"),
-        format!("create `{path}`, or correct or remove the reference"),
+        Fix::CreateOrCorrectReference {
+            path: path.to_owned(),
+        },
     ))
 }
 
@@ -113,7 +118,9 @@ fn case_problem(tree: &Tree, file: &str, line: u32, path: &str, key: &str) -> Op
             file,
             line,
             format!("`{path}` is marked{PLANNED}, but `{real}` exists, in another case"),
-            format!("write `{real}`, and drop the{PLANNED} after it"),
+            Fix::WriteCase {
+                real: real.to_owned(),
+            },
         ));
     }
     let folders = key.match_indices('/').filter_map(|(at, _)| key.get(..at));
@@ -124,7 +131,9 @@ fn case_problem(tree: &Tree, file: &str, line: u32, path: &str, key: &str) -> Op
         file,
         line,
         format!("`{path}` is marked{PLANNED}, but its folder `{folder}` exists as `{real}`"),
-        format!("write the path under `{real}`, as git lists it"),
+        Fix::WriteUnderFolder {
+            real: real.to_owned(),
+        },
     ))
 }
 

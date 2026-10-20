@@ -33,7 +33,7 @@ macro_rules! bad_command {
             "` does not parse: ",
             $detail,
             "\n    fix: ",
-            crate::checks::docs::commands::command_fix!()
+            crate::checks::docs::fix::command_fix!()
         )
     };
 }

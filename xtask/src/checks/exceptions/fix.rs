@@ -5,10 +5,26 @@ use std::fmt;
 
 /// A fix line of the exception lists.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Fix {}
+pub(crate) enum Fix {
+    /// An entry with a path and no reason after it.
+    WriteReason { path: String },
+    /// A path listed a second time: the first line keeps its reason.
+    DeleteDuplicate,
+}
 
 impl fmt::Display for Fix {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {}
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Fix::WriteReason { path } => write!(
+                f,
+                "write why `{path}` is exempt after the path, on the same line"
+            ),
+            Fix::DeleteDuplicate => {
+                f.write_str("delete this line and keep the reason on the first one")
+            }
+        }
     }
 }
+
+#[cfg(test)]
+mod tests;
