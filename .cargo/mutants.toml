@@ -3,7 +3,7 @@
 # runs it on the lines a branch changed; see xtask/src/mutants.rs.
 #
 # Every exclusion (`exclude_re`, `exclude_globs`) needs a comment saying why no test can tell the
-# mutant apart, and the code owner approves it (CODEOWNERS: /.cargo/). None yet.
+# mutant apart, and the code owner approves it (CODEOWNERS: /.cargo/).
 
 # The tests run nextest, as `cargo xtask check` does, so they see .config/nextest.toml.
 test_tool = "nextest"
