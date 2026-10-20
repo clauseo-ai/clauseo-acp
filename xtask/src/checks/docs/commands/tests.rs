@@ -320,7 +320,15 @@ fn a_line_shlex_cannot_split_is_not_read() {
         commands_of("Don't run cargo xtask check"),
         Vec::<String>::new()
     );
-    assert_eq!(commands_of("cargo xtask check \\"), Vec::<String>::new());
+}
+
+#[test]
+fn a_trailing_backslash_is_dropped_before_the_split() {
+    assert_eq!(
+        commands_of("cargo xtask frobnicate \\"),
+        ["cargo xtask frobnicate"]
+    );
+    assert_eq!(commands_of("cargo xtask check\\  "), ["cargo xtask check"]);
 }
 
 #[test]

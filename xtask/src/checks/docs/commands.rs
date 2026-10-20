@@ -118,9 +118,11 @@ fn after_prompt(text: &str) -> Option<&str> {
     PROMPTS.iter().find_map(|prompt| text.strip_prefix(prompt))
 }
 
-/// The xtask commands in `line`, split into words as a shell splits them. A line `shlex` cannot
-/// split has none.
+/// The xtask commands in `line`, split into words as a shell splits them. A trailing `\` is
+/// dropped first, as a line continuation. A line `shlex` cannot split has none.
 fn commands_in(line: &str) -> Vec<Command> {
+    let line = line.trim_end();
+    let line = line.strip_suffix('\\').unwrap_or(line);
     let Some(words) = shlex::split(line) else {
         return Vec::new();
     };

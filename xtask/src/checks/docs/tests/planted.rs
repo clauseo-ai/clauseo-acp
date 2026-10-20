@@ -270,6 +270,10 @@ crate::checks::planted::cases! {
     html_image_to_a_missing_file_fails: FailsWith(&[
         bad_link!("GUIDE.md", 1, "nope.png"),
     ]), inspects 4 => super::cases::html_image_to_a_missing_file_fails,
+    /// A trailing `\` continues the line, and the command on it is checked: `frobnicate` fails.
+    trailing_backslash_command_fails: FailsWith(&[
+        bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]), inspects 4 => super::cases::trailing_backslash_command_fails,
     /// A `$ ` prompt before `cargo xtask` in a fence does not hide the command.
     prompt_command_in_fence_fails: FailsWith(&[
         bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),

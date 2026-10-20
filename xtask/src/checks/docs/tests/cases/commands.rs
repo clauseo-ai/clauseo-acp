@@ -30,6 +30,16 @@ pub(crate) fn unknown_xtask_command_in_fence() -> Inspection {
     )
 }
 
+pub(crate) fn trailing_backslash_command_fails() -> Inspection {
+    docs(
+        "trailing-backslash",
+        vec![(
+            "GUIDE.md",
+            "```sh\ncargo xtask frobnicate \\\n```\n".to_owned(),
+        )],
+    )
+}
+
 pub(crate) fn prompt_command_in_fence_fails() -> Inspection {
     docs(
         "prompt-command",
