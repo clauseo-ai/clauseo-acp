@@ -6,9 +6,11 @@ use crate::scratch::Scratch;
 #[cfg(unix)]
 use crate::setup::AssetSha256;
 use crate::setup::BINARIES;
+#[cfg(unix)]
+use crate::setup::tests::fake_tool;
 use crate::setup::tests::{
     ASSET_BYTES, binary, curl_output, exited, expected_asset, expected_curl, expected_url,
-    expected_winget, fake_tool, linux,
+    expected_winget, linux,
 };
 use std::path::PathBuf;
 

@@ -13,7 +13,9 @@
               elsewhere"
 )]
 
-use std::fs::{self, File, OpenOptions, Permissions};
+use std::fs;
+#[cfg(unix)]
+use std::fs::{File, OpenOptions, Permissions};
 use std::io;
 use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
@@ -65,6 +67,7 @@ impl Scratch {
     }
 
     /// `fs::set_permissions` of `path`.
+    #[cfg(unix)]
     pub(crate) fn set_permissions(
         path: impl AsRef<Path>,
         permissions: Permissions,
@@ -73,6 +76,7 @@ impl Scratch {
     }
 
     /// Opens `path` for writing without creating it, to test whether it can be written.
+    #[cfg(unix)]
     pub(crate) fn open_for_writing(path: impl AsRef<Path>) -> io::Result<File> {
         OpenOptions::new().write(true).open(inside(path.as_ref()))
     }

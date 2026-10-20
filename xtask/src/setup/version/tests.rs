@@ -1,6 +1,7 @@
 //! Tests for `version.rs`: the version check and the text of each failure.
 
 use super::*;
+#[cfg(unix)]
 use crate::scratch::Scratch;
 use crate::setup::tests::{binary, linux};
 use std::path::PathBuf;
