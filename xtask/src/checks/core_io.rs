@@ -19,8 +19,9 @@
 //! - `[workspace.lints.clippy]` setting `all`, `style`, `disallowed_methods` or
 //!   `disallowed_types` to a level that does not report, at any priority;
 //! - a legacy `.cargo/config`, which cargo reads instead of `.cargo/config.toml`;
-//! - in `.cargo/config.toml`, a `rustflags` key at any depth and an `[env]` entry starting
-//!   with `CLIPPY_` in any case (`lints.rs`).
+//! - in `.cargo/config.toml`, a `rustflags` key at any depth, an `[alias]` key named after a
+//!   cargo subcommand xtask runs, which cargo runs instead and only warns about, and an `[env]`
+//!   entry starting with `CLIPPY_` in any case (`lints.rs`).
 //!
 //! xtask also runs cargo without `CLIPPY_CONF_DIR` in its own environment (`process.rs`).
 //!

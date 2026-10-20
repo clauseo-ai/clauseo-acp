@@ -78,6 +78,26 @@ macro_rules! lint_level {
     };
 }
 
+/// The violation for the `[alias]` key `$name` of `.cargo/config.toml` at `$line`.
+#[cfg(test)]
+macro_rules! alias {
+    ($line:literal, $name:literal) => {
+        concat!(
+            ".cargo/config.toml:",
+            $line,
+            ": `.cargo/config.toml` defines the alias `",
+            $name,
+            "`, so `cargo ",
+            $name,
+            "` runs the alias instead of the cargo command xtask runs, \
+             and cargo only warns about it\n    fix: remove the `",
+            $name,
+            "` alias; an alias may \
+             not take the name of a cargo command xtask runs"
+        )
+    };
+}
+
 /// The violation for the `rustflags` key `$key` of `.cargo/config.toml` at `$line`.
 #[cfg(test)]
 macro_rules! rustflags {
@@ -250,5 +270,7 @@ crate::checks::planted::cases! {
     ]), inspects 3 => super::clippy_env_in_cargo_config,
     /// Windows reads environment names ignoring case.
     clippy_env_in_another_case: FailsWith(&[clippy_env!(2, "Clippy_Conf_Dir")]), inspects 3 => super::clippy_env_in_another_case,
+    /// An alias named after a cargo command xtask runs; the repo's `xtask` alias passes.
+    alias_of_a_command_xtask_runs: FailsWith(&[alias!(3, "clippy")]), inspects 3 => super::alias_of_a_command_xtask_runs,
     cargo_config_without_lint_settings: Passes, inspects 3 => super::cargo_config_without_lint_settings,
 }

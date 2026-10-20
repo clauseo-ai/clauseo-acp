@@ -1,5 +1,5 @@
 //! The core-io planted cases about files beside the crate's `clippy.toml`: other clippy configs,
-//! the manifests' lint levels and the cargo config's rustflags.
+//! the manifests' lint levels and the cargo config's rustflags, aliases and `[env]`.
 
 use super::{ARCHITECTURE, Repo, expected, run_repo};
 use crate::checks::Inspection;
@@ -218,6 +218,18 @@ pub(in crate::checks::core_io) fn clippy_env_in_another_case() -> Inspection {
     good_crate_and(
         "clippy-env-case",
         &[(".cargo/config.toml", "[env]\nClippy_Conf_Dir = \"/\"\n")],
+    )
+}
+
+/// The review's case: an alias that turns clippy into `cargo check`, beside the repo's own
+/// `xtask` alias.
+pub(in crate::checks::core_io) fn alias_of_a_command_xtask_runs() -> Inspection {
+    good_crate_and(
+        "alias-clippy",
+        &[(
+            ".cargo/config.toml",
+            "[alias]\nxtask = \"run --quiet --locked --package xtask --\"\nclippy = \"check\"\n",
+        )],
     )
 }
 

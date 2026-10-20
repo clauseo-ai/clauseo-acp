@@ -8,7 +8,9 @@
 //! - there is no legacy `.cargo/config`, which cargo reads instead of `.cargo/config.toml`;
 //! - `.cargo/config.toml` has no `rustflags` key at any depth (where `-A` or `--cap-lints`
 //!   would silence the bans) and no `[env]` entry starting with `CLIPPY_` (cargo sets those on
-//!   every clippy-driver it starts, `CLIPPY_CONF_DIR` among them).
+//!   every clippy-driver it starts, `CLIPPY_CONF_DIR` among them);
+//! - `.cargo/config.toml` has no `[alias]` key named after a cargo subcommand xtask runs, which
+//!   cargo would run instead of the command, only warning about it.
 //!
 //! `#![allow(..)]` in the code is denied by the workspace lint `allow_attributes`;
 //! `#[expect(..)]` is the exception route.
@@ -26,6 +28,13 @@ const LINTS: [&str; 4] = ["all", "style", "disallowed_methods", "disallowed_type
 
 /// The levels at which those lints report a call.
 const REPORTING: [&str; 3] = ["warn", "deny", "forbid"];
+
+/// The cargo subcommands xtask runs, which an `[alias]` of the cargo config may not shadow: those
+/// of `checks/graph.rs`, `checks/dependencies.rs`, `steps/plan.rs`, `steps/policy.rs`,
+/// `buildtime.rs` (the probes), `setup.rs` and `workspace.rs`.
+const XTASK_SUBCOMMANDS: [&str; 10] = [
+    "build", "check", "clippy", "deny", "fmt", "install", "metadata", "nextest", "shear", "tree",
+];
 
 /// The repo's root manifest.
 pub(super) const ROOT_MANIFEST: &str = "Cargo.toml";
@@ -105,7 +114,8 @@ pub(super) fn workspace_lints(root: &Path) -> Vec<Violation> {
 }
 
 /// The violations for the cargo config: a legacy `.cargo/config`, and in `.cargo/config.toml`
-/// each `rustflags` key at any depth and each `[env]` entry whose name starts with `CLIPPY_`.
+/// each `rustflags` key at any depth, each `[alias]` key named after a cargo subcommand xtask
+/// runs and each `[env]` entry whose name starts with `CLIPPY_`.
 pub(super) fn cargo_config(root: &Path) -> Vec<Violation> {
     let mut found = Vec::new();
     match checks::read_repo_file(root, LEGACY_CARGO_CONFIG) {
@@ -136,6 +146,19 @@ pub(super) fn cargo_config(root: &Path) -> Vec<Violation> {
     for (key, offset) in rustflags {
         let line = line_of(&text, offset);
         found.push(report::rustflags_in_config(CARGO_CONFIG, line, &key));
+    }
+    let aliases = table_at(doc.get_ref(), "alias")
+        .into_iter()
+        .flat_map(|alias| alias.iter());
+    for (name, _) in
+        aliases.filter(|(name, _)| XTASK_SUBCOMMANDS.contains(&name.get_ref().as_ref()))
+    {
+        let line = line_of(&text, name.span().start);
+        found.push(report::alias_shadows_command(
+            CARGO_CONFIG,
+            line,
+            name.get_ref(),
+        ));
     }
     let env = table_at(doc.get_ref(), "env")
         .into_iter()
