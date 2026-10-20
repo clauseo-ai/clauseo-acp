@@ -456,3 +456,23 @@ fn names_in(dir: &Path) -> Vec<String> {
 }
 
 mod sweep;
+
+#[test]
+fn a_cargo_install_past_its_limit_says_so_and_how_to_see_why() {
+    let tool = &TOOLS[0];
+    let mut runner = |_: &Cmd, _: &Path, _: Output| -> io::Result<Ended> { Ok(Ended::TimedOut) };
+    let mut out = Printer::new(Vec::new(), false);
+    assert!(!install_tool(&mut out, tool, Path::new("."), &mut runner));
+    let cmd = format!(
+        "cargo install --locked {} --version {}",
+        tool.name, tool.version
+    );
+    assert_eq!(
+        String::from_utf8(out.into_inner()).unwrap(),
+        format!(
+            "{cmd}\ninstalling {} did not finish within 1 h, so it was stopped\n    fix: run \
+             `{cmd}` by hand to see why it does not finish within 1 h\n",
+            tool.name
+        )
+    );
+}

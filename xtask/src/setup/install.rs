@@ -4,7 +4,7 @@
 
 use super::{Binary, Machine, Packing, Runner};
 use crate::output::Printer;
-use crate::process::{Cmd, Ended, Output, Program};
+use crate::process::{self, Cmd, Ended, Output, Program};
 use crate::write::Staging;
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
@@ -168,15 +168,21 @@ fn run_winget<W: Write>(
         binary.name, binary.version
     ));
     let fix = format!("run `{cmd}` by hand and check its output, then run cargo xtask setup again");
-    let message = match runner(cmd, root, Output::Inherit) {
+    let (message, fix) = match runner(cmd, root, Output::Inherit) {
         Ok(Ended::Exited(ran)) if ran.success => return true,
-        Ok(Ended::Exited(_)) => format!("installing {} failed", binary.name),
-        Ok(Ended::TimedOut) => format!(
-            "installing {} did not finish within {} min, so it was stopped",
-            binary.name,
-            cmd.timeout.as_secs() / 60
+        Ok(Ended::Exited(_)) => (format!("installing {} failed", binary.name), fix),
+        Ok(Ended::TimedOut) => (
+            format!(
+                "installing {} did not finish within {}, so it was stopped",
+                binary.name,
+                process::limit_text(cmd.timeout)
+            ),
+            process::timeout_fix(cmd),
         ),
-        Err(error) => format!("could not run winget to install {}: {error}", binary.name),
+        Err(error) => (
+            format!("could not run winget to install {}: {error}", binary.name),
+            fix,
+        ),
     };
     out.failure(&message, &fix);
     false
@@ -366,8 +372,8 @@ fn run_step(
             )
         }
         Ok(Ended::TimedOut) => format!(
-            "{what} did not finish within {} s, so it was stopped",
-            cmd.timeout.as_secs()
+            "{what} did not finish within {}, so it was stopped",
+            process::limit_text(cmd.timeout)
         ),
         Err(error) => format!(
             "{what} failed: could not run {}: {error}",

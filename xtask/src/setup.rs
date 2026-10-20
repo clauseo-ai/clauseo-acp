@@ -303,7 +303,10 @@ fn check_version(binary: &Binary, root: &Path, runner: &mut Runner<'_>) -> Versi
         Ok(Ended::TimedOut) => Ok((
             false,
             String::new(),
-            format!("it did not finish within {} s", cmd.timeout.as_secs()),
+            format!(
+                "it did not finish within {}",
+                process::limit_text(cmd.timeout)
+            ),
         )),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             Err(format!("`{cmd}` could not start: {error}"))
@@ -336,11 +339,11 @@ fn install_tool<W: Write>(
         Ok(Ended::TimedOut) => {
             out.failure(
                 &format!(
-                    "installing {} did not finish within {} min, so it was stopped",
+                    "installing {} did not finish within {}, so it was stopped",
                     tool.name,
-                    cmd.timeout.as_secs() / 60
+                    process::limit_text(cmd.timeout)
                 ),
-                &fix,
+                &process::timeout_fix(&cmd),
             );
             false
         }

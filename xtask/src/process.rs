@@ -4,12 +4,17 @@
 //! - A command cannot run without a time limit: `Cmd::new` takes it.
 //! - It runs with stdin closed, in a process tree of its own: a new process group on Unix, a Job
 //!   Object that kills its processes when its handle closes on Windows (`windows.rs`).
-//! - Its tree is stopped at the limit and when its run is dropped (a panic included): SIGTERM to
-//!   the group, then SIGKILL after `KILL_GRACE`; on Windows `TerminateJobObject`. What is left of
-//!   the tree after the command exits gets SIGKILL, or is in the job that is terminated.
-//! - On Unix it is also stopped when xtask dies, however it dies, by the leader (`leader.rs`).
+//! - Its tree is stopped at the limit and when its run is dropped (a panic included): on Unix
+//!   SIGTERM to the group, then SIGKILL after `KILL_GRACE`; on Windows `TerminateJobObject`, which
+//!   ends every process in the job at once. What is left of the tree when the command exits gets
+//!   SIGKILL on Unix, and is ended with the job on Windows (`running.rs`).
+//! - Unix: it is also stopped when xtask dies, however it dies, by the leader (`leader.rs`).
 //!   Ctrl-C reaches only xtask, since each command has its own group; xtask dies of it, and the
-//!   leader then stops every group still running. Windows closes the jobs when xtask dies.
+//!   leader then stops every group still running.
+//! - Windows: there is no leader. When xtask dies, however it dies, Windows closes its handles,
+//!   and closing a job's handle ends every process in it. Ctrl-C reaches every process attached to
+//!   xtask's console, so a command that has not detached from it gets Ctrl-C at the same time as
+//!   xtask. Not run on Windows yet.
 
 #[cfg(unix)]
 mod leader;
@@ -204,6 +209,7 @@ fn spawn(command: &mut Command) -> io::Result<Child> {
 }
 
 /// Exit status and merged stdout and stderr of a command run by `capture`.
+#[derive(Debug)]
 pub(crate) struct Captured {
     pub success: bool,
     pub output: String,
@@ -219,7 +225,8 @@ pub(crate) struct Quiet {
 
 /// Runs `cmd` in `root` with stdout and stderr merged into one stream. Each chunk read is passed
 /// to `on_output` as it arrives, and kept for the returned `output`. A command that runs past its
-/// limit is an error of kind `TimedOut` (see `timed_out`).
+/// limit is an error of kind `TimedOut` (see `timed_out`). A command that exits while a process
+/// that left its tree still holds its output is an error that says so, after `running::DRAIN`.
 pub(crate) fn capture(
     cmd: &Cmd,
     root: &Path,
@@ -240,7 +247,8 @@ pub(crate) fn capture(
 }
 
 /// Runs `cmd` in `root` and returns its stdout and stderr separately. A command that runs past
-/// its limit is an error of kind `TimedOut` (see `timed_out`).
+/// its limit is an error of kind `TimedOut` (see `timed_out`); one whose output a process that
+/// left its tree still holds is an error, as for `capture`.
 pub(crate) fn run_quiet(cmd: &Cmd, root: &Path) -> io::Result<Quiet> {
     match run(cmd, root, Output::Quiet)? {
         Ended::Exited(quiet) => Ok(quiet),
@@ -251,9 +259,11 @@ pub(crate) fn run_quiet(cmd: &Cmd, root: &Path) -> io::Result<Quiet> {
 /// Where the output of a command run by `run` goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Output {
-    /// Straight to xtask's stdout and stderr, so the terminal when xtask has one. The command
-    /// still runs in a process group of its own: Ctrl-C reaches only xtask, and the leader stops
-    /// the command when xtask dies of it.
+    /// Straight to xtask's stdout and stderr, so the terminal when xtask has one. On Unix the
+    /// command still runs in a process group of its own: Ctrl-C reaches only xtask, and the leader
+    /// stops the command when xtask dies of it. On Windows it runs in its own job and shares
+    /// xtask's console, so Ctrl-C reaches it as well as xtask, and Windows ends the job when xtask
+    /// dies.
     Inherit,
     /// Kept, stdout and stderr apart.
     Quiet,
@@ -269,7 +279,8 @@ pub(crate) enum Ended {
 }
 
 /// Runs `cmd` in `root` with its output going where `output` says, and stops its tree if it runs
-/// past its limit.
+/// past its limit. With `Output::Quiet`, output a process that left its tree still holds is an
+/// error, as for `capture`.
 pub(crate) fn run(cmd: &Cmd, root: &Path, output: Output) -> io::Result<Ended> {
     let streams = match output {
         Output::Inherit => Streams::Inherit,
@@ -366,6 +377,11 @@ pub(crate) enum TestOutput {
     Inherit,
     /// Through `capture`.
     Capture,
+    /// Started with its output inherited; then, on Unix, the leader is killed, and the script runs
+    /// again to its end through `run`, with `$1` set to `again` (which starts a new leader); then
+    /// the first run is waited for. So only a new leader told about the first run's group can stop
+    /// it when xtask dies.
+    RestartedLeader,
 }
 
 /// The limit of the hidden `process-test` mode: longer than any test waits, so the test's signal
@@ -386,12 +402,36 @@ pub(crate) fn test_mode(output: TestOutput, script: &str) -> std::process::ExitC
             capture(&cmd, Path::new("."), &mut |_| {}),
             Ok(Captured { success: true, .. })
         ),
+        TestOutput::RestartedLeader => restarted_leader(&cmd, script),
     };
     if success {
         std::process::ExitCode::SUCCESS
     } else {
         std::process::ExitCode::FAILURE
     }
+}
+
+/// The `restarted-leader` test mode for `cmd`, which is `sh -c <script>`. Whether both runs
+/// exited 0.
+fn restarted_leader(cmd: &Cmd, script: &str) -> bool {
+    let mut command = cmd.program.command();
+    command.args(&cmd.args);
+    let limits = running::Limits::of(cmd.timeout);
+    let started = running::Running::start(command, &cmd.to_string(), Streams::Inherit, limits);
+    let Ok(first) = started else {
+        return false;
+    };
+    #[cfg(unix)]
+    leader::kill_for_test();
+    let again = Cmd::new(
+        Program::Named("sh"),
+        ["-c", script, "sh", "again"],
+        cmd.timeout,
+    );
+    let second = run(&again, Path::new("."), Output::Inherit);
+    let first = first.finish(&mut |_, _| {});
+    matches!(second, Ok(Ended::Exited(Quiet { success: true, .. })))
+        && matches!(first, Ok(Finish::Exited(status)) if status.success())
 }
 
 #[cfg(test)]

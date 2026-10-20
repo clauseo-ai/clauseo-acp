@@ -133,7 +133,7 @@ fn a_failed_download_leaves_bin_untouched_and_names_curl_as_the_fix() {
             ),
         ),
         (
-            "did not finish within 1260 s, so it was stopped",
+            "did not finish within 21 min, so it was stopped",
             Ok(Ended::TimedOut),
         ),
         (
@@ -230,6 +230,27 @@ fn a_failed_winget_names_it_as_the_fix() {
         format!(
             "installing lefthook {}: {winget}\ninstalling lefthook failed\n    fix: run \
              `{winget}` by hand and check its output, then run cargo xtask setup again\n",
+            lefthook.version
+        )
+    );
+}
+
+#[test]
+fn a_winget_past_its_limit_says_so_and_how_to_see_why() {
+    let lefthook = binary("lefthook");
+    let winget = expected_winget(lefthook);
+    let machine = Machine {
+        os: "windows",
+        ..linux(Path::new("unused"), true)
+    };
+    let (ok, _, printed) = install_with(lefthook, &machine, b"", &mut |_| Ok(Ended::TimedOut));
+    assert!(!ok);
+    assert_eq!(
+        printed,
+        format!(
+            "installing lefthook {}: {winget}\ninstalling lefthook did not finish within 30 min, \
+             so it was stopped\n    fix: run `{winget}` by hand to see why it does not finish \
+             within 30 min\n",
             lefthook.version
         )
     );

@@ -36,6 +36,9 @@ pub(super) struct Tree {
 }
 
 impl Tree {
+    /// What a tree is called in errors.
+    pub(super) const NAME: &str = "job";
+
     /// Makes `command` start suspended, so it runs nothing before it joins its job.
     pub(super) fn prepare(command: &mut Command) {
         command.creation_flags(CREATE_SUSPENDED.0);
@@ -121,13 +124,15 @@ impl Drop for Tree {
 /// Resumes every thread of process `pid`, which started suspended. Std gives no thread handle, so
 /// the threads are found with a Toolhelp snapshot. Fails when it resumes none.
 fn resume(pid: u32) -> io::Result<()> {
-    // SAFETY: a thread snapshot of the whole system takes no pointer; its handle is closed below.
-    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) }
-        .map_err(|error| os_error("could not list the command's threads", &error))?;
+    // Before the snapshot opens, so no early return leaves its handle open.
     let mut entry = THREADENTRY32 {
         dwSize: u32::try_from(size_of::<THREADENTRY32>()).map_err(io::Error::other)?,
         ..THREADENTRY32::default()
     };
+    // SAFETY: a thread snapshot of the whole system takes no pointer; its handle is closed below,
+    // and nothing between here and there returns early.
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) }
+        .map_err(|error| os_error("could not list the command's threads", &error))?;
     let mut resumed = 0_usize;
     // SAFETY: `snapshot` is the live snapshot handle and `entry` a THREADENTRY32 whose `dwSize`
     // is set, as Thread32First and Thread32Next require.
