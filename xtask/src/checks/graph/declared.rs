@@ -38,7 +38,7 @@ pub(crate) struct Blamed {
     /// True when one of them is optional.
     pub optional: bool,
     /// Their lines, one group per node they were matched to, then one group for the rest.
-    groups: Vec<Group>,
+    pub groups: Vec<Group>,
 }
 
 impl Blamed {
