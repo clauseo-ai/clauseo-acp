@@ -106,10 +106,12 @@ fn run(ctx: &Context) -> Inspection {
 /// lockfile and the crates downloaded). Counts the desktop crate's normal and build direct
 /// dependencies, the ones its rules read; dev-dependencies are not counted.
 fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
-    let (members, desktop_member) = match (checks::members(ctx), checks::desktop_member(ctx)) {
-        (Ok(members), Ok(desktop)) => (members, desktop),
-        (Err(stopped), _) | (_, Err(stopped)) => return stopped,
+    let desktop_member = match checks::desktop_member(ctx) {
+        Ok(desktop) => desktop,
+        Err(stopped) => return stopped,
     };
+    // `desktop_member` stops on a failed load, so the members are here.
+    let members = ctx.members.as_deref().unwrap_or_default();
     let manifest = checks::join(&desktop_member.dir, "Cargo.toml");
     let desktop_deps = &desktop_member.dependencies;
     let read = |rel: &str| checks::read_repo_file(&ctx.root, rel).map(Option::unwrap_or_default);

@@ -75,8 +75,8 @@ struct Metadata {
 struct Package {
     name: String,
     manifest_path: PathBuf,
-    #[serde(flatten)]
-    dependencies: PackageDependencies,
+    dependencies: Vec<CargoDependency>,
+    features: BTreeMap<String, Vec<String>>,
     targets: Vec<PackageTarget>,
 }
 
@@ -119,7 +119,7 @@ impl CargoDependency {
 }
 
 /// One package's dependencies and its `[features]` table, from `cargo metadata`.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct PackageDependencies {
     pub dependencies: Vec<CargoDependency>,
     pub features: BTreeMap<String, Vec<String>>,
@@ -166,7 +166,6 @@ pub(crate) fn parse_metadata(json: &str) -> Result<Vec<Member>, String> {
             .ok_or_else(|| format!("package {} is outside the workspace", package.name))?;
         let path_deps = package
             .dependencies
-            .dependencies
             .iter()
             .filter_map(|dep| dep.path.as_deref())
             .filter_map(|p| relative(p, base))
@@ -181,7 +180,10 @@ pub(crate) fn parse_metadata(json: &str) -> Result<Vec<Member>, String> {
             dir,
             path_deps,
             targets,
-            dependencies: package.dependencies,
+            dependencies: PackageDependencies {
+                dependencies: package.dependencies,
+                features: package.features,
+            },
         });
     }
     members.sort_by(|a, b| a.name.cmp(&b.name));

@@ -212,11 +212,11 @@ pub(crate) fn fmt_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Findi
 /// Findings for clippy's output (see `short_diags`). Each fix line is the command that shows
 /// the full diagnostic, built from the args that ran (see `clippy_repro`).
 pub(crate) fn clippy_findings(output: &str, ctx: &Context, cmd: &Cmd) -> Vec<Finding> {
+    // With no members, from a failed `cargo metadata`, the selectors that ran stay.
+    let members = ctx.members.as_deref().unwrap_or_default();
     short_diags(output, &root_str(ctx))
         .into_iter()
         .map(|diag| {
-            // With no members, from a failed `cargo metadata`, the selectors that ran stay.
-            let members = ctx.members.as_deref().unwrap_or_default();
             let fix = clippy_fix(cmd, &diag.path, members);
             Finding {
                 violation: Violation {
