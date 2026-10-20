@@ -9,6 +9,9 @@
 //! `--quick` sees. Do not tighten it to tracked files only. When git cannot list the files, the
 //! check fails with git's error. It counts the files it read.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 mod lexer;
 
 use crate::changes;

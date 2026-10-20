@@ -23,7 +23,7 @@ fn violation(line: u32, message: &str, fix: &str) -> Violation {
         path: PATH.to_owned(),
         line,
         message: message.to_owned(),
-        fix: fix.to_owned(),
+        fix: fix.into(),
     }
 }
 
@@ -171,8 +171,8 @@ fn json5_that_is_not_plain_json_and_invalid_files_fail_at_line_one() {
             )
         }]
     );
-    assert_eq!(scan(PATH, "{ \"a\": ")[0].fix, FIX_SYNTAX);
-    assert_eq!(scan("x/main.toml", "a = ")[0].fix, FIX_SYNTAX);
+    assert_eq!(scan(PATH, "{ \"a\": ")[0].fix.to_string(), FIX_SYNTAX);
+    assert_eq!(scan("x/main.toml", "a = ")[0].fix.to_string(), FIX_SYNTAX);
 }
 
 #[test]

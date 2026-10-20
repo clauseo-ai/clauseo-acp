@@ -13,6 +13,9 @@
 //! Tauri loads from the capabilities folder. Anything else there (a Finder `.DS_Store`, a Vim swap
 //! file, a `main.json~` backup) never reaches the app, so it is skipped.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 use crate::checks::json_text::{key_line, line_index_of};
 use crate::checks::{self, Inspection, Noun, StaticCheck};
 use crate::violation::Violation;

@@ -43,6 +43,9 @@
 //! `tauri-runtime`, `tauri-utils`, `wry` or a fork under another name; banning a family means
 //! listing each of its packages.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 use crate::checks::{self, core_io, violation};
 use crate::violation::Violation;
 use std::path::Path;

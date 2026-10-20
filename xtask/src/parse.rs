@@ -4,6 +4,7 @@
 //! level: message`) does not name the lint, and the JSON does. Each JSON message carries the short
 //! text in `rendered`, which is what people see.
 
+use crate::fix::Fix;
 use crate::process::Cmd;
 use crate::violation::{Finding, Violation};
 use crate::workspace::{Context, Member, package_for};
@@ -202,7 +203,7 @@ pub(crate) fn fmt_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Findi
                 path,
                 line,
                 message: "rustfmt would reformat this code".into(),
-                fix: "run `cargo fmt --all`".into(),
+                fix: Fix::tool("run `cargo fmt --all`"),
             },
             is_error: true,
         })
@@ -223,7 +224,7 @@ pub(crate) fn clippy_findings(output: &str, ctx: &Context, cmd: &Cmd) -> Vec<Fin
                     path: diag.path,
                     line: diag.line,
                     message: diag.message,
-                    fix,
+                    fix: Fix::tool(fix),
                 },
                 is_error: diag.is_error,
             }

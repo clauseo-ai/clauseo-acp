@@ -12,8 +12,7 @@ pub(super) fn cargo_stdout(root: &Path, args: &[&str]) -> Result<String, Failure
     let cmd = Cmd::new(Program::Cargo, args.iter().copied());
     let quiet = process::run_quiet(&cmd, root).map_err(|error| Failure {
         message: format!("could not run `{cmd}`: {error}"),
-        fix: "put `cargo` on PATH, since this check reads the dependency graph from cargo"
-            .to_owned(),
+        fix: "put `cargo` on PATH, since this check reads the dependency graph from cargo".into(),
     })?;
     if quiet.success {
         Ok(quiet.stdout)
@@ -21,7 +20,7 @@ pub(super) fn cargo_stdout(root: &Path, args: &[&str]) -> Result<String, Failure
         let stderr = quiet.stderr.trim();
         Err(Failure {
             message: format!("`{cmd}` failed: {stderr}"),
-            fix: failure_fix(&cmd, stderr, root),
+            fix: failure_fix(&cmd, stderr, root).into(),
         })
     }
 }

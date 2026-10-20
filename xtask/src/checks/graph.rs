@@ -27,6 +27,9 @@
 //! which section its lines came under (`Tree::sections`). A line in any other shape fails the
 //! check.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 use crate::checks::Failure;
 use crate::checks::toml_lines::{BUILD, Kind, NORMAL};
 use cargo::cargo_stdout;
@@ -67,7 +70,7 @@ pub(crate) fn load_tree(root: &Path, package: &str, flags: &[&str]) -> Result<Tr
         ),
         fix: "update `Tree::parse` in xtask/src/checks/graph.rs to the lines this cargo prints, \
               since the check reads each crate's dependency graph from them"
-            .to_owned(),
+            .into(),
     })
 }
 

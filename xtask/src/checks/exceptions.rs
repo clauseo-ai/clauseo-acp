@@ -2,6 +2,9 @@
 //! exempt. Blank lines and lines starting with `#` are skipped. Every check with an exception
 //! list reads it through `load`, so the format has one home.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 use crate::checks::{self, line_at};
 use crate::violation::Violation;
 use std::collections::BTreeSet;

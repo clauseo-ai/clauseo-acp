@@ -55,7 +55,7 @@ fn a_missing_desktop_member_is_one_violation_at_the_root_manifest() {
             "Cargo.toml",
             1,
             "the desktop crate (package `clauseo-desktop`) is not a workspace member",
-            "restore crates/desktop or update xtask/src/checks: these checks guard its capabilities, plugins and Tauri config",
+            Fix::DesktopNotMember,
         )))
     );
 }
@@ -116,7 +116,8 @@ fn a_failed_metadata_load_stops_every_check_that_reads_members() {
         if READ_MEMBERS.contains(&check.name) {
             let expected = vec![format!(
                 "could not read the workspace members: `cargo metadata` failed with {first}. \
-                 The full error is in the note above\n    fix: {METADATA_FIX}"
+                 The full error is in the note above\n    fix: fix the error quoted above so that \
+                 `cargo metadata` succeeds; this check reads the workspace members from its output"
             )];
             assert_eq!((check.name, report.printed()), (check.name, expected));
             assert!(report.inspection.stopped, "{} did not stop", check.name);
@@ -156,7 +157,9 @@ fn every_check_inspects_nothing_in_an_empty_repo() {
     for check in ALL {
         let report = check.report(&ctx);
         assert_eq!((check.name, report.inspection.inspected), (check.name, 0));
-        let fix = report.nothing_inspected.map(|failure| failure.fix);
+        let fix = report
+            .nothing_inspected
+            .map(|failure| failure.fix.to_string());
         if STOPS_IN_AN_EMPTY_REPO.contains(&check.name) {
             assert_eq!((check.name, fix.as_deref()), (check.name, None));
             assert!(report.inspection.stopped, "{} did not stop", check.name);
@@ -197,7 +200,9 @@ fn a_check_that_stopped_prints_one_fix_line() {
                   restore them, or, if they moved, update the consts \
                   xtask/src/checks/tauri_config.rs builds that place from";
     assert_eq!(
-        looked.nothing_inspected.map(|failure| failure.fix),
+        looked
+            .nothing_inspected
+            .map(|failure| failure.fix.to_string()),
         Some(normal.to_owned())
     );
     let stopped = check.judge(Inspection::stopped(gone()));
@@ -205,7 +210,9 @@ fn a_check_that_stopped_prints_one_fix_line() {
     assert!(stopped.failed());
     let silent = check.judge(Inspection::stopped_on(Vec::new()));
     assert_eq!(
-        silent.nothing_inspected.map(|failure| failure.fix),
+        silent
+            .nothing_inspected
+            .map(|failure| failure.fix.to_string()),
         Some(normal.to_owned()),
         "a stop with nothing printed above must still fail with a fix"
     );
@@ -280,11 +287,8 @@ fn zero_inspected_fails_without_a_location_and_names_where_the_check_looked() {
     assert!(report.failed());
     assert_eq!(report.counted, "0 capability files inspected");
     assert_eq!(
-        report.nothing_inspected,
-        Some(Failure {
-            message: "0 capability files inspected in the desktop crate's capabilities/".to_owned(),
-            fix: "tauri-config looks for capability files in the desktop crate's capabilities/; restore them, or, if they moved, update the consts xtask/src/checks/tauri_config.rs builds that place from".to_owned(),
-        })
+        report.nothing_inspected.map(|failure| failure.to_string()),
+        Some("0 capability files inspected in the desktop crate's capabilities/\n    fix: tauri-config looks for capability files in the desktop crate's capabilities/; restore them, or, if they moved, update the consts xtask/src/checks/tauri_config.rs builds that place from".to_owned())
     );
 }
 
@@ -314,7 +318,7 @@ fn a_failure_with_no_violation_and_something_inspected_fails_the_report() {
         inspected: 1,
         failures: vec![Failure {
             message: "could not list the repo's files".to_owned(),
-            fix: "install git".to_owned(),
+            fix: crate::fix::Fix::Fake("install git"),
         }],
         ..Inspection::default()
     });

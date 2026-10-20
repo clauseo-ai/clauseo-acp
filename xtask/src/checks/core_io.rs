@@ -67,6 +67,9 @@
 //!
 //! The check counts the Crates-table rows it classified, held or not.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 mod cfgs;
 mod clippy_toml;
 mod lints;

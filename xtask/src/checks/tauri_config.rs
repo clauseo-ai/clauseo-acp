@@ -16,6 +16,9 @@
 //! The pure functions take file contents and paths; `run` reads the files from the repo and counts
 //! the ones it found: `tauri.conf.json`, `build.rs` and each platform config.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 use crate::checks::json_text::key_line;
 use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
 use crate::violation::Violation;

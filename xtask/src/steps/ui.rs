@@ -6,6 +6,7 @@
 
 use super::ToolStep;
 use super::plan::{parse_none, reproduce};
+use crate::fix::Fix;
 use crate::process::{Cmd, Program};
 use crate::violation::{Finding, Violation};
 use crate::workspace::Context;
@@ -138,7 +139,7 @@ fn tsc_finding(line: &str) -> Option<Finding> {
             path: ui_path("ui/app", path),
             line: line_no,
             message: message.to_owned(),
-            fix: "`pnpm -C ui/app run typecheck` shows the full error".into(),
+            fix: Fix::tool("`pnpm -C ui/app run typecheck` shows the full error"),
         },
         is_error: message.starts_with("error "),
     })
@@ -168,8 +169,9 @@ fn oxlint_finding(line: &str) -> Option<Finding> {
             path: ui_path("ui/app", path),
             line: line_no,
             message: message.to_owned(),
-            fix: "`pnpm -C ui/app run lint` shows the rule's help; fix the code, do not disable the rule"
-                .into(),
+            fix: Fix::tool(
+                "`pnpm -C ui/app run lint` shows the rule's help; fix the code, do not disable the rule",
+            ),
         },
         is_error,
     })
@@ -186,7 +188,7 @@ fn oxfmt_findings(output: &str, _ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
                 path: ui_path("ui", path),
                 line: 1,
                 message: "oxfmt would reformat this file".into(),
-                fix: "run `pnpm -C ui run fmt` to reformat it".into(),
+                fix: Fix::tool("run `pnpm -C ui run fmt` to reformat it"),
             },
             is_error: true,
         })
@@ -302,7 +304,10 @@ mod tests {
             ]
         );
         assert_eq!(
-            tsc_findings(TSC_FAILING, &context(), &cmd)[0].violation.fix,
+            tsc_findings(TSC_FAILING, &context(), &cmd)[0]
+                .violation
+                .fix
+                .to_string(),
             "`pnpm -C ui/app run typecheck` shows the full error"
         );
     }
@@ -409,7 +414,8 @@ mod tests {
         assert_eq!(
             oxfmt_findings(OXFMT_FAILING, &context(), &cmd)[0]
                 .violation
-                .fix,
+                .fix
+                .to_string(),
             "run `pnpm -C ui run fmt` to reformat it"
         );
     }

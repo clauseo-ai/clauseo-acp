@@ -11,6 +11,9 @@
 //! buildtime lock (`target/xtask/buildtime.lock`, released at once): when another process holds
 //! it, the violation says a run is in progress instead of calling the edit a leftover.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 use crate::buildtime::lock;
 use crate::checks::{self, Inspection, Noun, StaticCheck};
 use crate::violation::Violation;

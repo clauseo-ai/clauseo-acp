@@ -21,7 +21,10 @@ fn a_failed_tree_run_is_a_failure_with_no_file_line() {
         "{failure}"
     );
     assert!(
-        failure.fix.starts_with("cargo could not resolve"),
+        failure
+            .fix
+            .to_string()
+            .starts_with("cargo could not resolve"),
         "{failure}"
     );
 }

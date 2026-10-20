@@ -72,7 +72,7 @@ fn run_static<W: Write>(check: &StaticCheck, ctx: &Context, out: &mut Printer<W>
         .iter()
         .chain(&report.nothing_inspected)
     {
-        out.failure(&failure.message, &failure.fix);
+        out.failure(&failure.message, &failure.fix.to_string());
     }
     for note in &report.inspection.notes {
         out.note(format_args!("note: {note}"));

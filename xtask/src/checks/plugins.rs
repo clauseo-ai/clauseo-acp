@@ -36,6 +36,9 @@
 //! when the setting lives in `[workspace.dependencies]`, else line 1.
 //! The Tauri config and `build.rs` belong to the `tauri-config` check.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 mod graph;
 
 use crate::checks::toml_lines::{ANY, Manifest, NORMAL};

@@ -14,6 +14,9 @@
 //! optional dependencies included, directly or through other crates, and no feature that only
 //! another member turns on. The I/O words belong to the core-io check.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 mod graph;
 
 use crate::checks::crates_table::{self, CrateRow, CratesTable, Status};
