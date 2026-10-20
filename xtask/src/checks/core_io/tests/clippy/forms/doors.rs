@@ -43,7 +43,7 @@ type Write = (&'static str, Only, &'static str, &'static str, &'static str);
 const FILE: &str = "f: &std::fs::File";
 
 /// Every std call that changes files, one per entry.
-const WRITES: [Write; 24] = [
+const WRITES: [Write; 31] = [
     (
         "fs_write",
         Only::Any,
@@ -177,6 +177,56 @@ const WRITES: [Write; 24] = [
         "",
         "std::fs::DirBuilder::new().create(\"a\")",
         "std::fs::DirBuilder::create",
+    ),
+    (
+        "fs_set_times",
+        Only::Any,
+        "",
+        "std::fs::set_times(\"a\", std::fs::FileTimes::new())",
+        "std::fs::set_times",
+    ),
+    (
+        "fs_set_times_nofollow",
+        Only::Any,
+        "",
+        "std::fs::set_times_nofollow(\"a\", std::fs::FileTimes::new())",
+        "std::fs::set_times_nofollow",
+    ),
+    (
+        "unix_fchown",
+        Only::Unix,
+        FILE,
+        "std::os::unix::fs::fchown(f, None, None)",
+        "std::os::unix::fs::fchown",
+    ),
+    // A bind creates the socket file at its path.
+    (
+        "unix_listener_bind",
+        Only::Unix,
+        "",
+        "std::os::unix::net::UnixListener::bind(\"s\")",
+        "std::os::unix::net::UnixListener::bind",
+    ),
+    (
+        "unix_listener_bind_addr",
+        Only::Unix,
+        "a: &std::os::unix::net::SocketAddr",
+        "std::os::unix::net::UnixListener::bind_addr(a)",
+        "std::os::unix::net::UnixListener::bind_addr",
+    ),
+    (
+        "unix_datagram_bind",
+        Only::Unix,
+        "",
+        "std::os::unix::net::UnixDatagram::bind(\"s\")",
+        "std::os::unix::net::UnixDatagram::bind",
+    ),
+    (
+        "unix_datagram_bind_addr",
+        Only::Unix,
+        "a: &std::os::unix::net::SocketAddr",
+        "std::os::unix::net::UnixDatagram::bind_addr(a)",
+        "std::os::unix::net::UnixDatagram::bind_addr",
     ),
     (
         "unix_symlink",
