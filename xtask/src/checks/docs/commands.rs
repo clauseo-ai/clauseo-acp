@@ -2,16 +2,17 @@
 //! line by line when its info word is in `SHELLS`, when it has no info string, or when it is
 //! indented. A session block is read only on its lines that start with a prompt from `PROMPTS`,
 //! and only from after that prompt. Other code blocks are not read. A read line continues when it
-//! ends in an odd number of its block's continuation character, as an even number is escaped. A
-//! continuing line is joined with the next line of its block, and so on down a chain of them, and
-//! the joined text is reported at the first line. The continuation character is a backtick in a
-//! PowerShell block, `^` in a `cmd` or `bat` block, and `\` in every other block that is read. In
-//! a session block the next line is read after a leading `> `, with or without a prompt. A
-//! continuation character is dropped only in a code block, and only when no line follows it in
-//! its block. A span keeps its text as written. Each joined text is split into words once, with
-//! `shlex`, or on whitespace when `shlex` cannot split it. Every `cargo` in the words, with its
-//! flags and `+toolchain` skipped, followed by `xtask`, starts a command. The words after `xtask`
-//! stop at shell syntax and parse against the clap tree in `main.rs`.
+//! ends in an odd number of its block's continuation character, as an even number is escaped,
+//! and, in every block but `cmd` and `bat`, when that character is outside a comment and outside
+//! quotes. A continuing line is joined with the next line of its block, and so on down a chain of
+//! them, and the joined text is reported at the first line. The continuation character is a
+//! backtick in a PowerShell block, `^` in a `cmd` or `bat` block, and `\` in every other block
+//! that is read. In a session block the next line is read after a leading `> `, with or without a
+//! prompt. A continuation character is dropped only in a code block, and only when no line
+//! follows it in its block. A span keeps its text as written. Each joined text is split into
+//! words once, with `shlex`, or on whitespace when `shlex` cannot split it. Every `cargo` in the
+//! words, with its flags and `+toolchain` skipped, followed by `xtask`, starts a command. The
+//! words after `xtask` stop at shell syntax and parse against the clap tree in `main.rs`.
 
 use super::markdown::{CodeLine, Scan};
 use crate::Cli;
@@ -169,7 +170,15 @@ fn continued<'a>(info: &str, line: &'a str) -> Option<&'a str> {
     let line = line.trim_end();
     let run = line.chars().rev().take_while(|&c| c == mark).count();
     let rest = line.strip_suffix(mark)?;
-    (run % 2 == 1).then_some(rest)
+    let outside = is_one_of(info, &CMDS) || ends_outside_comment(rest);
+    (run % 2 == 1 && outside).then_some(rest)
+}
+
+/// True when the end of `text` is outside a comment and outside quotes. `shlex` splits `text`
+/// with a sentinel word after it, and that word is the last word only then.
+fn ends_outside_comment(text: &str) -> bool {
+    let words = shlex::split(&format!("{text} x")).unwrap_or_default();
+    words.last().is_some_and(|word| word == "x")
 }
 
 /// The character that continues a line of a block whose info word is `info`.
