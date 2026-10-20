@@ -106,6 +106,11 @@ pub(crate) struct CargoDependency {
     /// The version requirement as cargo writes it, such as `^1.2` or `>=1, <2`.
     #[serde(default)]
     pub req: String,
+    /// Where the package comes from, such as `git+https://example.com/s?branch=main` for a git
+    /// dependency or `registry+https://github.com/rust-lang/crates.io-index`. `None` for a path
+    /// dependency.
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 impl CargoDependency {

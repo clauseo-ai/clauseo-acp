@@ -173,6 +173,17 @@ impl Tree {
         Some(Path::new(source)).filter(|path| path.is_absolute())
     }
 
+    /// The repository and reference of the git package `package`, such as
+    /// `https://example.com/s?branch=main`, which is the source cargo prints for it without the
+    /// `#` and commit at its end. `None` for a registry or path package.
+    pub(crate) fn git_source(&self, package: usize) -> Option<&str> {
+        let source = self.packages.get(package)?.source.as_deref()?;
+        if Path::new(source).is_absolute() {
+            return None;
+        }
+        source.rsplit_once('#').map(|(repository, _)| repository)
+    }
+
     /// The sections the lines of the direct dependency `package` came under: `Build` as well as
     /// `Normal` when cargo printed it under both. Empty for a package the crate does not depend on
     /// directly.

@@ -188,25 +188,53 @@ fn a_registry_declaration_is_matched_to_the_version_its_requirement_allows() {
     );
 }
 
-/// `s1 = { package = "s", version = "1" }` at line 7, which `[patch.crates-io]` points at the
-/// path package `vendor/s` 1.0.0, and `s2`, a git package `s` 1.2.0, at line 10, which alone
-/// brings `b` in. Both packages satisfy `s1`'s requirement, so which one `s1` built is not
-/// known, and the violation says each line may bring `b` in.
-#[test]
-fn a_registry_declaration_patched_to_a_path_is_not_matched_to_another_package() {
-    let text = "[package]\nname = \"clauseo-protocol\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\ns1 = { package = \"s\", version = \"1\" }\n\n[target.'cfg(windows)'.dependencies]\ns2 = { package = \"s\", git = \"https://example.com/s\" }\n\n[patch.crates-io]\ns = { path = \"../../vendor/s\" }\n";
-    let stdout = "clauseo-protocol v0.1.0 []\n|-- s v1.0.0 (/ws/vendor/s) []\n`-- s v1.2.0 (https://example.com/s#0123abcd) []\n    `-- b v1.0.0 []\n";
+/// The violations of `s1 = { package = "s", version = "1" }` at line 7 and `s2 = { package =
+/// "s", git = "https://example.com/s", branch = "main" }` under `cfg(windows)` at line 10, with
+/// `patch` after them, for the graph `stdout`. The metadata writes each source as `cargo
+/// metadata` does, and `stdout` prints the git node as `cargo tree` does.
+fn registry_and_git(patch: &str, stdout: &str) -> Vec<crate::violation::Violation> {
+    let text = format!(
+        "[package]\nname = \"clauseo-protocol\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\ns1 = {{ package = \"s\", version = \"1\" }}\n\n[target.'cfg(windows)'.dependencies]\ns2 = {{ package = \"s\", git = \"https://example.com/s\", branch = \"main\" }}\n{patch}"
+    );
     let dependencies = r#"[
         {"name": "s", "rename": "s1", "kind": null, "target": null, "optional": false,
-         "features": [], "req": "^1"},
+         "features": [], "req": "^1",
+         "source": "registry+https://github.com/rust-lang/crates.io-index"},
         {"name": "s", "rename": "s2", "kind": null, "target": "cfg(windows)", "optional": false,
-         "features": [], "req": "*"}]"#;
+         "features": [], "req": "*", "source": "git+https://example.com/s?branch=main"}]"#;
+    written_out(&text, stdout, dependencies)
+}
+
+/// The registry package `s` 1.4.0 and the git package `s` 1.2.0, which alone brings `b` in.
+/// Both versions satisfy `s1`'s requirement, but `s1` is matched to the registry package and
+/// `s2` to the git package by its source, so only line 10 is blamed.
+#[test]
+fn a_git_declaration_next_to_a_registry_declaration_is_matched_by_its_source() {
+    let stdout = "clauseo-protocol v0.1.0 []\n|-- s v1.4.0 []\n`-- s v1.2.0 (https://example.com/s?branch=main#0123abcd) []\n    `-- b v1.0.0 []\n";
     assert_eq!(
-        written_out(text, stdout, dependencies),
+        registry_and_git("", stdout),
+        vec![violation(
+            "crates/protocol/Cargo.toml",
+            10,
+            "clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids",
+            "move the code that uses `s2` into a crate whose row allows b, then remove `s2` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
+        )]
+    );
+}
+
+/// `[patch.crates-io]` points `s1` at the path package `vendor/s` 1.0.0, and both it and the git
+/// package `s` 1.2.0 bring `b` in. `s1` is matched to the path package, not to the git package,
+/// so each line is known to bring `b` in.
+#[test]
+fn a_registry_declaration_is_not_matched_to_a_git_package_of_its_name() {
+    let patch = "\n[patch.crates-io]\ns = { path = \"../../vendor/s\" }\n";
+    let stdout = "clauseo-protocol v0.1.0 []\n|-- s v1.0.0 (/ws/vendor/s) []\n|   `-- b v1.0.0 []\n`-- s v1.2.0 (https://example.com/s?branch=main#0123abcd) []\n    `-- b v1.0.0 []\n";
+    assert_eq!(
+        registry_and_git(patch, stdout),
         vec![violation(
             "crates/protocol/Cargo.toml",
             7,
-            "clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s1` and `s2` are declared at lines 7 and 10 of crates/protocol/Cargo.toml. xtask could not tell which package cargo builds for each of these declarations, so each of them may bring b in",
+            "clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s1` and `s2` are declared at lines 7 and 10 of crates/protocol/Cargo.toml, and each declaration brings b in",
             "move the code that uses `s1` and `s2` into a crate whose row allows b, then remove `s1` and `s2` from lines 7 and 10 of crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
         )]
     );

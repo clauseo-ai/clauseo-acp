@@ -1,7 +1,10 @@
-//! Tests of the text that says what is known about the blamed lines. The matching of each
-//! declaration to its node runs in the tests of `dependencies` and `plugins`.
+//! Tests of the text that says what is known about the blamed lines, and of the version match.
+//! The rest of the matching of each declaration to its node runs in the tests of `dependencies`
+//! and `plugins`.
 
-use super::{Group, declared, satisfies};
+use super::{Group, declared, produced, satisfies};
+use crate::checks::graph::{Section, Tree};
+use crate::workspace::CargoDependency;
 
 /// A group of `lines` that is `known` or not.
 fn group(lines: &[u32], known: bool) -> Group {
@@ -55,4 +58,25 @@ fn a_requirement_picks_the_version_cargo_would() {
     assert_eq!(satisfies("^1", "2.0.0"), Some(false));
     assert_eq!(satisfies(">=1, <2", "2.0.0"), Some(false));
     assert_eq!(satisfies("^2", "not a version"), None);
+}
+
+/// `cargo metadata`'s entry for a registry dependency on `s` with the requirement `req`.
+fn registry(req: &str) -> CargoDependency {
+    let entry = format!(
+        r#"{{"name": "s", "rename": null, "kind": null, "target": null, "optional": false,
+            "features": [], "req": "{req}"}}"#
+    );
+    serde_json::from_str(&entry).expect("the entry parses")
+}
+
+/// The `semver` crate cannot read the version 2.0, so that package may satisfy any requirement.
+/// Next to 1.4.0, which satisfies `^1`, it leaves a `^1` declaration matched to neither.
+/// Next to 1.4.0, which does not satisfy `^2`, it is the one package a `^2` declaration fits.
+#[test]
+fn a_version_semver_cannot_read_counts_as_a_possible_match() {
+    let stdout = "clauseo-protocol v0.1.0 []\n|-- s v1.4.0 []\n`-- s v2.0 []\n";
+    let tree = Tree::parse(stdout, "clauseo-protocol").expect("the tree parses");
+    let produced = |req: &str| produced(&tree, &registry(req), Section::Normal);
+    assert_eq!(produced("^1"), (vec![1, 2], false));
+    assert_eq!(produced("^2"), (vec![2], true));
 }

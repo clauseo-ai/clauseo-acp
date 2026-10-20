@@ -5,11 +5,15 @@
 //! The candidates are the crate's direct dependencies with the declaration's package name whose
 //! lines came under its section (`Tree::sections`). A path declaration matches the candidate
 //! whose folder is its path, which cargo has already resolved against the manifest's folder.
-//! Any other declaration matches the candidates whose version satisfies its requirement, read
-//! with the `semver` crate as cargo reads it. Path packages count among them, since `[patch]`
-//! may point a registry or git declaration at one. With one candidate, that one is the node.
-//! A declaration that matches no candidate or several could have produced any of them, so the
-//! text says it may bring the package in.
+//! A git declaration matches the git candidates of its repository and reference. `cargo
+//! metadata` writes its source as `git+<repository>?<reference>` and `cargo tree` prints a git
+//! node's source as `<repository>?<reference>#<commit>`, so the two are compared on the part
+//! between. A registry declaration matches the candidates that are not git packages and whose
+//! version satisfies its requirement, read with the `semver` crate as cargo reads it. Path
+//! packages count among them, since `[patch]` may point a registry declaration at one. A version
+//! the `semver` crate cannot read may satisfy the requirement, so that candidate counts too.
+//! With one candidate, that one is the node. A declaration that matches no candidate or several
+//! could have produced any of them, so the text says it may bring the package in.
 
 use super::{Section, Tree};
 use crate::checks::and_list;
@@ -121,30 +125,26 @@ fn produced(tree: &Tree, dep: &CargoDependency, section: Section) -> (Vec<usize>
     if candidates.len() == 1 {
         return (candidates, true);
     }
-    let matched: Option<Vec<usize>> = match &dep.path {
-        Some(path) => Some(
-            candidates
-                .iter()
-                .copied()
-                .filter(|&node| tree.source_path(node) == Some(path.as_path()))
-                .collect(),
-        ),
-        // Path nodes count too, as the module doc says. A version this cannot compare leaves
-        // the declaration unmatched.
-        None => candidates
-            .iter()
-            .copied()
-            .map(|node| satisfies(&dep.req, tree.version(node)).map(|ok| (node, ok)))
-            .collect::<Option<Vec<(usize, bool)>>>()
-            .map(|all| {
-                all.into_iter()
-                    .filter(|(_, ok)| *ok)
-                    .map(|(n, _)| n)
-                    .collect()
-            }),
-    };
-    match matched {
-        Some(one) if one.len() == 1 => (one, true),
+    let git = dep
+        .source
+        .as_deref()
+        .and_then(|source| source.strip_prefix("git+"));
+    let mut fitting = Vec::new();
+    for &node in &candidates {
+        let fits = match (&dep.path, git) {
+            (Some(path), _) => tree.source_path(node) == Some(path.as_path()),
+            (None, Some(git)) => tree.git_source(node) == Some(git),
+            (None, None) => {
+                tree.git_source(node).is_none()
+                    && satisfies(&dep.req, tree.version(node)) != Some(false)
+            }
+        };
+        if fits {
+            fitting.push(node);
+        }
+    }
+    match fitting.as_slice() {
+        [node] => (vec![*node], true),
         _ => (candidates, false),
     }
 }
