@@ -43,12 +43,18 @@ fn a_plain_setup_leaves_bin_alone() {
     assert_eq!(names_in(&bin), before);
 }
 
+/// A run lock that can be neither opened nor created: a symlink into a directory that is not there.
+#[cfg(unix)]
 #[test]
 fn a_run_lock_that_cannot_be_taken_is_a_note_and_the_run_installs_without_the_sweep() {
     let dir = Scratch::new("setup-run-lock-error");
     let bin = dir.join("bin");
     plant_leftovers(&bin);
-    std::fs::create_dir(bin.join(".xtask-setup.lock")).unwrap();
+    std::os::unix::fs::symlink(
+        dir.join("no-such-dir").join("lock"),
+        bin.join(".xtask-setup.lock"),
+    )
+    .unwrap();
     let tool = fake_tool(Packing::Bare);
     let (ok, _, printed) = run_fake(&linux(&bin, true), &tool, true, &[None, Some(tool.version)]);
     assert!(ok, "{printed}");

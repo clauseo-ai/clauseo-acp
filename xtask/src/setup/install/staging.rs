@@ -73,11 +73,13 @@ pub(crate) fn lock_bin_and_sweep<W: Write>(
     (Some(lock), swept.is_ok())
 }
 
-/// Opens `RUN_LOCK` in `bin`, making both if needed, and takes its exclusive lock, waiting while
-/// another run holds it.
+/// Makes `bin` if needed, then takes the exclusive lock on `RUN_LOCK` in it, waiting while another
+/// run holds it. The lock file is opened for reading, so one the user cannot write still locks. It
+/// is created only when it is missing.
 fn lock_run<W: Write>(out: &mut Printer<W>, bin: &Path) -> io::Result<File> {
     fs::create_dir_all(bin)?;
-    let lock = File::create(bin.join(RUN_LOCK))?;
+    let path = bin.join(RUN_LOCK);
+    let lock = File::open(&path).or_else(|_| File::create(&path))?;
     match lock.try_lock() {
         Ok(()) => {}
         Err(TryLockError::WouldBlock) => {

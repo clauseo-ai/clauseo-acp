@@ -321,9 +321,10 @@ fn fetch_check_place(
 }
 
 /// The curl command that downloads `url` to `asset`. A failed attempt (a reset, a 502) is tried
-/// again `CURL_RETRIES` times; `--retry-all-errors` is needed for a reset, which curl 8.7 (macOS)
-/// does not retry otherwise, and it needs curl 7.71 or newer. A retry truncates what the attempt before wrote. curl's own limits
-/// end it even when xtask is gone (Ctrl-C reaches xtask, not curl's group).
+/// again `CURL_RETRIES` times. `--retry-all-errors` is needed for a reset, which curl 8.7 (macOS)
+/// does not retry otherwise, and it needs curl 7.71 or newer. A retry truncates what the attempt
+/// before wrote. curl's own limits end it even when xtask is gone (Ctrl-C reaches xtask, not
+/// curl's group).
 fn curl_cmd(asset: &str, url: &str) -> Cmd {
     Cmd::new(
         Program::Named("curl"),

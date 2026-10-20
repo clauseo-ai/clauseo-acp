@@ -404,6 +404,36 @@ fn the_download_commands_and_curl_stopping_itself_before_run_timed_does() {
     assert_eq!(DOWNLOAD_TIMEOUT, Duration::from_mins(21));
 }
 
+#[cfg(unix)]
+#[test]
+fn a_run_lock_the_user_cannot_write_is_still_taken_without_a_note() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = Scratch::new("setup-install-read-only-lock");
+    let bin = dir.join("bin");
+    fs::create_dir(&bin).unwrap();
+    let lock_path = bin.join(".xtask-setup.lock");
+    fs::write(&lock_path, b"left by a sudo run").unwrap();
+    fs::set_permissions(&lock_path, fs::Permissions::from_mode(0o444)).unwrap();
+    assert!(
+        fs::OpenOptions::new().write(true).open(&lock_path).is_err(),
+        "the lock file is not writable"
+    );
+    let mut out = Printer::new(Vec::new(), false);
+    let (held, ok) = lock_bin_and_sweep(&mut out, &linux(&bin, true));
+    assert!(ok && held.is_some());
+    let other = fs::File::open(&lock_path).unwrap();
+    assert!(matches!(
+        other.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    assert_eq!(String::from_utf8(out.into_inner()).unwrap(), "");
+    assert_eq!(
+        fs::read(&lock_path).unwrap(),
+        b"left by a sudo run",
+        "the lock file is not rewritten"
+    );
+}
+
 #[test]
 fn a_second_binaries_run_waits_for_the_run_lock_then_sweeps_every_staging_entry() {
     let dir = Scratch::new("setup-install-run-lock");
