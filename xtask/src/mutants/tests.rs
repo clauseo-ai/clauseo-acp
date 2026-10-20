@@ -80,6 +80,8 @@ fn check(
     let old_build_dir = temp.join(format!("{prefix}old.tmp"));
     Scratch::create_dir_all(&old_build_dir).expect("make an old build dir");
     let new_build_dir = temp.join(format!("{prefix}new.tmp"));
+    // A build dir another tree's run made meanwhile, which is not this run's either.
+    let other_build_dir = temp.join("cargo-mutants-other-tree-new.tmp");
     let mut ran = Vec::new();
     let mut out = Printer::new(Vec::new(), false);
     let passed = {
@@ -125,6 +127,7 @@ fn check(
                     // The build dir a SIGKILL left behind.
                     Scratch::create_dir_all(new_build_dir.join("target"))
                         .expect("make a build dir");
+                    Scratch::create_dir_all(&other_build_dir).expect("make another tree's");
                     Err(process::timed_out(cmd))
                 }
                 Run::CannotStart => Err(io::Error::new(io::ErrorKind::NotFound, "no cargo")),
@@ -143,6 +146,8 @@ fn check(
         run_with(&mut out, &root, &temp, diff, &mut exec)
     };
     assert!(old_build_dir.is_dir(), "an earlier run's build dir is kept");
+    let other_kept = !matches!(run, Run::WritesThenTimesOut(_)) || other_build_dir.is_dir();
+    assert!(other_kept, "another tree's build dir is kept");
     assert!(
         !new_build_dir.exists(),
         "a build dir the stopped run left is removed"
