@@ -74,6 +74,26 @@ macro_rules! no_forbid {
     };
 }
 
+/// The violation for `crates/protocol/Cargo.toml`, which gives a `$kind` target the root
+/// `$path`, outside the crate's folder.
+#[cfg(test)]
+macro_rules! root_outside {
+    ($kind:literal, $path:literal) => {
+        concat!(
+            "crates/protocol/Cargo.toml:1: `crates/protocol/Cargo.toml` gives clauseo-protocol's ",
+            $kind,
+            " target the root `",
+            $path,
+            "`, outside `crates/protocol/`, and core-io checks \
+             the forbid line and the cfgs of clauseo-protocol only under its folder\n    \
+             fix: move `",
+            $path,
+            "` under `crates/protocol/` and point the target's `path` in \
+             `crates/protocol/Cargo.toml` at it"
+        )
+    };
+}
+
 /// The violation for a cfg with `$form` at line `$line` of `crates/protocol/src/hidden.rs`.
 #[cfg(test)]
 macro_rules! cfg_form {
@@ -266,13 +286,9 @@ crate::checks::planted::cases! {
     forbid_missing_in_a_bin: FailsWith(&[no_forbid!("crates/protocol/src/main.rs", "bin")]), inspects 3 => super::forbid_missing_in_a_bin,
     forbid_missing_in_a_test: FailsWith(&[no_forbid!("crates/protocol/tests/events.rs", "test")]), inspects 3 => super::forbid_missing_in_a_test,
     clock_only_crate_without_forbid: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::clock_only_crate_without_forbid,
-    root_outside_the_repo: FailsWith(&[
-        "crates/protocol/Cargo.toml:1: `crates/protocol/Cargo.toml` gives clauseo-protocol's bin \
-         target the root `/elsewhere/outside.rs`, outside the repo, so core-io cannot check that \
-         it carries `#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]`\n    \
-         fix: move `/elsewhere/outside.rs` under `crates/protocol/` and point the target's \
-         `path` in `crates/protocol/Cargo.toml` at it",
-    ]), inspects 3 => super::root_outside_the_repo,
+    root_outside_the_repo: FailsWith(&[root_outside!("bin", "/elsewhere/outside.rs")]), inspects 3 => super::root_outside_the_repo,
+    root_outside_the_repo_through_dot_dot: FailsWith(&[root_outside!("lib", "/x.rs")]), inspects 3 => super::root_outside_the_repo_through_dot_dot,
+    root_outside_the_crate: FailsWith(&[root_outside!("lib", "crates/shared/lib.rs")]), inspects 3 => super::root_outside_the_crate,
     root_not_rust: FailsWith(&[
         "crates/protocol/src/lib.rs:3: `crates/protocol/src/lib.rs`, a target root of \
          clauseo-protocol, does not parse as Rust (expected identifier), so core-io cannot find \

@@ -3,7 +3,7 @@
 use crate::process::{self, Cmd, Program};
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// A workspace member package.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,11 +22,30 @@ pub(crate) struct Member {
 pub(crate) struct Target {
     /// The target's kinds: `lib`, `bin`, `test`, `example`, `bench`, `custom-build` and others.
     pub kinds: Vec<String>,
-    /// The target's root file, relative to the workspace root and `/`-separated, or as
-    /// `cargo metadata` gives it when `outside`.
+    /// The target's root file with its `.` and `..` components resolved, relative to the
+    /// workspace root and `/`-separated, or absolute when `outside`.
     pub src_path: String,
     /// True when the root file lies outside the workspace root, where cargo still builds it.
     pub outside: bool,
+}
+
+impl Target {
+    /// The target of kinds `kinds` whose root `cargo metadata` gives as `src_path`, an absolute
+    /// path that may hold `..`, in the workspace at `base`.
+    pub(crate) fn new(kinds: Vec<String>, src_path: &Path, base: &Path) -> Target {
+        match relative(src_path, base) {
+            Some(relative) => Target {
+                kinds,
+                src_path: relative,
+                outside: false,
+            },
+            None => Target {
+                kinds,
+                src_path: lexical(src_path).to_string_lossy().into_owned(),
+                outside: true,
+            },
+        }
+    }
 }
 
 /// The workspace as one `cargo metadata --no-deps` run reports it.
@@ -202,18 +221,7 @@ pub(crate) fn parse_metadata(json: &str) -> Result<Vec<Member>, String> {
         let targets = package
             .targets
             .iter()
-            .map(|target| match relative(&target.src_path, base) {
-                Some(src_path) => Target {
-                    kinds: target.kind.clone(),
-                    src_path,
-                    outside: false,
-                },
-                None => Target {
-                    kinds: target.kind.clone(),
-                    src_path: target.src_path.to_string_lossy().into_owned(),
-                    outside: true,
-                },
-            })
+            .map(|target| Target::new(target.kind.clone(), &target.src_path, base))
             .collect();
         members.push(Member {
             name: package.name.clone(),
@@ -226,15 +234,38 @@ pub(crate) fn parse_metadata(json: &str) -> Result<Vec<Member>, String> {
     Ok(members)
 }
 
-/// `path` relative to `base`, `/`-separated; `None` when `path` is outside `base`.
+/// `path` relative to `base`, `/`-separated, after `lexical` resolves both; `None` when
+/// `path` is outside `base`.
 fn relative(path: &Path, base: &Path) -> Option<String> {
-    let rest = path.strip_prefix(base).ok()?;
+    let path = lexical(path);
+    let base = lexical(base);
+    let rest = path.strip_prefix(&base).ok()?;
     Some(
         rest.components()
             .map(|c| c.as_os_str().to_string_lossy().into_owned())
             .collect::<Vec<_>>()
             .join("/"),
     )
+}
+
+/// `path` with its `.` components dropped and each `..` removing the component before it,
+/// without reading the disk. A `..` at the root or at the start of a relative path stays.
+fn lexical(path: &Path) -> PathBuf {
+    let mut out: Vec<Component<'_>> = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match out.last() {
+                Some(Component::Normal(_)) => {
+                    out.pop();
+                }
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                Some(Component::ParentDir | Component::CurDir) | None => out.push(component),
+            },
+            other => out.push(other),
+        }
+    }
+    out.iter().collect()
 }
 
 /// True when the repo-relative `file` lies inside the repo-relative directory `dir`.
@@ -301,6 +332,27 @@ mod tests {
         assert_eq!(
             (outside.src_path.as_str(), outside.outside),
             ("/elsewhere/t.rs", true)
+        );
+    }
+
+    /// cargo metadata keeps a manifest's `..`; the target is placed by the path it resolves to.
+    #[test]
+    fn a_target_root_with_dot_dot_is_placed_where_it_resolves() {
+        let target = |path: &str| {
+            let target = Target::new(vec!["lib".to_owned()], Path::new(path), Path::new("/ws"));
+            (target.src_path, target.outside)
+        };
+        assert_eq!(
+            target("/ws/crates/a/../../../x.rs"),
+            ("/x.rs".to_owned(), true)
+        );
+        assert_eq!(
+            target("/ws/crates/a/../shared/./lib.rs"),
+            ("crates/shared/lib.rs".to_owned(), false)
+        );
+        assert_eq!(
+            target("/ws/crates/../../ws/crates/a/lib.rs"),
+            ("crates/a/lib.rs".to_owned(), false)
         );
     }
 

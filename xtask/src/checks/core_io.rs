@@ -19,11 +19,12 @@
 //! `clippy::disallowed_methods` or `clippy::disallowed_types` anywhere in the target is error
 //! E0453, and a level for `disallowed_methods` or `disallowed_types` in the manifest or in
 //! `CLIPPY_ARGS` does not undo it. So a held crate gets no exception; a test that needs a
-//! fixture reads it with `include_str!`. A root syn cannot parse fails at the syntax error, and a
-//! root outside the repo, which cargo builds all the same, fails at the crate's manifest. A
-//! held crate also has no build script, neither a `build.rs` in its folder nor a `build` key
-//! under `[package]`, since a build script's `cargo::rustc-env` lines reach the clippy that lints
-//! the crate (`roots.rs`).
+//! fixture reads it with `include_str!`. A root syn cannot parse fails at the syntax error. A
+//! root outside the crate's folder, once its `.` and `..` components are resolved, fails at the
+//! crate's manifest, since cargo builds it all the same and the cfg rule below reads only the
+//! folder. A held crate also has no build script, neither a `build.rs` in its folder nor a
+//! `build` key under `[package]`, since a build script's `cargo::rustc-env` lines reach the
+//! clippy that lints the crate (`roots.rs`).
 //!
 //! clippy sees all of a held crate's code. The clippy step runs with `--all-targets` and
 //! `--all-features` (`steps/plan.rs`), so clippy lints the crate once per target kind with every

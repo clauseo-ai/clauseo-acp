@@ -128,6 +128,10 @@ fn scratch(case: &str, repo: &Repo<'_>) -> Scratch {
     dir
 }
 
+/// The workspace root the members' targets are placed against, as `cargo metadata` would give
+/// it. A target's absolute path then does not depend on where the scratch repo lies.
+const METADATA_ROOT: &str = "/ws";
+
 /// The workspace members of every case: `clauseo-protocol` at `crates/protocol`, with its library
 /// and `targets`, and `clauseo-extra`, which has no row and no file.
 fn members(targets: &[(&str, &str)]) -> Vec<Member> {
@@ -142,10 +146,9 @@ fn members(targets: &[(&str, &str)]) -> Vec<Member> {
                 path_deps: Vec::new(),
                 targets: std::iter::once(("lib", lib.as_str()))
                     .chain(more.iter().copied())
-                    .map(|(kind, src_path)| Target {
-                        kinds: vec![kind.to_owned()],
-                        src_path: src_path.to_owned(),
-                        outside: src_path.starts_with('/'),
+                    .map(|(kind, src_path)| {
+                        let base = Path::new(METADATA_ROOT);
+                        Target::new(vec![kind.to_owned()], &base.join(src_path), base)
                     })
                     .collect(),
             }

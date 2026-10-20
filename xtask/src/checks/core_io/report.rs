@@ -303,7 +303,7 @@ pub(super) fn missing_forbid(path: &str, package: &str, kinds: &str) -> Violatio
 }
 
 /// The violation for `package`'s manifest `manifest`, which gives a target of kind `kinds` the
-/// root `path`, outside the repo; `dir` is the crate's folder.
+/// root `path`, outside the crate's folder `dir`.
 pub(super) fn root_outside(
     manifest: &str,
     package: &str,
@@ -315,8 +315,8 @@ pub(super) fn root_outside(
         manifest,
         1,
         format!(
-            "`{manifest}` gives {package}'s {kinds} target the root `{path}`, outside the repo, \
-             so core-io cannot check that it carries `{FORBID_LINE}`"
+            "`{manifest}` gives {package}'s {kinds} target the root `{path}`, outside `{dir}/`, \
+             and core-io checks the forbid line and the cfgs of {package} only under its folder"
         ),
         format!("move `{path}` under `{dir}/` and point the target's `path` in `{manifest}` at it"),
     )

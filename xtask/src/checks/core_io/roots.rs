@@ -1,11 +1,11 @@
-//! A held crate's target roots and build script: every target root carries `FORBID_LINE` among
-//! its inner attributes, and the crate has no build script.
+//! A held crate's target roots and build script. Every target root sits under the crate's folder
+//! and carries `FORBID_LINE` among its inner attributes, and the crate has no build script.
 
 use super::clippy_toml::line_number;
 use super::report;
 use crate::checks;
 use crate::violation::Violation;
-use crate::workspace::Member;
+use crate::workspace::{self, Member};
 use std::collections::BTreeSet;
 use std::path::Path;
 use syn::punctuated::Punctuated;
@@ -18,7 +18,7 @@ const FORBIDDEN: [&str; 2] = ["clippy::disallowed_methods", "clippy::disallowed_
 /// The kind of a build script target, which `build_script` covers.
 const BUILD_SCRIPT_KIND: &str = "custom-build";
 
-/// The violations for the target roots of the held crate `member` that lie outside the repo,
+/// The violations for the target roots of the held crate `member` that lie outside its folder,
 /// lack the forbid line or do not parse, each root once, in the order `cargo metadata` lists
 /// them.
 pub(super) fn forbid_lines(root: &Path, member: &Member) -> Vec<Violation> {
@@ -33,7 +33,7 @@ pub(super) fn forbid_lines(root: &Path, member: &Member) -> Vec<Violation> {
             continue;
         }
         let path = &target.src_path;
-        if target.outside {
+        if target.outside || !workspace::is_under(path, &member.dir) {
             let manifest = checks::join(&member.dir, "Cargo.toml");
             let kinds = target.kinds.join(", ");
             found.push(report::root_outside(

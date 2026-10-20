@@ -121,6 +121,25 @@ pub(in crate::checks::core_io) fn root_outside_the_repo() -> Inspection {
     held("root-outside", &[], &[("bin", "/elsewhere/outside.rs")])
 }
 
+/// The review's case: cargo metadata keeps the `..` of `[lib] path = "../../../x.rs"`.
+pub(in crate::checks::core_io) fn root_outside_the_repo_through_dot_dot() -> Inspection {
+    held(
+        "root-dot-dot",
+        &[],
+        &[("lib", "crates/protocol/../../../x.rs")],
+    )
+}
+
+/// The review's case: a root in the repo but outside the crate's folder, whose files the cfg
+/// rule does not read.
+pub(in crate::checks::core_io) fn root_outside_the_crate() -> Inspection {
+    held(
+        "root-outside-crate",
+        &[("crates/shared/lib.rs", FORBIDDING_ROOT)],
+        &[("lib", "crates/protocol/../shared/lib.rs")],
+    )
+}
+
 /// The line in the root of every kind of target, and no build script, passes.
 pub(in crate::checks::core_io) fn forbid_in_every_root() -> Inspection {
     let roots = [
