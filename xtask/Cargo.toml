@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+dunce.workspace = true
 # The docs check reads Markdown with it: code spans, links, reference definitions, code blocks.
 pulldown-cmark = { version = "0.13.4", default-features = false }
 # The tauri-config check: `span-locations` gives the line of a syntax error in build.rs.

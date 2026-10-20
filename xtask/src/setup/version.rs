@@ -111,8 +111,12 @@ fn after_install_fix(machine: &Machine<'_>, name: &str) -> String {
 /// Whether `dir` is one of the directories in `path`. Both sides are compared after
 /// `canonicalize`, so a symlinked or relative directory still matches; an entry that cannot be
 /// canonicalized (it does not exist, say) is compared as written.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "reads which directories PATH lists to word a fix line; it looks no program up"
+)]
 fn on_path(dir: &Path, path: &std::ffi::OsStr) -> bool {
-    let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let real = |p: &Path| dunce::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let dir_real = real(dir);
     std::env::split_paths(path).any(|entry| entry == dir || real(&entry) == dir_real)
 }
