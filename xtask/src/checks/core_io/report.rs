@@ -384,6 +384,16 @@ pub(super) fn cfg_rule(path: &str, line: u32, finding: &Finding, package: &str) 
              a `use`"
                 .to_owned(),
         ),
+        Finding::CfgInCfgAttr => (
+            format!(
+                "`{path}` puts a `cfg` inside a `cfg_attr`, which keeps the item whenever the \
+                 `cfg_attr`'s predicate is false, so a feature there acts like a `not(feature)` and \
+                 can leave code out of every clippy run"
+            ),
+            "write the condition as one `#[cfg(..)]` outside any `cfg_attr`, built from `test` \
+             and positive features"
+                .to_owned(),
+        ),
         Finding::Include => (
             format!(
                 "`{path}` calls `include!`, which can bring into {package} code from a file \

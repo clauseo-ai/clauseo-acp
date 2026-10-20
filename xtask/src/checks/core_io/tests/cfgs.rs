@@ -105,6 +105,16 @@ pub(in crate::checks::core_io) fn cfg_select_alias() -> Inspection {
     )
 }
 
+/// The review's case: a `cfg` inside a `cfg_attr` keeps the fn without the feature and drops it
+/// under `--all-features`, the only build clippy sees.
+pub(in crate::checks::core_io) fn cfg_inside_cfg_attr() -> Inspection {
+    with_file(
+        "cfg-in-cfg-attr",
+        "#[cfg_attr(feature = \"specta\", cfg(any()))]\npub fn g() {\n    \
+         let _ = std::fs::read(\"x\");\n}\n",
+    )
+}
+
 pub(in crate::checks::core_io) fn cfg_attr_not_feature() -> Inspection {
     with_file(
         "cfg-attr-not-feature",

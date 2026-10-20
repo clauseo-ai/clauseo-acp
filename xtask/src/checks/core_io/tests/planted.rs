@@ -335,6 +335,13 @@ crate::checks::planted::cases! {
     cfg_select_expression: FailsWith(&[cfg_select!(2)]), inspects 3 => super::cfg_select_expression,
     cfg_select_items: FailsWith(&[cfg_select!(1)]), inspects 3 => super::cfg_select_items,
     cfg_select_alias: FailsWith(&[cfg_select!(1)]), inspects 3 => super::cfg_select_alias,
+    cfg_inside_cfg_attr: FailsWith(&[
+        "crates/protocol/src/hidden.rs:1: `crates/protocol/src/hidden.rs` puts a `cfg` inside a \
+         `cfg_attr`, which keeps the item whenever the `cfg_attr`'s predicate is false, so a \
+         feature there acts like a `not(feature)` and can leave code out of every clippy run\n    \
+         fix: write the condition as one `#[cfg(..)]` outside any `cfg_attr`, built from `test` \
+         and positive features",
+    ]), inspects 3 => super::cfg_inside_cfg_attr,
     cfg_attr_not_feature: FailsWith(&[cfg_form!(1, "a feature under `not`")]), inspects 3 => super::cfg_attr_not_feature,
     cfg_metavariable_in_a_macro_body: FailsWith(&[cfg_form!(3, "a metavariable")]), inspects 3 => super::cfg_metavariable_in_a_macro_body,
     attribute_name_metavariable: FailsWith(&[

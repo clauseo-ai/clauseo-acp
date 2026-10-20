@@ -10,11 +10,12 @@
 //! macro can join a `#` to brackets passed separately. The name `cfg_select` fails wherever it
 //! stands, a `use` included, since `cfg_select!` builds only the arm whose cfg holds and an alias
 //! would hide the call. `cfg!` passes, since both branches of an `if cfg!(..)` are compiled and
-//! linted. An attribute or a macro
-//! call whose name is a metavariable fails, and so does a `#` before a metavariable, since a macro
-//! could build a `cfg` or an `include!` from a passed name. A `path` attribute, `include!` and
-//! any symlink under the crate's folder fail, so every module file sits at its default path
-//! under the crate, ends in `.rs` and is lexed here.
+//! linted. A `cfg` among the attributes of a `cfg_attr` fails, at any depth, since
+//! `#[cfg_attr(feature = "x", cfg(any()))]` keeps the item only when the feature is off. An
+//! attribute or a macro call whose name is a metavariable fails, and so does a `#` before a
+//! metavariable, since a macro could build a `cfg` or an `include!` from a passed name. A `path`
+//! attribute, `include!` and any symlink under the crate's folder fail, so every module file sits
+//! at its default path under the crate, ends in `.rs` and is lexed here.
 
 use super::report;
 use crate::checks;
@@ -38,6 +39,8 @@ pub(super) enum Finding {
     Include,
     /// The name `cfg_select`, whose macro builds only the arm whose cfg holds.
     CfgSelect,
+    /// A `cfg` among the attributes of a `cfg_attr`, at any depth of `cfg_attr`.
+    CfgInCfgAttr,
     /// A macro call whose name is a metavariable, such as `$x!`.
     MetavariableMacro,
 }
@@ -211,9 +214,15 @@ fn cfg_attr(rest: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
     }
 }
 
-/// Checks the tokens of one attribute after the predicate of `cfg_attr`: its name may not be a
-/// metavariable, and its head is checked as `attribute_head` checks it.
+/// Checks the tokens of one attribute after the predicate of `cfg_attr`: a `cfg` fails, its name
+/// may not be a metavariable, and its head is checked as `attribute_head` checks it.
 fn attribute(tokens: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
+    if let Some(TokenTree::Ident(ident)) = tokens.first()
+        && ident_name(ident) == "cfg"
+    {
+        hits.push((Finding::CfgInCfgAttr, line_of(ident.span().start().line)));
+        return;
+    }
     if let Some(first) = tokens.first() {
         metavariable_name(first, hits);
     }
@@ -385,6 +394,10 @@ mod tests {
             (
                 "#[cfg_attr(test, cfg_attr(unix, derive(Debug)))]",
                 vec![(name("unix"), 1)],
+            ),
+            (
+                "#[cfg_attr(test, cfg_attr(feature = \"a\", cfg(test)))]",
+                vec![(Finding::CfgInCfgAttr, 1)],
             ),
             ("r#include!(\"x.rs\");", vec![(Finding::Include, 1)]),
             (
