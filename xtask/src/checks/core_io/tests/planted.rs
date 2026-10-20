@@ -85,11 +85,11 @@ macro_rules! alias {
             $name,
             "`, so `cargo ",
             $name,
-            "` runs the alias instead of the cargo command xtask runs, \
+            "` runs the alias instead of the external command xtask runs, \
              and cargo only warns about it\n    fix: remove the `",
             $name,
             "` alias; an alias may \
-             not take the name of a cargo command xtask runs"
+             not take the name of an external cargo command xtask runs"
         )
     };
 }
@@ -238,7 +238,8 @@ crate::checks::planted::cases! {
          fix: delete the `build` key, and the script it names if there is one",
     ]), inspects 3 => super::package_build_set,
     forbid_in_every_root: Passes, inspects 3 => super::forbid_in_every_root,
-    /// An alias named after a cargo command xtask runs; the repo's `xtask` alias passes.
+    /// An alias named after an external cargo command xtask runs fails; the repo's `xtask` alias
+    /// and one named after a built-in command, which cargo ignores, pass.
     alias_of_a_command_xtask_runs: FailsWith(&[alias!(3, "clippy")]), inspects 3 => super::alias_of_a_command_xtask_runs,
     /// Any other clippy config fails: clippy reads only the nearest one, and `.clippy.toml` first.
     dot_clippy_toml_beside_the_crate_file: FailsWith(&[

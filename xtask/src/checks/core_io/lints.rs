@@ -8,12 +8,10 @@ use std::path::Path;
 use toml::Spanned;
 use toml::de::{DeString, DeTable, DeValue};
 
-/// The cargo subcommands xtask runs, which an `[alias]` of the cargo config may not shadow: those
-/// of `checks/graph.rs`, `checks/dependencies.rs`, `steps/plan.rs`, `steps/policy.rs`,
-/// `buildtime.rs` (the probes), `setup.rs` and `workspace.rs`.
-const XTASK_SUBCOMMANDS: [&str; 10] = [
-    "build", "check", "clippy", "deny", "fmt", "install", "metadata", "nextest", "shear", "tree",
-];
+/// The external cargo commands xtask runs, in `steps/plan.rs` and `steps/policy.rs`. An `[alias]`
+/// of the cargo config may not take their names, since cargo runs an alias in place of an
+/// external command. It ignores an alias named after a built-in command such as `check`.
+const XTASK_SUBCOMMANDS: [&str; 5] = ["clippy", "deny", "fmt", "nextest", "shear"];
 
 /// The repo's cargo config.
 pub(super) const CARGO_CONFIG: &str = ".cargo/config.toml";
@@ -53,8 +51,8 @@ pub(super) fn crate_manifest(root: &Path, member: &Member) -> Vec<Violation> {
 }
 
 /// The violations for the cargo config: a legacy `.cargo/config`, and in `.cargo/config.toml`
-/// each `rustflags` key at any depth, each `[alias]` key named after a cargo subcommand xtask
-/// runs and each `[env]` entry whose name starts with `CLIPPY_`.
+/// each `rustflags` key at any depth, each `[alias]` key named after an external cargo command
+/// xtask runs and each `[env]` entry whose name starts with `CLIPPY_`.
 pub(super) fn cargo_config(root: &Path) -> Vec<Violation> {
     let mut found = Vec::new();
     match checks::read_repo_file(root, LEGACY_CARGO_CONFIG) {

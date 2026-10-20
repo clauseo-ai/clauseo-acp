@@ -33,8 +33,9 @@
 //! - a member's `Cargo.toml` without `[lints] workspace = true`, any member, held or not;
 //! - a legacy `.cargo/config`, which cargo reads instead of `.cargo/config.toml`;
 //! - in `.cargo/config.toml`, a `rustflags` key at any depth, since `--cap-lints allow` there
-//!   beats `forbid`, an `[alias]` key named after a cargo subcommand xtask runs, since cargo runs
-//!   the alias instead and only warns, and an `[env]` entry starting with `CLIPPY_` in any case
+//!   beats `forbid`, an `[alias]` key named after an external cargo command xtask runs
+//!   (`clippy`, `fmt`, `nextest`, `deny` or `shear`), since cargo runs the alias instead and
+//!   only warns, and an `[env]` entry starting with `CLIPPY_` in any case
 //!   (`lints.rs`).
 //!
 //! xtask also runs cargo without `CLIPPY_CONF_DIR` in its own environment (`process.rs`).

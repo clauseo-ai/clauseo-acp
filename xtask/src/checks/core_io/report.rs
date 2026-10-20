@@ -221,18 +221,18 @@ pub(super) fn clippy_env_in_config(path: &str, line: u32, name: &str) -> Violati
 }
 
 /// The violation for the `[alias]` key `name` of the cargo config at `path`, at `line`, which
-/// is a cargo subcommand xtask runs.
+/// is an external cargo command xtask runs.
 pub(super) fn alias_shadows_command(path: &str, line: u32, name: &str) -> Violation {
     violation(
         path,
         line,
         format!(
             "`{path}` defines the alias `{name}`, so `cargo {name}` runs the alias instead of \
-             the cargo command xtask runs, and cargo only warns about it"
+             the external command xtask runs, and cargo only warns about it"
         ),
         format!(
-            "remove the `{name}` alias; an alias may not take the name of a cargo command xtask \
-             runs"
+            "remove the `{name}` alias; an alias may not take the name of an external cargo \
+             command xtask runs"
         ),
     )
 }

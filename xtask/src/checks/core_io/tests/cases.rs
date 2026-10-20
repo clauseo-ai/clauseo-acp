@@ -194,13 +194,14 @@ pub(in crate::checks::core_io) fn alias_of_a_command_xtask_runs() -> Inspection 
     )
 }
 
-/// A cargo config with an alias, an `[env]` entry and a build setting passes.
+/// A cargo config with aliases, an `[env]` entry and a build setting passes. cargo ignores an
+/// alias named after a built-in command, such as `check`.
 pub(in crate::checks::core_io) fn cargo_config_without_lint_settings() -> Inspection {
     good_crate_and(
         "cargo-config-clean",
         &[(
             ".cargo/config.toml",
-            "[alias]\nx = \"run\"\n\n[env]\nRUST_LOG = \"info\"\n\n[build]\njobs = 4\n",
+            "[alias]\nx = \"run\"\ncheck = \"build\"\n\n[env]\nRUST_LOG = \"info\"\n\n[build]\njobs = 4\n",
         )],
     )
 }
