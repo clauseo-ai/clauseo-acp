@@ -55,13 +55,20 @@ this. Use the words in `GLOSSARY.md` exactly.
 - A crate never depends on what `ARCHITECTURE.md` lists under "Never depends on".
 - Capability files and the desktop crate's permission files (`permissions/`) never contain
   `remote`, `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`.
-- Only `#[expect(lint, reason = "...")]` may silence a lint, never `#[allow]` or `#![allow]`.
+- Only `#[expect(lint, reason = "...")]` may silence a lint, never `#[allow]` or `#![allow]`. Every
+  `#[expect]` is listed in `xtask/expect-allowlist.txt`.
 - A crate that `ARCHITECTURE.md` marks as banning I/O or the clock gets no exception to the bans,
   not even `#[expect]`. What such a crate carries is in the I/O paragraph of `ARCHITECTURE.md`.
 - No `unwrap`, `expect`, `panic!`, `todo!` or `println!` outside tests and `main`.
 - A source file has at most 600 lines.
 - Rust comments stay within 100 columns; a file past 500 lines gets a note to split it.
 - A check that inspects nothing fails.
+- Every check ships planted violations, its bypass forms included. A surviving mutant in your
+  diff fails `cargo xtask mutants`.
+- Files are written only through each crate's write module (`xtask/src/write.rs`, and
+  `ui/app/scripts/guard.mjs` for scripts). Child processes start only through
+  `xtask/src/process.rs`, with a timeout and a whole-tree kill.
+- Each pinned version has one home.
 - Component files in `ui/` export only components.
 
 ## Testing
