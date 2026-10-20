@@ -29,9 +29,7 @@ const SRC: &str = "ui/app/src";
 const MARKER: &str = "data-buildtime=";
 
 const MESSAGE: &str = "an interrupted `cargo xtask buildtime web` left its edit here";
-const FIX: &str = "run `cargo xtask buildtime web` once to restore the file from target/xtask/buildtime, or remove the attribute by hand";
 const LIVE_MESSAGE: &str = "a `cargo xtask buildtime` run is in progress and holds this edit";
-const LIVE_FIX: &str = "rerun the check when that run ends";
 
 /// Fails on every line under `ui/app/src` that holds the probe's attribute.
 pub(crate) const CHECK: StaticCheck = StaticCheck {
@@ -96,14 +94,14 @@ fn collect(dir: &Path, found: &mut Vec<PathBuf>) -> io::Result<()> {
 /// worded for a live run when `held` (the buildtime lock is held), else for a leftover.
 fn scan(path: &str, text: &str, held: bool) -> Vec<Violation> {
     let (message, fix) = if held {
-        (LIVE_MESSAGE, LIVE_FIX)
+        (LIVE_MESSAGE, Fix::LiveRun)
     } else {
-        (MESSAGE, FIX)
+        (MESSAGE, Fix::Leftover)
     };
     text.lines()
         .enumerate()
         .filter(|(_, line)| line.contains(MARKER))
-        .map(|(index, _)| checks::violation(path, checks::line_at(index), message, fix))
+        .map(|(index, _)| checks::violation(path, checks::line_at(index), message, fix.clone()))
         .collect()
 }
 
