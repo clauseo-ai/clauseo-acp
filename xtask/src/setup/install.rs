@@ -5,7 +5,7 @@
 use super::{Binary, Machine, Packing, Runner};
 use crate::output::Printer;
 use crate::process::{Cmd, Ended, Output, Program};
-use crate::write;
+use crate::write::Staging;
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 use std::fs;
@@ -207,14 +207,15 @@ fn download_into<W: Write>(
         "installing {} {}: downloading {}",
         binary.name, binary.version, download.url
     ));
-    let staging = bin.join(format!(
-        "{}{}-{}",
-        staging::STAGING_PREFIX,
-        binary.name,
-        std::process::id()
-    ));
-    let placed = staging::fresh_dir(bin, &staging)
-        .and_then(|()| fetch_check_place(binary, download, &staging, bin, runner));
+    let label = format!("{}-{}", binary.name, std::process::id());
+    let staging = match staging::fresh_dir(bin, &label) {
+        Ok(staging) => staging,
+        Err((message, fix)) => {
+            out.failure(&message, &fix);
+            return false;
+        }
+    };
+    let placed = fetch_check_place(binary, download, &staging, bin, runner);
     let mut ok = match placed {
         Ok(()) => {
             out.note(format!(
@@ -230,15 +231,12 @@ fn download_into<W: Write>(
             false
         }
     };
-    match write::remove_staging_dir(&staging) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => {
-            out.failure(
-                &format!("could not remove {}: {error}", staging.display()),
-                &format!("remove {} by hand", staging.display()),
-            );
-            ok = false;
-        }
-        _ => {}
+    if let Err(error) = staging.remove() {
+        out.failure(
+            &format!("could not remove {}: {error}", staging.dir().display()),
+            &format!("remove {} by hand", staging.dir().display()),
+        );
+        ok = false;
     }
     ok
 }
@@ -248,10 +246,11 @@ fn download_into<W: Write>(
 fn fetch_check_place(
     binary: &Binary,
     download: &Download,
-    staging: &Path,
+    staging: &Staging,
     bin: &Path,
     runner: &mut Runner<'_>,
 ) -> Result<(), Failure> {
+    let (staging, dir) = (staging, staging.dir());
     let (name, asset, url) = (binary.name, download.asset.as_str(), download.url.as_str());
     let curl = curl_cmd(asset, url);
     let fix = format!(
@@ -259,8 +258,8 @@ fn fetch_check_place(
          setup --binaries again; setup needs curl 7.71 or newer, for --retry-all-errors"
     );
     let what = format!("downloading {url}");
-    run_step(runner, &curl, staging, &what, &fix)?;
-    let file = staging.join(asset);
+    run_step(runner, &curl, dir, &what, &fix)?;
+    let file = dir.join(asset);
     let found = sha256_of(&file).map_err(|error| {
         (
             format!("could not read the download of {url}: {error}"),
@@ -287,8 +286,8 @@ fn fetch_check_place(
                  download of {url} and check its output, then run cargo xtask setup --binaries \
                  again"
             );
-            run_step(runner, &tar, staging, &format!("unpacking {asset}"), &fix)?;
-            staging.join(name)
+            run_step(runner, &tar, dir, &format!("unpacking {asset}"), &fix)?;
+            dir.join(name)
         }
     };
     let regular = fs::symlink_metadata(&unpacked).map_err(|error| {
@@ -306,8 +305,7 @@ fn fetch_check_place(
             ),
         ));
     }
-    let destination = bin.join(name);
-    write::install_executable(&unpacked, &destination).map_err(|error| {
+    staging.install(&unpacked, name).map_err(|error| {
         (
             format!("could not move {name} into {}: {error}", bin.display()),
             retry_fix(bin),

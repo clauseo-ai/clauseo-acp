@@ -1,23 +1,28 @@
 //! The tracked-file guard: the saved copy of a file's original, every write a tool makes to the
 //! file, and putting the original back. The guard never writes over bytes it did not write itself.
 //! Any xtask tool that edits a tracked file uses it; `buildtime` does for its marker files.
+//!
+//! Its rules, the same as `ui/app/scripts/guard.mjs`'s:
+//! - Before the first edit, the original is copied to `<dir>/<repo path>`. A copy is never
+//!   replaced.
+//! - Every write to the file goes to `.<name>.<tool>.tmp` in the same folder, then is renamed over
+//!   it, so a kill never leaves half a file.
+//! - The original goes back only while the file holds exactly the bytes last written. Anything else
+//!   is the developer's edit: nothing more is written, and both files stay.
+//! - A killed run leaves its copy. The tool's next run puts it back through
+//!   `Backups::restore_leftover` only when the tool has checked that the file is the copy plus an
+//!   edit the tool itself makes.
 
+mod backups;
+
+pub(crate) use backups::Backups;
+
+use super::replace::{ReplaceFailure, replace, tmp_of};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
-/// What a tool that edits tracked files tells the guard: where its copies wait and what its
-/// messages call one run of it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Backups {
-    /// The folder of the copies, under the repo root, `/`-separated: `target/xtask/buildtime`.
-    /// A copy keeps the file's repo path under it.
-    pub dir: &'static str,
-    /// One run of the tool, as in "changed during this buildtime run".
-    pub run: &'static str,
-}
-
-/// Why the guard stopped: what happened, and what to do about it.
+/// Why the guard stopped or refused: what happened, and what to do about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GuardFailure {
     pub message: String,
@@ -27,57 +32,6 @@ pub(crate) struct GuardFailure {
 impl GuardFailure {
     fn new(message: String, fix: String) -> GuardFailure {
         GuardFailure { message, fix }
-    }
-}
-
-impl Backups {
-    /// The copy's path under the repo root, as the messages print it.
-    pub(crate) fn copy_name(self, rel: &str) -> String {
-        format!("{}/{rel}", self.dir)
-    }
-
-    /// The folder of the copies under `root`.
-    pub(crate) fn base(self, root: &Path) -> PathBuf {
-        root.join(self.dir)
-    }
-
-    /// The fix for a copy that could not be saved. A filesystem without hard links needs another
-    /// filesystem, not write access.
-    pub(crate) fn save_fix(self, kind: io::ErrorKind) -> String {
-        if kind == io::ErrorKind::Unsupported {
-            format!(
-                "the filesystem of {} has no hard links; run from a checkout on a filesystem that has them",
-                self.dir
-            )
-        } else {
-            format!("make sure {} is writable, then run again", self.dir)
-        }
-    }
-
-    /// A conflict: the file and its saved copy are kept, and the fix says what to do with them.
-    pub(crate) fn conflict(self, rel: &str, what: &str) -> GuardFailure {
-        GuardFailure::new(
-            format!("{rel} {what}; its saved copy is {}", self.copy_name(rel)),
-            format!(
-                "compare the two, keep what you want, then delete {}",
-                self.copy_name(rel)
-            ),
-        )
-    }
-
-    /// Puts `original`, the bytes of the copy `copy` that an interrupted run left, back in the
-    /// file at `rel` under `root`, then deletes the copy and the folders it leaves empty. The
-    /// caller has already checked that the file differs from the copy only by the tool's edit.
-    pub(crate) fn restore_leftover(
-        self,
-        root: &Path,
-        rel: &str,
-        copy: &Path,
-        original: &[u8],
-    ) -> io::Result<()> {
-        fs::write(root.join(rel), original).and_then(|()| fs::remove_file(copy))?;
-        prune(&self.base(root), copy);
-        Ok(())
     }
 }
 
@@ -102,19 +56,24 @@ pub(crate) struct Guard {
 }
 
 impl Guard {
-    /// Saves `text`, the original of the file at `rel` under `root`, as its copy. Nothing is
-    /// edited when the save fails, and an existing copy is never replaced.
+    /// Saves `text`, the original of the file at repo path `rel` under `root`, as its copy.
+    /// Nothing is edited when the save fails, and an existing copy is never replaced. Refuses a
+    /// `rel` that is not a relative path inside the repo.
     pub(crate) fn save(
         root: &Path,
         backups: Backups,
         rel: &str,
         text: &str,
     ) -> Result<Guard, GuardFailure> {
+        if !is_repo_path(rel) {
+            return Err(refusal(rel));
+        }
         let base = backups.base(root);
         let backup = base.join(rel);
         let copy = backups.copy_name(rel);
-        match write_new_copy(&backup, text) {
-            Ok(true) => Ok(Guard {
+        let tmp = format!("{}/{}", backups.dir, tmp_rel(rel, backups.tool));
+        match write_new_copy(&backup, backups.tool, text) {
+            Ok(()) => Ok(Guard {
                 backups,
                 path: root.join(rel),
                 rel: rel.to_owned(),
@@ -124,40 +83,68 @@ impl Guard {
                 backup,
                 pending: true,
             }),
-            Ok(false) => Err(GuardFailure::new(
+            Err(Save::CopyExists) => Err(GuardFailure::new(
                 format!(
                     "a saved copy of {rel} already exists at {copy}; an earlier {} kept it (a conflict or a failed restore)",
-                    backups.run
+                    backups.run()
                 ),
                 format!("compare {rel} with {copy}, keep what you want, then delete {copy}"),
             )),
-            Err(error) => Err(GuardFailure::new(
-                format!("could not back up {rel} before editing it: {error}"),
-                backups.save_fix(error.kind()),
+            Err(Save::TmpExists) => Err(GuardFailure::new(
+                format!("could not back up {rel}: {tmp} is left from an interrupted save"),
+                format!("compare {tmp} with {rel}, keep what you want, then delete {tmp}"),
             )),
+            Err(Save::Failed { error, tmp_left }) => {
+                let left = if tmp_left {
+                    format!("; delete {tmp}, a partial copy")
+                } else {
+                    String::new()
+                };
+                let fix = if error.kind() == io::ErrorKind::Unsupported {
+                    format!(
+                        "the filesystem of {} has no hard links; run from a checkout on a filesystem that has them",
+                        backups.dir
+                    )
+                } else {
+                    format!("fix what the error names, then run again; {rel} was not edited")
+                };
+                Err(GuardFailure::new(
+                    format!("could not back up {rel} before editing it: {error}"),
+                    format!("{fix}{left}"),
+                ))
+            }
         }
     }
 
     /// Writes `text` over the file, once the file still holds the bytes last written.
     pub(crate) fn write(&mut self, text: String) -> Result<(), GuardFailure> {
         self.unchanged()?;
-        fs::write(&self.path, text.as_bytes()).map_err(|error| {
+        replace(&self.path, self.backups.tool, text.as_bytes()).map_err(|failure| {
+            let left = self.tmp_left(&failure, "it holds only this run's edit");
             GuardFailure::new(
-                format!("could not write {}: {error}", self.rel),
                 format!(
-                    "make sure the file is writable; its original is in {}",
-                    self.backups.copy_name(&self.rel)
+                    "could not write {}: {}; the file is unchanged",
+                    self.rel, failure.error
                 ),
+                format!("fix what the error names, then run again{left}"),
             )
         })?;
         self.last = text;
         Ok(())
     }
 
+    /// `; delete <tmp>: <why>` when `failure` left the file's temporary file, else nothing.
+    fn tmp_left(&self, failure: &ReplaceFailure, why: &str) -> String {
+        match failure.tmp_left {
+            Some(_) => format!("; delete {}: {why}", tmp_rel(&self.rel, self.backups.tool)),
+            None => String::new(),
+        }
+    }
+
     /// `Ok` when the file still holds the bytes last written. Otherwise the guard stops: it keeps
     /// the file and the copy, and the failure says so.
     fn unchanged(&mut self) -> Result<(), GuardFailure> {
-        let run = self.backups.run;
+        let run = self.backups.run();
         let found = match fs::read(&self.path) {
             Ok(bytes) if bytes == self.last.as_bytes() => return Ok(()),
             Ok(_) => self
@@ -183,12 +170,17 @@ impl Guard {
     fn put_back(&mut self) -> Result<(), GuardFailure> {
         self.unchanged()?;
         self.pending = false;
-        fs::write(&self.path, self.original.as_bytes()).map_err(|error| {
+        let copy = self.backups.copy_name(&self.rel);
+        replace(&self.path, self.backups.tool, self.original.as_bytes()).map_err(|failure| {
+            let left = self.tmp_left(&failure, "the saved copy holds the original");
             GuardFailure::new(
-                format!("could not restore {}: {error}", self.rel),
                 format!(
-                    "copy {} over {}; it holds the original text",
-                    self.backup.display(),
+                    "could not restore {}: {}; it still holds this run's edit, and its original is in {copy}",
+                    self.rel, failure.error
+                ),
+                format!(
+                    "fix what the error names, then copy {copy} over {}: the file holds nothing \
+                     but this run's edit{left}",
                     self.rel
                 ),
             )
@@ -196,14 +188,10 @@ impl Guard {
         fs::remove_file(&self.backup).map_err(|error| {
             GuardFailure::new(
                 format!(
-                    "restored {} but could not delete its copy {}: {error}",
-                    self.rel,
-                    self.backup.display()
+                    "restored {} but could not delete its copy {copy}: {error}",
+                    self.rel
                 ),
-                format!(
-                    "delete {}; the file is already restored",
-                    self.backup.display()
-                ),
+                format!("delete {copy}; the file is already restored"),
             )
         })?;
         prune(&self.base, &self.backup);
@@ -232,34 +220,69 @@ impl Drop for Guard {
     }
 }
 
-/// Deletes `tmp`, the temporary `<copy>.tmp` file that an interrupted save (`Guard::save`) left
-/// among the copies.
-pub(crate) fn discard_interrupted_save(tmp: &Path) -> io::Result<()> {
-    fs::remove_file(tmp)
+/// Why `write_new_copy` wrote no copy.
+enum Save {
+    /// The copy already exists; nothing was written.
+    CopyExists,
+    /// The temporary file of an earlier, interrupted save is in the way; nothing was written.
+    TmpExists,
+    /// The OS refused a step. `tmp_left` is true when the temporary file could not be deleted.
+    Failed { error: io::Error, tmp_left: bool },
 }
 
-/// Writes `text` to `backup` without ever replacing a file there. The bytes go to `<backup>.tmp`,
-/// which is then hard-linked to `backup`: a link fails when `backup` exists, so the check and the
-/// create are one step. Returns `false` when `backup` already existed. The copy is synced before it
-/// is linked. The temporary file is removed again; a failure to remove it is ignored, since the
-/// next run's start deletes it.
-fn write_new_copy(backup: &Path, text: &str) -> io::Result<bool> {
+/// Writes `text` to `backup` without ever replacing a file there. The bytes go to the temporary
+/// file `tmp_of(backup, tool)`, created only when it is missing, which is then hard-linked to
+/// `backup`: a link fails when `backup` exists, so the check and the create are one step. The copy
+/// is synced before it is linked, and the temporary file is deleted again.
+fn write_new_copy(backup: &Path, tool: &str, text: &str) -> Result<(), Save> {
+    let failed = |error| Save::Failed {
+        error,
+        tmp_left: false,
+    };
     if let Some(dir) = backup.parent() {
-        fs::create_dir_all(dir)?;
+        fs::create_dir_all(dir).map_err(failed)?;
     }
-    let mut tmp_name = backup.as_os_str().to_owned();
-    tmp_name.push(".tmp");
-    let tmp = PathBuf::from(tmp_name);
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+    let tmp = tmp_of(backup, tool);
+    let mut file = match OpenOptions::new().write(true).create_new(true).open(&tmp) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Err(Save::TmpExists),
+        Err(error) => return Err(failed(error)),
+    };
     let linked = file
         .write_all(text.as_bytes())
         .and_then(|()| file.sync_all())
         .and_then(|()| fs::hard_link(&tmp, backup));
-    let _tmp_removed = fs::remove_file(&tmp).is_ok();
+    drop(file);
+    let tmp_left = fs::remove_file(&tmp).is_err();
     match linked {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
-        Err(error) => Err(error),
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Err(Save::CopyExists),
+        Err(error) => Err(Save::Failed { error, tmp_left }),
+    }
+}
+
+/// Whether `rel` is a relative path inside the repo: one or more plain names, no `..`, no root.
+fn is_repo_path(rel: &str) -> bool {
+    let path = Path::new(rel);
+    !rel.is_empty()
+        && path
+            .components()
+            .all(|part| matches!(part, Component::Normal(_)))
+}
+
+/// The refusal of a path that is not a relative path inside the repo.
+fn refusal(rel: &str) -> GuardFailure {
+    GuardFailure::new(
+        format!("refusing to guard `{rel}`: it is not a relative path inside the repo"),
+        "pass the file's repo path, such as crates/desktop/src/lib.rs".to_owned(),
+    )
+}
+
+/// The temporary file of a write by `tool` to the repo path `rel`, as a repo path.
+fn tmp_rel(rel: &str, tool: &str) -> String {
+    match rel.rsplit_once('/') {
+        Some((dir, name)) => format!("{dir}/.{name}.{tool}.tmp"),
+        None => format!(".{rel}.{tool}.tmp"),
     }
 }
 
@@ -273,3 +296,6 @@ fn prune(base: &Path, file: &Path) {
         dir = current.parent();
     }
 }
+
+#[cfg(test)]
+mod tests;
