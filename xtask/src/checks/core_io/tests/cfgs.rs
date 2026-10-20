@@ -78,10 +78,30 @@ pub(in crate::checks::core_io) fn cfg_custom_name() -> Inspection {
     )
 }
 
-pub(in crate::checks::core_io) fn cfg_macro_debug_assertions() -> Inspection {
+/// The review's case: `cfg_select!` as an expression, where clippy's build takes the `clippy`
+/// arm and rustc builds the `_` arm.
+pub(in crate::checks::core_io) fn cfg_select_expression() -> Inspection {
     with_file(
-        "cfg-macro-debug",
-        "pub fn g() -> bool {\n    cfg!(debug_assertions)\n}\n",
+        "cfg-select-expression",
+        "pub fn g() {\n    std::cfg_select! {\n        clippy => {}\n        _ => {\n            \
+         let _ = std::fs::read(\"x\");\n        }\n    }\n}\n",
+    )
+}
+
+/// The review's case: `cfg_select!` at item level.
+pub(in crate::checks::core_io) fn cfg_select_items() -> Inspection {
+    with_file(
+        "cfg-select-items",
+        "cfg_select! {\n    clippy => {}\n    _ => {\n        pub fn g() {}\n    }\n}\n",
+    )
+}
+
+/// The review's case: `cfg_select` under another name, which fails at the `use`.
+pub(in crate::checks::core_io) fn cfg_select_alias() -> Inspection {
+    with_file(
+        "cfg-select-alias",
+        "use std::cfg_select as pick;\npick! {\n    clippy => {}\n    _ => {\n        \
+         pub fn g() {}\n    }\n}\n",
     )
 }
 

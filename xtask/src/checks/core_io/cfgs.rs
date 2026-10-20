@@ -5,9 +5,12 @@
 //!
 //! Each `.rs` file of the crate is lexed, and every token tree is walked, macro bodies and macro
 //! call arguments included. The predicate of each `cfg` and `cfg_attr` at the start of any
-//! bracket group or inside a `cfg_attr`, and of each `cfg!`, is built only from `all`, `any`,
-//! `not`, `test` and `feature = "<literal>"`, with no `feature` under a `not`. Any bracket group
-//! counts, since a macro can join a `#` to brackets passed separately. An attribute or a macro
+//! bracket group or inside a `cfg_attr` is built only from `all`, `any`, `not`, `test` and
+//! `feature = "<literal>"`, with no `feature` under a `not`. Any bracket group counts, since a
+//! macro can join a `#` to brackets passed separately. The name `cfg_select` fails wherever it
+//! stands, a `use` included, since `cfg_select!` builds only the arm whose cfg holds and an alias
+//! would hide the call. `cfg!` passes, since both branches of an `if cfg!(..)` are compiled and
+//! linted. An attribute or a macro
 //! call whose name is a metavariable fails, and so does a `#` before a metavariable, since a macro
 //! could build a `cfg` or an `include!` from a passed name. A `path` attribute, `include!` and
 //! any symlink under the crate's folder fail, so every module file sits at its default path
@@ -33,6 +36,8 @@ pub(super) enum Finding {
     PathAttribute,
     /// A call of `include!`.
     Include,
+    /// The name `cfg_select`, whose macro builds only the arm whose cfg holds.
+    CfgSelect,
     /// A macro call whose name is a metavariable, such as `$x!`.
     MetavariableMacro,
 }
@@ -72,8 +77,6 @@ pub(super) fn cfg_rule(root: &Path, member: &Member, entries: &[String]) -> Vec<
             Ok(tokens) => {
                 let mut hits = Vec::new();
                 walk(tokens, &mut hits);
-                // `#[cfg $p]` is both an attribute head and a `cfg` before `$`; report it once.
-                hits.dedup();
                 for (finding, line) in hits {
                     found.push(report::cfg_rule(path, line, &finding, &member.name));
                 }
@@ -107,14 +110,14 @@ fn walk(tokens: TokenStream, hits: &mut Vec<(Finding, u32)>) {
                 }
                 walk(group.stream(), hits);
             }
-            // A `$` after the name may stand for the `!`, so it counts as a call.
-            TokenTree::Ident(ident)
-                if starts_with_punct(rest, '!') || starts_with_punct(rest, '$') =>
-            {
+            TokenTree::Ident(ident) => {
+                let line = line_of(ident.span().start().line);
                 match ident_name(ident).as_str() {
-                    "cfg" if starts_with_punct(rest, '$') => metavariable_in_place(&rest[0], hits),
-                    "cfg" => cfg_group(&rest[1..], true, hits),
-                    "include" => hits.push((Finding::Include, line_of(ident.span().start().line))),
+                    "cfg_select" => hits.push((Finding::CfgSelect, line)),
+                    // A `$` after the name may stand for the `!`, so it counts as a call.
+                    "include" if starts_with_punct(rest, '!') || starts_with_punct(rest, '$') => {
+                        hits.push((Finding::Include, line));
+                    }
                     _ => {}
                 }
             }
@@ -140,7 +143,7 @@ fn walk(tokens: TokenStream, hits: &mut Vec<(Finding, u32)>) {
                     None => {}
                 }
             }
-            TokenTree::Ident(_) | TokenTree::Punct(_) | TokenTree::Literal(_) => {}
+            TokenTree::Punct(_) | TokenTree::Literal(_) => {}
         }
     }
 }
@@ -163,13 +166,10 @@ fn names_a_macro(rest: &[TokenTree]) -> bool {
     }
 }
 
-/// Checks what follows `cfg` in an attribute (`is_macro` false), a parenthesized predicate, or
-/// what follows `cfg!` (`is_macro` true), a group of any delimiter.
-fn cfg_group(rest: &[TokenTree], is_macro: bool, hits: &mut Vec<(Finding, u32)>) {
+/// Checks what follows `cfg` in an attribute, a parenthesized predicate.
+fn cfg_group(rest: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
     match rest.first() {
-        Some(TokenTree::Group(group))
-            if is_macro || group.delimiter() == Delimiter::Parenthesis =>
-        {
+        Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Parenthesis => {
             let trees: Vec<TokenTree> = group.stream().into_iter().collect();
             if let Err(hit) = whole_predicate(&trees, group) {
                 hits.push(hit);
@@ -243,7 +243,7 @@ fn attribute_head(tokens: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
         "path" if starts_with_punct(&tokens[1..], '=') || starts_with_punct(&tokens[1..], '$') => {
             hits.push((Finding::PathAttribute, line_of(ident.span().start().line)));
         }
-        "cfg" => cfg_group(&tokens[1..], false, hits),
+        "cfg" => cfg_group(&tokens[1..], hits),
         "cfg_attr" => cfg_attr(&tokens[1..], hits),
         _ => {}
     }
@@ -349,7 +349,6 @@ mod tests {
             TokenStream::from_str(source).expect("the source lexes"),
             &mut hits,
         );
-        hits.dedup();
         hits
     }
 
@@ -361,7 +360,11 @@ mod tests {
         let malformed = || Finding::Predicate("a form that is not a predicate".to_owned());
         let negated = || Finding::Predicate("a feature under `not`".to_owned());
         let cases = [
-            ("cfg!{unix}", vec![(name("unix"), 1)]),
+            ("cfg!{unix}; if cfg!(not(clippy)) {}", vec![]),
+            (
+                "macro_rules! cfg_select { () => {} }",
+                vec![(Finding::CfgSelect, 1)],
+            ),
             ("#[cfg $p]", vec![(metavariable(), 1)]),
             ("#[cfg_attr $p]", vec![(metavariable(), 1)]),
             ("#[cfg_attr($p, derive(Debug))]", vec![(metavariable(), 1)]),
@@ -395,7 +398,7 @@ mod tests {
                 vec![(Finding::PathAttribute, 1)],
             ),
             ("#!$a", vec![(Finding::MetavariableAttribute, 1)]),
-            ("cfg $b (unix)", vec![(metavariable(), 1)]),
+            ("cfg $b (unix)", vec![]),
             (
                 "$($m)*!(x); $crate::m!(); $i::x!();",
                 vec![(Finding::MetavariableMacro, 1)],

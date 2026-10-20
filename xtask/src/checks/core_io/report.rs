@@ -363,7 +363,7 @@ pub(super) fn cfg_rule(path: &str, line: u32, finding: &Finding, package: &str) 
         Finding::MetavariableMacro => (
             format!(
                 "`{path}` calls a macro whose name is a metavariable, so a macro of {package} can \
-                 call `include!` or `cfg!` under a name passed to it"
+                 call `include!` under a name passed to it"
             ),
             "write the called macro's name in the macro body itself".to_owned(),
         ),
@@ -373,6 +373,16 @@ pub(super) fn cfg_rule(path: &str, line: u32, finding: &Finding, package: &str) 
                  file core-io does not read"
             ),
             "remove the `path` attribute and move the module to its default path".to_owned(),
+        ),
+        Finding::CfgSelect => (
+            format!(
+                "`{path}` names `cfg_select`, whose macro builds only the first arm whose cfg \
+                 holds, so the arms clippy's build does not take can hold code clippy never lints"
+            ),
+            "write each arm as an item under `#[cfg(..)]` built from `test` and positive \
+             features; a crate whose row bans I/O does not name `cfg_select` at all, not even in \
+             a `use`"
+                .to_owned(),
         ),
         Finding::Include => (
             format!(

@@ -129,6 +129,20 @@ macro_rules! path_attribute {
     };
 }
 
+/// The violation for the name `cfg_select` at line `$line` of `crates/protocol/src/hidden.rs`.
+#[cfg(test)]
+macro_rules! cfg_select {
+    ($line:literal) => {
+        concat!(
+            "crates/protocol/src/hidden.rs:", $line, ": `crates/protocol/src/hidden.rs` names \
+             `cfg_select`, whose macro builds only the first arm whose cfg holds, so the arms \
+             clippy's build does not take can hold code clippy never lints\n    fix: write each \
+             arm as an item under `#[cfg(..)]` built from `test` and positive features; a crate \
+             whose row bans I/O does not name `cfg_select` at all, not even in a `use`"
+        )
+    };
+}
+
 /// The violation for the `[alias]` key `$name` of `.cargo/config.toml` at `$line`.
 #[cfg(test)]
 macro_rules! alias {
@@ -318,7 +332,9 @@ crate::checks::planted::cases! {
     cfg_panic_abort: FailsWith(&[cfg_form!(1, "the name `panic`")]), inspects 3 => super::cfg_panic_abort,
     cfg_unix: FailsWith(&[cfg_form!(1, "the name `unix`")]), inspects 3 => super::cfg_unix,
     cfg_custom_name: FailsWith(&[cfg_form!(1, "the name `hidden`")]), inspects 3 => super::cfg_custom_name,
-    cfg_macro_debug_assertions: FailsWith(&[cfg_form!(2, "the name `debug_assertions`")]), inspects 3 => super::cfg_macro_debug_assertions,
+    cfg_select_expression: FailsWith(&[cfg_select!(2)]), inspects 3 => super::cfg_select_expression,
+    cfg_select_items: FailsWith(&[cfg_select!(1)]), inspects 3 => super::cfg_select_items,
+    cfg_select_alias: FailsWith(&[cfg_select!(1)]), inspects 3 => super::cfg_select_alias,
     cfg_attr_not_feature: FailsWith(&[cfg_form!(1, "a feature under `not`")]), inspects 3 => super::cfg_attr_not_feature,
     cfg_metavariable_in_a_macro_body: FailsWith(&[cfg_form!(3, "a metavariable")]), inspects 3 => super::cfg_metavariable_in_a_macro_body,
     attribute_name_metavariable: FailsWith(&[
@@ -357,7 +373,7 @@ crate::checks::planted::cases! {
     items_named_cfg: Passes, inspects 3 => super::items_named_cfg,
     macro_name_metavariable: FailsWith(&[
         "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs` calls a macro whose name is a metavariable, so a macro of \
-         clauseo-protocol can call `include!` or `cfg!` under a name passed to it\n    \
+         clauseo-protocol can call `include!` under a name passed to it\n    \
          fix: write the called macro's name in the macro body itself",
     ]), inspects 3 => super::macro_name_metavariable,
     symlinked_folder: FailsWith(&[
