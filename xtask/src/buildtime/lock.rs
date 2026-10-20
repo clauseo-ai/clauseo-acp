@@ -5,7 +5,8 @@
 //! cleans it up.
 
 use super::verdict::Failure;
-use std::fs::{self, File, OpenOptions, TryLockError};
+use crate::write;
+use std::fs::{File, TryLockError};
 use std::path::Path;
 
 /// The lock file, under the repo root.
@@ -14,19 +15,7 @@ pub(crate) const LOCK_PATH: &str = "target/xtask/buildtime.lock";
 /// Takes the exclusive lock on the file at `path`, creating it when it is missing. The lock holds
 /// as long as the returned `File` is alive. Fails at once when another run holds it.
 pub(crate) fn acquire(path: &Path) -> Result<File, Failure> {
-    let opened = match path.parent() {
-        Some(dir) => fs::create_dir_all(dir),
-        None => Ok(()),
-    }
-    .and_then(|()| {
-        OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(path)
-    });
-    let file = opened.map_err(|error| {
+    let file = write::create_lock_file(path).map_err(|error| {
         Failure::new(
             format!("could not open {LOCK_PATH}: {error}"),
             "make sure target/xtask is writable, then run again",
@@ -48,7 +37,7 @@ pub(crate) fn acquire(path: &Path) -> Result<File, Failure> {
 /// True when another open handle holds the lock on the file at `path`. A free lock is taken and
 /// released at once. A missing file is never created and reads as free, as does any error.
 pub(crate) fn is_held(path: &Path) -> bool {
-    let Ok(file) = OpenOptions::new().read(true).write(true).open(path) else {
+    let Ok(file) = write::open_lock_file(path) else {
         return false;
     };
     matches!(file.try_lock(), Err(TryLockError::WouldBlock))

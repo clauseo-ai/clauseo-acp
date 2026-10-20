@@ -3,6 +3,7 @@
 //! these types: a Rust probe measures seconds, a web probe seconds, milliseconds or kilobytes.
 
 use crate::budgets::{Budget, Gate, Unit};
+use crate::write::GuardFailure;
 use serde::Serialize;
 
 /// The median, minimum and maximum of the timed runs. Unit-free: the values are in whatever unit
@@ -45,6 +46,13 @@ impl Failure {
             fix: fix.into(),
             output: None,
         }
+    }
+}
+
+/// The tracked-file guard's failure, as the probe that used it fails.
+impl From<GuardFailure> for Failure {
+    fn from(failure: GuardFailure) -> Failure {
+        Failure::new(failure.message, failure.fix)
     }
 }
 

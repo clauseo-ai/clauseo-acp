@@ -39,6 +39,7 @@ mod setup;
 mod steps;
 mod violation;
 mod workspace;
+mod write;
 
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
