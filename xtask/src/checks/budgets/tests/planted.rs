@@ -84,7 +84,7 @@ crate::checks::planted::cases! {
         "budgets.toml:4: budget window_visible: limit must be zero or more\n    \
          fix: set limit to zero or more, in the row's unit",
     ]), inspects 1 => super::nan_limit,
-    /// An id that is not snake_case fails at the id line.
+    /// An id that is not `snake_case` fails at the id line.
     id_not_snake_case: FailsWith(&[
         "budgets.toml:2: budget Window-Visible: id must be snake_case\n    \
          fix: rename the id to lowercase words joined by _, such as window_visible",
@@ -94,17 +94,17 @@ crate::checks::planted::cases! {
         "budgets.toml:12: budget window_visible is defined twice (first at line 1)\n    \
          fix: give this row a new id, or remove one of the two tables",
     ]), inspects 2 => super::duplicate_id,
-    /// A measured_on that is not lowercase words joined by - fails at its line.
+    /// A `measured_on` that is not lowercase words joined by - fails at its line.
     measured_on_shape: FailsWith(&[
         "budgets.toml:11: budget window_visible: measured_on must be lowercase words joined by -\n    \
          fix: write measured_on as lowercase words joined by -, such as macos-arm64",
     ]), inspects 1 => super::measured_on_shape,
-    /// measured without measured_on fails at the header.
+    /// `measured` without `measured_on` fails at the header.
     measured_without_on: FailsWith(&[
         "budgets.toml:1: budget window_visible has measured but no measured_on\n    \
          fix: add measured_on = \"os-arch-machine kind, such as macos-arm64\"",
     ]), inspects 1 => super::measured_without_on,
-    /// measured_on without measured fails at the header.
+    /// `measured_on` without `measured` fails at the header.
     on_without_measured: FailsWith(&[
         "budgets.toml:1: budget window_visible has measured_on but no measured\n    \
          fix: add measured = <number> in the row's unit, or remove measured_on",
