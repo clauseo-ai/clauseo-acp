@@ -23,6 +23,7 @@ serde_json.workspace = true
 sha2 = "0.10.9"
 # The docs check splits the `cargo xtask` commands in the docs into words as a shell does.
 shlex = "2.0.1"
-# The tauri-config check parses `crates/desktop/build.rs` before it reads its tokens.
-syn = { version = "3.0.9", features = ["full"] }
+# The tauri-config check parses `crates/desktop/build.rs` before it reads its tokens. The
+# expect-allowlist check parses every .rs file and walks it with `syn::visit` (`visit`).
+syn = { version = "3.0.9", features = ["full", "visit"] }
 toml = "1"
