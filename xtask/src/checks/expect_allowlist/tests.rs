@@ -188,6 +188,26 @@ pub(super) fn allow_in_macro_rules() -> Repo {
     )
 }
 
+pub(super) fn allow_in_macro_call() -> Repo {
+    run_on(
+        "allow-in-macro-call",
+        "fn f() {\n    m! {\n        #[allow(dead_code)]\n        fn g() {}\n    }\n}\n",
+        "",
+    )
+}
+
+pub(super) fn cfg_attr_in_macro_call() -> Repo {
+    run_on(
+        "cfg-attr-in-macro-call",
+        "fn f() {\n    m!(#[cfg_attr(test, expect(dead_code, reason = \"x\"))] fn g() {});\n}\n",
+        "",
+    )
+}
+
+pub(super) fn allow_bare_path() -> Repo {
+    run_on("allow-bare-path", "#[allow]\nfn f() {}\n", "")
+}
+
 pub(super) fn allow_with_no_lint() -> Repo {
     run_on("allow-with-no-lint", "#[allow()]\nfn f() {}\n", "")
 }

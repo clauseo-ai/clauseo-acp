@@ -114,6 +114,23 @@ crate::checks::planted::cases! {
          fix: delete the allow, or write #![expect(dead_code, reason = \"...\")] in its place and \
          add \"src/a.rs a dead_code\" to xtask/expect-allowlist.txt (the code owner approves it)",
     ]), inspects 1 => super::allow_in_macro_rules,
+    /// An allow inside the tokens of a macro call fails.
+    allow_in_macro_call: FailsWith(&[
+        "src/a.rs:3: #[allow(dead_code)] silences a lint; only #[expect] with a reason may\n    \
+         fix: delete the allow, or write #[expect(dead_code, reason = \"...\")] in its place and \
+         add \"src/a.rs f dead_code\" to xtask/expect-allowlist.txt (the code owner approves it)",
+    ]), inspects 1 => super::allow_in_macro_call,
+    /// An expect under `cfg_attr` inside the tokens of a macro call counts.
+    cfg_attr_in_macro_call: FailsWith(&[
+        "src/a.rs:2: #[expect(dead_code)] in `f` is not in xtask/expect-allowlist.txt\n    fix: \
+         remove the #[expect], or add \"src/a.rs f dead_code\" to xtask/expect-allowlist.txt (the \
+         code owner approves it)",
+    ]), inspects 1 => super::cfg_attr_in_macro_call,
+    /// A bare `#[allow]` names no lint and fails.
+    allow_bare_path: FailsWith(&[
+        "src/a.rs:1: an allow attribute that names no lint\n    fix: delete the allow: it names \
+         no lint",
+    ]), inspects 1 => super::allow_bare_path,
     /// An allow that names no lint fails.
     allow_with_no_lint: FailsWith(&[
         "src/a.rs:1: an allow attribute that names no lint\n    fix: delete the allow: it names \
