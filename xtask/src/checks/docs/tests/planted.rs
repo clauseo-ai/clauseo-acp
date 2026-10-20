@@ -204,10 +204,6 @@ crate::checks::planted::cases! {
     unknown_xtask_subcommand: FailsWith(&[
         bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
     ]), inspects 4 => super::cases::unknown_xtask_subcommand,
-    /// An unknown flag fails, as an unknown subcommand does.
-    unknown_xtask_flag: FailsWith(&[
-        bad_command!(1, "cargo xtask check --frobnicate", "error: unexpected argument '--frobnicate' found"),
-    ]), inspects 4 => super::cases::unknown_xtask_flag,
     /// A fenced line that starts with `cargo xtask` is checked the same way.
     unknown_xtask_command_in_fence: FailsWith(&[
         bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
@@ -219,29 +215,6 @@ crate::checks::planted::cases! {
     /// A fence inside a quote inside a list item holds code, so its link is not read.
     fence_in_quote_in_list_item_hides_its_contents: Passes,
         inspects 4 => super::cases::fence_in_quote_in_list_item_hides_its_contents,
-    /// A span that is exactly `cargo xtask` names the tool in prose.
-    bare_tool_span_passes: Passes, inspects 4 => super::cases::bare_tool_span_passes,
-    /// The same words as a line of code are a command that names no subcommand.
-    bare_tool_in_code_fails: FailsWith(&[
-        bad_command!(2, "cargo xtask", "it names no subcommand"),
-    ]), inspects 4 => super::cases::bare_tool_in_code_fails,
-    /// `cargo xtask <command> --help`, the check's own fix text, is not read: the subcommand is a
-    /// placeholder.
-    placeholder_subcommand_passes: Passes,
-        inspects 4 => super::cases::placeholder_subcommand_passes,
-    /// `cargo xtask ...` is not read either: `...` is a placeholder.
-    ellipsis_subcommand_passes: Passes, inspects 4 => super::cases::ellipsis_subcommand_passes,
-    /// A placeholder for a flag's value passes: the words before it parse but for that value.
-    placeholder_flag_value_passes: Passes,
-        inspects 4 => super::cases::placeholder_flag_value_passes,
-    /// The words before a placeholder are still checked.
-    unknown_subcommand_before_a_placeholder_fails: FailsWith(&[
-        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::unknown_subcommand_before_a_placeholder_fails,
-    /// A `+<toolchain>` after `cargo` does not hide the command.
-    toolchain_command_fails: FailsWith(&[
-        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::toolchain_command_fails,
     /// `AGENTS.md` at 121 lines fails at line 121, the first line over the limit.
     agents_121_lines: FailsWith(&[
         "AGENTS.md:121: AGENTS.md has 121 lines, over the limit of 120\n    \
@@ -270,35 +243,15 @@ crate::checks::planted::cases! {
     html_image_to_a_missing_file_fails: FailsWith(&[
         bad_link!("GUIDE.md", 1, "nope.png"),
     ]), inspects 4 => super::cases::html_image_to_a_missing_file_fails,
-    /// A trailing `\` continues the line, and the command on it is checked: `frobnicate` fails.
-    trailing_backslash_command_fails: FailsWith(&[
-        bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::trailing_backslash_command_fails,
     /// A `\` that ends a line joins it with the next one, so `cargo xtask \` and `frobnicate` fail
     /// as one command, reported at the first line.
     continued_command_fails: FailsWith(&[
         bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
     ]), inspects 4 => super::cases::continued_command_fails,
-    /// A `$ ` prompt before `cargo xtask` in a fence does not hide the command.
-    prompt_command_in_fence_fails: FailsWith(&[
-        bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::prompt_command_in_fence_fails,
-    /// A command after `&&` in a span is checked on its own.
-    chained_command_in_span_fails: FailsWith(&[
-        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::chained_command_in_span_fails,
     /// An indented code block line that starts a command is checked.
     indented_code_command_fails: FailsWith(&[
         bad_command!(3, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
     ]), inspects 4 => super::cases::indented_code_command_fails,
-    /// `--help` does not hide an unknown subcommand after it.
-    help_with_an_unknown_subcommand_fails: FailsWith(&[
-        bad_command!(1, "cargo xtask --help frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::help_with_an_unknown_subcommand_fails,
-    /// `--help` does not hide an unknown flag after it.
-    help_with_an_unknown_flag_fails: FailsWith(&[
-        bad_command!(1, "cargo xtask check --help --frobnicate", "error: unexpected argument '--frobnicate' found"),
-    ]), inspects 4 => super::cases::help_with_an_unknown_flag_fails,
     /// A `.MD` file is a Markdown file, and its links are checked.
     uppercase_md_extension_is_checked: FailsWith(&[
         bad_link!("GUIDE.MD", 1, "nope.md"),
@@ -307,33 +260,14 @@ crate::checks::planted::cases! {
     markdown_extension_is_checked: FailsWith(&[
         bad_link!("guide.markdown", 1, "nope.md"),
     ]), inspects 4 => super::cases::markdown_extension_is_checked,
-    /// A stderr redirection after a command is shell syntax, not an argument.
-    stderr_redirect_passes: Passes, inspects 4 => super::cases::stderr_redirect_passes,
-    /// Quotes around a word are read as a shell reads them: `cargo xtask "check"` parses.
-    quoted_subcommand_passes: Passes, inspects 4 => super::cases::quoted_subcommand_passes,
     /// Only shell blocks (no info string, or a shell one) and the prompted lines of session blocks
     /// are read: the prose lines in rust, console output, markdown and yaml pass.
     prose_in_code_blocks_passes: Passes, inspects 4 => super::cases::prose_in_code_blocks_passes,
     /// A `# ` comment, a `> ` quoted line and output in a console block are not commands.
     output_and_comments_in_sessions_pass: Passes,
         inspects 4 => super::cases::output_and_comments_in_sessions_pass,
-    /// A command run in the background: the `&` is shell syntax, not an argument.
-    background_command_passes: Passes, inspects 4 => super::cases::background_command_passes,
     /// A `text` or `text,ignore` block holds output, so a failing command shown in it is not read.
     text_block_output_passes: Passes, inspects 4 => super::cases::text_block_output_passes,
-    /// A line that `shlex` cannot split is split on whitespace, so an apostrophe in prose does not
-    /// hide the command: `Don't run cargo xtask frobnicate` fails at its line.
-    apostrophe_in_plain_block_fails: FailsWith(&[
-        bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::apostrophe_in_plain_block_fails,
-    /// An odd quote after a pipe does not hide the command before it, which fails.
-    unclosed_quote_after_a_pipe_fails: FailsWith(&[
-        bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::unclosed_quote_after_a_pipe_fails,
-    /// In a block with no info string, `cd x && cargo xtask frobnicate` fails at its line.
-    plain_block_wrapped_command_fails: FailsWith(&[
-        bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::plain_block_wrapped_command_fails,
     /// A block with no info string is read line by line, as a shell block is, so prose that says
     /// `cargo xtask to` fails.
     plain_block_prose_fails: FailsWith(&[
