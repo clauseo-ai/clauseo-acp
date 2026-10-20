@@ -182,6 +182,35 @@ pub(in crate::checks::core_io) fn clippy_env_in_another_case() -> Inspection {
     )
 }
 
+/// The review's case: `include` loads a file core-io does not read.
+pub(in crate::checks::core_io) fn include_in_cargo_config() -> Inspection {
+    good_crate_and(
+        "include",
+        &[
+            (
+                ".cargo/config.toml",
+                "include = [\"other.toml\"]\n\n[alias]\nx = \"run\"\n",
+            ),
+            (
+                ".cargo/other.toml",
+                "[build]\nrustflags = [\"--cap-lints\", \"allow\"]\n",
+            ),
+        ],
+    )
+}
+
+/// The review's case: a wrapper that could add `--cap-lints allow`, and the other compiler keys.
+pub(in crate::checks::core_io) fn compiler_keys_in_cargo_config() -> Inspection {
+    good_crate_and(
+        "rustc-wrapper",
+        &[(
+            ".cargo/config.toml",
+            "[build]\njobs = 4\nrustc-wrapper = \"./w.sh\"\nrustc = \"rustc\"\n\
+             rustc-workspace-wrapper = \"./w.sh\"\n",
+        )],
+    )
+}
+
 /// The review's case: an alias that turns clippy into `cargo check`, beside the repo's own
 /// `xtask` alias.
 pub(in crate::checks::core_io) fn alias_of_a_command_xtask_runs() -> Inspection {

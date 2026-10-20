@@ -207,6 +207,35 @@ pub(super) fn rustflags_in_config(path: &str, line: u32, key: &str) -> Violation
     )
 }
 
+/// The violation for the `include` key of the cargo config at `path`, at `line`.
+pub(super) fn include_in_config(path: &str, line: u32) -> Violation {
+    violation(
+        path,
+        line,
+        format!(
+            "`{path}` sets `include`, so cargo loads other config files that core-io does not \
+             read, where `rustflags`, an alias or a `CLIPPY_` entry could turn off the bans of \
+             {ROOT} and {LIST}"
+        ),
+        format!("remove `include` and move the settings it loads into `{path}` itself"),
+    )
+}
+
+/// The violation for the compiler key `key` (`build.rustc` or a wrapper) of the cargo config at
+/// `path`, at `line`.
+pub(super) fn compiler_in_config(path: &str, line: u32, key: &str) -> Violation {
+    violation(
+        path,
+        line,
+        format!(
+            "`{path}` sets `{key}`, which replaces or wraps the compiler clippy runs, so it can \
+             add `--cap-lints allow` and turn off the bans of {ROOT} and {LIST} past the forbid \
+             line"
+        ),
+        format!("remove `{key}`; clippy runs the pinned toolchain's compiler as it is"),
+    )
+}
+
 /// The violation for the `[env]` entry `name` of the cargo config at `path`, at `line`.
 pub(super) fn clippy_env_in_config(path: &str, line: u32, name: &str) -> Violation {
     violation(

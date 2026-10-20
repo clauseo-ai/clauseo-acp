@@ -13,6 +13,10 @@ use toml::de::{DeString, DeTable, DeValue};
 /// external command. It ignores an alias named after a built-in command such as `check`.
 const XTASK_SUBCOMMANDS: [&str; 5] = ["clippy", "deny", "fmt", "nextest", "shear"];
 
+/// The `[build]` keys that replace or wrap the compiler clippy runs, where a wrapper could add
+/// `--cap-lints allow`.
+const COMPILER_KEYS: [&str; 3] = ["rustc", "rustc-wrapper", "rustc-workspace-wrapper"];
+
 /// The repo's cargo config.
 pub(super) const CARGO_CONFIG: &str = ".cargo/config.toml";
 
@@ -51,8 +55,9 @@ pub(super) fn crate_manifest(root: &Path, member: &Member) -> Vec<Violation> {
 }
 
 /// The violations for the cargo config: a legacy `.cargo/config`, and in `.cargo/config.toml`
-/// each `rustflags` key at any depth, each `[alias]` key named after an external cargo command
-/// xtask runs and each `[env]` entry whose name starts with `CLIPPY_`.
+/// each `rustflags` key at any depth, an `include` key, each `[build]` key in `COMPILER_KEYS`,
+/// each `[alias]` key named after an external cargo command xtask runs and each `[env]` entry
+/// whose name starts with `CLIPPY_`.
 pub(super) fn cargo_config(root: &Path) -> Vec<Violation> {
     let mut found = Vec::new();
     match checks::read_repo_file(root, LEGACY_CARGO_CONFIG) {
@@ -83,6 +88,18 @@ pub(super) fn cargo_config(root: &Path) -> Vec<Violation> {
     for (key, offset) in rustflags {
         let line = line_of(&text, offset);
         found.push(report::rustflags_in_config(CARGO_CONFIG, line, &key));
+    }
+    if let Some((key, _)) = entry(doc.get_ref(), "include") {
+        let line = line_of(&text, key.span().start);
+        found.push(report::include_in_config(CARGO_CONFIG, line));
+    }
+    let build = table_at(doc.get_ref(), "build")
+        .into_iter()
+        .flat_map(|build| build.iter());
+    for (name, _) in build.filter(|(name, _)| COMPILER_KEYS.contains(&name.get_ref().as_ref())) {
+        let line = line_of(&text, name.span().start);
+        let key = format!("build.{}", name.get_ref());
+        found.push(report::compiler_in_config(CARGO_CONFIG, line, &key));
     }
     let aliases = table_at(doc.get_ref(), "alias")
         .into_iter()

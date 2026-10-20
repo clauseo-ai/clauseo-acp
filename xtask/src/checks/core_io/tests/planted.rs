@@ -108,6 +108,19 @@ macro_rules! rustflags {
     };
 }
 
+/// The violation for the compiler key `$key` of `.cargo/config.toml` at `$line`.
+#[cfg(test)]
+macro_rules! compiler {
+    ($line:literal, $key:literal) => {
+        concat!(
+            ".cargo/config.toml:", $line, ": `.cargo/config.toml` sets `", $key, "`, which \
+             replaces or wraps the compiler clippy runs, so it can add `--cap-lints allow` and \
+             turn off the bans of clippy.toml and xtask/core-io-bans.toml past the forbid line\n    \
+             fix: remove `", $key, "`; clippy runs the pinned toolchain's compiler as it is"
+        )
+    };
+}
+
 /// The violation for the `[env]` entry `$name` of `.cargo/config.toml` at `$line`.
 #[cfg(test)]
 macro_rules! clippy_env {
@@ -278,6 +291,18 @@ crate::checks::planted::cases! {
     rustflags_in_build: FailsWith(&[rustflags!(5, "build.rustflags")]), inspects 3 => super::rustflags_in_build,
     rustflags_in_a_target: FailsWith(&[rustflags!(2, "target.cfg(unix).rustflags")]), inspects 3 => super::rustflags_in_a_target,
     rustflags_that_cap_lints: FailsWith(&[rustflags!(2, "build.rustflags")]), inspects 3 => super::rustflags_that_cap_lints,
+    /// `include`, and the keys that replace or wrap the compiler.
+    include_in_cargo_config: FailsWith(&[
+        ".cargo/config.toml:1: `.cargo/config.toml` sets `include`, so cargo loads other config \
+         files that core-io does not read, where `rustflags`, an alias or a `CLIPPY_` entry could \
+         turn off the bans of clippy.toml and xtask/core-io-bans.toml\n    \
+         fix: remove `include` and move the settings it loads into `.cargo/config.toml` itself",
+    ]), inspects 3 => super::include_in_cargo_config,
+    compiler_keys_in_cargo_config: FailsWith(&[
+        compiler!(3, "build.rustc-wrapper"),
+        compiler!(4, "build.rustc"),
+        compiler!(5, "build.rustc-workspace-wrapper"),
+    ]), inspects 3 => super::compiler_keys_in_cargo_config,
     /// An `[env]` entry starting with `CLIPPY_` (review D1).
     clippy_env_in_cargo_config: FailsWith(&[
         clippy_env!(3, "CLIPPY_CONF_DIR"),

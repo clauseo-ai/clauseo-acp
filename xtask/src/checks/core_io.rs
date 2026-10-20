@@ -32,11 +32,17 @@
 //!   the crate, a `.clippy.toml` before a `clippy.toml`;
 //! - a member's `Cargo.toml` without `[lints] workspace = true`, any member, held or not;
 //! - a legacy `.cargo/config`, which cargo reads instead of `.cargo/config.toml`;
-//! - in `.cargo/config.toml`, a `rustflags` key at any depth, since `--cap-lints allow` there
-//!   beats `forbid`, an `[alias]` key named after an external cargo command xtask runs
+//! - in `.cargo/config.toml` (`lints.rs`), a `rustflags` key at any depth, since
+//!   `--cap-lints allow` there beats `forbid`;
+//! - in `.cargo/config.toml`, an `include` key, since cargo loads the files it names and core-io
+//!   does not read them;
+//! - in `.cargo/config.toml`, the `[build]` keys `rustc`, `rustc-wrapper` and
+//!   `rustc-workspace-wrapper`, since each replaces or wraps the compiler clippy runs and can add
+//!   `--cap-lints allow`;
+//! - in `.cargo/config.toml`, an `[alias]` key named after an external cargo command xtask runs
 //!   (`clippy`, `fmt`, `nextest`, `deny` or `shear`), since cargo runs the alias instead and
-//!   only warns, and an `[env]` entry starting with `CLIPPY_` in any case
-//!   (`lints.rs`).
+//!   only warns;
+//! - in `.cargo/config.toml`, an `[env]` entry starting with `CLIPPY_` in any case.
 //!
 //! xtask also runs cargo without `CLIPPY_CONF_DIR` in its own environment (`process.rs`).
 //! `tests/clippy.rs` runs clippy with the generated file on scratch crates, one module per form a
