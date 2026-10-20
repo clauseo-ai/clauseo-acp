@@ -127,7 +127,7 @@ fn macro_arms() {
             "macro_rules! m { ($v:ident $t:tt) => { $v[0]; $crate[0]; $t[0]; $u[0]; $($t),*[0] } }",
             vec![(Finding::JoinedBrackets, 1); 3],
         ),
-        ("$h [cfg(test)]", vec![]),
+        ("$h [cfg(test)]", vec![(Finding::JoinedBrackets, 1)]),
     ];
     for (source, expected) in cases {
         assert_eq!(findings(source), expected, "{source}");

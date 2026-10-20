@@ -378,7 +378,7 @@ pub(super) fn cfg_rule(path: &str, line: u32, finding: &Finding, package: &str) 
                  does not see"
             ),
             "put the brackets after a token the macro body writes itself, or after a \
-             metavariable this arm binds as a fragment other than `tt`, such as `ident` or `expr`"
+             metavariable bound as a fragment other than `tt`, such as `ident` or `expr`"
                 .to_owned(),
         ),
         Finding::PathAttribute => (

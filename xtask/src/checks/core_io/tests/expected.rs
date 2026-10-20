@@ -67,7 +67,7 @@ macro_rules! joined_brackets {
              brackets right after a repetition or a metavariable that can stand for a `#`, so a \
              macro of clauseo-protocol can build an attribute that core-io does not see\n    \
              fix: put the brackets after a token the macro body writes itself, or after a \
-             metavariable this arm binds as a fragment other than `tt`, such as `ident` or `expr`"
+             metavariable bound as a fragment other than `tt`, such as `ident` or `expr`"
         )
     };
 }

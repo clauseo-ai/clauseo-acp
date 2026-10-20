@@ -307,6 +307,7 @@ crate::checks::planted::cases! {
     /// In a transcriber, brackets after a `tt` metavariable or a repetition fail.
     hash_joins_written_brackets: FailsWith(&[joined_brackets!(1)]), inspects 3 => super::hash_joins_written_brackets,
     repetition_joins_written_brackets: FailsWith(&[joined_brackets!(1)]), inspects 3 => super::repetition_joins_written_brackets,
+    joined_brackets_in_call_arguments: FailsWith(&[joined_brackets!(2)]), inspects 3 => super::joined_brackets_in_call_arguments,
     indexing_after_an_ident_passes: Passes, inspects 3 => super::indexing_after_an_ident_passes,
     path_attribute: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute,
     path_attribute_in_cfg_attr: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute_in_cfg_attr,

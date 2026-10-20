@@ -138,10 +138,10 @@ fn bindings(tokens: TokenStream) -> BTreeMap<String, String> {
     kinds
 }
 
-/// True when `before`, the trees ahead of a bracket group in a transcriber whose arm binds
-/// `binds`, end in a repetition such as `$($h)*`, or in a metavariable other than `$crate` that
-/// the arm binds as `tt` or does not bind. Either can stand for a `#` that turns the brackets into
-/// an attribute.
+/// True when `before`, the trees ahead of a bracket group whose arm binds `binds`, none outside
+/// any transcriber, end in a repetition such as `$($h)*`, or in a metavariable other than
+/// `$crate` that the arm binds as `tt` or does not bind. Either can stand for a `#` that turns the
+/// brackets into an attribute.
 pub(super) fn joins_brackets(before: &[TokenTree], binds: &BTreeMap<String, String>) -> bool {
     let is_op =
         |tree: &TokenTree| is_punct(tree, '*') || is_punct(tree, '+') || is_punct(tree, '?');

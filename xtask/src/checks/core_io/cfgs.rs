@@ -19,8 +19,9 @@
 //! `path` or an `include!` from what its caller passes. These metavariable rules skip the matcher
 //! of each `macro_rules!` arm, and a transcriber may write `#[$m]` when its arm's matcher binds
 //! `$m` as `#[$m:meta]`, but only for a definition outside every transcriber and every macro
-//! call's arguments. In a transcriber, brackets fail right after a repetition or after a
-//! metavariable that the arm binds as `tt` or does not bind, since either can stand for a `#`.
+//! call's arguments. Outside a matcher, brackets fail right after a repetition or after a
+//! metavariable that the arm whose transcriber holds them binds as `tt` or does not bind, since
+//! either can stand for a `#`.
 //! `macros.rs` reads the arms.
 //!
 //! `include!` and every symlink under the crate's folder fail. A `path` attribute passes only in
@@ -60,13 +61,17 @@ pub(super) enum Finding {
     CfgInCfgAttr,
     /// A macro call whose name is a metavariable, such as `$x!`.
     MetavariableMacro,
-    /// In a transcriber, brackets right after a metavariable bound as `tt` or not bound by the
-    /// arm, or after a repetition, either of which can stand for a `#`.
+    /// Outside a matcher, brackets right after a repetition or a metavariable that the arm whose
+    /// transcriber holds them does not bind as a fragment other than `tt`, either of which can
+    /// stand for a `#`.
     JoinedBrackets,
 }
 
 /// No names, for a scope outside any transcriber.
 static NO_NAMES: BTreeSet<String> = BTreeSet::new();
+
+/// No bindings, for brackets outside any transcriber.
+static NO_BINDS: BTreeMap<String, String> = BTreeMap::new();
 
 /// Where the walk is, as the metavariable and path rules see it.
 #[derive(Clone, Copy)]
@@ -188,9 +193,10 @@ fn walk(tokens: TokenStream, scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
                 } else {
                     scope
                 };
+                // Outside any transcriber nothing is bound, so every metavariable counts.
                 if inner.delimiter() == Delimiter::Bracket
-                    && let Some(binds) = scope.binds
-                    && macros::joins_brackets(&trees[..index], binds)
+                    && !scope.matcher
+                    && macros::joins_brackets(&trees[..index], scope.binds.unwrap_or(&NO_BINDS))
                 {
                     let line = line_of(inner.span().start().line);
                     hits.push((Finding::JoinedBrackets, line));

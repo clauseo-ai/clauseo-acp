@@ -9,11 +9,13 @@ mod cfgs;
 mod clippy;
 #[macro_use]
 mod expected;
+mod macros;
 pub(super) mod planted;
 mod roots;
 
 use cases::*;
 use cfgs::*;
+use macros::*;
 use roots::*;
 
 use super::*;
