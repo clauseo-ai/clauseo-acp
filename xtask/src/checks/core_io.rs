@@ -25,6 +25,15 @@
 //! under `[package]`, since a build script's `cargo::rustc-env` lines reach the clippy that lints
 //! the crate (`roots.rs`).
 //!
+//! clippy sees all of a held crate's code. The clippy step runs with `--all-targets` and
+//! `--all-features` (`steps/plan.rs`), so tests, benches, code behind a feature and
+//! `required-features` targets are linted. clippy lints with `cfg(clippy)` set and in the debug
+//! profile, so a held crate never names `clippy` or `debug_assertions`, the cfgs behind which
+//! code would go unlinted. Every `.rs` file in git's list under the crate's folder is lexed with
+//! proc-macro2, macro bodies included, and each identifier `clippy` or `debug_assertions` fails,
+//! raw form included, but `clippy` directly before `::`, a lint path. A file that does not lex
+//! fails at the line the lexer names (`cfgs.rs`).
+//!
 //! Lint configuration lives only in the root `clippy.toml`, the own `clippy.toml` of each crate
 //! whose row lists `fs`, `process` or `any I/O`, and the root `[workspace.lints]`. So the check
 //! also fails
@@ -53,8 +62,10 @@
 //! covered: code behind another target's `cfg`, which clippy lints only on that target, code
 //! another crate runs for this one (a dependency, a proc macro), an item a newer toolchain adds
 //! that the list does not name, a clippy config git ignores, cargo config outside the repo
-//! (parent folders, `CARGO_HOME`), `RUSTFLAGS` in the environment, `CLIPPY_CONF_DIR` when
-//! clippy runs without xtask, and a crate that is not a workspace member. It counts the
+//! (parent folders, `CARGO_HOME`), `RUSTFLAGS` and `RUSTC_WRAPPER` in the environment,
+//! `CLIPPY_CONF_DIR` when clippy runs without xtask, a crate that is not a workspace member, and
+//! a `clippy` or `debug_assertions` cfg in a file outside the crate's folder that `#[path]` or
+//! `include!` brings into the crate. It counts the
 //! Crates-table rows it classified, held or not.
 
 mod cfgs;
