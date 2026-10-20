@@ -15,8 +15,9 @@
 //! `cargo metadata` lists, the library, binaries, tests, examples and benches alike, has
 //! `#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]` among its inner
 //! attributes, with that meta in that order and not under `cfg_attr`. A macro can neither add nor
-//! remove a crate-root attribute, and under `forbid` an `allow` or `expect` of either lint
-//! anywhere in the target is error E0453, and a level for either lint in the manifest or in
+//! remove a crate-root attribute. Under `forbid`, an `allow` or `expect` of
+//! `clippy::disallowed_methods` or `clippy::disallowed_types` anywhere in the target is error
+//! E0453, and a level for `disallowed_methods` or `disallowed_types` in the manifest or in
 //! `CLIPPY_ARGS` does not undo it. So a held crate gets no exception; a test that needs a
 //! fixture reads it with `include_str!`. A root syn cannot parse fails at the syntax error. A
 //! held crate also has no build script, neither a `build.rs` in its folder nor a `build` key
