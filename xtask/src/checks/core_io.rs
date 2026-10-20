@@ -14,8 +14,8 @@
 //! The compiler keeps the bans on in a held crate. Every target root of a held crate that
 //! `cargo metadata` lists, the library, binaries, tests, examples and benches alike, has
 //! `#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]` among its inner
-//! attributes, with that meta in that order and not under `cfg_attr`. A macro can neither add nor
-//! remove a crate-root attribute. Under `forbid`, an `allow` or `expect` of
+//! attributes, naming the two lints in that order and not under `cfg_attr`. A macro can neither
+//! add nor remove a crate-root attribute. Under `forbid`, an `allow` or `expect` of
 //! `clippy::disallowed_methods` or `clippy::disallowed_types` anywhere in the target is error
 //! E0453, and a level for `disallowed_methods` or `disallowed_types` in the manifest or in
 //! `CLIPPY_ARGS` does not undo it. So a held crate gets no exception; a test that needs a
@@ -24,23 +24,36 @@
 //! crate's manifest, since cargo builds it all the same and the cfg rule below reads only the
 //! folder. A held crate also has no build script, neither a `build.rs` in its folder nor a
 //! `build` key under `[package]`, since a build script's `cargo::rustc-env` lines reach the
-//! clippy that lints the crate (`roots.rs`).
+//! clippy that lints the crate. `roots.rs` checks the roots and the build script.
 //!
-//! clippy sees all of a held crate's code. The clippy step runs with `--all-targets` and
-//! `--all-features` (`steps/plan.rs`), so clippy lints the crate once per target kind with every
+//! clippy sees all of a held crate's code. The clippy step in `steps/plan.rs` runs with
+//! `--all-targets` and `--all-features`, so clippy lints the crate once per target kind with every
 //! feature on, and code is linted only when its cfg holds in that build. `test` holds in the test
-//! build, `not(test)` in the others, and a positive feature in all of them. Any other cfg can
-//! leave code out of every clippy run, so a held crate's cfgs use only `test` and positive
-//! features. Every `.rs` file in git's list under the crate's folder is lexed with proc-macro2,
-//! macro bodies and macro call arguments included. The predicate of each `cfg` and `cfg_attr`
-//! at the start of any bracket group or inside a `cfg_attr`, since a macro can join a `#` to
-//! brackets passed separately, and of each `cfg!` is built only from `all`, `any`, `not`,
-//! `test` and `feature = "<literal>"`, with no `feature` under a `not`. An attribute or a macro
-//! call whose name is a metavariable fails, and so does a `#` before a metavariable, since a macro
-//! could build a `cfg` or an `include!` from a passed name. A `path` attribute, `include!` and
-//! every symlink git lists under the folder fail, file or folder target alike, so every module
-//! file sits at its default path in the folder itself and is lexed. A file that does not lex fails
-//! at the line the lexer names (`cfgs.rs`).
+//! build, `not(test)` in the others, and a positive feature in all of them. `doc` holds only when
+//! rustdoc documents the crate. Any other cfg can leave code out of every clippy run, so a held
+//! crate's cfgs use only `test`, `doc` and positive features. The cfg rule in `cfgs.rs` lexes
+//! with proc-macro2 every `.rs` file in git's list under the crate's folder, macro bodies and
+//! macro call arguments included.
+//!
+//! Each cfg predicate is built only from `all`, `any`, `not`, `test`, `doc` and
+//! `feature = "<literal>"`, with no `feature` under a `not`. The rule reads the predicate of each
+//! `cfg` and `cfg_attr` at the start of any bracket group, since a macro can join a `#` to
+//! brackets passed separately, and inside a `cfg_attr`. A `cfg` among a `cfg_attr`'s attributes
+//! fails at any depth, since it keeps the item whenever the `cfg_attr`'s predicate is false. The
+//! name `cfg_select` fails anywhere, a `use` included, since its macro builds only the arm whose
+//! cfg holds. `cfg!` passes, since both branches of an `if cfg!(..)` are compiled and linted.
+//!
+//! An attribute or a macro call whose name is a metavariable fails, and so does a `#` before a
+//! metavariable or a metavariable after `path` or `include`, since a macro could build a `cfg`, a
+//! `path` or an `include!` from what its caller passes. These rules skip the matcher of each
+//! `macro_rules!` arm. A transcriber may write `#[$m]` when its arm's matcher binds `$m` as
+//! `#[$m:meta]`, since the caller then writes a whole bracketed attribute, which the rule checks
+//! where the caller writes it.
+//!
+//! `include!` and every symlink git lists under the folder fail, file or folder target alike. A
+//! `path` attribute passes only on an out-of-line `mod name;` at the top level of a file, with a
+//! string literal that names a file the rule lexes without leaving the crate's folder on the way.
+//! So every module file is lexed. A file that does not lex fails at the line the lexer names.
 //!
 //! Lint configuration lives only in the root `clippy.toml`, the own `clippy.toml` of each crate
 //! whose row lists `fs`, `process` or `any I/O`, and the root `[workspace.lints]`. So the check
@@ -50,30 +63,33 @@
 //!   the crate, a `.clippy.toml` before a `clippy.toml`;
 //! - a member's `Cargo.toml` without `[lints] workspace = true`, any member, held or not;
 //! - a legacy `.cargo/config`, which cargo reads instead of `.cargo/config.toml`;
-//! - in `.cargo/config.toml` (`lints.rs`), a `rustflags` key at any depth, since
-//!   `--cap-lints allow` there beats `forbid`;
+//! - in `.cargo/config.toml`, a `rustflags` key at any depth, since `--cap-lints allow` there
+//!   beats `forbid`;
 //! - in `.cargo/config.toml`, an `include` key, since cargo loads the files it names and core-io
 //!   does not read them;
 //! - in `.cargo/config.toml`, the `[build]` keys `rustc`, `rustc-wrapper` and
 //!   `rustc-workspace-wrapper`, since each replaces or wraps the compiler clippy runs and can add
 //!   `--cap-lints allow`;
-//! - in `.cargo/config.toml`, an `[alias]` key named after an external cargo command xtask runs
-//!   (`clippy`, `fmt`, `nextest`, `deny` or `shear`), since cargo runs the alias instead and
-//!   only warns;
+//! - in `.cargo/config.toml`, an `[alias]` key named after an external cargo command xtask runs,
+//!   which is `clippy`, `fmt`, `nextest`, `deny` or `shear`, since cargo runs the alias instead
+//!   and only warns;
 //! - in `.cargo/config.toml`, an `[env]` entry starting with `CLIPPY_` in any case.
 //!
-//! xtask also runs cargo without `CLIPPY_CONF_DIR` in its own environment (`process.rs`).
-//! `tests/clippy.rs` runs clippy with the generated file on scratch crates, one module per form a
-//! ban must catch or must pass, and one per form the forbid line must refuse.
+//! `lints.rs` reads the manifests and the cargo config. xtask also runs cargo without
+//! `CLIPPY_CONF_DIR` in its own environment, as `process.rs` shows. `tests/clippy.rs` runs clippy
+//! with the generated file on scratch crates, one module per form a ban must catch or must pass,
+//! and one per form the forbid line must refuse.
 //!
-//! The file covers every target of the package clippy lints, `#[cfg(test)]` code included. Not
-//! covered: code another crate runs for this one (a dependency, a proc macro), a cfg that a macro
-//! from a crate that is not held wraps around code, since the cfg rule reads only the held
-//! crate's files, an item a newer toolchain adds that the list does not name, a source file or a
-//! clippy config git ignores, cargo config outside the repo (parent folders, `CARGO_HOME`),
-//! `RUSTFLAGS` and `RUSTC_WRAPPER` in the environment, `CLIPPY_CONF_DIR` when clippy runs
-//! without xtask, and a crate that is not a workspace member.
-//! It counts the Crates-table rows it classified, held or not.
+//! The file covers every target of the package clippy lints, `#[cfg(test)]` code included. It
+//! does not cover code another crate runs for this one, such as a dependency or a proc macro. Nor
+//! does it cover a cfg that a macro from a crate that is not held wraps around code, since the cfg
+//! rule reads only the held crate's files, or an item a newer toolchain adds that the list does
+//! not name. A source file or a clippy config git ignores is not covered, nor is cargo config
+//! outside the repo, in parent folders or `CARGO_HOME`. Neither are `RUSTFLAGS` and
+//! `RUSTC_WRAPPER` in the environment, `CLIPPY_CONF_DIR` when clippy runs without xtask, and a
+//! crate that is not a workspace member.
+//!
+//! The check counts the Crates-table rows it classified, held or not.
 
 mod cfgs;
 mod clippy_toml;
