@@ -22,8 +22,11 @@ pub(crate) struct Member {
 pub(crate) struct Target {
     /// The target's kinds: `lib`, `bin`, `test`, `example`, `bench`, `custom-build` and others.
     pub kinds: Vec<String>,
-    /// The target's root file, relative to the workspace root, `/`-separated.
+    /// The target's root file, relative to the workspace root and `/`-separated, or as
+    /// `cargo metadata` gives it when `outside`.
     pub src_path: String,
+    /// True when the root file lies outside the workspace root, where cargo still builds it.
+    pub outside: bool,
 }
 
 /// The workspace as one `cargo metadata --no-deps` run reports it.
@@ -199,19 +202,19 @@ pub(crate) fn parse_metadata(json: &str) -> Result<Vec<Member>, String> {
         let targets = package
             .targets
             .iter()
-            .map(|target| {
-                let src_path = relative(&target.src_path, base).ok_or_else(|| {
-                    format!(
-                        "a target of package {} is outside the workspace",
-                        package.name
-                    )
-                })?;
-                Ok(Target {
+            .map(|target| match relative(&target.src_path, base) {
+                Some(src_path) => Target {
                     kinds: target.kind.clone(),
                     src_path,
-                })
+                    outside: false,
+                },
+                None => Target {
+                    kinds: target.kind.clone(),
+                    src_path: target.src_path.to_string_lossy().into_owned(),
+                    outside: true,
+                },
             })
-            .collect::<Result<_, String>>()?;
+            .collect();
         members.push(Member {
             name: package.name.clone(),
             dir,
@@ -283,15 +286,22 @@ mod tests {
                 Target {
                     kinds: vec!["lib".to_owned()],
                     src_path: "crates/b/src/lib.rs".to_owned(),
+                    outside: false,
                 },
                 Target {
                     kinds: vec!["test".to_owned()],
                     src_path: "crates/b/tests/t.rs".to_owned(),
+                    outside: false,
                 },
             ]
         );
-        let outside = SAMPLE.replace("/ws/crates/b/tests/t.rs", "/elsewhere/t.rs");
-        assert!(parse_metadata(&outside).is_err());
+        let json = SAMPLE.replace("/ws/crates/b/tests/t.rs", "/elsewhere/t.rs");
+        let members = parse_metadata(&json).expect("a target outside the workspace parses");
+        let outside = &members[1].targets[1];
+        assert_eq!(
+            (outside.src_path.as_str(), outside.outside),
+            ("/elsewhere/t.rs", true)
+        );
     }
 
     #[test]

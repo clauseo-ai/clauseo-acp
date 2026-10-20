@@ -18,8 +18,9 @@ const FORBIDDEN: [&str; 2] = ["clippy::disallowed_methods", "clippy::disallowed_
 /// The kind of a build script target, which `build_script` covers.
 const BUILD_SCRIPT_KIND: &str = "custom-build";
 
-/// The violations for the target roots of the held crate `member` that lack the forbid line or
-/// do not parse, each root once, in the order `cargo metadata` lists them.
+/// The violations for the target roots of the held crate `member` that lie outside the repo,
+/// lack the forbid line or do not parse, each root once, in the order `cargo metadata` lists
+/// them.
 pub(super) fn forbid_lines(root: &Path, member: &Member) -> Vec<Violation> {
     let mut seen = BTreeSet::new();
     let mut found = Vec::new();
@@ -32,6 +33,18 @@ pub(super) fn forbid_lines(root: &Path, member: &Member) -> Vec<Violation> {
             continue;
         }
         let path = &target.src_path;
+        if target.outside {
+            let manifest = checks::join(&member.dir, "Cargo.toml");
+            let kinds = target.kinds.join(", ");
+            found.push(report::root_outside(
+                &manifest,
+                &member.name,
+                &kinds,
+                path,
+                &member.dir,
+            ));
+            continue;
+        }
         let text = match checks::read_repo_file(root, path) {
             Ok(Some(text)) => text,
             // cargo metadata listed it; a root gone since then fails cargo.

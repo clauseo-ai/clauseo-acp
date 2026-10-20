@@ -116,6 +116,11 @@ pub(in crate::checks::core_io) fn clock_only_crate_without_forbid() -> Inspectio
     )
 }
 
+/// The review's case: `[[bin]] path` names a file outside the repo, which cargo builds.
+pub(in crate::checks::core_io) fn root_outside_the_repo() -> Inspection {
+    held("root-outside", &[], &[("bin", "/elsewhere/outside.rs")])
+}
+
 /// The line in the root of every kind of target, and no build script, passes.
 pub(in crate::checks::core_io) fn forbid_in_every_root() -> Inspection {
     let roots = [

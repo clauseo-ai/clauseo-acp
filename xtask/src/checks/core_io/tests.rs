@@ -143,6 +143,7 @@ fn members(targets: &[(&str, &str)]) -> Vec<Member> {
                     .map(|(kind, src_path)| Target {
                         kinds: vec![kind.to_owned()],
                         src_path: src_path.to_owned(),
+                        outside: src_path.starts_with('/'),
                     })
                     .collect(),
             }
