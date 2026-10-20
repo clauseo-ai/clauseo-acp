@@ -1,11 +1,11 @@
 //! `cargo xtask` commands in the docs. An inline code span is read whole. A code block is read
 //! line by line when its info word is in `SHELLS`, when it has no info string, or when it is
 //! indented. A session block is read only on its lines that start with a prompt from `PROMPTS`,
-//! and only from after that prompt. Other code blocks are not read. Each read line is split into
-//! words with `shlex`, once, after a trailing `\` is dropped, and on whitespace when `shlex`
-//! cannot split it. Every `cargo` in the words, with its flags and `+toolchain` skipped, followed
-//! by `xtask`, starts a command. The words after `xtask` stop at shell syntax and parse against
-//! the clap tree in `main.rs`.
+//! and only from after that prompt. Other code blocks are not read. Each read line loses a
+//! trailing `\` and is split into words once, with `shlex`, or on whitespace when `shlex` cannot
+//! split it. Every `cargo` in the words, with its flags and `+toolchain` skipped, followed by
+//! `xtask`, starts a command. The words after `xtask` stop at shell syntax and parse against the
+//! clap tree in `main.rs`.
 
 use super::markdown::Scan;
 use crate::Cli;
