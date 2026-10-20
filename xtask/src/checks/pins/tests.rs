@@ -2,6 +2,7 @@
 //! `tests/cases.rs`.
 
 mod cases;
+mod fake_pins;
 pub(super) mod planted;
 
 use super::*;

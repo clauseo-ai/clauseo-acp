@@ -2,12 +2,12 @@
 //! another macro fills in, and a `#` passed to a macro without its brackets.
 
 use super::cfgs::with_file;
-use crate::checks::Inspection;
+use crate::checks::planted::Repo as ScratchRepo;
 
 /// The review's case: the protocol crate's way to forward doc comments and other attributes into
 /// a macro's items, `$(#[$meta:meta])*` in the matcher and `$(#[$meta])*` in the transcriber, at
 /// every depth of repetition, beside `#[doc = $doc]` and an attribute with a metavariable value.
-pub(in crate::checks::core_io) fn forwarded_attributes_pass() -> Inspection {
+pub(in crate::checks::core_io) fn forwarded_attributes_pass() -> ScratchRepo {
     with_file("forwarded-attributes", FORWARDED)
 }
 
@@ -84,7 +84,7 @@ string_id! {
 
 /// The review's case with a matcher that binds the forwarded attribute as `$m:tt`, which a
 /// caller can fill with `cfg(not(clippy))` and no brackets of its own.
-pub(in crate::checks::core_io) fn forwarded_attribute_as_tt() -> Inspection {
+pub(in crate::checks::core_io) fn forwarded_attribute_as_tt() -> ScratchRepo {
     with_file(
         "forwarded-tt",
         "macro_rules! fwd {\n    ($(#[$m:tt])* $name:ident) => {\n        $(#[$m])*\n        \
@@ -93,7 +93,7 @@ pub(in crate::checks::core_io) fn forwarded_attribute_as_tt() -> Inspection {
 }
 
 /// A matcher that binds the forwarded attribute's name as `$m:ident`.
-pub(in crate::checks::core_io) fn forwarded_attribute_as_ident() -> Inspection {
+pub(in crate::checks::core_io) fn forwarded_attribute_as_ident() -> ScratchRepo {
     with_file(
         "forwarded-ident",
         "macro_rules! fwd {\n    (#[$m:ident] $name:ident) => {\n        #[$m]\n        \
@@ -103,7 +103,7 @@ pub(in crate::checks::core_io) fn forwarded_attribute_as_ident() -> Inspection {
 
 /// A `macro_rules!` inside a transcriber: the outer macro fills in both the inner matcher's
 /// `#[$m:meta]` and the inner `#[$m]`, so the caller never writes brackets.
-pub(in crate::checks::core_io) fn forwarded_meta_in_a_nested_definition() -> Inspection {
+pub(in crate::checks::core_io) fn forwarded_meta_in_a_nested_definition() -> ScratchRepo {
     with_file(
         "forwarded-nested",
         r#"macro_rules! outer {
@@ -121,7 +121,7 @@ outer!(cfg(any()));
 
 /// A `macro_rules!` in a macro call's arguments is no definition, so its "matcher" gets the
 /// full rules.
-pub(in crate::checks::core_io) fn definition_shape_in_call_arguments() -> Inspection {
+pub(in crate::checks::core_io) fn definition_shape_in_call_arguments() -> ScratchRepo {
     with_file(
         "definition-in-call",
         r#"macro_rules! emit { (macro_rules! $n:ident { ($($c:tt)*) => {} }) => { $($c)* }; }
@@ -134,7 +134,7 @@ a!(cfg(any()));
 
 /// The review's case: a `#` passed as a `tt` joins brackets the transcriber writes, so the `#`
 /// in the call fails.
-pub(in crate::checks::core_io) fn hash_joins_written_brackets() -> Inspection {
+pub(in crate::checks::core_io) fn hash_joins_written_brackets() -> ScratchRepo {
     with_file(
         "hash-joins-brackets",
         "macro_rules! a { ($h:tt $($p:tt)*) => { $h [$($p)*] pub fn k() {} }; }\n\
@@ -144,7 +144,7 @@ pub(in crate::checks::core_io) fn hash_joins_written_brackets() -> Inspection {
 
 /// The review's case: one macro passes a `#` and brackets as separate arguments to a second,
 /// whose transcriber joins them into an attribute, so the `#` in the first macro fails.
-pub(in crate::checks::core_io) fn attribute_built_across_two_macros() -> Inspection {
+pub(in crate::checks::core_io) fn attribute_built_across_two_macros() -> ScratchRepo {
     with_file(
         "two-macros",
         "macro_rules! b { ($h:tt, $b:tt) => { $h $b pub fn k() {} }; }\n\
@@ -154,7 +154,7 @@ pub(in crate::checks::core_io) fn attribute_built_across_two_macros() -> Inspect
 }
 
 /// Indexing after a metavariable bound as `expr`, which cannot take a lone `#`.
-pub(in crate::checks::core_io) fn indexing_after_an_expr_passes() -> Inspection {
+pub(in crate::checks::core_io) fn indexing_after_an_expr_passes() -> ScratchRepo {
     with_file(
         "indexing-expr",
         "macro_rules! first { ($a:expr) => { $a[0] }; }\n\
@@ -163,7 +163,7 @@ pub(in crate::checks::core_io) fn indexing_after_an_expr_passes() -> Inspection 
 }
 
 /// The same indexing after a metavariable bound as `tt`, which fails for the name `tt`.
-pub(in crate::checks::core_io) fn indexing_after_a_tt() -> Inspection {
+pub(in crate::checks::core_io) fn indexing_after_a_tt() -> ScratchRepo {
     with_file(
         "indexing-tt",
         "macro_rules! first { ($a:tt) => { $a[0] }; }\n\
@@ -173,7 +173,7 @@ pub(in crate::checks::core_io) fn indexing_after_a_tt() -> Inspection {
 
 /// The review's case: the caller writes a whole `#[..]`, the matcher takes its `#` alone as a
 /// `tt`, and the transcriber puts it before other brackets.
-pub(in crate::checks::core_io) fn hash_split_from_a_whole_attribute() -> Inspection {
+pub(in crate::checks::core_io) fn hash_split_from_a_whole_attribute() -> ScratchRepo {
     with_file(
         "split-attribute",
         "macro_rules! split { ($h:tt $_b:tt $($t:tt)*) => { $h [$($t)*] pub fn hidden() {} }; }\n\
@@ -182,7 +182,7 @@ pub(in crate::checks::core_io) fn hash_split_from_a_whole_attribute() -> Inspect
 }
 
 /// The same with a doc comment, which lexes as `#[doc = ".."]`.
-pub(in crate::checks::core_io) fn hash_split_from_a_doc_comment() -> Inspection {
+pub(in crate::checks::core_io) fn hash_split_from_a_doc_comment() -> ScratchRepo {
     with_file(
         "split-doc",
         "macro_rules! split { ($h:tt $_b:tt $($t:tt)*) => { $h [$($t)*] pub fn hidden() {} }; }\n\
@@ -191,7 +191,7 @@ pub(in crate::checks::core_io) fn hash_split_from_a_doc_comment() -> Inspection 
 }
 
 /// The same with the split `#` passed to a second macro, whose transcriber writes `$a $b`.
-pub(in crate::checks::core_io) fn hash_split_across_two_macros() -> Inspection {
+pub(in crate::checks::core_io) fn hash_split_across_two_macros() -> ScratchRepo {
     with_file(
         "split-two-macros",
         "macro_rules! join { ($a:tt $b:tt) => { $a $b pub fn hidden() {} }; }\n\
@@ -201,7 +201,7 @@ pub(in crate::checks::core_io) fn hash_split_across_two_macros() -> Inspection {
 }
 
 /// Indexing after a metavariable bound as `ident`, which cannot stand for a `#`.
-pub(in crate::checks::core_io) fn indexing_after_an_ident_passes() -> Inspection {
+pub(in crate::checks::core_io) fn indexing_after_an_ident_passes() -> ScratchRepo {
     with_file(
         "indexing-ident",
         "macro_rules! at { ($v:ident, $i:expr) => { $v[$i] }; }\n\
@@ -211,7 +211,7 @@ pub(in crate::checks::core_io) fn indexing_after_an_ident_passes() -> Inspection
 
 /// The review's case: a forwarding macro that passes, called with a cfg clippy never sees, which
 /// fails where the caller writes it.
-pub(in crate::checks::core_io) fn forwarded_cfg_at_the_call() -> Inspection {
+pub(in crate::checks::core_io) fn forwarded_cfg_at_the_call() -> ScratchRepo {
     with_file(
         "forwarded-cfg-call",
         "macro_rules! fwd {\n    ($(#[$m:meta])* $name:ident) => {\n        $(#[$m])*\n        \

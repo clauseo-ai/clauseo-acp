@@ -1,5 +1,5 @@
 //! The builders of the planted cases of the capabilities check: each makes a scratch tree (or
-//! a context) and returns what the check's own `run` finds in it. See `tests/planted.rs`.
+//! a context) that the planted harness runs the check on. See `tests/planted.rs`.
 
 use super::*;
 
@@ -15,13 +15,13 @@ fn repo(case: &str, files: &[(&str, &str)]) -> Scratch {
     dir
 }
 
-/// Runs the check on the scratch repo `repo(case, files)`, with the desktop crate at its usual
+/// The scratch repo `repo(case, files)`, with the desktop crate at its usual
 /// place.
-fn run_on(case: &str, files: &[(&str, &str)]) -> Inspection {
-    run(&desktop_context(&repo(case, files)))
+fn run_on(case: &str, files: &[(&str, &str)]) -> Repo {
+    Repo::desktop(repo(case, files))
 }
 
-pub(super) fn clean_capability() -> Inspection {
+pub(super) fn clean_capability() -> Repo {
     run_on(
         "clean",
         &[(
@@ -32,26 +32,22 @@ pub(super) fn clean_capability() -> Inspection {
     )
 }
 
-pub(super) fn desktop_crate_missing() -> Inspection {
+pub(super) fn desktop_crate_missing() -> Repo {
     let dir = Scratch::new("planted-capabilities-desktop-missing");
-    run(&Context {
-        root: dir.to_path_buf(),
-        members: Ok(Vec::new()),
-        load_resolved_graph: false,
-    })
+    Repo::new(dir)
 }
 
-pub(super) fn folder_missing() -> Inspection {
+pub(super) fn folder_missing() -> Repo {
     run_on("folder-missing", &[])
 }
 
-pub(super) fn empty_folder() -> Inspection {
+pub(super) fn empty_folder() -> Repo {
     let dir = Scratch::new("planted-capabilities-empty-folder");
     Scratch::create_dir_all(dir.join("crates/desktop/capabilities")).expect("create the folder");
-    run(&desktop_context(&dir))
+    Repo::desktop(dir)
 }
 
-pub(super) fn core_default_value() -> Inspection {
+pub(super) fn core_default_value() -> Repo {
     run_on(
         "core-default-value",
         &[(
@@ -61,7 +57,7 @@ pub(super) fn core_default_value() -> Inspection {
     )
 }
 
-pub(super) fn core_default_key() -> Inspection {
+pub(super) fn core_default_key() -> Repo {
     run_on(
         "core-default-key",
         &[(
@@ -71,7 +67,7 @@ pub(super) fn core_default_key() -> Inspection {
     )
 }
 
-pub(super) fn remote_key() -> Inspection {
+pub(super) fn remote_key() -> Repo {
     run_on(
         "remote-key",
         &[(
@@ -81,7 +77,7 @@ pub(super) fn remote_key() -> Inspection {
     )
 }
 
-pub(super) fn remote_value() -> Inspection {
+pub(super) fn remote_value() -> Repo {
     run_on(
         "remote-value",
         &[(
@@ -91,7 +87,7 @@ pub(super) fn remote_value() -> Inspection {
     )
 }
 
-pub(super) fn forbidden_prefixes() -> Inspection {
+pub(super) fn forbidden_prefixes() -> Repo {
     run_on(
         "forbidden-prefixes",
         &[(
@@ -103,7 +99,7 @@ pub(super) fn forbidden_prefixes() -> Inspection {
     )
 }
 
-pub(super) fn prefixes_mid_string() -> Inspection {
+pub(super) fn prefixes_mid_string() -> Repo {
     run_on(
         "prefixes-mid-string",
         &[(
@@ -114,7 +110,7 @@ pub(super) fn prefixes_mid_string() -> Inspection {
     )
 }
 
-pub(super) fn escaped_value() -> Inspection {
+pub(super) fn escaped_value() -> Repo {
     run_on(
         "escaped-value",
         &[(
@@ -124,7 +120,7 @@ pub(super) fn escaped_value() -> Inspection {
     )
 }
 
-pub(super) fn escaped_key() -> Inspection {
+pub(super) fn escaped_key() -> Repo {
     run_on(
         "escaped-key",
         &[(
@@ -134,7 +130,7 @@ pub(super) fn escaped_key() -> Inspection {
     )
 }
 
-pub(super) fn toml_capability() -> Inspection {
+pub(super) fn toml_capability() -> Repo {
     run_on(
         "toml-capability",
         &[(
@@ -144,7 +140,7 @@ pub(super) fn toml_capability() -> Inspection {
     )
 }
 
-pub(super) fn invalid_toml() -> Inspection {
+pub(super) fn invalid_toml() -> Repo {
     run_on(
         "invalid-toml",
         &[(
@@ -154,7 +150,7 @@ pub(super) fn invalid_toml() -> Inspection {
     )
 }
 
-pub(super) fn invalid_json() -> Inspection {
+pub(super) fn invalid_json() -> Repo {
     run_on(
         "invalid-json",
         &[(
@@ -164,7 +160,7 @@ pub(super) fn invalid_json() -> Inspection {
     )
 }
 
-pub(super) fn json5_not_plain() -> Inspection {
+pub(super) fn json5_not_plain() -> Repo {
     run_on(
         "json5-not-plain",
         &[(
@@ -174,7 +170,7 @@ pub(super) fn json5_not_plain() -> Inspection {
     )
 }
 
-pub(super) fn plain_json5() -> Inspection {
+pub(super) fn plain_json5() -> Repo {
     run_on(
         "plain-json5",
         &[(
@@ -185,7 +181,7 @@ pub(super) fn plain_json5() -> Inspection {
 }
 
 /// The Tauri config holds one inline capability object, with `http:default` on line 7.
-pub(super) fn inline_capability() -> Inspection {
+pub(super) fn inline_capability() -> Repo {
     run_on(
         "inline-capability",
         &[
@@ -198,7 +194,7 @@ pub(super) fn inline_capability() -> Inspection {
     )
 }
 
-pub(super) fn nested_subfolder() -> Inspection {
+pub(super) fn nested_subfolder() -> Repo {
     run_on(
         "nested-subfolder",
         &[
@@ -213,7 +209,7 @@ pub(super) fn nested_subfolder() -> Inspection {
 
 /// A Finder `.DS_Store` and a Vim backup `main.json~` sit beside a clean `main.json`: neither is
 /// read, so the check passes on the one file it inspects.
-pub(super) fn other_extensions() -> Inspection {
+pub(super) fn other_extensions() -> Repo {
     let dir = repo("other-extensions", &[(PATH, CLEAN)]);
     let caps = dir.join("crates/desktop/capabilities");
     Scratch::write(
@@ -222,11 +218,11 @@ pub(super) fn other_extensions() -> Inspection {
     )
     .expect("write .DS_Store");
     Scratch::write(caps.join("main.json~"), "[\"core:default\"]").expect("write main.json~");
-    run(&desktop_context(&dir))
+    Repo::desktop(dir)
 }
 
 /// The desktop crate is found by its package name at `apps/shell`, not at `crates/desktop`.
-pub(super) fn moved_crate() -> Inspection {
+pub(super) fn moved_crate() -> Repo {
     let dir = repo(
         "moved-crate",
         &[(
@@ -234,18 +230,20 @@ pub(super) fn moved_crate() -> Inspection {
             "{\n  \"permissions\": [\"core:default\"]\n}",
         )],
     );
-    let mut ctx = desktop_context(&dir);
-    ctx.members.as_mut().expect("the context has members")[0].dir = "apps/shell".to_owned();
-    run(&ctx)
+    Repo::with_context(dir, |root| {
+        let mut ctx = desktop_context(root);
+        ctx.members.as_mut().expect("the context has members")[0].dir = "apps/shell".to_owned();
+        ctx
+    })
 }
 
 /// A capability file that is not UTF-8 cannot be read as text, so it is a violation; the other
 /// file still counts as inspected.
-pub(super) fn not_utf8_capability() -> Inspection {
+pub(super) fn not_utf8_capability() -> Repo {
     let dir = repo(
         "not-utf8",
         &[("crates/desktop/capabilities/other.json", CLEAN)],
     );
     Scratch::write(dir.join(PATH), b"{\"identifier\": \"main\"}\xff").expect("write main.json");
-    run(&desktop_context(&dir))
+    Repo::desktop(dir)
 }

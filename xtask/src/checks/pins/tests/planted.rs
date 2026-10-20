@@ -60,21 +60,6 @@ crate::checks::planted::cases! {
     ]), inspects 1 => super::cases::engines_node_missing,
     /// A comment that names the pinned lefthook passes.
     lefthook_comment_matches: Passes, inspects 2 => super::cases::lefthook_comment_matches,
-    /// A comment that names another lefthook fails at its line.
-    lefthook_comment_differs: FailsWith(&[
-        "lefthook.yml:3: the comment names lefthook 9.8.6, not 9.8.7, the version `BINARIES` in \
-         xtask/src/setup.rs pins\n    fix: check that the comment holds for lefthook 9.8.7, then \
-         make it name 9.8.7, the version `BINARIES` in xtask/src/setup.rs pins",
-    ]), inspects 2 => super::cases::lefthook_comment_differs,
-    /// A comment after a value counts, in any case, after a quoted string too.
-    lefthook_comment_after_a_value: FailsWith(&[
-        "lefthook.yml:2: the comment names lefthook 10.0, not 9.8.7, the version `BINARIES` in \
-         xtask/src/setup.rs pins\n    fix: check that the comment holds for lefthook 9.8.7, then \
-         make it name 9.8.7, the version `BINARIES` in xtask/src/setup.rs pins",
-        "lefthook.yml:4: the comment names lefthook 9.0.0, not 9.8.7, the version `BINARIES` in \
-         xtask/src/setup.rs pins\n    fix: check that the comment holds for lefthook 9.8.7, then \
-         make it name 9.8.7, the version `BINARIES` in xtask/src/setup.rs pins",
-    ]), inspects 2 => super::cases::lefthook_comment_after_a_value,
     /// `# lefthook` inside a quoted string or a block scalar is text, not a comment.
     lefthook_text_in_a_string: Passes, inspects 2 => super::cases::lefthook_text_in_a_string,
     /// A lefthook.yml that is not YAML fails at the line the parser stopped on.
@@ -170,43 +155,6 @@ crate::checks::planted::cases! {
          remove `node-version` and set `node-version-file: ui/package.json`: actions/setup-node \
          then installs a Node that `engines.node` there allows, its one home",
     ]), inspects 2 => super::cases::a_yaml_extension,
-    /// A pinned version, or a major.minor, in a run step fails at its line.
-    versions_in_run_steps: FailsWith(&[
-        ".github/workflows/ci.yml:4: `7.8.9` is the pnpm version `packageManager` in \
-         ui/package.json pins\n    fix: remove the version from the workflow: pnpm/action-setup \
-         with `package_json_file: ui/package.json` installs the pnpm `packageManager` names",
-        ".github/workflows/ci.yml:7: `7.8` is the major.minor of the pnpm version \
-         `packageManager` in ui/package.json pins\n    fix: remove the version from the \
-         workflow: pnpm/action-setup with `package_json_file: ui/package.json` installs the pnpm \
-         `packageManager` names",
-        ".github/workflows/ci.yml:8: `3.4.5` is the Rust version `channel` in rust-toolchain.toml \
-         pins\n    fix: remove the version from the workflow: a `run: rustup toolchain install` \
-         step with no argument installs the toolchain rust-toolchain.toml names",
-        ".github/workflows/ci.yml:9: `5.6.7` is the cargo-fake version `TOOLS` in \
-         xtask/src/setup.rs pins\n    fix: remove the version from the workflow: `cargo xtask \
-         setup --binaries` installs the versions xtask/src/setup.rs pins",
-        ".github/workflows/ci.yml:9: `9.8.7` is the lefthook version `BINARIES` in \
-         xtask/src/setup.rs pins\n    fix: remove the version from the workflow: `cargo xtask \
-         setup --binaries` installs the versions xtask/src/setup.rs pins",
-    ]), inspects 2 => super::cases::versions_in_run_steps,
-    /// A pinned version in an env value, a container, a docker image or another action's
-    /// input fails.
-    versions_in_other_values: FailsWith(&[
-        ".github/workflows/ci.yml:2: `6.7` is the major.minor of the minimum Node `engines.node` \
-         in ui/package.json sets\n    fix: remove the version from the workflow: \
-         actions/setup-node with `node-version-file: ui/package.json` installs a Node that \
-         `engines.node` allows",
-        ".github/workflows/ci.yml:5: `3.4` is the major.minor of the Rust version `channel` in \
-         rust-toolchain.toml pins\n    fix: remove the version from the workflow: a `run: rustup \
-         toolchain install` step with no argument installs the toolchain rust-toolchain.toml \
-         names",
-        ".github/workflows/ci.yml:7: `3.4.5` is the Rust version `channel` in rust-toolchain.toml \
-         pins\n    fix: remove the version from the workflow: a `run: rustup toolchain install` \
-         step with no argument installs the toolchain rust-toolchain.toml names",
-        ".github/workflows/ci.yml:10: `5.6.7` is the cargo-fake version `TOOLS` in \
-         xtask/src/setup.rs pins\n    fix: remove the version from the workflow: `cargo xtask \
-         setup --binaries` installs the versions xtask/src/setup.rs pins",
-    ]), inspects 2 => super::cases::versions_in_other_values,
     /// A workflow that is not YAML fails at the line the parser stopped on.
     workflow_not_yaml: FailsWith(&[
         ".github/workflows/ci.yml:3: .github/workflows/ci.yml is not YAML: while parsing a node, \

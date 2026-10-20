@@ -4,6 +4,7 @@
 pub(super) mod planted;
 
 use super::*;
+use crate::checks::planted::Repo;
 use crate::checks::tests::desktop_context;
 use crate::scratch::Scratch;
 
@@ -22,12 +23,12 @@ fn repo<T: AsRef<[u8]>>(case: &str, files: &[(&str, T)]) -> Scratch {
     dir
 }
 
-/// Runs the check on the scratch repo `repo(case, files)`.
-fn run_on<T: AsRef<[u8]>>(case: &str, files: &[(&str, T)]) -> Inspection {
-    run(&desktop_context(&repo(case, files)))
+/// The scratch repo `repo(case, files)`, with the desktop crate at its usual place.
+fn run_on<T: AsRef<[u8]>>(case: &str, files: &[(&str, T)]) -> Repo {
+    Repo::desktop(repo(case, files))
 }
 
-pub(super) fn clean_src_passes() -> Inspection {
+pub(super) fn clean_src_passes() -> Repo {
     run_on(
         "clean-src",
         &[
@@ -37,11 +38,11 @@ pub(super) fn clean_src_passes() -> Inspection {
     )
 }
 
-pub(super) fn left_attribute() -> Inspection {
+pub(super) fn left_attribute() -> Repo {
     run_on("left", &[(APP, "<main data-buildtime=\"2\" />\n")])
 }
 
-pub(super) fn two_lines_in_one_file() -> Inspection {
+pub(super) fn two_lines_in_one_file() -> Repo {
     run_on(
         "two-lines",
         &[(
@@ -51,7 +52,7 @@ pub(super) fn two_lines_in_one_file() -> Inspection {
     )
 }
 
-pub(super) fn nested_file() -> Inspection {
+pub(super) fn nested_file() -> Repo {
     run_on(
         "nested",
         &[
@@ -64,7 +65,7 @@ pub(super) fn nested_file() -> Inspection {
     )
 }
 
-pub(super) fn non_utf8_file() -> Inspection {
+pub(super) fn non_utf8_file() -> Repo {
     run_on(
         "non-utf8",
         &[(
@@ -75,22 +76,20 @@ pub(super) fn non_utf8_file() -> Inspection {
 }
 
 /// A file with the attribute while another process holds the buildtime lock: a live run.
-pub(super) fn live_run_holds_the_edit() -> Inspection {
+pub(super) fn live_run_holds_the_edit() -> Repo {
     let dir = repo("live", &[(APP, "<main data-buildtime=\"2\" />\n")]);
     let held = lock::acquire(&dir.join(lock::LOCK_PATH)).expect("take the lock");
-    let found = run(&desktop_context(&dir));
-    drop(held);
-    found
+    Repo::desktop(dir).holding(held)
 }
 
-pub(super) fn missing_src() -> Inspection {
+pub(super) fn missing_src() -> Repo {
     run_on::<&str>("missing-src", &[])
 }
 
-pub(super) fn empty_src() -> Inspection {
+pub(super) fn empty_src() -> Repo {
     let dir = Scratch::new("planted-buildtime-edits-empty-src");
     Scratch::create_dir_all(dir.join(SRC)).expect("create the src dir");
-    run(&desktop_context(&dir))
+    Repo::desktop(dir)
 }
 
 #[test]

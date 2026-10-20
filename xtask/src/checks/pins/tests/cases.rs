@@ -1,9 +1,12 @@
 //! The scratch repos of the pins check's tests and planted cases. Every version here is made up:
 //! the homes in each repo pin Rust 3.4.5, pnpm 7.8.9 and Node 6.7.0, and `TOOLS` and `BINARIES`
-//! below pin cargo-fake 5.6.7 and lefthook 9.8.7, so no test repeats a real pin.
+//! below pin cargo-fake 5.6.7 and lefthook 9.8.7, so no test repeats a real pin. The planted
+//! harness runs the check with the real `TOOLS` and `BINARIES`, so a planted case never names
+//! one of their versions; the cases that do are in `fake_pins.rs`.
 
 use super::super::inspect;
 use crate::checks::Inspection;
+use crate::checks::planted::Repo;
 use crate::scratch::Scratch;
 use crate::setup::{Binary, Packing, Tool};
 use crate::workspace::Context;
@@ -65,30 +68,30 @@ pub(super) fn check_in(ctx: &Context) -> Inspection {
     inspect(ctx, TOOLS, BINARIES)
 }
 
-/// The check on a repo with `rel` written as `text`.
-fn with_file(case: &str, rel: &str, text: &str) -> Inspection {
+/// A repo with `rel` written as `text`.
+fn with_file(case: &str, rel: &str, text: &str) -> Repo {
     let dir = repo(case);
     put(&dir, rel, text);
-    check(&dir)
+    Repo::new(dir)
 }
 
-/// The check on a repo whose `.github/workflows/ci.yml` is `text`.
-fn workflow(case: &str, text: &str) -> Inspection {
+/// A repo whose `.github/workflows/ci.yml` is `text`.
+fn workflow(case: &str, text: &str) -> Repo {
     with_file(case, ".github/workflows/ci.yml", text)
 }
 
-/// The check on a repo whose `lefthook.yml` is `text`.
-fn lefthook(case: &str, text: &str) -> Inspection {
+/// A repo whose `lefthook.yml` is `text`.
+fn lefthook(case: &str, text: &str) -> Repo {
     with_file(case, "lefthook.yml", text)
 }
 
 // The Rust version.
 
-pub(super) fn rust_version_matches() -> Inspection {
-    check(&repo("rust-version-matches"))
+pub(super) fn rust_version_matches() -> Repo {
+    Repo::new(repo("rust-version-matches"))
 }
 
-pub(super) fn rust_version_differs() -> Inspection {
+pub(super) fn rust_version_differs() -> Repo {
     with_file(
         "rust-version-differs",
         "Cargo.toml",
@@ -96,7 +99,7 @@ pub(super) fn rust_version_differs() -> Inspection {
     )
 }
 
-pub(super) fn rust_version_in_a_dotted_key() -> Inspection {
+pub(super) fn rust_version_in_a_dotted_key() -> Repo {
     with_file(
         "rust-version-dotted",
         "Cargo.toml",
@@ -104,37 +107,37 @@ pub(super) fn rust_version_in_a_dotted_key() -> Inspection {
     )
 }
 
-pub(super) fn rust_version_in_a_member() -> Inspection {
+pub(super) fn rust_version_in_a_member() -> Repo {
     let dir = repo("rust-version-member");
     put(
         &dir,
         "crates/desktop/Cargo.toml",
         "[package]\nname = \"clauseo-desktop\"\nrust-version = \"2.4\"\n",
     );
-    check_in(&crate::checks::tests::desktop_context(&dir))
+    Repo::desktop(dir)
 }
 
-pub(super) fn rust_version_inherited_by_a_member() -> Inspection {
+pub(super) fn rust_version_inherited_by_a_member() -> Repo {
     let dir = repo("rust-version-inherited");
     put(
         &dir,
         "crates/desktop/Cargo.toml",
         "[package]\nname = \"clauseo-desktop\"\nrust-version.workspace = true\n",
     );
-    check_in(&crate::checks::tests::desktop_context(&dir))
+    Repo::desktop(dir)
 }
 
-pub(super) fn manifest_not_toml() -> Inspection {
+pub(super) fn manifest_not_toml() -> Repo {
     with_file("manifest-not-toml", "Cargo.toml", "[workspace\n")
 }
 
-pub(super) fn toolchain_missing() -> Inspection {
+pub(super) fn toolchain_missing() -> Repo {
     let dir = repo("toolchain-missing");
     Scratch::remove_file(dir.join("rust-toolchain.toml")).expect("remove the toolchain file");
-    check(&dir)
+    Repo::new(dir)
 }
 
-pub(super) fn channel_not_a_version() -> Inspection {
+pub(super) fn channel_not_a_version() -> Repo {
     with_file(
         "channel-not-a-version",
         "rust-toolchain.toml",
@@ -142,7 +145,7 @@ pub(super) fn channel_not_a_version() -> Inspection {
     )
 }
 
-pub(super) fn package_manager_not_pnpm() -> Inspection {
+pub(super) fn package_manager_not_pnpm() -> Repo {
     with_file(
         "package-manager-not-pnpm",
         "ui/package.json",
@@ -150,7 +153,7 @@ pub(super) fn package_manager_not_pnpm() -> Inspection {
     )
 }
 
-pub(super) fn engines_node_missing() -> Inspection {
+pub(super) fn engines_node_missing() -> Repo {
     with_file(
         "engines-node-missing",
         "ui/package.json",
@@ -160,14 +163,21 @@ pub(super) fn engines_node_missing() -> Inspection {
 
 // The lefthook comment.
 
-pub(super) fn lefthook_comment_matches() -> Inspection {
-    lefthook(
-        "lefthook-matches",
-        "# lefthook 9.8.7: `root` runs the command there.\npre-commit:\n  parallel: true\n",
-    )
+/// The comment names the lefthook version the real `BINARIES` pins, read from it, since the
+/// check runs as `cargo xtask check` does, with the real pins.
+pub(super) fn lefthook_comment_matches() -> Repo {
+    let pinned = crate::setup::BINARIES
+        .iter()
+        .find(|binary| binary.name == "lefthook")
+        .expect("BINARIES pins lefthook");
+    let text = format!(
+        "# lefthook {}: `root` runs the command there.\npre-commit:\n  parallel: true\n",
+        pinned.version
+    );
+    lefthook("lefthook-matches", &text)
 }
 
-pub(super) fn lefthook_comment_differs() -> Inspection {
+pub(super) fn lefthook_comment_differs() -> Repo {
     lefthook(
         "lefthook-differs",
         "pre-commit:\n  commands:\n    # lefthook 9.8.6: `root` runs the command there.\n    \
@@ -175,7 +185,7 @@ pub(super) fn lefthook_comment_differs() -> Inspection {
     )
 }
 
-pub(super) fn lefthook_comment_after_a_value() -> Inspection {
+pub(super) fn lefthook_comment_after_a_value() -> Repo {
     lefthook(
         "lefthook-trailing",
         "pre-commit:\n  parallel: true # as of Lefthook v10.0:\n  commands:\n    \
@@ -183,7 +193,7 @@ pub(super) fn lefthook_comment_after_a_value() -> Inspection {
     )
 }
 
-pub(super) fn lefthook_text_in_a_string() -> Inspection {
+pub(super) fn lefthook_text_in_a_string() -> Repo {
     lefthook(
         "lefthook-string",
         "pre-commit:\n  commands:\n    a: { run: \"echo '# lefthook 1.0.0'\" }\n    b:\n      \
@@ -191,13 +201,13 @@ pub(super) fn lefthook_text_in_a_string() -> Inspection {
     )
 }
 
-pub(super) fn lefthook_not_yaml() -> Inspection {
+pub(super) fn lefthook_not_yaml() -> Repo {
     lefthook("lefthook-not-yaml", "pre-commit:\n  commands: [\n")
 }
 
 // Workflows.
 
-pub(super) fn workflow_reads_the_homes() -> Inspection {
+pub(super) fn workflow_reads_the_homes() -> Repo {
     workflow(
         "workflow-clean",
         "jobs:\n  build:\n    steps:\n\
@@ -212,7 +222,7 @@ pub(super) fn workflow_reads_the_homes() -> Inspection {
     )
 }
 
-pub(super) fn pnpm_version_input() -> Inspection {
+pub(super) fn pnpm_version_input() -> Repo {
     workflow(
         "pnpm-input",
         "jobs:\n  a:\n    steps:\n      - uses: pnpm/action-setup@v4\n        with:\n\
@@ -220,7 +230,7 @@ pub(super) fn pnpm_version_input() -> Inspection {
     )
 }
 
-pub(super) fn node_version_input() -> Inspection {
+pub(super) fn node_version_input() -> Repo {
     workflow(
         "node-input",
         "jobs:\n  a:\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n\
@@ -228,7 +238,7 @@ pub(super) fn node_version_input() -> Inspection {
     )
 }
 
-pub(super) fn toolchain_inputs() -> Inspection {
+pub(super) fn toolchain_inputs() -> Repo {
     workflow(
         "toolchain-inputs",
         "jobs:\n  a:\n    steps:\n\
@@ -240,14 +250,14 @@ pub(super) fn toolchain_inputs() -> Inspection {
     )
 }
 
-pub(super) fn toolchain_in_the_ref() -> Inspection {
+pub(super) fn toolchain_in_the_ref() -> Repo {
     workflow(
         "toolchain-ref",
         "jobs:\n  a:\n    steps:\n      - uses: dtolnay/rust-toolchain@1.80.0\n",
     )
 }
 
-pub(super) fn toolchain_in_a_commit_comment() -> Inspection {
+pub(super) fn toolchain_in_a_commit_comment() -> Repo {
     workflow(
         "toolchain-commit",
         "jobs:\n  a:\n    steps:\n\
@@ -255,7 +265,7 @@ pub(super) fn toolchain_in_a_commit_comment() -> Inspection {
     )
 }
 
-pub(super) fn quoted_keys_and_flow_mappings() -> Inspection {
+pub(super) fn quoted_keys_and_flow_mappings() -> Repo {
     workflow(
         "quoted-flow",
         "jobs:\n  a:\n    steps:\n\
@@ -264,7 +274,7 @@ pub(super) fn quoted_keys_and_flow_mappings() -> Inspection {
     )
 }
 
-pub(super) fn anchors_aliases_and_merge_keys() -> Inspection {
+pub(super) fn anchors_aliases_and_merge_keys() -> Repo {
     workflow(
         "anchors",
         "x-pnpm: &pnpm\n  version: 10\nx-node: &node { node-version: 20 }\njobs:\n  a:\n    steps:\n\
@@ -274,7 +284,7 @@ pub(super) fn anchors_aliases_and_merge_keys() -> Inspection {
     )
 }
 
-pub(super) fn a_yaml_extension() -> Inspection {
+pub(super) fn a_yaml_extension() -> Repo {
     with_file(
         "yaml-extension",
         ".github/workflows/release.yaml",
@@ -283,7 +293,7 @@ pub(super) fn a_yaml_extension() -> Inspection {
     )
 }
 
-pub(super) fn versions_in_run_steps() -> Inspection {
+pub(super) fn versions_in_run_steps() -> Repo {
     workflow(
         "run-steps",
         "jobs:\n  a:\n    steps:\n      - run: npm i -g pnpm@7.8.9\n\
@@ -293,7 +303,7 @@ pub(super) fn versions_in_run_steps() -> Inspection {
     )
 }
 
-pub(super) fn versions_in_other_values() -> Inspection {
+pub(super) fn versions_in_other_values() -> Repo {
     workflow(
         "other-values",
         "env:\n  NODE: \"6.7\"\njobs:\n  a:\n    container: rust:3.4\n    steps:\n\
@@ -302,6 +312,6 @@ pub(super) fn versions_in_other_values() -> Inspection {
     )
 }
 
-pub(super) fn workflow_not_yaml() -> Inspection {
+pub(super) fn workflow_not_yaml() -> Repo {
     workflow("workflow-not-yaml", "jobs:\n  a: {\n")
 }
