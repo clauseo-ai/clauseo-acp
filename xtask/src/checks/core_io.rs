@@ -39,7 +39,7 @@
 //! `feature = "<literal>"`, with no `feature` under a `not`. The rule reads the predicate of each
 //! `cfg` and `cfg_attr` at the start of any bracket group, since a macro can join a `#` to
 //! brackets passed separately, and inside a `cfg_attr`. A `cfg` among a `cfg_attr`'s attributes
-//! fails at any depth, since it keeps the item whenever the `cfg_attr`'s predicate is false. The
+//! fails at any depth, since with every feature on it can drop an item that other builds keep. The
 //! name `cfg_select` fails anywhere, a `use` included, since its macro builds only the arm whose
 //! cfg holds. `cfg!` passes, since both branches of an `if cfg!(..)` are compiled and linted.
 //!
@@ -80,9 +80,9 @@
 //! with the generated file on scratch crates, one module per form a ban must catch or must pass,
 //! and one per form the forbid line must refuse.
 //!
-//! The file covers every target of the package clippy lints, `#[cfg(test)]` code included. It
-//! does not cover code another crate runs for this one, such as a dependency or a proc macro. Nor
-//! does it cover a cfg that a macro from a crate that is not held wraps around code, since the cfg
+//! The bans cover every target of the package clippy lints, `#[cfg(test)]` code included. They
+//! do not cover code another crate runs for this one, such as a dependency or a proc macro. Nor
+//! do they cover a cfg that a macro from a crate that is not held wraps around code, since the cfg
 //! rule reads only the held crate's files, or an item a newer toolchain adds that the list does
 //! not name. A source file or a clippy config git ignores is not covered, nor is cargo config
 //! outside the repo, in parent folders or `CARGO_HOME`. Neither are `RUSTFLAGS` and
