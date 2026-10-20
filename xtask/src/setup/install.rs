@@ -252,7 +252,7 @@ fn fetch_check_place(
     let curl = curl_cmd(asset, url);
     let fix = format!(
         "run `{curl}` by hand in an empty directory and check its output, then run cargo xtask \
-         setup --binaries again"
+         setup --binaries again; setup needs curl 7.71 or newer, for --retry-all-errors"
     );
     let what = format!("downloading {url}");
     run_step(runner, &curl, staging, DOWNLOAD_TIMEOUT, &what, &fix)?;
@@ -322,7 +322,7 @@ fn fetch_check_place(
 
 /// The curl command that downloads `url` to `asset`. A failed attempt (a reset, a 502) is tried
 /// again `CURL_RETRIES` times; `--retry-all-errors` is needed for a reset, which curl 8.7 (macOS)
-/// does not retry otherwise. A retry truncates what the attempt before wrote. curl's own limits
+/// does not retry otherwise, and it needs curl 7.71 or newer. A retry truncates what the attempt before wrote. curl's own limits
 /// end it even when xtask is gone (Ctrl-C reaches xtask, not curl's group).
 fn curl_cmd(asset: &str, url: &str) -> Cmd {
     Cmd::new(
@@ -365,14 +365,10 @@ fn run_step(
     let message = match runner(cmd, dir, Output::Quiet, timeout) {
         Ok(Ended::Exited(ran)) if ran.success => return Ok(()),
         Ok(Ended::Exited(ran)) => {
-            // A retried curl prints one error line per attempt; only the last attempt's is said.
-            let mut said = ran.stderr.trim();
-            if cmd.program == Program::Named("curl") {
-                said = said.lines().last().unwrap_or_default();
-            }
+            let said = said_of(cmd, &ran.stderr);
             format!(
                 "{what} failed: {}",
-                if said.is_empty() { "no output" } else { said }
+                if said.is_empty() { "no output" } else { &said }
             )
         }
         Ok(Ended::TimedOut) => format!(
@@ -385,6 +381,20 @@ fn run_step(
         ),
     };
     Err((message, fix.to_owned()))
+}
+
+/// What a failed step says of its stderr. A retried curl prints one `curl: (N) ...` line per failed
+/// attempt, and the last one is the attempt that ended the run, so only that line is said. When
+/// curl prints none, as when it rejects an option, all of stderr is said.
+fn said_of(cmd: &Cmd, stderr: &str) -> String {
+    let last_attempt = stderr
+        .lines()
+        .rev()
+        .find(|line| line.starts_with("curl: ("));
+    match last_attempt {
+        Some(line) if cmd.program == Program::Named("curl") => line.trim().to_owned(),
+        _ => stderr.trim().to_owned(),
+    }
 }
 
 /// The sha256 of `file`'s bytes, in lowercase hex.

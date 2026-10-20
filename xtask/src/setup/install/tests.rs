@@ -91,6 +91,15 @@ fn a_download_whose_sha256_differs_leaves_bin_untouched() {
     );
 }
 
+/// The fix line of a failed curl download of `asset` from `url`.
+fn curl_fix(asset: &str, url: &str) -> String {
+    format!(
+        "    fix: run `{}` by hand in an empty directory and check its output, then run cargo \
+         xtask setup --binaries again; setup needs curl 7.71 or newer, for --retry-all-errors",
+        expected_curl(asset, url)
+    )
+}
+
 #[test]
 fn a_failed_download_leaves_bin_untouched_and_names_curl_as_the_fix() {
     let dir = Scratch::new("setup-install-curl-fails");
@@ -98,11 +107,7 @@ fn a_failed_download_leaves_bin_untouched_and_names_curl_as_the_fix() {
     let gitleaks = binary("gitleaks");
     let asset = expected_asset(gitleaks, "linux", "x86_64");
     let url = expected_url(gitleaks, &asset);
-    let fix = format!(
-        "    fix: run `{}` by hand in an empty directory and check its output, then run cargo \
-         xtask setup --binaries again",
-        expected_curl(&asset, &url)
-    );
+    let fix = curl_fix(&asset, &url);
     let cases: [(&str, io::Result<Ended>); 4] = [
         (
             "failed: curl: (22) The requested URL returned error: 404",
@@ -150,6 +155,59 @@ fn a_failed_download_leaves_bin_untouched_and_names_curl_as_the_fix() {
             )
         );
     }
+}
+
+/// What `install_binary` prints for gitleaks when its curl fails and writes `stderr`.
+fn printed_for_failed_curl(case: &str, stderr: &str) -> String {
+    let dir = Scratch::new(&format!("setup-install-curl-{case}"));
+    let bin = dir.join("bin");
+    let gitleaks = binary("gitleaks");
+    let mut runner = |_: &Cmd, _: &Path, _: Output, _: Duration| exited(false, "", stderr);
+    let mut out = Printer::new(Vec::new(), false);
+    let ok = install_binary(&mut out, gitleaks, &linux(&bin, true), &dir, &mut runner);
+    assert!(!ok);
+    assert_eq!(files_in(&bin), []);
+    String::from_utf8(out.into_inner()).unwrap()
+}
+
+#[test]
+fn a_retried_curl_says_only_the_last_attempt_that_ended_the_run() {
+    let gitleaks = binary("gitleaks");
+    let asset = expected_asset(gitleaks, "linux", "x86_64");
+    let url = expected_url(gitleaks, &asset);
+    let last = "curl: (22) The requested URL returned error: 502";
+    let stderr = format!(
+        "curl: (56) Recv failure: Connection reset by peer\n\
+         curl: (56) Recv failure: Connection reset by peer\n\
+         some line that is not an attempt\n\
+         {last}\n\
+         a line after the last attempt\n"
+    );
+    assert_eq!(
+        printed_for_failed_curl("retried", &stderr),
+        format!(
+            "installing gitleaks {}: downloading {url}\ndownloading {url} failed: {last}\n{}\n",
+            gitleaks.version,
+            curl_fix(&asset, &url)
+        )
+    );
+}
+
+#[test]
+fn an_old_curl_that_rejects_retry_all_errors_says_both_lines() {
+    let gitleaks = binary("gitleaks");
+    let asset = expected_asset(gitleaks, "linux", "x86_64");
+    let url = expected_url(gitleaks, &asset);
+    let said = "curl: option --retry-all-errors: is unknown\n\
+                curl: try 'curl --help' or 'curl --manual' for more information";
+    assert_eq!(
+        printed_for_failed_curl("old", &format!("{said}\n")),
+        format!(
+            "installing gitleaks {}: downloading {url}\ndownloading {url} failed: {said}\n{}\n",
+            gitleaks.version,
+            curl_fix(&asset, &url)
+        )
+    );
 }
 
 #[test]
