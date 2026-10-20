@@ -36,3 +36,36 @@ pub(crate) fn remove_mutants_output(dir: &Path) -> io::Result<()> {
         other => other,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scratch::Scratch;
+
+    #[test]
+    fn the_old_output_folder_is_removed_and_a_missing_one_is_not_an_error() {
+        let dir = Scratch::new("write-mutants-output");
+        let out = dir.join("mutants.out");
+        Scratch::create_dir_all(out.join("log")).expect("make an old mutants.out");
+        remove_mutants_output(&out).expect("remove it");
+        assert!(!out.exists());
+        remove_mutants_output(&out).expect("a missing folder is not an error");
+        // Any other error still is: here the path is a file, not a folder.
+        Scratch::write(&out, "x").expect("write a file in its place");
+        assert!(remove_mutants_output(&out).is_err());
+    }
+
+    #[test]
+    fn only_a_folder_named_like_a_cargo_mutants_build_dir_is_removed() {
+        let dir = Scratch::new("write-mutants-build-dir");
+        let build = dir.join("cargo-mutants-tree-abc.tmp");
+        Scratch::create_dir_all(build.join("target")).expect("make a build dir");
+        remove_mutants_build_dir(&build).expect("remove it");
+        assert!(!build.exists());
+        let other = dir.join("cargo-target.tmp");
+        Scratch::create_dir_all(&other).expect("make another folder");
+        let refused = remove_mutants_build_dir(&other).expect_err("refused");
+        assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
+        assert!(other.is_dir());
+    }
+}

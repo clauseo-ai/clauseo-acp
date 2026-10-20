@@ -414,6 +414,33 @@ mod tests {
     }
 
     #[test]
+    fn the_diff_is_against_the_merge_base_with_origin_main_with_a_and_b_prefixes() {
+        let dir = crate::scratch::Scratch::new("changes-diff-merge-base");
+        let commit = [
+            "-c",
+            "user.name=x",
+            "-c",
+            "user.email=x@x",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qam",
+        ];
+        git(&dir, &["init", "-q"]).expect("git init");
+        crate::scratch::Scratch::write(dir.join("a.rs"), "fn a() {}\n").expect("write a.rs");
+        git(&dir, &["add", "a.rs"]).expect("git add");
+        git(&dir, &[&commit[..], &["base"]].concat()).expect("commit the base");
+        let base = git(&dir, &["rev-parse", "HEAD"]).expect("rev-parse");
+        git(&dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]).expect("set origin/main");
+        crate::scratch::Scratch::write(dir.join("a.rs"), "fn b() {}\n").expect("change a.rs");
+        git(&dir, &[&commit[..], &["change"]].concat()).expect("commit the change");
+        assert_eq!(merge_base(&dir), Ok(base.trim().to_owned()));
+        let diff = diff_since_merge_base(&dir).expect("the diff");
+        assert!(diff.contains("--- a/a.rs\n+++ b/a.rs\n"), "{diff}");
+        assert!(diff.contains("-fn a() {}\n+fn b() {}\n"), "{diff}");
+    }
+
+    #[test]
     fn repo_files_fail_outside_a_git_repo_with_git_s_command_and_error() {
         let dir = crate::scratch::Scratch::new("changes-repo-files-none");
         let Err(GitError::Failed { command, stderr }) = repo_files(&dir) else {
