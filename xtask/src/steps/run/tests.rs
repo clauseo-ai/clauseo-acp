@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::checks::{Inspection, Noun};
-use crate::process::Program;
+use crate::process::{Program, TEST_TIMEOUT};
 use crate::violation::{Finding, Violation};
 use std::path::PathBuf;
 
@@ -37,7 +37,7 @@ fn reproduce(cmd: &Cmd, _output: Option<&str>) -> String {
 fn fake_tool(name: &'static str, program: &'static str, args: &[&str]) -> Step {
     Step::Tool(ToolStep {
         name,
-        cmd: Cmd::new(Program::Named(program), args),
+        cmd: Cmd::new(Program::Named(program), args, TEST_TIMEOUT),
         parse: no_findings,
         fix: reproduce,
         render: None,
@@ -244,6 +244,24 @@ fn a_program_that_cannot_start_fails_its_step_and_the_next_step_runs() {
 }
 
 #[test]
+fn a_tool_past_its_limit_fails_its_step_and_says_it_was_stopped() {
+    let steps = vec![fake_tool("slow", "fake", &["hang"])];
+    let mut exec = |cmd: &Cmd, _sink: &mut dyn FnMut(&[u8])| Err(process::timed_out(cmd));
+    let mut out = Printer::new(Vec::new(), false);
+    let results = run_all(steps, &context(), &mut out, &mut exec);
+    assert!(matches!(
+        results[0].status,
+        StepStatus::Ran { failed: true, .. }
+    ));
+    assert_eq!(
+        text(out),
+        "==> slow: fake hang\n\
+         `fake hang` did not finish within 1 min, so it was stopped\n\
+         \x20   fix: run `fake hang` by hand to see why it does not finish within 1 min\n"
+    );
+}
+
+#[test]
 fn a_clean_run_reports_no_failure() {
     let steps = vec![fake_tool("quiet", "fake", &["x"])];
     let mut exec = |cmd: &Cmd, _sink: &mut dyn FnMut(&[u8])| Ok(ok_output(cmd));
@@ -314,7 +332,7 @@ fn shout(output: &str) -> String {
 fn rendered_tool(name: &'static str, args: &[&str]) -> Step {
     Step::Tool(ToolStep {
         name,
-        cmd: Cmd::new(Program::Named("fake"), args),
+        cmd: Cmd::new(Program::Named("fake"), args, TEST_TIMEOUT),
         parse: no_findings,
         fix: reproduce,
         render: Some(shout),
@@ -359,7 +377,7 @@ fn after_a_failed_metadata_load_a_cargo_step_is_not_run() {
     let steps = vec![
         Step::Tool(ToolStep {
             name: "shear",
-            cmd: Cmd::new(Program::Cargo, ["shear"]),
+            cmd: Cmd::new(Program::Cargo, ["shear"], TEST_TIMEOUT),
             parse: no_findings,
             fix: reproduce,
             render: None,

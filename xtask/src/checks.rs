@@ -329,6 +329,7 @@ pub(crate) fn unlisted(check: &str, error: &GitError) -> Inspection {
     let fix = match error {
         GitError::NotStarted(_) => Fix::GitNotStarted { check },
         GitError::Failed { .. } => Fix::GitFailed { check },
+        GitError::TimedOut(_) => Fix::GitTimedOut { check },
     };
     Inspection {
         failures: vec![Failure {

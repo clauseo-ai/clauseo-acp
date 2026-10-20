@@ -14,7 +14,8 @@ const HEADER: &str = "# expect allowlist\n";
 
 /// Runs `git <args>` in `dir` and asserts that it succeeded.
 fn git(dir: &Path, args: &[&str]) {
-    let quiet = process::run_quiet(&Cmd::new(Program::Git, args), dir).expect("run git");
+    let quiet = process::run_quiet(&Cmd::new(Program::Git, args, process::TEST_TIMEOUT), dir)
+        .expect("run git");
     assert!(quiet.success, "git {args:?} failed: {}", quiet.stderr);
 }
 

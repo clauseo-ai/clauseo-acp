@@ -8,6 +8,7 @@ use crate::workspace::{self, Context};
 use std::io;
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Duration;
 
 /// Runs the whole check. `quick` limits clippy and nextest to changed packages.
 pub(crate) fn run(quick: bool) -> ExitCode {
@@ -46,10 +47,18 @@ pub(crate) fn run(quick: bool) -> ExitCode {
     }
 }
 
+/// How long `pnpm --version` may run: it prints one line, so 30 s means it hangs.
+const PNPM_VERSION_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Whether `pnpm` starts. Outside CI, without it, the ui steps are skipped (see `steps::plan`). CI
-/// runs the ui steps whatever this says, so it does not probe there.
+/// runs the ui steps whatever this says, so it does not probe there. A pnpm that starts but does
+/// not finish is found: the ui steps then run and report it.
 fn pnpm_found(root: &Path) -> bool {
-    process::run_quiet(&Cmd::new(Program::Pnpm, ["--version"]), root).is_ok()
+    let cmd = Cmd::new(Program::Pnpm, ["--version"], PNPM_VERSION_TIMEOUT);
+    match process::run_quiet(&cmd, root) {
+        Ok(_) => true,
+        Err(error) => process::is_timeout(&error),
+    }
 }
 
 /// CI mode: `CI` is set, is not empty, and is not `0` or `false` in any case.

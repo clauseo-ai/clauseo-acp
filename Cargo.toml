@@ -36,6 +36,22 @@ serde_json = "1"
 # canonicalize without the `\\?\` prefix std adds on Windows, which most tools refuse; clippy.toml
 # bans std's canonicalize in its favour.
 dunce = "1.0.5"
+# Shared with floor 2's `process` crate (S7), which adds the features it needs in its own line.
+# xtask's process door (xtask/src/process/unix.rs) sends signals to process groups with
+# `sys::signal::killpg`, which `signal` turns on (with `process`, for `unistd::Pid`).
+nix = { version = "0.31.3", default-features = false, features = ["signal"] }
+# Shared with S7 likewise. Each feature turns on the Win32 calls of xtask/src/process/windows.rs:
+# `Win32_Foundation` for `HANDLE` and `CloseHandle`, `Win32_Security` for `CreateJobObjectW`
+# (which takes `SECURITY_ATTRIBUTES`), `Win32_System_JobObjects` for the job calls,
+# `Win32_System_Threading` for `CREATE_SUSPENDED`, `OpenThread`, `ResumeThread` and the job's
+# limit struct, and `Win32_System_Diagnostics_ToolHelp` for the thread snapshot.
+windows = { version = "0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+  "Win32_System_Diagnostics_ToolHelp",
+] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"               # deny, not forbid: an FFI module overrides with #[expect(unsafe_code, reason = "…")]

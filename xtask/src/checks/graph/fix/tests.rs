@@ -2,8 +2,10 @@
 //! does not compile until it has a pinned text here.
 
 use super::Fix;
+use crate::process::{Cmd, Program, TimeoutFix};
 use std::collections::HashSet;
 use std::mem::discriminant;
+use std::time::Duration;
 
 fn pinned(fix: &Fix) -> String {
     match fix {
@@ -13,6 +15,8 @@ fn pinned(fix: &Fix) -> String {
         Fix::CargoOnPath => {
             "put `cargo` on PATH, since this check reads the dependency graph from cargo".to_owned()
         }
+        Fix::TimedOut(_) => "run `cargo tree -p x` by hand to see why it does not finish within 5 min"
+            .to_owned(),
         Fix::Lockfile => "Cargo.lock does not match the manifests, and the check never rewrites it. \
              Run `cargo update --workspace` to bring it in line, then commit Cargo.lock"
             .to_owned(),
@@ -40,6 +44,11 @@ fn every_fix_prints_its_pinned_text() {
     let samples = [
         Fix::TreeParse,
         Fix::CargoOnPath,
+        Fix::TimedOut(TimeoutFix::of(&Cmd::new(
+            Program::Cargo,
+            ["tree", "-p", "x"],
+            Duration::from_mins(5),
+        ))),
         Fix::Lockfile,
         Fix::Fetch,
         Fix::Manifest,

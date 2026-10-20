@@ -211,7 +211,7 @@ fn install_runs_the_pinned_command_for_each_os_and_arch() {
         let bin = dir.join("bin");
         let mut ran: Vec<(String, PathBuf)> = Vec::new();
         // Each download gets bytes that match no pin, so each install stops after its download.
-        let mut runner = |cmd: &Cmd, at: &Path, _: Output, _: Duration| -> io::Result<Ended> {
+        let mut runner = |cmd: &Cmd, at: &Path, _: Output| -> io::Result<Ended> {
             ran.push((cmd.to_string(), at.to_path_buf()));
             if cmd.program == Program::Named("curl") {
                 Scratch::write(at.join(curl_output(cmd)), b"not a release")?;
@@ -254,7 +254,7 @@ fn run_fake(
 ) -> (bool, Vec<String>, String) {
     let mut ran = Vec::new();
     let mut versions = versions.iter();
-    let mut runner = |cmd: &Cmd, at: &Path, _: Output, _: Duration| -> io::Result<Ended> {
+    let mut runner = |cmd: &Cmd, at: &Path, _: Output| -> io::Result<Ended> {
         ran.push(cmd.to_string());
         match cmd.program {
             Program::Named("curl") => {
@@ -409,7 +409,7 @@ fn a_version_check_that_hangs_or_cannot_run_is_a_failed_run_not_a_missing_binary
     ];
     for (ended, said) in cases {
         let mut ended = Some(ended);
-        let mut runner = |_: &Cmd, _: &Path, _: Output, _: Duration| ended.take().unwrap();
+        let mut runner = |_: &Cmd, _: &Path, _: Output| ended.take().unwrap();
         let expected = if said.is_empty() {
             VersionCheck::Missing("`faketool version` could not start: not found".into())
         } else {

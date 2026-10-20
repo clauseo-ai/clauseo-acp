@@ -273,6 +273,7 @@ fn clippy_repro(cmd: &Cmd, path: &str, members: &[Member]) -> Cmd {
     Cmd {
         program: cmd.program.clone(),
         args,
+        timeout: cmd.timeout,
     }
 }
 
@@ -293,6 +294,7 @@ mod tests {
                 "-D",
                 "warnings",
             ],
+            crate::process::TEST_TIMEOUT,
         );
         let members = vec![Member {
             name: "xtask".into(),
@@ -321,6 +323,7 @@ mod tests {
                 "--workspace",
                 "--message-format=short",
             ],
+            crate::process::TEST_TIMEOUT,
         );
         let members = vec![Member {
             name: "xtask".into(),

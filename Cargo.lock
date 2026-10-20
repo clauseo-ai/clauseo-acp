@@ -5668,6 +5668,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "dunce",
+ "nix",
  "proc-macro2",
  "pulldown-cmark",
  "saphyr-parser",
@@ -5678,6 +5679,7 @@ dependencies = [
  "shlex",
  "syn 3.0.9",
  "toml 1.1.8+spec-1.1.0",
+ "windows",
 ]
 
 [[package]]

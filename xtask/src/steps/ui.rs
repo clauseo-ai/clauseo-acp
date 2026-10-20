@@ -10,6 +10,14 @@ use crate::fix::Fix;
 use crate::process::{Cmd, Program};
 use crate::violation::{Finding, Violation};
 use crate::workspace::Context;
+use std::time::Duration;
+
+/// How long `pnpm install` may run: it downloads the packages the store lacks, minutes on a slow
+/// link.
+const INSTALL_TIMEOUT: Duration = Duration::from_mins(15);
+/// How long one package.json script may run: tsc, oxlint, oxfmt, vitest and vite build each take
+/// under a minute on the blank app.
+const SCRIPT_TIMEOUT: Duration = Duration::from_mins(10);
 
 /// Why the ui steps are skipped on a machine without pnpm. CI never skips them.
 pub(super) const NO_PNPM: &str =
@@ -39,13 +47,18 @@ fn script(dir: &str, name: &str, args: &[&str]) -> Cmd {
         ["-C", dir, "run", name]
             .into_iter()
             .chain(args.iter().copied()),
+        SCRIPT_TIMEOUT,
     )
 }
 
 fn install_step() -> ToolStep {
     ToolStep {
         name: "pnpm-install",
-        cmd: Cmd::new(Program::Pnpm, ["-C", "ui", "install", "--frozen-lockfile"]),
+        cmd: Cmd::new(
+            Program::Pnpm,
+            ["-C", "ui", "install", "--frozen-lockfile"],
+            INSTALL_TIMEOUT,
+        ),
         parse: parse_none,
         fix: ui_fix,
         render: None,

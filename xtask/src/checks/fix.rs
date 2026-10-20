@@ -22,6 +22,8 @@ pub(crate) enum Fix {
     GitNotStarted { check: String },
     /// git ran and failed, so `check` could not list the repo's files.
     GitFailed { check: String },
+    /// git ran past its limit, so `check` could not list the repo's files.
+    GitTimedOut { check: String },
     /// A file is there but is not UTF-8 text.
     NotUtf8,
     /// A file or folder could not be read for another reason, which the message quotes.
@@ -57,6 +59,11 @@ impl fmt::Display for Fix {
             Fix::GitFailed { check } => write!(
                 f,
                 "run the check inside a git checkout, or fix what git reports: {check} lists the \
+                 files it reads with `git ls-files`"
+            ),
+            Fix::GitTimedOut { check } => write!(
+                f,
+                "run that git command by hand to see why it does not finish: {check} lists the \
                  files it reads with `git ls-files`"
             ),
             Fix::NotUtf8 => f.write_str("make the file readable as UTF-8 text"),

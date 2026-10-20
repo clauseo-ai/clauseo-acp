@@ -36,6 +36,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Duration;
 use verdict::{Failure, Outcome, ProbeResult, ProbeStatus, passes};
 use web::WebRun;
 
@@ -265,15 +266,22 @@ fn profile_line(incremental: &Incremental) -> String {
     )
 }
 
+/// How long `rustc -V` may run: it prints one line, but rustup may install the pinned toolchain
+/// first, which takes minutes on a slow link.
+const RUSTC_VERSION_TIMEOUT: Duration = Duration::from_mins(10);
+
 /// `rustc -V`, trimmed.
 fn rustc_version(root: &Path) -> Result<String, Failure> {
-    let cmd = Cmd::new(Program::Named("rustc"), ["-V"]);
+    let cmd = Cmd::new(Program::Named("rustc"), ["-V"], RUSTC_VERSION_TIMEOUT);
     match process::run_quiet(&cmd, root) {
         Ok(quiet) if quiet.success => Ok(quiet.stdout.trim().to_owned()),
         Ok(quiet) => Err(Failure::new(
             format!("`rustc -V` failed: {}", quiet.stderr.trim()),
             "install Rust with rustup, then run `rustup show`",
         )),
+        Err(error) if process::is_timeout(&error) => {
+            Err(Failure::new(error.to_string(), process::timeout_fix(&cmd)))
+        }
         Err(error) => Err(Failure::new(
             format!("could not run `rustc -V`: {error}"),
             "install Rust with rustup",

@@ -26,6 +26,10 @@ fn pinned(fix: &Fix) -> &'static str {
             "run the check inside a git checkout, or fix what git reports: docs lists the files it \
              reads with `git ls-files`"
         }
+        Fix::GitTimedOut { .. } => {
+            "run that git command by hand to see why it does not finish: docs lists the files it \
+             reads with `git ls-files`"
+        }
         Fix::NotUtf8 => "make the file readable as UTF-8 text",
         Fix::Unreadable => {
             "fix what the error says so the check can read it: restore or replace the file or \
@@ -49,6 +53,9 @@ fn every_fix_prints_its_pinned_text() {
             check: "docs".to_owned(),
         },
         Fix::GitFailed {
+            check: "docs".to_owned(),
+        },
+        Fix::GitTimedOut {
             check: "docs".to_owned(),
         },
         Fix::NotUtf8,

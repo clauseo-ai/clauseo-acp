@@ -78,6 +78,24 @@ fn a_spawn_error_puts_the_original_bytes_back_and_leaves_no_copy() {
 }
 
 #[test]
+fn a_cargo_past_its_limit_says_it_was_stopped_and_puts_the_original_bytes_back() {
+    let dir = scratch("timed-out-cargo");
+    let mut runner = |cmd: &Cmd| -> io::Result<Captured> { Err(crate::process::timed_out(cmd)) };
+    let failure = measure(&dir, &marker(), CHECK, 2, false, &mut runner)
+        .expect_err("a cargo past its limit fails the probe");
+    assert_eq!(
+        failure.message,
+        "`cargo check -v` did not finish within 1 h, so it was stopped"
+    );
+    assert_eq!(
+        failure.fix,
+        "run `cargo check -v` by hand to see why it does not finish within 1 h"
+    );
+    assert_eq!(file_text(&dir), ORIGINAL);
+    assert!(!backup_of(&dir).exists());
+}
+
+#[test]
 fn a_panicking_runner_restores_the_file_on_the_spot() {
     let dir = scratch("panicking-runner");
     let mut runner = |_: &Cmd| -> io::Result<Captured> { panic!("cargo exploded") };

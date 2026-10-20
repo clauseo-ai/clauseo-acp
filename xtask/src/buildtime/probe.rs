@@ -22,6 +22,7 @@ use crate::write::{self, Backups, Guard};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Where the probes' copies of the marker files wait, and what the guard's messages call a run.
 pub(crate) const BACKUPS: Backups = Backups {
@@ -102,6 +103,10 @@ pub(crate) fn measure(
     }
 }
 
+/// How long one probe run may take: the warm-up can build every dependency cold on a slow machine,
+/// so this is xtask's longest limit with `cargo install`'s.
+const PROBE_TIMEOUT: Duration = Duration::from_hours(1);
+
 /// The edit-and-run loop of `measure`: the warm-up, then the timed runs. The warm-up's output is
 /// judged before any timed run, so a probe that cannot be trusted stops after one run.
 fn edit_and_run(
@@ -124,16 +129,20 @@ fn edit_and_run(
         guard.write(next)?;
         let warm_up = run == 0;
         let cmd = if warm_up {
-            Cmd::new(Program::Cargo, [probe.subcommand, "-v"])
+            Cmd::new(Program::Cargo, [probe.subcommand, "-v"], PROBE_TIMEOUT)
         } else {
-            Cmd::new(Program::Cargo, [probe.subcommand])
+            Cmd::new(Program::Cargo, [probe.subcommand], PROBE_TIMEOUT)
         };
         let (captured, elapsed) = timed(|| runner(&cmd));
         let captured = captured.map_err(|error| {
-            Failure::new(
-                format!("could not run `{cmd}`: {error}"),
-                format!("run `{cmd}` to see the error"),
-            )
+            if crate::process::is_timeout(&error) {
+                Failure::new(error.to_string(), crate::process::timeout_fix(&cmd))
+            } else {
+                Failure::new(
+                    format!("could not run `{cmd}`: {error}"),
+                    format!("run `{cmd}` to see the error"),
+                )
+            }
         })?;
         if !captured.success {
             return Err(Failure {
