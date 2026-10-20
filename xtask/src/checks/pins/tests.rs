@@ -4,6 +4,8 @@
 mod cases;
 mod fake_pins;
 pub(super) mod planted;
+mod workflow_files;
+mod yaml_text;
 
 use super::*;
 use cases::{check, put, repo};
@@ -323,4 +325,25 @@ fn engines_node_reads_the_version_after_its_operator() {
           with `node-version-file: ui/package.json` installs a Node that `engines.node` allows"
         ]
     );
+}
+
+/// `dtolnay/rust-toolchain` is pinned by a commit only when its ref is 40 hex digits. A shorter
+/// hex ref, or a 40-character name that is not hex, is no commit, so its comment is not read.
+#[test]
+fn a_ref_is_a_commit_only_when_it_is_forty_hex_digits() {
+    for reference in ["abcdef".to_owned(), "z".repeat(40)] {
+        let dir = repo("dtolnay-ref");
+        let text = format!(
+            "jobs:\n  a:\n    steps:\n      - uses: dtolnay/rust-toolchain@{reference} # 1.85.0\n"
+        );
+        put(&dir, ".github/workflows/ci.yml", &text);
+        let found = check(&dir);
+        assert_eq!(
+            (found.violations.is_empty(), found.failures.is_empty()),
+            (true, true),
+            "{reference}: {:?} {:?}",
+            found.violations,
+            found.failures
+        );
+    }
 }

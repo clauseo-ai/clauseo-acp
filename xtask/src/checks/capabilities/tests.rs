@@ -281,3 +281,28 @@ fn string_capabilities_and_an_invalid_config_pass_inline() {
     assert_eq!(inline_violations(conf, names), Vec::new());
     assert_eq!(inline_violations(conf, "{ \"app\": "), Vec::new());
 }
+
+#[test]
+fn permissions_that_cannot_be_listed_fail_at_their_folder() {
+    let dir = Scratch::new("capabilities-permissions-not-a-folder");
+    Scratch::create_dir_all(dir.join("crates/desktop/capabilities")).expect("create the folder");
+    Scratch::write(dir.join("crates/desktop/capabilities/main.json"), CLEAN)
+        .expect("write main.json");
+    Scratch::write(dir.join("crates/desktop/permissions"), "not a folder\n")
+        .expect("write the file");
+    let found = run(&desktop_context(&dir)).violations;
+    let [violation] = found.as_slice() else {
+        panic!("one violation, at the folder: {found:?}");
+    };
+    assert_eq!(
+        (violation.path.as_str(), violation.line),
+        ("crates/desktop/permissions", 1)
+    );
+    assert!(
+        violation
+            .message
+            .starts_with("could not read `crates/desktop/permissions`: "),
+        "{}",
+        violation.message
+    );
+}

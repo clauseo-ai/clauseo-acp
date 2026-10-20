@@ -225,6 +225,12 @@ crate::checks::planted::cases! {
         "xtask/core-io-bans.toml:3: `std::fs::read` is listed twice in `disallowed-methods`\n    \
          fix: delete this entry",
     ]), inspects 0 => super::list_entry_problems,
+    /// A root `clippy.toml` that is not TOML fails at the line the parser stopped on, with the
+    /// root's fix.
+    root_not_toml: FailsWith(&[
+        "clippy.toml:2: `clippy.toml` is not valid: unclosed array, expected `]`\n    \
+         fix: fix the line above so clippy and core-io can read the file",
+    ]), inspects 0 => super::root_not_toml,
     root_array_is_a_string: FailsWith(&[
         "clippy.toml:2: `disallowed-types` in clippy.toml is not an array, so core-io cannot \
          append xtask/core-io-bans.toml's `disallowed-types` to it\n    \

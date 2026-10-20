@@ -173,3 +173,19 @@ fn a_file_that_is_not_rust_is_an_error_at_its_line() {
     let error = find("src/a.rs", "fn f() {}\nfn g( {\n").expect_err("not Rust");
     assert_eq!(error.span().start().line, 2);
 }
+
+/// An attribute written inside another attribute's brackets is not a site: the outer one is
+/// read as a whole, and neither holds a meta that names the inner one.
+#[test]
+fn an_attribute_inside_a_macro_attribute_is_not_searched_again() {
+    let text = concat!(
+        "macro_rules! m {\n",
+        "    () => {\n",
+        "        #[cfg_attr(test, #[expect(a, reason = \"x\")])]\n",
+        "        #[doc = #[expect(b)]]\n",
+        "        fn g() {}\n",
+        "    };\n",
+        "}\n",
+    );
+    assert_eq!(found("src/a.rs", text), Vec::<String>::new());
+}

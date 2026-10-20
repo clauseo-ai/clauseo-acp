@@ -291,6 +291,17 @@ pub(super) fn list_entry_problems() -> ScratchRepo {
     )
 }
 
+/// A root `clippy.toml` that is not TOML: the message names the root file and its fix.
+pub(super) fn root_not_toml() -> ScratchRepo {
+    run_repo(
+        "root-not-toml",
+        &Repo {
+            root: Input::Text("msrv = \"1.99\"\ndisallowed-methods = [\n"),
+            ..Repo::default()
+        },
+    )
+}
+
 pub(super) fn root_array_is_a_string() -> ScratchRepo {
     run_repo(
         "root-array-is-a-string",
