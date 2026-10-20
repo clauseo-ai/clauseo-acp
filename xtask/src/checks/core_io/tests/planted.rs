@@ -74,6 +74,21 @@ macro_rules! no_forbid {
     };
 }
 
+/// The violation for the name `$name` at line `$line` of `crates/protocol/src/hidden.rs`.
+#[cfg(test)]
+macro_rules! always_set {
+    ($line:literal, $name:literal) => {
+        concat!(
+            "crates/protocol/src/hidden.rs:", $line, ": `crates/protocol/src/hidden.rs` names `",
+            $name, "` outside a lint path; clippy lints clauseo-protocol with `cfg(clippy)` set \
+             and in the debug profile, so code behind `not(clippy)` or `not(debug_assertions)` is \
+             never linted\n    fix: remove the cfg that names `", $name, "` here, or rename the \
+             item if `", $name, "` is not a cfg; a crate whose row bans I/O builds the same code \
+             under clippy and in every profile"
+        )
+    };
+}
+
 /// The violation for the `[alias]` key `$name` of `.cargo/config.toml` at `$line`.
 #[cfg(test)]
 macro_rules! alias {
@@ -257,6 +272,18 @@ crate::checks::planted::cases! {
          [package], but clauseo-protocol's row bans I/O and such a crate has no build script\n    \
          fix: delete the `build` key, and the script it names if there is one",
     ]), inspects 3 => super::package_build_set,
+    /// A held crate never names the cfgs clippy always sets, but in a lint path.
+    cfg_not_clippy: FailsWith(&[always_set!(1, "clippy")]), inspects 3 => super::cfg_not_clippy,
+    cfg_not_debug_assertions: FailsWith(&[always_set!(3, "debug_assertions")]), inspects 3 => super::cfg_not_debug_assertions,
+    cfg_attr_clippy: FailsWith(&[always_set!(1, "clippy")]), inspects 3 => super::cfg_attr_clippy,
+    cfg_in_a_macro_body: FailsWith(&[always_set!(3, "clippy")]), inspects 3 => super::cfg_in_a_macro_body,
+    source_not_lexed: FailsWith(&[
+        "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs`, a file of \
+         clauseo-protocol, does not lex as Rust from this line, so core-io cannot look for \
+         `cfg(clippy)` or `debug_assertions` in it\n    \
+         fix: fix the Rust syntax that starts at this line, such as a bracket or a string left open",
+    ]), inspects 3 => super::source_not_lexed,
+    clippy_only_in_lint_paths: Passes, inspects 3 => super::clippy_only_in_lint_paths,
     forbid_in_every_root: Passes, inspects 3 => super::forbid_in_every_root,
     /// An alias named after an external cargo command xtask runs fails; the repo's `xtask` alias
     /// and one named after a built-in command, which cargo ignores, pass.

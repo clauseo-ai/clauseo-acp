@@ -5,6 +5,7 @@
 //! bans must catch.
 
 mod cases;
+mod cfgs;
 mod clippy;
 pub(super) mod planted;
 mod roots;
@@ -12,6 +13,7 @@ mod roots;
 use std::collections::BTreeMap;
 
 use cases::*;
+use cfgs::*;
 use roots::*;
 
 use super::*;

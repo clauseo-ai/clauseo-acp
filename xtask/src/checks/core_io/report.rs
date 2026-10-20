@@ -338,6 +338,38 @@ pub(super) fn root_not_rust(path: &str, package: &str, line: u32, error: &syn::E
     )
 }
 
+/// The violation for the name `name` (`clippy` or `debug_assertions`) at `line` of `path`, a
+/// file of `package`, outside a lint path.
+pub(super) fn always_set_cfg(path: &str, line: u32, name: &str, package: &str) -> Violation {
+    violation(
+        path,
+        line,
+        format!(
+            "`{path}` names `{name}` outside a lint path; clippy lints {package} with \
+             `cfg(clippy)` set and in the debug profile, so code behind `not(clippy)` or \
+             `not(debug_assertions)` is never linted"
+        ),
+        format!(
+            "remove the cfg that names `{name}` here, or rename the item if `{name}` is not a \
+             cfg; a crate whose row bans I/O builds the same code under clippy and in every \
+             profile"
+        ),
+    )
+}
+
+/// The violation for `path`, a file of `package` that does not lex as Rust from `line`.
+pub(super) fn source_not_lexed(path: &str, line: u32, package: &str) -> Violation {
+    violation(
+        path,
+        line,
+        format!(
+            "`{path}`, a file of {package}, does not lex as Rust from this line, so core-io \
+             cannot look for `cfg(clippy)` or `debug_assertions` in it"
+        ),
+        "fix the Rust syntax that starts at this line, such as a bracket or a string left open",
+    )
+}
+
 /// The violation for the build script `path` of `package`, whose row bans I/O.
 pub(super) fn build_script_file(path: &str, package: &str) -> Violation {
     violation(

@@ -57,6 +57,7 @@
 //! clippy runs without xtask, and a crate that is not a workspace member. It counts the
 //! Crates-table rows it classified, held or not.
 
+mod cfgs;
 mod clippy_toml;
 mod lints;
 mod report;
@@ -125,6 +126,7 @@ fn run(ctx: &Context) -> Inspection {
         }
         violations.extend(roots::forbid_lines(&ctx.root, member));
         violations.extend(roots::build_script(&ctx.root, member));
+        violations.extend(cfgs::always_set_cfgs(&ctx.root, member, &files));
     }
     for member in &ctx.members {
         violations.extend(lints::crate_manifest(&ctx.root, member));
