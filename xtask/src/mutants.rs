@@ -40,8 +40,9 @@ const MUTANTS_TIMEOUT: Duration = Duration::from_mins(20);
 const VERSION_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// cargo-mutants' `--jobs`: how many mutants build and test at once, each in its own copy of the
-/// tree. Each build and test run is itself parallel, so this is far below the core count; see the
-/// measurement in the R3b pull request (12 cores, 24 GB).
+/// tree. Each build and test run is itself parallel, so this is far below the core count. On the
+/// 12-core, 24 GB Mac mini, the same 34 mutants took 162 s at 2 jobs, 129 s at 4 and 126 s at 8:
+/// past 4 the cores are full, and each job only adds a build dir and memory.
 const JOBS: &str = "4";
 
 /// Runs a command in the repo root, passing each chunk of its merged output to the callback as it
