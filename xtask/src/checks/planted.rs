@@ -162,15 +162,20 @@ pub(crate) fn registry_problems(checks: &[StaticCheck]) -> Vec<String> {
         .flat_map(|check| check.planted.iter().map(move |case| (check, case)))
         .collect();
     let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
-    let chunk = cases.len().div_ceil(threads).max(1);
+    // Each thread takes the next case no thread has taken, so the slow cases (those that run
+    // cargo, listed together under their check) spread over every thread instead of one.
+    let next = AtomicUsize::new(0);
     std::thread::scope(|scope| {
         // Every thread starts before the first join, so the cases run side by side.
         let mut handles = Vec::new();
-        for part in cases.chunks(chunk) {
+        for _ in 0..threads.min(cases.len()) {
+            let (cases, next) = (&cases, &next);
             handles.push(scope.spawn(move || {
-                part.iter()
-                    .filter_map(|(check, case)| judged(check, case))
-                    .collect::<Vec<_>>()
+                let mut found = Vec::new();
+                while let Some((check, case)) = cases.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    found.extend(judged(check, case));
+                }
+                found
             }));
         }
         for handle in handles {
@@ -238,3 +243,5 @@ pub(crate) use cases;
 use crate::checks::{Report, StaticCheck};
 #[cfg(test)]
 use crate::fix::Fix;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
