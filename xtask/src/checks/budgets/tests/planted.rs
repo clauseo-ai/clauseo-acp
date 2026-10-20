@@ -33,8 +33,8 @@ crate::checks::planted::cases! {
     ]), inspects 1 => super::missing_id,
     /// A key no row may have stops the check at its line: no row was looked at.
     unknown_key: FailsWith(&[
-        "budgets.toml:10: budgets.toml is not valid: unknown field `colour`, expected one of `id`, `metric`, `limit`, `unit`, \
-         `gate`, `measured_by`, `status`, `measured`, `measured_on`, `source`\n    \
+        "budgets.toml:10: budgets.toml is not valid: unknown field `colour`, expected one of `id`, \
+         `metric`, `limit`, `unit`, `gate`, `measured_by`, `status`, `measured`, `measured_on`, `source`\n    \
          fix: fix the line above; each row is a [[budget]] table of the ten keys listed at the top \
          of budgets.toml",
     ]), inspects 0 => super::unknown_key,
