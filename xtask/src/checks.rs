@@ -264,7 +264,7 @@ pub(crate) fn members(ctx: &Context) -> Result<&[Member], Inspection> {
 }
 
 /// The fix of a check that stopped because `cargo metadata` failed.
-pub(crate) const METADATA_FIX: &str = "fix the error quoted above until `cargo metadata` succeeds; this check reads the workspace members from it";
+pub(crate) const METADATA_FIX: &str = "fix the error quoted above so that `cargo metadata` succeeds; this check reads the workspace members from its output";
 
 /// The desktop crate's member. When `cargo metadata` failed, the inspection `members` gives;
 /// when the crate is not a workspace member, the one violation at `Cargo.toml:1` that every
