@@ -87,4 +87,67 @@ crate::checks::planted::cases! {
     ]), inspects 0 => super::only_file_unreadable,
     /// A file of 650 lines listed in the exception file, with a reason, passes.
     listed_600_plus_file_passes: Passes, inspects 1 => super::listed_600_plus_file_passes,
+    /// A `.cts` file of 601 lines fails the same way.
+    cts_601_lines: FailsWith(&[
+        "ui/big.cts:1: this file has 601 lines; the limit is 600\n    \
+         fix: split it into smaller modules, or list it in xtask/file-size-exceptions.txt with a reason",
+    ]), inspects 1 => super::cts_601_lines,
+    /// CRLF line endings count one line each.
+    crlf_601_lines: FailsWith(&[
+        "src/big.rs:1: this file has 601 lines; the limit is 600\n    \
+         fix: split it into smaller modules, or list it in xtask/file-size-exceptions.txt with a reason",
+    ]), inspects 1 => super::crlf_601_lines,
+    /// Lone `\\r` line endings count one line each too.
+    lone_cr_601_lines: FailsWith(&[
+        "ui/big.ts:1: this file has 601 lines; the limit is 600\n    \
+         fix: split it into smaller modules, or list it in xtask/file-size-exceptions.txt with a reason",
+    ]), inspects 1 => super::lone_cr_601_lines,
+    /// A `.rs` symlink to a long file of another kind is read through the link.
+    symlinked_file_601_lines: FailsWith(&[
+        "src/link.rs:1: this file has 601 lines; the limit is 600\n    \
+         fix: split it into smaller modules, or list it in xtask/file-size-exceptions.txt with a reason",
+    ]), inspects 1 => super::symlinked_file_601_lines,
+    /// An outer doc comment (`///`) that reaches column 101 fails.
+    outer_doc_comment_101: FailsWith(&[
+        "src/lib.rs:1: this comment reaches column 101; the limit is 100\n    \
+         fix: wrap the comment at 100 columns",
+    ]), inspects 1 => super::outer_doc_comment_101,
+    /// A `/** */` doc comment whose second line reaches column 101 fails on that line.
+    block_doc_comment_past_100: FailsWith(&[
+        "src/lib.rs:2: this comment reaches column 101; the limit is 100\n    \
+         fix: wrap the comment at 100 columns",
+    ]), inspects 1 => super::block_doc_comment_past_100,
+    /// A `/*! */` doc comment whose first line reaches column 101 fails on that line.
+    inner_block_doc_comment_past_100: FailsWith(&[
+        "src/lib.rs:1: this comment reaches column 101; the limit is 100\n    \
+         fix: wrap the comment at 100 columns",
+    ]), inspects 1 => super::inner_block_doc_comment_past_100,
+    /// Text after a nested pair closes is still comment, and fails past column 100.
+    nested_block_comment_past_100: FailsWith(&[
+        "src/lib.rs:2: this comment reaches column 101; the limit is 100\n    \
+         fix: wrap the comment at 100 columns",
+    ]), inspects 1 => super::nested_block_comment_past_100,
+    /// A comment on a CRLF line that reaches column 101 fails; the `\\r` is not counted.
+    crlf_comment_101: FailsWith(&[
+        "src/lib.rs:2: this comment reaches column 101; the limit is 100\n    \
+         fix: wrap the comment at 100 columns",
+    ]), inspects 1 => super::crlf_comment_101,
+    /// A 100-column comment on a CRLF line passes.
+    crlf_comment_100_passes: Passes, inspects 1 => super::crlf_comment_100_passes,
+    /// An exception for a file that is there but no source kind is stale.
+    stale_exception_not_source: FailsWith(&[
+        "xtask/file-size-exceptions.txt:2: `README.md` is listed as an exception, but the \
+         check inspects no Rust or TypeScript file at that path\n    \
+         fix: delete this line from xtask/file-size-exceptions.txt",
+    ]), inspects 1 => super::stale_exception_not_source,
+    /// An exception with no reason fails at its line.
+    exception_without_reason: FailsWith(&[
+        "xtask/file-size-exceptions.txt:2: `src/lib.rs` has no reason\n    \
+         fix: write why `src/lib.rs` is exempt after the path, on the same line",
+    ]), inspects 1 => super::exception_without_reason,
+    /// An exception listed twice fails at the second line; the first still exempts its file.
+    exception_listed_twice: FailsWith(&[
+        "xtask/file-size-exceptions.txt:3: `src/parser.rs` is listed twice\n    \
+         fix: delete this line and keep the reason on the first one",
+    ]), inspects 1 => super::exception_listed_twice,
 }
