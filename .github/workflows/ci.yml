@@ -26,9 +26,6 @@ concurrency:
   # Every push to main is checked; a pull request keeps only its newest run.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
   changes:
     name: changes
