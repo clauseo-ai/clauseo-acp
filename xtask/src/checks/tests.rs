@@ -193,7 +193,7 @@ const STOPS_IN_AN_EMPTY_REPO: [&str; 5] = [
 /// check that looked, or that stopped with nothing printed, gets the zero-inspected failure.
 #[test]
 fn a_check_that_stopped_prints_one_fix_line() {
-    let gone = || violation("a.json", 1, "gone", "restore it");
+    let gone = || violation("a.json", 1, "gone", crate::fix::Fix::Fake("restore it"));
     let check = fake(|_| Inspection::default());
     let looked = check.judge(Inspection::new(0, vec![gone()]));
     let normal = "tauri-config looks for capability files in the desktop crate's capabilities/; \
@@ -303,7 +303,17 @@ fn a_count_above_zero_passes_unless_there_are_violations_and_notes_never_fail() 
     assert!(!report.failed());
     assert_eq!(report.counted, "1 capability file inspected");
 
-    let check = fake(|_| Inspection::new(2, vec![violation("a.json", 3, "bad", "fix it")]));
+    let check = fake(|_| {
+        Inspection::new(
+            2,
+            vec![violation(
+                "a.json",
+                3,
+                "bad",
+                crate::fix::Fix::Fake("fix it"),
+            )],
+        )
+    });
     let report = check.report(&desktop_context(Path::new("/ws")));
     assert!(report.failed());
     assert_eq!(report.nothing_inspected, None);

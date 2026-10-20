@@ -36,20 +36,6 @@ pub(crate) enum Fix {
     /// their own.
     #[cfg(test)]
     Fake(&'static str),
-    /// Transitional: free text, while the checks move to their enums. Removed before merge.
-    Legacy(String),
-}
-
-impl From<&str> for Fix {
-    fn from(text: &str) -> Fix {
-        Fix::Legacy(text.to_owned())
-    }
-}
-
-impl From<String> for Fix {
-    fn from(text: String) -> Fix {
-        Fix::Legacy(text)
-    }
 }
 
 /// The text of a step's fix line. Its field is private, so `Fix::tool` is the only way in.
@@ -82,7 +68,6 @@ impl fmt::Display for Fix {
             Fix::Tool(ToolText(text)) => f.write_str(text),
             #[cfg(test)]
             Fix::Fake(text) => f.write_str(text),
-            Fix::Legacy(text) => f.write_str(text),
         }
     }
 }
