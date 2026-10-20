@@ -15,9 +15,13 @@
 //! The leader also inherits every descriptor xtask inherited without close-on-exec, and holds it
 //! until it exits.
 //!
+//! A leader found dead (someone killed it) is replaced before the next command starts, or when a
+//! write to it fails: xtask keeps the groups it registered, and tells them all to the new leader.
+//!
 //! Not covered: a command whose start returned in xtask but whose `+<group>` write had not happened
 //! when xtask died (a few instructions after `spawn`), a process that left its group (`setsid`),
-//! and a leader that is itself killed. Ctrl-Z stops xtask but not its commands.
+//! and xtask dying while its leader is dead and not yet replaced. Ctrl-Z stops xtask but not its
+//! commands.
 
 use super::running::KILL_GRACE;
 use super::spawn;
@@ -43,58 +47,102 @@ const POLL: Duration = Duration::from_millis(50);
 
 /// The leader of this xtask process, once a command has started.
 struct Leader {
-    /// The write end of the leader's stdin. It closes when xtask exits, and only then.
+    /// The write end of the leader's stdin. It closes when xtask exits, or when a dead leader is
+    /// replaced.
     pipe: io::PipeWriter,
-    /// Kept, never waited for: the leader outlives xtask.
+    /// Waited for only to see whether it died: a live leader outlives xtask.
     child: Child,
+    /// The groups registered and not released, which a new leader is told when this one dies.
+    groups: BTreeSet<Pid>,
 }
 
 static LEADER: Mutex<Option<Leader>> = Mutex::new(None);
 
-/// Starts the leader if it is not running yet. Called before each command starts, so its
-/// `register` is one write.
+impl Leader {
+    /// Whether it still runs. Only a leader that has surely exited counts as dead: replacing a
+    /// live one would close its stdin, and it would stop every group xtask still runs.
+    fn alive(&mut self) -> bool {
+        !matches!(self.child.try_wait(), Ok(Some(_)))
+    }
+
+    /// A new leader, told every group of this one, which then gets SIGKILL (it stops nothing
+    /// then) and is reaped. On failure this one is kept, groups and all.
+    fn replace(&mut self) -> io::Result<Leader> {
+        let next = start(self.groups.clone())?;
+        drop(self.child.kill());
+        drop(self.child.wait());
+        Ok(next)
+    }
+}
+
+/// Starts the leader if it is not running yet, and replaces it if it died. Called before each
+/// command starts, so its `register` is one write.
 pub(super) fn ensure() -> io::Result<()> {
-    let mut leader = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
-    if leader.is_none() {
-        *leader = Some(start()?);
+    let mut slot = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
+    let Some(leader) = slot.as_mut() else {
+        *slot = Some(start(BTreeSet::new())?);
+        return Ok(());
+    };
+    if !leader.alive() {
+        let next = leader.replace()?;
+        *slot = Some(next);
     }
     Ok(())
 }
 
-/// Tells the leader to stop `group` if xtask dies.
+/// Tells the leader to stop `group` if xtask dies. A leader that cannot be told is replaced.
 pub(super) fn register(group: Pid) -> io::Result<()> {
-    let mut leader = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
-    let Some(leader) = leader.as_mut() else {
+    let mut slot = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
+    let Some(leader) = slot.as_mut() else {
         return Err(io::Error::other(
             "xtask's process leader was not started before the command",
         ));
     };
-    leader
-        .pipe
-        .write_all(format!("+{group}\n").as_bytes())
-        .map_err(|error| {
-            // Not the write error's kind: callers read `NotFound` and `TimedOut` as their own.
-            io::Error::other(format!(
-                "could not tell xtask's process leader (pid {}) about process group {group}, so \
-                 the command was stopped: {error}",
+    leader.groups.insert(group);
+    let Err(error) = leader.pipe.write_all(format!("+{group}\n").as_bytes()) else {
+        return Ok(());
+    };
+    match leader.replace() {
+        Ok(next) => {
+            *slot = Some(next);
+            Ok(())
+        }
+        Err(start_error) => {
+            leader.groups.remove(&group);
+            // Not the errors' kind: callers read `NotFound` and `TimedOut` as their own.
+            Err(io::Error::other(format!(
+                "could not tell xtask's process leader (pid {}) about process group {group} \
+                 ({error}), nor start a new one, so the command was stopped: {start_error}",
                 leader.child.id()
-            ))
-        })
+            )))
+        }
+    }
 }
 
 /// Tells the leader that `group` is no longer xtask's to stop. A leader that cannot be told has
-/// died, and has no group left to stop.
+/// died, and stops nothing; a new one is not told the group.
 pub(super) fn release(group: Pid) {
-    let mut leader = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(leader) = leader.as_mut() {
+    let mut slot = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(leader) = slot.as_mut() {
+        leader.groups.remove(&group);
         drop(leader.pipe.write_all(format!("-{group}\n").as_bytes()));
     }
 }
 
-/// Starts the leader.
-fn start() -> io::Result<Leader> {
+/// Kills the leader with SIGKILL and reaps it, leaving it in place, so the next command finds it
+/// dead. For the hidden `process-test restarted-leader` mode only.
+pub(super) fn kill_for_test() {
+    let mut slot = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(leader) = slot.as_mut() {
+        drop(leader.child.kill());
+        drop(leader.child.wait());
+    }
+}
+
+/// Starts a leader and tells it `groups`.
+fn start(groups: BTreeSet<Pid>) -> io::Result<Leader> {
     let exe = leader_exe()?;
-    let (reader, pipe) = io::pipe()?;
+    let (reader, mut pipe) = io::pipe()?;
     let mut command = Command::new(&exe);
     command
         .arg(LEADER_SUBCOMMAND)
@@ -103,19 +151,46 @@ fn start() -> io::Result<Leader> {
         .stderr(Stdio::null())
         .process_group(0);
     // Not the spawn error's kind: a caller would read `NotFound` as its own program missing.
-    let child = spawn(&mut command).map_err(|error| {
+    let mut child = spawn(&mut command).map_err(|error| {
         io::Error::other(format!(
             "could not start xtask's process leader {}: {error}",
             exe.display()
         ))
     })?;
-    Ok(Leader { pipe, child })
+    let mut told = String::new();
+    for group in &groups {
+        told.push('+');
+        told.push_str(&group.to_string());
+        told.push('\n');
+    }
+    if let Err(error) = pipe.write_all(told.as_bytes()) {
+        drop(child.kill());
+        drop(child.wait());
+        return Err(io::Error::other(format!(
+            "could not tell the new process leader of xtask the process groups it runs: {error}"
+        )));
+    }
+    Ok(Leader {
+        pipe,
+        child,
+        groups,
+    })
+}
+
+/// `std::env::current_exe`'s answer, its error given a message and kind of its own: a caller
+/// reads `NotFound` (Linux without `/proc`) as its own program missing.
+fn own_binary(found: io::Result<PathBuf>) -> io::Result<PathBuf> {
+    found.map_err(|error| {
+        io::Error::other(format!(
+            "could not find xtask's own binary, which runs its process leader: {error}"
+        ))
+    })
 }
 
 /// The xtask binary, which runs the leader.
 #[cfg(not(test))]
 fn leader_exe() -> io::Result<PathBuf> {
-    std::env::current_exe()
+    own_binary(std::env::current_exe())
 }
 
 /// The xtask binary, which runs the leader. The unit tests run from
@@ -124,7 +199,7 @@ fn leader_exe() -> io::Result<PathBuf> {
 /// binary's own path, so a copied tree (cargo-mutants) finds its own.
 #[cfg(test)]
 fn leader_exe() -> io::Result<PathBuf> {
-    let harness = std::env::current_exe()?;
+    let harness = own_binary(std::env::current_exe())?;
     let name = format!("xtask{}", std::env::consts::EXE_SUFFIX);
     let exe = harness
         .parent()

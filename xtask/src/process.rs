@@ -367,6 +367,11 @@ pub(crate) enum TestOutput {
     Inherit,
     /// Through `capture`.
     Capture,
+    /// Started with its output inherited; then, on Unix, the leader is killed, and the script runs
+    /// again to its end through `run`, with `$1` set to `again` (which starts a new leader); then
+    /// the first run is waited for. So only a new leader told about the first run's group can stop
+    /// it when xtask dies.
+    RestartedLeader,
 }
 
 /// The limit of the hidden `process-test` mode: longer than any test waits, so the test's signal
@@ -387,12 +392,36 @@ pub(crate) fn test_mode(output: TestOutput, script: &str) -> std::process::ExitC
             capture(&cmd, Path::new("."), &mut |_| {}),
             Ok(Captured { success: true, .. })
         ),
+        TestOutput::RestartedLeader => restarted_leader(&cmd, script),
     };
     if success {
         std::process::ExitCode::SUCCESS
     } else {
         std::process::ExitCode::FAILURE
     }
+}
+
+/// The `restarted-leader` test mode for `cmd`, which is `sh -c <script>`. Whether both runs
+/// exited 0.
+fn restarted_leader(cmd: &Cmd, script: &str) -> bool {
+    let mut command = cmd.program.command();
+    command.args(&cmd.args);
+    let limits = running::Limits::of(cmd.timeout);
+    let started = running::Running::start(command, &cmd.to_string(), Streams::Inherit, limits);
+    let Ok(first) = started else {
+        return false;
+    };
+    #[cfg(unix)]
+    leader::kill_for_test();
+    let again = Cmd::new(
+        Program::Named("sh"),
+        ["-c", script, "sh", "again"],
+        cmd.timeout,
+    );
+    let second = run(&again, Path::new("."), Output::Inherit);
+    let first = first.finish(&mut |_, _| {});
+    matches!(second, Ok(Ended::Exited(Quiet { success: true, .. })))
+        && matches!(first, Ok(Finish::Exited(status)) if status.success())
 }
 
 #[cfg(test)]
