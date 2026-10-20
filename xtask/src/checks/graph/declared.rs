@@ -5,9 +5,9 @@
 //! The candidates are the crate's direct dependencies with the declaration's package name whose
 //! lines came under its section (`Tree::sections`). A path declaration matches the candidate
 //! whose folder is its path, which cargo has already resolved against the manifest's folder.
-//! Any other declaration matches the candidates that are not path packages and whose version
-//! satisfies its requirement, read with the `semver` crate, as
-//! cargo reads it. With one candidate, that one is the node.
+//! Any other declaration matches the candidates whose version satisfies its requirement, read
+//! with the `semver` crate as cargo reads it. Path packages count among them, since `[patch]`
+//! may point a registry or git declaration at one. With one candidate, that one is the node.
 //! A declaration that matches no candidate or several could have produced any of them, so the
 //! text says it may bring the package in.
 
@@ -129,11 +129,11 @@ fn produced(tree: &Tree, dep: &CargoDependency, section: Section) -> (Vec<usize>
                 .filter(|&node| tree.source_path(node) == Some(path.as_path()))
                 .collect(),
         ),
-        // A version this cannot compare leaves the declaration unmatched.
+        // Path nodes count too, as the module doc says. A version this cannot compare leaves
+        // the declaration unmatched.
         None => candidates
             .iter()
             .copied()
-            .filter(|&node| tree.source_path(node).is_none())
             .map(|node| satisfies(&dep.req, tree.version(node)).map(|ok| (node, ok)))
             .collect::<Option<Vec<(usize, bool)>>>()
             .map(|all| {

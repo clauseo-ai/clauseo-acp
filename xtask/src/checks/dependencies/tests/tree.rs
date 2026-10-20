@@ -3,6 +3,7 @@
 
 use super::{PROTOCOL_ROW, manifest, run_on, tauri, vendor, workspace};
 use crate::checks::Inspection;
+use crate::checks::violation;
 
 /// Two direct dependencies that both bring tauri in, through the same `inner`: cargo prints the
 /// second path as `inner (*)`, which must still lead to tauri.
@@ -135,24 +136,15 @@ pub(in crate::checks::dependencies) fn two_paths_of_one_name_both_bring_it_in() 
     two_paths_of_one_name("two-paths-one-name-both", BRINGS_B, BRINGS_B)
 }
 
-/// `s1 = { package = "s", version = "1" }` under `cfg(unix)` at line 7 and `s2`, the same
-/// with `version = "2"`, under `cfg(windows)` at line 10, where only `s` 2.0.0 brings `b` in.
-/// Registry packages need the network, so the graph and the metadata are written out here.
-#[test]
-fn a_registry_declaration_is_matched_to_the_version_its_requirement_allows() {
+/// The violations of a protocol crate whose manifest is `text`, whose graph is the `cargo tree`
+/// output `stdout`, and whose dependencies are the `cargo metadata` list `dependencies`, with a
+/// row that bans `b`. Registry and git packages need the network, so these cases write the
+/// graph and the metadata out.
+fn written_out(text: &str, stdout: &str, dependencies: &str) -> Vec<crate::violation::Violation> {
     use crate::checks::crates_table::{CrateRow, Never, Status};
     use crate::checks::dependencies::graph::{Crate, violations};
     use crate::checks::graph::Tree;
-    use crate::checks::violation;
-    let text = "[package]\nname = \"clauseo-protocol\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[target.'cfg(unix)'.dependencies]\ns1 = { package = \"s\", version = \"1\" }\n\n[target.'cfg(windows)'.dependencies]\ns2 = { package = \"s\", version = \"2\" }\n";
-    let stdout =
-        "clauseo-protocol v0.1.0 []\n|-- s v1.4.0 []\n`-- s v2.0.0 []\n    `-- b v1.0.0 []\n";
     let tree = Tree::parse(stdout, "clauseo-protocol").expect("the tree parses");
-    let dependencies = r#"[
-        {"name": "s", "rename": "s1", "kind": null, "target": "cfg(unix)", "optional": false,
-         "features": [], "req": "^1"},
-        {"name": "s", "rename": "s2", "kind": null, "target": "cfg(windows)", "optional": false,
-         "features": [], "req": "^2"}]"#;
     let deps = crate::workspace::PackageDependencies {
         dependencies: serde_json::from_str(dependencies).expect("the metadata parses"),
         features: std::collections::BTreeMap::new(),
@@ -170,13 +162,52 @@ fn a_registry_declaration_is_matched_to_the_version_its_requirement_allows() {
         row: &row,
         deps: &deps,
     };
+    violations(&krate, &tree)
+}
+
+/// `s1 = { package = "s", version = "1" }` under `cfg(unix)` at line 7 and `s2`, the same
+/// with `version = "2"`, under `cfg(windows)` at line 10, where only `s` 2.0.0 brings `b` in.
+#[test]
+fn a_registry_declaration_is_matched_to_the_version_its_requirement_allows() {
+    let text = "[package]\nname = \"clauseo-protocol\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[target.'cfg(unix)'.dependencies]\ns1 = { package = \"s\", version = \"1\" }\n\n[target.'cfg(windows)'.dependencies]\ns2 = { package = \"s\", version = \"2\" }\n";
+    let stdout =
+        "clauseo-protocol v0.1.0 []\n|-- s v1.4.0 []\n`-- s v2.0.0 []\n    `-- b v1.0.0 []\n";
+    let dependencies = r#"[
+        {"name": "s", "rename": "s1", "kind": null, "target": "cfg(unix)", "optional": false,
+         "features": [], "req": "^1"},
+        {"name": "s", "rename": "s2", "kind": null, "target": "cfg(windows)", "optional": false,
+         "features": [], "req": "^2"}]"#;
     assert_eq!(
-        violations(&krate, &tree),
+        written_out(text, stdout, dependencies),
         vec![violation(
             "crates/protocol/Cargo.toml",
             10,
             "clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids",
             "move the code that uses `s2` into a crate whose row allows b, then remove `s2` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
+        )]
+    );
+}
+
+/// `s1 = { package = "s", version = "1" }` at line 7, which `[patch.crates-io]` points at the
+/// path package `vendor/s` 1.0.0, and `s2`, a git package `s` 1.2.0, at line 10, which alone
+/// brings `b` in. Both packages satisfy `s1`'s requirement, so which one `s1` built is not
+/// known, and the violation says each line may bring `b` in.
+#[test]
+fn a_registry_declaration_patched_to_a_path_is_not_matched_to_another_package() {
+    let text = "[package]\nname = \"clauseo-protocol\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\ns1 = { package = \"s\", version = \"1\" }\n\n[target.'cfg(windows)'.dependencies]\ns2 = { package = \"s\", git = \"https://example.com/s\" }\n\n[patch.crates-io]\ns = { path = \"../../vendor/s\" }\n";
+    let stdout = "clauseo-protocol v0.1.0 []\n|-- s v1.0.0 (/ws/vendor/s) []\n`-- s v1.2.0 (https://example.com/s#0123abcd) []\n    `-- b v1.0.0 []\n";
+    let dependencies = r#"[
+        {"name": "s", "rename": "s1", "kind": null, "target": null, "optional": false,
+         "features": [], "req": "^1"},
+        {"name": "s", "rename": "s2", "kind": null, "target": "cfg(windows)", "optional": false,
+         "features": [], "req": "*"}]"#;
+    assert_eq!(
+        written_out(text, stdout, dependencies),
+        vec![violation(
+            "crates/protocol/Cargo.toml",
+            7,
+            "clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s1` and `s2` are declared at lines 7 and 10 of crates/protocol/Cargo.toml. xtask could not tell which package cargo builds for each of these declarations, so each of them may bring b in",
+            "move the code that uses `s1` and `s2` into a crate whose row allows b, then remove `s1` and `s2` from lines 7 and 10 of crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
         )]
     );
 }
