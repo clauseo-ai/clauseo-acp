@@ -1,19 +1,22 @@
 //! `cargo xtask` commands in the docs. An inline code span is read whole. A code block is read
 //! line by line when its info word is in `SHELLS`, when it has no info string, or when it is
 //! indented. A session block is read only on its lines that start with a prompt from `PROMPTS`,
-//! and only from after that prompt. Other code blocks are not read. A read line continues when it
-//! ends in an odd number of its block's continuation character, as an even number is escaped,
-//! and, in every block but `cmd` and `bat`, when that character is outside a comment and outside
-//! quotes. A continuing line is joined with the next line of its block, and so on down a chain of
-//! them, and the joined text is reported at the first line. The continuation character is a
-//! backtick in a PowerShell block, `^` in a `cmd` or `bat` block, and `\` in every other block
-//! that is read. In a session block the next line is read after a leading `> ` or `>> `, with or
-//! without a prompt. A continuing line has its continuation character dropped. When a line of its
-//! block follows, the two lines are joined. When none follows, the line is read alone. Each
-//! joined text is split into words once, with `shlex`, or on whitespace when `shlex` cannot
-//! split it. Every `cargo` in the words, with its flags and `+toolchain` skipped, followed by
-//! `xtask`, starts a command. The words after `xtask` stop at shell syntax and parse against the
-//! clap tree in `main.rs`.
+//! and only from after that prompt. Other code blocks are not read.
+//!
+//! The continuation character is a backtick in a PowerShell block, `^` in a `cmd` or `bat` block,
+//! and `\` in every other block that is read, and in an inline code span. A read line continues
+//! when it ends in an odd number of its continuation character, as an even number is escaped, and,
+//! in every block but `cmd` and `bat`, when that character is outside a comment and outside
+//! quotes.
+//!
+//! A continuing line has its continuation character dropped and is joined with the next line of
+//! its block. The join goes on down a chain of continuing lines, and the joined text is reported
+//! at the first line. When no line of its block follows, the line is read alone, as an inline code
+//! span always is. In a session block the next line is read after a leading `> ` or `>> `, with or
+//! without a prompt. Each joined text is split into words once, with `shlex`, or on whitespace
+//! when `shlex` cannot split it. Every `cargo` in the words, with its flags and `+toolchain`
+//! skipped, followed by `xtask`, starts a command. The words after `xtask` stop at shell syntax
+//! and parse against the clap tree in `main.rs`.
 
 use super::markdown::{CodeLine, Scan};
 use crate::Cli;
