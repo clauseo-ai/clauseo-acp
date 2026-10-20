@@ -97,6 +97,9 @@ fn run_tool<W: Write>(
     exec: &mut Exec<'_>,
 ) -> StepResult {
     out.header(tool.name, &tool.cmd);
+    if ctx.members.is_err() && tool.cmd.program == Program::Cargo {
+        return not_run(tool, out);
+    }
     let stream = tool.render.is_none();
     let (captured, secs) = timed(|| {
         exec(&tool.cmd, &mut |chunk| {
@@ -124,14 +127,14 @@ fn run_tool<W: Write>(
                         "`{}` failed without a file:line; its output is above",
                         tool.cmd
                     ),
-                    &tool_fix(tool, ctx, Some(&captured.output)),
+                    &(tool.fix)(&tool.cmd, Some(&captured.output)),
                 );
             }
             (failed, warnings)
         }
         Err(error) => {
             let message = format!("could not run `{}`: {error}", tool.cmd.program.name());
-            out.failure(&message, &tool_fix(tool, ctx, None));
+            out.failure(&message, &(tool.fix)(&tool.cmd, None));
             (true, 0)
         }
     };
@@ -146,18 +149,29 @@ fn run_tool<W: Write>(
     }
 }
 
-/// The fix of a failed tool step. When `cargo metadata` failed, a cargo step gets the metadata
-/// fix instead of its own, since its own fix names a cause that this failure need not have.
-fn tool_fix(tool: &ToolStep, ctx: &Context, output: Option<&str>) -> String {
-    if ctx.members.is_err() && tool.cmd.program == Program::Cargo {
-        METADATA_STEP_FIX.to_owned()
-    } else {
-        (tool.fix)(&tool.cmd, output)
+/// The result of a cargo step that is not run because `cargo metadata` failed. Cargo would
+/// fail on the same manifests and print the same error again, so the step prints one failure
+/// that points at the note and counts as failed.
+fn not_run<W: Write>(tool: &ToolStep, out: &mut Printer<W>) -> StepResult {
+    out.failure(
+        &format!("`{}` was not run, since `cargo metadata` failed", tool.cmd),
+        METADATA_STEP_FIX,
+    );
+    StepResult {
+        name: tool.name.into(),
+        status: StepStatus::Ran {
+            failed: true,
+            warnings: 0,
+            secs: 0.0,
+            inspected: None,
+        },
     }
 }
 
-/// The fix of a cargo step that failed after `cargo metadata` failed.
-pub(crate) const METADATA_STEP_FIX: &str = "fix the `cargo metadata` error in the note above first, since this step runs cargo on the same workspace manifests";
+/// The fix of a cargo step that is not run because `cargo metadata` failed.
+pub(crate) const METADATA_STEP_FIX: &str = "fix the `cargo metadata` error in the note above, \
+                                            then run the check again, since this step would run \
+                                            cargo on the same workspace manifests";
 
 #[cfg(test)]
 mod tests;
