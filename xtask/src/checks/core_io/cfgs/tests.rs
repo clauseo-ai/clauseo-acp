@@ -4,9 +4,14 @@ use super::*;
 
 /// The findings of `source`, each as its kind and line.
 fn findings(source: &str) -> Vec<(Finding, u32)> {
+    findings_of(TokenStream::from_str(source).expect("the source lexes"))
+}
+
+/// The findings of the lexed `tokens`, each as its kind and line.
+fn findings_of(tokens: TokenStream) -> Vec<(Finding, u32)> {
     let mut hits = Vec::new();
     walk(
-        TokenStream::from_str(source).expect("the source lexes"),
+        tokens,
         Scope {
             definitions: true,
             ..Scope::outside()
@@ -185,32 +190,32 @@ fn the_name_tt_fails_everywhere() {
     }
 }
 
-/// A shebang first line is left empty, and an inner attribute on the first line is kept.
+/// A shebang first line is left out, and an inner attribute on the first line is kept.
 #[test]
 fn a_shebang_first_line_is_left_out() {
     let cases = [
-        ("#!/usr/bin/env rust-script\nfn f() {}", "\nfn f() {}"),
-        ("#!/// Docs.\nfn f() {}", "\nfn f() {}"),
-        ("#!/usr/bin/env \"x\nfn f() {}", "\nfn f() {}"),
-        ("#!", ""),
-        (
-            "#![forbid(clippy::disallowed_methods)]\nfn f() {}",
-            "#![forbid(clippy::disallowed_methods)]\nfn f() {}",
-        ),
-        (
-            "#! /* a */ [allow(dead_code)]",
-            "#! /* a */ [allow(dead_code)]",
-        ),
-        ("#!\n[allow(dead_code)]", "#!\n[allow(dead_code)]"),
-        ("#!\n\"x", "#!\n\"x"),
-        ("fn f() {}", "fn f() {}"),
+        ("#!/usr/bin/env rust-script\nfn f() {}", true),
+        ("#!/// Docs.\nfn f() {}", true),
+        ("#!/usr/bin/env \"x\nfn f() {}", true),
+        ("#!", true),
+        ("#![forbid(clippy::disallowed_methods)]\nfn f() {}", false),
+        ("#! /* a */ [allow(dead_code)]", false),
+        ("#!\n[allow(dead_code)]", false),
+        ("#!\n\"x", false),
+        ("fn f() {}", false),
     ];
-    for (text, expected) in cases {
-        assert_eq!(without_shebang(text), expected, "{text}");
+    for (text, shebang) in cases {
+        let lexed = TokenStream::from_str(text);
+        assert_eq!(is_shebang(text, &lexed), shebang, "{text}");
     }
-    let stripped = without_shebang("#!/usr/bin/env rust-script\n#[cfg(unix)] fn f() {}");
+    assert_eq!(
+        blank_first_line("#!/usr/bin/env rust-script\nfn f() {}"),
+        "\nfn f() {}"
+    );
     let name = Finding::Predicate("the name `unix`".to_owned());
-    assert_eq!(findings(&stripped), vec![(name, 2)]);
+    let shebang = "#!/usr/bin/env rust-script\n#[cfg(unix)] fn f() {}";
+    let lexed = lex(shebang).expect("the shebang lexes once it is blanked");
+    assert_eq!(findings_of(lexed), vec![(name, 2)]);
 }
 
 /// A `path` value resolves against its file's folder, one component at a time, and may never

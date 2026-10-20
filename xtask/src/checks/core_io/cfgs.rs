@@ -57,8 +57,7 @@ use crate::violation::Violation;
 use crate::workspace::{self, Member};
 use paths::TopLevel;
 use predicate::{metavariable, whole_predicate};
-use proc_macro2::{Delimiter, Group, Punct, TokenStream, TokenTree};
-use std::borrow::Cow;
+use proc_macro2::{Delimiter, Group, LexError, Punct, TokenStream, TokenTree};
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::str::FromStr;
@@ -152,7 +151,7 @@ pub(super) fn cfg_rule(root: &Path, member: &Member, entries: &[String]) -> Vec<
                 continue;
             }
         };
-        match TokenStream::from_str(&without_shebang(&text)) {
+        match lex(&text) {
             Ok(tokens) => {
                 let mut hits = Vec::new();
                 let top = TopLevel {
@@ -179,33 +178,53 @@ pub(super) fn cfg_rule(root: &Path, member: &Member, entries: &[String]) -> Vec<
     found
 }
 
-/// `text` with a shebang first line left empty, as rustc ignores it, so the lexer reads the
-/// lines after it at their own numbers. A first line that starts with `#!` is a shebang unless
-/// the first token after the `#!` is a bracket group, which makes it an inner attribute. When
-/// the rest of the file does not lex, the first line alone decides, and a first line with no
-/// token after its `#!` is kept, so the lexer reports what follows.
-fn without_shebang(text: &str) -> Cow<'_, str> {
-    let Some(rest) = text.strip_prefix("#!") else {
-        return text.into();
-    };
-    let first = if let Ok(tokens) = TokenStream::from_str(rest) {
-        tokens.into_iter().next()
+/// The tokens of `text`, which is lexed once. When its first line is a shebang, rustc leaves that
+/// line out, so the line is blanked and the text is lexed again.
+fn lex(text: &str) -> Result<TokenStream, LexError> {
+    let lexed = TokenStream::from_str(text);
+    if is_shebang(text, &lexed) {
+        TokenStream::from_str(blank_first_line(text))
     } else {
-        let line = rest.split('\n').next().unwrap_or_default();
-        match TokenStream::from_str(line).map(|tokens| tokens.into_iter().next()) {
-            Ok(None) => return text.into(),
-            Ok(first) => first,
-            Err(_) => None,
-        }
-    };
-    match first {
-        Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => text.into(),
-        _ => text
-            .find('\n')
-            .map_or("", |end| &text[end..])
-            .to_owned()
-            .into(),
+        lexed
     }
+}
+
+/// True when the first line of `text` is a shebang, given how `text` lexed. A first line that
+/// starts with `#!` is a shebang unless the first token after the `#!` is a bracket group, which
+/// makes it an inner attribute. When `text` does not lex, that token is read from the first line
+/// alone, and a first line that is an attribute, or has no token after its `#!`, is kept, so the
+/// lexer reports what follows.
+fn is_shebang(text: &str, lexed: &Result<TokenStream, LexError>) -> bool {
+    let Some(rest) = text.strip_prefix("#!") else {
+        return false;
+    };
+    if let Ok(tokens) = lexed {
+        return !tokens
+            .clone()
+            .into_iter()
+            .nth(2)
+            .as_ref()
+            .is_some_and(is_bracket_group);
+    }
+    let line = rest.split('\n').next().unwrap_or_default();
+    let Ok(tokens) = TokenStream::from_str(line) else {
+        return true;
+    };
+    tokens
+        .into_iter()
+        .next()
+        .is_some_and(|tree| !is_bracket_group(&tree))
+}
+
+/// True when `tree` is a bracket group.
+fn is_bracket_group(tree: &TokenTree) -> bool {
+    matches!(tree, TokenTree::Group(group) if group.delimiter() == Delimiter::Bracket)
+}
+
+/// `text` from its first newline on, so the first line is empty and the lines after it keep
+/// their numbers.
+fn blank_first_line(text: &str) -> &str {
+    text.find('\n').map_or("", |end| &text[end..])
 }
 
 /// True when `file` ends in `.rs` in any case, which a case-insensitive file system opens for a
