@@ -46,6 +46,10 @@ pub(crate) const TOOLS: &[Tool] = &[
         name: "taplo-cli",
         version: "0.10.0",
     },
+    Tool {
+        name: "cargo-mutants",
+        version: "27.1.0",
+    },
 ];
 
 /// A pinned tool that is not a cargo crate. `setup` checks that `<name> version` prints exactly
