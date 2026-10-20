@@ -3,6 +3,7 @@
 
 use crate::checks::Failure;
 use crate::process::{self, Cmd, Program};
+use semver::{Version, VersionReq};
 use std::path::Path;
 
 /// The stdout of `cargo <args>` run in `root`. `Err` is the failure to report when cargo
@@ -65,25 +66,23 @@ const EITHER_FIX: &str = "cargo could not resolve the dependency that its error 
 
 /// The fix for cargo's resolution errors, or `None` for another error. Online, these errors
 /// mean the manifest names a package or version that does not exist. Offline, cargo also gives
-/// them for a crate that is not downloaded. A missing package is then looked up in the
-/// workspace's Cargo.lock: locked means not downloaded, not locked means a wrong manifest.
-/// Offline with no answer from Cargo.lock, the fix names both causes.
+/// them for a crate that is not downloaded. The workspace's Cargo.lock then decides. A registry
+/// entry with the name cargo could not resolve, at a version the requirement allows, means the
+/// crate is not downloaded. No such entry means a wrong manifest. Offline, when Cargo.lock or
+/// cargo's line cannot be read, the fix names both causes.
 fn resolution_fix(stderr: &str, offline: bool, root: &Path) -> Option<&'static str> {
-    const NO_PACKAGE: &str = "no matching package named `";
-    let missing = stderr
-        .find(NO_PACKAGE)
-        .map(|at| &stderr[at + NO_PACKAGE.len()..])
-        .and_then(|rest| rest.split_once('`'))
-        .map(|(name, _)| name);
-    if missing.is_none() && !stderr.contains("failed to select a version") {
-        return None;
-    }
+    let wanted = unresolved(stderr)?;
     if !offline {
         return Some(MANIFEST_FIX);
     }
-    let locked = missing
-        .zip(locked_packages(root))
-        .map(|(name, packages)| packages.iter().any(|package| package == name));
+    let locked = match wanted {
+        Unresolved::Known { name, req } => locked_packages(root).map(|packages| {
+            packages
+                .iter()
+                .any(|(locked, version)| *locked == name && req.matches(version))
+        }),
+        Unresolved::Unreadable => None,
+    };
     Some(match locked {
         Some(true) => FETCH_FIX,
         Some(false) => MANIFEST_FIX,
@@ -91,19 +90,80 @@ fn resolution_fix(stderr: &str, offline: bool, root: &Path) -> Option<&'static s
     })
 }
 
-/// The `name` of every `[[package]]` in `root/Cargo.lock`, or `None` when the file cannot be
-/// read or parsed.
-fn locked_packages(root: &Path) -> Option<Vec<String>> {
+/// The dependency that a cargo resolution error names.
+enum Unresolved {
+    /// Its name and requirement. A missing package allows any version.
+    Known { name: String, req: VersionReq },
+    /// A requirement line whose name or requirement cannot be read.
+    Unreadable,
+}
+
+/// The dependency that cargo's resolution error in `stderr` could not resolve, or `None` when
+/// `stderr` has no resolution error.
+fn unresolved(stderr: &str) -> Option<Unresolved> {
+    const NO_PACKAGE: &str = "no matching package named `";
+    const NO_VERSION: &str = "failed to select a version for the requirement `";
+    if let Some(rest) = after(stderr, NO_PACKAGE) {
+        let name = rest.split_once('`').map(|(name, _)| name.to_owned());
+        return Some(
+            name.map_or(Unresolved::Unreadable, |name| Unresolved::Known {
+                name,
+                req: VersionReq::STAR,
+            }),
+        );
+    }
+    let rest = after(stderr, NO_VERSION)?;
+    let known = rest.split_once('`').and_then(|(line, _)| requirement(line));
+    Some(
+        known.map_or(Unresolved::Unreadable, |(name, req)| Unresolved::Known {
+            name,
+            req,
+        }),
+    )
+}
+
+/// The text of `haystack` after the first `needle`.
+fn after<'a>(haystack: &'a str, needle: &str) -> Option<&'a str> {
+    haystack
+        .find(needle)
+        .map(|at| &haystack[at + needle.len()..])
+}
+
+/// The name and requirement of cargo's `serde_json = "^99"`, which is a TOML key and string.
+fn requirement(line: &str) -> Option<(String, VersionReq)> {
+    let table: toml::Table = line.parse().ok()?;
+    let mut entries = table.into_iter();
+    let (name, req) = entries.next()?;
+    if entries.next().is_some() {
+        return None;
+    }
+    let req = VersionReq::parse(req.as_str()?).ok()?;
+    Some((name, req))
+}
+
+/// The name and version of every `[[package]]` in `root/Cargo.lock` whose source is a
+/// registry, or `None` when the file cannot be read or parsed. A path package has no source,
+/// so it is never listed.
+fn locked_packages(root: &Path) -> Option<Vec<(String, Version)>> {
     let text = std::fs::read_to_string(root.join("Cargo.lock")).ok()?;
     let lock: toml::Table = text.parse().ok()?;
     let packages = lock.get("package")?.as_array()?;
-    Some(
-        packages
-            .iter()
-            .filter_map(|package| package.get("name")?.as_str())
-            .map(str::to_owned)
-            .collect(),
-    )
+    packages
+        .iter()
+        .filter(|package| {
+            package
+                .get("source")
+                .and_then(toml::Value::as_str)
+                .is_some_and(|source| {
+                    source.starts_with("registry+") || source.starts_with("sparse+")
+                })
+        })
+        .map(|package| {
+            let name = package.get("name")?.as_str()?.to_owned();
+            let version = Version::parse(package.get("version")?.as_str()?).ok()?;
+            Some((name, version))
+        })
+        .collect()
 }
 
 #[cfg(test)]
