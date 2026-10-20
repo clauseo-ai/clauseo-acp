@@ -64,8 +64,7 @@ fn run(ctx: &Context) -> Inspection {
                 let text = String::from_utf8_lossy(&bytes);
                 let lines = marked_lines(&text);
                 if !lines.is_empty() {
-                    let held =
-                        *held.get_or_insert_with(|| lock::is_held(&ctx.root.join(lock::LOCK_PATH)));
+                    let held = *held.get_or_insert_with(|| lock::is_held(&ctx.root));
                     found.extend(scan(&path, &lines, held));
                 }
             }

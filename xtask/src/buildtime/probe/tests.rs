@@ -6,6 +6,8 @@ use crate::scratch::Scratch;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 const REL: &str = "crates/desktop/src/lib.rs";
+/// The guard's temporary file for the marker file: next to it, and under the backup folder.
+const TMP: &str = "crates/desktop/src/.lib.rs.buildtime.tmp";
 const ORIGINAL: &str = "//! desktop\n\npub const BUILDTIME_MARKER: u64 = 41;\n\npub fn f() {}\n";
 const BUMPED: &str = "//! desktop\n\npub const BUILDTIME_MARKER: u64 = 42;\n\npub fn f() {}\n";
 const RUSTC: &str = "     Running `/rust/bin/rustc --crate-name clauseo_desktop --edition=2024 crates/desktop/src/lib.rs --crate-type lib -C embed-bitcode=no -C incremental=/ws/target/debug/incremental -C metadata=4a2f`";
@@ -298,7 +300,7 @@ fn a_second_save_of_the_same_file_fails_and_leaves_the_file_alone() {
     let dir = scratch("second-save");
     let mut first = save(&dir).expect("the first save");
     assert!(
-        !dir.join(BACKUP_DIR).join(format!("{REL}.tmp")).exists(),
+        !dir.join(BACKUP_DIR).join(TMP).exists(),
         "the temporary file is gone after a save"
     );
     first
@@ -333,10 +335,28 @@ fn a_second_save_of_the_same_file_fails_and_leaves_the_file_alone() {
 #[test]
 fn the_temporary_file_of_an_interrupted_save_is_deleted() {
     let dir = scratch("tmp-leftover");
-    let tmp = dir.join(BACKUP_DIR).join(format!("{REL}.tmp"));
+    let tmp = dir.join(BACKUP_DIR).join(TMP);
     Scratch::create_dir_all(tmp.parent().expect("has a parent")).expect("create the backup dir");
     Scratch::write(&tmp, ORIGINAL).expect("the interrupted save left its temporary file");
     assert_eq!(restore_leftovers(&dir), Ok(Vec::new()));
+    assert!(!tmp.exists());
+    assert_eq!(file_text(&dir), ORIGINAL);
+}
+
+#[test]
+fn the_temporary_file_of_an_interrupted_write_goes_with_the_restore() {
+    let dir = scratch("write-tmp-leftover");
+    Scratch::create_dir_all(backup_of(&dir).parent().expect("a parent")).expect("the backup dir");
+    Scratch::write(backup_of(&dir), ORIGINAL).expect("the copy a killed run left");
+    Scratch::write(dir.join(REL), BUMPED).expect("its bump");
+    let tmp = dir.join(TMP);
+    Scratch::write(&tmp, "half a bump").expect("the killed write's temporary file");
+    assert_eq!(
+        restore_leftovers(&dir),
+        Ok(vec![format!(
+            "restored {REL} from an interrupted buildtime run"
+        )])
+    );
     assert!(!tmp.exists());
     assert_eq!(file_text(&dir), ORIGINAL);
 }
@@ -423,18 +443,6 @@ fn a_dropped_guard_restores_only_the_bytes_it_wrote() {
     drop(guard);
     assert_eq!(file_text(&dir), ORIGINAL, "the guard's own bump is undone");
     assert!(!backup_of(&dir).exists());
-}
-
-#[test]
-fn a_filesystem_without_hard_links_gets_its_own_fix() {
-    assert_eq!(
-        BACKUPS.save_fix(io::ErrorKind::Unsupported),
-        "the filesystem of target/xtask/buildtime has no hard links; run from a checkout on a filesystem that has them"
-    );
-    assert_eq!(
-        BACKUPS.save_fix(io::ErrorKind::PermissionDenied),
-        "make sure target/xtask/buildtime is writable, then run again"
-    );
 }
 
 #[test]

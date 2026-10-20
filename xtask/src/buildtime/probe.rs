@@ -2,10 +2,9 @@
 //!
 //! Before the first edit, the original is copied to `target/xtask/buildtime/<repo path>`, and a
 //! copy is never replaced. The tracked-file guard (`Guard` in `xtask/src/write/guard.rs`) puts the
-//! original back and deletes the copy
-//! when the probe ends, and on a panic, but never over an edit made during the run. A killed run
-//! leaves its copy, and the next `buildtime rust` run puts it back only where the file differs by
-//! the marker's number alone (`restore_leftovers`).
+//! original back and deletes the copy when the probe ends, and on a panic, but never over an edit
+//! made during the run. A killed run leaves its copy, and the next `buildtime rust` run puts it
+//! back only where the file differs by the marker's number alone (`restore_leftovers`).
 //!
 //! `target/xtask/buildtime/ui/` is not this module's: the web half's script keeps its copy of
 //! `ui/app/src/App.tsx` there, under the rules written out in `ui/app/scripts/guard.mjs`.
@@ -18,7 +17,7 @@ use super::{INCREMENTAL_FIX, Probe};
 use crate::budgets::{Budget, Unit};
 use crate::clock::timed;
 use crate::process::{Captured, Cmd, Program};
-use crate::write::{self, Backups, Guard};
+use crate::write::{Backups, Guard};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -27,7 +26,7 @@ use std::time::Duration;
 /// Where the probes' copies of the marker files wait, and what the guard's messages call a run.
 pub(crate) const BACKUPS: Backups = Backups {
     dir: "target/xtask/buildtime",
-    run: "buildtime run",
+    tool: "buildtime",
 };
 
 /// Where the copies of the original files wait, under the repo root.
@@ -198,9 +197,10 @@ pub(crate) fn judge_warm_up(
 /// Looks at every file an interrupted run left in `target/xtask/buildtime`, before anything is
 /// written. A copy goes back only where the file differs from it by the marker's number. A file
 /// that changed otherwise, or is gone, is a conflict: nothing is written then, and each conflict
-/// is named. A file without a marker line is not a copy and is left alone. A temporary file of an
-/// interrupted save is deleted. Everything under `SCRIPT_OWNED` is skipped. Returns one line per
-/// restored file, `restored <path> from an interrupted buildtime run`.
+/// is named. A file without a marker line is not a copy and is left alone. The guard's temporary
+/// files of an interrupted save (in the backup folder) or write (next to the file) are deleted.
+/// Everything under `SCRIPT_OWNED` is skipped. Returns one line per restored file, `restored
+/// <path> from an interrupted buildtime run`.
 pub(crate) fn restore_leftovers(root: &Path) -> Result<Vec<String>, Failure> {
     let base = root.join(BACKUP_DIR);
     let mut files = Vec::new();
@@ -223,28 +223,24 @@ pub(crate) fn restore_leftovers(root: &Path) -> Result<Vec<String>, Failure> {
         if rel.starts_with(SCRIPT_OWNED) {
             continue;
         }
-        if Path::new(&rel).extension().is_some_and(|ext| ext == "tmp") {
-            write::discard_interrupted_save(&file).map_err(|error| {
-                Failure::new(
-                    format!("could not delete {}: {error}", BACKUPS.copy_name(&rel)),
-                    format!("delete {} by hand", file.display()),
-                )
-            })?;
+        if BACKUPS.is_tmp(&rel) {
+            BACKUPS.discard_interrupted_save(root, &rel)?;
             continue;
         }
+        BACKUPS.discard_interrupted_write(root, &rel)?;
         let bytes = fs::read(&file).map_err(|error| {
             Failure::new(
                 format!("could not read {}: {error}", BACKUPS.copy_name(&rel)),
                 format!("look at {} by hand, then run again", file.display()),
             )
         })?;
-        let Ok(copy_text) = String::from_utf8(bytes.clone()) else {
+        let Ok(copy_text) = String::from_utf8(bytes) else {
             continue;
         };
         let repo_text = fs::read_to_string(root.join(&rel)).ok();
         match leftover(repo_text.as_deref(), &copy_text) {
             Leftover::NotACopy => {}
-            Leftover::Restore => plans.push((file, rel, bytes)),
+            Leftover::Restore => plans.push(rel),
             Leftover::Missing => {
                 conflicts.push(
                     BACKUPS
@@ -265,13 +261,8 @@ pub(crate) fn restore_leftovers(root: &Path) -> Result<Vec<String>, Failure> {
         return Err(combine(&conflicts));
     }
     let mut lines = Vec::new();
-    for (copy, rel, bytes) in plans {
-        if let Err(error) = BACKUPS.restore_leftover(root, &rel, &copy, &bytes) {
-            return Err(Failure::new(
-                format!("could not restore {rel} from its copy: {error}"),
-                format!("copy {} over {rel} by hand", copy.display()),
-            ));
-        }
+    for rel in plans {
+        BACKUPS.restore_leftover(root, &rel)?;
         lines.push(format!("restored {rel} from an interrupted buildtime run"));
     }
     Ok(lines)

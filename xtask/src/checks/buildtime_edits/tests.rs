@@ -139,7 +139,7 @@ pub(super) fn lookalikes_pass() -> Repo {
 /// A file with the attribute while another process holds the buildtime lock: a live run.
 pub(super) fn live_run_holds_the_edit() -> Repo {
     let dir = repo("live", &[(APP, "<main data-buildtime=\"2\" />\n")]);
-    let held = lock::acquire(&dir.join(lock::LOCK_PATH)).expect("take the lock");
+    let held = lock::acquire(&dir).expect("take the lock");
     Repo::desktop(dir).holding(held)
 }
 
