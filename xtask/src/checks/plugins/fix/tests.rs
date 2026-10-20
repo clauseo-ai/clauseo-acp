@@ -37,6 +37,9 @@ fn pinned(fix: &Fix) -> String {
         Fix::AddBackToDependencies { plugin } => {
             format!("add it back under [dependencies]: `{plugin}.workspace = true`")
         }
+        Fix::Patched => "remove the entry: Tauri crates come from crates.io at the versions \
+             Cargo.lock pins; using a fork needs a decision recorded in a task brief"
+            .to_owned(),
         Fix::Tree => "only the fixed plugins and what they pull in may be in the desktop crate's \
              tree"
             .to_owned(),
@@ -61,6 +64,7 @@ fn every_fix_prints_its_pinned_text() {
             plugin: "tauri-plugin-os".to_owned(),
         },
         Fix::Tree,
+        Fix::Patched,
         Fix::RemoveDeclared {
             keys: "`s`".to_owned(),
             lines: "7 and 10".to_owned(),

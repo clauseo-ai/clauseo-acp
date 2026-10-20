@@ -96,6 +96,61 @@ fn inspect(dir: &Scratch) -> Inspection {
     run(&ctx)
 }
 
+/// The clean workspace with `root_tail` after the root manifest (from line 16) and each
+/// `(path, text)` of `files` written too.
+fn root_tail_case(name: &str, root_tail: &str, files: &[(&str, &str)]) -> Repo {
+    let dir = write_workspace(name, &format!("{ROOT}{root_tail}"), DESKTOP, &[]);
+    for (path, text) in files {
+        write_file(&dir, path, text);
+    }
+    Repo::cargo(dir)
+}
+
+/// A `[patch.'<url>']` entry renamed to `tauri-plugin-opener` with `package`, on line 18.
+pub(super) fn patch_renamed_under_a_url() -> Repo {
+    root_tail_case(
+        "patch_url",
+        "\n[patch.'https://github.com/tauri-apps/plugins-workspace']\n\
+         opener = { git = \"https://example.com/fork\", package = \"tauri-plugin-opener\" }\n",
+        &[],
+    )
+}
+
+/// A `[replace]` of `Tao` by package ID spec, on line 18 (cargo refuses it beside `[patch]`).
+pub(super) fn replace_by_package_spec() -> Repo {
+    root_tail_case(
+        "replace",
+        "\n[replace]\n\"Tao:0.34.0\" = { path = \"vendor/tao\" }\n",
+        &[],
+    )
+}
+
+/// `.cargo/config.toml` patches `tauri_runtime` on line 2; its `[replace]`, which cargo never
+/// reads there, is not reported.
+pub(super) fn patch_in_the_cargo_config() -> Repo {
+    root_tail_case(
+        "patch_in_config",
+        "",
+        &[(
+            ".cargo/config.toml",
+            "[patch.crates-io]\ntauri_runtime = { path = \"vendor/tauri-runtime\" }\n\n\
+             [replace]\n\"tauri:2.0.0\" = { path = \"vendor/tauri\" }\n",
+        )],
+    )
+}
+
+/// Patches of crates outside the Tauri family, in the manifest and the cargo config, pass.
+pub(super) fn patch_of_another_crate_passes() -> Repo {
+    root_tail_case(
+        "patch_other",
+        "\n[patch.crates-io]\nserde = { path = \"vendor/serde\" }\n",
+        &[(
+            ".cargo/config.toml",
+            "[patch.crates-io]\nmid = { path = \"vendor/mid\" }\n",
+        )],
+    )
+}
+
 pub(super) fn fixed_plugin_set_passes() -> Repo {
     Repo::cargo(write_workspace(
         "fixed_plugin_set_passes",
