@@ -73,18 +73,29 @@ mod xtask_dies {
 
     /// The pid of the grandchild, from the first line on `reader`, and the reader.
     fn grandchild_of(reader: PipeReader) -> (i32, BufReader<PipeReader>) {
-        let mut reader = BufReader::new(reader);
-        let pid = pid_of(&line_of(&mut reader));
-        (pid, reader)
+        let ([line], reader) = lines_of(BufReader::new(reader));
+        (pid_of(&line), reader)
     }
 
-    /// The next line on `reader`, without its newline.
-    fn line_of(reader: &mut BufReader<PipeReader>) -> String {
-        let mut line = String::new();
-        reader
-            .read_line(&mut line)
-            .expect("read the wrapper's line");
-        line.trim().to_owned()
+    /// The next `N` lines on `reader`, without their newlines, and the reader. Fails when they
+    /// have not all come after `SURVIVOR`, rather than wait for ever for a line that a broken
+    /// door never has printed.
+    fn lines_of<const N: usize>(
+        mut reader: BufReader<PipeReader>,
+    ) -> ([String; N], BufReader<PipeReader>) {
+        let (sender, read) = mpsc::channel();
+        thread::spawn(move || {
+            let lines = [(); N].map(|()| {
+                let mut line = String::new();
+                reader
+                    .read_line(&mut line)
+                    .expect("read the wrapper's line");
+                line.trim().to_owned()
+            });
+            drop(sender.send((lines, reader)));
+        });
+        read.recv_timeout(SURVIVOR)
+            .unwrap_or_else(|_| panic!("the wrapper printed no {N} lines within {SURVIVOR:?}"))
     }
 
     /// The pid on `line`.
@@ -164,9 +175,8 @@ mod xtask_dies {
     #[test]
     fn process_a_new_leader_stops_the_tree_its_dead_predecessor_was_told_about() {
         let (mut xtask, reader) = start_xtask("restarted-leader", RUNS_AGAIN);
-        let mut reader = BufReader::new(reader);
         // The first run prints its grandchild's pid and the second `again`, in either order.
-        let (first, second) = (line_of(&mut reader), line_of(&mut reader));
+        let ([first, second], reader) = lines_of(BufReader::new(reader));
         let pid = if first == "again" {
             second
         } else {
