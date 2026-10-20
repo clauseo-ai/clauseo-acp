@@ -1,0 +1,38 @@
+# Every #[expect(..)] and #![expect(..)] in the repo's Rust files, one line per site and lint.
+# The expect-allowlist static check (xtask/src/checks/expect_allowlist.rs) fails on a site with no
+# line here and on a line with no site. The code owner approves each line (CODEOWNERS: /xtask/).
+#
+# Format: <path> <item> <lint>, separated by spaces. `#` starts a comment; blank lines are skipped.
+# - <path>: the file, relative to the repo root, with `/`.
+# - <lint>: as the attribute writes it, without spaces (`clippy::unwrap_used`). One attribute that
+#   names several lints needs one line per lint; `reason = ".."` is not a lint.
+# - <item>: the nearest enclosing function, impl method, const, static or module. An attribute on
+#   one of those names that item itself (the expect on `fn timed` is `timed`). An attribute on
+#   anything else (a struct, enum, field, statement, trait item or impl block) names the item that
+#   encloses it. At the top level of a file that is the file's module: `crate` for lib.rs, main.rs
+#   and build.rs, the folder for mod.rs, else the file stem (`checks.rs` is `checks`). An inner
+#   attribute at the top of a file is `-`. A site inside a macro body names the item around the
+#   macro.
+# Sites under cfg_attr and inside macro bodies count too. N identical sites need N identical
+# lines. The order of the lines is not checked; keep them grouped by file.
+# `allow` is never listed: the check fails every #[allow] and #![allow], in every form.
+
+# The nine sites on main at a4bcd6f. R3 moved noisy_pass and boom_fail into steps/run/tests.rs.
+crates/desktop/src/lib.rs run clippy::disallowed_methods
+crates/desktop/src/lib.rs raise_main_window clippy::let_underscore_must_use
+crates/desktop/src/rust_only.rs plugin_rust_only clippy::disallowed_methods
+xtask/src/clock.rs timed clippy::disallowed_methods
+xtask/src/output.rs put clippy::let_underscore_must_use
+xtask/src/process.rs capture clippy::disallowed_methods
+xtask/src/process.rs run_quiet clippy::disallowed_methods
+xtask/src/steps/run/tests.rs noisy_pass clippy::unnecessary_wraps
+xtask/src/steps/run/tests.rs boom_fail clippy::unnecessary_wraps
+
+# Added by R3.
+xtask/src/checks.rs checks clippy::partial_pub_fields
+xtask/src/checks/core_io/clippy_toml.rs clippy_toml dead_code
+xtask/src/checks/core_io/clippy_toml.rs clippy_toml dead_code
+xtask/src/checks/core_io/tests/clippy.rs clippy clippy::disallowed_methods
+xtask/src/process.rs run_timed clippy::disallowed_methods
+xtask/src/setup/tests.rs exited clippy::unnecessary_wraps
+xtask/src/setup/tests.rs fake_asset clippy::unnecessary_wraps
