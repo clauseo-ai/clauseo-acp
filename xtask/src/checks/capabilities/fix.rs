@@ -18,6 +18,10 @@ pub(crate) enum Fix {
     Json5,
     /// A capability file does not parse as JSON or TOML, so Tauri cannot read it either.
     Syntax,
+    /// The capability folder holds no capability file, while permission files are there.
+    NoCapabilityFile,
+    /// A permission file mentions `remote`; it has no remote block, so the text is reworded.
+    RemotePermission,
 }
 
 impl fmt::Display for Fix {
@@ -44,6 +48,14 @@ impl fmt::Display for Fix {
                  the grants"
             }
             Fix::Syntax => "fix the syntax: Tauri cannot read the file either",
+            Fix::NoCapabilityFile => {
+                "restore main.json in it: Tauri reads the window's grants from that folder, and \
+                 this check guards them"
+            }
+            Fix::RemotePermission => {
+                "reword the text: a remote page must never reach the IPC, and `remote` is matched \
+                 anywhere in a permission file"
+            }
         })
     }
 }

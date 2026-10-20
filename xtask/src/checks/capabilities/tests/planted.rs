@@ -18,10 +18,11 @@ crate::checks::planted::cases! {
     ]), inspects 0 => super::cases::folder_missing,
     /// An empty capabilities folder inspects nothing, and the zero line names the normal fix.
     empty_folder: FailsWith(&[
-        "0 capability files inspected in the desktop crate's capabilities/\n    \
-         fix: capabilities looks for capability files in the desktop crate's capabilities/; restore them, \
-         or, if they moved, update the consts xtask/src/checks/capabilities.rs builds that \
-         place from",
+        "0 capability and permission files inspected in the desktop crate's capabilities/ and \
+         permissions/\n    \
+         fix: capabilities looks for capability and permission files in the desktop crate's \
+         capabilities/ and permissions/; restore them, or, if they moved, update the consts \
+         xtask/src/checks/capabilities.rs builds that place from",
     ]), inspects 0 => super::cases::empty_folder,
     /// `core:default` as a string value fails at the line of that string.
     core_default_value: FailsWith(&[
@@ -171,4 +172,32 @@ crate::checks::planted::cases! {
          fix: list only the narrow permissions the window needs; `core:default` also grants event emit and \
          devtools toggling",
     ]), inspects 1 => super::cases::moved_crate,
+    /// A permission set bundling `fs:allow-read`, which a capability grants as `"all"`, fails at
+    /// the set's line: the capability file and the permission file are both read.
+    permission_set_bundles_a_forbidden_permission: FailsWith(&[
+        "crates/desktop/permissions/x.toml:3: permission file names `fs:allow-read`\n    \
+         fix: do it in Rust behind a validated command; the webview gets no fs, shell, http, opener or dialog permission",
+    ]), inspects 2 => super::cases::permission_set_bundles_a_forbidden_permission,
+    /// A JSON permission file in a subfolder whose default names `core:default` with a `\u`
+    /// escape fails at its key's line, and one mentioning `remote` fails with the reword fix.
+    permission_json_escaped_and_remote: FailsWith(&[
+        "crates/desktop/permissions/nested/.hidden.json:3: permission file names `core:default` \
+         (written with escapes)\n    \
+         fix: list only the narrow permissions the window needs; `core:default` also grants event emit and \
+         devtools toggling",
+        "crates/desktop/permissions/nested/.hidden.json:6: permission file mentions `remote`\n    \
+         fix: reword the text: a remote page must never reach the IPC, and `remote` is matched \
+         anywhere in a permission file",
+    ]), inspects 2 => super::cases::permission_json_escaped_and_remote,
+    /// Permission files beside a capabilities folder with no capability file fail that folder,
+    /// and are still read: the one clean permission file is counted.
+    permissions_without_a_capability_file: FailsWith(&[
+        "crates/desktop/capabilities:1: the capabilities folder `crates/desktop/capabilities` holds \
+         no capability file\n    \
+         fix: restore main.json in it: Tauri reads the window's grants from that folder, and this \
+         check guards them",
+    ]), inspects 1 => super::cases::permissions_without_a_capability_file,
+    /// A clean permission file passes; a schema in `permissions/schemas/` and a `.json5` file,
+    /// which Tauri never reads as permissions, are skipped, though they name `fs:` permissions.
+    clean_permission_file: Passes, inspects 2 => super::cases::clean_permission_file,
 }
