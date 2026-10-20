@@ -287,6 +287,30 @@ fn every_command_on_a_line_is_checked_and_a_comment_ends_it() {
 }
 
 #[test]
+fn a_quoted_hash_is_a_word_and_not_a_comment() {
+    assert_eq!(
+        commands_of("x \"#a\" cargo xtask frobnicate"),
+        ["cargo xtask frobnicate"]
+    );
+}
+
+#[test]
+fn cargo_flags_and_a_toolchain_before_xtask_are_skipped() {
+    assert_eq!(
+        commands_of("cargo --locked xtask frobnicate"),
+        ["cargo xtask frobnicate"]
+    );
+    assert_eq!(
+        commands_of("cargo -q +nightly xtask frobnicate"),
+        ["cargo xtask frobnicate"]
+    );
+    assert_eq!(
+        commands_of("cargo --color always xtask x"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
 fn a_line_shlex_cannot_split_is_not_read() {
     assert_eq!(
         commands_of("cargo xtask check --name \"open"),

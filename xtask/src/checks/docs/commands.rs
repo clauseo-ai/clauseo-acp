@@ -1,10 +1,10 @@
-//! `cargo xtask` commands in the docs. Read: an inline code span, its whole text; every line of a
-//! code block whose info word is in `SHELLS`, of a block with no info string and of an indented
-//! block; in a session block (`SESSIONS`), the lines that start with a prompt (`PROMPTS`), from
-//! after the prompt. Other blocks are not read. Each line is split into words with `shlex`, once,
-//! and a line `shlex` cannot split is not read. Words from a `#` comment on are not read. Every
-//! `cargo [+toolchain] xtask` in the words is a command: the words after `xtask` stop at shell
-//! syntax and parse against the clap tree in `main.rs`.
+//! `cargo xtask` commands in the docs. An inline code span is read whole. A code block is read
+//! line by line when its info word is in `SHELLS`, when it has no info string, or when it is
+//! indented. A session block is read only on its lines that start with a prompt from `PROMPTS`,
+//! and only from after that prompt. Other code blocks are not read. Each read line is split into
+//! words with `shlex`, once, and a line that `shlex` cannot split is not read. Every `cargo` in the
+//! words, with its flags and `+toolchain` skipped, followed by `xtask`, starts a command. The words
+//! after `xtask` stop at shell syntax and parse against the clap tree in `main.rs`.
 
 use super::markdown::Scan;
 use crate::Cli;
@@ -124,24 +124,23 @@ fn commands_in(line: &str) -> Vec<Command> {
     let Some(words) = shlex::split(line) else {
         return Vec::new();
     };
-    let end = words
-        .iter()
-        .position(|word| word.starts_with('#'))
-        .unwrap_or(words.len());
-    (0..end)
-        .filter_map(|at| command_at(&words[..end], at))
+    (0..words.len())
+        .filter_map(|at| command_at(&words, at))
         .collect()
 }
 
-/// The command that starts at word `at` of `words`: `cargo`, an optional `+toolchain`, `xtask`,
-/// then the words up to shell syntax or a placeholder. `None` when no command starts there.
+/// The command that starts at word `at` of `words`: `cargo`, then any `+toolchain` and flags
+/// (words that start with `-`), then `xtask`, then the words up to shell syntax or a placeholder.
+/// `None` when no command starts there.
 fn command_at(words: &[String], at: usize) -> Option<Command> {
     let word = |index: usize| words.get(index).map(String::as_str);
     if !word(at).is_some_and(is_cargo) {
         return None;
     }
-    let toolchain = word(at + 1).is_some_and(|w| w.len() > 1 && w.starts_with('+'));
-    let xtask = if toolchain { at + 2 } else { at + 1 };
+    let mut xtask = at + 1;
+    while word(xtask).is_some_and(|w| w.starts_with('-') || is_toolchain(w)) {
+        xtask += 1;
+    }
     let (name, ended) = unpunctuated(word(xtask)?);
     if name != "xtask" {
         return None;
@@ -175,6 +174,11 @@ fn command_at(words: &[String], at: usize) -> Option<Command> {
         }
     }
     Some(command)
+}
+
+/// True for a word that selects a toolchain, `+nightly`.
+fn is_toolchain(word: &str) -> bool {
+    word.len() > 1 && word.starts_with('+')
 }
 
 /// True for a word that runs cargo: `cargo`, or a word that ends in `cargo` right after a `(`
