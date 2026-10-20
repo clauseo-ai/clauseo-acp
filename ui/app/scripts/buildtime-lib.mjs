@@ -1,22 +1,12 @@
 // The parts of buildtime.mjs that can be tested without a browser or a dev server, kept apart so
 // buildtime-lib.test.mjs can test them: argument parsing, the Node version, the commands from
-// package.json, sizing the initial JS of a build, and the guard over src/App.tsx. The guard's
-// rules are written out here only, above `BACKUP_DIR`; everything else points at them.
+// package.json, sizing the initial JS of a build, and buildtime's part of the guard over
+// src/App.tsx. The guard itself, and its rules, are in guard.mjs.
 
-import {
-  closeSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  rmdirSync,
-  unlinkSync,
-  writeSync,
-} from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { brotliCompressSync, constants as zlib } from "node:zlib";
+import { guardPaths, recoverFile } from "./guard.mjs";
 
 /**
  * The text the HMR probe edits in src/App.tsx. App.tsx names this constant in a comment; change
@@ -51,10 +41,23 @@ export function parseRuns(argv) {
   return runs;
 }
 
-/** The oldest Node the app's dependencies run on: `engines` in ui/package.json (babel 8). */
-export const MIN_NODE = "24.11.0";
+/**
+ * The oldest Node the app's dependencies run on (babel 8): `engines.node` of the ui workspace's
+ * package.json in `uiDir`, the one place it is written. Throws unless it is `>=` and a version.
+ */
+export function minNode(uiDir) {
+  const path = join(uiDir, "package.json");
+  const range = readJson(path).engines?.node;
+  const version = /^>=(\d+\.\d+\.\d+)$/.exec(range ?? "")?.[1];
+  if (version === undefined) {
+    throw new Error(
+      `${path} has engines.node ${JSON.stringify(range)}; buildtime reads only ">=<major>.<minor>.<patch>"`,
+    );
+  }
+  return version;
+}
 
-/** Whether the Node version `version` (`24.11.0`, a leading `v` allowed) is `min` or later. */
+/** Whether the Node version `version` (`26.1.0`, a leading `v` allowed) is `min` or later. */
 export function nodeAtLeast(version, min) {
   const parts = (text) => text.replace(/^v/, "").split(/[.-]/).slice(0, 3).map(Number);
   const [have, want] = [parts(version), parts(min)];
@@ -161,99 +164,23 @@ export function initialJs(dist) {
   return { bytes, files };
 }
 
-// The guard over src/App.tsx, the one place its rules are written:
-// - Before the first edit, the original bytes are copied to `target/xtask/buildtime/<repo path>`.
-//   An existing copy is never replaced.
-// - Every write, to App.tsx or to the copy, goes to a temporary file in the same folder, then is
-//   renamed over the target, so a kill never leaves half a file.
-// - The original goes back only while App.tsx holds exactly the bytes last written, after the
-//   probe and on SIGINT, SIGTERM and SIGHUP. Anything else is the developer's edit: nothing more
-//   is written, both files stay, and a ConflictError names them. Any failed restore fails the run
-//   and keeps the copy (`restoreFailure`).
-// - A killed run leaves its copy. The next run's `recoverApp` puts it back only when App.tsx is
-//   the copy plus one `data-buildtime="<n>"` at ROOT_TAG. xtask's own leftover restore
-//   (probe.rs) leaves `target/xtask/buildtime/ui/` to this script, and xtask's buildtime lock
-//   (lock.rs) covers the copy when xtask runs the script.
+// buildtime's part of the guard over src/App.tsx, whose rules are written out in guard.mjs:
+// where the copy waits, and which leftover edit is buildtime's own (one `data-buildtime="<n>"`
+// at ROOT_TAG). xtask's own leftover restore (probe.rs) leaves `target/xtask/buildtime/ui/` to
+// this script, and xtask's buildtime lock (lock.rs) covers the copy when xtask runs the script.
 
 /** Where the copies wait, under the repo root. xtask's buildtime lock covers it. */
 export const BACKUP_DIR = "target/xtask/buildtime";
 
-/** A conflict over App.tsx: both files are kept, and `fix` says what to do with them. */
-export class ConflictError extends Error {
-  constructor(message, fix) {
-    super(message);
-    this.name = "ConflictError";
-    this.fix = fix;
-  }
-}
-
-/**
- * The run failure for an error from `AppGuard.restore`: a ConflictError as it is; any other error
- * (EPERM from the rename while a scanner holds the file, say) named with the copy, which stays
- * for the next run's `recoverApp`.
- */
-export function restoreFailure(paths, error) {
-  if (error instanceof ConflictError) {
-    return { message: error.message, fix: error.fix };
-  }
-  return {
-    message: `could not put back ${paths.rel}: ${error?.message ?? String(error)}; its saved copy is ${paths.backupRel}`,
-    fix: `the next \`cargo xtask buildtime web\` restores ${paths.rel} from ${paths.backupRel}; or copy it back by hand`,
-  };
-}
-
-/** The file at repo path `rel` under `root`, its copy, and the folder copies live in. */
+/** The guard paths of the file at repo path `rel` under `root`, for buildtime's runs. */
 export function appPaths(root, rel) {
-  return {
+  return guardPaths({
+    root,
     rel,
-    app: join(root, rel),
-    base: join(root, BACKUP_DIR),
-    backup: join(root, BACKUP_DIR, rel),
-    backupRel: `${BACKUP_DIR}/${rel}`,
-  };
-}
-
-/** The temporary file a write to `path` goes through, in the same folder. */
-export function tmpOf(path) {
-  return join(dirname(path), `.${basename(path)}.buildtime.tmp`);
-}
-
-/** Writes `bytes` to a temporary file next to `path`, syncs it, then renames it over `path`. */
-export function writeThrough(path, bytes) {
-  const tmp = tmpOf(path);
-  const fd = openSync(tmp, "w");
-  try {
-    writeSync(fd, typeof bytes === "string" ? Buffer.from(bytes) : bytes);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  renameSync(tmp, path);
-}
-
-function readOrUndefined(path) {
-  return existsSync(path) ? readFileSync(path) : undefined;
-}
-
-function conflict(paths, what) {
-  return new ConflictError(
-    `${paths.rel} ${what}; its saved copy is ${paths.backupRel}`,
-    `compare the two, keep what you want, then delete ${paths.backupRel}`,
-  );
-}
-
-/** Removes the copy, then the folders between it and the backup folder that are now empty. */
-function dropCopy(paths) {
-  unlinkSync(paths.backup);
-  let dir = dirname(paths.backup);
-  while (dir.startsWith(paths.base) && dir !== paths.base) {
-    try {
-      rmdirSync(dir);
-    } catch {
-      break;
-    }
-    dir = dirname(dir);
-  }
+    backupDir: BACKUP_DIR,
+    tool: "buildtime",
+    rerun: "cargo xtask buildtime web",
+  });
 }
 
 const MARK_AT_ROOT = new RegExp(
@@ -271,108 +198,9 @@ export function unmarked(text) {
 }
 
 /**
- * What an interrupted run's copy means for App.tsx as it is now (`current`, `undefined` when the
- * file is gone): `clean` when they are equal, `restore` when App.tsx is the copy plus one mark at
- * ROOT_TAG, `missing`, or `conflict` for any other difference.
- */
-export function leftover(current, copy) {
-  if (current === undefined) {
-    return "missing";
-  }
-  if (current.equals(copy)) {
-    return "clean";
-  }
-  return unmarked(current.toString("utf8")) === copy.toString("utf8") ? "restore" : "conflict";
-}
-
-/**
- * Settles what an interrupted run left, before anything is written: deletes the temporary files
- * of an interrupted write, then puts the copy back when `leftover` allows it. Returns the line to
- * print, or `undefined` when there was no copy. Throws a ConflictError, keeping both files, when
- * App.tsx changed in any other way or is gone.
+ * Settles what an interrupted buildtime run left (`recoverFile` in guard.mjs): App.tsx goes back
+ * only when it is the copy plus one mark at ROOT_TAG.
  */
 export function recoverApp(paths) {
-  for (const tmp of [tmpOf(paths.app), tmpOf(paths.backup)]) {
-    if (existsSync(tmp)) {
-      unlinkSync(tmp);
-    }
-  }
-  const copy = readOrUndefined(paths.backup);
-  if (copy === undefined) {
-    return undefined;
-  }
-  switch (leftover(readOrUndefined(paths.app), copy)) {
-    case "clean":
-      dropCopy(paths);
-      return `deleted the copy of ${paths.rel} an interrupted buildtime run left; the file was unchanged`;
-    case "restore":
-      writeThrough(paths.app, copy);
-      dropCopy(paths);
-      return `restored ${paths.rel} from an interrupted buildtime run`;
-    case "missing":
-      throw conflict(paths, "is missing after an interrupted buildtime run");
-    default:
-      throw conflict(paths, "changed after an interrupted buildtime run");
-  }
-}
-
-/** The guard over App.tsx for one run: its original, its copy, and the bytes last written. */
-export class AppGuard {
-  /** Saves the original of App.tsx as its copy. Nothing is edited when the save fails. */
-  constructor(paths) {
-    if (existsSync(paths.backup)) {
-      throw new ConflictError(
-        `a saved copy of ${paths.rel} already exists at ${paths.backupRel}`,
-        `compare ${paths.rel} with ${paths.backupRel}, keep what you want, then delete ${paths.backupRel}`,
-      );
-    }
-    this.paths = paths;
-    this.original = readFileSync(paths.app);
-    this.last = this.original;
-    mkdirSync(dirname(paths.backup), { recursive: true });
-    writeThrough(paths.backup, this.original);
-    this.pending = true;
-  }
-
-  /** Throws a ConflictError, and stops writing, unless App.tsx holds the bytes last written. */
-  check() {
-    const current = readOrUndefined(this.paths.app);
-    if (current !== undefined && current.equals(this.last)) {
-      return;
-    }
-    this.pending = false;
-    throw conflict(
-      this.paths,
-      current === undefined
-        ? "went missing during this buildtime run"
-        : "changed during this buildtime run",
-    );
-  }
-
-  /** Writes `text` to App.tsx, once it still holds the bytes last written. */
-  write(text) {
-    if (!this.pending) {
-      throw new Error(`${this.paths.rel} is no longer guarded`);
-    }
-    this.check();
-    const bytes = Buffer.from(text);
-    writeThrough(this.paths.app, bytes);
-    this.last = bytes;
-  }
-
-  /**
-   * Puts the original back and deletes the copy, once App.tsx still holds the bytes last written.
-   * Safe to repeat. After a conflict, both files stay as they are.
-   */
-  restore() {
-    if (!this.pending) {
-      return;
-    }
-    this.check();
-    this.pending = false;
-    if (!this.last.equals(this.original)) {
-      writeThrough(this.paths.app, this.original);
-    }
-    dropCopy(this.paths);
-  }
+  return recoverFile(paths, (current, copy) => unmarked(current) === copy);
 }
