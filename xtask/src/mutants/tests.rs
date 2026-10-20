@@ -72,6 +72,12 @@ fn check(
     run: &Run,
 ) -> (String, bool, Vec<String>) {
     let root = Scratch::new(name);
+    let temp = root.join("tmp");
+    let prefix = build_dir_prefix(&root);
+    // A build dir of an earlier run, which is not this run's to remove.
+    let old_build_dir = temp.join(format!("{prefix}old.tmp"));
+    Scratch::create_dir_all(&old_build_dir).expect("make an old build dir");
+    let new_build_dir = temp.join(format!("{prefix}new.tmp"));
     let mut ran = Vec::new();
     let mut out = Printer::new(Vec::new(), false);
     let passed = {
@@ -114,6 +120,9 @@ fn check(
                 Run::WritesThenTimesOut(text) => {
                     Scratch::create_dir_all(root.join(OUTPUT_DIR)).expect("make mutants.out");
                     Scratch::write(root.join(OUTCOMES), text).expect("write outcomes.json");
+                    // The build dir a SIGKILL left behind.
+                    Scratch::create_dir_all(new_build_dir.join("target"))
+                        .expect("make a build dir");
                     Err(process::timed_out(cmd))
                 }
             }
@@ -121,8 +130,13 @@ fn check(
         // A stale run's outcomes.json, which must never be read as this run's.
         Scratch::create_dir_all(root.join(OUTPUT_DIR)).expect("make the old mutants.out");
         Scratch::write(root.join(OUTCOMES), "stale").expect("write the old outcomes.json");
-        run_with(&mut out, &root, diff, &mut exec)
+        run_with(&mut out, &root, &temp, diff, &mut exec)
     };
+    assert!(old_build_dir.is_dir(), "an earlier run's build dir is kept");
+    assert!(
+        !new_build_dir.exists(),
+        "a build dir the stopped run left is removed"
+    );
     let printed = String::from_utf8(out.into_inner()).expect("utf-8");
     (printed, passed, ran)
 }
@@ -394,6 +408,9 @@ fn a_run_past_the_cap_lists_the_mutants_it_had_missed() {
         &Run::WritesThenTimesOut(outcomes),
     );
     assert!(!passed);
+    let temp = std::env::temp_dir()
+        .join(format!("xtask-mutants-cap-partial-{}", std::process::id()))
+        .join("tmp");
     assert_eq!(
         printed,
         format!(
@@ -403,7 +420,9 @@ fn a_run_past_the_cap_lists_the_mutants_it_had_missed() {
              xtask/src/main.rs:106: missed mutant: no test fails on `replace double -> u32 with \
              0`\n{MISSED_FIX}\n\
              mutants FAILED at the cap, after 2 mutants tested: 1 missed, 1 caught, 0 timed out, \
-             0 unviable\n"
+             0 unviable\n\
+             removed 1 build dir cargo-mutants left in {} when it was stopped\n",
+            temp.display()
         )
     );
 }
@@ -492,6 +511,7 @@ fn every_fix_has_its_exact_text() {
         },
         Fix::Slow,
         Fix::Unviable,
+        Fix::RemoveByHand,
     ];
     let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
     assert_eq!(kinds.len(), samples.len(), "two samples share a variant");
@@ -537,6 +557,7 @@ fn every_fix_has_its_exact_text() {
                 "none: a mutant that does not compile cannot be tested, and the compiler \
                  already refuses that change"
             }
+            Fix::RemoveByHand => "delete that folder by hand; nothing else uses it",
         };
         assert_eq!(fix.to_string(), expected);
     }

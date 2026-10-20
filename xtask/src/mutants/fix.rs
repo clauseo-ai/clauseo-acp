@@ -32,6 +32,8 @@ pub(crate) enum Fix {
     Slow,
     /// Some mutants did not build.
     Unviable,
+    /// A build dir a stopped run left could not be removed; the message names it.
+    RemoveByHand,
 }
 
 impl Fix {
@@ -96,6 +98,7 @@ impl fmt::Display for Fix {
                 "none: a mutant that does not compile cannot be tested, and the compiler \
                  already refuses that change",
             ),
+            Fix::RemoveByHand => f.write_str("delete that folder by hand; nothing else uses it"),
         }
     }
 }

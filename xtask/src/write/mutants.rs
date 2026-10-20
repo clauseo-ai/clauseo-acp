@@ -13,6 +13,21 @@ pub(crate) fn save_mutants_diff(path: &Path, diff: &str) -> io::Result<()> {
     std::fs::write(path, diff)
 }
 
+/// Removes `dir`, a build dir cargo-mutants left in the temp dir when it was stopped. Refuses any
+/// folder whose name is not `cargo-mutants-*.tmp`, the names cargo-mutants gives them.
+pub(crate) fn remove_mutants_build_dir(dir: &Path) -> io::Result<()> {
+    let name = dir.file_name().map(|name| name.to_string_lossy());
+    let ours =
+        name.is_some_and(|name| name.starts_with("cargo-mutants-") && name.ends_with(".tmp"));
+    if !ours {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a cargo-mutants build dir (cargo-mutants-*.tmp)",
+        ));
+    }
+    std::fs::remove_dir_all(dir)
+}
+
 /// Removes `dir`, the `mutants.out` folder an earlier run of cargo-mutants left, so its
 /// `outcomes.json` is never read as this run's. A missing folder is not an error.
 pub(crate) fn remove_mutants_output(dir: &Path) -> io::Result<()> {
