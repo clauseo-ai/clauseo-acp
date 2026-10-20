@@ -94,19 +94,15 @@ reaches) is a module of `host`, not a crate. Frontend packages: `ui/app` (exists
 "fs", "process", "any I/O" and "clock" in the "Never depends on" column mean the standard
 library's APIs, not the `process` crate, and cover the crate's own code. "fs", "process" or "any
 I/O" bans the file, network, process and environment APIs, the standard streams, and the
-functions that read the disk or the clock (`Path::exists`, `Instant::elapsed`); "clock" alone
-bans only the two clock `now` functions, which the root `clippy.toml` bans in every crate. clippy
-enforces the bans after macro expansion: a crate whose row lists "fs", "process" or "any I/O"
-has its own `clippy.toml`, the root `clippy.toml` with the `disallowed-methods` and
-`disallowed-types` arrays of `xtask/core-io-bans.toml` appended, and `cargo xtask check` fails
-when that file is missing or parses to anything else. Lint configuration lives only in the
-root `clippy.toml`, those crates' own files and the root `[workspace.lints]`: `cargo xtask check`
-also fails any other `clippy.toml` or `.clippy.toml`, a member's `Cargo.toml` without
-`[lints] workspace = true`, `[workspace.lints.clippy]` turning off `all`, `style` or either
-lint, a legacy `.cargo/config`, and `rustflags` or a `CLIPPY_` entry in `[env]` in
-`.cargo/config.toml`. An exception is
-`#[expect(clippy::disallowed_methods, reason = "..")]` (or `disallowed_types`) on the code that
-needs it.
+functions that read the disk or the clock, such as `Path::exists` and `Instant::elapsed`.
+"clock" alone bans only the two clock `now` functions, which the root `clippy.toml` bans in every
+crate. clippy enforces the bans after macro expansion. A crate whose row lists "fs", "process",
+"any I/O" or "clock" starts every target root with
+`#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]` and has no build script, so it
+gets no exception to the bans. A crate whose row lists "fs", "process" or "any I/O" also has its
+own `clippy.toml`, which `cargo xtask check` prints when it is missing. Lint configuration lives
+only in the root `clippy.toml`, those crates' own files and the root `[workspace.lints]`. The
+rules `cargo xtask check` applies are in `xtask/src/checks/core_io.rs`.
 
 ## Seams left open on purpose
 
