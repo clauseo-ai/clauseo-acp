@@ -144,8 +144,9 @@ macro_rules! metavariable_attribute {
             "crates/protocol/src/hidden.rs:", $line, ": `crates/protocol/src/hidden.rs` writes an \
              attribute whose name is a metavariable, so a macro of clauseo-protocol can build a \
              cfg that core-io does not see\n    fix: write the attribute's name in the macro body \
-             itself, or take the whole attribute as `#[$m:meta]` in the arm's matcher and write it \
-             as `#[$m]`"
+             itself; an outer attribute may instead come whole from the caller, bound as \
+             `#[$m:meta]` in the arm's matcher and written as `#[$m]`, in a `macro_rules!` \
+             outside every other macro's body and arguments"
         )
     };
 }
@@ -170,10 +171,11 @@ macro_rules! cfg_select {
     ($line:literal) => {
         concat!(
             "crates/protocol/src/hidden.rs:", $line, ": `crates/protocol/src/hidden.rs` names \
-             `cfg_select`, whose macro builds only the first arm whose cfg holds, so the arms \
-             clippy's build does not take can hold code clippy never lints\n    fix: write each \
-             arm as an item under `#[cfg(..)]` built from `test`, `doc` and positive features; \
-             a crate whose row bans I/O does not name `cfg_select` at all, not even in a `use`"
+             `cfg_select`, a name a crate whose row bans I/O never uses, since `cfg_select!` \
+             builds only the first arm whose cfg holds and a `use` can call it under another \
+             name\n    fix: rename a field, variable or import named `cfg_select`; for the macro, \
+             give each arm's code its own `#[cfg(..)]` built from `test`, `doc` and positive \
+             features, or use `if cfg!(..)`, which compiles both branches"
         )
     };
 }
