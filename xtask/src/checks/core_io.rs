@@ -64,10 +64,12 @@
 //! ban must catch or must pass, and one per form the forbid line must refuse.
 //!
 //! The file covers every target of the package clippy lints, `#[cfg(test)]` code included. Not
-//! covered: code another crate runs for this one (a dependency, a proc macro), an item a newer
-//! toolchain adds that the list does not name, a clippy config git ignores, cargo config outside
-//! the repo (parent folders, `CARGO_HOME`), `RUSTFLAGS` and `RUSTC_WRAPPER` in the environment,
-//! `CLIPPY_CONF_DIR` when clippy runs without xtask, and a crate that is not a workspace member.
+//! covered: code another crate runs for this one (a dependency, a proc macro), a cfg that a macro
+//! from a crate that is not held wraps around code, since the cfg rule reads only the held
+//! crate's files, an item a newer toolchain adds that the list does not name, a source file or a
+//! clippy config git ignores, cargo config outside the repo (parent folders, `CARGO_HOME`),
+//! `RUSTFLAGS` and `RUSTC_WRAPPER` in the environment, `CLIPPY_CONF_DIR` when clippy runs
+//! without xtask, and a crate that is not a workspace member.
 //! It counts the Crates-table rows it classified, held or not.
 
 mod cfgs;

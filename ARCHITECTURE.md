@@ -99,7 +99,8 @@ functions that read the disk or the clock, such as `Path::exists` and `Instant::
 crate. clippy enforces the bans after macro expansion. A crate whose row lists "fs", "process",
 "any I/O" or "clock" starts every target root with
 `#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]` and has no build script, so it
-gets no exception to the bans. A crate whose row lists "fs", "process" or "any I/O" also has its
+gets no exception to the bans. Its cfgs use only `test` and positive features, and it has no
+`#[path]` or `include!`. A crate whose row lists "fs", "process" or "any I/O" also has its
 own `clippy.toml`, which `cargo xtask check` prints when it is missing. Lint configuration lives
 only in the root `clippy.toml`, those crates' own files and the root `[workspace.lints]`. The
 rules `cargo xtask check` applies are in `xtask/src/checks/core_io.rs`.

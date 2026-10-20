@@ -57,8 +57,9 @@ this. Use the words in `GLOSSARY.md` exactly.
   or `dialog:`.
 - Only `#[expect(lint, reason = "...")]` may silence a lint. An outer `#[allow]` fails.
 - A crate whose row bans I/O or the clock gets no exception to the bans, not even `#[expect]`.
-  Every target root starts with the forbid line `cargo xtask check` prints, and the crate has no
-  build script.
+  Every target root starts with the forbid line `cargo xtask check` prints, the crate has no
+  build script, and its cfgs use only `test` and positive features, with no `#[path]` or
+  `include!`.
 - No `unwrap`, `expect`, `panic!`, `todo!` or `println!` outside tests and `main`.
 - A source file has at most 600 lines.
 - Rust comments stay within 100 columns; a file past 500 lines gets a note to split it.
