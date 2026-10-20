@@ -118,13 +118,40 @@ pub(crate) fn only_files(root: &Path, entries: &[String]) -> Vec<String> {
 
 /// The commit this branch forked from: `git merge-base HEAD origin/main`.
 pub(crate) fn merge_base(root: &Path) -> Result<String, String> {
-    let base = git(root, &["merge-base", "HEAD", "origin/main"])?
-        .trim()
-        .to_owned();
+    merge_base_commit(root).map_err(String::from)
+}
+
+/// `merge_base`, with git's error kept apart for a typed fix.
+fn merge_base_commit(root: &Path) -> Result<String, GitError> {
+    let args = ["merge-base", "HEAD", "origin/main"];
+    let base = git(root, &args)?.trim().to_owned();
     if base.is_empty() {
-        return Err("`git merge-base HEAD origin/main` printed nothing".into());
+        return Err(GitError::Failed {
+            command: Cmd::new(Program::Git, args, GIT_TIMEOUT).to_string(),
+            stderr: "it exited 0 but printed nothing".into(),
+        });
     }
     Ok(base)
+}
+
+/// `git diff` of the working tree against the merge-base with `origin/main` (the base `--quick`
+/// uses), for `cargo xtask mutants`. Untracked files are not in it. The options fix the format
+/// whatever the user's git config says: no colour, no external diff tool, no rename pairs, and
+/// the `a/` and `b/` prefixes cargo-mutants strips.
+pub(crate) fn diff_since_merge_base(root: &Path) -> Result<String, GitError> {
+    let base = merge_base_commit(root)?;
+    git(
+        root,
+        &[
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-renames",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            base.as_str(),
+        ],
+    )
 }
 
 /// The commits gitleaks scans.

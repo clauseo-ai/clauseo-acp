@@ -1,0 +1,21 @@
+# cargo-mutants reads this file by default (cargo-mutants 27.1.0, src/config.rs:104,
+# `read_tree_config` joins `.cargo/mutants.toml` to the workspace root). `cargo xtask mutants`
+# runs it on the lines a branch changed; see xtask/src/mutants.rs.
+#
+# Every exclusion (`exclude_re`, `exclude_globs`) needs a comment saying why no test can tell the
+# mutant apart, and the code owner approves it (CODEOWNERS: /.cargo/). None yet.
+
+# The tests run nextest, as `cargo xtask check` does, so they see .config/nextest.toml.
+test_tool = "nextest"
+
+# A mutant is caught at its first failing test; running the rest of the suite only costs time.
+# .config/nextest.toml sets fail-fast = false for people, and this flag overrides it here.
+additional_cargo_test_args = ["--fail-fast"]
+
+# Each build runs in a copy of the tree. Leave out what .gitignore leaves out (target/,
+# node_modules/, dist/), which would otherwise be copied for every job: the default is false.
+gitignore = true
+
+# Copy `.git` too: xtask's tests list the repo with `git ls-files` and read the merge-base with
+# origin/main, which fail in a copy without it. The default is false.
+copy_vcs = true

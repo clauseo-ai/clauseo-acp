@@ -1,0 +1,517 @@
+//! Tests of `cargo xtask mutants`, through a fake `exec`: no real cargo-mutants runs.
+
+use super::*;
+use crate::scratch::Scratch;
+use std::collections::HashSet;
+use std::mem::discriminant;
+
+const CMD: &str = "cargo mutants --workspace --in-diff target/xtask/mutants.diff --output \
+                   target/xtask --jobs 4";
+const MISSED_FIX: &str = "    fix: add a test that fails on this change, or exclude it with a \
+                          reason in .cargo/mutants.toml (the code owner approves it)";
+const DIFF_TEXT: &str = "diff --git a/xtask/src/main.rs b/xtask/src/main.rs\n";
+
+/// The baseline outcome, with `summary`.
+fn baseline(summary: &str) -> String {
+    format!(
+        r#"{{"scenario": "Baseline", "summary": "{summary}", "log_path": "log/baseline.log",
+            "diff_path": null, "phase_results": []}}"#
+    )
+}
+
+/// A mutant outcome as cargo-mutants 27.1.0 writes it (trimmed of `phase_results`).
+fn mutant(summary: &str, line: u32, column: u32, mutation: &str) -> String {
+    format!(
+        r#"{{"scenario": {{"Mutant": {{
+              "name": "xtask/src/main.rs:{line}:{column}: {mutation}", "package": "xtask",
+              "file": "xtask/src/main.rs",
+              "function": {{"function_name": "double", "return_type": "-> u32",
+                "span": {{"start": {{"line": 105, "column": 1}}, "end": {{"line": 107, "column": 2}}}}}},
+              "span": {{"start": {{"line": {line}, "column": {column}}},
+                        "end": {{"line": {line}, "column": 10}}}},
+              "replacement": "0", "genre": "FnValue"}}}},
+            "summary": "{summary}", "log_path": "log/main_{line}.log",
+            "diff_path": "diff/main_{line}.diff", "phase_results": []}}"#
+    )
+}
+
+/// An `outcomes.json` with `outcomes`, finished when `finished`.
+fn lab(outcomes: &[String], finished: bool) -> String {
+    let end = if finished {
+        r#""2026-10-20T19:44:09.183114Z""#
+    } else {
+        "null"
+    };
+    format!(
+        r#"{{"outcomes": [{}], "total_mutants": 0, "missed": 0, "caught": 0, "timeout": 0,
+            "unviable": 0, "success": 0, "start_time": "2026-10-20T19:43:18.287389Z",
+            "end_time": {end}, "cargo_mutants_version": "27.1.0"}}"#,
+        outcomes.join(",")
+    )
+}
+
+/// What the fake cargo-mutants run does.
+enum Run {
+    /// Writes this `outcomes.json`, then exits with `success`.
+    Writes(String, bool),
+    /// Writes nothing and exits with `success`, printing `output`.
+    Nothing(bool, &'static str),
+    /// Runs past its limit.
+    TimesOut,
+}
+
+/// Runs `run_with` in a fresh scratch repo named `name`, with `diff`, a `cargo mutants
+/// --version` that prints `version` (`None`: it fails), and a run that does `run`. Returns what
+/// it printed, whether it passed, and the commands it ran.
+fn check(
+    name: &str,
+    diff: Result<String, GitError>,
+    version: Option<&str>,
+    run: &Run,
+) -> (String, bool, Vec<String>) {
+    let root = Scratch::new(name);
+    let mut ran = Vec::new();
+    let mut out = Printer::new(Vec::new(), false);
+    let passed = {
+        let mut exec = |cmd: &Cmd, _: &mut dyn FnMut(&[u8])| -> io::Result<Captured> {
+            ran.push(cmd.to_string());
+            if cmd.args == ["mutants", "--version"] {
+                return Ok(match version {
+                    Some(text) => Captured {
+                        success: true,
+                        output: format!("{text}\n"),
+                    },
+                    None => Captured {
+                        success: false,
+                        output: "error: no such command: `mutants`\n\nhelp: ...\n".into(),
+                    },
+                });
+            }
+            assert_eq!(
+                std::fs::read_to_string(root.join(DIFF)).expect("the diff was saved"),
+                DIFF_TEXT
+            );
+            assert!(
+                !root.join(OUTPUT_DIR).exists(),
+                "the last run's output is removed"
+            );
+            match run {
+                Run::Writes(text, success) => {
+                    Scratch::create_dir_all(root.join(OUTPUT_DIR)).expect("make mutants.out");
+                    Scratch::write(root.join(OUTCOMES), text).expect("write outcomes.json");
+                    Ok(Captured {
+                        success: *success,
+                        output: "cargo-mutants output\n".into(),
+                    })
+                }
+                Run::Nothing(success, output) => Ok(Captured {
+                    success: *success,
+                    output: (*output).into(),
+                }),
+                Run::TimesOut => Err(process::timed_out(cmd)),
+            }
+        };
+        // A stale run's outcomes.json, which must never be read as this run's.
+        Scratch::create_dir_all(root.join(OUTPUT_DIR)).expect("make the old mutants.out");
+        Scratch::write(root.join(OUTCOMES), "stale").expect("write the old outcomes.json");
+        run_with(&mut out, &root, diff, &mut exec)
+    };
+    let printed = String::from_utf8(out.into_inner()).expect("utf-8");
+    (printed, passed, ran)
+}
+
+#[test]
+fn a_missed_mutant_fails_at_its_file_and_line_with_the_fix() {
+    let outcomes = lab(
+        &[
+            baseline("Success"),
+            mutant("MissedMutant", 106, 5, "replace double -> u32 with 0"),
+            mutant(
+                "CaughtMutant",
+                110,
+                5,
+                "replace main -> ExitCode with Default::default()",
+            ),
+            mutant("Timeout", 120, 9, "replace += with -= in count"),
+            mutant(
+                "Unviable",
+                130,
+                5,
+                "replace parse -> Lab with Default::default()",
+            ),
+        ],
+        true,
+    );
+    let (printed, passed, ran) = check(
+        "mutants-missed",
+        Ok(DIFF_TEXT.to_owned()),
+        Some("cargo-mutants 27.1.0"),
+        &Run::Writes(outcomes, false),
+    );
+    assert!(!passed);
+    assert_eq!(ran, ["cargo mutants --version", CMD]);
+    assert_eq!(
+        printed,
+        format!(
+            "==> mutants: {CMD}\n\
+             xtask/src/main.rs:106: missed mutant: no test fails on `replace double -> u32 with \
+             0`\n{MISSED_FIX}\n\
+             note: xtask/src/main.rs:120: `replace += with -= in count` made the tests run past \
+             cargo-mutants' time limit, so it counts as caught\n    fix: none when the change \
+             makes the code loop forever, which the tests then catch; if the tests were only \
+             slow on a busy machine, run cargo xtask mutants again\n\
+             note: 1 of the mutants did not compile (unviable), so they say nothing about the \
+             tests; target/xtask/mutants.out/unviable.txt lists them\n    fix: none: a mutant \
+             that does not compile cannot be tested, and the compiler already refuses that \
+             change\n\
+             mutants FAILED: 4 mutants tested: 1 missed, 1 caught, 1 timed out, 1 unviable\n"
+        )
+    );
+}
+
+#[test]
+fn caught_and_timed_out_mutants_pass_though_cargo_mutants_exits_non_zero_on_a_timeout() {
+    let outcomes = lab(
+        &[
+            baseline("Success"),
+            mutant("CaughtMutant", 106, 5, "replace double -> u32 with 0"),
+            mutant("Timeout", 120, 9, "replace += with -= in count"),
+        ],
+        true,
+    );
+    let (printed, passed, _) = check(
+        "mutants-caught",
+        Ok(DIFF_TEXT.to_owned()),
+        Some("cargo-mutants 27.1.0"),
+        &Run::Writes(outcomes, false),
+    );
+    assert!(passed, "{printed}");
+    assert!(
+        printed.ends_with(
+            "mutants ok: 2 mutants tested: 0 missed, 1 caught, 1 timed out, 0 unviable\n"
+        ),
+        "{printed}"
+    );
+}
+
+#[test]
+fn a_run_that_fails_with_clean_outcomes_and_no_timeout_still_fails() {
+    let outcomes = lab(
+        &[baseline("Success"), mutant("CaughtMutant", 1, 1, "x")],
+        true,
+    );
+    let (printed, passed, _) = check(
+        "mutants-odd-exit",
+        Ok(DIFF_TEXT.to_owned()),
+        Some("cargo-mutants 27.1.0"),
+        &Run::Writes(outcomes, false),
+    );
+    assert!(!passed);
+    assert_eq!(
+        printed,
+        format!(
+            "==> mutants: {CMD}\ncargo-mutants output\n\
+             `{CMD}` failed, though target/xtask/mutants.out/outcomes.json shows no missed \
+             mutant\n    fix: run `{CMD}` by hand to see what goes wrong\n\
+             mutants FAILED: 1 mutant tested: 0 missed, 1 caught, 0 timed out, 0 unviable\n"
+        )
+    );
+}
+
+#[test]
+fn an_empty_diff_passes_with_a_note_and_runs_nothing() {
+    let (printed, passed, ran) = check(
+        "mutants-empty",
+        Ok("\n".into()),
+        Some("cargo-mutants 27.1.0"),
+        &Run::TimesOut,
+    );
+    assert!(passed);
+    assert_eq!(ran, Vec::<String>::new());
+    assert_eq!(
+        printed,
+        format!(
+            "==> mutants: {CMD}\n\
+             mutants ok: nothing changed since the merge-base with origin/main\n"
+        )
+    );
+}
+
+#[test]
+fn a_diff_with_no_mutant_passes_and_the_stale_outcomes_are_not_read() {
+    let (printed, passed, _) = check(
+        "mutants-none",
+        Ok(DIFF_TEXT.to_owned()),
+        Some("cargo-mutants 27.1.0"),
+        &Run::Nothing(true, "INFO No mutants to filter\n"),
+    );
+    assert!(passed);
+    assert_eq!(
+        printed,
+        format!(
+            "==> mutants: {CMD}\nmutants ok: cargo-mutants found no mutant in the changed lines\n"
+        )
+    );
+}
+
+#[test]
+fn a_run_that_fails_before_any_mutant_prints_its_output() {
+    let (printed, passed, _) = check(
+        "mutants-early",
+        Ok(DIFF_TEXT.to_owned()),
+        Some("cargo-mutants 27.1.0"),
+        &Run::Nothing(false, "ERROR Failed to parse diff: bad hunk\n"),
+    );
+    assert!(!passed);
+    assert_eq!(
+        printed,
+        format!(
+            "==> mutants: {CMD}\nERROR Failed to parse diff: bad hunk\n\
+             `{CMD}` failed before it tested any mutant\n    fix: run `{CMD}` by hand to see what goes wrong\n"
+        )
+    );
+}
+
+#[test]
+fn a_failed_baseline_fails_with_its_log() {
+    let outcomes = lab(&[baseline("Failure")], true);
+    let (printed, passed, _) = check(
+        "mutants-baseline",
+        Ok(DIFF_TEXT.to_owned()),
+        Some("cargo-mutants 27.1.0"),
+        &Run::Writes(outcomes, false),
+    );
+    assert!(!passed);
+    assert_eq!(
+        printed,
+        format!(
+            "==> mutants: {CMD}\n\
+             the unmutated tree failed in cargo-mutants' copy (Failure), so no mutant was \
+             tested; its log is target/xtask/mutants.out/log/baseline.log\n    fix: read the \
+             log: the build and tests must pass in a copy of the tree that holds .git but not \
+             what .gitignore excludes, as .cargo/mutants.toml sets\n\
+             mutants FAILED: 0 mutants tested: 0 missed, 0 caught, 0 timed out, 0 unviable\n"
+        )
+    );
+}
+
+#[test]
+fn an_unfinished_run_and_an_unexpected_outcome_fail() {
+    let outcomes = lab(
+        &[
+            baseline("Success"),
+            mutant("Failure", 106, 5, "replace double -> u32 with 0"),
+        ],
+        false,
+    );
+    let (printed, passed, _) = check(
+        "mutants-unfinished",
+        Ok(DIFF_TEXT.to_owned()),
+        Some("cargo-mutants 27.1.0"),
+        &Run::Writes(outcomes, false),
+    );
+    assert!(!passed);
+    assert_eq!(
+        printed,
+        format!(
+            "==> mutants: {CMD}\n\
+             xtask/src/main.rs:106: cargo-mutants gave `replace double -> u32 with 0` the \
+             outcome Failure, which xtask does not expect\n    fix: read \
+             target/xtask/mutants.out/log/main_106.log, then run cargo xtask mutants again\n\
+             `{CMD}` stopped before its run finished: outcomes.json has no end_time\n    fix: \
+             run `{CMD}` by hand to see what goes wrong\n\
+             mutants FAILED: 1 mutant tested: 0 missed, 0 caught, 0 timed out, 0 unviable, 1 \
+             other\n"
+        )
+    );
+}
+
+#[test]
+fn outcomes_it_cannot_parse_fail() {
+    let (printed, passed, _) = check(
+        "mutants-unparsed",
+        Ok(DIFF_TEXT.to_owned()),
+        Some("cargo-mutants 27.1.0"),
+        &Run::Writes(r#"{"outcomes": 3}"#.into(), true),
+    );
+    assert!(!passed);
+    assert_eq!(
+        printed,
+        format!(
+            "==> mutants: {CMD}\n\
+             could not read target/xtask/mutants.out/outcomes.json: invalid type: integer `3`, \
+             expected a sequence at line 1 column 14\n    fix: run cargo xtask mutants again; if \
+             it fails the same way, make xtask/src/mutants/outcomes.rs read the outcomes.json \
+             of the cargo-mutants version setup pins\n"
+        )
+    );
+}
+
+#[test]
+fn a_run_past_the_cap_fails_with_split_the_change() {
+    let (printed, passed, _) = check(
+        "mutants-cap",
+        Ok(DIFF_TEXT.to_owned()),
+        Some("cargo-mutants 27.1.0"),
+        &Run::TimesOut,
+    );
+    assert!(!passed);
+    assert_eq!(
+        printed,
+        format!(
+            "==> mutants: {CMD}\n\
+             `{CMD}` did not finish within 20 min, so it was stopped\n    fix: split the change: cargo xtask mutants caps a run at 20 minutes\n"
+        )
+    );
+}
+
+#[test]
+fn a_missing_or_other_cargo_mutants_fails_with_setup() {
+    let (printed, passed, ran) = check(
+        "mutants-missing",
+        Ok(DIFF_TEXT.to_owned()),
+        None,
+        &Run::TimesOut,
+    );
+    assert!(!passed);
+    assert_eq!(ran, ["cargo mutants --version"]);
+    assert_eq!(
+        printed,
+        format!(
+            "==> mutants: {CMD}\n\
+             cargo-mutants 27.1.0 is not installed: `cargo mutants --version` failed: error: no \
+             such command: `mutants`\n    fix: run `cargo xtask setup`, which installs \
+             cargo-mutants 27.1.0, the version xtask/src/setup.rs pins\n"
+        )
+    );
+    let (printed, _, _) = check(
+        "mutants-other",
+        Ok(DIFF_TEXT.to_owned()),
+        Some("cargo-mutants 26.2.0"),
+        &Run::TimesOut,
+    );
+    assert!(
+        printed.contains(
+            "cargo-mutants 27.1.0 is not installed: `cargo mutants --version` printed \
+             `cargo-mutants 26.2.0`\n"
+        ),
+        "{printed}"
+    );
+}
+
+#[test]
+fn a_git_error_fails_with_the_command_to_run() {
+    let error = GitError::Failed {
+        command: "git merge-base HEAD origin/main".into(),
+        stderr: "fatal: Not a valid object name origin/main".into(),
+    };
+    let (printed, passed, ran) = check(
+        "mutants-git",
+        Err(error),
+        Some("cargo-mutants 27.1.0"),
+        &Run::TimesOut,
+    );
+    assert!(!passed);
+    assert_eq!(ran, Vec::<String>::new());
+    assert_eq!(
+        printed,
+        format!(
+            "==> mutants: {CMD}\n\
+             could not diff against the merge-base with origin/main: `git merge-base HEAD \
+             origin/main` failed: fatal: Not a valid object name origin/main\n    fix: run `git \
+             merge-base HEAD origin/main` by hand to see why it fails; `git fetch origin main` \
+             fetches a missing origin/main\n"
+        )
+    );
+}
+
+/// The text of every fix, by an exhaustive match: a new variant does not compile until its text
+/// is pinned here. The samples are one per variant.
+#[test]
+fn every_fix_has_its_exact_text() {
+    let samples = [
+        Fix::Missed,
+        Fix::Split,
+        Fix::Setup { pinned: "1.2.3" },
+        Fix::GitNotStarted,
+        Fix::GitFailed {
+            command: "git diff".into(),
+        },
+        Fix::GitTimedOut,
+        Fix::Write { path: DIFF },
+        Fix::ByHand {
+            cmd: "cargo mutants".into(),
+        },
+        Fix::Unparsed,
+        Fix::Baseline,
+        Fix::Unexpected {
+            log: "target/xtask/mutants.out/log/x.log".into(),
+        },
+        Fix::Slow,
+        Fix::Unviable,
+    ];
+    let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
+    assert_eq!(kinds.len(), samples.len(), "two samples share a variant");
+    for fix in &samples {
+        let expected = match fix {
+            Fix::Missed => MISSED_FIX
+                .trim_start()
+                .strip_prefix("fix: ")
+                .unwrap_or_default(),
+            Fix::Split => "split the change: cargo xtask mutants caps a run at 20 minutes",
+            Fix::Setup { .. } => {
+                "run `cargo xtask setup`, which installs cargo-mutants 1.2.3, the version \
+                 xtask/src/setup.rs pins"
+            }
+            Fix::GitNotStarted => "install git, or put it on PATH",
+            Fix::GitFailed { .. } => {
+                "run `git diff` by hand to see why it fails; `git fetch origin main` fetches a \
+                 missing origin/main"
+            }
+            Fix::GitTimedOut => "run the git command above by hand to see why it does not finish",
+            Fix::Write { .. } => {
+                "make target/xtask/mutants.diff writable (check the disk has room), then run \
+                 cargo xtask mutants again"
+            }
+            Fix::ByHand { .. } => "run `cargo mutants` by hand to see what goes wrong",
+            Fix::Unparsed => {
+                "run cargo xtask mutants again; if it fails the same way, make \
+                 xtask/src/mutants/outcomes.rs read the outcomes.json of the cargo-mutants \
+                 version setup pins"
+            }
+            Fix::Baseline => {
+                "read the log: the build and tests must pass in a copy of the tree that holds \
+                 .git but not what .gitignore excludes, as .cargo/mutants.toml sets"
+            }
+            Fix::Unexpected { .. } => {
+                "read target/xtask/mutants.out/log/x.log, then run cargo xtask mutants again"
+            }
+            Fix::Slow => {
+                "none when the change makes the code loop forever, which the tests then catch; \
+                 if the tests were only slow on a busy machine, run cargo xtask mutants again"
+            }
+            Fix::Unviable => {
+                "none: a mutant that does not compile cannot be tested, and the compiler \
+                 already refuses that change"
+            }
+        };
+        assert_eq!(fix.to_string(), expected);
+    }
+}
+
+/// The real `outcomes.json` cargo-mutants 27.1.0 wrote for one mutant of the planted `double`
+/// (acceptance 18), trimmed to one outcome: the field names are cargo-mutants', not ours.
+#[test]
+fn a_real_outcome_parses() {
+    let text = r#"{"outcomes": [{"scenario": {"Mutant": {"name": "xtask/src/main.rs:106:5: replace double -> u32 with 0", "package": "xtask", "file": "xtask/src/main.rs", "function": {"function_name": "double", "return_type": "-> u32", "span": {"start": {"line": 105, "column": 1}, "end": {"line": 107, "column": 2}}}, "span": {"start": {"line": 106, "column": 5}, "end": {"line": 106, "column": 10}}, "replacement": "0", "genre": "FnValue"}}, "summary": "MissedMutant", "log_path": "log/xtask__src__main.rs_line_106_col_5.log", "diff_path": "diff/xtask__src__main.rs_line_106_col_5.diff", "phase_results": [{"phase": "Build", "duration": 3.19165075, "process_status": "Success", "argv": ["cargo", "nextest", "run", "--no-run", "--verbose", "--package=xtask@0.0.0"]}, {"phase": "Test", "duration": 13.424598833, "process_status": "Success", "argv": ["cargo", "nextest", "run", "--verbose", "--package=xtask@0.0.0", "--fail-fast"]}]}], "total_mutants": 1, "missed": 1, "caught": 0, "timeout": 0, "unviable": 0, "success": 0, "start_time": "2026-10-20T19:43:18.287389Z", "end_time": "2026-10-20T19:44:09.183114Z", "cargo_mutants_version": "27.1.0"}"#;
+    let lab = outcomes::parse(text).expect("parses");
+    let verdict = outcomes::judge(&lab, "cargo mutants", OUTPUT_DIR);
+    let missed: Vec<String> = verdict.missed.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        missed,
+        [format!(
+            "xtask/src/main.rs:106: missed mutant: no test fails on `replace double -> u32 with \
+             0`\n{MISSED_FIX}"
+        )]
+    );
+}
