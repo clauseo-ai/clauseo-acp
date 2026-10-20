@@ -44,6 +44,34 @@ fn no_version(requirement: &str, note: &str) -> String {
 }
 
 #[test]
+fn a_cargo_past_its_limit_is_told_apart_from_one_that_cannot_start() {
+    let cmd = Cmd::new(
+        Program::Cargo,
+        ["tree", "-p", "x"],
+        crate::process::TEST_TIMEOUT,
+    );
+    let timed_out = start_failure(&cmd, &process::timed_out(&cmd));
+    assert_eq!(
+        timed_out.message,
+        "`cargo tree -p x` did not finish within 1 min, so it was stopped"
+    );
+    assert_eq!(
+        timed_out.fix,
+        "run `cargo tree -p x` by hand to see why it does not finish within 1 min"
+    );
+    let missing = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
+    let not_started = start_failure(&cmd, &missing);
+    assert_eq!(
+        not_started.message,
+        "could not run `cargo tree -p x`: no such file"
+    );
+    assert_eq!(
+        not_started.fix,
+        "put `cargo` on PATH, since this check reads the dependency graph from cargo"
+    );
+}
+
+#[test]
 fn the_fix_of_a_failed_run_fits_its_cause() {
     let cmd = Cmd::new(
         Program::Cargo,

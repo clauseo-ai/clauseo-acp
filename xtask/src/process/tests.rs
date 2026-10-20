@@ -226,14 +226,20 @@ fn a_limit_is_written_in_its_largest_whole_unit() {
 }
 
 #[test]
-fn a_timeout_names_the_command_and_its_limit() {
+fn a_timeout_names_the_command_and_its_limit_and_is_told_apart() {
     let cmd = Cmd::new(Program::Cargo, ["nextest", "run"], Duration::from_mins(45));
     let error = timed_out(&cmd);
-    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
     assert_eq!(
         error.to_string(),
         "`cargo nextest run` did not finish within 45 min, so it was stopped"
     );
+    assert!(is_timeout(&error));
+    assert_eq!(
+        timeout_fix(&cmd),
+        "run `cargo nextest run` by hand to see why it does not finish within 45 min"
+    );
+    let not_found = io::Error::new(io::ErrorKind::NotFound, "no such file");
+    assert!(!is_timeout(&not_found));
 }
 
 #[cfg(unix)]

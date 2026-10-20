@@ -271,6 +271,9 @@ pub(crate) fn measure(
     let rerun = format!("run `{cmd}` to see the error");
     let quiet = match process::run_quiet(&cmd, root) {
         Ok(quiet) => quiet,
+        Err(error) if process::is_timeout(&error) => {
+            return Err(stop(diag, &error.to_string(), &process::timeout_fix(&cmd)));
+        }
         Err(error) => {
             return Err(stop(
                 diag,

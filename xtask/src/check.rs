@@ -51,10 +51,14 @@ pub(crate) fn run(quick: bool) -> ExitCode {
 const PNPM_VERSION_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Whether `pnpm` starts. Outside CI, without it, the ui steps are skipped (see `steps::plan`). CI
-/// runs the ui steps whatever this says, so it does not probe there.
+/// runs the ui steps whatever this says, so it does not probe there. A pnpm that starts but does
+/// not finish is found: the ui steps then run and report it.
 fn pnpm_found(root: &Path) -> bool {
     let cmd = Cmd::new(Program::Pnpm, ["--version"], PNPM_VERSION_TIMEOUT);
-    process::run_quiet(&cmd, root).is_ok()
+    match process::run_quiet(&cmd, root) {
+        Ok(_) => true,
+        Err(error) => process::is_timeout(&error),
+    }
 }
 
 /// CI mode: `CI` is set, is not empty, and is not `0` or `false` in any case.

@@ -150,15 +150,21 @@ pub(crate) fn load(root: &Path) -> Result<Vec<Member>, String> {
 /// nothing, which takes well under a second, so 2 min means it hangs (on a lock, say).
 const METADATA_TIMEOUT: Duration = Duration::from_mins(2);
 
-/// The stdout of `cargo metadata --format-version 1 --no-deps` run in `root`.
+/// The stdout of `cargo metadata --format-version 1 --no-deps` run in `root`. A run past its limit
+/// says so in place of the start error.
 fn run_metadata(root: &Path) -> Result<String, String> {
     let cmd = Cmd::new(
         Program::Cargo,
         ["metadata", "--format-version", "1", "--no-deps"],
         METADATA_TIMEOUT,
     );
-    let quiet = process::run_quiet(&cmd, root)
-        .map_err(|e| format!("could not run `cargo metadata`: {e}"))?;
+    let quiet = process::run_quiet(&cmd, root).map_err(|e| {
+        if process::is_timeout(&e) {
+            e.to_string()
+        } else {
+            format!("could not run `cargo metadata`: {e}")
+        }
+    })?;
     if !quiet.success {
         return Err(format!("`cargo metadata` failed:\n{}", quiet.stderr.trim()));
     }

@@ -198,6 +198,8 @@ pub(crate) enum GitError {
     NotStarted(String),
     /// git ran and failed, e.g. outside a git repo.
     Failed { command: String, stderr: String },
+    /// git ran past `GIT_TIMEOUT` and was stopped; the door's message, which names the command.
+    TimedOut(String),
 }
 
 impl fmt::Display for GitError {
@@ -205,6 +207,7 @@ impl fmt::Display for GitError {
         match self {
             GitError::NotStarted(error) => write!(f, "could not run git: {error}"),
             GitError::Failed { command, stderr } => write!(f, "`{command}` failed: {stderr}"),
+            GitError::TimedOut(message) => write!(f, "{message}"),
         }
     }
 }
@@ -222,8 +225,13 @@ const GIT_TIMEOUT: Duration = Duration::from_mins(1);
 /// The stdout of `git <args>` run in `root`.
 fn git(root: &Path, args: &[&str]) -> Result<String, GitError> {
     let cmd = Cmd::new(Program::Git, args, GIT_TIMEOUT);
-    let quiet =
-        process::run_quiet(&cmd, root).map_err(|error| GitError::NotStarted(error.to_string()))?;
+    let quiet = process::run_quiet(&cmd, root).map_err(|error| {
+        if process::is_timeout(&error) {
+            GitError::TimedOut(error.to_string())
+        } else {
+            GitError::NotStarted(error.to_string())
+        }
+    })?;
     if !quiet.success {
         return Err(GitError::Failed {
             command: cmd.to_string(),

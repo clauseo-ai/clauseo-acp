@@ -279,6 +279,9 @@ fn rustc_version(root: &Path) -> Result<String, Failure> {
             format!("`rustc -V` failed: {}", quiet.stderr.trim()),
             "install Rust with rustup, then run `rustup show`",
         )),
+        Err(error) if process::is_timeout(&error) => {
+            Err(Failure::new(error.to_string(), process::timeout_fix(&cmd)))
+        }
         Err(error) => Err(Failure::new(
             format!("could not run `rustc -V`: {error}"),
             "install Rust with rustup",

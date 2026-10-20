@@ -279,7 +279,7 @@ pub(crate) fn run(cmd: &Cmd, root: &Path, output: Output) -> io::Result<Ended> {
 }
 
 /// The error `capture` and `run_quiet` return for `cmd` when it runs past its limit. Its kind is
-/// `TimedOut`, which no start or read error has.
+/// `TimedOut`, which no start or read error has, so `is_timeout` tells it apart.
 pub(crate) fn timed_out(cmd: &Cmd) -> io::Error {
     io::Error::new(
         io::ErrorKind::TimedOut,
@@ -287,6 +287,19 @@ pub(crate) fn timed_out(cmd: &Cmd) -> io::Error {
             "`{cmd}` did not finish within {}, so it was stopped",
             limit_text(cmd.timeout)
         ),
+    )
+}
+
+/// Whether `error`, from `capture` or `run_quiet`, is the command running past its limit.
+pub(crate) fn is_timeout(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::TimedOut
+}
+
+/// The fix of a command that ran past its limit.
+pub(crate) fn timeout_fix(cmd: &Cmd) -> String {
+    format!(
+        "run `{cmd}` by hand to see why it does not finish within {}",
+        limit_text(cmd.timeout)
     )
 }
 

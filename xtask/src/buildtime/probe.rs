@@ -127,10 +127,14 @@ fn edit_and_run(
         };
         let (captured, elapsed) = timed(|| runner(&cmd));
         let captured = captured.map_err(|error| {
-            Failure::new(
-                format!("could not run `{cmd}`: {error}"),
-                format!("run `{cmd}` to see the error"),
-            )
+            if crate::process::is_timeout(&error) {
+                Failure::new(error.to_string(), crate::process::timeout_fix(&cmd))
+            } else {
+                Failure::new(
+                    format!("could not run `{cmd}`: {error}"),
+                    format!("run `{cmd}` to see the error"),
+                )
+            }
         })?;
         if !captured.success {
             return Err(Failure {

@@ -12,14 +12,11 @@ use std::time::Duration;
 const CARGO_TREE_TIMEOUT: Duration = Duration::from_mins(5);
 
 /// The stdout of `cargo <args>` run in `root`. `Err` is the failure to report when cargo
-/// cannot be started or fails. It has no `file:line`, since cargo's error names the cause.
+/// cannot be started, runs past its limit or fails. It has no `file:line`, since cargo's error
+/// names the cause.
 pub(super) fn cargo_stdout(root: &Path, args: &[&str]) -> Result<String, Failure> {
     let cmd = Cmd::new(Program::Cargo, args.iter().copied(), CARGO_TREE_TIMEOUT);
-    let quiet = process::run_quiet(&cmd, root).map_err(|error| Failure {
-        message: format!("could not run `{cmd}`: {error}"),
-        fix: "put `cargo` on PATH, since this check reads the dependency graph from cargo"
-            .to_owned(),
-    })?;
+    let quiet = process::run_quiet(&cmd, root).map_err(|error| start_failure(&cmd, &error))?;
     if quiet.success {
         Ok(quiet.stdout)
     } else {
@@ -28,6 +25,22 @@ pub(super) fn cargo_stdout(root: &Path, args: &[&str]) -> Result<String, Failure
             message: format!("`{cmd}` failed: {stderr}"),
             fix: failure_fix(&cmd, stderr, root),
         })
+    }
+}
+
+/// The failure of `cmd` that did not start or ran past its limit (`error`).
+fn start_failure(cmd: &Cmd, error: &std::io::Error) -> Failure {
+    if process::is_timeout(error) {
+        Failure {
+            message: error.to_string(),
+            fix: process::timeout_fix(cmd),
+        }
+    } else {
+        Failure {
+            message: format!("could not run `{cmd}`: {error}"),
+            fix: "put `cargo` on PATH, since this check reads the dependency graph from cargo"
+                .to_owned(),
+        }
     }
 }
 

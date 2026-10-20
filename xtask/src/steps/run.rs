@@ -4,7 +4,7 @@
 use crate::checks::StaticCheck;
 use crate::clock::timed;
 use crate::output::Printer;
-use crate::process::{Captured, Cmd, Program};
+use crate::process::{self, Captured, Cmd, Program};
 use crate::steps::{Step, ToolStep};
 use crate::workspace::Context;
 use std::io::{self, Write};
@@ -131,6 +131,10 @@ fn run_tool<W: Write>(
                 );
             }
             (failed, warnings)
+        }
+        Err(error) if process::is_timeout(&error) => {
+            out.failure(&error.to_string(), &process::timeout_fix(&tool.cmd));
+            (true, 0)
         }
         Err(error) => {
             let message = format!("could not run `{}`: {error}", tool.cmd.program.name());
