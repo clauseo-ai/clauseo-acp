@@ -150,11 +150,13 @@ fn read_line<'a>(info: &str, line: &'a str) -> Option<&'a str> {
 }
 
 /// The text of a line that continues a read line in a block whose info word is `info`. In a
-/// session block it is read after a leading `> `, prompted or not.
+/// session block it is read after a leading `> ` or `>> `, prompted or not.
 fn continued_text<'a>(info: &str, line: &'a str) -> &'a str {
     if is_one_of(info, &SESSIONS) {
         let text = line.trim_start();
-        text.strip_prefix("> ").unwrap_or(text)
+        text.strip_prefix(">> ")
+            .or_else(|| text.strip_prefix("> "))
+            .unwrap_or(text)
     } else {
         line
     }

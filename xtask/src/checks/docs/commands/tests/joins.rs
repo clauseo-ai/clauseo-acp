@@ -38,6 +38,7 @@ fn a_continued_line_is_joined_with_the_lines_after_it_in_its_block() {
         ("sh", "cargo xtask \\", "1: cargo xtask", &[1]),
         ("console", "$ cargo xtask check \\\n--quick", "1: cargo xtask check --quick", &[]),
         ("ps1-session", "PS> cargo xtask check `\n> --quick", "1: cargo xtask check --quick", &[]),
+        ("pwsh-session", "PS> cargo xtask check `\n>> --quik", "1: cargo xtask check --quik", &[1]),
         ("powershell", "cargo xtask check \\\n--quick", "1: cargo xtask check \\\n2: --quick", &[1]),
         ("sh", "cargo xtask check ^\n--quick", "1: cargo xtask check ^\n2: --quick", &[1]),
         ("console", "cargo xtask check \\\n--quick", "", &[]),
