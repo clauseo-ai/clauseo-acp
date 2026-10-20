@@ -174,6 +174,160 @@ fn a_failed_write_leaves_the_file_unchanged_and_says_so() {
     assert!(!dir.join(COPY).exists());
 }
 
+#[test]
+fn a_failed_write_that_cannot_delete_its_temporary_file_names_it() {
+    let dir = repo("tmp-stuck");
+    let mut guard = Guard::save(&dir, TOOL, REL, ORIGINAL).expect("the save");
+    // A folder where the write's temporary file goes: the write cannot open it, nor delete it.
+    let tmp = dir.join("src/.lib.rs.guardtest.tmp");
+    Scratch::create_dir_all(&tmp).expect("a folder in the way");
+    let error = Scratch::write(&tmp, EDIT).expect_err("a folder is no file to write");
+    let failure = guard
+        .write(EDIT.to_owned())
+        .expect_err("the temporary file cannot be made");
+    assert_eq!(
+        failure,
+        GuardFailure::new(
+            format!("could not write {REL}: {error}; the file is unchanged"),
+            "fix what the error names, then run again; delete src/.lib.rs.guardtest.tmp: it holds \
+             only this run's edit"
+                .to_owned(),
+        )
+    );
+    assert_eq!(text(&dir.join(REL)), ORIGINAL);
+}
+
+#[test]
+fn a_file_missing_at_the_next_write_is_a_conflict_and_the_copy_is_kept() {
+    let dir = repo("missing");
+    let mut guard = Guard::save(&dir, TOOL, REL, ORIGINAL).expect("the save");
+    Scratch::remove_file(dir.join(REL)).expect("the developer deletes the file");
+    let failure = guard
+        .write(EDIT.to_owned())
+        .expect_err("nothing is written over a missing file");
+    assert_eq!(
+        failure,
+        GuardFailure::new(
+            format!("{REL} went missing during this guardtest run; its saved copy is {COPY}"),
+            format!("compare the two, keep what you want, then delete {COPY}"),
+        )
+    );
+    assert!(!dir.join(REL).exists(), "nothing was written");
+    assert_eq!(text(&dir.join(COPY)), ORIGINAL, "the copy is kept");
+}
+
+#[test]
+fn a_file_that_cannot_be_read_at_the_next_write_is_named_with_its_error() {
+    let dir = repo("unreadable");
+    let mut guard = Guard::save(&dir, TOOL, REL, ORIGINAL).expect("the save");
+    Scratch::remove_file(dir.join(REL)).expect("the developer deletes the file");
+    Scratch::create_dir(dir.join(REL)).expect("a folder takes its place");
+    let error = fs::read(dir.join(REL)).expect_err("a folder cannot be read as a file");
+    let failure = guard
+        .write(EDIT.to_owned())
+        .expect_err("the write stops at the read");
+    assert_eq!(
+        failure,
+        GuardFailure::new(
+            format!("could not read {REL}: {error}"),
+            format!("compare it with {COPY}, keep what you want, then delete the copy"),
+        )
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_backup_folder_that_refuses_a_new_file_names_the_os_error_and_edits_nothing() {
+    let dir = repo("save-refused");
+    let folder = dir.join("target/xtask/guarded/src");
+    Scratch::create_dir_all(&folder).expect("create the backup folder");
+    read_only(&folder, true);
+    let error = Scratch::write(folder.join(".lib.rs.guardtest.tmp"), ORIGINAL)
+        .expect_err("the same error the save gets");
+    let saved = Guard::save(&dir, TOOL, REL, ORIGINAL);
+    read_only(&folder, false);
+    let Err(failure) = saved else {
+        panic!("the save fails")
+    };
+    assert_eq!(
+        failure,
+        GuardFailure::new(
+            format!("could not back up {REL} before editing it: {error}"),
+            format!("fix what the error names, then run again; {REL} was not edited"),
+        )
+    );
+    assert_eq!(text(&dir.join(REL)), ORIGINAL);
+    assert!(!dir.join(COPY).exists(), "no copy was made");
+}
+
+#[test]
+fn a_copy_the_folder_cannot_link_is_reported_as_that_error_not_as_an_existing_copy() {
+    let dir = repo("link-refused");
+    let backup = dir.join(COPY);
+    Scratch::create_dir_all(backup.parent().expect("a parent")).expect("the backup folder");
+    let refused = |_: &Path, _: &Path| Err(io::Error::from(io::ErrorKind::Unsupported));
+    match write_new_copy(&backup, TOOL.tool, ORIGINAL, refused) {
+        Err(Save::Failed { error, tmp_left }) => {
+            assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+            assert!(!tmp_left, "the temporary file is deleted");
+        }
+        _ => panic!("a link the OS refuses is the save's failure"),
+    }
+    assert!(!backup.exists(), "no copy was made");
+    assert!(
+        !dir.join("target/xtask/guarded/src/.lib.rs.guardtest.tmp")
+            .exists()
+    );
+}
+
+#[test]
+fn a_leftover_whose_file_is_gone_comes_back_as_a_new_file() {
+    let dir = repo("leftover-gone");
+    Scratch::create_dir_all(dir.join("target/xtask/guarded/src")).expect("create the folder");
+    Scratch::write(dir.join(COPY), ORIGINAL).expect("the copy a killed run left");
+    Scratch::remove_file(dir.join(REL)).expect("the file is gone");
+    assert_eq!(TOOL.restore_leftover(&dir, REL), Ok(()));
+    assert_eq!(text(&dir.join(REL)), ORIGINAL);
+    assert!(!dir.join(COPY).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_leftover_whose_file_is_a_link_to_itself_is_refused_and_the_link_stays() {
+    let dir = repo("leftover-loop");
+    Scratch::create_dir_all(dir.join("target/xtask/guarded/src")).expect("create the folder");
+    Scratch::write(dir.join(COPY), ORIGINAL).expect("the copy a killed run left");
+    Scratch::remove_file(dir.join(REL)).expect("the file is gone");
+    Scratch::symlink("lib.rs", dir.join(REL)).expect("a link to itself");
+    let error = fs::metadata(dir.join(REL)).expect_err("a link to itself cannot be inspected");
+    assert_eq!(
+        TOOL.restore_leftover(&dir, REL),
+        Err(GuardFailure::new(
+            format!("could not restore {REL} from its copy {COPY}: {error}; {REL} is unchanged"),
+            "fix what the error names, then run again".to_owned(),
+        ))
+    );
+    assert!(dir.join(REL).is_symlink(), "the link is not replaced");
+    assert_eq!(text(&dir.join(COPY)), ORIGINAL, "the copy is kept");
+}
+
+#[test]
+fn a_temporary_file_that_cannot_be_deleted_is_named_with_its_error() {
+    let dir = repo("stuck-leftover");
+    let tmp = dir.join("src/.lib.rs.guardtest.tmp");
+    Scratch::create_dir_all(&tmp).expect("a folder where a killed write's temporary file goes");
+    let error = Scratch::remove_file(&tmp).expect_err("a folder is no file to remove");
+    assert_eq!(
+        TOOL.discard_interrupted_write(&dir, REL),
+        Err(GuardFailure::new(
+            format!("could not delete src/.lib.rs.guardtest.tmp: {error}"),
+            "delete src/.lib.rs.guardtest.tmp by hand: an interrupted guardtest run wrote it, \
+             and it holds only that run's edit"
+                .to_owned(),
+        ))
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn a_failed_restore_keeps_the_edit_and_the_copy_and_says_how_to_finish() {
