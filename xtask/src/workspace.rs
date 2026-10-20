@@ -103,6 +103,9 @@ pub(crate) struct CargoDependency {
     /// The directory of a path dependency, else `None`.
     #[serde(default)]
     pub path: Option<PathBuf>,
+    /// The version requirement as cargo writes it, such as `^1.2` or `>=1, <2`.
+    #[serde(default)]
+    pub req: String,
 }
 
 impl CargoDependency {
