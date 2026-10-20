@@ -9,11 +9,11 @@
 //! backtick in a PowerShell block, `^` in a `cmd` or `bat` block, and `\` in every other block
 //! that is read. In a session block the next line is read after a leading `> ` or `>> `, with or
 //! without a prompt. A continuing line has its continuation character dropped. When a line of its
-//! block follows, the two lines are joined. When none follows, the line is read alone. A span
-//! keeps its text as written. Each joined text is split into words once, with `shlex`, or on
-//! whitespace when `shlex` cannot split it. Every `cargo` in the words, with its flags and
-//! `+toolchain` skipped, followed by `xtask`, starts a command. The words after `xtask` stop at
-//! shell syntax and parse against the clap tree in `main.rs`.
+//! block follows, the two lines are joined. When none follows, the line is read alone. Each
+//! joined text is split into words once, with `shlex`, or on whitespace when `shlex` cannot
+//! split it. Every `cargo` in the words, with its flags and `+toolchain` skipped, followed by
+//! `xtask`, starts a command. The words after `xtask` stop at shell syntax and parse against the
+//! clap tree in `main.rs`.
 
 use super::markdown::{CodeLine, Scan};
 use crate::Cli;
@@ -95,7 +95,10 @@ pub(super) fn problems(file: &str, scan: &Scan) -> Vec<Violation> {
         .spans
         .iter()
         .filter(|span| span.text != TOOL)
-        .map(|span| (span.line, span.text.clone()));
+        .map(|span| {
+            let text = continued("", &span.text).unwrap_or(&span.text);
+            (span.line, text.to_owned())
+        });
     spans
         .chain(read_texts(&scan.code))
         .flat_map(|(line, text)| {

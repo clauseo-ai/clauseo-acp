@@ -136,6 +136,19 @@ fn a_span_of_only_the_tool_name_is_prose_and_a_command_span_is_checked() {
 }
 
 #[test]
+fn a_span_that_ends_in_the_continuation_character_drops_it() {
+    let text = "Run `cargo xtask check \\` first, not `cargo xtask frobnicate \\`.\n";
+    let scan = crate::checks::docs::markdown::scan(text);
+    let found = problems("a.md", &scan);
+    assert_eq!(found.len(), 1, "only the second span is a command");
+    assert_eq!(
+        found[0].message,
+        "the xtask command `cargo xtask frobnicate` does not parse: error: unrecognized subcommand 'frobnicate'"
+    );
+    assert_eq!(found[0].line, 1);
+}
+
+#[test]
 fn a_placeholder_word_is_a_name_in_angle_brackets_or_an_ellipsis() {
     for word in ["<command>", "<n>", "...", "<path>..."] {
         assert!(is_placeholder(word), "{word} is a placeholder");
