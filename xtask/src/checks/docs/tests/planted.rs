@@ -300,4 +300,75 @@ crate::checks::planted::cases! {
          .markdown files; restore them, or, if they moved, update the consts \
          xtask/src/checks/docs.rs builds that place from",
     ]), inspects 0 => super::cases::no_markdown_and_no_required_files,
+    /// A link from the repo root (`/nope.md`) is looked up from the root, and fails.
+    root_slash_link_fails: FailsWith(&[
+        "GUIDE.md:1: the relative link `/nope.md` does not resolve: `nope.md` does not exist\n    \
+         fix: create `nope.md`, or correct or remove the link",
+    ]), inspects 4 => super::cases::root_slash_link_fails,
+    /// A link to the private folder beside the repo is not read: outside contributors lack it.
+    private_folder_link_passes: Passes, inspects 4 => super::cases::private_folder_link_passes,
+    /// A link that names the private folder, then climbs out of it, leaves the repo.
+    private_folder_then_climb_fails: FailsWith(&[
+        "GUIDE.md:1: the relative link `../clauseo-acp-private/../outside.md` leaves the repo\n    \
+         fix: point it at a file inside the repo, or remove it",
+    ]), inspects 4 => super::cases::private_folder_then_climb_fails,
+    /// A Markdown image to a missing file fails like a link.
+    markdown_image_to_a_missing_file_fails: FailsWith(&[
+        bad_link!("GUIDE.md", 1, "nope.png"),
+    ]), inspects 4 => super::cases::markdown_image_to_a_missing_file_fails,
+    /// A command after a `$` prompt and an assignment is read from `cargo`.
+    command_after_a_prompt_and_assignment_fails: FailsWith(&[
+        bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]), inspects 4 => super::cases::command_after_a_prompt_and_assignment_fails,
+    /// A toolchain after `cargo` (`+nightly`) is skipped, and the command still checked.
+    command_with_a_toolchain_fails: FailsWith(&[
+        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]), inspects 4 => super::cases::command_with_a_toolchain_fails,
+    /// Cargo's own flags before `xtask` are skipped, and the command still checked.
+    command_after_cargo_flags_fails: FailsWith(&[
+        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]), inspects 4 => super::cases::command_after_cargo_flags_fails,
+    /// The second command on a line, after `&&`, is checked too.
+    second_command_on_a_line_fails: FailsWith(&[
+        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]), inspects 4 => super::cases::second_command_on_a_line_fails,
+    /// A flag the subcommand does not have fails.
+    unknown_flag_fails: FailsWith(&[
+        bad_command!(1, "cargo xtask check --frobnicate", "error: unexpected argument '--frobnicate' found"),
+    ]), inspects 4 => super::cases::unknown_flag_fails,
+    /// A value outside the flag's range fails.
+    value_outside_its_range_fails: FailsWith(&[
+        bad_command!(1, "cargo xtask buildtime --runs 0", "error: invalid value '0' for '--runs <RUNS>': 0 is not in 1..=4294967295"),
+    ]), inspects 4 => super::cases::value_outside_its_range_fails,
+    /// `--help` before an unknown subcommand does not make it parse.
+    unknown_subcommand_after_help_fails: FailsWith(&[
+        bad_command!(1, "cargo xtask --help frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]), inspects 4 => super::cases::unknown_subcommand_after_help_fails,
+    /// A quoted subcommand is split as a shell splits it, and fails.
+    quoted_subcommand_fails: FailsWith(&[
+        bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]), inspects 4 => super::cases::quoted_subcommand_fails,
+    /// A repo without `CLAUDE.md` fails at line 1, with the fix that writes the import.
+    missing_claude: FailsWith(&[
+        "CLAUDE.md:1: CLAUDE.md does not exist\n    \
+         fix: create CLAUDE.md holding only `@AGENTS.md`, or restore it from git history",
+    ]), inspects 2 => super::cases::missing_claude,
+    /// A repo without `ARCHITECTURE.md` fails at line 1.
+    missing_architecture: FailsWith(&[
+        "ARCHITECTURE.md:1: ARCHITECTURE.md does not exist\n    \
+         fix: create ARCHITECTURE.md at the repo root, or restore it from git history",
+    ]), inspects 2 => super::cases::missing_architecture,
+    /// `CLAUDE.md` that imports another file is not `@AGENTS.md`.
+    claude_wrong_import: FailsWith(&[
+        "CLAUDE.md:1: CLAUDE.md must hold only `@AGENTS.md`\n    \
+         fix: move what CLAUDE.md holds besides `@AGENTS.md` into AGENTS.md, then keep only \
+         `@AGENTS.md` in CLAUDE.md",
+    ]), inspects 3 => super::cases::claude_wrong_import,
+    /// A percent-escaped link resolves to the file with the space.
+    percent_escaped_link_passes: Passes, inspects 5 => super::cases::percent_escaped_link_passes,
+    /// Absolute URLs, pure anchors, `mailto:` and an empty destination are not looked up.
+    urls_and_anchors_pass: Passes, inspects 4 => super::cases::urls_and_anchors_pass,
+    /// A Markdown file git ignores is not one of the repo's files: it is not read or counted.
+    ignored_markdown_is_not_read: Passes,
+        inspects 3 => super::cases::ignored_markdown_is_not_read,
 }
