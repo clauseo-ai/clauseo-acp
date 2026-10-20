@@ -3,46 +3,6 @@
 
 use super::*;
 
-/// The reminder cargo adds to every resolution error under `--offline`.
-const OFFLINE_NOTE: &str = "note: offline mode (via `--offline`) can sometimes cause surprising \
-                            resolution failures\nhelp: if this error is too confusing you may \
-                            wish to retry without `--offline`";
-
-#[test]
-fn the_fix_of_a_failed_run_fits_its_cause() {
-    let cmd = Cmd::new(Program::Cargo, ["tree", "-p", "x"]);
-    let lock = "error: the lock file /ws/Cargo.lock needs to be updated but --locked was passed to prevent this";
-    assert!(failure_fix(&cmd, lock).contains("cargo update --workspace"));
-    let missing = "error: failed to download `serde v1.0.0`\n\nCaused by:\n  attempting to make \
-                   an HTTP request, but --offline was specified";
-    assert!(failure_fix(&cmd, missing).contains("cargo fetch --locked"));
-    assert_eq!(
-        failure_fix(&cmd, "error: bad manifest"),
-        "fix what cargo reports above until `cargo tree -p x` succeeds, since this check reads \
-         the dependency graph from it"
-    );
-}
-
-/// A dependency that no registry version matches gets the manifest fix, not the fetch fix,
-/// though cargo adds its offline note to the error.
-#[test]
-fn an_unresolvable_dependency_sends_the_reader_to_its_manifest_under_offline_too() {
-    let cmd = Cmd::new(Program::Cargo, ["tree", "-p", "x", "--offline"]);
-    let no_package = format!(
-        "error: no matching package named `zzz-not-a-crate-xq` found\nlocation searched: \
-         crates.io index\nrequired by package `x v0.1.0 (/ws/x)`\n{OFFLINE_NOTE}"
-    );
-    let no_version = format!(
-        "error: failed to select a version for the requirement `serde = \"^999\"`\n\
-         candidate versions found which didn't match: 1.0.228\n{OFFLINE_NOTE}"
-    );
-    let manifest_fix = "cargo could not resolve the dependency that its error above names. \
-                        Correct that dependency in the manifest of the package the error says \
-                        requires it, then run the check again";
-    assert_eq!(failure_fix(&cmd, &no_package), manifest_fix);
-    assert_eq!(failure_fix(&cmd, &no_version), manifest_fix);
-}
-
 /// A failed `cargo tree` run is a failure with no `file:line`. Offline, a dependency on a
 /// crate no registry has fails to resolve whether or not the index is cached.
 #[test]

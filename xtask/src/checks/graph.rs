@@ -29,56 +29,9 @@
 
 use crate::checks::Failure;
 use crate::checks::toml_lines::{BUILD, Kind, NORMAL};
-use crate::process::{self, Cmd, Program};
+use cargo::cargo_stdout;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::Path;
-
-/// The stdout of `cargo <args>` run in `root`. `Err` is the failure to report when cargo
-/// cannot be started or fails. It has no `file:line`, since cargo's error names the cause.
-pub(crate) fn cargo_stdout(root: &Path, args: &[&str]) -> Result<String, Failure> {
-    let cmd = Cmd::new(Program::Cargo, args.iter().copied());
-    let quiet = process::run_quiet(&cmd, root).map_err(|error| Failure {
-        message: format!("could not run `{cmd}`: {error}"),
-        fix: "put `cargo` on PATH, since this check reads the dependency graph from cargo"
-            .to_owned(),
-    })?;
-    if quiet.success {
-        Ok(quiet.stdout)
-    } else {
-        let stderr = quiet.stderr.trim();
-        Err(Failure {
-            message: format!("`{cmd}` failed: {stderr}"),
-            fix: failure_fix(&cmd, stderr),
-        })
-    }
-}
-
-/// The fix for a failed run of `cmd` whose stderr is `stderr`, true for the cause cargo names.
-/// Under `--offline` cargo adds its offline note to every resolution error, so the errors of a
-/// dependency that no registry version matches come before the offline branch.
-fn failure_fix(cmd: &Cmd, stderr: &str) -> String {
-    if stderr.contains("--locked was passed") {
-        "Cargo.lock does not match the manifests, and the check never rewrites it. Run \
-         `cargo update --workspace` to bring it in line, then commit Cargo.lock"
-            .to_owned()
-    } else if stderr.contains("no matching package named")
-        || stderr.contains("failed to select a version")
-    {
-        "cargo could not resolve the dependency that its error above names. Correct that \
-         dependency in the manifest of the package the error says requires it, then run the \
-         check again"
-            .to_owned()
-    } else if stderr.contains("--offline") || stderr.contains("offline mode") {
-        "a crate is not downloaded and the check runs offline. Run `cargo fetch --locked`, then \
-         run the check again"
-            .to_owned()
-    } else {
-        format!(
-            "fix what cargo reports above until `{cmd}` succeeds, since this check reads the \
-             dependency graph from it"
-        )
-    }
-}
 
 /// The arguments of the `cargo tree` run for `package`, then `flags`.
 pub(crate) fn tree_args<'a>(package: &'a str, flags: &[&'a str]) -> Vec<&'a str> {
@@ -456,6 +409,7 @@ fn node_line(text: &str, depth: usize) -> Option<Line<'_>> {
     })
 }
 
+mod cargo;
 mod declared;
 
 pub(crate) use declared::blame;
