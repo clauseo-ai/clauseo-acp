@@ -2,12 +2,15 @@
 //! exit, and the caller's thread takes their events from one channel. The phases of the wait are
 //! timed with `clock::timed` around each receive, so no timer thread and no sleep is needed.
 //!
-//! The run ends when the command has exited and its pipes are closed. At its limit its tree gets
-//! SIGTERM (`Tree::terminate`), and SIGKILL after `KILL_GRACE` if the command or a pipe is still
-//! open. A process that left the tree can hold a pipe for ever, so after the exit, or after
-//! SIGKILL, the run waits at most `DRAIN` for the pipes. When the run ends, or its `Running` is
-//! dropped, what is left of the tree gets SIGKILL (`Tree::finish`); a drop before the end stops it
-//! the same way as a timeout first.
+//! The run ends when the command has exited and its pipes are closed. At its limit its tree is
+//! asked to stop (`Tree::terminate`: SIGTERM to the group on Unix, the whole stop on Windows), and
+//! killed (`Tree::kill`: SIGKILL on Unix) after `KILL_GRACE` if the command or a pipe is still
+//! open. When the command exits with a pipe still open, what is left of its tree is killed at once:
+//! it could only hold the pipe, and the pipe keeps what it wrote. A process that left the tree can
+//! hold a pipe for ever, so after the exit, or after the kill, the run waits at most `DRAIN` for
+//! the pipes, and a run that exited says when one was still open then. When the run ends, or its
+//! `Running` is dropped, what is left of the tree is killed (`Tree::finish`); a drop before the
+//! end stops it the same way as a timeout first.
 
 use super::{Cmd, spawn};
 use crate::clock::timed;
@@ -24,9 +27,10 @@ use super::unix::Tree;
 #[cfg(windows)]
 use super::windows::Tree;
 
-/// How long a tree has between SIGTERM and SIGKILL, as in `ui/app/scripts/buildtime-proc.mjs`.
+/// How long a tree has between SIGTERM and SIGKILL, as in `ui/app/scripts/buildtime-proc.mjs`. On
+/// Windows the stop at the limit already ends the job, so this is only how long its pipes have.
 pub(super) const KILL_GRACE: Duration = Duration::from_secs(5);
-/// How long a run waits for the output pipes once the command has exited or its tree got SIGKILL.
+/// How long a run waits for the output pipes once the command has exited or its tree was killed.
 const DRAIN: Duration = Duration::from_secs(1);
 /// Size of each read from a running command's output pipe.
 const CHUNK: usize = 8 * 1024;
@@ -35,6 +39,37 @@ const CHUNK: usize = 8 * 1024;
 /// then marks its ends close-on-exec (`std/src/sys/pipe/unix.rs`), so a command started by
 /// another thread in between would hold them and keep the reader from seeing EOF.
 static STARTING: Mutex<()> = Mutex::new(());
+
+/// A pipe made under `STARTING`, as the door makes its own, for a test that hands a command one:
+/// made outside it, a command another test thread starts could hold it and delay its EOF.
+#[cfg(all(test, unix))]
+pub(super) fn pipe() -> io::Result<(io::PipeReader, io::PipeWriter)> {
+    let _starting = STARTING.lock().unwrap_or_else(PoisonError::into_inner);
+    io::pipe()
+}
+
+/// How long each phase of a run may last.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Limits {
+    /// The command's own limit, counted from the start of `Running::finish`.
+    pub run: Duration,
+    /// From the stop at the limit, or at a drop, to the kill.
+    pub grace: Duration,
+    /// For the pipes to close once the command has exited or its tree was killed.
+    pub drain: Duration,
+}
+
+impl Limits {
+    /// The limits of a command that may run for `run`: `KILL_GRACE` and `DRAIN` for the rest.
+    /// Every command xtask runs gets these; only tests make the grace and the drain shorter.
+    pub(super) fn of(run: Duration) -> Limits {
+        Limits {
+            run,
+            grace: KILL_GRACE,
+            drain: DRAIN,
+        }
+    }
+}
 
 /// Where a command's stdout and stderr go.
 #[derive(Debug, Clone, Copy)]
@@ -52,6 +87,15 @@ pub(super) enum Streams {
 pub(super) enum Stream {
     Out,
     Err,
+}
+
+/// What ended a run other than its command's exit with its pipes closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Cut {
+    /// It was still running at its limit.
+    TimedOut,
+    /// A pipe was still open when the drain ran out.
+    HeldOpen,
 }
 
 /// How a run ended.
@@ -77,11 +121,12 @@ enum Event {
 enum Phase {
     /// Before its limit.
     Running,
-    /// Exited before its limit; the pipes have `DRAIN` to close.
+    /// Exited before its limit, and what was left of its tree was killed; the pipes have the
+    /// drain to close.
     Draining,
-    /// Got SIGTERM at its limit, or at a drop; has `KILL_GRACE` to exit and close the pipes.
+    /// Asked to stop at its limit, or at a drop; has the grace to exit and close the pipes.
     Terminating,
-    /// Got SIGKILL; the pipes have `DRAIN` to close.
+    /// Killed after the grace; the pipes have the drain to close.
     Killed,
 }
 
@@ -95,10 +140,12 @@ pub(super) struct Running {
     open: usize,
     exited: bool,
     status: Option<ExitStatus>,
+    limits: Limits,
     phase: Phase,
     /// What is left of the current phase.
     left: Duration,
-    timed_out: bool,
+    /// The first thing that cut the run short, if one did.
+    cut: Option<Cut>,
     /// The first error of the run: a pipe that could not be read, a failed wait or a failed stop.
     error: Option<io::Error>,
     /// Set once the run has ended and its result was taken, so a drop does not stop it again.
@@ -115,17 +162,17 @@ pub(super) fn run(
 ) -> io::Result<Finish> {
     let mut command = cmd.program.command();
     command.args(&cmd.args).current_dir(root);
-    Running::start(command, &cmd.to_string(), streams, cmd.timeout)?.finish(on_output)
+    Running::start(command, &cmd.to_string(), streams, Limits::of(cmd.timeout))?.finish(on_output)
 }
 
 impl Running {
     /// Starts `command` with stdin closed, in a tree of its own, with stdout and stderr as
-    /// `streams` says, and `limit` to run. `shown` names it in errors.
+    /// `streams` says, and `limits` for its phases. `shown` names it in errors.
     pub(super) fn start(
         mut command: Command,
         shown: &str,
         streams: Streams,
-        limit: Duration,
+        limits: Limits,
     ) -> io::Result<Running> {
         command.stdin(Stdio::null());
         let starting = STARTING.lock().unwrap_or_else(PoisonError::into_inner);
@@ -169,9 +216,10 @@ impl Running {
             open: readers.len(),
             exited: false,
             status: None,
+            limits,
             phase: Phase::Running,
-            left: limit,
-            timed_out: false,
+            left: limits.run,
+            cut: None,
             error: None,
             ended: false,
         };
@@ -188,21 +236,35 @@ impl Running {
     }
 
     /// Waits for the run to end, passing each chunk to `on_output`, and stops what is left of the
-    /// tree. A failed read, wait or stop is the error; else a run past its limit is `TimedOut`.
+    /// tree. A failed read, wait or stop is the error; else a run past its limit is `TimedOut`;
+    /// else a pipe still open after the drain is an error that says so (`held_open`).
     pub(super) fn finish(mut self, on_output: &mut dyn FnMut(Stream, &[u8])) -> io::Result<Finish> {
         self.wait(on_output);
         self.ended = true;
         self.tree.finish();
-        match (self.error.take(), self.timed_out, self.status) {
+        match (self.error.take(), self.cut, self.status) {
             (Some(error), _, _) => Err(error),
-            (None, true, _) => Ok(Finish::TimedOut),
-            (None, false, Some(status)) => Ok(Finish::Exited(status)),
+            (None, Some(Cut::TimedOut), _) => Ok(Finish::TimedOut),
+            (None, Some(Cut::HeldOpen), _) => Err(self.held_open()),
+            (None, None, Some(status)) => Ok(Finish::Exited(status)),
             // A run ends before its limit only after the exit, which sets the status or an error.
-            (None, false, None) => Err(io::Error::other(format!(
+            (None, None, None) => Err(io::Error::other(format!(
                 "the wait for `{}` ended without its exit status",
                 self.shown
             ))),
         }
+    }
+
+    /// The error of a run whose command exited and whose pipe was still open after the drain. The
+    /// kill at the exit ended every process left in the tree, so what holds the pipe left it.
+    fn held_open(&self) -> io::Error {
+        io::Error::other(format!(
+            "`{}` exited, but its output was still open {} after its {tree} was stopped: a \
+             process it started left the {tree} and holds it, and is left running",
+            self.shown,
+            super::limit_text(self.limits.drain),
+            tree = Tree::NAME,
+        ))
     }
 
     /// Takes events until the command has exited and its pipes are closed, or the last phase
@@ -225,21 +287,27 @@ impl Running {
                         Err(error) => self.keep(error),
                     }
                     if self.phase == Phase::Running {
-                        self.enter(Phase::Draining, DRAIN);
+                        self.enter(Phase::Draining, self.limits.drain);
+                        // What is left of the tree could only hold the pipes, which keep what it
+                        // wrote; with them closed, `finish` kills it.
+                        if self.open > 0 {
+                            self.kill();
+                        }
                     }
                 }
                 Err(RecvTimeoutError::Timeout) => match self.phase {
                     Phase::Running => {
-                        self.timed_out = true;
+                        self.cut.get_or_insert(Cut::TimedOut);
                         self.terminate();
                     }
                     Phase::Terminating => {
-                        self.enter(Phase::Killed, DRAIN);
-                        if let Err(error) = self.tree.kill() {
-                            self.keep(self.not_stopped(&error));
-                        }
+                        self.enter(Phase::Killed, self.limits.drain);
+                        self.kill();
                     }
-                    Phase::Draining | Phase::Killed => return,
+                    Phase::Draining | Phase::Killed => {
+                        self.cut.get_or_insert(Cut::HeldOpen);
+                        return;
+                    }
                 },
                 // Every thread has ended, so the exit and every EOF are in.
                 Err(RecvTimeoutError::Disconnected) => return,
@@ -247,10 +315,17 @@ impl Running {
         }
     }
 
-    /// Sends the tree SIGTERM and gives it `KILL_GRACE`.
+    /// Asks the tree to stop (SIGTERM on Unix) and gives it the grace.
     fn terminate(&mut self) {
-        self.enter(Phase::Terminating, KILL_GRACE);
+        self.enter(Phase::Terminating, self.limits.grace);
         if let Err(error) = self.tree.terminate() {
+            self.keep(self.not_stopped(&error));
+        }
+    }
+
+    /// Kills the tree (SIGKILL on Unix).
+    fn kill(&mut self) {
+        if let Err(error) = self.tree.kill() {
             self.keep(self.not_stopped(&error));
         }
     }

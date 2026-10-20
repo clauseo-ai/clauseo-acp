@@ -204,6 +204,7 @@ fn spawn(command: &mut Command) -> io::Result<Child> {
 }
 
 /// Exit status and merged stdout and stderr of a command run by `capture`.
+#[derive(Debug)]
 pub(crate) struct Captured {
     pub success: bool,
     pub output: String,

@@ -16,6 +16,9 @@ pub(super) struct Tree {
 }
 
 impl Tree {
+    /// What a tree is called in errors.
+    pub(super) const NAME: &str = "process group";
+
     /// Makes `command` start in a new process group.
     pub(super) fn prepare(command: &mut Command) {
         command.process_group(0);
@@ -51,8 +54,11 @@ impl Tree {
 
     /// SIGKILL to what is left of the group, then tells the leader the group is no longer
     /// xtask's to stop, so a later group with the same id is left alone. The command was reaped
-    /// already, so an empty group's id is free again; a new group would have to take that exact id
-    /// in between, which macOS and Linux, handing out pids in rising order, do not do.
+    /// already, so once the group is empty its id is free again, and a signal sent then would
+    /// reach a new process that took it. That is assumed not to happen: macOS and Linux hand out
+    /// pids in rising order and come back to an id only after wrapping at their limit (`PID_MAX`,
+    /// 99999, on macOS; `pid_max` on Linux), so every other pid would have to be used up in between. The
+    /// SIGTERM and SIGKILL at the limit rest on the same assumption once the command is reaped.
     pub(super) fn finish(&self) {
         drop(self.kill());
         leader::release(self.group);
