@@ -183,6 +183,16 @@ crate::checks::planted::cases! {
         "crates/protocol/Cargo.toml:7: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s1` and `s2` are declared at lines 7 and 10 of crates/protocol/Cargo.toml, and each declaration brings `b` in\n    \
          fix: move the code that uses `s1` and `s2` into a crate whose row allows b, then remove `s1` and `s2` from lines 7 and 10 of crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
     ]), inspects 1 => super::tree::two_paths_of_one_name_both_bring_it_in,
+    /// tauri reached through another member, whose row bans nothing, fails at that member's line.
+    through_another_member: FailsWith(&[
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on tauri through clauseo-util, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `clauseo-util` into a crate whose row allows tauri, then remove `clauseo-util` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on tauri",
+    ]), inspects 2 => super::bypass::through_another_member,
+    /// A registry dependency `[patch.crates-io]` swaps for a crate that brings tauri in fails.
+    patched_registry_dependency: FailsWith(&[
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on tauri through serde, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `serde` into a crate whose row allows tauri, then remove `serde` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on tauri",
+    ]), inspects 1 => super::bypass::patched_registry_dependency,
     crates_io_marker_passes: Passes, inspects 1 => super::names::crates_io_marker_passes,
     crates_io_marker_bans_the_package: FailsWith(&[
         "crates/host/Cargo.toml:7: clauseo-host depends on rmcp, which ARCHITECTURE.md forbids\n    \
