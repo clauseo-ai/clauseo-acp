@@ -46,7 +46,14 @@ pub(crate) const TOOLS: &[Tool] = &[
         name: "taplo-cli",
         version: "0.10.0",
     },
+    CARGO_MUTANTS,
 ];
+
+/// cargo-mutants, which `cargo xtask mutants` runs and checks the version of.
+pub(crate) const CARGO_MUTANTS: Tool = Tool {
+    name: "cargo-mutants",
+    version: "27.1.0",
+};
 
 /// A pinned tool that is not a cargo crate. `setup` checks that `<name> version` prints exactly
 /// `version`, and `setup --binaries` installs that version when it does not.

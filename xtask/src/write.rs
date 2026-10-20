@@ -9,6 +9,8 @@
 //!   writes, and puts it back through `Guard`, and recovers an interrupted run's copies with
 //!   `Backups`.
 //! - `lock`: lock files under `target/xtask` that keep a second run of a tool out.
+//! - `mutants`: the diff `cargo xtask mutants` hands cargo-mutants, its old output folder, and
+//!   the build dirs a stopped run left.
 //! - `setup`: the staging dirs, run lock and installed binaries of `setup --binaries` in cargo's
 //!   bin.
 
@@ -19,6 +21,7 @@
 
 mod guard;
 mod lock;
+mod mutants;
 mod replace;
 mod setup;
 
@@ -26,6 +29,10 @@ pub(crate) use guard::{Backups, Guard, GuardFailure};
 #[cfg(test)]
 pub(crate) use lock::LOCK_DIR;
 pub(crate) use lock::{LockFile, create_lock_file, open_lock_file};
+pub(crate) use mutants::{
+    MUTANTS_DIFF, MUTANTS_OUTPUT, remove_mutants_build_dir, remove_mutants_output,
+    save_mutants_diff,
+};
 pub(crate) use setup::{
     RUN_LOCK, STAGING_PREFIX, Staging, open_run_lock, remove_staging_leftovers,
 };

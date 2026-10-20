@@ -8,6 +8,7 @@
 
 use crate::budgets;
 use crate::checks;
+use crate::mutants;
 use std::fmt;
 
 /// One fix line. `Display` prints the text, without the `fix: ` label. Each check's enum is
@@ -30,6 +31,8 @@ pub(crate) enum Fix {
     Exceptions(Box<checks::exceptions::Fix>),
     ExpectAllowlist(Box<checks::expect_allowlist::Fix>),
     Pins(Box<checks::pins::Fix>),
+    /// `cargo xtask mutants`, which prints a missed mutant as a violation.
+    Mutants(Box<mutants::Fix>),
     /// A step's fix line, built from the command that ran and what the tool printed. Only
     /// `Fix::tool` makes one, and no check calls it: a planted case fails on it (see
     /// `planted::Planted::verdict`).
@@ -69,6 +72,7 @@ impl fmt::Display for Fix {
             Fix::Exceptions(fix) => fix.fmt(f),
             Fix::ExpectAllowlist(fix) => fix.fmt(f),
             Fix::Pins(fix) => fix.fmt(f),
+            Fix::Mutants(fix) => fix.fmt(f),
             Fix::Tool(ToolText(text)) => f.write_str(text),
             #[cfg(test)]
             Fix::Fake(text) => f.write_str(text),
@@ -105,4 +109,5 @@ wraps! {
     Exceptions(checks::exceptions::Fix),
     ExpectAllowlist(checks::expect_allowlist::Fix),
     Pins(checks::pins::Fix),
+    Mutants(mutants::Fix),
 }

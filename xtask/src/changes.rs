@@ -118,13 +118,40 @@ pub(crate) fn only_files(root: &Path, entries: &[String]) -> Vec<String> {
 
 /// The commit this branch forked from: `git merge-base HEAD origin/main`.
 pub(crate) fn merge_base(root: &Path) -> Result<String, String> {
-    let base = git(root, &["merge-base", "HEAD", "origin/main"])?
-        .trim()
-        .to_owned();
+    merge_base_commit(root).map_err(String::from)
+}
+
+/// `merge_base`, with git's error kept apart for a typed fix.
+fn merge_base_commit(root: &Path) -> Result<String, GitError> {
+    let args = ["merge-base", "HEAD", "origin/main"];
+    let base = git(root, &args)?.trim().to_owned();
     if base.is_empty() {
-        return Err("`git merge-base HEAD origin/main` printed nothing".into());
+        return Err(GitError::Failed {
+            command: Cmd::new(Program::Git, args, GIT_TIMEOUT).to_string(),
+            stderr: "it exited 0 but printed nothing".into(),
+        });
     }
     Ok(base)
+}
+
+/// `git diff` of the working tree against the merge-base with `origin/main` (the base `--quick`
+/// uses), for `cargo xtask mutants`. Untracked files are not in it. The options fix the format
+/// whatever the user's git config says: no colour, no external diff tool, no rename pairs, and
+/// the `a/` and `b/` prefixes cargo-mutants strips.
+pub(crate) fn diff_since_merge_base(root: &Path) -> Result<String, GitError> {
+    let base = merge_base_commit(root)?;
+    git(
+        root,
+        &[
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-renames",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            base.as_str(),
+        ],
+    )
 }
 
 /// The commits gitleaks scans.
@@ -384,6 +411,33 @@ mod tests {
             repo_files(&dir),
             Ok(files(&[".gitignore", "new.ts", "src/kept.rs"]))
         );
+    }
+
+    #[test]
+    fn the_diff_is_against_the_merge_base_with_origin_main_with_a_and_b_prefixes() {
+        let dir = crate::scratch::Scratch::new("changes-diff-merge-base");
+        let commit = [
+            "-c",
+            "user.name=x",
+            "-c",
+            "user.email=x@x",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qam",
+        ];
+        git(&dir, &["init", "-q"]).expect("git init");
+        crate::scratch::Scratch::write(dir.join("a.rs"), "fn a() {}\n").expect("write a.rs");
+        git(&dir, &["add", "a.rs"]).expect("git add");
+        git(&dir, &[&commit[..], &["base"]].concat()).expect("commit the base");
+        let base = git(&dir, &["rev-parse", "HEAD"]).expect("rev-parse");
+        git(&dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]).expect("set origin/main");
+        crate::scratch::Scratch::write(dir.join("a.rs"), "fn b() {}\n").expect("change a.rs");
+        git(&dir, &[&commit[..], &["change"]].concat()).expect("commit the change");
+        assert_eq!(merge_base(&dir), Ok(base.trim().to_owned()));
+        let diff = diff_since_merge_base(&dir).expect("the diff");
+        assert!(diff.contains("--- a/a.rs\n+++ b/a.rs\n"), "{diff}");
+        assert!(diff.contains("-fn a() {}\n+fn b() {}\n"), "{diff}");
     }
 
     #[test]
