@@ -72,6 +72,8 @@ pub(super) fn cfg_rule(root: &Path, member: &Member, entries: &[String]) -> Vec<
             Ok(tokens) => {
                 let mut hits = Vec::new();
                 walk(tokens, &mut hits);
+                // `#[cfg $p]` is both an attribute head and a `cfg` before `$`; report it once.
+                hits.dedup();
                 for (finding, line) in hits {
                     found.push(report::cfg_rule(path, line, &finding, &member.name));
                 }
@@ -105,8 +107,12 @@ fn walk(tokens: TokenStream, hits: &mut Vec<(Finding, u32)>) {
                 }
                 walk(group.stream(), hits);
             }
-            TokenTree::Ident(ident) if starts_with_punct(rest, '!') => {
+            // A `$` after the name may stand for the `!`, so it counts as a call.
+            TokenTree::Ident(ident)
+                if starts_with_punct(rest, '!') || starts_with_punct(rest, '$') =>
+            {
                 match ident_name(ident).as_str() {
+                    "cfg" if starts_with_punct(rest, '$') => metavariable_in_place(&rest[0], hits),
                     "cfg" => cfg_group(&rest[1..], true, hits),
                     "include" => hits.push((Finding::Include, line_of(ident.span().start().line))),
                     _ => {}
@@ -226,14 +232,15 @@ fn metavariable_name(tree: &TokenTree, hits: &mut Vec<(Finding, u32)>) {
 }
 
 /// Checks `tokens` as the inside of an attribute, whether or not a `#` stands before them, since a
-/// macro can put the `#` and the brackets together from separate tokens. A `path = ..` fails,
-/// and a `cfg` or `cfg_attr` predicate must be allowed.
+/// macro can put the `#` and the brackets together from separate tokens. A `path = ..` or
+/// `path $` fails, and a `cfg` or `cfg_attr` predicate must be allowed.
 fn attribute_head(tokens: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
     let Some(TokenTree::Ident(ident)) = tokens.first() else {
         return;
     };
     match ident_name(ident).as_str() {
-        "path" if starts_with_punct(&tokens[1..], '=') => {
+        // A `$` after `path` may stand for the `=`.
+        "path" if starts_with_punct(&tokens[1..], '=') || starts_with_punct(&tokens[1..], '$') => {
             hits.push((Finding::PathAttribute, line_of(ident.span().start().line)));
         }
         "cfg" => cfg_group(&tokens[1..], false, hits),
@@ -342,6 +349,7 @@ mod tests {
             TokenStream::from_str(source).expect("the source lexes"),
             &mut hits,
         );
+        hits.dedup();
         hits
     }
 
@@ -387,6 +395,7 @@ mod tests {
                 vec![(Finding::PathAttribute, 1)],
             ),
             ("#!$a", vec![(Finding::MetavariableAttribute, 1)]),
+            ("cfg $b (unix)", vec![(metavariable(), 1)]),
             (
                 "$($m)*!(x); $crate::m!(); $i::x!();",
                 vec![(Finding::MetavariableMacro, 1)],

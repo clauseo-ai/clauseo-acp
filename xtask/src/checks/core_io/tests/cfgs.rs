@@ -174,6 +174,23 @@ pub(in crate::checks::core_io) fn hash_from_a_metavariable() -> Inspection {
     )
 }
 
+/// The review's case: the `=` of a `path` attribute comes in as a metavariable.
+pub(in crate::checks::core_io) fn path_with_a_metavariable() -> Inspection {
+    with_file(
+        "path-metavariable",
+        "macro_rules! p {\n    ($e:tt) => {\n        #[path $e \"x.txt\"]\n        mod x;\n    \
+         };\n}\np!(=);\n",
+    )
+}
+
+/// The review's case: the `!` of `include!` comes in as a metavariable.
+pub(in crate::checks::core_io) fn include_with_a_metavariable() -> Inspection {
+    with_file(
+        "include-metavariable",
+        "macro_rules! i {\n    ($b:tt) => {\n        include $b (\"y.txt\");\n    };\n}\ni!(!);\n",
+    )
+}
+
 /// Items named `cfg` and `cfg_attr` are not cfgs.
 pub(in crate::checks::core_io) fn items_named_cfg() -> Inspection {
     with_file(

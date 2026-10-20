@@ -347,6 +347,13 @@ crate::checks::planted::cases! {
         cfg_form!(4, "the name `panic`"),
     ]), inspects 3 => super::attribute_split_across_a_macro,
     hash_from_a_metavariable: FailsWith(&[cfg_form!(2, "the name `panic`")]), inspects 3 => super::hash_from_a_metavariable,
+    path_with_a_metavariable: FailsWith(&[path_attribute!(3)]), inspects 3 => super::path_with_a_metavariable,
+    include_with_a_metavariable: FailsWith(&[
+        "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs` calls `include!`, which can bring into clauseo-protocol code \
+         from a file core-io does not read\n    \
+         fix: move the code into a module at its default path; use `include_str!` or \
+         `include_bytes!` for data",
+    ]), inspects 3 => super::include_with_a_metavariable,
     items_named_cfg: Passes, inspects 3 => super::items_named_cfg,
     macro_name_metavariable: FailsWith(&[
         "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs` calls a macro whose name is a metavariable, so a macro of \
