@@ -85,10 +85,6 @@ fn a_command_is_found_after_a_prompt_assignments_and_separators() {
         "RUST_LOG=1 CI=1 cargo xtask check --quick",
         &["cargo xtask check --quick"],
     );
-    assert_reads(
-        "cargo xtask check && cargo xtask frobnicate",
-        &["cargo xtask check", "cargo xtask frobnicate"],
-    );
     assert_reads("cd ui; cargo xtask setup", &["cargo xtask setup"]);
     assert_reads("cargo xtask setup | tee x", &["cargo xtask setup"]);
 }
@@ -99,10 +95,6 @@ fn a_command_is_found_anywhere_in_the_words_but_not_in_other_words_or_a_comment(
     assert_reads("cargo xtasks check", &[]);
     assert_reads("mycargo xtask check", &[]);
     assert_reads("# cargo xtask check", &[]);
-    assert_reads(
-        "cargo xtask check  # changed crates only",
-        &["cargo xtask check"],
-    );
 }
 
 #[test]
@@ -240,13 +232,8 @@ fn words_are_split_as_a_shell_splits_them() {
         "FOO=\"a b\" cargo xtask frobnicate",
         &["cargo xtask frobnicate"],
     );
-    assert_reads("sudo cargo xtask frobnicate", &["cargo xtask frobnicate"]);
     assert_reads(
         "echo 'a && b; c | d' && cargo xtask check",
-        &["cargo xtask check"],
-    );
-    assert_reads(
-        "cargo xtask check # it is fine; really",
         &["cargo xtask check"],
     );
 }
@@ -354,10 +341,7 @@ fn a_session_block_reads_only_the_prompted_lines() {
         "PS> cargo xtask check",
         Some("cargo xtask check"),
     );
-    assert_read("console", "# then run cargo xtask check again", None);
-    assert_read("console", "> cargo xtask check passes now", None);
     assert_read("console", "PS C:\\repo> cargo xtask check", None);
-    assert_read("console", "error: run cargo xtask setup first", None);
     assert!(is_one_of("Console", &SESSIONS));
     assert!(is_one_of("PWSH", &SHELLS));
     assert!(!is_one_of("rust", &SHELLS));

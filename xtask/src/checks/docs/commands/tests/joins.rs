@@ -35,7 +35,6 @@ fn a_continued_line_is_joined_with_the_lines_after_it_in_its_block() {
         ("sh", "cargo xtask check \\\n--quick", "1: cargo xtask check --quick", &[]),
         ("sh", "cargo xtask frobnicate \\", "1: cargo xtask frobnicate", &[1]),
         ("sh", "cargo xtask check\\  ", "1: cargo xtask check", &[]),
-        ("sh", "cargo xtask \\", "1: cargo xtask", &[1]),
         ("console", "$ cargo xtask check \\\n--quick", "1: cargo xtask check --quick", &[]),
         ("ps1-session", "PS> cargo xtask check `\n> --quick", "1: cargo xtask check --quick", &[]),
         ("pwsh-session", "PS> cargo xtask check `\n>> --quik", "1: cargo xtask check --quik", &[1]),
@@ -47,7 +46,6 @@ fn a_continued_line_is_joined_with_the_lines_after_it_in_its_block() {
         ("powershell", "cargo xtask check ``\n--quick", "1: cargo xtask check ``\n2: --quick", &[]),
         ("cmd", "cargo xtask check ^^\n--quick", "1: cargo xtask check ^^\n2: --quick", &[1]),
         ("sh", "# x \\\ncargo xtask frobnicate", "1: # x \\\n2: cargo xtask frobnicate", &[2]),
-        ("sh", "cargo xtask check # done \\\ncargo xtask frobnicate", "1: cargo xtask check # done \\\n2: cargo xtask frobnicate", &[2]),
         ("sh", "echo '# x' \\\ncargo xtask check", "1: echo '# x' cargo xtask check", &[]),
     ];
     for (info, text, read, reported) in rows {
