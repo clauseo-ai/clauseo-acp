@@ -44,27 +44,6 @@ here and adds the rule to "Rules the checks enforce" in `AGENTS.md`.
 
 ## Until the checks land
 
-- Test each new check against the ways around it: a rename, another spelling or escape, another
-  file or config the tool also reads, another API that does the same thing. Prefer clippy
-  `disallowed-methods`, cargo-deny or a real parser over a text scan.
-  Replaced by: the planted-violation test, which fails any check that ships no bypass forms.
-  Why: PR #8 took five rounds; each found a new way around the last fix.
-- Before you report, break what each new check, test or probe guards (remove it, move it, empty it)
-  and watch it fail.
-  Replaced by: mutation testing of the diff with cargo-mutants.
-  Why: a launch check and a compiler test passed with the thing they guard removed (PR #8).
-- Only buildtime edits a tracked file today. Its guard is `xtask/src/write/guard.rs` in
-  Rust and `ui/app/scripts/buildtime-lib.mjs` in scripts. The next tool that needs to edit a tracked
-  file moves the guard out of buildtime instead of copying it, and never writes a second guard.
-  Replaced by: clippy `disallowed-methods` and an oxlint import ban on file-writing calls outside
-  the guard.
-  Why: the second tool that edited a file repeated the defects the first had fixed (PR #6, PR #8).
-- Every child process has a timeout, and stopping it stops its whole process tree, also when the
-  parent gets SIGKILL. Test the stop on a real tree with a wrapper that starts a grandchild, as
-  `ui/app/scripts/buildtime-proc.test.mjs` does.
-  Replaced by: a process API in `xtask/src/process.rs` that cannot start a child without a timeout
-  and always kills the whole tree.
-  Why: it took three rounds in PR #8 to stop tsc's native binary and Vite.
 - Tests never touch the network.
   Replaced by: CI running the tests with the network cut off.
   Why: `cargo test -p xtask` quietly downloaded crates (PR #8).
