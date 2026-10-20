@@ -291,7 +291,7 @@ pub(super) fn clean_workspace_passes() -> Inspection {
 }
 
 #[test]
-fn a_lockfile_behind_the_manifests_fails_at_the_root_manifest_without_rewriting_it() {
+fn a_lockfile_behind_the_manifests_fails_with_no_file_line_without_rewriting_it() {
     let crates = [(
         "crates/protocol".to_owned(),
         manifest("clauseo-protocol", ""),
@@ -316,9 +316,9 @@ fn a_lockfile_behind_the_manifests_fails_at_the_root_manifest_without_rewriting_
     fs::write(dir.join(&mid_dir).join("src/lib.rs"), "").expect("write lib.rs");
     fs::write(dir.join(&mid_dir).join("Cargo.toml"), mid).expect("write mid");
     let found = check(&ctx, Some(&["--locked", "--offline"]));
-    assert_eq!(found.violations.len(), 1);
-    let failure = &found.violations[0];
-    assert_eq!((failure.path.as_str(), failure.line), ("Cargo.toml", 1));
+    assert_eq!(found.violations, Vec::new());
+    assert_eq!(found.failures.len(), 1);
+    let failure = &found.failures[0];
     assert!(
         failure.fix.contains("cargo update --workspace"),
         "{failure}"

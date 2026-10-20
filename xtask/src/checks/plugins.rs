@@ -144,6 +144,7 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
         };
         found.extend(path_violations(&member.name, &path, &text, deps, members));
     }
+    let mut failures = Vec::new();
     if let Some(flags) = graph_flags {
         let desktop = graph::Desktop {
             path: &manifest,
@@ -152,7 +153,7 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
         };
         match checks::graph::load_tree(&ctx.root, checks::DESKTOP_PACKAGE, flags) {
             Ok(tree) => found.extend(graph::violations(&tree, &desktop)),
-            Err(failed) => found.push(failed),
+            Err(failed) => failures.push(failed),
         }
     }
     let read_by_rules = desktop_deps
@@ -160,7 +161,10 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
         .iter()
         .filter(|dep| dep.kind.as_deref() != Some("dev"))
         .count();
-    Inspection::new(read_by_rules, found)
+    Inspection {
+        failures,
+        ..Inspection::new(read_by_rules, found)
+    }
 }
 
 /// One violation for each path dependency of member `name` whose package is not a workspace

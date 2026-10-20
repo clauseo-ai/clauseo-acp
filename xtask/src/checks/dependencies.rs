@@ -17,7 +17,7 @@
 mod graph;
 
 use crate::checks::crates_table::{self, CrateRow, CratesTable, Status};
-use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
+use crate::checks::{self, Failure, Inspection, Noun, StaticCheck, violation};
 use crate::violation::Violation;
 use crate::workspace::{Context, Member};
 use std::path::Path;
@@ -77,37 +77,47 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
         .iter()
         .filter(|(_, row)| !graph::forbidden(row).is_empty())
         .collect();
+    let mut failures = Vec::new();
     if let (Some(flags), false) = (graph_flags, walked.is_empty()) {
         for (member, row) in walked {
-            found.extend(walk(&ctx.root, member, row, flags));
+            match walk(&ctx.root, member, row, flags) {
+                Ok(violations) => found.extend(violations),
+                Err(failed) => failures.push(failed),
+            }
         }
     }
     found.sort_by(|a, b| (&a.path, a.line, &a.message).cmp(&(&b.path, b.line, &b.message)));
     found.dedup();
-    Inspection::new(matched.len(), found)
+    Inspection {
+        failures,
+        ..Inspection::new(matched.len(), found)
+    }
 }
 
-/// The violations in the graph of `member`, whose row is `row`: its `cargo tree` run with
-/// `flags`, or the failure to read it.
-fn walk(root: &Path, member: &Member, row: &CrateRow, flags: &[&str]) -> Vec<Violation> {
+/// The violations in the graph of `member`, whose row is `row`, from its `cargo tree` run with
+/// `flags`. `Err` is the failure of that run, which has no `file:line`.
+fn walk(
+    root: &Path,
+    member: &Member,
+    row: &CrateRow,
+    flags: &[&str],
+) -> Result<Vec<Violation>, Failure> {
     let manifest = checks::join(&member.dir, "Cargo.toml");
     let text = match checks::read_repo_file(root, &manifest) {
         Ok(text) => text.unwrap_or_default(),
-        Err(unreadable) => return vec![unreadable],
+        Err(unreadable) => return Ok(vec![unreadable]),
     };
-    match checks::graph::load_tree(root, &member.name, flags) {
-        Ok(tree) => graph::violations(
-            &graph::Crate {
-                package: &member.name,
-                manifest: &manifest,
-                text: &text,
-                row,
-                deps: &member.dependencies,
-            },
-            &tree,
-        ),
-        Err(failed) => vec![failed],
-    }
+    let tree = checks::graph::load_tree(root, &member.name, flags)?;
+    Ok(graph::violations(
+        &graph::Crate {
+            package: &member.name,
+            manifest: &manifest,
+            text: &text,
+            row,
+            deps: &member.dependencies,
+        },
+        &tree,
+    ))
 }
 
 /// One violation per row whose Status is wrong: `exists` with no workspace crate, or `planned`

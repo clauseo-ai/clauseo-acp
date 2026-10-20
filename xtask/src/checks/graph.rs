@@ -1,6 +1,6 @@
 //! A workspace crate's dependency graph, for the checks that read one: `dependencies` walks the
 //! graph of each crate whose row bans a crate, `plugins` walks the desktop crate's. A failed
-//! cargo run becomes one violation at `Cargo.toml:1`, with a fix for the cause cargo names.
+//! cargo run becomes one failure with no `file:line`, with a fix for the cause cargo names.
 //!
 //! The graph comes from the crate's own `cargo tree` run (see `tree_args`): `-p <crate>
 //! --all-features`, so the crate's optional dependencies count but a feature that only another
@@ -27,50 +27,55 @@
 //! which section its lines came under (`Tree::sections`). A line in any other shape fails the
 //! check.
 
+use crate::checks::Failure;
 use crate::checks::toml_lines::{BUILD, Kind, NORMAL};
-use crate::checks::violation;
 use crate::process::{self, Cmd, Program};
-use crate::violation::Violation;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::Path;
 
-/// The root manifest, where a failed run points.
-pub(crate) const ROOT_MANIFEST: &str = "Cargo.toml";
-
-/// The stdout of `cargo <args>` run in `root`; `Err` is the violation to report when cargo
-/// cannot be started or fails.
-pub(crate) fn cargo_stdout(root: &Path, args: &[&str]) -> Result<String, Violation> {
+/// The stdout of `cargo <args>` run in `root`. `Err` is the failure to report when cargo
+/// cannot be started or fails. It has no `file:line`, since cargo's error names the cause.
+pub(crate) fn cargo_stdout(root: &Path, args: &[&str]) -> Result<String, Failure> {
     let cmd = Cmd::new(Program::Cargo, args.iter().copied());
-    let quiet = process::run_quiet(&cmd, root).map_err(|error| {
-        violation(
-            ROOT_MANIFEST,
-            1,
-            format!("could not run `{cmd}`: {error}"),
-            "put `cargo` on PATH: this check reads the dependency graph from cargo",
-        )
+    let quiet = process::run_quiet(&cmd, root).map_err(|error| Failure {
+        message: format!("could not run `{cmd}`: {error}"),
+        fix: "put `cargo` on PATH, since this check reads the dependency graph from cargo"
+            .to_owned(),
     })?;
     if quiet.success {
         Ok(quiet.stdout)
     } else {
         let stderr = quiet.stderr.trim();
-        Err(violation(
-            ROOT_MANIFEST,
-            1,
-            format!("`{cmd}` failed: {stderr}"),
-            failure_fix(&cmd, stderr),
-        ))
+        Err(Failure {
+            message: format!("`{cmd}` failed: {stderr}"),
+            fix: failure_fix(&cmd, stderr),
+        })
     }
 }
 
 /// The fix for a failed run of `cmd` whose stderr is `stderr`, true for the cause cargo names.
+/// Under `--offline` cargo adds its offline note to every resolution error, so the errors of a
+/// dependency that no registry version matches come before the offline branch.
 fn failure_fix(cmd: &Cmd, stderr: &str) -> String {
     if stderr.contains("--locked was passed") {
-        "Cargo.lock does not match the manifests and the check never rewrites it: run `cargo update --workspace` to bring it in line, then commit Cargo.lock".to_owned()
+        "Cargo.lock does not match the manifests, and the check never rewrites it. Run \
+         `cargo update --workspace` to bring it in line, then commit Cargo.lock"
+            .to_owned()
+    } else if stderr.contains("no matching package named")
+        || stderr.contains("failed to select a version")
+    {
+        "cargo could not resolve the dependency that its error above names. Correct that \
+         dependency in the manifest of the package the error says requires it, then run the \
+         check again"
+            .to_owned()
     } else if stderr.contains("--offline") || stderr.contains("offline mode") {
-        "a crate is not downloaded and the check runs offline: run `cargo fetch --locked`, then run the check again".to_owned()
+        "a crate is not downloaded and the check runs offline. Run `cargo fetch --locked`, then \
+         run the check again"
+            .to_owned()
     } else {
         format!(
-            "fix what cargo reports above until `{cmd}` succeeds: this check reads the dependency graph from it"
+            "fix what cargo reports above until `{cmd}` succeeds, since this check reads the \
+             dependency graph from it"
         )
     }
 }
@@ -98,17 +103,18 @@ pub(crate) fn tree_args<'a>(package: &'a str, flags: &[&'a str]) -> Vec<&'a str>
 }
 
 /// The dependency graph of the workspace crate `package`, from `cargo tree` run in `root` with
-/// `flags` after `tree_args`. `Err` is the violation to report, at `Cargo.toml:1`.
-pub(crate) fn load_tree(root: &Path, package: &str, flags: &[&str]) -> Result<Tree, Violation> {
+/// `flags` after `tree_args`. `Err` is the failure to report, with no `file:line`.
+pub(crate) fn load_tree(root: &Path, package: &str, flags: &[&str]) -> Result<Tree, Failure> {
     let args = tree_args(package, flags);
     let stdout = cargo_stdout(root, &args)?;
-    Tree::parse(&stdout, package).map_err(|error| {
-        violation(
-            ROOT_MANIFEST,
-            1,
-            format!("could not read the output of `cargo {}`: {error}", args.join(" ")),
-            "update `Tree::parse` in xtask/src/checks/graph.rs to the lines this cargo prints: the check reads each crate's dependency graph from them",
-        )
+    Tree::parse(&stdout, package).map_err(|error| Failure {
+        message: format!(
+            "could not read the output of `cargo {}`: {error}",
+            args.join(" ")
+        ),
+        fix: "update `Tree::parse` in xtask/src/checks/graph.rs to the lines this cargo prints, \
+              since the check reads each crate's dependency graph from them"
+            .to_owned(),
     })
 }
 
