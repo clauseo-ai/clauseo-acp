@@ -21,42 +21,15 @@
 //! `CLIPPY_ARGS` does not undo it. So a held crate gets no exception; a test that needs a
 //! fixture reads it with `include_str!`. A root syn cannot parse fails at the syntax error. A
 //! root outside the crate's folder, once its `.` and `..` components are resolved, fails at the
-//! crate's manifest, since cargo builds it all the same and the cfg rule below reads only the
-//! folder. A held crate also has no build script, neither a `build.rs` in its folder nor a
+//! crate's manifest, since cargo builds it all the same and the cfg rule in `cfgs.rs` reads only
+//! the folder. A held crate also has no build script, neither a `build.rs` in its folder nor a
 //! `build` key under `[package]`, since a build script's `cargo::rustc-env` lines reach the
 //! clippy that lints the crate. `roots.rs` checks the roots and the build script.
 //!
-//! clippy sees all of a held crate's code. The clippy step in `steps/plan.rs` runs with
-//! `--all-targets` and `--all-features`, so clippy lints the crate once per target kind with every
-//! feature on, and code is linted only when its cfg holds in that build. `test` holds in the test
-//! build, `not(test)` in the others, and a positive feature in all of them. `doc` holds only when
-//! rustdoc documents the crate. Any other cfg can leave code out of every clippy run, so a held
-//! crate's cfgs use only `test`, `doc` and positive features. The cfg rule in `cfgs.rs` lexes
-//! with proc-macro2 every `.rs` file in git's list under the crate's folder, macro bodies and
-//! macro call arguments included.
-//!
-//! Each cfg predicate is built only from `all`, `any`, `not`, `test`, `doc` and
-//! `feature = "<literal>"`, with no `feature` under a `not`. The rule reads the predicate of each
-//! `cfg` and `cfg_attr` at the start of any bracket group, since a macro can join a `#` to
-//! brackets passed separately, and inside a `cfg_attr`. A `cfg` among a `cfg_attr`'s attributes
-//! fails at any depth, since with every feature on it can drop an item that other builds keep. The
-//! name `cfg_select` fails anywhere, a `use` included, since its macro builds only the arm whose
-//! cfg holds. `cfg!` passes, since both branches of an `if cfg!(..)` are compiled and linted.
-//!
-//! Every `#` is followed by brackets, or by `!` and brackets, wherever it stands, since otherwise
-//! a macro could join it to brackets passed separately. An attribute or a macro call whose name
-//! is a metavariable fails, and so does a metavariable after `path` or `include`, since a macro
-//! could build a `cfg`, a `path` or an `include!` from what its caller passes. These rules skip
-//! the matcher of each
-//! `macro_rules!` arm. A transcriber may write `#[$m]` when its arm's matcher binds `$m` as
-//! `#[$m:meta]`, since the caller then writes a whole bracketed attribute, which the rule checks
-//! where the caller writes it. Both hold only for a `macro_rules!` outside every transcriber and
-//! every macro call's arguments, since there no other macro can fill in its tokens.
-//!
-//! `include!` and every symlink git lists under the folder fail, file or folder target alike. A
-//! `path` attribute passes only on an out-of-line `mod name;` at the top level of a file, with a
-//! string literal that names a file the rule lexes without leaving the crate's folder on the way.
-//! So every module file is lexed. A file that does not lex fails at the line the lexer names.
+//! clippy lints only the code that its runs compile, so a banned call behind a cfg that no clippy
+//! run sets goes unseen. The cfg rule in `cfgs.rs` fails such cfgs in a held crate, along with the
+//! macro, `path`, `include!` and symlink forms that could hide one from it. Its module comment is
+//! the one place the rule is written down.
 //!
 //! Lint configuration lives only in the root `clippy.toml`, the own `clippy.toml` of each crate
 //! whose row lists `fs`, `process` or `any I/O`, and the root `[workspace.lints]`. So the check

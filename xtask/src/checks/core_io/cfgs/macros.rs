@@ -1,9 +1,6 @@
-//! The arms of a `macro_rules!` definition. The metavariable rules skip the matcher of each arm,
-//! which only matches tokens and builds nothing. In the transcriber, `#[$m]` passes when the same
-//! arm's matcher binds `$m` as `#[$m:meta]`, since a caller then writes a whole bracketed
-//! attribute, which the walk checks where the caller writes it. Both hold only for a definition
-//! outside every transcriber and every macro call's arguments. There another macro can fill in
-//! the matcher and the `$m`, or the tokens are no definition at all, so every rule applies.
+//! The arms of a `macro_rules!` definition, as the walk in `cfgs.rs` reads them. Where the walk's
+//! scope reads definitions, `arms` walks each matcher in a matcher scope and each transcriber with
+//! the names its own matcher binds as `#[$m:meta]`. Elsewhere it walks the body as it finds it.
 
 use super::{Finding, NO_NAMES, Scope, group, is_punct, walk};
 use proc_macro2::{Group, TokenStream, TokenTree};
@@ -21,8 +18,7 @@ pub(super) fn holds_arms(before: &[TokenTree]) -> bool {
 
 /// Pushes onto `hits` each `Finding` in the arms of the definition `body`, met in `scope`. Each
 /// arm is a matcher group, `=>` and a transcriber group, with a `;` between arms. A body where
-/// `scope` reads no definitions is walked in `scope` with every metavariable rule and no
-/// forwarded attribute, and a body of
+/// `scope` reads no definitions is walked in `scope` with no forwarded attribute, and a body of
 /// any other shape is walked as if it were outside any macro.
 pub(super) fn arms(body: &Group, scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
     if !scope.definitions {

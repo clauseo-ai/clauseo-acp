@@ -1,11 +1,8 @@
-//! A `path` attribute that core-io can follow. rustc resolves `#[path = ".."]` on an out-of-line
-//! `mod name;` outside any inline module block against the folder of the file that holds it. So
-//! such an attribute passes when it stands at the top level of a file, outside every brace,
-//! bracket and parenthesis, its value is a string literal, and the path it names, resolved
-//! against that folder one component at a time, never leaves the crate's folder and ends at a file
-//! core-io lexes. That file is then no symlink, since core-io lexes none. Every other `path`
-//! attribute fails, a metavariable value, one in a `cfg_attr`, on an inline module or in a module
-//! block included.
+//! The `path` attributes that core-io can follow. rustc resolves `#[path = ".."]` on an
+//! out-of-line `mod name;` outside any inline module block against the folder of the file that
+//! holds it. `allowed` tells whether brackets at the top level of a file are such an attribute
+//! with a string literal, and `resolve` follows its value from that folder one component at a
+//! time.
 
 use super::{ident_name, is_punct};
 use crate::workspace;

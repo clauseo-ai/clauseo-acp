@@ -1,32 +1,45 @@
-//! The cfg rule of a held crate. clippy lints the crate once per target kind with every feature
-//! on, so code is linted only when its cfg holds in that build. `test` holds in the test build,
-//! `not(test)` in the others, and a positive feature holds under `--all-features`. `doc` holds
-//! only when rustdoc documents the crate, and is false in every clippy run as in every build. Any
-//! other name, or a feature under a `not`, can leave code out of every clippy run.
+//! The cfg rule of a held crate, and the one place its rules are written down. The clippy step
+//! in `steps/plan.rs` runs with `--all-targets` and `--all-features`, so clippy lints the crate
+//! once per target kind with every feature on. Code is linted only when its cfg holds in one of
+//! those runs. `test` holds in the test build, `not(test)` in the others, and a positive feature
+//! in all of them. `doc` holds only when rustdoc documents the crate, so it is false in every
+//! clippy run as in every build. Any other name, or a feature under a `not`, can leave code out
+//! of every clippy run.
 //!
-//! Each `.rs` file of the crate is lexed, and every token tree is walked, macro bodies and macro
-//! call arguments included. The predicate of each `cfg` and `cfg_attr` at the start of any
-//! bracket group or inside a `cfg_attr` is built only from `all`, `any`, `not`, `test`, `doc` and
-//! `feature = "<literal>"`, with no `feature` under a `not`. Any bracket group counts, since a
-//! macro from outside the crate can write a `#` before brackets passed to it. A `cfg` among the
-//! attributes of a
-//! `cfg_attr` fails at any depth, since `#[cfg_attr(feature = "x", cfg(any()))]` keeps the item
-//! only when the feature is off. The name `cfg_select` fails wherever it stands, a `use`
-//! included, since `cfg_select!` builds only the arm whose cfg holds and an alias would hide the
-//! call. `cfg!` passes, since both branches of an `if cfg!(..)` are compiled and linted.
+//! The rule lexes with proc-macro2 every `.rs` file in git's list under the crate's folder and
+//! walks every token tree, macro bodies and macro call arguments included. A file that does not
+//! lex fails at the line the lexer names.
+//!
+//! Each `cfg` and `cfg_attr` predicate is built only from `all`, `any`, `not`, `test`, `doc` and
+//! `feature = "<literal>"`, with no `feature` under a `not`. The rule reads the predicate at the
+//! start of every bracket group, with or without a `#` before it, because a macro from outside
+//! the crate can write a `#` before brackets passed to it. It also reads each attribute inside a
+//! `cfg_attr`. A `cfg` among the attributes of a `cfg_attr` fails at any depth, because
+//! `#[cfg_attr(feature = "x", cfg(any()))]` keeps the item only when the feature is off. The name
+//! `cfg_select` fails wherever it stands, in a `use` too. `cfg_select!` builds only the arm whose
+//! cfg holds, and an alias would hide the call. `cfg!` passes, because both branches of an
+//! `if cfg!(..)` are compiled and linted.
 //!
 //! Every `#` is followed by a bracket group, or by `!` and a bracket group, in matchers,
 //! transcribers and macro call arguments alike. Otherwise a macro could join a `#` to brackets
-//! passed separately and build an attribute that core-io does not see. An attribute or a macro
-//! call whose name is a metavariable fails, and so does a metavariable after `path` or `include`,
-//! since a macro could build a `cfg`, a `path` or an `include!` from what its caller passes.
-//! These metavariable rules skip the matcher of each `macro_rules!` arm, and a transcriber may
-//! write `#[$m]` when its arm's matcher binds `$m` as `#[$m:meta]`, but only for a definition
-//! outside every transcriber and every macro call's arguments. `macros.rs` reads the arms.
+//! passed separately and build an attribute that the rule does not see. An attribute whose name is
+//! a metavariable fails, and so does a macro call whose name is a metavariable, such as `$x!`. A
+//! metavariable right after `path` or `include` fails too. Otherwise a macro could build a `cfg`,
+//! a `path` or an `include!` from what its caller passes.
 //!
-//! `include!` and every symlink under the crate's folder fail. A `path` attribute passes only in
-//! the one place where core-io can follow it to a file it lexes, and `paths.rs` says where that
-//! is. So every module file is a `.rs` file under the crate's folder and is lexed here.
+//! The metavariable rules skip the matcher of each arm of a `macro_rules!`, which only matches
+//! tokens. A transcriber may write `#[$m]` when the same arm's matcher binds `$m` as
+//! `#[$m:meta]`. The caller then writes a whole bracketed attribute, and the rule checks it where
+//! the caller writes it. Both exceptions hold only for a `macro_rules!` outside every transcriber
+//! and every macro call's arguments. Elsewhere another macro can fill in the matcher and the `$m`,
+//! or the tokens are no definition at all, so every rule applies.
+//!
+//! `include!` fails, and so does every symlink git lists under the crate's folder, whether it
+//! points to a file or a folder. A `path` attribute passes only on an out-of-line `mod name;` at
+//! the top level of a file, outside every brace, bracket and parenthesis. Its value is a string
+//! literal that names a file the rule lexes, resolved against the folder of the file that holds
+//! it, and it never leaves the crate's folder on the way. So every module file is a `.rs` file
+//! under the crate's folder and is lexed here.
 
 mod macros;
 mod paths;
@@ -74,8 +87,8 @@ struct Scope<'a> {
     /// True on the matcher side of a `macro_rules!` arm, where the metavariable rules do not
     /// apply.
     matcher: bool,
-    /// True where a `macro_rules!` is a definition whose arms the rules can read: outside every
-    /// transcriber and every macro call's arguments. Elsewhere another macro can fill in or
+    /// True outside every transcriber and every macro call's arguments, where a `macro_rules!` is
+    /// a definition whose arms the rules can read. Elsewhere another macro can fill in or
     /// rewrite its tokens, so its arms get the full rules.
     definitions: bool,
     /// The names the arm's matcher binds as `#[$m:meta]`, which its transcriber may write as
