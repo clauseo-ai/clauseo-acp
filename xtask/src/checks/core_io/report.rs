@@ -370,6 +370,16 @@ pub(super) fn cfg_rule(path: &str, line: u32, finding: &Finding, package: &str) 
             ),
             "write the called macro's name in the macro body itself".to_owned(),
         ),
+        Finding::JoinedBrackets => (
+            format!(
+                "`{path}` writes brackets right after a repetition or a metavariable that can \
+                 stand for a `#`, so a macro of {package} can build an attribute that core-io \
+                 does not see"
+            ),
+            "put the brackets after a token the macro body writes itself, or after a \
+             metavariable this arm binds as a fragment other than `tt`, such as `ident` or `expr`"
+                .to_owned(),
+        ),
         Finding::PathAttribute => (
             format!(
                 "`{path}` gives a module a `path` attribute that core-io cannot follow to a file \

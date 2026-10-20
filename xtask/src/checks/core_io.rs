@@ -49,7 +49,9 @@
 //! `macro_rules!` arm. A transcriber may write `#[$m]` when its arm's matcher binds `$m` as
 //! `#[$m:meta]`, since the caller then writes a whole bracketed attribute, which the rule checks
 //! where the caller writes it. Both hold only for a `macro_rules!` outside every transcriber and
-//! every macro call's arguments, since there no other macro can fill in its tokens.
+//! every macro call's arguments, since there no other macro can fill in its tokens. In a
+//! transcriber, brackets fail right after a repetition or after a metavariable that the arm binds
+//! as `tt` or does not bind at all, since either can stand for a `#`.
 //!
 //! `include!` and every symlink git lists under the folder fail, file or folder target alike. A
 //! `path` attribute passes only on an out-of-line `mod name;` at the top level of a file, with a

@@ -123,6 +123,11 @@ fn macro_arms() {
             "macro_rules! m { (#[cfg(unix)]) => {} }",
             vec![(Finding::Predicate("the name `unix`".to_owned()), 1)],
         ),
+        (
+            "macro_rules! m { ($v:ident $t:tt) => { $v[0]; $crate[0]; $t[0]; $u[0]; $($t),*[0] } }",
+            vec![(Finding::JoinedBrackets, 1); 3],
+        ),
+        ("$h [cfg(test)]", vec![]),
     ];
     for (source, expected) in cases {
         assert_eq!(findings(source), expected, "{source}");

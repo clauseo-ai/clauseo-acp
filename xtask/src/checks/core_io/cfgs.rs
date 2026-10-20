@@ -19,7 +19,9 @@
 //! `path` or an `include!` from what its caller passes. These metavariable rules skip the matcher
 //! of each `macro_rules!` arm, and a transcriber may write `#[$m]` when its arm's matcher binds
 //! `$m` as `#[$m:meta]`, but only for a definition outside every transcriber and every macro
-//! call's arguments. `macros.rs` reads the arms.
+//! call's arguments. In a transcriber, brackets fail right after a repetition or after a
+//! metavariable that the arm binds as `tt` or does not bind, since either can stand for a `#`.
+//! `macros.rs` reads the arms.
 //!
 //! `include!` and every symlink under the crate's folder fail. A `path` attribute passes only in
 //! the one place where core-io can follow it to a file it lexes, and `paths.rs` says where that
@@ -36,7 +38,7 @@ use crate::workspace::{self, Member};
 use paths::TopLevel;
 use predicate::{metavariable, whole_predicate};
 use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::str::FromStr;
 
@@ -58,6 +60,9 @@ pub(super) enum Finding {
     CfgInCfgAttr,
     /// A macro call whose name is a metavariable, such as `$x!`.
     MetavariableMacro,
+    /// In a transcriber, brackets right after a metavariable bound as `tt` or not bound by the
+    /// arm, or after a repetition, either of which can stand for a `#`.
+    JoinedBrackets,
 }
 
 /// No names, for a scope outside any transcriber.
@@ -76,6 +81,8 @@ struct Scope<'a> {
     /// The names the arm's matcher binds as `#[$m:meta]`, which its transcriber may write as
     /// `#[$m]`.
     metas: &'a BTreeSet<String>,
+    /// In a transcriber, the fragment kind of each metavariable the arm's matcher binds.
+    binds: Option<&'a BTreeMap<String, String>>,
     /// The file, when the walk is at its top level, outside every group, where a `path`
     /// attribute can pass (`paths.rs`).
     top: Option<&'a TopLevel<'a>>,
@@ -88,6 +95,7 @@ impl Scope<'static> {
             matcher: false,
             definitions: false,
             metas: &NO_NAMES,
+            binds: None,
             top: None,
         }
     }
@@ -180,6 +188,13 @@ fn walk(tokens: TokenStream, scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
                 } else {
                     scope
                 };
+                if inner.delimiter() == Delimiter::Bracket
+                    && let Some(binds) = scope.binds
+                    && macros::joins_brackets(&trees[..index], binds)
+                {
+                    let line = line_of(inner.span().start().line);
+                    hits.push((Finding::JoinedBrackets, line));
+                }
                 let path_passes = scope.top.is_some_and(|top| {
                     index > 0
                         && is_punct(&trees[index - 1], '#')

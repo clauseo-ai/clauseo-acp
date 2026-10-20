@@ -268,6 +268,33 @@ a!(cfg(any()));
     )
 }
 
+/// The review's case: a `#` passed as a `tt` joins brackets the transcriber writes.
+pub(in crate::checks::core_io) fn hash_joins_written_brackets() -> Inspection {
+    with_file(
+        "hash-joins-brackets",
+        "macro_rules! a { ($h:tt $($p:tt)*) => { $h [$($p)*] pub fn k() {} }; }\n\
+         a!(# cfg(not(clippy)));\n",
+    )
+}
+
+/// The same with the `#` passed through a repetition.
+pub(in crate::checks::core_io) fn repetition_joins_written_brackets() -> Inspection {
+    with_file(
+        "repetition-joins-brackets",
+        "macro_rules! r { ($($h:tt)?; $($p:tt)*) => { $($h)? [$($p)*] pub fn k() {} }; }\n\
+         r!(#; cfg(not(clippy)));\n",
+    )
+}
+
+/// Indexing after a metavariable bound as `ident`, which cannot stand for a `#`.
+pub(in crate::checks::core_io) fn indexing_after_an_ident_passes() -> Inspection {
+    with_file(
+        "indexing-ident",
+        "macro_rules! at { ($v:ident, $i:expr) => { $v[$i] }; }\n\
+         pub fn f(v: &[u8]) -> u8 {\n    at!(v, 0)\n}\n",
+    )
+}
+
 /// The review's case: a forwarding macro that passes, called with a cfg clippy never sees, which
 /// fails where the caller writes it.
 pub(in crate::checks::core_io) fn forwarded_cfg_at_the_call() -> Inspection {

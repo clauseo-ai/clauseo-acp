@@ -150,6 +150,20 @@ macro_rules! metavariable_attribute {
     };
 }
 
+/// The violation for brackets joined to a `#` at line `$line` of `crates/protocol/src/hidden.rs`.
+#[cfg(test)]
+macro_rules! joined_brackets {
+    ($line:literal) => {
+        concat!(
+            "crates/protocol/src/hidden.rs:", $line, ": `crates/protocol/src/hidden.rs` writes \
+             brackets right after a repetition or a metavariable that can stand for a `#`, so a \
+             macro of clauseo-protocol can build an attribute that core-io does not see\n    \
+             fix: put the brackets after a token the macro body writes itself, or after a \
+             metavariable this arm binds as a fragment other than `tt`, such as `ident` or `expr`"
+        )
+    };
+}
+
 /// The violation for the name `cfg_select` at line `$line` of `crates/protocol/src/hidden.rs`.
 #[cfg(test)]
 macro_rules! cfg_select {
@@ -374,6 +388,10 @@ crate::checks::planted::cases! {
     /// A definition inside a transcriber or a macro call's arguments gets the full rules.
     forwarded_meta_in_a_nested_definition: FailsWith(&[metavariable_attribute!(4), metavariable_attribute!(4)]), inspects 3 => super::forwarded_meta_in_a_nested_definition,
     definition_shape_in_call_arguments: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::definition_shape_in_call_arguments,
+    /// In a transcriber, brackets after a `tt` metavariable or a repetition fail.
+    hash_joins_written_brackets: FailsWith(&[joined_brackets!(1)]), inspects 3 => super::hash_joins_written_brackets,
+    repetition_joins_written_brackets: FailsWith(&[joined_brackets!(1)]), inspects 3 => super::repetition_joins_written_brackets,
+    indexing_after_an_ident_passes: Passes, inspects 3 => super::indexing_after_an_ident_passes,
     path_attribute: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute,
     path_attribute_in_cfg_attr: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute_in_cfg_attr,
     /// A literal `path` on a top-level `mod name;` passes when it names a file core-io lexes.
@@ -400,7 +418,7 @@ crate::checks::planted::cases! {
         metavariable_attribute!(2),
         cfg_form!(4, "the name `panic`"),
     ]), inspects 3 => super::attribute_split_across_a_macro,
-    hash_from_a_metavariable: FailsWith(&[cfg_form!(2, "the name `panic`")]), inspects 3 => super::hash_from_a_metavariable,
+    hash_from_a_metavariable: FailsWith(&[joined_brackets!(2), cfg_form!(2, "the name `panic`")]), inspects 3 => super::hash_from_a_metavariable,
     path_with_a_metavariable: FailsWith(&[path_attribute!(3)]), inspects 3 => super::path_with_a_metavariable,
     include_with_a_metavariable: FailsWith(&[
         "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs` calls `include!`, which can bring into clauseo-protocol code \
