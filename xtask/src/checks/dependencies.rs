@@ -141,7 +141,7 @@ fn status_violations(table: &CratesTable, matched: &[(&Member, &CrateRow)]) -> V
                     row.name,
                     crates_table::package_of(&row.name)
                 ),
-                "change the Status to `planned`: a row is `exists` only while its crate is a workspace member",
+                Fix::SetPlanned,
             )),
             (Status::Planned, Some(member)) => found.push(violation(
                 crates_table::FILE,
@@ -152,7 +152,7 @@ fn status_violations(table: &CratesTable, matched: &[(&Member, &CrateRow)]) -> V
                     member.name,
                     place(member)
                 ),
-                "change the Status to `exists`: the crate exists",
+                Fix::SetExists,
             )),
             _ => {}
         }
@@ -173,10 +173,8 @@ fn place(member: &Member) -> &str {
 fn no_row(table: &CratesTable, member: &Member) -> Violation {
     let line = table.rows.last().map_or(1, |row| row.line);
     let fix = match crates_table::row_name(&member.name).map(crates_table::fold) {
-        Some(name) => format!(
-            "add this row to the Crates table in ARCHITECTURE.md: | `{name}` | <what it owns> | <crates it may depend on> | <crates it never depends on> | exists |"
-        ),
-        None => "rename the package to `clauseo-` followed by its row name (the table maps row `<name>` to package `clauseo-<name>`), then add that row to the Crates table in ARCHITECTURE.md with its five columns: Crate | Owns | May depend on | Never depends on | Status".to_owned(),
+        Some(name) => Fix::AddRow { name },
+        None => Fix::RenamePackage,
     };
     violation(
         crates_table::FILE,

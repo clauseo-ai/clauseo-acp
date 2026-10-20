@@ -48,14 +48,19 @@ fn the_fix_of_a_failed_run_fits_its_cause() {
     let cmd = Cmd::new(Program::Cargo, ["tree", "-p", "x"]);
     let root = crate::scratch::Scratch::new("graph-cargo-fits");
     let lock = "error: the lock file /ws/Cargo.lock needs to be updated but --locked was passed to prevent this";
-    assert!(failure_fix(&cmd, lock, &root).contains("cargo update --workspace"));
+    assert!(
+        failure_fix(&cmd, lock, &root)
+            .to_string()
+            .contains("cargo update --workspace")
+    );
     let missing = "error: failed to download `serde v1.0.0`\n\nCaused by:\n  attempting to make \
                    an HTTP request, but --offline was specified";
-    assert_eq!(failure_fix(&cmd, missing, &root), FETCH_FIX);
+    assert_eq!(failure_fix(&cmd, missing, &root), Fix::Fetch);
     assert_eq!(
         failure_fix(&cmd, "error: bad manifest", &root),
-        "fix what cargo reports above until `cargo tree -p x` succeeds, since this check reads \
-         the dependency graph from it"
+        Fix::CargoReports {
+            command: "cargo tree -p x".to_owned()
+        }
     );
 }
 
@@ -66,11 +71,11 @@ fn online_a_resolution_error_is_a_wrong_manifest() {
     let root = root_with_lock("graph-cargo-online", LOCK);
     assert_eq!(
         failure_fix(&cmd, &no_package("serde_json", ""), &root),
-        MANIFEST_FIX
+        Fix::Manifest
     );
     assert_eq!(
         failure_fix(&cmd, &no_version("serde_json = \"^1.0.100\"", ""), &root),
-        MANIFEST_FIX
+        Fix::Manifest
     );
 }
 
@@ -82,11 +87,11 @@ fn offline_a_missing_package_is_not_downloaded_only_when_a_registry_locks_it() {
     let root = root_with_lock("graph-cargo-missing", LOCK);
     assert_eq!(
         failure_fix(&cmd, &no_package("serde_json", OFFLINE_NOTE), &root),
-        FETCH_FIX
+        Fix::Fetch
     );
     assert_eq!(
         failure_fix(&cmd, &no_package("clauseo-desktop", OFFLINE_NOTE), &root),
-        MANIFEST_FIX
+        Fix::Manifest
     );
 }
 
@@ -102,7 +107,7 @@ fn offline_a_version_is_not_downloaded_only_when_a_locked_version_fits() {
             &no_version("serde_json = \"^1.0.100\"", OFFLINE_NOTE),
             &root
         ),
-        FETCH_FIX
+        Fix::Fetch
     );
     assert_eq!(
         failure_fix(
@@ -110,7 +115,7 @@ fn offline_a_version_is_not_downloaded_only_when_a_locked_version_fits() {
             &no_version("serde_json = \"^99\"", OFFLINE_NOTE),
             &root
         ),
-        MANIFEST_FIX
+        Fix::Manifest
     );
 }
 
@@ -121,10 +126,10 @@ fn offline_without_an_answer_the_fix_names_both_causes() {
     let cmd = Cmd::new(Program::Cargo, ["tree", "--locked", "--offline"]);
     let error = no_package("serde_json", OFFLINE_NOTE);
     let missing = crate::scratch::Scratch::new("graph-cargo-no-lock");
-    assert_eq!(failure_fix(&cmd, &error, &missing), EITHER_FIX);
+    assert_eq!(failure_fix(&cmd, &error, &missing), Fix::Either);
     let broken = root_with_lock("graph-cargo-bad-lock", "[[package]\nname = ");
-    assert_eq!(failure_fix(&cmd, &error, &broken), EITHER_FIX);
+    assert_eq!(failure_fix(&cmd, &error, &broken), Fix::Either);
     let locked = root_with_lock("graph-cargo-bad-req", LOCK);
     let unreadable = no_version("serde_json = \"not a req\"", OFFLINE_NOTE);
-    assert_eq!(failure_fix(&cmd, &unreadable, &locked), EITHER_FIX);
+    assert_eq!(failure_fix(&cmd, &unreadable, &locked), Fix::Either);
 }

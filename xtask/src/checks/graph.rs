@@ -68,9 +68,7 @@ pub(crate) fn load_tree(root: &Path, package: &str, flags: &[&str]) -> Result<Tr
             "could not read the output of `cargo {}`: {error}",
             args.join(" ")
         ),
-        fix: "update `Tree::parse` in xtask/src/checks/graph.rs to the lines this cargo prints, \
-              since the check reads each crate's dependency graph from them"
-            .into(),
+        fix: Fix::TreeParse.into(),
     })
 }
 

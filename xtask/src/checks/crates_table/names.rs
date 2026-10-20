@@ -2,14 +2,14 @@
 //! written `clauseo-<row>`, a crates.io package, or a name that looks like ours and is rejected
 //! (see the module doc of `crates_table.rs`).
 
-use super::{IoWord, Never, fold, package_of};
+use super::{Fix, IoWord, Never, fold, package_of};
 
 /// Why an entry was rejected: the end of the message after "`<entry>` in the Never depends on
 /// column of `<row>`", and the fix.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Rejected {
     pub what: String,
-    pub fix: String,
+    pub fix: Fix,
 }
 
 /// What follows a crates.io package name in a Never cell to mark it as one: `rmcp (crates.io)`.
@@ -45,20 +45,18 @@ pub(super) fn crate_entry(entry: &str, rows: &[&str]) -> Result<Never, Rejected>
                 "{how}, and as written it would ban a crates.io package `{entry}` instead of our `{package}`",
                 package = package_of(row)
             ),
-            fix: format!(
-                "write `{ban}` to ban our crate `{package}`, or `{entry} {CRATES_IO}` if you mean the crates.io package: the module doc of xtask/src/checks/crates_table.rs lists which names read as ours",
-                ban = ban_spelling(row),
-                package = package_of(row)
-            ),
+            fix: Fix::TypoBan {
+                ban: ban_spelling(row),
+                package: package_of(row),
+                entry: entry.to_owned(),
+            },
         });
     }
     if entry.contains('_') {
         let dashed = entry.replace('_', "-");
         return Err(Rejected {
             what: "holds `_` but is no row of the Crates table, and only our row names are written with `_`".to_owned(),
-            fix: format!(
-                "write `{dashed}` for the crates.io package (this check reads `-` and `_` the same), or the row name of the crate you mean if it is ours"
-            ),
+            fix: Fix::Underscore { dashed },
         });
     }
     Ok(Never::External(entry.to_owned()))
@@ -89,21 +87,17 @@ fn clauseo_entry(entry: &str, folded: &str, rows: &[&str]) -> Result<Never, Reje
                     _ => "`_` after `clauseo`",
                 }
             ),
-            fix: format!(
-                "write `{package}`{or_row} to ban our crate, or `{entry} {CRATES_IO}` if you mean the crates.io package",
-                package = package_of(row),
-                or_row = if ban_spelling(row) == **row {
-                    format!(" (or the row name `{row}`)")
-                } else {
-                    String::new()
-                }
-            ),
+            fix: Fix::OwnPackage {
+                package: package_of(row),
+                row: (ban_spelling(row) == **row).then(|| (*row).to_owned()),
+                entry: entry.to_owned(),
+            },
         }),
         None if rest.is_empty() => Err(Rejected {
             what: format!("is `{entry}` with no row name after it, so it names none of our crates"),
-            fix: format!(
-                "write the name that bans the crate you mean (a name in the Crate column), or `{entry} {CRATES_IO}` if you mean the crates.io package"
-            ),
+            fix: Fix::NoRowName {
+                entry: entry.to_owned(),
+            },
         }),
         None => match rows.iter().find(|row| **row == rest) {
             Some(row) => Err(Rejected {
@@ -111,39 +105,34 @@ fn clauseo_entry(entry: &str, folded: &str, rows: &[&str]) -> Result<Never, Reje
                     "is not our package: the row `{row}`'s package is `{package}`",
                     package = package_of(row)
                 ),
-                fix: format!(
-                    "write `{ban}` to ban our crate `{package}`, or `{entry} {CRATES_IO}` if you mean the crates.io package",
-                    ban = ban_spelling(row),
-                    package = package_of(row)
-                ),
+                fix: Fix::Ban {
+                    ban: ban_spelling(row),
+                    package: package_of(row),
+                    entry: entry.to_owned(),
+                },
             }),
             None => Err(Rejected {
                 what: format!(
                     "starts with `{prefix}`, but `{rest}` is no row of the Crates table, so it names none of our crates",
                     prefix = entry.get(..8).unwrap_or(entry)
                 ),
-                fix: format!(
-                    "write the name that bans the crate you mean ({}), add a row `{rest}` for the crate, or write `{entry} {CRATES_IO}` if you mean the crates.io package",
-                    near_rows_hint(rest, rows)
-                ),
+                fix: Fix::NoRow {
+                    near: near_rows(rest, rows),
+                    row: rest.to_owned(),
+                    entry: entry.to_owned(),
+                },
             }),
         },
     }
 }
 
-/// The part of the fix that says which names to pick from: how to ban each row one edit from
-/// `name` (see `ban_spelling`), else the Crate column.
-fn near_rows_hint(name: &str, rows: &[&str]) -> String {
-    let near: Vec<String> = rows
-        .iter()
+/// The ways to ban each row one edit from `name` (see `ban_spelling`), in the order of `rows`.
+/// Empty when no row is that close, so the fix points at the Crate column instead.
+fn near_rows(name: &str, rows: &[&str]) -> Vec<String> {
+    rows.iter()
         .filter(|row| within_one_edit(name, row))
-        .map(|row| format!("`{}`", ban_spelling(row)))
-        .collect();
-    if near.is_empty() {
-        "a name in the Crate column".to_owned()
-    } else {
-        format!("perhaps {}", near.join(" or "))
-    }
+        .map(|row| ban_spelling(row))
+        .collect()
 }
 
 /// How a Never cell names our crate of row `row`: the row name, or the package `clauseo-<row>`
