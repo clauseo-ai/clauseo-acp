@@ -18,7 +18,7 @@ const CLEAN: &str = r#"{
   "permissions": []
 }"#;
 
-fn violation(line: u32, message: &str, fix: &str) -> Violation {
+fn violation(line: u32, message: &str, fix: Fix) -> Violation {
     Violation {
         path: PATH.to_owned(),
         line,
@@ -37,7 +37,11 @@ fn core_default_fails_at_its_line() {
     let text = "{\n  \"permissions\": [\n    \"core:default\"\n  ]\n}";
     assert_eq!(
         scan(PATH, text),
-        vec![violation(3, "capability grants `core:default`", FIX_CORE)]
+        vec![violation(
+            3,
+            "capability grants `core:default`",
+            Fix::CoreDefault
+        )]
     );
 }
 
@@ -49,7 +53,7 @@ fn remote_fails_at_its_line() {
         vec![violation(
             2,
             "capability file mentions `remote`",
-            FIX_REMOTE
+            Fix::Remote
         )]
     );
 }
@@ -62,10 +66,10 @@ fn remote_in_prose_fails_with_the_reword_hint() {
         vec![violation(
             2,
             "capability file mentions `remote`",
-            FIX_REMOTE
+            Fix::Remote
         )]
     );
-    assert!(FIX_REMOTE.contains("or reword the text"));
+    assert!(Fix::Remote.to_string().contains("or reword the text"));
 }
 
 #[test]
@@ -76,7 +80,7 @@ fn a_quoted_fs_permission_fails_and_names_the_whole_string() {
         vec![violation(
             2,
             "capability grants `fs:allow-read`",
-            FIX_PREFIX
+            Fix::ForbiddenPrefix
         )]
     );
 }
@@ -94,7 +98,11 @@ fn an_identifier_object_with_a_prefix_fails_and_toml_single_quotes_count() {
         scan(toml_path, single),
         vec![Violation {
             path: toml_path.to_owned(),
-            ..violation(2, "capability grants `shell:allow-open`", FIX_PREFIX)
+            ..violation(
+                2,
+                "capability grants `shell:allow-open`",
+                Fix::ForbiddenPrefix
+            )
         }]
     );
 }
@@ -107,7 +115,7 @@ fn escaped_json_strings_are_decoded_and_reported_at_their_key_or_line_one() {
         vec![violation(
             2,
             "capability grants `core:default` (written with escapes)",
-            FIX_CORE
+            Fix::CoreDefault
         )]
     );
     let fs = "{\n  \"permissions\": [\"\\u0066s:allow-read\"]\n}";
@@ -116,7 +124,7 @@ fn escaped_json_strings_are_decoded_and_reported_at_their_key_or_line_one() {
         vec![violation(
             2,
             "capability grants `fs:allow-read` (written with escapes)",
-            FIX_PREFIX
+            Fix::ForbiddenPrefix
         )]
     );
     let remote = "{\n  \"identifier\": \"main\",\n  \"re\\u006dote\": { \"urls\": [] }\n}";
@@ -125,7 +133,7 @@ fn escaped_json_strings_are_decoded_and_reported_at_their_key_or_line_one() {
         vec![violation(
             1,
             "capability file mentions `remote` (written with escapes)",
-            FIX_REMOTE
+            Fix::Remote
         )]
     );
 }
@@ -167,12 +175,18 @@ fn json5_that_is_not_plain_json_and_invalid_files_fail_at_line_one() {
             ..violation(
                 1,
                 "json5 capability files are not supported; use .json",
-                FIX_JSON5
+                Fix::Json5
             )
         }]
     );
-    assert_eq!(scan(PATH, "{ \"a\": ")[0].fix.to_string(), FIX_SYNTAX);
-    assert_eq!(scan("x/main.toml", "a = ")[0].fix.to_string(), FIX_SYNTAX);
+    assert_eq!(
+        scan(PATH, "{ \"a\": ")[0].fix.to_string(),
+        Fix::Syntax.to_string()
+    );
+    assert_eq!(
+        scan("x/main.toml", "a = ")[0].fix.to_string(),
+        Fix::Syntax.to_string()
+    );
 }
 
 #[test]
@@ -194,8 +208,8 @@ fn one_string_that_trips_two_rules_points_both_at_its_line_without_escapes() {
     assert_eq!(
         scan(PATH, text),
         vec![
-            violation(3, "capability file mentions `remote`", FIX_REMOTE),
-            violation(3, "capability grants `core:default`", FIX_CORE),
+            violation(3, "capability file mentions `remote`", Fix::Remote),
+            violation(3, "capability grants `core:default`", Fix::CoreDefault),
         ]
     );
 }
@@ -224,15 +238,15 @@ fn an_inline_capability_object_fails_at_its_lines_in_the_config() {
             .nth(8)
             .is_some_and(|text| text.contains("core:default"))
     );
-    let at = |message: &str, fix: &str| Violation {
+    let at = |message: &str, fix: Fix| Violation {
         path: conf.to_owned(),
         ..violation(line, message, fix)
     };
     assert_eq!(
         inline_violations(conf, CONF),
         vec![
-            at("capability grants `core:default`", FIX_CORE),
-            at("capability grants `fs:allow-read`", FIX_PREFIX),
+            at("capability grants `core:default`", Fix::CoreDefault),
+            at("capability grants `fs:allow-read`", Fix::ForbiddenPrefix),
         ]
     );
 }
@@ -249,12 +263,12 @@ fn an_escaped_inline_string_points_at_the_capabilities_key() {
                 ..violation(
                     4,
                     "capability grants `core:default` (written with escapes)",
-                    FIX_CORE
+                    Fix::CoreDefault
                 )
             },
             Violation {
                 path: conf.to_owned(),
-                ..violation(9, "capability grants `fs:allow-read`", FIX_PREFIX)
+                ..violation(9, "capability grants `fs:allow-read`", Fix::ForbiddenPrefix)
             },
         ]
     );
