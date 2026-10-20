@@ -38,7 +38,7 @@ mod tests;
 use super::verdict::{Failure, Outcome, ProbeResult, budget_limit, passes};
 use super::{Out, one_line, stop};
 use crate::budgets::{Budget, Unit};
-use crate::process::{self, Cmd, Program};
+use crate::process::{self, Cmd, Program, QuietRunner};
 use serde::Deserialize;
 use std::path::Path;
 use std::time::Duration;
@@ -246,14 +246,16 @@ impl WebRun {
 }
 
 /// Runs the script and reads its report. Fails before it runs when `ui/app/node_modules` is
-/// missing. The script's stderr notes are printed to `diag`. `Err` holds one line per reason the
-/// half could not be measured; the reason is printed before it returns.
+/// missing. The script's stderr notes are printed to `diag`. `runner` runs the script (production
+/// passes `process::run_quiet`). `Err` holds one line per reason the half could not be measured;
+/// the reason is printed before it returns.
 pub(crate) fn measure(
     root: &Path,
     runs: u32,
     ci: bool,
     budgets: &[Budget],
     diag: &mut Out,
+    runner: &mut QuietRunner<'_>,
 ) -> Result<WebRun, Vec<String>> {
     if !root.join("ui/app/node_modules").is_dir() {
         return Err(stop(
@@ -269,7 +271,7 @@ pub(crate) fn measure(
         SCRIPT_TIMEOUT,
     );
     let rerun = format!("run `{cmd}` to see the error");
-    let quiet = match process::run_quiet(&cmd, root) {
+    let quiet = match runner(&cmd, root) {
         Ok(quiet) => quiet,
         Err(error) if process::is_timeout(&error) => {
             return Err(stop(diag, &error.to_string(), &process::timeout_fix(&cmd)));

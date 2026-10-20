@@ -5,6 +5,7 @@ use super::report::{error_json, json_object, probe_json, table_lines, warning_li
 use super::verdict::*;
 use super::*;
 use crate::budgets::{Budget, Gate, Unit};
+use crate::scratch::Scratch;
 
 fn member(name: &str, dir: &str) -> Member {
     Member {
@@ -366,4 +367,70 @@ fn the_profile_line_is_an_expectation_that_the_warm_up_decides() {
             profile::CI_SOURCE
         )
     );
+}
+
+#[test]
+fn rustc_version_is_the_line_rustc_prints_trimmed() {
+    let mut runner = |cmd: &Cmd, _: &Path| -> io::Result<process::Quiet> {
+        assert_eq!(cmd.to_string(), "rustc -V");
+        Ok(process::Quiet {
+            success: true,
+            stdout: "rustc 1.90.0 (1159e78c4 2025-09-14)\n".into(),
+            stderr: String::new(),
+        })
+    };
+    assert_eq!(
+        rustc_version(Path::new("."), &mut runner),
+        Ok("rustc 1.90.0 (1159e78c4 2025-09-14)".to_owned())
+    );
+}
+
+#[test]
+fn a_rustc_version_that_exits_non_zero_is_named_with_its_stderr() {
+    let mut runner = |_: &Cmd, _: &Path| -> io::Result<process::Quiet> {
+        Ok(process::Quiet {
+            success: false,
+            stdout: String::new(),
+            stderr: "error: no toolchain installed\n".into(),
+        })
+    };
+    assert_eq!(
+        rustc_version(Path::new("."), &mut runner),
+        Err(Failure::new(
+            "`rustc -V` failed: error: no toolchain installed",
+            "install Rust with rustup, then run `rustup show`",
+        ))
+    );
+}
+
+#[test]
+fn a_rustc_version_past_its_limit_says_so_and_how_to_see_why() {
+    let mut runner =
+        |cmd: &Cmd, _: &Path| -> io::Result<process::Quiet> { Err(process::timed_out(cmd)) };
+    assert_eq!(
+        rustc_version(Path::new("."), &mut runner),
+        Err(Failure::new(
+            "`rustc -V` did not finish within 10 min, so it was stopped",
+            "run `rustc -V` by hand to see why it does not finish within 10 min",
+        ))
+    );
+}
+
+#[test]
+fn a_rustc_that_cannot_start_is_named_with_the_rustup_fix() {
+    let mut runner =
+        |_: &Cmd, _: &Path| -> io::Result<process::Quiet> { Err(io::Error::other("no such file")) };
+    assert_eq!(
+        rustc_version(Path::new("."), &mut runner),
+        Err(Failure::new(
+            "could not run `rustc -V`: no such file",
+            "install Rust with rustup",
+        ))
+    );
+}
+
+#[test]
+fn a_run_whose_checkout_has_no_budgets_fails_before_it_measures() {
+    let root = Scratch::new("buildtime-run");
+    assert_eq!(run(&root, Half::Web, 1, false), ExitCode::FAILURE);
 }

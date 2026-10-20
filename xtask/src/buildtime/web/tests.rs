@@ -10,6 +10,8 @@ use crate::budgets::Gate;
 use crate::output::Printer;
 use crate::scratch::Scratch;
 
+mod measure;
+
 fn budget(id: &str, limit: f64, unit: Unit, gate: Gate) -> Budget {
     Budget {
         id: id.into(),

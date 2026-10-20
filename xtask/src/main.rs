@@ -112,9 +112,13 @@ enum Commands {
 fn main() -> ExitCode {
     match Cli::parse().command {
         Commands::Check { quick } => check::run(quick),
-        Commands::Setup { binaries } => setup::run(binaries),
-        Commands::Buildtime { half, runs, json } => buildtime::run(half, runs, json),
-        Commands::Mutants => mutants::run(),
+        Commands::Setup { binaries } => {
+            setup::run(&workspace::workspace_root(), binaries, &mut process::run)
+        }
+        Commands::Buildtime { half, runs, json } => {
+            buildtime::run(&workspace::workspace_root(), half, runs, json)
+        }
+        Commands::Mutants => mutants::run(&workspace::workspace_root()),
         #[cfg(unix)]
         Commands::ProcessLeader => process::lead(),
         Commands::ProcessTest { output, script } => process::test_mode(output, &script),

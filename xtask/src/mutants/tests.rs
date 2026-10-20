@@ -3,6 +3,8 @@
 use super::*;
 use crate::scratch::Scratch;
 
+mod run;
+
 const CMD: &str = "cargo mutants --workspace --in-diff target/xtask/mutants.diff --output \
                    target/xtask --jobs 4";
 const MISSED_FIX: &str = "    fix: add a test that fails on this change, or exclude it with a \

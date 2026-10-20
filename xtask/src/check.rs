@@ -2,7 +2,7 @@
 
 use crate::changes::{self, ScanRange, Selection};
 use crate::output::Printer;
-use crate::process::{self, Cmd, Program};
+use crate::process::{self, Cmd, Program, QuietRunner};
 use crate::steps::{self, Scope, StepStatus};
 use crate::workspace::{self, Context};
 use std::io;
@@ -31,7 +31,12 @@ pub(crate) fn run(quick: bool) -> ExitCode {
         Scope::Workspace
     };
     let range = gitleaks_range(&mut out, &ctx, ci);
-    let steps = steps::plan(&scope, ci, range.as_deref(), ci || pnpm_found(&ctx.root));
+    let steps = steps::plan(
+        &scope,
+        ci,
+        range.as_deref(),
+        ci || pnpm_found(&ctx.root, &mut process::run_quiet),
+    );
     let mut exec =
         |cmd: &Cmd, on_output: &mut dyn FnMut(&[u8])| process::capture(cmd, &ctx.root, on_output);
     let results = steps::run_all(steps, &ctx, &mut out, &mut exec);
@@ -52,10 +57,10 @@ const PNPM_VERSION_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Whether `pnpm` starts. Outside CI, without it, the ui steps are skipped (see `steps::plan`). CI
 /// runs the ui steps whatever this says, so it does not probe there. A pnpm that starts but does
-/// not finish is found: the ui steps then run and report it.
-fn pnpm_found(root: &Path) -> bool {
+/// not finish is found: the ui steps then run and report it. `runner` runs `pnpm --version`.
+fn pnpm_found(root: &Path, runner: &mut QuietRunner<'_>) -> bool {
     let cmd = Cmd::new(Program::Pnpm, ["--version"], PNPM_VERSION_TIMEOUT);
-    match process::run_quiet(&cmd, root) {
+    match runner(&cmd, root) {
         Ok(_) => true,
         Err(error) => process::is_timeout(&error),
     }
@@ -150,5 +155,30 @@ mod tests {
         assert!(is_ci(Some("1")));
         assert!(is_ci(Some("true")));
         assert!(is_ci(Some("yes")));
+    }
+
+    #[test]
+    fn pnpm_is_found_when_it_starts_and_prints_its_version() {
+        let mut runner = |cmd: &Cmd, _: &Path| {
+            assert_eq!(cmd.to_string(), "pnpm --version");
+            Ok(process::Quiet {
+                success: true,
+                stdout: "9.15.0\n".into(),
+                stderr: String::new(),
+            })
+        };
+        assert!(pnpm_found(Path::new("."), &mut runner));
+    }
+
+    #[test]
+    fn pnpm_is_found_when_it_runs_past_its_limit() {
+        let mut runner = |cmd: &Cmd, _: &Path| Err(process::timed_out(cmd));
+        assert!(pnpm_found(Path::new("."), &mut runner));
+    }
+
+    #[test]
+    fn pnpm_is_not_found_when_it_cannot_start() {
+        let mut runner = |_: &Cmd, _: &Path| Err(io::Error::from(io::ErrorKind::NotFound));
+        assert!(!pnpm_found(Path::new("."), &mut runner));
     }
 }
