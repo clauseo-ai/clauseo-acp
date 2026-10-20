@@ -130,6 +130,21 @@ macro_rules! path_attribute {
     };
 }
 
+/// The violation for an attribute whose name is a metavariable at line `$line` of
+/// `crates/protocol/src/hidden.rs`.
+#[cfg(test)]
+macro_rules! metavariable_attribute {
+    ($line:literal) => {
+        concat!(
+            "crates/protocol/src/hidden.rs:", $line, ": `crates/protocol/src/hidden.rs` writes an \
+             attribute whose name is a metavariable, so a macro of clauseo-protocol can build a \
+             cfg that core-io does not see\n    fix: write the attribute's name in the macro body \
+             itself, or take the whole attribute as `#[$m:meta]` in the arm's matcher and write it \
+             as `#[$m]`"
+        )
+    };
+}
+
 /// The violation for the name `cfg_select` at line `$line` of `crates/protocol/src/hidden.rs`.
 #[cfg(test)]
 macro_rules! cfg_select {
@@ -345,11 +360,12 @@ crate::checks::planted::cases! {
     ]), inspects 3 => super::cfg_inside_cfg_attr,
     cfg_attr_not_feature: FailsWith(&[cfg_form!(1, "a feature under `not`")]), inspects 3 => super::cfg_attr_not_feature,
     cfg_metavariable_in_a_macro_body: FailsWith(&[cfg_form!(3, "a metavariable")]), inspects 3 => super::cfg_metavariable_in_a_macro_body,
-    attribute_name_metavariable: FailsWith(&[
-        "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs` writes an attribute whose name is a metavariable, so a macro \
-         of clauseo-protocol can build a cfg that core-io does not see\n    \
-         fix: write the attribute's name in the macro body itself",
-    ]), inspects 3 => super::attribute_name_metavariable,
+    attribute_name_metavariable: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::attribute_name_metavariable,
+    /// A transcriber may write `#[$m]` only when its arm binds `$m` as `#[$m:meta]`.
+    forwarded_attributes_pass: Passes, inspects 3 => super::forwarded_attributes_pass,
+    forwarded_attribute_as_tt: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::forwarded_attribute_as_tt,
+    forwarded_attribute_as_ident: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::forwarded_attribute_as_ident,
+    forwarded_cfg_at_the_call: FailsWith(&[cfg_form!(7, "the name `clippy`")]), inspects 3 => super::forwarded_cfg_at_the_call,
     path_attribute: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute,
     path_attribute_in_cfg_attr: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute_in_cfg_attr,
     include_macro: FailsWith(&[
@@ -366,9 +382,7 @@ crate::checks::planted::cases! {
     cfg_rule_passes: Passes, inspects 3 => super::cfg_rule_passes,
     cfg_doc_passes: Passes, inspects 3 => super::cfg_doc_passes,
     attribute_split_across_a_macro: FailsWith(&[
-        "crates/protocol/src/hidden.rs:2: `crates/protocol/src/hidden.rs` writes an attribute whose name is a metavariable, so a macro \
-         of clauseo-protocol can build a cfg that core-io does not see\n    \
-         fix: write the attribute's name in the macro body itself",
+        metavariable_attribute!(2),
         cfg_form!(4, "the name `panic`"),
     ]), inspects 3 => super::attribute_split_across_a_macro,
     hash_from_a_metavariable: FailsWith(&[cfg_form!(2, "the name `panic`")]), inspects 3 => super::hash_from_a_metavariable,

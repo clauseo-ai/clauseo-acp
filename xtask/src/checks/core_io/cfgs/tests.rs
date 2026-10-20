@@ -7,6 +7,7 @@ fn findings(source: &str) -> Vec<(Finding, u32)> {
     let mut hits = Vec::new();
     walk(
         TokenStream::from_str(source).expect("the source lexes"),
+        Scope::outside(),
         &mut hits,
     );
     hits
@@ -66,6 +67,58 @@ fn forms_beyond_the_planted_cases() {
         (
             "$($m)*!(x); $crate::m!(); $i::x!();",
             vec![(Finding::MetavariableMacro, 1)],
+        ),
+    ];
+    for (source, expected) in cases {
+        assert_eq!(findings(source), expected, "{source}");
+    }
+}
+
+/// How the metavariable rules read the arms of a `macro_rules!`: matchers are skipped, and a
+/// transcriber's `#[$m]` passes only when its own arm binds `$m` as `#[$m:meta]`.
+#[test]
+fn macro_arms() {
+    let attribute = |line| (Finding::MetavariableAttribute, line);
+    let cases = [
+        ("macro_rules! m { ($i:ident $x:tt) => {}; }", vec![]),
+        ("macro_rules! m { (#$h:tt $i:ident!) => {} }", vec![]),
+        ("macro_rules! m { (#[path $e:tt]) => {} }", vec![]),
+        ("macro_rules! m { (#[$a:meta]) => { #[$a] } }", vec![]),
+        (
+            "macro_rules! m { (#[$a:meta]) => {}; (#[$b:meta]) => { #[$a] } }",
+            vec![attribute(1)],
+        ),
+        (
+            "macro_rules! m { (#[$a:meta]) => { #![$a] } }",
+            vec![attribute(1)],
+        ),
+        (
+            "macro_rules! m { (#[$a:meta]) => { #[$a(x)] } }",
+            vec![attribute(1)],
+        ),
+        (
+            "macro_rules! m { ($a:meta) => { #[$a] } }",
+            vec![attribute(1)],
+        ),
+        (
+            "macro_rules! m { (#[$a:meta]) => { macro_rules! n { () => { #[$a] } } } }",
+            vec![attribute(1)],
+        ),
+        (
+            "macro_rules! m { (#[$a:meta]) => { #[cfg_attr(test, $a)] } }",
+            vec![attribute(1)],
+        ),
+        (
+            "macro_rules! m { (#[$a:meta]) => { $a!() } }",
+            vec![(Finding::MetavariableMacro, 1)],
+        ),
+        (
+            "macro_rules! m { (#[$a:meta]) => { #[$a] } garbage }",
+            vec![attribute(1), attribute(1)],
+        ),
+        (
+            "macro_rules! m { (#[cfg(unix)]) => {} }",
+            vec![(Finding::Predicate("the name `unix`".to_owned()), 1)],
         ),
     ];
     for (source, expected) in cases {

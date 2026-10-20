@@ -359,7 +359,9 @@ pub(super) fn cfg_rule(path: &str, line: u32, finding: &Finding, package: &str) 
                 "`{path}` writes an attribute whose name is a metavariable, so a macro of \
                  {package} can build a cfg that core-io does not see"
             ),
-            "write the attribute's name in the macro body itself".to_owned(),
+            "write the attribute's name in the macro body itself, or take the whole attribute as \
+             `#[$m:meta]` in the arm's matcher and write it as `#[$m]`"
+                .to_owned(),
         ),
         Finding::MetavariableMacro => (
             format!(

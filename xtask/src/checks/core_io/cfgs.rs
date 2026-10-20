@@ -14,18 +14,22 @@
 //! linted. A `cfg` among the attributes of a `cfg_attr` fails, at any depth, since
 //! `#[cfg_attr(feature = "x", cfg(any()))]` keeps the item only when the feature is off. An
 //! attribute or a macro call whose name is a metavariable fails, and so does a `#` before a
-//! metavariable, since a macro could build a `cfg` or an `include!` from a passed name. A `path`
+//! metavariable, since a macro could build a `cfg` or an `include!` from a passed name. These
+//! metavariable rules skip the matcher of each `macro_rules!` arm, and a transcriber may write
+//! `#[$m]` when its arm's matcher binds `$m` as `#[$m:meta]` (`macros.rs`). A `path`
 //! attribute, `include!` and any symlink under the crate's folder fail, so every module file sits
 //! at its default path under the crate, ends in `.rs` and is lexed here.
 
+mod macros;
 mod predicate;
 
 use super::report;
 use crate::checks;
 use crate::violation::Violation;
 use crate::workspace::{self, Member};
+use macros::Scope;
 use predicate::{metavariable, whole_predicate};
-use proc_macro2::{Delimiter, TokenStream, TokenTree};
+use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
 use std::path::Path;
 use std::str::FromStr;
 
@@ -83,7 +87,7 @@ pub(super) fn cfg_rule(root: &Path, member: &Member, entries: &[String]) -> Vec<
         match TokenStream::from_str(&text) {
             Ok(tokens) => {
                 let mut hits = Vec::new();
-                walk(tokens, &mut hits);
+                walk(tokens, Scope::outside(), &mut hits);
                 for (finding, line) in hits {
                     found.push(report::cfg_rule(path, line, &finding, &member.name));
                 }
@@ -105,53 +109,73 @@ fn is_rust_file(file: &str) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("rs"))
 }
 
-/// Pushes onto `hits` each `Finding` in `tokens` and its line, groups included.
-fn walk(tokens: TokenStream, hits: &mut Vec<(Finding, u32)>) {
+/// Pushes onto `hits` each `Finding` in `tokens` and its line, groups included, as `scope`
+/// sees them.
+fn walk(tokens: TokenStream, scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
     let trees: Vec<TokenTree> = tokens.into_iter().collect();
     for (index, tree) in trees.iter().enumerate() {
         let rest = &trees[index + 1..];
         match tree {
-            TokenTree::Group(group) => {
-                if group.delimiter() == Delimiter::Bracket {
-                    attribute_head(&group.stream().into_iter().collect::<Vec<_>>(), hits);
-                }
-                walk(group.stream(), hits);
+            TokenTree::Group(inner) if macros::holds_arms(&trees[..index]) => {
+                macros::arms(inner, hits);
             }
+            TokenTree::Group(inner) => group(inner, scope, hits),
             TokenTree::Ident(ident) => {
                 let line = line_of(ident.span().start().line);
                 match ident_name(ident).as_str() {
                     "cfg_select" => hits.push((Finding::CfgSelect, line)),
+                    "include" if starts_with_punct(rest, '!') => {
+                        hits.push((Finding::Include, line));
+                    }
                     // A `$` after the name may stand for the `!`, so it counts as a call.
-                    "include" if starts_with_punct(rest, '!') || starts_with_punct(rest, '$') => {
+                    "include" if starts_with_punct(rest, '$') && !scope.matcher => {
                         hits.push((Finding::Include, line));
                     }
                     _ => {}
                 }
             }
+            _ if scope.matcher => {}
             TokenTree::Punct(dollar) if dollar.as_char() == '$' && names_a_macro(rest) => {
                 hits.push((
                     Finding::MetavariableMacro,
                     line_of(dollar.span().start().line),
                 ));
             }
-            TokenTree::Punct(punct) if punct.as_char() == '#' => {
-                let rest = if starts_with_punct(rest, '!') {
-                    &rest[1..]
-                } else {
-                    rest
-                };
-                match rest.first() {
-                    Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => {
-                        if let Some(first) = group.stream().into_iter().next() {
-                            metavariable_name(&first, hits);
-                        }
-                    }
-                    Some(other) => metavariable_name(other, hits),
-                    None => {}
-                }
-            }
+            TokenTree::Punct(punct) if punct.as_char() == '#' => hash(rest, scope, hits),
             TokenTree::Punct(_) | TokenTree::Literal(_) => {}
         }
+    }
+}
+
+/// Checks `inner`, a group the walk meets in `scope`: a bracket group's head as an attribute's,
+/// then its trees.
+fn group(inner: &Group, scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
+    if inner.delimiter() == Delimiter::Bracket {
+        attribute_head(&inner.stream().into_iter().collect::<Vec<_>>(), scope, hits);
+    }
+    walk(inner.stream(), scope, hits);
+}
+
+/// Checks `rest`, what follows a `#` outside a matcher: the attribute's name, or what stands in
+/// place of its brackets, may not be a metavariable. A transcriber's `#[$m]` passes when `scope`
+/// binds `$m` as `#[$m:meta]`.
+fn hash(rest: &[TokenTree], scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
+    let inner = match rest {
+        [bang, after @ ..] if is_punct(bang, '!') => after,
+        _ => rest,
+    };
+    match inner.first() {
+        Some(TokenTree::Group(brackets)) if brackets.delimiter() == Delimiter::Bracket => {
+            let parts: Vec<TokenTree> = brackets.stream().into_iter().collect();
+            let forwarded = inner.len() == rest.len() && macros::forwards_meta(&parts, scope);
+            if let Some(first) = parts.first()
+                && !forwarded
+            {
+                metavariable_name(first, hits);
+            }
+        }
+        Some(other) => metavariable_name(other, hits),
+        None => {}
     }
 }
 
@@ -195,8 +219,8 @@ fn metavariable_in_place(tree: &TokenTree, hits: &mut Vec<(Finding, u32)>) {
 }
 
 /// Checks what follows `cfg_attr` in an attribute, `rest`: in its parenthesized group the first
-/// comma-separated part is a predicate, and each attribute after it is checked as one.
-fn cfg_attr(rest: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
+/// comma-separated part is a predicate, and each attribute after it is checked as one in `scope`.
+fn cfg_attr(rest: &[TokenTree], scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
     let group = match rest.first() {
         Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Parenthesis => group,
         Some(other) => return metavariable_in_place(other, hits),
@@ -209,23 +233,26 @@ fn cfg_attr(rest: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
         hits.push(hit);
     }
     for part in parts {
-        attribute(part, hits);
+        attribute(part, scope, hits);
     }
 }
 
 /// Checks the tokens of one attribute after the predicate of `cfg_attr`: a `cfg` fails, its name
-/// may not be a metavariable, and its head is checked as `attribute_head` checks it.
-fn attribute(tokens: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
+/// may not be a metavariable outside a matcher, and its head is checked as `attribute_head`
+/// checks it in `scope`.
+fn attribute(tokens: &[TokenTree], scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
     if let Some(TokenTree::Ident(ident)) = tokens.first()
         && ident_name(ident) == "cfg"
     {
         hits.push((Finding::CfgInCfgAttr, line_of(ident.span().start().line)));
         return;
     }
-    if let Some(first) = tokens.first() {
+    if let Some(first) = tokens.first()
+        && !scope.matcher
+    {
         metavariable_name(first, hits);
     }
-    attribute_head(tokens, hits);
+    attribute_head(tokens, scope, hits);
 }
 
 /// Pushes a metavariable attribute finding when `tree`, which stands where an attribute's name
@@ -241,18 +268,22 @@ fn metavariable_name(tree: &TokenTree, hits: &mut Vec<(Finding, u32)>) {
 
 /// Checks `tokens` as the inside of an attribute, whether or not a `#` stands before them, since a
 /// macro can put the `#` and the brackets together from separate tokens. A `path = ..` or
-/// `path $` fails, and a `cfg` or `cfg_attr` predicate must be allowed.
-fn attribute_head(tokens: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
+/// `path $` fails, the latter outside a matcher, and a `cfg` or `cfg_attr` predicate must be
+/// allowed.
+fn attribute_head(tokens: &[TokenTree], scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
     let Some(TokenTree::Ident(ident)) = tokens.first() else {
         return;
     };
     match ident_name(ident).as_str() {
+        "path" if starts_with_punct(&tokens[1..], '=') => {
+            hits.push((Finding::PathAttribute, line_of(ident.span().start().line)));
+        }
         // A `$` after `path` may stand for the `=`.
-        "path" if starts_with_punct(&tokens[1..], '=') || starts_with_punct(&tokens[1..], '$') => {
+        "path" if starts_with_punct(&tokens[1..], '$') && !scope.matcher => {
             hits.push((Finding::PathAttribute, line_of(ident.span().start().line)));
         }
         "cfg" => cfg_group(&tokens[1..], hits),
-        "cfg_attr" => cfg_attr(&tokens[1..], hits),
+        "cfg_attr" => cfg_attr(&tokens[1..], scope, hits),
         _ => {}
     }
 }
