@@ -283,6 +283,35 @@ fn a_trailing_backslash_is_dropped_before_the_split() {
 }
 
 #[test]
+fn a_command_continued_on_the_next_line_may_lack_a_word() {
+    let placeholders = |line: &str| -> Vec<bool> {
+        commands_in(line)
+            .iter()
+            .map(|command| command.placeholder)
+            .collect()
+    };
+    assert_eq!(placeholders("cargo xtask \\"), [true]);
+    assert_eq!(
+        placeholders("cargo xtask check && cargo xtask \\"),
+        [false, true]
+    );
+    assert_eq!(placeholders("cargo xtask check"), [false]);
+    let unfinished = commands_in("cargo xtask \\");
+    assert!(
+        unfinished
+            .iter()
+            .all(|command| problem("a.md", 1, command).is_none())
+    );
+    let misspelt = commands_in("cargo xtask frobnicate \\");
+    assert_eq!(misspelt.len(), 1);
+    assert!(
+        misspelt
+            .iter()
+            .all(|command| problem("a.md", 1, command).is_some())
+    );
+}
+
+#[test]
 fn a_line_shlex_cannot_split_is_split_on_whitespace() {
     assert_reads(
         "Don't run cargo xtask frobnicate",

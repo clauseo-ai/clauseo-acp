@@ -71,7 +71,7 @@ const TOOL: &str = "cargo xtask";
 struct Command {
     /// Its words as a shell splits them, starting `cargo`, `xtask`, up to the first placeholder.
     words: Vec<String>,
-    /// True when a placeholder followed these words.
+    /// True when a placeholder, or the end of a line ending in `\`, followed these words.
     placeholder: bool,
 }
 
@@ -120,16 +120,24 @@ fn after_prompt(text: &str) -> Option<&str> {
 }
 
 /// The xtask commands in `line`, split into words as a shell splits them. A trailing `\` is
-/// dropped first, as a line continuation. A line `shlex` cannot split is split on whitespace
-/// instead, so an odd quote does not hide the commands on it.
+/// dropped first. The next line is not read with this one, so the last command on a line that
+/// ends in `\` is treated as if a placeholder followed it. A line `shlex` cannot split is split
+/// on whitespace instead, so an odd quote does not hide the commands on it.
 fn commands_in(line: &str) -> Vec<Command> {
     let line = line.trim_end();
-    let line = line.strip_suffix('\\').unwrap_or(line);
+    let (line, continued) = match line.strip_suffix('\\') {
+        Some(rest) => (rest, true),
+        None => (line, false),
+    };
     let words =
         shlex::split(line).unwrap_or_else(|| line.split_whitespace().map(str::to_owned).collect());
-    (0..words.len())
+    let mut commands: Vec<Command> = (0..words.len())
         .filter_map(|at| command_at(&words, at))
-        .collect()
+        .collect();
+    if let Some(last) = commands.last_mut().filter(|_| continued) {
+        last.placeholder = true;
+    }
+    commands
 }
 
 /// The command that starts at word `at` of `words`: `cargo`, then any `+toolchain` and flags
