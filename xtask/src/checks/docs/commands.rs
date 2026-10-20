@@ -7,12 +7,13 @@
 //! quotes. A continuing line is joined with the next line of its block, and so on down a chain of
 //! them, and the joined text is reported at the first line. The continuation character is a
 //! backtick in a PowerShell block, `^` in a `cmd` or `bat` block, and `\` in every other block
-//! that is read. In a session block the next line is read after a leading `> `, with or without a
-//! prompt. A continuation character is dropped only in a code block, and only when no line
-//! follows it in its block. A span keeps its text as written. Each joined text is split into
-//! words once, with `shlex`, or on whitespace when `shlex` cannot split it. Every `cargo` in the
-//! words, with its flags and `+toolchain` skipped, followed by `xtask`, starts a command. The
-//! words after `xtask` stop at shell syntax and parse against the clap tree in `main.rs`.
+//! that is read. In a session block the next line is read after a leading `> ` or `>> `, with or
+//! without a prompt. A continuing line has its continuation character dropped. When a line of its
+//! block follows, the two lines are joined. When none follows, the line is read alone. A span
+//! keeps its text as written. Each joined text is split into words once, with `shlex`, or on
+//! whitespace when `shlex` cannot split it. Every `cargo` in the words, with its flags and
+//! `+toolchain` skipped, followed by `xtask`, starts a command. The words after `xtask` stop at
+//! shell syntax and parse against the clap tree in `main.rs`.
 
 use super::markdown::{CodeLine, Scan};
 use crate::Cli;
