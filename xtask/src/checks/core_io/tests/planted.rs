@@ -290,11 +290,11 @@ crate::checks::planted::cases! {
     /// A definition inside a transcriber or a macro call's arguments gets the full rules.
     forwarded_meta_in_a_nested_definition: FailsWith(&[metavariable_attribute!(4), metavariable_attribute!(4)]), inspects 3 => super::forwarded_meta_in_a_nested_definition,
     definition_shape_in_call_arguments: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::definition_shape_in_call_arguments,
-    /// In a transcriber, brackets after a `tt` metavariable or a repetition fail.
-    hash_joins_written_brackets: FailsWith(&[joined_brackets!(1)]), inspects 3 => super::hash_joins_written_brackets,
-    repetition_joins_written_brackets: FailsWith(&[joined_brackets!(1)]), inspects 3 => super::repetition_joins_written_brackets,
-    joined_brackets_in_call_arguments: FailsWith(&[joined_brackets!(2)]), inspects 3 => super::joined_brackets_in_call_arguments,
+    /// A `#` followed by neither brackets nor `!` and brackets fails, wherever it stands.
+    hash_joins_written_brackets: FailsWith(&[hash_without_brackets!(2)]), inspects 3 => super::hash_joins_written_brackets,
+    attribute_built_across_two_macros: FailsWith(&[hash_without_brackets!(2)]), inspects 3 => super::attribute_built_across_two_macros,
     indexing_after_an_ident_passes: Passes, inspects 3 => super::indexing_after_an_ident_passes,
+    indexing_after_a_tt_passes: Passes, inspects 3 => super::indexing_after_a_tt_passes,
     path_attribute: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute,
     path_attribute_in_cfg_attr: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute_in_cfg_attr,
     /// A literal `path` on a top-level `mod name;` passes when it names a file core-io lexes.
@@ -318,10 +318,10 @@ crate::checks::planted::cases! {
     cfg_rule_passes: Passes, inspects 3 => super::cfg_rule_passes,
     cfg_doc_passes: Passes, inspects 3 => super::cfg_doc_passes,
     attribute_split_across_a_macro: FailsWith(&[
-        metavariable_attribute!(2),
+        hash_without_brackets!(2),
         cfg_form!(4, "the name `panic`"),
     ]), inspects 3 => super::attribute_split_across_a_macro,
-    hash_from_a_metavariable: FailsWith(&[joined_brackets!(2), cfg_form!(2, "the name `panic`")]), inspects 3 => super::hash_from_a_metavariable,
+    hash_from_a_metavariable: FailsWith(&[cfg_form!(2, "the name `panic`"), hash_without_brackets!(4)]), inspects 3 => super::hash_from_a_metavariable,
     path_with_a_metavariable: FailsWith(&[path_attribute!(3)]), inspects 3 => super::path_with_a_metavariable,
     include_with_a_metavariable: FailsWith(&[
         "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs` calls `include!`, which can bring into clauseo-protocol code \

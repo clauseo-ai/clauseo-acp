@@ -58,16 +58,17 @@ macro_rules! metavariable_attribute {
     };
 }
 
-/// The violation for brackets joined to a `#` at line `$line` of `crates/protocol/src/hidden.rs`.
+/// The violation for a `#` without brackets at line `$line` of `crates/protocol/src/hidden.rs`.
 #[cfg(test)]
-macro_rules! joined_brackets {
+macro_rules! hash_without_brackets {
     ($line:literal) => {
         concat!(
             "crates/protocol/src/hidden.rs:", $line, ": `crates/protocol/src/hidden.rs` writes \
-             brackets right after a repetition or a metavariable that can stand for a `#`, so a \
-             macro of clauseo-protocol can build an attribute that core-io does not see\n    \
-             fix: put the brackets after a token the macro body writes itself, or after a \
-             metavariable bound as a fragment other than `tt`, such as `ident` or `expr`"
+             a `#` that is followed by neither brackets nor `!` and brackets, so a macro can \
+             join it to brackets from elsewhere and build an attribute in clauseo-protocol that \
+             core-io does not see\n    \
+             fix: write the attribute's brackets right after its `#`, as `#[..]` or `#![..]`; to \
+             pass an attribute to a macro, pass it whole, with its `#` and its brackets"
         )
     };
 }

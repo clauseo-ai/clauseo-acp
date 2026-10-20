@@ -43,15 +43,15 @@
 //! name `cfg_select` fails anywhere, a `use` included, since its macro builds only the arm whose
 //! cfg holds. `cfg!` passes, since both branches of an `if cfg!(..)` are compiled and linted.
 //!
-//! An attribute or a macro call whose name is a metavariable fails, and so does a `#` before a
-//! metavariable or a metavariable after `path` or `include`, since a macro could build a `cfg`, a
-//! `path` or an `include!` from what its caller passes. These rules skip the matcher of each
+//! Every `#` is followed by brackets, or by `!` and brackets, wherever it stands, since otherwise
+//! a macro could join it to brackets passed separately. An attribute or a macro call whose name
+//! is a metavariable fails, and so does a metavariable after `path` or `include`, since a macro
+//! could build a `cfg`, a `path` or an `include!` from what its caller passes. These rules skip
+//! the matcher of each
 //! `macro_rules!` arm. A transcriber may write `#[$m]` when its arm's matcher binds `$m` as
 //! `#[$m:meta]`, since the caller then writes a whole bracketed attribute, which the rule checks
 //! where the caller writes it. Both hold only for a `macro_rules!` outside every transcriber and
-//! every macro call's arguments, since there no other macro can fill in its tokens. Outside a
-//! matcher, brackets fail right after a repetition or after a metavariable that the arm holding
-//! them binds as `tt` or does not bind at all, since either can stand for a `#`.
+//! every macro call's arguments, since there no other macro can fill in its tokens.
 //!
 //! `include!` and every symlink git lists under the folder fail, file or folder target alike. A
 //! `path` attribute passes only on an out-of-line `mod name;` at the top level of a file, with a

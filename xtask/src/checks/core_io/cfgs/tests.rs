@@ -65,7 +65,7 @@ fn forms_beyond_the_planted_cases() {
             "let a = [path, cfg]; vec![$x]; m!([path = \"x\"]);",
             vec![(Finding::PathAttribute, 1)],
         ),
-        ("#!$a", vec![(Finding::MetavariableAttribute, 1)]),
+        ("#!$a", vec![(Finding::HashWithoutBrackets, 1)]),
         ("cfg $b (unix)", vec![]),
         (
             "$($m)*!(x); $crate::m!(); $i::x!();",
@@ -84,7 +84,7 @@ fn macro_arms() {
     let attribute = |line| (Finding::MetavariableAttribute, line);
     let cases = [
         ("macro_rules! m { ($i:ident $x:tt) => {}; }", vec![]),
-        ("macro_rules! m { (#$h:tt $i:ident!) => {} }", vec![]),
+        ("macro_rules! m { ($h:tt $i:ident!) => {} }", vec![]),
         ("macro_rules! m { (#[path $e:tt]) => {} }", vec![]),
         ("macro_rules! m { (#[$a:meta]) => { #[$a] } }", vec![]),
         (
@@ -125,9 +125,38 @@ fn macro_arms() {
         ),
         (
             "macro_rules! m { ($v:ident $t:tt) => { $v[0]; $crate[0]; $t[0]; $u[0]; $($t),*[0] } }",
-            vec![(Finding::JoinedBrackets, 1); 3],
+            vec![],
         ),
-        ("$h [cfg(test)]", vec![(Finding::JoinedBrackets, 1)]),
+    ];
+    for (source, expected) in cases {
+        assert_eq!(findings(source), expected, "{source}");
+    }
+}
+
+/// Every `#` is followed by a bracket group, or by `!` and a bracket group, in a matcher, a
+/// transcriber and a call's arguments alike. Doc comments, raw identifiers and strings pass.
+#[test]
+fn every_hash_is_followed_by_brackets() {
+    let hash = |line| (Finding::HashWithoutBrackets, line);
+    let cases = [
+        (
+            "//! Docs.\n/// Docs.\n#[derive(Debug)] #![allow(dead_code)] fn r#f() { \"#\"; }",
+            vec![],
+        ),
+        ("m!(#, [cfg(test)]);", vec![hash(1)]),
+        ("m!(#);", vec![hash(1)]),
+        ("m!(#!);", vec![hash(1)]),
+        ("m!(#(test) #{test} #! !);", vec![hash(1), hash(1), hash(1)]),
+        ("macro_rules! m { (#$h:tt) => {} }", vec![hash(1)]),
+        ("macro_rules! m { () => { # x } }", vec![hash(1)]),
+        (
+            "macro_rules! m { ($($h:tt)?) => { $($h)? [test] } }",
+            vec![],
+        ),
+        (
+            "m! { macro_rules! n { (#[$a:meta]) => { #[$a] } } }",
+            vec![(Finding::MetavariableAttribute, 1); 2],
+        ),
     ];
     for (source, expected) in cases {
         assert_eq!(findings(source), expected, "{source}");

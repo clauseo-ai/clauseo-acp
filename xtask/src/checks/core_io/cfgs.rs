@@ -8,21 +8,21 @@
 //! call arguments included. The predicate of each `cfg` and `cfg_attr` at the start of any
 //! bracket group or inside a `cfg_attr` is built only from `all`, `any`, `not`, `test`, `doc` and
 //! `feature = "<literal>"`, with no `feature` under a `not`. Any bracket group counts, since a
-//! macro can join a `#` to brackets passed separately. A `cfg` among the attributes of a
+//! macro from outside the crate can write a `#` before brackets passed to it. A `cfg` among the
+//! attributes of a
 //! `cfg_attr` fails at any depth, since `#[cfg_attr(feature = "x", cfg(any()))]` keeps the item
 //! only when the feature is off. The name `cfg_select` fails wherever it stands, a `use`
 //! included, since `cfg_select!` builds only the arm whose cfg holds and an alias would hide the
 //! call. `cfg!` passes, since both branches of an `if cfg!(..)` are compiled and linted.
 //!
-//! An attribute or a macro call whose name is a metavariable fails, and so does a `#` before a
-//! metavariable or a metavariable after `path` or `include`, since a macro could build a `cfg`, a
-//! `path` or an `include!` from what its caller passes. These metavariable rules skip the matcher
-//! of each `macro_rules!` arm, and a transcriber may write `#[$m]` when its arm's matcher binds
-//! `$m` as `#[$m:meta]`, but only for a definition outside every transcriber and every macro
-//! call's arguments. Outside a matcher, brackets fail right after a repetition or after a
-//! metavariable that the arm whose transcriber holds them binds as `tt` or does not bind, since
-//! either can stand for a `#`.
-//! `macros.rs` reads the arms.
+//! Every `#` is followed by a bracket group, or by `!` and a bracket group, in matchers,
+//! transcribers and macro call arguments alike. Otherwise a macro could join a `#` to brackets
+//! passed separately and build an attribute that core-io does not see. An attribute or a macro
+//! call whose name is a metavariable fails, and so does a metavariable after `path` or `include`,
+//! since a macro could build a `cfg`, a `path` or an `include!` from what its caller passes.
+//! These metavariable rules skip the matcher of each `macro_rules!` arm, and a transcriber may
+//! write `#[$m]` when its arm's matcher binds `$m` as `#[$m:meta]`, but only for a definition
+//! outside every transcriber and every macro call's arguments. `macros.rs` reads the arms.
 //!
 //! `include!` and every symlink under the crate's folder fail. A `path` attribute passes only in
 //! the one place where core-io can follow it to a file it lexes, and `paths.rs` says where that
@@ -38,8 +38,8 @@ use crate::violation::Violation;
 use crate::workspace::{self, Member};
 use paths::TopLevel;
 use predicate::{metavariable, whole_predicate};
-use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
-use std::collections::{BTreeMap, BTreeSet};
+use proc_macro2::{Delimiter, Group, Punct, TokenStream, TokenTree};
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -49,8 +49,10 @@ pub(super) enum Finding {
     /// A cfg predicate with a form other than `all`, `any`, `not`, `test`, `doc` and a positive
     /// feature, described as the fix names it.
     Predicate(String),
-    /// An attribute whose name is a metavariable, or a `#` before a metavariable.
+    /// An attribute whose name is a metavariable.
     MetavariableAttribute,
+    /// A `#` followed by neither a bracket group nor `!` and a bracket group.
+    HashWithoutBrackets,
     /// A `path` attribute.
     PathAttribute,
     /// A call of `include!`.
@@ -61,17 +63,10 @@ pub(super) enum Finding {
     CfgInCfgAttr,
     /// A macro call whose name is a metavariable, such as `$x!`.
     MetavariableMacro,
-    /// Outside a matcher, brackets right after a repetition or a metavariable that the arm whose
-    /// transcriber holds them does not bind as a fragment other than `tt`, either of which can
-    /// stand for a `#`.
-    JoinedBrackets,
 }
 
 /// No names, for a scope outside any transcriber.
 static NO_NAMES: BTreeSet<String> = BTreeSet::new();
-
-/// No bindings, for brackets outside any transcriber.
-static NO_BINDS: BTreeMap<String, String> = BTreeMap::new();
 
 /// Where the walk is, as the metavariable and path rules see it.
 #[derive(Clone, Copy)]
@@ -86,8 +81,6 @@ struct Scope<'a> {
     /// The names the arm's matcher binds as `#[$m:meta]`, which its transcriber may write as
     /// `#[$m]`.
     metas: &'a BTreeSet<String>,
-    /// In a transcriber, the fragment kind of each metavariable the arm's matcher binds.
-    binds: Option<&'a BTreeMap<String, String>>,
     /// The file, when the walk is at its top level, outside every group, where a `path`
     /// attribute can pass (`paths.rs`).
     top: Option<&'a TopLevel<'a>>,
@@ -100,7 +93,6 @@ impl Scope<'static> {
             matcher: false,
             definitions: false,
             metas: &NO_NAMES,
-            binds: None,
             top: None,
         }
     }
@@ -193,14 +185,6 @@ fn walk(tokens: TokenStream, scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
                 } else {
                     scope
                 };
-                // Outside any transcriber nothing is bound, so every metavariable counts.
-                if inner.delimiter() == Delimiter::Bracket
-                    && !scope.matcher
-                    && macros::joins_brackets(&trees[..index], scope.binds.unwrap_or(&NO_BINDS))
-                {
-                    let line = line_of(inner.span().start().line);
-                    hits.push((Finding::JoinedBrackets, line));
-                }
                 let path_passes = scope.top.is_some_and(|top| {
                     index > 0
                         && is_punct(&trees[index - 1], '#')
@@ -222,6 +206,7 @@ fn walk(tokens: TokenStream, scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
                     _ => {}
                 }
             }
+            TokenTree::Punct(punct) if punct.as_char() == '#' => hash(punct, rest, scope, hits),
             _ if scope.matcher => {}
             TokenTree::Punct(dollar) if dollar.as_char() == '$' && names_a_macro(rest) => {
                 hits.push((
@@ -229,7 +214,6 @@ fn walk(tokens: TokenStream, scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
                     line_of(dollar.span().start().line),
                 ));
             }
-            TokenTree::Punct(punct) if punct.as_char() == '#' => hash(rest, scope, hits),
             TokenTree::Punct(_) | TokenTree::Literal(_) => {}
         }
     }
@@ -246,10 +230,10 @@ fn group(inner: &Group, scope: Scope<'_>, path_passes: bool, hits: &mut Vec<(Fin
     walk(inner.stream(), Scope { top: None, ..scope }, hits);
 }
 
-/// Checks `rest`, what follows a `#` outside a matcher: the attribute's name, or what stands in
-/// place of its brackets, may not be a metavariable. A transcriber's `#[$m]` passes when `scope`
-/// binds `$m` as `#[$m:meta]`.
-fn hash(rest: &[TokenTree], scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
+/// Checks `rest`, what follows the `#` `punct`. It must be a bracket group, or `!` and a bracket
+/// group, in a matcher too. Outside a matcher the attribute's name may not be a metavariable,
+/// and a transcriber's `#[$m]` passes when `scope` binds `$m` as `#[$m:meta]`.
+fn hash(punct: &Punct, rest: &[TokenTree], scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
     let inner = match rest {
         [bang, after @ ..] if is_punct(bang, '!') => after,
         _ => rest,
@@ -260,12 +244,15 @@ fn hash(rest: &[TokenTree], scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
             let forwarded = inner.len() == rest.len() && macros::forwards_meta(&parts, scope);
             if let Some(first) = parts.first()
                 && !forwarded
+                && !scope.matcher
             {
                 metavariable_name(first, hits);
             }
         }
-        Some(other) => metavariable_name(other, hits),
-        None => {}
+        _ => hits.push((
+            Finding::HashWithoutBrackets,
+            line_of(punct.span().start().line),
+        )),
     }
 }
 
@@ -357,7 +344,7 @@ fn metavariable_name(tree: &TokenTree, hits: &mut Vec<(Finding, u32)>) {
 }
 
 /// Checks `tokens` as the inside of an attribute, whether or not a `#` stands before them, since a
-/// macro can put the `#` and the brackets together from separate tokens. A `path = ..` fails
+/// macro from outside the crate can write a `#` before brackets passed to it. A `path = ..` fails
 /// unless `path_passes`, a `path $` fails outside a matcher, and a `cfg` or `cfg_attr` predicate
 /// must be allowed.
 fn attribute_head(

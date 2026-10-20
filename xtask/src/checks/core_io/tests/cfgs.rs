@@ -257,7 +257,8 @@ pub(in crate::checks::core_io) fn macro_name_metavariable() -> Inspection {
     )
 }
 
-/// The review's case: `#` and its brackets come into the macro body as separate tokens.
+/// The review's case: `#` and its brackets come into the macro body as separate tokens, so the
+/// `#` in the transcriber fails.
 pub(in crate::checks::core_io) fn attribute_split_across_a_macro() -> Inspection {
     with_file(
         "attr-split",
@@ -266,7 +267,8 @@ pub(in crate::checks::core_io) fn attribute_split_across_a_macro() -> Inspection
     )
 }
 
-/// The review's case: the `#` comes in as a metavariable before the brackets.
+/// The review's case: the `#` comes in as a metavariable before the brackets, so the `#` in
+/// the call fails.
 pub(in crate::checks::core_io) fn hash_from_a_metavariable() -> Inspection {
     with_file(
         "attr-hash-metavariable",

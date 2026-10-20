@@ -1,5 +1,5 @@
 //! The core-io planted cases about macros: attributes a macro forwards whole, definitions that
-//! another macro fills in, and brackets a `#` passed as a `tt` can join.
+//! another macro fills in, and a `#` passed to a macro without its brackets.
 
 use super::cfgs::with_file;
 use crate::checks::Inspection;
@@ -132,7 +132,8 @@ a!(cfg(any()));
     )
 }
 
-/// The review's case: a `#` passed as a `tt` joins brackets the transcriber writes.
+/// The review's case: a `#` passed as a `tt` joins brackets the transcriber writes, so the `#`
+/// in the call fails.
 pub(in crate::checks::core_io) fn hash_joins_written_brackets() -> Inspection {
     with_file(
         "hash-joins-brackets",
@@ -141,23 +142,23 @@ pub(in crate::checks::core_io) fn hash_joins_written_brackets() -> Inspection {
     )
 }
 
-/// The same with the `#` passed through a repetition.
-pub(in crate::checks::core_io) fn repetition_joins_written_brackets() -> Inspection {
+/// The review's case: one macro passes a `#` and brackets as separate arguments to a second,
+/// whose transcriber joins them into an attribute, so the `#` in the first macro fails.
+pub(in crate::checks::core_io) fn attribute_built_across_two_macros() -> Inspection {
     with_file(
-        "repetition-joins-brackets",
-        "macro_rules! r { ($($h:tt)?; $($p:tt)*) => { $($h)? [$($p)*] pub fn k() {} }; }\n\
-         r!(#; cfg(not(clippy)));\n",
+        "two-macros",
+        "macro_rules! b { ($h:tt, $b:tt) => { $h $b pub fn k() {} }; }\n\
+         macro_rules! a { ($($t:tt)*) => { b!(#, [$($t)*]); }; }\n\
+         a!(cfg(not(feature = \"specta\")));\n",
     )
 }
 
-/// The review's case: a definition inside a macro call's arguments gets no bindings, so the
-/// `$h` before the brackets counts as unbound.
-pub(in crate::checks::core_io) fn joined_brackets_in_call_arguments() -> Inspection {
+/// Indexing after a metavariable bound as `tt`, which passes, since no `#` stands alone.
+pub(in crate::checks::core_io) fn indexing_after_a_tt_passes() -> Inspection {
     with_file(
-        "joined-in-call",
-        "macro_rules! id { ($($t:tt)*) => { $($t)* }; }\n\
-         id! { macro_rules! fake { ($h:tt $($p:tt)*) => { $h [$($p)*] pub fn j() {} }; } }\n\
-         fake!(# cfg(not(clippy)));\n",
+        "indexing-tt",
+        "macro_rules! first { ($a:tt) => { $a[0] }; }\n\
+         pub fn f(v: &[u8]) -> u8 {\n    first!(v)\n}\n",
     )
 }
 

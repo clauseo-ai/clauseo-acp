@@ -5,9 +5,9 @@
 //! outside every transcriber and every macro call's arguments. There another macro can fill in
 //! the matcher and the `$m`, or the tokens are no definition at all, so every rule applies.
 
-use super::{Finding, NO_NAMES, Scope, group, ident_name, is_punct, walk};
+use super::{Finding, NO_NAMES, Scope, group, is_punct, walk};
 use proc_macro2::{Group, TokenStream, TokenTree};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 /// True when `before`, the trees ahead of a group, ends in `macro_rules! name`, so the group
 /// holds the arms of a definition.
@@ -46,10 +46,8 @@ pub(super) fn arms(body: &Group, scope: Scope<'_>, hits: &mut Vec<(Finding, u32)
         };
         group(matcher, matching, false, hits);
         let metas = meta_bindings(matcher.stream());
-        let binds = bindings(matcher.stream());
         let transcribing = Scope {
             metas: &metas,
-            binds: Some(&binds),
             ..Scope::outside()
         };
         group(transcriber, transcribing, false, hits);
@@ -117,41 +115,4 @@ pub(super) fn forwards_meta(parts: &[TokenTree], scope: Scope<'_>) -> bool {
         [dollar, TokenTree::Ident(name)]
             if is_punct(dollar, '$') && scope.metas.contains(&name.to_string())
     )
-}
-
-/// The fragment kind of each metavariable that `tokens`, a matcher, binds as `$name:kind`, inside
-/// repetitions too.
-fn bindings(tokens: TokenStream) -> BTreeMap<String, String> {
-    let mut kinds = BTreeMap::new();
-    let trees: Vec<TokenTree> = tokens.into_iter().collect();
-    for (index, tree) in trees.iter().enumerate() {
-        match (tree, &trees[index + 1..]) {
-            (TokenTree::Group(inner), _) => kinds.extend(bindings(inner.stream())),
-            (dollar, [TokenTree::Ident(name), colon, TokenTree::Ident(kind), ..])
-                if is_punct(dollar, '$') && is_punct(colon, ':') =>
-            {
-                kinds.insert(ident_name(name), ident_name(kind));
-            }
-            _ => {}
-        }
-    }
-    kinds
-}
-
-/// True when `before`, the trees ahead of a bracket group whose arm binds `binds`, none outside
-/// any transcriber, end in a repetition such as `$($h)*`, or in a metavariable other than
-/// `$crate` that the arm binds as `tt` or does not bind. Either can stand for a `#` that turns the
-/// brackets into an attribute.
-pub(super) fn joins_brackets(before: &[TokenTree], binds: &BTreeMap<String, String>) -> bool {
-    let is_op =
-        |tree: &TokenTree| is_punct(tree, '*') || is_punct(tree, '+') || is_punct(tree, '?');
-    match before {
-        [.., dollar, TokenTree::Ident(name)] if is_punct(dollar, '$') => {
-            let name = ident_name(name);
-            name != "crate" && binds.get(&name).is_none_or(|kind| kind == "tt")
-        }
-        [.., dollar, TokenTree::Group(_), op] if is_punct(dollar, '$') && is_op(op) => true,
-        [.., dollar, TokenTree::Group(_), _, op] => is_punct(dollar, '$') && is_op(op),
-        _ => false,
-    }
 }
