@@ -123,9 +123,14 @@ macro_rules! path_attribute {
     ($line:literal) => {
         concat!(
             "crates/protocol/src/hidden.rs:", $line, ": `crates/protocol/src/hidden.rs` gives a \
-             module a `path` attribute, which can bring into clauseo-protocol a file core-io does \
-             not read\n    fix: remove the `path` attribute and move the module to its default \
-             path"
+             module a `path` attribute that core-io cannot follow to a file it lexes, so it can \
+             bring into clauseo-protocol a file core-io does not read\n    fix: give \
+             `#[path = \"..\"]` only to an out-of-line `mod name;` at the top level of a file, \
+             outside every brace, bracket and parenthesis, with a string literal that names, \
+             relative to this file's folder and with `/` between components, a `.rs` file under \
+             the crate's folder that git lists and that is not a symlink, without leaving that \
+             folder on the way; a `path` in a `cfg_attr`, on an inline module, inside a module \
+             block or with a metavariable value always fails"
         )
     };
 }
@@ -368,6 +373,13 @@ crate::checks::planted::cases! {
     forwarded_cfg_at_the_call: FailsWith(&[cfg_form!(7, "the name `clippy`")]), inspects 3 => super::forwarded_cfg_at_the_call,
     path_attribute: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute,
     path_attribute_in_cfg_attr: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute_in_cfg_attr,
+    /// A literal `path` on a top-level `mod name;` passes when it names a file core-io lexes.
+    path_to_a_lexed_file_passes: Passes, inspects 3 => super::path_to_a_lexed_file_passes,
+    path_from_a_macro_value: FailsWith(&[path_attribute!(3)]), inspects 3 => super::path_from_a_macro_value,
+    path_not_a_literal: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_not_a_literal,
+    path_leaving_the_crate: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_leaving_the_crate,
+    path_on_an_inline_module: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_on_an_inline_module,
+    path_inside_a_module_block: FailsWith(&[path_attribute!(2)]), inspects 3 => super::path_inside_a_module_block,
     include_macro: FailsWith(&[
         "crates/protocol/src/hidden.rs:2: `crates/protocol/src/hidden.rs` calls `include!`, which can bring into clauseo-protocol code \
          from a file core-io does not read\n    \

@@ -252,10 +252,81 @@ pub(in crate::checks::core_io) fn path_attribute() -> Inspection {
     with_file("path-attr", "#[path = \"x.txt\"]\nmod x;\n")
 }
 
+/// A `path` in a `cfg_attr` fails even when it names a file core-io lexes.
 pub(in crate::checks::core_io) fn path_attribute_in_cfg_attr() -> Inspection {
     with_file(
         "path-cfg-attr",
-        "#[cfg_attr(test, path = \"y.rs\")]\nmod y;\n",
+        "#[cfg_attr(test, path = \"lib.rs\")]\nmod y;\n",
+    )
+}
+
+/// The review's case: the protocol crate's tests share a helper and split a test crate with a
+/// literal `path` on a top-level `mod name;`, to files core-io lexes.
+pub(in crate::checks::core_io) fn path_to_a_lexed_file_passes() -> Inspection {
+    let crate_file = expected("path-passes").text;
+    let events = "#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]\n\
+                  #[cfg(test)]\n#[path = \"support/fixtures.rs\"]\npub mod fixtures;\n\n\
+                  #[cfg(test)]\n#[path = \"events/rules.rs\"]\nmod rules;\n\n\
+                  #[path = \"../src/./hidden.rs\"]\npub(crate) mod hidden;\n";
+    run_repo(
+        "path-passes",
+        &Repo {
+            crate_file: Some(&crate_file),
+            files: &[
+                ("crates/protocol/tests/events.rs", events),
+                (
+                    "crates/protocol/tests/support/fixtures.rs",
+                    "pub fn f() {}\n",
+                ),
+                (
+                    "crates/protocol/tests/events/rules.rs",
+                    "#[test]\nfn t() {}\n",
+                ),
+                (FILE, "pub fn g() {}\n"),
+            ],
+            targets: &[("test", "crates/protocol/tests/events.rs")],
+            ..Repo::default()
+        },
+    )
+}
+
+/// A `path` whose value a macro takes from its caller, after a literal `=`.
+pub(in crate::checks::core_io) fn path_from_a_macro_value() -> Inspection {
+    with_file(
+        "path-macro-value",
+        "macro_rules! p {\n    ($x:literal) => {\n        #[path = $x]\n        mod x;\n    \
+         };\n}\np!(\"lib.rs\");\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn path_not_a_literal() -> Inspection {
+    with_file(
+        "path-not-literal",
+        "#[path = concat!(\"lib\", \".rs\")]\nmod x;\n",
+    )
+}
+
+/// A path out of the crate's folder, to another crate's file that git lists.
+pub(in crate::checks::core_io) fn path_leaving_the_crate() -> Inspection {
+    with_file(
+        "path-leaving",
+        "#[path = \"../../extra/src/lib.rs\"]\nmod x;\n",
+    )
+}
+
+/// rustc resolves a `path` on an inline module, or on a module inside one, against another
+/// folder, so both fail even when the literal names a file core-io lexes from here.
+pub(in crate::checks::core_io) fn path_on_an_inline_module() -> Inspection {
+    with_file(
+        "path-inline",
+        "#[path = \"lib.rs\"]\nmod x {\n    pub fn f() {}\n}\n",
+    )
+}
+
+pub(in crate::checks::core_io) fn path_inside_a_module_block() -> Inspection {
+    with_file(
+        "path-module-block",
+        "mod outer {\n    #[path = \"lib.rs\"]\n    mod inner;\n}\n",
     )
 }
 

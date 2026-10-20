@@ -8,28 +8,34 @@
 //! call arguments included. The predicate of each `cfg` and `cfg_attr` at the start of any
 //! bracket group or inside a `cfg_attr` is built only from `all`, `any`, `not`, `test`, `doc` and
 //! `feature = "<literal>"`, with no `feature` under a `not`. Any bracket group counts, since a
-//! macro can join a `#` to brackets passed separately. The name `cfg_select` fails wherever it
-//! stands, a `use` included, since `cfg_select!` builds only the arm whose cfg holds and an alias
-//! would hide the call. `cfg!` passes, since both branches of an `if cfg!(..)` are compiled and
-//! linted. A `cfg` among the attributes of a `cfg_attr` fails, at any depth, since
-//! `#[cfg_attr(feature = "x", cfg(any()))]` keeps the item only when the feature is off. An
-//! attribute or a macro call whose name is a metavariable fails, and so does a `#` before a
-//! metavariable, since a macro could build a `cfg` or an `include!` from a passed name. These
-//! metavariable rules skip the matcher of each `macro_rules!` arm, and a transcriber may write
-//! `#[$m]` when its arm's matcher binds `$m` as `#[$m:meta]` (`macros.rs`). A `path`
-//! attribute, `include!` and any symlink under the crate's folder fail, so every module file sits
-//! at its default path under the crate, ends in `.rs` and is lexed here.
+//! macro can join a `#` to brackets passed separately. A `cfg` among the attributes of a
+//! `cfg_attr` fails at any depth, since `#[cfg_attr(feature = "x", cfg(any()))]` keeps the item
+//! only when the feature is off. The name `cfg_select` fails wherever it stands, a `use`
+//! included, since `cfg_select!` builds only the arm whose cfg holds and an alias would hide the
+//! call. `cfg!` passes, since both branches of an `if cfg!(..)` are compiled and linted.
+//!
+//! An attribute or a macro call whose name is a metavariable fails, and so does a `#` before a
+//! metavariable or a metavariable after `path` or `include`, since a macro could build a `cfg`, a
+//! `path` or an `include!` from what its caller passes. These metavariable rules skip the matcher
+//! of each `macro_rules!` arm, and a transcriber may write `#[$m]` when its arm's matcher binds
+//! `$m` as `#[$m:meta]`. `macros.rs` reads the arms.
+//!
+//! `include!` and every symlink under the crate's folder fail. A `path` attribute passes only in
+//! the one place where core-io can follow it to a file it lexes, and `paths.rs` says where that
+//! is. So every module file is a `.rs` file under the crate's folder and is lexed here.
 
 mod macros;
+mod paths;
 mod predicate;
 
 use super::report;
 use crate::checks;
 use crate::violation::Violation;
 use crate::workspace::{self, Member};
-use macros::Scope;
+use paths::TopLevel;
 use predicate::{metavariable, whole_predicate};
 use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -53,6 +59,34 @@ pub(super) enum Finding {
     MetavariableMacro,
 }
 
+/// No names, for a scope outside any transcriber.
+static NO_NAMES: BTreeSet<String> = BTreeSet::new();
+
+/// Where the walk is, as the metavariable and path rules see it.
+#[derive(Clone, Copy)]
+struct Scope<'a> {
+    /// True on the matcher side of a `macro_rules!` arm, where the metavariable rules do not
+    /// apply.
+    matcher: bool,
+    /// The names the arm's matcher binds as `#[$m:meta]`, which its transcriber may write as
+    /// `#[$m]`.
+    metas: &'a BTreeSet<String>,
+    /// The file, when the walk is at its top level, outside every group, where a `path`
+    /// attribute can pass (`paths.rs`).
+    top: Option<&'a TopLevel<'a>>,
+}
+
+impl Scope<'static> {
+    /// The scope of code inside a group and outside any `macro_rules!` arm.
+    fn outside() -> Self {
+        Scope {
+            matcher: false,
+            metas: &NO_NAMES,
+            top: None,
+        }
+    }
+}
+
 /// The violations for the held crate `member`'s entries among `entries` (git's list, a symlink
 /// as one entry): each symlink, each `.rs` file that does not lex, and each `Finding` in the
 /// others.
@@ -74,6 +108,7 @@ pub(super) fn cfg_rule(root: &Path, member: &Member, entries: &[String]) -> Vec<
             Err(error) => found.push(checks::unreadable(entry, &error)),
         }
     }
+    let lexed: BTreeSet<&str> = sources.iter().map(|path| path.as_str()).collect();
     for path in sources {
         let text = match checks::read_repo_file(root, path) {
             Ok(Some(text)) => text,
@@ -87,7 +122,16 @@ pub(super) fn cfg_rule(root: &Path, member: &Member, entries: &[String]) -> Vec<
         match TokenStream::from_str(&text) {
             Ok(tokens) => {
                 let mut hits = Vec::new();
-                walk(tokens, Scope::outside(), &mut hits);
+                let top = TopLevel {
+                    file: path,
+                    dir: &member.dir,
+                    lexed: &lexed,
+                };
+                let scope = Scope {
+                    top: Some(&top),
+                    ..Scope::outside()
+                };
+                walk(tokens, scope, &mut hits);
                 for (finding, line) in hits {
                     found.push(report::cfg_rule(path, line, &finding, &member.name));
                 }
@@ -119,7 +163,14 @@ fn walk(tokens: TokenStream, scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
             TokenTree::Group(inner) if macros::holds_arms(&trees[..index]) => {
                 macros::arms(inner, hits);
             }
-            TokenTree::Group(inner) => group(inner, scope, hits),
+            TokenTree::Group(inner) => {
+                let path_passes = scope.top.is_some_and(|top| {
+                    index > 0
+                        && is_punct(&trees[index - 1], '#')
+                        && paths::allowed(inner, rest, top)
+                });
+                group(inner, scope, path_passes, hits);
+            }
             TokenTree::Ident(ident) => {
                 let line = line_of(ident.span().start().line);
                 match ident_name(ident).as_str() {
@@ -148,12 +199,14 @@ fn walk(tokens: TokenStream, scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
 }
 
 /// Checks `inner`, a group the walk meets in `scope`: a bracket group's head as an attribute's,
-/// then its trees.
-fn group(inner: &Group, scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
+/// where a `path` attribute passes when `path_passes`, then its trees, which are not at the top
+/// level.
+fn group(inner: &Group, scope: Scope<'_>, path_passes: bool, hits: &mut Vec<(Finding, u32)>) {
     if inner.delimiter() == Delimiter::Bracket {
-        attribute_head(&inner.stream().into_iter().collect::<Vec<_>>(), scope, hits);
+        let tokens: Vec<TokenTree> = inner.stream().into_iter().collect();
+        attribute_head(&tokens, scope, path_passes, hits);
     }
-    walk(inner.stream(), scope, hits);
+    walk(inner.stream(), Scope { top: None, ..scope }, hits);
 }
 
 /// Checks `rest`, what follows a `#` outside a matcher: the attribute's name, or what stands in
@@ -252,7 +305,7 @@ fn attribute(tokens: &[TokenTree], scope: Scope<'_>, hits: &mut Vec<(Finding, u3
     {
         metavariable_name(first, hits);
     }
-    attribute_head(tokens, scope, hits);
+    attribute_head(tokens, scope, false, hits);
 }
 
 /// Pushes a metavariable attribute finding when `tree`, which stands where an attribute's name
@@ -267,15 +320,20 @@ fn metavariable_name(tree: &TokenTree, hits: &mut Vec<(Finding, u32)>) {
 }
 
 /// Checks `tokens` as the inside of an attribute, whether or not a `#` stands before them, since a
-/// macro can put the `#` and the brackets together from separate tokens. A `path = ..` or
-/// `path $` fails, the latter outside a matcher, and a `cfg` or `cfg_attr` predicate must be
-/// allowed.
-fn attribute_head(tokens: &[TokenTree], scope: Scope<'_>, hits: &mut Vec<(Finding, u32)>) {
+/// macro can put the `#` and the brackets together from separate tokens. A `path = ..` fails
+/// unless `path_passes`, a `path $` fails outside a matcher, and a `cfg` or `cfg_attr` predicate
+/// must be allowed.
+fn attribute_head(
+    tokens: &[TokenTree],
+    scope: Scope<'_>,
+    path_passes: bool,
+    hits: &mut Vec<(Finding, u32)>,
+) {
     let Some(TokenTree::Ident(ident)) = tokens.first() else {
         return;
     };
     match ident_name(ident).as_str() {
-        "path" if starts_with_punct(&tokens[1..], '=') => {
+        "path" if starts_with_punct(&tokens[1..], '=') && !path_passes => {
             hits.push((Finding::PathAttribute, line_of(ident.span().start().line)));
         }
         // A `$` after `path` may stand for the `=`.

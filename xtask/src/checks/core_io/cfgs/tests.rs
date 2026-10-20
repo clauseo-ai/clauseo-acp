@@ -125,3 +125,71 @@ fn macro_arms() {
         assert_eq!(findings(source), expected, "{source}");
     }
 }
+
+/// A `path` value resolves against its file's folder, one component at a time, and may never
+/// leave the crate's folder on the way.
+#[test]
+fn path_values_resolve_inside_the_crate() {
+    let file = "crates/p/tests/events.rs";
+    let cases = [
+        (
+            "support/fixtures.rs",
+            Some("crates/p/tests/support/fixtures.rs"),
+        ),
+        ("./a//b.rs", Some("crates/p/tests/a/b.rs")),
+        ("../src/lib.rs", Some("crates/p/src/lib.rs")),
+        ("../../p/src/lib.rs", None),
+        ("../../q/src/lib.rs", None),
+        ("/etc/x.rs", None),
+        ("a\\b.rs", None),
+        ("C:x.rs", None),
+        ("", None),
+    ];
+    for (value, expected) in cases {
+        assert_eq!(
+            paths::resolve(value, file, "crates/p").as_deref(),
+            expected,
+            "{value}"
+        );
+    }
+}
+
+/// Where a literal `path` passes: on a top-level `mod name;`, after other attributes and a
+/// visibility, naming a file the crate lexes.
+#[test]
+fn path_attributes_pass_only_on_a_top_level_module_declaration() {
+    let lexed: BTreeSet<&str> = ["crates/p/src/lib.rs", "crates/p/src/a.rs"].into();
+    let top = paths::TopLevel {
+        file: "crates/p/src/lib.rs",
+        dir: "crates/p",
+        lexed: &lexed,
+    };
+    let findings_at_top = |source: &str| {
+        let mut hits = Vec::new();
+        let scope = Scope {
+            top: Some(&top),
+            ..Scope::outside()
+        };
+        walk(
+            TokenStream::from_str(source).expect("the source lexes"),
+            scope,
+            &mut hits,
+        );
+        hits
+    };
+    let path = |line| vec![(Finding::PathAttribute, line)];
+    let cases = [
+        ("#[path = \"a.rs\"] mod x;", vec![]),
+        ("#[path = r\"a.rs\"] #[cfg(test)] pub(crate) mod x;", vec![]),
+        ("#[path = \"b.rs\"] mod x;", path(1)),
+        ("#[path = b\"a.rs\"] mod x;", path(1)),
+        ("#![path = \"a.rs\"]", path(1)),
+        ("#[path = \"a.rs\"] fn x() {}", path(1)),
+        ("#[path = \"a.rs\"] mod x {}", path(1)),
+        ("fn f() { #[path = \"a.rs\"] mod x; }", path(1)),
+        ("m! { #[path = \"a.rs\"] mod x; }", path(1)),
+    ];
+    for (source, expected) in cases {
+        assert_eq!(findings_at_top(source), expected, "{source}");
+    }
+}

@@ -372,10 +372,16 @@ pub(super) fn cfg_rule(path: &str, line: u32, finding: &Finding, package: &str) 
         ),
         Finding::PathAttribute => (
             format!(
-                "`{path}` gives a module a `path` attribute, which can bring into {package} a \
-                 file core-io does not read"
+                "`{path}` gives a module a `path` attribute that core-io cannot follow to a file \
+                 it lexes, so it can bring into {package} a file core-io does not read"
             ),
-            "remove the `path` attribute and move the module to its default path".to_owned(),
+            "give `#[path = \"..\"]` only to an out-of-line `mod name;` at the top level of a \
+             file, outside every brace, bracket and parenthesis, with a string literal that \
+             names, relative to this file's folder and with `/` between components, a `.rs` \
+             file under the crate's folder that git lists and that is not a symlink, without \
+             leaving that folder on the way; a `path` in a `cfg_attr`, on an inline module, \
+             inside a module block or with a metavariable value always fails"
+                .to_owned(),
         ),
         Finding::CfgSelect => (
             format!(

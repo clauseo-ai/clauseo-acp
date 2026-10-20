@@ -3,33 +3,9 @@
 //! arm's matcher binds `$m` as `#[$m:meta]`, since a caller then writes a whole bracketed
 //! attribute, which the walk checks where the caller writes it.
 
-use super::{Finding, group, is_punct, walk};
+use super::{Finding, Scope, group, is_punct, walk};
 use proc_macro2::{Group, TokenStream, TokenTree};
 use std::collections::BTreeSet;
-
-/// No names, for a scope outside any transcriber.
-pub(super) static NO_NAMES: BTreeSet<String> = BTreeSet::new();
-
-/// Where the walk is, as the metavariable rules see it.
-#[derive(Clone, Copy)]
-pub(super) struct Scope<'a> {
-    /// True on the matcher side of a `macro_rules!` arm, where the metavariable rules do not
-    /// apply.
-    pub(super) matcher: bool,
-    /// The names the arm's matcher binds as `#[$m:meta]`, which its transcriber may write as
-    /// `#[$m]`.
-    pub(super) metas: &'a BTreeSet<String>,
-}
-
-impl Scope<'static> {
-    /// The scope of code outside any `macro_rules!` arm.
-    pub(super) fn outside() -> Self {
-        Scope {
-            matcher: false,
-            metas: &NO_NAMES,
-        }
-    }
-}
 
 /// True when `before`, the trees ahead of a group, ends in `macro_rules! name`, so the group
 /// holds the arms of a definition.
@@ -53,15 +29,15 @@ pub(super) fn arms(body: &Group, hits: &mut Vec<(Finding, u32)>) {
     for (matcher, transcriber) in arms {
         let matching = Scope {
             matcher: true,
-            metas: &NO_NAMES,
+            ..Scope::outside()
         };
-        group(matcher, matching, hits);
+        group(matcher, matching, false, hits);
         let metas = meta_bindings(matcher.stream());
         let transcribing = Scope {
-            matcher: false,
             metas: &metas,
+            ..Scope::outside()
         };
-        group(transcriber, transcribing, hits);
+        group(transcriber, transcribing, false, hits);
     }
 }
 
