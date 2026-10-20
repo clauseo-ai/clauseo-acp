@@ -50,8 +50,6 @@ pub(super) struct CodeLine {
     pub line: u32,
     /// The line's code, container markers and the block's indent removed.
     pub text: String,
-    /// Which code block of the file holds the line, counted from 0.
-    pub block: usize,
     /// The first word of the block's info string (see `info_word`), as written.
     pub info: String,
 }
@@ -252,16 +250,13 @@ impl Pieces {
         line_of(source).saturating_add(u32::try_from(breaks).unwrap_or(u32::MAX))
     }
 
-    /// Adds each line of the block to `code`, at its file line, with the block's `info` word and
-    /// the next block number.
+    /// Adds each line of the block to `code`, at its file line, with the block's `info` word.
     fn code_lines(&self, line_of: &dyn Fn(usize) -> u32, info: &str, code: &mut Vec<CodeLine>) {
-        let block = code.last().map_or(0, |last| last.block + 1);
         let mut offset = 0;
         for raw in self.text.split_inclusive('\n') {
             code.push(CodeLine {
                 line: self.line(offset, line_of),
                 text: raw.trim_end_matches(['\n', '\r']).to_owned(),
-                block,
                 info: info.to_owned(),
             });
             offset += raw.len();

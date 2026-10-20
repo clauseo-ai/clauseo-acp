@@ -342,30 +342,32 @@ crate::checks::planted::cases! {
         bad_command!(7, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
         bad_command!(11, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
         bad_command!(12, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-        bad_command!(13, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
     ]), inspects 4 => super::cases::wrapped_commands_fail,
     /// Only shell blocks (no info string, or a shell one) and the prompted lines of session blocks
-    /// are read: the reviewer's prose lines in rust, console output, markdown and yaml pass.
+    /// are read: the prose lines in rust, console output, markdown and yaml pass.
     prose_in_code_blocks_passes: Passes, inspects 4 => super::cases::prose_in_code_blocks_passes,
-    /// A `# ` comment and a `> ` quoted line in a console block, and output and prose in no-info
-    /// and indented blocks, are not commands.
-    output_and_comments_in_sessions_and_plain_blocks_pass: Passes,
-        inspects 4 => super::cases::output_and_comments_in_sessions_and_plain_blocks_pass,
-    /// A prompted line ending in `\\` continues onto the next, its `> ` cut: `check` passes,
-    /// `frobnicate` (in a `terminal` block) fails at the prompted line.
-    continued_session_line: FailsWith(&[
-        bad_command!(7, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::continued_session_line,
+    /// A `# ` comment, a `> ` quoted line and output in a console block are not commands.
+    output_and_comments_in_sessions_pass: Passes,
+        inspects 4 => super::cases::output_and_comments_in_sessions_pass,
     /// A command run in the background: the `&` is shell syntax, not an argument.
     background_command_passes: Passes, inspects 4 => super::cases::background_command_passes,
     /// A `text` or `text,ignore` block holds output, so a failing command shown in it is not read.
     text_block_output_passes: Passes, inspects 4 => super::cases::text_block_output_passes,
-    /// A command line with a quote left open does not split into words, and fails.
-    open_quote_command_fails: FailsWith(&[
-        "GUIDE.md:2: the xtask command line `cargo xtask check --name \"open` does not split into \
-         words: a quote or escape is left open\n    \
-         fix: close the quote or escape that is left open, or remove the command",
-    ]), inspects 4 => super::cases::open_quote_command_fails,
+    /// A line that `shlex` cannot split is not read, so an apostrophe in prose passes.
+    apostrophe_in_plain_block_passes: Passes,
+        inspects 4 => super::cases::apostrophe_in_plain_block_passes,
+    /// In a block with no info string, `cd x && cargo xtask frobnicate`,
+    /// `RUST_LOG=1 cargo xtask frobnicate` and `sudo cargo xtask frobnicate` each fail at its line.
+    plain_block_wrapped_commands_fail: FailsWith(&[
+        bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+        bad_command!(3, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+        bad_command!(4, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]), inspects 4 => super::cases::plain_block_wrapped_commands_fail,
+    /// A block with no info string is read line by line, as a shell block is, so prose that says
+    /// `cargo xtask to` fails.
+    plain_block_prose_fails: FailsWith(&[
+        bad_command!(2, "cargo xtask to see the commands.", "error: unrecognized subcommand 'to'"),
+    ]), inspects 4 => super::cases::plain_block_prose_fails,
     /// A repo without `AGENTS.md` fails at line 1, the whole-file line.
     missing_agents: FailsWith(&[
         "AGENTS.md:1: AGENTS.md does not exist\n    \

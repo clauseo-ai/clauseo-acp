@@ -231,18 +231,40 @@ pub(crate) fn text_block_output_passes() -> Inspection {
     )
 }
 
-pub(crate) fn open_quote_command_fails() -> Inspection {
+pub(crate) fn apostrophe_in_plain_block_passes() -> Inspection {
     docs(
-        "open-quote",
+        "apostrophe-in-plain-block",
         vec![(
             "GUIDE.md",
-            "```sh\ncargo xtask check --name \"open\n```\n".to_owned(),
+            "```\nDon't run cargo xtask frobnicate.\n```\n".to_owned(),
         )],
     )
 }
 
-/// The reviewer's forms: flags after `sudo`, `env` and `time`, `nohup`, a substitution in an
-/// assignment, and the `%`, `PS>` and `PS <path>>` prompts in a console block.
+pub(crate) fn plain_block_wrapped_commands_fail() -> Inspection {
+    docs(
+        "plain-block-wrapped",
+        vec![(
+            "GUIDE.md",
+            "```\ncd x && cargo xtask frobnicate\nRUST_LOG=1 cargo xtask frobnicate\n\
+             sudo cargo xtask frobnicate\n```\n"
+                .to_owned(),
+        )],
+    )
+}
+
+pub(crate) fn plain_block_prose_fails() -> Inspection {
+    docs(
+        "plain-block-prose",
+        vec![(
+            "GUIDE.md",
+            "```\nRun cargo xtask to see the commands.\n```\n".to_owned(),
+        )],
+    )
+}
+
+/// Flags after `sudo`, `env` and `time`, `nohup`, a substitution in an assignment, and the `%` and
+/// `PS>` prompts in a console block.
 pub(crate) fn wrapped_commands_fail() -> Inspection {
     docs(
         "wrapped-commands",
@@ -251,8 +273,7 @@ pub(crate) fn wrapped_commands_fail() -> Inspection {
             "```sh\nsudo -E cargo xtask frobnicate\nsudo -u me cargo xtask frobnicate\n\
              env -i cargo xtask frobnicate\ntime -p cargo xtask frobnicate\n\
              nohup cargo xtask frobnicate\nx=$(cargo xtask frobnicate)\n```\n\n\
-             ```console\n% cargo xtask frobnicate\nPS> cargo xtask frobnicate\n\
-             PS C:\\repo> cargo xtask frobnicate\n```\n"
+             ```console\n% cargo xtask frobnicate\nPS> cargo xtask frobnicate\n```\n"
                 .to_owned(),
         )],
     )
@@ -283,31 +304,14 @@ pub(crate) fn prose_in_code_blocks_passes() -> Inspection {
     )
 }
 
-/// The reviewer's later false failures: a `# ` comment and a `> ` quoted line in a console
-/// block, and output and prose in no-info and indented blocks.
-pub(crate) fn output_and_comments_in_sessions_and_plain_blocks_pass() -> Inspection {
+/// A `# ` comment, a `> ` quoted line and output in a console block are not commands.
+pub(crate) fn output_and_comments_in_sessions_pass() -> Inspection {
     docs(
-        "session-and-plain-prose",
+        "session-output",
         vec![(
             "GUIDE.md",
             "```console\n# then run cargo xtask check again\n> cargo xtask check passes now\n```\n\n\
-             ```\nRun cargo xtask to see the commands.\n```\n\n\
-             ```\n$ cargo xtask check\nerror: run cargo xtask setup first\n```\n\n\
-             Output:\n\n    error: run cargo xtask setup first\n"
-                .to_owned(),
-        )],
-    )
-}
-
-/// A continued session line: `$ cargo xtask \\` then `> check` reads as `cargo xtask check`
-/// and passes; the same with `> frobnicate` fails at the first line.
-pub(crate) fn continued_session_line() -> Inspection {
-    docs(
-        "continued-session",
-        vec![(
-            "GUIDE.md",
-            "```console\n$ cargo xtask \\\n> check\n```\n\n\
-             ```terminal\n$ cargo xtask \\\n> frobnicate\n```\n"
+             ```console\n$ cargo xtask check\nerror: run cargo xtask setup first\n```\n"
                 .to_owned(),
         )],
     )

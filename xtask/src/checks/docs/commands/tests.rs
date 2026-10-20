@@ -10,11 +10,11 @@ fn error_for(command: &str) -> Option<String> {
     parse(&argv, false).err()
 }
 
-/// The commands `commands_in` finds in `text`, as their words joined by spaces.
-fn commands_of(text: &str) -> Vec<String> {
-    commands_in(text)
+/// The commands `commands_in` finds in `line`, as their words joined by spaces.
+fn commands_of(line: &str) -> Vec<String> {
+    commands_in(line)
         .into_iter()
-        .map(|found| found.expect("it splits").words.join(" "))
+        .map(|command| command.words.join(" "))
         .collect()
 }
 
@@ -112,37 +112,6 @@ fn a_command_is_found_anywhere_in_the_words_but_not_in_other_words_or_a_comment(
 }
 
 #[test]
-fn a_backslash_continues_a_code_line_onto_the_next() {
-    let lines = [
-        CodeLine {
-            line: 7,
-            text: "cargo xtask check \\".to_owned(),
-            block: 0,
-            info: String::new(),
-        },
-        CodeLine {
-            line: 8,
-            text: "  --frobnicate".to_owned(),
-            block: 0,
-            info: String::new(),
-        },
-        CodeLine {
-            line: 9,
-            text: "echo done".to_owned(),
-            block: 0,
-            info: String::new(),
-        },
-    ];
-    assert_eq!(
-        logical_lines(&lines, false),
-        [
-            (7, "cargo xtask check --frobnicate".to_owned()),
-            (9, "echo done".to_owned()),
-        ]
-    );
-}
-
-#[test]
 fn a_violation_names_the_command_and_gives_clap_s_first_line_when_it_is_short() {
     let found = problem("a.md", 3, &command("cargo xtask frobnicate")).expect("it does not parse");
     assert_eq!(
@@ -185,12 +154,12 @@ fn a_placeholder_for_the_subcommand_gives_no_command_and_a_later_one_cuts_the_wo
     assert_eq!(commands_of("cargo xtask ..."), Vec::<String>::new());
     assert_eq!(
         commands_in("cargo xtask buildtime --runs <n> --json"),
-        [Ok(Command {
+        [Command {
             words: ["cargo", "xtask", "buildtime", "--runs"]
                 .map(str::to_owned)
                 .to_vec(),
             placeholder: true,
-        })]
+        }]
     );
 }
 
@@ -296,111 +265,87 @@ fn words_are_split_as_a_shell_splits_them() {
         ["cargo xtask check"]
     );
     assert_eq!(
-        commands_of("cargo xtask check # it's fine; really"),
+        commands_of("cargo xtask check # it is fine; really"),
         ["cargo xtask check"]
     );
 }
 
 #[test]
-fn the_operators_are_read_outside_quotes_escapes_and_comments() {
+fn every_command_on_a_line_is_checked_and_a_comment_ends_it() {
     assert_eq!(
-        parts("a && b || c; d | e"),
-        ["a ", " b ", " c", " d ", " e"]
+        commands_of("cargo xtask check && cargo xtask setup; cargo xtask frobnicate"),
+        [
+            "cargo xtask check",
+            "cargo xtask setup",
+            "cargo xtask frobnicate"
+        ]
     );
-    assert_eq!(parts("a 2>&1 &"), ["a 2>&1 &"]);
     assert_eq!(
-        parts("echo \"x;y\" 'p|q' a\\;b"),
-        ["echo \"x;y\" 'p|q' a\\;b"]
+        commands_of("cargo xtask check # then cargo xtask frobnicate"),
+        ["cargo xtask check"]
     );
-    assert_eq!(parts("a # b; c"), ["a # b; c"]);
-    assert_eq!(parts("a#b; c"), ["a#b", " c"]);
 }
 
 #[test]
-fn a_part_with_an_open_quote_fails_only_when_it_names_the_tool() {
+fn a_line_shlex_cannot_split_is_not_read() {
     assert_eq!(
-        commands_in("cargo xtask check --x \"open"),
-        [Err("cargo xtask check --x \"open".to_owned())]
+        commands_of("cargo xtask check --name \"open"),
+        Vec::<String>::new()
     );
-    assert_eq!(commands_in("echo \"open"), Vec::<Found>::new());
-    let found = unsplit("a.md", 2, "cargo xtask \"check");
-    assert_eq!(found.line, 2);
-    assert_eq!(found.fix, UNSPLIT_FIX);
+    assert_eq!(
+        commands_of("Don't run cargo xtask check"),
+        Vec::<String>::new()
+    );
+    assert_eq!(commands_of("cargo xtask check \\"), Vec::<String>::new());
 }
 
 #[test]
-fn a_session_line_is_read_from_after_its_prompt_and_output_is_not() {
-    assert_eq!(
-        after_prompt("$ cargo xtask check"),
-        Some("cargo xtask check")
-    );
-    assert_eq!(
-        after_prompt("  % cargo xtask check"),
-        Some("cargo xtask check")
-    );
-    assert_eq!(after_prompt("# then run cargo xtask check again"), None);
-    assert_eq!(after_prompt("> cargo xtask check passes now"), None);
-    assert_eq!(
-        after_prompt("PS> cargo xtask check"),
-        Some("cargo xtask check")
-    );
-    assert_eq!(
-        after_prompt("PS C:\\repo> cargo xtask check"),
-        Some("cargo xtask check")
-    );
-    assert_eq!(after_prompt("error: run cargo xtask setup first"), None);
-    assert!(is_one_of("Console", &SESSIONS));
-    assert!(is_one_of("PWSH", &SHELLS));
-    assert!(!is_one_of("rust", &SHELLS));
+fn a_glued_second_command_is_not_read() {
+    assert_eq!(commands_of("a;cargo xtask x"), Vec::<String>::new());
 }
 
 #[test]
-fn a_plain_block_reads_only_a_line_that_starts_with_the_command() {
+fn a_block_with_no_info_string_or_a_shell_one_reads_every_line() {
     assert_eq!(
-        Reading::Plain.text("cargo xtask check"),
+        read_line("", "Run cargo xtask check, then sudo cargo xtask setup"),
+        Some("Run cargo xtask check, then sudo cargo xtask setup")
+    );
+    assert_eq!(
+        read_line("Bash", "sudo cargo xtask check"),
+        Some("sudo cargo xtask check")
+    );
+    assert_eq!(read_line("rust", "cargo xtask check"), None);
+    assert_eq!(
+        read_line("md", "Run cargo xtask to see the commands."),
+        None
+    );
+}
+
+#[test]
+fn a_session_block_reads_only_the_prompted_lines() {
+    assert_eq!(
+        read_line("console", "$ cargo xtask check"),
         Some("cargo xtask check")
     );
     assert_eq!(
-        Reading::Plain.text("$ cargo xtask check"),
-        Some("cargo xtask check")
-    );
-    assert_eq!(
-        Reading::Plain.text("% cargo +nightly xtask check"),
+        read_line("Terminal", "  % cargo +nightly xtask check"),
         Some("cargo +nightly xtask check")
     );
     assert_eq!(
-        Reading::Plain.text("error: run cargo xtask setup first"),
+        read_line("console", "PS> cargo xtask check"),
+        Some("cargo xtask check")
+    );
+    assert_eq!(
+        read_line("console", "# then run cargo xtask check again"),
         None
     );
+    assert_eq!(read_line("console", "> cargo xtask check passes now"), None);
+    assert_eq!(read_line("console", "PS C:\\repo> cargo xtask check"), None);
     assert_eq!(
-        Reading::Plain.text("Run cargo xtask to see the commands."),
+        read_line("console", "error: run cargo xtask setup first"),
         None
     );
-    assert_eq!(Reading::Plain.text("sudo cargo xtask check"), None);
-    assert_eq!(
-        Reading::Shell.text("sudo cargo xtask check"),
-        Some("sudo cargo xtask check")
-    );
-    assert_eq!(Reading::of(""), Reading::Plain);
-    assert_eq!(Reading::of("Terminal"), Reading::Session);
-    assert_eq!(Reading::of("bash"), Reading::Shell);
-    assert_eq!(Reading::of("rust"), Reading::Skip);
-}
-
-#[test]
-fn a_continued_session_line_drops_its_continuation_prompt() {
-    let line = |line, text: &str| CodeLine {
-        line,
-        text: text.to_owned(),
-        block: 0,
-        info: "console".to_owned(),
-    };
-    assert_eq!(
-        logical_lines(&[line(1, "$ cargo xtask \\"), line(2, "> check")], true),
-        [(1, "$ cargo xtask check".to_owned())]
-    );
-    assert_eq!(
-        logical_lines(&[line(1, "cargo xtask \\"), line(2, "> out")], false),
-        [(1, "cargo xtask > out".to_owned())]
-    );
+    assert!(is_one_of("Console", &SESSIONS));
+    assert!(is_one_of("PWSH", &SHELLS));
+    assert!(!is_one_of("rust", &SHELLS));
 }

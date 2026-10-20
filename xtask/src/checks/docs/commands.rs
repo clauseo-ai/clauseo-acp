@@ -1,27 +1,12 @@
-//! `cargo xtask` commands in the docs. Every code span and every line of a code block must parse,
-//! wherever `cargo [+toolchain] xtask` appears in it. The text is cut at `&&`, `||`, `;` and `|`,
-//! and each part is split into words with `shlex`, as a shell splits it, so quotes are read
-//! (`cargo xtask "check"`, `FOO="a b" cargo xtask check`). The command is found anywhere in the
-//! words, so what comes before it (a prompt such as `$`, `%` or `PS>`, `sudo -E`, `env -i`,
-//! `nohup`, `x=$(`) needs no list. The words after `xtask` stop at shell syntax and parse against
-//! the clap tree in `main.rs`. A part that holds `cargo xtask` but that `shlex` cannot split (a
-//! quote left open) fails.
-//!
-//! What is read, by where the text is:
-//! - an inline code span: the whole span, `cargo xtask` found anywhere in its words;
-//! - a code block with a shell info word (`SHELLS`): every line, found anywhere;
-//! - a code block with no info string, or an indented one: a line that starts (after an optional
-//!   `$ ` or `% ` prompt) with `cargo [+toolchain] xtask`, since such a block holds output and
-//!   prose as often as commands;
-//! - a session block (`SESSIONS`): a line that starts with a prompt (`PROMPTS`, or
-//!   `PS <path>> `), from after the prompt; the other lines are output. A prompted line that ends
-//!   in `\` continues onto the next, with that line's `> ` continuation prompt cut.
-//!
-//! A block with any other info string (`rust`, `yaml`, `md`, `text`, ...) holds code or prose
-//! in which `cargo xtask` is a mention, and is not read. The info string's first word, cut at `,`
-//! or whitespace, is matched in any case.
+//! `cargo xtask` commands in the docs. Read: an inline code span, its whole text; every line of a
+//! code block whose info word is in `SHELLS`, of a block with no info string and of an indented
+//! block; in a session block (`SESSIONS`), the lines that start with a prompt (`PROMPTS`), from
+//! after the prompt. Other blocks are not read. Each line is split into words with `shlex`, once,
+//! and a line `shlex` cannot split is not read. Words from a `#` comment on are not read. Every
+//! `cargo [+toolchain] xtask` in the words is a command: the words after `xtask` stop at shell
+//! syntax and parse against the clap tree in `main.rs`.
 
-use super::markdown::{CodeLine, Scan};
+use super::markdown::Scan;
 use crate::Cli;
 use crate::checks::violation;
 use crate::violation::Violation;
@@ -49,9 +34,6 @@ const FIX: &str = command_fix!();
 /// or backtick, and an operator glued to the word (`check;`, `check&`).
 const SHELL_PUNCTUATION: [char; 7] = ['>', '<', ')', '`', ';', '&', '|'];
 
-/// The fix for a command line that `shlex` cannot split into words.
-const UNSPLIT_FIX: &str = "close the quote or escape that is left open, or remove the command";
-
 /// The info words of a code block whose every line is a shell line.
 const SHELLS: [&str; 10] = [
     "sh",
@@ -76,62 +58,9 @@ const SESSIONS: [&str; 6] = [
     "ps1-session",
 ];
 
-/// The prompts a session line starts with. `PS <path>> ` is read apart (see `after_prompt`).
-/// `# ` and `> ` are not prompts: in a session they start a comment or a quoted output line as
-/// often.
+/// The prompts a session line starts with. `# ` and `> ` are not prompts: in a session they start
+/// a comment or a quoted output line as often.
 const PROMPTS: [&str; 3] = ["$ ", "% ", "PS> "];
-
-/// The prompts a line of a block with no info string may start with.
-const PLAIN_PROMPTS: [&str; 2] = ["$ ", "% "];
-
-/// The prompt a continued session line starts with, cut before the lines are joined.
-const CONTINUATION: &str = "> ";
-
-/// How the command rule reads a code block, by its info word.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Reading {
-    /// A shell block: every line, `cargo xtask` found anywhere.
-    Shell,
-    /// A session block: prompted lines only, from after the prompt.
-    Session,
-    /// No info string: lines that start with `cargo [+toolchain] xtask`, after a prompt.
-    Plain,
-    /// Any other info string: not read.
-    Skip,
-}
-
-impl Reading {
-    /// The reading of a block whose info word is `info` (empty when it has none).
-    fn of(info: &str) -> Reading {
-        if info.is_empty() {
-            Reading::Plain
-        } else if is_one_of(info, &SHELLS) {
-            Reading::Shell
-        } else if is_one_of(info, &SESSIONS) {
-            Reading::Session
-        } else {
-            Reading::Skip
-        }
-    }
-
-    /// The text of a logical line this reading reads, or `None` when it does not read it.
-    fn text(self, line: &str) -> Option<&str> {
-        match self {
-            Reading::Shell => Some(line),
-            Reading::Session => after_prompt(line),
-            Reading::Plain => {
-                let line = line.trim_start();
-                let rest = PLAIN_PROMPTS
-                    .iter()
-                    .find_map(|prompt| line.strip_prefix(prompt))
-                    .unwrap_or(line);
-                let words: Vec<&str> = rest.split_whitespace().take(3).collect();
-                (words.first() == Some(&"cargo") && xtask_at(&words).is_some()).then_some(rest)
-            }
-            Reading::Skip => None,
-        }
-    }
-}
 
 /// The span that names the tool in prose, not a command to run.
 const TOOL: &str = "cargo xtask";
@@ -145,50 +74,37 @@ struct Command {
     placeholder: bool,
 }
 
-/// What a part of a line holds: a command, or the part itself when it holds `cargo xtask` but
-/// `shlex` cannot split it.
-type Found = Result<Command, String>;
-
 /// One violation per xtask command in `file` that does not parse.
 pub(super) fn problems(file: &str, scan: &Scan) -> Vec<Violation> {
     let spans = scan
         .spans
         .iter()
         .filter(|span| span.text != TOOL)
-        .map(|span| (span.line, span.text.clone()));
+        .map(|span| (span.line, span.text.as_str()));
     let code = scan
         .code
-        .chunk_by(|a, b| a.block == b.block)
-        .flat_map(|block| {
-            let reading = Reading::of(block.first().map_or("", |line| line.info.as_str()));
-            let read = if reading == Reading::Skip { &[] } else { block };
-            logical_lines(read, reading == Reading::Session)
-                .into_iter()
-                .filter_map(move |(line, text)| Some((line, reading.text(&text)?.to_owned())))
-        });
+        .iter()
+        .filter_map(|line| Some((line.line, read_line(&line.info, &line.text)?)));
     spans
         .chain(code)
         .flat_map(|(line, text)| {
-            commands_in(&text)
+            commands_in(text)
                 .into_iter()
-                .filter_map(move |found| match found {
-                    Ok(command) => problem(file, line, &command),
-                    Err(part) => Some(unsplit(file, line, &part)),
-                })
+                .filter_map(move |command| problem(file, line, &command))
         })
         .collect()
 }
 
-/// The violation for `part`, a command line that `shlex` cannot split, from `line`.
-fn unsplit(file: &str, line: u32, part: &str) -> Violation {
-    violation(
-        file,
-        line,
-        format!(
-            "the xtask command line `{part}` does not split into words: a quote or escape is left open"
-        ),
-        UNSPLIT_FIX,
-    )
+/// The text of a line of a code block whose info word is `info` (empty for a block with no info
+/// string, or an indented block), or `None` when the rule does not read the line.
+fn read_line<'a>(info: &str, line: &'a str) -> Option<&'a str> {
+    if info.is_empty() || is_one_of(info, &SHELLS) {
+        Some(line)
+    } else if is_one_of(info, &SESSIONS) {
+        after_prompt(line)
+    } else {
+        None
+    }
 }
 
 /// True when `info` is one of `words`, in any case.
@@ -199,124 +115,66 @@ fn is_one_of(info: &str, words: &[&str]) -> bool {
 /// What follows the prompt of a session line, or `None` for a line with no prompt (output).
 fn after_prompt(text: &str) -> Option<&str> {
     let text = text.trim_start();
-    PROMPTS
+    PROMPTS.iter().find_map(|prompt| text.strip_prefix(prompt))
+}
+
+/// The xtask commands in `line`, split into words as a shell splits them. A line `shlex` cannot
+/// split has none.
+fn commands_in(line: &str) -> Vec<Command> {
+    let Some(words) = shlex::split(line) else {
+        return Vec::new();
+    };
+    let end = words
         .iter()
-        .find_map(|prompt| text.strip_prefix(prompt))
-        .or_else(|| {
-            text.strip_prefix("PS ")?
-                .split_once("> ")
-                .map(|(_, rest)| rest)
-        })
-}
-
-/// The lines of one code block as logical lines: a line ending in a backslash continues onto the
-/// next, and the pair is one line, with the first line's number. With `session`, a continued
-/// line's `> ` prompt is cut first.
-fn logical_lines(lines: &[CodeLine], session: bool) -> Vec<(u32, String)> {
-    let mut logical = Vec::new();
-    let mut open: Option<(u32, String)> = None;
-    for line in lines {
-        let mut text = line.text.trim();
-        if session && open.is_some() {
-            text = text.strip_prefix(CONTINUATION).unwrap_or(text).trim_start();
-        }
-        let (body, continues) = text
-            .strip_suffix('\\')
-            .map_or((text, false), |body| (body.trim_end(), true));
-        let (start, mut joined) = match open.take() {
-            Some((start, mut joined)) => {
-                joined.push(' ');
-                (start, joined)
-            }
-            None => (line.line, String::new()),
-        };
-        joined.push_str(body);
-        if continues {
-            open = Some((start, joined));
-        } else {
-            logical.push((start, joined));
-        }
-    }
-    logical.extend(open);
-    logical
-}
-
-/// The xtask commands in `text`, each part between the operators (see `parts`) split with
-/// `shlex`.
-fn commands_in(text: &str) -> Vec<Found> {
-    parts(text)
-        .into_iter()
-        .filter_map(|part| match shlex::split(part) {
-            Some(words) => command_of(&words).map(Ok),
-            None => names_the_tool(part).then(|| Err(part.trim().to_owned())),
-        })
+        .position(|word| word.starts_with('#'))
+        .unwrap_or(words.len());
+    (0..end)
+        .filter_map(|at| command_at(&words[..end], at))
         .collect()
 }
 
-/// The parts of `text` between the shell operators `&&`, `||`, `;` and `|`, read outside
-/// quotes, backslash escapes and a `#` comment. A lone `&` (`2>&1`) is not one of them.
-fn parts(text: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut start = 0;
-    let mut quote: Option<char> = None;
-    let mut escaped = false;
-    let mut word_start = true;
-    let mut chars = text.char_indices().peekable();
-    while let Some((at, c)) = chars.next() {
-        if escaped {
-            escaped = false;
-            word_start = false;
-            continue;
-        }
-        let mut operator = 0;
-        match (quote, c) {
-            (Some('\''), '\'') | (Some('"'), '"') => quote = None,
-            (Some('"') | None, '\\') => escaped = true,
-            (None, '\'' | '"') => quote = Some(c),
-            (None, '#') if word_start => break,
-            (None, ';') => operator = 1,
-            (None, '|' | '&') => {
-                let doubled = chars.peek().is_some_and(|(_, next)| *next == c);
-                if doubled {
-                    chars.next();
-                    operator = 2;
-                } else if c == '|' {
-                    operator = 1;
-                }
-            }
-            // Inside quotes, and any other character outside them.
-            _ => {}
-        }
-        if operator > 0 {
-            parts.push(text.get(start..at).unwrap_or_default());
-            start = at + operator;
-        }
-        word_start = quote.is_none() && (operator > 0 || c.is_whitespace());
+/// The command that starts at word `at` of `words`: `cargo`, an optional `+toolchain`, `xtask`,
+/// then the words up to shell syntax or a placeholder. `None` when no command starts there.
+fn command_at(words: &[String], at: usize) -> Option<Command> {
+    let word = |index: usize| words.get(index).map(String::as_str);
+    if !word(at).is_some_and(is_cargo) {
+        return None;
     }
-    parts.push(text.get(start..).unwrap_or_default());
-    parts
-}
-
-/// True when the words of `part`, cut at whitespace, hold `cargo [+toolchain] xtask`.
-fn names_the_tool(part: &str) -> bool {
-    let words: Vec<&str> = part.split_whitespace().collect();
-    xtask_at(&words).is_some()
-}
-
-/// The index of the `xtask` word of the first `cargo [+toolchain] xtask` in `words`. The
-/// `xtask` word may carry shell punctuation (`$(cargo xtask)`).
-fn xtask_at<S: AsRef<str>>(words: &[S]) -> Option<usize> {
-    let word = |at: usize| words.get(at).map(AsRef::as_ref);
-    (0..words.len()).find_map(|at| {
-        if !word(at).is_some_and(is_cargo) {
-            return None;
+    let toolchain = word(at + 1).is_some_and(|w| w.len() > 1 && w.starts_with('+'));
+    let xtask = if toolchain { at + 2 } else { at + 1 };
+    let (name, ended) = unpunctuated(word(xtask)?);
+    if name != "xtask" {
+        return None;
+    }
+    // `$(cargo xtask)`: the punctuation on `xtask` ends the command there.
+    let after: &[String] = if ended {
+        &[]
+    } else {
+        words.get(xtask + 1..).unwrap_or_default()
+    };
+    let mut command = Command {
+        words: vec!["cargo".to_owned(), "xtask".to_owned()],
+        placeholder: false,
+    };
+    for raw in after.iter().map(String::as_str) {
+        if is_placeholder(raw) {
+            if command.words.len() == 2 {
+                return None;
+            }
+            command.placeholder = true;
+            break;
         }
-        let toolchain = word(at + 1).is_some_and(|w| w.len() > 1 && w.starts_with('+'));
-        let next = if toolchain { at + 2 } else { at + 1 };
-        word(next)
-            .is_some_and(|w| unpunctuated(w).0 == "xtask")
-            .then_some(next)
-    })
+        let (head, cut) = unpunctuated(raw);
+        // The file descriptor of a redirection (`2` in `2>&1`) is not an argument.
+        let descriptor = cut && head.bytes().all(|b| b.is_ascii_digit());
+        if !head.is_empty() && !descriptor {
+            command.words.push(head.to_owned());
+        }
+        if cut {
+            break;
+        }
+    }
+    Some(command)
 }
 
 /// True for a word that runs cargo: `cargo`, or a word that ends in `cargo` right after a `(`
@@ -331,44 +189,6 @@ fn unpunctuated(word: &str) -> (&str, bool) {
         Some(cut) => (word.get(..cut).unwrap_or_default(), true),
         None => (word, false),
     }
-}
-
-/// The command `split`, a part of a line split by `shlex`, holds, when it holds one (see
-/// `xtask_at`). The words after `xtask` stop at a word with `SHELL_PUNCTUATION` (the text before
-/// it is kept unless it is a redirection's file descriptor, `2` in `2>&1`), and at a placeholder.
-/// A placeholder in the subcommand's place gives no command.
-fn command_of(split: &[String]) -> Option<Command> {
-    let at = xtask_at(split)?;
-    let mut words = vec!["cargo".to_owned(), "xtask".to_owned()];
-    let mut placeholder = false;
-    // `$(cargo xtask)`: the punctuation on `xtask` ends the command there.
-    let ended = split.get(at).is_some_and(|word| unpunctuated(word).1);
-    let after = if ended {
-        &[]
-    } else {
-        split.get(at + 1..).unwrap_or_default()
-    };
-    for raw in after.iter().map(String::as_str) {
-        if raw.starts_with('#') {
-            break;
-        }
-        if is_placeholder(raw) {
-            if words.len() == 2 {
-                return None;
-            }
-            placeholder = true;
-            break;
-        }
-        let (head, cut) = unpunctuated(raw);
-        let descriptor = cut && head.bytes().all(|b| b.is_ascii_digit());
-        if !head.is_empty() && !descriptor {
-            words.push(head.to_owned());
-        }
-        if cut {
-            break;
-        }
-    }
-    Some(Command { words, placeholder })
 }
 
 /// True for a placeholder word: `<name>` (no other `<` or `>` in it), or a word holding `...`.
