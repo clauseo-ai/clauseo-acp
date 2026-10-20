@@ -1,7 +1,7 @@
 //! The violations of the cfg rule's findings: each message with its fix kind, in `fix.rs`.
 
 use crate::checks::core_io::cfgs::Finding;
-use crate::checks::core_io::fix::Fix;
+use crate::checks::core_io::fix::{CfgFix, Fix};
 use crate::checks::violation;
 use crate::violation::Violation;
 
@@ -20,21 +20,21 @@ pub(in crate::checks::core_io) fn cfg_rule(
                  one of its runs, `doc` holds only when rustdoc documents the crate, and code \
                  behind any other cfg can be left out of every clippy run"
             ),
-            Fix::CfgPredicate { form: form.clone() },
+            Fix::Cfg(CfgFix::Predicate { form: form.clone() }),
         ),
         Finding::MetavariableAttribute => (
             format!(
                 "`{path}` writes an attribute whose name is a metavariable, so a macro of \
                  {package} can build a cfg that core-io does not see"
             ),
-            Fix::CfgMetavariableAttribute,
+            Fix::Cfg(CfgFix::MetavariableAttribute),
         ),
         Finding::MetavariableMacro => (
             format!(
                 "`{path}` calls a macro whose name is a metavariable, so a macro of {package} can \
                  call `include!` under a name passed to it"
             ),
-            Fix::CfgMetavariableMacro,
+            Fix::Cfg(CfgFix::MetavariableMacro),
         ),
         Finding::HashWithoutBrackets => (
             format!(
@@ -42,14 +42,14 @@ pub(in crate::checks::core_io) fn cfg_rule(
                  brackets, so a macro can join it to brackets from elsewhere and build an \
                  attribute in {package} that core-io does not see"
             ),
-            Fix::CfgHashWithoutBrackets,
+            Fix::Cfg(CfgFix::HashWithoutBrackets),
         ),
         Finding::PathAttribute => (
             format!(
                 "`{path}` gives a module a `path` attribute that core-io cannot follow to a file \
                  it lexes, so it can bring into {package} a file core-io does not read"
             ),
-            Fix::CfgPathAttribute,
+            Fix::Cfg(CfgFix::PathAttribute),
         ),
         Finding::CfgSelect => (
             format!(
@@ -57,7 +57,7 @@ pub(in crate::checks::core_io) fn cfg_rule(
                  `cfg_select!` builds only the first arm whose cfg holds and a `use` can call it \
                  under another name"
             ),
-            Fix::CfgSelect,
+            Fix::Cfg(CfgFix::Select),
         ),
         Finding::TtFragment => (
             format!(
@@ -65,7 +65,7 @@ pub(in crate::checks::core_io) fn cfg_rule(
                  `tt` fragment can take a lone `#` out of an attribute and a macro of {package} \
                  can join it to other brackets into an attribute that core-io does not see"
             ),
-            Fix::CfgTt,
+            Fix::Cfg(CfgFix::Tt),
         ),
         Finding::CfgInCfgAttr => (
             format!(
@@ -73,14 +73,14 @@ pub(in crate::checks::core_io) fn cfg_rule(
                  `cfg_attr`'s predicate is false, so a feature there acts like a `not(feature)` \
                  and can leave code out of every clippy run"
             ),
-            Fix::CfgInCfgAttr,
+            Fix::Cfg(CfgFix::InCfgAttr),
         ),
         Finding::Include => (
             format!(
                 "`{path}` calls `include!`, which can bring into {package} code from a file \
                  core-io does not read"
             ),
-            Fix::CfgInclude,
+            Fix::Cfg(CfgFix::Include),
         ),
     };
     violation(path, line, message, fix)

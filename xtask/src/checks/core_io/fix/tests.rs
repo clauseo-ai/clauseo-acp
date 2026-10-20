@@ -2,9 +2,18 @@
 //! does not compile until it has a pinned text here. Each sample gives a variant the values its
 //! pinned text names.
 
-use super::Fix;
+use super::{CfgFix, Fix};
 use std::collections::HashSet;
-use std::mem::discriminant;
+use std::mem::{Discriminant, discriminant};
+
+/// The variant of `fix`, and of the `CfgFix` it wraps, so two cfg samples count as two kinds.
+fn kind(fix: &Fix) -> (Discriminant<Fix>, Option<Discriminant<CfgFix>>) {
+    let inner = match fix {
+        Fix::Cfg(cfg) => Some(discriminant(cfg)),
+        _ => None,
+    };
+    (discriminant(fix), inner)
+}
 
 fn pinned(fix: &Fix) -> &'static str {
     match fix {
@@ -75,22 +84,24 @@ fn pinned(fix: &Fix) -> &'static str {
             "delete `crates/protocol/build.rs`; a crate whose row bans I/O has no build script"
         }
         Fix::DeleteBuildKey => "delete the `build` key, and the script it names if there is one",
-        Fix::CfgPredicate { .. } => {
+        Fix::Cfg(CfgFix::Predicate { .. }) => {
             "remove the name `unix` from this cfg; the cfgs of a crate whose row bans I/O use only \
              `test`, `doc` and features, joined by `all`, `any` and `not`, with no feature under a \
              `not`"
         }
-        Fix::CfgMetavariableAttribute => {
+        Fix::Cfg(CfgFix::MetavariableAttribute) => {
             "write the attribute's name in the macro body itself; an outer attribute may instead \
              come whole from the caller, bound as `#[$m:meta]` in the arm's matcher and written as \
              `#[$m]`, in a `macro_rules!` outside every other macro's body and arguments"
         }
-        Fix::CfgMetavariableMacro => "write the called macro's name in the macro body itself",
-        Fix::CfgHashWithoutBrackets => {
+        Fix::Cfg(CfgFix::MetavariableMacro) => {
+            "write the called macro's name in the macro body itself"
+        }
+        Fix::Cfg(CfgFix::HashWithoutBrackets) => {
             "write the attribute's brackets right after its `#`, as `#[..]` or `#![..]`; to pass \
              an attribute to a macro, pass it whole, with its `#` and its brackets"
         }
-        Fix::CfgPathAttribute => {
+        Fix::Cfg(CfgFix::PathAttribute) => {
             "give `#[path = \"..\"]` only to an out-of-line `mod name;` at the top level of a file, \
              outside every brace, bracket and parenthesis, with a string literal that names, \
              relative to this file's folder and with `/` between components, a `.rs` file under \
@@ -98,21 +109,21 @@ fn pinned(fix: &Fix) -> &'static str {
              folder on the way; a `path` in a `cfg_attr`, on an inline module, inside a module \
              block or with a metavariable value always fails"
         }
-        Fix::CfgSelect => {
+        Fix::Cfg(CfgFix::Select) => {
             "rename a field, variable or import named `cfg_select`; for the macro, give each arm's \
              code its own `#[cfg(..)]` built from `test`, `doc` and positive features, or use `if \
              cfg!(..)`, which compiles both branches"
         }
-        Fix::CfgTt => {
+        Fix::Cfg(CfgFix::Tt) => {
             "give the macros of a crate whose row bans I/O no `tt` fragment and use a typed \
              fragment such as `item`, `expr`, `ident`, `ty` or `meta`; rename an identifier named \
              `tt`"
         }
-        Fix::CfgInCfgAttr => {
+        Fix::Cfg(CfgFix::InCfgAttr) => {
             "write the condition as one `#[cfg(..)]` outside any `cfg_attr`, built from `test`, \
              `doc` and positive features"
         }
-        Fix::CfgInclude => {
+        Fix::Cfg(CfgFix::Include) => {
             "move the code into a module at its default path; use `include_str!` or \
              `include_bytes!` for data"
         }
@@ -175,19 +186,19 @@ fn every_fix_prints_its_pinned_text() {
             path: "crates/protocol/build.rs".to_owned(),
         },
         Fix::DeleteBuildKey,
-        Fix::CfgPredicate {
+        Fix::Cfg(CfgFix::Predicate {
             form: "the name `unix`".to_owned(),
-        },
-        Fix::CfgMetavariableAttribute,
-        Fix::CfgMetavariableMacro,
-        Fix::CfgHashWithoutBrackets,
-        Fix::CfgPathAttribute,
-        Fix::CfgSelect,
-        Fix::CfgTt,
-        Fix::CfgInCfgAttr,
-        Fix::CfgInclude,
+        }),
+        Fix::Cfg(CfgFix::MetavariableAttribute),
+        Fix::Cfg(CfgFix::MetavariableMacro),
+        Fix::Cfg(CfgFix::HashWithoutBrackets),
+        Fix::Cfg(CfgFix::PathAttribute),
+        Fix::Cfg(CfgFix::Select),
+        Fix::Cfg(CfgFix::Tt),
+        Fix::Cfg(CfgFix::InCfgAttr),
+        Fix::Cfg(CfgFix::Include),
     ];
-    let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
+    let kinds: HashSet<_> = samples.iter().map(kind).collect();
     assert_eq!(
         kinds.len(),
         samples.len(),

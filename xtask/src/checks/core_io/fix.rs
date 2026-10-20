@@ -2,8 +2,11 @@
 //! in `Display`; `fix/tests.rs` pins every variant's text. A variant carries only the values its
 //! own text prints; a value that only the message prints stays in `report.rs`.
 
+mod cfg;
+
 use super::clippy_toml::{LIST, ROOT};
 use super::roots::forbid_line;
+pub(crate) use cfg::CfgFix;
 use std::fmt;
 
 /// A fix line of the core-io check.
@@ -66,31 +69,11 @@ pub(crate) enum Fix {
     DeleteBuildScript { path: String },
     /// A held crate's `[package]` sets `build`.
     DeleteBuildKey,
-    /// A cfg predicate of a form the rule does not allow, described as `form`.
-    CfgPredicate { form: String },
-    /// An attribute whose name is a metavariable.
-    CfgMetavariableAttribute,
-    /// A macro call whose name is a metavariable.
-    CfgMetavariableMacro,
-    /// A `#` followed by neither brackets nor `!` and brackets.
-    CfgHashWithoutBrackets,
-    /// A `path` attribute.
-    CfgPathAttribute,
-    /// The name `cfg_select`.
-    CfgSelect,
-    /// The name `tt`.
-    CfgTt,
-    /// A `cfg` inside a `cfg_attr`.
-    CfgInCfgAttr,
-    /// A call of `include!`.
-    CfgInclude,
+    /// A finding of the cfg rule (`report/cfg.rs`).
+    Cfg(CfgFix),
 }
 
 impl fmt::Display for Fix {
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one arm per fix kind, so each text is written once beside its variant"
-    )]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Fix::WriteCrateFile {
@@ -195,51 +178,7 @@ impl fmt::Display for Fix {
             Fix::DeleteBuildKey => {
                 f.write_str("delete the `build` key, and the script it names if there is one")
             }
-            Fix::CfgPredicate { form } => write!(
-                f,
-                "remove {form} from this cfg; the cfgs of a crate whose row bans I/O use only \
-                 `test`, `doc` and features, joined by `all`, `any` and `not`, with no feature \
-                 under a `not`"
-            ),
-            Fix::CfgMetavariableAttribute => f.write_str(
-                "write the attribute's name in the macro body itself; an outer attribute may \
-                 instead come whole from the caller, bound as `#[$m:meta]` in the arm's matcher \
-                 and written as `#[$m]`, in a `macro_rules!` outside every other macro's body \
-                 and arguments",
-            ),
-            Fix::CfgMetavariableMacro => {
-                f.write_str("write the called macro's name in the macro body itself")
-            }
-            Fix::CfgHashWithoutBrackets => f.write_str(
-                "write the attribute's brackets right after its `#`, as `#[..]` or `#![..]`; to \
-                 pass an attribute to a macro, pass it whole, with its `#` and its brackets",
-            ),
-            Fix::CfgPathAttribute => f.write_str(
-                "give `#[path = \"..\"]` only to an out-of-line `mod name;` at the top level of a \
-                 file, outside every brace, bracket and parenthesis, with a string literal that \
-                 names, relative to this file's folder and with `/` between components, a `.rs` \
-                 file under the crate's folder that git lists and that is not a symlink, without \
-                 leaving that folder on the way; a `path` in a `cfg_attr`, on an inline module, \
-                 inside a module block or with a metavariable value always fails",
-            ),
-            Fix::CfgSelect => f.write_str(
-                "rename a field, variable or import named `cfg_select`; for the macro, give each \
-                 arm's code its own `#[cfg(..)]` built from `test`, `doc` and positive features, \
-                 or use `if cfg!(..)`, which compiles both branches",
-            ),
-            Fix::CfgTt => f.write_str(
-                "give the macros of a crate whose row bans I/O no `tt` fragment and use a typed \
-                 fragment such as `item`, `expr`, `ident`, `ty` or `meta`; rename an identifier \
-                 named `tt`",
-            ),
-            Fix::CfgInCfgAttr => f.write_str(
-                "write the condition as one `#[cfg(..)]` outside any `cfg_attr`, built from \
-                 `test`, `doc` and positive features",
-            ),
-            Fix::CfgInclude => f.write_str(
-                "move the code into a module at its default path; use `include_str!` or \
-                 `include_bytes!` for data",
-            ),
+            Fix::Cfg(fix) => fix.fmt(f),
         }
     }
 }
