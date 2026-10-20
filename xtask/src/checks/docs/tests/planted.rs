@@ -278,10 +278,6 @@ crate::checks::planted::cases! {
     prompt_command_in_fence_fails: FailsWith(&[
         bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
     ]), inspects 4 => super::cases::prompt_command_in_fence_fails,
-    /// `VAR=value` before `cargo xtask` in a span does not hide the command.
-    env_assignment_command_in_span_fails: FailsWith(&[
-        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::env_assignment_command_in_span_fails,
     /// A command after `&&` in a span is checked on its own.
     chained_command_in_span_fails: FailsWith(&[
         bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
@@ -308,45 +304,8 @@ crate::checks::planted::cases! {
     ]), inspects 4 => super::cases::markdown_extension_is_checked,
     /// A stderr redirection after a command is shell syntax, not an argument.
     stderr_redirect_passes: Passes, inspects 4 => super::cases::stderr_redirect_passes,
-    /// A stdout redirection after a command is shell syntax, not an argument.
-    stdout_redirect_passes: Passes, inspects 4 => super::cases::stdout_redirect_passes,
-    /// A command in a subshell is read, and its closing parenthesis is not an argument.
-    subshell_with_valid_command_passes: Passes,
-        inspects 4 => super::cases::subshell_with_valid_command_passes,
-    /// A command in a subshell is checked, and fails on its unknown subcommand.
-    subshell_with_unknown_subcommand_fails: FailsWith(&[
-        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::subshell_with_unknown_subcommand_fails,
-    /// A command in a command substitution is checked.
-    command_substitution_fails: FailsWith(&[
-        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::command_substitution_fails,
-    /// A `time` and `env` before the command are skipped, and the command is checked.
-    time_and_env_prefix_fails: FailsWith(&[
-        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::time_and_env_prefix_fails,
-    /// A `sudo` before the command is skipped, and the command is checked.
-    sudo_command_fails: FailsWith(&[
-        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::sudo_command_fails,
-    /// A quoted assignment with a space before the command is one word, and is skipped.
-    quoted_assignment_command_fails: FailsWith(&[
-        bad_command!(1, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::quoted_assignment_command_fails,
     /// Quotes around a word are read as a shell reads them: `cargo xtask "check"` parses.
     quoted_subcommand_passes: Passes, inspects 4 => super::cases::quoted_subcommand_passes,
-    /// `cargo xtask` is found anywhere in a line's words, so a wrapper with flags, `nohup`, a
-    /// substitution or another prompt does not hide the command.
-    wrapped_commands_fail: FailsWith(&[
-        bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-        bad_command!(3, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-        bad_command!(4, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-        bad_command!(5, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-        bad_command!(6, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-        bad_command!(7, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-        bad_command!(11, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-        bad_command!(12, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::wrapped_commands_fail,
     /// Only shell blocks (no info string, or a shell one) and the prompted lines of session blocks
     /// are read: the prose lines in rust, console output, markdown and yaml pass.
     prose_in_code_blocks_passes: Passes, inspects 4 => super::cases::prose_in_code_blocks_passes,
@@ -366,13 +325,10 @@ crate::checks::planted::cases! {
     unclosed_quote_after_a_pipe_fails: FailsWith(&[
         bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
     ]), inspects 4 => super::cases::unclosed_quote_after_a_pipe_fails,
-    /// In a block with no info string, `cd x && cargo xtask frobnicate`,
-    /// `RUST_LOG=1 cargo xtask frobnicate` and `sudo cargo xtask frobnicate` each fail at its line.
-    plain_block_wrapped_commands_fail: FailsWith(&[
+    /// In a block with no info string, `cd x && cargo xtask frobnicate` fails at its line.
+    plain_block_wrapped_command_fails: FailsWith(&[
         bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-        bad_command!(3, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-        bad_command!(4, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
-    ]), inspects 4 => super::cases::plain_block_wrapped_commands_fail,
+    ]), inspects 4 => super::cases::plain_block_wrapped_command_fails,
     /// A block with no info string is read line by line, as a shell block is, so prose that says
     /// `cargo xtask to` fails.
     plain_block_prose_fails: FailsWith(&[

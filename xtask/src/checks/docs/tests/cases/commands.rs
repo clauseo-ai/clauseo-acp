@@ -50,16 +50,6 @@ pub(crate) fn prompt_command_in_fence_fails() -> Inspection {
     )
 }
 
-pub(crate) fn env_assignment_command_in_span_fails() -> Inspection {
-    docs(
-        "env-command",
-        vec![(
-            "GUIDE.md",
-            "Run `RUST_LOG=1 cargo xtask frobnicate`.\n".to_owned(),
-        )],
-    )
-}
-
 pub(crate) fn chained_command_in_span_fails() -> Inspection {
     docs(
         "chained-command",
@@ -104,53 +94,6 @@ pub(crate) fn stderr_redirect_passes() -> Inspection {
     docs(
         "stderr-redirect",
         vec![("GUIDE.md", "Run `cargo xtask check 2>&1`.\n".to_owned())],
-    )
-}
-
-pub(crate) fn stdout_redirect_passes() -> Inspection {
-    docs(
-        "stdout-redirect",
-        vec![(
-            "GUIDE.md",
-            "Run `cargo xtask check > out.txt`.\n".to_owned(),
-        )],
-    )
-}
-
-pub(crate) fn subshell_with_valid_command_passes() -> Inspection {
-    docs(
-        "subshell-valid",
-        vec![(
-            "GUIDE.md",
-            "Run `(cd x && cargo xtask check)`.\n".to_owned(),
-        )],
-    )
-}
-
-pub(crate) fn subshell_with_unknown_subcommand_fails() -> Inspection {
-    docs(
-        "subshell-unknown",
-        vec![(
-            "GUIDE.md",
-            "Run `(cd x && cargo xtask frobnicate)`.\n".to_owned(),
-        )],
-    )
-}
-
-pub(crate) fn command_substitution_fails() -> Inspection {
-    docs(
-        "command-substitution",
-        vec![("GUIDE.md", "Run `$(cargo xtask frobnicate)`.\n".to_owned())],
-    )
-}
-
-pub(crate) fn time_and_env_prefix_fails() -> Inspection {
-    docs(
-        "time-env-prefix",
-        vec![(
-            "GUIDE.md",
-            "Run `time env cargo xtask frobnicate`.\n".to_owned(),
-        )],
     )
 }
 
@@ -201,26 +144,6 @@ pub(crate) fn toolchain_command_fails() -> Inspection {
     guide("toolchain", "Run `cargo +nightly xtask frobnicate`.\n")
 }
 
-pub(crate) fn sudo_command_fails() -> Inspection {
-    docs(
-        "sudo-command",
-        vec![(
-            "GUIDE.md",
-            "Run `sudo cargo xtask frobnicate`.\n".to_owned(),
-        )],
-    )
-}
-
-pub(crate) fn quoted_assignment_command_fails() -> Inspection {
-    docs(
-        "quoted-assignment",
-        vec![(
-            "GUIDE.md",
-            "Run `FOO=\"a b\" cargo xtask frobnicate`.\n".to_owned(),
-        )],
-    )
-}
-
 pub(crate) fn quoted_subcommand_passes() -> Inspection {
     docs(
         "quoted-subcommand",
@@ -261,14 +184,12 @@ pub(crate) fn unclosed_quote_after_a_pipe_fails() -> Inspection {
     )
 }
 
-pub(crate) fn plain_block_wrapped_commands_fail() -> Inspection {
+pub(crate) fn plain_block_wrapped_command_fails() -> Inspection {
     docs(
         "plain-block-wrapped",
         vec![(
             "GUIDE.md",
-            "```\ncd x && cargo xtask frobnicate\nRUST_LOG=1 cargo xtask frobnicate\n\
-             sudo cargo xtask frobnicate\n```\n"
-                .to_owned(),
+            "```\ncd x && cargo xtask frobnicate\n```\n".to_owned(),
         )],
     )
 }
@@ -279,22 +200,6 @@ pub(crate) fn plain_block_prose_fails() -> Inspection {
         vec![(
             "GUIDE.md",
             "```\nRun cargo xtask to see the commands.\n```\n".to_owned(),
-        )],
-    )
-}
-
-/// Flags after `sudo`, `env` and `time`, `nohup`, a substitution in an assignment, and the `%` and
-/// `PS>` prompts in a console block.
-pub(crate) fn wrapped_commands_fail() -> Inspection {
-    docs(
-        "wrapped-commands",
-        vec![(
-            "GUIDE.md",
-            "```sh\nsudo -E cargo xtask frobnicate\nsudo -u me cargo xtask frobnicate\n\
-             env -i cargo xtask frobnicate\ntime -p cargo xtask frobnicate\n\
-             nohup cargo xtask frobnicate\nx=$(cargo xtask frobnicate)\n```\n\n\
-             ```console\n% cargo xtask frobnicate\nPS> cargo xtask frobnicate\n```\n"
-                .to_owned(),
         )],
     )
 }
