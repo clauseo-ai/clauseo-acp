@@ -180,14 +180,5 @@ fn no_row(table: &CratesTable, member: &Member) -> Violation {
     )
 }
 
-/// `a`, `a and b`, `a, b and c`.
-fn and_list(items: &[String]) -> String {
-    match items {
-        [] => String::new(),
-        [only] => only.clone(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
-    }
-}
-
 #[cfg(test)]
 mod tests;

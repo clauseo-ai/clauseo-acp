@@ -204,13 +204,14 @@ fn oxfmt_path(line: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     fn context() -> Context {
         Context {
             root: PathBuf::from("/ws"),
             members: Vec::new(),
-            dependencies: Default::default(),
+            dependencies: BTreeMap::new(),
             load_resolved_graph: false,
         }
     }

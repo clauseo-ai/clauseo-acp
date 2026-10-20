@@ -8,11 +8,13 @@
 //! checks for every target.
 
 use super::FIXED_PLUGINS;
-use crate::checks::graph::Tree;
-use crate::checks::toml_lines::{BUILT, Manifest};
+use crate::checks::and_list;
+use crate::checks::graph::{Section, Tree};
+use crate::checks::toml_lines::Manifest;
 use crate::checks::violation;
 use crate::violation::Violation;
 use crate::workspace::PackageDependencies;
+use std::collections::BTreeSet;
 
 /// The plugin-authoring library every plugin depends on. It is not a plugin.
 const PLUGIN_LIBRARY: &str = "tauri-plugin";
@@ -44,16 +46,7 @@ pub(super) fn violations(tree: &Tree, desktop: &Desktop<'_>) -> Vec<Violation> {
             !FIXED_PLUGINS.contains(&tree.name(dependent)) && tree.deps(dependent).contains(&id)
         });
         if let Some(&dependent) = outsider {
-            found.push(violation(
-                desktop.path,
-                responsible_line(tree, id, desktop),
-                format!(
-                    "`{name}` {} is in the desktop crate's tree through `{}`, which is not a fixed plugin",
-                    tree.version(id),
-                    tree.name(dependent)
-                ),
-                TREE_FIX,
-            ));
+            found.push(violation_for(tree, id, dependent, desktop));
         }
     }
     found.sort_by(|a, b| (a.line, &a.message).cmp(&(b.line, &b.message)));
@@ -61,32 +54,88 @@ pub(super) fn violations(tree: &Tree, desktop: &Desktop<'_>) -> Vec<Violation> {
     found
 }
 
-/// The desktop manifest line of the direct dependency responsible for `target`: `target` itself
-/// when the desktop crate depends on it directly, else the one direct dependency that reaches
-/// it. Line 1 when no single dependency can be told apart.
-fn responsible_line(tree: &Tree, target: usize, desktop: &Desktop<'_>) -> u32 {
+/// The violation for `target`, a plugin reached through `dependent`. It points at the desktop
+/// manifest line that declares the direct dependency responsible; when that dependency is
+/// declared on several lines, it names them all, since removing one would leave the plugin in.
+fn violation_for(tree: &Tree, target: usize, dependent: usize, desktop: &Desktop<'_>) -> Violation {
+    let name = tree.name(target);
+    let message = format!(
+        "`{name}` {} is in the desktop crate's tree through `{}`, which is not a fixed plugin",
+        tree.version(target),
+        tree.name(dependent)
+    );
+    let (culprit, lines) = responsible(tree, target, desktop);
+    match lines.as_slice() {
+        [_, _, ..] => {
+            let at: Vec<String> = lines.iter().map(u32::to_string).collect();
+            let at = and_list(&at);
+            violation(
+                desktop.path,
+                lines[0],
+                format!(
+                    "{message}: `{culprit}` is declared at lines {at} of {}, and each declaration brings `{name}` in",
+                    desktop.path
+                ),
+                format!(
+                    "remove `{culprit}` from lines {at} of {}: {TREE_FIX}",
+                    desktop.path
+                ),
+            )
+        }
+        _ => violation(
+            desktop.path,
+            lines.first().copied().unwrap_or(1),
+            message,
+            TREE_FIX,
+        ),
+    }
+}
+
+/// The direct dependency responsible for `target`, its name, and the desktop manifest lines that
+/// declare it in the sections its node came under, in order. `target` itself when the desktop
+/// crate depends on it directly, else the one direct dependency name that reaches it. No lines
+/// when no single name can be told apart, or when no declaration is found.
+fn responsible(tree: &Tree, target: usize, desktop: &Desktop<'_>) -> (String, Vec<u32>) {
     let direct = tree.deps(Tree::ROOT);
-    let culprit = if direct.contains(&target) {
-        Some(target)
+    let culprit: Option<(&str, Vec<Section>)> = if direct.contains(&target) {
+        Some((tree.name(target), tree.sections(target).to_vec()))
     } else {
-        let mut reaching = direct
+        let reaching: Vec<usize> = direct
             .iter()
-            .filter(|&&dep| tree.reach(dep).order().contains(&target));
-        match (reaching.next(), reaching.next()) {
-            (Some(&only), None) => Some(only),
+            .copied()
+            .filter(|&dep| tree.reach(dep).order().contains(&target))
+            .collect();
+        match reaching.as_slice() {
+            [first, ..]
+                if reaching
+                    .iter()
+                    .all(|&dep| tree.name(dep) == tree.name(*first)) =>
+            {
+                let sections: BTreeSet<Section> = reaching
+                    .iter()
+                    .flat_map(|&dep| tree.sections(dep).iter().copied())
+                    .collect();
+                Some((tree.name(*first), sections.into_iter().collect()))
+            }
             _ => None,
         }
     };
-    let Some(culprit) = culprit else {
-        return 1;
+    let Some((name, sections)) = culprit else {
+        return (String::new(), Vec::new());
     };
-    let name = tree.name(culprit);
-    let Some(dep) = desktop.deps.dependencies.iter().find(|d| d.name == name) else {
-        return 1;
-    };
-    Manifest::parse(desktop.text)
-        .declaration(dep.key(), BUILT)
-        .unwrap_or(1)
+    let manifest = Manifest::parse(desktop.text);
+    let mut lines: Vec<u32> = desktop
+        .deps
+        .dependencies
+        .iter()
+        .filter(|dep| dep.name == name)
+        .filter_map(|dep| Some((dep, Section::of_kind(dep.kind.as_deref())?)))
+        .filter(|(_, section)| sections.contains(section))
+        .flat_map(|(dep, section)| manifest.declarations(dep.key(), section.tables()))
+        .collect();
+    lines.sort_unstable();
+    lines.dedup();
+    (name.to_owned(), lines)
 }
 
 #[cfg(test)]

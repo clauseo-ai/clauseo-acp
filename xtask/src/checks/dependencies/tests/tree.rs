@@ -23,6 +23,41 @@ pub(in crate::checks::dependencies) fn two_paths_each_fail() -> Inspection {
     run_on(&workspace("two-paths", PROTOCOL_ROW, "", &crates))
 }
 
+/// `s` declared in protocol's `[dependencies]` with `f1` and in its `[build-dependencies]` with
+/// `f2`, where `s`'s feature `f1` (or `f2`) brings `b` in: cargo builds `s` once per feature set,
+/// so each declaration has its own node.
+fn declared_twice(name: &str, s_features: &str) -> Inspection {
+    let crates = [
+        (
+            "crates/protocol".to_owned(),
+            manifest(
+                "clauseo-protocol",
+                "[dependencies]\ns = { path = \"../../vendor/s\", features = [\"f1\"] }\n\n[build-dependencies]\ns = { path = \"../../vendor/s\", features = [\"f2\"] }\n",
+            ),
+        ),
+        vendor(
+            "s",
+            &format!(
+                "[dependencies]\nb = {{ path = \"../b\", optional = true }}\n\n[features]\n{s_features}\n"
+            ),
+        ),
+        vendor("b", ""),
+    ];
+    let rows = "| `protocol` | events | serde | b | exists |\n";
+    run_on(&workspace(name, rows, "", &crates))
+}
+
+/// Only the build declaration's `s` brings `b` in, so the violation points at the build line,
+/// line 10, not at the normal line, line 7.
+pub(in crate::checks::dependencies) fn declared_twice_blames_the_building_line() -> Inspection {
+    declared_twice("declared-twice-build", "f1 = []\nf2 = [\"dep:b\"]")
+}
+
+/// Both declarations' `s` bring `b` in, so the violation names both lines.
+pub(in crate::checks::dependencies) fn declared_twice_names_both_lines() -> Inspection {
+    declared_twice("declared-twice-both", "f1 = [\"dep:b\"]\nf2 = [\"dep:b\"]")
+}
+
 /// `x` and the build dependency `y` both use `foo`, and only `y` turns on its feature `f`, which
 /// pulls in `b`: cargo builds `foo` twice (for the target without `f`, for the host with it), so
 /// `b` is reached through `y` only.

@@ -6,6 +6,7 @@
 pub(super) mod planted;
 
 use super::*;
+use crate::checks::and_list;
 use crate::scratch::Scratch;
 use crate::workspace;
 use std::fs;

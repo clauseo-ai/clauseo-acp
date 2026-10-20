@@ -266,6 +266,15 @@ pub(crate) fn desktop_dir(ctx: &Context) -> Result<&str, Violation> {
         })
 }
 
+/// `a`, `a and b`, `a, b and c`.
+pub(crate) fn and_list(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [only] => only.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 /// `dir/name`, or `name` when `dir` is the repo root.
 pub(crate) fn join(dir: &str, name: &str) -> String {
     if dir.is_empty() {

@@ -7,18 +7,27 @@
 //! workspace member turns on does not (one workspace-wide resolve would merge them, and blame the
 //! crate for an edge only the other member's build has); `--target all`, so every target's
 //! dependencies count; `-e normal,build`, since dev-dependencies never reach the built crate.
-//! With `--prefix depth --format "{p} [{f}]"` each line is `<depth><name> v<version>`, then
-//! `(proc-macro)` for a proc macro, then the source in parentheses for a path or git package,
+//! With `--prefix indent --charset ascii --format "{p} [{f}]"` the output is a tree drawing. The
+//! first line is the crate, with no prefix. Each later line has one four-column chunk for each
+//! level between it and the crate: `|   ` where the parent has a later sibling, four spaces where
+//! it has none. Then `|-- ` or `` `-- `` comes before the node, whose text is `<name> v<version>`,
+//! then `(proc-macro)` for a proc macro, then the source in parentheses for a path or git package,
 //! then the features cargo turned on in brackets, then ` (*)` for a node printed before. Cargo
 //! prints a node's subtree in full the first time and marks each later line of it `(*)`, so the
 //! graph maps each line's text, without the `(*)`, to the nodes under it, and a `(*)` line is a
 //! reference to that entry. The output stays the size of the graph, not of the number of paths
-//! through it. A package built twice with different features (for the host by a build
-//! dependency, and for the target) is two cargo nodes with different children; the features
-//! keep their lines apart, so each is its own entry and no path runs through the other's
-//! children. Two lines of one text are two builds with the same features, so the same children.
-//! A line in any other shape fails the check.
+//! through it. A package built twice with different features (for the host by a build dependency,
+//! and for the target) is two cargo nodes with different children; the features keep their lines
+//! apart, so each is its own entry and no path runs through the other's children. Two lines of one
+//! text are two builds with the same features, so the same children.
+//!
+//! Under a package, cargo prints its normal edges first, then a `[build-dependencies]` header
+//! line at the level of its build edges, then those edges. The header covers the edges at its
+//! level below it, up to the next line at that level or shallower, so a direct dependency knows
+//! which section its lines came under (`Tree::sections`). A line in any other shape fails the
+//! check.
 
+use crate::checks::toml_lines::{BUILD, Kind, NORMAL};
 use crate::checks::violation;
 use crate::process::{self, Cmd, Program};
 use crate::violation::Violation;
@@ -78,7 +87,9 @@ pub(crate) fn tree_args<'a>(package: &'a str, flags: &[&'a str]) -> Vec<&'a str>
         "--target",
         "all",
         "--prefix",
-        "depth",
+        "indent",
+        "--charset",
+        "ascii",
         "--format",
         "{p} [{f}]",
     ];
@@ -101,12 +112,44 @@ pub(crate) fn load_tree(root: &Path, package: &str, flags: &[&str]) -> Result<Tr
     })
 }
 
+/// The section of a crate's manifest that a dependency is declared in, as far as the graph
+/// tells: a direct dependency's edge came under one of these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Section {
+    /// `[dependencies]`, under no header.
+    Normal,
+    /// `[build-dependencies]`, under its header.
+    Build,
+}
+
+impl Section {
+    /// The section of a `cargo metadata` dependency of `kind` (`None` for normal, `"build"` for
+    /// build), or `None` for a kind that is not in the graph, such as dev.
+    pub(crate) fn of_kind(kind: Option<&str>) -> Option<Section> {
+        match kind {
+            None | Some("normal") => Some(Section::Normal),
+            Some("build") => Some(Section::Build),
+            Some(_) => None,
+        }
+    }
+
+    /// The manifest tables of this section, with or without a target.
+    pub(crate) fn tables(self) -> &'static [Kind] {
+        match self {
+            Section::Normal => NORMAL,
+            Section::Build => BUILD,
+        }
+    }
+}
+
 /// One node of a graph: a package with one set of features, and the nodes it depends on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Package {
     name: String,
     version: String,
     deps: Vec<usize>,
+    /// For a direct dependency of the crate, the sections its lines came under, each once.
+    sections: Vec<Section>,
 }
 
 /// A crate's dependency graph: one entry per package, the crate itself first, then the others
@@ -162,6 +205,16 @@ impl Tree {
             .map_or("", |p| p.version.as_str())
     }
 
+    /// The sections the lines of the direct dependency `package` came under: `Build` as well as
+    /// `Normal` when cargo printed it under both. Empty for a package the crate does not depend on
+    /// directly.
+    pub(crate) fn sections(&self, package: usize) -> &[Section] {
+        self.packages
+            .get(package)
+            .map(|p| p.sections.as_slice())
+            .unwrap_or_default()
+    }
+
     /// The packages `package` depends on, in `cargo tree`'s order.
     pub(crate) fn deps(&self, package: usize) -> &[usize] {
         self.packages
@@ -194,10 +247,11 @@ impl Tree {
         Reach { order, from }
     }
 
-    /// Reads `cargo tree --prefix depth --format "{p} [{f}]"` output for `package`: its first
-    /// line is `package` at depth 0, each later line is at least one deep and at most one deeper
-    /// than the line before it, no line sits under a `(*)` line, and a `(*)` line names a node
-    /// printed before.
+    /// Reads `cargo tree --prefix indent --charset ascii --format "{p} [{f}]"` output for
+    /// `package`: its first line is `package` at depth 0, each later node line is at least one
+    /// deep and at most one deeper than the line before it, no line sits under a `(*)` line, and a
+    /// `(*)` line names a node printed before. A `[build-dependencies]` header needs a package
+    /// with edges below it at its level.
     pub(crate) fn parse(stdout: &str, package: &str) -> Result<Tree, String> {
         let mut packages: Vec<Package> = Vec::new();
         let mut index: BTreeMap<&str, usize> = BTreeMap::new();
@@ -205,8 +259,24 @@ impl Tree {
         // was a `(*)` reference, which has no lines under it.
         let mut path: Vec<usize> = Vec::new();
         let mut last_starred = false;
+        // The section each level's edges came under: `headers[level]` is set by a header above
+        // them, and dropped by the first line at a shallower depth.
+        let mut headers: Vec<Section> = Vec::new();
         for (number, text) in stdout.lines().enumerate().map(|(n, t)| (n + 1, t)) {
-            let line = parse_line(text).ok_or_else(|| format!("line {number} `{text}` is not `<depth><name> v<version>` followed by `(proc-macro)`, `(<source>)`, `[<features>]` and `(*)`"))?;
+            let entry = parse_line(text).ok_or_else(|| format!("line {number} `{text}` is not a node line (`<prefix><name> v<version>`, then `(proc-macro)`, `(<source>)`, `[<features>]` and `(*)`) or a `[build-dependencies]` header"))?;
+            let line = match entry {
+                Entry::Header { level, section } => {
+                    if path.len() <= level || (path.len() == level + 1 && last_starred) {
+                        return Err(format!(
+                            "line {number} `{text}` is a section header with no package above it that can have edges"
+                        ));
+                    }
+                    headers.resize(level + 1, Section::Normal);
+                    headers[level] = section;
+                    continue;
+                }
+                Entry::Node(line) => line,
+            };
             let deepest = if path.is_empty() || last_starred {
                 path.len()
             } else {
@@ -233,15 +303,27 @@ impl Tree {
                         name: line.name.to_owned(),
                         version: line.version.to_owned(),
                         deps: Vec::new(),
+                        sections: Vec::new(),
                     });
                     packages.len() - 1
                 }
             };
+            // A line at this depth ends the headers of the levels below it.
+            headers.truncate(line.depth);
+            let section = line
+                .depth
+                .checked_sub(1)
+                .and_then(|level| headers.get(level))
+                .copied()
+                .unwrap_or(Section::Normal);
             path.truncate(line.depth);
             if let Some(parent) = path.last().and_then(|&p| packages.get_mut(p))
                 && !parent.deps.contains(&id)
             {
                 parent.deps.push(id);
+            }
+            if line.depth == 1 && !packages[id].sections.contains(&section) {
+                packages[id].sections.push(section);
             }
             path.push(id);
             last_starred = line.starred;
@@ -253,10 +335,22 @@ impl Tree {
     }
 }
 
-/// One line of `cargo tree` output.
+/// One line of `cargo tree` output: a node line, or a section header.
+enum Entry<'a> {
+    Node(Line<'a>),
+    /// A `[build-dependencies]` header under the package at depth `level`, labelling the edges
+    /// `level` chunks deep below it.
+    Header {
+        level: usize,
+        section: Section,
+    },
+}
+
+/// One node line of `cargo tree` output.
 struct Line<'a> {
+    /// The depth in the tree: 0 for the crate, 1 for a direct dependency.
     depth: usize,
-    /// The line after its depth, without ` (*)`: the same text for every line of one node.
+    /// The line after its prefix, without ` (*)`: the same text for every line of one node.
     key: &'a str,
     name: &'a str,
     version: &'a str,
@@ -264,18 +358,47 @@ struct Line<'a> {
     starred: bool,
 }
 
-/// One line, or `None` when it has another shape: `<depth><name> v<version>`, then
-/// ` (proc-macro)` for a proc macro, then ` (<source>)` for a package not from crates.io (a
+/// One line, or `None` when it has another shape. A node line is its prefix (a `|   ` or four
+/// spaces for each level between it and the crate, then `|-- ` or `` `-- ``, and none for the
+/// crate itself) and then `node_line`'s text. A header is its prefix and `[build-dependencies]`.
+fn parse_line(text: &str) -> Option<Entry<'_>> {
+    let mut rest = text;
+    let mut level = 0;
+    while let Some(next) = rest
+        .strip_prefix("|   ")
+        .or_else(|| rest.strip_prefix("    "))
+    {
+        rest = next;
+        level += 1;
+    }
+    if let Some(node) = rest
+        .strip_prefix("|-- ")
+        .or_else(|| rest.strip_prefix("`-- "))
+    {
+        return node_line(node, level + 1).map(Entry::Node);
+    }
+    if rest.starts_with('[') {
+        let section = match rest {
+            "[build-dependencies]" => Section::Build,
+            _ => return None,
+        };
+        return Some(Entry::Header { level, section });
+    }
+    if level == 0 {
+        return node_line(rest, 0).map(Entry::Node);
+    }
+    None
+}
+
+/// The node line `text` at `depth`, or `None` when it has another shape: `<name> v<version>`,
+/// then ` (proc-macro)` for a proc macro, then ` (<source>)` for a package not from crates.io (a
 /// path may hold parentheses, so the source runs to the line's last `)`), then ` [<features>]`
 /// (comma-separated, maybe empty), then ` (*)` for a node printed before, as cargo 1.99's
-/// `{p} [{f}]` writes them. The key is the line without ` (*)`, features included.
-fn parse_line(text: &str) -> Option<Line<'_>> {
-    let name_start = text.find(|c: char| !c.is_ascii_digit())?;
-    let depth = text.get(..name_start)?.parse().ok()?;
-    let rest = text.get(name_start..)?;
-    let (key, starred) = match rest.strip_suffix(" (*)") {
+/// `{p} [{f}]` writes them. The key is the text without ` (*)`, features included.
+fn node_line(text: &str, depth: usize) -> Option<Line<'_>> {
+    let (key, starred) = match text.strip_suffix(" (*)") {
         Some(key) => (key, true),
-        None => (rest, false),
+        None => (text, false),
     };
     let (package, features) = key.strip_suffix(']')?.rsplit_once(" [")?;
     let is_feature_char = |c: char| c.is_ascii_alphanumeric() || "-_+./,".contains(c);

@@ -3,6 +3,8 @@
 
 pub(super) mod planted;
 
+use std::collections::BTreeMap;
+
 use super::*;
 use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;
@@ -28,7 +30,7 @@ fn run_on(case: &str, files: &[(&str, String)]) -> Inspection {
     run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
-        dependencies: Default::default(),
+        dependencies: BTreeMap::new(),
         load_resolved_graph: false,
     })
 }
@@ -204,7 +206,7 @@ fn an_unreadable_listed_file_is_not_called_stale() {
     let found = run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
-        dependencies: Default::default(),
+        dependencies: BTreeMap::new(),
         load_resolved_graph: false,
     });
     let paths: Vec<&str> = found.violations.iter().map(|v| v.path.as_str()).collect();
@@ -217,7 +219,7 @@ pub(super) fn not_a_git_repo() -> Inspection {
     run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
-        dependencies: Default::default(),
+        dependencies: BTreeMap::new(),
         load_resolved_graph: false,
     })
 }
@@ -228,7 +230,7 @@ pub(super) fn only_file_unreadable() -> Inspection {
     run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
-        dependencies: Default::default(),
+        dependencies: BTreeMap::new(),
         load_resolved_graph: false,
     })
 }

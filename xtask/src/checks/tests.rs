@@ -1,5 +1,7 @@
 //! Tests of the shared helpers and of the rules every check meets.
 
+use std::collections::BTreeMap;
+
 use super::*;
 use crate::scratch::Scratch;
 
@@ -29,7 +31,7 @@ pub(crate) fn desktop_context(root: &Path) -> Context {
             dir: "crates/desktop".to_owned(),
             path_deps: Vec::new(),
         }],
-        dependencies: Default::default(),
+        dependencies: BTreeMap::new(),
         load_resolved_graph: false,
     }
 }
@@ -46,7 +48,7 @@ fn a_missing_desktop_member_is_one_violation_at_the_root_manifest() {
     let ctx = Context {
         root: Path::new("/ws").to_path_buf(),
         members: Vec::new(),
-        dependencies: Default::default(),
+        dependencies: BTreeMap::new(),
         load_resolved_graph: false,
     };
     assert_eq!(
@@ -87,7 +89,7 @@ fn every_check_inspects_nothing_in_an_empty_repo() {
     let ctx = Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
-        dependencies: Default::default(),
+        dependencies: BTreeMap::new(),
         load_resolved_graph: false,
     };
     for name in STOPS_IN_AN_EMPTY_REPO {

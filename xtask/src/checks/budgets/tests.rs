@@ -2,6 +2,8 @@
 
 pub(super) mod planted;
 
+use std::collections::BTreeMap;
+
 use super::*;
 use crate::scratch::Scratch;
 
@@ -21,7 +23,7 @@ fn run_on(case: &str, text: impl AsRef<[u8]>) -> Inspection {
     run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
-        dependencies: Default::default(),
+        dependencies: BTreeMap::new(),
         load_resolved_graph: false,
     })
 }

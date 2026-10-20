@@ -1,6 +1,8 @@
 //! The builders of the planted cases of the capabilities check: each makes a scratch tree (or
 //! a context) and returns what the check's own `run` finds in it. See `tests/planted.rs`.
 
+use std::collections::BTreeMap;
+
 use super::*;
 
 /// A scratch repo named after `case`, with each `(path, text)` of `files` written into it.
@@ -36,7 +38,7 @@ pub(super) fn desktop_crate_missing() -> Inspection {
     run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
-        dependencies: Default::default(),
+        dependencies: BTreeMap::new(),
         load_resolved_graph: false,
     })
 }

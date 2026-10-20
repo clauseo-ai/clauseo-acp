@@ -32,8 +32,8 @@ impl Kind {
 
 /// `[dependencies]` only.
 pub(crate) const NORMAL: &[Kind] = &[Kind::Normal];
-/// What is built into the crate: `[dependencies]` and `[build-dependencies]`.
-pub(crate) const BUILT: &[Kind] = &[Kind::Normal, Kind::Build];
+/// `[build-dependencies]` only.
+pub(crate) const BUILD: &[Kind] = &[Kind::Build];
 /// Every dependency table: normal, build and dev.
 pub(crate) const ANY: &[Kind] = &[Kind::Normal, Kind::Build, Kind::Dev];
 
@@ -55,9 +55,19 @@ impl<'a> Manifest<'a> {
     /// The first line that declares dependency `key` in a table of `kinds`, with or without a
     /// target: the line of the key itself (in a `[<table>.key]` header, that header's line).
     pub(crate) fn declaration(&self, key: &str, kinds: &[Kind]) -> Option<u32> {
-        self.entries(key, kinds)
+        self.declarations(key, kinds).first().copied()
+    }
+
+    /// Every line that declares dependency `key` in a table of `kinds`, in order, each once.
+    /// `declaration` is the first of them.
+    pub(crate) fn declarations(&self, key: &str, kinds: &[Kind]) -> Vec<u32> {
+        let mut lines: Vec<u32> = self
+            .entries(key, kinds)
             .map(|(key, _)| self.line(key.span().start))
-            .min()
+            .collect();
+        lines.sort_unstable();
+        lines.dedup();
+        lines
     }
 
     /// The line where the entry for `key` (in `kinds`) lists `feature` in its `features`.
@@ -169,7 +179,8 @@ mod tests {
         assert_eq!(manifest.declaration("dotted", NORMAL), Some(7));
         assert_eq!(manifest.declaration("os", NORMAL), Some(9));
         assert_eq!(manifest.declaration("built", NORMAL), None);
-        assert_eq!(manifest.declaration("built", BUILT), Some(13));
+        assert_eq!(manifest.declaration("built", BUILD), Some(13));
+        assert_eq!(manifest.declarations("built", BUILD), [13]);
         assert_eq!(manifest.declaration("t", ANY), None);
         assert_eq!(manifest.dependencies_header(), Some(1));
     }

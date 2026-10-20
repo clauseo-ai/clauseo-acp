@@ -107,6 +107,54 @@ fn a_plugin_outside_the_set_fails_unless_only_fixed_plugins_pull_it_in() {
     );
 }
 
+/// The desktop crate declares `s` twice, in `[dependencies]` with `f1` and in
+/// `[build-dependencies]` with `f2`. `s`'s optional `tauri-plugin-zz` sits behind the features
+/// `s_features` gives.
+fn declared_twice(name: &str, s_features: &str) -> (Scratch, String) {
+    let desktop = desktop(
+        "[dependencies]\ns = { path = \"../../vendor/s\", features = [\"f1\"] }\n\n[build-dependencies]\ns = { path = \"../../vendor/s\", features = [\"f2\"] }\n",
+    );
+    let s = format!(
+        "[dependencies]\ntauri-plugin-zz = {{ path = \"../tauri-plugin-zz\", optional = true }}\n\n[features]\n{s_features}\n"
+    );
+    let ws = workspace(name, &desktop, &[("s", &s), ("tauri-plugin-zz", "")]);
+    (ws, desktop)
+}
+
+#[test]
+fn a_plugin_behind_only_the_build_declaration_blames_the_build_line() {
+    let (ws, desktop) = declared_twice(
+        "declared-twice-build",
+        "f1 = []\nf2 = [\"dep:tauri-plugin-zz\"]",
+    );
+    assert_eq!(
+        violations_in(&ws, &desktop),
+        vec![violation(
+            DESKTOP_PATH,
+            line_of(&desktop, "features = [\"f2\"]"),
+            "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `s`, which is not a fixed plugin",
+            TREE_FIX,
+        )]
+    );
+}
+
+#[test]
+fn a_plugin_behind_both_declarations_names_both_lines() {
+    let (ws, desktop) = declared_twice(
+        "declared-twice-both",
+        "f1 = [\"dep:tauri-plugin-zz\"]\nf2 = [\"dep:tauri-plugin-zz\"]",
+    );
+    assert_eq!(
+        violations_in(&ws, &desktop),
+        vec![violation(
+            DESKTOP_PATH,
+            line_of(&desktop, "features = [\"f1\"]"),
+            "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `s`, which is not a fixed plugin: `s` is declared at lines 7 and 10 of crates/desktop/Cargo.toml, and each declaration brings `tauri-plugin-zz` in",
+            "remove `s` from lines 7 and 10 of crates/desktop/Cargo.toml: only the fixed plugins and what they pull in may be in the desktop crate's tree",
+        )]
+    );
+}
+
 #[test]
 fn a_clean_graph_passes() {
     let desktop = desktop("[dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n");

@@ -144,13 +144,14 @@ pub(super) fn setup_or_reproduce(cmd: &Cmd, output: Option<&str>) -> String {
 mod tests {
     use super::*;
     use crate::workspace::Member;
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     fn context(members: Vec<Member>) -> Context {
         Context {
             root: PathBuf::from("/ws"),
             members,
-            dependencies: Default::default(),
+            dependencies: BTreeMap::new(),
             load_resolved_graph: false,
         }
     }

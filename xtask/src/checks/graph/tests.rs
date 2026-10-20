@@ -20,7 +20,7 @@ fn the_fix_of_a_failed_run_fits_its_cause() {
 fn the_tree_run_resolves_the_crate_alone_with_all_its_features_for_every_target() {
     assert_eq!(
         tree_args("clauseo-protocol", &["--locked", "--offline"]).join(" "),
-        "tree -p clauseo-protocol -e normal,build --all-features --target all --prefix depth --format {p} [{f}] --locked --offline"
+        "tree -p clauseo-protocol -e normal,build --all-features --target all --prefix indent --charset ascii --format {p} [{f}] --locked --offline"
     );
 }
 
@@ -41,12 +41,12 @@ fn listed(tree: &Tree) -> Vec<String> {
 
 #[test]
 fn every_line_shape_cargo_prints_parses() {
-    let out = "0clauseo-protocol v0.1.0 (/ws/crates/protocol) []\n\
-               1serde v1.0.229 [alloc,default,derive,serde_derive,std]\n\
-               2serde_derive v1.0.229 (proc-macro) [default]\n\
-               1pm v0.1.0 (proc-macro) (/ws/vendor/pm (old) [x]) [a-b,c_d,e+f,g.h,i/j]\n\
-               1gitdep v0.2.0-rc.1 (https://example.com/r.git#0123abcd) []\n\
-               1win v0.1.0 (C:\\ws\\vendor\\win) []\n";
+    let out = "clauseo-protocol v0.1.0 (/ws/crates/protocol) []\n\
+               |-- serde v1.0.229 [alloc,default,derive,serde_derive,std]\n\
+               |   `-- serde_derive v1.0.229 (proc-macro) [default]\n\
+               |-- pm v0.1.0 (proc-macro) (/ws/vendor/pm (old) [x]) [a-b,c_d,e+f,g.h,i/j]\n\
+               |-- gitdep v0.2.0-rc.1 (https://example.com/r.git#0123abcd) []\n\
+               `-- win v0.1.0 (C:\\ws\\vendor\\win) []\n";
     let tree = Tree::parse(out, "clauseo-protocol").expect("it parses");
     assert_eq!(
         listed(&tree),
@@ -63,13 +63,14 @@ fn every_line_shape_cargo_prints_parses() {
 
 #[test]
 fn a_starred_line_is_the_node_printed_before_with_everything_under_it() {
-    let out = "0clauseo-protocol v0.1.0 (/ws) []\n\
-               1left v0.1.0 (/ws/vendor/left) []\n\
-               2inner v0.1.0 (/ws/vendor/inner) []\n\
-               3tauri v0.1.0 (/ws/vendor/tauri) []\n\
-               1right v0.1.0 (/ws/vendor/right) []\n\
-               2inner v0.1.0 (/ws/vendor/inner) [] (*)\n\
-               2tauri v0.1.0 (/ws/vendor/tauri) []\n";
+    let out = r"clauseo-protocol v0.1.0 (/ws) []
+|-- left v0.1.0 (/ws/vendor/left) []
+|   `-- inner v0.1.0 (/ws/vendor/inner) []
+|       `-- tauri v0.1.0 (/ws/vendor/tauri) []
+`-- right v0.1.0 (/ws/vendor/right) []
+    |-- inner v0.1.0 (/ws/vendor/inner) [] (*)
+    `-- tauri v0.1.0 (/ws/vendor/tauri) []
+";
     let tree = Tree::parse(out, "clauseo-protocol").expect("it parses");
     assert_eq!(
         listed(&tree),
@@ -92,12 +93,13 @@ fn a_starred_line_is_the_node_printed_before_with_everything_under_it() {
 /// is two nodes: what one build pulls in is never under the other.
 #[test]
 fn a_package_built_twice_with_other_features_is_two_nodes() {
-    let out = "0clauseo-protocol v0.1.0 (/ws) []\n\
-               1x v0.1.0 []\n\
-               2foo v0.1.0 []\n\
-               1y v0.1.0 []\n\
-               2foo v0.1.0 [f]\n\
-               3b v0.1.0 []\n";
+    let out = r"clauseo-protocol v0.1.0 (/ws) []
+|-- x v0.1.0 []
+|   `-- foo v0.1.0 []
+`-- y v0.1.0 []
+    `-- foo v0.1.0 [f]
+        `-- b v0.1.0 []
+";
     let tree = Tree::parse(out, "clauseo-protocol").expect("it parses");
     assert_eq!(
         listed(&tree),
@@ -115,12 +117,13 @@ fn a_package_built_twice_with_other_features_is_two_nodes() {
 
 #[test]
 fn a_package_printed_in_full_twice_with_the_same_features_is_one_node() {
-    let out = "0clauseo-protocol v0.1.0 (/ws) []\n\
-               1cc v1.0.0 []\n\
-               2jobserver v0.1.0 []\n\
-               1mid v0.1.0 []\n\
-               2cc v1.0.0 []\n\
-               3jobserver v0.1.0 []\n";
+    let out = r"clauseo-protocol v0.1.0 (/ws) []
+|-- cc v1.0.0 []
+|   `-- jobserver v0.1.0 []
+`-- mid v0.1.0 []
+    `-- cc v1.0.0 []
+        `-- jobserver v0.1.0 []
+";
     let tree = Tree::parse(out, "clauseo-protocol").expect("it parses");
     assert_eq!(
         listed(&tree),
@@ -133,13 +136,54 @@ fn a_package_printed_in_full_twice_with_the_same_features_is_one_node() {
     );
 }
 
+/// `s` is a normal edge of the crate and, from the second line of the build section, also a
+/// build edge. Its own build section holds `t`, which is no direct edge.
+#[test]
+fn a_direct_dependency_records_the_sections_its_lines_came_under() {
+    let out = r"clauseo-protocol v0.1.0 (/ws) []
+|-- s v0.1.0 (/ws/vendor/s) [f1,f2]
+|   |-- b1 v0.1.0 []
+|   [build-dependencies]
+|   `-- t v0.1.0 []
+|-- q v0.1.0 []
+|   `-- s v0.1.0 (/ws/vendor/s) [f1,f2] (*)
+[build-dependencies]
+|-- q v0.1.0 [] (*)
+`-- s v0.1.0 (/ws/vendor/s) [f1,f2] (*)
+";
+    let tree = Tree::parse(out, "clauseo-protocol").expect("it parses");
+    let id = |name: &str| (0..tree.packages.len()).find(|&id| tree.name(id) == name);
+    let (s, q, t) = (id("s").unwrap(), id("q").unwrap(), id("t").unwrap());
+    assert_eq!(tree.sections(s), [Section::Normal, Section::Build]);
+    assert_eq!(tree.sections(q), [Section::Normal, Section::Build]);
+    assert_eq!(tree.sections(t), []);
+    assert_eq!(tree.sections(Tree::ROOT), []);
+}
+
+/// A header under a package that is not a direct dependency labels only the edges below that
+/// package, so a direct dependency above it keeps the section of its own line.
+#[test]
+fn a_header_below_a_direct_dependency_leaves_its_section_normal() {
+    let out = r"clauseo-protocol v0.1.0 (/ws) []
+|-- s v0.1.0 []
+|   [build-dependencies]
+|   `-- t v0.1.0 []
+`-- r v0.1.0 []
+    `-- u v0.1.0 []
+";
+    let tree = Tree::parse(out, "clauseo-protocol").expect("it parses");
+    let s = (0..tree.packages.len()).find(|&id| tree.name(id) == "s");
+    assert_eq!(tree.sections(s.unwrap()), [Section::Normal]);
+    assert_eq!(listed(&tree)[1], "s 0.1.0: t");
+}
+
 #[test]
 fn a_line_of_another_shape_or_out_of_order_is_an_error() {
-    let root = "0clauseo-protocol v0.1.0 (/ws) []\n";
+    let root = "clauseo-protocol v0.1.0 (/ws) []\n";
     let parse = |rest: &str| Tree::parse(&format!("{root}{rest}"), "clauseo-protocol");
     let shape = |n: usize, text: &str| {
         Err(format!(
-            "line {n} `{text}` is not `<depth><name> v<version>` followed by `(proc-macro)`, `(<source>)`, `[<features>]` and `(*)`"
+            "line {n} `{text}` is not a node line (`<prefix><name> v<version>`, then `(proc-macro)`, `(<source>)`, `[<features>]` and `(*)`) or a `[build-dependencies]` header"
         ))
     };
     let order = |n: usize, text: &str, deepest: usize| {
@@ -149,34 +193,52 @@ fn a_line_of_another_shape_or_out_of_order_is_an_error() {
     };
     for bad in [
         "├── serde v1.0.0 []",
-        "1serde 1.0.0 []",
-        "1serde v1.0.0",
-        "1serde v1.0.0 /ws []",
-        "1serde v1.0.0 () []",
-        "1serde v1.0.0 [a b]",
-        "1serde v1.0.0 [] (*) (*)",
+        "serde 1.0.0 []",
+        "|-- serde v1.0.0",
+        "|-- serde v1.0.0 /ws []",
+        "|-- serde v1.0.0 () []",
+        "|-- serde v1.0.0 [a b]",
+        "|-- serde v1.0.0 [] (*) (*)",
+        "|  -- serde v1.0.0 []",
+        "  |-- serde v1.0.0 []",
+        "    serde v1.0.0 []",
+        "|-- [dev-dependencies]",
+        "[dev-dependencies]",
         "",
     ] {
         assert_eq!(parse(&format!("{bad}\n")), shape(2, bad));
     }
-    assert_eq!(parse("3serde v1.0.0 []\n"), order(2, "3serde v1.0.0 []", 1));
-    assert_eq!(parse("0other v1.0.0 []\n"), order(2, "0other v1.0.0 []", 1));
     assert_eq!(
-        parse("1serde v1.0.0 [] (*)\n"),
+        parse("|   |   |-- serde v1.0.0 []\n"),
+        order(2, "|   |   |-- serde v1.0.0 []", 1)
+    );
+    assert_eq!(parse("other v1.0.0 []\n"), order(2, "other v1.0.0 []", 1));
+    assert_eq!(
+        parse("|-- serde v1.0.0 [] (*)\n"),
         Err(
-            "line 2 `1serde v1.0.0 [] (*)` marks a package not printed before with `(*)`"
+            "line 2 `|-- serde v1.0.0 [] (*)` marks a package not printed before with `(*)`"
                 .to_owned()
         )
     );
-    let under_a_star = "1a v1.0.0 []\n2b v1.0.0 []\n1a v1.0.0 [] (*)\n2b v1.0.0 []\n";
-    assert_eq!(parse(under_a_star), order(5, "2b v1.0.0 []", 1));
+    let under_a_star =
+        "|-- a v1.0.0 []\n|   `-- b v1.0.0 []\n|-- a v1.0.0 [] (*)\n|   `-- b v1.0.0 []\n";
+    assert_eq!(parse(under_a_star), order(5, "|   `-- b v1.0.0 []", 1));
+    let header_under_a_star = "|-- a v1.0.0 []\n|-- a v1.0.0 [] (*)\n|   [build-dependencies]\n";
     assert_eq!(
-        Tree::parse("0other v1.0.0 []\n", "clauseo-protocol"),
-        order(1, "0other v1.0.0 []", 0)
+        parse(header_under_a_star),
+        Err("line 4 `|   [build-dependencies]` is a section header with no package above it that can have edges".to_owned())
     );
     assert_eq!(
-        Tree::parse("0clauseo-protocol v0.1.0 [] (*)\n", "clauseo-protocol"),
-        order(1, "0clauseo-protocol v0.1.0 [] (*)", 0)
+        Tree::parse("[build-dependencies]\n", "clauseo-protocol"),
+        Err("line 1 `[build-dependencies]` is a section header with no package above it that can have edges".to_owned())
+    );
+    assert_eq!(
+        Tree::parse("other v1.0.0 []\n", "clauseo-protocol"),
+        order(1, "other v1.0.0 []", 0)
+    );
+    assert_eq!(
+        Tree::parse("clauseo-protocol v0.1.0 [] (*)\n", "clauseo-protocol"),
+        order(1, "clauseo-protocol v0.1.0 [] (*)", 0)
     );
     assert_eq!(
         Tree::parse("", "clauseo-protocol"),

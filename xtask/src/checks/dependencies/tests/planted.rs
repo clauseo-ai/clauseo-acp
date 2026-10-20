@@ -160,6 +160,18 @@ crate::checks::planted::cases! {
         "crates/protocol/Cargo.toml:10: clauseo-protocol depends on b through y and foo, which ARCHITECTURE.md forbids\n    \
          fix: move the code that uses `y` into a crate whose row allows b, then remove `y` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
     ]), inspects 1 => super::tree::host_build_feature_blames_only_its_path,
+    /// `s` declared twice, with `f1` in `[dependencies]` and `f2` in `[build-dependencies]`, where
+    /// only `f2` brings b in, blames the build line.
+    declared_twice_blames_the_building_line: FailsWith(&[
+        "crates/protocol/Cargo.toml:10: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids\n    \
+         fix: move the code that uses `s` into a crate whose row allows b, then remove `s` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
+    ]), inspects 1 => super::tree::declared_twice_blames_the_building_line,
+    /// `s` declared twice, where both declarations bring b in, names both lines in the message
+    /// and the fix, since removing one would leave b in.
+    declared_twice_names_both_lines: FailsWith(&[
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids: `s` is declared at lines 7 and 10 of crates/protocol/Cargo.toml, and each declaration brings b in\n    \
+         fix: move the code that uses `s` into a crate whose row allows b, then remove `s` from lines 7 and 10 of crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
+    ]), inspects 1 => super::tree::declared_twice_names_both_lines,
     crates_io_marker_passes: Passes, inspects 1 => super::names::crates_io_marker_passes,
     crates_io_marker_bans_the_package: FailsWith(&[
         "crates/host/Cargo.toml:7: clauseo-host depends on rmcp, which ARCHITECTURE.md forbids\n    \
