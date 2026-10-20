@@ -3,9 +3,10 @@
 //! `xtask/core-io-bans.toml`) with every `allow-invalid` taken out, and whose root carries the
 //! forbid line core-io asks every target root of a held crate to carry. The first holds one module
 //! per form in `forms.rs`, the second one per form of `forms::forbidden()`. It runs the pinned
-//! clippy on each offline and asserts that each must-fail module gets a `disallowed_methods` or
-//! `disallowed_types` hit, or error E0453, inside its own file (naming the form's item, when it
-//! has one) and each must-pass module gets none.
+//! clippy on each offline, with the clippy step's flags (`CLIPPY_FLAGS`), and asserts that each
+//! must-fail module gets a `disallowed_methods` or `disallowed_types` hit, or error E0453,
+//! inside its own file (naming the form's item, when it has one) and each must-pass module gets
+//! none.
 //!
 //! Both crates' manifests set the two lints to `allow` in `[lints.clippy]`, and both runs pass
 //! `-A` of the two lints after `--`, which cargo hands to clippy-driver in `CLIPPY_ARGS`. The
@@ -22,6 +23,7 @@ mod forms;
 use super::clippy_toml;
 use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;
+use crate::steps::plan::CLIPPY_FLAGS;
 use forms::{Form, Must};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -96,29 +98,27 @@ fn clippy_bans_every_planted_call() {
 }
 
 /// Runs the pinned clippy offline on the scratch crate in `dir`, which holds `count` forms, with
-/// `-A` of the two lints after `--`, and reads what it reported.
+/// the clippy step's flags and `-A` of the two lints after `--`, and reads what it reported.
 fn clippy(dir: &Path, target: &Path, count: usize) -> Run {
     #[expect(
         clippy::disallowed_methods,
         reason = "the test reports how long clippy took"
     )]
     let started = Instant::now();
-    let cmd = Cmd::new(
-        Program::Cargo,
-        [
-            "clippy",
-            "--offline",
-            "--quiet",
-            "--message-format=json",
+    let target = target.to_string_lossy();
+    let args = ["clippy", "--offline", "--quiet"]
+        .into_iter()
+        .chain(CLIPPY_FLAGS)
+        .chain([
             "--target-dir",
-            &target.to_string_lossy(),
+            &target,
             "--",
             "-A",
             LINTS[0],
             "-A",
             LINTS[1],
-        ],
-    );
+        ]);
+    let cmd = Cmd::new(Program::Cargo, args);
     let ran = process::run_quiet(&cmd, dir).expect("cargo clippy starts");
     eprintln!(
         "clippy_bans_every_planted_call: {count} forms in {}, cargo clippy took {:.1?}",
@@ -193,16 +193,16 @@ fn wrong_forms(forms: &[Form], run: &Run) -> Vec<String> {
         .collect()
 }
 
-/// Writes a scratch crate into `dir`: a manifest with no dependency, its own workspace and the
-/// two lints set to `allow`, `clippy.toml` holding `config`, the repo's `rust-toolchain.toml`
-/// (so the pinned clippy runs), and `src/lib.rs`, which starts with `FORBID_LINE` and declares
-/// one module per form, each in `src/<name>.rs`.
+/// Writes a scratch crate into `dir`: a manifest with no dependency, its own workspace, a feature
+/// `io` that is off by default and the two lints set to `allow`, `clippy.toml` holding
+/// `config`, the repo's `rust-toolchain.toml`, so the pinned clippy runs, and `src/lib.rs`,
+/// which starts with `FORBID_LINE` and declares one module per form, each in `src/<name>.rs`.
 fn write_crate(dir: &Path, repo: &Path, config: &str, forms: &[Form]) {
     fs::create_dir_all(dir.join("src")).expect("create src/");
     fs::write(
         dir.join("Cargo.toml"),
         "[package]\nname = \"planted\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\
-         publish = false\n\n[lints.clippy]\ndisallowed_methods = \"allow\"\n\
+         publish = false\n\n[features]\nio = []\n\n[lints.clippy]\ndisallowed_methods = \"allow\"\n\
          disallowed_types = \"allow\"\n\n[workspace]\n",
     )
     .expect("write Cargo.toml");

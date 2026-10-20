@@ -93,6 +93,11 @@ pub(super) fn forms() -> Vec<Form> {
             all.push(fail(&name, &clock_source(clock, shape)));
         }
     }
+    // The step turns every feature on, so a call behind one that is off by default is linted.
+    all.push(fail(
+        "behind_a_feature",
+        "#[cfg(feature = \"io\")]\npub fn f() {\n    let _ = std::fs::read(\"x\");\n}\n",
+    ));
     all.extend(cases::failing());
     all.extend(cases::passing());
     all.extend(rules::failing());

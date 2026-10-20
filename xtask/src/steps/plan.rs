@@ -88,10 +88,18 @@ fn fmt_step() -> ToolStep {
     }
 }
 
+/// The flags of the clippy step after its package selectors: every target and every feature, so
+/// that tests, benches, code behind a feature and `required-features` targets are linted too.
+pub(crate) const CLIPPY_FLAGS: [&str; 3] = [
+    "--all-targets",
+    "--all-features",
+    "--message-format=json-diagnostic-short",
+];
+
 fn clippy_step(selectors: &[String], ci: bool) -> ToolStep {
     let mut args = vec!["clippy".to_owned()];
     args.extend(selectors.iter().cloned());
-    args.extend(["--all-targets", "--message-format=json-diagnostic-short"].map(String::from));
+    args.extend(CLIPPY_FLAGS.map(String::from));
     if ci {
         args.extend(["--", "-D", "warnings"].map(String::from));
     }
@@ -281,7 +289,7 @@ mod tests {
             tool_commands(&plan(&Scope::Workspace, false, Some("abc..HEAD"), true)),
             [
                 "cargo fmt --all -- --check",
-                "cargo clippy --workspace --all-targets --message-format=json-diagnostic-short",
+                "cargo clippy --workspace --all-targets --all-features --message-format=json-diagnostic-short",
                 "cargo deny --locked check",
                 "cargo shear --deny-warnings",
                 "typos --format brief",
@@ -299,7 +307,7 @@ mod tests {
         let ci = plan(&Scope::Workspace, true, Some("abc..HEAD"), true);
         assert_eq!(
             tool(&ci, "clippy").cmd.to_string(),
-            "cargo clippy --workspace --all-targets --message-format=json-diagnostic-short -- -D warnings"
+            "cargo clippy --workspace --all-targets --all-features --message-format=json-diagnostic-short -- -D warnings"
         );
         assert_eq!(
             tool(&ci, "nextest").cmd.to_string(),
@@ -364,7 +372,7 @@ mod tests {
             tool(&plan(&scope, false, None, true), "clippy")
                 .cmd
                 .to_string(),
-            "cargo clippy -p a -p b --all-targets --message-format=json-diagnostic-short"
+            "cargo clippy -p a -p b --all-targets --all-features --message-format=json-diagnostic-short"
         );
     }
 
@@ -379,7 +387,7 @@ mod tests {
         assert!(findings[0].is_error);
         assert_eq!(
             findings[0].violation.fix,
-            "`cargo clippy -p xtask --all-targets -- -D warnings` shows the full diagnostic and clippy's suggested change"
+            "`cargo clippy -p xtask --all-targets --all-features -- -D warnings` shows the full diagnostic and clippy's suggested change"
         );
     }
 
@@ -399,7 +407,7 @@ mod tests {
         assert!(!findings[0].is_error);
         assert_eq!(
             findings[0].violation.fix,
-            "`cargo clippy -p a --all-targets` shows the full diagnostic and clippy's suggested change"
+            "`cargo clippy -p a --all-targets --all-features` shows the full diagnostic and clippy's suggested change"
         );
     }
 
@@ -417,7 +425,7 @@ mod tests {
         assert_eq!(findings.len(), 1);
         assert_eq!(
             findings[0].violation.fix,
-            "`cargo clippy -p a -p b --all-targets` shows the full diagnostic and clippy's suggested change"
+            "`cargo clippy -p a -p b --all-targets --all-features` shows the full diagnostic and clippy's suggested change"
         );
     }
 

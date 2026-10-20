@@ -2,7 +2,7 @@
 //! it. Adding an external step is one `ToolStep` in `plan.rs`, or in `policy.rs` for a repo-policy
 //! tool, or in `ui.rs` for a frontend tool.
 
-mod plan;
+pub(crate) mod plan;
 mod policy;
 mod run;
 mod ui;
