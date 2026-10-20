@@ -185,6 +185,34 @@ fn the_name_tt_fails_everywhere() {
     }
 }
 
+/// A shebang first line is left empty, and an inner attribute on the first line is kept.
+#[test]
+fn a_shebang_first_line_is_left_out() {
+    let cases = [
+        ("#!/usr/bin/env rust-script\nfn f() {}", "\nfn f() {}"),
+        ("#!/// Docs.\nfn f() {}", "\nfn f() {}"),
+        ("#!/usr/bin/env \"x\nfn f() {}", "\nfn f() {}"),
+        ("#!", ""),
+        (
+            "#![forbid(clippy::disallowed_methods)]\nfn f() {}",
+            "#![forbid(clippy::disallowed_methods)]\nfn f() {}",
+        ),
+        (
+            "#! /* a */ [allow(dead_code)]",
+            "#! /* a */ [allow(dead_code)]",
+        ),
+        ("#!\n[allow(dead_code)]", "#!\n[allow(dead_code)]"),
+        ("#!\n\"x", "#!\n\"x"),
+        ("fn f() {}", "fn f() {}"),
+    ];
+    for (text, expected) in cases {
+        assert_eq!(without_shebang(text), expected, "{text}");
+    }
+    let stripped = without_shebang("#!/usr/bin/env rust-script\n#[cfg(unix)] fn f() {}");
+    let name = Finding::Predicate("the name `unix`".to_owned());
+    assert_eq!(findings(&stripped), vec![(name, 2)]);
+}
+
 /// A `path` value resolves against its file's folder, one component at a time, and may never
 /// leave the crate's folder on the way.
 #[test]

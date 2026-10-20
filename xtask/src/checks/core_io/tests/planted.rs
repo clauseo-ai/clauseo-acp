@@ -322,6 +322,8 @@ crate::checks::planted::cases! {
     ]), inspects 3 => super::source_not_lexed,
     cfg_rule_passes: Passes, inspects 3 => super::cfg_rule_passes,
     cfg_doc_passes: Passes, inspects 3 => super::cfg_doc_passes,
+    /// rustc ignores a shebang first line, so core-io does too.
+    shebang_line_passes: Passes, inspects 3 => super::shebang_line_passes,
     attribute_split_across_a_macro: FailsWith(&[
         tt_fragment!(2),
         tt_fragment!(2),

@@ -312,6 +312,14 @@ pub(in crate::checks::core_io) fn cfg_doc_passes() -> Inspection {
     )
 }
 
+/// A shebang first line, which rustc ignores, before code that passes.
+pub(in crate::checks::core_io) fn shebang_line_passes() -> Inspection {
+    with_file(
+        "shebang",
+        "#!/usr/bin/env rust-script\n#[cfg(test)]\nmod tests {}\n",
+    )
+}
+
 pub(in crate::checks::core_io) fn source_not_lexed() -> Inspection {
     with_file("not-lexed", "pub fn f() {}\n\npub fn g() {\n")
 }

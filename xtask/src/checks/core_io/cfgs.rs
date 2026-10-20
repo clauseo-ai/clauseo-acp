@@ -7,8 +7,9 @@
 //! of every clippy run.
 //!
 //! The rule lexes with proc-macro2 every `.rs` file in git's list under the crate's folder and
-//! walks every token tree, macro bodies and macro call arguments included. A file that does not
-//! lex fails at the line the lexer names.
+//! walks every token tree, macro bodies and macro call arguments included. A shebang first line
+//! is left out, as rustc leaves it out, and the lines after it keep their numbers. A file that
+//! does not lex fails at the line the lexer names.
 //!
 //! Each `cfg` and `cfg_attr` predicate is built only from `all`, `any`, `not`, `test`, `doc` and
 //! `feature = "<literal>"`, with no `feature` under a `not`. The rule reads the predicate at the
@@ -57,6 +58,7 @@ use crate::workspace::{self, Member};
 use paths::TopLevel;
 use predicate::{metavariable, whole_predicate};
 use proc_macro2::{Delimiter, Group, Punct, TokenStream, TokenTree};
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::str::FromStr;
@@ -150,7 +152,7 @@ pub(super) fn cfg_rule(root: &Path, member: &Member, entries: &[String]) -> Vec<
                 continue;
             }
         };
-        match TokenStream::from_str(&text) {
+        match TokenStream::from_str(&without_shebang(&text)) {
             Ok(tokens) => {
                 let mut hits = Vec::new();
                 let top = TopLevel {
@@ -175,6 +177,35 @@ pub(super) fn cfg_rule(root: &Path, member: &Member, entries: &[String]) -> Vec<
         }
     }
     found
+}
+
+/// `text` with a shebang first line left empty, as rustc ignores it, so the lexer reads the
+/// lines after it at their own numbers. A first line that starts with `#!` is a shebang unless
+/// the first token after the `#!` is a bracket group, which makes it an inner attribute. When
+/// the rest of the file does not lex, the first line alone decides, and a first line with no
+/// token after its `#!` is kept, so the lexer reports what follows.
+fn without_shebang(text: &str) -> Cow<'_, str> {
+    let Some(rest) = text.strip_prefix("#!") else {
+        return text.into();
+    };
+    let first = if let Ok(tokens) = TokenStream::from_str(rest) {
+        tokens.into_iter().next()
+    } else {
+        let line = rest.split('\n').next().unwrap_or_default();
+        match TokenStream::from_str(line).map(|tokens| tokens.into_iter().next()) {
+            Ok(None) => return text.into(),
+            Ok(first) => first,
+            Err(_) => None,
+        }
+    };
+    match first {
+        Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => text.into(),
+        _ => text
+            .find('\n')
+            .map_or("", |end| &text[end..])
+            .to_owned()
+            .into(),
+    }
 }
 
 /// True when `file` ends in `.rs` in any case, which a case-insensitive file system opens for a
