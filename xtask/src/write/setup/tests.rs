@@ -64,3 +64,69 @@ fn the_run_lock_is_created_when_missing_and_never_truncated() {
         "left by an earlier run"
     );
 }
+
+/// Makes `dir` read-only (true) or writable again (false).
+#[cfg(unix)]
+fn read_only(dir: &Path, on: bool) {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = if on { 0o555 } else { 0o755 };
+    Scratch::set_permissions(dir, fs::Permissions::from_mode(mode)).expect("chmod the folder");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_staging_dir_that_cannot_be_cleared_fails_fresh_with_the_os_error() {
+    let dir = Scratch::new("write-setup-stuck-fresh");
+    let bin = dir.join("bin");
+    let staging = Staging::fresh(&bin, "stuck").expect("a fresh staging dir");
+    Scratch::write(staging.dir().join("left"), "an earlier download").expect("a leftover");
+    read_only(&bin, true);
+    let refused = Staging::fresh(&bin, "stuck");
+    read_only(&bin, false);
+    let error = refused.expect_err("bin will not let the old staging dir go");
+    assert_eq!(
+        error.kind(),
+        io::ErrorKind::PermissionDenied,
+        "the OS error is returned, not a later create's"
+    );
+    assert!(
+        staging.dir().exists(),
+        "the dir it could not clear is still there"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_staging_dir_that_cannot_be_removed_fails_remove_with_the_os_error() {
+    let dir = Scratch::new("write-setup-stuck-remove");
+    let bin = dir.join("bin");
+    let staging = Staging::fresh(&bin, "stuck").expect("a fresh staging dir");
+    read_only(&bin, true);
+    let removed = staging.remove();
+    read_only(&bin, false);
+    let error = removed.expect_err("bin will not let the staging dir go");
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert!(staging.dir().exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_run_lock_that_cannot_be_read_is_refused_and_never_truncated() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = Scratch::new("write-setup-unreadable-lock");
+    let bin = dir.join("bin");
+    Scratch::create_dir_all(&bin).expect("bin");
+    Scratch::write(bin.join(RUN_LOCK), "kept").expect("the lock file");
+    // Write-only: the open for reading fails, the open for writing would succeed.
+    Scratch::set_permissions(bin.join(RUN_LOCK), fs::Permissions::from_mode(0o200))
+        .expect("chmod the lock file");
+    let refused = open_run_lock(&bin);
+    Scratch::set_permissions(bin.join(RUN_LOCK), fs::Permissions::from_mode(0o644))
+        .expect("chmod the lock file back");
+    let error = refused.expect_err("a lock file that cannot be read is no lock");
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(
+        fs::read_to_string(bin.join(RUN_LOCK)).expect("read it"),
+        "kept"
+    );
+}

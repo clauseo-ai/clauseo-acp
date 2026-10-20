@@ -72,7 +72,9 @@ impl Guard {
         let backup = base.join(rel);
         let copy = backups.copy_name(rel);
         let tmp = format!("{}/{}", backups.dir, tmp_rel(rel, backups.tool));
-        match write_new_copy(&backup, backups.tool, text) {
+        match write_new_copy(&backup, backups.tool, text, |from, to| {
+            fs::hard_link(from, to)
+        }) {
             Ok(()) => Ok(Guard {
                 backups,
                 path: root.join(rel),
@@ -232,9 +234,15 @@ enum Save {
 
 /// Writes `text` to `backup` without ever replacing a file there. The bytes go to the temporary
 /// file `tmp_of(backup, tool)`, created only when it is missing, which is then hard-linked to
-/// `backup`: a link fails when `backup` exists, so the check and the create are one step. The copy
-/// is synced before it is linked, and the temporary file is deleted again.
-fn write_new_copy(backup: &Path, tool: &str, text: &str) -> Result<(), Save> {
+/// `backup` by `link` (`fs::hard_link` in `save`): a link fails when `backup` exists, so the check
+/// and the create are one step. The copy is synced before it is linked, and the temporary file is
+/// deleted again. `link` is a parameter so a test can make it fail the way the OS can.
+fn write_new_copy(
+    backup: &Path,
+    tool: &str,
+    text: &str,
+    link: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> Result<(), Save> {
     let failed = |error| Save::Failed {
         error,
         tmp_left: false,
@@ -251,7 +259,7 @@ fn write_new_copy(backup: &Path, tool: &str, text: &str) -> Result<(), Save> {
     let linked = file
         .write_all(text.as_bytes())
         .and_then(|()| file.sync_all())
-        .and_then(|()| fs::hard_link(&tmp, backup));
+        .and_then(|()| link(&tmp, backup));
     drop(file);
     let tmp_left = fs::remove_file(&tmp).is_err();
     match linked {
