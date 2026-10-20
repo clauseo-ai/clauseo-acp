@@ -25,6 +25,7 @@ pub(crate) mod exceptions;
 mod file_size;
 pub(crate) mod graph;
 mod json_text;
+mod pins;
 pub(crate) mod planted;
 mod plugins;
 mod tauri_config;
@@ -236,6 +237,7 @@ pub(crate) const ALL: &[StaticCheck] = &[
     core_io::CHECK,
     docs::CHECK,
     file_size::CHECK,
+    pins::CHECK,
 ];
 
 /// The package name of the desktop crate. The checks find its directory through `Context::members`,
