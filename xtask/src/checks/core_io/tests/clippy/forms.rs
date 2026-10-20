@@ -3,8 +3,11 @@
 //! a must-pass form gets none. To add one, push it in `forms()` (or `review::forms()`): a name
 //! that is a valid module name, whether it must fail or pass, the targets it builds on, and its
 //! source. A form that turns a ban off goes in `forbid::forms()`, which `forbidden()` returns.
+//! A form for an entry of the root `clippy.toml` goes in `doors.rs`, which `root()` returns and
+//! whose failing forms `forms()` holds too.
 
 mod cases;
+mod doors;
 mod forbid;
 mod reads;
 mod review;
@@ -47,6 +50,10 @@ pub(super) struct Form {
     pub source: String,
     /// The item a hit in the form's file must name, when the form is there for one entry.
     pub item: Option<String>,
+    /// The line of the form's file that hit must be on, when the form plants one call.
+    pub line: Option<u64>,
+    /// Text that hit's reason or replacement must hold, when the form checks the entry's words.
+    pub note: Option<String>,
 }
 
 /// A form that must fail on every target.
@@ -66,6 +73,8 @@ pub(super) fn form(name: &str, must: Must, only: Only, source: &str) -> Form {
         only,
         source: source.to_owned(),
         item: None,
+        line: None,
+        note: None,
     }
 }
 
@@ -73,6 +82,18 @@ impl Form {
     /// The form, whose hits must name `item`: deleting `item` from the list fails it.
     pub(super) fn naming(mut self, item: &str) -> Form {
         self.item = Some(item.to_owned());
+        self
+    }
+
+    /// The form, whose hit naming its item must be on `line` of its file.
+    pub(super) fn at(mut self, line: u64) -> Form {
+        self.line = Some(line);
+        self
+    }
+
+    /// The form, whose hit naming its item must carry `note` in its reason or replacement.
+    pub(super) fn noting(mut self, note: &str) -> Form {
+        self.note = Some(note.to_owned());
         self
     }
 }
@@ -104,6 +125,21 @@ pub(super) fn forms() -> Vec<Form> {
     all.extend(rules::passing());
     all.extend(reads::forms());
     all.extend(review::forms());
+    // The doors' calls fail in a held crate too, through the root entries its file starts with.
+    // A path in both files takes the reason of the later entry, the list's, so no note is checked.
+    all.extend(
+        doors::failing()
+            .into_iter()
+            .map(|form| Form { note: None, ..form }),
+    );
+    all
+}
+
+/// The forms of the root `clippy.toml` alone, which get a crate of their own: the doors every
+/// crate has, and the reads they leave allowed, which a held crate's file bans.
+pub(super) fn root() -> Vec<Form> {
+    let mut all = doors::failing();
+    all.extend(doors::passing());
     all
 }
 
