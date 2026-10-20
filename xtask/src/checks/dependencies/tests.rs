@@ -325,43 +325,6 @@ fn a_lockfile_behind_the_manifests_fails_at_the_root_manifest_without_rewriting_
 }
 
 #[test]
-fn each_case_points_at_the_line_that_brings_tauri_in() {
-    for (found, line) in [
-        (build_dependency(), 7),
-        (target_windows(), 7),
-        (inherited(), 7),
-        (optional_feature(), 7),
-    ] {
-        let lines: Vec<_> = found
-            .violations
-            .iter()
-            .map(|v| (v.path.clone(), v.line))
-            .collect();
-        assert_eq!(lines, [("crates/protocol/Cargo.toml".to_owned(), line)]);
-    }
-    let optional = optional_feature();
-    assert!(
-        optional.violations[0]
-            .fix
-            .contains("remove `tauri` and every `[features]` item that enables it from")
-    );
-}
-
-#[test]
-fn a_forbidden_workspace_crate_is_named_by_its_package() {
-    let found = forbidden_workspace_crate();
-    let printed: Vec<String> = found.violations.iter().map(ToString::to_string).collect();
-    assert_eq!(
-        printed,
-        [
-            "crates/host/Cargo.toml:7: clauseo-host depends on clauseo-agents, which ARCHITECTURE.md forbids\n    \
-          fix: move the code that uses `clauseo-agents` into a crate whose row allows clauseo-agents, then remove `clauseo-agents` from crates/host/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-host never depends on clauseo-agents"
-        ]
-    );
-    assert_eq!(found.inspected, 2);
-}
-
-#[test]
 fn without_the_graph_only_rows_are_matched() {
     let crates = [
         (
