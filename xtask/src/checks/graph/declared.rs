@@ -188,29 +188,38 @@ impl Blamed {
                 format!("{head}, and each declaration brings {package} in")
             }
             [only] if only.known => {
-                format!("{head}. Cargo builds these declarations as one package, and {one_or_more}")
+                format!(
+                    "{head}. Cargo builds these declarations as one package, and \
+                     {one_or_more}"
+                )
             }
             [_] => format!(
-                "{head}. {not_told} for each of these declarations, so each of them may bring {package} in"
+                "{head}. {not_told} for each of these declarations, so each of them may bring \
+                 {package} in"
             ),
             _ => {
                 let sentences: Vec<String> = groups
-                .iter()
-                .map(|group| match (group.known, group.lines.as_slice()) {
-                    (true, [line]) => format!("The declaration at line {line} brings {package} in"),
-                    (true, lines) => format!(
-                        "Cargo builds the declarations at lines {} as one package, and {one_or_more}",
-                        lines_text(lines)
-                    ),
-                    (false, [line]) => format!(
-                        "{not_told} for the declaration at line {line}, so it may bring {package} in"
-                    ),
-                    (false, lines) => format!(
-                        "{not_told} for the declarations at lines {}, so each of them may bring {package} in",
-                        lines_text(lines)
-                    ),
-                })
-                .collect();
+                    .iter()
+                    .map(|group| match (group.known, group.lines.as_slice()) {
+                        (true, [line]) => {
+                            format!("The declaration at line {line} brings {package} in")
+                        }
+                        (true, lines) => format!(
+                            "Cargo builds the declarations at lines {} as one package, and \
+                             {one_or_more}",
+                            lines_text(lines)
+                        ),
+                        (false, [line]) => format!(
+                            "{not_told} for the declaration at line {line}, so it may bring \
+                             {package} in"
+                        ),
+                        (false, lines) => format!(
+                            "{not_told} for the declarations at lines {}, so each of them may \
+                             bring {package} in",
+                            lines_text(lines)
+                        ),
+                    })
+                    .collect();
                 format!("{head}. {}", sentences.join(". "))
             }
         }
