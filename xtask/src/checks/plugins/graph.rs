@@ -9,7 +9,7 @@
 
 use super::FIXED_PLUGINS;
 use crate::checks::and_list;
-use crate::checks::graph::{Section, Tree};
+use crate::checks::graph::{self, Section, Tree};
 use crate::checks::toml_lines::Manifest;
 use crate::checks::violation;
 use crate::violation::Violation;
@@ -56,7 +56,8 @@ pub(super) fn violations(tree: &Tree, desktop: &Desktop<'_>) -> Vec<Violation> {
 
 /// The violation for `target`, a plugin reached through `dependent`. It points at the desktop
 /// manifest line that declares the direct dependency responsible; when that dependency is
-/// declared on several lines, it names them all, since removing one would leave the plugin in.
+/// declared on several lines, it names them all, since removing only some of them may leave the
+/// plugin in.
 fn violation_for(tree: &Tree, target: usize, dependent: usize, desktop: &Desktop<'_>) -> Violation {
     let name = tree.name(target);
     let message = format!(
@@ -64,7 +65,10 @@ fn violation_for(tree: &Tree, target: usize, dependent: usize, desktop: &Desktop
         tree.version(target),
         tree.name(dependent)
     );
-    let (culprit, lines) = responsible(tree, target, desktop);
+    let (culprit, nodes) = responsible(tree, target, desktop);
+    let mut lines: Vec<u32> = nodes.iter().flatten().copied().collect();
+    lines.sort_unstable();
+    lines.dedup();
     match lines.as_slice() {
         [_, _, ..] => {
             let at: Vec<String> = lines.iter().map(u32::to_string).collect();
@@ -73,8 +77,13 @@ fn violation_for(tree: &Tree, target: usize, dependent: usize, desktop: &Desktop
                 desktop.path,
                 lines[0],
                 format!(
-                    "{message}: `{culprit}` is declared at lines {at} of {}, and each declaration brings `{name}` in",
-                    desktop.path
+                    "{message}. {}",
+                    graph::declared(
+                        &format!("`{culprit}`"),
+                        desktop.path,
+                        &format!("`{name}`"),
+                        &nodes
+                    )
                 ),
                 format!(
                     "remove `{culprit}` from lines {at} of {}: {TREE_FIX}",
@@ -91,14 +100,15 @@ fn violation_for(tree: &Tree, target: usize, dependent: usize, desktop: &Desktop
     }
 }
 
-/// The direct dependency responsible for `target`, its name, and the desktop manifest lines that
-/// declare it in the sections its node came under, in order. `target` itself when the desktop
-/// crate depends on it directly, else the one direct dependency name that reaches it. No lines
-/// when no single name can be told apart, or when no declaration is found.
-fn responsible(tree: &Tree, target: usize, desktop: &Desktop<'_>) -> (String, Vec<u32>) {
+/// The direct dependency responsible for `target`, its name, and for each of its nodes that
+/// reaches `target`, the desktop manifest lines that declare it in the sections that node came
+/// under, in order. `target` itself when the desktop crate depends on it directly, else the one
+/// direct dependency name that reaches it. No lines when no single name can be told apart, or
+/// when no declaration is found.
+fn responsible(tree: &Tree, target: usize, desktop: &Desktop<'_>) -> (String, Vec<Vec<u32>>) {
     let direct = tree.deps(Tree::ROOT);
-    let culprit: Option<(&str, Vec<Section>)> = if direct.contains(&target) {
-        Some((tree.name(target), tree.sections(target).to_vec()))
+    let culprit: Option<(&str, Vec<Vec<Section>>)> = if direct.contains(&target) {
+        Some((tree.name(target), vec![tree.sections(target).to_vec()]))
     } else {
         let reaching: Vec<usize> = direct
             .iter()
@@ -111,30 +121,37 @@ fn responsible(tree: &Tree, target: usize, desktop: &Desktop<'_>) -> (String, Ve
                     .iter()
                     .all(|&dep| tree.name(dep) == tree.name(*first)) =>
             {
-                let sections: BTreeSet<Section> = reaching
+                let nodes: BTreeSet<Vec<Section>> = reaching
                     .iter()
-                    .flat_map(|&dep| tree.sections(dep).iter().copied())
+                    .map(|&dep| tree.sections(dep).to_vec())
                     .collect();
-                Some((tree.name(*first), sections.into_iter().collect()))
+                Some((tree.name(*first), nodes.into_iter().collect()))
             }
             _ => None,
         }
     };
-    let Some((name, sections)) = culprit else {
+    let Some((name, nodes)) = culprit else {
         return (String::new(), Vec::new());
     };
     let manifest = Manifest::parse(desktop.text);
-    let mut lines: Vec<u32> = desktop
-        .deps
-        .dependencies
+    let lines = nodes
         .iter()
-        .filter(|dep| dep.name == name)
-        .filter_map(|dep| Some((dep, Section::of_kind(dep.kind.as_deref())?)))
-        .filter(|(_, section)| sections.contains(section))
-        .flat_map(|(dep, section)| manifest.declarations(dep.key(), section.tables()))
+        .map(|sections| {
+            let mut lines: Vec<u32> = desktop
+                .deps
+                .dependencies
+                .iter()
+                .filter(|dep| dep.name == name)
+                .filter_map(|dep| Some((dep, Section::of_kind(dep.kind.as_deref())?)))
+                .filter(|(_, section)| sections.contains(section))
+                .flat_map(|(dep, section)| manifest.declarations(dep.key(), section.tables()))
+                .collect();
+            lines.sort_unstable();
+            lines.dedup();
+            lines
+        })
+        .filter(|lines| !lines.is_empty())
         .collect();
-    lines.sort_unstable();
-    lines.dedup();
     (name.to_owned(), lines)
 }
 

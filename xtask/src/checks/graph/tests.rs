@@ -245,3 +245,23 @@ fn a_line_of_another_shape_or_out_of_order_is_an_error() {
         Err("it printed no line for `clauseo-protocol`".to_owned())
     );
 }
+
+#[test]
+fn declared_says_each_line_brings_the_package_in_only_when_each_node_has_one_line() {
+    let say = |nodes: &[Vec<u32>]| declared("`s`", "Cargo.toml", "b", nodes);
+    assert_eq!(
+        say(&[vec![7], vec![10]]),
+        "`s` is declared at lines 7 and 10 of Cargo.toml, and each declaration brings b in"
+    );
+    assert_eq!(
+        say(&[vec![7, 10]]),
+        "`s` is declared at lines 7 and 10 of Cargo.toml. Cargo builds these declarations as one \
+         package, and one or more of them brings b in"
+    );
+    assert_eq!(
+        say(&[vec![7, 10], vec![13]]),
+        "`s` is declared at lines 7, 10 and 13 of Cargo.toml. Cargo builds the declarations at \
+         lines 7 and 10 as one package, and one or more of them brings b in. The declaration at \
+         line 13 brings b in"
+    );
+}

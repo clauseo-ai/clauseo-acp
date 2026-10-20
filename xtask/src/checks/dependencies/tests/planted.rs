@@ -169,9 +169,16 @@ crate::checks::planted::cases! {
     /// `s` declared twice, where both declarations bring b in, names both lines in the message
     /// and the fix, since removing one would leave b in.
     declared_twice_names_both_lines: FailsWith(&[
-        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids: `s` is declared at lines 7 and 10 of crates/protocol/Cargo.toml, and each declaration brings b in\n    \
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s` is declared at lines 7 and 10 of crates/protocol/Cargo.toml, and each declaration brings b in\n    \
          fix: move the code that uses `s` into a crate whose row allows b, then remove `s` from lines 7 and 10 of crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
     ]), inspects 1 => super::tree::declared_twice_names_both_lines,
+    /// `s` declared in `[dependencies]` with `f1` and in a `[target.'cfg(windows)'.dependencies]`
+    /// table with `f3`, where only `f3` brings b in. Cargo builds both lines as one package, so
+    /// the violation says one or more of them brings b in and names both lines in the fix.
+    declared_twice_in_one_section: FailsWith(&[
+        "crates/protocol/Cargo.toml:7: clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s` is declared at lines 7 and 10 of crates/protocol/Cargo.toml. Cargo builds these declarations as one package, and one or more of them brings b in\n    \
+         fix: move the code that uses `s` into a crate whose row allows b, then remove `s` from lines 7 and 10 of crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
+    ]), inspects 1 => super::tree::declared_twice_in_one_section,
     crates_io_marker_passes: Passes, inspects 1 => super::names::crates_io_marker_passes,
     crates_io_marker_bans_the_package: FailsWith(&[
         "crates/host/Cargo.toml:7: clauseo-host depends on rmcp, which ARCHITECTURE.md forbids\n    \

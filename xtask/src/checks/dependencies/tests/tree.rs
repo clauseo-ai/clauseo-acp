@@ -27,13 +27,19 @@ pub(in crate::checks::dependencies) fn two_paths_each_fail() -> Inspection {
 /// `f2`, where `s`'s feature `f1` (or `f2`) brings `b` in: cargo builds `s` once per feature set,
 /// so each declaration has its own node.
 fn declared_twice(name: &str, s_features: &str) -> Inspection {
+    declared_twice_under("[build-dependencies]", "f2", name, s_features)
+}
+
+/// `s` declared in protocol's `[dependencies]` with `f1` and again under the table `header`
+/// with `feature`, with the features `s_features` of `s` deciding what brings `b` in.
+fn declared_twice_under(header: &str, feature: &str, name: &str, s_features: &str) -> Inspection {
+    let deps = format!(
+        "[dependencies]\ns = {{ path = \"../../vendor/s\", features = [\"f1\"] }}\n\n{header}\ns = {{ path = \"../../vendor/s\", features = [\"{feature}\"] }}\n"
+    );
     let crates = [
         (
             "crates/protocol".to_owned(),
-            manifest(
-                "clauseo-protocol",
-                "[dependencies]\ns = { path = \"../../vendor/s\", features = [\"f1\"] }\n\n[build-dependencies]\ns = { path = \"../../vendor/s\", features = [\"f2\"] }\n",
-            ),
+            manifest("clauseo-protocol", &deps),
         ),
         vendor(
             "s",
@@ -56,6 +62,17 @@ pub(in crate::checks::dependencies) fn declared_twice_blames_the_building_line()
 /// Both declarations' `s` bring `b` in, so the violation names both lines.
 pub(in crate::checks::dependencies) fn declared_twice_names_both_lines() -> Inspection {
     declared_twice("declared-twice-both", "f1 = [\"dep:b\"]\nf2 = [\"dep:b\"]")
+}
+
+/// Only the Windows declaration's `f3` brings `b` in, but both lines are normal dependencies, so
+/// `cargo tree --target all` builds them as one node with `f1` and `f3`.
+pub(in crate::checks::dependencies) fn declared_twice_in_one_section() -> Inspection {
+    declared_twice_under(
+        "[target.'cfg(windows)'.dependencies]",
+        "f3",
+        "declared-twice-one-section",
+        "f1 = []\nf3 = [\"dep:b\"]",
+    )
 }
 
 /// `x` and the build dependency `y` both use `foo`, and only `y` turns on its feature `f`, which

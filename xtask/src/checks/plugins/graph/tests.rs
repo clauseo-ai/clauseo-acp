@@ -151,7 +151,31 @@ fn a_plugin_behind_both_declarations_names_both_lines() {
         vec![violation(
             DESKTOP_PATH,
             line_of(&desktop, "features = [\"f1\"]"),
-            "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `s`, which is not a fixed plugin: `s` is declared at lines 7 and 10 of crates/desktop/Cargo.toml, and each declaration brings `tauri-plugin-zz` in",
+            "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `s`, which is not a fixed plugin. `s` is declared at lines 7 and 10 of crates/desktop/Cargo.toml, and each declaration brings `tauri-plugin-zz` in",
+            "remove `s` from lines 7 and 10 of crates/desktop/Cargo.toml: only the fixed plugins and what they pull in may be in the desktop crate's tree",
+        )]
+    );
+}
+
+/// `s` in `[dependencies]` with `f1` and in a `cfg(windows)` table with `f3`, where only `f3`
+/// brings the plugin in. Both are normal lines, so cargo builds them as one package.
+#[test]
+fn a_plugin_behind_one_of_two_normal_declarations_says_one_or_more_bring_it_in() {
+    let desktop = desktop(
+        "[dependencies]\ns = { path = \"../../vendor/s\", features = [\"f1\"] }\n\n[target.'cfg(windows)'.dependencies]\ns = { path = \"../../vendor/s\", features = [\"f3\"] }\n",
+    );
+    let s = "[dependencies]\ntauri-plugin-zz = { path = \"../tauri-plugin-zz\", optional = true }\n\n[features]\nf1 = []\nf3 = [\"dep:tauri-plugin-zz\"]\n";
+    let ws = workspace(
+        "declared-twice-one-section",
+        &desktop,
+        &[("s", s), ("tauri-plugin-zz", "")],
+    );
+    assert_eq!(
+        violations_in(&ws, &desktop),
+        vec![violation(
+            DESKTOP_PATH,
+            line_of(&desktop, "features = [\"f1\"]"),
+            "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `s`, which is not a fixed plugin. `s` is declared at lines 7 and 10 of crates/desktop/Cargo.toml. Cargo builds these declarations as one package, and one or more of them brings `tauri-plugin-zz` in",
             "remove `s` from lines 7 and 10 of crates/desktop/Cargo.toml: only the fixed plugins and what they pull in may be in the desktop crate's tree",
         )]
     );

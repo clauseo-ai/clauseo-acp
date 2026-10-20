@@ -142,6 +142,42 @@ impl Section {
     }
 }
 
+/// What is known about the manifest lines that declare one direct dependency, `quoted`, which
+/// brings `package` in. `nodes` holds the lines of each graph node of that dependency that
+/// reaches `package`. Cargo builds the lines of one node as one package, so a node of several
+/// lines says only that one or more of them brings `package` in. With every node on one line,
+/// each line brings it in.
+pub(crate) fn declared(quoted: &str, manifest: &str, package: &str, nodes: &[Vec<u32>]) -> String {
+    let mut all: Vec<u32> = nodes.iter().flatten().copied().collect();
+    all.sort_unstable();
+    all.dedup();
+    let at = |lines: &[u32]| {
+        let lines: Vec<String> = lines.iter().map(u32::to_string).collect();
+        crate::checks::and_list(&lines)
+    };
+    let head = format!("{quoted} is declared at lines {} of {manifest}", at(&all));
+    let one_or_more = format!("one or more of them brings {package} in");
+    match nodes {
+        _ if nodes.iter().all(|lines| lines.len() == 1) => {
+            format!("{head}, and each declaration brings {package} in")
+        }
+        [_] => format!("{head}. Cargo builds these declarations as one package, and {one_or_more}"),
+        _ => {
+            let sentences: Vec<String> = nodes
+                .iter()
+                .map(|lines| match lines.as_slice() {
+                    [line] => format!("The declaration at line {line} brings {package} in"),
+                    _ => format!(
+                        "Cargo builds the declarations at lines {} as one package, and {one_or_more}",
+                        at(lines)
+                    ),
+                })
+                .collect();
+            format!("{head}. {}", sentences.join(". "))
+        }
+    }
+}
+
 /// One node of a graph: a package with one set of features, and the nodes it depends on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Package {
