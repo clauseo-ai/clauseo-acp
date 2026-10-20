@@ -457,7 +457,6 @@ fn node_line(text: &str, depth: usize) -> Option<Line<'_>> {
 }
 
 mod declared;
-mod version;
 
 pub(crate) use declared::blame;
 

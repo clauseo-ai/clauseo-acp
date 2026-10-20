@@ -6,11 +6,12 @@
 //! lines came under its section (`Tree::sections`). A path declaration matches the candidate
 //! whose folder is its path, which cargo has already resolved against the manifest's folder.
 //! Any other declaration matches the candidates that are not path packages and whose version
-//! satisfies its requirement (`version::satisfies`). With one candidate, that one is the node.
+//! satisfies its requirement, read with the `semver` crate, as
+//! cargo reads it. With one candidate, that one is the node.
 //! A declaration that matches no candidate or several could have produced any of them, so the
 //! text says it may bring the package in.
 
-use super::{Section, Tree, version};
+use super::{Section, Tree};
 use crate::checks::and_list;
 use crate::checks::toml_lines::Manifest;
 use crate::workspace::{CargoDependency, PackageDependencies};
@@ -133,7 +134,7 @@ fn produced(tree: &Tree, dep: &CargoDependency, section: Section) -> (Vec<usize>
             .iter()
             .copied()
             .filter(|&node| tree.source_path(node).is_none())
-            .map(|node| version::satisfies(&dep.req, tree.version(node)).map(|ok| (node, ok)))
+            .map(|node| satisfies(&dep.req, tree.version(node)).map(|ok| (node, ok)))
             .collect::<Option<Vec<(usize, bool)>>>()
             .map(|all| {
                 all.into_iter()
@@ -146,6 +147,14 @@ fn produced(tree: &Tree, dep: &CargoDependency, section: Section) -> (Vec<usize>
         Some(one) if one.len() == 1 => (one, true),
         _ => (candidates, false),
     }
+}
+
+/// `Some(true)` when `version` satisfies the requirement `req`, `Some(false)` when it does not,
+/// and `None` when the `semver` crate cannot read either.
+fn satisfies(req: &str, version: &str) -> Option<bool> {
+    let req = semver::VersionReq::parse(req).ok()?;
+    let version = semver::Version::parse(version).ok()?;
+    Some(req.matches(&version))
 }
 
 /// What is known about the manifest lines that declare the direct dependency keys `keys`, which

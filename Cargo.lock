@@ -5653,6 +5653,7 @@ dependencies = [
  "clap",
  "proc-macro2",
  "pulldown-cmark",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

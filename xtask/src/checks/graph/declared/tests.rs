@@ -1,7 +1,7 @@
 //! Tests of the text that says what is known about the blamed lines. The matching of each
 //! declaration to its node runs in the tests of `dependencies` and `plugins`.
 
-use super::{Group, declared};
+use super::{Group, declared, satisfies};
 
 /// A group of `lines` that is `known` or not.
 fn group(lines: &[u32], known: bool) -> Group {
@@ -47,4 +47,12 @@ fn declared_says_lines_not_matched_to_one_node_may_bring_the_package_in() {
          brings b in. xtask could not tell which package cargo builds for the declaration at line \
          10, so it may bring b in"
     );
+}
+
+#[test]
+fn a_requirement_picks_the_version_cargo_would() {
+    assert_eq!(satisfies("^1", "1.4.0"), Some(true));
+    assert_eq!(satisfies("^1", "2.0.0"), Some(false));
+    assert_eq!(satisfies(">=1, <2", "2.0.0"), Some(false));
+    assert_eq!(satisfies("^2", "not a version"), None);
 }
