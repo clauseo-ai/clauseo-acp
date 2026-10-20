@@ -43,6 +43,9 @@ fn a_continued_line_is_joined_with_the_lines_after_it_in_its_block() {
         ("sh", "cargo xtask check ^\n--quick", "1: cargo xtask check ^\n2: --quick", &[1]),
         ("console", "cargo xtask check \\\n--quick", "", &[]),
         ("text", "cargo xtask check \\\n--quick", "", &[]),
+        ("sh", "cargo xtask check \\\\\n--quick", "1: cargo xtask check \\\\\n2: --quick", &[1]),
+        ("powershell", "cargo xtask check ``\n--quick", "1: cargo xtask check ``\n2: --quick", &[]),
+        ("cmd", "cargo xtask check ^^\n--quick", "1: cargo xtask check ^^\n2: --quick", &[1]),
     ];
     for (info, text, read, reported) in rows {
         let scan = Scan {
