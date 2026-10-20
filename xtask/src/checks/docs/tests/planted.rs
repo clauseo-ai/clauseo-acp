@@ -357,9 +357,15 @@ crate::checks::planted::cases! {
     background_command_passes: Passes, inspects 4 => super::cases::background_command_passes,
     /// A `text` or `text,ignore` block holds output, so a failing command shown in it is not read.
     text_block_output_passes: Passes, inspects 4 => super::cases::text_block_output_passes,
-    /// A line that `shlex` cannot split is not read, so an apostrophe in prose passes.
-    apostrophe_in_plain_block_passes: Passes,
-        inspects 4 => super::cases::apostrophe_in_plain_block_passes,
+    /// A line that `shlex` cannot split is split on whitespace, so an apostrophe in prose does not
+    /// hide the command: `Don't run cargo xtask frobnicate` fails at its line.
+    apostrophe_in_plain_block_fails: FailsWith(&[
+        bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]), inspects 4 => super::cases::apostrophe_in_plain_block_fails,
+    /// An odd quote after a pipe does not hide the command before it, which fails.
+    unclosed_quote_after_a_pipe_fails: FailsWith(&[
+        bad_command!(2, "cargo xtask frobnicate", "error: unrecognized subcommand 'frobnicate'"),
+    ]), inspects 4 => super::cases::unclosed_quote_after_a_pipe_fails,
     /// In a block with no info string, `cd x && cargo xtask frobnicate`,
     /// `RUST_LOG=1 cargo xtask frobnicate` and `sudo cargo xtask frobnicate` each fail at its line.
     plain_block_wrapped_commands_fail: FailsWith(&[

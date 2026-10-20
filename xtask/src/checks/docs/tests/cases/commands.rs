@@ -241,12 +241,22 @@ pub(crate) fn text_block_output_passes() -> Inspection {
     )
 }
 
-pub(crate) fn apostrophe_in_plain_block_passes() -> Inspection {
+pub(crate) fn apostrophe_in_plain_block_fails() -> Inspection {
     docs(
         "apostrophe-in-plain-block",
         vec![(
             "GUIDE.md",
-            "```\nDon't run cargo xtask frobnicate.\n```\n".to_owned(),
+            "```\nDon't run cargo xtask frobnicate\n```\n".to_owned(),
+        )],
+    )
+}
+
+pub(crate) fn unclosed_quote_after_a_pipe_fails() -> Inspection {
+    docs(
+        "unclosed-quote-after-a-pipe",
+        vec![(
+            "GUIDE.md",
+            "```sh\ncargo xtask frobnicate | grep \"it's\n```\n".to_owned(),
         )],
     )
 }

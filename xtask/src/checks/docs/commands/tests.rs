@@ -311,14 +311,18 @@ fn cargo_flags_and_a_toolchain_before_xtask_are_skipped() {
 }
 
 #[test]
-fn a_line_shlex_cannot_split_is_not_read() {
+fn a_line_shlex_cannot_split_is_split_on_whitespace() {
     assert_eq!(
-        commands_of("cargo xtask check --name \"open"),
-        Vec::<String>::new()
+        commands_of("Don't run cargo xtask frobnicate"),
+        ["cargo xtask frobnicate"]
     );
     assert_eq!(
-        commands_of("Don't run cargo xtask check"),
-        Vec::<String>::new()
+        commands_of("cargo xtask frobnicate | grep \"it's"),
+        ["cargo xtask frobnicate"]
+    );
+    assert_eq!(
+        commands_of("cargo xtask check --quick \"open"),
+        ["cargo xtask check --quick \"open"]
     );
 }
 

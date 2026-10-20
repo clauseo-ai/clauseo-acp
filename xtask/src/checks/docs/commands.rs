@@ -2,9 +2,10 @@
 //! line by line when its info word is in `SHELLS`, when it has no info string, or when it is
 //! indented. A session block is read only on its lines that start with a prompt from `PROMPTS`,
 //! and only from after that prompt. Other code blocks are not read. Each read line is split into
-//! words with `shlex`, once, and a line that `shlex` cannot split is not read. Every `cargo` in the
-//! words, with its flags and `+toolchain` skipped, followed by `xtask`, starts a command. The words
-//! after `xtask` stop at shell syntax and parse against the clap tree in `main.rs`.
+//! words with `shlex`, once, after a trailing `\` is dropped, and on whitespace when `shlex`
+//! cannot split it. Every `cargo` in the words, with its flags and `+toolchain` skipped, followed
+//! by `xtask`, starts a command. The words after `xtask` stop at shell syntax and parse against
+//! the clap tree in `main.rs`.
 
 use super::markdown::Scan;
 use crate::Cli;
@@ -119,13 +120,13 @@ fn after_prompt(text: &str) -> Option<&str> {
 }
 
 /// The xtask commands in `line`, split into words as a shell splits them. A trailing `\` is
-/// dropped first, as a line continuation. A line `shlex` cannot split has none.
+/// dropped first, as a line continuation. A line `shlex` cannot split is split on whitespace
+/// instead, so an odd quote does not hide the commands on it.
 fn commands_in(line: &str) -> Vec<Command> {
     let line = line.trim_end();
     let line = line.strip_suffix('\\').unwrap_or(line);
-    let Some(words) = shlex::split(line) else {
-        return Vec::new();
-    };
+    let words =
+        shlex::split(line).unwrap_or_else(|| line.split_whitespace().map(str::to_owned).collect());
     (0..words.len())
         .filter_map(|at| command_at(&words, at))
         .collect()
