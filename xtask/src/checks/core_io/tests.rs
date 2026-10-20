@@ -7,6 +7,8 @@
 mod cases;
 mod cfgs;
 mod clippy;
+#[macro_use]
+mod expected;
 pub(super) mod planted;
 mod roots;
 
