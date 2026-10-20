@@ -1,9 +1,9 @@
 //! The process door when xtask itself dies. Each test starts `xtask process-test` (hidden from
 //! `--help`), which runs a wrapper through the door; the wrapper starts a grandchild, prints its
-//! own pid (its group's id) and waits. Then the test kills xtask: with SIGKILL, which no handler sees, or with SIGINT to
-//! xtask's process group, as a terminal sends Ctrl-C to its foreground job. Since the door starts
-//! every command in a group of its own, only xtask gets the SIGINT; it dies of it, and the leader
-//! must then stop the wrapper's group.
+//! own pid (its group's id) and waits. Then the test kills xtask: with SIGKILL, which no handler
+//! sees, or with SIGINT to xtask's process group, as a terminal sends Ctrl-C to its foreground job.
+//! Since the door starts every command in a group of its own, only xtask gets the SIGINT; it dies
+//! of it, and the leader must then stop the wrapper's group.
 //!
 //! The grandchild holds a pipe the test reads: `sh` makes fd 3 a copy of it without close-on-exec,
 //! so xtask, the wrapper and the grandchild inherit it (and the leader, which exits once the groups

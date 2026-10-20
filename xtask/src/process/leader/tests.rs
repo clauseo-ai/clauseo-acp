@@ -1,6 +1,7 @@
 //! Tests of what the leader reads, how it stops groups, its hidden subcommand, its replacement
-//! when it dies, the groups xtask keeps for it, and the error when xtask cannot find itself. `xtask/tests/process.rs` tests that it stops a command's
-//! tree when xtask dies, a replaced leader included.
+//! when it dies, the groups xtask keeps for it, and the error when xtask cannot find itself.
+//! `xtask/tests/process.rs` tests that it stops a command's tree when xtask dies, a replaced
+//! leader included.
 
 use super::*;
 use crate::clock::timed;
