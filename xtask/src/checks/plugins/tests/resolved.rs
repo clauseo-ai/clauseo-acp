@@ -1,8 +1,9 @@
 //! Planted cases for the graph rule of the `plugins` check, with the graph on (`Repo::resolved`).
 //! Every registry dependency is patched (`[patch.crates-io]`) to a path crate under `vendor/`, so
 //! `cargo generate-lockfile --offline` and the check's `cargo tree --locked --offline` resolve the
-//! desktop crate's graph without the network, while `cargo metadata --no-deps` still sees registry dependencies,
-//! not path ones (a path dependency outside the workspace fails another rule of the check).
+//! desktop crate's graph without the network, while `cargo metadata --no-deps` still sees
+//! registry dependencies, not path ones (a path dependency outside the workspace fails another
+//! rule of the check).
 
 use super::{FIXED_PLUGINS, write_file};
 use crate::checks::planted::Repo;
