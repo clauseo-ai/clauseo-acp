@@ -117,7 +117,7 @@ enum Event {
 /// Where a run is between its start and its end.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
-    /// Before its limit.
+    /// Before its limit, while the command runs: its exit moves the run to `Draining`.
     Running,
     /// Exited before its limit, and what was left of its tree was killed; the pipes have the
     /// drain to close.
@@ -134,7 +134,6 @@ pub(super) struct Running {
     /// The command as people see it, for the errors.
     shown: String,
     events: Receiver<Event>,
-    exited: bool,
     status: Option<ExitStatus>,
     limits: Limits,
     phase: Phase,
@@ -209,7 +208,6 @@ impl Running {
             tree,
             shown: shown.to_owned(),
             events,
-            exited: false,
             status: None,
             limits,
             phase: Phase::Running,
@@ -273,7 +271,6 @@ impl Running {
                 Ok(Event::Data(stream, chunk)) => on_output(stream, &chunk),
                 Ok(Event::ReadFailed(error)) => self.keep(error),
                 Ok(Event::Exited(status)) => {
-                    self.exited = true;
                     match status {
                         Ok(status) => self.status = Some(status),
                         Err(error) => self.keep(error),
@@ -341,7 +338,8 @@ impl Drop for Running {
     /// timeout does, then waits as `finish` would.
     fn drop(&mut self) {
         if !self.ended {
-            if !self.exited && self.phase == Phase::Running {
+            // `Running` until the exit or the limit, so only a command still running is stopped.
+            if self.phase == Phase::Running {
                 self.terminate();
             }
             self.wait(&mut |_, _| {});
