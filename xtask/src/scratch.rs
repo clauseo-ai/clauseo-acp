@@ -104,21 +104,42 @@ impl Scratch {
 }
 
 /// `path`, once it is checked to lie in a scratch directory: under the temp dir, in a folder
-/// whose name starts with `xtask-`. Panics otherwise, so a test never changes a file outside one.
+/// whose name starts with `xtask-`. The check follows symlinks: `path` itself must not be one,
+/// and `path`, or its deepest folder that exists, resolved with `dunce::canonicalize`, must lie
+/// in a scratch dir, so no link made in a scratch dir leads a write out of it. Panics
+/// otherwise, so a test never changes a file outside one.
 fn inside(path: &Path) -> &Path {
-    let first = path
-        .strip_prefix(std::env::temp_dir())
-        .ok()
+    let outside = || {
+        format!(
+            "{} is not inside a scratch directory; make one with Scratch::new",
+            path.display()
+        )
+    };
+    assert!(
+        path.is_absolute() && !path.components().any(|part| part == Component::ParentDir),
+        "{}",
+        outside()
+    );
+    assert!(
+        !path.is_symlink(),
+        "{} is a symlink; Scratch never writes through one",
+        path.display()
+    );
+    let mut folder = Some(path);
+    while let Some(dir) = folder.filter(|dir| !dir.exists()) {
+        folder = dir.parent();
+    }
+    let resolved = folder.and_then(|dir| dunce::canonicalize(dir).ok());
+    let temp = dunce::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
+    let first = resolved
+        .as_deref()
+        .and_then(|dir| dir.strip_prefix(&temp).ok())
         .and_then(|rest| rest.components().next());
     let in_scratch = matches!(
         first,
         Some(Component::Normal(name)) if name.to_string_lossy().starts_with(PREFIX)
     );
-    assert!(
-        in_scratch && !path.components().any(|part| part == Component::ParentDir),
-        "{} is not inside a scratch directory; make one with Scratch::new",
-        path.display()
-    );
+    assert!(in_scratch, "{}", outside());
     path
 }
 
@@ -174,6 +195,46 @@ mod tests {
                 "{} is not inside a scratch directory; make one with Scratch::new",
                 escaping.display()
             )
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_in_a_scratch_dir_leads_no_write_out_of_it() {
+        let dir = Scratch::new("scratch-symlink");
+        let elsewhere = Scratch::new("scratch-symlink-target");
+        // A folder link pointing out of every scratch dir, and a file link to one in another.
+        Scratch::symlink_dir(std::env::temp_dir(), dir.join("out")).expect("a folder link");
+        Scratch::write(elsewhere.join("f.txt"), "kept").expect("a file elsewhere");
+        Scratch::symlink(elsewhere.join("f.txt"), dir.join("f.txt")).expect("a file link");
+
+        let through = dir.join("out/escaped.txt");
+        assert_eq!(
+            refusal(&through),
+            format!(
+                "{} is not inside a scratch directory; make one with Scratch::new",
+                through.display()
+            )
+        );
+        let nested = dir.join("out/new/deeper.txt");
+        assert_eq!(
+            refusal(&nested),
+            format!(
+                "{} is not inside a scratch directory; make one with Scratch::new",
+                nested.display()
+            )
+        );
+        assert_eq!(
+            refusal(&dir.join("f.txt")),
+            format!(
+                "{} is a symlink; Scratch never writes through one",
+                dir.join("f.txt").display()
+            )
+        );
+        assert!(!std::env::temp_dir().join("escaped.txt").exists());
+        assert_eq!(
+            fs::read_to_string(elsewhere.join("f.txt")).expect("read it"),
+            "kept"
         );
     }
 }
