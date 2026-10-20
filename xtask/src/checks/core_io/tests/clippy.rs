@@ -1,11 +1,17 @@
-//! `clippy_bans_every_planted_call`: builds one scratch crate whose `clippy.toml` is the file
+//! `clippy_bans_every_planted_call`: builds two scratch crates whose `clippy.toml` is the file
 //! core-io asks each core crate to have (the repo's root `clippy.toml` plus
-//! `xtask/core-io-bans.toml`) with every `allow-invalid` taken out, with one module per form in
-//! `forms.rs`, runs the pinned clippy on it offline, and asserts that each must-fail module gets
-//! a `disallowed_methods` or `disallowed_types` hit inside its own file (naming the form's item,
-//! when it has one) and each must-pass module gets none.
+//! `xtask/core-io-bans.toml`) with every `allow-invalid` taken out, and whose root carries the
+//! forbid line core-io asks every target root of a held crate to carry. The first holds one module
+//! per form in `forms.rs`, the second one per form of `forms::forbidden()`. It runs the pinned
+//! clippy on each offline and asserts that each must-fail module gets a `disallowed_methods` or
+//! `disallowed_types` hit, or error E0453, inside its own file (naming the form's item, when it
+//! has one) and each must-pass module gets none.
 //!
-//! It also fails on a compile error in a form, and on a warning about the `clippy.toml` itself
+//! Both crates' manifests set the two lints to `allow` in `[lints.clippy]`, and both runs pass
+//! `-A` of the two lints after `--`, which cargo hands to clippy-driver in `CLIPPY_ARGS`. The
+//! first run's must-fail forms still fail, so neither undoes the forbid line.
+//!
+//! It also fails on any other compile error, and on a warning about the `clippy.toml` itself
 //! other than "does not refer to a reachable" for exactly the entries of the other OS family
 //! (`std::os::windows::` on unix, `std::os::unix::` on Windows). So a misspelled entry fails
 //! here: a `std::os::unix` one when the test runs on unix, a `std::os::windows` one when it runs
@@ -27,24 +33,76 @@ use toml::{Table, Value as Toml};
 /// The lints whose hits count.
 const LINTS: [&str; 2] = ["clippy::disallowed_methods", "clippy::disallowed_types"];
 
+/// The error an `allow` or `expect` of a forbidden lint gets, which counts as a hit too.
+const FORBID_ERROR: &str = "E0453";
+
+/// The line every scratch crate's root starts with, as core-io asks of a held crate.
+const FORBID_LINE: &str = "#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]";
+
+/// What one clippy run reported.
+struct Run {
+    /// The text of each hit, by the file it is in.
+    hits: BTreeMap<String, Vec<String>>,
+    /// The paths of the config entries clippy could not find.
+    unreachable: BTreeSet<String>,
+    /// Every other error, and every other warning about the `clippy.toml`, as rendered.
+    problems: Vec<String>,
+    stderr: String,
+}
+
 #[test]
 fn clippy_bans_every_planted_call() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let expected = clippy_toml::load(&repo).expect("the repo's clippy.toml and list load");
-    let forms: Vec<Form> = forms::forms()
-        .into_iter()
-        .filter(|form| form.only.here())
-        .collect();
+    let here = |forms: Vec<Form>| -> Vec<Form> {
+        forms.into_iter().filter(|form| form.only.here()).collect()
+    };
+    let forms = here(forms::forms());
+    let forbidden = here(forms::forbidden());
     let dir = Scratch::new("core-io-clippy");
     let config = clippy_toml::render(&without_allow_invalid(&expected.table));
-    write_crate(&dir, &repo, &config, &forms);
+    let target = dir.join("target");
+    let bans = dir.join("bans");
+    write_crate(&bans, &repo, &config, &forms);
+    let run = clippy(&bans, &target, forms.len());
+    let forbid = dir.join("forbid");
+    write_crate(&forbid, &repo, &config, &forbidden);
+    let forbid_run = clippy(&forbid, &target, forbidden.len());
 
+    for run in [&run, &forbid_run] {
+        assert!(
+            run.problems.is_empty(),
+            "cargo clippy failed or warned about the config:\n{}\n{}",
+            run.problems.join("\n"),
+            run.stderr
+        );
+    }
+    assert_eq!(
+        run.unreachable,
+        other_family_entries(&expected.table),
+        "clippy must find every list entry but those of the other OS family"
+    );
+    let wrong: Vec<String> = wrong_forms(&forms, &run)
+        .into_iter()
+        .chain(wrong_forms(&forbidden, &forbid_run))
+        .collect();
+    assert!(
+        wrong.is_empty(),
+        "clippy got these forms wrong:\n{}\n{}\n{}",
+        wrong.join("\n"),
+        run.stderr,
+        forbid_run.stderr
+    );
+}
+
+/// Runs the pinned clippy offline on the scratch crate in `dir`, which holds `count` forms, with
+/// `-A` of the two lints after `--`, and reads what it reported.
+fn clippy(dir: &Path, target: &Path, count: usize) -> Run {
     #[expect(
         clippy::disallowed_methods,
         reason = "the test reports how long clippy took"
     )]
     let started = Instant::now();
-    let target = dir.join("target");
     let cmd = Cmd::new(
         Program::Cargo,
         [
@@ -54,19 +112,25 @@ fn clippy_bans_every_planted_call() {
             "--message-format=json",
             "--target-dir",
             &target.to_string_lossy(),
+            "--",
+            "-A",
+            LINTS[0],
+            "-A",
+            LINTS[1],
         ],
     );
-    let ran = process::run_quiet(&cmd, &dir).expect("cargo clippy starts");
+    let ran = process::run_quiet(&cmd, dir).expect("cargo clippy starts");
     eprintln!(
-        "clippy_bans_every_planted_call: {} forms, cargo clippy took {:.1?}",
-        forms.len(),
+        "clippy_bans_every_planted_call: {count} forms in {}, cargo clippy took {:.1?}",
+        dir.display(),
         started.elapsed()
     );
-
-    // The text of each hit, by the file it is in.
-    let mut hits: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut unreachable = BTreeSet::new();
-    let mut problems = Vec::new();
+    let mut run = Run {
+        hits: BTreeMap::new(),
+        unreachable: BTreeSet::new(),
+        problems: Vec::new(),
+        stderr: ran.stderr,
+    };
     for message in ran.stdout.lines().filter_map(compiler_message) {
         let code = message
             .pointer("/code/code")
@@ -76,36 +140,32 @@ fn clippy_bans_every_planted_call() {
         let text = message["message"].as_str().unwrap_or_default();
         let rendered = message["rendered"].as_str().unwrap_or_default();
         let files = primary_files(&message);
-        if LINTS.contains(&code) {
+        if LINTS.contains(&code) || code == FORBID_ERROR {
             for file in files {
-                hits.entry(file).or_default().push(text.to_owned());
+                run.hits.entry(file).or_default().push(text.to_owned());
             }
         } else if files.iter().any(|file| file.ends_with("clippy.toml")) {
             match unreachable_path(text) {
                 Some(path) => {
-                    unreachable.insert(path);
+                    run.unreachable.insert(path);
                 }
-                None => problems.push(rendered.to_owned()),
+                None => run.problems.push(rendered.to_owned()),
             }
         } else if level == "error" {
-            problems.push(rendered.to_owned());
+            run.problems.push(rendered.to_owned());
         }
     }
-    assert!(
-        problems.is_empty() && ran.success,
-        "cargo clippy failed or warned about the config:\n{}\n{}",
-        problems.join("\n"),
-        ran.stderr
-    );
-    assert_eq!(
-        unreachable,
-        other_family_entries(&expected.table),
-        "clippy must find every list entry but those of the other OS family"
-    );
-    let wrong: Vec<String> = forms
+    run
+}
+
+/// What `run` got wrong about `forms`: a must-fail form without a hit in its file, or without
+/// one naming its item, and a must-pass form with one.
+fn wrong_forms(forms: &[Form], run: &Run) -> Vec<String> {
+    forms
         .iter()
         .filter_map(|form| {
-            let found = hits
+            let found = run
+                .hits
                 .get(&format!("src/{}.rs", form.name))
                 .map_or(&[][..], Vec::as_slice);
             let names_item = |item: &str| {
@@ -130,22 +190,20 @@ fn clippy_bans_every_planted_call() {
                 _ => None,
             }
         })
-        .collect();
-    assert!(
-        wrong.is_empty(),
-        "clippy got these forms wrong:\n{}",
-        wrong.join("\n")
-    );
+        .collect()
 }
 
-/// Writes the scratch crate into `dir`: a manifest with no dependency and its own workspace,
-/// `clippy.toml` holding `config`, the repo's `rust-toolchain.toml` (so the pinned clippy
-/// runs), and `src/lib.rs` declaring one module per form, each in `src/<name>.rs`.
+/// Writes a scratch crate into `dir`: a manifest with no dependency, its own workspace and the
+/// two lints set to `allow`, `clippy.toml` holding `config`, the repo's `rust-toolchain.toml`
+/// (so the pinned clippy runs), and `src/lib.rs`, which starts with `FORBID_LINE` and declares
+/// one module per form, each in `src/<name>.rs`.
 fn write_crate(dir: &Path, repo: &Path, config: &str, forms: &[Form]) {
+    fs::create_dir_all(dir.join("src")).expect("create src/");
     fs::write(
         dir.join("Cargo.toml"),
         "[package]\nname = \"planted\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\
-         publish = false\n\n[workspace]\n",
+         publish = false\n\n[lints.clippy]\ndisallowed_methods = \"allow\"\n\
+         disallowed_types = \"allow\"\n\n[workspace]\n",
     )
     .expect("write Cargo.toml");
     fs::write(dir.join("clippy.toml"), config).expect("write clippy.toml");
@@ -154,8 +212,7 @@ fn write_crate(dir: &Path, repo: &Path, config: &str, forms: &[Form]) {
         dir.join("rust-toolchain.toml"),
     )
     .expect("copy rust-toolchain.toml");
-    fs::create_dir_all(dir.join("src")).expect("create src/");
-    let mut lib = vec!["#![allow(unused)]".to_owned()];
+    let mut lib = vec![FORBID_LINE.to_owned(), "#![allow(unused)]".to_owned()];
     for form in forms {
         lib.push(format!("pub mod {};", form.name));
         fs::write(

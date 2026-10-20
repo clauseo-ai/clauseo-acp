@@ -1,19 +1,4 @@
-//! Where lint configuration may live, so nothing turns the list's bans off: the root
-//! `clippy.toml` and the held crates' own files (checked in `core_io.rs`), and the root
-//! `[workspace.lints]`, and nowhere else. So:
-//! - every member's `Cargo.toml` says `[lints] workspace = true` (beside which cargo takes no
-//!   other lint key);
-//! - `[workspace.lints.clippy]` sets `all`, `style`, `disallowed_methods` and
-//!   `disallowed_types` only to a level that reports, at any priority;
-//! - there is no legacy `.cargo/config`, which cargo reads instead of `.cargo/config.toml`;
-//! - `.cargo/config.toml` has no `rustflags` key at any depth (where `-A` or `--cap-lints`
-//!   would silence the bans) and no `[env]` entry starting with `CLIPPY_` (cargo sets those on
-//!   every clippy-driver it starts, `CLIPPY_CONF_DIR` among them);
-//! - `.cargo/config.toml` has no `[alias]` key named after a cargo subcommand xtask runs, which
-//!   cargo would run instead of the command, only warning about it.
-//!
-//! `#![allow(..)]` in the code is denied by the workspace lint `allow_attributes`;
-//! `#[expect(..)]` is the exception route.
+//! The core-io rules on member manifests and the cargo config. `core_io.rs` states the rules.
 
 use super::report;
 use crate::checks;
@@ -23,21 +8,12 @@ use std::path::Path;
 use toml::Spanned;
 use toml::de::{DeString, DeTable, DeValue};
 
-/// The lints the list feeds and the groups that hold them, as cargo writes them with `_`.
-const LINTS: [&str; 4] = ["all", "style", "disallowed_methods", "disallowed_types"];
-
-/// The levels at which those lints report a call.
-const REPORTING: [&str; 3] = ["warn", "deny", "forbid"];
-
 /// The cargo subcommands xtask runs, which an `[alias]` of the cargo config may not shadow: those
 /// of `checks/graph.rs`, `checks/dependencies.rs`, `steps/plan.rs`, `steps/policy.rs`,
 /// `buildtime.rs` (the probes), `setup.rs` and `workspace.rs`.
 const XTASK_SUBCOMMANDS: [&str; 10] = [
     "build", "check", "clippy", "deny", "fmt", "install", "metadata", "nextest", "shear", "tree",
 ];
-
-/// The repo's root manifest.
-pub(super) const ROOT_MANIFEST: &str = "Cargo.toml";
 
 /// The repo's cargo config.
 pub(super) const CARGO_CONFIG: &str = ".cargo/config.toml";
@@ -74,43 +50,6 @@ pub(super) fn crate_manifest(root: &Path, member: &Member) -> Vec<Violation> {
         let line = line_of(&text, key.span().start);
         vec![report::lints_not_inherited(&path, line, &member.name, true)]
     }
-}
-
-/// The violations for a `[workspace.lints.clippy]` entry of the root manifest that sets one of
-/// `LINTS` to a level that does not report, whatever its priority.
-pub(super) fn workspace_lints(root: &Path) -> Vec<Violation> {
-    let text = match checks::read_repo_file(root, ROOT_MANIFEST) {
-        Ok(Some(text)) => text,
-        Ok(None) => return Vec::new(),
-        Err(unreadable) => return vec![unreadable],
-    };
-    let doc = match DeTable::parse(&text) {
-        Ok(doc) => doc,
-        Err(error) => return vec![not_toml(ROOT_MANIFEST, &text, &error)],
-    };
-    let clippy = table_at(doc.get_ref(), "workspace")
-        .and_then(|workspace| table_at(workspace, "lints"))
-        .and_then(|lints| table_at(lints, "clippy"));
-    let mut found: Vec<Violation> = clippy
-        .into_iter()
-        .flat_map(|table| table.iter())
-        .filter(|(name, _)| LINTS.contains(&lint_name(name.get_ref()).as_str()))
-        .filter_map(|(name, value)| {
-            let level = match value.get_ref() {
-                DeValue::Table(table) => entry(table, "level")
-                    .and_then(|(_, level)| level.get_ref().as_str())
-                    .unwrap_or_default(),
-                other => other.as_str().unwrap_or_default(),
-            };
-            (!REPORTING.contains(&level)).then(|| {
-                let line = line_of(&text, name.span().start);
-                report::workspace_lint_level(ROOT_MANIFEST, line, name.get_ref(), level)
-            })
-        })
-        .collect();
-    // The table iterates in key order; report in line order.
-    found.sort_by_key(|violation| violation.line);
-    found
 }
 
 /// The violations for the cargo config: a legacy `.cargo/config`, and in `.cargo/config.toml`
@@ -198,11 +137,6 @@ fn rustflags_keys(table: &DeTable<'_>, prefix: &str, found: &mut Vec<(String, us
 fn is_clippy_env(name: &str) -> bool {
     name.get(.."CLIPPY_".len())
         .is_some_and(|head| head.eq_ignore_ascii_case("CLIPPY_"))
-}
-
-/// `name` with each `-` read as `_`, as rustc reads a lint name.
-fn lint_name(name: &str) -> String {
-    name.replace('-', "_")
 }
 
 /// The violation for the TOML file `rel`, which does not parse.

@@ -115,45 +115,6 @@ pub(in crate::checks::core_io) fn crate_without_a_row_lints_not_inherited() -> I
     )
 }
 
-pub(in crate::checks::core_io) fn workspace_lint_allowed() -> Inspection {
-    good_crate_and(
-        "workspace-lint-allowed",
-        &[(
-            "Cargo.toml",
-            "[workspace]\nmembers = [\"crates/*\"]\n\n[workspace.lints.clippy]\n\
-             pedantic = { level = \"warn\", priority = -1 }\n\
-             disallowed_types = { level = \"allow\", priority = 1 }\n\
-             disallowed-methods = \"expect\"\n",
-        )],
-    )
-}
-
-/// The review's case: `style` turned off above `disallowed_methods = "deny"`, and `all`.
-pub(in crate::checks::core_io) fn workspace_lint_group_allowed() -> Inspection {
-    good_crate_and(
-        "workspace-lint-group",
-        &[(
-            "Cargo.toml",
-            "[workspace]\nmembers = [\"crates/*\"]\n\n[workspace.lints.clippy]\n\
-             style = { level = \"allow\", priority = 1 }\nall = \"allow\"\n\
-             disallowed_methods = \"deny\"\n",
-        )],
-    )
-}
-
-/// Each level that reports, in each spelling cargo takes; another group may be off.
-pub(in crate::checks::core_io) fn workspace_lints_that_report() -> Inspection {
-    good_crate_and(
-        "workspace-lints-report",
-        &[(
-            "Cargo.toml",
-            "[workspace]\nmembers = [\"crates/*\"]\n\n[workspace.lints.clippy]\n\
-             pedantic = \"allow\"\nstyle = { level = \"warn\", priority = -1 }\n\
-             disallowed-methods = \"warn\"\ndisallowed_types = { level = \"forbid\" }\n",
-        )],
-    )
-}
-
 /// The review's case: a legacy `.cargo/config` that silences a ban beside a clean
 /// `.cargo/config.toml`.
 pub(in crate::checks::core_io) fn legacy_cargo_config() -> Inspection {

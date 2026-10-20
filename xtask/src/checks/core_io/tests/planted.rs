@@ -58,22 +58,18 @@ macro_rules! stray {
     };
 }
 
-/// The violation for the root manifest's `$name` at `$line`, set to `$level`.
+/// The violation for the target root `$path` of `clauseo-protocol`, a `$kind` target, without
+/// the forbid line.
 #[cfg(test)]
-macro_rules! lint_level {
-    ($line:literal, $name:literal, $level:literal) => {
+macro_rules! no_forbid {
+    ($path:literal, $kind:literal) => {
         concat!(
-            "Cargo.toml:",
-            $line,
-            ": `[workspace.lints.clippy]` sets `",
-            $name,
-            "` to `",
-            $level,
-            "`, which can stop clippy reporting the calls clippy.toml and xtask/core-io-bans.toml \
-             ban\n    fix: set `",
-            $name,
-            "` to \"warn\" or \"deny\", or remove it; to let one call \
-             through, put `#[expect(clippy::disallowed_methods, reason = \"..\")]` on it"
+            $path, ":1: `", $path, "`, the root of clauseo-protocol's ", $kind, " target, does \
+             not carry `#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]` outside \
+             any `cfg_attr`, so an `allow` or `expect` in the target can turn off the bans of \
+             clippy.toml and xtask/core-io-bans.toml\n    fix: add this line to the inner \
+             attributes at the top of `", $path, "`, not under `cfg_attr`\n\
+             #![forbid(clippy::disallowed_methods, clippy::disallowed_types)]"
         )
     };
 }
@@ -134,8 +130,7 @@ macro_rules! own_lints {
              `[lints] workspace = true`; lint levels live only in the root [workspace.lints], so \
              that no crate can turn off the bans of the root clippy.toml or \
              xtask/core-io-bans.toml\n    fix: replace the table with `[lints]` and \
-             `workspace = true` (cargo takes no other lint key beside it); to let one call \
-             through, put `#[expect(clippy::disallowed_methods, reason = \"..\")]` on it"
+             `workspace = true`; cargo takes no other lint key beside it"
         )
     };
 }
@@ -215,6 +210,36 @@ crate::checks::planted::cases! {
          fix: write `disallowed-types` as an array of `{ path, reason }` tables",
         stopped!(),
     ]), inspects 0 => super::root_array_is_a_string,
+    /// Every target root of a held crate carries the forbid line, outside `cfg_attr`, and the
+    /// crate has no build script.
+    forbid_missing_in_the_lib: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::forbid_missing_in_the_lib,
+    forbid_under_cfg_attr: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::forbid_under_cfg_attr,
+    forbid_in_another_order: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::forbid_in_another_order,
+    forbid_missing_in_a_bin: FailsWith(&[no_forbid!("crates/protocol/src/main.rs", "bin")]), inspects 3 => super::forbid_missing_in_a_bin,
+    forbid_missing_in_a_test: FailsWith(&[no_forbid!("crates/protocol/tests/events.rs", "test")]), inspects 3 => super::forbid_missing_in_a_test,
+    clock_only_crate_without_forbid: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::clock_only_crate_without_forbid,
+    root_not_rust: FailsWith(&[
+        "crates/protocol/src/lib.rs:3: `crates/protocol/src/lib.rs`, a target root of \
+         clauseo-protocol, does not parse as Rust (expected identifier), so core-io cannot find \
+         `#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]` in it\n    \
+         fix: fix the syntax error, and make sure this line is among the inner attributes at the \
+         top of `crates/protocol/src/lib.rs`\n\
+         #![forbid(clippy::disallowed_methods, clippy::disallowed_types)]",
+    ]), inspects 3 => super::root_not_rust,
+    build_rs_present: FailsWith(&[
+        "crates/protocol/build.rs:1: clauseo-protocol's row bans I/O, but it has the build script \
+         `crates/protocol/build.rs`, whose `cargo::rustc-env` lines can set `CLIPPY_` variables \
+         for the clippy that lints it\n    \
+         fix: delete `crates/protocol/build.rs`; a crate whose row bans I/O has no build script",
+    ]), inspects 3 => super::build_rs_present,
+    package_build_set: FailsWith(&[
+        "crates/protocol/Cargo.toml:3: `crates/protocol/Cargo.toml` sets `build` under \
+         [package], but clauseo-protocol's row bans I/O and such a crate has no build script\n    \
+         fix: delete the `build` key, and the script it names if there is one",
+    ]), inspects 3 => super::package_build_set,
+    forbid_in_every_root: Passes, inspects 3 => super::forbid_in_every_root,
+    /// An alias named after a cargo command xtask runs; the repo's `xtask` alias passes.
+    alias_of_a_command_xtask_runs: FailsWith(&[alias!(3, "clippy")]), inspects 3 => super::alias_of_a_command_xtask_runs,
     /// Any other clippy config fails: clippy reads only the nearest one, and `.clippy.toml` first.
     dot_clippy_toml_beside_the_crate_file: FailsWith(&[
         "crates/protocol/.clippy.toml:1: `crates/protocol/.clippy.toml` is a .clippy.toml, which \
@@ -241,17 +266,6 @@ crate::checks::planted::cases! {
     crate_lints_of_its_own: FailsWith(&[own_lints!("crates/protocol/Cargo.toml", 4, "clauseo-protocol")]), inspects 3 => super::crate_lints_of_its_own,
     clock_only_crate_lints_of_its_own: FailsWith(&[own_lints!("crates/protocol/Cargo.toml", 4, "clauseo-protocol")]), inspects 3 => super::clock_only_crate_lints_of_its_own,
     crate_without_a_row_lints_not_inherited: FailsWith(&[no_lints!("crates/extra/Cargo.toml", "clauseo-extra")]), inspects 3 => super::crate_without_a_row_lints_not_inherited,
-    /// `[workspace.lints.clippy]` may not turn off the two lints or the groups that hold them,
-    /// at any priority (review D3).
-    workspace_lint_allowed: FailsWith(&[
-        lint_level!(6, "disallowed_types", "allow"),
-        lint_level!(7, "disallowed-methods", "expect"),
-    ]), inspects 3 => super::workspace_lint_allowed,
-    workspace_lint_group_allowed: FailsWith(&[
-        lint_level!(5, "style", "allow"),
-        lint_level!(6, "all", "allow"),
-    ]), inspects 3 => super::workspace_lint_group_allowed,
-    workspace_lints_that_report: Passes, inspects 3 => super::workspace_lints_that_report,
     /// A legacy `.cargo/config`, which cargo reads instead (review D4).
     legacy_cargo_config: FailsWith(&[
         ".cargo/config:1: `.cargo/config` is the legacy name of `.cargo/config.toml`; cargo \
@@ -270,7 +284,5 @@ crate::checks::planted::cases! {
     ]), inspects 3 => super::clippy_env_in_cargo_config,
     /// Windows reads environment names ignoring case.
     clippy_env_in_another_case: FailsWith(&[clippy_env!(2, "Clippy_Conf_Dir")]), inspects 3 => super::clippy_env_in_another_case,
-    /// An alias named after a cargo command xtask runs; the repo's `xtask` alias passes.
-    alias_of_a_command_xtask_runs: FailsWith(&[alias!(3, "clippy")]), inspects 3 => super::alias_of_a_command_xtask_runs,
     cargo_config_without_lint_settings: Passes, inspects 3 => super::cargo_config_without_lint_settings,
 }

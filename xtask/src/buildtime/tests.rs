@@ -11,6 +11,7 @@ fn member(name: &str, dir: &str) -> Member {
         name: name.into(),
         dir: dir.into(),
         path_deps: Vec::new(),
+        targets: Vec::new(),
     }
 }
 

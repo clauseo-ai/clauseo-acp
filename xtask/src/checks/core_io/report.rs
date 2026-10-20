@@ -178,9 +178,8 @@ pub(super) fn lints_not_inherited(
                  levels live only in the root [workspace.lints], so that no crate can turn off the \
                  bans of the root {ROOT} or {LIST}"
             ),
-            "replace the table with `[lints]` and `workspace = true` (cargo takes no other lint \
-             key beside it); to let one call through, put \
-             `#[expect(clippy::disallowed_methods, reason = \"..\")]` on it",
+            "replace the table with `[lints]` and `workspace = true`; cargo takes no other lint \
+             key beside it",
         )
     } else {
         (
@@ -192,23 +191,6 @@ pub(super) fn lints_not_inherited(
         )
     };
     violation(path, line, message, fix)
-}
-
-/// The violation for the root manifest's `[workspace.lints.clippy]` entry `name` (one of the two
-/// lints or a group that holds them), at `line`, whose level `level` does not report.
-pub(super) fn workspace_lint_level(path: &str, line: u32, name: &str, level: &str) -> Violation {
-    violation(
-        path,
-        line,
-        format!(
-            "`[workspace.lints.clippy]` sets `{name}` to `{level}`, which can stop clippy \
-             reporting the calls {ROOT} and {LIST} ban"
-        ),
-        format!(
-            "set `{name}` to \"warn\" or \"deny\", or remove it; to let one call through, put \
-             `#[expect(clippy::disallowed_methods, reason = \"..\")]` on it"
-        ),
-    )
 }
 
 /// The violation for the `rustflags` key `key` of the cargo config at `path`, at `line`.
@@ -265,5 +247,70 @@ pub(super) fn legacy_cargo_config(legacy: &str, config: &str) -> Violation {
              and core-io checks only `{config}`"
         ),
         format!("move what `{legacy}` holds into `{config}` and delete `{legacy}`"),
+    )
+}
+
+/// The attribute every target root of a held crate carries, as the fix prints it.
+pub(super) const FORBID_LINE: &str =
+    "#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]";
+
+/// The violation for the target root `path` of `package`, a target of kind `kinds`, whose
+/// inner attributes lack `FORBID_LINE`.
+pub(super) fn missing_forbid(path: &str, package: &str, kinds: &str) -> Violation {
+    violation(
+        path,
+        1,
+        format!(
+            "`{path}`, the root of {package}'s {kinds} target, does not carry `{FORBID_LINE}` \
+             outside any `cfg_attr`, so an `allow` or `expect` in the target can turn off the \
+             bans of {ROOT} and {LIST}"
+        ),
+        format!(
+            "add this line to the inner attributes at the top of `{path}`, not under \
+             `cfg_attr`\n{FORBID_LINE}"
+        ),
+    )
+}
+
+/// The violation for the target root `path` of `package`, which syn cannot parse (the error
+/// `error` at `line`).
+pub(super) fn root_not_rust(path: &str, package: &str, line: u32, error: &syn::Error) -> Violation {
+    violation(
+        path,
+        line,
+        format!(
+            "`{path}`, a target root of {package}, does not parse as Rust ({error}), so core-io \
+             cannot find `{FORBID_LINE}` in it"
+        ),
+        format!(
+            "fix the syntax error, and make sure this line is among the inner attributes at the \
+             top of `{path}`\n{FORBID_LINE}"
+        ),
+    )
+}
+
+/// The violation for the build script `path` of `package`, whose row bans I/O.
+pub(super) fn build_script_file(path: &str, package: &str) -> Violation {
+    violation(
+        path,
+        1,
+        format!(
+            "{package}'s row bans I/O, but it has the build script `{path}`, whose \
+             `cargo::rustc-env` lines can set `CLIPPY_` variables for the clippy that lints it"
+        ),
+        format!("delete `{path}`; a crate whose row bans I/O has no build script"),
+    )
+}
+
+/// The violation for the `build` key of `[package]` in `package`'s manifest `path`, at `line`.
+pub(super) fn build_key(path: &str, line: u32, package: &str) -> Violation {
+    violation(
+        path,
+        line,
+        format!(
+            "`{path}` sets `build` under [package], but {package}'s row bans I/O and such a \
+             crate has no build script"
+        ),
+        "delete the `build` key, and the script it names if there is one",
     )
 }

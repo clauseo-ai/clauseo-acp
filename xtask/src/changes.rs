@@ -223,6 +223,7 @@ mod tests {
             name: name.into(),
             dir: dir.into(),
             path_deps: path_deps.iter().map(ToString::to_string).collect(),
+            targets: Vec::new(),
         }
     }
 

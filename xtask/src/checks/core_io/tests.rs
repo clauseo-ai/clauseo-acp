@@ -1,19 +1,23 @@
 //! The planted cases of the core-io check and its other tests. Each case builds a scratch git
 //! repo with an `ARCHITECTURE.md` whose `protocol` row holds core I/O, a small root `clippy.toml`
-//! and list, manifests that inherit the workspace lints, and whatever other files the case needs.
-//! `tests/clippy.rs` runs clippy itself on the forms the bans must catch.
+//! and list, manifests that inherit the workspace lints, a library root with the forbid line, and
+//! whatever other files the case needs. `tests/clippy.rs` runs clippy itself on the forms the
+//! bans must catch.
 
 mod cases;
 mod clippy;
 pub(super) mod planted;
+mod roots;
 
 use std::collections::BTreeMap;
 
 use cases::*;
+use roots::*;
 
 use super::*;
 use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;
+use crate::workspace::Target;
 use std::fs;
 
 /// A Crates table with one held row (`protocol`, line 8), one that is not (`xtask`) and a
@@ -43,6 +47,13 @@ const ROOT_MANIFEST: &str = "[workspace]\nmembers = [\"crates/*\"]\n\n\
 const CRATE_MANIFEST: &str =
     "[package]\nname = \"clauseo-protocol\"\n\n[lints]\nworkspace = true\n";
 
+/// The library root of `clauseo-protocol`, a target of every case.
+const LIB_ROOT: &str = "crates/protocol/src/lib.rs";
+
+/// A target root that starts with the forbid line.
+const FORBIDDING_ROOT: &str = "//! A core crate.\n#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]\n\
+     #![doc(test(attr(deny(warnings))))]\n\npub fn f() {}\n";
+
 /// The inputs of one scratch repo.
 #[derive(Default)]
 struct Repo<'a> {
@@ -56,6 +67,8 @@ struct Repo<'a> {
     root: Input<'a>,
     /// The list, `LIST_TOML` by default.
     list: Input<'a>,
+    /// More targets of `clauseo-protocol` beside its library: (kind, repo-relative root).
+    targets: &'a [(&'a str, &'a str)],
 }
 
 /// One input file of a scratch repo.
@@ -101,8 +114,9 @@ fn scratch(case: &str, repo: &Repo<'_>) -> Scratch {
         fs::write(dir.join("crates/protocol/clippy.toml"), text).expect("write clippy.toml");
     }
     let defaults = [
-        (lints::ROOT_MANIFEST, ROOT_MANIFEST),
+        ("Cargo.toml", ROOT_MANIFEST),
         ("crates/protocol/Cargo.toml", CRATE_MANIFEST),
+        (LIB_ROOT, FORBIDDING_ROOT),
     ];
     for (path, text) in defaults.iter().chain(repo.files) {
         let path = dir.join(path);
@@ -112,15 +126,26 @@ fn scratch(case: &str, repo: &Repo<'_>) -> Scratch {
     dir
 }
 
-/// The workspace members of every case: `clauseo-protocol` at `crates/protocol`, and
-/// `clauseo-extra`, which has no row.
-fn members() -> Vec<Member> {
+/// The workspace members of every case: `clauseo-protocol` at `crates/protocol`, with its library
+/// and `targets`, and `clauseo-extra`, which has no row and no file.
+fn members(targets: &[(&str, &str)]) -> Vec<Member> {
     ["protocol", "extra"]
         .into_iter()
-        .map(|name| Member {
-            name: format!("clauseo-{name}"),
-            dir: format!("crates/{name}"),
-            path_deps: Vec::new(),
+        .map(|name| {
+            let lib = format!("crates/{name}/src/lib.rs");
+            let more = if name == "protocol" { targets } else { &[] };
+            Member {
+                name: format!("clauseo-{name}"),
+                dir: format!("crates/{name}"),
+                path_deps: Vec::new(),
+                targets: std::iter::once(("lib", lib.as_str()))
+                    .chain(more.iter().copied())
+                    .map(|(kind, src_path)| Target {
+                        kinds: vec![kind.to_owned()],
+                        src_path: src_path.to_owned(),
+                    })
+                    .collect(),
+            }
         })
         .collect()
 }
@@ -130,7 +155,7 @@ fn run_repo(case: &str, repo: &Repo<'_>) -> Inspection {
     let dir = scratch(case, repo);
     run(&Context {
         root: dir.to_path_buf(),
-        members: members(),
+        members: members(repo.targets),
         dependencies: BTreeMap::new(),
         load_resolved_graph: false,
     })

@@ -30,6 +30,7 @@ pub(crate) fn desktop_context(root: &Path) -> Context {
             name: DESKTOP_PACKAGE.to_owned(),
             dir: "crates/desktop".to_owned(),
             path_deps: Vec::new(),
+            targets: Vec::new(),
         }],
         dependencies: BTreeMap::new(),
         load_resolved_graph: false,

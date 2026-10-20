@@ -295,6 +295,7 @@ mod tests {
             name: "xtask".into(),
             dir: "xtask".into(),
             path_deps: vec![],
+            targets: vec![],
         }];
         assert_eq!(
             clippy_repro(&cmd, "xtask/src/main.rs", &members).to_string(),
@@ -321,6 +322,7 @@ mod tests {
             name: "xtask".into(),
             dir: "xtask".into(),
             path_deps: vec![],
+            targets: vec![],
         }];
         assert_eq!(
             clippy_repro(&cmd, "xtask/src/main.rs", &members).to_string(),

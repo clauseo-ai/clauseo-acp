@@ -1,9 +1,11 @@
 //! The forms `clippy_bans_every_planted_call` builds, one module each. A must-fail form gets at
-//! least one `disallowed_methods` or `disallowed_types` hit inside its own file; a must-pass form
-//! gets none. To add one, push it in `forms()` (or `review::forms()`): a name that is a valid
-//! module name, whether it must fail or pass, the targets it builds on, and its source.
+//! least one `disallowed_methods` or `disallowed_types` hit, or error E0453, inside its own file;
+//! a must-pass form gets none. To add one, push it in `forms()` (or `review::forms()`): a name
+//! that is a valid module name, whether it must fail or pass, the targets it builds on, and its
+//! source. A form that turns a ban off goes in `forbid::forms()`, which `forbidden()` returns.
 
 mod cases;
+mod forbid;
 mod reads;
 mod review;
 mod rules;
@@ -98,6 +100,11 @@ pub(super) fn forms() -> Vec<Form> {
     all.extend(reads::forms());
     all.extend(review::forms());
     all
+}
+
+/// The forms that turn a ban off, which the forbid line must refuse; they get a crate of their own.
+pub(super) fn forbidden() -> Vec<Form> {
+    forbid::forms()
 }
 
 /// A banned module and its items, for the module shapes.

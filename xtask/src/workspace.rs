@@ -13,6 +13,17 @@ pub(crate) struct Member {
     pub dir: String,
     /// Directories (relative to the workspace root) of this package's path dependencies.
     pub path_deps: Vec<String>,
+    /// The package's targets, as `cargo metadata` lists them.
+    pub targets: Vec<Target>,
+}
+
+/// One target of a member package.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Target {
+    /// The target's kinds: `lib`, `bin`, `test`, `example`, `bench`, `custom-build` and others.
+    pub kinds: Vec<String>,
+    /// The target's root file, relative to the workspace root, `/`-separated.
+    pub src_path: String,
 }
 
 /// The workspace as one `cargo metadata --no-deps` run reports it.
@@ -50,6 +61,14 @@ struct Package {
     name: String,
     manifest_path: PathBuf,
     dependencies: Vec<Dependency>,
+    targets: Vec<PackageTarget>,
+}
+
+/// One entry of a package's `targets` in `cargo metadata`.
+#[derive(Deserialize)]
+struct PackageTarget {
+    kind: Vec<String>,
+    src_path: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -177,10 +196,27 @@ pub(crate) fn parse_metadata(json: &str) -> Result<Vec<Member>, String> {
             .filter_map(|dep| dep.path.as_deref())
             .filter_map(|p| relative(p, base))
             .collect();
+        let targets = package
+            .targets
+            .iter()
+            .map(|target| {
+                let src_path = relative(&target.src_path, base).ok_or_else(|| {
+                    format!(
+                        "a target of package {} is outside the workspace",
+                        package.name
+                    )
+                })?;
+                Ok(Target {
+                    kinds: target.kind.clone(),
+                    src_path,
+                })
+            })
+            .collect::<Result<_, String>>()?;
         members.push(Member {
             name: package.name.clone(),
             dir,
             path_deps,
+            targets,
         });
     }
     members.sort_by(|a, b| a.name.cmp(&b.name));
@@ -222,9 +258,12 @@ mod tests {
         "packages": [
             {"name": "b", "manifest_path": "/ws/crates/b/Cargo.toml",
              "dependencies": [{"name": "serde", "path": null},
-                              {"name": "a", "path": "/ws/crates/a"}]},
+                              {"name": "a", "path": "/ws/crates/a"}],
+             "targets": [{"kind": ["lib"], "src_path": "/ws/crates/b/src/lib.rs"},
+                         {"kind": ["test"], "src_path": "/ws/crates/b/tests/t.rs"}]},
             {"name": "a", "manifest_path": "/ws/crates/a/Cargo.toml",
-             "dependencies": [{"name": "outside", "path": "/elsewhere/x"}]}
+             "dependencies": [{"name": "outside", "path": "/elsewhere/x"}],
+             "targets": []}
         ]
     }"#;
 
@@ -238,6 +277,21 @@ mod tests {
         assert_eq!(members[1].name, "b");
         assert_eq!(members[1].dir, "crates/b");
         assert_eq!(members[1].path_deps, vec!["crates/a".to_owned()]);
+        assert_eq!(
+            members[1].targets,
+            [
+                Target {
+                    kinds: vec!["lib".to_owned()],
+                    src_path: "crates/b/src/lib.rs".to_owned(),
+                },
+                Target {
+                    kinds: vec!["test".to_owned()],
+                    src_path: "crates/b/tests/t.rs".to_owned(),
+                },
+            ]
+        );
+        let outside = SAMPLE.replace("/ws/crates/b/tests/t.rs", "/elsewhere/t.rs");
+        assert!(parse_metadata(&outside).is_err());
     }
 
     #[test]
@@ -278,11 +332,13 @@ mod tests {
                 name: "outer".into(),
                 dir: "crates".into(),
                 path_deps: vec![],
+                targets: vec![],
             },
             Member {
                 name: "inner".into(),
                 dir: "crates/inner".into(),
                 path_deps: vec![],
+                targets: vec![],
             },
         ];
         assert_eq!(

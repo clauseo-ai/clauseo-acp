@@ -161,6 +161,7 @@ mod tests {
             name: name.into(),
             dir: dir.into(),
             path_deps: Vec::new(),
+            targets: Vec::new(),
         }
     }
 

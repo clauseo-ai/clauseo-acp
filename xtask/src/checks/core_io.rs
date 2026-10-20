@@ -1,45 +1,57 @@
 //! The `core-io` check. A crate whose Crates-table row in `ARCHITECTURE.md` lists `fs`,
-//! `process` or `any I/O` under "Never depends on" may not use the standard library's file,
-//! network, process and environment APIs, nor read the disk, the clock or the standard streams
-//! another way. clippy enforces that, after macro expansion and with the compiler's own name
-//! lookup: `xtask/core-io-bans.toml` lists every banned function and type for its
-//! `disallowed-methods` and `disallowed-types` lints, and clippy reads only the nearest
-//! `clippy.toml`, so each such crate has `crates/<name>/clippy.toml`, the root `clippy.toml` with
-//! the list's arrays appended to its own. This check fails when that file is missing or parses
-//! to anything else; its fix prints the file to write. A row that lists only `clock` needs no
-//! file: the root `clippy.toml` bans both clocks' `now` for every crate that reads it.
+//! `process`, `any I/O` or `clock` under "Never depends on" is held. A row with `fs`, `process`
+//! or `any I/O` bans the standard library's file, network, process and environment APIs, and
+//! reading the disk, the clock or the standard streams another way. A row with `clock` alone bans
+//! both clocks' `now`, which the root `clippy.toml` bans for every crate that reads it.
 //!
-//! The boundary is one rule: lint configuration lives only in the root `clippy.toml`, the held
-//! crates' own `clippy.toml`, and the root `[workspace.lints]`, and nowhere else. So the check
-//! fails:
-//! - every other `clippy.toml` and every `.clippy.toml` in git's list of the repo's files
-//!   (tracked, and untracked but not ignored): clippy reads the nearest one walking up from the
-//!   crate, a `.clippy.toml` before a `clippy.toml`;
+//! clippy enforces the bans, after macro expansion and with the compiler's own name lookup.
+//! `xtask/core-io-bans.toml` lists every banned function and type for its `disallowed-methods`
+//! and `disallowed-types` lints. clippy reads only the nearest `clippy.toml`, so a crate whose
+//! row lists `fs`, `process` or `any I/O` has `crates/<name>/clippy.toml`, the root
+//! `clippy.toml` with the list's arrays appended to its own. The check fails when that file is
+//! missing or parses to anything else, and its fix prints the file to write.
+//!
+//! The compiler keeps the bans on in a held crate. Every target root of a held crate that
+//! `cargo metadata` lists, the library, binaries, tests, examples and benches alike, has
+//! `#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]` among its inner
+//! attributes, with that meta in that order and not under `cfg_attr`. A macro can neither add nor
+//! remove a crate-root attribute, and under `forbid` an `allow` or `expect` of either lint
+//! anywhere in the target is error E0453, and a level for either lint in the manifest or in
+//! `CLIPPY_ARGS` does not undo it. So a held crate gets no exception; a test that needs a
+//! fixture reads it with `include_str!`. A root syn cannot parse fails at the syntax error. A
+//! held crate also has no build script, neither a `build.rs` in its folder nor a `build` key
+//! under `[package]`, since a build script's `cargo::rustc-env` lines reach the clippy that lints
+//! the crate (`roots.rs`).
+//!
+//! Lint configuration lives only in the root `clippy.toml`, the own `clippy.toml` of each crate
+//! whose row lists `fs`, `process` or `any I/O`, and the root `[workspace.lints]`. So the check
+//! also fails
+//! - every other `clippy.toml` and every `.clippy.toml` in git's list of the repo's files,
+//!   tracked and untracked but not ignored, since clippy reads the nearest one walking up from
+//!   the crate, a `.clippy.toml` before a `clippy.toml`;
 //! - a member's `Cargo.toml` without `[lints] workspace = true`, any member, held or not;
-//! - `[workspace.lints.clippy]` setting `all`, `style`, `disallowed_methods` or
-//!   `disallowed_types` to a level that does not report, at any priority;
 //! - a legacy `.cargo/config`, which cargo reads instead of `.cargo/config.toml`;
-//! - in `.cargo/config.toml`, a `rustflags` key at any depth, an `[alias]` key named after a
-//!   cargo subcommand xtask runs, which cargo runs instead and only warns about, and an `[env]`
-//!   entry starting with `CLIPPY_` in any case (`lints.rs`).
+//! - in `.cargo/config.toml`, a `rustflags` key at any depth, since `--cap-lints allow` there
+//!   beats `forbid`, an `[alias]` key named after a cargo subcommand xtask runs, since cargo runs
+//!   the alias instead and only warns, and an `[env]` entry starting with `CLIPPY_` in any case
+//!   (`lints.rs`).
 //!
 //! xtask also runs cargo without `CLIPPY_CONF_DIR` in its own environment (`process.rs`).
+//! `tests/clippy.rs` runs clippy with the generated file on scratch crates, one module per form a
+//! ban must catch or must pass, and one per form the forbid line must refuse.
 //!
-//! An exception is `#[expect(clippy::disallowed_methods, reason = "..")]` (or
-//! `disallowed_types`) on the code that needs it. `tests/clippy.rs` runs clippy with the
-//! generated file on one scratch crate, one module per form a ban must catch or must pass.
-//!
-//! The file covers every target of the package clippy lints: `src/`, `build.rs`, `tests/`,
-//! `benches/` and `#[cfg(test)]` code alike. Not covered: code behind another target's `cfg`
-//! (clippy lints it only on that target), code another crate runs for this one (a dependency, a
-//! proc macro), an item a newer toolchain adds that the list does not name, a clippy config git
-//! ignores, cargo config outside the repo (parent folders, `CARGO_HOME`), `RUSTFLAGS` in the
-//! environment, and `CLIPPY_CONF_DIR` when clippy runs without xtask. It counts the Crates-table
-//! rows it classified, held or not.
+//! The file covers every target of the package clippy lints, `#[cfg(test)]` code included. Not
+//! covered: code behind another target's `cfg`, which clippy lints only on that target, code
+//! another crate runs for this one (a dependency, a proc macro), an item a newer toolchain adds
+//! that the list does not name, a clippy config git ignores, cargo config outside the repo
+//! (parent folders, `CARGO_HOME`), `RUSTFLAGS` in the environment, `CLIPPY_CONF_DIR` when
+//! clippy runs without xtask, and a crate that is not a workspace member. It counts the
+//! Crates-table rows it classified, held or not.
 
 mod clippy_toml;
 mod lints;
 mod report;
+mod roots;
 
 use crate::changes;
 use crate::checks::crates_table::{self, CrateRow, IoWord, Never};
@@ -50,7 +62,8 @@ use clippy_toml::Expected;
 use std::collections::BTreeSet;
 use std::path::Path;
 
-/// Fails on every crate that must not do I/O and lacks the `clippy.toml` that bans it.
+/// Fails on every crate that must not do I/O and lacks what makes clippy ban it, and on every
+/// file that could turn the bans off.
 pub(crate) const CHECK: StaticCheck = StaticCheck {
     name: "core-io",
     counts: Noun {
@@ -93,18 +106,23 @@ fn run(ctx: &Context) -> Inspection {
         .iter()
         .filter_map(|member| {
             let row = table.row_for_package(&member.name)?;
-            bans_modules(row).then_some((member, row))
+            row.holds_core_io().then_some((member, row))
         })
         .collect();
     let mut violations = Vec::new();
     for (member, row) in &held {
-        violations.extend(check_crate(&ctx.root, member, row, &expected));
+        if bans_modules(row) {
+            violations.extend(check_crate(&ctx.root, member, row, &expected));
+        }
+        violations.extend(roots::forbid_lines(&ctx.root, member));
+        violations.extend(roots::build_script(&ctx.root, member));
     }
     for member in &ctx.members {
         violations.extend(lints::crate_manifest(&ctx.root, member));
     }
     let allowed: BTreeSet<String> = held
         .iter()
+        .filter(|(_, row)| bans_modules(row))
         .map(|(member, _)| checks::join(&member.dir, CLIPPY_TOML))
         .chain([CLIPPY_TOML.to_owned()])
         .collect();
@@ -114,7 +132,6 @@ fn run(ctx: &Context) -> Inspection {
             .filter(|file| is_clippy_config(file) && !allowed.contains(*file))
             .map(|file| report::stray_config(file)),
     );
-    violations.extend(lints::workspace_lints(&ctx.root));
     violations.extend(lints::cargo_config(&ctx.root));
     Inspection::new(table.rows.len(), violations)
 }
