@@ -57,6 +57,18 @@ fn pinned(fix: &Fix) -> &'static str {
             "remove it and put the setting in tauri.conf.json: Tauri reads or merges a config \
              passed in code past this check"
         }
+        Fix::ContextArguments => {
+            "call `tauri::generate_context!()` with no arguments: it then reads the checked \
+             tauri.conf.json and capabilities folder"
+        }
+        Fix::ContextRenamed => {
+            "import it under its own name and call `generate_context!()`, which this check reads"
+        }
+        Fix::SourceSyntax => "fix the syntax: this check cannot read the file's calls",
+        Fix::ConfigInEnv => {
+            "remove it and put the setting in tauri.conf.json: Tauri merges `TAURI_CONFIG` over \
+             the checked file"
+        }
     }
 }
 
@@ -78,6 +90,10 @@ fn every_fix_prints_its_pinned_text() {
         Fix::AppManifest,
         Fix::BuildRsSyntax,
         Fix::ConfigInCode,
+        Fix::ContextArguments,
+        Fix::ContextRenamed,
+        Fix::SourceSyntax,
+        Fix::ConfigInEnv,
     ];
     let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
     assert_eq!(

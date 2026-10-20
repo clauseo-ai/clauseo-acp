@@ -18,7 +18,7 @@ const XTASK_SUBCOMMANDS: [&str; 5] = ["clippy", "deny", "fmt", "nextest", "shear
 const COMPILER_KEYS: [&str; 3] = ["rustc", "rustc-wrapper", "rustc-workspace-wrapper"];
 
 /// The repo's cargo config.
-pub(super) const CARGO_CONFIG: &str = ".cargo/config.toml";
+pub(super) const CARGO_CONFIG: &str = checks::CARGO_CONFIG;
 
 /// The legacy name of the cargo config, which cargo reads instead of `CARGO_CONFIG`.
 pub(super) const LEGACY_CARGO_CONFIG: &str = ".cargo/config";

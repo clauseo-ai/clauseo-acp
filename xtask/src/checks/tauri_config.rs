@@ -14,13 +14,22 @@
 //! checked file. Platform config names match without regard to case, as a macOS disk does.
 //! Moving the capabilities folder with `capabilities_path_pattern` is banned in clippy.toml's
 //! `disallowed-methods`, not here: clippy resolves the path, so a fn pointer or a macro cannot
-//! hide the call. Each failing setting points
+//! hide the call. In the desktop crate's other Rust files, no `generate_context!` call has
+//! arguments, and `.cargo/config.toml` sets no `TAURI_CONFIG` in `[env]` (`sources.rs`). Each
+//! failing setting points
 //! at its key's line, found under its parent object (`json_text::key_line`), or at line 1.
 //! The pure functions take file contents and paths; `run` reads the files from the repo and counts
-//! the ones it found: `tauri.conf.json`, `build.rs` and each platform config.
+//! the ones it found: `tauri.conf.json`, `build.rs`, each platform config, each other Rust file
+//! of the desktop crate and `.cargo/config.toml`.
+//!
+//! Left open: a manifest written only in a `build.rs` function that is never called passes the
+//! `AppManifest` rule (it would need reachability), and a name built by `concat!("TAURI_",
+//! "CONFIG")` passes the `TAURI_CONFIG` rule.
 
 mod fix;
 pub(crate) use fix::Fix;
+
+mod sources;
 
 use crate::checks::json_text::key_line;
 use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
@@ -50,10 +59,15 @@ pub(crate) const PINNED_CSP: &str = "default-src 'self'; script-src 'self'; styl
 pub(crate) const CHECK: StaticCheck = StaticCheck {
     name: "tauri-config",
     counts: Noun {
-        one: "config file",
-        many: "config files",
+        one: "file",
+        many: "files",
     },
-    place: || format!("in the desktop crate ({TAURI_CONF} and {BUILD_RS})"),
+    place: || {
+        format!(
+            "in the desktop crate ({TAURI_CONF}, {BUILD_RS} and its other Rust files) and {}",
+            checks::CARGO_CONFIG
+        )
+    },
     source: file!(),
     run,
     #[cfg(test)]
@@ -88,6 +102,17 @@ fn run(ctx: &Context) -> Inspection {
         }
         Err(violation) => vec![violation],
     });
+    let (sources_read, in_sources) = sources::source_violations(&ctx.root, desktop, &build);
+    read += sources_read;
+    found.extend(in_sources);
+    match checks::read_repo_file(&ctx.root, checks::CARGO_CONFIG) {
+        Ok(Some(text)) => {
+            read += 1;
+            found.extend(sources::env_violations(checks::CARGO_CONFIG, &text));
+        }
+        Ok(None) => {}
+        Err(violation) => found.push(violation),
+    }
     Inspection::new(read, found)
 }
 

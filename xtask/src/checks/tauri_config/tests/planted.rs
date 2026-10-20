@@ -307,9 +307,52 @@ crate::checks::planted::cases! {
          fix: pass `tauri_build::AppManifest::new()` to \
          `tauri_build::Attributes::new().app_manifest(...)` in `tauri_build::try_build`: without a \
          manifest Tauri skips the access check for app commands",
-        "0 config files inspected in the desktop crate (tauri.conf.json and build.rs)\n    \
-         fix: tauri-config looks for config files in the desktop crate (tauri.conf.json and \
-         build.rs); restore them, or, if they moved, update the consts \
-         xtask/src/checks/tauri_config.rs builds that place from",
+        "0 files inspected in the desktop crate (tauri.conf.json, build.rs and its other Rust \
+         files) and .cargo/config.toml\n    \
+         fix: tauri-config looks for files in the desktop crate (tauri.conf.json, build.rs and \
+         its other Rust files) and .cargo/config.toml; restore them, or, if they moved, update \
+         the consts xtask/src/checks/tauri_config.rs builds that place from",
     ]), inspects 0 => super::cases::both_config_files_missing,
+    /// `generate_context!("other.json")` in `src/lib.rs` reads another config: it fails at its
+    /// line. The conf, build.rs and lib.rs are read.
+    generate_context_with_a_config_path: FailsWith(&[
+        "crates/desktop/src/lib.rs:2: `generate_context!` is called with arguments, which can \
+         name another config, capability files or assets than the checked ones\n    \
+         fix: call `tauri::generate_context!()` with no arguments: it then reads the checked \
+         tauri.conf.json and capabilities folder",
+    ]), inspects 3 => super::cases::generate_context_with_a_config_path,
+    /// A braced call with `capabilities` in a file that holds one expression, as `include!`
+    /// takes it, fails: the file is lexed, not parsed as a whole file.
+    generate_context_in_an_included_fragment: FailsWith(&[
+        "crates/desktop/src/ctx.rs:2: `generate_context!` is called with arguments, which can \
+         name another config, capability files or assets than the checked ones\n    \
+         fix: call `tauri::generate_context!()` with no arguments: it then reads the checked \
+         tauri.conf.json and capabilities folder",
+    ]), inspects 3 => super::cases::generate_context_in_an_included_fragment,
+    /// `generate_context` imported under another name fails at the import, in a nested module.
+    generate_context_renamed: FailsWith(&[
+        "crates/desktop/src/app/mod.rs:1: `generate_context` is renamed with `as`, so this check \
+         cannot see the calls under the new name\n    \
+         fix: import it under its own name and call `generate_context!()`, which this check reads",
+    ]), inspects 3 => super::cases::generate_context_renamed,
+    /// `generate_context!()` with no argument passes, and so do a doc comment and a string that
+    /// show it with one. Four files are read.
+    generate_context_without_arguments_passes: Passes, inspects 4
+        => super::cases::generate_context_without_arguments_passes,
+    /// A desktop Rust file that does not lex fails at the lexer's line.
+    source_that_does_not_lex: FailsWith(&[
+        "crates/desktop/src/lib.rs:2: `crates/desktop/src/lib.rs` is not valid Rust: cannot parse \
+         string into token stream\n    \
+         fix: fix the syntax: this check cannot read the file's calls",
+    ]), inspects 3 => super::cases::source_that_does_not_lex,
+    /// `TAURI_CONFIG` in `.cargo/config.toml`'s `[env]`, in lower case, fails at its key. The
+    /// conf, build.rs and the cargo config are read.
+    tauri_config_in_cargo_env: FailsWith(&[
+        ".cargo/config.toml:5: `.cargo/config.toml` sets `tauri_config` in [env], which \
+         tauri-build and `generate_context!` merge over tauri.conf.json\n    \
+         fix: remove it and put the setting in tauri.conf.json: Tauri merges `TAURI_CONFIG` over \
+         the checked file",
+    ]), inspects 3 => super::cases::tauri_config_in_cargo_env,
+    /// Other `[env]` entries, one only starting with `TAURI_CONFIG`, pass.
+    other_cargo_env_passes: Passes, inspects 3 => super::cases::other_cargo_env_passes,
 }
