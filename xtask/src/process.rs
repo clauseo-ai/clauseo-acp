@@ -1,17 +1,34 @@
 //! The only module that starts processes. Every other module goes through `capture`, `run_quiet`
-//! or `run_timed`, so the rules about how commands run live in one place.
+//! or `run`, and those three through `running.rs` and the one `spawn` here, so the rules about how
+//! commands run live in one place:
+//! - A command cannot run without a time limit: `Cmd::new` takes it.
+//! - It runs with stdin closed, in a process tree of its own: a new process group on Unix, a Job
+//!   Object that kills its processes when its handle closes on Windows (`windows.rs`).
+//! - Its tree is stopped at the limit and when its run is dropped (a panic included): SIGTERM to
+//!   the group, then SIGKILL after `KILL_GRACE`; on Windows `TerminateJobObject`. What is left of
+//!   the tree after the command exits gets SIGKILL, or is in the job that is terminated.
+//! - On Unix it is also stopped when xtask dies, however it dies, by the leader (`leader.rs`).
+//!   Ctrl-C reaches only xtask, since each command has its own group; xtask dies of it, and the
+//!   leader then stops every group still running. Windows closes the jobs when xtask dies.
 
+#[cfg(unix)]
+mod leader;
+mod running;
+#[cfg(unix)]
+mod unix;
+#[cfg(windows)]
+mod windows;
+
+#[cfg(unix)]
+pub(crate) use leader::lead;
+
+use running::{Finish, Stream, Streams};
 use std::ffi::OsStr;
 use std::fmt;
-use std::io::{self, Read};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::mpsc::{self, RecvTimeoutError};
-use std::thread;
+use std::process::{Child, Command};
 use std::time::Duration;
-
-/// Size of each read from a running command's output pipe.
-const CHUNK: usize = 8 * 1024;
 
 /// The program a command runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,15 +146,19 @@ fn resolve_pnpm(path: &OsStr, names: &[&str], exists: impl Fn(&Path) -> bool) ->
     PathBuf::from("pnpm")
 }
 
-/// A program and its arguments. Displays as the shell-like form: `cargo fmt --all -- --check`.
+/// A program, its arguments and how long it may run. Displays as the shell-like form:
+/// `cargo fmt --all -- --check`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Cmd {
     pub program: Program,
     pub args: Vec<String>,
+    /// How long it may run before its tree is stopped. Every call site passes a named `const`
+    /// that says why that long.
+    pub timeout: Duration,
 }
 
 impl Cmd {
-    pub(crate) fn new<I, S>(program: Program, args: I) -> Cmd
+    pub(crate) fn new<I, S>(program: Program, args: I, timeout: Duration) -> Cmd
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
@@ -148,6 +169,7 @@ impl Cmd {
                 .into_iter()
                 .map(|arg| arg.as_ref().to_owned())
                 .collect(),
+            timeout,
         }
     }
 }
@@ -159,13 +181,23 @@ impl fmt::Display for Cmd {
     }
 }
 
+/// Starts `command`. The one call of `Command::spawn` in xtask: `running.rs` starts every command
+/// through it, and `leader.rs` the leader. Nothing calls `Command::output` or `Command::status`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the process door: every child xtask starts goes through here"
+)]
+fn spawn(command: &mut Command) -> io::Result<Child> {
+    command.spawn()
+}
+
 /// Exit status and merged stdout and stderr of a command run by `capture`.
 pub(crate) struct Captured {
     pub success: bool,
     pub output: String,
 }
 
-/// Exit status and separate stdout and stderr of a command run by `run_quiet`.
+/// Exit status and separate stdout and stderr of a command run by `run_quiet` or `run`.
 #[derive(Debug)]
 pub(crate) struct Quiet {
     pub success: bool,
@@ -174,181 +206,141 @@ pub(crate) struct Quiet {
 }
 
 /// Runs `cmd` in `root` with stdout and stderr merged into one stream. Each chunk read is passed
-/// to `on_output` as it arrives, and kept for the returned `output`.
-#[expect(clippy::disallowed_methods, reason = "xtask runs tools and times them")]
+/// to `on_output` as it arrives, and kept for the returned `output`. A command that runs past its
+/// limit is an error of kind `TimedOut` (see `timed_out`).
 pub(crate) fn capture(
     cmd: &Cmd,
     root: &Path,
     on_output: &mut dyn FnMut(&[u8]),
 ) -> io::Result<Captured> {
-    let (mut reader, writer) = std::io::pipe()?;
-    let mut command = cmd.program.command();
-    command
-        .args(&cmd.args)
-        .current_dir(root)
-        .stdout(writer.try_clone()?)
-        .stderr(writer);
-    let mut child = command.spawn()?;
-    // The command still holds the write end of the pipe; drop it so the reader sees EOF.
-    drop(command);
-
     let mut bytes = Vec::new();
-    let mut chunk = vec![0u8; CHUNK];
-    loop {
-        match reader.read(&mut chunk) {
-            Ok(0) => break,
-            Ok(n) => {
-                bytes.extend_from_slice(&chunk[..n]);
-                on_output(&chunk[..n]);
-            }
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(error),
-        }
+    let finish = running::run(cmd, root, Streams::Merged, &mut |_, chunk| {
+        bytes.extend_from_slice(chunk);
+        on_output(chunk);
+    })?;
+    match finish {
+        Finish::Exited(status) => Ok(Captured {
+            success: status.success(),
+            output: String::from_utf8_lossy(&bytes).into_owned(),
+        }),
+        Finish::TimedOut => Err(timed_out(cmd)),
     }
-    let status = child.wait()?;
-    Ok(Captured {
-        success: status.success(),
-        output: String::from_utf8_lossy(&bytes).into_owned(),
-    })
 }
 
-/// Runs `cmd` in `root` and returns its stdout and stderr separately.
-#[expect(clippy::disallowed_methods, reason = "xtask runs tools and times them")]
+/// Runs `cmd` in `root` and returns its stdout and stderr separately. A command that runs past
+/// its limit is an error of kind `TimedOut` (see `timed_out`).
 pub(crate) fn run_quiet(cmd: &Cmd, root: &Path) -> io::Result<Quiet> {
-    let output = cmd
-        .program
-        .command()
-        .args(&cmd.args)
-        .current_dir(root)
-        .output()?;
-    Ok(Quiet {
-        success: output.status.success(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-    })
+    match run(cmd, root, Output::Quiet)? {
+        Ended::Exited(quiet) => Ok(quiet),
+        Ended::TimedOut => Err(timed_out(cmd)),
+    }
 }
 
-/// Where the output of a command run by `run_timed` goes.
+/// Where the output of a command run by `run` goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Output {
-    /// Straight to the terminal. The command stays in the terminal's process group, so Ctrl-C
-    /// stops it as it stops xtask.
+    /// Straight to xtask's stdout and stderr, so the terminal when xtask has one. The command
+    /// still runs in a process group of its own: Ctrl-C reaches only xtask, and the leader stops
+    /// the command when xtask dies of it.
     Inherit,
-    /// Kept, stdout and stderr apart, with stdin closed. On Unix the command runs in a process
-    /// group of its own, so a timeout kills everything it started.
+    /// Kept, stdout and stderr apart.
     Quiet,
 }
 
-/// How a command run by `run_timed` ended.
+/// How a command run by `run` ended.
 #[derive(Debug)]
 pub(crate) enum Ended {
     /// It exited. With `Output::Inherit`, `stdout` and `stderr` are empty.
     Exited(Quiet),
-    /// It was still running at the timeout, so it was killed.
+    /// It was still running at its limit, so its tree was stopped.
     TimedOut,
 }
 
-/// How long `run_timed` waits, after killing a command, for its output pipes to close.
-const KILL_GRACE: Duration = Duration::from_secs(5);
-
-/// Runs `cmd` in `root` and kills it if it runs longer than `timeout`. On a timeout it kills, on
-/// Unix, the command's process group with `Output::Quiet` and the command alone with
-/// `Output::Inherit`; on Windows, the command and every process it started (`taskkill /T`).
-#[expect(clippy::disallowed_methods, reason = "xtask runs tools and times them")]
-pub(crate) fn run_timed(
-    cmd: &Cmd,
-    root: &Path,
-    output: Output,
-    timeout: Duration,
-) -> io::Result<Ended> {
-    let mut command = cmd.program.command();
-    command.args(&cmd.args).current_dir(root);
-    if output == Output::Quiet {
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        #[cfg(unix)]
-        std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    }
-    let child = command.spawn()?;
-    let pid = child.id();
-    let (done, finished) = mpsc::channel();
-    thread::spawn(move || {
-        // The receiver is gone only after a timeout, when nobody wants the output any more.
-        drop(done.send(child.wait_with_output()));
-    });
-    match finished.recv_timeout(timeout) {
-        Ok(ran) => Ok(Ended::Exited(quiet_of(&ran?))),
-        Err(RecvTimeoutError::Timeout) => {
-            // A command that exited just at the timeout is not killed: its status is here already.
-            if let Ok(ran) = finished.try_recv() {
-                return Ok(Ended::Exited(quiet_of(&ran?)));
-            }
-            // What is left is the few instructions between the waiter reaping the command and
-            // sending its status, where the pid is free again. macOS and Linux hand out pids in
-            // rising order and wrap only after the whole range, so no new process gets it then.
-            // Windows reuses pids sooner, so there a new process would have to start and take that
-            // exact pid within those instructions for taskkill to hit it; that risk is accepted.
-            let killed = kill(pid, output);
-            // The waiter ends once the killed processes have closed the pipes. A process that left
-            // the group may hold them longer; it is not waited for past the grace period.
-            let late = finished.recv_timeout(KILL_GRACE);
-            match (killed, late) {
-                (Ok(()), _) => Ok(Ended::TimedOut),
-                // The kill found nothing to kill: the command exited just at the timeout.
-                (Err(_), Ok(Ok(ran))) => Ok(Ended::Exited(quiet_of(&ran))),
-                (Err(error), _) => Err(io::Error::other(format!(
-                    "`{cmd}` ran past its timeout of {} s and could not be stopped: {error}",
-                    timeout.as_secs()
-                ))),
-            }
-        }
-        Err(RecvTimeoutError::Disconnected) => Err(io::Error::other(format!(
-            "the thread waiting for `{cmd}` stopped without its exit status"
-        ))),
-    }
+/// Runs `cmd` in `root` with its output going where `output` says, and stops its tree if it runs
+/// past its limit.
+pub(crate) fn run(cmd: &Cmd, root: &Path, output: Output) -> io::Result<Ended> {
+    let streams = match output {
+        Output::Inherit => Streams::Inherit,
+        Output::Quiet => Streams::Separate,
+    };
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    let finish = running::run(cmd, root, streams, &mut |stream, chunk| match stream {
+        Stream::Out => stdout.extend_from_slice(chunk),
+        Stream::Err => stderr.extend_from_slice(chunk),
+    })?;
+    Ok(match finish {
+        Finish::Exited(status) => Ended::Exited(Quiet {
+            success: status.success(),
+            stdout: String::from_utf8_lossy(&stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&stderr).into_owned(),
+        }),
+        Finish::TimedOut => Ended::TimedOut,
+    })
 }
 
-/// The exit status and output of a finished command.
-fn quiet_of(ran: &std::process::Output) -> Quiet {
-    Quiet {
-        success: ran.status.success(),
-        stdout: String::from_utf8_lossy(&ran.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&ran.stderr).into_owned(),
-    }
+/// The error `capture` and `run_quiet` return for `cmd` when it runs past its limit. Its kind is
+/// `TimedOut`, which no start or read error has.
+pub(crate) fn timed_out(cmd: &Cmd) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        format!(
+            "`{cmd}` did not finish within {}, so it was stopped",
+            limit_text(cmd.timeout)
+        ),
+    )
 }
 
-/// The command that kills what `run_timed` started as `pid`: see `run_timed` for what each
-/// `output` and OS kills.
-fn kill_cmd(pid: u32, output: Output) -> Cmd {
-    if cfg!(windows) {
-        Cmd::new(
-            Program::Named("taskkill"),
-            ["/PID".to_owned(), pid.to_string(), "/T".into(), "/F".into()],
-        )
-    } else if output == Output::Quiet {
-        // A negative pid names the process group the command leads.
-        Cmd::new(Program::Named("kill"), ["-KILL", "--", &format!("-{pid}")])
+/// `limit` in the largest unit that divides it: `1 h`, `30 min`, `30 s` or `500 ms`.
+pub(crate) fn limit_text(limit: Duration) -> String {
+    let secs = limit.as_secs();
+    if limit.subsec_nanos() != 0 || secs == 0 {
+        format!("{} ms", limit.as_millis())
+    } else if secs.is_multiple_of(3600) {
+        format!("{} h", secs / 3600)
+    } else if secs.is_multiple_of(60) {
+        format!("{} min", secs / 60)
     } else {
-        Cmd::new(
-            Program::Named("kill"),
-            ["-KILL".to_owned(), pid.to_string()],
-        )
+        format!("{secs} s")
     }
 }
 
-/// Runs `kill_cmd`. Fails when the kill could not start or exited non-zero.
-fn kill(pid: u32, output: Output) -> io::Result<()> {
-    let cmd = kill_cmd(pid, output);
-    let killed = run_quiet(&cmd, Path::new("."))?;
-    if killed.success {
-        Ok(())
+/// The limit of the commands tests run (git init, tar, ps, short sh scripts), and of the commands
+/// they only build or display: each runs well under a second, so a minute means it hangs.
+#[cfg(test)]
+pub(crate) const TEST_TIMEOUT: Duration = Duration::from_mins(1);
+
+/// How the hidden `process-test` mode runs its script, for xtask/tests/process.rs.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub(crate) enum TestOutput {
+    /// Through `run` with `Output::Inherit`.
+    Inherit,
+    /// Through `capture`.
+    Capture,
+}
+
+/// The limit of the hidden `process-test` mode: longer than any test waits, so the test's signal
+/// ends the run, not the limit.
+const PROCESS_TEST_TIMEOUT: Duration = Duration::from_mins(10);
+
+/// The hidden `process-test` mode: runs `sh -c <script>` through the door as `output` says, so
+/// xtask/tests/process.rs can kill this xtask while the script runs. Exits 0 when the script
+/// exits 0, 1 otherwise.
+pub(crate) fn test_mode(output: TestOutput, script: &str) -> std::process::ExitCode {
+    let cmd = Cmd::new(Program::Named("sh"), ["-c", script], PROCESS_TEST_TIMEOUT);
+    let success = match output {
+        TestOutput::Inherit => matches!(
+            run(&cmd, Path::new("."), Output::Inherit),
+            Ok(Ended::Exited(Quiet { success: true, .. }))
+        ),
+        TestOutput::Capture => matches!(
+            capture(&cmd, Path::new("."), &mut |_| {}),
+            Ok(Captured { success: true, .. })
+        ),
+    };
+    if success {
+        std::process::ExitCode::SUCCESS
     } else {
-        Err(io::Error::other(format!(
-            "`{cmd}` failed: {}",
-            killed.stderr.trim()
-        )))
+        std::process::ExitCode::FAILURE
     }
 }
 

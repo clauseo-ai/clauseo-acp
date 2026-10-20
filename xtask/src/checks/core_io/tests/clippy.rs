@@ -30,7 +30,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use toml::{Table, Value as Toml};
 
 /// The lints whose hits count.
@@ -95,6 +95,10 @@ fn clippy_bans_every_planted_call() {
     );
 }
 
+/// How long the clippy run may take: it checks one scratch crate with no dependency, in seconds
+/// warm, but its first run builds nothing it can reuse, on a machine other builds share.
+const CLIPPY_TIMEOUT: Duration = Duration::from_mins(10);
+
 /// Runs the pinned clippy offline on the scratch crate in `dir`, which holds `count` forms, with
 /// the clippy step's flags and `-A` of the two lints after `--`, and reads what it reported.
 fn clippy(dir: &Path, target: &Path, count: usize) -> Run {
@@ -116,7 +120,7 @@ fn clippy(dir: &Path, target: &Path, count: usize) -> Run {
             "-A",
             LINTS[1],
         ]);
-    let cmd = Cmd::new(Program::Cargo, args);
+    let cmd = Cmd::new(Program::Cargo, args, CLIPPY_TIMEOUT);
     let ran = process::run_quiet(&cmd, dir).expect("cargo clippy starts");
     eprintln!(
         "clippy_bans_every_planted_call: {count} forms in {}, cargo clippy took {:.1?}",

@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::checks::{Inspection, Noun};
-use crate::process::Program;
+use crate::process::{Program, TEST_TIMEOUT};
 use crate::violation::{Finding, Violation};
 use std::path::PathBuf;
 
@@ -37,7 +37,7 @@ fn reproduce(cmd: &Cmd, _output: Option<&str>) -> String {
 fn fake_tool(name: &'static str, program: &'static str, args: &[&str]) -> Step {
     Step::Tool(ToolStep {
         name,
-        cmd: Cmd::new(Program::Named(program), args),
+        cmd: Cmd::new(Program::Named(program), args, TEST_TIMEOUT),
         parse: no_findings,
         fix: reproduce,
         render: None,
@@ -314,7 +314,7 @@ fn shout(output: &str) -> String {
 fn rendered_tool(name: &'static str, args: &[&str]) -> Step {
     Step::Tool(ToolStep {
         name,
-        cmd: Cmd::new(Program::Named("fake"), args),
+        cmd: Cmd::new(Program::Named("fake"), args, TEST_TIMEOUT),
         parse: no_findings,
         fix: reproduce,
         render: Some(shout),
@@ -359,7 +359,7 @@ fn after_a_failed_metadata_load_a_cargo_step_is_not_run() {
     let steps = vec![
         Step::Tool(ToolStep {
             name: "shear",
-            cmd: Cmd::new(Program::Cargo, ["shear"]),
+            cmd: Cmd::new(Program::Cargo, ["shear"], TEST_TIMEOUT),
             parse: no_findings,
             fix: reproduce,
             render: None,

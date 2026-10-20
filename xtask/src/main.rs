@@ -16,10 +16,12 @@
 //!   the tool's output once, then a `fix:` line.
 //! - Live tool output appears only when stdout is a terminal. Otherwise a passing tool prints its
 //!   header and our findings only.
-//! - Only `process.rs` starts processes and only `output.rs` prints. Keep it that way. The one
-//!   clock read (`clock.rs`) and each call to a disallowed method (`Command::spawn`,
-//!   `Command::output`) carry
-//!   `#[expect(clippy::disallowed_methods, reason = "xtask runs tools and times them")]`.
+//! - Only `process.rs` starts processes and only `output.rs` prints. Keep it that way. Every
+//!   command gets a time limit in `Cmd::new`; `process.rs` says how its tree is stopped. The one
+//!   clock read (`clock.rs`) and the one `Command::spawn` (`spawn` in `process.rs`) carry
+//!   `#[expect(clippy::disallowed_methods, reason = "...")]`.
+//! - Two subcommands are hidden from `--help`: `process-leader`, the leader `process.rs` starts
+//!   on Unix, and `process-test`, which `xtask/tests/process.rs` runs.
 //! - `buildtime web` runs `node ui/app/scripts/buildtime.mjs`, which times the
 //!   `ui/app/package.json` scripts with Node's own clock and prints JSON (the contract is in
 //!   `buildtime/web.rs`); xtask computes the statistics and judges them against budgets.
@@ -85,6 +87,17 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// The leader `process.rs` starts on Unix: stops the process groups it is told about when
+    /// its stdin closes.
+    #[cfg(unix)]
+    #[command(hide = true)]
+    ProcessLeader,
+    /// Runs `sh -c <script>` through the process door, for `xtask/tests/process.rs`.
+    #[command(hide = true)]
+    ProcessTest {
+        output: process::TestOutput,
+        script: String,
+    },
 }
 
 fn main() -> ExitCode {
@@ -92,5 +105,8 @@ fn main() -> ExitCode {
         Commands::Check { quick } => check::run(quick),
         Commands::Setup { binaries } => setup::run(binaries),
         Commands::Buildtime { half, runs, json } => buildtime::run(half, runs, json),
+        #[cfg(unix)]
+        Commands::ProcessLeader => process::lead(),
+        Commands::ProcessTest { output, script } => process::test_mode(output, &script),
     }
 }

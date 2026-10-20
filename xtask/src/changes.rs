@@ -5,6 +5,7 @@ use crate::workspace::{Member, package_for};
 use std::collections::BTreeSet;
 use std::fmt;
 use std::path::Path;
+use std::time::Duration;
 
 /// Which packages `--quick` checks.
 #[derive(Debug, PartialEq, Eq)]
@@ -214,9 +215,13 @@ impl From<GitError> for String {
     }
 }
 
+/// How long one git command may run: these read the index, refs and one diff, which take well
+/// under a second, so a minute means git hangs (on a lock or a credential prompt, say).
+const GIT_TIMEOUT: Duration = Duration::from_mins(1);
+
 /// The stdout of `git <args>` run in `root`.
 fn git(root: &Path, args: &[&str]) -> Result<String, GitError> {
-    let cmd = Cmd::new(Program::Git, args);
+    let cmd = Cmd::new(Program::Git, args, GIT_TIMEOUT);
     let quiet =
         process::run_quiet(&cmd, root).map_err(|error| GitError::NotStarted(error.to_string()))?;
     if !quiet.success {

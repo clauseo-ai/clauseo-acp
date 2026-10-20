@@ -5,11 +5,16 @@ use crate::checks::Failure;
 use crate::process::{self, Cmd, Program};
 use semver::{Version, VersionReq};
 use std::path::Path;
+use std::time::Duration;
+
+/// How long one `cargo tree` may run: it resolves the graph from Cargo.lock without building,
+/// which takes seconds, so 5 min means it hangs (on the package cache lock, say).
+const CARGO_TREE_TIMEOUT: Duration = Duration::from_mins(5);
 
 /// The stdout of `cargo <args>` run in `root`. `Err` is the failure to report when cargo
 /// cannot be started or fails. It has no `file:line`, since cargo's error names the cause.
 pub(super) fn cargo_stdout(root: &Path, args: &[&str]) -> Result<String, Failure> {
-    let cmd = Cmd::new(Program::Cargo, args.iter().copied());
+    let cmd = Cmd::new(Program::Cargo, args.iter().copied(), CARGO_TREE_TIMEOUT);
     let quiet = process::run_quiet(&cmd, root).map_err(|error| Failure {
         message: format!("could not run `{cmd}`: {error}"),
         fix: "put `cargo` on PATH, since this check reads the dependency graph from cargo"

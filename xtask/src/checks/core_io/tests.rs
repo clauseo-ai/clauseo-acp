@@ -104,7 +104,7 @@ impl<'a> Input<'a> {
 /// Writes `repo` into a scratch git repo named after `case`; returns the dir.
 fn scratch(case: &str, repo: &Repo<'_>) -> Scratch {
     let dir = Scratch::new(&format!("core-io-{case}"));
-    let init = Cmd::new(Program::Git, ["init", "-q"]);
+    let init = Cmd::new(Program::Git, ["init", "-q"], crate::process::TEST_TIMEOUT);
     let quiet = process::run_quiet(&init, &dir).expect("run git init");
     assert!(quiet.success, "git init failed: {}", quiet.stderr);
     let architecture = repo.architecture.unwrap_or(ARCHITECTURE);

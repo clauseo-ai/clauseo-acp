@@ -1,8 +1,7 @@
-//! Tests for `process.rs`: how git, pnpm and timed commands run.
+//! Tests for `process.rs`: how git, pnpm and commands with a limit run. `tree.rs` tests how a
+//! command's tree is stopped.
 
 use super::*;
-#[cfg(unix)]
-use crate::scratch::Scratch;
 use std::ffi::OsString;
 
 #[test]
@@ -32,11 +31,15 @@ fn cargo_runs_without_clippy_conf_dir() {
 
 #[test]
 fn cmd_displays_its_program_then_its_args() {
-    let cmd = Cmd::new(Program::Cargo, ["fmt", "--all", "--", "--check"]);
+    let cmd = Cmd::new(
+        Program::Cargo,
+        ["fmt", "--all", "--", "--check"],
+        TEST_TIMEOUT,
+    );
     assert_eq!(cmd.to_string(), "cargo fmt --all -- --check");
-    let named = Cmd::new(Program::Named("git"), Vec::<String>::new());
+    let named = Cmd::new(Program::Named("git"), Vec::<String>::new(), TEST_TIMEOUT);
     assert_eq!(named.to_string(), "git");
-    let pnpm = Cmd::new(Program::Pnpm, ["--version"]);
+    let pnpm = Cmd::new(Program::Pnpm, ["--version"], TEST_TIMEOUT);
     assert_eq!(pnpm.to_string(), "pnpm --version");
 }
 
@@ -122,6 +125,7 @@ fn capture_merges_stdout_and_stderr_and_reports_the_exit_status() {
     let cmd = Cmd::new(
         Program::Named("sh"),
         ["-c", "echo out; echo err >&2; exit 3"],
+        TEST_TIMEOUT,
     );
     let mut seen = Vec::new();
     let captured = capture(&cmd, Path::new("."), &mut |chunk| {
@@ -145,7 +149,11 @@ fn missing_from_git_local_env(listed: &str) -> Vec<&str> {
 
 #[test]
 fn every_variable_the_local_git_lists_is_in_git_local_env() {
-    let cmd = Cmd::new(Program::Git, ["rev-parse", "--local-env-vars"]);
+    let cmd = Cmd::new(
+        Program::Git,
+        ["rev-parse", "--local-env-vars"],
+        TEST_TIMEOUT,
+    );
     let listed = run_quiet(&cmd, Path::new(".")).expect("git runs");
     assert!(listed.success, "`{cmd}` failed: {}", listed.stderr);
     assert_eq!(
@@ -172,22 +180,13 @@ fn an_older_git_list_passes_and_a_list_with_an_unknown_name_fails() {
 }
 
 #[test]
-fn a_timed_kill_names_the_group_on_unix_for_quiet_and_the_process_for_inherit() {
-    let quiet = kill_cmd(4321, Output::Quiet).to_string();
-    let inherit = kill_cmd(4321, Output::Inherit).to_string();
-    if cfg!(windows) {
-        assert_eq!(quiet, "taskkill /PID 4321 /T /F");
-        assert_eq!(inherit, "taskkill /PID 4321 /T /F");
-    } else {
-        assert_eq!(quiet, "kill -KILL -- -4321");
-        assert_eq!(inherit, "kill -KILL 4321");
-    }
-}
-
-#[test]
-fn a_timed_command_that_cannot_start_is_an_error() {
-    let cmd = Cmd::new(Program::Named("xtask-no-such-program"), ["--version"]);
-    let ran = run_timed(&cmd, Path::new("."), Output::Quiet, Duration::from_secs(30));
+fn a_command_that_cannot_start_is_an_error() {
+    let cmd = Cmd::new(
+        Program::Named("xtask-no-such-program"),
+        ["--version"],
+        TEST_TIMEOUT,
+    );
+    let ran = run(&cmd, Path::new("."), Output::Quiet);
     assert_eq!(
         ran.expect_err("the program does not exist").kind(),
         io::ErrorKind::NotFound
@@ -196,12 +195,13 @@ fn a_timed_command_that_cannot_start_is_an_error() {
 
 #[cfg(unix)]
 #[test]
-fn a_timed_command_that_exits_gives_its_status_and_output() {
+fn a_command_that_exits_gives_its_status_and_output() {
     let cmd = Cmd::new(
         Program::Named("sh"),
         ["-c", "echo out; echo err >&2; exit 3"],
+        TEST_TIMEOUT,
     );
-    let ran = run_timed(&cmd, Path::new("."), Output::Quiet, Duration::from_secs(30));
+    let ran = run(&cmd, Path::new("."), Output::Quiet);
     let Ok(Ended::Exited(quiet)) = ran else {
         panic!("sh exits: {ran:?}");
     };
@@ -210,46 +210,31 @@ fn a_timed_command_that_exits_gives_its_status_and_output() {
     assert_eq!(quiet.stderr, "err\n");
 }
 
-/// Whether process `pid` has ended: `ps` finds no such process, or only its zombie.
-#[cfg(unix)]
-fn has_ended(pid: &str) -> bool {
-    let ps = Cmd::new(Program::Named("ps"), ["-o", "stat=", "-p", pid]);
-    let found = run_quiet(&ps, Path::new(".")).expect("ps runs");
-    !found.success || found.stdout.trim().starts_with('Z')
+#[test]
+fn a_limit_is_written_in_its_largest_whole_unit() {
+    let cases = [
+        (Duration::from_hours(1), "1 h"),
+        (Duration::from_mins(90), "90 min"),
+        (Duration::from_secs(30), "30 s"),
+        (Duration::from_secs(90), "90 s"),
+        (Duration::from_millis(1500), "1500 ms"),
+        (Duration::from_millis(500), "500 ms"),
+    ];
+    for (limit, text) in cases {
+        assert_eq!(limit_text(limit), text);
+    }
 }
 
-#[cfg(unix)]
 #[test]
-fn a_quiet_command_past_its_timeout_is_killed_with_the_processes_it_started() {
-    let dir = Scratch::new("process-timeout-tree");
-    // The grandchild holds the output pipe, so run_timed returns only once it is gone too.
-    let cmd = Cmd::new(
-        Program::Named("sh"),
-        ["-c", "sleep 30 & echo $! > grandchild; wait"],
-    );
-    let (ran, seconds) =
-        crate::clock::timed(|| run_timed(&cmd, &dir, Output::Quiet, Duration::from_millis(500)));
-    assert!(matches!(ran, Ok(Ended::TimedOut)), "{ran:?}");
-    assert!(seconds < 5.0, "returned after {seconds} s");
-    let grandchild = std::fs::read_to_string(dir.join("grandchild")).expect("sh wrote the pid");
-    assert!(
-        has_ended(grandchild.trim()),
-        "the grandchild {grandchild} still runs"
+fn a_timeout_names_the_command_and_its_limit() {
+    let cmd = Cmd::new(Program::Cargo, ["nextest", "run"], Duration::from_mins(45));
+    let error = timed_out(&cmd);
+    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    assert_eq!(
+        error.to_string(),
+        "`cargo nextest run` did not finish within 45 min, so it was stopped"
     );
 }
 
 #[cfg(unix)]
-#[test]
-fn an_inherited_command_past_its_timeout_is_killed() {
-    let cmd = Cmd::new(Program::Named("sleep"), ["30"]);
-    let (ran, seconds) = crate::clock::timed(|| {
-        run_timed(
-            &cmd,
-            Path::new("."),
-            Output::Inherit,
-            Duration::from_millis(500),
-        )
-    });
-    assert!(matches!(ran, Ok(Ended::TimedOut)), "{ran:?}");
-    assert!(seconds < 5.0, "returned after {seconds} s");
-}
+mod tree;

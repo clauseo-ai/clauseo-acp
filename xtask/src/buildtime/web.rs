@@ -41,6 +41,12 @@ use crate::budgets::{Budget, Unit};
 use crate::process::{self, Cmd, Program};
 use serde::Deserialize;
 use std::path::Path;
+use std::time::Duration;
+
+/// How long the script may run: it builds the app and starts the dev server once per run plus a
+/// warm-up, each a cold-ish build on a slow machine, so this is xtask's longest limit with
+/// `cargo install`'s.
+const SCRIPT_TIMEOUT: Duration = Duration::from_hours(1);
 
 /// The script, from the repo root.
 pub(crate) const SCRIPT: &str = "ui/app/scripts/buildtime.mjs";
@@ -257,7 +263,11 @@ pub(crate) fn measure(
         ));
     }
     let runs_arg = runs.to_string();
-    let cmd = Cmd::new(Program::Named("node"), [SCRIPT, "--runs", &runs_arg]);
+    let cmd = Cmd::new(
+        Program::Named("node"),
+        [SCRIPT, "--runs", &runs_arg],
+        SCRIPT_TIMEOUT,
+    );
     let rerun = format!("run `{cmd}` to see the error");
     let quiet = match process::run_quiet(&cmd, root) {
         Ok(quiet) => quiet,
