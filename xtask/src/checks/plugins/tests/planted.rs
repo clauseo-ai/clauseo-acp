@@ -144,6 +144,13 @@ crate::checks::planted::cases! {
          not a workspace member, so these checks and clippy never see it\n    \
          fix: add it to the workspace members, or remove the dependency",
     ]), inspects 11 => super::path_dependency_on_excluded_crate,
+    /// A path build dependency on a crate under `[workspace] exclude` fails at its line: the path
+    /// rule reads every table.
+    build_dependency_path_to_excluded_crate: FailsWith(&[
+        "crates/desktop/Cargo.toml:19: `clauseo-desktop` depends on `evil` by path, but `evil` is \
+         not a workspace member, so these checks and clippy never see it\n    \
+         fix: add it to the workspace members, or remove the dependency",
+    ]), inspects 11 => super::build_dependency_path_to_excluded_crate,
     /// A context with no members stops the check at the root manifest, before it inspects.
     desktop_crate_missing: FailsWith(&[
         "Cargo.toml:1: the desktop crate (package `clauseo-desktop`) is not a workspace member\n    \
@@ -160,4 +167,23 @@ crate::checks::planted::cases! {
     /// The same optional dependency without a plugin under it passes.
     optional_desktop_feature_without_a_plugin_passes: Passes, inspects 11
         => super::resolved::optional_desktop_feature_without_a_plugin_passes,
+    /// A plugin outside the set as a desktop build dependency fails at its line through the graph.
+    plugin_as_a_desktop_build_dependency: FailsWith(&[
+        "crates/desktop/Cargo.toml:19: `tauri-plugin-zz` 2.0.0 is in the desktop crate's tree \
+         through `clauseo-desktop`, which is not a fixed plugin\n    \
+         fix: only the fixed plugins and what they pull in may be in the desktop crate's tree",
+    ]), inspects 11 => super::resolved::plugin_as_a_desktop_build_dependency,
+    /// A plugin pulled in by another member's dependency fails at that member's desktop line.
+    plugin_through_another_member: FailsWith(&[
+        "crates/desktop/Cargo.toml:17: `tauri-plugin-zz` 2.0.0 is in the desktop crate's tree \
+         through `mid`, which is not a fixed plugin\n    \
+         fix: only the fixed plugins and what they pull in may be in the desktop crate's tree",
+    ]), inspects 11 => super::resolved::plugin_through_another_member,
+    /// A crate that depends on `tauri` under a name that is no `tauri-plugin-*` fails.
+    plugin_by_another_name: FailsWith(&[
+        "crates/desktop/Cargo.toml:17: `evil` 0.1.0 depends on `tauri`, so it can register a \
+         Tauri plugin, and is in the desktop crate's tree through `clauseo-desktop`, which is \
+         not a fixed plugin\n    \
+         fix: only the fixed plugins and what they pull in may be in the desktop crate's tree",
+    ]), inspects 11 => super::resolved::plugin_by_another_name,
 }

@@ -1,18 +1,16 @@
 //! Planted cases of the file-size check, and tests of its helpers. Each planted case writes its
-//! files into a scratch git repo and runs the real `run` on it.
+//! files into a scratch git repo, which the planted harness runs the check on.
 
 pub(super) mod planted;
 
 use super::*;
-use crate::process::{self, Cmd, Program};
+use crate::checks::planted::{Repo, git};
 use crate::scratch::Scratch;
 
 /// A scratch git repo named after `case`, with each `(path, text)` of `files` written into it.
 fn repo(case: &str, files: &[(&str, String)]) -> Scratch {
     let dir = Scratch::new(&format!("planted-file-size-{case}"));
-    let init = Cmd::new(Program::Git, ["init", "-q"], crate::process::TEST_TIMEOUT);
-    let quiet = process::run_quiet(&init, &dir).expect("run git init");
-    assert!(quiet.success, "git init failed: {}", quiet.stderr);
+    git(&dir, &["init", "-q"]);
     for (path, text) in files {
         let full = dir.join(path);
         Scratch::create_dir_all(full.parent().expect("a file has a parent")).expect("create dirs");
@@ -21,14 +19,10 @@ fn repo(case: &str, files: &[(&str, String)]) -> Scratch {
     dir
 }
 
-/// Runs the check on the scratch repo that `files` make.
-fn run_on(case: &str, files: &[(&str, String)]) -> Inspection {
+/// The scratch repo that `files` make.
+fn run_on(case: &str, files: &[(&str, String)]) -> Repo {
     let dir = repo(case, files);
-    run(&Context {
-        root: dir.to_path_buf(),
-        members: Ok(Vec::new()),
-        load_resolved_graph: false,
-    })
+    Repo::new(dir)
 }
 
 /// A file of `n` lines.
@@ -41,26 +35,26 @@ fn exceptions(entries: &str) -> (&'static str, String) {
     (EXCEPTIONS, format!("# a header line\n{entries}"))
 }
 
-pub(super) fn rs_601_lines() -> Inspection {
+pub(super) fn rs_601_lines() -> Repo {
     run_on("rs-601-lines", &[("src/big.rs", lines(601))])
 }
 
-pub(super) fn ts_601_lines() -> Inspection {
+pub(super) fn ts_601_lines() -> Repo {
     run_on("ts-601-lines", &[("ui/big.ts", lines(601))])
 }
 
-pub(super) fn tsx_601_lines() -> Inspection {
+pub(super) fn tsx_601_lines() -> Repo {
     run_on("tsx-601-lines", &[("ui/Big.tsx", lines(601))])
 }
 
-pub(super) fn mts_and_upper_case_rs_601_lines() -> Inspection {
+pub(super) fn mts_and_upper_case_rs_601_lines() -> Repo {
     run_on(
         "mts-and-upper-case-rs-601-lines",
         &[("ui/big.mts", lines(601)), ("src/LIB.RS", lines(601))],
     )
 }
 
-pub(super) fn stale_exception_gone() -> Inspection {
+pub(super) fn stale_exception_gone() -> Repo {
     run_on(
         "stale-exception-gone",
         &[
@@ -70,7 +64,7 @@ pub(super) fn stale_exception_gone() -> Inspection {
     )
 }
 
-pub(super) fn stale_exception_short() -> Inspection {
+pub(super) fn stale_exception_short() -> Repo {
     run_on(
         "stale-exception-short",
         &[
@@ -80,45 +74,45 @@ pub(super) fn stale_exception_short() -> Inspection {
     )
 }
 
-pub(super) fn line_comment_101() -> Inspection {
+pub(super) fn line_comment_101() -> Repo {
     let text = format!("fn a() {{}}\n// {}\n", "a".repeat(98));
     run_on("line-comment-101", &[("src/lib.rs", text)])
 }
 
-pub(super) fn doc_comment_101() -> Inspection {
+pub(super) fn doc_comment_101() -> Repo {
     let text = format!("//! {}\n", "a".repeat(97));
     run_on("doc-comment-101", &[("src/lib.rs", text)])
 }
 
-pub(super) fn trailing_comment_past_100() -> Inspection {
+pub(super) fn trailing_comment_past_100() -> Repo {
     // The code is 14 characters and 82 spaces; the comment `// end` is 6 more: 102 in all.
     let text = format!("let value = 1;{}// end\n", " ".repeat(82));
     run_on("trailing-comment-past-100", &[("src/lib.rs", text)])
 }
 
-pub(super) fn block_comment_past_100() -> Inspection {
+pub(super) fn block_comment_past_100() -> Repo {
     // Line 2 is three spaces, 104 `y`, and ` */`: 110 characters.
     let text = format!("/* first\n   {} */\nfn f() {{}}\n", "y".repeat(104));
     run_on("block-comment-past-100", &[("src/lib.rs", text)])
 }
 
-pub(super) fn e_acute_comment_100_passes() -> Inspection {
+pub(super) fn e_acute_comment_100_passes() -> Repo {
     let text = format!("//{}\n", "é".repeat(98));
     run_on("e-acute-comment-100", &[("src/lib.rs", text)])
 }
 
-pub(super) fn string_literal_101_passes() -> Inspection {
+pub(super) fn string_literal_101_passes() -> Repo {
     // The literal is 101 characters with its quotes; the line is over 100 because of it.
     let text = format!("let s = \"{}\";\n", "a".repeat(99));
     run_on("string-literal-101", &[("src/lib.rs", text)])
 }
 
-pub(super) fn string_holding_slashes_101_passes() -> Inspection {
+pub(super) fn string_holding_slashes_101_passes() -> Repo {
     let text = format!("let url = \"https://{}\";\n", "a".repeat(84));
     run_on("string-holding-slashes-101", &[("src/lib.rs", text)])
 }
 
-pub(super) fn raw_string_holding_slashes_passes() -> Inspection {
+pub(super) fn raw_string_holding_slashes_passes() -> Repo {
     let text = format!(
         "let s = r#\"https://example.com\n// {}\n\"#;\nlet t = r#\"// a\"#;\n",
         "b".repeat(120)
@@ -126,7 +120,7 @@ pub(super) fn raw_string_holding_slashes_passes() -> Inspection {
     run_on("raw-string-holding-slashes", &[("src/lib.rs", text)])
 }
 
-pub(super) fn char_quote_then_code_passes() -> Inspection {
+pub(super) fn char_quote_then_code_passes() -> Repo {
     let text = format!(
         "let quote = '\"';\nlet url = \"https://example.com/{}\";\n",
         "c".repeat(60)
@@ -134,7 +128,7 @@ pub(super) fn char_quote_then_code_passes() -> Inspection {
     run_on("char-quote-then-code", &[("src/lib.rs", text)])
 }
 
-pub(super) fn lifetime_then_string_passes() -> Inspection {
+pub(super) fn lifetime_then_string_passes() -> Repo {
     let text = format!(
         "fn pick<'a>(first: &'a str) -> &'static str {{\n    'outer: loop {{ break 'outer; }}\n    \
          let url = \"https://example.com/{}\";\n    first\n}}\n",
@@ -143,7 +137,7 @@ pub(super) fn lifetime_then_string_passes() -> Inspection {
     run_on("lifetime-then-string", &[("src/lib.rs", text)])
 }
 
-pub(super) fn listed_600_plus_file_passes() -> Inspection {
+pub(super) fn listed_600_plus_file_passes() -> Repo {
     run_on(
         "listed-600-plus",
         &[
@@ -153,36 +147,131 @@ pub(super) fn listed_600_plus_file_passes() -> Inspection {
     )
 }
 
+pub(super) fn cts_601_lines() -> Repo {
+    run_on("cts-601-lines", &[("ui/big.cts", lines(601))])
+}
+
+pub(super) fn crlf_601_lines() -> Repo {
+    run_on("crlf-601-lines", &[("src/big.rs", "\r\n".repeat(601))])
+}
+
+/// Old Mac line endings: `str::lines` would see one line.
+pub(super) fn lone_cr_601_lines() -> Repo {
+    run_on("lone-cr-601-lines", &[("ui/big.ts", "x\r".repeat(601))])
+}
+
+/// `src/link.rs` is a symlink to a 601-line `.txt` file, which is no source kind itself. On
+/// Windows, where a scratch file symlink needs a privilege, it is a plain copy.
+pub(super) fn symlinked_file_601_lines() -> Repo {
+    let dir = repo("symlinked-file", &[("notes/big.txt", lines(601))]);
+    Scratch::create_dir_all(dir.join("src")).expect("create src");
+    #[cfg(unix)]
+    Scratch::symlink("../notes/big.txt", dir.join("src/link.rs")).expect("link the file");
+    #[cfg(not(unix))]
+    Scratch::write(dir.join("src/link.rs"), lines(601)).expect("write the file");
+    Repo::new(dir)
+}
+
+pub(super) fn outer_doc_comment_101() -> Repo {
+    let text = format!("/// {}\nfn f() {{}}\n", "a".repeat(97));
+    run_on("outer-doc-comment-101", &[("src/lib.rs", text)])
+}
+
+pub(super) fn block_doc_comment_past_100() -> Repo {
+    // Line 2 is ` * ` and 98 `y`: 101 characters.
+    let text = format!("/**\n * {}\n */\nfn f() {{}}\n", "y".repeat(98));
+    run_on("block-doc-comment-past-100", &[("src/lib.rs", text)])
+}
+
+pub(super) fn inner_block_doc_comment_past_100() -> Repo {
+    // `/*! ` and 97 `z`: 101 characters, the comment closed on the next line.
+    let text = format!("/*! {}\n*/\nfn f() {{}}\n", "z".repeat(97));
+    run_on("inner-block-doc-past-100", &[("src/lib.rs", text)])
+}
+
+pub(super) fn nested_block_comment_past_100() -> Repo {
+    // The inner `*/` closes only the inner pair, so line 2 (two spaces, 99 `n`) is comment.
+    let text = format!(
+        "/* outer /* inner */\n  {}\n*/\nfn f() {{}}\n",
+        "n".repeat(99)
+    );
+    run_on("nested-block-past-100", &[("src/lib.rs", text)])
+}
+
+pub(super) fn crlf_comment_101() -> Repo {
+    let text = format!("fn a() {{}}\r\n// {}\r\n", "a".repeat(98));
+    run_on("crlf-comment-101", &[("src/lib.rs", text)])
+}
+
+/// The `\r` of a CRLF ending is not a column: a 100-column comment passes.
+pub(super) fn crlf_comment_100_passes() -> Repo {
+    let text = format!("fn a() {{}}\r\n// {}\r\n", "a".repeat(97));
+    run_on("crlf-comment-100", &[("src/lib.rs", text)])
+}
+
+pub(super) fn stale_exception_not_source() -> Repo {
+    run_on(
+        "stale-exception-not-source",
+        &[
+            ("src/lib.rs", "fn f() {}\n".to_owned()),
+            ("README.md", lines(700)),
+            exceptions("README.md a long readme\n"),
+        ],
+    )
+}
+
+pub(super) fn exception_without_reason() -> Repo {
+    run_on(
+        "exception-without-reason",
+        &[
+            ("src/lib.rs", "fn f() {}\n".to_owned()),
+            exceptions("src/lib.rs\n"),
+        ],
+    )
+}
+
+pub(super) fn exception_listed_twice() -> Repo {
+    run_on(
+        "exception-listed-twice",
+        &[
+            ("src/parser.rs", lines(650)),
+            exceptions("src/parser.rs generated\nsrc/parser.rs generated again\n"),
+        ],
+    )
+}
+
 #[test]
 fn a_file_of_exactly_the_limit_passes() {
-    let found = run_on("exactly-600", &[("src/lib.rs", lines(LINE_LIMIT))]);
+    let found = run(run_on("exactly-600", &[("src/lib.rs", lines(LINE_LIMIT))]).ctx());
     assert_eq!((found.inspected, found.violations), (1, Vec::new()));
 }
 
 #[test]
 fn only_rs_ts_and_tsx_files_are_inspected_and_only_rs_comments_are_checked() {
     let long_comment = format!("// {}\n", "a".repeat(150));
-    let found = run_on(
+    let found = run(run_on(
         "kinds",
         &[
             ("README.md", lines(900)),
             ("ui/notes.ts", long_comment),
             ("src/lib.rs", "fn f() {}\n".to_owned()),
         ],
-    );
+    )
+    .ctx());
     assert_eq!((found.inspected, found.violations), (2, Vec::new()));
 }
 
 #[test]
 fn a_listed_file_over_the_limit_still_has_its_comments_checked() {
     let long_comment = format!("// {}\n", "a".repeat(99));
-    let found = run_on(
+    let found = run(run_on(
         "listed-comment",
         &[
             ("src/parser.rs", format!("{long_comment}{}", lines(650))),
             exceptions("src/parser.rs generated\n"),
         ],
-    );
+    )
+    .ctx());
     let printed: Vec<String> = found.violations.iter().map(ToString::to_string).collect();
     assert_eq!(
         printed,
@@ -199,33 +288,32 @@ fn an_unreadable_listed_file_is_not_called_stale() {
     Scratch::write(dir.join("src/bad.rs"), [0xff, 0xfe, b'\n']).expect("write bytes");
     Scratch::create_dir_all(dir.join("xtask")).expect("create xtask");
     Scratch::write(dir.join(EXCEPTIONS), "src/bad.rs not UTF-8\n").expect("write exceptions");
-    let found = run(&Context {
-        root: dir.to_path_buf(),
-        members: Ok(Vec::new()),
-        load_resolved_graph: false,
-    });
+    let found = run(Repo::new(dir).ctx());
     let paths: Vec<&str> = found.violations.iter().map(|v| v.path.as_str()).collect();
     assert_eq!(paths, ["src/bad.rs"], "{:?}", found.violations);
 }
 
-pub(super) fn not_a_git_repo() -> Inspection {
+pub(super) fn not_a_git_repo() -> Repo {
     let dir = Scratch::new("planted-file-size-not-a-git-repo");
     Scratch::write(dir.join("lib.rs"), "fn f() {}\n").expect("write a source");
-    run(&Context {
-        root: dir.to_path_buf(),
-        members: Ok(Vec::new()),
-        load_resolved_graph: false,
-    })
+    Repo::new(dir)
 }
 
-pub(super) fn only_file_unreadable() -> Inspection {
+pub(super) fn only_file_unreadable() -> Repo {
     let dir = repo("only-file-unreadable", &[]);
     Scratch::write(dir.join("bad.rs"), [0xff, 0xfe, b'\n']).expect("write bytes");
-    run(&Context {
-        root: dir.to_path_buf(),
-        members: Ok(Vec::new()),
-        load_resolved_graph: false,
-    })
+    Repo::new(dir)
+}
+
+#[test]
+fn lines_end_at_lf_crlf_or_a_lone_cr() {
+    assert_eq!(line_count(""), 0);
+    assert_eq!(line_count("a"), 1);
+    assert_eq!(line_count("a\n"), 1);
+    assert_eq!(line_count("a\nb"), 2);
+    assert_eq!(line_count("a\r\nb\r\n"), 2);
+    assert_eq!(line_count("a\rb\rc"), 3);
+    assert_eq!(line_count("\n\r\r\n"), 3);
 }
 
 #[test]

@@ -1,12 +1,12 @@
-//! Planted violations: inputs a check must fail on (the ways around it included) and inputs it
-//! must pass, kept as one list per check so a registry can collect them.
+//! Planted violations: scratch repos a check must fail on (the ways around it included) and repos
+//! it must pass, kept as one list per check, `StaticCheck::planted`, which is the registry.
 //!
 //! Every check keeps them in one place, out of its production file:
 //!
 //! - `<check>/tests/planted.rs` holds the one `cases!` list, declared from `<check>/tests.rs`.
 //!   `cases!` turns the list into `PLANTED`, a `&[Planted]`, and into one `#[test]` per case, so
 //!   `cargo test -p xtask planted` lists `checks::<check>::tests::planted::<case>`.
-//! - The functions that build each case's input live in the check's tests module,
+//! - The functions that build each case's repo live in the check's tests module,
 //!   `<check>/tests.rs`, or in `<check>/tests/cases.rs` when they would push `tests.rs` past 500
 //!   lines. Never in `planted.rs` itself: each case's test takes its name there.
 //!
@@ -22,8 +22,22 @@
 //! The expectation is a variant of `Expect`, written without the type. Every case also states
 //! `inspects N`: how many items its check must report inspecting (`Inspection::inspected`). N is
 //! worked out from what the case's builder writes (the files, rows or crates the check reads),
-//! not copied from a run, so a check that counts what it never read fails its cases. The
-//! functions take no argument and return an `Inspection`.
+//! not copied from a run, so a check that counts what it never read fails its cases.
+//!
+//! A builder takes no argument and returns a `Repo`: a scratch directory holding the case's one
+//! violation (or none) and the `Context` the check runs in. It never runs the check. The harness
+//! does, through `StaticCheck::report`, the same call `cargo xtask check` makes, so no case can
+//! reach an inner function and skip what the whole check does: what it reads, how it counts and
+//! its zero-inspected judging. The registry test in `tests.rs` runs every check in `ALL` on each
+//! of its repos.
+
+#[cfg(test)]
+mod repo;
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+pub(crate) use repo::{Repo, git};
 
 /// What a planted case must produce, judged by the check's own `StaticCheck::judge`.
 #[cfg(test)]
@@ -46,16 +60,22 @@ pub(crate) struct Planted {
     pub expect: Expect,
     /// How many items the check must report inspecting for this input.
     pub inspects: usize,
-    /// Builds the input and runs the check's code on it.
-    pub run: fn() -> Inspection,
+    /// Builds the scratch repo the check runs on.
+    pub repo: fn() -> Repo,
 }
 
 #[cfg(test)]
 impl Planted {
+    /// Builds the case's repo and runs `check` on it as the runner does.
+    pub(crate) fn report(&self, check: &StaticCheck) -> Report {
+        let repo = (self.repo)();
+        check.report(repo.ctx())
+    }
+
     /// Runs the case and judges it as `check`. `Err` says how the result differs from `expect`
     /// and `inspects`; a count that differs is reported first.
     pub(crate) fn verdict(&self, check: &StaticCheck) -> Result<(), String> {
-        let report = check.judge((self.run)());
+        let report = self.report(check);
         let printed = report.printed();
         if self.inspects != report.inspection.inspected {
             return Err(format!(
@@ -109,21 +129,95 @@ pub(crate) fn verify_named(check: &StaticCheck, name: &str) {
     }
 }
 
+/// What is wrong with the planted registry of `checks`, one line each: a check with no planted
+/// case, no failing case or no passing case, a failing case the check passes, and a passing case
+/// it fails. Every case runs through `StaticCheck::report`, on as many threads as the machine
+/// has, since a case that runs cargo takes a tenth of a second.
+#[cfg(test)]
+pub(crate) fn registry_problems(checks: &[StaticCheck]) -> Vec<String> {
+    let mut problems = Vec::new();
+    for check in checks {
+        let name = check.name;
+        if check.planted.is_empty() {
+            problems.push(format!("{name} has no planted cases"));
+            continue;
+        }
+        if !check
+            .planted
+            .iter()
+            .any(|case| case.expect == Expect::Passes)
+        {
+            problems.push(format!("{name} has no planted case that passes"));
+        }
+        if !check
+            .planted
+            .iter()
+            .any(|case| case.expect != Expect::Passes)
+        {
+            problems.push(format!("{name} has no planted case that fails"));
+        }
+    }
+    let cases: Vec<(&StaticCheck, &Planted)> = checks
+        .iter()
+        .flat_map(|check| check.planted.iter().map(move |case| (check, case)))
+        .collect();
+    let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
+    let chunk = cases.len().div_ceil(threads).max(1);
+    std::thread::scope(|scope| {
+        // Every thread starts before the first join, so the cases run side by side.
+        let mut handles = Vec::new();
+        for part in cases.chunks(chunk) {
+            handles.push(scope.spawn(move || {
+                part.iter()
+                    .filter_map(|(check, case)| judged(check, case))
+                    .collect::<Vec<_>>()
+            }));
+        }
+        for handle in handles {
+            let found = handle
+                .join()
+                .expect("a planted case panicked; its own test says why");
+            problems.extend(found);
+        }
+    });
+    problems
+}
+
+/// The registry's problem with `case` of `check`: a failing case with no violation or failure,
+/// or a passing case with one.
+#[cfg(test)]
+fn judged(check: &StaticCheck, case: &Planted) -> Option<String> {
+    let report = case.report(check);
+    match (case.expect, report.failed()) {
+        (Expect::FailsWith(_), false) => Some(format!(
+            "{} found nothing in its planted case `{}`, which holds a violation",
+            check.name, case.name
+        )),
+        (Expect::Passes, true) => Some(format!(
+            "{} failed its planted case `{}`, which holds none:\n{}",
+            check.name,
+            case.name,
+            report.printed().join("\n")
+        )),
+        _ => None,
+    }
+}
+
 /// Makes `PLANTED` and the `planted` test module from one list of cases. See the module docs.
 #[cfg(test)]
 macro_rules! cases {
     ($(
         $(#[doc = $doc:literal])*
-        $name:ident : $expect:ident $( ( $($arg:tt)* ) )? , inspects $inspects:literal => $run:path
+        $name:ident : $expect:ident $( ( $($arg:tt)* ) )? , inspects $inspects:literal => $repo:path
     ),+ $(,)?) => {
-        /// This check's planted cases: inputs it must fail on and inputs it must pass.
+        /// This check's planted cases: repos it must fail on and repos it must pass.
         #[cfg(test)]
         pub(crate) const PLANTED: &[$crate::checks::planted::Planted] = &[$(
             $crate::checks::planted::Planted {
                 name: stringify!($name),
                 expect: $crate::checks::planted::Expect::$expect $( ( $($arg)* ) )?,
                 inspects: $inspects,
-                run: $run,
+                repo: $repo,
             },
         )+];
 
@@ -141,159 +235,6 @@ macro_rules! cases {
 pub(crate) use cases;
 
 #[cfg(test)]
-use crate::checks::{Inspection, StaticCheck};
+use crate::checks::{Report, StaticCheck};
 #[cfg(test)]
 use crate::fix::Fix;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::checks::{Noun, violation};
-
-    fn clean() -> Inspection {
-        Inspection::new(1, Vec::new())
-    }
-
-    fn empty() -> Inspection {
-        Inspection::default()
-    }
-
-    fn one_violation() -> Inspection {
-        Inspection::new(1, vec![violation("a.toml", 2, "bad", Fix::Fake("fix it"))])
-    }
-
-    fn looked_at_nothing() -> Inspection {
-        Inspection::new(0, vec![violation("a.toml", 2, "bad", Fix::Fake("fix it"))])
-    }
-
-    fn stopped() -> Inspection {
-        Inspection::stopped(violation("a.toml", 1, "gone", Fix::Fake("restore it")))
-    }
-
-    fn step_text() -> Inspection {
-        Inspection::new(1, vec![violation("a.toml", 2, "bad", Fix::tool("run it"))])
-    }
-
-    const CHECK: StaticCheck = StaticCheck::fake(
-        "fake",
-        Noun {
-            one: "row",
-            many: "rows",
-        },
-        || "in a.toml".to_owned(),
-        "xtask/src/checks/fake.rs",
-        |_| Inspection::default(),
-    );
-
-    fn verdict(expect: Expect, inspects: usize, run: fn() -> Inspection) -> Result<(), String> {
-        Planted {
-            name: "case",
-            expect,
-            inspects,
-            run,
-        }
-        .verdict(&CHECK)
-    }
-
-    /// A check's fix is its own enum: a step's text fails the case even when it prints as
-    /// expected.
-    #[test]
-    fn a_fix_with_a_step_text_fails_the_case() {
-        assert_eq!(
-            verdict(
-                Expect::FailsWith(&["a.toml:2: bad\n    fix: run it"]),
-                1,
-                step_text
-            ),
-            Err(
-                "the fix `run it` is a step's text; give it a variant in the check's Fix enum"
-                    .to_owned()
-            )
-        );
-    }
-
-    #[test]
-    fn fails_with_needs_the_exact_text() {
-        assert_eq!(
-            verdict(
-                Expect::FailsWith(&["a.toml:2: bad\n    fix: fix it"]),
-                1,
-                one_violation
-            ),
-            Ok(())
-        );
-        assert_eq!(
-            verdict(
-                Expect::FailsWith(&["a.toml:3: bad\n    fix: fix it"]),
-                1,
-                one_violation
-            ),
-            Err("expected these failures:\na.toml:3: bad\n    fix: fix it\nfound:\na.toml:2: bad\n    fix: fix it".to_owned())
-        );
-        assert_eq!(
-            verdict(Expect::FailsWith(&[]), 1, clean),
-            Err("FailsWith needs at least one failure; a case that passes is Passes".to_owned())
-        );
-    }
-
-    /// The failures are those the check judged: a stopped check lists only what stopped it, and a
-    /// check that looked at nothing gets the zero-inspected failure too.
-    #[test]
-    fn fails_with_holds_the_failures_judged_by_the_check() {
-        assert_eq!(
-            verdict(
-                Expect::FailsWith(&["a.toml:1: gone\n    fix: restore it"]),
-                0,
-                stopped
-            ),
-            Ok(())
-        );
-        assert_eq!(
-            verdict(
-                Expect::FailsWith(&["a.toml:2: bad\n    fix: fix it"]),
-                0,
-                looked_at_nothing
-            ),
-            Err("expected these failures:\na.toml:2: bad\n    fix: fix it\nfound:\na.toml:2: bad\n    fix: fix it\n0 rows inspected in a.toml\n    fix: fake looks for rows in a.toml; restore them, or, if they moved, update the consts xtask/src/checks/fake.rs builds that place from".to_owned())
-        );
-    }
-
-    #[test]
-    fn passes_needs_no_violation_and_something_inspected() {
-        assert_eq!(verdict(Expect::Passes, 1, clean), Ok(()));
-        assert_eq!(
-            verdict(Expect::Passes, 1, one_violation),
-            Err("expected a pass, found:\na.toml:2: bad\n    fix: fix it".to_owned())
-        );
-        assert_eq!(
-            verdict(Expect::Passes, 0, empty),
-            Err("expected a pass, found:\n0 rows inspected in a.toml\n    fix: fake looks for rows in a.toml; restore them, or, if they moved, update the consts xtask/src/checks/fake.rs builds that place from".to_owned())
-        );
-    }
-
-    #[test]
-    fn a_count_that_differs_fails_the_case_and_says_both_numbers() {
-        assert_eq!(
-            verdict(Expect::Passes, 1, clean),
-            Ok(()),
-            "a case that states the count it reads passes"
-        );
-        assert_eq!(
-            verdict(Expect::Passes, 2, clean),
-            Err("expected 2 inspected, found 1".to_owned())
-        );
-        assert_eq!(
-            verdict(Expect::Passes, 0, clean),
-            Err("expected 0 inspected, found 1".to_owned())
-        );
-        assert_eq!(
-            verdict(
-                Expect::FailsWith(&["a.toml:2: bad\n    fix: fix it"]),
-                2,
-                one_violation
-            ),
-            Err("expected 2 inspected, found 1".to_owned()),
-            "a count that differs is reported before the failures"
-        );
-    }
-}

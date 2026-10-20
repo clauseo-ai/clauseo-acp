@@ -5,9 +5,9 @@ mod cases;
 pub(super) mod planted;
 
 use super::*;
+use crate::checks::planted::Repo;
 use crate::checks::tests::desktop_context;
 use crate::scratch::Scratch;
-use crate::workspace::Context;
 
 const PATH: &str = "crates/desktop/capabilities/main.json";
 

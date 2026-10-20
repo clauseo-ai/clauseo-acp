@@ -53,6 +53,10 @@ fn pinned(fix: &Fix) -> &'static str {
              commands"
         }
         Fix::BuildRsSyntax => "fix the syntax: cargo cannot build the crate either",
+        Fix::ConfigInCode => {
+            "remove it and put the setting in tauri.conf.json: Tauri reads or merges a config \
+             passed in code past this check"
+        }
     }
 }
 
@@ -73,6 +77,7 @@ fn every_fix_prints_its_pinned_text() {
         Fix::Dangerous,
         Fix::AppManifest,
         Fix::BuildRsSyntax,
+        Fix::ConfigInCode,
     ];
     let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
     assert_eq!(

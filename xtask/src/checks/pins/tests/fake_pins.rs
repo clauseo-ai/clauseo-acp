@@ -1,0 +1,120 @@
+//! Cases of the pins check run with made-up `TOOLS` and `BINARIES` (`cases::TOOLS`,
+//! `cases::BINARIES`), through `inspect`, the whole check but for the pins it is handed. They
+//! were planted cases; the planted harness runs `run`, which reads the real pins, and their
+//! expected text would then repeat the real lefthook and cargo tool versions, a second home for
+//! each that the pins rule forbids.
+
+use super::cases::{self, check_in};
+use crate::checks::planted::Repo;
+
+/// Runs the check with the made-up pins on `repo` and asserts the count and printed failures.
+fn assert_found(repo: &Repo, inspects: usize, expected: &[&str]) {
+    let found = check_in(repo.ctx());
+    let printed: Vec<String> = found.violations.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        (found.inspected, printed),
+        (
+            inspects,
+            expected.iter().map(|line| (*line).to_owned()).collect()
+        )
+    );
+    assert!(found.failures.is_empty(), "{:?}", found.failures);
+}
+
+/// A comment that names another lefthook fails at its line.
+#[test]
+fn lefthook_comment_differs() {
+    assert_found(
+        &cases::lefthook_comment_differs(),
+        2,
+        &[
+            "lefthook.yml:3: the comment names lefthook 9.8.6, not 9.8.7, the version `BINARIES` in \
+     xtask/src/setup.rs pins\n    fix: check that the comment holds for lefthook 9.8.7, then \
+     make it name 9.8.7, the version `BINARIES` in xtask/src/setup.rs pins",
+        ],
+    );
+}
+
+/// A comment after a value counts, in any case, after a quoted string too.
+#[test]
+fn lefthook_comment_after_a_value() {
+    assert_found(
+        &cases::lefthook_comment_after_a_value(),
+        2,
+        &[
+            "lefthook.yml:2: the comment names lefthook 10.0, not 9.8.7, the version `BINARIES` in \
+     xtask/src/setup.rs pins\n    fix: check that the comment holds for lefthook 9.8.7, then \
+     make it name 9.8.7, the version `BINARIES` in xtask/src/setup.rs pins",
+            "lefthook.yml:4: the comment names lefthook 9.0.0, not 9.8.7, the version `BINARIES` in \
+     xtask/src/setup.rs pins\n    fix: check that the comment holds for lefthook 9.8.7, then \
+     make it name 9.8.7, the version `BINARIES` in xtask/src/setup.rs pins",
+        ],
+    );
+}
+
+/// A pinned version, or a major.minor, in a run step fails at its line.
+#[test]
+fn versions_in_run_steps() {
+    assert_found(
+        &cases::versions_in_run_steps(),
+        2,
+        &[
+            ".github/workflows/ci.yml:4: `7.8.9` is the pnpm version `packageManager` in \
+     ui/package.json pins\n    fix: remove the version from the workflow: pnpm/action-setup \
+     with `package_json_file: ui/package.json` installs the pnpm `packageManager` names",
+            ".github/workflows/ci.yml:7: `7.8` is the major.minor of the pnpm version \
+     `packageManager` in ui/package.json pins\n    fix: remove the version from the \
+     workflow: pnpm/action-setup with `package_json_file: ui/package.json` installs the pnpm \
+     `packageManager` names",
+            ".github/workflows/ci.yml:8: `3.4.5` is the Rust version `channel` in rust-toolchain.toml \
+     pins\n    fix: remove the version from the workflow: a `run: rustup toolchain install` \
+     step with no argument installs the toolchain rust-toolchain.toml names",
+            ".github/workflows/ci.yml:9: `5.6.7` is the cargo-fake version `TOOLS` in \
+     xtask/src/setup.rs pins\n    fix: remove the version from the workflow: `cargo xtask \
+     setup --binaries` installs the versions xtask/src/setup.rs pins",
+            ".github/workflows/ci.yml:9: `9.8.7` is the lefthook version `BINARIES` in \
+     xtask/src/setup.rs pins\n    fix: remove the version from the workflow: `cargo xtask \
+     setup --binaries` installs the versions xtask/src/setup.rs pins",
+        ],
+    );
+}
+
+/// A pinned version in an env value, a container, a docker image or another action's
+/// input fails.
+#[test]
+fn versions_in_other_values() {
+    assert_found(
+        &cases::versions_in_other_values(),
+        2,
+        &[
+            ".github/workflows/ci.yml:2: `6.7` is the major.minor of the minimum Node `engines.node` \
+     in ui/package.json sets\n    fix: remove the version from the workflow: \
+     actions/setup-node with `node-version-file: ui/package.json` installs a Node that \
+     `engines.node` allows",
+            ".github/workflows/ci.yml:5: `3.4` is the major.minor of the Rust version `channel` in \
+     rust-toolchain.toml pins\n    fix: remove the version from the workflow: a `run: rustup \
+     toolchain install` step with no argument installs the toolchain rust-toolchain.toml \
+     names",
+            ".github/workflows/ci.yml:7: `3.4.5` is the Rust version `channel` in rust-toolchain.toml \
+     pins\n    fix: remove the version from the workflow: a `run: rustup toolchain install` \
+     step with no argument installs the toolchain rust-toolchain.toml names",
+            ".github/workflows/ci.yml:10: `5.6.7` is the cargo-fake version `TOOLS` in \
+     xtask/src/setup.rs pins\n    fix: remove the version from the workflow: `cargo xtask \
+     setup --binaries` installs the versions xtask/src/setup.rs pins",
+        ],
+    );
+}
+
+/// The `lefthook@<version>` form, in upper case, after a flow sequence, fails at its line.
+#[test]
+fn lefthook_comment_at_form() {
+    assert_found(
+        &cases::lefthook_comment_at_form(),
+        2,
+        &[
+            "lefthook.yml:2: the comment names lefthook 9.8.6, not 9.8.7, the version `BINARIES` \
+             in xtask/src/setup.rs pins\n    fix: check that the comment holds for lefthook \
+             9.8.7, then make it name 9.8.7, the version `BINARIES` in xtask/src/setup.rs pins",
+        ],
+    );
+}

@@ -34,6 +34,8 @@ pub(crate) enum Fix {
     AppManifest,
     /// `build.rs` is not valid Rust.
     BuildRsSyntax,
+    /// `build.rs` passes a Tauri config in code (`config_path`, `TAURI_CONFIG`).
+    ConfigInCode,
 }
 
 impl fmt::Display for Fix {
@@ -87,6 +89,10 @@ impl fmt::Display for Fix {
                  without a manifest Tauri skips the access check for app commands"
             }
             Fix::BuildRsSyntax => "fix the syntax: cargo cannot build the crate either",
+            Fix::ConfigInCode => {
+                "remove it and put the setting in tauri.conf.json: Tauri reads or merges a config \
+                 passed in code past this check"
+            }
         })
     }
 }

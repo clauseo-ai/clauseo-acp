@@ -119,6 +119,51 @@ crate::checks::planted::cases! {
     ]), inspects 2 => super::cases::nested_subfolder,
     /// Files with other extensions (`.DS_Store`, `main.json~`) are skipped and the check passes.
     other_extensions: Passes, inspects 1 => super::cases::other_extensions,
+    /// A TOML string spelling `core:default` with a `\u` escape fails at its key's line.
+    escaped_toml_value: FailsWith(&[
+        "crates/desktop/capabilities/main.toml:3: capability grants `core:default` (written with escapes)\n    \
+         fix: list only the narrow permissions the window needs; `core:default` also grants event emit and \
+         devtools toggling",
+    ]), inspects 1 => super::cases::escaped_toml_value,
+    /// A plain-JSON `.json5` file spelling `core:default` with a `\u` escape fails too.
+    escaped_json5_value: FailsWith(&[
+        "crates/desktop/capabilities/main.json5:3: capability grants `core:default` (written with escapes)\n    \
+         fix: list only the narrow permissions the window needs; `core:default` also grants event emit and \
+         devtools toggling",
+    ]), inspects 1 => super::cases::escaped_json5_value,
+    /// A TOML literal string `'core:default'` fails at its line.
+    toml_literal_string: FailsWith(&[
+        "crates/desktop/capabilities/main.toml:2: capability grants `core:default`\n    \
+         fix: list only the narrow permissions the window needs; `core:default` also grants event emit and \
+         devtools toggling",
+    ]), inspects 1 => super::cases::toml_literal_string,
+    /// A TOML `[remote]` table fails at the table's line.
+    toml_remote_table: FailsWith(&[
+        "crates/desktop/capabilities/main.toml:3: capability file mentions `remote`\n    \
+         fix: remove the remote block, or reword the text: a remote page must never reach the IPC, and \
+         `remote` is matched anywhere",
+    ]), inspects 1 => super::cases::toml_remote_table,
+    /// A scoped permission object granting `fs:allow-read` fails at its identifier.
+    prefix_in_identifier_object: FailsWith(&[
+        "crates/desktop/capabilities/main.json:5: capability grants `fs:allow-read`\n    \
+         fix: do it in Rust behind a validated command; the webview gets no fs, shell, http, opener or dialog permission",
+    ]), inspects 1 => super::cases::prefix_in_identifier_object,
+    /// A file holding a list of capabilities is walked into each one.
+    capability_list_file: FailsWith(&[
+        "crates/desktop/capabilities/main.json:6: capability grants `opener:default`\n    \
+         fix: do it in Rust behind a validated command; the webview gets no fs, shell, http, opener or dialog permission",
+    ]), inspects 1 => super::cases::capability_list_file,
+    /// A hidden `.extra.json`, which Tauri's glob reads, is read too.
+    hidden_file: FailsWith(&[
+        "crates/desktop/capabilities/.extra.json:2: capability grants `http:default`\n    \
+         fix: do it in Rust behind a validated command; the webview gets no fs, shell, http, opener or dialog permission",
+    ]), inspects 2 => super::cases::hidden_file,
+    /// An escaped inline `core:default` in `tauri.conf.json` fails at the `capabilities` key.
+    inline_escaped: FailsWith(&[
+        "crates/desktop/tauri.conf.json:4: capability grants `core:default` (written with escapes)\n    \
+         fix: list only the narrow permissions the window needs; `core:default` also grants event emit and \
+         devtools toggling",
+    ]), inspects 1 => super::cases::inline_escaped,
     /// A desktop crate moved to `apps/shell` is found by its package name, and its file is
     /// reported there.
     moved_crate: FailsWith(&[

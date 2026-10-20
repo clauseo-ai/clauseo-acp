@@ -168,10 +168,11 @@ fn run(ctx: &Context) -> Inspection {
 const CLIPPY_TOML: &str = "clippy.toml";
 
 /// True when `file` (repo-relative) is a file clippy reads its config from: `clippy.toml`, or
-/// `.clippy.toml`, which wins over a `clippy.toml` in the same folder.
+/// `.clippy.toml`, which wins over a `clippy.toml` in the same folder, in any case, since a
+/// filesystem that ignores case (macOS's and Windows' default) opens `Clippy.toml` for them.
 fn is_clippy_config(file: &str) -> bool {
     let name = file.rsplit('/').next().unwrap_or(file);
-    name == CLIPPY_TOML || name == ".clippy.toml"
+    name.eq_ignore_ascii_case(CLIPPY_TOML) || name.eq_ignore_ascii_case(".clippy.toml")
 }
 
 /// True when `row` holds core I/O (`CrateRow::holds_core_io`) with `fs`, `process` or

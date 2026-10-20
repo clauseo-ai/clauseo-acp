@@ -235,11 +235,12 @@ fn no_two_checks_share_a_place() {
     }
 }
 
-/// Every entry in `ALL` is a whole check: a unique name, the file it lives in, a place, and
-/// planted cases that include a pass and a failure. A check left out of `ALL` is caught by the
-/// compiler instead: nothing outside tests reads its `CHECK`, so clippy's dead-code lint fails.
+/// Every entry in `ALL` is a whole check: a unique name, the file it lives in and a place. Its
+/// planted cases are held to the registry rule by `planted::tests`. A check left out of `ALL` is
+/// caught by the compiler instead: nothing outside tests reads its `CHECK`, so clippy's dead-code
+/// lint fails.
 #[test]
-fn every_check_in_all_has_a_unique_name_its_file_a_place_and_planted_cases() {
+fn every_check_in_all_has_a_unique_name_its_file_and_a_place() {
     let root = crate::workspace::workspace_root();
     let mut names = std::collections::BTreeSet::new();
     for check in ALL {
@@ -251,19 +252,6 @@ fn every_check_in_all_has_a_unique_name_its_file_a_place_and_planted_cases() {
             check.source
         );
         assert!(!(check.place)().is_empty(), "{} has no place", check.name);
-        let expects: Vec<planted::Expect> = check.planted.iter().map(|case| case.expect).collect();
-        assert!(
-            expects.contains(&planted::Expect::Passes),
-            "{} has no planted case that passes",
-            check.name
-        );
-        assert!(
-            expects
-                .iter()
-                .any(|expect| matches!(expect, planted::Expect::FailsWith(_))),
-            "{} has no planted case that fails",
-            check.name
-        );
     }
 }
 

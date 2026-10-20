@@ -19,6 +19,7 @@ use macros::*;
 use roots::*;
 
 use super::*;
+use crate::checks::planted::Repo as ScratchRepo;
 use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;
 use crate::workspace::Target;
@@ -164,18 +165,14 @@ fn members(targets: &[(&str, &str)]) -> Vec<Member> {
         .collect()
 }
 
-/// Runs the check on a scratch repo holding `repo`.
-fn run_repo(case: &str, repo: &Repo<'_>) -> Inspection {
+/// The scratch repo holding `repo`, with the members `members` gives.
+fn run_repo(case: &str, repo: &Repo<'_>) -> ScratchRepo {
     let dir = scratch(case, repo);
-    run(&Context {
-        root: dir.to_path_buf(),
-        members: Ok(members(repo.targets)),
-        load_resolved_graph: false,
-    })
+    ScratchRepo::with_members(dir, members(repo.targets))
 }
 
-/// Runs the check with `crate_file` as `crates/protocol/clippy.toml`.
-fn with_crate_file(case: &str, crate_file: &str) -> Inspection {
+/// The repo with `crate_file` as `crates/protocol/clippy.toml`.
+fn with_crate_file(case: &str, crate_file: &str) -> ScratchRepo {
     run_repo(
         case,
         &Repo {
@@ -192,21 +189,21 @@ fn expected(case: &str) -> Expected {
     clippy_toml::load(&dir).expect("the scratch inputs load")
 }
 
-pub(super) fn missing_crate_file() -> Inspection {
+pub(super) fn missing_crate_file() -> ScratchRepo {
     run_repo("missing-crate-file", &Repo::default())
 }
 
-pub(super) fn crate_file_differs() -> Inspection {
+pub(super) fn crate_file_differs() -> ScratchRepo {
     with_crate_file("crate-file-differs", ROOT_TOML)
 }
 
-pub(super) fn crate_file_matches() -> Inspection {
+pub(super) fn crate_file_matches() -> ScratchRepo {
     with_crate_file("crate-file-matches", &expected("crate-file-matches").text)
 }
 
 /// The same tables as the generated file, written as arrays of tables, in another key order
 /// and with comments.
-pub(super) fn crate_file_reformatted() -> Inspection {
+pub(super) fn crate_file_reformatted() -> ScratchRepo {
     with_crate_file(
         "crate-file-reformatted",
         "# written by hand\nmsrv = \"1.99\"\n\
@@ -217,7 +214,7 @@ pub(super) fn crate_file_reformatted() -> Inspection {
     )
 }
 
-pub(super) fn crate_file_not_toml() -> Inspection {
+pub(super) fn crate_file_not_toml() -> ScratchRepo {
     with_crate_file(
         "crate-file-not-toml",
         "msrv = \"1.99\"\ndisallowed-methods = [\n",
@@ -225,7 +222,7 @@ pub(super) fn crate_file_not_toml() -> Inspection {
 }
 
 /// A row whose Never list is `clock` alone needs no file: the root bans both clocks.
-pub(super) fn clock_only_row() -> Inspection {
+pub(super) fn clock_only_row() -> ScratchRepo {
     let architecture = ARCHITECTURE.replace("tauri, fs, process", "clock");
     run_repo(
         "clock-only-row",
@@ -237,7 +234,7 @@ pub(super) fn clock_only_row() -> Inspection {
 }
 
 /// `clauseo-extra` has no row and no file; with protocol's row gone, nothing is held.
-pub(super) fn crate_without_row() -> Inspection {
+pub(super) fn crate_without_row() -> ScratchRepo {
     let architecture = ARCHITECTURE.replace("tauri, fs, process", "tauri");
     run_repo(
         "crate-without-row",
@@ -248,7 +245,7 @@ pub(super) fn crate_without_row() -> Inspection {
     )
 }
 
-pub(super) fn list_missing() -> Inspection {
+pub(super) fn list_missing() -> ScratchRepo {
     run_repo(
         "list-missing",
         &Repo {
@@ -258,7 +255,7 @@ pub(super) fn list_missing() -> Inspection {
     )
 }
 
-pub(super) fn root_missing() -> Inspection {
+pub(super) fn root_missing() -> ScratchRepo {
     run_repo(
         "root-missing",
         &Repo {
@@ -268,7 +265,7 @@ pub(super) fn root_missing() -> Inspection {
     )
 }
 
-pub(super) fn list_unknown_key() -> Inspection {
+pub(super) fn list_unknown_key() -> ScratchRepo {
     run_repo(
         "list-unknown-key",
         &Repo {
@@ -281,7 +278,7 @@ pub(super) fn list_unknown_key() -> Inspection {
     )
 }
 
-pub(super) fn list_entry_problems() -> Inspection {
+pub(super) fn list_entry_problems() -> ScratchRepo {
     run_repo(
         "list-entry-problems",
         &Repo {
@@ -294,7 +291,7 @@ pub(super) fn list_entry_problems() -> Inspection {
     )
 }
 
-pub(super) fn root_array_is_a_string() -> Inspection {
+pub(super) fn root_array_is_a_string() -> ScratchRepo {
     run_repo(
         "root-array-is-a-string",
         &Repo {
@@ -307,25 +304,14 @@ pub(super) fn root_array_is_a_string() -> Inspection {
 #[test]
 fn every_row_counts_when_no_member_is_held() {
     let dir = scratch("count", &Repo::default());
-    let found = run(&Context {
-        root: dir.to_path_buf(),
-        members: Ok(Vec::new()),
-        load_resolved_graph: false,
-    });
+    let found = run(ScratchRepo::new(dir).ctx());
     assert_eq!(found, Inspection::new(3, Vec::new()));
 }
 
 #[test]
 fn a_missing_table_inspects_nothing() {
     let dir = Scratch::new("core-io-no-table");
-    assert_eq!(
-        run(&Context {
-            root: dir.to_path_buf(),
-            members: Ok(Vec::new()),
-            load_resolved_graph: false,
-        }),
-        Inspection::default()
-    );
+    assert_eq!(run(ScratchRepo::new(dir).ctx()), Inspection::default());
 }
 
 /// The Crates table rejects these names in a Never cell (`crates_table.rs`); `time` is the

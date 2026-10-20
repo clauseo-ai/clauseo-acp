@@ -1,17 +1,19 @@
 //! Tests for the `dependencies` check. Each case is a scratch workspace with an `ARCHITECTURE.md`
 //! and path crates; crates under `vendor/` (excluded from the workspace) stand in for registry
-//! crates such as `tauri`, so the real `cargo tree --offline` resolves each crate's graph without
-//! the network. With no lockfile, cargo writes one inside the scratch dir.
+//! crates such as `tauri`, so the check's own `cargo tree --locked --offline` resolves each
+//! crate's graph without the network, once `Repo::resolved` has written the lockfile.
 
 pub(super) mod planted;
 
 use super::*;
 use crate::checks::and_list;
+use crate::checks::planted::Repo;
 use crate::scratch::Scratch;
 use crate::workspace;
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+pub(super) mod bypass;
 pub(super) mod names;
 pub(super) mod table;
 pub(super) mod tree;
@@ -67,28 +69,22 @@ fn tauri() -> (String, String) {
     vendor("tauri", "")
 }
 
-/// Runs the check, graph included, on the workspace in `dir`.
-fn run_on(dir: &Scratch) -> Inspection {
-    let ws = workspace::load(dir).expect("cargo metadata runs");
-    let ctx = Context {
-        root: dir.to_path_buf(),
-        members: Ok(ws),
-        load_resolved_graph: false,
-    };
-    check(&ctx, Some(&["--offline"]))
+/// The workspace in `dir`, which the check reads with its resolved graph on.
+fn run_on(dir: Scratch) -> Repo {
+    Repo::resolved(dir)
 }
 
 /// A workspace whose only member is `clauseo-protocol` with `body`, plus `vendored` crates.
-fn protocol(name: &str, body: &str, vendored: Vec<(String, String)>) -> Inspection {
+fn protocol(name: &str, body: &str, vendored: Vec<(String, String)>) -> Repo {
     let mut crates = vec![(
         "crates/protocol".to_owned(),
         manifest("clauseo-protocol", body),
     )];
     crates.extend(vendored);
-    run_on(&workspace(name, PROTOCOL_ROW, "", &crates))
+    run_on(workspace(name, PROTOCOL_ROW, "", &crates))
 }
 
-pub(super) fn direct() -> Inspection {
+pub(super) fn direct() -> Repo {
     protocol(
         "direct",
         "[dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n",
@@ -96,7 +92,7 @@ pub(super) fn direct() -> Inspection {
     )
 }
 
-pub(super) fn transitive() -> Inspection {
+pub(super) fn transitive() -> Repo {
     protocol(
         "transitive",
         "[dependencies]\nmid = { path = \"../../vendor/mid\" }\n",
@@ -108,7 +104,7 @@ pub(super) fn transitive() -> Inspection {
     )
 }
 
-pub(super) fn build_dependency() -> Inspection {
+pub(super) fn build_dependency() -> Repo {
     protocol(
         "build",
         "[build-dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n",
@@ -116,7 +112,7 @@ pub(super) fn build_dependency() -> Inspection {
     )
 }
 
-pub(super) fn renamed() -> Inspection {
+pub(super) fn renamed() -> Repo {
     protocol(
         "renamed",
         "[dependencies]\nt = { package = \"tauri\", path = \"../../vendor/tauri\" }\n",
@@ -124,7 +120,7 @@ pub(super) fn renamed() -> Inspection {
     )
 }
 
-pub(super) fn target_windows() -> Inspection {
+pub(super) fn target_windows() -> Repo {
     protocol(
         "windows",
         "[target.'cfg(windows)'.dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n",
@@ -132,7 +128,7 @@ pub(super) fn target_windows() -> Inspection {
     )
 }
 
-pub(super) fn inherited() -> Inspection {
+pub(super) fn inherited() -> Repo {
     let crates = [
         (
             "crates/protocol".to_owned(),
@@ -149,10 +145,10 @@ pub(super) fn inherited() -> Inspection {
         "tauri = { path = \"vendor/tauri\" }\n",
         &crates,
     );
-    run_on(&dir)
+    run_on(dir)
 }
 
-pub(super) fn optional_feature() -> Inspection {
+pub(super) fn optional_feature() -> Repo {
     protocol(
         "optional",
         "[dependencies]\ntauri = { path = \"../../vendor/tauri\", optional = true }\n\n[features]\nwindow = [\"dep:tauri\"]\n",
@@ -160,7 +156,7 @@ pub(super) fn optional_feature() -> Inspection {
     )
 }
 
-pub(super) fn no_row() -> Inspection {
+pub(super) fn no_row() -> Repo {
     let crates = [
         (
             "crates/protocol".to_owned(),
@@ -168,10 +164,10 @@ pub(super) fn no_row() -> Inspection {
         ),
         ("crates/store".to_owned(), manifest("clauseo-store", "")),
     ];
-    run_on(&workspace("no-row", PROTOCOL_ROW, "", &crates))
+    run_on(workspace("no-row", PROTOCOL_ROW, "", &crates))
 }
 
-pub(super) fn forbidden_workspace_crate() -> Inspection {
+pub(super) fn forbidden_workspace_crate() -> Repo {
     let rows = "| `host` | sessions | protocol | tauri, agents | exists |\n| `agents` | registry | protocol | tauri | exists |\n";
     let crates = [
         (
@@ -183,10 +179,10 @@ pub(super) fn forbidden_workspace_crate() -> Inspection {
         ),
         ("crates/agents".to_owned(), manifest("clauseo-agents", "")),
     ];
-    run_on(&workspace("workspace-crate", rows, "", &crates))
+    run_on(workspace("workspace-crate", rows, "", &crates))
 }
 
-pub(super) fn comment_after_header() -> Inspection {
+pub(super) fn comment_after_header() -> Repo {
     protocol(
         "comment",
         "[dependencies] # runtime\ntauri = { path = \"../../vendor/tauri\" }\n",
@@ -194,7 +190,7 @@ pub(super) fn comment_after_header() -> Inspection {
     )
 }
 
-pub(super) fn quoted_key() -> Inspection {
+pub(super) fn quoted_key() -> Repo {
     protocol(
         "quoted",
         "[dependencies]\n'tauri' = { path = \"../../vendor/tauri\" }\n",
@@ -202,7 +198,7 @@ pub(super) fn quoted_key() -> Inspection {
     )
 }
 
-pub(super) fn table_header() -> Inspection {
+pub(super) fn table_header() -> Repo {
     protocol(
         "table-header",
         "[dependencies.tauri]\npath = \"../../vendor/tauri\"\n",
@@ -210,7 +206,7 @@ pub(super) fn table_header() -> Inspection {
     )
 }
 
-pub(super) fn dash_package_without_row() -> Inspection {
+pub(super) fn dash_package_without_row() -> Repo {
     let crates = [
         (
             "crates/protocol".to_owned(),
@@ -221,10 +217,10 @@ pub(super) fn dash_package_without_row() -> Inspection {
             manifest("clauseo-fake-agent", ""),
         ),
     ];
-    run_on(&workspace("dash-no-row", PROTOCOL_ROW, "", &crates))
+    run_on(workspace("dash-no-row", PROTOCOL_ROW, "", &crates))
 }
 
-pub(super) fn workspace_crate_spelled_with_dash() -> Inspection {
+pub(super) fn workspace_crate_spelled_with_dash() -> Repo {
     let rows = "| `host` | sessions | protocol | transport_ws | exists |\n| `transport_ws` | dev transport | host | tauri | exists |\n";
     let crates = [
         (
@@ -239,10 +235,10 @@ pub(super) fn workspace_crate_spelled_with_dash() -> Inspection {
             manifest("clauseo-transport-ws", ""),
         ),
     ];
-    run_on(&workspace("dash-workspace", rows, "", &crates))
+    run_on(workspace("dash-workspace", rows, "", &crates))
 }
 
-pub(super) fn crates_io_spelled_with_underscore() -> Inspection {
+pub(super) fn crates_io_spelled_with_underscore() -> Repo {
     let rows = "| `protocol` | events | serde | async-process | exists |\n";
     let crates = [
         (
@@ -254,19 +250,19 @@ pub(super) fn crates_io_spelled_with_underscore() -> Inspection {
         ),
         vendor("async_process", ""),
     ];
-    run_on(&workspace("dash-crates-io", rows, "", &crates))
+    run_on(workspace("dash-crates-io", rows, "", &crates))
 }
 
-pub(super) fn std_module_in_never() -> Inspection {
+pub(super) fn std_module_in_never() -> Repo {
     let rows = "| `protocol` | events | serde | net, tauri | exists |\n";
     let crates = [(
         "crates/protocol".to_owned(),
         manifest("clauseo-protocol", ""),
     )];
-    run_on(&workspace("std-module", rows, "", &crates))
+    run_on(workspace("std-module", rows, "", &crates))
 }
 
-pub(super) fn dev_dependency_passes() -> Inspection {
+pub(super) fn dev_dependency_passes() -> Repo {
     protocol(
         "dev",
         "[dev-dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n",
@@ -274,16 +270,16 @@ pub(super) fn dev_dependency_passes() -> Inspection {
     )
 }
 
-pub(super) fn planned_row_without_crate_is_skipped() -> Inspection {
+pub(super) fn planned_row_without_crate_is_skipped() -> Repo {
     let rows = format!("{PROTOCOL_ROW}| `host` | sessions | protocol | tauri | planned |\n");
     let crates = [(
         "crates/protocol".to_owned(),
         manifest("clauseo-protocol", ""),
     )];
-    run_on(&workspace("planned", &rows, "", &crates))
+    run_on(workspace("planned", &rows, "", &crates))
 }
 
-pub(super) fn clean_workspace_passes() -> Inspection {
+pub(super) fn clean_workspace_passes() -> Repo {
     protocol(
         "clean",
         "[dependencies]\nserde = { path = \"../../vendor/serde\" }\n",
@@ -359,7 +355,7 @@ fn a_package_outside_the_naming_rule_is_told_to_rename() {
         ),
         ("crates/odd".to_owned(), manifest("odd", "")),
     ];
-    let found = run_on(&workspace("odd-name", PROTOCOL_ROW, "", &crates));
+    let found = run(run_on(workspace("odd-name", PROTOCOL_ROW, "", &crates)).ctx());
     assert_eq!(found.inspected, 1);
     assert_eq!(found.violations.len(), 1);
     assert!(
@@ -418,7 +414,7 @@ fn an_entry_whose_line_cannot_be_found_says_so() {
 
 /// A workspace with protocol and desktop, both using a vendored `spec` whose optional `tauri`
 /// sits behind its `tauri` feature; `protocol_spec` and `desktop_spec` are their `spec` lines.
-fn spec_feature(name: &str, protocol_spec: &str, desktop_spec: &str) -> Inspection {
+fn spec_feature(name: &str, protocol_spec: &str, desktop_spec: &str) -> Repo {
     let rows = format!("{PROTOCOL_ROW}| `desktop` | shell | protocol, tauri | | exists |\n");
     let crates = [
         (
@@ -443,10 +439,10 @@ fn spec_feature(name: &str, protocol_spec: &str, desktop_spec: &str) -> Inspecti
         ),
         tauri(),
     ];
-    run_on(&workspace(name, &rows, "", &crates))
+    run_on(workspace(name, &rows, "", &crates))
 }
 
-pub(super) fn feature_turned_on_by_another_crate_passes() -> Inspection {
+pub(super) fn feature_turned_on_by_another_crate_passes() -> Repo {
     spec_feature(
         "spec-desktop",
         "spec = { path = \"../../vendor/spec\" }",
@@ -454,7 +450,7 @@ pub(super) fn feature_turned_on_by_another_crate_passes() -> Inspection {
     )
 }
 
-pub(super) fn feature_turned_on_by_the_crate_itself() -> Inspection {
+pub(super) fn feature_turned_on_by_the_crate_itself() -> Repo {
     spec_feature(
         "spec-protocol",
         "spec = { path = \"../../vendor/spec\", features = [\"tauri\"] }",

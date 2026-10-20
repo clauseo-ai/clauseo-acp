@@ -3,17 +3,17 @@
 //! (`BUILD`), with one thing changed.
 
 use super::*;
-use crate::checks::tests::desktop_context;
+use crate::checks::planted::Repo;
 use crate::scratch::Scratch;
 
-/// Runs the check on a scratch repo whose desktop crate holds `files`, each a name and its bytes.
-fn run_files(case: &str, files: &[(&str, &[u8])]) -> Inspection {
+/// A scratch repo whose desktop crate holds `files`, each a name and its bytes.
+fn run_files(case: &str, files: &[(&str, &[u8])]) -> Repo {
     let dir = Scratch::new(&format!("planted-tauri-config-{case}"));
     Scratch::create_dir_all(dir.join("crates/desktop")).expect("create the desktop dir");
     for (name, bytes) in files {
         Scratch::write(dir.join("crates/desktop").join(name), bytes).expect("write a desktop file");
     }
-    run(&desktop_context(&dir))
+    Repo::desktop(dir)
 }
 
 /// `CONF` with `from` replaced by `to`, once.
@@ -24,7 +24,7 @@ fn edited_conf(from: &str, to: &str) -> String {
 
 /// A desktop crate whose `tauri.conf.json` is `CONF` with `from` replaced by `to`, and whose
 /// `build.rs` is valid.
-fn conf_case(case: &str, from: &str, to: &str) -> Inspection {
+fn conf_case(case: &str, from: &str, to: &str) -> Repo {
     let conf = edited_conf(from, to);
     run_files(
         case,
@@ -33,7 +33,7 @@ fn conf_case(case: &str, from: &str, to: &str) -> Inspection {
 }
 
 /// A desktop crate whose `build.rs` is `build` and whose `tauri.conf.json` is valid.
-fn build_case(case: &str, build: &str) -> Inspection {
+fn build_case(case: &str, build: &str) -> Repo {
     run_files(
         case,
         &[(TAURI_CONF, CONF.as_bytes()), (BUILD_RS, build.as_bytes())],
@@ -41,12 +41,12 @@ fn build_case(case: &str, build: &str) -> Inspection {
 }
 
 /// A desktop crate whose `build.rs` is valid and whose `tauri.conf.json` is `conf`.
-fn raw_conf_case(case: &str, conf: &[u8]) -> Inspection {
+fn raw_conf_case(case: &str, conf: &[u8]) -> Repo {
     run_files(case, &[(TAURI_CONF, conf), (BUILD_RS, BUILD.as_bytes())])
 }
 
 /// The valid desktop crate with a platform config `name` next to its valid files.
-fn platform_case(case: &str, name: &str, text: &str) -> Inspection {
+fn platform_case(case: &str, name: &str, text: &str) -> Repo {
     run_files(
         case,
         &[
@@ -57,14 +57,14 @@ fn platform_case(case: &str, name: &str, text: &str) -> Inspection {
     )
 }
 
-pub(super) fn clean_tree() -> Inspection {
+pub(super) fn clean_tree() -> Repo {
     run_files(
         "clean-tree",
         &[(TAURI_CONF, CONF.as_bytes()), (BUILD_RS, BUILD.as_bytes())],
     )
 }
 
-pub(super) fn app_manifest_with_commands_passes() -> Inspection {
+pub(super) fn app_manifest_with_commands_passes() -> Repo {
     build_case(
         "app-manifest-with-commands",
         &BUILD.replace(
@@ -74,7 +74,7 @@ pub(super) fn app_manifest_with_commands_passes() -> Inspection {
     )
 }
 
-pub(super) fn dev_csp_not_checked() -> Inspection {
+pub(super) fn dev_csp_not_checked() -> Repo {
     conf_case(
         "dev-csp-not-checked",
         &csp_entry(),
@@ -85,7 +85,7 @@ pub(super) fn dev_csp_not_checked() -> Inspection {
     )
 }
 
-pub(super) fn endpoints_with_pubkey_passes() -> Inspection {
+pub(super) fn endpoints_with_pubkey_passes() -> Repo {
     let conf = edited_conf(
         "\"endpoints\": []",
         "\"endpoints\": [\"https://releases.example/latest.json\"]",
@@ -100,7 +100,7 @@ pub(super) fn endpoints_with_pubkey_passes() -> Inspection {
     )
 }
 
-pub(super) fn updater_artifacts_true_passes() -> Inspection {
+pub(super) fn updater_artifacts_true_passes() -> Repo {
     conf_case(
         "updater-artifacts-true",
         "\"icon\": []",
@@ -108,7 +108,7 @@ pub(super) fn updater_artifacts_true_passes() -> Inspection {
     )
 }
 
-pub(super) fn asset_protocol_disabled_passes() -> Inspection {
+pub(super) fn asset_protocol_disabled_passes() -> Repo {
     conf_case(
         "asset-protocol-disabled",
         "\"freezePrototype\": true,",
@@ -116,19 +116,19 @@ pub(super) fn asset_protocol_disabled_passes() -> Inspection {
     )
 }
 
-pub(super) fn conf_missing() -> Inspection {
+pub(super) fn conf_missing() -> Repo {
     run_files("conf-missing", &[(BUILD_RS, BUILD.as_bytes())])
 }
 
-pub(super) fn conf_not_utf8() -> Inspection {
+pub(super) fn conf_not_utf8() -> Repo {
     raw_conf_case("conf-not-utf8", &[0xff, 0xfe, b'{'])
 }
 
-pub(super) fn conf_invalid_json() -> Inspection {
+pub(super) fn conf_invalid_json() -> Repo {
     raw_conf_case("conf-invalid-json", b"{ \"app\": ")
 }
 
-pub(super) fn with_global_tauri_true() -> Inspection {
+pub(super) fn with_global_tauri_true() -> Repo {
     conf_case(
         "with-global-tauri-true",
         "\"withGlobalTauri\": false",
@@ -136,7 +136,7 @@ pub(super) fn with_global_tauri_true() -> Inspection {
     )
 }
 
-pub(super) fn with_global_tauri_missing() -> Inspection {
+pub(super) fn with_global_tauri_missing() -> Repo {
     conf_case(
         "with-global-tauri-missing",
         "\"withGlobalTauri\": false,",
@@ -144,7 +144,7 @@ pub(super) fn with_global_tauri_missing() -> Inspection {
     )
 }
 
-pub(super) fn freeze_prototype_false() -> Inspection {
+pub(super) fn freeze_prototype_false() -> Repo {
     conf_case(
         "freeze-prototype-false",
         "\"freezePrototype\": true",
@@ -152,11 +152,11 @@ pub(super) fn freeze_prototype_false() -> Inspection {
     )
 }
 
-pub(super) fn freeze_prototype_missing() -> Inspection {
+pub(super) fn freeze_prototype_missing() -> Repo {
     conf_case("freeze-prototype-missing", "\"freezePrototype\": true,", "")
 }
 
-pub(super) fn csp_not_pinned() -> Inspection {
+pub(super) fn csp_not_pinned() -> Repo {
     let trimmed = PINNED_CSP.replace("; require-trusted-types-for 'script'", "");
     conf_case(
         "csp-not-pinned",
@@ -165,7 +165,7 @@ pub(super) fn csp_not_pinned() -> Inspection {
     )
 }
 
-pub(super) fn csp_object() -> Inspection {
+pub(super) fn csp_object() -> Repo {
     conf_case(
         "csp-object",
         &csp_entry(),
@@ -173,11 +173,11 @@ pub(super) fn csp_object() -> Inspection {
     )
 }
 
-pub(super) fn csp_not_string() -> Inspection {
+pub(super) fn csp_not_string() -> Repo {
     conf_case("csp-not-string", &csp_entry(), "\"csp\": true")
 }
 
-pub(super) fn csp_missing() -> Inspection {
+pub(super) fn csp_missing() -> Repo {
     conf_case(
         "csp-missing",
         &format!("[\"main\"],\n      {}", csp_entry()),
@@ -185,7 +185,7 @@ pub(super) fn csp_missing() -> Inspection {
     )
 }
 
-pub(super) fn frontend_dist_url() -> Inspection {
+pub(super) fn frontend_dist_url() -> Repo {
     conf_case(
         "frontend-dist-url",
         "\"frontendDist\": \"../../ui/app/dist\"",
@@ -193,7 +193,7 @@ pub(super) fn frontend_dist_url() -> Inspection {
     )
 }
 
-pub(super) fn frontend_dist_list() -> Inspection {
+pub(super) fn frontend_dist_list() -> Repo {
     conf_case(
         "frontend-dist-list",
         "\"frontendDist\": \"../../ui/app/dist\"",
@@ -201,7 +201,7 @@ pub(super) fn frontend_dist_list() -> Inspection {
     )
 }
 
-pub(super) fn app_windows_config_window() -> Inspection {
+pub(super) fn app_windows_config_window() -> Repo {
     conf_case(
         "app-windows-config-window",
         "\"windows\": []",
@@ -209,7 +209,7 @@ pub(super) fn app_windows_config_window() -> Inspection {
     )
 }
 
-pub(super) fn asset_protocol_enabled() -> Inspection {
+pub(super) fn asset_protocol_enabled() -> Repo {
     conf_case(
         "asset-protocol-enabled",
         "\"freezePrototype\": true,",
@@ -217,7 +217,7 @@ pub(super) fn asset_protocol_enabled() -> Inspection {
     )
 }
 
-pub(super) fn updater_endpoints_without_pubkey() -> Inspection {
+pub(super) fn updater_endpoints_without_pubkey() -> Repo {
     conf_case(
         "updater-endpoints-without-pubkey",
         "\"endpoints\": []",
@@ -225,7 +225,7 @@ pub(super) fn updater_endpoints_without_pubkey() -> Inspection {
     )
 }
 
-pub(super) fn whitespace_pubkey_with_endpoints() -> Inspection {
+pub(super) fn whitespace_pubkey_with_endpoints() -> Repo {
     let conf = edited_conf(
         "\"endpoints\": []",
         "\"endpoints\": [\"https://releases.example/latest.json\"]",
@@ -237,7 +237,7 @@ pub(super) fn whitespace_pubkey_with_endpoints() -> Inspection {
     )
 }
 
-pub(super) fn updater_v1_compatible() -> Inspection {
+pub(super) fn updater_v1_compatible() -> Repo {
     conf_case(
         "updater-v1-compatible",
         "\"icon\": []",
@@ -245,7 +245,7 @@ pub(super) fn updater_v1_compatible() -> Inspection {
     )
 }
 
-pub(super) fn dangerous_key_nested() -> Inspection {
+pub(super) fn dangerous_key_nested() -> Repo {
     conf_case(
         "dangerous-key-nested",
         "\"freezePrototype\": true,",
@@ -253,7 +253,7 @@ pub(super) fn dangerous_key_nested() -> Inspection {
     )
 }
 
-pub(super) fn dangerous_key_in_an_array() -> Inspection {
+pub(super) fn dangerous_key_in_an_array() -> Repo {
     conf_case(
         "dangerous-key-in-an-array",
         "\"capabilities\": [\"main\"]",
@@ -261,7 +261,7 @@ pub(super) fn dangerous_key_in_an_array() -> Inspection {
     )
 }
 
-pub(super) fn platform_config_json() -> Inspection {
+pub(super) fn platform_config_json() -> Repo {
     platform_case(
         "platform-config-json",
         "tauri.macos.conf.json",
@@ -269,7 +269,7 @@ pub(super) fn platform_config_json() -> Inspection {
     )
 }
 
-pub(super) fn platform_config_json5() -> Inspection {
+pub(super) fn platform_config_json5() -> Repo {
     platform_case(
         "platform-config-json5",
         "tauri.linux.conf.json5",
@@ -277,7 +277,7 @@ pub(super) fn platform_config_json5() -> Inspection {
     )
 }
 
-pub(super) fn platform_config_toml() -> Inspection {
+pub(super) fn platform_config_toml() -> Repo {
     platform_case(
         "platform-config-toml",
         "Tauri.windows.toml",
@@ -285,53 +285,53 @@ pub(super) fn platform_config_toml() -> Inspection {
     )
 }
 
-pub(super) fn build_rs_missing() -> Inspection {
+pub(super) fn build_rs_missing() -> Repo {
     run_files("build-rs-missing", &[(TAURI_CONF, CONF.as_bytes())])
 }
 
-pub(super) fn build_rs_without_app_manifest() -> Inspection {
+pub(super) fn build_rs_without_app_manifest() -> Repo {
     build_case(
         "build-rs-without-app-manifest",
         "fn main() {\n    tauri_build::build();\n}\n",
     )
 }
 
-pub(super) fn app_manifest_new_not_passed() -> Inspection {
+pub(super) fn app_manifest_new_not_passed() -> Repo {
     build_case(
         "app-manifest-new-not-passed",
         "fn main() {\n    let _ = tauri_build::AppManifest::new();\n    tauri_build::build();\n}\n",
     )
 }
 
-pub(super) fn app_manifest_without_new() -> Inspection {
+pub(super) fn app_manifest_without_new() -> Repo {
     build_case(
         "app-manifest-without-new",
         "fn main() {\n    tauri_build::try_build(\n        tauri_build::Attributes::new().app_manifest(manifest()),\n    );\n}\n",
     )
 }
 
-pub(super) fn app_manifest_only_in_block_comment() -> Inspection {
+pub(super) fn app_manifest_only_in_block_comment() -> Repo {
     build_case(
         "app-manifest-only-in-block-comment",
         "/*\n    tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new())\n*/\nfn main() {\n    tauri_build::build();\n}\n",
     )
 }
 
-pub(super) fn app_manifest_only_in_line_comment() -> Inspection {
+pub(super) fn app_manifest_only_in_line_comment() -> Repo {
     build_case(
         "app-manifest-only-in-line-comment",
         "// tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new());\nfn main() {\n    tauri_build::build();\n}\n",
     )
 }
 
-pub(super) fn manifest_new_in_trailing_comment() -> Inspection {
+pub(super) fn manifest_new_in_trailing_comment() -> Repo {
     build_case(
         "manifest-new-in-trailing-comment",
         "fn main() {\n    let a = tauri_build::Attributes::new().app_manifest(manifest()); // tauri_build::AppManifest::new()\n}\n",
     )
 }
 
-pub(super) fn app_manifest_in_string_only() -> Inspection {
+pub(super) fn app_manifest_in_string_only() -> Repo {
     build_case(
         "app-manifest-in-string-only",
         r#"fn main() {
@@ -342,18 +342,18 @@ pub(super) fn app_manifest_in_string_only() -> Inspection {
     )
 }
 
-pub(super) fn app_manifest_only_defined() -> Inspection {
+pub(super) fn app_manifest_only_defined() -> Repo {
     build_case(
         "app-manifest-only-defined",
         "fn main() {\n    let _ = tauri_build::AppManifest::new();\n    tauri_build::build();\n}\nfn app_manifest(_manifest: tauri_build::AppManifest) {}\n",
     )
 }
 
-pub(super) fn build_rs_not_valid_rust() -> Inspection {
+pub(super) fn build_rs_not_valid_rust() -> Repo {
     build_case("build-rs-not-valid-rust", "fn main() {\n    let x = ;\n}\n")
 }
 
-pub(super) fn build_rs_not_utf8() -> Inspection {
+pub(super) fn build_rs_not_utf8() -> Repo {
     run_files(
         "build-rs-not-utf8",
         &[
@@ -363,16 +363,100 @@ pub(super) fn build_rs_not_utf8() -> Inspection {
     )
 }
 
-pub(super) fn desktop_crate_missing() -> Inspection {
+pub(super) fn desktop_crate_missing() -> Repo {
     let dir = Scratch::new("planted-tauri-config-desktop-crate-missing");
-    run(&Context {
-        root: dir.to_path_buf(),
-        members: Ok(Vec::new()),
-        load_resolved_graph: false,
-    })
+    Repo::new(dir)
 }
 
 /// The desktop crate with neither tauri.conf.json nor build.rs: the check looks and finds none.
-pub(super) fn both_config_files_missing() -> Inspection {
+pub(super) fn both_config_files_missing() -> Repo {
     run_files("both-config-files-missing", &[])
+}
+pub(super) fn platform_config_android() -> Repo {
+    platform_case(
+        "platform-config-android",
+        "tauri.android.conf.json",
+        "{\"app\":{\"withGlobalTauri\":true}}",
+    )
+}
+
+pub(super) fn platform_config_ios_toml() -> Repo {
+    platform_case(
+        "platform-config-ios-toml",
+        "Tauri.ios.toml",
+        "[app]\nwithGlobalTauri = true\n",
+    )
+}
+
+/// A platform config named in capitals: a macOS or Windows disk hands it to Tauri all the same.
+pub(super) fn platform_config_other_case() -> Repo {
+    platform_case(
+        "platform-config-other-case",
+        "TAURI.MACOS.CONF.JSON",
+        "{\"app\":{\"withGlobalTauri\":true}}",
+    )
+}
+
+/// `tauri.conf.json5` as the only main config: Tauri reads it when `tauri.conf.json` is missing.
+pub(super) fn main_config_json5_only() -> Repo {
+    run_files(
+        "main-config-json5-only",
+        &[
+            ("tauri.conf.json5", b"{ app: { withGlobalTauri: true } }"),
+            (BUILD_RS, BUILD.as_bytes()),
+        ],
+    )
+}
+
+/// `Tauri.toml` as the only main config: Tauri reads it when `tauri.conf.json` is missing.
+pub(super) fn main_config_toml_only() -> Repo {
+    run_files(
+        "main-config-toml-only",
+        &[
+            ("Tauri.toml", b"[app]\nwithGlobalTauri = true\n"),
+            (BUILD_RS, BUILD.as_bytes()),
+        ],
+    )
+}
+
+/// `withGlobalTauri` written twice, the safe value first: the last one wins, as in Tauri.
+pub(super) fn duplicate_key_unsafe_last() -> Repo {
+    conf_case(
+        "duplicate-key-unsafe-last",
+        "\"withGlobalTauri\": false,",
+        "\"withGlobalTauri\": false,\n    \"withGlobalTauri\": true,",
+    )
+}
+
+/// `Attributes::config_path` points tauri-build at another config, on line 3.
+pub(super) fn build_rs_config_path() -> Repo {
+    build_case(
+        "build-rs-config-path",
+        &BUILD.replace(
+            "tauri_build::Attributes::new()",
+            "tauri_build::Attributes::new().config_path(\"other.conf.json\")",
+        ),
+    )
+}
+
+/// `build.rs` sets `TAURI_CONFIG`, which tauri-build merges over `tauri.conf.json`, on line 2.
+pub(super) fn build_rs_sets_env_config() -> Repo {
+    build_case(
+        "build-rs-sets-env-config",
+        &BUILD.replace(
+            "fn main() {\n",
+            "fn main() {\n    unsafe { std::env::set_var(\"TAURI_CONFIG\", \"{}\") };\n",
+        ),
+    )
+}
+
+/// `build.rs` hands `TAURI_CONFIG` to rustc, so `generate_context!` merges it, on line 2.
+pub(super) fn build_rs_rustc_env_config() -> Repo {
+    build_case(
+        "build-rs-rustc-env-config",
+        &BUILD.replace(
+            "fn main() {\n",
+            "fn main() {\n    println!(\"cargo:rustc-env=TAURI_CONFIG={{}}\");\n",
+        ),
+    )
 }

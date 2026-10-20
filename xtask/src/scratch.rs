@@ -19,21 +19,26 @@ use std::fs::{File, OpenOptions, Permissions};
 use std::io;
 use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// The start of every scratch directory's name.
 const PREFIX: &str = "xtask-";
 
-/// An empty directory `xtask-<name>-<pid>` under the temp dir, removed on drop.
+/// Numbers the scratch directories of this process, so one name asked for twice at once (a
+/// planted case run by its own test and by the registry test, on two threads) gets two.
+static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+/// An empty directory `xtask-<name>-<pid>-<n>` under the temp dir, removed on drop.
 pub(crate) struct Scratch(PathBuf);
 
 impl Scratch {
     /// Makes the directory, clearing what a killed earlier run left under the same name.
     ///
-    /// `name` must be unique per test, across all of xtask's tests. `cargo test` runs tests as
-    /// threads of one process, so two tests sharing a name would share a pid too, and each would
-    /// wipe the other's directory. Start it with the module, e.g. `buildtime-stray`.
+    /// Start `name` with the module, e.g. `buildtime-stray`, so a directory left behind says
+    /// which test made it. The pid and a per-process number keep two directories apart.
     pub(crate) fn new(name: &str) -> Scratch {
-        let dir = std::env::temp_dir().join(format!("{PREFIX}{name}-{}", std::process::id()));
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("{PREFIX}{name}-{}-{n}", std::process::id()));
         if dir.exists() {
             fs::remove_dir_all(&dir).expect("clear the old scratch dir");
         }
