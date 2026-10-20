@@ -1,6 +1,8 @@
 //! View entries and patches: boxed large variants, entry ids, and how an entry's inline cost
 //! counts.
 
+#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
+
 #[cfg(test)]
 #[path = "support/fixtures.rs"]
 pub mod fixtures;

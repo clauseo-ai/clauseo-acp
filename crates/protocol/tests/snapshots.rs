@@ -4,6 +4,7 @@
 //! has the same name), and the match that names each variant's test. That match has no wildcard
 //! arm, so a new variant fails to compile until it has a row, and that row carries its example.
 
+#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
 #![deny(clippy::wildcard_enum_match_arm)]
 
 #[cfg(test)]

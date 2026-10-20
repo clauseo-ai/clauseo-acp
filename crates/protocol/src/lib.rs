@@ -66,6 +66,7 @@
 //! `command/validate.rs` for commands and their limits, `query.rs`, `view.rs` (entries in
 //! `view/entry.rs`) and `patch.rs` for what subscribers receive.
 
+#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
 #![deny(
     clippy::indexing_slicing,
     clippy::string_slice,

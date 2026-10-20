@@ -9,6 +9,7 @@
 //! - `#[serde(other)] Unknown`: the variant stays, written back as the string `"unknown"`.
 //!
 //! An app that exports these types must use the same rewrite.
+#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
 #![cfg(feature = "specta")]
 
 use std::borrow::Cow;

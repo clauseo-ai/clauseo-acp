@@ -1,6 +1,8 @@
 //! `docs/ui-states.md` names every variant the UI must have a state for. This test keeps the list
 //! true: each variant of the listed enums appears in the document as `` `Type::Variant` ``.
 
+#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
+
 use clauseo_protocol::{
     CheckpointKind, Delivery, ElicitationOutcome, ErrorCode, ExpiryReason, LimitSource,
     PermissionKind, SkippedFileReason, SteerOutcome, StopReason, ThreadStatus, ToolCallStatus,

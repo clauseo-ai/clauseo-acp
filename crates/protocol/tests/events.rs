@@ -1,6 +1,8 @@
 //! Events: the envelope and `DomainEvent` on the wire, in JSON and in `MessagePack`, and the
 //! enums that decode values a newer Clauseo may add.
 
+#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
+
 #[cfg(test)]
 #[path = "support/fixtures.rs"]
 pub mod fixtures;

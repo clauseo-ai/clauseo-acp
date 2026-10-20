@@ -1,5 +1,7 @@
 //! Text costs: `escaped_len`, `utf16_len`, `TextOrBlob::inline_len`, previews and blob refs.
 
+#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
+
 use clauseo_protocol::{
     BlobHash, BlobRef, PREVIEW_BYTES, TextOrBlob, escaped_len, preview, utf16_len,
 };

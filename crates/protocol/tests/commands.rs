@@ -1,6 +1,8 @@
 //! Commands and queries: unknown fields refused, the shape limits `validate()` checks, and how
 //! a prompt's delivery is read.
 
+#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
+
 #[cfg(test)]
 #[path = "support/fixtures.rs"]
 pub mod fixtures;

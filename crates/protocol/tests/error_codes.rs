@@ -2,6 +2,8 @@
 //! in step with `ErrorCode`: every code has a row, every row names a known code, and the
 //! retryable column matches `ErrorCode::is_retryable`.
 
+#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]
+
 use std::collections::BTreeSet;
 
 use clauseo_protocol::ErrorCode;
