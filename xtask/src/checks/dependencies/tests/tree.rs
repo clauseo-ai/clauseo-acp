@@ -148,12 +148,15 @@ fn a_registry_declaration_is_matched_to_the_version_its_requirement_allows() {
     let stdout =
         "clauseo-protocol v0.1.0 []\n|-- s v1.4.0 []\n`-- s v2.0.0 []\n    `-- b v1.0.0 []\n";
     let tree = Tree::parse(stdout, "clauseo-protocol").expect("the tree parses");
-    let deps = r#"{"features": {}, "dependencies": [
+    let dependencies = r#"[
         {"name": "s", "rename": "s1", "kind": null, "target": "cfg(unix)", "optional": false,
          "features": [], "req": "^1"},
         {"name": "s", "rename": "s2", "kind": null, "target": "cfg(windows)", "optional": false,
-         "features": [], "req": "^2"}]}"#;
-    let deps = serde_json::from_str(deps).expect("the metadata parses");
+         "features": [], "req": "^2"}]"#;
+    let deps = crate::workspace::PackageDependencies {
+        dependencies: serde_json::from_str(dependencies).expect("the metadata parses"),
+        features: std::collections::BTreeMap::new(),
+    };
     let row = CrateRow {
         line: 7,
         name: "protocol".to_owned(),
