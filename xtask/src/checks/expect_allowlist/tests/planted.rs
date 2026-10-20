@@ -160,6 +160,21 @@ crate::checks::planted::cases! {
          fix: restore xtask/expect-allowlist.txt, one \"<path> <item> <lint>\" line per #[expect] \
          site; the check matches the sites against it only once it is there",
     ]), inspects 1 => super::missing_allowlist,
+    /// A tracked `.rs` file that is not UTF-8 is unread: the check says why, and counts none.
+    rust_file_not_utf8: FailsWith(&[
+        "src/a.rs:1: could not read `src/a.rs`: stream did not contain valid UTF-8\n    \
+         fix: make the file readable as UTF-8 text",
+    ]), inspects 0 => super::rust_file_not_utf8,
+    /// A repo with no Rust file inspects none: the stale entry is printed, and the zero line
+    /// gives the normal fix beside it.
+    no_rust_file: FailsWith(&[
+        "xtask/expect-allowlist.txt:2: stale entry: src/a.rs has no #[expect(dead_code)] in \
+         `f`\n    fix: delete line 2 of xtask/expect-allowlist.txt",
+        "0 Rust files inspected in the repo, matched against xtask/expect-allowlist.txt\n    \
+         fix: expect-allowlist looks for Rust files in the repo, matched against \
+         xtask/expect-allowlist.txt; restore them, or, if they moved, update the consts \
+         xtask/src/checks/expect_allowlist.rs builds that place from",
+    ]), inspects 0 => super::no_rust_file,
     /// An untracked file that `.gitignore` does not exclude counts, and so does an upper-case
     /// `.RS`.
     untracked_upper_case_rs: FailsWith(&[

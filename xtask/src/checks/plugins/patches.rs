@@ -74,6 +74,7 @@ fn spec_name(spec: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::checks::toml_lines::Patch;
 
     #[test]
     fn a_spec_names_its_package() {
@@ -87,5 +88,18 @@ mod tests {
             "tauri"
         );
         assert_eq!(spec_name("https://github.com/tauri-apps/tao.git"), "tao");
+    }
+
+    /// A `[patch]` key is a package name, read whole; only a `[replace]` key is a spec.
+    #[test]
+    fn a_patch_key_is_a_package_name_and_a_replace_key_a_spec() {
+        let patch = |table: &str| Patch {
+            table: table.to_owned(),
+            key: "tauri:2.0.0".to_owned(),
+            package: None,
+            line: 1,
+        };
+        assert_eq!(patched_package(&patch("[patch.crates-io]")), "tauri:2.0.0");
+        assert_eq!(patched_package(&patch("[replace]")), "tauri");
     }
 }

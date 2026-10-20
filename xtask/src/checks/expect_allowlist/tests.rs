@@ -339,3 +339,25 @@ fn an_outer_allow_names_the_outer_form_in_its_fix() {
          \"src/a.rs f unused\" to xtask/expect-allowlist.txt (the code owner approves it)"
     );
 }
+
+/// A tracked `.rs` file that is not UTF-8: it is unread, so no site is counted.
+pub(super) fn rust_file_not_utf8() -> Repo {
+    let dir = Scratch::new("planted-expect-allowlist-rust-file-not-utf8");
+    git(&dir, &["init", "-q"]);
+    Scratch::create_dir_all(dir.join("xtask")).expect("create the folder");
+    Scratch::write(dir.join(ALLOWLIST), HEADER).expect("write the allowlist");
+    Scratch::create_dir_all(dir.join("src")).expect("create the folder");
+    Scratch::write(dir.join("src/a.rs"), b"fn f() {}\xff\n").expect("write a.rs");
+    git(&dir, &["add", "-A"]);
+    Repo::new(dir)
+}
+
+/// A repo with no Rust file, whose allowlist has one entry: that entry is stale, and the zero
+/// count is still reported beside it.
+pub(super) fn no_rust_file() -> Repo {
+    run_files(
+        "no-rust-file",
+        &[(ALLOWLIST, "# expect allowlist\nsrc/a.rs f dead_code\n")],
+        &[],
+    )
+}
