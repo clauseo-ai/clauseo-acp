@@ -96,7 +96,7 @@ pub(super) fn problems(file: &str, scan: &Scan) -> Vec<Violation> {
         .iter()
         .filter(|span| span.text != TOOL)
         .map(|span| {
-            let text = continued("", &span.text).unwrap_or(&span.text);
+            let text = without_continuation("", &span.text).unwrap_or(&span.text);
             (span.line, text.to_owned())
         });
     spans
@@ -124,7 +124,7 @@ fn read_texts(code: &[CodeLine]) -> Vec<(u32, String)> {
         let mut piece = read;
         let mut line = first.line;
         loop {
-            let Some(rest) = continued(&first.info, piece) else {
+            let Some(rest) = without_continuation(&first.info, piece) else {
                 text.push_str(piece);
                 break;
             };
@@ -133,7 +133,7 @@ fn read_texts(code: &[CodeLine]) -> Vec<(u32, String)> {
                 break;
             };
             text.push(' ');
-            piece = continued_text(&next.info, &next.text);
+            piece = next_line_text(&next.info, &next.text);
             line = next.line;
             index += 1;
         }
@@ -154,9 +154,9 @@ fn read_line<'a>(info: &str, line: &'a str) -> Option<&'a str> {
     }
 }
 
-/// The text of a line that continues a read line in a block whose info word is `info`. In a
+/// The text of a line that continues a read line, in a block whose info word is `info`. In a
 /// session block it is read after a leading `> ` or `>> `, prompted or not.
-fn continued_text<'a>(info: &str, line: &'a str) -> &'a str {
+fn next_line_text<'a>(info: &str, line: &'a str) -> &'a str {
     if is_one_of(info, &SESSIONS) {
         let text = line.trim_start();
         text.strip_prefix(">> ")
@@ -169,18 +169,18 @@ fn continued_text<'a>(info: &str, line: &'a str) -> &'a str {
 
 /// The text of `line`, a read line of a block whose info word is `info`, without the continuation
 /// character that ends it, or `None` when the line does not continue.
-fn continued<'a>(info: &str, line: &'a str) -> Option<&'a str> {
+fn without_continuation<'a>(info: &str, line: &'a str) -> Option<&'a str> {
     let mark = continuation(info);
     let line = line.trim_end();
     let run = line.chars().rev().take_while(|&c| c == mark).count();
     let rest = line.strip_suffix(mark)?;
-    let outside = is_one_of(info, &CMDS) || ends_outside_comment(rest);
+    let outside = is_one_of(info, &CMDS) || ends_outside_comment_and_quotes(rest);
     (run % 2 == 1 && outside).then_some(rest)
 }
 
 /// True when the end of `text` is outside a comment and outside quotes. `shlex` splits `text`
 /// with a sentinel word after it, and that word is the last word only then.
-fn ends_outside_comment(text: &str) -> bool {
+fn ends_outside_comment_and_quotes(text: &str) -> bool {
     let words = shlex::split(&format!("{text} x")).unwrap_or_default();
     words.last().is_some_and(|word| word == "x")
 }
