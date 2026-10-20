@@ -10,6 +10,7 @@
 //! are blamed, each by its own key. When there are several, the violation names each line and
 //! says what is known about them (`checks::graph::blame`).
 
+use super::Fix;
 use crate::checks::and_list;
 use crate::checks::crates_table::{self, CrateRow};
 use crate::checks::graph::{self, Tree};
@@ -109,11 +110,6 @@ fn violation_for(krate: &Crate<'_>, tree: &Tree, blame: &Blame<'_>) -> Violation
         }
         _ => String::new(),
     };
-    let features = if blamed.optional {
-        " and every `[features]` item that enables it"
-    } else {
-        ""
-    };
     let (message, fix) = if let [_, _, ..] = lines.as_slice() {
         let at = blamed.lines_text();
         (
@@ -122,12 +118,15 @@ fn violation_for(krate: &Crate<'_>, tree: &Tree, blame: &Blame<'_>) -> Violation
                 krate.package,
                 blamed.declared(krate.manifest, package)
             ),
-            format!(
-                "move the code that uses {quoted} into a crate whose row allows {package}, then remove {quoted} from lines {at} of {manifest}{features}: the row at ARCHITECTURE.md:{row} says {krate} never depends on {package}",
-                manifest = krate.manifest,
-                row = krate.row.line,
-                krate = krate.package,
-            ),
+            Fix::MoveFromLines {
+                keys: quoted,
+                package: package.to_owned(),
+                lines: at,
+                manifest: krate.manifest.to_owned(),
+                features: blamed.optional,
+                row: krate.row.line,
+                krate: krate.package.to_owned(),
+            },
         )
     } else {
         let unlocated = if lines.is_empty() {
@@ -143,12 +142,14 @@ fn violation_for(krate: &Crate<'_>, tree: &Tree, blame: &Blame<'_>) -> Violation
                 "{} depends on {package}{through}, which ARCHITECTURE.md forbids{unlocated}",
                 krate.package
             ),
-            format!(
-                "move the code that uses {quoted} into a crate whose row allows {package}, then remove {quoted}{features} from {manifest}: the row at ARCHITECTURE.md:{row} says {krate} never depends on {package}",
-                manifest = krate.manifest,
-                row = krate.row.line,
-                krate = krate.package,
-            ),
+            Fix::MoveFromManifest {
+                keys: quoted,
+                package: package.to_owned(),
+                manifest: krate.manifest.to_owned(),
+                features: blamed.optional,
+                row: krate.row.line,
+                krate: krate.package.to_owned(),
+            },
         )
     };
     violation(

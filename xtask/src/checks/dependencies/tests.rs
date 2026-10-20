@@ -321,7 +321,7 @@ fn a_lockfile_behind_the_manifests_fails_with_no_file_line_without_rewriting_it(
     assert_eq!(found.failures.len(), 1);
     let failure = &found.failures[0];
     assert!(
-        failure.fix.contains("cargo update --workspace"),
+        failure.fix.to_string().contains("cargo update --workspace"),
         "{failure}"
     );
     let after = fs::read_to_string(dir.join("Cargo.lock")).expect("the lockfile is still there");
@@ -365,6 +365,7 @@ fn a_package_outside_the_naming_rule_is_told_to_rename() {
     assert!(
         found.violations[0]
             .fix
+            .to_string()
             .starts_with("rename the package to `clauseo-`")
     );
 }

@@ -105,7 +105,7 @@ fn run(ctx: &Context) -> Inspection {
         }
         Ok(None) => failures.push(Failure {
             message: format!("{ALLOWLIST} is missing, so no #[expect] site was matched against it"),
-            fix: Fix::MissingAllowlist.to_string(),
+            fix: Fix::MissingAllowlist.into(),
         }),
         Err(violation) => violations.push(violation),
     }
@@ -149,14 +149,14 @@ fn site_violation(file: &str, site: &Site, expects: &mut Vec<Expect>) -> Option<
                 file,
                 site.line,
                 format!("#{bang}[allow({lint})] silences a lint; only #[expect] with a reason may"),
-                fix.to_string(),
+                fix,
             ))
         }
         Kind::EmptyAllow => Some(checks::violation(
             file,
             site.line,
             "an allow attribute that names no lint",
-            Fix::EmptyAllow.to_string(),
+            Fix::EmptyAllow,
         )),
     }
 }
@@ -170,7 +170,7 @@ fn unparsable(file: &str, error: &syn::Error) -> Violation {
         file,
         line,
         format!("`{file}` is not valid Rust: {error}"),
-        Fix::Unparsable.to_string(),
+        Fix::Unparsable,
     )
 }
 
@@ -198,7 +198,7 @@ fn parse(text: &str) -> (Vec<Entry>, Vec<Violation>) {
                     "this line has {} fields; a line is \"<path> <item> <lint>\"",
                     fields.len()
                 ),
-                Fix::Malformed.to_string(),
+                Fix::Malformed,
             ));
         }
     }
@@ -257,7 +257,7 @@ fn unlisted(site: &Expect, listed: usize, count: usize) -> Violation {
         item: item.clone(),
         lint: lint.clone(),
     };
-    checks::violation(path, site.line, message, fix.to_string())
+    checks::violation(path, site.line, message, fix)
 }
 
 /// Where a site of `item` is, for a message: in `f`, or at the top of the file for `-`.
@@ -287,7 +287,7 @@ fn stale(key: &Key, line: u32, present: usize, count: usize) -> Violation {
             if present == 1 { "site" } else { "sites" }
         )
     };
-    checks::violation(ALLOWLIST, line, message, Fix::Stale { line }.to_string())
+    checks::violation(ALLOWLIST, line, message, Fix::Stale { line })
 }
 
 /// `once`, `twice`, `N times`.

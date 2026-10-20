@@ -30,6 +30,7 @@ mod changes;
 mod check;
 mod checks;
 mod clock;
+mod fix;
 mod output;
 mod parse;
 mod process;

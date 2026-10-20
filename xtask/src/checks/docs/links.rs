@@ -7,6 +7,7 @@
 //! A label defined twice (`[e]: a.md` and later `[e]: nope.md`) is read once: pulldown-cmark's
 //! `reference_definitions()` keeps only the first definition, so a broken repeat is never read.
 
+use super::Fix;
 use super::markdown::Link;
 use super::tree::{self, Tree};
 use crate::checks::violation;
@@ -38,13 +39,13 @@ fn problem(tree: &Tree, root: &Path, file: &str, link: &Link) -> Option<Violatio
                     "the relative link `{path}` does not resolve: {}",
                     found.reason(&rel)
                 ),
-                "link a file git tracks, or remove the link",
+                Fix::LinkTrackedFile,
             )),
             None => Some(violation(
                 file,
                 link.line,
                 format!("the relative link `{path}` does not resolve: `{rel}` does not exist"),
-                format!("create `{rel}`, or correct or remove the link"),
+                Fix::CreateOrCorrectLink { path: rel },
             )),
         },
         Target::Outside { private: true } => None,
@@ -52,7 +53,7 @@ fn problem(tree: &Tree, root: &Path, file: &str, link: &Link) -> Option<Violatio
             file,
             link.line,
             format!("the relative link `{path}` leaves the repo"),
-            "point it at a file inside the repo, or remove it",
+            Fix::PointInside,
         )),
     }
 }

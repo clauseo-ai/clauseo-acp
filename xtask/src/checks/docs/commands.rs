@@ -18,6 +18,7 @@
 //! skipped, followed by `xtask`, starts a command. The words after `xtask` stop at shell syntax
 //! and parse against the clap tree in `main.rs`.
 
+use super::Fix;
 use super::markdown::{CodeLine, Scan};
 use crate::Cli;
 use crate::checks::violation;
@@ -27,20 +28,6 @@ use clap::error::{Error, ErrorKind};
 
 /// The longest clap first line that the message repeats. A longer one is left out.
 const SHORT: usize = 80;
-
-/// The one fix for every command that does not parse, as a literal the planted cases can
-/// `concat!`.
-macro_rules! command_fix {
-    () => {
-        "correct it to a command that `cargo xtask --help` lists (`cargo xtask <command> --help` \
-         lists its flags), or remove it"
-    };
-}
-#[cfg(test)]
-pub(super) use command_fix;
-
-/// The one fix for every command that does not parse.
-const FIX: &str = command_fix!();
 
 /// What ends a word as shell syntax: a redirection (`2>&1`, `> out`, `<`), a closing parenthesis
 /// or backtick, and an operator glued to the word (`check;`, `check&`).
@@ -314,7 +301,7 @@ fn problem(file: &str, line: u32, command: &Command) -> Option<Violation> {
         file,
         line,
         format!("the xtask command `{shown}` does not parse{detail}"),
-        FIX,
+        Fix::CorrectCommand,
     ))
 }
 

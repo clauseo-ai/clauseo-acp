@@ -26,7 +26,7 @@ pub(super) fn read(root: &Path, found: &mut Inspection) -> Homes {
         read.map_err(|cause| {
             found.failures.push(Failure {
                 message: format!("could not read {what} from {file}: {cause}"),
-                fix: Fix::Unread(unread).to_string(),
+                fix: Fix::Unread(unread).into(),
             });
         })
         .ok()

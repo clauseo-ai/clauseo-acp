@@ -385,7 +385,7 @@ mod tests {
         assert_eq!(findings.len(), 1);
         assert!(findings[0].is_error);
         assert_eq!(
-            findings[0].violation.fix,
+            findings[0].violation.fix.to_string(),
             "`cargo clippy -p xtask --all-targets --all-features -- -D warnings` shows the full diagnostic and clippy's suggested change"
         );
     }
@@ -405,7 +405,7 @@ mod tests {
         assert_eq!(findings.len(), 1);
         assert!(!findings[0].is_error);
         assert_eq!(
-            findings[0].violation.fix,
+            findings[0].violation.fix.to_string(),
             "`cargo clippy -p a --all-targets --all-features` shows the full diagnostic and clippy's suggested change"
         );
     }
@@ -423,7 +423,7 @@ mod tests {
         let findings = (clippy.parse)(output, &context(Vec::new()), &clippy.cmd);
         assert_eq!(findings.len(), 1);
         assert_eq!(
-            findings[0].violation.fix,
+            findings[0].violation.fix.to_string(),
             "`cargo clippy -p a -p b --all-targets --all-features` shows the full diagnostic and clippy's suggested change"
         );
     }

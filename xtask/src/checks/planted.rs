@@ -63,6 +63,19 @@ impl Planted {
                 self.inspects, report.inspection.inspected
             ));
         }
+        let fixes = report.inspection.violations.iter().map(|found| &found.fix);
+        let mut fixes = fixes.chain(
+            report
+                .inspection
+                .failures
+                .iter()
+                .map(|failure| &failure.fix),
+        );
+        if let Some(text) = fixes.find(|fix| matches!(fix, Fix::Tool(_))) {
+            return Err(format!(
+                "the fix `{text}` is a step's text; give it a variant in the check's Fix enum"
+            ));
+        }
         match self.expect {
             Expect::FailsWith([]) => {
                 Err("FailsWith needs at least one failure; a case that passes is Passes".to_owned())
@@ -129,6 +142,8 @@ pub(crate) use cases;
 
 #[cfg(test)]
 use crate::checks::{Inspection, StaticCheck};
+#[cfg(test)]
+use crate::fix::Fix;
 
 #[cfg(test)]
 mod tests {
@@ -144,15 +159,19 @@ mod tests {
     }
 
     fn one_violation() -> Inspection {
-        Inspection::new(1, vec![violation("a.toml", 2, "bad", "fix it")])
+        Inspection::new(1, vec![violation("a.toml", 2, "bad", Fix::Fake("fix it"))])
     }
 
     fn looked_at_nothing() -> Inspection {
-        Inspection::new(0, vec![violation("a.toml", 2, "bad", "fix it")])
+        Inspection::new(0, vec![violation("a.toml", 2, "bad", Fix::Fake("fix it"))])
     }
 
     fn stopped() -> Inspection {
-        Inspection::stopped(violation("a.toml", 1, "gone", "restore it"))
+        Inspection::stopped(violation("a.toml", 1, "gone", Fix::Fake("restore it")))
+    }
+
+    fn step_text() -> Inspection {
+        Inspection::new(1, vec![violation("a.toml", 2, "bad", Fix::tool("run it"))])
     }
 
     const CHECK: StaticCheck = StaticCheck::fake(
@@ -174,6 +193,23 @@ mod tests {
             run,
         }
         .verdict(&CHECK)
+    }
+
+    /// A check's fix is its own enum: a step's text fails the case even when it prints as
+    /// expected.
+    #[test]
+    fn a_fix_with_a_step_text_fails_the_case() {
+        assert_eq!(
+            verdict(
+                Expect::FailsWith(&["a.toml:2: bad\n    fix: run it"]),
+                1,
+                step_text
+            ),
+            Err(
+                "the fix `run it` is a step's text; give it a variant in the check's Fix enum"
+                    .to_owned()
+            )
+        );
     }
 
     #[test]

@@ -31,7 +31,7 @@ pub(super) fn check(root: &Path, binaries: &[Binary], found: &mut Inspection) {
                 LEFTHOOK,
                 error.line,
                 format!("{LEFTHOOK} is not YAML: {}", error.info),
-                Fix::NotYaml.to_string(),
+                Fix::NotYaml,
             ));
             return;
         }
@@ -52,8 +52,7 @@ pub(super) fn check(root: &Path, binaries: &[Binary], found: &mut Inspection) {
                     ),
                     Fix::LefthookComment {
                         pinned: pinned.version.to_owned(),
-                    }
-                    .to_string(),
+                    },
                 ));
             }
         }

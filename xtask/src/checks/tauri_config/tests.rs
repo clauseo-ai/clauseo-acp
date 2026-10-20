@@ -68,7 +68,7 @@ fn with_global_tauri_in_the_wrong_object_points_at_line_one() {
             PATH,
             1,
             "app.withGlobalTauri must be false",
-            GLOBAL_TAURI_FIX
+            Fix::GlobalTauri
         )]
     );
 }
@@ -92,7 +92,7 @@ fn a_csp_other_than_the_pinned_string_fails_at_its_line() {
                 PATH,
                 line_of(&text, "\"csp\""),
                 "app.security.csp is not the pinned policy",
-                CSP_PINNED_FIX,
+                Fix::CspPinned,
             )]
         );
     }
@@ -124,7 +124,7 @@ fn any_scheme_as_frontend_dist_fails_and_a_local_path_passes() {
                 PATH,
                 line_of(&text, "frontendDist"),
                 "build.frontendDist is a URL",
-                FRONTEND_FIX,
+                Fix::Frontend,
             )]
         );
     }
@@ -143,7 +143,7 @@ fn a_missing_windows_array_fails_at_line_one() {
             PATH,
             1,
             "app.windows must be an empty array",
-            WINDOWS_FIX
+            Fix::Windows
         )]
     );
 }

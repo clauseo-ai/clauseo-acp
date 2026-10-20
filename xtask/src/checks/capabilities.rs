@@ -13,6 +13,9 @@
 //! Tauri loads from the capabilities folder. Anything else there (a Finder `.DS_Store`, a Vim swap
 //! file, a `main.json~` backup) never reaches the app, so it is skipped.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 use crate::checks::json_text::{key_line, line_index_of};
 use crate::checks::{self, Inspection, Noun, StaticCheck};
 use crate::violation::Violation;
@@ -35,12 +38,6 @@ const EXTENSIONS: [&str; 3] = ["json", "json5", "toml"];
 
 /// Permission prefixes that name a plugin's API. The webview gets none of them.
 const FORBIDDEN_PREFIXES: [&str; 5] = ["fs:", "shell:", "http:", "opener:", "dialog:"];
-
-const FIX_CORE: &str = "list only the narrow permissions the window needs; `core:default` also grants event emit and devtools toggling";
-const FIX_REMOTE: &str = "remove the remote block, or reword the text: a remote page must never reach the IPC, and `remote` is matched anywhere";
-const FIX_PREFIX: &str = "do it in Rust behind a validated command; the webview gets no fs, shell, http, opener or dialog permission";
-const FIX_JSON5: &str = "rename it to .json and write plain JSON: xtask cannot decode json5, so it cannot check the grants";
-const FIX_SYNTAX: &str = "fix the syntax: Tauri cannot read the file either";
 
 /// Appended to a message whose string is not found in the raw text, which spells it with escapes.
 const ESCAPED: &str = " (written with escapes)";
@@ -73,7 +70,7 @@ fn run(ctx: &Context) -> Inspection {
                 &rel,
                 1,
                 format!("the capabilities folder `{rel}` is missing"),
-                "restore it with main.json: Tauri reads the window's grants from it, and this check guards them",
+                Fix::FolderMissing,
             ));
         }
         Err(error) => return Inspection::stopped(checks::unreadable(&rel, &error)),
@@ -127,20 +124,20 @@ fn is_capability_file(path: &Path) -> bool {
 /// The violations in one capability file. `path` is repo-relative and `text` is the file; the
 /// extension of `path` picks the parser.
 pub(crate) fn scan(path: &str, text: &str) -> Vec<Violation> {
-    let at_one = |message: String, fix: &str| vec![checks::violation(path, 1, message, fix)];
+    let at_one = |message: String, fix: Fix| vec![checks::violation(path, 1, message, fix)];
     let extension = Path::new(path).extension().and_then(|ext| ext.to_str());
     let value = if extension == Some("toml") {
         match toml::from_str::<toml::Value>(text).map(serde_json::to_value) {
             Ok(Ok(value)) => value,
             Ok(Err(error)) => {
-                return at_one(format!("could not read `{path}`: {error}"), FIX_SYNTAX);
+                return at_one(format!("could not read `{path}`: {error}"), Fix::Syntax);
             }
             Err(error) => {
                 let line = error
                     .span()
                     .map_or(1, |span| checks::line_at(line_index_of(text, span.start)));
                 let message = format!("`{path}` is not valid TOML: {}", error.message());
-                return vec![checks::violation(path, line, message, FIX_SYNTAX)];
+                return vec![checks::violation(path, line, message, Fix::Syntax)];
             }
         }
     } else {
@@ -149,13 +146,13 @@ pub(crate) fn scan(path: &str, text: &str) -> Vec<Violation> {
             Err(_) if extension == Some("json5") => {
                 return at_one(
                     "json5 capability files are not supported; use .json".to_owned(),
-                    FIX_JSON5,
+                    Fix::Json5,
                 );
             }
             Err(error) => {
                 let line = u32::try_from(error.line()).unwrap_or(1).max(1);
                 let message = format!("`{path}` is not valid JSON: {error}");
-                return vec![checks::violation(path, line, message, FIX_SYNTAX)];
+                return vec![checks::violation(path, line, message, Fix::Syntax)];
             }
         }
     };
@@ -199,7 +196,7 @@ struct Finding {
     /// The key that holds a string value; `None` for a key.
     key: Option<String>,
     /// The message and fix of each rule it trips, all reported at the string's one location.
-    problems: Vec<(String, &'static str)>,
+    problems: Vec<(String, Fix)>,
 }
 
 /// Collects a finding for every forbidden key and string value in `value`, at any depth. `key`
@@ -223,12 +220,7 @@ fn walk(value: &Value, key: Option<&str>, found: &mut Vec<Finding>) {
 }
 
 /// Adds a finding for `needle` when `problems` is not empty.
-fn push(
-    found: &mut Vec<Finding>,
-    needle: &str,
-    key: Option<&str>,
-    problems: Vec<(String, &'static str)>,
-) {
+fn push(found: &mut Vec<Finding>, needle: &str, key: Option<&str>, problems: Vec<(String, Fix)>) {
     if !problems.is_empty() {
         found.push(Finding {
             needle: needle.to_owned(),
@@ -240,20 +232,23 @@ fn push(
 
 /// The messages and fixes for one decoded key or string value. Only a value can grant a
 /// permission by its prefix.
-fn problems(text: &str, is_value: bool) -> Vec<(String, &'static str)> {
+fn problems(text: &str, is_value: bool) -> Vec<(String, Fix)> {
     let mut found = Vec::new();
     if text.contains("remote") {
-        found.push(("capability file mentions `remote`".to_owned(), FIX_REMOTE));
+        found.push(("capability file mentions `remote`".to_owned(), Fix::Remote));
     }
     if text.contains("core:default") {
-        found.push(("capability grants `core:default`".to_owned(), FIX_CORE));
+        found.push((
+            "capability grants `core:default`".to_owned(),
+            Fix::CoreDefault,
+        ));
     }
     if is_value
         && FORBIDDEN_PREFIXES
             .iter()
             .any(|prefix| text.starts_with(prefix))
     {
-        found.push((format!("capability grants `{text}`"), FIX_PREFIX));
+        found.push((format!("capability grants `{text}`"), Fix::ForbiddenPrefix));
     }
     found
 }

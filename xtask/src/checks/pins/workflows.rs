@@ -74,7 +74,7 @@ pub(super) fn check(
                     &path,
                     error.line,
                     format!("{path} is not YAML: {}", error.info),
-                    Fix::NotYaml.to_string(),
+                    Fix::NotYaml,
                 ));
                 continue;
             }
@@ -244,7 +244,7 @@ impl Walk<'_> {
                     pinned.what(),
                     pinned.home()
                 );
-                self.report(key.line, message, &pinned.fix());
+                self.report(key.line, message, pinned.fix());
             }
         }
         if action == DTOLNAY {
@@ -260,7 +260,7 @@ impl Walk<'_> {
                 "`uses: {text}` tells {DTOLNAY} which Rust toolchain to install through its ref; \
                  the one home of that version is {home}"
             );
-            self.report(uses.line, message, &Fix::RustToolchain);
+            self.report(uses.line, message, Fix::RustToolchain);
             return;
         }
         let commit = reference.len() == 40 && reference.bytes().all(|b| b.is_ascii_hexdigit());
@@ -276,7 +276,7 @@ impl Walk<'_> {
                  {named}, the Rust toolchain a commit of its `{named}` branch installs; the one \
                  home of that version is {home}"
             );
-            self.report(uses.line, message, &Fix::RustToolchain);
+            self.report(uses.line, message, Fix::RustToolchain);
         }
     }
 
@@ -301,13 +301,13 @@ impl Walk<'_> {
                 copy.home.to_string()
             };
             let message = format!("`{}` is {what}", copy.text);
-            self.report(line, message, &Fix::Copy(copy.home));
+            self.report(line, message, Fix::Copy(copy.home));
         }
     }
 
-    fn report(&mut self, line: u32, message: String, fix: &Fix) {
+    fn report(&mut self, line: u32, message: String, fix: Fix) {
         self.found
-            .push(checks::violation(self.path, line, message, fix.to_string()));
+            .push(checks::violation(self.path, line, message, fix));
     }
 }
 

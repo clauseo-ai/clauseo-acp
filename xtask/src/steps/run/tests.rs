@@ -51,7 +51,7 @@ fn one_violation(_ctx: &Context) -> Inspection {
             path: "docs/a.md".into(),
             line: 2,
             message: "bad link".into(),
-            fix: "fix the link".into(),
+            fix: crate::fix::Fix::Fake("fix the link"),
         }],
     )
 }

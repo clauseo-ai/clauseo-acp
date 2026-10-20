@@ -102,11 +102,11 @@ fn a_missing_required_file_is_at_line_1_with_a_fix_that_creates_it() {
     assert_eq!(found.line, 1);
     assert_eq!(found.message, "CLAUDE.md does not exist");
     assert_eq!(
-        found.fix,
+        found.fix.to_string(),
         "create CLAUDE.md holding only `@AGENTS.md`, or restore it from git history"
     );
     assert_eq!(
-        missing(&row(ARCHITECTURE)).fix,
+        missing(&row(ARCHITECTURE)).fix.to_string(),
         "create ARCHITECTURE.md at the repo root, or restore it from git history"
     );
 }

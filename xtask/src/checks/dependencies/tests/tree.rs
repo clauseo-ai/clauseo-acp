@@ -3,6 +3,7 @@
 
 use super::{PROTOCOL_ROW, manifest, run_on, tauri, vendor, workspace};
 use crate::checks::Inspection;
+use crate::checks::dependencies::Fix;
 use crate::checks::violation;
 
 /// Two direct dependencies that both bring tauri in, through the same `inner`: cargo prints the
@@ -183,7 +184,14 @@ fn a_registry_declaration_is_matched_to_the_version_its_requirement_allows() {
             "crates/protocol/Cargo.toml",
             10,
             "clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids",
-            "move the code that uses `s2` into a crate whose row allows b, then remove `s2` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
+            Fix::MoveFromManifest {
+                keys: "`s2`".to_owned(),
+                package: "b".to_owned(),
+                manifest: "crates/protocol/Cargo.toml".to_owned(),
+                features: false,
+                row: 7,
+                krate: "clauseo-protocol".to_owned(),
+            },
         )]
     );
 }
@@ -217,7 +225,14 @@ fn a_git_declaration_next_to_a_registry_declaration_is_matched_by_its_source() {
             "crates/protocol/Cargo.toml",
             10,
             "clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids",
-            "move the code that uses `s2` into a crate whose row allows b, then remove `s2` from crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
+            Fix::MoveFromManifest {
+                keys: "`s2`".to_owned(),
+                package: "b".to_owned(),
+                manifest: "crates/protocol/Cargo.toml".to_owned(),
+                features: false,
+                row: 7,
+                krate: "clauseo-protocol".to_owned(),
+            },
         )]
     );
 }
@@ -235,7 +250,15 @@ fn a_registry_declaration_is_not_matched_to_a_git_package_of_its_name() {
             "crates/protocol/Cargo.toml",
             7,
             "clauseo-protocol depends on b through s, which ARCHITECTURE.md forbids. `s1` and `s2` are declared at lines 7 and 10 of crates/protocol/Cargo.toml, and each declaration brings `b` in",
-            "move the code that uses `s1` and `s2` into a crate whose row allows b, then remove `s1` and `s2` from lines 7 and 10 of crates/protocol/Cargo.toml: the row at ARCHITECTURE.md:7 says clauseo-protocol never depends on b",
+            Fix::MoveFromLines {
+                keys: "`s1` and `s2`".to_owned(),
+                package: "b".to_owned(),
+                lines: "7 and 10".to_owned(),
+                manifest: "crates/protocol/Cargo.toml".to_owned(),
+                features: false,
+                row: 7,
+                krate: "clauseo-protocol".to_owned(),
+            },
         )]
     );
 }

@@ -6,7 +6,10 @@
 //! To add a check, copy `checks/budgets.rs` with `checks/budgets/tests.rs` and
 //! `checks/budgets/tests/planted.rs`, the smallest check in the full shape: a `CHECK` whose
 //! `place` comes from the consts its code reads, a `run` that counts what it inspected, and a
-//! `cases!` list of planted cases that `CHECK.planted` points at. Then add it to `ALL`.
+//! `cases!` list of planted cases that `CHECK.planted` points at. Then add it to `ALL`. Its fix
+//! lines are a `Fix` enum in `<check>/fix.rs`, one variant per failure kind with the text written
+//! once in `Display`, wrapped in `crate::fix::Fix`; `<check>/fix/tests.rs` pins every variant's
+//! text in a `match` with no `_` arm, so a new variant does not compile until its text is pinned.
 //!
 //! Every check counts what it inspected. `StaticCheck::judge` is the one place that judges a run:
 //! it fails on any violation or failure, and on a count of zero, since a check that inspected
@@ -14,23 +17,26 @@
 //! `StaticCheck::report` (a check's `run` is private to this module) and every planted case
 //! through `planted::verify_named`.
 
-mod budgets;
-mod buildtime_edits;
-mod capabilities;
-mod core_io;
+pub(crate) mod budgets;
+pub(crate) mod buildtime_edits;
+pub(crate) mod capabilities;
+pub(crate) mod core_io;
 pub(crate) mod crates_table;
-mod dependencies;
-mod docs;
+pub(crate) mod dependencies;
+pub(crate) mod docs;
 pub(crate) mod exceptions;
-mod expect_allowlist;
-mod file_size;
+pub(crate) mod expect_allowlist;
+pub(crate) mod file_size;
+mod fix;
 pub(crate) mod graph;
 mod json_text;
-mod pins;
+pub(crate) mod pins;
 pub(crate) mod planted;
-mod plugins;
-mod tauri_config;
+pub(crate) mod plugins;
+pub(crate) mod tauri_config;
 pub(crate) mod toml_lines;
+
+pub(crate) use fix::Fix;
 
 use crate::changes::GitError;
 use crate::violation::Violation;
@@ -126,7 +132,7 @@ impl Inspection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Failure {
     pub message: String,
-    pub fix: String,
+    pub fix: crate::fix::Fix,
 }
 
 impl fmt::Display for Failure {
@@ -194,16 +200,15 @@ impl StaticCheck {
     /// crate's capabilities/`. The fix names what the check looks for, where, and its file.
     pub(crate) fn nothing_inspected(&self) -> Failure {
         let place = (self.place)();
-        let fix = format!(
-            "{name} looks for {many} {place}; restore them, or, if they moved, update the consts \
-             {source} builds that place from",
-            name = self.name,
-            many = self.counts.many,
-            source = self.source,
-        );
         Failure {
             message: format!("{} inspected {place}", self.counts.count(0)),
-            fix,
+            fix: Fix::NothingInspected {
+                name: self.name,
+                many: self.counts.many,
+                place,
+                source: self.source,
+            }
+            .into(),
         }
     }
 
@@ -256,7 +261,7 @@ pub(crate) fn members(ctx: &Context) -> Result<&[Member], Inspection> {
                 "could not read the workspace members: {}",
                 metadata_quote(error)
             ),
-            fix: METADATA_FIX.to_owned(),
+            fix: Fix::Metadata.into(),
         }],
         stopped: true,
         ..Inspection::default()
@@ -275,9 +280,6 @@ fn metadata_quote(error: &str) -> String {
     }
 }
 
-/// The fix of a check that stopped because `cargo metadata` failed.
-pub(crate) const METADATA_FIX: &str = "fix the error quoted above so that `cargo metadata` succeeds; this check reads the workspace members from its output";
-
 /// The desktop crate's member. When `cargo metadata` failed, the inspection `members` gives;
 /// when the crate is not a workspace member, the one violation at `Cargo.toml:1` that every
 /// desktop check stops on.
@@ -289,8 +291,10 @@ pub(crate) fn desktop_member(ctx: &Context) -> Result<&Member, Inspection> {
             Inspection::stopped(violation(
                 "Cargo.toml",
                 1,
-                format!("the desktop crate (package `{DESKTOP_PACKAGE}`) is not a workspace member"),
-                "restore crates/desktop or update xtask/src/checks: these checks guard its capabilities, plugins and Tauri config",
+                format!(
+                    "the desktop crate (package `{DESKTOP_PACKAGE}`) is not a workspace member"
+                ),
+                Fix::DesktopNotMember,
             ))
         })
 }
@@ -321,21 +325,15 @@ pub(crate) fn join(dir: &str, name: &str) -> String {
 /// The inspection of a check that reads the repo's files but could not list them, because
 /// `git ls-files` failed. `check` is the check's name, for the fix.
 pub(crate) fn unlisted(check: &str, error: &GitError) -> Inspection {
+    let check = check.to_owned();
     let fix = match error {
-        GitError::NotStarted(_) => {
-            format!(
-                "install git and put it on PATH: {check} lists the files it reads with `git ls-files`"
-            )
-        }
-        GitError::Failed { .. } => format!(
-            "run the check inside a git checkout, or fix what git reports: {check} lists the files \
-             it reads with `git ls-files`"
-        ),
+        GitError::NotStarted(_) => Fix::GitNotStarted { check },
+        GitError::Failed { .. } => Fix::GitFailed { check },
     };
     Inspection {
         failures: vec![Failure {
             message: format!("could not list the repo's files: {error}"),
-            fix,
+            fix: fix.into(),
         }],
         stopped: true,
         ..Inspection::default()
@@ -356,16 +354,11 @@ pub(crate) fn read_repo_file(root: &Path, rel: &str) -> Result<Option<String>, V
 /// when that is the error; otherwise it sends the reader to the OS error in the message.
 pub(crate) fn unreadable(path: &str, error: &io::Error) -> Violation {
     let fix = if error.kind() == io::ErrorKind::InvalidData {
-        "make the file readable as UTF-8 text"
+        Fix::NotUtf8
     } else {
-        "fix what the error says so the check can read it: restore or replace the file or folder"
+        Fix::Unreadable
     };
-    Violation {
-        path: path.to_owned(),
-        line: 1,
-        message: format!("could not read `{path}`: {error}"),
-        fix: fix.to_owned(),
-    }
+    violation(path, 1, format!("could not read `{path}`: {error}"), fix)
 }
 
 /// `path` relative to `root`, with `/` separators.
@@ -383,7 +376,7 @@ pub(crate) fn violation(
     path: &str,
     line: u32,
     message: impl Into<String>,
-    fix: impl Into<String>,
+    fix: impl Into<crate::fix::Fix>,
 ) -> Violation {
     Violation {
         path: path.to_owned(),

@@ -5,6 +5,7 @@
 
 use super::ToolStep;
 use super::plan::{parse_none, setup_or, setup_or_reproduce};
+use crate::fix::Fix;
 use crate::parse::{rel_path, short_diags};
 use crate::process::{Cmd, Program};
 use crate::violation::{Finding, Violation};
@@ -72,9 +73,10 @@ fn typos_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
                     .strip_prefix("error: ")
                     .unwrap_or(&diag.message)
                     .to_owned(),
-                fix: "correct the spelling (`typos -w` applies the suggestion); a real name or \
-                      term goes under [default.extend-words] in _typos.toml"
-                    .into(),
+                fix: Fix::tool(
+                    "correct the spelling (`typos -w` applies the suggestion); a real name or \
+                     term goes under [default.extend-words] in _typos.toml",
+                ),
             },
             is_error: true,
         })
@@ -104,7 +106,7 @@ fn taplo_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
             Some(Finding {
                 violation: Violation {
                     message: "taplo would reformat this file".into(),
-                    fix: format!("run `taplo fmt {path}`"),
+                    fix: Fix::tool(format!("run `taplo fmt {path}`")),
                     path,
                     line: 1,
                 },
@@ -223,9 +225,10 @@ impl Leak {
                     "gitleaks rule {} matched a secret in commit {short}",
                     self.rule.as_deref().unwrap_or("unknown")
                 ),
-                fix: "remove the secret from this branch's commits (rewrite them) and rotate it if \
-                      it is real; a fake secret in a test fixture goes in .gitleaks.toml's allowlist"
-                    .into(),
+                fix: Fix::tool(
+                    "remove the secret from this branch's commits (rewrite them) and rotate it if \
+                     it is real; a fake secret in a test fixture goes in .gitleaks.toml's allowlist",
+                ),
             },
             is_error: true,
         })
@@ -324,7 +327,10 @@ mod tests {
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].violation.path, "deny.toml");
         assert_eq!(findings[0].violation.line, 1);
-        assert_eq!(findings[0].violation.fix, "run `taplo fmt deny.toml`");
+        assert_eq!(
+            findings[0].violation.fix.to_string(),
+            "run `taplo fmt deny.toml`"
+        );
     }
 
     #[test]

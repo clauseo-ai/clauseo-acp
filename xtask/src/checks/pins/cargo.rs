@@ -45,7 +45,7 @@ fn compare(manifest: &str, text: &str, channel: Option<&str>, found: &mut Inspec
                 manifest,
                 line(text, at),
                 format!("{manifest} is not TOML: {}", error.message()),
-                Fix::NotToml.to_string(),
+                Fix::NotToml,
             ));
             return;
         }
@@ -73,8 +73,7 @@ fn compare(manifest: &str, text: &str, channel: Option<&str>, found: &mut Inspec
                 ),
                 Fix::RustVersion {
                     channel_major_minor: wanted.to_owned(),
-                }
-                .to_string(),
+                },
             ));
         }
     }
