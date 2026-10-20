@@ -35,7 +35,7 @@ use std::io::{self, BufRead, Write};
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitCode, Stdio};
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::mpsc;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
@@ -131,6 +131,14 @@ pub(super) fn kill_for_test() {
     }
 }
 
+/// The leader's pid and the groups it was told about, for the tests.
+#[cfg(test)]
+fn current() -> Option<(u32, BTreeSet<Pid>)> {
+    let slot = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
+    slot.as_ref()
+        .map(|leader| (leader.child.id(), leader.groups.clone()))
+}
+
 /// Starts a leader and tells it `groups`.
 fn start(groups: BTreeSet<Pid>) -> io::Result<Leader> {
     let exe = leader_exe()?;
@@ -212,7 +220,7 @@ fn leader_exe() -> io::Result<PathBuf> {
 /// closes, then stops the groups still registered.
 pub(crate) fn lead() -> ExitCode {
     let groups = registered(io::stdin().lock());
-    stop(&groups);
+    stop(&groups, KILL_GRACE);
     ExitCode::SUCCESS
 }
 
@@ -236,23 +244,23 @@ fn registered(input: impl BufRead) -> BTreeSet<i32> {
     groups
 }
 
-/// SIGTERM to each of `groups`, then, after up to `KILL_GRACE` for them to empty, SIGKILL to each.
-fn stop(groups: &BTreeSet<i32>) {
+/// SIGTERM to each of `groups`, then, after up to `grace` (checked every `POLL`) for them to
+/// empty, SIGKILL to each. The leader passes `KILL_GRACE`; tests pass a shorter one.
+fn stop(groups: &BTreeSet<i32>, grace: Duration) {
     let groups: Vec<Pid> = groups.iter().map(|group| Pid::from_raw(*group)).collect();
     for group in &groups {
         drop(signal(*group, Signal::SIGTERM));
     }
     // Never sent to while `_keep` lives, so each receive times out after `POLL`.
     let (_keep, tick) = mpsc::channel::<()>();
-    let mut waited = Duration::ZERO;
-    while waited < KILL_GRACE {
+    for _ in 0..grace.as_millis().div_ceil(POLL.as_millis()) {
         if groups.iter().all(|group| empty(*group)) {
             return;
         }
-        if tick.recv_timeout(POLL) != Err(RecvTimeoutError::Timeout) {
+        // Never `Ok`: nothing sends.
+        if tick.recv_timeout(POLL).is_ok() {
             break;
         }
-        waited += POLL;
     }
     for group in &groups {
         drop(signal(*group, Signal::SIGKILL));

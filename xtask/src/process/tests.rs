@@ -243,4 +243,16 @@ fn a_timeout_names_the_command_and_its_limit_and_is_told_apart() {
 }
 
 #[cfg(unix)]
-mod tree;
+#[test]
+fn the_restarted_leader_mode_passes_only_when_both_runs_pass() {
+    let mode = |script: &str| {
+        let cmd = Cmd::new(Program::Named("sh"), ["-c", script], TEST_TIMEOUT);
+        restarted_leader(&cmd, script)
+    };
+    assert!(mode("exit 0"));
+    assert!(!mode(r#"[ "$1" != again ]"#), "the second run fails");
+    assert!(!mode(r#"[ "$1" = again ]"#), "the first run fails");
+}
+
+#[cfg(unix)]
+pub(super) mod tree;

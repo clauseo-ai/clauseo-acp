@@ -1,15 +1,15 @@
 //! The process door when xtask itself dies. Each test starts `xtask process-test` (hidden from
 //! `--help`), which runs a wrapper through the door; the wrapper starts a grandchild, prints its
-//! pid and waits. Then the test kills xtask: with SIGKILL, which no handler sees, or with SIGINT to
-//! xtask's process group, as a terminal sends Ctrl-C to its foreground job. Since the door starts
-//! every command in a group of its own, only xtask gets the SIGINT; it dies of it, and the leader
-//! must then stop the wrapper's group.
+//! own pid (its group's id) and waits. Then the test kills xtask: with SIGKILL, which no handler
+//! sees, or with SIGINT to xtask's process group, as a terminal sends Ctrl-C to its foreground job.
+//! Since the door starts every command in a group of its own, only xtask gets the SIGINT; it dies
+//! of it, and the leader must then stop the wrapper's group.
 //!
 //! The grandchild holds a pipe the test reads: `sh` makes fd 3 a copy of it without close-on-exec,
 //! so xtask, the wrapper and the grandchild inherit it (and the leader, which exits once the groups
 //! it stops are empty). The test sees EOF only once all of them are gone, and never sleeps. A
-//! survivor fails the test and is not killed: by then its pid may be another process's. It ends
-//! when its `sleep` does, and a stuck xtask at its `process-test` limit.
+//! survivor's group gets SIGKILL before the test fails; a stuck xtask ends at its `process-test`
+//! limit.
 #![cfg(unix)]
 
 // In a `#[cfg(test)]` module, so the helpers may panic as the tests do.
@@ -25,18 +25,18 @@ mod xtask_dies {
     use std::thread;
     use std::time::Duration;
 
-    /// Starts a grandchild that holds fd 3, prints the grandchild's pid on fd 3, and waits for it.
-    const WRAPPER: &str = "sleep 300 & echo $! >&3; wait";
+    /// Starts a grandchild that holds fd 3, prints its own pid (its group's id) on fd 3, and waits.
+    const WRAPPER: &str = "sleep 300 & echo $$ >&3; wait";
 
     /// `WRAPPER`, but on SIGTERM it prints `term` on fd 3 and exits, so it prints that only when
     /// the leader sends SIGTERM before SIGKILL.
     const REPORTS_SIGTERM: &str =
-        "trap 'echo term >&3; exit 0' TERM; sleep 300 & echo $! >&3; wait";
+        "trap 'echo term >&3; exit 0' TERM; sleep 300 & echo $$ >&3; wait";
 
     /// For the `restarted-leader` mode: `WRAPPER` on its first run; on its second, which runs
     /// once a new leader has started, it prints `again` on fd 3.
     const RUNS_AGAIN: &str =
-        "if [ \"$1\" = again ]; then echo again >&3; else sleep 300 & echo $! >&3; wait; fi";
+        "if [ \"$1\" = again ]; then echo again >&3; else sleep 300 & echo $$ >&3; wait; fi";
 
     /// How long the test waits for xtask to exit, and then for EOF, before it fails: far longer
     /// than the leader's grace period (5 s) and its check of the groups.
@@ -71,8 +71,8 @@ mod xtask_dies {
         (xtask, reader)
     }
 
-    /// The pid of the grandchild, from the first line on `reader`, and the reader.
-    fn grandchild_of(reader: PipeReader) -> (i32, BufReader<PipeReader>) {
+    /// The wrapper's group, from the first line on `reader`, and the reader.
+    fn group_of(reader: PipeReader) -> (i32, BufReader<PipeReader>) {
         let ([line], reader) = lines_of(BufReader::new(reader));
         (pid_of(&line), reader)
     }
@@ -116,16 +116,18 @@ mod xtask_dies {
     }
 
     /// Waits for EOF on `reader`, which comes once the wrapper and the grandchild are gone, and
-    /// returns what was printed after the lines read so far. A grandchild still holding the pipe
-    /// after `SURVIVOR` fails the test.
-    fn gone(mut reader: BufReader<PipeReader>, grandchild: i32) -> String {
+    /// returns what was printed after the lines read so far. A tree still holding the pipe after
+    /// `SURVIVOR` gets SIGKILL to `group`, and the test fails. Safe: a process still holds the
+    /// pipe, so it is still in the group, and a group's id is not given out while one is.
+    fn gone(mut reader: BufReader<PipeReader>, group: i32) -> String {
         let (sender, eof) = mpsc::channel();
         thread::spawn(move || {
             let mut rest = Vec::new();
             drop(sender.send(reader.read_to_end(&mut rest).map(|_| rest)));
         });
         let Ok(rest) = eof.recv_timeout(SURVIVOR) else {
-            panic!("grandchild {grandchild} outlived xtask by {SURVIVOR:?}");
+            let killed = killpg(Pid::from_raw(group), Signal::SIGKILL);
+            panic!("group {group} outlived xtask by {SURVIVOR:?} (SIGKILL to it: {killed:?})");
         };
         String::from_utf8_lossy(&rest.expect("read the pipe")).into_owned()
     }
@@ -139,43 +141,43 @@ mod xtask_dies {
     #[test]
     fn process_leader_stops_the_tree_when_xtask_gets_sigkill() {
         let (mut xtask, reader) = start_xtask("capture", WRAPPER);
-        let (grandchild, reader) = grandchild_of(reader);
+        let (group, reader) = group_of(reader);
         xtask.kill().expect("send SIGKILL to xtask");
         assert_eq!(exit_of(xtask).signal(), Some(Signal::SIGKILL as i32));
-        assert_eq!(gone(reader, grandchild), "");
+        assert_eq!(gone(reader, group), "");
     }
 
     #[test]
     fn process_ctrl_c_stops_an_inherited_child_and_its_grandchild() {
         let (xtask, reader) = start_xtask("inherit", WRAPPER);
-        let (grandchild, reader) = grandchild_of(reader);
+        let (group, reader) = group_of(reader);
         ctrl_c(&xtask);
         assert_eq!(exit_of(xtask).signal(), Some(Signal::SIGINT as i32));
-        assert_eq!(gone(reader, grandchild), "");
+        assert_eq!(gone(reader, group), "");
     }
 
     #[test]
     fn process_ctrl_c_stops_a_captured_child_and_its_grandchild() {
         let (xtask, reader) = start_xtask("capture", WRAPPER);
-        let (grandchild, reader) = grandchild_of(reader);
+        let (group, reader) = group_of(reader);
         ctrl_c(&xtask);
         assert_eq!(exit_of(xtask).signal(), Some(Signal::SIGINT as i32));
-        assert_eq!(gone(reader, grandchild), "");
+        assert_eq!(gone(reader, group), "");
     }
 
     #[test]
     fn process_leader_sends_sigterm_before_sigkill() {
         let (mut xtask, reader) = start_xtask("capture", REPORTS_SIGTERM);
-        let (grandchild, reader) = grandchild_of(reader);
+        let (group, reader) = group_of(reader);
         xtask.kill().expect("send SIGKILL to xtask");
         assert_eq!(exit_of(xtask).signal(), Some(Signal::SIGKILL as i32));
-        assert_eq!(gone(reader, grandchild), "term\n");
+        assert_eq!(gone(reader, group), "term\n");
     }
 
     #[test]
     fn process_a_new_leader_stops_the_tree_its_dead_predecessor_was_told_about() {
         let (mut xtask, reader) = start_xtask("restarted-leader", RUNS_AGAIN);
-        // The first run prints its grandchild's pid and the second `again`, in either order.
+        // The first run prints its group and the second `again`, in either order.
         let ([first, second], reader) = lines_of(BufReader::new(reader));
         let pid = if first == "again" {
             second
@@ -183,9 +185,9 @@ mod xtask_dies {
             assert_eq!(second, "again");
             first
         };
-        let grandchild = pid_of(&pid);
+        let group = pid_of(&pid);
         xtask.kill().expect("send SIGKILL to xtask");
         assert_eq!(exit_of(xtask).signal(), Some(Signal::SIGKILL as i32));
-        assert_eq!(gone(reader, grandchild), "");
+        assert_eq!(gone(reader, group), "");
     }
 }
