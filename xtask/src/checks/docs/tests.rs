@@ -19,6 +19,7 @@ fn only_the_markdown_files_of_a_git_repo_are_counted() {
     let found = run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        dependencies: Default::default(),
         load_resolved_graph: false,
     });
     assert_eq!(found.inspected, 1);
@@ -31,6 +32,7 @@ fn a_folder_that_is_not_a_git_repo_inspects_nothing_and_says_git_s_error() {
     let found = run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        dependencies: Default::default(),
         load_resolved_graph: false,
     });
     let error = crate::changes::repo_files(&dir).expect_err("not a git repo");
@@ -91,6 +93,7 @@ fn a_link_to_a_file_git_ignores_fails_in_a_real_repo() {
     let found = run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        dependencies: Default::default(),
         load_resolved_graph: false,
     });
     let printed: Vec<String> = found.violations.iter().map(ToString::to_string).collect();

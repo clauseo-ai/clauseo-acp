@@ -3,9 +3,10 @@
 //!
 //! The Tauri family is `wry`, `tao` and every package whose name starts with `tauri`.
 //!
-//! The dependencies of every member come from one `cargo metadata --no-deps` run, which resolves
-//! workspace inheritance and renames, so a renamed or inherited entry counts under its real
-//! package. Among normal dependencies, with or without a target:
+//! The dependencies of every member come from the one `cargo metadata --no-deps` run that
+//! `workspace::load` makes, which resolves workspace inheritance and renames, so a renamed or
+//! inherited entry counts under its real package. Among normal dependencies, with or without a
+//! target:
 //! - in the desktop crate, the `tauri-plugin-*` packages are exactly `FIXED_PLUGINS`, none of them
 //!   optional (the set sits behind no cargo feature); `tauri`'s merged features include neither
 //!   `devtools` nor `protocol-asset`, and no `[features]` entry turns either on through
@@ -40,7 +41,7 @@ mod graph;
 use crate::checks::toml_lines::{ANY, Manifest, NORMAL};
 use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
 use crate::violation::Violation;
-use crate::workspace::{self, CargoDependency, Context, PackageDependencies};
+use crate::workspace::{CargoDependency, Context, PackageDependencies};
 use std::collections::BTreeMap;
 
 const WORKSPACE_MANIFEST: &str = "Cargo.toml";
@@ -68,7 +69,6 @@ const FAMILY_FIX: &str = "depend on `tauri` and the fixed plugins only: other Ta
 const MEMBER_FIX: &str =
     "only crates/desktop depends on Tauri; move the code there or behind the host interface";
 const OUTSIDE_FIX: &str = "add it to the workspace members, or remove the dependency";
-const METADATA_FIX: &str = "fix the manifest until `cargo metadata --no-deps` succeeds: this check reads the dependencies from it";
 
 /// Fails on every Tauri dependency of a workspace member outside the fixed set or its rules.
 pub(crate) const CHECK: StaticCheck = StaticCheck {
@@ -112,17 +112,7 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
         Err(violation) => return Inspection::stopped(violation),
     };
     let manifest = checks::join(dir, "Cargo.toml");
-    let packages = match workspace::load_workspace_dependencies(&ctx.root) {
-        Ok(packages) => packages,
-        Err(error) => {
-            return Inspection::stopped(violation(
-                &manifest,
-                1,
-                format!("could not read the workspace's dependencies: {error}"),
-                METADATA_FIX,
-            ));
-        }
-    };
+    let packages = &ctx.dependencies;
     let read = |rel: &str| checks::read_repo_file(&ctx.root, rel).map(Option::unwrap_or_default);
     let (desktop, root) = match (read(&manifest), read(WORKSPACE_MANIFEST)) {
         (Ok(desktop), Ok(root)) => (desktop, root),
@@ -133,10 +123,10 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
             &manifest,
             1,
             format!(
-                "`cargo metadata` lists no package `{}`",
+                "the desktop crate (package `{}`) has no dependencies in the workspace",
                 checks::DESKTOP_PACKAGE
             ),
-            METADATA_FIX,
+            "update xtask/src/workspace.rs: the members and the dependencies come from one `cargo metadata` run, so each member has an entry in both",
         ));
     };
     let mut found = violations(
@@ -166,7 +156,7 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
                 }
             }
         };
-        found.extend(path_violations(&member.name, &path, &text, deps, &packages));
+        found.extend(path_violations(&member.name, &path, &text, deps, packages));
     }
     if let Some(flags) = graph_flags {
         let desktop = graph::Desktop {

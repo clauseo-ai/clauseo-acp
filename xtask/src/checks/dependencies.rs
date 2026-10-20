@@ -19,8 +19,7 @@ mod graph;
 use crate::checks::crates_table::{self, CrateRow, CratesTable, Status};
 use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
 use crate::violation::Violation;
-use crate::workspace::{self, Context, Member, PackageDependencies};
-use std::collections::BTreeMap;
+use crate::workspace::{Context, Member, PackageDependencies};
 use std::path::Path;
 
 /// Fails on a workspace crate without a row, and on a dependency its row forbids.
@@ -75,38 +74,14 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
         .filter(|(_, row)| !graph::forbidden(row).is_empty())
         .collect();
     if let (Some(flags), false) = (graph_flags, walked.is_empty()) {
-        match declared_dependencies(&ctx.root) {
-            Ok(declared) => {
-                for (member, row) in walked {
-                    found.extend(walk(
-                        &ctx.root,
-                        member,
-                        row,
-                        declared.get(&member.name),
-                        flags,
-                    ));
-                }
-            }
-            Err(failed) => found.push(failed),
+        for (member, row) in walked {
+            let deps = ctx.dependencies.get(&member.name);
+            found.extend(walk(&ctx.root, member, row, deps, flags));
         }
     }
     found.sort_by(|a, b| (&a.path, a.line, &a.message).cmp(&(&b.path, b.line, &b.message)));
     found.dedup();
     Inspection::new(matched.len(), found)
-}
-
-/// The dependencies of every workspace member, by package, from `cargo metadata --no-deps`.
-fn declared_dependencies(root: &Path) -> Result<BTreeMap<String, PackageDependencies>, Violation> {
-    let args = ["metadata", "--format-version", "1", "--no-deps"];
-    let stdout = checks::graph::cargo_stdout(root, &args)?;
-    workspace::parse_workspace_dependencies(&stdout).map_err(|error| {
-        violation(
-            checks::graph::ROOT_MANIFEST,
-            1,
-            format!("could not read the output of `cargo {}`: {error}", args.join(" ")),
-            "update xtask/src/workspace.rs to the JSON this cargo writes: this check reads each crate's dependencies from it",
-        )
-    })
 }
 
 /// The violations in the graph of `member`, whose row is `row` and whose declared dependencies

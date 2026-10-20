@@ -129,6 +129,7 @@ fn run_repo(case: &str, repo: &Repo<'_>) -> Inspection {
     run(&Context {
         root: dir.to_path_buf(),
         members: members(),
+        dependencies: Default::default(),
         load_resolved_graph: false,
     })
 }
@@ -269,6 +270,7 @@ fn every_row_counts_when_no_member_is_held() {
     let found = run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        dependencies: Default::default(),
         load_resolved_graph: false,
     });
     assert_eq!(found, Inspection::new(3, Vec::new()));
@@ -281,6 +283,7 @@ fn a_missing_table_inspects_nothing() {
         run(&Context {
             root: dir.to_path_buf(),
             members: Vec::new(),
+            dependencies: Default::default(),
             load_resolved_graph: false,
         }),
         Inspection::default()

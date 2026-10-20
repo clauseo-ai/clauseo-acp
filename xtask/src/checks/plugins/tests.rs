@@ -11,6 +11,7 @@ pub(super) mod resolved;
 use super::*;
 use crate::checks::tests::desktop_context;
 use crate::scratch::Scratch;
+use crate::workspace;
 use std::fs;
 use std::path::Path;
 
@@ -87,8 +88,10 @@ fn member(name: &str, body: &str) -> String {
 
 /// `run` on the scratch workspace `dir`, with the members `cargo metadata` lists.
 fn inspect(dir: &Scratch) -> Inspection {
+    let workspace = workspace::load(dir).expect("cargo metadata runs");
     let ctx = Context {
-        members: workspace::load_members(dir).expect("cargo metadata runs"),
+        members: workspace.members,
+        dependencies: workspace.dependencies,
         ..desktop_context(dir)
     };
     run(&ctx)
@@ -350,7 +353,7 @@ pub(super) fn path_dependency_on_excluded_crate() -> Inspection {
 
 pub(super) fn metadata_lists_no_desktop_package() -> Inspection {
     // The desktop crate is in the context but not in the workspace, so `cargo metadata` lists no
-    // package with its name. A failing `cargo metadata` is covered by the test below.
+    // package with its name. A failing `cargo metadata` is covered in `workspace::tests`.
     let dir = Scratch::new("planted-plugins-metadata_lists_no_desktop_package");
     write_file(
         &dir,
@@ -392,28 +395,4 @@ fn a_build_dependency_counts_and_a_dev_dependency_does_not() {
     let dir = write_workspace("counts_build_not_dev", ROOT, &desktop, &[]);
     let found = inspect(&dir);
     assert_eq!((found.inspected, found.violations), (11, Vec::new()));
-}
-
-/// `cargo metadata` fails when the root manifest's `tauri` requirement does not parse. Its
-/// message ends with cargo's stderr, which names the scratch directory (with its pid), so no
-/// planted case can hold the text exactly: this test checks the parts that do not vary.
-#[test]
-fn a_cargo_metadata_failure_stops_the_check_at_the_desktop_manifest() {
-    let root = ROOT.replace("tauri = \"2\"\n", "tauri = \"not a req\"\n");
-    let dir = write_workspace("metadata_fails", &root, DESKTOP, &[]);
-    let found = run(&desktop_context(&dir));
-    assert_eq!(found.inspected, 0);
-    let [only] = found.violations.as_slice() else {
-        panic!("one violation, found {:?}", found.violations)
-    };
-    assert_eq!(
-        (only.path.as_str(), only.line, only.fix.as_str()),
-        ("crates/desktop/Cargo.toml", 1, METADATA_FIX)
-    );
-    assert!(
-        only.message
-            .starts_with("could not read the workspace's dependencies: `cargo metadata` failed: "),
-        "{}",
-        only.message
-    );
 }

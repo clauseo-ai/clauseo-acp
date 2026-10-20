@@ -67,9 +67,11 @@ fn tauri() -> (String, String) {
 
 /// Runs the check, graph included, on the workspace in `dir`.
 fn run_on(dir: &Scratch) -> Inspection {
+    let ws = workspace::load(dir).expect("cargo metadata runs");
     let ctx = Context {
         root: dir.to_path_buf(),
-        members: workspace::load_members(dir).expect("cargo metadata runs"),
+        members: ws.members,
+        dependencies: ws.dependencies,
         load_resolved_graph: false,
     };
     check(&ctx, Some(&["--offline"]))
@@ -295,9 +297,11 @@ fn a_lockfile_behind_the_manifests_fails_at_the_root_manifest_without_rewriting_
         manifest("clauseo-protocol", ""),
     )];
     let dir = workspace("stale-lock", PROTOCOL_ROW, "", &crates);
+    let ws = workspace::load(&dir).expect("cargo metadata runs");
     let ctx = Context {
         root: dir.to_path_buf(),
-        members: workspace::load_members(&dir).expect("cargo metadata runs"),
+        members: ws.members,
+        dependencies: ws.dependencies,
         load_resolved_graph: false,
     };
     assert_eq!(check(&ctx, Some(&["--offline"])).violations, Vec::new());
@@ -337,9 +341,11 @@ fn without_the_graph_only_rows_are_matched() {
         tauri(),
     ];
     let dir = workspace("no-graph", PROTOCOL_ROW, "", &crates);
+    let ws = workspace::load(&dir).expect("cargo metadata runs");
     let ctx = Context {
         root: dir.to_path_buf(),
-        members: workspace::load_members(&dir).expect("cargo metadata runs"),
+        members: ws.members,
+        dependencies: ws.dependencies,
         load_resolved_graph: false,
     };
     assert_eq!(run(&ctx), Inspection::new(1, Vec::new()));

@@ -150,6 +150,7 @@ mod tests {
         Context {
             root: PathBuf::from("/ws"),
             members,
+            dependencies: Default::default(),
             load_resolved_graph: false,
         }
     }

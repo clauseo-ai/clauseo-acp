@@ -21,6 +21,7 @@ fn run_on(case: &str, text: impl AsRef<[u8]>) -> Inspection {
     run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        dependencies: Default::default(),
         load_resolved_graph: false,
     })
 }

@@ -29,6 +29,7 @@ pub(crate) fn desktop_context(root: &Path) -> Context {
             dir: "crates/desktop".to_owned(),
             path_deps: Vec::new(),
         }],
+        dependencies: Default::default(),
         load_resolved_graph: false,
     }
 }
@@ -45,6 +46,7 @@ fn a_missing_desktop_member_is_one_violation_at_the_root_manifest() {
     let ctx = Context {
         root: Path::new("/ws").to_path_buf(),
         members: Vec::new(),
+        dependencies: Default::default(),
         load_resolved_graph: false,
     };
     assert_eq!(
@@ -61,8 +63,10 @@ fn a_missing_desktop_member_is_one_violation_at_the_root_manifest() {
 #[test]
 fn the_real_repo_passes_every_static_check() {
     let root = crate::workspace::workspace_root();
+    let workspace = crate::workspace::load(&root).expect("cargo metadata runs");
     let ctx = Context {
-        members: crate::workspace::load_members(&root).expect("cargo metadata runs"),
+        members: workspace.members,
+        dependencies: workspace.dependencies,
         load_resolved_graph: false,
         root,
     };
@@ -83,6 +87,7 @@ fn every_check_inspects_nothing_in_an_empty_repo() {
     let ctx = Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        dependencies: Default::default(),
         load_resolved_graph: false,
     };
     for name in STOPS_IN_AN_EMPTY_REPO {

@@ -35,7 +35,9 @@ fn workspace(name: &str, desktop: &str, crates: &[(&str, &str)]) -> Scratch {
 fn violations_in(dir: &Scratch, desktop: &str) -> Vec<Violation> {
     let tree = checks::graph::load_tree(dir, checks::DESKTOP_PACKAGE, &["--offline"])
         .expect("cargo tree runs");
-    let packages = workspace::load_workspace_dependencies(dir).expect("cargo metadata runs");
+    let packages = workspace::load(dir)
+        .expect("cargo metadata runs")
+        .dependencies;
     violations(
         &tree,
         &Desktop {

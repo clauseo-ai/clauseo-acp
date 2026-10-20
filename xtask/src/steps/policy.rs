@@ -256,6 +256,7 @@ mod tests {
         Context {
             root: PathBuf::from("/ws"),
             members: Vec::new(),
+            dependencies: Default::default(),
             load_resolved_graph: false,
         }
     }
@@ -329,6 +330,7 @@ mod tests {
         let ctx = Context {
             root: PathBuf::from(r"C:\ws"),
             members: Vec::new(),
+            dependencies: Default::default(),
             load_resolved_graph: false,
         };
         let out = r#"ERROR taplo:format_files: the file is not properly formatted path="C:\\ws\\xtask\\Cargo.toml""#;

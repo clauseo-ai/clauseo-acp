@@ -11,6 +11,7 @@ fn context() -> Context {
     Context {
         root: PathBuf::from("/ws"),
         members: Vec::new(),
+        dependencies: Default::default(),
         load_resolved_graph: false,
     }
 }

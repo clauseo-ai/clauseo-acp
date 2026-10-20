@@ -36,6 +36,7 @@ pub(super) fn desktop_crate_missing() -> Inspection {
     run(&Context {
         root: dir.to_path_buf(),
         members: Vec::new(),
+        dependencies: Default::default(),
         load_resolved_graph: false,
     })
 }

@@ -14,16 +14,17 @@ pub(crate) fn run(quick: bool) -> ExitCode {
     let mut out = Printer::stdout();
     let root = workspace::workspace_root();
     let ci = is_ci(std::env::var("CI").ok().as_deref());
-    let (members, members_error) = match workspace::load_members(&root) {
-        Ok(members) => (members, None),
+    let (workspace, members_error) = match workspace::load(&root) {
+        Ok(workspace) => (workspace, None),
         Err(error) => {
             out.note(format!("note: {error}"));
-            (Vec::new(), Some(error))
+            (workspace::Workspace::default(), Some(error))
         }
     };
     let ctx = Context {
         root,
-        members,
+        members: workspace.members,
+        dependencies: workspace.dependencies,
         load_resolved_graph: true,
     };
 

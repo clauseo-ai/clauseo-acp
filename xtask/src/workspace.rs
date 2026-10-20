@@ -15,10 +15,22 @@ pub(crate) struct Member {
     pub path_deps: Vec<String>,
 }
 
+/// The workspace as one `cargo metadata --no-deps` run reports it.
+#[derive(Default)]
+pub(crate) struct Workspace {
+    pub members: Vec<Member>,
+    /// The dependencies and `[features]` of every member, by package name.
+    pub dependencies: BTreeMap<String, PackageDependencies>,
+}
+
 /// Passed to every static check.
 pub(crate) struct Context {
     pub root: PathBuf,
     pub members: Vec<Member>,
+    /// The dependencies and `[features]` of every member, by package name, from the same
+    /// `cargo metadata` run as `members`. Empty when that run failed, which `cargo xtask check`
+    /// reports as a note before any check runs.
+    pub dependencies: BTreeMap<String, PackageDependencies>,
     /// Whether checks may load the dependency graph cargo resolved (`cargo tree --locked
     /// --offline` per crate, for plugins and dependencies: `checks::graph`). That graph
     /// needs every target's crates downloaded, so tests of the real repo, which use no network,
@@ -105,17 +117,18 @@ pub(crate) fn workspace_root() -> PathBuf {
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
 }
 
-/// Runs `cargo metadata` in `root` and returns the workspace members.
-pub(crate) fn load_members(root: &Path) -> Result<Vec<Member>, String> {
-    parse_metadata(&run_metadata(root)?)
+/// Runs `cargo metadata` in `root` once and reads the workspace from its output.
+pub(crate) fn load(root: &Path) -> Result<Workspace, String> {
+    let json = run_metadata(root)?;
+    Ok(Workspace {
+        members: parse_metadata(&json)?,
+        dependencies: parse_workspace_dependencies(&json)?,
+    })
 }
 
-/// Runs `cargo metadata` in `root` and returns the dependencies and `[features]` of every
-/// workspace member, by package name.
-pub(crate) fn load_workspace_dependencies(
-    root: &Path,
-) -> Result<BTreeMap<String, PackageDependencies>, String> {
-    parse_workspace_dependencies(&run_metadata(root)?)
+/// Runs `cargo metadata` in `root` and returns the workspace members.
+pub(crate) fn load_members(root: &Path) -> Result<Vec<Member>, String> {
+    load(root).map(|workspace| workspace.members)
 }
 
 /// The stdout of `cargo metadata --format-version 1 --no-deps` run in `root`.
@@ -201,6 +214,8 @@ pub(crate) fn package_for<'a>(file: &str, members: &'a [Member]) -> Option<&'a M
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
+    use std::fs;
 
     const SAMPLE: &str = r#"{
         "workspace_root": "/ws",
@@ -244,6 +259,16 @@ mod tests {
         assert_eq!(tauri.features, ["devtools"]);
         assert_eq!(deps.features["x"], ["t/devtools"]);
         assert!(parse_workspace_dependencies("{").is_err());
+    }
+
+    #[test]
+    fn a_failed_cargo_metadata_run_is_an_error_of_the_load() {
+        let dir = Scratch::new("workspace-load-fails");
+        let manifest = "[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
+                        [dependencies]\nfoo = \"not a req\"\n";
+        fs::write(dir.join("Cargo.toml"), manifest).expect("write the manifest");
+        let error = load(&dir).err().expect("cargo metadata fails");
+        assert!(error.starts_with("`cargo metadata` failed: "), "{error}");
     }
 
     #[test]
