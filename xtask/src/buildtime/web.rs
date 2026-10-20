@@ -12,7 +12,7 @@
 //!   `failures` is optional: `[{"message", "fix"}]` for what is no probe's (a conflict over
 //!   `ui/app/src/App.tsx`, a restore that failed); each fails the run. With `probes` empty, the
 //!   script stopped before it measured (a conflict left by an interrupted run, or a Node older
-//!   than 24.11).
+//!   than `engines.node` in `ui/package.json` allows).
 //! - exit status: 0, or 1 when it reports `failures`. A crash exits 1 with no JSON line.
 //! - stderr: notes for people, printed as they are.
 //!
@@ -21,11 +21,11 @@
 //! (`dev_start`), and times N edits of `src/App.tsx` until headless Chrome shows them (`hmr`). It
 //! stops only the processes it started, each with its process group (`buildtime-proc.mjs`).
 //!
-//! The `hmr` probe edits App.tsx under the script's guard. Its rules (the copy under
-//! `target/xtask/buildtime/`, the restore, and the leftover rule that `probe::restore_leftovers`
-//! leaves to it) are written out in one place, above `BACKUP_DIR` in
-//! `ui/app/scripts/buildtime-lib.mjs`. The lock (`lock.rs`) covers the copy when xtask runs the
-//! script.
+//! The `hmr` probe edits App.tsx under the scripts' guard, `ui/app/scripts/guard.mjs`, where its
+//! rules (the copy, the restore, the leftover rule) are written out. `BACKUP_DIR` in
+//! `ui/app/scripts/buildtime-lib.mjs` puts the copy under `target/xtask/buildtime/`, and names the
+//! leftover edit that `probe::restore_leftovers` leaves to the script. The lock (`lock.rs`) covers
+//! the copy when xtask runs the script.
 //!
 //! Gating: `tsc`, `oxlint_type_aware` and `vite_build` follow their row's gate like the Rust
 //! probes, and fail the run when they fail (the tool exits non-zero). `initial_js`, `dev_start`
@@ -265,7 +265,7 @@ pub(crate) fn measure(
             return Err(stop(
                 diag,
                 &format!("could not run `node`: {error}"),
-                "install Node 24.11 or later",
+                &install_node(node_engines(root).as_deref()),
             ));
         }
     };
@@ -293,6 +293,24 @@ pub(crate) fn measure(
             Err(stop(diag, &format!("`{cmd}` failed"), &rerun))
         }
         Read::Unreadable(message) => Err(stop(diag, &message, &rerun)),
+    }
+}
+
+/// The Node range that `engines.node` in `ui/package.json` names, the one place the minimum is
+/// written. `None` when the file, its JSON or the field cannot be read.
+fn node_engines(root: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(root.join("ui/package.json")).ok()?;
+    let manifest: serde_json::Value = serde_json::from_str(&text).ok()?;
+    Some(manifest.get("engines")?.get("node")?.as_str()?.to_owned())
+}
+
+/// The fix when `node` cannot run: a Node in the range `engines` (from `node_engines`).
+fn install_node(engines: Option<&str>) -> String {
+    match engines {
+        Some(range) => {
+            format!("install a Node that matches {range} (`engines.node` in ui/package.json)")
+        }
+        None => "install the Node that `engines.node` in ui/package.json names".to_owned(),
     }
 }
 

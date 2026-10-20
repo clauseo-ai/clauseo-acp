@@ -12,7 +12,7 @@
 // timed runs.
 //
 // The HMR probe edits src/App.tsx while it runs, under the guard whose rules are written out in
-// buildtime-lib.mjs, above `BACKUP_DIR`. Every child (the tools and Vite) starts, runs and stops
+// guard.mjs; buildtime-lib.mjs adds where the copy waits and which leftover edit is its own. Every child (the tools and Vite) starts, runs and stops
 // through buildtime-proc.mjs, which stops it with everything it started.
 
 import { existsSync, readFileSync } from "node:fs";
@@ -20,19 +20,17 @@ import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  AppGuard,
-  ConflictError,
-  MIN_NODE,
   appPaths,
   initialJs,
   marked,
+  minNode,
   nodeAtLeast,
   parseRuns,
   recoverApp,
-  restoreFailure,
   scriptCommand,
 } from "./buildtime-lib.mjs";
 import { runTool, start, stop, stopAll } from "./buildtime-proc.mjs";
+import { ConflictError, FileGuard, restoreFailure } from "./guard.mjs";
 
 const APP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const UI_DIR = resolve(APP_DIR, "..");
@@ -222,8 +220,8 @@ async function measureDev(runs, state) {
       await page.goto(`http://localhost:${port}/`);
       await page.waitForSelector("#app-root", { state: "attached" });
       // Checks ROOT_TAG before anything is saved or written.
-      marked(readFileSync(APP_PATHS.app, "utf8"), 0);
-      state.guard = new AppGuard(APP_PATHS);
+      marked(readFileSync(APP_PATHS.file, "utf8"), 0);
+      state.guard = new FileGuard(APP_PATHS);
       const samples = [];
       for (let run = 0; run <= runs; run += 1) {
         const ms = await timedEdit(page, state.guard, run + 1);
@@ -298,9 +296,10 @@ async function onSignal(state, signal) {
 
 async function main() {
   const runs = parseRuns(process.argv.slice(2));
-  if (!nodeAtLeast(process.versions.node, MIN_NODE)) {
-    const message = `Node ${process.versions.node} is too old for ui/ (engines: >=${MIN_NODE})`;
-    report(runs, [], [{ message, fix: `install Node ${MIN_NODE} or later` }]);
+  const min = minNode(UI_DIR);
+  if (!nodeAtLeast(process.versions.node, min)) {
+    const message = `Node ${process.versions.node} is too old for ui/ (engines: >=${min})`;
+    report(runs, [], [{ message, fix: `install Node ${min} or later` }]);
     return;
   }
   if (!existsSync(join(APP_DIR, "node_modules"))) {
