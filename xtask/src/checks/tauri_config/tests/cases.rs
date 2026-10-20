@@ -153,6 +153,10 @@ pub(super) fn freeze_prototype_false() -> Inspection {
     )
 }
 
+pub(super) fn freeze_prototype_missing() -> Inspection {
+    conf_case("freeze-prototype-missing", "\"freezePrototype\": true,", "")
+}
+
 pub(super) fn csp_not_pinned() -> Inspection {
     let trimmed = PINNED_CSP.replace("; require-trusted-types-for 'script'", "");
     conf_case(
@@ -222,6 +226,18 @@ pub(super) fn updater_endpoints_without_pubkey() -> Inspection {
     )
 }
 
+pub(super) fn whitespace_pubkey_with_endpoints() -> Inspection {
+    let conf = edited_conf(
+        "\"endpoints\": []",
+        "\"endpoints\": [\"https://releases.example/latest.json\"]",
+    )
+    .replace("\"pubkey\": \"\"", "\"pubkey\": \"   \"");
+    run_files(
+        "whitespace-pubkey-with-endpoints",
+        &[(TAURI_CONF, conf.as_bytes()), (BUILD_RS, BUILD.as_bytes())],
+    )
+}
+
 pub(super) fn updater_v1_compatible() -> Inspection {
     conf_case(
         "updater-v1-compatible",
@@ -235,6 +251,14 @@ pub(super) fn dangerous_key_nested() -> Inspection {
         "dangerous-key-nested",
         "\"freezePrototype\": true,",
         "\"freezePrototype\": true,\n      \"assetProtocol\": { \"enable\": false, \"dangerousScope\": true },",
+    )
+}
+
+pub(super) fn dangerous_key_in_an_array() -> Inspection {
+    conf_case(
+        "dangerous-key-in-an-array",
+        "\"capabilities\": [\"main\"]",
+        "\"capabilities\": [\"main\", { \"identifier\": \"ipc\", \"dangerousScope\": true }]",
     )
 }
 

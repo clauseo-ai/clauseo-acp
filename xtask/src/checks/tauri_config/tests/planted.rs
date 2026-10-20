@@ -54,6 +54,12 @@ crate::checks::planted::cases! {
          fix: set `\"freezePrototype\": true` under app.security: a frozen prototype stops script \
          in the page from hijacking the objects the IPC bridge uses",
     ]), inspects 2 => super::cases::freeze_prototype_false,
+    /// `app.security.freezePrototype` left out fails at line 1.
+    freeze_prototype_missing: FailsWith(&[
+        "crates/desktop/tauri.conf.json:1: app.security.freezePrototype must be true\n    \
+         fix: set `\"freezePrototype\": true` under app.security: a frozen prototype stops script \
+         in the page from hijacking the objects the IPC bridge uses",
+    ]), inspects 2 => super::cases::freeze_prototype_missing,
     /// A CSP that is a string but not the pinned one fails at the `csp` line.
     csp_not_pinned: FailsWith(&[
         "crates/desktop/tauri.conf.json:12: app.security.csp is not the pinned policy\n    \
@@ -109,6 +115,11 @@ crate::checks::planted::cases! {
         "crates/desktop/tauri.conf.json:21: plugins.updater has endpoints but no pubkey\n    \
          fix: set plugins.updater.pubkey to the release public key before adding endpoints",
     ]), inspects 2 => super::cases::updater_endpoints_without_pubkey,
+    /// Updater endpoints with a whitespace-only public key fail at the `endpoints` line.
+    whitespace_pubkey_with_endpoints: FailsWith(&[
+        "crates/desktop/tauri.conf.json:21: plugins.updater has endpoints but no pubkey\n    \
+         fix: set plugins.updater.pubkey to the release public key before adding endpoints",
+    ]), inspects 2 => super::cases::whitespace_pubkey_with_endpoints,
     /// `bundle.createUpdaterArtifacts` set to `"v1Compatible"` fails at its line.
     updater_v1_compatible: FailsWith(&[
         "crates/desktop/tauri.conf.json:17: bundle.createUpdaterArtifacts is \"v1Compatible\"\n    \
@@ -121,6 +132,12 @@ crate::checks::planted::cases! {
          off a Tauri safeguard\n    \
          fix: remove it: each `dangerous*` setting switches off a Tauri safeguard",
     ]), inspects 2 => super::cases::dangerous_key_nested,
+    /// A `dangerous*` key in an object inside an array fails under its key path, at line 1.
+    dangerous_key_in_an_array: FailsWith(&[
+        "crates/desktop/tauri.conf.json:1: `app.security.capabilities.dangerousScope` switches off \
+         a Tauri safeguard\n    \
+         fix: remove it: each `dangerous*` setting switches off a Tauri safeguard",
+    ]), inspects 2 => super::cases::dangerous_key_in_an_array,
     /// A platform config `tauri.macos.conf.json` fails at line 1.
     platform_config_json: FailsWith(&[
         "crates/desktop/tauri.macos.conf.json:1: platform config \
