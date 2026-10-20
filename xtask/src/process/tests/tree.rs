@@ -1,81 +1,100 @@
 //! Tests of how a command's tree is stopped: at its limit, when its run is dropped or panics,
 //! after it exits, and with SIGKILL when it ignores SIGTERM. Most run a wrapper that starts a
-//! grandchild and waits, as `ui/app/scripts/buildtime-proc.test.mjs` does. The grandchild holds
-//! the write end of a pipe the test reads, so the test sees EOF only once the wrapper and the
-//! grandchild are both gone. Nothing sleeps: the test blocks on that pipe or on the run.
+//! grandchild, prints its own pid (its group's id) and waits, as
+//! `ui/app/scripts/buildtime-proc.test.mjs` does. The grandchild holds the write end of a pipe the
+//! test reads, so the test sees EOF only once the wrapper and the grandchild are both gone.
+//! Nothing sleeps: the test blocks on that pipe or on the run. `leader/tests.rs` uses them too.
 //!
-//! A run's limit counts from the start of `Running::finish`, and these tests read the
-//! grandchild's pid before they call it, so a stop at the limit always meets the whole tree,
-//! however loaded the machine. That is why their limits can be short.
+//! A run's limit counts from the start of `Running::finish`, and these tests read the wrapper's
+//! line before they call it, so a stop at the limit always meets the whole tree, however loaded
+//! the machine. That is why their limits can be short.
 
 use super::super::running::{self, Finish, Limits, Running, Streams};
 use super::*;
 use crate::clock::timed;
+use nix::sys::signal::{Signal, killpg};
+use nix::unistd::Pid;
 use std::io::{BufRead, BufReader, PipeReader, Read};
 use std::panic::{self, AssertUnwindSafe};
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
-/// Starts a grandchild that holds stdout, prints the grandchild's pid, and waits for it.
-const WRAPPER: &str = "sleep 300 & echo $!; wait";
+/// Starts a grandchild that holds stdout, prints its own pid, which is its group's id, and waits.
+pub(in crate::process) const WRAPPER: &str = "sleep 300 & echo $$; wait";
 
 /// `WRAPPER`, but on SIGTERM it prints `term` and exits. So with SIGTERM first its run ends long
 /// before `KILL_GRACE`, and with SIGKILL alone it prints nothing.
-const REPORTS_SIGTERM: &str = "trap 'echo term; exit 0' TERM; sleep 300 & echo $!; wait";
+const REPORTS_SIGTERM: &str = "trap 'echo term; exit 0' TERM; sleep 300 & echo $$; wait";
 
 /// The limit of a run the tests let time out. The tree is whole before it starts (see the top of
 /// this file), so it only has to be short.
 const SHORT_LIMIT: Duration = Duration::from_millis(50);
 
 /// The grace of the test that waits it out, and the drain of the test that waits that out.
-const SHORT_WAIT: Duration = Duration::from_millis(200);
+pub(in crate::process) const SHORT_WAIT: Duration = Duration::from_millis(200);
 
 /// How long a test waits for EOF, or for a run to end, before it fails: far longer than the
 /// `KILL_GRACE` and drain a stop takes.
-const SURVIVOR: Duration = Duration::from_secs(20);
+pub(in crate::process) const SURVIVOR: Duration = Duration::from_secs(20);
 
-/// A grandchild whose pid the wrapper printed, and the EOF of the pipe it holds.
-struct Grandchild {
-    pid: i32,
+/// The tree of a wrapper that printed its group's id, and the EOF of the pipe it holds.
+pub(in crate::process) struct Grandchild {
+    group: i32,
     eof: Receiver<io::Result<Vec<u8>>>,
 }
 
 impl Grandchild {
-    /// Reads the pid the wrapper printed on `reader`'s first line, then reads the rest on another
-    /// thread.
-    fn of(reader: PipeReader) -> Grandchild {
+    /// The id of the wrapper's group.
+    pub(in crate::process) fn group(&self) -> i32 {
+        self.group
+    }
+
+    /// Reads the group the wrapper printed on `reader`'s first line, then reads the rest on
+    /// another thread.
+    pub(in crate::process) fn of(reader: PipeReader) -> Grandchild {
         let mut reader = BufReader::new(reader);
         let mut line = String::new();
         reader
             .read_line(&mut line)
             .expect("read the wrapper's first line");
-        let pid = line.trim().parse().unwrap_or_else(|_| {
-            panic!("the wrapper ended before it printed its grandchild's pid: {line:?}")
-        });
+        let group = line
+            .trim()
+            .parse()
+            .unwrap_or_else(|_| panic!("the wrapper ended before it printed its group: {line:?}"));
         let (sender, eof) = mpsc::channel();
         thread::spawn(move || {
             let mut rest = Vec::new();
             drop(sender.send(reader.read_to_end(&mut rest).map(|_| rest)));
         });
-        Grandchild { pid, eof }
+        Grandchild { group, eof }
     }
 
     /// Waits for EOF on the pipe, which comes once the wrapper and the grandchild are gone, and
-    /// returns what they printed after the pid. A grandchild still holding the pipe after
-    /// `SURVIVOR` fails the test. It is not killed: its pid may belong to another process by
-    /// then. It ends when its `sleep` does.
-    fn gone(self) -> Vec<u8> {
-        let Ok(rest) = self.eof.recv_timeout(SURVIVOR) else {
-            panic!("grandchild {} outlived its stop by {SURVIVOR:?}", self.pid);
-        };
-        rest.expect("read the pipe")
+    /// returns what they printed after the group. A tree still holding the pipe after `SURVIVOR`
+    /// fails the test (`fail`).
+    pub(in crate::process) fn gone(self) -> Vec<u8> {
+        match self.eof.recv_timeout(SURVIVOR) {
+            Ok(rest) => rest.expect("read the pipe"),
+            Err(_) => self.fail(&format!("it outlived its stop by {SURVIVOR:?}")),
+        }
+    }
+
+    /// SIGKILL to the group, then fails the test with `why`, so a broken stop leaves no tree
+    /// behind. Called only while the tree is known to hold the pipe, so a process is still in the
+    /// group, and a group's id is not given to a new process while one is.
+    pub(in crate::process) fn fail(self, why: &str) -> ! {
+        let killed = killpg(Pid::from_raw(self.group), Signal::SIGKILL);
+        panic!(
+            "the tree of group {}: {why} (SIGKILL to it: {killed:?})",
+            self.group
+        );
     }
 }
 
 /// Starts `sh -c <script>` with `limits`, its stdout the write end of a new pipe; returns the run
 /// and the read end.
-fn start(script: &str, limits: Limits) -> (Running, PipeReader) {
+pub(in crate::process) fn start(script: &str, limits: Limits) -> (Running, PipeReader) {
     let (reader, writer) = running::pipe().expect("make a pipe");
     let mut command = Command::new("sh");
     command.args(["-c", script]).stdout(writer);
@@ -88,8 +107,9 @@ fn a_timeout_stops_the_command_and_its_grandchild() {
     let (running, reader) = start(WRAPPER, Limits::of(SHORT_LIMIT));
     let grandchild = Grandchild::of(reader);
     let finish = running.finish(&mut |_, _| {});
+    let rest = grandchild.gone();
     assert!(matches!(finish, Ok(Finish::TimedOut)), "{finish:?}");
-    assert_eq!(grandchild.gone(), b"");
+    assert_eq!(rest, b"");
 }
 
 #[test]
@@ -97,8 +117,9 @@ fn a_timeout_sends_sigterm_before_sigkill() {
     let (running, reader) = start(REPORTS_SIGTERM, Limits::of(SHORT_LIMIT));
     let grandchild = Grandchild::of(reader);
     let finish = running.finish(&mut |_, _| {});
+    let rest = grandchild.gone();
     assert!(matches!(finish, Ok(Finish::TimedOut)), "{finish:?}");
-    assert_eq!(String::from_utf8_lossy(&grandchild.gone()), "term\n");
+    assert_eq!(String::from_utf8_lossy(&rest), "term\n");
 }
 
 #[test]
@@ -131,14 +152,15 @@ fn a_panic_stops_the_command_and_its_grandchild() {
 
 #[test]
 fn a_grandchild_left_running_is_stopped_when_the_command_exits() {
-    let (running, reader) = start("sleep 300 & echo $!", Limits::of(TEST_TIMEOUT));
+    let (running, reader) = start("sleep 300 & echo $$", Limits::of(TEST_TIMEOUT));
     let grandchild = Grandchild::of(reader);
     let finish = running.finish(&mut |_, _| {});
+    let rest = grandchild.gone();
     assert!(
         matches!(&finish, Ok(Finish::Exited(status)) if status.success()),
         "{finish:?}"
     );
-    assert_eq!(grandchild.gone(), b"");
+    assert_eq!(rest, b"");
 }
 
 #[test]
@@ -150,8 +172,9 @@ fn a_tree_that_ignores_sigterm_gets_sigkill_after_the_grace_period() {
     let (running, reader) = start(&format!("trap '' TERM; {WRAPPER}"), limits);
     let grandchild = Grandchild::of(reader);
     let (finish, secs) = timed(|| running.finish(&mut |_, _| {}));
+    let rest = grandchild.gone();
     assert!(matches!(finish, Ok(Finish::TimedOut)), "{finish:?}");
-    assert_eq!(grandchild.gone(), b"");
+    assert_eq!(rest, b"");
     let least = (limits.run + limits.grace).as_secs_f64();
     assert!(secs >= least, "stopped after {secs} s, before {least} s");
 }

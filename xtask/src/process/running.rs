@@ -5,8 +5,8 @@
 //! The run ends when the command has exited and its pipes are closed. At its limit its tree is
 //! asked to stop (`Tree::terminate`: SIGTERM to the group on Unix, the whole stop on Windows), and
 //! killed (`Tree::kill`: SIGKILL on Unix) after `KILL_GRACE` if the command or a pipe is still
-//! open. When the command exits with a pipe still open, what is left of its tree is killed at once:
-//! it could only hold the pipe, and the pipe keeps what it wrote. A process that left the tree can
+//! open. When the command exits, what is left of its tree is killed at once: it could only hold
+//! the pipes, and a pipe keeps what was written to it. A process that left the tree can
 //! hold a pipe for ever, so after the exit, or after the kill, the run waits at most `DRAIN` for
 //! the pipes, and a run that exited says when one was still open then. When the run ends, or its
 //! `Running` is dropped, what is left of the tree is killed (`Tree::finish`); a drop before the
@@ -106,12 +106,10 @@ pub(super) enum Finish {
     TimedOut,
 }
 
-/// What the threads of a run send it.
+/// What the threads of a run send it. A reader sends nothing at EOF: its thread ends.
 enum Event {
     Data(Stream, Vec<u8>),
-    /// A pipe reached EOF.
-    Closed,
-    /// A pipe could not be read; it counts as closed.
+    /// A pipe could not be read; its reader ends, so it counts as closed.
     ReadFailed(io::Error),
     Exited(io::Result<ExitStatus>),
 }
@@ -136,8 +134,6 @@ pub(super) struct Running {
     /// The command as people see it, for the errors.
     shown: String,
     events: Receiver<Event>,
-    /// Pipes not closed yet.
-    open: usize,
     exited: bool,
     status: Option<ExitStatus>,
     limits: Limits,
@@ -213,7 +209,6 @@ impl Running {
             tree,
             shown: shown.to_owned(),
             events,
-            open: readers.len(),
             exited: false,
             status: None,
             limits,
@@ -268,18 +263,15 @@ impl Running {
     }
 
     /// Takes events until the command has exited and its pipes are closed, or the last phase
-    /// ran out.
+    /// ran out. Each thread of the run ends after its last event, the waiter after the exit and
+    /// each reader at its pipe's EOF, so the channel disconnects exactly when both are in.
     fn wait(&mut self, on_output: &mut dyn FnMut(Stream, &[u8])) {
-        while !(self.exited && self.open == 0) {
+        loop {
             let (event, secs) = timed(|| self.events.recv_timeout(self.left));
             self.left = self.left.saturating_sub(Duration::from_secs_f64(secs));
             match event {
                 Ok(Event::Data(stream, chunk)) => on_output(stream, &chunk),
-                Ok(Event::Closed) => self.open -= 1,
-                Ok(Event::ReadFailed(error)) => {
-                    self.open -= 1;
-                    self.keep(error);
-                }
+                Ok(Event::ReadFailed(error)) => self.keep(error),
                 Ok(Event::Exited(status)) => {
                     self.exited = true;
                     match status {
@@ -289,10 +281,8 @@ impl Running {
                     if self.phase == Phase::Running {
                         self.enter(Phase::Draining, self.limits.drain);
                         // What is left of the tree could only hold the pipes, which keep what it
-                        // wrote; with them closed, `finish` kills it.
-                        if self.open > 0 {
-                            self.kill();
-                        }
+                        // wrote.
+                        self.kill();
                     }
                 }
                 Err(RecvTimeoutError::Timeout) => match self.phase {
@@ -360,20 +350,27 @@ impl Drop for Running {
     }
 }
 
-/// Reads `reader` to its end, sending each chunk, then `Closed` or `ReadFailed`.
+/// Reads `reader` to its end, sending each chunk, and `ReadFailed` if a read fails. Returning
+/// drops the thread's sender, which is how the run learns the pipe is closed.
 fn read_all(stream: Stream, mut reader: io::PipeReader, sender: &Sender<Event>) {
     let mut chunk = vec![0u8; CHUNK];
     loop {
-        let event = match reader.read(&mut chunk) {
-            Ok(0) => Event::Closed,
-            Ok(n) => Event::Data(stream, chunk[..n].to_vec()),
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-            Err(error) => Event::ReadFailed(error),
-        };
-        let last = !matches!(event, Event::Data(..));
-        // The receiver is gone once the run has ended, when nobody wants the rest.
-        if sender.send(event).is_err() || last {
-            return;
+        match reader.read(&mut chunk) {
+            Ok(0) => return,
+            Ok(n) => {
+                // The receiver is gone once the run has ended, when nobody wants the rest.
+                if sender
+                    .send(Event::Data(stream, chunk[..n].to_vec()))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => {
+                drop(sender.send(Event::ReadFailed(error)));
+                return;
+            }
         }
     }
 }
