@@ -147,6 +147,99 @@ pub(super) fn listed_600_plus_file_passes() -> Repo {
     )
 }
 
+pub(super) fn cts_601_lines() -> Repo {
+    run_on("cts-601-lines", &[("ui/big.cts", lines(601))])
+}
+
+pub(super) fn crlf_601_lines() -> Repo {
+    run_on("crlf-601-lines", &[("src/big.rs", "\r\n".repeat(601))])
+}
+
+/// Old Mac line endings: `str::lines` would see one line.
+pub(super) fn lone_cr_601_lines() -> Repo {
+    run_on("lone-cr-601-lines", &[("ui/big.ts", "x\r".repeat(601))])
+}
+
+/// `src/link.rs` is a symlink to a 601-line `.txt` file, which is no source kind itself. On
+/// Windows, where a scratch file symlink needs a privilege, it is a plain copy.
+pub(super) fn symlinked_file_601_lines() -> Repo {
+    let dir = repo("symlinked-file", &[("notes/big.txt", lines(601))]);
+    Scratch::create_dir_all(dir.join("src")).expect("create src");
+    #[cfg(unix)]
+    Scratch::symlink("../notes/big.txt", dir.join("src/link.rs")).expect("link the file");
+    #[cfg(not(unix))]
+    Scratch::write(dir.join("src/link.rs"), lines(601)).expect("write the file");
+    Repo::new(dir)
+}
+
+pub(super) fn outer_doc_comment_101() -> Repo {
+    let text = format!("/// {}\nfn f() {{}}\n", "a".repeat(97));
+    run_on("outer-doc-comment-101", &[("src/lib.rs", text)])
+}
+
+pub(super) fn block_doc_comment_past_100() -> Repo {
+    // Line 2 is ` * ` and 98 `y`: 101 characters.
+    let text = format!("/**\n * {}\n */\nfn f() {{}}\n", "y".repeat(98));
+    run_on("block-doc-comment-past-100", &[("src/lib.rs", text)])
+}
+
+pub(super) fn inner_block_doc_comment_past_100() -> Repo {
+    // `/*! ` and 97 `z`: 101 characters, the comment closed on the next line.
+    let text = format!("/*! {}\n*/\nfn f() {{}}\n", "z".repeat(97));
+    run_on("inner-block-doc-past-100", &[("src/lib.rs", text)])
+}
+
+pub(super) fn nested_block_comment_past_100() -> Repo {
+    // The inner `*/` closes only the inner pair, so line 2 (two spaces, 99 `n`) is comment.
+    let text = format!(
+        "/* outer /* inner */\n  {}\n*/\nfn f() {{}}\n",
+        "n".repeat(99)
+    );
+    run_on("nested-block-past-100", &[("src/lib.rs", text)])
+}
+
+pub(super) fn crlf_comment_101() -> Repo {
+    let text = format!("fn a() {{}}\r\n// {}\r\n", "a".repeat(98));
+    run_on("crlf-comment-101", &[("src/lib.rs", text)])
+}
+
+/// The `\r` of a CRLF ending is not a column: a 100-column comment passes.
+pub(super) fn crlf_comment_100_passes() -> Repo {
+    let text = format!("fn a() {{}}\r\n// {}\r\n", "a".repeat(97));
+    run_on("crlf-comment-100", &[("src/lib.rs", text)])
+}
+
+pub(super) fn stale_exception_not_source() -> Repo {
+    run_on(
+        "stale-exception-not-source",
+        &[
+            ("src/lib.rs", "fn f() {}\n".to_owned()),
+            ("README.md", lines(700)),
+            exceptions("README.md a long readme\n"),
+        ],
+    )
+}
+
+pub(super) fn exception_without_reason() -> Repo {
+    run_on(
+        "exception-without-reason",
+        &[
+            ("src/lib.rs", "fn f() {}\n".to_owned()),
+            exceptions("src/lib.rs\n"),
+        ],
+    )
+}
+
+pub(super) fn exception_listed_twice() -> Repo {
+    run_on(
+        "exception-listed-twice",
+        &[
+            ("src/parser.rs", lines(650)),
+            exceptions("src/parser.rs generated\nsrc/parser.rs generated again\n"),
+        ],
+    )
+}
+
 #[test]
 fn a_file_of_exactly_the_limit_passes() {
     let found = run(run_on("exactly-600", &[("src/lib.rs", lines(LINE_LIMIT))]).ctx());
@@ -210,6 +303,17 @@ pub(super) fn only_file_unreadable() -> Repo {
     let dir = repo("only-file-unreadable", &[]);
     Scratch::write(dir.join("bad.rs"), [0xff, 0xfe, b'\n']).expect("write bytes");
     Repo::new(dir)
+}
+
+#[test]
+fn lines_end_at_lf_crlf_or_a_lone_cr() {
+    assert_eq!(line_count(""), 0);
+    assert_eq!(line_count("a"), 1);
+    assert_eq!(line_count("a\n"), 1);
+    assert_eq!(line_count("a\nb"), 2);
+    assert_eq!(line_count("a\r\nb\r\n"), 2);
+    assert_eq!(line_count("a\rb\rc"), 3);
+    assert_eq!(line_count("\n\r\r\n"), 3);
 }
 
 #[test]

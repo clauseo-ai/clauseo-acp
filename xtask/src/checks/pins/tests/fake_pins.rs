@@ -104,3 +104,17 @@ fn versions_in_other_values() {
         ],
     );
 }
+
+/// The `lefthook@<version>` form, in upper case, after a flow sequence, fails at its line.
+#[test]
+fn lefthook_comment_at_form() {
+    assert_found(
+        &cases::lefthook_comment_at_form(),
+        2,
+        &[
+            "lefthook.yml:2: the comment names lefthook 9.8.6, not 9.8.7, the version `BINARIES` \
+             in xtask/src/setup.rs pins\n    fix: check that the comment holds for lefthook \
+             9.8.7, then make it name 9.8.7, the version `BINARIES` in xtask/src/setup.rs pins",
+        ],
+    );
+}

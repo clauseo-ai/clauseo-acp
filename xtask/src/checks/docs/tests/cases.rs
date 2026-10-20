@@ -8,8 +8,10 @@ use std::fmt::Write;
 use std::path::Path;
 
 mod commands;
+mod forms;
 mod paths;
 pub(super) use commands::*;
+pub(super) use forms::*;
 pub(super) use paths::*;
 
 /// A valid `AGENTS.md`.

@@ -69,7 +69,7 @@ fn run(ctx: &Context) -> Inspection {
         match checks::read_repo_file(&ctx.root, file) {
             Ok(Some(text)) => {
                 read += 1;
-                let lines = text.lines().count();
+                let lines = line_count(&text);
                 sizes.push((file.clone(), lines));
                 violations.extend(size_violation(file, lines, exempt.contains(file.as_str())));
                 if is_rust(file) {
@@ -112,6 +112,16 @@ fn extension(file: &str) -> Option<String> {
         .extension()
         .and_then(|ext| ext.to_str())
         .map(str::to_ascii_lowercase)
+}
+
+/// How many lines `text` has, each ended by `\n`, `\r\n` or a lone `\r` (old Mac endings, which
+/// TypeScript and every editor break lines on), the last one ended or not. `str::lines` alone
+/// would count a file of lone `\r` endings as one line.
+fn line_count(text: &str) -> usize {
+    let breaks =
+        text.matches('\n').count() + text.matches('\r').count() - text.matches("\r\n").count();
+    let unended = !text.is_empty() && !text.ends_with(['\n', '\r']);
+    breaks + usize::from(unended)
 }
 
 /// The violation for a file of `lines` lines that is over the limit and not exempt, at line 1.

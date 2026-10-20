@@ -49,4 +49,54 @@ crate::checks::planted::cases! {
          fix: buildtime-edits looks for UI source files under ui/app/src; restore them, or, if \
          they moved, update the consts xtask/src/checks/buildtime_edits.rs builds that place from",
     ]), inspects 0 => super::empty_src,
+    /// Single quotes around the value fail the same way.
+    single_quoted: FailsWith(&[
+        "ui/app/src/App.tsx:1: an interrupted `cargo xtask buildtime web` left its edit here\n    \
+         fix: run `cargo xtask buildtime web` once to restore the file from target/xtask/buildtime, \
+         or remove the attribute by hand",
+    ]), inspects 1 => super::single_quoted,
+    /// A braced JSX value fails the same way.
+    braced_value: FailsWith(&[
+        "ui/app/src/App.tsx:1: an interrupted `cargo xtask buildtime web` left its edit here\n    \
+         fix: run `cargo xtask buildtime web` once to restore the file from target/xtask/buildtime, \
+         or remove the attribute by hand",
+    ]), inspects 1 => super::braced_value,
+    /// The attribute on its own line, as a formatter splits a tag, fails at that line.
+    split_tag: FailsWith(&[
+        "ui/app/src/App.tsx:3: an interrupted `cargo xtask buildtime web` left its edit here\n    \
+         fix: run `cargo xtask buildtime web` once to restore the file from target/xtask/buildtime, \
+         or remove the attribute by hand",
+    ]), inspects 1 => super::split_tag,
+    /// Whitespace before the `=` does not hide the attribute.
+    space_before_equals: FailsWith(&[
+        "ui/app/src/App.tsx:1: an interrupted `cargo xtask buildtime web` left its edit here\n    \
+         fix: run `cargo xtask buildtime web` once to restore the file from target/xtask/buildtime, \
+         or remove the attribute by hand",
+    ]), inspects 1 => super::space_before_equals,
+    /// The name and its `=` on two lines fail once, at the name's line.
+    name_and_value_split: FailsWith(&[
+        "ui/app/src/App.tsx:2: an interrupted `cargo xtask buildtime web` left its edit here\n    \
+         fix: run `cargo xtask buildtime web` once to restore the file from target/xtask/buildtime, \
+         or remove the attribute by hand",
+    ]), inspects 1 => super::name_and_value_split,
+    /// CRLF line endings count lines the same way.
+    crlf_file: FailsWith(&[
+        "ui/app/src/App.tsx:2: an interrupted `cargo xtask buildtime web` left its edit here\n    \
+         fix: run `cargo xtask buildtime web` once to restore the file from target/xtask/buildtime, \
+         or remove the attribute by hand",
+    ]), inspects 1 => super::crlf_file,
+    /// The attribute in a stylesheet fails: every file type is read, not only `.tsx`.
+    stylesheet: FailsWith(&[
+        "ui/app/src/app.css:4: an interrupted `cargo xtask buildtime web` left its edit here\n    \
+         fix: run `cargo xtask buildtime web` once to restore the file from target/xtask/buildtime, \
+         or remove the attribute by hand",
+    ]), inspects 2 => super::stylesheet,
+    /// The attribute in a file under a hidden, nested folder fails: every folder is walked.
+    hidden_deep_folder: FailsWith(&[
+        "ui/app/src/.cache/a/b/state.json:1: an interrupted `cargo xtask buildtime web` left its edit here\n    \
+         fix: run `cargo xtask buildtime web` once to restore the file from target/xtask/buildtime, \
+         or remove the attribute by hand",
+    ]), inspects 2 => super::hidden_deep_folder,
+    /// Names that only start like the attribute, or the bare name in a comment, pass.
+    lookalikes_pass: Passes, inspects 1 => super::lookalikes_pass,
 }

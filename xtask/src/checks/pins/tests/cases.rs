@@ -312,6 +312,102 @@ pub(super) fn versions_in_other_values() -> Repo {
     )
 }
 
+pub(super) fn pnpm_copy_in_a_run_step() -> Repo {
+    workflow(
+        "pnpm-copy-run",
+        "jobs:\n  a:\n    steps:\n      - run: npm i -g pnpm@7.8.9\n",
+    )
+}
+
+pub(super) fn node_major_minor_in_a_block_scalar() -> Repo {
+    workflow(
+        "node-block-scalar",
+        "jobs:\n  a:\n    steps:\n      - run: |\n          echo start\n          \
+         fnm install 6.7 --corepack-enabled\n",
+    )
+}
+
+pub(super) fn rust_copy_in_a_flow_mapping() -> Repo {
+    workflow(
+        "rust-flow-mapping",
+        "jobs:\n  a:\n    env: { RUSTUP_TOOLCHAIN: \"3.4.5\" }\n    steps:\n      - run: true\n",
+    )
+}
+
+pub(super) fn copy_under_a_quoted_key() -> Repo {
+    workflow(
+        "copy-quoted-key",
+        "\"env\":\n  'PNPM_VERSION': \"7.8.9\"\njobs:\n  a:\n    steps:\n      - run: true\n",
+    )
+}
+
+pub(super) fn copy_through_an_alias() -> Repo {
+    workflow(
+        "copy-alias",
+        "x-rust: &rust \"3.4.5\"\njobs:\n  a:\n    env:\n      RUST: *rust\n  b:\n    env:\n\
+         \x20     RUST: *rust\n",
+    )
+}
+
+pub(super) fn copy_in_a_flow_sequence() -> Repo {
+    workflow(
+        "copy-flow-sequence",
+        "jobs:\n  a:\n    strategy:\n      matrix:\n        node: [6.7.0]\n",
+    )
+}
+
+pub(super) fn an_upper_case_yml_extension() -> Repo {
+    with_file(
+        "upper-case-yml",
+        ".github/workflows/CI.YML",
+        "jobs:\n  a:\n    steps:\n      - run: rustup toolchain install 3.4.5\n",
+    )
+}
+
+/// GitHub reads only the top level of `.github/workflows/`, and so does the check.
+pub(super) fn a_workflow_in_a_subfolder_passes() -> Repo {
+    with_file(
+        "workflow-subfolder",
+        ".github/workflows/old/ci.yml",
+        "jobs:\n  a:\n    steps:\n      - run: rustup toolchain install 3.4.5\n",
+    )
+}
+
+pub(super) fn rust_version_in_a_root_package() -> Repo {
+    with_file(
+        "rust-version-root-package",
+        "Cargo.toml",
+        "[package]\nname = \"root\"\nrust-version = \"3.3\"\n",
+    )
+}
+
+pub(super) fn rust_version_in_a_quoted_member_key() -> Repo {
+    let dir = repo("rust-version-quoted-member");
+    put(
+        &dir,
+        "crates/desktop/Cargo.toml",
+        "[\"package\"]\nname = \"clauseo-desktop\"\n\"rust-version\" = \"2.4\"\n",
+    );
+    Repo::desktop(dir)
+}
+
+pub(super) fn rust_version_in_an_inline_member_table() -> Repo {
+    let dir = repo("rust-version-inline-member");
+    put(
+        &dir,
+        "crates/desktop/Cargo.toml",
+        "package = { name = \"clauseo-desktop\", rust-version = \"2.4\" }\n",
+    );
+    Repo::desktop(dir)
+}
+
+pub(super) fn lefthook_comment_at_form() -> Repo {
+    lefthook(
+        "lefthook-at-form",
+        "pre-commit:\n  commands: [fmt] #see LEFTHOOK@9.8.6\n",
+    )
+}
+
 pub(super) fn workflow_not_yaml() -> Repo {
     workflow("workflow-not-yaml", "jobs:\n  a: {\n")
 }
