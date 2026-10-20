@@ -28,6 +28,14 @@ fn pinned(fix: &Fix) -> &'static str {
              the grants"
         }
         Fix::Syntax => "fix the syntax: Tauri cannot read the file either",
+        Fix::NoCapabilityFile => {
+            "restore main.json in it: Tauri reads the window's grants from that folder, and this \
+             check guards them"
+        }
+        Fix::RemotePermission => {
+            "reword the text: a remote page must never reach the IPC, and `remote` is matched \
+             anywhere in a permission file"
+        }
     }
 }
 
@@ -40,6 +48,8 @@ fn every_fix_prints_its_pinned_text() {
         Fix::ForbiddenPrefix,
         Fix::Json5,
         Fix::Syntax,
+        Fix::NoCapabilityFile,
+        Fix::RemotePermission,
     ];
     let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
     assert_eq!(

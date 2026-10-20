@@ -186,4 +186,37 @@ crate::checks::planted::cases! {
          not a fixed plugin\n    \
          fix: only the fixed plugins and what they pull in may be in the desktop crate's tree",
     ]), inspects 11 => super::resolved::plugin_by_another_name,
+    /// Root `[patch.crates-io]` swaps the fixed `tauri-plugin-dialog` for a fork that pulls in
+    /// `tauri-plugin-zz`: the graph rule trusts the fixed plugin, and the patch rule fails it.
+    patched_fixed_plugin_brings_a_plugin: FailsWith(&[
+        "Cargo.toml:18: `[patch.crates-io]` swaps in another source for the Tauri crate \
+         `tauri-plugin-dialog`, whose dependencies the plugin rules trust\n    \
+         fix: remove the entry: Tauri crates come from crates.io at the versions Cargo.lock pins; \
+         using a fork needs a decision recorded in a task brief",
+    ]), inspects 10 => super::resolved::patched_fixed_plugin_brings_a_plugin,
+    /// A `[patch.'<url>']` entry renamed with `package` fails at its key, naming the package.
+    patch_renamed_under_a_url: FailsWith(&[
+        "Cargo.toml:18: `[patch.'https://github.com/tauri-apps/plugins-workspace']` swaps in \
+         another source for the Tauri crate `tauri-plugin-opener`, whose dependencies the plugin \
+         rules trust\n    \
+         fix: remove the entry: Tauri crates come from crates.io at the versions Cargo.lock pins; \
+         using a fork needs a decision recorded in a task brief",
+    ]), inspects 10 => super::patch_renamed_under_a_url,
+    /// A `[replace]` by package ID spec, in another case, fails at its key.
+    replace_by_package_spec: FailsWith(&[
+        "Cargo.toml:18: `[replace]` swaps in another source for the Tauri crate `Tao`, whose \
+         dependencies the plugin rules trust\n    \
+         fix: remove the entry: Tauri crates come from crates.io at the versions Cargo.lock pins; \
+         using a fork needs a decision recorded in a task brief",
+    ]), inspects 10 => super::replace_by_package_spec,
+    /// `[patch]` in `.cargo/config.toml`, which cargo applies too, fails; its `[replace]`,
+    /// which cargo does not read there, is not reported.
+    patch_in_the_cargo_config: FailsWith(&[
+        ".cargo/config.toml:2: `[patch.crates-io]` swaps in another source for the Tauri crate \
+         `tauri_runtime`, whose dependencies the plugin rules trust\n    \
+         fix: remove the entry: Tauri crates come from crates.io at the versions Cargo.lock pins; \
+         using a fork needs a decision recorded in a task brief",
+    ]), inspects 10 => super::patch_in_the_cargo_config,
+    /// Patches of crates outside the Tauri family pass: the graph rule sees what they bring.
+    patch_of_another_crate_passes: Passes, inspects 10 => super::patch_of_another_crate_passes,
 }

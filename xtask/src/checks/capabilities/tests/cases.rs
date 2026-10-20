@@ -344,3 +344,68 @@ pub(super) fn inline_escaped() -> Repo {
         ],
     )
 }
+
+/// A capability granting `"all"` and a permission file whose set `all` bundles
+/// `fs:allow-read` on line 3.
+pub(super) fn permission_set_bundles_a_forbidden_permission() -> Repo {
+    run_on(
+        "permission-set",
+        &[
+            (
+                PATH,
+                "{\n  \"identifier\": \"main\",\n  \"permissions\": [\"all\"]\n}\n",
+            ),
+            (
+                "crates/desktop/permissions/x.toml",
+                "[[set]]\nidentifier = \"all\"\npermissions = [\"fs:allow-read\"]\ndescription = \"x\"\n",
+            ),
+        ],
+    )
+}
+
+/// A hidden JSON permission file in a subfolder: its default names `core:default` with a `\u`
+/// escape (key `permissions` on line 3), and a permission's description says `remote` on line 6.
+pub(super) fn permission_json_escaped_and_remote() -> Repo {
+    run_on(
+        "permission-json",
+        &[
+            (PATH, CLEAN),
+            (
+                "crates/desktop/permissions/nested/.hidden.json",
+                "{\n  \"default\": {\n    \"permissions\": [\"core:\\u0064efault\"]\n  },\n  \
+                 \"permission\": [\n    { \"identifier\": \"p\", \"description\": \"a remote page\" }\n  ]\n}\n",
+            ),
+        ],
+    )
+}
+
+/// An empty capabilities folder and one clean permission file.
+pub(super) fn permissions_without_a_capability_file() -> Repo {
+    let dir = repo(
+        "permissions-alone",
+        &[(
+            "crates/desktop/permissions/app.toml",
+            "[[permission]]\nidentifier = \"allow-ping\"\ncommands.allow = [\"ping\"]\n",
+        )],
+    );
+    Scratch::create_dir_all(dir.join("crates/desktop/capabilities")).expect("create the folder");
+    Repo::desktop(dir)
+}
+
+/// A clean capability, a clean permission file, and two files Tauri skips: a schema under
+/// `permissions/schemas/` and a `.json5` file, each naming `fs:allow-read`.
+pub(super) fn clean_permission_file() -> Repo {
+    let skipped = "{\n  \"permissions\": [\"fs:allow-read\"]\n}\n";
+    run_on(
+        "clean-permission",
+        &[
+            (PATH, CLEAN),
+            (
+                "crates/desktop/permissions/app.toml",
+                "[[permission]]\nidentifier = \"allow-ping\"\ncommands.allow = [\"ping\"]\n",
+            ),
+            ("crates/desktop/permissions/schemas/schema.json", skipped),
+            ("crates/desktop/permissions/extra.json5", skipped),
+        ],
+    )
+}

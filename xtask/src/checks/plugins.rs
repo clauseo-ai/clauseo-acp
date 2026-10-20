@@ -33,6 +33,10 @@
 //! (`devtools` in tauri, tauri-runtime, tauri-runtime-wry or wry, `protocol-asset` in tauri) is
 //! banned in deny.toml's `[[bans.features]]`, which the `deny` step checks.
 //!
+//! No `[patch]` or `[replace]` entry of the root manifest, and no `[patch]` entry of
+//! `.cargo/config.toml`, names a Tauri family crate (`patches.rs`): the graph rule trusts what
+//! `tauri` and the fixed plugins pull in, so a swapped one could bring any plugin.
+//!
 //! The manifest text is read only for line numbers: the member's `Cargo.toml`, or the root one
 //! when the setting lives in `[workspace.dependencies]`, else line 1.
 //! The Tauri config and `build.rs` belong to the `tauri-config` check.
@@ -41,6 +45,7 @@ mod fix;
 pub(crate) use fix::Fix;
 
 mod graph;
+mod patches;
 
 use crate::checks::toml_lines::{ANY, Manifest, NORMAL};
 use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
@@ -140,6 +145,20 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
             }
         };
         found.extend(path_violations(&member.name, &path, &text, deps, members));
+    }
+    found.extend(patches::violations(
+        WORKSPACE_MANIFEST,
+        &root,
+        patches::Source::Manifest,
+    ));
+    match checks::read_repo_file(&ctx.root, checks::CARGO_CONFIG) {
+        Ok(Some(config)) => found.extend(patches::violations(
+            checks::CARGO_CONFIG,
+            &config,
+            patches::Source::CargoConfig,
+        )),
+        Ok(None) => {}
+        Err(violation) => found.push(violation),
     }
     let mut failures = Vec::new();
     if let Some(flags) = graph_flags {

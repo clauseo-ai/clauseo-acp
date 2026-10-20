@@ -12,6 +12,15 @@
 //! Only `*.json`, `*.json5` and `*.toml` files are scanned, at any depth: those are the only files
 //! Tauri loads from the capabilities folder. Anything else there (a Finder `.DS_Store`, a Vim swap
 //! file, a `main.json~` backup) never reaches the app, so it is skipped.
+//!
+//! The app's permission files are held to the same rules, since a capability can grant a set
+//! of them by its bare name (`"all"`) and a set may bundle other plugins' permissions
+//! (tauri-utils 2.10.2 `acl/resolved.rs:447-459`). tauri-build 2.7.3 reads them from the
+//! crate's `permissions/**/*` (`acl.rs:304-320`); tauri-utils keeps the `*.json` and `*.toml`
+//! ones (`acl/build.rs:36`, case-sensitive, hidden files too, as glob 0.3 matches them) and skips
+//! a file whose folder is named `schemas` (`acl/build.rs:88`). Moving them with
+//! `permissions_path_pattern` is banned in clippy.toml's `disallowed-methods`, as
+//! `capabilities_path_pattern` is.
 
 mod fix;
 pub(crate) use fix::Fix;
@@ -29,12 +38,21 @@ use std::path::{Path, PathBuf};
 /// The capability folder, inside the desktop crate's directory.
 const DIR: &str = "capabilities";
 
+/// The app's permission folder, inside the desktop crate's directory.
+const PERMISSIONS_DIR: &str = "permissions";
+
+/// A folder of this name under `PERMISSIONS_DIR` holds schemas, which Tauri skips.
+const SCHEMAS_DIR: &str = "schemas";
+
 /// The Tauri config, inside the desktop crate's directory. Its `app.security.capabilities` may
 /// hold capability objects inline.
 const TAURI_CONF: &str = "tauri.conf.json";
 
 /// The extensions of the capability files Tauri reads.
 const EXTENSIONS: [&str; 3] = ["json", "json5", "toml"];
+
+/// The extensions of the permission files Tauri reads.
+const PERMISSION_EXTENSIONS: [&str; 2] = ["json", "toml"];
 
 /// Permission prefixes that name a plugin's API. The webview gets none of them.
 const FORBIDDEN_PREFIXES: [&str; 5] = ["fs:", "shell:", "http:", "opener:", "dialog:"];
@@ -46,24 +64,26 @@ const ESCAPED: &str = " (written with escapes)";
 pub(crate) const CHECK: StaticCheck = StaticCheck {
     name: "capabilities",
     counts: Noun {
-        one: "capability file",
-        many: "capability files",
+        one: "capability or permission file",
+        many: "capability and permission files",
     },
-    place: || format!("in the desktop crate's {DIR}/"),
+    place: || format!("in the desktop crate's {DIR}/ and {PERMISSIONS_DIR}/"),
     source: file!(),
     run,
     #[cfg(test)]
     planted: tests::planted::PLANTED,
 };
 
-/// Counts the capability files read; the inline objects in the Tauri config are not counted.
+/// Counts the capability and permission files read; the inline objects in the Tauri config are
+/// not counted. Permission files beside a capabilities folder with no capability file fail that
+/// folder, so they cannot stand in for the capabilities this check guards.
 fn run(ctx: &Context) -> Inspection {
     let desktop = match checks::desktop_dir(ctx) {
         Ok(dir) => dir,
         Err(stopped) => return stopped,
     };
     let rel = checks::join(desktop, DIR);
-    let files = match capability_files(&ctx.root.join(&rel)) {
+    let files = match files_in(&ctx.root.join(&rel), is_capability_file) {
         Ok(files) => files,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Inspection::stopped(checks::violation(
@@ -92,12 +112,39 @@ fn run(ctx: &Context) -> Inspection {
             Err(error) => found.push(checks::unreadable(&path, &error)),
         }
     }
+    let permissions_rel = checks::join(desktop, PERMISSIONS_DIR);
+    let permissions = match files_in(&ctx.root.join(&permissions_rel), is_permission_file) {
+        Ok(files) => files,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => {
+            found.push(checks::unreadable(&permissions_rel, &error));
+            Vec::new()
+        }
+    };
+    if read == 0 && !permissions.is_empty() {
+        found.push(checks::violation(
+            &rel,
+            1,
+            format!("the capabilities folder `{rel}` holds no capability file"),
+            Fix::NoCapabilityFile,
+        ));
+    }
+    for file in &permissions {
+        let path = checks::repo_path(&ctx.root, file);
+        match fs::read_to_string(file) {
+            Ok(text) => {
+                read += 1;
+                found.extend(scan_as(Kind::Permission, &path, &text));
+            }
+            Err(error) => found.push(checks::unreadable(&path, &error)),
+        }
+    }
     Inspection::new(read, found)
 }
 
-/// Every file under `dir` with one of `EXTENSIONS`, recursively, sorted by path. Fails when `dir`
+/// Every file under `dir` that `keep` accepts, recursively, sorted by path. Fails when `dir`
 /// cannot be listed.
-fn capability_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
+fn files_in(dir: &Path, keep: fn(&Path) -> bool) -> io::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     let mut pending = vec![dir.to_path_buf()];
     while let Some(next) = pending.pop() {
@@ -105,7 +152,7 @@ fn capability_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
             let path = entry?.path();
             if path.is_dir() {
                 pending.push(path);
-            } else if is_capability_file(&path) {
+            } else if keep(&path) {
                 files.push(path);
             }
         }
@@ -121,9 +168,32 @@ fn is_capability_file(path: &Path) -> bool {
         .is_some_and(|extension| EXTENSIONS.contains(&extension))
 }
 
+/// True when Tauri would load `path` as an app permission file: its extension is one of
+/// `PERMISSION_EXTENSIONS`, and its folder is not named `SCHEMAS_DIR`.
+fn is_permission_file(path: &Path) -> bool {
+    let extension = path.extension().and_then(|extension| extension.to_str());
+    let folder = path.parent().and_then(Path::file_name);
+    extension.is_some_and(|extension| PERMISSION_EXTENSIONS.contains(&extension))
+        && folder.is_none_or(|folder| folder != SCHEMAS_DIR)
+}
+
+/// The kind of file a string is in, which its messages name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// A capability file, or a capability written inline in the Tauri config.
+    Capability,
+    /// An app permission file, whose sets and defaults a capability grants by name.
+    Permission,
+}
+
 /// The violations in one capability file. `path` is repo-relative and `text` is the file; the
 /// extension of `path` picks the parser.
 pub(crate) fn scan(path: &str, text: &str) -> Vec<Violation> {
+    scan_as(Kind::Capability, path, text)
+}
+
+/// The violations in one file of `kind`, as `scan` finds them.
+fn scan_as(kind: Kind, path: &str, text: &str) -> Vec<Violation> {
     let at_one = |message: String, fix: Fix| vec![checks::violation(path, 1, message, fix)];
     let extension = Path::new(path).extension().and_then(|ext| ext.to_str());
     let value = if extension == Some("toml") {
@@ -157,7 +227,7 @@ pub(crate) fn scan(path: &str, text: &str) -> Vec<Violation> {
         }
     };
     let mut findings = Vec::new();
-    walk(&value, None, &mut findings);
+    walk(kind, &value, None, &mut findings);
     locate(path, text, 0, None, findings)
 }
 
@@ -178,7 +248,7 @@ pub(crate) fn inline_violations(path: &str, text: &str) -> Vec<Violation> {
         .flatten()
         .filter(|element| element.is_object())
     {
-        walk(object, None, &mut findings);
+        walk(Kind::Capability, object, None, &mut findings);
     }
     let line = key_line(text, &keys);
     let from: usize = text
@@ -201,20 +271,20 @@ struct Finding {
 
 /// Collects a finding for every forbidden key and string value in `value`, at any depth. `key`
 /// is the key that holds `value`, if any; array elements keep their array's key.
-fn walk(value: &Value, key: Option<&str>, found: &mut Vec<Finding>) {
+fn walk(kind: Kind, value: &Value, key: Option<&str>, found: &mut Vec<Finding>) {
     match value {
         Value::Object(map) => {
             for (name, child) in map {
-                push(found, name, None, problems(name, false));
-                walk(child, Some(name), found);
+                push(found, name, None, problems(kind, name, false));
+                walk(kind, child, Some(name), found);
             }
         }
         Value::Array(items) => {
             for item in items {
-                walk(item, key, found);
+                walk(kind, item, key, found);
             }
         }
-        Value::String(text) => push(found, text, key, problems(text, true)),
+        Value::String(text) => push(found, text, key, problems(kind, text, true)),
         _ => {}
     }
 }
@@ -230,25 +300,31 @@ fn push(found: &mut Vec<Finding>, needle: &str, key: Option<&str>, problems: Vec
     }
 }
 
-/// The messages and fixes for one decoded key or string value. Only a value can grant a
-/// permission by its prefix.
-fn problems(text: &str, is_value: bool) -> Vec<(String, Fix)> {
+/// The messages and fixes for one decoded key or string value in a file of `kind`. Only a value
+/// can grant a permission by its prefix. A permission file names what a capability grants
+/// through it.
+fn problems(kind: Kind, text: &str, is_value: bool) -> Vec<(String, Fix)> {
+    let (file, grants, remote_fix) = match kind {
+        Kind::Capability => ("capability file", "capability grants", Fix::Remote),
+        Kind::Permission => (
+            "permission file",
+            "permission file names",
+            Fix::RemotePermission,
+        ),
+    };
     let mut found = Vec::new();
     if text.contains("remote") {
-        found.push(("capability file mentions `remote`".to_owned(), Fix::Remote));
+        found.push((format!("{file} mentions `remote`"), remote_fix));
     }
     if text.contains("core:default") {
-        found.push((
-            "capability grants `core:default`".to_owned(),
-            Fix::CoreDefault,
-        ));
+        found.push((format!("{grants} `core:default`"), Fix::CoreDefault));
     }
     if is_value
         && FORBIDDEN_PREFIXES
             .iter()
             .any(|prefix| text.starts_with(prefix))
     {
-        found.push((format!("capability grants `{text}`"), Fix::ForbiddenPrefix));
+        found.push((format!("{grants} `{text}`"), Fix::ForbiddenPrefix));
     }
     found
 }
