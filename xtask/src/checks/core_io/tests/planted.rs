@@ -2,7 +2,8 @@
 //! test per case (see `checks/planted.rs`). The functions that build each input live in
 //! the check's tests module. The forms clippy must catch are in `tests/clippy.rs`.
 
-/// The `crates/protocol/clippy.toml` the scratch repo needs: its root file plus its list.
+/// The `crates/protocol/clippy.toml` the scratch repo needs, its root file plus its list, as the
+/// fix prints it, without a newline after its last line.
 #[cfg(test)]
 macro_rules! crate_file {
     () => {
@@ -16,7 +17,7 @@ macro_rules! crate_file {
          ]\n\
          disallowed-types = [\n  \
          { allow-invalid = true, path = \"std::fs::File\", reason = \"no files\" },\n\
-         ]\n"
+         ]"
     };
 }
 

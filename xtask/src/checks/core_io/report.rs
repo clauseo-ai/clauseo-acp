@@ -6,8 +6,11 @@ use super::roots::forbid_line;
 use crate::checks::{crates_table, violation};
 use crate::violation::Violation;
 
-/// The fix for `package`'s `clippy.toml` at `path`: what to write and how to make clippy read it.
+/// The fix for `package`'s `clippy.toml` at `path`, which says what to write and how to make
+/// clippy read it. The text ends at its last line, so no blank line printed after it reads as
+/// part of the file.
 fn write_this(path: &str, package: &str, text: &str) -> String {
+    let text = text.trim_end_matches('\n');
     format!(
         "write `{path}` with exactly the text below, the root {ROOT} with the arrays of {LIST} \
          appended (clippy reads only the nearest clippy.toml), then run `cargo clean -p \
