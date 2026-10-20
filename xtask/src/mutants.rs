@@ -132,6 +132,7 @@ pub(crate) fn run_with<W: Write>(
                 process::limit_text(cmd.timeout)
             );
             fail(out, &message, &Fix::Split);
+            stopped_at_cap(out, root, &cmd);
             false
         }
         Err(error) => {
@@ -244,6 +245,26 @@ fn judge<W: Write>(out: &mut Printer<W>, root: &Path, cmd: &Cmd, captured: &Capt
     let status = if passed { "ok" } else { "FAILED" };
     out.note(format!("mutants {status}: {}", verdict.counts));
     passed
+}
+
+/// After the cap: the missed mutants the stopped run had found, from its `outcomes.json` so far,
+/// so the change can be split around them. Prints nothing more when the run had not written one
+/// yet, or was stopped in the middle of writing it.
+fn stopped_at_cap<W: Write>(out: &mut Printer<W>, root: &Path, cmd: &Cmd) {
+    let Ok(text) = std::fs::read_to_string(root.join(OUTCOMES)) else {
+        return;
+    };
+    let Ok(lab) = outcomes::parse(&text) else {
+        return;
+    };
+    let verdict = outcomes::judge(&lab, &cmd.to_string(), OUTPUT_DIR);
+    for missed in &verdict.missed {
+        out.violation(missed);
+    }
+    out.note(format!(
+        "mutants FAILED at the cap, after {}",
+        verdict.counts
+    ));
 }
 
 /// Prints a failure with no file and line.

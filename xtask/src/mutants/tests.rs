@@ -58,6 +58,8 @@ enum Run {
     Nothing(bool, &'static str),
     /// Runs past its limit.
     TimesOut,
+    /// Writes this `outcomes.json`, then runs past its limit.
+    WritesThenTimesOut(String),
 }
 
 /// Runs `run_with` in a fresh scratch repo named `name`, with `diff`, a `cargo mutants
@@ -109,6 +111,11 @@ fn check(
                     output: (*output).into(),
                 }),
                 Run::TimesOut => Err(process::timed_out(cmd)),
+                Run::WritesThenTimesOut(text) => {
+                    Scratch::create_dir_all(root.join(OUTPUT_DIR)).expect("make mutants.out");
+                    Scratch::write(root.join(OUTCOMES), text).expect("write outcomes.json");
+                    Err(process::timed_out(cmd))
+                }
             }
         };
         // A stale run's outcomes.json, which must never be read as this run's.
@@ -361,6 +368,42 @@ fn a_run_past_the_cap_fails_with_split_the_change() {
         format!(
             "==> mutants: {CMD}\n\
              `{CMD}` did not finish within 20 min, so it was stopped\n    fix: split the change: cargo xtask mutants caps a run at 20 minutes\n"
+        )
+    );
+}
+
+#[test]
+fn a_run_past_the_cap_lists_the_mutants_it_had_missed() {
+    let outcomes = lab(
+        &[
+            baseline("Success"),
+            mutant("MissedMutant", 106, 5, "replace double -> u32 with 0"),
+            mutant(
+                "CaughtMutant",
+                110,
+                5,
+                "replace main -> ExitCode with Default::default()",
+            ),
+        ],
+        false,
+    );
+    let (printed, passed, _) = check(
+        "mutants-cap-partial",
+        Ok(DIFF_TEXT.to_owned()),
+        Some("cargo-mutants 27.1.0"),
+        &Run::WritesThenTimesOut(outcomes),
+    );
+    assert!(!passed);
+    assert_eq!(
+        printed,
+        format!(
+            "==> mutants: {CMD}\n\
+             `{CMD}` did not finish within 20 min, so it was stopped\n    fix: split the change: \
+             cargo xtask mutants caps a run at 20 minutes\n\
+             xtask/src/main.rs:106: missed mutant: no test fails on `replace double -> u32 with \
+             0`\n{MISSED_FIX}\n\
+             mutants FAILED at the cap, after 2 mutants tested: 1 missed, 1 caught, 0 timed out, \
+             0 unviable\n"
         )
     );
 }
