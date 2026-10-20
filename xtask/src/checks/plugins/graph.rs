@@ -7,7 +7,7 @@
 //! `protocol-asset` in tauri) are banned in deny.toml's `[[bans.features]]`, which cargo-deny
 //! checks for every target.
 
-use super::FIXED_PLUGINS;
+use super::{FIXED_PLUGINS, Fix};
 use crate::checks::graph::{self, Tree};
 use crate::checks::violation;
 use crate::violation::Violation;
@@ -15,9 +15,6 @@ use crate::workspace::PackageDependencies;
 
 /// The plugin-authoring library every plugin depends on. It is not a plugin.
 const PLUGIN_LIBRARY: &str = "tauri-plugin";
-
-const TREE_FIX: &str =
-    "only the fixed plugins and what they pull in may be in the desktop crate's tree";
 
 /// Where the graph violations point: the desktop manifest and the desktop crate's dependencies
 /// from `cargo metadata --no-deps`, which give the line of a direct dependency.
@@ -68,18 +65,17 @@ fn violation_for(tree: &Tree, target: usize, dependent: usize, desktop: &Desktop
             desktop.path,
             *first,
             format!("{message}. {}", blamed.declared(desktop.path, name)),
-            format!(
-                "remove {} from lines {} of {}: {TREE_FIX}",
-                blamed.keys_text(),
-                blamed.lines_text(),
-                desktop.path
-            ),
+            Fix::RemoveDeclared {
+                keys: blamed.keys_text(),
+                lines: blamed.lines_text(),
+                path: desktop.path.to_owned(),
+            },
         ),
         lines => violation(
             desktop.path,
             lines.first().copied().unwrap_or(1),
             message,
-            TREE_FIX,
+            Fix::Tree,
         ),
     }
 }

@@ -92,7 +92,7 @@ fn a_plugin_outside_the_set_fails_unless_only_fixed_plugins_pull_it_in() {
         ],
     );
     let at = |needle: &str, message: &str| {
-        violation(DESKTOP_PATH, line_of(&desktop, needle), message, TREE_FIX)
+        violation(DESKTOP_PATH, line_of(&desktop, needle), message, Fix::Tree)
     };
     assert_eq!(
         violations_in(&ws, &desktop),
@@ -135,7 +135,7 @@ fn a_plugin_behind_only_the_build_declaration_blames_the_build_line() {
             DESKTOP_PATH,
             line_of(&desktop, "features = [\"f2\"]"),
             "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `s`, which is not a fixed plugin",
-            TREE_FIX,
+            Fix::Tree,
         )]
     );
 }
@@ -152,7 +152,11 @@ fn a_plugin_behind_both_declarations_names_both_lines() {
             DESKTOP_PATH,
             line_of(&desktop, "features = [\"f1\"]"),
             "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `s`, which is not a fixed plugin. `s` is declared at lines 7 and 10 of crates/desktop/Cargo.toml, and each declaration brings `tauri-plugin-zz` in",
-            "remove `s` from lines 7 and 10 of crates/desktop/Cargo.toml: only the fixed plugins and what they pull in may be in the desktop crate's tree",
+            Fix::RemoveDeclared {
+                keys: "`s`".to_owned(),
+                lines: "7 and 10".to_owned(),
+                path: DESKTOP_PATH.to_owned(),
+            },
         )]
     );
 }
@@ -176,7 +180,11 @@ fn a_plugin_behind_one_of_two_normal_declarations_says_one_or_more_bring_it_in()
             DESKTOP_PATH,
             line_of(&desktop, "features = [\"f1\"]"),
             "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `s`, which is not a fixed plugin. `s` is declared at lines 7 and 10 of crates/desktop/Cargo.toml. Cargo builds these declarations as one package, and one or more of them brings `tauri-plugin-zz` in",
-            "remove `s` from lines 7 and 10 of crates/desktop/Cargo.toml: only the fixed plugins and what they pull in may be in the desktop crate's tree",
+            Fix::RemoveDeclared {
+                keys: "`s`".to_owned(),
+                lines: "7 and 10".to_owned(),
+                path: DESKTOP_PATH.to_owned(),
+            },
         )]
     );
 }
@@ -212,7 +220,7 @@ fn two_packages_of_one_name_are_blamed_by_their_own_keys() {
     let message = "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `s`, which is not a fixed plugin";
     assert_eq!(
         two_paths_of_one_name("one-name-s2", ["", plugin]),
-        vec![violation(DESKTOP_PATH, 10, message, TREE_FIX)]
+        vec![violation(DESKTOP_PATH, 10, message, Fix::Tree)]
     );
     assert_eq!(
         two_paths_of_one_name("one-name-both", [plugin, plugin]),
@@ -222,7 +230,11 @@ fn two_packages_of_one_name_are_blamed_by_their_own_keys() {
             format!(
                 "{message}. `s1` and `s2` are declared at lines 7 and 10 of crates/desktop/Cargo.toml, and each declaration brings `tauri-plugin-zz` in"
             ),
-            "remove `s1` and `s2` from lines 7 and 10 of crates/desktop/Cargo.toml: only the fixed plugins and what they pull in may be in the desktop crate's tree",
+            Fix::RemoveDeclared {
+                keys: "`s1` and `s2`".to_owned(),
+                lines: "7 and 10".to_owned(),
+                path: DESKTOP_PATH.to_owned(),
+            },
         )]
     );
 }
@@ -256,7 +268,7 @@ fn a_plugin_behind_an_optional_dependency_of_a_desktop_feature_fails() {
             DESKTOP_PATH,
             line_of(&desktop, "mid = "),
             "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `mid`, which is not a fixed plugin",
-            TREE_FIX,
+            Fix::Tree,
         )]
     );
 }
@@ -314,7 +326,7 @@ fn a_plugin_behind_a_feature_the_desktop_crate_turns_on_fails() {
             DESKTOP_PATH,
             line_of(&desktop, "spec = "),
             "`tauri-plugin-zz` 0.1.0 is in the desktop crate's tree through `spec`, which is not a fixed plugin",
-            TREE_FIX,
+            Fix::Tree,
         )]
     );
 }
