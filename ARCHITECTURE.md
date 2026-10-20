@@ -101,13 +101,12 @@ crate. clippy enforces the bans after macro expansion. A crate whose row lists "
 `#![forbid(clippy::disallowed_methods, clippy::disallowed_types)]` and has no build script, so it
 gets no exception to the bans. Its cfgs use only `test`, `doc` and positive features, it never
 names `cfg_select`, and it has no `include!`. Its only `#[path]` attributes sit on a top-level
-`mod name;` and name, as a string literal, a `.rs` file in the crate's folder. These are not all
-of the rules, and the others are in `xtask/src/checks/core_io/cfgs.rs`, among them a `cfg` inside
-a `cfg_attr`, attribute and macro names built from a metavariable, a `#` not followed by brackets,
-and symlinks. A crate whose row lists "fs", "process" or "any I/O" also has its own
-`clippy.toml`, which `cargo xtask check` prints when it is missing. Lint configuration lives only
-in the root `clippy.toml`, those crates' own files and the root `[workspace.lints]`. The other
-rules `cargo xtask check` applies are in `xtask/src/checks/core_io.rs`.
+`mod name;` and name, as a string literal, a `.rs` file in the crate's folder. The rest of these
+rules, the macro rules among them, are in `xtask/src/checks/core_io/cfgs.rs`. A crate whose row
+lists "fs", "process" or "any I/O" also has its own `clippy.toml`, which `cargo xtask check`
+prints when it is missing. Lint configuration lives only in the root `clippy.toml`, those crates'
+own files and the root `[workspace.lints]`. The other rules `cargo xtask check` applies are in
+`xtask/src/checks/core_io.rs`.
 
 ## Seams left open on purpose
 
