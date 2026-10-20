@@ -4,7 +4,7 @@
 use crate::checks::StaticCheck;
 use crate::clock::timed;
 use crate::output::Printer;
-use crate::process::{Captured, Cmd};
+use crate::process::{Captured, Cmd, Program};
 use crate::steps::{Step, ToolStep};
 use crate::workspace::Context;
 use std::io::{self, Write};
@@ -124,14 +124,14 @@ fn run_tool<W: Write>(
                         "`{}` failed without a file:line; its output is above",
                         tool.cmd
                     ),
-                    &(tool.fix)(&tool.cmd, Some(&captured.output)),
+                    &tool_fix(tool, ctx, Some(&captured.output)),
                 );
             }
             (failed, warnings)
         }
         Err(error) => {
             let message = format!("could not run `{}`: {error}", tool.cmd.program.name());
-            out.failure(&message, &(tool.fix)(&tool.cmd, None));
+            out.failure(&message, &tool_fix(tool, ctx, None));
             (true, 0)
         }
     };
@@ -145,6 +145,19 @@ fn run_tool<W: Write>(
         },
     }
 }
+
+/// The fix of a failed tool step. When `cargo metadata` failed, a cargo step gets the metadata
+/// fix instead of its own, since its own fix names a cause that this failure need not have.
+fn tool_fix(tool: &ToolStep, ctx: &Context, output: Option<&str>) -> String {
+    if ctx.members.is_err() && tool.cmd.program == Program::Cargo {
+        METADATA_STEP_FIX.to_owned()
+    } else {
+        (tool.fix)(&tool.cmd, output)
+    }
+}
+
+/// The fix of a cargo step that failed after `cargo metadata` failed.
+pub(crate) const METADATA_STEP_FIX: &str = "fix the `cargo metadata` error in the note above first, since this step runs cargo on the same workspace manifests";
 
 #[cfg(test)]
 mod tests;

@@ -347,3 +347,54 @@ fn live_a_rendered_tool_never_streams_and_a_failure_prints_the_rendered_output()
          \x20   fix: run `fake fail` to reproduce\n"
     );
 }
+
+/// After a failed `cargo metadata`, a failed cargo step gets the metadata fix instead of its
+/// own, whether cargo ran or could not start. A step that is not cargo keeps its own fix.
+#[test]
+fn after_a_failed_metadata_load_a_failed_cargo_step_gets_the_metadata_fix() {
+    let ctx = Context {
+        members: Err("`cargo metadata` failed:\nerror: bad manifest".to_owned()),
+        ..context()
+    };
+    let cargo_step = |name| {
+        Step::Tool(ToolStep {
+            name,
+            cmd: Cmd::new(Program::Cargo, ["shear"]),
+            parse: no_findings,
+            fix: reproduce,
+            render: None,
+        })
+    };
+    let steps = vec![
+        cargo_step("shear"),
+        cargo_step("unstarted"),
+        fake_tool("other", "fake", &["fail"]),
+    ];
+    let mut calls = 0;
+    let mut exec = |_cmd: &Cmd, _sink: &mut dyn FnMut(&[u8])| {
+        calls += 1;
+        if calls == 2 {
+            Err(io::Error::new(io::ErrorKind::NotFound, "no such file"))
+        } else {
+            Ok(Captured {
+                success: false,
+                output: "boom\n".into(),
+            })
+        }
+    };
+    let mut out = Printer::new(Vec::new(), false);
+    run_all(steps, &ctx, &mut out, &mut exec);
+    let fixes: Vec<String> = text(out)
+        .lines()
+        .filter_map(|line| line.strip_prefix("    fix: "))
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(
+        fixes,
+        [
+            METADATA_STEP_FIX,
+            METADATA_STEP_FIX,
+            "run `fake fail` to reproduce"
+        ]
+    );
+}
