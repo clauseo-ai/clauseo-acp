@@ -16,6 +16,8 @@ dunce.workspace = true
 pulldown-cmark = { version = "0.13.4", default-features = false }
 # The tauri-config check: `span-locations` gives the line of a syntax error in build.rs.
 proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
+# The pins check parses workflows and lefthook.yml with it: events with line numbers, anchors.
+saphyr-parser = "0.2.2"
 # The graph checks match a registry declaration to the version its requirement allows.
 semver = "1.0.28"
 serde = { version = "1", features = ["derive"] }

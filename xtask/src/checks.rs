@@ -26,6 +26,7 @@ mod expect_allowlist;
 mod file_size;
 pub(crate) mod graph;
 mod json_text;
+mod pins;
 pub(crate) mod planted;
 mod plugins;
 mod tauri_config;
@@ -238,6 +239,7 @@ pub(crate) const ALL: &[StaticCheck] = &[
     docs::CHECK,
     file_size::CHECK,
     expect_allowlist::CHECK,
+    pins::CHECK,
 ];
 
 /// The package name of the desktop crate. The checks find its directory through `Context::members`,
