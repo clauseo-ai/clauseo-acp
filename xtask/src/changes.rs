@@ -85,6 +85,12 @@ pub(crate) fn changed_files(root: &Path) -> Result<Vec<String>, String> {
 /// anyone adds it, as `--quick` sees it. Repo-relative, `/`-separated, sorted. Errors when git
 /// cannot start, or fails, e.g. outside a git repo.
 pub(crate) fn repo_files(root: &Path) -> Result<Vec<String>, GitError> {
+    Ok(only_files(root, &repo_entries(root)?))
+}
+
+/// Every entry git lists as `repo_files` does, before it keeps only the files on disk: a symlink
+/// is one entry, whatever it points at, and a tracked file gone from disk stays. Sorted.
+pub(crate) fn repo_entries(root: &Path) -> Result<Vec<String>, GitError> {
     let listed = git(
         root,
         &[
@@ -95,10 +101,18 @@ pub(crate) fn repo_files(root: &Path) -> Result<Vec<String>, GitError> {
             "--exclude-standard",
         ],
     )?;
-    let files: BTreeSet<String> = split_nul(&listed)
-        .filter(|file| root.join(file).is_file())
-        .collect();
-    Ok(files.into_iter().collect())
+    let entries: BTreeSet<String> = split_nul(&listed).collect();
+    Ok(entries.into_iter().collect())
+}
+
+/// The entries among `entries` (repo-relative) that are files on disk under `root`, a symlink to
+/// a file included.
+pub(crate) fn only_files(root: &Path, entries: &[String]) -> Vec<String> {
+    entries
+        .iter()
+        .filter(|entry| root.join(entry).is_file())
+        .cloned()
+        .collect()
 }
 
 /// The commit this branch forked from: `git merge-base HEAD origin/main`.

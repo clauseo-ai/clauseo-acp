@@ -361,6 +361,13 @@ pub(super) fn cfg_rule(path: &str, line: u32, finding: &Finding, package: &str) 
             ),
             "write the attribute's name in the macro body itself".to_owned(),
         ),
+        Finding::MetavariableMacro => (
+            format!(
+                "`{path}` calls a macro whose name is a metavariable, so a macro of {package} can \
+                 call `include!` or `cfg!` under a name passed to it"
+            ),
+            "write the called macro's name in the macro body itself".to_owned(),
+        ),
         Finding::PathAttribute => (
             format!(
                 "`{path}` gives a module a `path` attribute, which can bring into {package} a \
@@ -379,6 +386,19 @@ pub(super) fn cfg_rule(path: &str, line: u32, finding: &Finding, package: &str) 
         ),
     };
     violation(path, line, message, fix)
+}
+
+/// The violation for `path`, a symlink under the folder of `package`.
+pub(super) fn symlink(path: &str, package: &str) -> Violation {
+    violation(
+        path,
+        1,
+        format!(
+            "`{path}` is a symlink under {package}'s folder, so a `mod` can compile files from \
+             elsewhere into {package} that core-io does not lex"
+        ),
+        "replace the symlink with the file or folder it points to",
+    )
 }
 
 /// The violation for `path`, a file of `package` that does not lex as Rust from `line`.

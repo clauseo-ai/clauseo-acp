@@ -1,7 +1,8 @@
 //! The core-io planted cases about the cfg rule: a held crate's cfgs use only `test` and positive
-//! features, and its files have no metavariable attribute name, `path` attribute or `include!`.
+//! features, and its files have no metavariable attribute or macro name, `path` attribute,
+//! `include!` or symlink.
 
-use super::{Repo, expected, run_repo};
+use super::{FORBIDDING_ROOT, LIB_ROOT, Repo, expected, run_repo};
 use crate::checks::Inspection;
 
 /// A file of `clauseo-protocol` beside its library root.
@@ -123,6 +124,44 @@ pub(in crate::checks::core_io) fn path_attribute_in_cfg_attr() -> Inspection {
 
 pub(in crate::checks::core_io) fn include_macro() -> Inspection {
     with_file("include-macro", "pub fn f() {}\ninclude!(\"x.rs\");\n")
+}
+
+/// The review's case: a symlinked folder brings another crate's module into the held crate,
+/// where `mod sub;` compiles it. git lists the symlink as one entry.
+pub(in crate::checks::core_io) fn symlinked_folder() -> Inspection {
+    let crate_file = expected("symlink").text;
+    let lib = format!("{FORBIDDING_ROOT}mod sub;\n");
+    run_repo(
+        "symlink",
+        &Repo {
+            crate_file: Some(&crate_file),
+            files: &[
+                (LIB_ROOT, &lib),
+                (
+                    "crates/extra/src/sub/mod.rs",
+                    "#[cfg(panic = \"abort\")]\npub fn g() {}\n",
+                ),
+            ],
+            folder_links: &[("crates/protocol/src/sub", "../../extra/src/sub")],
+            ..Repo::default()
+        },
+    )
+}
+
+/// A macro that calls `include!` under a name passed to it.
+pub(in crate::checks::core_io) fn macro_name_metavariable() -> Inspection {
+    with_file(
+        "macro-metavariable",
+        "macro_rules! m {\n    ($i:ident) => {\n        $i!(\"x.txt\");\n    };\n}\nm!(include);\n",
+    )
+}
+
+/// Items named `cfg` and `cfg_attr` are not cfgs.
+pub(in crate::checks::core_io) fn items_named_cfg() -> Inspection {
+    with_file(
+        "items-named-cfg",
+        "pub fn cfg(x: u8) -> u8 {\n    x\n}\npub fn cfg_attr() -> u8 {\n    cfg(1)\n}\n",
+    )
 }
 
 pub(in crate::checks::core_io) fn source_not_lexed() -> Inspection {

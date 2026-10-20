@@ -71,6 +71,9 @@ struct Repo<'a> {
     list: Input<'a>,
     /// More targets of `clauseo-protocol` beside its library: (kind, repo-relative root).
     targets: &'a [(&'a str, &'a str)],
+    /// Symlinks to folders, made after the files: (repo-relative link, target as the link holds
+    /// it).
+    folder_links: &'a [(&'a str, &'a str)],
 }
 
 /// One input file of a scratch repo.
@@ -124,6 +127,12 @@ fn scratch(case: &str, repo: &Repo<'_>) -> Scratch {
         let path = dir.join(path);
         fs::create_dir_all(path.parent().expect("a file has a parent")).expect("create dirs");
         fs::write(path, text).expect("write a file");
+    }
+    for (link, target) in repo.folder_links {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, dir.join(link)).expect("make a symlink");
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(target, dir.join(link)).expect("make a symlink");
     }
     dir
 }

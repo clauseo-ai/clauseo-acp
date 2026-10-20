@@ -4,11 +4,13 @@
 //! name, or a feature under a `not`, can leave code out of every clippy run.
 //!
 //! Each `.rs` file of the crate is lexed, and every token tree is walked, macro bodies and macro
-//! call arguments included. The predicate of each `cfg(..)`, `cfg!(..)` and `cfg_attr(..)` is
-//! built only from `all`, `any`, `not`, `test` and `feature = "<literal>"`, with no `feature`
-//! under a `not`. An attribute whose name is a metavariable fails, since a macro could build a
-//! `cfg` from a passed name. A `path` attribute and `include!` fail, so every module file sits at
-//! its default path under the crate, ends in `.rs` and is lexed here.
+//! call arguments included. The predicate of each `cfg` and `cfg_attr` attribute, at the top of
+//! `#[..]` or `#![..]` or inside a `cfg_attr`, and of each `cfg!` is built only from `all`,
+//! `any`, `not`, `test` and `feature = "<literal>"`, with no `feature` under a `not`. An
+//! attribute or a macro call whose name is a metavariable fails, since a macro could build a `cfg`
+//! or an `include!` from a passed name. A `path` attribute, `include!` and any symlink under the
+//! crate's folder fail, so every module file sits at its default path under the crate, ends in
+//! `.rs` and is lexed here.
 
 use super::report;
 use crate::checks;
@@ -30,15 +32,31 @@ pub(super) enum Finding {
     PathAttribute,
     /// A call of `include!`.
     Include,
+    /// A macro call whose name is a metavariable, such as `$x!`.
+    MetavariableMacro,
 }
 
-/// The violations for the held crate `member`'s `.rs` files among `files` (git's list): each
-/// file that does not lex, and each `Finding` in the others.
-pub(super) fn cfg_rule(root: &Path, member: &Member, files: &[String]) -> Vec<Violation> {
+/// The violations for the held crate `member`'s entries among `entries` (git's list, a symlink
+/// as one entry): each symlink, each `.rs` file that does not lex, and each `Finding` in the
+/// others.
+pub(super) fn cfg_rule(root: &Path, member: &Member, entries: &[String]) -> Vec<Violation> {
     let mut found = Vec::new();
-    let sources = files
+    let mut sources = Vec::new();
+    for entry in entries
         .iter()
-        .filter(|file| is_rust_file(file) && workspace::is_under(file, &member.dir));
+        .filter(|entry| workspace::is_under(entry, &member.dir))
+    {
+        match root.join(entry).symlink_metadata() {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                found.push(report::symlink(entry, &member.name));
+            }
+            Ok(meta) if meta.is_file() && is_rust_file(entry) => sources.push(entry),
+            // A tracked entry gone from disk is no code to lint; any other error is unreadable.
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => found.push(checks::unreadable(entry, &error)),
+        }
+    }
     for path in sources {
         let text = match checks::read_repo_file(root, path) {
             Ok(Some(text)) => text,
@@ -81,14 +99,19 @@ fn walk(tokens: TokenStream, hits: &mut Vec<(Finding, u32)>) {
         let rest = &trees[index + 1..];
         match tree {
             TokenTree::Group(group) => walk(group.stream(), hits),
-            TokenTree::Ident(ident) => match ident_name(ident).as_str() {
-                "cfg" => cfg_call(rest, hits),
-                "cfg_attr" => cfg_attr(rest, hits),
-                "include" if starts_with_punct(rest, '!') => {
-                    hits.push((Finding::Include, line_of(ident.span().start().line)));
+            TokenTree::Ident(ident) if starts_with_punct(rest, '!') => {
+                match ident_name(ident).as_str() {
+                    "cfg" => cfg_group(&rest[1..], true, hits),
+                    "include" => hits.push((Finding::Include, line_of(ident.span().start().line))),
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
+            TokenTree::Punct(dollar) if dollar.as_char() == '$' && names_a_macro(rest) => {
+                hits.push((
+                    Finding::MetavariableMacro,
+                    line_of(dollar.span().start().line),
+                ));
+            }
             TokenTree::Punct(punct) if punct.as_char() == '#' => {
                 let rest = if starts_with_punct(rest, '!') {
                     &rest[1..]
@@ -101,27 +124,43 @@ fn walk(tokens: TokenStream, hits: &mut Vec<(Finding, u32)>) {
                     attribute(&group.stream().into_iter().collect::<Vec<_>>(), hits);
                 }
             }
-            TokenTree::Punct(_) | TokenTree::Literal(_) => {}
+            TokenTree::Ident(_) | TokenTree::Punct(_) | TokenTree::Literal(_) => {}
         }
     }
 }
 
-/// Checks what follows `cfg`, `rest`: a parenthesized predicate directly, or a group of any
-/// delimiter after `!`, as in `cfg!(..)`.
-fn cfg_call(rest: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
-    let (next, is_macro) = match rest {
-        [TokenTree::Punct(bang), next, ..] if bang.as_char() == '!' => (next, true),
-        [next, ..] => (next, false),
-        [] => return,
-    };
-    match next {
-        TokenTree::Group(group) if is_macro || group.delimiter() == Delimiter::Parenthesis => {
+/// True when `rest`, which follows a `$`, makes the metavariable a macro's name: `$x!`, or a
+/// repetition such as `$($x)*!`.
+fn names_a_macro(rest: &[TokenTree]) -> bool {
+    match rest {
+        [TokenTree::Ident(_), after @ ..] => starts_with_punct(after, '!'),
+        [TokenTree::Group(_), after @ ..] => {
+            let after = match after {
+                [op, more @ ..] if is_punct(op, '*') || is_punct(op, '+') || is_punct(op, '?') => {
+                    more
+                }
+                _ => after,
+            };
+            starts_with_punct(after, '!')
+        }
+        _ => false,
+    }
+}
+
+/// Checks what follows `cfg` in an attribute (`is_macro` false), a parenthesized predicate, or
+/// what follows `cfg!` (`is_macro` true), a group of any delimiter.
+fn cfg_group(rest: &[TokenTree], is_macro: bool, hits: &mut Vec<(Finding, u32)>) {
+    match rest.first() {
+        Some(TokenTree::Group(group))
+            if is_macro || group.delimiter() == Delimiter::Parenthesis =>
+        {
             let trees: Vec<TokenTree> = group.stream().into_iter().collect();
             if let Err(hit) = whole_predicate(&trees, group) {
                 hits.push(hit);
             }
         }
-        other => metavariable_in_place(other, hits),
+        Some(other) => metavariable_in_place(other, hits),
+        None => {}
     }
 }
 
@@ -137,8 +176,8 @@ fn metavariable() -> Finding {
     Finding::Predicate("a metavariable".to_owned())
 }
 
-/// Checks what follows `cfg_attr`, `rest`: in its parenthesized group the first comma-separated
-/// part is a predicate, and each attribute after it is checked as one.
+/// Checks what follows `cfg_attr` in an attribute, `rest`: in its parenthesized group the first
+/// comma-separated part is a predicate, and each attribute after it is checked as one.
 fn cfg_attr(rest: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
     let group = match rest.first() {
         Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Parenthesis => group,
@@ -156,8 +195,9 @@ fn cfg_attr(rest: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
     }
 }
 
-/// Checks the tokens of one attribute, inside `#[..]` or after the predicate of `cfg_attr`: its
-/// name may be neither a metavariable nor `path`.
+/// Checks the tokens of one attribute, inside `#[..]` or after the predicate of `cfg_attr`. Its
+/// name may be neither a metavariable nor `path`, and a `cfg` or `cfg_attr` predicate must be
+/// allowed.
 fn attribute(tokens: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
     match tokens.first() {
         Some(TokenTree::Punct(dollar)) if dollar.as_char() == '$' => {
@@ -166,9 +206,12 @@ fn attribute(tokens: &[TokenTree], hits: &mut Vec<(Finding, u32)>) {
                 line_of(dollar.span().start().line),
             ));
         }
-        Some(TokenTree::Ident(ident)) if ident_name(ident) == "path" => {
-            hits.push((Finding::PathAttribute, line_of(ident.span().start().line)));
-        }
+        Some(TokenTree::Ident(ident)) => match ident_name(ident).as_str() {
+            "path" => hits.push((Finding::PathAttribute, line_of(ident.span().start().line))),
+            "cfg" => cfg_group(&tokens[1..], false, hits),
+            "cfg_attr" => cfg_attr(&tokens[1..], hits),
+            _ => {}
+        },
         _ => {}
     }
 }
@@ -312,6 +355,11 @@ mod tests {
                 vec![],
             ),
             ("let cfg = 1; include_bytes!(\"x\"); path::x();", vec![]),
+            ("self.cfg(); fn cfg(x: u8) {} cfg_attr(unix);", vec![]),
+            (
+                "$($m)*!(x); $crate::m!(); $i::x!();",
+                vec![(Finding::MetavariableMacro, 1)],
+            ),
         ];
         for (source, expected) in cases {
             assert_eq!(findings(source), expected, "{source}");

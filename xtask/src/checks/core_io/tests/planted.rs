@@ -308,8 +308,8 @@ crate::checks::planted::cases! {
          [package], but clauseo-protocol's row bans I/O and such a crate has no build script\n    \
          fix: delete the `build` key, and the script it names if there is one",
     ]), inspects 3 => super::package_build_set,
-    /// A held crate's cfgs use only `test` and positive features, and its files have no
-    /// metavariable attribute name, `path` attribute or `include!`.
+    /// A held crate's cfgs use only `test` and positive features, and its folder has no
+    /// metavariable attribute or macro name, `path` attribute, `include!` or symlink.
     cfg_not_clippy: FailsWith(&[cfg_form!(1, "the name `clippy`")]), inspects 3 => super::cfg_not_clippy,
     cfg_not_debug_assertions: FailsWith(&[cfg_form!(3, "the name `debug_assertions`")]), inspects 3 => super::cfg_not_debug_assertions,
     cfg_attr_clippy: FailsWith(&[cfg_form!(1, "the name `clippy`"), path_attribute!(1)]), inspects 3 => super::cfg_attr_clippy,
@@ -340,6 +340,18 @@ crate::checks::planted::cases! {
          fix: fix the Rust syntax that starts at this line, such as a bracket or a string left open",
     ]), inspects 3 => super::source_not_lexed,
     cfg_rule_passes: Passes, inspects 3 => super::cfg_rule_passes,
+    items_named_cfg: Passes, inspects 3 => super::items_named_cfg,
+    macro_name_metavariable: FailsWith(&[
+        "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs` calls a macro whose name is a metavariable, so a macro of \
+         clauseo-protocol can call `include!` or `cfg!` under a name passed to it\n    \
+         fix: write the called macro's name in the macro body itself",
+    ]), inspects 3 => super::macro_name_metavariable,
+    symlinked_folder: FailsWith(&[
+        "crates/protocol/src/sub:1: `crates/protocol/src/sub` is a symlink under \
+         clauseo-protocol's folder, so a `mod` can compile files from elsewhere into \
+         clauseo-protocol that core-io does not lex\n    \
+         fix: replace the symlink with the file or folder it points to",
+    ]), inspects 3 => super::symlinked_folder,
     forbid_in_every_root: Passes, inspects 3 => super::forbid_in_every_root,
     /// An alias named after an external cargo command xtask runs fails; the repo's `xtask` alias
     /// and one named after a built-in command, which cargo ignores, pass.

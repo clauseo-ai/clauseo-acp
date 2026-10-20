@@ -32,12 +32,14 @@
 //! build, `not(test)` in the others, and a positive feature in all of them. Any other cfg can
 //! leave code out of every clippy run, so a held crate's cfgs use only `test` and positive
 //! features. Every `.rs` file in git's list under the crate's folder is lexed with proc-macro2,
-//! macro bodies and macro call arguments included. The predicate of each `cfg(..)`, `cfg!(..)`
-//! and `cfg_attr(..)` is built only from `all`, `any`, `not`, `test` and `feature = "<literal>"`,
-//! with no `feature` under a `not`. An attribute whose name is a metavariable fails, since a macro
-//! could build a `cfg` from a passed name. A `path` attribute and `include!` fail, so every module
-//! file sits at its default path under the crate and is lexed. A file that does not lex fails at
-//! the line the lexer names (`cfgs.rs`).
+//! macro bodies and macro call arguments included. The predicate of each `cfg` and `cfg_attr`
+//! attribute, at the top of `#[..]` or `#![..]` or inside a `cfg_attr`, and of each `cfg!` is
+//! built only from `all`, `any`, `not`, `test` and `feature = "<literal>"`, with no `feature`
+//! under a `not`. An attribute or a macro call whose name is a metavariable fails, since a macro
+//! could build a `cfg` or an `include!` from a passed name. A `path` attribute, `include!` and
+//! every symlink git lists under the folder fail, file or folder target alike, so every module
+//! file sits at its default path in the folder itself and is lexed. A file that does not lex fails
+//! at the line the lexer names (`cfgs.rs`).
 //!
 //! Lint configuration lives only in the root `clippy.toml`, the own `clippy.toml` of each crate
 //! whose row lists `fs`, `process` or `any I/O`, and the root `[workspace.lints]`. So the check
@@ -122,10 +124,11 @@ fn run(ctx: &Context) -> Inspection {
         Ok(expected) => expected,
         Err(problems) => return Inspection::stopped_on(problems),
     };
-    let files = match changes::repo_files(&ctx.root) {
-        Ok(files) => files,
+    let entries = match changes::repo_entries(&ctx.root) {
+        Ok(entries) => entries,
         Err(error) => return checks::unlisted(CHECK.name, &error),
     };
+    let files = changes::only_files(&ctx.root, &entries);
     let held: Vec<(&Member, &CrateRow)> = ctx
         .members
         .iter()
@@ -141,7 +144,7 @@ fn run(ctx: &Context) -> Inspection {
         }
         violations.extend(roots::forbid_lines(&ctx.root, member));
         violations.extend(roots::build_script(&ctx.root, member));
-        violations.extend(cfgs::cfg_rule(&ctx.root, member, &files));
+        violations.extend(cfgs::cfg_rule(&ctx.root, member, &entries));
     }
     for member in &ctx.members {
         violations.extend(lints::crate_manifest(&ctx.root, member));
