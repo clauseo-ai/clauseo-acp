@@ -14,6 +14,9 @@ use crate::setup::tests::{
 };
 use std::path::PathBuf;
 
+/// The winget path when winget exits 0.
+mod winget;
+
 /// The sha256 of `SWAPPED`, an asset that is not the pinned one.
 const SWAPPED: &[u8] = b"a swapped asset";
 const SWAPPED_SHA256: &str = "48e9f8d5aa337b952104b96fdaac9b42a1efb93b62d75e69967d48d9ea0a62de";

@@ -9,7 +9,6 @@ mod version;
 
 use crate::output::Printer;
 use crate::process::{self, Cmd, Ended, Output, Program};
-use crate::workspace;
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -220,20 +219,13 @@ impl Machine<'static> {
 pub(crate) type Runner<'a> = dyn FnMut(&Cmd, &Path, Output) -> io::Result<Ended> + 'a;
 
 /// Installs each cargo tool, then checks each binary's version and, with `binaries`, installs it
-/// when that check fails and checks again. Continues past failures; fails if any failed.
-pub(crate) fn run(binaries: bool) -> ExitCode {
+/// when that check fails and checks again. Continues past failures; fails if any failed. Runs in
+/// `root`, the checkout, with every command going through `runner`. Production passes
+/// `process::run`.
+pub(crate) fn run(root: &Path, binaries: bool, runner: &mut Runner<'_>) -> ExitCode {
     let mut out = Printer::stdout();
-    let root = workspace::workspace_root();
     let machine = Machine::this();
-    let ok = run_with(
-        &mut out,
-        &machine,
-        TOOLS,
-        BINARIES,
-        binaries,
-        &root,
-        &mut process::run,
-    );
+    let ok = run_with(&mut out, &machine, TOOLS, BINARIES, binaries, root, runner);
     if ok {
         ExitCode::SUCCESS
     } else {

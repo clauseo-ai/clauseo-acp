@@ -246,6 +246,9 @@ pub(crate) fn capture(
     }
 }
 
+/// A runner of `run_quiet`: production passes `run_quiet` itself, a test a fake.
+pub(crate) type QuietRunner<'a> = dyn FnMut(&Cmd, &Path) -> io::Result<Quiet> + 'a;
+
 /// Runs `cmd` in `root` and returns its stdout and stderr separately. A command that runs past
 /// its limit is an error of kind `TimedOut` (see `timed_out`); one whose output a process that
 /// left its tree still holds is an error, as for `capture`.

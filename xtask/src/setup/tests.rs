@@ -455,6 +455,7 @@ fn names_in(dir: &Path) -> Vec<String> {
     names
 }
 
+mod run;
 mod sweep;
 
 #[test]

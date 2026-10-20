@@ -410,6 +410,28 @@ mod tests {
     }
 
     #[test]
+    fn fmt_findings_make_one_error_per_file_fmt_would_change_with_the_fmt_fix() {
+        let ctx = Context {
+            root: std::path::PathBuf::from("/ws"),
+            members: Ok(Vec::new()),
+            load_resolved_graph: false,
+        };
+        let cmd = Cmd::new(
+            crate::process::Program::Cargo,
+            ["fmt", "--all", "--", "--check"],
+            crate::process::TEST_TIMEOUT,
+        );
+        let out = "Diff in /ws/xtask/src/main.rs:3:\n-fn  bad( ){}\n+fn bad() {}\n";
+        let findings = fmt_findings(out, &ctx, &cmd);
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].is_error);
+        assert_eq!(
+            findings[0].violation.to_string(),
+            "xtask/src/main.rs:3: rustfmt would reformat this code\n    fix: run `cargo fmt --all`"
+        );
+    }
+
+    #[test]
     fn clippy_parses_warning_and_error_lines() {
         let out = "xtask/src/main.rs:4:9: warning: unused variable: `x`\n\
                    xtask/src/main.rs:6:5: error[E0425]: cannot find value `y` in this scope\n";

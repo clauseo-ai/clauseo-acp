@@ -16,7 +16,6 @@ use crate::changes::{self, GitError};
 use crate::output::Printer;
 use crate::process::{self, Captured, Cmd, Program};
 use crate::setup::CARGO_MUTANTS;
-use crate::workspace;
 use crate::write;
 use std::collections::BTreeSet;
 use std::io::{self, Write};
@@ -50,14 +49,14 @@ const JOBS: &str = "4";
 /// arrives. `process::capture` in a real run; a fake in the tests.
 pub(crate) type Exec<'a> = dyn FnMut(&Cmd, &mut dyn FnMut(&[u8])) -> io::Result<Captured> + 'a;
 
-/// Runs `cargo xtask mutants`. Exits 0 only when the run finished and no mutant was missed.
-pub(crate) fn run() -> ExitCode {
+/// Runs `cargo xtask mutants` in `root`, the checkout. Exits 0 only when the run finished and no
+/// mutant was missed.
+pub(crate) fn run(root: &Path) -> ExitCode {
     let mut out = Printer::stdout();
-    let root = workspace::workspace_root();
-    let diff = changes::diff_since_merge_base(&root);
+    let diff = changes::diff_since_merge_base(root);
     let mut exec =
-        |cmd: &Cmd, on_output: &mut dyn FnMut(&[u8])| process::capture(cmd, &root, on_output);
-    if run_with(&mut out, &root, &std::env::temp_dir(), diff, &mut exec) {
+        |cmd: &Cmd, on_output: &mut dyn FnMut(&[u8])| process::capture(cmd, root, on_output);
+    if run_with(&mut out, root, &std::env::temp_dir(), diff, &mut exec) {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
