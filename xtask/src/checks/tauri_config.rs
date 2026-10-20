@@ -71,7 +71,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
 fn run(ctx: &Context) -> Inspection {
     let desktop = match checks::desktop_dir(ctx) {
         Ok(dir) => dir,
-        Err(violation) => return Inspection::stopped(violation),
+        Err(stopped) => return stopped,
     };
     let mut read = 0;
     let conf = checks::join(desktop, TAURI_CONF);

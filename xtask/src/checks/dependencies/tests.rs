@@ -71,8 +71,7 @@ fn run_on(dir: &Scratch) -> Inspection {
     let ws = workspace::load(dir).expect("cargo metadata runs");
     let ctx = Context {
         root: dir.to_path_buf(),
-        members: ws.members,
-        dependencies: ws.dependencies,
+        members: Ok(ws),
         load_resolved_graph: false,
     };
     check(&ctx, Some(&["--offline"]))
@@ -301,8 +300,7 @@ fn a_lockfile_behind_the_manifests_fails_at_the_root_manifest_without_rewriting_
     let ws = workspace::load(&dir).expect("cargo metadata runs");
     let ctx = Context {
         root: dir.to_path_buf(),
-        members: ws.members,
-        dependencies: ws.dependencies,
+        members: Ok(ws),
         load_resolved_graph: false,
     };
     assert_eq!(check(&ctx, Some(&["--offline"])).violations, Vec::new());
@@ -345,8 +343,7 @@ fn without_the_graph_only_rows_are_matched() {
     let ws = workspace::load(&dir).expect("cargo metadata runs");
     let ctx = Context {
         root: dir.to_path_buf(),
-        members: ws.members,
-        dependencies: ws.dependencies,
+        members: Ok(ws),
         load_resolved_graph: false,
     };
     assert_eq!(run(&ctx), Inspection::new(1, Vec::new()));
@@ -403,7 +400,7 @@ fn an_entry_whose_line_cannot_be_found_says_so() {
             manifest: "crates/protocol/Cargo.toml",
             text: "",
             row,
-            deps: None,
+            deps: &crate::workspace::PackageDependencies::default(),
         },
         &tree,
     );

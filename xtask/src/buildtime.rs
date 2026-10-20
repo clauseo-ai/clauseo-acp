@@ -205,7 +205,7 @@ fn measure_rust(
         out.note(&rustc);
         out.note(profile_line(&incremental));
     }
-    let members = match workspace::load_members(root) {
+    let members = match workspace::load(root) {
         Ok(members) => members,
         Err(error) => {
             return Err(stop(diag, &error, "run `cargo metadata` to see the error"));

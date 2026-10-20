@@ -41,8 +41,7 @@ mod graph;
 use crate::checks::toml_lines::{ANY, Manifest, NORMAL};
 use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
 use crate::violation::Violation;
-use crate::workspace::{CargoDependency, Context, PackageDependencies};
-use std::collections::BTreeMap;
+use crate::workspace::{CargoDependency, Context, Member, PackageDependencies};
 
 const WORKSPACE_MANIFEST: &str = "Cargo.toml";
 
@@ -107,27 +106,16 @@ fn run(ctx: &Context) -> Inspection {
 /// lockfile and the crates downloaded). Counts the desktop crate's normal and build direct
 /// dependencies, the ones its rules read; dev-dependencies are not counted.
 fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
-    let dir = match checks::desktop_dir(ctx) {
-        Ok(dir) => dir,
-        Err(violation) => return Inspection::stopped(violation),
+    let (members, desktop_member) = match (checks::members(ctx), checks::desktop_member(ctx)) {
+        (Ok(members), Ok(desktop)) => (members, desktop),
+        (Err(stopped), _) | (_, Err(stopped)) => return stopped,
     };
-    let manifest = checks::join(dir, "Cargo.toml");
-    let packages = &ctx.dependencies;
+    let manifest = checks::join(&desktop_member.dir, "Cargo.toml");
+    let desktop_deps = &desktop_member.dependencies;
     let read = |rel: &str| checks::read_repo_file(&ctx.root, rel).map(Option::unwrap_or_default);
     let (desktop, root) = match (read(&manifest), read(WORKSPACE_MANIFEST)) {
         (Ok(desktop), Ok(root)) => (desktop, root),
         (Err(violation), _) | (_, Err(violation)) => return Inspection::stopped(violation),
-    };
-    let Some(desktop_deps) = packages.get(checks::DESKTOP_PACKAGE) else {
-        return Inspection::stopped(violation(
-            &manifest,
-            1,
-            format!(
-                "the desktop crate (package `{}`) has no dependencies in the workspace",
-                checks::DESKTOP_PACKAGE
-            ),
-            "update xtask/src/workspace.rs: the members and the dependencies come from one `cargo metadata` run, so each member has an entry in both",
-        ));
     };
     let mut found = violations(
         desktop_deps,
@@ -137,10 +125,8 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
             root: &root,
         },
     );
-    for member in &ctx.members {
-        let Some(deps) = packages.get(&member.name) else {
-            continue;
-        };
+    for member in members {
+        let deps = &member.dependencies;
         let path = checks::join(&member.dir, "Cargo.toml");
         let text = if member.name == checks::DESKTOP_PACKAGE {
             desktop.clone()
@@ -156,7 +142,7 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
                 }
             }
         };
-        found.extend(path_violations(&member.name, &path, &text, deps, packages));
+        found.extend(path_violations(&member.name, &path, &text, deps, members));
     }
     if let Some(flags) = graph_flags {
         let desktop = graph::Desktop {
@@ -178,19 +164,19 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
 }
 
 /// One violation for each path dependency of member `name` whose package is not a workspace
-/// member (`members` holds the members' dependencies by name), such as a crate under
+/// member of `members`, such as a crate under
 /// `[workspace] exclude`: `cargo metadata --no-deps` and clippy never see it.
 fn path_violations(
     name: &str,
     path: &str,
     text: &str,
     deps: &PackageDependencies,
-    members: &BTreeMap<String, PackageDependencies>,
+    members: &[Member],
 ) -> Vec<Violation> {
     let manifest = Manifest::parse(text);
     deps.dependencies
         .iter()
-        .filter(|dep| dep.path.is_some() && !members.contains_key(&dep.name))
+        .filter(|dep| dep.path.is_some() && !members.iter().any(|member| member.name == dep.name))
         .map(|dep| {
             let line = manifest.declaration(dep.key(), ANY).unwrap_or(1);
             violation(

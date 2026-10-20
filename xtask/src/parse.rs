@@ -215,7 +215,9 @@ pub(crate) fn clippy_findings(output: &str, ctx: &Context, cmd: &Cmd) -> Vec<Fin
     short_diags(output, &root_str(ctx))
         .into_iter()
         .map(|diag| {
-            let fix = clippy_fix(cmd, &diag.path, &ctx.members);
+            // With no members, from a failed `cargo metadata`, the selectors that ran stay.
+            let members = ctx.members.as_deref().unwrap_or_default();
+            let fix = clippy_fix(cmd, &diag.path, members);
             Finding {
                 violation: Violation {
                     path: diag.path,
@@ -296,6 +298,7 @@ mod tests {
             dir: "xtask".into(),
             path_deps: vec![],
             targets: vec![],
+            dependencies: crate::workspace::PackageDependencies::default(),
         }];
         assert_eq!(
             clippy_repro(&cmd, "xtask/src/main.rs", &members).to_string(),
@@ -323,6 +326,7 @@ mod tests {
             dir: "xtask".into(),
             path_deps: vec![],
             targets: vec![],
+            dependencies: crate::workspace::PackageDependencies::default(),
         }];
         assert_eq!(
             clippy_repro(&cmd, "xtask/src/main.rs", &members).to_string(),

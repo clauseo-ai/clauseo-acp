@@ -12,6 +12,7 @@ fn member(name: &str, dir: &str) -> Member {
         dir: dir.into(),
         path_deps: Vec::new(),
         targets: Vec::new(),
+        dependencies: crate::workspace::PackageDependencies::default(),
     }
 }
 

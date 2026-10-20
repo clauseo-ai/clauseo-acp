@@ -2,8 +2,6 @@
 
 pub(super) mod planted;
 
-use std::collections::BTreeMap;
-
 use super::*;
 use crate::scratch::Scratch;
 
@@ -22,8 +20,7 @@ fn run_on(case: &str, text: impl AsRef<[u8]>) -> Inspection {
     std::fs::write(dir.join(budgets::FILE), text).expect("write budgets.toml");
     run(&Context {
         root: dir.to_path_buf(),
-        members: Vec::new(),
-        dependencies: BTreeMap::new(),
+        members: Ok(Vec::new()),
         load_resolved_graph: false,
     })
 }

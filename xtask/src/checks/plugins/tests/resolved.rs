@@ -57,8 +57,7 @@ fn optional_mid(name: &str, mid_body: &str) -> Inspection {
     write_file(&dir, "crates/desktop/src/lib.rs", "");
     let workspace = workspace::load(&dir).expect("cargo metadata runs");
     let ctx = Context {
-        members: workspace.members,
-        dependencies: workspace.dependencies,
+        members: Ok(workspace),
         ..desktop_context(&dir)
     };
     check(&ctx, Some(&["--offline"]))

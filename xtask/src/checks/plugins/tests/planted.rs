@@ -144,16 +144,6 @@ crate::checks::planted::cases! {
          not a workspace member, so these checks and clippy never see it\n    \
          fix: add it to the workspace members, or remove the dependency",
     ]), inspects 11 => super::path_dependency_on_excluded_crate,
-    /// A workspace whose members and dependencies lack the desktop crate stops the check.
-    metadata_lists_no_desktop_package: FailsWith(&[
-        "crates/desktop/Cargo.toml:1: the desktop crate (package `clauseo-desktop`) has no \
-         dependencies in the workspace\n    \
-         fix: update xtask/src/workspace.rs: the members and the dependencies come from one \
-         `cargo metadata` run, so each member has an entry in both",
-        "0 direct dependencies inspected of the desktop crate (package `clauseo-desktop`) in \
-         `cargo metadata`\n    \
-         fix: the check stopped before it could look; fix the failure above first",
-    ]), inspects 0 => super::metadata_lists_no_desktop_package,
     /// A context with no members stops the check at the root manifest, before it inspects.
     desktop_crate_missing: FailsWith(&[
         "Cargo.toml:1: the desktop crate (package `clauseo-desktop`) is not a workspace member\n    \

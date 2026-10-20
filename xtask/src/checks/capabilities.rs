@@ -63,7 +63,7 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
 fn run(ctx: &Context) -> Inspection {
     let desktop = match checks::desktop_dir(ctx) {
         Ok(dir) => dir,
-        Err(violation) => return Inspection::stopped(violation),
+        Err(stopped) => return stopped,
     };
     let rel = checks::join(desktop, DIR);
     let files = match capability_files(&ctx.root.join(&rel)) {

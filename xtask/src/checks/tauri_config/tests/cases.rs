@@ -2,8 +2,6 @@
 //! and runs the check's own `run` on it: a valid `tauri.conf.json` (`CONF`) and `build.rs`
 //! (`BUILD`), with one thing changed.
 
-use std::collections::BTreeMap;
-
 use super::*;
 use crate::checks::tests::desktop_context;
 use crate::scratch::Scratch;
@@ -370,8 +368,7 @@ pub(super) fn desktop_crate_missing() -> Inspection {
     let dir = Scratch::new("planted-tauri-config-desktop-crate-missing");
     run(&Context {
         root: dir.to_path_buf(),
-        members: Vec::new(),
-        dependencies: BTreeMap::new(),
+        members: Ok(Vec::new()),
         load_resolved_graph: false,
     })
 }

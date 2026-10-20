@@ -19,7 +19,7 @@ mod graph;
 use crate::checks::crates_table::{self, CrateRow, CratesTable, Status};
 use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
 use crate::violation::Violation;
-use crate::workspace::{Context, Member, PackageDependencies};
+use crate::workspace::{Context, Member};
 use std::path::Path;
 
 /// Fails on a workspace crate without a row, and on a dependency its row forbids.
@@ -56,13 +56,17 @@ fn run(ctx: &Context) -> Inspection {
 /// The check, reading each checked crate's graph with `cargo tree` (`checks::graph::tree_args`,
 /// then `graph_flags`), or matching rows only when `graph_flags` is `None`.
 fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
+    let members = match checks::members(ctx) {
+        Ok(members) => members,
+        Err(stopped) => return stopped,
+    };
     let table = match crates_table::load(&ctx.root) {
         Ok(table) => table,
         Err(error) => return Inspection::stopped_on(error.into_violations()),
     };
     let mut found = Vec::new();
     let mut matched = Vec::new();
-    for member in &ctx.members {
+    for member in members {
         match table.row_for_package(&member.name) {
             Some(row) => matched.push((member, row)),
             None => found.push(no_row(&table, member)),
@@ -75,8 +79,7 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
         .collect();
     if let (Some(flags), false) = (graph_flags, walked.is_empty()) {
         for (member, row) in walked {
-            let deps = ctx.dependencies.get(&member.name);
-            found.extend(walk(&ctx.root, member, row, deps, flags));
+            found.extend(walk(&ctx.root, member, row, flags));
         }
     }
     found.sort_by(|a, b| (&a.path, a.line, &a.message).cmp(&(&b.path, b.line, &b.message)));
@@ -84,15 +87,9 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
     Inspection::new(matched.len(), found)
 }
 
-/// The violations in the graph of `member`, whose row is `row` and whose declared dependencies
-/// are `deps`: its `cargo tree` run with `flags`, or the failure to read it.
-fn walk(
-    root: &Path,
-    member: &Member,
-    row: &CrateRow,
-    deps: Option<&PackageDependencies>,
-    flags: &[&str],
-) -> Vec<Violation> {
+/// The violations in the graph of `member`, whose row is `row`: its `cargo tree` run with
+/// `flags`, or the failure to read it.
+fn walk(root: &Path, member: &Member, row: &CrateRow, flags: &[&str]) -> Vec<Violation> {
     let manifest = checks::join(&member.dir, "Cargo.toml");
     let text = match checks::read_repo_file(root, &manifest) {
         Ok(text) => text.unwrap_or_default(),
@@ -105,7 +102,7 @@ fn walk(
                 manifest: &manifest,
                 text: &text,
                 row,
-                deps,
+                deps: &member.dependencies,
             },
             &tree,
         ),

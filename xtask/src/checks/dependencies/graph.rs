@@ -26,8 +26,8 @@ pub(super) struct Crate<'a> {
     /// The text of that manifest, read only for line numbers.
     pub text: &'a str,
     pub row: &'a CrateRow,
-    /// Its dependencies from `cargo metadata --no-deps`, `None` when cargo listed none for it.
-    pub deps: Option<&'a PackageDependencies>,
+    /// Its dependencies from `cargo metadata --no-deps`.
+    pub deps: &'a PackageDependencies,
 }
 
 /// One violation per direct dependency of `krate` and package of its row's Never list that the
@@ -97,8 +97,7 @@ fn violation_for(krate: &Crate<'_>, blame: &Blame<'_>) -> Violation {
     let manifest = Manifest::parse(krate.text);
     let entries: Vec<(&CargoDependency, Section)> = krate
         .deps
-        .map(|deps| deps.dependencies.as_slice())
-        .unwrap_or_default()
+        .dependencies
         .iter()
         .filter(|dep| dep.name == direct)
         .filter_map(|dep| Some((dep, Section::of_kind(dep.kind.as_deref())?)))

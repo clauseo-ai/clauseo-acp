@@ -117,6 +117,10 @@ pub(crate) fn holds_banned_modules(name: &str) -> bool {
 }
 
 fn run(ctx: &Context) -> Inspection {
+    let members = match checks::members(ctx) {
+        Ok(members) => members,
+        Err(stopped) => return stopped,
+    };
     let table = match crates_table::load(&ctx.root) {
         Ok(table) => table,
         Err(error) => return Inspection::stopped_on(error.into_violations()),
@@ -130,8 +134,7 @@ fn run(ctx: &Context) -> Inspection {
         Err(error) => return checks::unlisted(CHECK.name, &error),
     };
     let files = changes::only_files(&ctx.root, &entries);
-    let held: Vec<(&Member, &CrateRow)> = ctx
-        .members
+    let held: Vec<(&Member, &CrateRow)> = members
         .iter()
         .filter_map(|member| {
             let row = table.row_for_package(&member.name)?;
@@ -147,7 +150,7 @@ fn run(ctx: &Context) -> Inspection {
         violations.extend(roots::build_script(&ctx.root, member));
         violations.extend(cfgs::cfg_rule(&ctx.root, member, &entries));
     }
-    for member in &ctx.members {
+    for member in members {
         violations.extend(lints::crate_manifest(&ctx.root, member));
     }
     let allowed: BTreeSet<String> = held

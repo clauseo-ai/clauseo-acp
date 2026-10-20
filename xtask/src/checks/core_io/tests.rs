@@ -10,8 +10,6 @@ mod clippy;
 pub(super) mod planted;
 mod roots;
 
-use std::collections::BTreeMap;
-
 use cases::*;
 use cfgs::*;
 use roots::*;
@@ -160,6 +158,7 @@ fn members(targets: &[(&str, &str)]) -> Vec<Member> {
                         Target::new(vec![kind.to_owned()], &base.join(src_path), base)
                     })
                     .collect(),
+                dependencies: crate::workspace::PackageDependencies::default(),
             }
         })
         .collect()
@@ -170,8 +169,7 @@ fn run_repo(case: &str, repo: &Repo<'_>) -> Inspection {
     let dir = scratch(case, repo);
     run(&Context {
         root: dir.to_path_buf(),
-        members: members(repo.targets),
-        dependencies: BTreeMap::new(),
+        members: Ok(members(repo.targets)),
         load_resolved_graph: false,
     })
 }
@@ -311,8 +309,7 @@ fn every_row_counts_when_no_member_is_held() {
     let dir = scratch("count", &Repo::default());
     let found = run(&Context {
         root: dir.to_path_buf(),
-        members: Vec::new(),
-        dependencies: BTreeMap::new(),
+        members: Ok(Vec::new()),
         load_resolved_graph: false,
     });
     assert_eq!(found, Inspection::new(3, Vec::new()));
@@ -324,8 +321,7 @@ fn a_missing_table_inspects_nothing() {
     assert_eq!(
         run(&Context {
             root: dir.to_path_buf(),
-            members: Vec::new(),
-            dependencies: BTreeMap::new(),
+            members: Ok(Vec::new()),
             load_resolved_graph: false,
         }),
         Inspection::default()

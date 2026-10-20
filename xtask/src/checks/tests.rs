@@ -1,7 +1,5 @@
 //! Tests of the shared helpers and of the rules every check meets.
 
-use std::collections::BTreeMap;
-
 use super::*;
 use crate::scratch::Scratch;
 
@@ -26,13 +24,13 @@ fn a_path_is_repo_relative_with_slashes() {
 pub(crate) fn desktop_context(root: &Path) -> Context {
     Context {
         root: root.to_path_buf(),
-        members: vec![crate::workspace::Member {
+        members: Ok(vec![crate::workspace::Member {
             name: DESKTOP_PACKAGE.to_owned(),
             dir: "crates/desktop".to_owned(),
             path_deps: Vec::new(),
             targets: Vec::new(),
-        }],
-        dependencies: BTreeMap::new(),
+            dependencies: crate::workspace::PackageDependencies::default(),
+        }]),
         load_resolved_graph: false,
     }
 }
@@ -40,7 +38,7 @@ pub(crate) fn desktop_context(root: &Path) -> Context {
 #[test]
 fn the_desktop_dir_comes_from_the_member_with_its_package_name() {
     let mut ctx = desktop_context(Path::new("/ws"));
-    ctx.members[0].dir = "apps/shell".to_owned();
+    ctx.members.as_mut().expect("the context has members")[0].dir = "apps/shell".to_owned();
     assert_eq!(desktop_dir(&ctx), Ok("apps/shell"));
 }
 
@@ -48,18 +46,17 @@ fn the_desktop_dir_comes_from_the_member_with_its_package_name() {
 fn a_missing_desktop_member_is_one_violation_at_the_root_manifest() {
     let ctx = Context {
         root: Path::new("/ws").to_path_buf(),
-        members: Vec::new(),
-        dependencies: BTreeMap::new(),
+        members: Ok(Vec::new()),
         load_resolved_graph: false,
     };
     assert_eq!(
         desktop_dir(&ctx),
-        Err(violation(
+        Err(Inspection::stopped(violation(
             "Cargo.toml",
             1,
             "the desktop crate (package `clauseo-desktop`) is not a workspace member",
             "restore crates/desktop or update xtask/src/checks: these checks guard its capabilities, plugins and Tauri config",
-        ))
+        )))
     );
 }
 
@@ -68,8 +65,7 @@ fn the_real_repo_passes_every_static_check() {
     let root = crate::workspace::workspace_root();
     let workspace = crate::workspace::load(&root).expect("cargo metadata runs");
     let ctx = Context {
-        members: workspace.members,
-        dependencies: workspace.dependencies,
+        members: Ok(workspace),
         load_resolved_graph: false,
         root,
     };
@@ -84,13 +80,58 @@ fn the_real_repo_passes_every_static_check() {
     }
 }
 
+/// The checks that read the workspace members, so stop when `cargo metadata` failed.
+const READ_MEMBERS: [&str; 5] = [
+    "capabilities",
+    "plugins",
+    "tauri-config",
+    "dependencies",
+    "core-io",
+];
+
+/// On the real repo with a failed `cargo metadata`, each check that reads members prints only
+/// cargo's error and the stopped fix, nothing about the empty workspace that stood in for the
+/// load. The other checks do not read members and pass as on a good load.
+#[test]
+fn a_failed_metadata_load_stops_every_check_that_reads_members() {
+    let error =
+        "`cargo metadata` failed: error: failed to parse manifest at `crates/desktop/Cargo.toml`";
+    let ctx = Context {
+        root: crate::workspace::workspace_root(),
+        members: Err(error.to_owned()),
+        load_resolved_graph: false,
+    };
+    for name in READ_MEMBERS {
+        assert!(
+            ALL.iter().any(|check| check.name == name),
+            "no check {name}"
+        );
+    }
+    for check in ALL {
+        let report = check.report(&ctx);
+        if READ_MEMBERS.contains(&check.name) {
+            let place = (check.place)();
+            let expected = vec![
+                format!("could not read the workspace members: {error}\n    fix: {METADATA_FIX}"),
+                format!(
+                    "{} inspected {place}\n    fix: {STOPPED_FIX}",
+                    check.counts.count(0)
+                ),
+            ];
+            assert_eq!((check.name, report.printed()), (check.name, expected));
+            assert!(report.inspection.stopped, "{} did not stop", check.name);
+        } else {
+            assert!(!report.failed(), "{}: {:?}", check.name, report.printed());
+        }
+    }
+}
+
 #[test]
 fn every_check_inspects_nothing_in_an_empty_repo() {
     let dir = Scratch::new("checks-empty-repo");
     let ctx = Context {
         root: dir.to_path_buf(),
-        members: Vec::new(),
-        dependencies: BTreeMap::new(),
+        members: Ok(Vec::new()),
         load_resolved_graph: false,
     };
     for name in STOPS_IN_AN_EMPTY_REPO {

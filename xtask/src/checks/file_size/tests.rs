@@ -3,8 +3,6 @@
 
 pub(super) mod planted;
 
-use std::collections::BTreeMap;
-
 use super::*;
 use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;
@@ -29,8 +27,7 @@ fn run_on(case: &str, files: &[(&str, String)]) -> Inspection {
     let dir = repo(case, files);
     run(&Context {
         root: dir.to_path_buf(),
-        members: Vec::new(),
-        dependencies: BTreeMap::new(),
+        members: Ok(Vec::new()),
         load_resolved_graph: false,
     })
 }
@@ -205,8 +202,7 @@ fn an_unreadable_listed_file_is_not_called_stale() {
     fs::write(dir.join(EXCEPTIONS), "src/bad.rs not UTF-8\n").expect("write exceptions");
     let found = run(&Context {
         root: dir.to_path_buf(),
-        members: Vec::new(),
-        dependencies: BTreeMap::new(),
+        members: Ok(Vec::new()),
         load_resolved_graph: false,
     });
     let paths: Vec<&str> = found.violations.iter().map(|v| v.path.as_str()).collect();
@@ -218,8 +214,7 @@ pub(super) fn not_a_git_repo() -> Inspection {
     fs::write(dir.join("lib.rs"), "fn f() {}\n").expect("write a source");
     run(&Context {
         root: dir.to_path_buf(),
-        members: Vec::new(),
-        dependencies: BTreeMap::new(),
+        members: Ok(Vec::new()),
         load_resolved_graph: false,
     })
 }
@@ -229,8 +224,7 @@ pub(super) fn only_file_unreadable() -> Inspection {
     fs::write(dir.join("bad.rs"), [0xff, 0xfe, b'\n']).expect("write bytes");
     run(&Context {
         root: dir.to_path_buf(),
-        members: Vec::new(),
-        dependencies: BTreeMap::new(),
+        members: Ok(Vec::new()),
         load_resolved_graph: false,
     })
 }

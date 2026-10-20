@@ -35,15 +35,17 @@ fn workspace(name: &str, desktop: &str, crates: &[(&str, &str)]) -> Scratch {
 fn violations_in(dir: &Scratch, desktop: &str) -> Vec<Violation> {
     let tree = checks::graph::load_tree(dir, checks::DESKTOP_PACKAGE, &["--offline"])
         .expect("cargo tree runs");
-    let packages = workspace::load(dir)
-        .expect("cargo metadata runs")
-        .dependencies;
+    let members = workspace::load(dir).expect("cargo metadata runs");
+    let desktop_member = members
+        .iter()
+        .find(|member| member.name == checks::DESKTOP_PACKAGE)
+        .expect("the desktop crate is a member");
     violations(
         &tree,
         &Desktop {
             path: DESKTOP_PATH,
             text: desktop,
-            deps: &packages[checks::DESKTOP_PACKAGE],
+            deps: &desktop_member.dependencies,
         },
     )
 }

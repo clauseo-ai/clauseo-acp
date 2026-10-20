@@ -1,8 +1,6 @@
 //! Tests of `run.rs`: the step runner prints each step, its findings and its summary line, and
 //! keeps running after a step fails.
 
-use std::collections::BTreeMap;
-
 use super::*;
 use crate::checks::{Inspection, Noun};
 use crate::process::Program;
@@ -12,8 +10,7 @@ use std::path::PathBuf;
 fn context() -> Context {
     Context {
         root: PathBuf::from("/ws"),
-        members: Vec::new(),
-        dependencies: BTreeMap::new(),
+        members: Ok(Vec::new()),
         load_resolved_graph: false,
     }
 }

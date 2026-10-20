@@ -32,7 +32,7 @@ pub(crate) mod toml_lines;
 
 use crate::changes::GitError;
 use crate::violation::Violation;
-use crate::workspace::Context;
+use crate::workspace::{Context, Member};
 use std::fmt;
 use std::fs;
 use std::io;
@@ -249,21 +249,43 @@ pub(crate) const ALL: &[StaticCheck] = &[
 /// so a moved crate is still checked and a missing one fails instead of passing quietly.
 pub(crate) const DESKTOP_PACKAGE: &str = "clauseo-desktop";
 
-/// The repo-relative directory of the desktop crate. When it is not a workspace member, the one
-/// violation at `Cargo.toml:1` that every desktop check reports.
-pub(crate) fn desktop_dir(ctx: &Context) -> Result<&str, Violation> {
-    ctx.members
+/// The workspace members, or the inspection of a check that stops because `cargo metadata`
+/// failed: one failure that quotes cargo's error. A check that reads members calls this first,
+/// so it never judges an empty workspace that only stands in for a failed load.
+pub(crate) fn members(ctx: &Context) -> Result<&[Member], Inspection> {
+    ctx.members.as_deref().map_err(|error| Inspection {
+        failures: vec![Failure {
+            message: format!("could not read the workspace members: {error}"),
+            fix: METADATA_FIX.to_owned(),
+        }],
+        stopped: true,
+        ..Inspection::default()
+    })
+}
+
+/// The fix of a check that stopped because `cargo metadata` failed.
+pub(crate) const METADATA_FIX: &str = "fix the error quoted above until `cargo metadata` succeeds; this check reads the workspace members from it";
+
+/// The desktop crate's member. When `cargo metadata` failed, the inspection `members` gives;
+/// when the crate is not a workspace member, the one violation at `Cargo.toml:1` that every
+/// desktop check stops on.
+pub(crate) fn desktop_member(ctx: &Context) -> Result<&Member, Inspection> {
+    members(ctx)?
         .iter()
         .find(|member| member.name == DESKTOP_PACKAGE)
-        .map(|member| member.dir.as_str())
         .ok_or_else(|| {
-            violation(
+            Inspection::stopped(violation(
                 "Cargo.toml",
                 1,
                 format!("the desktop crate (package `{DESKTOP_PACKAGE}`) is not a workspace member"),
                 "restore crates/desktop or update xtask/src/checks: these checks guard its capabilities, plugins and Tauri config",
-            )
+            ))
         })
+}
+
+/// The repo-relative directory of the desktop crate, or the inspection `desktop_member` stops on.
+pub(crate) fn desktop_dir(ctx: &Context) -> Result<&str, Inspection> {
+    desktop_member(ctx).map(|member| member.dir.as_str())
 }
 
 /// `a`, `a and b`, `a, b and c`.

@@ -250,14 +250,12 @@ fn strip_ansi(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     fn context() -> Context {
         Context {
             root: PathBuf::from("/ws"),
-            members: Vec::new(),
-            dependencies: BTreeMap::new(),
+            members: Ok(Vec::new()),
             load_resolved_graph: false,
         }
     }
@@ -330,8 +328,7 @@ mod tests {
     fn taplo_findings_read_a_windows_path_in_debug_form() {
         let ctx = Context {
             root: PathBuf::from(r"C:\ws"),
-            members: Vec::new(),
-            dependencies: BTreeMap::new(),
+            members: Ok(Vec::new()),
             load_resolved_graph: false,
         };
         let out = r#"ERROR taplo:format_files: the file is not properly formatted path="C:\\ws\\xtask\\Cargo.toml""#;

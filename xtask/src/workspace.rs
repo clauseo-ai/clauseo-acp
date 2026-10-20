@@ -15,6 +15,8 @@ pub(crate) struct Member {
     pub path_deps: Vec<String>,
     /// The package's targets, as `cargo metadata` lists them.
     pub targets: Vec<Target>,
+    /// The package's dependencies and `[features]` table, as `cargo metadata` lists them.
+    pub dependencies: PackageDependencies,
 }
 
 /// One target of a member package.
@@ -48,22 +50,13 @@ impl Target {
     }
 }
 
-/// The workspace as one `cargo metadata --no-deps` run reports it.
-#[derive(Default)]
-pub(crate) struct Workspace {
-    pub members: Vec<Member>,
-    /// The dependencies and `[features]` of every member, by package name.
-    pub dependencies: BTreeMap<String, PackageDependencies>,
-}
-
 /// Passed to every static check.
 pub(crate) struct Context {
     pub root: PathBuf,
-    pub members: Vec<Member>,
-    /// The dependencies and `[features]` of every member, by package name, from the same
-    /// `cargo metadata` run as `members`. Empty when that run failed, which `cargo xtask check`
-    /// reports as a note before any check runs.
-    pub dependencies: BTreeMap<String, PackageDependencies>,
+    /// The workspace members from one `cargo metadata --no-deps` run, or the error of that run.
+    /// A check that reads members stops on the error (`checks::members`), since an empty list
+    /// would make it report fixes for a workspace that is not there.
+    pub members: Result<Vec<Member>, String>,
     /// Whether checks may load the dependency graph cargo resolved (`cargo tree --locked
     /// --offline` per crate, for plugins and dependencies: `checks::graph`). That graph
     /// needs every target's crates downloaded, so tests of the real repo, which use no network,
@@ -82,7 +75,8 @@ struct Metadata {
 struct Package {
     name: String,
     manifest_path: PathBuf,
-    dependencies: Vec<Dependency>,
+    #[serde(flatten)]
+    dependencies: PackageDependencies,
     targets: Vec<PackageTarget>,
 }
 
@@ -91,12 +85,6 @@ struct Package {
 struct PackageTarget {
     kind: Vec<String>,
     src_path: PathBuf,
-}
-
-#[derive(Deserialize)]
-struct Dependency {
-    /// Set for path dependencies.
-    path: Option<PathBuf>,
 }
 
 /// One dependency of a package as `cargo metadata` reports it, with workspace inheritance
@@ -131,24 +119,10 @@ impl CargoDependency {
 }
 
 /// One package's dependencies and its `[features]` table, from `cargo metadata`.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub(crate) struct PackageDependencies {
     pub dependencies: Vec<CargoDependency>,
     pub features: BTreeMap<String, Vec<String>>,
-}
-
-/// The parts of a package that `parse_workspace_dependencies` reads.
-#[derive(Deserialize)]
-struct PackageWithDependencies {
-    name: String,
-    #[serde(flatten)]
-    dependencies: PackageDependencies,
-}
-
-/// The packages of `cargo metadata` JSON, for `parse_workspace_dependencies`.
-#[derive(Deserialize)]
-struct DependencyMetadata {
-    packages: Vec<PackageWithDependencies>,
 }
 
 /// The workspace root: the parent of this crate's directory (`xtask/`).
@@ -158,18 +132,9 @@ pub(crate) fn workspace_root() -> PathBuf {
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
 }
 
-/// Runs `cargo metadata` in `root` once and reads the workspace from its output.
-pub(crate) fn load(root: &Path) -> Result<Workspace, String> {
-    let json = run_metadata(root)?;
-    Ok(Workspace {
-        members: parse_metadata(&json)?,
-        dependencies: parse_workspace_dependencies(&json)?,
-    })
-}
-
-/// Runs `cargo metadata` in `root` and returns the workspace members.
-pub(crate) fn load_members(root: &Path) -> Result<Vec<Member>, String> {
-    load(root).map(|workspace| workspace.members)
+/// Runs `cargo metadata` in `root` once and reads the workspace members from its output.
+pub(crate) fn load(root: &Path) -> Result<Vec<Member>, String> {
+    parse_metadata(&run_metadata(root)?)
 }
 
 /// The stdout of `cargo metadata --format-version 1 --no-deps` run in `root`.
@@ -186,19 +151,6 @@ fn run_metadata(root: &Path) -> Result<String, String> {
     Ok(quiet.stdout)
 }
 
-/// Reads the dependencies and `[features]` of every package in `cargo metadata` JSON, by name.
-pub(crate) fn parse_workspace_dependencies(
-    json: &str,
-) -> Result<BTreeMap<String, PackageDependencies>, String> {
-    let metadata: DependencyMetadata =
-        serde_json::from_str(json).map_err(|e| format!("bad `cargo metadata` JSON: {e}"))?;
-    Ok(metadata
-        .packages
-        .into_iter()
-        .map(|package| (package.name, package.dependencies))
-        .collect())
-}
-
 /// Reads `cargo metadata --no-deps` JSON. Paths are made relative to `workspace_root`.
 pub(crate) fn parse_metadata(json: &str) -> Result<Vec<Member>, String> {
     let metadata: Metadata =
@@ -206,13 +158,14 @@ pub(crate) fn parse_metadata(json: &str) -> Result<Vec<Member>, String> {
     let base = metadata.workspace_root.as_path();
 
     let mut members = Vec::new();
-    for package in &metadata.packages {
+    for package in metadata.packages {
         let dir = package
             .manifest_path
             .parent()
             .and_then(|p| relative(p, base))
             .ok_or_else(|| format!("package {} is outside the workspace", package.name))?;
         let path_deps = package
+            .dependencies
             .dependencies
             .iter()
             .filter_map(|dep| dep.path.as_deref())
@@ -224,10 +177,11 @@ pub(crate) fn parse_metadata(json: &str) -> Result<Vec<Member>, String> {
             .map(|target| Target::new(target.kind.clone(), &target.src_path, base))
             .collect();
         members.push(Member {
-            name: package.name.clone(),
+            name: package.name,
             dir,
             path_deps,
             targets,
+            dependencies: package.dependencies,
         });
     }
     members.sort_by(|a, b| a.name.cmp(&b.name));
@@ -291,12 +245,20 @@ mod tests {
         "workspace_root": "/ws",
         "packages": [
             {"name": "b", "manifest_path": "/ws/crates/b/Cargo.toml",
-             "dependencies": [{"name": "serde", "path": null},
-                              {"name": "a", "path": "/ws/crates/a"}],
+             "features": {"x": ["t/devtools"]},
+             "dependencies": [
+                {"name": "serde", "rename": null, "kind": null, "target": null,
+                 "optional": false, "features": [], "path": null, "req": "^1"},
+                {"name": "a", "rename": null, "kind": null, "target": null,
+                 "optional": false, "features": [], "path": "/ws/crates/a", "req": "*"},
+                {"name": "tauri", "rename": "t", "kind": null, "target": "cfg(unix)",
+                 "optional": false, "features": ["devtools"], "req": "^2"}],
              "targets": [{"kind": ["lib"], "src_path": "/ws/crates/b/src/lib.rs"},
                          {"kind": ["test"], "src_path": "/ws/crates/b/tests/t.rs"}]},
             {"name": "a", "manifest_path": "/ws/crates/a/Cargo.toml",
-             "dependencies": [{"name": "outside", "path": "/elsewhere/x"}],
+             "features": {},
+             "dependencies": [{"name": "outside", "rename": null, "kind": "dev", "target": null,
+                               "optional": false, "features": [], "path": "/elsewhere/x"}],
              "targets": []}
         ]
     }"#;
@@ -357,24 +319,18 @@ mod tests {
     }
 
     #[test]
-    fn parses_every_package_s_dependencies_and_features() {
-        let json = r#"{"packages": [
-            {"name": "other", "dependencies": [], "features": {}},
-            {"name": "app", "features": {"x": ["t/devtools"]}, "dependencies": [
-                {"name": "tauri", "rename": "t", "kind": null, "target": "cfg(unix)",
-                 "optional": false, "features": ["devtools"], "req": "^2"}]}
-        ]}"#;
-        let packages = parse_workspace_dependencies(json).expect("sample parses");
-        assert_eq!(packages.keys().collect::<Vec<_>>(), ["app", "other"]);
-        let deps = &packages["app"];
-        assert_eq!(deps.dependencies.len(), 1);
-        let tauri = &deps.dependencies[0];
+    fn parses_every_member_s_dependencies_and_features() {
+        let members = parse_metadata(SAMPLE).expect("sample parses");
+        let deps = &members[1].dependencies;
+        assert_eq!(deps.dependencies.len(), 3);
+        let tauri = &deps.dependencies[2];
         assert_eq!((tauri.name.as_str(), tauri.key()), ("tauri", "t"));
         assert!(tauri.is_normal());
         assert_eq!(tauri.target.as_deref(), Some("cfg(unix)"));
         assert_eq!(tauri.features, ["devtools"]);
         assert_eq!(deps.features["x"], ["t/devtools"]);
-        assert!(parse_workspace_dependencies("{").is_err());
+        assert!(!members[0].dependencies.dependencies[0].is_normal());
+        assert!(parse_metadata("{").is_err());
     }
 
     #[test]
@@ -383,7 +339,7 @@ mod tests {
         let manifest = "[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
                         [dependencies]\nfoo = \"not a req\"\n";
         fs::write(dir.join("Cargo.toml"), manifest).expect("write the manifest");
-        let error = load(&dir).err().expect("cargo metadata fails");
+        let error = load(&dir).expect_err("cargo metadata fails");
         assert!(error.starts_with("`cargo metadata` failed: "), "{error}");
     }
 
@@ -395,12 +351,14 @@ mod tests {
                 dir: "crates".into(),
                 path_deps: vec![],
                 targets: vec![],
+                dependencies: PackageDependencies::default(),
             },
             Member {
                 name: "inner".into(),
                 dir: "crates/inner".into(),
                 path_deps: vec![],
                 targets: vec![],
+                dependencies: PackageDependencies::default(),
             },
         ];
         assert_eq!(

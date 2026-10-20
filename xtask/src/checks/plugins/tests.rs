@@ -90,8 +90,7 @@ fn member(name: &str, body: &str) -> String {
 fn inspect(dir: &Scratch) -> Inspection {
     let workspace = workspace::load(dir).expect("cargo metadata runs");
     let ctx = Context {
-        members: workspace.members,
-        dependencies: workspace.dependencies,
+        members: Ok(workspace),
         ..desktop_context(dir)
     };
     run(&ctx)
@@ -351,29 +350,11 @@ pub(super) fn path_dependency_on_excluded_crate() -> Inspection {
     inspect(&dir)
 }
 
-pub(super) fn metadata_lists_no_desktop_package() -> Inspection {
-    // The desktop crate is in the context but not in the workspace, so `cargo metadata` lists no
-    // package with its name. A failing `cargo metadata` is covered in `workspace::tests`.
-    let dir = Scratch::new("planted-plugins-metadata_lists_no_desktop_package");
-    write_file(
-        &dir,
-        "Cargo.toml",
-        "[workspace]\nresolver = \"3\"\nmembers = [\"crates/other\"]\n",
-    );
-    write_file(
-        &dir,
-        "crates/other/Cargo.toml",
-        &member("clauseo-other", ""),
-    );
-    write_file(&dir, "crates/other/src/lib.rs", "");
-    run(&desktop_context(&dir))
-}
-
 pub(super) fn desktop_crate_missing() -> Inspection {
     let dir = Scratch::new("planted-plugins-desktop_crate_missing");
     write_file(&dir, "Cargo.toml", ROOT);
     run(&Context {
-        members: Vec::new(),
+        members: Ok(Vec::new()),
         ..desktop_context(&dir)
     })
 }

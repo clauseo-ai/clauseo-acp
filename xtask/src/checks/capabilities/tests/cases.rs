@@ -1,8 +1,6 @@
 //! The builders of the planted cases of the capabilities check: each makes a scratch tree (or
 //! a context) and returns what the check's own `run` finds in it. See `tests/planted.rs`.
 
-use std::collections::BTreeMap;
-
 use super::*;
 
 /// A scratch repo named after `case`, with each `(path, text)` of `files` written into it.
@@ -37,8 +35,7 @@ pub(super) fn desktop_crate_missing() -> Inspection {
     let dir = Scratch::new("planted-capabilities-desktop-missing");
     run(&Context {
         root: dir.to_path_buf(),
-        members: Vec::new(),
-        dependencies: BTreeMap::new(),
+        members: Ok(Vec::new()),
         load_resolved_graph: false,
     })
 }
@@ -237,7 +234,7 @@ pub(super) fn moved_crate() -> Inspection {
         )],
     );
     let mut ctx = desktop_context(&dir);
-    ctx.members[0].dir = "apps/shell".to_owned();
+    ctx.members.as_mut().expect("the context has members")[0].dir = "apps/shell".to_owned();
     run(&ctx)
 }
 

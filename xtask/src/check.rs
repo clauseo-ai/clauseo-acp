@@ -14,22 +14,14 @@ pub(crate) fn run(quick: bool) -> ExitCode {
     let mut out = Printer::stdout();
     let root = workspace::workspace_root();
     let ci = is_ci(std::env::var("CI").ok().as_deref());
-    let (workspace, members_error) = match workspace::load(&root) {
-        Ok(workspace) => (workspace, None),
-        Err(error) => {
-            out.note(format!("note: {error}"));
-            (workspace::Workspace::default(), Some(error))
-        }
-    };
     let ctx = Context {
+        members: workspace::load(&root),
         root,
-        members: workspace.members,
-        dependencies: workspace.dependencies,
         load_resolved_graph: true,
     };
 
     let scope = if quick {
-        quick_scope(&mut out, &ctx, members_error.as_deref())
+        quick_scope(&mut out, &ctx)
     } else {
         Scope::Workspace
     };
@@ -65,13 +57,14 @@ pub(crate) fn is_ci(value: Option<&str>) -> bool {
 }
 
 /// Decides what `--quick` covers, and prints the decision.
-fn quick_scope(out: &mut Printer<io::Stdout>, ctx: &Context, members_error: Option<&str>) -> Scope {
-    if let Some(error) = members_error {
-        out.note(format!(
-            "quick: all packages (cargo metadata failed: {error})"
-        ));
+/// When `cargo metadata` failed, the checks that read members quote its error.
+fn quick_scope(out: &mut Printer<io::Stdout>, ctx: &Context) -> Scope {
+    let Ok(members) = &ctx.members else {
+        out.note(
+            "quick: all packages (`cargo metadata` failed, so the changed packages are unknown)",
+        );
         return Scope::Workspace;
-    }
+    };
     let files = match changes::changed_files(&ctx.root) {
         Ok(files) => files,
         Err(error) => {
@@ -81,7 +74,7 @@ fn quick_scope(out: &mut Printer<io::Stdout>, ctx: &Context, members_error: Opti
             return Scope::Workspace;
         }
     };
-    match changes::select(&files, &ctx.members) {
+    match changes::select(&files, members) {
         Selection::All(reason) => {
             out.note(format!("quick: all packages ({reason})"));
             Scope::Workspace
@@ -90,7 +83,7 @@ fn quick_scope(out: &mut Printer<io::Stdout>, ctx: &Context, members_error: Opti
             if names.is_empty() {
                 out.note("quick: no changed packages");
             } else {
-                let direct = changes::direct_members(&files, &ctx.members);
+                let direct = changes::direct_members(&files, members);
                 let dependents: Vec<String> = names
                     .iter()
                     .filter(|name| !direct.contains(name))
