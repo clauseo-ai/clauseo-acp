@@ -182,6 +182,79 @@ pub(in crate::checks::core_io) fn clippy_env_in_another_case() -> ScratchRepo {
     )
 }
 
+/// `rustflags` as a dotted key at the top of the file, outside any table header.
+pub(in crate::checks::core_io) fn rustflags_as_a_dotted_key() -> ScratchRepo {
+    good_crate_and(
+        "rustflags-dotted",
+        &[(
+            ".cargo/config.toml",
+            "[alias]\nx = \"run\"\n\n[target]\nx86_64-unknown-linux-gnu.rustflags = [\"-Awarnings\"]\n",
+        )],
+    )
+}
+
+/// `rustflags` inside an inline table.
+pub(in crate::checks::core_io) fn rustflags_in_an_inline_table() -> ScratchRepo {
+    good_crate_and(
+        "rustflags-inline",
+        &[(
+            ".cargo/config.toml",
+            "build = { jobs = 4, rustflags = [\"--cap-lints\", \"allow\"] }\n",
+        )],
+    )
+}
+
+/// A compiler key as a dotted key at the top of the file.
+pub(in crate::checks::core_io) fn compiler_key_as_a_dotted_key() -> ScratchRepo {
+    good_crate_and(
+        "rustc-wrapper-dotted",
+        &[(".cargo/config.toml", "build.rustc-wrapper = \"./w.sh\"\n")],
+    )
+}
+
+/// An alias as a dotted key at the top of the file.
+pub(in crate::checks::core_io) fn alias_as_a_dotted_key() -> ScratchRepo {
+    good_crate_and(
+        "alias-dotted",
+        &[(
+            ".cargo/config.toml",
+            "alias.x = \"run\"\nalias.clippy = \"check\"\n",
+        )],
+    )
+}
+
+/// An `[env]` entry in an inline table.
+pub(in crate::checks::core_io) fn clippy_env_in_an_inline_table() -> ScratchRepo {
+    good_crate_and(
+        "clippy-env-inline",
+        &[(".cargo/config.toml", "env = { CLIPPY_CONF_DIR = \"/\" }\n")],
+    )
+}
+
+/// `workspace = false` is a `[lints]` table that does not inherit.
+pub(in crate::checks::core_io) fn crate_lints_workspace_false() -> ScratchRepo {
+    good_crate_and(
+        "crate-lints-false",
+        &[(
+            "crates/protocol/Cargo.toml",
+            "[package]\nname = \"clauseo-protocol\"\n\n[lints]\nworkspace = false\n",
+        )],
+    )
+}
+
+/// A clippy config in another case: on a filesystem that ignores case, as macOS and Windows
+/// have by default, clippy opens it as `clippy.toml`.
+pub(in crate::checks::core_io) fn clippy_toml_in_another_case() -> ScratchRepo {
+    good_crate_and("clippy-toml-case", &[("crates/Clippy.toml", "")])
+}
+
+pub(in crate::checks::core_io) fn dot_clippy_toml_in_another_case() -> ScratchRepo {
+    good_crate_and(
+        "dot-clippy-toml-case",
+        &[(".CLIPPY.toml", "msrv = \"1.99\"\n")],
+    )
+}
+
 /// The review's case: `include` loads a file core-io does not read.
 pub(in crate::checks::core_io) fn include_in_cargo_config() -> ScratchRepo {
     good_crate_and(

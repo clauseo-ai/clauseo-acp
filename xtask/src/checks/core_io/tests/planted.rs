@@ -238,6 +238,13 @@ crate::checks::planted::cases! {
     forbid_missing_in_a_bin: FailsWith(&[no_forbid!("crates/protocol/src/main.rs", "bin")]), inspects 3 => super::forbid_missing_in_a_bin,
     forbid_missing_in_a_test: FailsWith(&[no_forbid!("crates/protocol/tests/events.rs", "test")]), inspects 3 => super::forbid_missing_in_a_test,
     clock_only_crate_without_forbid: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::clock_only_crate_without_forbid,
+    forbid_missing_in_an_example: FailsWith(&[no_forbid!("crates/protocol/examples/demo.rs", "example")]), inspects 3 => super::forbid_missing_in_an_example,
+    forbid_missing_in_a_bench: FailsWith(&[no_forbid!("crates/protocol/benches/fold.rs", "bench")]), inspects 3 => super::forbid_missing_in_a_bench,
+    /// Only `forbid` of both lints, at the top of the root, counts.
+    forbid_naming_one_lint: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::forbid_naming_one_lint,
+    deny_in_place_of_forbid: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::deny_in_place_of_forbid,
+    forbid_inside_a_module: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::forbid_inside_a_module,
+    forbid_as_an_outer_attribute: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::forbid_as_an_outer_attribute,
     root_outside_the_repo: FailsWith(&[root_outside!("bin", "/elsewhere/outside.rs")]), inspects 3 => super::root_outside_the_repo,
     root_outside_the_repo_through_dot_dot: FailsWith(&[root_outside!("lib", "/x.rs")]), inspects 3 => super::root_outside_the_repo_through_dot_dot,
     root_outside_the_crate: FailsWith(&[root_outside!("lib", "crates/shared/lib.rs")]), inspects 3 => super::root_outside_the_crate,
@@ -373,6 +380,16 @@ crate::checks::planted::cases! {
          crate reads, and core-io prints the file each crate whose row bans fs, process or any \
          I/O needs",
     ]), inspects 3 => super::dot_clippy_toml_at_the_root,
+    /// A filesystem that ignores case opens `Clippy.toml` as `clippy.toml`.
+    clippy_toml_in_another_case: FailsWith(&[stray!("crates/Clippy.toml", "crates")]), inspects 3 => super::clippy_toml_in_another_case,
+    dot_clippy_toml_in_another_case: FailsWith(&[
+        ".CLIPPY.toml:1: `.CLIPPY.toml` is a .clippy.toml, which clippy reads instead of a \
+         clippy.toml beside it or above it, so it replaces the root clippy.toml's bans, and a core \
+         crate's list, for every crate in the repo\n    \
+         fix: delete `.CLIPPY.toml`: clippy settings go in the root clippy.toml, which every \
+         crate reads, and core-io prints the file each crate whose row bans fs, process or any \
+         I/O needs",
+    ]), inspects 3 => super::dot_clippy_toml_in_another_case,
     clippy_toml_in_crates: FailsWith(&[stray!("crates/clippy.toml", "crates")]), inspects 3 => super::clippy_toml_in_crates,
     clippy_toml_in_xtask: FailsWith(&[stray!("xtask/clippy.toml", "xtask")]), inspects 3 => super::clippy_toml_in_xtask,
     clippy_toml_of_a_crate_without_a_row: FailsWith(&[stray!("crates/extra/clippy.toml", "crates/extra")]), inspects 3 => super::clippy_toml_of_a_crate_without_a_row,
@@ -382,6 +399,7 @@ crate::checks::planted::cases! {
     crate_lints_of_its_own: FailsWith(&[own_lints!("crates/protocol/Cargo.toml", 4, "clauseo-protocol")]), inspects 3 => super::crate_lints_of_its_own,
     clock_only_crate_lints_of_its_own: FailsWith(&[own_lints!("crates/protocol/Cargo.toml", 4, "clauseo-protocol")]), inspects 3 => super::clock_only_crate_lints_of_its_own,
     crate_without_a_row_lints_not_inherited: FailsWith(&[no_lints!("crates/extra/Cargo.toml", "clauseo-extra")]), inspects 3 => super::crate_without_a_row_lints_not_inherited,
+    crate_lints_workspace_false: FailsWith(&[own_lints!("crates/protocol/Cargo.toml", 4, "clauseo-protocol")]), inspects 3 => super::crate_lints_workspace_false,
     /// A legacy `.cargo/config`, which cargo reads instead (review D4).
     legacy_cargo_config: FailsWith(&[
         ".cargo/config:1: `.cargo/config` is the legacy name of `.cargo/config.toml`; cargo \
@@ -393,6 +411,12 @@ crate::checks::planted::cases! {
     rustflags_in_build: FailsWith(&[rustflags!(5, "build.rustflags")]), inspects 3 => super::rustflags_in_build,
     rustflags_in_a_target: FailsWith(&[rustflags!(2, "target.cfg(unix).rustflags")]), inspects 3 => super::rustflags_in_a_target,
     rustflags_that_cap_lints: FailsWith(&[rustflags!(2, "build.rustflags")]), inspects 3 => super::rustflags_that_cap_lints,
+    /// Dotted keys and inline tables are the same keys.
+    rustflags_as_a_dotted_key: FailsWith(&[rustflags!(5, "target.x86_64-unknown-linux-gnu.rustflags")]), inspects 3 => super::rustflags_as_a_dotted_key,
+    rustflags_in_an_inline_table: FailsWith(&[rustflags!(1, "build.rustflags")]), inspects 3 => super::rustflags_in_an_inline_table,
+    compiler_key_as_a_dotted_key: FailsWith(&[compiler!(1, "build.rustc-wrapper")]), inspects 3 => super::compiler_key_as_a_dotted_key,
+    alias_as_a_dotted_key: FailsWith(&[alias!(2, "clippy")]), inspects 3 => super::alias_as_a_dotted_key,
+    clippy_env_in_an_inline_table: FailsWith(&[clippy_env!(1, "CLIPPY_CONF_DIR")]), inspects 3 => super::clippy_env_in_an_inline_table,
     /// `include`, and the keys that replace or wrap the compiler.
     include_in_cargo_config: FailsWith(&[
         ".cargo/config.toml:1: `.cargo/config.toml` sets `include`, so cargo loads other config \

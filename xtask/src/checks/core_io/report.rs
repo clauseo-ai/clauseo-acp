@@ -148,7 +148,7 @@ pub(super) fn stray_config(path: &str) -> Violation {
     } else {
         format!("the crates under `{dir}/`")
     };
-    let message = if name == ".clippy.toml" {
+    let message = if name.eq_ignore_ascii_case(".clippy.toml") {
         format!(
             "`{path}` is a .clippy.toml, which clippy reads instead of a clippy.toml beside it or \
              above it, so it replaces the root {ROOT}'s bans, and a core crate's list, for {under}"

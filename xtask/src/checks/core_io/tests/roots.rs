@@ -69,6 +69,69 @@ pub(in crate::checks::core_io) fn forbid_missing_in_a_test() -> ScratchRepo {
     )
 }
 
+pub(in crate::checks::core_io) fn forbid_missing_in_an_example() -> ScratchRepo {
+    let example = "crates/protocol/examples/demo.rs";
+    held(
+        "forbid-example",
+        &[(example, BARE_ROOT)],
+        &[("example", example)],
+    )
+}
+
+pub(in crate::checks::core_io) fn forbid_missing_in_a_bench() -> ScratchRepo {
+    let bench = "crates/protocol/benches/fold.rs";
+    held("forbid-bench", &[(bench, BARE_ROOT)], &[("bench", bench)])
+}
+
+/// A forbid of one lint leaves the other free to be allowed.
+pub(in crate::checks::core_io) fn forbid_naming_one_lint() -> ScratchRepo {
+    held(
+        "forbid-one-lint",
+        &[(
+            LIB_ROOT,
+            "#![forbid(clippy::disallowed_methods)]\npub fn f() {}\n",
+        )],
+        &[],
+    )
+}
+
+/// `deny` in place of `forbid`: an `allow` in the target overrides it.
+pub(in crate::checks::core_io) fn deny_in_place_of_forbid() -> ScratchRepo {
+    held(
+        "deny-not-forbid",
+        &[(
+            LIB_ROOT,
+            "#![deny(clippy::disallowed_methods, clippy::disallowed_types)]\npub fn f() {}\n",
+        )],
+        &[],
+    )
+}
+
+/// The line at the top of an inline module covers that module, not the crate.
+pub(in crate::checks::core_io) fn forbid_inside_a_module() -> ScratchRepo {
+    held(
+        "forbid-in-module",
+        &[(
+            LIB_ROOT,
+            "mod m {\n    #![forbid(clippy::disallowed_methods, clippy::disallowed_types)]\n}\n\
+             pub fn f() {}\n",
+        )],
+        &[],
+    )
+}
+
+/// The lints forbidden on one item, as an outer attribute, leave the rest of the crate free.
+pub(in crate::checks::core_io) fn forbid_as_an_outer_attribute() -> ScratchRepo {
+    held(
+        "forbid-outer",
+        &[(
+            LIB_ROOT,
+            "#[forbid(clippy::disallowed_methods, clippy::disallowed_types)]\npub fn f() {}\n",
+        )],
+        &[],
+    )
+}
+
 pub(in crate::checks::core_io) fn root_not_rust() -> ScratchRepo {
     held(
         "root-not-rust",
