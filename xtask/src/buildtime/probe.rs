@@ -8,7 +8,7 @@
 //! the marker's number alone (`restore_leftovers`).
 //!
 //! `target/xtask/buildtime/ui/` is not this module's: the web half's script keeps its copy of
-//! `ui/app/src/App.tsx` there, under the rules written out in `ui/app/scripts/buildtime-lib.mjs`.
+//! `ui/app/src/App.tsx` there, under the rules written out in `ui/app/scripts/guard.mjs`.
 //! `restore_leftovers` never reads, restores or deletes anything under it.
 
 use super::marker::{self, Leftover, Marker, bump_marker, leftover};

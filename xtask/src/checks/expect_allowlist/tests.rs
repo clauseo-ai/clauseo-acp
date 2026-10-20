@@ -7,7 +7,6 @@ pub(super) mod planted;
 use super::*;
 use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;
-use std::fs;
 use std::mem::discriminant;
 
 /// The allowlist's first line in every case, so its entries start at line 2.
@@ -26,8 +25,8 @@ fn run_files(case: &str, files: &[(&str, &str)], untracked: &[(&str, &str)]) -> 
     git(&dir, &["init", "-q"]);
     let write = |(path, text): &(&str, &str)| {
         let full = dir.join(path);
-        fs::create_dir_all(full.parent().expect("a file has a parent")).expect("create dirs");
-        fs::write(full, text).expect("write a file");
+        Scratch::create_dir_all(full.parent().expect("a file has a parent")).expect("create dirs");
+        Scratch::write(full, text).expect("write a file");
     };
     files.iter().for_each(write);
     git(&dir, &["add", "-A"]);

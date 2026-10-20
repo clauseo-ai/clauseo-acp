@@ -36,3 +36,9 @@ xtask/src/checks/core_io/tests/clippy.rs clippy clippy::disallowed_methods
 xtask/src/process.rs run_timed clippy::disallowed_methods
 xtask/src/setup/tests.rs exited clippy::unnecessary_wraps
 xtask/src/setup/tests.rs fake_asset clippy::unnecessary_wraps
+
+# Added by R3b: the write door, the test write door and the PATH lookup.
+xtask/src/write.rs - clippy::disallowed_methods
+xtask/src/scratch.rs - clippy::disallowed_methods
+xtask/src/process.rs resolve_pnpm clippy::disallowed_methods
+xtask/src/setup/version.rs on_path clippy::disallowed_methods

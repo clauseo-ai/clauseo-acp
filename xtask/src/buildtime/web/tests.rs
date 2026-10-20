@@ -526,12 +526,12 @@ fn the_node_fix_reads_engines_node_from_ui_package_json() {
 fn the_node_fix_names_the_range_or_the_field_it_could_not_read() {
     let dir = Scratch::new("web-node-engines");
     assert_eq!(node_engines(&dir), None);
-    std::fs::create_dir_all(dir.join("ui")).expect("create ui/");
+    Scratch::create_dir_all(dir.join("ui")).expect("create ui/");
     for text in ["{", r#"{"engines": {}}"#, r#"{"engines": {"node": 20}}"#] {
-        std::fs::write(dir.join("ui/package.json"), text).expect("write ui/package.json");
+        Scratch::write(dir.join("ui/package.json"), text).expect("write ui/package.json");
         assert_eq!(node_engines(&dir), None, "{text}");
     }
-    std::fs::write(
+    Scratch::write(
         dir.join("ui/package.json"),
         r#"{"engines": {"node": ">=20.5.0"}}"#,
     )
