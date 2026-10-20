@@ -12,22 +12,23 @@
 //! does not lex fails at the line the lexer names.
 //!
 //! Each `cfg` and `cfg_attr` predicate is built only from `all`, `any`, `not`, `test`, `doc` and
-//! `feature = "<literal>"`, with no `feature` under a `not`. The rule reads the predicate at the
-//! start of every bracket group, with or without a `#` before it, because a macro from outside
-//! the crate can write a `#` before brackets passed to it. It also reads each attribute inside a
-//! `cfg_attr`. A `cfg` among the attributes of a `cfg_attr` fails at any depth, because
-//! `#[cfg_attr(feature = "x", cfg(any()))]` keeps the item only when the feature is off. The name
-//! `cfg_select` fails wherever it stands, in a `use` too. `cfg_select!` builds only the arm whose
-//! cfg holds, and an alias would hide the call. `cfg!` passes, because both branches of an
-//! `if cfg!(..)` are compiled and linted.
+//! `feature = "<literal>"`, with no `feature` under a `not`. The rule reads a `cfg` or `cfg_attr`
+//! and its predicate at the start of every bracket group, with or without a `#` before it, because
+//! a macro from outside the crate can write a `#` before brackets passed to it. It also reads each
+//! attribute inside a `cfg_attr`. A `cfg` among the attributes of a `cfg_attr` fails at any depth,
+//! because `#[cfg_attr(feature = "x", cfg(any()))]` keeps the item only when the feature is off.
+//! The name `cfg_select` fails wherever it stands, in a `use` too. `cfg_select!` builds only the
+//! arm whose cfg holds, and an alias would hide the call. `cfg!` passes, because both branches of
+//! an `if cfg!(..)` are compiled and linted.
 //!
-//! Every `#` is followed by a bracket group, or by `!` and a bracket group, in matchers,
+//! Every `#` must be followed by a bracket group, or by `!` and a bracket group, in matchers,
 //! transcribers and macro call arguments alike. Otherwise a macro could join a `#` to brackets
 //! passed separately and build an attribute that the rule does not see. The name `tt` fails
-//! wherever it stands, in the matcher of every `macro_rules!` too, because a `tt` fragment is
-//! the one fragment that can take a lone `#` out of an attribute the caller writes whole, a doc
-//! comment included, and the transcriber can then put that `#` before other brackets. Failing
-//! the name itself also covers a nested definition and a fragment kind passed in as `$h:$k`.
+//! wherever it stands, in the matcher of every `macro_rules!` too. A `tt` fragment is the one
+//! fragment that can take a lone `#` out of an attribute the caller writes whole, a doc comment
+//! included. The transcriber can then put that `#` before other brackets, which is why the name
+//! fails. Failing the name itself also covers a nested definition and a fragment kind passed in as
+//! `$h:$k`.
 //!
 //! An attribute whose name is a metavariable fails, and so does a macro call whose name is a
 //! metavariable, such as `$x!`. A metavariable right after `path` or `include` fails too.
