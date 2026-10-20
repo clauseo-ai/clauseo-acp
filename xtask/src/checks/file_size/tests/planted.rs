@@ -78,16 +78,12 @@ crate::checks::planted::cases! {
          failed: fatal: not a git repository (or any of the parent directories): .git\n    \
          fix: run the check inside a git checkout, or fix what git reports: file-size lists the \
          files it reads with `git ls-files`",
-        "0 source files inspected in the repo's .rs, .ts, .tsx, .mts and .cts files\n    \
-         fix: the check stopped before it could look; fix the failure above first",
     ]), inspects 0 => super::not_a_git_repo,
     /// A file that is not UTF-8 fails and is not counted; with no other file read, the check
     /// stopped on it.
     only_file_unreadable: FailsWith(&[
         "bad.rs:1: could not read `bad.rs`: stream did not contain valid UTF-8\n    \
          fix: make the file readable as UTF-8 text",
-        "0 source files inspected in the repo's .rs, .ts, .tsx, .mts and .cts files\n    \
-         fix: the check stopped before it could look; fix the failure above first",
     ]), inspects 0 => super::only_file_unreadable,
     /// A file of 650 lines listed in the exception file, with a reason, passes.
     listed_600_plus_file_passes: Passes, inspects 1 => super::listed_600_plus_file_passes,

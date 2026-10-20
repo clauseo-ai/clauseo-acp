@@ -173,13 +173,14 @@ impl StaticCheck {
         self.judge((self.run)(ctx))
     }
 
-    /// Judges one inspection: a count of zero adds the zero-inspected failure, with the stopped
-    /// fix only when the check says it stopped and printed why.
+    /// Judges one inspection. A count of zero adds the zero-inspected failure, unless the check
+    /// says it stopped and printed why. That violation or failure already fails the check and
+    /// carries the one fix, and the result line still shows the count of zero.
     fn judge(&self, inspection: Inspection) -> Report {
         let stopped = inspection.stopped
             && (!inspection.violations.is_empty() || !inspection.failures.is_empty());
         let nothing_inspected =
-            (inspection.inspected == 0).then(|| self.nothing_inspected(stopped));
+            (inspection.inspected == 0 && !stopped).then(|| self.nothing_inspected());
         Report {
             counted: format!("{} inspected", self.counts.count(inspection.inspected)),
             inspection,
@@ -188,21 +189,16 @@ impl StaticCheck {
     }
 
     /// The failure for an inspection of zero items: `0 capability files inspected in the desktop
-    /// crate's capabilities/`. When the check `stopped` on a failure of its own, the fix sends
-    /// the reader to that failure; else it names what the check looks for, where, and its file.
-    pub(crate) fn nothing_inspected(&self, stopped: bool) -> Failure {
+    /// crate's capabilities/`. The fix names what the check looks for, where, and its file.
+    pub(crate) fn nothing_inspected(&self) -> Failure {
         let place = (self.place)();
-        let fix = if stopped {
-            STOPPED_FIX.to_owned()
-        } else {
-            format!(
-                "{name} looks for {many} {place}; restore them, or, if they moved, update the \
-                 consts {source} builds that place from",
-                name = self.name,
-                many = self.counts.many,
-                source = self.source,
-            )
-        };
+        let fix = format!(
+            "{name} looks for {many} {place}; restore them, or, if they moved, update the consts \
+             {source} builds that place from",
+            name = self.name,
+            many = self.counts.many,
+            source = self.source,
+        );
         Failure {
             message: format!("{} inspected {place}", self.counts.count(0)),
             fix,
@@ -229,9 +225,6 @@ impl StaticCheck {
     }
 }
 
-/// The zero-inspected fix of a check that reported a failure before it inspected anything.
-const STOPPED_FIX: &str = "the check stopped before it could look; fix the failure above first";
-
 /// Every static check, in run order.
 pub(crate) const ALL: &[StaticCheck] = &[
     budgets::CHECK,
@@ -255,12 +248,27 @@ pub(crate) const DESKTOP_PACKAGE: &str = "clauseo-desktop";
 pub(crate) fn members(ctx: &Context) -> Result<&[Member], Inspection> {
     ctx.members.as_deref().map_err(|error| Inspection {
         failures: vec![Failure {
-            message: format!("could not read the workspace members: {error}"),
+            message: format!(
+                "could not read the workspace members: {}",
+                metadata_quote(error)
+            ),
             fix: METADATA_FIX.to_owned(),
         }],
         stopped: true,
         ..Inspection::default()
     })
+}
+
+/// What a stopped check quotes of the failed load's `error`. `cargo xtask check` prints the
+/// whole error once as a note before the steps, so a check quotes only cargo's first line that
+/// starts with `error:` and points up. With no such line it quotes all of the error.
+fn metadata_quote(error: &str) -> String {
+    match error.lines().find(|line| line.starts_with("error:")) {
+        Some(line) => {
+            format!("`cargo metadata` failed with {line}. The full error is in the note above")
+        }
+        None => error.to_owned(),
+    }
 }
 
 /// The fix of a check that stopped because `cargo metadata` failed.

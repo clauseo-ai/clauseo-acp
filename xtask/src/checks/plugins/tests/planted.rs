@@ -149,9 +149,6 @@ crate::checks::planted::cases! {
         "Cargo.toml:1: the desktop crate (package `clauseo-desktop`) is not a workspace member\n    \
          fix: restore crates/desktop or update xtask/src/checks: these checks guard its \
          capabilities, plugins and Tauri config",
-        "0 direct dependencies inspected of the desktop crate (package `clauseo-desktop`) in \
-         `cargo metadata`\n    \
-         fix: the check stopped before it could look; fix the failure above first",
     ]), inspects 0 => super::desktop_crate_missing,
     /// A plugin outside the fixed set behind an optional desktop dependency (feature `extra`)
     /// fails at that dependency's line: the desktop crate's graph is read with all its features.

@@ -89,16 +89,20 @@ const READ_MEMBERS: [&str; 5] = [
     "core-io",
 ];
 
-/// On the real repo with a failed `cargo metadata`, each check that reads members prints only
-/// cargo's error and the stopped fix, nothing about the empty workspace that stood in for the
-/// load. The other checks do not read members and pass as on a good load.
+/// On the real repo with a failed `cargo metadata`, each check that reads members prints one
+/// failure that quotes cargo's first `error:` line, points at the note above, and carries the
+/// one fix line. Nothing about the empty workspace that stood in for the load. The other checks
+/// do not read members and pass as on a good load.
 #[test]
 fn a_failed_metadata_load_stops_every_check_that_reads_members() {
-    let error =
-        "`cargo metadata` failed: error: failed to parse manifest at `crates/desktop/Cargo.toml`";
+    let first = "error: failed to load manifest for workspace member `/ws/crates/desktop`";
+    let error = format!(
+        "`cargo metadata` failed:\n{first}\n\nCaused by:\n  failed to parse manifest at \
+         `/ws/crates/desktop/Cargo.toml`\n\nCaused by:\n  error: an indented line is not quoted"
+    );
     let ctx = Context {
         root: crate::workspace::workspace_root(),
-        members: Err(error.to_owned()),
+        members: Err(error),
         load_resolved_graph: false,
     };
     for name in READ_MEMBERS {
@@ -110,20 +114,29 @@ fn a_failed_metadata_load_stops_every_check_that_reads_members() {
     for check in ALL {
         let report = check.report(&ctx);
         if READ_MEMBERS.contains(&check.name) {
-            let place = (check.place)();
-            let expected = vec![
-                format!("could not read the workspace members: {error}\n    fix: {METADATA_FIX}"),
-                format!(
-                    "{} inspected {place}\n    fix: {STOPPED_FIX}",
-                    check.counts.count(0)
-                ),
-            ];
+            let expected = vec![format!(
+                "could not read the workspace members: `cargo metadata` failed with {first}. \
+                 The full error is in the note above\n    fix: {METADATA_FIX}"
+            )];
             assert_eq!((check.name, report.printed()), (check.name, expected));
             assert!(report.inspection.stopped, "{} did not stop", check.name);
+            assert!(report.failed(), "{} passed", check.name);
+            assert_eq!(
+                report.counted,
+                format!("{} inspected", check.counts.count(0))
+            );
         } else {
             assert!(!report.failed(), "{}: {:?}", check.name, report.printed());
         }
     }
+}
+
+/// An error with no line that starts with `error:`, such as cargo that could not start, is
+/// quoted whole.
+#[test]
+fn a_load_error_with_no_error_line_is_quoted_whole() {
+    let error = "could not run `cargo metadata`: No such file or directory";
+    assert_eq!(metadata_quote(error), error);
 }
 
 #[test]
@@ -145,10 +158,8 @@ fn every_check_inspects_nothing_in_an_empty_repo() {
         assert_eq!((check.name, report.inspection.inspected), (check.name, 0));
         let fix = report.nothing_inspected.map(|failure| failure.fix);
         if STOPS_IN_AN_EMPTY_REPO.contains(&check.name) {
-            assert_eq!(
-                (check.name, fix.as_deref()),
-                (check.name, Some(STOPPED_FIX))
-            );
+            assert_eq!((check.name, fix.as_deref()), (check.name, None));
+            assert!(report.inspection.stopped, "{} did not stop", check.name);
         } else {
             let normal = format!(
                 "{} looks for {} {}; restore them, or, if they moved, update the consts {} builds \
@@ -175,30 +186,28 @@ const STOPS_IN_AN_EMPTY_REPO: [&str; 5] = [
     "file-size",
 ];
 
+/// A check that stopped on a violation prints that violation's fix and no second fix line. A
+/// check that looked, or that stopped with nothing printed, gets the zero-inspected failure.
 #[test]
-fn a_violation_with_nothing_inspected_gets_the_stopped_fix_only_when_the_check_stopped() {
+fn a_check_that_stopped_prints_one_fix_line() {
     let gone = || violation("a.json", 1, "gone", "restore it");
     let check = fake(|_| Inspection::default());
     let looked = check.judge(Inspection::new(0, vec![gone()]));
+    let normal = "tauri-config looks for capability files in the desktop crate's capabilities/; \
+                  restore them, or, if they moved, update the consts \
+                  xtask/src/checks/tauri_config.rs builds that place from";
     assert_eq!(
         looked.nothing_inspected.map(|failure| failure.fix),
-        Some(
-            "tauri-config looks for capability files in the desktop crate's capabilities/; \
-             restore them, or, if they moved, update the consts xtask/src/checks/tauri_config.rs \
-             builds that place from"
-                .to_owned()
-        )
+        Some(normal.to_owned())
     );
     let stopped = check.judge(Inspection::stopped(gone()));
-    assert_eq!(
-        stopped.nothing_inspected.map(|failure| failure.fix),
-        Some(STOPPED_FIX.to_owned())
-    );
+    assert_eq!(stopped.printed(), ["a.json:1: gone\n    fix: restore it"]);
+    assert!(stopped.failed());
     let silent = check.judge(Inspection::stopped_on(Vec::new()));
-    assert_ne!(
+    assert_eq!(
         silent.nothing_inspected.map(|failure| failure.fix),
-        Some(STOPPED_FIX.to_owned()),
-        "a stop with nothing printed above must not send the reader above"
+        Some(normal.to_owned()),
+        "a stop with nothing printed above must still fail with a fix"
     );
 }
 
@@ -326,8 +335,6 @@ fn a_git_that_cannot_start_says_so_and_tells_to_install_it() {
              error 2)\n    \
              fix: install git and put it on PATH: file-size lists the files it reads with \
              `git ls-files`",
-            "0 capability files inspected in the desktop crate's capabilities/\n    \
-             fix: the check stopped before it could look; fix the failure above first",
         ]
     );
 }

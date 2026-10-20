@@ -10,15 +10,11 @@ crate::checks::planted::cases! {
         "Cargo.toml:1: the desktop crate (package `clauseo-desktop`) is not a workspace member\n    \
          fix: restore crates/desktop or update xtask/src/checks: these checks guard its capabilities, \
          plugins and Tauri config",
-        "0 capability files inspected in the desktop crate's capabilities/\n    \
-         fix: the check stopped before it could look; fix the failure above first",
     ]), inspects 0 => super::cases::desktop_crate_missing,
     /// A desktop crate with no capabilities folder fails at line 1 and stops the check.
     folder_missing: FailsWith(&[
         "crates/desktop/capabilities:1: the capabilities folder `crates/desktop/capabilities` is missing\n    \
          fix: restore it with main.json: Tauri reads the window's grants from it, and this check guards them",
-        "0 capability files inspected in the desktop crate's capabilities/\n    \
-         fix: the check stopped before it could look; fix the failure above first",
     ]), inspects 0 => super::cases::folder_missing,
     /// An empty capabilities folder inspects nothing, and the zero line names the normal fix.
     empty_folder: FailsWith(&[

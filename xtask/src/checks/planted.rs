@@ -147,6 +147,10 @@ mod tests {
         Inspection::new(1, vec![violation("a.toml", 2, "bad", "fix it")])
     }
 
+    fn looked_at_nothing() -> Inspection {
+        Inspection::new(0, vec![violation("a.toml", 2, "bad", "fix it")])
+    }
+
     fn stopped() -> Inspection {
         Inspection::stopped(violation("a.toml", 1, "gone", "restore it"))
     }
@@ -196,14 +200,13 @@ mod tests {
         );
     }
 
+    /// The failures are those the check judged: a stopped check lists only what stopped it, and a
+    /// check that looked at nothing gets the zero-inspected failure too.
     #[test]
-    fn fails_with_includes_the_zero_inspected_failure_judged_by_the_check() {
+    fn fails_with_holds_the_failures_judged_by_the_check() {
         assert_eq!(
             verdict(
-                Expect::FailsWith(&[
-                    "a.toml:1: gone\n    fix: restore it",
-                    "0 rows inspected in a.toml\n    fix: the check stopped before it could look; fix the failure above first",
-                ]),
+                Expect::FailsWith(&["a.toml:1: gone\n    fix: restore it"]),
                 0,
                 stopped
             ),
@@ -211,11 +214,11 @@ mod tests {
         );
         assert_eq!(
             verdict(
-                Expect::FailsWith(&["a.toml:1: gone\n    fix: restore it"]),
+                Expect::FailsWith(&["a.toml:2: bad\n    fix: fix it"]),
                 0,
-                stopped
+                looked_at_nothing
             ),
-            Err("expected these failures:\na.toml:1: gone\n    fix: restore it\nfound:\na.toml:1: gone\n    fix: restore it\n0 rows inspected in a.toml\n    fix: the check stopped before it could look; fix the failure above first".to_owned())
+            Err("expected these failures:\na.toml:2: bad\n    fix: fix it\nfound:\na.toml:2: bad\n    fix: fix it\n0 rows inspected in a.toml\n    fix: fake looks for rows in a.toml; restore them, or, if they moved, update the consts xtask/src/checks/fake.rs builds that place from".to_owned())
         );
     }
 

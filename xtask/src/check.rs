@@ -19,6 +19,10 @@ pub(crate) fn run(quick: bool) -> ExitCode {
         root,
         load_resolved_graph: true,
     };
+    // Printed once here in full. Each check that stops on it quotes one line and points up.
+    if let Err(error) = &ctx.members {
+        out.note(format!("note: {error}"));
+    }
 
     let scope = if quick {
         quick_scope(&mut out, &ctx)

@@ -34,15 +34,6 @@ macro_rules! write_crate_file {
     };
 }
 
-/// The zero-inspected failure after a problem with the root file or the list.
-#[cfg(test)]
-macro_rules! stopped {
-    () => {
-        "0 Crates table rows inspected in the Crates table of ARCHITECTURE.md\n    \
-         fix: the check stopped before it could look; fix the failure above first"
-    };
-}
-
 /// The violation for the stray clippy config `$path`, a `clippy.toml` in `$dir`.
 #[cfg(test)]
 macro_rules! stray {
@@ -214,12 +205,10 @@ crate::checks::planted::cases! {
     list_missing: FailsWith(&[
         "xtask/core-io-bans.toml:1: `xtask/core-io-bans.toml` is missing, and core-io builds \
          each core crate's clippy.toml from it\n    fix: restore `xtask/core-io-bans.toml` from git",
-        stopped!(),
     ]), inspects 0 => super::list_missing,
     root_missing: FailsWith(&[
         "clippy.toml:1: `clippy.toml` is missing, and core-io builds each core crate's \
          clippy.toml from it\n    fix: restore `clippy.toml` from git",
-        stopped!(),
     ]), inspects 0 => super::root_missing,
     list_unknown_key: FailsWith(&[
         "xtask/core-io-bans.toml:4: `xtask/core-io-bans.toml` is not valid: unknown field \
@@ -227,7 +216,6 @@ crate::checks::planted::cases! {
          fix: fix the line above: the file holds only `disallowed-methods` and \
          `disallowed-types`, arrays of `{ path, reason }` tables, each with an optional \
          `replacement` and `allow-invalid`",
-        stopped!(),
     ]), inspects 0 => super::list_unknown_key,
     list_entry_problems: FailsWith(&[
         "xtask/core-io-bans.toml:3: the `disallowed-methods` entry for `std::fs::read` has an \
@@ -235,13 +223,11 @@ crate::checks::planted::cases! {
          fix: say why a core crate may not use the item, and what to do instead",
         "xtask/core-io-bans.toml:3: `std::fs::read` is listed twice in `disallowed-methods`\n    \
          fix: delete this entry",
-        stopped!(),
     ]), inspects 0 => super::list_entry_problems,
     root_array_is_a_string: FailsWith(&[
         "clippy.toml:2: `disallowed-types` in clippy.toml is not an array, so core-io cannot \
          append xtask/core-io-bans.toml's `disallowed-types` to it\n    \
          fix: write `disallowed-types` as an array of `{ path, reason }` tables",
-        stopped!(),
     ]), inspects 0 => super::root_array_is_a_string,
     /// Every target root of a held crate carries the forbid line, outside `cfg_attr`, and the
     /// crate has no build script.

@@ -146,7 +146,7 @@ fn run_metadata(root: &Path) -> Result<String, String> {
     let quiet = process::run_quiet(&cmd, root)
         .map_err(|e| format!("could not run `cargo metadata`: {e}"))?;
     if !quiet.success {
-        return Err(format!("`cargo metadata` failed: {}", quiet.stderr.trim()));
+        return Err(format!("`cargo metadata` failed:\n{}", quiet.stderr.trim()));
     }
     Ok(quiet.stdout)
 }
@@ -340,7 +340,7 @@ mod tests {
                         [dependencies]\nfoo = \"not a req\"\n";
         fs::write(dir.join("Cargo.toml"), manifest).expect("write the manifest");
         let error = load(&dir).expect_err("cargo metadata fails");
-        assert!(error.starts_with("`cargo metadata` failed: "), "{error}");
+        assert!(error.starts_with("`cargo metadata` failed:\n"), "{error}");
     }
 
     #[test]

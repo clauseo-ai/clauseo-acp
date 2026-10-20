@@ -13,15 +13,11 @@ crate::checks::planted::cases! {
         "budgets.toml:1: budgets.toml is not valid: unclosed array table, expected `]`\n    \
          fix: fix the line above; each row is a [[budget]] table of the ten keys listed at the top \
          of budgets.toml",
-        "0 budget rows inspected in budgets.toml at the repo root\n    \
-         fix: the check stopped before it could look; fix the failure above first",
     ]), inspects 0 => super::not_toml,
     /// A file that is not UTF-8 is there but cannot be read: the check stopped on it.
     not_utf8: FailsWith(&[
         "budgets.toml:1: could not read `budgets.toml`: stream did not contain valid UTF-8\n    \
          fix: make the file readable as UTF-8 text",
-        "0 budget rows inspected in budgets.toml at the repo root\n    \
-         fix: the check stopped before it could look; fix the failure above first",
     ]), inspects 0 => super::not_utf8,
     /// A row with every required key passes.
     valid_row: Passes, inspects 1 => super::valid_row,

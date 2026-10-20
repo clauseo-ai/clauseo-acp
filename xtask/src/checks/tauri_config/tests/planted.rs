@@ -239,8 +239,6 @@ crate::checks::planted::cases! {
          member\n    \
          fix: restore crates/desktop or update xtask/src/checks: these checks guard its \
          capabilities, plugins and Tauri config",
-        "0 config files inspected in the desktop crate (tauri.conf.json and build.rs)\n    \
-         fix: the check stopped before it could look; fix the failure above first",
     ]), inspects 0 => super::cases::desktop_crate_missing,
     /// Neither config file exists: the check looked and found none, so the zero line gets the
     /// normal fix, not the stopped one.
