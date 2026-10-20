@@ -17,14 +17,13 @@
 # lines. The order of the lines is not checked; keep them grouped by file.
 # `allow` is never listed: the check fails every #[allow] and #![allow], in every form.
 
-# The nine sites on main at a4bcd6f. R3 moved noisy_pass and boom_fail into steps/run/tests.rs.
+# The nine sites on main at a4bcd6f, less process.rs capture and run_quiet, which R3b folded into
+# spawn (below). R3 moved noisy_pass and boom_fail into steps/run/tests.rs.
 crates/desktop/src/lib.rs run clippy::disallowed_methods
 crates/desktop/src/lib.rs raise_main_window clippy::let_underscore_must_use
 crates/desktop/src/rust_only.rs plugin_rust_only clippy::disallowed_methods
 xtask/src/clock.rs timed clippy::disallowed_methods
 xtask/src/output.rs put clippy::let_underscore_must_use
-xtask/src/process.rs capture clippy::disallowed_methods
-xtask/src/process.rs run_quiet clippy::disallowed_methods
 xtask/src/steps/run/tests.rs noisy_pass clippy::unnecessary_wraps
 xtask/src/steps/run/tests.rs boom_fail clippy::unnecessary_wraps
 
@@ -33,12 +32,14 @@ xtask/src/checks.rs checks clippy::partial_pub_fields
 xtask/src/checks/core_io/clippy_toml.rs clippy_toml dead_code
 xtask/src/checks/core_io/clippy_toml.rs clippy_toml dead_code
 xtask/src/checks/core_io/tests/clippy.rs clippy clippy::disallowed_methods
-xtask/src/process.rs run_timed clippy::disallowed_methods
 xtask/src/setup/tests.rs exited clippy::unnecessary_wraps
 xtask/src/setup/tests.rs fake_asset clippy::unnecessary_wraps
 
-# Added by R3b: the write door, the test write door and the PATH lookup.
+# Added by R3b: the write door, the test write door, the one process start, its Windows calls, the
+# integration test that starts xtask, and the one walk over PATH.
+xtask/src/process.rs spawn clippy::disallowed_methods
+xtask/src/process/windows.rs - unsafe_code
+xtask/tests/process.rs start_xtask clippy::disallowed_methods
 xtask/src/write.rs - clippy::disallowed_methods
 xtask/src/scratch.rs - clippy::disallowed_methods
-xtask/src/process.rs resolve_pnpm clippy::disallowed_methods
-xtask/src/setup/version.rs on_path clippy::disallowed_methods
+xtask/src/process.rs first_on_path clippy::disallowed_methods

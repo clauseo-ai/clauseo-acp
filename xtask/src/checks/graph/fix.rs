@@ -1,6 +1,7 @@
 //! The fix lines of the dependency graph reader, one variant per failure kind.
 //! Each text is written once, in `Display`; `fix/tests.rs` pins every variant's text.
 
+use crate::process::TimeoutFix;
 use std::fmt;
 
 /// A fix line of the dependency graph reader.
@@ -10,6 +11,8 @@ pub(crate) enum Fix {
     TreeParse,
     /// `cargo` could not be started.
     CargoOnPath,
+    /// `cargo` ran past its limit and was stopped.
+    TimedOut(TimeoutFix),
     /// `cargo` fails because `Cargo.lock` does not match the manifests.
     Lockfile,
     /// A crate is locked but not downloaded, and the check runs offline.
@@ -32,6 +35,7 @@ impl fmt::Display for Fix {
             Fix::CargoOnPath => f.write_str(
                 "put `cargo` on PATH, since this check reads the dependency graph from cargo",
             ),
+            Fix::TimedOut(fix) => fix.fmt(f),
             Fix::Lockfile => f.write_str(
                 "Cargo.lock does not match the manifests, and the check never rewrites it. Run \
                  `cargo update --workspace` to bring it in line, then commit Cargo.lock",

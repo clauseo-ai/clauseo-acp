@@ -1,6 +1,6 @@
 //! The doors of the root `clippy.toml`, which bans them in every crate: one must-fail form per
 //! std call that changes files (the write module), both `canonicalize` paths (and `PathBuf`'s,
-//! which reaches `Path::canonicalize` by deref), `env::split_paths` (the one program lookup), and
+//! which reaches `Path::canonicalize` by deref), `env::split_paths` (the one walk over PATH), and
 //! `Command::status` and `CommandExt::exec` (the process door); and must-pass forms for the
 //! reads, which stay allowed. Each failing form plants its call on line 2 and must get a hit
 //! there naming its entry, with the entry's reason or replacement, so deleting the entry, or
@@ -254,7 +254,7 @@ pub(super) fn failing() -> Vec<Form> {
             "",
             "std::env::split_paths(\"a:b\").count()",
             "std::env::split_paths",
-            "only resolve_pnpm in xtask/src/process.rs looks programs up on PATH",
+            "only first_on_path in xtask/src/process.rs walks PATH",
         ),
         planted(
             "command_status",

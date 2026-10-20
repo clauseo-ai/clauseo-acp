@@ -65,7 +65,11 @@ impl Repo {
     /// `cargo`, with the resolved graph on, as `cargo xtask check` runs: the check walks it with
     /// `cargo tree --locked --offline`, so cargo first writes the lockfile, offline.
     pub(crate) fn resolved(dir: Scratch) -> Repo {
-        let lock = Cmd::new(Program::Cargo, ["generate-lockfile", "--offline"]);
+        let lock = Cmd::new(
+            Program::Cargo,
+            ["generate-lockfile", "--offline"],
+            process::TEST_TIMEOUT,
+        );
         let quiet = process::run_quiet(&lock, &dir).expect("run cargo generate-lockfile");
         assert!(
             quiet.success,
@@ -102,6 +106,7 @@ pub(crate) fn desktop_member() -> Member {
 
 /// Runs `git <args>` in `dir` and asserts that it succeeded.
 pub(crate) fn git(dir: &Path, args: &[&str]) {
-    let quiet = process::run_quiet(&Cmd::new(Program::Git, args), dir).expect("run git");
+    let quiet = process::run_quiet(&Cmd::new(Program::Git, args, process::TEST_TIMEOUT), dir)
+        .expect("run git");
     assert!(quiet.success, "git {args:?} failed: {}", quiet.stderr);
 }

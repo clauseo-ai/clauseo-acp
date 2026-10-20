@@ -10,11 +10,20 @@ use crate::parse::{rel_path, short_diags};
 use crate::process::{Cmd, Program};
 use crate::violation::{Finding, Violation};
 use crate::workspace::Context;
+use std::time::Duration;
+
+/// How long cargo-deny may run: it fetches the advisory database, which on a slow link takes
+/// minutes.
+const DENY_TIMEOUT: Duration = Duration::from_mins(10);
+/// How long cargo-shear, typos and taplo may run: each reads the repo's files once, in seconds.
+const SCAN_TIMEOUT: Duration = Duration::from_mins(5);
+/// How long gitleaks may run: it reads every commit in its range, all history when there is none.
+const GITLEAKS_TIMEOUT: Duration = Duration::from_mins(10);
 
 pub(super) fn deny_step() -> ToolStep {
     ToolStep {
         name: "deny",
-        cmd: Cmd::new(Program::Cargo, ["deny", "--locked", "check"]),
+        cmd: Cmd::new(Program::Cargo, ["deny", "--locked", "check"], DENY_TIMEOUT),
         parse: parse_none,
         fix: deny_fix,
         render: None,
@@ -34,7 +43,7 @@ fn deny_fix(cmd: &Cmd, output: Option<&str>) -> String {
 pub(super) fn shear_step() -> ToolStep {
     ToolStep {
         name: "shear",
-        cmd: Cmd::new(Program::Cargo, ["shear", "--deny-warnings"]),
+        cmd: Cmd::new(Program::Cargo, ["shear", "--deny-warnings"], SCAN_TIMEOUT),
         parse: parse_none,
         fix: shear_fix,
         render: None,
@@ -53,7 +62,7 @@ fn shear_fix(_cmd: &Cmd, output: Option<&str>) -> String {
 pub(super) fn typos_step() -> ToolStep {
     ToolStep {
         name: "typos",
-        cmd: Cmd::new(Program::Named("typos"), ["--format", "brief"]),
+        cmd: Cmd::new(Program::Named("typos"), ["--format", "brief"], SCAN_TIMEOUT),
         parse: typos_findings,
         fix: setup_or_reproduce,
         render: None,
@@ -86,7 +95,7 @@ fn typos_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
 pub(super) fn taplo_step() -> ToolStep {
     ToolStep {
         name: "taplo",
-        cmd: Cmd::new(Program::Named("taplo"), ["fmt", "--check"]),
+        cmd: Cmd::new(Program::Named("taplo"), ["fmt", "--check"], SCAN_TIMEOUT),
         parse: taplo_findings,
         fix: setup_or_reproduce,
         render: None,
@@ -173,7 +182,7 @@ pub(super) fn gitleaks_step(range: Option<&str>) -> ToolStep {
     }
     ToolStep {
         name: "gitleaks",
-        cmd: Cmd::new(Program::Named("gitleaks"), args),
+        cmd: Cmd::new(Program::Named("gitleaks"), args, GITLEAKS_TIMEOUT),
         parse: gitleaks_findings,
         fix: setup_or_reproduce,
         render: None,

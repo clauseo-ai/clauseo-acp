@@ -30,3 +30,11 @@ shlex = "2.0.1"
 # expect-allowlist check parses every .rs file and walks it with `syn::visit` (`visit`).
 syn = { version = "3.0.9", features = ["full", "visit"] }
 toml = "1"
+
+# The process door signals each command's process group (xtask/src/process/unix.rs).
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true
+
+# The process door runs each command in a Job Object (xtask/src/process/windows.rs).
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true

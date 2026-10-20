@@ -54,7 +54,7 @@ disallowed-methods = [
   # Paths and PATH
   { path = "std::fs::canonicalize", reason = "canonicalize returns \\\\?\\ paths on Windows that most tools refuse", replacement = "dunce::canonicalize" },
   { path = "std::path::Path::canonicalize", reason = "canonicalize returns \\\\?\\ paths on Windows that most tools refuse", replacement = "dunce::canonicalize" },
-  { path = "std::env::split_paths", reason = "only resolve_pnpm in xtask/src/process.rs looks programs up on PATH; generalise it rather than add a second lookup" },
+  { path = "std::env::split_paths", reason = "only first_on_path in xtask/src/process.rs walks PATH (resolve_pnpm looks pnpm up with it); reuse it rather than split PATH again" },
   # Process starts that skip the process door
   { path = "std::process::Command::status", reason = "children start only through xtask/src/process.rs" },
   { path = "std::os::unix::process::CommandExt::exec", reason = "children start only through xtask/src/process.rs", allow-invalid = true },

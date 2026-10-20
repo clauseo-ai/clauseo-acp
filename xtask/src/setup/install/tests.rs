@@ -6,9 +6,11 @@ use crate::scratch::Scratch;
 #[cfg(unix)]
 use crate::setup::AssetSha256;
 use crate::setup::BINARIES;
+#[cfg(unix)]
+use crate::setup::tests::fake_tool;
 use crate::setup::tests::{
     ASSET_BYTES, binary, curl_output, exited, expected_asset, expected_curl, expected_url,
-    expected_winget, fake_tool, linux,
+    expected_winget, linux,
 };
 use std::path::PathBuf;
 
@@ -41,7 +43,7 @@ fn install_with(
     other: &mut dyn FnMut(&Cmd) -> io::Result<Ended>,
 ) -> (bool, Vec<(String, PathBuf)>, String) {
     let mut ran = Vec::new();
-    let mut runner = |cmd: &Cmd, at: &Path, _: Output, _: Duration| -> io::Result<Ended> {
+    let mut runner = |cmd: &Cmd, at: &Path, _: Output| -> io::Result<Ended> {
         ran.push((cmd.to_string(), at.to_path_buf()));
         match cmd.program {
             Program::Named("curl") => Scratch::write(at.join(curl_output(cmd)), asset_bytes)?,
@@ -144,7 +146,7 @@ fn a_failed_download_leaves_bin_untouched_and_names_curl_as_the_fix() {
     ];
     for (said, ended) in cases {
         let mut ended = Some(ended);
-        let mut runner = |_: &Cmd, _: &Path, _: Output, _: Duration| ended.take().unwrap();
+        let mut runner = |_: &Cmd, _: &Path, _: Output| ended.take().unwrap();
         let mut out = Printer::new(Vec::new(), false);
         let ok = install_binary(&mut out, gitleaks, &linux(&bin, true), &dir, &mut runner);
         assert!(!ok);
@@ -164,7 +166,7 @@ fn printed_for_failed_curl(case: &str, stderr: &str) -> String {
     let dir = Scratch::new(&format!("setup-install-curl-{case}"));
     let bin = dir.join("bin");
     let gitleaks = binary("gitleaks");
-    let mut runner = |_: &Cmd, _: &Path, _: Output, _: Duration| exited(false, "", stderr);
+    let mut runner = |_: &Cmd, _: &Path, _: Output| exited(false, "", stderr);
     let mut out = Printer::new(Vec::new(), false);
     let ok = install_binary(&mut out, gitleaks, &linux(&bin, true), &dir, &mut runner);
     assert!(!ok);
@@ -298,6 +300,7 @@ fn real_tar_gz(dir: &Path, member: &str) -> PathBuf {
     let tar = Cmd::new(
         Program::Named("tar"),
         ["-czf", archive_arg.as_str(), "gitleaks", "LICENSE"],
+        crate::process::TEST_TIMEOUT,
     );
     let made = crate::process::run_quiet(&tar, &src).expect("tar runs");
     assert!(made.success, "{tar}: {}", made.stderr);
@@ -319,12 +322,12 @@ fn install_real_tar_gz(archive: &Path, bin: &Path) -> (bool, String) {
         sha256: pins,
         ..fake_tool(Packing::TarGz)
     };
-    let mut runner = |cmd: &Cmd, at: &Path, output: Output, timeout: Duration| match cmd.program {
+    let mut runner = |cmd: &Cmd, at: &Path, output: Output| match cmd.program {
         Program::Named("curl") => {
             Scratch::copy(archive, at.join(curl_output(cmd)))?;
             exited(true, "", "")
         }
-        Program::Named("tar") => crate::process::run_timed(cmd, at, output, timeout),
+        Program::Named("tar") => crate::process::run(cmd, at, output),
         _ => panic!("{cmd} was not expected to run"),
     };
     let mut out = Printer::new(Vec::new(), false);
@@ -394,7 +397,7 @@ fn refused(printed: &str) {
 }
 
 #[test]
-fn the_download_commands_and_curl_stopping_itself_before_run_timed_does() {
+fn the_download_commands_and_curl_stopping_itself_before_its_limit_does() {
     let (asset, url) = ("a.tar.gz", "https://example.com/a.tar.gz");
     assert_eq!(curl_cmd(asset, url).to_string(), expected_curl(asset, url));
     assert_eq!(

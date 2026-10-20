@@ -175,8 +175,10 @@ fn lefthook_asset(os: &str, arch: &str, version: &str) -> Option<String> {
     Some(format!("lefthook_{version}_{os}_{arch}"))
 }
 
-/// How long each command `setup` starts may run before it is killed.
+/// How long `cargo install` may run before its tree is stopped: it builds a tool from source,
+/// which on a cold cache and a slow machine takes many minutes, so this is xtask's longest limit.
 const CARGO_INSTALL_TIMEOUT: Duration = Duration::from_hours(1);
+/// How long `<binary> version` may run: it prints one line, so 30 s means it hangs.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The machine `setup` installs on.
@@ -207,9 +209,8 @@ impl Machine<'static> {
     }
 }
 
-/// Runs a command in a directory, with where its output goes and how long it may run. Production
-/// passes `process::run_timed`.
-pub(crate) type Runner<'a> = dyn FnMut(&Cmd, &Path, Output, Duration) -> io::Result<Ended> + 'a;
+/// Runs a command in a directory, with where its output goes. Production passes `process::run`.
+pub(crate) type Runner<'a> = dyn FnMut(&Cmd, &Path, Output) -> io::Result<Ended> + 'a;
 
 /// Installs each cargo tool, then checks each binary's version and, with `binaries`, installs it
 /// when that check fails and checks again. Continues past failures; fails if any failed.
@@ -224,7 +225,7 @@ pub(crate) fn run(binaries: bool) -> ExitCode {
         BINARIES,
         binaries,
         &root,
-        &mut process::run_timed,
+        &mut process::run,
     );
     if ok {
         ExitCode::SUCCESS
@@ -297,12 +298,12 @@ fn setup_binary<W: Write>(
 /// Runs `<name> version` and compares what it prints with the pin.
 fn check_version(binary: &Binary, root: &Path, runner: &mut Runner<'_>) -> VersionCheck {
     let cmd = version::version_cmd(binary);
-    let ran = match runner(&cmd, root, Output::Quiet, VERSION_TIMEOUT) {
+    let ran = match runner(&cmd, root, Output::Quiet) {
         Ok(Ended::Exited(quiet)) => Ok((quiet.success, quiet.stdout, quiet.stderr)),
         Ok(Ended::TimedOut) => Ok((
             false,
             String::new(),
-            format!("it did not finish within {} s", VERSION_TIMEOUT.as_secs()),
+            format!("it did not finish within {} s", cmd.timeout.as_secs()),
         )),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             Err(format!("`{cmd}` could not start: {error}"))
@@ -322,10 +323,11 @@ fn install_tool<W: Write>(
     let cmd = Cmd::new(
         Program::Cargo,
         ["install", "--locked", tool.name, "--version", tool.version],
+        CARGO_INSTALL_TIMEOUT,
     );
     out.note(&cmd);
     let fix = format!("run `{cmd}` to reproduce");
-    match runner(&cmd, root, Output::Inherit, CARGO_INSTALL_TIMEOUT) {
+    match runner(&cmd, root, Output::Inherit) {
         Ok(Ended::Exited(ran)) if ran.success => true,
         Ok(Ended::Exited(_)) => {
             out.failure(&format!("installing {} failed", tool.name), &fix);
@@ -336,7 +338,7 @@ fn install_tool<W: Write>(
                 &format!(
                     "installing {} did not finish within {} min, so it was stopped",
                     tool.name,
-                    CARGO_INSTALL_TIMEOUT.as_secs() / 60
+                    cmd.timeout.as_secs() / 60
                 ),
                 &fix,
             );
