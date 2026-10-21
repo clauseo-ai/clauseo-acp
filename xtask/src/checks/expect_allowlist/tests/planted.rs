@@ -326,6 +326,13 @@ crate::checks::planted::cases! {
         "#[allow(dead_code)] silences a lint; only #[expect] with a reason may lower a lint",
         lower(Level::Allow, "src/a.rs", "d", "dead_code", false),
     )], inspects 1 => super::repos::attribute_value_allow_in_macro,
+    /// `#[path]` with a `\` fails: `sub\x.rs` is named as written, since a repo path uses `/`.
+    path_backslash: Fails[fails(
+        "src/a.rs:1",
+        "#[path = \"sub\\x.rs\"] names `sub\\x.rs`, a path written with `\\` rather than `/`, \
+         which is not a .rs file git lists, so expect-allowlist does not read it",
+        Fix::Path,
+    )], inspects 1 => super::repos::path_backslash,
     /// `#[path]` to an absolute path fails: it is outside the repo, so the check does not read it.
     path_absolute: Fails[fails(
         "src/a.rs:1",

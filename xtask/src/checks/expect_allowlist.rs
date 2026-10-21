@@ -247,8 +247,13 @@ const NOT_READ: &str = "which is not a .rs file git lists, so expect-allowlist d
 
 /// `target`, relative to the folder of `file`, as the check names it when it is not one of
 /// `listed`: repo-relative when it stays inside the repo, else as written. `None` when the
-/// check reads it.
+/// check reads it. A path written with `\` is named as written: a repo path uses `/`.
 fn unread(file: &str, target: &str, listed: &BTreeSet<&str>) -> Option<String> {
+    if target.contains('\\') {
+        return Some(format!(
+            "`{target}`, a path written with `\\` rather than `/`"
+        ));
+    }
     match resolve(file, target) {
         Some(path) if listed.contains(path.as_str()) => None,
         Some(path) => Some(format!("`{path}`")),
@@ -257,9 +262,10 @@ fn unread(file: &str, target: &str, listed: &BTreeSet<&str>) -> Option<String> {
 }
 
 /// `target` joined to the folder of `file` and made repo-relative, with `.` and `..` folded.
-/// `None` for an absolute path, a Windows path, or one that leaves the repo.
+/// `None` for an absolute path (`/`), a path with a `:` such as a Windows drive, or one that
+/// leaves the repo. `unread` names a path with `\` before it gets here.
 fn resolve(file: &str, target: &str) -> Option<String> {
-    if target.starts_with('/') || target.contains('\\') || target.contains(':') {
+    if target.starts_with('/') || target.contains(':') {
         return None;
     }
     let mut parts: Vec<&str> = file.split('/').collect();
