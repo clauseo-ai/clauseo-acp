@@ -99,7 +99,7 @@ fn outcomes_that_cannot_be_read_fail_even_after_a_clean_exit() {
 }
 
 #[test]
-fn a_cargo_mutants_past_its_limit_is_not_installed_and_the_run_says_how_to_see_why() {
+fn a_cargo_mutants_past_its_limit_could_not_be_checked_and_the_run_says_how_to_see_why() {
     let mut exec = |_: &Cmd, _: &mut dyn FnMut(&[u8])| -> io::Result<Ran> { Ok(Ran::timed_out()) };
     let mut out = Printer::new(Vec::new(), false);
     assert!(!installed(&mut out, &mut exec));
@@ -107,9 +107,8 @@ fn a_cargo_mutants_past_its_limit_is_not_installed_and_the_run_says_how_to_see_w
     assert_eq!(
         String::from_utf8(out.into_inner()).expect("utf-8"),
         format!(
-            "cargo-mutants 27.1.0 is not installed: `{cmd}` did not run: `{cmd}` did not finish \
-             within 1 min, so it was stopped\n    fix: run `{cmd}` by hand to see what goes \
-             wrong\n"
+            "cargo-mutants 27.1.0 could not be checked: `{cmd}` did not finish within 1 min, so \
+             it was stopped\n    fix: run `{cmd}` by hand to see what goes wrong\n"
         )
     );
 }

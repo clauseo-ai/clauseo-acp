@@ -251,9 +251,13 @@ fn remove_output(root: &Path) -> io::Result<()> {
 fn installed<W: Write>(out: &mut Printer<W>, exec: &mut Exec<'_>) -> bool {
     let cmd = Cmd::new(Program::Cargo, ["mutants", "--version"], VERSION_TIMEOUT);
     let pinned = CARGO_MUTANTS.version;
-    let (said, fix) = match exec(&cmd, &mut |_| {}) {
+    let not_installed = format!("cargo-mutants {pinned} is not installed: `{cmd}`");
+    let (message, fix) = match exec(&cmd, &mut |_| {}) {
         Ok(found) if found.status == Status::TimedOut => (
-            format!("did not run: {}", process::timeout_message(&cmd)),
+            format!(
+                "cargo-mutants {pinned} could not be checked: {}",
+                process::timeout_message(&cmd)
+            ),
             Fix::ByHand {
                 cmd: cmd.to_string(),
             },
@@ -264,20 +268,25 @@ fn installed<W: Write>(out: &mut Printer<W>, exec: &mut Exec<'_>) -> bool {
             if version == Some(pinned) {
                 return true;
             }
-            (format!("printed `{printed}`"), Fix::Setup { pinned })
+            (
+                format!("{not_installed} printed `{printed}`"),
+                Fix::Setup { pinned },
+            )
         }
         Ok(found) => {
             let first = found.stdout.trim().lines().next().unwrap_or_default();
-            (format!("failed: {first}"), Fix::Setup { pinned })
+            (
+                format!("{not_installed} failed: {first}"),
+                Fix::Setup { pinned },
+            )
         }
         Err(error) => (
-            format!("did not run: {error}"),
+            format!("{not_installed} did not run: {error}"),
             Fix::ByHand {
                 cmd: cmd.to_string(),
             },
         ),
     };
-    let message = format!("cargo-mutants {pinned} is not installed: `{cmd}` {said}");
     fail(out, &message, &fix);
     false
 }
