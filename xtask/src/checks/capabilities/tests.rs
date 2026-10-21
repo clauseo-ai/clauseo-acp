@@ -1,11 +1,10 @@
 //! Tests for the `capabilities` check: `scan` and `inline_violations` on strings. The `run`
-//! cases on scratch trees are the planted cases in `tests/planted.rs`, built below.
+//! cases on scratch trees are the planted cases in `tests/planted.rs`, built in `tests/repos.rs`.
 
-mod cases;
 pub(super) mod planted;
+mod repos;
 
 use super::*;
-use crate::checks::planted::Repo;
 use crate::checks::tests::desktop_context;
 use crate::scratch::Scratch;
 
