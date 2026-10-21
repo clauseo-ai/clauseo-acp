@@ -69,6 +69,7 @@ this. Use the words in `GLOSSARY.md` exactly.
   `Scratch` (`xtask/src/scratch.rs`) in xtask's tests, `ui/app/scripts/guard.mjs` in scripts.
   Child processes start only through `xtask/src/process.rs` in xtask and
   `ui/app/scripts/buildtime-proc.mjs` in scripts, each with a timeout and a whole-tree kill.
+- Each pinned version has one home.
 - Component files in `ui/` export only components.
 
 ## Testing

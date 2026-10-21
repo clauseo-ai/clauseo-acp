@@ -1,7 +1,7 @@
-//! The fix line of each failure `pins` reports, and its text. The helper that writes a home's
-//! words (`unread_fix`) is a method of `FileHome` in `pins.rs`.
+//! The fix line of each failure `pins` reports, and its text. The helpers that write a home's
+//! words (`install`, `input_fix`, `unread_fix`) are methods of `FileHome` in `pins.rs`.
 
-use super::{FileHome, SETUP, TOOLCHAIN};
+use super::{FileHome, Home, SETUP, TOOLCHAIN};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,6 +10,11 @@ pub(crate) enum Fix {
     RustVersion { channel_major_minor: String },
     /// A `lefthook.yml` comment that names another lefthook version than `BINARIES`.
     LefthookComment { pinned: String },
+    /// A version input to the action that installs this tool, or a Rust toolchain action's
+    /// ref that names a toolchain.
+    Input(FileHome),
+    /// A workflow value that names a version of the tool this home pins.
+    Copy(Home),
     /// A home value that could not be read.
     Unread(FileHome),
     /// A YAML file that does not parse.
@@ -33,6 +38,8 @@ impl fmt::Display for Fix {
                 "check that the comment holds for lefthook {pinned}, then make it name {pinned}, \
                  the version `BINARIES` in {SETUP} pins"
             ),
+            Fix::Input(home) => home.input_fix(f),
+            Fix::Copy(home) => write!(f, "remove the version from this file: {}", home.install()),
             Fix::Unread(home) => home.unread_fix(f),
             Fix::NotYaml => write!(
                 f,
