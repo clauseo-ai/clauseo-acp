@@ -62,7 +62,7 @@ pub(crate) fn assert_texts<F: fmt::Display>(
         let (index, expected) = text(sample);
         assert!(
             index < arms.len(),
-            "{sample} is past the last arm, {}",
+            "{sample} maps to arm {index}, but there are only {} arms",
             arms.len()
         );
         assert_eq!(
@@ -86,7 +86,6 @@ pub(crate) fn assert_texts<F: fmt::Display>(
 }
 
 /// A two-variant enum, with the macro and the assertion run on it, to pin their failures.
-#[derive(Debug)]
 enum Toy {
     Alpha,
     Beta { n: u8 },
