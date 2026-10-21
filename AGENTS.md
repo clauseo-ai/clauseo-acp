@@ -55,7 +55,9 @@ this. Use the words in `GLOSSARY.md` exactly.
 - A crate never depends on what `ARCHITECTURE.md` lists under "Never depends on".
 - Capability files and the desktop crate's permission files (`permissions/`) never contain
   `remote`, `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`.
-- Only `#[expect(lint, reason = "...")]` may silence a lint, never `#[allow]` or `#![allow]`.
+- Only `#[expect(lint, reason = "...")]` may silence a lint, never `allow` or `warn` in any form
+  (outer, inner, `cfg_attr`, macro bodies). Every `#[expect]` is listed in
+  `xtask/expect-allowlist.txt`.
 - A crate that `ARCHITECTURE.md` marks as banning I/O or the clock gets no exception to the bans,
   not even `#[expect]`. What such a crate carries is in the I/O paragraph of `ARCHITECTURE.md`.
 - No `unwrap`, `expect`, `panic!`, `todo!` or `println!` outside tests and `main`.

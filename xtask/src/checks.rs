@@ -31,6 +31,7 @@ pub(crate) mod crates_table;
 pub(crate) mod dependencies;
 pub(crate) mod docs;
 pub(crate) mod exceptions;
+pub(crate) mod expect_allowlist;
 pub(crate) mod file_size;
 mod fix;
 pub(crate) mod graph;
@@ -250,6 +251,7 @@ pub(crate) const ALL: &[StaticCheck] = &[
     core_io::CHECK,
     docs::CHECK,
     file_size::CHECK,
+    expect_allowlist::CHECK,
 ];
 
 /// The package name of the desktop crate. The checks find its directory through `Context::members`,
