@@ -54,7 +54,7 @@ here and adds the rule to "Rules the checks enforce" in `AGENTS.md`.
   Replaced by: mutation testing of the diff with cargo-mutants.
   Why: a launch check and a compiler test passed with the thing they guard removed (PR #8).
 - Only buildtime edits a tracked file today. Its guard is `xtask/src/buildtime/probe/guard.rs` in
-  Rust and `ui/app/scripts/buildtime-lib.mjs` in scripts. The next tool that needs to edit a tracked
+  Rust and `ui/app/scripts/guard.mjs` in scripts. The next tool that needs to edit a tracked
   file moves the guard out of buildtime instead of copying it, and never writes a second guard.
   Replaced by: clippy `disallowed-methods` and an oxlint import ban on file-writing calls outside
   the guard.
