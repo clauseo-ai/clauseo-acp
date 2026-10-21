@@ -398,6 +398,22 @@ pub(super) fn clean_permission_file() -> Repo {
     )
 }
 
+/// `capabilities/main.json` is a symlink to `other/grant.json`, a file of the crate that grants
+/// `core:default` on line 3. The walk reads the file through the link: it is not a folder link.
+pub(super) fn file_symlink() -> Repo {
+    let grant = "{\n  \"permissions\": [\n    \"core:default\"\n  ]\n}\n";
+    let dir = planted::scratch(
+        "capabilities-file-symlink",
+        &[("crates/desktop/other/grant.json", grant)],
+    );
+    Scratch::create_dir_all(dir.join("crates/desktop/capabilities")).expect("create the folder");
+    #[cfg(unix)]
+    Scratch::symlink("../other/grant.json", dir.join(PATH)).expect("link the file");
+    #[cfg(not(unix))]
+    Scratch::write(dir.join(PATH), grant).expect("write the file");
+    Repo::desktop(dir)
+}
+
 /// The clean capability, and `capabilities/x`, a symlink to the desktop crate's folder, above
 /// it: a walk that followed it would loop.
 pub(super) fn symlink_to_a_folder_above() -> Repo {
