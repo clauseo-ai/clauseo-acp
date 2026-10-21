@@ -102,7 +102,8 @@ fn prompts_fail(command: &mut Command, ssh_set: bool) {
 }
 
 /// Sends `signal` to process group `group`. A group with no process left (`ESRCH`) is stopped
-/// already, so that is not an error.
+/// already, so that is not an error. `EPERM` (no process in it could be signalled, which macOS
+/// also answers for a group of zombies) is returned; `Running::stop` judges it.
 pub(super) fn signal(group: Pid, signal: Signal) -> io::Result<()> {
     match killpg(group, signal) {
         Ok(()) | Err(Errno::ESRCH) => Ok(()),
@@ -110,7 +111,8 @@ pub(super) fn signal(group: Pid, signal: Signal) -> io::Result<()> {
     }
 }
 
-/// Whether no process is left in `group`. `EPERM` means one is, owned by another user.
+/// Whether no process is left in `group`. `EPERM` means one is: owned by another user, or, on
+/// macOS, exited and not yet reaped (a zombie), which its new parent reaps soon.
 pub(super) fn empty(group: Pid) -> bool {
     killpg(group, None) == Err(Errno::ESRCH)
 }

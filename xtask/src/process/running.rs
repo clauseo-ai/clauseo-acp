@@ -148,6 +148,15 @@ pub(super) enum Finish {
     TimedOut,
 }
 
+/// A signal a run sends its tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Stop {
+    /// `Tree::terminate`: SIGTERM on Unix.
+    Terminate,
+    /// `Tree::kill`: SIGKILL on Unix.
+    Kill,
+}
+
 /// What the threads of a run send it. A reader sends nothing at EOF: its thread ends.
 enum Event {
     Data(Stream, Vec<u8>),
@@ -193,6 +202,8 @@ pub(super) struct Running {
     cut: Option<Cut>,
     /// The first error of the run: a pipe that could not be read, a failed wait or a failed stop.
     error: Option<io::Error>,
+    /// The first stop the OS denied (EPERM) before the command had exited (`Running::stop`).
+    denied: Option<io::Error>,
     /// Set once the run has ended and its result was taken, so a drop does not stop it again.
     ended: bool,
 }
@@ -295,6 +306,7 @@ impl Running {
             left: limits.run,
             cut: None,
             error: None,
+            denied: None,
             ended: false,
         })
     }
@@ -306,6 +318,10 @@ impl Running {
         self.wait(on_output);
         self.ended = true;
         self.tree.finish();
+        // A stop denied before the exit is an error only if the exit never came.
+        if let (false, Some(error)) = (self.exited, self.denied.take()) {
+            self.keep(self.not_stopped(&error));
+        }
         match (self.error.take(), self.cut, self.status) {
             (Some(error), _, _) => Err(error),
             (None, Some(Cut::TimedOut), _) => Ok(Finish::TimedOut),
@@ -405,15 +421,42 @@ impl Running {
     /// Asks the tree to stop (SIGTERM on Unix) and gives it the grace.
     fn terminate(&mut self) {
         self.enter(Phase::Terminating, self.limits.grace);
-        if let Err(error) = self.tree.terminate() {
-            self.keep(self.not_stopped(&error));
-        }
+        self.stop(Stop::Terminate);
     }
 
     /// Kills the tree (SIGKILL on Unix).
     fn kill(&mut self) {
-        if let Err(error) = self.tree.kill() {
+        self.stop(Stop::Kill);
+    }
+
+    /// Sends `stop` to the tree and judges a failure. macOS answers EPERM, not ESRCH, to a signal
+    /// for a group whose processes have all exited and are not yet reaped (zombies): EPERM means
+    /// no process in the group could be signalled. Once the command has exited, that is what it
+    /// means for its group, so it is not an error. Before, the command may have exited with the
+    /// waiter not yet past its reap, so the failure is held, and is the run's error only if the
+    /// command never exits (a command that changed its user, which xtask cannot stop).
+    fn stop(&mut self, stop: Stop) {
+        let Err(error) = self.send(stop) else {
+            return;
+        };
+        if error.kind() != io::ErrorKind::PermissionDenied {
             self.keep(self.not_stopped(&error));
+        } else if !self.exited {
+            self.denied.get_or_insert(error);
+        }
+    }
+
+    /// Sends `stop` to the tree, or lets a test's `STOP_HOOK` decide what it does.
+    fn send(&self, stop: Stop) -> io::Result<()> {
+        #[cfg(test)]
+        if let Some(result) =
+            STOP_HOOK.with_borrow_mut(|hook| hook.as_mut().map(|hook| hook(stop, &self.tree)))
+        {
+            return result;
+        }
+        match stop {
+            Stop::Terminate => self.tree.terminate(),
+            Stop::Kill => self.tree.kill(),
         }
     }
 
@@ -460,9 +503,16 @@ fn start_thread(body: impl FnOnce() + Send + 'static) -> io::Result<()> {
 #[cfg(test)]
 pub(super) type ThreadHook = Box<dyn FnMut() -> io::Result<()>>;
 
+/// A hook a test sets on its own thread, run in place of each stop a run sends its tree there:
+/// it may send it (`Tree::terminate` or `Tree::kill`) or not, and says what the stop gave.
+#[cfg(test)]
+pub(super) type StopHook = Box<dyn FnMut(Stop, &OsTree) -> io::Result<()>>;
+
 #[cfg(test)]
 thread_local! {
     pub(super) static BEFORE_THREAD: std::cell::RefCell<Option<ThreadHook>> =
+        const { std::cell::RefCell::new(None) };
+    pub(super) static STOP_HOOK: std::cell::RefCell<Option<StopHook>> =
         const { std::cell::RefCell::new(None) };
 }
 

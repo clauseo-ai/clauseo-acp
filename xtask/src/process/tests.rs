@@ -275,3 +275,6 @@ fn the_restarted_leader_mode_passes_only_when_both_runs_pass() {
 
 #[cfg(unix)]
 pub(super) mod tree;
+
+#[cfg(unix)]
+mod denied;
