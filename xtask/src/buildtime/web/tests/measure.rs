@@ -2,6 +2,7 @@
 //! its limit: each is named with its command and the fix that says what to do.
 
 use super::*;
+use crate::process::Ran;
 use std::cell::RefCell;
 use std::io::{self, Write};
 use std::rc::Rc;
@@ -40,8 +41,7 @@ fn measured(root: &Path, runner: &mut QuietRunner<'_>) -> (Result<WebRun, Vec<St
 #[test]
 fn a_script_past_its_limit_is_named_with_the_command_to_run_by_hand() {
     let root = checkout("web-measure-timeout");
-    let mut runner =
-        |cmd: &Cmd, _: &Path| -> io::Result<process::Quiet> { Err(process::timed_out(cmd)) };
+    let mut runner = |_: &Cmd, _: &Path| -> io::Result<Ran> { Ok(Ran::timed_out()) };
     let (result, printed) = measured(&root, &mut runner);
     let message = concat!(
         "`node ui/app/scripts/buildtime.mjs --runs 2` did not finish within 1 h, ",
@@ -67,7 +67,7 @@ fn a_node_that_cannot_start_is_named_with_the_engines_range_to_install() {
     )
     .expect("write ui/package.json");
     let mut runner =
-        |_: &Cmd, _: &Path| -> io::Result<process::Quiet> { Err(io::Error::other("no such file")) };
+        |_: &Cmd, _: &Path| -> io::Result<Ran> { Err(io::Error::other("no such file")) };
     let (result, printed) = measured(&root, &mut runner);
     assert_eq!(
         result.expect_err("a node that cannot start fails the half"),

@@ -4,13 +4,13 @@
 use crate::checks::StaticCheck;
 use crate::clock::timed;
 use crate::output::Printer;
-use crate::process::{self, Captured, Cmd, Program};
+use crate::process::{self, Cmd, Program, Ran, Status, TimeoutFix};
 use crate::steps::{Step, ToolStep};
 use crate::workspace::Context;
 use std::io::{self, Write};
 
 /// Runs a tool command and passes each chunk of its output to the sink as it arrives.
-pub(crate) type Exec<'a> = dyn FnMut(&Cmd, &mut dyn FnMut(&[u8])) -> io::Result<Captured> + 'a;
+pub(crate) type Exec<'a> = dyn FnMut(&Cmd, &mut dyn FnMut(&[u8])) -> io::Result<Ran> + 'a;
 
 /// The summary entry for one step.
 pub(crate) struct StepResult {
@@ -109,32 +109,33 @@ fn run_tool<W: Write>(
         })
     });
     let (failed, warnings) = match captured {
+        Ok(captured) if captured.status == Status::TimedOut => {
+            let fix = TimeoutFix::of(&tool.cmd).to_string();
+            out.failure(&process::timeout_message(&tool.cmd), &fix);
+            (true, 0)
+        }
         Ok(captured) => {
-            let findings = (tool.parse)(&captured.output, ctx, &tool.cmd);
+            let findings = (tool.parse)(&captured.stdout, ctx, &tool.cmd);
             for finding in &findings {
                 out.violation(&finding.violation);
             }
             let has_error = findings.iter().any(|f| f.is_error);
             let warnings = findings.iter().filter(|f| !f.is_error).count();
-            let failed = !captured.success;
+            let failed = !captured.success();
             if failed && !has_error {
                 match tool.render {
-                    None => out.captured_output(&captured.output),
-                    Some(render) => out.held_output(&render(&captured.output)),
+                    None => out.captured_output(&captured.stdout),
+                    Some(render) => out.held_output(&render(&captured.stdout)),
                 }
                 out.failure(
                     &format!(
                         "`{}` failed without a file:line; its output is above",
                         tool.cmd
                     ),
-                    &(tool.fix)(&tool.cmd, Some(&captured.output)),
+                    &(tool.fix)(&tool.cmd, Some(&captured.stdout)),
                 );
             }
             (failed, warnings)
-        }
-        Err(error) if process::is_timeout(&error) => {
-            out.failure(&error.to_string(), &process::timeout_fix(&tool.cmd));
-            (true, 0)
         }
         Err(error) => {
             let message = format!("could not run `{}`: {error}", tool.cmd.program.name());

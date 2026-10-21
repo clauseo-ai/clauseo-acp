@@ -2,7 +2,7 @@
 //! command runs through the door. Not part of the door's API: nothing else in xtask calls it.
 
 use super::running::{self, Finish, Streams};
-use super::{Captured, Cmd, Ended, Output, Program, Quiet, capture, run};
+use super::{Cmd, Output, Program, Ran, capture, run};
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -31,14 +31,12 @@ const PROCESS_TEST_TIMEOUT: Duration = Duration::from_mins(10);
 pub(crate) fn test_mode(output: TestOutput, script: &str) -> ExitCode {
     let cmd = Cmd::new(Program::Named("sh"), ["-c", script], PROCESS_TEST_TIMEOUT);
     let success = match output {
-        TestOutput::Inherit => matches!(
-            run(&cmd, Path::new("."), Output::Inherit),
-            Ok(Ended::Exited(Quiet { success: true, .. }))
-        ),
-        TestOutput::Capture => matches!(
-            capture(&cmd, Path::new("."), &mut |_| {}),
-            Ok(Captured { success: true, .. })
-        ),
+        TestOutput::Inherit => {
+            run(&cmd, Path::new("."), Output::Inherit).is_ok_and(|ran| ran.success())
+        }
+        TestOutput::Capture => {
+            capture(&cmd, Path::new("."), &mut |_| {}).is_ok_and(|ran| ran.success())
+        }
         TestOutput::RestartedLeader => restarted_leader(&cmd, script),
     };
     if success {
@@ -67,7 +65,7 @@ pub(super) fn restarted_leader(cmd: &Cmd, script: &str) -> bool {
     );
     let second = run(&again, Path::new("."), Output::Inherit);
     let first = first.finish(&mut |_, _| {});
-    matches!(second, Ok(Ended::Exited(Quiet { success: true, .. })))
+    second.as_ref().is_ok_and(Ran::success)
         && matches!(first, Ok(Finish::Exited(status)) if status.success())
 }
 

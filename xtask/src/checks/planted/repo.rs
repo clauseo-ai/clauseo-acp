@@ -72,7 +72,7 @@ impl Repo {
         );
         let quiet = process::run_quiet(&lock, &dir).expect("run cargo generate-lockfile");
         assert!(
-            quiet.success,
+            quiet.success(),
             "cargo generate-lockfile failed: {}",
             quiet.stderr
         );
@@ -108,5 +108,5 @@ pub(crate) fn desktop_member() -> Member {
 pub(crate) fn git(dir: &Path, args: &[&str]) {
     let quiet = process::run_quiet(&Cmd::new(Program::Git, args, process::TEST_TIMEOUT), dir)
         .expect("run git");
-    assert!(quiet.success, "git {args:?} failed: {}", quiet.stderr);
+    assert!(quiet.success(), "git {args:?} failed: {}", quiet.stderr);
 }

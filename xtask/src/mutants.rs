@@ -14,7 +14,7 @@ pub(crate) use fix::Fix;
 
 use crate::changes::{self, GitError};
 use crate::output::Printer;
-use crate::process::{self, Captured, Cmd, Program};
+use crate::process::{self, Cmd, Program, Ran, Status};
 use crate::setup::CARGO_MUTANTS;
 use crate::write;
 use std::collections::BTreeSet;
@@ -55,7 +55,7 @@ const JOBS: &str = "4";
 
 /// Runs a command in the repo root, passing each chunk of its merged output to the callback as it
 /// arrives. `process::capture` in a real run; a fake in the tests.
-pub(crate) type Exec<'a> = dyn FnMut(&Cmd, &mut dyn FnMut(&[u8])) -> io::Result<Captured> + 'a;
+pub(crate) type Exec<'a> = dyn FnMut(&Cmd, &mut dyn FnMut(&[u8])) -> io::Result<Ran> + 'a;
 
 /// Runs `cargo xtask mutants` in `root`, the checkout. Exits 0 only when the run finished and no
 /// mutant was missed.
@@ -138,17 +138,13 @@ pub(crate) fn run_with<W: Write>(
     let before = build_dirs(temp, root);
     let ran = exec(&cmd, &mut |chunk| out.tool_output(chunk));
     match ran {
-        Ok(captured) => judge(out, root, &cmd, &captured),
-        Err(error) if process::is_timeout(&error) => {
-            let message = format!(
-                "`{cmd}` did not finish within {}, so it was stopped",
-                process::limit_text(cmd.timeout)
-            );
-            fail(out, &message, &Fix::Split);
+        Ok(ran) if ran.status == Status::TimedOut => {
+            fail(out, &process::timeout_message(&cmd), &Fix::Split);
             stopped_at_cap(out, root, &cmd);
             remove_left_build_dirs(out, temp, root, &before);
             false
         }
+        Ok(captured) => judge(out, root, &cmd, &captured),
         Err(error) => {
             let message = format!("could not run `{cmd}`: {error}");
             fail(
@@ -168,8 +164,14 @@ fn installed<W: Write>(out: &mut Printer<W>, exec: &mut Exec<'_>) -> bool {
     let cmd = Cmd::new(Program::Cargo, ["mutants", "--version"], VERSION_TIMEOUT);
     let pinned = CARGO_MUTANTS.version;
     let (said, fix) = match exec(&cmd, &mut |_| {}) {
-        Ok(found) if found.success => {
-            let printed = found.output.trim();
+        Ok(found) if found.status == Status::TimedOut => (
+            format!("did not run: {}", process::timeout_message(&cmd)),
+            Fix::ByHand {
+                cmd: cmd.to_string(),
+            },
+        ),
+        Ok(found) if found.success() => {
+            let printed = found.stdout.trim();
             let version = printed.strip_prefix("cargo-mutants ");
             if version == Some(pinned) {
                 return true;
@@ -177,7 +179,7 @@ fn installed<W: Write>(out: &mut Printer<W>, exec: &mut Exec<'_>) -> bool {
             (format!("printed `{printed}`"), Fix::Setup { pinned })
         }
         Ok(found) => {
-            let first = found.output.trim().lines().next().unwrap_or_default();
+            let first = found.stdout.trim().lines().next().unwrap_or_default();
             (format!("failed: {first}"), Fix::Setup { pinned })
         }
         Err(error) => (
@@ -193,17 +195,17 @@ fn installed<W: Write>(out: &mut Printer<W>, exec: &mut Exec<'_>) -> bool {
 }
 
 /// Judges a run of cargo-mutants that exited, from its `outcomes.json`.
-fn judge<W: Write>(out: &mut Printer<W>, root: &Path, cmd: &Cmd, captured: &Captured) -> bool {
+fn judge<W: Write>(out: &mut Printer<W>, root: &Path, cmd: &Cmd, captured: &Ran) -> bool {
     let text = match std::fs::read_to_string(root.join(OUTCOMES)) {
         Ok(text) => text,
         // cargo-mutants writes no output folder when the diff holds no mutant: no Rust file
         // changed, or the changed lines hold none. The last run's folder was removed above.
-        Err(error) if error.kind() == io::ErrorKind::NotFound && captured.success => {
+        Err(error) if error.kind() == io::ErrorKind::NotFound && captured.success() => {
             out.note("mutants ok: cargo-mutants found no mutant in the changed lines");
             return true;
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            out.captured_output(&captured.output);
+            out.captured_output(&captured.stdout);
             let message = format!("`{cmd}` failed before it tested any mutant");
             fail(
                 out,
@@ -244,8 +246,8 @@ fn judge<W: Write>(out: &mut Printer<W>, root: &Path, cmd: &Cmd, captured: &Capt
     let mut passed = verdict.passed();
     // cargo-mutants exits 3 when a mutant timed out, which xtask counts as caught; any other
     // failure with nothing in outcomes.json to explain it is still a failure.
-    if passed && !captured.success && verdict.counts.timeout == 0 {
-        out.captured_output(&captured.output);
+    if passed && !captured.success() && verdict.counts.timeout == 0 {
+        out.captured_output(&captured.stdout);
         let message = format!("`{cmd}` failed, though {OUTCOMES} shows no missed mutant");
         fail(
             out,

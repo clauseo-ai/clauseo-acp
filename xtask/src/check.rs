@@ -2,7 +2,7 @@
 
 use crate::changes::{self, ScanRange, Selection};
 use crate::output::Printer;
-use crate::process::{self, Cmd, Program, QuietRunner};
+use crate::process::{Cmd, Program, QuietRunner};
 use crate::steps::{self, Exec, Scope, StepStatus};
 use crate::workspace::Context;
 use std::io::Write;
@@ -59,10 +59,8 @@ const PNPM_VERSION_TIMEOUT: Duration = Duration::from_secs(30);
 /// not finish is found: the ui steps then run and report it. `runner` runs `pnpm --version`.
 fn pnpm_found(root: &Path, runner: &mut QuietRunner<'_>) -> bool {
     let cmd = Cmd::new(Program::Pnpm, ["--version"], PNPM_VERSION_TIMEOUT);
-    match runner(&cmd, root) {
-        Ok(_) => true,
-        Err(error) => process::is_timeout(&error),
-    }
+    // A run past the limit is `Ok` too: pnpm started.
+    runner(&cmd, root).is_ok()
 }
 
 /// CI mode: `CI` is set, is not empty, and is not `0` or `false` in any case.
@@ -146,6 +144,7 @@ fn list_or_none(names: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::process::Ran;
     use crate::scratch::Scratch;
     use crate::workspace::{Context, Member, PackageDependencies};
     use std::cell::RefCell;
@@ -176,12 +175,9 @@ mod tests {
     }
 
     /// Records `cmd` in `ran` and fails it: no tool runs.
-    fn record_and_fail(ran: &RefCell<Vec<String>>, cmd: &Cmd) -> process::Captured {
+    fn record_and_fail(ran: &RefCell<Vec<String>>, cmd: &Cmd) -> Ran {
         ran.borrow_mut().push(cmd.to_string());
-        process::Captured {
-            success: false,
-            output: "fake failure\n".into(),
-        }
+        Ran::exited(false, "fake failure\n", "")
     }
 
     #[test]
@@ -189,12 +185,8 @@ mod tests {
         let (_root, ctx) = scratch_context("check-run");
         let ran = RefCell::new(Vec::new());
         let mut exec = |cmd: &Cmd, _: &mut dyn FnMut(&[u8])| Ok(record_and_fail(&ran, cmd));
-        let mut quiet = |_: &Cmd, _: &Path| -> io::Result<process::Quiet> {
-            Ok(process::Quiet {
-                success: true,
-                stdout: "9.15.0\n".into(),
-                stderr: String::new(),
-            })
+        let mut quiet = |_: &Cmd, _: &Path| -> io::Result<Ran> {
+            Ok(Ran::exited(true, "9.15.0\n", String::new()))
         };
         assert_eq!(
             run(&ctx, false, false, &mut exec, &mut quiet),
@@ -208,12 +200,8 @@ mod tests {
         let (_root, ctx) = scratch_context("check-run-pnpm");
         let ran = RefCell::new(Vec::new());
         let mut exec = |cmd: &Cmd, _: &mut dyn FnMut(&[u8])| Ok(record_and_fail(&ran, cmd));
-        let mut quiet = |_: &Cmd, _: &Path| -> io::Result<process::Quiet> {
-            Ok(process::Quiet {
-                success: true,
-                stdout: "9.15.0\n".into(),
-                stderr: String::new(),
-            })
+        let mut quiet = |_: &Cmd, _: &Path| -> io::Result<Ran> {
+            Ok(Ran::exited(true, "9.15.0\n", String::new()))
         };
         run(&ctx, false, false, &mut exec, &mut quiet);
         assert!(ran.borrow().iter().any(|cmd| cmd.starts_with("pnpm")));
@@ -224,7 +212,7 @@ mod tests {
         let (_root, ctx) = scratch_context("check-run-no-pnpm");
         let ran = RefCell::new(Vec::new());
         let mut exec = |cmd: &Cmd, _: &mut dyn FnMut(&[u8])| Ok(record_and_fail(&ran, cmd));
-        let mut quiet = |_: &Cmd, _: &Path| -> io::Result<process::Quiet> {
+        let mut quiet = |_: &Cmd, _: &Path| -> io::Result<Ran> {
             Err(io::Error::from(io::ErrorKind::NotFound))
         };
         run(&ctx, false, false, &mut exec, &mut quiet);
@@ -237,7 +225,7 @@ mod tests {
         let ran = RefCell::new(Vec::new());
         let mut exec = |cmd: &Cmd, _: &mut dyn FnMut(&[u8])| Ok(record_and_fail(&ran, cmd));
         let probes = RefCell::new(0);
-        let mut quiet = |_: &Cmd, _: &Path| -> io::Result<process::Quiet> {
+        let mut quiet = |_: &Cmd, _: &Path| -> io::Result<Ran> {
             *probes.borrow_mut() += 1;
             Err(io::Error::from(io::ErrorKind::NotFound))
         };
@@ -325,18 +313,14 @@ mod tests {
     fn pnpm_is_found_when_it_starts_and_prints_its_version() {
         let mut runner = |cmd: &Cmd, _: &Path| {
             assert_eq!(cmd.to_string(), "pnpm --version");
-            Ok(process::Quiet {
-                success: true,
-                stdout: "9.15.0\n".into(),
-                stderr: String::new(),
-            })
+            Ok(Ran::exited(true, "9.15.0\n", String::new()))
         };
         assert!(pnpm_found(Path::new("."), &mut runner));
     }
 
     #[test]
     fn pnpm_is_found_when_it_runs_past_its_limit() {
-        let mut runner = |cmd: &Cmd, _: &Path| Err(process::timed_out(cmd));
+        let mut runner = |_: &Cmd, _: &Path| Ok(Ran::timed_out());
         assert!(pnpm_found(Path::new("."), &mut runner));
     }
 

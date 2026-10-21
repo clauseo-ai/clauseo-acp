@@ -228,55 +228,104 @@ fn spawn(command: &mut Command) -> io::Result<Child> {
     command.spawn()
 }
 
-/// Exit status and merged stdout and stderr of a command run by `capture`.
-#[derive(Debug)]
-pub(crate) struct Captured {
-    pub success: bool,
-    pub output: String,
+/// How a command ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Status {
+    /// It exited with status 0.
+    Succeeded,
+    /// It exited with another status, or a signal ended it.
+    Failed,
+    /// It was still running at its limit, so its tree was stopped. Its message is
+    /// `timeout_message` and its fix `TimeoutFix`.
+    TimedOut,
 }
 
-/// Exit status and separate stdout and stderr of a command run by `run_quiet` or `run`.
+/// How a command run by `capture`, `run_quiet` or `run` ended, and what was kept of its output:
+/// the one result of every run. A timeout is a `Status`, never an error: the `Err` beside a
+/// `Ran` means only that the command could not be started, or that its exit or output could not
+/// be waited for or read (a process that left its tree holding the output included).
 #[derive(Debug)]
-pub(crate) struct Quiet {
-    pub success: bool,
+pub(crate) struct Ran {
+    pub status: Status,
+    /// Its stdout; from `capture`, its stdout and stderr merged in the order they came. Empty with
+    /// `Output::Inherit`, whose output went to xtask's own and was not kept. What came before the
+    /// stop when it timed out.
     pub stdout: String,
+    /// Its stderr. Empty from `capture`, which merges it into `stdout`, and with
+    /// `Output::Inherit`.
     pub stderr: String,
 }
 
+impl Ran {
+    /// Whether it exited with status 0.
+    pub(crate) fn success(&self) -> bool {
+        self.status == Status::Succeeded
+    }
+
+    /// The result of a run that ended as `finish` says, with `stdout` and `stderr` kept.
+    fn of(finish: &Finish, stdout: &[u8], stderr: &[u8]) -> Ran {
+        let status = match finish {
+            Finish::Exited(status) if status.success() => Status::Succeeded,
+            Finish::Exited(_) => Status::Failed,
+            Finish::TimedOut => Status::TimedOut,
+        };
+        Ran {
+            status,
+            stdout: String::from_utf8_lossy(stdout).into_owned(),
+            stderr: String::from_utf8_lossy(stderr).into_owned(),
+        }
+    }
+}
+
+/// The results a test's fake runner returns.
+#[cfg(test)]
+impl Ran {
+    /// A run that exited, with `success` saying whether with status 0.
+    pub(crate) fn exited(
+        success: bool,
+        stdout: impl Into<String>,
+        stderr: impl Into<String>,
+    ) -> Ran {
+        Ran {
+            status: if success {
+                Status::Succeeded
+            } else {
+                Status::Failed
+            },
+            stdout: stdout.into(),
+            stderr: stderr.into(),
+        }
+    }
+
+    /// A run stopped at its limit, with nothing kept.
+    pub(crate) fn timed_out() -> Ran {
+        Ran {
+            status: Status::TimedOut,
+            stdout: String::new(),
+            stderr: String::new(),
+        }
+    }
+}
+
 /// Runs `cmd` in `root` with stdout and stderr merged into one stream. Each chunk read is passed
-/// to `on_output` as it arrives, and kept for the returned `output`. A command that runs past its
-/// limit is an error of kind `TimedOut` (see `timed_out`). A command that exits while a process
-/// that left its tree still holds its output is an error that says so, after `running::DRAIN`.
-pub(crate) fn capture(
-    cmd: &Cmd,
-    root: &Path,
-    on_output: &mut dyn FnMut(&[u8]),
-) -> io::Result<Captured> {
+/// to `on_output` as it arrives, and kept for the returned `stdout`. A command that exits while a
+/// process that left its tree still holds its output is an error that says so, after
+/// `running::DRAIN`.
+pub(crate) fn capture(cmd: &Cmd, root: &Path, on_output: &mut dyn FnMut(&[u8])) -> io::Result<Ran> {
     let mut bytes = Vec::new();
     let finish = running::run(cmd, root, Streams::Merged, &mut |_, chunk| {
         bytes.extend_from_slice(chunk);
         on_output(chunk);
     })?;
-    match finish {
-        Finish::Exited(status) => Ok(Captured {
-            success: status.success(),
-            output: String::from_utf8_lossy(&bytes).into_owned(),
-        }),
-        Finish::TimedOut => Err(timed_out(cmd)),
-    }
+    Ok(Ran::of(&finish, &bytes, b""))
 }
 
 /// A runner of `run_quiet`: production passes `run_quiet` itself, a test a fake.
-pub(crate) type QuietRunner<'a> = dyn FnMut(&Cmd, &Path) -> io::Result<Quiet> + 'a;
+pub(crate) type QuietRunner<'a> = dyn FnMut(&Cmd, &Path) -> io::Result<Ran> + 'a;
 
-/// Runs `cmd` in `root` and returns its stdout and stderr separately. A command that runs past
-/// its limit is an error of kind `TimedOut` (see `timed_out`); one whose output a process that
-/// left its tree still holds is an error, as for `capture`.
-pub(crate) fn run_quiet(cmd: &Cmd, root: &Path) -> io::Result<Quiet> {
-    match run(cmd, root, Output::Quiet)? {
-        Ended::Exited(quiet) => Ok(quiet),
-        Ended::TimedOut => Err(timed_out(cmd)),
-    }
+/// Runs `cmd` in `root` and keeps its stdout and stderr apart: `run` with `Output::Quiet`.
+pub(crate) fn run_quiet(cmd: &Cmd, root: &Path) -> io::Result<Ran> {
+    run(cmd, root, Output::Quiet)
 }
 
 /// Where the output of a command run by `run` goes.
@@ -284,27 +333,18 @@ pub(crate) fn run_quiet(cmd: &Cmd, root: &Path) -> io::Result<Quiet> {
 pub(crate) enum Output {
     /// Straight to xtask's stdout and stderr, so the terminal when xtask has one. On Unix the
     /// command still runs in a process group of its own: Ctrl-C reaches only xtask, and the leader
-    /// stops the command when xtask dies of it. On Windows it runs in its own job and shares
-    /// xtask's console, so Ctrl-C reaches it as well as xtask, and Windows ends the job when xtask
-    /// dies.
+    /// stops the command when xtask dies of it; it cannot read the terminal, so git and ssh
+    /// prompts are turned off (`unix.rs`). On Windows it runs in its own job and shares xtask's
+    /// console, so Ctrl-C reaches it as well as xtask, and Windows ends the job when xtask dies.
     Inherit,
     /// Kept, stdout and stderr apart.
     Quiet,
 }
 
-/// How a command run by `run` ended.
-#[derive(Debug)]
-pub(crate) enum Ended {
-    /// It exited. With `Output::Inherit`, `stdout` and `stderr` are empty.
-    Exited(Quiet),
-    /// It was still running at its limit, so its tree was stopped.
-    TimedOut,
-}
-
 /// Runs `cmd` in `root` with its output going where `output` says, and stops its tree if it runs
 /// past its limit. With `Output::Quiet`, output a process that left its tree still holds is an
 /// error, as for `capture`.
-pub(crate) fn run(cmd: &Cmd, root: &Path, output: Output) -> io::Result<Ended> {
+pub(crate) fn run(cmd: &Cmd, root: &Path, output: Output) -> io::Result<Ran> {
     let streams = match output {
         Output::Inherit => Streams::Inherit,
         Output::Quiet => Streams::Separate,
@@ -314,36 +354,16 @@ pub(crate) fn run(cmd: &Cmd, root: &Path, output: Output) -> io::Result<Ended> {
         Stream::Out => stdout.extend_from_slice(chunk),
         Stream::Err => stderr.extend_from_slice(chunk),
     })?;
-    Ok(match finish {
-        Finish::Exited(status) => Ended::Exited(Quiet {
-            success: status.success(),
-            stdout: String::from_utf8_lossy(&stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&stderr).into_owned(),
-        }),
-        Finish::TimedOut => Ended::TimedOut,
-    })
+    Ok(Ran::of(&finish, &stdout, &stderr))
 }
 
-/// The error `capture` and `run_quiet` return for `cmd` when it runs past its limit. Its kind is
-/// `TimedOut`, which no start or read error has, so `is_timeout` tells it apart.
-pub(crate) fn timed_out(cmd: &Cmd) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::TimedOut,
-        format!(
-            "`{cmd}` did not finish within {}, so it was stopped",
-            limit_text(cmd.timeout)
-        ),
+/// What to say of `cmd` when it ran past its limit (`Status::TimedOut`). The one home of that
+/// wording; its fix is `TimeoutFix`.
+pub(crate) fn timeout_message(cmd: &Cmd) -> String {
+    format!(
+        "`{cmd}` did not finish within {}, so it was stopped",
+        limit_text(cmd.timeout)
     )
-}
-
-/// Whether `error`, from `capture` or `run_quiet`, is the command running past its limit.
-pub(crate) fn is_timeout(error: &io::Error) -> bool {
-    error.kind() == io::ErrorKind::TimedOut
-}
-
-/// The fix of a command that ran past its limit, as text, for the steps and buildtime.
-pub(crate) fn timeout_fix(cmd: &Cmd) -> String {
-    TimeoutFix::of(cmd).to_string()
 }
 
 /// The fix of a command that ran past its limit: run it by hand. The one home of its wording, which

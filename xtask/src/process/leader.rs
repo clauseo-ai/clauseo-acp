@@ -100,7 +100,7 @@ pub(super) fn register(group: Pid) -> io::Result<()> {
         }
         Err(start_error) => {
             leader.groups.remove(&group);
-            // Not the errors' kind: callers read `NotFound` and `TimedOut` as their own.
+            // Not the errors' kind: a caller reads `NotFound` as its own program missing.
             Err(io::Error::other(format!(
                 "could not tell xtask's process leader (pid {}) about process group {group} \
                  ({error}), nor start a new one, so the command was stopped: {start_error}",
@@ -234,7 +234,8 @@ fn registered(input: impl BufRead) -> BTreeSet<i32> {
 }
 
 /// SIGTERM to each of `groups`, then, after up to `grace` (checked every `POLL`, as a run checks
-/// its group) for them to empty, SIGKILL to each. The leader passes `KILL_GRACE`; tests pass a shorter one.
+/// its group) for them to empty, SIGKILL to each. The leader passes `KILL_GRACE`; tests pass a
+/// shorter one.
 fn stop(groups: &BTreeSet<i32>, grace: Duration) {
     let groups: Vec<Pid> = groups.iter().map(|group| Pid::from_raw(*group)).collect();
     for group in &groups {

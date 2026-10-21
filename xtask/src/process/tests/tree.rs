@@ -1,8 +1,9 @@
 //! Tests of how a command's tree is stopped: at its limit, when its run is dropped or panics,
-//! after it exits, with SIGKILL when it ignores SIGTERM, and when a thread of its run cannot start. Most run a wrapper that starts a
-//! grandchild, prints its own pid (its group's id) and waits, as
-//! `ui/app/scripts/buildtime-proc.test.mjs` does. The grandchild holds the write end of a pipe the
-//! test reads, so the test sees EOF only once the wrapper and the grandchild are both gone.
+//! after it exits, with SIGKILL when it ignores SIGTERM, and when a thread of its run cannot
+//! start. Most run a wrapper that starts a grandchild, prints its own pid (its group's id) and
+//! waits, as `ui/app/scripts/buildtime-proc.test.mjs` does. The grandchild holds the write end of
+//! a pipe the test reads, so the test sees EOF only once the wrapper and the grandchild are both
+//! gone.
 //! Nothing sleeps: the test blocks on that pipe or on the run. `leader/tests.rs` uses them too.
 //!
 //! A run's limit counts from the start of `Running::finish`, and these tests read the wrapper's
@@ -362,25 +363,26 @@ fn a_leftover_in_the_group_that_holds_the_output_is_stopped_when_the_command_exi
         TEST_TIMEOUT,
     );
     let captured = capture(&cmd, Path::new("."), &mut |_| {}).expect("sh runs");
-    assert!(captured.success);
-    assert_eq!(captured.output, "hi\n");
+    assert!(captured.success());
+    assert_eq!(captured.stdout, "hi\n");
 }
 
 #[test]
-fn capture_says_a_command_past_its_limit_was_stopped() {
+fn every_runner_gives_a_command_past_its_limit_as_a_status_not_an_error() {
     let cmd = Cmd::new(Program::Named("sleep"), ["300"], SHORT_LIMIT);
-    let error = capture(&cmd, Path::new("."), &mut |_| {}).expect_err("sleep runs past its limit");
-    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
-    assert_eq!(
-        error.to_string(),
-        "`sleep 300` did not finish within 50 ms, so it was stopped"
-    );
+    let captured = capture(&cmd, Path::new("."), &mut |_| {}).expect("sleep starts");
+    assert_eq!(captured.status, Status::TimedOut);
+    assert!(!captured.success());
+    let quiet = run_quiet(&cmd, Path::new(".")).expect("sleep starts");
+    assert_eq!(quiet.status, Status::TimedOut);
+    let inherited = run(&cmd, Path::new("."), Output::Inherit).expect("sleep starts");
+    assert_eq!(inherited.status, Status::TimedOut);
 }
 
 #[test]
 fn run_quiet_reports_a_command_that_exits_before_its_limit() {
     let cmd = Cmd::new(Program::Named("sh"), ["-c", "echo done"], TEST_TIMEOUT);
     let quiet = run_quiet(&cmd, Path::new(".")).expect("sh runs");
-    assert!(quiet.success);
+    assert!(quiet.success());
     assert_eq!(quiet.stdout, "done\n");
 }
