@@ -25,6 +25,18 @@
 //! its src/process/unix.rs:37 in 27.1.0, and cargo-nextest 0.9.148 each test, nextest-runner
 //! 0.126.0's src/runner/executor.rs:433 and :828), and xtask dying while its leader is dead and
 //! not yet replaced. Ctrl-Z stops xtask but not its commands.
+//!
+//! Where this differs from the task brief (R3b), which puts each child under a leader of its own
+//! that starts it and sends SIGKILL, as `buildtime-leader.mjs` does for each tool, and the windows
+//! each difference opens:
+//! - One shared leader beside the commands, told about each group over the pipe after `spawn`
+//!   returns, instead of a leader that starts its command. Window: from the command's start to
+//!   its `+<group>` write, xtask dying leaves the command running. It costs one process per
+//!   xtask (about 6.6 ms) instead of one per command.
+//! - A dead leader is noticed only when the next command starts and its write fails. Window:
+//!   every command running between the leader's death and that start has no cover if xtask dies.
+//! - SIGTERM first, then SIGKILL after `KILL_GRACE`, instead of SIGKILL at once, so a command can
+//!   clean up. Window: a command that ignores SIGTERM outlives xtask by up to `KILL_GRACE`.
 
 use super::running::{KILL_GRACE, POLL};
 use super::spawn;
@@ -186,6 +198,12 @@ fn leader_exe() -> io::Result<PathBuf> {
 /// `target/<profile>/deps/xtask-<hash>`, which is not xtask, so the leader is the xtask binary
 /// cargo builds in `target/<profile>/` for the tests in `xtask/tests/`. Found from the test
 /// binary's own path, so a copied tree (cargo-mutants) finds its own.
+///
+/// So the unit tests run the leader of whatever xtask binary sits next to `deps/`, not of the
+/// code under test. Two worktrees that share one `CARGO_TARGET_DIR` share that binary (cargo
+/// hashes a path package from the workspace root, the same in both), so a build in one can swap
+/// the leader the other's tests run, and cargo, finding it fresh, keeps it. `cargo clean -p
+/// xtask` in the worktree that tests fixes it; one target dir per worktree (AGENTS.md) avoids it.
 #[cfg(test)]
 fn leader_exe() -> io::Result<PathBuf> {
     let harness = own_binary(std::env::current_exe())?;
