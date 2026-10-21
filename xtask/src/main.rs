@@ -111,7 +111,19 @@ enum Commands {
 
 fn main() -> ExitCode {
     match Cli::parse().command {
-        Commands::Check { quick } => check::run(quick),
+        Commands::Check { quick } => {
+            let root = workspace::workspace_root();
+            let ctx = workspace::Context {
+                members: workspace::load(&root),
+                root: root.clone(),
+                load_resolved_graph: true,
+            };
+            let ci = check::is_ci(std::env::var("CI").ok().as_deref());
+            let mut exec = |cmd: &process::Cmd, on_output: &mut dyn FnMut(&[u8])| {
+                process::capture(cmd, &root, on_output)
+            };
+            check::run(&ctx, quick, ci, &mut exec, &mut process::run_quiet)
+        }
         Commands::Setup { binaries } => {
             setup::run(&workspace::workspace_root(), binaries, &mut process::run)
         }
