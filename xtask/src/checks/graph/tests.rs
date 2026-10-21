@@ -2,6 +2,7 @@
 //! Both checks also run real `cargo tree --offline` on scratch workspaces in their own tests.
 
 use super::*;
+use crate::scratch::Scratch;
 
 /// A failed `cargo tree` run is a failure with no `file:line`. Offline, a dependency on a
 /// crate no registry has fails to resolve whether or not the index is cached.
@@ -10,9 +11,9 @@ fn a_failed_tree_run_is_a_failure_with_no_file_line() {
     let dir = crate::scratch::Scratch::new("graph-unresolvable");
     let manifest = "[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
                     [dependencies]\nzzz-not-a-crate-xq = \"1\"\n";
-    std::fs::write(dir.join("Cargo.toml"), manifest).expect("write the manifest");
-    std::fs::create_dir_all(dir.join("src")).expect("create src");
-    std::fs::write(dir.join("src/lib.rs"), "").expect("write lib.rs");
+    Scratch::write(dir.join("Cargo.toml"), manifest).expect("write the manifest");
+    Scratch::create_dir_all(dir.join("src")).expect("create src");
+    Scratch::write(dir.join("src/lib.rs"), "").expect("write lib.rs");
     let failure = load_tree(&dir, "x", &["--offline"]).expect_err("cargo tree fails");
     assert!(
         failure

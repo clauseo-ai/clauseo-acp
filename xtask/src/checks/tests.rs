@@ -7,7 +7,7 @@ use crate::scratch::Scratch;
 fn a_missing_file_reads_as_none_and_a_present_one_as_its_text() {
     let dir = Scratch::new("checks-read");
     assert_eq!(read_repo_file(&dir, "a.txt"), Ok(None));
-    fs::write(dir.join("a.txt"), "hello").expect("write the file");
+    Scratch::write(dir.join("a.txt"), "hello").expect("write the file");
     assert_eq!(read_repo_file(&dir, "a.txt"), Ok(Some("hello".to_owned())));
 }
 

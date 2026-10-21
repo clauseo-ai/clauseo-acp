@@ -6,9 +6,11 @@ use crate::scratch::Scratch;
 #[cfg(unix)]
 use crate::setup::AssetSha256;
 use crate::setup::BINARIES;
+#[cfg(unix)]
+use crate::setup::tests::fake_tool;
 use crate::setup::tests::{
     ASSET_BYTES, binary, curl_output, exited, expected_asset, expected_curl, expected_url,
-    expected_winget, fake_tool, linux,
+    expected_winget, linux,
 };
 use std::path::PathBuf;
 
@@ -44,8 +46,10 @@ fn install_with(
     let mut runner = |cmd: &Cmd, at: &Path, _: Output, _: Duration| -> io::Result<Ended> {
         ran.push((cmd.to_string(), at.to_path_buf()));
         match cmd.program {
-            Program::Named("curl") => fs::write(at.join(curl_output(cmd)), asset_bytes)?,
-            Program::Named("tar") => fs::write(at.join(cmd.args.last().unwrap()), ASSET_BYTES)?,
+            Program::Named("curl") => Scratch::write(at.join(curl_output(cmd)), asset_bytes)?,
+            Program::Named("tar") => {
+                Scratch::write(at.join(cmd.args.last().unwrap()), ASSET_BYTES)?;
+            }
             _ => return other(cmd),
         }
         exited(true, "", "")
@@ -63,8 +67,8 @@ fn never(cmd: &Cmd) -> io::Result<Ended> {
 fn a_download_whose_sha256_differs_leaves_bin_untouched() {
     let dir = Scratch::new("setup-install-mismatch");
     let bin = dir.join("bin");
-    fs::create_dir(&bin).unwrap();
-    fs::write(bin.join("lefthook"), b"the working lefthook").unwrap();
+    Scratch::create_dir(&bin).unwrap();
+    Scratch::write(bin.join("lefthook"), b"the working lefthook").unwrap();
     let before = files_in(&bin);
     let lefthook = binary("lefthook");
     let (ok, ran, printed) = install_with(lefthook, &linux(&bin, true), SWAPPED, &mut never);
@@ -273,7 +277,7 @@ fn without_a_cargo_bin_nothing_is_downloaded() {
 fn sha256_of_hashes_the_file_bytes() {
     let dir = Scratch::new("setup-install-sha");
     let file = dir.join("asset");
-    fs::write(&file, SWAPPED).unwrap();
+    Scratch::write(&file, SWAPPED).unwrap();
     assert_eq!(sha256_of(&file).unwrap(), SWAPPED_SHA256);
 }
 
@@ -283,12 +287,12 @@ fn sha256_of_hashes_the_file_bytes() {
 #[cfg(unix)]
 fn real_tar_gz(dir: &Path, member: &str) -> PathBuf {
     let src = dir.join(format!("{member}-src"));
-    fs::create_dir_all(&src).unwrap();
-    fs::write(src.join("LICENSE"), b"the license").unwrap();
+    Scratch::create_dir_all(&src).unwrap();
+    Scratch::write(src.join("LICENSE"), b"the license").unwrap();
     match member {
-        "file" => fs::write(src.join("gitleaks"), ASSET_BYTES).unwrap(),
-        "link" => std::os::unix::fs::symlink("LICENSE", src.join("gitleaks")).unwrap(),
-        _ => fs::create_dir(src.join("gitleaks")).unwrap(),
+        "file" => Scratch::write(src.join("gitleaks"), ASSET_BYTES).unwrap(),
+        "link" => Scratch::symlink("LICENSE", src.join("gitleaks")).unwrap(),
+        _ => Scratch::create_dir(src.join("gitleaks")).unwrap(),
     }
     let name = member;
     let archive = dir.join(format!("{name}.tar.gz"));
@@ -319,7 +323,7 @@ fn install_real_tar_gz(archive: &Path, bin: &Path) -> (bool, String) {
     };
     let mut runner = |cmd: &Cmd, at: &Path, output: Output, timeout: Duration| match cmd.program {
         Program::Named("curl") => {
-            fs::copy(archive, at.join(curl_output(cmd)))?;
+            Scratch::copy(archive, at.join(curl_output(cmd)))?;
             exited(true, "", "")
         }
         Program::Named("tar") => crate::process::run_timed(cmd, at, output, timeout),
@@ -343,8 +347,8 @@ fn the_real_tar_extract_replaces_gitleaks_in_bin_from_a_release_like_archive() {
     let dir = Scratch::new("setup-install-real-tar");
     let archive = real_tar_gz(&dir, "file");
     let bin = dir.join("bin");
-    fs::create_dir(&bin).unwrap();
-    fs::write(bin.join("gitleaks"), b"an old gitleaks").unwrap();
+    Scratch::create_dir(&bin).unwrap();
+    Scratch::write(bin.join("gitleaks"), b"an old gitleaks").unwrap();
     let (ok, printed) = install_real_tar_gz(&archive, &bin);
     assert!(ok, "{printed}");
     assert_eq!(
@@ -365,8 +369,8 @@ fn the_real_tar_extract_refuses_a_gitleaks_member_that_is_a_symlink_or_a_directo
         let dir = Scratch::new(&format!("setup-install-real-tar-{member}"));
         let archive = real_tar_gz(&dir, member);
         let bin = dir.join("bin");
-        fs::create_dir(&bin).unwrap();
-        fs::write(bin.join("gitleaks"), b"the working gitleaks").unwrap();
+        Scratch::create_dir(&bin).unwrap();
+        Scratch::write(bin.join("gitleaks"), b"the working gitleaks").unwrap();
         let before = files_in(&bin);
         let (ok, printed) = install_real_tar_gz(&archive, &bin);
         assert!(!ok, "{member}");
@@ -410,12 +414,12 @@ fn a_run_lock_the_user_cannot_write_is_still_taken_without_a_note() {
     use std::os::unix::fs::PermissionsExt;
     let dir = Scratch::new("setup-install-read-only-lock");
     let bin = dir.join("bin");
-    fs::create_dir(&bin).unwrap();
+    Scratch::create_dir(&bin).unwrap();
     let lock_path = bin.join(".xtask-setup.lock");
-    fs::write(&lock_path, b"left by a sudo run").unwrap();
-    fs::set_permissions(&lock_path, fs::Permissions::from_mode(0o444)).unwrap();
+    Scratch::write(&lock_path, b"left by a sudo run").unwrap();
+    Scratch::set_permissions(&lock_path, fs::Permissions::from_mode(0o444)).unwrap();
     assert!(
-        fs::OpenOptions::new().write(true).open(&lock_path).is_err(),
+        Scratch::open_for_writing(&lock_path).is_err(),
         "the lock file is not writable"
     );
     let mut out = Printer::new(Vec::new(), false);
@@ -441,7 +445,7 @@ fn a_second_binaries_run_waits_for_the_run_lock_then_sweeps_every_staging_entry(
     let (held, ok) = lock_bin_and_sweep(&mut Printer::new(Vec::new(), false), &linux(&bin, true));
     assert!(ok && held.is_some());
     // The first run's staging dir, in use while it holds the lock.
-    fs::create_dir(bin.join(".xtask-setup-gitleaks-1")).unwrap();
+    Scratch::create_dir(bin.join(".xtask-setup-gitleaks-1")).unwrap();
     let (done, second) = std::sync::mpsc::channel();
     let second_bin = bin.clone();
     std::thread::spawn(move || {

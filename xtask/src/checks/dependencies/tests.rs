@@ -41,12 +41,13 @@ fn workspace(name: &str, rows: &str, workspace_deps: &str, crates: &[(String, St
         "[workspace]\nresolver = \"3\"\nmembers = [{}]\nexclude = [\"vendor\"]\n\n[workspace.dependencies]\n{workspace_deps}",
         members.join(", ")
     );
-    fs::write(dir.join("Cargo.toml"), root).expect("write the root manifest");
-    fs::write(dir.join("ARCHITECTURE.md"), format!("{TABLE_HEAD}{rows}")).expect("write the table");
+    Scratch::write(dir.join("Cargo.toml"), root).expect("write the root manifest");
+    Scratch::write(dir.join("ARCHITECTURE.md"), format!("{TABLE_HEAD}{rows}"))
+        .expect("write the table");
     for (crate_dir, manifest) in crates {
-        fs::create_dir_all(dir.join(crate_dir).join("src")).expect("create the crate dirs");
-        fs::write(dir.join(crate_dir).join("src/lib.rs"), "").expect("write lib.rs");
-        fs::write(dir.join(crate_dir).join("Cargo.toml"), manifest).expect("write a manifest");
+        Scratch::create_dir_all(dir.join(crate_dir).join("src")).expect("create the crate dirs");
+        Scratch::write(dir.join(crate_dir).join("src/lib.rs"), "").expect("write lib.rs");
+        Scratch::write(dir.join(crate_dir).join("Cargo.toml"), manifest).expect("write a manifest");
     }
     dir
 }
@@ -306,15 +307,15 @@ fn a_lockfile_behind_the_manifests_fails_with_no_file_line_without_rewriting_it(
     assert_eq!(check(&ctx, Some(&["--offline"])).violations, Vec::new());
     let lock = fs::read_to_string(dir.join("Cargo.lock")).expect("cargo wrote a lockfile");
     let body = "[dependencies]\nmid = { path = \"../../vendor/mid\" }\n";
-    fs::write(
+    Scratch::write(
         dir.join("crates/protocol/Cargo.toml"),
         manifest("clauseo-protocol", body),
     )
     .expect("write the manifest");
     let (mid_dir, mid) = vendor("mid", "");
-    fs::create_dir_all(dir.join(&mid_dir).join("src")).expect("create mid");
-    fs::write(dir.join(&mid_dir).join("src/lib.rs"), "").expect("write lib.rs");
-    fs::write(dir.join(&mid_dir).join("Cargo.toml"), mid).expect("write mid");
+    Scratch::create_dir_all(dir.join(&mid_dir).join("src")).expect("create mid");
+    Scratch::write(dir.join(&mid_dir).join("src/lib.rs"), "").expect("write lib.rs");
+    Scratch::write(dir.join(&mid_dir).join("Cargo.toml"), mid).expect("write mid");
     let found = check(&ctx, Some(&["--locked", "--offline"]));
     assert_eq!(found.violations, Vec::new());
     assert_eq!(found.failures.len(), 1);

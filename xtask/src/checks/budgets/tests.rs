@@ -17,7 +17,7 @@ fn row(limit: &str) -> String {
 /// Runs the check on a scratch repo whose `budgets.toml` is `text`.
 fn run_on(case: &str, text: impl AsRef<[u8]>) -> Inspection {
     let dir = Scratch::new(&format!("planted-budgets-{case}"));
-    std::fs::write(dir.join(budgets::FILE), text).expect("write budgets.toml");
+    Scratch::write(dir.join(budgets::FILE), text).expect("write budgets.toml");
     run(&Context {
         root: dir.to_path_buf(),
         members: Ok(Vec::new()),

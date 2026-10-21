@@ -8,8 +8,9 @@ fn repo(case: &str, files: &[(&str, &str)]) -> Scratch {
     let dir = Scratch::new(&format!("planted-capabilities-{case}"));
     for (path, text) in files {
         let full = dir.join(path);
-        fs::create_dir_all(full.parent().expect("a file has a parent")).expect("create the dirs");
-        fs::write(full, text).expect("write the file");
+        Scratch::create_dir_all(full.parent().expect("a file has a parent"))
+            .expect("create the dirs");
+        Scratch::write(full, text).expect("write the file");
     }
     dir
 }
@@ -46,7 +47,7 @@ pub(super) fn folder_missing() -> Inspection {
 
 pub(super) fn empty_folder() -> Inspection {
     let dir = Scratch::new("planted-capabilities-empty-folder");
-    fs::create_dir_all(dir.join("crates/desktop/capabilities")).expect("create the folder");
+    Scratch::create_dir_all(dir.join("crates/desktop/capabilities")).expect("create the folder");
     run(&desktop_context(&dir))
 }
 
@@ -215,12 +216,12 @@ pub(super) fn nested_subfolder() -> Inspection {
 pub(super) fn other_extensions() -> Inspection {
     let dir = repo("other-extensions", &[(PATH, CLEAN)]);
     let caps = dir.join("crates/desktop/capabilities");
-    fs::write(
+    Scratch::write(
         caps.join(".DS_Store"),
         b"\x00\x00\x00\x01Bud1\xff\xfe\x00remote",
     )
     .expect("write .DS_Store");
-    fs::write(caps.join("main.json~"), "[\"core:default\"]").expect("write main.json~");
+    Scratch::write(caps.join("main.json~"), "[\"core:default\"]").expect("write main.json~");
     run(&desktop_context(&dir))
 }
 
@@ -245,6 +246,6 @@ pub(super) fn not_utf8_capability() -> Inspection {
         "not-utf8",
         &[("crates/desktop/capabilities/other.json", CLEAN)],
     );
-    fs::write(dir.join(PATH), b"{\"identifier\": \"main\"}\xff").expect("write main.json");
+    Scratch::write(dir.join(PATH), b"{\"identifier\": \"main\"}\xff").expect("write main.json");
     run(&desktop_context(&dir))
 }
