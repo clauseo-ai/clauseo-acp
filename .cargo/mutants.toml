@@ -28,10 +28,13 @@ exclude_globs = ["xtask/src/process/windows.rs"]
 # No test can make these happen without fault injection in std (xtask/src/process/running.rs):
 # - `Running::keep` only keeps the error of a failed pipe read, wait or killpg, which a live
 #   child's pipes and group never give.
-# - `read_all` retries a read that failed with EINTR. xtask installs no signal handler, so a pipe
-#   read is never interrupted and the retry never runs.
+# - `read_all` retries a read that failed with EINTR, which `interrupted` tells apart. xtask
+#   installs no signal handler, so a pipe read is never interrupted and the retry never runs.
+#   Only the mutants of `interrupted` and of the match guard that calls it are excluded; any
+#   other comparison in `read_all` is still mutated.
 exclude_re = [
   'running\.rs:\d+:\d+: replace Running::keep with \(\)$',
-  'running\.rs:\d+:\d+: replace match guard error\.kind\(\) == io::ErrorKind::Interrupted with (true|false) in read_all$',
-  'running\.rs:\d+:\d+: replace == with != in read_all$',
+  'running\.rs:\d+:\d+: replace match guard interrupted\(&error\) with (true|false) in read_all$',
+  'running\.rs:\d+:\d+: replace interrupted -> bool with (true|false)$',
+  'running\.rs:\d+:\d+: replace == with != in interrupted$',
 ]

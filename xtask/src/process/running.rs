@@ -364,11 +364,16 @@ fn read_all(stream: Stream, mut reader: io::PipeReader, sender: &Sender<Event>) 
                     return;
                 }
             }
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) if interrupted(&error) => {}
             Err(error) => {
                 drop(sender.send(Event::ReadFailed(error)));
                 return;
             }
         }
     }
+}
+
+/// Whether a read failed only because a signal interrupted it (EINTR), so it is tried again.
+fn interrupted(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::Interrupted
 }
