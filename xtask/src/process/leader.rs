@@ -22,8 +22,8 @@
 //! Not covered: a command whose start returned in xtask but whose `+<group>` write had not happened
 //! when xtask died (a few instructions after `spawn`), a process that left its group (any
 //! `setsid` or `setpgid`: cargo-mutants starts every cargo and nextest child in a group of its own,
-//! its src/process/unix.rs:37 in 27.1.0, and cargo-nextest 0.9.148 each test, nextest-runner
-//! 0.126.0's src/runner/executor.rs:433 and :828), and xtask dying while its leader is dead and
+//! its src/process/unix.rs:37 in 27.1.0, and cargo-nextest each test, nextest-runner 0.126.0's
+//! src/runner/executor.rs:433 and :828), and xtask dying while its leader is dead and
 //! not yet replaced. Ctrl-Z stops xtask but not its commands.
 //!
 //! Where this differs from the task brief (R3b), which puts each child under a leader of its own
