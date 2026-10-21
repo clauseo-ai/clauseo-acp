@@ -53,11 +53,8 @@ fn backup_of(dir: &Path) -> PathBuf {
 #[test]
 fn a_failing_cargo_puts_the_original_bytes_back_and_leaves_no_copy() {
     let dir = scratch("failing-cargo");
-    let mut runner = |_: &Cmd| -> io::Result<Captured> {
-        Ok(Captured {
-            success: false,
-            output: "error[E0432]: unresolved import\n".into(),
-        })
+    let mut runner = |_: &Cmd| -> io::Result<Ran> {
+        Ok(Ran::exited(false, "error[E0432]: unresolved import\n", ""))
     };
     let failure = measure(&dir, &marker(), CHECK, 2, false, &mut runner)
         .expect_err("a failing cargo fails the probe");
@@ -69,7 +66,7 @@ fn a_failing_cargo_puts_the_original_bytes_back_and_leaves_no_copy() {
 #[test]
 fn a_spawn_error_puts_the_original_bytes_back_and_leaves_no_copy() {
     let dir = scratch("spawn-error");
-    let mut runner = |_: &Cmd| -> io::Result<Captured> {
+    let mut runner = |_: &Cmd| -> io::Result<Ran> {
         Err(io::Error::new(io::ErrorKind::NotFound, "no cargo here"))
     };
     let failure = measure(&dir, &marker(), CHECK, 2, false, &mut runner)
@@ -80,9 +77,27 @@ fn a_spawn_error_puts_the_original_bytes_back_and_leaves_no_copy() {
 }
 
 #[test]
+fn a_cargo_past_its_limit_says_it_was_stopped_and_puts_the_original_bytes_back() {
+    let dir = scratch("timed-out-cargo");
+    let mut runner = |_: &Cmd| -> io::Result<Ran> { Ok(Ran::timed_out()) };
+    let failure = measure(&dir, &marker(), CHECK, 2, false, &mut runner)
+        .expect_err("a cargo past its limit fails the probe");
+    assert_eq!(
+        failure.message,
+        "`cargo check -v` did not finish within 1 h, so it was stopped"
+    );
+    assert_eq!(
+        failure.fix,
+        "run `cargo check -v` by hand to see why it does not finish within 1 h"
+    );
+    assert_eq!(file_text(&dir), ORIGINAL);
+    assert!(!backup_of(&dir).exists());
+}
+
+#[test]
 fn a_panicking_runner_restores_the_file_on_the_spot() {
     let dir = scratch("panicking-runner");
-    let mut runner = |_: &Cmd| -> io::Result<Captured> { panic!("cargo exploded") };
+    let mut runner = |_: &Cmd| -> io::Result<Ran> { panic!("cargo exploded") };
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         measure(&dir, &marker(), CHECK, 2, false, &mut runner)
     }));
@@ -119,17 +134,14 @@ fn no_leftover_copies_means_nothing_is_printed() {
 fn a_successful_run_returns_the_samples_and_leaves_the_original_bytes() {
     let dir = scratch("success");
     let mut calls = Vec::new();
-    let mut runner = |cmd: &Cmd| -> io::Result<Captured> {
+    let mut runner = |cmd: &Cmd| -> io::Result<Ran> {
         calls.push(cmd.to_string());
         let output = if cmd.args.iter().any(|arg| arg == "-v") {
             RUSTC.to_owned()
         } else {
             String::new()
         };
-        Ok(Captured {
-            success: true,
-            output,
-        })
+        Ok(Ran::exited(true, output, ""))
     };
     let samples =
         measure(&dir, &marker(), CHECK, 3, false, &mut runner).expect("the probe measures");
@@ -152,12 +164,9 @@ fn a_successful_run_returns_the_samples_and_leaves_the_original_bytes() {
 fn a_crate_that_is_not_rebuilt_fails_before_any_timed_run_and_restores() {
     let dir = scratch("not-rebuilt");
     let mut calls = 0;
-    let mut runner = |_: &Cmd| -> io::Result<Captured> {
+    let mut runner = |_: &Cmd| -> io::Result<Ran> {
         calls += 1;
-        Ok(Captured {
-            success: true,
-            output: "    Fresh clauseo-desktop v0.1.0\n".into(),
-        })
+        Ok(Ran::exited(true, "    Fresh clauseo-desktop v0.1.0\n", ""))
     };
     let failure = measure(&dir, &marker(), CHECK, 5, false, &mut runner)
         .expect_err("a crate cargo did not rebuild fails the probe");
@@ -176,16 +185,13 @@ fn a_crate_that_is_not_rebuilt_fails_before_any_timed_run_and_restores() {
 #[test]
 fn a_non_incremental_build_warns_locally_and_is_refused_in_ci() {
     let dir = scratch("not-incremental");
-    let mut runner = |cmd: &Cmd| -> io::Result<Captured> {
+    let mut runner = |cmd: &Cmd| -> io::Result<Ran> {
         let output = if cmd.args.iter().any(|arg| arg == "-v") {
             RUSTC_NOT_INCREMENTAL.to_owned()
         } else {
             String::new()
         };
-        Ok(Captured {
-            success: true,
-            output,
-        })
+        Ok(Ran::exited(true, output, ""))
     };
     let samples =
         measure(&dir, &marker(), CHECK, 1, false, &mut runner).expect("locally it is measured");
@@ -351,7 +357,7 @@ fn an_edit_during_the_run_survives_and_keeps_the_copy_and_fails_the_probe() {
     let dir = scratch("edit-mid-run");
     let file = dir.join(REL);
     let mut calls = 0;
-    let mut runner = |cmd: &Cmd| -> io::Result<Captured> {
+    let mut runner = |cmd: &Cmd| -> io::Result<Ran> {
         calls += 1;
         if calls == 2 {
             Scratch::write(&file, EDITED_MID_RUN).expect("someone saves the file");
@@ -361,10 +367,7 @@ fn an_edit_during_the_run_survives_and_keeps_the_copy_and_fails_the_probe() {
         } else {
             String::new()
         };
-        Ok(Captured {
-            success: true,
-            output,
-        })
+        Ok(Ran::exited(true, output, ""))
     };
     let failure = measure(&dir, &marker(), CHECK, 3, false, &mut runner)
         .expect_err("an edit during the run fails the probe");

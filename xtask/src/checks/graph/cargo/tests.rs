@@ -45,8 +45,40 @@ fn no_version(requirement: &str, note: &str) -> String {
 }
 
 #[test]
+fn a_cargo_past_its_limit_is_told_apart_from_one_that_cannot_start() {
+    let cmd = Cmd::new(
+        Program::Cargo,
+        ["tree", "-p", "x"],
+        crate::process::TEST_TIMEOUT,
+    );
+    let timed_out = timeout_failure(&cmd);
+    assert_eq!(
+        timed_out.message,
+        "`cargo tree -p x` did not finish within 1 min, so it was stopped"
+    );
+    assert_eq!(
+        timed_out.fix,
+        "run `cargo tree -p x` by hand to see why it does not finish within 1 min"
+    );
+    let missing = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
+    let not_started = start_failure(&cmd, &missing);
+    assert_eq!(
+        not_started.message,
+        "could not run `cargo tree -p x`: no such file"
+    );
+    assert_eq!(
+        not_started.fix,
+        "put `cargo` on PATH, since this check reads the dependency graph from cargo"
+    );
+}
+
+#[test]
 fn the_fix_of_a_failed_run_fits_its_cause() {
-    let cmd = Cmd::new(Program::Cargo, ["tree", "-p", "x"]);
+    let cmd = Cmd::new(
+        Program::Cargo,
+        ["tree", "-p", "x"],
+        crate::process::TEST_TIMEOUT,
+    );
     let root = crate::scratch::Scratch::new("graph-cargo-fits");
     let lock = "error: the lock file /ws/Cargo.lock needs to be updated but --locked was passed to prevent this";
     assert!(failure_fix(&cmd, lock, &root).contains("cargo update --workspace"));
@@ -63,7 +95,11 @@ fn the_fix_of_a_failed_run_fits_its_cause() {
 /// Online, a resolution error is always a wrong manifest, even for a package Cargo.lock lists.
 #[test]
 fn online_a_resolution_error_is_a_wrong_manifest() {
-    let cmd = Cmd::new(Program::Cargo, ["tree", "-p", "x"]);
+    let cmd = Cmd::new(
+        Program::Cargo,
+        ["tree", "-p", "x"],
+        crate::process::TEST_TIMEOUT,
+    );
     let root = root_with_lock("graph-cargo-online", LOCK);
     assert_eq!(
         failure_fix(&cmd, &no_package("serde_json", ""), &root),
@@ -79,7 +115,11 @@ fn online_a_resolution_error_is_a_wrong_manifest() {
 /// package of that name has no source, so it is a wrong manifest.
 #[test]
 fn offline_a_missing_package_is_not_downloaded_only_when_a_registry_locks_it() {
-    let cmd = Cmd::new(Program::Cargo, ["tree", "--locked", "--offline"]);
+    let cmd = Cmd::new(
+        Program::Cargo,
+        ["tree", "--locked", "--offline"],
+        crate::process::TEST_TIMEOUT,
+    );
     let root = root_with_lock("graph-cargo-missing", LOCK);
     assert_eq!(
         failure_fix(&cmd, &no_package("serde_json", OFFLINE_NOTE), &root),
@@ -95,7 +135,11 @@ fn offline_a_missing_package_is_not_downloaded_only_when_a_registry_locks_it() {
 /// that no locked version fits is a wrong manifest.
 #[test]
 fn offline_a_version_is_not_downloaded_only_when_a_locked_version_fits() {
-    let cmd = Cmd::new(Program::Cargo, ["tree", "--locked", "--offline"]);
+    let cmd = Cmd::new(
+        Program::Cargo,
+        ["tree", "--locked", "--offline"],
+        crate::process::TEST_TIMEOUT,
+    );
     let root = root_with_lock("graph-cargo-version", LOCK);
     assert_eq!(
         failure_fix(
@@ -119,7 +163,11 @@ fn offline_a_version_is_not_downloaded_only_when_a_locked_version_fits() {
 /// the fix names both causes.
 #[test]
 fn offline_without_an_answer_the_fix_names_both_causes() {
-    let cmd = Cmd::new(Program::Cargo, ["tree", "--locked", "--offline"]);
+    let cmd = Cmd::new(
+        Program::Cargo,
+        ["tree", "--locked", "--offline"],
+        crate::process::TEST_TIMEOUT,
+    );
     let error = no_package("serde_json", OFFLINE_NOTE);
     let missing = crate::scratch::Scratch::new("graph-cargo-no-lock");
     assert_eq!(failure_fix(&cmd, &error, &missing), EITHER_FIX);

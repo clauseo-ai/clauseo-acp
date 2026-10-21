@@ -38,9 +38,15 @@ mod tests;
 use super::verdict::{Failure, Outcome, ProbeResult, budget_limit, passes};
 use super::{Out, one_line, stop};
 use crate::budgets::{Budget, Unit};
-use crate::process::{self, Cmd, Program};
+use crate::process::{self, Cmd, Program, QuietRunner, Status, TimeoutFix};
 use serde::Deserialize;
 use std::path::Path;
+use std::time::Duration;
+
+/// How long the script may run: it builds the app and starts the dev server once per run plus a
+/// warm-up, each a cold-ish build on a slow machine, so this is xtask's longest limit with
+/// `cargo install`'s.
+const SCRIPT_TIMEOUT: Duration = Duration::from_hours(1);
 
 /// The script, from the repo root.
 pub(crate) const SCRIPT: &str = "ui/app/scripts/buildtime.mjs";
@@ -240,14 +246,16 @@ impl WebRun {
 }
 
 /// Runs the script and reads its report. Fails before it runs when `ui/app/node_modules` is
-/// missing. The script's stderr notes are printed to `diag`. `Err` holds one line per reason the
-/// half could not be measured; the reason is printed before it returns.
+/// missing. The script's stderr notes are printed to `diag`. `runner` runs the script (production
+/// passes `process::run_quiet`). `Err` holds one line per reason the half could not be measured;
+/// the reason is printed before it returns.
 pub(crate) fn measure(
     root: &Path,
     runs: u32,
     ci: bool,
     budgets: &[Budget],
     diag: &mut Out,
+    runner: &mut QuietRunner<'_>,
 ) -> Result<WebRun, Vec<String>> {
     if !root.join("ui/app/node_modules").is_dir() {
         return Err(stop(
@@ -257,9 +265,17 @@ pub(crate) fn measure(
         ));
     }
     let runs_arg = runs.to_string();
-    let cmd = Cmd::new(Program::Named("node"), [SCRIPT, "--runs", &runs_arg]);
+    let cmd = Cmd::new(
+        Program::Named("node"),
+        [SCRIPT, "--runs", &runs_arg],
+        SCRIPT_TIMEOUT,
+    );
     let rerun = format!("run `{cmd}` to see the error");
-    let quiet = match process::run_quiet(&cmd, root) {
+    let quiet = match runner(&cmd, root) {
+        Ok(quiet) if quiet.status == Status::TimedOut => {
+            let fix = TimeoutFix::of(&cmd).to_string();
+            return Err(stop(diag, &process::timeout_message(&cmd), &fix));
+        }
         Ok(quiet) => quiet,
         Err(error) => {
             return Err(stop(
@@ -271,7 +287,7 @@ pub(crate) fn measure(
     };
     let read = read_output(
         &quiet.stdout,
-        quiet.success,
+        quiet.success(),
         &cmd.to_string(),
         budgets,
         runs,
@@ -288,7 +304,7 @@ pub(crate) fn measure(
             .iter()
             .flat_map(|failure| stop(diag, &failure.message, &failure.fix))
             .collect()),
-        Read::Unreadable(_) if !quiet.success => {
+        Read::Unreadable(_) if !quiet.success() => {
             diag.captured_output(&quiet.stderr);
             Err(stop(diag, &format!("`{cmd}` failed"), &rerun))
         }

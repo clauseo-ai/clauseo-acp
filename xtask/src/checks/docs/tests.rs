@@ -10,9 +10,9 @@ use crate::scratch::Scratch;
 #[test]
 fn only_the_markdown_files_of_a_git_repo_are_counted() {
     let dir = Scratch::new("docs-git-count");
-    let git = Cmd::new(Program::Git, ["init", "-q"]);
+    let git = Cmd::new(Program::Git, ["init", "-q"], crate::process::TEST_TIMEOUT);
     let quiet = process::run_quiet(&git, &dir).expect("git runs");
-    assert!(quiet.success, "git init failed: {}", quiet.stderr);
+    assert!(quiet.success(), "git init failed: {}", quiet.stderr);
     Scratch::write(dir.join("NOTES.md"), "# Notes\n").expect("write a doc");
     Scratch::write(dir.join("data.txt"), "not Markdown\n").expect("write a text file");
     let found = run(&Context {
@@ -81,9 +81,9 @@ fn only_the_markdown_files_it_read_are_counted() {
 #[test]
 fn a_link_to_a_file_git_ignores_fails_in_a_real_repo() {
     let dir = Scratch::new("docs-git-ignored");
-    let git = Cmd::new(Program::Git, ["init", "-q"]);
+    let git = Cmd::new(Program::Git, ["init", "-q"], crate::process::TEST_TIMEOUT);
     let quiet = process::run_quiet(&git, &dir).expect("git runs");
-    assert!(quiet.success, "git init failed: {}", quiet.stderr);
+    assert!(quiet.success(), "git init failed: {}", quiet.stderr);
     Scratch::write(dir.join(".gitignore"), "local.md\n").expect("write .gitignore");
     Scratch::write(dir.join("local.md"), "# Local\n").expect("write the ignored file");
     Scratch::write(dir.join("GUIDE.md"), "See [x](local.md).\n").expect("write a doc");

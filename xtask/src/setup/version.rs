@@ -32,7 +32,11 @@ pub(crate) fn compare_version(
 
 /// `<name> version`, the command that prints the installed version.
 pub(crate) fn version_cmd(binary: &Binary) -> Cmd {
-    Cmd::new(Program::Named(binary.name), ["version"])
+    Cmd::new(
+        Program::Named(binary.name),
+        ["version"],
+        super::VERSION_TIMEOUT,
+    )
 }
 
 /// What this run did to install a binary before its last version check.

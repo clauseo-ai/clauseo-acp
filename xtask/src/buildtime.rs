@@ -26,7 +26,7 @@ mod tests;
 use crate::budgets;
 use crate::check;
 use crate::output::Printer;
-use crate::process::{self, Cmd, Program};
+use crate::process::{self, Cmd, Program, QuietRunner, Status, TimeoutFix};
 use crate::workspace::{self, Member};
 use clap::ValueEnum;
 use profile::{Incremental, Sources};
@@ -36,6 +36,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Duration;
 use verdict::{Failure, Outcome, ProbeResult, ProbeStatus, passes};
 use web::WebRun;
 
@@ -174,7 +175,7 @@ fn measure_rust(
         diag.note(line);
     }
     let budgets = load_budgets(root, diag)?;
-    let rustc = match rustc_version(root) {
+    let rustc = match rustc_version(root, &mut process::run_quiet) {
         Ok(version) => version,
         Err(failure) => return Err(stop(diag, &failure.message, &failure.fix)),
     };
@@ -265,11 +266,19 @@ fn profile_line(incremental: &Incremental) -> String {
     )
 }
 
-/// `rustc -V`, trimmed.
-fn rustc_version(root: &Path) -> Result<String, Failure> {
-    let cmd = Cmd::new(Program::Named("rustc"), ["-V"]);
-    match process::run_quiet(&cmd, root) {
-        Ok(quiet) if quiet.success => Ok(quiet.stdout.trim().to_owned()),
+/// How long `rustc -V` may run: it prints one line, but rustup may install the pinned toolchain
+/// first, which takes minutes on a slow link.
+const RUSTC_VERSION_TIMEOUT: Duration = Duration::from_mins(10);
+
+/// `rustc -V`, trimmed. `runner` runs it.
+fn rustc_version(root: &Path, runner: &mut QuietRunner<'_>) -> Result<String, Failure> {
+    let cmd = Cmd::new(Program::Named("rustc"), ["-V"], RUSTC_VERSION_TIMEOUT);
+    match runner(&cmd, root) {
+        Ok(quiet) if quiet.success() => Ok(quiet.stdout.trim().to_owned()),
+        Ok(quiet) if quiet.status == Status::TimedOut => Err(Failure::new(
+            process::timeout_message(&cmd),
+            TimeoutFix::of(&cmd).to_string(),
+        )),
         Ok(quiet) => Err(Failure::new(
             format!("`rustc -V` failed: {}", quiet.stderr.trim()),
             "install Rust with rustup, then run `rustup show`",
@@ -362,7 +371,7 @@ fn measure_web(
     diag: &mut Out,
 ) -> Result<WebRun, Vec<String>> {
     let budgets = load_budgets(root, diag)?;
-    let run = web::measure(root, runs, ci, &budgets, diag)?;
+    let run = web::measure(root, runs, ci, &budgets, diag, &mut process::run_quiet)?;
     if !json {
         out.note(format!("web: node {}", run.node));
         for line in report::table_lines(&run.results) {

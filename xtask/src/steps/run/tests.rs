@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::checks::{Inspection, Noun};
-use crate::process::Program;
+use crate::process::{Program, TEST_TIMEOUT};
 use crate::violation::{Finding, Violation};
 use std::path::PathBuf;
 
@@ -19,11 +19,8 @@ fn text(out: Printer<Vec<u8>>) -> String {
     String::from_utf8(out.into_inner()).expect("output is utf-8")
 }
 
-fn ok_output(cmd: &Cmd) -> Captured {
-    Captured {
-        success: true,
-        output: cmd.to_string(),
-    }
+fn ok_output(cmd: &Cmd) -> Ran {
+    Ran::exited(true, cmd.to_string(), "")
 }
 
 fn no_findings(_output: &str, _ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
@@ -37,7 +34,7 @@ fn reproduce(cmd: &Cmd, _output: Option<&str>) -> String {
 fn fake_tool(name: &'static str, program: &'static str, args: &[&str]) -> Step {
     Step::Tool(ToolStep {
         name,
-        cmd: Cmd::new(Program::Named(program), args),
+        cmd: Cmd::new(Program::Named(program), args, TEST_TIMEOUT),
         parse: no_findings,
         fix: reproduce,
         render: None,
@@ -161,13 +158,14 @@ fn without_secs(printed: &str) -> String {
     clippy::unnecessary_wraps,
     reason = "must match the Exec type, which returns io::Result"
 )]
-fn noisy_pass(_cmd: &Cmd, sink: &mut dyn FnMut(&[u8])) -> io::Result<Captured> {
+fn noisy_pass(_cmd: &Cmd, sink: &mut dyn FnMut(&[u8])) -> io::Result<Ran> {
     sink(b"   Compiling foo v0.1.0\n");
     sink(b"running 3 tests\n");
-    Ok(Captured {
-        success: true,
-        output: "   Compiling foo v0.1.0\nrunning 3 tests\n".into(),
-    })
+    Ok(Ran::exited(
+        true,
+        "   Compiling foo v0.1.0\nrunning 3 tests\n",
+        "",
+    ))
 }
 
 /// A failing run whose only output is `boom`, with no file and line.
@@ -175,12 +173,9 @@ fn noisy_pass(_cmd: &Cmd, sink: &mut dyn FnMut(&[u8])) -> io::Result<Captured> {
     clippy::unnecessary_wraps,
     reason = "must match the Exec type, which returns io::Result"
 )]
-fn boom_fail(_cmd: &Cmd, sink: &mut dyn FnMut(&[u8])) -> io::Result<Captured> {
+fn boom_fail(_cmd: &Cmd, sink: &mut dyn FnMut(&[u8])) -> io::Result<Ran> {
     sink(b"boom\n");
-    Ok(Captured {
-        success: false,
-        output: "boom\n".into(),
-    })
+    Ok(Ran::exited(false, "boom\n", ""))
 }
 
 #[test]
@@ -193,10 +188,11 @@ fn a_failing_step_does_not_stop_the_later_ones() {
     let mut calls = Vec::new();
     let mut exec = |cmd: &Cmd, _sink: &mut dyn FnMut(&[u8])| {
         calls.push(cmd.to_string());
-        Ok(Captured {
-            success: !cmd.args.iter().any(|arg| arg == "fail"),
-            output: "boom\n".into(),
-        })
+        Ok(Ran::exited(
+            !cmd.args.iter().any(|arg| arg == "fail"),
+            "boom\n",
+            "",
+        ))
     };
     let mut out = Printer::new(Vec::new(), false);
     let results = run_all(steps, &context(), &mut out, &mut exec);
@@ -241,6 +237,59 @@ fn a_program_that_cannot_start_fails_its_step_and_the_next_step_runs() {
         StepStatus::Ran { failed: false, .. }
     ));
     assert!(text(out).contains("could not run `missing`"));
+}
+
+/// A tool's parser that finds one warning and no error in its output.
+fn one_warning(_output: &str, _ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
+    vec![Finding {
+        violation: Violation {
+            path: "docs/a.md".into(),
+            line: 2,
+            message: "a warning".into(),
+            fix: "fix the warning".into(),
+        },
+        is_error: false,
+    }]
+}
+
+#[test]
+fn a_tool_warning_is_counted_and_does_not_fail_its_step() {
+    let step = Step::Tool(ToolStep {
+        name: "lint",
+        cmd: Cmd::new(Program::Named("fake"), ["warn"], TEST_TIMEOUT),
+        parse: one_warning,
+        fix: reproduce,
+        render: None,
+    });
+    let mut exec = |_: &Cmd, _: &mut dyn FnMut(&[u8])| Ok(Ran::exited(true, "a warning\n", ""));
+    let mut out = Printer::new(Vec::new(), false);
+    let results = run_all(vec![step], &context(), &mut out, &mut exec);
+    assert!(matches!(
+        results[0].status,
+        StepStatus::Ran {
+            failed: false,
+            warnings: 1,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_tool_past_its_limit_fails_its_step_and_says_it_was_stopped() {
+    let steps = vec![fake_tool("slow", "fake", &["hang"])];
+    let mut exec = |_: &Cmd, _sink: &mut dyn FnMut(&[u8])| Ok(Ran::timed_out());
+    let mut out = Printer::new(Vec::new(), false);
+    let results = run_all(steps, &context(), &mut out, &mut exec);
+    assert!(matches!(
+        results[0].status,
+        StepStatus::Ran { failed: true, .. }
+    ));
+    assert_eq!(
+        text(out),
+        "==> slow: fake hang\n\
+         `fake hang` did not finish within 1 min, so it was stopped\n\
+         \x20   fix: run `fake hang` by hand to see why it does not finish within 1 min\n"
+    );
 }
 
 #[test]
@@ -314,7 +363,7 @@ fn shout(output: &str) -> String {
 fn rendered_tool(name: &'static str, args: &[&str]) -> Step {
     Step::Tool(ToolStep {
         name,
-        cmd: Cmd::new(Program::Named("fake"), args),
+        cmd: Cmd::new(Program::Named("fake"), args, TEST_TIMEOUT),
         parse: no_findings,
         fix: reproduce,
         render: Some(shout),
@@ -359,7 +408,7 @@ fn after_a_failed_metadata_load_a_cargo_step_is_not_run() {
     let steps = vec![
         Step::Tool(ToolStep {
             name: "shear",
-            cmd: Cmd::new(Program::Cargo, ["shear"]),
+            cmd: Cmd::new(Program::Cargo, ["shear"], TEST_TIMEOUT),
             parse: no_findings,
             fix: reproduce,
             render: None,
