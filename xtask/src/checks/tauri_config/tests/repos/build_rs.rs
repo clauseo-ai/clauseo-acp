@@ -14,7 +14,7 @@ pub(in crate::checks::tauri_config::tests) fn app_manifest_with_commands_passes(
 }
 
 pub(in crate::checks::tauri_config::tests) fn build_rs_missing() -> Repo {
-    run_files("build-rs-missing", &[(TAURI_CONF, CONF.as_bytes())])
+    desktop_repo("build-rs-missing", &[(CONF_AT, CONF.as_bytes())])
 }
 
 pub(in crate::checks::tauri_config::tests) fn build_rs_without_app_manifest() -> Repo {
@@ -82,12 +82,9 @@ pub(in crate::checks::tauri_config::tests) fn build_rs_not_valid_rust() -> Repo 
 }
 
 pub(in crate::checks::tauri_config::tests) fn build_rs_not_utf8() -> Repo {
-    run_files(
+    desktop_repo(
         "build-rs-not-utf8",
-        &[
-            (TAURI_CONF, CONF.as_bytes()),
-            (BUILD_RS, &[0xff, 0xfe, b'f']),
-        ],
+        &[(CONF_AT, CONF.as_bytes()), (BUILD_AT, &[0xff, 0xfe, b'f'])],
     )
 }
 
