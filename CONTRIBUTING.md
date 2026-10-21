@@ -28,3 +28,4 @@ Clauseo is GPL-3.0-or-later. Most code here is written by coding agents and chec
 
 Contributions are licensed under the GPL-3.0-or-later, as in `LICENSE`. Code copied from another project keeps
 its licence text in `LICENSES/` and an SPDX header in each copied file.
+
