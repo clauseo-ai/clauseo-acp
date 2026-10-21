@@ -43,6 +43,9 @@
 //! `tauri-runtime`, `tauri-utils`, `wry` or a fork under another name; banning a family means
 //! listing each of its packages.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 use crate::checks::{self, core_io, violation};
 use crate::violation::Violation;
 use std::path::Path;
@@ -70,8 +73,6 @@ const COLUMNS: [&str; 5] = [
     "Never depends on",
     "Status",
 ];
-
-const SHAPE_FIX: &str = "keep the Crates table in ARCHITECTURE.md as one pipe table with the columns Crate | Owns | May depend on | Never depends on | Status: xtask/src/checks/crates_table.rs reads it";
 
 /// The table, one row per crate, in file order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -253,7 +254,7 @@ pub(crate) fn parse(text: &str) -> Result<CratesTable, Vec<Violation>> {
                 table.header.join(" | "),
                 COLUMNS.join(" | ")
             ),
-            SHAPE_FIX,
+            Fix::Shape,
         )]);
     }
     let mut found: Vec<Violation> = table
@@ -277,7 +278,7 @@ pub(crate) fn parse(text: &str) -> Result<CratesTable, Vec<Violation>> {
             FILE,
             header_line,
             "the Crates table has no rows",
-            "add a row for every crate that exists",
+            Fix::NoRows,
         ));
     }
     if found.is_empty() {
@@ -298,9 +299,7 @@ fn after_the_table(end: u32, line: u32) -> Violation {
         format!(
             "the Crates table ends at line {end}, but line {line} after it starts with `|`, so a row there is not part of the table"
         ),
-        format!(
-            "remove the blank lines between line {end} and line {line}, so the row joins the table, or move the text at line {line} out of the `{SECTION}` section: a blank line ends a table"
-        ),
+        Fix::AfterTable { end, line },
     )
 }
 
@@ -309,16 +308,13 @@ fn after_the_table(end: u32, line: u32) -> Violation {
 /// message say so and the fix offer the `(crates.io)` marker.
 fn io_word_in_other_case(entry: &str, word: IoWord, row: &str, line: u32) -> Violation {
     let exact = word.word();
-    let (would, or_marker) = if is_package_name(entry) {
+    let (would, crates_io) = if is_package_name(entry) {
         (
             ", and as written it would ban a crates.io package instead",
-            format!(
-                ", or `{entry} {}` if you mean the crates.io package",
-                names::CRATES_IO
-            ),
+            Some(entry.to_owned()),
         )
     } else {
-        ("", String::new())
+        ("", None)
     };
     violation(
         FILE,
@@ -326,7 +322,10 @@ fn io_word_in_other_case(entry: &str, word: IoWord, row: &str, line: u32) -> Vio
         format!(
             "`{entry}` in the Never depends on column of `{row}` is the I/O word `{exact}` written with other letter case{would}"
         ),
-        format!("write `{exact}` to ban the standard library's APIs it names{or_marker}"),
+        Fix::IoWordCase {
+            exact,
+            entry: crates_io,
+        },
     )
 }
 
@@ -351,7 +350,7 @@ fn raw_row(row: &table::Row, found: &mut Vec<Violation>) -> Option<RawRow> {
                 row.written,
                 COLUMNS.len()
             ),
-            SHAPE_FIX,
+            Fix::Shape,
         ));
         return None;
     };
@@ -363,7 +362,7 @@ fn raw_row(row: &table::Row, found: &mut Vec<Violation>) -> Option<RawRow> {
                 FILE,
                 line,
                 format!("crate `{name}` has status `{other}`"),
-                "write `exists` or `planned` in the Status column",
+                Fix::StatusWord,
             ));
             None
         }
@@ -373,7 +372,7 @@ fn raw_row(row: &table::Row, found: &mut Vec<Violation>) -> Option<RawRow> {
             FILE,
             line,
             format!("`{name}` is not a crate name"),
-            "name the crate as its directory under crates/: lowercase letters, digits and _",
+            Fix::CrateName,
         ));
         return None;
     }
@@ -398,7 +397,7 @@ fn classify(raw: &[RawRow], found: &mut Vec<Violation>) -> Vec<CrateRow> {
                     "crate `{}` has a second row (the first is at line {})",
                     row.name, first.line
                 ),
-                "keep one row per crate",
+                Fix::OneRow,
             ));
         }
         let mut never = Vec::new();
@@ -421,9 +420,9 @@ fn classify(raw: &[RawRow], found: &mut Vec<Violation>) -> Vec<CrateRow> {
                         "`{entry}` in the Never depends on column of `{}` names a standard library module, not a crate, so nothing would enforce it",
                         row.name
                     ),
-                    format!(
-                        "write `any I/O` (or `fs` or `process`) instead of `{entry}`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now"
-                    ),
+                    Fix::StdModule {
+                        entry: entry.clone(),
+                    },
                 ));
             } else if raw.iter().any(|other| other.name == *entry) {
                 never.push(Never::Workspace(entry.clone()));
@@ -449,7 +448,7 @@ fn classify(raw: &[RawRow], found: &mut Vec<Violation>) -> Vec<CrateRow> {
                         "`{entry}` in the Never depends on column of `{}` is neither an I/O word nor a crate name",
                         row.name
                     ),
-                    "write fs, process, any I/O, clock, a crate of the table or a crates.io package name (as `<name> (crates.io)` to mark it as one), separated by commas",
+                    Fix::NotAName,
                 ));
             }
         }

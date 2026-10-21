@@ -3,7 +3,7 @@
 //! table, and a `\|` is a pipe inside a cell. Cell text is what GitHub shows: code spans keep
 //! their content without the backticks, other inline markup keeps only its text.
 
-use super::{FILE, SECTION, SHAPE_FIX};
+use super::{FILE, Fix, SECTION};
 use crate::checks::{self, violation};
 use crate::violation::Violation;
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
@@ -140,7 +140,7 @@ pub(super) fn read(text: &str) -> Result<Table, Violation> {
             FILE,
             1,
             format!("ARCHITECTURE.md has no `{SECTION}` section"),
-            SHAPE_FIX,
+            Fix::Shape,
         ));
     };
     table.ok_or_else(|| no_table(text, line_of(heading)))
@@ -163,13 +163,13 @@ fn no_table(text: &str, heading: u32) -> Violation {
             FILE,
             line + 1,
             "the Crates table's header is not followed by its `|---|` separator line",
-            SHAPE_FIX,
+            Fix::Shape,
         ),
         None => violation(
             FILE,
             heading,
             format!("the `{SECTION}` section has no table"),
-            SHAPE_FIX,
+            Fix::Shape,
         ),
     }
 }

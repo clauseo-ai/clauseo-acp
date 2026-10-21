@@ -1,52 +1,54 @@
-//! Tests of the budgets check; the planted cases are in `tests/planted.rs`.
+//! Tests of the budgets check. The planted cases are in `tests/planted.rs` and their builders in
+//! `tests/repos.rs`; the lines below are the expected failures that differ by OS or that several
+//! cases share.
 
 pub(super) mod planted;
+mod repos;
 
 use super::*;
-use crate::scratch::Scratch;
-
-/// A valid row whose limit line (line 4) is `limit`.
-fn row(limit: &str) -> String {
-    format!(
-        "[[budget]]\nid = \"window_visible\"\nmetric = \"window visible\"\n{limit}\n\
-         unit = \"ms\"\ngate = \"alert\"\nmeasured_by = \"marks\"\nstatus = \"unmeasured\"\n\
-         source = \"doc 15\"\n"
-    )
-}
-
-/// Runs the check on a scratch repo whose `budgets.toml` is `text`.
-fn run_on(case: &str, text: impl AsRef<[u8]>) -> Inspection {
-    let dir = Scratch::new(&format!("planted-budgets-{case}"));
-    Scratch::write(dir.join(budgets::FILE), text).expect("write budgets.toml");
-    run(&Context {
-        root: dir.to_path_buf(),
-        members: Ok(Vec::new()),
-        load_resolved_graph: false,
-    })
-}
-
-pub(super) fn negative_limit() -> Inspection {
-    run_on("negative-limit", row("limit = -1.0"))
-}
-
-pub(super) fn not_toml() -> Inspection {
-    run_on("not-toml", "[[budget]\nid = \n")
-}
-
-pub(super) fn not_utf8() -> Inspection {
-    run_on("not-utf8", b"[[budget]]\nid = \"\xff\"\n")
-}
-
-pub(super) fn valid_row() -> Inspection {
-    run_on("valid-row", row("limit = 250.0"))
-}
+use crate::budgets::Fix;
+use crate::checks::planted::{fails, failure};
 
 #[test]
 fn rows_with_problems_still_count() {
-    let found = run_on(
+    let repo = repos::budgets_file(
         "count",
-        format!("{}\n{}", row("limit = -1.0"), row("limit = 1.0")),
+        format!(
+            "{}\n{}",
+            repos::row("limit = -1.0"),
+            repos::row("limit = 1.0")
+        ),
     );
+    let found = run(repo.ctx());
     assert_eq!(found.inspected, 2);
     assert_eq!(found.violations.len(), 2);
+}
+
+/// The zero-inspected failure of the budgets check, as it prints.
+fn nothing_inspected() -> String {
+    failure(
+        "0 budget rows inspected in budgets.toml at the repo root",
+        crate::checks::Fix::NothingInspected {
+            name: "budgets",
+            many: "budget rows",
+            place: "in budgets.toml at the repo root".to_owned(),
+            source: "xtask/src/checks/budgets.rs",
+        },
+    )
+}
+
+/// What the `missing_file` case prints: the read error, in the OS's words, and the zero line.
+fn missing_file() -> Vec<String> {
+    #[cfg(not(windows))]
+    let error = "No such file or directory (os error 2)";
+    #[cfg(windows)]
+    let error = "The system cannot find the file specified. (os error 2)";
+    vec![
+        fails(
+            "budgets.toml:1",
+            &format!("cannot read budgets.toml: {error}"),
+            Fix::Restore,
+        ),
+        nothing_inspected(),
+    ]
 }

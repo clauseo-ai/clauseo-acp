@@ -1,25 +1,14 @@
-//! The text of every core-io violation, so each message and its fix live side by side.
+//! The violation of every core-io finding, so each message sits beside its fix kind. The fix
+//! texts live in `fix.rs`.
 
 use super::clippy_toml::{LIST, ROOT};
+use super::fix::Fix;
 use super::roots::forbid_line;
 use crate::checks::{crates_table, violation};
 use crate::violation::Violation;
 
 mod cfg;
 pub(super) use cfg::cfg_rule;
-
-/// The fix for `package`'s `clippy.toml` at `path`, which says what to write and how to make
-/// clippy read it. The text ends at its last line, so no blank line printed after it reads as
-/// part of the file.
-fn write_this(path: &str, package: &str, text: &str) -> String {
-    let text = text.trim_end_matches('\n');
-    format!(
-        "write `{path}` with exactly the text below, the root {ROOT} with the arrays of {LIST} \
-         appended (clippy reads only the nearest clippy.toml), then run `cargo clean -p \
-         {package}`: cargo does not lint a crate again when its clippy.toml appears after it \
-         last linted it\n{text}"
-    )
-}
 
 /// The violation at the row (line `line` of `ARCHITECTURE.md`) of `package`, whose
 /// `clippy.toml` at `path` is missing; `words` are the I/O words of its row.
@@ -37,7 +26,7 @@ pub(super) fn missing_crate_file(
             "{package}'s row bans I/O (Never depends on: {words}), but `{path}` is missing, so \
              clippy does not ban the standard library's I/O in it"
         ),
-        write_this(path, package, text),
+        write_crate_file(path, package, text),
     )
 }
 
@@ -57,7 +46,7 @@ pub(super) fn crate_file_differs(
             "`{path}` of {package} is not the root {ROOT} plus {LIST}: it differs in {}",
             keys.join(", ")
         ),
-        write_this(path, package, text),
+        write_crate_file(path, package, text),
     )
 }
 
@@ -75,8 +64,18 @@ pub(super) fn crate_file_not_toml(
         path,
         line,
         format!("`{path}` is not valid TOML ({first})"),
-        write_this(path, package, text),
+        write_crate_file(path, package, text),
     )
+}
+
+/// The fix for `package`'s `clippy.toml` at `path`, which says what to write and how to make
+/// clippy read it.
+fn write_crate_file(path: &str, package: &str, text: &str) -> Fix {
+    Fix::WriteCrateFile {
+        path: path.to_owned(),
+        package: package.to_owned(),
+        text: text.to_owned(),
+    }
 }
 
 /// The violation for the root file or the list, missing at `rel`.
@@ -85,7 +84,9 @@ pub(super) fn missing_input(rel: &str) -> Violation {
         rel,
         1,
         format!("`{rel}` is missing, and core-io builds each core crate's clippy.toml from it"),
-        format!("restore `{rel}` from git"),
+        Fix::RestoreInput {
+            rel: rel.to_owned(),
+        },
     )
 }
 
@@ -93,13 +94,11 @@ pub(super) fn missing_input(rel: &str) -> Violation {
 pub(super) fn not_toml(rel: &str, line: u32, error: &toml::de::Error) -> Violation {
     let first = error.message().lines().next().unwrap_or_default().trim();
     let fix = if rel == LIST {
-        "fix the line above: the file holds only `disallowed-methods` and `disallowed-types`, \
-         arrays of `{ path, reason }` tables, each with an optional `replacement` and \
-         `allow-invalid`"
+        Fix::ListNotToml
     } else if rel == ROOT {
-        "fix the line above so clippy and core-io can read the file"
+        Fix::RootNotToml
     } else {
-        "fix the line above so cargo and core-io can read the file"
+        Fix::CargoNotToml
     };
     violation(rel, line, format!("`{rel}` is not valid: {first}"), fix)
 }
@@ -112,7 +111,9 @@ pub(super) fn root_not_an_array(key: &str, line: u32) -> Violation {
         format!(
             "`{key}` in {ROOT} is not an array, so core-io cannot append {LIST}'s `{key}` to it"
         ),
-        format!("write `{key}` as an array of `{{ path, reason }}` tables"),
+        Fix::RootNotArray {
+            key: key.to_owned(),
+        },
     )
 }
 
@@ -124,7 +125,7 @@ pub(super) fn empty_reason(key: &str, path: &str, line: u32) -> Violation {
         format!(
             "the `{key}` entry for `{path}` has an empty reason, which clippy prints with each hit"
         ),
-        "say why a core crate may not use the item, and what to do instead",
+        Fix::EmptyReason,
     )
 }
 
@@ -134,7 +135,7 @@ pub(super) fn listed_twice(key: &str, path: &str, line: u32) -> Violation {
         LIST,
         line,
         format!("`{path}` is listed twice in `{key}`"),
-        "delete this entry",
+        Fix::ListedTwice,
     )
 }
 
@@ -147,7 +148,7 @@ pub(super) fn stray_config(path: &str) -> Violation {
     } else {
         format!("the crates under `{dir}/`")
     };
-    let message = if name == ".clippy.toml" {
+    let message = if name.eq_ignore_ascii_case(".clippy.toml") {
         format!(
             "`{path}` is a .clippy.toml, which clippy reads instead of a clippy.toml beside it or \
              above it, so it replaces the root {ROOT}'s bans, and a core crate's list, for {under}"
@@ -163,10 +164,9 @@ pub(super) fn stray_config(path: &str) -> Violation {
         path,
         1,
         message,
-        format!(
-            "delete `{path}`: clippy settings go in the root {ROOT}, which every crate reads, and \
-             core-io prints the file each crate whose row bans fs, process or any I/O needs"
-        ),
+        Fix::StrayConfig {
+            path: path.to_owned(),
+        },
     )
 }
 
@@ -185,8 +185,7 @@ pub(super) fn lints_not_inherited(
                  levels live only in the root [workspace.lints], so that no crate can turn off the \
                  bans of the root {ROOT} or {LIST}"
             ),
-            "replace the table with `[lints]` and `workspace = true`; cargo takes no other lint \
-             key beside it",
+            Fix::ReplaceLintsTable,
         )
     } else {
         (
@@ -194,7 +193,7 @@ pub(super) fn lints_not_inherited(
                 "`{path}` has no `[lints] workspace = true`, so {package} does not get the lint \
                  levels of the root [workspace.lints], the one place they are set"
             ),
-            "add `[lints]` with `workspace = true`",
+            Fix::AddLints,
         )
     };
     violation(path, line, message, fix)
@@ -210,7 +209,7 @@ pub(super) fn rustflags_in_config(path: &str, line: u32, key: &str) -> Violation
              silence the bans of {ROOT} and {LIST} for every crate; lint levels live only in the \
              root [workspace.lints]"
         ),
-        "remove the key; set lint levels in the root Cargo.toml's [workspace.lints]",
+        Fix::RemoveRustflags,
     )
 }
 
@@ -224,7 +223,9 @@ pub(super) fn include_in_config(path: &str, line: u32) -> Violation {
              read, where `rustflags`, an alias or a `CLIPPY_` entry could turn off the bans of \
              {ROOT} and {LIST}"
         ),
-        format!("remove `include` and move the settings it loads into `{path}` itself"),
+        Fix::RemoveInclude {
+            path: path.to_owned(),
+        },
     )
 }
 
@@ -239,7 +240,9 @@ pub(super) fn compiler_in_config(path: &str, line: u32, key: &str) -> Violation 
              add `--cap-lints allow` and turn off the bans of {ROOT} and {LIST} past the forbid \
              line"
         ),
-        format!("remove `{key}`; clippy runs the pinned toolchain's compiler as it is"),
+        Fix::RemoveCompiler {
+            key: key.to_owned(),
+        },
     )
 }
 
@@ -252,7 +255,7 @@ pub(super) fn clippy_env_in_config(path: &str, line: u32, name: &str) -> Violati
             "`{path}` sets `{name}` in [env], which cargo passes to every clippy-driver it starts; \
              `CLIPPY_CONF_DIR` there points clippy away from the {ROOT} files core-io checks"
         ),
-        "remove the entry; clippy settings go in the root clippy.toml",
+        Fix::RemoveClippyEnv,
     )
 }
 
@@ -266,10 +269,9 @@ pub(super) fn alias_shadows_command(path: &str, line: u32, name: &str) -> Violat
             "`{path}` defines the alias `{name}`, so `cargo {name}` runs the alias instead of \
              the external command xtask runs, and cargo only warns about it"
         ),
-        format!(
-            "remove the `{name}` alias; an alias may not take the name of an external cargo \
-             command xtask runs"
-        ),
+        Fix::RemoveAlias {
+            name: name.to_owned(),
+        },
     )
 }
 
@@ -282,26 +284,28 @@ pub(super) fn legacy_cargo_config(legacy: &str, config: &str) -> Violation {
             "`{legacy}` is the legacy name of `{config}`; cargo reads it instead when both exist, \
              and core-io checks only `{config}`"
         ),
-        format!("move what `{legacy}` holds into `{config}` and delete `{legacy}`"),
+        Fix::MoveLegacyConfig {
+            legacy: legacy.to_owned(),
+            config: config.to_owned(),
+        },
     )
 }
 
 /// The violation for the target root `path` of `package`, a target of kind `kinds`, whose
 /// inner attributes lack `forbid_line()`.
 pub(super) fn missing_forbid(path: &str, package: &str, kinds: &str) -> Violation {
-    let line = forbid_line();
     violation(
         path,
         1,
         format!(
-            "`{path}`, the root of {package}'s {kinds} target, does not carry `{line}` \
+            "`{path}`, the root of {package}'s {kinds} target, does not carry `{}` \
              outside any `cfg_attr`, so an `allow` or `expect` in the target can turn off the \
-             bans of {ROOT} and {LIST}"
+             bans of {ROOT} and {LIST}",
+            forbid_line()
         ),
-        format!(
-            "add this line to the inner attributes at the top of `{path}`, not under \
-             `cfg_attr`\n{line}"
-        ),
+        Fix::AddForbid {
+            path: path.to_owned(),
+        },
     )
 }
 
@@ -321,25 +325,28 @@ pub(super) fn root_outside(
             "`{manifest}` gives {package}'s {kinds} target the root `{path}`, outside `{dir}/`, \
              and core-io checks the forbid line and the cfgs of {package} only under its folder"
         ),
-        format!("move `{path}` under `{dir}/` and point the target's `path` in `{manifest}` at it"),
+        Fix::MoveRoot {
+            manifest: manifest.to_owned(),
+            path: path.to_owned(),
+            dir: dir.to_owned(),
+        },
     )
 }
 
 /// The violation for the target root `path` of `package`, which syn cannot parse (the error
 /// `error` at `line`).
 pub(super) fn root_not_rust(path: &str, package: &str, line: u32, error: &syn::Error) -> Violation {
-    let forbid = forbid_line();
     violation(
         path,
         line,
         format!(
             "`{path}`, a target root of {package}, does not parse as Rust ({error}), so core-io \
-             cannot find `{forbid}` in it"
+             cannot find `{}` in it",
+            forbid_line()
         ),
-        format!(
-            "fix the syntax error, and make sure this line is among the inner attributes at the \
-             top of `{path}`\n{forbid}"
-        ),
+        Fix::RootNotRust {
+            path: path.to_owned(),
+        },
     )
 }
 
@@ -352,7 +359,7 @@ pub(super) fn symlink(path: &str, package: &str) -> Violation {
             "`{path}` is a symlink under {package}'s folder, so a `mod` can compile files from \
              elsewhere into {package} that core-io does not lex"
         ),
-        "replace the symlink with the file or folder it points to",
+        Fix::ReplaceSymlink,
     )
 }
 
@@ -365,7 +372,7 @@ pub(super) fn source_not_lexed(path: &str, line: u32, package: &str) -> Violatio
             "`{path}`, a file of {package}, does not lex as Rust from this line, so core-io \
              cannot check its cfgs"
         ),
-        "fix the Rust syntax that starts at this line, such as a bracket or a string left open",
+        Fix::SourceNotLexed,
     )
 }
 
@@ -378,7 +385,9 @@ pub(super) fn build_script_file(path: &str, package: &str) -> Violation {
             "{package}'s row bans I/O, but it has the build script `{path}`, whose \
              `cargo::rustc-env` lines can set `CLIPPY_` variables for the clippy that lints it"
         ),
-        format!("delete `{path}`; a crate whose row bans I/O has no build script"),
+        Fix::DeleteBuildScript {
+            path: path.to_owned(),
+        },
     )
 }
 
@@ -391,6 +400,6 @@ pub(super) fn build_key(path: &str, line: u32, package: &str) -> Violation {
             "`{path}` sets `build` under [package], but {package}'s row bans I/O and such a \
              crate has no build script"
         ),
-        "delete the `build` key, and the script it names if there is one",
+        Fix::DeleteBuildKey,
     )
 }

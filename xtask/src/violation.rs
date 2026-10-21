@@ -1,3 +1,4 @@
+use crate::fix::Fix;
 use std::fmt;
 
 /// One problem a check found. Displays as `path:line: message` and an indented `fix:` line.
@@ -7,7 +8,7 @@ pub(crate) struct Violation {
     pub path: String,
     pub line: u32,
     pub message: String,
-    pub fix: String,
+    pub fix: Fix,
 }
 
 impl fmt::Display for Violation {
@@ -36,7 +37,7 @@ mod tests {
             path: "crates/a/src/lib.rs".into(),
             line: 12,
             message: "rustfmt would reformat this code".into(),
-            fix: "run `cargo fmt --all`".into(),
+            fix: Fix::tool("run `cargo fmt --all`"),
         };
         assert_eq!(
             v.to_string(),

@@ -36,6 +36,9 @@
 //! when the setting lives in `[workspace.dependencies]`, else line 1.
 //! The Tauri config and `build.rs` belong to the `tauri-config` check.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 mod graph;
 
 use crate::checks::toml_lines::{ANY, Manifest, NORMAL};
@@ -59,15 +62,6 @@ const FIXED_PLUGINS: [&str; 8] = [
 
 /// The `tauri` features that must never be enabled.
 const FORBIDDEN_FEATURES: [&str; 2] = ["devtools", "protocol-asset"];
-
-const FEATURE_FIX: &str = "remove it: devtools let script in the page open the inspector, and `protocol-asset` serves files from disk to the webview";
-const RUNTIME_FIX: &str = "remove it: tauri-runtime is there only to name a type, and its `devtools` and `macos-private-api` features would reach the binary through it";
-const PLUGIN_FIX: &str = "remove it: the plugin set is fixed (each change forces a near-cold rebuild and widens what the webview can reach); changing it needs a decision recorded in a task brief";
-const OPTIONAL_FIX: &str = "drop `optional = true` and any feature that enables it: the plugin set is fixed and sits behind no cargo feature, so every build ships the same plugins";
-const FAMILY_FIX: &str = "depend on `tauri` and the fixed plugins only: other Tauri crates can switch on features such as devtools that the tauri entry's checks never see";
-const MEMBER_FIX: &str =
-    "only crates/desktop depends on Tauri; move the code there or behind the host interface";
-const OUTSIDE_FIX: &str = "add it to the workspace members, or remove the dependency";
 
 /// Fails on every Tauri dependency of a workspace member outside the fixed set or its rules.
 pub(crate) const CHECK: StaticCheck = StaticCheck {
@@ -192,7 +186,7 @@ fn path_violations(
                     "`{name}` depends on `{dep}` by path, but `{dep}` is not a workspace member, so these checks and clippy never see it",
                     dep = dep.name
                 ),
-                OUTSIDE_FIX,
+                Fix::OutsideMembers,
             )
         })
         .collect()
@@ -217,7 +211,7 @@ pub(crate) fn member_violations(
                 path,
                 line,
                 format!("`{name}` depends on `{}`{}", dep.name, as_key(dep)),
-                MEMBER_FIX,
+                Fix::MemberDependsOnTauri,
             )
         })
         .collect()
@@ -282,7 +276,7 @@ fn family_violations(normal: &[&CargoDependency], locate: &Locator<'_>) -> Vec<V
                     dep.name,
                     as_key(dep)
                 ),
-                FAMILY_FIX,
+                Fix::Family,
             )
         })
         .collect()
@@ -299,7 +293,7 @@ fn runtime_feature_violations(normal: &[&CargoDependency], locate: &Locator<'_>)
                 path,
                 line,
                 format!("`tauri-runtime` enables the `{feature}` feature"),
-                RUNTIME_FIX,
+                Fix::Runtime,
             ));
         }
     }
@@ -318,13 +312,13 @@ fn plugin_violations(normal: &[&CargoDependency], locate: &Locator<'_>) -> Vec<V
             found.push(locate.dependency(
                 dep.key(),
                 format!("`{}`{as_key} is not in the fixed plugin set", dep.name),
-                PLUGIN_FIX,
+                Fix::PluginOutsideSet,
             ));
         } else if dep.optional {
             found.push(locate.dependency(
                 dep.key(),
                 format!("`{}`{as_key} is optional", dep.name),
-                OPTIONAL_FIX,
+                Fix::Optional,
             ));
         }
     }
@@ -334,7 +328,9 @@ fn plugin_violations(normal: &[&CargoDependency], locate: &Locator<'_>) -> Vec<V
                 locate.desktop_path,
                 locate.dependencies_header(),
                 format!("`{plugin}` is missing from the fixed plugin set"),
-                format!("add it back under [dependencies]: `{plugin}.workspace = true`"),
+                Fix::AddBackToDependencies {
+                    plugin: plugin.to_owned(),
+                },
             ));
         }
     }
@@ -355,7 +351,7 @@ fn tauri_feature_violations(normal: &[&CargoDependency], locate: &Locator<'_>) -
                 path,
                 line,
                 format!("`tauri` enables the `{feature}` feature"),
-                FEATURE_FIX,
+                Fix::Feature,
             ));
         }
     }
@@ -387,7 +383,7 @@ fn feature_table_violations(
                 locate.desktop_path,
                 locate.feature_item(item),
                 format!("`[features]` enables the `tauri` feature `{feature}` through `{item}`"),
-                FEATURE_FIX,
+                Fix::Feature,
             ));
         }
     }
@@ -411,7 +407,7 @@ impl<'a> Locator<'a> {
     }
 
     /// A violation at the desktop line that declares `key`, else at line 1.
-    fn dependency(&self, key: &str, message: String, fix: &str) -> Violation {
+    fn dependency(&self, key: &str, message: String, fix: Fix) -> Violation {
         let line = self.desktop.declaration(key, NORMAL).unwrap_or(1);
         violation(self.desktop_path, line, message, fix)
     }

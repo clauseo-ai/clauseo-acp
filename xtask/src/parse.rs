@@ -6,6 +6,7 @@
 //! notes that give its reason and replacement (see `help_notes`); other lints print their rendered
 //! text alone.
 
+use crate::fix::Fix;
 use crate::process::Cmd;
 use crate::violation::{Finding, Violation};
 use crate::workspace::{Context, Member, package_for};
@@ -290,7 +291,7 @@ pub(crate) fn fmt_findings(output: &str, ctx: &Context, _cmd: &Cmd) -> Vec<Findi
                 path,
                 line,
                 message: "rustfmt would reformat this code".into(),
-                fix: "run `cargo fmt --all`".into(),
+                fix: Fix::tool("run `cargo fmt --all`"),
             },
             is_error: true,
         })
@@ -311,7 +312,7 @@ pub(crate) fn clippy_findings(output: &str, ctx: &Context, cmd: &Cmd) -> Vec<Fin
                     path: diag.path,
                     line: diag.line,
                     message: diag.message,
-                    fix,
+                    fix: Fix::tool(fix),
                 },
                 is_error: diag.is_error,
             }

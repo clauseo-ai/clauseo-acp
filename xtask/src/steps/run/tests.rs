@@ -48,7 +48,7 @@ fn one_violation(_ctx: &Context) -> Inspection {
             path: "docs/a.md".into(),
             line: 2,
             message: "bad link".into(),
-            fix: "fix the link".into(),
+            fix: crate::fix::Fix::Fake("fix the link"),
         }],
     )
 }
@@ -246,7 +246,7 @@ fn one_warning(_output: &str, _ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
             path: "docs/a.md".into(),
             line: 2,
             message: "a warning".into(),
-            fix: "fix the warning".into(),
+            fix: crate::fix::Fix::Fake("fix the warning"),
         },
         is_error: false,
     }]

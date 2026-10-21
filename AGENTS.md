@@ -53,8 +53,8 @@ this. Use the words in `GLOSSARY.md` exactly.
 
 <!-- Each phrased as a trap. Details live in the failure's `fix:` line. -->
 - A crate never depends on what `ARCHITECTURE.md` lists under "Never depends on".
-- Capability files never contain `remote`, `core:default`, `fs:`, `shell:`, `http:`, `opener:`
-  or `dialog:`.
+- Capability files and the desktop crate's permission files (`permissions/`) never contain
+  `remote`, `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`.
 - Only `#[expect(lint, reason = "...")]` may silence a lint, never `#[allow]` or `#![allow]`.
 - A crate that `ARCHITECTURE.md` marks as banning I/O or the clock gets no exception to the bans,
   not even `#[expect]`. What such a crate carries is in the I/O paragraph of `ARCHITECTURE.md`.
@@ -62,6 +62,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 - A source file has at most 600 lines.
 - Rust comments stay within 100 columns; a file past 500 lines gets a note to split it.
 - A check that inspects nothing fails.
+- Every check ships planted violations, its bypass forms included.
 - Files are written only through each crate's write module: `xtask/src/write.rs` in xtask,
   `Scratch` (`xtask/src/scratch.rs`) in xtask's tests, `ui/app/scripts/guard.mjs` in scripts.
   Child processes start only through `xtask/src/process.rs` in xtask and

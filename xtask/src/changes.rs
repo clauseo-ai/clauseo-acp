@@ -118,11 +118,18 @@ pub(crate) fn only_files(root: &Path, entries: &[String]) -> Vec<String> {
 
 /// The commit this branch forked from: `git merge-base HEAD origin/main`.
 pub(crate) fn merge_base(root: &Path) -> Result<String, String> {
-    let base = git(root, &["merge-base", "HEAD", "origin/main"])?
-        .trim()
-        .to_owned();
+    merge_base_commit(root).map_err(String::from)
+}
+
+/// `merge_base`, with git's error kept apart for a typed fix.
+fn merge_base_commit(root: &Path) -> Result<String, GitError> {
+    let args = ["merge-base", "HEAD", "origin/main"];
+    let base = git(root, &args)?.trim().to_owned();
     if base.is_empty() {
-        return Err("`git merge-base HEAD origin/main` printed nothing".into());
+        return Err(GitError::Failed {
+            command: Cmd::new(Program::Git, args, GIT_TIMEOUT).to_string(),
+            stderr: "it exited 0 but printed nothing".into(),
+        });
     }
     Ok(base)
 }

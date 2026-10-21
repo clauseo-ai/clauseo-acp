@@ -269,7 +269,7 @@ const WRITES: [Write; 31] = [
 /// The entries of the root file in crates the scratch crates do not build: `tauri` and
 /// `tauri_build` take minutes to build cold, too long for a test. `every_root_entry_has_a_form`
 /// pins this list exactly, so an entry without a form fails unless it is added here, in review.
-pub(crate) const NOT_BUILT: [&str; 12] = [
+pub(crate) const NOT_BUILT: [&str; 14] = [
     "tauri::Builder::plugin",
     "tauri::Builder::plugin_boxed",
     "tauri::AppHandle::plugin",
@@ -281,6 +281,8 @@ pub(crate) const NOT_BUILT: [&str; 12] = [
     "tauri::Context::new",
     "tauri::Context::set_assets",
     "tauri_build::Attributes::capabilities_path_pattern",
+    "tauri_build::AppManifest::permissions_path_pattern",
+    "tauri_build::InlinedPlugin::permissions_path_pattern",
     "tauri::ipc::RuntimeAuthority::__allow_command",
 ];
 

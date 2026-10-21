@@ -8,6 +8,9 @@
 //! anyone adds it, and it matches what `--quick` sees. Links and paths are looked up in the same
 //! list, so an ignored local file does not count as existing; the disk is read only to say so.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 mod commands;
 mod links;
 mod markdown;
@@ -77,12 +80,18 @@ fn inspect(root: &Path, files: &[String]) -> Inspection {
     violations.extend(required_problems(root));
     // Sorted by the whole violation, so `dedup` merges every repeat, not only adjacent ones.
     violations.sort_by(|a, b| {
-        (a.path.as_str(), a.line, a.message.as_str(), a.fix.as_str()).cmp(&(
-            b.path.as_str(),
-            b.line,
-            b.message.as_str(),
-            b.fix.as_str(),
-        ))
+        (
+            a.path.as_str(),
+            a.line,
+            a.message.as_str(),
+            a.fix.to_string(),
+        )
+            .cmp(&(
+                b.path.as_str(),
+                b.line,
+                b.message.as_str(),
+                b.fix.to_string(),
+            ))
     });
     violations.dedup();
     Inspection::new(inspected, violations)
