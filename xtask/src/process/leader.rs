@@ -45,17 +45,18 @@ use std::time::Duration;
 pub(super) const LEADER_SUBCOMMAND: &str = "process-leader";
 
 /// The leader of this xtask process, once a command has started.
-struct Leader {
+pub(super) struct Leader {
     /// The write end of the leader's stdin. It closes when xtask exits, or when a dead leader is
     /// replaced.
     pipe: io::PipeWriter,
-    /// Waited for only once replaced: a live leader outlives xtask.
-    child: Child,
+    /// Waited for only once replaced: a live leader outlives xtask. `test_mode.rs` kills it to
+    /// test its replacement.
+    pub(super) child: Child,
     /// The groups registered and not released, which a new leader is told when this one dies.
     groups: BTreeSet<Pid>,
 }
 
-static LEADER: Mutex<Option<Leader>> = Mutex::new(None);
+pub(super) static LEADER: Mutex<Option<Leader>> = Mutex::new(None);
 
 impl Leader {
     /// A new leader, told every group of this one, which then gets SIGKILL and is reaped. Killed,
@@ -116,16 +117,6 @@ pub(super) fn release(group: Pid) {
     if let Some(leader) = slot.as_mut() {
         leader.groups.remove(&group);
         drop(leader.pipe.write_all(format!("-{group}\n").as_bytes()));
-    }
-}
-
-/// Kills the leader with SIGKILL and reaps it, leaving it in place, so the next command finds it
-/// dead. For the hidden `process-test restarted-leader` mode and the tests only.
-pub(super) fn kill_for_test() {
-    let mut slot = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(leader) = slot.as_mut() {
-        drop(leader.child.kill());
-        drop(leader.child.wait());
     }
 }
 
