@@ -249,7 +249,6 @@ pub(crate) fn package_for<'a>(file: &str, members: &'a [Member]) -> Option<&'a M
 mod tests {
     use super::*;
     use crate::scratch::Scratch;
-    use std::fs;
 
     const SAMPLE: &str = r#"{
         "workspace_root": "/ws",
@@ -348,7 +347,8 @@ mod tests {
         let dir = Scratch::new("workspace-load-fails");
         let manifest = "[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
                         [dependencies]\nfoo = \"not a req\"\n";
-        fs::write(dir.join("Cargo.toml"), manifest).expect("write the manifest");
+        crate::scratch::Scratch::write(dir.join("Cargo.toml"), manifest)
+            .expect("write the manifest");
         let error = load(&dir).expect_err("cargo metadata fails");
         assert!(error.starts_with("`cargo metadata` failed:\n"), "{error}");
     }

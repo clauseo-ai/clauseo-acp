@@ -15,8 +15,9 @@ fn repo<T: AsRef<[u8]>>(case: &str, files: &[(&str, T)]) -> Scratch {
     let dir = Scratch::new(&format!("planted-buildtime-edits-{case}"));
     for (path, contents) in files {
         let full = dir.join(path);
-        fs::create_dir_all(full.parent().expect("a file has a parent")).expect("create the dirs");
-        fs::write(full, contents).expect("write the file");
+        Scratch::create_dir_all(full.parent().expect("a file has a parent"))
+            .expect("create the dirs");
+        Scratch::write(full, contents).expect("write the file");
     }
     dir
 }
@@ -88,7 +89,7 @@ pub(super) fn missing_src() -> Inspection {
 
 pub(super) fn empty_src() -> Inspection {
     let dir = Scratch::new("planted-buildtime-edits-empty-src");
-    fs::create_dir_all(dir.join(SRC)).expect("create the src dir");
+    Scratch::create_dir_all(dir.join(SRC)).expect("create the src dir");
     run(&desktop_context(&dir))
 }
 

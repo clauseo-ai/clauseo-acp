@@ -214,7 +214,7 @@ fn install_runs_the_pinned_command_for_each_os_and_arch() {
         let mut runner = |cmd: &Cmd, at: &Path, _: Output, _: Duration| -> io::Result<Ended> {
             ran.push((cmd.to_string(), at.to_path_buf()));
             if cmd.program == Program::Named("curl") {
-                std::fs::write(at.join(curl_output(cmd)), b"not a release")?;
+                Scratch::write(at.join(curl_output(cmd)), b"not a release")?;
             }
             exited(true, "", "")
         };
@@ -264,7 +264,7 @@ fn run_fake(
                     let taken = std::fs::File::open(&lock)?.try_lock();
                     assert!(matches!(taken, Err(std::fs::TryLockError::WouldBlock)));
                 }
-                std::fs::write(at.join(curl_output(cmd)), ASSET_BYTES)?;
+                Scratch::write(at.join(curl_output(cmd)), ASSET_BYTES)?;
             }
             Program::Named("faketool") => {
                 return match versions.next().expect("a version for each check") {

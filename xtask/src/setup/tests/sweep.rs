@@ -1,16 +1,17 @@
 //! Tests of the staging sweep and the run lock through `run_with`.
 
 use super::*;
+use crate::scratch::Scratch;
 
 /// Fills `bin` with what an interrupted setup leaves (a staging dir with half a download, a stray
 /// staging file) and two entries that are not setup's.
 fn plant_leftovers(bin: &Path) {
     let stale = bin.join(".xtask-setup-gitleaks-99999");
-    std::fs::create_dir_all(&stale).unwrap();
-    std::fs::write(stale.join("gitleaks_unverified.tar.gz"), b"half a download").unwrap();
-    std::fs::write(bin.join(".xtask-setup-lefthook-1"), b"a stray file").unwrap();
-    std::fs::write(bin.join("lefthook"), b"the working lefthook").unwrap();
-    std::fs::write(bin.join(".xtask-other"), b"not ours").unwrap();
+    Scratch::create_dir_all(&stale).unwrap();
+    Scratch::write(stale.join("gitleaks_unverified.tar.gz"), b"half a download").unwrap();
+    Scratch::write(bin.join(".xtask-setup-lefthook-1"), b"a stray file").unwrap();
+    Scratch::write(bin.join("lefthook"), b"the working lefthook").unwrap();
+    Scratch::write(bin.join(".xtask-other"), b"not ours").unwrap();
 }
 
 #[test]
@@ -50,7 +51,7 @@ fn a_run_lock_that_cannot_be_taken_is_a_note_and_the_run_installs_without_the_sw
     let dir = Scratch::new("setup-run-lock-error");
     let bin = dir.join("bin");
     plant_leftovers(&bin);
-    std::os::unix::fs::symlink(
+    Scratch::symlink(
         dir.join("no-such-dir").join("lock"),
         bin.join(".xtask-setup.lock"),
     )

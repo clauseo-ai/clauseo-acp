@@ -22,7 +22,6 @@ use super::*;
 use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;
 use crate::workspace::Target;
-use std::fs;
 
 /// A Crates table with one held row (`protocol`, line 8), one that is not (`xtask`) and a
 /// planned held row (`ids`).
@@ -108,17 +107,17 @@ fn scratch(case: &str, repo: &Repo<'_>) -> Scratch {
     let quiet = process::run_quiet(&init, &dir).expect("run git init");
     assert!(quiet.success, "git init failed: {}", quiet.stderr);
     let architecture = repo.architecture.unwrap_or(ARCHITECTURE);
-    fs::write(dir.join(crates_table::FILE), architecture).expect("write ARCHITECTURE.md");
-    fs::create_dir_all(dir.join("crates/protocol")).expect("create the crate dir");
-    fs::create_dir_all(dir.join("xtask")).expect("create xtask/");
+    Scratch::write(dir.join(crates_table::FILE), architecture).expect("write ARCHITECTURE.md");
+    Scratch::create_dir_all(dir.join("crates/protocol")).expect("create the crate dir");
+    Scratch::create_dir_all(dir.join("xtask")).expect("create xtask/");
     if let Some(text) = repo.root.text(ROOT_TOML) {
-        fs::write(dir.join(clippy_toml::ROOT), text).expect("write the root clippy.toml");
+        Scratch::write(dir.join(clippy_toml::ROOT), text).expect("write the root clippy.toml");
     }
     if let Some(text) = repo.list.text(LIST_TOML) {
-        fs::write(dir.join(clippy_toml::LIST), text).expect("write the list");
+        Scratch::write(dir.join(clippy_toml::LIST), text).expect("write the list");
     }
     if let Some(text) = repo.crate_file {
-        fs::write(dir.join("crates/protocol/clippy.toml"), text).expect("write clippy.toml");
+        Scratch::write(dir.join("crates/protocol/clippy.toml"), text).expect("write clippy.toml");
     }
     let defaults = [
         ("Cargo.toml", ROOT_MANIFEST),
@@ -127,14 +126,11 @@ fn scratch(case: &str, repo: &Repo<'_>) -> Scratch {
     ];
     for (path, text) in defaults.iter().chain(repo.files) {
         let path = dir.join(path);
-        fs::create_dir_all(path.parent().expect("a file has a parent")).expect("create dirs");
-        fs::write(path, text).expect("write a file");
+        Scratch::create_dir_all(path.parent().expect("a file has a parent")).expect("create dirs");
+        Scratch::write(path, text).expect("write a file");
     }
     for (link, target) in repo.folder_links {
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(target, dir.join(link)).expect("make a symlink");
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(target, dir.join(link)).expect("make a symlink");
+        Scratch::symlink_dir(target, dir.join(link)).expect("make a symlink");
     }
     dir
 }

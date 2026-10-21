@@ -12,7 +12,6 @@ use super::*;
 use crate::checks::tests::desktop_context;
 use crate::scratch::Scratch;
 use crate::workspace;
-use std::fs;
 use std::path::Path;
 
 /// The root manifest of a clean workspace.
@@ -55,8 +54,8 @@ tauri-plugin-notification.workspace = true
 /// Writes `text` to `rel` under `dir`, creating its directories.
 fn write_file(dir: &Path, rel: &str, text: &str) {
     let path = dir.join(rel);
-    fs::create_dir_all(path.parent().expect("a file has a parent")).expect("create the dirs");
-    fs::write(path, text).expect("write the file");
+    Scratch::create_dir_all(path.parent().expect("a file has a parent")).expect("create the dirs");
+    Scratch::write(path, text).expect("write the file");
 }
 
 /// Writes the scratch workspace `planted-plugins-<name>`: the root manifest `root`, the desktop

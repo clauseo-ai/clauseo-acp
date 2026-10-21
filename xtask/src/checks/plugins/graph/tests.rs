@@ -6,7 +6,6 @@ use super::*;
 use crate::checks;
 use crate::scratch::Scratch;
 use crate::workspace;
-use std::fs;
 
 const DESKTOP_PATH: &str = "crates/desktop/Cargo.toml";
 
@@ -15,7 +14,7 @@ const DESKTOP_PATH: &str = "crates/desktop/Cargo.toml";
 fn workspace(name: &str, desktop: &str, crates: &[(&str, &str)]) -> Scratch {
     let dir = Scratch::new(&format!("plugins-graph-{name}"));
     let root = "[workspace]\nresolver = \"3\"\nmembers = [\"crates/desktop\"]\n";
-    fs::write(dir.join("Cargo.toml"), root).expect("write the root manifest");
+    Scratch::write(dir.join("Cargo.toml"), root).expect("write the root manifest");
     let mut all = vec![("crates/desktop".to_owned(), desktop.to_owned())];
     for (crate_name, body) in crates {
         let manifest = format!(
@@ -24,9 +23,10 @@ fn workspace(name: &str, desktop: &str, crates: &[(&str, &str)]) -> Scratch {
         all.push((format!("vendor/{crate_name}"), manifest));
     }
     for (crate_dir, manifest) in all {
-        fs::create_dir_all(dir.join(&crate_dir).join("src")).expect("create the crate dirs");
-        fs::write(dir.join(&crate_dir).join("src/lib.rs"), "").expect("write lib.rs");
-        fs::write(dir.join(&crate_dir).join("Cargo.toml"), manifest).expect("write a manifest");
+        Scratch::create_dir_all(dir.join(&crate_dir).join("src")).expect("create the crate dirs");
+        Scratch::write(dir.join(&crate_dir).join("src/lib.rs"), "").expect("write lib.rs");
+        Scratch::write(dir.join(&crate_dir).join("Cargo.toml"), manifest)
+            .expect("write a manifest");
     }
     dir
 }
@@ -193,15 +193,15 @@ fn two_paths_of_one_name(name: &str, bodies: [&str; 2]) -> Vec<Violation> {
     // share a name.
     let root =
         "[workspace]\nresolver = \"3\"\nmembers = [\"crates/desktop\"]\nexclude = [\"vendor\"]\n";
-    fs::write(ws.join("Cargo.toml"), root).expect("write the root manifest");
+    Scratch::write(ws.join("Cargo.toml"), root).expect("write the root manifest");
     for (s_dir, version, body) in [("s1", "1.0.0", bodies[0]), ("s2", "2.0.0", bodies[1])] {
         let manifest = format!(
             "[package]\nname = \"s\"\nversion = \"{version}\"\nedition = \"2024\"\n\n{body}"
         );
         let dir = ws.join("vendor").join(s_dir);
-        fs::create_dir_all(dir.join("src")).expect("create the crate dirs");
-        fs::write(dir.join("src/lib.rs"), "").expect("write lib.rs");
-        fs::write(dir.join("Cargo.toml"), manifest).expect("write a manifest");
+        Scratch::create_dir_all(dir.join("src")).expect("create the crate dirs");
+        Scratch::write(dir.join("src/lib.rs"), "").expect("write lib.rs");
+        Scratch::write(dir.join("Cargo.toml"), manifest).expect("write a manifest");
     }
     violations_in(&ws, &desktop)
 }
@@ -283,7 +283,7 @@ fn spec_feature(name: &str, desktop_spec: &str, other_spec: &str) -> Vec<Violati
         ],
     );
     let root = "[workspace]\nresolver = \"3\"\nmembers = [\"crates/desktop\", \"vendor/other\"]\n";
-    fs::write(ws.join("Cargo.toml"), root).expect("write the root manifest");
+    Scratch::write(ws.join("Cargo.toml"), root).expect("write the root manifest");
     violations_in(&ws, &desktop)
 }
 

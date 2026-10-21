@@ -6,7 +6,6 @@ pub(super) mod planted;
 use super::*;
 use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;
-use std::fs;
 
 #[test]
 fn only_the_markdown_files_of_a_git_repo_are_counted() {
@@ -14,8 +13,8 @@ fn only_the_markdown_files_of_a_git_repo_are_counted() {
     let git = Cmd::new(Program::Git, ["init", "-q"]);
     let quiet = process::run_quiet(&git, &dir).expect("git runs");
     assert!(quiet.success, "git init failed: {}", quiet.stderr);
-    fs::write(dir.join("NOTES.md"), "# Notes\n").expect("write a doc");
-    fs::write(dir.join("data.txt"), "not Markdown\n").expect("write a text file");
+    Scratch::write(dir.join("NOTES.md"), "# Notes\n").expect("write a doc");
+    Scratch::write(dir.join("data.txt"), "not Markdown\n").expect("write a text file");
     let found = run(&Context {
         root: dir.to_path_buf(),
         members: Ok(Vec::new()),
@@ -27,7 +26,7 @@ fn only_the_markdown_files_of_a_git_repo_are_counted() {
 #[test]
 fn a_folder_that_is_not_a_git_repo_inspects_nothing_and_says_git_s_error() {
     let dir = Scratch::new("docs-no-git");
-    fs::write(dir.join("NOTES.md"), "# Notes\n").expect("write a doc");
+    Scratch::write(dir.join("NOTES.md"), "# Notes\n").expect("write a doc");
     let found = run(&Context {
         root: dir.to_path_buf(),
         members: Ok(Vec::new()),
@@ -40,11 +39,11 @@ fn a_folder_that_is_not_a_git_repo_inspects_nothing_and_says_git_s_error() {
 #[test]
 fn violations_are_listed_by_file_then_line() {
     let dir = Scratch::new("docs-order");
-    fs::write(dir.join("AGENTS.md"), "# Agents\n").expect("write AGENTS.md");
-    fs::write(dir.join("ARCHITECTURE.md"), "# Architecture\n").expect("write ARCHITECTURE.md");
-    fs::write(dir.join("CLAUDE.md"), "@AGENTS.md\n").expect("write CLAUDE.md");
-    fs::write(dir.join("b.md"), "# B\n\nSee [x](gone.md).\n").expect("write b.md");
-    fs::write(
+    Scratch::write(dir.join("AGENTS.md"), "# Agents\n").expect("write AGENTS.md");
+    Scratch::write(dir.join("ARCHITECTURE.md"), "# Architecture\n").expect("write ARCHITECTURE.md");
+    Scratch::write(dir.join("CLAUDE.md"), "@AGENTS.md\n").expect("write CLAUDE.md");
+    Scratch::write(dir.join("b.md"), "# B\n\nSee [x](gone.md).\n").expect("write b.md");
+    Scratch::write(
         dir.join("a.md"),
         "# A\n\nSee `crates/x/`.\n\n[y](gone.md)\n",
     )
@@ -61,8 +60,8 @@ fn violations_are_listed_by_file_then_line() {
 #[test]
 fn only_the_markdown_files_it_read_are_counted() {
     let dir = Scratch::new("docs-count-read");
-    fs::write(dir.join("a.md"), "# A\n").expect("write a doc");
-    fs::write(dir.join("bad.md"), [0xff, 0xfe, b'\n']).expect("write a doc that is not UTF-8");
+    Scratch::write(dir.join("a.md"), "# A\n").expect("write a doc");
+    Scratch::write(dir.join("bad.md"), [0xff, 0xfe, b'\n']).expect("write a doc that is not UTF-8");
     let listed = ["a.md", "bad.md", "gone.md"].map(str::to_owned);
     let found = inspect(&dir, &listed);
     assert_eq!(
@@ -85,9 +84,9 @@ fn a_link_to_a_file_git_ignores_fails_in_a_real_repo() {
     let git = Cmd::new(Program::Git, ["init", "-q"]);
     let quiet = process::run_quiet(&git, &dir).expect("git runs");
     assert!(quiet.success, "git init failed: {}", quiet.stderr);
-    fs::write(dir.join(".gitignore"), "local.md\n").expect("write .gitignore");
-    fs::write(dir.join("local.md"), "# Local\n").expect("write the ignored file");
-    fs::write(dir.join("GUIDE.md"), "See [x](local.md).\n").expect("write a doc");
+    Scratch::write(dir.join(".gitignore"), "local.md\n").expect("write .gitignore");
+    Scratch::write(dir.join("local.md"), "# Local\n").expect("write the ignored file");
+    Scratch::write(dir.join("GUIDE.md"), "See [x](local.md).\n").expect("write a doc");
     let found = run(&Context {
         root: dir.to_path_buf(),
         members: Ok(Vec::new()),

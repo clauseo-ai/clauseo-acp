@@ -115,8 +115,9 @@ mod tests {
     #[test]
     fn on_disk_matches_each_part_with_its_case() {
         let dir = crate::scratch::Scratch::new("docs-tree-on-disk");
-        fs::create_dir_all(dir.join("docs/sub")).expect("create a folder");
-        fs::write(dir.join("docs/local.md"), "# Local\n").expect("write a file");
+        crate::scratch::Scratch::create_dir_all(dir.join("docs/sub")).expect("create a folder");
+        crate::scratch::Scratch::write(dir.join("docs/local.md"), "# Local\n")
+            .expect("write a file");
         assert_eq!(on_disk(&dir, "docs/local.md"), Some(OnDisk::File));
         assert_eq!(on_disk(&dir, "docs/sub"), Some(OnDisk::Folder));
         assert_eq!(on_disk(&dir, "docs/LOCAL.md"), None);
