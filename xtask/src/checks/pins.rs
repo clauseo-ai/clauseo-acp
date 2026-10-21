@@ -26,11 +26,14 @@
 //! forms that name its tool in `forms.rs`, and one sample in each exhaustive test in `tests.rs`.
 
 mod cargo;
+mod fix;
 mod forms;
 mod homes;
 mod lefthook;
 mod workflows;
 mod yaml;
+
+pub(crate) use fix::Fix;
 
 use crate::checks::{Inspection, Noun, StaticCheck};
 use crate::setup::{BINARIES, Binary, TOOLS, Tool};
@@ -244,57 +247,6 @@ impl Home {
             Home::Tool(_) | Home::Binary(_) => {
                 format!("`cargo xtask setup --binaries` installs the versions {SETUP} pins")
             }
-        }
-    }
-}
-
-/// The fix line of each failure `pins` reports.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Fix {
-    /// A `rust-version` whose major.minor is not the toolchain's.
-    RustVersion { channel_major_minor: String },
-    /// A `lefthook.yml` comment that names another lefthook version than `BINARIES`.
-    LefthookComment { pinned: String },
-    /// A version input to the action that installs this tool, or a Rust toolchain action's
-    /// ref that names a toolchain.
-    Input(FileHome),
-    /// A workflow value that names a version of the tool this home pins.
-    Copy(Home),
-    /// A home value that could not be read.
-    Unread(FileHome),
-    /// A YAML file that does not parse.
-    NotYaml,
-    /// A manifest that does not parse.
-    NotToml,
-}
-
-impl fmt::Display for Fix {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Fix::RustVersion {
-                channel_major_minor,
-            } => write!(
-                f,
-                "set rust-version to \"{channel_major_minor}\", the major.minor of `channel` in \
-                 {TOOLCHAIN}, the one home of the Rust version"
-            ),
-            Fix::LefthookComment { pinned } => write!(
-                f,
-                "check that the comment holds for lefthook {pinned}, then make it name {pinned}, \
-                 the version `BINARIES` in {SETUP} pins"
-            ),
-            Fix::Input(home) => home.input_fix(f),
-            Fix::Copy(home) => write!(f, "remove the version from this file: {}", home.install()),
-            Fix::Unread(home) => home.unread_fix(f),
-            Fix::NotYaml => write!(
-                f,
-                "make the file valid YAML at this line: pins parses it to find the versions it \
-                 holds"
-            ),
-            Fix::NotToml => write!(
-                f,
-                "make the manifest valid TOML at this line: pins reads its rust-version there"
-            ),
         }
     }
 }
