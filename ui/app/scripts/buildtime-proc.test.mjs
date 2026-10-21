@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { DRAIN_MS, KILL_GRACE_MS, groupAlive, runTool } from "./buildtime-proc.mjs";
+import { DRAIN_MS, KILL_GRACE_MS, groupAlive, runTool, start, stop } from "./buildtime-proc.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "buildtime-proc-"));
 
@@ -12,18 +12,45 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-/** tsc's pattern: a node wrapper that runs the real binary (`sleep 30`) with inherited stdio. */
+const LEADER = join(import.meta.dirname, "buildtime-leader.mjs");
+
+/**
+ * tsc's pattern: a node wrapper that runs the real binary with inherited stdio. The binary is a
+ * node process that prints `ready` and waits 30 s. Every process of the tool, and its leader, has
+ * the scratch folder in its argv, so `leftovers()` finds them without knowing their pids.
+ */
 function wrapper() {
   const tool = join(dir, "wrapper.mjs");
+  const binary = 'console.log("ready"); setTimeout(() => {}, 30_000);';
   writeFileSync(
     tool,
     [
       'import { execFileSync } from "node:child_process";',
-      'execFileSync("sleep", ["30"], { stdio: "inherit" });',
+      `execFileSync(process.execPath, ["-e", ${JSON.stringify(binary)}, ${JSON.stringify(dir)}], {`,
+      '  stdio: "inherit",',
+      "});",
       "",
     ].join("\n"),
   );
   return tool;
+}
+
+/** Whether any process with the scratch folder in its argv (the tool, its binary) is left. */
+function leftovers() {
+  return spawnSync("pgrep", ["-f", dir]).status === 0;
+}
+
+/** Resolves once `stream` has printed a line `ready`. */
+function ready(stream) {
+  return new Promise((done) => {
+    let out = "";
+    stream.on("data", (chunk) => {
+      out += chunk;
+      if (out.split("\n").includes("ready")) {
+        done();
+      }
+    });
+  });
 }
 
 /** Resolves once `test()` is true, or with false after `ms`. */
@@ -41,15 +68,45 @@ async function until(test, ms) {
 // POSIX only: process groups and the leader exist only there. On Windows, buildtime-proc.mjs
 // stops a tree with taskkill, which these tests do not cover.
 describe.skipIf(process.platform === "win32")("runTool", () => {
-  it("stops a tool whose own child holds the pipes, and that child, at the timeout", async () => {
+  // The timeout can fire before the leader has started the tool (a loaded machine starts node
+  // slowly), so `toolPid` may be unknown; either way nothing of the tool may be left.
+  it("leaves nothing of a tool whose own child holds the pipes at the timeout", async () => {
     const started = performance.now();
     const result = await runTool([wrapper()], { cwd: dir, timeoutMs: 300 });
     const ms = performance.now() - started;
     expect(result.timedOut).toBe(true);
     expect(ms).toBeLessThan(300 + KILL_GRACE_MS + DRAIN_MS);
-    expect(result.toolPid).toBeTypeOf("number");
-    expect(groupAlive(result.toolPid)).toBe(false);
     expect(groupAlive(result.pid)).toBe(false);
+    if (result.toolPid !== undefined) {
+      expect(groupAlive(result.toolPid)).toBe(false);
+    }
+    expect(await until(() => !leftovers(), 3_000)).toBe(true);
+  }, 15_000);
+
+  it("stops a started tool's group, and the child of it that holds the pipes", async () => {
+    const child = start([wrapper()], { cwd: dir });
+    const reported = new Promise((done) => child.once("message", done));
+    await Promise.all([ready(child.stdout), reported]);
+    expect(groupAlive(child.toolPid)).toBe(true);
+    expect(await stop(child)).toBe(true);
+    expect(groupAlive(child.toolPid)).toBe(false);
+    expect(groupAlive(child.pid)).toBe(false);
+    expect(await until(() => !leftovers(), 3_000)).toBe(true);
+  }, 15_000);
+
+  // What `stop` sends while the leader has not reported the tool's pid: SIGTERM to the leader's
+  // group alone. The leader passes it on, and the tool and its child go with it.
+  it("stops the tool through its leader when the stop comes before the pid", async () => {
+    const leader = spawn(process.execPath, [LEADER, wrapper()], {
+      cwd: dir,
+      stdio: ["ignore", "pipe", "inherit", "ipc"],
+      detached: true,
+    });
+    const exited = new Promise((done) => leader.once("exit", (code) => done(code)));
+    await ready(leader.stdout);
+    process.kill(-leader.pid, "SIGTERM");
+    expect(await exited).toBe(128 + 15);
+    expect(await until(() => !leftovers(), 3_000)).toBe(true);
   }, 15_000);
 
   it("returns the code and output of a tool that exits", async () => {
