@@ -2,21 +2,24 @@
 //! core-io asks each core crate to have (the repo's root `clippy.toml` plus
 //! `xtask/core-io-bans.toml`) with every `allow-invalid` taken out, and whose root carries the
 //! forbid line core-io asks every target root of a held crate to carry. The first holds one module
-//! per form in `forms.rs`, the second one per form of `forms::forbidden()`. It runs the pinned
-//! clippy on each offline, with the clippy step's flags (`CLIPPY_FLAGS`), and asserts that each
-//! must-fail module gets a `disallowed_methods` or `disallowed_types` hit, or error E0453,
-//! inside its own file (naming the form's item, when it has one) and each must-pass module gets
-//! none.
+//! per form in `forms.rs`, the second one per form of `forms::forbidden()`. A third crate has the
+//! root `clippy.toml` alone, and one module per form of `forms::root()`: the doors every crate
+//! has, and the reads they leave allowed. It runs the pinned clippy on each offline, with the
+//! clippy step's flags (`CLIPPY_FLAGS`), and asserts that each must-fail module gets a
+//! `disallowed_methods` or `disallowed_types` hit, or error E0453, inside its own file (naming
+//! the form's item, when it has one, on the form's line and with its note, when it has them) and
+//! each must-pass module gets none.
 //!
 //! Both crates' manifests set the two lints to `allow` in `[lints.clippy]`, and both runs pass
 //! `-A` of the two lints after `--`, which cargo hands to clippy-driver in `CLIPPY_ARGS`. The
 //! first run's must-fail forms still fail, so neither undoes the forbid line.
 //!
 //! It also fails on any other compile error, and on a warning about the `clippy.toml` itself
-//! other than "does not refer to a reachable" for exactly the entries of the other OS family
-//! (`std::os::windows::` on unix, `std::os::unix::` on Windows). So a misspelled entry fails
-//! here: a `std::os::unix` one when the test runs on unix, a `std::os::windows` one when it runs
-//! on Windows, any other one everywhere.
+//! other than "does not refer to a reachable" for exactly the entries that do not build here: a
+//! root entry none of whose forms builds on this target (`Only`), and any other entry of the
+//! other OS family (`std::os::windows::` on unix, `std::os::unix::` on Windows). So a misspelled
+//! entry fails where its form builds. `every_root_entry_has_a_form` checks that every root entry
+//! has a form.
 
 mod forms;
 
@@ -28,6 +31,7 @@ use crate::steps::plan::CLIPPY_FLAGS;
 use forms::{Form, Must};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::Path;
 use std::time::Instant;
 use toml::{Table, Value as Toml};
@@ -38,10 +42,20 @@ const LINTS: [&str; 2] = ["clippy::disallowed_methods", "clippy::disallowed_type
 /// The error an `allow` or `expect` of a forbidden lint gets, which counts as a hit too.
 const FORBID_ERROR: &str = "E0453";
 
+/// One hit: where it is and what it says.
+struct Hit {
+    /// The line of its primary span.
+    line: u64,
+    /// The message: "use of a disallowed method `<path>`".
+    text: String,
+    /// Its notes and help (the entry's reason) and suggested replacements, joined.
+    notes: String,
+}
+
 /// What one clippy run reported.
 struct Run {
-    /// The text of each hit, by the file it is in.
-    hits: BTreeMap<String, Vec<String>>,
+    /// Each hit, by the file it is in.
+    hits: BTreeMap<String, Vec<Hit>>,
     /// The paths of the config entries clippy could not find.
     unreachable: BTreeSet<String>,
     /// Every other error, and every other warning about the `clippy.toml`, as rendered.
@@ -67,8 +81,18 @@ fn clippy_bans_every_planted_call() {
     let forbid = dir.join("forbid");
     write_crate(&forbid, &repo, &config, &forbidden);
     let forbid_run = clippy(&forbid, &target, forbidden.len());
+    let root_forms = here(forms::root());
+    let root_table: Table = toml::from_str(
+        &fs::read_to_string(repo.join(clippy_toml::ROOT)).expect("read the root clippy.toml"),
+    )
+    .expect("the root clippy.toml parses");
+    let root_config =
+        toml::to_string(&without_allow_invalid(&root_table)).expect("the root table renders");
+    let root = dir.join("root");
+    write_crate(&root, &repo, &root_config, &root_forms);
+    let root_run = clippy(&root, &target, root_forms.len());
 
-    for run in [&run, &forbid_run] {
+    for run in [&run, &forbid_run, &root_run] {
         assert!(
             run.problems.is_empty(),
             "cargo clippy failed or warned about the config:\n{}\n{}",
@@ -76,21 +100,29 @@ fn clippy_bans_every_planted_call() {
             run.stderr
         );
     }
+    let all_root_forms = forms::root();
     assert_eq!(
         run.unreachable,
-        other_family_entries(&expected.table),
-        "clippy must find every list entry but those of the other OS family"
+        not_here(&expected.table, &all_root_forms),
+        "clippy must find every list entry but those that do not build here"
+    );
+    assert_eq!(
+        root_run.unreachable,
+        not_here(&root_table, &all_root_forms),
+        "clippy must find every root entry but those that do not build here"
     );
     let wrong: Vec<String> = wrong_forms(&forms, &run)
         .into_iter()
         .chain(wrong_forms(&forbidden, &forbid_run))
+        .chain(wrong_forms(&root_forms, &root_run))
         .collect();
     assert!(
         wrong.is_empty(),
-        "clippy got these forms wrong:\n{}\n{}\n{}",
+        "clippy got these forms wrong:\n{}\n{}\n{}\n{}",
         wrong.join("\n"),
         run.stderr,
-        forbid_run.stderr
+        forbid_run.stderr,
+        root_run.stderr
     );
 }
 
@@ -136,12 +168,17 @@ fn clippy(dir: &Path, target: &Path, count: usize) -> Run {
         let level = message["level"].as_str().unwrap_or_default();
         let text = message["message"].as_str().unwrap_or_default();
         let rendered = message["rendered"].as_str().unwrap_or_default();
-        let files = primary_files(&message);
+        let spans = primary_spans(&message);
         if LINTS.contains(&code) || code == FORBID_ERROR {
-            for file in files {
-                run.hits.entry(file).or_default().push(text.to_owned());
+            let notes = notes(&message);
+            for (file, line) in spans {
+                run.hits.entry(file).or_default().push(Hit {
+                    line,
+                    text: text.to_owned(),
+                    notes: notes.clone(),
+                });
             }
-        } else if files.iter().any(|file| file.ends_with("clippy.toml")) {
+        } else if spans.iter().any(|(file, _)| file.ends_with("clippy.toml")) {
             match unreachable_path(text) {
                 Some(path) => {
                     run.unreachable.insert(path);
@@ -156,7 +193,8 @@ fn clippy(dir: &Path, target: &Path, count: usize) -> Run {
 }
 
 /// What `run` got wrong about `forms`: a must-fail form without a hit in its file, or without
-/// one naming its item, and a must-pass form with one.
+/// one naming its item (on its line, with its note, when the form has them), and a must-pass
+/// form with one.
 fn wrong_forms(forms: &[Form], run: &Run) -> Vec<String> {
     forms
         .iter()
@@ -165,24 +203,44 @@ fn wrong_forms(forms: &[Form], run: &Run) -> Vec<String> {
                 .hits
                 .get(&format!("src/{}.rs", form.name))
                 .map_or(&[][..], Vec::as_slice);
-            let names_item = |item: &str| {
-                let quoted = format!("`{item}`");
-                found.iter().any(|hit| hit.contains(&quoted))
+            let listed = || {
+                let hits: Vec<String> = found
+                    .iter()
+                    .map(|hit| format!("line {}: {} ({})", hit.line, hit.text, hit.notes))
+                    .collect();
+                hits.join("; ")
+            };
+            let matches = |item: &str, hit: &Hit| {
+                hit.text.contains(&format!("`{item}`"))
+                    && form.line.is_none_or(|line| hit.line == line)
+                    && form
+                        .note
+                        .as_ref()
+                        .is_none_or(|note| hit.notes.contains(note))
             };
             match (form.must, &form.item) {
                 (Must::Fail, _) if found.is_empty() => {
                     Some(format!("{}: no hit, but it must fail", form.name))
                 }
-                (Must::Fail, Some(item)) if !names_item(item) => Some(format!(
-                    "{}: no hit names `{item}`, only: {}",
-                    form.name,
-                    found.join("; ")
-                )),
+                (Must::Fail, Some(item)) if !found.iter().any(|hit| matches(item, hit)) => {
+                    Some(format!(
+                        "{}: no hit names `{item}`{}{}, only: {}",
+                        form.name,
+                        form.line
+                            .map(|line| format!(" on line {line}"))
+                            .unwrap_or_default(),
+                        form.note
+                            .as_ref()
+                            .map(|note| format!(" with \"{note}\""))
+                            .unwrap_or_default(),
+                        listed()
+                    ))
+                }
                 (Must::Pass, _) if !found.is_empty() => Some(format!(
                     "{}: {} hit(s), but it must pass: {}",
                     form.name,
                     found.len(),
-                    found.join("; ")
+                    listed()
                 )),
                 _ => None,
             }
@@ -190,19 +248,41 @@ fn wrong_forms(forms: &[Form], run: &Run) -> Vec<String> {
         .collect()
 }
 
-/// Writes a scratch crate into `dir`: a manifest with no dependency, its own workspace, a feature
-/// `io` that is off by default and the two lints set to `allow`, `clippy.toml` holding
-/// `config`, the repo's `rust-toolchain.toml`, so the pinned clippy runs, and `src/lib.rs`,
-/// which starts with `forbid_line()` and declares one module per form, each in `src/<name>.rs`.
+/// The repo's dependency `name`, as `[workspace.dependencies]` in the root `Cargo.toml` writes
+/// it, so the scratch crates resolve the root file's entries against the same crate.
+fn dependency(repo: &Path, name: &str) -> String {
+    let manifest: Table = toml::from_str(
+        &fs::read_to_string(repo.join("Cargo.toml")).expect("read the root Cargo.toml"),
+    )
+    .expect("the root Cargo.toml parses");
+    let found = manifest
+        .get("workspace")
+        .and_then(|workspace| workspace.get("dependencies"))
+        .and_then(|deps| deps.get(name))
+        .expect("the root Cargo.toml has the workspace dependency");
+    format!("{name} = {found}")
+}
+
+/// Writes a scratch crate into `dir`: a manifest whose dependency is the repo's `serde_json`, its
+/// own workspace, a feature `io` that is off by default and the two
+/// lints set to `allow`; the repo's `Cargo.lock`, so the offline build takes the versions it
+/// locks; `clippy.toml` holding `config`; the repo's `rust-toolchain.toml`, so the pinned clippy
+/// runs; and `src/lib.rs`, which starts with `forbid_line()` and declares one module per form,
+/// each in `src/<name>.rs`.
 fn write_crate(dir: &Path, repo: &Path, config: &str, forms: &[Form]) {
     Scratch::create_dir_all(dir.join("src")).expect("create src/");
     Scratch::write(
         dir.join("Cargo.toml"),
-        "[package]\nname = \"planted\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\
-         publish = false\n\n[features]\nio = []\n\n[lints.clippy]\ndisallowed_methods = \"allow\"\n\
-         disallowed_types = \"allow\"\n\n[workspace]\n",
+        format!(
+            "[package]\nname = \"planted\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\
+             publish = false\n\n[features]\nio = []\n\n[dependencies]\n{}\n\n\
+             [lints.clippy]\ndisallowed_methods = \"allow\"\ndisallowed_types = \"allow\"\n\n\
+             [workspace]\n",
+            dependency(repo, "serde_json")
+        ),
     )
     .expect("write Cargo.toml");
+    Scratch::copy(repo.join("Cargo.lock"), dir.join("Cargo.lock")).expect("copy Cargo.lock");
     Scratch::write(dir.join("clippy.toml"), config).expect("write clippy.toml");
     Scratch::copy(
         repo.join("rust-toolchain.toml"),
@@ -228,17 +308,39 @@ fn compiler_message(line: &str) -> Option<Value> {
     (parsed["reason"] == "compiler-message").then(|| parsed["message"].take())
 }
 
-/// The files of a message's primary spans, `/`-separated as cargo prints them relative to the
-/// crate (`src/x.rs`), or absolute for a file outside it.
-fn primary_files(message: &Value) -> Vec<String> {
+/// The file and first line of a message's primary spans, the file `/`-separated as cargo prints
+/// it relative to the crate (`src/x.rs`), or absolute for a file outside it.
+fn primary_spans(message: &Value) -> Vec<(String, u64)> {
     message["spans"]
         .as_array()
         .into_iter()
         .flatten()
         .filter(|span| span["is_primary"] == true)
-        .filter_map(|span| span["file_name"].as_str())
-        .map(|file| file.replace('\\', "/"))
+        .filter_map(|span| {
+            let file = span["file_name"].as_str()?.replace('\\', "/");
+            Some((file, span["line_start"].as_u64().unwrap_or_default()))
+        })
         .collect()
+}
+
+/// A message's children (its notes and help, where clippy puts an entry's reason) and the
+/// replacements they suggest, joined by ` | `.
+fn notes(message: &Value) -> String {
+    let children = message["children"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice);
+    let mut parts = Vec::new();
+    for child in children {
+        parts.extend(child["message"].as_str().map(str::to_owned));
+        let spans = child["spans"].as_array().map_or(&[][..], Vec::as_slice);
+        parts.extend(
+            spans
+                .iter()
+                .filter_map(|span| span["suggested_replacement"].as_str())
+                .map(str::to_owned),
+        );
+    }
+    parts.join(" | ")
 }
 
 /// `table` with `allow-invalid` taken out of every entry, so clippy warns about each path it
@@ -256,22 +358,74 @@ fn without_allow_invalid(table: &Table) -> Table {
     table
 }
 
-/// The paths of `table`'s `disallowed-methods` and `disallowed-types` entries in the other OS
-/// family's `std::os` module, which clippy cannot find on this host.
-fn other_family_entries(table: &Table) -> BTreeSet<String> {
-    let other = if cfg!(windows) {
-        "std::os::unix::"
-    } else {
-        "std::os::windows::"
-    };
+/// The paths of `table`'s `disallowed-methods` and `disallowed-types` entries.
+fn entries(table: &Table) -> impl Iterator<Item = &str> {
     ["disallowed-methods", "disallowed-types"]
         .into_iter()
         .filter_map(|key| table.get(key).and_then(Toml::as_array))
         .flatten()
         .filter_map(|row| row.get("path").and_then(Toml::as_str))
-        .filter(|path| path.starts_with(other))
+}
+
+/// The paths of `table`'s entries that clippy cannot find on this host: an entry a root form
+/// names when no form naming it builds here (`Only`), and any other entry in the other OS
+/// family's `std::os` module.
+fn not_here(table: &Table, root_forms: &[Form]) -> BTreeSet<String> {
+    let other = if cfg!(windows) {
+        "std::os::unix::"
+    } else {
+        "std::os::windows::"
+    };
+    entries(table)
+        .filter(|path| {
+            let mut naming = root_forms
+                .iter()
+                .filter(|form| form.item.as_deref() == Some(*path))
+                .peekable();
+            match naming.peek() {
+                Some(_) => !naming.any(|form| form.only.here()),
+                None => path.starts_with(other),
+            }
+        })
         .map(str::to_owned)
         .collect()
+}
+
+/// The entries of `table` that no form in `forms` names as its item, in the file's order.
+fn without_a_form(table: &Table, forms: &[Form]) -> Vec<String> {
+    let items: BTreeSet<&str> = forms
+        .iter()
+        .filter_map(|form| form.item.as_deref())
+        .collect();
+    entries(table)
+        .filter(|path| !items.contains(path))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Every entry of the root `clippy.toml` has a form in `forms::root()` that must hit it, on
+/// some target: an entry added without one fails here, before clippy runs.
+#[test]
+fn every_root_entry_has_a_form() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let root: Table = toml::from_str(
+        &fs::read_to_string(repo.join(clippy_toml::ROOT)).expect("read the root clippy.toml"),
+    )
+    .expect("the root clippy.toml parses");
+    let forms = forms::root();
+    assert_eq!(without_a_form(&root, &forms), forms::NOT_BUILT);
+    // The failing case: an entry with no form is named.
+    let mut planted = root;
+    let row: Table =
+        toml::from_str("path = \"std::fs::read_link\"\nreason = \"x\"").expect("a row");
+    planted
+        .get_mut("disallowed-methods")
+        .and_then(Toml::as_array_mut)
+        .expect("the root bans methods")
+        .push(Toml::Table(row));
+    let mut expected = forms::NOT_BUILT.to_vec();
+    expected.push("std::fs::read_link");
+    assert_eq!(without_a_form(&planted, &forms), expected);
 }
 
 /// The path in clippy's warning that a config entry names nothing it can find, the

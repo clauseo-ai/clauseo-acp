@@ -4,6 +4,11 @@
 //! every other ban (`canonicalize`, `Command::status`, the clock, ...). A wrapper does exactly what
 //! its std call does; the rules about which paths may change live in the door's other files.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "the write door's std calls live here alone; clippy.toml bans them elsewhere"
+)]
+
 use std::fs::{self, File, OpenOptions, Permissions};
 use std::io;
 use std::path::Path;
