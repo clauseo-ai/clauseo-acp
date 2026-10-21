@@ -1,15 +1,20 @@
 //! The `fix:` line of a violation or a failure, typed.
 //!
 //! Each check names its failure kinds in its own `Fix` enum, whose `Display` writes each text once,
-//! and its `fix/tests.rs` pins every variant's text in an exhaustive `match`. So a new kind does
-//! not compile until its text is tested. The modules that several checks share (the helpers in
-//! `checks.rs`, `crates_table`, `graph`, `exceptions`) have an enum each too. This enum wraps them
-//! all, plus `Tool`: the text of the steps, which build their fix lines from what a tool printed.
+//! and its `fix/tests.rs` pins every variant's text with `tests::fix_texts!`, which numbers the
+//! arms of one exhaustive `match`. `tests::assert_texts` then fails until each arm has a sample,
+//! so a new kind needs its arm and its sample. The modules that several checks share (the helpers
+//! in `checks.rs`, `crates_table`, `graph`, `exceptions`) have an enum each too. This enum wraps
+//! them all, plus `Tool`: the text of the steps, which build their fix lines from what a tool
+//! printed.
 
 use crate::budgets;
 use crate::checks;
 use crate::mutants;
 use std::fmt;
+
+#[cfg(test)]
+pub(crate) mod tests;
 
 /// One fix line. `Display` prints the text, without the `fix: ` label. Each check's enum is
 /// boxed, so a `Violation` stays small however many fields a variant carries.
