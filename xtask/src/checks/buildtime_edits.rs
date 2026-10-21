@@ -60,8 +60,7 @@ fn run(ctx: &Context) -> Inspection {
                 read += 1;
                 let text = String::from_utf8_lossy(&bytes);
                 if text.contains(MARKER) {
-                    let held =
-                        *held.get_or_insert_with(|| lock::is_held(&ctx.root.join(lock::LOCK_PATH)));
+                    let held = *held.get_or_insert_with(|| lock::is_held(&ctx.root));
                     found.extend(scan(&path, &text, held));
                 }
             }

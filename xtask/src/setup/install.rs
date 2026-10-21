@@ -5,6 +5,7 @@
 use super::{Binary, Machine, Packing, Runner};
 use crate::output::Printer;
 use crate::process::{Cmd, Ended, Output, Program};
+use crate::write::Staging;
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 use std::fs;
@@ -203,14 +204,15 @@ fn download_into<W: Write>(
         "installing {} {}: downloading {}",
         binary.name, binary.version, download.url
     ));
-    let staging = bin.join(format!(
-        "{}{}-{}",
-        staging::STAGING_PREFIX,
-        binary.name,
-        std::process::id()
-    ));
-    let placed = staging::fresh_dir(bin, &staging)
-        .and_then(|()| fetch_check_place(binary, download, &staging, bin, runner));
+    let label = format!("{}-{}", binary.name, std::process::id());
+    let staging = match staging::fresh_dir(bin, &label) {
+        Ok(staging) => staging,
+        Err((message, fix)) => {
+            out.failure(&message, &fix);
+            return false;
+        }
+    };
+    let placed = fetch_check_place(binary, download, &staging, bin, runner);
     let mut ok = match placed {
         Ok(()) => {
             out.note(format!(
@@ -226,15 +228,12 @@ fn download_into<W: Write>(
             false
         }
     };
-    match fs::remove_dir_all(&staging) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => {
-            out.failure(
-                &format!("could not remove {}: {error}", staging.display()),
-                &format!("remove {} by hand", staging.display()),
-            );
-            ok = false;
-        }
-        _ => {}
+    if let Err(error) = staging.remove() {
+        out.failure(
+            &format!("could not remove {}: {error}", staging.dir().display()),
+            &format!("remove {} by hand", staging.dir().display()),
+        );
+        ok = false;
     }
     ok
 }
@@ -244,10 +243,11 @@ fn download_into<W: Write>(
 fn fetch_check_place(
     binary: &Binary,
     download: &Download,
-    staging: &Path,
+    staging: &Staging,
     bin: &Path,
     runner: &mut Runner<'_>,
 ) -> Result<(), Failure> {
+    let (staging, dir) = (staging, staging.dir());
     let (name, asset, url) = (binary.name, download.asset.as_str(), download.url.as_str());
     let curl = curl_cmd(asset, url);
     let fix = format!(
@@ -255,8 +255,8 @@ fn fetch_check_place(
          setup --binaries again; setup needs curl 7.71 or newer, for --retry-all-errors"
     );
     let what = format!("downloading {url}");
-    run_step(runner, &curl, staging, DOWNLOAD_TIMEOUT, &what, &fix)?;
-    let file = staging.join(asset);
+    run_step(runner, &curl, dir, DOWNLOAD_TIMEOUT, &what, &fix)?;
+    let file = dir.join(asset);
     let found = sha256_of(&file).map_err(|error| {
         (
             format!("could not read the download of {url}: {error}"),
@@ -286,12 +286,12 @@ fn fetch_check_place(
             run_step(
                 runner,
                 &tar,
-                staging,
+                dir,
                 UNPACK_TIMEOUT,
                 &format!("unpacking {asset}"),
                 &fix,
             )?;
-            staging.join(name)
+            dir.join(name)
         }
     };
     let regular = fs::symlink_metadata(&unpacked).map_err(|error| {
@@ -309,15 +309,12 @@ fn fetch_check_place(
             ),
         ));
     }
-    let destination = bin.join(name);
-    make_executable(&unpacked)
-        .and_then(|()| fs::rename(&unpacked, &destination))
-        .map_err(|error| {
-            (
-                format!("could not move {name} into {}: {error}", bin.display()),
-                retry_fix(bin),
-            )
-        })
+    staging.install(&unpacked, name).map_err(|error| {
+        (
+            format!("could not move {name} into {}: {error}", bin.display()),
+            retry_fix(bin),
+        )
+    })
 }
 
 /// The curl command that downloads `url` to `asset`. A failed attempt (a reset, a 502) is tried
@@ -406,16 +403,6 @@ pub(crate) fn sha256_of(file: &Path) -> io::Result<String> {
         write!(hex, "{byte:02x}").map_err(io::Error::other)?;
     }
     Ok(hex)
-}
-
-/// On Unix makes `file` executable.
-fn make_executable(file: &Path) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(file, fs::Permissions::from_mode(0o755))?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

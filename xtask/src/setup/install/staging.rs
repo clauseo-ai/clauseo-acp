@@ -4,30 +4,28 @@
 use super::{Failure, retry_fix};
 use crate::output::Printer;
 use crate::setup::Machine;
-use std::fs::{self, File, TryLockError};
+use crate::write::{self, LockFile, Staging};
+use std::fs::TryLockError;
 use std::io::{self, Write};
 use std::path::Path;
 
 /// The start of the name of every staging directory `setup` makes in bin.
-pub(super) const STAGING_PREFIX: &str = ".xtask-setup-";
-
-/// Makes `bin` if needed, and `staging` in it, empty.
-pub(super) fn fresh_dir(bin: &Path, staging: &Path) -> Result<(), Failure> {
-    let made = fs::create_dir_all(bin).and_then(|()| match fs::remove_dir_all(staging) {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
-        _ => fs::create_dir(staging),
-    });
-    made.map_err(|error| {
-        (
-            format!("could not make {}: {error}", staging.display()),
-            retry_fix(bin),
-        )
-    })
-}
+const STAGING_PREFIX: &str = ".xtask-setup-";
 
 /// The file in bin whose exclusive lock `setup --binaries` holds for the whole run, so one run at a
 /// time uses bin. It is never deleted, and `STAGING_PREFIX` does not match it.
 const RUN_LOCK: &str = ".xtask-setup.lock";
+
+/// Makes `bin` if needed, and the staging dir `<bin>/.xtask-setup-<label>` in it, empty.
+pub(super) fn fresh_dir(bin: &Path, label: &str) -> Result<Staging, Failure> {
+    let name = format!("{STAGING_PREFIX}{label}");
+    Staging::fresh(bin, &name).map_err(|error| {
+        (
+            format!("could not make {}: {error}", bin.join(&name).display()),
+            retry_fix(bin),
+        )
+    })
+}
 
 /// On macOS and Linux, takes the run lock in `machine`'s cargo bin, waiting while another
 /// `setup --binaries` holds it, then removes every `STAGING_PREFIX` entry. With the lock held no
@@ -37,7 +35,7 @@ const RUN_LOCK: &str = ".xtask-setup.lock";
 pub(crate) fn lock_bin_and_sweep<W: Write>(
     out: &mut Printer<W>,
     machine: &Machine<'_>,
-) -> (Option<File>, bool) {
+) -> (Option<LockFile>, bool) {
     let Some(bin) = machine
         .cargo_bin
         .as_deref()
@@ -73,13 +71,23 @@ pub(crate) fn lock_bin_and_sweep<W: Write>(
     (Some(lock), swept.is_ok())
 }
 
+/// Removes every entry in `bin` whose name starts with `STAGING_PREFIX`, each through
+/// `write::remove_in`, which removes a symlink and never follows it.
+fn remove_staging_leftovers(bin: &Path) -> io::Result<()> {
+    for entry in std::fs::read_dir(bin)? {
+        let name = entry?.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(STAGING_PREFIX) {
+            write::remove_in(bin, &name)?;
+        }
+    }
+    Ok(())
+}
+
 /// Makes `bin` if needed, then takes the exclusive lock on `RUN_LOCK` in it, waiting while another
-/// run holds it. The lock file is opened for reading, so one the user cannot write still locks. It
-/// is created only when it is missing.
-fn lock_run<W: Write>(out: &mut Printer<W>, bin: &Path) -> io::Result<File> {
-    fs::create_dir_all(bin)?;
-    let path = bin.join(RUN_LOCK);
-    let lock = File::open(&path).or_else(|_| File::create(&path))?;
+/// run holds it. How the file is opened is `LockFile::open`'s.
+fn lock_run<W: Write>(out: &mut Printer<W>, bin: &Path) -> io::Result<LockFile> {
+    let lock = LockFile::open(bin, RUN_LOCK)?;
     match lock.try_lock() {
         Ok(()) => {}
         Err(TryLockError::WouldBlock) => {
@@ -92,26 +100,4 @@ fn lock_run<W: Write>(out: &mut Printer<W>, bin: &Path) -> io::Result<File> {
         Err(TryLockError::Error(error)) => return Err(error),
     }
     Ok(lock)
-}
-
-/// Removes every entry in `bin` whose name starts with `STAGING_PREFIX`. A symlink is removed,
-/// never followed.
-fn remove_staging_leftovers(bin: &Path) -> io::Result<()> {
-    for entry in fs::read_dir(bin)? {
-        let entry = entry?;
-        if !entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with(STAGING_PREFIX)
-        {
-            continue;
-        }
-        let path = entry.path();
-        if fs::symlink_metadata(&path)?.is_dir() {
-            fs::remove_dir_all(&path)?;
-        } else {
-            fs::remove_file(&path)?;
-        }
-    }
-    Ok(())
 }

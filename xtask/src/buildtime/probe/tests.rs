@@ -1,12 +1,13 @@
 //! Tests for `probe.rs`: the restore of the marker file on every path, the guard against edits made
 //! during a run, and the warm-up judgement.
 
-use super::guard::save_fix;
 use super::*;
 use crate::scratch::Scratch;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 const REL: &str = "crates/desktop/src/lib.rs";
+/// The guard's temporary file for the marker file: next to it, and under the backup folder.
+const TMP: &str = "crates/desktop/src/.lib.rs.buildtime.tmp";
 const ORIGINAL: &str = "//! desktop\n\npub const BUILDTIME_MARKER: u64 = 41;\n\npub fn f() {}\n";
 const BUMPED: &str = "//! desktop\n\npub const BUILDTIME_MARKER: u64 = 42;\n\npub fn f() {}\n";
 const RUSTC: &str = "     Running `/rust/bin/rustc --crate-name clauseo_desktop --edition=2024 crates/desktop/src/lib.rs --crate-type lib -C embed-bitcode=no -C incremental=/ws/target/debug/incremental -C metadata=4a2f`";
@@ -23,10 +24,15 @@ const CHECK: Probe = Probe {
 fn scratch(name: &str) -> Scratch {
     let dir = Scratch::new(&format!("buildtime-{name}"));
     let file = dir.join(REL);
-    fs::create_dir_all(file.parent().expect("the file has a parent"))
+    Scratch::create_dir_all(file.parent().expect("the file has a parent"))
         .expect("create the crate dir");
-    fs::write(&file, ORIGINAL).expect("write the marker file");
+    Scratch::write(&file, ORIGINAL).expect("write the marker file");
     dir
+}
+
+/// Saves the marker file's original through the guard, as \`measure\` does.
+fn save(dir: &Path) -> Result<Guard, crate::write::GuardFailure> {
+    Guard::save(dir, BACKUPS, REL, ORIGINAL)
 }
 
 fn marker() -> Marker {
@@ -88,10 +94,10 @@ fn a_panicking_runner_restores_the_file_on_the_spot() {
 #[test]
 fn a_leftover_copy_is_put_back_and_deleted_and_named() {
     let dir = scratch("leftover");
-    fs::write(dir.join(REL), BUMPED).expect("the interrupted run left the bump");
-    fs::create_dir_all(backup_of(&dir).parent().expect("has a parent"))
+    Scratch::write(dir.join(REL), BUMPED).expect("the interrupted run left the bump");
+    Scratch::create_dir_all(backup_of(&dir).parent().expect("has a parent"))
         .expect("create the backup dir");
-    fs::write(backup_of(&dir), ORIGINAL).expect("the interrupted run left the copy");
+    Scratch::write(backup_of(&dir), ORIGINAL).expect("the interrupted run left the copy");
     let lines = restore_leftovers(&dir).expect("the leftover restores");
     assert_eq!(
         lines,
@@ -222,10 +228,10 @@ const EDITED_AND_BUMPED: &str = "//! desktop, edited by hand\n\npub const BUILDT
 #[test]
 fn a_conflict_leaves_both_files_untouched_and_names_the_copy() {
     let dir = scratch("conflict");
-    fs::write(dir.join(REL), EDITED_AND_BUMPED).expect("the user edited the file");
-    fs::create_dir_all(backup_of(&dir).parent().expect("has a parent"))
+    Scratch::write(dir.join(REL), EDITED_AND_BUMPED).expect("the user edited the file");
+    Scratch::create_dir_all(backup_of(&dir).parent().expect("has a parent"))
         .expect("create the backup dir");
-    fs::write(backup_of(&dir), ORIGINAL).expect("the interrupted run left the copy");
+    Scratch::write(backup_of(&dir), ORIGINAL).expect("the interrupted run left the copy");
     let failure = restore_leftovers(&dir).expect_err("a changed file is a conflict");
     assert_eq!(
         failure.message,
@@ -247,10 +253,10 @@ fn a_conflict_leaves_both_files_untouched_and_names_the_copy() {
 #[test]
 fn a_missing_file_is_a_conflict_and_the_copy_is_kept() {
     let dir = scratch("missing");
-    fs::remove_file(dir.join(REL)).expect("the file is gone");
-    fs::create_dir_all(backup_of(&dir).parent().expect("has a parent"))
+    Scratch::remove_file(dir.join(REL)).expect("the file is gone");
+    Scratch::create_dir_all(backup_of(&dir).parent().expect("has a parent"))
         .expect("create the backup dir");
-    fs::write(backup_of(&dir), ORIGINAL).expect("the interrupted run left the copy");
+    Scratch::write(backup_of(&dir), ORIGINAL).expect("the interrupted run left the copy");
     let failure = restore_leftovers(&dir).expect_err("a missing file is a conflict");
     assert!(failure.message.starts_with(&format!("{REL} is missing")));
     assert!(backup_of(&dir).exists());
@@ -261,8 +267,8 @@ fn a_missing_file_is_a_conflict_and_the_copy_is_kept() {
 fn a_stray_file_without_a_marker_is_ignored() {
     let dir = scratch("stray");
     let stray = dir.join(BACKUP_DIR).join(".DS_Store");
-    fs::create_dir_all(dir.join(BACKUP_DIR)).expect("create the backup dir");
-    fs::write(&stray, "Bud1 junk").expect("the stray file is there");
+    Scratch::create_dir_all(dir.join(BACKUP_DIR)).expect("create the backup dir");
+    Scratch::write(&stray, "Bud1 junk").expect("the stray file is there");
     assert_eq!(restore_leftovers(&dir), Ok(Vec::new()));
     assert_eq!(
         fs::read_to_string(&stray).expect("the stray file is left alone"),
@@ -274,21 +280,21 @@ fn a_stray_file_without_a_marker_is_ignored() {
 #[test]
 fn a_second_save_of_the_same_file_fails_and_leaves_the_file_alone() {
     let dir = scratch("second-save");
-    let mut first = Guard::save(&dir, &marker()).expect("the first save");
+    let mut first = save(&dir).expect("the first save");
     assert!(
-        !dir.join(BACKUP_DIR).join(format!("{REL}.tmp")).exists(),
+        !dir.join(BACKUP_DIR).join(TMP).exists(),
         "the temporary file is gone after a save"
     );
     first
         .write(BUMPED.to_owned())
         .expect("the probe edits the file");
-    let Err(failure) = Guard::save(&dir, &marker()) else {
+    let Err(failure) = save(&dir) else {
         panic!("a second save is refused");
     };
     assert_eq!(
         failure.message,
         format!(
-            "a saved copy of {REL} already exists at target/xtask/buildtime/{REL}; an earlier probe kept it (a conflict or a failed restore)"
+            "a saved copy of {REL} already exists at target/xtask/buildtime/{REL}; an earlier buildtime run kept it (a conflict or a failed restore)"
         )
     );
     assert_eq!(
@@ -311,10 +317,28 @@ fn a_second_save_of_the_same_file_fails_and_leaves_the_file_alone() {
 #[test]
 fn the_temporary_file_of_an_interrupted_save_is_deleted() {
     let dir = scratch("tmp-leftover");
-    let tmp = dir.join(BACKUP_DIR).join(format!("{REL}.tmp"));
-    fs::create_dir_all(tmp.parent().expect("has a parent")).expect("create the backup dir");
-    fs::write(&tmp, ORIGINAL).expect("the interrupted save left its temporary file");
+    let tmp = dir.join(BACKUP_DIR).join(TMP);
+    Scratch::create_dir_all(tmp.parent().expect("has a parent")).expect("create the backup dir");
+    Scratch::write(&tmp, ORIGINAL).expect("the interrupted save left its temporary file");
     assert_eq!(restore_leftovers(&dir), Ok(Vec::new()));
+    assert!(!tmp.exists());
+    assert_eq!(file_text(&dir), ORIGINAL);
+}
+
+#[test]
+fn the_temporary_file_of_an_interrupted_write_goes_with_the_restore() {
+    let dir = scratch("write-tmp-leftover");
+    Scratch::create_dir_all(backup_of(&dir).parent().expect("a parent")).expect("the backup dir");
+    Scratch::write(backup_of(&dir), ORIGINAL).expect("the copy a killed run left");
+    Scratch::write(dir.join(REL), BUMPED).expect("its bump");
+    let tmp = dir.join(TMP);
+    Scratch::write(&tmp, "half a bump").expect("the killed write's temporary file");
+    assert_eq!(
+        restore_leftovers(&dir),
+        Ok(vec![format!(
+            "restored {REL} from an interrupted buildtime run"
+        )])
+    );
     assert!(!tmp.exists());
     assert_eq!(file_text(&dir), ORIGINAL);
 }
@@ -330,7 +354,7 @@ fn an_edit_during_the_run_survives_and_keeps_the_copy_and_fails_the_probe() {
     let mut runner = |cmd: &Cmd| -> io::Result<Captured> {
         calls += 1;
         if calls == 2 {
-            fs::write(&file, EDITED_MID_RUN).expect("someone saves the file");
+            Scratch::write(&file, EDITED_MID_RUN).expect("someone saves the file");
         }
         let output = if cmd.args.iter().any(|arg| arg == "-v") {
             RUSTC.to_owned()
@@ -368,9 +392,9 @@ fn an_edit_during_the_run_survives_and_keeps_the_copy_and_fails_the_probe() {
 #[test]
 fn an_edit_before_the_restore_survives_and_keeps_the_copy() {
     let dir = scratch("edit-before-restore");
-    let mut guard = Guard::save(&dir, &marker()).expect("the save");
+    let mut guard = save(&dir).expect("the save");
     guard.write(BUMPED.to_owned()).expect("the bump");
-    fs::write(dir.join(REL), EDITED_MID_RUN).expect("someone saves the file");
+    Scratch::write(dir.join(REL), EDITED_MID_RUN).expect("someone saves the file");
     let failure = guard.restore().expect_err("the restore finds the edit");
     assert!(
         failure
@@ -384,9 +408,9 @@ fn an_edit_before_the_restore_survives_and_keeps_the_copy() {
 #[test]
 fn a_dropped_guard_restores_only_the_bytes_it_wrote() {
     let dir = scratch("drop-after-edit");
-    let mut guard = Guard::save(&dir, &marker()).expect("the save");
+    let mut guard = save(&dir).expect("the save");
     guard.write(BUMPED.to_owned()).expect("the bump");
-    fs::write(dir.join(REL), EDITED_MID_RUN).expect("someone saves the file");
+    Scratch::write(dir.join(REL), EDITED_MID_RUN).expect("someone saves the file");
     drop(guard);
     assert_eq!(
         file_text(&dir),
@@ -396,7 +420,7 @@ fn a_dropped_guard_restores_only_the_bytes_it_wrote() {
     assert_eq!(fs::read_to_string(backup_of(&dir)).expect("kept"), ORIGINAL);
 
     let dir = scratch("drop-untouched");
-    let mut guard = Guard::save(&dir, &marker()).expect("the save");
+    let mut guard = save(&dir).expect("the save");
     guard.write(BUMPED.to_owned()).expect("the bump");
     drop(guard);
     assert_eq!(file_text(&dir), ORIGINAL, "the guard's own bump is undone");
@@ -404,23 +428,11 @@ fn a_dropped_guard_restores_only_the_bytes_it_wrote() {
 }
 
 #[test]
-fn a_filesystem_without_hard_links_gets_its_own_fix() {
-    assert_eq!(
-        save_fix(io::ErrorKind::Unsupported),
-        "the filesystem of target/xtask/buildtime has no hard links; run from a checkout on a filesystem that has them"
-    );
-    assert_eq!(
-        save_fix(io::ErrorKind::PermissionDenied),
-        "make sure target/xtask/buildtime is writable, then run again"
-    );
-}
-
-#[test]
 fn a_kept_copy_marks_its_crate_so_later_probes_on_it_are_skipped() {
     let dir = scratch("kept-copy");
     let crate_dir = REL.split("/src/").next().expect("REL is inside a crate");
     assert!(!holds_kept_copy(&dir, crate_dir), "no copy yet");
-    let _kept = Guard::save(&dir, &marker()).expect("the save");
+    let _kept = save(&dir).expect("the save");
     assert!(holds_kept_copy(&dir, crate_dir), "the copy is there");
     assert!(
         !holds_kept_copy(&dir, "crates/other"),
@@ -436,11 +448,11 @@ fn the_scripts_app_copy_and_its_temporary_file_are_left_to_the_script() {
         .join(BACKUP_DIR)
         .join("ui/app/src/.App.tsx.buildtime.tmp");
     let marker_tmp = dir.join(BACKUP_DIR).join("ui/app/src/lib.rs.tmp");
-    fs::create_dir_all(app_copy.parent().expect("a parent")).expect("create the copy dir");
+    Scratch::create_dir_all(app_copy.parent().expect("a parent")).expect("create the copy dir");
     // Even a copy that looks like a marker file is not read as one.
-    fs::write(&app_copy, ORIGINAL).expect("write the App.tsx copy");
-    fs::write(&app_tmp, "half").expect("write the temporary file");
-    fs::write(&marker_tmp, "half").expect("write a .tmp file");
+    Scratch::write(&app_copy, ORIGINAL).expect("write the App.tsx copy");
+    Scratch::write(&app_tmp, "half").expect("write the temporary file");
+    Scratch::write(&marker_tmp, "half").expect("write a .tmp file");
     assert_eq!(restore_leftovers(&dir), Ok(Vec::new()));
     assert_eq!(
         fs::read_to_string(&app_copy).ok().as_deref(),
