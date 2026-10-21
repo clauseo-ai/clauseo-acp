@@ -119,3 +119,6 @@ impl fmt::Display for Fix {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
