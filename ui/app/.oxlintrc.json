@@ -112,6 +112,12 @@
                   "writevSync",
                   "writeFile",
                   "writeFileSync",
+                  "WriteStream",
+                  "FileWriteStream",
+                  "Utf8Stream",
+                  "mkdtempDisposableSync",
+                  "lchmod",
+                  "lchmodSync",
                   "default"
                 ],
                 "message": "Under scripts/, files change only through scripts/guard.mjs, and node:fs is imported by name, its read functions only. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
@@ -171,6 +177,12 @@
                   "writevSync",
                   "writeFile",
                   "writeFileSync",
+                  "WriteStream",
+                  "FileWriteStream",
+                  "Utf8Stream",
+                  "mkdtempDisposableSync",
+                  "lchmod",
+                  "lchmodSync",
                   "default"
                 ],
                 "message": "Under scripts/, files change only through scripts/guard.mjs, and node:fs is imported by name, its read functions only. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
@@ -214,6 +226,34 @@
               {
                 "name": "vm",
                 "message": "Under scripts/, a module that loads or runs other code (createRequire, a worker, vm) would get past the node:fs and node:child_process bans; import what you need directly. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:sqlite",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:v8",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "v8",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:trace_events",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "trace_events",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:wasi",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "wasi",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
               }
             ],
             "patterns": [
@@ -241,6 +281,14 @@
           {
             "property": "binding",
             "message": "process.binding reaches Node's internal modules past the import bans under scripts/; import what you need directly. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+          },
+          {
+            "property": "writeReport",
+            "message": "process.report.writeReport writes a file past the node:fs ban under scripts/; no script needs it. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+          },
+          {
+            "property": "writeHeapSnapshot",
+            "message": "v8.writeHeapSnapshot writes a file past the node:fs ban under scripts/; no script needs it. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
           }
         ],
         "no-eval": "error",
@@ -292,6 +340,34 @@
               {
                 "name": "vm",
                 "message": "Under scripts/, a module that loads or runs other code (createRequire, a worker, vm) would get past the node:fs and node:child_process bans; import what you need directly. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:sqlite",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:v8",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "v8",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:trace_events",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "trace_events",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:wasi",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "wasi",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
               }
             ],
             "patterns": [
@@ -366,6 +442,12 @@
                   "writevSync",
                   "writeFile",
                   "writeFileSync",
+                  "WriteStream",
+                  "FileWriteStream",
+                  "Utf8Stream",
+                  "mkdtempDisposableSync",
+                  "lchmod",
+                  "lchmodSync",
                   "default"
                 ],
                 "message": "Under scripts/, files change only through scripts/guard.mjs, and node:fs is imported by name, its read functions only. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
@@ -425,6 +507,12 @@
                   "writevSync",
                   "writeFile",
                   "writeFileSync",
+                  "WriteStream",
+                  "FileWriteStream",
+                  "Utf8Stream",
+                  "mkdtempDisposableSync",
+                  "lchmod",
+                  "lchmodSync",
                   "default"
                 ],
                 "message": "Under scripts/, files change only through scripts/guard.mjs, and node:fs is imported by name, its read functions only. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
@@ -460,6 +548,34 @@
               {
                 "name": "vm",
                 "message": "Under scripts/, a module that loads or runs other code (createRequire, a worker, vm) would get past the node:fs and node:child_process bans; import what you need directly. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:sqlite",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:v8",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "v8",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:trace_events",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "trace_events",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:wasi",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "wasi",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
               }
             ],
             "patterns": [
@@ -514,6 +630,34 @@
               {
                 "name": "vm",
                 "message": "Under scripts/, a module that loads or runs other code (createRequire, a worker, vm) would get past the node:fs and node:child_process bans; import what you need directly. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:sqlite",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:v8",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "v8",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:trace_events",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "trace_events",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:wasi",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "wasi",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
               }
             ],
             "patterns": [
@@ -556,6 +700,34 @@
               {
                 "name": "vm",
                 "message": "Under scripts/, a module that loads or runs other code (createRequire, a worker, vm) would get past the node:fs and node:child_process bans; import what you need directly. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:sqlite",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:v8",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "v8",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:trace_events",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "trace_events",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "node:wasi",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
+              },
+              {
+                "name": "wasi",
+                "message": "Under scripts/, these modules write files past the node:fs ban (a database, a heap snapshot, a trace file, a WASI guest's preopened folders), and no script needs them. A script that needs an exemption gets an override by its exact name in ui/app/.oxlintrc.json."
               }
             ],
             "patterns": [
