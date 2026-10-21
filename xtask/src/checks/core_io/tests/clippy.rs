@@ -18,8 +18,9 @@
 //! other than "does not refer to a reachable" for exactly the entries that do not build here: a
 //! root entry none of whose forms builds on this target (`Only`), and any other entry of the
 //! other OS family (`std::os::windows::` on unix, `std::os::unix::` on Windows). So a misspelled
-//! entry fails where its form builds. `every_root_entry_has_a_form` checks that every root entry
-//! has a form.
+//! entry fails where its form builds. Each crate depends on the repo's nix on Unix, so the
+//! `nix::` entries resolve. `every_root_entry_has_a_form` checks that every root entry has a
+//! form.
 
 mod forms;
 
@@ -267,8 +268,8 @@ fn dependency(repo: &Path, name: &str) -> String {
     format!("{name} = {found}")
 }
 
-/// Writes a scratch crate into `dir`: a manifest whose dependency is the repo's `serde_json`, its
-/// own workspace, a feature `io` that is off by default and the two
+/// Writes a scratch crate into `dir`: a manifest whose dependencies are the repo's `serde_json`
+/// and, on Unix, its `nix`, its own workspace, a feature `io` that is off by default and the two
 /// lints set to `allow`; the repo's `Cargo.lock`, so the offline build takes the versions it
 /// locks; `clippy.toml` holding `config`; the repo's `rust-toolchain.toml`, so the pinned clippy
 /// runs; and `src/lib.rs`, which starts with `forbid_line()` and declares one module per form,
@@ -280,9 +281,10 @@ fn write_crate(dir: &Path, repo: &Path, config: &str, forms: &[Form]) {
         format!(
             "[package]\nname = \"planted\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\
              publish = false\n\n[features]\nio = []\n\n[dependencies]\n{}\n\n\
-             [lints.clippy]\ndisallowed_methods = \"allow\"\ndisallowed_types = \"allow\"\n\n\
-             [workspace]\n",
-            dependency(repo, "serde_json")
+             [target.'cfg(unix)'.dependencies]\n{}\n\n[lints.clippy]\n\
+             disallowed_methods = \"allow\"\ndisallowed_types = \"allow\"\n\n[workspace]\n",
+            dependency(repo, "serde_json"),
+            dependency(repo, "nix")
         ),
     )
     .expect("write Cargo.toml");

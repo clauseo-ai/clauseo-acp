@@ -64,6 +64,8 @@ this. Use the words in `GLOSSARY.md` exactly.
 - A check that inspects nothing fails.
 - Files are written only through each crate's write module: `xtask/src/write.rs` in xtask,
   `Scratch` (`xtask/src/scratch.rs`) in xtask's tests, `ui/app/scripts/guard.mjs` in scripts.
+  Child processes start only through `xtask/src/process.rs` in xtask and
+  `ui/app/scripts/buildtime-proc.mjs` in scripts, each with a timeout and a whole-tree kill.
 - Component files in `ui/` export only components.
 
 ## Testing

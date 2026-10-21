@@ -1,14 +1,15 @@
 //! The doors of the root `clippy.toml`, which bans them in every crate: one must-fail form per
 //! std call that changes files (the write module), both `canonicalize` paths (and `PathBuf`'s,
-//! which reaches `Path::canonicalize` by deref) and `env::split_paths` (the one walk over PATH),
+//! which reaches `Path::canonicalize` by deref), `env::split_paths` (the one walk over PATH), and
+//! `Command::status`, `CommandExt::exec` and nix's safe spawn and exec calls (the process door),
 //! and the clock, `thread::sleep`, `Command::output` and `spawn` and `serde_json::from_reader`;
 //! and must-pass forms for the reads, which stay allowed. The tauri entries have none
 //! (`NOT_BUILT`). Each failing form plants its call on line 2 and must get a hit
 //! there naming its entry, with the entry's reason or replacement, so deleting the entry, or
 //! giving it another reason, fails the test.
 //!
-//! `std::os::windows::fs::symlink_file` and `symlink_dir` build on Windows only: the test checks
-//! each where it builds.
+//! `std::os::windows::fs::symlink_file` and `symlink_dir` build on Windows only, and nix's
+//! `execvpe`, `fexecve` and `execveat` on Linux only: the test checks each where it builds.
 
 use super::{Form, Must, Only, form};
 
@@ -17,6 +18,9 @@ const WRITE_REASON: &str = "files change only through the crate's write module; 
 
 /// The replacement the `canonicalize` entries name.
 const DUNCE: &str = "dunce::canonicalize";
+
+/// The process door's reason.
+const PROCESS_REASON: &str = "children start only through xtask/src/process.rs";
 
 /// The form `door_<name>`: `pub fn f(<params>)` whose line 2 is `let _ = <call>;`, which must
 /// get a hit there naming `item`, with `note` in its reason or replacement.
@@ -286,7 +290,74 @@ const LAUNCH_REASON: &str = "agents and tools are launched by the `process` crat
 /// The clock entries' reason.
 const CLOCK_REASON: &str = "the core takes time as input";
 
-/// The must-fail forms: every path the root file bans for the write and path doors.
+/// The parameters of `f` for the nix spawn calls.
+const SPAWN: &str = "fa: &nix::spawn::PosixSpawnFileActions, at: &nix::spawn::PosixSpawnAttr";
+
+/// A file descriptor parameter, for the nix exec calls on one.
+const FD: &str = "fd: std::os::fd::BorrowedFd<'_>";
+
+/// nix's safe calls that start or become another program: the form's name, its targets, the
+/// parameters of `f`, the call, and the entry it must hit.
+const NIX: [Write; 8] = [
+    (
+        "nix_posix_spawn",
+        Only::Unix,
+        SPAWN,
+        "nix::spawn::posix_spawn(c\"a\", fa, at, &[c\"a\"], &[c\"a\"])",
+        "nix::spawn::posix_spawn",
+    ),
+    (
+        "nix_posix_spawnp",
+        Only::Unix,
+        SPAWN,
+        "nix::spawn::posix_spawnp(c\"a\", fa, at, &[c\"a\"], &[c\"a\"])",
+        "nix::spawn::posix_spawnp",
+    ),
+    (
+        "nix_execv",
+        Only::Unix,
+        "",
+        "nix::unistd::execv(c\"a\", &[c\"a\"])",
+        "nix::unistd::execv",
+    ),
+    (
+        "nix_execve",
+        Only::Unix,
+        "",
+        "nix::unistd::execve(c\"a\", &[c\"a\"], &[c\"a\"])",
+        "nix::unistd::execve",
+    ),
+    (
+        "nix_execvp",
+        Only::Unix,
+        "",
+        "nix::unistd::execvp(c\"a\", &[c\"a\"])",
+        "nix::unistd::execvp",
+    ),
+    (
+        "nix_execvpe",
+        Only::Linux,
+        "",
+        "nix::unistd::execvpe(c\"a\", &[c\"a\"], &[c\"a\"])",
+        "nix::unistd::execvpe",
+    ),
+    (
+        "nix_fexecve",
+        Only::Linux,
+        FD,
+        "nix::unistd::fexecve(fd, &[c\"a\"], &[c\"a\"])",
+        "nix::unistd::fexecve",
+    ),
+    (
+        "nix_execveat",
+        Only::Linux,
+        FD,
+        "nix::unistd::execveat(fd, c\"a\", &[c\"a\"], &[c\"a\"], nix::fcntl::AtFlags::empty())",
+        "nix::unistd::execveat",
+    ),
+];
+
+/// The must-fail forms: every path the root file bans for the write, path and process doors.
 pub(super) fn failing() -> Vec<Form> {
     let mut all: Vec<Form> = WRITES
         .iter()
@@ -375,7 +446,26 @@ pub(super) fn failing() -> Vec<Form> {
             "std::env::split_paths",
             "only first_on_path in xtask/src/process.rs walks PATH",
         ),
+        planted(
+            "command_status",
+            Only::Any,
+            "",
+            "std::process::Command::new(\"true\").status()",
+            "std::process::Command::status",
+            PROCESS_REASON,
+        ),
+        planted(
+            "command_ext_exec",
+            Only::Unix,
+            "",
+            "std::os::unix::process::CommandExt::exec(&mut std::process::Command::new(\"true\"))",
+            "std::os::unix::process::CommandExt::exec",
+            PROCESS_REASON,
+        ),
     ]);
+    all.extend(NIX.iter().map(|&(name, only, params, call, item)| {
+        planted(name, only, params, call, item, PROCESS_REASON)
+    }));
     all
 }
 
