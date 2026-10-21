@@ -12,8 +12,7 @@
 use super::{Form, Must, Only, form};
 
 /// What the root `clippy.toml` says about a write, as the hit's note carries it.
-const WRITE_REASON: &str = "files change only through the crate's write module: \
-                            xtask/src/write.rs in xtask";
+const WRITE_REASON: &str = "files change only through the crate's write module; see AGENTS.md";
 
 /// The replacement the `canonicalize` entries name.
 const DUNCE: &str = "dunce::canonicalize";
