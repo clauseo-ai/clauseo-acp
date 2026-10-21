@@ -392,6 +392,32 @@ mod tests {
     }
 
     #[test]
+    fn the_merge_base_with_origin_main_is_the_commit_the_branch_forked_from() {
+        let dir = crate::scratch::Scratch::new("changes-merge-base");
+        let commit = [
+            "-c",
+            "user.name=x",
+            "-c",
+            "user.email=x@x",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qam",
+        ];
+        git(&dir, &["init", "-q"]).expect("git init");
+        crate::scratch::Scratch::write(dir.join("a.rs"), "fn a() {}\n").expect("write a.rs");
+        git(&dir, &["add", "a.rs"]).expect("git add");
+        git(&dir, &[&commit[..], &["base"]].concat()).expect("commit the base");
+        let base = git(&dir, &["rev-parse", "HEAD"]).expect("rev-parse");
+        git(&dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]).expect("set origin/main");
+        crate::scratch::Scratch::write(dir.join("a.rs"), "fn b() {}\n").expect("change a.rs");
+        git(&dir, &[&commit[..], &["change"]].concat()).expect("commit the change");
+        let base = base.trim().to_owned();
+        assert_eq!(merge_base(&dir), Ok(base.clone()));
+        assert_eq!(scan_range(&dir, false), ScanRange::Since(base));
+    }
+
+    #[test]
     fn repo_files_fail_outside_a_git_repo_with_git_s_command_and_error() {
         let dir = crate::scratch::Scratch::new("changes-repo-files-none");
         let Err(GitError::Failed { command, stderr }) = repo_files(&dir) else {
