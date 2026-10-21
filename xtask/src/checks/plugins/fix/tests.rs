@@ -1,12 +1,11 @@
-//! Pins the text of every `plugins::Fix` variant. The `match` has no `_` arm, so a new variant
-//! does not compile until it has a pinned text here.
+//! Pins the text of every `plugins::Fix` variant with `fix_texts!`: one arm per variant, and
+//! `assert_texts` fails until each arm has a sample, so a new variant needs both.
 
 use super::Fix;
-use std::collections::HashSet;
-use std::mem::discriminant;
+use crate::fix::tests::{assert_texts, fix_texts};
 
-fn pinned(fix: &Fix) -> String {
-    match fix {
+fix_texts! {
+    fn pinned for Fix {
         Fix::Feature => "remove it: devtools let script in the page open the inspector, and \
              `protocol-asset` serves files from disk to the webview"
             .to_owned(),
@@ -14,7 +13,7 @@ fn pinned(fix: &Fix) -> String {
             "remove it: tauri-runtime is there only to name a type, and its `devtools` \
              and `macos-private-api` features would reach the binary through it"
                 .to_owned()
-        }
+        },
         Fix::PluginOutsideSet => "remove it: the plugin set is fixed (each change forces a \
              near-cold rebuild and widens what the webview can reach); changing it needs a \
              decision recorded in a task brief"
@@ -26,17 +25,17 @@ fn pinned(fix: &Fix) -> String {
             "depend on `tauri` and the fixed plugins only: other Tauri crates can switch \
              on features such as devtools that the tauri entry's checks never see"
                 .to_owned()
-        }
+        },
         Fix::MemberDependsOnTauri => {
             "only crates/desktop depends on Tauri; move the code there or behind the host interface"
                 .to_owned()
-        }
+        },
         Fix::OutsideMembers => {
             "add it to the workspace members, or remove the dependency".to_owned()
-        }
+        },
         Fix::AddBackToDependencies { plugin } => {
             format!("add it back under [dependencies]: `{plugin}.workspace = true`")
-        }
+        },
         Fix::Patched => "remove the entry: Tauri crates come from crates.io at the versions \
              Cargo.lock pins; using a fork needs a decision recorded in a task brief"
             .to_owned(),
@@ -71,13 +70,5 @@ fn every_fix_prints_its_pinned_text() {
             path: "crates/desktop/Cargo.toml".to_owned(),
         },
     ];
-    let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
-    assert_eq!(
-        kinds.len(),
-        samples.len(),
-        "two samples are the same variant"
-    );
-    for fix in &samples {
-        assert_eq!(fix.to_string(), pinned(fix));
-    }
+    assert_texts(&samples, pinned, ARMS);
 }

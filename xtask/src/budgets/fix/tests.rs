@@ -1,25 +1,24 @@
-//! Pins the text of every `budgets::Fix` variant. The `match` has no `_` arm, so a new variant
-//! does not compile until it has a pinned text here.
+//! Pins the text of every `budgets::Fix` variant with `fix_texts!`: one arm per variant, and
+//! `assert_texts` fails until each arm has a sample, so a new variant needs both.
 
 use super::Fix;
-use std::collections::HashSet;
-use std::mem::discriminant;
+use crate::fix::tests::{assert_texts, fix_texts};
 
-fn pinned(fix: &Fix) -> &'static str {
-    match fix {
+fix_texts! {
+    fn pinned for Fix {
         Fix::Restore => "restore budgets.toml at the repo root",
         Fix::Syntax => {
             "fix the line above; each row is a [[budget]] table of the ten keys listed at the top \
              of budgets.toml"
-        }
+        },
         Fix::NoRows => "add a [[budget]] table for each budget the plan sets",
         Fix::NegativeLimit => "set limit to zero or more, in the row's unit",
         Fix::MeasuredOnShape => {
             "write measured_on as lowercase words joined by -, such as macos-arm64"
-        }
+        },
         Fix::IdNotSnakeCase => {
             "rename the id to lowercase words joined by _, such as window_visible"
-        }
+        },
         Fix::DuplicateId => "give this row a new id, or remove one of the two tables",
         Fix::AddId => r#"add id = "snake_case_name", unique in budgets.toml"#,
         Fix::AddMetric => r#"add metric = "what is measured""#,
@@ -32,10 +31,10 @@ fn pinned(fix: &Fix) -> &'static str {
         Fix::AddMeasuredOn => r#"add measured_on = "os-arch-machine kind, such as macos-arm64""#,
         Fix::AddMeasuredOrRemoveOn => {
             "add measured = <number> in the row's unit, or remove measured_on"
-        }
+        },
         Fix::AddMeasuredOrUnmeasure => {
             r#"add measured = <number> in the row's unit, or set status = "unmeasured""#
-        }
+        },
     }
 }
 
@@ -61,13 +60,5 @@ fn every_fix_prints_its_pinned_text() {
         Fix::AddMeasuredOrRemoveOn,
         Fix::AddMeasuredOrUnmeasure,
     ];
-    let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
-    assert_eq!(
-        kinds.len(),
-        samples.len(),
-        "two samples are the same variant"
-    );
-    for fix in &samples {
-        assert_eq!(fix.to_string(), pinned(fix));
-    }
+    assert_texts(&samples, pinned, ARMS);
 }

@@ -1,20 +1,19 @@
-//! Pins the text of every `graph::Fix` variant. The `match` has no `_` arm, so a new variant
-//! does not compile until it has a pinned text here.
+//! Pins the text of every `graph::Fix` variant with `fix_texts!`: one arm per variant, and
+//! `assert_texts` fails until each arm has a sample, so a new variant needs both.
 
 use super::Fix;
+use crate::fix::tests::{assert_texts, fix_texts};
 use crate::process::{Cmd, Program, TimeoutFix};
-use std::collections::HashSet;
-use std::mem::discriminant;
 use std::time::Duration;
 
-fn pinned(fix: &Fix) -> String {
-    match fix {
+fix_texts! {
+    fn pinned for Fix {
         Fix::TreeParse => "update `Tree::parse` in xtask/src/checks/graph.rs to the lines this cargo \
              prints, since the check reads each crate's dependency graph from them"
             .to_owned(),
         Fix::CargoOnPath => {
             "put `cargo` on PATH, since this check reads the dependency graph from cargo".to_owned()
-        }
+        },
         Fix::TimedOut(_) => "run `cargo tree -p x` by hand to see why it does not finish within 5 min"
             .to_owned(),
         Fix::Lockfile => "Cargo.lock does not match the manifests, and the check never rewrites it. \
@@ -57,15 +56,7 @@ fn every_fix_prints_its_pinned_text() {
             command: "cargo tree -p clauseo-host".to_owned(),
         },
     ];
-    let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
-    assert_eq!(
-        kinds.len(),
-        samples.len(),
-        "two samples are the same variant"
-    );
-    for fix in &samples {
-        assert_eq!(fix.to_string(), pinned(fix));
-    }
+    assert_texts(&samples, pinned, ARMS);
 }
 
 #[test]

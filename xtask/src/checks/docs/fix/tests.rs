@@ -1,34 +1,33 @@
-//! Pins the text of every `docs::Fix` variant. The `match` has no `_` arm, so a new variant does
-//! not compile until it has a pinned text here.
+//! Pins the text of every `docs::Fix` variant with `fix_texts!`: one arm per variant, and
+//! `assert_texts` fails until each arm has a sample, so a new variant needs both.
 
 use super::Fix;
-use std::collections::HashSet;
-use std::mem::discriminant;
+use crate::fix::tests::{assert_texts, fix_texts};
 
-fn pinned(fix: &Fix) -> &'static str {
-    match fix {
+fix_texts! {
+    fn pinned for Fix {
         Fix::CreateImport { .. } => {
             "create CLAUDE.md holding only `@AGENTS.md`, or restore it from git history"
-        }
+        },
         Fix::CreateRequired { .. } => {
             "create AGENTS.md at the repo root, or restore it from git history"
-        }
+        },
         Fix::CutLines { .. } => {
             "cut AGENTS.md to 120 lines, moving what you cut into the file that owns it"
-        }
+        },
         Fix::CutBytes { .. } => {
             "cut AGENTS.md to 8192 bytes, moving what you cut into the file that owns it"
-        }
+        },
         Fix::MoveImport { .. } => {
             "move what CLAUDE.md holds besides `@AGENTS.md` into AGENTS.md, then keep only \
              `@AGENTS.md` in CLAUDE.md"
-        }
+        },
         Fix::NoDotParts => "write the path from the repo root, without `..`",
         Fix::DropPlanned { .. } => "drop the (planned) after `crates/x/src/lib.rs`",
         Fix::NameTrackedFile => "name a file git tracks, or remove the reference",
         Fix::CreateOrCorrectReference { .. } => {
             "create `crates/nope/src/lib.rs`, or correct or remove the reference"
-        }
+        },
         Fix::WriteCase { .. } => "write `docs/real.md`, and drop the (planned) after it",
         Fix::WriteUnderFolder { .. } => "write the path under `docs`, as git lists it",
         Fix::LinkTrackedFile => "link a file git tracks, or remove the link",
@@ -37,7 +36,7 @@ fn pinned(fix: &Fix) -> &'static str {
         Fix::CorrectCommand => {
             "correct it to a command that `cargo xtask --help` lists (`cargo xtask <command> \
              --help` lists its flags), or remove it"
-        }
+        },
     }
 }
 
@@ -84,13 +83,5 @@ fn every_fix_prints_its_pinned_text() {
         Fix::PointInside,
         Fix::CorrectCommand,
     ];
-    let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
-    assert_eq!(
-        kinds.len(),
-        samples.len(),
-        "two samples are the same variant"
-    );
-    for fix in &samples {
-        assert_eq!(fix.to_string(), pinned(fix));
-    }
+    assert_texts(&samples, pinned, ARMS);
 }
