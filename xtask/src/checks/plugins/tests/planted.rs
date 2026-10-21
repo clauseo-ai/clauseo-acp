@@ -217,6 +217,27 @@ crate::checks::planted::cases! {
          fix: remove the entry: Tauri crates come from crates.io at the versions Cargo.lock pins; \
          using a fork needs a decision recorded in a task brief",
     ]), inspects 10 => super::patch_in_the_cargo_config,
+    /// `paths` in `.cargo/config.toml` overrides the fixed `tauri-plugin-dialog` with a fork
+    /// that pulls in `tauri-plugin-zz`: the graph rule trusts the fixed plugin, so it fails here.
+    paths_override_brings_a_plugin: FailsWith(&[
+        ".cargo/config.toml:1: `paths` overrides every crate that a listed folder holds, so it can \
+         swap in another source for a Tauri crate, whose dependencies the plugin rules trust\n    \
+         fix: remove the entry: Tauri crates come from crates.io at the versions Cargo.lock pins; \
+         using a fork needs a decision recorded in a task brief",
+    ]), inspects 10 => super::resolved::paths_override_brings_a_plugin,
+    /// Source replacement in `.cargo/config.toml` serves crates.io from `forks`, whose
+    /// `tauri-plugin-dialog` pulls in `tauri-plugin-zz`: both keys fail.
+    source_replacement_brings_a_plugin: FailsWith(&[
+        ".cargo/config.toml:2: `replace-with` of source `crates-io` swaps in another source for \
+         all of its crates, Tauri crates included, whose dependencies the plugin rules trust\n    \
+         fix: remove the entry: Tauri crates come from crates.io at the versions Cargo.lock pins; \
+         using a fork needs a decision recorded in a task brief",
+        ".cargo/config.toml:5: `directory` of source `forked` makes a source from local files, \
+         which `replace-with` can swap in for Tauri crates, whose dependencies the plugin rules \
+         trust\n    \
+         fix: remove the entry: Tauri crates come from crates.io at the versions Cargo.lock pins; \
+         using a fork needs a decision recorded in a task brief",
+    ]), inspects 10 => super::resolved::source_replacement_brings_a_plugin,
     /// Patches of crates outside the Tauri family pass: the graph rule sees what they bring.
     patch_of_another_crate_passes: Passes, inspects 10 => super::patch_of_another_crate_passes,
 }

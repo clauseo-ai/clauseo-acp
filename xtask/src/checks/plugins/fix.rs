@@ -24,7 +24,8 @@ pub(crate) enum Fix {
     AddBackToDependencies { plugin: String },
     /// The desktop crate's graph holds a plugin outside the set, and no declaring line is known.
     Tree,
-    /// A `[patch]` or `[replace]` entry swaps a Tauri crate for another source.
+    /// A `[patch]` or `[replace]` entry swaps a Tauri crate for another source, or the cargo
+    /// config has a `paths` override or a source replacement.
     Patched,
     /// The desktop crate's graph holds a plugin outside the set, and these declarations bring it
     /// in: `keys` are the declared names (quoted, such as `` `s` ``), `lines` the manifest lines

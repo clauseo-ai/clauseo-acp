@@ -34,8 +34,9 @@
 //! banned in deny.toml's `[[bans.features]]`, which the `deny` step checks.
 //!
 //! No `[patch]` or `[replace]` entry of the root manifest, and no `[patch]` entry of
-//! `.cargo/config.toml`, names a Tauri family crate (`patches.rs`): the graph rule trusts what
-//! `tauri` and the fixed plugins pull in, so a swapped one could bring any plugin.
+//! `.cargo/config.toml`, names a Tauri family crate, and that config has no `paths` override and
+//! no source replacement (`patches.rs`): the graph rule trusts what `tauri` and the fixed plugins
+//! pull in, so a swapped one could bring any plugin.
 //!
 //! The manifest text is read only for line numbers: the member's `Cargo.toml`, or the root one
 //! when the setting lives in `[workspace.dependencies]`, else line 1.
@@ -151,12 +152,17 @@ fn check(ctx: &Context, graph_flags: Option<&[&str]>) -> Inspection {
         &root,
         patches::Source::Manifest,
     ));
+    // Cargo also reads the legacy name `.cargo/config`; the core-io check fails that file, so
+    // across the checks this one name is enough.
     match checks::read_repo_file(&ctx.root, checks::CARGO_CONFIG) {
-        Ok(Some(config)) => found.extend(patches::violations(
-            checks::CARGO_CONFIG,
-            &config,
-            patches::Source::CargoConfig,
-        )),
+        Ok(Some(config)) => {
+            found.extend(patches::violations(
+                checks::CARGO_CONFIG,
+                &config,
+                patches::Source::CargoConfig,
+            ));
+            found.extend(patches::config_violations(checks::CARGO_CONFIG, &config));
+        }
         Ok(None) => {}
         Err(violation) => found.push(violation),
     }

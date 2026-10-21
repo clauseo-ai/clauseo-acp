@@ -65,20 +65,28 @@ impl Repo {
     /// `cargo`, with the resolved graph on, as `cargo xtask check` runs: the check walks it with
     /// `cargo tree --locked --offline`, so cargo first writes the lockfile, offline.
     pub(crate) fn resolved(dir: Scratch) -> Repo {
-        let lock = Cmd::new(
-            Program::Cargo,
-            ["generate-lockfile", "--offline"],
-            process::TEST_TIMEOUT,
-        );
-        let quiet = process::run_quiet(&lock, &dir).expect("run cargo generate-lockfile");
-        assert!(
-            quiet.success,
-            "cargo generate-lockfile failed: {}",
-            quiet.stderr
-        );
+        lock(&dir);
         let mut repo = Repo::cargo(dir);
         repo.ctx.load_resolved_graph = true;
         repo
+    }
+
+    /// `resolved`, for the workspace in the folder `repo` of `dir`, so cargo also reads the
+    /// config files of `dir` (cargo reads `.cargo/config.toml` in every parent folder), while
+    /// the check reads only the workspace's own.
+    pub(crate) fn resolved_in(dir: Scratch, repo: &str) -> Repo {
+        let root = dir.join(repo);
+        lock(&root);
+        let members = workspace::load(&root).expect("cargo metadata runs");
+        Repo {
+            held: Vec::new(),
+            ctx: Context {
+                root,
+                members: Ok(members),
+                load_resolved_graph: true,
+            },
+            _dir: dir,
+        }
     }
 
     /// The repo, holding `value` until the check has run.
@@ -91,6 +99,21 @@ impl Repo {
     pub(crate) fn ctx(&self) -> &Context {
         &self.ctx
     }
+}
+
+/// Writes the lockfile of the workspace at `root` with `cargo generate-lockfile --offline`.
+fn lock(root: &Path) {
+    let lock = Cmd::new(
+        Program::Cargo,
+        ["generate-lockfile", "--offline"],
+        process::TEST_TIMEOUT,
+    );
+    let quiet = process::run_quiet(&lock, root).expect("run cargo generate-lockfile");
+    assert!(
+        quiet.success,
+        "cargo generate-lockfile failed: {}",
+        quiet.stderr
+    );
 }
 
 /// The desktop crate as a member at `crates/desktop`, with no target or dependency.
