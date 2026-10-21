@@ -302,7 +302,7 @@ pub(crate) fn run(half: Half, runs: u32, json: bool) -> ExitCode {
         ExitCode::FAILURE
     };
 
-    let _lock = match lock::acquire(&root.join(lock::LOCK_PATH)) {
+    let _lock = match lock::acquire(&root) {
         Ok(file) => file,
         Err(failure) => {
             let errors = stop(&mut diag, &failure.message, &failure.fix);

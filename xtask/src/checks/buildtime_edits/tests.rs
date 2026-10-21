@@ -77,7 +77,7 @@ pub(super) fn non_utf8_file() -> Inspection {
 /// A file with the attribute while another process holds the buildtime lock: a live run.
 pub(super) fn live_run_holds_the_edit() -> Inspection {
     let dir = repo("live", &[(APP, "<main data-buildtime=\"2\" />\n")]);
-    let held = lock::acquire(&dir.join(lock::LOCK_PATH)).expect("take the lock");
+    let held = lock::acquire(&dir).expect("take the lock");
     let found = run(&desktop_context(&dir));
     drop(held);
     found
