@@ -21,6 +21,7 @@ const PROPERTIES = "eslint(no-restricted-properties)";
 const WRITE_DOOR = "files change only through scripts/guard.mjs";
 const PROCESS_DOOR = "child processes start only through scripts/buildtime-proc.mjs";
 const LOADER = "a module that loads or runs other code";
+const OTHER_WRITER = "these modules write files past the node:fs ban";
 
 /** Each planted form, as the file under scripts/ that holds it, and what oxlint must say. */
 const BANNED = {
@@ -65,6 +66,21 @@ const BANNED = {
   "buildtime-proc.mjs": [`import { writeFileSync } from "node:fs";`, IMPORTS, WRITE_DOOR],
   "buildtime-leader.mjs": [`import { createRequire } from "node:module";`, IMPORTS, LOADER],
   "guard.test.mjs": [`import { spawn } from "node:child_process";`, IMPORTS, PROCESS_DOOR],
+  // The node:fs writers past the first list (review of PR #18): each creates or changes a file.
+  "write-stream.mjs": [`import { WriteStream } from "node:fs";`, IMPORTS, WRITE_DOOR],
+  "file-write-stream.mjs": [`import { FileWriteStream } from "fs";`, IMPORTS, WRITE_DOOR],
+  "utf8-stream.mjs": [`import { Utf8Stream } from "node:fs";`, IMPORTS, WRITE_DOOR],
+  "mkdtemp-disposable.mjs": [`import { mkdtempDisposableSync } from "fs";`, IMPORTS, WRITE_DOOR],
+  "lchmod.mjs": [`import { lchmod } from "node:fs";`, IMPORTS, WRITE_DOOR],
+  "lchmod-sync.mjs": [`import { lchmodSync } from "fs";`, IMPORTS, WRITE_DOOR],
+  // Modules outside node:fs that write files. No door needs them, so every file bans them.
+  "sqlite.mjs": [`import { DatabaseSync } from "node:sqlite";`, IMPORTS, OTHER_WRITER],
+  "v8.mjs": [`import { writeHeapSnapshot } from "v8";`, IMPORTS, OTHER_WRITER],
+  "trace-events.mjs": [`import { createTracing } from "node:trace_events";`, IMPORTS, OTHER_WRITER],
+  "wasi.mjs": [`import { WASI } from "wasi";`, IMPORTS, OTHER_WRITER],
+  "write-report.mjs": [`process.report.writeReport("r.json");`, PROPERTIES, "writeReport"],
+  "heap-snapshot.mjs": [`globalThis.v8.writeHeapSnapshot("h");`, PROPERTIES, "writeHeapSnapshot"],
+  "buildtime-proc.test.mjs": [`import { DatabaseSync } from "node:sqlite";`, IMPORTS, OTHER_WRITER],
 };
 
 /** The rules of the bans; the planted files break others (unused imports) that do not count. */
