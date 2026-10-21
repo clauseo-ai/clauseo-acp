@@ -60,8 +60,13 @@ fn a_script_past_its_limit_is_named_with_the_command_to_run_by_hand() {
 }
 
 #[test]
-fn a_node_that_cannot_start_is_named_with_the_node_to_install() {
+fn a_node_that_cannot_start_is_named_with_the_engines_range_to_install() {
     let root = checkout("web-measure-no-node");
+    Scratch::write(
+        root.join("ui/package.json"),
+        r#"{"engines": {"node": ">=20.5.0"}}"#,
+    )
+    .expect("write ui/package.json");
     let mut runner =
         |_: &Cmd, _: &Path| -> io::Result<Ran> { Err(io::Error::other("no such file")) };
     let (result, printed) = measured(&root, &mut runner);
@@ -71,7 +76,8 @@ fn a_node_that_cannot_start_is_named_with_the_node_to_install() {
     );
     assert_eq!(
         printed,
-        "could not run `node`: no such file\n    fix: install Node 24.11 or later\n"
+        "could not run `node`: no such file\n    fix: install a Node that matches >=20.5.0 \
+         (`engines.node` in ui/package.json)\n"
     );
 }
 

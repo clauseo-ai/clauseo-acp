@@ -41,10 +41,23 @@ export function parseRuns(argv) {
   return runs;
 }
 
-/** The oldest Node the app's dependencies run on: `engines` in ui/package.json (babel 8). */
-export const MIN_NODE = "24.11.0";
+/**
+ * The oldest Node the app's dependencies run on (babel 8): `engines.node` of the ui workspace's
+ * package.json in `uiDir`, the one place it is written. Throws unless it is `>=` and a version.
+ */
+export function minNode(uiDir) {
+  const path = join(uiDir, "package.json");
+  const range = readJson(path).engines?.node;
+  const version = /^>=(\d+\.\d+\.\d+)$/.exec(range ?? "")?.[1];
+  if (version === undefined) {
+    throw new Error(
+      `${path} has engines.node ${JSON.stringify(range)}; buildtime reads only ">=<major>.<minor>.<patch>"`,
+    );
+  }
+  return version;
+}
 
-/** Whether the Node version `version` (`24.11.0`, a leading `v` allowed) is `min` or later. */
+/** Whether the Node version `version` (`26.1.0`, a leading `v` allowed) is `min` or later. */
 export function nodeAtLeast(version, min) {
   const parts = (text) => text.replace(/^v/, "").split(/[.-]/).slice(0, 3).map(Number);
   const [have, want] = [parts(version), parts(min)];

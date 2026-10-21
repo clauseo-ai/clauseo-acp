@@ -20,10 +20,10 @@ import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  MIN_NODE,
   appPaths,
   initialJs,
   marked,
+  minNode,
   nodeAtLeast,
   parseRuns,
   recoverApp,
@@ -296,9 +296,10 @@ async function onSignal(state, signal) {
 
 async function main() {
   const runs = parseRuns(process.argv.slice(2));
-  if (!nodeAtLeast(process.versions.node, MIN_NODE)) {
-    const message = `Node ${process.versions.node} is too old for ui/ (engines: >=${MIN_NODE})`;
-    report(runs, [], [{ message, fix: `install Node ${MIN_NODE} or later` }]);
+  const min = minNode(UI_DIR);
+  if (!nodeAtLeast(process.versions.node, min)) {
+    const message = `Node ${process.versions.node} is too old for ui/ (engines: >=${min})`;
+    report(runs, [], [{ message, fix: `install Node ${min} or later` }]);
     return;
   }
   if (!existsSync(join(APP_DIR, "node_modules"))) {
