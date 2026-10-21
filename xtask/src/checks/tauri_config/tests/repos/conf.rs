@@ -188,3 +188,12 @@ pub(in crate::checks::tauri_config::tests) fn dangerous_key_in_an_array() -> Rep
         "\"capabilities\": [\"main\", { \"identifier\": \"ipc\", \"dangerousScope\": true }]",
     )
 }
+
+/// `withGlobalTauri` written twice, the safe value first: the last one wins, as in Tauri.
+pub(in crate::checks::tauri_config::tests) fn duplicate_key_unsafe_last() -> Repo {
+    conf_case(
+        "duplicate-key-unsafe-last",
+        "\"withGlobalTauri\": false,",
+        "\"withGlobalTauri\": false,\n    \"withGlobalTauri\": true,",
+    )
+}

@@ -5,10 +5,12 @@
 mod build_rs;
 mod conf;
 mod config_files;
+mod sources;
 
 pub(super) use build_rs::*;
 pub(super) use conf::*;
 pub(super) use config_files::*;
+pub(super) use sources::*;
 
 use super::*;
 use crate::checks::planted::{self, Repo};
@@ -65,6 +67,14 @@ fn platform_case(case: &str, path: &str, text: &str) -> Repo {
             (path, text.as_bytes()),
         ],
     )
+}
+
+/// A scratch repo with the valid `tauri.conf.json` and `build.rs` in its desktop crate and each
+/// `(path, text)` of `files`, paths from the repo root.
+pub(super) fn tree_case(case: &str, files: &[(&str, &str)]) -> Repo {
+    let desktop = [(CONF_AT, CONF), (BUILD_AT, BUILD)];
+    let files: Vec<(&str, &str)> = desktop.iter().chain(files).copied().collect();
+    Repo::desktop(planted::scratch(&format!("tauri-config-{case}"), &files))
 }
 
 pub(super) fn clean_tree() -> Repo {

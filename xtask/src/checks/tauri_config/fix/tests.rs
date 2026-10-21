@@ -52,6 +52,26 @@ fix_texts! {
              commands"
         },
         Fix::BuildRsSyntax => "fix the syntax: cargo cannot build the crate either",
+        Fix::ConfigInCode => {
+            "remove it and put the setting in tauri.conf.json: Tauri reads or merges a config \
+             passed in code past this check"
+        },
+        Fix::ContextArguments => {
+            "call `tauri::generate_context!()` with no arguments: it then reads the checked \
+             tauri.conf.json and capabilities folder"
+        },
+        Fix::ContextRenamed => {
+            "import it under its own name and call `generate_context!()`, which this check reads"
+        },
+        Fix::SourceSyntax => "fix the syntax: this check cannot read the file's calls",
+        Fix::ConfigInEnv => {
+            "remove it and put the setting in tauri.conf.json: Tauri merges `TAURI_CONFIG` over \
+             the checked file"
+        },
+        Fix::LinkedFolder => {
+            "replace the symlink with a real folder holding the files: rustc follows it, and this \
+             check reads only what is really in the folder"
+        },
     }
 }
 
@@ -72,6 +92,12 @@ fn every_fix_prints_its_pinned_text() {
         Fix::Dangerous,
         Fix::AppManifest,
         Fix::BuildRsSyntax,
+        Fix::ConfigInCode,
+        Fix::ContextArguments,
+        Fix::ContextRenamed,
+        Fix::SourceSyntax,
+        Fix::ConfigInEnv,
+        Fix::LinkedFolder,
     ];
     assert_texts(&samples, pinned, ARMS);
 }

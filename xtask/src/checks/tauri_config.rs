@@ -9,15 +9,27 @@
 //! No platform config (`tauri.<platform>.conf.json`, `.json5` or `Tauri.<platform>.toml`) exists:
 //! Tauri merges one over `tauri.conf.json` and could turn a setting back on for one OS.
 //! In `build.rs`, parsed with syn: an `AppManifest` is declared (`app_manifest(` and
-//! `AppManifest::new()` are called). Moving the capabilities folder with
-//! `capabilities_path_pattern` is banned in clippy.toml's `disallowed-methods`, not here: clippy
-//! resolves the path, so a fn pointer or a macro cannot hide the call. Each failing setting points
+//! `AppManifest::new()` are called), and no config is passed in code (a `config_path(...)` call,
+//! or a string naming `TAURI_CONFIG`), which Tauri would read instead of, or merge over, the
+//! checked file. Platform config names match without regard to case, as a macOS disk does.
+//! Moving the capabilities folder with `capabilities_path_pattern` is banned in clippy.toml's
+//! `disallowed-methods`, not here: clippy resolves the path, so a fn pointer or a macro cannot
+//! hide the call. In the desktop crate's other Rust files, no `generate_context!` call has
+//! arguments, and `.cargo/config.toml` sets no `TAURI_CONFIG` in `[env]` (`sources.rs`). Each
+//! failing setting points
 //! at its key's line, found under its parent object (`json_text::key_line`), or at line 1.
 //! The pure functions take file contents and paths; `run` reads the files from the repo and counts
-//! the ones it found: `tauri.conf.json`, `build.rs` and each platform config.
+//! the ones it found: `tauri.conf.json`, `build.rs`, each platform config, each other Rust file
+//! of the desktop crate and `.cargo/config.toml`.
+//!
+//! Left open: a manifest written only in a `build.rs` function that is never called passes the
+//! `AppManifest` rule (it would need reachability), and a name built by `concat!("TAURI_",
+//! "CONFIG")` passes the `TAURI_CONFIG` rule.
 
 mod fix;
 pub(crate) use fix::Fix;
+
+mod sources;
 
 use crate::checks::json_text::key_line;
 use crate::checks::{self, Inspection, Noun, StaticCheck, violation};
@@ -25,11 +37,16 @@ use crate::violation::Violation;
 use crate::workspace::Context;
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 use serde_json::Value;
+use std::fs;
+use std::path::Path;
 use syn::ext::IdentExt;
 
 /// The files this check reads, inside the desktop crate's directory.
 const TAURI_CONF: &str = "tauri.conf.json";
 const BUILD_RS: &str = "build.rs";
+
+/// The variable whose JSON tauri-build and `generate_context!` merge over `tauri.conf.json`.
+const ENV_CONFIG: &str = "TAURI_CONFIG";
 
 /// The platforms Tauri merges a platform config for, over `tauri.conf.json`.
 const PLATFORMS: [&str; 5] = ["macos", "windows", "linux", "ios", "android"];
@@ -42,10 +59,15 @@ pub(crate) const PINNED_CSP: &str = "default-src 'self'; script-src 'self'; styl
 pub(crate) const CHECK: StaticCheck = StaticCheck {
     name: "tauri-config",
     counts: Noun {
-        one: "config file",
-        many: "config files",
+        one: "file",
+        many: "files",
     },
-    place: || format!("in the desktop crate ({TAURI_CONF} and {BUILD_RS})"),
+    place: || {
+        format!(
+            "in the desktop crate ({TAURI_CONF}, {BUILD_RS} and its other Rust files) and {}",
+            checks::CARGO_CONFIG
+        )
+    },
     source: file!(),
     run,
     #[cfg(test)]
@@ -66,10 +88,9 @@ fn run(ctx: &Context) -> Inspection {
         }
         Err(violation) => vec![violation],
     };
-    let platform: Vec<String> = platform_configs()
+    let platform: Vec<String> = platform_configs_in(&ctx.root.join(desktop))
         .into_iter()
         .map(|name| checks::join(desktop, &name))
-        .filter(|rel| ctx.root.join(rel).exists())
         .collect();
     read += platform.len();
     found.extend(platform.iter().map(|rel| platform_violation(rel)));
@@ -81,6 +102,19 @@ fn run(ctx: &Context) -> Inspection {
         }
         Err(violation) => vec![violation],
     });
+    let (sources_read, in_sources) = sources::source_violations(&ctx.root, desktop, &build);
+    read += sources_read;
+    found.extend(in_sources);
+    // Cargo also reads the legacy name `.cargo/config`; the core-io check fails that file, so
+    // across the checks this one name is enough.
+    match checks::read_repo_file(&ctx.root, checks::CARGO_CONFIG) {
+        Ok(Some(text)) => {
+            read += 1;
+            found.extend(sources::env_violations(checks::CARGO_CONFIG, &text));
+        }
+        Ok(None) => {}
+        Err(violation) => found.push(violation),
+    }
     Inspection::new(read, found)
 }
 
@@ -254,6 +288,28 @@ fn platform_configs() -> Vec<String> {
         .collect()
 }
 
+/// The names in `dir` of the platform configs, matched without regard to ASCII case: a disk that
+/// ignores case (macOS, Windows) hands `TAURI.MACOS.CONF.JSON` to Tauri too, while a Linux CI
+/// would find no file of the exact name. In the order of `platform_configs`; none when `dir`
+/// cannot be listed.
+fn platform_configs_in(dir: &Path) -> Vec<String> {
+    let names: Vec<String> = fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect();
+    platform_configs()
+        .iter()
+        .flat_map(|wanted| {
+            names
+                .iter()
+                .filter(move |name| name.eq_ignore_ascii_case(wanted))
+                .cloned()
+        })
+        .collect()
+}
+
 /// The violation for the platform config at `path`, which exists.
 fn platform_violation(path: &str) -> Violation {
     violation(
@@ -322,6 +378,9 @@ pub(crate) fn build_rs_violations(path: &str, text: Option<&str>) -> Vec<Violati
             Fix::AppManifest,
         ));
     }
+    for (line, message) in calls.config_in_code {
+        found.push(violation(path, line, message, Fix::ConfigInCode));
+    }
     found
 }
 
@@ -339,6 +398,10 @@ struct BuildCalls {
     app_manifest: bool,
     /// `AppManifest::new()` is called.
     manifest_new: bool,
+    /// The line and message of each config passed in code: a `config_path(...)` call, or a
+    /// literal naming `TAURI_CONFIG`, which tauri-build and `generate_context!` merge over
+    /// `tauri.conf.json` (set with `env::set_var` or `cargo:rustc-env=`).
+    config_in_code: Vec<(u32, String)>,
 }
 
 impl BuildCalls {
@@ -353,7 +416,15 @@ impl BuildCalls {
                     continue;
                 }
                 TokenTree::Ident(ident) => ident.unraw(),
-                TokenTree::Punct(_) | TokenTree::Literal(_) => continue,
+                TokenTree::Literal(literal) => {
+                    if literal.to_string().contains(ENV_CONFIG) {
+                        let line = line_of(literal.span());
+                        let message = format!("build.rs names `{ENV_CONFIG}`");
+                        self.config_in_code.push((line, message));
+                    }
+                    continue;
+                }
+                TokenTree::Punct(_) => continue,
             };
             let args = match trees.get(index + 1) {
                 Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Parenthesis => {
@@ -367,11 +438,20 @@ impl BuildCalls {
             }
             if ident == "app_manifest" {
                 self.app_manifest = true;
+            } else if ident == "config_path" {
+                let line = line_of(tree.span());
+                let message = "build.rs calls `config_path`".to_owned();
+                self.config_in_code.push((line, message));
             } else if ident == "new" && args.is_empty() && after_app_manifest_path(&before) {
                 self.manifest_new = true;
             }
         }
     }
+}
+
+/// The 1-based line where `span` starts.
+fn line_of(span: proc_macro2::Span) -> u32 {
+    u32::try_from(span.start().line).unwrap_or(1).max(1)
 }
 
 /// True when the three tokens before a name are `AppManifest`, `:` and `:`.
