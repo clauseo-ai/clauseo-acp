@@ -211,6 +211,23 @@ fn a_hash_in_a_macro_body_with_no_brackets_is_a_site() {
 }
 
 #[test]
+fn a_hash_before_parentheses_in_a_macro_body_is_not_an_attribute() {
+    let text = "macro_rules! q {\n    () => {\n        #(expect(a))\n    };\n}\n";
+    assert_eq!(found(text), ["3 q #"]);
+}
+
+#[test]
+fn an_include_in_a_macro_body_does_not_hide_the_attribute_after_it() {
+    let text = concat!(
+        "macro_rules! i {\n    () => {\n",
+        "        let a = 1; include!(\"c.rs\");\n",
+        "        #[expect(b)]\n",
+        "    };\n}\n",
+    );
+    assert_eq!(found(text), ["3 i include c.rs", "4 i expect b"]);
+}
+
+#[test]
 fn doc_comments_and_strings_that_mention_an_attribute_are_not_sites() {
     let text = "//! Uses `#[expect(a)]`.\n/// And #![allow(b)].\n#[doc = \"#[expect(c)]\"]\n\
                 fn f() {\n    let s = \"#[expect(d)]\";\n    /* #[allow(e)] */\n}\n";
