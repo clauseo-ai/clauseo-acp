@@ -6,6 +6,10 @@ use crate::scratch::Scratch;
 mod cap;
 mod errors;
 mod run;
+mod untracked;
+
+/// The command that lists the untracked `.rs` files, as it prints.
+const UNTRACKED_CMD: &str = "git ls-files -z --others --exclude-standard -- *.rs";
 
 const CMD: &str = "cargo mutants --workspace --in-diff target/xtask/mutants.diff --output \
                    target/xtask --jobs 4";
@@ -68,12 +72,33 @@ enum Run {
     FolderForOutcomes,
 }
 
-/// Runs `run_with` in a fresh scratch repo named `name`, with `diff`, a `cargo mutants
-/// --version` that prints `version` (`None`: it fails), and a run that does `run`. Returns what
-/// it printed, whether it passed, and the commands it ran.
+/// What the fake `git ls-files` of the untracked `.rs` files does.
+enum Git {
+    /// Exits 0, printing this NUL-separated list.
+    Lists(&'static str),
+    /// Exits non-zero, printing this.
+    Fails(&'static str),
+    /// Does not start.
+    CannotStart,
+}
+
+/// `check_with`, where git lists no untracked `.rs` file.
 fn check(
     name: &str,
     diff: Result<String, GitError>,
+    version: Option<&str>,
+    run: &Run,
+) -> (String, bool, Vec<String>) {
+    check_with(name, diff, &Git::Lists(""), version, run)
+}
+
+/// Runs `run_with` in a fresh scratch repo named `name`, with `diff`, a `git ls-files` that does
+/// `git`, a `cargo mutants --version` that prints `version` (`None`: it fails), and a run that
+/// does `run`. Returns what it printed, whether it passed, and the commands it ran.
+fn check_with(
+    name: &str,
+    diff: Result<String, GitError>,
+    git: &Git,
     version: Option<&str>,
     run: &Run,
 ) -> (String, bool, Vec<String>) {
@@ -91,6 +116,19 @@ fn check(
     let passed = {
         let mut exec = |cmd: &Cmd, _: &mut dyn FnMut(&[u8])| -> io::Result<Captured> {
             ran.push(cmd.to_string());
+            if cmd.program == Program::Git {
+                return match git {
+                    Git::Lists(files) => Ok(Captured {
+                        success: true,
+                        output: (*files).into(),
+                    }),
+                    Git::Fails(output) => Ok(Captured {
+                        success: false,
+                        output: (*output).into(),
+                    }),
+                    Git::CannotStart => Err(io::Error::new(io::ErrorKind::NotFound, "no git")),
+                };
+            }
             if cmd.args == ["mutants", "--version"] {
                 return Ok(match version {
                     Some(text) => Captured {
@@ -189,7 +227,7 @@ fn a_missed_mutant_fails_at_its_file_and_line_with_the_fix() {
         &Run::Writes(outcomes, false),
     );
     assert!(!passed);
-    assert_eq!(ran, ["cargo mutants --version", CMD]);
+    assert_eq!(ran, [UNTRACKED_CMD, "cargo mutants --version", CMD]);
     assert_eq!(
         printed,
         format!(
@@ -267,7 +305,7 @@ fn an_empty_diff_passes_with_a_note_and_runs_nothing() {
         &Run::TimesOut,
     );
     assert!(passed);
-    assert_eq!(ran, Vec::<String>::new());
+    assert_eq!(ran, [UNTRACKED_CMD]);
     assert_eq!(
         printed,
         format!(

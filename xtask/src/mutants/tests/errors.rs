@@ -12,7 +12,7 @@ fn a_missing_or_other_cargo_mutants_fails_with_setup() {
         &Run::TimesOut,
     );
     assert!(!passed);
-    assert_eq!(ran, ["cargo mutants --version"]);
+    assert_eq!(ran, [UNTRACKED_CMD, "cargo mutants --version"]);
     assert_eq!(
         printed,
         format!(

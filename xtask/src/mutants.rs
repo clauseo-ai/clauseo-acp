@@ -3,9 +3,10 @@
 //! It writes `git diff` against the merge-base with origin/main (the base `--quick` uses) to
 //! `target/xtask/mutants.diff`, then runs cargo-mutants on the mutants in those lines, with the
 //! settings in `.cargo/mutants.toml`, and reads what it found from its `outcomes.json`
-//! (`outcomes.rs`). Untracked files are not in the diff, so `git add` a new file first. Each
-//! missed mutant (one no test fails on) is a failure at its file and line. The run is capped at
-//! `MUTANTS_TIMEOUT`, calibrated on one machine (see there).
+//! (`outcomes.rs`). Untracked files are not in the diff, so a run with an untracked `.rs` file
+//! fails before cargo-mutants starts, naming the file to `git add`. Each missed mutant (one no
+//! test fails on) is a failure at its file and line. The run is capped at `MUTANTS_TIMEOUT`,
+//! calibrated on one machine (see there).
 
 mod fix;
 mod outcomes;
@@ -42,6 +43,9 @@ const OUTCOMES: &str = "target/xtask/mutants.out/outcomes.json";
 /// mutants; a slower machine covers fewer, so a change that fits there can fail on a CI runner.
 /// Recalibrate it on the CI runner once the mutants job exists.
 const MUTANTS_TIMEOUT: Duration = Duration::from_mins(20);
+
+/// How long `git ls-files` may run: it lists files from the index, so a minute means it hangs.
+const GIT_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// How long `cargo mutants --version` may run: it prints one line, so a minute means it hangs.
 const VERSION_TIMEOUT: Duration = Duration::from_mins(1);
@@ -115,6 +119,9 @@ pub(crate) fn run_with<W: Write>(
             return false;
         }
     };
+    if !all_tracked(out, exec) {
+        return false;
+    }
     if diff.trim().is_empty() {
         out.note("mutants ok: nothing changed since the merge-base with origin/main");
         return true;
@@ -162,6 +169,67 @@ pub(crate) fn run_with<W: Write>(
             false
         }
     }
+}
+
+/// The command that lists the untracked `.rs` files git does not ignore, NUL-separated.
+fn untracked_cmd() -> Cmd {
+    Cmd::new(
+        Program::Git,
+        [
+            "ls-files",
+            "-z",
+            "--others",
+            "--exclude-standard",
+            "--",
+            "*.rs",
+        ],
+        GIT_TIMEOUT,
+    )
+}
+
+/// Whether every `.rs` file git does not ignore is tracked: `--in-diff` gets only the tracked
+/// files' changes, so cargo-mutants would mutate none of an untracked one and still pass. Prints
+/// a failure naming each untracked file, or why git could not list them.
+fn all_tracked<W: Write>(out: &mut Printer<W>, exec: &mut Exec<'_>) -> bool {
+    let cmd = untracked_cmd();
+    let (error, fix) = match exec(&cmd, &mut |_| {}) {
+        Ok(listed) if listed.success => {
+            let untracked: Vec<&str> = listed
+                .output
+                .split('\0')
+                .filter(|f| !f.is_empty())
+                .collect();
+            for file in &untracked {
+                let message =
+                    format!("{file} is untracked, so cargo-mutants would mutate none of it");
+                fail(
+                    out,
+                    &message,
+                    &Fix::Untracked {
+                        file: (*file).to_owned(),
+                    },
+                );
+            }
+            return untracked.is_empty();
+        }
+        Ok(listed) => {
+            let error = GitError::Failed {
+                command: cmd.to_string(),
+                stderr: listed.output.trim().to_owned(),
+            };
+            let fix = Fix::ByHand {
+                cmd: cmd.to_string(),
+            };
+            (error, fix)
+        }
+        Err(error) if process::is_timeout(&error) => {
+            (GitError::TimedOut(error.to_string()), Fix::GitTimedOut)
+        }
+        Err(error) => (GitError::NotStarted(error.to_string()), Fix::GitNotStarted),
+    };
+    let message = format!("could not list the untracked .rs files: {error}");
+    fail(out, &message, &fix);
+    false
 }
 
 /// Removes `OUTPUT_DIR` under `root`, the folder an earlier run of cargo-mutants left, so its
