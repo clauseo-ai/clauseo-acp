@@ -355,4 +355,12 @@ crate::checks::planted::cases! {
     ]), inspects 3 => super::cases::tauri_config_in_cargo_env,
     /// Other `[env]` entries, one only starting with `TAURI_CONFIG`, pass.
     other_cargo_env_passes: Passes, inspects 3 => super::cases::other_cargo_env_passes,
+    /// `src/x -> ..` fails and the check finishes: the walk does not follow the link, behind
+    /// which a `mod` could compile a file. The conf, build.rs and lib.rs are read.
+    symlink_to_a_folder_above: FailsWith(&[
+        "crates/desktop/src/x:1: `crates/desktop/src/x` is a symlink to a folder: the desktop \
+         crate can compile Rust files behind it, and this check does not follow it\n    \
+         fix: replace the symlink with a real folder holding the files: rustc follows it, and \
+         this check reads only what is really in the folder",
+    ]), inspects 3 => super::linked::symlink_to_a_folder_above,
 }

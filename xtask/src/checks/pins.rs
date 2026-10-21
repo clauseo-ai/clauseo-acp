@@ -5,14 +5,28 @@
 //!   `channel` in `rust-toolchain.toml`.
 //! - A comment in `lefthook.yml` that names a lefthook version names the one `BINARIES` in
 //!   `xtask/src/setup.rs` pins.
-//! - No workflow in `.github/workflows/` pins pnpm, Node or Rust: no `version` input to
-//!   `pnpm/action-setup`, no `node-version` input to `actions/setup-node`, no toolchain input,
-//!   ref or ref comment of a Rust toolchain action, and no value that holds a version a home pins.
+//! - No workflow in `.github/workflows/` and no action in `.github/actions/` pins a version of
+//!   pnpm, Node, Rust or a tool `xtask/src/setup.rs` pins: no version input to the actions that
+//!   install pnpm, Node or Rust, and no version where a value names the tool (`pnpm@<v>`,
+//!   `node:<v>`, `rustup toolchain install <v>`, ...; the list is in `forms.rs`). Any version
+//!   there fails, the home's or another, so a copy and a drifted copy both fail.
 //!
-//! It counts the files that can hold a copy and that it read: each manifest, `lefthook.yml` and
-//! each workflow file.
+//! It counts the files that can hold a copy and that it read: each manifest, `lefthook.yml`, each
+//! workflow file and each action file.
+//!
+//! `engines.node` in `ui/package.json` takes only `>=<major>.<minor>.<patch>`: one minimum Node.
+//! This is the one place that grammar is written down for Rust; `engines_node_minimum` applies it
+//! here and in `xtask/src/buildtime/web.rs`, and `minNode` in `ui/app/scripts/buildtime-lib.mjs`
+//! applies it in the same words (`ENGINES_NODE_RULE`). Anything else fails as a home that cannot
+//! be read.
+//!
+//! Adding a home: a cargo tool in `TOOLS` or a binary in `BINARIES` needs nothing here, as the
+//! forms read their names. A version kept in another file is a `FileHome` variant, which touches
+//! its arms in `impl FileHome` (the compiler lists them), its reader and field in `homes.rs`, the
+//! forms that name its tool in `forms.rs`, and one sample in each exhaustive test in `tests.rs`.
 
 mod cargo;
+mod forms;
 mod homes;
 mod lefthook;
 mod workflows;
@@ -32,8 +46,9 @@ pub(crate) const CHECK: StaticCheck = StaticCheck {
     },
     place: || {
         format!(
-            "in {CARGO_TOML} and the members' manifests, {LEFTHOOK} and {}/",
-            workflows::DIR
+            "in {CARGO_TOML} and the members' manifests, {LEFTHOOK}, {}/ and {}/",
+            workflows::DIR,
+            workflows::ACTIONS
         )
     },
     source: file!(),
@@ -53,6 +68,21 @@ const LEFTHOOK: &str = "lefthook.yml";
 /// The home of the pinned cargo tools (`TOOLS`) and binaries (`BINARIES`).
 const SETUP: &str = "xtask/src/setup.rs";
 
+/// The one form `engines.node` takes, in the words each reader of it fails with.
+pub(crate) const ENGINES_NODE_RULE: &str = "engines.node takes only \">=<major>.<minor>.<patch>\"";
+
+/// The minimum Node in an `engines.node` of the one form it takes: `1.2.3` of `>=1.2.3`. `None`
+/// for anything else (`^1.2.3`, `>= 1.2.3`, `>=1.2`, `>=1.2.3 <2`), which `ENGINES_NODE_RULE`
+/// names.
+pub(crate) fn engines_node_minimum(field: &str) -> Option<&str> {
+    let version = field.strip_prefix(">=")?;
+    let parts: Vec<&str> = version.split('.').collect();
+    let numbers = parts
+        .iter()
+        .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()));
+    (parts.len() == 3 && numbers).then_some(version)
+}
+
 fn run(ctx: &Context) -> Inspection {
     inspect(ctx, TOOLS, BINARIES)
 }
@@ -63,50 +93,159 @@ fn inspect(ctx: &Context, tools: &[Tool], binaries: &[Binary]) -> Inspection {
     let homes = homes::read(&ctx.root, &mut found);
     cargo::check(ctx, homes.rust.as_deref(), &mut found);
     lefthook::check(&ctx.root, binaries, &mut found);
-    workflows::check(&ctx.root, &homes, tools, binaries, &mut found);
+    workflows::check(&ctx.root, tools, binaries, &mut found);
     found
 }
 
 /// A pinned version and the home it is read from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Home {
-    /// `channel` in `rust-toolchain.toml`.
-    Rust,
-    /// `packageManager` in `ui/package.json`.
-    Pnpm,
-    /// `engines.node` in `ui/package.json`, a minimum.
-    Node,
+    /// A version kept in a file of the repo.
+    File(FileHome),
     /// A cargo tool in `TOOLS`, by crate name.
     Tool(&'static str),
     /// A binary in `BINARIES`, by name.
     Binary(&'static str),
 }
 
-impl fmt::Display for Home {
-    /// What the version is, as the end of `` `1.2.3` is ``.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+/// A version kept in a file of the repo, which `homes.rs` reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FileHome {
+    /// `channel` in `rust-toolchain.toml`.
+    Rust,
+    /// `packageManager` in `ui/package.json`.
+    Pnpm,
+    /// `engines.node` in `ui/package.json`, a minimum.
+    Node,
+}
+
+impl FileHome {
+    /// The tool, as the end of "which ... to install".
+    fn tool(self) -> &'static str {
         match self {
-            Home::Rust => write!(f, "the Rust version `channel` in {TOOLCHAIN} pins"),
-            Home::Pnpm => write!(
-                f,
-                "the pnpm version `packageManager` in {PACKAGE_JSON} pins"
+            FileHome::Rust => "Rust toolchain",
+            FileHome::Pnpm => "pnpm",
+            FileHome::Node => "Node",
+        }
+    }
+
+    /// The version, as "the one home of ... is".
+    fn noun(self) -> &'static str {
+        match self {
+            FileHome::Rust => "the Rust version",
+            FileHome::Pnpm => "the pnpm version",
+            FileHome::Node => "the minimum Node",
+        }
+    }
+
+    /// Where the version is written.
+    fn place(self) -> String {
+        match self {
+            FileHome::Rust => format!("`channel` in {TOOLCHAIN}"),
+            FileHome::Pnpm => format!("`packageManager` in {PACKAGE_JSON}"),
+            FileHome::Node => format!("`engines.node` in {PACKAGE_JSON}"),
+        }
+    }
+
+    /// How a workflow installs the version from its home.
+    fn install(self) -> String {
+        match self {
+            FileHome::Rust => format!(
+                "a `run: rustup toolchain install` step with no argument installs the toolchain \
+                 {TOOLCHAIN} names"
             ),
-            Home::Node => write!(f, "the minimum Node `engines.node` in {PACKAGE_JSON} sets"),
-            Home::Tool(name) => write!(f, "the {name} version `TOOLS` in {SETUP} pins"),
-            Home::Binary(name) => write!(f, "the {name} version `BINARIES` in {SETUP} pins"),
+            FileHome::Pnpm => format!(
+                "pnpm/action-setup with `package_json_file: {PACKAGE_JSON}` installs the pnpm \
+                 `packageManager` names"
+            ),
+            FileHome::Node => format!(
+                "actions/setup-node with `node-version-file: {PACKAGE_JSON}` installs a Node \
+                 that `engines.node` allows"
+            ),
+        }
+    }
+
+    /// The fix of a version input to the action that installs the tool.
+    fn input_fix(self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FileHome::Rust => write!(
+                f,
+                "install Rust with a `run: rustup toolchain install` step instead: with no \
+                 argument rustup installs the toolchain {TOOLCHAIN} names, the one home of the \
+                 Rust version"
+            ),
+            FileHome::Pnpm => write!(
+                f,
+                "remove `version` and set `package_json_file: {PACKAGE_JSON}`: pnpm/action-setup \
+                 then installs the pnpm `packageManager` names there, its one home"
+            ),
+            FileHome::Node => write!(
+                f,
+                "remove `node-version` and set `node-version-file: {PACKAGE_JSON}`: \
+                 actions/setup-node then installs a Node that `engines.node` there allows, its \
+                 one home"
+            ),
+        }
+    }
+
+    /// The fix of a home value that could not be read.
+    fn unread_fix(self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FileHome::Rust => write!(
+                f,
+                "set `channel = \"<major>.<minor>.<patch>\"` under `[toolchain]` in {TOOLCHAIN}: \
+                 it is the one home of the Rust version, and pins compares its copies with it"
+            ),
+            FileHome::Pnpm => write!(
+                f,
+                "set `\"packageManager\": \"pnpm@<major>.<minor>.<patch>\"` in {PACKAGE_JSON}: \
+                 it is the one home of the pnpm version, and pins looks for copies of it"
+            ),
+            FileHome::Node => write!(
+                f,
+                "set `\"engines\": {{ \"node\": \">=<major>.<minor>.<patch>\" }}` in \
+                 {PACKAGE_JSON}: it is the one home of the minimum Node, and pins looks for \
+                 copies of it"
+            ),
         }
     }
 }
 
-/// A home value `pins` could not read, so it compares no copy with it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Unread {
-    /// `channel` in `rust-toolchain.toml`.
-    Channel,
-    /// `packageManager` in `ui/package.json`.
-    PackageManager,
-    /// `engines.node` in `ui/package.json`.
-    EnginesNode,
+impl Home {
+    /// The tool, as the end of "names ...".
+    fn tool(self) -> &'static str {
+        match self {
+            Home::File(home) => home.tool(),
+            Home::Tool(name) | Home::Binary(name) => name,
+        }
+    }
+
+    /// The version, as "the one home of ... is".
+    fn noun(self) -> String {
+        match self {
+            Home::File(home) => home.noun().to_owned(),
+            Home::Tool(name) | Home::Binary(name) => format!("the {name} version"),
+        }
+    }
+
+    /// Where the version is written.
+    fn place(self) -> String {
+        match self {
+            Home::File(home) => home.place(),
+            Home::Tool(_) => format!("`TOOLS` in {SETUP}"),
+            Home::Binary(_) => format!("`BINARIES` in {SETUP}"),
+        }
+    }
+
+    /// How a workflow installs the version from its home.
+    fn install(self) -> String {
+        match self {
+            Home::File(home) => home.install(),
+            Home::Tool(_) | Home::Binary(_) => {
+                format!("`cargo xtask setup --binaries` installs the versions {SETUP} pins")
+            }
+        }
+    }
 }
 
 /// The fix line of each failure `pins` reports.
@@ -116,16 +255,13 @@ pub(crate) enum Fix {
     RustVersion { channel_major_minor: String },
     /// A `lefthook.yml` comment that names another lefthook version than `BINARIES`.
     LefthookComment { pinned: String },
-    /// A `version` input to `pnpm/action-setup`.
-    PnpmInput,
-    /// A `node-version` input to `actions/setup-node`.
-    NodeInput,
-    /// A Rust toolchain action told which toolchain to install.
-    RustToolchain,
-    /// A workflow value that holds a version a home pins.
+    /// A version input to the action that installs this tool, or a Rust toolchain action's
+    /// ref that names a toolchain.
+    Input(FileHome),
+    /// A workflow value that names a version of the tool this home pins.
     Copy(Home),
     /// A home value that could not be read.
-    Unread(Unread),
+    Unread(FileHome),
     /// A YAML file that does not parse.
     NotYaml,
     /// A manifest that does not parse.
@@ -147,25 +283,9 @@ impl fmt::Display for Fix {
                 "check that the comment holds for lefthook {pinned}, then make it name {pinned}, \
                  the version `BINARIES` in {SETUP} pins"
             ),
-            Fix::PnpmInput => write!(
-                f,
-                "remove `version` and set `package_json_file: {PACKAGE_JSON}`: pnpm/action-setup \
-                 then installs the pnpm `packageManager` names there, its one home"
-            ),
-            Fix::NodeInput => write!(
-                f,
-                "remove `node-version` and set `node-version-file: {PACKAGE_JSON}`: \
-                 actions/setup-node then installs a Node that `engines.node` there allows, its \
-                 one home"
-            ),
-            Fix::RustToolchain => write!(
-                f,
-                "install Rust with a `run: rustup toolchain install` step instead: with no \
-                 argument rustup installs the toolchain {TOOLCHAIN} names, the one home of the \
-                 Rust version"
-            ),
-            Fix::Copy(home) => copy_fix(f, *home),
-            Fix::Unread(unread) => unread_fix(f, *unread),
+            Fix::Input(home) => home.input_fix(f),
+            Fix::Copy(home) => write!(f, "remove the version from this file: {}", home.install()),
+            Fix::Unread(home) => home.unread_fix(f),
             Fix::NotYaml => write!(
                 f,
                 "make the file valid YAML at this line: pins parses it to find the versions it \
@@ -176,49 +296,6 @@ impl fmt::Display for Fix {
                 "make the manifest valid TOML at this line: pins reads its rust-version there"
             ),
         }
-    }
-}
-
-/// The fix of a workflow value that holds the version `home` pins.
-fn copy_fix(f: &mut fmt::Formatter<'_>, home: Home) -> fmt::Result {
-    let how = match home {
-        Home::Rust => format!(
-            "a `run: rustup toolchain install` step with no argument installs the toolchain \
-             {TOOLCHAIN} names"
-        ),
-        Home::Pnpm => format!(
-            "pnpm/action-setup with `package_json_file: {PACKAGE_JSON}` installs the pnpm \
-             `packageManager` names"
-        ),
-        Home::Node => format!(
-            "actions/setup-node with `node-version-file: {PACKAGE_JSON}` installs a Node that \
-             `engines.node` allows"
-        ),
-        Home::Tool(_) | Home::Binary(_) => {
-            format!("`cargo xtask setup --binaries` installs the versions {SETUP} pins")
-        }
-    };
-    write!(f, "remove the version from the workflow: {how}")
-}
-
-/// The fix of a home value that could not be read.
-fn unread_fix(f: &mut fmt::Formatter<'_>, unread: Unread) -> fmt::Result {
-    match unread {
-        Unread::Channel => write!(
-            f,
-            "set `channel = \"<major>.<minor>.<patch>\"` under `[toolchain]` in {TOOLCHAIN}: it \
-             is the one home of the Rust version, and pins compares its copies with it"
-        ),
-        Unread::PackageManager => write!(
-            f,
-            "set `\"packageManager\": \"pnpm@<major>.<minor>.<patch>\"` in {PACKAGE_JSON}: it is \
-             the one home of the pnpm version, and pins looks for copies of it"
-        ),
-        Unread::EnginesNode => write!(
-            f,
-            "set `\"engines\": {{ \"node\": \">=<major>.<minor>.<patch>\" }}` in {PACKAGE_JSON}: \
-             it is the one home of the minimum Node, and pins looks for copies of it"
-        ),
     }
 }
 

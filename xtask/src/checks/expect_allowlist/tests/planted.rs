@@ -1,6 +1,6 @@
 //! The planted cases of the expect-allowlist check: one `cases!` list, which makes `PLANTED`
 //! and one test per case (see `checks/planted.rs`). The functions that build each input live in
-//! the check's tests module. Every case has one Rust file, so each inspects 1.
+//! the check's tests module and `tests/cases.rs`. A case inspects the Rust files it writes.
 
 crate::checks::planted::cases! {
     /// A Rust file whose one `#[expect]` has its line passes.
@@ -44,10 +44,10 @@ crate::checks::planted::cases! {
          fix: remove the #[expect], or add \"src/a.rs f clippy::unwrap_used\" to \
          xtask/expect-allowlist.txt (the code owner approves it)",
     ]), inspects 1 => super::several_lints,
-    /// An expect inside a `macro_rules!` body counts, named after the module around the macro.
+    /// An expect inside a `macro_rules!` body counts, named after the macro.
     macro_rules_body: FailsWith(&[
-        "src/a.rs:3: #[expect(dead_code)] in `a` is not in xtask/expect-allowlist.txt\n    fix: \
-         remove the #[expect], or add \"src/a.rs a dead_code\" to xtask/expect-allowlist.txt (the \
+        "src/a.rs:3: #[expect(dead_code)] in `m` is not in xtask/expect-allowlist.txt\n    fix: \
+         remove the #[expect], or add \"src/a.rs m dead_code\" to xtask/expect-allowlist.txt (the \
          code owner approves it)",
     ]), inspects 1 => super::macro_rules_body,
     /// An expect inside the tokens of a macro call counts, named after the function around it.
@@ -64,10 +64,10 @@ crate::checks::planted::cases! {
         "xtask/expect-allowlist.txt:3: stale entry: src/gone.rs has no #![expect(unsafe_code)] at \
          the top of the file\n    fix: delete line 3 of xtask/expect-allowlist.txt",
     ]), inspects 1 => super::stale_line,
-    /// Two identical sites need two lines: the second site fails.
+    /// Two identical sites (two statements in one function) need two lines: the second fails.
     two_sites_one_line: FailsWith(&[
-        "src/a.rs:4: #[expect(dead_code)] in `a` is in xtask/expect-allowlist.txt once, but this \
-         file has 2 such sites\n    fix: remove the #[expect], or add \"src/a.rs a dead_code\" to \
+        "src/a.rs:4: #[expect(unused)] in `f` is in xtask/expect-allowlist.txt once, but this \
+         file has 2 such sites\n    fix: remove the #[expect], or add \"src/a.rs f unused\" to \
          xtask/expect-allowlist.txt (the code owner approves it)",
     ]), inspects 1 => super::two_sites_one_line,
     /// One site listed twice: the second line is stale.
@@ -77,7 +77,7 @@ crate::checks::planted::cases! {
     ]), inspects 1 => super::one_site_two_lines,
     /// An outer `#[allow]` fails.
     allow_outer: FailsWith(&[
-        "src/a.rs:1: #[allow(dead_code)] silences a lint; only #[expect] with a reason may\n    \
+        "src/a.rs:1: #[allow(dead_code)] silences a lint; only #[expect] with a reason may lower a lint\n    \
          fix: delete the allow, or write #[expect(dead_code, reason = \"...\")] in its place and \
          add \"src/a.rs f dead_code\" to xtask/expect-allowlist.txt (the code owner approves it)",
     ]), inspects 1 => super::allow_outer,
@@ -85,38 +85,38 @@ crate::checks::planted::cases! {
     /// see it.
     allow_inner_at_file_top: FailsWith(&[
         "src/a.rs:1: #![allow(clippy::disallowed_methods)] silences a lint; only #[expect] with a \
-         reason may\n    fix: delete the allow, or write #![expect(clippy::disallowed_methods, \
+         reason may lower a lint\n    fix: delete the allow, or write #![expect(clippy::disallowed_methods, \
          reason = \"...\")] in its place and add \"src/a.rs - clippy::disallowed_methods\" to \
          xtask/expect-allowlist.txt (the code owner approves it)",
     ]), inspects 1 => super::allow_inner_at_file_top,
     /// An inner `#![allow]` at the top of an inline `mod` fails.
     allow_inner_in_mod: FailsWith(&[
-        "src/a.rs:2: #![allow(dead_code)] silences a lint; only #[expect] with a reason may\n    \
+        "src/a.rs:2: #![allow(dead_code)] silences a lint; only #[expect] with a reason may lower a lint\n    \
          fix: delete the allow, or write #![expect(dead_code, reason = \"...\")] in its place and \
          add \"src/a.rs m dead_code\" to xtask/expect-allowlist.txt (the code owner approves it)",
     ]), inspects 1 => super::allow_inner_in_mod,
     /// An allow under an inner `cfg_attr` fails.
     allow_cfg_attr: FailsWith(&[
         "src/a.rs:1: #![allow(clippy::disallowed_methods)] silences a lint; only #[expect] with a \
-         reason may\n    fix: delete the allow, or write #![expect(clippy::disallowed_methods, \
+         reason may lower a lint\n    fix: delete the allow, or write #![expect(clippy::disallowed_methods, \
          reason = \"...\")] in its place and add \"src/a.rs - clippy::disallowed_methods\" to \
          xtask/expect-allowlist.txt (the code owner approves it)",
     ]), inspects 1 => super::allow_cfg_attr,
     /// An allow under nested `cfg_attr` on a statement fails.
     allow_nested_cfg_attr: FailsWith(&[
-        "src/a.rs:2: #[allow(unused)] silences a lint; only #[expect] with a reason may\n    fix: \
+        "src/a.rs:2: #[allow(unused)] silences a lint; only #[expect] with a reason may lower a lint\n    fix: \
          delete the allow, or write #[expect(unused, reason = \"...\")] in its place and add \
          \"src/a.rs f unused\" to xtask/expect-allowlist.txt (the code owner approves it)",
     ]), inspects 1 => super::allow_nested_cfg_attr,
     /// An allow inside a `macro_rules!` body fails.
     allow_in_macro_rules: FailsWith(&[
-        "src/a.rs:3: #![allow(dead_code)] silences a lint; only #[expect] with a reason may\n    \
+        "src/a.rs:3: #![allow(dead_code)] silences a lint; only #[expect] with a reason may lower a lint\n    \
          fix: delete the allow, or write #![expect(dead_code, reason = \"...\")] in its place and \
-         add \"src/a.rs a dead_code\" to xtask/expect-allowlist.txt (the code owner approves it)",
+         add \"src/a.rs m dead_code\" to xtask/expect-allowlist.txt (the code owner approves it)",
     ]), inspects 1 => super::allow_in_macro_rules,
     /// An allow inside the tokens of a macro call fails.
     allow_in_macro_call: FailsWith(&[
-        "src/a.rs:3: #[allow(dead_code)] silences a lint; only #[expect] with a reason may\n    \
+        "src/a.rs:3: #[allow(dead_code)] silences a lint; only #[expect] with a reason may lower a lint\n    \
          fix: delete the allow, or write #[expect(dead_code, reason = \"...\")] in its place and \
          add \"src/a.rs f dead_code\" to xtask/expect-allowlist.txt (the code owner approves it)",
     ]), inspects 1 => super::allow_in_macro_call,
@@ -149,10 +149,10 @@ crate::checks::planted::cases! {
     /// not called stale.
     unparsable_file: FailsWith(&[
         "src/a.rs:2: `src/a.rs` is not valid Rust: expected one of: `for`, parentheses, \
-         `unsafe`, `fn`, \
-         `extern`, identifier, `::`, `<`, `dyn`, square brackets, `*`, `&`, `!`, `impl`, `_`, \
-         lifetime\n    fix: make the file valid Rust that syn can parse: expect-allowlist \
-         reads every .rs file in the repo for its #[expect] and #[allow] sites",
+         `unsafe`, `fn`, `extern`, identifier, `::`, `<`, `dyn`, square brackets, `*`, `&`, \
+         `!`, `impl`, `_`, lifetime\n    fix: make the file valid Rust that syn can parse: \
+         expect-allowlist reads every .rs file in the repo for its expect, allow and warn \
+         attributes",
     ]), inspects 1 => super::unparsable_file,
     /// A missing allowlist is one failure with no line; no site is matched.
     missing_allowlist: FailsWith(&[
@@ -182,4 +182,86 @@ crate::checks::planted::cases! {
          remove the #[expect], or add \"src/B.RS f dead_code\" to xtask/expect-allowlist.txt (the \
          code owner approves it)",
     ]), inspects 1 => super::untracked_upper_case_rs,
+    /// An outer `#[warn]` fails as an allow does: it turns a denied lint into a warning.
+    warn_outer: FailsWith(&[
+        "src/a.rs:1: #[warn(clippy::disallowed_methods)] turns a denied lint into a warning, which a local cargo xtask check passes; only #[expect] with a reason may lower a lint\n    fix: delete the warn, or write #[expect(clippy::disallowed_methods, reason = \"...\")] in its place and add \"src/a.rs f clippy::disallowed_methods\" to xtask/expect-allowlist.txt (the code owner approves it)",
+    ]), inspects 1 => super::warn_outer,
+    /// An inner `#![warn]` at the top of the file fails.
+    warn_inner_at_file_top: FailsWith(&[
+        "src/a.rs:1: #![warn(warnings)] turns a denied lint into a warning, which a local cargo xtask check passes; only #[expect] with a reason may lower a lint\n    fix: delete the warn, or write #![expect(warnings, reason = \"...\")] in its place and add \"src/a.rs - warnings\" to xtask/expect-allowlist.txt (the code owner approves it)",
+    ]), inspects 1 => super::warn_inner_at_file_top,
+    /// A warn under nested `cfg_attr` on a statement fails.
+    warn_cfg_attr: FailsWith(&[
+        "src/a.rs:2: #[warn(unused)] turns a denied lint into a warning, which a local cargo xtask check passes; only #[expect] with a reason may lower a lint\n    fix: delete the warn, or write #[expect(unused, reason = \"...\")] in its place and add \"src/a.rs f unused\" to xtask/expect-allowlist.txt (the code owner approves it)",
+    ]), inspects 1 => super::warn_cfg_attr,
+    /// A warn inside a `macro_rules!` body fails.
+    warn_in_macro_rules: FailsWith(&[
+        "src/a.rs:3: #![warn(dead_code)] turns a denied lint into a warning, which a local cargo xtask check passes; only #[expect] with a reason may lower a lint\n    fix: delete the warn, or write #![expect(dead_code, reason = \"...\")] in its place and add \"src/a.rs m dead_code\" to xtask/expect-allowlist.txt (the code owner approves it)",
+    ]), inspects 1 => super::warn_in_macro_rules,
+    /// A warn inside the tokens of a macro call fails.
+    warn_in_macro_call: FailsWith(&[
+        "src/a.rs:3: #[warn(dead_code)] turns a denied lint into a warning, which a local cargo xtask check passes; only #[expect] with a reason may lower a lint\n    fix: delete the warn, or write #[expect(dead_code, reason = \"...\")] in its place and add \"src/a.rs f dead_code\" to xtask/expect-allowlist.txt (the code owner approves it)",
+    ]), inspects 1 => super::warn_in_macro_call,
+    /// A warn that names no lint fails.
+    warn_with_no_lint: FailsWith(&[
+        "src/a.rs:1: a warn attribute that names no lint\n    fix: delete the warn: it names no lint",
+    ]), inspects 1 => super::warn_with_no_lint,
+    /// `deny` and `forbid` only raise a lint: they pass.
+    deny_and_forbid: Passes, inspects 1 => super::deny_and_forbid,
+    /// `#[$m]` in a macro body fails: the caller could pass in any attribute.
+    metavariable_attribute: FailsWith(&[
+        "src/a.rs:3: an attribute in a macro body takes its name or a lint from a metavariable, so expect-allowlist cannot see whether it is an expect, allow or warn\n    fix: write the attribute's name and each of its lints in the macro body itself, with no metavariable, so expect-allowlist can read them; a caller cannot pass in an attribute or a lint",
+    ]), inspects 1 => super::metavariable_attribute,
+    /// `#[$n(dead_code)]` fails: the caller names the attribute.
+    metavariable_name_with_lints: FailsWith(&[
+        "src/a.rs:3: an attribute in a macro body takes its name or a lint from a metavariable, so expect-allowlist cannot see whether it is an expect, allow or warn\n    fix: write the attribute's name and each of its lints in the macro body itself, with no metavariable, so expect-allowlist can read them; a caller cannot pass in an attribute or a lint",
+    ]), inspects 1 => super::metavariable_name_with_lints,
+    /// `#[cfg_attr(all(), $m)]` fails.
+    metavariable_in_cfg_attr: FailsWith(&[
+        "src/a.rs:3: an attribute in a macro body takes its name or a lint from a metavariable, so expect-allowlist cannot see whether it is an expect, allow or warn\n    fix: write the attribute's name and each of its lints in the macro body itself, with no metavariable, so expect-allowlist can read them; a caller cannot pass in an attribute or a lint",
+    ]), inspects 1 => super::metavariable_in_cfg_attr,
+    /// `#![$($t)*]` fails.
+    metavariable_inner_repetition: FailsWith(&[
+        "src/a.rs:3: an attribute in a macro body takes its name or a lint from a metavariable, so expect-allowlist cannot see whether it is an expect, allow or warn\n    fix: write the attribute's name and each of its lints in the macro body itself, with no metavariable, so expect-allowlist can read them; a caller cannot pass in an attribute or a lint",
+    ]), inspects 1 => super::metavariable_inner_repetition,
+    /// `#[expect($n, ..)]` fails: one allowlist line would approve any lint.
+    metavariable_lint_in_expect: FailsWith(&[
+        "src/a.rs:3: an attribute in a macro body takes its name or a lint from a metavariable, so expect-allowlist cannot see whether it is an expect, allow or warn\n    fix: write the attribute's name and each of its lints in the macro body itself, with no metavariable, so expect-allowlist can read them; a caller cannot pass in an attribute or a lint",
+    ]), inspects 1 => super::metavariable_lint_in_expect,
+    /// A `#` with no brackets after it in a macro body fails: `# $b` takes them from the caller.
+    hash_without_brackets: FailsWith(&[
+        "src/a.rs:3: a `#` in a macro body has no brackets after it, so the caller supplies the attribute and expect-allowlist cannot read it\n    fix: write the attribute's brackets right after its `#`, as `#[..]` or `#![..]`, with its name and lints in the macro body itself",
+    ]), inspects 1 => super::hash_without_brackets,
+    /// `#[path]` to a `.rs` file git lists passes; both files are read.
+    path_to_listed_rs: Passes, inspects 2 => super::path_to_listed_rs,
+    /// `#[path]` to a file that is not `.rs` fails: the allow in it is never read.
+    path_to_non_rs: FailsWith(&[
+        "src/a.rs:1: #[path = \"x.txt\"] names `src/x.txt`, which is not a .rs file git lists, so expect-allowlist does not read it\n    fix: give #[path] a string literal naming a .rs file that git lists, relative to this file's folder, on a module at the top level of the file, or move the module to its default path; expect-allowlist reads only those files",
+    ]), inspects 1 => super::path_to_non_rs,
+    /// `#[path]` under `cfg_attr` to a `.rs` file `.gitignore` excludes fails.
+    path_to_ignored_rs: FailsWith(&[
+        "src/a.rs:1: #[path = \"gen/x.rs\"] names `src/gen/x.rs`, which is not a .rs file git lists, so expect-allowlist does not read it\n    fix: give #[path] a string literal naming a .rs file that git lists, relative to this file's folder, on a module at the top level of the file, or move the module to its default path; expect-allowlist reads only those files",
+    ]), inspects 1 => super::path_to_ignored_rs,
+    /// `#[path]` that leaves the repo fails.
+    path_outside_repo: FailsWith(&[
+        "src/a.rs:1: #[path = \"../../x.rs\"] names `../../x.rs`, outside the repo, which is not a .rs file git lists, so expect-allowlist does not read it\n    fix: give #[path] a string literal naming a .rs file that git lists, relative to this file's folder, on a module at the top level of the file, or move the module to its default path; expect-allowlist reads only those files",
+    ]), inspects 1 => super::path_outside_repo,
+    /// `#[path]` on a module inside an inline module fails: its folder is not checked.
+    path_in_inline_mod: FailsWith(&[
+        "src/a.rs:2: #[path = \"c.rs\"] is not on a module at the top level of the file, so expect-allowlist cannot tell which file rustc compiles\n    fix: give #[path] a string literal naming a .rs file that git lists, relative to this file's folder, on a module at the top level of the file, or move the module to its default path; expect-allowlist reads only those files",
+    ]), inspects 2 => super::path_in_inline_mod,
+    /// `include!` of a `.rs` file git lists passes, relative to the file's folder.
+    include_listed_rs: Passes, inspects 2 => super::include_listed_rs,
+    /// `include!` of a file that is not `.rs` fails.
+    include_non_rs: FailsWith(&[
+        "src/a.rs:1: include!(\"x.inc\") compiles `src/x.inc`, which is not a .rs file git lists, so expect-allowlist does not read it\n    fix: move the code into a module, or include! only a .rs file that git lists, named by a string literal relative to this file's folder; expect-allowlist reads only those files",
+    ]), inspects 1 => super::include_non_rs,
+    /// `include!` of anything but a string literal fails.
+    include_not_a_literal: FailsWith(&[
+        "src/a.rs:1: include! takes an argument that is not a string literal, so expect-allowlist cannot tell which file rustc compiles\n    fix: move the code into a module, or include! only a .rs file that git lists, named by a string literal relative to this file's folder; expect-allowlist reads only those files",
+    ]), inspects 1 => super::include_not_a_literal,
+    /// `include!` in a macro body counts too.
+    include_in_macro_body: FailsWith(&[
+        "src/a.rs:3: include!(\"x.inc\") compiles `src/x.inc`, which is not a .rs file git lists, so expect-allowlist does not read it\n    fix: move the code into a module, or include! only a .rs file that git lists, named by a string literal relative to this file's folder; expect-allowlist reads only those files",
+    ]), inspects 1 => super::include_in_macro_body,
 }

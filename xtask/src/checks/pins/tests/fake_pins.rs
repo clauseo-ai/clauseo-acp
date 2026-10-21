@@ -59,48 +59,50 @@ fn versions_in_run_steps() {
         &cases::versions_in_run_steps(),
         2,
         &[
-            ".github/workflows/ci.yml:4: `7.8.9` is the pnpm version `packageManager` in \
-     ui/package.json pins\n    fix: remove the version from the workflow: pnpm/action-setup \
-     with `package_json_file: ui/package.json` installs the pnpm `packageManager` names",
-            ".github/workflows/ci.yml:7: `7.8` is the major.minor of the pnpm version \
-     `packageManager` in ui/package.json pins\n    fix: remove the version from the \
-     workflow: pnpm/action-setup with `package_json_file: ui/package.json` installs the pnpm \
-     `packageManager` names",
-            ".github/workflows/ci.yml:8: `3.4.5` is the Rust version `channel` in rust-toolchain.toml \
-     pins\n    fix: remove the version from the workflow: a `run: rustup toolchain install` \
-     step with no argument installs the toolchain rust-toolchain.toml names",
-            ".github/workflows/ci.yml:9: `5.6.7` is the cargo-fake version `TOOLS` in \
-     xtask/src/setup.rs pins\n    fix: remove the version from the workflow: `cargo xtask \
-     setup --binaries` installs the versions xtask/src/setup.rs pins",
-            ".github/workflows/ci.yml:9: `9.8.7` is the lefthook version `BINARIES` in \
-     xtask/src/setup.rs pins\n    fix: remove the version from the workflow: `cargo xtask \
-     setup --binaries` installs the versions xtask/src/setup.rs pins",
+            ".github/workflows/ci.yml:4: `pnpm@7.8.9` names pnpm 7.8.9; the one home of the pnpm \
+             version is `packageManager` in ui/package.json\n    fix: remove the version from this \
+             file: pnpm/action-setup with `package_json_file: ui/package.json` installs the pnpm \
+             `packageManager` names",
+            ".github/workflows/ci.yml:7: `pnpm@7.8` names pnpm 7.8; the one home of the pnpm \
+             version is `packageManager` in ui/package.json\n    fix: remove the version from this \
+             file: pnpm/action-setup with `package_json_file: ui/package.json` installs the pnpm \
+             `packageManager` names",
+            ".github/workflows/ci.yml:8: `rustup toolchain install 3.4.5` names Rust toolchain \
+             3.4.5; the one home of the Rust version is `channel` in rust-toolchain.toml\n    fix: \
+             remove the version from this file: a `run: rustup toolchain install` step with no \
+             argument installs the toolchain rust-toolchain.toml names",
+            ".github/workflows/ci.yml:9: `cargo-fake@5.6.7` names cargo-fake 5.6.7; the one home \
+             of the cargo-fake version is `TOOLS` in xtask/src/setup.rs\n    fix: remove the \
+             version from this file: `cargo xtask setup --binaries` installs the versions \
+             xtask/src/setup.rs pins",
+            ".github/workflows/ci.yml:9: `lefthook@9.8.7` names lefthook 9.8.7; the one home of \
+             the lefthook version is `BINARIES` in xtask/src/setup.rs\n    fix: remove the version \
+             from this file: `cargo xtask setup --binaries` installs the versions \
+             xtask/src/setup.rs pins",
         ],
     );
 }
 
-/// A pinned version in an env value, a container, a docker image or another action's
-/// input fails.
+/// A version in a container image, a docker image or an install action's tool input fails;
+/// the Node major.minor alone in an env value names no tool and passes.
 #[test]
 fn versions_in_other_values() {
     assert_found(
         &cases::versions_in_other_values(),
         2,
         &[
-            ".github/workflows/ci.yml:2: `6.7` is the major.minor of the minimum Node `engines.node` \
-     in ui/package.json sets\n    fix: remove the version from the workflow: \
-     actions/setup-node with `node-version-file: ui/package.json` installs a Node that \
-     `engines.node` allows",
-            ".github/workflows/ci.yml:5: `3.4` is the major.minor of the Rust version `channel` in \
-     rust-toolchain.toml pins\n    fix: remove the version from the workflow: a `run: rustup \
-     toolchain install` step with no argument installs the toolchain rust-toolchain.toml \
-     names",
-            ".github/workflows/ci.yml:7: `3.4.5` is the Rust version `channel` in rust-toolchain.toml \
-     pins\n    fix: remove the version from the workflow: a `run: rustup toolchain install` \
-     step with no argument installs the toolchain rust-toolchain.toml names",
-            ".github/workflows/ci.yml:10: `5.6.7` is the cargo-fake version `TOOLS` in \
-     xtask/src/setup.rs pins\n    fix: remove the version from the workflow: `cargo xtask \
-     setup --binaries` installs the versions xtask/src/setup.rs pins",
+            ".github/workflows/ci.yml:5: `rust:3.4` names Rust toolchain 3.4; the one home of the \
+             Rust version is `channel` in rust-toolchain.toml\n    fix: remove the version from \
+             this file: a `run: rustup toolchain install` step with no argument installs the \
+             toolchain rust-toolchain.toml names",
+            ".github/workflows/ci.yml:7: `rust:3.4.5` names Rust toolchain 3.4.5; the one home of \
+             the Rust version is `channel` in rust-toolchain.toml\n    fix: remove the version \
+             from this file: a `run: rustup toolchain install` step with no argument installs the \
+             toolchain rust-toolchain.toml names",
+            ".github/workflows/ci.yml:10: `cargo-fake@5.6.7` names cargo-fake 5.6.7; the one home \
+             of the cargo-fake version is `TOOLS` in xtask/src/setup.rs\n    fix: remove the \
+             version from this file: `cargo xtask setup --binaries` installs the versions \
+             xtask/src/setup.rs pins",
         ],
     );
 }

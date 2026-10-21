@@ -18,6 +18,7 @@ mod backups;
 pub(crate) use backups::Backups;
 
 use super::replace::{ReplaceFailure, replace, tmp_of};
+use super::sys;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
@@ -47,7 +48,7 @@ pub(crate) struct Guard {
     path: PathBuf,
     rel: String,
     original: String,
-    pub(crate) last: String,
+    last: String,
     base: PathBuf,
     backup: PathBuf,
     /// The original still has to go back. False after `restore`, and after a conflict, which keeps
@@ -72,9 +73,7 @@ impl Guard {
         let backup = base.join(rel);
         let copy = backups.copy_name(rel);
         let tmp = format!("{}/{}", backups.dir, tmp_rel(rel, backups.tool));
-        match write_new_copy(&backup, backups.tool, text, |from, to| {
-            fs::hard_link(from, to)
-        }) {
+        match write_new_copy(&backup, backups.tool, text, sys::hard_link) {
             Ok(()) => Ok(Guard {
                 backups,
                 path: root.join(rel),
@@ -116,6 +115,12 @@ impl Guard {
                 ))
             }
         }
+    }
+
+    /// The bytes the guard last wrote to the file (the original until the first write). Read-only:
+    /// only `write` changes them, so no caller can make the conflict check miss an edit.
+    pub(crate) fn last(&self) -> &str {
+        &self.last
     }
 
     /// Writes `text` over the file, once the file still holds the bytes last written.
@@ -187,7 +192,7 @@ impl Guard {
                 ),
             )
         })?;
-        fs::remove_file(&self.backup).map_err(|error| {
+        sys::remove_file(&self.backup).map_err(|error| {
             GuardFailure::new(
                 format!(
                     "restored {} but could not delete its copy {copy}: {error}",
@@ -234,7 +239,7 @@ enum Save {
 
 /// Writes `text` to `backup` without ever replacing a file there. The bytes go to the temporary
 /// file `tmp_of(backup, tool)`, created only when it is missing, which is then hard-linked to
-/// `backup` by `link` (`fs::hard_link` in `save`): a link fails when `backup` exists, so the check
+/// `backup` by `link` (`sys::hard_link` in `save`): a link fails when `backup` exists, so the check
 /// and the create are one step. The copy is synced before it is linked, and the temporary file is
 /// deleted again. `link` is a parameter so a test can make it fail the way the OS can.
 fn write_new_copy(
@@ -248,10 +253,12 @@ fn write_new_copy(
         tmp_left: false,
     };
     if let Some(dir) = backup.parent() {
-        fs::create_dir_all(dir).map_err(failed)?;
+        sys::create_dir_all(dir).map_err(failed)?;
     }
     let tmp = tmp_of(backup, tool);
-    let mut file = match OpenOptions::new().write(true).create_new(true).open(&tmp) {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    let mut file = match sys::open(&options, &tmp) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Err(Save::TmpExists),
         Err(error) => return Err(failed(error)),
@@ -261,7 +268,7 @@ fn write_new_copy(
         .and_then(|()| file.sync_all())
         .and_then(|()| link(&tmp, backup));
     drop(file);
-    let tmp_left = fs::remove_file(&tmp).is_err();
+    let tmp_left = sys::remove_file(&tmp).is_err();
     match linked {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Err(Save::CopyExists),
@@ -298,7 +305,7 @@ fn tmp_rel(rel: &str, tool: &str) -> String {
 fn prune(base: &Path, file: &Path) {
     let mut dir = file.parent();
     while let Some(current) = dir.filter(|d| d.starts_with(base) && *d != base) {
-        if fs::remove_dir(current).is_err() {
+        if sys::remove_dir(current).is_err() {
             break;
         }
         dir = current.parent();

@@ -150,6 +150,21 @@ pub(super) fn architecture_301_lines() -> Repo {
     )
 }
 
+/// `AGENTS.md` at 121 lines, each ended by a lone `\r`.
+pub(super) fn agents_121_lone_cr_lines() -> Repo {
+    let text = lines(121).replace('\n', "\r");
+    docs("agents-121-lone-cr-lines", vec![("AGENTS.md", text)])
+}
+
+/// `ARCHITECTURE.md` at 301 lines, each ended by a lone `\r`.
+pub(super) fn architecture_301_lone_cr_lines() -> Repo {
+    let text = format!("# Architecture\n{}", lines(300)).replace('\n', "\r");
+    docs(
+        "architecture-301-lone-cr-lines",
+        vec![("ARCHITECTURE.md", text)],
+    )
+}
+
 pub(super) fn claude_extra_line() -> Repo {
     docs(
         "claude-extra-line",

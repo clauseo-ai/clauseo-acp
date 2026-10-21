@@ -307,13 +307,13 @@ pub(super) fn only_file_unreadable() -> Repo {
 
 #[test]
 fn lines_end_at_lf_crlf_or_a_lone_cr() {
-    assert_eq!(line_count(""), 0);
-    assert_eq!(line_count("a"), 1);
-    assert_eq!(line_count("a\n"), 1);
-    assert_eq!(line_count("a\nb"), 2);
-    assert_eq!(line_count("a\r\nb\r\n"), 2);
-    assert_eq!(line_count("a\rb\rc"), 3);
-    assert_eq!(line_count("\n\r\r\n"), 3);
+    assert_eq!(checks::line_count(b""), 0);
+    assert_eq!(checks::line_count(b"a"), 1);
+    assert_eq!(checks::line_count(b"a\n"), 1);
+    assert_eq!(checks::line_count(b"a\nb"), 2);
+    assert_eq!(checks::line_count(b"a\r\nb\r\n"), 2);
+    assert_eq!(checks::line_count(b"a\rb\rc"), 3);
+    assert_eq!(checks::line_count(b"\n\r\r\n"), 3);
 }
 
 #[test]

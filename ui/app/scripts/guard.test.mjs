@@ -1,4 +1,14 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -6,10 +16,12 @@ import {
   ConflictError,
   FileGuard,
   guardPaths,
+  isRepoPath,
   leftover,
   recoverFile,
   restoreFailure,
   tmpOf,
+  writeAll,
 } from "./guard.mjs";
 
 const REL = "src/notes.txt";
@@ -214,4 +226,97 @@ describe("restoreFailure", () => {
       fix: `the next \`cmd x\` restores ${REL} from b/${REL}; or copy it back by hand`,
     });
   });
+});
+
+describe("guardPaths refusals", () => {
+  const at = (rel, backupDir = "target/x", tool = "t") =>
+    guardPaths({ root: "/r", rel, backupDir, tool, rerun: "x" });
+
+  it("refuses a file or backup folder outside the repo, as xtask's is_repo_path does", () => {
+    expect(isRepoPath("ui/app/src/App.tsx")).toBe(true);
+    for (const rel of [
+      "../x",
+      "a/../../x",
+      "/etc/x",
+      "C:\\x",
+      "c:x",
+      "a\\..\\..\\x",
+      "./a",
+      "a//b",
+      "",
+    ]) {
+      expect(() => at(rel)).toThrow(
+        `refusing to guard \`${rel}\`: it is not a relative path inside the repo; pass a repo path, such as ui/app/src/App.tsx`,
+      );
+    }
+    expect(() => at("a.txt", "../target")).toThrow("refusing to guard `../target`");
+  });
+
+  it("refuses a tool name that would put the temporary file elsewhere", () => {
+    expect(() => at("a.txt", "target/x", "../t")).toThrow(
+      "refusing the tool name `../t`: it names temporary files, so use lowercase letters, digits and -",
+    );
+  });
+});
+
+describe("writeAll", () => {
+  it("writes the rest after a short write, and throws on a write that makes no progress", () => {
+    const bytes = Buffer.from("0123456789");
+    const got = [];
+    writeAll(7, bytes, (fd, buffer, offset, length) => {
+      expect(fd).toBe(7);
+      const n = Math.min(3, length);
+      got.push(buffer.subarray(offset, offset + n).toString());
+      return n;
+    });
+    expect(got).toEqual(["012", "345", "678", "9"]);
+    expect(() => writeAll(7, bytes, () => 0)).toThrow("a write of 10 bytes made no progress");
+  });
+});
+
+describe("FileGuard's copy and modes", () => {
+  it("never replaces a copy another run made between the check and the create", () => {
+    const at = repo();
+    const theirs = "the other run's original\n";
+    const raceLink = (from, to) => {
+      put(to, theirs);
+      linkSync(from, to);
+    };
+    let error;
+    try {
+      new FileGuard(at, { link: raceLink });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(ConflictError);
+    expect(error.message).toBe(`a saved copy of ${REL} already exists at target/xtask/demo/${REL}`);
+    expect(read(at.backup)).toBe(theirs);
+    expect(read(at.file)).toBe(ORIGINAL);
+    expect(existsSync(tmpOf(at.backup, at.tool))).toBe(false);
+  });
+
+  it("keeps a temporary copy left by an interrupted save, and edits nothing", () => {
+    const at = repo();
+    put(tmpOf(at.backup, at.tool), "half");
+    expect(() => new FileGuard(at)).toThrow(
+      `could not back up ${REL}: target/xtask/demo/src/.notes.txt.demo.tmp is left from an interrupted save`,
+    );
+    expect(read(tmpOf(at.backup, at.tool))).toBe("half");
+    expect(existsSync(at.backup)).toBe(false);
+    expect(read(at.file)).toBe(ORIGINAL);
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "keeps the file's mode through a write and the restore",
+    () => {
+      const at = repo();
+      chmodSync(at.file, 0o751);
+      const guard = new FileGuard(at);
+      guard.write("one\n");
+      expect(statSync(at.file).mode & 0o7777).toBe(0o751);
+      guard.restore();
+      expect(statSync(at.file).mode & 0o7777).toBe(0o751);
+      expect(read(at.file)).toBe(ORIGINAL);
+    },
+  );
 });

@@ -2,6 +2,7 @@
 //! kill never leaves half a file. The temporary file is named as `ui/app/scripts/guard.mjs` names
 //! its own: `.<name>.<tool>.tmp`.
 
+use super::sys;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -27,13 +28,13 @@ pub(super) fn replace(path: &Path, tool: &str, bytes: &[u8]) -> Result<(), Repla
     let tmp = tmp_of(path, tool);
     let written = write_synced(&tmp, bytes)
         .and_then(|()| match fs::metadata(path) {
-            Ok(meta) => fs::set_permissions(&tmp, meta.permissions()),
+            Ok(meta) => sys::set_permissions(&tmp, meta.permissions()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error),
         })
-        .and_then(|()| fs::rename(&tmp, path));
+        .and_then(|()| sys::rename(&tmp, path));
     written.map_err(|error| {
-        let gone = match fs::remove_file(&tmp) {
+        let gone = match sys::remove_file(&tmp) {
             Ok(()) => true,
             Err(missing) => missing.kind() == io::ErrorKind::NotFound,
         };
@@ -46,10 +47,8 @@ pub(super) fn replace(path: &Path, tool: &str, bytes: &[u8]) -> Result<(), Repla
 
 /// Writes `bytes` to `tmp`, replacing what is there, and syncs it.
 fn write_synced(tmp: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(tmp)?;
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    let mut file = sys::open(&options, tmp)?;
     file.write_all(bytes).and_then(|()| file.sync_all())
 }

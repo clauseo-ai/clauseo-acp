@@ -11,7 +11,9 @@
 //!
 //! Only `*.json`, `*.json5` and `*.toml` files are scanned, at any depth: those are the only files
 //! Tauri loads from the capabilities folder. Anything else there (a Finder `.DS_Store`, a Vim swap
-//! file, a `main.json~` backup) never reaches the app, so it is skipped.
+//! file, a `main.json~` backup) never reaches the app, so it is skipped. A symlink to a file is
+//! read through the link. A symlink to a folder, in either folder, fails and is not followed:
+//! Tauri's glob follows it, and following it here could loop (`x -> ..`).
 //!
 //! The app's permission files are held to the same rules, since a capability can grant a set
 //! of them by its bare name (`"all"`) and a set may bundle other plugins' permissions
@@ -83,8 +85,11 @@ fn run(ctx: &Context) -> Inspection {
         Err(stopped) => return stopped,
     };
     let rel = checks::join(desktop, DIR);
-    let files = match files_in(&ctx.root.join(&rel), is_capability_file) {
-        Ok(files) => files,
+    let Walk {
+        files,
+        linked_folders,
+    } = match files_in(&ctx.root.join(&rel), is_capability_file) {
+        Ok(walk) => walk,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Inspection::stopped(checks::violation(
                 &rel,
@@ -96,7 +101,7 @@ fn run(ctx: &Context) -> Inspection {
         Err(error) => return Inspection::stopped(checks::unreadable(&rel, &error)),
     };
     let mut read = 0;
-    let mut found = Vec::new();
+    let mut found = linked_folder_violations(&ctx.root, &linked_folders);
     let conf = checks::join(desktop, TAURI_CONF);
     // A missing or unreadable config is the `tauri-config` check's failure, reported there once.
     if let Ok(Some(text)) = checks::read_repo_file(&ctx.root, &conf) {
@@ -114,7 +119,10 @@ fn run(ctx: &Context) -> Inspection {
     }
     let permissions_rel = checks::join(desktop, PERMISSIONS_DIR);
     let permissions = match files_in(&ctx.root.join(&permissions_rel), is_permission_file) {
-        Ok(files) => files,
+        Ok(walk) => {
+            found.extend(linked_folder_violations(&ctx.root, &walk.linked_folders));
+            walk.files
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
         Err(error) => {
             found.push(checks::unreadable(&permissions_rel, &error));
@@ -142,23 +150,61 @@ fn run(ctx: &Context) -> Inspection {
     Inspection::new(read, found)
 }
 
-/// Every file under `dir` that `keep` accepts, recursively, sorted by path. Fails when `dir`
-/// cannot be listed.
-fn files_in(dir: &Path, keep: fn(&Path) -> bool) -> io::Result<Vec<PathBuf>> {
-    let mut files = Vec::new();
+/// What `files_in` found under a folder.
+struct Walk {
+    /// Every file `keep` accepts, sorted by path. A symlink to a file counts as a file, read
+    /// through the link.
+    files: Vec<PathBuf>,
+    /// Every symlink to a folder, sorted by path. The walk does not follow them, so a link to a
+    /// folder above (`x -> ..`) cannot loop it; Tauri's glob (glob 0.3.4 `PathWrapper`) does
+    /// follow them, so each one fails.
+    linked_folders: Vec<PathBuf>,
+}
+
+/// Every file under `dir` that `keep` accepts, recursively, and every symlink to a folder.
+/// Fails when a folder cannot be listed.
+fn files_in(dir: &Path, keep: fn(&Path) -> bool) -> io::Result<Walk> {
+    let mut walk = Walk {
+        files: Vec::new(),
+        linked_folders: Vec::new(),
+    };
     let mut pending = vec![dir.to_path_buf()];
     while let Some(next) = pending.pop() {
         for entry in fs::read_dir(&next)? {
-            let path = entry?.path();
-            if path.is_dir() {
+            let entry = entry?;
+            let path = entry.path();
+            let kind = entry.file_type()?;
+            if kind.is_dir() {
                 pending.push(path);
+            } else if kind.is_symlink() && path.is_dir() {
+                walk.linked_folders.push(path);
             } else if keep(&path) {
-                files.push(path);
+                walk.files.push(path);
             }
         }
     }
-    files.sort();
-    Ok(files)
+    walk.files.sort();
+    walk.linked_folders.sort();
+    Ok(walk)
+}
+
+/// One violation per symlink to a folder in `linked`, at line 1.
+fn linked_folder_violations(root: &Path, linked: &[PathBuf]) -> Vec<Violation> {
+    linked
+        .iter()
+        .map(|link| {
+            let path = checks::repo_path(root, link);
+            checks::violation(
+                &path,
+                1,
+                format!(
+                    "`{path}` is a symlink to a folder: Tauri reads the files behind it, and this \
+                     check does not follow it"
+                ),
+                Fix::LinkedFolder,
+            )
+        })
+        .collect()
 }
 
 /// True when Tauri would load `path` as a capability file: its extension is one of `EXTENSIONS`.

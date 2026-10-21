@@ -15,10 +15,12 @@
 //! first run's must-fail forms still fail, so neither undoes the forbid line.
 //!
 //! It also fails on any other compile error, and on a warning about the `clippy.toml` itself
-//! other than "does not refer to a reachable" for exactly the entries of the other OS family
-//! (`std::os::windows::` on unix, `std::os::unix::` on Windows). So a misspelled entry fails
-//! here: a `std::os::unix` one when the test runs on unix, a `std::os::windows` one when it runs
-//! on Windows, any other one everywhere.
+//! other than "does not refer to a reachable" for exactly the entries that do not build here: a
+//! root entry none of whose forms builds on this target (`Only`), and any other entry of the
+//! other OS family (`std::os::windows::` on unix, `std::os::unix::` on Windows). So a misspelled
+//! entry fails where its form builds. Each crate depends on the repo's nix on Unix, so the
+//! `nix::` entries resolve. `every_root_entry_has_a_form` checks that every root entry has a
+//! form.
 
 mod forms;
 
@@ -99,15 +101,16 @@ fn clippy_bans_every_planted_call() {
             run.stderr
         );
     }
+    let all_root_forms = forms::root();
     assert_eq!(
         run.unreachable,
-        other_family_entries(&expected.table),
-        "clippy must find every list entry but those of the other OS family"
+        not_here(&expected.table, &all_root_forms),
+        "clippy must find every list entry but those that do not build here"
     );
     assert_eq!(
         root_run.unreachable,
-        other_family_entries(&root_table),
-        "clippy must find every root entry but those of the other OS family"
+        not_here(&root_table, &all_root_forms),
+        "clippy must find every root entry but those that do not build here"
     );
     let wrong: Vec<String> = wrong_forms(&forms, &run)
         .into_iter()
@@ -250,19 +253,42 @@ fn wrong_forms(forms: &[Form], run: &Run) -> Vec<String> {
         .collect()
 }
 
-/// Writes a scratch crate into `dir`: a manifest with no dependency, its own workspace, a feature
-/// `io` that is off by default and the two lints set to `allow`, `clippy.toml` holding
-/// `config`, the repo's `rust-toolchain.toml`, so the pinned clippy runs, and `src/lib.rs`,
-/// which starts with `forbid_line()` and declares one module per form, each in `src/<name>.rs`.
+/// The repo's dependency `name`, as `[workspace.dependencies]` in the root `Cargo.toml` writes
+/// it, so the scratch crates resolve the root file's entries against the same crate.
+fn dependency(repo: &Path, name: &str) -> String {
+    let manifest: Table = toml::from_str(
+        &fs::read_to_string(repo.join("Cargo.toml")).expect("read the root Cargo.toml"),
+    )
+    .expect("the root Cargo.toml parses");
+    let found = manifest
+        .get("workspace")
+        .and_then(|workspace| workspace.get("dependencies"))
+        .and_then(|deps| deps.get(name))
+        .expect("the root Cargo.toml has the workspace dependency");
+    format!("{name} = {found}")
+}
+
+/// Writes a scratch crate into `dir`: a manifest whose dependencies are the repo's `serde_json`
+/// and, on Unix, its `nix`, its own workspace, a feature `io` that is off by default and the two
+/// lints set to `allow`; the repo's `Cargo.lock`, so the offline build takes the versions it
+/// locks; `clippy.toml` holding `config`; the repo's `rust-toolchain.toml`, so the pinned clippy
+/// runs; and `src/lib.rs`, which starts with `forbid_line()` and declares one module per form,
+/// each in `src/<name>.rs`.
 fn write_crate(dir: &Path, repo: &Path, config: &str, forms: &[Form]) {
     Scratch::create_dir_all(dir.join("src")).expect("create src/");
     Scratch::write(
         dir.join("Cargo.toml"),
-        "[package]\nname = \"planted\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\
-         publish = false\n\n[features]\nio = []\n\n[lints.clippy]\ndisallowed_methods = \"allow\"\n\
-         disallowed_types = \"allow\"\n\n[workspace]\n",
+        format!(
+            "[package]\nname = \"planted\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\
+             publish = false\n\n[features]\nio = []\n\n[dependencies]\n{}\n\n\
+             [target.'cfg(unix)'.dependencies]\n{}\n\n[lints.clippy]\n\
+             disallowed_methods = \"allow\"\ndisallowed_types = \"allow\"\n\n[workspace]\n",
+            dependency(repo, "serde_json"),
+            dependency(repo, "nix")
+        ),
     )
     .expect("write Cargo.toml");
+    Scratch::copy(repo.join("Cargo.lock"), dir.join("Cargo.lock")).expect("copy Cargo.lock");
     Scratch::write(dir.join("clippy.toml"), config).expect("write clippy.toml");
     Scratch::copy(
         repo.join("rust-toolchain.toml"),
@@ -338,22 +364,74 @@ fn without_allow_invalid(table: &Table) -> Table {
     table
 }
 
-/// The paths of `table`'s `disallowed-methods` and `disallowed-types` entries in the other OS
-/// family's `std::os` module, which clippy cannot find on this host.
-fn other_family_entries(table: &Table) -> BTreeSet<String> {
-    let other = if cfg!(windows) {
-        "std::os::unix::"
-    } else {
-        "std::os::windows::"
-    };
+/// The paths of `table`'s `disallowed-methods` and `disallowed-types` entries.
+fn entries(table: &Table) -> impl Iterator<Item = &str> {
     ["disallowed-methods", "disallowed-types"]
         .into_iter()
         .filter_map(|key| table.get(key).and_then(Toml::as_array))
         .flatten()
         .filter_map(|row| row.get("path").and_then(Toml::as_str))
-        .filter(|path| path.starts_with(other))
+}
+
+/// The paths of `table`'s entries that clippy cannot find on this host: an entry a root form
+/// names when no form naming it builds here (`Only`), and any other entry in the other OS
+/// family's `std::os` module.
+fn not_here(table: &Table, root_forms: &[Form]) -> BTreeSet<String> {
+    let other = if cfg!(windows) {
+        "std::os::unix::"
+    } else {
+        "std::os::windows::"
+    };
+    entries(table)
+        .filter(|path| {
+            let mut naming = root_forms
+                .iter()
+                .filter(|form| form.item.as_deref() == Some(*path))
+                .peekable();
+            match naming.peek() {
+                Some(_) => !naming.any(|form| form.only.here()),
+                None => path.starts_with(other),
+            }
+        })
         .map(str::to_owned)
         .collect()
+}
+
+/// The entries of `table` that no form in `forms` names as its item, in the file's order.
+fn without_a_form(table: &Table, forms: &[Form]) -> Vec<String> {
+    let items: BTreeSet<&str> = forms
+        .iter()
+        .filter_map(|form| form.item.as_deref())
+        .collect();
+    entries(table)
+        .filter(|path| !items.contains(path))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Every entry of the root `clippy.toml` has a form in `forms::root()` that must hit it, on
+/// some target: an entry added without one fails here, before clippy runs.
+#[test]
+fn every_root_entry_has_a_form() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let root: Table = toml::from_str(
+        &fs::read_to_string(repo.join(clippy_toml::ROOT)).expect("read the root clippy.toml"),
+    )
+    .expect("the root clippy.toml parses");
+    let forms = forms::root();
+    assert_eq!(without_a_form(&root, &forms), forms::NOT_BUILT);
+    // The failing case: an entry with no form is named.
+    let mut planted = root;
+    let row: Table =
+        toml::from_str("path = \"std::fs::read_link\"\nreason = \"x\"").expect("a row");
+    planted
+        .get_mut("disallowed-methods")
+        .and_then(Toml::as_array_mut)
+        .expect("the root bans methods")
+        .push(Toml::Table(row));
+    let mut expected = forms::NOT_BUILT.to_vec();
+    expected.push("std::fs::read_link");
+    assert_eq!(without_a_form(&planted, &forms), expected);
 }
 
 /// The path in clippy's warning that a config entry names nothing it can find, the

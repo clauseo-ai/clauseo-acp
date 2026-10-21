@@ -200,4 +200,19 @@ crate::checks::planted::cases! {
     /// A clean permission file passes; a schema in `permissions/schemas/` and a `.json5` file,
     /// which Tauri never reads as permissions, are skipped, though they name `fs:` permissions.
     clean_permission_file: Passes, inspects 2 => super::cases::clean_permission_file,
+    /// `capabilities/x -> ..` fails and the check finishes: the walk does not follow the link,
+    /// which Tauri's glob would follow up into the crate's folder.
+    symlink_to_a_folder_above: FailsWith(&[
+        "crates/desktop/capabilities/x:1: `crates/desktop/capabilities/x` is a symlink to a \
+         folder: Tauri reads the files behind it, and this check does not follow it\n    \
+         fix: replace the symlink with a real folder holding the files: Tauri follows it, and \
+         this check reads only what is really in the folder",
+    ]), inspects 1 => super::cases::symlink_to_a_folder_above,
+    /// A symlink in `permissions/` to a folder whose file grants `fs:default` fails at the link.
+    permissions_symlink_to_a_folder: FailsWith(&[
+        "crates/desktop/permissions/sets:1: `crates/desktop/permissions/sets` is a symlink to a \
+         folder: Tauri reads the files behind it, and this check does not follow it\n    \
+         fix: replace the symlink with a real folder holding the files: Tauri follows it, and \
+         this check reads only what is really in the folder",
+    ]), inspects 1 => super::cases::permissions_symlink_to_a_folder,
 }

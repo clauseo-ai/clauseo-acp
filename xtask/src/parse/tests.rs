@@ -264,6 +264,12 @@ const LET_UNDERSCORE: &str = r#"{"reason":"compiler-message","message":{"rendere
 /// replacement is empty.
 const UNWRAP_SOME: &str = r#"{"reason":"compiler-message","message":{"rendered":"xtask/src/main.rs:114:13: warning: used `unwrap()` on `Some` value\n","$message_type":"diagnostic","children":[{"children":[],"code":null,"level":"help","message":"for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unnecessary_literal_unwrap","rendered":null,"spans":[]},{"children":[],"code":null,"level":"note","message":"`#[warn(clippy::unnecessary_literal_unwrap)]` on by default","rendered":null,"spans":[]},{"children":[],"code":null,"level":"help","message":"remove the `Some` and `unwrap()`","rendered":null,"spans":[{"byte_end":4871,"byte_start":4866,"column_end":18,"column_start":13,"expansion":null,"file_name":"xtask/src/main.rs","is_primary":true,"label":null,"line_end":114,"line_start":114,"suggested_replacement":"","suggestion_applicability":"MachineApplicable","text":[{"highlight_end":18,"highlight_start":13,"text":"    let _ = Some(1u8).unwrap();"}]},{"byte_end":4884,"byte_start":4874,"column_end":31,"column_start":21,"expansion":null,"file_name":"xtask/src/main.rs","is_primary":true,"label":null,"line_end":114,"line_start":114,"suggested_replacement":"","suggestion_applicability":"MachineApplicable","text":[{"highlight_end":31,"highlight_start":21,"text":"    let _ = Some(1u8).unwrap();"}]}]}],"level":"warning","message":"used `unwrap()` on `Some` value","spans":[{"byte_end":4884,"byte_start":4866,"column_end":31,"column_start":13,"expansion":null,"file_name":"xtask/src/main.rs","is_primary":true,"label":null,"line_end":114,"line_start":114,"suggested_replacement":null,"suggestion_applicability":null,"text":[{"highlight_end":31,"highlight_start":13,"text":"    let _ = Some(1u8).unwrap();"}]}],"code":{"code":"clippy::unnecessary_literal_unwrap","explanation":null}}}"#;
 
+/// Real clippy 1.99.0 output for `/// Uses FooBar for things.` in a scratch crate, run as
+/// `cargo clippy --message-format=json-diagnostic-short -- -W clippy::doc_markdown -D warnings`.
+/// Its children are the docs link, `implied by -D warnings`, an `#[allow]` suggestion and a
+/// `try` suggestion. Cut: `package_id`, `manifest_path` and `target`.
+const DOC_MARKDOWN: &str = r#"{"reason":"compiler-message","message":{"rendered":"src/lib.rs:3:10: error: item in documentation is missing backticks\n","$message_type":"diagnostic","children":[{"children":[],"code":null,"level":"help","message":"for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#doc_markdown","rendered":null,"spans":[]},{"children":[],"code":null,"level":"note","message":"`-D clippy::doc-markdown` implied by `-D warnings`","rendered":null,"spans":[]},{"children":[],"code":null,"level":"help","message":"to override `-D warnings` add `#[allow(clippy::doc_markdown)]`","rendered":null,"spans":[]},{"children":[],"code":null,"level":"help","message":"try","rendered":null,"spans":[{"byte_end":51,"byte_start":45,"column_end":16,"column_start":10,"expansion":null,"file_name":"src/lib.rs","is_primary":true,"label":null,"line_end":3,"line_start":3,"suggested_replacement":"`FooBar`","suggestion_applicability":"MachineApplicable","text":[{"highlight_end":16,"highlight_start":10,"text":"/// Uses FooBar for things."}]}]}],"level":"error","message":"item in documentation is missing backticks","spans":[{"byte_end":51,"byte_start":45,"column_end":16,"column_start":10,"expansion":null,"file_name":"src/lib.rs","is_primary":true,"label":null,"line_end":3,"line_start":3,"suggested_replacement":null,"suggestion_applicability":null,"text":[{"highlight_end":16,"highlight_start":10,"text":"/// Uses FooBar for things."}]}],"code":{"code":"clippy::doc_markdown","explanation":null}}}"#;
+
 #[test]
 fn a_ban_prints_its_reason_and_its_replacement() {
     assert_eq!(
@@ -304,28 +310,106 @@ fn a_diagnostic_with_only_boilerplate_notes_prints_as_before() {
 }
 
 #[test]
-fn a_note_that_points_at_code_stays_out_and_a_help_without_replacement_prints() {
+fn a_lint_that_is_not_a_ban_prints_no_notes_even_with_a_help_child() {
     assert_eq!(
         short_diags(LET_UNDERSCORE, "/ws"),
         vec![Diag {
             path: "xtask/src/main.rs".into(),
             line: 115,
-            message: "error: non-binding `let` on an expression with `#[must_use]` type (clippy::let_underscore_must_use): consider explicitly using expression value".into(),
+            message: "error: non-binding `let` on an expression with `#[must_use]` type (clippy::let_underscore_must_use)".into(),
             is_error: true,
         }]
     );
 }
 
 #[test]
-fn an_empty_replacement_adds_no_use_piece() {
+fn a_lint_that_is_not_a_ban_prints_no_suggestion_either() {
     assert_eq!(
         short_diags(UNWRAP_SOME, "/ws"),
         vec![Diag {
             path: "xtask/src/main.rs".into(),
             line: 114,
-            message: "warning: used `unwrap()` on `Some` value (clippy::unnecessary_literal_unwrap): remove the `Some` and `unwrap()`".into(),
+            message:
+                "warning: used `unwrap()` on `Some` value (clippy::unnecessary_literal_unwrap)"
+                    .into(),
             is_error: false,
         }]
+    );
+}
+
+#[test]
+fn a_pedantic_lint_under_dash_d_warnings_gets_no_implied_note_and_no_allow() {
+    assert_eq!(
+        short_diags(DOC_MARKDOWN, "/ws"),
+        vec![Diag {
+            path: "src/lib.rs".into(),
+            line: 3,
+            message: "error: item in documentation is missing backticks (clippy::doc_markdown)"
+                .into(),
+            is_error: true,
+        }]
+    );
+}
+
+/// Hand-written in the shape clippy prints: `text` is the message, `code` the lint, and each of
+/// `children` a JSON note or help.
+fn hand_written(text: &str, code: &str, children: &[&str]) -> String {
+    format!(
+        r#"{{"reason":"compiler-message","message":{{"rendered":"xtask/src/main.rs:113:13: error: {text}\n","children":[{children}],"level":"error","message":"{text}","spans":[],"code":{{"code":"{code}","explanation":null}}}}}}"#,
+        children = children.join(",")
+    )
+}
+
+/// The one message `short_diags` makes from `output`.
+fn message_of(output: &str) -> String {
+    let diags = short_diags(output, "/ws");
+    assert_eq!(diags.len(), 1, "one diagnostic expected: {diags:?}");
+    diags[0].message.clone()
+}
+
+#[test]
+fn a_ban_never_prints_the_lint_level_note_or_an_allow_suggestion() {
+    let implied = r#"{"children":[],"code":null,"level":"note","message":"`-D clippy::disallowed-methods` implied by `-D warnings`","rendered":null,"spans":[]}"#;
+    let allow = r#"{"children":[],"code":null,"level":"help","message":"to override `-D warnings` add `#[allow(clippy::disallowed_methods)]`","rendered":null,"spans":[]}"#;
+    let reason = r#"{"children":[],"code":null,"level":"help","message":"canonicalize returns paths that most tools refuse","rendered":null,"spans":[{"suggested_replacement":"dunce::canonicalize"}]}"#;
+    let line = hand_written(
+        "use of a disallowed method `std::fs::canonicalize`",
+        "clippy::disallowed_methods",
+        &[implied, allow, reason],
+    );
+    assert_eq!(
+        message_of(&line),
+        "error: use of a disallowed method `std::fs::canonicalize` (clippy::disallowed_methods): canonicalize returns paths that most tools refuse; use `dunce::canonicalize`"
+    );
+}
+
+#[test]
+fn a_disallowed_type_prints_its_note_and_no_note_that_points_at_code() {
+    let docs = r#"{"children":[],"code":null,"level":"help","message":"for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#disallowed_types","rendered":null,"spans":[]}"#;
+    let points_at_type = r#"{"children":[],"code":null,"level":"note","message":"type is `std::path::PathBuf`","rendered":null,"spans":[{"suggested_replacement":null}]}"#;
+    let reason = r#"{"children":[],"code":null,"level":"note","message":"paths come from the workspace root only","rendered":null,"spans":[]}"#;
+    let line = hand_written(
+        "use of a disallowed type `std::path::PathBuf`",
+        "clippy::disallowed_types",
+        &[docs, points_at_type, reason],
+    );
+    assert_eq!(
+        message_of(&line),
+        "error: use of a disallowed type `std::path::PathBuf` (clippy::disallowed_types): paths come from the workspace root only"
+    );
+}
+
+#[test]
+fn an_empty_replacement_adds_no_use_piece() {
+    let reason = r#"{"children":[],"code":null,"level":"help","message":"canonicalize returns paths that most tools refuse","rendered":null,"spans":[{"suggested_replacement":""}]}"#;
+    let line = hand_written(
+        "use of a disallowed method `std::fs::canonicalize`",
+        "clippy::disallowed_methods",
+        &[reason],
+    );
+    assert_eq!(
+        message_of(&line),
+        "error: use of a disallowed method `std::fs::canonicalize` (clippy::disallowed_methods): canonicalize returns paths that most tools refuse"
     );
 }
 

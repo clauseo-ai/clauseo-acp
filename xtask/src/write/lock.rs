@@ -2,18 +2,35 @@
 //! The OS drops the lock when the process ends, killed or not. The door hands out a `LockFile`,
 //! never a `File`: nothing can be written through it.
 
+use super::{plain_name, sys};
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io;
-use std::path::{Component, Path};
-
-/// The folder of xtask's lock files, under the repo root.
-pub(crate) const LOCK_DIR: &str = "target/xtask";
+use std::path::Path;
 
 /// An open lock file. Only its lock can be taken; it holds as long as the value lives.
 #[derive(Debug)]
 pub(crate) struct LockFile(File);
 
 impl LockFile {
+    /// Makes `dir` if needed, then opens the lock file `<dir>/<name>`. An existing file is
+    /// opened for reading, so one the user cannot write still locks; it is never truncated. A
+    /// missing one is created, empty. An open that fails for any other reason fails. Refuses a
+    /// `name` that is not one plain file name ending in `.lock`.
+    pub(crate) fn open(dir: &Path, name: &str) -> io::Result<LockFile> {
+        lock_name(name)?;
+        sys::create_dir_all(dir)?;
+        let path = dir.join(name);
+        match File::open(&path) {
+            Ok(file) => Ok(LockFile(file)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let mut create = OpenOptions::new();
+                create.write(true).create(true).truncate(false);
+                sys::open(&create, &path).map(LockFile)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// Takes the exclusive lock, or says why not at once.
     pub(crate) fn try_lock(&self) -> Result<(), TryLockError> {
         self.0.try_lock()
@@ -23,57 +40,17 @@ impl LockFile {
     pub(crate) fn lock(&self) -> io::Result<()> {
         self.0.lock()
     }
-
-    /// Wraps a file the write door opened as a lock file.
-    pub(super) fn of(file: File) -> LockFile {
-        LockFile(file)
-    }
 }
 
-/// Opens the lock file `<root>/target/xtask/<name>` for reading and writing, creating it and
-/// its folders when missing. An existing file is not truncated. Refuses a `name` that is not a
-/// plain `<name>.lock` file name.
-pub(crate) fn create_lock_file(root: &Path, name: &str) -> io::Result<LockFile> {
-    let dir = root.join(LOCK_DIR);
-    let path = dir.join(lock_name(name)?);
-    std::fs::create_dir_all(&dir)?;
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path)
-        .map(LockFile)
-}
-
-/// Opens the existing lock file `<root>/target/xtask/<name>` for reading and writing, to test its
-/// lock. A missing file is never created: the open fails with `NotFound`. Refuses a `name`
-/// that is not a plain `<name>.lock` file name.
-pub(crate) fn open_lock_file(root: &Path, name: &str) -> io::Result<LockFile> {
-    let path = root.join(LOCK_DIR).join(lock_name(name)?);
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)
-        .map(LockFile)
-}
-
-/// `name` when it is one plain file name ending in `.lock`, else the refusal.
-fn lock_name(name: &str) -> io::Result<&str> {
-    let mut parts = Path::new(name).components();
-    let plain = matches!(
-        (parts.next(), parts.next()),
-        (Some(Component::Normal(_)), None)
-    );
-    if plain && Path::new(name).extension().is_some_and(|ext| ext == "lock") && !name.contains('\\')
-    {
-        Ok(name)
+/// `Ok` when `name` is one plain file name ending in `.lock`, else the refusal.
+fn lock_name(name: &str) -> io::Result<()> {
+    let plain = plain_name(name, "lock file name").is_ok();
+    if plain && Path::new(name).extension().is_some_and(|ext| ext == "lock") {
+        Ok(())
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!(
-                "`{name}` is not a lock file name: a lock file is a plain <name>.lock in {LOCK_DIR}"
-            ),
+            format!("`{name}` is not a lock file name: it must be one plain <name>.lock file name"),
         ))
     }
 }
@@ -82,33 +59,65 @@ fn lock_name(name: &str) -> io::Result<&str> {
 mod tests {
     use super::*;
     use crate::scratch::Scratch;
+    use std::fs;
 
     #[test]
-    fn a_lock_file_is_a_plain_name_in_target_xtask() {
+    fn a_lock_file_is_a_plain_name_directly_in_its_folder() {
         let dir = Scratch::new("write-lock-names");
+        let locks = dir.join("target/xtask");
         for name in [
             "../Cargo.toml",
             "Cargo.toml",
             "sub/a.lock",
             ".lock",
             "/tmp/a.lock",
+            "a\\b.lock",
         ] {
-            let refused = create_lock_file(&dir, name).expect_err("refused");
+            let refused = LockFile::open(&locks, name).expect_err("refused");
             assert_eq!(refused.kind(), io::ErrorKind::InvalidInput);
             assert_eq!(
                 refused.to_string(),
                 format!(
-                    "`{name}` is not a lock file name: a lock file is a plain <name>.lock in target/xtask"
+                    "`{name}` is not a lock file name: it must be one plain <name>.lock file name"
                 )
-            );
-            assert_eq!(
-                open_lock_file(&dir, name).expect_err("refused").to_string(),
-                refused.to_string()
             );
         }
         assert!(!dir.join("target").exists(), "nothing was made");
-        let lock = create_lock_file(&dir, "a.lock").expect("made");
+        let lock = LockFile::open(&locks, "a.lock").expect("made with its folders");
         lock.try_lock().expect("the lock is free");
-        assert!(dir.join("target/xtask/a.lock").is_file());
+        assert!(locks.join("a.lock").is_file());
+        let second = LockFile::open(&locks, "a.lock").expect("opened again");
+        assert!(matches!(second.try_lock(), Err(TryLockError::WouldBlock)));
+        drop(lock);
+        second.try_lock().expect("free once the first is dropped");
+    }
+
+    #[test]
+    fn a_lock_file_is_created_when_missing_and_never_truncated() {
+        let dir = Scratch::new("write-lock-kept");
+        let bin = dir.join("bin");
+        drop(LockFile::open(&bin, ".xtask-setup.lock").expect("created with bin"));
+        Scratch::write(bin.join(".xtask-setup.lock"), "left by an earlier run").expect("bytes");
+        drop(LockFile::open(&bin, ".xtask-setup.lock").expect("opened"));
+        assert_eq!(
+            fs::read_to_string(bin.join(".xtask-setup.lock")).expect("read it"),
+            "left by an earlier run"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_lock_file_that_cannot_be_read_is_refused_and_never_truncated() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = Scratch::new("write-lock-unreadable");
+        let lock = dir.join("a.lock");
+        Scratch::write(&lock, "kept").expect("the lock file");
+        // Write-only: the open for reading fails, the open for writing would succeed.
+        Scratch::set_permissions(&lock, fs::Permissions::from_mode(0o200)).expect("chmod it");
+        let refused = LockFile::open(&dir, "a.lock");
+        Scratch::set_permissions(&lock, fs::Permissions::from_mode(0o644)).expect("chmod back");
+        let error = refused.expect_err("a lock file that cannot be read is no lock");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(fs::read_to_string(&lock).expect("read it"), "kept");
     }
 }

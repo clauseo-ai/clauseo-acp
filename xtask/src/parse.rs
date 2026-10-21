@@ -2,8 +2,9 @@
 //!
 //! Clippy runs with `--message-format=json-diagnostic-short`: the short text form (`path:line:col:
 //! level: message`) does not name the lint, and the JSON does. Each JSON message carries the short
-//! text in `rendered`, which is what people see. A finding's message also gets the help notes
-//! under the diagnostic (see `help_notes`), such as a disallowed method's reason and replacement.
+//! text in `rendered`, which is what people see. A finding for a clippy ban (`BANS`) also gets the
+//! notes that give its reason and replacement (see `help_notes`); other lints print their rendered
+//! text alone.
 
 use crate::fix::Fix;
 use crate::process::Cmd;
@@ -141,7 +142,7 @@ struct JsonMessage {
     rendered: String,
     /// The lint or error code: `clippy::unwrap_used`, `unused_variables`, `E0425`.
     code: Option<String>,
-    /// The help notes under the diagnostic, in the order clippy printed them (see `help_notes`).
+    /// The notes under a ban's diagnostic, in the order clippy printed them; empty for other lints.
     help: Vec<String>,
 }
 
@@ -155,16 +156,25 @@ fn json_message(line: &str) -> Option<JsonMessage> {
         return None;
     }
     let message = value.get("message")?;
+    let code = message
+        .get("code")
+        .and_then(|code| code.get("code"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let help = match code.as_deref() {
+        Some(code) if BANS.contains(&code) => help_notes(message),
+        _ => Vec::new(),
+    };
     Some(JsonMessage {
         rendered: message.get("rendered")?.as_str()?.to_owned(),
-        code: message
-            .get("code")
-            .and_then(|code| code.get("code"))
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned),
-        help: help_notes(message),
+        code,
+        help,
     })
 }
+
+/// The clippy lints whose notes are printed: a ban in `clippy.toml` gives its reason as a note or
+/// help, and its replacement as a suggestion. Every other lint prints its rendered text alone.
+const BANS: [&str; 2] = ["clippy::disallowed_methods", "clippy::disallowed_types"];
 
 /// Appends ` (code)` to the message, unless the text already shows it as `error[code]`.
 fn with_lint(mut diag: Diag, code: Option<&str>) -> Diag {
@@ -176,11 +186,11 @@ fn with_lint(mut diag: Diag, code: Option<&str>) -> Diag {
     diag
 }
 
-/// The help notes under a diagnostic, one piece per kept child: the child's message, then `use X`
-/// (with the replacement in backticks) when a span suggests replacement `X`. A child is kept when
-/// it is a `help`, or a `note` with no span, and it is not boilerplate. A note that points at code
-/// (`type is ...`) stays out. A `disallowed_methods` ban prints its reason as a `note` when it has
-/// no replacement, and as a `help` that carries the replacement when it has one.
+/// The help notes under a ban, one piece per kept child: the child's message, then `use X` (with
+/// the replacement in backticks) when a span suggests replacement `X`. A child is kept when it is
+/// a `help`, or a `note` with no span, and it is neither boilerplate nor a note that asks for an
+/// `#[allow]`. A note that points at code (`type is ...`) stays out. A ban prints its reason as a
+/// `note` when it has no replacement, and as a `help` that carries the replacement when it has one.
 fn help_notes(message: &serde_json::Value) -> Vec<String> {
     let mut notes = Vec::new();
     let children = message
@@ -200,7 +210,8 @@ fn help_notes(message: &serde_json::Value) -> Vec<String> {
         let text = one_line(text);
         let kept = (level == "help" || (level == "note" && spans.is_empty()))
             && !text.is_empty()
-            && !is_boilerplate(&text);
+            && !is_boilerplate(&text)
+            && !asks_for_allow(&text);
         if !kept {
             continue;
         }
@@ -217,12 +228,20 @@ fn help_notes(message: &serde_json::Value) -> Vec<String> {
     notes
 }
 
-/// The notes that clippy and rustc print under every finding and that say nothing about it: the
-/// lint's docs link, the source of a lint level, and the default level of a rustc lint.
+/// The notes that clippy and rustc print under a finding and that say nothing about why it fired:
+/// the lint's docs link, the source of a lint level, the default level of a rustc lint, and the
+/// level that `-D warnings` gives a lint.
 fn is_boilerplate(text: &str) -> bool {
     text.starts_with("for further information visit ")
         || text.starts_with("requested on the command line")
         || text.ends_with(" on by default")
+        || text.contains("implied by `-D warnings`")
+}
+
+/// A note that tells the reader to silence the lint with `#[allow]`. AGENTS.md bans that attribute,
+/// so no note that names one is printed.
+fn asks_for_allow(text: &str) -> bool {
+    text.contains("[allow")
 }
 
 /// `text` with every run of whitespace, a newline included, as one space: a note stays on the

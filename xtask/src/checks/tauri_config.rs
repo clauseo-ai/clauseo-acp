@@ -105,6 +105,8 @@ fn run(ctx: &Context) -> Inspection {
     let (sources_read, in_sources) = sources::source_violations(&ctx.root, desktop, &build);
     read += sources_read;
     found.extend(in_sources);
+    // Cargo also reads the legacy name `.cargo/config`; the core-io check fails that file, so
+    // across the checks this one name is enough.
     match checks::read_repo_file(&ctx.root, checks::CARGO_CONFIG) {
         Ok(Some(text)) => {
             read += 1;

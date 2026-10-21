@@ -463,7 +463,7 @@ pub(super) fn build_rs_rustc_env_config() -> Repo {
 
 /// A scratch repo with the valid `tauri.conf.json` and `build.rs` in its desktop crate and each
 /// `(path, text)` of `files`, paths from the repo root.
-fn tree_case(case: &str, files: &[(&str, &str)]) -> Repo {
+pub(super) fn tree_case(case: &str, files: &[(&str, &str)]) -> Repo {
     let dir = Scratch::new(&format!("planted-tauri-config-{case}"));
     let desktop = [
         ("crates/desktop/tauri.conf.json", CONF),

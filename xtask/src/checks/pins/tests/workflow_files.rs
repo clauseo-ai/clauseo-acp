@@ -25,6 +25,26 @@ fn only_yaml_files_at_the_top_of_the_folder_are_read() {
     assert_eq!(found.inspected, 2);
 }
 
+/// A `.github/actions` that is a file, not a folder, fails at that path like the workflows
+/// folder does.
+#[test]
+fn an_actions_path_that_is_not_a_folder_fails_at_the_path() {
+    let dir = repo("actions-not-a-folder");
+    put(&dir, ".github/actions", "not a folder\n");
+    let found = check(&dir);
+    let [violation] = found.violations.as_slice() else {
+        panic!("one violation, at the path: {:?}", found.violations);
+    };
+    assert_eq!(violation.path, ".github/actions");
+    assert!(
+        violation
+            .message
+            .starts_with("could not read `.github/actions`: "),
+        "{}",
+        violation.message
+    );
+}
+
 /// A `.github/workflows` that is a file, not a folder, cannot be listed: the check fails at
 /// the folder rather than passing it.
 #[test]

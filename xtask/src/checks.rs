@@ -395,5 +395,21 @@ pub(crate) fn line_at(index: usize) -> u32 {
     u32::try_from(index.saturating_add(1)).unwrap_or(u32::MAX)
 }
 
+/// How many lines `text` has, each ended by `\n`, `\r\n` or a lone `\r` (old Mac endings, which
+/// TypeScript, every editor and GitHub break lines on), the last one ended or not. `str::lines`
+/// alone would count a file of lone `\r` endings as one line. Bytes, so a caller can count up to
+/// any byte, on a char boundary or not.
+pub(crate) fn line_count(text: &[u8]) -> usize {
+    let mut breaks = 0;
+    for (index, byte) in text.iter().enumerate() {
+        let crlf = *byte == b'\r' && text.get(index + 1) == Some(&b'\n');
+        breaks += usize::from(*byte == b'\n' || (*byte == b'\r' && !crlf));
+    }
+    let unended = text
+        .last()
+        .is_some_and(|last| *last != b'\n' && *last != b'\r');
+    breaks + usize::from(unended)
+}
+
 #[cfg(test)]
 mod tests;

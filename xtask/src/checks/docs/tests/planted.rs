@@ -230,6 +230,16 @@ crate::checks::planted::cases! {
         "ARCHITECTURE.md:301: ARCHITECTURE.md has 301 lines, over the limit of 300\n    \
          fix: cut ARCHITECTURE.md to 300 lines, moving what you cut into the file that owns it",
     ]), inspects 3 => super::cases::architecture_301_lines,
+    /// `AGENTS.md` at 121 lines ended by lone `\r`, which GitHub shows as lines, fails too.
+    agents_121_lone_cr_lines: FailsWith(&[
+        "AGENTS.md:121: AGENTS.md has 121 lines, over the limit of 120\n    \
+         fix: cut AGENTS.md to 120 lines, moving what you cut into the file that owns it",
+    ]), inspects 3 => super::cases::agents_121_lone_cr_lines,
+    /// `ARCHITECTURE.md`, which has no byte limit, at 301 lines ended by lone `\r` fails.
+    architecture_301_lone_cr_lines: FailsWith(&[
+        "ARCHITECTURE.md:301: ARCHITECTURE.md has 301 lines, over the limit of 300\n    \
+         fix: cut ARCHITECTURE.md to 300 lines, moving what you cut into the file that owns it",
+    ]), inspects 3 => super::cases::architecture_301_lone_cr_lines,
     /// `CLAUDE.md` with anything after `@AGENTS.md` fails at line 2.
     claude_extra_line: FailsWith(&[
         "CLAUDE.md:2: CLAUDE.md must hold only `@AGENTS.md`\n    \

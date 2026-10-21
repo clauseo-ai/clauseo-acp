@@ -3,10 +3,13 @@
 // (the tests that build scratch trees aside, each named there). Any
 // script that edits a tracked file calls it; the caller names the file, where its copy waits,
 // itself, and which leftover edits are its own. Its rules are written out here only:
-// - Before the first edit, the original bytes are copied to `<backupDir>/<repo path>`. An existing
-//   copy is never replaced.
-// - Every write, to the file or to the copy, goes to a temporary file in the same folder
-//   (`.<name>.<tool>.tmp`), then is renamed over the target, so a kill never leaves half a file.
+// - The file and the copies' folder are repo paths: plain names, no `..`, no root.
+// - Before the first edit, the original bytes are copied to `<backupDir>/<repo path>`. A copy is
+//   never replaced: it is written to its temporary file, created only when missing, and then
+//   hard-linked into place, which fails when a copy exists, so the check and the create are one
+//   step even for two runs at once.
+// - Every write to the file goes to a temporary file in the same folder (`.<name>.<tool>.tmp`),
+//   gets the file's mode, then is renamed over it, so a kill never leaves half a file.
 // - The original goes back only while the file holds exactly the bytes last written. Anything else
 //   is the developer's edit: nothing more is written, both files stay, and a ConflictError names
 //   them. Any failed restore fails the run and keeps the copy (`restoreFailure`).
@@ -17,16 +20,19 @@
 import {
   closeSync,
   existsSync,
+  fchmodSync,
   fsyncSync,
+  linkSync,
   mkdirSync,
   openSync,
   readFileSync,
   renameSync,
   rmdirSync,
+  statSync,
   unlinkSync,
   writeSync,
 } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, win32 } from "node:path";
 
 /** A conflict over a guarded file: both files are kept, and `fix` says what to do with them. */
 export class ConflictError extends Error {
@@ -43,6 +49,18 @@ export class ConflictError extends Error {
  * command whose next run restores the file from its copy.
  */
 export function guardPaths({ root, rel, backupDir, tool, rerun }) {
+  for (const path of [rel, backupDir]) {
+    if (!isRepoPath(path)) {
+      throw new Error(
+        `refusing to guard \`${path}\`: it is not a relative path inside the repo; pass a repo path, such as ui/app/src/App.tsx`,
+      );
+    }
+  }
+  if (!/^[a-z][a-z0-9-]*$/.test(tool)) {
+    throw new Error(
+      `refusing the tool name \`${tool}\`: it names temporary files, so use lowercase letters, digits and -`,
+    );
+  }
   return {
     rel,
     file: join(root, rel),
@@ -54,22 +72,117 @@ export function guardPaths({ root, rel, backupDir, tool, rerun }) {
   };
 }
 
+/**
+ * Whether `rel` is a relative path inside the repo: one or more plain names, split on `/` or `\`,
+ * none empty, `.` or `..`, and no root or drive. Stricter than xtask's `is_repo_path`, which
+ * lets `a//b` and `a/./b` through.
+ */
+export function isRepoPath(rel) {
+  if (
+    typeof rel !== "string" ||
+    isAbsolute(rel) ||
+    win32.isAbsolute(rel) ||
+    /^[A-Za-z]:/.test(rel)
+  ) {
+    return false;
+  }
+  return rel.split(/[\\/]/).every((part) => part !== "" && part !== "." && part !== "..");
+}
+
+/**
+ * Writes all of `bytes` to `fd` with `write` (`writeSync`), which may write fewer bytes than
+ * asked. Throws when a write makes no progress.
+ */
+export function writeAll(fd, bytes, write = writeSync) {
+  let at = 0;
+  while (at < bytes.length) {
+    const wrote = write(fd, bytes, at, bytes.length - at);
+    if (!(wrote > 0)) {
+      throw new Error(`a write of ${bytes.length - at} bytes made no progress`);
+    }
+    at += wrote;
+  }
+}
+
 /** The temporary file a write by `tool` to `path` goes through, in the same folder. */
 export function tmpOf(path, tool) {
   return join(dirname(path), `.${basename(path)}.${tool}.tmp`);
 }
 
-/** Writes `bytes` to a temporary file next to `path`, syncs it, then renames it over `path`. */
+/**
+ * Writes `bytes` to a temporary file next to `path`, gives it `path`'s mode, syncs it, then renames
+ * it over `path`. `path` exists: the guard only writes over a file it has saved.
+ */
 function writeThrough(path, tool, bytes) {
   const tmp = tmpOf(path, tool);
   const fd = openSync(tmp, "w");
   try {
-    writeSync(fd, typeof bytes === "string" ? Buffer.from(bytes) : bytes);
+    writeAll(fd, bytes);
+    fchmodSync(fd, statSync(path).mode & 0o7777);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
   }
   renameSync(tmp, path);
+}
+
+/**
+ * Writes `bytes` to `paths.backup` without ever replacing a file there: to the backup's temporary
+ * file, created only when it is missing, then hard-linked to the backup by `link` (`linkSync`),
+ * which fails when the backup exists. Throws a ConflictError when either is in the way; the
+ * temporary file is deleted again either way. `link` is a parameter so a test can let another
+ * run win between the two steps.
+ */
+function writeNewCopy(paths, bytes, link) {
+  mkdirSync(dirname(paths.backup), { recursive: true });
+  const tmp = tmpOf(paths.backup, paths.tool);
+  let fd;
+  try {
+    fd = openSync(tmp, "wx");
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      const tmpRel = `${dirname(paths.backupRel)}/${basename(tmp)}`;
+      throw new ConflictError(
+        `could not back up ${paths.rel}: ${tmpRel} is left from an interrupted save`,
+        `compare ${tmpRel} with ${paths.rel}, keep what you want, then delete ${tmpRel}`,
+      );
+    }
+    throw error;
+  }
+  try {
+    try {
+      writeAll(fd, bytes);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    link(tmp, paths.backup);
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      throw copyExists(paths);
+    }
+    throw error;
+  } finally {
+    unlinkIfThere(tmp);
+  }
+}
+
+/** Deletes `path`; one already gone (another run's `recoverFile` took it) is no error. */
+function unlinkIfThere(path) {
+  try {
+    unlinkSync(path);
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw error;
+    }
+  }
+}
+
+function copyExists(paths) {
+  return new ConflictError(
+    `a saved copy of ${paths.rel} already exists at ${paths.backupRel}`,
+    `compare ${paths.rel} with ${paths.backupRel}, keep what you want, then delete ${paths.backupRel}`,
+  );
 }
 
 function readOrUndefined(path) {
@@ -163,18 +276,14 @@ export function recoverFile(paths, isOwnEdit) {
 /** The guard over one file for one run: its original, its copy, and the bytes last written. */
 export class FileGuard {
   /** Saves the original of the file as its copy. Nothing is edited when the save fails. */
-  constructor(paths) {
+  constructor(paths, { link = linkSync } = {}) {
     if (existsSync(paths.backup)) {
-      throw new ConflictError(
-        `a saved copy of ${paths.rel} already exists at ${paths.backupRel}`,
-        `compare ${paths.rel} with ${paths.backupRel}, keep what you want, then delete ${paths.backupRel}`,
-      );
+      throw copyExists(paths);
     }
     this.paths = paths;
     this.original = readFileSync(paths.file);
     this.last = this.original;
-    mkdirSync(dirname(paths.backup), { recursive: true });
-    writeThrough(paths.backup, paths.tool, this.original);
+    writeNewCopy(paths, this.original, link);
     this.pending = true;
   }
 

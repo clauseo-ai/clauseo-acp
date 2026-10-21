@@ -42,17 +42,23 @@ export function parseRuns(argv) {
 }
 
 /**
+ * The one form `engines.node` takes: `>=<major>.<minor>.<patch>`, one minimum Node, three numbers,
+ * no spaces. The pins check (xtask/src/checks/pins.rs) and xtask/src/buildtime/web.rs read it with
+ * the same rule and fail in these words; the pins check's tests hold this line to them.
+ */
+const ENGINES_NODE_RULE = 'engines.node takes only ">=<major>.<minor>.<patch>"';
+
+/**
  * The oldest Node the app's dependencies run on (babel 8): `engines.node` of the ui workspace's
- * package.json in `uiDir`, the one place it is written. Throws unless it is `>=` and a version.
+ * package.json in `uiDir`, the one place it is written. Throws, naming ENGINES_NODE_RULE, on any
+ * other form.
  */
 export function minNode(uiDir) {
   const path = join(uiDir, "package.json");
   const range = readJson(path).engines?.node;
   const version = /^>=(\d+\.\d+\.\d+)$/.exec(range ?? "")?.[1];
   if (version === undefined) {
-    throw new Error(
-      `${path} has engines.node ${JSON.stringify(range)}; buildtime reads only ">=<major>.<minor>.<patch>"`,
-    );
+    throw new Error(`${path} has engines.node ${JSON.stringify(range)}; ${ENGINES_NODE_RULE}`);
   }
   return version;
 }

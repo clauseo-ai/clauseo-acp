@@ -409,3 +409,27 @@ pub(super) fn clean_permission_file() -> Repo {
         ],
     )
 }
+
+/// The clean capability, and `capabilities/x`, a symlink to the desktop crate's folder, above
+/// it: a walk that followed it would loop.
+pub(super) fn symlink_to_a_folder_above() -> Repo {
+    let clean = "{\n  \"identifier\": \"main\",\n  \"permissions\": []\n}\n";
+    let dir = repo("symlink-above", &[(PATH, clean)]);
+    Scratch::symlink_dir("..", dir.join("crates/desktop/capabilities/x")).expect("link the folder");
+    Repo::desktop(dir)
+}
+
+/// The clean capability, and `permissions/sets`, a symlink to a folder outside the crate that
+/// holds a permission file granting `fs:default`.
+pub(super) fn permissions_symlink_to_a_folder() -> Repo {
+    let clean = "{\n  \"identifier\": \"main\",\n  \"permissions\": []\n}\n";
+    let grant = "[[set]]\nidentifier = \"all\"\npermissions = [\"fs:default\"]\n";
+    let dir = repo(
+        "permissions-symlink",
+        &[(PATH, clean), ("elsewhere/all.toml", grant)],
+    );
+    let link = dir.join("crates/desktop/permissions/sets");
+    Scratch::create_dir_all(link.parent().expect("a link has a parent")).expect("create the dir");
+    Scratch::symlink_dir("../../../elsewhere", link).expect("link the folder");
+    Repo::desktop(dir)
+}

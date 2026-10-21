@@ -10,7 +10,9 @@
 //! `generate_context` imported under another name (`use ... as`) fails too, since its calls
 //! would carry another name. Each file is lexed into tokens and walked, macro bodies included;
 //! it is not parsed as a whole file, since `include!` can pull in a `.rs` file that holds one
-//! expression. A file named other than `*.rs` and pulled in with `include!` is not read.
+//! expression. A file named other than `*.rs` and pulled in with `include!` is not read. A symlink
+//! to a folder fails and is not followed: a `mod` can compile a file behind it, and following it
+//! could loop the walk (`x -> ..`).
 //!
 //! Cargo passes `[env]` of `.cargo/config.toml` to build scripts and rustc invocations (cargo
 //! 1.99 config reference, `[env]`), so `TAURI_CONFIG` there reaches both readers: tauri-build
@@ -31,23 +33,31 @@ use syn::ext::IdentExt;
 /// The macro that builds the app's context from the Tauri config.
 const MACRO: &str = "generate_context";
 
-/// Every `*.rs` file under `dir`, at any depth, other than `skip`, sorted by path. Fails when a
-/// folder cannot be listed.
-pub(super) fn rust_files(dir: &Path, skip: &Path) -> io::Result<Vec<PathBuf>> {
+/// Every `*.rs` file under `dir`, at any depth, other than `skip`, sorted by path, and every
+/// symlink to a folder there, sorted by path. A symlink to a file counts as a file, read through
+/// the link; a symlink to a folder is not followed, so a link to a folder above (`x -> ..`)
+/// cannot loop the walk. Fails when a folder cannot be listed.
+pub(super) fn rust_files(dir: &Path, skip: &Path) -> io::Result<(Vec<PathBuf>, Vec<PathBuf>)> {
     let mut files = Vec::new();
+    let mut linked_folders = Vec::new();
     let mut pending = vec![dir.to_path_buf()];
     while let Some(next) = pending.pop() {
         for entry in fs::read_dir(&next)? {
-            let path = entry?.path();
-            if path.is_dir() {
+            let entry = entry?;
+            let path = entry.path();
+            let kind = entry.file_type()?;
+            if kind.is_dir() {
                 pending.push(path);
+            } else if kind.is_symlink() && path.is_dir() {
+                linked_folders.push(path);
             } else if path.extension().is_some_and(|extension| extension == "rs") && path != skip {
                 files.push(path);
             }
         }
     }
     files.sort();
-    Ok(files)
+    linked_folders.sort();
+    Ok((files, linked_folders))
 }
 
 /// The violations in the Rust file at `path` (repo-relative) holding `text`: each
@@ -122,18 +132,29 @@ pub(super) fn env_violations(rel: &str, text: &str) -> Vec<Violation> {
 }
 
 /// The violations in the desktop crate's Rust files under `desktop` (repo-relative), other than
-/// `build`, and the number of files read.
+/// `build`, and the number of files read. Each symlink to a folder there fails: a `mod` can
+/// compile a file behind it, which the walk does not read.
 pub(super) fn source_violations(
     root: &Path,
     desktop: &str,
     build: &str,
 ) -> (usize, Vec<Violation>) {
-    let files = match rust_files(&root.join(desktop), &root.join(build)) {
-        Ok(files) => files,
+    let (files, linked_folders) = match rust_files(&root.join(desktop), &root.join(build)) {
+        Ok(walk) => walk,
         Err(error) => return (0, vec![checks::unreadable(desktop, &error)]),
     };
     let mut read = 0;
-    let mut found = Vec::new();
+    let mut found: Vec<Violation> = linked_folders
+        .iter()
+        .map(|link| {
+            let path = checks::repo_path(root, link);
+            let message = format!(
+                "`{path}` is a symlink to a folder: the desktop crate can compile Rust files \
+                 behind it, and this check does not follow it"
+            );
+            violation(&path, 1, message, Fix::LinkedFolder)
+        })
+        .collect();
     for file in &files {
         let path = checks::repo_path(root, file);
         match fs::read_to_string(file) {
