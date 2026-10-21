@@ -3,6 +3,11 @@
 //! expect below covers only this file, so `Scratch`'s checks stay under every other ban. Each
 //! wrapper does exactly what its std call does; `Scratch` checks the path first.
 
+#![expect(
+    clippy::disallowed_methods,
+    reason = "Scratch's std calls live here alone; clippy.toml bans them elsewhere"
+)]
+
 use std::fs;
 #[cfg(unix)]
 use std::fs::{File, OpenOptions, Permissions};
