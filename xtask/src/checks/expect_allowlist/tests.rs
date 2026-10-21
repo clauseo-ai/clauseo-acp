@@ -2,7 +2,10 @@
 //! and the fix texts. Each planted case writes its files into a scratch git repo, adds them, and
 //! the planted harness runs the check on it.
 
+mod cases;
 pub(super) mod planted;
+
+pub(super) use cases::*;
 
 use super::*;
 use crate::checks::planted::{Repo, git};
@@ -130,9 +133,9 @@ pub(super) fn stale_line() -> Repo {
 pub(super) fn two_sites_one_line() -> Repo {
     run_on(
         "two-sites-one-line",
-        "struct S {\n    #[expect(dead_code, reason = \"x\")]\n    x: u8,\n    \
-         #[expect(dead_code, reason = \"x\")]\n    y: u8,\n}\n",
-        "src/a.rs a dead_code\n",
+        "fn f() {\n    #[expect(unused, reason = \"x\")]\n    let x = 1;\n    \
+         #[expect(unused, reason = \"x\")]\n    let y = 1;\n}\n",
+        "src/a.rs f unused\n",
     )
 }
 
@@ -264,13 +267,18 @@ fn samples() -> Vec<Fix> {
             lint: lint.clone(),
         },
         Fix::Stale { line: 7 },
-        Fix::Allow {
+        Fix::Lower {
+            level: Level::Allow,
             path,
             item,
             lint,
             inner: true,
         },
-        Fix::EmptyAllow,
+        Fix::EmptyLower { level: Level::Warn },
+        Fix::MetavariableAttribute,
+        Fix::HashWithoutBrackets,
+        Fix::Path,
+        Fix::Include,
         Fix::Malformed,
         Fix::Unparsable,
         Fix::MissingAllowlist,
@@ -288,19 +296,38 @@ fn every_fix_has_its_exact_text() {
                  xtask/expect-allowlist.txt (the code owner approves it)"
             }
             Fix::Stale { .. } => "delete line 7 of xtask/expect-allowlist.txt",
-            Fix::Allow { .. } => {
+            Fix::Lower { .. } => {
                 "delete the allow, or write #![expect(dead_code, reason = \"...\")] in its place \
                  and add \"src/a.rs f dead_code\" to xtask/expect-allowlist.txt (the code owner \
                  approves it)"
             }
-            Fix::EmptyAllow => "delete the allow: it names no lint",
+            Fix::EmptyLower { .. } => "delete the warn: it names no lint",
+            Fix::MetavariableAttribute => {
+                "write the attribute's name and each of its lints in the macro body itself, with \
+                 no metavariable, so expect-allowlist can read them; a caller cannot pass in an \
+                 attribute or a lint"
+            }
+            Fix::HashWithoutBrackets => {
+                "write the attribute's brackets right after its `#`, as `#[..]` or `#![..]`, \
+                 with its name and lints in the macro body itself"
+            }
+            Fix::Path => {
+                "give #[path] a string literal naming a .rs file that git lists, relative to \
+                 this file's folder, on a module at the top level of the file, or move the \
+                 module to its default path; expect-allowlist reads only those files"
+            }
+            Fix::Include => {
+                "move the code into a module, or include! only a .rs file that git lists, named \
+                 by a string literal relative to this file's folder; expect-allowlist reads only \
+                 those files"
+            }
             Fix::Malformed => {
                 "write the line as \"<path> <item> <lint>\", three fields separated by spaces, \
                  as the comment at the top of xtask/expect-allowlist.txt says, or delete it"
             }
             Fix::Unparsable => {
                 "make the file valid Rust that syn can parse: expect-allowlist reads every .rs \
-                 file in the repo for its #[expect] and #[allow] sites"
+                 file in the repo for its expect, allow and warn attributes"
             }
             Fix::MissingAllowlist => {
                 "restore xtask/expect-allowlist.txt, one \"<path> <item> <lint>\" line per \
@@ -326,8 +353,9 @@ fn the_fix_samples_are_distinct_variants() {
 }
 
 #[test]
-fn an_outer_allow_names_the_outer_form_in_its_fix() {
-    let fix = Fix::Allow {
+fn an_outer_warn_names_the_outer_form_and_the_warn_in_its_fix() {
+    let fix = Fix::Lower {
+        level: Level::Warn,
         path: "src/a.rs".to_owned(),
         item: "f".to_owned(),
         lint: "unused".to_owned(),
@@ -335,7 +363,7 @@ fn an_outer_allow_names_the_outer_form_in_its_fix() {
     };
     assert_eq!(
         fix.to_string(),
-        "delete the allow, or write #[expect(unused, reason = \"...\")] in its place and add \
+        "delete the warn, or write #[expect(unused, reason = \"...\")] in its place and add \
          \"src/a.rs f unused\" to xtask/expect-allowlist.txt (the code owner approves it)"
     );
 }

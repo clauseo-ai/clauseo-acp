@@ -1,6 +1,10 @@
 //! The `expect-allowlist` check: every `#[expect(..)]` and `#![expect(..)]` in the repo's Rust
 //! files has its own line in `xtask/expect-allowlist.txt`, every line there has its own site,
-//! and no file silences a lint with `allow` in any form.
+//! and no file lowers a lint with `allow` or `warn` in any form. `deny` and `forbid` only
+//! raise a lint, so they pass. The forms that would hide an attribute from this check fail too:
+//! an attribute in a macro body whose name or lint is a metavariable, a `#` in a macro body with
+//! no brackets after it, and a `#[path]` or `include!` that makes rustc compile a file this
+//! check does not read (see `sites`).
 //!
 //! The files are every `.rs` file (in any case) that `changes::repo_files` lists: tracked files,
 //! and untracked files that `.gitignore` does not exclude, so a new file is caught before anyone
@@ -20,6 +24,7 @@ use crate::changes;
 use crate::checks::{self, Failure, Inspection, Noun, StaticCheck, line_at};
 use crate::violation::Violation;
 use crate::workspace::Context;
+use fix::Level;
 use sites::{Kind, Site};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -27,8 +32,9 @@ use std::path::Path;
 /// The allowlist, repo-relative.
 pub(super) const ALLOWLIST: &str = "xtask/expect-allowlist.txt";
 
-/// Fails on an unlisted `expect`, a stale allowlist line, any `allow`, a malformed line and a Rust
-/// file syn cannot parse.
+/// Fails on an unlisted `expect`, a stale allowlist line, any `allow` or `warn`, an attribute it
+/// cannot read, a `#[path]` or `include!` of a file it does not read, a malformed line and a
+/// Rust file syn cannot parse.
 pub(crate) const CHECK: StaticCheck = StaticCheck {
     name: "expect-allowlist",
     counts: Noun {
@@ -73,25 +79,30 @@ fn run(ctx: &Context) -> Inspection {
     // Files whose sites are unknown: a line naming one is not called stale.
     let mut unknown = BTreeSet::new();
     let mut read = 0;
-    for file in files.iter().filter(|file| is_rust(file)) {
+    let listed: BTreeSet<&str> = files
+        .iter()
+        .map(String::as_str)
+        .filter(|file| is_rust(file))
+        .collect();
+    for file in listed.iter().copied() {
         let text = match checks::read_repo_file(&ctx.root, file) {
             Ok(Some(text)) => text,
             Ok(None) => continue,
             Err(violation) => {
-                unknown.insert(file.clone());
+                unknown.insert(file.to_owned());
                 violations.push(violation);
                 continue;
             }
         };
         read += 1;
-        match sites::find(file, &text) {
+        match sites::find(&text) {
             Ok(found) => {
                 for site in found {
-                    violations.extend(site_violation(file, &site, &mut expects));
+                    violations.extend(site_violation(file, &site, &listed, &mut expects));
                 }
             }
             Err(error) => {
-                unknown.insert(file.clone());
+                unknown.insert(file.to_owned());
                 violations.push(unparsable(file, &error));
             }
         }
@@ -126,39 +137,143 @@ fn is_rust(file: &str) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("rs"))
 }
 
-/// Keeps an `expect` site in `expects` for matching; an `allow` is a violation at once.
-fn site_violation(file: &str, site: &Site, expects: &mut Vec<Expect>) -> Option<Violation> {
-    match &site.kind {
+/// Keeps an `expect` site in `expects` for matching; every other site is a violation at once,
+/// except a `#[path]` or `include!` of a file in `listed`, the `.rs` files the check reads.
+fn site_violation(
+    file: &str,
+    site: &Site,
+    listed: &BTreeSet<&str>,
+    expects: &mut Vec<Expect>,
+) -> Option<Violation> {
+    let (message, fix) = match &site.kind {
         Kind::Expect { lint, inner } => {
             expects.push(Expect {
                 key: (file.to_owned(), site.item.clone(), lint.clone()),
                 line: site.line,
                 inner: *inner,
             });
-            None
+            return None;
         }
-        Kind::Allow { lint, inner } => {
+        Kind::Lower { level, lint, inner } => {
             let bang = if *inner { "!" } else { "" };
-            let fix = Fix::Allow {
+            let what = match level {
+                Level::Allow => "silences a lint",
+                Level::Warn => {
+                    "turns a denied lint into a warning, which a local cargo xtask check passes"
+                }
+            };
+            let fix = Fix::Lower {
+                level: *level,
                 path: file.to_owned(),
                 item: site.item.clone(),
                 lint: lint.clone(),
                 inner: *inner,
             };
-            Some(checks::violation(
-                file,
-                site.line,
-                format!("#{bang}[allow({lint})] silences a lint; only #[expect] with a reason may"),
-                fix,
-            ))
+            let message = format!(
+                "#{bang}[{level}({lint})] {what}; only #[expect] with a reason may lower a lint"
+            );
+            (message, fix)
         }
-        Kind::EmptyAllow => Some(checks::violation(
-            file,
-            site.line,
-            "an allow attribute that names no lint",
-            Fix::EmptyAllow,
-        )),
+        Kind::EmptyLower { level } => (
+            format!(
+                "{} {level} attribute that names no lint",
+                if *level == Level::Allow { "an" } else { "a" }
+            ),
+            Fix::EmptyLower { level: *level },
+        ),
+        Kind::Metavariable => (
+            "an attribute in a macro body takes its name or a lint from a metavariable, so \
+             expect-allowlist cannot see whether it is an expect, allow or warn"
+                .to_owned(),
+            Fix::MetavariableAttribute,
+        ),
+        Kind::HashWithoutBrackets => (
+            "a `#` in a macro body has no brackets after it, so the caller supplies the \
+             attribute and expect-allowlist cannot read it"
+                .to_owned(),
+            Fix::HashWithoutBrackets,
+        ),
+        Kind::Path { value, resolve } => (
+            path_message(file, value.as_deref(), *resolve, listed)?,
+            Fix::Path,
+        ),
+        Kind::Include { target } => (
+            include_message(file, target.as_deref(), listed)?,
+            Fix::Include,
+        ),
+    };
+    Some(checks::violation(file, site.line, message, fix))
+}
+
+/// Why a `#[path]` with `value` in `file` fails, or `None` when it names a file in `listed`.
+fn path_message(
+    file: &str,
+    value: Option<&str>,
+    resolve: bool,
+    listed: &BTreeSet<&str>,
+) -> Option<String> {
+    let Some(value) = value else {
+        return Some(
+            "#[path] takes a value that is not a string literal, so expect-allowlist cannot tell \
+             which file rustc compiles"
+                .to_owned(),
+        );
+    };
+    if !resolve {
+        return Some(format!(
+            "#[path = \"{value}\"] is not on a module at the top level of the file, so \
+             expect-allowlist cannot tell which file rustc compiles"
+        ));
     }
+    unread(file, value, listed)
+        .map(|target| format!("#[path = \"{value}\"] names {target}, {NOT_READ}"))
+}
+
+/// Why an `include!` of `target` in `file` fails, or `None` when it names a file in `listed`.
+fn include_message(file: &str, target: Option<&str>, listed: &BTreeSet<&str>) -> Option<String> {
+    let Some(target) = target else {
+        return Some(
+            "include! takes an argument that is not a string literal, so expect-allowlist cannot \
+             tell which file rustc compiles"
+                .to_owned(),
+        );
+    };
+    unread(file, target, listed)
+        .map(|resolved| format!("include!(\"{target}\") compiles {resolved}, {NOT_READ}"))
+}
+
+/// The end of the message for a `#[path]` or `include!` of a file the check does not read.
+const NOT_READ: &str = "which is not a .rs file git lists, so expect-allowlist does not read it";
+
+/// `target`, relative to the folder of `file`, as the check names it when it is not one of
+/// `listed`: repo-relative when it stays inside the repo, else as written. `None` when the
+/// check reads it.
+fn unread(file: &str, target: &str, listed: &BTreeSet<&str>) -> Option<String> {
+    match resolve(file, target) {
+        Some(path) if listed.contains(path.as_str()) => None,
+        Some(path) => Some(format!("`{path}`")),
+        None => Some(format!("`{target}`, outside the repo")),
+    }
+}
+
+/// `target` joined to the folder of `file` and made repo-relative, with `.` and `..` folded.
+/// `None` for an absolute path, a Windows path, or one that leaves the repo.
+fn resolve(file: &str, target: &str) -> Option<String> {
+    if target.starts_with('/') || target.contains('\\') || target.contains(':') {
+        return None;
+    }
+    let mut parts: Vec<&str> = file.split('/').collect();
+    parts.pop();
+    for part in target.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            _ => parts.push(part),
+        }
+    }
+    Some(parts.join("/"))
 }
 
 /// The violation for a Rust file syn cannot parse, at the error's line.
