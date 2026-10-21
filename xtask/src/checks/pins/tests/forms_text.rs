@@ -1,7 +1,7 @@
 //! Tests of `forms::named`: where a value names a pinned tool and a version, with the cases'
 //! made-up `TOOLS` and `BINARIES`.
 
-use super::cases::{BINARIES, TOOLS};
+use super::repos::{BINARIES, TOOLS};
 use super::*;
 
 /// The words each form shows, by the text it is found in.

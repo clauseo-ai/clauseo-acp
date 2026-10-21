@@ -1,16 +1,16 @@
 //! Tests of the pins check; the planted cases are in `tests/planted.rs`, their repos in
-//! `tests/cases.rs`.
+//! `tests/repos.rs`.
 
-mod cases;
 mod engines_node;
 mod fake_pins;
 mod forms_text;
 pub(super) mod planted;
+mod repos;
 mod workflow_files;
 mod yaml_text;
 
 use super::*;
-use cases::{check, put, repo};
+use repos::{check, put, repo};
 use std::collections::HashSet;
 use std::mem::discriminant;
 
