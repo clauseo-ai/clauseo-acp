@@ -233,6 +233,13 @@ crate::checks::planted::cases! {
     /// A clean permission file passes; a schema in `permissions/schemas/` and a `.json5` file,
     /// which Tauri never reads as permissions, are skipped, though they name `fs:` permissions.
     clean_permission_file: Passes, inspects 2 => super::repos::clean_permission_file,
+    /// A capability file that is a symlink to a file is read through the link: the `core:default`
+    /// in the file it names fails at the link's path, on the line of its string.
+    file_symlink: Fails[fails(
+        "crates/desktop/capabilities/main.json:3",
+        "capability grants `core:default`",
+        Fix::CoreDefault,
+    )], inspects 1 => super::repos::file_symlink,
     /// `capabilities/x -> ..` fails and the check finishes: the walk does not follow the link,
     /// which Tauri's glob would follow up into the crate's folder.
     symlink_to_a_folder_above: Fails[fails(

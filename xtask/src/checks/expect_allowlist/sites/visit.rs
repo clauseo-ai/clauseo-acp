@@ -18,7 +18,7 @@ fn name(ident: &syn::Ident) -> String {
 }
 
 /// The name of an impl's type: the last segment of its path, with no generics, through
-/// references, pointers, slices and arrays; `_` for any other type.
+/// references, pointers, slices, arrays and parentheses; `_` for any other type.
 fn type_name(ty: &syn::Type) -> String {
     match ty {
         syn::Type::Path(path) => path

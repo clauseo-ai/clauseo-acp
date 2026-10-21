@@ -211,6 +211,23 @@ fn a_hash_in_a_macro_body_with_no_brackets_is_a_site() {
 }
 
 #[test]
+fn a_hash_before_parentheses_in_a_macro_body_is_not_an_attribute() {
+    let text = "macro_rules! q {\n    () => {\n        #(expect(a))\n    };\n}\n";
+    assert_eq!(found(text), ["3 q #"]);
+}
+
+#[test]
+fn an_include_in_a_macro_body_does_not_hide_the_attribute_after_it() {
+    let text = concat!(
+        "macro_rules! i {\n    () => {\n",
+        "        let a = 1; include!(\"c.rs\");\n",
+        "        #[expect(b)]\n",
+        "    };\n}\n",
+    );
+    assert_eq!(found(text), ["3 i include c.rs", "4 i expect b"]);
+}
+
+#[test]
 fn doc_comments_and_strings_that_mention_an_attribute_are_not_sites() {
     let text = "//! Uses `#[expect(a)]`.\n/// And #![allow(b)].\n#[doc = \"#[expect(c)]\"]\n\
                 fn f() {\n    let s = \"#[expect(d)]\";\n    /* #[allow(e)] */\n}\n";
@@ -227,6 +244,20 @@ fn a_raw_identifier_names_the_same_attribute() {
 fn an_allow_that_names_no_lint_is_a_site() {
     let text = "#[allow()]\nfn f() {}\n#[allow]\nfn g() {}\n#[allow = \"x\"]\nfn h() {}\n";
     assert_eq!(found(text), ["1 f allow()", "3 g allow()", "5 h allow()"]);
+}
+
+/// An impl names its items by the type it is for, through a pointer, an array and parentheses.
+#[test]
+fn an_impl_names_the_type_inside_a_pointer_an_array_or_parentheses() {
+    let text = concat!(
+        "impl T for *const A {\n    #[expect(a)]\n    fn p() {}\n}\n",
+        "impl T for [B; 2] {\n    #[expect(b)]\n    fn q() {}\n}\n",
+        "impl T for (C) {\n    #[expect(c)]\n    fn r() {}\n}\n",
+    );
+    assert_eq!(
+        found(text),
+        ["2 A::p expect a", "6 B::q expect b", "10 C::r expect c"]
+    );
 }
 
 /// `#[path]` resolves only on a module at the top level of the file, outside macro bodies.
@@ -262,6 +293,33 @@ fn include_calls_are_sites_in_code_and_in_macro_bodies() {
     assert_eq!(
         found(text),
         ["1 - include a.inc", "3 f include ?", "7 i include c.rs"]
+    );
+}
+
+/// The value of `name = value` is an expression: an `include!` in it, and an attribute on a
+/// statement of a block in it, are sites, in code and in macro bodies, and so is one under
+/// `cfg_attr`.
+#[test]
+fn an_attribute_value_is_walked_for_sites() {
+    let text = concat!(
+        "#[doc = include!(\"a.inc\")]\nstruct S;\n",
+        "#[doc = { #[allow(dead_code)] let _a = 1; \"s\" }]\nstruct T;\n",
+        "#[cfg_attr(test, doc = { #[expect(clippy::unwrap_used)] let _b = 1; \"t\" })]\n",
+        "struct U;\n",
+        "macro_rules! m {\n    () => {\n",
+        "        #[doc = include!(\"c.inc\")]\n        struct V;\n",
+        "        #[doc = { #[warn(dead_code)] let _d = 1; \"u\" }]\n        struct W;\n",
+        "    };\n}\n",
+    );
+    assert_eq!(
+        found(text),
+        [
+            "1 S include a.inc",
+            "3 T allow dead_code",
+            "5 U expect clippy::unwrap_used",
+            "9 m include c.inc",
+            "11 m warn dead_code",
+        ]
     );
 }
 

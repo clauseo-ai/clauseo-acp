@@ -374,6 +374,73 @@ pub(super) fn path_to_ignored_rs() -> Repo {
     )
 }
 
+pub(super) fn path_dot_segment() -> Repo {
+    with_files(
+        "path-dot-segment",
+        "#[path = \"./b.rs\"]\nmod b;\n",
+        &[("src/b.rs", "fn g() {}\n")],
+    )
+}
+
+pub(super) fn attribute_value_include() -> Repo {
+    with_files(
+        "attribute-value-include",
+        "#[doc = include!(\"x.inc\")]\nstruct S;\n",
+        &[],
+    )
+}
+
+pub(super) fn attribute_value_allow() -> Repo {
+    with_files(
+        "attribute-value-allow",
+        "#[doc = { #[allow(dead_code)] let _a = 1; \"s\" }]\nstruct S;\n",
+        &[],
+    )
+}
+
+pub(super) fn attribute_value_expect_listed() -> Repo {
+    run_on(
+        "attribute-value-expect-listed",
+        "#[doc = { #[expect(dead_code, reason = \"x\")] let _a = 1; \"s\" }]\nstruct S;\n",
+        "src/a.rs S dead_code\n",
+    )
+}
+
+pub(super) fn attribute_value_include_in_macro() -> Repo {
+    with_files(
+        "attribute-value-include-in-macro",
+        concat!(
+            "macro_rules! d {\n    () => {\n",
+            "        #[doc = include!(\"x.inc\")]\n        struct S;\n    };\n}\n",
+        ),
+        &[],
+    )
+}
+
+pub(super) fn attribute_value_allow_in_macro() -> Repo {
+    with_files(
+        "attribute-value-allow-in-macro",
+        concat!(
+            "macro_rules! d {\n    () => {\n",
+            "        #[doc = { #[allow(dead_code)] let _a = 1; \"s\" }]\n",
+            "        struct S;\n    };\n}\n",
+        ),
+        &[],
+    )
+}
+
+pub(super) fn path_drive_letter() -> Repo {
+    with_files(
+        "path-drive-letter",
+        "#[path = \"C:/abs/x.rs\"]\nmod x;\n",
+        &[],
+    )
+}
+
+pub(super) fn path_absolute() -> Repo {
+    with_files("path-absolute", "#[path = \"/abs/x.rs\"]\nmod x;\n", &[])
+}
+
 pub(super) fn path_outside_repo() -> Repo {
     with_files(
         "path-outside-repo",

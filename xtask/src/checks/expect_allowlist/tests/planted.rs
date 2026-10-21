@@ -293,6 +293,54 @@ crate::checks::planted::cases! {
          expect-allowlist does not read it",
         Fix::Path,
     )], inspects 1 => super::repos::path_to_non_rs,
+    /// `#[path]` to a `.rs` file git lists, through a `.` segment, passes: `./b.rs` is `b.rs`.
+    path_dot_segment: Passes, inspects 2 => super::repos::path_dot_segment,
+    /// An `include!` in an attribute's value (`#[doc = include!(..)]`) is read like any other: a
+    /// non-`.rs` file fails at the attribute's line.
+    attribute_value_include: Fails[fails(
+        "src/a.rs:1",
+        "include!(\"x.inc\") compiles `src/x.inc`, which is not a .rs file git lists, so \
+         expect-allowlist does not read it",
+        Fix::Include,
+    )], inspects 1 => super::repos::attribute_value_include,
+    /// An `allow` on a statement in an attribute's value fails, and names the item the value is on.
+    attribute_value_allow: Fails[fails(
+        "src/a.rs:1",
+        "#[allow(dead_code)] silences a lint; only #[expect] with a reason may lower a lint",
+        lower(Level::Allow, "src/a.rs", "S", "dead_code", false),
+    )], inspects 1 => super::repos::attribute_value_allow,
+    /// An `expect` on a statement in an attribute's value passes with its allowlist line.
+    attribute_value_expect_listed: Passes,
+    inspects 1 => super::repos::attribute_value_expect_listed,
+    /// An `include!` in an attribute's value in a macro body fails at the line of the `include`.
+    attribute_value_include_in_macro: Fails[fails(
+        "src/a.rs:3",
+        "include!(\"x.inc\") compiles `src/x.inc`, which is not a .rs file git lists, so \
+         expect-allowlist does not read it",
+        Fix::Include,
+    )], inspects 1 => super::repos::attribute_value_include_in_macro,
+    /// An `allow` on a statement in an attribute's value in a macro body fails, and names the
+    /// macro, the item the body is in.
+    attribute_value_allow_in_macro: Fails[fails(
+        "src/a.rs:3",
+        "#[allow(dead_code)] silences a lint; only #[expect] with a reason may lower a lint",
+        lower(Level::Allow, "src/a.rs", "d", "dead_code", false),
+    )], inspects 1 => super::repos::attribute_value_allow_in_macro,
+    /// `#[path]` to an absolute path fails: it is outside the repo, so the check does not read it.
+    path_absolute: Fails[fails(
+        "src/a.rs:1",
+        "#[path = \"/abs/x.rs\"] names `/abs/x.rs`, outside the repo, which is not a .rs file \
+         git lists, so expect-allowlist does not read it",
+        Fix::Path,
+    )], inspects 1 => super::repos::path_absolute,
+    /// `#[path]` to a Windows drive path fails: it is outside the repo. A drive letter is no
+    /// relative folder, so the check does not read it.
+    path_drive_letter: Fails[fails(
+        "src/a.rs:1",
+        "#[path = \"C:/abs/x.rs\"] names `C:/abs/x.rs`, outside the repo, which is not a .rs file \
+         git lists, so expect-allowlist does not read it",
+        Fix::Path,
+    )], inspects 1 => super::repos::path_drive_letter,
     /// `#[path]` under `cfg_attr` to a `.rs` file `.gitignore` excludes fails.
     path_to_ignored_rs: Fails[fails(
         "src/a.rs:1",

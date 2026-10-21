@@ -363,4 +363,12 @@ crate::checks::planted::cases! {
          files behind it, and this check does not follow it",
         Fix::LinkedFolder,
     )], inspects 3 => super::linked::symlink_to_a_folder_above,
+    /// `src/gen.rs -> ../../../elsewhere/ctx.rs` is a symlink to a file: the walk reads it through
+    /// the link, and its `generate_context!` with arguments fails at the link's path, line 1.
+    symlink_to_a_rust_file: Fails[fails(
+        "crates/desktop/src/gen.rs:1",
+        "`generate_context!` is called with arguments, which can name another config, capability \
+         files or assets than the checked ones",
+        Fix::ContextArguments,
+    )], inspects 4 => super::linked::symlink_to_a_rust_file,
 }

@@ -12,7 +12,8 @@
 //! What the check could not read is a site too: an attribute in a macro body whose name or lint
 //! is a metavariable (`#[$m]`, `#[cfg_attr(.., $m)]`, `#[expect($lint)]`), a `#` in a macro body
 //! with no brackets after it, `#[path]` and `include!`, which make rustc compile a file this
-//! check may not read.
+//! check may not read. The value of a `name = value` attribute is an expression, and the sites in
+//! it (an `include!`, an attribute in a block) are found too.
 
 mod visit;
 
@@ -183,6 +184,12 @@ impl Finder {
                 "cfg_attr" => self.cfg_attr(list.tokens.clone(), inner, origin, line),
                 _ => {}
             },
+        }
+        // The value of `name = value` is an expression: an `include!` in it, or an attribute on
+        // a statement of a block in it (`#[doc = { #[allow(dead_code)] let _a = 1; "" }]`), is a
+        // site.
+        if let syn::Meta::NameValue(pair) = meta {
+            Visit::visit_expr(self, &pair.value);
         }
     }
 
