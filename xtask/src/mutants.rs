@@ -5,7 +5,7 @@
 //! settings in `.cargo/mutants.toml`, and reads what it found from its `outcomes.json`
 //! (`outcomes.rs`). Untracked files are not in the diff, so `git add` a new file first. Each
 //! missed mutant (one no test fails on) is a failure at its file and line. The run is capped at
-//! `MUTANTS_TIMEOUT`, whatever the machine.
+//! `MUTANTS_TIMEOUT`, calibrated on one machine (see there).
 
 mod fix;
 mod outcomes;
@@ -38,7 +38,9 @@ const OUTPUT_DIR: &str = "target/xtask/mutants.out";
 const OUTCOMES: &str = "target/xtask/mutants.out/outcomes.json";
 
 /// The cap on one run: the review loop waits for it, so a change whose mutants take longer is
-/// split instead. The same on every machine, so a change that fits here fits in CI.
+/// split instead. Calibrated on the 12-core Apple M6 Mac only, where 20 minutes covered about 270
+/// mutants; a slower machine covers fewer, so a change that fits there can fail on a CI runner.
+/// Recalibrate it on the CI runner once the mutants job exists.
 const MUTANTS_TIMEOUT: Duration = Duration::from_mins(20);
 
 /// How long `cargo mutants --version` may run: it prints one line, so a minute means it hangs.
@@ -47,7 +49,9 @@ const VERSION_TIMEOUT: Duration = Duration::from_mins(1);
 /// cargo-mutants' `--jobs`: how many mutants build and test at once, each in its own copy of the
 /// tree. Each build and test run is itself parallel, so this is far below the core count. On the
 /// 12-core, 24 GB Mac mini, the same 34 mutants took 162 s at 2 jobs, 129 s at 4 and 126 s at 8:
-/// past 4 the cores are full, and each job only adds a build dir and memory.
+/// past 4 the cores are full, and each job only adds a build dir and memory. Tuned on that Mac
+/// only (the 12-core Apple M6); recalibrate it with `MUTANTS_TIMEOUT` on the CI runner once the
+/// mutants job exists.
 const JOBS: &str = "4";
 
 /// Runs a command in the repo root, passing each chunk of its merged output to the callback as it
