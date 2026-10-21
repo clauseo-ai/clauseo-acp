@@ -180,7 +180,7 @@ pub(crate) struct Cmd {
     /// that says why that long.
     pub timeout: Duration,
     /// How long its tree has between SIGTERM and SIGKILL on Unix, at its limit and for what is
-    /// left of it when it exits: `KILL_GRACE` unless the `Cmd` was built with another.
+    /// left of it when it exits: `KILL_GRACE` unless `kill_grace` set another.
     pub kill_grace: Duration,
 }
 
@@ -198,6 +198,15 @@ impl Cmd {
                 .collect(),
             timeout,
             kill_grace: running::KILL_GRACE,
+        }
+    }
+
+    /// `self` with `grace` between SIGTERM and SIGKILL instead of `KILL_GRACE`, for a command
+    /// that needs longer to stop its own children. Pass a named `const` that says why.
+    pub(crate) fn kill_grace(self, grace: Duration) -> Cmd {
+        Cmd {
+            kill_grace: grace,
+            ..self
         }
     }
 }

@@ -53,6 +53,11 @@ pub(super) fn set_permissions(path: &Path, permissions: Permissions) -> io::Resu
     fs::set_permissions(path, permissions)
 }
 
+/// `fs::write`.
+pub(super) fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    fs::write(path, bytes)
+}
+
 /// `OpenOptions::open`.
 pub(super) fn open(options: &OpenOptions, path: &Path) -> io::Result<File> {
     options.open(path)
