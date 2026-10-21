@@ -9,5 +9,8 @@ fn a_setup_whose_every_command_fails_exits_with_failure() {
     let mut runner = |_: &Cmd, _: &Path, _: Output| -> io::Result<Ran> {
         Err(io::Error::other("no runner in this test"))
     };
-    assert_eq!(run(&root, false, &mut runner), ExitCode::FAILURE);
+    assert_eq!(
+        run(&root, Selection::All, false, &mut runner),
+        ExitCode::FAILURE
+    );
 }
