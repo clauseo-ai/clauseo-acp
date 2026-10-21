@@ -296,6 +296,33 @@ fn include_calls_are_sites_in_code_and_in_macro_bodies() {
     );
 }
 
+/// The value of `name = value` is an expression: an `include!` in it, and an attribute on a
+/// statement of a block in it, are sites, in code and in macro bodies, and so is one under
+/// `cfg_attr`.
+#[test]
+fn an_attribute_value_is_walked_for_sites() {
+    let text = concat!(
+        "#[doc = include!(\"a.inc\")]\nstruct S;\n",
+        "#[doc = { #[allow(dead_code)] let _a = 1; \"s\" }]\nstruct T;\n",
+        "#[cfg_attr(test, doc = { #[expect(clippy::unwrap_used)] let _b = 1; \"t\" })]\n",
+        "struct U;\n",
+        "macro_rules! m {\n    () => {\n",
+        "        #[doc = include!(\"c.inc\")]\n        struct V;\n",
+        "        #[doc = { #[warn(dead_code)] let _d = 1; \"u\" }]\n        struct W;\n",
+        "    };\n}\n",
+    );
+    assert_eq!(
+        found(text),
+        [
+            "1 S include a.inc",
+            "3 T allow dead_code",
+            "5 U expect clippy::unwrap_used",
+            "9 m include c.inc",
+            "11 m warn dead_code",
+        ]
+    );
+}
+
 #[test]
 fn a_file_that_is_not_rust_is_an_error_at_its_line() {
     let error = find("fn f() {}\nfn g( {\n").expect_err("not Rust");
