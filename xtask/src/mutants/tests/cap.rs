@@ -104,3 +104,11 @@ fn a_left_build_dir_that_cannot_be_removed_fails_with_its_path_and_error() {
         )
     );
 }
+
+#[test]
+fn a_trees_build_dirs_start_with_cargo_mutants_and_the_folder_name() {
+    assert_eq!(
+        build_dir_prefix(Path::new("/work/clauseo-acp")),
+        "cargo-mutants-clauseo-acp-"
+    );
+}

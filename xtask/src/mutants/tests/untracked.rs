@@ -43,6 +43,28 @@ fn an_untracked_file_fails_even_when_nothing_tracked_changed() {
 }
 
 #[test]
+fn a_git_that_runs_past_its_limit_listing_the_untracked_files_fails_with_the_timeout() {
+    let (printed, passed, ran) = check_with(
+        "mutants-untracked-git-hangs",
+        Ok(DIFF_TEXT.to_owned()),
+        &Git::TimesOut,
+        Some("cargo-mutants 27.1.0"),
+        &Run::TimesOut,
+    );
+    assert!(!passed);
+    assert_eq!(ran, [UNTRACKED_CMD]);
+    assert_eq!(
+        printed,
+        format!(
+            "==> mutants: {CMD}\n\
+             could not list the untracked .rs files: `{UNTRACKED_CMD}` did not finish within 1 \
+             min, so it was stopped\n    fix: run the git command above by hand to see why it \
+             does not finish\n"
+        )
+    );
+}
+
+#[test]
 fn a_git_that_cannot_list_the_untracked_files_fails_with_why() {
     let (printed, passed, ran) = check_with(
         "mutants-untracked-git-fails",
