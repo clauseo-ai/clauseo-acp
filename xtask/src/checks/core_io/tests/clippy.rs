@@ -19,8 +19,10 @@
 //! root entry none of whose forms builds on this target (`Only`), and any other entry of the
 //! other OS family (`std::os::windows::` on unix, `std::os::unix::` on Windows). So a misspelled
 //! entry fails where its form builds. Each crate depends on the repo's nix on Unix, so the
-//! `nix::` entries resolve. `every_root_entry_has_a_form` checks that every root entry has a
-//! form.
+//! `nix::` entries resolve. On Windows nix is no dependency, and clippy passes over an entry of
+//! a crate the build does not have without a word, so those entries are neither found nor
+//! reported there; their forms are Unix-only (`Only`) and do not build there either.
+//! `every_root_entry_has_a_form` checks that every root entry has a form.
 
 mod forms;
 
@@ -373,9 +375,10 @@ fn entries(table: &Table) -> impl Iterator<Item = &str> {
         .filter_map(|row| row.get("path").and_then(Toml::as_str))
 }
 
-/// The paths of `table`'s entries that clippy cannot find on this host: an entry a root form
-/// names when no form naming it builds here (`Only`), and any other entry in the other OS
-/// family's `std::os` module.
+/// The paths of `table`'s entries that clippy reports it cannot find on this host: an entry a
+/// root form names when no form naming it builds here (`Only`), and any other entry in the other
+/// OS family's `std::os` module. An entry of a crate the scratch crates do not depend on here
+/// (`not_a_dependency_here`) is left out: clippy says nothing about it.
 fn not_here(table: &Table, root_forms: &[Form]) -> BTreeSet<String> {
     let other = if cfg!(windows) {
         "std::os::unix::"
@@ -383,6 +386,7 @@ fn not_here(table: &Table, root_forms: &[Form]) -> BTreeSet<String> {
         "std::os::windows::"
     };
     entries(table)
+        .filter(|path| !not_a_dependency_here(path))
         .filter(|path| {
             let mut naming = root_forms
                 .iter()
@@ -395,6 +399,12 @@ fn not_here(table: &Table, root_forms: &[Form]) -> BTreeSet<String> {
         })
         .map(str::to_owned)
         .collect()
+}
+
+/// True for an entry of a crate the scratch crates do not depend on on this host: nix, which they
+/// depend on only on Unix (`write_crate`).
+fn not_a_dependency_here(path: &str) -> bool {
+    !cfg!(unix) && path.starts_with("nix::")
 }
 
 /// The entries of `table` that no form in `forms` names as its item, in the file's order.

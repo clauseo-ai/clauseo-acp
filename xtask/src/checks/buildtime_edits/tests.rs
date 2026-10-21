@@ -19,7 +19,7 @@ fn nothing_inspected() -> String {
             name: "buildtime-edits",
             many: "UI source files",
             place: "under ui/app/src".to_owned(),
-            source: "xtask/src/checks/buildtime_edits.rs",
+            source: "xtask/src/checks/buildtime_edits.rs".to_owned(),
         },
     )
 }

@@ -197,7 +197,7 @@ pub(crate) fn registry_problems(checks: &[StaticCheck]) -> Vec<String> {
         if check.planted.iter().all(Planted::passes) {
             problems.push(format!("{name} has no planted case that fails"));
         }
-        let own = own_list(check.source);
+        let own = own_list(&check.source());
         if let Some(case) = check
             .planted
             .iter()
@@ -216,11 +216,11 @@ pub(crate) fn registry_problems(checks: &[StaticCheck]) -> Vec<String> {
 }
 
 /// The file that holds the `cases!` list of the check in `source`: `xtask/src/checks/budgets.rs`
-/// has `xtask/src/checks/budgets/tests/planted.rs`, with `/` on every OS.
+/// has `xtask/src/checks/budgets/tests/planted.rs`; `source` is `/`-separated
+/// (`StaticCheck::source`).
 #[cfg(test)]
 fn own_list(source: &str) -> String {
-    let source = source.replace('\\', "/");
-    let stem = source.strip_suffix(".rs").unwrap_or(&source);
+    let stem = source.strip_suffix(".rs").unwrap_or(source);
     format!("{stem}/tests/planted.rs")
 }
 

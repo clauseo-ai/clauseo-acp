@@ -170,7 +170,7 @@ fn every_check_inspects_nothing_in_an_empty_repo() {
                 check.name,
                 check.counts.many,
                 (check.place)(),
-                check.source
+                check.source()
             );
             assert_eq!((check.name, fix), (check.name, Some(normal)));
         }
@@ -245,11 +245,11 @@ fn every_check_in_all_has_a_unique_name_its_file_and_a_place() {
     let mut names = std::collections::BTreeSet::new();
     for check in ALL {
         assert!(names.insert(check.name), "{} is in ALL twice", check.name);
+        let source = check.source();
         assert!(
-            check.source.starts_with("xtask/src/checks/") && root.join(check.source).is_file(),
-            "{} names {}, not its file under xtask/src/checks/",
-            check.name,
-            check.source
+            source.starts_with("xtask/src/checks/") && root.join(&source).is_file(),
+            "{} names {source}, not its file under xtask/src/checks/",
+            check.name
         );
         assert!(!(check.place)().is_empty(), "{} has no place", check.name);
     }
@@ -267,6 +267,21 @@ fn fake(run: fn(&Context) -> Inspection) -> StaticCheck {
         "xtask/src/checks/tauri_config.rs",
         run,
     )
+}
+
+/// `file!()` writes `\` on Windows; the fix names the file with `/` on every OS.
+#[test]
+fn a_source_written_with_backslashes_is_named_with_slashes() {
+    let check = StaticCheck {
+        source: "xtask\\src\\checks\\tauri_config.rs",
+        ..fake(|_| Inspection::default())
+    };
+    assert_eq!(check.source(), "xtask/src/checks/tauri_config.rs");
+    let fix = check.nothing_inspected().fix.to_string();
+    assert!(
+        fix.contains("the consts xtask/src/checks/tauri_config.rs builds"),
+        "{fix}"
+    );
 }
 
 #[test]

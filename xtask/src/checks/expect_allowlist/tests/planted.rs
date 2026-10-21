@@ -189,7 +189,7 @@ crate::checks::planted::cases! {
             name: "expect-allowlist",
             many: "Rust files",
             place: "in the repo, matched against xtask/expect-allowlist.txt".to_owned(),
-            source: "xtask/src/checks/expect_allowlist.rs",
+            source: "xtask/src/checks/expect_allowlist.rs".to_owned(),
         },
     )], inspects 0 => super::repos::no_rust_file,
     /// An untracked file that `.gitignore` does not exclude counts, and so does an upper-case

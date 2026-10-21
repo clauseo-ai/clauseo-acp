@@ -27,7 +27,7 @@ crate::checks::planted::cases! {
             name: "capabilities",
             many: "capability and permission files",
             place: "in the desktop crate's capabilities/ and permissions/".to_owned(),
-            source: "xtask/src/checks/capabilities.rs",
+            source: "xtask/src/checks/capabilities.rs".to_owned(),
         },
     )], inspects 0 => super::repos::empty_folder,
     /// `core:default` as a string value fails at the line of that string.

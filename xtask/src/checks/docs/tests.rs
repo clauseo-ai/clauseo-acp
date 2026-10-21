@@ -147,7 +147,7 @@ fn no_markdown_inspected() -> String {
             name: "docs",
             many: "Markdown files",
             place: "in the repo's git-tracked or unignored .md and .markdown files".to_owned(),
-            source: "xtask/src/checks/docs.rs",
+            source: "xtask/src/checks/docs.rs".to_owned(),
         },
     )
 }

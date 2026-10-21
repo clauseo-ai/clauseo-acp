@@ -44,7 +44,7 @@ fn every_fix_prints_its_pinned_text() {
             name: "budgets",
             many: "budget rows",
             place: "in budgets.toml at the repo root".to_owned(),
-            source: "xtask/src/checks/budgets.rs",
+            source: "xtask/src/checks/budgets.rs".to_owned(),
         },
         Fix::Metadata,
         Fix::DesktopNotMember,

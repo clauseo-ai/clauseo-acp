@@ -26,7 +26,7 @@ pub(crate) struct Target {
     /// The target's kinds: `lib`, `bin`, `test`, `example`, `bench`, `custom-build` and others.
     pub kinds: Vec<String>,
     /// The target's root file with its `.` and `..` components resolved, relative to the
-    /// workspace root and `/`-separated, or absolute when `outside`.
+    /// workspace root, or absolute when `outside`; `/`-separated on every OS either way.
     pub src_path: String,
     /// True when the root file lies outside the workspace root, where cargo still builds it.
     pub outside: bool,
@@ -44,7 +44,9 @@ impl Target {
             },
             None => Target {
                 kinds,
-                src_path: lexical(src_path).to_string_lossy().into_owned(),
+                src_path: lexical(src_path)
+                    .to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/"),
                 outside: true,
             },
         }
@@ -313,6 +315,30 @@ mod tests {
         assert_eq!(
             (outside.src_path.as_str(), outside.outside),
             ("/elsewhere/t.rs", true)
+        );
+    }
+
+    /// A target root outside the workspace on Windows: drive and all, shown with `/`.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_target_outside_the_workspace_is_named_with_slashes() {
+        let target = Target::new(
+            vec!["lib".to_owned()],
+            Path::new(r"D:\elsewhere\crate\..\x.rs"),
+            Path::new(r"C:\ws"),
+        );
+        assert_eq!(
+            (target.src_path.as_str(), target.outside),
+            ("D:/elsewhere/x.rs", true)
+        );
+        let inside = Target::new(
+            vec!["lib".to_owned()],
+            Path::new(r"C:\ws\crates\a\src\lib.rs"),
+            Path::new(r"C:\ws"),
+        );
+        assert_eq!(
+            (inside.src_path.as_str(), inside.outside),
+            ("crates/a/src/lib.rs", false)
         );
     }
 

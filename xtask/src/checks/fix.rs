@@ -12,7 +12,7 @@ pub(crate) enum Fix {
         name: &'static str,
         many: &'static str,
         place: String,
-        source: &'static str,
+        source: String,
     },
     /// `cargo metadata` failed, so a check that reads the workspace members stopped.
     Metadata,

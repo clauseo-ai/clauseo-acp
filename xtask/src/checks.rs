@@ -71,7 +71,7 @@ pub(crate) struct StaticCheck {
     /// Built from the consts the check's code reads, so it cannot go stale when they change.
     place: fn() -> String,
     /// The repo-relative file of the check, `file!()` in its `CHECK`, which the zero-inspected
-    /// fix names.
+    /// fix names. Read it through `source()`: `file!()` has `\` on Windows.
     source: &'static str,
     run: fn(&Context) -> Inspection,
     /// The check's planted cases, the `PLANTED` of its `tests/planted.rs`.
@@ -205,6 +205,12 @@ impl StaticCheck {
         }
     }
 
+    /// The check's file, repo-relative and `/`-separated on every OS: `file!()` writes it with
+    /// the host's separator, and messages show repo paths with `/`.
+    pub(crate) fn source(&self) -> String {
+        self.source.replace('\\', "/")
+    }
+
     /// The failure for an inspection of zero items: `0 capability files inspected in the desktop
     /// crate's capabilities/`. The fix names what the check looks for, where, and its file.
     pub(crate) fn nothing_inspected(&self) -> Failure {
@@ -215,7 +221,7 @@ impl StaticCheck {
                 name: self.name,
                 many: self.counts.many,
                 place,
-                source: self.source,
+                source: self.source(),
             }
             .into(),
         }
