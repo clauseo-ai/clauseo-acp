@@ -2,7 +2,9 @@
 //!
 //! Clippy runs with `--message-format=json-diagnostic-short`: the short text form (`path:line:col:
 //! level: message`) does not name the lint, and the JSON does. Each JSON message carries the short
-//! text in `rendered`, which is what people see.
+//! text in `rendered`, which is what people see. A finding for a clippy ban (`BANS`) also gets the
+//! notes that give its reason and replacement (see `help_notes`); other lints print their rendered
+//! text alone.
 
 use crate::process::Cmd;
 use crate::violation::{Finding, Violation};
@@ -83,21 +85,23 @@ fn hunk_changed_line(start: u32, body: &[&str]) -> u32 {
 pub(crate) struct Diag {
     pub path: String,
     pub line: u32,
-    /// Includes the level and, from JSON, the lint:
+    /// Includes the level and, from JSON, the lint and the help notes:
     /// `warning: unused variable: x (unused_variables)` or `error[E0425]: cannot find value`.
     pub message: String,
     pub is_error: bool,
 }
 
 /// Every short-form diagnostic in `output`, deduplicated by (path, line, message). A line is either
-/// one of cargo's JSON messages, whose `rendered` text is read and whose lint name is appended, or
-/// plain `path:line:col: warning|error...` text. Lines without a file prefix are ignored.
+/// one of cargo's JSON messages, whose `rendered` text is read, whose lint name is appended and
+/// whose help notes follow, or plain `path:line:col: warning|error...` text. Lines without a file
+/// prefix are ignored.
 pub(crate) fn short_diags(output: &str, root: &str) -> Vec<Diag> {
     let mut diags: Vec<Diag> = Vec::new();
     for line in output.lines() {
         let diag = match json_message(line) {
             Some(message) => message.rendered.lines().next().and_then(|text| {
-                short_line(text, root).map(|diag| with_lint(diag, message.code.as_deref()))
+                short_line(text, root)
+                    .map(|diag| with_help(with_lint(diag, message.code.as_deref()), &message.help))
             }),
             None => short_line(line, root),
         };
@@ -137,6 +141,8 @@ struct JsonMessage {
     rendered: String,
     /// The lint or error code: `clippy::unwrap_used`, `unused_variables`, `E0425`.
     code: Option<String>,
+    /// The notes under a ban's diagnostic, in the order clippy printed them; empty for other lints.
+    help: Vec<String>,
 }
 
 /// The diagnostic in one line of cargo's JSON output, or `None` for any other line.
@@ -149,15 +155,25 @@ fn json_message(line: &str) -> Option<JsonMessage> {
         return None;
     }
     let message = value.get("message")?;
+    let code = message
+        .get("code")
+        .and_then(|code| code.get("code"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let help = match code.as_deref() {
+        Some(code) if BANS.contains(&code) => help_notes(message),
+        _ => Vec::new(),
+    };
     Some(JsonMessage {
         rendered: message.get("rendered")?.as_str()?.to_owned(),
-        code: message
-            .get("code")
-            .and_then(|code| code.get("code"))
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned),
+        code,
+        help,
     })
 }
+
+/// The clippy lints whose notes are printed: a ban in `clippy.toml` gives its reason as a note or
+/// help, and its replacement as a suggestion. Every other lint prints its rendered text alone.
+const BANS: [&str; 2] = ["clippy::disallowed_methods", "clippy::disallowed_types"];
 
 /// Appends ` (code)` to the message, unless the text already shows it as `error[code]`.
 fn with_lint(mut diag: Diag, code: Option<&str>) -> Diag {
@@ -165,6 +181,78 @@ fn with_lint(mut diag: Diag, code: Option<&str>) -> Diag {
         && !diag.message.contains(&format!("[{code}]"))
     {
         diag.message = format!("{} ({code})", diag.message);
+    }
+    diag
+}
+
+/// The help notes under a ban, one piece per kept child: the child's message, then `use X` (with
+/// the replacement in backticks) when a span suggests replacement `X`. A child is kept when it is
+/// a `help`, or a `note` with no span, and it is neither boilerplate nor a note that asks for an
+/// `#[allow]`. A note that points at code (`type is ...`) stays out. A ban prints its reason as a
+/// `note` when it has no replacement, and as a `help` that carries the replacement when it has one.
+fn help_notes(message: &serde_json::Value) -> Vec<String> {
+    let mut notes = Vec::new();
+    let children = message
+        .get("children")
+        .and_then(serde_json::Value::as_array);
+    for child in children.into_iter().flatten() {
+        let text = child.get("message").and_then(serde_json::Value::as_str);
+        let level = child.get("level").and_then(serde_json::Value::as_str);
+        let spans = child
+            .get("spans")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let (Some(text), Some(level)) = (text, level) else {
+            continue;
+        };
+        let text = one_line(text);
+        let kept = (level == "help" || (level == "note" && spans.is_empty()))
+            && !text.is_empty()
+            && !is_boilerplate(&text)
+            && !asks_for_allow(&text);
+        if !kept {
+            continue;
+        }
+        let replacement = spans
+            .iter()
+            .filter_map(|span| span.get("suggested_replacement")?.as_str())
+            .map(one_line)
+            .find(|replacement| !replacement.is_empty());
+        notes.push(text);
+        if let Some(replacement) = replacement {
+            notes.push(format!("use `{replacement}`"));
+        }
+    }
+    notes
+}
+
+/// The notes that clippy and rustc print under a finding and that say nothing about why it fired:
+/// the lint's docs link, the source of a lint level, the default level of a rustc lint, and the
+/// level that `-D warnings` gives a lint.
+fn is_boilerplate(text: &str) -> bool {
+    text.starts_with("for further information visit ")
+        || text.starts_with("requested on the command line")
+        || text.ends_with(" on by default")
+        || text.contains("implied by `-D warnings`")
+}
+
+/// A note that tells the reader to silence the lint with `#[allow]`. AGENTS.md bans that attribute,
+/// so no note that names one is printed.
+fn asks_for_allow(text: &str) -> bool {
+    text.contains("[allow")
+}
+
+/// `text` with every run of whitespace, a newline included, as one space: a note stays on the
+/// finding's line.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Appends the help notes to a finding's message: `: `, then the notes joined by `; `.
+fn with_help(mut diag: Diag, help: &[String]) -> Diag {
+    if !help.is_empty() {
+        diag.message = format!("{}: {}", diag.message, help.join("; "));
     }
     diag
 }
@@ -276,223 +364,4 @@ fn clippy_repro(cmd: &Cmd, path: &str, members: &[Member]) -> Cmd {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn clippy_repro_drops_the_workspace_flag_and_narrows_to_the_owner() {
-        let cmd = Cmd::new(
-            crate::process::Program::Cargo,
-            [
-                "clippy",
-                "--workspace",
-                "--all-targets",
-                "--message-format=short",
-                "--",
-                "-D",
-                "warnings",
-            ],
-        );
-        let members = vec![Member {
-            name: "xtask".into(),
-            dir: "xtask".into(),
-            path_deps: vec![],
-            targets: vec![],
-            dependencies: crate::workspace::PackageDependencies::default(),
-        }];
-        assert_eq!(
-            clippy_repro(&cmd, "xtask/src/main.rs", &members).to_string(),
-            "cargo clippy -p xtask --all-targets -- -D warnings"
-        );
-    }
-
-    #[test]
-    fn clippy_repro_copies_everything_after_the_separator_verbatim() {
-        let cmd = Cmd::new(
-            crate::process::Program::Cargo,
-            [
-                "clippy",
-                "--workspace",
-                "--all-targets",
-                "--",
-                "-p",
-                "odd",
-                "--workspace",
-                "--message-format=short",
-            ],
-        );
-        let members = vec![Member {
-            name: "xtask".into(),
-            dir: "xtask".into(),
-            path_deps: vec![],
-            targets: vec![],
-            dependencies: crate::workspace::PackageDependencies::default(),
-        }];
-        assert_eq!(
-            clippy_repro(&cmd, "xtask/src/main.rs", &members).to_string(),
-            "cargo clippy -p xtask --all-targets -- -p odd --workspace --message-format=short"
-        );
-    }
-
-    #[test]
-    fn rel_path_strips_root_and_normalises_separators() {
-        assert_eq!(
-            rel_path("/ws/xtask/src/main.rs", "/ws"),
-            "xtask/src/main.rs"
-        );
-        assert_eq!(rel_path("./xtask/src/main.rs", "/ws"), "xtask/src/main.rs");
-        assert_eq!(
-            rel_path("C:\\ws\\xtask\\src\\main.rs", "C:\\ws"),
-            "xtask/src/main.rs"
-        );
-    }
-
-    #[test]
-    fn fmt_parses_current_header() {
-        let out = "Diff in /ws/xtask/src/main.rs:3:\n-fn  bad( ){}\n+fn bad() {}\n";
-        assert_eq!(
-            fmt_diffs(out, "/ws"),
-            vec![("xtask/src/main.rs".to_owned(), 3)]
-        );
-    }
-
-    #[test]
-    fn fmt_reports_the_changed_line_not_the_hunk_context_start() {
-        // Real `cargo fmt --check` output for `fn  bad( ){}` appended at line 40.
-        let out = "Diff in /ws/xtask/src/main.rs:37:\n         Commands::Setup => tools::setup(),\n     }\n }\n-fn  bad( ){}\n+fn bad() {}\n\n";
-        assert_eq!(
-            fmt_diffs(out, "/ws"),
-            vec![("xtask/src/main.rs".to_owned(), 40)]
-        );
-    }
-
-    #[test]
-    fn fmt_points_at_the_inserted_line_for_an_add_only_hunk() {
-        // Three context lines (37-39), then an added line that goes in front of original line 40.
-        let out = "Diff in /ws/xtask/src/main.rs:37:\n         Commands::Setup => setup::run(),\n     }\n }\n+fn added() {}\n\n";
-        assert_eq!(
-            fmt_diffs(out, "/ws"),
-            vec![("xtask/src/main.rs".to_owned(), 40)]
-        );
-    }
-
-    #[test]
-    fn fmt_parses_old_header_and_dedupes() {
-        let out = "Diff in /ws/xtask/src/main.rs at line 3:\n\
-                   Diff in /ws/xtask/src/main.rs at line 3:\n\
-                   Diff in /ws/xtask/src/lib.rs at line 9:\n";
-        assert_eq!(
-            fmt_diffs(out, "/ws"),
-            vec![
-                ("xtask/src/main.rs".to_owned(), 3),
-                ("xtask/src/lib.rs".to_owned(), 9)
-            ]
-        );
-    }
-
-    #[test]
-    fn fmt_parses_windows_path() {
-        let out = "Diff in C:\\ws\\xtask\\src\\main.rs:7:\n";
-        assert_eq!(
-            fmt_diffs(out, "C:\\ws"),
-            vec![("xtask/src/main.rs".to_owned(), 7)]
-        );
-    }
-
-    #[test]
-    fn fmt_finds_nothing_in_a_syntax_error() {
-        let out = "error: expected one of `!` or `::`, found `(`\n --> xtask/src/main.rs:1:4\n";
-        assert_eq!(fmt_diffs(out, "/ws"), Vec::<(String, u32)>::new());
-    }
-
-    #[test]
-    fn clippy_parses_warning_and_error_lines() {
-        let out = "xtask/src/main.rs:4:9: warning: unused variable: `x`\n\
-                   xtask/src/main.rs:6:5: error[E0425]: cannot find value `y` in this scope\n";
-        let diags = short_diags(out, "/ws");
-        assert_eq!(
-            diags,
-            vec![
-                Diag {
-                    path: "xtask/src/main.rs".into(),
-                    line: 4,
-                    message: "warning: unused variable: `x`".into(),
-                    is_error: false,
-                },
-                Diag {
-                    path: "xtask/src/main.rs".into(),
-                    line: 6,
-                    message: "error[E0425]: cannot find value `y` in this scope".into(),
-                    is_error: true,
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn clippy_parses_windows_drive_paths() {
-        let out = "C:\\ws\\xtask\\src\\main.rs:4:9: error: unused variable: `unused`\n";
-        let diags = short_diags(out, "C:\\ws");
-        assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].path, "xtask/src/main.rs");
-        assert_eq!(diags[0].line, 4);
-        assert!(diags[0].is_error);
-    }
-
-    #[test]
-    fn clippy_ignores_lines_without_a_file_prefix_and_dedupes() {
-        let out = "warning: `xtask` (bin \"xtask\") generated 1 warning\n\
-                   error: could not compile `xtask` (bin \"xtask\") due to 1 previous error\n\
-                   xtask/src/main.rs:4:9: warning: unused variable: `x`\n\
-                   xtask/src/main.rs:4:9: warning: unused variable: `x`\n";
-        let diags = short_diags(out, "/ws");
-        assert_eq!(diags.len(), 1);
-        assert!(!diags[0].is_error);
-    }
-
-    const JSON_OUTPUT: &str = concat!(
-        r#"{"reason":"compiler-artifact","target":{"name":"serde"}}"#,
-        "\n",
-        r#"{"reason":"compiler-message","message":{"rendered":"/ws/xtask/src/check.rs:13:14: error: used `unwrap()` on an `Option` value\n","code":{"code":"clippy::unwrap_used","explanation":null},"level":"error"}}"#,
-        "\n",
-        r#"{"reason":"compiler-message","message":{"rendered":"xtask/src/main.rs:6:5: error[E0425]: cannot find value `y` in this scope\n","code":{"code":"E0425"},"level":"error"}}"#,
-        "\n",
-        r#"{"reason":"compiler-message","message":{"rendered":"warning: 1 warning emitted\n","code":null,"level":"warning"}}"#,
-        "\n",
-        "error: could not compile `xtask` (bin \"xtask\") due to 2 previous errors\n",
-    );
-
-    #[test]
-    fn clippy_json_names_the_lint_and_does_not_repeat_an_error_code() {
-        let diags = short_diags(JSON_OUTPUT, "/ws");
-        assert_eq!(
-            diags,
-            vec![
-                Diag {
-                    path: "xtask/src/check.rs".into(),
-                    line: 13,
-                    message: "error: used `unwrap()` on an `Option` value (clippy::unwrap_used)"
-                        .into(),
-                    is_error: true,
-                },
-                Diag {
-                    path: "xtask/src/main.rs".into(),
-                    line: 6,
-                    message: "error[E0425]: cannot find value `y` in this scope".into(),
-                    is_error: true,
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn clippy_render_keeps_rendered_text_and_plain_lines_and_drops_other_json() {
-        assert_eq!(
-            clippy_render(JSON_OUTPUT),
-            "/ws/xtask/src/check.rs:13:14: error: used `unwrap()` on an `Option` value\n\
-             xtask/src/main.rs:6:5: error[E0425]: cannot find value `y` in this scope\n\
-             warning: 1 warning emitted\n\
-             error: could not compile `xtask` (bin \"xtask\") due to 2 previous errors\n"
-        );
-    }
-}
+mod tests;
