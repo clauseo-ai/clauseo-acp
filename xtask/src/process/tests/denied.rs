@@ -76,13 +76,14 @@ fn a_stop_denied_to_a_command_that_never_exits_is_the_error() {
 }
 
 /// Makes a process group that holds only a zombie: the perl's child moves to a group of its own
-/// and exits; the perl, which does not reap it, prints the group once the child's end of a pipe
-/// has closed, which happens only at its exit.
+/// and exits, and the perl, which does not reap it, prints the group once signal 0 to it is
+/// denied, so the child has become a zombie. It asks at most ten million times (seconds), then
+/// prints the group anyway, so an OS that answers otherwise fails the test instead of hanging it.
 #[cfg(target_os = "macos")]
-const ZOMBIE_GROUP: &str = r#"perl -e 'pipe(my $r, my $w) or die "pipe: $!";
-defined(my $pid = fork) or die "fork: $!";
-if (!$pid) { close $r; setpgrp(0, 0); exit 0 }
-close $w; <$r>; $| = 1; print "$pid\n"; sleep 300'"#;
+const ZOMBIE_GROUP: &str = r#"perl -e 'defined(my $pid = fork) or die "fork: $!";
+if (!$pid) { setpgrp(0, 0); exit 0 }
+my $n = 0; $n++ until (!kill(0, -$pid) && $!{EPERM}) || $n > 10_000_000;
+$| = 1; print "$pid\n"; sleep 300'"#;
 
 #[cfg(target_os = "macos")]
 #[test]
