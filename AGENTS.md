@@ -64,7 +64,8 @@ this. Use the words in `GLOSSARY.md` exactly.
 - A source file has at most 600 lines.
 - Rust comments stay within 100 columns; a file past 500 lines gets a note to split it.
 - A check that inspects nothing fails.
-- Every check ships planted violations, its bypass forms included.
+- Every check ships planted violations, its bypass forms included. A surviving mutant in your
+  diff fails `cargo xtask mutants`.
 - Files are written only through each crate's write module: `xtask/src/write.rs` in xtask,
   `Scratch` (`xtask/src/scratch.rs`) in xtask's tests, `ui/app/scripts/guard.mjs` in scripts.
   Child processes start only through `xtask/src/process.rs` in xtask and
