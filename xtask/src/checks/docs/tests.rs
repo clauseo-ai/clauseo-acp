@@ -1,9 +1,12 @@
-//! Tests of the docs check's file list, and of the check as one run.
+//! Tests of the docs check's file list, and of the check as one run. The planted cases are in
+//! `tests/planted.rs` and their builders in `tests/repos.rs`; the functions below are the expected
+//! lines that several cases share.
 
-mod cases;
 pub(super) mod planted;
+mod repos;
 
 use super::*;
+use crate::checks::planted::{fails, failure};
 use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;
 
@@ -12,7 +15,7 @@ fn only_the_markdown_files_of_a_git_repo_are_counted() {
     let dir = Scratch::new("docs-git-count");
     let git = Cmd::new(Program::Git, ["init", "-q"], crate::process::TEST_TIMEOUT);
     let quiet = process::run_quiet(&git, &dir).expect("git runs");
-    assert!(quiet.success, "git init failed: {}", quiet.stderr);
+    assert!(quiet.success(), "git init failed: {}", quiet.stderr);
     Scratch::write(dir.join("NOTES.md"), "# Notes\n").expect("write a doc");
     Scratch::write(dir.join("data.txt"), "not Markdown\n").expect("write a text file");
     let found = run(&Context {
@@ -83,7 +86,7 @@ fn a_link_to_a_file_git_ignores_fails_in_a_real_repo() {
     let dir = Scratch::new("docs-git-ignored");
     let git = Cmd::new(Program::Git, ["init", "-q"], crate::process::TEST_TIMEOUT);
     let quiet = process::run_quiet(&git, &dir).expect("git runs");
-    assert!(quiet.success, "git init failed: {}", quiet.stderr);
+    assert!(quiet.success(), "git init failed: {}", quiet.stderr);
     Scratch::write(dir.join(".gitignore"), "local.md\n").expect("write .gitignore");
     Scratch::write(dir.join("local.md"), "# Local\n").expect("write the ignored file");
     Scratch::write(dir.join("GUIDE.md"), "See [x](local.md).\n").expect("write a doc");
@@ -101,4 +104,50 @@ fn a_link_to_a_file_git_ignores_fails_in_a_real_repo() {
         ),
         "the ignored file does not count, and the fix says git ignores it: {printed:?}"
     );
+}
+
+/// The violation for the relative link `link` at `file:line`, which names a file that does not
+/// exist.
+fn bad_link(file: &str, line: usize, link: &str) -> String {
+    fails(
+        &format!("{file}:{line}"),
+        &format!("the relative link `{link}` does not resolve: `{link}` does not exist"),
+        Fix::CreateOrCorrectLink {
+            path: link.to_owned(),
+        },
+    )
+}
+
+/// The violation for the backticked path `path` at `GUIDE.md:line`, which does not exist.
+fn bad_path(line: usize, path: &str) -> String {
+    fails(
+        &format!("GUIDE.md:{line}"),
+        &format!("`{path}` does not exist"),
+        Fix::CreateOrCorrectReference {
+            path: path.to_owned(),
+        },
+    )
+}
+
+/// The violation for the xtask command `command` at `GUIDE.md:line`, which does not parse for the
+/// reason `detail`.
+fn bad_command(line: usize, command: &str, detail: &str) -> String {
+    fails(
+        &format!("GUIDE.md:{line}"),
+        &format!("the xtask command `{command}` does not parse: {detail}"),
+        Fix::CorrectCommand,
+    )
+}
+
+/// The zero-inspected failure of the docs check, as it prints when no Markdown file is read.
+fn no_markdown_inspected() -> String {
+    failure(
+        "0 Markdown files inspected in the repo's git-tracked or unignored .md and .markdown files",
+        crate::checks::Fix::NothingInspected {
+            name: "docs",
+            many: "Markdown files",
+            place: "in the repo's git-tracked or unignored .md and .markdown files".to_owned(),
+            source: "xtask/src/checks/docs.rs",
+        },
+    )
 }

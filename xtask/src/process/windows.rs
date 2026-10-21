@@ -9,6 +9,7 @@
     reason = "FFI to the Win32 Job Object, process and thread APIs"
 )]
 
+use super::running::{Streams, Tree};
 use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
@@ -31,24 +32,25 @@ use windows::core::PCWSTR;
 const TERMINATED: u32 = 1;
 
 /// The Job Object a command runs in. Dropping it closes the handle, which kills what is left.
-pub(super) struct Tree {
+pub(super) struct Job {
     job: HANDLE,
 }
 
-impl Tree {
-    /// What a tree is called in errors.
-    pub(super) const NAME: &str = "job";
+impl Tree for Job {
+    const NAME: &'static str = "job";
 
-    /// Makes `command` start suspended, so it runs nothing before it joins its job.
-    pub(super) fn prepare(command: &mut Command) {
+    /// Makes `command` start suspended, so it runs nothing before it joins its job. Its output
+    /// goes where it goes: a job is no background group, so a command that inherits xtask's
+    /// console can still prompt on it.
+    fn prepare(command: &mut Command, _streams: Streams) {
         command.creation_flags(CREATE_SUSPENDED.0);
     }
 
     /// The tree of `child`, just started suspended from a `prepare`d command: a new job holds it,
     /// then its threads resume. When a step fails, the child is ended and the error returned; the
     /// caller reaps.
-    pub(super) fn adopt(child: &mut Child) -> io::Result<Tree> {
-        let tree = match Tree::new() {
+    fn adopt(child: &mut Child) -> io::Result<Job> {
+        let tree = match Job::new() {
             Ok(tree) => tree,
             Err(error) => {
                 drop(child.kill());
@@ -70,13 +72,39 @@ impl Tree {
         Ok(tree)
     }
 
+    /// Ends every process in the job. Windows has no SIGTERM to send a console command that
+    /// another process started, so this is the whole stop.
+    fn terminate(&self) -> io::Result<()> {
+        // SAFETY: `self.job` is a job handle `self` holds.
+        unsafe { TerminateJobObject(self.job, TERMINATED) }
+            .map_err(|error| os_error("could not terminate the job", &error))
+    }
+
+    /// The same as `terminate`.
+    fn kill(&self) -> io::Result<()> {
+        self.terminate()
+    }
+
+    /// Always: `terminate` has ended every process in the job at once. One still holding a pipe
+    /// as it ends is what the drain waits for.
+    fn empty(&self) -> bool {
+        true
+    }
+
+    /// Ends what is left of the job. The handle closes when the job drops.
+    fn finish(&self) {
+        drop(self.terminate());
+    }
+}
+
+impl Job {
     /// A new job that kills its processes when its last handle closes.
-    fn new() -> io::Result<Tree> {
+    fn new() -> io::Result<Job> {
         // SAFETY: no security attributes and no name are valid arguments; the handle returned is
         // owned by the `Tree` built from it, which closes it once.
         let job = unsafe { CreateJobObjectW(None, PCWSTR::null()) }
             .map_err(|error| os_error("could not create a job object", &error))?;
-        let tree = Tree { job };
+        let tree = Job { job };
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         let size = u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
@@ -94,27 +122,9 @@ impl Tree {
         .map_err(|error| os_error("could not set the job to kill on close", &error))?;
         Ok(tree)
     }
-
-    /// Ends every process in the job. Windows has no SIGTERM to send a console command that
-    /// another process started, so this is the whole stop.
-    pub(super) fn terminate(&self) -> io::Result<()> {
-        // SAFETY: `self.job` is a job handle `self` holds.
-        unsafe { TerminateJobObject(self.job, TERMINATED) }
-            .map_err(|error| os_error("could not terminate the job", &error))
-    }
-
-    /// The same as `terminate`.
-    pub(super) fn kill(&self) -> io::Result<()> {
-        self.terminate()
-    }
-
-    /// Ends what is left of the job. The handle closes when the tree drops.
-    pub(super) fn finish(&self) {
-        drop(self.terminate());
-    }
 }
 
-impl Drop for Tree {
+impl Drop for Job {
     fn drop(&mut self) {
         // SAFETY: `self.job` is a handle this tree owns and closes only here.
         drop(unsafe { CloseHandle(self.job) });

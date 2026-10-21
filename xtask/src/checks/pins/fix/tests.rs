@@ -1,9 +1,9 @@
-//! Pins the text of every `pins::Fix` variant with `fix_texts!`: one arm per variant, and
-//! `assert_texts` fails until each arm has a sample, so a new variant needs both.
+//! Pins the text of every `pins::Fix` variant, and of each home and file home, with `fix_texts!`:
+//! one arm per variant, and `assert_texts` or `assert_shown` fails until each arm has a sample, so
+//! a new variant, `Home` or `FileHome` needs both.
 
 use super::{FileHome, Fix, Home};
 use crate::fix::tests::{assert_texts, fix_texts};
-use std::collections::HashSet;
 
 fix_texts! {
     fn pinned for Fix {
@@ -58,100 +58,110 @@ fn every_fix_has_its_exact_text() {
     assert_texts(&samples, pinned, ARMS);
 }
 
-/// What each home is called and how a workflow installs from it. The match is exhaustive, so a
-/// new home needs an arm here, but the list of homes below is not checked against the enum: a
-/// home missing from that list is not tested.
-#[test]
-fn every_home_has_its_exact_texts() {
-    let homes = [
-        Home::File(FileHome::Rust),
-        Home::File(FileHome::Pnpm),
-        Home::File(FileHome::Node),
-        Home::Tool("cargo-fake"),
-        Home::Binary("lefthook"),
-    ];
-    let unique: HashSet<String> = homes.iter().map(|home| format!("{home:?}")).collect();
-    assert_eq!(unique.len(), homes.len(), "two samples are the same home");
-    let setup = "`cargo xtask setup --binaries` installs the versions xtask/src/setup.rs pins";
-    for home in homes {
-        let (tool, noun, place, install) = match home {
-            Home::File(FileHome::Rust) => (
-                "Rust toolchain",
-                "the Rust version",
-                "`channel` in rust-toolchain.toml",
-                "a `run: rustup toolchain install` step with no argument installs the toolchain \
-                 rust-toolchain.toml names",
+/// The texts of each home: what it is called, where its version is written, and the fix a
+/// workflow copy gets. Its `Home::Tool` and `Home::Binary` arms take the name from the sample.
+mod homes {
+    use super::*;
+    use crate::fix::tests::{assert_shown, fix_texts};
+
+    fix_texts! {
+        fn home_text for Home {
+            Home::File(FileHome::Rust) => concat!(
+                "Rust toolchain\n",
+                "the Rust version\n",
+                "`channel` in rust-toolchain.toml\n",
+                "remove the version from this file: a `run: rustup toolchain install` step with no \
+                 argument installs the toolchain rust-toolchain.toml names"
             ),
-            Home::File(FileHome::Pnpm) => (
-                "pnpm",
-                "the pnpm version",
-                "`packageManager` in ui/package.json",
-                "pnpm/action-setup with `package_json_file: ui/package.json` installs the pnpm \
-                 `packageManager` names",
+            Home::File(FileHome::Pnpm) => concat!(
+                "pnpm\n",
+                "the pnpm version\n",
+                "`packageManager` in ui/package.json\n",
+                "remove the version from this file: pnpm/action-setup with \
+                 `package_json_file: ui/package.json` installs the pnpm `packageManager` names"
             ),
-            Home::File(FileHome::Node) => (
-                "Node",
-                "the minimum Node",
-                "`engines.node` in ui/package.json",
-                "actions/setup-node with `node-version-file: ui/package.json` installs a Node \
-                 that `engines.node` allows",
+            Home::File(FileHome::Node) => concat!(
+                "Node\n",
+                "the minimum Node\n",
+                "`engines.node` in ui/package.json\n",
+                "remove the version from this file: actions/setup-node with \
+                 `node-version-file: ui/package.json` installs a Node that `engines.node` allows"
             ),
-            Home::Tool(_) => (
-                "cargo-fake",
-                "the cargo-fake version",
-                "`TOOLS` in xtask/src/setup.rs",
-                setup,
+            Home::Tool(name) => format!(
+                "{name}\nthe {name} version\n`TOOLS` in xtask/src/setup.rs\n\
+                 remove the version from this file: `cargo xtask setup --binaries` installs the \
+                 versions xtask/src/setup.rs pins"
             ),
-            Home::Binary(_) => (
-                "lefthook",
-                "the lefthook version",
-                "`BINARIES` in xtask/src/setup.rs",
-                setup,
+            Home::Binary(name) => format!(
+                "{name}\nthe {name} version\n`BINARIES` in xtask/src/setup.rs\n\
+                 remove the version from this file: `cargo xtask setup --binaries` installs the \
+                 versions xtask/src/setup.rs pins"
             ),
-        };
-        assert_eq!(
-            (home.tool(), home.noun(), home.place()),
-            (tool, noun.to_owned(), place.to_owned())
-        );
-        assert_eq!(
-            Fix::Copy(home).to_string(),
-            format!("remove the version from this file: {install}")
-        );
+        }
+    }
+
+    /// A home's four texts, one line each, as the messages and the fix line print them.
+    fn shown(home: &Home) -> String {
+        format!(
+            "{}\n{}\n{}\n{}",
+            home.tool(),
+            home.noun(),
+            home.place(),
+            Fix::Copy(*home)
+        )
+    }
+
+    #[test]
+    fn every_home_has_its_exact_texts() {
+        let homes = [
+            Home::File(FileHome::Rust),
+            Home::File(FileHome::Pnpm),
+            Home::File(FileHome::Node),
+            Home::Tool("cargo-fake"),
+            Home::Binary("lefthook"),
+        ];
+        assert_shown(&homes, shown, home_text, ARMS);
     }
 }
 
-/// The fixes of a version input and of a home that could not be read, for each file home in the
-/// list below. As with `every_home_has_its_exact_texts`, a new `FileHome` is not forced into it.
-#[test]
-fn every_file_home_has_its_exact_fixes() {
-    for home in [FileHome::Rust, FileHome::Pnpm, FileHome::Node] {
-        let (input, unread) = match home {
-            FileHome::Rust => (
+/// The texts of each file home's two fixes, a version input's and an unreadable home's, one line
+/// each.
+mod file_homes {
+    use super::*;
+    use crate::fix::tests::{assert_shown, fix_texts};
+
+    fix_texts! {
+        fn fixes_text for FileHome {
+            FileHome::Rust => concat!(
                 "install Rust with a `run: rustup toolchain install` step instead: with no \
                  argument rustup installs the toolchain rust-toolchain.toml names, the one home \
-                 of the Rust version",
+                 of the Rust version\n",
                 "set `channel = \"<major>.<minor>.<patch>\"` under `[toolchain]` in \
                  rust-toolchain.toml: it is the one home of the Rust version, and pins compares \
-                 its copies with it",
+                 its copies with it"
             ),
-            FileHome::Pnpm => (
+            FileHome::Pnpm => concat!(
                 "remove `version` and set `package_json_file: ui/package.json`: pnpm/action-setup \
-                 then installs the pnpm `packageManager` names there, its one home",
+                 then installs the pnpm `packageManager` names there, its one home\n",
                 "set `\"packageManager\": \"pnpm@<major>.<minor>.<patch>\"` in ui/package.json: \
-                 it is the one home of the pnpm version, and pins looks for copies of it",
+                 it is the one home of the pnpm version, and pins looks for copies of it"
             ),
-            FileHome::Node => (
+            FileHome::Node => concat!(
                 "remove `node-version` and set `node-version-file: ui/package.json`: \
                  actions/setup-node then installs a Node that `engines.node` there allows, its \
-                 one home",
+                 one home\n",
                 "set `\"engines\": { \"node\": \">=<major>.<minor>.<patch>\" }` in \
                  ui/package.json: it is the one home of the minimum Node, and pins looks for \
-                 copies of it",
+                 copies of it"
             ),
-        };
-        assert_eq!(
-            (Fix::Input(home).to_string(), Fix::Unread(home).to_string()),
-            (input.to_owned(), unread.to_owned())
-        );
+        }
+    }
+
+    #[test]
+    fn every_file_home_has_its_exact_fixes() {
+        // A file home's two fixes, one line each, as the fix lines print them.
+        let shown = |home: &FileHome| format!("{}\n{}", Fix::Input(*home), Fix::Unread(*home));
+        let homes = [FileHome::Rust, FileHome::Pnpm, FileHome::Node];
+        assert_shown(&homes, shown, fixes_text, ARMS);
     }
 }

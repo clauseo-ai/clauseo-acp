@@ -26,7 +26,7 @@ mod tests;
 use crate::budgets;
 use crate::check;
 use crate::output::Printer;
-use crate::process::{self, Cmd, Program, QuietRunner};
+use crate::process::{self, Cmd, Program, QuietRunner, Status, TimeoutFix};
 use crate::workspace::{self, Member};
 use clap::ValueEnum;
 use profile::{Incremental, Sources};
@@ -274,14 +274,15 @@ const RUSTC_VERSION_TIMEOUT: Duration = Duration::from_mins(10);
 fn rustc_version(root: &Path, runner: &mut QuietRunner<'_>) -> Result<String, Failure> {
     let cmd = Cmd::new(Program::Named("rustc"), ["-V"], RUSTC_VERSION_TIMEOUT);
     match runner(&cmd, root) {
-        Ok(quiet) if quiet.success => Ok(quiet.stdout.trim().to_owned()),
+        Ok(quiet) if quiet.success() => Ok(quiet.stdout.trim().to_owned()),
+        Ok(quiet) if quiet.status == Status::TimedOut => Err(Failure::new(
+            process::timeout_message(&cmd),
+            TimeoutFix::of(&cmd).to_string(),
+        )),
         Ok(quiet) => Err(Failure::new(
             format!("`rustc -V` failed: {}", quiet.stderr.trim()),
             "install Rust with rustup, then run `rustup show`",
         )),
-        Err(error) if process::is_timeout(&error) => {
-            Err(Failure::new(error.to_string(), process::timeout_fix(&cmd)))
-        }
         Err(error) => Err(Failure::new(
             format!("could not run `rustc -V`: {error}"),
             "install Rust with rustup",

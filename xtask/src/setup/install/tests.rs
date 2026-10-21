@@ -2,6 +2,7 @@
 //! an injected runner, and the winget and no-release paths.
 
 use super::*;
+use crate::process::Ran;
 use crate::scratch::Scratch;
 #[cfg(unix)]
 use crate::setup::AssetSha256;
@@ -43,10 +44,10 @@ fn install_with(
     b: &Binary,
     machine: &Machine<'_>,
     asset_bytes: &[u8],
-    other: &mut dyn FnMut(&Cmd) -> io::Result<Ended>,
+    other: &mut dyn FnMut(&Cmd) -> io::Result<Ran>,
 ) -> (bool, Vec<(String, PathBuf)>, String) {
     let mut ran = Vec::new();
-    let mut runner = |cmd: &Cmd, at: &Path, _: Output| -> io::Result<Ended> {
+    let mut runner = |cmd: &Cmd, at: &Path, _: Output| -> io::Result<Ran> {
         ran.push((cmd.to_string(), at.to_path_buf()));
         match cmd.program {
             Program::Named("curl") => Scratch::write(at.join(curl_output(cmd)), asset_bytes)?,
@@ -62,7 +63,7 @@ fn install_with(
     (ok, ran, String::from_utf8(out.into_inner()).unwrap())
 }
 
-fn never(cmd: &Cmd) -> io::Result<Ended> {
+fn never(cmd: &Cmd) -> io::Result<Ran> {
     panic!("{cmd} was not expected to run")
 }
 
@@ -115,7 +116,7 @@ fn a_failed_download_leaves_bin_untouched_and_names_curl_as_the_fix() {
     let asset = expected_asset(gitleaks, "linux", "x86_64");
     let url = expected_url(gitleaks, &asset);
     let fix = curl_fix(&asset, &url);
-    let cases: [(&str, io::Result<Ended>); 4] = [
+    let cases: [(&str, io::Result<Ran>); 4] = [
         (
             "failed: curl: (22) The requested URL returned error: 404",
             exited(
@@ -137,7 +138,7 @@ fn a_failed_download_leaves_bin_untouched_and_names_curl_as_the_fix() {
         ),
         (
             "did not finish within 21 min, so it was stopped",
-            Ok(Ended::TimedOut),
+            Ok(Ran::timed_out()),
         ),
         (
             "failed: could not run curl: No such file or directory",
@@ -246,7 +247,7 @@ fn a_winget_past_its_limit_says_so_and_how_to_see_why() {
         os: "windows",
         ..linux(Path::new("unused"), true)
     };
-    let (ok, _, printed) = install_with(lefthook, &machine, b"", &mut |_| Ok(Ended::TimedOut));
+    let (ok, _, printed) = install_with(lefthook, &machine, b"", &mut |_| Ok(Ran::timed_out()));
     assert!(!ok);
     assert_eq!(
         printed,
@@ -327,7 +328,7 @@ fn real_tar_gz(dir: &Path, member: &str) -> PathBuf {
         crate::process::TEST_TIMEOUT,
     );
     let made = crate::process::run_quiet(&tar, &src).expect("tar runs");
-    assert!(made.success, "{tar}: {}", made.stderr);
+    assert!(made.success(), "{tar}: {}", made.stderr);
     archive
 }
 

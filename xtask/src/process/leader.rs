@@ -20,15 +20,28 @@
 //! leader.
 //!
 //! Not covered: a command whose start returned in xtask but whose `+<group>` write had not happened
-//! when xtask died (a few instructions after `spawn`), a process that left its group (`setsid`),
-//! and xtask dying while its leader is dead and not yet replaced. Ctrl-Z stops xtask but not its
-//! commands.
+//! when xtask died (a few instructions after `spawn`), a process that left its group (any
+//! `setsid` or `setpgid`: cargo-mutants starts every cargo and nextest child in a group of its own,
+//! its src/process/unix.rs:37 in 27.1.0, and cargo-nextest 0.9.148 each test, nextest-runner
+//! 0.126.0's src/runner/executor.rs:433 and :828), and xtask dying while its leader is dead and
+//! not yet replaced. Ctrl-Z stops xtask but not its commands.
+//!
+//! Where this differs from the task brief (R3b), which puts each child under a leader of its own
+//! that starts it and sends SIGKILL, as `buildtime-leader.mjs` does for each tool, and the windows
+//! each difference opens:
+//! - One shared leader beside the commands, told about each group over the pipe after `spawn`
+//!   returns, instead of a leader that starts its command. Window: from the command's start to
+//!   its `+<group>` write, xtask dying leaves the command running. It costs one process per
+//!   xtask (about 6.6 ms) instead of one per command.
+//! - A dead leader is noticed only when the next command starts and its write fails. Window:
+//!   every command running between the leader's death and that start has no cover if xtask dies.
+//! - SIGTERM first, then SIGKILL after `KILL_GRACE`, instead of SIGKILL at once, so a command can
+//!   clean up. Window: a command that ignores SIGTERM outlives xtask by up to `KILL_GRACE`.
 
-use super::running::KILL_GRACE;
+use super::running::{KILL_GRACE, POLL};
 use super::spawn;
-use super::unix::signal;
-use nix::errno::Errno;
-use nix::sys::signal::{Signal, killpg};
+use super::unix::{empty, signal};
+use nix::sys::signal::Signal;
 use nix::unistd::Pid;
 use std::collections::BTreeSet;
 use std::io::{self, BufRead, Write};
@@ -43,21 +56,19 @@ use std::time::Duration;
 /// clap spells this way; `the_leader_subcommand_parses` ties them.
 pub(super) const LEADER_SUBCOMMAND: &str = "process-leader";
 
-/// How often a stopping leader checks whether the groups it signalled are empty.
-const POLL: Duration = Duration::from_millis(50);
-
 /// The leader of this xtask process, once a command has started.
-struct Leader {
+pub(super) struct Leader {
     /// The write end of the leader's stdin. It closes when xtask exits, or when a dead leader is
     /// replaced.
     pipe: io::PipeWriter,
-    /// Waited for only once replaced: a live leader outlives xtask.
-    child: Child,
+    /// Waited for only once replaced: a live leader outlives xtask. `test_mode.rs` kills it to
+    /// test its replacement.
+    pub(super) child: Child,
     /// The groups registered and not released, which a new leader is told when this one dies.
     groups: BTreeSet<Pid>,
 }
 
-static LEADER: Mutex<Option<Leader>> = Mutex::new(None);
+pub(super) static LEADER: Mutex<Option<Leader>> = Mutex::new(None);
 
 impl Leader {
     /// A new leader, told every group of this one, which then gets SIGKILL and is reaped. Killed,
@@ -101,7 +112,7 @@ pub(super) fn register(group: Pid) -> io::Result<()> {
         }
         Err(start_error) => {
             leader.groups.remove(&group);
-            // Not the errors' kind: callers read `NotFound` and `TimedOut` as their own.
+            // Not the errors' kind: a caller reads `NotFound` as its own program missing.
             Err(io::Error::other(format!(
                 "could not tell xtask's process leader (pid {}) about process group {group} \
                  ({error}), nor start a new one, so the command was stopped: {start_error}",
@@ -118,16 +129,6 @@ pub(super) fn release(group: Pid) {
     if let Some(leader) = slot.as_mut() {
         leader.groups.remove(&group);
         drop(leader.pipe.write_all(format!("-{group}\n").as_bytes()));
-    }
-}
-
-/// Kills the leader with SIGKILL and reaps it, leaving it in place, so the next command finds it
-/// dead. For the hidden `process-test restarted-leader` mode and the tests only.
-pub(super) fn kill_for_test() {
-    let mut slot = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(leader) = slot.as_mut() {
-        drop(leader.child.kill());
-        drop(leader.child.wait());
     }
 }
 
@@ -197,6 +198,12 @@ fn leader_exe() -> io::Result<PathBuf> {
 /// `target/<profile>/deps/xtask-<hash>`, which is not xtask, so the leader is the xtask binary
 /// cargo builds in `target/<profile>/` for the tests in `xtask/tests/`. Found from the test
 /// binary's own path, so a copied tree (cargo-mutants) finds its own.
+///
+/// So the unit tests run the leader of whatever xtask binary sits next to `deps/`, not of the
+/// code under test. Two worktrees that share one `CARGO_TARGET_DIR` share that binary (cargo
+/// hashes a path package from the workspace root, the same in both), so a build in one can swap
+/// the leader the other's tests run, and cargo, finding it fresh, keeps it. `cargo clean -p
+/// xtask` in the worktree that tests fixes it; one target dir per worktree (AGENTS.md) avoids it.
 #[cfg(test)]
 fn leader_exe() -> io::Result<PathBuf> {
     let harness = own_binary(std::env::current_exe())?;
@@ -244,8 +251,9 @@ fn registered(input: impl BufRead) -> BTreeSet<i32> {
     groups
 }
 
-/// SIGTERM to each of `groups`, then, after up to `grace` (checked every `POLL`) for them to
-/// empty, SIGKILL to each. The leader passes `KILL_GRACE`; tests pass a shorter one.
+/// SIGTERM to each of `groups`, then, after up to `grace` (checked every `POLL`, as a run checks
+/// its group) for them to empty, SIGKILL to each. The leader passes `KILL_GRACE`; tests pass a
+/// shorter one.
 fn stop(groups: &BTreeSet<i32>, grace: Duration) {
     let groups: Vec<Pid> = groups.iter().map(|group| Pid::from_raw(*group)).collect();
     for group in &groups {
@@ -265,11 +273,6 @@ fn stop(groups: &BTreeSet<i32>, grace: Duration) {
     for group in &groups {
         drop(signal(*group, Signal::SIGKILL));
     }
-}
-
-/// Whether no process is left in `group`. `EPERM` means one is, owned by another user.
-fn empty(group: Pid) -> bool {
-    killpg(group, None) == Err(Errno::ESRCH)
 }
 
 #[cfg(test)]

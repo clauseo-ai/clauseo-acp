@@ -8,7 +8,7 @@ mod install;
 mod version;
 
 use crate::output::Printer;
-use crate::process::{self, Cmd, Ended, Output, Program};
+use crate::process::{self, Cmd, Output, Program, Ran, Status, TimeoutFix};
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -216,7 +216,7 @@ impl Machine<'static> {
 }
 
 /// Runs a command in a directory, with where its output goes. Production passes `process::run`.
-pub(crate) type Runner<'a> = dyn FnMut(&Cmd, &Path, Output) -> io::Result<Ended> + 'a;
+pub(crate) type Runner<'a> = dyn FnMut(&Cmd, &Path, Output) -> io::Result<Ran> + 'a;
 
 /// Installs each cargo tool, then checks each binary's version and, with `binaries`, installs it
 /// when that check fails and checks again. Continues past failures; fails if any failed. Runs in
@@ -298,8 +298,10 @@ fn setup_binary<W: Write>(
 fn check_version(binary: &Binary, root: &Path, runner: &mut Runner<'_>) -> VersionCheck {
     let cmd = version::version_cmd(binary);
     let ran = match runner(&cmd, root, Output::Quiet) {
-        Ok(Ended::Exited(quiet)) => Ok((quiet.success, quiet.stdout, quiet.stderr)),
-        Ok(Ended::TimedOut) => Ok((
+        Ok(Ran {
+            status: Status::TimedOut,
+            ..
+        }) => Ok((
             false,
             String::new(),
             format!(
@@ -307,6 +309,7 @@ fn check_version(binary: &Binary, root: &Path, runner: &mut Runner<'_>) -> Versi
                 process::limit_text(cmd.timeout)
             ),
         )),
+        Ok(quiet) => Ok((quiet.success(), quiet.stdout, quiet.stderr)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             Err(format!("`{cmd}` could not start: {error}"))
         }
@@ -330,20 +333,20 @@ fn install_tool<W: Write>(
     out.note(&cmd);
     let fix = format!("run `{cmd}` to reproduce");
     match runner(&cmd, root, Output::Inherit) {
-        Ok(Ended::Exited(ran)) if ran.success => true,
-        Ok(Ended::Exited(_)) => {
-            out.failure(&format!("installing {} failed", tool.name), &fix);
-            false
-        }
-        Ok(Ended::TimedOut) => {
+        Ok(ran) if ran.success() => true,
+        Ok(ran) if ran.status == Status::TimedOut => {
             out.failure(
                 &format!(
                     "installing {} did not finish within {}, so it was stopped",
                     tool.name,
                     process::limit_text(cmd.timeout)
                 ),
-                &process::timeout_fix(&cmd),
+                &TimeoutFix::of(&cmd).to_string(),
             );
+            false
+        }
+        Ok(_) => {
+            out.failure(&format!("installing {} failed", tool.name), &fix);
             false
         }
         Err(error) => {

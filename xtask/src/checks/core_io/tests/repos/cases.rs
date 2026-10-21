@@ -1,25 +1,25 @@
 //! The core-io planted cases about files beside the crate's `clippy.toml`: other clippy configs,
 //! the manifests' lint levels and the cargo config's rustflags, aliases and `[env]`.
 
-use super::{ARCHITECTURE, Repo, expected, run_repo};
-use crate::checks::planted::Repo as ScratchRepo;
+use super::{ARCHITECTURE, Layout, expected, run_repo};
+use crate::checks::planted::Repo;
 
 /// The repo with the generated `crates/protocol/clippy.toml` and `files`.
-fn good_crate_and(case: &str, files: &[(&str, &str)]) -> ScratchRepo {
+fn good_crate_and(case: &str, files: &[(&str, &str)]) -> Repo {
     let text = expected(case).text;
     run_repo(
         case,
-        &Repo {
+        &Layout {
             crate_file: Some(&text),
             files,
-            ..Repo::default()
+            ..Layout::default()
         },
     )
 }
 
 /// The review's case: a `.clippy.toml` beside a correct `clippy.toml`, which clippy reads
 /// instead.
-pub(in crate::checks::core_io) fn dot_clippy_toml_beside_the_crate_file() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn dot_clippy_toml_beside_the_crate_file() -> Repo {
     good_crate_and(
         "dot-clippy-toml-beside",
         &[(
@@ -29,23 +29,23 @@ pub(in crate::checks::core_io) fn dot_clippy_toml_beside_the_crate_file() -> Scr
     )
 }
 
-pub(in crate::checks::core_io) fn dot_clippy_toml_at_the_root() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn dot_clippy_toml_at_the_root() -> Repo {
     good_crate_and(
         "dot-clippy-toml-root",
         &[(".clippy.toml", "msrv = \"1.99\"\n")],
     )
 }
 
-pub(in crate::checks::core_io) fn clippy_toml_in_crates() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn clippy_toml_in_crates() -> Repo {
     good_crate_and("clippy-toml-in-crates", &[("crates/clippy.toml", "")])
 }
 
-pub(in crate::checks::core_io) fn clippy_toml_in_xtask() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn clippy_toml_in_xtask() -> Repo {
     good_crate_and("clippy-toml-in-xtask", &[("xtask/clippy.toml", "")])
 }
 
 /// `clauseo-extra` has no row, so its own file would hide the root bans from it.
-pub(in crate::checks::core_io) fn clippy_toml_of_a_crate_without_a_row() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn clippy_toml_of_a_crate_without_a_row() -> Repo {
     good_crate_and(
         "clippy-toml-without-row",
         &[("crates/extra/clippy.toml", "msrv = \"1.99\"\n")],
@@ -53,19 +53,19 @@ pub(in crate::checks::core_io) fn clippy_toml_of_a_crate_without_a_row() -> Scra
 }
 
 /// A row with `clock` alone gets the root file; a file of its own would hide the clock bans.
-pub(in crate::checks::core_io) fn clippy_toml_of_a_clock_only_crate() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn clippy_toml_of_a_clock_only_crate() -> Repo {
     let architecture = ARCHITECTURE.replace("tauri, fs, process", "clock");
     run_repo(
         "clippy-toml-clock-only",
-        &Repo {
+        &Layout {
             crate_file: Some("too-many-lines-threshold = 120\n"),
             architecture: Some(&architecture),
-            ..Repo::default()
+            ..Layout::default()
         },
     )
 }
 
-pub(in crate::checks::core_io) fn crate_lints_not_inherited() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn crate_lints_not_inherited() -> Repo {
     good_crate_and(
         "crate-lints-missing",
         &[(
@@ -76,7 +76,7 @@ pub(in crate::checks::core_io) fn crate_lints_not_inherited() -> ScratchRepo {
 }
 
 /// The review's case: the crate's own `[lints.clippy]` turns a ban off.
-pub(in crate::checks::core_io) fn crate_lints_of_its_own() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn crate_lints_of_its_own() -> Repo {
     good_crate_and(
         "crate-lints-own",
         &[(
@@ -88,24 +88,24 @@ pub(in crate::checks::core_io) fn crate_lints_of_its_own() -> ScratchRepo {
 }
 
 /// A clock-only crate's own `[lints.clippy]` would turn the root's clock bans off.
-pub(in crate::checks::core_io) fn clock_only_crate_lints_of_its_own() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn clock_only_crate_lints_of_its_own() -> Repo {
     let architecture = ARCHITECTURE.replace("tauri, fs, process", "clock");
     run_repo(
         "clock-only-lints-own",
-        &Repo {
+        &Layout {
             architecture: Some(&architecture),
             files: &[(
                 "crates/protocol/Cargo.toml",
                 "[package]\nname = \"clauseo-protocol\"\n\n[lints.clippy]\n\
                  disallowed_methods = \"allow\"\n",
             )],
-            ..Repo::default()
+            ..Layout::default()
         },
     )
 }
 
 /// `clauseo-extra` has no row; it still inherits the workspace lints.
-pub(in crate::checks::core_io) fn crate_without_a_row_lints_not_inherited() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn crate_without_a_row_lints_not_inherited() -> Repo {
     good_crate_and(
         "row-less-lints-missing",
         &[(
@@ -117,7 +117,7 @@ pub(in crate::checks::core_io) fn crate_without_a_row_lints_not_inherited() -> S
 
 /// The review's case: a legacy `.cargo/config` that silences a ban beside a clean
 /// `.cargo/config.toml`.
-pub(in crate::checks::core_io) fn legacy_cargo_config() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn legacy_cargo_config() -> Repo {
     good_crate_and(
         "legacy-cargo-config",
         &[
@@ -130,7 +130,7 @@ pub(in crate::checks::core_io) fn legacy_cargo_config() -> ScratchRepo {
     )
 }
 
-pub(in crate::checks::core_io) fn rustflags_in_build() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn rustflags_in_build() -> Repo {
     good_crate_and(
         "rustflags-build",
         &[(
@@ -140,7 +140,7 @@ pub(in crate::checks::core_io) fn rustflags_in_build() -> ScratchRepo {
     )
 }
 
-pub(in crate::checks::core_io) fn rustflags_in_a_target() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn rustflags_in_a_target() -> Repo {
     good_crate_and(
         "rustflags-target",
         &[(
@@ -151,7 +151,7 @@ pub(in crate::checks::core_io) fn rustflags_in_a_target() -> ScratchRepo {
 }
 
 /// The review's case: flags that silence the bans without naming them.
-pub(in crate::checks::core_io) fn rustflags_that_cap_lints() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn rustflags_that_cap_lints() -> Repo {
     good_crate_and(
         "rustflags-cap-lints",
         &[(
@@ -163,7 +163,7 @@ pub(in crate::checks::core_io) fn rustflags_that_cap_lints() -> ScratchRepo {
 
 /// The review's case: `CLIPPY_CONF_DIR` set for clippy-driver through `[env]`, and another
 /// `CLIPPY_` entry in table form.
-pub(in crate::checks::core_io) fn clippy_env_in_cargo_config() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn clippy_env_in_cargo_config() -> Repo {
     good_crate_and(
         "clippy-env",
         &[(
@@ -175,7 +175,7 @@ pub(in crate::checks::core_io) fn clippy_env_in_cargo_config() -> ScratchRepo {
 }
 
 /// The reviewer's case: `CLIPPY_CONF_DIR` in mixed case, which Windows reads as the same name.
-pub(in crate::checks::core_io) fn clippy_env_in_another_case() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn clippy_env_in_another_case() -> Repo {
     good_crate_and(
         "clippy-env-case",
         &[(".cargo/config.toml", "[env]\nClippy_Conf_Dir = \"/\"\n")],
@@ -183,7 +183,7 @@ pub(in crate::checks::core_io) fn clippy_env_in_another_case() -> ScratchRepo {
 }
 
 /// `rustflags` as a dotted key at the top of the file, outside any table header.
-pub(in crate::checks::core_io) fn rustflags_as_a_dotted_key() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn rustflags_as_a_dotted_key() -> Repo {
     good_crate_and(
         "rustflags-dotted",
         &[(
@@ -194,7 +194,7 @@ pub(in crate::checks::core_io) fn rustflags_as_a_dotted_key() -> ScratchRepo {
 }
 
 /// `rustflags` inside an inline table.
-pub(in crate::checks::core_io) fn rustflags_in_an_inline_table() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn rustflags_in_an_inline_table() -> Repo {
     good_crate_and(
         "rustflags-inline",
         &[(
@@ -205,7 +205,7 @@ pub(in crate::checks::core_io) fn rustflags_in_an_inline_table() -> ScratchRepo 
 }
 
 /// A compiler key as a dotted key at the top of the file.
-pub(in crate::checks::core_io) fn compiler_key_as_a_dotted_key() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn compiler_key_as_a_dotted_key() -> Repo {
     good_crate_and(
         "rustc-wrapper-dotted",
         &[(".cargo/config.toml", "build.rustc-wrapper = \"./w.sh\"\n")],
@@ -213,7 +213,7 @@ pub(in crate::checks::core_io) fn compiler_key_as_a_dotted_key() -> ScratchRepo 
 }
 
 /// An alias as a dotted key at the top of the file.
-pub(in crate::checks::core_io) fn alias_as_a_dotted_key() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn alias_as_a_dotted_key() -> Repo {
     good_crate_and(
         "alias-dotted",
         &[(
@@ -224,7 +224,7 @@ pub(in crate::checks::core_io) fn alias_as_a_dotted_key() -> ScratchRepo {
 }
 
 /// An `[env]` entry in an inline table.
-pub(in crate::checks::core_io) fn clippy_env_in_an_inline_table() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn clippy_env_in_an_inline_table() -> Repo {
     good_crate_and(
         "clippy-env-inline",
         &[(".cargo/config.toml", "env = { CLIPPY_CONF_DIR = \"/\" }\n")],
@@ -232,7 +232,7 @@ pub(in crate::checks::core_io) fn clippy_env_in_an_inline_table() -> ScratchRepo
 }
 
 /// `workspace = false` is a `[lints]` table that does not inherit.
-pub(in crate::checks::core_io) fn crate_lints_workspace_false() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn crate_lints_workspace_false() -> Repo {
     good_crate_and(
         "crate-lints-false",
         &[(
@@ -244,11 +244,11 @@ pub(in crate::checks::core_io) fn crate_lints_workspace_false() -> ScratchRepo {
 
 /// A clippy config in another case: on a filesystem that ignores case, as macOS and Windows
 /// have by default, clippy opens it as `clippy.toml`.
-pub(in crate::checks::core_io) fn clippy_toml_in_another_case() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn clippy_toml_in_another_case() -> Repo {
     good_crate_and("clippy-toml-case", &[("crates/Clippy.toml", "")])
 }
 
-pub(in crate::checks::core_io) fn dot_clippy_toml_in_another_case() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn dot_clippy_toml_in_another_case() -> Repo {
     good_crate_and(
         "dot-clippy-toml-case",
         &[(".CLIPPY.toml", "msrv = \"1.99\"\n")],
@@ -256,7 +256,7 @@ pub(in crate::checks::core_io) fn dot_clippy_toml_in_another_case() -> ScratchRe
 }
 
 /// The review's case: `include` loads a file core-io does not read.
-pub(in crate::checks::core_io) fn include_in_cargo_config() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn include_in_cargo_config() -> Repo {
     good_crate_and(
         "include",
         &[
@@ -273,7 +273,7 @@ pub(in crate::checks::core_io) fn include_in_cargo_config() -> ScratchRepo {
 }
 
 /// The review's case: a wrapper that could add `--cap-lints allow`, and the other compiler keys.
-pub(in crate::checks::core_io) fn compiler_keys_in_cargo_config() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn compiler_keys_in_cargo_config() -> Repo {
     good_crate_and(
         "rustc-wrapper",
         &[(
@@ -286,7 +286,7 @@ pub(in crate::checks::core_io) fn compiler_keys_in_cargo_config() -> ScratchRepo
 
 /// The review's case: an alias that turns clippy into `cargo check`, beside the repo's own
 /// `xtask` alias.
-pub(in crate::checks::core_io) fn alias_of_a_command_xtask_runs() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn alias_of_a_command_xtask_runs() -> Repo {
     good_crate_and(
         "alias-clippy",
         &[(
@@ -298,7 +298,7 @@ pub(in crate::checks::core_io) fn alias_of_a_command_xtask_runs() -> ScratchRepo
 
 /// A cargo config with aliases, an `[env]` entry and a build setting passes. cargo ignores an
 /// alias named after a built-in command, such as `check`.
-pub(in crate::checks::core_io) fn cargo_config_without_lint_settings() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn cargo_config_without_lint_settings() -> Repo {
     good_crate_and(
         "cargo-config-clean",
         &[(

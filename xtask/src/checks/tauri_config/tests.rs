@@ -1,10 +1,10 @@
 //! Unit tests for the `tauri-config` check: only what the planted cases cannot express (a key in
 //! the wrong object, the CSP and `is_url` edge cases, a missing windows array, the platform config
-//! names). Every other rule is a planted case in `tests/planted.rs`, built in `tests/cases.rs`.
+//! names). Every other rule is a planted case in `tests/planted.rs`, built in `tests/repos.rs`.
 
-mod cases;
 mod linked;
 pub(super) mod planted;
+mod repos;
 
 use super::*;
 

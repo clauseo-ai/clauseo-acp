@@ -3,15 +3,19 @@
 //! One file per check in `src/checks/`, registered in `ALL` below. `steps::plan` runs every entry
 //! after the tool steps and before nextest.
 //!
-//! To add a check, copy `checks/budgets.rs` with `checks/budgets/tests.rs` and
-//! `checks/budgets/tests/planted.rs`, the smallest check in the full shape: a `CHECK` whose
-//! `place` comes from the consts its code reads, a `run` that counts what it inspected, and a
-//! `cases!` list of planted cases that `CHECK.planted` points at. Then add it to `ALL`. Its fix
-//! lines are a `Fix` enum in `<check>/fix.rs`, one variant per failure kind with the text written
-//! once in `Display`, wrapped in `crate::fix::Fix`. `<check>/fix/tests.rs` pins every variant's
-//! text with `fix_texts!` (in `crate::fix::tests`), which writes one `match` and numbers its arms.
-//! A new variant fails to compile until it has an arm; then `assert_texts` fails, naming the arm,
-//! until that arm has exactly one sample, which must print the arm's text.
+//! To add a check, copy `checks/budgets.rs` with `checks/budgets/tests.rs`,
+//! `checks/budgets/tests/planted.rs` and `checks/budgets/tests/repos.rs`, the smallest check in
+//! the full shape: a `CHECK` whose `place` comes from the consts its code reads, a `run` that
+//! counts what it inspected, and a `cases!` list of planted cases that `CHECK.planted` points at.
+//! Every check keeps that list in `<check>/tests/planted.rs`, each case's failures built with
+//! `planted::fails` from the check's `Fix` variants, and the builders of its scratch repos in
+//! `<check>/tests/repos.rs` (`Repo::files` writes a repo's files); `planted.rs` says how. Then
+//! add it to `ALL`. Its fix lines are a `Fix` enum in `<check>/fix.rs`, one variant per failure
+//! kind with the text written once in `Display`, wrapped in `crate::fix::Fix`.
+//! `<check>/fix/tests.rs` pins every variant's text with `fix_texts!` (in `crate::fix::tests`),
+//! which writes one `match` and numbers its arms. A new variant fails to compile until it has an
+//! arm; then `assert_texts` fails, naming the arm, until that arm has exactly one sample, which
+//! must print the arm's text.
 //!
 //! Every check counts what it inspected. `StaticCheck::judge` is the one place that judges a run:
 //! it fails on any violation or failure, and on a count of zero, since a check that inspected

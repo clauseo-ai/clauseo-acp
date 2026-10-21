@@ -1,6 +1,6 @@
 //! The builders of the tauri-config planted cases with a symlink to a folder in the desktop crate.
 
-use super::cases::tree_case;
+use super::repos::tree_case;
 use crate::checks::planted::Repo;
 use crate::scratch::Scratch;
 

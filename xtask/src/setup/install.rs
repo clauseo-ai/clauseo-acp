@@ -4,7 +4,7 @@
 
 use super::{Binary, Machine, Packing, Runner};
 use crate::output::Printer;
-use crate::process::{self, Cmd, Ended, Output, Program};
+use crate::process::{self, Cmd, Output, Program, Status, TimeoutFix};
 use crate::write::Staging;
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
@@ -169,16 +169,16 @@ fn run_winget<W: Write>(
     ));
     let fix = format!("run `{cmd}` by hand and check its output, then run cargo xtask setup again");
     let (message, fix) = match runner(cmd, root, Output::Inherit) {
-        Ok(Ended::Exited(ran)) if ran.success => return true,
-        Ok(Ended::Exited(_)) => (format!("installing {} failed", binary.name), fix),
-        Ok(Ended::TimedOut) => (
+        Ok(ran) if ran.success() => return true,
+        Ok(ran) if ran.status == Status::TimedOut => (
             format!(
                 "installing {} did not finish within {}, so it was stopped",
                 binary.name,
                 process::limit_text(cmd.timeout)
             ),
-            process::timeout_fix(cmd),
+            TimeoutFix::of(cmd).to_string(),
         ),
+        Ok(_) => (format!("installing {} failed", binary.name), fix),
         Err(error) => (
             format!("could not run winget to install {}: {error}", binary.name),
             fix,
@@ -363,18 +363,18 @@ fn run_step(
     fix: &str,
 ) -> Result<(), Failure> {
     let message = match runner(cmd, dir, Output::Quiet) {
-        Ok(Ended::Exited(ran)) if ran.success => return Ok(()),
-        Ok(Ended::Exited(ran)) => {
+        Ok(ran) if ran.success() => return Ok(()),
+        Ok(ran) if ran.status == Status::TimedOut => format!(
+            "{what} did not finish within {}, so it was stopped",
+            process::limit_text(cmd.timeout)
+        ),
+        Ok(ran) => {
             let said = said_of(cmd, &ran.stderr);
             format!(
                 "{what} failed: {}",
                 if said.is_empty() { "no output" } else { &said }
             )
         }
-        Ok(Ended::TimedOut) => format!(
-            "{what} did not finish within {}, so it was stopped",
-            process::limit_text(cmd.timeout)
-        ),
         Err(error) => format!(
             "{what} failed: could not run {}: {error}",
             cmd.program.name()

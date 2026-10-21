@@ -1,24 +1,13 @@
-//! The builders of the planted cases of the capabilities check: each makes a scratch tree (or
-//! a context) that the planted harness runs the check on. See `tests/planted.rs`.
+//! The builders of the capabilities planted cases: each makes a scratch tree (or a context) that
+//! the planted harness runs the check on. See `tests/planted.rs`.
 
 use super::*;
+use crate::checks::planted::{self, Repo};
 
-/// A scratch repo named after `case`, with each `(path, text)` of `files` written into it.
-fn repo(case: &str, files: &[(&str, &str)]) -> Scratch {
-    let dir = Scratch::new(&format!("planted-capabilities-{case}"));
-    for (path, text) in files {
-        let full = dir.join(path);
-        Scratch::create_dir_all(full.parent().expect("a file has a parent"))
-            .expect("create the dirs");
-        Scratch::write(full, text).expect("write the file");
-    }
-    dir
-}
-
-/// The scratch repo `repo(case, files)`, with the desktop crate at its usual
-/// place.
+/// A scratch repo named after `case`, whose desktop crate, at its usual place, holds `files`:
+/// each `(path, text)`, with the parent folders made.
 fn run_on(case: &str, files: &[(&str, &str)]) -> Repo {
-    Repo::desktop(repo(case, files))
+    Repo::desktop(planted::scratch(&format!("capabilities-{case}"), files))
 }
 
 pub(super) fn clean_capability() -> Repo {
@@ -33,8 +22,7 @@ pub(super) fn clean_capability() -> Repo {
 }
 
 pub(super) fn desktop_crate_missing() -> Repo {
-    let dir = Scratch::new("planted-capabilities-desktop-missing");
-    Repo::new(dir)
+    Repo::files::<&str>("capabilities-desktop-missing", &[])
 }
 
 pub(super) fn folder_missing() -> Repo {
@@ -42,7 +30,7 @@ pub(super) fn folder_missing() -> Repo {
 }
 
 pub(super) fn empty_folder() -> Repo {
-    let dir = Scratch::new("planted-capabilities-empty-folder");
+    let dir = planted::scratch::<&str>("capabilities-empty-folder", &[]);
     Scratch::create_dir_all(dir.join("crates/desktop/capabilities")).expect("create the folder");
     Repo::desktop(dir)
 }
@@ -210,7 +198,7 @@ pub(super) fn nested_subfolder() -> Repo {
 /// A Finder `.DS_Store` and a Vim backup `main.json~` sit beside a clean `main.json`: neither is
 /// read, so the check passes on the one file it inspects.
 pub(super) fn other_extensions() -> Repo {
-    let dir = repo("other-extensions", &[(PATH, CLEAN)]);
+    let dir = planted::scratch("capabilities-other-extensions", &[(PATH, CLEAN)]);
     let caps = dir.join("crates/desktop/capabilities");
     Scratch::write(
         caps.join(".DS_Store"),
@@ -223,8 +211,8 @@ pub(super) fn other_extensions() -> Repo {
 
 /// The desktop crate is found by its package name at `apps/shell`, not at `crates/desktop`.
 pub(super) fn moved_crate() -> Repo {
-    let dir = repo(
-        "moved-crate",
+    let dir = planted::scratch(
+        "capabilities-moved-crate",
         &[(
             "apps/shell/capabilities/main.json",
             "{\n  \"permissions\": [\"core:default\"]\n}",
@@ -240,8 +228,8 @@ pub(super) fn moved_crate() -> Repo {
 /// A capability file that is not UTF-8 cannot be read as text, so it is a violation; the other
 /// file still counts as inspected.
 pub(super) fn not_utf8_capability() -> Repo {
-    let dir = repo(
-        "not-utf8",
+    let dir = planted::scratch(
+        "capabilities-not-utf8",
         &[("crates/desktop/capabilities/other.json", CLEAN)],
     );
     Scratch::write(dir.join(PATH), b"{\"identifier\": \"main\"}\xff").expect("write main.json");
@@ -381,8 +369,8 @@ pub(super) fn permission_json_escaped_and_remote() -> Repo {
 
 /// An empty capabilities folder and one clean permission file.
 pub(super) fn permissions_without_a_capability_file() -> Repo {
-    let dir = repo(
-        "permissions-alone",
+    let dir = planted::scratch(
+        "capabilities-permissions-alone",
         &[(
             "crates/desktop/permissions/app.toml",
             "[[permission]]\nidentifier = \"allow-ping\"\ncommands.allow = [\"ping\"]\n",
@@ -414,7 +402,7 @@ pub(super) fn clean_permission_file() -> Repo {
 /// it: a walk that followed it would loop.
 pub(super) fn symlink_to_a_folder_above() -> Repo {
     let clean = "{\n  \"identifier\": \"main\",\n  \"permissions\": []\n}\n";
-    let dir = repo("symlink-above", &[(PATH, clean)]);
+    let dir = planted::scratch("capabilities-symlink-above", &[(PATH, clean)]);
     Scratch::symlink_dir("..", dir.join("crates/desktop/capabilities/x")).expect("link the folder");
     Repo::desktop(dir)
 }
@@ -424,8 +412,8 @@ pub(super) fn symlink_to_a_folder_above() -> Repo {
 pub(super) fn permissions_symlink_to_a_folder() -> Repo {
     let clean = "{\n  \"identifier\": \"main\",\n  \"permissions\": []\n}\n";
     let grant = "[[set]]\nidentifier = \"all\"\npermissions = [\"fs:default\"]\n";
-    let dir = repo(
-        "permissions-symlink",
+    let dir = planted::scratch(
+        "capabilities-permissions-symlink",
         &[(PATH, clean), ("elsewhere/all.toml", grant)],
     );
     let link = dir.join("crates/desktop/permissions/sets");

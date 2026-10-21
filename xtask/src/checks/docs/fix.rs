@@ -4,17 +4,6 @@
 use super::markdown::PLANNED;
 use std::fmt;
 
-/// The text of the fix for a command that does not parse, as a literal the planted cases can
-/// `concat!`.
-macro_rules! command_fix {
-    () => {
-        "correct it to a command that `cargo xtask --help` lists (`cargo xtask <command> --help` \
-         lists its flags), or remove it"
-    };
-}
-#[cfg(test)]
-pub(super) use command_fix;
-
 /// A fix line of the docs check.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Fix {
@@ -93,7 +82,10 @@ impl fmt::Display for Fix {
                 write!(f, "create `{path}`, or correct or remove the link")
             }
             Fix::PointInside => f.write_str("point it at a file inside the repo, or remove it"),
-            Fix::CorrectCommand => f.write_str(command_fix!()),
+            Fix::CorrectCommand => f.write_str(
+                "correct it to a command that `cargo xtask --help` lists (`cargo xtask <command> \
+                 --help` lists its flags), or remove it",
+            ),
         }
     }
 }

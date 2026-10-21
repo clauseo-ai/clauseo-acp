@@ -114,31 +114,23 @@ fn check_with(
     let mut ran = Vec::new();
     let mut out = Printer::new(Vec::new(), false);
     let passed = {
-        let mut exec = |cmd: &Cmd, _: &mut dyn FnMut(&[u8])| -> io::Result<Captured> {
+        let mut exec = |cmd: &Cmd, _: &mut dyn FnMut(&[u8])| -> io::Result<Ran> {
             ran.push(cmd.to_string());
             if cmd.program == Program::Git {
                 return match git {
-                    Git::Lists(files) => Ok(Captured {
-                        success: true,
-                        output: (*files).into(),
-                    }),
-                    Git::Fails(output) => Ok(Captured {
-                        success: false,
-                        output: (*output).into(),
-                    }),
+                    Git::Lists(files) => Ok(Ran::exited(true, *files, "")),
+                    Git::Fails(output) => Ok(Ran::exited(false, *output, "")),
                     Git::CannotStart => Err(io::Error::new(io::ErrorKind::NotFound, "no git")),
                 };
             }
             if cmd.args == ["mutants", "--version"] {
                 return Ok(match version {
-                    Some(text) => Captured {
-                        success: true,
-                        output: format!("{text}\n"),
-                    },
-                    None => Captured {
-                        success: false,
-                        output: "error: no such command: `mutants`\n\nhelp: ...\n".into(),
-                    },
+                    Some(text) => Ran::exited(true, format!("{text}\n"), ""),
+                    None => Ran::exited(
+                        false,
+                        "error: no such command: `mutants`\n\nhelp: ...\n",
+                        "",
+                    ),
                 });
             }
             assert_eq!(
@@ -153,16 +145,10 @@ fn check_with(
                 Run::Writes(text, success) => {
                     Scratch::create_dir_all(root.join(OUTPUT_DIR)).expect("make mutants.out");
                     Scratch::write(root.join(OUTCOMES), text).expect("write outcomes.json");
-                    Ok(Captured {
-                        success: *success,
-                        output: "cargo-mutants output\n".into(),
-                    })
+                    Ok(Ran::exited(*success, "cargo-mutants output\n", ""))
                 }
-                Run::Nothing(success, output) => Ok(Captured {
-                    success: *success,
-                    output: (*output).into(),
-                }),
-                Run::TimesOut => Err(process::timed_out(cmd)),
+                Run::Nothing(success, output) => Ok(Ran::exited(*success, *output, "")),
+                Run::TimesOut => Ok(Ran::timed_out()),
                 Run::WritesThenTimesOut(text) => {
                     Scratch::create_dir_all(root.join(OUTPUT_DIR)).expect("make mutants.out");
                     Scratch::write(root.join(OUTCOMES), text).expect("write outcomes.json");
@@ -170,15 +156,12 @@ fn check_with(
                     Scratch::create_dir_all(new_build_dir.join("target"))
                         .expect("make a build dir");
                     Scratch::create_dir_all(&other_build_dir).expect("make another tree's");
-                    Err(process::timed_out(cmd))
+                    Ok(Ran::timed_out())
                 }
                 Run::CannotStart => Err(io::Error::new(io::ErrorKind::NotFound, "no cargo")),
                 Run::FolderForOutcomes => {
                     Scratch::create_dir_all(root.join(OUTCOMES)).expect("make a folder");
-                    Ok(Captured {
-                        success: true,
-                        output: String::new(),
-                    })
+                    Ok(Ran::exited(true, String::new(), ""))
                 }
             }
         };

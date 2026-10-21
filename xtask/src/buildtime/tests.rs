@@ -5,6 +5,7 @@ use super::report::{error_json, json_object, probe_json, table_lines, warning_li
 use super::verdict::*;
 use super::*;
 use crate::budgets::{Budget, Gate, Unit};
+use crate::process::Ran;
 use crate::scratch::Scratch;
 
 fn member(name: &str, dir: &str) -> Member {
@@ -371,13 +372,13 @@ fn the_profile_line_is_an_expectation_that_the_warm_up_decides() {
 
 #[test]
 fn rustc_version_is_the_line_rustc_prints_trimmed() {
-    let mut runner = |cmd: &Cmd, _: &Path| -> io::Result<process::Quiet> {
+    let mut runner = |cmd: &Cmd, _: &Path| -> io::Result<Ran> {
         assert_eq!(cmd.to_string(), "rustc -V");
-        Ok(process::Quiet {
-            success: true,
-            stdout: "rustc 1.90.0 (1159e78c4 2025-09-14)\n".into(),
-            stderr: String::new(),
-        })
+        Ok(Ran::exited(
+            true,
+            "rustc 1.90.0 (1159e78c4 2025-09-14)\n",
+            String::new(),
+        ))
     };
     assert_eq!(
         rustc_version(Path::new("."), &mut runner),
@@ -387,12 +388,12 @@ fn rustc_version_is_the_line_rustc_prints_trimmed() {
 
 #[test]
 fn a_rustc_version_that_exits_non_zero_is_named_with_its_stderr() {
-    let mut runner = |_: &Cmd, _: &Path| -> io::Result<process::Quiet> {
-        Ok(process::Quiet {
-            success: false,
-            stdout: String::new(),
-            stderr: "error: no toolchain installed\n".into(),
-        })
+    let mut runner = |_: &Cmd, _: &Path| -> io::Result<Ran> {
+        Ok(Ran::exited(
+            false,
+            String::new(),
+            "error: no toolchain installed\n",
+        ))
     };
     assert_eq!(
         rustc_version(Path::new("."), &mut runner),
@@ -405,8 +406,7 @@ fn a_rustc_version_that_exits_non_zero_is_named_with_its_stderr() {
 
 #[test]
 fn a_rustc_version_past_its_limit_says_so_and_how_to_see_why() {
-    let mut runner =
-        |cmd: &Cmd, _: &Path| -> io::Result<process::Quiet> { Err(process::timed_out(cmd)) };
+    let mut runner = |_: &Cmd, _: &Path| -> io::Result<Ran> { Ok(Ran::timed_out()) };
     assert_eq!(
         rustc_version(Path::new("."), &mut runner),
         Err(Failure::new(
@@ -419,7 +419,7 @@ fn a_rustc_version_past_its_limit_says_so_and_how_to_see_why() {
 #[test]
 fn a_rustc_that_cannot_start_is_named_with_the_rustup_fix() {
     let mut runner =
-        |_: &Cmd, _: &Path| -> io::Result<process::Quiet> { Err(io::Error::other("no such file")) };
+        |_: &Cmd, _: &Path| -> io::Result<Ran> { Err(io::Error::other("no such file")) };
     assert_eq!(
         rustc_version(Path::new("."), &mut runner),
         Err(Failure::new(

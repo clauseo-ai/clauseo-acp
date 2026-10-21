@@ -39,7 +39,7 @@ use super::verdict::{Failure, Outcome, ProbeResult, budget_limit, passes};
 use super::{Out, one_line, stop};
 use crate::budgets::{Budget, Unit};
 use crate::checks::pins;
-use crate::process::{self, Cmd, Program, QuietRunner};
+use crate::process::{self, Cmd, Program, QuietRunner, Status, TimeoutFix};
 use serde::Deserialize;
 use std::path::Path;
 use std::time::Duration;
@@ -273,10 +273,11 @@ pub(crate) fn measure(
     );
     let rerun = format!("run `{cmd}` to see the error");
     let quiet = match runner(&cmd, root) {
-        Ok(quiet) => quiet,
-        Err(error) if process::is_timeout(&error) => {
-            return Err(stop(diag, &error.to_string(), &process::timeout_fix(&cmd)));
+        Ok(quiet) if quiet.status == Status::TimedOut => {
+            let fix = TimeoutFix::of(&cmd).to_string();
+            return Err(stop(diag, &process::timeout_message(&cmd), &fix));
         }
+        Ok(quiet) => quiet,
         Err(error) => {
             return Err(stop(
                 diag,
@@ -287,7 +288,7 @@ pub(crate) fn measure(
     };
     let read = read_output(
         &quiet.stdout,
-        quiet.success,
+        quiet.success(),
         &cmd.to_string(),
         budgets,
         runs,
@@ -304,7 +305,7 @@ pub(crate) fn measure(
             .iter()
             .flat_map(|failure| stop(diag, &failure.message, &failure.fix))
             .collect()),
-        Read::Unreadable(_) if !quiet.success => {
+        Read::Unreadable(_) if !quiet.success() => {
             diag.captured_output(&quiet.stderr);
             Err(stop(diag, &format!("`{cmd}` failed"), &rerun))
         }

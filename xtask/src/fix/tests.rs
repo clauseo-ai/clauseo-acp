@@ -44,10 +44,21 @@ macro_rules! fix_texts {
 pub(crate) use fix_texts;
 
 /// Checks `samples` against the arms of a `fix_texts!` function, `text`, whose patterns are
-/// `arms`. Each arm must name a variant by its path, must have exactly one sample, and each
-/// sample must print the text its arm gives.
+/// `arms`, for a type that prints its text with `Display`. See `assert_shown`.
 pub(crate) fn assert_texts<F: fmt::Display>(
     samples: &[F],
+    text: fn(&F) -> (usize, String),
+    arms: &[&str],
+) {
+    assert_shown(samples, F::to_string, text, arms);
+}
+
+/// `assert_texts` for a type without `Display`: `show` gives each sample's text. Each arm must
+/// name a variant by its path, must have exactly one sample, and each sample must print the text
+/// its arm gives.
+pub(crate) fn assert_shown<F>(
+    samples: &[F],
+    show: fn(&F) -> String,
     text: fn(&F) -> (usize, String),
     arms: &[&str],
 ) {
@@ -60,14 +71,14 @@ pub(crate) fn assert_texts<F: fmt::Display>(
     let mut count = vec![0_usize; arms.len()];
     for sample in samples {
         let (index, expected) = text(sample);
+        let shown = show(sample);
         assert!(
             index < arms.len(),
-            "{sample} maps to arm {index}, but there are only {} arms",
+            "{shown} maps to arm {index}, but there are only {} arms",
             arms.len()
         );
         assert_eq!(
-            sample.to_string(),
-            expected,
+            shown, expected,
             "arm {index} (`{}`) prints the wrong text",
             arms[index]
         );

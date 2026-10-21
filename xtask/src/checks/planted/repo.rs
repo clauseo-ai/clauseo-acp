@@ -40,6 +40,11 @@ impl Repo {
         Repo::with_members(dir, vec![desktop_member()])
     }
 
+    /// The repo `scratch(case, files)` writes, for a check that reads no workspace member.
+    pub(crate) fn files<T: AsRef<[u8]>>(case: &str, files: &[(&str, T)]) -> Repo {
+        Repo::new(scratch(case, files))
+    }
+
     /// The repo in `dir` with the context `context` makes from its root, such as a failed load.
     pub(crate) fn with_context(dir: Scratch, context: impl FnOnce(&Path) -> Context) -> Repo {
         let ctx = context(&dir);
@@ -101,6 +106,22 @@ impl Repo {
     }
 }
 
+/// A scratch directory named `planted-{case}`, with each `(path, bytes)` of `files` written into
+/// it, its parent directories first. `path` is relative to the directory, with `/` between parts.
+/// Start `case` with the check, e.g. `budgets-negative-limit`, so a directory a killed run left
+/// says which case made it.
+pub(crate) fn scratch<T: AsRef<[u8]>>(case: &str, files: &[(&str, T)]) -> Scratch {
+    let dir = Scratch::new(&format!("planted-{case}"));
+    for (path, bytes) in files {
+        let full = dir.join(path);
+        if let Some(parent) = full.parent() {
+            Scratch::create_dir_all(parent).expect("create the file's parent directories");
+        }
+        Scratch::write(&full, bytes).expect("write the case's file");
+    }
+    dir
+}
+
 /// Writes the lockfile of the workspace at `root` with `cargo generate-lockfile --offline`.
 fn lock(root: &Path) {
     let lock = Cmd::new(
@@ -110,7 +131,7 @@ fn lock(root: &Path) {
     );
     let quiet = process::run_quiet(&lock, root).expect("run cargo generate-lockfile");
     assert!(
-        quiet.success,
+        quiet.success(),
         "cargo generate-lockfile failed: {}",
         quiet.stderr
     );
@@ -131,5 +152,5 @@ pub(crate) fn desktop_member() -> Member {
 pub(crate) fn git(dir: &Path, args: &[&str]) {
     let quiet = process::run_quiet(&Cmd::new(Program::Git, args, process::TEST_TIMEOUT), dir)
         .expect("run git");
-    assert!(quiet.success, "git {args:?} failed: {}", quiet.stderr);
+    assert!(quiet.success(), "git {args:?} failed: {}", quiet.stderr);
 }
