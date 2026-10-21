@@ -246,6 +246,20 @@ fn an_allow_that_names_no_lint_is_a_site() {
     assert_eq!(found(text), ["1 f allow()", "3 g allow()", "5 h allow()"]);
 }
 
+/// An impl names its items by the type it is for, through a pointer, an array and parentheses.
+#[test]
+fn an_impl_names_the_type_inside_a_pointer_an_array_or_parentheses() {
+    let text = concat!(
+        "impl T for *const A {\n    #[expect(a)]\n    fn p() {}\n}\n",
+        "impl T for [B; 2] {\n    #[expect(b)]\n    fn q() {}\n}\n",
+        "impl T for (C) {\n    #[expect(c)]\n    fn r() {}\n}\n",
+    );
+    assert_eq!(
+        found(text),
+        ["2 A::p expect a", "6 B::q expect b", "10 C::r expect c"]
+    );
+}
+
 /// `#[path]` resolves only on a module at the top level of the file, outside macro bodies.
 #[test]
 fn path_attributes_are_sites() {
