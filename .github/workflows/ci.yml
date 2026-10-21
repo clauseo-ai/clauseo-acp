@@ -103,7 +103,8 @@ jobs:
             ~/.cargo/bin
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
-          key: cargo-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('xtask/src/setup.rs') }}
+          # Its own key: the build jobs cache only nextest, and the Linux one runs on an older image.
+          key: cargo-tools-fast-lane-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('xtask/src/setup.rs') }}
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -179,7 +180,7 @@ jobs:
             ~/.cargo/bin
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
-          key: cargo-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('xtask/src/setup.rs') }}
+          key: cargo-nextest-${{ matrix.runner }}-${{ runner.arch }}-${{ hashFiles('xtask/src/setup.rs') }}
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: env.BUILD == 'true'
@@ -225,11 +226,11 @@ jobs:
         if: env.BUILD == 'true' && matrix.native
         run: cargo clippy --workspace --all-targets --target "$TARGET" -- -D warnings
 
-      # Only the tests need a pinned tool (nextest), so the app is built, uploaded and launched
-      # before the tools are installed.
-      - name: Install the pinned tools
+      # The tests need only one pinned tool, nextest, so the app is built, uploaded and launched
+      # before it is installed, and no other tool is built here.
+      - name: Install nextest at its pin
         if: env.BUILD == 'true' && matrix.native
-        run: cargo xtask setup --binaries
+        run: cargo xtask setup --only cargo-nextest
 
       - name: Test
         if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux'
