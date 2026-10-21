@@ -1,32 +1,32 @@
 //! The core-io planted cases about a held crate's target roots and build script: the forbid line
 //! in each root, and no build script.
 
-use super::{ARCHITECTURE, FORBIDDING_ROOT, LIB_ROOT, Repo, expected, run_repo};
-use crate::checks::planted::Repo as ScratchRepo;
+use super::{ARCHITECTURE, FORBIDDING_ROOT, LIB_ROOT, Layout, expected, run_repo};
+use crate::checks::planted::Repo;
 
 /// A target root without the forbid line.
 const BARE_ROOT: &str = "//! A core crate.\npub fn f() {}\n";
 
 /// The repo with the generated `crates/protocol/clippy.toml`, `files` and `targets`.
-fn held(case: &str, files: &[(&str, &str)], targets: &[(&str, &str)]) -> ScratchRepo {
+fn held(case: &str, files: &[(&str, &str)], targets: &[(&str, &str)]) -> Repo {
     let text = expected(case).text;
     run_repo(
         case,
-        &Repo {
+        &Layout {
             crate_file: Some(&text),
             files,
             targets,
-            ..Repo::default()
+            ..Layout::default()
         },
     )
 }
 
-pub(in crate::checks::core_io) fn forbid_missing_in_the_lib() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn forbid_missing_in_the_lib() -> Repo {
     held("forbid-lib", &[(LIB_ROOT, BARE_ROOT)], &[])
 }
 
 /// The review's case: the line only under `cfg_attr`, which a cfg can switch off.
-pub(in crate::checks::core_io) fn forbid_under_cfg_attr() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn forbid_under_cfg_attr() -> Repo {
     held(
         "forbid-cfg-attr",
         &[(
@@ -39,7 +39,7 @@ pub(in crate::checks::core_io) fn forbid_under_cfg_attr() -> ScratchRepo {
 }
 
 /// The lints named in the other order are not the line the fix prints.
-pub(in crate::checks::core_io) fn forbid_in_another_order() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn forbid_in_another_order() -> Repo {
     held(
         "forbid-order",
         &[(
@@ -50,14 +50,14 @@ pub(in crate::checks::core_io) fn forbid_in_another_order() -> ScratchRepo {
     )
 }
 
-pub(in crate::checks::core_io) fn forbid_missing_in_a_bin() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn forbid_missing_in_a_bin() -> Repo {
     let main = "crates/protocol/src/main.rs";
     held("forbid-bin", &[(main, BARE_ROOT)], &[("bin", main)])
 }
 
 /// The review's case: a test target, which clippy lints with `--all-targets`, turns a ban off at
 /// its top.
-pub(in crate::checks::core_io) fn forbid_missing_in_a_test() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn forbid_missing_in_a_test() -> Repo {
     let test = "crates/protocol/tests/events.rs";
     held(
         "forbid-test",
@@ -69,7 +69,7 @@ pub(in crate::checks::core_io) fn forbid_missing_in_a_test() -> ScratchRepo {
     )
 }
 
-pub(in crate::checks::core_io) fn forbid_missing_in_an_example() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn forbid_missing_in_an_example() -> Repo {
     let example = "crates/protocol/examples/demo.rs";
     held(
         "forbid-example",
@@ -78,13 +78,13 @@ pub(in crate::checks::core_io) fn forbid_missing_in_an_example() -> ScratchRepo 
     )
 }
 
-pub(in crate::checks::core_io) fn forbid_missing_in_a_bench() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn forbid_missing_in_a_bench() -> Repo {
     let bench = "crates/protocol/benches/fold.rs";
     held("forbid-bench", &[(bench, BARE_ROOT)], &[("bench", bench)])
 }
 
 /// A forbid of one lint leaves the other free to be allowed.
-pub(in crate::checks::core_io) fn forbid_naming_one_lint() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn forbid_naming_one_lint() -> Repo {
     held(
         "forbid-one-lint",
         &[(
@@ -96,7 +96,7 @@ pub(in crate::checks::core_io) fn forbid_naming_one_lint() -> ScratchRepo {
 }
 
 /// `deny` in place of `forbid`: an `allow` in the target overrides it.
-pub(in crate::checks::core_io) fn deny_in_place_of_forbid() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn deny_in_place_of_forbid() -> Repo {
     held(
         "deny-not-forbid",
         &[(
@@ -108,7 +108,7 @@ pub(in crate::checks::core_io) fn deny_in_place_of_forbid() -> ScratchRepo {
 }
 
 /// The line at the top of an inline module covers that module, not the crate.
-pub(in crate::checks::core_io) fn forbid_inside_a_module() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn forbid_inside_a_module() -> Repo {
     held(
         "forbid-in-module",
         &[(
@@ -121,7 +121,7 @@ pub(in crate::checks::core_io) fn forbid_inside_a_module() -> ScratchRepo {
 }
 
 /// The lints forbidden on one item, as an outer attribute, leave the rest of the crate free.
-pub(in crate::checks::core_io) fn forbid_as_an_outer_attribute() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn forbid_as_an_outer_attribute() -> Repo {
     held(
         "forbid-outer",
         &[(
@@ -132,7 +132,7 @@ pub(in crate::checks::core_io) fn forbid_as_an_outer_attribute() -> ScratchRepo 
     )
 }
 
-pub(in crate::checks::core_io) fn root_not_rust() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn root_not_rust() -> Repo {
     held(
         "root-not-rust",
         &[(
@@ -144,7 +144,7 @@ pub(in crate::checks::core_io) fn root_not_rust() -> ScratchRepo {
 }
 
 /// The review's case: a build script, whose `cargo::rustc-env` lines reach clippy.
-pub(in crate::checks::core_io) fn build_rs_present() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn build_rs_present() -> Repo {
     held(
         "build-rs",
         &[(
@@ -155,7 +155,7 @@ pub(in crate::checks::core_io) fn build_rs_present() -> ScratchRepo {
     )
 }
 
-pub(in crate::checks::core_io) fn package_build_set() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn package_build_set() -> Repo {
     held(
         "package-build",
         &[(
@@ -167,25 +167,25 @@ pub(in crate::checks::core_io) fn package_build_set() -> ScratchRepo {
 }
 
 /// A row with `clock` alone needs no `clippy.toml`, but its crate still carries the line.
-pub(in crate::checks::core_io) fn clock_only_crate_without_forbid() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn clock_only_crate_without_forbid() -> Repo {
     let architecture = ARCHITECTURE.replace("tauri, fs, process", "clock");
     run_repo(
         "clock-only-forbid",
-        &Repo {
+        &Layout {
             architecture: Some(&architecture),
             files: &[(LIB_ROOT, BARE_ROOT)],
-            ..Repo::default()
+            ..Layout::default()
         },
     )
 }
 
 /// The review's case: `[[bin]] path` names a file outside the repo, which cargo builds.
-pub(in crate::checks::core_io) fn root_outside_the_repo() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn root_outside_the_repo() -> Repo {
     held("root-outside", &[], &[("bin", "/elsewhere/outside.rs")])
 }
 
 /// The review's case: cargo metadata keeps the `..` of `[lib] path = "../../../x.rs"`.
-pub(in crate::checks::core_io) fn root_outside_the_repo_through_dot_dot() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn root_outside_the_repo_through_dot_dot() -> Repo {
     held(
         "root-dot-dot",
         &[],
@@ -195,7 +195,7 @@ pub(in crate::checks::core_io) fn root_outside_the_repo_through_dot_dot() -> Scr
 
 /// The review's case: a root in the repo but outside the crate's folder, whose files the cfg
 /// rule does not read.
-pub(in crate::checks::core_io) fn root_outside_the_crate() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn root_outside_the_crate() -> Repo {
     held(
         "root-outside-crate",
         &[("crates/shared/lib.rs", FORBIDDING_ROOT)],
@@ -204,7 +204,7 @@ pub(in crate::checks::core_io) fn root_outside_the_crate() -> ScratchRepo {
 }
 
 /// The line in the root of every kind of target, and no build script, passes.
-pub(in crate::checks::core_io) fn forbid_in_every_root() -> ScratchRepo {
+pub(in crate::checks::core_io::tests) fn forbid_in_every_root() -> Repo {
     let roots = [
         ("bin", "crates/protocol/src/bin/tool.rs"),
         ("test", "crates/protocol/tests/events.rs"),
