@@ -1,0 +1,170 @@
+//! Patched Tauri crates. The graph rule trusts what `tauri` and the fixed plugins pull in, so
+//! a `[patch]` or `[replace]` entry that swaps one of them for another source (a path, a git
+//! fork, another registry) could bring any plugin past it. So no entry may name a Tauri family
+//! crate: the root `Cargo.toml`'s `[patch.<source>]` and `[replace]`, and `[patch.<source>]` of
+//! `.cargo/config.toml`, which cargo also applies and prefers over the manifest's (cargo 1.99
+//! config reference, `[patch]`; the config has no `[replace]`). An entry names the package of its
+//! `package` field, else of its key; a `[replace]` key is a package ID spec (`name@1.0.0`,
+//! `name:1.0.0`, `<url>#name@1.0.0` or `<url>#1.0.0`). Names match with `_` read as `-`, in
+//! any ASCII case. Patches of other crates stay allowed: the graph rule sees what they pull in.
+//!
+//! `.cargo/config.toml` can swap a crate two more ways, and neither names the crate in the
+//! config (`config_violations`): `paths = [...]` overrides every crate whose package a listed
+//! folder holds, and source replacement (`replace-with` of a `[source.<name>]`) serves a whole
+//! source, crates.io included, from elsewhere, such as a `directory` or `local-registry` source.
+//! So any `paths`, and any `replace-with`, `directory` or `local-registry` key of a source, fails.
+//! Configs outside the repo (parent folders, `$CARGO_HOME`) are the machine's, not the repo's;
+//! the check does not read them.
+
+use super::{Fix, is_tauri};
+use crate::checks::toml_lines::{Manifest, Patch};
+use crate::checks::violation;
+use crate::violation::Violation;
+
+/// Which file the entries come from: the manifest reads `[replace]`, the cargo config does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Source {
+    /// The workspace's root `Cargo.toml`.
+    Manifest,
+    /// `.cargo/config.toml`.
+    CargoConfig,
+}
+
+/// One violation per entry in the file `path` holding `text` that patches a Tauri crate, at
+/// the entry's key.
+pub(super) fn violations(path: &str, text: &str, source: Source) -> Vec<Violation> {
+    Manifest::parse(text)
+        .patches()
+        .into_iter()
+        .filter(|patch| source == Source::Manifest || patch.table != "[replace]")
+        .filter_map(|patch| {
+            let name = patched_package(&patch);
+            let normal = name.to_ascii_lowercase().replace('_', "-");
+            is_tauri(&normal).then(|| {
+                let message = format!(
+                    "`{}` swaps in another source for the Tauri crate `{name}`, whose \
+                     dependencies the plugin rules trust",
+                    patch.table
+                );
+                violation(path, patch.line, message, Fix::Patched)
+            })
+        })
+        .collect()
+}
+
+/// The keys of a `[source.<name>]` table that swap in, or make, a source a crate can come from.
+const SOURCE_KEYS: [&str; 3] = ["replace-with", "directory", "local-registry"];
+
+/// One violation per `paths` key, and per `SOURCE_KEYS` key of a `[source.<name>]` table, in
+/// the cargo config `path` holding `text`, at its key.
+pub(super) fn config_violations(path: &str, text: &str) -> Vec<Violation> {
+    let config = Manifest::parse(text);
+    let mut found: Vec<Violation> = config
+        .table_keys(&[])
+        .into_iter()
+        .filter(|(key, _)| key == "paths")
+        .map(|(_, line)| {
+            let message = "`paths` overrides every crate that a listed folder holds, so it can \
+                           swap in another source for a Tauri crate, whose dependencies the \
+                           plugin rules trust";
+            violation(path, line, message.to_owned(), Fix::Patched)
+        })
+        .collect();
+    for (source, _) in config.table_keys(&["source"]) {
+        for (key, line) in config.table_keys(&["source", &source]) {
+            let what = match key.as_str() {
+                "replace-with" => {
+                    "swaps in another source for all of its crates, Tauri crates included,"
+                }
+                _ if SOURCE_KEYS.contains(&key.as_str()) => {
+                    "makes a source from local files, which `replace-with` can swap in for \
+                     Tauri crates,"
+                }
+                _ => continue,
+            };
+            let message = format!(
+                "`{key}` of source `{source}` {what} whose dependencies the plugin rules trust"
+            );
+            found.push(violation(path, line, message, Fix::Patched));
+        }
+    }
+    found
+}
+
+/// The package `patch` swaps: its `package` field, else the package its key names.
+fn patched_package(patch: &Patch) -> String {
+    match &patch.package {
+        Some(package) => package.clone(),
+        None if patch.table == "[replace]" => spec_name(&patch.key).to_owned(),
+        None => patch.key.clone(),
+    }
+}
+
+/// The package name in the package ID spec `spec`: the part before `@` or `:`, after a URL's
+/// `#`; for `<url>#<version>` or a bare URL, the URL's last path segment without `.git`.
+fn spec_name(spec: &str) -> &str {
+    let (url, fragment) = match spec.split_once('#') {
+        Some((url, fragment)) => (Some(url), fragment),
+        None if spec.contains("://") => (Some(spec), ""),
+        None => (None, spec),
+    };
+    let name = fragment.split(['@', ':']).next().unwrap_or(fragment);
+    match url {
+        Some(url) if name.is_empty() || name.starts_with(|c: char| c.is_ascii_digit()) => {
+            let segment = url.trim_end_matches('/').rsplit('/').next().unwrap_or(url);
+            segment.strip_suffix(".git").unwrap_or(segment)
+        }
+        _ => name,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::checks::toml_lines::Patch;
+
+    #[test]
+    fn a_spec_names_its_package() {
+        assert_eq!(spec_name("tauri:2.0.0"), "tauri");
+        assert_eq!(spec_name("tauri@2.0.0"), "tauri");
+        assert_eq!(spec_name("tauri"), "tauri");
+        let index = "https://github.com/rust-lang/crates.io-index";
+        assert_eq!(spec_name(&format!("{index}#wry@0.50.0")), "wry");
+        assert_eq!(
+            spec_name("https://github.com/tauri-apps/tauri#2.0.0"),
+            "tauri"
+        );
+        assert_eq!(spec_name("https://github.com/tauri-apps/tao.git"), "tao");
+    }
+
+    /// `local-registry` fails like `directory`, a dotted `paths` key fails, and a source that
+    /// only names a registry passes: without `replace-with` nothing comes from it.
+    #[test]
+    fn a_cargo_config_fails_each_key_that_swaps_a_source() {
+        let text = "paths = [\"a\"]\nsource.mirror.registry = \"sparse+https://example.com/\"\n\
+                    \n[source.local]\nlocal-registry = \"reg\"\n";
+        let found: Vec<String> = config_violations(".cargo/config.toml", text)
+            .iter()
+            .map(|found| found.message.clone())
+            .collect();
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found[0].starts_with("`paths` overrides"), "{found:?}");
+        assert!(
+            found[1].starts_with("`local-registry` of source `local` makes"),
+            "{found:?}"
+        );
+    }
+
+    /// A `[patch]` key is a package name, read whole; only a `[replace]` key is a spec.
+    #[test]
+    fn a_patch_key_is_a_package_name_and_a_replace_key_a_spec() {
+        let patch = |table: &str| Patch {
+            table: table.to_owned(),
+            key: "tauri:2.0.0".to_owned(),
+            package: None,
+            line: 1,
+        };
+        assert_eq!(patched_package(&patch("[patch.crates-io]")), "tauri:2.0.0");
+        assert_eq!(patched_package(&patch("[replace]")), "tauri");
+    }
+}

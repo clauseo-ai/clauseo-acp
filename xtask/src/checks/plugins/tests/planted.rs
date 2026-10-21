@@ -148,6 +148,14 @@ crate::checks::planted::cases! {
          these checks and clippy never see it",
         Fix::OutsideMembers,
     )], inspects 11 => super::repos::path_dependency_on_excluded_crate,
+    /// A path build dependency on a crate under `[workspace] exclude` fails at its line: the path
+    /// rule reads every table.
+    build_dependency_path_to_excluded_crate: Fails[fails(
+        "crates/desktop/Cargo.toml:19",
+        "`clauseo-desktop` depends on `evil` by path, but `evil` is not a workspace member, so \
+         these checks and clippy never see it",
+        Fix::OutsideMembers,
+    )], inspects 11 => super::repos::build_dependency_path_to_excluded_crate,
     /// A context with no members stops the check at the root manifest, before it inspects.
     desktop_crate_missing: Fails[fails(
         "Cargo.toml:1",
@@ -165,4 +173,82 @@ crate::checks::planted::cases! {
     /// The same optional dependency without a plugin under it passes.
     optional_desktop_feature_without_a_plugin_passes: Passes, inspects 11
         => super::repos::optional_desktop_feature_without_a_plugin_passes,
+    /// A plugin outside the set as a desktop build dependency fails at its line through the graph.
+    plugin_as_a_desktop_build_dependency: Fails[fails(
+        "crates/desktop/Cargo.toml:19",
+        "`tauri-plugin-zz` 2.0.0 is in the desktop crate's tree through `clauseo-desktop`, which \
+         is not a fixed plugin",
+        Fix::Tree,
+    )], inspects 11 => super::repos::plugin_as_a_desktop_build_dependency,
+    /// A plugin pulled in by another member's dependency fails at that member's desktop line.
+    plugin_through_another_member: Fails[fails(
+        "crates/desktop/Cargo.toml:17",
+        "`tauri-plugin-zz` 2.0.0 is in the desktop crate's tree through `mid`, which is not a \
+         fixed plugin",
+        Fix::Tree,
+    )], inspects 11 => super::repos::plugin_through_another_member,
+    /// A crate that depends on `tauri` under a name that is no `tauri-plugin-*` fails.
+    plugin_by_another_name: Fails[fails(
+        "crates/desktop/Cargo.toml:17",
+        "`evil` 0.1.0 depends on `tauri`, so it can register a Tauri plugin, and is in the \
+         desktop crate's tree through `clauseo-desktop`, which is not a fixed plugin",
+        Fix::Tree,
+    )], inspects 11 => super::repos::plugin_by_another_name,
+    /// Root `[patch.crates-io]` swaps the fixed `tauri-plugin-dialog` for a fork that pulls in
+    /// `tauri-plugin-zz`: the graph rule trusts the fixed plugin, and the patch rule fails it.
+    patched_fixed_plugin_brings_a_plugin: Fails[fails(
+        "Cargo.toml:18",
+        "`[patch.crates-io]` swaps in another source for the Tauri crate `tauri-plugin-dialog`, \
+         whose dependencies the plugin rules trust",
+        Fix::Patched,
+    )], inspects 10 => super::repos::patched_fixed_plugin_brings_a_plugin,
+    /// A `[patch.'<url>']` entry renamed with `package` fails at its key, naming the package.
+    patch_renamed_under_a_url: Fails[fails(
+        "Cargo.toml:18",
+        "`[patch.'https://github.com/tauri-apps/plugins-workspace']` swaps in another source for \
+         the Tauri crate `tauri-plugin-opener`, whose dependencies the plugin rules trust",
+        Fix::Patched,
+    )], inspects 10 => super::repos::patch_renamed_under_a_url,
+    /// A `[replace]` by package ID spec, in another case, fails at its key.
+    replace_by_package_spec: Fails[fails(
+        "Cargo.toml:18",
+        "`[replace]` swaps in another source for the Tauri crate `Tao`, whose dependencies the \
+         plugin rules trust",
+        Fix::Patched,
+    )], inspects 10 => super::repos::replace_by_package_spec,
+    /// `[patch]` in `.cargo/config.toml`, which cargo applies too, fails; its `[replace]`,
+    /// which cargo does not read there, is not reported.
+    patch_in_the_cargo_config: Fails[fails(
+        ".cargo/config.toml:2",
+        "`[patch.crates-io]` swaps in another source for the Tauri crate `tauri_runtime`, whose \
+         dependencies the plugin rules trust",
+        Fix::Patched,
+    )], inspects 10 => super::repos::patch_in_the_cargo_config,
+    /// `paths` in `.cargo/config.toml` overrides the fixed `tauri-plugin-dialog` with a fork
+    /// that pulls in `tauri-plugin-zz`: the graph rule trusts the fixed plugin, so it fails here.
+    paths_override_brings_a_plugin: Fails[fails(
+        ".cargo/config.toml:1",
+        "`paths` overrides every crate that a listed folder holds, so it can swap in another \
+         source for a Tauri crate, whose dependencies the plugin rules trust",
+        Fix::Patched,
+    )], inspects 10 => super::repos::paths_override_brings_a_plugin,
+    /// Source replacement in `.cargo/config.toml` serves crates.io from `forks`, whose
+    /// `tauri-plugin-dialog` pulls in `tauri-plugin-zz`: both keys fail.
+    source_replacement_brings_a_plugin: Fails[
+        fails(
+            ".cargo/config.toml:2",
+            "`replace-with` of source `crates-io` swaps in another source for all of its crates, \
+             Tauri crates included, whose dependencies the plugin rules trust",
+            Fix::Patched,
+        ),
+        fails(
+            ".cargo/config.toml:5",
+            "`directory` of source `forked` makes a source from local files, which \
+             `replace-with` can swap in for Tauri crates, whose dependencies the plugin rules \
+             trust",
+            Fix::Patched,
+        ),
+    ], inspects 10 => super::repos::source_replacement_brings_a_plugin,
+    /// Patches of crates outside the Tauri family pass: the graph rule sees what they bring.
+    patch_of_another_crate_passes: Passes, inspects 10 => super::repos::patch_of_another_crate_passes,
 }

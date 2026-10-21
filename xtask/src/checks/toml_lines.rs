@@ -132,6 +132,58 @@ impl<'a> Manifest<'a> {
         Some(self.line(key.span().start))
     }
 
+    /// Each key of the table at the dotted path `keys` (`["env"]` for `[env]`, a dotted
+    /// `env.X = ...` or an inline table alike) with its line, in file order. None when the path
+    /// holds no table.
+    pub(crate) fn table_keys(&self, keys: &[&str]) -> Vec<(String, u32)> {
+        let mut table = self.root();
+        for key in keys {
+            table = table.and_then(|table| table_at(table, key));
+        }
+        table
+            .into_iter()
+            .flat_map(|table| table.iter())
+            .map(|(name, _)| (name.get_ref().to_string(), self.line(name.span().start)))
+            .collect()
+    }
+
+    /// Each entry of `[patch.<source>]` and of `[replace]`, in file order: where it is, its key,
+    /// and the `package` it renames, if any.
+    pub(crate) fn patches(&self) -> Vec<Patch> {
+        let Some(root) = self.root() else {
+            return Vec::new();
+        };
+        let sources = table_at(root, "patch")
+            .into_iter()
+            .flat_map(|patch| patch.iter())
+            .filter_map(|(source, value)| {
+                let table = value.get_ref().as_table()?;
+                Some((
+                    format!("[patch.{}]", bare_or_quoted(source.get_ref())),
+                    table,
+                ))
+            });
+        let replace = table_at(root, "replace").map(|table| ("[replace]".to_owned(), table));
+        let mut found = Vec::new();
+        for (table_name, table) in sources.chain(replace) {
+            for (key, value) in table {
+                let package = value
+                    .get_ref()
+                    .as_table()
+                    .and_then(|fields| entry(fields, "package"))
+                    .and_then(|(_, package)| package.get_ref().as_str())
+                    .map(str::to_owned);
+                found.push(Patch {
+                    table: table_name.clone(),
+                    key: key.get_ref().to_string(),
+                    package,
+                    line: self.line(key.span().start),
+                });
+            }
+        }
+        found
+    }
+
     /// The root table.
     fn root(&self) -> Option<&DeTable<'a>> {
         self.doc.as_ref().map(Spanned::get_ref)
@@ -181,6 +233,33 @@ impl<'a> Manifest<'a> {
         let before = self.text.get(..offset).unwrap_or(self.text);
         checks::line_at(before.matches('\n').count())
     }
+}
+
+/// `key` as a TOML header writes it: bare when it is only ASCII letters, digits, `-` and `_`,
+/// else in single quotes.
+fn bare_or_quoted(key: &str) -> String {
+    let bare = !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if bare {
+        key.to_owned()
+    } else {
+        format!("'{key}'")
+    }
+}
+
+/// One entry of `[patch.<source>]` or `[replace]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Patch {
+    /// The table, as written in a header: `[patch.crates-io]` or `[replace]`.
+    pub table: String,
+    /// The entry's key: a package name, or a package ID spec in `[replace]`.
+    pub key: String,
+    /// The `package` field, which names the patched package in place of the key.
+    pub package: Option<String>,
+    /// The line of the key.
+    pub line: u32,
 }
 
 /// A key and its value, both with their spans.
@@ -235,6 +314,33 @@ mod tests {
         assert_eq!(manifest.workspace_feature("t", "x"), Some(16));
         assert_eq!(manifest.feature_item("tauri/devtools"), Some(19));
         assert_eq!(manifest.feature_item("other"), None);
+    }
+
+    #[test]
+    fn table_keys_and_patches_are_found_with_their_lines() {
+        let text = "[patch.crates-io]\nx = { path = \"x\" }\ny = { path = \"y\", package = \"z\" }\n\
+                    [env]\nA = \"1\"\nB.value = \"2\"\n[patch.'https://g/r']\nw.git = \"https://g/w\"\n[replace]\n\"v:1.0.0\" = { path = \"v\" }\n";
+        let manifest = Manifest::parse(text);
+        assert_eq!(
+            manifest.table_keys(&["env"]),
+            [("A".to_owned(), 5), ("B".to_owned(), 6)]
+        );
+        assert_eq!(manifest.table_keys(&["nothing"]), []);
+        let patch = |table: &str, key: &str, package: Option<&str>, line| Patch {
+            table: table.to_owned(),
+            key: key.to_owned(),
+            package: package.map(str::to_owned),
+            line,
+        };
+        assert_eq!(
+            manifest.patches(),
+            [
+                patch("[patch.crates-io]", "x", None, 2),
+                patch("[patch.crates-io]", "y", Some("z"), 3),
+                patch("[patch.'https://g/r']", "w", None, 8),
+                patch("[replace]", "v:1.0.0", None, 10),
+            ]
+        );
     }
 
     #[test]
