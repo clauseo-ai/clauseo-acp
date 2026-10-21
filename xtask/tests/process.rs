@@ -18,7 +18,7 @@
 // In a `#[cfg(test)]` module, so the helpers may panic as the tests do.
 #[cfg(test)]
 mod xtask_dies {
-    use nix::sys::signal::{Signal, killpg};
+    use nix::sys::signal::{Signal, kill, killpg};
     use nix::unistd::Pid;
     use std::io::{self, BufRead, BufReader, PipeReader, Read};
     use std::os::unix::process::{CommandExt, ExitStatusExt};
@@ -114,13 +114,17 @@ mod xtask_dies {
             .unwrap_or_else(|_| panic!("the wrapper printed no pid: {line:?}"))
     }
 
-    /// Waits for `xtask` to exit, and fails when it is still running after `SURVIVOR`.
+    /// Waits for `xtask` to exit, and fails when it is still running after `SURVIVOR`, after
+    /// SIGKILL to it (its leader then stops its command). Safe: it is not reaped yet, so its pid
+    /// is still its own.
     fn exit_of(mut xtask: Child) -> ExitStatus {
         let pid = xtask.id();
         let (sender, exited) = mpsc::channel();
         thread::spawn(move || drop(sender.send(xtask.wait())));
         let Ok(status) = exited.recv_timeout(SURVIVOR) else {
-            panic!("xtask {pid} was still running {SURVIVOR:?} after the signal");
+            let raw = Pid::from_raw(i32::try_from(pid).expect("a pid"));
+            let killed = kill(raw, Signal::SIGKILL);
+            panic!("xtask {pid} was still running after {SURVIVOR:?} (SIGKILL to it: {killed:?})");
         };
         status.expect("wait for xtask")
     }
@@ -197,8 +201,10 @@ mod xtask_dies {
                 None => command.env_remove("GIT_SSH_COMMAND"),
             };
         });
-        let ([line], _) = lines_of(BufReader::new(reader));
+        // Waited for before the line, so a door that never runs the script ends in SIGKILL to
+        // xtask rather than in a wait for a line that never comes.
         assert!(exit_of(xtask).success(), "the script exits 0");
+        let ([line], _) = lines_of(BufReader::new(reader));
         line
     }
 

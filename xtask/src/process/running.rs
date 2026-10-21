@@ -342,10 +342,9 @@ impl Running {
             if self.closed && matches!(self.phase, Phase::Draining | Phase::Killed) {
                 return;
             }
-            // Nothing says when the tree empties, so once the command has exited it is asked
-            // every `POLL`.
-            let polling = self.phase == Phase::Terminating && self.exited;
-            let wait = if polling {
+            // Nothing says when the tree empties, so while it has the grace it is asked every
+            // `POLL` (above, once the command has exited).
+            let wait = if self.phase == Phase::Terminating {
                 self.left.min(POLL)
             } else {
                 self.left

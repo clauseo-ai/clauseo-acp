@@ -236,6 +236,31 @@ fn a_leftover_that_ignores_sigterm_gets_sigkill_after_the_grace_period() {
     );
 }
 
+/// Leaves a perl in its group that ignores SIGTERM and holds the output (its stderr), then prints
+/// `hi` and exits. The perl tells the shell it ignores SIGTERM through a pipe the shell reads
+/// before it goes on, so the stop at the exit always finds it ignoring.
+const LEFTOVER_HOLDS_THE_OUTPUT: &str = r#"{ perl -e '$SIG{TERM} = "IGNORE"; $| = 1;
+print "ready\n"; sleep 300' & } | read ready; echo hi"#;
+
+#[test]
+fn a_leftover_that_ignores_sigterm_and_holds_the_output_is_killed_after_the_grace() {
+    let cmd = Cmd::new(
+        Program::Named("sh"),
+        ["-c", LEFTOVER_HOLDS_THE_OUTPUT],
+        TEST_TIMEOUT,
+    )
+    .kill_grace(SHORT_WAIT);
+    let (captured, secs) = timed(|| capture(&cmd, Path::new("."), &mut |_| {}));
+    let captured = captured.expect("the kill after the grace closes the output");
+    assert_eq!(captured.status, Status::Succeeded);
+    assert_eq!(captured.stdout, "hi\n");
+    let grace = SHORT_WAIT.as_secs_f64();
+    assert!(
+        secs >= grace,
+        "ended after {secs} s, before the {grace} s grace"
+    );
+}
+
 #[test]
 fn a_thread_that_cannot_start_stops_and_reaps_the_command() {
     let (reader, writer) = running::pipe().expect("make a pipe");
