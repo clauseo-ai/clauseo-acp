@@ -284,10 +284,10 @@ fn rustc_version(root: &Path) -> Result<String, Failure> {
 /// A printer for lines that may be redirected: stdout for the table, stderr for JSON-mode errors.
 type Out = Printer<Box<dyn Write>>;
 
-/// Runs `cargo xtask buildtime`. Takes the checkout's lock for the whole run, then runs the Rust
-/// half, the web half, or the Rust half then the web half. Returns the exit code.
-pub(crate) fn run(half: Half, runs: u32, json: bool) -> ExitCode {
-    let root = workspace::workspace_root();
+/// Runs `cargo xtask buildtime` in `root`, the checkout. Takes the checkout's lock for the whole
+/// run, then runs the Rust half, the web half, or the Rust half then the web half. Returns the exit
+/// code.
+pub(crate) fn run(root: &Path, half: Half, runs: u32, json: bool) -> ExitCode {
     let mut out: Out = Printer::new(Box::new(io::stdout()), false);
     let sink: Box<dyn Write> = if json {
         Box::new(io::stderr())
@@ -302,7 +302,7 @@ pub(crate) fn run(half: Half, runs: u32, json: bool) -> ExitCode {
         ExitCode::FAILURE
     };
 
-    let _lock = match lock::acquire(&root) {
+    let _lock = match lock::acquire(root) {
         Ok(file) => file,
         Err(failure) => {
             let errors = stop(&mut diag, &failure.message, &failure.fix);
@@ -312,7 +312,7 @@ pub(crate) fn run(half: Half, runs: u32, json: bool) -> ExitCode {
     let rust = if half == Half::Web {
         None
     } else {
-        match measure_rust(&root, runs, json, &mut out, &mut diag) {
+        match measure_rust(root, runs, json, &mut out, &mut diag) {
             Ok(rust) => Some(rust),
             Err(errors) => return stopped(&mut out, &errors),
         }
@@ -331,7 +331,7 @@ pub(crate) fn run(half: Half, runs: u32, json: bool) -> ExitCode {
     }
     let web = (half != Half::Rust).then(|| {
         let ci = check::is_ci(env::var("CI").ok().as_deref());
-        WebJson::of(&measure_web(&root, runs, ci, json, &mut out, &mut diag))
+        WebJson::of(&measure_web(root, runs, ci, json, &mut out, &mut diag))
     });
     let rust_passed = rust
         .as_ref()
