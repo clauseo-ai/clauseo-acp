@@ -75,7 +75,7 @@ fn a_node_that_cannot_start_is_named_with_the_engines_range_to_install() {
     );
     assert_eq!(
         printed,
-        "could not run `node`: no such file\n    fix: install a Node that matches >=20.5.0 \
+        "could not run `node`: no such file\n    fix: install Node 20.5.0 or later \
          (`engines.node` in ui/package.json)\n"
     );
 }

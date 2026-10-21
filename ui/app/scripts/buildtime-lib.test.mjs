@@ -103,11 +103,14 @@ describe("minNode", () => {
     expect(minNode(ui)).toBe("20.5.0");
     for (const [engines, shown] of [
       [{ node: "^20.5.0" }, '"^20.5.0"'],
+      [{ node: ">= 20.5.0" }, '">= 20.5.0"'],
+      [{ node: ">=20.5" }, '">=20.5"'],
+      [{ node: ">=20.5.0 <30" }, '">=20.5.0 <30"'],
       [{}, "undefined"],
     ]) {
       tree(ui, { "package.json": { engines } });
       expect(() => minNode(ui)).toThrow(
-        `${join(ui, "package.json")} has engines.node ${shown}; buildtime reads only ">=<major>.<minor>.<patch>"`,
+        `${join(ui, "package.json")} has engines.node ${shown}; engines.node takes only ">=<major>.<minor>.<patch>"`,
       );
     }
   });
