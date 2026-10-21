@@ -4,18 +4,13 @@
 //!
 //! xtask's tests change files only through the helpers here (`Scratch::write`,
 //! `Scratch::create_dir_all`, ...): workspace `clippy.toml` bans the std calls everywhere else, in
-//! tests too. Each helper does what the std call of the same name does, and panics when the path
-//! it changes is not inside a scratch directory.
+//! tests too, and `sys.rs` holds the only calls to them. Each helper does what the std call of the
+//! same name does, and panics when the path it changes is not inside a scratch directory.
 
-#![expect(
-    clippy::disallowed_methods,
-    reason = "xtask's tests change files only through Scratch; clippy.toml bans the std calls \
-              elsewhere"
-)]
+mod sys;
 
-use std::fs;
 #[cfg(unix)]
-use std::fs::{File, OpenOptions, Permissions};
+use std::fs::{File, Permissions};
 use std::io;
 use std::ops::Deref;
 use std::path::{Component, Path, PathBuf};
@@ -40,35 +35,35 @@ impl Scratch {
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!("{PREFIX}{name}-{}-{n}", std::process::id()));
         if dir.exists() {
-            fs::remove_dir_all(&dir).expect("clear the old scratch dir");
+            sys::remove_dir_all(&dir).expect("clear the old scratch dir");
         }
-        fs::create_dir_all(&dir).expect("create the scratch dir");
+        sys::create_dir_all(&dir).expect("create the scratch dir");
         Scratch(dir)
     }
 
     /// `fs::write` of `contents` to `path`.
     pub(crate) fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Result<()> {
-        fs::write(inside(path.as_ref()), contents)
+        sys::write(inside(path.as_ref()), contents.as_ref())
     }
 
     /// `fs::create_dir` of `path`: fails when it exists or its parent is missing.
     pub(crate) fn create_dir(path: impl AsRef<Path>) -> io::Result<()> {
-        fs::create_dir(inside(path.as_ref()))
+        sys::create_dir(inside(path.as_ref()))
     }
 
     /// `fs::create_dir_all` of `path`, with every missing parent.
     pub(crate) fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
-        fs::create_dir_all(inside(path.as_ref()))
+        sys::create_dir_all(inside(path.as_ref()))
     }
 
     /// `fs::remove_file` of `path`.
     pub(crate) fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
-        fs::remove_file(inside(path.as_ref()))
+        sys::remove_file(inside(path.as_ref()))
     }
 
     /// `fs::copy` of `from` (which may lie anywhere) to `to`.
     pub(crate) fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64> {
-        fs::copy(from, inside(to.as_ref()))
+        sys::copy(from.as_ref(), inside(to.as_ref()))
     }
 
     /// `fs::set_permissions` of `path`.
@@ -77,28 +72,28 @@ impl Scratch {
         path: impl AsRef<Path>,
         permissions: Permissions,
     ) -> io::Result<()> {
-        fs::set_permissions(inside(path.as_ref()), permissions)
+        sys::set_permissions(inside(path.as_ref()), permissions)
     }
 
     /// Opens `path` for writing without creating it, to test whether it can be written.
     #[cfg(unix)]
     pub(crate) fn open_for_writing(path: impl AsRef<Path>) -> io::Result<File> {
-        OpenOptions::new().write(true).open(inside(path.as_ref()))
+        sys::open_for_writing(inside(path.as_ref()))
     }
 
     /// A symlink at `link` to `target` (which may be relative to the link).
     #[cfg(unix)]
     pub(crate) fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
-        std::os::unix::fs::symlink(target, inside(link.as_ref()))
+        sys::symlink(target.as_ref(), inside(link.as_ref()))
     }
 
     /// A symlink at `link` to the directory `target`: `symlink` on Unix, `symlink_dir` on
     /// Windows.
     pub(crate) fn symlink_dir(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
         #[cfg(unix)]
-        let linked = std::os::unix::fs::symlink(target, inside(link.as_ref()));
+        let linked = sys::symlink(target.as_ref(), inside(link.as_ref()));
         #[cfg(windows)]
-        let linked = std::os::windows::fs::symlink_dir(target, inside(link.as_ref()));
+        let linked = sys::symlink_dir(target.as_ref(), inside(link.as_ref()));
         linked
     }
 }
@@ -153,7 +148,7 @@ impl Deref for Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        if let Err(error) = fs::remove_dir_all(&self.0) {
+        if let Err(error) = sys::remove_dir_all(&self.0) {
             eprintln!("could not remove {}: {error}", self.0.display());
         }
     }
@@ -162,6 +157,7 @@ impl Drop for Scratch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     /// The panic message `inside` gives for `path`.
     fn refusal(path: &Path) -> String {

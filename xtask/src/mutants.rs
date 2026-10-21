@@ -3,9 +3,10 @@
 //! It writes `git diff` against the merge-base with origin/main (the base `--quick` uses) to
 //! `target/xtask/mutants.diff`, then runs cargo-mutants on the mutants in those lines, with the
 //! settings in `.cargo/mutants.toml`, and reads what it found from its `outcomes.json`
-//! (`outcomes.rs`). Untracked files are not in the diff, so `git add` a new file first. Each
-//! missed mutant (one no test fails on) is a failure at its file and line. The run is capped at
-//! `MUTANTS_TIMEOUT`, whatever the machine.
+//! (`outcomes.rs`). Untracked files are not in the diff, so a run with an untracked `.rs` file
+//! fails before cargo-mutants starts, naming the file to `git add`. Each missed mutant (one no
+//! test fails on) is a failure at its file and line. The run is capped at `MUTANTS_TIMEOUT`,
+//! calibrated on one machine (see there).
 
 mod fix;
 mod outcomes;
@@ -23,18 +24,28 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-/// The diff cargo-mutants reads, relative to the repo root.
-const DIFF: &str = write::MUTANTS_DIFF;
-/// The folder cargo-mutants makes its `mutants.out` in (`--output`), instead of the repo root.
+/// The folder cargo-mutants makes its `mutants.out` in (`--output`), instead of the repo root,
+/// and the diff is saved in.
 const OUTPUT_PARENT: &str = "target/xtask";
+/// The diff's name in `OUTPUT_PARENT`.
+const DIFF_NAME: &str = "mutants.diff";
+/// The diff cargo-mutants reads, relative to the repo root.
+const DIFF: &str = "target/xtask/mutants.diff";
+/// The output folder's name in `OUTPUT_PARENT`.
+const OUTPUT_NAME: &str = "mutants.out";
 /// Its output folder, which each run removes first.
-const OUTPUT_DIR: &str = write::MUTANTS_OUTPUT;
+const OUTPUT_DIR: &str = "target/xtask/mutants.out";
 /// What xtask reads of it.
 const OUTCOMES: &str = "target/xtask/mutants.out/outcomes.json";
 
 /// The cap on one run: the review loop waits for it, so a change whose mutants take longer is
-/// split instead. The same on every machine, so a change that fits here fits in CI.
+/// split instead. Calibrated on the 12-core Apple M6 Mac only, where 20 minutes covered about 270
+/// mutants; a slower machine covers fewer, so a change that fits there can fail on a CI runner.
+/// Recalibrate it on the CI runner once the mutants job exists.
 const MUTANTS_TIMEOUT: Duration = Duration::from_mins(20);
+
+/// How long `git ls-files` may run: it lists files from the index, so a minute means it hangs.
+const GIT_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// How long `cargo mutants --version` may run: it prints one line, so a minute means it hangs.
 const VERSION_TIMEOUT: Duration = Duration::from_mins(1);
@@ -42,7 +53,9 @@ const VERSION_TIMEOUT: Duration = Duration::from_mins(1);
 /// cargo-mutants' `--jobs`: how many mutants build and test at once, each in its own copy of the
 /// tree. Each build and test run is itself parallel, so this is far below the core count. On the
 /// 12-core, 24 GB Mac mini, the same 34 mutants took 162 s at 2 jobs, 129 s at 4 and 126 s at 8:
-/// past 4 the cores are full, and each job only adds a build dir and memory.
+/// past 4 the cores are full, and each job only adds a build dir and memory. Tuned on that Mac
+/// only (the 12-core Apple M6); recalibrate it with `MUTANTS_TIMEOUT` on the CI runner once the
+/// mutants job exists.
 const JOBS: &str = "4";
 
 /// Runs a command in the repo root, passing each chunk of its merged output to the callback as it
@@ -106,6 +119,9 @@ pub(crate) fn run_with<W: Write>(
             return false;
         }
     };
+    if !all_tracked(out, exec) {
+        return false;
+    }
     if diff.trim().is_empty() {
         out.note("mutants ok: nothing changed since the merge-base with origin/main");
         return true;
@@ -113,7 +129,8 @@ pub(crate) fn run_with<W: Write>(
     if !installed(out, exec) {
         return false;
     }
-    if let Err(error) = write::save_mutants_diff(root, &diff) {
+    if let Err(error) = write::write_file_in(&root.join(OUTPUT_PARENT), DIFF_NAME, diff.as_bytes())
+    {
         fail(
             out,
             &format!("could not write {DIFF}: {error}"),
@@ -121,7 +138,7 @@ pub(crate) fn run_with<W: Write>(
         );
         return false;
     }
-    if let Err(error) = write::remove_mutants_output(root) {
+    if let Err(error) = remove_output(root) {
         let message = format!("could not remove {OUTPUT_DIR}, the last run's output: {error}");
         fail(out, &message, &Fix::Write { path: OUTPUT_DIR });
         return false;
@@ -151,6 +168,76 @@ pub(crate) fn run_with<W: Write>(
             );
             false
         }
+    }
+}
+
+/// The command that lists the untracked `.rs` files git does not ignore, NUL-separated.
+fn untracked_cmd() -> Cmd {
+    Cmd::new(
+        Program::Git,
+        [
+            "ls-files",
+            "-z",
+            "--others",
+            "--exclude-standard",
+            "--",
+            "*.rs",
+        ],
+        GIT_TIMEOUT,
+    )
+}
+
+/// Whether every `.rs` file git does not ignore is tracked: `--in-diff` gets only the tracked
+/// files' changes, so cargo-mutants would mutate none of an untracked one and still pass. Prints
+/// a failure naming each untracked file, or why git could not list them.
+fn all_tracked<W: Write>(out: &mut Printer<W>, exec: &mut Exec<'_>) -> bool {
+    let cmd = untracked_cmd();
+    let (error, fix) = match exec(&cmd, &mut |_| {}) {
+        Ok(listed) if listed.success => {
+            let untracked: Vec<&str> = listed
+                .output
+                .split('\0')
+                .filter(|f| !f.is_empty())
+                .collect();
+            for file in &untracked {
+                let message =
+                    format!("{file} is untracked, so cargo-mutants would mutate none of it");
+                fail(
+                    out,
+                    &message,
+                    &Fix::Untracked {
+                        file: (*file).to_owned(),
+                    },
+                );
+            }
+            return untracked.is_empty();
+        }
+        Ok(listed) => {
+            let error = GitError::Failed {
+                command: cmd.to_string(),
+                stderr: listed.output.trim().to_owned(),
+            };
+            let fix = Fix::ByHand {
+                cmd: cmd.to_string(),
+            };
+            (error, fix)
+        }
+        Err(error) if process::is_timeout(&error) => {
+            (GitError::TimedOut(error.to_string()), Fix::GitTimedOut)
+        }
+        Err(error) => (GitError::NotStarted(error.to_string()), Fix::GitNotStarted),
+    };
+    let message = format!("could not list the untracked .rs files: {error}");
+    fail(out, &message, &fix);
+    false
+}
+
+/// Removes `OUTPUT_DIR` under `root`, the folder an earlier run of cargo-mutants left, so its
+/// `outcomes.json` is never read as this run's. A missing folder is not an error.
+fn remove_output(root: &Path) -> io::Result<()> {
+    match write::remove_in(&root.join(OUTPUT_PARENT), OUTPUT_NAME) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
     }
 }
 
@@ -311,11 +398,13 @@ fn remove_left_build_dirs<W: Write>(
     let left: Vec<PathBuf> = build_dirs(temp, root).difference(before).cloned().collect();
     let mut removed = 0;
     for dir in &left {
-        match write::remove_mutants_build_dir(dir) {
+        let name = dir.file_name().unwrap_or_default().to_string_lossy();
+        match write::remove_in(temp, &name) {
             Ok(()) => removed += 1,
             Err(error) => {
                 let message = format!(
-                    "could not remove {}, a build dir cargo-mutants left when it was stopped:                      {error}",
+                    "could not remove {}, a build dir cargo-mutants left when it was stopped: \
+                     {error}",
                     dir.display()
                 );
                 fail(out, &message, &Fix::RemoveByHand);

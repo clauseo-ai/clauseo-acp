@@ -31,6 +31,9 @@ fn every_fix_has_its_exact_text() {
         Fix::Slow,
         Fix::Unviable,
         Fix::RemoveByHand,
+        Fix::Untracked {
+            file: "xtask/src/new.rs".into(),
+        },
     ];
     let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
     assert_eq!(kinds.len(), samples.len(), "two samples share a variant");
@@ -77,6 +80,10 @@ fn every_fix_has_its_exact_text() {
                  already refuses that change"
             }
             Fix::RemoveByHand => "delete that folder by hand; nothing else uses it",
+            Fix::Untracked { .. } => {
+                "git add xtask/src/new.rs (or git add -N xtask/src/new.rs) so cargo-mutants sees \
+                 it, or ignore it in .gitignore"
+            }
         };
         assert_eq!(fix.to_string(), expected);
     }

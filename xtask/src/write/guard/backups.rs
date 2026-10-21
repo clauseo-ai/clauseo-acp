@@ -2,6 +2,7 @@
 //! left: its temporary files and its copies.
 
 use super::super::replace::{replace, tmp_of};
+use super::super::sys;
 use super::{GuardFailure, is_repo_path, prune, refusal, tmp_rel};
 use std::fs;
 use std::io;
@@ -70,7 +71,7 @@ impl Backups {
             ));
         }
         let copy = self.copy_name(rel);
-        fs::remove_file(self.base(root).join(rel)).map_err(|error| {
+        sys::remove_file(&self.base(root).join(rel)).map_err(|error| {
             GuardFailure::new(
                 format!("could not delete {copy}: {error}"),
                 format!("delete {copy} by hand: an interrupted save left it, and the next save needs its name"),
@@ -89,7 +90,7 @@ impl Backups {
             return Err(refusal(rel));
         }
         let tmp = tmp_of(&root.join(rel), self.tool);
-        match fs::remove_file(&tmp) {
+        match sys::remove_file(&tmp) {
             Err(error) if error.kind() != io::ErrorKind::NotFound => Err(GuardFailure::new(
                 format!("could not delete {}: {error}", tmp_rel(rel, self.tool)),
                 format!(
@@ -135,7 +136,7 @@ impl Backups {
                 format!("fix what the error names, then run again{left}"),
             )
         })?;
-        fs::remove_file(&backup).map_err(|error| {
+        sys::remove_file(&backup).map_err(|error| {
             GuardFailure::new(
                 format!("restored {rel} but could not delete its copy {copy}: {error}"),
                 format!("delete {copy}; the file is already restored"),

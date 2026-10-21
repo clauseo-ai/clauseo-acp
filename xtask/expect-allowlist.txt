@@ -42,6 +42,6 @@ xtask/src/setup/tests.rs fake_asset clippy::unnecessary_wraps
 xtask/src/process.rs spawn clippy::disallowed_methods
 xtask/src/process/windows.rs - unsafe_code
 xtask/tests/process.rs xtask_dies::start_xtask clippy::disallowed_methods
-xtask/src/write.rs - clippy::disallowed_methods
-xtask/src/scratch.rs - clippy::disallowed_methods
+xtask/src/write/sys.rs - clippy::disallowed_methods
+xtask/src/scratch/sys.rs - clippy::disallowed_methods
 xtask/src/process.rs first_on_path clippy::disallowed_methods

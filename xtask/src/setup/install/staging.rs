@@ -4,20 +4,24 @@
 use super::{Failure, retry_fix};
 use crate::output::Printer;
 use crate::setup::Machine;
-use crate::write;
-use crate::write::{LockFile, RUN_LOCK, STAGING_PREFIX, Staging};
+use crate::write::{self, LockFile, Staging};
 use std::fs::TryLockError;
 use std::io::{self, Write};
 use std::path::Path;
 
+/// The start of the name of every staging directory `setup` makes in bin.
+const STAGING_PREFIX: &str = ".xtask-setup-";
+
+/// The file in bin whose exclusive lock `setup --binaries` holds for the whole run, so one run at a
+/// time uses bin. It is never deleted, and `STAGING_PREFIX` does not match it.
+const RUN_LOCK: &str = ".xtask-setup.lock";
+
 /// Makes `bin` if needed, and the staging dir `<bin>/.xtask-setup-<label>` in it, empty.
 pub(super) fn fresh_dir(bin: &Path, label: &str) -> Result<Staging, Failure> {
-    Staging::fresh(bin, label).map_err(|error| {
+    let name = format!("{STAGING_PREFIX}{label}");
+    Staging::fresh(bin, &name).map_err(|error| {
         (
-            format!(
-                "could not make {}: {error}",
-                bin.join(format!("{STAGING_PREFIX}{label}")).display()
-            ),
+            format!("could not make {}: {error}", bin.join(&name).display()),
             retry_fix(bin),
         )
     })
@@ -51,7 +55,7 @@ pub(crate) fn lock_bin_and_sweep<W: Write>(
             return (None, true);
         }
     };
-    let swept = write::remove_staging_leftovers(bin);
+    let swept = remove_staging_leftovers(bin);
     if let Err(error) = &swept {
         out.failure(
             &format!(
@@ -67,10 +71,23 @@ pub(crate) fn lock_bin_and_sweep<W: Write>(
     (Some(lock), swept.is_ok())
 }
 
+/// Removes every entry in `bin` whose name starts with `STAGING_PREFIX`, each through
+/// `write::remove_in`, which removes a symlink and never follows it.
+fn remove_staging_leftovers(bin: &Path) -> io::Result<()> {
+    for entry in std::fs::read_dir(bin)? {
+        let name = entry?.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(STAGING_PREFIX) {
+            write::remove_in(bin, &name)?;
+        }
+    }
+    Ok(())
+}
+
 /// Makes `bin` if needed, then takes the exclusive lock on `RUN_LOCK` in it, waiting while another
-/// run holds it. How the file is opened is `write::open_run_lock`'s.
+/// run holds it. How the file is opened is `LockFile::open`'s.
 fn lock_run<W: Write>(out: &mut Printer<W>, bin: &Path) -> io::Result<LockFile> {
-    let lock = write::open_run_lock(bin)?;
+    let lock = LockFile::open(bin, RUN_LOCK)?;
     match lock.try_lock() {
         Ok(()) => {}
         Err(TryLockError::WouldBlock) => {

@@ -34,6 +34,8 @@ pub(crate) enum Fix {
     Unviable,
     /// A build dir a stopped run left could not be removed; the message names it.
     RemoveByHand,
+    /// `file`, a `.rs` file, is untracked, so cargo-mutants would not see it.
+    Untracked { file: String },
 }
 
 impl Fix {
@@ -99,6 +101,11 @@ impl fmt::Display for Fix {
                  already refuses that change",
             ),
             Fix::RemoveByHand => f.write_str("delete that folder by hand; nothing else uses it"),
+            Fix::Untracked { file } => write!(
+                f,
+                "git add {file} (or git add -N {file}) so cargo-mutants sees it, or ignore it in \
+                 .gitignore"
+            ),
         }
     }
 }
