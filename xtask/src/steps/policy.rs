@@ -142,15 +142,15 @@ fn debug_string(after_quote: &str) -> Option<String> {
 /// canonical form, since a tool may print either (`/tmp` and `/private/tmp` on macOS).
 fn repo_path(raw: &str, ctx: &Context) -> String {
     let mut roots = vec![ctx.root.to_string_lossy().into_owned()];
-    if let Ok(canonical) = std::fs::canonicalize(&ctx.root) {
+    if let Ok(canonical) = dunce::canonicalize(&ctx.root) {
         roots.push(canonical.to_string_lossy().into_owned());
     }
     relative_to_any(raw, &roots)
 }
 
 /// `raw` relative to the first of `roots` it lies under, `/`-separated, or all of `raw` when it
-/// lies under none. Windows verbatim prefixes (`\\?\`, which `canonicalize` adds there) are
-/// dropped from both sides first.
+/// lies under none. Windows verbatim prefixes (`\\?\`, which `dunce::canonicalize` keeps on a path
+/// it cannot write without one, and a tool may print) are dropped from both sides first.
 fn relative_to_any(raw: &str, roots: &[String]) -> String {
     let raw = strip_verbatim(raw);
     let whole = raw.trim().replace('\\', "/");

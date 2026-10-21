@@ -143,15 +143,31 @@ fn pnpm_file() -> PathBuf {
 /// in a later one, the same as the developer's shell. The result is `dir.join(name)`. When no
 /// directory holds a match, it is the bare `pnpm`.
 fn resolve_pnpm(path: &OsStr, names: &[&str], exists: impl Fn(&Path) -> bool) -> PathBuf {
-    for dir in std::env::split_paths(path) {
-        for name in names {
-            let file = dir.join(name);
-            if exists(&file) {
-                return file;
-            }
-        }
-    }
-    PathBuf::from("pnpm")
+    first_on_path(path, |dir| {
+        names
+            .iter()
+            .map(|name| dir.join(name))
+            .find(|file| exists(file))
+    })
+    .unwrap_or_else(|| PathBuf::from("pnpm"))
+}
+
+/// The first `found(dir)` that is `Some`, for the directories `path` lists, in PATH order. The one
+/// walk over PATH in xtask: `resolve_pnpm` looks pnpm up with it, and setup asks whether a
+/// directory is on PATH. A second lookup reuses it instead of splitting PATH again. An empty
+/// entry (`;;` on Windows, `::` elsewhere) is skipped: joined to a file name it would name a
+/// file in the working directory, so a `pnpm.exe` wherever xtask runs would win.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one walk over PATH; clippy.toml bans split_paths everywhere else"
+)]
+pub(crate) fn first_on_path<T>(
+    path: &OsStr,
+    mut found: impl FnMut(&Path) -> Option<T>,
+) -> Option<T> {
+    std::env::split_paths(path)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .find_map(|dir| found(&dir))
 }
 
 /// A program, its arguments and how long it may run. Displays as the shell-like form:

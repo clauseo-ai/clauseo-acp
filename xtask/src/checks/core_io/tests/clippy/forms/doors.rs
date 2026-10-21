@@ -1,9 +1,11 @@
 //! The doors of the root `clippy.toml`, which bans them in every crate: one must-fail form per
-//! std call that changes files (the write module), and the clock, `thread::sleep`,
-//! `Command::output` and `spawn` and `serde_json::from_reader`; and must-pass forms for the
-//! reads, which stay allowed. The tauri entries have none (`NOT_BUILT`). Each failing form plants
-//! its call on line 2 and must get a hit there naming its entry, with the entry's reason or
-//! replacement, so deleting the entry, or giving it another reason, fails the test.
+//! std call that changes files (the write module), both `canonicalize` paths (and `PathBuf`'s,
+//! which reaches `Path::canonicalize` by deref) and `env::split_paths` (the one walk over PATH),
+//! and the clock, `thread::sleep`, `Command::output` and `spawn` and `serde_json::from_reader`;
+//! and must-pass forms for the reads, which stay allowed. The tauri entries have none
+//! (`NOT_BUILT`). Each failing form plants its call on line 2 and must get a hit
+//! there naming its entry, with the entry's reason or replacement, so deleting the entry, or
+//! giving it another reason, fails the test.
 //!
 //! `std::os::windows::fs::symlink_file` and `symlink_dir` build on Windows only: the test checks
 //! each where it builds.
@@ -12,6 +14,9 @@ use super::{Form, Must, Only, form};
 
 /// What the root `clippy.toml` says about a write, as the hit's note carries it.
 const WRITE_REASON: &str = "files change only through the crate's write module; see AGENTS.md";
+
+/// The replacement the `canonicalize` entries name.
+const DUNCE: &str = "dunce::canonicalize";
 
 /// The form `door_<name>`: `pub fn f(<params>)` whose line 2 is `let _ = <call>;`, which must
 /// get a hit there naming `item`, with `note` in its reason or replacement.
@@ -281,8 +286,7 @@ const LAUNCH_REASON: &str = "agents and tools are launched by the `process` crat
 /// The clock entries' reason.
 const CLOCK_REASON: &str = "the core takes time as input";
 
-/// The must-fail forms: every path the root file bans for the write door, the clock, sleep,
-/// the launches and `serde_json::from_reader`.
+/// The must-fail forms: every path the root file bans for the write and path doors.
 pub(super) fn failing() -> Vec<Form> {
     let mut all: Vec<Form> = WRITES
         .iter()
@@ -338,6 +342,38 @@ pub(super) fn failing() -> Vec<Form> {
             "serde_json::from_reader::<_, u8>(std::io::empty())",
             "serde_json::from_reader",
             "serde_json::from_slice",
+        ),
+        planted(
+            "fs_canonicalize",
+            Only::Any,
+            "",
+            "std::fs::canonicalize(\"a\")",
+            "std::fs::canonicalize",
+            DUNCE,
+        ),
+        planted(
+            "path_canonicalize",
+            Only::Any,
+            "",
+            "std::path::Path::new(\"a\").canonicalize()",
+            "std::path::Path::canonicalize",
+            DUNCE,
+        ),
+        planted(
+            "path_buf_canonicalize",
+            Only::Any,
+            "",
+            "std::path::PathBuf::from(\"a\").canonicalize()",
+            "std::path::Path::canonicalize",
+            DUNCE,
+        ),
+        planted(
+            "split_paths",
+            Only::Any,
+            "",
+            "std::env::split_paths(\"a:b\").count()",
+            "std::env::split_paths",
+            "only first_on_path in xtask/src/process.rs walks PATH",
         ),
     ]);
     all
