@@ -76,8 +76,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 
 ## Testing
 
-- Tests are deterministic: no sleeps, no real agent. A scripted `fake_agent` arrives with
-  the core crates.
+- Tests are deterministic: no sleeps, no real agent. A scripted `fake_agent` comes with core crates.
 
 ## Performance
 
