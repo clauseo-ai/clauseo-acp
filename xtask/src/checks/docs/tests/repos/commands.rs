@@ -3,14 +3,14 @@
 use super::{docs, guide};
 use crate::checks::planted::Repo;
 
-pub(crate) fn unknown_xtask_subcommand() -> Repo {
+pub(in crate::checks::docs::tests) fn unknown_xtask_subcommand() -> Repo {
     docs(
         "unknown-xtask-subcommand",
         vec![("GUIDE.md", "Run `cargo xtask frobnicate` now.\n".to_owned())],
     )
 }
 
-pub(crate) fn unknown_xtask_command_in_fence() -> Repo {
+pub(in crate::checks::docs::tests) fn unknown_xtask_command_in_fence() -> Repo {
     docs(
         "unknown-xtask-command-in-fence",
         vec![(
@@ -20,14 +20,14 @@ pub(crate) fn unknown_xtask_command_in_fence() -> Repo {
     )
 }
 
-pub(crate) fn tab_indented_code_command_fails() -> Repo {
+pub(in crate::checks::docs::tests) fn tab_indented_code_command_fails() -> Repo {
     guide(
         "tab-indented",
         "Text.\n\n\tcargo xtask frobnicate\n\t[x](nope.md)\n",
     )
 }
 
-pub(crate) fn continued_command_fails() -> Repo {
+pub(in crate::checks::docs::tests) fn continued_command_fails() -> Repo {
     docs(
         "continued-command",
         vec![(
@@ -37,7 +37,7 @@ pub(crate) fn continued_command_fails() -> Repo {
     )
 }
 
-pub(crate) fn indented_code_command_fails() -> Repo {
+pub(in crate::checks::docs::tests) fn indented_code_command_fails() -> Repo {
     docs(
         "indented-code-command",
         vec![(
@@ -48,7 +48,7 @@ pub(crate) fn indented_code_command_fails() -> Repo {
 }
 
 /// A `text` and a `text,ignore` block that show a failing command and its error, as output.
-pub(crate) fn text_block_output_passes() -> Repo {
+pub(in crate::checks::docs::tests) fn text_block_output_passes() -> Repo {
     docs(
         "text-block",
         vec![(
@@ -60,7 +60,7 @@ pub(crate) fn text_block_output_passes() -> Repo {
     )
 }
 
-pub(crate) fn plain_block_prose_fails() -> Repo {
+pub(in crate::checks::docs::tests) fn plain_block_prose_fails() -> Repo {
     docs(
         "plain-block-prose",
         vec![(
@@ -72,7 +72,7 @@ pub(crate) fn plain_block_prose_fails() -> Repo {
 
 /// The reviewer's prose lines, each in its kind of block: a mention of `cargo xtask` in rust,
 /// markdown and yaml blocks, and output in a console block, is not a command.
-pub(crate) fn prose_in_code_blocks_passes() -> Repo {
+pub(in crate::checks::docs::tests) fn prose_in_code_blocks_passes() -> Repo {
     docs(
         "prose-in-code-blocks",
         vec![(
@@ -89,7 +89,7 @@ pub(crate) fn prose_in_code_blocks_passes() -> Repo {
 }
 
 /// A `# ` comment, a `> ` quoted line and output in a console block are not commands.
-pub(crate) fn output_and_comments_in_sessions_pass() -> Repo {
+pub(in crate::checks::docs::tests) fn output_and_comments_in_sessions_pass() -> Repo {
     docs(
         "session-output",
         vec![(

@@ -4,12 +4,12 @@
 use super::{ARCHITECTURE, docs, guide};
 use crate::checks::planted::Repo;
 
-pub(crate) fn path_with_a_line_passes() -> Repo {
+pub(in crate::checks::docs::tests) fn path_with_a_line_passes() -> Repo {
     guide("path-line", "See `xtask/src/main.rs:1`.\n")
 }
 
 /// The first word of a span is the path, whatever follows it.
-pub(crate) fn first_word_is_the_path() -> Repo {
+pub(in crate::checks::docs::tests) fn first_word_is_the_path() -> Repo {
     docs(
         "first-word",
         vec![
@@ -25,12 +25,12 @@ pub(crate) fn first_word_is_the_path() -> Repo {
 }
 
 /// A first word that is a pattern is not a path, whatever follows it.
-pub(crate) fn first_word_pattern_passes() -> Repo {
+pub(in crate::checks::docs::tests) fn first_word_pattern_passes() -> Repo {
     guide("first-word-pattern", "See `crates/<name>/src and more`.\n")
 }
 
 /// Rohan's three marked spans, outside `ARCHITECTURE.md`: the marker is not read.
-pub(crate) fn planned_marker_outside_architecture_fails() -> Repo {
+pub(in crate::checks::docs::tests) fn planned_marker_outside_architecture_fails() -> Repo {
     docs(
         "planned-outside",
         vec![
@@ -58,24 +58,24 @@ fn architecture(case: &str, text: &str) -> Repo {
     )
 }
 
-pub(crate) fn planned_missing_path_passes() -> Repo {
+pub(in crate::checks::docs::tests) fn planned_missing_path_passes() -> Repo {
     architecture(
         "planned-missing",
         "Packages: `ui/components` (planned) and `ui/bindings` (planned).\n",
     )
 }
 
-pub(crate) fn planned_existing_path_fails() -> Repo {
+pub(in crate::checks::docs::tests) fn planned_existing_path_fails() -> Repo {
     architecture(
         "planned-existing",
         "The entry: `xtask/src/main.rs` (planned).\n",
     )
 }
 
-pub(crate) fn planned_case_variant_fails() -> Repo {
+pub(in crate::checks::docs::tests) fn planned_case_variant_fails() -> Repo {
     architecture("planned-case", "Next: `docs/REAL.md` (planned).\n")
 }
 
-pub(crate) fn planned_folder_case_variant_fails() -> Repo {
+pub(in crate::checks::docs::tests) fn planned_folder_case_variant_fails() -> Repo {
     architecture("planned-folder-case", "Next: `Docs/new.md` (planned).\n")
 }
