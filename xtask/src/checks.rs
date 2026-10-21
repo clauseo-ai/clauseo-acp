@@ -327,6 +327,10 @@ pub(crate) fn unlisted(check: &str, error: &GitError) -> Inspection {
             "run the check inside a git checkout, or fix what git reports: {check} lists the files \
              it reads with `git ls-files`"
         ),
+        GitError::TimedOut(_) => format!(
+            "run that git command by hand to see why it does not finish: {check} lists the files \
+             it reads with `git ls-files`"
+        ),
     };
     Inspection {
         failures: vec![Failure {

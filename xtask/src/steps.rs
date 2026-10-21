@@ -8,7 +8,7 @@ mod run;
 mod ui;
 
 pub(crate) use plan::plan;
-pub(crate) use run::{StepResult, StepStatus, run_all};
+pub(crate) use run::{Exec, StepResult, StepStatus, run_all};
 
 use crate::checks::StaticCheck;
 use crate::process::Cmd;

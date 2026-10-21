@@ -17,6 +17,7 @@ fn clippy_repro_drops_the_workspace_flag_and_narrows_to_the_owner() {
             "-D",
             "warnings",
         ],
+        crate::process::TEST_TIMEOUT,
     );
     let members = vec![Member {
         name: "xtask".into(),
@@ -45,6 +46,7 @@ fn clippy_repro_copies_everything_after_the_separator_verbatim() {
             "--workspace",
             "--message-format=short",
         ],
+        crate::process::TEST_TIMEOUT,
     );
     let members = vec![Member {
         name: "xtask".into(),
@@ -140,6 +142,7 @@ fn fmt_findings_make_one_error_per_file_fmt_would_change_with_the_fmt_fix() {
     let cmd = Cmd::new(
         crate::process::Program::Cargo,
         ["fmt", "--all", "--", "--check"],
+        crate::process::TEST_TIMEOUT,
     );
     let out = "Diff in /ws/xtask/src/main.rs:3:\n-fn  bad( ){}\n+fn bad() {}\n";
     let findings = fmt_findings(out, &ctx, &cmd);

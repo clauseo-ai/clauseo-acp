@@ -2,27 +2,48 @@
 //! names.
 
 use crate::checks::Failure;
-use crate::process::{self, Cmd, Program};
+use crate::process::{self, Cmd, Program, Status};
 use semver::{Version, VersionReq};
 use std::path::Path;
+use std::time::Duration;
+
+/// How long one `cargo tree` may run: it resolves the graph from Cargo.lock without building,
+/// which takes seconds, so 5 min means it hangs (on the package cache lock, say).
+const CARGO_TREE_TIMEOUT: Duration = Duration::from_mins(5);
 
 /// The stdout of `cargo <args>` run in `root`. `Err` is the failure to report when cargo
-/// cannot be started or fails. It has no `file:line`, since cargo's error names the cause.
+/// cannot be started, runs past its limit or fails. It has no `file:line`, since cargo's error
+/// names the cause.
 pub(super) fn cargo_stdout(root: &Path, args: &[&str]) -> Result<String, Failure> {
-    let cmd = Cmd::new(Program::Cargo, args.iter().copied());
-    let quiet = process::run_quiet(&cmd, root).map_err(|error| Failure {
+    let cmd = Cmd::new(Program::Cargo, args.iter().copied(), CARGO_TREE_TIMEOUT);
+    let quiet = process::run_quiet(&cmd, root).map_err(|error| start_failure(&cmd, &error))?;
+    match quiet.status {
+        Status::Succeeded => Ok(quiet.stdout),
+        Status::TimedOut => Err(timeout_failure(&cmd)),
+        Status::Failed => {
+            let stderr = quiet.stderr.trim();
+            Err(Failure {
+                message: format!("`{cmd}` failed: {stderr}"),
+                fix: failure_fix(&cmd, stderr, root),
+            })
+        }
+    }
+}
+
+/// The failure of `cmd` that ran past its limit.
+fn timeout_failure(cmd: &Cmd) -> Failure {
+    Failure {
+        message: process::timeout_message(cmd),
+        fix: process::TimeoutFix::of(cmd).to_string(),
+    }
+}
+
+/// The failure of `cmd` that did not start (`error`).
+fn start_failure(cmd: &Cmd, error: &std::io::Error) -> Failure {
+    Failure {
         message: format!("could not run `{cmd}`: {error}"),
         fix: "put `cargo` on PATH, since this check reads the dependency graph from cargo"
             .to_owned(),
-    })?;
-    if quiet.success {
-        Ok(quiet.stdout)
-    } else {
-        let stderr = quiet.stderr.trim();
-        Err(Failure {
-            message: format!("`{cmd}` failed: {stderr}"),
-            fix: failure_fix(&cmd, stderr, root),
-        })
     }
 }
 

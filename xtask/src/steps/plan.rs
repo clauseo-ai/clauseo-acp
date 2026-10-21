@@ -10,8 +10,15 @@ use crate::process::{Cmd, Program};
 use crate::steps::{Scope, Step, ToolStep};
 use crate::violation::Finding;
 use crate::workspace::Context;
+use std::time::Duration;
 
 const NO_PACKAGES: &str = "no changed packages";
+
+/// How long `cargo fmt --check` may run: it formats the workspace in seconds.
+const FMT_TIMEOUT: Duration = Duration::from_mins(5);
+/// How long clippy and nextest may run: each can build the whole workspace, Tauri included, cold
+/// on a slow machine, and nextest then runs every test.
+const BUILD_TIMEOUT: Duration = Duration::from_mins(45);
 
 /// The steps for `scope`, in run order: fmt, clippy, deny, shear, typos, taplo, gitleaks, every
 /// static check, the six ui steps, nextest. With `Scope::Nothing`, clippy and nextest are skipped;
@@ -81,7 +88,11 @@ pub(super) fn reproduce(cmd: &Cmd, _output: Option<&str>) -> String {
 fn fmt_step() -> ToolStep {
     ToolStep {
         name: "fmt",
-        cmd: Cmd::new(Program::Cargo, ["fmt", "--all", "--", "--check"]),
+        cmd: Cmd::new(
+            Program::Cargo,
+            ["fmt", "--all", "--", "--check"],
+            FMT_TIMEOUT,
+        ),
         parse: parse::fmt_findings,
         fix: reproduce,
         render: None,
@@ -105,7 +116,7 @@ fn clippy_step(selectors: &[String], ci: bool) -> ToolStep {
     }
     ToolStep {
         name: "clippy",
-        cmd: Cmd::new(Program::Cargo, args),
+        cmd: Cmd::new(Program::Cargo, args, BUILD_TIMEOUT),
         parse: parse::clippy_findings,
         fix: reproduce,
         render: Some(parse::clippy_render),
@@ -121,7 +132,7 @@ fn nextest_step(selectors: &[String], ci: bool) -> ToolStep {
     }
     ToolStep {
         name: "nextest",
-        cmd: Cmd::new(Program::Cargo, args),
+        cmd: Cmd::new(Program::Cargo, args, BUILD_TIMEOUT),
         parse: parse_none,
         fix: setup_or_reproduce,
         render: None,
@@ -430,7 +441,11 @@ mod tests {
 
     #[test]
     fn nextest_points_at_setup_when_the_subcommand_is_missing() {
-        let cmd = Cmd::new(Program::Cargo, ["nextest", "run"]);
+        let cmd = Cmd::new(
+            Program::Cargo,
+            ["nextest", "run"],
+            crate::process::TEST_TIMEOUT,
+        );
         assert_eq!(
             setup_or_reproduce(&cmd, Some("error: no such command: `nextest`\n")),
             "run `cargo xtask setup`"

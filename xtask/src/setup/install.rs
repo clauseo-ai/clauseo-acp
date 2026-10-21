@@ -4,7 +4,7 @@
 
 use super::{Binary, Machine, Packing, Runner};
 use crate::output::Printer;
-use crate::process::{Cmd, Ended, Output, Program};
+use crate::process::{self, Cmd, Output, Program, Status, TimeoutFix};
 use crate::write::Staging;
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
@@ -26,11 +26,13 @@ const CURL_MAX_TIME_S: u64 = 5 * 60;
 const CURL_RETRY_MAX_TIME_S: u64 = 3 * CURL_MAX_TIME_S;
 /// What curl may take beyond its limits, to start up and exit.
 const CURL_MARGIN_S: u64 = 60;
-/// `run_timed`'s limit for curl: the last retry starts by `--retry-max-time` and runs at most
+/// The door's limit for curl: the last retry starts by `--retry-max-time` and runs at most
 /// `--max-time`, plus the margin. So curl always stops itself first and says why.
 const DOWNLOAD_TIMEOUT: Duration =
     Duration::from_secs(CURL_RETRY_MAX_TIME_S + CURL_MAX_TIME_S + CURL_MARGIN_S);
+/// tar unpacks one binary of tens of MB from a local file, which takes seconds.
 const UNPACK_TIMEOUT: Duration = Duration::from_secs(60);
+/// winget downloads and runs an installer, which takes minutes on a slow link.
 const WINGET_TIMEOUT: Duration = Duration::from_mins(30);
 
 /// How a binary installs on one OS and arch.
@@ -110,6 +112,7 @@ pub(crate) fn winget(binary: &Binary) -> Cmd {
             "--accept-package-agreements",
             "--disable-interactivity",
         ],
+        WINGET_TIMEOUT,
     )
 }
 
@@ -165,15 +168,21 @@ fn run_winget<W: Write>(
         binary.name, binary.version
     ));
     let fix = format!("run `{cmd}` by hand and check its output, then run cargo xtask setup again");
-    let message = match runner(cmd, root, Output::Inherit, WINGET_TIMEOUT) {
-        Ok(Ended::Exited(ran)) if ran.success => return true,
-        Ok(Ended::Exited(_)) => format!("installing {} failed", binary.name),
-        Ok(Ended::TimedOut) => format!(
-            "installing {} did not finish within {} min, so it was stopped",
-            binary.name,
-            WINGET_TIMEOUT.as_secs() / 60
+    let (message, fix) = match runner(cmd, root, Output::Inherit) {
+        Ok(ran) if ran.success() => return true,
+        Ok(ran) if ran.status == Status::TimedOut => (
+            format!(
+                "installing {} did not finish within {}, so it was stopped",
+                binary.name,
+                process::limit_text(cmd.timeout)
+            ),
+            TimeoutFix::of(cmd).to_string(),
         ),
-        Err(error) => format!("could not run winget to install {}: {error}", binary.name),
+        Ok(_) => (format!("installing {} failed", binary.name), fix),
+        Err(error) => (
+            format!("could not run winget to install {}: {error}", binary.name),
+            fix,
+        ),
     };
     out.failure(&message, &fix);
     false
@@ -255,7 +264,7 @@ fn fetch_check_place(
          setup --binaries again; setup needs curl 7.71 or newer, for --retry-all-errors"
     );
     let what = format!("downloading {url}");
-    run_step(runner, &curl, dir, DOWNLOAD_TIMEOUT, &what, &fix)?;
+    run_step(runner, &curl, dir, &what, &fix)?;
     let file = dir.join(asset);
     let found = sha256_of(&file).map_err(|error| {
         (
@@ -283,14 +292,7 @@ fn fetch_check_place(
                  download of {url} and check its output, then run cargo xtask setup --binaries \
                  again"
             );
-            run_step(
-                runner,
-                &tar,
-                dir,
-                UNPACK_TIMEOUT,
-                &format!("unpacking {asset}"),
-                &fix,
-            )?;
+            run_step(runner, &tar, dir, &format!("unpacking {asset}"), &fix)?;
             dir.join(name)
         }
     };
@@ -320,8 +322,7 @@ fn fetch_check_place(
 /// The curl command that downloads `url` to `asset`. A failed attempt (a reset, a 502) is tried
 /// again `CURL_RETRIES` times. `--retry-all-errors` is needed for a reset, which curl 8.7 (macOS)
 /// does not retry otherwise, and it needs curl 7.71 or newer. A retry truncates what the attempt
-/// before wrote. curl's own limits end it even when xtask is gone (Ctrl-C reaches xtask, not
-/// curl's group).
+/// before wrote. curl's own limits end it before the door's limit (`DOWNLOAD_TIMEOUT`) does.
 fn curl_cmd(asset: &str, url: &str) -> Cmd {
     Cmd::new(
         Program::Named("curl"),
@@ -340,6 +341,7 @@ fn curl_cmd(asset: &str, url: &str) -> Cmd {
             asset,
             url,
         ],
+        DOWNLOAD_TIMEOUT,
     )
 }
 
@@ -348,6 +350,7 @@ fn tar_cmd(asset: &str, name: &str) -> Cmd {
     Cmd::new(
         Program::Named("tar"),
         ["--no-same-owner", "-xzf", asset, name],
+        UNPACK_TIMEOUT,
     )
 }
 
@@ -356,23 +359,22 @@ fn run_step(
     runner: &mut Runner<'_>,
     cmd: &Cmd,
     dir: &Path,
-    timeout: Duration,
     what: &str,
     fix: &str,
 ) -> Result<(), Failure> {
-    let message = match runner(cmd, dir, Output::Quiet, timeout) {
-        Ok(Ended::Exited(ran)) if ran.success => return Ok(()),
-        Ok(Ended::Exited(ran)) => {
+    let message = match runner(cmd, dir, Output::Quiet) {
+        Ok(ran) if ran.success() => return Ok(()),
+        Ok(ran) if ran.status == Status::TimedOut => format!(
+            "{what} did not finish within {}, so it was stopped",
+            process::limit_text(cmd.timeout)
+        ),
+        Ok(ran) => {
             let said = said_of(cmd, &ran.stderr);
             format!(
                 "{what} failed: {}",
                 if said.is_empty() { "no output" } else { &said }
             )
         }
-        Ok(Ended::TimedOut) => format!(
-            "{what} did not finish within {} s, so it was stopped",
-            timeout.as_secs()
-        ),
         Err(error) => format!(
             "{what} failed: could not run {}: {error}",
             cmd.program.name()

@@ -16,11 +16,12 @@ use super::verdict::{Failure, Outcome, budget_limit};
 use super::{INCREMENTAL_FIX, Probe};
 use crate::budgets::{Budget, Unit};
 use crate::clock::timed;
-use crate::process::{Captured, Cmd, Program};
+use crate::process::{self, Cmd, Program, Ran, Status, TimeoutFix};
 use crate::write::{Backups, Guard};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// Where the probes' copies of the marker files wait, and what the guard's messages call a run.
 pub(crate) const BACKUPS: Backups = Backups {
@@ -47,7 +48,7 @@ pub(crate) fn run_probe(
     budgets: &[Budget],
     runs: u32,
     ci: bool,
-    runner: &mut dyn FnMut(&Cmd) -> io::Result<Captured>,
+    runner: &mut dyn FnMut(&Cmd) -> io::Result<Ran>,
 ) -> Outcome {
     let limit = match budget_limit(budgets, probe.budget_id, Unit::S) {
         Ok(limit) => limit,
@@ -84,7 +85,7 @@ pub(crate) fn measure(
     probe: Probe,
     runs: u32,
     ci: bool,
-    runner: &mut dyn FnMut(&Cmd) -> io::Result<Captured>,
+    runner: &mut dyn FnMut(&Cmd) -> io::Result<Ran>,
 ) -> Result<Samples, Failure> {
     let mut guard = Guard::save(root, BACKUPS, &marker.path, &marker.text)?;
     let edited = edit_and_run(&mut guard, marker, probe, runs, ci, runner);
@@ -101,6 +102,10 @@ pub(crate) fn measure(
     }
 }
 
+/// How long one probe run may take: the warm-up can build every dependency cold on a slow machine,
+/// so this is xtask's longest limit with `cargo install`'s.
+const PROBE_TIMEOUT: Duration = Duration::from_hours(1);
+
 /// The edit-and-run loop of `measure`: the warm-up, then the timed runs. The warm-up's output is
 /// judged before any timed run, so a probe that cannot be trusted stops after one run.
 fn edit_and_run(
@@ -109,7 +114,7 @@ fn edit_and_run(
     probe: Probe,
     runs: u32,
     ci: bool,
-    runner: &mut dyn FnMut(&Cmd) -> io::Result<Captured>,
+    runner: &mut dyn FnMut(&Cmd) -> io::Result<Ran>,
 ) -> Result<Samples, Failure> {
     let mut secs = Vec::new();
     let mut warning = None;
@@ -123,9 +128,9 @@ fn edit_and_run(
         guard.write(next)?;
         let warm_up = run == 0;
         let cmd = if warm_up {
-            Cmd::new(Program::Cargo, [probe.subcommand, "-v"])
+            Cmd::new(Program::Cargo, [probe.subcommand, "-v"], PROBE_TIMEOUT)
         } else {
-            Cmd::new(Program::Cargo, [probe.subcommand])
+            Cmd::new(Program::Cargo, [probe.subcommand], PROBE_TIMEOUT)
         };
         let (captured, elapsed) = timed(|| runner(&cmd));
         let captured = captured.map_err(|error| {
@@ -134,15 +139,21 @@ fn edit_and_run(
                 format!("run `{cmd}` to see the error"),
             )
         })?;
-        if !captured.success {
+        if captured.status == Status::TimedOut {
+            return Err(Failure::new(
+                process::timeout_message(&cmd),
+                TimeoutFix::of(&cmd).to_string(),
+            ));
+        }
+        if !captured.success() {
             return Err(Failure {
                 message: format!("{cmd} failed"),
                 fix: format!("run `{cmd}` to see the error"),
-                output: Some(captured.output),
+                output: Some(captured.stdout),
             });
         }
         if warm_up {
-            warning = judge_warm_up(&captured.output, probe, ci)?;
+            warning = judge_warm_up(&captured.stdout, probe, ci)?;
         } else {
             secs.push(elapsed);
         }

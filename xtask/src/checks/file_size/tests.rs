@@ -10,9 +10,9 @@ use crate::scratch::Scratch;
 /// A scratch git repo named after `case`, with each `(path, text)` of `files` written into it.
 fn repo(case: &str, files: &[(&str, String)]) -> Scratch {
     let dir = Scratch::new(&format!("planted-file-size-{case}"));
-    let init = Cmd::new(Program::Git, ["init", "-q"]);
+    let init = Cmd::new(Program::Git, ["init", "-q"], crate::process::TEST_TIMEOUT);
     let quiet = process::run_quiet(&init, &dir).expect("run git init");
-    assert!(quiet.success, "git init failed: {}", quiet.stderr);
+    assert!(quiet.success(), "git init failed: {}", quiet.stderr);
     for (path, text) in files {
         let full = dir.join(path);
         Scratch::create_dir_all(full.parent().expect("a file has a parent")).expect("create dirs");

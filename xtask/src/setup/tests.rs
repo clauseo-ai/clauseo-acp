@@ -3,7 +3,7 @@
 //! test.
 
 use super::*;
-use crate::process::Quiet;
+use crate::process::Ran;
 use crate::scratch::Scratch;
 
 pub(super) fn binary(name: &str) -> &'static Binary {
@@ -71,12 +71,8 @@ pub(super) fn curl_output(cmd: &Cmd) -> &str {
 
 /// A command that exited, with what it printed.
 #[expect(clippy::unnecessary_wraps, reason = "it is what a runner returns")]
-pub(super) fn exited(success: bool, stdout: &str, stderr: &str) -> io::Result<Ended> {
-    Ok(Ended::Exited(Quiet {
-        success,
-        stdout: stdout.to_owned(),
-        stderr: stderr.to_owned(),
-    }))
+pub(super) fn exited(success: bool, stdout: &str, stderr: &str) -> io::Result<Ran> {
+    Ok(Ran::exited(success, stdout.to_owned(), stderr.to_owned()))
 }
 
 /// A Linux x86-64 machine whose cargo bin is `bin`, on PATH when `on_path`.
@@ -211,7 +207,7 @@ fn install_runs_the_pinned_command_for_each_os_and_arch() {
         let bin = dir.join("bin");
         let mut ran: Vec<(String, PathBuf)> = Vec::new();
         // Each download gets bytes that match no pin, so each install stops after its download.
-        let mut runner = |cmd: &Cmd, at: &Path, _: Output, _: Duration| -> io::Result<Ended> {
+        let mut runner = |cmd: &Cmd, at: &Path, _: Output| -> io::Result<Ran> {
             ran.push((cmd.to_string(), at.to_path_buf()));
             if cmd.program == Program::Named("curl") {
                 Scratch::write(at.join(curl_output(cmd)), b"not a release")?;
@@ -254,7 +250,7 @@ fn run_fake(
 ) -> (bool, Vec<String>, String) {
     let mut ran = Vec::new();
     let mut versions = versions.iter();
-    let mut runner = |cmd: &Cmd, at: &Path, _: Output, _: Duration| -> io::Result<Ended> {
+    let mut runner = |cmd: &Cmd, at: &Path, _: Output| -> io::Result<Ran> {
         ran.push(cmd.to_string());
         match cmd.program {
             Program::Named("curl") => {
@@ -393,8 +389,8 @@ fn a_plain_setup_checks_the_version_and_installs_nothing() {
 #[test]
 fn a_version_check_that_hangs_or_cannot_run_is_a_failed_run_not_a_missing_binary() {
     let tool = fake_tool(Packing::Bare);
-    let cases: [(io::Result<Ended>, &str); 3] = [
-        (Ok(Ended::TimedOut), "it did not finish within 30 s"),
+    let cases: [(io::Result<Ran>, &str); 3] = [
+        (Ok(Ran::timed_out()), "it did not finish within 30 s"),
         (
             Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
@@ -409,7 +405,7 @@ fn a_version_check_that_hangs_or_cannot_run_is_a_failed_run_not_a_missing_binary
     ];
     for (ended, said) in cases {
         let mut ended = Some(ended);
-        let mut runner = |_: &Cmd, _: &Path, _: Output, _: Duration| ended.take().unwrap();
+        let mut runner = |_: &Cmd, _: &Path, _: Output| ended.take().unwrap();
         let expected = if said.is_empty() {
             VersionCheck::Missing("`faketool version` could not start: not found".into())
         } else {
@@ -455,4 +451,45 @@ fn names_in(dir: &Path) -> Vec<String> {
     names
 }
 
+mod run;
 mod sweep;
+
+#[test]
+fn a_cargo_install_past_its_limit_says_so_and_how_to_see_why() {
+    let tool = &TOOLS[0];
+    let mut runner = |_: &Cmd, _: &Path, _: Output| -> io::Result<Ran> { Ok(Ran::timed_out()) };
+    let mut out = Printer::new(Vec::new(), false);
+    assert!(!install_tool(&mut out, tool, Path::new("."), &mut runner));
+    let cmd = format!(
+        "cargo install --locked {} --version {}",
+        tool.name, tool.version
+    );
+    assert_eq!(
+        String::from_utf8(out.into_inner()).unwrap(),
+        format!(
+            "{cmd}\ninstalling {} did not finish within 1 h, so it was stopped\n    fix: run \
+             `{cmd}` by hand to see why it does not finish within 1 h\n",
+            tool.name
+        )
+    );
+}
+
+#[test]
+fn a_cargo_install_that_exits_non_zero_says_it_failed_and_how_to_reproduce_it() {
+    let tool = &TOOLS[0];
+    let mut runner =
+        |_: &Cmd, _: &Path, _: Output| -> io::Result<Ran> { Ok(Ran::exited(false, "", "")) };
+    let mut out = Printer::new(Vec::new(), false);
+    assert!(!install_tool(&mut out, tool, Path::new("."), &mut runner));
+    let cmd = format!(
+        "cargo install --locked {} --version {}",
+        tool.name, tool.version
+    );
+    assert_eq!(
+        String::from_utf8(out.into_inner()).unwrap(),
+        format!(
+            "{cmd}\ninstalling {} failed\n    fix: run `{cmd}` to reproduce\n",
+            tool.name
+        )
+    );
+}

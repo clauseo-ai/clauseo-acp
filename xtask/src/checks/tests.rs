@@ -340,6 +340,23 @@ fn a_git_that_cannot_start_says_so_and_tells_to_install_it() {
 }
 
 #[test]
+fn a_git_past_its_limit_says_so_and_tells_to_run_it_by_hand() {
+    let error = GitError::TimedOut(
+        "`git ls-files -z` did not finish within 1 min, so it was stopped".to_owned(),
+    );
+    let report = fake(|_| Inspection::default()).judge(unlisted("file-size", &error));
+    assert_eq!(
+        report.printed(),
+        [
+            "could not list the repo's files: `git ls-files -z` did not finish within 1 min, so \
+             it was stopped\n    \
+             fix: run that git command by hand to see why it does not finish: file-size lists the \
+             files it reads with `git ls-files`",
+        ]
+    );
+}
+
+#[test]
 fn an_unreadable_path_asks_for_utf8_only_when_that_is_the_error() {
     let not_text = io::Error::new(
         io::ErrorKind::InvalidData,
