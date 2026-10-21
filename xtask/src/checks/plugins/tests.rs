@@ -1,19 +1,18 @@
 //! Tests for the `plugins` check. Each case is a tiny scratch workspace (a root `Cargo.toml`,
 //! member manifests and empty `src/lib.rs` files) that `run` reads through the real
 //! `cargo metadata --no-deps`, so cargo itself resolves the renames and inheritance under test.
-//! They skip the graph rules, except the cases in `tests/resolved.rs`, which patch every registry
-//! crate to a path crate so the graph resolves offline; `graph/tests.rs` covers the rest.
-//! The planted cases are in `tests/planted.rs`; their builders are the functions below.
+//! They skip the graph rules, except the cases in `tests/repos/resolved.rs`, which patch every
+//! registry crate to a path crate so the graph resolves offline; `graph/tests.rs` covers the rest.
+//! The planted cases are in `tests/planted.rs`; their builders are in `tests/repos.rs`.
 
 pub(super) mod planted;
-pub(super) mod resolved;
+mod repos;
 
 use super::*;
-use crate::checks::planted::Repo;
+use crate::checks::planted::scratch as planted_scratch;
 use crate::checks::tests::desktop_context;
 use crate::scratch::Scratch;
 use crate::workspace;
-use std::path::Path;
 
 /// The root manifest of a clean workspace.
 const ROOT: &str = r#"[workspace]
@@ -52,38 +51,38 @@ tauri-plugin-os.workspace = true
 tauri-plugin-notification.workspace = true
 "#;
 
-/// Writes `text` to `rel` under `dir`, creating its directories.
-fn write_file(dir: &Path, rel: &str, text: &str) {
-    let path = dir.join(rel);
-    Scratch::create_dir_all(path.parent().expect("a file has a parent")).expect("create the dirs");
-    Scratch::write(path, text).expect("write the file");
+/// The files of a scratch workspace: each path, relative to the workspace, and its text.
+type Files = Vec<(String, String)>;
+
+/// One file of a scratch workspace: its `path` and its `text`.
+fn file(path: &str, text: &str) -> (String, String) {
+    (path.to_owned(), text.to_owned())
 }
 
-/// Writes the scratch workspace `planted-plugins-<name>`: the root manifest `root`, the desktop
-/// manifest `desktop` and one crate per `(dir, manifest)` in `others`. The directory is removed
-/// when the returned `Scratch` drops.
-fn write_workspace(name: &str, root: &str, desktop: &str, others: &[(&str, &str)]) -> Scratch {
-    let dir = Scratch::new(&format!("planted-plugins-{name}"));
-    write_file(&dir, "Cargo.toml", root);
+/// The scratch workspace `planted-plugins-<name>`, with each file of `files` written into it.
+/// The directory is removed when the returned `Scratch` drops.
+fn scratch_of(name: &str, files: &[(String, String)]) -> Scratch {
+    let files: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(path, text)| (path.as_str(), text.as_str()))
+        .collect();
+    planted_scratch(&format!("plugins-{name}"), &files)
+}
+
+/// The files of a workspace: the root manifest `root`, the desktop manifest `desktop` and one
+/// crate per `(dir, manifest)` in `others`, each with an empty `src/lib.rs`.
+fn workspace_files(root: &str, desktop: &str, others: &[(&str, &str)]) -> Files {
+    let mut files = vec![file("Cargo.toml", root)];
     for (crate_dir, manifest) in [("crates/desktop", desktop)].iter().chain(others) {
-        write_file(&dir, &format!("{crate_dir}/Cargo.toml"), manifest);
-        write_file(&dir, &format!("{crate_dir}/src/lib.rs"), "");
+        files.push(file(&format!("{crate_dir}/Cargo.toml"), manifest));
+        files.push(file(&format!("{crate_dir}/src/lib.rs"), ""));
     }
-    dir
+    files
 }
 
-/// The clean workspace with `from` replaced by `to` in the desktop manifest.
-fn desktop_with(name: &str, from: &str, to: &str) -> Scratch {
-    assert!(
-        DESKTOP.contains(from),
-        "the desktop manifest contains {from}"
-    );
-    write_workspace(name, ROOT, &DESKTOP.replacen(from, to, 1), &[])
-}
-
-/// A member crate named `name` whose manifest is the package header and then `body`.
-fn member(name: &str, body: &str) -> String {
-    format!("[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n{body}")
+/// The scratch workspace `planted-plugins-<name>` that `workspace_files` describes.
+fn write_workspace(name: &str, root: &str, desktop: &str, others: &[(&str, &str)]) -> Scratch {
+    scratch_of(name, &workspace_files(root, desktop, others))
 }
 
 /// `run` on the scratch workspace `dir`, with the members `cargo metadata` lists.
@@ -94,333 +93,6 @@ fn inspect(dir: &Scratch) -> Inspection {
         ..desktop_context(dir)
     };
     run(&ctx)
-}
-
-/// The clean workspace with `root_tail` after the root manifest (from line 16) and each
-/// `(path, text)` of `files` written too.
-fn root_tail_case(name: &str, root_tail: &str, files: &[(&str, &str)]) -> Repo {
-    let dir = write_workspace(name, &format!("{ROOT}{root_tail}"), DESKTOP, &[]);
-    for (path, text) in files {
-        write_file(&dir, path, text);
-    }
-    Repo::cargo(dir)
-}
-
-/// A `[patch.'<url>']` entry renamed to `tauri-plugin-opener` with `package`, on line 18.
-pub(super) fn patch_renamed_under_a_url() -> Repo {
-    root_tail_case(
-        "patch_url",
-        "\n[patch.'https://github.com/tauri-apps/plugins-workspace']\n\
-         opener = { git = \"https://example.com/fork\", package = \"tauri-plugin-opener\" }\n",
-        &[],
-    )
-}
-
-/// A `[replace]` of `Tao` by package ID spec, on line 18 (cargo refuses it beside `[patch]`).
-pub(super) fn replace_by_package_spec() -> Repo {
-    root_tail_case(
-        "replace",
-        "\n[replace]\n\"Tao:0.34.0\" = { path = \"vendor/tao\" }\n",
-        &[],
-    )
-}
-
-/// `.cargo/config.toml` patches `tauri_runtime` on line 2; its `[replace]`, which cargo never
-/// reads there, is not reported.
-pub(super) fn patch_in_the_cargo_config() -> Repo {
-    root_tail_case(
-        "patch_in_config",
-        "",
-        &[(
-            ".cargo/config.toml",
-            "[patch.crates-io]\ntauri_runtime = { path = \"vendor/tauri-runtime\" }\n\n\
-             [replace]\n\"tauri:2.0.0\" = { path = \"vendor/tauri\" }\n",
-        )],
-    )
-}
-
-/// Patches of crates outside the Tauri family, in the manifest and the cargo config, pass.
-pub(super) fn patch_of_another_crate_passes() -> Repo {
-    root_tail_case(
-        "patch_other",
-        "\n[patch.crates-io]\nserde = { path = \"vendor/serde\" }\n",
-        &[(
-            ".cargo/config.toml",
-            "[patch.crates-io]\nmid = { path = \"vendor/mid\" }\n",
-        )],
-    )
-}
-
-pub(super) fn fixed_plugin_set_passes() -> Repo {
-    Repo::cargo(write_workspace(
-        "fixed_plugin_set_passes",
-        ROOT,
-        DESKTOP,
-        &[],
-    ))
-}
-
-pub(super) fn tauri_build_as_a_build_dependency_passes() -> Repo {
-    let desktop = format!("{DESKTOP}\n[build-dependencies]\ntauri-build = \"2\"\n");
-    Repo::cargo(write_workspace("tauri_build_passes", ROOT, &desktop, &[]))
-}
-
-pub(super) fn dev_dependency_plugin_passes() -> Repo {
-    let desktop = format!("{DESKTOP}\n[dev-dependencies]\ntauri-plugin-shell = \"2\"\n");
-    Repo::cargo(write_workspace(
-        "dev_dependency_plugin",
-        ROOT,
-        &desktop,
-        &[],
-    ))
-}
-
-pub(super) fn plugin_outside_fixed_set() -> Repo {
-    let desktop = format!("{DESKTOP}tauri-plugin-shell = \"2\"\n");
-    Repo::cargo(write_workspace(
-        "plugin_outside_fixed_set",
-        ROOT,
-        &desktop,
-        &[],
-    ))
-}
-
-pub(super) fn renamed_plugin_outside_fixed_set() -> Repo {
-    let root = format!("{ROOT}files = {{ package = \"tauri-plugin-fs\", version = \"2\" }}\n");
-    let desktop = format!("{DESKTOP}files.workspace = true\n");
-    Repo::cargo(write_workspace("renamed_plugin", &root, &desktop, &[]))
-}
-
-pub(super) fn target_plugin_outside_fixed_set() -> Repo {
-    let desktop =
-        format!("{DESKTOP}\n[target.'cfg(windows)'.dependencies]\ntauri-plugin-fs = \"2\"\n");
-    Repo::cargo(write_workspace("target_plugin", ROOT, &desktop, &[]))
-}
-
-pub(super) fn optional_fixed_plugin() -> Repo {
-    let desktop = DESKTOP.replacen(
-        "tauri-plugin-dialog.workspace = true\n",
-        "tauri-plugin-dialog = { workspace = true, optional = true }\n",
-        1,
-    );
-    let desktop = format!("{desktop}\n[features]\ndefault = [\"tauri-plugin-dialog\"]\n");
-    Repo::cargo(write_workspace(
-        "optional_fixed_plugin",
-        ROOT,
-        &desktop,
-        &[],
-    ))
-}
-
-pub(super) fn fixed_plugin_missing() -> Repo {
-    Repo::cargo(desktop_with(
-        "fixed_plugin_missing",
-        "tauri-plugin-os.workspace = true\n",
-        "",
-    ))
-}
-
-pub(super) fn wry_in_desktop() -> Repo {
-    let desktop = format!(
-        "{DESKTOP}\n[target.'cfg(unix)'.dependencies]\nwry = {{ version = \"0.53\", features = [\"devtools\"] }}\n"
-    );
-    Repo::cargo(write_workspace("wry_in_desktop", ROOT, &desktop, &[]))
-}
-
-pub(super) fn tauri_runtime_wry_in_desktop() -> Repo {
-    let desktop = format!(
-        "{DESKTOP}tauri-runtime-wry = {{ version = \"2.12.2\", features = [\"devtools\"] }}\n"
-    );
-    Repo::cargo(write_workspace("tauri_runtime_wry", ROOT, &desktop, &[]))
-}
-
-pub(super) fn tauri_runtime_devtools_in_desktop() -> Repo {
-    Repo::cargo(desktop_with(
-        "tauri_runtime_devtools",
-        "tauri-runtime.workspace = true\n",
-        "tauri-runtime = { workspace = true, default-features = true, features = [\"devtools\"] }\n",
-    ))
-}
-
-pub(super) fn tauri_runtime_feature_in_workspace() -> Repo {
-    let root = ROOT.replace(
-        "tauri-runtime = \"2\"\n",
-        "tauri-runtime = { version = \"2\", features = [\"macos-private-api\"] }\n",
-    );
-    Repo::cargo(write_workspace("tauri_runtime_root", &root, DESKTOP, &[]))
-}
-
-pub(super) fn devtools_in_tauri_entry() -> Repo {
-    Repo::cargo(desktop_with(
-        "devtools_in_tauri_entry",
-        "tauri.workspace = true\n",
-        "tauri = { workspace = true, features = [\n  \"devtools\",\n] }\n",
-    ))
-}
-
-pub(super) fn protocol_asset_in_tauri_entry() -> Repo {
-    Repo::cargo(desktop_with(
-        "protocol_asset_in_tauri_entry",
-        "tauri.workspace = true\n",
-        "tauri = { workspace = true, features = [\"protocol-asset\"] }\n",
-    ))
-}
-
-pub(super) fn devtools_in_renamed_tauri_entry() -> Repo {
-    let root = ROOT.replace(
-        "tauri = \"2\"\n",
-        "t = { package = \"tauri\", version = \"2\", features = [\"devtools\"] }\n",
-    );
-    let desktop = DESKTOP.replace("tauri.workspace = true\n", "t.workspace = true\n");
-    Repo::cargo(write_workspace(
-        "renamed_tauri_devtools",
-        &root,
-        &desktop,
-        &[],
-    ))
-}
-
-pub(super) fn protocol_asset_in_renamed_tauri_entry() -> Repo {
-    let root = ROOT.replace(
-        "tauri = \"2\"\n",
-        "t = { package = \"tauri\", version = \"2\", features = [\"protocol-asset\"] }\n",
-    );
-    let desktop = DESKTOP.replace("tauri.workspace = true\n", "t.workspace = true\n");
-    Repo::cargo(write_workspace(
-        "renamed_tauri_protocol_asset",
-        &root,
-        &desktop,
-        &[],
-    ))
-}
-
-pub(super) fn feature_table_enables_devtools_through_tauri() -> Repo {
-    let desktop = format!("{DESKTOP}\n[features]\ninspect = [\"tauri/devtools\"]\n");
-    Repo::cargo(write_workspace("feature_table_tauri", ROOT, &desktop, &[]))
-}
-
-pub(super) fn feature_table_enables_through_a_rename() -> Repo {
-    let root = ROOT.replace(
-        "tauri = \"2\"\n",
-        "t = { package = \"tauri\", version = \"2\" }\n",
-    );
-    let desktop = format!(
-        "{}\n[features]\nasset = [\"t/protocol-asset\"]\n",
-        DESKTOP.replace("tauri.workspace = true\n", "t.workspace = true\n")
-    );
-    Repo::cargo(write_workspace(
-        "feature_table_rename",
-        &root,
-        &desktop,
-        &[],
-    ))
-}
-
-pub(super) fn feature_table_enables_through_an_optional_tauri() -> Repo {
-    let desktop = DESKTOP.replacen(
-        "tauri.workspace = true\n",
-        "tauri = { workspace = true, optional = true }\n",
-        1,
-    );
-    let desktop = format!("{desktop}\n[features]\ninspect = [\"tauri?/devtools\"]\n");
-    Repo::cargo(write_workspace(
-        "feature_table_optional",
-        ROOT,
-        &desktop,
-        &[],
-    ))
-}
-
-pub(super) fn other_member_depends_on_tauri() -> Repo {
-    let core = member("clauseo-core", "[dependencies]\ntauri = \"2\"\n");
-    Repo::cargo(write_workspace(
-        "member_tauri",
-        ROOT,
-        DESKTOP,
-        &[("crates/core", core.as_str())],
-    ))
-}
-
-pub(super) fn other_member_depends_on_wry() -> Repo {
-    let core = member("clauseo-core", "[dependencies]\nwry = \"0.53\"\n");
-    Repo::cargo(write_workspace(
-        "member_wry",
-        ROOT,
-        DESKTOP,
-        &[("crates/core", core.as_str())],
-    ))
-}
-
-pub(super) fn other_member_renamed_tauri_runtime_in_target() -> Repo {
-    let core = member(
-        "clauseo-core",
-        "[target.'cfg(unix)'.dependencies]\nrt = { package = \"tauri-runtime\", version = \"2\" }\n",
-    );
-    Repo::cargo(write_workspace(
-        "member_renamed_runtime",
-        ROOT,
-        DESKTOP,
-        &[("crates/core", core.as_str())],
-    ))
-}
-
-pub(super) fn other_member_depends_on_tauri_through_a_path_dependency() -> Repo {
-    let root = ROOT.replace(
-        "members = [\"crates/*\"]\n",
-        "members = [\"crates/*\"]\nexclude = [\"vendor\"]\n",
-    );
-    let core = member(
-        "clauseo-core",
-        "[dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n",
-    );
-    let dir = write_workspace(
-        "member_tauri_path",
-        &root,
-        DESKTOP,
-        &[("crates/core", core.as_str())],
-    );
-    write_file(
-        &dir,
-        "vendor/tauri/Cargo.toml",
-        "[package]\nname = \"tauri\"\nversion = \"2.0.0\"\nedition = \"2024\"\n",
-    );
-    write_file(&dir, "vendor/tauri/src/lib.rs", "");
-    Repo::cargo(dir)
-}
-
-pub(super) fn path_dependency_on_excluded_crate() -> Repo {
-    let root = ROOT.replace(
-        "members = [\"crates/*\"]\n",
-        "members = [\"crates/*\"]\nexclude = [\"evil\"]\n",
-    );
-    let desktop = format!("{DESKTOP}evil = {{ path = \"../../evil\" }}\n");
-    let dir = write_workspace("path_dependency_excluded", &root, &desktop, &[]);
-    write_file(
-        &dir,
-        "evil/Cargo.toml",
-        "[package]\nname = \"evil\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n\
-         [dependencies]\ntauri-runtime-wry = { version = \"2\", features = [\"devtools\"] }\n",
-    );
-    write_file(&dir, "evil/src/lib.rs", "");
-    Repo::cargo(dir)
-}
-
-pub(super) fn build_dependency_path_to_excluded_crate() -> Repo {
-    let root = ROOT.replace(
-        "members = [\"crates/*\"]\n",
-        "members = [\"crates/*\"]\nexclude = [\"evil\"]\n",
-    );
-    let desktop = format!("{DESKTOP}\n[build-dependencies]\nevil = {{ path = \"../../evil\" }}\n");
-    let dir = write_workspace("build_path_excluded", &root, &desktop, &[]);
-    write_file(&dir, "evil/Cargo.toml", &member("evil", ""));
-    write_file(&dir, "evil/src/lib.rs", "");
-    Repo::cargo(dir)
-}
-
-pub(super) fn desktop_crate_missing() -> Repo {
-    let dir = Scratch::new("planted-plugins-desktop_crate_missing");
-    write_file(&dir, "Cargo.toml", ROOT);
-    Repo::new(dir)
 }
 
 /// The fixed set inspects its ten normal dependencies, the count the zero-inspected rule reads.
