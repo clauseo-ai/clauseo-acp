@@ -81,7 +81,7 @@ pub(super) fn problems(required: &Required, text: &str) -> Vec<Violation> {
 
 /// The violation when `text` has more than `limit` lines, at the first line over the limit.
 fn over_lines(file: &str, text: &str, limit: usize) -> Option<Violation> {
-    let lines = text.lines().count();
+    let lines = checks::line_count(text.as_bytes());
     (lines > limit).then(|| {
         violation(
             file,
@@ -111,15 +111,11 @@ fn over_bytes(file: &str, text: &str, limit: usize) -> Option<Violation> {
     })
 }
 
-/// The 1-based line that holds the byte at `index`.
+/// The 1-based line that holds the byte at `index`, with lines ended as `checks::line_count`
+/// ends them: the count of lines up to that byte, itself included.
 fn line_of_byte(text: &str, index: usize) -> u32 {
-    let newlines = text
-        .as_bytes()
-        .iter()
-        .take(index)
-        .filter(|byte| **byte == b'\n')
-        .count();
-    checks::line_at(newlines)
+    let through = text.as_bytes().get(..=index).unwrap_or(text.as_bytes());
+    u32::try_from(checks::line_count(through).max(1)).unwrap_or(u32::MAX)
 }
 
 /// The violation when `file` is not exactly `@<target>`, with or without its final newline. It

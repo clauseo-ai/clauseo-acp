@@ -151,3 +151,25 @@ fn the_byte_limit_is_a_whole_number_of_kib() {
     let (_, bytes) = limits(AGENTS);
     assert_eq!(bytes.map(|bytes| bytes % 1024), Some(0));
 }
+
+#[test]
+fn lines_ended_by_a_lone_cr_count_for_the_limits() {
+    let over = "x\r".repeat(121);
+    assert_eq!(
+        messages(AGENTS, &over),
+        ["AGENTS.md:121: AGENTS.md has 121 lines, over the limit of 120"]
+    );
+    let second_line_is_over = format!("{}\r{}\r", "a".repeat(8190), "b".repeat(5));
+    assert_eq!(
+        messages(AGENTS, &second_line_is_over),
+        ["AGENTS.md:2: AGENTS.md is 8197 bytes, over the limit of 8192"]
+    );
+}
+
+#[test]
+fn a_byte_is_on_the_line_its_ending_closes() {
+    let text = "a\r\nb\rc\n";
+    let lines: Vec<u32> = (0..text.len()).map(|at| line_of_byte(text, at)).collect();
+    assert_eq!(lines, [1, 1, 1, 2, 2, 3, 3]);
+    assert_eq!(line_of_byte("", 0), 1);
+}
