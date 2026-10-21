@@ -11,6 +11,7 @@ use crate::output::Printer;
 use crate::scratch::Scratch;
 
 mod measure;
+mod node;
 
 fn budget(id: &str, limit: f64, unit: Unit, gate: Gate) -> Budget {
     Budget {

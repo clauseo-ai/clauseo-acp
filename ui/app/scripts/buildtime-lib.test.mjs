@@ -6,11 +6,11 @@ import { brotliCompressSync, constants as zlib } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   BACKUP_DIR,
-  MIN_NODE,
   ROOT_TAG,
   appPaths,
   initialJs,
   marked,
+  minNode,
   nodeAtLeast,
   parseRuns,
   recoverApp,
@@ -79,18 +79,37 @@ describe("parseRuns", () => {
 
 describe("nodeAtLeast", () => {
   it("compares major, minor and patch as numbers", () => {
-    expect(MIN_NODE).toBe("24.11.0");
-    expect(nodeAtLeast("24.11.0", MIN_NODE)).toBe(true);
-    expect(nodeAtLeast("v24.11.1", MIN_NODE)).toBe(true);
-    expect(nodeAtLeast("26.0.0", MIN_NODE)).toBe(true);
-    expect(nodeAtLeast("24.2.0", MIN_NODE)).toBe(false);
-    expect(nodeAtLeast("24.0.0", MIN_NODE)).toBe(false);
-    expect(nodeAtLeast("v22.20.0", MIN_NODE)).toBe(false);
+    const min = "20.5.0";
+    expect(nodeAtLeast("20.5.0", min)).toBe(true);
+    expect(nodeAtLeast("v20.5.1", min)).toBe(true);
+    expect(nodeAtLeast("22.0.0", min)).toBe(true);
+    expect(nodeAtLeast("20.10.0", min)).toBe(true);
+    expect(nodeAtLeast("20.4.9", min)).toBe(false);
+    expect(nodeAtLeast("20.0.0", min)).toBe(false);
+    expect(nodeAtLeast("v18.20.0", min)).toBe(false);
+  });
+});
+
+describe("minNode", () => {
+  it("reads the version of engines.node in ui/package.json", () => {
+    const ui = resolve(APP_DIR, "..");
+    const range = JSON.parse(readFileSync(join(ui, "package.json"), "utf8")).engines?.node;
+    expect(`>=${minNode(ui)}`).toBe(range);
   });
 
-  it("matches the engines field of ui/package.json", () => {
-    const ui = JSON.parse(readFileSync(join(APP_DIR, "..", "package.json"), "utf8"));
-    expect(ui.engines?.node).toBe(`>=${MIN_NODE}`);
+  it("reads a scratch package.json, and refuses a range it cannot compare", () => {
+    const ui = scratch();
+    tree(ui, { "package.json": { engines: { node: ">=20.5.0" } } });
+    expect(minNode(ui)).toBe("20.5.0");
+    for (const [engines, shown] of [
+      [{ node: "^20.5.0" }, '"^20.5.0"'],
+      [{}, "undefined"],
+    ]) {
+      tree(ui, { "package.json": { engines } });
+      expect(() => minNode(ui)).toThrow(
+        `${join(ui, "package.json")} has engines.node ${shown}; buildtime reads only ">=<major>.<minor>.<patch>"`,
+      );
+    }
   });
 });
 
