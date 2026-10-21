@@ -128,31 +128,6 @@ fn fails_needs_the_exact_text() {
     );
 }
 
-/// The old form, whole lines as strings, judges the same way until the last check leaves it.
-#[test]
-fn fails_with_needs_the_exact_text() {
-    assert_eq!(
-        verdict(
-            Expect::FailsWith(&["a.toml:2: bad\n    fix: fix it"]),
-            1,
-            one_violation
-        ),
-        Ok(())
-    );
-    assert_eq!(
-        verdict(
-            Expect::FailsWith(&["a.toml:3: bad\n    fix: fix it"]),
-            1,
-            one_violation
-        ),
-        Err("expected these failures:\na.toml:3: bad\n    fix: fix it\nfound:\na.toml:2: bad\n    fix: fix it".to_owned())
-    );
-    assert_eq!(
-        verdict(Expect::FailsWith(&[]), 1, clean),
-        Err("a failing case lists at least one failure; a case that passes is Passes".to_owned())
-    );
-}
-
 /// The failures are those the check judged: a stopped check lists only what stopped it, and a
 /// check that looked at nothing gets the zero-inspected failure too.
 #[test]

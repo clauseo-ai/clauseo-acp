@@ -32,8 +32,7 @@
 //! `path:line`). The location and the message are spelled out; the fix is the check's `Fix`
 //! variant, so its text lives once, in the `Display` that `<check>/fix/tests.rs` pins, and the
 //! harness still compares the exact printed lines. `Fails(path)` takes a function instead, for
-//! lines that differ by OS. `FailsWith(&[...])`, the whole lines as strings, is the old form,
-//! kept until every check is converted.
+//! lines that differ by OS.
 //!
 //! Every case also states `inspects N`: how many items its check must report inspecting
 //! (`Inspection::inspected`). N is worked out from what the case's builder writes (the files,
@@ -64,11 +63,9 @@ pub(crate) use repo::{Repo, git, scratch};
 pub(crate) enum Expect {
     /// Exactly these violations and failures, each as it prints (`path:line: what\n    fix: ...`,
     /// or `what\n    fix: ...` for one without a location), in the order the runner prints them.
-    /// The zero-inspected failure is one of them when the case inspected nothing. The old form:
-    /// the last check converted to `Fails` removes it.
-    FailsWith(&'static [&'static str]),
-    /// As `FailsWith`, with the lines built when the case runs, by `fails` and `failure`, so
-    /// each fix is named by its `Fix` variant. `cases!` writes `Fails[line, ...]` as a closure.
+    /// The zero-inspected failure is one of them when the case inspected nothing. The lines are
+    /// built when the case runs, by `fails` and `failure`, so each fix is named by its `Fix`
+    /// variant. `cases!` writes `Fails[line, ...]` as a closure.
     Fails(fn() -> Vec<String>),
     /// The check passes: no violation, no failure, and at least one item inspected.
     Passes,
@@ -141,7 +138,6 @@ impl Planted {
                 return Err(format!("expected a pass, found:\n{}", printed.join("\n")));
             }
             Expect::Passes => return Ok(()),
-            Expect::FailsWith(lines) => lines.iter().map(ToString::to_string).collect(),
             Expect::Fails(lines) => lines(),
         };
         if expected.is_empty() {
