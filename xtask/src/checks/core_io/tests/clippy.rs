@@ -19,7 +19,8 @@
 //! root entry none of whose forms builds on this target (`Only`), and any other entry of the
 //! other OS family (`std::os::windows::` on unix, `std::os::unix::` on Windows). So a misspelled
 //! entry fails where its form builds. Each crate depends on the repo's nix on Unix, so the
-//! `nix::` entries resolve.
+//! `nix::` entries resolve. `every_root_entry_has_a_form` checks that every root entry has a
+//! form.
 
 mod forms;
 
@@ -267,8 +268,8 @@ fn dependency(repo: &Path, name: &str) -> String {
     format!("{name} = {found}")
 }
 
-/// Writes a scratch crate into `dir`: a manifest whose one dependency is the repo's `nix`, on
-/// Unix, its own workspace, a feature `io` that is off by default and the two
+/// Writes a scratch crate into `dir`: a manifest whose dependencies are the repo's `serde_json`
+/// and, on Unix, its `nix`, its own workspace, a feature `io` that is off by default and the two
 /// lints set to `allow`; the repo's `Cargo.lock`, so the offline build takes the versions it
 /// locks; `clippy.toml` holding `config`; the repo's `rust-toolchain.toml`, so the pinned clippy
 /// runs; and `src/lib.rs`, which starts with `forbid_line()` and declares one module per form,
@@ -279,9 +280,10 @@ fn write_crate(dir: &Path, repo: &Path, config: &str, forms: &[Form]) {
         dir.join("Cargo.toml"),
         format!(
             "[package]\nname = \"planted\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\
-             publish = false\n\n[features]\nio = []\n\n[target.'cfg(unix)'.dependencies]\n{}\n\n\
-             [lints.clippy]\ndisallowed_methods = \"allow\"\ndisallowed_types = \"allow\"\n\n\
-             [workspace]\n",
+             publish = false\n\n[features]\nio = []\n\n[dependencies]\n{}\n\n\
+             [target.'cfg(unix)'.dependencies]\n{}\n\n[lints.clippy]\n\
+             disallowed_methods = \"allow\"\ndisallowed_types = \"allow\"\n\n[workspace]\n",
+            dependency(repo, "serde_json"),
             dependency(repo, "nix")
         ),
     )
@@ -393,6 +395,43 @@ fn not_here(table: &Table, root_forms: &[Form]) -> BTreeSet<String> {
         })
         .map(str::to_owned)
         .collect()
+}
+
+/// The entries of `table` that no form in `forms` names as its item, in the file's order.
+fn without_a_form(table: &Table, forms: &[Form]) -> Vec<String> {
+    let items: BTreeSet<&str> = forms
+        .iter()
+        .filter_map(|form| form.item.as_deref())
+        .collect();
+    entries(table)
+        .filter(|path| !items.contains(path))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Every entry of the root `clippy.toml` has a form in `forms::root()` that must hit it, on
+/// some target: an entry added without one fails here, before clippy runs.
+#[test]
+fn every_root_entry_has_a_form() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let root: Table = toml::from_str(
+        &fs::read_to_string(repo.join(clippy_toml::ROOT)).expect("read the root clippy.toml"),
+    )
+    .expect("the root clippy.toml parses");
+    let forms = forms::root();
+    assert_eq!(without_a_form(&root, &forms), forms::NOT_BUILT);
+    // The failing case: an entry with no form is named.
+    let mut planted = root;
+    let row: Table =
+        toml::from_str("path = \"std::fs::read_link\"\nreason = \"x\"").expect("a row");
+    planted
+        .get_mut("disallowed-methods")
+        .and_then(Toml::as_array_mut)
+        .expect("the root bans methods")
+        .push(Toml::Table(row));
+    let mut expected = forms::NOT_BUILT.to_vec();
+    expected.push("std::fs::read_link");
+    assert_eq!(without_a_form(&planted, &forms), expected);
 }
 
 /// The path in clippy's warning that a config entry names nothing it can find, the

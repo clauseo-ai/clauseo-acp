@@ -1,8 +1,10 @@
 //! The doors of the root `clippy.toml`, which bans them in every crate: one must-fail form per
 //! std call that changes files (the write module), both `canonicalize` paths (and `PathBuf`'s,
 //! which reaches `Path::canonicalize` by deref), `env::split_paths` (the one walk over PATH), and
-//! `Command::status`, `CommandExt::exec` and nix's safe spawn and exec calls (the process door);
-//! and must-pass forms for the reads, which stay allowed. Each failing form plants its call on line 2 and must get a hit
+//! `Command::status`, `CommandExt::exec` and nix's safe spawn and exec calls (the process door),
+//! and the clock, `thread::sleep`, `Command::output` and `spawn` and `serde_json::from_reader`;
+//! and must-pass forms for the reads, which stay allowed. The tauri entries have none
+//! (`NOT_BUILT`). Each failing form plants its call on line 2 and must get a hit
 //! there naming its entry, with the entry's reason or replacement, so deleting the entry, or
 //! giving it another reason, fails the test.
 //!
@@ -264,6 +266,32 @@ const WRITES: [Write; 31] = [
     ),
 ];
 
+/// The entries of the root file in crates the scratch crates do not build: `tauri` and
+/// `tauri_build` take minutes to build cold, too long for a test. `every_root_entry_has_a_form`
+/// pins this list exactly, so an entry without a form fails unless it is added here, in review.
+pub(crate) const NOT_BUILT: [&str; 14] = [
+    "tauri::Builder::plugin",
+    "tauri::Builder::plugin_boxed",
+    "tauri::AppHandle::plugin",
+    "tauri::AppHandle::plugin_boxed",
+    "tauri::Manager::add_capability",
+    "tauri::Context::runtime_authority_mut",
+    "tauri::ipc::RuntimeAuthority::add_capability",
+    "tauri::Context::config_mut",
+    "tauri::Context::new",
+    "tauri::Context::set_assets",
+    "tauri_build::Attributes::capabilities_path_pattern",
+    "tauri_build::AppManifest::permissions_path_pattern",
+    "tauri_build::InlinedPlugin::permissions_path_pattern",
+    "tauri::ipc::RuntimeAuthority::__allow_command",
+];
+
+/// The process crate's reason, for `Command::output` and `Command::spawn`.
+const LAUNCH_REASON: &str = "agents and tools are launched by the `process` crate";
+
+/// The clock entries' reason.
+const CLOCK_REASON: &str = "the core takes time as input";
+
 /// The parameters of `f` for the nix spawn calls.
 const SPAWN: &str = "fa: &nix::spawn::PosixSpawnFileActions, at: &nix::spawn::PosixSpawnAttr";
 
@@ -340,6 +368,54 @@ pub(super) fn failing() -> Vec<Form> {
         })
         .collect();
     all.extend([
+        planted(
+            "thread_sleep",
+            Only::Any,
+            "",
+            "std::thread::sleep(std::time::Duration::ZERO)",
+            "std::thread::sleep",
+            "blocks; tests use an injected clock",
+        ),
+        planted(
+            "command_output",
+            Only::Any,
+            "",
+            "std::process::Command::new(\"true\").output()",
+            "std::process::Command::output",
+            LAUNCH_REASON,
+        ),
+        planted(
+            "command_spawn",
+            Only::Any,
+            "",
+            "std::process::Command::new(\"true\").spawn()",
+            "std::process::Command::spawn",
+            LAUNCH_REASON,
+        ),
+        planted(
+            "instant_now",
+            Only::Any,
+            "",
+            "std::time::Instant::now()",
+            "std::time::Instant::now",
+            CLOCK_REASON,
+        ),
+        planted(
+            "system_time_now",
+            Only::Any,
+            "",
+            "std::time::SystemTime::now()",
+            "std::time::SystemTime::now",
+            CLOCK_REASON,
+        ),
+        planted(
+            "serde_json_from_reader",
+            Only::Any,
+            "",
+            "serde_json::from_reader::<_, u8>(std::io::empty())",
+            "serde_json::from_reader",
+            "serde_json::from_slice",
+        ),
         planted(
             "fs_canonicalize",
             Only::Any,

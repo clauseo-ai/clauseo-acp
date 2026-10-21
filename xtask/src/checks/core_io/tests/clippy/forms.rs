@@ -13,6 +13,8 @@ mod reads;
 mod review;
 mod rules;
 
+pub(super) use doors::NOT_BUILT;
+
 /// What clippy must report for a form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Must {
