@@ -24,7 +24,7 @@ fn each_form_names_its_tool_and_version() {
             home: pnpm,
         }]
     );
-    let cases: [(&str, &[&str]); 14] = [
+    let cases: [(&str, &[&str]); 17] = [
         ("npm i -g pnpm@7", &["pnpm@7"]),
         (
             "volta install Node@v6 lefthook@9.8.6",
@@ -53,6 +53,21 @@ fn each_form_names_its_tool_and_version() {
         (
             "cargo +3.4.4 build; rustc +3.4 x.rs",
             &["cargo +3.4.4", "rustc +3.4"],
+        ),
+        (
+            "cargo +3.4.4 install cargo-fake --version 5.6.0",
+            &[
+                "cargo +3.4.4",
+                "cargo +3.4.4 install cargo-fake --version 5.6.0",
+            ],
+        ),
+        (
+            "rustup install 3.4.5 --profile minimal",
+            &["rustup install 3.4.5"],
+        ),
+        (
+            "rustup update 3.4.5 stable 3.3.1",
+            &["rustup update 3.4.5", "rustup update 3.4.5 stable 3.3.1"],
         ),
         (
             "fnm install 6.7 && nvm use 6",
