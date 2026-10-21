@@ -20,15 +20,16 @@
 //! leader.
 //!
 //! Not covered: a command whose start returned in xtask but whose `+<group>` write had not happened
-//! when xtask died (a few instructions after `spawn`), a process that left its group (`setsid`),
-//! and xtask dying while its leader is dead and not yet replaced. Ctrl-Z stops xtask but not its
-//! commands.
+//! when xtask died (a few instructions after `spawn`), a process that left its group (any
+//! `setsid` or `setpgid`: cargo-mutants starts every cargo and nextest child in a group of its own,
+//! its src/process/unix.rs:37 in 27.1.0, and cargo-nextest 0.9.148 each test, nextest-runner
+//! 0.126.0's src/runner/executor.rs:433 and :828), and xtask dying while its leader is dead and
+//! not yet replaced. Ctrl-Z stops xtask but not its commands.
 
-use super::running::KILL_GRACE;
+use super::running::{KILL_GRACE, POLL};
 use super::spawn;
-use super::unix::signal;
-use nix::errno::Errno;
-use nix::sys::signal::{Signal, killpg};
+use super::unix::{empty, signal};
+use nix::sys::signal::Signal;
 use nix::unistd::Pid;
 use std::collections::BTreeSet;
 use std::io::{self, BufRead, Write};
@@ -42,9 +43,6 @@ use std::time::Duration;
 /// The hidden subcommand that runs the leader. `main.rs` names its variant `ProcessLeader`, which
 /// clap spells this way; `the_leader_subcommand_parses` ties them.
 pub(super) const LEADER_SUBCOMMAND: &str = "process-leader";
-
-/// How often a stopping leader checks whether the groups it signalled are empty.
-const POLL: Duration = Duration::from_millis(50);
 
 /// The leader of this xtask process, once a command has started.
 struct Leader {
@@ -244,8 +242,8 @@ fn registered(input: impl BufRead) -> BTreeSet<i32> {
     groups
 }
 
-/// SIGTERM to each of `groups`, then, after up to `grace` (checked every `POLL`) for them to
-/// empty, SIGKILL to each. The leader passes `KILL_GRACE`; tests pass a shorter one.
+/// SIGTERM to each of `groups`, then, after up to `grace` (checked every `POLL`, as a run checks
+/// its group) for them to empty, SIGKILL to each. The leader passes `KILL_GRACE`; tests pass a shorter one.
 fn stop(groups: &BTreeSet<i32>, grace: Duration) {
     let groups: Vec<Pid> = groups.iter().map(|group| Pid::from_raw(*group)).collect();
     for group in &groups {
@@ -265,11 +263,6 @@ fn stop(groups: &BTreeSet<i32>, grace: Duration) {
     for group in &groups {
         drop(signal(*group, Signal::SIGKILL));
     }
-}
-
-/// Whether no process is left in `group`. `EPERM` means one is, owned by another user.
-fn empty(group: Pid) -> bool {
-    killpg(group, None) == Err(Errno::ESRCH)
 }
 
 #[cfg(test)]

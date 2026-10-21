@@ -1,5 +1,5 @@
 //! Tests of how a command's tree is stopped: at its limit, when its run is dropped or panics,
-//! after it exits, and with SIGKILL when it ignores SIGTERM. Most run a wrapper that starts a
+//! after it exits, with SIGKILL when it ignores SIGTERM, and when a thread of its run cannot start. Most run a wrapper that starts a
 //! grandchild, prints its own pid (its group's id) and waits, as
 //! `ui/app/scripts/buildtime-proc.test.mjs` does. The grandchild holds the write end of a pipe the
 //! test reads, so the test sees EOF only once the wrapper and the grandchild are both gone.
@@ -12,11 +12,14 @@
 use super::super::running::{self, Finish, Limits, Running, Streams};
 use super::*;
 use crate::clock::timed;
-use nix::sys::signal::{Signal, killpg};
+use nix::errno::Errno;
+use nix::sys::signal::{Signal, kill, killpg};
 use nix::unistd::Pid;
+use std::cell::{Cell, RefCell};
 use std::io::{BufRead, BufReader, PipeReader, Read};
 use std::panic::{self, AssertUnwindSafe};
 use std::process::Command;
+use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
@@ -54,14 +57,13 @@ impl Grandchild {
     /// another thread.
     pub(in crate::process) fn of(reader: PipeReader) -> Grandchild {
         let mut reader = BufReader::new(reader);
-        let mut line = String::new();
-        reader
-            .read_line(&mut line)
-            .expect("read the wrapper's first line");
-        let group = line
-            .trim()
-            .parse()
-            .unwrap_or_else(|_| panic!("the wrapper ended before it printed its group: {line:?}"));
+        let group = group_on(&mut reader).expect("read the wrapper's first line");
+        Grandchild::rest_of(group, reader)
+    }
+
+    /// The tree of group `group`, whose line was read off `reader`; reads the rest on another
+    /// thread.
+    fn rest_of(group: i32, mut reader: BufReader<PipeReader>) -> Grandchild {
         let (sender, eof) = mpsc::channel();
         thread::spawn(move || {
             let mut rest = Vec::new();
@@ -90,6 +92,17 @@ impl Grandchild {
             self.group
         );
     }
+}
+
+/// The group a wrapper printed on the next line of `reader`.
+fn group_on(reader: &mut BufReader<PipeReader>) -> io::Result<i32> {
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+    line.trim().parse().map_err(|error| {
+        io::Error::other(format!(
+            "the wrapper ended before it printed its group: {line:?} ({error})"
+        ))
+    })
 }
 
 /// Starts `sh -c <script>` with `limits`, its stdout the write end of a new pipe; returns the run
@@ -163,6 +176,91 @@ fn a_grandchild_left_running_is_stopped_when_the_command_exits() {
     assert_eq!(rest, b"");
 }
 
+/// Leaves one process in its group when it exits, a perl that on SIGTERM prints `term` and exits.
+/// It prints the group's id once its handler is set, so the stop at the exit, which comes only
+/// once `finish` runs, finds it set. One process, not a shell with a `sleep`: a SIGTERM that
+/// lands while a shell forks its `sleep` can leave the `sleep` running.
+const LEFTOVER_REPORTS_SIGTERM: &str = r#"perl -e '$SIG{TERM} = sub { print "term\n"; exit 0 };
+$| = 1; print getpgrp(), "\n"; sleep 300' &"#;
+
+/// Leaves one process in its group, a perl that ignores SIGTERM, and prints the group's id once
+/// it does.
+const LEFTOVER_IGNORES_SIGTERM: &str =
+    r#"perl -e '$SIG{TERM} = "IGNORE"; $| = 1; print getpgrp(), "\n"; sleep 300' &"#;
+
+#[test]
+fn a_leftover_gets_sigterm_when_the_command_exits_and_the_run_ends_when_it_does() {
+    let limits = Limits {
+        grace: SURVIVOR,
+        ..Limits::of(TEST_TIMEOUT)
+    };
+    let (running, reader) = start(LEFTOVER_REPORTS_SIGTERM, limits);
+    let grandchild = Grandchild::of(reader);
+    let (finish, secs) = timed(|| running.finish(&mut |_, _| {}));
+    let rest = grandchild.gone();
+    assert!(
+        matches!(&finish, Ok(Finish::Exited(status)) if status.success()),
+        "{finish:?}"
+    );
+    assert_eq!(String::from_utf8_lossy(&rest), "term\n");
+    let grace = limits.grace.as_secs_f64();
+    assert!(
+        secs < grace,
+        "ended after {secs} s, not before the {grace} s grace"
+    );
+}
+
+#[test]
+fn a_leftover_that_ignores_sigterm_gets_sigkill_after_the_grace_period() {
+    let limits = Limits {
+        grace: SHORT_WAIT,
+        ..Limits::of(TEST_TIMEOUT)
+    };
+    let (running, reader) = start(LEFTOVER_IGNORES_SIGTERM, limits);
+    let grandchild = Grandchild::of(reader);
+    let (finish, secs) = timed(|| running.finish(&mut |_, _| {}));
+    let rest = grandchild.gone();
+    assert!(
+        matches!(&finish, Ok(Finish::Exited(status)) if status.success()),
+        "{finish:?}"
+    );
+    assert_eq!(rest, b"");
+    let grace = limits.grace.as_secs_f64();
+    assert!(
+        secs >= grace,
+        "stopped after {secs} s, before the {grace} s grace"
+    );
+}
+
+#[test]
+fn a_thread_that_cannot_start_stops_and_reaps_the_command() {
+    let (reader, writer) = running::pipe().expect("make a pipe");
+    let mut command = Command::new("sh");
+    command.args(["-c", WRAPPER]).stdout(writer);
+    let reader = Rc::new(RefCell::new(BufReader::new(reader)));
+    let group = Rc::new(Cell::new(0));
+    let (hook_reader, hook_group) = (Rc::clone(&reader), Rc::clone(&group));
+    // The waiter's thread is the first a run starts; it fails once the wrapper is whole.
+    running::BEFORE_THREAD.set(Some(Box::new(move || {
+        hook_group.set(group_on(&mut hook_reader.borrow_mut())?);
+        Err(io::Error::other("the test's thread could not start"))
+    })));
+    let started = Running::start(command, "sh", Streams::Inherit, Limits::of(TEST_TIMEOUT));
+    running::BEFORE_THREAD.set(None);
+    let Err(error) = started else {
+        panic!("the run started without its waiter's thread");
+    };
+    assert_eq!(error.to_string(), "the test's thread could not start");
+    let reader = Rc::into_inner(reader)
+        .expect("the hook is gone")
+        .into_inner();
+    let grandchild = Grandchild::rest_of(group.get(), reader);
+    // A zombie still answers signal 0; only a reaped pid gives ESRCH.
+    let wrapper = kill(Pid::from_raw(grandchild.group()), None);
+    assert_eq!(wrapper, Err(Errno::ESRCH), "the wrapper was not reaped");
+    assert_eq!(grandchild.gone(), b"");
+}
+
 #[test]
 fn a_tree_that_ignores_sigterm_gets_sigkill_after_the_grace_period() {
     let limits = Limits {
@@ -225,7 +323,7 @@ fn a_process_that_left_the_group_with_the_output_ends_the_run_after_the_drain() 
 }
 
 #[test]
-fn a_leftover_in_the_group_that_holds_the_output_is_killed_when_the_command_exits() {
+fn a_leftover_in_the_group_that_holds_the_output_is_stopped_when_the_command_exits() {
     let cmd = Cmd::new(
         Program::Named("sh"),
         ["-c", "sleep 300 & echo hi"],

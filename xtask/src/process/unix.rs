@@ -3,6 +3,7 @@
 //! leader (`leader.rs`) so it is stopped when xtask dies.
 
 use super::leader;
+use super::running::Tree;
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
@@ -11,22 +12,21 @@ use std::os::unix::process::CommandExt;
 use std::process::{Child, Command};
 
 /// The process group a command leads.
-pub(super) struct Tree {
+pub(super) struct Group {
     group: Pid,
 }
 
-impl Tree {
-    /// What a tree is called in errors.
-    pub(super) const NAME: &str = "process group";
+impl Tree for Group {
+    const NAME: &'static str = "process group";
 
     /// Makes `command` start in a new process group.
-    pub(super) fn prepare(command: &mut Command) {
+    fn prepare(command: &mut Command) {
         command.process_group(0);
     }
 
     /// The tree of `child`, just started from a `prepare`d command, registered with the leader.
     /// When that fails, the group gets SIGKILL and the error is returned; the caller reaps.
-    pub(super) fn adopt(child: &mut Child) -> io::Result<Tree> {
+    fn adopt(child: &mut Child) -> io::Result<Group> {
         let Ok(raw) = i32::try_from(child.id()) else {
             drop(child.kill());
             return Err(io::Error::other(format!(
@@ -39,17 +39,21 @@ impl Tree {
             drop(signal(group, Signal::SIGKILL));
             return Err(error);
         }
-        Ok(Tree { group })
+        Ok(Group { group })
     }
 
     /// SIGTERM to the group.
-    pub(super) fn terminate(&self) -> io::Result<()> {
+    fn terminate(&self) -> io::Result<()> {
         signal(self.group, Signal::SIGTERM)
     }
 
     /// SIGKILL to the group.
-    pub(super) fn kill(&self) -> io::Result<()> {
+    fn kill(&self) -> io::Result<()> {
         signal(self.group, Signal::SIGKILL)
+    }
+
+    fn empty(&self) -> bool {
+        empty(self.group)
     }
 
     /// SIGKILL to what is left of the group, then tells the leader the group is no longer
@@ -58,9 +62,9 @@ impl Tree {
     /// reach a new process that took it. That is assumed not to happen: macOS and Linux hand out
     /// pids in rising order and come back to an id only after wrapping at their limit (`PID_MAX`,
     /// 99999, on macOS; `pid_max` on Linux), so pids would have to go all the way round in
-    /// between. The SIGTERM and SIGKILL at the limit, and the kill when the command exits, rest on
-    /// the same assumption once the command is reaped.
-    pub(super) fn finish(&self) {
+    /// between. The SIGTERM at the exit, the checks that the group is empty, and the SIGKILL
+    /// after the grace rest on the same assumption once the command is reaped.
+    fn finish(&self) {
         drop(self.kill());
         leader::release(self.group);
     }
@@ -73,4 +77,9 @@ pub(super) fn signal(group: Pid, signal: Signal) -> io::Result<()> {
         Ok(()) | Err(Errno::ESRCH) => Ok(()),
         Err(errno) => Err(io::Error::from(errno)),
     }
+}
+
+/// Whether no process is left in `group`. `EPERM` means one is, owned by another user.
+pub(super) fn empty(group: Pid) -> bool {
+    killpg(group, None) == Err(Errno::ESRCH)
 }

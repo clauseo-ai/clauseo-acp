@@ -7,7 +7,8 @@
 //! - Its tree is stopped at the limit and when its run is dropped (a panic included): on Unix
 //!   SIGTERM to the group, then SIGKILL after `KILL_GRACE`; on Windows `TerminateJobObject`, which
 //!   ends every process in the job at once. What is left of the tree when the command exits gets
-//!   SIGKILL on Unix, and is ended with the job on Windows (`running.rs`).
+//!   the same stop on Unix (SIGTERM, then SIGKILL if the group has not emptied after
+//!   `KILL_GRACE`), and is ended with the job on Windows (`running.rs`).
 //! - Unix: it is also stopped when xtask dies, however it dies, by the leader (`leader.rs`).
 //!   Ctrl-C reaches only xtask, since each command has its own group; xtask dies of it, and the
 //!   leader then stops every group still running.
