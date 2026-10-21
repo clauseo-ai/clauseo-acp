@@ -2,6 +2,7 @@
 //! the wrong object, the CSP and `is_url` edge cases, a missing windows array, the platform config
 //! names). Every other rule is a planted case in `tests/planted.rs`, built in `tests/repos.rs`.
 
+mod linked;
 pub(super) mod planted;
 mod repos;
 
@@ -161,4 +162,21 @@ fn every_platform_config_name_is_covered() {
     ] {
         assert!(names.contains(&name.to_owned()), "{name}");
     }
+}
+
+/// `generate_context` followed by a name other than `as` is not a rename: here a match binding.
+#[test]
+fn a_name_after_the_macro_other_than_as_is_not_a_rename() {
+    let text = concat!(
+        "fn f(value: u8) {\n",
+        "    match value {\n",
+        "        generate_context if value > 0 => {}\n",
+        "        _ => {}\n",
+        "    }\n",
+        "}\n",
+    );
+    assert_eq!(
+        sources::context_violations("crates/desktop/src/lib.rs", text),
+        Vec::new()
+    );
 }

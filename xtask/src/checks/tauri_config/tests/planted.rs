@@ -160,6 +160,60 @@ crate::checks::planted::cases! {
         "platform config `crates/desktop/Tauri.windows.toml` overrides tauri.conf.json",
         Fix::Platform,
     )], inspects 3 => super::repos::platform_config_toml,
+    /// A platform config `tauri.android.conf.json` fails the same way.
+    platform_config_android: Fails[fails(
+        "crates/desktop/tauri.android.conf.json:1",
+        "platform config `crates/desktop/tauri.android.conf.json` overrides tauri.conf.json",
+        Fix::Platform,
+    )], inspects 3 => super::repos::platform_config_android,
+    /// A platform config `Tauri.ios.toml` fails the same way.
+    platform_config_ios_toml: Fails[fails(
+        "crates/desktop/Tauri.ios.toml:1",
+        "platform config `crates/desktop/Tauri.ios.toml` overrides tauri.conf.json",
+        Fix::Platform,
+    )], inspects 3 => super::repos::platform_config_ios_toml,
+    /// A platform config named in capitals fails under its own name, on any disk.
+    platform_config_other_case: Fails[fails(
+        "crates/desktop/TAURI.MACOS.CONF.JSON:1",
+        "platform config `crates/desktop/TAURI.MACOS.CONF.JSON` overrides tauri.conf.json",
+        Fix::Platform,
+    )], inspects 3 => super::repos::platform_config_other_case,
+    /// `tauri.conf.json5` alone, which Tauri would read, fails as a missing `tauri.conf.json`.
+    main_config_json5_only: Fails[fails(
+        "crates/desktop/tauri.conf.json:1",
+        "`crates/desktop/tauri.conf.json` is missing",
+        Fix::ConfMissing,
+    )], inspects 1 => super::repos::main_config_json5_only,
+    /// `Tauri.toml` alone, which Tauri would read, fails as a missing `tauri.conf.json`.
+    main_config_toml_only: Fails[fails(
+        "crates/desktop/tauri.conf.json:1",
+        "`crates/desktop/tauri.conf.json` is missing",
+        Fix::ConfMissing,
+    )], inspects 1 => super::repos::main_config_toml_only,
+    /// `withGlobalTauri` false then true: the last wins, so it fails at the first key's line.
+    duplicate_key_unsafe_last: Fails[fails(
+        "crates/desktop/tauri.conf.json:7",
+        "app.withGlobalTauri must be false",
+        Fix::GlobalTauri,
+    )], inspects 2 => super::repos::duplicate_key_unsafe_last,
+    /// A `config_path(...)` call in `build.rs` fails at its line.
+    build_rs_config_path: Fails[fails(
+        "crates/desktop/build.rs:3",
+        "build.rs calls `config_path`",
+        Fix::ConfigInCode,
+    )], inspects 2 => super::repos::build_rs_config_path,
+    /// `env::set_var(\"TAURI_CONFIG\", ...)` in `build.rs` fails at its line.
+    build_rs_sets_env_config: Fails[fails(
+        "crates/desktop/build.rs:2",
+        "build.rs names `TAURI_CONFIG`",
+        Fix::ConfigInCode,
+    )], inspects 2 => super::repos::build_rs_sets_env_config,
+    /// `cargo:rustc-env=TAURI_CONFIG=...` printed by `build.rs` fails at its line.
+    build_rs_rustc_env_config: Fails[fails(
+        "crates/desktop/build.rs:2",
+        "build.rs names `TAURI_CONFIG`",
+        Fix::ConfigInCode,
+    )], inspects 2 => super::repos::build_rs_rustc_env_config,
     /// A missing `build.rs` fails as having no manifest, at line 1.
     build_rs_missing: Fails[fails(
         "crates/desktop/build.rs:1",
@@ -246,13 +300,75 @@ crate::checks::planted::cases! {
             Fix::AppManifest,
         ),
         failure(
-            "0 config files inspected in the desktop crate (tauri.conf.json and build.rs)",
+            "0 files inspected in the desktop crate (tauri.conf.json, build.rs and its other Rust \
+             files) and .cargo/config.toml",
             crate::checks::Fix::NothingInspected {
                 name: "tauri-config",
-                many: "config files",
-                place: "in the desktop crate (tauri.conf.json and build.rs)".to_owned(),
+                many: "files",
+                place: "in the desktop crate (tauri.conf.json, build.rs and its other Rust files) \
+                        and .cargo/config.toml"
+                    .to_owned(),
                 source: "xtask/src/checks/tauri_config.rs",
             },
         ),
     ], inspects 0 => super::repos::both_config_files_missing,
+    /// `generate_context!("other.json")` in `src/lib.rs` reads another config: it fails at its
+    /// line. The conf, build.rs and lib.rs are read.
+    generate_context_with_a_config_path: Fails[fails(
+        "crates/desktop/src/lib.rs:2",
+        "`generate_context!` is called with arguments, which can name another config, capability \
+         files or assets than the checked ones",
+        Fix::ContextArguments,
+    )], inspects 3 => super::repos::generate_context_with_a_config_path,
+    /// A braced call with `capabilities` in a file that holds one expression, as `include!`
+    /// takes it, fails: the file is lexed, not parsed as a whole file.
+    generate_context_in_an_included_fragment: Fails[fails(
+        "crates/desktop/src/ctx.rs:2",
+        "`generate_context!` is called with arguments, which can name another config, capability \
+         files or assets than the checked ones",
+        Fix::ContextArguments,
+    )], inspects 3 => super::repos::generate_context_in_an_included_fragment,
+    /// `generate_context` imported under another name fails at the import, in a nested module.
+    generate_context_renamed: Fails[fails(
+        "crates/desktop/src/app/mod.rs:1",
+        "`generate_context` is renamed with `as`, so this check cannot see the calls under the \
+         new name",
+        Fix::ContextRenamed,
+    )], inspects 3 => super::repos::generate_context_renamed,
+    /// `generate_context!()` with no argument passes, and so do a doc comment and a string that
+    /// show it with one. Four files are read.
+    generate_context_without_arguments_passes: Passes, inspects 4
+        => super::repos::generate_context_without_arguments_passes,
+    /// A desktop Rust file that does not lex fails at the lexer's line.
+    source_that_does_not_lex: Fails[fails(
+        "crates/desktop/src/lib.rs:2",
+        "`crates/desktop/src/lib.rs` is not valid Rust: cannot parse string into token stream",
+        Fix::SourceSyntax,
+    )], inspects 3 => super::repos::source_that_does_not_lex,
+    /// `TAURI_CONFIG` in `.cargo/config.toml`'s `[env]`, in lower case, fails at its key. The
+    /// conf, build.rs and the cargo config are read.
+    tauri_config_in_cargo_env: Fails[fails(
+        ".cargo/config.toml:5",
+        "`.cargo/config.toml` sets `tauri_config` in [env], which tauri-build and \
+         `generate_context!` merge over tauri.conf.json",
+        Fix::ConfigInEnv,
+    )], inspects 3 => super::repos::tauri_config_in_cargo_env,
+    /// Other `[env]` entries, one only starting with `TAURI_CONFIG`, pass.
+    other_cargo_env_passes: Passes, inspects 3 => super::repos::other_cargo_env_passes,
+    /// `src/x -> ..` fails and the check finishes: the walk does not follow the link, behind
+    /// which a `mod` could compile a file. The conf, build.rs and lib.rs are read.
+    symlink_to_a_folder_above: Fails[fails(
+        "crates/desktop/src/x:1",
+        "`crates/desktop/src/x` is a symlink to a folder: the desktop crate can compile Rust \
+         files behind it, and this check does not follow it",
+        Fix::LinkedFolder,
+    )], inspects 3 => super::linked::symlink_to_a_folder_above,
+    /// `src/gen.rs -> ../../../elsewhere/ctx.rs` is a symlink to a file: the walk reads it through
+    /// the link, and its `generate_context!` with arguments fails at the link's path, line 1.
+    symlink_to_a_rust_file: Fails[fails(
+        "crates/desktop/src/gen.rs:1",
+        "`generate_context!` is called with arguments, which can name another config, capability \
+         files or assets than the checked ones",
+        Fix::ContextArguments,
+    )], inspects 4 => super::linked::symlink_to_a_rust_file,
 }

@@ -87,3 +87,36 @@ pub(in crate::checks::tauri_config::tests) fn build_rs_not_utf8() -> Repo {
         &[(CONF_AT, CONF.as_bytes()), (BUILD_AT, &[0xff, 0xfe, b'f'])],
     )
 }
+
+/// `Attributes::config_path` points tauri-build at another config, on line 3.
+pub(in crate::checks::tauri_config::tests) fn build_rs_config_path() -> Repo {
+    build_case(
+        "build-rs-config-path",
+        &BUILD.replace(
+            "tauri_build::Attributes::new()",
+            "tauri_build::Attributes::new().config_path(\"other.conf.json\")",
+        ),
+    )
+}
+
+/// `build.rs` sets `TAURI_CONFIG`, which tauri-build merges over `tauri.conf.json`, on line 2.
+pub(in crate::checks::tauri_config::tests) fn build_rs_sets_env_config() -> Repo {
+    build_case(
+        "build-rs-sets-env-config",
+        &BUILD.replace(
+            "fn main() {\n",
+            "fn main() {\n    unsafe { std::env::set_var(\"TAURI_CONFIG\", \"{}\") };\n",
+        ),
+    )
+}
+
+/// `build.rs` hands `TAURI_CONFIG` to rustc, so `generate_context!` merges it, on line 2.
+pub(in crate::checks::tauri_config::tests) fn build_rs_rustc_env_config() -> Repo {
+    build_case(
+        "build-rs-rustc-env-config",
+        &BUILD.replace(
+            "fn main() {\n",
+            "fn main() {\n    println!(\"cargo:rustc-env=TAURI_CONFIG={{}}\");\n",
+        ),
+    )
+}
