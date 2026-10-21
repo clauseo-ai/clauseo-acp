@@ -34,6 +34,7 @@ pub(crate) enum Fix {
     Graph(Box<checks::graph::Fix>),
     Exceptions(Box<checks::exceptions::Fix>),
     ExpectAllowlist(Box<checks::expect_allowlist::Fix>),
+    Pins(Box<checks::pins::Fix>),
     /// A step's fix line, built from the command that ran and what the tool printed. Only
     /// `Fix::tool` makes one, and no check calls it: a planted case fails on it (see
     /// `planted::Planted::verdict`).
@@ -72,6 +73,7 @@ impl fmt::Display for Fix {
             Fix::Graph(fix) => fix.fmt(f),
             Fix::Exceptions(fix) => fix.fmt(f),
             Fix::ExpectAllowlist(fix) => fix.fmt(f),
+            Fix::Pins(fix) => fix.fmt(f),
             Fix::Tool(ToolText(text)) => f.write_str(text),
             #[cfg(test)]
             Fix::Fake(text) => f.write_str(text),
@@ -107,4 +109,5 @@ wraps! {
     Graph(checks::graph::Fix),
     Exceptions(checks::exceptions::Fix),
     ExpectAllowlist(checks::expect_allowlist::Fix),
+    Pins(checks::pins::Fix),
 }
