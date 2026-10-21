@@ -22,9 +22,9 @@ pub(in crate::checks::tauri_config::tests) fn endpoints_with_pubkey_passes() -> 
         "\"pubkey\": \"\"",
         "\"pubkey\": \"dW50cnVzdGVkIGNvbW1lbnQ=\"",
     );
-    run_files(
+    desktop_repo(
         "endpoints-with-pubkey",
-        &[(TAURI_CONF, conf.as_bytes()), (BUILD_RS, BUILD.as_bytes())],
+        &[(CONF_AT, conf.as_bytes()), (BUILD_AT, BUILD.as_bytes())],
     )
 }
 
@@ -45,7 +45,7 @@ pub(in crate::checks::tauri_config::tests) fn asset_protocol_disabled_passes() -
 }
 
 pub(in crate::checks::tauri_config::tests) fn conf_missing() -> Repo {
-    run_files("conf-missing", &[(BUILD_RS, BUILD.as_bytes())])
+    desktop_repo("conf-missing", &[(BUILD_AT, BUILD.as_bytes())])
 }
 
 pub(in crate::checks::tauri_config::tests) fn conf_not_utf8() -> Repo {
@@ -159,9 +159,9 @@ pub(in crate::checks::tauri_config::tests) fn whitespace_pubkey_with_endpoints()
         "\"endpoints\": [\"https://releases.example/latest.json\"]",
     )
     .replace("\"pubkey\": \"\"", "\"pubkey\": \"   \"");
-    run_files(
+    desktop_repo(
         "whitespace-pubkey-with-endpoints",
-        &[(TAURI_CONF, conf.as_bytes()), (BUILD_RS, BUILD.as_bytes())],
+        &[(CONF_AT, conf.as_bytes()), (BUILD_AT, BUILD.as_bytes())],
     )
 }
 

@@ -16,18 +16,14 @@ use super::*;
 use crate::checks::planted::{self, Repo};
 use crate::scratch::Scratch;
 
-/// A scratch repo whose desktop crate holds `files`, each a name and its bytes.
-fn run_files(case: &str, files: &[(&str, &[u8])]) -> Repo {
-    let paths: Vec<String> = files
-        .iter()
-        .map(|(name, _)| format!("crates/desktop/{name}"))
-        .collect();
-    let files: Vec<(&str, &[u8])> = paths
-        .iter()
-        .zip(files)
-        .map(|(path, (_, bytes))| (path.as_str(), *bytes))
-        .collect();
-    let dir = planted::scratch(&format!("tauri-config-{case}"), &files);
+/// `tauri.conf.json` and `build.rs` of the desktop crate, by their path from the repo root.
+const CONF_AT: &str = "crates/desktop/tauri.conf.json";
+const BUILD_AT: &str = "crates/desktop/build.rs";
+
+/// A scratch repo whose one member is the desktop crate, holding `files`, each a path from the
+/// repo root with its bytes.
+fn desktop_repo(case: &str, files: &[(&str, &[u8])]) -> Repo {
+    let dir = planted::scratch(&format!("tauri-config-{case}"), files);
     Scratch::create_dir_all(dir.join("crates/desktop")).expect("create the desktop dir");
     Repo::desktop(dir)
 }
@@ -42,33 +38,33 @@ fn edited_conf(from: &str, to: &str) -> String {
 /// `build.rs` is valid.
 fn conf_case(case: &str, from: &str, to: &str) -> Repo {
     let conf = edited_conf(from, to);
-    run_files(
+    desktop_repo(
         case,
-        &[(TAURI_CONF, conf.as_bytes()), (BUILD_RS, BUILD.as_bytes())],
+        &[(CONF_AT, conf.as_bytes()), (BUILD_AT, BUILD.as_bytes())],
     )
 }
 
 /// A desktop crate whose `build.rs` is `build` and whose `tauri.conf.json` is valid.
 fn build_case(case: &str, build: &str) -> Repo {
-    run_files(
+    desktop_repo(
         case,
-        &[(TAURI_CONF, CONF.as_bytes()), (BUILD_RS, build.as_bytes())],
+        &[(CONF_AT, CONF.as_bytes()), (BUILD_AT, build.as_bytes())],
     )
 }
 
 /// A desktop crate whose `build.rs` is valid and whose `tauri.conf.json` is `conf`.
 fn raw_conf_case(case: &str, conf: &[u8]) -> Repo {
-    run_files(case, &[(TAURI_CONF, conf), (BUILD_RS, BUILD.as_bytes())])
+    desktop_repo(case, &[(CONF_AT, conf), (BUILD_AT, BUILD.as_bytes())])
 }
 
-/// The valid desktop crate with a platform config `name` next to its valid files.
-fn platform_case(case: &str, name: &str, text: &str) -> Repo {
-    run_files(
+/// The valid desktop crate with a platform config at `path` next to its valid files.
+fn platform_case(case: &str, path: &str, text: &str) -> Repo {
+    desktop_repo(
         case,
         &[
-            (TAURI_CONF, CONF.as_bytes()),
-            (BUILD_RS, BUILD.as_bytes()),
-            (name, text.as_bytes()),
+            (CONF_AT, CONF.as_bytes()),
+            (BUILD_AT, BUILD.as_bytes()),
+            (path, text.as_bytes()),
         ],
     )
 }
@@ -76,27 +72,23 @@ fn platform_case(case: &str, name: &str, text: &str) -> Repo {
 /// A scratch repo with the valid `tauri.conf.json` and `build.rs` in its desktop crate and each
 /// `(path, text)` of `files`, paths from the repo root.
 pub(super) fn tree_case(case: &str, files: &[(&str, &str)]) -> Repo {
-    let desktop = [
-        ("crates/desktop/tauri.conf.json", CONF),
-        ("crates/desktop/build.rs", BUILD),
-    ];
+    let desktop = [(CONF_AT, CONF), (BUILD_AT, BUILD)];
     let files: Vec<(&str, &str)> = desktop.iter().chain(files).copied().collect();
     Repo::desktop(planted::scratch(&format!("tauri-config-{case}"), &files))
 }
 
 pub(super) fn clean_tree() -> Repo {
-    run_files(
+    desktop_repo(
         "clean-tree",
-        &[(TAURI_CONF, CONF.as_bytes()), (BUILD_RS, BUILD.as_bytes())],
+        &[(CONF_AT, CONF.as_bytes()), (BUILD_AT, BUILD.as_bytes())],
     )
 }
 
 pub(super) fn desktop_crate_missing() -> Repo {
-    let dir = Scratch::new("planted-tauri-config-desktop-crate-missing");
-    Repo::new(dir)
+    Repo::files::<&str>("tauri-config-desktop-crate-missing", &[])
 }
 
 /// The desktop crate with neither tauri.conf.json nor build.rs: the check looks and finds none.
 pub(super) fn both_config_files_missing() -> Repo {
-    run_files("both-config-files-missing", &[])
+    desktop_repo("both-config-files-missing", &[])
 }
