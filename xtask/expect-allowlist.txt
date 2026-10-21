@@ -6,31 +6,33 @@
 # - <path>: the file, relative to the repo root, with `/`.
 # - <lint>: as the attribute writes it, without spaces (`clippy::unwrap_used`). One attribute that
 #   names several lints needs one line per lint; `reason = ".."` is not a lint.
-# - <item>: the nearest enclosing function, impl method, const, static or module. An attribute on
-#   one of those names that item itself (the expect on `fn timed` is `timed`). An attribute on
-#   anything else (a struct, enum, field, statement, trait item or impl block) names the item that
-#   encloses it. At the top level of a file that is the file's module: `crate` for lib.rs, main.rs
-#   and build.rs, the folder for mod.rs, else the file stem (`checks.rs` is `checks`). An inner
-#   attribute at the top of a file is `-`. A site inside a macro body names the item around the
-#   macro.
+# - <item>: the item the attribute sits on, as a path from the top of the file joined with `::`:
+#   `timed` for a function, `Entry::replacement` for a field, `Printer::put` for a method (an impl
+#   is named by the last segment of its type, without generics), `Trait::method` for a trait's
+#   default method, `m::f` inside a module, `E::V` for a variant, `S::0` for a tuple field. An
+#   attribute on a statement, an expression, a parameter or a generic names the nearest item
+#   around it, and so does one inside a macro body. At the top level of a file, an attribute on no
+#   named item (an inner attribute of the file, a `use`, an `extern` block, a macro call) is `-`.
 # Sites under cfg_attr and inside macro bodies count too. N identical sites need N identical
 # lines. The order of the lines is not checked; keep them grouped by file.
-# `allow` is never listed: the check fails every #[allow] and #![allow], in every form.
+# `allow` and `warn` are never listed: the check fails each of them in every form, and so does
+# an attribute in a macro body whose name or lint is a metavariable, a `#` there with no brackets
+# after it, and a #[path] or include! of a file the check does not read.
 
 # The nine sites on main at a4bcd6f, less process.rs capture and run_quiet, which R3b folded into
 # spawn (below). R3 moved noisy_pass and boom_fail into steps/run/tests.rs.
 crates/desktop/src/lib.rs run clippy::disallowed_methods
 crates/desktop/src/lib.rs raise_main_window clippy::let_underscore_must_use
-crates/desktop/src/rust_only.rs plugin_rust_only clippy::disallowed_methods
+crates/desktop/src/rust_only.rs Builder::plugin_rust_only clippy::disallowed_methods
 xtask/src/clock.rs timed clippy::disallowed_methods
-xtask/src/output.rs put clippy::let_underscore_must_use
+xtask/src/output.rs Printer::put clippy::let_underscore_must_use
 xtask/src/steps/run/tests.rs noisy_pass clippy::unnecessary_wraps
 xtask/src/steps/run/tests.rs boom_fail clippy::unnecessary_wraps
 
 # Added by R3.
-xtask/src/checks.rs checks clippy::partial_pub_fields
-xtask/src/checks/core_io/clippy_toml.rs clippy_toml dead_code
-xtask/src/checks/core_io/clippy_toml.rs clippy_toml dead_code
+xtask/src/checks.rs StaticCheck clippy::partial_pub_fields
+xtask/src/checks/core_io/clippy_toml.rs Entry::replacement dead_code
+xtask/src/checks/core_io/clippy_toml.rs Entry::allow_invalid dead_code
 xtask/src/checks/core_io/tests/clippy.rs clippy clippy::disallowed_methods
 xtask/src/setup/tests.rs exited clippy::unnecessary_wraps
 xtask/src/setup/tests.rs fake_asset clippy::unnecessary_wraps
@@ -39,7 +41,7 @@ xtask/src/setup/tests.rs fake_asset clippy::unnecessary_wraps
 # integration test that starts xtask, and the one walk over PATH.
 xtask/src/process.rs spawn clippy::disallowed_methods
 xtask/src/process/windows.rs - unsafe_code
-xtask/tests/process.rs start_xtask clippy::disallowed_methods
+xtask/tests/process.rs xtask_dies::start_xtask clippy::disallowed_methods
 xtask/src/write.rs - clippy::disallowed_methods
 xtask/src/scratch.rs - clippy::disallowed_methods
 xtask/src/process.rs first_on_path clippy::disallowed_methods
