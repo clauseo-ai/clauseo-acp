@@ -31,7 +31,6 @@ fn type_name(ty: &syn::Type) -> String {
         syn::Type::Slice(inner) => type_name(&inner.elem),
         syn::Type::Array(inner) => type_name(&inner.elem),
         syn::Type::Paren(inner) => type_name(&inner.elem),
-        syn::Type::Group(inner) => type_name(&inner.elem),
         _ => "_".to_owned(),
     }
 }
