@@ -1,290 +1,42 @@
-//! Tests for the `dependencies` check. Each case is a scratch workspace with an `ARCHITECTURE.md`
-//! and path crates; crates under `vendor/` (excluded from the workspace) stand in for registry
-//! crates such as `tauri`, so the check's own `cargo tree --locked --offline` resolves each
-//! crate's graph without the network, once `Repo::resolved` has written the lockfile.
+//! Tests for the `dependencies` check that its planted cases cannot express: a lockfile behind the
+//! manifests, a check run without the graph, the naming rule and a line that cannot be found. The
+//! planted cases are in `planted.rs`, built in `repos.rs`; the fix lines they share are here.
 
 pub(super) mod planted;
+mod repos;
+mod tree;
 
 use super::*;
 use crate::checks::and_list;
-use crate::checks::planted::Repo;
 use crate::scratch::Scratch;
 use crate::workspace;
+use repos::*;
 use std::fs;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-pub(super) mod bypass;
-pub(super) mod names;
-pub(super) mod table;
-pub(super) mod tree;
-
-/// Numbers scratch dirs, so a case run twice in one process never shares a dir.
-static NEXT: AtomicUsize = AtomicUsize::new(0);
-
-/// The header of a scratch `ARCHITECTURE.md`; its first row lands on line 7.
-const TABLE_HEAD: &str = "# Architecture\n\n## Crates\n\n| Crate | Owns | May depend on | Never depends on | Status |\n|---|---|---|---|---|\n";
-
-/// The protocol row, on line 7 when it comes first.
-const PROTOCOL_ROW: &str = "| `protocol` | events | serde | tauri, tokio, fs | exists |\n";
-
-/// A scratch workspace: one `(dir, manifest)` per crate (members are those under `crates/`), the
-/// root `[workspace.dependencies]` body `workspace_deps`, and the Crates table `rows`.
-fn workspace(name: &str, rows: &str, workspace_deps: &str, crates: &[(String, String)]) -> Scratch {
-    let dir = Scratch::new(&format!(
-        "dependencies-{name}-{}",
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    ));
-    let members: Vec<String> = crates
-        .iter()
-        .filter(|(crate_dir, _)| crate_dir.starts_with("crates/"))
-        .map(|(crate_dir, _)| format!("\"{crate_dir}\""))
-        .collect();
-    let root = format!(
-        "[workspace]\nresolver = \"3\"\nmembers = [{}]\nexclude = [\"vendor\"]\n\n[workspace.dependencies]\n{workspace_deps}",
-        members.join(", ")
-    );
-    Scratch::write(dir.join("Cargo.toml"), root).expect("write the root manifest");
-    Scratch::write(dir.join("ARCHITECTURE.md"), format!("{TABLE_HEAD}{rows}"))
-        .expect("write the table");
-    for (crate_dir, manifest) in crates {
-        Scratch::create_dir_all(dir.join(crate_dir).join("src")).expect("create the crate dirs");
-        Scratch::write(dir.join(crate_dir).join("src/lib.rs"), "").expect("write lib.rs");
-        Scratch::write(dir.join(crate_dir).join("Cargo.toml"), manifest).expect("write a manifest");
+/// The fix that moves `package` out of protocol's manifest, where the one declaration `key`
+/// brings it in: protocol's row (line 7) forbids `package` for `clauseo-protocol`.
+fn protocol_move(key: &str, package: &str) -> Fix {
+    Fix::MoveFromManifest {
+        keys: format!("`{key}`"),
+        package: package.to_owned(),
+        manifest: "crates/protocol/Cargo.toml".to_owned(),
+        features: false,
+        row: 7,
+        krate: "clauseo-protocol".to_owned(),
     }
-    dir
 }
 
-/// A manifest for package `name`, followed by `body`: its sixth line is the first of `body`'s.
-fn manifest(name: &str, body: &str) -> String {
-    format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n{body}")
-}
-
-/// A vendored crate `name` (outside the workspace) with `body`.
-fn vendor(name: &str, body: &str) -> (String, String) {
-    (format!("vendor/{name}"), manifest(name, body))
-}
-
-/// The stand-in for the real `tauri`.
-fn tauri() -> (String, String) {
-    vendor("tauri", "")
-}
-
-/// The workspace in `dir`, which the check reads with its resolved graph on.
-fn run_on(dir: Scratch) -> Repo {
-    Repo::resolved(dir)
-}
-
-/// A workspace whose only member is `clauseo-protocol` with `body`, plus `vendored` crates.
-fn protocol(name: &str, body: &str, vendored: Vec<(String, String)>) -> Repo {
-    let mut crates = vec![(
-        "crates/protocol".to_owned(),
-        manifest("clauseo-protocol", body),
-    )];
-    crates.extend(vendored);
-    run_on(workspace(name, PROTOCOL_ROW, "", &crates))
-}
-
-pub(super) fn direct() -> Repo {
-    protocol(
-        "direct",
-        "[dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n",
-        vec![tauri()],
-    )
-}
-
-pub(super) fn transitive() -> Repo {
-    protocol(
-        "transitive",
-        "[dependencies]\nmid = { path = \"../../vendor/mid\" }\n",
-        vec![
-            vendor("mid", "[dependencies]\ninner = { path = \"../inner\" }\n"),
-            vendor("inner", "[dependencies]\ntauri = { path = \"../tauri\" }\n"),
-            tauri(),
-        ],
-    )
-}
-
-pub(super) fn build_dependency() -> Repo {
-    protocol(
-        "build",
-        "[build-dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n",
-        vec![tauri()],
-    )
-}
-
-pub(super) fn renamed() -> Repo {
-    protocol(
-        "renamed",
-        "[dependencies]\nt = { package = \"tauri\", path = \"../../vendor/tauri\" }\n",
-        vec![tauri()],
-    )
-}
-
-pub(super) fn target_windows() -> Repo {
-    protocol(
-        "windows",
-        "[target.'cfg(windows)'.dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n",
-        vec![tauri()],
-    )
-}
-
-pub(super) fn inherited() -> Repo {
-    let crates = [
-        (
-            "crates/protocol".to_owned(),
-            manifest(
-                "clauseo-protocol",
-                "[dependencies]\ntauri.workspace = true\n",
-            ),
-        ),
-        tauri(),
-    ];
-    let dir = workspace(
-        "inherited",
-        PROTOCOL_ROW,
-        "tauri = { path = \"vendor/tauri\" }\n",
-        &crates,
-    );
-    run_on(dir)
-}
-
-pub(super) fn optional_feature() -> Repo {
-    protocol(
-        "optional",
-        "[dependencies]\ntauri = { path = \"../../vendor/tauri\", optional = true }\n\n[features]\nwindow = [\"dep:tauri\"]\n",
-        vec![tauri()],
-    )
-}
-
-pub(super) fn no_row() -> Repo {
-    let crates = [
-        (
-            "crates/protocol".to_owned(),
-            manifest("clauseo-protocol", ""),
-        ),
-        ("crates/store".to_owned(), manifest("clauseo-store", "")),
-    ];
-    run_on(workspace("no-row", PROTOCOL_ROW, "", &crates))
-}
-
-pub(super) fn forbidden_workspace_crate() -> Repo {
-    let rows = "| `host` | sessions | protocol | tauri, agents | exists |\n| `agents` | registry | protocol | tauri | exists |\n";
-    let crates = [
-        (
-            "crates/host".to_owned(),
-            manifest(
-                "clauseo-host",
-                "[dependencies]\nclauseo-agents = { path = \"../agents\" }\n",
-            ),
-        ),
-        ("crates/agents".to_owned(), manifest("clauseo-agents", "")),
-    ];
-    run_on(workspace("workspace-crate", rows, "", &crates))
-}
-
-pub(super) fn comment_after_header() -> Repo {
-    protocol(
-        "comment",
-        "[dependencies] # runtime\ntauri = { path = \"../../vendor/tauri\" }\n",
-        vec![tauri()],
-    )
-}
-
-pub(super) fn quoted_key() -> Repo {
-    protocol(
-        "quoted",
-        "[dependencies]\n'tauri' = { path = \"../../vendor/tauri\" }\n",
-        vec![tauri()],
-    )
-}
-
-pub(super) fn table_header() -> Repo {
-    protocol(
-        "table-header",
-        "[dependencies.tauri]\npath = \"../../vendor/tauri\"\n",
-        vec![tauri()],
-    )
-}
-
-pub(super) fn dash_package_without_row() -> Repo {
-    let crates = [
-        (
-            "crates/protocol".to_owned(),
-            manifest("clauseo-protocol", ""),
-        ),
-        (
-            "crates/fake_agent".to_owned(),
-            manifest("clauseo-fake-agent", ""),
-        ),
-    ];
-    run_on(workspace("dash-no-row", PROTOCOL_ROW, "", &crates))
-}
-
-pub(super) fn workspace_crate_spelled_with_dash() -> Repo {
-    let rows = "| `host` | sessions | protocol | transport_ws | exists |\n| `transport_ws` | dev transport | host | tauri | exists |\n";
-    let crates = [
-        (
-            "crates/host".to_owned(),
-            manifest(
-                "clauseo-host",
-                "[dependencies]\nclauseo-transport-ws = { path = \"../transport_ws\" }\n",
-            ),
-        ),
-        (
-            "crates/transport_ws".to_owned(),
-            manifest("clauseo-transport-ws", ""),
-        ),
-    ];
-    run_on(workspace("dash-workspace", rows, "", &crates))
-}
-
-pub(super) fn crates_io_spelled_with_underscore() -> Repo {
-    let rows = "| `protocol` | events | serde | async-process | exists |\n";
-    let crates = [
-        (
-            "crates/protocol".to_owned(),
-            manifest(
-                "clauseo-protocol",
-                "[dependencies]\nasync_process = { path = \"../../vendor/async_process\" }\n",
-            ),
-        ),
-        vendor("async_process", ""),
-    ];
-    run_on(workspace("dash-crates-io", rows, "", &crates))
-}
-
-pub(super) fn std_module_in_never() -> Repo {
-    let rows = "| `protocol` | events | serde | net, tauri | exists |\n";
-    let crates = [(
-        "crates/protocol".to_owned(),
-        manifest("clauseo-protocol", ""),
-    )];
-    run_on(workspace("std-module", rows, "", &crates))
-}
-
-pub(super) fn dev_dependency_passes() -> Repo {
-    protocol(
-        "dev",
-        "[dev-dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n",
-        vec![tauri()],
-    )
-}
-
-pub(super) fn planned_row_without_crate_is_skipped() -> Repo {
-    let rows = format!("{PROTOCOL_ROW}| `host` | sessions | protocol | tauri | planned |\n");
-    let crates = [(
-        "crates/protocol".to_owned(),
-        manifest("clauseo-protocol", ""),
-    )];
-    run_on(workspace("planned", &rows, "", &crates))
-}
-
-pub(super) fn clean_workspace_passes() -> Repo {
-    protocol(
-        "clean",
-        "[dependencies]\nserde = { path = \"../../vendor/serde\" }\n",
-        vec![vendor("serde", "")],
-    )
+/// The fix that moves `package` out of host's manifest, where the one declaration `key` brings
+/// it in: host's row (line 7) forbids `package` for `clauseo-host`.
+fn host_move(key: &str, package: &str) -> Fix {
+    Fix::MoveFromManifest {
+        keys: format!("`{key}`"),
+        package: package.to_owned(),
+        manifest: "crates/host/Cargo.toml".to_owned(),
+        features: false,
+        row: 7,
+        krate: "clauseo-host".to_owned(),
+    }
 }
 
 #[test]
@@ -410,50 +162,4 @@ fn an_entry_whose_line_cannot_be_found_says_so() {
             "clauseo-protocol depends on tauri, which ARCHITECTURE.md forbids (xtask found no line declaring `tauri` in crates/protocol/Cargo.toml, so this points at line 1)".to_owned()
         )]
     );
-}
-
-/// A workspace with protocol and desktop, both using a vendored `spec` whose optional `tauri`
-/// sits behind its `tauri` feature; `protocol_spec` and `desktop_spec` are their `spec` lines.
-fn spec_feature(name: &str, protocol_spec: &str, desktop_spec: &str) -> Repo {
-    let rows = format!("{PROTOCOL_ROW}| `desktop` | shell | protocol, tauri | | exists |\n");
-    let crates = [
-        (
-            "crates/protocol".to_owned(),
-            manifest(
-                "clauseo-protocol",
-                &format!("[dependencies]\n{protocol_spec}\n"),
-            ),
-        ),
-        (
-            "crates/desktop".to_owned(),
-            manifest(
-                "clauseo-desktop",
-                &format!(
-                    "[dependencies]\n{desktop_spec}\nclauseo-protocol = {{ path = \"../protocol\" }}\n"
-                ),
-            ),
-        ),
-        vendor(
-            "spec",
-            "[dependencies]\ntauri = { path = \"../tauri\", optional = true }\n\n[features]\ntauri = [\"dep:tauri\"]\n",
-        ),
-        tauri(),
-    ];
-    run_on(workspace(name, &rows, "", &crates))
-}
-
-pub(super) fn feature_turned_on_by_another_crate_passes() -> Repo {
-    spec_feature(
-        "spec-desktop",
-        "spec = { path = \"../../vendor/spec\" }",
-        "spec = { path = \"../../vendor/spec\", features = [\"tauri\"] }",
-    )
-}
-
-pub(super) fn feature_turned_on_by_the_crate_itself() -> Repo {
-    spec_feature(
-        "spec-protocol",
-        "spec = { path = \"../../vendor/spec\", features = [\"tauri\"] }",
-        "spec = { path = \"../../vendor/spec\" }",
-    )
 }

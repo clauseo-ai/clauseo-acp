@@ -1,8 +1,7 @@
-//! Planted cases of the `dependencies` check about Never entries that look like our crates: the
+//! The builders of the dependencies cases about Never entries that look like our crates: the
 //! `(crates.io)` marker, letter case, swapped letters and `clauseo-` names that are no package.
 
-use super::{manifest, run_on, vendor, workspace};
-use crate::checks::planted::Repo;
+use super::*;
 
 /// The rows `host` (Never cell `never`), `agents`, `mcp` and `xtask`, host on line 7.
 fn rows(never: &str) -> String {
@@ -22,11 +21,11 @@ fn host(name: &str, never: &str, deps: &str, vendored: &[&str]) -> Repo {
     run_on(workspace(name, &rows(never), "", &crates))
 }
 
-pub(in crate::checks::dependencies) fn crates_io_marker_passes() -> Repo {
+pub(in crate::checks::dependencies::tests) fn crates_io_marker_passes() -> Repo {
     host("marker-passes", "rmcp (crates.io)", "", &[])
 }
 
-pub(in crate::checks::dependencies) fn crates_io_marker_bans_the_package() -> Repo {
+pub(in crate::checks::dependencies::tests) fn crates_io_marker_bans_the_package() -> Repo {
     host(
         "marker-bans",
         "rmcp (crates.io)",
@@ -35,31 +34,33 @@ pub(in crate::checks::dependencies) fn crates_io_marker_bans_the_package() -> Re
     )
 }
 
-pub(in crate::checks::dependencies) fn crates_io_name_one_edit_from_a_row() -> Repo {
+pub(in crate::checks::dependencies::tests) fn crates_io_name_one_edit_from_a_row() -> Repo {
     host("rmcp-bare", "rmcp", "", &[])
 }
 
-pub(in crate::checks::dependencies) fn row_name_in_capitals() -> Repo {
+pub(in crate::checks::dependencies::tests) fn row_name_in_capitals() -> Repo {
     host("capitals", "AGENTS", "", &[])
 }
 
-pub(in crate::checks::dependencies) fn package_name_in_other_case() -> Repo {
+pub(in crate::checks::dependencies::tests) fn package_name_in_other_case() -> Repo {
     host("clauseo-case", "Clauseo-agents", "", &[])
 }
 
-pub(in crate::checks::dependencies) fn row_name_with_two_letters_swapped() -> Repo {
+pub(in crate::checks::dependencies::tests) fn row_name_with_two_letters_swapped() -> Repo {
     host("swapped", "agnets", "", &[])
 }
 
-pub(in crate::checks::dependencies) fn clauseo_before_a_row_whose_package_has_no_prefix() -> Repo {
+pub(in crate::checks::dependencies::tests) fn clauseo_before_a_row_whose_package_has_no_prefix()
+-> Repo {
     host("clauseo-xtask", "clauseo-xtask", "", &[])
 }
 
-pub(in crate::checks::dependencies) fn io_word_in_other_case() -> Repo {
+pub(in crate::checks::dependencies::tests) fn io_word_in_other_case() -> Repo {
     host("io-word-case", "FS, Clock, Any I/O", "", &[])
 }
 
-pub(in crate::checks::dependencies) fn crates_io_name_in_capitals_bans_the_package() -> Repo {
+pub(in crate::checks::dependencies::tests) fn crates_io_name_in_capitals_bans_the_package() -> Repo
+{
     let crates = [
         (
             "crates/protocol".to_owned(),
@@ -74,7 +75,7 @@ pub(in crate::checks::dependencies) fn crates_io_name_in_capitals_bans_the_packa
     run_on(workspace("capitals-ban", rows, "", &crates))
 }
 
-pub(in crate::checks::dependencies) fn typo_of_a_row_named_like_an_io_word() -> Repo {
+pub(in crate::checks::dependencies::tests) fn typo_of_a_row_named_like_an_io_word() -> Repo {
     let crates = [(
         "crates/host".to_owned(),
         manifest("clauseo-host", "[dependencies]\n"),
@@ -83,15 +84,16 @@ pub(in crate::checks::dependencies) fn typo_of_a_row_named_like_an_io_word() -> 
     run_on(workspace("io-word-row", rows, "", &crates))
 }
 
-pub(in crate::checks::dependencies) fn std_module_in_other_case() -> Repo {
+pub(in crate::checks::dependencies::tests) fn std_module_in_other_case() -> Repo {
     host("std-case", "Std, NET", "", &[])
 }
 
-pub(in crate::checks::dependencies) fn clauseo_prefix_alone() -> Repo {
+pub(in crate::checks::dependencies::tests) fn clauseo_prefix_alone() -> Repo {
     host("clauseo-alone", "clauseo_", "", &[])
 }
 
-pub(in crate::checks::dependencies) fn underscore_row_package_after_clauseo_underscore() -> Repo {
+pub(in crate::checks::dependencies::tests) fn underscore_row_package_after_clauseo_underscore()
+-> Repo {
     let crates = [(
         "crates/host".to_owned(),
         manifest("clauseo-host", "[dependencies]\n"),
