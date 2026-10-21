@@ -101,7 +101,7 @@ pub(super) fn scratch(case: &str, repo: &Layout<'_>) -> Scratch {
     let dir = Scratch::new(&format!("core-io-{case}"));
     let init = Cmd::new(Program::Git, ["init", "-q"], crate::process::TEST_TIMEOUT);
     let quiet = process::run_quiet(&init, &dir).expect("run git init");
-    assert!(quiet.success, "git init failed: {}", quiet.stderr);
+    assert!(quiet.success(), "git init failed: {}", quiet.stderr);
     let architecture = repo.architecture.unwrap_or(ARCHITECTURE);
     Scratch::write(dir.join(crates_table::FILE), architecture).expect("write ARCHITECTURE.md");
     Scratch::create_dir_all(dir.join("crates/protocol")).expect("create the crate dir");

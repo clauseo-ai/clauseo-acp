@@ -112,6 +112,21 @@ fn an_exe_beats_a_cmd_in_the_same_directory() {
 }
 
 #[test]
+fn an_empty_path_entry_does_not_find_a_pnpm_in_the_working_directory() {
+    let files = [at("", "pnpm.exe"), at("/usr/local/node", "pnpm.cmd")];
+    let path = path_of(&["", "/usr/local/node"]);
+    assert_eq!(
+        resolve_pnpm(&path, &WINDOWS_PNPM, only(&files)),
+        at("/usr/local/node", "pnpm.cmd")
+    );
+    let only_empty = path_of(&["", "/tools/bin"]);
+    assert_eq!(
+        resolve_pnpm(&only_empty, &WINDOWS_PNPM, only(&files)),
+        PathBuf::from("pnpm")
+    );
+}
+
+#[test]
 fn the_resolved_path_is_the_directory_joined_with_the_name() {
     let files = [at("/usr/local/node", "pnpm.exe")];
     let resolved = resolve_pnpm(&path_of(&DIRS), &WINDOWS_PNPM, only(&files));
@@ -132,10 +147,10 @@ fn capture_merges_stdout_and_stderr_and_reports_the_exit_status() {
         seen.extend_from_slice(chunk);
     })
     .expect("sh runs");
-    assert!(!captured.success);
-    assert!(captured.output.contains("out"));
-    assert!(captured.output.contains("err"));
-    assert_eq!(seen, captured.output.as_bytes());
+    assert!(!captured.success());
+    assert!(captured.stdout.contains("out"));
+    assert!(captured.stdout.contains("err"));
+    assert_eq!(seen, captured.stdout.as_bytes());
 }
 
 /// The names in `listed`, the output of `git rev-parse --local-env-vars`, that `GIT_LOCAL_ENV`
@@ -155,7 +170,7 @@ fn every_variable_the_local_git_lists_is_in_git_local_env() {
         TEST_TIMEOUT,
     );
     let listed = run_quiet(&cmd, Path::new(".")).expect("git runs");
-    assert!(listed.success, "`{cmd}` failed: {}", listed.stderr);
+    assert!(listed.success(), "`{cmd}` failed: {}", listed.stderr);
     assert_eq!(
         missing_from_git_local_env(&listed.stdout),
         Vec::<&str>::new(),
@@ -201,13 +216,21 @@ fn a_command_that_exits_gives_its_status_and_output() {
         ["-c", "echo out; echo err >&2; exit 3"],
         TEST_TIMEOUT,
     );
-    let ran = run(&cmd, Path::new("."), Output::Quiet);
-    let Ok(Ended::Exited(quiet)) = ran else {
-        panic!("sh exits: {ran:?}");
-    };
-    assert!(!quiet.success);
+    let quiet = run(&cmd, Path::new("."), Output::Quiet).expect("sh runs");
+    assert_eq!(quiet.status, Status::Failed);
+    assert!(!quiet.success());
     assert_eq!(quiet.stdout, "out\n");
     assert_eq!(quiet.stderr, "err\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn an_inherited_command_keeps_no_output() {
+    let cmd = Cmd::new(Program::Named("true"), Vec::<String>::new(), TEST_TIMEOUT);
+    let ran = run(&cmd, Path::new("."), Output::Inherit).expect("true runs");
+    assert_eq!(ran.status, Status::Succeeded);
+    assert!(ran.success());
+    assert_eq!((ran.stdout.as_str(), ran.stderr.as_str()), ("", ""));
 }
 
 #[test]
@@ -226,20 +249,16 @@ fn a_limit_is_written_in_its_largest_whole_unit() {
 }
 
 #[test]
-fn a_timeout_names_the_command_and_its_limit_and_is_told_apart() {
+fn a_timeout_names_the_command_and_its_limit() {
     let cmd = Cmd::new(Program::Cargo, ["nextest", "run"], Duration::from_mins(45));
-    let error = timed_out(&cmd);
     assert_eq!(
-        error.to_string(),
+        timeout_message(&cmd),
         "`cargo nextest run` did not finish within 45 min, so it was stopped"
     );
-    assert!(is_timeout(&error));
     assert_eq!(
-        timeout_fix(&cmd),
+        TimeoutFix::of(&cmd).to_string(),
         "run `cargo nextest run` by hand to see why it does not finish within 45 min"
     );
-    let not_found = io::Error::new(io::ErrorKind::NotFound, "no such file");
-    assert!(!is_timeout(&not_found));
 }
 
 #[cfg(unix)]
@@ -247,7 +266,7 @@ fn a_timeout_names_the_command_and_its_limit_and_is_told_apart() {
 fn the_restarted_leader_mode_passes_only_when_both_runs_pass() {
     let mode = |script: &str| {
         let cmd = Cmd::new(Program::Named("sh"), ["-c", script], TEST_TIMEOUT);
-        restarted_leader(&cmd, script)
+        test_mode::restarted_leader(&cmd, script)
     };
     assert!(mode("exit 0"));
     assert!(!mode(r#"[ "$1" != again ]"#), "the second run fails");
@@ -256,3 +275,6 @@ fn the_restarted_leader_mode_passes_only_when_both_runs_pass() {
 
 #[cfg(unix)]
 pub(super) mod tree;
+
+#[cfg(unix)]
+mod denied;

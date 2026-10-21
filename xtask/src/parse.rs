@@ -362,6 +362,7 @@ fn clippy_repro(cmd: &Cmd, path: &str, members: &[Member]) -> Cmd {
         program: cmd.program.clone(),
         args,
         timeout: cmd.timeout,
+        kill_grace: cmd.kill_grace,
     }
 }
 

@@ -7,7 +7,8 @@
 //! - Its tree is stopped at the limit and when its run is dropped (a panic included): on Unix
 //!   SIGTERM to the group, then SIGKILL after `KILL_GRACE`; on Windows `TerminateJobObject`, which
 //!   ends every process in the job at once. What is left of the tree when the command exits gets
-//!   SIGKILL on Unix, and is ended with the job on Windows (`running.rs`).
+//!   the same stop on Unix (SIGTERM, then SIGKILL if the group has not emptied after
+//!   `KILL_GRACE`), and is ended with the job on Windows (`running.rs`).
 //! - Unix: it is also stopped when xtask dies, however it dies, by the leader (`leader.rs`).
 //!   Ctrl-C reaches only xtask, since each command has its own group; xtask dies of it, and the
 //!   leader then stops every group still running.
@@ -19,6 +20,7 @@
 #[cfg(unix)]
 mod leader;
 mod running;
+mod test_mode;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]
@@ -26,6 +28,7 @@ mod windows;
 
 #[cfg(unix)]
 pub(crate) use leader::lead;
+pub(crate) use test_mode::{TestOutput, test_mode};
 
 use running::{Finish, Stream, Streams};
 use std::ffi::OsStr;
@@ -151,7 +154,9 @@ fn resolve_pnpm(path: &OsStr, names: &[&str], exists: impl Fn(&Path) -> bool) ->
 
 /// The first `found(dir)` that is `Some`, for the directories `path` lists, in PATH order. The one
 /// walk over PATH in xtask: `resolve_pnpm` looks pnpm up with it, and setup asks whether a
-/// directory is on PATH. A second lookup reuses it instead of splitting PATH again.
+/// directory is on PATH. A second lookup reuses it instead of splitting PATH again. An empty
+/// entry (`;;` on Windows, `::` elsewhere) is skipped: joined to a file name it would name a
+/// file in the working directory, so a `pnpm.exe` wherever xtask runs would win.
 #[expect(
     clippy::disallowed_methods,
     reason = "the one walk over PATH; clippy.toml bans split_paths everywhere else"
@@ -160,7 +165,9 @@ pub(crate) fn first_on_path<T>(
     path: &OsStr,
     mut found: impl FnMut(&Path) -> Option<T>,
 ) -> Option<T> {
-    std::env::split_paths(path).find_map(|dir| found(&dir))
+    std::env::split_paths(path)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .find_map(|dir| found(&dir))
 }
 
 /// A program, its arguments and how long it may run. Displays as the shell-like form:
@@ -172,6 +179,9 @@ pub(crate) struct Cmd {
     /// How long it may run before its tree is stopped. Every call site passes a named `const`
     /// that says why that long.
     pub timeout: Duration,
+    /// How long its tree has between SIGTERM and SIGKILL on Unix, at its limit and for what is
+    /// left of it when it exits: `KILL_GRACE` unless `kill_grace` set another.
+    pub kill_grace: Duration,
 }
 
 impl Cmd {
@@ -187,6 +197,16 @@ impl Cmd {
                 .map(|arg| arg.as_ref().to_owned())
                 .collect(),
             timeout,
+            kill_grace: running::KILL_GRACE,
+        }
+    }
+
+    /// `self` with `grace` between SIGTERM and SIGKILL instead of `KILL_GRACE`, for a command
+    /// that needs longer to stop its own children. Pass a named `const` that says why.
+    pub(crate) fn kill_grace(self, grace: Duration) -> Cmd {
+        Cmd {
+            kill_grace: grace,
+            ..self
         }
     }
 }
@@ -208,55 +228,104 @@ fn spawn(command: &mut Command) -> io::Result<Child> {
     command.spawn()
 }
 
-/// Exit status and merged stdout and stderr of a command run by `capture`.
-#[derive(Debug)]
-pub(crate) struct Captured {
-    pub success: bool,
-    pub output: String,
+/// How a command ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Status {
+    /// It exited with status 0.
+    Succeeded,
+    /// It exited with another status, or a signal ended it.
+    Failed,
+    /// It was still running at its limit, so its tree was stopped. Its message is
+    /// `timeout_message` and its fix `TimeoutFix`.
+    TimedOut,
 }
 
-/// Exit status and separate stdout and stderr of a command run by `run_quiet` or `run`.
+/// How a command run by `capture`, `run_quiet` or `run` ended, and what was kept of its output:
+/// the one result of every run. A timeout is a `Status`, never an error: the `Err` beside a
+/// `Ran` means only that the command could not be started, or that its exit or output could not
+/// be waited for or read (a process that left its tree holding the output included).
 #[derive(Debug)]
-pub(crate) struct Quiet {
-    pub success: bool,
+pub(crate) struct Ran {
+    pub status: Status,
+    /// Its stdout; from `capture`, its stdout and stderr merged in the order they came. Empty with
+    /// `Output::Inherit`, whose output went to xtask's own and was not kept. What came before the
+    /// stop when it timed out.
     pub stdout: String,
+    /// Its stderr. Empty from `capture`, which merges it into `stdout`, and with
+    /// `Output::Inherit`.
     pub stderr: String,
 }
 
+impl Ran {
+    /// Whether it exited with status 0.
+    pub(crate) fn success(&self) -> bool {
+        self.status == Status::Succeeded
+    }
+
+    /// The result of a run that ended as `finish` says, with `stdout` and `stderr` kept.
+    fn of(finish: &Finish, stdout: &[u8], stderr: &[u8]) -> Ran {
+        let status = match finish {
+            Finish::Exited(status) if status.success() => Status::Succeeded,
+            Finish::Exited(_) => Status::Failed,
+            Finish::TimedOut => Status::TimedOut,
+        };
+        Ran {
+            status,
+            stdout: String::from_utf8_lossy(stdout).into_owned(),
+            stderr: String::from_utf8_lossy(stderr).into_owned(),
+        }
+    }
+}
+
+/// The results a test's fake runner returns.
+#[cfg(test)]
+impl Ran {
+    /// A run that exited, with `success` saying whether with status 0.
+    pub(crate) fn exited(
+        success: bool,
+        stdout: impl Into<String>,
+        stderr: impl Into<String>,
+    ) -> Ran {
+        Ran {
+            status: if success {
+                Status::Succeeded
+            } else {
+                Status::Failed
+            },
+            stdout: stdout.into(),
+            stderr: stderr.into(),
+        }
+    }
+
+    /// A run stopped at its limit, with nothing kept.
+    pub(crate) fn timed_out() -> Ran {
+        Ran {
+            status: Status::TimedOut,
+            stdout: String::new(),
+            stderr: String::new(),
+        }
+    }
+}
+
 /// Runs `cmd` in `root` with stdout and stderr merged into one stream. Each chunk read is passed
-/// to `on_output` as it arrives, and kept for the returned `output`. A command that runs past its
-/// limit is an error of kind `TimedOut` (see `timed_out`). A command that exits while a process
-/// that left its tree still holds its output is an error that says so, after `running::DRAIN`.
-pub(crate) fn capture(
-    cmd: &Cmd,
-    root: &Path,
-    on_output: &mut dyn FnMut(&[u8]),
-) -> io::Result<Captured> {
+/// to `on_output` as it arrives, and kept for the returned `stdout`. A command that exits while a
+/// process that left its tree still holds its output is an error that says so, after
+/// `running::DRAIN`.
+pub(crate) fn capture(cmd: &Cmd, root: &Path, on_output: &mut dyn FnMut(&[u8])) -> io::Result<Ran> {
     let mut bytes = Vec::new();
     let finish = running::run(cmd, root, Streams::Merged, &mut |_, chunk| {
         bytes.extend_from_slice(chunk);
         on_output(chunk);
     })?;
-    match finish {
-        Finish::Exited(status) => Ok(Captured {
-            success: status.success(),
-            output: String::from_utf8_lossy(&bytes).into_owned(),
-        }),
-        Finish::TimedOut => Err(timed_out(cmd)),
-    }
+    Ok(Ran::of(&finish, &bytes, b""))
 }
 
 /// A runner of `run_quiet`: production passes `run_quiet` itself, a test a fake.
-pub(crate) type QuietRunner<'a> = dyn FnMut(&Cmd, &Path) -> io::Result<Quiet> + 'a;
+pub(crate) type QuietRunner<'a> = dyn FnMut(&Cmd, &Path) -> io::Result<Ran> + 'a;
 
-/// Runs `cmd` in `root` and returns its stdout and stderr separately. A command that runs past
-/// its limit is an error of kind `TimedOut` (see `timed_out`); one whose output a process that
-/// left its tree still holds is an error, as for `capture`.
-pub(crate) fn run_quiet(cmd: &Cmd, root: &Path) -> io::Result<Quiet> {
-    match run(cmd, root, Output::Quiet)? {
-        Ended::Exited(quiet) => Ok(quiet),
-        Ended::TimedOut => Err(timed_out(cmd)),
-    }
+/// Runs `cmd` in `root` and keeps its stdout and stderr apart: `run` with `Output::Quiet`.
+pub(crate) fn run_quiet(cmd: &Cmd, root: &Path) -> io::Result<Ran> {
+    run(cmd, root, Output::Quiet)
 }
 
 /// Where the output of a command run by `run` goes.
@@ -264,27 +333,18 @@ pub(crate) fn run_quiet(cmd: &Cmd, root: &Path) -> io::Result<Quiet> {
 pub(crate) enum Output {
     /// Straight to xtask's stdout and stderr, so the terminal when xtask has one. On Unix the
     /// command still runs in a process group of its own: Ctrl-C reaches only xtask, and the leader
-    /// stops the command when xtask dies of it. On Windows it runs in its own job and shares
-    /// xtask's console, so Ctrl-C reaches it as well as xtask, and Windows ends the job when xtask
-    /// dies.
+    /// stops the command when xtask dies of it; it cannot read the terminal, so git and ssh
+    /// prompts are turned off (`unix.rs`). On Windows it runs in its own job and shares xtask's
+    /// console, so Ctrl-C reaches it as well as xtask, and Windows ends the job when xtask dies.
     Inherit,
     /// Kept, stdout and stderr apart.
     Quiet,
 }
 
-/// How a command run by `run` ended.
-#[derive(Debug)]
-pub(crate) enum Ended {
-    /// It exited. With `Output::Inherit`, `stdout` and `stderr` are empty.
-    Exited(Quiet),
-    /// It was still running at its limit, so its tree was stopped.
-    TimedOut,
-}
-
 /// Runs `cmd` in `root` with its output going where `output` says, and stops its tree if it runs
 /// past its limit. With `Output::Quiet`, output a process that left its tree still holds is an
 /// error, as for `capture`.
-pub(crate) fn run(cmd: &Cmd, root: &Path, output: Output) -> io::Result<Ended> {
+pub(crate) fn run(cmd: &Cmd, root: &Path, output: Output) -> io::Result<Ran> {
     let streams = match output {
         Output::Inherit => Streams::Inherit,
         Output::Quiet => Streams::Separate,
@@ -294,36 +354,16 @@ pub(crate) fn run(cmd: &Cmd, root: &Path, output: Output) -> io::Result<Ended> {
         Stream::Out => stdout.extend_from_slice(chunk),
         Stream::Err => stderr.extend_from_slice(chunk),
     })?;
-    Ok(match finish {
-        Finish::Exited(status) => Ended::Exited(Quiet {
-            success: status.success(),
-            stdout: String::from_utf8_lossy(&stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&stderr).into_owned(),
-        }),
-        Finish::TimedOut => Ended::TimedOut,
-    })
+    Ok(Ran::of(&finish, &stdout, &stderr))
 }
 
-/// The error `capture` and `run_quiet` return for `cmd` when it runs past its limit. Its kind is
-/// `TimedOut`, which no start or read error has, so `is_timeout` tells it apart.
-pub(crate) fn timed_out(cmd: &Cmd) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::TimedOut,
-        format!(
-            "`{cmd}` did not finish within {}, so it was stopped",
-            limit_text(cmd.timeout)
-        ),
+/// What to say of `cmd` when it ran past its limit (`Status::TimedOut`). The one home of that
+/// wording; its fix is `TimeoutFix`.
+pub(crate) fn timeout_message(cmd: &Cmd) -> String {
+    format!(
+        "`{cmd}` did not finish within {}, so it was stopped",
+        limit_text(cmd.timeout)
     )
-}
-
-/// Whether `error`, from `capture` or `run_quiet`, is the command running past its limit.
-pub(crate) fn is_timeout(error: &io::Error) -> bool {
-    error.kind() == io::ErrorKind::TimedOut
-}
-
-/// The fix of a command that ran past its limit, as text, for the steps and buildtime.
-pub(crate) fn timeout_fix(cmd: &Cmd) -> String {
-    TimeoutFix::of(cmd).to_string()
 }
 
 /// The fix of a command that ran past its limit: run it by hand. The one home of its wording, which
@@ -372,70 +412,6 @@ pub(crate) fn limit_text(limit: Duration) -> String {
 /// they only build or display: each runs well under a second, so a minute means it hangs.
 #[cfg(test)]
 pub(crate) const TEST_TIMEOUT: Duration = Duration::from_mins(1);
-
-/// How the hidden `process-test` mode runs its script, for xtask/tests/process.rs.
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub(crate) enum TestOutput {
-    /// Through `run` with `Output::Inherit`.
-    Inherit,
-    /// Through `capture`.
-    Capture,
-    /// Started with its output inherited; then, on Unix, the leader is killed, and the script runs
-    /// again to its end through `run`, with `$1` set to `again` (which starts a new leader); then
-    /// the first run is waited for. So only a new leader told about the first run's group can stop
-    /// it when xtask dies.
-    RestartedLeader,
-}
-
-/// The limit of the hidden `process-test` mode: longer than any test waits, so the test's signal
-/// ends the run, not the limit.
-const PROCESS_TEST_TIMEOUT: Duration = Duration::from_mins(10);
-
-/// The hidden `process-test` mode: runs `sh -c <script>` through the door as `output` says, so
-/// xtask/tests/process.rs can kill this xtask while the script runs. Exits 0 when the script
-/// exits 0, 1 otherwise.
-pub(crate) fn test_mode(output: TestOutput, script: &str) -> std::process::ExitCode {
-    let cmd = Cmd::new(Program::Named("sh"), ["-c", script], PROCESS_TEST_TIMEOUT);
-    let success = match output {
-        TestOutput::Inherit => matches!(
-            run(&cmd, Path::new("."), Output::Inherit),
-            Ok(Ended::Exited(Quiet { success: true, .. }))
-        ),
-        TestOutput::Capture => matches!(
-            capture(&cmd, Path::new("."), &mut |_| {}),
-            Ok(Captured { success: true, .. })
-        ),
-        TestOutput::RestartedLeader => restarted_leader(&cmd, script),
-    };
-    if success {
-        std::process::ExitCode::SUCCESS
-    } else {
-        std::process::ExitCode::FAILURE
-    }
-}
-
-/// The `restarted-leader` test mode for `cmd`, which is `sh -c <script>`. Whether both runs
-/// exited 0.
-fn restarted_leader(cmd: &Cmd, script: &str) -> bool {
-    let mut command = cmd.program.command();
-    command.args(&cmd.args);
-    let limits = running::Limits::of(cmd.timeout);
-    let started = running::Running::start(command, &cmd.to_string(), Streams::Inherit, limits);
-    let Ok(first) = started else {
-        return false;
-    };
-    #[cfg(unix)]
-    leader::kill_for_test();
-    let again = Cmd::new(
-        Program::Named("sh"),
-        ["-c", script, "sh", "again"],
-        cmd.timeout,
-    );
-    let second = run(&again, Path::new("."), Output::Inherit);
-    let first = first.finish(&mut |_, _| {});
-    matches!(second, Ok(Ended::Exited(Quiet { success: true, .. })))
-        && matches!(first, Ok(Finish::Exited(status)) if status.success())
-}
 
 #[cfg(test)]
 mod tests;

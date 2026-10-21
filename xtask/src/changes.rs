@@ -1,6 +1,6 @@
 //! `--quick` change detection: which packages changed since `origin/main`, and who depends on them.
 
-use crate::process::{self, Cmd, Program};
+use crate::process::{self, Cmd, Program, Status};
 use crate::workspace::{Member, package_for};
 use std::collections::BTreeSet;
 use std::fmt;
@@ -252,14 +252,12 @@ const GIT_TIMEOUT: Duration = Duration::from_mins(1);
 /// The stdout of `git <args>` run in `root`.
 fn git(root: &Path, args: &[&str]) -> Result<String, GitError> {
     let cmd = Cmd::new(Program::Git, args, GIT_TIMEOUT);
-    let quiet = process::run_quiet(&cmd, root).map_err(|error| {
-        if process::is_timeout(&error) {
-            GitError::TimedOut(error.to_string())
-        } else {
-            GitError::NotStarted(error.to_string())
-        }
-    })?;
-    if !quiet.success {
+    let quiet =
+        process::run_quiet(&cmd, root).map_err(|error| GitError::NotStarted(error.to_string()))?;
+    if quiet.status == Status::TimedOut {
+        return Err(GitError::TimedOut(process::timeout_message(&cmd)));
+    }
+    if !quiet.success() {
         return Err(GitError::Failed {
             command: cmd.to_string(),
             stderr: quiet.stderr.trim().to_owned(),

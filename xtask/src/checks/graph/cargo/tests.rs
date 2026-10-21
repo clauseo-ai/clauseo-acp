@@ -51,7 +51,7 @@ fn a_cargo_past_its_limit_is_told_apart_from_one_that_cannot_start() {
         ["tree", "-p", "x"],
         crate::process::TEST_TIMEOUT,
     );
-    let timed_out = start_failure(&cmd, &process::timed_out(&cmd));
+    let timed_out = timeout_failure(&cmd);
     assert_eq!(
         timed_out.message,
         "`cargo tree -p x` did not finish within 1 min, so it was stopped"

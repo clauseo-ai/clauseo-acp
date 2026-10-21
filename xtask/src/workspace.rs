@@ -1,6 +1,6 @@
 //! Workspace layout read from `cargo metadata`, and the context handed to static checks.
 
-use crate::process::{self, Cmd, Program};
+use crate::process::{self, Cmd, Program, Status};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -158,14 +158,12 @@ fn run_metadata(root: &Path) -> Result<String, String> {
         ["metadata", "--format-version", "1", "--no-deps"],
         METADATA_TIMEOUT,
     );
-    let quiet = process::run_quiet(&cmd, root).map_err(|e| {
-        if process::is_timeout(&e) {
-            e.to_string()
-        } else {
-            format!("could not run `cargo metadata`: {e}")
-        }
-    })?;
-    if !quiet.success {
+    let quiet = process::run_quiet(&cmd, root)
+        .map_err(|e| format!("could not run `cargo metadata`: {e}"))?;
+    if quiet.status == Status::TimedOut {
+        return Err(process::timeout_message(&cmd));
+    }
+    if !quiet.success() {
         return Err(format!("`cargo metadata` failed:\n{}", quiet.stderr.trim()));
     }
     Ok(quiet.stdout)

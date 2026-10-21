@@ -3,7 +3,7 @@
 
 use super::Fix;
 use crate::checks::Failure;
-use crate::process::{self, Cmd, Program};
+use crate::process::{self, Cmd, Program, Status};
 use semver::{Version, VersionReq};
 use std::path::Path;
 use std::time::Duration;
@@ -18,29 +18,32 @@ const CARGO_TREE_TIMEOUT: Duration = Duration::from_mins(5);
 pub(super) fn cargo_stdout(root: &Path, args: &[&str]) -> Result<String, Failure> {
     let cmd = Cmd::new(Program::Cargo, args.iter().copied(), CARGO_TREE_TIMEOUT);
     let quiet = process::run_quiet(&cmd, root).map_err(|error| start_failure(&cmd, &error))?;
-    if quiet.success {
-        Ok(quiet.stdout)
-    } else {
-        let stderr = quiet.stderr.trim();
-        Err(Failure {
-            message: format!("`{cmd}` failed: {stderr}"),
-            fix: failure_fix(&cmd, stderr, root).into(),
-        })
+    match quiet.status {
+        Status::Succeeded => Ok(quiet.stdout),
+        Status::TimedOut => Err(timeout_failure(&cmd)),
+        Status::Failed => {
+            let stderr = quiet.stderr.trim();
+            Err(Failure {
+                message: format!("`{cmd}` failed: {stderr}"),
+                fix: failure_fix(&cmd, stderr, root).into(),
+            })
+        }
     }
 }
 
-/// The failure of `cmd` that did not start or ran past its limit (`error`).
+/// The failure of `cmd` that ran past its limit.
+fn timeout_failure(cmd: &Cmd) -> Failure {
+    Failure {
+        message: process::timeout_message(cmd),
+        fix: Fix::TimedOut(process::TimeoutFix::of(cmd)).into(),
+    }
+}
+
+/// The failure of `cmd` that did not start (`error`).
 fn start_failure(cmd: &Cmd, error: &std::io::Error) -> Failure {
-    if process::is_timeout(error) {
-        Failure {
-            message: error.to_string(),
-            fix: Fix::TimedOut(process::TimeoutFix::of(cmd)).into(),
-        }
-    } else {
-        Failure {
-            message: format!("could not run `{cmd}`: {error}"),
-            fix: Fix::CargoOnPath.into(),
-        }
+    Failure {
+        message: format!("could not run `{cmd}`: {error}"),
+        fix: Fix::CargoOnPath.into(),
     }
 }
 

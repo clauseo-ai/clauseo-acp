@@ -46,9 +46,9 @@ fn a_dead_leader_is_replaced_when_the_next_command_starts() {
     let cmd = Cmd::new(Program::Named("true"), Vec::<String>::new(), TEST_TIMEOUT);
     run_quiet(&cmd, Path::new(".")).expect("true runs, and the leader starts");
     let killed = leader_pid();
-    kill_for_test();
+    crate::process::test_mode::kill_leader();
     let ran = run_quiet(&cmd, Path::new(".")).expect("a new leader takes the command");
-    assert!(ran.success);
+    assert!(ran.success());
     assert_ne!(leader_pid(), killed, "the killed leader was replaced");
 }
 

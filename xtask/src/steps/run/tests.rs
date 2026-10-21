@@ -19,11 +19,8 @@ fn text(out: Printer<Vec<u8>>) -> String {
     String::from_utf8(out.into_inner()).expect("output is utf-8")
 }
 
-fn ok_output(cmd: &Cmd) -> Captured {
-    Captured {
-        success: true,
-        output: cmd.to_string(),
-    }
+fn ok_output(cmd: &Cmd) -> Ran {
+    Ran::exited(true, cmd.to_string(), "")
 }
 
 fn no_findings(_output: &str, _ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
@@ -161,13 +158,14 @@ fn without_secs(printed: &str) -> String {
     clippy::unnecessary_wraps,
     reason = "must match the Exec type, which returns io::Result"
 )]
-fn noisy_pass(_cmd: &Cmd, sink: &mut dyn FnMut(&[u8])) -> io::Result<Captured> {
+fn noisy_pass(_cmd: &Cmd, sink: &mut dyn FnMut(&[u8])) -> io::Result<Ran> {
     sink(b"   Compiling foo v0.1.0\n");
     sink(b"running 3 tests\n");
-    Ok(Captured {
-        success: true,
-        output: "   Compiling foo v0.1.0\nrunning 3 tests\n".into(),
-    })
+    Ok(Ran::exited(
+        true,
+        "   Compiling foo v0.1.0\nrunning 3 tests\n",
+        "",
+    ))
 }
 
 /// A failing run whose only output is `boom`, with no file and line.
@@ -175,12 +173,9 @@ fn noisy_pass(_cmd: &Cmd, sink: &mut dyn FnMut(&[u8])) -> io::Result<Captured> {
     clippy::unnecessary_wraps,
     reason = "must match the Exec type, which returns io::Result"
 )]
-fn boom_fail(_cmd: &Cmd, sink: &mut dyn FnMut(&[u8])) -> io::Result<Captured> {
+fn boom_fail(_cmd: &Cmd, sink: &mut dyn FnMut(&[u8])) -> io::Result<Ran> {
     sink(b"boom\n");
-    Ok(Captured {
-        success: false,
-        output: "boom\n".into(),
-    })
+    Ok(Ran::exited(false, "boom\n", ""))
 }
 
 #[test]
@@ -193,10 +188,11 @@ fn a_failing_step_does_not_stop_the_later_ones() {
     let mut calls = Vec::new();
     let mut exec = |cmd: &Cmd, _sink: &mut dyn FnMut(&[u8])| {
         calls.push(cmd.to_string());
-        Ok(Captured {
-            success: !cmd.args.iter().any(|arg| arg == "fail"),
-            output: "boom\n".into(),
-        })
+        Ok(Ran::exited(
+            !cmd.args.iter().any(|arg| arg == "fail"),
+            "boom\n",
+            "",
+        ))
     };
     let mut out = Printer::new(Vec::new(), false);
     let results = run_all(steps, &context(), &mut out, &mut exec);
@@ -246,7 +242,7 @@ fn a_program_that_cannot_start_fails_its_step_and_the_next_step_runs() {
 #[test]
 fn a_tool_past_its_limit_fails_its_step_and_says_it_was_stopped() {
     let steps = vec![fake_tool("slow", "fake", &["hang"])];
-    let mut exec = |cmd: &Cmd, _sink: &mut dyn FnMut(&[u8])| Err(process::timed_out(cmd));
+    let mut exec = |_: &Cmd, _sink: &mut dyn FnMut(&[u8])| Ok(Ran::timed_out());
     let mut out = Printer::new(Vec::new(), false);
     let results = run_all(steps, &context(), &mut out, &mut exec);
     assert!(matches!(
