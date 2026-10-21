@@ -335,7 +335,8 @@ fn remove_left_build_dirs<W: Write>(
             Ok(()) => removed += 1,
             Err(error) => {
                 let message = format!(
-                    "could not remove {}, a build dir cargo-mutants left when it was stopped:                      {error}",
+                    "could not remove {}, a build dir cargo-mutants left when it was stopped: \
+                     {error}",
                     dir.display()
                 );
                 fail(out, &message, &Fix::RemoveByHand);
