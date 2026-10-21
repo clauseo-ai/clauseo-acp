@@ -5,23 +5,21 @@ import { fileURLToPath } from "node:url";
 import { brotliCompressSync, constants as zlib } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  AppGuard,
-  ConflictError,
+  BACKUP_DIR,
   MIN_NODE,
   ROOT_TAG,
   appPaths,
-  nodeAtLeast,
-  recoverApp,
-  restoreFailure,
-  tmpOf,
-  unmarked,
   initialJs,
   marked,
+  nodeAtLeast,
   parseRuns,
+  recoverApp,
   resolveBin,
   scriptCommand,
   splitCommand,
+  unmarked,
 } from "./buildtime-lib.mjs";
+import { restoreFailure, tmpOf } from "./guard.mjs";
 
 const APP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -206,132 +204,55 @@ describe("initialJs", () => {
   });
 });
 
-describe("the App.tsx guard", () => {
+describe("buildtime's part of the App.tsx guard", () => {
   const REL = "ui/app/src/App.tsx";
   const ORIGINAL = 'export function App() {\n  return <div id="app-root" />;\n}\n';
 
-  /** A repo with App.tsx holding `text`, and its paths. */
-  function repo(text = ORIGINAL) {
+  /** A repo with App.tsx holding `text` and its saved copy holding ORIGINAL, and its paths. */
+  function interrupted(text) {
     const paths = appPaths(scratch(), REL);
-    tree(paths.app.slice(0, -REL.length), { [REL]: text });
+    tree(paths.file.slice(0, -REL.length), { [REL]: text });
+    tree(paths.base, { [REL]: ORIGINAL });
     return paths;
   }
 
   const read = (path) => readFileSync(path, "utf8");
 
+  it("keeps the copy under target/xtask/buildtime and names buildtime's temporary files", () => {
+    const paths = appPaths("/repo", REL);
+    expect(paths.backup).toBe(join("/repo", BACKUP_DIR, REL));
+    expect(paths.backupRel).toBe(`target/xtask/buildtime/${REL}`);
+    expect(tmpOf(paths.file, paths.tool)).toBe(join("/repo", "ui/app/src/.App.tsx.buildtime.tmp"));
+  });
+
   it("marks and recovers back to the same bytes", () => {
-    const paths = repo(marked(ORIGINAL, 3));
-    tree(paths.base, { [REL]: ORIGINAL });
+    const paths = interrupted(marked(ORIGINAL, 3));
     expect(unmarked(marked(ORIGINAL, 3))).toBe(ORIGINAL);
     expect(recoverApp(paths)).toBe(`restored ${REL} from an interrupted buildtime run`);
-    expect(read(paths.app)).toBe(ORIGINAL);
+    expect(read(paths.file)).toBe(ORIGINAL);
     expect(existsSync(paths.backup)).toBe(false);
     expect(existsSync(join(paths.base, "ui"))).toBe(false);
   });
 
-  it("does nothing without a copy, and drops a copy of an unchanged file", () => {
-    const paths = repo();
-    expect(recoverApp(paths)).toBeUndefined();
-    tree(paths.base, { [REL]: ORIGINAL });
-    expect(recoverApp(paths)).toMatch(/^deleted the copy/);
-    expect(read(paths.app)).toBe(ORIGINAL);
-    expect(existsSync(paths.backup)).toBe(false);
-  });
-
-  it("deletes the temporary files of an interrupted write", () => {
-    const paths = repo();
-    writeFileSync(tmpOf(paths.app), "half");
-    expect(recoverApp(paths)).toBeUndefined();
-    expect(existsSync(tmpOf(paths.app))).toBe(false);
-  });
-
-  it("keeps a half-written App.tsx and its copy, and reports the conflict", () => {
-    const paths = repo(ORIGINAL.slice(0, 20));
-    tree(paths.base, { [REL]: ORIGINAL });
-    expect(() => recoverApp(paths)).toThrow(
-      `${REL} changed after an interrupted buildtime run; its saved copy is target/xtask/buildtime/${REL}`,
-    );
-    expect(read(paths.app)).toBe(ORIGINAL.slice(0, 20));
-    expect(read(paths.backup)).toBe(ORIGINAL);
-  });
-
-  it("keeps a developer's edit made after a killed run, and a missing file is a conflict", () => {
-    const edited = `${marked(ORIGINAL, 2)}// typed after the kill\n`;
-    const paths = repo(edited);
-    tree(paths.base, { [REL]: ORIGINAL });
-    let error;
-    try {
-      recoverApp(paths);
-    } catch (caught) {
-      error = caught;
+  it("keeps a developer's edit made after a killed run, and a mark twice", () => {
+    for (const text of [
+      `${marked(ORIGINAL, 2)}// typed after the kill\n`,
+      marked(marked(ORIGINAL, 2), 3),
+    ]) {
+      const paths = interrupted(text);
+      expect(() => recoverApp(paths)).toThrow(
+        `${REL} changed after an interrupted buildtime run; its saved copy is target/xtask/buildtime/${REL}`,
+      );
+      expect(read(paths.file)).toBe(text);
+      expect(read(paths.backup)).toBe(ORIGINAL);
     }
-    expect(error).toBeInstanceOf(ConflictError);
-    expect(error.fix).toBe(
-      `compare the two, keep what you want, then delete target/xtask/buildtime/${REL}`,
-    );
-    expect(read(paths.app)).toBe(edited);
-    expect(read(paths.backup)).toBe(ORIGINAL);
-    rmSync(paths.app);
-    expect(() => recoverApp(paths)).toThrow("is missing after an interrupted buildtime run");
-    expect(read(paths.backup)).toBe(ORIGINAL);
   });
 
-  it("puts the original back after its edits and leaves no copy or temporary file", () => {
-    const paths = repo();
-    const guard = new AppGuard(paths);
-    expect(read(paths.backup)).toBe(ORIGINAL);
-    guard.write(marked(ORIGINAL, 1));
-    guard.write(marked(ORIGINAL, 2));
-    expect(read(paths.app)).toBe(marked(ORIGINAL, 2));
-    expect(existsSync(tmpOf(paths.app))).toBe(false);
-    guard.restore();
-    guard.restore();
-    expect(read(paths.app)).toBe(ORIGINAL);
-    expect(existsSync(paths.backup)).toBe(false);
-  });
-
-  it("keeps a developer's edit made during the run, and both files", () => {
-    const paths = repo();
-    const guard = new AppGuard(paths);
-    guard.write(marked(ORIGINAL, 1));
-    const typed = `${marked(ORIGINAL, 1)}// typed during the run\n`;
-    writeFileSync(paths.app, typed);
-    expect(() => guard.write(marked(ORIGINAL, 2))).toThrow(
-      `${REL} changed during this buildtime run; its saved copy is target/xtask/buildtime/${REL}`,
-    );
-    guard.restore();
-    expect(read(paths.app)).toBe(typed);
-    expect(read(paths.backup)).toBe(ORIGINAL);
-  });
-
-  it("keeps an edit made just before the restore", () => {
-    const paths = repo();
-    const guard = new AppGuard(paths);
-    guard.write(marked(ORIGINAL, 1));
-    writeFileSync(paths.app, "export {};\n");
-    expect(() => guard.restore()).toThrow(ConflictError);
-    expect(read(paths.app)).toBe("export {};\n");
-    expect(read(paths.backup)).toBe(ORIGINAL);
-  });
-
-  it("turns a failed restore into a run failure that names the copy", () => {
-    const paths = appPaths("/repo", REL);
-    const conflict = new ConflictError("changed", "compare them");
-    expect(restoreFailure(paths, conflict)).toEqual({ message: "changed", fix: "compare them" });
-    const eperm = Object.assign(new Error("EPERM: operation not permitted, rename"), {
-      code: "EPERM",
-    });
-    expect(restoreFailure(paths, eperm)).toEqual({
+  it("names cargo xtask buildtime web in the fix of a failed restore", () => {
+    const eperm = new Error("EPERM: operation not permitted, rename");
+    expect(restoreFailure(appPaths("/repo", REL), eperm)).toEqual({
       message: `could not put back ${REL}: EPERM: operation not permitted, rename; its saved copy is target/xtask/buildtime/${REL}`,
       fix: `the next \`cargo xtask buildtime web\` restores ${REL} from target/xtask/buildtime/${REL}; or copy it back by hand`,
     });
-  });
-
-  it("refuses to start over an existing copy and leaves App.tsx alone", () => {
-    const paths = repo();
-    tree(paths.base, { [REL]: "an older copy" });
-    expect(() => new AppGuard(paths)).toThrow(`a saved copy of ${REL} already exists`);
-    expect(read(paths.backup)).toBe("an older copy");
-    expect(read(paths.app)).toBe(ORIGINAL);
   });
 });
