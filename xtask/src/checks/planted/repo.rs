@@ -40,6 +40,11 @@ impl Repo {
         Repo::with_members(dir, vec![desktop_member()])
     }
 
+    /// The repo `scratch(case, files)` writes, for a check that reads no workspace member.
+    pub(crate) fn files<T: AsRef<[u8]>>(case: &str, files: &[(&str, T)]) -> Repo {
+        Repo::new(scratch(case, files))
+    }
+
     /// The repo in `dir` with the context `context` makes from its root, such as a failed load.
     pub(crate) fn with_context(dir: Scratch, context: impl FnOnce(&Path) -> Context) -> Repo {
         let ctx = context(&dir);
@@ -99,6 +104,22 @@ impl Repo {
     pub(crate) fn ctx(&self) -> &Context {
         &self.ctx
     }
+}
+
+/// A scratch directory named `planted-{case}`, with each `(path, bytes)` of `files` written into
+/// it, its parent directories first. `path` is relative to the directory, with `/` between parts.
+/// Start `case` with the check, e.g. `budgets-negative-limit`, so a directory a killed run left
+/// says which case made it.
+pub(crate) fn scratch<T: AsRef<[u8]>>(case: &str, files: &[(&str, T)]) -> Scratch {
+    let dir = Scratch::new(&format!("planted-{case}"));
+    for (path, bytes) in files {
+        let full = dir.join(path);
+        if let Some(parent) = full.parent() {
+            Scratch::create_dir_all(parent).expect("create the file's parent directories");
+        }
+        Scratch::write(&full, bytes).expect("write the case's file");
+    }
+    dir
 }
 
 /// Writes the lockfile of the workspace at `root` with `cargo generate-lockfile --offline`.
