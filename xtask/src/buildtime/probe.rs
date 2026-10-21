@@ -119,7 +119,7 @@ fn edit_and_run(
     let mut secs = Vec::new();
     let mut warning = None;
     for run in 0..=runs {
-        let next = bump_marker(&guard.last).ok_or_else(|| {
+        let next = bump_marker(guard.last()).ok_or_else(|| {
             Failure::new(
                 format!("{} lost its marker line", marker.path),
                 "restore the BUILDTIME_MARKER line by hand",

@@ -48,7 +48,7 @@ pub(crate) struct Guard {
     path: PathBuf,
     rel: String,
     original: String,
-    pub(crate) last: String,
+    last: String,
     base: PathBuf,
     backup: PathBuf,
     /// The original still has to go back. False after `restore`, and after a conflict, which keeps
@@ -115,6 +115,12 @@ impl Guard {
                 ))
             }
         }
+    }
+
+    /// The bytes the guard last wrote to the file (the original until the first write). Read-only:
+    /// only `write` changes them, so no caller can make the conflict check miss an edit.
+    pub(crate) fn last(&self) -> &str {
+        &self.last
     }
 
     /// Writes `text` over the file, once the file still holds the bytes last written.
