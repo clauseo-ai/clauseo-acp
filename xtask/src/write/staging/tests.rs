@@ -1,20 +1,21 @@
-//! Tests for setup's writes: each stays in bin and the staging dir it made.
+//! Tests of `Staging`: each write stays in bin and the staging dir it made.
 
 use super::*;
 use crate::scratch::Scratch;
+use std::fs;
 
 #[test]
 fn a_staging_dir_is_one_name_in_bin_and_installs_only_its_own_files() {
     let dir = Scratch::new("write-setup-staging");
     let bin = dir.join("bin");
-    let refused = Staging::fresh(&bin, "../escape").expect_err("a path is no label");
+    let refused = Staging::fresh(&bin, "../escape").expect_err("a path is no name");
     assert_eq!(
         refused.to_string(),
-        "`../escape` is not a staging label: it must be one plain file name"
+        "`../escape` is not a staging dir name: it must be one plain file name"
     );
     assert!(!bin.exists(), "nothing was made");
 
-    let staging = Staging::fresh(&bin, "tool-1").expect("a fresh staging dir");
+    let staging = Staging::fresh(&bin, ".xtask-setup-tool-1").expect("a fresh staging dir");
     assert_eq!(staging.dir(), bin.join(".xtask-setup-tool-1"));
     Scratch::write(staging.dir().join("tool"), "binary").expect("a download");
     Scratch::write(dir.join("elsewhere"), "binary").expect("a file outside");
@@ -48,21 +49,6 @@ fn a_staging_dir_is_one_name_in_bin_and_installs_only_its_own_files() {
     staging
         .remove()
         .expect("a staging dir already gone is fine");
-}
-
-#[test]
-fn the_run_lock_is_created_when_missing_and_never_truncated() {
-    let dir = Scratch::new("write-setup-run-lock");
-    let bin = dir.join("bin");
-    let lock = open_run_lock(&bin).expect("created with bin");
-    lock.try_lock().expect("the lock is free");
-    drop(lock);
-    Scratch::write(bin.join(RUN_LOCK), "left by an earlier run").expect("some bytes");
-    drop(open_run_lock(&bin).expect("opened"));
-    assert_eq!(
-        fs::read_to_string(bin.join(RUN_LOCK)).expect("read it"),
-        "left by an earlier run"
-    );
 }
 
 /// Makes `dir` read-only (true) or writable again (false).
@@ -107,26 +93,4 @@ fn a_staging_dir_that_cannot_be_removed_fails_remove_with_the_os_error() {
     let error = removed.expect_err("bin will not let the staging dir go");
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     assert!(staging.dir().exists());
-}
-
-#[cfg(unix)]
-#[test]
-fn a_run_lock_that_cannot_be_read_is_refused_and_never_truncated() {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = Scratch::new("write-setup-unreadable-lock");
-    let bin = dir.join("bin");
-    Scratch::create_dir_all(&bin).expect("bin");
-    Scratch::write(bin.join(RUN_LOCK), "kept").expect("the lock file");
-    // Write-only: the open for reading fails, the open for writing would succeed.
-    Scratch::set_permissions(bin.join(RUN_LOCK), fs::Permissions::from_mode(0o200))
-        .expect("chmod the lock file");
-    let refused = open_run_lock(&bin);
-    Scratch::set_permissions(bin.join(RUN_LOCK), fs::Permissions::from_mode(0o644))
-        .expect("chmod the lock file back");
-    let error = refused.expect_err("a lock file that cannot be read is no lock");
-    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
-    assert_eq!(
-        fs::read_to_string(bin.join(RUN_LOCK)).expect("read it"),
-        "kept"
-    );
 }

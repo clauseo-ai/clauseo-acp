@@ -23,12 +23,17 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-/// The diff cargo-mutants reads, relative to the repo root.
-const DIFF: &str = write::MUTANTS_DIFF;
-/// The folder cargo-mutants makes its `mutants.out` in (`--output`), instead of the repo root.
+/// The folder cargo-mutants makes its `mutants.out` in (`--output`), instead of the repo root,
+/// and the diff is saved in.
 const OUTPUT_PARENT: &str = "target/xtask";
+/// The diff's name in `OUTPUT_PARENT`.
+const DIFF_NAME: &str = "mutants.diff";
+/// The diff cargo-mutants reads, relative to the repo root.
+const DIFF: &str = "target/xtask/mutants.diff";
+/// The output folder's name in `OUTPUT_PARENT`.
+const OUTPUT_NAME: &str = "mutants.out";
 /// Its output folder, which each run removes first.
-const OUTPUT_DIR: &str = write::MUTANTS_OUTPUT;
+const OUTPUT_DIR: &str = "target/xtask/mutants.out";
 /// What xtask reads of it.
 const OUTCOMES: &str = "target/xtask/mutants.out/outcomes.json";
 
@@ -113,7 +118,8 @@ pub(crate) fn run_with<W: Write>(
     if !installed(out, exec) {
         return false;
     }
-    if let Err(error) = write::save_mutants_diff(root, &diff) {
+    if let Err(error) = write::write_file_in(&root.join(OUTPUT_PARENT), DIFF_NAME, diff.as_bytes())
+    {
         fail(
             out,
             &format!("could not write {DIFF}: {error}"),
@@ -121,7 +127,7 @@ pub(crate) fn run_with<W: Write>(
         );
         return false;
     }
-    if let Err(error) = write::remove_mutants_output(root) {
+    if let Err(error) = remove_output(root) {
         let message = format!("could not remove {OUTPUT_DIR}, the last run's output: {error}");
         fail(out, &message, &Fix::Write { path: OUTPUT_DIR });
         return false;
@@ -151,6 +157,15 @@ pub(crate) fn run_with<W: Write>(
             );
             false
         }
+    }
+}
+
+/// Removes `OUTPUT_DIR` under `root`, the folder an earlier run of cargo-mutants left, so its
+/// `outcomes.json` is never read as this run's. A missing folder is not an error.
+fn remove_output(root: &Path) -> io::Result<()> {
+    match write::remove_in(&root.join(OUTPUT_PARENT), OUTPUT_NAME) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
     }
 }
 
@@ -311,7 +326,8 @@ fn remove_left_build_dirs<W: Write>(
     let left: Vec<PathBuf> = build_dirs(temp, root).difference(before).cloned().collect();
     let mut removed = 0;
     for dir in &left {
-        match write::remove_mutants_build_dir(dir) {
+        let name = dir.file_name().unwrap_or_default().to_string_lossy();
+        match write::remove_in(temp, &name) {
             Ok(()) => removed += 1,
             Err(error) => {
                 let message = format!(
