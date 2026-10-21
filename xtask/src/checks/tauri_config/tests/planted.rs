@@ -308,7 +308,7 @@ crate::checks::planted::cases! {
                 place: "in the desktop crate (tauri.conf.json, build.rs and its other Rust files) \
                         and .cargo/config.toml"
                     .to_owned(),
-                source: "xtask/src/checks/tauri_config.rs",
+                source: "xtask/src/checks/tauri_config.rs".to_owned(),
             },
         ),
     ], inspects 0 => super::repos::both_config_files_missing,

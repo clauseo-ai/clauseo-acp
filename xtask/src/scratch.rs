@@ -88,12 +88,17 @@ impl Scratch {
     }
 
     /// A symlink at `link` to the directory `target`: `symlink` on Unix, `symlink_dir` on
-    /// Windows.
+    /// Windows. On Windows a relative `target` written with `/` (`../../elsewhere`) is stored
+    /// with `\`, since Windows stores the target as given and resolves a relative one only
+    /// with `\`.
     pub(crate) fn symlink_dir(target: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
         #[cfg(unix)]
         let linked = sys::symlink(target.as_ref(), inside(link.as_ref()));
         #[cfg(windows)]
-        let linked = sys::symlink_dir(target.as_ref(), inside(link.as_ref()));
+        let linked = sys::symlink_dir(
+            &target.as_ref().components().collect::<PathBuf>(),
+            inside(link.as_ref()),
+        );
         linked
     }
 }
