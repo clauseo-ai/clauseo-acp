@@ -239,6 +239,41 @@ fn a_program_that_cannot_start_fails_its_step_and_the_next_step_runs() {
     assert!(text(out).contains("could not run `missing`"));
 }
 
+/// A tool's parser that finds one warning and no error in its output.
+fn one_warning(_output: &str, _ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
+    vec![Finding {
+        violation: Violation {
+            path: "docs/a.md".into(),
+            line: 2,
+            message: "a warning".into(),
+            fix: crate::fix::Fix::Fake("fix the warning"),
+        },
+        is_error: false,
+    }]
+}
+
+#[test]
+fn a_tool_warning_is_counted_and_does_not_fail_its_step() {
+    let step = Step::Tool(ToolStep {
+        name: "lint",
+        cmd: Cmd::new(Program::Named("fake"), ["warn"], TEST_TIMEOUT),
+        parse: one_warning,
+        fix: reproduce,
+        render: None,
+    });
+    let mut exec = |_: &Cmd, _: &mut dyn FnMut(&[u8])| Ok(Ran::exited(true, "a warning\n", ""));
+    let mut out = Printer::new(Vec::new(), false);
+    let results = run_all(vec![step], &context(), &mut out, &mut exec);
+    assert!(matches!(
+        results[0].status,
+        StepStatus::Ran {
+            failed: false,
+            warnings: 1,
+            ..
+        }
+    ));
+}
+
 #[test]
 fn a_tool_past_its_limit_fails_its_step_and_says_it_was_stopped() {
     let steps = vec![fake_tool("slow", "fake", &["hang"])];

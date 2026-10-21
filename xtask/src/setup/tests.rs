@@ -473,3 +473,23 @@ fn a_cargo_install_past_its_limit_says_so_and_how_to_see_why() {
         )
     );
 }
+
+#[test]
+fn a_cargo_install_that_exits_non_zero_says_it_failed_and_how_to_reproduce_it() {
+    let tool = &TOOLS[0];
+    let mut runner =
+        |_: &Cmd, _: &Path, _: Output| -> io::Result<Ran> { Ok(Ran::exited(false, "", "")) };
+    let mut out = Printer::new(Vec::new(), false);
+    assert!(!install_tool(&mut out, tool, Path::new("."), &mut runner));
+    let cmd = format!(
+        "cargo install --locked {} --version {}",
+        tool.name, tool.version
+    );
+    assert_eq!(
+        String::from_utf8(out.into_inner()).unwrap(),
+        format!(
+            "{cmd}\ninstalling {} failed\n    fix: run `{cmd}` to reproduce\n",
+            tool.name
+        )
+    );
+}

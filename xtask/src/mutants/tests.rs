@@ -78,6 +78,8 @@ enum Git {
     Lists(&'static str),
     /// Exits non-zero, printing this.
     Fails(&'static str),
+    /// Runs past its limit.
+    TimesOut,
     /// Does not start.
     CannotStart,
 }
@@ -120,6 +122,7 @@ fn check_with(
                 return match git {
                     Git::Lists(files) => Ok(Ran::exited(true, *files, "")),
                     Git::Fails(output) => Ok(Ran::exited(false, *output, "")),
+                    Git::TimesOut => Ok(Ran::timed_out()),
                     Git::CannotStart => Err(io::Error::new(io::ErrorKind::NotFound, "no git")),
                 };
             }
