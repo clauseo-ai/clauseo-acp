@@ -1,4 +1,5 @@
-//! Workspace automation: `cargo xtask check [--quick]`, `cargo xtask setup [--binaries]`,
+//! Workspace automation: `cargo xtask check [--quick]`,
+//! `cargo xtask setup [--binaries] [--only <tool>]...`,
 //! `cargo xtask buildtime [rust|web|all] [--runs N] [--json]` and `cargo xtask mutants`.
 //!
 //! For people and agents:
@@ -9,7 +10,8 @@
 //!   and its planted cases go in one `checks::planted::cases!` list.
 //! - Pin a tool: one `Tool` in `setup::TOOLS` for a cargo crate, else one `Binary` in
 //!   `setup::BINARIES`.
-//! - `setup` prints a `Binary`'s install command; `setup --binaries` also runs it.
+//! - `setup` prints a `Binary`'s install command; `setup --binaries` also runs it. `setup --only
+//!   <tool>`, repeatable, sets up only the named `Tool`s and `Binary`s.
 //! - Budgets live in `budgets.toml` at the repo root; `budgets.rs` reads them for the check and for
 //!   `buildtime`.
 //! - Failures print as `path:line: what`, then `    fix: ...`. A failure with no location prints
@@ -78,6 +80,10 @@ enum Commands {
         /// A failed install fails setup with a fix line. Versions are checked either way.
         #[arg(long)]
         binaries: bool,
+        /// Set up only this pinned tool, named as `setup` prints it (`cargo-nextest`,
+        /// `gitleaks`, ...). Repeat it to name more. An unknown name fails before any install.
+        #[arg(long, value_name = "TOOL")]
+        only: Vec<String>,
     },
     /// Time the build loop against `budgets.toml`: the Rust half, the web half, or both (the
     /// default).
@@ -124,9 +130,12 @@ fn main() -> ExitCode {
             };
             check::run(&ctx, quick, ci, &mut exec, &mut process::run_quiet)
         }
-        Commands::Setup { binaries } => {
-            setup::run(&workspace::workspace_root(), binaries, &mut process::run)
-        }
+        Commands::Setup { binaries, only } => setup::run(
+            &workspace::workspace_root(),
+            setup::Selection::of(&only),
+            binaries,
+            &mut process::run,
+        ),
         Commands::Buildtime { half, runs, json } => {
             buildtime::run(&workspace::workspace_root(), half, runs, json)
         }

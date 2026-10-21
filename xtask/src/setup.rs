@@ -2,7 +2,9 @@
 //! that are not cargo crates, and checks their versions. With `--binaries` it also installs each of
 //! those that is missing or at another version, then checks its version again. On macOS and Linux
 //! that install downloads the release asset, checks its pinned sha256 and only then moves the
-//! binary into `CARGO_HOME/bin`; on Windows it runs winget.
+//! binary into `CARGO_HOME/bin`; on Windows it runs winget. With `--only <tool>` (repeatable) it
+//! sets up only the named tools, each named as in `TOOLS` or `BINARIES`; `--binaries` then installs
+//! only the named binaries. A name that is neither fails the run before anything is installed.
 
 mod install;
 mod version;
@@ -215,17 +217,59 @@ impl Machine<'static> {
     }
 }
 
+/// The tools a run can set up: `TOOLS` and `BINARIES` in production, fakes in tests.
+struct Pins<'a> {
+    tools: &'a [Tool],
+    binaries: &'a [Binary],
+}
+
+/// Which pinned tools a run sets up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Selection<'a> {
+    /// Every tool in `TOOLS` and `BINARIES`: `setup` without `--only`.
+    All,
+    /// The tools `--only` names, at least one; any name may be unknown, which fails the run.
+    Only(&'a [String]),
+}
+
+impl<'a> Selection<'a> {
+    /// The selection the `--only` values give: `All` when there are none.
+    pub(crate) fn of(only: &'a [String]) -> Self {
+        if only.is_empty() {
+            Selection::All
+        } else {
+            Selection::Only(only)
+        }
+    }
+
+    fn has(self, name: &str) -> bool {
+        match self {
+            Selection::All => true,
+            Selection::Only(names) => names.iter().any(|n| n == name),
+        }
+    }
+}
+
 /// Runs a command in a directory, with where its output goes. Production passes `process::run`.
 pub(crate) type Runner<'a> = dyn FnMut(&Cmd, &Path, Output) -> io::Result<Ran> + 'a;
 
-/// Installs each cargo tool, then checks each binary's version and, with `binaries`, installs it
-/// when that check fails and checks again. Continues past failures; fails if any failed. Runs in
-/// `root`, the checkout, with every command going through `runner`. Production passes
-/// `process::run`.
-pub(crate) fn run(root: &Path, binaries: bool, runner: &mut Runner<'_>) -> ExitCode {
+/// Installs each selected cargo tool, then checks each selected binary's version and, with
+/// `binaries`, installs it when that check fails and checks again. Continues past failures; fails
+/// if any failed. Runs in `root`, the checkout, with every command going through `runner`.
+/// Production passes `process::run`.
+pub(crate) fn run(
+    root: &Path,
+    selection: Selection<'_>,
+    binaries: bool,
+    runner: &mut Runner<'_>,
+) -> ExitCode {
     let mut out = Printer::stdout();
     let machine = Machine::this();
-    let ok = run_with(&mut out, &machine, TOOLS, BINARIES, binaries, root, runner);
+    let pins = Pins {
+        tools: TOOLS,
+        binaries: BINARIES,
+    };
+    let ok = run_with(&mut out, &machine, &pins, selection, binaries, root, runner);
     if ok {
         ExitCode::SUCCESS
     } else {
@@ -237,18 +281,25 @@ pub(crate) fn run(root: &Path, binaries: bool, runner: &mut Runner<'_>) -> ExitC
 fn run_with<W: Write>(
     out: &mut Printer<W>,
     machine: &Machine<'_>,
-    tools: &[Tool],
-    binaries: &[Binary],
+    pins: &Pins<'_>,
+    selection: Selection<'_>,
     install: bool,
     root: &Path,
     runner: &mut Runner<'_>,
 ) -> bool {
+    if !known_names(out, pins, selection) {
+        return false;
+    }
+    let tools = pins.tools.iter().filter(|t| selection.has(t.name));
+    let binaries: Vec<&Binary> = (pins.binaries.iter())
+        .filter(|b| selection.has(b.name))
+        .collect();
     let mut all_ok = true;
     for tool in tools {
         all_ok &= install_tool(out, tool, root, runner);
     }
     // Held to the end of the run.
-    let _lock = if install {
+    let _lock = if install && !binaries.is_empty() {
         let (lock, ok) = install::lock_bin_and_sweep(out, machine);
         all_ok &= ok;
         lock
@@ -262,6 +313,29 @@ fn run_with<W: Write>(
         "hooks: run `lefthook install` once per clone to turn on the pre-commit and pre-push hooks",
     );
     all_ok
+}
+
+/// Fails each name in `selection` that `pins` does not pin, with a fix that lists the names it
+/// does. Returns whether every name is pinned.
+fn known_names<W: Write>(out: &mut Printer<W>, pins: &Pins<'_>, selection: Selection<'_>) -> bool {
+    let Selection::Only(names) = selection else {
+        return true;
+    };
+    let valid: Vec<&str> = (pins.tools.iter().map(|t| t.name))
+        .chain(pins.binaries.iter().map(|b| b.name))
+        .collect();
+    let mut all_known = true;
+    for name in names.iter().filter(|n| !valid.contains(&n.as_str())) {
+        out.failure(
+            &format!("setup --only {name}: no pinned tool is named {name}"),
+            &format!(
+                "name a pinned tool after --only, one of: {}; then run cargo xtask setup again",
+                valid.join(", ")
+            ),
+        );
+        all_known = false;
+    }
+    all_known
 }
 
 /// Checks `binary`'s version; with `install`, installs it when the check fails and checks again.

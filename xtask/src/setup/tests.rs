@@ -241,50 +241,14 @@ fn install_runs_the_pinned_command_for_each_os_and_arch() {
 }
 
 /// What `run_with` ran, as shell-like text, for a tool whose `version` prints each entry of
-/// `versions` in turn (`None`: it cannot start).
+/// `versions` in turn (`None`: it cannot start), with every tool selected.
 fn run_fake(
     machine: &Machine<'_>,
     tool: &Binary,
     install: bool,
     versions: &[Option<&str>],
 ) -> (bool, Vec<String>, String) {
-    let mut ran = Vec::new();
-    let mut versions = versions.iter();
-    let mut runner = |cmd: &Cmd, at: &Path, _: Output| -> io::Result<Ran> {
-        ran.push(cmd.to_string());
-        match cmd.program {
-            Program::Named("curl") => {
-                // The run lock is held while the binaries install, unless it could not be taken.
-                let lock = at.parent().unwrap().join(".xtask-setup.lock");
-                if lock.is_file() {
-                    let taken = std::fs::File::open(&lock)?.try_lock();
-                    assert!(matches!(taken, Err(std::fs::TryLockError::WouldBlock)));
-                }
-                Scratch::write(at.join(curl_output(cmd)), ASSET_BYTES)?;
-            }
-            Program::Named("faketool") => {
-                return match versions.next().expect("a version for each check") {
-                    Some(version) => exited(true, &format!("{version}\n"), ""),
-                    None => Err(io::Error::new(io::ErrorKind::NotFound, "not found")),
-                };
-            }
-            _ => {}
-        }
-        exited(true, "", "")
-    };
-    let mut out = Printer::new(Vec::new(), false);
-    let root = Path::new(".");
-    let ok = run_with(
-        &mut out,
-        machine,
-        TOOLS,
-        std::slice::from_ref(tool),
-        install,
-        root,
-        &mut runner,
-    );
-    let printed = String::from_utf8(out.into_inner()).unwrap();
-    (ok, ran, printed)
+    only::run_selected(machine, tool, Selection::All, install, versions)
 }
 
 /// The `cargo install` commands for `TOOLS`, which `run` runs first.
@@ -451,6 +415,7 @@ fn names_in(dir: &Path) -> Vec<String> {
     names
 }
 
+mod only;
 mod run;
 mod sweep;
 
