@@ -45,7 +45,7 @@ fn engines_node_in_another_form_fails_with_the_rule() {
             "could not read the minimum Node from ui/package.json: `engines.node` is `^6.7.0`; \
              engines.node takes only \">=<major>.<minor>.<patch>\"\n    fix: set `\"engines\": \
              { \"node\": \">=<major>.<minor>.<patch>\" }` in ui/package.json: it is the one home \
-             of the minimum Node, and pins reads it there"
+             of the minimum Node, and pins looks for copies of it"
         ]
     );
     assert_eq!(found.inspected, 1);

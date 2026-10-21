@@ -3,8 +3,10 @@
 
 mod engines_node;
 mod fake_pins;
+mod forms_text;
 pub(super) mod planted;
 mod repos;
+mod workflow_files;
 mod yaml_text;
 
 use super::*;
@@ -12,7 +14,6 @@ use repos::{check, put, repo};
 
 /// saphyr-parser's markers as `yaml.rs` reads them: lines from 1, a block scalar from the line
 /// after its `|`, and columns in characters, so a `#` after a non-ASCII key is still placed.
-/// A parse error is at the line the parser stopped on.
 #[test]
 fn yaml_lines_and_comments_come_from_the_parser() {
     let text = "é: x # one\nk: \"q # not\" # two\nr: | # three\n  # text\n  more\n# four\n";
@@ -22,6 +23,17 @@ fn yaml_lines_and_comments_come_from_the_parser() {
         comments,
         [(1, " one"), (2, " two"), (3, " three"), (6, " four")]
     );
+    let [root] = doc.roots() else {
+        panic!("one document");
+    };
+    let entries = root.entries();
+    let block = entries
+        .iter()
+        .find(|(key, _)| key.scalar() == Some("r"))
+        .map(|(_, value)| value)
+        .expect("the block scalar");
+    assert_eq!((block.line, block.end_line), (4, 6));
+    assert_eq!(block.scalar(), Some("# text\nmore\n"));
     assert_eq!(
         yaml::parse("a: [\n").err(),
         Some(yaml::NotYaml {
@@ -69,6 +81,18 @@ fn the_real_lefthook_comment_names_the_pinned_version() {
         "no comment in lefthook.yml names a version"
     );
     assert!(named.iter().all(|version| Some(*version) == pinned));
+}
+
+#[test]
+fn a_version_counts_only_as_a_whole_word() {
+    assert!(workflows::holds("npm i -g pnpm@7.8.9", "7.8.9"));
+    assert!(workflows::holds("v7.8.9.", "7.8.9"));
+    assert!(workflows::holds("rust:3.4", "3.4"));
+    assert!(!workflows::holds("17.8.9", "7.8.9"));
+    assert!(!workflows::holds("7.8.90", "7.8.9"));
+    assert!(!workflows::holds("7.8.9.1", "7.8.9"));
+    assert!(!workflows::holds("0.7.8.9", "7.8.9"));
+    assert!(!workflows::holds("3.4.5", "3.4"));
 }
 
 #[test]
@@ -137,6 +161,27 @@ fn a_home_that_cannot_be_read_says_why() {
             found.violations.is_empty(),
             "{case}: {:?}",
             found.violations
+        );
+    }
+}
+
+/// `dtolnay/rust-toolchain` is pinned by a commit only when its ref is 40 hex digits. A shorter
+/// hex ref, or a 40-character name that is not hex, is no commit, so its comment is not read.
+#[test]
+fn a_ref_is_a_commit_only_when_it_is_forty_hex_digits() {
+    for reference in ["abcdef".to_owned(), "z".repeat(40)] {
+        let dir = repo("dtolnay-ref");
+        let text = format!(
+            "jobs:\n  a:\n    steps:\n      - uses: dtolnay/rust-toolchain@{reference} # 1.85.0\n"
+        );
+        put(&dir, ".github/workflows/ci.yml", &text);
+        let found = check(&dir);
+        assert_eq!(
+            (found.violations.is_empty(), found.failures.is_empty()),
+            (true, true),
+            "{reference}: {:?} {:?}",
+            found.violations,
+            found.failures
         );
     }
 }

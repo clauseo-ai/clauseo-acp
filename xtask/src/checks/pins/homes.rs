@@ -2,8 +2,8 @@
 //! `packageManager` and `engines.node` in `ui/package.json`. A value that cannot be read, or is
 //! not in the one form its home takes, is a failure with no line (the value is missing, so there
 //! is no line to point at). Only the Rust version is kept: `rust-version` copies it. No rule
-//! compares a copy with the pnpm or Node version; they are read so that a home in another form
-//! fails here.
+//! compares a copy with the pnpm or Node version, as every version a workflow names for them
+//! fails; they are read so that a home in another form fails here.
 
 use super::{
     ENGINES_NODE_RULE, FileHome, Fix, PACKAGE_JSON, TOOLCHAIN, engines_node_minimum, is_version,

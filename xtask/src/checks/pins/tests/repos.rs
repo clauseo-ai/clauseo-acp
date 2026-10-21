@@ -1,23 +1,33 @@
 //! The scratch repos of the pins check's tests and planted cases. Every version here is made up:
-//! the homes in each repo pin Rust 3.4.5, pnpm 7.8.9 and Node 6.7.0, and `BINARIES` below pins
-//! lefthook 9.8.7, so no test repeats a real pin. The planted harness runs the check with the
-//! real `BINARIES`, so a planted case never names one of their versions; the cases that do are
-//! in `fake_pins.rs`.
+//! the homes in each repo pin Rust 3.4.5, pnpm 7.8.9 and Node 6.7.0, and `TOOLS` and `BINARIES`
+//! below pin cargo-fake 5.6.7 and lefthook 9.8.7, so no test repeats a real pin. The planted
+//! harness runs the check with the real `TOOLS` and `BINARIES`, so a planted case never names
+//! one of their versions; the cases that do are in `fake_pins.rs`.
 //!
-//! The builders of the lefthook comment are in `repos/`, re-exported here so every case names
-//! `super::repos::<builder>`.
+//! The builders of the workflow files, the lefthook comment and the forms that name a tool are
+//! by topic in `repos/`, re-exported here so every case names `super::repos::<builder>`.
 
 mod lefthook_comment;
+mod tool_forms;
+mod workflows;
 
 pub(super) use lefthook_comment::*;
+pub(super) use tool_forms::*;
+pub(super) use workflows::*;
 
 use super::super::inspect;
 use crate::checks::Inspection;
 use crate::checks::planted::{self, Repo};
 use crate::scratch::Scratch;
-use crate::setup::{Binary, Packing};
+use crate::setup::{Binary, Packing, Tool};
 use crate::workspace::Context;
 use std::path::Path;
+
+/// The cargo tools the cases pin.
+pub(super) const TOOLS: &[Tool] = &[Tool {
+    name: "cargo-fake",
+    version: "5.6.7",
+}];
 
 /// The binaries the cases pin.
 pub(super) const BINARIES: &[Binary] = &[Binary {
@@ -82,14 +92,19 @@ pub(super) fn check(dir: &Path) -> Inspection {
     })
 }
 
-/// Runs the check in `ctx` with the cases' `BINARIES`.
+/// Runs the check in `ctx` with the cases' `TOOLS` and `BINARIES`.
 pub(super) fn check_in(ctx: &Context) -> Inspection {
-    inspect(ctx, BINARIES)
+    inspect(ctx, TOOLS, BINARIES)
 }
 
 /// A repo of the homes with `rel` written as `text`, and no workspace member.
 fn with_file(case: &str, rel: &str, text: &str) -> Repo {
     Repo::files(&format!("pins-{case}"), &homes(&[(rel, text)]))
+}
+
+/// A repo whose `.github/workflows/ci.yml` is `text`.
+fn workflow(case: &str, text: &str) -> Repo {
+    with_file(case, ".github/workflows/ci.yml", text)
 }
 
 /// A repo whose `lefthook.yml` is `text`.
