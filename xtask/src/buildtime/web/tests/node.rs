@@ -1,5 +1,5 @@
-//! Tests of how `web.rs` reads the Node range from `engines.node` in `ui/package.json`, for the
-//! fix when `node` cannot run.
+//! Tests of how `web.rs` reads the minimum Node from `engines.node` in `ui/package.json`, with the
+//! grammar `checks::pins` writes down, for the fix when `node` cannot run.
 
 use super::*;
 
@@ -11,31 +11,42 @@ fn the_node_fix_reads_engines_node_from_ui_package_json() {
     let range = manifest["engines"]["node"]
         .as_str()
         .expect("ui/package.json has engines.node");
-    assert_eq!(node_engines(&root).as_deref(), Some(range));
+    let min = min_node(&root).expect("engines.node takes the one form");
+    assert_eq!(format!(">={min}"), range);
 }
 
+/// The fix names the minimum when `engines.node` has the one form it takes, and the rule when
+/// the file, its JSON or the field cannot be read or has another form.
 #[test]
-fn the_node_fix_names_the_range_or_the_field_it_could_not_read() {
+fn the_node_fix_names_the_minimum_or_the_rule() {
     let dir = Scratch::new("web-node-engines");
-    assert_eq!(node_engines(&dir), None);
+    assert_eq!(min_node(&dir), None);
     Scratch::create_dir_all(dir.join("ui")).expect("create ui/");
-    for text in ["{", r#"{"engines": {}}"#, r#"{"engines": {"node": 20}}"#] {
+    for text in [
+        "{",
+        r#"{"engines": {}}"#,
+        r#"{"engines": {"node": 20}}"#,
+        r#"{"engines": {"node": "^20.5.0"}}"#,
+        r#"{"engines": {"node": ">= 20.5.0"}}"#,
+        r#"{"engines": {"node": ">=20.5.0 <30"}}"#,
+    ] {
         Scratch::write(dir.join("ui/package.json"), text).expect("write ui/package.json");
-        assert_eq!(node_engines(&dir), None, "{text}");
+        assert_eq!(min_node(&dir), None, "{text}");
     }
     Scratch::write(
         dir.join("ui/package.json"),
         r#"{"engines": {"node": ">=20.5.0"}}"#,
     )
     .expect("write ui/package.json");
-    let range = node_engines(&dir);
-    assert_eq!(range.as_deref(), Some(">=20.5.0"));
+    let min = min_node(&dir);
+    assert_eq!(min.as_deref(), Some("20.5.0"));
     assert_eq!(
-        install_node(range.as_deref()),
-        "install a Node that matches >=20.5.0 (`engines.node` in ui/package.json)"
+        install_node(min.as_deref()),
+        "install Node 20.5.0 or later (`engines.node` in ui/package.json)"
     );
     assert_eq!(
         install_node(None),
-        "install the Node that `engines.node` in ui/package.json names"
+        "set `engines.node` in ui/package.json to the minimum Node (engines.node takes only \
+         \">=<major>.<minor>.<patch>\"), then install that Node or a later one"
     );
 }

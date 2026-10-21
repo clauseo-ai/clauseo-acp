@@ -38,6 +38,7 @@ mod tests;
 use super::verdict::{Failure, Outcome, ProbeResult, budget_limit, passes};
 use super::{Out, one_line, stop};
 use crate::budgets::{Budget, Unit};
+use crate::checks::pins;
 use crate::process::{self, Cmd, Program, QuietRunner, Status, TimeoutFix};
 use serde::Deserialize;
 use std::path::Path;
@@ -281,7 +282,7 @@ pub(crate) fn measure(
             return Err(stop(
                 diag,
                 &format!("could not run `node`: {error}"),
-                &install_node(node_engines(root).as_deref()),
+                &install_node(min_node(root).as_deref()),
             ));
         }
     };
@@ -312,21 +313,27 @@ pub(crate) fn measure(
     }
 }
 
-/// The Node range that `engines.node` in `ui/package.json` names, the one place the minimum is
-/// written. `None` when the file, its JSON or the field cannot be read.
-fn node_engines(root: &Path) -> Option<String> {
+/// The minimum Node in `engines.node` of `ui/package.json`, the one place it is written, read
+/// with the grammar `checks::pins` writes down (`>=<major>.<minor>.<patch>` only). `None` when
+/// the file, its JSON or the field cannot be read, or the field has another form.
+fn min_node(root: &Path) -> Option<String> {
     let text = std::fs::read_to_string(root.join("ui/package.json")).ok()?;
     let manifest: serde_json::Value = serde_json::from_str(&text).ok()?;
-    Some(manifest.get("engines")?.get("node")?.as_str()?.to_owned())
+    let field = manifest.get("engines")?.get("node")?.as_str()?;
+    pins::engines_node_minimum(field).map(str::to_owned)
 }
 
-/// The fix when `node` cannot run: a Node in the range `engines` (from `node_engines`).
-fn install_node(engines: Option<&str>) -> String {
-    match engines {
-        Some(range) => {
-            format!("install a Node that matches {range} (`engines.node` in ui/package.json)")
+/// The fix when `node` cannot run: Node `min` or later (from `min_node`).
+fn install_node(min: Option<&str>) -> String {
+    match min {
+        Some(min) => {
+            format!("install Node {min} or later (`engines.node` in ui/package.json)")
         }
-        None => "install the Node that `engines.node` in ui/package.json names".to_owned(),
+        None => format!(
+            "set `engines.node` in ui/package.json to the minimum Node ({}), then install that \
+             Node or a later one",
+            pins::ENGINES_NODE_RULE
+        ),
     }
 }
 
