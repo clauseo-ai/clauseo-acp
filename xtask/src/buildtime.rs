@@ -8,7 +8,7 @@
 //! is put back after every probe, and at the start of the next run if this one was interrupted
 //! (`probe.rs`), but never over an edit made during the run. The web half's edit of
 //! `ui/app/src/App.tsx` is guarded by its script, under the rules written out in
-//! `ui/app/scripts/buildtime-lib.mjs`. One run at a time holds the checkout's lock (`lock.rs`),
+//! `ui/app/scripts/guard.mjs`. One run at a time holds the checkout's lock (`lock.rs`),
 //! through both halves. Only `clock::timed` reads the clock, and only
 //! `process.rs` starts processes; the web half's Node script does its own timing.
 
