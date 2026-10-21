@@ -112,6 +112,21 @@ fn an_exe_beats_a_cmd_in_the_same_directory() {
 }
 
 #[test]
+fn an_empty_path_entry_does_not_find_a_pnpm_in_the_working_directory() {
+    let files = [at("", "pnpm.exe"), at("/usr/local/node", "pnpm.cmd")];
+    let path = path_of(&["", "/usr/local/node"]);
+    assert_eq!(
+        resolve_pnpm(&path, &WINDOWS_PNPM, only(&files)),
+        at("/usr/local/node", "pnpm.cmd")
+    );
+    let only_empty = path_of(&["", "/tools/bin"]);
+    assert_eq!(
+        resolve_pnpm(&only_empty, &WINDOWS_PNPM, only(&files)),
+        PathBuf::from("pnpm")
+    );
+}
+
+#[test]
 fn the_resolved_path_is_the_directory_joined_with_the_name() {
     let files = [at("/usr/local/node", "pnpm.exe")];
     let resolved = resolve_pnpm(&path_of(&DIRS), &WINDOWS_PNPM, only(&files));

@@ -58,4 +58,8 @@ disallowed-methods = [
   { path = "std::os::unix::net::UnixDatagram::bind_addr", reason = "files change only through the crate's write module; see AGENTS.md", allow-invalid = true },
   { path = "std::os::windows::fs::symlink_file", reason = "files change only through the crate's write module; see AGENTS.md", allow-invalid = true },
   { path = "std::os::windows::fs::symlink_dir", reason = "files change only through the crate's write module; see AGENTS.md", allow-invalid = true },
+  # Paths and PATH
+  { path = "std::fs::canonicalize", reason = "canonicalize returns \\\\?\\ paths on Windows that most tools refuse", replacement = "dunce::canonicalize" },
+  { path = "std::path::Path::canonicalize", reason = "canonicalize returns \\\\?\\ paths on Windows that most tools refuse", replacement = "dunce::canonicalize" },
+  { path = "std::env::split_paths", reason = "only first_on_path in xtask/src/process.rs walks PATH (resolve_pnpm looks pnpm up with it); reuse it rather than split PATH again" },
 ]

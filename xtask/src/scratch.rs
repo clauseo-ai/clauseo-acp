@@ -100,7 +100,7 @@ impl Scratch {
 
 /// `path`, once it is checked to lie in a scratch directory: under the temp dir, in a folder
 /// whose name starts with `xtask-`. The check follows symlinks: `path` itself must not be one,
-/// and `path`, or its deepest folder that exists, resolved with `std::fs::canonicalize`, must lie
+/// and `path`, or its deepest folder that exists, resolved with `dunce::canonicalize`, must lie
 /// in a scratch dir, so no link made in a scratch dir leads a write out of it. Panics
 /// otherwise, so a test never changes a file outside one.
 fn inside(path: &Path) -> &Path {
@@ -124,8 +124,8 @@ fn inside(path: &Path) -> &Path {
     while let Some(dir) = folder.filter(|dir| !dir.exists()) {
         folder = dir.parent();
     }
-    let resolved = folder.and_then(|dir| std::fs::canonicalize(dir).ok());
-    let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
+    let resolved = folder.and_then(|dir| dunce::canonicalize(dir).ok());
+    let temp = dunce::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
     let first = resolved
         .as_deref()
         .and_then(|dir| dir.strip_prefix(&temp).ok())
