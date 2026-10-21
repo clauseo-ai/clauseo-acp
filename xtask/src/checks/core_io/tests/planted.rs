@@ -1,6 +1,6 @@
 //! The planted cases of the core-io check: one `cases!` list, which makes `PLANTED` and one
 //! test per case (see `checks/planted.rs`). The functions that build each input live in
-//! the check's tests module. The forms clippy must catch are in `tests/clippy.rs`.
+//! `tests/repos.rs` and its topic files. The forms clippy must catch are in `tests/clippy.rs`.
 
 /// The `crates/protocol/clippy.toml` the scratch repo needs, its root file plus its list, as the
 /// fix prints it, without a newline after its last line.
@@ -183,77 +183,77 @@ crate::checks::planted::cases! {
          `crates/protocol/clippy.toml` is missing, so clippy does not ban the standard library's \
          I/O in it\n",
         write_crate_file!()
-    )]), inspects 3 => super::missing_crate_file,
+    )]), inspects 3 => super::repos::missing_crate_file,
     /// A file that is the root alone lacks the list's entries.
     crate_file_differs: FailsWith(&[concat!(
         "crates/protocol/clippy.toml:1: `crates/protocol/clippy.toml` of clauseo-protocol is not \
          the root clippy.toml plus xtask/core-io-bans.toml: it differs in `disallowed-methods`, \
          `disallowed-types`\n",
         write_crate_file!()
-    )]), inspects 3 => super::crate_file_differs,
+    )]), inspects 3 => super::repos::crate_file_differs,
     crate_file_not_toml: FailsWith(&[concat!(
         "crates/protocol/clippy.toml:2: `crates/protocol/clippy.toml` is not valid TOML \
          (unclosed array, expected `]`)\n",
         write_crate_file!()
-    )]), inspects 3 => super::crate_file_not_toml,
+    )]), inspects 3 => super::repos::crate_file_not_toml,
     /// The generated file passes, and so does one with the same tables written another way.
-    crate_file_matches: Passes, inspects 3 => super::crate_file_matches,
-    crate_file_reformatted: Passes, inspects 3 => super::crate_file_reformatted,
+    crate_file_matches: Passes, inspects 3 => super::repos::crate_file_matches,
+    crate_file_reformatted: Passes, inspects 3 => super::repos::crate_file_reformatted,
     /// A row with `clock` alone needs no file, nor does a crate with no row.
-    clock_only_row: Passes, inspects 3 => super::clock_only_row,
-    crate_without_row: Passes, inspects 3 => super::crate_without_row,
+    clock_only_row: Passes, inspects 3 => super::repos::clock_only_row,
+    crate_without_row: Passes, inspects 3 => super::repos::crate_without_row,
     /// Problems with the inputs stop the check.
     list_missing: FailsWith(&[
         "xtask/core-io-bans.toml:1: `xtask/core-io-bans.toml` is missing, and core-io builds \
          each core crate's clippy.toml from it\n    fix: restore `xtask/core-io-bans.toml` from git",
-    ]), inspects 0 => super::list_missing,
+    ]), inspects 0 => super::repos::list_missing,
     root_missing: FailsWith(&[
         "clippy.toml:1: `clippy.toml` is missing, and core-io builds each core crate's \
          clippy.toml from it\n    fix: restore `clippy.toml` from git",
-    ]), inspects 0 => super::root_missing,
+    ]), inspects 0 => super::repos::root_missing,
     list_unknown_key: FailsWith(&[
         "xtask/core-io-bans.toml:4: `xtask/core-io-bans.toml` is not valid: unknown field \
          `disallowed-macros`, expected `disallowed-methods` or `disallowed-types`\n    \
          fix: fix the line above: the file holds only `disallowed-methods` and \
          `disallowed-types`, arrays of `{ path, reason }` tables, each with an optional \
          `replacement` and `allow-invalid`",
-    ]), inspects 0 => super::list_unknown_key,
+    ]), inspects 0 => super::repos::list_unknown_key,
     list_entry_problems: FailsWith(&[
         "xtask/core-io-bans.toml:3: the `disallowed-methods` entry for `std::fs::read` has an \
          empty reason, which clippy prints with each hit\n    \
          fix: say why a core crate may not use the item, and what to do instead",
         "xtask/core-io-bans.toml:3: `std::fs::read` is listed twice in `disallowed-methods`\n    \
          fix: delete this entry",
-    ]), inspects 0 => super::list_entry_problems,
+    ]), inspects 0 => super::repos::list_entry_problems,
     /// A root `clippy.toml` that is not TOML fails at the line the parser stopped on, with the
     /// root's fix.
     root_not_toml: FailsWith(&[
         "clippy.toml:2: `clippy.toml` is not valid: unclosed array, expected `]`\n    \
          fix: fix the line above so clippy and core-io can read the file",
-    ]), inspects 0 => super::root_not_toml,
+    ]), inspects 0 => super::repos::root_not_toml,
     root_array_is_a_string: FailsWith(&[
         "clippy.toml:2: `disallowed-types` in clippy.toml is not an array, so core-io cannot \
          append xtask/core-io-bans.toml's `disallowed-types` to it\n    \
          fix: write `disallowed-types` as an array of `{ path, reason }` tables",
-    ]), inspects 0 => super::root_array_is_a_string,
+    ]), inspects 0 => super::repos::root_array_is_a_string,
     /// Every target root of a held crate carries the forbid line, outside `cfg_attr`, and the
     /// crate has no build script.
-    forbid_missing_in_the_lib: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::forbid_missing_in_the_lib,
-    forbid_under_cfg_attr: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::forbid_under_cfg_attr,
-    forbid_in_another_order: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::forbid_in_another_order,
-    forbid_missing_in_a_bin: FailsWith(&[no_forbid!("crates/protocol/src/main.rs", "bin")]), inspects 3 => super::forbid_missing_in_a_bin,
-    forbid_missing_in_a_test: FailsWith(&[no_forbid!("crates/protocol/tests/events.rs", "test")]), inspects 3 => super::forbid_missing_in_a_test,
-    clock_only_crate_without_forbid: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::clock_only_crate_without_forbid,
-    forbid_missing_in_an_example: FailsWith(&[no_forbid!("crates/protocol/examples/demo.rs", "example")]), inspects 3 => super::forbid_missing_in_an_example,
-    forbid_missing_in_a_bench: FailsWith(&[no_forbid!("crates/protocol/benches/fold.rs", "bench")]), inspects 3 => super::forbid_missing_in_a_bench,
+    forbid_missing_in_the_lib: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::repos::forbid_missing_in_the_lib,
+    forbid_under_cfg_attr: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::repos::forbid_under_cfg_attr,
+    forbid_in_another_order: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::repos::forbid_in_another_order,
+    forbid_missing_in_a_bin: FailsWith(&[no_forbid!("crates/protocol/src/main.rs", "bin")]), inspects 3 => super::repos::forbid_missing_in_a_bin,
+    forbid_missing_in_a_test: FailsWith(&[no_forbid!("crates/protocol/tests/events.rs", "test")]), inspects 3 => super::repos::forbid_missing_in_a_test,
+    clock_only_crate_without_forbid: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::repos::clock_only_crate_without_forbid,
+    forbid_missing_in_an_example: FailsWith(&[no_forbid!("crates/protocol/examples/demo.rs", "example")]), inspects 3 => super::repos::forbid_missing_in_an_example,
+    forbid_missing_in_a_bench: FailsWith(&[no_forbid!("crates/protocol/benches/fold.rs", "bench")]), inspects 3 => super::repos::forbid_missing_in_a_bench,
     /// Only `forbid` of both lints, at the top of the root, counts.
-    forbid_naming_one_lint: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::forbid_naming_one_lint,
-    deny_in_place_of_forbid: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::deny_in_place_of_forbid,
-    forbid_inside_a_module: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::forbid_inside_a_module,
-    forbid_as_an_outer_attribute: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::forbid_as_an_outer_attribute,
-    root_outside_the_repo: FailsWith(&[root_outside!("bin", "/elsewhere/outside.rs")]), inspects 3 => super::root_outside_the_repo,
-    root_outside_the_repo_through_dot_dot: FailsWith(&[root_outside!("lib", "/x.rs")]), inspects 3 => super::root_outside_the_repo_through_dot_dot,
-    root_outside_the_crate: FailsWith(&[root_outside!("lib", "crates/shared/lib.rs")]), inspects 3 => super::root_outside_the_crate,
+    forbid_naming_one_lint: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::repos::forbid_naming_one_lint,
+    deny_in_place_of_forbid: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::repos::deny_in_place_of_forbid,
+    forbid_inside_a_module: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::repos::forbid_inside_a_module,
+    forbid_as_an_outer_attribute: FailsWith(&[no_forbid!("crates/protocol/src/lib.rs", "lib")]), inspects 3 => super::repos::forbid_as_an_outer_attribute,
+    root_outside_the_repo: FailsWith(&[root_outside!("bin", "/elsewhere/outside.rs")]), inspects 3 => super::repos::root_outside_the_repo,
+    root_outside_the_repo_through_dot_dot: FailsWith(&[root_outside!("lib", "/x.rs")]), inspects 3 => super::repos::root_outside_the_repo_through_dot_dot,
+    root_outside_the_crate: FailsWith(&[root_outside!("lib", "crates/shared/lib.rs")]), inspects 3 => super::repos::root_outside_the_crate,
     root_not_rust: FailsWith(&[
         "crates/protocol/src/lib.rs:3: `crates/protocol/src/lib.rs`, a target root of \
          clauseo-protocol, does not parse as Rust (expected identifier), so core-io cannot find \
@@ -261,114 +261,114 @@ crate::checks::planted::cases! {
          fix: fix the syntax error, and make sure this line is among the inner attributes at the \
          top of `crates/protocol/src/lib.rs`\n\
          #![forbid(clippy::disallowed_methods, clippy::disallowed_types)]",
-    ]), inspects 3 => super::root_not_rust,
+    ]), inspects 3 => super::repos::root_not_rust,
     build_rs_present: FailsWith(&[
         "crates/protocol/build.rs:1: clauseo-protocol's row bans I/O, but it has the build script \
          `crates/protocol/build.rs`, whose `cargo::rustc-env` lines can set `CLIPPY_` variables \
          for the clippy that lints it\n    \
          fix: delete `crates/protocol/build.rs`; a crate whose row bans I/O has no build script",
-    ]), inspects 3 => super::build_rs_present,
+    ]), inspects 3 => super::repos::build_rs_present,
     package_build_set: FailsWith(&[
         "crates/protocol/Cargo.toml:3: `crates/protocol/Cargo.toml` sets `build` under \
          [package], but clauseo-protocol's row bans I/O and such a crate has no build script\n    \
          fix: delete the `build` key, and the script it names if there is one",
-    ]), inspects 3 => super::package_build_set,
+    ]), inspects 3 => super::repos::package_build_set,
     /// A held crate's cfgs use only `test` and positive features, and its folder has no
     /// metavariable attribute or macro name, `path` attribute, `include!` or symlink.
-    cfg_not_clippy: FailsWith(&[cfg_form!(1, "the name `clippy`")]), inspects 3 => super::cfg_not_clippy,
-    cfg_not_debug_assertions: FailsWith(&[cfg_form!(3, "the name `debug_assertions`")]), inspects 3 => super::cfg_not_debug_assertions,
-    cfg_attr_clippy: FailsWith(&[cfg_form!(1, "the name `clippy`"), path_attribute!(1)]), inspects 3 => super::cfg_attr_clippy,
-    cfg_in_a_macro_body: FailsWith(&[cfg_form!(3, "the name `clippy`")]), inspects 3 => super::cfg_in_a_macro_body,
-    cfg_not_feature: FailsWith(&[cfg_form!(2, "a feature under `not`")]), inspects 3 => super::cfg_not_feature,
-    cfg_panic_abort: FailsWith(&[cfg_form!(1, "the name `panic`")]), inspects 3 => super::cfg_panic_abort,
-    cfg_unix: FailsWith(&[cfg_form!(1, "the name `unix`")]), inspects 3 => super::cfg_unix,
-    cfg_custom_name: FailsWith(&[cfg_form!(1, "the name `hidden`")]), inspects 3 => super::cfg_custom_name,
-    cfg_select_expression: FailsWith(&[cfg_select!(2)]), inspects 3 => super::cfg_select_expression,
-    cfg_select_items: FailsWith(&[cfg_select!(1)]), inspects 3 => super::cfg_select_items,
-    cfg_select_alias: FailsWith(&[cfg_select!(1)]), inspects 3 => super::cfg_select_alias,
+    cfg_not_clippy: FailsWith(&[cfg_form!(1, "the name `clippy`")]), inspects 3 => super::repos::cfg_not_clippy,
+    cfg_not_debug_assertions: FailsWith(&[cfg_form!(3, "the name `debug_assertions`")]), inspects 3 => super::repos::cfg_not_debug_assertions,
+    cfg_attr_clippy: FailsWith(&[cfg_form!(1, "the name `clippy`"), path_attribute!(1)]), inspects 3 => super::repos::cfg_attr_clippy,
+    cfg_in_a_macro_body: FailsWith(&[cfg_form!(3, "the name `clippy`")]), inspects 3 => super::repos::cfg_in_a_macro_body,
+    cfg_not_feature: FailsWith(&[cfg_form!(2, "a feature under `not`")]), inspects 3 => super::repos::cfg_not_feature,
+    cfg_panic_abort: FailsWith(&[cfg_form!(1, "the name `panic`")]), inspects 3 => super::repos::cfg_panic_abort,
+    cfg_unix: FailsWith(&[cfg_form!(1, "the name `unix`")]), inspects 3 => super::repos::cfg_unix,
+    cfg_custom_name: FailsWith(&[cfg_form!(1, "the name `hidden`")]), inspects 3 => super::repos::cfg_custom_name,
+    cfg_select_expression: FailsWith(&[cfg_select!(2)]), inspects 3 => super::repos::cfg_select_expression,
+    cfg_select_items: FailsWith(&[cfg_select!(1)]), inspects 3 => super::repos::cfg_select_items,
+    cfg_select_alias: FailsWith(&[cfg_select!(1)]), inspects 3 => super::repos::cfg_select_alias,
     cfg_inside_cfg_attr: FailsWith(&[
         "crates/protocol/src/hidden.rs:1: `crates/protocol/src/hidden.rs` puts a `cfg` inside a \
          `cfg_attr`, which keeps the item whenever the `cfg_attr`'s predicate is false, so a \
          feature there acts like a `not(feature)` and can leave code out of every clippy run\n    \
          fix: write the condition as one `#[cfg(..)]` outside any `cfg_attr`, built from `test`, \
          `doc` and positive features",
-    ]), inspects 3 => super::cfg_inside_cfg_attr,
-    cfg_attr_not_feature: FailsWith(&[cfg_form!(1, "a feature under `not`")]), inspects 3 => super::cfg_attr_not_feature,
-    cfg_metavariable_in_a_macro_body: FailsWith(&[cfg_form!(3, "a metavariable")]), inspects 3 => super::cfg_metavariable_in_a_macro_body,
-    attribute_name_metavariable: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::attribute_name_metavariable,
+    ]), inspects 3 => super::repos::cfg_inside_cfg_attr,
+    cfg_attr_not_feature: FailsWith(&[cfg_form!(1, "a feature under `not`")]), inspects 3 => super::repos::cfg_attr_not_feature,
+    cfg_metavariable_in_a_macro_body: FailsWith(&[cfg_form!(3, "a metavariable")]), inspects 3 => super::repos::cfg_metavariable_in_a_macro_body,
+    attribute_name_metavariable: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::repos::attribute_name_metavariable,
     /// A transcriber may write `#[$m]` only when its arm binds `$m` as `#[$m:meta]`.
-    forwarded_attributes_pass: Passes, inspects 3 => super::forwarded_attributes_pass,
-    forwarded_attribute_as_tt: FailsWith(&[tt_fragment!(2), metavariable_attribute!(3)]), inspects 3 => super::forwarded_attribute_as_tt,
-    forwarded_attribute_as_ident: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::forwarded_attribute_as_ident,
-    forwarded_cfg_at_the_call: FailsWith(&[cfg_form!(7, "the name `clippy`")]), inspects 3 => super::forwarded_cfg_at_the_call,
+    forwarded_attributes_pass: Passes, inspects 3 => super::repos::forwarded_attributes_pass,
+    forwarded_attribute_as_tt: FailsWith(&[tt_fragment!(2), metavariable_attribute!(3)]), inspects 3 => super::repos::forwarded_attribute_as_tt,
+    forwarded_attribute_as_ident: FailsWith(&[metavariable_attribute!(3)]), inspects 3 => super::repos::forwarded_attribute_as_ident,
+    forwarded_cfg_at_the_call: FailsWith(&[cfg_form!(7, "the name `clippy`")]), inspects 3 => super::repos::forwarded_cfg_at_the_call,
     /// A definition inside a transcriber or a macro call's arguments gets the full rules.
-    forwarded_meta_in_a_nested_definition: FailsWith(&[tt_fragment!(2), metavariable_attribute!(4), metavariable_attribute!(4)]), inspects 3 => super::forwarded_meta_in_a_nested_definition,
-    definition_shape_in_call_arguments: FailsWith(&[tt_fragment!(1), tt_fragment!(2), metavariable_attribute!(3)]), inspects 3 => super::definition_shape_in_call_arguments,
+    forwarded_meta_in_a_nested_definition: FailsWith(&[tt_fragment!(2), metavariable_attribute!(4), metavariable_attribute!(4)]), inspects 3 => super::repos::forwarded_meta_in_a_nested_definition,
+    definition_shape_in_call_arguments: FailsWith(&[tt_fragment!(1), tt_fragment!(2), metavariable_attribute!(3)]), inspects 3 => super::repos::definition_shape_in_call_arguments,
     /// A `#` followed by neither brackets nor `!` and brackets fails, wherever it stands.
-    hash_joins_written_brackets: FailsWith(&[tt_fragment!(1), tt_fragment!(1), hash_without_brackets!(2)]), inspects 3 => super::hash_joins_written_brackets,
-    attribute_built_across_two_macros: FailsWith(&[tt_fragment!(1), tt_fragment!(1), tt_fragment!(2), hash_without_brackets!(2)]), inspects 3 => super::attribute_built_across_two_macros,
-    indexing_after_an_ident_passes: Passes, inspects 3 => super::indexing_after_an_ident_passes,
-    indexing_after_an_expr_passes: Passes, inspects 3 => super::indexing_after_an_expr_passes,
+    hash_joins_written_brackets: FailsWith(&[tt_fragment!(1), tt_fragment!(1), hash_without_brackets!(2)]), inspects 3 => super::repos::hash_joins_written_brackets,
+    attribute_built_across_two_macros: FailsWith(&[tt_fragment!(1), tt_fragment!(1), tt_fragment!(2), hash_without_brackets!(2)]), inspects 3 => super::repos::attribute_built_across_two_macros,
+    indexing_after_an_ident_passes: Passes, inspects 3 => super::repos::indexing_after_an_ident_passes,
+    indexing_after_an_expr_passes: Passes, inspects 3 => super::repos::indexing_after_an_expr_passes,
     /// The name `tt` fails wherever it stands, since only a `tt` fragment can take a lone `#`.
-    indexing_after_a_tt: FailsWith(&[tt_fragment!(1)]), inspects 3 => super::indexing_after_a_tt,
-    hash_split_from_a_whole_attribute: FailsWith(&[tt_fragment!(1), tt_fragment!(1), tt_fragment!(1)]), inspects 3 => super::hash_split_from_a_whole_attribute,
-    hash_split_from_a_doc_comment: FailsWith(&[tt_fragment!(1), tt_fragment!(1), tt_fragment!(1)]), inspects 3 => super::hash_split_from_a_doc_comment,
-    hash_split_across_two_macros: FailsWith(&[tt_fragment!(1), tt_fragment!(1), tt_fragment!(2), tt_fragment!(2), tt_fragment!(2)]), inspects 3 => super::hash_split_across_two_macros,
-    path_attribute: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute,
-    path_attribute_in_cfg_attr: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_attribute_in_cfg_attr,
+    indexing_after_a_tt: FailsWith(&[tt_fragment!(1)]), inspects 3 => super::repos::indexing_after_a_tt,
+    hash_split_from_a_whole_attribute: FailsWith(&[tt_fragment!(1), tt_fragment!(1), tt_fragment!(1)]), inspects 3 => super::repos::hash_split_from_a_whole_attribute,
+    hash_split_from_a_doc_comment: FailsWith(&[tt_fragment!(1), tt_fragment!(1), tt_fragment!(1)]), inspects 3 => super::repos::hash_split_from_a_doc_comment,
+    hash_split_across_two_macros: FailsWith(&[tt_fragment!(1), tt_fragment!(1), tt_fragment!(2), tt_fragment!(2), tt_fragment!(2)]), inspects 3 => super::repos::hash_split_across_two_macros,
+    path_attribute: FailsWith(&[path_attribute!(1)]), inspects 3 => super::repos::path_attribute,
+    path_attribute_in_cfg_attr: FailsWith(&[path_attribute!(1)]), inspects 3 => super::repos::path_attribute_in_cfg_attr,
     /// A literal `path` on a top-level `mod name;` passes when it names a file core-io lexes.
-    path_to_a_lexed_file_passes: Passes, inspects 3 => super::path_to_a_lexed_file_passes,
-    path_from_a_macro_value: FailsWith(&[path_attribute!(3)]), inspects 3 => super::path_from_a_macro_value,
-    path_not_a_literal: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_not_a_literal,
-    path_leaving_the_crate: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_leaving_the_crate,
-    path_on_an_inline_module: FailsWith(&[path_attribute!(1)]), inspects 3 => super::path_on_an_inline_module,
-    path_inside_a_module_block: FailsWith(&[path_attribute!(2)]), inspects 3 => super::path_inside_a_module_block,
+    path_to_a_lexed_file_passes: Passes, inspects 3 => super::repos::path_to_a_lexed_file_passes,
+    path_from_a_macro_value: FailsWith(&[path_attribute!(3)]), inspects 3 => super::repos::path_from_a_macro_value,
+    path_not_a_literal: FailsWith(&[path_attribute!(1)]), inspects 3 => super::repos::path_not_a_literal,
+    path_leaving_the_crate: FailsWith(&[path_attribute!(1)]), inspects 3 => super::repos::path_leaving_the_crate,
+    path_on_an_inline_module: FailsWith(&[path_attribute!(1)]), inspects 3 => super::repos::path_on_an_inline_module,
+    path_inside_a_module_block: FailsWith(&[path_attribute!(2)]), inspects 3 => super::repos::path_inside_a_module_block,
     include_macro: FailsWith(&[
         "crates/protocol/src/hidden.rs:2: `crates/protocol/src/hidden.rs` calls `include!`, which can bring into clauseo-protocol code \
          from a file core-io does not read\n    \
          fix: move the code into a module at its default path; use `include_str!` or \
          `include_bytes!` for data",
-    ]), inspects 3 => super::include_macro,
+    ]), inspects 3 => super::repos::include_macro,
     source_not_lexed: FailsWith(&[
         "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs`, a file of clauseo-protocol, does not lex as Rust from this \
          line, so core-io cannot check its cfgs\n    \
          fix: fix the Rust syntax that starts at this line, such as a bracket or a string left open",
-    ]), inspects 3 => super::source_not_lexed,
-    cfg_rule_passes: Passes, inspects 3 => super::cfg_rule_passes,
-    cfg_doc_passes: Passes, inspects 3 => super::cfg_doc_passes,
+    ]), inspects 3 => super::repos::source_not_lexed,
+    cfg_rule_passes: Passes, inspects 3 => super::repos::cfg_rule_passes,
+    cfg_doc_passes: Passes, inspects 3 => super::repos::cfg_doc_passes,
     /// rustc ignores a shebang first line, so core-io does too.
-    shebang_line_passes: Passes, inspects 3 => super::shebang_line_passes,
+    shebang_line_passes: Passes, inspects 3 => super::repos::shebang_line_passes,
     attribute_split_across_a_macro: FailsWith(&[
         tt_fragment!(2),
         tt_fragment!(2),
         hash_without_brackets!(2),
         cfg_form!(4, "the name `panic`"),
-    ]), inspects 3 => super::attribute_split_across_a_macro,
-    hash_from_a_metavariable: FailsWith(&[tt_fragment!(2), tt_fragment!(2), cfg_form!(2, "the name `panic`"), hash_without_brackets!(4)]), inspects 3 => super::hash_from_a_metavariable,
-    path_with_a_metavariable: FailsWith(&[tt_fragment!(2), path_attribute!(3)]), inspects 3 => super::path_with_a_metavariable,
+    ]), inspects 3 => super::repos::attribute_split_across_a_macro,
+    hash_from_a_metavariable: FailsWith(&[tt_fragment!(2), tt_fragment!(2), cfg_form!(2, "the name `panic`"), hash_without_brackets!(4)]), inspects 3 => super::repos::hash_from_a_metavariable,
+    path_with_a_metavariable: FailsWith(&[tt_fragment!(2), path_attribute!(3)]), inspects 3 => super::repos::path_with_a_metavariable,
     include_with_a_metavariable: FailsWith(&[
         tt_fragment!(2),
         "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs` calls `include!`, which can bring into clauseo-protocol code \
          from a file core-io does not read\n    \
          fix: move the code into a module at its default path; use `include_str!` or \
          `include_bytes!` for data",
-    ]), inspects 3 => super::include_with_a_metavariable,
-    items_named_cfg: Passes, inspects 3 => super::items_named_cfg,
+    ]), inspects 3 => super::repos::include_with_a_metavariable,
+    items_named_cfg: Passes, inspects 3 => super::repos::items_named_cfg,
     macro_name_metavariable: FailsWith(&[
         "crates/protocol/src/hidden.rs:3: `crates/protocol/src/hidden.rs` calls a macro whose name is a metavariable, so a macro of \
          clauseo-protocol can call `include!` under a name passed to it\n    \
          fix: write the called macro's name in the macro body itself",
-    ]), inspects 3 => super::macro_name_metavariable,
+    ]), inspects 3 => super::repos::macro_name_metavariable,
     symlinked_folder: FailsWith(&[
         "crates/protocol/src/sub:1: `crates/protocol/src/sub` is a symlink under \
          clauseo-protocol's folder, so a `mod` can compile files from elsewhere into \
          clauseo-protocol that core-io does not lex\n    \
          fix: replace the symlink with the file or folder it points to",
-    ]), inspects 3 => super::symlinked_folder,
-    forbid_in_every_root: Passes, inspects 3 => super::forbid_in_every_root,
+    ]), inspects 3 => super::repos::symlinked_folder,
+    forbid_in_every_root: Passes, inspects 3 => super::repos::forbid_in_every_root,
     /// An alias named after an external cargo command xtask runs fails; the repo's `xtask` alias
     /// and one named after a built-in command, which cargo ignores, pass.
-    alias_of_a_command_xtask_runs: FailsWith(&[alias!(3, "clippy")]), inspects 3 => super::alias_of_a_command_xtask_runs,
+    alias_of_a_command_xtask_runs: FailsWith(&[alias!(3, "clippy")]), inspects 3 => super::repos::alias_of_a_command_xtask_runs,
     /// Any other clippy config fails: clippy reads only the nearest one, and `.clippy.toml` first.
     dot_clippy_toml_beside_the_crate_file: FailsWith(&[
         "crates/protocol/.clippy.toml:1: `crates/protocol/.clippy.toml` is a .clippy.toml, which \
@@ -377,7 +377,7 @@ crate::checks::planted::cases! {
          fix: delete `crates/protocol/.clippy.toml`: clippy settings go in the root clippy.toml, \
          which every crate reads, and core-io prints the file each crate whose row bans fs, \
          process or any I/O needs",
-    ]), inspects 3 => super::dot_clippy_toml_beside_the_crate_file,
+    ]), inspects 3 => super::repos::dot_clippy_toml_beside_the_crate_file,
     dot_clippy_toml_at_the_root: FailsWith(&[
         ".clippy.toml:1: `.clippy.toml` is a .clippy.toml, which clippy reads instead of a \
          clippy.toml beside it or above it, so it replaces the root clippy.toml's bans, and a core \
@@ -385,9 +385,9 @@ crate::checks::planted::cases! {
          fix: delete `.clippy.toml`: clippy settings go in the root clippy.toml, which every \
          crate reads, and core-io prints the file each crate whose row bans fs, process or any \
          I/O needs",
-    ]), inspects 3 => super::dot_clippy_toml_at_the_root,
+    ]), inspects 3 => super::repos::dot_clippy_toml_at_the_root,
     /// A filesystem that ignores case opens `Clippy.toml` as `clippy.toml`.
-    clippy_toml_in_another_case: FailsWith(&[stray!("crates/Clippy.toml", "crates")]), inspects 3 => super::clippy_toml_in_another_case,
+    clippy_toml_in_another_case: FailsWith(&[stray!("crates/Clippy.toml", "crates")]), inspects 3 => super::repos::clippy_toml_in_another_case,
     dot_clippy_toml_in_another_case: FailsWith(&[
         ".CLIPPY.toml:1: `.CLIPPY.toml` is a .clippy.toml, which clippy reads instead of a \
          clippy.toml beside it or above it, so it replaces the root clippy.toml's bans, and a core \
@@ -395,52 +395,52 @@ crate::checks::planted::cases! {
          fix: delete `.CLIPPY.toml`: clippy settings go in the root clippy.toml, which every \
          crate reads, and core-io prints the file each crate whose row bans fs, process or any \
          I/O needs",
-    ]), inspects 3 => super::dot_clippy_toml_in_another_case,
-    clippy_toml_in_crates: FailsWith(&[stray!("crates/clippy.toml", "crates")]), inspects 3 => super::clippy_toml_in_crates,
-    clippy_toml_in_xtask: FailsWith(&[stray!("xtask/clippy.toml", "xtask")]), inspects 3 => super::clippy_toml_in_xtask,
-    clippy_toml_of_a_crate_without_a_row: FailsWith(&[stray!("crates/extra/clippy.toml", "crates/extra")]), inspects 3 => super::clippy_toml_of_a_crate_without_a_row,
-    clippy_toml_of_a_clock_only_crate: FailsWith(&[stray!("crates/protocol/clippy.toml", "crates/protocol")]), inspects 3 => super::clippy_toml_of_a_clock_only_crate,
+    ]), inspects 3 => super::repos::dot_clippy_toml_in_another_case,
+    clippy_toml_in_crates: FailsWith(&[stray!("crates/clippy.toml", "crates")]), inspects 3 => super::repos::clippy_toml_in_crates,
+    clippy_toml_in_xtask: FailsWith(&[stray!("xtask/clippy.toml", "xtask")]), inspects 3 => super::repos::clippy_toml_in_xtask,
+    clippy_toml_of_a_crate_without_a_row: FailsWith(&[stray!("crates/extra/clippy.toml", "crates/extra")]), inspects 3 => super::repos::clippy_toml_of_a_crate_without_a_row,
+    clippy_toml_of_a_clock_only_crate: FailsWith(&[stray!("crates/protocol/clippy.toml", "crates/protocol")]), inspects 3 => super::repos::clippy_toml_of_a_clock_only_crate,
     /// Every member inherits the workspace lints, held or not (review D5).
-    crate_lints_not_inherited: FailsWith(&[no_lints!("crates/protocol/Cargo.toml", "clauseo-protocol")]), inspects 3 => super::crate_lints_not_inherited,
-    crate_lints_of_its_own: FailsWith(&[own_lints!("crates/protocol/Cargo.toml", 4, "clauseo-protocol")]), inspects 3 => super::crate_lints_of_its_own,
-    clock_only_crate_lints_of_its_own: FailsWith(&[own_lints!("crates/protocol/Cargo.toml", 4, "clauseo-protocol")]), inspects 3 => super::clock_only_crate_lints_of_its_own,
-    crate_without_a_row_lints_not_inherited: FailsWith(&[no_lints!("crates/extra/Cargo.toml", "clauseo-extra")]), inspects 3 => super::crate_without_a_row_lints_not_inherited,
-    crate_lints_workspace_false: FailsWith(&[own_lints!("crates/protocol/Cargo.toml", 4, "clauseo-protocol")]), inspects 3 => super::crate_lints_workspace_false,
+    crate_lints_not_inherited: FailsWith(&[no_lints!("crates/protocol/Cargo.toml", "clauseo-protocol")]), inspects 3 => super::repos::crate_lints_not_inherited,
+    crate_lints_of_its_own: FailsWith(&[own_lints!("crates/protocol/Cargo.toml", 4, "clauseo-protocol")]), inspects 3 => super::repos::crate_lints_of_its_own,
+    clock_only_crate_lints_of_its_own: FailsWith(&[own_lints!("crates/protocol/Cargo.toml", 4, "clauseo-protocol")]), inspects 3 => super::repos::clock_only_crate_lints_of_its_own,
+    crate_without_a_row_lints_not_inherited: FailsWith(&[no_lints!("crates/extra/Cargo.toml", "clauseo-extra")]), inspects 3 => super::repos::crate_without_a_row_lints_not_inherited,
+    crate_lints_workspace_false: FailsWith(&[own_lints!("crates/protocol/Cargo.toml", 4, "clauseo-protocol")]), inspects 3 => super::repos::crate_lints_workspace_false,
     /// A legacy `.cargo/config`, which cargo reads instead (review D4).
     legacy_cargo_config: FailsWith(&[
         ".cargo/config:1: `.cargo/config` is the legacy name of `.cargo/config.toml`; cargo \
          reads it instead when both exist, and core-io checks only `.cargo/config.toml`\n    \
          fix: move what `.cargo/config` holds into `.cargo/config.toml` and delete \
          `.cargo/config`",
-    ]), inspects 3 => super::legacy_cargo_config,
+    ]), inspects 3 => super::repos::legacy_cargo_config,
     /// Any `rustflags` key in the cargo config, whatever its flags (review D2).
-    rustflags_in_build: FailsWith(&[rustflags!(5, "build.rustflags")]), inspects 3 => super::rustflags_in_build,
-    rustflags_in_a_target: FailsWith(&[rustflags!(2, "target.cfg(unix).rustflags")]), inspects 3 => super::rustflags_in_a_target,
-    rustflags_that_cap_lints: FailsWith(&[rustflags!(2, "build.rustflags")]), inspects 3 => super::rustflags_that_cap_lints,
+    rustflags_in_build: FailsWith(&[rustflags!(5, "build.rustflags")]), inspects 3 => super::repos::rustflags_in_build,
+    rustflags_in_a_target: FailsWith(&[rustflags!(2, "target.cfg(unix).rustflags")]), inspects 3 => super::repos::rustflags_in_a_target,
+    rustflags_that_cap_lints: FailsWith(&[rustflags!(2, "build.rustflags")]), inspects 3 => super::repos::rustflags_that_cap_lints,
     /// Dotted keys and inline tables are the same keys.
-    rustflags_as_a_dotted_key: FailsWith(&[rustflags!(5, "target.x86_64-unknown-linux-gnu.rustflags")]), inspects 3 => super::rustflags_as_a_dotted_key,
-    rustflags_in_an_inline_table: FailsWith(&[rustflags!(1, "build.rustflags")]), inspects 3 => super::rustflags_in_an_inline_table,
-    compiler_key_as_a_dotted_key: FailsWith(&[compiler!(1, "build.rustc-wrapper")]), inspects 3 => super::compiler_key_as_a_dotted_key,
-    alias_as_a_dotted_key: FailsWith(&[alias!(2, "clippy")]), inspects 3 => super::alias_as_a_dotted_key,
-    clippy_env_in_an_inline_table: FailsWith(&[clippy_env!(1, "CLIPPY_CONF_DIR")]), inspects 3 => super::clippy_env_in_an_inline_table,
+    rustflags_as_a_dotted_key: FailsWith(&[rustflags!(5, "target.x86_64-unknown-linux-gnu.rustflags")]), inspects 3 => super::repos::rustflags_as_a_dotted_key,
+    rustflags_in_an_inline_table: FailsWith(&[rustflags!(1, "build.rustflags")]), inspects 3 => super::repos::rustflags_in_an_inline_table,
+    compiler_key_as_a_dotted_key: FailsWith(&[compiler!(1, "build.rustc-wrapper")]), inspects 3 => super::repos::compiler_key_as_a_dotted_key,
+    alias_as_a_dotted_key: FailsWith(&[alias!(2, "clippy")]), inspects 3 => super::repos::alias_as_a_dotted_key,
+    clippy_env_in_an_inline_table: FailsWith(&[clippy_env!(1, "CLIPPY_CONF_DIR")]), inspects 3 => super::repos::clippy_env_in_an_inline_table,
     /// `include`, and the keys that replace or wrap the compiler.
     include_in_cargo_config: FailsWith(&[
         ".cargo/config.toml:1: `.cargo/config.toml` sets `include`, so cargo loads other config \
          files that core-io does not read, where `rustflags`, an alias or a `CLIPPY_` entry could \
          turn off the bans of clippy.toml and xtask/core-io-bans.toml\n    \
          fix: remove `include` and move the settings it loads into `.cargo/config.toml` itself",
-    ]), inspects 3 => super::include_in_cargo_config,
+    ]), inspects 3 => super::repos::include_in_cargo_config,
     compiler_keys_in_cargo_config: FailsWith(&[
         compiler!(3, "build.rustc-wrapper"),
         compiler!(4, "build.rustc"),
         compiler!(5, "build.rustc-workspace-wrapper"),
-    ]), inspects 3 => super::compiler_keys_in_cargo_config,
+    ]), inspects 3 => super::repos::compiler_keys_in_cargo_config,
     /// An `[env]` entry starting with `CLIPPY_` (review D1).
     clippy_env_in_cargo_config: FailsWith(&[
         clippy_env!(3, "CLIPPY_CONF_DIR"),
         clippy_env!(4, "CLIPPY_ARGS"),
-    ]), inspects 3 => super::clippy_env_in_cargo_config,
+    ]), inspects 3 => super::repos::clippy_env_in_cargo_config,
     /// Windows reads environment names ignoring case.
-    clippy_env_in_another_case: FailsWith(&[clippy_env!(2, "Clippy_Conf_Dir")]), inspects 3 => super::clippy_env_in_another_case,
-    cargo_config_without_lint_settings: Passes, inspects 3 => super::cargo_config_without_lint_settings,
+    clippy_env_in_another_case: FailsWith(&[clippy_env!(2, "Clippy_Conf_Dir")]), inspects 3 => super::repos::clippy_env_in_another_case,
+    cargo_config_without_lint_settings: Passes, inspects 3 => super::repos::cargo_config_without_lint_settings,
 }
