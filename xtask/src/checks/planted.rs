@@ -1,35 +1,54 @@
 //! Planted violations: scratch repos a check must fail on (the ways around it included) and repos
 //! it must pass, kept as one list per check, `StaticCheck::planted`, which is the registry.
 //!
-//! Every check keeps them in one place, out of its production file:
+//! Every check keeps them in the same two files, out of its production file:
 //!
 //! - `<check>/tests/planted.rs` holds the one `cases!` list, declared from `<check>/tests.rs`.
 //!   `cases!` turns the list into `PLANTED`, a `&[Planted]`, and into one `#[test]` per case, so
-//!   `cargo test -p xtask planted` lists `checks::<check>::tests::planted::<case>`.
-//! - The functions that build each case's repo live in the check's tests module,
-//!   `<check>/tests.rs`, or in `<check>/tests/cases.rs` when they would push `tests.rs` past 500
-//!   lines. Never in `planted.rs` itself: each case's test takes its name there.
+//!   `cargo test -p xtask planted` lists `checks::<check>::tests::planted::<case>`. Never put a
+//!   function there: each case's test takes its name in that module.
+//! - `<check>/tests/repos.rs` holds the functions that build each case's repo, and nothing else
+//!   the cases do not call. Past 500 lines it keeps the shared helpers and moves the builders by
+//!   topic into `<check>/tests/repos/<topic>.rs`, re-exported with `pub(super) use <topic>::*`,
+//!   so every case still names `super::repos::<builder>`.
 //!
 //! ```ignore
+//! use crate::checks::planted::fails;
+//! use crate::budgets::Fix;
+//!
 //! crate::checks::planted::cases! {
 //!     /// A row whose limit is below zero: the one row is read, and it fails.
-//!     negative_limit: FailsWith(&["budgets.toml:3: ...\n    fix: ..."]),
-//!         inspects 1 => super::negative_limit,
-//!     valid_row: Passes, inspects 1 => super::valid_row,
+//!     negative_limit: Fails[fails(
+//!         "budgets.toml:4",
+//!         "budget window_visible: limit must be zero or more",
+//!         Fix::NegativeLimit,
+//!     )], inspects 1 => super::repos::negative_limit,
+//!     valid_row: Passes, inspects 1 => super::repos::valid_row,
 //! }
 //! ```
 //!
-//! The expectation is a variant of `Expect`, written without the type. Every case also states
-//! `inspects N`: how many items its check must report inspecting (`Inspection::inspected`). N is
-//! worked out from what the case's builder writes (the files, rows or crates the check reads),
-//! not copied from a run, so a check that counts what it never read fails its cases.
+//! The expectation is a variant of `Expect`, written without the type. `Fails[...]` lists each
+//! failure as it prints, built by `fails` (`path:line`, message and fix) or `failure` (no
+//! `path:line`). The location and the message are spelled out; the fix is the check's `Fix`
+//! variant, so its text lives once, in the `Display` that `<check>/fix/tests.rs` pins, and the
+//! harness still compares the exact printed lines. `Fails(path)` takes a function instead, for
+//! lines that differ by OS. `FailsWith(&[...])`, the whole lines as strings, is the old form,
+//! kept until every check is converted.
+//!
+//! Every case also states `inspects N`: how many items its check must report inspecting
+//! (`Inspection::inspected`). N is worked out from what the case's builder writes (the files,
+//! rows or crates the check reads), not copied from a run, so a check that counts what it never
+//! read fails its cases.
 //!
 //! A builder takes no argument and returns a `Repo`: a scratch directory holding the case's one
-//! violation (or none) and the `Context` the check runs in. It never runs the check. The harness
-//! does, through `StaticCheck::report`, the same call `cargo xtask check` makes, so no case can
-//! reach an inner function and skip what the whole check does: what it reads, how it counts and
-//! its zero-inspected judging. The registry test in `tests.rs` runs every check in `ALL` on each
-//! of its repos.
+//! violation (or none) and the `Context` the check runs in. `Repo::files` writes the files of a
+//! repo with no workspace member; `scratch` writes them and returns the directory, for a builder
+//! that adds members, git or cargo. A builder never runs the check. The harness does, through
+//! `StaticCheck::report`, the same call `cargo xtask check` makes, so no case can reach an inner
+//! function and skip what the whole check does: what it reads, how it counts and its
+//! zero-inspected judging. Each case runs once, in its own test; the registry test in `tests.rs`
+//! runs nothing and holds `ALL` to the rules: every check has cases, a failing one and a passing
+//! one among them, and its `CHECK.planted` is the list of its own `tests/planted.rs`.
 
 #[cfg(test)]
 mod repo;
@@ -37,18 +56,36 @@ mod repo;
 mod tests;
 
 #[cfg(test)]
-pub(crate) use repo::{Repo, git};
+pub(crate) use repo::{Repo, git, scratch};
 
 /// What a planted case must produce, judged by the check's own `StaticCheck::judge`.
 #[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum Expect {
     /// Exactly these violations and failures, each as it prints (`path:line: what\n    fix: ...`,
     /// or `what\n    fix: ...` for one without a location), in the order the runner prints them.
-    /// The zero-inspected failure is one of them when the case inspected nothing.
+    /// The zero-inspected failure is one of them when the case inspected nothing. The old form:
+    /// the last check converted to `Fails` removes it.
     FailsWith(&'static [&'static str]),
+    /// As `FailsWith`, with the lines built when the case runs, by `fails` and `failure`, so
+    /// each fix is named by its `Fix` variant. `cases!` writes `Fails[line, ...]` as a closure.
+    Fails(fn() -> Vec<String>),
     /// The check passes: no violation, no failure, and at least one item inspected.
     Passes,
+}
+
+/// A violation as it prints: `{at}: {message}`, then `    fix: ` and the fix's text. `at` is
+/// `path:line`. The fix is a check's `Fix` variant, never its text, so a fix is worded in one
+/// place.
+#[cfg(test)]
+pub(crate) fn fails(at: &str, message: &str, fix: impl Into<Fix>) -> String {
+    format!("{at}: {message}\n    fix: {}", fix.into())
+}
+
+/// A failure with no `path:line` as it prints: `message`, then `    fix: ` and the fix's text.
+#[cfg(test)]
+pub(crate) fn failure(message: &str, fix: impl Into<Fix>) -> String {
+    format!("{message}\n    fix: {}", fix.into())
 }
 
 /// One planted case of a check.
@@ -57,6 +94,9 @@ pub(crate) enum Expect {
 pub(crate) struct Planted {
     /// The case's name, also the name of its test.
     pub name: &'static str,
+    /// The file whose `cases!` list holds the case, `file!()` there, which the registry
+    /// matches with its check's file.
+    pub file: &'static str,
     pub expect: Expect,
     /// How many items the check must report inspecting for this input.
     pub inspects: usize,
@@ -96,20 +136,33 @@ impl Planted {
                 "the fix `{text}` is a step's text; give it a variant in the check's Fix enum"
             ));
         }
-        match self.expect {
-            Expect::FailsWith([]) => {
-                Err("FailsWith needs at least one failure; a case that passes is Passes".to_owned())
+        let expected: Vec<String> = match self.expect {
+            Expect::Passes if report.failed() => {
+                return Err(format!("expected a pass, found:\n{}", printed.join("\n")));
             }
-            Expect::FailsWith(expected) if printed != expected => Err(format!(
+            Expect::Passes => return Ok(()),
+            Expect::FailsWith(lines) => lines.iter().map(ToString::to_string).collect(),
+            Expect::Fails(lines) => lines(),
+        };
+        if expected.is_empty() {
+            return Err(
+                "a failing case lists at least one failure; a case that passes is Passes"
+                    .to_owned(),
+            );
+        }
+        if printed != expected {
+            return Err(format!(
                 "expected these failures:\n{}\nfound:\n{}",
                 expected.join("\n"),
                 printed.join("\n")
-            )),
-            Expect::Passes if report.failed() => {
-                Err(format!("expected a pass, found:\n{}", printed.join("\n")))
-            }
-            Expect::FailsWith(_) | Expect::Passes => Ok(()),
+            ));
         }
+        Ok(())
+    }
+
+    /// True for a case that expects the check to pass.
+    fn passes(&self) -> bool {
+        matches!(self.expect, Expect::Passes)
     }
 }
 
@@ -129,10 +182,10 @@ pub(crate) fn verify_named(check: &StaticCheck, name: &str) {
     }
 }
 
-/// What is wrong with the planted registry of `checks`, one line each: a check with no planted
-/// case, no failing case or no passing case, a failing case the check passes, and a passing case
-/// it fails. Every case runs through `StaticCheck::report`, on as many threads as the machine
-/// has, since a case that runs cargo takes a tenth of a second.
+/// What is wrong with the planted registry of `checks`, one line each, sorted: a check with no
+/// planted case, no failing case or no passing case, and a check whose `planted` holds a case
+/// from another file than its own `tests/planted.rs`. It runs no case: the test `cases!` makes
+/// for each case does, and judges it more strictly than a pass or a fail.
 #[cfg(test)]
 pub(crate) fn registry_problems(checks: &[StaticCheck]) -> Vec<String> {
     let mut problems = Vec::new();
@@ -142,70 +195,37 @@ pub(crate) fn registry_problems(checks: &[StaticCheck]) -> Vec<String> {
             problems.push(format!("{name} has no planted cases"));
             continue;
         }
-        if !check
-            .planted
-            .iter()
-            .any(|case| case.expect == Expect::Passes)
-        {
+        if !check.planted.iter().any(Planted::passes) {
             problems.push(format!("{name} has no planted case that passes"));
         }
-        if !check
-            .planted
-            .iter()
-            .any(|case| case.expect != Expect::Passes)
-        {
+        if check.planted.iter().all(Planted::passes) {
             problems.push(format!("{name} has no planted case that fails"));
         }
+        let own = own_list(check.source);
+        if let Some(case) = check
+            .planted
+            .iter()
+            .find(|case| case.file.replace('\\', "/") != own)
+        {
+            problems.push(format!(
+                "{name}'s planted list holds `{}` from {}; point its CHECK.planted at \
+                 tests::planted::PLANTED, the list in {own}",
+                case.name,
+                case.file.replace('\\', "/")
+            ));
+        }
     }
-    let cases: Vec<(&StaticCheck, &Planted)> = checks
-        .iter()
-        .flat_map(|check| check.planted.iter().map(move |case| (check, case)))
-        .collect();
-    let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
-    // Each thread takes the next case no thread has taken, so the slow cases (those that run
-    // cargo, listed together under their check) spread over every thread instead of one.
-    let next = AtomicUsize::new(0);
-    std::thread::scope(|scope| {
-        // Every thread starts before the first join, so the cases run side by side.
-        let mut handles = Vec::new();
-        for _ in 0..threads.min(cases.len()) {
-            let (cases, next) = (&cases, &next);
-            handles.push(scope.spawn(move || {
-                let mut found = Vec::new();
-                while let Some((check, case)) = cases.get(next.fetch_add(1, Ordering::Relaxed)) {
-                    found.extend(judged(check, case));
-                }
-                found
-            }));
-        }
-        for handle in handles {
-            let found = handle
-                .join()
-                .expect("a planted case panicked; its own test says why");
-            problems.extend(found);
-        }
-    });
+    problems.sort();
     problems
 }
 
-/// The registry's problem with `case` of `check`: a failing case with no violation or failure,
-/// or a passing case with one.
+/// The file that holds the `cases!` list of the check in `source`: `xtask/src/checks/budgets.rs`
+/// has `xtask/src/checks/budgets/tests/planted.rs`, with `/` on every OS.
 #[cfg(test)]
-fn judged(check: &StaticCheck, case: &Planted) -> Option<String> {
-    let report = case.report(check);
-    match (case.expect, report.failed()) {
-        (Expect::FailsWith(_), false) => Some(format!(
-            "{} found nothing in its planted case `{}`, which holds a violation",
-            check.name, case.name
-        )),
-        (Expect::Passes, true) => Some(format!(
-            "{} failed its planted case `{}`, which holds none:\n{}",
-            check.name,
-            case.name,
-            report.printed().join("\n")
-        )),
-        _ => None,
-    }
+fn own_list(source: &str) -> String {
+    let source = source.replace('\\', "/");
+    let stem = source.strip_suffix(".rs").unwrap_or(&source);
+    format!("{stem}/tests/planted.rs")
 }
 
 /// Makes `PLANTED` and the `planted` test module from one list of cases. See the module docs.
@@ -213,14 +233,20 @@ fn judged(check: &StaticCheck, case: &Planted) -> Option<String> {
 macro_rules! cases {
     ($(
         $(#[doc = $doc:literal])*
-        $name:ident : $expect:ident $( ( $($arg:tt)* ) )? , inspects $inspects:literal => $repo:path
+        $name:ident : $expect:ident
+            $( ( $($arg:tt)* ) )?
+            $( [ $($line:expr),+ $(,)? ] )?
+            , inspects $inspects:literal => $repo:path
     ),+ $(,)?) => {
         /// This check's planted cases: repos it must fail on and repos it must pass.
         #[cfg(test)]
         pub(crate) const PLANTED: &[$crate::checks::planted::Planted] = &[$(
             $crate::checks::planted::Planted {
                 name: stringify!($name),
-                expect: $crate::checks::planted::Expect::$expect $( ( $($arg)* ) )?,
+                file: file!(),
+                expect: $crate::checks::planted::Expect::$expect
+                    $( ( $($arg)* ) )?
+                    $( (|| vec![$($line),+]) )?,
                 inspects: $inspects,
                 repo: $repo,
             },
@@ -243,5 +269,3 @@ pub(crate) use cases;
 use crate::checks::{Report, StaticCheck};
 #[cfg(test)]
 use crate::fix::Fix;
-#[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
