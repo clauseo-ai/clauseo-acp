@@ -2,7 +2,9 @@
 //! `tests/cases.rs`.
 
 mod cases;
+mod engines_node;
 mod fake_pins;
+mod forms_text;
 pub(super) mod planted;
 mod workflow_files;
 mod yaml_text;
@@ -13,7 +15,7 @@ use std::collections::HashSet;
 use std::mem::discriminant;
 
 /// The text of every fix, by an exhaustive match: a new variant does not compile until its text
-/// is pinned here. The samples are one per variant.
+/// is pinned here. The samples are one per variant; the texts per home are in the next test.
 #[test]
 fn every_fix_has_its_exact_text() {
     let samples = [
@@ -23,11 +25,9 @@ fn every_fix_has_its_exact_text() {
         Fix::LefthookComment {
             pinned: "9.8.7".to_owned(),
         },
-        Fix::PnpmInput,
-        Fix::NodeInput,
-        Fix::RustToolchain,
-        Fix::Copy(Home::Pnpm),
-        Fix::Unread(Unread::Channel),
+        Fix::Input(FileHome::Pnpm),
+        Fix::Copy(Home::File(FileHome::Pnpm)),
+        Fix::Unread(FileHome::Rust),
         Fix::NotYaml,
         Fix::NotToml,
     ];
@@ -43,22 +43,12 @@ fn every_fix_has_its_exact_text() {
                 "check that the comment holds for lefthook 9.8.7, then make it name 9.8.7, the \
                  version `BINARIES` in xtask/src/setup.rs pins"
             }
-            Fix::PnpmInput => {
+            Fix::Input(_) => {
                 "remove `version` and set `package_json_file: ui/package.json`: pnpm/action-setup \
                  then installs the pnpm `packageManager` names there, its one home"
             }
-            Fix::NodeInput => {
-                "remove `node-version` and set `node-version-file: ui/package.json`: \
-                 actions/setup-node then installs a Node that `engines.node` there allows, its \
-                 one home"
-            }
-            Fix::RustToolchain => {
-                "install Rust with a `run: rustup toolchain install` step instead: with no \
-                 argument rustup installs the toolchain rust-toolchain.toml names, the one home \
-                 of the Rust version"
-            }
             Fix::Copy(_) => {
-                "remove the version from the workflow: pnpm/action-setup with \
+                "remove the version from this file: pnpm/action-setup with \
                  `package_json_file: ui/package.json` installs the pnpm `packageManager` names"
             }
             Fix::Unread(_) => {
@@ -78,76 +68,99 @@ fn every_fix_has_its_exact_text() {
     }
 }
 
-/// The fix of a copy, for every home: the matches are exhaustive, as for `Fix`.
+/// What each home is called and how a workflow installs from it, by an exhaustive match: a new
+/// home does not compile until its texts are pinned here.
 #[test]
-fn every_copy_fix_and_home_has_its_exact_text() {
+fn every_home_has_its_exact_texts() {
     let homes = [
-        Home::Rust,
-        Home::Pnpm,
-        Home::Node,
+        Home::File(FileHome::Rust),
+        Home::File(FileHome::Pnpm),
+        Home::File(FileHome::Node),
         Home::Tool("cargo-fake"),
         Home::Binary("lefthook"),
     ];
-    let kinds: HashSet<_> = homes.iter().map(discriminant).collect();
-    assert_eq!(kinds.len(), homes.len(), "two samples share a variant");
+    let unique: HashSet<String> = homes.iter().map(|home| format!("{home:?}")).collect();
+    assert_eq!(unique.len(), homes.len(), "two samples are the same home");
+    let setup = "`cargo xtask setup --binaries` installs the versions xtask/src/setup.rs pins";
     for home in homes {
-        let (what, how) = match home {
-            Home::Rust => (
-                "the Rust version `channel` in rust-toolchain.toml pins",
+        let (tool, noun, place, install) = match home {
+            Home::File(FileHome::Rust) => (
+                "Rust toolchain",
+                "the Rust version",
+                "`channel` in rust-toolchain.toml",
                 "a `run: rustup toolchain install` step with no argument installs the toolchain \
                  rust-toolchain.toml names",
             ),
-            Home::Pnpm => (
-                "the pnpm version `packageManager` in ui/package.json pins",
+            Home::File(FileHome::Pnpm) => (
+                "pnpm",
+                "the pnpm version",
+                "`packageManager` in ui/package.json",
                 "pnpm/action-setup with `package_json_file: ui/package.json` installs the pnpm \
                  `packageManager` names",
             ),
-            Home::Node => (
-                "the minimum Node `engines.node` in ui/package.json sets",
+            Home::File(FileHome::Node) => (
+                "Node",
+                "the minimum Node",
+                "`engines.node` in ui/package.json",
                 "actions/setup-node with `node-version-file: ui/package.json` installs a Node \
                  that `engines.node` allows",
             ),
             Home::Tool(_) => (
-                "the cargo-fake version `TOOLS` in xtask/src/setup.rs pins",
-                "`cargo xtask setup --binaries` installs the versions xtask/src/setup.rs pins",
+                "cargo-fake",
+                "the cargo-fake version",
+                "`TOOLS` in xtask/src/setup.rs",
+                setup,
             ),
             Home::Binary(_) => (
-                "the lefthook version `BINARIES` in xtask/src/setup.rs pins",
-                "`cargo xtask setup --binaries` installs the versions xtask/src/setup.rs pins",
+                "lefthook",
+                "the lefthook version",
+                "`BINARIES` in xtask/src/setup.rs",
+                setup,
             ),
         };
-        assert_eq!(home.to_string(), what);
+        assert_eq!(
+            (home.tool(), home.noun(), home.place()),
+            (tool, noun.to_owned(), place.to_owned())
+        );
         assert_eq!(
             Fix::Copy(home).to_string(),
-            format!("remove the version from the workflow: {how}")
+            format!("remove the version from this file: {install}")
         );
     }
 }
 
-/// The fix of a home value that could not be read, for every value.
+/// The fixes of a version input and of a home that could not be read, for every file home.
 #[test]
-fn every_unread_fix_has_its_exact_text() {
-    let values = [Unread::Channel, Unread::PackageManager, Unread::EnginesNode];
-    let kinds: HashSet<_> = values.iter().map(discriminant).collect();
-    assert_eq!(kinds.len(), values.len(), "two samples share a variant");
-    for unread in values {
-        let expected = match unread {
-            Unread::Channel => {
+fn every_file_home_has_its_exact_fixes() {
+    for home in [FileHome::Rust, FileHome::Pnpm, FileHome::Node] {
+        let (input, unread) = match home {
+            FileHome::Rust => (
+                "install Rust with a `run: rustup toolchain install` step instead: with no \
+                 argument rustup installs the toolchain rust-toolchain.toml names, the one home \
+                 of the Rust version",
                 "set `channel = \"<major>.<minor>.<patch>\"` under `[toolchain]` in \
                  rust-toolchain.toml: it is the one home of the Rust version, and pins compares \
-                 its copies with it"
-            }
-            Unread::PackageManager => {
+                 its copies with it",
+            ),
+            FileHome::Pnpm => (
+                "remove `version` and set `package_json_file: ui/package.json`: pnpm/action-setup \
+                 then installs the pnpm `packageManager` names there, its one home",
                 "set `\"packageManager\": \"pnpm@<major>.<minor>.<patch>\"` in ui/package.json: \
-                 it is the one home of the pnpm version, and pins looks for copies of it"
-            }
-            Unread::EnginesNode => {
+                 it is the one home of the pnpm version, and pins looks for copies of it",
+            ),
+            FileHome::Node => (
+                "remove `node-version` and set `node-version-file: ui/package.json`: \
+                 actions/setup-node then installs a Node that `engines.node` there allows, its \
+                 one home",
                 "set `\"engines\": { \"node\": \">=<major>.<minor>.<patch>\" }` in \
                  ui/package.json: it is the one home of the minimum Node, and pins looks for \
-                 copies of it"
-            }
+                 copies of it",
+            ),
         };
-        assert_eq!(Fix::Unread(unread).to_string(), expected);
+        assert_eq!(
+            (Fix::Input(home).to_string(), Fix::Unread(home).to_string()),
+            (input.to_owned(), unread.to_owned())
+        );
     }
 }
 
@@ -275,8 +288,8 @@ fn a_home_that_cannot_be_read_says_why() {
             "package-node-range",
             PACKAGE_JSON,
             "{ \"engines\": { \"node\": \"*\" }, \"packageManager\": \"pnpm@7.8.9\" }",
-            "could not read the minimum Node from ui/package.json: `engines.node` is `*`, which \
-             starts with no version",
+            "could not read the minimum Node from ui/package.json: `engines.node` is `*`; \
+             engines.node takes only \">=<major>.<minor>.<patch>\"",
         ),
         (
             "package-not-json",
@@ -302,29 +315,6 @@ fn a_home_that_cannot_be_read_says_why() {
             found.violations
         );
     }
-}
-
-/// A Node range keeps only its first version: `>= 6.7.0 < 8` reads as `6.7.0`.
-#[test]
-fn engines_node_reads_the_version_after_its_operator() {
-    let dir = repo("node-range");
-    put(
-        &dir,
-        PACKAGE_JSON,
-        "{ \"engines\": { \"node\": \">= 6.7.0 < 8\" }, \"packageManager\": \"pnpm@7.8.9\" }",
-    );
-    put(&dir, ".github/workflows/ci.yml", "env:\n  A: node 6.7.0\n");
-    let found = check(&dir);
-    assert!(found.failures.is_empty(), "{:?}", found.failures);
-    let lines: Vec<String> = found.violations.iter().map(ToString::to_string).collect();
-    assert_eq!(
-        lines,
-        [
-            ".github/workflows/ci.yml:2: `6.7.0` is the minimum Node `engines.node` in \
-          ui/package.json sets\n    fix: remove the version from the workflow: actions/setup-node \
-          with `node-version-file: ui/package.json` installs a Node that `engines.node` allows"
-        ]
-    );
 }
 
 /// `dtolnay/rust-toolchain` is pinned by a commit only when its ref is 40 hex digits. A shorter

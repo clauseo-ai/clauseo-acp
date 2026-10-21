@@ -1,56 +1,50 @@
 //! Reads the pinned versions from their homes: `channel` in `rust-toolchain.toml`, and
-//! `packageManager` and `engines.node` in `ui/package.json`. A value that cannot be read is a
-//! failure with no line (the value is missing, so there is no line to point at), and the rules
-//! that compare copies with it skip it.
+//! `packageManager` and `engines.node` in `ui/package.json`. A value that cannot be read, or is
+//! not in the one form its home takes, is a failure with no line (the value is missing, so there
+//! is no line to point at). Only the Rust version is kept: `rust-version` copies it. No rule
+//! compares a copy with the pnpm or Node version, as every version a workflow names for them
+//! fails; they are read so that a home in another form fails here.
 
-use super::{Fix, PACKAGE_JSON, TOOLCHAIN, Unread, is_version};
+use super::{
+    ENGINES_NODE_RULE, FileHome, Fix, PACKAGE_JSON, TOOLCHAIN, engines_node_minimum, is_version,
+};
 use crate::checks::{Failure, Inspection};
 use std::fs;
 use std::io;
 use std::path::Path;
 
-/// The versions the homes pin, each `None` when it could not be read.
+/// The versions the homes pin that a rule compares copies with.
 #[derive(Debug, Default)]
 pub(super) struct Homes {
-    /// `channel`, e.g. `1.2.3`.
+    /// `channel`, e.g. `1.2.3`; `None` when it could not be read.
     pub rust: Option<String>,
-    /// The version in `packageManager`, without `pnpm@` and any `+<hash>`.
-    pub pnpm: Option<String>,
-    /// The version in `engines.node`, without its operator (`>=`).
-    pub node: Option<String>,
 }
 
 /// Reads every home, adding a failure to `found` for each value it could not read.
 pub(super) fn read(root: &Path, found: &mut Inspection) -> Homes {
-    let mut keep = |unread: Unread, what: &str, file: &str, read: Result<String, String>| {
+    let mut keep = |home: FileHome, file: &str, read: Result<String, String>| {
         read.map_err(|cause| {
             found.failures.push(Failure {
-                message: format!("could not read {what} from {file}: {cause}"),
-                fix: Fix::Unread(unread).into(),
+                message: format!("could not read {} from {file}: {cause}", home.noun()),
+                fix: Fix::Unread(home).into(),
             });
         })
         .ok()
     };
-    let rust = keep(
-        Unread::Channel,
-        "the Rust version",
-        TOOLCHAIN,
-        rust_channel(root),
-    );
+    let rust = keep(FileHome::Rust, TOOLCHAIN, rust_channel(root));
     let package = package_json(root);
-    let pnpm = keep(
-        Unread::PackageManager,
-        "the pnpm version",
+    let json = package.clone();
+    keep(
+        FileHome::Pnpm,
         PACKAGE_JSON,
-        package.clone().and_then(|json| pnpm_version(&json)),
+        json.and_then(|json| pnpm_version(&json)),
     );
-    let node = keep(
-        Unread::EnginesNode,
-        "the minimum Node",
+    keep(
+        FileHome::Node,
         PACKAGE_JSON,
         package.and_then(|json| node_version(&json)),
     );
-    Homes { rust, pnpm, node }
+    Homes { rust }
 }
 
 /// `root/rel` as text, or why it could not be read.
@@ -101,19 +95,14 @@ fn pnpm_version(json: &serde_json::Value) -> Result<String, String> {
         .ok_or_else(|| format!("`packageManager` is `{field}`, not `pnpm@<major>.<minor>.<patch>`"))
 }
 
-/// The version in `engines.node`, after its operator: `1.2.3` of `>=1.2.3`.
+/// The minimum Node in `engines.node`: `1.2.3` of `>=1.2.3`, the only form it takes.
 fn node_version(json: &serde_json::Value) -> Result<String, String> {
     let field = json
         .get("engines")
         .and_then(|engines| engines.get("node"))
         .and_then(serde_json::Value::as_str)
         .ok_or("it has no `engines.node` string")?;
-    let version = field
-        .trim_start_matches(['>', '=', '^', '~', 'v', ' '])
-        .split([' ', '|', '<'])
-        .next()
-        .filter(|version| is_version(version));
-    version
+    engines_node_minimum(field)
         .map(str::to_owned)
-        .ok_or_else(|| format!("`engines.node` is `{field}`, which starts with no version"))
+        .ok_or_else(|| format!("`engines.node` is `{field}`; {ENGINES_NODE_RULE}"))
 }

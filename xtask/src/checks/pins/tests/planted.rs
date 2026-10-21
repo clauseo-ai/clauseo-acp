@@ -163,45 +163,52 @@ crate::checks::planted::cases! {
     ]), inspects 2 => super::cases::workflow_not_yaml,
     /// The pnpm version in a run step is a copy of its home and fails at its line.
     pnpm_copy_in_a_run_step: FailsWith(&[
-        ".github/workflows/ci.yml:4: `7.8.9` is the pnpm version `packageManager` in ui/package.json pins\n    \
-         fix: remove the version from the workflow: pnpm/action-setup with \
-         `package_json_file: ui/package.json` installs the pnpm `packageManager` names",
+        ".github/workflows/ci.yml:4: `pnpm@7.8.9` names pnpm 7.8.9; the one home of the pnpm \
+         version is `packageManager` in ui/package.json\n    fix: remove the version from this \
+         file: pnpm/action-setup with `package_json_file: ui/package.json` installs the pnpm \
+         `packageManager` names",
     ]), inspects 2 => super::cases::pnpm_copy_in_a_run_step,
     /// The Node major.minor on a block scalar's third line fails at that line.
     node_major_minor_in_a_block_scalar: FailsWith(&[
-        ".github/workflows/ci.yml:6: `6.7` is the major.minor of the minimum Node `engines.node` in ui/package.json sets\n    \
-         fix: remove the version from the workflow: actions/setup-node with \
-         `node-version-file: ui/package.json` installs a Node that `engines.node` allows",
+        ".github/workflows/ci.yml:6: `fnm install 6.7` names Node 6.7; the one home of the minimum \
+         Node is `engines.node` in ui/package.json\n    fix: remove the version from this file: \
+         actions/setup-node with `node-version-file: ui/package.json` installs a Node that \
+         `engines.node` allows",
     ]), inspects 2 => super::cases::node_major_minor_in_a_block_scalar,
     /// A copy in a flow mapping fails at its line.
     rust_copy_in_a_flow_mapping: FailsWith(&[
-        ".github/workflows/ci.yml:3: `3.4.5` is the Rust version `channel` in rust-toolchain.toml pins\n    \
-         fix: remove the version from the workflow: a `run: rustup \
-         toolchain install` step with no argument installs the toolchain rust-toolchain.toml names",
+        ".github/workflows/ci.yml:3: `RUSTUP_TOOLCHAIN: 3.4.5` names Rust toolchain 3.4.5; the one \
+         home of the Rust version is `channel` in rust-toolchain.toml\n    fix: remove the version \
+         from this file: a `run: rustup toolchain install` step with no argument installs the \
+         toolchain rust-toolchain.toml names",
     ]), inspects 2 => super::cases::rust_copy_in_a_flow_mapping,
     /// A copy under a quoted key fails: keys are matched as YAML reads them.
     copy_under_a_quoted_key: FailsWith(&[
-        ".github/workflows/ci.yml:2: `7.8.9` is the pnpm version `packageManager` in ui/package.json pins\n    \
-         fix: remove the version from the workflow: pnpm/action-setup with \
-         `package_json_file: ui/package.json` installs the pnpm `packageManager` names",
+        ".github/workflows/ci.yml:2: `Rustup_Toolchain: 3.3` names Rust toolchain 3.3; the one \
+         home of the Rust version is `channel` in rust-toolchain.toml\n    fix: remove the version \
+         from this file: a `run: rustup toolchain install` step with no argument installs the \
+         toolchain rust-toolchain.toml names",
     ]), inspects 2 => super::cases::copy_under_a_quoted_key,
     /// A copy behind an anchor fails once, at the anchored value, however often it is used.
     copy_through_an_alias: FailsWith(&[
-        ".github/workflows/ci.yml:1: `3.4.5` is the Rust version `channel` in rust-toolchain.toml pins\n    \
-         fix: remove the version from the workflow: a `run: rustup \
-         toolchain install` step with no argument installs the toolchain rust-toolchain.toml names",
+        ".github/workflows/ci.yml:1: `rustup toolchain install 3.4.5` names Rust toolchain 3.4.5; \
+         the one home of the Rust version is `channel` in rust-toolchain.toml\n    fix: remove the \
+         version from this file: a `run: rustup toolchain install` step with no argument installs \
+         the toolchain rust-toolchain.toml names",
     ]), inspects 2 => super::cases::copy_through_an_alias,
     /// A copy in a flow sequence fails at its line.
     copy_in_a_flow_sequence: FailsWith(&[
-        ".github/workflows/ci.yml:5: `6.7.0` is the minimum Node `engines.node` in ui/package.json sets\n    \
-         fix: remove the version from the workflow: actions/setup-node with \
-         `node-version-file: ui/package.json` installs a Node that `engines.node` allows",
+        ".github/workflows/ci.yml:5: `node:6.7.0` names Node 6.7.0; the one home of the minimum \
+         Node is `engines.node` in ui/package.json\n    fix: remove the version from this file: \
+         actions/setup-node with `node-version-file: ui/package.json` installs a Node that \
+         `engines.node` allows",
     ]), inspects 2 => super::cases::copy_in_a_flow_sequence,
     /// A workflow with an upper-case `.YML` extension is read too.
     an_upper_case_yml_extension: FailsWith(&[
-        ".github/workflows/CI.YML:4: `3.4.5` is the Rust version `channel` in rust-toolchain.toml pins\n    \
-         fix: remove the version from the workflow: a `run: rustup \
-         toolchain install` step with no argument installs the toolchain rust-toolchain.toml names",
+        ".github/workflows/CI.YML:4: `rustup toolchain install 3.4.5` names Rust toolchain 3.4.5; \
+         the one home of the Rust version is `channel` in rust-toolchain.toml\n    fix: remove the \
+         version from this file: a `run: rustup toolchain install` step with no argument installs \
+         the toolchain rust-toolchain.toml names",
     ]), inspects 2 => super::cases::an_upper_case_yml_extension,
     /// A workflow in a subfolder is not one GitHub runs, so it is not read.
     a_workflow_in_a_subfolder_passes: Passes,
@@ -224,4 +231,84 @@ crate::checks::planted::cases! {
          `channel` in rust-toolchain.toml pins (3.4.5)\n    fix: set rust-version to \"3.4\", \
          the major.minor of `channel` in rust-toolchain.toml, the one home of the Rust version",
     ]), inspects 2 => super::cases::rust_version_in_an_inline_member_table,
+    /// Composite actions are read like workflows: a version input and a pnpm version fail.
+    pnpm_and_node_in_a_composite_action: FailsWith(&[
+        ".github/actions/setup/action.yml:7: `version` tells pnpm/action-setup which pnpm to \
+         install; the one home of that version is `packageManager` in ui/package.json\n    fix: \
+         remove `version` and set `package_json_file: ui/package.json`: pnpm/action-setup then \
+         installs the pnpm `packageManager` names there, its one home",
+        ".github/actions/setup/action.yml:8: `pnpm@7.8.9` names pnpm 7.8.9; the one home of the \
+         pnpm version is `packageManager` in ui/package.json\n    fix: remove the version from \
+         this file: pnpm/action-setup with `package_json_file: ui/package.json` installs the pnpm \
+         `packageManager` names",
+        ".github/actions/tools/node/action.yaml:5: `node-version` tells actions/setup-node which \
+         Node to install; the one home of that version is `engines.node` in ui/package.json\n    \
+         fix: remove `node-version` and set `node-version-file: ui/package.json`: \
+         actions/setup-node then installs a Node that `engines.node` there allows, its one home",
+    ]),
+        inspects 3 => super::cases::pnpm_and_node_in_a_composite_action,
+    /// Versions that drift from the homes fail too: a pnpm major, Node container images.
+    drifted_pnpm_and_node_container: FailsWith(&[
+        ".github/workflows/ci.yml:3: `node:6` names Node 6; the one home of the minimum Node is \
+         `engines.node` in ui/package.json\n    fix: remove the version from this file: \
+         actions/setup-node with `node-version-file: ui/package.json` installs a Node that \
+         `engines.node` allows",
+        ".github/workflows/ci.yml:6: `node:6.7-alpine` names Node 6.7-alpine; the one home of the \
+         minimum Node is `engines.node` in ui/package.json\n    fix: remove the version from this \
+         file: actions/setup-node with `node-version-file: ui/package.json` installs a Node that \
+         `engines.node` allows",
+        ".github/workflows/ci.yml:8: `pnpm@7` names pnpm 7; the one home of the pnpm version is \
+         `packageManager` in ui/package.json\n    fix: remove the version from this file: \
+         pnpm/action-setup with `package_json_file: ui/package.json` installs the pnpm \
+         `packageManager` names",
+    ]),
+        inspects 2 => super::cases::drifted_pnpm_and_node_container,
+    /// corepack, `cargo install --version` across a line break and an install action's tool.
+    corepack_and_cargo_install_versions: FailsWith(&[
+        ".github/workflows/ci.yml:4: `pnpm@7.8.8` names pnpm 7.8.8; the one home of the pnpm \
+         version is `packageManager` in ui/package.json\n    fix: remove the version from this \
+         file: pnpm/action-setup with `package_json_file: ui/package.json` installs the pnpm \
+         `packageManager` names",
+        ".github/workflows/ci.yml:7: `cargo install --locked cargo-deny --version 0.0.1` names \
+         cargo-deny 0.0.1; the one home of the cargo-deny version is `TOOLS` in \
+         xtask/src/setup.rs\n    fix: remove the version from this file: `cargo xtask setup \
+         --binaries` installs the versions xtask/src/setup.rs pins",
+        ".github/workflows/ci.yml:10: `cargo-nextest@0.0.1` names cargo-nextest 0.0.1; the one \
+         home of the cargo-nextest version is `TOOLS` in xtask/src/setup.rs\n    fix: remove the \
+         version from this file: `cargo xtask setup --binaries` installs the versions \
+         xtask/src/setup.rs pins",
+    ]),
+        inspects 2 => super::cases::corepack_and_cargo_install_versions,
+    /// rustup's toolchain arguments, `cargo +<v>` and a Rust image.
+    rustup_and_plus_toolchains: FailsWith(&[
+        ".github/workflows/ci.yml:4: `rustup default 3.3` names Rust toolchain 3.3; the one home \
+         of the Rust version is `channel` in rust-toolchain.toml\n    fix: remove the version from \
+         this file: a `run: rustup toolchain install` step with no argument installs the toolchain \
+         rust-toolchain.toml names",
+        ".github/workflows/ci.yml:4: `cargo +3.4.5` names Rust toolchain 3.4.5; the one home of \
+         the Rust version is `channel` in rust-toolchain.toml\n    fix: remove the version from \
+         this file: a `run: rustup toolchain install` step with no argument installs the toolchain \
+         rust-toolchain.toml names",
+        ".github/workflows/ci.yml:5: `rustup component add clippy --toolchain 3.4` names Rust \
+         toolchain 3.4; the one home of the Rust version is `channel` in rust-toolchain.toml\n    \
+         fix: remove the version from this file: a `run: rustup toolchain install` step with no \
+         argument installs the toolchain rust-toolchain.toml names",
+        ".github/workflows/ci.yml:6: `rust:3.4.5` names Rust toolchain 3.4.5; the one home of the \
+         Rust version is `channel` in rust-toolchain.toml\n    fix: remove the version from this \
+         file: a `run: rustup toolchain install` step with no argument installs the toolchain \
+         rust-toolchain.toml names",
+    ]),
+        inspects 2 => super::cases::rustup_and_plus_toolchains,
+    /// A number that names no pinned tool is not a copy: `python-version: '3.4'` passes.
+    numbers_that_name_no_tool: Passes, inspects 2 => super::cases::numbers_that_name_no_tool,
+    /// dtolnay/rust-toolchain at a commit with no comment cannot be checked, so it passes.
+    dtolnay_at_a_bare_commit: Passes, inspects 2 => super::cases::dtolnay_at_a_bare_commit,
+    /// An engines.node in another form than `>=<major>.<minor>.<patch>` fails with the rule.
+    engines_node_with_a_caret: FailsWith(&[
+        "could not read the minimum Node from ui/package.json: `engines.node` is `^6.7.0`; \
+         engines.node takes only \">=<major>.<minor>.<patch>\"\n    fix: set `\"engines\": { \
+         \"node\": \">=<major>.<minor>.<patch>\" }` in ui/package.json: it is the one home of the \
+         minimum Node, and pins looks for copies of it",
+    ]),
+        inspects 1 => super::cases::engines_node_with_a_caret,
 }

@@ -1,22 +1,28 @@
-//! The workflow rule: no file in `.github/workflows/` pins pnpm, Node or Rust, or repeats a
-//! version a home pins. Each `.yml` and `.yaml` file there (in any case) is parsed with
-//! `saphyr-parser`, so quoted keys, flow mappings, anchors, aliases and merge keys read as YAML
-//! defines them.
+//! The workflow rule: no workflow in `.github/workflows/` and no action in `.github/actions/`
+//! pins pnpm, Node, Rust or a tool `xtask/src/setup.rs` pins. It reads each `.yml` and `.yaml`
+//! file at the top of `.github/workflows/` (in any case), and each `action.yml` and
+//! `action.yaml` anywhere under `.github/actions/`, the composite actions a workflow runs with
+//! `uses: ./.github/actions/<name>`. Each is parsed with `saphyr-parser`, so quoted keys, flow
+//! mappings, anchors, aliases and merge keys read as YAML defines them; a composite action's
+//! `runs.steps` are steps like a job's.
 //!
 //! A step (any mapping with `uses`) fails on:
 //! - a `version` input to `pnpm/action-setup`, a `node-version` input to `actions/setup-node`, or
-//!   the toolchain input of a Rust toolchain action (`TOOLCHAIN_ACTIONS`). Input names match in
-//!   any case, as the runner passes them as `INPUT_<NAME>`;
+//!   the toolchain input of a Rust toolchain action (`TOOLCHAIN_ACTIONS`), whatever its value.
+//!   Input names match in any case, as the runner passes them as `INPUT_<NAME>`;
 //! - `dtolnay/rust-toolchain` at a version ref (`@1.2.3`), or at a commit whose comment names a
-//!   version: its branches are named after the toolchain they install.
+//!   version: its branches are named after the toolchain they install. At a commit with no
+//!   comment, or one that names no version, the toolchain it installs cannot be told from the
+//!   workflow, so that ref is not checked.
 //!
-//! Any other value (a `run` script, an `env` value, another action's input, a `docker://` image)
-//! fails when it holds a version a home pins, or the major.minor of the Rust, pnpm or Node one,
-//! as a whole word: `1.2.3` in `pnpm@1.2.3`, not in `11.2.3`. Keys and comments are not read.
+//! Any other value (a `run` script, an `env` value, another action's input, a container or a
+//! `docker://` image) fails where it names a pinned tool and a version, in the forms `forms.rs`
+//! lists, and so does a `RUSTUP_TOOLCHAIN` key (any case) whose value is a version. Any version
+//! there fails, the home's or another. Other keys, other numbers and comments are not read.
 
-use super::homes::Homes;
+use super::forms::{self, Named};
 use super::yaml::{self, Node, Value};
-use super::{Fix, Home, PACKAGE_JSON, TOOLCHAIN, is_version, major_minor};
+use super::{FileHome, Fix, Home, is_version};
 use crate::checks::{self, Inspection};
 use crate::setup::{Binary, Tool};
 use crate::violation::Violation;
@@ -28,6 +34,8 @@ use std::rc::Rc;
 
 /// Where GitHub reads workflows from: only the files at its top level.
 pub(super) const DIR: &str = ".github/workflows";
+/// Where the repo's composite actions are, each in an `action.yml` or `action.yaml`.
+pub(super) const ACTIONS: &str = ".github/actions";
 
 /// Rust toolchain actions and the input that names the toolchain, from each action's
 /// `action.yml`.
@@ -41,24 +49,22 @@ const TOOLCHAIN_ACTIONS: &[(&str, &str)] = &[
 /// The action whose ref names the toolchain it installs.
 const DTOLNAY: &str = "dtolnay/rust-toolchain";
 
-pub(super) fn check(
-    root: &Path,
-    homes: &Homes,
-    tools: &[Tool],
-    binaries: &[Binary],
-    found: &mut Inspection,
-) {
-    let files = match workflow_files(root) {
-        Ok(files) => files,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
-        Err(error) => {
-            found.violations.push(checks::unreadable(DIR, &error));
-            return;
+/// The environment variable that overrides the toolchain `rust-toolchain.toml` names.
+const RUSTUP_TOOLCHAIN: &str = "RUSTUP_TOOLCHAIN";
+
+pub(super) fn check(root: &Path, tools: &[Tool], binaries: &[Binary], found: &mut Inspection) {
+    let mut paths = Vec::new();
+    for (dir, list) in [
+        (DIR, workflow_files as fn(&Path) -> io::Result<Vec<String>>),
+        (ACTIONS, action_files),
+    ] {
+        match list(root) {
+            Ok(files) => paths.extend(files),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => found.violations.push(checks::unreadable(dir, &error)),
         }
-    };
-    let copies = copies(homes, tools, binaries);
-    for name in files {
-        let path = format!("{DIR}/{name}");
+    }
+    for path in paths {
         found.inspected = found.inspected.saturating_add(1);
         let text = match fs::read_to_string(root.join(&path)) {
             Ok(text) => text,
@@ -83,7 +89,8 @@ pub(super) fn check(
             path: &path,
             lines: text.lines().collect(),
             comments: doc.comments(&text).into_iter().collect(),
-            copies: &copies,
+            tools,
+            binaries,
             seen: HashSet::new(),
             found: Vec::new(),
         };
@@ -98,79 +105,57 @@ pub(super) fn check(
     }
 }
 
-/// The names of the `.yml` and `.yaml` files in `DIR`, sorted.
+/// The paths of the `.yml` and `.yaml` files in `DIR`, sorted.
 fn workflow_files(root: &Path) -> io::Result<Vec<String>> {
-    let mut names = Vec::new();
+    let mut paths = Vec::new();
     for entry in fs::read_dir(root.join(DIR))? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        let yaml = Path::new(&name).extension().is_some_and(|extension| {
-            extension.eq_ignore_ascii_case("yml") || extension.eq_ignore_ascii_case("yaml")
-        });
-        if yaml && entry.file_type()?.is_file() {
-            names.push(name);
+        if is_yaml(&name) && entry.file_type()?.is_file() {
+            paths.push(format!("{DIR}/{name}"));
         }
     }
-    names.sort();
-    Ok(names)
+    paths.sort();
+    Ok(paths)
 }
 
-/// A version a workflow must not hold, and the home that pins it.
-struct Pin {
-    text: String,
-    home: Home,
-    /// True for the major.minor of the home's version.
-    major_minor: bool,
-}
-
-/// Every version the homes pin: Rust, pnpm and Node with their major.minor, and each tool and
-/// binary in `setup.rs`.
-fn copies(homes: &Homes, tools: &[Tool], binaries: &[Binary]) -> Vec<Pin> {
-    let mut out = Vec::new();
-    let read = [
-        (Home::Rust, &homes.rust),
-        (Home::Pnpm, &homes.pnpm),
-        (Home::Node, &homes.node),
-    ];
-    for (home, version) in read {
-        let Some(version) = version else {
-            continue;
-        };
-        out.push(Pin {
-            text: version.clone(),
-            home,
-            major_minor: false,
-        });
-        if major_minor(version) != version {
-            out.push(Pin {
-                text: major_minor(version).to_owned(),
-                home,
-                major_minor: true,
-            });
+/// The paths of the `action.yml` and `action.yaml` files anywhere under `ACTIONS`, sorted.
+fn action_files(root: &Path) -> io::Result<Vec<String>> {
+    let mut paths = Vec::new();
+    let mut dirs = vec![ACTIONS.to_owned()];
+    while let Some(dir) = dirs.pop() {
+        for entry in fs::read_dir(root.join(&dir))? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let kind = entry.file_type()?;
+            let stem = Path::new(&name)
+                .file_stem()
+                .is_some_and(|stem| stem == "action");
+            if kind.is_dir() {
+                dirs.push(format!("{dir}/{name}"));
+            } else if kind.is_file() && stem && is_yaml(&name) {
+                paths.push(format!("{dir}/{name}"));
+            }
         }
     }
-    let tools = tools
-        .iter()
-        .map(|tool| (tool.version, Home::Tool(tool.name)));
-    let binaries = binaries
-        .iter()
-        .map(|binary| (binary.version, Home::Binary(binary.name)));
-    for (version, home) in tools.chain(binaries) {
-        out.push(Pin {
-            text: version.to_owned(),
-            home,
-            major_minor: false,
-        });
-    }
-    out
+    paths.sort();
+    Ok(paths)
 }
 
-/// One workflow file's walk. Each node is visited once, through whichever alias reaches it.
+/// True for a name that ends in `.yml` or `.yaml`, in any case.
+fn is_yaml(name: &str) -> bool {
+    Path::new(name).extension().is_some_and(|extension| {
+        extension.eq_ignore_ascii_case("yml") || extension.eq_ignore_ascii_case("yaml")
+    })
+}
+
+/// One file's walk. Each node is visited once, through whichever alias reaches it.
 struct Walk<'a> {
     path: &'a str,
     lines: Vec<&'a str>,
     comments: HashMap<u32, &'a str>,
-    copies: &'a [Pin],
+    tools: &'a [Tool],
+    binaries: &'a [Binary],
     seen: HashSet<*const Node>,
     found: Vec<Violation>,
 }
@@ -199,10 +184,32 @@ impl Walk<'_> {
                         // An action's ref is its own version, not a copy of a pin.
                         self.seen.insert(Rc::as_ptr(value));
                     }
+                    self.rustup_toolchain(key, value);
                     self.node(value);
                 }
             }
         }
+    }
+
+    /// A `RUSTUP_TOOLCHAIN` key whose value is a version.
+    fn rustup_toolchain(&mut self, key: &Node, value: &Rc<Node>) {
+        let Some(name) = key
+            .scalar()
+            .filter(|name| name.eq_ignore_ascii_case(RUSTUP_TOOLCHAIN))
+        else {
+            return;
+        };
+        let Some(version) = value.scalar().filter(|text| forms::is_named_version(text)) else {
+            return;
+        };
+        // Its value is reported here, not read again.
+        self.seen.insert(Rc::as_ptr(value));
+        let named = Named {
+            shown: format!("{name}: {version}"),
+            version: version.to_owned(),
+            home: Home::File(FileHome::Rust),
+        };
+        self.copy(value, &named);
     }
 
     /// The rules for a step: its inputs and, for `dtolnay/rust-toolchain`, its ref.
@@ -224,13 +231,13 @@ impl Walk<'_> {
         let toolchain = TOOLCHAIN_ACTIONS
             .iter()
             .find(|(known, _)| *known == action)
-            .map(|(_, input)| (*input, Pinned::Rust));
+            .map(|(_, input)| (*input, FileHome::Rust));
         let input = match action.as_str() {
-            "pnpm/action-setup" => Some(("version", Pinned::Pnpm)),
-            "actions/setup-node" => Some(("node-version", Pinned::Node)),
+            "pnpm/action-setup" => Some(("version", FileHome::Pnpm)),
+            "actions/setup-node" => Some(("node-version", FileHome::Node)),
             _ => toolchain,
         };
-        if let (Some((input, pinned)), Some(with)) = (input, field("with")) {
+        if let (Some((input, home)), Some(with)) = (input, field("with")) {
             for (key, value) in with.entries() {
                 let Some(name) = key.scalar().filter(|name| name.eq_ignore_ascii_case(input))
                 else {
@@ -241,10 +248,10 @@ impl Walk<'_> {
                 let message = format!(
                     "`{name}` tells {action} which {} to install; the one home of that version \
                      is {}",
-                    pinned.what(),
-                    pinned.home()
+                    home.tool(),
+                    home.place()
                 );
-                self.report(key.line, message, pinned.fix());
+                self.report(key.line, message, Fix::Input(home));
             }
         }
         if action == DTOLNAY {
@@ -254,13 +261,13 @@ impl Walk<'_> {
 
     /// `dtolnay/rust-toolchain` at a version ref, or at a commit whose comment names one.
     fn dtolnay(&mut self, uses: &Node, text: &str, reference: &str) {
-        let home = Pinned::Rust.home();
+        let home = FileHome::Rust.place();
         if is_version(reference) {
             let message = format!(
                 "`uses: {text}` tells {DTOLNAY} which Rust toolchain to install through its ref; \
                  the one home of that version is {home}"
             );
-            self.report(uses.line, message, Fix::RustToolchain);
+            self.report(uses.line, message, Fix::Input(FileHome::Rust));
             return;
         }
         let commit = reference.len() == 40 && reference.bytes().all(|b| b.is_ascii_hexdigit());
@@ -276,72 +283,42 @@ impl Walk<'_> {
                  {named}, the Rust toolchain a commit of its `{named}` branch installs; the one \
                  home of that version is {home}"
             );
-            self.report(uses.line, message, Fix::RustToolchain);
+            self.report(uses.line, message, Fix::Input(FileHome::Rust));
         }
     }
 
-    /// A value that holds a version a home pins.
+    /// A value that names a pinned tool and a version.
     fn scalar(&mut self, node: &Node, text: &str) {
-        for copy in self.copies {
-            if !holds(text, &copy.text) {
-                continue;
-            }
-            let first = usize::try_from(node.line.saturating_sub(1)).unwrap_or(usize::MAX);
-            let last = usize::try_from(node.end_line).unwrap_or(usize::MAX);
-            let line = (first..last.max(first.saturating_add(1)))
-                .find(|index| {
-                    self.lines
-                        .get(*index)
-                        .is_some_and(|line| holds(line, &copy.text))
-                })
-                .map_or(node.line, checks::line_at);
-            let what = if copy.major_minor {
-                format!("the major.minor of {}", copy.home)
-            } else {
-                copy.home.to_string()
-            };
-            let message = format!("`{}` is {what}", copy.text);
-            self.report(line, message, Fix::Copy(copy.home));
+        for named in forms::named(text, self.tools, self.binaries) {
+            self.copy(node, &named);
         }
+    }
+
+    /// Reports `named`, at the line of `node` that holds its version.
+    fn copy(&mut self, node: &Node, named: &Named) {
+        let first = usize::try_from(node.line.saturating_sub(1)).unwrap_or(usize::MAX);
+        let last = usize::try_from(node.end_line).unwrap_or(usize::MAX);
+        let line = (first..last.max(first.saturating_add(1)))
+            .find(|index| {
+                self.lines
+                    .get(*index)
+                    .is_some_and(|line| holds(line, &named.version))
+            })
+            .map_or(node.line, checks::line_at);
+        let message = format!(
+            "`{}` names {} {}; the one home of {} is {}",
+            named.shown,
+            named.home.tool(),
+            named.version,
+            named.home.noun(),
+            named.home.place()
+        );
+        self.report(line, message, Fix::Copy(named.home));
     }
 
     fn report(&mut self, line: u32, message: String, fix: Fix) {
         self.found
             .push(checks::violation(self.path, line, message, fix));
-    }
-}
-
-/// What a version input pins.
-#[derive(Debug, Clone, Copy)]
-enum Pinned {
-    Pnpm,
-    Node,
-    Rust,
-}
-
-impl Pinned {
-    fn what(self) -> &'static str {
-        match self {
-            Pinned::Pnpm => "pnpm",
-            Pinned::Node => "Node",
-            Pinned::Rust => "Rust toolchain",
-        }
-    }
-
-    fn home(self) -> String {
-        match self {
-            Pinned::Pnpm => format!("`packageManager` in {PACKAGE_JSON}"),
-            Pinned::Node => format!("`engines.node` in {PACKAGE_JSON}"),
-            Pinned::Rust => format!("`channel` in {TOOLCHAIN}"),
-        }
-    }
-
-    fn fix(self) -> Fix {
-        match self {
-            Pinned::Pnpm => Fix::PnpmInput,
-            Pinned::Node => Fix::NodeInput,
-            Pinned::Rust => Fix::RustToolchain,
-        }
     }
 }
 
