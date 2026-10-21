@@ -7,6 +7,14 @@
 //! `package` field, else of its key; a `[replace]` key is a package ID spec (`name@1.0.0`,
 //! `name:1.0.0`, `<url>#name@1.0.0` or `<url>#1.0.0`). Names match with `_` read as `-`, in
 //! any ASCII case. Patches of other crates stay allowed: the graph rule sees what they pull in.
+//!
+//! `.cargo/config.toml` can swap a crate two more ways, and neither names the crate in the
+//! config (`config_violations`): `paths = [...]` overrides every crate whose package a listed
+//! folder holds, and source replacement (`replace-with` of a `[source.<name>]`) serves a whole
+//! source, crates.io included, from elsewhere, such as a `directory` or `local-registry` source.
+//! So any `paths`, and any `replace-with`, `directory` or `local-registry` key of a source, fails.
+//! Configs outside the repo (parent folders, `$CARGO_HOME`) are the machine's, not the repo's;
+//! the check does not read them.
 
 use super::{Fix, is_tauri};
 use crate::checks::toml_lines::{Manifest, Patch};
@@ -42,6 +50,45 @@ pub(super) fn violations(path: &str, text: &str, source: Source) -> Vec<Violatio
             })
         })
         .collect()
+}
+
+/// The keys of a `[source.<name>]` table that swap in, or make, a source a crate can come from.
+const SOURCE_KEYS: [&str; 3] = ["replace-with", "directory", "local-registry"];
+
+/// One violation per `paths` key, and per `SOURCE_KEYS` key of a `[source.<name>]` table, in
+/// the cargo config `path` holding `text`, at its key.
+pub(super) fn config_violations(path: &str, text: &str) -> Vec<Violation> {
+    let config = Manifest::parse(text);
+    let mut found: Vec<Violation> = config
+        .table_keys(&[])
+        .into_iter()
+        .filter(|(key, _)| key == "paths")
+        .map(|(_, line)| {
+            let message = "`paths` overrides every crate that a listed folder holds, so it can \
+                           swap in another source for a Tauri crate, whose dependencies the \
+                           plugin rules trust";
+            violation(path, line, message.to_owned(), Fix::Patched)
+        })
+        .collect();
+    for (source, _) in config.table_keys(&["source"]) {
+        for (key, line) in config.table_keys(&["source", &source]) {
+            let what = match key.as_str() {
+                "replace-with" => {
+                    "swaps in another source for all of its crates, Tauri crates included,"
+                }
+                _ if SOURCE_KEYS.contains(&key.as_str()) => {
+                    "makes a source from local files, which `replace-with` can swap in for \
+                     Tauri crates,"
+                }
+                _ => continue,
+            };
+            let message = format!(
+                "`{key}` of source `{source}` {what} whose dependencies the plugin rules trust"
+            );
+            found.push(violation(path, line, message, Fix::Patched));
+        }
+    }
+    found
 }
 
 /// The package `patch` swaps: its `package` field, else the package its key names.
@@ -88,6 +135,24 @@ mod tests {
             "tauri"
         );
         assert_eq!(spec_name("https://github.com/tauri-apps/tao.git"), "tao");
+    }
+
+    /// `local-registry` fails like `directory`, a dotted `paths` key fails, and a source that
+    /// only names a registry passes: without `replace-with` nothing comes from it.
+    #[test]
+    fn a_cargo_config_fails_each_key_that_swaps_a_source() {
+        let text = "paths = [\"a\"]\nsource.mirror.registry = \"sparse+https://example.com/\"\n\
+                    \n[source.local]\nlocal-registry = \"reg\"\n";
+        let found: Vec<String> = config_violations(".cargo/config.toml", text)
+            .iter()
+            .map(|found| found.message.clone())
+            .collect();
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found[0].starts_with("`paths` overrides"), "{found:?}");
+        assert!(
+            found[1].starts_with("`local-registry` of source `local` makes"),
+            "{found:?}"
+        );
     }
 
     /// A `[patch]` key is a package name, read whole; only a `[replace]` key is a spec.

@@ -44,6 +44,8 @@ pub(crate) enum Fix {
     SourceSyntax,
     /// `.cargo/config.toml` sets `TAURI_CONFIG` in `[env]`.
     ConfigInEnv,
+    /// A symlink to a folder sits in the desktop crate's folder.
+    LinkedFolder,
 }
 
 impl fmt::Display for Fix {
@@ -113,6 +115,10 @@ impl fmt::Display for Fix {
             Fix::ConfigInEnv => {
                 "remove it and put the setting in tauri.conf.json: Tauri merges `TAURI_CONFIG` \
                  over the checked file"
+            }
+            Fix::LinkedFolder => {
+                "replace the symlink with a real folder holding the files: rustc follows it, and \
+                 this check reads only what is really in the folder"
             }
         })
     }

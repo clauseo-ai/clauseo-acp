@@ -32,6 +32,10 @@ fn pinned(fix: &Fix) -> &'static str {
             "restore main.json in it: Tauri reads the window's grants from that folder, and this \
              check guards them"
         }
+        Fix::LinkedFolder => {
+            "replace the symlink with a real folder holding the files: Tauri follows it, and this \
+             check reads only what is really in the folder"
+        }
         Fix::RemotePermission => {
             "reword the text: a remote page must never reach the IPC, and `remote` is matched \
              anywhere in a permission file"
@@ -49,6 +53,7 @@ fn every_fix_prints_its_pinned_text() {
         Fix::Json5,
         Fix::Syntax,
         Fix::NoCapabilityFile,
+        Fix::LinkedFolder,
         Fix::RemotePermission,
     ];
     let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
