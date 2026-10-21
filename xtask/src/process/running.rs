@@ -30,7 +30,7 @@ use super::unix::Group as OsTree;
 use super::windows::Job as OsTree;
 
 /// How long a tree has between SIGTERM and SIGKILL, as in `ui/app/scripts/buildtime-proc.mjs`,
-/// unless its `Cmd` sets another (its `kill_grace`). On Windows the stop at the limit already
+/// unless its `Cmd` sets another (`Cmd::kill_grace`). On Windows the stop at the limit already
 /// ends the job, so this is only how long its pipes have.
 pub(super) const KILL_GRACE: Duration = Duration::from_secs(5);
 /// How long a run waits for the output pipes once its tree is empty or was killed.
@@ -103,7 +103,7 @@ impl Limits {
         }
     }
 
-    /// The limits of `cmd`: its own limit and grace (its `kill_grace`), and `DRAIN`. Every
+    /// The limits of `cmd`: its own limit and grace (`Cmd::kill_grace`), and `DRAIN`. Every
     /// command xtask runs gets these.
     pub(super) fn of_cmd(cmd: &Cmd) -> Limits {
         Limits {

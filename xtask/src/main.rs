@@ -1,5 +1,5 @@
 //! Workspace automation: `cargo xtask check [--quick]`, `cargo xtask setup [--binaries]`,
-//! `cargo xtask buildtime [rust|web|all] [--runs N] [--json]`.
+//! `cargo xtask buildtime [rust|web|all] [--runs N] [--json]` and `cargo xtask mutants`.
 //!
 //! For people and agents:
 //! - Add an external step: one `ToolStep` in `steps/plan.rs`, or `steps/policy.rs` for a
@@ -25,6 +25,8 @@
 //! - `buildtime web` runs `node ui/app/scripts/buildtime.mjs`, which times the
 //!   `ui/app/package.json` scripts with Node's own clock and prints JSON (the contract is in
 //!   `buildtime/web.rs`); xtask computes the statistics and judges them against budgets.
+//! - `mutants` runs cargo-mutants on the diff against origin/main and reads its `outcomes.json`
+//!   (`mutants/outcomes.rs`); exclusions live in `.cargo/mutants.toml`, each with its reason.
 
 mod budgets;
 mod buildtime;
@@ -33,6 +35,7 @@ mod check;
 mod checks;
 mod clock;
 mod fix;
+mod mutants;
 mod output;
 mod parse;
 mod process;
@@ -89,6 +92,10 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Mutation-test the lines changed since `git merge-base HEAD origin/main` with cargo-mutants
+    /// (settings in `.cargo/mutants.toml`). Each missed mutant fails as `path:line: what` and
+    /// `fix:`. A run is capped at 20 minutes.
+    Mutants,
     /// The leader `process.rs` starts on Unix: stops the process groups it is told about when
     /// its stdin closes.
     #[cfg(unix)]
@@ -123,6 +130,7 @@ fn main() -> ExitCode {
         Commands::Buildtime { half, runs, json } => {
             buildtime::run(&workspace::workspace_root(), half, runs, json)
         }
+        Commands::Mutants => mutants::run(&workspace::workspace_root()),
         #[cfg(unix)]
         Commands::ProcessLeader => process::lead(),
         Commands::ProcessTest { output, script } => process::test_mode(output, &script),

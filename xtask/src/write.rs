@@ -5,7 +5,8 @@
 //! out no `File` to write through. A tool keeps its own paths and passes them in. xtask's tests
 //! write through `Scratch` (`scratch.rs`).
 //!
-//! - `remove_in`: remove one entry directly in a folder.
+//! - `write_file_in`, `remove_in`: write one file directly in a folder, remove one entry directly
+//!   in a folder.
 //! - `LockFile::open`: a lock file directly in a folder, whose exclusive lock keeps a second run
 //!   of a tool out.
 //! - `Guard`, `Backups`: the tracked-file guard. Any tool that edits a tracked file saves its
@@ -25,6 +26,15 @@ pub(crate) use staging::Staging;
 
 use std::io;
 use std::path::{Component, Path};
+
+/// Writes `bytes` to `<dir>/<name>`, making `dir` and its missing parents first and replacing a
+/// file already there. Refuses a `name` that is not one plain file name, so the write never
+/// leaves `dir`.
+pub(crate) fn write_file_in(dir: &Path, name: &str, bytes: &[u8]) -> io::Result<()> {
+    plain_name(name, "file name")?;
+    sys::create_dir_all(dir)?;
+    sys::write(&dir.join(name), bytes)
+}
 
 /// Removes `<dir>/<name>`: the folder and everything in it, or the file. A symlink is removed,
 /// never followed. Refuses a `name` that is not one plain file name, so nothing outside `dir`, or

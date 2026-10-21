@@ -244,14 +244,12 @@ print "ready\n"; sleep 300' & } | read ready; echo hi"#;
 
 #[test]
 fn a_leftover_that_ignores_sigterm_and_holds_the_output_is_killed_after_the_grace() {
-    let cmd = Cmd {
-        kill_grace: SHORT_WAIT,
-        ..Cmd::new(
-            Program::Named("sh"),
-            ["-c", LEFTOVER_HOLDS_THE_OUTPUT],
-            TEST_TIMEOUT,
-        )
-    };
+    let cmd = Cmd::new(
+        Program::Named("sh"),
+        ["-c", LEFTOVER_HOLDS_THE_OUTPUT],
+        TEST_TIMEOUT,
+    )
+    .kill_grace(SHORT_WAIT);
     let (captured, secs) = timed(|| capture(&cmd, Path::new("."), &mut |_| {}));
     let captured = captured.expect("the kill after the grace closes the output");
     assert_eq!(captured.status, Status::Succeeded);
@@ -311,10 +309,7 @@ fn a_tree_that_ignores_sigterm_gets_sigkill_after_the_grace_period() {
 #[test]
 fn a_command_with_its_own_grace_gets_sigkill_after_that_grace() {
     let script = format!("trap '' TERM; {WRAPPER}");
-    let cmd = Cmd {
-        kill_grace: SHORT_WAIT,
-        ..Cmd::new(Program::Named("sh"), ["-c", &script], SHORT_LIMIT)
-    };
+    let cmd = Cmd::new(Program::Named("sh"), ["-c", &script], SHORT_LIMIT).kill_grace(SHORT_WAIT);
     let limits = Limits::of_cmd(&cmd);
     assert_eq!(
         limits,
