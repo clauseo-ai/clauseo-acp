@@ -27,8 +27,11 @@ use std::thread;
 pub(in crate::process) const WRAPPER: &str = "sleep 300 & echo $$; wait";
 
 /// `WRAPPER`, but on SIGTERM it prints `term` and exits. So with SIGTERM first its run ends long
-/// before `KILL_GRACE`, and with SIGKILL alone it prints nothing.
-const REPORTS_SIGTERM: &str = "trap 'echo term; exit 0' TERM; sleep 300 & echo $$; wait";
+/// before `KILL_GRACE`, and with SIGKILL alone it prints nothing. The grandchild is a perl that
+/// prints the group's id itself once it runs: a `sleep` the trapping shell has forked but not yet
+/// started can catch the SIGTERM in the shell's trap and lose it, and then outlives it.
+const REPORTS_SIGTERM: &str = r#"trap 'echo term; exit 0' TERM
+perl -e '$| = 1; print getpgrp(), "\n"; sleep 300' & wait"#;
 
 /// The limit of a run the tests let time out. The tree is whole before it starts (see the top of
 /// this file), so it only has to be short.
@@ -278,7 +281,36 @@ fn a_tree_that_ignores_sigterm_gets_sigkill_after_the_grace_period() {
 }
 
 #[test]
+fn a_command_with_its_own_grace_gets_sigkill_after_that_grace() {
+    let script = format!("trap '' TERM; {WRAPPER}");
+    let cmd = Cmd::new(Program::Named("sh"), ["-c", &script], SHORT_LIMIT).kill_grace(SHORT_WAIT);
+    let limits = Limits::of_cmd(&cmd);
+    assert_eq!(
+        limits,
+        Limits {
+            run: SHORT_LIMIT,
+            grace: SHORT_WAIT,
+            drain: Duration::from_secs(1),
+        }
+    );
+    let (running, reader) = start(&script, limits);
+    let grandchild = Grandchild::of(reader);
+    let (finish, secs) = timed(|| running.finish(&mut |_, _| {}));
+    let rest = grandchild.gone();
+    assert!(matches!(finish, Ok(Finish::TimedOut)), "{finish:?}");
+    assert_eq!(rest, b"");
+    let least = (limits.run + limits.grace).as_secs_f64();
+    let default = (limits.run + running::KILL_GRACE).as_secs_f64();
+    assert!(
+        (least..default).contains(&secs),
+        "stopped after {secs} s, not between {least} s and the {default} s of the default grace"
+    );
+}
+
+#[test]
 fn every_command_gets_five_seconds_of_grace_and_one_second_to_drain() {
+    let cmd = Cmd::new(Program::Named("true"), Vec::<String>::new(), TEST_TIMEOUT);
+    assert_eq!(Limits::of_cmd(&cmd), Limits::of(TEST_TIMEOUT));
     assert_eq!(
         Limits::of(TEST_TIMEOUT),
         Limits {

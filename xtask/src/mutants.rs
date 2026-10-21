@@ -36,6 +36,14 @@ const OUTCOMES: &str = "target/xtask/mutants.out/outcomes.json";
 /// split instead. The same on every machine, so a change that fits here fits in CI.
 const MUTANTS_TIMEOUT: Duration = Duration::from_mins(20);
 
+/// How long cargo-mutants has between the door's SIGTERM and its SIGKILL at the cap. It starts
+/// each cargo and nextest child in a process group of its own (27.1.0's src/process/unix.rs:37),
+/// so the door's signals never reach them; it handles SIGTERM itself (ctrlc with its
+/// `termination` feature, src/interrupt.rs:16), sends SIGTERM to each child's group
+/// (src/process.rs:112) and exits. With the default five seconds, one capped run left four build
+/// dirs behind (see `remove_left_build_dirs`).
+const MUTANTS_KILL_GRACE: Duration = Duration::from_mins(1);
+
 /// How long `cargo mutants --version` may run: it prints one line, so a minute means it hangs.
 const VERSION_TIMEOUT: Duration = Duration::from_mins(1);
 
@@ -81,6 +89,7 @@ fn mutants_cmd() -> Cmd {
         ],
         MUTANTS_TIMEOUT,
     )
+    .kill_grace(MUTANTS_KILL_GRACE)
 }
 
 /// `run` in `root`, on `diff` (the branch's diff, or why git could not give it), with every

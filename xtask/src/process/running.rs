@@ -4,7 +4,8 @@
 //!
 //! The run ends when the command has exited, its tree is empty and its pipes are closed. When the
 //! command exits, and at its limit, its tree is asked to stop (`Tree::terminate`: SIGTERM to the
-//! group on Unix, the whole stop on Windows) and has the grace (`KILL_GRACE`) to empty, checked every `POLL` once the command has exited, as
+//! group on Unix, the whole stop on Windows) and has the grace (`KILL_GRACE` unless its `Cmd` sets
+//! another) to empty, checked every `POLL` once the command has exited, as
 //! `ui/app/scripts/buildtime-proc.mjs` does; what is still in it then is killed (`Tree::kill`:
 //! SIGKILL on Unix). So a helper a tool forked into its group gets SIGTERM and the grace after
 //! every step, not SIGKILL. A process that left the tree can hold a pipe for ever, so once the
@@ -28,8 +29,9 @@ use super::unix::Group as OsTree;
 #[cfg(windows)]
 use super::windows::Job as OsTree;
 
-/// How long a tree has between SIGTERM and SIGKILL, as in `ui/app/scripts/buildtime-proc.mjs`. On
-/// Windows the stop at the limit already ends the job, so this is only how long its pipes have.
+/// How long a tree has between SIGTERM and SIGKILL, as in `ui/app/scripts/buildtime-proc.mjs`,
+/// unless its `Cmd` sets another (`Cmd::kill_grace`). On Windows the stop at the limit already
+/// ends the job, so this is only how long its pipes have.
 pub(super) const KILL_GRACE: Duration = Duration::from_secs(5);
 /// How long a run waits for the output pipes once its tree is empty or was killed.
 const DRAIN: Duration = Duration::from_secs(1);
@@ -101,10 +103,13 @@ impl Limits {
         }
     }
 
-    /// The limits of `cmd`: its own limit, `KILL_GRACE` and `DRAIN`. Every command xtask runs
-    /// gets these.
+    /// The limits of `cmd`: its own limit and grace (`Cmd::kill_grace`), and `DRAIN`. Every
+    /// command xtask runs gets these.
     pub(super) fn of_cmd(cmd: &Cmd) -> Limits {
-        Limits::of(cmd.timeout)
+        Limits {
+            grace: cmd.kill_grace,
+            ..Limits::of(cmd.timeout)
+        }
     }
 }
 

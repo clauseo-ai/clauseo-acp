@@ -177,6 +177,9 @@ pub(crate) struct Cmd {
     /// How long it may run before its tree is stopped. Every call site passes a named `const`
     /// that says why that long.
     pub timeout: Duration,
+    /// How long its tree has between SIGTERM and SIGKILL on Unix, at its limit and for what is
+    /// left of it when it exits: `KILL_GRACE` unless `kill_grace` set another.
+    pub kill_grace: Duration,
 }
 
 impl Cmd {
@@ -192,6 +195,16 @@ impl Cmd {
                 .map(|arg| arg.as_ref().to_owned())
                 .collect(),
             timeout,
+            kill_grace: running::KILL_GRACE,
+        }
+    }
+
+    /// `self` with `grace` between SIGTERM and SIGKILL instead of `KILL_GRACE`, for a command
+    /// that needs longer to stop its own children. Pass a named `const` that says why.
+    pub(crate) fn kill_grace(self, grace: Duration) -> Cmd {
+        Cmd {
+            kill_grace: grace,
+            ..self
         }
     }
 }
