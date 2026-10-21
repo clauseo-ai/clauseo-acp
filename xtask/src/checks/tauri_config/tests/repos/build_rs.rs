@@ -1,0 +1,89 @@
+//! The tauri-config builders for `build.rs`: the app manifest it must hand tauri-build, and
+//! the configs it must not point at.
+
+use super::*;
+
+pub(in crate::checks::tauri_config::tests) fn app_manifest_with_commands_passes() -> Repo {
+    build_case(
+        "app-manifest-with-commands",
+        &BUILD.replace(
+            "AppManifest::new()",
+            "AppManifest::new().commands(&[\"open_matter\"])",
+        ),
+    )
+}
+
+pub(in crate::checks::tauri_config::tests) fn build_rs_missing() -> Repo {
+    desktop_repo("build-rs-missing", &[(CONF_AT, CONF.as_bytes())])
+}
+
+pub(in crate::checks::tauri_config::tests) fn build_rs_without_app_manifest() -> Repo {
+    build_case(
+        "build-rs-without-app-manifest",
+        "fn main() {\n    tauri_build::build();\n}\n",
+    )
+}
+
+pub(in crate::checks::tauri_config::tests) fn app_manifest_new_not_passed() -> Repo {
+    build_case(
+        "app-manifest-new-not-passed",
+        "fn main() {\n    let _ = tauri_build::AppManifest::new();\n    tauri_build::build();\n}\n",
+    )
+}
+
+pub(in crate::checks::tauri_config::tests) fn app_manifest_without_new() -> Repo {
+    build_case(
+        "app-manifest-without-new",
+        "fn main() {\n    tauri_build::try_build(\n        tauri_build::Attributes::new().app_manifest(manifest()),\n    );\n}\n",
+    )
+}
+
+pub(in crate::checks::tauri_config::tests) fn app_manifest_only_in_block_comment() -> Repo {
+    build_case(
+        "app-manifest-only-in-block-comment",
+        "/*\n    tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new())\n*/\nfn main() {\n    tauri_build::build();\n}\n",
+    )
+}
+
+pub(in crate::checks::tauri_config::tests) fn app_manifest_only_in_line_comment() -> Repo {
+    build_case(
+        "app-manifest-only-in-line-comment",
+        "// tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new());\nfn main() {\n    tauri_build::build();\n}\n",
+    )
+}
+
+pub(in crate::checks::tauri_config::tests) fn manifest_new_in_trailing_comment() -> Repo {
+    build_case(
+        "manifest-new-in-trailing-comment",
+        "fn main() {\n    let a = tauri_build::Attributes::new().app_manifest(manifest()); // tauri_build::AppManifest::new()\n}\n",
+    )
+}
+
+pub(in crate::checks::tauri_config::tests) fn app_manifest_in_string_only() -> Repo {
+    build_case(
+        "app-manifest-in-string-only",
+        r#"fn main() {
+    let note = "tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new())";
+    tauri_build::build();
+}
+"#,
+    )
+}
+
+pub(in crate::checks::tauri_config::tests) fn app_manifest_only_defined() -> Repo {
+    build_case(
+        "app-manifest-only-defined",
+        "fn main() {\n    let _ = tauri_build::AppManifest::new();\n    tauri_build::build();\n}\nfn app_manifest(_manifest: tauri_build::AppManifest) {}\n",
+    )
+}
+
+pub(in crate::checks::tauri_config::tests) fn build_rs_not_valid_rust() -> Repo {
+    build_case("build-rs-not-valid-rust", "fn main() {\n    let x = ;\n}\n")
+}
+
+pub(in crate::checks::tauri_config::tests) fn build_rs_not_utf8() -> Repo {
+    desktop_repo(
+        "build-rs-not-utf8",
+        &[(CONF_AT, CONF.as_bytes()), (BUILD_AT, &[0xff, 0xfe, b'f'])],
+    )
+}

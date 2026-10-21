@@ -1,9 +1,12 @@
-//! Tests of the docs check's file list, and of the check as one run.
+//! Tests of the docs check's file list, and of the check as one run. The planted cases are in
+//! `tests/planted.rs` and their builders in `tests/repos.rs`; the functions below are the expected
+//! lines that several cases share.
 
-mod cases;
 pub(super) mod planted;
+mod repos;
 
 use super::*;
+use crate::checks::planted::{fails, failure};
 use crate::process::{self, Cmd, Program};
 use crate::scratch::Scratch;
 
@@ -101,4 +104,50 @@ fn a_link_to_a_file_git_ignores_fails_in_a_real_repo() {
         ),
         "the ignored file does not count, and the fix says git ignores it: {printed:?}"
     );
+}
+
+/// The violation for the relative link `link` at `file:line`, which names a file that does not
+/// exist.
+fn bad_link(file: &str, line: usize, link: &str) -> String {
+    fails(
+        &format!("{file}:{line}"),
+        &format!("the relative link `{link}` does not resolve: `{link}` does not exist"),
+        Fix::CreateOrCorrectLink {
+            path: link.to_owned(),
+        },
+    )
+}
+
+/// The violation for the backticked path `path` at `GUIDE.md:line`, which does not exist.
+fn bad_path(line: usize, path: &str) -> String {
+    fails(
+        &format!("GUIDE.md:{line}"),
+        &format!("`{path}` does not exist"),
+        Fix::CreateOrCorrectReference {
+            path: path.to_owned(),
+        },
+    )
+}
+
+/// The violation for the xtask command `command` at `GUIDE.md:line`, which does not parse for the
+/// reason `detail`.
+fn bad_command(line: usize, command: &str, detail: &str) -> String {
+    fails(
+        &format!("GUIDE.md:{line}"),
+        &format!("the xtask command `{command}` does not parse: {detail}"),
+        Fix::CorrectCommand,
+    )
+}
+
+/// The zero-inspected failure of the docs check, as it prints when no Markdown file is read.
+fn no_markdown_inspected() -> String {
+    failure(
+        "0 Markdown files inspected in the repo's git-tracked or unignored .md and .markdown files",
+        crate::checks::Fix::NothingInspected {
+            name: "docs",
+            many: "Markdown files",
+            place: "in the repo's git-tracked or unignored .md and .markdown files".to_owned(),
+            source: "xtask/src/checks/docs.rs",
+        },
+    )
 }

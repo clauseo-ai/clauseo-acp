@@ -110,7 +110,7 @@ fn a_leading_zero_is_invalid_toml() {
         violation.message.starts_with("budgets.toml is not valid: "),
         "{violation:?}"
     );
-    assert!(violation.fix.starts_with("fix the line above;"));
+    assert!(violation.fix.to_string().starts_with("fix the line above;"));
 }
 
 #[test]
@@ -118,13 +118,9 @@ fn removing_gate_reports_exactly_that_at_the_header() {
     let text = ROW.replace("gate = \"release\"\n", "");
     let violation = one_violation(&text);
     assert_eq!(
-        violation,
-        Violation {
-            path: "budgets.toml".into(),
-            line: 1,
-            message: "budget cold_start has no gate".into(),
-            fix: "add gate = \"pr\", \"release\", \"alert\" or \"local\"".into(),
-        }
+        violation.to_string(),
+        "budgets.toml:1: budget cold_start has no gate\n    \
+         fix: add gate = \"pr\", \"release\", \"alert\" or \"local\""
     );
 }
 
@@ -135,7 +131,7 @@ fn a_row_without_an_id_is_reported_at_its_header() {
     assert_eq!(violation.line, 1);
     assert_eq!(violation.message, "budget has no id");
     assert_eq!(
-        violation.fix,
+        violation.fix.to_string(),
         "add id = \"snake_case_name\", unique in budgets.toml"
     );
 }
@@ -391,7 +387,10 @@ fn a_missing_file_is_one_violation_on_line_1() {
             .message
             .starts_with("cannot read budgets.toml: ")
     );
-    assert_eq!(violations[0].fix, "restore budgets.toml at the repo root");
+    assert_eq!(
+        violations[0].fix.to_string(),
+        "restore budgets.toml at the repo root"
+    );
 }
 
 // The repo's own budgets.toml is checked by the `budgets` step of `cargo xtask check`, not by a

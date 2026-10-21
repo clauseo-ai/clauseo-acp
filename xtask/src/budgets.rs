@@ -6,6 +6,9 @@
 //! cannot express stay here: required keys, `snake_case` and unique ids, `measured` and
 //! `measured_on` set together, and a limit that is zero or more.
 
+mod fix;
+pub(crate) use fix::Fix;
+
 use crate::violation::Violation;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -126,11 +129,7 @@ fn parse_counted(text: &str) -> Read {
     let rows = file.budget.len();
     let mut violations = Vec::new();
     if file.budget.is_empty() {
-        violations.push(problem(
-            1,
-            "no [[budget]] tables",
-            "add a [[budget]] table for each budget the plan sets",
-        ));
+        violations.push(problem(1, "no [[budget]] tables", Fix::NoRows));
     }
     let mut budgets = Vec::new();
     let mut first_headers = HashMap::new();
@@ -172,7 +171,7 @@ pub(crate) fn read(root: &Path) -> Read {
             violations: vec![problem(
                 1,
                 format!("cannot read budgets.toml: {error}"),
-                "restore budgets.toml at the repo root",
+                Fix::Restore,
             )],
             unreadable: false,
         },
@@ -187,7 +186,7 @@ pub(crate) fn read(root: &Path) -> Read {
     }
 }
 
-fn problem(line: u32, message: impl Into<String>, fix: impl Into<String>) -> Violation {
+fn problem(line: u32, message: impl Into<String>, fix: Fix) -> Violation {
     Violation {
         path: FILE.to_owned(),
         line,
@@ -203,7 +202,7 @@ fn syntax_problem(text: &str, error: &toml::de::Error) -> Violation {
     problem(
         line,
         format!("budgets.toml is not valid: {first}"),
-        "fix the line above; each row is a [[budget]] table of the ten keys listed at the top of budgets.toml",
+        Fix::Syntax,
     )
 }
 
@@ -263,7 +262,7 @@ fn check_row(
         found.push(problem(
             line_of(limit, text),
             format!("budget {name}: limit must be zero or more"),
-            "set limit to zero or more, in the row's unit",
+            Fix::NegativeLimit,
         ));
     }
     if let Some(measured_on) = &row.measured_on
@@ -272,7 +271,7 @@ fn check_row(
         found.push(problem(
             line_of(measured_on, text),
             format!("budget {name}: measured_on must be lowercase words joined by -"),
-            "write measured_on as lowercase words joined by -, such as macos-arm64",
+            Fix::MeasuredOnShape,
         ));
     }
     check_required(row, &name, header, found);
@@ -295,14 +294,14 @@ fn check_id(
         found.push(problem(
             line,
             format!("budget {value}: id must be snake_case"),
-            "rename the id to lowercase words joined by _, such as window_visible",
+            Fix::IdNotSnakeCase,
         ));
     }
     match first_headers.get(value) {
         Some(first) => found.push(problem(
             line,
             format!("budget {value} is defined twice (first at line {first})"),
-            "give this row a new id, or remove one of the two tables",
+            Fix::DuplicateId,
         )),
         None => {
             first_headers.insert(value.clone(), header);
@@ -312,16 +311,15 @@ fn check_id(
 
 /// Every required key is there. A row that lacks one gets the fix for that key.
 fn check_required(row: &Row, name: &str, header: u32, found: &mut Vec<Violation>) {
-    #[rustfmt::skip]
     let required = [
-        (row.id.is_none(), "id", r#"add id = "snake_case_name", unique in budgets.toml"#),
-        (row.metric.is_none(), "metric", r#"add metric = "what is measured""#),
-        (row.limit.is_none(), "limit", "add limit = <number> in the row's unit"),
-        (row.unit.is_none(), "unit", r#"add unit = "s", "ms", "MB", "KB" or "count""#),
-        (row.gate.is_none(), "gate", r#"add gate = "pr", "release", "alert" or "local""#),
-        (row.measured_by.is_none(), "measured_by", r#"add measured_by = "the tool or method""#),
-        (row.status.is_none(), "status", r#"add status = "unmeasured" or "measured""#),
-        (row.source.is_none(), "source", r#"add source = "the plan section it comes from""#),
+        (row.id.is_none(), "id", Fix::AddId),
+        (row.metric.is_none(), "metric", Fix::AddMetric),
+        (row.limit.is_none(), "limit", Fix::AddLimit),
+        (row.unit.is_none(), "unit", Fix::AddUnit),
+        (row.gate.is_none(), "gate", Fix::AddGate),
+        (row.measured_by.is_none(), "measured_by", Fix::AddMeasuredBy),
+        (row.status.is_none(), "status", Fix::AddStatus),
+        (row.source.is_none(), "source", Fix::AddSource),
     ];
     for (missing, key, fix) in required {
         if missing {
@@ -343,14 +341,14 @@ fn check_measured(row: &Row, name: &str, header: u32, found: &mut Vec<Violation>
         found.push(problem(
             header,
             format!("budget {name} has measured but no measured_on"),
-            r#"add measured_on = "os-arch-machine kind, such as macos-arm64""#,
+            Fix::AddMeasuredOn,
         ));
     }
     if has_measured_on && !has_measured {
         found.push(problem(
             header,
             format!("budget {name} has measured_on but no measured"),
-            "add measured = <number> in the row's unit, or remove measured_on",
+            Fix::AddMeasuredOrRemoveOn,
         ));
     }
     let is_measured = row
@@ -361,7 +359,7 @@ fn check_measured(row: &Row, name: &str, header: u32, found: &mut Vec<Violation>
         found.push(problem(
             header,
             format!("budget {name} is measured but has no measured value"),
-            r#"add measured = <number> in the row's unit, or set status = "unmeasured""#,
+            Fix::AddMeasuredOrUnmeasure,
         ));
     }
 }

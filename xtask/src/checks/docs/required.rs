@@ -2,6 +2,7 @@
 //! stay within their line and byte limits. `CLAUDE.md` holds the import of `AGENTS.md` and
 //! nothing else.
 
+use super::Fix;
 use crate::checks::{self, violation};
 use crate::violation::Violation;
 
@@ -52,12 +53,13 @@ pub(super) const REQUIRED: [Required; 3] = [
 pub(super) fn missing(required: &Required) -> Violation {
     let file = required.file;
     let fix = match required.rule {
-        Rule::Import(target) => {
-            format!("create {file} holding only `@{target}`, or restore it from git history")
-        }
-        Rule::Limits { .. } => {
-            format!("create {file} at the repo root, or restore it from git history")
-        }
+        Rule::Import(target) => Fix::CreateImport {
+            file: file.to_owned(),
+            target: target.to_owned(),
+        },
+        Rule::Limits { .. } => Fix::CreateRequired {
+            file: file.to_owned(),
+        },
     };
     violation(file, 1, format!("{file} does not exist"), fix)
 }
@@ -79,13 +81,16 @@ pub(super) fn problems(required: &Required, text: &str) -> Vec<Violation> {
 
 /// The violation when `text` has more than `limit` lines, at the first line over the limit.
 fn over_lines(file: &str, text: &str, limit: usize) -> Option<Violation> {
-    let lines = text.lines().count();
+    let lines = checks::line_count(text.as_bytes());
     (lines > limit).then(|| {
         violation(
             file,
             checks::line_at(limit),
             format!("{file} has {lines} lines, over the limit of {limit}"),
-            format!("cut {file} to {limit} lines, moving what you cut into the file that owns it"),
+            Fix::CutLines {
+                file: file.to_owned(),
+                limit,
+            },
         )
     })
 }
@@ -98,20 +103,19 @@ fn over_bytes(file: &str, text: &str, limit: usize) -> Option<Violation> {
             file,
             line_of_byte(text, limit),
             format!("{file} is {bytes} bytes, over the limit of {limit}"),
-            format!("cut {file} to {limit} bytes, moving what you cut into the file that owns it"),
+            Fix::CutBytes {
+                file: file.to_owned(),
+                limit,
+            },
         )
     })
 }
 
-/// The 1-based line that holds the byte at `index`.
+/// The 1-based line that holds the byte at `index`, with lines ended as `checks::line_count`
+/// ends them: the count of lines up to that byte, itself included.
 fn line_of_byte(text: &str, index: usize) -> u32 {
-    let newlines = text
-        .as_bytes()
-        .iter()
-        .take(index)
-        .filter(|byte| **byte == b'\n')
-        .count();
-    checks::line_at(newlines)
+    let through = text.as_bytes().get(..=index).unwrap_or(text.as_bytes());
+    u32::try_from(checks::line_count(through).max(1)).unwrap_or(u32::MAX)
 }
 
 /// The violation when `file` is not exactly `@<target>`, with or without its final newline. It
@@ -132,9 +136,10 @@ fn import(file: &str, target: &str, text: &str) -> Option<Violation> {
         file,
         at,
         format!("{file} must hold only `{line}`"),
-        format!(
-            "move what {file} holds besides `{line}` into {target}, then keep only `{line}` in {file}"
-        ),
+        Fix::MoveImport {
+            file: file.to_owned(),
+            target: target.to_owned(),
+        },
     ))
 }
 

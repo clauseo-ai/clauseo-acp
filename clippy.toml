@@ -24,6 +24,8 @@ disallowed-methods = [
   { path = "tauri::Context::new", reason = "only generate_context! builds the context, from the checked tauri.conf.json and capabilities" },
   { path = "tauri::Context::set_assets", reason = "the app serves only the checked frontendDist that generate_context! embeds" },
   { path = "tauri_build::Attributes::capabilities_path_pattern", reason = "moves the capabilities folder away from crates/desktop/capabilities/, where the capabilities check reads them" },
+  { path = "tauri_build::AppManifest::permissions_path_pattern", reason = "moves the app's permission files away from crates/desktop/permissions/, where the capabilities check reads them" },
+  { path = "tauri_build::InlinedPlugin::permissions_path_pattern", reason = "moves an inlined plugin's permission files away from crates/desktop/permissions/, where the capabilities check reads them" },
   { path = "tauri::ipc::RuntimeAuthority::__allow_command", reason = "grants a command with no capability, where no check sees it; permissions live in crates/desktop/capabilities/" },
   # Writes: every std call that changes the file system; reads stay allowed. Each std::os
   # module exists on one OS family only, so allow-invalid keeps clippy quiet on the other.

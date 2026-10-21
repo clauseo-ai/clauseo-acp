@@ -1,0 +1,103 @@
+//! The builders of the dependencies cases about Never entries that look like our crates: the
+//! `(crates.io)` marker, letter case, swapped letters and `clauseo-` names that are no package.
+
+use super::*;
+
+/// The rows `host` (Never cell `never`), `agents`, `mcp` and `xtask`, host on line 7.
+fn rows(never: &str) -> String {
+    format!(
+        "| `host` | sessions | protocol | tauri, {never} | exists |\n| `agents` | registry | protocol | tauri | planned |\n| `mcp` | sidecar | rmcp | tauri | planned |\n| `xtask` | checks | none of ours | tauri | planned |\n"
+    )
+}
+
+/// A workspace whose only member is `clauseo-host`, with `deps` as its `[dependencies]` body and
+/// a vendored crate per name in `vendored`, under `rows(never)`.
+fn host(name: &str, never: &str, deps: &str, vendored: &[&str]) -> Repo {
+    let mut crates = vec![(
+        "crates/host".to_owned(),
+        manifest("clauseo-host", &format!("[dependencies]\n{deps}")),
+    )];
+    crates.extend(vendored.iter().map(|package| vendor(package, "")));
+    run_on(workspace(name, &rows(never), "", &crates))
+}
+
+pub(in crate::checks::dependencies::tests) fn crates_io_marker_passes() -> Repo {
+    host("marker-passes", "rmcp (crates.io)", "", &[])
+}
+
+pub(in crate::checks::dependencies::tests) fn crates_io_marker_bans_the_package() -> Repo {
+    host(
+        "marker-bans",
+        "rmcp (crates.io)",
+        "rmcp = { path = \"../../vendor/rmcp\" }\n",
+        &["rmcp"],
+    )
+}
+
+pub(in crate::checks::dependencies::tests) fn crates_io_name_one_edit_from_a_row() -> Repo {
+    host("rmcp-bare", "rmcp", "", &[])
+}
+
+pub(in crate::checks::dependencies::tests) fn row_name_in_capitals() -> Repo {
+    host("capitals", "AGENTS", "", &[])
+}
+
+pub(in crate::checks::dependencies::tests) fn package_name_in_other_case() -> Repo {
+    host("clauseo-case", "Clauseo-agents", "", &[])
+}
+
+pub(in crate::checks::dependencies::tests) fn row_name_with_two_letters_swapped() -> Repo {
+    host("swapped", "agnets", "", &[])
+}
+
+pub(in crate::checks::dependencies::tests) fn clauseo_before_a_row_whose_package_has_no_prefix()
+-> Repo {
+    host("clauseo-xtask", "clauseo-xtask", "", &[])
+}
+
+pub(in crate::checks::dependencies::tests) fn io_word_in_other_case() -> Repo {
+    host("io-word-case", "FS, Clock, Any I/O", "", &[])
+}
+
+pub(in crate::checks::dependencies::tests) fn crates_io_name_in_capitals_bans_the_package() -> Repo
+{
+    let crates = [
+        (
+            "crates/protocol".to_owned(),
+            manifest(
+                "clauseo-protocol",
+                "[dependencies]\ntauri = { path = \"../../vendor/tauri\" }\n",
+            ),
+        ),
+        vendor("tauri", ""),
+    ];
+    let rows = "| `protocol` | events | serde | Tauri | exists |\n";
+    run_on(workspace("capitals-ban", rows, "", &crates))
+}
+
+pub(in crate::checks::dependencies::tests) fn typo_of_a_row_named_like_an_io_word() -> Repo {
+    let crates = [(
+        "crates/host".to_owned(),
+        manifest("clauseo-host", "[dependencies]\n"),
+    )];
+    let rows = "| `host` | sessions | protocol | tauri, procesz | exists |\n| `process` | runner | protocol | tauri | planned |\n";
+    run_on(workspace("io-word-row", rows, "", &crates))
+}
+
+pub(in crate::checks::dependencies::tests) fn std_module_in_other_case() -> Repo {
+    host("std-case", "Std, NET", "", &[])
+}
+
+pub(in crate::checks::dependencies::tests) fn clauseo_prefix_alone() -> Repo {
+    host("clauseo-alone", "clauseo_", "", &[])
+}
+
+pub(in crate::checks::dependencies::tests) fn underscore_row_package_after_clauseo_underscore()
+-> Repo {
+    let crates = [(
+        "crates/host".to_owned(),
+        manifest("clauseo-host", "[dependencies]\n"),
+    )];
+    let rows = "| `host` | sessions | protocol | tauri, clauseo_transport_ws | exists |\n| `transport_ws` | websocket | host | tauri | planned |\n";
+    run_on(workspace("clauseo-underscore-row", rows, "", &crates))
+}

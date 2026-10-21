@@ -106,7 +106,7 @@ fn an_unknown_status_fails_at_its_line_naming_the_two_values() {
             FILE,
             7,
             "crate `xtask` has status `done`",
-            "write `exists` or `planned` in the Status column",
+            Fix::StatusWord,
         )])
     );
 }
@@ -120,7 +120,7 @@ fn a_header_with_other_columns_fails_at_the_header_line() {
             FILE,
             3,
             "the Crates table's columns are `Crate | Owns | Status`, not `Crate | Owns | May depend on | Never depends on | Status`",
-            SHAPE_FIX,
+            Fix::Shape,
         )])
     );
 }
@@ -133,7 +133,7 @@ fn a_missing_section_fails_at_line_one_and_a_section_without_a_table_at_its_head
             FILE,
             1,
             "ARCHITECTURE.md has no `## Crates` section",
-            SHAPE_FIX
+            Fix::Shape
         )])
     );
     assert_eq!(
@@ -142,7 +142,7 @@ fn a_missing_section_fails_at_line_one_and_a_section_without_a_table_at_its_head
             FILE,
             3,
             "the `## Crates` section has no table",
-            SHAPE_FIX
+            Fix::Shape
         )])
     );
 }
@@ -159,19 +159,19 @@ fn a_short_row_a_repeated_row_and_a_bad_never_entry_fail_at_their_lines() {
                 FILE,
                 7,
                 "this Crates table row has 4 cells, not 5",
-                SHAPE_FIX
+                Fix::Shape
             ),
             violation(
                 FILE,
                 9,
                 "crate `desktop` has a second row (the first is at line 8)",
-                "keep one row per crate"
+                Fix::OneRow,
             ),
             violation(
                 FILE,
                 9,
                 "`no network` in the Never depends on column of `desktop` is neither an I/O word nor a crate name",
-                "write fs, process, any I/O, clock, a crate of the table or a crates.io package name (as `<name> (crates.io)` to mark it as one), separated by commas"
+                Fix::NotAName,
             ),
         ])
     );
@@ -186,7 +186,7 @@ fn a_missing_separator_and_an_empty_table_fail() {
             FILE,
             4,
             "the Crates table's header is not followed by its `|---|` separator line",
-            SHAPE_FIX
+            Fix::Shape
         )])
     );
     assert_eq!(
@@ -195,7 +195,7 @@ fn a_missing_separator_and_an_empty_table_fail() {
             FILE,
             5,
             "the Crates table has no rows",
-            "add a row for every crate that exists"
+            Fix::NoRows,
         )])
     );
 }
@@ -246,25 +246,33 @@ fn a_std_module_in_the_never_column_fails_at_its_row() {
                 FILE,
                 7,
                 "`net` in the Never depends on column of `reducer` names a standard library module, not a crate, so nothing would enforce it",
-                "write `any I/O` (or `fs` or `process`) instead of `net`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now",
+                Fix::StdModule {
+                    entry: "net".to_owned(),
+                },
             ),
             violation(
                 FILE,
                 7,
                 "`env` in the Never depends on column of `reducer` names a standard library module, not a crate, so nothing would enforce it",
-                "write `any I/O` (or `fs` or `process`) instead of `env`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now",
+                Fix::StdModule {
+                    entry: "env".to_owned(),
+                },
             ),
             violation(
                 FILE,
                 7,
                 "`os` in the Never depends on column of `reducer` names a standard library module, not a crate, so nothing would enforce it",
-                "write `any I/O` (or `fs` or `process`) instead of `os`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now",
+                Fix::StdModule {
+                    entry: "os".to_owned(),
+                },
             ),
             violation(
                 FILE,
                 7,
                 "`std` in the Never depends on column of `reducer` names a standard library module, not a crate, so nothing would enforce it",
-                "write `any I/O` (or `fs` or `process`) instead of `std`: each bans the standard library's file, network, process, environment and clock APIs; `clock` alone bans only Instant::now and SystemTime::now",
+                Fix::StdModule {
+                    entry: "std".to_owned(),
+                },
             ),
         ])
     );
@@ -311,7 +319,7 @@ fn a_row_without_a_leading_pipe_is_a_row_and_a_row_after_a_blank_line_fails() {
             FILE,
             9,
             "the Crates table ends at line 7, but line 9 after it starts with `|`, so a row there is not part of the table",
-            "remove the blank lines between line 7 and line 9, so the row joins the table, or move the text at line 9 out of the `## Crates` section: a blank line ends a table",
+            Fix::AfterTable { end: 7, line: 9 },
         )])
     );
     let second =
@@ -337,13 +345,13 @@ fn a_short_or_long_row_is_counted_as_written_not_as_gfm_pads_or_cuts_it() {
                 FILE,
                 7,
                 "this Crates table row has 6 cells, not 5",
-                SHAPE_FIX
+                Fix::Shape
             ),
             violation(
                 FILE,
                 8,
                 "this Crates table row has 4 cells, not 5",
-                SHAPE_FIX
+                Fix::Shape
             ),
         ])
     );
@@ -376,7 +384,11 @@ fn a_row_name_written_with_a_dash_is_rejected_as_ours() {
             FILE,
             7,
             "`transport-ws` in the Never depends on column of `host` is the row `transport_ws` written with `-` for `_`, and as written it would ban a crates.io package `transport-ws` instead of our `clauseo-transport_ws`",
-            "write `transport_ws` to ban our crate `clauseo-transport_ws`, or `transport-ws (crates.io)` if you mean the crates.io package: the module doc of xtask/src/checks/crates_table.rs lists which names read as ours",
+            Fix::TypoBan {
+                ban: "transport_ws".to_owned(),
+                package: "clauseo-transport_ws".to_owned(),
+                entry: "transport-ws".to_owned(),
+            },
         )])
     );
 }
@@ -438,17 +450,25 @@ fn a_look_alike_of_a_row_named_like_an_io_word_is_told_to_write_its_package() {
         "| `host` | things | | clauseo-procesz, Clauseo-Process | planned |\n\
          | `process` | things | | | planned |\n",
     );
-    let at = |what: &str, fix: &str| violation(FILE, 7, what, fix);
+    let at = |what: &str, fix: Fix| violation(FILE, 7, what, fix);
     assert_eq!(
         parse(&text),
         Err(vec![
             at(
                 "`clauseo-procesz` in the Never depends on column of `host` starts with `clauseo-`, but `procesz` is no row of the Crates table, so it names none of our crates",
-                "write the name that bans the crate you mean (perhaps `clauseo-process`), add a row `procesz` for the crate, or write `clauseo-procesz (crates.io)` if you mean the crates.io package",
+                Fix::NoRow {
+                    near: vec!["clauseo-process".to_owned()],
+                    row: "procesz".to_owned(),
+                    entry: "clauseo-procesz".to_owned(),
+                },
             ),
             at(
                 "`Clauseo-Process` in the Never depends on column of `host` is the package `clauseo-process` written with other letter case",
-                "write `clauseo-process` to ban our crate, or `Clauseo-Process (crates.io)` if you mean the crates.io package",
+                Fix::OwnPackage {
+                    package: "clauseo-process".to_owned(),
+                    row: None,
+                    entry: "Clauseo-Process".to_owned(),
+                },
             ),
         ])
     );
@@ -460,10 +480,10 @@ fn a_row_package_written_with_an_underscore_after_clauseo_is_told_to_write_the_p
         "| `host` | things | | clauseo_process, Clauseo_Process | planned |\n\
          | `process` | things | | | planned |\n",
     );
-    let fix = |entry: &str| {
-        format!(
-            "write `clauseo-process` to ban our crate, or `{entry} (crates.io)` if you mean the crates.io package"
-        )
+    let fix = |entry: &str| Fix::OwnPackage {
+        package: "clauseo-process".to_owned(),
+        row: None,
+        entry: entry.to_owned(),
     };
     assert_eq!(
         parse(&text),
