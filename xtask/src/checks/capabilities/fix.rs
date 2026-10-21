@@ -20,6 +20,8 @@ pub(crate) enum Fix {
     Syntax,
     /// The capability folder holds no capability file, while permission files are there.
     NoCapabilityFile,
+    /// A symlink to a folder sits in the capabilities or permissions folder.
+    LinkedFolder,
     /// A permission file mentions `remote`; it has no remote block, so the text is reworded.
     RemotePermission,
 }
@@ -51,6 +53,10 @@ impl fmt::Display for Fix {
             Fix::NoCapabilityFile => {
                 "restore main.json in it: Tauri reads the window's grants from that folder, and \
                  this check guards them"
+            }
+            Fix::LinkedFolder => {
+                "replace the symlink with a real folder holding the files: Tauri follows it, and \
+                 this check reads only what is really in the folder"
             }
             Fix::RemotePermission => {
                 "reword the text: a remote page must never reach the IPC, and `remote` is matched \

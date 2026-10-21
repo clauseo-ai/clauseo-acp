@@ -3,6 +3,7 @@
 //! names). Every other rule is a planted case in `tests/planted.rs`, built in `tests/cases.rs`.
 
 mod cases;
+mod linked;
 pub(super) mod planted;
 
 use super::*;

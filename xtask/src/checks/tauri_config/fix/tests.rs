@@ -69,6 +69,10 @@ fn pinned(fix: &Fix) -> &'static str {
             "remove it and put the setting in tauri.conf.json: Tauri merges `TAURI_CONFIG` over \
              the checked file"
         }
+        Fix::LinkedFolder => {
+            "replace the symlink with a real folder holding the files: rustc follows it, and this \
+             check reads only what is really in the folder"
+        }
     }
 }
 
@@ -94,6 +98,7 @@ fn every_fix_prints_its_pinned_text() {
         Fix::ContextRenamed,
         Fix::SourceSyntax,
         Fix::ConfigInEnv,
+        Fix::LinkedFolder,
     ];
     let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
     assert_eq!(
