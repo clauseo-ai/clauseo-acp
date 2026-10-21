@@ -58,8 +58,9 @@ fn every_fix_has_its_exact_text() {
     assert_texts(&samples, pinned, ARMS);
 }
 
-/// What each home is called and how a workflow installs from it, by an exhaustive match: a new
-/// home does not compile until its texts are pinned here.
+/// What each home is called and how a workflow installs from it. The match is exhaustive, so a
+/// new home needs an arm here, but the list of homes below is not checked against the enum: a
+/// home missing from that list is not tested.
 #[test]
 fn every_home_has_its_exact_texts() {
     let homes = [
@@ -119,7 +120,8 @@ fn every_home_has_its_exact_texts() {
     }
 }
 
-/// The fixes of a version input and of a home that could not be read, for every file home.
+/// The fixes of a version input and of a home that could not be read, for each file home in the
+/// list below. As with `every_home_has_its_exact_texts`, a new `FileHome` is not forced into it.
 #[test]
 fn every_file_home_has_its_exact_fixes() {
     for home in [FileHome::Rust, FileHome::Pnpm, FileHome::Node] {
