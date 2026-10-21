@@ -1,12 +1,11 @@
-//! Pins the text of every `crates_table::Fix` variant. The `match` has no `_` arm, so a new
-//! variant does not compile until it has a pinned text here.
+//! Pins the text of every `crates_table::Fix` variant with `fix_texts!`: one arm per variant, and
+//! `assert_texts` fails until each arm has a sample, so a new variant needs both.
 
 use super::Fix;
-use std::collections::HashSet;
-use std::mem::discriminant;
+use crate::fix::tests::{assert_texts, fix_texts};
 
-fn pinned(fix: &Fix) -> String {
-    match fix {
+fix_texts! {
+    fn pinned for Fix {
         Fix::Shape => "keep the Crates table in ARCHITECTURE.md as one pipe table with the columns \
              Crate | Owns | May depend on | Never depends on | Status: xtask/src/checks/crates_table.rs \
              reads it"
@@ -19,7 +18,7 @@ fn pinned(fix: &Fix) -> String {
         Fix::StatusWord => "write `exists` or `planned` in the Status column".to_owned(),
         Fix::CrateName => {
             "name the crate as its directory under crates/: lowercase letters, digits and _".to_owned()
-        }
+        },
         Fix::OneRow => "keep one row per crate".to_owned(),
         Fix::StdModule { entry } => format!(
             "write `any I/O` (or `fs` or `process`) instead of `{entry}`: each bans the standard \
@@ -61,7 +60,7 @@ fn pinned(fix: &Fix) -> String {
                 "write `{package}`{or_row} to ban our crate, or `{entry} (crates.io)` if you mean the \
                  crates.io package"
             )
-        }
+        },
         Fix::NoRowName { entry } => format!(
             "write the name that bans the crate you mean (a name in the Crate column), or \
              `{entry} (crates.io)` if you mean the crates.io package"
@@ -90,7 +89,7 @@ fn pinned(fix: &Fix) -> String {
                 "write the name that bans the crate you mean ({hint}), add a row `{row}` for the \
                  crate, or write `{entry} (crates.io)` if you mean the crates.io package"
             )
-        }
+        },
     }
 }
 
@@ -138,15 +137,7 @@ fn every_fix_prints_its_pinned_text() {
             entry: "clauseo-mcpx".to_owned(),
         },
     ];
-    let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
-    assert_eq!(
-        kinds.len(),
-        samples.len(),
-        "two samples are the same variant"
-    );
-    for fix in &samples {
-        assert_eq!(fix.to_string(), pinned(fix));
-    }
+    assert_texts(&samples, pinned, ARMS);
 }
 
 #[test]

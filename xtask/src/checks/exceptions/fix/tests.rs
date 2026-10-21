@@ -1,15 +1,14 @@
-//! Pins the text of every `exceptions::Fix` variant. The `match` has no `_` arm, so a new variant
-//! does not compile until it has a pinned text here.
+//! Pins the text of every `exceptions::Fix` variant with `fix_texts!`: one arm per variant, and
+//! `assert_texts` fails until each arm has a sample, so a new variant needs both.
 
 use super::Fix;
-use std::collections::HashSet;
-use std::mem::discriminant;
+use crate::fix::tests::{assert_texts, fix_texts};
 
-fn pinned(fix: &Fix) -> &'static str {
-    match fix {
+fix_texts! {
+    fn pinned for Fix {
         Fix::WriteReason { .. } => {
             "write why `src/a.rs` is exempt after the path, on the same line"
-        }
+        },
         Fix::DeleteDuplicate => "delete this line and keep the reason on the first one",
     }
 }
@@ -22,13 +21,5 @@ fn every_fix_prints_its_pinned_text() {
         },
         Fix::DeleteDuplicate,
     ];
-    let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
-    assert_eq!(
-        kinds.len(),
-        samples.len(),
-        "two samples are the same variant"
-    );
-    for fix in &samples {
-        assert_eq!(fix.to_string(), pinned(fix));
-    }
+    assert_texts(&samples, pinned, ARMS);
 }

@@ -1,12 +1,11 @@
-//! Pins the text of every `dependencies::Fix` variant. The `match` has no `_` arm, so a new
-//! variant does not compile until it has a pinned text here.
+//! Pins the text of every `dependencies::Fix` variant with `fix_texts!`: one arm per variant, and
+//! `assert_texts` fails until each arm has a sample, so a new variant needs both.
 
 use super::Fix;
-use std::collections::HashSet;
-use std::mem::discriminant;
+use crate::fix::tests::{assert_texts, fix_texts};
 
-fn pinned(fix: &Fix) -> String {
-    match fix {
+fix_texts! {
+    fn pinned for Fix {
         Fix::SetPlanned => "change the Status to `planned`: a row is `exists` only while its crate is \
              a workspace member"
             .to_owned(),
@@ -93,15 +92,7 @@ fn every_fix_prints_its_pinned_text() {
         move_from_lines(false),
         move_from_manifest(false),
     ];
-    let kinds: HashSet<_> = samples.iter().map(discriminant).collect();
-    assert_eq!(
-        kinds.len(),
-        samples.len(),
-        "two samples are the same variant"
-    );
-    for fix in &samples {
-        assert_eq!(fix.to_string(), pinned(fix));
-    }
+    assert_texts(&samples, pinned, ARMS);
 }
 
 #[test]

@@ -8,8 +8,10 @@
 //! `place` comes from the consts its code reads, a `run` that counts what it inspected, and a
 //! `cases!` list of planted cases that `CHECK.planted` points at. Then add it to `ALL`. Its fix
 //! lines are a `Fix` enum in `<check>/fix.rs`, one variant per failure kind with the text written
-//! once in `Display`, wrapped in `crate::fix::Fix`; `<check>/fix/tests.rs` pins every variant's
-//! text in a `match` with no `_` arm, so a new variant does not compile until its text is pinned.
+//! once in `Display`, wrapped in `crate::fix::Fix`. `<check>/fix/tests.rs` pins every variant's
+//! text with `fix_texts!` (in `crate::fix::tests`), which writes one `match` and numbers its arms.
+//! A new variant fails to compile until it has an arm; then `assert_texts` fails, naming the arm,
+//! until that arm has exactly one sample, which must print the arm's text.
 //!
 //! Every check counts what it inspected. `StaticCheck::judge` is the one place that judges a run:
 //! it fails on any violation or failure, and on a count of zero, since a check that inspected
