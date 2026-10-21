@@ -1,13 +1,13 @@
 //! The doors of the root `clippy.toml`, which bans them in every crate: one must-fail form per
 //! std call that changes files (the write module), both `canonicalize` paths (and `PathBuf`'s,
 //! which reaches `Path::canonicalize` by deref), `env::split_paths` (the one walk over PATH), and
-//! `Command::status` and `CommandExt::exec` (the process door); and must-pass forms for the
-//! reads, which stay allowed. Each failing form plants its call on line 2 and must get a hit
+//! `Command::status`, `CommandExt::exec` and nix's safe spawn and exec calls (the process door);
+//! and must-pass forms for the reads, which stay allowed. Each failing form plants its call on line 2 and must get a hit
 //! there naming its entry, with the entry's reason or replacement, so deleting the entry, or
 //! giving it another reason, fails the test.
 //!
-//! `std::os::windows::fs::symlink_file` and `symlink_dir` build on Windows only: the test checks
-//! them where it runs on Windows.
+//! `std::os::windows::fs::symlink_file` and `symlink_dir` build on Windows only, and nix's
+//! `execvpe`, `fexecve` and `execveat` on Linux only: the test checks each where it builds.
 
 use super::{Form, Must, Only, form};
 
@@ -264,6 +264,73 @@ const WRITES: [Write; 31] = [
     ),
 ];
 
+/// The parameters of `f` for the nix spawn calls.
+const SPAWN: &str = "fa: &nix::spawn::PosixSpawnFileActions, at: &nix::spawn::PosixSpawnAttr";
+
+/// A file descriptor parameter, for the nix exec calls on one.
+const FD: &str = "fd: std::os::fd::BorrowedFd<'_>";
+
+/// nix's safe calls that start or become another program: the form's name, its targets, the
+/// parameters of `f`, the call, and the entry it must hit.
+const NIX: [Write; 8] = [
+    (
+        "nix_posix_spawn",
+        Only::Unix,
+        SPAWN,
+        "nix::spawn::posix_spawn(c\"a\", fa, at, &[c\"a\"], &[c\"a\"])",
+        "nix::spawn::posix_spawn",
+    ),
+    (
+        "nix_posix_spawnp",
+        Only::Unix,
+        SPAWN,
+        "nix::spawn::posix_spawnp(c\"a\", fa, at, &[c\"a\"], &[c\"a\"])",
+        "nix::spawn::posix_spawnp",
+    ),
+    (
+        "nix_execv",
+        Only::Unix,
+        "",
+        "nix::unistd::execv(c\"a\", &[c\"a\"])",
+        "nix::unistd::execv",
+    ),
+    (
+        "nix_execve",
+        Only::Unix,
+        "",
+        "nix::unistd::execve(c\"a\", &[c\"a\"], &[c\"a\"])",
+        "nix::unistd::execve",
+    ),
+    (
+        "nix_execvp",
+        Only::Unix,
+        "",
+        "nix::unistd::execvp(c\"a\", &[c\"a\"])",
+        "nix::unistd::execvp",
+    ),
+    (
+        "nix_execvpe",
+        Only::Linux,
+        "",
+        "nix::unistd::execvpe(c\"a\", &[c\"a\"], &[c\"a\"])",
+        "nix::unistd::execvpe",
+    ),
+    (
+        "nix_fexecve",
+        Only::Linux,
+        FD,
+        "nix::unistd::fexecve(fd, &[c\"a\"], &[c\"a\"])",
+        "nix::unistd::fexecve",
+    ),
+    (
+        "nix_execveat",
+        Only::Linux,
+        FD,
+        "nix::unistd::execveat(fd, c\"a\", &[c\"a\"], &[c\"a\"], nix::fcntl::AtFlags::empty())",
+        "nix::unistd::execveat",
+    ),
+];
+
 /// The must-fail forms: every path the root file bans for the write, path and process doors.
 pub(super) fn failing() -> Vec<Form> {
     let mut all: Vec<Form> = WRITES
@@ -322,6 +389,9 @@ pub(super) fn failing() -> Vec<Form> {
             PROCESS_REASON,
         ),
     ]);
+    all.extend(NIX.iter().map(|&(name, only, params, call, item)| {
+        planted(name, only, params, call, item, PROCESS_REASON)
+    }));
     all
 }
 

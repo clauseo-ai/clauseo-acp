@@ -38,7 +38,9 @@ serde_json = "1"
 dunce = "1.0.5"
 # Shared with floor 2's `process` crate (S7), which adds the features it needs in its own line.
 # xtask's process door (xtask/src/process/unix.rs) sends signals to process groups with
-# `sys::signal::killpg`, which `signal` turns on (with `process`, for `unistd::Pid`).
+# `sys::signal::killpg`, which `signal` turns on (with `process`, for `unistd::Pid`). `process`
+# also brings nix's safe spawn and exec calls (`spawn::posix_spawn*`, `unistd::exec*`); the root
+# clippy.toml bans each, so children still start only through the process door.
 nix = { version = "0.31.3", default-features = false, features = ["signal"] }
 # Shared with S7 likewise. Each feature turns on the Win32 calls of xtask/src/process/windows.rs:
 # `Win32_Foundation` for `HANDLE` and `CloseHandle`, `Win32_Security` for `CreateJobObjectW`
