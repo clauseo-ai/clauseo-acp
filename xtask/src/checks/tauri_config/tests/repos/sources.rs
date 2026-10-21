@@ -1,4 +1,5 @@
-//! The tauri-config builders for the desktop crate's Rust sources and cargo config: `generate_context!` and `TAURI_CONFIG`.
+//! The tauri-config builders for the desktop crate's Rust sources and cargo config:
+//! `generate_context!` and `TAURI_CONFIG`.
 
 use super::*;
 

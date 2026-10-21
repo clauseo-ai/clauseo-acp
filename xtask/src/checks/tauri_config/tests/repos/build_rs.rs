@@ -1,4 +1,5 @@
-//! The tauri-config builders for `build.rs`: the app manifest it must hand tauri-build, and the configs it must not point at.
+//! The tauri-config builders for `build.rs`: the app manifest it must hand tauri-build, and
+//! the configs it must not point at.
 
 use super::*;
 

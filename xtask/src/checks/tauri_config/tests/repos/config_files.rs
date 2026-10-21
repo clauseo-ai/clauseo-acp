@@ -1,4 +1,5 @@
-//! The tauri-config builders for the other config files Tauri reads: platform configs and a main config in json5 or toml.
+//! The tauri-config builders for the other config files Tauri reads: platform configs, and a
+//! main config in json5 or toml.
 
 use super::*;
 
