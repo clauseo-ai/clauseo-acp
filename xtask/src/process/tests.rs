@@ -266,11 +266,28 @@ fn a_timeout_names_the_command_and_its_limit() {
 fn the_restarted_leader_mode_passes_only_when_both_runs_pass() {
     let mode = |script: &str| {
         let cmd = Cmd::new(Program::Named("sh"), ["-c", script], TEST_TIMEOUT);
-        test_mode::restarted_leader(&cmd, script)
+        let mut registered = 0;
+        let passed = test_mode::restarted_leader(&cmd, script, &mut || registered += 1);
+        assert_eq!(registered, 1, "says once that the groups are registered");
+        passed
     };
     assert!(mode("exit 0"));
     assert!(!mode(r#"[ "$1" != again ]"#), "the second run fails");
     assert!(!mode(r#"[ "$1" = again ]"#), "the first run fails");
+}
+
+#[cfg(unix)]
+#[test]
+fn the_test_mode_passes_only_when_its_script_does_and_says_once_it_is_registered() {
+    for streams in [Streams::Inherit, Streams::Merged] {
+        for (script, success) in [("exit 0", true), ("exit 1", false)] {
+            let cmd = Cmd::new(Program::Named("sh"), ["-c", script], TEST_TIMEOUT);
+            let mut registered = 0;
+            let passed = test_mode::run_noting(&cmd, streams, &mut || registered += 1);
+            assert_eq!(passed, success, "{script} with {streams:?}");
+            assert_eq!(registered, 1, "{script} with {streams:?}");
+        }
+    }
 }
 
 #[cfg(unix)]
