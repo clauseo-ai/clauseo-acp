@@ -374,6 +374,26 @@ pub(super) fn path_to_ignored_rs() -> Repo {
     )
 }
 
+pub(super) fn path_dot_segment() -> Repo {
+    with_files(
+        "path-dot-segment",
+        "#[path = \"./b.rs\"]\nmod b;\n",
+        &[("src/b.rs", "fn g() {}\n")],
+    )
+}
+
+pub(super) fn path_drive_letter() -> Repo {
+    with_files(
+        "path-drive-letter",
+        "#[path = \"C:/abs/x.rs\"]\nmod x;\n",
+        &[],
+    )
+}
+
+pub(super) fn path_absolute() -> Repo {
+    with_files("path-absolute", "#[path = \"/abs/x.rs\"]\nmod x;\n", &[])
+}
+
 pub(super) fn path_outside_repo() -> Repo {
     with_files(
         "path-outside-repo",

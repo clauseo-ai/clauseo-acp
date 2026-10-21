@@ -293,6 +293,23 @@ crate::checks::planted::cases! {
          expect-allowlist does not read it",
         Fix::Path,
     )], inspects 1 => super::repos::path_to_non_rs,
+    /// `#[path]` to a `.rs` file git lists, through a `.` segment, passes: `./b.rs` is `b.rs`.
+    path_dot_segment: Passes, inspects 2 => super::repos::path_dot_segment,
+    /// `#[path]` to an absolute path fails: it is outside the repo, so the check does not read it.
+    path_absolute: Fails[fails(
+        "src/a.rs:1",
+        "#[path = \"/abs/x.rs\"] names `/abs/x.rs`, outside the repo, which is not a .rs file \
+         git lists, so expect-allowlist does not read it",
+        Fix::Path,
+    )], inspects 1 => super::repos::path_absolute,
+    /// `#[path]` to a Windows drive path fails: it is outside the repo. A drive letter is no
+    /// relative folder, so the check does not read it.
+    path_drive_letter: Fails[fails(
+        "src/a.rs:1",
+        "#[path = \"C:/abs/x.rs\"] names `C:/abs/x.rs`, outside the repo, which is not a .rs file \
+         git lists, so expect-allowlist does not read it",
+        Fix::Path,
+    )], inspects 1 => super::repos::path_drive_letter,
     /// `#[path]` under `cfg_attr` to a `.rs` file `.gitignore` excludes fails.
     path_to_ignored_rs: Fails[fails(
         "src/a.rs:1",
