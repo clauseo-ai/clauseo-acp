@@ -5,6 +5,7 @@ use super::report::{error_json, json_object, probe_json, table_lines, warning_li
 use super::verdict::*;
 use super::*;
 use crate::budgets::{Budget, Gate, Unit};
+use crate::scratch::Scratch;
 
 fn member(name: &str, dir: &str) -> Member {
     Member {
@@ -366,4 +367,10 @@ fn the_profile_line_is_an_expectation_that_the_warm_up_decides() {
             profile::CI_SOURCE
         )
     );
+}
+
+#[test]
+fn a_run_whose_checkout_has_no_budgets_fails_before_it_measures() {
+    let root = Scratch::new("buildtime-run");
+    assert_eq!(run(&root, Half::Web, 1, false), ExitCode::FAILURE);
 }

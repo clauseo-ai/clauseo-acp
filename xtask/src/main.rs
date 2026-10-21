@@ -92,6 +92,8 @@ fn main() -> ExitCode {
     match Cli::parse().command {
         Commands::Check { quick } => check::run(quick),
         Commands::Setup { binaries } => setup::run(binaries),
-        Commands::Buildtime { half, runs, json } => buildtime::run(half, runs, json),
+        Commands::Buildtime { half, runs, json } => {
+            buildtime::run(&workspace::workspace_root(), half, runs, json)
+        }
     }
 }
