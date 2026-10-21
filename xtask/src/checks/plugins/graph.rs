@@ -1,6 +1,8 @@
 //! The rule of the `plugins` check that reads the desktop crate's dependency graph
 //! (`checks::graph`, the same per-crate `cargo tree` graph `dependencies` reads): no
-//! `tauri-plugin-*` outside the fixed set is in it unless only fixed plugins pull it in.
+//! `tauri-plugin-*` outside the fixed set is in it unless only fixed plugins pull it in, and
+//! neither is any other crate that depends on `tauri` (a plugin by another name), apart from
+//! the desktop crate itself.
 //! `cargo metadata --no-deps` lists workspace members only, so a crate under `[workspace]
 //! exclude` pulled in by path, or a registry or git dependency, shows up only here.
 //! The resolved features (no `devtools` in tauri, tauri-runtime, tauri-runtime-wry or wry, no
@@ -16,6 +18,9 @@ use crate::workspace::PackageDependencies;
 /// The plugin-authoring library every plugin depends on. It is not a plugin.
 const PLUGIN_LIBRARY: &str = "tauri-plugin";
 
+/// The package a plugin by any name depends on, to register itself with the app.
+const TAURI: &str = "tauri";
+
 /// Where the graph violations point: the desktop manifest and the desktop crate's dependencies
 /// from `cargo metadata --no-deps`, which give the line of a direct dependency.
 pub(super) struct Desktop<'a> {
@@ -25,22 +30,24 @@ pub(super) struct Desktop<'a> {
 }
 
 /// Every violation in `tree`, the desktop crate's graph, located in the desktop manifest: each
-/// `tauri-plugin-*` outside the fixed set that a package other than a fixed plugin depends on.
+/// package outside the fixed set that a package other than a fixed plugin depends on, when it is
+/// a `tauri-plugin-*` or, the desktop crate aside, depends on `tauri` itself.
 pub(super) fn violations(tree: &Tree, desktop: &Desktop<'_>) -> Vec<Violation> {
     let reach = tree.reach(Tree::ROOT);
     let reachable = reach.order();
     let mut found = Vec::new();
     for &id in reachable {
         let name = tree.name(id);
-        let is_plugin = name.starts_with("tauri-plugin-") && name != PLUGIN_LIBRARY;
-        if !is_plugin || FIXED_PLUGINS.contains(&name) {
+        let named = name.starts_with("tauri-plugin-") && name != PLUGIN_LIBRARY;
+        let uses_tauri = id != Tree::ROOT && tree.deps(id).iter().any(|&d| tree.name(d) == TAURI);
+        if !(named || uses_tauri) || FIXED_PLUGINS.contains(&name) {
             continue;
         }
         let outsider = reachable.iter().find(|&&dependent| {
             !FIXED_PLUGINS.contains(&tree.name(dependent)) && tree.deps(dependent).contains(&id)
         });
         if let Some(&dependent) = outsider {
-            found.push(violation_for(tree, id, dependent, desktop));
+            found.push(violation_for(tree, id, dependent, desktop, named));
         }
     }
     found.sort_by(|a, b| (a.line, &a.message).cmp(&(b.line, &b.message)));
@@ -48,14 +55,26 @@ pub(super) fn violations(tree: &Tree, desktop: &Desktop<'_>) -> Vec<Violation> {
     found
 }
 
-/// The violation for `target`, a plugin reached through `dependent`. It points at the desktop
-/// manifest line that declares the direct dependency responsible; when several lines declare a
-/// node of it that brings the plugin in, it names them all, since removing only some of them may
-/// leave the plugin in.
-fn violation_for(tree: &Tree, target: usize, dependent: usize, desktop: &Desktop<'_>) -> Violation {
+/// The violation for `target`, a plugin reached through `dependent`: one `named` `tauri-plugin-*`,
+/// else a crate that depends on `tauri`. It points at the desktop manifest line that declares
+/// the direct dependency responsible; when several lines declare a node of it that brings the
+/// plugin in, it names them all, since removing only some of them may leave the plugin in.
+fn violation_for(
+    tree: &Tree,
+    target: usize,
+    dependent: usize,
+    desktop: &Desktop<'_>,
+    named: bool,
+) -> Violation {
     let name = tree.name(target);
+    let uses = if named {
+        String::new()
+    } else {
+        format!(" depends on `{TAURI}`, so it can register a Tauri plugin, and")
+    };
     let message = format!(
-        "`{name}` {} is in the desktop crate's tree through `{}`, which is not a fixed plugin",
+        "`{name}` {}{uses} is in the desktop crate's tree through `{}`, which is not a fixed \
+         plugin",
         tree.version(target),
         tree.name(dependent)
     );

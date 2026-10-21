@@ -24,6 +24,9 @@ pub(crate) enum Fix {
     AddBackToDependencies { plugin: String },
     /// The desktop crate's graph holds a plugin outside the set, and no declaring line is known.
     Tree,
+    /// A `[patch]` or `[replace]` entry swaps a Tauri crate for another source, or the cargo
+    /// config has a `paths` override or a source replacement.
+    Patched,
     /// The desktop crate's graph holds a plugin outside the set, and these declarations bring it
     /// in: `keys` are the declared names (quoted, such as `` `s` ``), `lines` the manifest lines
     /// as a list (such as `7 and 10`), and `path` the desktop manifest.
@@ -71,6 +74,10 @@ impl fmt::Display for Fix {
                     "add it back under [dependencies]: `{plugin}.workspace = true`"
                 )
             }
+            Fix::Patched => f.write_str(
+                "remove the entry: Tauri crates come from crates.io at the versions Cargo.lock \
+                 pins; using a fork needs a decision recorded in a task brief",
+            ),
             Fix::Tree => f.write_str(
                 "only the fixed plugins and what they pull in may be in the desktop crate's tree",
             ),

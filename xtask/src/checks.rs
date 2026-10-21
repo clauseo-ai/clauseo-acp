@@ -50,6 +50,9 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+/// The repo's cargo config, which cargo reads from the root for every command xtask runs there.
+pub(crate) const CARGO_CONFIG: &str = ".cargo/config.toml";
+
 /// A check written in Rust. Run it through `report`, which fails it on any violation and on an
 /// inspection of zero items. Only `name` is public: the rest is read here, so nothing outside
 /// this module can call `run` and skip the judging.
