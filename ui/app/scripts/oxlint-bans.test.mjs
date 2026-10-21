@@ -119,6 +119,15 @@ const DOORS = {
 const UNCAUGHT = {
   "fs-dynamic.mjs": `const { writeFileSync } = await import("node:fs");`,
   "disable-all.mjs": `/* ${"oxlint"}-disable */\nimport { writeFileSync } from "node:fs";`,
+  // A property name built at run time: no-restricted-properties matches only a literal name
+  // (no_restricted_properties.rs, `expression_property_name`).
+  "builtin-computed.mjs": `const k = "getBuiltin" + "Module";\nprocess[k]("node:fs");`,
+  // The name as an argument, not a property: no rule of oxlint 1.87.0 reads Reflect.get's
+  // arguments.
+  "builtin-reflect.mjs": `Reflect.get(process, "getBuiltinModule")("node:fs");`,
+  // A built source: no-restricted-imports reads only a string literal source of `import()`
+  // (no_restricted_imports.rs, `report_import_expression_allowed`).
+  "process-built.mjs": `const x = "child_process";\nawait import("node:" + x);`,
 };
 
 const dirs = [];
