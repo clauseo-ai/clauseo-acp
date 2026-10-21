@@ -10,6 +10,9 @@
 //! it stops are empty). The test sees EOF only once all of them are gone, and never sleeps. A
 //! survivor's group gets SIGKILL before the test fails; a stuck xtask ends at its `process-test`
 //! limit.
+//!
+//! One test lets the script exit instead: it prints what an `Output::Inherit` command sees of
+//! git's prompt variables, which the door sets because such a command cannot read the terminal.
 #![cfg(unix)]
 
 // In a `#[cfg(test)]` module, so the helpers may panic as the tests do.
@@ -47,15 +50,22 @@ mod xtask_dies {
     static STARTING: Mutex<()> = Mutex::new(());
 
     /// Starts `xtask process-test <output> <script>` in a process group of its own, as a shell
-    /// starts a job, with fd 3 the write end of a new pipe. Returns xtask and the read end.
+    /// starts a job, with fd 3 the write end of a new pipe, and `env` given its command to change
+    /// its environment. Returns xtask and the read end.
     #[expect(
         clippy::disallowed_methods,
         reason = "the test starts the xtask binary itself, to kill it"
     )]
-    fn start_xtask(output: &str, script: &str) -> (Child, PipeReader) {
+    fn start_xtask(
+        output: &str,
+        script: &str,
+        env: &mut dyn FnMut(&mut Command),
+    ) -> (Child, PipeReader) {
         let _starting = STARTING.lock().unwrap_or_else(PoisonError::into_inner);
         let (reader, writer) = io::pipe().expect("make a pipe");
-        let xtask = Command::new("sh")
+        let mut command = Command::new("sh");
+        env(&mut command);
+        let xtask = command
             .args([
                 "-c",
                 r#"exec "$0" process-test "$1" "$2" 3>&1 >/dev/null"#,
@@ -140,7 +150,7 @@ mod xtask_dies {
 
     #[test]
     fn process_leader_stops_the_tree_when_xtask_gets_sigkill() {
-        let (mut xtask, reader) = start_xtask("capture", WRAPPER);
+        let (mut xtask, reader) = start_xtask("capture", WRAPPER, &mut |_| {});
         let (group, reader) = group_of(reader);
         xtask.kill().expect("send SIGKILL to xtask");
         assert_eq!(exit_of(xtask).signal(), Some(Signal::SIGKILL as i32));
@@ -149,7 +159,7 @@ mod xtask_dies {
 
     #[test]
     fn process_ctrl_c_stops_an_inherited_child_and_its_grandchild() {
-        let (xtask, reader) = start_xtask("inherit", WRAPPER);
+        let (xtask, reader) = start_xtask("inherit", WRAPPER, &mut |_| {});
         let (group, reader) = group_of(reader);
         ctrl_c(&xtask);
         assert_eq!(exit_of(xtask).signal(), Some(Signal::SIGINT as i32));
@@ -158,7 +168,7 @@ mod xtask_dies {
 
     #[test]
     fn process_ctrl_c_stops_a_captured_child_and_its_grandchild() {
-        let (xtask, reader) = start_xtask("capture", WRAPPER);
+        let (xtask, reader) = start_xtask("capture", WRAPPER, &mut |_| {});
         let (group, reader) = group_of(reader);
         ctrl_c(&xtask);
         assert_eq!(exit_of(xtask).signal(), Some(Signal::SIGINT as i32));
@@ -167,16 +177,45 @@ mod xtask_dies {
 
     #[test]
     fn process_leader_sends_sigterm_before_sigkill() {
-        let (mut xtask, reader) = start_xtask("capture", REPORTS_SIGTERM);
+        let (mut xtask, reader) = start_xtask("capture", REPORTS_SIGTERM, &mut |_| {});
         let (group, reader) = group_of(reader);
         xtask.kill().expect("send SIGKILL to xtask");
         assert_eq!(exit_of(xtask).signal(), Some(Signal::SIGKILL as i32));
         assert_eq!(gone(reader, group), "term\n");
     }
 
+    /// Prints on fd 3 what an `Output::Inherit` command sees of git's prompt variables.
+    const PROMPT_ENV: &str = r#"echo "$GIT_TERMINAL_PROMPT|$GIT_SSH_COMMAND" >&3"#;
+
+    /// What `xtask process-test <output> PROMPT_ENV` prints, with `GIT_SSH_COMMAND` set to
+    /// `ssh` in xtask's environment, or removed from it. Fails when xtask does not exit 0.
+    fn prompt_env(output: &str, ssh: Option<&str>) -> String {
+        let (xtask, reader) = start_xtask(output, PROMPT_ENV, &mut |command| {
+            command.env_remove("GIT_TERMINAL_PROMPT");
+            match ssh {
+                Some(ssh) => command.env("GIT_SSH_COMMAND", ssh),
+                None => command.env_remove("GIT_SSH_COMMAND"),
+            };
+        });
+        let ([line], _) = lines_of(BufReader::new(reader));
+        assert!(exit_of(xtask).success(), "the script exits 0");
+        line
+    }
+
+    #[test]
+    fn process_an_inherited_child_gets_git_and_ssh_prompts_turned_off() {
+        assert_eq!(prompt_env("inherit", None), "0|ssh -o BatchMode=yes");
+        assert_eq!(prompt_env("inherit", Some("ssh -i key")), "0|ssh -i key");
+        assert_eq!(
+            prompt_env("capture", None),
+            "|",
+            "a captured child cannot prompt"
+        );
+    }
+
     #[test]
     fn process_a_new_leader_stops_the_tree_its_dead_predecessor_was_told_about() {
-        let (mut xtask, reader) = start_xtask("restarted-leader", RUNS_AGAIN);
+        let (mut xtask, reader) = start_xtask("restarted-leader", RUNS_AGAIN, &mut |_| {});
         // The first run prints its group and the second `again`, in either order.
         let ([first, second], reader) = lines_of(BufReader::new(reader));
         let pid = if first == "again" {

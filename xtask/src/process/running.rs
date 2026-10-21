@@ -48,8 +48,8 @@ pub(super) trait Tree: Sized {
     /// What a tree is called in errors.
     const NAME: &'static str;
 
-    /// Makes `command` start in a new tree.
-    fn prepare(command: &mut Command);
+    /// Makes `command`, whose output goes where `streams` says, start in a new tree.
+    fn prepare(command: &mut Command, streams: Streams);
 
     /// The tree of `child`, just started from a `prepare`d command. When that fails, what was
     /// started is ended and the error returned; the caller reaps.
@@ -225,7 +225,7 @@ impl Running {
         // write. Under `STARTING`, like every pipe.
         #[cfg(unix)]
         super::leader::ensure()?;
-        OsTree::prepare(&mut command);
+        OsTree::prepare(&mut command, streams);
         let readers = match streams {
             Streams::Inherit => Vec::new(),
             Streams::Merged => {

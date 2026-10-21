@@ -1,15 +1,32 @@
 //! The Unix half of a command's tree: a process group of its own (`process_group(0)`, so the
 //! group's id is the command's pid), signalled through nix's `killpg`, and registered with the
 //! leader (`leader.rs`) so it is stopped when xtask dies.
+//!
+//! A group of its own is a background group on xtask's terminal, so an `Output::Inherit` command
+//! that reads the terminal gets SIGTTIN and stops, silently, until its limit or Ctrl-C. Before
+//! the door, git and ssh prompts (a credential, a passphrase) during `cargo install` worked. So an
+//! `Output::Inherit` command gets `GIT_TERMINAL_PROMPT=0` and, unless xtask's own environment sets
+//! `GIT_SSH_COMMAND`, `GIT_SSH_COMMAND="ssh -o BatchMode=yes"`: git and ssh then fail at once
+//! instead of prompting. Costs left: any other program that reads `/dev/tty` from an
+//! `Output::Inherit` command still stops until its limit or Ctrl-C, and the `GIT_SSH_COMMAND` set
+//! here takes the place of a `GIT_SSH` or `core.sshCommand` the developer set.
 
 use super::leader;
-use super::running::Tree;
+use super::running::{Streams, Tree};
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
 use std::io;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command};
+
+/// The variables an `Output::Inherit` command gets so that git and ssh fail instead of prompting
+/// on a terminal it cannot read. `GIT_SSH_COMMAND` is set only when xtask's own environment does
+/// not set it (`prompts_fail`).
+const NO_PROMPT_ENV: [(&str, &str); 2] = [
+    ("GIT_TERMINAL_PROMPT", "0"),
+    ("GIT_SSH_COMMAND", "ssh -o BatchMode=yes"),
+];
 
 /// The process group a command leads.
 pub(super) struct Group {
@@ -19,9 +36,13 @@ pub(super) struct Group {
 impl Tree for Group {
     const NAME: &'static str = "process group";
 
-    /// Makes `command` start in a new process group.
-    fn prepare(command: &mut Command) {
+    /// Makes `command` start in a new process group; with `Streams::Inherit`, also with git and
+    /// ssh prompts turned off (`prompts_fail`), since the group cannot read the terminal.
+    fn prepare(command: &mut Command, streams: Streams) {
         command.process_group(0);
+        if let Streams::Inherit = streams {
+            prompts_fail(command, std::env::var_os("GIT_SSH_COMMAND").is_some());
+        }
     }
 
     /// The tree of `child`, just started from a `prepare`d command, registered with the leader.
@@ -67,6 +88,16 @@ impl Tree for Group {
     fn finish(&self) {
         drop(self.kill());
         leader::release(self.group);
+    }
+}
+
+/// Sets `NO_PROMPT_ENV` on `command`, all but `GIT_SSH_COMMAND` when `ssh_set` says xtask's own
+/// environment sets it, which the command then inherits.
+fn prompts_fail(command: &mut Command, ssh_set: bool) {
+    for (name, value) in NO_PROMPT_ENV {
+        if !(ssh_set && name == "GIT_SSH_COMMAND") {
+            command.env(name, value);
+        }
     }
 }
 

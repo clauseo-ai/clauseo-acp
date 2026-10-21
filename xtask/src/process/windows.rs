@@ -9,7 +9,7 @@
     reason = "FFI to the Win32 Job Object, process and thread APIs"
 )]
 
-use super::running::Tree;
+use super::running::{Streams, Tree};
 use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
@@ -39,8 +39,10 @@ pub(super) struct Job {
 impl Tree for Job {
     const NAME: &'static str = "job";
 
-    /// Makes `command` start suspended, so it runs nothing before it joins its job.
-    fn prepare(command: &mut Command) {
+    /// Makes `command` start suspended, so it runs nothing before it joins its job. Its output
+    /// goes where it goes: a job is no background group, so a command that inherits xtask's
+    /// console can still prompt on it.
+    fn prepare(command: &mut Command, _streams: Streams) {
         command.creation_flags(CREATE_SUSPENDED.0);
     }
 
