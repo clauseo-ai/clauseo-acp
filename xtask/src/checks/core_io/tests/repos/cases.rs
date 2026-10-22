@@ -285,7 +285,7 @@ pub(in crate::checks::core_io::tests) fn compiler_keys_in_cargo_config() -> Repo
 }
 
 /// The repo's own `xtask` alias, the line as it is in `.cargo/config.toml`.
-/// `the_xtask_alias_is_the_repo_s` fails when the two differ.
+/// `the_xtask_alias_matches_the_cargo_config` fails when the two differ.
 const XTASK_ALIAS: &str =
     "xtask = \"run --quiet --locked --package xtask --target-dir target/xtask-run --\"";
 
@@ -304,7 +304,7 @@ pub(in crate::checks::core_io::tests) fn alias_of_a_command_xtask_runs() -> Repo
 /// `alias_of_a_command_xtask_runs` puts the repo's own `xtask` alias beside the bad one, so its
 /// copy has to stay the line in `.cargo/config.toml`.
 #[test]
-fn the_xtask_alias_is_the_repo_s() {
+fn the_xtask_alias_matches_the_cargo_config() {
     let config = include_str!("../../../../../../.cargo/config.toml");
     assert!(
         config.lines().any(|line| line == XTASK_ALIAS),
