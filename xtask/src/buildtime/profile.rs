@@ -106,8 +106,13 @@ fn bool_at(table: &Table, path: &[&str]) -> Option<bool> {
 
 /// What the warm-up's `-v` output says about the crate `package`, whose rustc lines carry
 /// `--crate-name <package with - as _>`. `None` when there is no such line, which means cargo did
-/// not rebuild it. `Some(true)` when every such line passes `-C incremental=`, and `Some(false)`
-/// when one does not.
+/// not rebuild it. `Some(true)` when every such line passes `-C incremental=<dir>`, quoted or not
+/// (see `unquoted`), and `Some(false)` when one does not.
+///
+/// The lines are split on whitespace, so a quoted value with a space in it, such as
+/// `-C 'incremental=/Users/x/My Projects/target/debug/incremental'`, arrives in pieces. Only the
+/// first piece is read, which is why the value is matched by its `incremental=` prefix: an exact
+/// match on the whole value would need the line split the way a shell splits it.
 pub(crate) fn warm_up_incremental(output: &str, package: &str) -> Option<bool> {
     let crate_name = package.replace('-', "_");
     let mut rebuilt = false;
@@ -116,16 +121,34 @@ pub(crate) fn warm_up_incremental(output: &str, package: &str) -> Option<bool> {
         let tokens: Vec<&str> = line.split_whitespace().collect();
         let named = tokens
             .windows(2)
-            .any(|pair| pair[0] == "--crate-name" && pair[1] == crate_name);
+            .any(|pair| pair[0] == "--crate-name" && unquoted(pair[1]) == crate_name);
         if !named {
             continue;
         }
         rebuilt = true;
         incremental &= tokens
             .windows(2)
-            .any(|pair| pair[0] == "-C" && pair[1].starts_with("incremental="));
+            .any(|pair| pair[0] == "-C" && unquoted(pair[1]).starts_with("incremental="));
     }
     rebuilt.then_some(incremental)
+}
+
+/// `token` without one leading `'` or `"`. `cargo -v` prints each argument through
+/// `shell_escape::escape` (cargo-util's `ProcessBuilder`, shell-escape 0.1.5), which quotes it
+/// in one of two ways:
+/// - Unix style, on Unix and on Windows when `MSYSTEM` is set (Git Bash, MSYS2): an argument with
+///   any character outside `A-Za-z0-9-_=/,.+` goes in single quotes, so a Windows path
+///   (`'incremental=D:\a\...'`) and a Unix path with a space, `@` or `~` both do.
+/// - Windows style otherwise (cmd, PowerShell): an argument goes in double quotes only when it
+///   holds a space, tab, newline or `"`.
+///
+/// The closing quote goes too when `token` ends with the same one. A value split at a space keeps
+/// its closing quote on a later piece, so its first piece loses only the opening one.
+fn unquoted(token: &str) -> &str {
+    match token.strip_prefix(['\'', '"']) {
+        Some(rest) => rest.strip_suffix(&token[..1]).unwrap_or(rest),
+        None => token,
+    }
 }
 
 #[cfg(test)]

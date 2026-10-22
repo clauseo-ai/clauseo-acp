@@ -217,7 +217,10 @@ pub(super) fn run(
     on_output: &mut dyn FnMut(Stream, &[u8]),
 ) -> io::Result<Finish> {
     let mut command = cmd.program.command();
-    command.args(&cmd.args).current_dir(root);
+    command
+        .args(&cmd.args)
+        .envs(cmd.env.clone())
+        .current_dir(root);
     Running::start(command, &cmd.to_string(), streams, Limits::of_cmd(cmd))?.finish(on_output)
 }
 
