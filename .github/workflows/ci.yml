@@ -8,8 +8,8 @@
 #   still start but skip every step. A job skipped as a whole would report its check under the
 #   unexpanded name "build (${{ matrix.target }})", and a required check that never reports blocks
 #   the merge.
-# - The mutants job runs only on pull requests, and skips every step, the same way, unless a `.rs`
-#   file changed.
+# - The mutants job has no matrix, so it is skipped as a whole: it runs only on pull requests into
+#   main that change a `.rs` file. A skipped job still reports its check as "mutants".
 # - The Linux job runs the tests with the network cut off, so a test that reaches the network fails.
 # - Every action is pinned by commit SHA, with its tag in a comment.
 
@@ -50,7 +50,6 @@ jobs:
           set -euo pipefail
           if [ "$EVENT" != pull_request ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
-            echo "mutants=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git init -q work
@@ -60,7 +59,8 @@ jobs:
             "+${HEAD_SHA}:refs/ci/head"
           # --no-renames lists both sides of a rename, so a code file renamed to .md or moved under
           # docs/ still runs the builds.
-          code=$(git diff --no-renames --name-only refs/ci/base...refs/ci/head | grep -vE '\.md$|^docs/' || true)
+          changed=$(git diff --no-renames --name-only refs/ci/base...refs/ci/head)
+          code=$(printf '%s\n' "$changed" | grep -vE '\.md$|^docs/' || true)
           if [ -n "$code" ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           else
@@ -68,12 +68,13 @@ jobs:
             echo "build=false" >> "$GITHUB_OUTPUT"
           fi
           # cargo-mutants mutates only the `.rs` lines in the diff, so without one there is nothing
-          # to test.
-          rust=$(git diff --no-renames --name-only refs/ci/base...refs/ci/head | grep -E '\.rs$' || true)
+          # to test. A pull request whose only `.rs` changes are deletions still runs the job, which
+          # pays for its setup and finds no mutant; that is rare enough to leave.
+          rust=$(printf '%s\n' "$changed" | grep -E '\.rs$' || true)
           if [ -n "$rust" ]; then
             echo "mutants=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No .rs file changed: the mutants job skips its steps."
+            echo "No .rs file changed: the mutants job is skipped."
             echo "mutants=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -287,55 +288,56 @@ jobs:
               as_runner cargo nextest run --workspace --profile ci --no-tests=pass
             '
 
-  # cargo-mutants on the lines the pull request changed: it fails on a mutant no test catches, or
-  # when the run passes `cargo xtask mutants`' 20-minute cap. Not on pushes to main: there HEAD is
-  # the merge-base with origin/main, so the diff is empty and `cargo xtask mutants` passes without
-  # testing anything. Linux only: cargo-mutants 27.1.0 does not build with `--locked` on Windows
-  # ARM64 (its lockfile pulls in winapi 0.2.8, which has no aarch64).
+  # cargo-mutants on the lines the pull request changed. It fails on a mutant no test catches, or
+  # when the run reaches `MUTANTS_TIMEOUT` in xtask/src/mutants.rs.
+  # - Pull requests into main only (`github.base_ref` is empty on a push). On a push to main, HEAD
+  #   is the merge-base with origin/main, so the diff is empty and `cargo xtask mutants` would pass
+  #   without testing anything. On a pull request into another branch, `cargo xtask mutants` would
+  #   still diff against origin/main and mutate the parent branch's changes too. Such a pull request
+  #   gets the job at its first push after it is retargeted to main: the `pull_request` event does
+  #   not fire on a retarget.
+  # - Linux only: a second OS would double the runner minutes for the same mutants. cargo-mutants
+  #   also does not build on Windows ARM64 (#41).
   mutants:
     name: mutants
     needs: changes
-    if: github.event_name == 'pull_request'
+    if: github.base_ref == 'main' && needs.changes.outputs.mutants == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    env:
-      MUTANTS: ${{ needs.changes.outputs.mutants }}
+    # Must exceed a cold setup (about 8.5 min: apt, then building cargo-mutants and nextest) plus
+    # `MUTANTS_TIMEOUT` and `MUTANTS_KILL_GRACE` in xtask/src/mutants.rs, so that xtask stops a
+    # long run itself and prints the missed mutants found so far, before GitHub cancels the job.
+    timeout-minutes: 35
     steps:
-      - name: Skip, no .rs file changed
-        if: env.MUTANTS != 'true'
-        run: echo "No .rs file changed; nothing to mutate."
-
       # Full history: `cargo xtask mutants` diffs against the merge-base with origin/main, and a
       # shallow clone has none.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: env.MUTANTS == 'true'
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: Install the Rust toolchain from rust-toolchain.toml
-        if: env.MUTANTS == 'true'
         run: rustup toolchain install
 
       # A mutant in the desktop crate builds and tests it, which links WebKitGTK.
       - name: Install the Linux system packages Tauri needs
-        if: env.MUTANTS == 'true'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends libwebkit2gtk-4.1-dev
 
-      # Its own key, like the other jobs' tool caches: it holds cargo-mutants and nextest.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: env.MUTANTS == 'true'
+      # fast-lane's tools (`setup --binaries`, same image) include cargo-mutants and nextest, so
+      # this job restores its cache and saves none. It builds them itself only when fast-lane has
+      # not yet saved that key, such as on the first run after a change to setup.rs.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/bin
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
-          key: cargo-mutants-nextest-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('xtask/src/setup.rs') }}
+          key: cargo-tools-fast-lane-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('xtask/src/setup.rs') }}
 
+      # Saves the crate registry downloads and xtask's own build. It does not speed up the mutants:
+      # each one builds in a copy of the tree with its own target/.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        if: env.MUTANTS == 'true'
         with:
           key: mutants
           cache-bin: "false"
@@ -343,9 +345,7 @@ jobs:
       # cargo-mutants runs each mutant's tests with nextest (`test_tool` in .cargo/mutants.toml), so
       # both are installed, and no other pinned tool.
       - name: Install cargo-mutants and nextest at their pins
-        if: env.MUTANTS == 'true'
         run: cargo xtask setup --only cargo-mutants --only cargo-nextest
 
       - name: cargo xtask mutants
-        if: env.MUTANTS == 'true'
         run: cargo xtask mutants
