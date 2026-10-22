@@ -305,6 +305,34 @@ fn a_rustc_line_without_incremental_says_the_crate_is_not() {
     );
 }
 
+const RUSTC_DESKTOP_WINDOWS_SINGLE: &str = r"     Running `C:\rust\bin\rustc.exe --crate-name clauseo_desktop --edition=2024 crates\desktop\src\lib.rs --error-format=json --crate-type lib -C embed-bitcode=no -C debuginfo=1 -C metadata=4a2f -C 'incremental=D:\a\clauseo-acp\clauseo-acp\target\debug\incremental' -C strip=debuginfo --out-dir 'D:\a\clauseo-acp\clauseo-acp\target\debug\deps'`";
+const RUSTC_DESKTOP_WINDOWS_DOUBLE: &str = r#"     Running `C:\rust\bin\rustc.exe --crate-name clauseo_desktop --edition=2024 crates\desktop\src\lib.rs --error-format=json --crate-type lib -C embed-bitcode=no -C debuginfo=1 -C metadata=4a2f -C "incremental=D:\a\clauseo-acp\clauseo-acp\target\debug\incremental" -C strip=debuginfo --out-dir "D:\a\clauseo-acp\clauseo-acp\target\debug\deps"`"#;
+const RUSTC_DESKTOP_WINDOWS_OFF: &str = r"     Running `C:\rust\bin\rustc.exe --crate-name clauseo_desktop --edition=2024 crates\desktop\src\lib.rs --error-format=json --crate-type lib -C embed-bitcode=no -C debuginfo=1 -C metadata=4a2f -C 'link-arg=/DEBUG' -C strip=debuginfo --out-dir 'D:\a\clauseo-acp\clauseo-acp\target\debug\deps'`";
+
+#[test]
+fn a_windows_rustc_line_with_a_single_quoted_incremental_says_the_crate_is_incremental() {
+    assert_eq!(
+        warm_up_incremental(RUSTC_DESKTOP_WINDOWS_SINGLE, "clauseo-desktop"),
+        Some(true)
+    );
+}
+
+#[test]
+fn a_windows_rustc_line_with_a_double_quoted_incremental_says_the_crate_is_incremental() {
+    assert_eq!(
+        warm_up_incremental(RUSTC_DESKTOP_WINDOWS_DOUBLE, "clauseo-desktop"),
+        Some(true)
+    );
+}
+
+#[test]
+fn a_quoted_windows_rustc_line_without_incremental_says_the_crate_is_not() {
+    assert_eq!(
+        warm_up_incremental(RUSTC_DESKTOP_WINDOWS_OFF, "clauseo-desktop"),
+        Some(false)
+    );
+}
+
 #[test]
 fn no_rustc_line_for_the_crate_means_it_was_not_rebuilt() {
     let output = "    Fresh clauseo-desktop v0.1.0\n";
