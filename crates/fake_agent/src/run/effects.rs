@@ -30,7 +30,7 @@ pub(super) fn file_step(cwd: &str, kind: &StepKind) -> Result<(), String> {
         StepKind::WriteFile { path, content } => {
             let full = cwd.join(path);
             make_parent(&full)
-                .and_then(|()| std::fs::write(&full, content))
+                .and_then(|()| crate::write::write(&full, content))
                 .map_err(|e| format!("write_file {path}: {e}"))
         }
         StepKind::DeleteFile { path } => {
@@ -38,7 +38,7 @@ pub(super) fn file_step(cwd: &str, kind: &StepKind) -> Result<(), String> {
             if !full.is_file() {
                 return Err(format!("no such file {path}"));
             }
-            std::fs::remove_file(&full).map_err(|e| format!("delete_file {path}: {e}"))
+            crate::write::remove_file(&full).map_err(|e| format!("delete_file {path}: {e}"))
         }
         StepKind::MoveFile { from, to } => {
             let source = cwd.join(from);
@@ -47,7 +47,7 @@ pub(super) fn file_step(cwd: &str, kind: &StepKind) -> Result<(), String> {
             }
             let target = cwd.join(to);
             make_parent(&target)
-                .and_then(|()| std::fs::rename(&source, &target))
+                .and_then(|()| crate::write::rename(&source, &target))
                 .map_err(|e| format!("move_file {from} to {to}: {e}"))
         }
         _ => Ok(()),
@@ -56,7 +56,7 @@ pub(super) fn file_step(cwd: &str, kind: &StepKind) -> Result<(), String> {
 
 fn make_parent(path: &Path) -> std::io::Result<()> {
     match path.parent() {
-        Some(parent) => std::fs::create_dir_all(parent),
+        Some(parent) => crate::write::create_dir_all(parent),
         None => Ok(()),
     }
 }
@@ -65,7 +65,7 @@ fn make_parent(path: &Path) -> std::io::Result<()> {
 /// process's working directory), then writes `fake_agent: child <pid>` to stderr.
 pub(super) fn spawn_child(pid_file: &str) -> Result<(), String> {
     let pid = start_hold().map_err(|e| format!("spawn_child: {e}"))?;
-    std::fs::write(pid_file, format!("{pid}\n"))
+    crate::write::write(pid_file, format!("{pid}\n"))
         .map_err(|e| format!("spawn_child: write {pid_file}: {e}"))?;
     write_stderr(&format!("fake_agent: child {pid}\n"))
         .map_err(|e| format!("write to stderr failed: {e}"))

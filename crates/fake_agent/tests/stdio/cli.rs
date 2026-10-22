@@ -5,6 +5,7 @@ use std::path::Path;
 use clauseo_fake_agent::{SCENARIOS, Scenario, bin_path, scenario_path};
 
 use crate::harness::{Agent, Scratch};
+use crate::write;
 
 fn scenarios_dir() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/scenarios"))
@@ -100,13 +101,13 @@ fn edit_file_kind_fails_validation_naming_session_update() {
         .unwrap()
         + 1;
     let planted = source.replacen(r#""kind":"edit""#, r#""kind":"edit_file""#, 1);
-    std::fs::create_dir(dir.path().join("common")).unwrap();
-    std::fs::copy(
+    write::create_dir(dir.path().join("common")).unwrap();
+    write::copy(
         scenarios_dir().join("common/handshake.jsonl"),
         dir.path().join("common/handshake.jsonl"),
     )
     .unwrap();
-    std::fs::write(dir.path().join("files-multi-turn.jsonl"), planted).unwrap();
+    write::write(dir.path().join("files-multi-turn.jsonl"), planted).unwrap();
     let finished = Agent::start_args(&["--check", "."], dir.path()).finish();
     assert_eq!(finished.status.code(), Some(2));
     assert_eq!(finished.stdout, "");

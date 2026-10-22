@@ -5,6 +5,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::harness::{Agent, Scratch, prompt, result};
+use crate::write;
 
 /// Reads one turn's updates up to the prompt result for request `id`, and returns the updates.
 fn turn(agent: &mut Agent, id: u64) -> Vec<Value> {
@@ -57,7 +58,7 @@ const MATTER: &str = "Matter folder";
 fn files_multi_turn_changes_cwd() {
     let root = Scratch::new("files_multi_turn_changes_cwd");
     let matter = root.path().join(MATTER);
-    std::fs::create_dir(&matter).unwrap();
+    write::create_dir(&matter).unwrap();
     let cwd = matter.to_str().unwrap().to_owned();
     let at = |path: &str| format!("{cwd}/{path}");
     let mut agent = Agent::start("files-multi-turn", root.path());
@@ -100,12 +101,12 @@ fn files_multi_turn_changes_cwd() {
 fn delete_missing_file_exits_3() {
     let root = Scratch::new("delete_missing_file_exits_3");
     let matter = root.path().join(MATTER);
-    std::fs::create_dir(&matter).unwrap();
+    write::create_dir(&matter).unwrap();
     let mut agent = Agent::start("files-multi-turn", root.path());
     agent.handshake(matter.to_str().unwrap());
     turn(&mut agent, 2);
     turn(&mut agent, 3);
-    std::fs::remove_file(matter.join("notes/a.txt")).unwrap();
+    write::remove_file(matter.join("notes/a.txt")).unwrap();
     agent.send(&prompt(4, "Next"));
     let source =
         std::fs::read_to_string(clauseo_fake_agent::scenario_path("files-multi-turn")).unwrap();
