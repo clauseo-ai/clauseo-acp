@@ -31,3 +31,6 @@ mod stream;
 #[cfg(test)]
 #[path = "stdio/turns.rs"]
 mod turns;
+#[cfg(test)]
+#[path = "stdio/write.rs"]
+mod write;

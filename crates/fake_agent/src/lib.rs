@@ -49,6 +49,7 @@ mod pattern;
 mod run;
 mod scenario;
 mod validate;
+mod write;
 
 pub use bundled::{SCENARIOS, bin_path, scenario_path};
 pub use cli::cli;

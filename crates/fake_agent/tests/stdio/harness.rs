@@ -17,6 +17,8 @@ use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitSta
 
 use serde_json::{Value, json};
 
+use crate::write;
+
 /// A folder under the system temp folder, unique per test and process, removed on drop.
 pub(crate) struct Scratch {
     path: PathBuf,
@@ -26,9 +28,9 @@ impl Scratch {
     pub(crate) fn new(test: &str) -> Self {
         let path = std::env::temp_dir().join(format!("fake_agent-{test}-{}", std::process::id()));
         if path.exists() {
-            std::fs::remove_dir_all(&path).unwrap();
+            write::remove_dir_all(&path).unwrap();
         }
-        std::fs::create_dir_all(&path).unwrap();
+        write::create_dir_all(&path).unwrap();
         Self { path }
     }
 
@@ -44,7 +46,7 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        if let Err(error) = std::fs::remove_dir_all(&self.path) {
+        if let Err(error) = write::remove_dir_all(&self.path) {
             // A test that failed may leave a file open on Windows; say so rather than panic.
             eprintln!("could not remove {}: {error}", self.path.display());
         }
