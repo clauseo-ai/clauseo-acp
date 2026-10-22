@@ -3,6 +3,10 @@ import { defineConfig } from "@playwright/test";
 /**
  * The real app on Windows, driven over CDP (app-windows/fixture.ts). No browser is downloaded or
  * launched: the tests attach to the app's own WebView2.
+ *
+ * The file name picks the project: `*.test.ts` is a pure unit test that runs on any OS,
+ * `*.spec.ts` drives the real app and runs on Windows only. The unit tests use Playwright's runner
+ * rather than ui/app's vitest, so this package needs no second test dependency.
  */
 export default defineConfig({
   testDir: "app-windows",
