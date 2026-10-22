@@ -182,7 +182,10 @@ pub(crate) struct Cmd {
     /// How long its tree has between SIGTERM and SIGKILL on Unix, at its limit and for what is
     /// left of it when it exits: `KILL_GRACE` unless `kill_grace` set another.
     pub kill_grace: Duration,
-    /// Variables set for it on top of the environment it inherits from xtask, in order.
+    /// Variables set for it on top of the environment it inherits from xtask, in order. Tests only
+    /// (the setter is `#[cfg(test)]`): `Display` prints each `NAME=value` verbatim into failure
+    /// messages and "run `{cmd}`" fixes, so it must never hold a secret, and that form does not run
+    /// in cmd or PowerShell.
     pub env: Vec<(String, String)>,
 }
 
