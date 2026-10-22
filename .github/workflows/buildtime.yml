@@ -13,6 +13,8 @@ name: buildtime
 
 on:
   workflow_dispatch:
+  push:
+    branches: [S3-g5-build-numbers]
 
 permissions:
   contents: read
