@@ -240,9 +240,17 @@ jobs:
         if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux'
         run: cargo nextest run --workspace --profile ci --no-tests=pass
 
+      # Twice: tauri's generate_context! writes each compressed asset into the crate's OUT_DIR
+      # while that crate compiles, and only if the file is missing (tauri-codegen 2.7.3,
+      # embedded_assets.rs:355). On a fresh OUT_DIR cargo then finds the asset newer than the start
+      # of that compile and marks the unit stale, even when nothing else builds beside it. The
+      # second pass rebuilds it with every asset in place, writes nothing, and leaves the offline
+      # run nothing to build.
       - name: Build the tests
         if: env.BUILD == 'true' && runner.os == 'Linux'
-        run: cargo nextest run --workspace --profile ci --no-tests=pass --no-run
+        run: |
+          cargo nextest run --workspace --profile ci --no-tests=pass --no-run
+          cargo nextest run --workspace --profile ci --no-tests=pass --no-run
 
       # A new network namespace with only loopback, entered as root and then dropped back to the
       # runner user, without its supplementary groups (docker's socket would reach the network) and
