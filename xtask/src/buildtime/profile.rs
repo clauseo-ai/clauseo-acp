@@ -121,9 +121,10 @@ pub(crate) fn warm_up_incremental(output: &str, package: &str) -> Option<bool> {
             continue;
         }
         rebuilt = true;
-        incremental &= tokens
-            .windows(2)
-            .any(|pair| pair[0] == "-C" && pair[1].starts_with("incremental="));
+        incremental &= tokens.windows(2).any(|pair| {
+            let value = pair[1].strip_prefix(['\'', '"']).unwrap_or(pair[1]);
+            pair[0] == "-C" && value.starts_with("incremental=")
+        });
     }
     rebuilt.then_some(incremental)
 }
