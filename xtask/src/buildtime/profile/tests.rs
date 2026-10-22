@@ -413,14 +413,26 @@ const PROBE: Probe = Probe {
 };
 
 /// `measure`'s warm-up of the probe crate in `root` with the real cargo, run with
-/// `CARGO_INCREMENTAL=<incremental>` as the buildtime workflow sets it (CI's own jobs set `0`),
+/// `CARGO_INCREMENTAL=<incremental>` as the buildtime workflow sets it (CI's own jobs set `0`)
+/// and its target dir pinned to `<root>/target`,
 /// and CI passed as set, so a build read as not incremental fails instead of warning. Returns the
 /// result and cargo's output.
 fn real_warm_up(root: &Path, incremental: &str) -> (Result<Samples, Failure>, String) {
     let marker = marker::find(root, "").expect("the probe crate has a marker");
+    let target = root.join("target");
+    let target = target.to_str().expect("the scratch path is UTF-8");
+    let build_incremental = if incremental == "1" { "true" } else { "false" };
     let mut output = String::new();
     let mut runner = |cmd: &Cmd| -> io::Result<Ran> {
-        let cmd = cmd.clone().env("CARGO_INCREMENTAL", incremental);
+        // The test sets its own conditions, whatever the caller's environment says: the build
+        // stays under `PROBE_DIR`, so cargo quotes its paths and none of it lands in xtask's own
+        // target dir, and incremental is on or off as `incremental` says.
+        let cmd = cmd
+            .clone()
+            .env("CARGO_TARGET_DIR", target)
+            .env("CARGO_BUILD_TARGET_DIR", target)
+            .env("CARGO_INCREMENTAL", incremental)
+            .env("CARGO_BUILD_INCREMENTAL", build_incremental);
         let ran = process::capture(&cmd, root, &mut |_| {})?;
         output.push_str(&ran.stdout);
         Ok(ran)
@@ -453,6 +465,27 @@ fn a_real_cargo_warm_up_under_a_quoted_path_is_read_as_incremental() {
         }),
         "the warm-up's output:\n{output}"
     );
+    assert!(
+        quoted_incremental_in_probe_dir(&output),
+        "cargo did not print the probe's -C incremental= path quoted and under {PROBE_DIR:?}, so \
+         this test no longer exercises the quoting; the warm-up's output:\n{output}"
+    );
+}
+
+/// Whether the probe's rustc line in `output` passes `-C 'incremental=<dir>'` or
+/// `-C "incremental=<dir>"` with `<dir>` under `PROBE_DIR`.
+fn quoted_incremental_in_probe_dir(output: &str) -> bool {
+    output
+        .lines()
+        .filter(|line| line.contains("--crate-name buildtime_probe"))
+        .any(|line| {
+            ['\'', '"'].into_iter().any(|quote| {
+                let flag = format!("-C {quote}incremental=");
+                line.split_once(&flag)
+                    .and_then(|(_, rest)| rest.split(quote).next())
+                    .is_some_and(|dir| dir.contains(PROBE_DIR))
+            })
+        })
 }
 
 #[test]
