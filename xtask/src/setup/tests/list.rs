@@ -3,6 +3,7 @@
 //! takes no other flag.
 
 use super::*;
+use crate::setup::list::list_with;
 use clap::Parser;
 
 /// Whether `list_with` passed for `pins` in `format`, and what it printed on stdout and stderr.
