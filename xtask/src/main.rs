@@ -1,5 +1,5 @@
 //! Workspace automation: `cargo xtask check [--quick]`,
-//! `cargo xtask setup [--binaries] [--only <tool>]...`,
+//! `cargo xtask setup [--binaries] [--only <tool>]... | --list`,
 //! `cargo xtask buildtime [rust|web|all] [--runs N] [--json]` and `cargo xtask mutants`.
 //!
 //! For people and agents:
@@ -11,7 +11,8 @@
 //! - Pin a tool: one `Tool` in `setup::TOOLS` for a cargo crate, else one `Binary` in
 //!   `setup::BINARIES`.
 //! - `setup` prints a `Binary`'s install command; `setup --binaries` also runs it. `setup --only
-//!   <tool>`, repeatable, sets up only the named `Tool`s and `Binary`s.
+//!   <tool>`, repeatable, sets up only the named `Tool`s and `Binary`s. `setup --list` prints
+//!   every pin in the tab-separated format the `setup.rs` module doc writes out.
 //! - Budgets live in `budgets.toml` at the repo root; `budgets.rs` reads them for the check and for
 //!   `buildtime`.
 //! - Failures print as `path:line: what`, then `    fix: ...`. A failure with no location prints
@@ -72,7 +73,7 @@ enum Commands {
     },
     /// Install the pinned cargo tools (`cargo install --locked <tool> --version <version>`), print
     /// how to install gitleaks and lefthook, and check their versions against the pins. `--only`
-    /// narrows all of this to the named tools.
+    /// narrows all of this to the named tools; `--list` does none of it and prints the pins.
     Setup {
         /// Also install the selected binaries (gitleaks and lefthook unless `--only` narrows them)
         /// where the version check fails, then check again.
@@ -86,6 +87,15 @@ enum Commands {
         /// `gitleaks`, ...). Repeat it to name more. An unknown name fails before any install.
         #[arg(long, value_name = "TOOL")]
         only: Vec<String>,
+        /// Print every pin and install and check nothing, one line each, fields separated by tabs.
+        ///
+        /// `tool<TAB><name><TAB><version>` for each pinned cargo tool, then
+        /// `binary<TAB><name><TAB><version><TAB><os><TAB><arch><TAB><sha256>` for each pinned
+        /// release asset of gitleaks and lefthook (`os` and `arch` as in Rust's
+        /// `std::env::consts`, `sha256` in lowercase hex), including each binary's `windows`
+        /// `x86_64` asset, which `--binaries` does not download (it runs winget there).
+        #[arg(long, conflicts_with_all = ["binaries", "only"])]
+        list: bool,
     },
     /// Time the build loop against `budgets.toml`: the Rust half, the web half, or both (the
     /// default).
@@ -132,7 +142,8 @@ fn main() -> ExitCode {
             };
             check::run(&ctx, quick, ci, &mut exec, &mut process::run_quiet)
         }
-        Commands::Setup { binaries, only } => setup::run(
+        Commands::Setup { list: true, .. } => setup::list(&mut output::Printer::stdout()),
+        Commands::Setup { binaries, only, .. } => setup::run(
             &workspace::workspace_root(),
             setup::Selection::of(&only),
             binaries,

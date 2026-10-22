@@ -145,15 +145,24 @@ fn the_cargo_tools_are_pinned() {
     assert_eq!(names.len(), TOOLS.len(), "a tool is pinned twice");
 }
 
+/// Each binary pins the asset of every macOS and Linux platform, which `--binaries` downloads, and
+/// of Windows x86-64, which `--list` prints for scripts that download it there.
 #[test]
-fn each_binary_pins_one_sha256_per_unix_platform() {
+fn each_binary_pins_one_sha256_per_unix_platform_and_windows_x86_64() {
     for b in BINARIES {
         let pinned: Vec<(&str, &str)> = b.sha256.iter().map(|p| (p.os, p.arch)).collect();
-        let unix: Vec<(&str, &str)> = PLATFORMS
+        let mut expected: Vec<(&str, &str)> = PLATFORMS
             .into_iter()
             .filter(|(os, _)| *os != "windows")
             .collect();
-        assert_eq!(pinned, unix, "{}", b.name);
+        expected.push(("windows", "x86_64"));
+        assert_eq!(pinned, expected, "{}", b.name);
+    }
+}
+
+#[test]
+fn each_pinned_sha256_is_64_lowercase_hex() {
+    for b in BINARIES {
         for pin in b.sha256 {
             assert_eq!(pin.sha256.len(), 64, "{} {}-{}", b.name, pin.os, pin.arch);
             assert!(
@@ -415,6 +424,7 @@ fn names_in(dir: &Path) -> Vec<String> {
     names
 }
 
+mod list;
 mod only;
 mod run;
 mod sweep;
