@@ -17,8 +17,9 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   forbidOnly: true,
-  // Setup (60 s), the settle wait (30 s) and the snapshots and taskkill (30 s each at most) fit.
-  timeout: 180_000,
+  // Fits the worst case: setup 60 s, the settle wait 30 s plus one snapshot, the snapshots (30 s,
+  // or 90 s with the working set) and taskkill 30 s.
+  timeout: 300_000,
   expect: { timeout: 30_000 },
   reporter: [["list"]],
 });

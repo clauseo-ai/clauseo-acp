@@ -13,7 +13,10 @@ export interface TreeProcess {
   commandLine: string | null;
   /** Win32_Process.PrivatePageCount: committed private bytes (Task Manager's "Commit size"). */
   privateBytes: number;
-  /** The WorkingSetPrivate counter (Task Manager's "Memory"); null if the counter is missing. */
+  /**
+   * The WorkingSetPrivate counter (Task Manager's "Memory"); null if the snapshot did not ask for
+   * it or the counter is missing.
+   */
   privateWorkingSetBytes: number | null;
 }
 
@@ -36,17 +39,23 @@ export interface TreeMemory {
   privateWorkingSetBytes: number | null;
 }
 
-/** How long PowerShell may take for one snapshot. */
+/** How long PowerShell may take for a snapshot without the working set counter. */
 const SNAPSHOT_TIMEOUT_MS = 30_000;
+/**
+ * How long it may take with the counter. The per-process counters are slow: on windows-11-arm one
+ * query took over 10 s, and the first on a fresh runner over 30 s.
+ */
+const WORKING_SET_TIMEOUT_MS = 90_000;
 
-const QUERY = [
-  "$ws = @{}",
-  "Get-CimInstance Win32_PerfRawData_PerfProc_Process | ForEach-Object { $ws[[string]$_.IDProcess] = $_.WorkingSetPrivate }",
+/** Fills `$ws` with each PID's private working set. */
+const WORKING_SETS =
+  "Get-CimInstance Win32_PerfRawData_PerfProc_Process | ForEach-Object { $ws[[string]$_.IDProcess] = $_.WorkingSetPrivate }";
+
+const PROCESSES =
   "Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId," +
-    " @{n='CreatedMs';e={ if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() / 10000 } }}," +
-    " Name, CommandLine, PrivatePageCount," +
-    " @{n='WorkingSetPrivate';e={ $ws[[string]$_.ProcessId] }} | ConvertTo-Json -Compress",
-].join("; ");
+  " @{n='CreatedMs';e={ if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() / 10000 } }}," +
+  " Name, CommandLine, PrivatePageCount," +
+  " @{n='WorkingSetPrivate';e={ $ws[[string]$_.ProcessId] }} | ConvertTo-Json -Compress";
 
 const isNumberOrNull = (value: unknown): boolean => typeof value === "number" || value === null;
 
@@ -123,12 +132,23 @@ export function treeMemory(tree: readonly TreeProcess[]): TreeMemory {
   };
 }
 
-/** The tree rooted at `root`, from a fresh snapshot. Throws if `root` is not running. */
-export async function processTree(root: number): Promise<TreeProcess[]> {
+/**
+ * The tree rooted at `root`, from a fresh snapshot, with each process's private working set if
+ * `workingSet` is set. Throws if `root` is not running.
+ */
+export async function processTree(
+  root: number,
+  { workingSet = false }: { workingSet?: boolean } = {},
+): Promise<TreeProcess[]> {
+  const query = ["$ws = @{}", ...(workingSet ? [WORKING_SETS] : []), PROCESSES].join("; ");
   const { stdout } = await promisify(execFile)(
     "powershell",
-    ["-NoProfile", "-NonInteractive", "-Command", QUERY],
-    { encoding: "utf8", timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 },
+    ["-NoProfile", "-NonInteractive", "-Command", query],
+    {
+      encoding: "utf8",
+      timeout: workingSet ? WORKING_SET_TIMEOUT_MS : SNAPSHOT_TIMEOUT_MS,
+      maxBuffer: 64 * 1024 * 1024,
+    },
   );
   const parsed: unknown = JSON.parse(stdout);
   if (!Array.isArray(parsed) || !parsed.every(isRow)) {

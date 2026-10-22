@@ -1,6 +1,6 @@
 // The blank app's numbers, the control for every memory and start-up budget: time to #app-root,
-// memory of the process tree right then and once it has settled, and the page's JS heap and DOM
-// nodes after a forced GC.
+// the process tree's private bytes right then, and once its memory has settled and a GC has run,
+// its private bytes and private working set and the page's JS heap and DOM nodes.
 //
 //   E2E_RESULTS   where to write the numbers as JSON (required)
 
@@ -26,7 +26,7 @@ test("the blank app's numbers", async ({ app }) => {
   // From the start of the process to the first time the harness saw the element, so it includes
   // the CDP connection.
   const msToRoot = performance.now() - app.startedAt;
-  const atRoot = treeMemory(await processTree(app.pid));
+  const atRoot = treeMemory(await processTree(app.pid)).privateBytes;
 
   const idle = await settle(app.pid, SETTLE_MAX_MS);
   const cdp = await app.page.context().newCDPSession(app.page);
@@ -35,7 +35,7 @@ test("the blank app's numbers", async ({ app }) => {
   const { metrics } = await cdp.send("Performance.getMetrics");
   const metric = (name: string): number | null =>
     metrics.find((entry) => entry.name === name)?.value ?? null;
-  const tree = await processTree(app.pid);
+  const tree = await processTree(app.pid, { workingSet: true });
   const memory = treeMemory(tree);
 
   const results = {
@@ -48,10 +48,7 @@ test("the blank app's numbers", async ({ app }) => {
     msToRoot: Math.round(msToRoot),
     settled: idle.settled,
     msToSettle: idle.ms,
-    atRoot: {
-      groupPrivateBytes: atRoot.privateBytes,
-      groupPrivateWorkingSetBytes: atRoot.privateWorkingSetBytes,
-    },
+    atRoot: { groupPrivateBytes: atRoot },
     webview2: app.browser.version(),
     userAgent: await app.page.evaluate(() => navigator.userAgent),
     processes: tree,
