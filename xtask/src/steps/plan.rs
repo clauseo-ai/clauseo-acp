@@ -307,7 +307,7 @@ mod tests {
                 "gitleaks git --redact --no-banner --verbose --no-color --log-opts=abc..HEAD",
                 "pnpm -C ui install --frozen-lockfile",
                 "pnpm -C ui/app run typecheck --pretty false",
-                "pnpm -C ui/app run lint --format unix",
+                "pnpm -C ui/app run lint:types --format unix",
                 "pnpm -C ui run fmt:check",
                 "pnpm -C ui/app run test",
                 "pnpm -C ui/app run build",
@@ -367,7 +367,7 @@ mod tests {
             [
                 "pnpm -C ui install --frozen-lockfile",
                 "pnpm -C ui/app run typecheck --pretty false",
-                "pnpm -C ui/app run lint --format unix",
+                "pnpm -C ui/app run lint:types --format unix",
                 "pnpm -C ui run fmt:check",
                 "pnpm -C ui/app run test",
                 "pnpm -C ui/app run build",
