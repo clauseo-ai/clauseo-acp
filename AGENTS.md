@@ -22,11 +22,12 @@ this. Use the words in `GLOSSARY.md` exactly.
 
 <!-- Name only commands that exist. A check fails on any `cargo xtask ...` here that does not parse. -->
 - `cargo xtask check --quick`: changed crates only. Run it before every report.
-- `cargo xtask check`: exactly CI's fast lane plus this OS's tests. Run xtask from the repo root.
+- `cargo xtask check`: exactly CI's fast lane plus this OS's tests.
 - `cargo xtask buildtime`: build-loop timings against `budgets.toml`.
 - `cargo xtask setup`: installs the pinned cargo tools and checks gitleaks and lefthook.
 - `cargo xtask setup --binaries`: also installs the binaries `--only` names (repeatable; all if none).
 - `pnpm -C ui install --frozen-lockfile`: frontend dependencies.
+- Run every xtask command from the repo root (why: the alias in `.cargo/config.toml`).
 
 ## Map
 
@@ -95,7 +96,6 @@ this. Use the words in `GLOSSARY.md` exactly.
 
 - One worktree per task, on its own branch. Never share `target/` between worktrees.
 - Commit with `git commit -s`.
-- Run `cargo xtask check --quick` before you report.
 - Report what you verified, with the command and its result, and what you did not verify.
 - In the pull request, list every difference from the brief (or the issue, when there is no brief)
   under Deviations and every code path you never ran (Windows, SIGKILL, a missing tool) under Not
