@@ -11,13 +11,13 @@ export interface TreeProcess {
   pid: number;
   name: string;
   commandLine: string | null;
-  /** Win32_Process.PrivatePageCount: committed private bytes (Task Manager's "Commit size"). */
-  privateBytes: number;
   /**
    * The WorkingSetPrivate counter (Task Manager's "Memory"); null if the snapshot did not ask for
    * it or the counter is missing.
    */
   privateWorkingSetBytes: number | null;
+  /** Win32_Process.PrivatePageCount: committed private bytes (Task Manager's "Commit size"). */
+  commitBytes: number;
 }
 
 /** One row of the snapshot, as PowerShell prints it. */
@@ -34,9 +34,9 @@ export interface Row {
 
 /** The tree's memory, summed. */
 export interface TreeMemory {
-  privateBytes: number;
   /** Null if any process lacks the counter. */
   privateWorkingSetBytes: number | null;
+  commitBytes: number;
 }
 
 /**
@@ -96,8 +96,8 @@ export function walkTree(rows: readonly Row[], root: number): TreeProcess[] {
       pid: parent.ProcessId,
       name: parent.Name,
       commandLine: parent.CommandLine,
-      privateBytes: parent.PrivatePageCount,
       privateWorkingSetBytes: parent.WorkingSetPrivate,
+      commitBytes: parent.PrivatePageCount,
     });
     const startedAt = parent.CreatedMs;
     for (const row of rows) {
@@ -125,8 +125,8 @@ export function treeMemory(tree: readonly TreeProcess[]): TreeMemory {
         : privateWorkingSetBytes + entry.privateWorkingSetBytes;
   }
   return {
-    privateBytes: tree.reduce((sum, entry) => sum + entry.privateBytes, 0),
     privateWorkingSetBytes,
+    commitBytes: tree.reduce((sum, entry) => sum + entry.commitBytes, 0),
   };
 }
 
@@ -158,29 +158,38 @@ export async function processTree(
   return walkTree(parsed, root);
 }
 
-/** How many snapshots in a row `settle` needs to agree. */
+/** How many readings in a row `settle` needs to agree. */
 const SETTLE_WINDOW = 3;
-/** How far apart the window's private bytes may be, as a fraction of the largest. */
+/** How far apart the window's readings may be, as a fraction of the largest. */
 const SETTLE_TOLERANCE = 0.01;
 /** The pause between two readings. */
 const SETTLE_INTERVAL_MS = 1_000;
 
+/** One reading of `settle`. */
+export interface Reading {
+  /** Since `settle` started, when the reading came back. */
+  ms: number;
+  commitBytes: number;
+}
+
 /** How `settle` ended. */
 export interface Settled {
-  /** False if the private bytes were still moving when the time ran out. */
+  /** False if the commit was still moving when the time ran out. */
   settled: boolean;
   ms: number;
+  /** Every reading, so a run that never settles shows whether the counter drifts or is noisy. */
+  readings: Reading[];
 }
 
 /**
- * Reads the private bytes of `pids` until the last `SETTLE_WINDOW` readings agree within
+ * Reads the commit of `pids` until the last `SETTLE_WINDOW` readings agree within
  * `SETTLE_TOLERANCE`, or `maxMs` has passed. It reads `Get-Process`, the same counter as
  * `PrivatePageCount` without WMI's cost; a process that has ended counts as nothing.
  */
 export async function settle(pids: readonly number[], maxMs: number): Promise<Settled> {
   const query = `(Get-Process -Id ${pids.join(",")} -ErrorAction SilentlyContinue | Measure-Object PrivateMemorySize64 -Sum).Sum`;
   const start = performance.now();
-  const totals: number[] = [];
+  const readings: Reading[] = [];
   for (;;) {
     const out = (await powershell(query)).trim();
     const total = Number(out);
@@ -189,14 +198,14 @@ export async function settle(pids: readonly number[], maxMs: number): Promise<Se
         `none of processes ${pids.join(", ")} is running, or Get-Process printed ${out}`,
       );
     }
-    totals.push(total);
-    const window = totals.slice(-SETTLE_WINDOW);
+    const ms = Math.round(performance.now() - start);
+    readings.push({ ms, commitBytes: total });
+    const window = readings.slice(-SETTLE_WINDOW).map((reading) => reading.commitBytes);
     const settled =
       window.length === SETTLE_WINDOW &&
       Math.max(...window) - Math.min(...window) <= SETTLE_TOLERANCE * Math.max(...window);
-    const ms = performance.now() - start;
     if (settled || ms > maxMs) {
-      return { settled, ms: Math.round(ms) };
+      return { settled, ms, readings };
     }
     await wait(SETTLE_INTERVAL_MS);
   }

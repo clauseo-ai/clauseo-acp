@@ -20,7 +20,7 @@ pub(super) const PLATFORMS: [(&str, &str); 6] = [
     ("windows", "aarch64"),
 ];
 
-/// The release asset of `b` for a macOS or Linux `os`/`arch`. Each asset's OS and arch spelling
+/// The release asset of `b` for an `os`/`arch` in `PLATFORMS`. Each asset's OS and arch spelling
 /// is written here once.
 pub(super) fn expected_asset(b: &Binary, os: &str, arch: &str) -> String {
     let v = b.version;
@@ -33,6 +33,10 @@ pub(super) fn expected_asset(b: &Binary, os: &str, arch: &str) -> String {
         ("lefthook", "macos", "x86_64") => format!("lefthook_{v}_MacOS_x86_64"),
         ("lefthook", "linux", "aarch64") => format!("lefthook_{v}_Linux_arm64"),
         ("lefthook", "linux", "x86_64") => format!("lefthook_{v}_Linux_x86_64"),
+        ("gitleaks", "windows", "x86_64") => format!("gitleaks_{v}_windows_x64.zip"),
+        ("gitleaks", "windows", "aarch64") => format!("gitleaks_{v}_windows_arm64.zip"),
+        ("lefthook", "windows", "x86_64") => format!("lefthook_{v}_Windows_x86_64.exe"),
+        ("lefthook", "windows", "aarch64") => format!("lefthook_{v}_Windows_arm64.exe"),
         other => panic!("no asset written out for {other:?}"),
     }
 }
@@ -145,15 +149,27 @@ fn the_cargo_tools_are_pinned() {
     assert_eq!(names.len(), TOOLS.len(), "a tool is pinned twice");
 }
 
+/// Each binary pins one sha256 per platform, Windows included, in `PLATFORMS` order, and names
+/// the release asset each belongs to.
 #[test]
-fn each_binary_pins_one_sha256_per_unix_platform() {
+fn each_binary_pins_one_sha256_and_names_one_asset_per_platform() {
     for b in BINARIES {
         let pinned: Vec<(&str, &str)> = b.sha256.iter().map(|p| (p.os, p.arch)).collect();
-        let unix: Vec<(&str, &str)> = PLATFORMS
-            .into_iter()
-            .filter(|(os, _)| *os != "windows")
-            .collect();
-        assert_eq!(pinned, unix, "{}", b.name);
+        assert_eq!(pinned, PLATFORMS, "{}", b.name);
+        for (os, arch) in PLATFORMS {
+            assert_eq!(
+                (b.asset)(os, arch, b.version),
+                Some(expected_asset(b, os, arch)),
+                "{} {os}-{arch}",
+                b.name
+            );
+        }
+    }
+}
+
+#[test]
+fn each_pinned_sha256_is_64_lowercase_hex() {
+    for b in BINARIES {
         for pin in b.sha256 {
             assert_eq!(pin.sha256.len(), 64, "{} {}-{}", b.name, pin.os, pin.arch);
             assert!(
@@ -415,6 +431,7 @@ fn names_in(dir: &Path) -> Vec<String> {
     names
 }
 
+mod list;
 mod only;
 mod run;
 mod sweep;

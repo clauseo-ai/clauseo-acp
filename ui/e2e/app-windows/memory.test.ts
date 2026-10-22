@@ -54,7 +54,7 @@ test("throws when the root is not running", () => {
 
 test("sums the tree, and has no working set total if one process lacks the counter", () => {
   const tree = walkTree([row(10, 4, 100), row(11, 10, 200)], 10);
-  expect(treeMemory(tree)).toEqual({ privateBytes: 21_000, privateWorkingSetBytes: 2_100 });
+  expect(treeMemory(tree)).toEqual({ privateWorkingSetBytes: 2_100, commitBytes: 21_000 });
   const missing = walkTree([row(10, 4, 100), { ...row(11, 10, 200), WorkingSetPrivate: null }], 10);
-  expect(treeMemory(missing)).toEqual({ privateBytes: 21_000, privateWorkingSetBytes: null });
+  expect(treeMemory(missing)).toEqual({ privateWorkingSetBytes: null, commitBytes: 21_000 });
 });

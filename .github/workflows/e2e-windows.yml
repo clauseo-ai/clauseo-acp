@@ -13,14 +13,16 @@
 
 name: e2e-windows
 
-# Pull requests run only when they touch what the app is built from. That is fine while no check
-# of this workflow is required; before one is, drop the filter, for the reason ci.yml gives: a
-# required check that never reports blocks the merge. Every push to main runs, which gives the
-# budgets their baseline and keeps main's Rust cache, the one pull requests can read, warm.
+# Pull requests run only when they touch what the app is built from. That takes all of crates/,
+# not only crates/desktop, so the filter stays right as the desktop crate comes to depend on the
+# others. Filtering is fine while no check of this workflow is required; before one is, drop the
+# filter, for the reason ci.yml gives: a required check that never reports blocks the merge.
+# Every push to main runs, which gives the budgets their baseline and keeps main's Rust cache, the
+# one pull requests can read, warm.
 on:
   pull_request:
     paths:
-      - crates/desktop/**
+      - crates/**
       - ui/**
       - Cargo.toml
       - Cargo.lock

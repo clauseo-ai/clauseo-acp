@@ -1,6 +1,7 @@
 // The blank app's numbers, the control for every memory and start-up budget: time to #app-root,
-// the process tree's private bytes right then, and once its memory has settled and a GC has run,
-// its private bytes and private working set and the page's JS heap and DOM nodes.
+// the process tree's commit right then, and once its memory has settled and a GC has run, its
+// private working set (the headline, which budgets use) and commit and the page's JS heap and DOM
+// nodes.
 //
 //   E2E_RESULTS   where to write the numbers as JSON (required)
 
@@ -11,6 +12,11 @@ import { processTree, settle, treeMemory } from "./memory.ts";
 
 /** How long the tree's memory may take to settle before it is sampled anyway. */
 const SETTLE_MAX_MS = 60_000;
+/**
+ * A start slower than this gets a warning on the run page. The final runs took 1.6 to 2.2 s, and
+ * the wait for #app-root allows 90 s, so without the warning a stall would pass unseen.
+ */
+const SLOW_START_MS = 0;
 
 function resultsPath(): string {
   const path = process.env["E2E_RESULTS"];
@@ -25,10 +31,17 @@ test("the blank app's numbers", async ({ app }) => {
   await expect(app.page.locator("#app-root")).toBeAttached();
   // From the start of the process to the first time the harness saw the element, so it includes
   // the CDP connection.
-  const msToRoot = performance.now() - app.startedAt;
-  // The first snapshot after #app-root; on windows-11-arm WMI takes 10 to 20 s of that.
+  const msToRoot = Math.round(performance.now() - app.startedAt);
+  if (msToRoot > SLOW_START_MS) {
+    const warning = `#app-root took ${msToRoot} ms in ${app.mode} mode, over ${SLOW_START_MS} ms`;
+    test.info().annotations.push({ type: "warning", description: warning });
+    // The job log shows the test's output line by line, so GitHub reads this as a workflow command.
+    process.stdout.write(`::warning title=Slow start::${warning}\n`);
+  }
+  // The first snapshot after #app-root, without the working-set counters: those add seconds (on
+  // windows-11-arm, WMI takes 10 to 20 s of this snapshot already).
   const rootTree = await processTree(app.pid);
-  const atRoot = treeMemory(rootTree).privateBytes;
+  const atRoot = treeMemory(rootTree);
 
   const idle = await settle(
     rootTree.map((entry) => entry.pid),
@@ -45,20 +58,21 @@ test("the blank app's numbers", async ({ app }) => {
 
   const results = {
     mode: app.mode,
+    // Settled, after the GC. The private working set is the group metric budgets use; commit is a
+    // second series, 1.5 to 2.5 times larger on GitHub's runners.
+    groupPrivateWorkingSetBytes: memory.privateWorkingSetBytes,
+    groupCommitBytes: memory.commitBytes,
     jsHeapUsedBytes: metric("JSHeapUsedSize"),
     domNodes: metric("Nodes"),
-    // Settled, after the GC.
-    groupPrivateBytes: memory.privateBytes,
-    groupPrivateWorkingSetBytes: memory.privateWorkingSetBytes,
-    msToRoot: Math.round(msToRoot),
-    settled: idle.settled,
-    msToSettle: idle.ms,
-    atRoot: { groupPrivateBytes: atRoot },
+    msToRoot,
+    atRoot: { groupCommitBytes: atRoot.commitBytes },
+    settle: idle,
     webview2: app.browser.version(),
     userAgent: await app.page.evaluate(() => navigator.userAgent),
     processes: tree,
   };
   writeFileSync(out, `${JSON.stringify(results, null, 2)}\n`);
+  expect(results.groupPrivateWorkingSetBytes).not.toBeNull();
   expect(results.jsHeapUsedBytes).not.toBeNull();
   expect(results.domNodes).not.toBeNull();
 });

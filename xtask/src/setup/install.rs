@@ -46,13 +46,19 @@ pub(crate) enum Install {
     NoRelease,
 }
 
-/// A release asset to download, and the sha256 it must have.
+/// A pinned release asset of a binary, on any OS: where it is, and the sha256 it must have.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct Download {
+pub(crate) struct PinnedAsset {
     /// Its file name.
     pub asset: String,
     pub url: String,
     pub sha256: &'static str,
+}
+
+/// A macOS or Linux release asset to download, and how it holds the binary.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Download {
+    pub pinned: PinnedAsset,
     pub packing: Packing,
 }
 
@@ -61,22 +67,27 @@ pub(crate) fn install_plan(binary: &Binary, os: &str, arch: &str) -> Install {
     if os == "windows" {
         return Install::Winget(winget(binary));
     }
-    let pinned = binary
-        .sha256
-        .iter()
-        .find(|pin| pin.os == os && pin.arch == arch);
-    match ((binary.asset)(os, arch, binary.version), pinned) {
-        (Some(asset), Some(pin)) => Install::Download(Download {
-            url: format!(
-                "https://github.com/{}/releases/download/v{}/{asset}",
-                binary.repo, binary.version
-            ),
-            asset,
-            sha256: pin.sha256,
+    pinned_asset(binary, os, arch).map_or(Install::NoRelease, |pinned| {
+        Install::Download(Download {
+            pinned,
             packing: binary.packing,
-        }),
-        _ => Install::NoRelease,
-    }
+        })
+    })
+}
+
+/// The release asset of `binary` for `os`/`arch` and its pinned sha256; `None` when either is
+/// missing.
+pub(crate) fn pinned_asset(binary: &Binary, os: &str, arch: &str) -> Option<PinnedAsset> {
+    let pin = (binary.sha256.iter()).find(|pin| pin.os == os && pin.arch == arch)?;
+    let asset = (binary.asset)(os, arch, binary.version)?;
+    Some(PinnedAsset {
+        url: format!(
+            "https://github.com/{}/releases/download/v{}/{asset}",
+            binary.repo, binary.version
+        ),
+        asset,
+        sha256: pin.sha256,
+    })
 }
 
 /// What to do to install `binary` on `os`/`arch`: the line `setup` prints, and the fix of a
@@ -87,7 +98,7 @@ pub(crate) fn how_to_install(binary: &Binary, os: &str, arch: &str) -> String {
         Install::Download(download) => format!(
             "run `cargo xtask setup --binaries`, which downloads {} and installs {} only if its \
              sha256 matches the pin",
-            download.url, binary.name
+            download.pinned.url, binary.name
         ),
         Install::NoRelease => format!(
             "download v{} for {os}-{arch} from https://github.com/{}/releases and put it on PATH",
@@ -211,7 +222,7 @@ fn download_into<W: Write>(
 ) -> bool {
     out.note(format!(
         "installing {} {}: downloading {}",
-        binary.name, binary.version, download.url
+        binary.name, binary.version, download.pinned.url
     ));
     let label = format!("{}-{}", binary.name, std::process::id());
     let staging = match staging::fresh_dir(bin, &label) {
@@ -257,7 +268,11 @@ fn fetch_check_place(
     runner: &mut Runner<'_>,
 ) -> Result<(), Failure> {
     let (staging, dir) = (staging, staging.dir());
-    let (name, asset, url) = (binary.name, download.asset.as_str(), download.url.as_str());
+    let (name, asset, url) = (
+        binary.name,
+        download.pinned.asset.as_str(),
+        download.pinned.url.as_str(),
+    );
     let curl = curl_cmd(asset, url);
     let fix = format!(
         "run `{curl}` by hand in an empty directory and check its output, then run cargo xtask \
@@ -272,11 +287,11 @@ fn fetch_check_place(
             retry_fix(bin),
         )
     })?;
-    if found != download.sha256 {
+    if found != download.pinned.sha256 {
         return Err((
             format!(
                 "{url} has sha256 {found}, but the pin is {}, so {name} is not installed",
-                download.sha256
+                download.pinned.sha256
             ),
             "run cargo xtask setup --binaries again. If the sha256 still differs, the file at \
              that URL is not the one the pin was taken from: do not install it by hand"
