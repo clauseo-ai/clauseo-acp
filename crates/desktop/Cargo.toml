@@ -12,6 +12,10 @@ crate-type = ["rlib"]
 [lints]
 workspace = true
 
+[features]
+# Windows only: the webview opens a DevTools port for Playwright (src/e2e.rs). Never on by default.
+e2e = []
+
 [build-dependencies]
 tauri-build.workspace = true
 
