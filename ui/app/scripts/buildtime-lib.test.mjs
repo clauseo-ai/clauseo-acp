@@ -101,12 +101,12 @@ describe("minNode", () => {
     const ui = scratch();
     tree(ui, { "package.json": { engines: { node: ">=20.5.0" } } });
     expect(minNode(ui)).toBe("20.5.0");
-    for (const [engines, shown] of [
-      [{ node: "^20.5.0" }, '"^20.5.0"'],
-      [{ node: ">= 20.5.0" }, '">= 20.5.0"'],
-      [{ node: ">=20.5" }, '">=20.5"'],
-      [{ node: ">=20.5.0 <30" }, '">=20.5.0 <30"'],
-      [{}, "undefined"],
+    for (const { engines, shown } of [
+      { engines: { node: "^20.5.0" }, shown: '"^20.5.0"' },
+      { engines: { node: ">= 20.5.0" }, shown: '">= 20.5.0"' },
+      { engines: { node: ">=20.5" }, shown: '">=20.5"' },
+      { engines: { node: ">=20.5.0 <30" }, shown: '">=20.5.0 <30"' },
+      { engines: {}, shown: "undefined" },
     ]) {
       tree(ui, { "package.json": { engines } });
       expect(() => minNode(ui)).toThrow(
