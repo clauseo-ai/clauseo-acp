@@ -291,7 +291,7 @@ pub(in crate::checks::core_io::tests) fn alias_of_a_command_xtask_runs() -> Repo
         "alias-clippy",
         &[(
             ".cargo/config.toml",
-            "[alias]\nxtask = \"run --quiet --locked --package xtask --\"\nclippy = \"check\"\n",
+            "[alias]\nxtask = \"run --quiet --locked --package xtask --target-dir target/xtask-run --\"\nclippy = \"check\"\n",
         )],
     )
 }
