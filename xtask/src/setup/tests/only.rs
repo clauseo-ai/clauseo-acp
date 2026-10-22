@@ -148,7 +148,14 @@ fn only_several_names_sets_up_each_in_pin_order() {
 fn an_unknown_name_fails_before_anything_runs_and_lists_the_pinned_names() {
     let dir = Scratch::new("setup-only-unknown");
     let tool = fake_tool(Packing::Bare);
-    let picked = names(&["cargo-nextest", "nextest", "gitleak"]);
+    let picked = names(&[
+        "cargo-nextest",
+        "nextest",
+        "faketool",
+        "nope",
+        "gitleak",
+        "nope",
+    ]);
     let (ok, ran, printed) = run_selected(
         &linux(&dir.join("bin"), true),
         &tool,
@@ -158,6 +165,7 @@ fn an_unknown_name_fails_before_anything_runs_and_lists_the_pinned_names() {
     );
     assert!(!ok);
     assert!(ran.is_empty(), "{ran:?}");
+    assert!(!dir.join("bin").exists());
     let valid = "cargo-nextest, cargo-deny, cargo-shear, typos-cli, taplo-cli, cargo-mutants, \
                  faketool";
     let fix = format!(
@@ -168,6 +176,7 @@ fn an_unknown_name_fails_before_anything_runs_and_lists_the_pinned_names() {
         printed,
         format!(
             "setup --only nextest: no pinned tool is named nextest\n{fix}\
+             setup --only nope: no pinned tool is named nope\n{fix}\
              setup --only gitleak: no pinned tool is named gitleak\n{fix}"
         )
     );

@@ -71,9 +71,11 @@ enum Commands {
         quick: bool,
     },
     /// Install the pinned cargo tools (`cargo install --locked <tool> --version <version>`), print
-    /// how to install gitleaks and lefthook, and check their versions against the pins.
+    /// how to install gitleaks and lefthook, and check their versions against the pins. `--only`
+    /// narrows all of this to the named tools.
     Setup {
-        /// Also install gitleaks and lefthook where the version check fails, then check again.
+        /// Also install the selected binaries (gitleaks and lefthook unless `--only` narrows them)
+        /// where the version check fails, then check again.
         ///
         /// A binary already at its pin is left alone. On macOS and Linux the release asset is
         /// moved into `CARGO_HOME/bin` only if its sha256 matches the pin; on Windows winget runs.
