@@ -102,6 +102,8 @@ pub(super) fn register(group: Pid) -> io::Result<()> {
         ));
     };
     leader.groups.insert(group);
+    #[cfg(test)]
+    OWN.with_borrow_mut(|own| own.insert(group));
     let Err(error) = leader.pipe.write_all(format!("+{group}\n").as_bytes()) else {
         return Ok(());
     };
@@ -112,6 +114,8 @@ pub(super) fn register(group: Pid) -> io::Result<()> {
         }
         Err(start_error) => {
             leader.groups.remove(&group);
+            #[cfg(test)]
+            OWN.with_borrow_mut(|own| own.remove(&group));
             // Not the errors' kind: a caller reads `NotFound` as its own program missing.
             Err(io::Error::other(format!(
                 "could not tell xtask's process leader (pid {}) about process group {group} \
@@ -128,6 +132,8 @@ pub(super) fn release(group: Pid) {
     let mut slot = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(leader) = slot.as_mut() {
         leader.groups.remove(&group);
+        #[cfg(test)]
+        OWN.with_borrow_mut(|own| own.remove(&group));
         drop(leader.pipe.write_all(format!("-{group}\n").as_bytes()));
     }
 }
@@ -138,6 +144,23 @@ pub(super) fn current() -> Option<(u32, BTreeSet<Pid>)> {
     let slot = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
     slot.as_ref()
         .map(|leader| (leader.child.id(), leader.groups.clone()))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The groups this thread registered and has not released. A run registers and releases
+    /// its group on the thread that started it (`Running::start`, `finish` and `drop`), so a
+    /// test can tell its own groups from those of the tests beside it: under `cargo test` they
+    /// all share one process, and so one leader.
+    static OWN: std::cell::RefCell<BTreeSet<Pid>> =
+        const { std::cell::RefCell::new(BTreeSet::new()) };
+}
+
+/// The groups the leader holds that this thread registered, for the tests in `tests.rs`.
+#[cfg(test)]
+pub(super) fn own_groups() -> BTreeSet<Pid> {
+    let held = current().map(|(_, groups)| groups).unwrap_or_default();
+    OWN.with_borrow(|own| own.intersection(&held).copied().collect())
 }
 
 /// Starts a leader and tells it `groups`.

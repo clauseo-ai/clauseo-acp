@@ -261,12 +261,12 @@ fn a_timeout_names_the_command_and_its_limit() {
     );
 }
 
-/// The groups the leader was told about and not released, empty when no leader has started.
+/// The groups the leader was told about and not released that this test's thread registered,
+/// empty when no leader has started. Only this test's: under `cargo test` the other tests run
+/// commands through the same leader.
 #[cfg(unix)]
 fn leader_groups() -> std::collections::BTreeSet<nix::unistd::Pid> {
-    leader::current()
-        .map(|(_, groups)| groups)
-        .unwrap_or_default()
+    leader::own_groups()
 }
 
 #[cfg(unix)]
@@ -275,12 +275,14 @@ fn the_restarted_leader_mode_passes_only_when_both_runs_pass_and_says_so_once_re
     let mode = |script: &str| {
         let cmd = Cmd::new(Program::Named("sh"), ["-c", script], TEST_TIMEOUT);
         leader::ensure().expect("the leader starts");
-        let (killed, before) = leader::current().expect("a leader runs");
+        let (killed, _) = leader::current().expect("a leader runs");
+        let before = leader_groups();
         assert!(before.is_empty(), "no group is registered yet: {before:?}");
         let mut registered = 0;
         let passed = test_mode::restarted_leader(&cmd, script, &mut || {
             registered += 1;
-            let (now, groups) = leader::current().expect("a leader runs");
+            let (now, _) = leader::current().expect("a leader runs");
+            let groups = leader_groups();
             assert_ne!(
                 now, killed,
                 "the killed leader was replaced before the line"
