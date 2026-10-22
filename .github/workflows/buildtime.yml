@@ -2,6 +2,8 @@
 # `cargo xtask buildtime all`, the fresh-worktree recipe step by step, and on Windows x64 the edit
 # loop again with rust-lld. Shared runners report; they never gate, so this runs on demand only.
 #
+# - Steps are timed with Perl's Time::HiRes: the macOS runner's bash is 3.2, which has no
+#   EPOCHREALTIME, and Perl ships with macOS and Git for Windows.
 # - No version is written here, as in ci.yml: Rust comes from rust-toolchain.toml, pnpm from
 #   "packageManager" and Node from "engines.node" in ui/package.json.
 # - No build cache: the cold build must start from an empty target/.
@@ -63,8 +65,8 @@ jobs:
         run: |
           echo "runner $MACHINE: $(uname -sm), $(nproc 2>/dev/null || sysctl -n hw.ncpu) CPUs, bash $BASH_VERSION"
           rustc -V
-          echo "pnpm $(pnpm -v), node $(node -v)"
-          : "${EPOCHREALTIME:?the step timings need bash 5 or newer for EPOCHREALTIME}"
+          echo "pnpm $(pnpm -v), node $(node -v), $(perl -v | grep -m1 'This is')"
+          mkdir -p "$OUT"
 
       # Downloads stay out of the timings: the crates are fetched and the ui workspace installed first.
       - name: Fetch the crates and install the ui workspace
@@ -74,11 +76,23 @@ jobs:
 
       - name: Cold build of the app after cargo clean
         run: |
-          mkdir -p "$OUT"
+          now() { perl -MTime::HiRes=time -e 'printf "%.6f\n", time'; }
           cargo clean
-          start=$EPOCHREALTIME
+          start=$(now)
           cargo build -p clauseo-desktop
-          awk -v a="$start" -v b="$EPOCHREALTIME" 'BEGIN { printf "cold_build_desktop\t%.3f\n", b - a }' >> "$OUT/steps.tsv"
+          awk -v a="$start" -v b="$(now)" 'BEGIN { printf "cold_build_desktop\t%.3f\n", b - a }' >> "$OUT/steps.tsv"
+
+      - name: "scratch: how cargo -v prints the rustc lines for clauseo_desktop"
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        run: |
+          touch crates/desktop/src/lib.rs
+          cargo build -v -p clauseo-desktop 2> verbose.log
+          echo "lines naming the crate: $(grep -c -- 'clauseo_desktop' verbose.log)"
+          grep -- 'clauseo_desktop' verbose.log | while IFS= read -r line; do
+            echo "---- length ${#line}"
+            echo "${line:0:300}"
+            echo "$line" | grep -o -E '.{0,30}(crate-name|incremental|@).{0,80}' | head -8 || true
+          done
 
       - name: cargo xtask buildtime all
         run: cargo xtask buildtime all --runs 5 --json > "$OUT/buildtime-$MACHINE.json"
@@ -100,11 +114,13 @@ jobs:
           cargo build -p clauseo-desktop
           test -z "$(git status --porcelain --untracked-files=no)"
           new=../buildtime-worktree
+          now() { perl -MTime::HiRes=time -e 'printf "%.6f\n", time'; }
           step() {
-            local name=$1 start=$EPOCHREALTIME
+            local name=$1 start
+            start=$(now)
             shift
             "$@"
-            awk -v n="$name" -v a="$start" -v b="$EPOCHREALTIME" \
+            awk -v n="$name" -v a="$start" -v b="$(now)" \
               'BEGIN { printf "worktree_%s\t%.3f\n", n, b - a }' >> "$OUT/steps.tsv"
           }
           # Older than every artifact, so only the app crate rebuilds (tauri-build's absolute paths).
