@@ -10,13 +10,14 @@ permissions:
 
 jobs:
   hmr:
-    name: hmr (${{ matrix.runner }})
+    name: hmr (${{ matrix.runner }}, ${{ matrix.attempt }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         runner: [windows-2025, windows-11-arm]
+        attempt: [1, 2]
     defaults:
       run:
         shell: bash
