@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "playwright test",
+    "test": "playwright test --project=app",
+    "test:unit": "playwright test --project=unit",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
