@@ -1,6 +1,12 @@
 //! Tests for `profile.rs`: the static reading and its order, and the warm-up reader.
 
 use super::*;
+use crate::buildtime::Probe;
+use crate::buildtime::marker;
+use crate::buildtime::probe::{Samples, measure};
+use crate::process::{self, Cmd, Ran};
+use crate::scratch::Scratch;
+use std::io;
 
 const CONFIG_DEV_OFF: &str = "[profile.dev]\nincremental = false\n";
 const MANIFEST_ON: &str = "[profile.dev]\ndebug = 1\nincremental = true  # on\n";
@@ -305,31 +311,122 @@ fn a_rustc_line_without_incremental_says_the_crate_is_not() {
     );
 }
 
-const RUSTC_DESKTOP_WINDOWS_SINGLE: &str = r"     Running `C:\rust\bin\rustc.exe --crate-name clauseo_desktop --edition=2024 crates\desktop\src\lib.rs --error-format=json --crate-type lib -C embed-bitcode=no -C debuginfo=1 -C metadata=4a2f -C 'incremental=D:\a\clauseo-acp\clauseo-acp\target\debug\incremental' -C strip=debuginfo --out-dir 'D:\a\clauseo-acp\clauseo-acp\target\debug\deps'`";
-const RUSTC_DESKTOP_WINDOWS_DOUBLE: &str = r#"     Running `C:\rust\bin\rustc.exe --crate-name clauseo_desktop --edition=2024 crates\desktop\src\lib.rs --error-format=json --crate-type lib -C embed-bitcode=no -C debuginfo=1 -C metadata=4a2f -C "incremental=D:\a\clauseo-acp\clauseo-acp\target\debug\incremental" -C strip=debuginfo --out-dir "D:\a\clauseo-acp\clauseo-acp\target\debug\deps"`"#;
-const RUSTC_DESKTOP_WINDOWS_OFF: &str = r"     Running `C:\rust\bin\rustc.exe --crate-name clauseo_desktop --edition=2024 crates\desktop\src\lib.rs --error-format=json --crate-type lib -C embed-bitcode=no -C debuginfo=1 -C metadata=4a2f -C 'link-arg=/DEBUG' -C strip=debuginfo --out-dir 'D:\a\clauseo-acp\clauseo-acp\target\debug\deps'`";
+/// A rustc line for clauseo_desktop as `cargo -v` prints it, with `flag` among its arguments.
+fn rustc_line(flag: &str) -> String {
+    format!(
+        "     Running `/rust/bin/rustc --crate-name clauseo_desktop --edition=2024 crates/desktop/src/lib.rs --crate-type lib -C embed-bitcode=no {flag} -C metadata=4a2f --out-dir /ws/target/debug/deps`"
+    )
+}
 
+/// How each quoting form of the `-C` value reads (see `unquoted` for when cargo quotes).
 #[test]
-fn a_windows_rustc_line_with_a_single_quoted_incremental_says_the_crate_is_incremental() {
-    assert_eq!(
-        warm_up_incremental(RUSTC_DESKTOP_WINDOWS_SINGLE, "clauseo-desktop"),
-        Some(true)
-    );
+fn every_quoting_form_of_the_incremental_flag_is_read() {
+    let cases: [(&str, String, Option<bool>); 8] = [
+        (
+            "Unix, unquoted",
+            rustc_line("-C incremental=/ws/target/debug/incremental"),
+            Some(true),
+        ),
+        (
+            "Unix, single-quoted path with a space",
+            rustc_line("-C 'incremental=/Users/x/My Projects/target/debug/incremental'"),
+            Some(true),
+        ),
+        (
+            "native Windows, unquoted",
+            rustc_line(r"-C incremental=D:\a\clauseo-acp\clauseo-acp\target\debug\incremental"),
+            Some(true),
+        ),
+        (
+            "native Windows, double-quoted path with a space",
+            rustc_line(r#"-C "incremental=C:\Users\John Doe\proj\target\debug\incremental""#),
+            Some(true),
+        ),
+        (
+            "Git Bash, single-quoted, written from shell-escape's rules",
+            rustc_line(r"-C 'incremental=D:\a\clauseo-acp\clauseo-acp\target\debug\incremental'"),
+            Some(true),
+        ),
+        (
+            "no -C incremental",
+            rustc_line("-C debuginfo=1"),
+            Some(false),
+        ),
+        (
+            "quoted, no incremental flag",
+            rustc_line(r"-C 'link-arg=/DEBUG'"),
+            Some(false),
+        ),
+        (
+            "quoted link-arg holding incremental=",
+            rustc_line("-C 'link-arg=incremental=x'"),
+            Some(false),
+        ),
+    ];
+    for (case, line, expected) in cases {
+        assert_eq!(
+            warm_up_incremental(&line, "clauseo-desktop"),
+            expected,
+            "{case}: {line}"
+        );
+    }
 }
 
 #[test]
-fn a_windows_rustc_line_with_a_double_quoted_incremental_says_the_crate_is_incremental() {
-    assert_eq!(
-        warm_up_incremental(RUSTC_DESKTOP_WINDOWS_DOUBLE, "clauseo-desktop"),
-        Some(true)
+fn a_quoted_crate_name_still_names_the_crate() {
+    let line = rustc_line("-C incremental=/ws/target/debug/incremental").replace(
+        "--crate-name clauseo_desktop",
+        "--crate-name 'clauseo_desktop'",
     );
+    assert_eq!(warm_up_incremental(&line, "clauseo-desktop"), Some(true));
 }
 
+/// The probe crate that `measure` warms up with the real cargo. It sits in a folder with a space in
+/// its name, so cargo quotes the `-C incremental=` path on every OS: single quotes on Unix and
+/// under Git Bash, double quotes in cmd and PowerShell.
+const PROBE_DIR: &str = "My Probe";
+const PROBE_MANIFEST: &str = "[package]\nname = \"buildtime-probe\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[workspace]\n";
+const PROBE_LIB: &str = "pub const BUILDTIME_MARKER: u64 = 0;\n";
+/// Cargo turns incremental off when `CI` is set, as it is in CI, unless `build.incremental` is
+/// true.
+const PROBE_CONFIG: &str = "[build]\nincremental = true\n";
+
 #[test]
-fn a_quoted_windows_rustc_line_without_incremental_says_the_crate_is_not() {
+fn a_real_cargo_warm_up_under_a_quoted_path_is_read_as_incremental() {
+    let scratch = Scratch::new("buildtime-real-warm-up");
+    let root = scratch.join(PROBE_DIR);
+    Scratch::create_dir_all(root.join("src")).expect("create the probe crate");
+    Scratch::create_dir_all(root.join(".cargo")).expect("create its .cargo folder");
+    Scratch::write(root.join("Cargo.toml"), PROBE_MANIFEST).expect("write Cargo.toml");
+    Scratch::write(root.join("src/lib.rs"), PROBE_LIB).expect("write src/lib.rs");
+    Scratch::write(root.join(".cargo/config.toml"), PROBE_CONFIG).expect("write config.toml");
+    let marker = marker::find(&root, "").expect("the probe crate has a marker");
+    let probe = Probe {
+        name: "check_probe",
+        package: "buildtime-probe",
+        budget_id: "none",
+        subcommand: "check",
+    };
+    let mut output = String::new();
+    let mut runner = |cmd: &Cmd| -> io::Result<Ran> {
+        let ran = process::capture(cmd, &root, &mut |_| {})?;
+        output.push_str(&ran.stdout);
+        Ok(ran)
+    };
+    // CI is passed as set, so a warm-up read as not incremental fails instead of warning.
+    let samples = measure(&root, &marker, probe, 0, true, &mut runner);
     assert_eq!(
-        warm_up_incremental(RUSTC_DESKTOP_WINDOWS_OFF, "clauseo-desktop"),
-        Some(false)
+        samples,
+        Ok(Samples {
+            secs: Vec::new(),
+            warning: None
+        }),
+        "the warm-up's output:\n{output}"
+    );
+    // TEMPORARY: prints the Windows warm-up output for the captured fixture; removed next commit.
+    assert!(
+        !cfg!(windows),
+        "TEMPORARY capture of the warm-up output:\n{output}"
     );
 }
 
