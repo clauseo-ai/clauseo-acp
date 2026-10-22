@@ -43,6 +43,14 @@ fn cmd_displays_its_program_then_its_args() {
     assert_eq!(pnpm.to_string(), "pnpm --version");
 }
 
+#[test]
+fn cmd_displays_its_variables_before_its_program() {
+    let cmd = Cmd::new(Program::Cargo, ["check", "-v"], TEST_TIMEOUT)
+        .env("CARGO_INCREMENTAL", "1")
+        .env("CI", "");
+    assert_eq!(cmd.to_string(), "CARGO_INCREMENTAL=1 CI= cargo check -v");
+}
+
 /// The path of `name` in `dir`.
 fn at(dir: &str, name: &str) -> PathBuf {
     Path::new(dir).join(name)

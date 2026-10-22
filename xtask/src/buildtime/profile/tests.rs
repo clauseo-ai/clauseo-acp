@@ -4,9 +4,11 @@ use super::*;
 use crate::buildtime::Probe;
 use crate::buildtime::marker;
 use crate::buildtime::probe::{Samples, measure};
+use crate::buildtime::verdict::Failure;
 use crate::process::{self, Cmd, Ran};
 use crate::scratch::Scratch;
 use std::io;
+use std::path::Path;
 
 const CONFIG_DEV_OFF: &str = "[profile.dev]\nincremental = false\n";
 const MANIFEST_ON: &str = "[profile.dev]\ndebug = 1\nincremental = true  # on\n";
@@ -387,34 +389,46 @@ fn a_quoted_crate_name_still_names_the_crate() {
 const PROBE_DIR: &str = "My Probe";
 const PROBE_MANIFEST: &str = "[package]\nname = \"buildtime-probe\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n[workspace]\n";
 const PROBE_LIB: &str = "pub const BUILDTIME_MARKER: u64 = 0;\n";
-/// Cargo turns incremental off when `CI` is set, as it is in CI, unless `build.incremental` is
-/// true.
-const PROBE_CONFIG: &str = "[build]\nincremental = true\n";
+const PROBE: Probe = Probe {
+    name: "check_probe",
+    package: "buildtime-probe",
+    budget_id: "none",
+    subcommand: "check",
+};
+
+/// `measure`'s warm-up of the probe crate in `root` with the real cargo, run with
+/// `CARGO_INCREMENTAL=<incremental>` as the buildtime workflow sets it (CI's own jobs set `0`),
+/// and CI passed as set, so a build read as not incremental fails instead of warning. Returns the
+/// result and cargo's output.
+fn real_warm_up(root: &Path, incremental: &str) -> (Result<Samples, Failure>, String) {
+    let marker = marker::find(root, "").expect("the probe crate has a marker");
+    let mut output = String::new();
+    let mut runner = |cmd: &Cmd| -> io::Result<Ran> {
+        let cmd = cmd.clone().env("CARGO_INCREMENTAL", incremental);
+        let ran = process::capture(&cmd, root, &mut |_| {})?;
+        output.push_str(&ran.stdout);
+        Ok(ran)
+    };
+    let samples = measure(root, &marker, PROBE, 0, true, &mut runner);
+    (samples, output)
+}
 
 #[test]
 fn a_real_cargo_warm_up_under_a_quoted_path_is_read_as_incremental() {
     let scratch = Scratch::new("buildtime-real-warm-up");
     let root = scratch.join(PROBE_DIR);
     Scratch::create_dir_all(root.join("src")).expect("create the probe crate");
-    Scratch::create_dir_all(root.join(".cargo")).expect("create its .cargo folder");
     Scratch::write(root.join("Cargo.toml"), PROBE_MANIFEST).expect("write Cargo.toml");
     Scratch::write(root.join("src/lib.rs"), PROBE_LIB).expect("write src/lib.rs");
-    Scratch::write(root.join(".cargo/config.toml"), PROBE_CONFIG).expect("write config.toml");
-    let marker = marker::find(&root, "").expect("the probe crate has a marker");
-    let probe = Probe {
-        name: "check_probe",
-        package: "buildtime-probe",
-        budget_id: "none",
-        subcommand: "check",
-    };
-    let mut output = String::new();
-    let mut runner = |cmd: &Cmd| -> io::Result<Ran> {
-        let ran = process::capture(cmd, &root, &mut |_| {})?;
-        output.push_str(&ran.stdout);
-        Ok(ran)
-    };
-    // CI is passed as set, so a warm-up read as not incremental fails instead of warning.
-    let samples = measure(&root, &marker, probe, 0, true, &mut runner);
+
+    let (samples, output) = real_warm_up(&root, "0");
+    let refused = samples.expect_err("a build without incremental is refused in CI");
+    assert!(
+        refused.message.starts_with("refusing to measure"),
+        "{refused:?}\nthe warm-up's output:\n{output}"
+    );
+
+    let (samples, output) = real_warm_up(&root, "1");
     assert_eq!(
         samples,
         Ok(Samples {
