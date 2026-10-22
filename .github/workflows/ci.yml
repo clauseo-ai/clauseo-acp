@@ -1,5 +1,5 @@
-# CI: the fast lane (`cargo xtask check` on Linux) and the blank app built and tested on every
-# target.
+# CI: the fast lane (`cargo xtask check` on Linux), the blank app built and tested on every
+# target, and on pull requests the mutation tests of the changed lines (`cargo xtask mutants`).
 #
 # - No version is written here. Rust comes from rust-toolchain.toml, pnpm from "packageManager" and
 #   Node from "engines.node" in ui/package.json, and the cargo tools and gitleaks from
@@ -8,6 +8,8 @@
 #   still start but skip every step. A job skipped as a whole would report its check under the
 #   unexpanded name "build (${{ matrix.target }})", and a required check that never reports blocks
 #   the merge.
+# - The mutants job runs only on pull requests, and skips every step, the same way, unless a `.rs`
+#   file changed.
 # - The Linux job runs the tests with the network cut off, so a test that reaches the network fails.
 # - Every action is pinned by commit SHA, with its tag in a comment.
 
@@ -35,8 +37,9 @@ jobs:
     timeout-minutes: 5
     outputs:
       build: ${{ steps.filter.outputs.build }}
+      mutants: ${{ steps.filter.outputs.mutants }}
     steps:
-      - name: Decide whether the build jobs run
+      - name: Decide whether the build and mutants jobs run
         id: filter
         env:
           EVENT: ${{ github.event_name }}
@@ -47,6 +50,7 @@ jobs:
           set -euo pipefail
           if [ "$EVENT" != pull_request ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "mutants=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git init -q work
@@ -62,6 +66,15 @@ jobs:
           else
             echo "Only Markdown or docs/ changed: the build jobs skip their steps."
             echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+          # cargo-mutants mutates only the `.rs` lines in the diff, so without one there is nothing
+          # to test.
+          rust=$(git diff --no-renames --name-only refs/ci/base...refs/ci/head | grep -E '\.rs$' || true)
+          if [ -n "$rust" ]; then
+            echo "mutants=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No .rs file changed: the mutants job skips its steps."
+            echo "mutants=false" >> "$GITHUB_OUTPUT"
           fi
 
   fast-lane:
@@ -273,3 +286,66 @@ jobs:
               echo "uid inside the namespace: $(as_runner id -u)"
               as_runner cargo nextest run --workspace --profile ci --no-tests=pass
             '
+
+  # cargo-mutants on the lines the pull request changed: it fails on a mutant no test catches, or
+  # when the run passes `cargo xtask mutants`' 20-minute cap. Not on pushes to main: there HEAD is
+  # the merge-base with origin/main, so the diff is empty and `cargo xtask mutants` passes without
+  # testing anything. Linux only: cargo-mutants 27.1.0 does not build with `--locked` on Windows
+  # ARM64 (its lockfile pulls in winapi 0.2.8, which has no aarch64).
+  mutants:
+    name: mutants
+    needs: changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      MUTANTS: ${{ needs.changes.outputs.mutants }}
+    steps:
+      - name: Skip, no .rs file changed
+        if: env.MUTANTS != 'true'
+        run: echo "No .rs file changed; nothing to mutate."
+
+      # Full history: `cargo xtask mutants` diffs against the merge-base with origin/main, and a
+      # shallow clone has none.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.MUTANTS == 'true'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        if: env.MUTANTS == 'true'
+        run: rustup toolchain install
+
+      # A mutant in the desktop crate builds and tests it, which links WebKitGTK.
+      - name: Install the Linux system packages Tauri needs
+        if: env.MUTANTS == 'true'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends libwebkit2gtk-4.1-dev
+
+      # Its own key, like the other jobs' tool caches: it holds cargo-mutants and nextest.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: env.MUTANTS == 'true'
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+          key: cargo-mutants-nextest-ubuntu-24.04-${{ runner.arch }}-${{ hashFiles('xtask/src/setup.rs') }}
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: env.MUTANTS == 'true'
+        with:
+          key: mutants
+          cache-bin: "false"
+
+      # cargo-mutants runs each mutant's tests with nextest (`test_tool` in .cargo/mutants.toml), so
+      # both are installed, and no other pinned tool.
+      - name: Install cargo-mutants and nextest at their pins
+        if: env.MUTANTS == 'true'
+        run: cargo xtask setup --only cargo-mutants --only cargo-nextest
+
+      - name: cargo xtask mutants
+        if: env.MUTANTS == 'true'
+        run: cargo xtask mutants
