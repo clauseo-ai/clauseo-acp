@@ -1,2 +1,7 @@
 [alias]
+# xtask builds into its own target dir: `cargo xtask check` builds the whole workspace into
+# target/, which relinks xtask, and Windows can't replace a running exe (os error 5).
+# The path is relative to the current directory, so run cargo xtask from the repo root.
+# The line is copied in xtask/src/checks/core_io/tests/repos/cases.rs (XTASK_ALIAS), and a test
+# there fails when the two differ.
 xtask = "run --quiet --locked --package xtask --target-dir target/xtask-run --"

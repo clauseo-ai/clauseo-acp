@@ -22,7 +22,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 
 <!-- Name only commands that exist. A check fails on any `cargo xtask ...` here that does not parse. -->
 - `cargo xtask check --quick`: changed crates only. Run it before every report.
-- `cargo xtask check`: exactly CI's fast lane plus this OS's tests.
+- `cargo xtask check`: exactly CI's fast lane plus this OS's tests. Run xtask from the repo root.
 - `cargo xtask buildtime`: build-loop timings against `budgets.toml`.
 - `cargo xtask setup`: installs the pinned cargo tools and checks gitleaks and lefthook.
 - `cargo xtask setup --binaries`: also installs the binaries `--only` names (repeatable; all if none).
