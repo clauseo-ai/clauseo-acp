@@ -261,14 +261,39 @@ fn a_timeout_names_the_command_and_its_limit() {
     );
 }
 
+/// The groups the leader was told about and not released, empty when no leader has started.
+#[cfg(unix)]
+fn leader_groups() -> std::collections::BTreeSet<nix::unistd::Pid> {
+    leader::current()
+        .map(|(_, groups)| groups)
+        .unwrap_or_default()
+}
+
 #[cfg(unix)]
 #[test]
-fn the_restarted_leader_mode_passes_only_when_both_runs_pass() {
+fn the_restarted_leader_mode_passes_only_when_both_runs_pass_and_says_so_once_replaced() {
     let mode = |script: &str| {
         let cmd = Cmd::new(Program::Named("sh"), ["-c", script], TEST_TIMEOUT);
+        leader::ensure().expect("the leader starts");
+        let (killed, before) = leader::current().expect("a leader runs");
+        assert!(before.is_empty(), "no group is registered yet: {before:?}");
         let mut registered = 0;
-        let passed = test_mode::restarted_leader(&cmd, script, &mut || registered += 1);
+        let passed = test_mode::restarted_leader(&cmd, script, &mut || {
+            registered += 1;
+            let (now, groups) = leader::current().expect("a leader runs");
+            assert_ne!(
+                now, killed,
+                "the killed leader was replaced before the line"
+            );
+            assert_eq!(
+                groups.len(),
+                1,
+                "the new leader holds the first run's group: {groups:?}"
+            );
+        });
         assert_eq!(registered, 1, "says once that the groups are registered");
+        // The one group the new leader held was released by the first run's end: it was its own.
+        assert!(leader_groups().is_empty(), "{:?}", leader_groups());
         passed
     };
     assert!(mode("exit 0"));
@@ -282,10 +307,21 @@ fn the_test_mode_passes_only_when_its_script_does_and_says_once_it_is_registered
     for streams in [Streams::Inherit, Streams::Merged] {
         for (script, success) in [("exit 0", true), ("exit 1", false)] {
             let cmd = Cmd::new(Program::Named("sh"), ["-c", script], TEST_TIMEOUT);
+            assert!(leader_groups().is_empty(), "{:?}", leader_groups());
             let mut registered = 0;
-            let passed = test_mode::run_noting(&cmd, streams, &mut || registered += 1);
+            let passed = test_mode::run_noting(&cmd, streams, &mut || {
+                registered += 1;
+                let groups = leader_groups();
+                assert_eq!(
+                    groups.len(),
+                    1,
+                    "the leader knows the group: {script} {streams:?}"
+                );
+            });
             assert_eq!(passed, success, "{script} with {streams:?}");
             assert_eq!(registered, 1, "{script} with {streams:?}");
+            // Released by the run's end, so the group the leader held was the command's own.
+            assert!(leader_groups().is_empty(), "{:?}", leader_groups());
         }
     }
 }

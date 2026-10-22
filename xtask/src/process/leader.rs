@@ -132,9 +132,9 @@ pub(super) fn release(group: Pid) {
     }
 }
 
-/// The leader's pid and the groups it was told about, for the tests.
+/// The leader's pid and the groups it was told about, for the tests here and in `tests.rs`.
 #[cfg(test)]
-fn current() -> Option<(u32, BTreeSet<Pid>)> {
+pub(super) fn current() -> Option<(u32, BTreeSet<Pid>)> {
     let slot = LEADER.lock().unwrap_or_else(PoisonError::into_inner);
     slot.as_ref()
         .map(|leader| (leader.child.id(), leader.groups.clone()))
