@@ -311,7 +311,7 @@ fn a_rustc_line_without_incremental_says_the_crate_is_not() {
     );
 }
 
-/// A rustc line for clauseo_desktop as `cargo -v` prints it, with `flag` among its arguments.
+/// A rustc line for `clauseo_desktop` as `cargo -v` prints it, with `flag` among its arguments.
 fn rustc_line(flag: &str) -> String {
     format!(
         "     Running `/rust/bin/rustc --crate-name clauseo_desktop --edition=2024 crates/desktop/src/lib.rs --crate-type lib -C embed-bitcode=no {flag} -C metadata=4a2f --out-dir /ws/target/debug/deps`"
@@ -424,10 +424,8 @@ fn a_real_cargo_warm_up_under_a_quoted_path_is_read_as_incremental() {
         "the warm-up's output:\n{output}"
     );
     // TEMPORARY: prints the Windows warm-up output for the captured fixture; removed next commit.
-    assert!(
-        !cfg!(windows),
-        "TEMPORARY capture of the warm-up output:\n{output}"
-    );
+    #[cfg(windows)]
+    panic!("TEMPORARY capture of the warm-up output:\n{output}");
 }
 
 #[test]
