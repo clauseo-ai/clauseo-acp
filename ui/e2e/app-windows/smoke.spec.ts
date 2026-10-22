@@ -1,50 +1,52 @@
-// The blank app starts, renders #app-root, and reports the control's numbers.
-//
-//   E2E_RESULTS   where to write the numbers as JSON (required)
-//   E2E_MODE      a label for the run, written into the JSON ("normal" or "disable-gpu")
+// The blank app starts, renders #app-root, keeps its WebView2 data in the temporary folder, and its
+// WebView2 browser process got the arguments the e2e build passes.
 
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
 import { processTree } from "./memory.ts";
 
-function resultsPath(): string {
-  const path = process.env["E2E_RESULTS"];
-  if (path === undefined || path === "") {
-    throw new Error("E2E_RESULTS is not set; set it to the JSON file the numbers go to");
-  }
-  return path;
+/** wry's own browser arguments, which `crates/desktop/src/e2e.rs` passes again. */
+const WRY_DEFAULT_ARGS = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+
+/** The arguments of a command line, without the quotes around each. */
+function argumentsOf(commandLine: string): string[] {
+  return commandLine
+    .split(/\s+/)
+    .filter((part) => part !== "")
+    .map((part) => part.replace(/^"(.*)"$/, "$1"));
 }
 
-test("the blank app renders #app-root", async ({ app }) => {
-  const out = resultsPath();
-  await expect(app.page.locator("#app-root")).toBeAttached();
-  // From the start of the process to the first time the harness saw the element, so it includes
-  // the CDP connection.
-  const msToRoot = performance.now() - app.startedAt;
+// One test, so the app starts once; each step names what failed.
+test("the blank app starts, renders #app-root and runs as the e2e build says", async ({ app }) => {
+  await test.step("#app-root is attached", async () => {
+    await expect(app.page.locator("#app-root")).toBeAttached();
+  });
 
-  const cdp = await app.page.context().newCDPSession(app.page);
-  await cdp.send("HeapProfiler.collectGarbage");
-  await cdp.send("Performance.enable");
-  const { metrics } = await cdp.send("Performance.getMetrics");
-  const metric = (name: string): number | null =>
-    metrics.find((entry) => entry.name === name)?.value ?? null;
-  const tree = processTree(app.pid);
+  await test.step("WebView2 keeps its data in the temporary folder", () => {
+    // WebView2 keeps its profile in <data folder>/EBWebView. Without it, WebView2 ignored
+    // WEBVIEW2_USER_DATA_FOLDER and wrote to the app's real data folder.
+    expect(existsSync(join(app.userDataFolder, "EBWebView"))).toBe(true);
+  });
 
-  const results = {
-    mode: process.env["E2E_MODE"] ?? "normal",
-    jsHeapUsedBytes: metric("JSHeapUsedSize"),
-    domNodes: metric("Nodes"),
-    groupPrivateBytes: tree.reduce((sum, entry) => sum + entry.privateBytes, 0),
-    msToRoot: Math.round(msToRoot),
-    webview2: app.browser.version(),
-    userAgent: await app.page.evaluate(() => navigator.userAgent),
-    // WebView2 keeps its profile in <data folder>/EBWebView; false means it ignored the variable.
-    tempDataFolderUsed: existsSync(join(app.userDataFolder, "EBWebView")),
-    processes: tree,
-  };
-  writeFileSync(out, `${JSON.stringify(results, null, 2)}\n`);
-  expect(results.jsHeapUsedBytes).not.toBeNull();
-  expect(results.domNodes).not.toBeNull();
+  await test.step("the browser process got the e2e build's arguments", async () => {
+    // The browser process is the one msedgewebview2.exe without --type=; the others are its
+    // renderer, GPU and utility processes.
+    const browsers = (await processTree(app.pid)).filter(
+      (entry) =>
+        entry.name === "msedgewebview2.exe" &&
+        entry.commandLine !== null &&
+        !argumentsOf(entry.commandLine).some((arg) => arg.startsWith("--type=")),
+    );
+    expect(browsers).toHaveLength(1);
+    const args = argumentsOf(browsers[0]?.commandLine ?? "");
+    expect(args).toContain(`--remote-debugging-port=${app.port}`);
+    expect(args).toContain(WRY_DEFAULT_ARGS);
+    if (app.mode === "disable-gpu") {
+      expect(args).toContain("--disable-gpu");
+    } else {
+      expect(args).not.toContain("--disable-gpu");
+    }
+  });
 });
