@@ -5,6 +5,16 @@
 //! binary into `CARGO_HOME/bin`; on Windows it runs winget. With `--only <tool>` (repeatable) it
 //! sets up only the named tools, each named as in `TOOLS` or `BINARIES`; `--binaries` then installs
 //! only the named binaries. A name that is neither fails the run before anything is installed.
+//!
+//! `setup --list` installs and checks nothing: it prints every pin, one line each, its fields
+//! separated by tabs, for scripts that install the tools another way:
+//!
+//! - `tool<TAB><name><TAB><version>` for each entry of `TOOLS`, in order;
+//! - `binary<TAB><name><TAB><version><TAB><os><TAB><arch><TAB><sha256>` for each pinned release
+//!   asset of each entry of `BINARIES`, in order, with `os` and `arch` as in `std::env::consts`
+//!   and `sha256` in lowercase hex.
+//!
+//! A change to these lines is a change of format for every script that reads them.
 
 mod install;
 mod version;
@@ -61,8 +71,11 @@ pub(crate) const CARGO_MUTANTS: Tool = Tool {
 pub(crate) struct Binary {
     pub name: &'static str,
     pub version: &'static str,
-    /// The sha256 of the release asset of `version` for each macOS and Linux OS and arch, from
-    /// the checksum file that release publishes. A pin bump changes these with `version`.
+    /// The sha256 of the release asset of `version` for each OS and arch it is pinned on, from
+    /// the checksum file that release publishes: every macOS and Linux one, which
+    /// `setup --binaries` checks its download against, and Windows x86-64, which `setup --list`
+    /// prints for scripts that download it there (`setup --binaries` runs winget on Windows). A pin
+    /// bump changes these with `version`.
     pub sha256: &'static [AssetSha256],
     /// The GitHub `owner/repo` its releases come from.
     pub repo: &'static str,
@@ -117,6 +130,12 @@ pub(crate) const BINARIES: &[Binary] = &[
                 arch: "x86_64",
                 sha256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
             },
+            // gitleaks_<version>_windows_x64.zip
+            AssetSha256 {
+                os: "windows",
+                arch: "x86_64",
+                sha256: "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e",
+            },
         ],
         repo: "gitleaks/gitleaks",
         winget: "Gitleaks.Gitleaks",
@@ -146,6 +165,12 @@ pub(crate) const BINARIES: &[Binary] = &[
                 os: "linux",
                 arch: "x86_64",
                 sha256: "ebee376ee803749c39dd8c6fecff47e08e63e03b02b5ef62e3ea616e4312b1e0",
+            },
+            // lefthook_<version>_Windows_x86_64.exe
+            AssetSha256 {
+                os: "windows",
+                arch: "x86_64",
+                sha256: "51dfc983a4b86852b33d3238ff45414d2d488a70c0e84d08b90907adb5ad0cbe",
             },
         ],
         repo: "evilmartians/lefthook",
@@ -275,6 +300,31 @@ pub(crate) fn run(
     } else {
         ExitCode::FAILURE
     }
+}
+
+/// Prints every pin to `out`, as the module doc writes out, and installs nothing. Production passes
+/// `Printer::stdout()`.
+pub(crate) fn list<W: Write>(out: &mut Printer<W>) -> ExitCode {
+    let pins = Pins {
+        tools: TOOLS,
+        binaries: BINARIES,
+    };
+    list_with(out, &pins);
+    ExitCode::SUCCESS
+}
+
+/// The `setup --list` lines of `pins`, written in one go.
+fn list_with<W: Write>(out: &mut Printer<W>, pins: &Pins<'_>) {
+    let tools = (pins.tools.iter()).map(|t| format!("tool\t{}\t{}", t.name, t.version));
+    let assets = pins.binaries.iter().flat_map(|b| {
+        b.sha256.iter().map(move |pin| {
+            format!(
+                "binary\t{}\t{}\t{}\t{}\t{}",
+                b.name, b.version, pin.os, pin.arch, pin.sha256
+            )
+        })
+    });
+    out.note(tools.chain(assets).collect::<Vec<_>>().join("\n"));
 }
 
 /// `run` on `machine`, with every command going through `runner`. Returns whether all passed.
