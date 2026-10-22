@@ -21,9 +21,11 @@ on:
 permissions:
   contents: read
 
+# A pull request keeps only its newest run. Each push to main has a group of its own: in a shared
+# group, GitHub keeps one pending run and cancels it when a newer push arrives, even without
+# cancel-in-progress, so a commit merged between two others would never be checked.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  # Every push to main is checked; a pull request keeps only its newest run.
+  group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -40,7 +42,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           if [ "$EVENT" != pull_request ]; then
@@ -51,8 +53,10 @@ jobs:
           cd work
           git fetch -q --no-tags --filter=blob:none "$REPO_URL" \
             "+refs/heads/${BASE_REF}:refs/ci/base" \
-            "+refs/pull/${PR_NUMBER}/head:refs/ci/head"
-          code=$(git diff --name-only refs/ci/base...refs/ci/head | grep -vE '\.md$|^docs/' || true)
+            "+${HEAD_SHA}:refs/ci/head"
+          # --no-renames lists both sides of a rename, so a code file renamed to .md or moved under
+          # docs/ still runs the builds.
+          code=$(git diff --no-renames --name-only refs/ci/base...refs/ci/head | grep -vE '\.md$|^docs/' || true)
           if [ -n "$code" ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           else
@@ -241,8 +245,10 @@ jobs:
         run: cargo nextest run --workspace --profile ci --no-tests=pass --no-run
 
       # A new network namespace with only loopback, entered as root and then dropped back to the
-      # runner user. sudo may replace PATH, HOME and the cargo and rustup homes, so they go through
-      # RUN_* variables. The script reads every value from the environment; none is pasted in.
+      # runner user, without its supplementary groups (docker's socket would reach the network) and
+      # with no_new_privs (sudo could otherwise nsenter back out). sudo may replace PATH, HOME and
+      # the cargo and rustup homes, so they go through RUN_* variables. The script reads every value
+      # from the environment; none is pasted in.
       - name: Test without the network
         if: env.BUILD == 'true' && runner.os == 'Linux'
         run: |
@@ -252,7 +258,7 @@ jobs:
               ip link set lo up
               ip -brief address show dev lo
               as_runner() {
-                setpriv --reuid="$RUN_UID" --regid="$RUN_GID" --init-groups \
+                setpriv --reuid="$RUN_UID" --regid="$RUN_GID" --clear-groups --no-new-privs \
                   env PATH="$RUN_PATH" HOME="$RUN_HOME" CARGO_HOME="$RUN_CARGO_HOME" \
                   RUSTUP_HOME="$RUN_RUSTUP_HOME" CARGO_NET_OFFLINE=true "$@"
               }
