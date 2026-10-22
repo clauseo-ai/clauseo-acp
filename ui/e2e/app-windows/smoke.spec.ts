@@ -7,8 +7,13 @@ import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
 import { processTree } from "./memory.ts";
 
-/** wry's own browser arguments, which `crates/desktop/src/e2e.rs` passes again. */
-const WRY_DEFAULT_ARGS = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+/**
+ * The features in wry's own browser arguments: a copy of `WRY_DEFAULT_ARGS` in
+ * `crates/desktop/src/e2e.rs`, which passes them again. Keep the two in step: the last step fails
+ * if the browser process lacks any of these, which catches e2e.rs dropping one, but a feature added
+ * only in e2e.rs goes unchecked.
+ */
+const WRY_DISABLED_FEATURES = ["msWebOOUI", "msPdfOOUI", "msSmartScreenProtection"];
 
 /** The arguments of a command line, without the quotes around each. */
 function argumentsOf(commandLine: string): string[] {
@@ -42,7 +47,12 @@ test("the blank app starts, renders #app-root and runs as the e2e build says", a
     expect(browsers).toHaveLength(1);
     const args = argumentsOf(browsers[0]?.commandLine ?? "");
     expect(args).toContain(`--remote-debugging-port=${app.port}`);
-    expect(args).toContain(WRY_DEFAULT_ARGS);
+    // Each feature in any --disable-features= argument, so a runtime that merges or reorders the
+    // lists still passes.
+    const disabled = args
+      .filter((arg) => arg.startsWith("--disable-features="))
+      .flatMap((arg) => arg.slice("--disable-features=".length).split(","));
+    expect(disabled).toEqual(expect.arrayContaining(WRY_DISABLED_FEATURES));
     if (app.mode === "disable-gpu") {
       expect(args).toContain("--disable-gpu");
     } else {

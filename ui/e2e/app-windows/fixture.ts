@@ -69,17 +69,22 @@ function remaining(deadline: number, step: string): number {
  */
 function readPort(child: ChildProcess, deadline: number): Promise<number> {
   return new Promise((done, fail) => {
+    // Declared before the handlers, which clear it, and set after them, since setting it can throw
+    // and the "error" handler must be in place by then.
+    let timer: ReturnType<typeof setTimeout> | undefined;
     child.once("error", (error) => {
+      clearTimeout(timer);
       fail(new Error(`the app did not start: ${appPath()}`, { cause: error }));
     });
     child.once("exit", (code) => {
+      clearTimeout(timer);
       fail(new Error(`the app exited with ${String(code)} before it printed E2E_CDP_PORT`));
     });
     if (child.stdout === null) {
       fail(new Error("the app was started without a stdout pipe"));
       return;
     }
-    const timer = setTimeout(
+    timer = setTimeout(
       () => {
         fail(
           new Error(
