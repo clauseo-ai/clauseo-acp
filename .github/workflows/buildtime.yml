@@ -15,6 +15,8 @@ name: buildtime
 
 on:
   workflow_dispatch:
+  push:
+    branches: [S3-g5-build-numbers]
 
 permissions:
   contents: read
@@ -79,18 +81,6 @@ jobs:
           start=$(now)
           cargo build -p clauseo-desktop
           awk -v a="$start" -v b="$(now)" 'BEGIN { printf "cold_build_desktop\t%.3f\n", b - a }' >> "$OUT/steps.tsv"
-
-      - name: "scratch: how cargo -v prints the rustc lines for clauseo_desktop"
-        if: ${{ !cancelled() && runner.os == 'Windows' }}
-        run: |
-          touch crates/desktop/src/lib.rs
-          cargo build -v -p clauseo-desktop 2> verbose.log
-          echo "lines naming the crate: $(grep -c -- 'clauseo_desktop' verbose.log)"
-          grep -- 'clauseo_desktop' verbose.log | while IFS= read -r line; do
-            echo "---- length ${#line}"
-            echo "${line:0:300}"
-            echo "$line" | grep -o -E '.{0,30}(crate-name|incremental|@).{0,80}' | head -8 || true
-          done
 
       - name: cargo xtask buildtime all
         run: cargo xtask buildtime all --runs 5 --json > "$OUT/buildtime-$MACHINE.json"
