@@ -320,6 +320,20 @@ fn rustc_line(flag: &str) -> String {
     )
 }
 
+/// The warm-up's rustc line from `a_real_cargo_warm_up_under_a_quoted_path_is_read_as_incremental`
+/// on `windows-2025` under `shell: bash` (Git Bash, `MSYSTEM` set), copied verbatim from
+/// <https://github.com/clauseo-ai/clauseo-acp/actions/runs/39746393912/job/119717413871>, with
+/// only nextest's four-space indent and the CRLF's `\r` removed. Cargo single-quotes the paths.
+const RUSTC_GIT_BASH_CAPTURED: &str = r"     Running `C:\Users\runneradmin\.rustup\toolchains\1.99.0-x86_64-pc-windows-msvc\bin\rustc.exe --crate-name buildtime_probe --edition=2024 'src\lib.rs' --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type lib --emit=dep-info,metadata -C embed-bitcode=no -C debuginfo=2 --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' -C metadata=901e60803536ea4e -C extra-filename=-ac81c29e4ec327c1 --out-dir 'C:\Users\RUNNER~1\AppData\Local\Temp\xtask-buildtime-real-warm-up-5260-0\My Probe\target\debug\deps' -C 'incremental=C:\Users\RUNNER~1\AppData\Local\Temp\xtask-buildtime-real-warm-up-5260-0\My Probe\target\debug\incremental' -L 'dependency=C:\Users\RUNNER~1\AppData\Local\Temp\xtask-buildtime-real-warm-up-5260-0\My Probe\target\debug\deps'`";
+
+#[test]
+fn a_git_bash_line_captured_from_windows_ci_is_read_as_incremental() {
+    assert_eq!(
+        warm_up_incremental(RUSTC_GIT_BASH_CAPTURED, "buildtime-probe"),
+        Some(true)
+    );
+}
+
 /// How each quoting form of the `-C` value reads (see `unquoted` for when cargo quotes).
 #[test]
 fn every_quoting_form_of_the_incremental_flag_is_read() {
@@ -345,8 +359,10 @@ fn every_quoting_form_of_the_incremental_flag_is_read() {
             Some(true),
         ),
         (
-            "Git Bash, single-quoted, written from shell-escape's rules",
-            rustc_line(r"-C 'incremental=D:\a\clauseo-acp\clauseo-acp\target\debug\incremental'"),
+            "Git Bash, single-quoted, the flag from RUSTC_GIT_BASH_CAPTURED",
+            rustc_line(
+                r"-C 'incremental=C:\Users\RUNNER~1\AppData\Local\Temp\xtask-buildtime-real-warm-up-5260-0\My Probe\target\debug\incremental'",
+            ),
             Some(true),
         ),
         (
@@ -437,9 +453,6 @@ fn a_real_cargo_warm_up_under_a_quoted_path_is_read_as_incremental() {
         }),
         "the warm-up's output:\n{output}"
     );
-    // TEMPORARY: prints the Windows warm-up output for the captured fixture; removed next commit.
-    #[cfg(windows)]
-    panic!("TEMPORARY capture of the warm-up output:\n{output}");
 }
 
 #[test]
