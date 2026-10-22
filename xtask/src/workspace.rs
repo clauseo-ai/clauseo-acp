@@ -363,6 +363,25 @@ mod tests {
         );
     }
 
+    /// On Unix a backslash is an ordinary file-name character, so a name that holds one keeps it,
+    /// both outside the workspace and inside it.
+    #[cfg(unix)]
+    #[test]
+    fn a_unix_target_root_keeps_its_backslashes() {
+        let target = |path: &str| {
+            let target = Target::new(vec!["lib".to_owned()], Path::new(path), Path::new("/ws"));
+            (target.src_path, target.outside)
+        };
+        assert_eq!(
+            target(r"/else\where/a\b.rs"),
+            (r"/else\where/a\b.rs".to_owned(), true)
+        );
+        assert_eq!(
+            target(r"/ws/cr\ates/lib.rs"),
+            (r"cr\ates/lib.rs".to_owned(), false)
+        );
+    }
+
     #[test]
     fn parses_every_member_s_dependencies_and_features() {
         let members = parse_metadata(SAMPLE).expect("sample parses");
