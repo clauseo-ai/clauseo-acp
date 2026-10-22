@@ -1,9 +1,10 @@
 //! The hidden `process-test` mode, which xtask/tests/process.rs runs to kill xtask while a
 //! command runs through the door. Not part of the door's API: nothing else in xtask calls it.
 //!
-//! It prints `REGISTERED` on stdout once the leader has been told the group of every command it
-//! started, so a test that kills xtask after that line never kills it inside the window leader.rs
-//! lists as not covered (from a command's start to its `+<group>` write).
+//! It prints `REGISTERED` on stdout on Unix once the leader has been told the group of every
+//! command it started (on Windows, once its job holds them), so a test that kills xtask after that
+//! line never kills it inside the window leader.rs lists as not covered (from a command's start to
+//! its `+<group>` write).
 
 use super::running::{self, Finish, Running, Streams};
 use super::{Cmd, Output, Program, Ran, run};
@@ -27,8 +28,9 @@ pub(crate) enum TestOutput {
     RestartedLeader,
 }
 
-/// The line `process-test` prints once the groups of its commands are registered with the
-/// leader. xtask/tests/process.rs spells it too; every test there fails when the two differ.
+/// The line `process-test` prints on Unix once the leader has been told the groups of its
+/// commands (on Windows, once their job holds them). xtask/tests/process.rs spells it too; every
+/// test there fails when the two differ.
 const REGISTERED: &str = "registered";
 
 /// The limit of the hidden `process-test` mode: longer than any test waits, so the test's signal
@@ -36,8 +38,9 @@ const REGISTERED: &str = "registered";
 const PROCESS_TEST_TIMEOUT: Duration = Duration::from_mins(10);
 
 /// The hidden `process-test` mode: runs `sh -c <script>` through the door as `output` says, so
-/// xtask/tests/process.rs can kill this xtask while the script runs, and prints `REGISTERED` once
-/// the leader knows the script's group. Exits 0 when the script exits 0, 1 otherwise.
+/// xtask/tests/process.rs can kill this xtask while the script runs, and prints `REGISTERED` on
+/// Unix once the leader knows the script's group (on Windows, once its job holds it). Exits 0 when
+/// the script exits 0, 1 otherwise.
 pub(crate) fn test_mode(output: TestOutput, script: &str) -> ExitCode {
     let cmd = Cmd::new(Program::Named("sh"), ["-c", script], PROCESS_TEST_TIMEOUT);
     let mut registered = || Printer::stdout().note(REGISTERED);
