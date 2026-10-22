@@ -4,5 +4,5 @@ import type { HostTransport } from "./transport/host-transport.ts";
 export function App(_props: { transport: HostTransport }) {
   // `cargo xtask buildtime web` times hot reload by adding an attribute to this element's opening
   // tag, ROOT_TAG in scripts/buildtime-lib.mjs. When this element changes, change ROOT_TAG with it.
-  return <div id="app-root" />;
+  return <div id="app-root-renamed" />;
 }
