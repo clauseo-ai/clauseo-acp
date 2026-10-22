@@ -55,6 +55,7 @@ deny = [
   { crate = "async-trait", wrappers = [
     "zbus",
   ], reason = "house style: no async traits across crates" },
+  { crate = "rust-ini@>=0.21.3", reason = "deep-link 2.6.2 fails on Linux; drop when deep-link 2.6.3 is out" },
 ]
 
 # devtools let script in the page open the inspector, and `protocol-asset` serves files from disk to
