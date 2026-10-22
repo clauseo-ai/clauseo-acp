@@ -1,15 +1,26 @@
 //! Tests of `setup --list`: both formats on fake pins, written out here; the real pins, one line
-//! each; a pin with no asset fails; and `--list` parses alone, with its format, and takes no other
-//! flag.
+//! each; a pin with no asset fails on stderr; and `--list` parses alone, with its format, and
+//! takes no other flag.
 
 use super::*;
 use clap::Parser;
 
-/// What `list_with` printed for `pins` in `format`, and whether it passed.
-fn listed(pins: &Pins<'_>, format: ListFormat) -> (bool, String) {
+/// Whether `list_with` passed for `pins` in `format`, and what it printed on stdout and stderr.
+fn listed(pins: &Pins<'_>, format: ListFormat) -> (bool, String, String) {
     let mut out = Printer::new(Vec::new(), false);
-    let ok = list_with(&mut out, pins, format);
-    (ok, String::from_utf8(out.into_inner()).unwrap())
+    let mut err = Printer::new(Vec::new(), false);
+    let ok = list_with(&mut out, &mut err, pins, format);
+    let text = |p: Printer<Vec<u8>>| String::from_utf8(p.into_inner()).unwrap();
+    (ok, text(out), text(err))
+}
+
+/// What `list` printed on the real pins in `format`, after checking it passed with no stderr.
+fn listed_real(format: ListFormat) -> String {
+    let mut out = Printer::new(Vec::new(), false);
+    let mut err = Printer::new(Vec::new(), false);
+    assert_eq!(list(&mut out, &mut err, format), ExitCode::SUCCESS);
+    assert_eq!(String::from_utf8(err.into_inner()).unwrap(), "");
+    String::from_utf8(out.into_inner()).unwrap()
 }
 
 const FAKE_TOOLS: [Tool; 2] = [
@@ -53,8 +64,8 @@ fn list_prints_a_tab_separated_line_per_tool_then_per_pinned_asset() {
         tools: &FAKE_TOOLS,
         binaries: &binaries,
     };
-    let (ok, printed) = listed(&pins, ListFormat::Text);
-    assert!(ok);
+    let (ok, printed, err) = listed(&pins, ListFormat::Text);
+    assert!(ok && err.is_empty(), "{err}");
     assert_eq!(
         printed,
         format!(
@@ -77,8 +88,8 @@ fn list_json_prints_one_object_with_the_same_pins() {
         tools: &FAKE_TOOLS,
         binaries: &binaries,
     };
-    let (ok, printed) = listed(&pins, ListFormat::Json);
-    assert!(ok);
+    let (ok, printed, err) = listed(&pins, ListFormat::Json);
+    assert!(ok && err.is_empty(), "{err}");
     assert_eq!(printed.lines().count(), 1, "{printed}");
     let asset = |name: &str, os: &str, arch: &str, sha256: &str| {
         let file = format!("faketool_fake-version_{os}_{arch}");
@@ -108,11 +119,14 @@ fn list_with_no_pins_prints_nothing_as_text() {
         tools: &[],
         binaries: &[],
     };
-    assert_eq!(listed(&pins, ListFormat::Text), (true, String::new()));
+    assert_eq!(
+        listed(&pins, ListFormat::Text),
+        (true, String::new(), String::new())
+    );
 }
 
 #[test]
-fn a_pin_with_no_release_asset_fails_and_lists_nothing() {
+fn a_pin_with_no_release_asset_fails_on_stderr_and_lists_nothing() {
     let unnamed = Binary {
         asset: |_, _, _| None,
         ..fake_tool(Packing::Bare)
@@ -123,10 +137,11 @@ fn a_pin_with_no_release_asset_fails_and_lists_nothing() {
         binaries: &binaries,
     };
     for format in [ListFormat::Text, ListFormat::Json] {
-        let (ok, printed) = listed(&pins, format);
+        let (ok, printed, err) = listed(&pins, format);
         assert!(!ok);
+        assert_eq!(printed, "");
         assert_eq!(
-            printed,
+            err,
             "setup --list: faketool pins a sha256 for linux-x86_64, but names no release asset \
              there\n    fix: return that asset's file name from faketool's `asset` function in \
              xtask/src/setup.rs, or remove the pin\n"
@@ -134,13 +149,12 @@ fn a_pin_with_no_release_asset_fails_and_lists_nothing() {
     }
 }
 
-/// `setup --list` on the real pins exits with success and prints a line per tool and per pin,
-/// none twice, with a Windows x86-64 line for each binary.
+/// `setup --list` on the real pins exits with success, prints nothing on stderr, and prints a
+/// line per tool and per pin, none twice, with a Windows x86-64 line for each binary; the JSON has
+/// an entry per pin, with one Windows x86-64 entry per binary.
 #[test]
 fn list_prints_every_real_pin_once() {
-    let mut out = Printer::new(Vec::new(), false);
-    assert_eq!(list(&mut out, ListFormat::Text), ExitCode::SUCCESS);
-    let printed = String::from_utf8(out.into_inner()).unwrap();
+    let printed = listed_real(ListFormat::Text);
     let lines: Vec<&str> = printed.lines().collect();
     let pins: usize = BINARIES.iter().map(|b| b.sha256.len()).sum();
     assert_eq!(lines.len(), TOOLS.len() + pins, "{printed}");
@@ -152,10 +166,14 @@ fn list_prints_every_real_pin_once() {
         let windows = format!("binary\t{}\t{}\twindows\tx86_64\t", b.name, b.version);
         assert!(lines.iter().any(|l| l.starts_with(&windows)), "{printed}");
     }
-    let mut out = Printer::new(Vec::new(), false);
-    assert_eq!(list(&mut out, ListFormat::Json), ExitCode::SUCCESS);
-    let json: serde_json::Value = serde_json::from_slice(&out.into_inner()).unwrap();
-    assert_eq!(json["binaries"].as_array().unwrap().len(), pins);
+    let json: serde_json::Value = serde_json::from_str(&listed_real(ListFormat::Json)).unwrap();
+    let entries = json["binaries"].as_array().unwrap();
+    assert_eq!(entries.len(), pins);
+    for b in BINARIES {
+        let windows = (entries.iter())
+            .filter(|e| e["name"] == b.name && e["os"] == "windows" && e["arch"] == "x86_64");
+        assert_eq!(windows.count(), 1, "{}", b.name);
+    }
 }
 
 #[test]

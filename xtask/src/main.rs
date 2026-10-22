@@ -100,8 +100,10 @@ enum Commands {
         /// "binaries": [{"name", "version", "os", "arch", "sha256", "asset", "url"}, ...]}`, the
         /// same pins in the same order, with `asset` the file name.
         ///
-        /// Both formats only grow: a text field is only ever appended and a JSON key only ever
-        /// added, never renamed, moved or removed, so a reader ignores what it does not know.
+        /// Scripts read `--list=json`: its keys are only ever added, never renamed, moved or
+        /// removed, so a reader ignores keys it does not know. The text is for people and may
+        /// change. Check the exit code before reading stdout: when it fails, it prints nothing on
+        /// stdout and says why on stderr.
         #[arg(
             long,
             value_name = "FORMAT",
@@ -159,7 +161,11 @@ fn main() -> ExitCode {
         }
         Commands::Setup {
             list: Some(format), ..
-        } => setup::list(&mut output::Printer::stdout(), format),
+        } => setup::list(
+            &mut output::Printer::stdout(),
+            &mut output::Printer::stderr(),
+            format,
+        ),
         Commands::Setup { binaries, only, .. } => setup::run(
             &workspace::workspace_root(),
             setup::Selection::of(&only),

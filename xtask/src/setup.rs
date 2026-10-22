@@ -75,7 +75,7 @@ pub(crate) struct Binary {
     /// The file name of the release asset for `(os, arch, version)` as in `std::env::consts`;
     /// `None` where no asset exists.
     pub asset: fn(&str, &str, &str) -> Option<String>,
-    /// How the macOS and Linux assets hold the binary.
+    /// How the macOS and Linux assets hold the binary, which `setup --binaries` downloads there.
     pub packing: Packing,
 }
 
@@ -311,13 +311,18 @@ pub(crate) enum ListFormat {
 }
 
 /// Prints every pin to `out` in `format`, as `--help` writes out, and installs nothing. Fails when
-/// a pinned sha256 has no release asset to belong to. Production passes `Printer::stdout()`.
-pub(crate) fn list<W: Write>(out: &mut Printer<W>, format: ListFormat) -> ExitCode {
+/// a pinned sha256 has no release asset to belong to, saying why on `err` and printing nothing on
+/// `out`. Production passes `Printer::stdout()` and `Printer::stderr()`.
+pub(crate) fn list<W: Write, E: Write>(
+    out: &mut Printer<W>,
+    err: &mut Printer<E>,
+    format: ListFormat,
+) -> ExitCode {
     let pins = Pins {
         tools: TOOLS,
         binaries: BINARIES,
     };
-    if list_with(out, &pins, format) {
+    if list_with(out, err, &pins, format) {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
@@ -325,16 +330,21 @@ pub(crate) fn list<W: Write>(out: &mut Printer<W>, format: ListFormat) -> ExitCo
 }
 
 /// `list` on `pins`. Returns whether every pin has a release asset; when one has none, it prints
-/// that failure and no pins.
-fn list_with<W: Write>(out: &mut Printer<W>, pins: &Pins<'_>, format: ListFormat) -> bool {
+/// that failure on `err` and nothing on `out`.
+fn list_with<W: Write, E: Write>(
+    out: &mut Printer<W>,
+    err: &mut Printer<E>,
+    pins: &Pins<'_>,
+    format: ListFormat,
+) -> bool {
     let mut assets = Vec::new();
     let mut all_named = true;
     for b in pins.binaries {
         for pin in b.sha256 {
-            if let Some(download) = install::pinned_download(b, pin.os, pin.arch) {
+            if let Some(download) = install::pinned_asset(b, pin.os, pin.arch) {
                 assets.push((b, pin, download));
             } else {
-                out.failure(
+                err.failure(
                     &format!(
                         "setup --list: {} pins a sha256 for {}-{}, but names no release asset there",
                         b.name, pin.os, pin.arch
