@@ -1,5 +1,6 @@
-//! The `e2e` feature, Windows only: WebView2 opens a DevTools port on 127.0.0.1 so Playwright can
-//! attach with `connectOverCDP`, and the port is printed to stdout as `E2E_CDP_PORT=<port>`.
+//! The `e2e` feature, Windows only: the webview (`WebView2`) opens its remote debugging port on
+//! 127.0.0.1 so Playwright can attach with `connectOverCDP`, and the port is printed to stdout as
+//! `E2E_CDP_PORT=<port>`.
 //!
 //! Contract:
 //! - Built only with `--features e2e` on Windows. The default build has no `e2e` feature, so a
@@ -20,10 +21,11 @@ const WRY_DEFAULT_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartSc
 /// Set to `1` to run the webview without the GPU.
 const DISABLE_GPU_VAR: &str = "CLAUSEO_E2E_DISABLE_GPU";
 
-/// `builder` with WebView2's DevTools on a free port of 127.0.0.1, after printing the port.
-pub(crate) fn with_debugging_port<'a, R: Runtime, M: Manager<R>>(
-    builder: WebviewWindowBuilder<'a, R, M>,
-) -> tauri::Result<WebviewWindowBuilder<'a, R, M>> {
+/// `builder` with the webview's remote debugging port on a free port of 127.0.0.1, after printing
+/// the port.
+pub(crate) fn with_debugging_port<R: Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'_, R, M>,
+) -> tauri::Result<WebviewWindowBuilder<'_, R, M>> {
     // The OS picks a port nothing listens on; the listener closes before WebView2 binds it.
     let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?
         .local_addr()?

@@ -80,6 +80,7 @@ jobs:
         run: cargo clippy -p clauseo-desktop --all-targets --features e2e --target "$TARGET" -- -D warnings
 
       - name: Build the app with the e2e feature
+        id: build
         run: pnpm -C ui tauri build --no-bundle --features e2e --target "$TARGET"
 
       - name: Smoke test
@@ -93,7 +94,7 @@ jobs:
       # Runs even when the first run failed: GitHub's Windows runners have no GPU, and the two runs
       # tell apart a failure of the GPU path from a failure of the app.
       - name: Smoke test with --disable-gpu
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           E2E_MODE: disable-gpu
           CLAUSEO_E2E_DISABLE_GPU: "1"
@@ -103,7 +104,7 @@ jobs:
           pnpm -C ui/e2e test
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         with:
           name: e2e-results-${{ matrix.runner }}
           path: ${{ env.OUT }}
