@@ -12,6 +12,8 @@
 //!   `tauri-plugin-*` dependency, and on the `devtools` or `protocol-asset` features of `tauri`.
 //! - This blank app is the control for every memory and start-up budget. Keep it blank.
 
+#[cfg(all(windows, feature = "e2e"))]
+mod e2e;
 mod rust_only;
 
 use rust_only::PluginRustOnly;
@@ -59,10 +61,12 @@ pub fn run() -> tauri::Result<()> {
 /// title is `productName` from `tauri.conf.json`.
 fn open_main_window(app: &App) -> tauri::Result<()> {
     let title = app.package_info().name.clone();
-    WebviewWindowBuilder::new(app, MAIN_WINDOW, WebviewUrl::App("index.html".into()))
+    let builder = WebviewWindowBuilder::new(app, MAIN_WINDOW, WebviewUrl::App("index.html".into()))
         .title(title)
-        .use_https_scheme(true)
-        .build()?;
+        .use_https_scheme(true);
+    #[cfg(all(windows, feature = "e2e"))]
+    let builder = e2e::with_debugging_port(builder)?;
+    builder.build()?;
     Ok(())
 }
 
