@@ -12,7 +12,7 @@
 //!   `setup::BINARIES`.
 //! - `setup` prints a `Binary`'s install command; `setup --binaries` also runs it. `setup --only
 //!   <tool>`, repeatable, sets up only the named `Tool`s and `Binary`s. `setup --list` prints
-//!   every pin in the tab-separated format the `setup.rs` module doc writes out.
+//!   every pin; its format is written out once, in the doc of the `list` field below.
 //! - Budgets live in `budgets.toml` at the repo root; `budgets.rs` reads them for the check and for
 //!   `buildtime`.
 //! - Failures print as `path:line: what`, then `    fix: ...`. A failure with no location prints
@@ -87,15 +87,30 @@ enum Commands {
         /// `gitleaks`, ...). Repeat it to name more. An unknown name fails before any install.
         #[arg(long, value_name = "TOOL")]
         only: Vec<String>,
-        /// Print every pin and install and check nothing, one line each, fields separated by tabs.
+        /// Print every pin and install and check nothing. Takes no other flag.
         ///
+        /// `--list` (or `--list=text`) prints one line per pin, fields separated by tabs:
         /// `tool<TAB><name><TAB><version>` for each pinned cargo tool, then
-        /// `binary<TAB><name><TAB><version><TAB><os><TAB><arch><TAB><sha256>` for each pinned
-        /// release asset of gitleaks and lefthook (`os` and `arch` as in Rust's
-        /// `std::env::consts`, `sha256` in lowercase hex), including each binary's `windows`
-        /// `x86_64` asset, which `--binaries` does not download (it runs winget there).
-        #[arg(long, conflicts_with_all = ["binaries", "only"])]
-        list: bool,
+        /// `binary<TAB><name><TAB><version><TAB><os><TAB><arch><TAB><sha256><TAB><url>` for each
+        /// pinned release asset of gitleaks and lefthook, on every OS and arch, Windows included.
+        /// `os` and `arch` are as in Rust's `std::env::consts`, `sha256` is lowercase hex, and
+        /// `url` is the asset's download URL, whose last part is its file name.
+        ///
+        /// `--list=json` prints one JSON object: `{"tools": [{"name", "version"}, ...],
+        /// "binaries": [{"name", "version", "os", "arch", "sha256", "asset", "url"}, ...]}`, the
+        /// same pins in the same order, with `asset` the file name.
+        ///
+        /// Both formats only grow: a text field is only ever appended and a JSON key only ever
+        /// added, never renamed, moved or removed, so a reader ignores what it does not know.
+        #[arg(
+            long,
+            value_name = "FORMAT",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "text",
+            exclusive = true
+        )]
+        list: Option<setup::ListFormat>,
     },
     /// Time the build loop against `budgets.toml`: the Rust half, the web half, or both (the
     /// default).
@@ -142,7 +157,9 @@ fn main() -> ExitCode {
             };
             check::run(&ctx, quick, ci, &mut exec, &mut process::run_quiet)
         }
-        Commands::Setup { list: true, .. } => setup::list(&mut output::Printer::stdout()),
+        Commands::Setup {
+            list: Some(format), ..
+        } => setup::list(&mut output::Printer::stdout(), format),
         Commands::Setup { binaries, only, .. } => setup::run(
             &workspace::workspace_root(),
             setup::Selection::of(&only),

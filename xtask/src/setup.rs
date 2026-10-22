@@ -6,15 +6,9 @@
 //! sets up only the named tools, each named as in `TOOLS` or `BINARIES`; `--binaries` then installs
 //! only the named binaries. A name that is neither fails the run before anything is installed.
 //!
-//! `setup --list` installs and checks nothing: it prints every pin, one line each, its fields
-//! separated by tabs, for scripts that install the tools another way:
-//!
-//! - `tool<TAB><name><TAB><version>` for each entry of `TOOLS`, in order;
-//! - `binary<TAB><name><TAB><version><TAB><os><TAB><arch><TAB><sha256>` for each pinned release
-//!   asset of each entry of `BINARIES`, in order, with `os` and `arch` as in `std::env::consts`
-//!   and `sha256` in lowercase hex.
-//!
-//! A change to these lines is a change of format for every script that reads them.
+//! `setup --list` installs and checks nothing: it prints every pin, as text or as JSON, for
+//! scripts that install the tools another way. Its format is written out once, in `--help` (the
+//! `list` field of `Commands::Setup` in `main.rs`).
 
 mod install;
 mod version;
@@ -71,11 +65,8 @@ pub(crate) const CARGO_MUTANTS: Tool = Tool {
 pub(crate) struct Binary {
     pub name: &'static str,
     pub version: &'static str,
-    /// The sha256 of the release asset of `version` for each OS and arch it is pinned on, from
-    /// the checksum file that release publishes: every macOS and Linux one, which
-    /// `setup --binaries` checks its download against, and Windows x86-64, which `setup --list`
-    /// prints for scripts that download it there (`setup --binaries` runs winget on Windows). A pin
-    /// bump changes these with `version`.
+    /// The sha256 of the release asset of `version`, one per OS and arch it is pinned on, from the
+    /// checksum file that release publishes. A pin bump changes these with `version`.
     pub sha256: &'static [AssetSha256],
     /// The GitHub `owner/repo` its releases come from.
     pub repo: &'static str,
@@ -84,7 +75,7 @@ pub(crate) struct Binary {
     /// The file name of the release asset for `(os, arch, version)` as in `std::env::consts`;
     /// `None` where no asset exists.
     pub asset: fn(&str, &str, &str) -> Option<String>,
-    /// How the asset holds the binary.
+    /// How the macOS and Linux assets hold the binary.
     pub packing: Packing,
 }
 
@@ -130,11 +121,15 @@ pub(crate) const BINARIES: &[Binary] = &[
                 arch: "x86_64",
                 sha256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
             },
-            // gitleaks_<version>_windows_x64.zip
             AssetSha256 {
                 os: "windows",
                 arch: "x86_64",
                 sha256: "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e",
+            },
+            AssetSha256 {
+                os: "windows",
+                arch: "aarch64",
+                sha256: "b95f5e4f5c425cedca7ee203d9afd29597e692c4924a12ed42f970537c72cc0f",
             },
         ],
         repo: "gitleaks/gitleaks",
@@ -166,11 +161,15 @@ pub(crate) const BINARIES: &[Binary] = &[
                 arch: "x86_64",
                 sha256: "ebee376ee803749c39dd8c6fecff47e08e63e03b02b5ef62e3ea616e4312b1e0",
             },
-            // lefthook_<version>_Windows_x86_64.exe
             AssetSha256 {
                 os: "windows",
                 arch: "x86_64",
                 sha256: "51dfc983a4b86852b33d3238ff45414d2d488a70c0e84d08b90907adb5ad0cbe",
+            },
+            AssetSha256 {
+                os: "windows",
+                arch: "aarch64",
+                sha256: "73e90ea339d562fdb2ddabcce4c1d3550bda134ab068c37e53e2853724a85cd6",
             },
         ],
         repo: "evilmartians/lefthook",
@@ -181,9 +180,10 @@ pub(crate) const BINARIES: &[Binary] = &[
 ];
 
 fn gitleaks_asset(os: &str, arch: &str, version: &str) -> Option<String> {
-    let os = match os {
-        "macos" => "darwin",
-        "linux" => "linux",
+    let (os, ext) = match os {
+        "macos" => ("darwin", "tar.gz"),
+        "linux" => ("linux", "tar.gz"),
+        "windows" => ("windows", "zip"),
         _ => return None,
     };
     let arch = match arch {
@@ -191,13 +191,14 @@ fn gitleaks_asset(os: &str, arch: &str, version: &str) -> Option<String> {
         "x86_64" => "x64",
         _ => return None,
     };
-    Some(format!("gitleaks_{version}_{os}_{arch}.tar.gz"))
+    Some(format!("gitleaks_{version}_{os}_{arch}.{ext}"))
 }
 
 fn lefthook_asset(os: &str, arch: &str, version: &str) -> Option<String> {
-    let os = match os {
-        "macos" => "MacOS",
-        "linux" => "Linux",
+    let (os, ext) = match os {
+        "macos" => ("MacOS", ""),
+        "linux" => ("Linux", ""),
+        "windows" => ("Windows", ".exe"),
         _ => return None,
     };
     let arch = match arch {
@@ -205,7 +206,7 @@ fn lefthook_asset(os: &str, arch: &str, version: &str) -> Option<String> {
         "x86_64" => "x86_64",
         _ => return None,
     };
-    Some(format!("lefthook_{version}_{os}_{arch}"))
+    Some(format!("lefthook_{version}_{os}_{arch}{ext}"))
 }
 
 /// How long `cargo install` may run before its tree is stopped: it builds a tool from source,
@@ -302,29 +303,88 @@ pub(crate) fn run(
     }
 }
 
-/// Prints every pin to `out`, as the module doc writes out, and installs nothing. Production passes
-/// `Printer::stdout()`.
-pub(crate) fn list<W: Write>(out: &mut Printer<W>) -> ExitCode {
+/// What `setup --list` prints: lines of tab-separated fields, or one JSON object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum ListFormat {
+    Text,
+    Json,
+}
+
+/// Prints every pin to `out` in `format`, as `--help` writes out, and installs nothing. Fails when
+/// a pinned sha256 has no release asset to belong to. Production passes `Printer::stdout()`.
+pub(crate) fn list<W: Write>(out: &mut Printer<W>, format: ListFormat) -> ExitCode {
     let pins = Pins {
         tools: TOOLS,
         binaries: BINARIES,
     };
-    list_with(out, &pins);
-    ExitCode::SUCCESS
+    if list_with(out, &pins, format) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
-/// The `setup --list` lines of `pins`, written in one go.
-fn list_with<W: Write>(out: &mut Printer<W>, pins: &Pins<'_>) {
-    let tools = (pins.tools.iter()).map(|t| format!("tool\t{}\t{}", t.name, t.version));
-    let assets = pins.binaries.iter().flat_map(|b| {
-        b.sha256.iter().map(move |pin| {
-            format!(
-                "binary\t{}\t{}\t{}\t{}\t{}",
-                b.name, b.version, pin.os, pin.arch, pin.sha256
-            )
-        })
-    });
-    out.note(tools.chain(assets).collect::<Vec<_>>().join("\n"));
+/// `list` on `pins`. Returns whether every pin has a release asset; when one has none, it prints
+/// that failure and no pins.
+fn list_with<W: Write>(out: &mut Printer<W>, pins: &Pins<'_>, format: ListFormat) -> bool {
+    let mut assets = Vec::new();
+    let mut all_named = true;
+    for b in pins.binaries {
+        for pin in b.sha256 {
+            if let Some(download) = install::pinned_download(b, pin.os, pin.arch) {
+                assets.push((b, pin, download));
+            } else {
+                out.failure(
+                    &format!(
+                        "setup --list: {} pins a sha256 for {}-{}, but names no release asset there",
+                        b.name, pin.os, pin.arch
+                    ),
+                    &format!(
+                        "return that asset's file name from {}'s `asset` function in \
+                         xtask/src/setup.rs, or remove the pin",
+                        b.name
+                    ),
+                );
+                all_named = false;
+            }
+        }
+    }
+    if !all_named {
+        return false;
+    }
+    match format {
+        ListFormat::Text => {
+            for t in pins.tools {
+                out.note(format_args!("tool\t{}\t{}", t.name, t.version));
+            }
+            for (b, pin, download) in &assets {
+                out.note(format_args!(
+                    "binary\t{}\t{}\t{}\t{}\t{}\t{}",
+                    b.name, b.version, pin.os, pin.arch, download.sha256, download.url
+                ));
+            }
+        }
+        ListFormat::Json => {
+            let tools: Vec<serde_json::Value> = (pins.tools.iter())
+                .map(|t| serde_json::json!({ "name": t.name, "version": t.version }))
+                .collect();
+            let binaries: Vec<serde_json::Value> = (assets.iter())
+                .map(|(b, pin, download)| {
+                    serde_json::json!({
+                        "name": b.name,
+                        "version": b.version,
+                        "os": pin.os,
+                        "arch": pin.arch,
+                        "sha256": download.sha256,
+                        "asset": download.asset,
+                        "url": download.url,
+                    })
+                })
+                .collect();
+            out.note(serde_json::json!({ "tools": tools, "binaries": binaries }));
+        }
+    }
+    true
 }
 
 /// `run` on `machine`, with every command going through `runner`. Returns whether all passed.

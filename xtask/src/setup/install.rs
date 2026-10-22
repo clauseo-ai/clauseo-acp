@@ -61,22 +61,23 @@ pub(crate) fn install_plan(binary: &Binary, os: &str, arch: &str) -> Install {
     if os == "windows" {
         return Install::Winget(winget(binary));
     }
-    let pinned = binary
-        .sha256
-        .iter()
-        .find(|pin| pin.os == os && pin.arch == arch);
-    match ((binary.asset)(os, arch, binary.version), pinned) {
-        (Some(asset), Some(pin)) => Install::Download(Download {
-            url: format!(
-                "https://github.com/{}/releases/download/v{}/{asset}",
-                binary.repo, binary.version
-            ),
-            asset,
-            sha256: pin.sha256,
-            packing: binary.packing,
-        }),
-        _ => Install::NoRelease,
-    }
+    pinned_download(binary, os, arch).map_or(Install::NoRelease, Install::Download)
+}
+
+/// The release asset of `binary` for `os`/`arch` and its pinned sha256; `None` when either is
+/// missing. On Windows `packing` is not the asset's (gitleaks ships a `.zip` there).
+pub(crate) fn pinned_download(binary: &Binary, os: &str, arch: &str) -> Option<Download> {
+    let pin = (binary.sha256.iter()).find(|pin| pin.os == os && pin.arch == arch)?;
+    let asset = (binary.asset)(os, arch, binary.version)?;
+    Some(Download {
+        url: format!(
+            "https://github.com/{}/releases/download/v{}/{asset}",
+            binary.repo, binary.version
+        ),
+        asset,
+        sha256: pin.sha256,
+        packing: binary.packing,
+    })
 }
 
 /// What to do to install `binary` on `os`/`arch`: the line `setup` prints, and the fix of a
