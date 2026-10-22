@@ -39,13 +39,11 @@ export interface TreeMemory {
   privateWorkingSetBytes: number | null;
 }
 
-/** How long PowerShell may take for a snapshot without the working set counter. */
-const SNAPSHOT_TIMEOUT_MS = 30_000;
 /**
- * How long it may take with the counter. The per-process counters are slow: on windows-11-arm one
- * query took over 10 s, and the first on a fresh runner over 30 s.
+ * How long one PowerShell call may take. WMI is slow on windows-11-arm: a snapshot takes 10 to 20 s
+ * there, and the first one on a fresh runner took over 30 s.
  */
-const WORKING_SET_TIMEOUT_MS = 90_000;
+const POWERSHELL_TIMEOUT_MS = 90_000;
 
 /** Fills `$ws` with each PID's private working set. */
 const WORKING_SETS =
@@ -132,23 +130,26 @@ export function treeMemory(tree: readonly TreeProcess[]): TreeMemory {
   };
 }
 
+/** What `command` prints. */
+async function powershell(command: string): Promise<string> {
+  const { stdout } = await promisify(execFile)(
+    "powershell",
+    ["-NoProfile", "-NonInteractive", "-Command", command],
+    { encoding: "utf8", timeout: POWERSHELL_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 },
+  );
+  return stdout;
+}
+
 /**
  * The tree rooted at `root`, from a fresh snapshot, with each process's private working set if
- * `workingSet` is set. Throws if `root` is not running.
+ * `workingSet` is set (the counters add seconds). Throws if `root` is not running.
  */
 export async function processTree(
   root: number,
   { workingSet = false }: { workingSet?: boolean } = {},
 ): Promise<TreeProcess[]> {
-  const query = ["$ws = @{}", ...(workingSet ? [WORKING_SETS] : []), PROCESSES].join("; ");
-  const { stdout } = await promisify(execFile)(
-    "powershell",
-    ["-NoProfile", "-NonInteractive", "-Command", query],
-    {
-      encoding: "utf8",
-      timeout: workingSet ? WORKING_SET_TIMEOUT_MS : SNAPSHOT_TIMEOUT_MS,
-      maxBuffer: 64 * 1024 * 1024,
-    },
+  const stdout = await powershell(
+    ["$ws = @{}", ...(workingSet ? [WORKING_SETS] : []), PROCESSES].join("; "),
   );
   const parsed: unknown = JSON.parse(stdout);
   if (!Array.isArray(parsed) || !parsed.every(isRow)) {
@@ -161,7 +162,7 @@ export async function processTree(
 const SETTLE_WINDOW = 3;
 /** How far apart the window's private bytes may be, as a fraction of the largest. */
 const SETTLE_TOLERANCE = 0.01;
-/** The pause between two snapshots. */
+/** The pause between two readings. */
 const SETTLE_INTERVAL_MS = 1_000;
 
 /** How `settle` ended. */
@@ -172,14 +173,23 @@ export interface Settled {
 }
 
 /**
- * Takes snapshots of the tree until the last `SETTLE_WINDOW` agree on private bytes within
- * `SETTLE_TOLERANCE`, or `maxMs` has passed.
+ * Reads the private bytes of `pids` until the last `SETTLE_WINDOW` readings agree within
+ * `SETTLE_TOLERANCE`, or `maxMs` has passed. It reads `Get-Process`, the same counter as
+ * `PrivatePageCount` without WMI's cost; a process that has ended counts as nothing.
  */
-export async function settle(root: number, maxMs: number): Promise<Settled> {
+export async function settle(pids: readonly number[], maxMs: number): Promise<Settled> {
+  const query = `(Get-Process -Id ${pids.join(",")} -ErrorAction SilentlyContinue | Measure-Object PrivateMemorySize64 -Sum).Sum`;
   const start = performance.now();
   const totals: number[] = [];
   for (;;) {
-    totals.push(treeMemory(await processTree(root)).privateBytes);
+    const out = (await powershell(query)).trim();
+    const total = Number(out);
+    if (out === "" || !Number.isFinite(total)) {
+      throw new Error(
+        `none of processes ${pids.join(", ")} is running, or Get-Process printed ${out}`,
+      );
+    }
+    totals.push(total);
     const window = totals.slice(-SETTLE_WINDOW);
     const settled =
       window.length === SETTLE_WINDOW &&

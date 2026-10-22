@@ -10,7 +10,7 @@ import { test } from "./fixture.ts";
 import { processTree, settle, treeMemory } from "./memory.ts";
 
 /** How long the tree's memory may take to settle before it is sampled anyway. */
-const SETTLE_MAX_MS = 30_000;
+const SETTLE_MAX_MS = 60_000;
 
 function resultsPath(): string {
   const path = process.env["E2E_RESULTS"];
@@ -26,9 +26,14 @@ test("the blank app's numbers", async ({ app }) => {
   // From the start of the process to the first time the harness saw the element, so it includes
   // the CDP connection.
   const msToRoot = performance.now() - app.startedAt;
-  const atRoot = treeMemory(await processTree(app.pid)).privateBytes;
+  // The first snapshot after #app-root; on windows-11-arm WMI takes 10 to 20 s of that.
+  const rootTree = await processTree(app.pid);
+  const atRoot = treeMemory(rootTree).privateBytes;
 
-  const idle = await settle(app.pid, SETTLE_MAX_MS);
+  const idle = await settle(
+    rootTree.map((entry) => entry.pid),
+    SETTLE_MAX_MS,
+  );
   const cdp = await app.page.context().newCDPSession(app.page);
   await cdp.send("HeapProfiler.collectGarbage");
   await cdp.send("Performance.enable");

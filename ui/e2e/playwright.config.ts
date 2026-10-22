@@ -17,9 +17,10 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   forbidOnly: true,
-  // Fits the worst case: setup 60 s, the settle wait 30 s plus one snapshot, the snapshots (30 s,
-  // or 90 s with the working set) and taskkill 30 s.
-  timeout: 300_000,
-  expect: { timeout: 30_000 },
+  // Above the sum of the harness's own timeouts, so one of those fires first and names its step.
+  timeout: 600_000,
+  // The wait for #app-root: in normal mode on windows-2025, the navigation to the app has taken
+  // from 2 s to over 30 s. A slow start shows in msToRoot instead of failing the run.
+  expect: { timeout: 90_000 },
   reporter: [["list"]],
 });
