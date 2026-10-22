@@ -80,7 +80,7 @@ fn only_is_repeatable_and_combines_with_binaries() {
         "gitleaks",
     ])
     .unwrap();
-    let crate::Commands::Setup { binaries, only } = cli.command else {
+    let crate::Commands::Setup { binaries, only, .. } = cli.command else {
         panic!("not setup");
     };
     assert!(binaries);

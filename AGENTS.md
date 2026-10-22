@@ -27,6 +27,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 - `cargo xtask setup`: installs the pinned cargo tools and checks gitleaks and lefthook.
 - `cargo xtask setup --binaries`: also installs the binaries `--only` names (repeatable; all if none).
 - `pnpm -C ui install --frozen-lockfile`: frontend dependencies.
+- Run every xtask command from the repo root (why: the alias in `.cargo/config.toml`).
 
 ## Map
 
@@ -65,7 +66,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 - Rust comments stay within 100 columns; a file past 500 lines gets a note to split it.
 - A check that inspects nothing fails.
 - Every check ships planted violations, its bypass forms included. A surviving mutant in your
-  diff fails `cargo xtask mutants`.
+  diff fails `cargo xtask mutants`, which CI runs on each PR into main that changes a `.rs` file.
 - Files are written only through each crate's write module: `xtask/src/write.rs` in xtask,
   `Scratch` (`xtask/src/scratch.rs`) in xtask's tests, `ui/app/scripts/guard.mjs` in scripts.
   Child processes start only through `xtask/src/process.rs` in xtask and
@@ -95,7 +96,6 @@ this. Use the words in `GLOSSARY.md` exactly.
 
 - One worktree per task, on its own branch. Never share `target/` between worktrees.
 - Commit with `git commit -s`.
-- Run `cargo xtask check --quick` before you report.
 - Report what you verified, with the command and its result, and what you did not verify.
 - In the pull request, list every difference from the brief (or the issue, when there is no brief)
   under Deviations and every code path you never ran (Windows, SIGKILL, a missing tool) under Not

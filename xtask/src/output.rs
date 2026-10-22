@@ -20,6 +20,14 @@ impl Printer<io::Stdout> {
     }
 }
 
+impl Printer<io::Stderr> {
+    /// The printer for this process's stderr: failures that must stay out of what a script reads
+    /// on stdout. Never live, since it streams no tool output.
+    pub(crate) fn stderr() -> Self {
+        Printer::new(io::stderr(), false)
+    }
+}
+
 impl<W: Write> Printer<W> {
     pub(crate) fn new(out: W, live: bool) -> Self {
         Printer { out, live }

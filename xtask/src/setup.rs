@@ -5,8 +5,13 @@
 //! binary into `CARGO_HOME/bin`; on Windows it runs winget. With `--only <tool>` (repeatable) it
 //! sets up only the named tools, each named as in `TOOLS` or `BINARIES`; `--binaries` then installs
 //! only the named binaries. A name that is neither fails the run before anything is installed.
+//!
+//! `setup --list` installs and checks nothing: it prints every pin, as text or as JSON, for
+//! scripts that install the tools another way. Its format is written out once, in `--help` (the
+//! `list` field of `Commands::Setup` in `main.rs`).
 
 mod install;
+mod list;
 mod version;
 
 use crate::output::Printer;
@@ -17,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
+pub(crate) use list::{ListFormat, list};
 use version::{Attempt, VersionCheck, compare_version};
 
 /// A cargo crate `cargo xtask setup` installs at a pinned version.
@@ -61,8 +67,8 @@ pub(crate) const CARGO_MUTANTS: Tool = Tool {
 pub(crate) struct Binary {
     pub name: &'static str,
     pub version: &'static str,
-    /// The sha256 of the release asset of `version` for each macOS and Linux OS and arch, from
-    /// the checksum file that release publishes. A pin bump changes these with `version`.
+    /// The sha256 of the release asset of `version`, one per OS and arch it is pinned on, from the
+    /// checksum file that release publishes. A pin bump changes these with `version`.
     pub sha256: &'static [AssetSha256],
     /// The GitHub `owner/repo` its releases come from.
     pub repo: &'static str,
@@ -71,7 +77,7 @@ pub(crate) struct Binary {
     /// The file name of the release asset for `(os, arch, version)` as in `std::env::consts`;
     /// `None` where no asset exists.
     pub asset: fn(&str, &str, &str) -> Option<String>,
-    /// How the asset holds the binary.
+    /// How the macOS and Linux assets hold the binary, which `setup --binaries` downloads there.
     pub packing: Packing,
 }
 
@@ -117,6 +123,16 @@ pub(crate) const BINARIES: &[Binary] = &[
                 arch: "x86_64",
                 sha256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
             },
+            AssetSha256 {
+                os: "windows",
+                arch: "x86_64",
+                sha256: "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e",
+            },
+            AssetSha256 {
+                os: "windows",
+                arch: "aarch64",
+                sha256: "b95f5e4f5c425cedca7ee203d9afd29597e692c4924a12ed42f970537c72cc0f",
+            },
         ],
         repo: "gitleaks/gitleaks",
         winget: "Gitleaks.Gitleaks",
@@ -147,6 +163,16 @@ pub(crate) const BINARIES: &[Binary] = &[
                 arch: "x86_64",
                 sha256: "ebee376ee803749c39dd8c6fecff47e08e63e03b02b5ef62e3ea616e4312b1e0",
             },
+            AssetSha256 {
+                os: "windows",
+                arch: "x86_64",
+                sha256: "51dfc983a4b86852b33d3238ff45414d2d488a70c0e84d08b90907adb5ad0cbe",
+            },
+            AssetSha256 {
+                os: "windows",
+                arch: "aarch64",
+                sha256: "73e90ea339d562fdb2ddabcce4c1d3550bda134ab068c37e53e2853724a85cd6",
+            },
         ],
         repo: "evilmartians/lefthook",
         winget: "evilmartians.lefthook",
@@ -156,9 +182,10 @@ pub(crate) const BINARIES: &[Binary] = &[
 ];
 
 fn gitleaks_asset(os: &str, arch: &str, version: &str) -> Option<String> {
-    let os = match os {
-        "macos" => "darwin",
-        "linux" => "linux",
+    let (os, ext) = match os {
+        "macos" => ("darwin", "tar.gz"),
+        "linux" => ("linux", "tar.gz"),
+        "windows" => ("windows", "zip"),
         _ => return None,
     };
     let arch = match arch {
@@ -166,13 +193,14 @@ fn gitleaks_asset(os: &str, arch: &str, version: &str) -> Option<String> {
         "x86_64" => "x64",
         _ => return None,
     };
-    Some(format!("gitleaks_{version}_{os}_{arch}.tar.gz"))
+    Some(format!("gitleaks_{version}_{os}_{arch}.{ext}"))
 }
 
 fn lefthook_asset(os: &str, arch: &str, version: &str) -> Option<String> {
-    let os = match os {
-        "macos" => "MacOS",
-        "linux" => "Linux",
+    let (os, ext) = match os {
+        "macos" => ("MacOS", ""),
+        "linux" => ("Linux", ""),
+        "windows" => ("Windows", ".exe"),
         _ => return None,
     };
     let arch = match arch {
@@ -180,7 +208,7 @@ fn lefthook_asset(os: &str, arch: &str, version: &str) -> Option<String> {
         "x86_64" => "x86_64",
         _ => return None,
     };
-    Some(format!("lefthook_{version}_{os}_{arch}"))
+    Some(format!("lefthook_{version}_{os}_{arch}{ext}"))
 }
 
 /// How long `cargo install` may run before its tree is stopped: it builds a tool from source,

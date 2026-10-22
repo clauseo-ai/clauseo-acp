@@ -75,10 +75,12 @@ fn tsc_step() -> ToolStep {
     }
 }
 
+/// oxlint with `--type-aware` (the `lint:types` script), so the rules that need types, such as
+/// `no-base-to-string`, fail the check too. The plain `lint` script skips them.
 fn oxlint_step() -> ToolStep {
     ToolStep {
         name: "oxlint",
-        cmd: script("ui/app", "lint", &["--format", "unix"]),
+        cmd: script("ui/app", "lint:types", &["--format", "unix"]),
         parse: oxlint_findings,
         fix: ui_fix,
         render: None,
@@ -183,7 +185,7 @@ fn oxlint_finding(line: &str) -> Option<Finding> {
             line: line_no,
             message: message.to_owned(),
             fix: Fix::tool(
-                "`pnpm -C ui/app run lint` shows the rule's help; fix the code, do not disable the rule",
+                "`pnpm -C ui/app run lint:types` shows the rule's help; fix the code, do not disable the rule",
             ),
         },
         is_error,
@@ -266,7 +268,7 @@ mod tests {
         );
         assert_eq!(
             oxlint_step().cmd.to_string(),
-            "pnpm -C ui/app run lint --format unix"
+            "pnpm -C ui/app run lint:types --format unix"
         );
         assert_eq!(oxfmt_step().cmd.to_string(), "pnpm -C ui run fmt:check");
         assert_eq!(vitest_step().cmd.to_string(), "pnpm -C ui/app run test");
@@ -338,9 +340,9 @@ mod tests {
         );
     }
 
-    /// Real `pnpm -C ui/app run lint --format unix` output with an error planted in
+    /// Real `pnpm -C ui/app run lint:types --format unix` output with an error planted in
     /// `src/zz_planted.tsx`.
-    const OXLINT_FAILING: &str = "$ oxlint --format unix\n\
+    const OXLINT_FAILING: &str = "$ oxlint --type-aware --format unix\n\
         src/zz_planted.tsx:1:1: '@tauri-apps/api/core' import is restricted from being used by a pattern. [Error/eslint(no-restricted-imports)]\n\
         \n\
         1 problem\n\
@@ -365,6 +367,27 @@ mod tests {
         );
     }
 
+    /// Real `pnpm -C ui/app run lint:types --format unix` output on origin/main's
+    /// `scripts/buildtime-lib.test.mjs` at 092b5fa: two rules that only `--type-aware` runs.
+    const OXLINT_TYPE_AWARE_FAILING: &str = "$ oxlint --type-aware --format unix\n\
+        scripts/buildtime-lib.test.mjs:113:57: 'shown' may use Object's default stringification format ('[object Object]') when stringified. [Error/typescript(no-base-to-string)]\n\
+        scripts/buildtime-lib.test.mjs:113:57: Invalid type used in template literal expression. [Error/typescript(restrict-template-expressions)]\n\
+        \n\
+        2 problems\n\
+        [ELIFECYCLE] Command failed with exit code 1.\n";
+
+    #[test]
+    fn type_aware_error_lines_fail_the_step() {
+        let cmd = oxlint_step().cmd;
+        let found = findings(oxlint_findings, &cmd, OXLINT_TYPE_AWARE_FAILING);
+        let path = "ui/app/scripts/buildtime-lib.test.mjs";
+        let rules = ["(no-base-to-string)]", "(restrict-template-expressions)]"];
+        assert_eq!(found.len(), rules.len());
+        for ((at, line, message, is_error), rule) in found.iter().zip(rules) {
+            assert!(at == path && *line == 113 && *is_error && message.ends_with(rule));
+        }
+    }
+
     #[test]
     fn oxlint_warning_lines_are_findings_that_do_not_fail() {
         let found = findings(oxlint_findings, &oxlint_step().cmd, OXLINT_WARNING);
@@ -379,7 +402,7 @@ mod tests {
             findings(
                 oxlint_findings,
                 &oxlint_step().cmd,
-                "$ oxlint --format unix\n"
+                "$ oxlint --type-aware --format unix\n"
             ),
             Vec::<Row>::new()
         );

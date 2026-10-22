@@ -171,7 +171,7 @@ pub(crate) fn first_on_path<T>(
 }
 
 /// A program, its arguments and how long it may run. Displays as the shell-like form:
-/// `cargo fmt --all -- --check`.
+/// `cargo fmt --all -- --check`, after its `NAME=value` variables when it sets any.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Cmd {
     pub program: Program,
@@ -182,6 +182,11 @@ pub(crate) struct Cmd {
     /// How long its tree has between SIGTERM and SIGKILL on Unix, at its limit and for what is
     /// left of it when it exits: `KILL_GRACE` unless `kill_grace` set another.
     pub kill_grace: Duration,
+    /// Variables set for it on top of the environment it inherits from xtask, in order. Tests only
+    /// (the setter is `#[cfg(test)]`): `Display` prints each `NAME=value` verbatim into failure
+    /// messages and "run `{cmd}`" fixes, so it must never hold a secret, and that form does not run
+    /// in cmd or PowerShell.
+    pub env: Vec<(String, String)>,
 }
 
 impl Cmd {
@@ -198,7 +203,16 @@ impl Cmd {
                 .collect(),
             timeout,
             kill_grace: running::KILL_GRACE,
+            env: Vec::new(),
         }
+    }
+
+    /// `self` with `name` set to `value` in its environment. A test uses it to give a cargo run
+    /// the setting a real run gets from its job, whatever the test's own job sets.
+    #[cfg(test)]
+    pub(crate) fn env(mut self, name: &str, value: &str) -> Cmd {
+        self.env.push((name.to_owned(), value.to_owned()));
+        self
     }
 
     /// `self` with `grace` between SIGTERM and SIGKILL instead of `KILL_GRACE`, for a command
@@ -213,6 +227,9 @@ impl Cmd {
 
 impl fmt::Display for Cmd {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (name, value) in &self.env {
+            write!(f, "{name}={value} ")?;
+        }
         write!(f, "{}", self.program.name())?;
         self.args.iter().try_for_each(|arg| write!(f, " {arg}"))
     }
