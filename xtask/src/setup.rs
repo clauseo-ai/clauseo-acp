@@ -325,7 +325,12 @@ fn known_names<W: Write>(out: &mut Printer<W>, pins: &Pins<'_>, selection: Selec
         .chain(pins.binaries.iter().map(|b| b.name))
         .collect();
     let mut all_known = true;
-    for name in names.iter().filter(|n| !valid.contains(&n.as_str())) {
+    // A name given twice fails once, at its first place in `names`, as a known name runs once.
+    let unknown = names
+        .iter()
+        .enumerate()
+        .filter(|(i, n)| !valid.contains(&n.as_str()) && !names[..*i].contains(n));
+    for (_, name) in unknown {
         out.failure(
             &format!("setup --only {name}: no pinned tool is named {name}"),
             &format!(

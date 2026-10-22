@@ -25,7 +25,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 - `cargo xtask check`: exactly CI's fast lane plus this OS's tests.
 - `cargo xtask buildtime`: build-loop timings against `budgets.toml`.
 - `cargo xtask setup`: installs the pinned cargo tools and checks gitleaks and lefthook.
-- `cargo xtask setup --binaries`: also installs gitleaks and lefthook. Repeat `--only <tool>` to set up just those.
+- `cargo xtask setup --binaries`: also installs the binaries `--only` names (repeatable; all if none).
 - `pnpm -C ui install --frozen-lockfile`: frontend dependencies.
 
 ## Map
