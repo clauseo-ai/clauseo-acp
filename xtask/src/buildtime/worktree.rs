@@ -45,6 +45,7 @@
 //! not be removed), left out when there is none. A run that stopped before it measured prints
 //! `{"passed": false, "errors": [...]}`. The exit code is 1 when the run fails.
 
+mod artifacts;
 mod steps;
 #[cfg(test)]
 mod tests;
@@ -62,9 +63,12 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use steps::StepFailed;
 #[cfg(test)]
-use steps::{
-    NO_DIRTY_FIX, NOT_ADDED, REBUILT_FIX, XTASK_REBUILT_FIX, built_line, package_name,
-    rebuilt_besides, same_path, touched_time, with_output, xtask_binary,
+use {
+    artifacts::{built_line, package_name, rebuilt_besides},
+    steps::{
+        NO_DIRTY_FIX, NOT_ADDED, REBUILT_FIX, XTASK_REBUILT_FIX, same_path, touched_time,
+        with_output, xtask_binary,
+    },
 };
 
 /// The package whose first build is timed, and the only one that build may rebuild.
