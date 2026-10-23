@@ -13,6 +13,12 @@
 /crates/acp/          @ro-hansolo
 /crates/sandbox/      @ro-hansolo
 
+# Every decision record (0001 to 0003, TEMPLATE.md and each later one; 0002 and 0003 hold the
+# protocol's frozen event and error shapes) and the UI state table. A change to them needs the
+# code owner's approval, as a change to the crate does.
+/docs/decisions/      @ro-hansolo
+/docs/ui-states.md    @ro-hansolo
+
 # The agreement text, entity coverage and CI must be approved by the company.
 /CLA.md               @ro-hansolo
 /cla/entities/        @ro-hansolo
