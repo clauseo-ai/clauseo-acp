@@ -104,25 +104,17 @@ pub(super) fn warning_lines(results: &[ProbeResult]) -> Vec<String> {
 }
 
 /// The output of each failed probe: the tool's output when it ran, then the failure and its fix.
-/// A reported-only probe's failure says that the run still passes.
+/// Every failure fails the run, a reported-only probe's included (`ProbeResult::fails_run`).
 pub(super) fn print_failures<W: Write>(results: &[ProbeResult], diag: &mut Printer<W>) {
     for result in results {
         if let Outcome::Failed(failure) = &result.outcome {
             if let Some(output) = &failure.output {
                 diag.captured_output(output);
             }
-            if result.reported_only {
-                let message = format!("{} ({REPORTED_FAILURE})", failure.message);
-                diag.failure(&message, &failure.fix);
-            } else {
-                diag.failure(&failure.message, &failure.fix);
-            }
+            diag.failure(&failure.message, &failure.fix);
         }
     }
 }
-
-/// Added to the failure of a reported-only probe.
-pub(super) const REPORTED_FAILURE: &str = "reported only; the run still passes";
 
 /// One probe in the JSON report, the same shape for both halves. Values are in `unit`; absent
 /// fields are left out.
@@ -144,7 +136,7 @@ pub(super) struct ProbeJson {
     budget: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     budget_id: Option<&'static str>,
-    /// True when the probe never fails the run, whatever it came to.
+    /// True when being over budget never fails the run. A failed probe fails it either way.
     reported_only: bool,
     /// Why a probe was skipped or failed.
     #[serde(skip_serializing_if = "Option::is_none")]

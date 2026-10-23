@@ -9,6 +9,7 @@
 
 mod sys;
 
+use std::fs::FileTimes;
 #[cfg(unix)]
 use std::fs::{File, Permissions};
 use std::io;
@@ -59,6 +60,16 @@ impl Scratch {
     /// `fs::remove_file` of `path`.
     pub(crate) fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
         sys::remove_file(inside(path.as_ref()))
+    }
+
+    /// `fs::remove_dir_all` of `path`, a folder and everything under it.
+    pub(crate) fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
+        sys::remove_dir_all(inside(path.as_ref()))
+    }
+
+    /// `fs::set_times` of `path`.
+    pub(crate) fn set_times(path: impl AsRef<Path>, times: FileTimes) -> io::Result<()> {
+        sys::set_times(inside(path.as_ref()), times)
     }
 
     /// `fs::copy` of `from` (which may lie anywhere) to `to`.

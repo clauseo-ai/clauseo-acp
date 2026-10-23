@@ -9,7 +9,7 @@
     reason = "the write door's std calls live here alone; clippy.toml bans them elsewhere"
 )]
 
-use std::fs::{self, File, OpenOptions, Permissions};
+use std::fs::{self, File, FileTimes, OpenOptions, Permissions};
 use std::io;
 use std::path::Path;
 
@@ -61,4 +61,25 @@ pub(super) fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// `OpenOptions::open`.
 pub(super) fn open(options: &OpenOptions, path: &Path) -> io::Result<File> {
     options.open(path)
+}
+
+/// `fs::copy`.
+pub(super) fn copy(from: &Path, to: &Path) -> io::Result<u64> {
+    fs::copy(from, to)
+}
+
+/// `fs::set_times`.
+pub(super) fn set_times(path: &Path, times: FileTimes) -> io::Result<()> {
+    fs::set_times(path, times)
+}
+
+/// `fs::set_times_nofollow`.
+pub(super) fn set_times_nofollow(path: &Path, times: FileTimes) -> io::Result<()> {
+    fs::set_times_nofollow(path, times)
+}
+
+/// `std::os::unix::fs::symlink`.
+#[cfg(unix)]
+pub(super) fn symlink(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
 }

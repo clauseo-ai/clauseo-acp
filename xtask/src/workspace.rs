@@ -3,6 +3,7 @@
 use crate::process::{self, Cmd, Program, Status};
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
@@ -136,11 +137,44 @@ pub(crate) struct PackageDependencies {
     pub features: BTreeMap<String, Vec<String>>,
 }
 
-/// The workspace root: the parent of this crate's directory (`xtask/`).
+/// The workspace root: the parent of this crate's directory (`xtask/`) in the checkout xtask runs
+/// in, which `root_from` reads from the variables `cargo run` (and so the `cargo xtask` alias)
+/// sets for the program it runs.
 pub(crate) fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
+    root_from(
+        std::env::var_os("CARGO_MANIFEST_DIR").as_deref(),
+        std::env::var_os("CARGO_PKG_NAME").as_deref(),
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    )
+}
+
+/// The parent of xtask's directory. `run_dir` and `run_package` are `CARGO_MANIFEST_DIR` and
+/// `CARGO_PKG_NAME` as xtask runs: cargo sets both for the program `cargo run` starts (cargo 1.99:
+/// a moved crate whose sources are older than its binary prints the new dir at run time and the
+/// old one through `env!`). `run_dir` is used when `run_package` is this package's own name and
+/// `run_dir` looks like xtask's directory (`is_xtask_dir`), so a dir another package's cargo, or
+/// another project's `xtask`, left in the environment is not taken for xtask's. Otherwise
+/// `compiled_dir`, the dir xtask was compiled in, which a checkout that copied another checkout's
+/// `target/xtask-run` would get wrong: cargo sees the copied binary as up to date, since it
+/// ignores the variables it sets itself when it checks for changes.
+pub(crate) fn root_from(
+    run_dir: Option<&OsStr>,
+    run_package: Option<&OsStr>,
+    compiled_dir: &Path,
+) -> PathBuf {
+    let own = run_package == Some(OsStr::new(env!("CARGO_PKG_NAME")));
+    let dir = match run_dir.map(Path::new) {
+        Some(dir) if own && is_xtask_dir(dir) => dir,
+        _ => compiled_dir,
+    };
+    dir.parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
+}
+
+/// Whether `dir` looks like xtask's directory: its last part is `xtask` and it holds a
+/// `Cargo.toml`. An empty `dir` has no last part.
+fn is_xtask_dir(dir: &Path) -> bool {
+    dir.file_name() == Some(OsStr::new("xtask")) && dir.join("Cargo.toml").is_file()
 }
 
 /// Runs `cargo metadata` in `root` once and reads the workspace members from its output.
@@ -406,6 +440,61 @@ mod tests {
             .expect("write the manifest");
         let error = load(&dir).expect_err("cargo metadata fails");
         assert!(error.starts_with("`cargo metadata` failed:\n"), "{error}");
+    }
+
+    /// A worktree that copied another checkout's `target/xtask-run` runs a binary compiled in that
+    /// checkout: the root must come from what cargo sets as xtask runs, not from `env!`. The run
+    /// dir is a real folder, so on Windows it has a drive and backslashes.
+    #[test]
+    fn the_root_is_the_checkout_xtask_runs_in_not_the_one_it_was_compiled_in() {
+        let scratch = Scratch::new("workspace-run-dir");
+        let worktree = scratch.join("new/worktree");
+        let manifest = "[package]\nname = \"xtask\"\n";
+        for dir in ["new/worktree/xtask", "bare/xtask", "other/tool"] {
+            Scratch::create_dir_all(scratch.join(dir)).expect("a dir");
+        }
+        Scratch::write(worktree.join("xtask/Cargo.toml"), manifest).expect("xtask's manifest");
+        Scratch::write(scratch.join("other/tool/Cargo.toml"), manifest).expect("another dir");
+        let compiled = Path::new("/src/checkout/xtask");
+        let run_dir = worktree.join("xtask");
+        let run_dir = run_dir.as_os_str();
+        let xtask = Some(OsStr::new("xtask"));
+        assert_eq!(root_from(Some(run_dir), xtask, compiled), worktree);
+        let old = PathBuf::from("/src/checkout");
+        assert_eq!(root_from(None, xtask, compiled), old, "unset");
+        assert_eq!(
+            root_from(Some(OsStr::new("")), xtask, compiled),
+            old,
+            "empty"
+        );
+        let desktop = Some(OsStr::new("clauseo-desktop"));
+        assert_eq!(
+            root_from(Some(run_dir), desktop, compiled),
+            old,
+            "another package's dir"
+        );
+        assert_eq!(
+            root_from(Some(run_dir), None, compiled),
+            old,
+            "no package name"
+        );
+        let bare = scratch.join("bare/xtask");
+        assert_eq!(
+            root_from(Some(bare.as_os_str()), xtask, compiled),
+            old,
+            "a dir named xtask without a Cargo.toml"
+        );
+        let other = scratch.join("other/tool");
+        assert_eq!(
+            root_from(Some(other.as_os_str()), xtask, compiled),
+            old,
+            "a dir with a Cargo.toml not named xtask"
+        );
+        assert_eq!(
+            root_from(None, None, Path::new("/")),
+            PathBuf::from("."),
+            "a dir with no parent"
+        );
     }
 
     #[test]

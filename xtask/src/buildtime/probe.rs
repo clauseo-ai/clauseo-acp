@@ -181,17 +181,26 @@ pub(crate) fn judge_warm_up(
                 probe.package
             ),
         )),
-        Some(true) => Ok(None),
-        Some(false) if ci => Err(Failure::new(
-            format!(
-                "refusing to measure: CI is set and {} builds without incremental",
-                probe.package
-            ),
+        Some(incremental) => judge_incremental(probe.package, incremental, ci),
+    }
+}
+
+/// What a rebuild of `package` with (`incremental`) or without incremental means for its timing:
+/// nothing when it was incremental. Without, a failure when CI is set, and otherwise the warning
+/// that the timing is not comparable with the budget.
+pub(crate) fn judge_incremental(
+    package: &str,
+    incremental: bool,
+    ci: bool,
+) -> Result<Option<String>, Failure> {
+    match (incremental, ci) {
+        (true, _) => Ok(None),
+        (false, true) => Err(Failure::new(
+            format!("refusing to measure: CI is set and {package} builds without incremental"),
             INCREMENTAL_FIX,
         )),
-        Some(false) => Ok(Some(format!(
-            "warning: {} builds without incremental; its timing is not comparable with the budget",
-            probe.package
+        (false, false) => Ok(Some(format!(
+            "warning: {package} builds without incremental; its timing is not comparable with the budget"
         ))),
     }
 }

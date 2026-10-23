@@ -264,11 +264,11 @@ source = "synthesis §4; doc 17 §3.4"
 
 [[budget]]
 id = "fresh_agent_worktree"
-metric = "fresh agent worktree, end to end"
+metric = "fresh agent worktree, end to end, through the first `cargo xtask`"
 limit = 30.0
 unit = "s"
 gate = "alert"
-measured_by = "worktree script"
+measured_by = "cargo xtask buildtime worktree"
 status = "unmeasured"
 measured = 20.0
 measured_on = "linux-x86_64-vm"
