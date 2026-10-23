@@ -125,6 +125,7 @@
 )]
 
 mod error;
+mod error_code;
 mod ids;
 mod number;
 mod open_enum;
@@ -151,6 +152,7 @@ macro_rules! wire_types {
 
 // Every type that crosses the boundary: each derives `specta::Type` under the `specta` feature.
 wire_types! {
+    error_code::{ErrorCode, HostError},
     ids::{
         AgentChoiceId, AgentId, AgentSessionId, BlobHash, CheckpointId, CommandId, ContentId,
         ElicitationId, EventId, FileRefId, FolderRefId, MatterId, MatterPath, MessageId,
