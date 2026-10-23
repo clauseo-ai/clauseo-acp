@@ -108,9 +108,11 @@ fn a_copy_keeps_symlinks_as_symlinks_with_their_own_times_and_a_files_permission
     copy_into(&debug, &target, "debug").expect("the tree is copied");
     for ((name, pointed), times_before) in links.into_iter().zip(before) {
         let link = target.join("debug").join(name);
+        // The times first: reading a link moves its access time on Linux (relatime), as reading a
+        // file does.
+        assert_eq!(times(&link), times_before, "{name}'s own times");
         assert!(link.is_symlink(), "{name} stays a symlink");
         assert_eq!(fs::read_link(&link).expect("a link"), Path::new(pointed));
-        assert_eq!(times(&link), times_before, "{name}'s own times");
     }
     let copied = fs::metadata(target.join("debug/app")).expect("copied");
     assert_eq!(copied.permissions().mode() & 0o777, 0o555);
