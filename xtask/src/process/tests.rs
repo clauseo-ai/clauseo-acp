@@ -186,11 +186,12 @@ fn every_variable_the_local_git_lists_is_in_git_local_env() {
     );
 }
 
-/// `git rev-parse --local-env-vars` as git 2.39 prints it, with `GIT_SUPER_PREFIX`.
+/// `git rev-parse --local-env-vars` as git 2.39 prints it, with `GIT_INTERNAL_SUPER_PREFIX`.
 const GIT_2_39_LOCAL_ENV: &str = "GIT_ALTERNATE_OBJECT_DIRECTORIES\nGIT_CONFIG\n\
     GIT_CONFIG_PARAMETERS\nGIT_CONFIG_COUNT\nGIT_OBJECT_DIRECTORY\nGIT_DIR\nGIT_WORK_TREE\n\
     GIT_IMPLICIT_WORK_TREE\nGIT_GRAFT_FILE\nGIT_INDEX_FILE\nGIT_NO_REPLACE_OBJECTS\n\
-    GIT_REPLACE_REF_BASE\nGIT_PREFIX\nGIT_SUPER_PREFIX\nGIT_SHALLOW_FILE\nGIT_COMMON_DIR\n";
+    GIT_REPLACE_REF_BASE\nGIT_PREFIX\nGIT_INTERNAL_SUPER_PREFIX\nGIT_SHALLOW_FILE\n\
+    GIT_COMMON_DIR\n";
 
 #[test]
 fn an_older_git_list_passes_and_a_list_with_an_unknown_name_fails() {
