@@ -32,7 +32,17 @@ copy_vcs = true
 # crates/desktop/src/e2e.rs is the same: it is compiled only for Windows with the `e2e` feature
 # (`#[cfg(all(windows, feature = "e2e"))]` in lib.rs). Its code runs only in e2e-windows.yml, whose
 # smoke test checks the webview arguments it passes.
-exclude_globs = ["xtask/src/process/windows.rs", "crates/desktop/src/e2e.rs"]
+#
+# Likewise each OS shim of clauseo-settings is compiled for its OS only (`#[cfg(windows)]` or
+# `#[cfg(target_os = "macos")]` on the `mod` line), and its read-only tests run in the Windows CI
+# jobs and on macOS. The parsers they feed are in other files and are mutated as usual.
+exclude_globs = [
+  "xtask/src/process/windows.rs",
+  "crates/desktop/src/e2e.rs",
+  "crates/settings/src/policy/windows.rs",
+  "crates/settings/src/policy/macos.rs",
+  "crates/settings/src/system/windows.rs",
+]
 
 # No test can make these happen without fault injection in std (xtask/src/process/running.rs):
 # - `Running::keep` only keeps the error of a failed pipe read, wait or killpg, which a live
@@ -56,4 +66,9 @@ exclude_re = [
   #   `|` and `^` give the same byte for every input. (`+` would too, but cargo-mutants never
   #   turns `|` into `+`: it replaces `|` only with `^` and `&`, and `&` is caught.)
   'ids\.rs:\d+:\d+: replace \| with \^ in <impl FromStr for BlobHash>::from_str$',
+  # clauseo-settings' `SystemDirs` (crates/settings/src/system.rs) asks the real OS for its
+  # folders. Off Windows, `home` is `std::env::home_dir`, which no test may read (tests read no
+  # real home folder), and the others return `None` with no caller there; on Windows they call
+  # the known-folder shim excluded above.
+  'crates/settings/src/system\.rs:\d+:\d+: replace <impl PlatformDirs for SystemDirs>::(home|local_data|documents|known_folder) -> Option<PathBuf> with ',
 ]
