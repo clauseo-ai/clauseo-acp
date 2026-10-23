@@ -5,3 +5,14 @@
 # The line is copied in xtask/src/checks/core_io/tests/repos/cases.rs (XTASK_ALIAS), and a test
 # there fails when the two differ.
 xtask = "run --quiet --locked --package xtask --target-dir target/xtask-run --"
+
+# Windows links with rust-lld (lld-link, shipped with the toolchain) instead of MSVC's link.exe.
+# Edit to binary, `cargo xtask buildtime rust`'s build_desktop, median of 5 per run:
+# - x86_64, windows-2025-runner (3 runs): link.exe 2.98, 3.02, 3.05 s; rust-lld 2.53, 2.66, 2.85 s.
+# - aarch64, windows-11-arm-runner (2 runs): link.exe 3.71, 3.83 s; rust-lld 2.85, 2.97 s.
+# Changing the linker makes cargo rebuild every crate once.
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"
+
+[target.aarch64-pc-windows-msvc]
+linker = "rust-lld.exe"
