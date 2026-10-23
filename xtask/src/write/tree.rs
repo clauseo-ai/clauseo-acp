@@ -91,9 +91,11 @@ fn copy_link(from: &Path, to: &Path) -> io::Result<()> {
 
 /// Sets the access and modification times of `<dir>/<path>` to `time`. `path` is relative, its
 /// parts plain names joined by `/`, as `git ls-files` prints a path; each part is joined on its
-/// own, so a Windows folder gets `\` between them. A symlink gets its own times and is never
-/// followed. Refuses any other `path` (absolute, with `.`, `..`, an empty part or a `\`), so the
-/// change never leaves `dir`.
+/// own, so a Windows folder gets `\` between them. When the last part is a symlink, it gets its
+/// own times and is not followed. Refuses any other `path` (absolute, with `.`, `..`, an empty
+/// part or a `\`), so `path` alone cannot name a file outside `dir`; a symlinked folder earlier
+/// in `path` is followed, wherever it points. `git ls-files` never lists a path under a tracked
+/// symlink, so the worktree run does not reach that case.
 pub(crate) fn set_times_in(dir: &Path, path: &str, time: SystemTime) -> io::Result<()> {
     let mut full = dir.to_path_buf();
     for part in path.split('/') {
