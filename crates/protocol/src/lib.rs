@@ -137,10 +137,12 @@ mod open_enum;
 mod raw;
 mod serde_util;
 mod session;
+mod stream;
 mod text;
 mod title;
 mod tool;
 mod turn;
+mod view;
 
 /// Writes the one list of wire types: a `pub use <module>::{..};` per module and, under the
 /// `specta` feature, [`wire_types`], which registers every one of them.
@@ -195,11 +197,18 @@ wire_types! {
         PlanStatus, PromptCapabilities, RenameSource, SessionCapabilities, SteeringCapability,
         TextKind, TurnUsage,
     },
+    stream::{StreamId},
     text::{BlobRef, TextOrBlob},
     title::{Title},
     tool::{ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation},
     turn::{
         ChangeKind, Delivery, FileChange, SkippedFile, SkippedFileReason, SteerOutcome, StopReason,
+    },
+    view::{
+        AgentContentEntry, AgentTextEntry, ContextUsage, ElicitationEntry, ElicitationState,
+        EntryId, HeaderEntry, LimitStopEntry, MarkerEntry, MarkerKind, MatterHeaderEntry,
+        NoticeEntry, PermissionEntry, PermissionState, StepEntry, ThreadStatus, ToolCallEntry,
+        UserMessageEntry, UserMessageStatus, VersionEntry, ViewEntry,
     },
 }
 
