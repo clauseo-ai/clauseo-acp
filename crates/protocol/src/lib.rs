@@ -124,17 +124,23 @@
     clippy::wildcard_enum_match_arm
 )]
 
+mod approval;
 mod content;
 mod error;
 mod error_code;
+mod event;
 mod ids;
+mod limits;
+mod matter;
 mod number;
 mod open_enum;
 mod raw;
 mod serde_util;
+mod session;
 mod text;
 mod title;
 mod tool;
+mod turn;
 
 /// Writes the one list of wire types: a `pub use <module>::{..};` per module and, under the
 /// `specta` feature, [`wire_types`], which registers every one of them.
@@ -154,18 +160,47 @@ macro_rules! wire_types {
 
 // Every type that crosses the boundary: each derives `specta::Type` under the `specta` feature.
 wire_types! {
+    approval::{
+        Deliverable, ElicitationOutcome, ElicitationRequest, ElicitationResponse, ExpiryReason,
+        PermissionChoice, PermissionKind, PermissionOption, Principal,
+    },
     content::{ContentBlock, PromptBlock, RawFrom, ToolCallContent},
     error_code::{ErrorCode, HostError},
+    event::{
+        AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
+        CompactionChanged, ConfigOptionsReplaced, ContentAppended, DomainEvent, ElicitationExpired,
+        ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, ModeChanged,
+        Notice, OutsideEdits, PermissionExpired, PermissionRequested, PermissionResolved,
+        PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone, TextAppended, ThreadArchived,
+        ThreadCreated, ThreadRenamed, ToolCallStarted, ToolCallUpdated, TurnEnded, TurnFailed,
+        TurnQueued, TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage, VersionRestored,
+    },
     ids::{
         AgentChoiceId, AgentId, AgentSessionId, BlobHash, CheckpointId, CommandId, ContentId,
         ElicitationId, EventId, FileRefId, FolderRefId, MatterId, MatterPath, MessageId,
         PermissionRequestId, ThreadId, ToolCallId, TurnId, ViewEpoch,
     },
+    limits::{
+        AccountLimits, AccountRef, AgentKind, AgentLimitsView, AtLimitBehaviour, Billing,
+        BillingKind, BillingProvider, Freshness, LimitMeter, LimitSource, LimitStopReason,
+        LimitWindow, LimitWindowView, LimitsView, MeterTone, PlanLabel, StaleReason,
+        UnavailableReason, WindowFreshness, WindowKind,
+    },
+    matter::{CheckpointKind, FileChoice, FileDecision, ImportSummary, MatterKind, RestoreScope},
     number::{Count, Cursor, Finite, Seq, Timestamp},
     raw::{RawPayload},
+    session::{
+        AgentCapabilities, AvailableCommand, CompactionStatus, ConfigCategory, ConfigChoice,
+        ConfigOption, ConfigOptionKind, Cost, DetachReason, NoticeLevel, PlanEntry, PlanPriority,
+        PlanStatus, PromptCapabilities, RenameSource, SessionCapabilities, SteeringCapability,
+        TextKind, TurnUsage,
+    },
     text::{BlobRef, TextOrBlob},
     title::{Title},
     tool::{ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation},
+    turn::{
+        ChangeKind, Delivery, FileChange, SkippedFile, SkippedFileReason, SteerOutcome, StopReason,
+    },
 }
 
 // compact_str's type, re-exported for callers; wire fields holding it export as `string`.
