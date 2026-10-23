@@ -4,7 +4,7 @@
 use super::super::steps::XTASK_RUN_FIX;
 use super::super::steps::xtask_binary;
 use super::super::*;
-use super::{Fake, LIMIT, app_only, find, left_behind, measure_with, repo};
+use super::{Fake, LIMIT, app_only, artifact, find, left_behind, measure_with, repo};
 use crate::buildtime::INCREMENTAL_FIX;
 use crate::process::{self, Cmd, Program, TEST_TIMEOUT};
 use crate::scratch::Scratch;
@@ -430,4 +430,39 @@ fn the_built_line_names_each_rebuilt_unit_once_and_counts_the_fresh_ones() {
         "first build: rebuilt clauseo-desktop (custom-build), clauseo-desktop (lib); fresh: 2"
     );
     assert_eq!(built_line(""), "first build: rebuilt nothing; fresh: 0");
+}
+
+/// cargo prints a `Dirty` line only for a unit it built before (cargo 1.99: a unit whose
+/// build output is missing gets only its `Compiling` line), so a first build may rebuild another
+/// package and print none.
+#[test]
+fn a_first_build_that_rebuilt_another_package_without_a_dirty_line_says_it_built_it_first() {
+    let scratch = Scratch::new("worktree-rebuilt-no-dirty");
+    let root = repo(&scratch);
+    let more = format!(
+        "{}\n{}",
+        artifact("path+file:///w/dep#0.1.0", "lib", false),
+        app_only()
+    );
+    let mut fake = Fake {
+        builds: vec![more],
+        build_stderr: "   Compiling dep v0.1.0 (/w/dep)\n       Fresh libc v0.2.177\n".to_owned(),
+        ..Fake::default()
+    };
+    let measured = measure_with(&root, false, 1, &mut fake).expect("measured");
+    assert_eq!(
+        find(&measured, "worktree_first_build").outcome,
+        Outcome::Failed(Failure::new(
+            "`cargo build -p clauseo-desktop --message-format=json -v` rebuilt more than \
+             clauseo-desktop in the worktree: dep (lib)",
+            NO_DIRTY_FIX
+        ))
+    );
+    assert_eq!(
+        NO_DIRTY_FIX,
+        "cargo printed no `Dirty` line, so it built each one for the first time: the copied \
+         target/debug held no build of them with the worktree's settings (features, environment, \
+         `.cargo/config.toml`); find what differs from the repo root, then run again"
+    );
+    assert!(measured.notes.is_empty(), "no build passed");
 }

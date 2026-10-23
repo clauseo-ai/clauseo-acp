@@ -213,8 +213,8 @@ fn a_folder_git_made_but_does_not_know_fails_the_removal_with_a_fix_that_removes
             format!(
                 "check what is at {shown} before you move it away: if `git worktree list` names \
                  it, `git worktree remove {shown}` removes it unless it holds modified or \
-                 untracked files, and `git worktree prune` forgets it once its folder is gone; \
-                 then run again"
+                 untracked files, and once its folder is gone `git worktree prune` forgets it, \
+                 after `git worktree unlock {shown}` if it is locked; then run again"
             )
         )
     );

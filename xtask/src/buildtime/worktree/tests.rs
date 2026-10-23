@@ -120,6 +120,10 @@ enum Trick {
     RefuseRemove,
     /// `git worktree add` makes the folder, then fails.
     AddFailsAfterMakingIt,
+    /// `git worktree add` fails and makes nothing.
+    AddFails,
+    /// `git worktree list` fails once a `git worktree add` ran.
+    ListFailsAfterAdd,
     /// pnpm runs past its limit.
     PnpmTimesOut,
     /// Someone makes a folder at the worktree's path, holding `theirs.txt`, during the warm-up.
@@ -159,6 +163,15 @@ impl Fake {
             {
                 Scratch::create_dir_all(path).expect("the folder git made");
                 Ok(Ran::exited(false, "", "fatal: failed by the test\n"))
+            }
+            (Program::Git, ["worktree", "add", ..]) if self.tricks.contains(&Trick::AddFails) => {
+                Ok(Ran::exited(false, "", "fatal: failed by the test\n"))
+            }
+            (Program::Git, ["worktree", "list", ..])
+                if self.tricks.contains(&Trick::ListFailsAfterAdd)
+                    && self.ran("git worktree add") > 0 =>
+            {
+                Ok(Ran::exited(false, "", "fatal: refused by the test\n"))
             }
             (Program::Git, _) => process::run_quiet(cmd, dir),
             (Program::Pnpm, _) if self.tricks.contains(&Trick::PnpmTimesOut) => {
@@ -455,39 +468,4 @@ fn an_xtask_that_rebuilt_fails_the_last_step_and_leaves_the_total_skipped() {
         Outcome::Skipped(NO_TOTAL.into())
     );
     assert!(!measured.passed(false));
-}
-
-/// cargo prints a `Dirty` line only for a unit it built before (cargo 1.99: a unit whose
-/// build output is missing gets only its `Compiling` line), so a first build may rebuild another
-/// package and print none.
-#[test]
-fn a_first_build_that_rebuilt_another_package_without_a_dirty_line_says_it_built_it_first() {
-    let scratch = Scratch::new("worktree-rebuilt-no-dirty");
-    let root = repo(&scratch);
-    let more = format!(
-        "{}\n{}",
-        artifact("path+file:///w/dep#0.1.0", "lib", false),
-        app_only()
-    );
-    let mut fake = Fake {
-        builds: vec![more],
-        build_stderr: "   Compiling dep v0.1.0 (/w/dep)\n       Fresh libc v0.2.177\n".to_owned(),
-        ..Fake::default()
-    };
-    let measured = measure_with(&root, false, 1, &mut fake).expect("measured");
-    assert_eq!(
-        find(&measured, "worktree_first_build").outcome,
-        Outcome::Failed(Failure::new(
-            "`cargo build -p clauseo-desktop --message-format=json -v` rebuilt more than \
-             clauseo-desktop in the worktree: dep (lib)",
-            NO_DIRTY_FIX
-        ))
-    );
-    assert_eq!(
-        NO_DIRTY_FIX,
-        "cargo printed no `Dirty` line, so it built each one for the first time: the copied \
-         target/debug held no build of them with the worktree's settings (features, environment, \
-         `.cargo/config.toml`); find what differs from the repo root, then run again"
-    );
-    assert!(measured.notes.is_empty(), "no build passed");
 }
