@@ -62,9 +62,10 @@ const CLIPPY_CONF_DIR: &str = "CLIPPY_CONF_DIR";
 
 /// The variables `git rev-parse --local-env-vars` lists: each points git at a particular
 /// repository, index or object store instead of the one found from the working dir. It is git
-/// 2.54's list plus `GIT_SUPER_PREFIX`, which gits before 2.40 still list. A git that lists a name
-/// missing here fails `every_variable_the_local_git_lists_is_in_git_local_env`; a git that lists
-/// fewer passes.
+/// 2.54's list plus `GIT_INTERNAL_SUPER_PREFIX`, which every git from 2.11.0 through 2.39.5 lists
+/// and 2.10.x and 2.40.0 and later do not. No release lists `GIT_SUPER_PREFIX`. A git that lists a
+/// name missing here fails `every_variable_the_local_git_lists_is_in_git_local_env`; a git that
+/// lists fewer passes.
 const GIT_LOCAL_ENV: [&str; 16] = [
     "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     "GIT_CONFIG",
@@ -79,7 +80,7 @@ const GIT_LOCAL_ENV: [&str; 16] = [
     "GIT_NO_REPLACE_OBJECTS",
     "GIT_REPLACE_REF_BASE",
     "GIT_PREFIX",
-    "GIT_SUPER_PREFIX",
+    "GIT_INTERNAL_SUPER_PREFIX",
     "GIT_SHALLOW_FILE",
     "GIT_COMMON_DIR",
 ];
