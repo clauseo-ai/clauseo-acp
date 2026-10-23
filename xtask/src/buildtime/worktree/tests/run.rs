@@ -72,6 +72,13 @@ fn a_whole_run_prints_the_table_or_one_json_object_and_passes() {
     };
     let (passed, table, diag) = run_with(&root, false, &mut fake);
     assert_eq!(passed, Ok(true), "{diag}");
+    assert_eq!(
+        diag,
+        "run 1, first build: rebuilt clauseo-desktop (custom-build), clauseo-desktop (lib); \
+         fresh: 1\nrun 2, first build: rebuilt clauseo-desktop (custom-build), clauseo-desktop \
+         (lib); fresh: 1\n",
+        "what each first build rebuilt, from cargo's JSON"
+    );
     let lines: Vec<&str> = table.lines().collect();
     assert!(lines[0].starts_with("rustc "), "{table}");
     assert!(
@@ -101,6 +108,11 @@ fn a_whole_run_prints_the_table_or_one_json_object_and_passes() {
     };
     let (passed, json, diag) = run_with(&root, true, &mut fake);
     assert_eq!(passed, Ok(true), "{diag}");
+    assert_eq!(
+        diag.lines().count(),
+        2,
+        "the two lines go to stderr: {diag}"
+    );
     assert_eq!(json.lines().count(), 1, "one JSON object: {json}");
     let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
     assert_eq!(value["runs"], 2);
@@ -190,17 +202,22 @@ fn a_folder_git_made_but_does_not_know_fails_the_removal_with_a_fix_that_removes
     let [failure] = measured.errors.as_slice() else {
         panic!("one failure: {:?}", measured.errors);
     };
-    let start = format!(
-        "could not remove the worktree {shown} that this run made: `git worktree remove --force \
-         {shown}` failed ("
+    assert_eq!(
+        failure,
+        &Failure::new(
+            format!(
+                "could not remove the worktree {shown} that this run made: {NOT_ADDED}; its \
+                 folder is still there"
+            ),
+            cannot_remove_fix(&path)
+        )
     );
-    assert!(failure.message.starts_with(&start), "{}", failure.message);
-    assert!(
-        failure.message.ends_with("); its folder is still there"),
-        "{}",
-        failure.message
+    assert_eq!(
+        NOT_ADDED,
+        "its `git worktree add` failed, and xtask runs `git worktree remove` only on a worktree \
+         whose add succeeded"
     );
-    assert_eq!(failure.fix, cannot_remove_fix(&path));
+    assert_eq!(fake.ran("git worktree remove"), 0, "not its add's");
     assert_eq!(fake.ran("git worktree add"), 1, "no second run");
     assert_eq!(
         find(&measured, "worktree_copy").outcome,
@@ -218,18 +235,23 @@ fn a_command_past_its_limit_says_it_was_stopped() {
         ..Fake::default()
     };
     let measured = measure_with(&root, false, 1, &mut fake).expect("measured");
-    let ui = place(&root).expect("a place").join("ui");
+    let path = place(&root).expect("a place");
     let cmd = format!(
         "pnpm -C {} install --frozen-lockfile --prefer-offline",
-        ui.display()
+        path.join("ui").display()
     );
     assert_eq!(
         find(&measured, "worktree_pnpm_install").outcome,
         Outcome::Failed(Failure::new(
             format!("`{cmd}` did not finish within 30 min, so it was stopped"),
-            format!("run `{cmd}` by hand to see why it does not finish within 30 min")
+            format!(
+                "the run removed its worktree: make one the same way at {}, then run `{cmd}` by \
+                 hand to see why it does not finish within 30 min",
+                path.display()
+            )
         ))
     );
+    assert!(!left_behind(&root, &path), "the worktree is gone");
 }
 
 #[test]

@@ -62,6 +62,11 @@ impl Scratch {
         sys::remove_file(inside(path.as_ref()))
     }
 
+    /// `fs::remove_dir_all` of `path`, a folder and everything under it.
+    pub(crate) fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
+        sys::remove_dir_all(inside(path.as_ref()))
+    }
+
     /// `fs::set_times` of `path`.
     pub(crate) fn set_times(path: impl AsRef<Path>, times: FileTimes) -> io::Result<()> {
         sys::set_times(inside(path.as_ref()), times)

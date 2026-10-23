@@ -1,11 +1,10 @@
 //! Tests of the parts of a worktree run: the copy, the incremental judgement, the JSON object, the
 //! worktree's place, and how cargo's JSON names what it rebuilt, read from a real cargo build.
 
-use super::super::super::verdict::ProbeStatus;
 use super::super::steps::XTASK_RUN_FIX;
 use super::super::steps::xtask_binary;
 use super::super::*;
-use super::{Fake, LIMIT, app_only, find, measure_with, repo};
+use super::{Fake, LIMIT, app_only, find, left_behind, measure_with, repo};
 use crate::buildtime::INCREMENTAL_FIX;
 use crate::process::{self, Cmd, Program, TEST_TIMEOUT};
 use crate::scratch::Scratch;
@@ -101,11 +100,24 @@ fn a_build_without_incremental_is_refused_in_ci_and_warned_about_elsewhere() {
         build_stderr: rustc_line(false),
         ..Fake::default()
     };
-    let measured = measure_with(&root, true, 1, &mut in_ci).expect("measured");
+    let measured = measure_with(&root, true, 3, &mut in_ci).expect("measured");
     assert_eq!(
-        find(&measured, "worktree_first_build").status(),
-        ProbeStatus::Failed
+        find(&measured, "worktree_first_build").outcome,
+        Outcome::Failed(Failure::new(
+            "refusing to measure: CI is set and clauseo-desktop builds without incremental",
+            INCREMENTAL_FIX
+        ))
     );
+    assert_eq!(
+        in_ci.ran("git worktree add"),
+        1,
+        "every run would fail the same way, so none follows"
+    );
+    assert!(
+        !left_behind(&root, &place(&root).expect("a place")),
+        "removed"
+    );
+    assert!(!measured.passed(true));
 }
 
 #[test]
@@ -189,6 +201,7 @@ fn the_json_has_the_run_fields_and_errors_only_when_there_are_some() {
             outcome: Outcome::of_samples(TOTAL, vec![31.0], Some(LIMIT)),
         }],
         errors: Vec::new(),
+        notes: vec!["run 1, first build: rebuilt nothing; fresh: 1".to_owned()],
     };
     let keys = |json: &str| {
         let value: serde_json::Value = serde_json::from_str(json).expect("valid json");
@@ -251,8 +264,26 @@ fn the_worktree_goes_next_to_the_root_and_a_root_with_no_parent_is_refused() {
     );
     let refused = place(Path::new("/")).expect_err("no parent");
     assert_eq!(
-        refused.message,
-        "cannot place the worktree next to /: it has no parent folder"
+        refused,
+        Failure::new(
+            "cannot place the worktree next to /: it has no parent folder",
+            "run `cargo xtask buildtime worktree` from a checkout inside a folder: the worktree \
+             goes next to the checkout"
+        )
+    );
+    let gone = scratch.join("gone");
+    let error = dunce::canonicalize(&gone).expect_err("not there");
+    let refused = place(&gone.join("clauseo-acp")).expect_err("no such folder");
+    assert_eq!(
+        refused,
+        Failure::new(
+            format!(
+                "cannot place the worktree next to {0}: {1}: {error}",
+                gone.join("clauseo-acp").display(),
+                gone.display()
+            ),
+            "fix what the error names in that folder, where the worktree goes, then run again"
+        )
     );
 }
 
@@ -362,11 +393,17 @@ fn a_real_cargo_build_names_each_package_it_rebuilt_besides_the_one_asked() {
         assert!(built.success(), "{}", built.stderr);
         built.stdout
     };
-    assert_eq!(rebuilt_besides(&build(), "app-desk"), ["dep (lib)"], "cold");
+    let cold = build();
+    assert_eq!(rebuilt_besides(&cold, "app-desk"), ["dep (lib)"], "cold");
+    assert_eq!(
+        built_line(&cold),
+        "first build: rebuilt dep (lib), app-desk (lib); fresh: 0"
+    );
     let warm = build();
     assert!(
         rebuilt_besides(&warm, "app-desk").is_empty() && rebuilt_besides(&warm, "dep").is_empty()
     );
+    assert_eq!(built_line(&warm), "first build: rebuilt nothing; fresh: 2");
     // 2100-01-01, 47482 days after the epoch: later than any build.
     let later =
         FileTimes::new().set_modified(SystemTime::UNIX_EPOCH + Duration::from_hours(47_482 * 24));
@@ -377,4 +414,20 @@ fn a_real_cargo_build_names_each_package_it_rebuilt_besides_the_one_asked() {
         "only the app rebuilt"
     );
     assert_eq!(rebuilt_besides(&edited, "dep"), ["app-desk (lib)"]);
+    assert_eq!(
+        built_line(&edited),
+        "first build: rebuilt app-desk (lib); fresh: 1"
+    );
+}
+
+/// A unit cargo names twice, as a build that reports an artifact again does, is named once; every
+/// fresh message counts.
+#[test]
+fn the_built_line_names_each_rebuilt_unit_once_and_counts_the_fresh_ones() {
+    let twice = format!("{}\n{}", app_only(), app_only());
+    assert_eq!(
+        built_line(&twice),
+        "first build: rebuilt clauseo-desktop (custom-build), clauseo-desktop (lib); fresh: 2"
+    );
+    assert_eq!(built_line(""), "first build: rebuilt nothing; fresh: 0");
 }
