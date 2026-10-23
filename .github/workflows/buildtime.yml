@@ -1,0 +1,129 @@
+# Build-loop numbers on GitHub's shared runners, started by hand: a cold build of the app,
+# `cargo xtask buildtime all`, the fresh-worktree recipe step by step, and on Windows x64 the edit
+# loop again with rust-lld. Shared runners report; they never gate, so this runs on demand only.
+#
+# - Steps are timed with Perl's Time::HiRes: the macOS runner's bash is 3.2, which has no
+#   EPOCHREALTIME, and Perl ships with macOS and Git for Windows.
+# - No version is written here, as in ci.yml: Rust comes from rust-toolchain.toml, pnpm from
+#   "packageManager" and Node from "engines.node" in ui/package.json.
+# - No build cache: the cold build must start from an empty target/.
+# - Each job uploads `buildtime-<machine>`: the JSON of every buildtime run and a TSV of the cold
+#   build and the worktree steps, in seconds.
+# - Every action is pinned by commit SHA, with its tag in a comment.
+
+name: buildtime
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: measure (${{ matrix.machine }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-15, machine: macos-15-runner, copy: "cp -a -c" }
+          - { runner: windows-2025, machine: windows-2025-runner, copy: "cp -a" }
+          - { runner: windows-11-arm, machine: windows-11-arm-runner, copy: "cp -a" }
+    env:
+      # Cargo turns incremental off whenever CI is set, and buildtime refuses to measure without it.
+      CARGO_INCREMENTAL: "1"
+      MACHINE: ${{ matrix.machine }}
+      COPY: ${{ matrix.copy }}
+      # Relative to the checkout, untracked, and outside target/, which `cargo clean` empties.
+      OUT: buildtime-out
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Show the machine and the tools
+        run: |
+          echo "runner $MACHINE: $(uname -sm), $(nproc 2>/dev/null || sysctl -n hw.ncpu) CPUs, bash $BASH_VERSION"
+          rustc -V
+          echo "pnpm $(pnpm -v), node $(node -v), $(perl -v | grep -m1 'This is')"
+          mkdir -p "$OUT"
+
+      # Downloads stay out of the timings: the crates are fetched and the ui workspace installed first.
+      - name: Fetch the crates and install the ui workspace
+        run: |
+          cargo fetch --locked
+          pnpm -C ui install --frozen-lockfile
+
+      - name: Cold build of the app after cargo clean
+        run: |
+          now() { perl -MTime::HiRes=time -e 'printf "%.6f\n", time'; }
+          cargo clean
+          start=$(now)
+          cargo build -p clauseo-desktop
+          awk -v a="$start" -v b="$(now)" 'BEGIN { printf "cold_build_desktop\t%.3f\n", b - a }' >> "$OUT/steps.tsv"
+
+      - name: cargo xtask buildtime all
+        run: cargo xtask buildtime all --runs 5 --json > "$OUT/buildtime-$MACHINE.json"
+
+      # A failed probe fails the step, but the other numbers are still worth having, so the steps
+      # after it run unless the run was cancelled.
+      - name: cargo xtask buildtime rust, linked with rust-lld
+        if: ${{ !cancelled() && matrix.runner == 'windows-2025' }}
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld.exe
+        run: cargo xtask buildtime rust --runs 5 --json > "$OUT/buildtime-$MACHINE-rust-lld.json"
+
+      # The recipe needs a warm target/debug that matches HEAD, and buildtime's edits left the app
+      # crate to rebuild. Paths stay relative, so Git Bash never sees a Windows path. Cargo reads
+      # .cargo/config.toml from the directory it runs in, so the worktree builds from inside it.
+      - name: Fresh worktree, each step timed
+        if: ${{ !cancelled() }}
+        run: |
+          cargo build -p clauseo-desktop
+          test -z "$(git status --porcelain --untracked-files=no)"
+          new=../buildtime-worktree
+          now() { perl -MTime::HiRes=time -e 'printf "%.6f\n", time'; }
+          step() {
+            local name=$1 start
+            start=$(now)
+            shift
+            "$@"
+            awk -v n="$name" -v a="$start" -v b="$(now)" \
+              'BEGIN { printf "worktree_%s\t%.3f\n", n, b - a }' >> "$OUT/steps.tsv"
+          }
+          # Older than every artifact, so only the app crate rebuilds (tauri-build's absolute paths).
+          touch_old() { (cd "$new" && git ls-files -z | xargs -0 touch -h -t 200001010000); }
+          build_new() { (cd "$new" && cargo build -p clauseo-desktop); }
+          step add git worktree add --detach "$new" HEAD
+          mkdir -p "$new/target"
+          # shellcheck disable=SC2086 # COPY is a command and its flags
+          step copy $COPY target/debug target/CACHEDIR.TAG "$new/target/"
+          step touch touch_old
+          step pnpm_install pnpm -C "$new/ui" install --frozen-lockfile --prefer-offline
+          step first_build build_new
+          cat "$OUT/steps.tsv"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: buildtime-${{ matrix.machine }}
+          path: ${{ env.OUT }}
+          if-no-files-found: error

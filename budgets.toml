@@ -173,7 +173,9 @@ limit = 180.0
 unit = "KB"
 gate = "pr"
 measured_by = "bundle analysis"
-status = "unmeasured"
+status = "measured"
+measured = 51.1
+measured_on = "macos-x64-laptop"
 source = "synthesis §4; doc 14; doc 17"
 
 [[budget]]
@@ -233,9 +235,9 @@ limit = 1.0
 unit = "s"
 gate = "local"
 measured_by = "cargo xtask buildtime rust"
-status = "unmeasured"
-measured = 0.46
-measured_on = "linux-x86_64-vm"
+status = "measured"
+measured = 1.16
+measured_on = "macos-x64-laptop"
 source = "synthesis §4; doc 17 §3.4"
 
 [[budget]]
@@ -245,9 +247,9 @@ limit = 5.0
 unit = "s"
 gate = "local"
 measured_by = "cargo xtask buildtime rust"
-status = "unmeasured"
-measured = 1.33
-measured_on = "linux-x86_64-vm"
+status = "measured"
+measured = 3.45
+measured_on = "macos-x64-laptop"
 source = "synthesis §4; doc 17 §3.4"
 
 [[budget]]
@@ -257,9 +259,9 @@ limit = 100.0
 unit = "ms"
 gate = "local"
 measured_by = "cargo xtask buildtime web"
-status = "unmeasured"
-measured = 32.0
-measured_on = "linux-x86_64-vm"
+status = "measured"
+measured = 99.8
+measured_on = "macos-x64-laptop"
 source = "synthesis §4; doc 17 §3.4"
 
 [[budget]]
@@ -269,9 +271,9 @@ limit = 30.0
 unit = "s"
 gate = "alert"
 measured_by = "worktree script"
-status = "unmeasured"
-measured = 20.0
-measured_on = "linux-x86_64-vm"
+status = "measured"
+measured = 31.3
+measured_on = "macos-x64-laptop"
 source = "synthesis §4; doc 17 §3.4"
 
 [[budget]]
@@ -379,9 +381,9 @@ limit = 2.0
 unit = "s"
 gate = "local"
 measured_by = "cargo xtask buildtime web"
-status = "unmeasured"
-measured = 0.21
-measured_on = "linux-x86_64-vm"
+status = "measured"
+measured = 0.29
+measured_on = "macos-x64-laptop"
 source = "doc 17 §3.4"
 
 [[budget]]
@@ -391,9 +393,9 @@ limit = 2.0
 unit = "s"
 gate = "local"
 measured_by = "cargo xtask buildtime web"
-status = "unmeasured"
-measured = 0.26
-measured_on = "linux-x86_64-vm"
+status = "measured"
+measured = 0.62
+measured_on = "macos-x64-laptop"
 source = "doc 17 §3.4"
 
 [[budget]]
@@ -403,9 +405,9 @@ limit = 5.0
 unit = "s"
 gate = "local"
 measured_by = "cargo xtask buildtime web"
-status = "unmeasured"
-measured = 0.65
-measured_on = "linux-x86_64-vm"
+status = "measured"
+measured = 0.86
+measured_on = "macos-x64-laptop"
 source = "doc 17 §3.4"
 
 [[budget]]
