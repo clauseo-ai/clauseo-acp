@@ -122,6 +122,8 @@ enum Trick {
     AddFailsAfterMakingIt,
     /// pnpm runs past its limit.
     PnpmTimesOut,
+    /// Someone makes a folder at the worktree's path, holding `theirs.txt`, during the warm-up.
+    FolderDuringWarmUp,
 }
 
 /// What the fake tools do, and what they saw.
@@ -175,10 +177,17 @@ impl Fake {
                     self.build_stderr.clone(),
                 ))
             }
-            (Program::Cargo, ["build", "-p", APP, "-v"]) => match &self.warm_up_fails {
-                Some(stderr) => Ok(Ran::exited(false, "", stderr.clone())),
-                None => Ok(Ran::exited(true, "", self.warm_up_stderr.clone())),
-            },
+            (Program::Cargo, ["build", "-p", APP, "-v"]) => {
+                if self.tricks.contains(&Trick::FolderDuringWarmUp) {
+                    let theirs = place(dir).expect("a place");
+                    Scratch::create_dir_all(&theirs).expect("their folder");
+                    Scratch::write(theirs.join("theirs.txt"), "theirs").expect("their file");
+                }
+                match &self.warm_up_fails {
+                    Some(stderr) => Ok(Ran::exited(false, "", stderr.clone())),
+                    None => Ok(Ran::exited(true, "", self.warm_up_stderr.clone())),
+                }
+            }
             (Program::Cargo, ["xtask", "--help"]) => {
                 if self.tricks.contains(&Trick::RebuildXtask) {
                     let times = FileTimes::new().set_modified(old(500));

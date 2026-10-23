@@ -3,7 +3,7 @@
 //! leaves each alone, and its fix line's commands clear it without losing work.
 
 use super::super::*;
-use super::{Fake, git, left_behind, measure_with, repo};
+use super::{Fake, Trick, app_only, find, git, left_behind, measure_with, repo};
 use crate::process::{self, Cmd, Program, TEST_TIMEOUT};
 use crate::scratch::Scratch;
 use std::fs;
@@ -122,4 +122,42 @@ fn a_registered_worktree_whose_folder_is_gone_stops_the_run_and_the_fix_clears_i
     git(&root, &["worktree", "unlock", &shown]);
     git(&root, &["worktree", "prune"]);
     assert!(!left_behind(&root, &path), "unlocked, prune forgets it");
+}
+
+/// The path is checked again right before each add: a folder someone made during the warm-up
+/// fails `worktree_add` before git runs, is left alone, and no run follows.
+#[test]
+fn a_folder_made_during_the_warm_up_fails_the_add_before_git_runs_and_is_left_alone() {
+    let scratch = Scratch::new("worktree-during-warm-up");
+    let root = repo(&scratch);
+    let mut fake = Fake {
+        builds: vec![app_only()],
+        tricks: vec![Trick::FolderDuringWarmUp],
+        ..Fake::default()
+    };
+    let measured = measure_with(&root, false, 2, &mut fake).expect("measured");
+    let path = place(&root).expect("a place");
+    let shown = path.display();
+    assert_eq!(
+        find(&measured, "worktree_add").outcome,
+        Outcome::Failed(Failure::new(
+            format!(
+                "{shown} is already there; an interrupted `cargo xtask buildtime worktree` run \
+                 may have left it"
+            ),
+            already_there_fix(&path)
+        ))
+    );
+    assert_eq!(fake.ran("git worktree add"), 0, "git never ran the add");
+    assert_eq!(fake.ran("git worktree remove"), 0);
+    assert!(measured.errors.is_empty(), "nothing to remove");
+    assert_eq!(
+        find(&measured, "worktree_copy").outcome,
+        Outcome::Skipped(NOT_REACHED.into())
+    );
+    assert!(!measured.passed(false));
+    assert_eq!(
+        fs::read_to_string(path.join("theirs.txt")).expect("kept"),
+        "theirs"
+    );
 }

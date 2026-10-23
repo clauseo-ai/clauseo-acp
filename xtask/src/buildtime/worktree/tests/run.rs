@@ -165,8 +165,8 @@ fn a_worktree_that_cannot_be_removed_fails_the_run_and_no_further_run_starts() {
         [Failure::new(
             format!(
                 "could not remove the worktree {shown} that this run made: `git worktree remove \
-                 --force {shown}` failed (fatal: refused by the test); `git worktree list` still \
-                 names it; its folder is still there"
+                 --force {shown}` failed (fatal: refused by the test); `git worktree list` names \
+                 it; its folder is on disk"
             ),
             cannot_remove_fix(&path),
         )]
@@ -206,18 +206,20 @@ fn a_folder_git_made_but_does_not_know_fails_the_removal_with_a_fix_that_removes
         failure,
         &Failure::new(
             format!(
-                "could not remove the worktree {shown} that this run made: {NOT_ADDED}; its \
-                 folder is still there"
+                "this run's `git worktree add` failed and something is left at {shown}: its \
+                 folder is on disk. xtask cannot tell whether git or someone else made it, so it \
+                 leaves it as it is"
             ),
-            cannot_remove_fix(&path)
+            format!(
+                "check what is at {shown} before you move it away: if `git worktree list` names \
+                 it, `git worktree remove {shown}` removes it unless it holds modified or \
+                 untracked files, and `git worktree prune` forgets it once its folder is gone; \
+                 then run again"
+            )
         )
     );
-    assert_eq!(
-        NOT_ADDED,
-        "its `git worktree add` failed, and xtask runs `git worktree remove` only on a worktree \
-         whose add succeeded"
-    );
-    assert_eq!(fake.ran("git worktree remove"), 0, "not its add's");
+    assert_eq!(fake.ran("git worktree remove"), 0, "xtask removes nothing");
+    assert!(path.is_dir(), "left as it is");
     assert_eq!(fake.ran("git worktree add"), 1, "no second run");
     assert_eq!(
         find(&measured, "worktree_copy").outcome,
@@ -234,24 +236,36 @@ fn a_command_past_its_limit_says_it_was_stopped() {
         tricks: vec![Trick::PnpmTimesOut],
         ..Fake::default()
     };
-    let measured = measure_with(&root, false, 1, &mut fake).expect("measured");
     let path = place(&root).expect("a place");
     let cmd = format!(
         "pnpm -C {} install --frozen-lockfile --prefer-offline",
         path.join("ui").display()
     );
-    assert_eq!(
-        find(&measured, "worktree_pnpm_install").outcome,
-        Outcome::Failed(Failure::new(
-            format!("`{cmd}` did not finish within 30 min, so it was stopped"),
-            format!(
-                "the run removed its worktree: make one the same way at {}, then run `{cmd}` by \
-                 hand to see why it does not finish within 30 min",
-                path.display()
-            )
-        ))
-    );
+    let stopped = Outcome::Failed(Failure::new(
+        format!("`{cmd}` did not finish within 30 min, so it was stopped"),
+        format!(
+            "in a worktree made the same way at {}, run `{cmd}` by hand to see why it does not \
+             finish within 30 min",
+            path.display()
+        ),
+    ));
+    let measured = measure_with(&root, false, 1, &mut fake).expect("measured");
+    assert_eq!(find(&measured, "worktree_pnpm_install").outcome, stopped);
     assert!(!left_behind(&root, &path), "the worktree is gone");
+    // The same fix holds when the worktree then cannot be removed.
+    let mut stuck = Fake {
+        builds: vec![app_only()],
+        tricks: vec![Trick::PnpmTimesOut, Trick::RefuseRemove],
+        ..Fake::default()
+    };
+    let measured = measure_with(&root, false, 1, &mut stuck).expect("measured");
+    assert_eq!(find(&measured, "worktree_pnpm_install").outcome, stopped);
+    assert_eq!(measured.errors.len(), 1, "the removal failed too");
+    assert!(left_behind(&root, &path), "the worktree is still there");
+    git(
+        &root,
+        &["worktree", "remove", "--force", &path.to_string_lossy()],
+    );
 }
 
 #[test]

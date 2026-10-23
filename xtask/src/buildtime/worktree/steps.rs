@@ -298,9 +298,10 @@ impl Worktree<'_> {
 
     /// After a run: removes the worktree with `git worktree remove --force` when this run's
     /// `git worktree add` succeeded (`added`), then makes sure it is gone from disk and from
-    /// `git worktree list`. Before the runs nothing was at its path and git listed no worktree
-    /// there (`refuse_leftover`), so what is there now this run made. When the add failed, xtask
-    /// runs no `git worktree remove`: git undoes a failed add itself, and what it left is named.
+    /// `git worktree list`. Nothing was at its path right before the add (`refuse_leftover`), so
+    /// after a successful add what is there this run made. When the add failed, xtask removes
+    /// nothing: git undoes a failed add itself, and xtask cannot tell whether git or someone else
+    /// made what is left, so it only names it.
     pub(super) fn remove(&self, added: bool, runner: &mut QuietRunner<'_>) -> Result<(), Failure> {
         let mut why = Vec::new();
         if added {
@@ -311,23 +312,19 @@ impl Worktree<'_> {
                 why.push(with_output(failure));
             }
         }
-        let listed = self
-            .listed(runner)
-            .map_err(|failure| self.cannot_remove(&failure.message))?;
-        let on_disk = fs::symlink_metadata(&self.path).is_ok();
-        if !added && (listed || on_disk) {
-            why.push(NOT_ADDED.to_owned());
+        match self.listed(runner) {
+            Ok(true) => why.push("`git worktree list` names it".to_owned()),
+            Ok(false) => {}
+            Err(failure) => why.push(failure.message),
         }
-        if listed {
-            why.push("`git worktree list` still names it".to_owned());
+        if fs::symlink_metadata(&self.path).is_ok() {
+            why.push("its folder is on disk".to_owned());
         }
-        if on_disk {
-            why.push("its folder is still there".to_owned());
+        match (why.is_empty(), added) {
+            (true, _) => Ok(()),
+            (false, true) => Err(self.cannot_remove(&why.join("; "))),
+            (false, false) => Err(self.left_after_failed_add(&why.join("; "))),
         }
-        if why.is_empty() {
-            return Ok(());
-        }
-        Err(self.cannot_remove(&why.join("; ")))
     }
 
     /// Whether `git worktree list --porcelain` names the worktree.
@@ -340,6 +337,23 @@ impl Worktree<'_> {
             .lines()
             .filter_map(|line| line.strip_prefix("worktree "))
             .any(|path| same_path(Path::new(path), &self.path)))
+    }
+
+    /// The failure of what is at the worktree's path after this run's `git worktree add` failed.
+    pub(super) fn left_after_failed_add(&self, why: &str) -> Failure {
+        let path = self.path.display();
+        Failure::new(
+            format!(
+                "this run's `git worktree add` failed and something is left at {path}: {why}. \
+                 xtask cannot tell whether git or someone else made it, so it leaves it as it is"
+            ),
+            format!(
+                "check what is at {path} before you move it away: if `git worktree list` names \
+                 it, `git worktree remove {path}` removes it unless it holds modified or \
+                 untracked files, and `git worktree prune` forgets it once its folder is gone; \
+                 then run again"
+            ),
+        )
     }
 
     /// The failure of a worktree this run made and could not remove.
@@ -356,10 +370,6 @@ impl Worktree<'_> {
         )
     }
 }
-
-/// Why a worktree whose add failed is left: xtask removed nothing.
-pub(crate) const NOT_ADDED: &str = "its `git worktree add` failed, and xtask runs \
-    `git worktree remove` only on a worktree whose add succeeded";
 
 /// A failure's message, with what the command printed on one line after it in brackets when it
 /// printed anything.
@@ -397,7 +407,7 @@ enum Where {
 /// failure carries what it printed, its JSON messages as people read them and without the
 /// `Fresh` and `Running` lines of `-v`. A command that failed in the worktree cannot be run
 /// again there, since the run removes it: its fix points at that output, or, for a command past
-/// its limit, which printed nothing, says to make a worktree the same way first.
+/// its limit, which printed nothing, says to run it in a worktree made the same way.
 fn ran(runner: &mut QuietRunner<'_>, cmd: &Cmd, dir: &Path, place: Where) -> Result<Ran, Failure> {
     match runner(cmd, dir) {
         Ok(done) if done.success() => Ok(done),
@@ -405,11 +415,13 @@ fn ran(runner: &mut QuietRunner<'_>, cmd: &Cmd, dir: &Path, place: Where) -> Res
             process::timeout_message(cmd),
             match place {
                 Where::Checkout => TimeoutFix::of(cmd).to_string(),
-                Where::Worktree => format!(
-                    "the run removed its worktree: make one the same way at {}, then {}",
-                    dir.display(),
-                    TimeoutFix::of(cmd)
-                ),
+                Where::Worktree => {
+                    format!(
+                        "in a worktree made the same way at {}, {}",
+                        dir.display(),
+                        TimeoutFix::of(cmd)
+                    )
+                }
             },
         )),
         Ok(done) => {
