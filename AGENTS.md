@@ -33,6 +33,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 
 <!-- One line per crate or package that exists. Planned crates are in ARCHITECTURE.md. -->
 - `crates/desktop`: the Tauri shell. Blank for now.
+- `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.
 - `ui/app`: the React app. Empty for now. Tauri APIs only under `ui/app/src/transport/`.
 - `xtask`: checks, build timing, budgets. Builds without any app crate.
 
@@ -57,8 +58,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 - Capability files and the desktop crate's permission files (`permissions/`) never contain
   `remote`, `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`.
 - Only `#[expect(lint, reason = "...")]` may silence a lint, never `allow` or `warn` in any form
-  (outer, inner, `cfg_attr`, macro bodies). Every `#[expect]` is listed in
-  `xtask/expect-allowlist.txt`.
+  (outer, inner, `cfg_attr`, macro bodies). Every `#[expect]` is listed in `xtask/expect-allowlist.txt`.
 - A crate that `ARCHITECTURE.md` marks as banning I/O or the clock gets no exception to the bans,
   not even `#[expect]`. What such a crate carries is in the I/O paragraph of `ARCHITECTURE.md`.
 - No `unwrap`, `expect`, `panic!`, `todo!` or `println!` outside tests and `main`.

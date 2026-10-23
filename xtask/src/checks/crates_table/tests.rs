@@ -222,7 +222,7 @@ fn the_real_architecture_md_parses() {
     let status = |name: &str| table.row(name).map(|row| row.status);
     assert_eq!(status("xtask"), Some(Status::Exists));
     assert_eq!(status("desktop"), Some(Status::Exists));
-    assert_eq!(status("protocol"), Some(Status::Planned));
+    assert_eq!(status("protocol"), Some(Status::Exists));
     assert_eq!(
         table.row("protocol").map(|row| row.never.clone()),
         Some(vec![

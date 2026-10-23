@@ -30,17 +30,21 @@ Clauseo app process (Rust)
    open a file or link). Files are named by opaque ids, never paths.
 2. `desktop` deserialises and validates the command in Rust (types, opaque ids, allowed values), then
    forwards it over `async-channel` to the host thread. Rust-side validation is the security boundary.
-3. The host checks it against current state, assigns the next gapless per-thread `seq`, and commits the event to `store`
-   before acting or publishing. Text deltas are the exception: they reach the screen in 16 ms batches
+3. The host checks it against current state, assigns the next gapless `seq` in the event's stream
+   (a thread's or a matter's), and commits the event to `store` before acting or publishing. Text
+   deltas are the exception: they reach the screen in 16 ms batches
    and disk in batches of at most 250 ms.
-4. `reducer` folds events into thread state and view patches (`Upsert`, `Remove`, `AppendText`,
-   `Reset`), each with a per-thread `cursor`.
+4. `reducer` folds events into thread and matter state and view patches (`Upsert`, `Remove`,
+   `AppendText`, `Reset`), each with a per-stream `cursor`.
 5. The host sends patches to each subscribed window over its Channel. The webview applies only the
-   next cursor, so replays and duplicates are no-ops, and acknowledges what it applied.
+   next cursor of each stream, so replays and duplicates are no-ops, and acknowledges what it applied
+   (`Ack { stream, epoch, cursor }`).
 6. Agent traffic goes the other way: ACP over stdio into `acp`, then to the host as events.
    `matters` checkpoints the matter folder before and after every turn.
-7. A reload, renderer crash or stall recovers through `subscribe(thread_id, after_cursor)`, which
-   returns the tail or a `Reset` with a view snapshot.
+7. A reload, renderer crash or stall recovers per stream through `Subscribe { stream, after }`
+   (`after` is the last epoch and cursor), which returns the tail or a `Reset` carrying a
+   `ViewWindow`.
+   `SubscribeEvents { stream, after_seq }` serves envelopes by `seq` instead.
 
 ## Crates
 
@@ -67,7 +71,7 @@ to write instead.
 |---|---|---|---|---|
 | `xtask` | check, ci, buildtime, budgets, doc checks | none of ours | tauri | exists |
 | `desktop` | Tauri shell: fixed plugin set, AppManifest, capabilities; later commands and the Channel bridge | host, settings, tauri | | exists |
-| `protocol` | Event envelope, domain events, commands, view patches, ids, error codes | serde, uuid, specta | tauri, tokio, fs, process | planned |
+| `protocol` | Event envelope, domain events, commands, queries, view patches, account limits, ids, error codes | serde, serde_json, uuid, compact_str, thiserror, specta, specta-serde | tauri, tokio, fs, process | exists |
 | `reducer` | Pure fold from events to thread state and view patches | protocol | any I/O, clock, tauri | planned |
 | `store` | SQLite log, snapshots, blobs, receipts, writer thread | protocol, rusqlite | tauri | planned |
 | `matters` | Shadow repos via gix: checkpoints, undo, restore, compare, retention, file watching | protocol, gix, notify | tauri | planned |
@@ -113,7 +117,9 @@ own files and the root `[workspace.lints]`. The other rules `cargo xtask check` 
 1. The host serves subscribers by `seq`. The webview is one subscriber; a phone client can be another.
 2. `session/new` always sends an `mcpServers` list (empty until `clauseo-mcp` exists).
 3. Tool calls render by tool name, with a generic card as the fallback.
-4. Every call carries a `principal` (only `LocalDesktop` today).
+4. Every call has a `principal` (only `LocalDesktop` today). The surface that takes the call
+   (desktop bridge, transport, cli) passes it to the host from its connection; it is never read
+   from the client's message.
 5. Large payloads go to the content-addressed blob store.
 6. The policy layer is read at start-up even before any policy exists.
 7. All frontend access to the host goes through one `HostTransport` interface.
@@ -137,4 +143,5 @@ own files and the root `[workspace.lints]`. The other rules `cargo xtask check` 
 Changes to the event schema, error codes, a crate's public interface, the dependency table above or
 the Rust-to-webview boundary need a record in `docs/decisions/`. Anyone who adds a Tauri command, or
 anything else the webview can reach, reads `docs/decisions/0001-rust-webview-boundary.md` and
-`docs/threat-model.md` first.
+`docs/threat-model.md` first. Anyone who changes a type in `protocol` reads
+`docs/decisions/0002-event-schema.md` first: it says which changes keep the log readable.
