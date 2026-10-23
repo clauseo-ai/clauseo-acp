@@ -124,6 +124,7 @@
     clippy::wildcard_enum_match_arm
 )]
 
+mod content;
 mod error;
 mod error_code;
 mod ids;
@@ -133,6 +134,7 @@ mod raw;
 mod serde_util;
 mod text;
 mod title;
+mod tool;
 
 /// Writes the one list of wire types: a `pub use <module>::{..};` per module and, under the
 /// `specta` feature, [`wire_types`], which registers every one of them.
@@ -152,6 +154,7 @@ macro_rules! wire_types {
 
 // Every type that crosses the boundary: each derives `specta::Type` under the `specta` feature.
 wire_types! {
+    content::{ContentBlock, PromptBlock, RawFrom, ToolCallContent},
     error_code::{ErrorCode, HostError},
     ids::{
         AgentChoiceId, AgentId, AgentSessionId, BlobHash, CheckpointId, CommandId, ContentId,
@@ -162,6 +165,7 @@ wire_types! {
     raw::{RawPayload},
     text::{BlobRef, TextOrBlob},
     title::{Title},
+    tool::{ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation},
 }
 
 // compact_str's type, re-exported for callers; wire fields holding it export as `string`.
