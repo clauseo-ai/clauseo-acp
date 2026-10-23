@@ -1,0 +1,18 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"user_message\")"
+---
+{
+  "user_message": {
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "message": "01900000-0000-7000-8000-000000000005",
+    "content": [
+      {
+        "text": {
+          "text": "Summarise"
+        }
+      }
+    ],
+    "delivery": "steer"
+  }
+}

@@ -424,5 +424,7 @@ enum JsonValue {
 }
 
 mod skip;
+#[cfg(test)]
+mod tests;
 
 pub(crate) use skip::SkipSeed;

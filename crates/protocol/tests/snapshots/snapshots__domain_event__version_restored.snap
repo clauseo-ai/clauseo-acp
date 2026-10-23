@@ -1,0 +1,17 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"version_restored\")"
+---
+{
+  "version_restored": {
+    "from": "01900000-0000-7000-8000-000000000008",
+    "checkpoint": "01900000-0000-7000-8000-000000000011",
+    "scope": {
+      "files": {
+        "paths": [
+          "a.docx"
+        ]
+      }
+    }
+  }
+}

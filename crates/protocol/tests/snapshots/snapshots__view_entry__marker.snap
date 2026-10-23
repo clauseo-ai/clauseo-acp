@@ -1,0 +1,20 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "entry(\"marker\")"
+---
+{
+  "marker": {
+    "order": 11,
+    "event": "01900000-0000-7000-8000-000000000016",
+    "kind": {
+      "step_undone": {
+        "turn": "01900000-0000-7000-8000-000000000003",
+        "checkpoint": "01900000-0000-7000-8000-00000000000f",
+        "restored": [
+          "a.docx"
+        ],
+        "kept": []
+      }
+    }
+  }
+}

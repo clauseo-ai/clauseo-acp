@@ -1,0 +1,13 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"text_appended\")"
+---
+{
+  "text_appended": {
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "message": "01900000-0000-7000-8000-000000000009",
+    "acp_message_id": "msg_01",
+    "kind": "answer",
+    "text": "The lease \"ends\"\n"
+  }
+}

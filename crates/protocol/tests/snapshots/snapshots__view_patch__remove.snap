@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "ViewPatchBody::Remove { entry_id: EntryId::Notice(event_id(40)) }"
+---
+{
+  "remove": {
+    "entry_id": "notice:01900000-0000-7000-8000-000000000028"
+  }
+}

@@ -142,6 +142,8 @@ mod raw;
 mod serde_util;
 mod session;
 mod stream;
+#[cfg(test)]
+mod test_support;
 mod text;
 mod title;
 mod tool;

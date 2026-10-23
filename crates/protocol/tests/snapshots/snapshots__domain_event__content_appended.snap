@@ -1,0 +1,19 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"content_appended\")"
+---
+{
+  "content_appended": {
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "message": "01900000-0000-7000-8000-000000000009",
+    "kind": "thought",
+    "block": {
+      "image": {
+        "data": {
+          "inline": "iVBORw0KGgo="
+        },
+        "mime_type": "image/png"
+      }
+    }
+  }
+}

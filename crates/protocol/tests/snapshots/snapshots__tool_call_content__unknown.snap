@@ -1,0 +1,5 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "ToolCallContent::Unknown { kind: \"terminal\".to_owned() }"
+---
+"terminal"

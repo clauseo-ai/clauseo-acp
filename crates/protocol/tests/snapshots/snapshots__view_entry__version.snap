@@ -1,0 +1,34 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "entry(\"version\")"
+---
+{
+  "version": {
+    "order": 2,
+    "checkpoint": "01900000-0000-7000-8000-000000000010",
+    "kind": "outside_edits",
+    "ts": 1760000000000,
+    "files": [
+      {
+        "path": "a.docx",
+        "change": "modified",
+        "before": "ab12",
+        "after": "cd34",
+        "size_bytes": 2048,
+        "may_include_lawyer_edits": true
+      },
+      {
+        "path": "b/new.docx",
+        "change": {
+          "renamed": {
+            "from": "b/old.docx"
+          }
+        },
+        "before": "ab12",
+        "after": "ab12",
+        "size_bytes": 10,
+        "may_include_lawyer_edits": false
+      }
+    ]
+  }
+}

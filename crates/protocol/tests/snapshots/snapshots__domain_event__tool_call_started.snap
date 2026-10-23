@@ -1,0 +1,52 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"tool_call_started\")"
+---
+{
+  "tool_call_started": {
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "tool_call": "01900000-0000-7000-8000-000000000004",
+    "acp_id": "toolu_01",
+    "title": "Read the lease",
+    "kind": "read",
+    "tool_name": "Read",
+    "status": "in_progress",
+    "locations": [
+      {
+        "inside": {
+          "path": "leases/lease.docx",
+          "line": 3
+        }
+      },
+      {
+        "outside": {
+          "display": "/etc/hosts"
+        }
+      }
+    ],
+    "raw_input": {
+      "inline": "{\"path\":\"lease.docx\"}"
+    },
+    "content": [
+      {
+        "text": {
+          "text": {
+            "inline": "done"
+          }
+        }
+      },
+      {
+        "diff": {
+          "path": {
+            "inside": {
+              "path": "a.md"
+            }
+          },
+          "new": {
+            "inline": "new"
+          }
+        }
+      }
+    ]
+  }
+}

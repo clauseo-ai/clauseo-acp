@@ -1,0 +1,17 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"turn_ended\")"
+---
+{
+  "turn_ended": {
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "stop": "end_turn",
+    "usage": {
+      "total": 30,
+      "input": 20,
+      "output": 10,
+      "cached_read": 5
+    },
+    "checkpoint_after": "01900000-0000-7000-8000-00000000000e"
+  }
+}

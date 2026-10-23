@@ -424,3 +424,5 @@ where
 
 #[cfg(test)]
 pub(crate) mod check;
+#[cfg(test)]
+mod tests;

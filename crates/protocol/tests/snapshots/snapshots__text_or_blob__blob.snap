@@ -1,0 +1,11 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "TextOrBlob::Blob(sample_blob(7, 5000))"
+---
+{
+  "blob": {
+    "hash": "0707070707070707070707070707070707070707070707070707070707070707",
+    "size_bytes": 5000,
+    "preview": "preview"
+  }
+}

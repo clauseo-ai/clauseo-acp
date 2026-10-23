@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"mode_changed\")"
+---
+{
+  "mode_changed": {
+    "mode_id": "plan"
+  }
+}

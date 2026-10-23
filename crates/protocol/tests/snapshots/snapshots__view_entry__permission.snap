@@ -1,0 +1,29 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "entry(\"permission\")"
+---
+{
+  "permission": {
+    "order": 6,
+    "request": "01900000-0000-7000-8000-00000000000a",
+    "options": [
+      {
+        "option_id": "allow",
+        "kind": "allow_once",
+        "agent_label": "Yes"
+      }
+    ],
+    "deliverable": "live",
+    "state": {
+      "resolved": {
+        "choice": {
+          "selected": {
+            "option_id": "allow",
+            "kind": "allow_once"
+          }
+        },
+        "by": "local_desktop"
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: acp_unsupported_block()
+---
+{
+  "unsupported": {
+    "kind": "hologram",
+    "raw_from": "acp",
+    "raw": {
+      "inline": "{\"type\":\"hologram\"}"
+    }
+  }
+}

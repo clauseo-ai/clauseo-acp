@@ -1,0 +1,22 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostEvent::Events(vec![sample_envelope(event(\"turn_started\"))])"
+---
+{
+  "events": [
+    {
+      "schema_version": 1,
+      "event_id": "01900000-0000-7000-8000-000000000028",
+      "stream": "thread:01900000-0000-7000-8000-000000000002",
+      "seq": 7,
+      "ts": 1760000000000,
+      "command_id": "01900000-0000-7000-8000-000000000029",
+      "event": {
+        "turn_started": {
+          "turn": "01900000-0000-7000-8000-000000000003",
+          "checkpoint_before": "01900000-0000-7000-8000-000000000008"
+        }
+      }
+    }
+  ]
+}

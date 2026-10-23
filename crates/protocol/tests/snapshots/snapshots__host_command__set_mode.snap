@@ -1,0 +1,10 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::SetMode { thread: thread_id(2), mode_id: short(\"plan\"), }"
+---
+{
+  "set_mode": {
+    "thread": "01900000-0000-7000-8000-000000000002",
+    "mode_id": "plan"
+  }
+}

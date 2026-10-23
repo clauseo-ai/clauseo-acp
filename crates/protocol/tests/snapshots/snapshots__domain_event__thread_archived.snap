@@ -1,0 +1,7 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"thread_archived\")"
+---
+{
+  "thread_archived": {}
+}

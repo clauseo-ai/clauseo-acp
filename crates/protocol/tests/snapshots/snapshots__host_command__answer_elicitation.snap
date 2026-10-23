@@ -1,0 +1,17 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::AnswerElicitation\n{\n    thread: thread_id(2), elicitation: elicitation_id(12), response:\n    ElicitationResponse::Accept { values: raw(r#\"{\"party\":\"Jones\"}\"#) },\n}"
+---
+{
+  "answer_elicitation": {
+    "thread": "01900000-0000-7000-8000-000000000002",
+    "elicitation": "01900000-0000-7000-8000-00000000000c",
+    "response": {
+      "accept": {
+        "values": {
+          "party": "Jones"
+        }
+      }
+    }
+  }
+}

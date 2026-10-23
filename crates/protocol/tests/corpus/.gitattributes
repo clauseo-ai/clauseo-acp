@@ -1,0 +1,3 @@
+# Frozen bytes: git must never convert line endings in them.
+*.msgpack binary
+*.jsonl -text

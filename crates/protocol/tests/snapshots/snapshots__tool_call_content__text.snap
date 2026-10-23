@@ -1,0 +1,11 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "ToolCallContent::Text { text: TextOrBlob::Inline(\"done\".to_owned()) }"
+---
+{
+  "text": {
+    "text": {
+      "inline": "done"
+    }
+  }
+}

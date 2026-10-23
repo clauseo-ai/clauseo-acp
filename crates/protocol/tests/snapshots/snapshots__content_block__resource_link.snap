@@ -1,0 +1,13 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "ContentBlock::ResourceLink\n{\n    uri: \"file:///matter/a.pdf\".to_owned(), name: \"a.pdf\".to_owned(),\n    mime_type: Some(short(\"application/pdf\")), title: None, description:\n    Some(\"The lease\".to_owned()), size: Some(2048),\n}"
+---
+{
+  "resource_link": {
+    "uri": "file:///matter/a.pdf",
+    "name": "a.pdf",
+    "mime_type": "application/pdf",
+    "description": "The lease",
+    "size": 2048
+  }
+}
