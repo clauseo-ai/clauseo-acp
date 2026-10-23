@@ -127,6 +127,8 @@
 mod error;
 mod ids;
 mod number;
+mod open_enum;
+mod raw;
 mod serde_util;
 mod text;
 mod title;
@@ -155,6 +157,7 @@ wire_types! {
         PermissionRequestId, ThreadId, ToolCallId, TurnId, ViewEpoch,
     },
     number::{Count, Cursor, Finite, Seq, Timestamp},
+    raw::{RawPayload},
     text::{BlobRef, TextOrBlob},
     title::{Title},
 }
@@ -165,6 +168,9 @@ pub use compact_str::CompactString;
 pub use error::Error;
 pub use ids::{MAX_ID_TEXT_BYTES, is_windows_reserved_name};
 pub use number::MAX_SAFE;
+// The kind a catch-all holds; the catch-all variants holding it export as `string`.
+pub use open_enum::UnknownKind;
+pub use raw::{MAX_MSGPACK_DEPTH, MAX_RAW_DEPTH, MAX_RAW_ENCODE_DEPTH};
 pub use text::{INLINE_LIMIT_BYTES, PREVIEW_BYTES, escaped_len, preview_of, utf16_len};
 pub use title::{MAX_TITLE_CHARS, check_display_title};
 
