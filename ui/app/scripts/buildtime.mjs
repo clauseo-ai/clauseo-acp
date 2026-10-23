@@ -18,6 +18,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
   appPaths,
@@ -42,6 +43,15 @@ const READY_TIMEOUT_MS = 60_000;
 const EDIT_TIMEOUT_MS = 10_000;
 /** How long one tool run may take before it is stopped and its probe fails. */
 const TOOL_TIMEOUT_MS = 120_000;
+/**
+ * How long the hmr probe waits, after an edit shows, before its next write. Vite 8.3.4's bundled
+ * chokidar throttles each file's change events: the first one passes and starts a 50 ms window
+ * (`_throttle(EV_CHANGE, path, 50)`, vite/dist/node/chunks/node.js:12264), and a change inside
+ * that window is dropped, never delivered later. On windows-2025-runner an edit shows in about
+ * 50 ms (48 to 80 ms in two CI runs of five edits), so without the wait the next write can fall
+ * inside that window and its edit never shows. The wait is outside the timed span.
+ */
+const HMR_GAP_MS = 100;
 
 function note(text) {
   process.stderr.write(`buildtime.mjs: ${text}\n`);
@@ -227,6 +237,9 @@ async function measureDev(runs, state) {
         const ms = await timedEdit(page, state.guard, run + 1);
         if (run > 0) {
           samples.push(ms);
+        }
+        if (run < runs) {
+          await delay(HMR_GAP_MS);
         }
       }
       hmr = { probe: "hmr", samples_ms: samples };
