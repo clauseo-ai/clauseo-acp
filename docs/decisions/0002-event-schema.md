@@ -635,9 +635,8 @@ and specta to serde, serde_json, uuid, compact_str, thiserror, specta and specta
 
 ## Status
 
-Proposed. Accepted once Rohan approves the pull request that adds this record; that approval is the
-event schema freeze.
+accepted
 
 ## Date
 
-2026-10-19
+2026-10-22
