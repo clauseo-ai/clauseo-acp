@@ -1,0 +1,12 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "ViewPatchBody::AppendText\n{\n    message_id: message_id(9), target: AppendTarget::AgentText, from_len: 9,\n    text: \" ends\".to_owned(),\n}"
+---
+{
+  "append_text": {
+    "message_id": "01900000-0000-7000-8000-000000000009",
+    "target": "agent_text",
+    "from_len": 9,
+    "text": " ends"
+  }
+}

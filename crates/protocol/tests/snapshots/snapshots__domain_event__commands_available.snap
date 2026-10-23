@@ -1,0 +1,14 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"commands_available\")"
+---
+{
+  "commands_available": {
+    "commands": [
+      {
+        "name": "review",
+        "description": "Review a document"
+      }
+    ]
+  }
+}

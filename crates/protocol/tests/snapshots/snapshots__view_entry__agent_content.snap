@@ -1,0 +1,21 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "entry(\"agent_content\")"
+---
+{
+  "agent_content": {
+    "order": 4,
+    "event": "01900000-0000-7000-8000-000000000014",
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "message": "01900000-0000-7000-8000-000000000009",
+    "kind": "thought",
+    "block": {
+      "image": {
+        "data": {
+          "inline": "iVBORw0KGgo="
+        },
+        "mime_type": "image/png"
+      }
+    }
+  }
+}

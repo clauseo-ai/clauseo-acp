@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::ResumeQueue { thread: thread_id(2) }"
+---
+{
+  "resume_queue": {
+    "thread": "01900000-0000-7000-8000-000000000002"
+  }
+}

@@ -105,3 +105,6 @@ impl<'de> Deserialize<'de> for EntryId {
         deserializer.deserialize_str(FromStrVisitor::<Self>::new("an entry id, kind:uuid"))
     }
 }
+
+#[cfg(test)]
+mod tests;

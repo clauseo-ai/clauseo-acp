@@ -1,0 +1,12 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"compaction_changed\")"
+---
+{
+  "compaction_changed": {
+    "status": "completed",
+    "summary": {
+      "inline": "So far"
+    }
+  }
+}

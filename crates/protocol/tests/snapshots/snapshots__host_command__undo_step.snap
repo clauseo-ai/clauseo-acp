@@ -1,0 +1,16 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::UndoStep\n{\n    thread: thread_id(2), turn: turn_id(3), files:\n    vec![FileDecision { path: path(\"a.docx\"), choice: FileChoice::Undo }],\n}"
+---
+{
+  "undo_step": {
+    "thread": "01900000-0000-7000-8000-000000000002",
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "files": [
+      {
+        "path": "a.docx",
+        "choice": "undo"
+      }
+    ]
+  }
+}

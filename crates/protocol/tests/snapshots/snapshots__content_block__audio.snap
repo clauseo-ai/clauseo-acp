@@ -1,0 +1,16 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "ContentBlock::Audio\n{\n    data: TextOrBlob::Blob(sample_blob(9, 4_000_000)), mime_type:\n    short(\"audio/mpeg\"),\n}"
+---
+{
+  "audio": {
+    "data": {
+      "blob": {
+        "hash": "0909090909090909090909090909090909090909090909090909090909090909",
+        "size_bytes": 4000000,
+        "preview": "preview"
+      }
+    },
+    "mime_type": "audio/mpeg"
+  }
+}

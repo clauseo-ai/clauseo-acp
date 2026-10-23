@@ -1,0 +1,12 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "ContentBlock::Image\n{\n    data: TextOrBlob::Inline(\"iVBORw0KGgo=\".to_owned()), mime_type:\n    short(\"image/png\"), uri: None,\n}"
+---
+{
+  "image": {
+    "data": {
+      "inline": "iVBORw0KGgo="
+    },
+    "mime_type": "image/png"
+  }
+}

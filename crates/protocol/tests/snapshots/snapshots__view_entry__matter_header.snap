@@ -1,0 +1,17 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "entry(\"matter_header\")"
+---
+{
+  "matter_header": {
+    "order": 1,
+    "matter": "01900000-0000-7000-8000-000000000001",
+    "name": "Smith v Jones",
+    "kind": "folder",
+    "import": {
+      "files": 12,
+      "bytes": 4000000,
+      "cloud_only": 1
+    }
+  }
+}

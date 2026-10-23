@@ -1,0 +1,14 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: patch
+---
+{
+  "append_text": {
+    "message_id": "01900000-0000-7000-8000-000000000005",
+    "target": {
+      "user_block": 1
+    },
+    "from_len": 4096,
+    "text": "the rest of the clause"
+  }
+}

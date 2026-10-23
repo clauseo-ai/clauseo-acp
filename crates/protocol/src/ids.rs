@@ -262,3 +262,6 @@ pub use strings::{
     AgentChoiceId, AgentId, AgentSessionId, ContentId, MAX_ID_TEXT_BYTES, MatterPath,
     is_windows_reserved_name,
 };
+
+#[cfg(test)]
+mod tests;

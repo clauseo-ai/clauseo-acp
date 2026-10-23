@@ -1,0 +1,29 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostEvent::AccountLimitsChanged(account_limits(),)"
+---
+{
+  "account_limits_changed": {
+    "agent": "claude",
+    "account": "acct-1",
+    "plan": "Max",
+    "billing": "plan",
+    "windows": [
+      {
+        "id": "five_hour",
+        "kind": "session",
+        "label": "5-hour",
+        "used_percent": 82.5,
+        "resets_at": 1760000000000,
+        "duration_mins": 300,
+        "warning": true
+      }
+    ],
+    "at_limit": "pauses",
+    "source": {
+      "fresh": {
+        "checked_at": 1760000000000
+      }
+    }
+  }
+}

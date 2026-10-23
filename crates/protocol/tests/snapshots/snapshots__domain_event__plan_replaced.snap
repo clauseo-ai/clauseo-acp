@@ -1,0 +1,15 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"plan_replaced\")"
+---
+{
+  "plan_replaced": {
+    "entries": [
+      {
+        "content": "Read the lease",
+        "priority": "high",
+        "status": "in_progress"
+      }
+    ]
+  }
+}

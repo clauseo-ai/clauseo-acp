@@ -1,0 +1,14 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"steer_resolved\")"
+---
+{
+  "steer_resolved": {
+    "message": "01900000-0000-7000-8000-000000000005",
+    "outcome": {
+      "requeued": {
+        "turn": "01900000-0000-7000-8000-000000000007"
+      }
+    }
+  }
+}

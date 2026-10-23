@@ -1,0 +1,11 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"elicitation_resolved\")"
+---
+{
+  "elicitation_resolved": {
+    "elicitation": "01900000-0000-7000-8000-00000000000c",
+    "outcome": "accepted",
+    "by": "local_desktop"
+  }
+}

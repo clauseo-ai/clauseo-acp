@@ -1,0 +1,37 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "event(\"files_changed\")"
+---
+{
+  "files_changed": {
+    "turn": "01900000-0000-7000-8000-000000000003",
+    "files": [
+      {
+        "path": "a.docx",
+        "change": "modified",
+        "before": "ab12",
+        "after": "cd34",
+        "size_bytes": 2048,
+        "may_include_lawyer_edits": true
+      },
+      {
+        "path": "b/new.docx",
+        "change": {
+          "renamed": {
+            "from": "b/old.docx"
+          }
+        },
+        "before": "ab12",
+        "after": "ab12",
+        "size_bytes": 10,
+        "may_include_lawyer_edits": false
+      }
+    ],
+    "skipped": [
+      {
+        "path": "big.zip",
+        "reason": "over_size_cap"
+      }
+    ]
+  }
+}

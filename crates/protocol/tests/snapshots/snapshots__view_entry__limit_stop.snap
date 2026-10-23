@@ -1,0 +1,13 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "entry(\"limit_stop\")"
+---
+{
+  "limit_stop": {
+    "order": 9,
+    "turn": "01900000-0000-7000-8000-000000000006",
+    "window": "five_hour",
+    "resets_at": 1760000000000,
+    "reason": "plan_window"
+  }
+}

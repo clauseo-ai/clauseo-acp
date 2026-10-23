@@ -1,0 +1,7 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "TextOrBlob::Inline(\"The lease \\\"ends\\\"\\n\".to_owned())"
+---
+{
+  "inline": "The lease \"ends\"\n"
+}
