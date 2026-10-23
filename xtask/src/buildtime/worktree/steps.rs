@@ -1,0 +1,399 @@
+//! The steps of a worktree run, the refusal and warm-up before them, and the removal after each
+//! run, as the module doc of `worktree.rs` lists them.
+
+use super::super::one_line;
+use super::super::probe::judge_incremental;
+use super::super::profile::warm_up_incremental;
+use super::super::verdict::Failure;
+use super::{APP, Step, Worktree};
+use crate::parse::clippy_render;
+use crate::process::{self, Cmd, Program, QuietRunner, Ran, Status, TimeoutFix};
+use crate::write;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
+
+/// git's commands here (status, worktree add, ls-files, worktree list) each take seconds on a
+/// checkout this size, so 5 min means one hangs (on a lock, say).
+const GIT_TIMEOUT: Duration = Duration::from_mins(5);
+
+/// `git worktree remove` deletes the copied build output, gigabytes on a slow disk.
+const REMOVE_TIMEOUT: Duration = Duration::from_mins(10);
+
+/// pnpm installs from its store, in seconds, but fetches what the store lacks over the network.
+const PNPM_TIMEOUT: Duration = Duration::from_mins(30);
+
+/// The warm-up can build every dependency cold on a slow machine, as a Rust probe's can.
+const BUILD_TIMEOUT: Duration = Duration::from_hours(1);
+
+/// `cargo xtask --help` builds xtask from scratch when the copy did not bring it.
+const XTASK_TIMEOUT: Duration = Duration::from_mins(30);
+
+/// 2000-01-01T00:00:00Z, 10957 days after the epoch: the time every tracked file gets, older
+/// than any build output.
+pub(crate) fn touched_time() -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_hours(10_957 * 24)
+}
+
+/// The fix when the first build rebuilt more than the app. `cargo build -v` prints a `Dirty`
+/// line with the reason for each crate it rebuilds (cargo 1.99), and the failure shows them.
+pub(crate) const REBUILT_FIX: &str = "read why cargo rebuilt each one in the `Dirty` lines \
+    above (`cargo build -v` prints them), fix that cause, then run again";
+
+/// The fix when the first `cargo xtask` rebuilt xtask. The alias passes `--quiet`, so its own
+/// `-v` run shows the `Dirty` line.
+pub(crate) const XTASK_REBUILT_FIX: &str = "make a worktree the same way and run \
+    `cargo run --locked --package xtask --target-dir target/xtask-run -v -- --help` in it: its \
+    `Dirty` line says why cargo rebuilt xtask";
+
+/// The fix when xtask's build output is not in the checkout.
+pub(crate) const XTASK_RUN_FIX: &str = "run `cargo xtask --help` from the repo root (the alias \
+    builds xtask into target/xtask-run), then run again";
+
+impl Worktree<'_> {
+    /// Runs one step. `Ok` holds the not-incremental warning of the first build, if it has one.
+    pub(super) fn step(
+        &self,
+        step: Step,
+        runner: &mut QuietRunner<'_>,
+    ) -> Result<Option<String>, Failure> {
+        match step {
+            Step::Add => {
+                let path = self.path.to_string_lossy();
+                let add = ["worktree", "add", "--detach", &path, "HEAD"];
+                let cmd = Cmd::new(Program::Git, add, GIT_TIMEOUT);
+                ran(runner, &cmd, self.root, Where::Checkout).map(|_| None)
+            }
+            Step::Copy => self.copy().map(|()| None),
+            Step::Touch => self.touch(runner).map(|()| None),
+            Step::PnpmInstall => {
+                let ui = self.path.join("ui");
+                let ui = ui.to_string_lossy();
+                let install = [
+                    "-C",
+                    &ui,
+                    "install",
+                    "--frozen-lockfile",
+                    "--prefer-offline",
+                ];
+                let cmd = Cmd::new(Program::Pnpm, install, PNPM_TIMEOUT);
+                ran(runner, &cmd, &self.path, Where::Worktree).map(|_| None)
+            }
+            Step::FirstBuild => self.first_build(runner),
+            Step::FirstXtask => self.first_xtask(runner).map(|()| None),
+        }
+    }
+
+    /// Fails when tracked files have uncommitted changes, or when git cannot say.
+    pub(super) fn refuse_uncommitted(&self, runner: &mut QuietRunner<'_>) -> Result<(), Failure> {
+        let status = ["status", "--porcelain", "--untracked-files=no"];
+        let cmd = Cmd::new(Program::Git, status, GIT_TIMEOUT);
+        let listed = ran(runner, &cmd, self.root, Where::Checkout)?;
+        if listed.stdout.trim().is_empty() {
+            return Ok(());
+        }
+        Err(Failure::new(
+            format!(
+                "refusing to measure: tracked files have uncommitted changes (`{cmd}` lists them), \
+                 and the worktree is made from HEAD, so its first build would not match the warm \
+                 checkout"
+            ),
+            "commit them or stash them (`git stash`), then run again",
+        ))
+    }
+
+    /// `cargo build -p clauseo-desktop -v` in the checkout, not timed. Fails when it fails, and in
+    /// CI when its rustc line, if it rebuilt the app, shows it built without incremental.
+    pub(super) fn warm_up(&self, runner: &mut QuietRunner<'_>) -> Result<(), Failure> {
+        let cmd = Cmd::new(Program::Cargo, ["build", "-p", APP, "-v"], BUILD_TIMEOUT);
+        let built = ran(runner, &cmd, self.root, Where::Checkout)?;
+        match warm_up_incremental(&built.stderr, APP) {
+            Some(incremental) => judge_incremental(APP, incremental, self.ci).map(|_| ()),
+            None => Ok(()),
+        }
+    }
+
+    /// Copies the build output into `<path>/target/` with `write::copy_into`: `debug` and
+    /// `xtask-run`, which must be there, then `CACHEDIR.TAG` when it is (cargo writes it only
+    /// when it makes `target/` itself). Nothing is copied when one that must be there is not.
+    pub(super) fn copy(&self) -> Result<(), Failure> {
+        let target = self.path.join("target");
+        let required = [
+            (
+                "debug",
+                format!("run `cargo build -p {APP}` from the repo root, then run again"),
+            ),
+            ("xtask-run", XTASK_RUN_FIX.to_owned()),
+        ];
+        for (name, fix) in &required {
+            if fs::symlink_metadata(self.root.join("target").join(name)).is_err() {
+                return Err(Failure::new(
+                    format!("target/{name} is not in this checkout"),
+                    fix.as_str(),
+                ));
+            }
+        }
+        let tag = self.root.join("target/CACHEDIR.TAG");
+        let tag = fs::symlink_metadata(&tag).is_ok().then_some("CACHEDIR.TAG");
+        for name in required.iter().map(|(name, _)| *name).chain(tag) {
+            let from = self.root.join("target").join(name);
+            write::copy_into(&from, &target, name).map_err(|error| {
+                Failure::new(
+                    format!(
+                        "could not copy target/{name} into {}: {error}",
+                        target.display()
+                    ),
+                    "fix what the error names, then run again",
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Gives every file `git ls-files -z` lists in the worktree `touched_time()`.
+    pub(super) fn touch(&self, runner: &mut QuietRunner<'_>) -> Result<(), Failure> {
+        let cmd = Cmd::new(Program::Git, ["ls-files", "-z"], GIT_TIMEOUT);
+        let listed = ran(runner, &cmd, &self.path, Where::Worktree)?;
+        for file in listed.stdout.split('\0').filter(|file| !file.is_empty()) {
+            write::set_times_in(&self.path, file, touched_time()).map_err(|error| {
+                Failure::new(
+                    format!("could not set the times of {file} in the worktree: {error}"),
+                    "fix what the error names, then run again",
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    /// The first build in the worktree. Fails when it rebuilt another package than the app, and
+    /// judges the app's rustc line for incremental.
+    pub(super) fn first_build(
+        &self,
+        runner: &mut QuietRunner<'_>,
+    ) -> Result<Option<String>, Failure> {
+        let build = ["build", "-p", APP, "--message-format=json", "-v"];
+        let cmd = Cmd::new(Program::Cargo, build, BUILD_TIMEOUT);
+        let built = ran(runner, &cmd, &self.path, Where::Worktree)?;
+        let others = rebuilt_besides(&built.stdout, APP);
+        if !others.is_empty() {
+            let dirty: Vec<&str> = built
+                .stderr
+                .lines()
+                .filter(|line| line.trim_start().starts_with("Dirty "))
+                .collect();
+            return Err(Failure {
+                message: format!(
+                    "`{cmd}` rebuilt more than {APP} in the worktree: {}",
+                    others.join(", ")
+                ),
+                fix: REBUILT_FIX.to_owned(),
+                output: (!dirty.is_empty()).then(|| format!("{}\n", dirty.join("\n"))),
+            });
+        }
+        match warm_up_incremental(&built.stderr, APP) {
+            Some(incremental) => judge_incremental(APP, incremental, self.ci),
+            None => Ok(None),
+        }
+    }
+
+    /// `cargo xtask --help` in the worktree. Fails when xtask's binary changed.
+    pub(super) fn first_xtask(&self, runner: &mut QuietRunner<'_>) -> Result<(), Failure> {
+        let binary = xtask_binary(&self.path);
+        let modified = || fs::metadata(&binary).and_then(|meta| meta.modified()).ok();
+        let Some(before) = modified() else {
+            return Err(Failure::new(
+                format!("{} is not there after the copy", binary.display()),
+                XTASK_RUN_FIX,
+            ));
+        };
+        let cmd = Cmd::new(Program::Cargo, ["xtask", "--help"], XTASK_TIMEOUT);
+        ran(runner, &cmd, &self.path, Where::Worktree)?;
+        if modified() == Some(before) {
+            return Ok(());
+        }
+        Err(Failure::new(
+            format!(
+                "`{cmd}` rebuilt xtask in the worktree: {} changed",
+                binary.display()
+            ),
+            XTASK_REBUILT_FIX,
+        ))
+    }
+
+    /// Removes the worktree when it is on disk or `git worktree list` names it, then makes sure
+    /// neither is so.
+    pub(super) fn remove(&self, runner: &mut QuietRunner<'_>) -> Result<(), Failure> {
+        let on_disk = || fs::symlink_metadata(&self.path).is_ok();
+        let mut why = Vec::new();
+        if on_disk() || self.listed(runner)? {
+            let path = self.path.to_string_lossy();
+            let remove = ["worktree", "remove", "--force", &path];
+            let cmd = Cmd::new(Program::Git, remove, REMOVE_TIMEOUT);
+            if let Err(failure) = ran(runner, &cmd, self.root, Where::Checkout) {
+                why.push(with_output(failure));
+            }
+        }
+        if self.listed(runner)? {
+            why.push("`git worktree list` still names it".to_owned());
+        }
+        if on_disk() {
+            why.push("its folder is still there".to_owned());
+        }
+        if why.is_empty() {
+            return Ok(());
+        }
+        Err(self.cannot_remove(&why.join("; ")))
+    }
+
+    /// Whether `git worktree list --porcelain` names the worktree.
+    pub(super) fn listed(&self, runner: &mut QuietRunner<'_>) -> Result<bool, Failure> {
+        let list = ["worktree", "list", "--porcelain"];
+        let cmd = Cmd::new(Program::Git, list, GIT_TIMEOUT);
+        let listed = ran(runner, &cmd, self.root, Where::Checkout)
+            .map_err(|f| self.cannot_remove(&f.message))?;
+        Ok(listed
+            .stdout
+            .lines()
+            .filter_map(|line| line.strip_prefix("worktree "))
+            .any(|path| same_path(Path::new(path), &self.path)))
+    }
+
+    /// The failure of a worktree this run made and could not remove.
+    pub(super) fn cannot_remove(&self, why: &str) -> Failure {
+        let path = self.path.display();
+        Failure::new(
+            format!("could not remove the worktree {path} that this run made: {why}"),
+            format!(
+                "remove it by hand with `git worktree remove --force {path}`, or delete the \
+                 folder if git does not know it (this run made it: it holds a checkout of HEAD \
+                 and copied build output, nothing else); run `git worktree prune` if the folder \
+                 is already gone; then run again"
+            ),
+        )
+    }
+}
+
+/// A failure's message, with what the command printed on one line after it in brackets when it
+/// printed anything.
+pub(crate) fn with_output(failure: Failure) -> String {
+    match failure.output.as_deref().map(one_line) {
+        Some(said) if !said.is_empty() => format!("{} ({said})", failure.message),
+        _ => failure.message,
+    }
+}
+
+/// Whether `a` and `b` name the same folder: equal as paths (so `C:/x` and `C:\x` on Windows), or
+/// resolving to the same folder.
+pub(crate) fn same_path(a: &Path, b: &Path) -> bool {
+    a == b
+        || matches!(
+            (dunce::canonicalize(a), dunce::canonicalize(b)),
+            (Ok(a), Ok(b)) if a == b
+        )
+}
+
+/// xtask's binary in the alias's target dir under `root`.
+pub(crate) fn xtask_binary(root: &Path) -> PathBuf {
+    root.join("target/xtask-run/debug")
+        .join(format!("xtask{}", std::env::consts::EXE_SUFFIX))
+}
+
+/// Where a command runs: in the checkout, or in the worktree, which is gone once the run ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Where {
+    Checkout,
+    Worktree,
+}
+
+/// Runs `cmd` in `dir`. `Err` when it cannot start, runs past its limit or exits non-zero; the
+/// failure carries what it printed, its JSON messages as people read them and without the
+/// `Fresh` and `Running` lines of `-v`. A command that failed in the worktree cannot be run
+/// again there, so its fix points at that output.
+fn ran(runner: &mut QuietRunner<'_>, cmd: &Cmd, dir: &Path, place: Where) -> Result<Ran, Failure> {
+    match runner(cmd, dir) {
+        Ok(done) if done.success() => Ok(done),
+        Ok(done) if done.status == Status::TimedOut => Err(Failure::new(
+            process::timeout_message(cmd),
+            TimeoutFix::of(cmd).to_string(),
+        )),
+        Ok(done) => {
+            let mut stderr = String::new();
+            for line in done.stderr.lines() {
+                let verbose = line.trim_start();
+                if !verbose.starts_with("Fresh ") && !verbose.starts_with("Running `") {
+                    stderr.push_str(line);
+                    stderr.push('\n');
+                }
+            }
+            Err(Failure {
+                message: format!("`{cmd}` failed"),
+                fix: match place {
+                    Where::Checkout => format!("run `{cmd}` from the repo root to see the error"),
+                    Where::Worktree => "read its output above (the worktree is removed once the \
+                                        run ends), fix what it names, then run again"
+                        .to_owned(),
+                },
+                output: Some(format!("{}{stderr}", clippy_render(&done.stdout))),
+            })
+        }
+        Err(error) => Err(Failure::new(
+            format!("could not run `{cmd}`: {error}"),
+            format!(
+                "make sure `{}` runs from a terminal in {}, then run again",
+                cmd.program.name(),
+                dir.display()
+            ),
+        )),
+    }
+}
+
+/// The packages other than `package` that cargo rebuilt, from its `--message-format=json` stdout:
+/// each `compiler-artifact` message with `"fresh": false`, named `<package> (<target kinds>)`, once
+/// each, in the order cargo built them.
+pub(crate) fn rebuilt_besides(stdout: &str, package: &str) -> Vec<String> {
+    let mut rebuilt: Vec<String> = Vec::new();
+    for line in stdout.lines().filter(|line| line.starts_with('{')) {
+        let Ok(message) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let artifact = message.get("reason").and_then(|r| r.as_str()) == Some("compiler-artifact");
+        let fresh = message.get("fresh").and_then(serde_json::Value::as_bool);
+        let id = message.get("package_id").and_then(|id| id.as_str());
+        let (true, Some(false), Some(id)) = (artifact, fresh, id) else {
+            continue;
+        };
+        let name = package_name(id);
+        if name == package {
+            continue;
+        }
+        let kinds: Vec<&str> = message
+            .pointer("/target/kind")
+            .and_then(serde_json::Value::as_array)
+            .map(|kinds| kinds.iter().filter_map(|kind| kind.as_str()).collect())
+            .unwrap_or_default();
+        let unit = format!("{name} ({})", kinds.join(", "));
+        if !rebuilt.contains(&unit) {
+            rebuilt.push(unit);
+        }
+    }
+    rebuilt
+}
+
+/// The package name in a cargo package id: `<source>#<name>@<version>`, or `<source>#<version>`
+/// when the name is the last part of the source's path (cargo 1.77 and later), or the older
+/// `<name> <version> (<source>)`.
+pub(crate) fn package_name(id: &str) -> &str {
+    match id.rsplit_once('#') {
+        Some((_, fragment)) if fragment.contains('@') => {
+            fragment.split_once('@').map_or(fragment, |(name, _)| name)
+        }
+        Some((source, _)) => {
+            let path = source.split_once('?').map_or(source, |(path, _)| path);
+            path.trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or(path)
+        }
+        None => id.split_whitespace().next().unwrap_or(id),
+    }
+}

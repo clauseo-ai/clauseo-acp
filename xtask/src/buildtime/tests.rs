@@ -362,7 +362,7 @@ fn the_profile_line_is_an_expectation_that_the_warm_up_decides() {
         source: profile::CI_SOURCE.to_owned(),
     };
     assert_eq!(
-        profile_line(&off),
+        profile_line(&off, PROBE_DECIDER),
         format!(
             "profile: dev, incremental expected off ({}); each probe's warm-up rustc line decides",
             profile::CI_SOURCE
@@ -430,7 +430,15 @@ fn a_rustc_that_cannot_start_is_named_with_the_rustup_fix() {
 }
 
 #[test]
+fn each_part_runs_its_halves_and_worktree_runs_neither() {
+    assert_eq!(halves(Part::Rust), Some((true, false)));
+    assert_eq!(halves(Part::Web), Some((false, true)));
+    assert_eq!(halves(Part::All), Some((true, true)));
+    assert_eq!(halves(Part::Worktree), None);
+}
+
+#[test]
 fn a_run_whose_checkout_has_no_budgets_fails_before_it_measures() {
     let root = Scratch::new("buildtime-run");
-    assert_eq!(run(&root, Half::Web, 1, false), ExitCode::FAILURE);
+    assert_eq!(run(&root, Part::Web, 1, false), ExitCode::FAILURE);
 }

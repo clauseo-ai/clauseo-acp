@@ -1,6 +1,6 @@
 //! Workspace automation: `cargo xtask check [--quick]`,
 //! `cargo xtask setup [--binaries] [--only <tool>]... | --list`,
-//! `cargo xtask buildtime [rust|web|all] [--runs N] [--json]` and `cargo xtask mutants`.
+//! `cargo xtask buildtime [rust|web|all|worktree] [--runs N] [--json]` and `cargo xtask mutants`.
 //!
 //! For people and agents:
 //! - Add an external step: one `ToolStep` in `steps/plan.rs`, or `steps/policy.rs` for a
@@ -114,12 +114,12 @@ enum Commands {
         )]
         list: Option<setup::ListFormat>,
     },
-    /// Time the build loop against `budgets.toml`: the Rust half, the web half, or both (the
-    /// default).
+    /// Time the build loop against `budgets.toml`: the Rust half, the web half, both (the
+    /// default), or a fresh worktree end to end (`worktree`, not part of `all`).
     Buildtime {
-        /// Which half to time.
+        /// What to time.
         #[arg(default_value = "all")]
-        half: buildtime::Half,
+        part: buildtime::Part,
         /// Timed runs per probe, after one warm-up run.
         #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u32).range(1..))]
         runs: u32,
@@ -172,8 +172,8 @@ fn main() -> ExitCode {
             binaries,
             &mut process::run,
         ),
-        Commands::Buildtime { half, runs, json } => {
-            buildtime::run(&workspace::workspace_root(), half, runs, json)
+        Commands::Buildtime { part, runs, json } => {
+            buildtime::run(&workspace::workspace_root(), part, runs, json)
         }
         Commands::Mutants => mutants::run(&workspace::workspace_root()),
         #[cfg(unix)]
