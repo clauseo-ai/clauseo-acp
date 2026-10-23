@@ -1,7 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "xtask"]
-default-members = ["crates/desktop"]
+# `cargo xtask buildtime` times edits to clauseo-protocol with cargo at the root, so it must be in
+# the default members' graph; until desktop depends on it (through host), it is listed itself.
+default-members = ["crates/desktop", "crates/protocol"]
 
 [workspace.package]
 edition = "2024"
@@ -32,7 +34,7 @@ tauri-plugin-os = "2.4.0"
 tauri-plugin-notification = "2.7.0"
 # tauri::generate_context! writes the plugin configuration as serde_json values, and
 # crates/desktop/src/rust_only.rs names serde_json::Value in the plugin hooks it forwards.
-serde_json = "1"
+serde_json = "1.0.154"
 # canonicalize without the `\\?\` prefix std adds on Windows, which most tools refuse; clippy.toml
 # bans std's canonicalize in its favour.
 dunce = "1.0.5"
@@ -54,6 +56,24 @@ windows = { version = "0.62.2", features = [
   "Win32_System_Threading",
   "Win32_System_Diagnostics_ToolHelp",
 ] }
+# clauseo-protocol: the host boundary types; xtask: the JSON it reads (features go on each
+# crate's own lines).
+serde = "1"
+uuid = "1"
+thiserror = "2.0"
+compact_str = "0.10.0"
+specta = "=2.0.0-rc.25"
+# protocol's `specta` feature: specta-serde applies the serde attributes (the one for rc.25).
+specta-serde = "=0.0.12"
+# Test-only: property tests, and the MessagePack form the store writes.
+proptest = "1.12"
+rmp-serde = "1.3.1"
+# Golden snapshots of the wire form (clauseo-protocol); the json feature goes on the crate line.
+insta = "1.49"
+# Test-only: the TypeScript export.
+specta-typescript = "=0.0.12"
+# xtask's docs check, and protocol's doc-table tests (test-only there).
+pulldown-cmark = { version = "0.13.4", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "deny"               # deny, not forbid: an FFI module overrides with #[expect(unsafe_code, reason = "…")]
