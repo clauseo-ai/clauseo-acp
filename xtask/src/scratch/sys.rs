@@ -8,7 +8,7 @@
     reason = "Scratch's std calls live here alone; clippy.toml bans them elsewhere"
 )]
 
-use std::fs;
+use std::fs::{self, FileTimes};
 #[cfg(unix)]
 use std::fs::{File, OpenOptions, Permissions};
 use std::io;
@@ -37,6 +37,11 @@ pub(super) fn remove_file(path: &Path) -> io::Result<()> {
 /// `fs::remove_dir_all`.
 pub(super) fn remove_dir_all(path: &Path) -> io::Result<()> {
     fs::remove_dir_all(path)
+}
+
+/// `fs::set_times`.
+pub(super) fn set_times(path: &Path, times: FileTimes) -> io::Result<()> {
+    fs::set_times(path, times)
 }
 
 /// `fs::copy`.

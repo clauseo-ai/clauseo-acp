@@ -13,16 +13,20 @@
 //!   original, writes, and puts it back through `Guard`, and recovers an interrupted run's copies
 //!   with `Backups`.
 //! - `Staging`: a staging dir in a bin folder that downloads go to, and the install from it.
+//! - `copy_into`, `set_times_in`: copy a tree into a folder with its times and symlinks kept, set
+//!   the times of an entry under a folder (`tree.rs`).
 
 mod guard;
 mod lock;
 mod replace;
 mod staging;
 mod sys;
+mod tree;
 
 pub(crate) use guard::{Backups, Guard, GuardFailure};
 pub(crate) use lock::LockFile;
 pub(crate) use staging::Staging;
+pub(crate) use tree::{copy_into, set_times_in};
 
 use std::io;
 use std::path::{Component, Path};

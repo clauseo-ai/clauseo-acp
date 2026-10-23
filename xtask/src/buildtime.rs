@@ -1,6 +1,7 @@
-//! `cargo xtask buildtime [rust|web|all] [--runs N] [--json]`: times the edit loop of the app and
-//! of the protocol crate (the Rust half), and of the frontend in `ui/app` (the web half,
+//! `cargo xtask buildtime [rust|web|all|worktree] [--runs N] [--json]`: times the edit loop of the
+//! app and of the protocol crate (the Rust half), and of the frontend in `ui/app` (the web half,
 //! `web.rs`), against the rows of `budgets.toml`. `all` runs the Rust half, then the web half.
+//! `worktree` times a fresh worktree end to end instead (`worktree.rs`); it is not part of `all`.
 //!
 //! A probe writes the next value of its crate's `BUILDTIME_MARKER`, runs `cargo <sub> -v` as a
 //! warm-up that is not counted, then times `cargo <sub>` runs. The warm-up's rustc lines are the
@@ -9,8 +10,8 @@
 //! (`probe.rs`), but never over an edit made during the run. The web half's edit of
 //! `ui/app/src/App.tsx` is guarded by its script, under the rules written out in
 //! `ui/app/scripts/guard.mjs`. One run at a time holds the checkout's lock (`lock.rs`),
-//! through both halves. Only `clock::timed` reads the clock, and only
-//! `process.rs` starts processes; the web half's Node script does its own timing.
+//! through both halves, or through every worktree run. Only `clock::timed` reads the clock, and
+//! only `process.rs` starts processes; the web half's Node script does its own timing.
 
 pub(crate) mod lock;
 mod marker;
@@ -19,6 +20,7 @@ mod profile;
 mod report;
 mod verdict;
 mod web;
+mod worktree;
 
 #[cfg(test)]
 mod tests;
@@ -51,12 +53,17 @@ const WEB_OVER_FIX: &str = "find what slowed the loop (the tool's own output sho
 /// The fix for a probe over its budget that fails the run.
 const OVER_FIX: &str = "find what slowed the loop (`cargo build --timings` shows where the time goes); a limit in budgets.toml changes only with a reviewed measurement";
 
-/// Which half of the build loop to time.
+/// What to time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub(crate) enum Half {
+pub(crate) enum Part {
+    /// The Rust half: the app's and the protocol crate's edit loops.
     Rust,
+    /// The web half: the frontend's edit loop.
     Web,
+    /// The Rust half, then the web half.
     All,
+    /// A fresh worktree, end to end, through the first `cargo xtask`. Not part of `all`.
+    Worktree,
 }
 
 /// One timed edit loop: `cargo <subcommand>` in `package`, against the budget row `budget_id`.
@@ -175,36 +182,11 @@ fn measure_rust(
         diag.note(line);
     }
     let budgets = load_budgets(root, diag)?;
-    let rustc = match rustc_version(root, &mut process::run_quiet) {
-        Ok(version) => version,
-        Err(failure) => return Err(stop(diag, &failure.message, &failure.fix)),
-    };
-    let manifest = match fs::read_to_string(root.join("Cargo.toml")) {
-        Ok(manifest) => manifest,
-        Err(error) => {
-            return Err(stop(
-                diag,
-                &format!("cannot read Cargo.toml: {error}"),
-                "restore Cargo.toml at the repo root",
-            ));
-        }
-    };
-    let cargo_incremental = env::var("CARGO_INCREMENTAL").ok();
-    let build_incremental = env::var("CARGO_BUILD_INCREMENTAL").ok();
-    let profile_dev_incremental = env::var("CARGO_PROFILE_DEV_INCREMENTAL").ok();
-    let config_toml = fs::read_to_string(root.join(".cargo/config.toml")).ok();
-    let incremental = profile::resolve(&Sources {
-        cargo_incremental: cargo_incremental.as_deref(),
-        build_incremental: build_incremental.as_deref(),
-        ci_present: env::var_os("CI").is_some(),
-        profile_dev_incremental: profile_dev_incremental.as_deref(),
-        config_toml: config_toml.as_deref(),
-        manifest: Some(&manifest),
-    });
+    let (rustc, incremental) = toolchain(root, diag)?;
     let ci = check::is_ci(env::var("CI").ok().as_deref());
     if !json {
         out.note(&rustc);
-        out.note(profile_line(&incremental));
+        out.note(profile_line(&incremental, PROBE_DECIDER));
     }
     let members = match workspace::load(root) {
         Ok(members) => members,
@@ -243,6 +225,39 @@ fn measure_rust(
     })
 }
 
+/// The `rustc -V` line, and the incremental setting the timed builds are expected to run with,
+/// read as cargo reads it for a `[profile.dev]` build (`profile::resolve`). `Err` holds the reason
+/// it cannot be read, printed before it returns.
+fn toolchain(root: &Path, diag: &mut Out) -> Result<(String, Incremental), Vec<String>> {
+    let rustc = match rustc_version(root, &mut process::run_quiet) {
+        Ok(version) => version,
+        Err(failure) => return Err(stop(diag, &failure.message, &failure.fix)),
+    };
+    let manifest = match fs::read_to_string(root.join("Cargo.toml")) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            return Err(stop(
+                diag,
+                &format!("cannot read Cargo.toml: {error}"),
+                "restore Cargo.toml at the repo root",
+            ));
+        }
+    };
+    let cargo_incremental = env::var("CARGO_INCREMENTAL").ok();
+    let build_incremental = env::var("CARGO_BUILD_INCREMENTAL").ok();
+    let profile_dev_incremental = env::var("CARGO_PROFILE_DEV_INCREMENTAL").ok();
+    let config_toml = fs::read_to_string(root.join(".cargo/config.toml")).ok();
+    let incremental = profile::resolve(&Sources {
+        cargo_incremental: cargo_incremental.as_deref(),
+        build_incremental: build_incremental.as_deref(),
+        ci_present: env::var_os("CI").is_some(),
+        profile_dev_incremental: profile_dev_incremental.as_deref(),
+        config_toml: config_toml.as_deref(),
+        manifest: Some(&manifest),
+    });
+    Ok((rustc, incremental))
+}
+
 /// A Rust probe's result: it measures seconds, and a failure or a gated overrun fails the run.
 fn rust_result(probe: &Probe, outcome: Outcome) -> ProbeResult {
     ProbeResult {
@@ -257,14 +272,18 @@ fn rust_result(probe: &Probe, outcome: Outcome) -> ProbeResult {
 const KEPT_COPY: &str = "an earlier probe on this crate kept its saved copy; resolve that first";
 
 /// The profile line. The resolver reads only some of cargo's config files, so its answer is an
-/// expectation; each probe's warm-up rustc line decides, and refuses a non-incremental build in CI.
-fn profile_line(incremental: &Incremental) -> String {
+/// expectation; `decider`, a rustc line of what is timed, decides, and refuses a non-incremental
+/// build in CI.
+fn profile_line(incremental: &Incremental, decider: &str) -> String {
     let state = if incremental.on { "on" } else { "off" };
     format!(
-        "profile: dev, incremental expected {state} ({}); each probe's warm-up rustc line decides",
+        "profile: dev, incremental expected {state} ({}); {decider} decides",
         incremental.source
     )
 }
+
+/// What decides a Rust probe's incremental setting, for the profile line.
+const PROBE_DECIDER: &str = "each probe's warm-up rustc line";
 
 /// How long `rustc -V` may run: it prints one line, but rustup may install the pinned toolchain
 /// first, which takes minutes on a slow link.
@@ -294,9 +313,9 @@ fn rustc_version(root: &Path, runner: &mut QuietRunner<'_>) -> Result<String, Fa
 type Out = Printer<Box<dyn Write>>;
 
 /// Runs `cargo xtask buildtime` in `root`, the checkout. Takes the checkout's lock for the whole
-/// run, then runs the Rust half, the web half, or the Rust half then the web half. Returns the exit
-/// code.
-pub(crate) fn run(root: &Path, half: Half, runs: u32, json: bool) -> ExitCode {
+/// run, then runs the Rust half, the web half, the Rust half then the web half, or the worktree
+/// runs. Returns the exit code.
+pub(crate) fn run(root: &Path, part: Part, runs: u32, json: bool) -> ExitCode {
     let mut out: Out = Printer::new(Box::new(io::stdout()), false);
     let sink: Box<dyn Write> = if json {
         Box::new(io::stderr())
@@ -318,13 +337,27 @@ pub(crate) fn run(root: &Path, half: Half, runs: u32, json: bool) -> ExitCode {
             return stopped(&mut out, &errors);
         }
     };
-    let rust = if half == Half::Web {
-        None
-    } else {
+    let Some((rust_half, web_half)) = halves(part) else {
+        let worktree = worktree::run(
+            root,
+            runs,
+            json,
+            &mut out,
+            &mut diag,
+            &mut process::run_quiet,
+        );
+        return match worktree {
+            Ok(passed) => exit_code(passed),
+            Err(errors) => stopped(&mut out, &errors),
+        };
+    };
+    let rust = if rust_half {
         match measure_rust(root, runs, json, &mut out, &mut diag) {
             Ok(rust) => Some(rust),
             Err(errors) => return stopped(&mut out, &errors),
         }
+    } else {
+        None
     };
     if let Some(rust) = &rust {
         if !json {
@@ -338,7 +371,7 @@ pub(crate) fn run(root: &Path, half: Half, runs: u32, json: bool) -> ExitCode {
         report::print_failures(&rust.results, &mut diag);
         report_over_budget(&rust.results, rust.ci, OVER_FIX, &mut diag);
     }
-    let web = (half != Half::Rust).then(|| {
+    let web = web_half.then(|| {
         let ci = check::is_ci(env::var("CI").ok().as_deref());
         WebJson::of(&measure_web(root, runs, ci, json, &mut out, &mut diag))
     });
@@ -351,6 +384,16 @@ pub(crate) fn run(root: &Path, half: Half, runs: u32, json: bool) -> ExitCode {
         }
     }
     exit_code(passed)
+}
+
+/// Which halves `part` runs: the Rust half, the web half. `None` for the worktree runs.
+fn halves(part: Part) -> Option<(bool, bool)> {
+    match part {
+        Part::Rust => Some((true, false)),
+        Part::Web => Some((false, true)),
+        Part::All => Some((true, true)),
+        Part::Worktree => None,
+    }
 }
 
 /// The verdict of a run: no half that ran fails it.
