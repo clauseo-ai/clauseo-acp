@@ -38,14 +38,14 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - `crates/process`: starts an agent in its own process tree, shuts it down and kills the tree; the `Launcher` seam.
 - `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.
 - `crates/reducer`: the pure fold from events to state and view changes, and snapshots; its gungraun bench is `crates/reducer_bench` (Linux).
+- `crates/settings`: settings, data folders and the policy layer. See `docs/decisions/0009-policy-layer.md`.
 - `crates/store`: the event log, snapshots, blobs and receipts in one SQLite file; format in `docs/decisions/0006-store-format.md`.
 - `ui/app`: the React app, empty for now; `ui/components`: its tokens, icons, words and controls, checked by ui/app's scripts. Tauri APIs only under `ui/app/src/transport/`.
 - `xtask`: checks, build timing, budgets. Builds without any app crate. Frozen: no new checks.
 
 ## Never
 
-- Never add `tauri` or `tokio` to a core crate (see "Never depends on" in `ARCHITECTURE.md`). Tauri is
-  about 90% of cold build time, and the core must run without a window.
+- Never add `tauri` or `tokio` to a core crate (see "Never depends on" in `ARCHITECTURE.md`). Tauri is about 90% of cold build time, and the core must run without a window.
 - Never add a Tauri plugin or grant a webview permission. The plugin set is fixed (each change forces
   a near-cold rebuild), and every permission widens what an XSS can reach.
 - Never write a sync `#[tauri::command]` or stream through Tauri events. Sync commands block the UI
