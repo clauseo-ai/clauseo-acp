@@ -18,6 +18,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
   appPaths,
@@ -42,6 +43,15 @@ const READY_TIMEOUT_MS = 60_000;
 const EDIT_TIMEOUT_MS = 10_000;
 /** How long one tool run may take before it is stopped and its probe fails. */
 const TOOL_TIMEOUT_MS = 120_000;
+/**
+ * How long the hmr probe waits, after an edit shows, before its next write. Vite 8.3.4's bundled
+ * chokidar throttles each file's change events: the first one passes and starts a 50 ms window
+ * (`_throttle(EV_CHANGE, path, 50)`, vite/dist/node/chunks/node.js:12264), and a change inside
+ * that window is dropped, never delivered later. On windows-2025-runner an edit shows in about
+ * 50 ms (48 to 80 ms in two CI runs of five edits), so without the wait the next write can fall
+ * inside that window and its edit never shows. The wait is outside the timed span.
+ */
+const HMR_GAP_MS = 100;
 
 function note(text) {
   process.stderr.write(`buildtime.mjs: ${text}\n`);
@@ -130,14 +140,18 @@ function startVite(port, state) {
   });
 }
 
-/** Why hmr is skipped when no browser launches. Only CHROME_PATH finds a Chromium. */
+/**
+ * Why hmr fails when no browser launches: the Chrome channel finds no Chrome that starts, and no
+ * CHROME_PATH is set. launchBrowser prints playwright's own error to stderr before it throws this.
+ */
 const NO_CHROME =
-  "Google Chrome not found at its standard paths; set CHROME_PATH to a Chrome or Chromium binary";
+  "Google Chrome was not found at its standard paths, or would not launch; install it or set " +
+  "CHROME_PATH to a Chrome or Chromium binary";
 
 /**
  * Headless Google Chrome through playwright-core (`channel: "chrome"`, its standard install paths),
- * or the Chrome or Chromium binary at CHROME_PATH. `undefined` when no Chrome is installed; a
- * CHROME_PATH binary that does not launch throws, so hmr fails rather than being skipped.
+ * or the Chrome or Chromium binary at CHROME_PATH. Throws when neither launches: NO_CHROME for the
+ * channel, playwright's own error for a CHROME_PATH binary. hmr fails either way, never skips.
  */
 async function launchBrowser() {
   const { chromium } = await import("playwright-core");
@@ -149,7 +163,7 @@ async function launchBrowser() {
     return await chromium.launch({ headless: true, channel: "chrome" });
   } catch (error) {
     note(`could not launch Chrome: ${String(error).split("\n")[0]}`);
-    return undefined;
+    throw new Error(NO_CHROME);
   }
 }
 
@@ -213,9 +227,6 @@ async function measureDev(runs, state) {
     }
     try {
       state.browser = await launchBrowser();
-      if (state.browser === undefined) {
-        return [devStart, { probe: "hmr", skipped: NO_CHROME }];
-      }
       const page = await state.browser.newPage();
       await page.goto(`http://localhost:${port}/`);
       await page.waitForSelector("#app-root", { state: "attached" });
@@ -227,6 +238,9 @@ async function measureDev(runs, state) {
         const ms = await timedEdit(page, state.guard, run + 1);
         if (run > 0) {
           samples.push(ms);
+        }
+        if (run < runs) {
+          await delay(HMR_GAP_MS);
         }
       }
       hmr = { probe: "hmr", samples_ms: samples };
