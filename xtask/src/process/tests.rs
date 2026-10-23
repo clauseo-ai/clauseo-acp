@@ -26,7 +26,10 @@ fn cargo_runs_without_clippy_conf_dir() {
         .filter(|(_, value)| value.is_none())
         .map(|(name, _)| name)
         .collect();
-    assert_eq!(removed, [OsStr::new(CLIPPY_CONF_DIR)]);
+    assert!(removed.contains(&OsStr::new(CLIPPY_CONF_DIR)));
+    for name in ["CARGO", "CARGO_MANIFEST_DIR", "CARGO_MANIFEST_PATH"] {
+        assert!(removed.contains(&OsStr::new(name)), "{name} is removed");
+    }
 }
 
 #[test]
@@ -142,6 +145,65 @@ fn the_resolved_path_is_the_directory_joined_with_the_name() {
     assert_eq!(resolved.file_name(), Some(OsStr::new("pnpm.exe")));
 }
 
+#[test]
+fn only_names_under_the_cargo_pkg_prefix_are_package_variables() {
+    for name in ["CARGO_PKG_NAME", "CARGO_PKG_LICENSE_FILE"] {
+        assert!(
+            is_cargo_pkg(OsStr::new(name)),
+            "{name} is a package variable"
+        );
+    }
+    for name in [
+        "CARGO_HOME",
+        "CARGO_PKG",
+        "CARGO_PKGX",
+        "XCARGO_PKG_NAME",
+        "",
+    ] {
+        assert!(!is_cargo_pkg(OsStr::new(name)), "{name} is not one");
+    }
+    // Windows names are not case-sensitive, so the lower-case name is the same variable there.
+    assert_eq!(is_cargo_pkg(OsStr::new("cargo_pkg_name")), cfg!(windows));
+}
+
+/// A child started through the process module does not see the variables `cargo run` sets for
+/// xtask, but sees one a person set for cargo. The test process gets those from cargo or nextest;
+/// the precondition asserts stop the test from passing without the variables being there.
+#[cfg(unix)]
+#[test]
+fn a_child_does_not_inherit_the_variables_cargo_run_sets() {
+    for name in ["CARGO_MANIFEST_DIR", "CARGO_PKG_NAME", "CARGO_HOME"] {
+        assert!(
+            std::env::var_os(name).is_some(),
+            "{name} is set for a test binary"
+        );
+    }
+    let cmd = Cmd::new(Program::Named("env"), Vec::<String>::new(), TEST_TIMEOUT);
+    let captured = capture(&cmd, Path::new("."), &mut |_| {}).expect("env runs");
+    assert!(captured.success());
+    let child_sees = |name: &str| {
+        captured
+            .stdout
+            .lines()
+            .any(|line| line.starts_with(&format!("{name}=")))
+    };
+    for name in [
+        "CARGO",
+        "CARGO_MANIFEST_DIR",
+        "CARGO_MANIFEST_PATH",
+        "CARGO_PKG_NAME",
+        "CARGO_PKG_VERSION",
+        "CARGO_PKG_DESCRIPTION",
+        "CARGO_PKG_RUST_VERSION",
+    ] {
+        assert!(!child_sees(name), "{name} reaches the child");
+    }
+    assert!(
+        child_sees("CARGO_HOME"),
+        "CARGO_HOME does not reach the child"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn capture_merges_stdout_and_stderr_and_reports_the_exit_status() {
@@ -186,11 +248,12 @@ fn every_variable_the_local_git_lists_is_in_git_local_env() {
     );
 }
 
-/// `git rev-parse --local-env-vars` as git 2.39 prints it, with `GIT_SUPER_PREFIX`.
+/// `git rev-parse --local-env-vars` as git 2.39 prints it, with `GIT_INTERNAL_SUPER_PREFIX`.
 const GIT_2_39_LOCAL_ENV: &str = "GIT_ALTERNATE_OBJECT_DIRECTORIES\nGIT_CONFIG\n\
     GIT_CONFIG_PARAMETERS\nGIT_CONFIG_COUNT\nGIT_OBJECT_DIRECTORY\nGIT_DIR\nGIT_WORK_TREE\n\
     GIT_IMPLICIT_WORK_TREE\nGIT_GRAFT_FILE\nGIT_INDEX_FILE\nGIT_NO_REPLACE_OBJECTS\n\
-    GIT_REPLACE_REF_BASE\nGIT_PREFIX\nGIT_SUPER_PREFIX\nGIT_SHALLOW_FILE\nGIT_COMMON_DIR\n";
+    GIT_REPLACE_REF_BASE\nGIT_PREFIX\nGIT_INTERNAL_SUPER_PREFIX\nGIT_SHALLOW_FILE\n\
+    GIT_COMMON_DIR\n";
 
 #[test]
 fn an_older_git_list_passes_and_a_list_with_an_unknown_name_fails() {
