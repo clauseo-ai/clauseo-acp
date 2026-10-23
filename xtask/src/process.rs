@@ -2,6 +2,8 @@
 //! or `run`, and those three through `running.rs` and the one `spawn` here, so the rules about how
 //! commands run live in one place:
 //! - A command cannot run without a time limit: `Cmd::new` takes it.
+//! - It runs without the variables `cargo run` sets for xtask (`remove_cargo_run_env`), so a
+//!   cargo it starts sees the same environment as one run from a shell.
 //! - It runs with stdin closed, in a process tree of its own: a new process group on Unix, a Job
 //!   Object that kills its processes when its handle closes on Windows (`windows.rs`).
 //! - Its tree is stopped at the limit and when its run is dropped (a panic included): on Unix
@@ -96,8 +98,9 @@ impl Program {
         }
     }
 
+    /// The command for this program, without the variables `cargo run` set for xtask.
     fn command(&self) -> Command {
-        match *self {
+        let mut command = match *self {
             Program::Cargo => {
                 let mut cargo =
                     Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
@@ -115,8 +118,49 @@ impl Program {
                 }
                 git
             }
+        };
+        remove_cargo_run_env(&mut command);
+        command
+    }
+}
+
+/// The variables `cargo run` sets for the program it runs, which xtask would pass on to each
+/// child: `CARGO` names the cargo that ran, and the other two name xtask's package (cargo 1.99,
+/// `fill_env` in `src/compiler/compilation.rs`, lines 446 and 452 to 453). A child cargo that
+/// inherits them sees a changed environment, and `ring`'s build script reruns (`cargo -v` says
+/// "the env variable `CARGO_MANIFEST_DIR` changed"). The package names `CARGO_PKG_*` are removed
+/// by `CARGO_PKG_PREFIX`. Names a person sets for cargo (`CARGO_HOME`, `CARGO_TARGET_DIR`,
+/// `CARGO_BUILD_*`, ...) are not here.
+const CARGO_RUN_ENV: [&str; 3] = ["CARGO", "CARGO_MANIFEST_DIR", "CARGO_MANIFEST_PATH"];
+
+/// The prefix of the package variables cargo sets for a run: `CARGO_PKG_NAME`,
+/// `CARGO_PKG_VERSION` and its parts, and the metadata ones (`CARGO_PKG_DESCRIPTION`, ...).
+const CARGO_PKG_PREFIX: &str = "CARGO_PKG_";
+
+/// Removes from `command` the variables `CARGO_RUN_ENV` names and every variable with
+/// `CARGO_PKG_PREFIX` that xtask holds, so the child starts without them. On Windows the names
+/// are matched without regard to case, as the OS matches them.
+fn remove_cargo_run_env(command: &mut Command) {
+    for name in CARGO_RUN_ENV {
+        command.env_remove(name);
+    }
+    for (name, _) in std::env::vars_os() {
+        if is_cargo_pkg(&name) {
+            command.env_remove(name);
         }
     }
+}
+
+/// Whether `name` starts with `CARGO_PKG_PREFIX`, without regard to case on Windows.
+fn is_cargo_pkg(name: &OsStr) -> bool {
+    let name = name.to_string_lossy();
+    name.get(..CARGO_PKG_PREFIX.len()).is_some_and(|head| {
+        if cfg!(windows) {
+            head.eq_ignore_ascii_case(CARGO_PKG_PREFIX)
+        } else {
+            head == CARGO_PKG_PREFIX
+        }
+    })
 }
 
 /// The file names pnpm may have on Windows, in the order they are looked for within one
