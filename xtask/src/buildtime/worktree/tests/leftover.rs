@@ -1,6 +1,7 @@
 //! Tests of what is already at the worktree's path before a run: a folder, someone's own
 //! worktree, a worktree git lists whose folder is gone. The run stops before it makes anything,
-//! leaves each alone, and its fix line's commands clear it without losing work.
+//! leaves each alone, and its fix line's commands clear it without losing work. Also a folder that
+//! comes during the warm-up, and a `git worktree list` that fails after a run.
 
 use super::super::*;
 use super::{Fake, Trick, app_only, find, git, left_behind, measure_with, repo};
@@ -159,5 +160,67 @@ fn a_folder_made_during_the_warm_up_fails_the_add_before_git_runs_and_is_left_al
     assert_eq!(
         fs::read_to_string(path.join("theirs.txt")).expect("kept"),
         "theirs"
+    );
+}
+
+/// When `git worktree list` fails after a run and nothing is on disk, the failure says only
+/// that: whether git still lists the worktree is unknown, so nothing is called left. With a
+/// folder on disk, something is left, and the failed listing is one more reason.
+#[test]
+fn a_listing_that_fails_after_a_run_says_only_that_it_could_not_check() {
+    let unchecked = |added: bool, root: &Path| {
+        let path = place(root).expect("a place");
+        let shown = path.display();
+        let what = if added {
+            format!("the worktree {shown} that this run made is removed from disk")
+        } else {
+            format!("this run's `git worktree add` failed and left no folder at {shown}")
+        };
+        Failure::new(
+            format!(
+                "{what}, but xtask could not check whether `git worktree list` names it: \
+                 `git worktree list --porcelain` failed"
+            ),
+            format!(
+                "run `git worktree list` from the repo root; if it names {shown}, run \
+                 `git worktree prune`, after `git worktree unlock {shown}` if it shows it \
+                 locked; then run again"
+            ),
+        )
+    };
+    for (added, trick) in [(false, Some(Trick::AddFails)), (true, None)] {
+        let scratch = Scratch::new("worktree-list-fails");
+        let root = repo(&scratch);
+        let mut fake = Fake {
+            builds: vec![app_only()],
+            tricks: [Trick::ListFailsAfterAdd]
+                .into_iter()
+                .chain(trick)
+                .collect(),
+            ..Fake::default()
+        };
+        let measured = measure_with(&root, false, 1, &mut fake).expect("measured");
+        assert_eq!(measured.errors, [unchecked(added, &root)], "added: {added}");
+        assert!(!left_behind(&root, &place(&root).expect("a place")));
+    }
+    let scratch = Scratch::new("worktree-list-fails-folder");
+    let root = repo(&scratch);
+    let mut fake = Fake {
+        builds: vec![app_only()],
+        tricks: vec![Trick::ListFailsAfterAdd, Trick::AddFailsAfterMakingIt],
+        ..Fake::default()
+    };
+    let measured = measure_with(&root, false, 1, &mut fake).expect("measured");
+    let [failure] = measured.errors.as_slice() else {
+        panic!("one failure: {:?}", measured.errors);
+    };
+    let shown = place(&root).expect("a place").display().to_string();
+    assert!(
+        failure.message.starts_with(&format!(
+            "this run's `git worktree add` failed and something is left at {shown}: its folder \
+             is on disk; `git worktree list --porcelain` failed. "
+        )),
+        "{}",
+        failure.message
     );
 }

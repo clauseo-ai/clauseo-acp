@@ -301,7 +301,8 @@ impl Worktree<'_> {
     /// `git worktree list`. Nothing was at its path right before the add (`refuse_leftover`), so
     /// after a successful add what is there this run made. When the add failed, xtask removes
     /// nothing: git undoes a failed add itself, and xtask cannot tell whether git or someone else
-    /// made what is left, so it only names it.
+    /// made what is left, so it only names it. When nothing is on disk but `git worktree list`
+    /// failed, the failure says only that (`unchecked`).
     pub(super) fn remove(&self, added: bool, runner: &mut QuietRunner<'_>) -> Result<(), Failure> {
         let mut why = Vec::new();
         if added {
@@ -312,19 +313,49 @@ impl Worktree<'_> {
                 why.push(with_output(failure));
             }
         }
-        match self.listed(runner) {
-            Ok(true) => why.push("`git worktree list` names it".to_owned()),
-            Ok(false) => {}
-            Err(failure) => why.push(failure.message),
-        }
+        let list_failed = match self.listed(runner) {
+            Ok(true) => {
+                why.push("`git worktree list` names it".to_owned());
+                None
+            }
+            Ok(false) => None,
+            Err(failure) => Some(failure),
+        };
         if fs::symlink_metadata(&self.path).is_ok() {
             why.push("its folder is on disk".to_owned());
         }
-        match (why.is_empty(), added) {
-            (true, _) => Ok(()),
-            (false, true) => Err(self.cannot_remove(&why.join("; "))),
-            (false, false) => Err(self.left_after_failed_add(&why.join("; "))),
+        if why.is_empty() {
+            return list_failed.map_or(Ok(()), |failure| Err(self.unchecked(added, &failure)));
         }
+        why.extend(list_failed.map(|failure| failure.message));
+        let why = why.join("; ");
+        Err(if added {
+            self.cannot_remove(&why)
+        } else {
+            self.left_after_failed_add(&why)
+        })
+    }
+
+    /// The failure when nothing is on disk at the worktree's path but `git worktree list` failed,
+    /// so whether git still lists it is unknown. `added` says whether this run's add succeeded.
+    pub(super) fn unchecked(&self, added: bool, failure: &Failure) -> Failure {
+        let path = self.path.display();
+        let what = if added {
+            format!("the worktree {path} that this run made is removed from disk")
+        } else {
+            format!("this run's `git worktree add` failed and left no folder at {path}")
+        };
+        Failure::new(
+            format!(
+                "{what}, but xtask could not check whether `git worktree list` names it: {}",
+                failure.message
+            ),
+            format!(
+                "run `git worktree list` from the repo root; if it names {path}, run \
+                 `git worktree prune`, after `git worktree unlock {path}` if it shows it \
+                 locked; then run again"
+            ),
+        )
     }
 
     /// Whether `git worktree list --porcelain` names the worktree.
@@ -350,8 +381,8 @@ impl Worktree<'_> {
             format!(
                 "check what is at {path} before you move it away: if `git worktree list` names \
                  it, `git worktree remove {path}` removes it unless it holds modified or \
-                 untracked files, and `git worktree prune` forgets it once its folder is gone; \
-                 then run again"
+                 untracked files, and once its folder is gone `git worktree prune` forgets it, \
+                 after `git worktree unlock {path}` if it is locked; then run again"
             ),
         )
     }
