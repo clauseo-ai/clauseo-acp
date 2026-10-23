@@ -32,7 +32,10 @@ tauri-plugin-os = "2.4.0"
 tauri-plugin-notification = "2.7.0"
 # tauri::generate_context! writes the plugin configuration as serde_json values, and
 # crates/desktop/src/rust_only.rs names serde_json::Value in the plugin hooks it forwards.
-serde_json = "1"
+# clauseo-settings holds every policy value as a serde_json::Value. No crate turns on
+# `preserve_order`: Cargo unifies features across the workspace, and it would reorder every
+# serde_json map.
+serde_json = "1.0.154"
 # canonicalize without the `\\?\` prefix std adds on Windows, which most tools refuse; clippy.toml
 # bans std's canonicalize in its favour.
 dunce = "1.0.5"
@@ -54,6 +57,17 @@ windows = { version = "0.62.2", features = [
   "Win32_System_Threading",
   "Win32_System_Diagnostics_ToolHelp",
 ] }
+# clauseo-settings: the settings schema, settings.json and the policy layer (features go on the
+# crate's own lines).
+serde = "1"
+thiserror = "2.0"
+# JSONC: settings.json and policy.json take comments and trailing commas.
+serde_json_lenient = "0.2"
+schemars = { version = "1.2", default-features = false }
+# macOS managed preferences: a safe CFPreferencesCopyAppValue and CFPreferencesAppValueIsForced.
+objc2-core-foundation = "0.3.2"
+# Test-only: snapshots.
+insta = "1.49"
 
 [workspace.lints.rust]
 unsafe_code = "deny"               # deny, not forbid: an FFI module overrides with #[expect(unsafe_code, reason = "…")]

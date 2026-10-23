@@ -1,0 +1,36 @@
+[package]
+name = "clauseo-settings"
+version = "0.1.0"
+description = "Clauseo's settings: the schema, the folders it uses, settings.json and the policy layer."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
+serde_json_lenient = { workspace = true, features = [
+  "preserve_order",
+  "raw_value",
+] }
+schemars = { workspace = true, features = ["std", "derive", "indexmap2"] }
+thiserror = { workspace = true }
+
+# The registry and the known folders.
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = [
+  "Win32_System_Registry",
+  "Win32_UI_Shell",
+  "Win32_System_Com",
+] }
+
+# Managed preferences.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-foundation = { workspace = true, features = ["CFPreferences"] }
+
+[dev-dependencies]
+insta = { workspace = true, features = ["json", "redactions"] }
+
+[lints]
+workspace = true

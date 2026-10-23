@@ -48,3 +48,11 @@ xtask/src/process.rs first_on_path clippy::disallowed_methods
 
 # Added by S4: the e2e build prints its DevTools port for the Playwright harness.
 crates/desktop/src/e2e.rs with_debugging_port clippy::print_stdout
+
+# Added with clauseo-settings: its one file write, and its FFI to the registry, the known folders
+# and the property list containers of managed preferences.
+crates/settings/src/files.rs SystemFiles::write_atomic clippy::disallowed_methods
+crates/settings/src/policy/windows.rs - unsafe_code
+crates/settings/src/system/windows.rs - unsafe_code
+crates/settings/src/policy/macos.rs items unsafe_code
+crates/settings/src/policy/macos.rs entries unsafe_code

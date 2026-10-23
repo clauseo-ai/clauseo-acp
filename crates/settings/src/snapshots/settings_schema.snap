@@ -1,0 +1,154 @@
+---
+source: crates/settings/src/schema/tests.rs
+---
+{
+  "$defs": {
+    "AgentLaunch": {
+      "description": "How to start one agent. `process` and `host` launch it; this crate only reads it.",
+      "properties": {
+        "args": {
+          "default": [],
+          "description": "Its arguments.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "description": "The program, as an absolute path.",
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Variables added to its environment. Never a secret: keys go in the OS keychain.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "Density": {
+      "description": "How much space the app leaves round things.",
+      "oneOf": [
+        {
+          "const": "comfortable",
+          "description": "More space.",
+          "type": "string"
+        },
+        {
+          "const": "compact",
+          "description": "Less space.",
+          "type": "string"
+        }
+      ]
+    },
+    "FontSize": {
+      "default": 14,
+      "description": "A text size, in points.",
+      "maximum": 20,
+      "minimum": 12,
+      "type": "integer"
+    },
+    "Language": {
+      "default": "en",
+      "description": "A BCP 47 language tag, such as en or en-GB.",
+      "type": "string"
+    },
+    "MattersSettings": {
+      "description": "The `matters` section.",
+      "properties": {
+        "default_location": {
+          "default": null,
+          "description": "The folder new matters go in, as an absolute path. When absent, `Documents/Clauseo`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Theme": {
+      "description": "The colour theme.",
+      "oneOf": [
+        {
+          "const": "system",
+          "description": "As the OS is set.",
+          "type": "string"
+        },
+        {
+          "const": "light",
+          "description": "Light.",
+          "type": "string"
+        },
+        {
+          "const": "dark",
+          "description": "Dark.",
+          "type": "string"
+        }
+      ]
+    },
+    "UiSettings": {
+      "description": "The `ui` section. Design may change these values before M4 without a decision record.",
+      "properties": {
+        "density": {
+          "$ref": "#/$defs/Density",
+          "default": "comfortable",
+          "description": "How much space the app leaves round things."
+        },
+        "font_size": {
+          "$ref": "#/$defs/FontSize",
+          "default": 14,
+          "description": "The text size, in points."
+        },
+        "language": {
+          "$ref": "#/$defs/Language",
+          "default": "en",
+          "description": "The app's language."
+        },
+        "theme": {
+          "$ref": "#/$defs/Theme",
+          "default": "system",
+          "description": "Light, dark, or as the OS is set."
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Every setting, as `Effective::settings` gives it: the defaults, then `settings.json`, then\nthe policy layer.",
+  "properties": {
+    "agents": {
+      "additionalProperties": {
+        "$ref": "#/$defs/AgentLaunch"
+      },
+      "default": {},
+      "description": "The agents Clauseo can launch, by id. Empty by default.",
+      "type": "object"
+    },
+    "matters": {
+      "$ref": "#/$defs/MattersSettings",
+      "default": {
+        "default_location": null
+      },
+      "description": "Where matters live."
+    },
+    "ui": {
+      "$ref": "#/$defs/UiSettings",
+      "default": {
+        "density": "comfortable",
+        "font_size": 14,
+        "language": "en",
+        "theme": "system"
+      },
+      "description": "How the app looks. The webview changes these only through a `UiPatch`."
+    }
+  },
+  "title": "Settings",
+  "type": "object"
+}
