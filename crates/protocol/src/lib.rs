@@ -125,6 +125,7 @@
 )]
 
 mod approval;
+mod command;
 mod content;
 mod envelope;
 mod error;
@@ -168,6 +169,10 @@ wire_types! {
     approval::{
         Deliverable, ElicitationOutcome, ElicitationRequest, ElicitationResponse, ExpiryReason,
         PermissionChoice, PermissionKind, PermissionOption, Principal,
+    },
+    command::{
+        CommandEnvelope, CommandOutcome, ConfigValue, DeliveryRequest, HostCommand, MatterSource,
+        RestoreRequest,
     },
     content::{ContentBlock, PromptBlock, RawFrom, ToolCallContent},
     envelope::{Envelope},
@@ -223,6 +228,20 @@ wire_types! {
     },
 }
 
+// Re-exports that are not wire types: constants, functions, and types that never cross the
+// boundary.
+pub use command::{
+    MAX_ELICITATION_VALUES_BYTES,
+    MAX_FILE_LIST,
+    MAX_MATTER_NAME_BYTES,
+    MAX_PATH_LIST_BYTES,
+    MAX_PROMPT_BLOCKS,
+    MAX_PROMPT_FILES,
+    MAX_PROMPT_TEXT_BYTES,
+    MAX_QUEUED_TURNS,
+    // A checked command inside Rust; never serialised (the client sends `CommandEnvelope`).
+    ValidatedCommand,
+};
 // compact_str's type, re-exported for callers; wire fields holding it export as `string`.
 pub use compact_str::CompactString;
 // What a store decodes a stored envelope as; it is never written, so it has no wire form.
