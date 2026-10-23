@@ -9,6 +9,9 @@
 //!   `{"probe": name}` plus exactly one of `"samples_ms": [numbers]` (timed runs, warm-up left
 //!   out), `"bytes": number` (with `"files"`), `"skipped": "why"` or
 //!   `"failed": {"message", "command", "output"}`, where `command` reproduces the failure.
+//!   `skipped` is only for a probe that follows a failure which already fails the run (`hmr`
+//!   after a failed `dev_start`, `initial_js` after a failed `vite build`). A probe that cannot
+//!   run on this machine, `hmr` with no Chrome included, is `failed`.
 //!   `failures` is optional: `[{"message", "fix"}]` for what is no probe's (a conflict over
 //!   `ui/app/src/App.tsx`, a restore that failed); each fails the run. With `probes` empty, the
 //!   script stopped before it measured (a conflict left by an interrupted run, or a Node older
@@ -28,9 +31,10 @@
 //! the copy when xtask runs the script.
 //!
 //! Gating: `tsc`, `oxlint_type_aware` and `vite_build` follow their row's gate like the Rust
-//! probes, and fail the run when they fail (the tool exits non-zero). `initial_js`, `dev_start`
-//! and `hmr` are reported only: over budget or failed, they show in the table, a failure prints
-//! its lines, and the run still passes. A skipped probe (no Chrome) never fails the run.
+//! probes. `initial_js`, `dev_start` and `hmr` are reported only: over budget, they show in the
+//! table and the run still passes. Every probe that fails (no number: the tool exits non-zero, no
+//! Chrome, a timeout) fails the run, reported only or not, in CI too, and prints its lines. A
+//! skipped probe never fails the run: it follows a failure that already does.
 
 #[cfg(test)]
 mod tests;
@@ -57,7 +61,7 @@ pub(crate) const SCRIPT: &str = "ui/app/scripts/buildtime.mjs";
 pub(crate) enum Gating {
     /// Its budget row's gate decides, as for the Rust probes, and a failure fails the run.
     Row,
-    /// Reported, never fails the run: not over budget, and not when it fails.
+    /// Over budget, only reported: never fails the run. A failure still fails it.
     ReportedOnly,
 }
 
@@ -113,15 +117,20 @@ pub(crate) const WEB_PROBES: &[WebProbe] = &[
     },
 ];
 
-/// The line under the web table that names the probes of `probes` that never fail the run, or
-/// `None` when every probe can.
+/// The line under the web table that names the probes of `probes` that never fail the run by
+/// being over budget, or `None` when every probe can.
 pub(crate) fn reported_line(probes: &[WebProbe]) -> Option<String> {
     let names: Vec<&str> = probes
         .iter()
         .filter(|probe| probe.gating == Gating::ReportedOnly)
         .map(|probe| probe.name)
         .collect();
-    (!names.is_empty()).then(|| format!("reported only, never fail the run: {}", names.join(", ")))
+    (!names.is_empty()).then(|| {
+        format!(
+            "reported only, never fail the run over budget: {}",
+            names.join(", ")
+        )
+    })
 }
 
 /// The object the script prints on stdout.

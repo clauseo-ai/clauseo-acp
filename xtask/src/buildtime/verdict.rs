@@ -139,7 +139,8 @@ impl Outcome {
 pub(crate) struct ProbeResult {
     pub name: &'static str,
     pub unit: Unit,
-    /// The probe never fails the run: not when it is over budget, and not when it fails.
+    /// Over budget, the probe never fails the run. It still fails it when it fails: a probe that
+    /// produced no number fails the run, reported only or not, in CI too.
     pub reported_only: bool,
     pub outcome: Outcome,
 }
@@ -149,17 +150,17 @@ impl ProbeResult {
         self.outcome.status()
     }
 
-    /// Whether this probe fails the run. A reported-only probe never does. Otherwise a failure
-    /// always does, and an over-budget probe does when its gate says so for this machine.
+    /// Whether this probe fails the run. A failure always does, on every machine and for a
+    /// reported-only probe too: it produced no number. A skipped probe never does: it does not
+    /// apply here, or it follows a failure that already fails the run. An over-budget probe does
+    /// when it is not reported only and its gate says so for this machine.
     pub(crate) fn fails_run(&self, ci: bool) -> bool {
-        if self.reported_only {
-            return false;
-        }
         match &self.outcome {
             Outcome::Skipped(_) => false,
             Outcome::Failed(_) => true,
             Outcome::Measured { budget, .. } => {
-                self.status() == ProbeStatus::Over
+                !self.reported_only
+                    && self.status() == ProbeStatus::Over
                     && budget.is_some_and(|budget| over_budget_fails(budget.gate, ci))
             }
         }

@@ -342,10 +342,7 @@ pub(crate) fn run(root: &Path, half: Half, runs: u32, json: bool) -> ExitCode {
         let ci = check::is_ci(env::var("CI").ok().as_deref());
         WebJson::of(&measure_web(root, runs, ci, json, &mut out, &mut diag))
     });
-    let rust_passed = rust
-        .as_ref()
-        .is_none_or(|rust| passes(&rust.results, rust.ci));
-    let passed = rust_passed && web.as_ref().is_none_or(WebJson::passed);
+    let passed = run_passed(rust.as_ref(), web.as_ref());
     if json {
         match (&rust, &web) {
             (Some(rust), web) => out.note(report::json_object(rust, passed, web.as_ref())),
@@ -353,6 +350,16 @@ pub(crate) fn run(root: &Path, half: Half, runs: u32, json: bool) -> ExitCode {
             (None, None) => {}
         }
     }
+    exit_code(passed)
+}
+
+/// The verdict of a run: no half that ran fails it.
+fn run_passed(rust: Option<&RustRun>, web: Option<&WebJson>) -> bool {
+    rust.is_none_or(|rust| passes(&rust.results, rust.ci)) && web.is_none_or(WebJson::passed)
+}
+
+/// The exit code of a run whose verdict is `passed`: 0, or 1 when it fails.
+fn exit_code(passed: bool) -> ExitCode {
     if passed {
         ExitCode::SUCCESS
     } else {
