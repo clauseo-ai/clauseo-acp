@@ -4,11 +4,12 @@
 use super::super::profile::Incremental;
 use super::super::report::{WebJson, json_object, print_failures, table_lines, web_json};
 use super::super::verdict::{Limit, ProbeStatus, Stats};
-use super::super::{PROBES, RustRun, rust_result};
+use super::super::{PROBES, RustRun, exit_code, run_passed, rust_result};
 use super::*;
 use crate::budgets::Gate;
 use crate::output::Printer;
 use crate::scratch::Scratch;
+use std::process::ExitCode;
 
 mod measure;
 mod node;
@@ -33,9 +34,8 @@ fn budgets() -> Vec<Budget> {
     ]
 }
 
-/// The script's reason for skipping hmr when no Chrome launches.
-const NO_CHROME: &str =
-    "Google Chrome not found at its standard paths; set CHROME_PATH to a Chrome or Chromium binary";
+/// The script's reason for skipping hmr after `dev_start` failed.
+const DEV_SERVER_DOWN: &str = "the dev server did not start";
 
 /// One line, as the script prints it.
 const ALL_OK: &str = concat!(
@@ -151,21 +151,24 @@ fn a_failed_probe_carries_the_tools_output_and_a_command_to_reproduce_it() {
 }
 
 #[test]
-fn a_skipped_hmr_is_reported_and_does_not_fail_the_run() {
+fn a_skipped_hmr_is_reported_and_does_not_fail_the_run_itself() {
     let json = with(
         "hmr",
-        &format!(r#"{{"probe":"hmr","skipped":"{NO_CHROME}"}}"#),
+        &format!(r#"{{"probe":"hmr","skipped":"{DEV_SERVER_DOWN}"}}"#),
     );
     let results = results_of(&json);
     let hmr = find(&results, "hmr");
     assert_eq!(hmr.status(), ProbeStatus::Skipped);
-    assert_eq!(hmr.outcome, Outcome::Skipped(NO_CHROME.into()));
+    assert_eq!(hmr.outcome, Outcome::Skipped(DEV_SERVER_DOWN.into()));
+    assert!(!hmr.fails_run(false) && !hmr.fails_run(true));
     assert_eq!(find(&results, "dev_start").status(), ProbeStatus::Reported);
     assert!(web_run(results, false).passed());
 }
 
+/// A reported-only probe that produced no number fails the run, in CI too: on windows-2025-runner a
+/// failed `hmr` once left `web.passed: true` and a green job.
 #[test]
-fn a_failed_hmr_dev_start_or_initial_js_shows_failed_prints_its_lines_and_passes() {
+fn a_failed_hmr_dev_start_or_initial_js_shows_failed_prints_its_lines_and_fails_the_run() {
     let cases = [
         ("hmr", 6, "hmr failed: Timeout 10000ms exceeded"),
         (
@@ -186,12 +189,10 @@ fn a_failed_hmr_dev_start_or_initial_js_shows_failed_prints_its_lines_and_passes
         let results = results_of(&with(name, &failed));
         let result = find(&results, name);
         assert_eq!(result.status(), ProbeStatus::Failed, "{name}");
-        assert!(
-            !result.fails_run(false) && !result.fails_run(true),
-            "{name}"
-        );
-        assert!(web_run(results.clone(), false).passed(), "{name}");
-        assert!(web_run(results.clone(), true).passed(), "{name} in CI");
+        assert!(result.reported_only, "{name}");
+        assert!(result.fails_run(false) && result.fails_run(true), "{name}");
+        assert!(!web_run(results.clone(), false).passed(), "{name}");
+        assert!(!web_run(results.clone(), true).passed(), "{name} in CI");
         assert_eq!(
             table_lines(&results)[row],
             format!("{name:<19}failed (see below)")
@@ -201,16 +202,18 @@ fn a_failed_hmr_dev_start_or_initial_js_shows_failed_prints_its_lines_and_passes
         assert_eq!(
             String::from_utf8(diag.into_inner()).expect("utf-8"),
             format!(
-                "the tool's output\n{message} (reported only; the run still passes)\n    fix: run `node ui/app/scripts/buildtime.mjs --runs 3` to see the error, and fix it\n"
+                "the tool's output\n{message}\n    fix: run `node ui/app/scripts/buildtime.mjs --runs 3` to see the error, and fix it\n"
             )
         );
-        let web = WebJson::of(&Ok(web_run(results, false)));
+        let web = WebJson::of(&Ok(web_run(results, true)));
         let json: serde_json::Value = serde_json::from_str(&web_json(&web)).expect("valid json");
         let probe = &json["web"]["probes"][row - 1];
         assert_eq!(probe["status"], "failed");
         assert_eq!(probe["reported_only"], true);
         assert_eq!(probe["reason"], message);
-        assert_eq!(json["passed"], true);
+        assert_eq!(json["web"]["passed"], false, "{name}");
+        assert_eq!(json["passed"], false, "{name}");
+        assert_eq!(exit_code(run_passed(None, Some(&web))), ExitCode::FAILURE);
     }
 }
 
@@ -314,11 +317,11 @@ fn the_table_shows_each_probe_in_its_unit_and_a_dash_without_a_budget() {
     );
     let skipped = results_of(&with(
         "hmr",
-        &format!(r#"{{"probe":"hmr","skipped":"{NO_CHROME}"}}"#),
+        &format!(r#"{{"probe":"hmr","skipped":"{DEV_SERVER_DOWN}"}}"#),
     ));
     assert_eq!(
         table_lines(&skipped)[6],
-        format!("hmr                skipped: {NO_CHROME}")
+        format!("hmr                skipped: {DEV_SERVER_DOWN}")
     );
     assert_eq!(
         table_lines(&all_over())[1].split_whitespace().last(),
@@ -365,7 +368,7 @@ fn the_web_json_carries_every_probe_with_its_unit_and_gating() {
 fn the_reported_only_line_names_the_probes_whose_gating_says_so() {
     assert_eq!(
         reported_line(WEB_PROBES).as_deref(),
-        Some("reported only, never fail the run: initial_js, dev_start, hmr")
+        Some("reported only, never fail the run over budget: initial_js, dev_start, hmr")
     );
     let gated: Vec<WebProbe> = WEB_PROBES
         .iter()
@@ -409,6 +412,10 @@ fn the_all_json_nests_the_web_half_under_web() {
     assert_eq!(json["web"]["probes"][5]["probe"], "hmr");
     assert_eq!(json["web"]["passed"], true);
     assert_eq!(json["passed"], true);
+    assert_eq!(
+        exit_code(run_passed(Some(&rust), Some(&web))),
+        ExitCode::SUCCESS
+    );
 
     let failing = WebJson::of(&Ok(web_run(all_over(), false)));
     let json: serde_json::Value =
@@ -416,6 +423,11 @@ fn the_all_json_nests_the_web_half_under_web() {
             .expect("valid json");
     assert_eq!(json["web"]["passed"], false);
     assert_eq!(json["passed"], false);
+    assert_eq!(
+        exit_code(run_passed(Some(&rust), Some(&failing))),
+        ExitCode::FAILURE
+    );
+    assert_eq!(exit_code(run_passed(Some(&rust), None)), ExitCode::SUCCESS);
 }
 
 const CONFLICT: &str = r#"{"message":"ui/app/src/App.tsx changed during this buildtime run; its saved copy is target/xtask/buildtime/ui/app/src/App.tsx","fix":"compare the two, keep what you want, then delete target/xtask/buildtime/ui/app/src/App.tsx"}"#;
