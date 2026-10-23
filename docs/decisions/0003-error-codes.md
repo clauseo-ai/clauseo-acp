@@ -82,8 +82,8 @@ passes; `matter.turn_running` is, as `thread.turn_running` is.
 
 ## Status
 
-Proposed. Accepted once Rohan approves the pull request that adds this record.
+accepted
 
 ## Date
 
-2026-10-19
+2026-10-22
