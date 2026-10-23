@@ -140,14 +140,18 @@ function startVite(port, state) {
   });
 }
 
-/** Why hmr is skipped when no browser launches. Only CHROME_PATH finds a Chromium. */
+/**
+ * Why hmr fails when no browser launches: the Chrome channel finds no Chrome that starts, and no
+ * CHROME_PATH is set. launchBrowser prints playwright's own error to stderr before it throws this.
+ */
 const NO_CHROME =
-  "Google Chrome not found at its standard paths; set CHROME_PATH to a Chrome or Chromium binary";
+  "Google Chrome was not found at its standard paths, or would not launch; install it or set " +
+  "CHROME_PATH to a Chrome or Chromium binary";
 
 /**
  * Headless Google Chrome through playwright-core (`channel: "chrome"`, its standard install paths),
- * or the Chrome or Chromium binary at CHROME_PATH. `undefined` when no Chrome is installed; a
- * CHROME_PATH binary that does not launch throws, so hmr fails rather than being skipped.
+ * or the Chrome or Chromium binary at CHROME_PATH. Throws when neither launches: NO_CHROME for the
+ * channel, playwright's own error for a CHROME_PATH binary. hmr fails either way, never skips.
  */
 async function launchBrowser() {
   const { chromium } = await import("playwright-core");
@@ -159,7 +163,7 @@ async function launchBrowser() {
     return await chromium.launch({ headless: true, channel: "chrome" });
   } catch (error) {
     note(`could not launch Chrome: ${String(error).split("\n")[0]}`);
-    return undefined;
+    throw new Error(NO_CHROME);
   }
 }
 
@@ -223,9 +227,6 @@ async function measureDev(runs, state) {
     }
     try {
       state.browser = await launchBrowser();
-      if (state.browser === undefined) {
-        return [devStart, { probe: "hmr", skipped: NO_CHROME }];
-      }
       const page = await state.browser.newPage();
       await page.goto(`http://localhost:${port}/`);
       await page.waitForSelector("#app-root", { state: "attached" });
