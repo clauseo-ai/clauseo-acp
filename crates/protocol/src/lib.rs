@@ -147,6 +147,8 @@ mod title;
 mod tool;
 mod turn;
 mod view;
+#[cfg(feature = "specta")]
+mod wire;
 
 /// Writes the one list of wire types: a `pub use <module>::{..};` per module and, under the
 /// `specta` feature, [`wire_types`], which registers every one of them.
@@ -256,6 +258,8 @@ pub use query::{MAX_BLOB_READ_BYTES, MAX_PAGE_ENTRIES};
 pub use raw::{MAX_MSGPACK_DEPTH, MAX_RAW_DEPTH, MAX_RAW_ENCODE_DEPTH};
 pub use text::{INLINE_LIMIT_BYTES, PREVIEW_BYTES, escaped_len, preview_of, utf16_len};
 pub use title::{MAX_TITLE_CHARS, check_display_title};
+#[cfg(feature = "specta")]
+pub use wire::{WireFormat, known_kinds_typescript};
 
 /// The envelope's `schema_version` this crate writes: 1 at the freeze.
 pub const SCHEMA_VERSION: u32 = 1;
