@@ -1,18 +1,22 @@
 //! Tests of `cargo xtask mutants`, through a fake `exec`: no real cargo-mutants runs.
 
+use super::build_dirs::build_dir_prefix;
+use super::pass::{WIRE_OUTCOMES, WIRE_OUTPUT_DIR};
 use super::*;
 use crate::scratch::Scratch;
+use std::path::PathBuf;
 
 mod cap;
 mod errors;
 mod run;
 mod untracked;
+mod wire;
 
 /// The command that lists the untracked `.rs` files, as it prints.
 const UNTRACKED_CMD: &str = "git ls-files -z --others --exclude-standard -- *.rs";
 
-const CMD: &str = "cargo mutants --workspace --in-diff target/xtask/mutants.diff --output \
-                   target/xtask --jobs 4";
+const CMD: &str = "cargo mutants --workspace --exclude crates/protocol/src/wire.rs --in-diff \
+                   target/xtask/mutants.diff --output target/xtask --jobs 4";
 const MISSED_FIX: &str = "    fix: add a test that fails on this change, or exclude it with a \
                           reason in .cargo/mutants.toml (the code owner approves it)";
 const DIFF_TEXT: &str = "diff --git a/xtask/src/main.rs b/xtask/src/main.rs\n";
@@ -84,6 +88,40 @@ enum Git {
     CannotStart,
 }
 
+/// The build dirs a fake run may make: one a SIGKILL left (`new`), and one another tree's run
+/// made meanwhile (`other`).
+struct BuildDirs {
+    new: PathBuf,
+    other: PathBuf,
+}
+
+/// What the fake cargo-mutants pass does for `run`, writing its outcomes to `outcomes` in
+/// `output_dir`.
+fn fake_pass(run: &Run, output_dir: &Path, outcomes: &Path, dirs: &BuildDirs) -> io::Result<Ran> {
+    match run {
+        Run::Writes(text, success) => {
+            Scratch::create_dir_all(output_dir).expect("make mutants.out");
+            Scratch::write(outcomes, text).expect("write outcomes.json");
+            Ok(Ran::exited(*success, "cargo-mutants output\n", ""))
+        }
+        Run::Nothing(success, output) => Ok(Ran::exited(*success, *output, "")),
+        Run::TimesOut => Ok(Ran::timed_out()),
+        Run::WritesThenTimesOut(text) => {
+            Scratch::create_dir_all(output_dir).expect("make mutants.out");
+            Scratch::write(outcomes, text).expect("write outcomes.json");
+            // The build dir a SIGKILL left behind.
+            Scratch::create_dir_all(dirs.new.join("target")).expect("make a build dir");
+            Scratch::create_dir_all(&dirs.other).expect("make another tree's");
+            Ok(Ran::timed_out())
+        }
+        Run::CannotStart => Err(io::Error::new(io::ErrorKind::NotFound, "no cargo")),
+        Run::FolderForOutcomes => {
+            Scratch::create_dir_all(outcomes).expect("make a folder");
+            Ok(Ran::exited(true, String::new(), ""))
+        }
+    }
+}
+
 /// `check_with`, where git lists no untracked `.rs` file.
 fn check(
     name: &str,
@@ -94,9 +132,7 @@ fn check(
     check_with(name, diff, &Git::Lists(""), version, run)
 }
 
-/// Runs `run_with` in a fresh scratch repo named `name`, with `diff`, a `git ls-files` that does
-/// `git`, a `cargo mutants --version` that prints `version` (`None`: it fails), and a run that
-/// does `run`. Returns what it printed, whether it passed, and the commands it ran.
+/// `check_runs` with no wire pass: a diff that does not change `crates/protocol/src/wire.rs`.
 fn check_with(
     name: &str,
     diff: Result<String, GitError>,
@@ -104,15 +140,33 @@ fn check_with(
     version: Option<&str>,
     run: &Run,
 ) -> (String, bool, Vec<String>) {
+    check_runs(name, diff, git, version, run, None)
+}
+
+/// Runs `run_with` in a fresh scratch repo named `name`, with `diff`, a `git ls-files` that does
+/// `git`, a `cargo mutants --version` that prints `version` (`None`: it fails), a main pass that
+/// does `run` and a wire pass that does `wire` (`None`: the test fails if one starts). Returns
+/// what it printed, whether it passed, and the commands it ran.
+fn check_runs(
+    name: &str,
+    diff: Result<String, GitError>,
+    git: &Git,
+    version: Option<&str>,
+    run: &Run,
+    wire: Option<&Run>,
+) -> (String, bool, Vec<String>) {
     let root = Scratch::new(name);
     let temp = root.join("tmp");
     let prefix = build_dir_prefix(&root);
     // A build dir of an earlier run, which is not this run's to remove.
     let old_build_dir = temp.join(format!("{prefix}old.tmp"));
     Scratch::create_dir_all(&old_build_dir).expect("make an old build dir");
-    let new_build_dir = temp.join(format!("{prefix}new.tmp"));
-    // A build dir another tree's run made meanwhile, which is not this run's either.
-    let other_build_dir = temp.join("cargo-mutants-other-tree-new.tmp");
+    let dirs = BuildDirs {
+        new: temp.join(format!("{prefix}new.tmp")),
+        // A build dir another tree's run made meanwhile, which is not this run's either.
+        other: temp.join("cargo-mutants-other-tree-new.tmp"),
+    };
+    let saved = diff.clone().unwrap_or_default();
     let mut ran = Vec::new();
     let mut out = Printer::new(Vec::new(), false);
     let passed = {
@@ -138,46 +192,46 @@ fn check_with(
             }
             assert_eq!(
                 std::fs::read_to_string(root.join(DIFF)).expect("the diff was saved"),
-                DIFF_TEXT
+                saved
             );
             assert!(
-                !root.join(OUTPUT_DIR).exists(),
-                "the last run's output is removed"
+                !root.join(WIRE_OUTPUT_DIR).exists(),
+                "the last run's wire output is removed"
             );
-            match run {
-                Run::Writes(text, success) => {
-                    Scratch::create_dir_all(root.join(OUTPUT_DIR)).expect("make mutants.out");
-                    Scratch::write(root.join(OUTCOMES), text).expect("write outcomes.json");
-                    Ok(Ran::exited(*success, "cargo-mutants output\n", ""))
-                }
-                Run::Nothing(success, output) => Ok(Ran::exited(*success, *output, "")),
-                Run::TimesOut => Ok(Ran::timed_out()),
-                Run::WritesThenTimesOut(text) => {
-                    Scratch::create_dir_all(root.join(OUTPUT_DIR)).expect("make mutants.out");
-                    Scratch::write(root.join(OUTCOMES), text).expect("write outcomes.json");
-                    // The build dir a SIGKILL left behind.
-                    Scratch::create_dir_all(new_build_dir.join("target"))
-                        .expect("make a build dir");
-                    Scratch::create_dir_all(&other_build_dir).expect("make another tree's");
-                    Ok(Ran::timed_out())
-                }
-                Run::CannotStart => Err(io::Error::new(io::ErrorKind::NotFound, "no cargo")),
-                Run::FolderForOutcomes => {
-                    Scratch::create_dir_all(root.join(OUTCOMES)).expect("make a folder");
-                    Ok(Ran::exited(true, String::new(), ""))
-                }
+            if !cmd.args.iter().any(|arg| arg == "--file") {
+                assert!(
+                    !root.join(OUTPUT_DIR).exists(),
+                    "the last run's output is removed"
+                );
+                return fake_pass(run, &root.join(OUTPUT_DIR), &root.join(OUTCOMES), &dirs);
             }
+            let Some(wire) = wire else {
+                panic!("no wire pass runs on this diff: `{cmd}`");
+            };
+            // The wire pass has what the main pass left of the cap, which here is nearly all.
+            assert!(cmd.timeout < MUTANTS_TIMEOUT, "{:?}", cmd.timeout);
+            assert!(cmd.timeout > Duration::from_mins(19));
+            assert_eq!(cmd.kill_grace, MUTANTS_KILL_GRACE);
+            fake_pass(
+                wire,
+                &root.join(WIRE_OUTPUT_DIR),
+                &root.join(WIRE_OUTCOMES),
+                &dirs,
+            )
         };
-        // A stale run's outcomes.json, which must never be read as this run's.
-        Scratch::create_dir_all(root.join(OUTPUT_DIR)).expect("make the old mutants.out");
-        Scratch::write(root.join(OUTCOMES), "stale").expect("write the old outcomes.json");
+        // Stale runs' outcomes.json, which must never be read as this run's.
+        for (dir, outcomes) in [(OUTPUT_DIR, OUTCOMES), (WIRE_OUTPUT_DIR, WIRE_OUTCOMES)] {
+            Scratch::create_dir_all(root.join(dir)).expect("make the old mutants.out");
+            Scratch::write(root.join(outcomes), "stale").expect("write the old outcomes.json");
+        }
         run_with(&mut out, &root, &temp, diff, &mut exec)
     };
     assert!(old_build_dir.is_dir(), "an earlier run's build dir is kept");
-    let other_kept = !matches!(run, Run::WritesThenTimesOut(_)) || other_build_dir.is_dir();
+    let left = |run: &Run| matches!(run, Run::WritesThenTimesOut(_));
+    let other_kept = !(left(run) || wire.is_some_and(left)) || dirs.other.is_dir();
     assert!(other_kept, "another tree's build dir is kept");
     assert!(
-        !new_build_dir.exists(),
+        !dirs.new.exists(),
         "a build dir the stopped run left is removed"
     );
     let printed = String::from_utf8(out.into_inner()).expect("utf-8");

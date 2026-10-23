@@ -48,3 +48,13 @@ xtask/src/process.rs first_on_path clippy::disallowed_methods
 
 # Added by S4: the e2e build prints its DevTools port for the Playwright harness.
 crates/desktop/src/e2e.rs with_debugging_port clippy::print_stdout
+
+# The `#[expect]`s that stay in protocol: `Envelope` keeps `schema_version` private among public
+# fields, so only `Envelope::new` builds one; the one in error_code.rs needs a by-value error
+# (`map_err` takes it); and the three specta-only shapes (two in event.rs, one in raw.rs) are
+# never constructed, only described.
+crates/protocol/src/envelope.rs Envelope clippy::partial_pub_fields
+crates/protocol/src/error_code.rs HostError::invalid_command clippy::needless_pass_by_value
+crates/protocol/src/event.rs domain_events dead_code
+crates/protocol/src/event.rs domain_events dead_code
+crates/protocol/src/raw.rs JsonValue dead_code

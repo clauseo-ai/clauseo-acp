@@ -12,6 +12,12 @@ test_tool = "nextest"
 # .config/nextest.toml sets fail-fast = false for people, and this flag overrides it here.
 additional_cargo_test_args = ["--fail-fast"]
 
+# No `features`: they would go to every mutant's build, and cargo refuses a protocol feature for
+# any other package, so every xtask or desktop mutant would come back unviable. Only
+# crates/protocol/src/wire.rs needs protocol's specta feature (`WireFormat` and its tests);
+# `cargo xtask mutants` leaves it out of the main pass and mutates it in a second pass with the
+# feature on (xtask/src/mutants/pass.rs).
+
 # Each build runs in a copy of the tree. Leave out what .gitignore leaves out (target/,
 # node_modules/, dist/), which would otherwise be copied for every job: the default is false.
 gitignore = true
@@ -44,4 +50,10 @@ exclude_re = [
   # app. Replaced with `Ok(())`, the app opens no window; e2e-windows.yml's smoke test catches that
   # (no `#app-root`), but on Windows only, outside the mutants run.
   'crates/desktop/src/lib\.rs:\d+:\d+: replace open_main_window -> tauri::Result<\(\)> with Ok\(\(\)\)$',
+  # Protocol (crates/protocol). No test can tell these mutants apart from the code:
+  # - `BlobHash::from_str` joins a high and a low hex digit with `(high << 4) | low`. Each digit is
+  #   0 to 15 (`hex_value` gives 0-9 and 10-15), so the high digit's low four bits are zero and
+  #   `|` and `^` give the same byte for every input. (`+` would too, but cargo-mutants never
+  #   turns `|` into `+`: it replaces `|` only with `^` and `&`, and `&` is caught.)
+  'ids\.rs:\d+:\d+: replace \| with \^ in <impl FromStr for BlobHash>::from_str$',
 ]
