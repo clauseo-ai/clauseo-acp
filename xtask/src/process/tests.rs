@@ -26,7 +26,10 @@ fn cargo_runs_without_clippy_conf_dir() {
         .filter(|(_, value)| value.is_none())
         .map(|(name, _)| name)
         .collect();
-    assert_eq!(removed, [OsStr::new(CLIPPY_CONF_DIR)]);
+    assert!(removed.contains(&OsStr::new(CLIPPY_CONF_DIR)));
+    for name in ["CARGO", "CARGO_MANIFEST_DIR", "CARGO_MANIFEST_PATH"] {
+        assert!(removed.contains(&OsStr::new(name)), "{name} is removed");
+    }
 }
 
 #[test]
@@ -140,6 +143,65 @@ fn the_resolved_path_is_the_directory_joined_with_the_name() {
     let resolved = resolve_pnpm(&path_of(&DIRS), &WINDOWS_PNPM, only(&files));
     assert_eq!(resolved.parent(), Some(Path::new("/usr/local/node")));
     assert_eq!(resolved.file_name(), Some(OsStr::new("pnpm.exe")));
+}
+
+#[test]
+fn only_names_under_the_cargo_pkg_prefix_are_package_variables() {
+    for name in ["CARGO_PKG_NAME", "CARGO_PKG_LICENSE_FILE"] {
+        assert!(
+            is_cargo_pkg(OsStr::new(name)),
+            "{name} is a package variable"
+        );
+    }
+    for name in [
+        "CARGO_HOME",
+        "CARGO_PKG",
+        "CARGO_PKGX",
+        "XCARGO_PKG_NAME",
+        "",
+    ] {
+        assert!(!is_cargo_pkg(OsStr::new(name)), "{name} is not one");
+    }
+    // Windows names are not case-sensitive, so the lower-case name is the same variable there.
+    assert_eq!(is_cargo_pkg(OsStr::new("cargo_pkg_name")), cfg!(windows));
+}
+
+/// A child started through the process module does not see the variables `cargo run` sets for
+/// xtask, but sees one a person set for cargo. The test process gets those from cargo or nextest;
+/// the precondition asserts stop the test from passing without the variables being there.
+#[cfg(unix)]
+#[test]
+fn a_child_does_not_inherit_the_variables_cargo_run_sets() {
+    for name in ["CARGO_MANIFEST_DIR", "CARGO_PKG_NAME", "CARGO_HOME"] {
+        assert!(
+            std::env::var_os(name).is_some(),
+            "{name} is set for a test binary"
+        );
+    }
+    let cmd = Cmd::new(Program::Named("env"), Vec::<String>::new(), TEST_TIMEOUT);
+    let captured = capture(&cmd, Path::new("."), &mut |_| {}).expect("env runs");
+    assert!(captured.success());
+    let child_sees = |name: &str| {
+        captured
+            .stdout
+            .lines()
+            .any(|line| line.starts_with(&format!("{name}=")))
+    };
+    for name in [
+        "CARGO",
+        "CARGO_MANIFEST_DIR",
+        "CARGO_MANIFEST_PATH",
+        "CARGO_PKG_NAME",
+        "CARGO_PKG_VERSION",
+        "CARGO_PKG_DESCRIPTION",
+        "CARGO_PKG_RUST_VERSION",
+    ] {
+        assert!(!child_sees(name), "{name} reaches the child");
+    }
+    assert!(
+        child_sees("CARGO_HOME"),
+        "CARGO_HOME does not reach the child"
+    );
 }
 
 #[cfg(unix)]
