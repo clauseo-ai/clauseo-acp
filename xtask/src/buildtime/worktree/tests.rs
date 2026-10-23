@@ -7,10 +7,11 @@ use super::*;
 use crate::budgets::Gate;
 use crate::process::{self, Cmd, Program, Ran, TEST_TIMEOUT};
 use crate::scratch::Scratch;
-use std::fs::FileTimes;
+use std::fs::{self, FileTimes};
 use std::io;
 use std::time::{Duration, SystemTime};
 
+mod leftover;
 mod parts;
 mod run;
 
@@ -355,37 +356,6 @@ fn uncommitted_changes_to_tracked_files_stop_the_run_before_anything_is_made() {
 }
 
 #[test]
-fn a_folder_already_at_the_worktree_path_stops_the_run_and_is_left_alone() {
-    let scratch = Scratch::new("worktree-there");
-    let root = repo(&scratch);
-    let path = place(&root).expect("a place");
-    Scratch::create_dir_all(&path).expect("a folder in the way");
-    Scratch::write(path.join("notes.txt"), "kept").expect("a file in it");
-    let mut fake = Fake::default();
-    let refused = measure_with(&root, false, 1, &mut fake).expect_err("refused");
-    let shown = path.display();
-    assert_eq!(
-        refused.message,
-        format!(
-            "{shown} is already there; an interrupted `cargo xtask buildtime worktree` run may \
-             have left it"
-        )
-    );
-    assert_eq!(
-        refused.fix,
-        format!(
-            "if `git worktree list` names it, remove it with `git worktree remove --force \
-             {shown}`; otherwise move it away. xtask never deletes what this run did not make"
-        )
-    );
-    assert_eq!(fake.ran("git worktree"), 0);
-    assert_eq!(
-        fs::read_to_string(path.join("notes.txt")).expect("kept"),
-        "kept"
-    );
-}
-
-#[test]
 fn a_first_build_that_rebuilt_another_package_fails_and_its_run_gives_no_sample() {
     let scratch = Scratch::new("worktree-rebuilt-more");
     let root = repo(&scratch);
@@ -420,6 +390,14 @@ fn a_first_build_that_rebuilt_another_package_fails_and_its_run_gives_no_sample(
         failure.output.as_deref(),
         Some("       Dirty serde v1.0.228: the dependency build_script changed\n"),
         "the reasons cargo gave"
+    );
+    assert_eq!(
+        measured.notes,
+        [
+            "run 2, first build: rebuilt clauseo-desktop (custom-build), clauseo-desktop (lib); \
+          fresh: 1"
+        ],
+        "a line for the build that passed"
     );
     assert!(
         build.reported_only && build.fails_run(true),
@@ -468,4 +446,39 @@ fn an_xtask_that_rebuilt_fails_the_last_step_and_leaves_the_total_skipped() {
         Outcome::Skipped(NO_TOTAL.into())
     );
     assert!(!measured.passed(false));
+}
+
+/// cargo prints a `Dirty` line only for a unit it built before (cargo 1.99: a unit whose
+/// build output is missing gets only its `Compiling` line), so a first build may rebuild another
+/// package and print none.
+#[test]
+fn a_first_build_that_rebuilt_another_package_without_a_dirty_line_says_it_built_it_first() {
+    let scratch = Scratch::new("worktree-rebuilt-no-dirty");
+    let root = repo(&scratch);
+    let more = format!(
+        "{}\n{}",
+        artifact("path+file:///w/dep#0.1.0", "lib", false),
+        app_only()
+    );
+    let mut fake = Fake {
+        builds: vec![more],
+        build_stderr: "   Compiling dep v0.1.0 (/w/dep)\n       Fresh libc v0.2.177\n".to_owned(),
+        ..Fake::default()
+    };
+    let measured = measure_with(&root, false, 1, &mut fake).expect("measured");
+    assert_eq!(
+        find(&measured, "worktree_first_build").outcome,
+        Outcome::Failed(Failure::new(
+            "`cargo build -p clauseo-desktop --message-format=json -v` rebuilt more than \
+             clauseo-desktop in the worktree: dep (lib)",
+            NO_DIRTY_FIX
+        ))
+    );
+    assert_eq!(
+        NO_DIRTY_FIX,
+        "cargo printed no `Dirty` line, so it built each one for the first time: the copied \
+         target/debug held no build of them with the worktree's settings (features, environment, \
+         `.cargo/config.toml`); find what differs from the repo root, then run again"
+    );
+    assert!(measured.notes.is_empty(), "no build passed");
 }

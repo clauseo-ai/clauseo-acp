@@ -6,9 +6,9 @@
 //! an interrupted Rust half left (`probe::restore_leftovers`); refuses a checkout whose tracked
 //! files have uncommitted changes (`git status --porcelain --untracked-files=no`), since the
 //! worktree is made from HEAD and the warm build is not; stops when something is already at the
-//! worktree's path, `<root's folder name>-buildtime-worktree` next to the repo root (xtask never
-//! deletes what it did not make); and warms up with `cargo build -p clauseo-desktop -v`, not
-//! timed.
+//! worktree's path, `<root's folder name>-buildtime-worktree` next to the repo root, or when
+//! `git worktree list` names that path though its folder is gone (xtask never deletes what it did
+//! not make); and warms up with `cargo build -p clauseo-desktop -v`, not timed.
 //!
 //! Each run times six steps, each a reported-only probe without a budget row:
 //! - `worktree_add`: `git worktree add --detach <path> HEAD`.
@@ -23,7 +23,10 @@
 //!   worktree. It fails when a `compiler-artifact` message with `"fresh": false` names another
 //!   package: only clauseo-desktop may rebuild (tauri-build prints `rerun-if-changed` with absolute
 //!   paths, so its build script reruns once in a new checkout). Its rustc line for clauseo-desktop,
-//!   when there is one, is judged for incremental as a Rust probe's warm-up is.
+//!   when there is one, is judged for incremental as a Rust probe's warm-up is: in CI, without
+//!   incremental, the step fails and no later run starts, since each would fail the same way. A
+//!   first build that passes prints `run <n>, first build: rebuilt <units>; fresh: <count>` on
+//!   stderr, from those same messages.
 //! - `worktree_first_xtask`: `cargo xtask --help` in the worktree, the cheapest command through
 //!   the alias (clap prints the help and exits 0: no file read, no child process). It fails when it
 //!   exits non-zero, or when xtask was rebuilt: the alias passes `--quiet`, so a rebuild shows as a
@@ -31,9 +34,10 @@
 //!   run, so its file identity changes even when nothing is rebuilt).
 //!
 //! The gated probe, `fresh_worktree`, is each run's six steps added up; a run with a failed step
-//! gives it no sample. After every run, a failed one too, the worktree is removed
-//! (`git worktree remove --force`) and must be gone from disk and from `git worktree list`; when it
-//! is not, the run fails with a fix line and no further run starts.
+//! gives it no sample. After every run, a failed one too, the worktree is removed with
+//! `git worktree remove --force` when the run's `git worktree add` succeeded (when it failed, git
+//! undoes the add itself and xtask removes nothing), and must be gone from disk and from
+//! `git worktree list`; when it is not, the run fails with a fix line and no further run starts.
 //!
 //! `--json` prints one object: `{"rustc", "profile", "incremental", "ci", "runs", "passed",
 //! "probes": [...]}`, each probe in the shape `report.rs` gives both halves, the six steps then
@@ -55,12 +59,12 @@ use crate::check;
 use crate::clock::timed;
 use crate::process::QuietRunner;
 use serde::Serialize;
-use std::fs;
 use std::path::{Path, PathBuf};
+use steps::StepFailed;
 #[cfg(test)]
 use steps::{
-    REBUILT_FIX, XTASK_REBUILT_FIX, package_name, rebuilt_besides, same_path, touched_time,
-    with_output, xtask_binary,
+    NO_DIRTY_FIX, NOT_ADDED, REBUILT_FIX, XTASK_REBUILT_FIX, built_line, package_name,
+    rebuilt_besides, same_path, touched_time, with_output, xtask_binary,
 };
 
 /// The package whose first build is timed, and the only one that build may rebuild.
@@ -124,12 +128,14 @@ pub(crate) struct Worktree<'a> {
     pub ci: bool,
 }
 
-/// The runs, once measured: a result per step and the gated one, and the failures that are no
-/// probe's (a worktree that could not be removed).
+/// The runs, once measured: a result per step and the gated one, the failures that are no
+/// probe's (a worktree that could not be removed), and a line per first build that passed naming
+/// what cargo rebuilt (`run <n>, first build: rebuilt ...`).
 #[derive(Debug)]
 pub(crate) struct Measured {
     pub results: Vec<ProbeResult>,
     pub errors: Vec<Failure>,
+    pub notes: Vec<String>,
 }
 
 impl Measured {
@@ -176,6 +182,9 @@ pub(crate) fn run(
             out.note(line);
         }
     }
+    for line in &measured.notes {
+        diag.note(line);
+    }
     report::print_failures(&measured.results, diag);
     for failure in &measured.errors {
         diag.failure(&failure.message, &failure.fix);
@@ -198,26 +207,37 @@ pub(crate) fn run(
 /// Where the worktree goes: next to `root`, named `<root's folder name>-buildtime-worktree`, in
 /// `root`'s parent as `dunce::canonicalize` gives it, the form `git worktree list` prints.
 pub(crate) fn place(root: &Path) -> Result<PathBuf, Failure> {
-    let cannot = |why: String| {
+    let cannot = |why: String, fix: String| {
         Failure::new(
             format!(
                 "cannot place the worktree next to {}: {why}",
                 root.display()
             ),
-            "run `cargo xtask buildtime worktree` from a checkout in a folder you can write to",
+            fix,
         )
     };
     let (Some(parent), Some(name)) = (root.parent(), root.file_name()) else {
-        return Err(cannot("it has no parent folder".to_owned()));
+        return Err(cannot(
+            "it has no parent folder".to_owned(),
+            "run `cargo xtask buildtime worktree` from a checkout inside a folder: the worktree \
+             goes next to the checkout"
+                .to_owned(),
+        ));
     };
-    let parent = dunce::canonicalize(parent).map_err(|error| cannot(error.to_string()))?;
+    let parent = dunce::canonicalize(parent).map_err(|error| {
+        cannot(
+            format!("{}: {error}", parent.display()),
+            "fix what the error names in that folder, where the worktree goes, then run again"
+                .to_owned(),
+        )
+    })?;
     Ok(parent.join(format!("{}{SUFFIX}", name.to_string_lossy())))
 }
 
-/// Checks the checkout and that nothing is at the worktree's path, warms up, then makes, times
-/// and removes the worktree `runs` times.
-/// `runner` runs each command in the folder it is given (production passes
-/// `process::run_quiet`). `Err` is a reason not to start: nothing was made then.
+/// Checks the checkout and that no worktree is left at the worktree's path, warms up, then
+/// makes, times and removes the worktree `runs` times. `runner` runs each command in the folder
+/// it is given (production passes `process::run_quiet`). `Err` is a reason not to start: nothing
+/// was made then.
 pub(crate) fn measure(
     worktree: &Worktree<'_>,
     runs: u32,
@@ -225,36 +245,28 @@ pub(crate) fn measure(
     runner: &mut QuietRunner<'_>,
 ) -> Result<Measured, Failure> {
     worktree.refuse_uncommitted(runner)?;
-    if fs::symlink_metadata(&worktree.path).is_ok() {
-        let path = worktree.path.display();
-        return Err(Failure::new(
-            format!(
-                "{path} is already there; an interrupted `cargo xtask buildtime worktree` run may \
-                 have left it"
-            ),
-            format!(
-                "if `git worktree list` names it, remove it with `git worktree remove --force \
-                 {path}`; otherwise move it away. xtask never deletes what this run did not make"
-            ),
-        ));
-    }
+    worktree.refuse_leftover(runner)?;
     worktree.warm_up(runner)?;
     let mut steps: Vec<(Vec<f64>, Option<Failure>)> = vec![(Vec::new(), None); STEPS.len()];
     let mut totals = Vec::new();
     let mut warning = None;
     let mut errors = Vec::new();
-    for _ in 0..runs {
+    let mut notes = Vec::new();
+    for run in 1..=runs {
         let mut secs = Vec::new();
+        let mut last = false;
         for (step, (samples, failed)) in STEPS.into_iter().zip(&mut steps) {
             let (done, took) = timed(|| worktree.step(step, runner));
             match done {
-                Ok(note) => {
+                Ok(done) => {
                     samples.push(took);
                     secs.push(took);
-                    warning = warning.or(note);
+                    warning = warning.or(done.warning);
+                    notes.extend(done.built.map(|built| format!("run {run}, {built}")));
                 }
-                Err(failure) => {
+                Err(StepFailed { failure, every_run }) => {
                     failed.get_or_insert(failure);
+                    last = every_run;
                     break;
                 }
             }
@@ -262,8 +274,12 @@ pub(crate) fn measure(
         if secs.len() == STEPS.len() {
             totals.push(secs.iter().sum());
         }
-        if let Err(failure) = worktree.remove(runner) {
+        // `Step::Add` runs first, so a run that timed any step made its worktree.
+        if let Err(failure) = worktree.remove(!secs.is_empty(), runner) {
             errors.push(failure);
+            break;
+        }
+        if last {
             break;
         }
     }
@@ -296,7 +312,11 @@ pub(crate) fn measure(
         reported_only: false,
         outcome,
     });
-    Ok(Measured { results, errors })
+    Ok(Measured {
+        results,
+        errors,
+        notes,
+    })
 }
 
 /// Why a step that never ran is skipped: the failure that stopped it fails the run.
