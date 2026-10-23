@@ -8,7 +8,9 @@
 //! worktree is made from HEAD and the warm build is not; stops when something is already at the
 //! worktree's path, `<root's folder name>-buildtime-worktree` next to the repo root, or when
 //! `git worktree list` names that path though its folder is gone (xtask never deletes what it did
-//! not make); and warms up with `cargo build -p clauseo-desktop -v`, not timed.
+//! not make); and warms up with `cargo build -p clauseo-desktop -v`, not timed. The path is
+//! checked again, untimed, right before each run's add: a failure there is `worktree_add`'s, and
+//! no later run starts.
 //!
 //! Each run times six steps, each a reported-only probe without a budget row:
 //! - `worktree_add`: `git worktree add --detach <path> HEAD`.
@@ -35,9 +37,10 @@
 //!
 //! The gated probe, `fresh_worktree`, is each run's six steps added up; a run with a failed step
 //! gives it no sample. After every run, a failed one too, the worktree is removed with
-//! `git worktree remove --force` when the run's `git worktree add` succeeded (when it failed, git
-//! undoes the add itself and xtask removes nothing), and must be gone from disk and from
-//! `git worktree list`; when it is not, the run fails with a fix line and no further run starts.
+//! `git worktree remove --force` when the run's `git worktree add` succeeded, and must be gone
+//! from disk and from `git worktree list`; when it is not, the run fails with a fix line and no
+//! further run starts. When the add failed, xtask removes nothing: it names what is left at the
+//! path, since it cannot tell whether git or someone else made it.
 //!
 //! `--json` prints one object: `{"rustc", "profile", "incremental", "ci", "runs", "passed",
 //! "probes": [...]}`, each probe in the shape `report.rs` gives both halves, the six steps then
@@ -66,8 +69,8 @@ use steps::StepFailed;
 use {
     artifacts::{built_line, package_name, rebuilt_besides},
     steps::{
-        NO_DIRTY_FIX, NOT_ADDED, REBUILT_FIX, XTASK_REBUILT_FIX, same_path, touched_time,
-        with_output, xtask_binary,
+        NO_DIRTY_FIX, REBUILT_FIX, XTASK_REBUILT_FIX, same_path, touched_time, with_output,
+        xtask_binary,
     },
 };
 
@@ -110,6 +113,9 @@ pub(crate) const STEPS: [Step; 6] = [
     Step::FirstBuild,
     Step::FirstXtask,
 ];
+
+/// Where `Step::Add` is in `STEPS`: first.
+const ADD: usize = 0;
 
 impl Step {
     /// The step's probe name.
@@ -259,6 +265,13 @@ pub(crate) fn measure(
     for run in 1..=runs {
         let mut secs = Vec::new();
         let mut last = false;
+        // Checked again right before each add, untimed: something may have come to the path since
+        // the last check, during the warm-up (which can take long) or after the last removal.
+        // Every later run would fail the same way, so none starts.
+        if let Err(failure) = worktree.refuse_leftover(runner) {
+            steps[ADD].1.get_or_insert(failure);
+            break;
+        }
         for (step, (samples, failed)) in STEPS.into_iter().zip(&mut steps) {
             let (done, took) = timed(|| worktree.step(step, runner));
             match done {
