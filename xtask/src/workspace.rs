@@ -3,6 +3,7 @@
 use crate::process::{self, Cmd, Program, Status};
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
@@ -136,10 +137,36 @@ pub(crate) struct PackageDependencies {
     pub features: BTreeMap<String, Vec<String>>,
 }
 
-/// The workspace root: the parent of this crate's directory (`xtask/`).
+/// The workspace root: the parent of this crate's directory (`xtask/`) in the checkout xtask runs
+/// in, which `root_from` reads from the variables `cargo run` (and so the `cargo xtask` alias)
+/// sets for the program it runs.
 pub(crate) fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
+    root_from(
+        std::env::var_os("CARGO_MANIFEST_DIR").as_deref(),
+        std::env::var_os("CARGO_PKG_NAME").as_deref(),
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+    )
+}
+
+/// The parent of xtask's directory. `run_dir` and `run_package` are `CARGO_MANIFEST_DIR` and
+/// `CARGO_PKG_NAME` as xtask runs: cargo sets both for the program `cargo run` starts (cargo 1.99:
+/// a moved crate whose sources are older than its binary prints the new dir at run time and the
+/// old one through `env!`). `run_dir` is used when it is set and not empty and `run_package` is
+/// this package's own name, so a dir another package's cargo left in the environment is not taken
+/// for xtask's. Otherwise `compiled_dir`, the dir xtask was compiled in, which a checkout that
+/// copied another checkout's `target/xtask-run` would get wrong: cargo sees the copied binary as
+/// up to date, since it ignores the variables it sets itself when it checks for changes.
+pub(crate) fn root_from(
+    run_dir: Option<&OsStr>,
+    run_package: Option<&OsStr>,
+    compiled_dir: &Path,
+) -> PathBuf {
+    let own = run_package == Some(OsStr::new(env!("CARGO_PKG_NAME")));
+    let dir = match run_dir {
+        Some(dir) if own && !dir.is_empty() => Path::new(dir),
+        _ => compiled_dir,
+    };
+    dir.parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
 }
 
@@ -406,6 +433,54 @@ mod tests {
             .expect("write the manifest");
         let error = load(&dir).expect_err("cargo metadata fails");
         assert!(error.starts_with("`cargo metadata` failed:\n"), "{error}");
+    }
+
+    /// A worktree that copied another checkout's `target/xtask-run` runs a binary compiled in that
+    /// checkout: the root must come from what cargo sets as xtask runs, not from `env!`.
+    #[test]
+    fn the_root_is_the_checkout_xtask_runs_in_not_the_one_it_was_compiled_in() {
+        let compiled = Path::new("/src/checkout/xtask");
+        let run_dir = OsStr::new("/new/worktree/xtask");
+        let xtask = Some(OsStr::new("xtask"));
+        assert_eq!(
+            root_from(Some(run_dir), xtask, compiled),
+            PathBuf::from("/new/worktree")
+        );
+        let old = PathBuf::from("/src/checkout");
+        assert_eq!(root_from(None, xtask, compiled), old, "unset");
+        assert_eq!(
+            root_from(Some(OsStr::new("")), xtask, compiled),
+            old,
+            "empty"
+        );
+        let desktop = Some(OsStr::new("clauseo-desktop"));
+        assert_eq!(
+            root_from(Some(run_dir), desktop, compiled),
+            old,
+            "another package's dir"
+        );
+        assert_eq!(
+            root_from(Some(run_dir), None, compiled),
+            old,
+            "no package name"
+        );
+        assert_eq!(
+            root_from(None, None, Path::new("/")),
+            PathBuf::from("."),
+            "a dir with no parent"
+        );
+    }
+
+    /// The dir cargo sets on Windows has backslashes and a drive.
+    #[cfg(windows)]
+    #[test]
+    fn the_root_of_a_windows_run_dir_is_its_parent() {
+        let root = root_from(
+            Some(OsStr::new(r"D:\a\clauseo-acp\xtask")),
+            Some(OsStr::new("xtask")),
+            Path::new(r"C:\src\xtask"),
+        );
+        assert_eq!(root, PathBuf::from(r"D:\a\clauseo-acp"));
     }
 
     #[test]
