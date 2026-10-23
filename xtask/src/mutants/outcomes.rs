@@ -75,7 +75,7 @@ pub(super) fn parse(text: &str) -> Result<Lab, serde_json::Error> {
 }
 
 /// How many mutants ended which way.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(super) struct Counts {
     pub tested: usize,
     pub missed: usize,
@@ -84,6 +84,18 @@ pub(super) struct Counts {
     pub unviable: usize,
     /// Any other outcome, each also a failure.
     pub other: usize,
+}
+
+impl Counts {
+    /// Adds `other`'s counts to these, field by field: two passes' counts as one run's.
+    pub(super) fn add(&mut self, other: &Counts) {
+        self.tested += other.tested;
+        self.missed += other.missed;
+        self.caught += other.caught;
+        self.timeout += other.timeout;
+        self.unviable += other.unviable;
+        self.other += other.other;
+    }
 }
 
 impl fmt::Display for Counts {

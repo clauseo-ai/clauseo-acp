@@ -91,7 +91,7 @@ fn a_left_build_dir_that_cannot_be_removed_fails_with_its_path_and_error() {
     let mode = |mode| std::fs::Permissions::from_mode(mode);
     Scratch::set_permissions(&build, mode(0o555)).expect("make it read-only");
     let mut out = Printer::new(Vec::new(), false);
-    remove_left_build_dirs(&mut out, &temp, &root, &BTreeSet::new());
+    remove_left_build_dirs(&mut out, &temp, &root, &std::collections::BTreeSet::new());
     Scratch::set_permissions(&build, mode(0o755)).expect("make it writable again");
     let printed = String::from_utf8(out.into_inner()).expect("utf-8");
     assert_eq!(

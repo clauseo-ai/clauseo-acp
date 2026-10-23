@@ -20,12 +20,13 @@ const FMT_TIMEOUT: Duration = Duration::from_mins(5);
 /// on a slow machine, and nextest then runs every test.
 const BUILD_TIMEOUT: Duration = Duration::from_mins(45);
 
-/// The steps for `scope`, in run order: fmt, clippy, deny, shear, typos, taplo, gitleaks, every
-/// static check, the six ui steps, nextest. With `Scope::Nothing`, clippy and nextest are skipped;
-/// the others never depend on the scope. `ci` picks the CI variants of the clippy and nextest
-/// commands. `gitleaks_range` is the git range gitleaks scans (`<base>..HEAD`), or `None` for all
-/// history. `pnpm_found` says whether pnpm starts: without it, the ui steps are skipped unless
-/// `ci`.
+/// The steps for `scope`, in run order: fmt, clippy, clippy-featureless, deny, shear, typos, taplo,
+/// gitleaks, every static check, the six ui steps, nextest, nextest-specta, doctest. With
+/// `Scope::Nothing`, the five package steps (clippy, clippy-featureless, nextest, nextest-specta,
+/// doctest) are skipped; the others never depend on the scope. `ci` picks the CI variants of the
+/// clippy and nextest commands.
+/// `gitleaks_range` is the git range gitleaks scans (`<base>..HEAD`), or `None` for all history.
+/// `pnpm_found` says whether pnpm starts: without it, the ui steps are skipped unless `ci`.
 pub(crate) fn plan(
     scope: &Scope,
     ci: bool,
@@ -38,6 +39,9 @@ pub(crate) fn plan(
         Some(selectors) => Step::Tool(clippy_step(selectors, ci)),
         None => skipped("clippy"),
     });
+    steps.push(protocol_step(scope, FEATURELESS_CLIPPY_NAME, || {
+        featureless_clippy_step(ci)
+    }));
     steps.extend(
         [
             policy::deny_step(),
@@ -54,6 +58,8 @@ pub(crate) fn plan(
         Some(selectors) => Step::Tool(nextest_step(selectors, ci)),
         None => skipped("nextest"),
     });
+    steps.push(protocol_step(scope, SPECTA_NAME, || specta_step(ci)));
+    steps.push(protocol_step(scope, DOCTEST_NAME, doctest_step));
     steps
 }
 
@@ -61,6 +67,35 @@ fn skipped(name: &'static str) -> Step {
     Step::Skipped {
         name,
         reason: NO_PACKAGES,
+    }
+}
+
+/// The package whose `specta` export, featureless build and doc tests the protocol steps check.
+/// Protocol is the one feature-gated crate, which is why its name is here and not read from the
+/// manifests.
+const PROTOCOL: &str = "clauseo-protocol";
+const FEATURELESS_CLIPPY_NAME: &str = "clippy-featureless";
+const SPECTA_NAME: &str = "nextest-specta";
+const DOCTEST_NAME: &str = "doctest";
+const NOT_CHANGED: &str = "clauseo-protocol is not a changed package";
+
+/// The test targets behind `specta`: protocol's TypeScript export and `enum_table`. Cargo selects
+/// them with `--test`, so only these two targets build. A nextest `-E` filter applies after the
+/// build, which would build all eleven of protocol's test targets to run two. A renamed target
+/// makes cargo fail the step and name the similar one.
+const SPECTA_TESTS: [&str; 2] = ["specta_export", "enum_table"];
+
+/// A step for protocol only: it runs on the workspace or when protocol is a named package, and is
+/// skipped otherwise, so quick mode leaves protocol's steps out when protocol did not change.
+fn protocol_step(scope: &Scope, name: &'static str, tool: impl FnOnce() -> ToolStep) -> Step {
+    match scope {
+        Scope::Workspace => Step::Tool(tool()),
+        Scope::Packages(names) if names.iter().any(|named| named == PROTOCOL) => Step::Tool(tool()),
+        Scope::Packages(_) => Step::Skipped {
+            name,
+            reason: NOT_CHANGED,
+        },
+        Scope::Nothing => skipped(name),
     }
 }
 
@@ -111,9 +146,7 @@ fn clippy_step(selectors: &[String], ci: bool) -> ToolStep {
     let mut args = vec!["clippy".to_owned()];
     args.extend(selectors.iter().cloned());
     args.extend(CLIPPY_FLAGS.map(String::from));
-    if ci {
-        args.extend(["--", "-D", "warnings"].map(String::from));
-    }
+    deny_warnings_in_ci(&mut args, ci);
     ToolStep {
         name: "clippy",
         cmd: Cmd::new(Program::Cargo, args, BUILD_TIMEOUT),
@@ -123,6 +156,16 @@ fn clippy_step(selectors: &[String], ci: bool) -> ToolStep {
     }
 }
 
+/// The `-D warnings` tail of a clippy step. In CI a warning fails the step; a local run shows it
+/// and passes, as the warnings of any other package do.
+fn deny_warnings_in_ci(args: &mut Vec<String>, ci: bool) {
+    if ci {
+        args.extend(["--", "-D", "warnings"].map(String::from));
+    }
+}
+
+/// The featureless run: the build the other crates use, so a `specta`-only item fails here.
+/// Feature-gated tests run in `specta_step`.
 fn nextest_step(selectors: &[String], ci: bool) -> ToolStep {
     let mut args = vec!["nextest".to_owned(), "run".to_owned()];
     args.extend(selectors.iter().cloned());
@@ -135,6 +178,69 @@ fn nextest_step(selectors: &[String], ci: bool) -> ToolStep {
         cmd: Cmd::new(Program::Cargo, args, BUILD_TIMEOUT),
         parse: parse_none,
         fix: setup_or_reproduce,
+        render: None,
+    }
+}
+
+/// Clippy on protocol with no features: the build every other crate gets. In CI `-D warnings`,
+/// as the main clippy step has, so a warning that only this build shows fails the check; the
+/// all-features clippy step cannot see it. Locally it shows the warning and passes.
+fn featureless_clippy_step(ci: bool) -> ToolStep {
+    let mut args = [
+        "clippy",
+        "-p",
+        PROTOCOL,
+        "--all-targets",
+        "--message-format=json-diagnostic-short",
+    ]
+    .map(String::from)
+    .to_vec();
+    deny_warnings_in_ci(&mut args, ci);
+    ToolStep {
+        name: FEATURELESS_CLIPPY_NAME,
+        cmd: Cmd::new(Program::Cargo, args, BUILD_TIMEOUT),
+        parse: parse::clippy_findings,
+        fix: reproduce,
+        render: Some(parse::clippy_render),
+    }
+}
+
+/// The `specta` tests, with the feature on. No `--no-tests=pass`: the run fails if none runs.
+fn specta_step(ci: bool) -> ToolStep {
+    let mut args = ["nextest", "run", "-p", PROTOCOL, "--features", "specta"]
+        .map(String::from)
+        .to_vec();
+    args.extend(
+        SPECTA_TESTS
+            .iter()
+            .flat_map(|test| ["--test", *test])
+            .map(String::from),
+    );
+    if ci {
+        args.extend(["--profile", "ci"].map(String::from));
+    }
+    ToolStep {
+        name: SPECTA_NAME,
+        cmd: Cmd::new(Program::Cargo, args, BUILD_TIMEOUT),
+        parse: parse_none,
+        fix: setup_or_reproduce,
+        render: None,
+    }
+}
+
+/// Protocol's doc tests, every feature on. nextest runs no doc tests, and protocol's
+/// `compile_fail` examples are what show that only protocol builds a `ValidatedCommand` or an
+/// `UnknownKind`; without this step nothing runs them.
+fn doctest_step() -> ToolStep {
+    ToolStep {
+        name: DOCTEST_NAME,
+        cmd: Cmd::new(
+            Program::Cargo,
+            ["test", "-p", PROTOCOL, "--doc", "--all-features"],
+            BUILD_TIMEOUT,
+        ),
+        parse: parse_none,
+        fix: reproduce,
         render: None,
     }
 }
@@ -160,300 +266,4 @@ pub(super) fn setup_or_reproduce(cmd: &Cmd, output: Option<&str>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::workspace::Member;
-    use std::path::PathBuf;
-
-    fn context(members: Vec<Member>) -> Context {
-        Context {
-            root: PathBuf::from("/ws"),
-            members: Ok(members),
-            load_resolved_graph: false,
-        }
-    }
-
-    fn member(name: &str, dir: &str) -> Member {
-        Member {
-            name: name.into(),
-            dir: dir.into(),
-            path_deps: Vec::new(),
-            targets: Vec::new(),
-            dependencies: crate::workspace::PackageDependencies::default(),
-        }
-    }
-
-    fn tool_commands(steps: &[Step]) -> Vec<String> {
-        steps
-            .iter()
-            .filter_map(|step| match step {
-                Step::Tool(tool) => Some(tool.cmd.to_string()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// The command of each tool step named in `names`, in plan order.
-    fn commands_named(steps: &[Step], names: &[&str]) -> Vec<String> {
-        steps
-            .iter()
-            .filter_map(|step| match step {
-                Step::Tool(tool) if names.contains(&tool.name) => Some(tool.cmd.to_string()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// The tool step named `name`. A plan without one fails the test here.
-    fn tool<'a>(steps: &'a [Step], name: &str) -> &'a ToolStep {
-        let found = steps.iter().find_map(|step| match step {
-            Step::Tool(found) if found.name == name => Some(found),
-            _ => None,
-        });
-        let Some(found) = found else {
-            panic!("the plan has a `{name}` tool step");
-        };
-        found
-    }
-
-    /// Each step's name, with `skipped` after the name of a skipped step.
-    fn step_names(steps: &[Step]) -> Vec<String> {
-        steps
-            .iter()
-            .map(|step| match step {
-                Step::Tool(tool) => tool.name.to_owned(),
-                Step::Static(check) => check.name.to_owned(),
-                Step::Skipped { name, .. } => format!("{name} skipped"),
-            })
-            .collect()
-    }
-
-    /// The reason of each skipped step, by name, in plan order.
-    fn skip_reasons(steps: &[Step]) -> Vec<(&'static str, &'static str)> {
-        steps
-            .iter()
-            .filter_map(|step| match step {
-                Step::Skipped { name, reason } => Some((*name, *reason)),
-                _ => None,
-            })
-            .collect()
-    }
-
-    /// The ui step names, in run order, when they run.
-    const UI: [&str; 6] = [
-        "pnpm-install",
-        "tsc",
-        "oxlint",
-        "oxfmt",
-        "vitest",
-        "vite-build",
-    ];
-
-    /// The ui step names, in run order, when they are skipped.
-    const UI_SKIPPED: [&str; 6] = [
-        "pnpm-install skipped",
-        "tsc skipped",
-        "oxlint skipped",
-        "oxfmt skipped",
-        "vitest skipped",
-        "vite-build skipped",
-    ];
-
-    /// The names a plan should have: the tool steps around every registered static check, then
-    /// the ui steps (`ui`: running or skipped), then nextest.
-    fn expected_names(clippy: &str, ui: [&str; 6], nextest: &str) -> Vec<String> {
-        let mut names: Vec<String> = ["fmt", clippy, "deny", "shear", "typos", "taplo", "gitleaks"]
-            .map(str::to_owned)
-            .to_vec();
-        names.extend(checks::ALL.iter().map(|check| check.name.to_owned()));
-        names.extend(ui.map(str::to_owned));
-        names.push(nextest.to_owned());
-        names
-    }
-
-    #[test]
-    fn an_empty_package_list_is_nothing_and_skips_only_clippy_and_nextest() {
-        assert_eq!(Scope::packages(vec![]), Scope::Nothing);
-        let steps = plan(&Scope::Nothing, false, None, true);
-        assert_eq!(
-            step_names(&steps),
-            expected_names("clippy skipped", UI, "nextest skipped")
-        );
-        assert_eq!(
-            skip_reasons(&steps),
-            [("clippy", NO_PACKAGES), ("nextest", NO_PACKAGES)]
-        );
-    }
-
-    #[test]
-    fn plan_runs_every_step_in_order_for_the_workspace() {
-        assert_eq!(
-            step_names(&plan(&Scope::Workspace, false, None, true)),
-            expected_names("clippy", UI, "nextest")
-        );
-    }
-
-    #[test]
-    fn plan_commands_for_the_workspace_in_both_modes() {
-        assert_eq!(
-            tool_commands(&plan(&Scope::Workspace, false, Some("abc..HEAD"), true)),
-            [
-                "cargo fmt --all -- --check",
-                "cargo clippy --workspace --all-targets --all-features --message-format=json-diagnostic-short",
-                "cargo deny --locked check",
-                "cargo shear --deny-warnings",
-                "typos --format brief",
-                "taplo fmt --check",
-                "gitleaks git --redact --no-banner --verbose --no-color --log-opts=abc..HEAD",
-                "pnpm -C ui install --frozen-lockfile",
-                "pnpm -C ui/app run typecheck --pretty false",
-                "pnpm -C ui/app run lint:types --format unix",
-                "pnpm -C ui run fmt:check",
-                "pnpm -C ui/app run test",
-                "pnpm -C ui/app run build",
-                "cargo nextest run --workspace --no-tests=pass",
-            ]
-        );
-        let ci = plan(&Scope::Workspace, true, Some("abc..HEAD"), true);
-        assert_eq!(
-            tool(&ci, "clippy").cmd.to_string(),
-            "cargo clippy --workspace --all-targets --all-features --message-format=json-diagnostic-short -- -D warnings"
-        );
-        assert_eq!(
-            tool(&ci, "nextest").cmd.to_string(),
-            "cargo nextest run --workspace --no-tests=pass --profile ci"
-        );
-    }
-
-    #[test]
-    fn the_ui_steps_run_in_order_after_the_static_checks_and_before_nextest() {
-        let steps = plan(&Scope::Workspace, false, None, true);
-        let names = step_names(&steps);
-        let first = names.iter().position(|name| name == "pnpm-install");
-        let last = names.iter().position(|name| name == "vite-build");
-        let (Some(first), Some(last)) = (first, last) else {
-            panic!("the ui steps are in the plan: {names:?}");
-        };
-        assert_eq!(names[first..=last], UI);
-        assert_eq!(names[first - 1], checks::ALL[checks::ALL.len() - 1].name);
-        assert_eq!(names[last + 1], "nextest");
-    }
-
-    #[test]
-    fn without_pnpm_locally_the_ui_steps_are_skipped_with_the_note() {
-        let steps = plan(&Scope::Workspace, false, None, false);
-        assert_eq!(
-            step_names(&steps),
-            expected_names("clippy", UI_SKIPPED, "nextest")
-        );
-        let ui_reasons: Vec<(&str, &str)> = skip_reasons(&steps)
-            .into_iter()
-            .filter(|(name, _)| UI.contains(name))
-            .collect();
-        assert_eq!(ui_reasons, UI.map(|name| (name, ui::NO_PNPM)));
-        assert!(
-            tool_commands(&steps)
-                .iter()
-                .all(|cmd| !cmd.starts_with("pnpm"))
-        );
-    }
-
-    #[test]
-    fn in_ci_the_ui_steps_run_even_without_pnpm() {
-        let steps = plan(&Scope::Workspace, true, None, false);
-        assert_eq!(step_names(&steps), expected_names("clippy", UI, "nextest"));
-        assert_eq!(
-            commands_named(&steps, &UI),
-            [
-                "pnpm -C ui install --frozen-lockfile",
-                "pnpm -C ui/app run typecheck --pretty false",
-                "pnpm -C ui/app run lint:types --format unix",
-                "pnpm -C ui run fmt:check",
-                "pnpm -C ui/app run test",
-                "pnpm -C ui/app run build",
-            ]
-        );
-    }
-
-    #[test]
-    fn clippy_command_for_named_packages() {
-        let scope = Scope::packages(vec!["a".into(), "b".into()]);
-        assert_eq!(
-            tool(&plan(&scope, false, None, true), "clippy")
-                .cmd
-                .to_string(),
-            "cargo clippy -p a -p b --all-targets --all-features --message-format=json-diagnostic-short"
-        );
-    }
-
-    #[test]
-    fn clippy_repro_narrows_to_the_owning_package_in_ci() {
-        let members = vec![member("xtask", "xtask")];
-        let steps = plan(&Scope::Workspace, true, None, true);
-        let clippy = tool(&steps, "clippy");
-        let output = "xtask/src/main.rs:4:9: error: unused variable: `unused`\n";
-        let findings = (clippy.parse)(output, &context(members), &clippy.cmd);
-        assert_eq!(findings.len(), 1);
-        assert!(findings[0].is_error);
-        assert_eq!(
-            findings[0].violation.fix.to_string(),
-            "`cargo clippy -p xtask --all-targets --all-features -- -D warnings` shows the full diagnostic and clippy's suggested change"
-        );
-    }
-
-    #[test]
-    fn clippy_repro_narrows_to_the_owning_package_without_ci() {
-        let members = vec![member("a", "crates/a"), member("b", "crates/b")];
-        let steps = plan(
-            &Scope::packages(vec!["a".into(), "b".into()]),
-            false,
-            None,
-            true,
-        );
-        let clippy = tool(&steps, "clippy");
-        let output = "crates/a/src/lib.rs:1:1: warning: unused import\n";
-        let findings = (clippy.parse)(output, &context(members), &clippy.cmd);
-        assert_eq!(findings.len(), 1);
-        assert!(!findings[0].is_error);
-        assert_eq!(
-            findings[0].violation.fix.to_string(),
-            "`cargo clippy -p a --all-targets --all-features` shows the full diagnostic and clippy's suggested change"
-        );
-    }
-
-    #[test]
-    fn clippy_keeps_the_selectors_when_no_package_owns_the_file() {
-        let steps = plan(
-            &Scope::packages(vec!["a".into(), "b".into()]),
-            false,
-            None,
-            true,
-        );
-        let clippy = tool(&steps, "clippy");
-        let output = "docs/x.md:3:1: warning: stray text\n";
-        let findings = (clippy.parse)(output, &context(Vec::new()), &clippy.cmd);
-        assert_eq!(findings.len(), 1);
-        assert_eq!(
-            findings[0].violation.fix.to_string(),
-            "`cargo clippy -p a -p b --all-targets --all-features` shows the full diagnostic and clippy's suggested change"
-        );
-    }
-
-    #[test]
-    fn nextest_points_at_setup_when_the_subcommand_is_missing() {
-        let cmd = Cmd::new(
-            Program::Cargo,
-            ["nextest", "run"],
-            crate::process::TEST_TIMEOUT,
-        );
-        assert_eq!(
-            setup_or_reproduce(&cmd, Some("error: no such command: `nextest`\n")),
-            "run `cargo xtask setup`"
-        );
-        assert_eq!(setup_or_reproduce(&cmd, None), "run `cargo xtask setup`");
-        assert_eq!(
-            setup_or_reproduce(&cmd, Some("1 test failed")),
-            "run `cargo nextest run` to reproduce"
-        );
-    }
-}
+mod tests;

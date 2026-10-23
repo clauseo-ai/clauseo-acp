@@ -116,7 +116,7 @@ fn a_cargo_mutants_past_its_limit_could_not_be_checked_and_the_run_says_how_to_s
 #[test]
 fn a_missing_output_folder_is_nothing_to_remove() {
     let root = Scratch::new("mutants-no-output");
-    remove_output(&root).expect("nothing to remove is not an error");
+    remove_output(&root, OUTPUT_PARENT).expect("nothing to remove is not an error");
 }
 
 /// An output folder that cannot be removed is an error, which fails the run before cargo-mutants
@@ -132,7 +132,7 @@ fn an_output_folder_that_cannot_be_removed_is_an_error() {
     // A read-only folder keeps its contents, so the file in it cannot be removed.
     let mode = |mode| std::fs::Permissions::from_mode(mode);
     Scratch::set_permissions(&output, mode(0o555)).expect("make it read-only");
-    let removed = remove_output(&root);
+    let removed = remove_output(&root, OUTPUT_PARENT);
     Scratch::set_permissions(&output, mode(0o755)).expect("make it writable again");
     let error = removed.expect_err("the folder is kept, so the removal fails");
     assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
