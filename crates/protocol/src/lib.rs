@@ -135,6 +135,8 @@ mod limits;
 mod matter;
 mod number;
 mod open_enum;
+mod patch;
+mod query;
 mod raw;
 mod serde_util;
 mod session;
@@ -192,6 +194,13 @@ wire_types! {
     },
     matter::{CheckpointKind, FileChoice, FileDecision, ImportSummary, MatterKind, RestoreScope},
     number::{Count, Cursor, Finite, Seq, Timestamp},
+    patch::{
+        Ack, AppendTarget, HostEvent, PatchBatch, StreamHeader, Subscribe, SubscribeEvents,
+        ViewPatch, ViewPatchBody, ViewPosition, ViewWindow,
+    },
+    query::{
+        BlobRange, HostQuery, MatterSummary, PageLimit, QueryResult, ReadLen, ThreadSummary,
+    },
     raw::{RawPayload},
     session::{
         AgentCapabilities, AvailableCommand, CompactionStatus, ConfigCategory, ConfigChoice,
@@ -224,6 +233,7 @@ pub use ids::{MAX_ID_TEXT_BYTES, is_windows_reserved_name};
 pub use number::MAX_SAFE;
 // The kind a catch-all holds; the catch-all variants holding it export as `string`.
 pub use open_enum::UnknownKind;
+pub use query::{MAX_BLOB_READ_BYTES, MAX_PAGE_ENTRIES};
 pub use raw::{MAX_MSGPACK_DEPTH, MAX_RAW_DEPTH, MAX_RAW_ENCODE_DEPTH};
 pub use text::{INLINE_LIMIT_BYTES, PREVIEW_BYTES, escaped_len, preview_of, utf16_len};
 pub use title::{MAX_TITLE_CHARS, check_display_title};
