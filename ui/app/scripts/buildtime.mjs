@@ -49,7 +49,10 @@ const TOOL_TIMEOUT_MS = 120_000;
  * (`_throttle(EV_CHANGE, path, 50)`, vite/dist/node/chunks/node.js:12264), and a change inside
  * that window is dropped, never delivered later. On windows-2025-runner an edit shows in about
  * 50 ms (48 to 80 ms in two CI runs of five edits), so without the wait the next write can fall
- * inside that window and its edit never shows. The wait is outside the timed span.
+ * inside that window and its edit never shows. The wait is outside the timed span. On
+ * macos-arm64-desktop it costs nothing measurable: with the wait at 60 and 100 ms, `hmr`'s median
+ * over 15 edits was 55.4 and 52.0 ms. At 300 ms it was 66.0 ms, with edits up to 152 ms, so the
+ * wait stays short.
  */
 const HMR_GAP_MS = 100;
 
