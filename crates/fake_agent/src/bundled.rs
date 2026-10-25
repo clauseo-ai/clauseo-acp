@@ -1,5 +1,6 @@
 //! The compiled-in scenarios, and the paths other crates' tests use.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use crate::Error;
@@ -98,10 +99,16 @@ pub fn scenario_path(name: &str) -> PathBuf {
 /// [`Error::CurrentExe`] if the running executable cannot be found, and
 /// [`Error::BinaryNotFound`] if the profile folder has no `fake_agent`.
 pub fn bin_path() -> Result<PathBuf, Error> {
-    if let Some(var) = std::env::var_os(BIN_VAR).filter(|v| !v.is_empty()) {
+    bin_path_from(std::env::var_os(BIN_VAR), std::env::current_exe())
+}
+
+/// [`bin_path`] with the variable's value and the running executable passed in, so its tests
+/// can check every branch without setting the environment. An empty variable counts as unset.
+fn bin_path_from(var: Option<OsString>, exe: std::io::Result<PathBuf>) -> Result<PathBuf, Error> {
+    if let Some(var) = var.filter(|v| !v.is_empty()) {
         return existing(PathBuf::from(var), Source::Var);
     }
-    let exe = std::env::current_exe().map_err(|source| Error::CurrentExe { source })?;
+    let exe = exe.map_err(|source| Error::CurrentExe { source })?;
     existing(
         profile_bin(&exe, std::env::consts::EXE_SUFFIX),
         Source::Profile,
@@ -141,6 +148,8 @@ fn profile_bin(exe: &Path, suffix: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+
     use super::*;
     use crate::scenario::{Reply, Scenario, StepKind, Wait};
 
@@ -249,5 +258,62 @@ mod tests {
         );
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
         assert_eq!(existing(manifest.clone(), Source::Var).unwrap(), manifest);
+    }
+
+    /// A `Cargo.toml` of this crate: an existing file that is not the binary.
+    fn some_file() -> PathBuf {
+        PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
+    }
+
+    /// The running test executable: a file that exists, which these tests can name.
+    fn this_exe() -> PathBuf {
+        std::env::current_exe().unwrap()
+    }
+
+    fn no_exe() -> io::Result<PathBuf> {
+        Err(io::Error::other("no executable"))
+    }
+
+    #[test]
+    fn the_variable_names_the_binary_when_it_is_set() {
+        let path = bin_path_from(Some(some_file().into()), no_exe()).unwrap();
+        assert_eq!(path, some_file());
+        // The variable is read before the executable, so a missing executable does not matter.
+        assert!(matches!(
+            bin_path_from(Some(this_exe().into()), no_exe()),
+            Ok(path) if path == this_exe()
+        ));
+    }
+
+    #[test]
+    fn a_variable_naming_no_file_is_an_error_that_names_it() {
+        let missing = PathBuf::from("/no/such/fake_agent");
+        let error = bin_path_from(Some(missing.clone().into()), no_exe()).unwrap_err();
+        assert!(matches!(&error, Error::BinaryVarNotFound { path } if *path == missing));
+    }
+
+    #[test]
+    fn an_empty_variable_is_unset() {
+        // Unset, the profile folder of `exe` is searched, and this folder has no binary.
+        let error = bin_path_from(Some(OsString::new()), Ok(some_file())).unwrap_err();
+        assert!(matches!(error, Error::BinaryNotFound { .. }), "{error}");
+    }
+
+    #[test]
+    fn no_variable_and_no_executable_is_an_error() {
+        let error = bin_path_from(None, no_exe()).unwrap_err();
+        assert!(matches!(error, Error::CurrentExe { .. }), "{error}");
+    }
+
+    #[test]
+    fn no_variable_searches_the_profile_folder_of_the_executable() {
+        let error = bin_path_from(None, Ok(some_file())).unwrap_err();
+        let Error::BinaryNotFound { path } = error else {
+            panic!("{error}");
+        };
+        assert_eq!(
+            path,
+            some_file().with_file_name(format!("fake_agent{}", std::env::consts::EXE_SUFFIX))
+        );
     }
 }
