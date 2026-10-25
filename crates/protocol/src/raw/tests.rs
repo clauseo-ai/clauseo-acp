@@ -171,7 +171,7 @@ fn json_writes_a_scalar_or_binary_key_as_its_json_text() {
 }
 
 #[test]
-fn serde_json_value_cannot_do_this() {
+fn value_refuses_binary_and_raw_payload_keeps_key_order() {
     // The reason RawPayload exists: Value refuses binary data, and it sorts keys unless
     // serde_json's `preserve_order` feature is on. A workspace build has it on (the ACP SDK
     // turns it on) and `-p clauseo-protocol` alone does not, so no assertion here depends on
