@@ -226,4 +226,15 @@ mod tests {
         assert!(uses_cwd(&value));
         assert!(!uses_cwd(&out));
     }
+
+    #[test]
+    fn integers_past_f64_precision_stay_apart() {
+        // Both round to the same f64, but neither is a float, so they compare as integers.
+        let big = json!(9_007_199_254_740_993_u64);
+        let rounded = json!(9_007_199_254_740_992_u64);
+        assert!(!scalar_eq(&big, &rounded));
+        assert!(matches(&big, Some(&rounded), "").is_err());
+        // A float on either side compares as f64, where they are equal.
+        assert!(scalar_eq(&json!(9_007_199_254_740_992.0), &rounded));
+    }
 }
