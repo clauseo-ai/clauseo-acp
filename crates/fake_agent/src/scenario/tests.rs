@@ -145,7 +145,7 @@ fn static_checks_name_file_and_line() {
         ),
         (
             &[r#"{"expect":{"method":"initialize","as":"i"},"exit":{"code":1}}"#],
-            "t.jsonl:2: a step has exactly one step key, found `exit` and `expect`",
+            "t.jsonl:2: a step has exactly one key, found `exit` and `expect`",
         ),
         (
             &[r#"{"expect":{"method":"initialize","as":"i","param":{}}}"#],
@@ -206,13 +206,17 @@ fn a_wrong_step_key_lists_every_key() {
             &[]
         ),
         format!(
-            "t.jsonl:2: a step has exactly one step key, found `exit` and `expect`; expected \
-             one of: {KEYS}"
+            "t.jsonl:2: a step has exactly one key, found `exit` and `expect`; expected one of: \
+             {KEYS}"
         )
     );
     assert_eq!(
         load_error(&[r#"{"note":"only a note"}"#], &[]),
         format!("t.jsonl:2: a step needs one of: {KEYS}")
+    );
+    assert_eq!(
+        load_error(&[r#"{"all":[{}]}"#], &[]),
+        "t.jsonl:2: all: an item needs one of: expect, expect_response"
     );
     assert_eq!(
         load_error(&[r#"{"respond":{"to":"a","result":{},"raw":1}}"#], &[]),

@@ -189,7 +189,7 @@ pub(super) fn step(value: Value) -> Result<Body, String> {
         None | Some(Value::String(_)) => {}
         Some(_) => return Err("note: expected a string".to_owned()),
     }
-    let (kind, raw) = match tagged::<StepBody>(map, "unknown step")? {
+    let (kind, raw) = match tagged::<StepBody>(map, "a step", "unknown step")? {
         StepBody::Expect(b) => (StepKind::Wait(Wait::Expect(expect(b)?)), false),
         StepBody::ExpectResponse(b) => (StepKind::Wait(Wait::Response(expect_response(b)?)), false),
         StepBody::All(items) => (StepKind::All(all(items)?), false),
@@ -241,8 +241,13 @@ pub(super) fn step(value: Value) -> Result<Body, String> {
 }
 
 /// Deserialises externally tagged enum `T` from `map`, which must hold exactly one of its keys.
-/// A wrong key gets `unknown` and the valid keys; an error in the body names its key.
-fn tagged<T: DeserializeOwned>(map: Map<String, Value>, unknown: &str) -> Result<T, String> {
+/// `what` names the map in messages ("a step", "an item"). A wrong key gets `unknown` and the
+/// valid keys; an error in the body names its key.
+fn tagged<T: DeserializeOwned>(
+    map: Map<String, Value>,
+    what: &str,
+    unknown: &str,
+) -> Result<T, String> {
     // Sorted, so the message is the same whether serde_json keeps key order or not.
     let mut keys: Vec<String> = map.keys().cloned().collect();
     keys.sort();
@@ -251,10 +256,9 @@ fn tagged<T: DeserializeOwned>(map: Map<String, Value>, unknown: &str) -> Result
         match keys.as_slice() {
             [key] if valid.contains(&key.as_str()) => format!("{key}: {error}"),
             [key] => format!("{unknown} `{key}`; expected one of: {}", valid.join(", ")),
-            [] => format!("a step needs one of: {}", valid.join(", ")),
+            [] => format!("{what} needs one of: {}", valid.join(", ")),
             [first, second, ..] => format!(
-                "a step has exactly one step key, found `{first}` and `{second}`; expected one \
-                 of: {}",
+                "{what} has exactly one key, found `{first}` and `{second}`; expected one of: {}",
                 valid.join(", ")
             ),
         }
@@ -296,7 +300,9 @@ fn all(items: Vec<Map<String, Value>>) -> Result<Vec<Wait>, String> {
     items
         .into_iter()
         .map(|item| {
-            match tagged::<WaitBody>(item, "cannot wait on").map_err(|m| format!("all: {m}"))? {
+            match tagged::<WaitBody>(item, "an item", "cannot wait on")
+                .map_err(|m| format!("all: {m}"))?
+            {
                 WaitBody::Expect(b) => Ok(Wait::Expect(expect(b)?)),
                 WaitBody::ExpectResponse(b) => Ok(Wait::Response(expect_response(b)?)),
             }
@@ -334,7 +340,8 @@ fn exit(code: i64) -> Result<StepKind, String> {
 }
 
 /// The variant names serde gives an externally tagged enum, read from its derived
-/// `Deserialize`, so no list of step keys is kept by hand.
+/// `Deserialize`, so no list of step keys is kept by hand. `KEYS` in `scenario/tests.rs` pins
+/// the step keys, so a new step that changes the list fails there first.
 mod keys {
     use std::fmt;
 
