@@ -78,6 +78,28 @@ fn metadata_without_a_dir_stops_the_run_before_the_warm_up() {
     }
 }
 
+/// A `cargo metadata` that fails in the checkout stops the run before the warm-up, with what
+/// it printed and the fix of any failed command there.
+#[test]
+fn a_failed_cargo_metadata_stops_the_run_before_the_warm_up() {
+    let scratch = Scratch::new("worktree-metadata-fails");
+    let root = repo(&scratch);
+    let mut fake = Fake {
+        metadata_fails: Some("error: failed to parse manifest\n".to_owned()),
+        ..Fake::default()
+    };
+    let refused = measure_with(&root, false, 1, &mut fake).expect_err("refused");
+    assert_eq!(fake.ran("cargo build"), 0, "no warm-up");
+    assert_eq!(fake.ran("git worktree add"), 0, "nothing made");
+    assert_eq!(
+        refused,
+        Failure::new(
+            "`cargo metadata` failed:\nerror: failed to parse manifest",
+            format!("run `{METADATA}` from the repo root to see the error")
+        )
+    );
+}
+
 #[test]
 fn a_target_debug_that_is_no_real_folder_stops_the_run_before_the_warm_up() {
     let scratch = Scratch::new("worktree-debug-not-a-folder");
