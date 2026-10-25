@@ -220,8 +220,9 @@ fn survives<T: DeserializeOwned + Serialize>(
     contained(value, &back, base, method)
 }
 
-/// Whether every key and value of `sent` is present and equal in `back`. A `null` in `sent` may be
-/// missing in `back`, since the SDK skips `None` fields. `method` is the method of the message.
+/// Whether every key and value of `sent` is present and equal in `back`. A key of `sent` may be
+/// missing in `back` only where [`dropped`] allows it: an empty value or a default, at a place
+/// where the SDK leaves it out. `method` is the method of the message.
 fn contained(sent: &Value, back: &Value, pointer: &str, method: &str) -> Result<(), String> {
     let lost = |became: &str| {
         format!(

@@ -78,8 +78,8 @@ pub(crate) struct Step {
     pub(crate) raw: bool,
 }
 
-/// What a step does. See the crate docs for the table. `body.rs` builds it from the step's one
-/// key with an exhaustive match, so a new step key cannot be forgotten here.
+/// What a step does; `scenarios/README.md` describes each step. `body.rs` builds it from the
+/// step's one key with an exhaustive match, so a new step key cannot be forgotten here.
 #[derive(Debug, Clone)]
 pub(crate) enum StepKind {
     /// `expect` or `expect_response`.
@@ -250,7 +250,7 @@ fn included(include: &str, at: &Loc, includes: &Includes<'_>) -> Result<Vec<Step
             .is_none_or(|ext| ext != "jsonl")
     {
         return Err(at.load_error(format!(
-            "include `{include}` must be a .jsonl file name in scenarios/common/"
+            "include `{include}` must be a .jsonl file name, with no folder in it"
         )));
     }
     let missing = || {
