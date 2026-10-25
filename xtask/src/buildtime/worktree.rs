@@ -40,7 +40,8 @@
 //! `git worktree remove --force` when the run's `git worktree add` succeeded, and must be gone
 //! from disk and from `git worktree list`; when it is not, the run fails with a fix line and no
 //! further run starts. When the add failed, xtask removes nothing: it names what is left at the
-//! path, since it cannot tell whether git or someone else made it.
+//! path, since it cannot tell whether git or someone else made it. Whatever is left, before a run
+//! or after one, gets one fix line (`leftover.rs`).
 //!
 //! `--json` prints one object: `{"rustc", "profile", "incremental", "ci", "runs", "passed",
 //! "probes": [...]}`, each probe in the shape `report.rs` gives both halves, the six steps then
@@ -49,6 +50,7 @@
 //! `{"passed": false, "errors": [...]}`. The exit code is 1 when the run fails.
 
 mod artifacts;
+mod leftover;
 mod steps;
 #[cfg(test)]
 mod tests;
@@ -68,6 +70,7 @@ use steps::StepFailed;
 #[cfg(test)]
 use {
     artifacts::{built_line, package_name, rebuilt_besides},
+    leftover::leftover_fix,
     steps::{REBUILT_FIX, XTASK_REBUILT_FIX, same_path, touched_time, with_output, xtask_binary},
 };
 
@@ -250,7 +253,7 @@ pub(crate) fn measure(
     runner: &mut QuietRunner<'_>,
 ) -> Result<Measured, Failure> {
     worktree.refuse_uncommitted(runner)?;
-    worktree.refuse_leftover(runner)?;
+    leftover::refuse(worktree, runner)?;
     worktree.warm_up(runner)?;
     let mut steps: Vec<(Vec<f64>, Option<Failure>)> = vec![(Vec::new(), None); STEPS.len()];
     let mut totals = Vec::new();
@@ -263,7 +266,7 @@ pub(crate) fn measure(
         // Checked again right before each add, untimed: something may have come to the path since
         // the last check, during the warm-up (which can take long) or after the last removal.
         // Every later run would fail the same way, so none starts.
-        if let Err(failure) = worktree.refuse_leftover(runner) {
+        if let Err(failure) = leftover::refuse(worktree, runner) {
             steps[Step::Add as usize].1.get_or_insert(failure);
             break;
         }
@@ -287,7 +290,7 @@ pub(crate) fn measure(
             totals.push(secs.iter().sum());
         }
         // `Step::Add` runs first, so a run that timed any step made its worktree.
-        if let Err(failure) = worktree.remove(!secs.is_empty(), runner) {
+        if let Err(failure) = leftover::remove(worktree, !secs.is_empty(), runner) {
             errors.push(failure);
             break;
         }

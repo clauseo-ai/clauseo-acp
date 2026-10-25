@@ -120,8 +120,6 @@ enum Trick {
     RefuseRemove,
     /// `git worktree add` makes the folder, then fails.
     AddFailsAfterMakingIt,
-    /// `git worktree add` fails and makes nothing.
-    AddFails,
     /// `git worktree list` fails once a `git worktree add` ran.
     ListFailsAfterAdd,
     /// pnpm runs past its limit.
@@ -162,9 +160,6 @@ impl Fake {
                 if self.tricks.contains(&Trick::AddFailsAfterMakingIt) =>
             {
                 Scratch::create_dir_all(path).expect("the folder git made");
-                Ok(Ran::exited(false, "", "fatal: failed by the test\n"))
-            }
-            (Program::Git, ["worktree", "add", ..]) if self.tricks.contains(&Trick::AddFails) => {
                 Ok(Ran::exited(false, "", "fatal: failed by the test\n"))
             }
             (Program::Git, ["worktree", "list", ..])
@@ -249,16 +244,6 @@ fn samples(result: &ProbeResult) -> Vec<f64> {
         Outcome::Measured { samples, .. } => samples.clone(),
         other => panic!("{} is not measured: {other:?}", result.name),
     }
-}
-
-/// The fix of a worktree this run could not remove.
-fn cannot_remove_fix(path: &Path) -> String {
-    format!(
-        "remove it by hand with `git worktree remove --force {0}`, or delete the folder if git \
-         does not know it (this run made it: it holds a checkout of HEAD and copied build output, \
-         nothing else); run `git worktree prune` if the folder is already gone; then run again",
-        path.display()
-    )
 }
 
 /// Whether git still lists `path` as a worktree of `root`, or it is on disk.
