@@ -337,19 +337,24 @@ pub(crate) fn run(root: &Path, part: Part, runs: u32, json: bool) -> ExitCode {
             return stopped(&mut out, &errors);
         }
     };
-    let Some((rust_half, web_half)) = halves(part) else {
-        let worktree = worktree::run(
-            root,
-            runs,
-            json,
-            &mut out,
-            &mut diag,
-            &mut process::run_quiet,
-        );
-        return match worktree {
-            Ok(passed) => exit_code(passed),
-            Err(errors) => stopped(&mut out, &errors),
-        };
+    let (rust_half, web_half) = match part {
+        Part::Rust => (true, false),
+        Part::Web => (false, true),
+        Part::All => (true, true),
+        Part::Worktree => {
+            let worktree = worktree::run(
+                root,
+                runs,
+                json,
+                &mut out,
+                &mut diag,
+                &mut process::run_quiet,
+            );
+            return match worktree {
+                Ok(passed) => exit_code(passed),
+                Err(errors) => stopped(&mut out, &errors),
+            };
+        }
     };
     let rust = if rust_half {
         match measure_rust(root, runs, json, &mut out, &mut diag) {
@@ -384,16 +389,6 @@ pub(crate) fn run(root: &Path, part: Part, runs: u32, json: bool) -> ExitCode {
         }
     }
     exit_code(passed)
-}
-
-/// Which halves `part` runs: the Rust half, the web half. `None` for the worktree runs.
-fn halves(part: Part) -> Option<(bool, bool)> {
-    match part {
-        Part::Rust => Some((true, false)),
-        Part::Web => Some((false, true)),
-        Part::All => Some((true, true)),
-        Part::Worktree => None,
-    }
 }
 
 /// The verdict of a run: no half that ran fails it.

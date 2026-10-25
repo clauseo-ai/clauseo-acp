@@ -430,14 +430,6 @@ fn a_rustc_that_cannot_start_is_named_with_the_rustup_fix() {
 }
 
 #[test]
-fn each_part_runs_its_halves_and_worktree_runs_neither() {
-    assert_eq!(halves(Part::Rust), Some((true, false)));
-    assert_eq!(halves(Part::Web), Some((false, true)));
-    assert_eq!(halves(Part::All), Some((true, true)));
-    assert_eq!(halves(Part::Worktree), None);
-}
-
-#[test]
 fn a_run_whose_checkout_has_no_budgets_fails_before_it_measures() {
     let root = Scratch::new("buildtime-run");
     assert_eq!(run(&root, Part::Web, 1, false), ExitCode::FAILURE);
