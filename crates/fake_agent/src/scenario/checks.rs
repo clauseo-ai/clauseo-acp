@@ -5,9 +5,9 @@ use std::collections::{HashMap, HashSet};
 
 use agent_client_protocol::schema::v1 as acp;
 
-use super::{Expect, ExpectResponse, Loc, Reply, Step, StepKind, Wait};
+use super::{Expect, ExpectResponse, FileOp, Loc, Reply, Step, StepKind, Wait};
 use crate::Error;
-use crate::pattern::substitute;
+use crate::pattern::{CWD, substitute};
 use crate::validate::{Problem, Sent, validate};
 
 /// The absolute `cwd` that `{{cwd}}` becomes while validating.
@@ -35,7 +35,7 @@ pub(super) fn check(steps: &[Step]) -> Result<(), Error> {
     for step in steps {
         let at = &step.at;
         match &step.kind {
-            StepKind::Expect(expect) => {
+            StepKind::Wait(Wait::Expect(expect)) => {
                 check_expect(expect).map_err(|m| at.load_error(m))?;
                 seen.label(expect, at)?;
             }
@@ -55,7 +55,7 @@ pub(super) fn check(steps: &[Step]) -> Result<(), Error> {
                     }
                 }
             }
-            StepKind::ExpectResponse(response) => seen.response(response, at)?,
+            StepKind::Wait(Wait::Response(response)) => seen.response(response, at)?,
             StepKind::Respond { to, reply } => seen.respond(step, to, reply)?,
             StepKind::Update { update, .. } => {
                 if !step.raw {
@@ -96,17 +96,26 @@ pub(super) fn check(steps: &[Step]) -> Result<(), Error> {
                     )?;
                 }
             }
-            StepKind::WriteFile { path, .. } | StepKind::DeleteFile { path } => {
-                relative(path).map_err(|m| at.load_error(m))?;
+            StepKind::File(FileOp::Write { path, .. } | FileOp::Delete { path }) => {
+                relative(path, SESSION_CWD).map_err(|m| at.load_error(m))?;
             }
-            StepKind::MoveFile { from, to } => {
-                relative(from).map_err(|m| at.load_error(m))?;
-                relative(to).map_err(|m| at.load_error(m))?;
+            StepKind::File(FileOp::Move { from, to }) => {
+                relative(from, SESSION_CWD).map_err(|m| at.load_error(m))?;
+                relative(to, SESSION_CWD).map_err(|m| at.load_error(m))?;
             }
             StepKind::SpawnChild { pid_file } => {
-                relative(pid_file).map_err(|m| at.load_error(m))?;
+                relative(pid_file, PROCESS_FOLDER).map_err(|m| at.load_error(m))?;
             }
-            StepKind::SendLine(_) | StepKind::Stderr { .. } | StepKind::Exit { .. } => {}
+            StepKind::SendLine(text) => {
+                if text.contains(CWD) {
+                    return Err(at.load_error(format!(
+                        "send_line: `{CWD}` is not allowed, since the line is written as raw text \
+                         and a Windows cwd's backslashes would make it invalid JSON; use notify, \
+                         update or request, which substitute it into parsed JSON"
+                    )));
+                }
+            }
+            StepKind::Stderr { .. } | StepKind::Exit { .. } => {}
         }
     }
     Ok(())
@@ -185,14 +194,19 @@ fn checked(at: &Loc, method: &str, sent: &Sent<'_>) -> Result<(), Error> {
             file: at.file.clone(),
             line: at.line,
             method: method.to_owned(),
-            message,
+            message: at.with_origin(message),
         }),
     }
 }
 
-/// A file step's path must be relative and must not climb out with `..`. Both separators count,
-/// so a Windows path is refused on every system.
-pub(crate) fn relative(path: &str) -> Result<(), String> {
+/// What file steps' paths are relative to.
+const SESSION_CWD: &str = "the session cwd";
+/// What `spawn_child`'s `pid_file` is relative to.
+const PROCESS_FOLDER: &str = "the process folder (the agent's working directory)";
+
+/// A file step's path must be relative to `base` and must not climb out with `..`. Both
+/// separators count, so a Windows path is refused on every system.
+pub(crate) fn relative(path: &str, base: &str) -> Result<(), String> {
     let absolute = path.starts_with(['/', '\\'])
         || path.as_bytes().get(1) == Some(&b':')
         || std::path::Path::new(path).is_absolute();
@@ -200,11 +214,11 @@ pub(crate) fn relative(path: &str) -> Result<(), String> {
         Err("the path is empty".to_owned())
     } else if absolute {
         Err(format!(
-            "path `{path}` is absolute; file steps take paths relative to the cwd"
+            "path `{path}` is absolute; it must be relative to {base}"
         ))
     } else if path.split(['/', '\\']).any(|part| part == "..") {
         Err(format!(
-            "path `{path}` has a `..` component; it must stay under the cwd"
+            "path `{path}` has a `..` component; it must stay under {base}"
         ))
     } else {
         Ok(())

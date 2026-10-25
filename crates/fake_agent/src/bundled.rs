@@ -78,6 +78,7 @@ pub(crate) fn common(file: &str) -> Option<&'static str> {
 }
 
 /// The absolute path of bundled scenario `name`'s source file, for tests that read it.
+#[must_use]
 pub fn scenario_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("scenarios")
@@ -90,6 +91,12 @@ pub fn scenario_path(name: &str) -> PathBuf {
 /// Cargo does not build a dependency's binaries for `cargo nextest run -p <other>`, so a missing
 /// profile binary's error says to run `cargo build -p clauseo-fake_agent`. A missing file named by
 /// the variable gets an error that names the variable instead.
+///
+/// # Errors
+///
+/// [`Error::BinaryVarNotFound`] if `CLAUSEO_FAKE_AGENT_BIN` names no file,
+/// [`Error::CurrentExe`] if the running executable cannot be found, and
+/// [`Error::BinaryNotFound`] if the profile folder has no `fake_agent`.
 pub fn bin_path() -> Result<PathBuf, Error> {
     if let Some(var) = std::env::var_os(BIN_VAR).filter(|v| !v.is_empty()) {
         return existing(PathBuf::from(var), Source::Var);
@@ -135,7 +142,7 @@ fn profile_bin(exe: &Path, suffix: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scenario::{Reply, Scenario, StepKind};
+    use crate::scenario::{Reply, Scenario, StepKind, Wait};
 
     fn stems(folder: &Path) -> Vec<String> {
         let mut stems: Vec<String> = std::fs::read_dir(folder)
@@ -178,7 +185,7 @@ mod tests {
             .steps
             .iter()
             .filter_map(|step| match &step.kind {
-                StepKind::Expect(expect) if expect.method == "session/new" => {
+                StepKind::Wait(Wait::Expect(expect)) if expect.method == "session/new" => {
                     expect.label.as_deref()
                 }
                 _ => None,

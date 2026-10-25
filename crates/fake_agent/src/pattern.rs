@@ -13,7 +13,7 @@ pub(crate) const CWD: &str = "{{cwd}}";
 /// Works on parsed JSON, so a Windows `cwd` with backslashes stays valid JSON.
 pub(crate) fn substitute(value: &Value, cwd: &str) -> Value {
     match value {
-        Value::String(text) if text.contains(CWD) => Value::String(text.replace(CWD, cwd)),
+        Value::String(text) => Value::String(text.replace(CWD, cwd)),
         Value::Array(items) => Value::Array(items.iter().map(|v| substitute(v, cwd)).collect()),
         Value::Object(map) => Value::Object(
             map.iter()
@@ -124,12 +124,19 @@ pub(crate) fn child(pointer: &str, key: &str) -> String {
     format!("{pointer}/{}", key.replace('~', "~0").replace('/', "~1"))
 }
 
-/// Compact JSON of `value`, cut at 120 characters so a message stays one readable line.
+/// The most characters of a value or client line a message quotes.
+pub(crate) const QUOTE_LIMIT: usize = 120;
+
+/// Compact JSON of `value`, cut by [`cut`] so a message stays one readable line.
 pub(crate) fn short(value: &Value) -> String {
-    let text = value.to_string();
-    match text.char_indices().nth(120) {
-        Some((cut, _)) => format!("{}...", &text[..cut]),
-        None => text,
+    cut(&value.to_string())
+}
+
+/// `text`, cut at [`QUOTE_LIMIT`] characters with `...` after the cut.
+pub(crate) fn cut(text: &str) -> String {
+    match text.char_indices().nth(QUOTE_LIMIT) {
+        Some((at, _)) => format!("{}...", &text[..at]),
+        None => text.to_owned(),
     }
 }
 

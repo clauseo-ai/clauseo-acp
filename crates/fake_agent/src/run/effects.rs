@@ -3,7 +3,8 @@
 use std::io::Write;
 use std::path::Path;
 
-use crate::scenario::StepKind;
+use crate::diagnostic;
+use crate::scenario::FileOp;
 
 /// Writes `text` to stderr in one call.
 pub(super) fn write_stderr(text: &str) -> std::io::Result<()> {
@@ -24,23 +25,23 @@ pub(super) fn stderr_step(line: &str, repeat: u32) -> std::io::Result<()> {
 
 /// Runs a `write_file`, `delete_file` or `move_file` step under `cwd`. Paths were checked to be
 /// relative at load.
-pub(super) fn file_step(cwd: &str, kind: &StepKind) -> Result<(), String> {
+pub(super) fn file_step(cwd: &str, op: &FileOp) -> Result<(), String> {
     let cwd = Path::new(cwd);
-    match kind {
-        StepKind::WriteFile { path, content } => {
+    match op {
+        FileOp::Write { path, content } => {
             let full = cwd.join(path);
             make_parent(&full)
                 .and_then(|()| crate::write::write(&full, content))
                 .map_err(|e| format!("write_file {path}: {e}"))
         }
-        StepKind::DeleteFile { path } => {
+        FileOp::Delete { path } => {
             let full = cwd.join(path);
             if !full.is_file() {
                 return Err(format!("no such file {path}"));
             }
             crate::write::remove_file(&full).map_err(|e| format!("delete_file {path}: {e}"))
         }
-        StepKind::MoveFile { from, to } => {
+        FileOp::Move { from, to } => {
             let source = cwd.join(from);
             if !source.is_file() {
                 return Err(format!("no such file {from}"));
@@ -50,7 +51,6 @@ pub(super) fn file_step(cwd: &str, kind: &StepKind) -> Result<(), String> {
                 .and_then(|()| crate::write::rename(&source, &target))
                 .map_err(|e| format!("move_file {from} to {to}: {e}"))
         }
-        _ => Ok(()),
     }
 }
 
@@ -62,12 +62,13 @@ fn make_parent(path: &Path) -> std::io::Result<()> {
 }
 
 /// Starts `fake_agent --hold` with null stdio, writes its PID to `pid_file` (relative to the
-/// process's working directory), then writes `fake_agent: child <pid>` to stderr.
+/// process folder, the agent's working directory, not the session `cwd`), then writes
+/// `fake_agent: child <pid>` to stderr.
 pub(super) fn spawn_child(pid_file: &str) -> Result<(), String> {
     let pid = start_hold().map_err(|e| format!("spawn_child: {e}"))?;
     crate::write::write(pid_file, format!("{pid}\n"))
         .map_err(|e| format!("spawn_child: write {pid_file}: {e}"))?;
-    write_stderr(&format!("fake_agent: child {pid}\n"))
+    write_stderr(&diagnostic(format_args!("child {pid}")))
         .map_err(|e| format!("write to stderr failed: {e}"))
 }
 

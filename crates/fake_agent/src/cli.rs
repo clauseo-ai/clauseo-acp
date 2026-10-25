@@ -4,20 +4,18 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::{Error, Scenario, bundled};
+use crate::{EXIT_LOAD, EXIT_OK, EXIT_WRITE, Error, Scenario, bundled, diagnostic};
 
-const USAGE: &str = concat!(
-    "fake_agent: usage: fake_agent --scenario <name or path> | --check <path>... | --list | ",
-    "--hold\n"
-);
+const USAGE: &str =
+    "usage: fake_agent --scenario <name or path> | --check <path>... | --list | --hold";
 
-/// Runs the command line `args` (without the program name) and returns the exit code: 0 done,
-/// 2 bad arguments or a scenario that fails to load, 3 a mismatch, or an `exit` step's code.
-/// Never returns for `--hold`, or when stdin closes under `on_stdin_close: "hang"`.
+/// Runs the command line `args` (without the program name) and returns the exit code: one of
+/// [`EXIT_OK`], [`EXIT_WRITE`], [`EXIT_LOAD`] and [`crate::EXIT_MISMATCH`], or an `exit` step's
+/// code. Never returns for `--hold`, or when stdin closes under `on_stdin_close: "hang"`.
 pub fn cli(args: Vec<OsString>) -> i32 {
     let args: Option<Vec<String>> = args.into_iter().map(|a| a.into_string().ok()).collect();
     let Some(args) = args else {
-        return fail(USAGE);
+        return fail(&diagnostic(USAGE));
     };
     match args
         .iter()
@@ -29,30 +27,32 @@ pub fn cli(args: Vec<OsString>) -> i32 {
         ["--hold"] => crate::park_forever(),
         ["--scenario", target] => scenario(target),
         ["--check", paths @ ..] if !paths.is_empty() => check(paths),
-        _ => fail(USAGE),
+        _ => fail(&diagnostic(USAGE)),
     }
 }
 
-/// Writes `text` to stderr and returns 2.
+/// Writes `text` to stderr and returns [`EXIT_LOAD`].
 fn fail(text: &str) -> i32 {
     let mut stderr = std::io::stderr().lock();
     stderr.write_all(text.as_bytes()).unwrap_or_default();
-    2
+    EXIT_LOAD
 }
 
-/// Writes `text` to stdout; exits 3 if the client closed it.
+/// Writes `text` to stdout.
 fn print(text: &str) -> i32 {
-    let mut stdout = std::io::stdout().lock();
-    match stdout
-        .write_all(text.as_bytes())
-        .and_then(|()| stdout.flush())
-    {
-        Ok(()) => 0,
+    print_to(&mut std::io::stdout().lock(), text)
+}
+
+/// Writes `text` to `out` and returns [`EXIT_OK`], or [`EXIT_WRITE`] with a stderr line if
+/// the write fails (the client closed stdout).
+fn print_to(out: &mut impl Write, text: &str) -> i32 {
+    match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
+        Ok(()) => EXIT_OK,
         Err(error) => {
             let mut stderr = std::io::stderr().lock();
-            let line = format!("fake_agent: write to stdout failed: {error}\n");
+            let line = diagnostic(format_args!("write to stdout failed: {error}"));
             stderr.write_all(line.as_bytes()).unwrap_or_default();
-            3
+            EXIT_WRITE
         }
     }
 }
@@ -78,16 +78,15 @@ fn scenario(target: &str) -> i32 {
         match bundled::text(target) {
             Some(text) => Scenario::parse(target, text),
             None => {
-                return fail(&format!(
-                    "fake_agent: unknown scenario `{target}`; `fake_agent --list` prints the \
-                     bundled names\n"
-                ));
+                return fail(&diagnostic(format_args!(
+                    "unknown scenario `{target}`; `fake_agent --list` prints the bundled names"
+                )));
             }
         }
     };
     match loaded {
         Ok(scenario) => crate::run::run(&scenario),
-        Err(error) => fail(&format!("fake_agent: {error}\n")),
+        Err(error) => fail(&diagnostic(error)),
     }
 }
 
@@ -101,11 +100,11 @@ fn check(paths: &[&str]) -> i32 {
                 for file in files {
                     match Scenario::load(&file) {
                         Ok(_) => count += 1,
-                        Err(error) => errors.push(format!("fake_agent: {error}\n")),
+                        Err(error) => errors.push(diagnostic(error)),
                     }
                 }
             }
-            Err(error) => errors.push(format!("fake_agent: {error}\n")),
+            Err(error) => errors.push(diagnostic(error)),
         }
     }
     if errors.is_empty() {
@@ -141,4 +140,30 @@ fn files(path: &Path) -> Result<Vec<PathBuf>, Error> {
     }
     files.sort();
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A stdout the client has closed: every write fails.
+    struct Closed;
+
+    impl Write for Closed {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_failed_stdout_write_exits_write_not_mismatch() {
+        assert_eq!(print_to(&mut Closed, "ok 1\n"), EXIT_WRITE);
+        let mut out = Vec::new();
+        assert_eq!(print_to(&mut out, "ok 1\n"), EXIT_OK);
+        assert_eq!(out, b"ok 1\n");
+    }
 }

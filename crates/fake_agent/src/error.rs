@@ -7,6 +7,7 @@ use std::path::PathBuf;
 ///
 /// Its `Display` text has no `fake_agent: ` prefix; the binary adds it.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// The scenario text is not a valid scenario: bad JSON, an unknown step, a broken label.
     #[error("{file}:{line}: {message}")]
