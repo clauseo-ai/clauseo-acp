@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use clauseo_fake_agent::{SCENARIOS, Scenario, bin_path, scenario_path};
+use clauseo_fake_agent::{EXIT_LOAD, EXIT_OK, SCENARIOS, Scenario, bin_path, scenario_path};
 
 use crate::harness::{Agent, Scratch};
 use crate::write;
@@ -22,7 +22,7 @@ fn every_bundled_scenario_validates() {
     let dir = Scratch::new("every_bundled_scenario_validates");
     let agent = Agent::start_args(&["--check", scenarios_dir().to_str().unwrap()], dir.path());
     let finished = agent.finish();
-    assert_eq!(finished.status.code(), Some(0), "{}", finished.stderr);
+    assert_eq!(finished.status.code(), Some(EXIT_OK), "{}", finished.stderr);
     assert_eq!(finished.stdout, format!("ok {}\n", SCENARIOS.len()));
 }
 
@@ -84,7 +84,7 @@ fn every_agent_info_names_the_crate_version() {
 fn list_prints_the_bundled_names() {
     let dir = Scratch::new("list_prints_the_bundled_names");
     let finished = Agent::start_args(&["--list"], dir.path()).finish();
-    assert_eq!(finished.status.code(), Some(0), "{}", finished.stderr);
+    assert_eq!(finished.status.code(), Some(EXIT_OK), "{}", finished.stderr);
     let lines: Vec<&str> = finished.stdout.lines().collect();
     assert_eq!(lines, SCENARIOS);
 }
@@ -109,7 +109,7 @@ fn edit_file_kind_fails_validation_naming_session_update() {
     .unwrap();
     write::write(dir.path().join("files-multi-turn.jsonl"), planted).unwrap();
     let finished = Agent::start_args(&["--check", "."], dir.path()).finish();
-    assert_eq!(finished.status.code(), Some(2));
+    assert_eq!(finished.status.code(), Some(EXIT_LOAD));
     assert_eq!(finished.stdout, "");
     assert_eq!(
         finished.stderr,
@@ -124,7 +124,7 @@ fn edit_file_kind_fails_validation_naming_session_update() {
 fn check_of_an_empty_folder_fails() {
     let dir = Scratch::new("check_of_an_empty_folder_fails");
     let finished = Agent::start_args(&["--check", "."], dir.path()).finish();
-    assert_eq!(finished.status.code(), Some(2));
+    assert_eq!(finished.status.code(), Some(EXIT_LOAD));
     assert_eq!(
         finished.stderr,
         "fake_agent: .: no .jsonl files in this folder\n"
@@ -144,11 +144,11 @@ fn bad_arguments_exit_2_with_usage() {
         &["--frob"],
     ] {
         let finished = Agent::start_args(args, dir.path()).finish();
-        assert_eq!(finished.status.code(), Some(2), "{args:?}");
+        assert_eq!(finished.status.code(), Some(EXIT_LOAD), "{args:?}");
         assert_eq!(finished.stderr, usage, "{args:?}");
     }
     let finished = Agent::start_args(&["--scenario", "no-such"], dir.path()).finish();
-    assert_eq!(finished.status.code(), Some(2));
+    assert_eq!(finished.status.code(), Some(EXIT_LOAD));
     assert_eq!(
         finished.stderr,
         "fake_agent: unknown scenario `no-such`; `fake_agent --list` prints the bundled names\n"

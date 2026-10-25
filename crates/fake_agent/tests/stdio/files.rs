@@ -1,5 +1,6 @@
 //! `files-multi-turn`: file steps under the session's cwd.
 
+use clauseo_fake_agent::{EXIT_MISMATCH, EXIT_OK};
 use std::path::Path;
 
 use serde_json::{Value, json};
@@ -91,7 +92,7 @@ fn files_multi_turn_changes_cwd() {
     assert!(!matter.join("notes/a.txt").exists());
     assert_eq!(locations(&third), [vec![at("notes/a.txt")]]);
     assert_eq!(third[0]["kind"], "delete");
-    agent.expect_exit(0);
+    agent.expect_exit(EXIT_OK);
     assert_eq!(entries(root.path()), [MATTER]);
     assert_eq!(entries(&matter), ["archive", "notes"]);
     assert_eq!(entries(&matter.join("notes")), Vec::<String>::new());
@@ -116,7 +117,7 @@ fn delete_missing_file_exits_3() {
         .unwrap()
         + 1;
     assert_eq!(
-        agent.expect_exit(3).stderr,
+        agent.expect_exit(EXIT_MISMATCH).stderr,
         format!("fake_agent: files-multi-turn.jsonl:{line}: no such file notes/a.txt\n")
     );
     assert_eq!(entries(root.path()), [MATTER]);

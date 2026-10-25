@@ -1,6 +1,7 @@
 //! `cancel-late-updates`, `queue-two-prompts` and `steer-fallback`: the order of a cancelled turn,
 //! and the two mismatches a client can make by sending a message too early.
 
+use clauseo_fake_agent::{EXIT_MISMATCH, EXIT_OK};
 use serde_json::{Value, json};
 
 use crate::harness::{Agent, Scratch, notification, prompt, request, result, update};
@@ -37,7 +38,7 @@ fn cancel_late_updates_order() {
     agent.send(&prompt(3, "Still there?"));
     agent.expect_line(&chunk("m-answer-2", "Second answer."));
     agent.expect_line(&result(3, json!({"stopReason": "end_turn"})));
-    agent.expect_exit(0);
+    agent.expect_exit(EXIT_OK);
 }
 
 #[test]
@@ -51,7 +52,7 @@ fn queue_two_prompts_early_prompt_is_mismatch() {
     assert_eq!(permission["method"], "session/request_permission");
     agent.send(&prompt(3, "Second question"));
     assert_eq!(
-        agent.expect_exit(3).stderr,
+        agent.expect_exit(EXIT_MISMATCH).stderr,
         "fake_agent: queue-two-prompts.jsonl:5: expected response to perm-1, got session/prompt\n"
     );
 }
@@ -81,7 +82,7 @@ fn steer_fallback_steering_is_mismatch() {
         json!({"sessionId": "sess-1", "prompt": [{"type": "text", "text": "Focus on clause 4"}]}),
     ));
     assert_eq!(
-        agent.expect_exit(3).stderr,
+        agent.expect_exit(EXIT_MISMATCH).stderr,
         "fake_agent: steer-fallback.jsonl:8: expected notification session/cancel, got \
          _session/steering\n"
     );
