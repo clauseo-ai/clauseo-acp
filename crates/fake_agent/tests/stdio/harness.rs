@@ -1,6 +1,10 @@
 //! Drives the built `fake_agent` over real pipes. No sleeps, timeouts or polling: every wait is a
 //! blocking read of a line the agent writes, or of EOF.
 //!
+//! So the only guard against a hang is nextest's slow-timeout in `.config/nextest.toml` (period
+//! 10 s, terminate-after 3: a test still running after 30 s is killed). Run these tests with
+//! `cargo nextest run`: under plain `cargo test` a read the agent never answers blocks forever.
+//!
 //! Reuse it for a new scenario test:
 //! ```ignore
 //! let dir = Scratch::new("my_test");
@@ -8,7 +12,7 @@
 //! agent.handshake(dir.path());
 //! agent.send(json!({"jsonrpc": "2.0", "id": 2, "method": "session/prompt", "params": {...}}));
 //! assert_eq!(agent.read_line()["params"]["update"]["sessionUpdate"], "agent_thought_chunk");
-//! agent.expect_exit(0);
+//! agent.expect_exit(EXIT_OK);
 //! ```
 
 use std::io::{BufRead, BufReader, Read, Write};

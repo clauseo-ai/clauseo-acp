@@ -1,5 +1,6 @@
 //! `prompt-stream`, `malformed-line` and `exit-mid-turn`.
 
+use clauseo_fake_agent::{EXIT_MISMATCH, EXIT_OK};
 use serde_json::json;
 
 use crate::harness::{Agent, Scratch, prompt, result, update};
@@ -30,7 +31,7 @@ fn prompt_stream_over_stdio() {
         agent.expect_line(&chunk("agent_message_chunk", "m-answer-1", text));
     }
     agent.expect_line(&result(2, json!({"stopReason": "end_turn"})));
-    agent.expect_exit(0);
+    agent.expect_exit(EXIT_OK);
 }
 
 #[test]
@@ -42,7 +43,7 @@ fn prompt_for_another_session_is_a_mismatch() {
     wrong["params"]["sessionId"] = json!("sess-2");
     agent.send(&wrong);
     assert_eq!(
-        agent.expect_exit(3).stderr,
+        agent.expect_exit(EXIT_MISMATCH).stderr,
         "fake_agent: prompt-stream.jsonl:3: session/prompt params: /sessionId: expected \"sess-1\", \
          got \"sess-2\"\n"
     );
@@ -69,7 +70,7 @@ fn malformed_line_written_verbatim() {
         "After the broken line.",
     ));
     agent.expect_line(&result(2, json!({"stopReason": "end_turn"})));
-    agent.expect_exit(0);
+    agent.expect_exit(EXIT_OK);
 }
 
 #[test]
@@ -78,7 +79,7 @@ fn malformed_client_line_is_a_mismatch() {
     let mut agent = Agent::start("prompt-stream", dir.path());
     agent.send_raw(r#"{"jsonrpc":"2.0","id":0,"method":"initialize","par"#);
     assert_eq!(
-        agent.expect_exit(3).stderr,
+        agent.expect_exit(EXIT_MISMATCH).stderr,
         "fake_agent: handshake.jsonl:1: malformed line from the client: \
          {\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"initialize\",\"par\n"
     );

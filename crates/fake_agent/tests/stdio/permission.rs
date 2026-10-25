@@ -1,5 +1,6 @@
 //! `permission-cancelled`: the cancel and the cancelled answer to `perm-1` in either order.
 
+use clauseo_fake_agent::{EXIT_MISMATCH, EXIT_OK};
 use serde_json::{Value, json};
 
 use crate::harness::{Agent, Scratch, notification, prompt, result, update};
@@ -46,7 +47,7 @@ fn finish_turn(mut agent: Agent) {
         "status": "failed"}),
     ));
     agent.expect_line(&result(2, json!({"stopReason": "cancelled"})));
-    agent.expect_exit(0);
+    agent.expect_exit(EXIT_OK);
 }
 
 #[test]
@@ -71,7 +72,7 @@ fn permission_selected_instead_of_cancelled_is_a_mismatch() {
     agent.send(&cancel());
     agent.send(&json!({"jsonrpc": "2.0", "id": "perm-1",
         "result": {"outcome": {"outcome": "selected", "optionId": "allow-once"}}}));
-    let stderr = agent.expect_exit(3).stderr;
+    let stderr = agent.expect_exit(EXIT_MISMATCH).stderr;
     assert_eq!(
         stderr,
         "fake_agent: permission-cancelled.jsonl:6: response to perm-1 result: /outcome/outcome: \
@@ -83,7 +84,7 @@ fn permission_selected_instead_of_cancelled_is_a_mismatch() {
 fn permission_other_message_in_all_is_a_mismatch() {
     let (_dir, mut agent) = up_to_permission("permission_other_message_in_all");
     agent.send(&prompt(3, "Another question"));
-    let stderr = agent.expect_exit(3).stderr;
+    let stderr = agent.expect_exit(EXIT_MISMATCH).stderr;
     assert_eq!(
         stderr,
         "fake_agent: permission-cancelled.jsonl:6: expected one of: notification session/cancel, \

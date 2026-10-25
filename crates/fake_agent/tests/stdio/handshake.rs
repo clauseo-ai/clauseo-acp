@@ -1,5 +1,6 @@
 //! `initialize-caps` and a plain mismatch.
 
+use clauseo_fake_agent::{EXIT_MISMATCH, EXIT_OK};
 use serde_json::{Value, json};
 
 use crate::harness::{Agent, Scratch, request, result};
@@ -41,7 +42,7 @@ fn initialize_caps_over_stdio() {
     let options = response["result"]["configOptions"].as_array().unwrap();
     assert_eq!(options.len(), 1);
     assert_eq!(options[0]["type"], "select");
-    agent.expect_exit(0);
+    agent.expect_exit(EXIT_OK);
 }
 
 /// Sets the value at `pointer`, creating the last key if it is missing.
@@ -60,7 +61,7 @@ fn refused(test: &str, params: Value) -> String {
     let dir = Scratch::new(test);
     let mut agent = Agent::start("initialize-caps", dir.path());
     agent.send(&request(0, "initialize", params));
-    agent.expect_exit(3).stderr
+    agent.expect_exit(EXIT_MISMATCH).stderr
 }
 
 const AT: &str = "fake_agent: initialize-caps.jsonl:2: initialize params: ";
@@ -153,7 +154,7 @@ fn mismatch_exits_3() {
         "session/new",
         json!({"cwd": dir.cwd(), "mcpServers": []}),
     ));
-    let finished = agent.expect_exit(3);
+    let finished = agent.expect_exit(EXIT_MISMATCH);
     assert_eq!(
         finished.stderr,
         "fake_agent: initialize-caps.jsonl:2: expected request initialize, got session/new\n"
@@ -166,11 +167,11 @@ fn message_after_the_last_step_is_a_mismatch() {
     let mut agent = Agent::start("idle", dir.path());
     agent.send(&json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {}}));
     assert_eq!(
-        agent.expect_exit(3).stderr,
+        agent.expect_exit(EXIT_MISMATCH).stderr,
         "fake_agent: idle.jsonl:1: unexpected notification session/cancel after the last step\n"
     );
     let dir = Scratch::new("idle_exits_0_on_eof");
-    Agent::start("idle", dir.path()).expect_exit(0);
+    Agent::start("idle", dir.path()).expect_exit(EXIT_OK);
 }
 
 #[test]
@@ -186,7 +187,7 @@ fn last_line_without_newline_is_a_mismatch() {
             "handshake.jsonl:1"
         };
         assert_eq!(
-            agent.expect_exit(3).stderr,
+            agent.expect_exit(EXIT_MISMATCH).stderr,
             format!("fake_agent: {at}: client line has no newline before stdin closed\n")
         );
     }
