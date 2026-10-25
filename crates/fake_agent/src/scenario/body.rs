@@ -388,4 +388,14 @@ mod keys {
     pub(super) fn variants<'de, T: Deserialize<'de>>() -> &'static [&'static str] {
         T::deserialize(Probe).err().map_or(&[], |found| found.0)
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn found_displays_the_variants_it_holds() {
+            assert_eq!(Found(&["a", "b"]).to_string(), r#"variants ["a", "b"]"#);
+        }
+    }
 }

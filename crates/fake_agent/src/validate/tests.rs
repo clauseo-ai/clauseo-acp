@@ -354,3 +354,18 @@ fn every_stable_method_has_a_type() {
         );
     }
 }
+
+#[test]
+fn pointers_match_a_star_only_for_an_array_index() {
+    assert!(pointer_matches("/a/b", "/a/b"));
+    assert!(pointer_matches(
+        "/result/authMethods/*/args",
+        "/result/authMethods/0/args"
+    ));
+    assert!(pointer_matches("/a/*", "/a/12"));
+    assert!(!pointer_matches("/a/*", "/a/x"));
+    assert!(!pointer_matches("/a/*", "/a/"));
+    assert!(!pointer_matches("/a/b", "/a/1"));
+    assert!(!pointer_matches("/a/*", "/a/0/b"));
+    assert!(!pointer_matches("/a/*/c", "/a/0/d"));
+}

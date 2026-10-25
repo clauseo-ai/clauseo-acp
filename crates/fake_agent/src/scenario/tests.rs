@@ -324,3 +324,12 @@ fn header_is_checked() {
             .contains("unknown field `x`")
     );
 }
+
+#[test]
+fn stderr_repeat_defaults_to_one() {
+    let scenario = parse_text(&[r#"{"stderr":{"line":"x"}}"#], &[]).unwrap();
+    assert!(matches!(
+        scenario.steps[0].kind,
+        StepKind::Stderr { repeat: 1, .. }
+    ));
+}
