@@ -114,6 +114,27 @@ fn a_target_debug_that_is_no_real_folder_stops_the_run_before_the_warm_up() {
     }
 }
 
+/// A `target/debug` that cannot be read for another reason than not being there stops the run:
+/// with `target` a file, Unix says the path is not a folder (Windows may say it is not found,
+/// which leaves it to the warm-up).
+#[cfg(unix)]
+#[test]
+fn a_target_debug_that_cannot_be_read_stops_the_run_before_the_warm_up() {
+    let scratch = Scratch::new("worktree-debug-unreadable");
+    let root = repo(&scratch);
+    Scratch::remove_dir_all(root.join("target")).expect("no target folder");
+    Scratch::write(root.join("target"), "a file").expect("a file instead");
+    let debug = root.join("target/debug");
+    let error = std::fs::symlink_metadata(&debug).expect_err("not readable");
+    assert_eq!(
+        refused_with(&root, None),
+        Failure::new(
+            format!("could not read {}: {error}", debug.display()),
+            "fix what the error names, then run again"
+        )
+    );
+}
+
 /// A checkout never built has no `target/debug` yet: the warm-up makes a real one, so the checks
 /// pass and the run goes on (here the fake warm-up makes none, so the copy then fails).
 #[test]
