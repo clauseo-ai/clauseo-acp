@@ -152,11 +152,12 @@ pub(crate) fn workspace_root() -> PathBuf {
 /// `CARGO_PKG_NAME` as xtask runs: cargo sets both for the program `cargo run` starts (cargo 1.99:
 /// a moved crate whose sources are older than its binary prints the new dir at run time and the
 /// old one through `env!`). `run_dir` is used when `run_package` is this package's own name and
-/// `run_dir` looks like xtask's directory (`is_xtask_dir`), so a dir another package's cargo, or
-/// another project's `xtask`, left in the environment is not taken for xtask's. Otherwise
-/// `compiled_dir`, the dir xtask was compiled in, which a checkout that copied another checkout's
-/// `target/xtask-run` would get wrong: cargo sees the copied binary as up to date, since it
-/// ignores the variables it sets itself when it checks for changes.
+/// `run_dir` looks like xtask's directory (`is_xtask_dir`). That guard rejects another package's
+/// dir, a dir not named `xtask`, or one without a `Cargo.toml`, so such a dir that cargo left in
+/// the environment is not taken for xtask's. Otherwise `compiled_dir`, the dir xtask was compiled
+/// in, which a checkout that copied another checkout's `target/xtask-run` would get wrong: cargo
+/// sees the copied binary as up to date, since it ignores the variables it sets itself when it
+/// checks for changes.
 pub(crate) fn root_from(
     run_dir: Option<&OsStr>,
     run_package: Option<&OsStr>,
