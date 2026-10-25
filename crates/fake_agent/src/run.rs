@@ -288,3 +288,6 @@ fn message(id: Option<Value>, method: &str, params: Option<Value>) -> Value {
     }
     Value::Object(body)
 }
+
+#[cfg(test)]
+mod tests;
