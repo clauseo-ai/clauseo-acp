@@ -270,9 +270,10 @@ fn elicitation_schema_round_trips_in_messagepack() {
         panic!("decoded to {:?}", requested.request);
     };
     assert_eq!(schema.to_json_text().unwrap(), schema_json);
-    // `serde_json::Value` would sort them.
-    let sorted = serde_json::from_str::<serde_json::Value>(schema_json).unwrap();
-    assert_ne!(sorted.to_string(), schema_json);
+    // The schema's keys are out of sorted order, so the line above shows the order was kept.
+    // (Not shown with `serde_json::Value`: it keeps the order too when the workspace build turns
+    // on its `preserve_order` feature.)
+    assert!(schema_json.find(r#""type""#) < schema_json.find(r#""required""#));
 }
 
 #[test]

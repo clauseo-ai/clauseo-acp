@@ -201,17 +201,24 @@ fn envelope_with_its_event_before_schema_version_decodes_the_same() {
     events.push(tool_call_started_with_blobs());
     for event in events {
         let current = envelope(event);
-        // A `serde_json::Value` sorts its keys, so `event` comes before `schema_version`.
-        let sorted = serde_json::to_value(&current).unwrap();
-        let keys: Vec<&String> = sorted.as_object().unwrap().keys().collect();
+        // `event` goes first. A `serde_json::Map` keeps that order when the workspace build turns
+        // on serde_json's `preserve_order` feature, and sorts its keys (`event` still first)
+        // when it does not, as in `-p clauseo-protocol` alone.
+        let mut rest = serde_json::to_value(&current).unwrap();
+        let rest = rest.as_object_mut().unwrap();
+        let mut first = serde_json::Map::new();
+        first.insert("event".to_owned(), rest.remove("event").unwrap());
+        first.extend(std::mem::take(rest));
+        let keys: Vec<&String> = first.keys().collect();
         let at = |name: &str| keys.iter().position(|key| *key == name).unwrap();
         assert!(at("event") < at("schema_version"), "{keys:?}");
-        // It sorts a `RawPayload` map's keys too, so the check is that the decode writes back
-        // as the same `Value` (whose maps compare without order).
-        let read = serde_json::from_value::<Envelope>(sorted.clone()).unwrap();
-        assert_eq!(serde_json::to_value(&read).unwrap(), sorted);
+        let first = serde_json::Value::Object(first);
+        // Without `preserve_order` a `RawPayload` map's keys are sorted too, so the check is that
+        // the decode writes back as the same `Value` (whose maps compare without order).
+        let read = serde_json::from_value::<Envelope>(first.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&read).unwrap(), first);
         assert_eq!(
-            serde_json::from_value::<EnvelopeRead>(sorted).unwrap(),
+            serde_json::from_value::<EnvelopeRead>(first).unwrap(),
             EnvelopeRead::Current(read)
         );
         // In both formats, `MessagePack`'s binary ids and blob hashes included.
