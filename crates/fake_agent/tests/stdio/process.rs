@@ -1,5 +1,8 @@
 //! `ignore-stdin-close` and `grandchild`, for S7's shutdown and tree-kill tests.
 
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
+
 use crate::harness::{Agent, PidGuard, Scratch};
 
 #[test]
@@ -35,4 +38,19 @@ fn grandchild_writes_pid() {
     grandchild.kill();
     let finished = agent.finish();
     assert!(!finished.status.success());
+}
+
+/// `--hold` says so on stderr, then never exits. Killed, it dies by the kill (signal 9 on
+/// Unix, TerminateProcess's exit 1 on Windows). A broken `--hold` prints usage and exits 2.
+#[test]
+fn hold_announces_itself_and_dies_when_killed() {
+    let dir = Scratch::new("hold_announces_itself");
+    let mut agent = Agent::start_args(&["--hold"], dir.path());
+    assert_eq!(agent.stderr_line(), "fake_agent: holding");
+    agent.kill();
+    let finished = agent.finish();
+    #[cfg(unix)]
+    assert_eq!(finished.status.signal(), Some(9), "{:?}", finished.status);
+    #[cfg(windows)]
+    assert_eq!(finished.status.code(), Some(1), "{:?}", finished.status);
 }

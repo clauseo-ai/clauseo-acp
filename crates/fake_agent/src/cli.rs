@@ -24,11 +24,22 @@ pub fn cli(args: Vec<OsString>) -> i32 {
         .as_slice()
     {
         ["--list"] => list(),
-        ["--hold"] => crate::park_forever(),
+        ["--hold"] => hold(),
         ["--scenario", target] => scenario(target),
         ["--check", paths @ ..] if !paths.is_empty() => check(paths),
         _ => fail(&diagnostic(USAGE)),
     }
+}
+
+/// Writes `fake_agent: holding` to stderr, so a test that reads that line knows the process is
+/// up without a sleep, then parks.
+fn hold() -> ! {
+    let mut stderr = std::io::stderr().lock();
+    stderr
+        .write_all(diagnostic("holding").as_bytes())
+        .unwrap_or_default();
+    drop(stderr);
+    crate::park_forever()
 }
 
 /// Writes `text` to stderr and returns [`EXIT_LOAD`].

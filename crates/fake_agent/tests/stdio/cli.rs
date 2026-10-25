@@ -160,3 +160,38 @@ fn bin_path_finds_the_built_binary() {
     let path = bin_path().unwrap();
     assert_eq!(path, Path::new(env!("CARGO_BIN_EXE_fake_agent")));
 }
+
+/// A bare name is bundled; a path (one with a separator, or a `.jsonl` name) is a file. A
+/// missing file is an I/O error naming that path, never an unknown bundled name.
+#[test]
+fn scenario_takes_a_path_only_with_a_separator_or_jsonl() {
+    let dir = Scratch::new("scenario_takes_a_path");
+    write::copy(scenario_path("idle"), dir.path().join("idle.jsonl")).unwrap();
+    // A `.jsonl` name in the working folder runs as a file.
+    Agent::start_args(&["--scenario", "idle.jsonl"], dir.path()).expect_exit(EXIT_OK);
+    // A path with a separator runs as a file, whatever its extension.
+    let by_path = scenario_path("idle");
+    Agent::start_args(&["--scenario", by_path.to_str().unwrap()], dir.path()).expect_exit(EXIT_OK);
+    for target in ["sub/missing", "missing.jsonl"] {
+        let finished = Agent::start_args(&["--scenario", target], dir.path()).finish();
+        assert_eq!(finished.status.code(), Some(EXIT_LOAD), "{target}");
+        assert!(
+            finished
+                .stderr
+                .starts_with(&format!("fake_agent: {target}: ")),
+            "{target}: {}",
+            finished.stderr
+        );
+    }
+}
+
+/// `--check` of a folder takes its `.jsonl` files and ignores the rest.
+#[test]
+fn check_of_a_folder_takes_only_the_jsonl_files() {
+    let dir = Scratch::new("check_takes_only_jsonl");
+    write::copy(scenario_path("idle"), dir.path().join("idle.jsonl")).unwrap();
+    write::write(dir.path().join("notes.txt"), "not a scenario\n").unwrap();
+    let finished = Agent::start_args(&["--check", "."], dir.path()).finish();
+    assert_eq!(finished.status.code(), Some(EXIT_OK), "{}", finished.stderr);
+    assert_eq!(finished.stdout, "ok 1\n");
+}
