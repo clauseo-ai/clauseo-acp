@@ -64,7 +64,6 @@ fn metadata_without_a_dir_stops_the_run_before_the_warm_up() {
     let root = repo(&scratch);
     let only_target = serde_json::json!({ "target_directory": root.join("target") });
     for (printed, field) in [
-        ("not json".to_owned(), "target_directory"),
         (r#"{"target_directory": 1}"#.to_owned(), "target_directory"),
         (only_target.to_string(), "build_directory"),
     ] {
@@ -76,6 +75,22 @@ fn metadata_without_a_dir_stops_the_run_before_the_warm_up() {
             )
         );
     }
+}
+
+/// Output of `cargo metadata` that is not JSON is named as such, with serde's error, and not
+/// as a missing field.
+#[test]
+fn metadata_that_is_not_json_stops_the_run_before_the_warm_up() {
+    let scratch = Scratch::new("worktree-metadata-not-json");
+    let root = repo(&scratch);
+    let error = serde_json::from_str::<serde_json::Value>("not json").expect_err("not JSON");
+    assert_eq!(
+        refused_with(&root, Some("not json".to_owned())),
+        Failure::new(
+            format!("`{METADATA}` printed output that is not JSON: {error}"),
+            format!("run `{METADATA}` from the repo root to see what it prints")
+        )
+    );
 }
 
 /// A `cargo metadata` that fails in the checkout stops the run before the warm-up, with what
