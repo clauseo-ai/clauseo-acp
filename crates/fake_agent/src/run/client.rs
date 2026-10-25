@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use crate::pattern::{check_off, matches, short, substitute, uses_cwd};
+use crate::pattern::{check_off, cut, matches, short, substitute, uses_cwd};
 use crate::scenario::{Expect, ExpectResponse, Reply, Wait};
 
 /// One parsed client line.
@@ -58,14 +58,6 @@ pub(super) fn classify(line: &str) -> Result<Incoming, String> {
             reply: Reply::Error(error),
         }),
         _ => Err(malformed()),
-    }
-}
-
-/// The line, cut at 200 characters for the message.
-fn cut(line: &str) -> String {
-    match line.char_indices().nth(200) {
-        Some((at, _)) => format!("{}...", &line[..at]),
-        None => line.to_owned(),
     }
 }
 

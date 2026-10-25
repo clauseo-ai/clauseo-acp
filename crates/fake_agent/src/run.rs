@@ -10,6 +10,7 @@ use agent_client_protocol::schema::v1 as acp;
 use serde_json::{Map, Value, json};
 
 use crate::scenario::{Loc, OnStdinClose, Reply, Scenario, StepKind, Wait};
+use crate::{EXIT_MISMATCH, EXIT_OK, diagnostic};
 use client::{Incoming, Miss, NO_CWD, classify, describe_wait, match_wait, placed};
 
 /// Why the script stopped before reaching its end.
@@ -18,7 +19,7 @@ pub(crate) enum Stop {
     Exit(i32),
     /// Stdin reached EOF.
     StdinClosed,
-    /// A mismatch or a failed step: exit 3 with this message.
+    /// A mismatch or a failed step: exit [`EXIT_MISMATCH`] with this message.
     Fail(Loc, String),
 }
 
@@ -54,16 +55,16 @@ pub(crate) fn run(scenario: &Scenario) -> i32 {
     match runner.play() {
         Stop::Exit(code) => code,
         Stop::StdinClosed => match scenario.on_stdin_close {
-            OnStdinClose::Exit => 0,
+            OnStdinClose::Exit => EXIT_OK,
             OnStdinClose::Hang => {
-                effects::write_stderr("fake_agent: stdin closed, holding\n").unwrap_or_default();
+                effects::write_stderr(&diagnostic("stdin closed, holding")).unwrap_or_default();
                 crate::park_forever()
             }
         },
         Stop::Fail(at, message) => {
-            let line = format!("fake_agent: {}:{}: {message}\n", at.file, at.line);
+            let line = diagnostic(format_args!("{}:{}: {message}", at.file, at.line));
             effects::write_stderr(&line).unwrap_or_default();
-            3
+            EXIT_MISMATCH
         }
     }
 }
@@ -89,18 +90,11 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
 
     fn step(&mut self, at: &Loc, kind: &StepKind) -> Result<(), Stop> {
         match kind {
-            StepKind::Expect(expect) => {
-                let wait = Wait::Expect(expect.clone());
+            StepKind::Wait(wait) => {
                 let incoming = self.read(at)?;
-                match_wait(&wait, &incoming, self.cwd.as_deref())
+                match_wait(wait, &incoming, self.cwd.as_deref())
                     .map_err(|miss| Stop::Fail(at.clone(), miss.into_message()))?;
-                self.received(&wait, incoming);
-            }
-            StepKind::ExpectResponse(response) => {
-                let wait = Wait::Response(response.clone());
-                let incoming = self.read(at)?;
-                match_wait(&wait, &incoming, self.cwd.as_deref())
-                    .map_err(|miss| Stop::Fail(at.clone(), miss.into_message()))?;
+                self.received(wait, incoming);
             }
             StepKind::All(waits) => self.all(at, waits)?,
             StepKind::Respond { to, reply } => self.respond(at, to, reply)?,
@@ -115,39 +109,25 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
                 let params = json!({"sessionId": session, "update": update});
                 self.send(
                     at,
-                    &message(
-                        None,
-                        Some(acp::CLIENT_METHOD_NAMES.session_update),
-                        Some(params),
-                    ),
+                    &message(None, acp::CLIENT_METHOD_NAMES.session_update, Some(params)),
                 )?;
             }
             StepKind::Notify { method, params } => {
                 let params = params.as_ref().map(|p| self.placed(at, p)).transpose()?;
-                self.send(at, &message(None, Some(method), params))?;
+                self.send(at, &message(None, method, params))?;
             }
             StepKind::Request { id, method, params } => {
                 let params = params.as_ref().map(|p| self.placed(at, p)).transpose()?;
-                self.send(at, &message(Some(json!(id)), Some(method), params))?;
+                self.send(at, &message(Some(json!(id)), method, params))?;
             }
-            StepKind::SendLine(text) => {
-                let text = match &self.cwd {
-                    Some(cwd) => text.replace(crate::pattern::CWD, cwd),
-                    None if text.contains(crate::pattern::CWD) => {
-                        return Err(Stop::Fail(at.clone(), NO_CWD.to_owned()));
-                    }
-                    None => text.clone(),
-                };
-                self.write_line(at, &text)?;
-            }
-            StepKind::WriteFile { .. }
-            | StepKind::DeleteFile { .. }
-            | StepKind::MoveFile { .. } => {
+            // Written as is: `{{cwd}}` in it is refused at load.
+            StepKind::SendLine(text) => self.write_line(at, text)?,
+            StepKind::File(op) => {
                 let cwd = self
                     .cwd
                     .as_deref()
                     .ok_or_else(|| Stop::Fail(at.clone(), NO_CWD.to_owned()))?;
-                effects::file_step(cwd, kind).map_err(|m| Stop::Fail(at.clone(), m))?;
+                effects::file_step(cwd, op).map_err(|m| Stop::Fail(at.clone(), m))?;
             }
             StepKind::Stderr { line, repeat } => effects::stderr_step(line, *repeat)
                 .map_err(|e| Stop::Fail(at.clone(), format!("write to stderr failed: {e}")))?,
@@ -296,15 +276,13 @@ impl<R: BufRead, W: Write> Runner<'_, R, W> {
 }
 
 /// A JSON-RPC 2.0 request (with `id`) or notification (without).
-fn message(id: Option<Value>, method: Option<&str>, params: Option<Value>) -> Value {
+fn message(id: Option<Value>, method: &str, params: Option<Value>) -> Value {
     let mut body = Map::new();
     body.insert("jsonrpc".to_owned(), json!("2.0"));
     if let Some(id) = id {
         body.insert("id".to_owned(), id);
     }
-    if let Some(method) = method {
-        body.insert("method".to_owned(), json!(method));
-    }
+    body.insert("method".to_owned(), json!(method));
     if let Some(params) = params {
         body.insert("params".to_owned(), params);
     }

@@ -1,29 +1,17 @@
-//! Turns one JSON line into a header or a step. Bodies are serde structs that refuse unknown keys.
+//! Turns one JSON line into a header or a step. A step is an externally tagged serde enum, so its
+//! one key picks the variant, and every body is a struct that refuses unknown keys.
 
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
-use super::{Expect, ExpectResponse, OnStdinClose, Reply, StepKind, Wait};
+use super::{Expect, ExpectResponse, FileOp, OnStdinClose, Reply, StepKind, Wait};
+use crate::{EXIT_LOAD, EXIT_MISMATCH};
 
-/// The step keys, in the order the crate docs list them.
-const STEP_KEYS: &[&str] = &[
-    "expect",
-    "expect_response",
-    "all",
-    "respond",
-    "update",
-    "notify",
-    "request",
-    "send_line",
-    "write_file",
-    "delete_file",
-    "move_file",
-    "stderr",
-    "spawn_child",
-    "exit",
-    "include",
-];
+/// The most times one `stderr` step may repeat its line. Well above every bundled scenario (200)
+/// and the largest performance workload (5,000), and small enough that the one buffer the step
+/// fills stays a few megabytes.
+pub(crate) const MAX_REPEAT: u32 = 100_000;
 
 /// A step, or an `include` the parser expands.
 pub(super) enum Parsed {
@@ -37,12 +25,13 @@ struct Header {
     scenario: String,
     description: String,
     #[serde(default)]
-    on_stdin_close: Option<String>,
+    on_stdin_close: OnStdinClose,
 }
 
 /// Parses the header line of scenario `name`.
 pub(super) fn header(name: &str, value: Value) -> Result<OnStdinClose, String> {
-    let header: Header = body("header", value)?;
+    let header: Header =
+        serde_json::from_value(value).map_err(|error| format!("header: {error}"))?;
     if header.scenario != name {
         return Err(format!(
             "header: scenario `{}` differs from the file stem `{name}`",
@@ -52,13 +41,36 @@ pub(super) fn header(name: &str, value: Value) -> Result<OnStdinClose, String> {
     if header.description.trim().is_empty() {
         return Err("header: description is empty".to_owned());
     }
-    match header.on_stdin_close.as_deref() {
-        None | Some("exit") => Ok(OnStdinClose::Exit),
-        Some("hang") => Ok(OnStdinClose::Hang),
-        Some(other) => Err(format!(
-            "header: on_stdin_close is `{other}`, expected exit or hang"
-        )),
-    }
+    Ok(header.on_stdin_close)
+}
+
+/// One step line without its `note`: exactly one of these keys.
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+enum StepBody {
+    Expect(ExpectBody),
+    ExpectResponse(ExpectResponseBody),
+    All(Vec<Map<String, Value>>),
+    Respond(RespondBody),
+    Update(UpdateBody),
+    Notify(NotifyBody),
+    Request(RequestBody),
+    SendLine(String),
+    WriteFile(WriteFileBody),
+    DeleteFile(PathBody),
+    MoveFile(MoveFileBody),
+    Stderr(StderrBody),
+    SpawnChild(SpawnChildBody),
+    Exit(ExitBody),
+    Include(String),
+}
+
+/// One item of an `all` list.
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+enum WaitBody {
+    Expect(ExpectBody),
+    ExpectResponse(ExpectResponseBody),
 }
 
 #[derive(Deserialize)]
@@ -177,89 +189,50 @@ pub(super) fn step(value: Value) -> Result<Body, String> {
         None | Some(Value::String(_)) => {}
         Some(_) => return Err("note: expected a string".to_owned()),
     }
-    let key = step_key(&map)?;
-    let value = map.remove(&key).unwrap_or_default();
-    let mut raw = false;
-    let kind = match key.as_str() {
-        "expect" => StepKind::Expect(expect(body(&key, value)?)?),
-        "expect_response" => StepKind::ExpectResponse(expect_response(body(&key, value)?)?),
-        "all" => StepKind::All(all(value)?),
-        "respond" => {
-            let b: RespondBody = body(&key, value)?;
-            raw = b.raw;
-            StepKind::Respond {
-                to: b.to,
-                reply: reply(&key, b.result, b.error)?,
-            }
+    let (kind, raw) = match tagged::<StepBody>(map, "unknown step")? {
+        StepBody::Expect(b) => (StepKind::Wait(Wait::Expect(expect(b)?)), false),
+        StepBody::ExpectResponse(b) => (StepKind::Wait(Wait::Response(expect_response(b)?)), false),
+        StepBody::All(items) => (StepKind::All(all(items)?), false),
+        StepBody::Respond(b) => {
+            let reply = reply("respond", b.result, b.error)?;
+            (StepKind::Respond { to: b.to, reply }, b.raw)
         }
-        "update" => {
-            let b: UpdateBody = body(&key, value)?;
-            raw = b.raw;
-            StepKind::Update {
-                update: b.update,
-                session: b.session,
-            }
+        StepBody::Update(b) => {
+            let (update, session) = (b.update, b.session);
+            (StepKind::Update { update, session }, b.raw)
         }
-        "notify" => {
-            let b: NotifyBody = body(&key, value)?;
-            raw = b.raw;
-            StepKind::Notify {
-                method: b.method,
-                params: b.params,
-            }
+        StepBody::Notify(b) => {
+            let (method, params) = (b.method, b.params);
+            (StepKind::Notify { method, params }, b.raw)
         }
-        "request" => {
-            let b: RequestBody = body(&key, value)?;
-            raw = b.raw;
-            StepKind::Request {
-                id: b.id,
-                method: b.method,
-                params: b.params,
-            }
+        StepBody::Request(b) => {
+            let (id, method, params) = (b.id, b.method, b.params);
+            (StepKind::Request { id, method, params }, b.raw)
         }
-        "send_line" => StepKind::SendLine(body(&key, value)?),
-        "write_file" => {
-            let b: WriteFileBody = body(&key, value)?;
-            StepKind::WriteFile {
-                path: b.path,
-                content: b.content,
-            }
+        StepBody::SendLine(text) => (StepKind::SendLine(text), false),
+        StepBody::WriteFile(b) => {
+            let (path, content) = (b.path, b.content);
+            (StepKind::File(FileOp::Write { path, content }), false)
         }
-        "delete_file" => StepKind::DeleteFile {
-            path: body::<PathBody>(&key, value)?.path,
-        },
-        "move_file" => {
-            let b: MoveFileBody = body(&key, value)?;
-            StepKind::MoveFile {
-                from: b.from,
-                to: b.to,
-            }
+        StepBody::DeleteFile(b) => (StepKind::File(FileOp::Delete { path: b.path }), false),
+        StepBody::MoveFile(b) => {
+            let (from, to) = (b.from, b.to);
+            (StepKind::File(FileOp::Move { from, to }), false)
         }
-        "stderr" => {
-            let b: StderrBody = body(&key, value)?;
-            StepKind::Stderr {
-                line: b.line,
-                repeat: b.repeat,
-            }
-        }
-        "spawn_child" => StepKind::SpawnChild {
-            pid_file: body::<SpawnChildBody>(&key, value)?.pid_file,
-        },
-        "exit" => {
-            let code = body::<ExitBody>(&key, value)?.code;
-            // Unix keeps only the low 8 bits of an exit code, so refuse what it would change.
-            match i32::try_from(code) {
-                Ok(code) if (0..=255).contains(&code) => StepKind::Exit { code },
-                _ => return Err(format!("exit: code {code} is outside 0..=255")),
-            }
-        }
-        "include" => {
+        StepBody::Stderr(b) => (stderr(b)?, false),
+        StepBody::SpawnChild(b) => (
+            StepKind::SpawnChild {
+                pid_file: b.pid_file,
+            },
+            false,
+        ),
+        StepBody::Exit(b) => (exit(b.code)?, false),
+        StepBody::Include(file) => {
             return Ok(Body {
-                kind: Parsed::Include(body(&key, value)?),
-                raw,
+                kind: Parsed::Include(file),
+                raw: false,
             });
         }
-        _ => return Err(format!("unknown step `{key}`")),
     };
     Ok(Body {
         kind: Parsed::Step(kind),
@@ -267,24 +240,25 @@ pub(super) fn step(value: Value) -> Result<Body, String> {
     })
 }
 
-/// The one step key in `map`, which has had `note` removed.
-fn step_key(map: &Map<String, Value>) -> Result<String, String> {
-    let mut keys = map.keys();
-    match (keys.next(), keys.next()) {
-        (None, _) => Err(format!("a step needs one of: {}", STEP_KEYS.join(", "))),
-        (Some(first), Some(second)) => Err(format!(
-            "a step has exactly one step key, found `{first}` and `{second}`"
-        )),
-        (Some(key), None) if STEP_KEYS.contains(&key.as_str()) => Ok(key.clone()),
-        (Some(key), None) => Err(format!(
-            "unknown step `{key}`; expected one of: {}",
-            STEP_KEYS.join(", ")
-        )),
-    }
-}
-
-fn body<T: DeserializeOwned>(key: &str, value: Value) -> Result<T, String> {
-    serde_json::from_value(value).map_err(|error| format!("{key}: {error}"))
+/// Deserialises externally tagged enum `T` from `map`, which must hold exactly one of its keys.
+/// A wrong key gets `unknown` and the valid keys; an error in the body names its key.
+fn tagged<T: DeserializeOwned>(map: Map<String, Value>, unknown: &str) -> Result<T, String> {
+    // Sorted, so the message is the same whether serde_json keeps key order or not.
+    let mut keys: Vec<String> = map.keys().cloned().collect();
+    keys.sort();
+    serde_json::from_value(Value::Object(map)).map_err(|error| {
+        let valid = keys::variants::<T>();
+        match keys.as_slice() {
+            [key] if valid.contains(&key.as_str()) => format!("{key}: {error}"),
+            [key] => format!("{unknown} `{key}`; expected one of: {}", valid.join(", ")),
+            [] => format!("a step needs one of: {}", valid.join(", ")),
+            [first, second, ..] => format!(
+                "a step has exactly one step key, found `{first}` and `{second}`; expected one \
+                 of: {}",
+                valid.join(", ")
+            ),
+        }
+    })
 }
 
 fn expect(b: ExpectBody) -> Result<Expect, String> {
@@ -315,30 +289,103 @@ fn reply(key: &str, result: Option<Value>, error: Option<Value>) -> Result<Reply
 }
 
 /// An `all` list: each item is `{"expect": {...}}` or `{"expect_response": {...}}`.
-fn all(value: Value) -> Result<Vec<Wait>, String> {
-    let Value::Array(items) = value else {
-        return Err("all: expected a list".to_owned());
-    };
+fn all(items: Vec<Map<String, Value>>) -> Result<Vec<Wait>, String> {
     if items.is_empty() {
         return Err("all: the list is empty".to_owned());
     }
     items
         .into_iter()
         .map(|item| {
-            let Value::Object(mut map) = item else {
-                return Err(
-                    "all: each item is {\"expect\": ...} or {\"expect_response\": ...}".to_owned(),
-                );
-            };
-            let key = step_key(&map)?;
-            let value = map.remove(&key).unwrap_or_default();
-            match key.as_str() {
-                "expect" => Ok(Wait::Expect(expect(body(&key, value)?)?)),
-                "expect_response" => Ok(Wait::Response(expect_response(body(&key, value)?)?)),
-                _ => Err(format!(
-                    "all: `{key}` cannot wait; use expect or expect_response"
-                )),
+            match tagged::<WaitBody>(item, "cannot wait on").map_err(|m| format!("all: {m}"))? {
+                WaitBody::Expect(b) => Ok(Wait::Expect(expect(b)?)),
+                WaitBody::ExpectResponse(b) => Ok(Wait::Response(expect_response(b)?)),
             }
         })
         .collect()
+}
+
+fn stderr(b: StderrBody) -> Result<StepKind, String> {
+    if b.repeat > MAX_REPEAT {
+        return Err(format!(
+            "stderr: repeat {} is over the cap of {MAX_REPEAT}",
+            b.repeat
+        ));
+    }
+    Ok(StepKind::Stderr {
+        line: b.line,
+        repeat: b.repeat,
+    })
+}
+
+fn exit(code: i64) -> Result<StepKind, String> {
+    let reserved = |name: &str| {
+        format!(
+            "exit: code {code} is {name}, the code fake_agent itself exits with; an exit step may \
+             not use {EXIT_LOAD} (EXIT_LOAD) or {EXIT_MISMATCH} (EXIT_MISMATCH)"
+        )
+    };
+    // Unix keeps only the low 8 bits of an exit code, so refuse what it would change.
+    match i32::try_from(code) {
+        Ok(EXIT_LOAD) => Err(reserved("EXIT_LOAD")),
+        Ok(EXIT_MISMATCH) => Err(reserved("EXIT_MISMATCH")),
+        Ok(code) if (0..=255).contains(&code) => Ok(StepKind::Exit { code }),
+        _ => Err(format!("exit: code {code} is outside 0..=255")),
+    }
+}
+
+/// The variant names serde gives an externally tagged enum, read from its derived
+/// `Deserialize`, so no list of step keys is kept by hand.
+mod keys {
+    use std::fmt;
+
+    use serde::de::{self, Deserialize, Deserializer, Visitor};
+
+    /// A deserializer that only reports the variant names it is asked for.
+    struct Probe;
+
+    /// The variants a `deserialize_enum` call named; empty for anything else.
+    #[derive(Debug)]
+    struct Found(&'static [&'static str]);
+
+    impl fmt::Display for Found {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "variants {:?}", self.0)
+        }
+    }
+
+    impl std::error::Error for Found {}
+
+    impl de::Error for Found {
+        fn custom<T: fmt::Display>(_: T) -> Self {
+            Found(&[])
+        }
+    }
+
+    impl<'de> Deserializer<'de> for Probe {
+        type Error = Found;
+
+        fn deserialize_any<V: Visitor<'de>>(self, _: V) -> Result<V::Value, Found> {
+            Err(Found(&[]))
+        }
+
+        fn deserialize_enum<V: Visitor<'de>>(
+            self,
+            _: &'static str,
+            variants: &'static [&'static str],
+            _: V,
+        ) -> Result<V::Value, Found> {
+            Err(Found(variants))
+        }
+
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string bytes byte_buf
+            option unit unit_struct newtype_struct seq tuple tuple_struct map struct identifier
+            ignored_any
+        }
+    }
+
+    /// The keys externally tagged enum `T` accepts, in declaration order.
+    pub(super) fn variants<'de, T: Deserialize<'de>>() -> &'static [&'static str] {
+        T::deserialize(Probe).err().map_or(&[], |found| found.0)
+    }
 }
