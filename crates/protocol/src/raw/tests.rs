@@ -172,11 +172,15 @@ fn json_writes_a_scalar_or_binary_key_as_its_json_text() {
 
 #[test]
 fn serde_json_value_cannot_do_this() {
-    // The reason RawPayload exists: Value sorts keys and refuses binary data.
-    let value: serde_json::Value = serde_json::from_str(r#"{"b":1,"a":2}"#).unwrap();
-    assert_eq!(value.to_string(), r#"{"a":2,"b":1}"#);
+    // The reason RawPayload exists: Value refuses binary data, and it sorts keys unless
+    // serde_json's `preserve_order` feature is on. A workspace build has it on (the ACP SDK
+    // turns it on) and `-p clauseo-protocol` alone does not, so no assertion here depends on
+    // Value's key order; RawPayload keeps the order in both.
     let bin = rmp_serde::to_vec_named(&RawPayload::Bytes(vec![1].into())).unwrap();
     assert!(rmp_serde::from_slice::<serde_json::Value>(&bin).is_err());
+    let text = r#"{"b":1,"a":2}"#;
+    let raw: RawPayload = serde_json::from_str(text).unwrap();
+    assert_eq!(raw.to_json_text().unwrap(), text);
 }
 
 #[test]
