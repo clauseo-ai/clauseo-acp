@@ -42,17 +42,17 @@ pub(super) fn refuse_shared(
             format!("run `{cmd}` from the repo root to see the error"),
         )
     })?;
-    let metadata = serde_json::from_str::<serde_json::Value>(&printed).ok();
+    let look = format!("run `{cmd}` from the repo root to see what it prints");
+    let metadata = serde_json::from_str::<serde_json::Value>(&printed).map_err(|error| {
+        Failure::new(
+            format!("`{cmd}` printed output that is not JSON: {error}"),
+            look.clone(),
+        )
+    })?;
     let own = worktree.root.join("target");
     for field in DIRS {
-        let named = metadata
-            .as_ref()
-            .and_then(|value| value.get(field)?.as_str());
-        let Some(dir) = named else {
-            return Err(Failure::new(
-                format!("`{cmd}` printed no `{field}`"),
-                format!("run `{cmd}` from the repo root to see what it prints"),
-            ));
+        let Some(dir) = metadata.get(field).and_then(serde_json::Value::as_str) else {
+            return Err(Failure::new(format!("`{cmd}` printed no `{field}`"), look));
         };
         if !own_target(Path::new(dir), worktree.root) {
             return Err(Failure::new(
