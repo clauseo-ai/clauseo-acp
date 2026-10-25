@@ -82,7 +82,7 @@ fn metadata_without_a_dir_stops_the_run_before_the_warm_up() {
 fn a_target_debug_that_is_no_real_folder_stops_the_run_before_the_warm_up() {
     let scratch = Scratch::new("worktree-debug-not-a-folder");
     let root = repo(&scratch);
-    let debug = root.join("target/debug");
+    let debug = root.join("target").join("debug");
     let refusal = |what: &str| {
         Failure::new(
             format!(
@@ -124,7 +124,7 @@ fn a_target_debug_that_cannot_be_read_stops_the_run_before_the_warm_up() {
     let root = repo(&scratch);
     Scratch::remove_dir_all(root.join("target")).expect("no target folder");
     Scratch::write(root.join("target"), "a file").expect("a file instead");
-    let debug = root.join("target/debug");
+    let debug = root.join("target").join("debug");
     let error = std::fs::symlink_metadata(&debug).expect_err("not readable");
     assert_eq!(
         refused_with(&root, None),
