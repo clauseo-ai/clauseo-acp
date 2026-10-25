@@ -38,6 +38,13 @@ fn budgets() -> Vec<Budget> {
 /// The script's reason for skipping hmr after `dev_start` failed.
 const DEV_SERVER_DOWN: &str = "the dev server did not start";
 
+/// The script's reason for skipping hmr when no Chrome launches.
+const NO_CHROME: &str =
+    "Google Chrome not found at its standard paths; set CHROME_PATH to a Chrome or Chromium binary";
+
+/// `dev_start` as the script reports a dev server that exits before it is ready.
+const DEV_START_FAILED: &str = r#"{"probe":"dev_start","failed":{"message":"dev_start failed: vite exited with 1 before it was ready","command":"node ui/app/scripts/buildtime.mjs --runs 3","output":"the tool's output"}}"#;
+
 /// One line, as the script prints it.
 const ALL_OK: &str = concat!(
     r#"{"node":"v24.1.0","runs":3,"probes":["#,
@@ -72,13 +79,26 @@ fn measured(result: &ProbeResult) -> (Stats, Option<Limit>) {
     }
 }
 
+/// `json` with the samples of `probe` replaced by `replacement`. `probe` is a plain entry, with
+/// no nested object.
+fn replace_in(json: &str, probe: &str, replacement: &str) -> String {
+    let start = json
+        .find(&format!(r#"{{"probe":"{probe}""#))
+        .expect("the probe is in the json");
+    let end = start + json[start..].find('}').expect("the probe closes") + 1;
+    format!("{}{replacement}{}", &json[..start], &json[end..])
+}
+
 /// `ALL_OK` with the samples of `probe` replaced by `replacement`.
 fn with(probe: &str, replacement: &str) -> String {
-    let start = ALL_OK
-        .find(&format!(r#"{{"probe":"{probe}""#))
-        .expect("the probe is in ALL_OK");
-    let end = start + ALL_OK[start..].find('}').expect("the probe closes") + 1;
-    format!("{}{replacement}{}", &ALL_OK[..start], &ALL_OK[end..])
+    replace_in(ALL_OK, probe, replacement)
+}
+
+/// A run whose dev server did not start, as the script reports it: `dev_start` failed, and
+/// `hmr` skipped because of it.
+fn dev_server_down() -> String {
+    let skipped_hmr = format!(r#"{{"probe":"hmr","skipped":"{DEV_SERVER_DOWN}"}}"#);
+    replace_in(&with("dev_start", DEV_START_FAILED), "hmr", &skipped_hmr)
 }
 
 fn web_run(results: Vec<ProbeResult>, ci: bool) -> WebRun {
@@ -152,18 +172,50 @@ fn a_failed_probe_carries_the_tools_output_and_a_command_to_reproduce_it() {
 }
 
 #[test]
-fn a_skipped_hmr_is_reported_and_does_not_fail_the_run_itself() {
-    let json = with(
-        "hmr",
-        &format!(r#"{{"probe":"hmr","skipped":"{DEV_SERVER_DOWN}"}}"#),
-    );
-    let results = results_of(&json);
+fn a_skipped_hmr_after_a_failed_dev_start_is_reported_and_the_failure_is_the_reason() {
+    let results = results_of(&dev_server_down());
     let hmr = find(&results, "hmr");
     assert_eq!(hmr.status(), ProbeStatus::Skipped);
     assert_eq!(hmr.outcome, Outcome::Skipped(DEV_SERVER_DOWN.into()));
     assert!(!hmr.fails_run(false) && !hmr.fails_run(true));
-    assert_eq!(find(&results, "dev_start").status(), ProbeStatus::Reported);
-    assert!(web_run(results, false).passed());
+    assert_eq!(find(&results, "dev_start").status(), ProbeStatus::Failed);
+    assert!(!web_run(results.clone(), false).passed());
+    let mut diag = Printer::new(Vec::new(), false);
+    print_failures(&results, &mut diag);
+    assert_eq!(
+        String::from_utf8(diag.into_inner()).expect("utf-8"),
+        "the tool's output\ndev_start failed: vite exited with 1 before it was ready\n    fix: run `node ui/app/scripts/buildtime.mjs --runs 3` to see the error, and fix it\n"
+    );
+}
+
+/// A skip that no failure explains is a failure: here, hmr skipped for want of Chrome while every
+/// other probe measured. The script's exit status does not matter.
+#[test]
+fn a_skipped_hmr_with_every_other_probe_measured_fails_the_run() {
+    let json = with(
+        "hmr",
+        &format!(r#"{{"probe":"hmr","skipped":"{NO_CHROME}"}}"#),
+    );
+    let results = results_of(&json);
+    let hmr = find(&results, "hmr");
+    assert_eq!(hmr.status(), ProbeStatus::Failed);
+    assert_eq!(
+        hmr.outcome,
+        Outcome::Failed(Failure::new(
+            format!(
+                "ui/app/scripts/buildtime.mjs skipped hmr and no other probe failed: {NO_CHROME}"
+            ),
+            "make ui/app/scripts/buildtime.mjs report hmr as failed, not skipped, when it cannot run (a skip needs a failed probe before it)",
+        ))
+    );
+    assert!(hmr.reported_only, "hmr stays reported only, as a failure");
+    assert!(hmr.fails_run(false) && hmr.fails_run(true));
+    assert!(!web_run(results.clone(), false).passed());
+    assert!(!web_run(results.clone(), true).passed(), "in CI too");
+    assert_eq!(
+        table_lines(&results)[6],
+        format!("{:<19}failed (see below)", "hmr")
+    );
 }
 
 /// A reported-only probe that produced no number fails the run, in CI too: on windows-2025-runner a
@@ -278,10 +330,7 @@ fn the_table_shows_each_probe_in_its_unit_and_a_dash_without_a_budget() {
             "hmr                90ms    80ms    100ms   100ms    ok",
         ]
     );
-    let skipped = results_of(&with(
-        "hmr",
-        &format!(r#"{{"probe":"hmr","skipped":"{DEV_SERVER_DOWN}"}}"#),
-    ));
+    let skipped = results_of(&dev_server_down());
     assert_eq!(
         table_lines(&skipped)[6],
         format!("hmr                skipped: {DEV_SERVER_DOWN}")

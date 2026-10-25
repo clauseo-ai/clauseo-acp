@@ -152,8 +152,9 @@ impl ProbeResult {
 
     /// Whether this probe fails the run. A failure always does, on every machine and for a
     /// reported-only probe too: it produced no number. A skipped probe never does: it does not
-    /// apply here, or it follows a failure that already fails the run. An over-budget probe does
-    /// when it is not reported only and its gate says so for this machine.
+    /// apply here, or it follows a failure that already fails the run. A web skip that nothing
+    /// explains reaches here as a failure, since `web::results` makes it one. An over-budget probe
+    /// does when it is not reported only and its gate says so for this machine.
     pub(crate) fn fails_run(&self, ci: bool) -> bool {
         match &self.outcome {
             Outcome::Skipped(_) => false,

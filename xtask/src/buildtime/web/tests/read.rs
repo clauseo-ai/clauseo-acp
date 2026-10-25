@@ -137,3 +137,39 @@ fn the_output_of_a_real_script_run_reads_into_all_six_probes() {
     }
     assert_eq!(run.failures, []);
 }
+
+#[test]
+fn a_skipped_hmr_with_every_other_probe_measured_fails_the_run_even_at_exit_zero() {
+    let json = with(
+        "hmr",
+        &format!(r#"{{"probe":"hmr","skipped":"{NO_CHROME}"}}"#),
+    );
+    let Read::Run(run) = read(&json, true) else {
+        panic!("a measured run");
+    };
+    assert!(!run.passed(), "a skip nothing explains fails the run");
+    assert_eq!(run.failures, []);
+    assert_eq!(find(&run.results, "hmr").status(), ProbeStatus::Failed);
+    let json: serde_json::Value =
+        serde_json::from_str(&web_json(&WebJson::of(&Ok(run)))).expect("valid json");
+    assert_eq!(json["web"]["probes"][5]["status"], "failed");
+    assert_eq!(json["passed"], false);
+}
+
+#[test]
+fn a_skipped_hmr_beside_a_conflict_adds_no_failure_of_its_own() {
+    let json = with(
+        "hmr",
+        &format!(r#"{{"probe":"hmr","skipped":"{NO_CHROME}"}}"#),
+    );
+    let stdout = format!(r#"{},"failures":[{CONFLICT}]}}"#, &json[..json.len() - 1]);
+    let Read::Run(run) = read(&stdout, false) else {
+        panic!("a measured run");
+    };
+    assert_eq!(run.failures.len(), 1, "only the conflict");
+    assert_eq!(
+        find(&run.results, "hmr").outcome,
+        Outcome::Skipped(NO_CHROME.into())
+    );
+    assert!(!run.passed());
+}

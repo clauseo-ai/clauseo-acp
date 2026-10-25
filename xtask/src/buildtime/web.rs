@@ -11,7 +11,8 @@
 //!   `"failed": {"message", "command", "output"}`, where `command` reproduces the failure.
 //!   `skipped` is only for a probe that follows a failure which already fails the run (`hmr`
 //!   after a failed `dev_start`, `initial_js` after a failed `vite build`). A probe that cannot
-//!   run on this machine, `hmr` with no Chrome included, is `failed`.
+//!   run on this machine, `hmr` with no Chrome included, is `failed`. A `skipped` that no other
+//!   probe's failure explains is a failure of its own (`results`).
 //!   `failures` is optional: `[{"message", "fix"}]` for what is no probe's (a conflict over
 //!   `ui/app/src/App.tsx`, a restore that failed); each fails the run. With `probes` empty, the
 //!   script stopped before it measured (a conflict left by an interrupted run, or a Node older
@@ -34,7 +35,8 @@
 //! probes. `initial_js`, `dev_start` and `hmr` are reported only: over budget, they show in the
 //! table and the run still passes. Every probe that fails (no number: the tool exits non-zero, no
 //! Chrome, a timeout) fails the run, reported only or not, in CI too, and prints its lines. A
-//! skipped probe never fails the run: it follows a failure that already does.
+//! skipped probe never fails the run by itself: it follows a failure that already does, or else
+//! it is a failure (`results`).
 
 #[cfg(test)]
 mod tests;
@@ -194,17 +196,50 @@ fn values(probe: &WebProbe, found: &ScriptProbe) -> Result<Vec<f64>, Failure> {
     }
 }
 
-/// The outcome of every web probe from the script's report, in `WEB_PROBES` order.
+/// The outcome of every web probe from the script's report, in `WEB_PROBES` order. A probe the
+/// script skipped becomes a failure when no probe failed and the report has no failures of its
+/// own: then nothing says why there is no number, so the skip cannot pass the run.
 pub(crate) fn results(report: &ScriptReport, budgets: &[Budget]) -> Vec<ProbeResult> {
+    let outcomes: Vec<Outcome> = WEB_PROBES
+        .iter()
+        .map(|probe| outcome(probe, report, budgets))
+        .collect();
+    let unexplained = report.failures.is_empty()
+        && !outcomes
+            .iter()
+            .any(|outcome| matches!(outcome, Outcome::Failed(_)));
     WEB_PROBES
         .iter()
-        .map(|probe| ProbeResult {
+        .zip(outcomes)
+        .map(|(probe, outcome)| ProbeResult {
             name: probe.name,
             unit: probe.unit,
             reported_only: probe.gating == Gating::ReportedOnly,
-            outcome: outcome(probe, report, budgets),
+            outcome: match outcome {
+                Outcome::Skipped(reason) if unexplained => {
+                    Outcome::Failed(unexplained_skip(probe, &reason))
+                }
+                outcome => outcome,
+            },
         })
         .collect()
+}
+
+/// The failure of a skipped probe that no other probe's failure explains: its reason, and the
+/// fix, which says the script must report such a probe as failed, as this module's doc says.
+fn unexplained_skip(probe: &WebProbe, reason: &str) -> Failure {
+    Failure::new(
+        format!(
+            "{SCRIPT} skipped {} and no other probe failed: {}",
+            probe.name,
+            one_line(reason)
+        ),
+        format!(
+            "make {SCRIPT} report {} as failed, not skipped, when it cannot run (a skip needs a \
+             failed probe before it)",
+            probe.name
+        ),
+    )
 }
 
 fn outcome(probe: &WebProbe, report: &ScriptReport, budgets: &[Budget]) -> Outcome {
