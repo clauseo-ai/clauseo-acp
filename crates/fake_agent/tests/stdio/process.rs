@@ -41,7 +41,7 @@ fn grandchild_writes_pid() {
 }
 
 /// `--hold` says so on stderr, then never exits. Killed, it dies by the kill (signal 9 on
-/// Unix, TerminateProcess's exit 1 on Windows). A broken `--hold` prints usage and exits 2.
+/// Unix, exit 1 from `TerminateProcess` on Windows). A broken `--hold` prints usage and exits 2.
 #[test]
 fn hold_announces_itself_and_dies_when_killed() {
     let dir = Scratch::new("hold_announces_itself");

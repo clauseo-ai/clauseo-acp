@@ -49,6 +49,12 @@ fn defaults_match_the_sdk() {
     let update = json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Look",
         "kind": "other", "status": "pending", "content": [], "locations": null});
     assert_eq!(validate(&Sent::Update(&update)), Ok(()));
+}
+
+/// A key the SDK type does not have is dropped on the way back, so it fails, whatever its value
+/// and however deep it sits.
+#[test]
+fn keys_the_sdk_does_not_know_fail() {
     let update = json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Look",
         "unknownKey": {}});
     assert_eq!(
