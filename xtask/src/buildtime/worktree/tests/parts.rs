@@ -339,10 +339,8 @@ fn a_package_id_names_its_package_in_every_form_cargo_prints() {
             "serde",
         ),
         ("git+https://github.com/o/tao?branch=dev#0.34.0", "tao"),
-        (
-            "serde 1.0.228 (registry+https://github.com/rust-lang/crates.io-index)",
-            "serde",
-        ),
+        // Not a form cargo 1.99 prints: the whole id, never the app's name.
+        ("clauseo-desktop 0.0.0", "clauseo-desktop 0.0.0"),
     ] {
         assert_eq!(package_name(id), name, "{id}");
     }
@@ -455,14 +453,16 @@ fn a_first_build_that_rebuilt_another_package_without_a_dirty_line_says_it_built
         Outcome::Failed(Failure::new(
             "`cargo build -p clauseo-desktop --message-format=json -v` rebuilt more than \
              clauseo-desktop in the worktree: dep (lib)",
-            NO_DIRTY_FIX
-        ))
+            REBUILT_FIX
+        )),
+        "no output: no `Dirty` line to show"
     );
     assert_eq!(
-        NO_DIRTY_FIX,
-        "cargo printed no `Dirty` line, so it built each one for the first time: the copied \
-         target/debug held no build of them with the worktree's settings (features, environment, \
-         `.cargo/config.toml`); find what differs from the repo root, then run again"
+        REBUILT_FIX,
+        "the `Dirty` lines above, if any, say why cargo rebuilt each one; one without a `Dirty` \
+         line was built for the first time, so the copied target/debug held no build of it with \
+         the worktree's settings (features, environment, `.cargo/config.toml`); fix the cause, \
+         then run again"
     );
     assert!(measured.notes.is_empty(), "no build passed");
 }

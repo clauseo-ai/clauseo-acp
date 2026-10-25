@@ -79,8 +79,9 @@ pub(crate) fn built_line(stdout: &str) -> String {
 }
 
 /// The package name in a cargo package id: `<source>#<name>@<version>`, or `<source>#<version>`
-/// when the name is the last part of the source's path (cargo 1.77 and later), or the older
-/// `<name> <version> (<source>)`.
+/// when the name is the last part of the source's path (cargo 1.99, as pinned). An id in any
+/// other form is its own name, so it reads as another package than the app and the rebuild check
+/// fails loudly instead of passing.
 pub(crate) fn package_name(id: &str) -> &str {
     match id.rsplit_once('#') {
         Some((_, fragment)) if fragment.contains('@') => {
@@ -93,6 +94,6 @@ pub(crate) fn package_name(id: &str) -> &str {
                 .next()
                 .unwrap_or(path)
         }
-        None => id.split_whitespace().next().unwrap_or(id),
+        None => id,
     }
 }

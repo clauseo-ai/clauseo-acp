@@ -68,10 +68,7 @@ use steps::StepFailed;
 #[cfg(test)]
 use {
     artifacts::{built_line, package_name, rebuilt_besides},
-    steps::{
-        NO_DIRTY_FIX, REBUILT_FIX, XTASK_REBUILT_FIX, same_path, touched_time, with_output,
-        xtask_binary,
-    },
+    steps::{REBUILT_FIX, XTASK_REBUILT_FIX, same_path, touched_time, with_output, xtask_binary},
 };
 
 /// The package whose first build is timed, and the only one that build may rebuild.
@@ -104,7 +101,8 @@ pub(crate) enum Step {
     FirstXtask,
 }
 
-/// The steps, in the order they run and print.
+/// The steps, in the order they run and print: the enum's order, so a step's place in `STEPS`
+/// (and in what a run keeps per step) is `step as usize`.
 pub(crate) const STEPS: [Step; 6] = [
     Step::Add,
     Step::Copy,
@@ -113,9 +111,6 @@ pub(crate) const STEPS: [Step; 6] = [
     Step::FirstBuild,
     Step::FirstXtask,
 ];
-
-/// Where `Step::Add` is in `STEPS`: first.
-const ADD: usize = 0;
 
 impl Step {
     /// The step's probe name.
@@ -269,7 +264,7 @@ pub(crate) fn measure(
         // the last check, during the warm-up (which can take long) or after the last removal.
         // Every later run would fail the same way, so none starts.
         if let Err(failure) = worktree.refuse_leftover(runner) {
-            steps[ADD].1.get_or_insert(failure);
+            steps[Step::Add as usize].1.get_or_insert(failure);
             break;
         }
         for (step, (samples, failed)) in STEPS.into_iter().zip(&mut steps) {
