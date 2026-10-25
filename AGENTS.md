@@ -78,7 +78,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 
 ## Testing
 
-- Tests are deterministic: no sleeps, no real agent. A scripted `fake_agent` comes with core crates.
+- Tests are deterministic: no sleeps, no real agent. The scripted `fake_agent` stands in for one.
 
 ## Performance
 
@@ -90,8 +90,7 @@ this. Use the words in `GLOSSARY.md` exactly.
   repeats thousands of times a day, and many small savings together are what make the app feel
   instant, the way a car maker that shaves a few grams off every part ends up with a much lighter car.
   So when two ways to do something both meet the brief, measure both and keep the faster one, even
-  when the gap looks too small to notice. List each comparison in the pull request under Performance:
-  what you compared, the machine, the medians, and what you kept.
+  when the gap looks too small to notice. List each comparison in the PR under Performance.
 
 ## How you work
 
