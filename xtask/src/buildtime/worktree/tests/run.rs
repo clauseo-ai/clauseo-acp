@@ -4,9 +4,7 @@
 
 use super::super::super::Out;
 use super::super::*;
-use super::{
-    Fake, Trick, app_only, cannot_remove_fix, find, git, left_behind, measure_with, repo, samples,
-};
+use super::{Fake, Trick, app_only, find, git, left_behind, measure_with, repo, samples};
 use crate::output::Printer;
 use crate::process::Cmd;
 use crate::scratch::Scratch;
@@ -168,7 +166,7 @@ fn a_worktree_that_cannot_be_removed_fails_the_run_and_no_further_run_starts() {
                  --force {shown}` failed (fatal: refused by the test); `git worktree list` names \
                  it; its folder is on disk"
             ),
-            cannot_remove_fix(&path),
+            leftover_fix(&path),
         )]
     );
     assert_eq!(
@@ -188,7 +186,7 @@ fn a_worktree_that_cannot_be_removed_fails_the_run_and_no_further_run_starts() {
 }
 
 #[test]
-fn a_folder_git_made_but_does_not_know_fails_the_removal_with_a_fix_that_removes_it() {
+fn a_folder_git_made_but_does_not_know_fails_the_removal_and_is_left_as_it_is() {
     let scratch = Scratch::new("worktree-unknown-folder");
     let root = repo(&scratch);
     let mut fake = Fake {
@@ -210,12 +208,7 @@ fn a_folder_git_made_but_does_not_know_fails_the_removal_with_a_fix_that_removes
                  folder is on disk. xtask cannot tell whether git or someone else made it, so it \
                  leaves it as it is"
             ),
-            format!(
-                "check what is at {shown} before you move it away: if `git worktree list` names \
-                 it, `git worktree remove {shown}` removes it unless it holds modified or \
-                 untracked files, and once its folder is gone `git worktree prune` forgets it, \
-                 after `git worktree unlock {shown}` if it is locked; then run again"
-            )
+            leftover_fix(&path)
         )
     );
     assert_eq!(fake.ran("git worktree remove"), 0, "xtask removes nothing");
