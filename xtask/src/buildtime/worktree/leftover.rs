@@ -18,19 +18,22 @@ const REMOVE_TIMEOUT: Duration = Duration::from_mins(10);
 /// refuses even with `--force`; one killed during `git worktree remove --force` leaves a folder
 /// missing tracked files, which plain `git worktree remove` refuses as holding "modified or
 /// untracked files", or one whose `.git` file is already gone, which `git worktree list` shows
-/// as prunable and `git worktree remove` cannot remove ("validation failed").
+/// as prunable and `git worktree remove` cannot remove ("validation failed"). `--force` is named
+/// only for what the reader can check is no one's work: a killed add, whose lock reads
+/// `locked initializing` (its checkout is partial and its index may be locked, so `git status`
+/// lists every file), or a folder where `git status --short` lists only deleted files.
 pub(crate) fn leftover_fix(path: &Path) -> String {
     let path = path.display();
     format!(
-        "run `git worktree list` from the repo root and clear {path} in this order: if it shows \
-         {path} locked, `git worktree unlock {path}`; if it shows it prunable or its folder is \
-         gone, `git worktree prune`, which forgets every worktree whose folder is gone unless it \
-         is locked; if it still names {path}, `git worktree remove {path}`, which refuses a \
-         worktree with modified or untracked files, and when that refuses and the folder holds \
-         only a checkout of HEAD and target/ (what this command makes), `git worktree remove \
-         --force {path}`; move away a folder left there that git does not name (delete it only \
-         if it holds nothing but a checkout of HEAD and target/). xtask never deletes what this \
-         run did not make; then run again"
+        "run `git worktree list --porcelain` from the repo root and clear {path} in this order: \
+         if it shows {path} locked, `git worktree unlock {path}`; if it shows it prunable or its \
+         folder is gone, `git worktree prune`, which forgets every worktree whose folder is gone \
+         unless it is locked; if it still names {path}, `git worktree remove {path}`, which \
+         refuses a worktree with modified or untracked files, and when that refuses and either \
+         the lock read `locked initializing` (a `git worktree add` that was killed) or \
+         `git -C {path} status --short` lists only deleted files (` D`), `git worktree remove \
+         --force {path}`; move away a folder left there that git does not name. xtask never \
+         deletes what this run did not make; then run again"
     )
 }
 
