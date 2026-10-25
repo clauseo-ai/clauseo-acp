@@ -2,12 +2,9 @@
 //!
 //! # Owns
 //!
-//! - The scenario format: one `.jsonl` file per scenario, line 1 the header
-//!   (`{"scenario", "description", "on_stdin_close": "exit" | "hang"}`), every other line one step
-//!   with exactly one step key (`expect`, `expect_response`, `all`, `respond`, `update`, `notify`,
-//!   `request`, `send_line`, `write_file`, `delete_file`, `move_file`, `stderr`, `spawn_child`,
-//!   `exit`, `include`) and an optional `note`. Items of `all` are `{"expect": ...}` or
-//!   `{"expect_response": ...}`. Files in `scenarios/common/` have no header and may not include.
+//! - The scenario format: one `.jsonl` file per scenario, a header line, then one step per line.
+//!   `scenarios/README.md` is the full reference: every step and its fields, the pattern rules,
+//!   labels, includes, `raw`, the exit codes, and how to add a scenario.
 //! - The bundled scenarios in `scenarios/`, compiled in (`bundled.rs` lists them once).
 //! - The runner: a blocking line loop over stdin and stdout, no async runtime, no SDK role.
 //!
@@ -61,7 +58,8 @@ pub use cli::cli;
 pub use error::Error;
 pub use scenario::Scenario;
 
-/// Exit code: stdin closed and the scenario was done, or `--list` or `--check` succeeded.
+/// Exit code: stdin closed under `on_stdin_close: "exit"` (at any step, so steps may be left),
+/// or `--list` or `--check` succeeded.
 pub const EXIT_OK: i32 = 0;
 /// Exit code: `--list` or `--check` could not write its result to stdout.
 pub const EXIT_WRITE: i32 = 1;

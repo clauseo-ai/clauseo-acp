@@ -33,7 +33,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 
 <!-- One line per crate or package that exists. Planned crates are in ARCHITECTURE.md. -->
 - `crates/desktop`: the Tauri shell. Blank for now.
-- `crates/fake_agent`: scripted ACP agent for tests; scenarios in `crates/fake_agent/scenarios/`.
+- `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `crates/fake_agent/scenarios/` (README.md).
 - `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.
 - `ui/app`: the React app. Empty for now. Tauri APIs only under `ui/app/src/transport/`.
 - `xtask`: checks, build timing, budgets. Builds without any app crate.
