@@ -40,7 +40,7 @@ fn include_cannot_nest() {
     );
     assert_eq!(
         load_error(&[r#"{"include":"../x.jsonl"}"#], &common),
-        "t.jsonl:2: include `../x.jsonl` must be a .jsonl file name in scenarios/common/"
+        "t.jsonl:2: include `../x.jsonl` must be a .jsonl file name, with no folder in it"
     );
     assert_eq!(
         load_error(&[r#"{"include":"missing.jsonl"}"#], &common),
