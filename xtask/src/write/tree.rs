@@ -18,6 +18,12 @@ use std::time::SystemTime;
 /// making `dir` and its missing parents first. Refuses a `name` that is not one plain file name,
 /// and a `<dir>/<name>` that is already there, so nothing is replaced. A symlink is copied as a
 /// symlink (on Unix), never followed. A folder's times are set once its entries are in.
+///
+/// The check above that `<dir>/<name>` is free and the copy are not atomic: something could make
+/// that path in between, and `fs::copy` then follows a symlink there and truncates its target.
+/// That is acceptable because it only matters inside the run's own new folder, where nothing else
+/// writes. Closing the gap would mean creating the destination with `create_new` and copying into
+/// it, and the APFS clone that `fs::copy` makes (`fclonefileat`) takes a path, not a handle.
 pub(crate) fn copy_into(from: &Path, dir: &Path, name: &str) -> io::Result<()> {
     plain_name(name, "name in the folder")?;
     let to = dir.join(name);
