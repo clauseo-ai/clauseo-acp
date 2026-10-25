@@ -39,16 +39,10 @@ pub(crate) fn touched_time() -> SystemTime {
 /// The fix when the first build rebuilt more than the app. `cargo build -v` prints a `Dirty`
 /// line with the reason for each crate it rebuilds that it built before, and none for a crate it
 /// builds for the first time, only its `Compiling` line (cargo 1.99); the failure shows them.
-pub(crate) const REBUILT_FIX: &str = "read why cargo rebuilt each one in the `Dirty` lines \
-    above (`cargo build -v` prints them); one with no `Dirty` line was built for the first \
-    time, so the copied target/debug held no build of it with the worktree's settings; fix that \
-    cause, then run again";
-
-/// The fix when the first build rebuilt more than the app and printed no `Dirty` line at all.
-pub(crate) const NO_DIRTY_FIX: &str = "cargo printed no `Dirty` line, so it built each one for \
-    the first time: the copied target/debug held no build of them with the worktree's settings \
-    (features, environment, `.cargo/config.toml`); find what differs from the repo root, then \
-    run again";
+pub(crate) const REBUILT_FIX: &str = "the `Dirty` lines above, if any, say why cargo rebuilt \
+    each one; one without a `Dirty` line was built for the first time, so the copied \
+    target/debug held no build of it with the worktree's settings (features, environment, \
+    `.cargo/config.toml`); fix the cause, then run again";
 
 /// The fix when the first `cargo xtask` rebuilt xtask. The alias passes `--quiet`, so its own
 /// `-v` run shows the `Dirty` line.
@@ -243,18 +237,13 @@ impl Worktree<'_> {
                 .lines()
                 .filter(|line| line.trim_start().starts_with("Dirty "))
                 .collect();
-            let (fix, output) = if dirty.is_empty() {
-                (NO_DIRTY_FIX, None)
-            } else {
-                (REBUILT_FIX, Some(format!("{}\n", dirty.join("\n"))))
-            };
             return Err(StepFailed::from(Failure {
                 message: format!(
                     "`{cmd}` rebuilt more than {APP} in the worktree: {}",
                     others.join(", ")
                 ),
-                fix: fix.to_owned(),
-                output,
+                fix: REBUILT_FIX.to_owned(),
+                output: (!dirty.is_empty()).then(|| format!("{}\n", dirty.join("\n"))),
             }));
         }
         let warning = match warm_up_incremental(&built.stderr, APP) {

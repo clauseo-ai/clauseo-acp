@@ -297,6 +297,13 @@ fn each_run_makes_the_worktree_times_six_steps_and_removes_it() {
             "fresh_worktree"
         ]
     );
+    assert!(
+        STEPS
+            .into_iter()
+            .enumerate()
+            .all(|(place, step)| step as usize == place),
+        "a step's place in STEPS is its discriminant, as `measure` indexes them"
+    );
     let steps: Vec<Vec<f64>> = STEPS
         .iter()
         .map(|step| samples(find(&measured, step.name())))
