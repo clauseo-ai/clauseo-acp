@@ -14,6 +14,7 @@ use std::time::{Duration, SystemTime};
 mod leftover;
 mod parts;
 mod run;
+mod target;
 
 /// A time no file made today has by chance.
 fn old(offset: u64) -> SystemTime {
@@ -140,6 +141,8 @@ struct Fake {
     /// The stderr of a warm-up or a pnpm install that fails.
     warm_up_fails: Option<String>,
     pnpm_fails: Option<String>,
+    /// What `cargo metadata` prints instead of naming `<dir>/target` as both dirs.
+    metadata: Option<String>,
     /// Each command and the folder it ran in.
     seen: Vec<(String, PathBuf)>,
     /// At each first build: a tracked file's time, the copied app's time, whether the tag came.
@@ -171,6 +174,11 @@ impl Fake {
             (Program::Git, _) => process::run_quiet(cmd, dir),
             (Program::Pnpm, _) if self.tricks.contains(&Trick::PnpmTimesOut) => {
                 Ok(Ran::timed_out())
+            }
+            (Program::Cargo, ["metadata", ..]) => {
+                let own = metadata_naming(&dir.join("target"), &dir.join("target"));
+                let printed = self.metadata.clone().unwrap_or(own);
+                Ok(Ran::exited(true, printed, ""))
             }
             (Program::Cargo, ["build", .., "--message-format=json", "-v"]) => {
                 self.at_build.push((
@@ -217,6 +225,18 @@ impl Fake {
             .filter(|(cmd, _)| cmd.starts_with(start))
             .count()
     }
+}
+
+/// What `cargo metadata --format-version 1 --no-deps` prints, in part, for a target dir and a
+/// build dir.
+fn metadata_naming(target: &Path, build: &Path) -> String {
+    serde_json::json!({
+        "packages": [],
+        "target_directory": target,
+        "build_directory": build,
+        "version": 1,
+    })
+    .to_string()
 }
 
 /// Measures `runs` runs of the worktree of `root` with `fake`.
