@@ -204,6 +204,45 @@ fn a_child_does_not_inherit_the_variables_cargo_run_sets() {
     );
 }
 
+/// The Windows twin of the test above. `cmd /c set` lists the child's variables. Windows names
+/// are not case-sensitive, so names are compared upper-cased. `CARGO_HOME` comes from rustup,
+/// which sets it for the cargo it starts and so for the test binary.
+#[cfg(windows)]
+#[test]
+fn a_child_does_not_inherit_the_variables_cargo_run_sets_on_windows() {
+    for name in ["CARGO_MANIFEST_DIR", "CARGO_PKG_NAME", "CARGO_HOME"] {
+        assert!(
+            std::env::var_os(name).is_some(),
+            "{name} is set for a test binary"
+        );
+    }
+    let cmd = Cmd::new(Program::Named("cmd"), ["/c", "set"], TEST_TIMEOUT);
+    let captured = capture(&cmd, Path::new("."), &mut |_| {}).expect("cmd runs");
+    assert!(captured.success());
+    let names: Vec<String> = captured
+        .stdout
+        .lines()
+        .filter_map(|line| line.split('=').next())
+        .map(str::to_ascii_uppercase)
+        .collect();
+    let child_sees = |name: &str| names.iter().any(|seen| *seen == name.to_ascii_uppercase());
+    for name in [
+        "CARGO",
+        "CARGO_MANIFEST_DIR",
+        "CARGO_MANIFEST_PATH",
+        "CARGO_PKG_NAME",
+        "CARGO_PKG_VERSION",
+        "CARGO_PKG_DESCRIPTION",
+        "CARGO_PKG_RUST_VERSION",
+    ] {
+        assert!(!child_sees(name), "{name} reaches the child");
+    }
+    assert!(
+        child_sees("CARGO_HOME"),
+        "CARGO_HOME does not reach the child"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn capture_merges_stdout_and_stderr_and_reports_the_exit_status() {
