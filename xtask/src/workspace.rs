@@ -1,6 +1,6 @@
 //! Workspace layout read from `cargo metadata`, and the context handed to static checks.
 
-use crate::process::{self, Cmd, Program, Status};
+use crate::process::{self, Cmd, Program, QuietRunner, Status};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -180,23 +180,27 @@ fn is_xtask_dir(dir: &Path) -> bool {
 
 /// Runs `cargo metadata` in `root` once and reads the workspace members from its output.
 pub(crate) fn load(root: &Path) -> Result<Vec<Member>, String> {
-    parse_metadata(&run_metadata(root)?)
+    parse_metadata(&run_metadata(root, &mut process::run_quiet)?)
 }
 
 /// How long `cargo metadata --no-deps` may run: it reads the workspace manifests and resolves
 /// nothing, which takes well under a second, so 2 min means it hangs (on a lock, say).
 const METADATA_TIMEOUT: Duration = Duration::from_mins(2);
 
-/// The stdout of `cargo metadata --format-version 1 --no-deps` run in `root`. A run past its limit
-/// says so in place of the start error.
-fn run_metadata(root: &Path) -> Result<String, String> {
-    let cmd = Cmd::new(
+/// `cargo metadata --format-version 1 --no-deps`, with its one time limit.
+pub(crate) fn metadata_cmd() -> Cmd {
+    Cmd::new(
         Program::Cargo,
         ["metadata", "--format-version", "1", "--no-deps"],
         METADATA_TIMEOUT,
-    );
-    let quiet = process::run_quiet(&cmd, root)
-        .map_err(|e| format!("could not run `cargo metadata`: {e}"))?;
+    )
+}
+
+/// The stdout of `metadata_cmd` run in `root` through `runner`. A run past its limit says so in
+/// place of the start error.
+pub(crate) fn run_metadata(root: &Path, runner: &mut QuietRunner<'_>) -> Result<String, String> {
+    let cmd = metadata_cmd();
+    let quiet = runner(&cmd, root).map_err(|e| format!("could not run `cargo metadata`: {e}"))?;
     if quiet.status == Status::TimedOut {
         return Err(process::timeout_message(&cmd));
     }

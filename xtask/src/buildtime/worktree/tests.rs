@@ -143,6 +143,8 @@ struct Fake {
     pnpm_fails: Option<String>,
     /// What `cargo metadata` prints instead of naming `<dir>/target` as both dirs.
     metadata: Option<String>,
+    /// The stderr of a `cargo metadata` that fails.
+    metadata_fails: Option<String>,
     /// Each command and the folder it ran in.
     seen: Vec<(String, PathBuf)>,
     /// At each first build: a tracked file's time, the copied app's time, whether the tag came.
@@ -176,6 +178,9 @@ impl Fake {
                 Ok(Ran::timed_out())
             }
             (Program::Cargo, ["metadata", ..]) => {
+                if let Some(stderr) = &self.metadata_fails {
+                    return Ok(Ran::exited(false, "", stderr.clone()));
+                }
                 let own = metadata_naming(&dir.join("target"), &dir.join("target"));
                 let printed = self.metadata.clone().unwrap_or(own);
                 Ok(Ran::exited(true, printed, ""))

@@ -6,17 +6,13 @@
 //! into the checkout's output. Either way the fresh check passes and the number looks valid.
 
 use super::super::verdict::Failure;
-use super::steps::{Where, ran, same_path};
+use super::steps::same_path;
 use super::{APP, Worktree};
-use crate::process::{Cmd, Program, QuietRunner};
+use crate::process::QuietRunner;
+use crate::workspace;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::Path;
-use std::time::Duration;
-
-/// `cargo metadata --no-deps` reads only the workspace's manifests, in about a second; 5 min
-/// means it hangs (on cargo's package lock, say).
-const METADATA_TIMEOUT: Duration = Duration::from_mins(5);
 
 /// The fields of `cargo metadata` that name where cargo builds: final output, then the rest.
 const DIRS: [&str; 2] = ["target_directory", "build_directory"];
@@ -39,10 +35,14 @@ pub(super) fn refuse_shared(
     worktree: &Worktree<'_>,
     runner: &mut QuietRunner<'_>,
 ) -> Result<(), Failure> {
-    let args = ["metadata", "--format-version", "1", "--no-deps"];
-    let cmd = Cmd::new(Program::Cargo, args, METADATA_TIMEOUT);
-    let printed = ran(runner, &cmd, worktree.root, Where::Checkout)?;
-    let metadata = serde_json::from_str::<serde_json::Value>(&printed.stdout).ok();
+    let cmd = workspace::metadata_cmd();
+    let printed = workspace::run_metadata(worktree.root, runner).map_err(|error| {
+        Failure::new(
+            error,
+            format!("run `{cmd}` from the repo root to see the error"),
+        )
+    })?;
+    let metadata = serde_json::from_str::<serde_json::Value>(&printed).ok();
     let own = worktree.root.join("target");
     for field in DIRS {
         let named = metadata
