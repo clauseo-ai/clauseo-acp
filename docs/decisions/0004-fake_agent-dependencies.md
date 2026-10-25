@@ -28,7 +28,7 @@ every crate in a workspace build: a test must not depend on the key order of a `
 
 ## Status
 
-proposed
+accepted
 
 ## Date
 
