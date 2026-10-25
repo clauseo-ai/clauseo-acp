@@ -8,7 +8,9 @@
 //! worktree is made from HEAD and the warm build is not; stops when something is already at the
 //! worktree's path, `<root's folder name>-buildtime-worktree` next to the repo root, or when
 //! `git worktree list` names that path though its folder is gone (xtask never deletes what it did
-//! not make); and warms up with `cargo build -p clauseo-desktop -v`, not timed. The path is
+//! not make); refuses a checkout whose `cargo metadata` target or build dir is not
+//! `<root>/target`, whose `target/debug` is a symlink, or that lacks `target/xtask-run`
+//! (`target.rs`); and warms up with `cargo build -p clauseo-desktop -v`, not timed. The path is
 //! checked again, untimed, right before each run's add: a failure there is `worktree_add`'s, and
 //! no later run starts.
 //!
@@ -52,6 +54,7 @@
 mod artifacts;
 mod leftover;
 mod steps;
+mod target;
 #[cfg(test)]
 mod tests;
 
@@ -72,6 +75,7 @@ use {
     artifacts::{built_line, package_name, rebuilt_besides},
     leftover::leftover_fix,
     steps::{REBUILT_FIX, XTASK_REBUILT_FIX, same_path, touched_time, with_output, xtask_binary},
+    target::{SHARED_TARGET_FIX, XTASK_RUN_FIX, own_target},
 };
 
 /// The package whose first build is timed, and the only one that build may rebuild.
@@ -254,6 +258,7 @@ pub(crate) fn measure(
 ) -> Result<Measured, Failure> {
     worktree.refuse_uncommitted(runner)?;
     leftover::refuse(worktree, runner)?;
+    target::refuse_shared(worktree, runner)?;
     worktree.warm_up(runner)?;
     let mut steps: Vec<(Vec<f64>, Option<Failure>)> = vec![(Vec::new(), None); STEPS.len()];
     let mut totals = Vec::new();

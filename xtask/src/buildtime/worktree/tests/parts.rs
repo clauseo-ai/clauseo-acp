@@ -1,8 +1,6 @@
 //! Tests of the parts of a worktree run: the copy, the incremental judgement, the JSON object, the
 //! worktree's place, and how cargo's JSON names what it rebuilt, read from a real cargo build.
 
-use super::super::steps::XTASK_RUN_FIX;
-use super::super::steps::xtask_binary;
 use super::super::*;
 use super::{Fake, LIMIT, app_only, artifact, find, left_behind, measure_with, repo};
 use crate::buildtime::INCREMENTAL_FIX;
@@ -29,15 +27,8 @@ fn a_checkout_without_its_build_output_fails_the_copy_and_copies_nothing() {
             debug_fix
         ))
     );
-    Scratch::create_dir_all(root.join("target/debug")).expect("debug");
-    assert_eq!(
-        worktree.copy(),
-        Err(Failure::new(
-            "target/xtask-run is not in this checkout",
-            XTASK_RUN_FIX
-        ))
-    );
     assert!(!path.exists(), "nothing was copied");
+    Scratch::create_dir_all(root.join("target/debug")).expect("debug");
     Scratch::create_dir_all(root.join("target/xtask-run")).expect("xtask-run");
     assert_eq!(
         worktree.copy(),

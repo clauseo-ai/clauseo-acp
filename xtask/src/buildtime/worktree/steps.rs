@@ -1,11 +1,13 @@
 //! The steps of a worktree run, and the refusal and warm-up before them, as the module doc of
-//! `worktree.rs` lists them. What is left at the worktree's path is `leftover.rs`'s.
+//! `worktree.rs` lists them. What is left at the worktree's path is `leftover.rs`'s, the checks of
+//! the checkout's `target/` are `target.rs`'s.
 
 use super::super::one_line;
 use super::super::probe::judge_incremental;
 use super::super::profile::warm_up_incremental;
 use super::super::verdict::Failure;
 use super::artifacts::{built_line, rebuilt_besides};
+use super::target::XTASK_RUN_FIX;
 use super::{APP, Step, Worktree};
 use crate::parse::clippy_render;
 use crate::process::{self, Cmd, Program, QuietRunner, Ran, Status, TimeoutFix};
@@ -46,10 +48,6 @@ pub(crate) const REBUILT_FIX: &str = "the `Dirty` lines above, if any, say why c
 pub(crate) const XTASK_REBUILT_FIX: &str = "make a worktree the same way and run \
     `cargo run --locked --package xtask --target-dir target/xtask-run -v -- --help` in it: its \
     `Dirty` line says why cargo rebuilt xtask";
-
-/// The fix when xtask's build output is not in the checkout.
-pub(crate) const XTASK_RUN_FIX: &str = "run `cargo xtask --help` from the repo root (the alias \
-    builds xtask into target/xtask-run), then run again";
 
 /// What a step that passed found: for the first build, its not-incremental warning when it has
 /// one, and what cargo rebuilt (`built_line`).
@@ -140,29 +138,21 @@ impl Worktree<'_> {
         }
     }
 
-    /// Copies the build output into `<path>/target/` with `write::copy_into`: `debug` and
-    /// `xtask-run`, which must be there, then `CACHEDIR.TAG` when it is (cargo writes it only
-    /// when it makes `target/` itself). Nothing is copied when one that must be there is not.
+    /// Copies the build output into `<path>/target/` with `write::copy_into`: `debug`, which
+    /// must be there, and `xtask-run`, which `target.rs` found before the warm-up, then
+    /// `CACHEDIR.TAG` when it is there (cargo writes it only when it makes `target/` itself).
+    /// Nothing is copied when `debug` is not there.
     pub(super) fn copy(&self) -> Result<(), Failure> {
         let target = self.path.join("target");
-        let required = [
-            (
-                "debug",
+        if fs::symlink_metadata(self.root.join("target/debug")).is_err() {
+            return Err(Failure::new(
+                "target/debug is not in this checkout",
                 format!("run `cargo build -p {APP}` from the repo root, then run again"),
-            ),
-            ("xtask-run", XTASK_RUN_FIX.to_owned()),
-        ];
-        for (name, fix) in &required {
-            if fs::symlink_metadata(self.root.join("target").join(name)).is_err() {
-                return Err(Failure::new(
-                    format!("target/{name} is not in this checkout"),
-                    fix.as_str(),
-                ));
-            }
+            ));
         }
         let tag = self.root.join("target/CACHEDIR.TAG");
         let tag = fs::symlink_metadata(&tag).is_ok().then_some("CACHEDIR.TAG");
-        for name in required.iter().map(|(name, _)| *name).chain(tag) {
+        for name in ["debug", "xtask-run"].into_iter().chain(tag) {
             let from = self.root.join("target").join(name);
             write::copy_into(&from, &target, name).map_err(|error| {
                 Failure::new(
