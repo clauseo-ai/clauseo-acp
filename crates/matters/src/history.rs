@@ -1,9 +1,12 @@
 //! The shadow repository behind one trait, so `git2` could replace gix if a spike finds a
-//! blocker. [`GixStore`] is the one implementation. Nothing outside this module names a gix type.
+//! blocker. [`GixStore`] is the one implementation; swapping it means a second implementation
+//! and changing the one field of `checkpoint::Core` that names it. Nothing outside this module
+//! names a gix type.
 //!
 //! The repository is a bare-style git dir (`history.git`) with `core.worktree` set to the matter
-//! folder, `HEAD` a symbolic ref to `refs/clauseo/timeline`, loose objects only, and the stat
-//! cache as its `index` file. Decision record 0007 is the format; this module writes it.
+//! folder, `HEAD` a symbolic ref to the unborn branch `refs/heads/clauseo`, the timeline on
+//! `refs/clauseo/timeline`, loose objects only, and the stat cache as its `index` file.
+//! Decision record 0007 is the format; this module writes it.
 
 mod blob;
 mod check;
@@ -23,8 +26,12 @@ pub(crate) use gix_store::GixStore;
 use crate::Error;
 use crate::stat::StatCache;
 
-/// The ref every checkpoint moves forward. The only ref besides `HEAD`, which names it.
+/// The ref every checkpoint moves forward. The only ref that exists besides `HEAD`.
 pub(crate) const TIMELINE_REF: &str = "refs/clauseo/timeline";
+
+/// The branch `HEAD` names. It is never born (no commit is ever made on it): a `HEAD` naming a
+/// ref outside `refs/heads/` is `badHeadTarget` to `git fsck`, while an unborn branch is not.
+pub(crate) const HEAD_REF: &str = "refs/heads/clauseo";
 
 /// A git object id (SHA-1), kept free of gix's types.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -77,14 +84,16 @@ pub(crate) trait HistoryStore: Sized {
     fn create(git_dir: &Path, worktree: &Path) -> Result<Self, Error>;
 
     /// Opens the git dir `git_dir` isolated from every git config and environment variable,
-    /// and sets `core.worktree` to `worktree` if it says otherwise (the folder was moved).
+    /// sets `core.worktree` to `worktree` if it says otherwise (the folder was moved), and
+    /// rewrites `HEAD` if it holds anything but the symbolic ref to [`HEAD_REF`].
     fn open(git_dir: &Path, worktree: &Path) -> Result<Self, Error>;
 
     /// Hashes the file `file` as a blob and stores it as a loose object unless it is already
     /// there: zlib level 0 when its first bytes say it is already compressed, level 1
-    /// otherwise. `len` is its size from the walk's metadata and `cap` the walk's size cap: a
-    /// file found over it when read again is an [`Error::Io`] of kind `InvalidData`. Returns
-    /// the blob and the bytes actually read.
+    /// otherwise. `len` is its size from the walk's metadata and `cap` the walk's size cap
+    /// ([`crate::Limits::effective_cap`]): a file found over it when read is an
+    /// [`Error::Io`] of kind `FileTooLarge`, and nothing is stored. Returns the blob and the
+    /// bytes actually read.
     fn store_file(&mut self, file: &Path, len: u64, cap: u64) -> Result<(Oid, u64), Error>;
 
     /// Hashes the file `file` as a blob without storing anything.
@@ -131,6 +140,7 @@ pub(crate) trait HistoryStore: Sized {
         cache: &mut StatCache,
     ) -> Result<(), Error>;
 
-    /// Writes `cache` alone, durably, when no commit is made. Sets `cache.written_at`.
+    /// Writes `cache` alone when no commit is made, by temp file and rename with a plain sync
+    /// and no full flush: it is a cache, rebuilt if lost. Sets `cache.written_at`.
     fn save_cache(&mut self, cache: &mut StatCache) -> Result<(), Error>;
 }

@@ -20,7 +20,8 @@ pub const IMPORT_WARN_BYTES: u64 = 20_000_000_000;
 pub const LARGEST_FILES: usize = 10;
 
 /// What a new or imported matter puts in its folder besides `.clauseo/matter.json`. Chosen per
-/// create or import; the shadow repository is outside the folder either way.
+/// create or import; the shadow repository is outside the folder either way. A folder marker,
+/// not the glossary's Marker (the thread line that records an undo).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Marker {
     /// Nothing.
@@ -59,6 +60,12 @@ impl Limits {
         file_cap_bytes: FILE_CAP_BYTES,
         import_warn_bytes: IMPORT_WARN_BYTES,
     };
+
+    /// The cap every walk, read and undo applies: [`Limits::file_cap_bytes`], at most
+    /// `u32::MAX` bytes. The one place the clamp is written.
+    pub(crate) fn effective_cap(&self) -> u64 {
+        self.file_cap_bytes.min(u64::from(u32::MAX))
+    }
 }
 
 /// What every matter operation needs from the host.
@@ -144,6 +151,14 @@ pub struct Checkpoint {
 }
 
 /// An undo of one step: the changes between two checkpoints, file by file.
+///
+/// The two checkpoint ids are single-use: retry a failed undo with fresh ones. An undo that
+/// failed after its `outside-edits` checkpoint has put that id on the timeline, so a retry
+/// with the same id fails with `command.invalid` (`DuplicateCheckpoint`) once the folder
+/// differs. An undo that failed partway through its deletions and renames leaves the folder
+/// partly undone, recorded by nothing until the next checkpoint, which takes it as it is (for
+/// `before_turn`, as outside edits); a retry's `edited_since` lists the files the failed
+/// attempt already put back. The decisions stay valid for a retry: the step is the same.
 #[derive(Debug, Clone, Copy)]
 pub struct UndoRequest<'a> {
     /// The checkpoint before the step.

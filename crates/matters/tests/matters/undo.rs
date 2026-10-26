@@ -1,7 +1,14 @@
 //! Undoing a step: restore and delete, edits made since, "Undo anyway", undoing an undo, and
 //! the lock check.
 
-use clauseo_matters::{CheckpointOutcome, Error, Limits, Matter, TimelineEntry};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::{Duration, SystemTime};
+
+use clauseo_matters::{
+    CheckpointOutcome, Error, Imported, Limits, Matter, PlaceholderProbe, Settings, TimelineEntry,
+};
 use clauseo_protocol::{CheckpointKind, ErrorCode, FileChoice, FileDecision, SkippedFileReason};
 
 use crate::fixture::{
@@ -256,5 +263,68 @@ fn undo_after_file_grew_over_cap_needs_no_decision_for_it() {
     assert_eq!(fx.read("big.pdf"), grown);
     let after = fx.file("big.pdf").metadata().unwrap().modified().unwrap();
     assert_eq!(after, mtime);
+    assert_no_temp_files(&fx.folder);
+}
+
+/// Once armed, sets `target`'s mtime the `nth` time it is asked about it: a write landing
+/// after the walk took the file's stat. Never cloud-only.
+struct TouchingProbe {
+    target: PathBuf,
+    nth: usize,
+    armed: AtomicBool,
+    seen: AtomicUsize,
+}
+
+impl PlaceholderProbe for TouchingProbe {
+    fn is_cloud_only(&self, path: &Path, _metadata: &std::fs::Metadata) -> bool {
+        if path == self.target
+            && self.armed.load(Ordering::Relaxed)
+            && self.seen.fetch_add(1, Ordering::Relaxed) + 1 == self.nth
+        {
+            let mtime = SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+            crate::support::set_mtime(path, mtime);
+        }
+        false
+    }
+}
+
+#[test]
+fn undo_refuses_a_target_written_after_its_outside_edits_checkpoint() {
+    let fx = Fixture::new("undo-moved-since");
+    // Asked about a.txt once by undo's writable check, then by the outside-edits walk.
+    let probe = Arc::new(TouchingProbe {
+        target: fx.file("a.txt"),
+        nth: 2,
+        armed: AtomicBool::new(false),
+        seen: AtomicUsize::new(0),
+    });
+    let settings = Settings {
+        probe: Arc::<TouchingProbe>::clone(&probe),
+        ..fx.settings()
+    };
+    fx.write("a.txt", "one");
+    fx.write("b.txt", "bee");
+    let cancel = AtomicBool::new(false);
+    let imported = Matter::import(settings, fx.new_matter(), &[], &mut |_| {}, &cancel);
+    let Ok(Imported::Done { matter, .. }) = imported else {
+        panic!("{imported:?}");
+    };
+    let mut matter = *matter;
+    matter.before_turn(&meta(2)).unwrap();
+    fx.write("a.txt", "two");
+    fx.write("c.txt", "sea");
+    crate::support::remove_file(fx.file("b.txt"));
+    created(matter.after_turn(&meta(3), &tools(&STEP)).unwrap(), 3);
+
+    probe.armed.store(true, Ordering::Relaxed);
+    let err = undo(&mut matter, (1, 3), &STEP, (4, 5)).unwrap_err();
+    assert!(
+        matches!(&err, Error::FileLocked { paths } if *paths == [path("a.txt")]),
+        "{err:?}"
+    );
+    assert_eq!(probe.seen.load(Ordering::Relaxed), 2);
+    assert_eq!(fx.read("a.txt"), b"two");
+    assert!(!fx.exists("b.txt"));
+    assert_eq!(fx.read("c.txt"), b"sea");
     assert_no_temp_files(&fx.folder);
 }

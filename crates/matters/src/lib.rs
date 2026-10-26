@@ -29,8 +29,8 @@
 //! - Nothing of the history is in the matter folder but `.clauseo/matter.json`. This crate never
 //!   sets an environment variable, never runs `git` or any process, never reads or writes a `.git`
 //!   in the folder, and opens repositories isolated from every git config and variable.
-//! - The timeline only moves forward: one ref, each checkpoint a commit whose parent is the last.
-//!   No empty commits: an unchanged tree reuses the last checkpoint
+//! - The timeline only moves forward: one ref, each checkpoint a commit whose parent is the ref's
+//!   tip. No empty commits: an unchanged tree reuses the last checkpoint
 //!   ([`CheckpointOutcome::Reused`]).
 //! - Objects, then the ref and the stat cache, are durable before a checkpoint returns.
 //! - Excluded, over-cap and cloud-only files are never read, written or deleted.

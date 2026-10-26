@@ -28,7 +28,7 @@ fn create_writes_only_head_config_objects_and_refs() {
     assert_eq!(std::fs::read_dir(git_dir.join("refs")).unwrap().count(), 0);
     assert_eq!(
         std::fs::read(git_dir.join("HEAD")).unwrap(),
-        b"ref: refs/clauseo/timeline\n"
+        b"ref: refs/heads/clauseo\n"
     );
     let quoted = worktree
         .to_str()
@@ -71,6 +71,17 @@ fn open_rewrites_the_worktree_after_a_move() {
         "{config}"
     );
     assert!(!config.contains("folder\""), "{config}");
+}
+
+#[test]
+fn open_rewrites_a_head_that_names_anything_else() {
+    let dir = TestDir::new("history-open-head");
+    let (git_dir, store) = new_store(&dir);
+    drop(store);
+    let head = git_dir.join("HEAD");
+    replace_file(&head, b"ref: refs/clauseo/timeline\n");
+    GixStore::open(&git_dir, &dir.path().join("folder")).unwrap();
+    assert_eq!(std::fs::read(&head).unwrap(), b"ref: refs/heads/clauseo\n");
 }
 
 #[test]

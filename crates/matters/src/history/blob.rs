@@ -111,8 +111,9 @@ impl Blobs {
     /// if given; returns the blob and the bytes read. A file whose length is not `len`, that
     /// changes between the two passes of a stream, or whose open file is not the file at
     /// `path` (a symlink or another file swapped in), is opened, stat'd and read again, at most
-    /// [`ATTEMPTS`] times in all; a length over `cap` (clamped to `u32::MAX`, as the walk
-    /// does) is refused.
+    /// [`ATTEMPTS`] times in all; a length over `cap` (the walk's
+    /// [`crate::Limits::effective_cap`]) is refused as an [`Error::Io`] of kind
+    /// `FileTooLarge`, and nothing is stored.
     pub(super) fn read(
         &mut self,
         path: &Path,
@@ -120,7 +121,6 @@ impl Blobs {
         cap: u64,
         mut target: Option<Target<'_>>,
     ) -> Result<(Oid, u64), Error> {
-        let cap = cap.min(u64::from(u32::MAX));
         let mut expected = len;
         for attempt in 0..ATTEMPTS {
             let Some(mut file) = open_checked(path)? else {
@@ -133,7 +133,7 @@ impl Blobs {
                 expected = metadata.len();
             }
             if expected > cap {
-                let over = io::Error::new(io::ErrorKind::InvalidData, "the file is over the cap");
+                let over = io::Error::new(io::ErrorKind::FileTooLarge, "the file is over the cap");
                 return Err(Error::io("read", path, over));
             }
             let done = if expected <= self.stream_threshold {

@@ -100,6 +100,20 @@ pub(crate) fn open_exclusive(path: &Path) -> io::Result<File> {
     OpenOptions::new().read(true).share_mode(0).open(path)
 }
 
+/// Sets the modification time of the file `path`.
+#[cfg(test)]
+pub(crate) fn set_mtime(path: &Path, mtime: std::time::SystemTime) -> io::Result<()> {
+    let file = OpenOptions::new().write(true).open(path)?;
+    file.set_times(std::fs::FileTimes::new().set_modified(mtime))
+}
+
+/// Appends `bytes` to the file `path` in place.
+#[cfg(test)]
+pub(crate) fn append(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write as _;
+    OpenOptions::new().append(true).open(path)?.write_all(bytes)
+}
+
 /// The most temp names [`replace`] tries in one folder before giving up.
 const TEMP_TRIES: u32 = 1000;
 

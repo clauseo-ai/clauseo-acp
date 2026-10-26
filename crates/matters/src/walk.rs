@@ -1,8 +1,9 @@
 //! The folder walk: every regular file under a matter folder that the exclusion list keeps, with
 //! its stat and whether it is cloud-only or over the size cap. Never follows a symlink, never
-//! descends into `.git` or `.clauseo`, never opens a file.
+//! descends into `.git` or `.clauseo`, never opens a file. [`classify`] is the one rule for
+//! which files the crate never reads or writes; undo applies it too.
 
-use std::fs::{self, DirEntry};
+use std::fs::{self, DirEntry, Metadata};
 use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -36,47 +37,100 @@ pub(crate) enum FoundKind {
     OverCap,
 }
 
+/// What a walk found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Listing {
+    /// The files, sorted by path bytes.
+    pub(crate) files: Vec<Found>,
+    /// The subfolders that could not be read (relative to the root, sorted): what is under them
+    /// is unknown, so a checkpoint keeps their entries as they were.
+    pub(crate) unread: Vec<String>,
+}
+
+/// What the crate makes of the entry `path` with `metadata`, taken without following a
+/// symlink: `None` when it is not a regular file (never read, never written), else
+/// [`FoundKind::CloudOnly`] if `probe` says so, else [`FoundKind::OverCap`] if larger than
+/// `cap` ([`crate::Limits::effective_cap`]), else [`FoundKind::File`].
+pub(crate) fn classify(
+    probe: &dyn PlaceholderProbe,
+    path: &Path,
+    metadata: &Metadata,
+    cap: u64,
+) -> Option<FoundKind> {
+    if !metadata.is_file() {
+        None
+    } else if probe.is_cloud_only(path, metadata) {
+        Some(FoundKind::CloudOnly)
+    } else if metadata.len() > cap {
+        Some(FoundKind::OverCap)
+    } else {
+        Some(FoundKind::File)
+    }
+}
+
 /// Walks `root`: every regular file under it whose name and folders the exclusion list keeps,
-/// sorted by path bytes. A file is [`FoundKind::CloudOnly`] if `probe` says so, else
-/// [`FoundKind::OverCap`] if larger than `file_cap` (at most `u32::MAX`). `progress` is called
-/// once per file found. Symlinks and other non-regular entries are skipped and never
-/// descended; so are names that are not UTF-8 or do not make a [`MatterPath`] (with a warning).
-/// An entry gone before its stat is skipped. Returns `Ok(None)` once `cancel` is set (checked
-/// before each folder and each entry).
+/// sorted by path bytes, each as [`classify`] makes it with `cap`
+/// ([`crate::Limits::effective_cap`]). `progress` is called once per file found. Symlinks and
+/// other non-regular entries are skipped and never descended; so are names that are not UTF-8
+/// or do not make a [`MatterPath`] (with a warning). An entry gone before its stat is skipped,
+/// and so is a subfolder gone before it is read. A subfolder that does not read (permission
+/// denied, say) is listed in [`Listing::unread`] with a warning; the root not reading is an
+/// error. Returns `Ok(None)` once `cancel` is set (checked before each folder and each entry).
 pub(crate) fn walk(
     root: &Path,
     probe: &dyn PlaceholderProbe,
-    file_cap: u64,
+    cap: u64,
     cancel: Option<&AtomicBool>,
     progress: &mut dyn FnMut(&Found),
-) -> Result<Option<Vec<Found>>, Error> {
+) -> Result<Option<Listing>, Error> {
     let mut walker = Walker {
         probe,
-        cap: file_cap.min(u64::from(u32::MAX)),
+        cap,
         cancel,
         progress,
         found: Vec::new(),
     };
+    let mut unread = Vec::new();
     // Folders still to read: absolute path and path relative to `root` ("" for the root).
     let mut pending = vec![(root.to_path_buf(), String::new())];
     while let Some((dir, relative)) = pending.pop() {
         if walker.cancelled() {
             return Ok(None);
         }
-        let entries = fs::read_dir(&dir).map_err(|err| Error::io("read folder", &dir, err))?;
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(err) if relative.is_empty() => return Err(Error::io("read folder", &dir, err)),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                tracing::warn!(path = %dir.display(), error = %err, "skipped a folder that does not read");
+                unread.push(relative);
+                continue;
+            }
+        };
         for entry in entries {
             if walker.cancelled() {
                 return Ok(None);
             }
-            let entry = entry.map_err(|err| Error::io("read folder", &dir, err))?;
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) if relative.is_empty() => {
+                    return Err(Error::io("read folder", &dir, err));
+                }
+                Err(err) => {
+                    tracing::warn!(path = %dir.display(), error = %err, "stopped reading a folder");
+                    unread.push(relative);
+                    break;
+                }
+            };
             if let Some(sub) = walker.entry(&entry, &relative)? {
                 pending.push(sub);
             }
         }
     }
-    let mut found = walker.found;
-    found.sort_unstable_by(|a, b| a.path.as_str().as_bytes().cmp(b.path.as_str().as_bytes()));
-    Ok(Some(found))
+    let mut files = walker.found;
+    files.sort_unstable_by(|a, b| a.path.as_str().as_bytes().cmp(b.path.as_str().as_bytes()));
+    unread.sort_unstable();
+    Ok(Some(Listing { files, unread }))
 }
 
 struct Walker<'a> {
@@ -138,21 +192,13 @@ impl Walker<'_> {
             Err(err) => return Err(Error::io("stat", &path, err)),
         };
         // The entry may have been replaced by something else since it was listed.
-        if !metadata.is_file() {
+        let Some(kind) = classify(self.probe, &path, &metadata, self.cap) else {
             return Ok(None);
-        }
-        let len = metadata.len();
-        let kind = if self.probe.is_cloud_only(&path, &metadata) {
-            FoundKind::CloudOnly
-        } else if len > self.cap {
-            FoundKind::OverCap
-        } else {
-            FoundKind::File
         };
         let found = Found {
             path: matter_path,
             stat: Stat::from_metadata(&metadata),
-            len,
+            len: metadata.len(),
             kind,
         };
         (self.progress)(&found);
