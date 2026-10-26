@@ -1,0 +1,93 @@
+# Installs pinned tools as prebuilt binaries, at the versions `cargo xtask setup --list=json`
+# prints, and checks each version. No version is written here: xtask/src/setup.rs is their home.
+#
+# - The cargo tools come from taiki-e/install-action, which checks the sha256 of each tool it
+#   knows. `fallback: none` makes it fail on a tool or version it does not know, rather than fall
+#   back to cargo-binstall, which checks no sha256. Their versions are then checked here, from
+#   `<tool> --version`: `cargo xtask setup` would run `cargo install`, which fails on a binary it
+#   did not install itself ("binary already exists in destination").
+# - The binaries (gitleaks, lefthook) go through `cargo xtask setup --binaries`, which installs one
+#   only when it is missing or at another version, checking the pinned sha256, and then checks its
+#   version.
+# - Needs the Rust toolchain installed first: the pins are read by building and running xtask.
+
+name: Install the pinned tools
+description: Installs the tools xtask/src/setup.rs pins, as prebuilt binaries, and checks them.
+
+inputs:
+  tools:
+    description: >-
+      Space-separated names, as `cargo xtask setup --list` prints them (cargo-nextest, gitleaks,
+      ...). Empty installs every pinned tool.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Read the pins from cargo xtask setup --list=json
+      id: pins
+      shell: bash
+      env:
+        NAMES: ${{ inputs.tools }}
+      run: |
+        set -euo pipefail
+        # jq on Windows ends its lines with CRLF, so each of its outputs drops the CR.
+        cargo xtask setup --list=json > "$RUNNER_TEMP/pins.json"
+        # Each name given must be pinned, as `setup --only` requires.
+        for name in $NAMES; do
+          jq -e --arg n "$name" '[.tools[], .binaries[]] | any(.name == $n)' \
+            "$RUNNER_TEMP/pins.json" > /dev/null \
+            || { echo "::error::$name is not a pinned tool in xtask/src/setup.rs"; exit 1; }
+        done
+        names=$(jq -cn --arg s "$NAMES" '$s | split(" ") | map(select(. != ""))' | tr -d '\r')
+        jq -r --argjson want "$names" \
+          '.tools[] | select(($want | length) == 0 or (.name as $n | $want | index($n)))
+           | "\(.name)\t\(.version)"' "$RUNNER_TEMP/pins.json" | tr -d '\r' > "$RUNNER_TEMP/cargo-tools.tsv"
+        spec=$(awk -F '\t' '{ printf "%s%s@%s", (NR > 1 ? "," : ""), $1, $2 }' \
+          "$RUNNER_TEMP/cargo-tools.tsv")
+        binaries=$(jq -r --argjson want "$names" \
+          '[.binaries[].name] | unique[] | select(($want | length) == 0 or (. as $n | $want | index($n)))
+           | "--only \(.)"' "$RUNNER_TEMP/pins.json" | tr -d '\r' | tr '\n' ' ')
+        echo "spec=$spec" >> "$GITHUB_OUTPUT"
+        echo "binaries=$binaries" >> "$GITHUB_OUTPUT"
+        echo "cargo tools: ${spec:-none}"
+        echo "binaries: ${binaries:-none}"
+
+    - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+      if: steps.pins.outputs.spec != ''
+      with:
+        tool: ${{ steps.pins.outputs.spec }}
+        fallback: none
+
+    # cargo-<x> runs as `cargo <x> --version`, <x>-cli as `<x> --version`; each prints its name
+    # and then its version as the second word.
+    - name: Check the cargo tools' versions against the pins
+      if: steps.pins.outputs.spec != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        failed=0
+        while IFS=$'\t' read -r name version; do
+          case "$name" in
+            cargo-*) got=$(cargo "${name#cargo-}" --version | awk 'NR == 1 { print $2 }') ;;
+            *) got=$("${name%-cli}" --version | awk 'NR == 1 { print $2 }') ;;
+          esac
+          if [ "$got" = "$version" ]; then
+            echo "$name $version ok"
+          else
+            echo "::error::$name is at '$got', but xtask/src/setup.rs pins $version"
+            failed=1
+          fi
+        done < "$RUNNER_TEMP/cargo-tools.tsv"
+        exit "$failed"
+
+    - name: Install and check the binaries (cargo xtask setup --binaries)
+      if: steps.pins.outputs.binaries != ''
+      shell: bash
+      env:
+        ONLY: ${{ steps.pins.outputs.binaries }}
+      run: |
+        # $ONLY is "--only <name> ..." and is split on purpose.
+        # shellcheck disable=SC2086
+        cargo xtask setup --binaries $ONLY
