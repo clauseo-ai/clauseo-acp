@@ -27,14 +27,32 @@ fn cancel_late_updates_tagged_late() {
         let (end, keys) = futures::join!(prompt, cancel);
         assert_eq!(keys, Vec::new());
         assert_eq!(end.unwrap().stop, StopReason::Cancelled);
+        // The agent sends one chunk after the cancelled response and before it reads the second
+        // prompt. A chunk is `Late` until the second prompt starts on this side, so wait for it
+        // here: started at once, the prompt can win the race with the inbound handler (it did on
+        // Linux CI) and the chunk is then rightly `Turn(t2)`.
+        let before = ctx
+            .until(|event| match event {
+                AcpEvent::Update { update, .. } => {
+                    harness::chunk_text(update).is_some_and(|(_, text, _)| text == "Still writing.")
+                }
+                _ => false,
+            })
+            .await;
         let end = ctx
             .client
             .prompt(&session, t2, text("Again"))
             .await
             .unwrap();
         assert_eq!(end.stop, StopReason::EndTurn);
-        let updates = ctx.updates();
-        let origins: Vec<_> = updates.iter().map(|(origin, _)| *origin).collect();
+        let origins: Vec<_> = before
+            .iter()
+            .filter_map(|event| match event {
+                AcpEvent::Update { origin, .. } => Some(*origin),
+                _ => None,
+            })
+            .chain(ctx.updates().iter().map(|(origin, _)| *origin))
+            .collect();
         assert_eq!(
             origins,
             [

@@ -51,6 +51,11 @@ pub(crate) const MAX_LINES_IN_FLIGHT: usize = 64;
 /// other notifications are not counted, because the SDK does not hand every one of them to the
 /// handler (a response to an unknown id, a malformed `$/cancel_request`), and a line counted
 /// but never handled would stop the reader for good.
+///
+/// That the SDK hands every counted line to the handler exactly once was read from SDK 3.3.0
+/// with `unstable_protocol_v2` off, as this crate builds it. With that feature on, the SDK drops
+/// a notification that comes before `initialize` (`jsonrpc/protocol_compat.rs`), which would
+/// leave it counted; recheck this before turning the feature on or bumping the SDK.
 #[derive(Debug, Default)]
 pub(crate) struct Gate {
     /// How many events are waiting for room.
@@ -173,8 +178,8 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
     }
 }
 
-/// The lines the SDK's `Lines` transport reads, each copied to the frame tap. A UTF-8 JSON
-/// object with a `jsonrpc` key and a `method` or an `id` passes as it is ([`Envelope`]). Blank
+/// The lines the SDK's `Lines` transport reads, each copied to the frame tap. A UTF-8 JSON-RPC
+/// message passes as it is ([`Envelope::is_message`]). Blank
 /// lines are skipped; any other line becomes a [`MALFORMED_LINE_METHOD`] notification, which the
 /// inbound handler turns into a
 /// [`ProtocolWarning::MalformedLine`](crate::ProtocolWarning::MalformedLine). A line over 8 MiB
@@ -247,7 +252,8 @@ pub(crate) const MALFORMED_LINE_METHOD: &str = "_clauseo/malformed_line";
 
 /// Whether the inbound handler counts this notification off the [`Gate`]: the same lines
 /// [`incoming`] counted, a `session/update` whose `params` is an object ([`Envelope::is_update`])
-/// or a malformed-line marker. The SDK hands each of these to the handler exactly once.
+/// or a malformed-line marker. The SDK hands each of these to the handler exactly once (see
+/// [`Gate`] for when that holds).
 pub(crate) fn counted(method: &str, params: &serde_json::Value) -> bool {
     (method == "session/update" || method == MALFORMED_LINE_METHOD) && params.is_object()
 }
@@ -273,10 +279,15 @@ struct Envelope {
 }
 
 impl Envelope {
-    /// A JSON-RPC message: a `jsonrpc` key, and a `method` or an `id`. Anything else the SDK
-    /// would answer with an error, and a log line an adapter wrote to stdout is not one.
+    /// A JSON-RPC message as the SDK's own decode reads one (`RawJsonRpcMessage`): `jsonrpc` is
+    /// `"2.0"`, and there is a `method` with no `result` or `error` (a request or a
+    /// notification), or an `id` with exactly one of `result` and `error` and no `method` (a
+    /// response). Anything else the SDK would answer with an error, and a log line an adapter
+    /// wrote to stdout is not one.
     fn is_message(&self) -> bool {
-        self.jsonrpc.is_some() && (self.method.is_some() || self.id)
+        let request = self.method.is_some() && !self.result && !self.error;
+        let response = self.method.is_none() && self.id && self.result != self.error;
+        self.jsonrpc == Some(Shape::Text { matches: true }) && (request || response)
     }
 
     /// A `session/update` notification the SDK decodes and hands the inbound handler: `jsonrpc`
