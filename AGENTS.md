@@ -36,7 +36,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 - `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `crates/fake_agent/scenarios/` (README.md).
 - `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.
 - `ui/app`: the React app. Empty for now. Tauri APIs only under `ui/app/src/transport/`.
-- `xtask`: checks, build timing, budgets. Builds without any app crate.
+- `xtask`: checks, build timing, budgets. Builds without any app crate. Frozen: no new checks.
 
 ## Never
 
@@ -66,8 +66,6 @@ this. Use the words in `GLOSSARY.md` exactly.
 - A source file has at most 600 lines.
 - Rust comments stay within 100 columns; a file past 500 lines gets a note to split it.
 - A check that inspects nothing fails.
-- Every check ships planted violations, its bypass forms included. A surviving mutant in your
-  diff fails `cargo xtask mutants`, which CI runs on each PR into main that changes a `.rs` file.
 - Files are written only through each crate's write module: `xtask/src/write.rs` in xtask,
   `Scratch` (`xtask/src/scratch.rs`) in xtask's tests, `ui/app/scripts/guard.mjs` in scripts.
   Child processes start only through `xtask/src/process.rs` in xtask and
@@ -84,13 +82,13 @@ this. Use the words in `GLOSSARY.md` exactly.
 
 - Budgets live in `budgets.toml`. Never trade a budget for tidiness.
 - The blank app is the control for every memory and start-up budget. Keep it blank.
-- Take every speed or memory win, however small. Lawyers keep Clauseo open while they work, and the
-  same few paths run all day: streaming an agent's answer to the screen, saving each event, versioning
-  the matter after every turn, reopening long conversations. A few percent saved on one of those paths
-  repeats thousands of times a day, and many small savings together are what make the app feel
-  instant, the way a car maker that shaves a few grams off every part ends up with a much lighter car.
-  So when two ways to do something both meet the brief, measure both and keep the faster one, even
-  when the gap looks too small to notice. List each comparison in the PR under Performance.
+- Product code takes every speed or memory win, however small. The same few paths run all day:
+  streaming an answer to the screen, saving each event, versioning the matter after every turn,
+  reopening long conversations. Many small savings there make the app feel instant, the way a car
+  maker that shaves a few grams off every part ends up with a much lighter car. When two ways to do
+  something on a product path both meet the brief, measure both and keep the faster, even when the
+  gap is tiny. Under Performance, list what you compared, the machine, the medians, what you kept.
+- Tooling, CI, docs and tests are exempt: keep them correct and simple, and do not benchmark them.
 
 ## How you work
 
@@ -102,7 +100,9 @@ this. Use the words in `GLOSSARY.md` exactly.
   verified. Update both after each review.
 - Give each fact one home: a version, a key list, a policy string, a type, a rule's wording. Derive
   the rest from it; where two files cannot share it, add a test that fails when they disagree.
-- Touch only the files your brief lists. If the brief is wrong or silent, stop and say so.
+- Touch the files your brief lists. If you need another, change it and list it under Deviations. If
+  the brief is wrong, stop and say so.
+- When you review a pull request, follow the review bar in `CONTRIBUTING.md`.
 - Do not merge. A person reviews and merges.
 
 ## Definition of done
