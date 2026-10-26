@@ -1,5 +1,5 @@
 # The blank app end to end on Windows: built with the `e2e` feature, started, and driven by
-# Playwright over CDP (ui/e2e), on x64 and ARM64. One launch warms up the new exe unmeasured; then
+# Playwright over CDP (ui/e2e), on x64 and, after the merge, ARM64. One launch warms up the new exe unmeasured; then
 # the tests run once as is and once with --disable-gpu, and each run writes the control's numbers
 # (time to #app-root, memory of the process tree, JS heap, DOM nodes) to
 # e2e-results-<runner>-<mode>.json. The numbers are recorded, not gated.
@@ -13,32 +13,33 @@
 
 name: e2e-windows
 
-# Pull requests run only when they touch what the app is built from. That takes all of crates/,
-# not only crates/desktop, so the filter stays right as the desktop crate comes to depend on the
-# others. Filtering is fine while no check of this workflow is required; before one is, drop the
-# filter, for the reason ci.yml gives: a required check that never reports blocks the merge.
-# Every push to main runs, which gives the budgets their baseline and keeps main's Rust cache, the
-# one pull requests can read, warm.
+# Pull requests run only when they touch the desktop crate, the ui or this workflow, and only on
+# windows-2025 (x64). A change elsewhere that breaks the app (another crate, Cargo.lock, the
+# toolchain) shows up on the next push to main. Filtering is fine while no check of this workflow
+# is required; before one is, drop the filter, for the reason ci.yml gives: a required check that
+# never reports blocks the merge.
+# Every push to main, the nightly run and a run on demand cover x64 and ARM64 (windows-11-arm),
+# which gives the budgets their baseline and keeps main's Rust cache, the one pull requests can
+# read, warm.
 on:
   pull_request:
     paths:
-      - crates/**
+      - crates/desktop/**
       - ui/**
-      - Cargo.toml
-      - Cargo.lock
-      - rust-toolchain.toml
-      - .cargo/**
       - .github/workflows/e2e-windows.yml
   push:
     branches: [main]
+  schedule:
+    - cron: "47 3 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# A pull request keeps only its newest run. Each push to main has a group of its own, as in ci.yml.
+# A pull request keeps only its newest run. Each push to main, nightly run and run on demand has a
+# group of its own, as in ci.yml.
 concurrency:
-  group: e2e-windows-${{ github.event.pull_request.number || github.sha }}
+  group: e2e-windows-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -48,10 +49,14 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
+      # x64 always; ARM64 on every event but a pull request. One JSON list per case, because an
+      # `include` entry that matches no other entry is added as a combination of its own.
       matrix:
-        include:
-          - { runner: windows-2025, target: x86_64-pc-windows-msvc }
-          - { runner: windows-11-arm, target: aarch64-pc-windows-msvc }
+        include: >-
+          ${{ fromJSON(github.event_name == 'pull_request'
+            && '[{"runner": "windows-2025", "target": "x86_64-pc-windows-msvc"}]'
+            || '[{"runner": "windows-2025", "target": "x86_64-pc-windows-msvc"},
+                 {"runner": "windows-11-arm", "target": "aarch64-pc-windows-msvc"}]') }}
     env:
       TARGET: ${{ matrix.target }}
       E2E_APP: ${{ github.workspace }}/target/${{ matrix.target }}/release/clauseo-desktop.exe

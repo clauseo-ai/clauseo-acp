@@ -1,15 +1,20 @@
-# CI: the fast lane (`cargo xtask check` on Linux), the blank app built and tested on every
-# target, and on pull requests the mutation tests of the changed lines (`cargo xtask mutants`).
+# CI: the fast lane (`cargo xtask check` on Linux) and the blank app built and tested on every
+# target. Nightly and on demand, it also runs the mutation tests of main's last 24 hours.
 #
 # - No version is written here. Rust comes from rust-toolchain.toml, pnpm from "packageManager" and
 #   Node from "engines.node" in ui/package.json, and the cargo tools and gitleaks from
-#   `cargo xtask setup --binaries`.
+#   xtask/src/setup.rs, which .github/actions/install-pinned-tools reads with
+#   `cargo xtask setup --list=json` and installs as prebuilt binaries.
+# - Tier 1 (macOS Apple silicon, Windows x64) and Linux build and test on every pull request.
+#   Tier 2 (Intel macOS, Windows ARM64) waits for the merge: on a pull request its build jobs start
+#   but skip every step, and they run in full on each push to main, nightly and on demand. The
+#   Apple silicon job checks on each pull request that the workspace still compiles for Intel macOS.
 # - A pull request that touches only Markdown or docs/ still runs the fast lane, and the build jobs
 #   still start but skip every step. A job skipped as a whole would report its check under the
 #   unexpanded name "build (${{ matrix.target }})", and a required check that never reports blocks
 #   the merge.
-# - The mutants job has no matrix, so it is skipped as a whole: it runs only on pull requests into
-#   main that change a `.rs` file. A skipped job still reports its check as "mutants".
+# - The mutants job has no matrix, so it is skipped as a whole on pull requests and pushes, where it
+#   still reports its check as "mutants". It only reports: a missed mutant never fails the run.
 # - The Linux job runs the tests with the network cut off, so a test that reaches the network fails.
 # - Every action is pinned by commit SHA, with its tag in a comment.
 
@@ -19,15 +24,20 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Nightly, on main: the tier-2 builds and the mutants of the last 24 hours.
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 # A pull request keeps only its newest run. Each push to main has a group of its own: in a shared
 # group, GitHub keeps one pending run and cancels it when a newer push arrives, even without
-# cancel-in-progress, so a commit merged between two others would never be checked.
+# cancel-in-progress, so a commit merged between two others would never be checked. A nightly or
+# on-demand run has its own group too, so it never cancels or waits on the push of the same commit.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.sha }}
+  group: ci-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -37,9 +47,10 @@ jobs:
     timeout-minutes: 5
     outputs:
       build: ${{ steps.filter.outputs.build }}
-      mutants: ${{ steps.filter.outputs.mutants }}
     steps:
-      - name: Decide whether the build and mutants jobs run
+      # A push, the nightly run and a run on demand build everything; a pull request builds unless
+      # it changes only Markdown or docs/.
+      - name: Decide whether the build jobs run
         id: filter
         env:
           EVENT: ${{ github.event_name }}
@@ -66,16 +77,6 @@ jobs:
           else
             echo "Only Markdown or docs/ changed: the build jobs skip their steps."
             echo "build=false" >> "$GITHUB_OUTPUT"
-          fi
-          # cargo-mutants mutates only the `.rs` lines in the diff, so without one there is nothing
-          # to test. A pull request whose only `.rs` changes are deletions still runs the job, which
-          # pays for its setup and finds no mutant; that is rare enough to leave.
-          rust=$(printf '%s\n' "$changed" | grep -E '\.rs$' || true)
-          if [ -n "$rust" ]; then
-            echo "mutants=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No .rs file changed: the mutants job is skipped."
-            echo "mutants=false" >> "$GITHUB_OUTPUT"
           fi
 
   fast-lane:
@@ -114,22 +115,13 @@ jobs:
           echo "pnpm $(pnpm -v), ui/package.json wants $(node -p 'require("./ui/package.json").packageManager')"
           echo "node $(node -v), ui/package.json wants $(node -p 'require("./ui/package.json").engines.node')"
 
-      # The pinned cargo tools build once per change to their pins, not once per run.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-          # Its own key: the build jobs cache only nextest, and the Linux one runs on an older image.
-          key: cargo-tools-fast-lane-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('xtask/src/setup.rs') }}
-
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: "false"
 
+      # Every pinned tool, as prebuilt binaries; nothing is built from source.
       - name: Install the pinned tools
-        run: cargo xtask setup --binaries
+        uses: ./.github/actions/install-pinned-tools
 
       - name: cargo xtask check
         run: CI=1 cargo xtask check
@@ -142,25 +134,32 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # `tier2`: skipped on pull requests, built in full on push to main, nightly and on demand.
         include:
-          - { target: aarch64-apple-darwin, runner: macos-15, native: true }
+          - { target: aarch64-apple-darwin, runner: macos-15, native: true, tier2: false }
           # Cross-compiled on the arm64 runner, so it is built but not linted or tested.
-          - { target: x86_64-apple-darwin, runner: macos-15, native: false }
+          - { target: x86_64-apple-darwin, runner: macos-15, native: false, tier2: true }
           # The oldest glibc we support; release packages are built here later.
-          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-22.04, native: true }
-          - { target: x86_64-pc-windows-msvc, runner: windows-2025, native: true }
-          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, native: true }
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-22.04, native: true, tier2: false }
+          - { target: x86_64-pc-windows-msvc, runner: windows-2025, native: true, tier2: false }
+          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, native: true, tier2: true }
     env:
       TARGET: ${{ matrix.target }}
       EXE: clauseo-desktop${{ contains(matrix.target, '-windows-') && '.exe' || '' }}
-      BUILD: ${{ needs.changes.outputs.build }}
+      CODE: ${{ needs.changes.outputs.build }}
+      TIER2_WAITS: ${{ matrix.tier2 && github.event_name == 'pull_request' }}
+      BUILD: ${{ needs.changes.outputs.build == 'true' && !(matrix.tier2 && github.event_name == 'pull_request') }}
     defaults:
       run:
         shell: bash
     steps:
       - name: Skip, only Markdown or docs/ changed
-        if: env.BUILD != 'true'
+        if: env.CODE != 'true'
         run: echo "Only Markdown or docs/ changed; nothing to build."
+
+      - name: Skip, a tier-2 target builds after the merge
+        if: env.CODE == 'true' && env.TIER2_WAITS == 'true'
+        run: echo "$TARGET is tier 2; it builds on push to main, nightly and on demand."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.BUILD == 'true'
@@ -191,15 +190,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: env.BUILD == 'true' && matrix.native
-        with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-          key: cargo-nextest-${{ matrix.runner }}-${{ runner.arch }}-${{ hashFiles('xtask/src/setup.rs') }}
-
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: env.BUILD == 'true'
         with:
@@ -223,6 +213,15 @@ jobs:
           path: target/${{ env.TARGET }}/release/${{ env.EXE }}
           if-no-files-found: error
 
+      # One developer works on an Intel Mac, so main must always compile there; the full Intel
+      # build waits for the merge. After the app build, which writes the ui/app/dist the desktop
+      # crate embeds.
+      - name: Check that the workspace compiles for Intel macOS
+        if: env.BUILD == 'true' && matrix.target == 'aarch64-apple-darwin' && github.event_name == 'pull_request'
+        run: |
+          rustup target add x86_64-apple-darwin
+          cargo check --workspace --all-targets --target x86_64-apple-darwin --locked
+
       # The app must still be running when the timeout stops it (exit 124), without a panic.
       - name: Launch the app under xvfb
         if: env.BUILD == 'true' && runner.os == 'Linux'
@@ -244,11 +243,12 @@ jobs:
         if: env.BUILD == 'true' && matrix.native
         run: cargo clippy --workspace --all-targets --target "$TARGET" -- -D warnings
 
-      # The tests need only one pinned tool, nextest, so the app is built, uploaded and launched
-      # before it is installed, and no other tool is built here.
+      # The tests need only one pinned tool, nextest, as a prebuilt binary.
       - name: Install nextest at its pin
         if: env.BUILD == 'true' && matrix.native
-        run: cargo xtask setup --only cargo-nextest
+        uses: ./.github/actions/install-pinned-tools
+        with:
+          tools: cargo-nextest
 
       - name: Test
         if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux'
@@ -288,24 +288,21 @@ jobs:
               as_runner cargo nextest run --workspace --profile ci --no-tests=pass
             '
 
-  # cargo-mutants on the lines the pull request changed. It fails on a mutant no test catches, or
-  # when the run reaches `MUTANTS_TIMEOUT` in xtask/src/mutants.rs.
-  # - Pull requests into main only (`github.base_ref` is empty on a push). On a push to main, HEAD
-  #   is the merge-base with origin/main, so the diff is empty and `cargo xtask mutants` would pass
-  #   without testing anything. On a pull request into another branch, `cargo xtask mutants` would
-  #   still diff against origin/main and mutate the parent branch's changes too. Such a pull request
-  #   gets the job at its first push after it is retargeted to main: the `pull_request` event does
-  #   not fire on a retarget.
+  # cargo-mutants on main's changes of the last 24 hours, nightly and on demand. It only reports:
+  # a missed mutant, or a run that reaches `MUTANTS_TIMEOUT` in xtask/src/mutants.rs, shows in the
+  # job summary and the `mutants-report` artifact and never fails the run.
+  # - `cargo xtask mutants` diffs against the merge-base with origin/main, so origin/main is moved
+  #   back to main's last commit from before the window; the diff is then the window's changes.
   # - Linux only: a second OS would double the runner minutes for the same mutants. cargo-mutants
   #   also does not build on Windows ARM64 (#41).
   mutants:
     name: mutants
-    needs: changes
-    if: github.base_ref == 'main' && needs.changes.outputs.mutants == 'true'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
-    # Must exceed a cold setup (about 8.5 min: apt, then building cargo-mutants and nextest) plus
-    # `MUTANTS_TIMEOUT` and `MUTANTS_KILL_GRACE` in xtask/src/mutants.rs, so that xtask stops a
-    # long run itself and prints the missed mutants found so far, before GitHub cancels the job.
+    continue-on-error: true
+    # Must exceed the setup (apt, xtask's build) plus `MUTANTS_TIMEOUT` and `MUTANTS_KILL_GRACE`
+    # in xtask/src/mutants.rs, so that xtask stops a long run itself and prints the missed mutants
+    # found so far, before GitHub cancels the job.
     timeout-minutes: 35
     steps:
       # Full history: `cargo xtask mutants` diffs against the merge-base with origin/main, and a
@@ -315,6 +312,19 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # The newest first-parent commit older than 24 hours, or the first commit when there is none.
+      # With no commit in the window it is HEAD, and `cargo xtask mutants` finds nothing to test.
+      - name: Point origin/main at main as of 24 hours ago
+        run: |
+          set -euo pipefail
+          base=$(git rev-list -1 --first-parent --before='24 hours ago' HEAD)
+          if [ -z "$base" ]; then
+            base=$(git rev-list --max-parents=0 HEAD | tail -n 1)
+          fi
+          git update-ref refs/remotes/origin/main "$base"
+          echo "Mutating the changes from $base to $(git rev-parse HEAD):"
+          git log --oneline "$base..HEAD"
+
       - name: Install the Rust toolchain from rust-toolchain.toml
         run: rustup toolchain install
 
@@ -323,17 +333,6 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends libwebkit2gtk-4.1-dev
-
-      # fast-lane's tools (`setup --binaries`, same image) include cargo-mutants and nextest, so
-      # this job restores its cache and saves none. It builds them itself only when fast-lane has
-      # not yet saved that key, such as on the first run after a change to setup.rs.
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-          key: cargo-tools-fast-lane-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('xtask/src/setup.rs') }}
 
       # Saves the crate registry downloads and xtask's own build. It does not speed up the mutants:
       # each one builds in a copy of the tree with its own target/.
@@ -345,7 +344,43 @@ jobs:
       # cargo-mutants runs each mutant's tests with nextest (`test_tool` in .cargo/mutants.toml), so
       # both are installed, and no other pinned tool.
       - name: Install cargo-mutants and nextest at their pins
-        run: cargo xtask setup --only cargo-mutants --only cargo-nextest
+        uses: ./.github/actions/install-pinned-tools
+        with:
+          tools: cargo-mutants cargo-nextest
 
       - name: cargo xtask mutants
-        run: cargo xtask mutants
+        id: mutants
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo xtask mutants 2>&1 | tee mutants.log
+
+      - name: Summarise the mutants
+        if: ${{ !cancelled() }}
+        env:
+          OUTCOME: ${{ steps.mutants.outcome }}
+        run: |
+          {
+            echo "## Mutants of main's last 24 hours: \`cargo xtask mutants\` $OUTCOME"
+            for f in target/xtask/mutants.out/outcomes.json target/xtask/wire/mutants.out/outcomes.json; do
+              [ -f "$f" ] || continue
+              jq -r --arg f "$f" '"- \($f): \(.total_mutants) mutants, \(.caught) caught, \(.missed) missed, \(.timeout) timed out, \(.unviable) unviable"' "$f"
+            done
+            echo
+            echo "Last 100 lines of its output (all of it is in the mutants-report artifact):"
+            echo
+            echo '```'
+            tail -n 100 mutants.log 2>/dev/null || echo "(no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: mutants-report
+          path: |
+            mutants.log
+            target/xtask/mutants.diff
+            target/xtask/mutants.out
+            target/xtask/wire/mutants.out
+          if-no-files-found: warn
