@@ -244,7 +244,7 @@ fn matter_and_thread_rows_round_trip() {
         ..Commit::default()
     }))
     .unwrap_err();
-    assert!(matches!(error, Error::Io { .. }), "{error:?}");
+    assert!(matches!(error, Error::Constraint { .. }), "{error:?}");
     assert_eq!(block_on(store.threads(matter(9))).unwrap(), Vec::new());
     let read = block_on(store.read_after(thread(4), None, 10)).unwrap();
     assert_eq!(seqs(&read), Vec::<u64>::new());
@@ -315,7 +315,7 @@ fn checkpoint_rows_round_trip() {
         ..Commit::default()
     }))
     .unwrap_err();
-    assert!(matches!(error, Error::Io { .. }), "{error:?}");
+    assert!(matches!(error, Error::Constraint { .. }), "{error:?}");
     block_on(store.close()).unwrap();
 
     let store = dir.open();

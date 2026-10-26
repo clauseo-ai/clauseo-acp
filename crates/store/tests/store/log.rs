@@ -416,6 +416,13 @@ fn seq_and_stream_id_bounds() {
         seqs(&read(&store, thread(1), Some(last - 1), 500)),
         vec![last]
     );
+    // Nothing can come after the last seq a key holds, or past it: an empty page, not an error.
+    assert_eq!(read(&store, thread(1), Some(last), 500), Vec::new());
+    assert_eq!(read(&store, thread(1), Some(last + 1), 500), Vec::new());
+    assert_eq!(
+        read(&store, thread(1), Some((1 << 53) - 1), 500),
+        Vec::new()
+    );
     let over = block_on(store.commit(texts(thread(1), last + 1, last + 1)));
     match over {
         Err(error @ Error::KeyOutOfRange { .. }) => {

@@ -2,8 +2,8 @@
 //!
 //! The mapping is the one in `docs/decisions/0006-store-format.md`, Errors: a full disk is
 //! `store.disk_full`, data that does not read back is `store.corrupt`, every other SQLite or OS
-//! failure is `store.io`, and the host bugs (`SeqGap`, `DuplicateCommand`, `KeyOutOfRange`,
-//! `Encode`) are `internal`.
+//! failure is `store.io`, and the host bugs (`SeqGap`, `SnapshotAhead`, `DuplicateCommand`,
+//! `KeyOutOfRange`, `Encode`, `Constraint`) and `Closed` are `internal`.
 
 use std::fmt;
 use std::io;
@@ -58,6 +58,18 @@ pub enum Error {
         /// The `seq` the commit carried.
         got: Seq,
     },
+    /// The commit's snapshot is at `seq`, past `head`, the stream's last `seq` with the commit's
+    /// own events: a host bug. Kept, it would push out an older snapshot and later be read as
+    /// the fold of events it never saw.
+    #[error("snapshot of {stream} at {seq} is past its head {head}")]
+    SnapshotAhead {
+        /// The stream.
+        stream: StreamId,
+        /// The snapshot's `seq`.
+        seq: Seq,
+        /// The stream's last `seq` (0 before its first event).
+        head: u64,
+    },
     /// The commit's receipt names a `command_id` that already has one; `stored` is that
     /// receipt, so the host can compare `payload_hash` to tell a repeat from a conflict.
     #[error("command {} already has a receipt", stored.command_id)]
@@ -85,7 +97,15 @@ pub enum Error {
         /// What failed, for logs.
         detail: String,
     },
-    /// The store was closed, or its thread is gone.
+    /// A row breaks a constraint of the schema (`SQLITE_CONSTRAINT`), such as a thread or
+    /// checkpoint row whose matter has no row: a host bug. Nothing of the commit was written.
+    #[error("a row breaks a constraint: {detail}")]
+    Constraint {
+        /// What SQLite refused, for logs.
+        detail: String,
+    },
+    /// The store was closed, or its thread is gone: the call came after `close`, or was still
+    /// queued when the store closed. Permanent for this `Store`.
     #[error("the store is closed")]
     Closed,
 }
@@ -96,33 +116,25 @@ impl Error {
         match self {
             Self::DiskFull => ErrorCode::StoreDiskFull,
             Self::Corrupt { .. } | Self::BlobMissing { .. } => ErrorCode::StoreCorrupt,
-            Self::Io { .. } | Self::Closed => ErrorCode::StoreIo,
+            Self::Io { .. } => ErrorCode::StoreIo,
             Self::Locked => ErrorCode::StoreLocked,
             Self::NewerSchema { .. } => ErrorCode::StoreNewerVersion,
             Self::SeqGap { .. }
+            | Self::SnapshotAhead { .. }
             | Self::DuplicateCommand { .. }
             | Self::KeyOutOfRange { .. }
-            | Self::Encode { .. } => ErrorCode::Internal,
+            | Self::Encode { .. }
+            | Self::Constraint { .. }
+            | Self::Closed => ErrorCode::Internal,
         }
     }
 
-    /// Whether the same call may succeed later with nothing else changed. It follows
-    /// [`ErrorCode::is_retryable`] (decision 0003), except that a `store.io` failure is
-    /// retryable only for `SQLITE_BUSY` and [`Error::Closed`].
-    pub fn retryable(&self) -> bool {
-        match self {
-            Self::Io { source } => source.busy,
-            Self::Closed => true,
-            Self::DiskFull
-            | Self::Corrupt { .. }
-            | Self::Locked
-            | Self::NewerSchema { .. }
-            | Self::SeqGap { .. }
-            | Self::DuplicateCommand { .. }
-            | Self::KeyOutOfRange { .. }
-            | Self::BlobMissing { .. }
-            | Self::Encode { .. } => self.code().is_retryable(),
-        }
+    /// Whether the same call may succeed later with nothing else changed: exactly
+    /// [`ErrorCode::is_retryable`] of [`Error::code`] (decision 0003), so it always equals the
+    /// `retryable` of the `HostError` built from this code. `store.io` is retryable; a
+    /// `SQLITE_BUSY` among them is told apart by [`IoError::is_busy`].
+    pub const fn retryable(&self) -> bool {
+        self.code().is_retryable()
     }
 
     /// A `Corrupt` with `detail`.
@@ -142,6 +154,11 @@ impl From<rusqlite::Error> for Error {
             }
             if code == SqliteCode::DatabaseCorrupt || code == SqliteCode::NotADatabase {
                 return Self::corrupt(error.to_string());
+            }
+            if code == SqliteCode::ConstraintViolation {
+                return Self::Constraint {
+                    detail: error.to_string(),
+                };
             }
             let busy = code == SqliteCode::DatabaseBusy;
             return Self::Io {

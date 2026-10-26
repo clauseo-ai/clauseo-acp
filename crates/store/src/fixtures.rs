@@ -127,10 +127,11 @@ fn envelope(n: u64) -> Envelope {
     )
 }
 
-/// The event at `seq`: seq 1 is `ThreadCreated`; then each turn of 250 events is a
-/// `UserMessage`, a `TurnStarted`, 25 runs of 7 `TextAppended`, a `ToolCallStarted` and its
-/// `ToolCallUpdated`, then 21 `TextAppended`, a `FilesChanged` and a `TurnEnded`. Seq 1
-/// takes the place of turn 1's first event, so every later event keeps its place.
+/// The event at `seq`. Each turn of 250 events is, by place: 0 a `UserMessage`, 1 a
+/// `TurnStarted`, 2 to 226 25 runs of 7 `TextAppended`, a `ToolCallStarted` and its
+/// `ToolCallUpdated`, 227 to 247 21 `TextAppended`, 248 a `FilesChanged`, 249 a `TurnEnded`.
+/// Seq 1 is `ThreadCreated`, in place of turn 1's first `TextAppended` (place 2): seqs 2 and 3
+/// are turn 1's places 0 and 1, and from seq 4 on every event keeps its place.
 fn event(n: u64) -> DomainEvent {
     if n == 1 {
         return ThreadCreated {
@@ -141,7 +142,11 @@ fn event(n: u64) -> DomainEvent {
         .into();
     }
     let turn_index = (n - 1) / EVENTS_PER_TURN;
-    let at = (n - 1) % EVENTS_PER_TURN;
+    let at = if n <= 3 {
+        n - 2
+    } else {
+        (n - 1) % EVENTS_PER_TURN
+    };
     let turn: TurnId = id(10_000 + turn_index);
     let message: MessageId = id(20_000 + turn_index);
     match at {
@@ -180,8 +185,8 @@ fn event(n: u64) -> DomainEvent {
             checkpoint_after: Some(id::<CheckpointId>(40_001 + 2 * turn_index)),
         }
         .into(),
-        // 2..=176: 25 runs of 7 texts, a tool call started and updated.
-        2..=176 if (at - 2) % 9 >= 7 => {
+        // 2..=226: 25 runs of 7 texts, a tool call started and updated.
+        2..=226 if (at - 2) % 9 >= 7 => {
             let call: ToolCallId = id(50_000 + turn_index * 25 + (at - 2) / 9);
             if (at - 2) % 9 == 7 {
                 DomainEvent::from(Box::new(ToolCallStarted {

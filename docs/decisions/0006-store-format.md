@@ -33,7 +33,8 @@ under "May depend on". The crate also needs `serde`, `serde_json`, `rmp-serde`, 
 
 ### Schema version 1
 
-`crates/store/src/migrations/0001_init.sql`, verbatim:
+`crates/store/src/migrations/0001_init.sql`, verbatim (the test `decision_record_quotes_the_migration`
+fails if this copy and the file differ):
 
 ```sql
 -- Schema version 1. docs/decisions/0006-store-format.md gives the reason for each choice.
@@ -72,7 +73,9 @@ CREATE TABLE account_limits (agent TEXT NOT NULL, account TEXT NOT NULL, limits 
   PRIMARY KEY (agent, account)) WITHOUT ROWID;
 ```
 
-Ids are stored as lowercase hyphenated UUID text. Times are milliseconds since the Unix epoch.
+In the table columns, ids are stored as lowercase hyphenated UUID text and times as milliseconds
+since the Unix epoch. Inside `events.envelope`, the envelope's own encoding applies: ids are
+16-byte MessagePack bin, as `docs/decisions/0002-event-schema.md` says, and `stream` is its text.
 
 #### streams and the events key
 
@@ -80,7 +83,7 @@ Ids are stored as lowercase hyphenated UUID text. Times are milliseconds since t
   `StreamId`'s `Display` and `FromStr`. Every other table names a stream by its integer
   `stream_id`, which never leaves the store. `heads`, `read_after`, `reopen`, `Committed` and every
   envelope carry `StreamId`.
-- The first commit or receipt that names a stream gives it the next `stream_id`, as a row with
+- The first commit, receipt or snapshot that names a stream gives it the next `stream_id`, as a row with
   `last_seq` 0. Rows are never deleted, so a number is never reused. The writer keeps the map from
   `StreamId` to `stream_id` and each `last_seq` in memory, loaded at `open`.
 - An event's key is `(stream_id << 32) | seq`. Reason: a rowid table with that key stores no
@@ -122,6 +125,9 @@ Ids are stored as lowercase hyphenated UUID text. Times are milliseconds since t
   writer would stall every other thread's commits.
 - A commit that carries a snapshot deletes all but the two newest snapshots of its stream, so one
   bad snapshot has a fallback. A snapshot at the same `(stream_id, seq)` replaces the old one.
+- A snapshot whose `seq` is past its stream's head, the commit's own events counted, fails the
+  commit with `Error::SnapshotAhead`. Reason: kept, it would push out a real fallback, and once the
+  log reached its `seq`, `reopen` would serve it as the fold of events it never saw.
 - `reopen` reads the newest snapshot with the asked `reducer_schema`, at or below the head, that
   decompresses. One that does not decompress, or claims more than 1 GiB, is skipped, and the next
   older one, or the log from seq 1, takes its place. A snapshot with another `reducer_schema` is
@@ -246,27 +252,31 @@ checksum is added: the WAL already makes a torn write truncate cleanly, one leve
 ### Errors
 
 `Error::code()` gives the `ErrorCode` and `Error::retryable()` whether the same call may succeed
-later. Retryable follows the table in `docs/decisions/0003-error-codes.md`, except `store.io`,
-which is retryable only for SQLite's busy answer and for `Closed`. The code is in
-`crates/store/src/error.rs`.
+later. `retryable()` is exactly the code's retryable in `docs/decisions/0003-error-codes.md`, with
+no exception, so it always equals the `retryable` of the `HostError` the host builds from the
+code (`HostError::new` takes it from the code). A busy `store.io` is told apart by
+`IoError::is_busy()`, for a host that wants to retry it at once. `Closed` is `internal`: after
+`close` it is permanent, so a caller that trusted a retryable `Closed` would retry forever. The
+code is in `crates/store/src/error.rs`.
 
 | `Error` variant | When | code | retryable |
 |---|---|---|---|
 | `DiskFull` | `SQLITE_FULL` (also what `max_page_count` gives), or an OS write that failed with `ENOSPC` or `ERROR_DISK_FULL` | `store.disk_full` | no |
 | `Corrupt { detail }` | `SQLITE_CORRUPT`, `SQLITE_NOTADB`, a gap in `seq` on read, an envelope that does not decode or names another row, a stored value that does not parse, a blob whose hash or size does not match | `store.corrupt` | no |
 | `BlobMissing { hash }` | no blob has this hash | `store.corrupt` | no |
-| `Io { source }` | `SQLITE_BUSY` after `busy_timeout` | `store.io` | yes |
-| `Io { source }` | every other SQLite or OS failure | `store.io` | no |
-| `Closed` | a call after `close`, or the store's thread is gone | `store.io` | yes |
+| `Io { source }` | every other SQLite or OS failure, `SQLITE_BUSY` after `busy_timeout` included (`is_busy()`) | `store.io` | yes |
 | `Locked` | another process holds `state.sqlite.lock` | `store.locked` | no |
 | `NewerSchema { found, supported }` | the file's `user_version`, or an envelope's `schema_version`, is newer than this build | `store.newer_version` | no |
 | `SeqGap { stream, expected, got }` | a commit's events do not run on from the stream's last `seq` | `internal` | no |
 | `DuplicateCommand { stored }` | the commit's receipt names a `command_id` that already has one | `internal` | no |
 | `KeyOutOfRange { stream }` | a `seq` at or above 2^32, or a `stream_id` past 2^31 - 1 | `internal` | no |
 | `Encode { detail }` | a value the caller passed does not serialise | `internal` | no |
+| `SnapshotAhead { stream, seq, head }` | a commit's snapshot is past its stream's head, the commit's events counted | `internal` | no |
+| `Constraint { detail }` | `SQLITE_CONSTRAINT`: a row breaks the schema, such as a thread or checkpoint row whose matter has no row | `internal` | no |
+| `Closed` | a call after `close`, a call still queued when the store closed, or the store's thread is gone | `internal` | no |
 
-The `internal` errors are host bugs or idempotency answers; the host handles them before anything
-reaches a client.
+The `internal` errors are host bugs, idempotency answers or a store already closed; the host
+handles them before anything reaches a client.
 
 The store never runs `PRAGMA integrity_check` on open, because its cost grows with the file.
 Corruption is reported when a read meets it.
@@ -291,6 +301,17 @@ Rohan, 2026-10-26:
 - `Reopen.head` is `Option<Seq>`: `None` for a stream with no events.
 - A commit's blobs are `BlobIn` values, hashed on the caller's thread by `BlobIn::new`, so the
   writer thread never hashes. `BlobIn::blob_ref()` gives the reference an event carries.
+
+From the review of the first version (Rohan, 2026-10-26):
+
+- When a store thread ends, by `Close`, by its queue closing or by a panic, it closes its queue and
+  drops every request still in it, so each waiting caller gets `Error::Closed` instead of no answer.
+- Dropping the last `Store` clone without `close` closes the store: the reader, then the writer,
+  serves what is already queued, the writer checkpoints and closes the file, and the drop waits for
+  both threads, so the lock is free when it returns. Only `close` reports how that went.
+- `read_after` with `after` at or past 2^32 returns an empty page: no event can be there.
+- `Closed` is `internal` and `retryable()` is the code's (Errors, above); `SQLITE_CONSTRAINT` is
+  `Error::Constraint` and a snapshot past the head is `Error::SnapshotAhead`, both `internal`.
 
 ### Dependencies
 

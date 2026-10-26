@@ -11,6 +11,9 @@ mod common;
 mod write;
 
 #[cfg(test)]
+#[path = "store/close.rs"]
+mod close;
+#[cfg(test)]
 #[path = "store/errors.rs"]
 mod errors;
 #[cfg(test)]
