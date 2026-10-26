@@ -2,7 +2,7 @@
 //! level the first bytes call for. Files up to a threshold are read whole into a reused
 //! buffer; larger ones are hashed in chunks, then streamed into the store.
 
-use std::fs::File;
+use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek};
 use std::path::Path;
 
@@ -13,7 +13,7 @@ use gix::odb::loose;
 use super::Oid;
 use super::durable::{self, NewObjects, put};
 use super::gix_store::to_oid;
-use crate::Error;
+use crate::{Error, write};
 
 /// Files up to this size are read whole into a reused buffer; larger ones are streamed.
 const STREAM_THRESHOLD: u64 = 8 * 1024 * 1024;
@@ -60,6 +60,31 @@ impl<'a> Target<'a> {
     }
 }
 
+/// The file at `path` opened without following a symlink; `None` when the open file is not a
+/// regular file or (on Unix) not the one `symlink_metadata` of `path` names.
+fn open_checked(path: &Path) -> Result<Option<File>, Error> {
+    let file = write::open_read_nofollow(path).map_err(|err| Error::io("open", path, err))?;
+    let opened = file
+        .metadata()
+        .map_err(|err| Error::io("stat", path, err))?;
+    let named = std::fs::symlink_metadata(path).map_err(|err| Error::io("stat", path, err))?;
+    let same = opened.is_file() && named.is_file() && same_file(&opened, &named);
+    Ok(same.then_some(file))
+}
+
+/// Whether two metadata name one file: same device and inode.
+#[cfg(unix)]
+fn same_file(a: &Metadata, b: &Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+/// Windows: std exposes no file id on stable, so only the regular-file checks apply.
+#[cfg(not(unix))]
+fn same_file(_: &Metadata, _: &Metadata) -> bool {
+    true
+}
+
 /// The reader of files as blobs, with its reused buffer.
 pub(super) struct Blobs {
     /// The buffer files are read into, reused across calls.
@@ -83,24 +108,33 @@ impl Blobs {
     }
 
     /// Hashes the file `path` (`len` bytes by its metadata) as a blob, storing it in `target`
-    /// if given; returns the blob and the bytes read. A file whose length is not `len`, or
-    /// that changes between the two passes of a stream, is re-stat'd and read again, at most
-    /// [`ATTEMPTS`] times in all.
+    /// if given; returns the blob and the bytes read. A file whose length is not `len`, that
+    /// changes between the two passes of a stream, or whose open file is not the file at
+    /// `path` (a symlink or another file swapped in), is opened, stat'd and read again, at most
+    /// [`ATTEMPTS`] times in all; a length over `cap` (clamped to `u32::MAX`, as the walk
+    /// does) is refused.
     pub(super) fn read(
         &mut self,
         path: &Path,
         len: u64,
+        cap: u64,
         mut target: Option<Target<'_>>,
     ) -> Result<(Oid, u64), Error> {
-        let mut file = File::open(path).map_err(|err| Error::io("open", path, err))?;
+        let cap = cap.min(u64::from(u32::MAX));
         let mut expected = len;
         for attempt in 0..ATTEMPTS {
+            let Some(mut file) = open_checked(path)? else {
+                continue;
+            };
             if attempt > 0 {
                 let metadata = file
                     .metadata()
                     .map_err(|err| Error::io("stat", path, err))?;
                 expected = metadata.len();
-                file.rewind().map_err(|err| Error::io("read", path, err))?;
+            }
+            if expected > cap {
+                let over = io::Error::new(io::ErrorKind::InvalidData, "the file is over the cap");
+                return Err(Error::io("read", path, over));
             }
             let done = if expected <= self.stream_threshold {
                 self.buffered(&mut file, path, expected, target.as_mut())?
@@ -178,7 +212,7 @@ impl Blobs {
         let Some(target) = target else {
             return Ok(Some((to_oid(&id)?, len)));
         };
-        if durable::present(target.deflated, &id, Kind::Blob, len)? {
+        if durable::present(target.deflated, target.new_objects, &id, Kind::Blob, len)? {
             return Ok(Some((to_oid(&id)?, len)));
         }
         file.rewind().map_err(|err| Error::io("read", path, err))?;

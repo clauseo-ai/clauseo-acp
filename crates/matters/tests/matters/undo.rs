@@ -1,12 +1,12 @@
 //! Undoing a step: restore and delete, edits made since, "Undo anyway", undoing an undo, and
 //! the lock check.
 
-use clauseo_matters::{CheckpointOutcome, Error, Matter, TimelineEntry};
-use clauseo_protocol::{CheckpointKind, ErrorCode};
+use clauseo_matters::{CheckpointOutcome, Error, Limits, Matter, TimelineEntry};
+use clauseo_protocol::{CheckpointKind, ErrorCode, FileChoice, FileDecision, SkippedFileReason};
 
 use crate::fixture::{
-    Fixture, added, assert_none, cid, created, deleted, meta, modified, path, thread, tools, turn,
-    undo, undo_all, undo_request,
+    Fixture, added, assert_no_temp_files, assert_none, cid, created, deleted, meta, modified, path,
+    thread, tools, turn, undo, undo_all, undo_request,
 };
 
 /// The step every test undoes: checkpoint 3 after a turn that modified `a.txt`, created
@@ -60,6 +60,7 @@ fn undo_restores_before_contents_and_deletes_created() {
     assert_eq!(fx.read("a.txt"), b"one");
     assert_eq!(fx.read("b.txt"), b"bee");
     assert!(!fx.exists("c.txt"));
+    assert_no_temp_files(&fx.folder);
     assert_eq!(
         matter.timeline().last(),
         Some(&TimelineEntry {
@@ -193,4 +194,67 @@ fn undo_refuses_locked_file_and_writes_nothing() {
         [added("unrelated.txt", b"an outside edit")]
     );
     assert_eq!(fx.read("a.txt"), b"one");
+}
+
+#[test]
+fn undo_recreates_deleted_subfolder() {
+    let fx = Fixture::new("undo-subfolder");
+    fx.write("sub/deep/a.txt", "deep");
+    fx.write("sub/b.txt", "shallow");
+    fx.write("top.txt", "top");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    crate::support::remove_dir_all(fx.file("sub"));
+    fx.write("top.txt", "top, edited");
+    let paths = ["sub/b.txt", "sub/deep/a.txt", "top.txt"];
+    let changes = created(matter.after_turn(&meta(3), &tools(&paths)).unwrap(), 3);
+    assert_eq!(changes.len(), 3);
+
+    let undone = undo(&mut matter, (1, 3), &paths, (4, 5)).unwrap();
+    assert_eq!(undone.restored.len(), 3);
+    assert_eq!(fx.read("sub/deep/a.txt"), b"deep");
+    assert_eq!(fx.read("sub/b.txt"), b"shallow");
+    assert_eq!(fx.read("top.txt"), b"top");
+    assert_no_temp_files(&fx.folder);
+}
+
+#[test]
+fn undo_after_file_grew_over_cap_needs_no_decision_for_it() {
+    let mut fx = Fixture::new("undo-grew-over-cap");
+    fx.limits = Limits {
+        file_cap_bytes: 10,
+        import_warn_bytes: 1_000_000,
+    };
+    fx.write("big.pdf", "small");
+    fx.write("a.txt", "one");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    let grown = [b'%'; 40];
+    fx.write("big.pdf", grown);
+    fx.write("a.txt", "two");
+    let mtime = fx.file("big.pdf").metadata().unwrap().modified().unwrap();
+    let checkpoint = matter
+        .after_turn(&meta(3), &tools(&["a.txt", "big.pdf"]))
+        .unwrap();
+    assert_eq!(checkpoint.skipped.len(), 1);
+    assert_eq!(checkpoint.skipped[0].path, path("big.pdf"));
+    assert_eq!(checkpoint.skipped[0].reason, SkippedFileReason::OverSizeCap);
+    let changes = created(checkpoint, 3);
+    assert_eq!(changes, [modified("a.txt", b"one", b"two")]);
+
+    // Decisions only for what the checkpoint reported.
+    let decisions: Vec<FileDecision> = changes
+        .iter()
+        .map(|change| FileDecision {
+            path: change.path().clone(),
+            choice: FileChoice::Undo,
+        })
+        .collect();
+    let undone = matter.undo(&undo_request(1, 3, &decisions, 4, 5)).unwrap();
+    assert_eq!(undone.restored, [path("a.txt")]);
+    assert_eq!(fx.read("a.txt"), b"one");
+    assert_eq!(fx.read("big.pdf"), grown);
+    let after = fx.file("big.pdf").metadata().unwrap().modified().unwrap();
+    assert_eq!(after, mtime);
+    assert_no_temp_files(&fx.folder);
 }

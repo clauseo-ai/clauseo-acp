@@ -74,6 +74,11 @@ pub(crate) fn symlink(target: impl AsRef<Path>, link: impl AsRef<Path>) {
     std::os::unix::fs::symlink(target, link).unwrap();
 }
 
+/// `fs::remove_dir_all`.
+pub(crate) fn remove_dir_all(path: impl AsRef<Path>) {
+    std::fs::remove_dir_all(path).unwrap();
+}
+
 /// `fs::rename`.
 pub(crate) fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) {
     std::fs::rename(from, to).unwrap();

@@ -2,7 +2,7 @@
 //! `checkpoint.rs` and `undo.rs`; this file checks inputs and keeps the folder and history in
 //! step.
 
-mod json;
+pub(crate) mod json;
 
 use std::collections::BTreeSet;
 use std::io;
@@ -78,6 +78,7 @@ impl Matter {
     ) -> Result<Imported, Error> {
         refuse_marker(new.marker)?;
         refuse::check_folder(&new.folder, refused)?;
+        refuse::check_new_matter(&new.folder, &settings.matters_root)?;
         let home = matter_home(&settings, new.id);
         if exists(&home)? {
             return Err(Error::HistoryExists { git_dir: home });

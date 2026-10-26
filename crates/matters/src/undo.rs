@@ -12,7 +12,7 @@ use crate::checkpoint::{Core, SizedFile, Spec};
 use crate::history::{HistoryStore, Oid};
 use crate::stat::{EntryState, Stat};
 use crate::types::{CheckpointOutcome, Settings, TimelineEntry, UndoRequest, Undone};
-use crate::{Error, locks, write};
+use crate::{Error, fsync, locks, write};
 
 /// One file operation that puts a path back as it was before the step.
 #[derive(Debug, Clone)]
@@ -37,9 +37,27 @@ struct Step {
     ops: Vec<Op>,
 }
 
-/// The step from `before` to `after` as undo operations, sorted by path.
-fn step(core: &Core, before: CheckpointId, after: CheckpointId) -> Result<Vec<Step>, Error> {
-    let changes = core.changes_between(before, after)?;
+/// The step from `before` to `after` as undo operations, sorted by path. A deletion whose
+/// file is there now but over the cap or cloud-only is left out: the checkpoint that saw it
+/// leave the tree reported it as skipped, not deleted, and undo never writes such a file.
+fn step(
+    core: &Core,
+    folder: &Path,
+    settings: &Settings,
+    before: CheckpointId,
+    after: CheckpointId,
+) -> Result<Vec<Step>, Error> {
+    let mut changes = core.changes_between(before, after)?;
+    let mut kept = Vec::with_capacity(changes.len());
+    for change in changes.drain(..) {
+        if matches!(change.change(), ChangeKind::Deleted)
+            && now_skipped(folder, settings, change.path())?
+        {
+            continue;
+        }
+        kept.push(change);
+    }
+    let changes = kept;
     let before_files = core.files_of(before)?;
     let blob = |path: &MatterPath| {
         find(&before_files, path.as_str())
@@ -93,7 +111,7 @@ pub(crate) fn edited_since(
     before: CheckpointId,
     after: CheckpointId,
 ) -> Result<Vec<MatterPath>, Error> {
-    let steps = step(core, before, after)?;
+    let steps = step(core, folder, settings, before, after)?;
     let after_files = core.files_of(after)?;
     let mut edited = Vec::new();
     for step in &steps {
@@ -136,6 +154,16 @@ fn current(
     }
     let (blob, _) = core.history.hash_file(&abs, metadata.len())?;
     Ok(Current::Blob(blob))
+}
+
+/// Whether a regular file is at `path` now that is over the cap or cloud-only.
+fn now_skipped(folder: &Path, settings: &Settings, path: &MatterPath) -> Result<bool, Error> {
+    let abs = folder.join(path.as_str());
+    match std::fs::symlink_metadata(&abs) {
+        Ok(metadata) => Ok(metadata.is_file() && skipped(settings, &abs, &metadata)),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(Error::io("stat", abs, err)),
+    }
 }
 
 /// Whether the entry at `abs` is one the crate never reads or writes: not a regular file,
@@ -181,7 +209,7 @@ pub(crate) fn undo(
     settings: &Settings,
     request: &UndoRequest<'_>,
 ) -> Result<Undone, Error> {
-    let steps = step(core, request.before, request.after)?;
+    let steps = step(core, folder, settings, request.before, request.after)?;
     let choices = choices(&steps, request)?;
     let mut acting: Vec<&Step> = Vec::new();
     let mut kept: Vec<MatterPath> = Vec::new();
@@ -238,11 +266,7 @@ pub(crate) fn undo(
             edited_since.push(step.path.clone());
         }
     }
-    for step in &acting {
-        for op in &step.ops {
-            apply(core, folder, op)?;
-        }
-    }
+    apply(core, folder, &acting)?;
     let checkpoint = core.take(
         folder,
         settings,
@@ -317,23 +341,55 @@ fn choices(steps: &[Step], request: &UndoRequest<'_>) -> Result<Vec<FileChoice>,
         .collect()
 }
 
-/// Carries out one operation: a write by temp file and rename (making missing folders), or a
-/// delete (an already missing file is fine).
-fn apply(core: &Core, folder: &Path, op: &Op) -> Result<(), Error> {
-    let abs = folder.join(op.path().as_str());
-    match op {
-        Op::Write(_, blob) => {
-            if let Some(parent) = abs.parent() {
-                write::create_dir_all(parent).map_err(|err| Error::io("create", parent, err))?;
-            }
-            write::replace(&abs, &mut |file| {
+/// Carries out the steps' operations in two phases, so a failure while writing changes nothing:
+/// first every write goes to a synced temp file beside its target (making missing folders), then
+/// the temp files are renamed over their targets and the deletions made, each folder synced.
+fn apply(core: &Core, folder: &Path, steps: &[&Step]) -> Result<(), Error> {
+    let mut staged = Vec::new();
+    for op in steps.iter().flat_map(|step| &step.ops) {
+        if let Op::Write(path, blob) = op {
+            let abs = make_parents(folder, path)?;
+            let file = write::stage(&abs, &mut |file| {
                 core.history.read_blob(*blob, file).map(drop)
-            })
+            })?;
+            staged.push(file);
         }
-        Op::Delete(_) => match write::remove_file(&abs) {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(Error::io("delete", abs, err)),
-        },
     }
+    for file in staged {
+        file.commit()?;
+    }
+    for op in steps.iter().flat_map(|step| &step.ops) {
+        if let Op::Delete(path) = op {
+            let abs = folder.join(path.as_str());
+            match write::remove_file(&abs) {
+                Ok(()) => {}
+                Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+                Err(err) => return Err(Error::io("delete", abs, err)),
+            }
+            let dir = abs.parent().unwrap_or(folder);
+            fsync::sync_dir(dir).map_err(|err| Error::io("sync", dir, err))?;
+        }
+    }
+    Ok(())
+}
+
+/// `folder`/`path`, after making each missing folder on the way (and syncing the folder
+/// that holds it). [`writable`] already refused a path through a symlink.
+fn make_parents(folder: &Path, path: &MatterPath) -> Result<std::path::PathBuf, Error> {
+    let mut at = folder.to_owned();
+    let mut parts = path.as_str().split('/').peekable();
+    while let Some(part) = parts.next() {
+        if parts.peek().is_none() {
+            at.push(part);
+            break;
+        }
+        let parent = at.clone();
+        at.push(part);
+        match write::create_dir(&at) {
+            Ok(()) => fsync::sync_dir(&parent).map_err(|err| Error::io("sync", &parent, err))?,
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(err) => return Err(Error::io("create", &at, err)),
+        }
+    }
+    Ok(at)
 }

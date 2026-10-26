@@ -4,44 +4,55 @@
 use std::collections::BTreeSet;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use gix::hash::ObjectId;
 use gix::objs::{Kind, Write as _};
 use gix::odb::loose;
 
+use super::check;
 use super::gix_store::{sync_dir, to_oid};
 use super::{Oid, TIMELINE_REF};
 use crate::{Error, fsync, write};
 
-/// The loose object files written since the last publish, and their `objects/xx` folders.
+/// The loose object files a commit about to be published may newly name: those written since
+/// the last publish and those found already present, with their `objects/xx` folders.
 #[derive(Debug, Default)]
 pub(super) struct NewObjects {
-    /// Each new object file, in the order written.
-    files: Vec<PathBuf>,
+    /// Each object file to sync.
+    files: BTreeSet<PathBuf>,
     /// The `objects/xx` folders those files are in.
     folders: BTreeSet<PathBuf>,
     /// Whether any of those folders was new, so `objects` gained an entry.
     made_folder: bool,
+    /// The timeline ref's modification time at the last publish (or open); `None` before the
+    /// first. A present object modified since then is checked in full.
+    published_at: Option<SystemTime>,
 }
 
 impl NewObjects {
-    /// Records the new object file `file`; `made_folder` when its folder was made for it.
+    /// Records the object file `file`; `made_folder` when its folder was made for it.
     pub(super) fn record(&mut self, file: PathBuf, made_folder: bool) {
         if let Some(folder) = file.parent() {
             self.folders.insert(folder.to_path_buf());
         }
         self.made_folder |= made_folder;
-        self.files.push(file);
+        self.files.insert(file);
+    }
+
+    /// Sets the timeline ref's modification time, after open or a publish.
+    pub(super) fn set_published_at(&mut self, time: Option<SystemTime>) {
+        self.published_at = time;
     }
 
     /// The files recorded so far.
     #[cfg(test)]
-    pub(super) fn files(&self) -> &[PathBuf] {
-        &self.files
+    pub(super) fn files(&self) -> Vec<PathBuf> {
+        self.files.iter().cloned().collect()
     }
 
-    /// Steps 1 and 2 of the sync order: syncs each new file, each folder they are in, and
-    /// `objects` (the folder `objects`) if a folder was new; then one barrier on a new file.
+    /// Steps 1 and 2 of the sync order: syncs each recorded file, each folder they are in,
+    /// and `objects` (the folder `objects`) if a folder was new; then one barrier on a file.
     pub(super) fn make_durable(&self, objects: &Path) -> Result<(), Error> {
         let mut last = None;
         for path in &self.files {
@@ -69,37 +80,54 @@ impl NewObjects {
     }
 }
 
-/// Whether object `id` is in `store` with a sound header: its file exists and its first bytes
-/// inflate to a header of `kind` and `size`. A file that does not (torn by a crash before it
-/// was synced) is logged and removed, so the caller writes the object again.
+/// Whether object `id` (`kind`, `size` bytes) is in `store` and sound; if so it is recorded
+/// in `new_objects` for the sync. A file written since the last publish (by this run, or by
+/// one that crashed before syncing it) is inflated and hashed in full, any other has its
+/// header checked. A file that fails is logged and left for the caller to write over: gix
+/// renames the new object onto it (on Windows, where that rename is skipped when the target
+/// exists, it is removed first). An I/O error reading it is returned and the file kept.
 pub(super) fn present(
     store: &loose::Store,
+    new_objects: &mut NewObjects,
     id: &ObjectId,
     kind: Kind,
     size: u64,
 ) -> Result<bool, Error> {
     let path = store.object_path(id);
-    if !path.is_file() {
-        return Ok(false);
+    if new_objects.files.contains(&path) {
+        return Ok(true);
     }
-    match store.try_header(id) {
-        Ok(Some(header)) if header == (size, kind) => return Ok(true),
-        Ok(header) => {
-            tracing::warn!(path = %path.display(), ?header, "rewriting a torn loose object");
-        }
-        Err(err) => {
-            tracing::warn!(path = %path.display(), error = %err, "rewriting a torn loose object");
-        }
+    let metadata = match std::fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(Error::io("stat", path, err)),
+    };
+    let recent = match (new_objects.published_at, metadata.modified()) {
+        (Some(published), Ok(modified)) => modified >= published,
+        (None, _) | (Some(_), Err(_)) => true,
+    };
+    let sound = metadata.is_file()
+        && if recent {
+            check::whole(&path, id, kind, size)?
+        } else {
+            check::header(&path, kind, size)?
+        };
+    if sound {
+        new_objects.record(path, false);
+        return Ok(true);
     }
+    tracing::warn!(path = %path.display(), "rewriting a torn loose object");
+    #[cfg(windows)]
     match write::remove_file(&path) {
-        Ok(()) => Ok(false),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(Error::io("remove", path, err)),
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(err) => return Err(Error::io("remove", path, err)),
     }
+    Ok(false)
 }
 
 /// Writes object `id` (`kind`, `data`) through `store` unless it is [`present`], and records
-/// the new file in `new_objects`.
+/// the file in `new_objects`.
 pub(super) fn put(
     store: &loose::Store,
     new_objects: &mut NewObjects,
@@ -108,7 +136,7 @@ pub(super) fn put(
     id: ObjectId,
 ) -> Result<(), Error> {
     let size = u64::try_from(data.len()).unwrap_or(u64::MAX);
-    if present(store, &id, kind, size)? {
+    if present(store, new_objects, &id, kind, size)? {
         return Ok(());
     }
     let path = store.object_path(&id);
@@ -118,6 +146,17 @@ pub(super) fn put(
         .map_err(|err| Error::history("write object", err))?;
     new_objects.record(path, made_folder);
     Ok(())
+}
+
+/// The timeline ref's modification time in the git dir `git_dir`; `None` when it does not
+/// exist.
+pub(super) fn ref_time(git_dir: &Path) -> Result<Option<SystemTime>, Error> {
+    let path = ref_path(git_dir);
+    match std::fs::symlink_metadata(&path).and_then(|metadata| metadata.modified()) {
+        Ok(time) => Ok(Some(time)),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(Error::io("stat", path, err)),
+    }
 }
 
 /// The timeline ref's file in the git dir `git_dir`.

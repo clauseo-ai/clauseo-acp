@@ -138,7 +138,7 @@ impl GixStore {
 
     /// The object files written since the last publish.
     #[cfg(test)]
-    pub(super) fn new_object_files(&self) -> &[PathBuf] {
+    pub(super) fn new_object_files(&self) -> Vec<PathBuf> {
         self.new_objects.files()
     }
 }
@@ -187,20 +187,24 @@ impl HistoryStore for GixStore {
                     .map_err(|err| Error::io("write", &path, err))
             })?;
         }
-        Ok(Self::at(git_dir))
+        let mut store = Self::at(git_dir);
+        store
+            .new_objects
+            .set_published_at(durable::ref_time(git_dir)?);
+        Ok(store)
     }
 
-    fn store_file(&mut self, file: &Path, len: u64) -> Result<(Oid, u64), Error> {
+    fn store_file(&mut self, file: &Path, len: u64, cap: u64) -> Result<(Oid, u64), Error> {
         let target = Target {
             stored: &self.stored,
             deflated: &self.deflated,
             new_objects: &mut self.new_objects,
         };
-        self.blobs.read(file, len, Some(target))
+        self.blobs.read(file, len, cap, Some(target))
     }
 
     fn hash_file(&mut self, file: &Path, len: u64) -> Result<(Oid, u64), Error> {
-        self.blobs.read(file, len, None)
+        self.blobs.read(file, len, u64::MAX, None)
     }
 
     fn read_blob(&self, blob: Oid, out: &mut dyn Write) -> Result<u64, Error> {
@@ -335,6 +339,8 @@ impl HistoryStore for GixStore {
         durable::check_ref(&self.git_dir, expected)?;
         self.new_objects.make_durable(self.deflated.path())?;
         durable::move_ref(&self.git_dir, commit, expected)?;
+        self.new_objects
+            .set_published_at(durable::ref_time(&self.git_dir)?);
         let index = self.git_dir.join("index");
         index_file::save(&index, cache)?;
         let file = File::open(&index).map_err(|err| Error::io("open", &index, err))?;

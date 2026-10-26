@@ -32,7 +32,8 @@ documents with 3 changed).
     	logallrefupdates = false
     	worktree = "<absolute path of the matter folder>"
     ```
-    `core.worktree` is quoted, with `\` and `"` escaped. Opening the matter rewrites it when the folder
+    `core.worktree` is quoted, with `\`, `"`, newline and tab escaped (`\\`, `\"`, `\n`, `\t`);
+    it must be absolute and valid UTF-8. Opening the matter rewrites it when the folder
     was moved and located again. Clauseo never reads it back for anything but that comparison.
   - `objects/` and `refs/`, empty.
 
@@ -40,8 +41,8 @@ documents with 3 changed).
   no LFS.
 - The matter folder holds one thing of Clauseo's: `.clauseo/matter.json`, version 1:
   `{"version": 1, "matter_id": "<uuid>", "created_at": <milliseconds since the Unix epoch>}`, written
-  by temp file and rename. Readers accept any `version` and ignore keys they do not know; they need
-  `matter_id` and `created_at`. A later format that drops either uses a new file name. Opening a
+  by temp file and rename. Readers accept any `version` (or none) and ignore keys they do not know;
+  they need `matter_id` and `created_at`. A later format that drops either uses a new file name. Opening a
   matter whose folder is gone, has no `matter.json`, has one that does not read, or has one naming
   another matter fails with `matter.folder_missing` (the "Locate folder" answer).
 - Repositories are opened with gix's isolated options: no system, global or user git config and no
@@ -79,7 +80,8 @@ documents with 3 changed).
   (turn checkpoints, and an undo's when the host passes them). Writers emit them in that order.
   Readers take the message's last paragraph, accept the trailers in any order, ignore keys they do
   not know, read a kind they do not know as `Unknown`, and need only `Clauseo-Checkpoint`; a commit
-  without one is not a checkpoint. The summary line is for people and is never parsed.
+  without one is not a checkpoint. Writers never reuse an id; a reader that finds one id on two
+  commits takes the later. The summary line is for people and is never parsed.
 - There is no `Clauseo-Seq` trailer: the commit is written before the host logs
   `CheckpointRecorded`, so the `seq` is not known yet, and the parent chain already orders the
   timeline. Opening a matter walks the first-parent chain from the ref and rebuilds the map from
@@ -133,6 +135,9 @@ documents with 3 changed).
   blob, and every tree and commit, is written at level 1, gix's default. A level-0 object is ordinary
   zlib that every git reads, so the rule can change later without rewriting history.
 - Hashing is gix's own collision-detecting SHA-1.
+- An object already present is never written again once its header decodes with the expected kind
+  and size; one whose file is newer than the ref file (left by a run that never published) is
+  inflated and hashed in full first. A torn one is written again.
 - Retention: every version is kept. No pruning, squashing, gc or repack. `Retention::KeepAll` is
   passed at open, so a later policy is a new variant.
 
@@ -141,8 +146,9 @@ documents with 3 changed).
 gix 0.89 syncs no loose object (it writes a temp file and renames it), so Clauseo syncs, with one full
 flush per checkpoint:
 
-- macOS: a plain `fsync` on each new object file and on each `objects/xx` folder it touched (and
-  `objects/` when a new `xx` folder was made); one `F_BARRIERFSYNC`; then the ref moves (checked
+- macOS: a plain `fsync` on each object file the checkpoint wrote or found already present (an
+  object a killed run left behind may never have been synced), and on each `objects/xx` folder it
+  touched (and `objects/` when a new `xx` folder was made); one `F_BARRIERFSYNC`; then the ref moves (checked
   against the expected previous commit) and the index is written, each by temp file and rename, each
   plain-`fsync`ed with its folder; then one `F_FULLFSYNC`. Objects reach the disk before the ref that
   names them, and the last flush makes everything durable before the checkpoint returns.

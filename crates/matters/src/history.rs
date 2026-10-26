@@ -6,6 +6,7 @@
 //! cache as its `index` file. Decision record 0007 is the format; this module writes it.
 
 mod blob;
+mod check;
 mod durable;
 mod gix_store;
 mod index_file;
@@ -81,9 +82,10 @@ pub(crate) trait HistoryStore: Sized {
 
     /// Hashes the file `file` as a blob and stores it as a loose object unless it is already
     /// there: zlib level 0 when its first bytes say it is already compressed, level 1
-    /// otherwise. `len` is its size from the walk's metadata; returns the blob and the bytes
-    /// actually read.
-    fn store_file(&mut self, file: &Path, len: u64) -> Result<(Oid, u64), Error>;
+    /// otherwise. `len` is its size from the walk's metadata and `cap` the walk's size cap: a
+    /// file found over it when read again is an [`Error::Io`] of kind `InvalidData`. Returns
+    /// the blob and the bytes actually read.
+    fn store_file(&mut self, file: &Path, len: u64, cap: u64) -> Result<(Oid, u64), Error>;
 
     /// Hashes the file `file` as a blob without storing anything.
     fn hash_file(&mut self, file: &Path, len: u64) -> Result<(Oid, u64), Error>;
