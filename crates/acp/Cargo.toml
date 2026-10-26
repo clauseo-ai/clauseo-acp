@@ -1,0 +1,32 @@
+[package]
+name = "clauseo-acp"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+clauseo-protocol = { path = "../protocol" }
+# Exactly what Claude Code and Codex use; never `unstable_subagents`, `unstable`, `schemars`,
+# `process` or `stdio` (Clauseo spawns agents and owns the pipes).
+agent-client-protocol = { workspace = true, features = [
+  "unstable_session_fork",
+  "unstable_llm_providers",
+  "unstable_end_turn_token_usage",
+  "unstable_plan_operations",
+] }
+futures = { workspace = true }
+async-channel = { workspace = true, features = ["std"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+memchr = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+clauseo-fake_agent = { path = "../fake_agent" }
+async-process = { workspace = true }
+uuid = { workspace = true }
