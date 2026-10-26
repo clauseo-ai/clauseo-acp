@@ -91,6 +91,10 @@ agent-client-protocol = { version = "=3.3.0", default-features = false }
 # only the gix features it needs.
 gix = { version = "0.89.0", default-features = false }
 tracing = "0.1.44"
+# clauseo-acp (it also uses the futures and async-channel lines above): the stdout line filter
+# (memchr splits lines); async-process starts fake_agent in its tests.
+memchr = "2.8"
+async-process = "2"
 
 [workspace.lints.rust]
 unsafe_code = "deny"               # deny, not forbid: an FFI module overrides with #[expect(unsafe_code, reason = "…")]
