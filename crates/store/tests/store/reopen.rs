@@ -1,9 +1,11 @@
 //! Reopen: the newest snapshot of the asked reducer schema that decompresses, and the events
 //! after it; the 20k-event fixture as the deterministic guard of the reopen budget.
 
+use std::collections::BTreeMap;
+
 use clauseo_protocol::Envelope;
 use clauseo_store::fixtures::{self, reopen_20k};
-use clauseo_store::{Commit, SnapshotIn, Store};
+use clauseo_store::{Commit, Error, SnapshotIn, Store};
 use futures::executor::block_on;
 
 use crate::common::{TestDir, count, seq, seqs, sql, texts, thread};
@@ -63,7 +65,8 @@ fn snapshot_in_compresses_and_reopen_returns_bytes() {
     assert_eq!(seqs(&reopen.tail), vec![4, 5]);
     assert_eq!(reopen.head, Some(seq(5)));
 
-    // A commit with a snapshot and no events; one past the head is not used.
+    // A commit with a snapshot and no events; one past the head is refused, nothing of it
+    // kept, so the snapshot at the head stays.
     let at_head = state(5, 1000);
     let only = Commit {
         snapshot: Some(SnapshotIn::compress(thread(1), seq(5), 7, &at_head)),
@@ -74,17 +77,59 @@ fn snapshot_in_compresses_and_reopen_returns_bytes() {
         snapshot: Some(SnapshotIn::compress(thread(1), seq(9), 7, b"ahead")),
         ..Commit::default()
     };
-    block_on(store.commit(ahead)).unwrap();
+    match block_on(store.commit(ahead)) {
+        Err(Error::SnapshotAhead {
+            stream,
+            seq: at,
+            head,
+        }) => {
+            assert_eq!((stream, at.get(), head), (thread(1), 9, 5));
+        }
+        other => panic!("expected SnapshotAhead, got {other:?}"),
+    }
+    // A snapshot at the commit's own last event is not ahead.
+    block_on(store.commit(with_snapshot(6, 7, 7, 7, &state(7, 1000)))).unwrap();
     let reopen = block_on(store.reopen(thread(1), 7)).unwrap();
     assert_eq!(
         reopen
             .snapshot
             .map(|snapshot| (snapshot.seq, snapshot.state)),
-        Some((seq(5), at_head))
+        Some((seq(7), state(7, 1000)))
     );
     assert_eq!(reopen.tail, Vec::<Envelope>::new());
-    assert_eq!(reopen.head, Some(seq(5)));
+    assert_eq!(reopen.head, Some(seq(7)));
     block_on(store.close()).unwrap();
+    // The fallback kept is the one at the head, not the refused one.
+    let conn = sql(&dir);
+    let kept: String = conn
+        .query_row(
+            "SELECT group_concat(seq) FROM (SELECT seq FROM snapshots ORDER BY seq)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(kept, "5,7");
+}
+
+/// The kinds of `events` by turn of 250, each turn's kinds counted.
+fn kinds_per_turn(events: &[Envelope]) -> Vec<BTreeMap<String, u64>> {
+    let mut turns: Vec<BTreeMap<String, u64>> = Vec::new();
+    for chunk in events.chunks(250) {
+        let mut kinds = BTreeMap::new();
+        for envelope in chunk {
+            *kinds.entry(envelope.event.kind().to_owned()).or_insert(0) += 1;
+        }
+        turns.push(kinds);
+    }
+    turns
+}
+
+/// A turn's kind counts: `(kind, count)` pairs.
+fn turn(pairs: &[(&str, u64)]) -> BTreeMap<String, u64> {
+    pairs
+        .iter()
+        .map(|(kind, count)| ((*kind).to_owned(), *count))
+        .collect()
 }
 
 #[test]
@@ -104,6 +149,44 @@ fn reopen_reads_snapshot_and_tail_only() {
         4,
     );
     assert_eq!(folded, 18_001);
+
+    // The shape: 80 turns of 250 events; seq 1's ThreadCreated takes the place of turn 1's
+    // first TextAppended.
+    let events: Vec<Envelope> = commits
+        .iter()
+        .flat_map(|commit| commit.events.iter().cloned())
+        .collect();
+    assert_eq!(seqs(&events), (1..=fixtures::EVENTS).collect::<Vec<_>>());
+    let later = [
+        ("user_message", 1),
+        ("turn_started", 1),
+        ("text_appended", 196),
+        ("tool_call_started", 25),
+        ("tool_call_updated", 25),
+        ("files_changed", 1),
+        ("turn_ended", 1),
+    ];
+    let mut first = later;
+    first[2] = ("text_appended", 195);
+    let mut first = turn(&first);
+    first.insert("thread_created".to_owned(), 1);
+    let turns = kinds_per_turn(&events);
+    assert_eq!(turns.len(), 80);
+    assert_eq!(turns[0], first, "turn 1");
+    for (n, kinds) in turns.iter().enumerate().skip(1) {
+        assert_eq!(*kinds, turn(&later), "turn {}", n + 1);
+    }
+    let opening: Vec<&str> = events[..4].iter().map(|e| e.event.kind()).collect();
+    assert_eq!(
+        opening,
+        [
+            "thread_created",
+            "user_message",
+            "turn_started",
+            "text_appended"
+        ]
+    );
+
     let store = dir.open();
     for commit in commits {
         block_on(store.commit(commit)).unwrap();

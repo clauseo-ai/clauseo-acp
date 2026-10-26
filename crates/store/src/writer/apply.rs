@@ -232,12 +232,23 @@ fn put_rows(conn: &Connection, commit: &Commit) -> Result<(), Error> {
     Ok(())
 }
 
-/// Stores the snapshot and keeps only the two newest of its stream.
+/// Stores the snapshot and keeps only the two newest of its stream. A snapshot past the
+/// stream's head (this commit's events counted) is `SnapshotAhead`.
 fn put_snapshot(
     conn: &Connection,
     snapshot: &SnapshotIn,
     changes: &mut Changes<'_>,
 ) -> Result<(), Error> {
+    let head = changes
+        .get(snapshot.stream)
+        .map_or(0, |state| state.last_seq);
+    if snapshot.seq.get() > head {
+        return Err(Error::SnapshotAhead {
+            stream: snapshot.stream,
+            seq: snapshot.seq,
+            head,
+        });
+    }
     {
         let state = changes.get_or_add(conn, snapshot.stream)?;
         conn.prepare_cached(

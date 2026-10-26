@@ -26,7 +26,12 @@ const QUEUE: usize = 256;
 
 /// The store: one SQLite file served by a writer thread and a reader thread. Cheap to clone;
 /// every clone talks to the same threads. Calls after [`Store::close`] return
-/// [`Error::Closed`].
+/// [`Error::Closed`], and so does every call still queued when the store closes.
+///
+/// Dropping the last clone without [`Store::close`] closes the store the same way and waits for
+/// both threads: the writer first serves every request already queued, then checkpoints, closes
+/// the file and releases the lock, so a following [`Store::open`] of the same folder succeeds.
+/// Only `close` reports a failure of that last step.
 #[derive(Clone)]
 pub struct Store {
     inner: Arc<Inner>,
@@ -35,7 +40,36 @@ pub struct Store {
 struct Inner {
     writer: Sender<WriteRequest>,
     reader: Sender<ReadRequest>,
-    threads: Mutex<Vec<JoinHandle<()>>>,
+    writer_thread: Mutex<Option<JoinHandle<()>>>,
+    reader_thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl Inner {
+    /// Closes the reader's queue and joins it, then the writer's, so the writer's last
+    /// checkpoint finds no reader. Each thread serves what is already queued first. Joining a
+    /// thread already joined does nothing.
+    fn shut_down(&self) {
+        self.reader.close();
+        if let Some(thread) = take(&self.reader_thread) {
+            join(thread);
+        }
+        self.writer.close();
+        if let Some(thread) = take(&self.writer_thread) {
+            join(thread);
+        }
+    }
+}
+
+impl Drop for Inner {
+    /// The last clone went without `close`: close the same way, the result unreported.
+    fn drop(&mut self) {
+        self.shut_down();
+    }
+}
+
+/// Takes the handle out of `slot`, whether or not a panic poisoned it.
+fn take(slot: &Mutex<Option<JoinHandle<()>>>) -> Option<JoinHandle<()>> {
+    slot.lock().unwrap_or_else(PoisonError::into_inner).take()
 }
 
 /// A request to the reader thread.
@@ -130,7 +164,8 @@ impl Store {
             inner: Arc::new(Inner {
                 writer: writer_tx,
                 reader: reader_tx,
-                threads: Mutex::new(vec![writer]),
+                writer_thread: Mutex::new(Some(writer)),
+                reader_thread: Mutex::new(None),
             }),
         };
         let reader = match reader {
@@ -140,7 +175,11 @@ impl Store {
                 return Err(error.into());
             }
         };
-        store.join_handles().push(reader);
+        *store
+            .inner
+            .reader_thread
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(reader);
         match ready_rx.await.unwrap_or(Err(Error::Closed)) {
             Ok(()) => Ok(store),
             Err(error) => {
@@ -260,12 +299,7 @@ impl Store {
     pub async fn close(self) -> Result<(), Error> {
         let read = self.read(|reply| ReadRequest::Close { reply }).await;
         let wrote = self.write(|reply| WriteRequest::Close { reply }).await;
-        self.inner.reader.close();
-        self.inner.writer.close();
-        let threads = std::mem::take(&mut *self.join_handles());
-        for thread in threads {
-            join(thread);
-        }
+        self.inner.shut_down();
         // A second close finds the threads gone; that is not a failure.
         match (read, wrote) {
             (Err(Error::Closed), Err(Error::Closed)) => Ok(()),
@@ -275,7 +309,8 @@ impl Store {
 
     /// Holds the writer thread until the returned sender is dropped or sent to: requests sent
     /// meanwhile wait in its queue, so the commits among them form one group. Returns once the
-    /// writer is held. Test support only.
+    /// writer is held. Release it before dropping the last clone, whose drop waits for the
+    /// writer. Test support only.
     #[cfg(feature = "test-support")]
     pub async fn hold_writer(&self) -> Result<oneshot::Sender<()>, Error> {
         let (release, held) = oneshot::channel();
@@ -294,17 +329,17 @@ impl Store {
             .await
     }
 
+    /// The number of requests waiting in the writer's queue, the one it serves now not counted.
+    /// Test support only.
+    #[cfg(feature = "test-support")]
+    pub fn queued_writes(&self) -> usize {
+        self.inner.writer.len()
+    }
+
     /// The value of `PRAGMA <name>` on the reader's connection, as text. Test support only.
     #[cfg(feature = "test-support")]
     pub async fn reader_pragma(&self, name: &'static str) -> Result<String, Error> {
         self.read(|reply| ReadRequest::Pragma { name, reply }).await
-    }
-
-    fn join_handles(&self) -> std::sync::MutexGuard<'_, Vec<JoinHandle<()>>> {
-        self.inner
-            .threads
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
     }
 
     async fn write<T>(
@@ -339,10 +374,24 @@ fn closed<T>(_unsent: async_channel::SendError<T>) -> Error {
     Error::Closed
 }
 
-/// Joins a store thread. Its loop returns no error and catches none: a panic there is a bug
-/// that already failed its caller's call with `Closed`.
+/// Joins a store thread. Its loop returns no error and catches none: a panic there is a bug,
+/// and its [`Drain`] already failed every waiting call with `Closed`.
 fn join(thread: JoinHandle<()>) {
     drop(thread.join());
+}
+
+/// Held by each store thread for its whole life. When the thread ends, by `Close`, by its queue
+/// closing or by a panic, it closes the queue and drops every request still in it, so each
+/// waiting caller's reply resolves to [`Error::Closed`] instead of never.
+struct Drain<'a, T>(&'a Receiver<T>);
+
+impl<T> Drop for Drain<'_, T> {
+    fn drop(&mut self) {
+        self.0.close();
+        while let Ok(request) = self.0.try_recv() {
+            drop(request);
+        }
+    }
 }
 
 /// The writer thread: opens the file, says so, then serves requests.
@@ -351,6 +400,8 @@ fn run_writer(
     ready: oneshot::Sender<Result<std::path::PathBuf, Error>>,
     requests: &Receiver<WriteRequest>,
 ) {
+    // Declared first, so it drops last: after the writer has released the lock.
+    let _drain = Drain(requests);
     let opened = open::open_writer(options).and_then(|opened| {
         let path = opened.path.clone();
         Writer::new(opened).map(|writer| (writer, path))
@@ -370,6 +421,7 @@ fn run_reader(
     ready: oneshot::Sender<Result<(), Error>>,
     requests: &Receiver<ReadRequest>,
 ) {
+    let _drain = Drain(requests);
     let conn = match open::open_reader(path) {
         Ok(conn) => {
             answer(ready, Ok(()));

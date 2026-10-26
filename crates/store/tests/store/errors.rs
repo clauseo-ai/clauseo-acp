@@ -10,20 +10,21 @@ use crate::common::{TestDir, matter, receipt, text_event, texts, thread, ts};
 use crate::write;
 
 /// The code and retryable flag each variant must give. Exhaustive, so a new variant fails to
-/// compile here until it has a row. `retryable` follows `ErrorCode::is_retryable`, except
-/// `store.io`: retryable only for `SQLITE_BUSY` and `Closed`.
+/// compile here until it has a row. `retryable` is always `ErrorCode::is_retryable` of the code.
 fn expected(error: &Error) -> (ErrorCode, bool) {
     match error {
         Error::DiskFull => (ErrorCode::StoreDiskFull, false),
         Error::Corrupt { .. } | Error::BlobMissing { .. } => (ErrorCode::StoreCorrupt, false),
-        Error::Io { source } => (ErrorCode::StoreIo, source.is_busy()),
-        Error::Closed => (ErrorCode::StoreIo, true),
+        Error::Io { .. } => (ErrorCode::StoreIo, true),
         Error::Locked => (ErrorCode::StoreLocked, false),
         Error::NewerSchema { .. } => (ErrorCode::StoreNewerVersion, false),
         Error::SeqGap { .. }
+        | Error::SnapshotAhead { .. }
         | Error::DuplicateCommand { .. }
         | Error::KeyOutOfRange { .. }
-        | Error::Encode { .. } => (ErrorCode::Internal, false),
+        | Error::Encode { .. }
+        | Error::Constraint { .. }
+        | Error::Closed => (ErrorCode::Internal, false),
     }
 }
 
@@ -35,13 +36,11 @@ fn check(error: &Error, code: ErrorCode, retryable: bool) {
     );
     assert_eq!(error.code(), code, "code of {error:?}");
     assert_eq!(error.retryable(), retryable, "retryable of {error:?}");
-    if !matches!(error, Error::Io { .. } | Error::Closed) {
-        assert_eq!(
-            error.retryable(),
-            code.is_retryable(),
-            "{error:?} follows protocol"
-        );
-    }
+    assert_eq!(
+        error.retryable(),
+        code.is_retryable(),
+        "{error:?} follows protocol"
+    );
 }
 
 #[test]
@@ -55,8 +54,8 @@ fn error_codes_map() {
         matches!(&io, Error::Io { source } if !source.is_busy()),
         "{io:?}"
     );
-    check(&io, ErrorCode::StoreIo, false);
-    // Io from SQLite: a constraint failure (a thread whose matter has no row).
+    check(&io, ErrorCode::StoreIo, true);
+    // Constraint: a foreign-key failure (a thread whose matter has no row).
     let store = dir.open();
     let row = clauseo_store::ThreadRow {
         id: crate::common::id(1),
@@ -73,8 +72,25 @@ fn error_codes_map() {
         ..Commit::default()
     }))
     .unwrap_err();
-    assert!(matches!(constraint, Error::Io { .. }), "{constraint:?}");
-    check(&constraint, ErrorCode::StoreIo, false);
+    assert!(
+        matches!(constraint, Error::Constraint { .. }),
+        "{constraint:?}"
+    );
+    check(&constraint, ErrorCode::Internal, false);
+
+    // SnapshotAhead: a snapshot past the stream's head.
+    let ahead = block_on(store.commit(Commit {
+        snapshot: Some(clauseo_store::SnapshotIn::compress(
+            thread(3),
+            crate::common::seq(2),
+            1,
+            b"ahead",
+        )),
+        ..texts(thread(3), 1, 1)
+    }))
+    .unwrap_err();
+    assert!(matches!(ahead, Error::SnapshotAhead { .. }), "{ahead:?}");
+    check(&ahead, ErrorCode::Internal, false);
 
     // Locked.
     let locked = block_on(Store::open(StoreOptions::new(dir.path())))
@@ -134,7 +150,7 @@ fn error_codes_map() {
     block_on(store.close()).unwrap();
     let closed = block_on(clone.heads()).unwrap_err();
     assert!(matches!(closed, Error::Closed), "{closed:?}");
-    check(&closed, ErrorCode::StoreIo, true);
+    check(&closed, ErrorCode::Internal, false);
     let closed = block_on(clone.read_after(thread(1), None, 1)).unwrap_err();
     assert!(matches!(closed, Error::Closed), "{closed:?}");
     drop(clone);

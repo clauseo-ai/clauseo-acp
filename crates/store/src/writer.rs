@@ -104,7 +104,8 @@ impl Writer {
         })
     }
 
-    /// Serves requests until `Close` or until every sender is gone.
+    /// Serves requests until `Close`, or until the queue is closed (by the last `Store` clone's
+    /// drop) and empty; then closes as `Close` does.
     pub(crate) fn run(mut self, requests: &Receiver<WriteRequest>) {
         let mut next: Option<WriteRequest> = None;
         loop {
@@ -150,6 +151,8 @@ impl Writer {
                 }
             }
         }
+        // No caller is left to hear how the close went.
+        drop(self.close());
     }
 
     /// Every stream with at least one event and its last `seq`, in stream order.

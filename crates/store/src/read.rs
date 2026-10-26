@@ -61,6 +61,10 @@ pub(crate) fn read_after(
         return Ok(Vec::new());
     };
     let after = after.map_or(0, Seq::get);
+    // No event has a seq past u32::MAX (the key refuses it), so nothing comes after one.
+    if after > u64::from(u32::MAX) {
+        return Ok(Vec::new());
+    }
     let limit = limit.min(READ_PAGE_MAX);
     let low = codec::key(stream, id, after)?;
     let high = first_key(id) | 0xFFFF_FFFF;
