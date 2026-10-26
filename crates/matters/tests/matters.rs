@@ -38,3 +38,7 @@ mod reopen;
 #[cfg(test)]
 #[path = "matters/errors.rs"]
 mod errors;
+
+#[cfg(test)]
+#[path = "matters/refuse.rs"]
+mod refuse;

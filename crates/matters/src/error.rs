@@ -39,6 +39,12 @@ pub enum Error {
         /// The id asked for.
         id: CheckpointId,
     },
+    /// A checkpoint would reuse an id already on the timeline (`command.invalid`).
+    #[error("checkpoint {id} is already on the timeline")]
+    DuplicateCheckpoint {
+        /// The id passed.
+        id: CheckpointId,
+    },
     /// An undo names no decision for a path the step changed (`command.invalid`).
     #[error("the undo has no decision for {path}")]
     MissingDecision {
@@ -123,6 +129,12 @@ pub enum Refusal {
     /// It is an entry of the refused list (the home folder, a system folder), or an ancestor of
     /// one. The entry, as the host passed it.
     Listed(PathBuf),
+    /// It holds a `.clauseo/matter.json` naming this matter: it already belongs to one.
+    AlreadyMatter(MatterId),
+    /// It holds a `.clauseo/matter.json` that does not read, so it may belong to a matter.
+    UnreadableMatterJson,
+    /// It is, contains or sits inside the matters root.
+    MattersRoot,
 }
 
 impl fmt::Display for Refusal {
@@ -130,6 +142,13 @@ impl fmt::Display for Refusal {
         match self {
             Self::DriveRoot => f.write_str("it is a drive root"),
             Self::Listed(entry) => write!(f, "it is or contains {}", entry.display()),
+            Self::AlreadyMatter(id) => write!(f, "it is already matter {id}"),
+            Self::UnreadableMatterJson => {
+                f.write_str("its .clauseo/matter.json does not read, so it may be a matter")
+            }
+            Self::MattersRoot => {
+                f.write_str("it is, holds or sits inside Clauseo's matters folder")
+            }
         }
     }
 }
@@ -147,6 +166,7 @@ impl Error {
             Self::FolderRefused { .. } => ErrorCode::MatterFolderRefused,
             Self::FileLocked { .. } => ErrorCode::MatterFileLocked,
             Self::UnknownCheckpoint { .. }
+            | Self::DuplicateCheckpoint { .. }
             | Self::MissingDecision { .. }
             | Self::UnexpectedDecision { .. }
             | Self::FolderExists { .. }

@@ -187,9 +187,19 @@ impl Core {
                         EntryState::Read(blob)
                     } else {
                         let path = folder.join(file.path.as_str());
-                        let (blob, read) = self.history.store_file(&path, file.len)?;
-                        done.bytes = done.bytes.saturating_add(read);
-                        EntryState::Read(blob)
+                        match self.history.store_file(&path, file.len, cap) {
+                            Ok((blob, read)) => {
+                                done.bytes = done.bytes.saturating_add(read);
+                                EntryState::Read(blob)
+                            }
+                            // Gone since the walk listed it: it is deleted.
+                            Err(Error::Io { source, .. })
+                                if source.kind() == std::io::ErrorKind::NotFound =>
+                            {
+                                continue;
+                            }
+                            Err(err) => return Err(err),
+                        }
                     }
                 }
                 FoundKind::CloudOnly | FoundKind::OverCap => {
@@ -262,6 +272,9 @@ impl Core {
                 skipped,
             });
         }
+        if self.timeline.by_id.contains_key(&spec.entry.id) {
+            return Err(Error::DuplicateCheckpoint { id: spec.entry.id });
+        }
         if let Some(tools) = spec.tool_paths {
             changes = changes
                 .into_iter()
@@ -291,7 +304,9 @@ impl Core {
         };
         if let Err(err) = self.history.publish(commit, parent, &mut cache) {
             // The ref may or may not have moved: read it again before the next checkpoint.
-            self.reload()?;
+            if let Err(reload) = self.reload() {
+                tracing::warn!(error = %reload, "the timeline did not read after a failed publish");
+            }
             return Err(err);
         }
         self.cache = cache;

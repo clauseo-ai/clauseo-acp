@@ -239,6 +239,28 @@ impl Fixture {
     }
 }
 
+/// Asserts no undo temp file (`.clauseo-<n>.tmp`) is left anywhere under `dir`.
+pub(crate) fn assert_no_temp_files(dir: &Path) {
+    let mut stack = vec![dir.to_owned()];
+    while let Some(at) = stack.pop() {
+        for entry in std::fs::read_dir(&at).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name().into_string().unwrap();
+            assert!(
+                !(name.starts_with(".clauseo-")
+                    && Path::new(&name)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("tmp"))),
+                "{} left behind",
+                entry.path().display()
+            );
+            if entry.file_type().unwrap().is_dir() {
+                stack.push(entry.path());
+            }
+        }
+    }
+}
+
 /// Asserts `items` is empty, showing them if not.
 pub(crate) fn assert_none<T: PartialEq + std::fmt::Debug>(items: &[T]) {
     assert_eq!(items, &[] as &[T]);

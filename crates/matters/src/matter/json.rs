@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use clauseo_protocol::{MatterId, Timestamp};
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, MissingReason, write};
+use crate::{Error, MissingReason, fsync, write};
 
 /// The folder inside the matter folder that holds `matter.json`; excluded from every checkpoint.
 pub(crate) const DIR: &str = ".clauseo";
@@ -22,6 +22,7 @@ const VERSION: u32 = 1;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct MatterJson {
+    #[serde(default)]
     version: u32,
     matter_id: MatterId,
     created_at: Timestamp,
@@ -36,7 +37,10 @@ pub(crate) fn path(folder: &Path) -> PathBuf {
 /// `.clauseo` if needed.
 pub(crate) fn write(folder: &Path, id: MatterId, created_at: Timestamp) -> Result<(), Error> {
     let dir = folder.join(DIR);
-    write::create_dir_all(&dir).map_err(|err| Error::io("create", &dir, err))?;
+    if !dir.is_dir() {
+        write::create_dir_all(&dir).map_err(|err| Error::io("create", &dir, err))?;
+        fsync::sync_dir(folder).map_err(|err| Error::io("sync", folder, err))?;
+    }
     let json = MatterJson {
         version: VERSION,
         matter_id: id,
@@ -79,6 +83,29 @@ pub(crate) fn check(folder: &Path, id: MatterId) -> Result<(), Error> {
         Ok(())
     } else {
         Err(missing(MissingReason::OtherMatter(json.matter_id)))
+    }
+}
+
+/// What `.clauseo/matter.json` holds before an import.
+pub(crate) enum Existing {
+    /// No file.
+    None,
+    /// A matter's id.
+    Matter(MatterId),
+    /// A file that does not read as `matter.json`.
+    Unreadable,
+}
+
+/// Reads `folder`'s `matter.json`, if it has one.
+pub(crate) fn existing(folder: &Path) -> Result<Existing, Error> {
+    let file = path(folder);
+    match std::fs::read(&file) {
+        Ok(bytes) => Ok(serde_json::from_slice::<MatterJson>(&bytes)
+            .map_or(Existing::Unreadable, |json| {
+                Existing::Matter(json.matter_id)
+            })),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Existing::None),
+        Err(err) => Err(Error::io("read", file, err)),
     }
 }
 

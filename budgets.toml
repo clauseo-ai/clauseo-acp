@@ -183,7 +183,9 @@ limit = 200.0
 unit = "ms"
 gate = "alert"
 measured_by = "bench on a fixture folder"
-status = "unmeasured"
+status = "measured"
+measured = 15.5
+measured_on = "macos-arm64-desktop"
 source = "synthesis §4"
 
 [[budget]]

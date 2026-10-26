@@ -17,6 +17,7 @@ fn variant(err: &Error) -> &'static str {
         Error::FolderRefused { .. } => "FolderRefused",
         Error::FileLocked { .. } => "FileLocked",
         Error::UnknownCheckpoint { .. } => "UnknownCheckpoint",
+        Error::DuplicateCheckpoint { .. } => "DuplicateCheckpoint",
         Error::MissingDecision { .. } => "MissingDecision",
         Error::UnexpectedDecision { .. } => "UnexpectedDecision",
         Error::FolderExists { .. } => "FolderExists",
@@ -33,7 +34,7 @@ fn assert_code(err: &Error, code: ErrorCode, name: &str) {
 }
 
 /// One of each variant, with the code it maps to.
-fn hand_built() -> [(Error, ErrorCode); 11] {
+fn hand_built() -> [(Error, ErrorCode); 12] {
     let folder = PathBuf::from("/m");
     [
         (
@@ -58,6 +59,10 @@ fn hand_built() -> [(Error, ErrorCode); 11] {
         ),
         (
             Error::UnknownCheckpoint { id: cid(9) },
+            ErrorCode::CommandInvalid,
+        ),
+        (
+            Error::DuplicateCheckpoint { id: cid(9) },
             ErrorCode::CommandInvalid,
         ),
         (
@@ -153,6 +158,16 @@ fn undo_errors(fx: &Fixture) -> Matter {
     let err = undo(&mut matter, (1, 3), &["a.txt"], (4, 5)).unwrap_err();
     assert_code(&err, ErrorCode::MatterFileLocked, "FileLocked");
     assert_eq!(matter.timeline().len(), 2);
+    crate::support::remove_file(fx.file("~$a.txt"));
+
+    // A real change checkpointed under an id the timeline already has.
+    fx.write("a.txt", "three");
+    let err = matter.after_turn(&meta(3), &tools(&["a.txt"])).unwrap_err();
+    assert_code(&err, ErrorCode::CommandInvalid, "DuplicateCheckpoint");
+    let err = matter.before_turn(&meta(1)).unwrap_err();
+    assert_code(&err, ErrorCode::CommandInvalid, "DuplicateCheckpoint");
+    assert_eq!(matter.timeline().len(), 2);
+    assert_eq!(matter.last_checkpoint(), Some(cid(3)));
     matter
 }
 

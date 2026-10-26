@@ -22,6 +22,7 @@ pub fn scan(
     cancel: &AtomicBool,
 ) -> Result<Scanned, Error> {
     refuse::check_folder(folder, refused)?;
+    refuse::check_new_matter(folder, &settings.matters_root)?;
     let mut seen = Progress { files: 0, bytes: 0 };
     let walked = walk::walk(
         folder,

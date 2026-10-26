@@ -6,6 +6,7 @@ use std::ffi::OsString;
 use std::io;
 use std::path::{Component, Path, PathBuf, Prefix};
 
+use crate::matter::json;
 use crate::{Error, MissingReason, Refusal};
 
 /// Refuses `folder` if, once canonicalised, it is a drive root, or equals or contains an entry of
@@ -46,6 +47,35 @@ pub(crate) fn check_folder(folder: &Path, refused: &[PathBuf]) -> Result<(), Err
         if contains {
             return Err(refuse(Refusal::Listed(entry.clone())));
         }
+    }
+    Ok(())
+}
+
+/// Refuses `folder` if it already holds a `.clauseo/matter.json` (it belongs to a matter;
+/// importing it again would take it from that matter), or if it is, contains or sits inside the
+/// matters root (the history would version itself). Called after [`check_folder`].
+pub(crate) fn check_new_matter(folder: &Path, matters_root: &Path) -> Result<(), Error> {
+    let refuse = |reason| Error::FolderRefused {
+        folder: folder.to_path_buf(),
+        reason,
+    };
+    match json::existing(folder)? {
+        json::Existing::None => {}
+        json::Existing::Matter(id) => return Err(refuse(Refusal::AlreadyMatter(id))),
+        json::Existing::Unreadable => return Err(refuse(Refusal::UnreadableMatterJson)),
+    }
+    let canonical =
+        dunce::canonicalize(folder).map_err(|err| Error::io("canonicalize", folder, err))?;
+    let root = dunce::canonicalize(matters_root).unwrap_or_else(|_| matters_root.to_path_buf());
+    let (candidate, root) = (spellings(&canonical), spellings(&root));
+    let nested = candidate.iter().any(|folder_key| {
+        root.iter().any(|root_key| {
+            root_key.starts_with(folder_key.as_slice())
+                || folder_key.starts_with(root_key.as_slice())
+        })
+    });
+    if nested {
+        return Err(refuse(Refusal::MattersRoot));
     }
     Ok(())
 }

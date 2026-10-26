@@ -74,9 +74,8 @@ fn over_cap_file_skipped_and_never_written() {
 
     // Undoing the step keeps the over-cap file as it is.
     let mtime = fx.file("grow.txt").metadata().unwrap().modified().unwrap();
-    let undone = undo(&mut matter, (1, 4), &["grow.txt", "small.txt"], (5, 6)).unwrap();
+    let undone = undo(&mut matter, (1, 4), &["small.txt"], (5, 6)).unwrap();
     assert_eq!(undone.restored, [path("small.txt")]);
-    assert_eq!(undone.kept, [path("grow.txt")]);
     assert_eq!(fx.read("small.txt"), b"small");
     assert_eq!(fx.read("grow.txt"), grown);
     let after = fx.file("grow.txt").metadata().unwrap().modified().unwrap();
