@@ -35,6 +35,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 - `crates/desktop`: the Tauri shell. Blank for now.
 - `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `crates/fake_agent/scenarios/` (README.md).
 - `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.
+- `crates/store`: the event log, snapshots, blobs and receipts in one SQLite file; format in `docs/decisions/0006-store-format.md`.
 - `ui/app`: the React app. Empty for now. Tauri APIs only under `ui/app/src/transport/`.
 - `xtask`: checks, build timing, budgets. Builds without any app crate. Frozen: no new checks.
 
@@ -100,8 +101,7 @@ this. Use the words in `GLOSSARY.md` exactly.
   verified. Update both after each review.
 - Give each fact one home: a version, a key list, a policy string, a type, a rule's wording. Derive
   the rest from it; where two files cannot share it, add a test that fails when they disagree.
-- Touch the files your brief lists. If you need another, change it and list it under Deviations. If
-  the brief is wrong, stop and say so.
+- Touch the files your brief lists. If you need another, change it and list it under Deviations. If the brief is wrong, stop and say so.
 - When you review a pull request, follow the review bar in `CONTRIBUTING.md`.
 - Do not merge. A person reviews and merges.
 
