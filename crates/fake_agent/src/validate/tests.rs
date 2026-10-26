@@ -344,6 +344,8 @@ fn every_stable_method_has_a_type() {
     /// Unstable methods the SDK lists only when a feature is on. `fake_agent` turns none on, but
     /// Cargo unifies features in a workspace build, where `clauseo-acp`'s `unstable_session_fork`
     /// and `unstable_llm_providers` add these; a scenario still sends them only with `raw`.
+    /// Revisit on any `agent-client-protocol` bump: a method that becomes stable must leave this
+    /// list and get a response type, or this skip hides it.
     const UNSTABLE: &[&str] = &[
         "session/fork",
         "providers/list",

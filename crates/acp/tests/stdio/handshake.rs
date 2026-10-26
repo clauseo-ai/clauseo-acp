@@ -9,7 +9,7 @@ use crate::harness::{self, Ctx, chunk, inside, sess1, update_event};
 fn initialize_caps_exact() {
     let outcome = harness::run("initialize-caps", async |ctx: Ctx| {
         let info = ctx.client.initialize().await.unwrap();
-        assert_eq!(info.name, "fake_agent");
+        assert_eq!(info.name.as_deref(), Some("fake_agent"));
         assert_eq!(info.version.as_deref(), Some("0.0.0"));
         assert!(info.capabilities.load_session);
         assert!(info.capabilities.prompt.embedded_context);

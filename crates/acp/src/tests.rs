@@ -12,6 +12,8 @@ use serde_json::{Value, json};
 
 use super::*;
 
+mod interface;
+
 /// The agent's stdin: each write arrives as one message (the line sink writes a line at once).
 struct Stdin(mpsc::UnboundedSender<Vec<u8>>);
 
@@ -64,16 +66,30 @@ impl Agent {
         assert_eq!(init["method"], "initialize");
         self.respond(&init, &json!({"protocolVersion": 1}));
     }
+
+    /// Answers `initialize`, then `session/new` with session `s-1`.
+    async fn start(&mut self) {
+        self.initialize().await;
+        let new = self.read().await;
+        assert_eq!(new["method"], "session/new");
+        self.respond(&new, &json!({"sessionId": "s-1"}));
+    }
+
+    fn update(&self, params: &Value) {
+        self.send(&json!({"jsonrpc": "2.0", "method": "session/update", "params": params}));
+    }
 }
 
 fn pipes() -> (AcpClient, async_channel::Receiver<AcpEvent>, Driver, Agent) {
+    pipes_with(ConnectOptions::default())
+}
+
+fn pipes_with(
+    options: ConnectOptions,
+) -> (AcpClient, async_channel::Receiver<AcpEvent>, Driver, Agent) {
     let (written_tx, written) = mpsc::unbounded();
     let (stdout, stdout_rx) = mpsc::unbounded();
-    let (client, events, driver) = connect(
-        Stdin(written_tx),
-        stdout_rx.into_async_read(),
-        ConnectOptions::default(),
-    );
+    let (client, events, driver) = connect(Stdin(written_tx), stdout_rx.into_async_read(), options);
     (client, events, driver, Agent { written, stdout })
 }
 

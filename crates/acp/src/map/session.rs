@@ -171,9 +171,9 @@ pub(crate) fn agent_info(response: acp::InitializeResponse) -> AgentInfo {
     let capabilities = response.agent_capabilities;
     let prompt = capabilities.prompt_capabilities;
     let session = capabilities.session_capabilities;
-    let (name, version) = response.agent_info.map_or((String::new(), None), |info| {
-        (info.name, Some(info.version))
-    });
+    let (name, version) = response
+        .agent_info
+        .map_or((None, None), |info| (Some(info.name), Some(info.version)));
     AgentInfo {
         name,
         version,
@@ -203,13 +203,13 @@ pub(crate) fn agent_info(response: acp::InitializeResponse) -> AgentInfo {
 fn auth_method(method: acp::AuthMethod) -> Option<AuthMethod> {
     Some(match method {
         acp::AuthMethod::Agent(agent) => AuthMethod {
-            id: agent.id.0.to_string(),
+            id: CompactString::from(&*agent.id.0),
             name: agent.name,
             description: agent.description,
             kind: AuthKind::Agent,
         },
         acp::AuthMethod::Terminal(terminal) => AuthMethod {
-            id: terminal.id.0.to_string(),
+            id: CompactString::from(&*terminal.id.0),
             name: terminal.name,
             description: terminal.description,
             kind: AuthKind::Terminal {

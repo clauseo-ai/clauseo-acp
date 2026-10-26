@@ -35,7 +35,10 @@ spawns agents and owns the pipes. Its dev-dependencies (`clauseo-fake_agent`, `a
 `acp` stays free of any executor: the host spawns the `Driver` future on its own. A later SDK
 major changes only this crate. Cargo unifies features across the workspace, so the four unstable
 schema features reach `fake_agent` too in a workspace build: with `unstable_plan_operations` on,
-`plan_update` and `plan_removed` decode where they did not before.
+`plan_update` and `plan_removed` decode where they did not before. For the same reason
+`fake_agent`'s `every_stable_method_has_a_type` skips `session/fork` and `providers/*`, which
+the SDK lists only with those features on; on any `agent-client-protocol` bump that list is
+checked again, so a method the bump makes stable is not hidden by it.
 
 ## Status
 

@@ -182,7 +182,7 @@ fn notice_and_compaction() {
         assert_eq!(end.stop, StopReason::EndTurn);
         let t1 = Origin::Turn(turn(1));
         let summary = |text: &str| AgentUpdate::CompactionSummaryChunk {
-            acp_id: "c-1".to_owned(),
+            acp_id: "c-1".into(),
             content: block(text),
         };
         assert_eq!(
@@ -199,7 +199,7 @@ fn notice_and_compaction() {
                 (
                     t1,
                     AgentUpdate::CompactionStarted {
-                        acp_id: "c-1".to_owned()
+                        acp_id: "c-1".into()
                     }
                 ),
                 (t1, summary("The lease was reviewed in March. ")),
@@ -207,7 +207,7 @@ fn notice_and_compaction() {
                 (
                     t1,
                     AgentUpdate::CompactionEnded {
-                        acp_id: "c-1".to_owned(),
+                        acp_id: "c-1".into(),
                         completed: true,
                     }
                 ),
@@ -247,9 +247,12 @@ fn unknown_update_ignored() {
                         "Before the unknown update. "
                     )
                 ),
-                AcpEvent::Warning(ProtocolWarning::UnknownUpdate {
-                    name: "_clauseo_test_unknown".to_owned(),
-                }),
+                AcpEvent::Warning {
+                    session: Some(sess1()),
+                    warning: ProtocolWarning::UnknownUpdate {
+                        name: "_clauseo_test_unknown".to_owned(),
+                    },
+                },
                 update_event(
                     t1,
                     chunk(

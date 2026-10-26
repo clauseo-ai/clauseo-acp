@@ -85,3 +85,71 @@ fn empty_input_has_no_lines() {
     assert_eq!(lines(Vec::new(), 1).unwrap(), Vec::<Vec<u8>>::new());
     assert_eq!(lines(b"\n\n".to_vec(), 1).unwrap(), [b"", b""]);
 }
+
+/// `(is_message, is_update)` for a line, or `None` when it does not decode.
+fn classify(line: &str) -> Option<(bool, bool)> {
+    let envelope = serde_json::from_str::<Envelope>(line).ok()?;
+    Some((envelope.is_message(), envelope.is_update()))
+}
+
+#[test]
+fn envelope_counts_only_what_the_handler_counts_off() {
+    let update = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s"}}"#;
+    assert_eq!(classify(update), Some((true, true)));
+    for (line, expected) in [
+        // Another notification, a request, a response: passed on, not counted.
+        (
+            r#"{"jsonrpc":"2.0","method":"elicitation/complete","params":{}}"#,
+            Some((true, false)),
+        ),
+        (
+            r#"{"jsonrpc":"2.0","id":1,"method":"session/update","params":{}}"#,
+            Some((true, false)),
+        ),
+        (
+            r#"{"jsonrpc":"2.0","id":null,"result":{}}"#,
+            Some((true, false)),
+        ),
+        // `params` that the handler would not see as an object, or another version.
+        (
+            r#"{"jsonrpc":"2.0","method":"session/update","params":[]}"#,
+            Some((true, false)),
+        ),
+        (
+            r#"{"jsonrpc":"2.0","method":"session/update"}"#,
+            Some((true, false)),
+        ),
+        (
+            r#"{"jsonrpc":"1.0","method":"session/update","params":{}}"#,
+            Some((true, false)),
+        ),
+        // An escaped key or value reads as its text.
+        (
+            r#"{"jsonrpc":"2.0","method":"session/update","params":{}}"#,
+            Some((true, true)),
+        ),
+        // A repeated key counts as its last value, as in the SDK.
+        (
+            r#"{"jsonrpc":"2.0","method":"x","method":"session/update","params":{}}"#,
+            Some((true, true)),
+        ),
+        // Not JSON-RPC: a log object, no `method` or `id`, a scalar, an array.
+        (r#"{"level":"info","msg":"ready"}"#, Some((false, false))),
+        (r#"{"jsonrpc":"2.0"}"#, Some((false, false))),
+        ("42", None),
+        (
+            r#"[{"jsonrpc":"2.0","method":"session/update","params":{}}]"#,
+            None,
+        ),
+    ] {
+        assert_eq!(classify(line), expected, "{line}");
+    }
+    // The handler's side of the same rule.
+    assert!(counted("session/update", &serde_json::json!({})));
+    assert!(counted(
+        MALFORMED_LINE_METHOD,
+        &serde_json::json!({"bytes": 3})
+    ));
+    assert!(!counted("session/update", &serde_json::Value::Null));
+    assert!(!counted("elicitation/complete", &serde_json::json!({})));
+}

@@ -224,7 +224,7 @@ pub(crate) fn update_event(origin: Origin, update: AgentUpdate) -> AcpEvent {
 pub(crate) fn chunk(role: MessageRole, message: &str, text: &str) -> AgentUpdate {
     AgentUpdate::MessageChunk {
         role,
-        acp_message_id: Some(message.to_owned()),
+        acp_message_id: Some(message.into()),
         content: block(text),
     }
 }

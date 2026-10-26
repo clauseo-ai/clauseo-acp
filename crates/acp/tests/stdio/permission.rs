@@ -309,7 +309,7 @@ fn elicitation_url_completed() {
             assert_eq!(
                 done.last(),
                 Some(&AcpEvent::ElicitationCompleted {
-                    elicitation_id: "el-1".to_owned()
+                    elicitation_id: "el-1".into()
                 })
             );
         };
