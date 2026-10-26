@@ -12,7 +12,8 @@ use crate::event::{LimitSignal, RawFrame};
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions {
     /// Receives a copy of every line in and out, with `try_send`: when the channel is full the
-    /// frame is dropped and counted ([`AcpClient::frames_dropped`](crate::AcpClient::frames_dropped)).
+    /// frame is dropped and counted, as
+    /// [`AcpClient::frames_dropped`](crate::AcpClient::frames_dropped) tells.
     pub frame_tap: Option<async_channel::Sender<RawFrame>>,
 }
 

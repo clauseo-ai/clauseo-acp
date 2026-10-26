@@ -341,7 +341,19 @@ fn method_names<T: Serialize>(names: &T) -> Vec<String> {
 fn every_stable_method_has_a_type() {
     /// Notifications the agent receives, which have no response type to check.
     const RECEIVED_NOTIFICATIONS: &[&str] = &[acp::AGENT_METHOD_NAMES.session_cancel];
+    /// Unstable methods the SDK lists only when a feature is on. `fake_agent` turns none on, but
+    /// Cargo unifies features in a workspace build, where `clauseo-acp`'s `unstable_session_fork`
+    /// and `unstable_llm_providers` add these; a scenario still sends them only with `raw`.
+    const UNSTABLE: &[&str] = &[
+        "session/fork",
+        "providers/list",
+        "providers/set",
+        "providers/disable",
+    ];
     for method in method_names(&acp::AGENT_METHOD_NAMES) {
+        if UNSTABLE.contains(&method.as_str()) {
+            continue;
+        }
         assert!(
             result_check(&method).is_some() || RECEIVED_NOTIFICATIONS.contains(&method.as_str()),
             "{method} has no response type or received-notification entry"

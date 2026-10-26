@@ -1,0 +1,3 @@
+{"scenario":"version-mismatch","description":"initialize answers protocolVersion 2 (raw, the SDK would refuse it): the client must close the connection with UnsupportedVersion{agent:2}; nothing else is expected","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","raw":true,"result":{"protocolVersion":2,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}

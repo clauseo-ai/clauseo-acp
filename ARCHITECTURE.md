@@ -77,7 +77,7 @@ to write instead.
 | `matters` | Shadow repos via gix: create and import, checkpoints, undo, restore, compare, file watching; retention after G9 | protocol, gix, notify, serde, serde_json, tracing, dunce; nix (macOS only) | tauri | exists |
 | `settings` | Settings schema and locations, the policy layer | serde, schemars | tauri | planned |
 | `process` | Spawning, graceful shutdown, process-tree kill, restart supervisor, the `Launcher` trait | protocol, async-process | tauri | planned |
-| `acp` | Wrapper over `agent-client-protocol` | protocol, agent-client-protocol | tauri, tokio | planned |
+| `acp` | Wrapper over `agent-client-protocol` | protocol, agent-client-protocol, futures, async-channel, serde, serde_json, memchr | tauri, tokio | exists |
 | `host` | Own thread and executor: sessions, commands, permissions, subscriptions, checkpoints per turn | protocol, reducer, store, matters, process, acp, settings | tauri, tokio, agents | planned |
 | `fake_agent` | Scripted ACP agent for tests | agent-client-protocol, serde, serde_json | | exists |
 | `cli` | Headless client for agents and CI | host, settings | tauri | planned |

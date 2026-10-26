@@ -138,8 +138,9 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
 /// The lines the SDK's `Lines` transport reads: each one UTF-8 JSON, copied to the frame tap.
 /// Blank lines are skipped; any other line that is not UTF-8 JSON becomes a
 /// [`MALFORMED_LINE_METHOD`] notification, which the inbound handler turns into a
-/// [`ProtocolWarning::MalformedLine`](crate::ProtocolWarning::MalformedLine). A line over 8 MiB ends the stream with an error, which
-/// closes the connection (the driver reports `Error::Protocol`).
+/// [`ProtocolWarning::MalformedLine`](crate::ProtocolWarning::MalformedLine). A line over 8 MiB
+/// ends the stream with an error, which closes the connection (the driver reports
+/// `Error::Protocol`).
 pub(crate) fn incoming<R>(
     reader: R,
     shared: Arc<Shared>,
