@@ -76,7 +76,10 @@ fn malformed_line_skipped() {
         assert_eq!(events.len(), 3, "{events:?}");
         assert!(matches!(
             &events[1],
-            AcpEvent::Warning(ProtocolWarning::MalformedLine { .. })
+            AcpEvent::Warning {
+                session: None,
+                warning: ProtocolWarning::MalformedLine { .. }
+            }
         ));
         for index in [0, 2] {
             let AcpEvent::Update { update, origin, .. } = &events[index] else {

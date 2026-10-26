@@ -1,7 +1,9 @@
 //! What the driver sends the host: [`AcpEvent`] and the types inside it.
 //!
-//! Payloads use `protocol`'s types wherever it has one. Agent ids (`toolCallId`, `messageId`,
-//! session ids) stay the agent's text: `host` mints Clauseo's ids and dedupes on them.
+//! Payloads use `protocol`'s types wherever it has one. Agent ids stay the agent's text: a
+//! session id is an `AgentSessionId`, every other agent id (`toolCallId`, `messageId`,
+//! `compactionId`, `elicitationId`, an auth method's `id`) a `CompactString`. `host` mints
+//! Clauseo's ids and dedupes on them.
 
 use clauseo_protocol::{
     AgentSessionId, AvailableCommand, CompactString, ConfigOption, ContentBlock, Cost, Count,
@@ -42,14 +44,14 @@ pub enum AcpEvent {
         key: PendingKey,
         /// The agent's `elicitationId`, which URL elicitations carry and
         /// [`AcpEvent::ElicitationCompleted`] names again; `None` for a form.
-        elicitation_id: Option<String>,
+        elicitation_id: Option<CompactString>,
         /// The form or the URL.
         request: ElicitationRequest,
     },
     /// The agent says a URL elicitation finished (`elicitation/complete`).
     ElicitationCompleted {
         /// The agent's `elicitationId`.
-        elicitation_id: String,
+        elicitation_id: CompactString,
     },
     /// A plan limit signal from an update (`_claude/rateLimit` on `usage_update`, or the AIR
     /// `sessionFailure` on `session_info_update`).
@@ -62,7 +64,13 @@ pub enum AcpEvent {
         signal: LimitSignal,
     },
     /// Something the agent sent that the driver skipped or did not understand.
-    Warning(ProtocolWarning),
+    Warning {
+        /// The agent's session it is about, when the message named one: `None` for a malformed
+        /// line, an `elicitation/complete`, or a `session/update` without a usable `sessionId`.
+        session: Option<AgentSessionId>,
+        /// What it was.
+        warning: ProtocolWarning,
+    },
 }
 
 /// When an update came, relative to the session's turns.
@@ -104,7 +112,7 @@ pub enum AgentUpdate {
         /// Whose message.
         role: MessageRole,
         /// The agent's `messageId`, when it sent one.
-        acp_message_id: Option<String>,
+        acp_message_id: Option<CompactString>,
         /// The block. An ACP block type the driver does not know is `Unsupported`.
         content: ContentBlock,
     },
@@ -153,19 +161,19 @@ pub enum AgentUpdate {
     /// `compaction_update` with status `in_progress`.
     CompactionStarted {
         /// The agent's `compactionId`.
-        acp_id: String,
+        acp_id: CompactString,
     },
     /// `compaction_update` with status `completed`, `failed` or `cancelled`.
     CompactionEnded {
         /// The agent's `compactionId`.
-        acp_id: String,
+        acp_id: CompactString,
         /// Whether it completed.
         completed: bool,
     },
     /// `compaction_summary_chunk`: one block of the summary.
     CompactionSummaryChunk {
         /// The agent's `compactionId`.
-        acp_id: String,
+        acp_id: CompactString,
         /// The block.
         content: ContentBlock,
     },
@@ -213,8 +221,8 @@ pub enum LimitSignal {
     Stopped {
         /// Why.
         reason: LimitStopReason,
-        /// The failure's `title`, for display.
-        title: String,
+        /// The failure's `title`, for display, when it is a string.
+        title: Option<String>,
     },
 }
 
@@ -239,29 +247,33 @@ pub enum ProtocolWarning {
     },
     /// A `session/update` whose `sessionUpdate` the driver does not map.
     UnknownUpdate {
-        /// The `sessionUpdate` name.
+        /// The `sessionUpdate` name, as the agent wrote it.
         name: String,
     },
-    /// A known `session/update` that failed to decode, or held an id no command could name.
+    /// A `session/update` or another notification that failed to decode: no `update`, no
+    /// `sessionUpdate` name, a known update whose fields do not decode, or an id no command
+    /// could name.
     InvalidUpdate {
-        /// The `sessionUpdate` name.
-        name: String,
+        /// The `sessionUpdate` name, or the notification's method when it is not a
+        /// `session/update`; `None` when the update has no `sessionUpdate` string.
+        name: Option<String>,
         /// Why.
         error: String,
     },
     /// `_claude/rateLimit` with a `status` other than `allowed`, `allowed_warning`, `rejected`.
     UnknownLimitStatus {
-        /// The status.
-        status: String,
+        /// The status; `None` when it is missing or not a string.
+        status: Option<String>,
     },
     /// An AIR `sessionFailure` that is not a plan limit (`context_exhausted`, a warning, ...).
+    /// Each field is `None` when it is missing or not a string.
     SessionFailure {
         /// Its `category`.
-        category: String,
+        category: Option<String>,
         /// Its `severity`.
-        severity: String,
+        severity: Option<String>,
         /// Its `title`.
-        title: String,
+        title: Option<String>,
     },
 }
 

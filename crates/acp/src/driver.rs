@@ -16,7 +16,7 @@ mod answers;
 
 use crate::Error;
 use crate::client::{Command, Reply};
-use crate::event::{AcpEvent, Origin};
+use crate::event::Origin;
 use crate::map;
 use crate::state::{SessionState, Shared};
 use crate::types::{AuthKind, McpServer, PromptEnd, SessionStart};
@@ -71,7 +71,7 @@ fn execute(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, command: Command) {
         Command::Initialize(reply) => initialize(cx, shared, reply),
         Command::Authenticate { method_id, reply } => {
             let terminal = shared.state().auth_methods.iter().any(|method| {
-                method.id == method_id && matches!(method.kind, AuthKind::Terminal { .. })
+                method.id.as_str() == method_id && matches!(method.kind, AuthKind::Terminal { .. })
             });
             if terminal {
                 return answer(reply, Err(Error::TerminalAuthMethod));
@@ -305,6 +305,7 @@ fn prompt(
     let request = acp::PromptRequest::new(session.as_str().to_owned(), blocks);
     let state = Arc::clone(shared);
     let key = CompactString::from(session.as_str());
+    let session = session.clone();
     let on_answer = move |result: Result<acp::PromptResponse, Error>| async move {
         {
             let mut locked = state.state();
@@ -322,7 +323,10 @@ fn prompt(
         if let Some(failure) = response.meta.as_ref().and_then(map::session_failure) {
             match failure {
                 Ok(signal) => limit = Some(signal),
-                Err(warning) => state.emit(AcpEvent::Warning(warning)).await,
+                Err(warning) => {
+                    let event = map::warning_event(Some(session), warning);
+                    state.emit(event).await;
+                }
             }
         }
         Ok(PromptEnd {

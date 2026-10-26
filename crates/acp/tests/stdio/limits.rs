@@ -166,7 +166,7 @@ fn session_failure_typed() {
             .unwrap();
         let stopped = LimitSignal::Stopped {
             reason: LimitStopReason::PlanWindow,
-            title: "You've hit your usage limit.".to_owned(),
+            title: Some("You've hit your usage limit.".to_owned()),
         };
         assert_eq!(
             end,

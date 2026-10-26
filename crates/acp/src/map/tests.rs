@@ -18,14 +18,7 @@ fn map_update(mut update: Value, cwd: Option<&Path>) -> Vec<AcpEvent> {
     let quarantined = quarantine_unknown_blocks(&mut update);
     let decoded: acp::SessionUpdate = serde_json::from_value(update).unwrap();
     let mut out = Vec::new();
-    super::update(
-        &session(),
-        Origin::Idle,
-        decoded,
-        cwd,
-        quarantined,
-        &mut out,
-    );
+    super::update(session(), Origin::Idle, decoded, cwd, quarantined, &mut out);
     out
 }
 
@@ -196,9 +189,12 @@ fn rate_limit_fields_and_unknown_status() {
     let events = map_update(usage(json!({"status": "throttled"})), None);
     assert_eq!(
         events[1],
-        AcpEvent::Warning(ProtocolWarning::UnknownLimitStatus {
-            status: "throttled".to_owned()
-        })
+        AcpEvent::Warning {
+            session: Some(session()),
+            warning: ProtocolWarning::UnknownLimitStatus {
+                status: Some("throttled".to_owned())
+            }
+        }
     );
     // Other `_meta` keys are never read.
     let plain = json!({"sessionUpdate": "usage_update", "used": 1, "size": 2, "_meta": {"x": 1}});
@@ -217,7 +213,7 @@ fn session_failure_categories() {
     let stopped = |reason| {
         Ok(LimitSignal::Stopped {
             reason,
-            title: "T".to_owned(),
+            title: Some("T".to_owned()),
         })
     };
     assert_eq!(
@@ -236,9 +232,9 @@ fn session_failure_categories() {
         assert_eq!(
             failure(category, severity, actions),
             Err(ProtocolWarning::SessionFailure {
-                category: category.to_owned(),
-                severity: severity.to_owned(),
-                title: "T".to_owned(),
+                category: Some(category.to_owned()),
+                severity: Some(severity.to_owned()),
+                title: Some("T".to_owned()),
             })
         );
     }
@@ -252,6 +248,6 @@ fn config_option_with_unnameable_id_is_refused() {
     let events = map_update(update, None);
     assert!(matches!(
         &events[..],
-        [AcpEvent::Warning(ProtocolWarning::InvalidUpdate { name, .. })] if name == "config_option_update"
+        [AcpEvent::Warning { session: Some(_), warning: ProtocolWarning::InvalidUpdate { name: Some(name), .. } }] if name == "config_option_update"
     ));
 }

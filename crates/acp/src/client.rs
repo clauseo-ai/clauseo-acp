@@ -171,7 +171,9 @@ impl AcpClient {
 
     /// `session/cancel`. Answers every pending permission request of the session as
     /// `cancelled` and returns their keys; later updates come with
-    /// [`Origin::Late`](crate::Origin::Late) until the next prompt starts.
+    /// [`Origin::Late`](crate::Origin::Late) until the next prompt starts. Elicitations of the
+    /// session stay pending; answer or cancel them with
+    /// [`answer_elicitation`](Self::answer_elicitation).
     pub async fn cancel(&self, session: &AgentSessionId) -> Result<Vec<PendingKey>, Error> {
         let session = session.clone();
         self.call(|reply| Command::Cancel { session, reply }).await

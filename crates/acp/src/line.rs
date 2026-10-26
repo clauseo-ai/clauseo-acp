@@ -1,16 +1,18 @@
 //! The stdout line path and the stdin line sink.
 //!
 //! The SDK's `Lines` transport takes its lines from [`incoming`], which splits the agent's stdout
-//! into lines and passes on only the ones that are UTF-8 JSON. Without it, SDK 3.3.0's `Lines`
-//! answers a malformed line with a parse-error response to the agent, which a strict agent (and
+//! into lines and passes on only the ones that are UTF-8 JSON-RPC messages. Without it, SDK
+//! 3.3.0's `Lines` answers a line that is not one (not JSON, or JSON such as a log object, a
+//! number or an array) with an error response to the agent, which a strict agent (and
 //! `fake_agent`) treats as a protocol error; here the line is skipped with
 //! `ProtocolWarning::MalformedLine` and nothing goes back. `Lines` caps nothing, so the 8 MiB
-//! cap is here too.
+//! cap and the [`Gate`] are here too.
 //!
 //! Hot path: every agent message takes it. The measured choices (64 KiB buffer, `memchr`,
-//! `from_utf8` then `IgnoredAny`, one exact allocation for a line that sits whole in the buffer)
-//! are in the pull request that added them.
+//! `from_utf8` then a decode that builds nothing, one exact allocation for a line that sits whole
+//! in the buffer) are in pull request #64.
 
+use std::fmt;
 use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -20,6 +22,8 @@ use std::task::{Context, Poll};
 use futures::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
 use futures::task::AtomicWaker;
 use futures::{Sink, Stream};
+use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer};
 
 use crate::event::FrameDirection;
 use crate::state::Shared;
@@ -33,18 +37,46 @@ pub(crate) const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
 /// The stdout read buffer. A macOS pipe holds at most 64 KiB, so a larger one gains nothing.
 const READ_BUFFER_BYTES: usize = 64 * 1024;
 
-/// Stops the line reader while an event waits for room in the full event channel, so a host
-/// that stops draining slows the agent instead of filling memory. The SDK reads lines into an
-/// unbounded queue, so the reader itself has to stop.
+/// How many counted lines may wait between the line reader and the inbound handler.
+pub(crate) const MAX_LINES_IN_FLIGHT: usize = 64;
+
+/// Stops the line reader, so a host that stops draining slows the agent instead of filling
+/// memory. The SDK reads lines into an unbounded queue ahead of its dispatch loop, so the reader
+/// itself has to stop. It stops while an event waits for room in the full event channel, and
+/// while [`MAX_LINES_IN_FLIGHT`] counted lines are read but not yet handled.
+///
+/// Counted lines are the `session/update` notifications and the malformed lines, the ones an
+/// agent sends many of: [`incoming`] counts each when it passes it on, and the inbound handler
+/// counts it off ([`counted`]) when the SDK hands it over. The agent's responses, requests and
+/// other notifications are not counted, because the SDK does not hand every one of them to the
+/// handler (a response to an unknown id, a malformed `$/cancel_request`), and a line counted
+/// but never handled would stop the reader for good.
 #[derive(Debug, Default)]
 pub(crate) struct Gate {
     /// How many events are waiting for room.
     blocked: AtomicUsize,
+    /// Counted lines passed on to the SDK that the inbound handler has not started.
+    in_flight: AtomicUsize,
     /// The line reader, when it waits for the gate.
     reader: AtomicWaker,
 }
 
 impl Gate {
+    /// The reader passed on a counted line.
+    fn line_read(&self) {
+        self.in_flight.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// The inbound handler started a counted line.
+    pub(crate) fn line_handled(&self) {
+        let before = self
+            .in_flight
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
+        if before.is_ok_and(|before| before >= MAX_LINES_IN_FLIGHT) {
+            self.reader.wake();
+        }
+    }
+
     /// An event starts waiting for room.
     pub(crate) fn close(&self) {
         self.blocked.fetch_add(1, Ordering::AcqRel);
@@ -57,13 +89,19 @@ impl Gate {
         }
     }
 
-    /// Ready when no event waits for room.
+    fn is_open(&self) -> bool {
+        self.blocked.load(Ordering::Acquire) == 0
+            && self.in_flight.load(Ordering::Acquire) < MAX_LINES_IN_FLIGHT
+    }
+
+    /// Ready when no event waits for room and fewer than [`MAX_LINES_IN_FLIGHT`] counted lines
+    /// wait for the handler.
     fn poll_open(&self, cx: &mut Context<'_>) -> Poll<()> {
-        if self.blocked.load(Ordering::Acquire) == 0 {
+        if self.is_open() {
             return Poll::Ready(());
         }
         self.reader.register(cx.waker());
-        if self.blocked.load(Ordering::Acquire) == 0 {
+        if self.is_open() {
             Poll::Ready(())
         } else {
             Poll::Pending
@@ -135,12 +173,13 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
     }
 }
 
-/// The lines the SDK's `Lines` transport reads: each one UTF-8 JSON, copied to the frame tap.
-/// Blank lines are skipped; any other line that is not UTF-8 JSON becomes a
-/// [`MALFORMED_LINE_METHOD`] notification, which the inbound handler turns into a
+/// The lines the SDK's `Lines` transport reads, each copied to the frame tap. A UTF-8 JSON
+/// object with a `jsonrpc` key and a `method` or an `id` passes as it is ([`Envelope`]). Blank
+/// lines are skipped; any other line becomes a [`MALFORMED_LINE_METHOD`] notification, which the
+/// inbound handler turns into a
 /// [`ProtocolWarning::MalformedLine`](crate::ProtocolWarning::MalformedLine). A line over 8 MiB
 /// ends the stream with an error, which closes the connection (the driver reports
-/// `Error::Protocol`).
+/// `Error::Protocol`). Before each line it waits for the [`Gate`].
 pub(crate) fn incoming<R>(
     reader: R,
     shared: Arc<Shared>,
@@ -172,19 +211,27 @@ where
                 continue;
             }
             let line = match String::from_utf8(bytes) {
-                Ok(line) if serde_json::from_str::<serde::de::IgnoredAny>(&line).is_ok() => {
-                    shared.tap(FrameDirection::In, &line);
-                    line
-                }
                 Ok(line) => {
                     shared.tap(FrameDirection::In, &line);
-                    malformed_marker(line.len())
+                    match serde_json::from_str::<Envelope>(&line) {
+                        Ok(envelope) if envelope.is_message() => {
+                            if envelope.is_update() {
+                                shared.gate.line_read();
+                            }
+                            line
+                        }
+                        Ok(_) | Err(_) => {
+                            shared.gate.line_read();
+                            malformed_marker(line.len())
+                        }
+                    }
                 }
                 Err(error) => {
                     shared.tap(
                         FrameDirection::In,
                         &String::from_utf8_lossy(error.as_bytes()),
                     );
+                    shared.gate.line_read();
                     malformed_marker(error.as_bytes().len())
                 }
             };
@@ -198,10 +245,188 @@ where
 /// loop, and a warning sent from here would overtake them.
 pub(crate) const MALFORMED_LINE_METHOD: &str = "_clauseo/malformed_line";
 
+/// Whether the inbound handler counts this notification off the [`Gate`]: the same lines
+/// [`incoming`] counted, a `session/update` whose `params` is an object ([`Envelope::is_update`])
+/// or a malformed-line marker. The SDK hands each of these to the handler exactly once.
+pub(crate) fn counted(method: &str, params: &serde_json::Value) -> bool {
+    (method == "session/update" || method == MALFORMED_LINE_METHOD) && params.is_object()
+}
+
 fn malformed_marker(bytes: usize) -> String {
     format!(
         r#"{{"jsonrpc":"2.0","method":"{MALFORMED_LINE_METHOD}","params":{{"bytes":{bytes}}}}}"#
     )
+}
+
+/// What the filter reads of a line, with no `Value` and no allocation: which JSON-RPC keys it
+/// has, and the shapes [`Envelope::is_update`] needs. Only a JSON object decodes: a number, a
+/// string or an array (ACP sends no batches) fails like a line that is not JSON. A key that
+/// appears twice counts as its last value, as in the SDK's own decode.
+#[derive(Debug, Default)]
+struct Envelope {
+    jsonrpc: Option<Shape>,
+    method: Option<Shape>,
+    params: Option<Shape>,
+    id: bool,
+    result: bool,
+    error: bool,
+}
+
+impl Envelope {
+    /// A JSON-RPC message: a `jsonrpc` key, and a `method` or an `id`. Anything else the SDK
+    /// would answer with an error, and a log line an adapter wrote to stdout is not one.
+    fn is_message(&self) -> bool {
+        self.jsonrpc.is_some() && (self.method.is_some() || self.id)
+    }
+
+    /// A `session/update` notification the SDK decodes and hands the inbound handler: `jsonrpc`
+    /// is `"2.0"`, `params` an object, and there is no `id`, `result` or `error`.
+    fn is_update(&self) -> bool {
+        self.jsonrpc == Some(Shape::Text { matches: true })
+            && self.method == Some(Shape::Text { matches: true })
+            && self.params == Some(Shape::Object)
+            && !(self.id || self.result || self.error)
+    }
+}
+
+impl<'de> Deserialize<'de> for Envelope {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(EnvelopeVisitor)
+    }
+}
+
+struct EnvelopeVisitor;
+
+impl<'de> Visitor<'de> for EnvelopeVisitor {
+    type Value = Envelope;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON-RPC message")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Envelope, A::Error> {
+        let mut envelope = Envelope::default();
+        while let Some(key) = map.next_key::<Key>()? {
+            match key {
+                Key::Jsonrpc => envelope.jsonrpc = Some(map.next_value_seed(ShapeOf("2.0"))?),
+                Key::Method => {
+                    envelope.method = Some(map.next_value_seed(ShapeOf("session/update"))?);
+                }
+                Key::Params => envelope.params = Some(map.next_value_seed(ShapeOf(""))?),
+                Key::Id => envelope.id = map.next_value::<IgnoredAny>().map(|_| true)?,
+                Key::Result => envelope.result = map.next_value::<IgnoredAny>().map(|_| true)?,
+                Key::Error => envelope.error = map.next_value::<IgnoredAny>().map(|_| true)?,
+                Key::Other => drop(map.next_value::<IgnoredAny>()?),
+            }
+        }
+        Ok(envelope)
+    }
+}
+
+/// A key of a JSON-RPC message, read without copying it.
+#[derive(Clone, Copy)]
+enum Key {
+    Jsonrpc,
+    Method,
+    Params,
+    Id,
+    Result,
+    Error,
+    Other,
+}
+
+impl<'de> Deserialize<'de> for Key {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_identifier(KeyVisitor)
+    }
+}
+
+struct KeyVisitor;
+
+impl Visitor<'_> for KeyVisitor {
+    type Value = Key;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a key")
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<Key, E> {
+        Ok(match v {
+            "jsonrpc" => Key::Jsonrpc,
+            "method" => Key::Method,
+            "params" => Key::Params,
+            "id" => Key::Id,
+            "result" => Key::Result,
+            "error" => Key::Error,
+            _ => Key::Other,
+        })
+    }
+}
+
+/// The kind of one value, read without keeping it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    /// A string; `matches` when it is the one [`ShapeOf`] looks for.
+    Text { matches: bool },
+    /// An object.
+    Object,
+    /// Anything else.
+    Other,
+}
+
+/// Reads a value's [`Shape`], comparing a string with the text it holds.
+struct ShapeOf(&'static str);
+
+impl<'de> DeserializeSeed<'de> for ShapeOf {
+    type Value = Shape;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Shape, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for ShapeOf {
+    type Value = Shape;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("any value")
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<Shape, E> {
+        Ok(Shape::Text {
+            matches: v == self.0,
+        })
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Shape, A::Error> {
+        while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+        Ok(Shape::Object)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Shape, A::Error> {
+        while seq.next_element::<IgnoredAny>()?.is_some() {}
+        Ok(Shape::Other)
+    }
+
+    fn visit_bool<E: de::Error>(self, _: bool) -> Result<Shape, E> {
+        Ok(Shape::Other)
+    }
+
+    fn visit_i64<E: de::Error>(self, _: i64) -> Result<Shape, E> {
+        Ok(Shape::Other)
+    }
+
+    fn visit_u64<E: de::Error>(self, _: u64) -> Result<Shape, E> {
+        Ok(Shape::Other)
+    }
+
+    fn visit_f64<E: de::Error>(self, _: f64) -> Result<Shape, E> {
+        Ok(Shape::Other)
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Shape, E> {
+        Ok(Shape::Other)
+    }
 }
 
 /// Writes each line and a `\n` to the agent's stdin, flushing after each, and copies it to the

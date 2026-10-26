@@ -1,6 +1,7 @@
 //! The one SDK handler: every message the agent sends passes through [`Inbound`]. It only
 //! forwards: it maps, records what an answer needs, sends events and returns. While the event
-//! channel is full it waits, which holds the SDK's dispatch loop and stops the line reader.
+//! channel is full it waits, which holds the SDK's dispatch loop and stops the line reader. It
+//! counts each `session/update` and malformed line off the line reader's `Gate` as it starts.
 //!
 //! It takes messages untyped, because SDK 3.3.0 drops a typed notification that fails to decode
 //! with only a log line: an unknown `sessionUpdate` would vanish without
@@ -37,6 +38,9 @@ impl HandleDispatchFrom<Agent> for Inbound {
     ) -> Result<Handled<Dispatch>, agent_client_protocol::Error> {
         match message {
             Dispatch::Notification(message) => {
+                if crate::line::counted(&message.method, &message.params) {
+                    self.shared.gate.line_handled();
+                }
                 self.notification(message).await;
                 Ok(Handled::Yes)
             }
@@ -68,17 +72,16 @@ impl Inbound {
         match message.method.as_str() {
             "session/update" => self.session_update(message.params).await,
             "elicitation/complete" => {
-                match acp::CompleteElicitationNotification::deserialize(&message.params) {
-                    Ok(complete) => {
-                        let elicitation_id = complete.elicitation_id.0.to_string();
-                        let event = AcpEvent::ElicitationCompleted { elicitation_id };
-                        self.shared.emit(event).await;
-                    }
+                let event = match acp::CompleteElicitationNotification::deserialize(&message.params)
+                {
+                    Ok(complete) => AcpEvent::ElicitationCompleted {
+                        elicitation_id: CompactString::from(&*complete.elicitation_id.0),
+                    },
                     Err(error) => {
-                        let warning = invalid_message("elicitation/complete", &error);
-                        self.shared.emit(AcpEvent::Warning(warning)).await;
+                        map::invalid(None, Some("elicitation/complete"), error.to_string())
                     }
-                }
+                };
+                self.shared.emit(event).await;
             }
             crate::line::MALFORMED_LINE_METHOD => {
                 let bytes = message.params.get("bytes").and_then(Value::as_u64);
@@ -86,7 +89,7 @@ impl Inbound {
                     .and_then(|bytes| usize::try_from(bytes).ok())
                     .unwrap_or_default();
                 let warning = ProtocolWarning::MalformedLine { bytes };
-                self.shared.emit(AcpEvent::Warning(warning)).await;
+                self.shared.emit(map::warning_event(None, warning)).await;
             }
             // `$/cancel_request` and extension notifications: nothing to do.
             _ => {}
@@ -94,35 +97,48 @@ impl Inbound {
     }
 
     async fn session_update(&mut self, mut params: Value) {
-        let Some(update) = params.get_mut("update") else {
-            let warning = ProtocolWarning::InvalidUpdate {
-                name: String::new(),
-                error: "session/update without an update".to_owned(),
-            };
-            return self.shared.emit(AcpEvent::Warning(warning)).await;
+        // Built once, before decoding, so a warning about this update can name its session.
+        let session_id = params
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .map(AgentSessionId::new);
+        let session = match session_id {
+            Some(Ok(session)) => Some(session),
+            Some(Err(_)) | None => None,
         };
-        let name = update.get("sessionUpdate").and_then(Value::as_str);
-        let Some(name) = name.filter(|name| map::KNOWN_UPDATES.contains(name)) else {
-            let name = name.unwrap_or_default();
-            return self.shared.emit(map::unknown(name)).await;
+        let update = params.get("update");
+        let name = update.map(|update| update.get("sessionUpdate").and_then(Value::as_str));
+        let name: &'static str = match name {
+            None => {
+                let error = "a session/update without an update".to_owned();
+                return self.shared.emit(map::invalid(session, None, error)).await;
+            }
+            Some(None) => {
+                let error = "an update without a sessionUpdate name".to_owned();
+                return self.shared.emit(map::invalid(session, None, error)).await;
+            }
+            Some(Some(name)) => match map::KNOWN_UPDATES.into_iter().find(|known| *known == name) {
+                Some(known) => known,
+                None => return self.shared.emit(map::unknown(session, name)).await,
+            },
         };
-        let name: &'static str = map::KNOWN_UPDATES
-            .into_iter()
-            .find(|known| *known == name)
+        let quarantined = params
+            .get_mut("update")
+            .map(map::quarantine_unknown_blocks)
             .unwrap_or_default();
-        let quarantined = map::quarantine_unknown_blocks(update);
         let notification = match serde_json::from_value::<acp::SessionNotification>(params) {
             Ok(notification) => notification,
             Err(error) => {
-                return self
-                    .shared
-                    .emit(map::invalid(name, error.to_string()))
-                    .await;
+                let event = map::invalid(session, Some(name), error.to_string());
+                return self.shared.emit(event).await;
             }
         };
-        let Ok(session) = AgentSessionId::new(&notification.session_id.0) else {
-            let error = "empty sessionId".to_owned();
-            return self.shared.emit(map::invalid(name, error)).await;
+        let Some(session) = session else {
+            let error = "a missing or empty sessionId".to_owned();
+            return self
+                .shared
+                .emit(map::invalid(None, Some(name), error))
+                .await;
         };
         {
             let state = self.shared.state();
@@ -130,7 +146,7 @@ impl Inbound {
             let origin = session_state.map_or(crate::event::Origin::Idle, |s| s.origin);
             let cwd = session_state.map(|s| s.cwd.as_path());
             map::update(
-                &session,
+                session,
                 origin,
                 notification.update,
                 cwd,
@@ -244,7 +260,7 @@ fn permission(params: Value) -> Result<PermissionRequest, agent_client_protocol:
 /// An elicitation request, checked.
 struct CheckedElicitation {
     session: AgentSessionId,
-    elicitation_id: Option<String>,
+    elicitation_id: Option<CompactString>,
     request: ElicitationRequest,
 }
 
@@ -267,7 +283,7 @@ fn elicitation(params: Value) -> Result<CheckedElicitation, agent_client_protoco
             )
         }
         acp::ElicitationMode::Url(url) => {
-            let id = Some(url.elicitation_id.0.to_string());
+            let id = Some(CompactString::from(&*url.elicitation_id.0));
             (
                 url.scope,
                 id,
@@ -313,11 +329,4 @@ fn permission_kinds(params: &Value) -> Result<Vec<PermissionKind>, String> {
             other => Err(format!("{other:?}")),
         })
         .collect()
-}
-
-fn invalid_message(method: &str, error: &serde_json::Error) -> ProtocolWarning {
-    ProtocolWarning::InvalidUpdate {
-        name: method.to_owned(),
-        error: error.to_string(),
-    }
 }

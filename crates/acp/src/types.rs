@@ -20,9 +20,9 @@ pub struct ConnectOptions {
 /// What `initialize` told about the agent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentInfo {
-    /// `agentInfo.name`, or empty when the agent sent none.
-    pub name: String,
-    /// `agentInfo.version`.
+    /// `agentInfo.name`; `None` when the agent sent no `agentInfo`.
+    pub name: Option<String>,
+    /// `agentInfo.version`; `None` when the agent sent no `agentInfo`.
     pub version: Option<String>,
     /// What it supports. `steering` stays `None` until steer is built.
     pub capabilities: AgentCapabilities,
@@ -34,7 +34,7 @@ pub struct AgentInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthMethod {
     /// The id `authenticate` takes.
-    pub id: String,
+    pub id: CompactString,
     /// Its name, for display.
     pub name: String,
     /// Its description.

@@ -111,8 +111,9 @@ fn take_unknown(block: &mut Value) -> Option<ContentBlock> {
 
 /// Maps one decoded `session/update` into events, pushed onto `out`. `cwd` is the session's
 /// folder, for tool locations; `quarantined` the blocks [`quarantine_unknown_blocks`] took out.
+/// The last event takes `session`; only an update that makes several events clones it.
 pub(crate) fn update(
-    session: &AgentSessionId,
+    session: AgentSessionId,
     origin: Origin,
     update: acp::SessionUpdate,
     cwd: Option<&Path>,
@@ -150,87 +151,109 @@ pub(crate) fn update(
         acp::SessionUpdate::ConfigOptionUpdate(update) => {
             match session::config_options(update.config_options) {
                 Ok(options) => AgentUpdate::ConfigOptions(options),
-                Err(error) => return out.push(invalid("config_option_update", error)),
+                Err(error) => {
+                    return out.push(invalid(Some(session), Some("config_option_update"), error));
+                }
             }
         }
         acp::SessionUpdate::SessionInfoUpdate(update) => {
-            if let Some(meta) = &update.meta
-                && let Some(failure) = limit::session_failure(meta)
-            {
-                out.push(limit_event(session, origin, failure));
-            }
-            match update.title {
-                MaybeUndefined::Value(title) => AgentUpdate::SessionTitle { title: Some(title) },
-                MaybeUndefined::Null => AgentUpdate::SessionTitle { title: None },
-                MaybeUndefined::Undefined => return,
+            let failure = update.meta.as_ref().and_then(limit::session_failure);
+            let title = match update.title {
+                MaybeUndefined::Value(title) => Some(Some(title)),
+                MaybeUndefined::Null => Some(None),
+                MaybeUndefined::Undefined => None,
+            };
+            match (failure, title) {
+                (Some(failure), Some(title)) => {
+                    out.push(limit_event(session.clone(), origin, failure));
+                    AgentUpdate::SessionTitle { title }
+                }
+                (Some(failure), None) => return out.push(limit_event(session, origin, failure)),
+                (None, Some(title)) => AgentUpdate::SessionTitle { title },
+                (None, None) => return,
             }
         }
         acp::SessionUpdate::UsageUpdate(update) => return usage(session, origin, update, out),
         acp::SessionUpdate::Notice(notice) => session::notice(notice),
         acp::SessionUpdate::CompactionUpdate(update) => match compaction(&update) {
             Ok(update) => update,
-            Err(error) => return out.push(invalid("compaction_update", error)),
+            Err(error) => {
+                return out.push(invalid(Some(session), Some("compaction_update"), error));
+            }
         },
         acp::SessionUpdate::CompactionSummaryChunk(chunk) => {
-            let acp_id = chunk.compaction_id.0.to_string();
+            let acp_id = CompactString::from(&*chunk.compaction_id.0);
             let block = match quarantined.next() {
                 Some(Quarantined::Chunk(block)) => block,
                 Some(Quarantined::ToolContent(..)) | None => content::block(chunk.content),
             };
-            for content in split_block(block) {
-                let acp_id = acp_id.clone();
-                let update = AgentUpdate::CompactionSummaryChunk { acp_id, content };
-                out.push(update_event(session, origin, update));
-            }
-            return;
+            return push_parts(
+                block,
+                (session, acp_id),
+                out,
+                |(session, acp_id), content| {
+                    let update = AgentUpdate::CompactionSummaryChunk { acp_id, content };
+                    update_event(session, origin, update)
+                },
+            );
         }
         // Filtered out before decoding (`KNOWN_UPDATES`); kept for a change of that list.
-        acp::SessionUpdate::PlanUpdate(_) => return out.push(unknown("plan_update")),
-        acp::SessionUpdate::PlanRemoved(_) => return out.push(unknown("plan_removed")),
+        acp::SessionUpdate::PlanUpdate(_) => {
+            return out.push(unknown(Some(session), "plan_update"));
+        }
+        acp::SessionUpdate::PlanRemoved(_) => {
+            return out.push(unknown(Some(session), "plan_removed"));
+        }
         other => {
             let whole = serde_json::to_value(&other).unwrap_or_default();
             let name = whole.get("sessionUpdate").and_then(Value::as_str);
-            return out.push(unknown(name.unwrap_or_default()));
+            let event = if let Some(name) = name {
+                unknown(Some(session), name)
+            } else {
+                let error = "an update newer than schema 1.11.0".to_owned();
+                invalid(Some(session), None, error)
+            };
+            return out.push(event);
         }
     };
     out.push(update_event(session, origin, mapped));
 }
 
-fn update_event(session: &AgentSessionId, origin: Origin, update: AgentUpdate) -> AcpEvent {
+fn update_event(session: AgentSessionId, origin: Origin, update: AgentUpdate) -> AcpEvent {
     AcpEvent::Update {
-        session: session.clone(),
+        session,
         origin,
         update,
     }
 }
 
 fn chunks(
-    session: &AgentSessionId,
+    session: AgentSessionId,
     origin: Origin,
     role: MessageRole,
     chunk: acp::ContentChunk,
     quarantined: Option<Quarantined>,
     out: &mut Vec<AcpEvent>,
 ) {
-    let acp_message_id = chunk.message_id.map(|id| id.0.to_string());
+    let acp_message_id = chunk.message_id.map(|id| CompactString::from(&*id.0));
     let block = match quarantined {
         Some(Quarantined::Chunk(block)) => block,
         Some(Quarantined::ToolContent(..)) | None => content::block(chunk.content),
     };
-    for content in split_block(block) {
-        let acp_message_id = acp_message_id.clone();
+    let shared = (session, acp_message_id);
+    push_parts(block, shared, out, |(session, acp_message_id), content| {
         let update = AgentUpdate::MessageChunk {
             role,
             acp_message_id,
             content,
         };
-        out.push(update_event(session, origin, update));
-    }
+        update_event(session, origin, update)
+    });
 }
 
 /// The usage, then Claude's rate limit when its `_meta` carries one.
 fn usage(
-    session: &AgentSessionId,
+    session: AgentSessionId,
     origin: Origin,
     update: acp::UsageUpdate,
     out: &mut Vec<AcpEvent>,
@@ -246,16 +269,17 @@ fn usage(
         size: Count::clamped(update.size),
         cost,
     };
-    out.push(update_event(session, origin, usage));
-    if let Some(meta) = &update.meta
-        && let Some(signal) = limit::rate_limit(meta)
-    {
-        out.push(limit_event(session, origin, signal));
+    match update.meta.as_ref().and_then(limit::rate_limit) {
+        Some(signal) => {
+            out.push(update_event(session.clone(), origin, usage));
+            out.push(limit_event(session, origin, signal));
+        }
+        None => out.push(update_event(session, origin, usage)),
     }
 }
 
 fn compaction(update: &acp::CompactionUpdate) -> Result<AgentUpdate, String> {
-    let acp_id = update.compaction_id.0.to_string();
+    let acp_id = CompactString::from(&*update.compaction_id.0);
     let completed = match &update.status {
         acp::CompactionStatus::InProgress => return Ok(AgentUpdate::CompactionStarted { acp_id }),
         acp::CompactionStatus::Completed => true,
@@ -267,35 +291,27 @@ fn compaction(update: &acp::CompactionUpdate) -> Result<AgentUpdate, String> {
     Ok(AgentUpdate::CompactionEnded { acp_id, completed })
 }
 
-/// A text block over 1 MiB as several blocks; any other block as itself.
-fn split_block(block: ContentBlock) -> Parts {
+/// Pushes the event `make` builds for each part of `block`: a text block over 1 MiB in several
+/// parts, any other block as itself. The one part of a block that is not split takes `shared`;
+/// the parts of a split block each get a clone.
+fn push_parts<T: Clone>(
+    block: ContentBlock,
+    shared: T,
+    out: &mut Vec<AcpEvent>,
+    make: impl Fn(T, ContentBlock) -> AcpEvent,
+) {
     match block {
         ContentBlock::Text { text } if text.len() > content::MAX_TEXT_CHUNK_BYTES => {
-            Parts::Many(split_text(&text).into_iter())
+            for text in split_text(&text) {
+                out.push(make(shared.clone(), ContentBlock::Text { text }));
+            }
         }
         block @ (ContentBlock::Text { .. }
         | ContentBlock::Image { .. }
         | ContentBlock::Audio { .. }
         | ContentBlock::ResourceLink { .. }
         | ContentBlock::Resource { .. }
-        | ContentBlock::Unsupported { .. }) => Parts::One(Some(block)),
-    }
-}
-
-/// The blocks of [`split_block`], without boxing an iterator.
-enum Parts {
-    One(Option<ContentBlock>),
-    Many(std::vec::IntoIter<String>),
-}
-
-impl Iterator for Parts {
-    type Item = ContentBlock;
-
-    fn next(&mut self) -> Option<ContentBlock> {
-        match self {
-            Self::One(block) => block.take(),
-            Self::Many(texts) => texts.next().map(|text| ContentBlock::Text { text }),
-        }
+        | ContentBlock::Unsupported { .. }) => out.push(make(shared, block)),
     }
 }
 
@@ -310,29 +326,35 @@ fn tool_blocks(quarantined: impl Iterator<Item = Quarantined>) -> Vec<(usize, Co
 }
 
 fn limit_event(
-    session: &AgentSessionId,
+    session: AgentSessionId,
     origin: Origin,
     signal: Result<crate::event::LimitSignal, ProtocolWarning>,
 ) -> AcpEvent {
     match signal {
         Ok(signal) => AcpEvent::Limit {
-            session: session.clone(),
+            session,
             origin,
             signal,
         },
-        Err(warning) => AcpEvent::Warning(warning),
+        Err(warning) => warning_event(Some(session), warning),
     }
 }
 
-pub(crate) fn unknown(name: &str) -> AcpEvent {
-    AcpEvent::Warning(ProtocolWarning::UnknownUpdate {
-        name: name.to_owned(),
-    })
+/// A warning, about `session` when it is known.
+pub(crate) fn warning_event(session: Option<AgentSessionId>, warning: ProtocolWarning) -> AcpEvent {
+    AcpEvent::Warning { session, warning }
 }
 
-pub(crate) fn invalid(name: &str, error: String) -> AcpEvent {
-    AcpEvent::Warning(ProtocolWarning::InvalidUpdate {
-        name: name.to_owned(),
-        error,
-    })
+pub(crate) fn unknown(session: Option<AgentSessionId>, name: &str) -> AcpEvent {
+    let name = name.to_owned();
+    warning_event(session, ProtocolWarning::UnknownUpdate { name })
+}
+
+pub(crate) fn invalid(
+    session: Option<AgentSessionId>,
+    name: Option<&str>,
+    error: String,
+) -> AcpEvent {
+    let name = name.map(str::to_owned);
+    warning_event(session, ProtocolWarning::InvalidUpdate { name, error })
 }

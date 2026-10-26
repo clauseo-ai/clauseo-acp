@@ -18,7 +18,7 @@ pub(crate) fn rate_limit(
         Some("allowed_warning") => LimitStatus::Warning,
         Some("rejected") => LimitStatus::Rejected,
         other => {
-            let status = other.map_or_else(|| "(missing)".to_owned(), str::to_owned);
+            let status = other.map(str::to_owned);
             return Some(Err(ProtocolWarning::UnknownLimitStatus { status }));
         }
     };
@@ -54,21 +54,15 @@ pub(crate) fn session_failure(
         .get("air")?
         .get("sessionFailure")?
         .as_object()?;
-    let text = |key: &str| {
-        failure
-            .get(key)
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned()
-    };
+    let text = |key: &str| failure.get(key).and_then(Value::as_str).map(str::to_owned);
     let (category, severity, title) = (text("category"), text("severity"), text("title"));
     let actions: Option<Vec<&str>> = failure
         .get("actions")
         .and_then(Value::as_array)
         .map(|actions| actions.iter().filter_map(Value::as_str).collect());
-    let reason = match (category.as_str(), severity.as_str(), actions.as_deref()) {
-        ("limit", "error", Some([])) => Some(LimitStopReason::PlanWindow),
-        ("limit", "error", Some(["retry"])) => Some(LimitStopReason::Temporary),
+    let reason = match (category.as_deref(), severity.as_deref(), actions.as_deref()) {
+        (Some("limit"), Some("error"), Some([])) => Some(LimitStopReason::PlanWindow),
+        (Some("limit"), Some("error"), Some(["retry"])) => Some(LimitStopReason::Temporary),
         _ => None,
     };
     Some(match reason {

@@ -9,7 +9,8 @@
 //!   check, and the refusal of `fs/*` and `terminal/*` (-32601).
 //! - Turning agent traffic into [`AcpEvent`]s built from `protocol`'s types (`map.rs`), the
 //!   typed plan limit signals ([`LimitSignal`]), and the stdout line filter with its caps
-//!   (`line.rs`): a line at most 8 MiB, a text chunk at most 1 MiB.
+//!   (`line.rs`): a line at most 8 MiB, a text chunk at most 1 MiB, at most 64 updates read
+//!   ahead of the handler.
 //!
 //! # Interface
 //!
@@ -24,6 +25,10 @@
 //!   owns timers, including the cancel fallback.
 //! - The event channel holds 1,024 events. When it is full the driver stops reading the agent,
 //!   which slows it. The host must keep draining events while it awaits any call.
+//! - What a host that drains nothing holds: the 1,024 events, one more waiting for room, and at
+//!   most 64 `session/update`s and malformed lines read but not yet handled, each line at most
+//!   8 MiB. The agent's responses, requests and other notifications are not counted in the 64.
+//!   Anything past that stays in the pipe, and the agent blocks on it.
 //! - No call blocks another: a pending prompt never holds back a permission answer or a cancel.
 //!   A call's future may be dropped; its answer is then discarded.
 //! - Origins: `Turn(t)` while turn `t`'s prompt is in flight; `Late(t)` from `cancel()` until the
@@ -32,22 +37,23 @@
 //! - `_meta` is read only at `_claude/rateLimit` (on `usage_update`) and
 //!   `jetbrains.air.sessionFailure` (on `session_info_update` and the prompt response). A
 //!   `session/new` `_meta` is sent verbatim and never read.
-//! - A malformed line, an unknown update or an unknown content block never ends the connection:
-//!   they become a [`ProtocolWarning`] or a `ContentBlock::Unsupported`.
+//! - A malformed line (not UTF-8 JSON-RPC), an unknown update or an unknown content block never
+//!   ends the connection, and nothing is written back for it: it becomes a [`ProtocolWarning`],
+//!   naming its session when the message named one, or a `ContentBlock::Unsupported`.
 //! - No Clauseo id is minted here: agent ids stay strings, and `host` maps [`PendingKey`]s.
 //!
 //! # Depends on
 //!
-//! `protocol`, `agent-client-protocol` (features `unstable_session_fork`,
-//! `unstable_llm_providers`, `unstable_end_turn_token_usage`, `unstable_plan_operations`),
-//! `futures`, `async-channel`, `serde`, `serde_json`, `memchr`, `thiserror`. Never `tauri`,
-//! `tokio` or `process`: the host hands over the pipes.
+//! `protocol`, `agent-client-protocol` with the features its `Cargo.toml` line names (never
+//! `unstable_subagents`), `futures`, `async-channel`, `serde`, `serde_json`, `memchr`,
+//! `thiserror`. Never `tauri`, `tokio` or `process`: the host hands over the pipes.
 //!
 //! # Start reading
 //!
 //! `driver.rs` (the connection and the command loop), then `inbound.rs` (what the agent sends),
 //! `line.rs` (the stdout line path), `map.rs` (the mappings) and `state.rs`. Tests: unit tests
-//! in `src/*/tests.rs`; the stdio tests against `fake_agent` in `tests/stdio/`, with this
+//! in `src/tests.rs` and `src/tests/` (the driver over in-memory pipes, where interface tests
+//! go) and `src/*/tests.rs`; the stdio tests against `fake_agent` in `tests/stdio/`, with this
 //! crate's own scenarios in `tests/scenarios/`.
 
 #![deny(
