@@ -87,6 +87,10 @@ pulldown-cmark = { version = "0.13.4", default-features = false }
 # fake_agent validates its scenarios against the SDK's v1 schema (schema 1.11.0). No features here:
 # a crate that needs one turns it on in its own line.
 agent-client-protocol = { version = "=3.3.0", default-features = false }
+# clauseo-matters: shadow repositories in process (no git binary, no libgit2); each crate turns on
+# only the gix features it needs.
+gix = { version = "0.89.0", default-features = false }
+tracing = "0.1.44"
 
 [workspace.lints.rust]
 unsafe_code = "deny"               # deny, not forbid: an FFI module overrides with #[expect(unsafe_code, reason = "…")]

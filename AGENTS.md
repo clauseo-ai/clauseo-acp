@@ -34,6 +34,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 <!-- One line per crate or package that exists. Planned crates are in ARCHITECTURE.md. -->
 - `crates/desktop`: the Tauri shell. Blank for now.
 - `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `crates/fake_agent/scenarios/` (README.md).
+- `crates/matters`: matter folders and their shadow git history (checkpoints, undo). See `docs/decisions/0007-matter-history-format.md`.
 - `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.
 - `crates/store`: the event log, snapshots, blobs and receipts in one SQLite file; format in `docs/decisions/0006-store-format.md`.
 - `ui/app`: the React app. Empty for now. Tauri APIs only under `ui/app/src/transport/`.
@@ -111,8 +112,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 - Every acceptance check in the brief passes, with output in the pull request.
 - Tests sit at the interface and include a failing case.
 - Docs you changed still pass the doc checks.
-- Every comment, doc, help text, test name and PR sentence about what you changed is still true,
-  and claims only what a test or command showed.
+- Every comment, doc, help text, test name and PR sentence about what you changed is still true, and claims only what a test or command showed.
 
 ## Changing this file
 
