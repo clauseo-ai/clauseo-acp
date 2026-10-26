@@ -10,10 +10,10 @@ use clauseo_protocol::{
 
 use crate::{Matter, PlaceholderProbe};
 
-/// The per-file size cap (QR8.1): 512 MB. A larger file is skipped (`OverSizeCap`), never read.
+/// The per-file size cap: 512 MB. A larger file is skipped (`OverSizeCap`), never read.
 pub const FILE_CAP_BYTES: u64 = 512_000_000;
 
-/// The folder size above which an import warns (QR8.2): 20 GB. A warning only, never a refusal.
+/// The folder size above which an import warns: 20 GB. A warning only, never a refusal.
 pub const IMPORT_WARN_BYTES: u64 = 20_000_000_000;
 
 /// How many of the largest files a [`ScanReport`] names.
