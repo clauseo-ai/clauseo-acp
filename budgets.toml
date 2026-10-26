@@ -194,7 +194,7 @@ metric = "reducer apply, one event"
 limit = 0.05
 unit = "ms"
 gate = "pr"
-measured_by = "gungraun instruction-count proxy"
+measured_by = "cargo bench -p clauseo-reducer_bench --bench apply (gungraun, 50,000 ir per event)"
 status = "unmeasured"
 source = "synthesis §4; doc 04"
 

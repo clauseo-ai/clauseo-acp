@@ -4,8 +4,7 @@ Clauseo is a desktop ACP client for lawyers: a Rust session host, a thin Tauri 2
 The lawyer brings their own agent (Claude Code or Codex). This file is for coding agents and people
 alike. `CLAUDE.md` imports it, so Claude Code and Codex read the same rules.
 
-Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means the coding agent reading
-this. Use the words in `GLOSSARY.md` exactly.
+Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means the coding agent reading this. Use the words in `GLOSSARY.md` exactly.
 
 ## Read next
 
@@ -37,6 +36,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 - `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `crates/fake_agent/scenarios/` (README.md).
 - `crates/matters`: matter folders and their shadow git history (checkpoints, undo). See `docs/decisions/0007-matter-history-format.md`.
 - `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.
+- `crates/reducer`: the pure fold from events to state and view changes, and snapshots; its gungraun bench is `crates/reducer_bench` (Linux).
 - `crates/store`: the event log, snapshots, blobs and receipts in one SQLite file; format in `docs/decisions/0006-store-format.md`.
 - `ui/app`: the React app. Empty for now. Tauri APIs only under `ui/app/src/transport/`.
 - `xtask`: checks, build timing, budgets. Builds without any app crate. Frozen: no new checks.

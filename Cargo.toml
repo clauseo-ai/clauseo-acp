@@ -1,9 +1,10 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "xtask"]
-# `cargo xtask buildtime` times edits to clauseo-protocol with cargo at the root, so it must be in
-# the default members' graph; until desktop depends on it (through host), it is listed itself.
-default-members = ["crates/desktop", "crates/protocol"]
+# `cargo xtask buildtime` times edits to clauseo-protocol and clauseo-reducer with cargo at the
+# root, so they must be in the default members' graph; until desktop depends on them (through
+# host), they are listed themselves.
+default-members = ["crates/desktop", "crates/protocol", "crates/reducer"]
 
 [workspace.package]
 edition = "2024"
@@ -65,7 +66,8 @@ compact_str = "0.10.0"
 specta = "=2.0.0-rc.25"
 # protocol's `specta` feature: specta-serde applies the serde attributes (the one for rc.25).
 specta-serde = "=0.0.12"
-# Test-only: property tests, and the MessagePack form the store writes.
+# proptest: test-only. rmp-serde: the MessagePack form the store writes, and clauseo-reducer's
+# snapshot bytes.
 proptest = "1.12"
 rmp-serde = "1.3.1"
 # clauseo-store: SQLite (its crate line turns on `bundled` and `blob`; the defaults keep `cache`
@@ -80,6 +82,9 @@ futures = "0.3.32"
 criterion = { version = "0.8", default-features = false }
 # Golden snapshots of the wire form (clauseo-protocol); the json feature goes on the crate line.
 insta = "1.49"
+# Bench-only, Linux only: clauseo-reducer's instruction counts under Valgrind. The
+# gungraun-runner binary CI installs must be the same version.
+gungraun = "0.20"
 # Test-only: the TypeScript export.
 specta-typescript = "=0.0.12"
 # xtask's docs check, and protocol's doc-table tests (test-only there).

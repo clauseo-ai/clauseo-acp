@@ -75,7 +75,7 @@ pub(crate) struct Probe {
     pub subcommand: &'static str,
 }
 
-/// The four probes, in the order they run and print.
+/// The five probes, in the order they run and print.
 const PROBES: &[Probe] = &[
     Probe {
         name: "check_desktop",
@@ -100,6 +100,12 @@ const PROBES: &[Probe] = &[
         package: "clauseo-protocol",
         budget_id: "cargo_build_protocol_edit",
         subcommand: "build",
+    },
+    Probe {
+        name: "test_reducer",
+        package: "clauseo-reducer",
+        budget_id: "reducer_test_edit",
+        subcommand: "test",
     },
 ];
 

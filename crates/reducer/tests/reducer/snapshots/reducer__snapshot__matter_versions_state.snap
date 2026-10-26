@@ -1,0 +1,129 @@
+---
+source: crates/reducer/tests/reducer/snapshot.rs
+expression: fold(&matter_versions().unwrap())
+---
+{
+  "matter": {
+    "matter": "01900000-0000-7000-8000-000100000000",
+    "seq": 10,
+    "header": {
+      "order": 1,
+      "matter": "01900000-0000-7000-8000-000100000000",
+      "name": "Smith v Jones",
+      "kind": "folder",
+      "import": {
+        "files": 12,
+        "bytes": 4000000,
+        "cloud_only": 1
+      }
+    },
+    "entries": [
+      {
+        "version": {
+          "order": 2,
+          "checkpoint": "01900000-0000-7000-8000-000100000003",
+          "kind": "import",
+          "ts": 2000,
+          "files": []
+        }
+      },
+      {
+        "version": {
+          "order": 3,
+          "checkpoint": "01900000-0000-7000-8000-000100000004",
+          "kind": "before_turn",
+          "thread": "01900000-0000-7000-8000-000200000000",
+          "turn": "01900000-0000-7000-8000-000100000002",
+          "ts": 3000,
+          "files": []
+        }
+      },
+      {
+        "version": {
+          "order": 4,
+          "checkpoint": "01900000-0000-7000-8000-000100000005",
+          "kind": "after_turn",
+          "thread": "01900000-0000-7000-8000-000200000000",
+          "turn": "01900000-0000-7000-8000-000100000002",
+          "ts": 4000,
+          "files": []
+        }
+      },
+      {
+        "version": {
+          "order": 5,
+          "checkpoint": "01900000-0000-7000-8000-000100000009",
+          "kind": "outside_edits",
+          "thread": "01900000-0000-7000-8000-000200000000",
+          "turn": "01900000-0000-7000-8000-000100000002",
+          "ts": 5000,
+          "files": [
+            {
+              "path": "lease.docx",
+              "change": "modified",
+              "before": "ab12",
+              "after": "cd34",
+              "size_bytes": 2048,
+              "may_include_lawyer_edits": false
+            },
+            {
+              "path": "notes/summary.md",
+              "change": "added",
+              "after": "ef56",
+              "size_bytes": 300,
+              "may_include_lawyer_edits": false
+            }
+          ]
+        }
+      },
+      {
+        "version": {
+          "order": 7,
+          "checkpoint": "01900000-0000-7000-8000-00010000000c",
+          "kind": "undo",
+          "thread": "01900000-0000-7000-8000-000200000000",
+          "turn": "01900000-0000-7000-8000-000100000002",
+          "ts": 7000,
+          "files": []
+        }
+      },
+      {
+        "version": {
+          "order": 8,
+          "checkpoint": "01900000-0000-7000-8000-00010000000e",
+          "kind": "outside_edits",
+          "ts": 8000,
+          "files": []
+        }
+      },
+      {
+        "version": {
+          "order": 9,
+          "checkpoint": "01900000-0000-7000-8000-000100000010",
+          "kind": "restore",
+          "ts": 9000,
+          "files": []
+        }
+      },
+      {
+        "marker": {
+          "order": 10,
+          "event": "01900000-0000-7000-8000-000100000012",
+          "kind": {
+            "version_restored": {
+              "from": "01900000-0000-7000-8000-000100000004",
+              "checkpoint": "01900000-0000-7000-8000-000100000010",
+              "scope": {
+                "files": {
+                  "paths": [
+                    "lease.docx"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

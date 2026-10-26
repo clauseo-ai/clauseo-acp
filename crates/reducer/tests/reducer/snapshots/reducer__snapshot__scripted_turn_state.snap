@@ -1,0 +1,1035 @@
+---
+source: crates/reducer/tests/reducer/snapshot.rs
+expression: fold(&scripted_turn().unwrap())
+---
+{
+  "thread": {
+    "thread": "01900000-0000-7000-8000-000300000000",
+    "seq": 571,
+    "header": {
+      "order": 1,
+      "thread": "01900000-0000-7000-8000-000300000000",
+      "matter": "01900000-0000-7000-8000-000100000000",
+      "title": "Indemnity review",
+      "agent": "claude-acp",
+      "status": "idle",
+      "queue_held": false,
+      "config_options": [],
+      "commands": [],
+      "plan": [
+        {
+          "content": "Step 0 of the review",
+          "priority": "medium",
+          "status": "completed"
+        },
+        {
+          "content": "Step 1 of the review",
+          "priority": "medium",
+          "status": "completed"
+        },
+        {
+          "content": "Step 2 of the review",
+          "priority": "medium",
+          "status": "completed"
+        }
+      ],
+      "usage": {
+        "context_used": 42000,
+        "context_size": 200000
+      }
+    },
+    "entries": [
+      {
+        "user_message": {
+          "order": 2,
+          "message": "01900000-0000-7000-8000-000300000003",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "content": [
+            {
+              "text": {
+                "text": "Review the lease and fix the indemnity clauses."
+              }
+            }
+          ],
+          "status": "sent",
+          "edited": false
+        }
+      },
+      {
+        "agent_text": {
+          "order": 4,
+          "message": "01900000-0000-7000-8000-000300000007",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "kind": "thought",
+          "text": "Chunk 0000 of the scripted answer text. Chunk 0001 of the scripted answer text. Chunk 0002 of the scripted answer text. Chunk 0003 of the scripted answer text. Chunk 0004 of the scripted answer text. Chunk 0005 of the scripted answer text. Chunk 0006 of the scripted answer text. Chunk 0007 of the scripted answer text. Chunk 0008 of the scripted answer text. Chunk 0009 of the scripted answer text. Chunk 0010 of the scripted answer text. Chunk 0011 of the scripted answer text. Chunk 0012 of the scripted answer text. Chunk 0013 of the scripted answer text. Chunk 0014 of the scripted answer text. Chunk 0015 of the scripted answer text. Chunk 0016 of the scripted answer text. Chunk 0017 of the scripted answer text. Chunk 0018 of the scripted answer text. Chunk 0019 of the scripted answer text. Chunk 0020 of the scripted answer text. Chunk 0021 of the scripted answer text. Chunk 0022 of the scripted answer text. Chunk 0023 of the scripted answer text. Chunk 0024 of the scripted answer text. Chunk 0025 of the scripted answer text. Chunk 0026 of the scripted answer text. Chunk 0027 of the scripted answer text. Chunk 0028 of the scripted answer text. Chunk 0029 of the scripted answer text. Chunk 0030 of the scripted answer text. Chunk 0031 of the scripted answer text. Chunk 0032 of the scripted answer text. Chunk 0033 of the scripted answer text. Chunk 0034 of the scripted answer text. Chunk 0035 of the scripted answer text. Chunk 0036 of the scripted answer text. Chunk 0037 of the scripted answer text. Chunk 0038 of the scripted answer text. Chunk 0039 of the scripted answer text. Chunk 0040 of the scripted answer text. Chunk 0041 of the scripted answer text. Chunk 0042 of the scripted answer text. Chunk 0043 of the scripted answer text. Chunk 0044 of the scripted answer text. Chunk 0045 of the scripted answer text. Chunk 0046 of the scripted answer text. Chunk 0047 of the scripted answer text. Chunk 0048 of the scripted answer text. Chunk 0049 of the scripted answer text. Chunk 0050 of the scripted answer text. Chunk 0051 of the scripted answer text. Chunk 0052 of the scripted answer text. Chunk 0053 of the scripted answer text. Chunk 0054 of the scripted answer text. Chunk 0055 of the scripted answer text. Chunk 0056 of the scripted answer text. Chunk 0057 of the scripted answer text. Chunk 0058 of the scripted answer text. Chunk 0059 of the scripted answer text. Chunk 0060 of the scripted answer text. Chunk 0061 of the scripted answer text. Chunk 0062 of the scripted answer text. Chunk 0063 of the scripted answer text. Chunk 0064 of the scripted answer text. Chunk 0065 of the scripted answer text. Chunk 0066 of the scripted answer text. Chunk 0067 of the scripted answer text. Chunk 0068 of the scripted answer text. Chunk 0069 of the scripted answer text. Chunk 0070 of the scripted answer text. Chunk 0071 of the scripted answer text. Chunk 0072 of the scripted answer text. Chunk 0073 of the scripted answer text. Chunk 0074 of the scripted answer text. Chunk 0075 of the scripted answer text. Chunk 0076 of the scripted answer text. Chunk 0077 of the scripted answer text. Chunk 0078 of the scripted answer text. Chunk 0079 of the scripted answer text. Chunk 0080 of the scripted answer text. Chunk 0081 of the scripted answer text. Chunk 0082 of the scripted answer text. Chunk 0083 of the scripted answer text. Chunk 0084 of the scripted answer text. Chunk 0085 of the scripted answer text. Chunk 0086 of the scripted answer text. Chunk 0087 of the scripted answer text. Chunk 0088 of the scripted answer text. Chunk 0089 of the scripted answer text. Chunk 0090 of the scripted answer text. Chunk 0091 of the scripted answer text. Chunk 0092 of the scripted answer text. Chunk 0093 of the scripted answer text. Chunk 0094 of the scripted answer text. Chunk 0095 of the scripted answer text. Chunk 0096 of the scripted answer text. Chunk 0097 of the scripted answer text. Chunk 0098 of the scripted answer text. Chunk 0099 of the scripted answer text. "
+        }
+      },
+      {
+        "tool_call": {
+          "order": 29,
+          "tool_call": "01900000-0000-7000-8000-000300000021",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 0",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/0.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 0."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/0.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tool_call": {
+          "order": 57,
+          "tool_call": "01900000-0000-7000-8000-00030000003e",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 1",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/1.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 1."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/1.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tool_call": {
+          "order": 85,
+          "tool_call": "01900000-0000-7000-8000-00030000005b",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 2",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/2.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 2."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/2.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tool_call": {
+          "order": 113,
+          "tool_call": "01900000-0000-7000-8000-000300000078",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 3",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/3.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 3."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/3.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "agent_text": {
+          "order": 116,
+          "message": "01900000-0000-7000-8000-00030000007c",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "kind": "answer",
+          "text": "Chunk 0100 of the scripted answer text. Chunk 0101 of the scripted answer text. Chunk 0102 of the scripted answer text. Chunk 0103 of the scripted answer text. Chunk 0104 of the scripted answer text. Chunk 0105 of the scripted answer text. Chunk 0106 of the scripted answer text. Chunk 0107 of the scripted answer text. Chunk 0108 of the scripted answer text. Chunk 0109 of the scripted answer text. Chunk 0110 of the scripted answer text. Chunk 0111 of the scripted answer text. Chunk 0112 of the scripted answer text. Chunk 0113 of the scripted answer text. Chunk 0114 of the scripted answer text. Chunk 0115 of the scripted answer text. Chunk 0116 of the scripted answer text. Chunk 0117 of the scripted answer text. Chunk 0118 of the scripted answer text. Chunk 0119 of the scripted answer text. Chunk 0120 of the scripted answer text. Chunk 0121 of the scripted answer text. Chunk 0122 of the scripted answer text. Chunk 0123 of the scripted answer text. Chunk 0124 of the scripted answer text. Chunk 0125 of the scripted answer text. Chunk 0126 of the scripted answer text. Chunk 0127 of the scripted answer text. Chunk 0128 of the scripted answer text. Chunk 0129 of the scripted answer text. Chunk 0130 of the scripted answer text. Chunk 0131 of the scripted answer text. Chunk 0132 of the scripted answer text. Chunk 0133 of the scripted answer text. Chunk 0134 of the scripted answer text. Chunk 0135 of the scripted answer text. Chunk 0136 of the scripted answer text. Chunk 0137 of the scripted answer text. Chunk 0138 of the scripted answer text. Chunk 0139 of the scripted answer text. Chunk 0140 of the scripted answer text. Chunk 0141 of the scripted answer text. Chunk 0142 of the scripted answer text. Chunk 0143 of the scripted answer text. Chunk 0144 of the scripted answer text. Chunk 0145 of the scripted answer text. Chunk 0146 of the scripted answer text. Chunk 0147 of the scripted answer text. Chunk 0148 of the scripted answer text. Chunk 0149 of the scripted answer text. Chunk 0150 of the scripted answer text. Chunk 0151 of the scripted answer text. Chunk 0152 of the scripted answer text. Chunk 0153 of the scripted answer text. Chunk 0154 of the scripted answer text. Chunk 0155 of the scripted answer text. Chunk 0156 of the scripted answer text. Chunk 0157 of the scripted answer text. Chunk 0158 of the scripted answer text. Chunk 0159 of the scripted answer text. Chunk 0160 of the scripted answer text. Chunk 0161 of the scripted answer text. Chunk 0162 of the scripted answer text. Chunk 0163 of the scripted answer text. Chunk 0164 of the scripted answer text. Chunk 0165 of the scripted answer text. Chunk 0166 of the scripted answer text. Chunk 0167 of the scripted answer text. Chunk 0168 of the scripted answer text. Chunk 0169 of the scripted answer text. Chunk 0170 of the scripted answer text. Chunk 0171 of the scripted answer text. Chunk 0172 of the scripted answer text. Chunk 0173 of the scripted answer text. Chunk 0174 of the scripted answer text. Chunk 0175 of the scripted answer text. Chunk 0176 of the scripted answer text. Chunk 0177 of the scripted answer text. Chunk 0178 of the scripted answer text. Chunk 0179 of the scripted answer text. Chunk 0180 of the scripted answer text. Chunk 0181 of the scripted answer text. Chunk 0182 of the scripted answer text. Chunk 0183 of the scripted answer text. Chunk 0184 of the scripted answer text. Chunk 0185 of the scripted answer text. Chunk 0186 of the scripted answer text. Chunk 0187 of the scripted answer text. Chunk 0188 of the scripted answer text. Chunk 0189 of the scripted answer text. Chunk 0190 of the scripted answer text. Chunk 0191 of the scripted answer text. Chunk 0192 of the scripted answer text. Chunk 0193 of the scripted answer text. Chunk 0194 of the scripted answer text. Chunk 0195 of the scripted answer text. Chunk 0196 of the scripted answer text. Chunk 0197 of the scripted answer text. Chunk 0198 of the scripted answer text. Chunk 0199 of the scripted answer text. "
+        }
+      },
+      {
+        "tool_call": {
+          "order": 141,
+          "tool_call": "01900000-0000-7000-8000-000300000096",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 4",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/4.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 4."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/4.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tool_call": {
+          "order": 170,
+          "tool_call": "01900000-0000-7000-8000-0003000000b4",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 5",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/5.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 5."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/5.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tool_call": {
+          "order": 198,
+          "tool_call": "01900000-0000-7000-8000-0003000000d1",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 6",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/6.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 6."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/6.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tool_call": {
+          "order": 226,
+          "tool_call": "01900000-0000-7000-8000-0003000000ee",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 7",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/7.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 7."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/7.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "agent_text": {
+          "order": 229,
+          "message": "01900000-0000-7000-8000-0003000000f2",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "kind": "answer",
+          "text": "Chunk 0200 of the scripted answer text. Chunk 0201 of the scripted answer text. Chunk 0202 of the scripted answer text. Chunk 0203 of the scripted answer text. Chunk 0204 of the scripted answer text. Chunk 0205 of the scripted answer text. Chunk 0206 of the scripted answer text. Chunk 0207 of the scripted answer text. Chunk 0208 of the scripted answer text. Chunk 0209 of the scripted answer text. Chunk 0210 of the scripted answer text. Chunk 0211 of the scripted answer text. Chunk 0212 of the scripted answer text. Chunk 0213 of the scripted answer text. Chunk 0214 of the scripted answer text. Chunk 0215 of the scripted answer text. Chunk 0216 of the scripted answer text. Chunk 0217 of the scripted answer text. Chunk 0218 of the scripted answer text. Chunk 0219 of the scripted answer text. Chunk 0220 of the scripted answer text. Chunk 0221 of the scripted answer text. Chunk 0222 of the scripted answer text. Chunk 0223 of the scripted answer text. Chunk 0224 of the scripted answer text. Chunk 0225 of the scripted answer text. Chunk 0226 of the scripted answer text. Chunk 0227 of the scripted answer text. Chunk 0228 of the scripted answer text. Chunk 0229 of the scripted answer text. Chunk 0230 of the scripted answer text. Chunk 0231 of the scripted answer text. Chunk 0232 of the scripted answer text. Chunk 0233 of the scripted answer text. Chunk 0234 of the scripted answer text. Chunk 0235 of the scripted answer text. Chunk 0236 of the scripted answer text. Chunk 0237 of the scripted answer text. Chunk 0238 of the scripted answer text. Chunk 0239 of the scripted answer text. Chunk 0240 of the scripted answer text. Chunk 0241 of the scripted answer text. Chunk 0242 of the scripted answer text. Chunk 0243 of the scripted answer text. Chunk 0244 of the scripted answer text. Chunk 0245 of the scripted answer text. Chunk 0246 of the scripted answer text. Chunk 0247 of the scripted answer text. Chunk 0248 of the scripted answer text. Chunk 0249 of the scripted answer text. Chunk 0250 of the scripted answer text. Chunk 0251 of the scripted answer text. Chunk 0252 of the scripted answer text. Chunk 0253 of the scripted answer text. Chunk 0254 of the scripted answer text. Chunk 0255 of the scripted answer text. Chunk 0256 of the scripted answer text. Chunk 0257 of the scripted answer text. Chunk 0258 of the scripted answer text. Chunk 0259 of the scripted answer text. Chunk 0260 of the scripted answer text. Chunk 0261 of the scripted answer text. Chunk 0262 of the scripted answer text. Chunk 0263 of the scripted answer text. Chunk 0264 of the scripted answer text. Chunk 0265 of the scripted answer text. Chunk 0266 of the scripted answer text. Chunk 0267 of the scripted answer text. Chunk 0268 of the scripted answer text. Chunk 0269 of the scripted answer text. Chunk 0270 of the scripted answer text. Chunk 0271 of the scripted answer text. Chunk 0272 of the scripted answer text. Chunk 0273 of the scripted answer text. Chunk 0274 of the scripted answer text. Chunk 0275 of the scripted answer text. Chunk 0276 of the scripted answer text. Chunk 0277 of the scripted answer text. Chunk 0278 of the scripted answer text. Chunk 0279 of the scripted answer text. Chunk 0280 of the scripted answer text. Chunk 0281 of the scripted answer text. Chunk 0282 of the scripted answer text. Chunk 0283 of the scripted answer text. Chunk 0284 of the scripted answer text. Chunk 0285 of the scripted answer text. Chunk 0286 of the scripted answer text. Chunk 0287 of the scripted answer text. Chunk 0288 of the scripted answer text. Chunk 0289 of the scripted answer text. Chunk 0290 of the scripted answer text. Chunk 0291 of the scripted answer text. Chunk 0292 of the scripted answer text. Chunk 0293 of the scripted answer text. Chunk 0294 of the scripted answer text. Chunk 0295 of the scripted answer text. Chunk 0296 of the scripted answer text. Chunk 0297 of the scripted answer text. Chunk 0298 of the scripted answer text. Chunk 0299 of the scripted answer text. "
+        }
+      },
+      {
+        "tool_call": {
+          "order": 254,
+          "tool_call": "01900000-0000-7000-8000-00030000010c",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 8",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/8.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 8."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/8.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "permission": {
+          "order": 255,
+          "request": "01900000-0000-7000-8000-00030000010e",
+          "tool_call": "01900000-0000-7000-8000-00030000010c",
+          "options": [
+            {
+              "option_id": "allow",
+              "kind": "allow_once",
+              "agent_label": "Yes"
+            }
+          ],
+          "deliverable": "live",
+          "state": {
+            "resolved": {
+              "choice": {
+                "selected": {
+                  "option_id": "allow",
+                  "kind": "allow_once"
+                }
+              },
+              "by": "local_desktop"
+            }
+          }
+        }
+      },
+      {
+        "tool_call": {
+          "order": 284,
+          "tool_call": "01900000-0000-7000-8000-00030000012c",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 9",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/9.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 9."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/9.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tool_call": {
+          "order": 313,
+          "tool_call": "01900000-0000-7000-8000-00030000014a",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 10",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/10.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 10."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/10.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tool_call": {
+          "order": 341,
+          "tool_call": "01900000-0000-7000-8000-000300000167",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 11",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/11.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 11."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/11.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "agent_text": {
+          "order": 344,
+          "message": "01900000-0000-7000-8000-00030000016b",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "kind": "answer",
+          "text": "Chunk 0300 of the scripted answer text. Chunk 0301 of the scripted answer text. Chunk 0302 of the scripted answer text. Chunk 0303 of the scripted answer text. Chunk 0304 of the scripted answer text. Chunk 0305 of the scripted answer text. Chunk 0306 of the scripted answer text. Chunk 0307 of the scripted answer text. Chunk 0308 of the scripted answer text. Chunk 0309 of the scripted answer text. Chunk 0310 of the scripted answer text. Chunk 0311 of the scripted answer text. Chunk 0312 of the scripted answer text. Chunk 0313 of the scripted answer text. Chunk 0314 of the scripted answer text. Chunk 0315 of the scripted answer text. Chunk 0316 of the scripted answer text. Chunk 0317 of the scripted answer text. Chunk 0318 of the scripted answer text. Chunk 0319 of the scripted answer text. Chunk 0320 of the scripted answer text. Chunk 0321 of the scripted answer text. Chunk 0322 of the scripted answer text. Chunk 0323 of the scripted answer text. Chunk 0324 of the scripted answer text. Chunk 0325 of the scripted answer text. Chunk 0326 of the scripted answer text. Chunk 0327 of the scripted answer text. Chunk 0328 of the scripted answer text. Chunk 0329 of the scripted answer text. Chunk 0330 of the scripted answer text. Chunk 0331 of the scripted answer text. Chunk 0332 of the scripted answer text. Chunk 0333 of the scripted answer text. Chunk 0334 of the scripted answer text. Chunk 0335 of the scripted answer text. Chunk 0336 of the scripted answer text. Chunk 0337 of the scripted answer text. Chunk 0338 of the scripted answer text. Chunk 0339 of the scripted answer text. Chunk 0340 of the scripted answer text. Chunk 0341 of the scripted answer text. Chunk 0342 of the scripted answer text. Chunk 0343 of the scripted answer text. Chunk 0344 of the scripted answer text. Chunk 0345 of the scripted answer text. Chunk 0346 of the scripted answer text. Chunk 0347 of the scripted answer text. Chunk 0348 of the scripted answer text. Chunk 0349 of the scripted answer text. Chunk 0350 of the scripted answer text. Chunk 0351 of the scripted answer text. Chunk 0352 of the scripted answer text. Chunk 0353 of the scripted answer text. Chunk 0354 of the scripted answer text. Chunk 0355 of the scripted answer text. Chunk 0356 of the scripted answer text. Chunk 0357 of the scripted answer text. Chunk 0358 of the scripted answer text. Chunk 0359 of the scripted answer text. Chunk 0360 of the scripted answer text. Chunk 0361 of the scripted answer text. Chunk 0362 of the scripted answer text. Chunk 0363 of the scripted answer text. Chunk 0364 of the scripted answer text. Chunk 0365 of the scripted answer text. Chunk 0366 of the scripted answer text. Chunk 0367 of the scripted answer text. Chunk 0368 of the scripted answer text. Chunk 0369 of the scripted answer text. Chunk 0370 of the scripted answer text. Chunk 0371 of the scripted answer text. Chunk 0372 of the scripted answer text. Chunk 0373 of the scripted answer text. Chunk 0374 of the scripted answer text. Chunk 0375 of the scripted answer text. Chunk 0376 of the scripted answer text. Chunk 0377 of the scripted answer text. Chunk 0378 of the scripted answer text. Chunk 0379 of the scripted answer text. Chunk 0380 of the scripted answer text. Chunk 0381 of the scripted answer text. Chunk 0382 of the scripted answer text. Chunk 0383 of the scripted answer text. Chunk 0384 of the scripted answer text. Chunk 0385 of the scripted answer text. Chunk 0386 of the scripted answer text. Chunk 0387 of the scripted answer text. Chunk 0388 of the scripted answer text. Chunk 0389 of the scripted answer text. Chunk 0390 of the scripted answer text. Chunk 0391 of the scripted answer text. Chunk 0392 of the scripted answer text. Chunk 0393 of the scripted answer text. Chunk 0394 of the scripted answer text. Chunk 0395 of the scripted answer text. Chunk 0396 of the scripted answer text. Chunk 0397 of the scripted answer text. Chunk 0398 of the scripted answer text. Chunk 0399 of the scripted answer text. "
+        }
+      },
+      {
+        "tool_call": {
+          "order": 369,
+          "tool_call": "01900000-0000-7000-8000-000300000185",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 12",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/12.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 12."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/12.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tool_call": {
+          "order": 397,
+          "tool_call": "01900000-0000-7000-8000-0003000001a2",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 13",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/13.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 13."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/13.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tool_call": {
+          "order": 425,
+          "tool_call": "01900000-0000-7000-8000-0003000001bf",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 14",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/14.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 14."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/14.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tool_call": {
+          "order": 454,
+          "tool_call": "01900000-0000-7000-8000-0003000001dd",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 15",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/15.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 15."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/15.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "agent_text": {
+          "order": 457,
+          "message": "01900000-0000-7000-8000-0003000001e1",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "kind": "answer",
+          "text": "Chunk 0400 of the scripted answer text. Chunk 0401 of the scripted answer text. Chunk 0402 of the scripted answer text. Chunk 0403 of the scripted answer text. Chunk 0404 of the scripted answer text. Chunk 0405 of the scripted answer text. Chunk 0406 of the scripted answer text. Chunk 0407 of the scripted answer text. Chunk 0408 of the scripted answer text. Chunk 0409 of the scripted answer text. Chunk 0410 of the scripted answer text. Chunk 0411 of the scripted answer text. Chunk 0412 of the scripted answer text. Chunk 0413 of the scripted answer text. Chunk 0414 of the scripted answer text. Chunk 0415 of the scripted answer text. Chunk 0416 of the scripted answer text. Chunk 0417 of the scripted answer text. Chunk 0418 of the scripted answer text. Chunk 0419 of the scripted answer text. Chunk 0420 of the scripted answer text. Chunk 0421 of the scripted answer text. Chunk 0422 of the scripted answer text. Chunk 0423 of the scripted answer text. Chunk 0424 of the scripted answer text. Chunk 0425 of the scripted answer text. Chunk 0426 of the scripted answer text. Chunk 0427 of the scripted answer text. Chunk 0428 of the scripted answer text. Chunk 0429 of the scripted answer text. Chunk 0430 of the scripted answer text. Chunk 0431 of the scripted answer text. Chunk 0432 of the scripted answer text. Chunk 0433 of the scripted answer text. Chunk 0434 of the scripted answer text. Chunk 0435 of the scripted answer text. Chunk 0436 of the scripted answer text. Chunk 0437 of the scripted answer text. Chunk 0438 of the scripted answer text. Chunk 0439 of the scripted answer text. Chunk 0440 of the scripted answer text. Chunk 0441 of the scripted answer text. Chunk 0442 of the scripted answer text. Chunk 0443 of the scripted answer text. Chunk 0444 of the scripted answer text. Chunk 0445 of the scripted answer text. Chunk 0446 of the scripted answer text. Chunk 0447 of the scripted answer text. Chunk 0448 of the scripted answer text. Chunk 0449 of the scripted answer text. Chunk 0450 of the scripted answer text. Chunk 0451 of the scripted answer text. Chunk 0452 of the scripted answer text. Chunk 0453 of the scripted answer text. Chunk 0454 of the scripted answer text. Chunk 0455 of the scripted answer text. Chunk 0456 of the scripted answer text. Chunk 0457 of the scripted answer text. Chunk 0458 of the scripted answer text. Chunk 0459 of the scripted answer text. Chunk 0460 of the scripted answer text. Chunk 0461 of the scripted answer text. Chunk 0462 of the scripted answer text. Chunk 0463 of the scripted answer text. Chunk 0464 of the scripted answer text. Chunk 0465 of the scripted answer text. Chunk 0466 of the scripted answer text. Chunk 0467 of the scripted answer text. Chunk 0468 of the scripted answer text. Chunk 0469 of the scripted answer text. Chunk 0470 of the scripted answer text. Chunk 0471 of the scripted answer text. Chunk 0472 of the scripted answer text. Chunk 0473 of the scripted answer text. Chunk 0474 of the scripted answer text. Chunk 0475 of the scripted answer text. Chunk 0476 of the scripted answer text. Chunk 0477 of the scripted answer text. Chunk 0478 of the scripted answer text. Chunk 0479 of the scripted answer text. Chunk 0480 of the scripted answer text. Chunk 0481 of the scripted answer text. Chunk 0482 of the scripted answer text. Chunk 0483 of the scripted answer text. Chunk 0484 of the scripted answer text. Chunk 0485 of the scripted answer text. Chunk 0486 of the scripted answer text. Chunk 0487 of the scripted answer text. Chunk 0488 of the scripted answer text. Chunk 0489 of the scripted answer text. Chunk 0490 of the scripted answer text. Chunk 0491 of the scripted answer text. Chunk 0492 of the scripted answer text. Chunk 0493 of the scripted answer text. Chunk 0494 of the scripted answer text. Chunk 0495 of the scripted answer text. Chunk 0496 of the scripted answer text. Chunk 0497 of the scripted answer text. Chunk 0498 of the scripted answer text. Chunk 0499 of the scripted answer text. "
+        }
+      },
+      {
+        "tool_call": {
+          "order": 482,
+          "tool_call": "01900000-0000-7000-8000-0003000001fb",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 16",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/16.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 16."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/16.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tool_call": {
+          "order": 510,
+          "tool_call": "01900000-0000-7000-8000-000300000218",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 17",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/17.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 17."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/17.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tool_call": {
+          "order": 538,
+          "tool_call": "01900000-0000-7000-8000-000300000235",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 18",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/18.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 18."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/18.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "tool_call": {
+          "order": 566,
+          "tool_call": "01900000-0000-7000-8000-000300000252",
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "title": "Edit clause 19",
+          "kind": "edit",
+          "tool_name": "Edit",
+          "status": "completed",
+          "locations": [
+            {
+              "inside": {
+                "path": "docs/19.md",
+                "line": 1
+              }
+            }
+          ],
+          "content": [
+            {
+              "text": {
+                "text": {
+                  "inline": "Edited clause 19."
+                }
+              }
+            },
+            {
+              "diff": {
+                "path": {
+                  "inside": {
+                    "path": "docs/19.md"
+                  }
+                },
+                "old": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substa"
+                },
+                "new": {
+                  "inline": "The tenant shall keep the premises in good and substantial repair. The tenant shall keep the premises in good and substantial repair. The tenant shall keep the "
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "step": {
+          "order": 571,
+          "turn": "01900000-0000-7000-8000-000300000002",
+          "stop": "end_turn",
+          "files": [
+            {
+              "path": "lease.docx",
+              "change": "modified",
+              "before": "ab12",
+              "after": "cd34",
+              "size_bytes": 2048,
+              "may_include_lawyer_edits": false
+            },
+            {
+              "path": "notes/summary.md",
+              "change": "added",
+              "after": "ef56",
+              "size_bytes": 300,
+              "may_include_lawyer_edits": false
+            }
+          ],
+          "skipped": [],
+          "checkpoint_after": "01900000-0000-7000-8000-000300000258",
+          "undone": false,
+          "usage": {
+            "total": 30,
+            "input": 20,
+            "output": 10
+          }
+        }
+      }
+    ],
+    "text_utf16": {
+      "01900000-0000-7000-8000-000300000007": 4000,
+      "01900000-0000-7000-8000-00030000007c": 4000,
+      "01900000-0000-7000-8000-0003000000f2": 4000,
+      "01900000-0000-7000-8000-00030000016b": 4000,
+      "01900000-0000-7000-8000-0003000001e1": 4000
+    },
+    "turn": "01900000-0000-7000-8000-000300000002",
+    "running": null,
+    "after_turn": null,
+    "files": {},
+    "failures": {}
+  }
+}
