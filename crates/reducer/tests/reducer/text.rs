@@ -333,6 +333,72 @@ fn deltas_in_flight_take_the_seqs_their_events_get() {
 }
 
 #[test]
+fn thought_to_answer_handoff_keeps_order() {
+    // The usual turn: a thought with durable text and an un-durable tail, then the answer's
+    // first delta. Under the host contract the answer's first delta closes the batch: the host
+    // sends the thought's tail first and passes the pending head that results.
+    let (mut log, mut state, turn, answer_id) = running();
+    let thought = log.fresh().unwrap();
+    let out = apply(
+        &mut state,
+        &log.push(text(
+            turn,
+            thought,
+            TextKind::Thought,
+            "Thinking.".to_owned(),
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    let durable = state.seq().unwrap();
+    delta_at(
+        &mut state,
+        turn,
+        thought,
+        TextKind::Thought,
+        " More.",
+        durable,
+    );
+    // The flush: the thought's tail is sent; the state has not applied it yet.
+    let tail = log
+        .push(text(turn, thought, TextKind::Thought, " More.".to_owned()))
+        .unwrap();
+    let opened = delta_at(
+        &mut state,
+        turn,
+        answer_id,
+        TextKind::Answer,
+        "Answer",
+        tail.seq,
+    );
+    assert_eq!(
+        first_upsert(&opened.changes).order(),
+        seq(tail.seq.get() + 1)
+    );
+    assert!(opened.anomalies.is_empty(), "{:?}", opened.anomalies);
+    let out = apply(&mut state, &tail).unwrap();
+    assert!(
+        out.changes.is_empty() && out.anomalies.is_empty(),
+        "{out:?}"
+    );
+    let sent = log
+        .push(text(turn, answer_id, TextKind::Answer, "Answer".to_owned()))
+        .unwrap();
+    let out = apply(&mut state, &sent).unwrap();
+    let corrected = out
+        .anomalies
+        .iter()
+        .any(|anomaly| matches!(anomaly, Anomaly::OrderCorrected { .. }));
+    assert!(!corrected, "{:?}", out.anomalies);
+    assert!(
+        out.changes.is_empty() && out.anomalies.is_empty(),
+        "{out:?}"
+    );
+    assert_eq!(state, fold(log.events()));
+}
+
+#[test]
 fn event_extending_shown_text_appends_only_the_rest() {
     // A message only deltas opened: "Hi😀" is 4 UTF-16 units (6 bytes).
     let (mut log, mut state, turn, message) = running();

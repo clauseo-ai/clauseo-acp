@@ -1,10 +1,15 @@
 //! Edges of the thread fold: the end of a turn that never started, and events that carry
 //! nothing to change.
 
-use clauseo_protocol::{ErrorCode, ThreadStatus, TurnFailed, UsageUpdated, ViewEntry};
-use clauseo_reducer::{StreamState, apply};
+use clauseo_protocol::{
+    ErrorCode, MessageId, StopReason, ThreadStatus, TurnFailed, TurnId, UsageUpdated,
+    UserMessageStatus, ViewEntry,
+};
+use clauseo_reducer::{StreamState, ViewChange, apply};
 
-use crate::fixtures::{Log, files_changed, thread_created, turn_ended, usage};
+use crate::fixtures::{
+    Log, files_changed, start_turn, thread_created, turn_ended, usage, user_message,
+};
 use crate::helpers::fold;
 
 /// The state's JSON with `seq` cleared, to compare states that folded different event counts.
@@ -44,6 +49,84 @@ fn turn_ended_of_unstarted_turn_drops_its_files_and_failure() {
     assert_eq!(state.as_thread().unwrap().status(), ThreadStatus::Idle);
     // Dropped: the state is the created thread's but for seq.
     assert_eq!(without_seq(&state), without_seq(&created));
+}
+
+/// The status of the user message `message` in `state`.
+#[cfg(test)]
+fn prompt_status(state: &StreamState, message: MessageId) -> Option<UserMessageStatus> {
+    state.entries().values().find_map(|entry| match entry {
+        ViewEntry::UserMessage(prompt) if prompt.message == message => Some(prompt.status),
+        _ => None,
+    })
+}
+
+/// A `TurnEnded` cancelled, of `turn`, pushed and applied.
+#[cfg(test)]
+fn cancel(log: &mut Log, state: &mut StreamState, turn: TurnId) -> clauseo_reducer::Applied {
+    let checkpoint = log.fresh().unwrap();
+    let mut ended = turn_ended(turn, checkpoint).unwrap();
+    if let clauseo_protocol::DomainEvent::TurnEnded(event) = &mut ended {
+        event.stop = StopReason::Cancelled;
+        event.checkpoint_after = None;
+        event.usage = None;
+    }
+    apply(state, &log.push(ended).unwrap()).unwrap()
+}
+
+#[test]
+fn turn_ended_before_start_settles_and_removes_prompt() {
+    // A prompt whose turn is cancelled before it starts, with no other turn running: the
+    // thread settles to Idle (not Starting for good) and the prompt is Removed (0002).
+    let mut log = Log::thread(11).unwrap();
+    log.push(thread_created().unwrap()).unwrap();
+    let (turn, message): (TurnId, MessageId) = (log.fresh().unwrap(), log.fresh().unwrap());
+    log.push(user_message(turn, message, "Draft the notice."))
+        .unwrap();
+    let mut state = fold(log.events());
+    assert_eq!(state.as_thread().unwrap().status(), ThreadStatus::Starting);
+    let out = cancel(&mut log, &mut state, turn);
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    assert_eq!(state.as_thread().unwrap().status(), ThreadStatus::Idle);
+    assert_eq!(
+        prompt_status(&state, message),
+        Some(UserMessageStatus::Removed)
+    );
+    let removed = out.changes.iter().any(|change| {
+        matches!(change, ViewChange::Upsert(entry)
+            if matches!(&**entry, ViewEntry::UserMessage(p) if p.status == UserMessageStatus::Removed))
+    });
+    assert!(removed, "{:?}", out.changes);
+    let steps = state.entries().values();
+    assert!(!steps.clone().any(|e| matches!(e, ViewEntry::Step(_))));
+    assert_eq!(state, fold(log.events()));
+
+    // A prompt sent while a turn runs, whose turn is cancelled before it starts: Removed, and
+    // the running turn keeps the status.
+    let running = start_turn(&mut log, "Check clause 2.").unwrap();
+    let (queued, prompt): (TurnId, MessageId) = (log.fresh().unwrap(), log.fresh().unwrap());
+    log.push(user_message(queued, prompt, "Then clause 3."))
+        .unwrap();
+    let mut state = fold(log.events());
+    let out = cancel(&mut log, &mut state, queued);
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    assert_eq!(state.as_thread().unwrap().status(), ThreadStatus::Running);
+    assert_eq!(
+        prompt_status(&state, prompt),
+        Some(UserMessageStatus::Removed)
+    );
+    let first = log
+        .events()
+        .iter()
+        .find_map(|envelope| match &envelope.event {
+            clauseo_protocol::DomainEvent::UserMessage(event) if event.turn == running => {
+                Some(event.message)
+            }
+            _ => None,
+        });
+    assert_eq!(
+        prompt_status(&state, first.unwrap()),
+        Some(UserMessageStatus::Sent)
+    );
 }
 
 #[test]

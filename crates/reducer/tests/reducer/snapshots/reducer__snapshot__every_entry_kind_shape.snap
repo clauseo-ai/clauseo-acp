@@ -1,0 +1,250 @@
+---
+source: crates/reducer/tests/reducer/snapshot.rs
+description: "The snapshot shape changed: bump REDUCER_SCHEMA_VERSION (crates/reducer/src/snapshot.rs), then accept this snapshot."
+expression: "Snapshot::of(&every)"
+---
+{
+  "reducer_schema": 1,
+  "state": {
+    "thread": {
+      "thread": "01900000-0000-7000-8000-000c00000000",
+      "seq": 18,
+      "header": {
+        "order": 1,
+        "thread": "01900000-0000-7000-8000-000c00000000",
+        "matter": "01900000-0000-7000-8000-000100000000",
+        "title": "Indemnity review",
+        "agent": "claude-acp",
+        "status": {
+          "paused_at_limit": {}
+        },
+        "queue_held": false,
+        "config_options": [],
+        "commands": [],
+        "plan": []
+      },
+      "entries": [
+        {
+          "user_message": {
+            "order": 2,
+            "message": "01900000-0000-7000-8000-000c00000003",
+            "turn": "01900000-0000-7000-8000-000c00000002",
+            "content": [
+              {
+                "text": {
+                  "text": "Draft the notice «now»."
+                }
+              }
+            ],
+            "status": "sent",
+            "edited": false
+          }
+        },
+        {
+          "agent_text": {
+            "order": 4,
+            "message": "01900000-0000-7000-8000-000c00000007",
+            "turn": "01900000-0000-7000-8000-000c00000002",
+            "kind": "answer",
+            "text": "Here é:"
+          }
+        },
+        {
+          "agent_content": {
+            "order": 5,
+            "event": "01900000-0000-7000-8000-000c00000009",
+            "turn": "01900000-0000-7000-8000-000c00000002",
+            "message": "01900000-0000-7000-8000-000c00000007",
+            "kind": "answer",
+            "block": {
+              "image": {
+                "data": {
+                  "inline": "iVBORw0KGgo="
+                },
+                "mime_type": "image/png"
+              }
+            }
+          }
+        },
+        {
+          "agent_content": {
+            "order": 6,
+            "event": "01900000-0000-7000-8000-000c0000000a",
+            "turn": "01900000-0000-7000-8000-000c00000002",
+            "message": "01900000-0000-7000-8000-000c00000007",
+            "kind": "answer",
+            "block": {
+              "resource_link": {
+                "uri": "file:///matter/lease.docx",
+                "name": "lease.docx",
+                "title": "Lease"
+              }
+            }
+          }
+        },
+        {
+          "tool_call": {
+            "order": 7,
+            "tool_call": "01900000-0000-7000-8000-000c0000000b",
+            "turn": "01900000-0000-7000-8000-000c00000002",
+            "title": "Edit clause 4",
+            "kind": "edit",
+            "tool_name": "Edit",
+            "status": "in_progress",
+            "locations": [
+              {
+                "inside": {
+                  "path": "docs/4.md",
+                  "line": 1
+                }
+              }
+            ],
+            "content": []
+          }
+        },
+        {
+          "permission": {
+            "order": 8,
+            "request": "01900000-0000-7000-8000-000c0000000d",
+            "tool_call": "01900000-0000-7000-8000-000c0000000b",
+            "options": [
+              {
+                "option_id": "allow",
+                "kind": "allow_once",
+                "agent_label": "Yes"
+              }
+            ],
+            "deliverable": "live",
+            "state": {
+              "resolved": {
+                "choice": {
+                  "selected": {
+                    "option_id": "allow",
+                    "kind": "allow_once"
+                  }
+                },
+                "by": "local_desktop"
+              }
+            }
+          }
+        },
+        {
+          "elicitation": {
+            "order": 10,
+            "elicitation": "01900000-0000-7000-8000-000c00000010",
+            "request": {
+              "url": {
+                "message": "Sign in to the court portal.",
+                "url": "https://example.org/login"
+              }
+            },
+            "state": "pending"
+          }
+        },
+        {
+          "elicitation": {
+            "order": 11,
+            "elicitation": "01900000-0000-7000-8000-000c00000011",
+            "request": {
+              "url": {
+                "message": "Sign in to the court portal.",
+                "url": "https://example.org/login"
+              }
+            },
+            "state": {
+              "resolved": {
+                "outcome": "accepted",
+                "by": "local_desktop"
+              }
+            }
+          }
+        },
+        {
+          "notice": {
+            "order": 13,
+            "event": "01900000-0000-7000-8000-000c00000015",
+            "level": "warning",
+            "text": "Context is nearly full."
+          }
+        },
+        {
+          "marker": {
+            "order": 14,
+            "event": "01900000-0000-7000-8000-000c00000016",
+            "kind": {
+              "compaction": {
+                "status": "completed",
+                "summary": {
+                  "inline": "Earlier: the lease review."
+                }
+              }
+            }
+          }
+        },
+        {
+          "step": {
+            "order": 16,
+            "turn": "01900000-0000-7000-8000-000c00000002",
+            "stop": "end_turn",
+            "files": [
+              {
+                "path": "lease.docx",
+                "change": "modified",
+                "before": "ab12",
+                "after": "cd34",
+                "size_bytes": 2048,
+                "may_include_lawyer_edits": false
+              },
+              {
+                "path": "notes/summary.md",
+                "change": "added",
+                "after": "ef56",
+                "size_bytes": 300,
+                "may_include_lawyer_edits": false
+              }
+            ],
+            "skipped": [],
+            "checkpoint_after": "01900000-0000-7000-8000-000c00000018",
+            "undone": true,
+            "usage": {
+              "total": 30,
+              "input": 20,
+              "output": 10
+            }
+          }
+        },
+        {
+          "limit_stop": {
+            "order": 17,
+            "turn": "01900000-0000-7000-8000-000c00000002",
+            "reason": "temporary"
+          }
+        },
+        {
+          "marker": {
+            "order": 18,
+            "event": "01900000-0000-7000-8000-000c0000001c",
+            "kind": {
+              "step_undone": {
+                "turn": "01900000-0000-7000-8000-000c00000002",
+                "checkpoint": "01900000-0000-7000-8000-000c0000001b",
+                "restored": [
+                  "docs/4.md"
+                ],
+                "kept": []
+              }
+            }
+          }
+        }
+      ],
+      "text_utf16": {
+        "01900000-0000-7000-8000-000c00000007": 7
+      },
+      "turn": "01900000-0000-7000-8000-000c00000002",
+      "running": null,
+      "after_turn": null,
+      "files": {},
+      "failures": {}
+    }
+  }
+}

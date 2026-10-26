@@ -166,6 +166,10 @@ opt-level = 3
 panic = "abort"
 strip = true
 
+[profile.bench] # gungraun: Callgrind counts by symbol, so a stripped bench counts 0 instructions
+strip = false
+debug = true
+
 [profile.preview] # "feel the app": 207 s cold, 11.7 s per app edit (a Linux VM)
 inherits = "release"
 lto = false

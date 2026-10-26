@@ -1,151 +1,16 @@
-//! Message text: appends from events and from display-stage deltas, the durable part of each
-//! message, and splitting text so no change carries more than `INLINE_LIMIT_BYTES`.
+//! Message text: appends from events and from display-stage deltas, and the durable part of
+//! each message. Splitting text at `INLINE_LIMIT_BYTES` is in `split.rs`.
 //!
 //! Each message keeps the UTF-16 length of its shown text and of its durable part in its
 //! [`TextMeta`], and adds `utf16_len(chunk)` on each append, so a `from_len` is never a rescan.
 
-use clauseo_protocol::{
-    AgentTextEntry, AppendTarget, ContentBlock, INLINE_LIMIT_BYTES, MessageId, Seq, TextAppended,
-    UserMessageEntry, ViewEntry, escaped_len,
-};
+use clauseo_protocol::{AgentTextEntry, AppendTarget, Seq, TextAppended, ViewEntry};
 
-use crate::change::{Anomaly, TextDelta, ViewChange};
+use crate::change::{Anomaly, TextDelta};
+use crate::order::{insert_entry, seq_plus, set_order};
+use crate::split::{push_appends, push_text_upsert};
 use crate::state::{TextMeta, ThreadState, count_u16};
-use crate::thread::insert_entry;
 use crate::{Applied, Error};
-
-/// The most bytes JSON escaping makes of one byte (`\u00XX`): text no longer than the limit
-/// divided by it fits without counting.
-const MAX_ESCAPE: usize = 6;
-
-/// The first piece of `text` whose escaped cost is at most `budget`, cut at a `char` boundary,
-/// and the rest.
-fn cut(text: &str, budget: usize) -> (&str, &str) {
-    // Escaping never shortens text, so only text within the budget in bytes can fit whole; a
-    // longer text is walked only as far as its first piece, never scanned to its end.
-    if text.len().saturating_mul(MAX_ESCAPE) <= budget
-        || (text.len() <= budget && escaped_len(text) <= budget)
-    {
-        return (text, "");
-    }
-    let mut cost = 0;
-    for (at, ch) in text.char_indices() {
-        cost += char_cost(ch);
-        if cost > budget {
-            return text.split_at_checked(at).unwrap_or((text, ""));
-        }
-    }
-    (text, "")
-}
-
-/// One char's share of `escaped_len`, as `serde_json` escapes it.
-fn char_cost(ch: char) -> usize {
-    match ch {
-        '"' | '\\' | '\u{8}' | '\t' | '\n' | '\u{c}' | '\r' => 2,
-        '\0'..='\u{1f}' => 6,
-        other => other.len_utf8(),
-    }
-}
-
-/// Pushes `AppendText` changes for `text` on a text `from_len` long, each at most
-/// `INLINE_LIMIT_BYTES` escaped. Returns nothing: the caller keeps its own count.
-fn push_appends(
-    out: &mut Vec<ViewChange>,
-    message_id: MessageId,
-    target: AppendTarget,
-    mut from_len: u32,
-    mut text: &str,
-) {
-    while !text.is_empty() {
-        let (piece, rest) = cut(text, INLINE_LIMIT_BYTES);
-        if piece.is_empty() {
-            // Unreachable for a non-empty text (one char costs at most 6 bytes); stops a loop.
-            return;
-        }
-        out.push(ViewChange::AppendText {
-            message_id,
-            target,
-            from_len,
-            text: piece.to_owned(),
-        });
-        if !rest.is_empty() {
-            from_len = from_len.saturating_add(count_u16(piece));
-        }
-        text = rest;
-    }
-}
-
-/// Pushes an `Upsert` of an agent text entry with its text cut at the limit, then `AppendText`
-/// changes for the rest.
-pub(crate) fn push_text_upsert(out: &mut Vec<ViewChange>, entry: &AgentTextEntry) {
-    let (head, rest) = cut(&entry.text, INLINE_LIMIT_BYTES);
-    out.push(ViewChange::Upsert(Box::new(ViewEntry::AgentText(
-        AgentTextEntry {
-            order: entry.order,
-            message: entry.message,
-            turn: entry.turn,
-            kind: entry.kind,
-            text: head.to_owned(),
-        },
-    ))));
-    if !rest.is_empty() {
-        let target = AppendTarget::AgentText;
-        push_appends(out, entry.message, target, count_u16(head), rest);
-    }
-}
-
-/// Pushes an `Upsert` of a user message whose `Text` blocks are cut to the limit in all, summed
-/// over the blocks in order (a block past the limit goes empty), then `AppendText` changes with
-/// `AppendTarget::UserBlock` for the rest of each cut block.
-pub(crate) fn push_user_upsert(out: &mut Vec<ViewChange>, entry: &UserMessageEntry) {
-    let mut budget = INLINE_LIMIT_BYTES;
-    let mut rests: Vec<(u32, u32, &str)> = Vec::new();
-    let mut content = Vec::with_capacity(entry.content.len());
-    for (block_index, block) in entry.content.iter().enumerate() {
-        let ContentBlock::Text { text } = block else {
-            content.push(block.clone());
-            continue;
-        };
-        let (head, rest) = cut(text, budget);
-        budget = budget.saturating_sub(escaped_len(head));
-        if !rest.is_empty() {
-            let at = u32::try_from(block_index).unwrap_or(u32::MAX);
-            rests.push((at, count_u16(head), rest));
-        }
-        content.push(ContentBlock::Text {
-            text: head.to_owned(),
-        });
-    }
-    out.push(ViewChange::Upsert(Box::new(ViewEntry::UserMessage(
-        UserMessageEntry {
-            content,
-            ..without_content(entry)
-        },
-    ))));
-    for (at, from_len, rest) in rests {
-        push_appends(
-            out,
-            entry.message,
-            AppendTarget::UserBlock(at),
-            from_len,
-            rest,
-        );
-    }
-}
-
-/// A copy of `entry` with an empty `content`, for building the cut copy.
-fn without_content(entry: &UserMessageEntry) -> UserMessageEntry {
-    UserMessageEntry {
-        order: entry.order,
-        message: entry.message,
-        turn: entry.turn,
-        content: Vec::new(),
-        delivery: entry.delivery,
-        status: entry.status,
-        edited: entry.edited,
-        steer: entry.steer.clone(),
-    }
-}
 
 /// Folds a `TextAppended` at `seq`.
 ///
@@ -257,8 +122,8 @@ fn open_message(state: &mut ThreadState, seq: Seq, event: &TextAppended, out: &m
 }
 
 /// Folds display-stage text: appends it to the message's shown text, or opens the message at
-/// a provisional order: after `pending_seq` and after every message a delta opened above it.
-pub(crate) fn text_delta(state: &mut ThreadState, delta: &TextDelta) -> Result<Applied, Error> {
+/// a provisional order: `max(last entry order, pending_seq) + 1` (the host contract in `lib.rs`).
+pub(crate) fn text_delta(state: &mut ThreadState, delta: &TextDelta<'_>) -> Result<Applied, Error> {
     if let Some(seq) = state.seq
         && delta.pending_seq < seq
     {
@@ -281,20 +146,22 @@ pub(crate) fn text_delta(state: &mut ThreadState, delta: &TextDelta) -> Result<A
             });
         }
         let from_len = meta.shown_u16;
-        entry.text.push_str(&delta.text);
-        meta.shown_u16 = from_len.saturating_add(count_u16(&delta.text));
+        entry.text.push_str(delta.text);
+        meta.shown_u16 = from_len.saturating_add(count_u16(delta.text));
         let target = AppendTarget::AgentText;
         push_appends(
             &mut out.changes,
             delta.message,
             target,
             from_len,
-            &delta.text,
+            delta.text,
         );
         return Ok(out);
     }
-    // After the pending head and after every message a delta opened whose `TextAppended` the
-    // host has not sent yet: those are exactly the entries above `pending_seq`.
+    // After the pending head. Under the host contract (`lib.rs`) a message's first delta comes
+    // after the host flushed every other message's text, so no entry is above `pending_seq` and
+    // this is the `seq` its first `TextAppended` gets; with the contract broken, `max` still puts
+    // it after every entry.
     let last = state.entries.last_key_value().map(|(key, _)| *key);
     let order = seq_plus(
         last.map_or(delta.pending_seq, |last| last.max(delta.pending_seq)),
@@ -305,7 +172,7 @@ pub(crate) fn text_delta(state: &mut ThreadState, delta: &TextDelta) -> Result<A
         message: delta.message,
         turn: delta.turn,
         kind: delta.kind,
-        text: delta.text.clone(),
+        text: delta.text.to_owned(),
     };
     push_text_upsert(&mut out.changes, &entry);
     state.index.texts.insert(
@@ -321,16 +188,4 @@ pub(crate) fn text_delta(state: &mut ThreadState, delta: &TextDelta) -> Result<A
     state.index.provisional += 1;
     state.entries.insert(order, ViewEntry::AgentText(entry));
     Ok(out)
-}
-
-/// `seq + n`, saturating at the largest `Seq`.
-pub(crate) fn seq_plus(seq: Seq, n: u64) -> Seq {
-    Seq::new(seq.get().saturating_add(n)).unwrap_or(seq)
-}
-
-/// Sets an agent text entry's order; other entries never move.
-pub(crate) fn set_order(entry: &mut ViewEntry, order: Seq) {
-    if let ViewEntry::AgentText(text) = entry {
-        text.order = order;
-    }
 }

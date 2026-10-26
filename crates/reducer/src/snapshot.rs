@@ -5,13 +5,19 @@
 //! UTF-16 count, and leaves out messages only deltas opened, so no copy is made to drop
 //! un-durable text and a snapshot always equals the fold of the log. Decoding rebuilds the
 //! indexes from the entries.
+//!
+//! `reducer_schema` is the first key, and `Snapshot::from_bytes` reads it before the state: bytes
+//! another schema wrote give [`Error::SchemaMismatch`] whatever shape their state has, never
+//! [`Error::SnapshotDecode`].
 
 use std::collections::BTreeMap;
+use std::fmt;
 
 use clauseo_protocol::{
     AgentTextEntry, ErrorCode, HeaderEntry, MatterHeaderEntry, MatterId, MessageId, Seq, TextKind,
     ThreadId, ThreadStatus, TurnId, ViewEntry,
 };
+use serde::de::{self, IgnoredAny, MapAccess, Visitor};
 use serde::ser::{SerializeMap, SerializeSeq, SerializeStruct};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -24,7 +30,7 @@ use crate::{Error, StreamState};
 pub const REDUCER_SCHEMA_VERSION: u32 = 1;
 
 /// A snapshot as read: the schema it was written with and the state.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
     /// The `REDUCER_SCHEMA_VERSION` that wrote it.
     pub reducer_schema: u32,
@@ -32,7 +38,8 @@ pub struct Snapshot {
     pub state: StreamState,
 }
 
-/// A snapshot to write: the schema and a borrow of the state, never a copy.
+/// A snapshot to write: the schema and a borrow of the state, never a copy. `reducer_schema` is
+/// written first, so a reader can stop before a state of another shape.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct SnapshotRef<'a> {
     /// This build's `REDUCER_SCHEMA_VERSION`.
@@ -50,9 +57,21 @@ impl Snapshot {
         }
     }
 
-    /// Decodes snapshot bytes; [`Error::SnapshotDecode`] when they do not decode.
+    /// Decodes snapshot bytes. Reads `reducer_schema` first and stops with
+    /// [`Error::SchemaMismatch`] when another schema wrote them, before decoding their state;
+    /// [`Error::SnapshotDecode`] when they do not decode.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        rmp_serde::from_slice(bytes).map_err(Error::SnapshotDecode)
+        let read: Read = rmp_serde::from_slice(bytes).map_err(Error::SnapshotDecode)?;
+        match read.state {
+            Some(state) => Ok(Self {
+                reducer_schema: read.reducer_schema,
+                state,
+            }),
+            None => Err(Error::SchemaMismatch {
+                found: read.reducer_schema,
+                expected: REDUCER_SCHEMA_VERSION,
+            }),
+        }
     }
 
     /// The state, if this build's schema wrote it; [`Error::SchemaMismatch`] otherwise.
@@ -64,6 +83,60 @@ impl Snapshot {
             });
         }
         Ok(self.state)
+    }
+}
+
+/// What snapshot bytes hold: the schema that wrote them, and the state when it is this build's.
+struct Read {
+    reducer_schema: u32,
+    state: Option<StreamState>,
+}
+
+/// A snapshot's keys, in the order `SnapshotRef` writes them.
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "snake_case")]
+enum Key {
+    ReducerSchema,
+    State,
+}
+
+impl<'de> Deserialize<'de> for Read {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_struct("Snapshot", &["reducer_schema", "state"], ReadVisitor)
+    }
+}
+
+struct ReadVisitor;
+
+impl<'de> Visitor<'de> for ReadVisitor {
+    type Value = Read;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a snapshot map: reducer_schema, then state")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Read, A::Error> {
+        if !matches!(map.next_key::<Key>()?, Some(Key::ReducerSchema)) {
+            return Err(de::Error::custom("a snapshot starts with reducer_schema"));
+        }
+        let found: u32 = map.next_value()?;
+        if found != REDUCER_SCHEMA_VERSION {
+            // Another schema: its state may have any shape, so it is skipped, never decoded.
+            while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+            return Ok(Read {
+                reducer_schema: found,
+                state: None,
+            });
+        }
+        if !matches!(map.next_key::<Key>()?, Some(Key::State)) {
+            return Err(de::Error::missing_field("state"));
+        }
+        let state = map.next_value()?;
+        while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+        Ok(Read {
+            reducer_schema: found,
+            state: Some(state),
+        })
     }
 }
 
