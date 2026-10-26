@@ -1,5 +1,6 @@
 ---
 source: crates/reducer/tests/reducer/snapshot.rs
+description: "The snapshot shape changed: bump REDUCER_SCHEMA_VERSION (crates/reducer/src/snapshot.rs), then accept this snapshot."
 expression: fold(&scripted_turn().unwrap())
 ---
 {

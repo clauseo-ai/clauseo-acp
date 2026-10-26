@@ -1,5 +1,6 @@
 //! clauseo-reducer's instruction counts under Valgrind (gungraun, Callgrind): folding a busy
-//! turn, one event on a long thread, a 20,000-event replay and the view snapshot of that thread.
+//! turn, one event or one text delta on a long thread, a 20,000-event replay and the view
+//! snapshot of that thread.
 //!
 //! Each case builds its events and its state in gungraun's `setup`, which Callgrind does not
 //! count, so only the fold is counted. Hard limits are below; the soft limit (2% more `ir` than
@@ -19,8 +20,10 @@ mod linux {
     use std::fmt::Display;
     use std::hint::black_box;
 
-    use clauseo_protocol::{DomainEvent, Envelope, ViewWindow};
-    use clauseo_reducer::{Applied, Error, StreamState, apply, view_snapshot};
+    use clauseo_protocol::{DomainEvent, Envelope, MessageId, Seq, TextKind, TurnId, ViewWindow};
+    use clauseo_reducer::{
+        Applied, Error, StreamState, TextDelta, apply, apply_text_delta, view_snapshot,
+    };
     use gungraun::{
         Callgrind, EventKind, LibraryBenchmarkConfig, library_benchmark, library_benchmark_group,
     };
@@ -93,6 +96,15 @@ mod linux {
         next: Envelope,
     }
 
+    /// A state and a delta's text for its open answer, with the host's pending head.
+    struct OneDelta {
+        state: StreamState,
+        turn: TurnId,
+        message: MessageId,
+        text: String,
+        pending_seq: Seq,
+    }
+
     fn fresh(events: Vec<Envelope>) -> Fold {
         let Some(first) = events.first() else {
             fail("no events to fold")
@@ -152,6 +164,26 @@ mod linux {
         on_open_turn(256 * 1024, |open| Ok(open.text_appended()))
     }
 
+    /// The long thread with an open turn whose answer holds 256 KiB, and a 40-byte delta onto
+    /// that answer: the streaming hot path, where `from_len` must come from the cached count.
+    fn delta_on_256k() -> OneDelta {
+        let open = built(
+            "the open turn",
+            OpenTurn::on_long_thread(LONG_THREAD_EVENTS, 256 * 1024),
+        );
+        let state = fold(open.log.events());
+        let Some(pending_seq) = state.seq() else {
+            fail("the open turn folded to an empty state")
+        };
+        OneDelta {
+            state,
+            turn: open.turn,
+            message: open.answer,
+            text: fixtures::prose(40),
+            pending_seq,
+        }
+    }
+
     fn tool_call_updated() -> OneEvent {
         on_open_turn(8 * 1024, |open| open.tool_call_updated())
     }
@@ -188,6 +220,24 @@ mod linux {
         (input, applied)
     }
 
+    // Applies one text delta to the long thread's open answer.
+    #[library_benchmark]
+    #[bench::text_delta_256k(setup = delta_on_256k, config = limits(Some(IR_PER_EVENT)))]
+    fn text_delta_on_long_thread(mut input: OneDelta) -> (OneDelta, Result<Applied, Error>) {
+        let delta = TextDelta {
+            turn: input.turn,
+            message: input.message,
+            kind: TextKind::Answer,
+            text: &input.text,
+            pending_seq: input.pending_seq,
+        };
+        let Some(thread) = input.state.as_thread_mut() else {
+            fail("the open turn's state is not a thread")
+        };
+        let applied = apply_text_delta(thread, &delta);
+        (input, applied)
+    }
+
     // The view snapshot of the long thread.
     #[library_benchmark]
     #[bench::view_snapshot_20k(setup = long_state, config = limits(None))]
@@ -198,7 +248,12 @@ mod linux {
 
     library_benchmark_group!(
         name = apply_group,
-        benchmarks = [fold_events, one_event_on_long_thread, view_snapshot_20k]
+        benchmarks = [
+            fold_events,
+            one_event_on_long_thread,
+            text_delta_on_long_thread,
+            view_snapshot_20k
+        ]
     );
 }
 

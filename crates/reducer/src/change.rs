@@ -99,9 +99,10 @@ pub enum Anomaly {
 }
 
 /// Display-stage text the host passes in before the text is an event: it reaches the screen
-/// at once and the log later, as a `TextAppended`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TextDelta {
+/// at once and the log later, as a `TextAppended`. It borrows its text: the host keeps its own
+/// copy for the durability batch, and the reducer copies only what it keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextDelta<'a> {
     /// The turn.
     pub turn: TurnId,
     /// The agent's message.
@@ -109,7 +110,7 @@ pub struct TextDelta {
     /// Answer or thought.
     pub kind: TextKind,
     /// The text.
-    pub text: String,
+    pub text: &'a str,
     /// The host's pending head: the last `seq` it has sent to the store for this stream.
     pub pending_seq: Seq,
 }

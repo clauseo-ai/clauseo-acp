@@ -158,29 +158,66 @@ fn mid_turn() -> (Log, StreamState) {
     (log, state)
 }
 
+/// A snapshot written with its state before its schema, which this format never writes.
+#[cfg(test)]
+#[derive(serde::Serialize)]
+struct StateFirst<'a> {
+    state: &'a StreamState,
+    reducer_schema: u32,
+}
+
+/// The description of every snapshot that holds a state's serialised shape.
+#[cfg(test)]
+const BUMP: &str = "The snapshot shape changed: bump REDUCER_SCHEMA_VERSION \
+                    (crates/reducer/src/snapshot.rs), then accept this snapshot.";
+
 #[test]
 fn prompt_stream_state() {
-    insta::assert_json_snapshot!(fold(&prompt_stream().unwrap()));
+    insta::with_settings!({ description => BUMP }, {
+        insta::assert_json_snapshot!(fold(&prompt_stream().unwrap()));
+    });
 }
 
 #[test]
 fn scripted_turn_state() {
-    insta::assert_json_snapshot!(fold(&scripted_turn().unwrap()));
+    insta::with_settings!({ description => BUMP }, {
+        insta::assert_json_snapshot!(fold(&scripted_turn().unwrap()));
+    });
 }
 
 #[test]
 fn matter_versions_state() {
-    insta::assert_json_snapshot!(fold(&matter_versions().unwrap()));
+    insta::with_settings!({ description => BUMP }, {
+        insta::assert_json_snapshot!(fold(&matter_versions().unwrap()));
+    });
 }
 
 #[test]
 fn snapshot_shape_is_pinned() {
+    // Every field of a thread's state, and every entry kind a thread holds, each in a snapshot.
     let (_, state) = mid_turn();
-    let description = "The snapshot shape changed: bump REDUCER_SCHEMA_VERSION \
-                       (crates/reducer/src/snapshot.rs), then accept this snapshot.";
-    insta::with_settings!({ description => description }, {
+    let every = fold(&every_entry_kind());
+    insta::with_settings!({ description => BUMP }, {
         insta::assert_json_snapshot!(Snapshot::of(&state));
+        insta::assert_json_snapshot!("every_entry_kind_shape", Snapshot::of(&every));
     });
+}
+
+#[test]
+fn cut_message_serialises_as_its_entry() {
+    // A message with un-durable text is written cut, from a borrow, by hand; the log's fold
+    // holds the same message as an owned entry. Equal JSON means the hand-written fields are
+    // the entry's, a field added later included.
+    let (log, state) = mid_turn();
+    let cut = serde_json::to_value(Snapshot::of(&state)).unwrap();
+    let owned = serde_json::to_value(Snapshot::of(&fold(log.events()))).unwrap();
+    assert_eq!(cut, owned);
+    let durable = cut["state"]["thread"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["agent_text"]["text"] == "Reading é😀");
+    assert!(durable, "{cut}");
 }
 
 #[test]
@@ -232,13 +269,38 @@ fn snapshot_bytes_round_trip() {
         reducer_schema: later,
         state: &state,
     };
-    let read = Snapshot::from_bytes(&newer.to_bytes().unwrap()).unwrap();
-    let refused = read.into_state();
-    assert!(
-        matches!(refused, Err(Error::SchemaMismatch { found, expected })
-            if found == later && expected == REDUCER_SCHEMA_VERSION),
-        "{refused:?}"
-    );
+    // A newer schema with this shape, and newer and older ones whose state has another shape:
+    // each is refused by its schema, read before the state.
+    let reshaped = |schema: u32| {
+        let value = serde_json::json!({
+            "reducer_schema": schema,
+            "state": { "thread": { "thread_id_v2": 1 } },
+        });
+        rmp_serde::to_vec_named(&value).unwrap()
+    };
+    let bytes = [
+        (later, newer.to_bytes().unwrap()),
+        (later, reshaped(later)),
+        (0, reshaped(0)),
+    ];
+    for (schema, bytes) in bytes {
+        let refused = Snapshot::from_bytes(&bytes);
+        assert!(
+            matches!(refused, Err(Error::SchemaMismatch { found, expected })
+                if found == schema && expected == REDUCER_SCHEMA_VERSION),
+            "{refused:?}"
+        );
+    }
+    // This schema with another shape does not decode.
+    let read = Snapshot::from_bytes(&reshaped(REDUCER_SCHEMA_VERSION));
+    assert!(matches!(read, Err(Error::SnapshotDecode(_))), "{read:?}");
+    // The state before the schema: not the order this format writes.
+    let state_first = StateFirst {
+        state: &state,
+        reducer_schema: REDUCER_SCHEMA_VERSION,
+    };
+    let read = Snapshot::from_bytes(&rmp_serde::to_vec_named(&state_first).unwrap());
+    assert!(matches!(read, Err(Error::SnapshotDecode(_))), "{read:?}");
     let owned = Snapshot {
         reducer_schema: later,
         state,

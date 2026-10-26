@@ -5,9 +5,10 @@
 //! start, text chunks on up to three messages (one of thoughts, two of answers) with non-ASCII
 //! text and chars JSON escapes, tool calls and their updates, permissions asked and answered,
 //! files, and the turn's end. Each text chunk may also come as deltas first, split anywhere,
-//! and a host may run its pending head ahead of the state (commits in flight).
+//! and a host may hold text in its durability batch and run its pending head ahead of the state
+//! (commits in flight), under the host contract.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use clauseo_protocol::{
     AppendTarget, ContentBlock, DomainEvent, EntryId, Envelope, MessageId, PermissionRequestId,
@@ -295,63 +296,138 @@ fn is_delta_anomaly(anomaly: &Anomaly) -> bool {
 }
 
 /// What [`play_ahead`] leaves: the state with deltas, the fold of the same events without
-/// them, and every change in the order it was emitted.
+/// them, every change in the order it was emitted, and how many first deltas closed a batch
+/// that held another message's unsent text.
 #[cfg(test)]
 struct Ahead {
     state: StreamState,
     plain: StreamState,
     applied: Vec<Applied>,
+    handoffs: usize,
 }
 
-/// Plays `stream` as a host with commits in flight, honouring the host contract: each text
-/// event comes first as deltas (the whole text when it has no pieces) whose `pending_seq` is the
-/// last `seq` the host sent, then is sent; after sending the `i`th event the state applies up to
-/// `lags[i % len]` of the sent events, so its `seq` trails the pending head. `each` runs after
-/// every step with the state and the plain fold.
+/// The sending side of [`play_ahead`]: events sent and not yet applied, the pending head, and
+/// the state and plain fold that apply them.
+#[cfg(test)]
+struct Sender<'a, F> {
+    lags: &'a [usize],
+    flight: VecDeque<&'a Envelope>,
+    head: Option<Seq>,
+    sent: usize,
+    ahead: Ahead,
+    each: F,
+}
+
+#[cfg(test)]
+impl<'a, F: FnMut(&StreamState, &StreamState) -> Result<(), TestCaseError>> Sender<'a, F> {
+    /// Sends `envelope`; the state then applies up to `lags[n % len]` of the sent events, `n`
+    /// counting the sends.
+    fn send(&mut self, envelope: &'a Envelope) -> Result<(), TestCaseError> {
+        self.flight.push_back(envelope);
+        self.head = Some(envelope.seq);
+        let lag = self.lags[self.sent % self.lags.len()];
+        self.sent += 1;
+        self.catch_up(lag)
+    }
+
+    /// Sends the batch's events, oldest first.
+    fn flush(&mut self, batch: &mut Vec<&'a Envelope>) -> Result<(), TestCaseError> {
+        for envelope in batch.drain(..) {
+            self.send(envelope)?;
+        }
+        Ok(())
+    }
+
+    /// Applies sent events until at most `lag` are in flight.
+    fn catch_up(&mut self, lag: usize) -> Result<(), TestCaseError> {
+        while self.flight.len() > lag {
+            let Some(sent) = self.flight.pop_front() else {
+                break;
+            };
+            let ahead = &mut self.ahead;
+            ahead.applied.push(apply(&mut ahead.state, sent).unwrap());
+            apply(&mut ahead.plain, sent).unwrap();
+            (self.each)(&ahead.state, &ahead.plain)?;
+        }
+        Ok(())
+    }
+}
+
+/// Plays `stream` as a host with a durability batch and commits in flight, under the host
+/// contract (`lib.rs`). Each text event's text is shown first as deltas (the whole text when it
+/// has no pieces) and waits in the batch. The batch is sent before any non-text event, before a
+/// message's first delta, whose `pending_seq` is then the head that results, and after a text
+/// event when `flushes[i % len]` says the batch timer fired. So a new message's first delta often
+/// meets another message's unsent tail, as an answer meets its thought's. After each send the
+/// state applies up to `lags[n % len]` of the sent events, so its `seq` trails the pending
+/// head. `each` runs after every step with the state and the plain fold.
 #[cfg(test)]
 fn play_ahead(
     stream: &[(Envelope, Vec<String>)],
     lags: &[usize],
-    mut each: impl FnMut(&StreamState, &StreamState) -> Result<(), TestCaseError>,
+    flushes: &[bool],
+    each: impl FnMut(&StreamState, &StreamState) -> Result<(), TestCaseError>,
 ) -> Result<Ahead, TestCaseError> {
     let events = events_of(stream);
-    let mut state = empty(&events);
-    let mut plain = empty(&events);
-    let mut applied = Vec::new();
-    let mut flight: VecDeque<&Envelope> = VecDeque::new();
+    let mut sender = Sender {
+        lags,
+        flight: VecDeque::new(),
+        head: None,
+        sent: 0,
+        ahead: Ahead {
+            state: empty(&events),
+            plain: empty(&events),
+            applied: Vec::new(),
+            handoffs: 0,
+        },
+        each,
+    };
+    let mut batch: Vec<&Envelope> = Vec::new();
+    let mut shown: BTreeSet<MessageId> = BTreeSet::new();
     for (index, (envelope, pieces)) in stream.iter().enumerate() {
-        if let DomainEvent::TextAppended(event) = &envelope.event {
-            let whole = [event.text.clone()];
-            let pieces = if pieces.is_empty() {
-                &whole[..]
-            } else {
-                pieces
-            };
-            let pending = Seq::new(envelope.seq.get() - 1).unwrap();
-            for piece in pieces {
-                let (turn, message, kind) = (event.turn, event.message, event.kind);
-                applied.push(delta_at(&mut state, turn, message, kind, piece, pending));
+        let DomainEvent::TextAppended(event) = &envelope.event else {
+            sender.flush(&mut batch)?;
+            sender.send(envelope)?;
+            continue;
+        };
+        if shown.insert(event.message) {
+            // The message's first delta closes the batch.
+            if batch
+                .iter()
+                .any(|held| is_text_of_other(held, event.message))
+            {
+                sender.ahead.handoffs += 1;
             }
-            each(&state, &plain)?;
+            sender.flush(&mut batch)?;
         }
-        flight.push_back(envelope);
-        let lag = lags[index % lags.len()];
-        let last = index + 1 == stream.len();
-        while let Some(sent) = flight.front().copied() {
-            if !last && flight.len() <= lag {
-                break;
-            }
-            flight.pop_front();
-            applied.push(apply(&mut state, sent).unwrap());
-            apply(&mut plain, sent).unwrap();
-            each(&state, &plain)?;
+        let whole = [event.text.clone()];
+        let pieces = if pieces.is_empty() {
+            &whole[..]
+        } else {
+            pieces
+        };
+        let pending = sender.head.unwrap();
+        for piece in pieces {
+            let (turn, message, kind) = (event.turn, event.message, event.kind);
+            let ahead = &mut sender.ahead;
+            let applied = delta_at(&mut ahead.state, turn, message, kind, piece, pending);
+            ahead.applied.push(applied);
+        }
+        (sender.each)(&sender.ahead.state, &sender.ahead.plain)?;
+        batch.push(envelope);
+        if flushes[index % flushes.len()] {
+            sender.flush(&mut batch)?;
         }
     }
-    Ok(Ahead {
-        state,
-        plain,
-        applied,
-    })
+    sender.flush(&mut batch)?;
+    sender.catch_up(0)?;
+    Ok(sender.ahead)
+}
+
+/// Whether `envelope` is text of a message other than `message`.
+#[cfg(test)]
+fn is_text_of_other(envelope: &Envelope, message: MessageId) -> bool {
+    matches!(&envelope.event, DomainEvent::TextAppended(event) if event.message != message)
 }
 
 #[cfg(test)]
@@ -426,9 +502,10 @@ proptest! {
     fn pending_head_ahead_keeps_order_and_view(
         script in script(),
         lags in prop::collection::vec(0..3usize, 1..8),
+        flushes in prop::collection::vec(prop::bool::weighted(0.25), 1..8),
     ) {
         let stream = build(&script);
-        let ahead = play_ahead(&stream, &lags, |_, _| Ok(()))?;
+        let ahead = play_ahead(&stream, &lags, &flushes, |_, _| Ok(()))?;
         let mut model = Model::default();
         for applied in &ahead.applied {
             prop_assert!(applied.anomalies.is_empty(), "{:?}", applied.anomalies);
@@ -444,11 +521,41 @@ proptest! {
     fn snapshot_with_unconfirmed_deltas_is_the_fold_so_far(
         script in script(),
         lags in prop::collection::vec(0..3usize, 1..8),
+        flushes in prop::collection::vec(prop::bool::weighted(0.25), 1..8),
     ) {
         let stream = build(&script);
-        play_ahead(&stream, &lags, |state, plain| {
+        play_ahead(&stream, &lags, &flushes, |state, plain| {
             prop_assert_eq!(&helpers::round_trip(state), plain);
             Ok(())
         })?;
+    }
+}
+
+#[test]
+fn play_ahead_meets_unsent_tails() {
+    // A thought in two chunks, held in the batch, then an answer and a second answer: each
+    // answer's first delta meets the unsent text before it. No anomaly, and the view is the log's.
+    let item = |slot: usize, text: &str| Item::Text {
+        slot,
+        text: text.to_owned(),
+        cuts: vec![3],
+        deltas: true,
+    };
+    let script = vec![vec![
+        item(0, "Reading é the lease."),
+        item(0, " Clause 4 😀."),
+        item(1, "The break clause"),
+        item(1, " needs notice."),
+        item(2, "Draft: «six months»."),
+    ]];
+    let stream = build(&script);
+    for lags in [[0], [1], [2]] {
+        let ahead = play_ahead(&stream, &lags, &[false], |_, _| Ok(())).unwrap();
+        assert_eq!(ahead.handoffs, 2);
+        for applied in &ahead.applied {
+            assert!(applied.anomalies.is_empty(), "{:?}", applied.anomalies);
+        }
+        assert_eq!(view_snapshot(&ahead.state), view_snapshot(&ahead.plain));
+        assert_eq!(snapshot_bytes(&ahead.state), snapshot_bytes(&ahead.plain));
     }
 }

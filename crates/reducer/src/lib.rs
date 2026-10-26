@@ -20,13 +20,23 @@
 //! from events. `store` and `host` decide when to take snapshots; this crate defines what they
 //! hold.
 //!
-//! Host contract for text deltas: `host` passes display-stage text to `apply_text_delta` with its
-//! pending head (the last `seq` it sent to the store) as `pending_seq`. Its durability batch
-//! flushes messages in the order their first delta arrived and before any non-text event of the
-//! stream. A message a delta opens takes the order after `pending_seq` and after the messages
-//! deltas opened whose `TextAppended` the host has not sent yet (the entries above
-//! `pending_seq`), so under the contract its first `TextAppended` gets exactly that `seq`.
-//! Otherwise the reducer moves the entry and reports [`Anomaly::OrderCorrected`].
+//! Host contract for text deltas, which `host` keeps so that a message a delta opens is already
+//! at the order its first `TextAppended` gets:
+//!
+//! 1. `host` passes display-stage text to `apply_text_delta` with `pending_seq`, its pending head:
+//!    the last `seq` it has sent to the store for this stream, never behind the state's `seq`.
+//! 2. Its durability batch turns the text it holds into `TextAppended` events and sends them. It
+//!    is flushed before any non-text event of the stream is sent.
+//! 3. A message's first delta closes the current batch: before passing that delta, `host`
+//!    flushes the batch (the other messages' un-durable text) and passes the pending head that
+//!    results as `pending_seq`. The new message opens the next batch, and that batch sends its
+//!    `TextAppended` first, so its `seq` is `pending_seq + 1`.
+//! 4. The reducer opens the message at `max(last entry order, pending_seq) + 1`. Under rule 3 no
+//!    entry is above the pending head when a message opens, so that is `pending_seq + 1`, the
+//!    `seq` its first `TextAppended` gets, and the event confirms it in place with no change.
+//!
+//! A first `TextAppended` at another `seq` breaks the contract: the reducer moves the entry to
+//! that `seq`, sends it again and reports [`Anomaly::OrderCorrected`].
 //!
 //! # Invariants
 //!
@@ -62,9 +72,10 @@
 //! # Start reading
 //!
 //! `apply` below, then `thread.rs` (the thread fold and its status rules), `text.rs` (text,
-//! deltas, the durable part and splitting), `matter.rs`, `state.rs` (the state and its indexes),
-//! `snapshot.rs` (the snapshot format), `view.rs` and `change.rs`. The tests are one binary,
-//! `tests/reducer.rs` with its modules in `tests/reducer/`, and shared fixtures in
+//! deltas and the durable part), `split.rs` (splitting text at the inline limit), `order.rs`
+//! (inserting entries and moving a message a delta opened), `matter.rs`, `state.rs` (the state
+//! and its indexes), `snapshot.rs` (the snapshot format), `view.rs` and `change.rs`. The tests
+//! are one binary, `tests/reducer.rs` with its modules in `tests/reducer/`, and shared fixtures in
 //! `tests/support/fixtures.rs`; the instruction-count bench is the `clauseo-reducer_bench`
 //! package (`crates/reducer_bench`).
 
@@ -80,7 +91,9 @@
 mod change;
 mod error;
 mod matter;
+mod order;
 mod snapshot;
+mod split;
 mod state;
 mod text;
 mod thread;
@@ -133,11 +146,12 @@ pub fn apply(state: &mut StreamState, envelope: &Envelope) -> Result<Applied, Er
 }
 
 /// Folds display-stage text into the thread: appends it to its message's shown text (an
-/// `AppendText`), or opens the message (an `Upsert`) at a provisional order. The text is not
-/// durable until its `TextAppended` is applied.
+/// `AppendText`), or opens the message (an `Upsert`) at a provisional order, which the host
+/// contract above makes the `seq` of its first `TextAppended`. The text is not durable until its
+/// `TextAppended` is applied.
 ///
 /// Refuses a delta whose `pending_seq` is behind the state's `seq`
 /// ([`Error::PendingSeqBehind`]).
-pub fn apply_text_delta(state: &mut ThreadState, delta: &TextDelta) -> Result<Applied, Error> {
+pub fn apply_text_delta(state: &mut ThreadState, delta: &TextDelta<'_>) -> Result<Applied, Error> {
     text::text_delta(state, delta)
 }

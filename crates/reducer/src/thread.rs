@@ -17,8 +17,9 @@ use clauseo_protocol::{
 
 use crate::Applied;
 use crate::change::{Anomaly, ViewChange};
+use crate::order::insert_entry;
 use crate::state::ThreadState;
-use crate::text::{push_text_upsert, seq_plus, set_order, text_appended};
+use crate::text::text_appended;
 
 /// Folds one envelope of the thread's stream; the caller has checked its stream and `seq`.
 pub(crate) fn fold(state: &mut ThreadState, envelope: &Envelope, out: &mut Applied) {
@@ -355,39 +356,4 @@ pub(super) fn insert_new(state: &mut ThreadState, order: Seq, entry: ViewEntry, 
     out.changes
         .push(ViewChange::Upsert(Box::new(entry.clone())));
     insert_entry(state, order, entry, out);
-}
-
-/// Inserts `entry` at `order`. A message a delta opened at that order moves after the last
-/// entry, with its `Upsert` and [`Anomaly::OrderCorrected`]: under the host contract its
-/// `TextAppended` would have taken this `seq`, and its own event corrects it again.
-pub(crate) fn insert_entry(
-    state: &mut ThreadState,
-    order: Seq,
-    entry: ViewEntry,
-    out: &mut Applied,
-) {
-    if let Some(mut moved) = state.entries.insert(order, entry) {
-        let ViewEntry::AgentText(text) = &moved else {
-            return;
-        };
-        let message = text.message;
-        let last = state
-            .entries
-            .last_key_value()
-            .map_or(order, |(key, _)| *key);
-        let to = seq_plus(last, 1);
-        set_order(&mut moved, to);
-        if let Some(meta) = state.index.texts.get_mut(&message) {
-            meta.order = to;
-        }
-        if let ViewEntry::AgentText(text) = &moved {
-            push_text_upsert(&mut out.changes, text);
-        }
-        state.entries.insert(to, moved);
-        out.anomalies.push(Anomaly::OrderCorrected {
-            message,
-            from: order,
-            to,
-        });
-    }
 }

@@ -61,7 +61,7 @@ pub fn delta_at(
         turn,
         message,
         kind,
-        text: text.to_owned(),
+        text,
         pending_seq,
     };
     apply_text_delta(state.as_thread_mut().unwrap(), &delta).unwrap()

@@ -6,11 +6,12 @@ use clauseo_protocol::{
     UserMessageEntry, UserMessageStatus, ViewEntry,
 };
 
-use super::{insert_entry, insert_marker, insert_new, not_yet, set, set_status, set_vec};
+use super::{insert_marker, insert_new, not_yet, set, set_status, set_vec};
 use crate::Applied;
 use crate::change::{Anomaly, ViewChange};
+use crate::order::insert_entry;
+use crate::split::push_user_upsert;
 use crate::state::{ThreadState, TurnFiles};
-use crate::text::push_user_upsert;
 
 /// The status while a turn runs: `NeedsYou` while the lawyer is asked, else `Running`.
 pub(super) fn running_status(state: &ThreadState) -> ThreadStatus {
@@ -158,8 +159,10 @@ pub(super) fn stopped_at_limit(
 }
 
 /// Ends the running turn: its step, then the status. A `TurnEnded` of a turn that is not
-/// running (one that never started) leaves the status and makes no step; a second one of a
-/// turn with a step is [`Anomaly::Duplicate`].
+/// running (one that never started) makes no step and marks its user message `Removed`
+/// (0002); it leaves the status, but for `Starting` from that turn's own prompt while no turn
+/// runs, which settles (to `Idle` unless the lawyer is asked). A second `TurnEnded` of a turn
+/// with a step is [`Anomaly::Duplicate`].
 pub(super) fn turn_ended(state: &mut ThreadState, seq: Seq, event: &TurnEnded, out: &mut Applied) {
     if state.index.steps.contains_key(&event.turn) {
         out.anomalies.push(Anomaly::Duplicate {
@@ -171,6 +174,14 @@ pub(super) fn turn_ended(state: &mut ThreadState, seq: Seq, event: &TurnEnded, o
     if state.running != Some(event.turn) {
         state.files.remove(&event.turn);
         state.failures.remove(&event.turn);
+        remove_prompts(state, event.turn, out);
+        if state.running.is_none()
+            && state.turn == Some(event.turn)
+            && matches!(state.status(), ThreadStatus::Starting)
+        {
+            let status = settled_status(state);
+            set_status(state, "turn_ended", out, status);
+        }
         return;
     }
     state.running = None;
@@ -202,6 +213,20 @@ pub(super) fn turn_ended(state: &mut ThreadState, seq: Seq, event: &TurnEnded, o
         | ThreadStatus::Archived => after.unwrap_or_else(|| settled_status(state)),
     };
     set_status(state, "turn_ended", out, status);
+}
+
+/// Marks the user messages of `turn`, which ended without starting, `Removed`. It walks every
+/// entry: a turn that never started is rare (a prompt removed or cancelled before its turn), and
+/// an index from turns to prompts would be one more to keep.
+fn remove_prompts(state: &mut ThreadState, turn: TurnId, out: &mut Applied) {
+    for entry in state.entries.values_mut() {
+        if let ViewEntry::UserMessage(prompt) = entry
+            && prompt.turn == turn
+            && set(&mut prompt.status, UserMessageStatus::Removed)
+        {
+            push_user_upsert(&mut out.changes, prompt);
+        }
+    }
 }
 
 pub(super) fn step_undone(
