@@ -73,7 +73,7 @@ to write instead.
 | `desktop` | Tauri shell: fixed plugin set, AppManifest, capabilities; later commands and the Channel bridge | host, settings, tauri | | exists |
 | `protocol` | Event envelope, domain events, commands, queries, view patches, account limits, ids, error codes | serde, serde_json, uuid, compact_str, thiserror, specta, specta-serde | tauri, tokio, fs, process | exists |
 | `reducer` | Pure fold from events to thread state and view patches | protocol | any I/O, clock, tauri | planned |
-| `store` | SQLite log, snapshots, blobs, receipts, writer thread | protocol, rusqlite | tauri | planned |
+| `store` | SQLite log, snapshots, blobs, receipts, writer thread | protocol, rusqlite, serde, serde_json, rmp-serde, blake3, zstd, async-channel, futures | tauri | exists |
 | `matters` | Shadow repos via gix: checkpoints, undo, restore, compare, retention, file watching | protocol, gix, notify | tauri | planned |
 | `settings` | Settings schema and locations, the policy layer | serde, schemars | tauri | planned |
 | `process` | Spawning, graceful shutdown, process-tree kill, restart supervisor, the `Launcher` trait | protocol, async-process | tauri | planned |
