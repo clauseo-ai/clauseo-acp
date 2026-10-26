@@ -1,0 +1,9 @@
+{"scenario":"unknown-permission-kind","description":"One prompt; the agent asks permission with one option of kind allow_forever, which ACP v1 does not have (raw): the client must refuse it with -32602 (invalid params); then end_turn","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"request":{"id":"perm-1","method":"session/request_permission","raw":true,"params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-perm-1","title":"Edit brief.txt","kind":"edit","status":"pending"},"options":[{"optionId":"allow-forever","name":"Allow forever","kind":"allow_forever"}]}}}
+{"expect_response":{"id":"perm-1","error":{"code":-32602}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

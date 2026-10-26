@@ -8,9 +8,10 @@ use std::path::PathBuf;
 
 use async_process::{Child, ChildStderr, Command, Stdio};
 use clauseo_acp::{
-    AcpClient, AcpEvent, AgentUpdate, ConnectOptions, Error, NewSession, Origin, SessionStart,
+    AcpClient, AcpEvent, AgentUpdate, ConnectOptions, Error, MessageRole, NewSession, Origin,
+    PendingKey, SessionStart,
 };
-use clauseo_protocol::{AgentSessionId, ContentBlock, TurnId};
+use clauseo_protocol::{AgentSessionId, ContentBlock, MatterPath, ToolLocation, TurnId};
 use futures::AsyncReadExt;
 
 /// What a test body gets.
@@ -59,6 +60,19 @@ impl Ctx {
     pub(crate) async fn next(&self) -> AcpEvent {
         self.events.recv().await.expect("the event channel closed")
     }
+
+    /// Waits for events until one satisfies `done`; returns every event through that one.
+    pub(crate) async fn until(&self, done: impl Fn(&AcpEvent) -> bool) -> Vec<AcpEvent> {
+        let mut seen = Vec::new();
+        loop {
+            let event = self.next().await;
+            let last = done(&event);
+            seen.push(event);
+            if last {
+                return seen;
+            }
+        }
+    }
 }
 
 /// How the run ended once the test body returned and dropped its client.
@@ -84,9 +98,28 @@ pub(crate) fn local(name: &str) -> String {
     )
 }
 
+/// This run's folder under the temp folder: the agent's working directory and the session's
+/// `cwd`, removed when the run ends. Nextest runs each test in its own process.
+struct RunDir(PathBuf);
+
+impl RunDir {
+    fn new() -> Self {
+        let dir = std::env::temp_dir().join(format!("clauseo-acp-stdio-{}", std::process::id()));
+        crate::write::create_dir_all(&dir).expect("create the run folder");
+        Self(dir)
+    }
+}
+
+impl Drop for RunDir {
+    fn drop(&mut self) {
+        drop(crate::write::remove_dir_all(&self.0));
+    }
+}
+
 /// Plays `scenario` against the client the body drives.
 pub(crate) fn run(scenario: &str, body: impl AsyncFnOnce(Ctx)) -> Outcome {
-    let cwd = std::env::temp_dir();
+    let dir = RunDir::new();
+    let cwd = dir.0.clone();
     let bin = clauseo_fake_agent::bin_path().expect("fake_agent binary");
     let mut child = Command::new(bin)
         .args(["--scenario", scenario])
@@ -175,5 +208,51 @@ pub(crate) fn chunk_text(
             content: ContentBlock::Text { text },
         } => Some((*role, text.as_str(), acp_message_id.as_deref())),
         _ => None,
+    }
+}
+
+/// An update event on `sess-1`.
+pub(crate) fn update_event(origin: Origin, update: AgentUpdate) -> AcpEvent {
+    AcpEvent::Update {
+        session: sess1(),
+        origin,
+        update,
+    }
+}
+
+/// A message chunk with one text block.
+pub(crate) fn chunk(role: MessageRole, message: &str, text: &str) -> AgentUpdate {
+    AgentUpdate::MessageChunk {
+        role,
+        acp_message_id: Some(message.to_owned()),
+        content: block(text),
+    }
+}
+
+/// A text block.
+pub(crate) fn block(text: &str) -> ContentBlock {
+    ContentBlock::Text {
+        text: text.to_owned(),
+    }
+}
+
+/// A place inside the session folder, as `brief.txt` names it.
+pub(crate) fn inside(path: &str) -> ToolLocation {
+    ToolLocation::Inside {
+        path: MatterPath::new(path).expect("a matter path"),
+        line: None,
+    }
+}
+
+/// Whether `event` is a text chunk of any role.
+pub(crate) fn is_chunk(event: &AcpEvent) -> bool {
+    matches!(event, AcpEvent::Update { update, .. } if chunk_text(update).is_some())
+}
+
+/// The key of the last permission request in `events`; it must hold one.
+pub(crate) fn pending_permission(events: &[AcpEvent]) -> PendingKey {
+    match events.last() {
+        Some(AcpEvent::PermissionRequested { key, .. }) => *key,
+        other => panic!("expected a permission request last, got {other:?}"),
     }
 }

@@ -32,6 +32,7 @@ this. Use the words in `GLOSSARY.md` exactly.
 ## Map
 
 <!-- One line per crate or package that exists. Planned crates are in ARCHITECTURE.md. -->
+- `crates/acp`: the ACP client over the agent's pipes; agent traffic as events. Scenarios in `tests/scenarios/`.
 - `crates/desktop`: the Tauri shell. Blank for now.
 - `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `crates/fake_agent/scenarios/` (README.md).
 - `crates/matters`: matter folders and their shadow git history (checkpoints, undo). See `docs/decisions/0007-matter-history-format.md`.
@@ -48,8 +49,7 @@ this. Use the words in `GLOSSARY.md` exactly.
   a near-cold rebuild), and every permission widens what an XSS can reach.
 - Never write a sync `#[tauri::command]` or stream through Tauri events. Sync commands block the UI
   thread; events go to every webview. Use async commands and one `ipc::Channel` per window.
-- Never read or write the real app data folder, `~/.claude` or `~/.codex`. Those hold a lawyer's data
-  and agent credentials.
+- Never read or write the real app data folder, `~/.claude` or `~/.codex`. Those hold a lawyer's data and agent credentials.
 - Never kill a process by name. Kill only the PID you started.
 - Never open a `.env` file or print a secret.
 - Never create or edit CLA.md or anything in cla/. Signing is done by the person, never by an agent.

@@ -8,9 +8,29 @@
 mod harness;
 
 #[cfg(test)]
+#[path = "stdio/write.rs"]
+mod write;
+
+#[cfg(test)]
 #[path = "stdio/handshake.rs"]
 mod handshake;
 
 #[cfg(test)]
 #[path = "stdio/turns.rs"]
 mod turns;
+
+#[cfg(test)]
+#[path = "stdio/updates.rs"]
+mod updates;
+
+#[cfg(test)]
+#[path = "stdio/permission.rs"]
+mod permission;
+
+#[cfg(test)]
+#[path = "stdio/limits.rs"]
+mod limits;
+
+#[cfg(test)]
+#[path = "stdio/tools.rs"]
+mod tools;

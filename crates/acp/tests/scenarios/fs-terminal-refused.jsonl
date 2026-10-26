@@ -1,0 +1,11 @@
+{"scenario":"fs-terminal-refused","description":"One prompt; the agent asks for fs/read_text_file and terminal/create: the client must refuse each with -32601 (method not found); then end_turn","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"request":{"id":"fs-1","method":"fs/read_text_file","params":{"sessionId":"sess-1","path":"{{cwd}}/brief.txt"}}}
+{"expect_response":{"id":"fs-1","error":{"code":-32601}}}
+{"request":{"id":"term-1","method":"terminal/create","params":{"sessionId":"sess-1","command":"ls"}}}
+{"expect_response":{"id":"term-1","error":{"code":-32601}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
