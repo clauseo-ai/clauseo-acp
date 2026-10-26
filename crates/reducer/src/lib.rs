@@ -30,7 +30,8 @@
 //! 3. A message's first delta closes the current batch: before passing that delta, `host`
 //!    flushes the batch (the other messages' un-durable text) and passes the pending head that
 //!    results as `pending_seq`. The new message opens the next batch, and that batch sends its
-//!    `TextAppended` first, so its `seq` is `pending_seq + 1`.
+//!    `TextAppended` first, so its `seq` is `pending_seq + 1`. Text for other messages that
+//!    arrives after that first delta goes into the same batch, after it.
 //! 4. The reducer opens the message at `max(last entry order, pending_seq) + 1`. Under rule 3 no
 //!    entry is above the pending head when a message opens, so that is `pending_seq + 1`, the
 //!    `seq` its first `TextAppended` gets, and the event confirms it in place with no change.

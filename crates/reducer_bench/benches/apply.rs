@@ -3,9 +3,11 @@
 //! snapshot of that thread.
 //!
 //! Each case builds its events and its state in gungraun's `setup`, which Callgrind does not
-//! count, so only the fold is counted. Hard limits are below; the soft limit (2% more `ir` than
-//! the `main` baseline) applies when the run passes `--baseline=main`, as CI's `reducer-bench`
-//! job does. On systems other than Linux, `main` says gungraun needs Valgrind and exits 0.
+//! count, so only the fold is counted. Each setup ends by settling the heap (`settled`), so the
+//! allocator's work on the setup's garbage is not counted either. Hard limits are below; the
+//! soft limit (2% more `ir` than the `main` baseline) applies when the run passes
+//! `--baseline=main`, as CI's `reducer-bench` job does. On systems other than Linux, `main` says
+//! gungraun needs Valgrind and exits 0.
 
 #[cfg(target_os = "linux")]
 #[path = "../../reducer/tests/support/fixtures.rs"]
@@ -28,7 +30,7 @@ mod linux {
         Callgrind, EventKind, LibraryBenchmarkConfig, library_benchmark, library_benchmark_group,
     };
 
-    use crate::fixtures::{self, Fx, OpenTurn, SCRIPTED_TURN_EVENTS};
+    use crate::fixtures::{self, Fx, Log, OpenTurn, SCRIPTED_TURN_EVENTS};
 
     /// 50,000 instructions stand for 50 µs: the reference laptops (i5-8250U, i5-1135G7) retire
     /// at least one instruction per nanosecond on code like this, even at an IPC of 0.5 and
@@ -67,6 +69,22 @@ mod linux {
         panic!("apply bench setup: {what}")
     }
 
+    /// Bytes of the one allocation that settles the heap: a large request below glibc's mmap
+    /// threshold (128 KiB), served from the heap.
+    const SETTLE_BYTES: usize = 64 * 1024;
+
+    /// `input`, after the heap is settled. The setup frees thousands of small chunks (the
+    /// folded log's `Applied` values, the fixtures' buffers), and glibc's malloc sorts or merges
+    /// them on the next large request. Without this, the first large allocation in the counted
+    /// call (an 8 KiB message growing to 16 KiB) paid for all of them: 1,401,401 instructions in
+    /// `text_appended_8k` against 2,093 for the same event on a 256 KiB message. One large
+    /// allocation here does that work in the setup instead.
+    fn settled<T>(input: T) -> T {
+        let settle: Vec<u8> = Vec::with_capacity(SETTLE_BYTES);
+        drop(black_box(settle));
+        input
+    }
+
     /// The value of `result`, or a failed run that says what could not be built.
     fn built<T, E: Display>(what: &str, result: Result<T, E>) -> T {
         result.unwrap_or_else(|error| fail(&format!("{what}: {error}")))
@@ -90,29 +108,33 @@ mod linux {
         events: Vec<Envelope>,
     }
 
-    /// A state and the one event to apply to it.
+    /// A state and the one event to apply to it, and the log it came from, kept so that its
+    /// memory is freed after the counted call, not before it.
     struct OneEvent {
         state: StreamState,
         next: Envelope,
+        _log: Log,
     }
 
-    /// A state and a delta's text for its open answer, with the host's pending head.
+    /// A state and a delta's text for its open answer, with the host's pending head, and the
+    /// log it came from (as in [`OneEvent`]).
     struct OneDelta {
         state: StreamState,
         turn: TurnId,
         message: MessageId,
         text: String,
         pending_seq: Seq,
+        _log: Log,
     }
 
     fn fresh(events: Vec<Envelope>) -> Fold {
         let Some(first) = events.first() else {
             fail("no events to fold")
         };
-        Fold {
+        settled(Fold {
             state: StreamState::new(first.stream),
             events,
-        }
+        })
     }
 
     fn scripted_turn_input() -> Fold {
@@ -134,10 +156,11 @@ mod linux {
     }
 
     fn long_state() -> StreamState {
-        fold(&built(
+        let state = fold(&built(
             "long_thread",
             fixtures::long_thread(LONG_THREAD_EVENTS),
-        ))
+        ));
+        settled(state)
     }
 
     /// The long thread with an open turn whose answer holds `answer_bytes`, folded, and the
@@ -153,7 +176,11 @@ mod linux {
         let state = fold(open.log.events());
         let event = built("the next event", next(&mut open));
         let next = built("its envelope", open.log.push(event));
-        OneEvent { state, next }
+        settled(OneEvent {
+            state,
+            next,
+            _log: open.log,
+        })
     }
 
     fn text_on_8k() -> OneEvent {
@@ -175,13 +202,14 @@ mod linux {
         let Some(pending_seq) = state.seq() else {
             fail("the open turn folded to an empty state")
         };
-        OneDelta {
+        settled(OneDelta {
             state,
             turn: open.turn,
             message: open.answer,
             text: fixtures::prose(40),
             pending_seq,
-        }
+            _log: open.log,
+        })
     }
 
     fn tool_call_updated() -> OneEvent {
