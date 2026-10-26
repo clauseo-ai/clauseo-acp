@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::ErrorCode;
-use clauseo_store::{BlobIn, Commit, DB_FILE, Error, LOCK_FILE, SCHEMA, Store, StoreOptions};
+use clauseo_store::{BlobIn, Commit, DB_FILE, Error, SCHEMA, Store, StoreOptions};
 use futures::executor::block_on;
 use rusqlite::Connection;
 
@@ -293,6 +293,8 @@ fn disk_full_maps_to_store_disk_full() {
 #[test]
 fn db_file_is_private() {
     use std::os::unix::fs::PermissionsExt;
+
+    use clauseo_store::LOCK_FILE;
 
     let dir = TestDir::new("db_file_is_private");
     let store = dir.open();
