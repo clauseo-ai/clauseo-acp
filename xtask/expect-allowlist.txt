@@ -66,3 +66,14 @@ crates/fake_agent/tests/stdio/write.rs - clippy::disallowed_methods
 crates/fake_agent/src/run/effects.rs start_hold clippy::disallowed_methods
 crates/fake_agent/tests/stdio/harness.rs Agent::start_args clippy::disallowed_methods
 crates/fake_agent/tests/stdio/harness.rs kill_pid clippy::disallowed_methods
+
+# Added by R7: store's write module (the lock file and the private database file), the one
+# BlobRef::new that cannot fail, the test-support fixture's fixed values, the tests' write
+# module, the benches' scratch folder, and the two benches' unwraps.
+crates/store/src/write.rs - clippy::disallowed_methods
+crates/store/src/model.rs blob_ref_of clippy::expect_used
+crates/store/src/fixtures.rs - clippy::expect_used
+crates/store/tests/store/write.rs - clippy::disallowed_methods
+crates/store/benches/common/dir.rs - clippy::disallowed_methods
+crates/store/benches/reopen.rs - clippy::unwrap_used
+crates/store/benches/commit.rs - clippy::unwrap_used

@@ -1,0 +1,43 @@
+[package]
+name = "clauseo-store"
+version = "0.1.0"
+description = "The Clauseo event log, snapshots, blobs and receipts in one SQLite file, behind a writer and a reader thread."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Exports `fixtures` (the 20k-event reopen fixture) for this crate's bench and host's.
+test-support = []
+
+[dependencies]
+clauseo-protocol = { path = "../protocol" }
+rusqlite = { workspace = true, features = ["bundled", "blob"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rmp-serde = { workspace = true }
+blake3 = { workspace = true }
+zstd = { workspace = true }
+async-channel = { workspace = true, features = ["std"] }
+futures = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# Itself with test-support, so the reopen bench reaches `fixtures` with no flag.
+clauseo-store = { path = ".", features = ["test-support"] }
+proptest = { workspace = true }
+criterion = { workspace = true }
+# Tests read the file directly: user_version, the events_readable view, damaged rows.
+rusqlite = { workspace = true, features = ["bundled"] }
+
+[[bench]]
+name = "reopen"
+harness = false
+
+[[bench]]
+name = "commit"
+harness = false
+
+[lints]
+workspace = true
