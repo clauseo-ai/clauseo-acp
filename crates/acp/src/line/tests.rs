@@ -110,7 +110,7 @@ fn envelope_counts_only_what_the_handler_counts_off() {
             r#"{"jsonrpc":"2.0","id":null,"result":{}}"#,
             Some((true, false)),
         ),
-        // `params` that the handler would not see as an object, or another version.
+        // `params` that the handler would not see as an object.
         (
             r#"{"jsonrpc":"2.0","method":"session/update","params":[]}"#,
             Some((true, false)),
@@ -119,13 +119,24 @@ fn envelope_counts_only_what_the_handler_counts_off() {
             r#"{"jsonrpc":"2.0","method":"session/update"}"#,
             Some((true, false)),
         ),
+        // Another version, an `id` with no `result` or `error` or with both: the SDK would
+        // answer each with an error.
         (
             r#"{"jsonrpc":"1.0","method":"session/update","params":{}}"#,
-            Some((true, false)),
+            Some((false, false)),
+        ),
+        (r#"{"jsonrpc":"2.0","id":1}"#, Some((false, false))),
+        (
+            r#"{"jsonrpc":"2.0","id":1,"result":{},"error":{}}"#,
+            Some((false, false)),
+        ),
+        (
+            r#"{"jsonrpc":"2.0","id":1,"method":"x","result":{}}"#,
+            Some((false, false)),
         ),
         // An escaped key or value reads as its text.
         (
-            r#"{"jsonrpc":"2.0","method":"session/update","params":{}}"#,
+            r#"{"json\u0072pc":"2.0","method":"session\/update","params":{}}"#,
             Some((true, true)),
         ),
         // A repeated key counts as its last value, as in the SDK.
