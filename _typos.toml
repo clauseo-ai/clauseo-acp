@@ -2,5 +2,6 @@
 # hook. Add a word under [default.extend-words] only when it is a real name or term, never to hide a typo.
 [files]
 # Lock files hold only generated text (checksums, integrity hashes, package names and versions):
-# nothing in them is ours to spell.
-extend-exclude = ["Cargo.lock", "ui/pnpm-lock.yaml"]
+# nothing in them is ours to spell. MessagePack files are binary. The pre-commit hook passes
+# --force-exclude, so these hold for the staged files it names too.
+extend-exclude = ["Cargo.lock", "ui/pnpm-lock.yaml", "*.msgpack"]
