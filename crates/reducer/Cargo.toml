@@ -1,0 +1,30 @@
+[package]
+name = "clauseo-reducer"
+version = "0.1.0"
+description = "The pure fold from Clauseo events to stream state and view changes."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Every test is under tests/ (one binary) and the docs hold no examples, so `cargo test` builds
+# no unit-test copy of the library and runs no doctests: an edit stays within the
+# `reducer_test_edit` budget.
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+clauseo-protocol = { path = "../protocol" }
+serde = { workspace = true, features = ["derive"] }
+rmp-serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true, features = ["json", "redactions"] }
+proptest = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,120 @@
+---
+source: crates/reducer/tests/reducer/snapshot.rs
+description: "The snapshot shape changed: bump REDUCER_SCHEMA_VERSION (crates/reducer/src/snapshot.rs), then accept this snapshot."
+expression: "Snapshot::of(&state)"
+---
+{
+  "reducer_schema": 1,
+  "state": {
+    "thread": {
+      "thread": "01900000-0000-7000-8000-000800000000",
+      "seq": 9,
+      "header": {
+        "order": 1,
+        "thread": "01900000-0000-7000-8000-000800000000",
+        "matter": "01900000-0000-7000-8000-000100000000",
+        "title": "Indemnity review",
+        "agent": "claude-acp",
+        "status": "needs_you",
+        "queue_held": false,
+        "config_options": [],
+        "commands": [],
+        "plan": []
+      },
+      "entries": [
+        {
+          "user_message": {
+            "order": 2,
+            "message": "01900000-0000-7000-8000-000800000003",
+            "turn": "01900000-0000-7000-8000-000800000002",
+            "content": [
+              {
+                "text": {
+                  "text": "Check the break clause."
+                }
+              }
+            ],
+            "status": "sent",
+            "edited": false
+          }
+        },
+        {
+          "agent_text": {
+            "order": 4,
+            "message": "01900000-0000-7000-8000-000800000007",
+            "turn": "01900000-0000-7000-8000-000800000002",
+            "kind": "thought",
+            "text": "Reading é😀"
+          }
+        },
+        {
+          "tool_call": {
+            "order": 5,
+            "tool_call": "01900000-0000-7000-8000-000800000009",
+            "turn": "01900000-0000-7000-8000-000800000002",
+            "title": "Edit clause 2",
+            "kind": "edit",
+            "tool_name": "Edit",
+            "status": "in_progress",
+            "locations": [
+              {
+                "inside": {
+                  "path": "docs/2.md",
+                  "line": 1
+                }
+              }
+            ],
+            "content": []
+          }
+        },
+        {
+          "permission": {
+            "order": 6,
+            "request": "01900000-0000-7000-8000-00080000000b",
+            "tool_call": "01900000-0000-7000-8000-000800000009",
+            "options": [
+              {
+                "option_id": "allow",
+                "kind": "allow_once",
+                "agent_label": "Yes"
+              }
+            ],
+            "deliverable": "live",
+            "state": "pending"
+          }
+        }
+      ],
+      "text_utf16": {
+        "01900000-0000-7000-8000-000800000007": 11
+      },
+      "turn": "01900000-0000-7000-8000-000800000002",
+      "running": "01900000-0000-7000-8000-000800000002",
+      "after_turn": "idle",
+      "files": {
+        "01900000-0000-7000-8000-000800000002": {
+          "files": [
+            {
+              "path": "lease.docx",
+              "change": "modified",
+              "before": "ab12",
+              "after": "cd34",
+              "size_bytes": 2048,
+              "may_include_lawyer_edits": false
+            },
+            {
+              "path": "notes/summary.md",
+              "change": "added",
+              "after": "ef56",
+              "size_bytes": 300,
+              "may_include_lawyer_edits": false
+            }
+          ],
+          "skipped": []
+        }
+      },
+      "failures": {
+        "01900000-0000-7000-8000-000800000002": "internal"
+      }
+    }
+  }
+}

@@ -16,6 +16,8 @@
 # - The mutants job has no matrix, so it is skipped as a whole on pull requests and pushes, where it
 #   still reports its check as "mutants". It only reports: a missed mutant never fails the run.
 # - The Linux job runs the tests with the network cut off, so a test that reaches the network fails.
+# - reducer-bench counts clauseo-reducer's instructions under Valgrind on every run and, on a pull
+#   request, compares them with the merge-base on main.
 # - Every action is pinned by commit SHA, with its tag in a comment.
 
 name: CI
@@ -384,3 +386,87 @@ jobs:
             target/xtask/mutants.out
             target/xtask/wire/mutants.out
           if-no-files-found: warn
+
+  # clauseo-reducer's instruction counts under Valgrind (gungraun), on every run: the hard limits in
+  # crates/reducer_bench/benches/apply.rs always apply. On a pull request whose merge-base on main
+  # has the bench, it first saves main's counts as the baseline `main`, then fails the head on more
+  # than 2% more `ir` in any case (the soft limit in apply.rs) unless the pull request carries the
+  # label `bench-ok`. A label added after the run started takes effect when the job is re-run.
+  # - Both runs share one CARGO_TARGET_DIR: gungraun keeps baselines under it (`gungraun/`), and
+  #   the head run reuses the base run's dependency builds.
+  # - The soft limit is in apply.rs, not on the command line: gungraun's `--callgrind-limits`
+  #   replaces each case's own limits, hard ones included. A run without `--baseline` compares with
+  #   nothing, so it checks the hard limits only.
+  reducer-bench:
+    name: reducer-bench
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      # Full history: the baseline is built at the merge-base with origin/main.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      # Its own key: bench builds use the bench profile, which no other job builds. It keeps
+      # ~/.cargo/bin, so the runner installed below is not rebuilt while its version stays.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: reducer-bench
+
+      - name: Install Valgrind
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends valgrind
+
+      # The runner's version must equal the gungraun library's, so it is read from Cargo.lock,
+      # the one home of that version.
+      - name: Install gungraun-runner at the version of the gungraun library
+        run: |
+          set -euo pipefail
+          version=$(cargo metadata --locked --format-version 1 \
+            | jq -r '.packages[] | select(.name == "gungraun") | .version')
+          echo "gungraun $version"
+          cargo install --locked gungraun-runner --version "$version"
+
+      # On a pull request, HEAD is the merge commit GitHub made of the head onto main, and
+      # origin/main is main as fetched. While main has not moved since that merge, the merge-base
+      # is the merge commit's first parent, the main the change lands on, so the comparison shows
+      # the pull request's change alone; if main has moved, it is an older main commit. A push
+      # to main, the nightly run and a run on demand have no baseline.
+      - name: cargo bench (apply)
+        env:
+          EVENT: ${{ github.event_name }}
+          BENCH_OK: ${{ contains(github.event.pull_request.labels.*.name, 'bench-ok') }}
+        run: |
+          set -euo pipefail
+          # A cached earlier run must not become the baseline.
+          rm -rf "$CARGO_TARGET_DIR/gungraun"
+          bench=(cargo bench --locked -p clauseo-reducer_bench --bench apply --)
+          baseline=false
+          if [ "$EVENT" = pull_request ]; then
+            base=$(git merge-base HEAD origin/main)
+            if git cat-file -e "$base:crates/reducer_bench/Cargo.toml" 2>/dev/null; then
+              echo "Baseline: main at $base"
+              git worktree add --detach "$RUNNER_TEMP/base" "$base"
+              (cd "$RUNNER_TEMP/base" && rustup toolchain install && "${bench[@]}" --save-baseline=main)
+              baseline=true
+            else
+              echo "No baseline: crates/reducer_bench is not at $base"
+            fi
+          fi
+          if [ "$baseline" = true ] && [ "$BENCH_OK" != true ]; then
+            "${bench[@]}" --baseline=main
+          else
+            if [ "$BENCH_OK" = true ]; then
+              echo "Label bench-ok: hard limits only"
+            fi
+            "${bench[@]}"
+          fi

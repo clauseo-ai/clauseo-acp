@@ -1,0 +1,83 @@
+---
+source: crates/reducer/tests/reducer/snapshot.rs
+expression: fold(&prompt_stream().unwrap())
+---
+{
+  "thread": {
+    "thread": "01900000-0000-7000-8000-000200000000",
+    "seq": 12,
+    "header": {
+      "order": 1,
+      "thread": "01900000-0000-7000-8000-000200000000",
+      "matter": "01900000-0000-7000-8000-000100000000",
+      "title": "Indemnity review",
+      "agent": "claude-acp",
+      "status": "idle",
+      "queue_held": false,
+      "config_options": [],
+      "commands": [],
+      "plan": []
+    },
+    "entries": [
+      {
+        "user_message": {
+          "order": 2,
+          "message": "01900000-0000-7000-8000-000200000003",
+          "turn": "01900000-0000-7000-8000-000200000002",
+          "content": [
+            {
+              "text": {
+                "text": "Summarise the indemnity clause."
+              }
+            }
+          ],
+          "status": "sent",
+          "edited": false
+        }
+      },
+      {
+        "agent_text": {
+          "order": 4,
+          "message": "01900000-0000-7000-8000-000200000007",
+          "turn": "01900000-0000-7000-8000-000200000002",
+          "kind": "thought",
+          "text": "Reading the indemnity clause first."
+        }
+      },
+      {
+        "agent_text": {
+          "order": 7,
+          "message": "01900000-0000-7000-8000-00020000000b",
+          "turn": "01900000-0000-7000-8000-000200000002",
+          "kind": "answer",
+          "text": "The clause caps liability at the fees paid in the last twelve months."
+        }
+      },
+      {
+        "step": {
+          "order": 12,
+          "turn": "01900000-0000-7000-8000-000200000002",
+          "stop": "end_turn",
+          "files": [],
+          "skipped": [],
+          "checkpoint_after": "01900000-0000-7000-8000-000200000011",
+          "undone": false,
+          "usage": {
+            "total": 30,
+            "input": 20,
+            "output": 10
+          }
+        }
+      }
+    ],
+    "text_utf16": {
+      "01900000-0000-7000-8000-000200000007": 35,
+      "01900000-0000-7000-8000-00020000000b": 69
+    },
+    "turn": "01900000-0000-7000-8000-000200000002",
+    "running": null,
+    "after_turn": null,
+    "files": {},
+    "failures": {}
+  }
+}

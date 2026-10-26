@@ -1,0 +1,28 @@
+[package]
+name = "clauseo-reducer_bench"
+version = "0.0.0"
+description = "clauseo-reducer's gungraun bench: instructions per event, counted under Valgrind."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# A bench-only package, apart from clauseo-reducer: gungraun's `main!` reads the command line and
+# exits the process, which the I/O bans of the reducer crate refuse in every one of its targets.
+# It has no library and no normal dependency.
+
+[dev-dependencies]
+clauseo-protocol = { path = "../protocol" }
+clauseo-reducer = { path = "../reducer" }
+
+# gungraun counts instructions under Valgrind, so it builds only on Linux; on other systems the
+# bench's `main` says so and exits 0.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gungraun = { workspace = true }
+
+[[bench]]
+name = "apply"
+harness = false
+
+[lints]
+workspace = true

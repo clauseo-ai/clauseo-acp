@@ -183,12 +183,12 @@ fn a_probe_that_was_not_incremental_warns_under_the_table() {
 fn probes_whose_package_is_missing_are_planned_as_skipped() {
     let members = vec![member("clauseo-protocol", "crates/protocol")];
     let planned = plan(PROBES, &members);
-    assert_eq!(planned.len(), 4);
+    assert_eq!(planned.len(), 5);
     let skipped = planned
         .iter()
         .filter(|p| matches!(p, Planned::Skip(_)))
         .count();
-    assert_eq!(skipped, 2);
+    assert_eq!(skipped, 3);
     assert!(matches!(
         &planned[0],
         Planned::Skip(probe) if probe.name == "check_desktop"
@@ -197,6 +197,20 @@ fn probes_whose_package_is_missing_are_planned_as_skipped() {
         &planned[2],
         Planned::Run { probe, dir } if probe.name == "check_protocol" && dir == "crates/protocol"
     ));
+}
+
+#[test]
+fn the_reducer_probe_times_cargo_test_against_its_budget_row() {
+    let reducer = PROBES.iter().find(|probe| probe.name == "test_reducer");
+    assert_eq!(
+        reducer,
+        Some(&Probe {
+            name: "test_reducer",
+            package: "clauseo-reducer",
+            budget_id: "reducer_test_edit",
+            subcommand: "test",
+        })
+    );
 }
 
 #[test]
