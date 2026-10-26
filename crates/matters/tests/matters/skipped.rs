@@ -8,6 +8,7 @@ use clauseo_protocol::{SkippedFile, SkippedFileReason};
 use crate::fixture::{
     Fixture, added, assert_none, cid, created, meta, modified, path, tools, undo,
 };
+#[cfg(unix)]
 use crate::support;
 
 fn skipped(at: &str, reason: SkippedFileReason) -> SkippedFile {
@@ -192,4 +193,32 @@ fn changed_cloud_only_file_never_read() {
             added("new.docx", b"never versioned"),
         ]
     );
+}
+
+/// A subfolder that does not read is skipped with a warning and its files stay in the tree as
+/// they were: neither deleted nor changed, and the rest of the folder is checkpointed.
+#[cfg(unix)]
+#[test]
+fn unreadable_subfolder_keeps_its_files() {
+    let fx = Fixture::new("unreadable-subfolder");
+    fx.write("locked/inner.txt", "inside");
+    fx.write("a.txt", "one");
+    let mut matter = fx.import();
+    support::set_mode(fx.file("locked"), 0o000);
+    if std::fs::read_dir(fx.file("locked")).is_ok() {
+        // Running as root, which reads any folder: nothing to check.
+        support::set_mode(fx.file("locked"), 0o755);
+        eprintln!("skipped: this user reads a mode-000 folder");
+        return;
+    }
+    fx.write("a.txt", "two");
+    let checkpoint = matter.before_turn(&meta(2));
+    support::set_mode(fx.file("locked"), 0o755);
+    assert_eq!(
+        created(checkpoint.unwrap(), 2),
+        [modified("a.txt", b"one", b"two")]
+    );
+    // Readable again and unchanged: nothing to record.
+    let again = matter.before_turn(&meta(3)).unwrap();
+    assert_eq!(again.outcome, CheckpointOutcome::Reused(cid(2)));
 }

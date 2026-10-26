@@ -14,7 +14,7 @@ use gix::zlib::Compression;
 
 use super::blob::{Blobs, Target, count};
 use super::durable::{self, NewObjects, put};
-use super::{CommitRecord, HistoryStore, Oid, TIMELINE_REF, TreeFile, index_file, tree};
+use super::{CommitRecord, HEAD_REF, HistoryStore, Oid, TreeFile, index_file, tree};
 use crate::stat::{FileTime, StatCache};
 use crate::{Error, fsync, write};
 
@@ -56,9 +56,9 @@ pub(super) fn to_oid(id: &gix::oid) -> Result<Oid, Error> {
         .map_err(|err| Error::history("object id", err))
 }
 
-/// `HEAD`: a symbolic ref to the timeline.
+/// `HEAD`: a symbolic ref to [`HEAD_REF`], a branch that is never born.
 fn head_text() -> String {
-    format!("ref: {TIMELINE_REF}\n")
+    format!("ref: {HEAD_REF}\n")
 }
 
 /// `config`, with `core.worktree` set to `worktree` (absolute and UTF-8, else an error).
@@ -178,6 +178,15 @@ impl HistoryStore for GixStore {
         let repo = gix::open_opts(git_dir, options).map_err(|err| Error::history("open", err))?;
         let current = repo.config_snapshot().string("core.worktree");
         drop(repo);
+        let head = git_dir.join("HEAD");
+        let text = head_text();
+        let head_now = std::fs::read(&head).map_err(|err| Error::io("read", &head, err))?;
+        if head_now != text.as_bytes() {
+            write::replace(&head, &mut |file| {
+                file.write_all(text.as_bytes())
+                    .map_err(|err| Error::io("write", &head, err))
+            })?;
+        }
         let wanted = worktree.to_str().map(str::as_bytes);
         if current.as_deref().map(Vec::as_slice) != wanted {
             let config = config_text(worktree)?;

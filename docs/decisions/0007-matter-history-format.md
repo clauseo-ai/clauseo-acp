@@ -22,7 +22,10 @@ documents with 3 changed).
   Each matter has `<matters root>/<matter id>/history.git`, where the matter id is the hyphenated
   lowercase UUID.
 - `history.git` is a bare-style git dir. At creation it holds exactly:
-  - `HEAD`: `ref: refs/clauseo/timeline` and a newline.
+  - `HEAD`: `ref: refs/heads/clauseo` and a newline: a branch that is never born (no commit is ever
+    made on it). `git fsck` reports a `HEAD` naming a ref outside `refs/heads/` as `badHeadTarget`;
+    an unborn branch it accepts. Opening a matter rewrites `HEAD` when it holds anything else.
+    Clauseo never reads it otherwise.
   - `config`:
     ```
     [core]
@@ -45,6 +48,11 @@ documents with 3 changed).
   they need `matter_id` and `created_at`. A later format that drops either uses a new file name. Opening a
   matter whose folder is gone, has no `matter.json`, has one that does not read, or has one naming
   another matter fails with `matter.folder_missing` (the "Locate folder" answer).
+- `Marker`, chosen per create or import, is what else goes in the folder: `None` (nothing) or
+  `EmptyRepository`. `EmptyRepository` runs a plain non-bare `git init` only when the folder has no
+  `.git`: no commits, no remote, never a `gitdir:` file, unrelated to the shadow repository, and
+  that repository is then excluded like any lawyer's `.git`. `DEFAULT_MARKER` is `None` until the
+  Codex-without-git verdict; that verdict changes only that constant. This version refuses `EmptyRepository` with `command.invalid` until it is built.
 - Repositories are opened with gix's isolated options: no system, global or user git config and no
   `GIT_*` environment variable applies. Clauseo never sets an environment variable, so agents never
   see `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` or `GIT_CONFIG*` from it.
@@ -53,13 +61,15 @@ documents with 3 changed).
 
 ### The timeline
 
-- One ref: `refs/clauseo/timeline`. No branches, no tags, no other refs. It always points to a
-  commit.
-- Each checkpoint is one commit whose single parent is the previous checkpoint, whichever thread made
-  it; the first (`import`) checkpoint has no parent. Nothing rewrites the timeline: undo and restore
-  add commits.
-- No empty commits. A checkpoint whose tree equals the last checkpoint's reuses that checkpoint's id
-  instead of committing.
+- One ref: `refs/clauseo/timeline`. No branches (`HEAD`'s `refs/heads/clauseo` never exists), no
+  tags, no other refs. It always points to a commit.
+- Each checkpoint is one commit whose single parent is the commit the ref names (its tip), whichever
+  thread made it; the first (`import`) checkpoint has no parent. This version always writes a
+  trailer, so the tip is the previous checkpoint; a later version may put a commit without one
+  there, and a writer still builds on the tip. Nothing rewrites the timeline: undo and restore add
+  commits.
+- No empty commits. A checkpoint whose tree equals the tip's tree reuses the last checkpoint's id
+  instead of committing, when the tip's tree is that checkpoint's tree; otherwise it commits.
 - Author and committer are `Clauseo <>` (name `Clauseo`, empty email), at the checkpoint's time in
   whole seconds, offset `+0000`. The host passes the time; Clauseo reads no clock.
 - Every file is stored as mode `100644`. Symlinks and other non-regular files are not versioned.
@@ -96,17 +106,21 @@ documents with 3 changed).
   `.~lock.*#`; and any file or folder named `.git` or `.clauseo`, with everything under it.
 - A file over the per-file size cap (512 MB by default; the stat cache keeps 32-bit sizes, so a cap of
   4 GiB or more acts as `u32::MAX` bytes) is never read and is not in the tree. A file that grows over
-  the cap leaves the tree and is reported as skipped, never as deleted.
+  the cap leaves the tree and is reported as skipped, never as deleted; so does one found over it
+  while it is read (still copying in when the turn ended, say).
 - A cloud-only placeholder is never read (macOS: the `SF_DATALESS` flag; Windows:
   `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS` or `FILE_ATTRIBUTE_OFFLINE`; checked behind the
   `PlaceholderProbe` trait). A versioned file that becomes cloud-only keeps its previous tree entry,
   since dehydration does not change content. One that was never versioned is not in the tree.
 - A name that is not valid UTF-8, or whose path fails `MatterPath`'s check, is skipped with a warning.
+- A subfolder that does not read (permission denied, say) is skipped with a warning, and the files
+  the last checkpoint had under it keep their tree entries, as a cloud-only file does. The matter
+  folder itself not reading fails the checkpoint.
 
 ### The stat cache
 
-- `history.git/index` is a git index file (gix-index) describing the last checkpoint's tree plus the
-  skipped files: one entry per path, sorted by path bytes, mode `100644`, uid and gid 0, and git's
+- `history.git/index` is a git index file (gix-index) describing the tip's tree plus the skipped
+  files: one entry per path, sorted by path bytes, mode `100644`, uid and gid 0, and git's
   32-bit stat fields: ctime and mtime (seconds and nanoseconds), device, inode, size. On Windows
   `ctime` holds the creation time and device and inode are 0.
 - The entry's state is written with git's own flags, so `git status` with this index reads it
@@ -115,15 +129,19 @@ documents with 3 changed).
   - `skip-worktree`: in the tree with this earlier blob, but the file is cloud-only now and was not
     read; it is checked again on every walk;
   - `intent-to-add` with the empty blob's id: not in the tree (over the cap, or cloud-only and never
-    versioned), kept so an unchanged skipped file is not listed on every checkpoint.
+    versioned), kept so an unchanged skipped file is not listed on every checkpoint. Unchanged
+    here means the same size and modification time: a sync client touches a placeholder's other
+    attributes without changing it.
 
   Either extended flag makes the file index version 3.
 - It is a cache. A file that is missing, does not decode, or whose in-tree entries do not match the
-  last checkpoint's tree is rebuilt from that tree, at the cost of reading every file once. Later
+  tip's tree is rebuilt from that tree, at the cost of reading every file once. Later
   versions may discard it the same way.
 - A file is read again when its stat differs from its entry, or when its mtime is within 2 s of (or
   after) the index file's own modification time ("racily clean", as git does), so a same-size rewrite
-  in the same second is seen. Nothing else is read. Clauseo's own walk (`read_dir` plus
+  in the same second is seen. Nothing else is read. A checkpoint that read a file again only for
+  being racily clean writes the cache even when no entry changed, so its time moves past the file,
+  as git rewrites its index. Clauseo's own walk (`read_dir` plus
   `symlink_metadata`), not gix's status or dirwalk, decides this, so a cloud-only file is never
   opened.
 
@@ -157,7 +175,10 @@ flush per checkpoint:
 - Windows: `File::sync_all` on each written file, in the same order; folders are not synced.
 
 Files Clauseo writes into the matter folder (undo) go to a temp file in the same folder, are synced
-the same way, and are renamed over the target. A file is never truncated in place.
+the same way, and are renamed over the target. A file is never truncated in place. Undo writes every
+temp file first, then makes its deletions, then renames the temp files into place, so on a case- or
+normalisation-insensitive file system (APFS by default, NTFS) a deletion never removes a file just
+put back.
 
 ### `ARCHITECTURE.md`
 
@@ -169,7 +190,8 @@ workspace's canonicalize (the root `clippy.toml` bans std's), used by the refuse
 ## Consequences
 
 - The history is a plain git repository: `git --git-dir=<matters root>/<id>/history.git log
-  refs/clauseo/timeline` reads it, and any git can repack or verify it.
+  refs/clauseo/timeline` reads it, and `git fsck --strict` accepts it (git 2.54.0, on a repository
+  this version made: an import and one checkpoint).
 - A later version must keep reading this layout, `matter.json` version 1, the single ref, the
   trailers and level-0 and level-1 loose objects. It may change the summary line, the compression
   rule and the stat cache freely; it may add trailers and kinds (older readers ignore them).

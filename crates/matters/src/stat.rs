@@ -142,10 +142,7 @@ pub(crate) struct StatCache {
 impl StatCache {
     /// The entry for `path`, by binary search.
     pub(crate) fn get(&self, path: &str) -> Option<&CacheEntry> {
-        self.entries
-            .binary_search_by(|entry| entry.path.as_str().as_bytes().cmp(path.as_bytes()))
-            .ok()
-            .and_then(|index| self.entries.get(index))
+        find_by_path(&self.entries, path, |entry| entry.path.as_str())
     }
 
     /// The blob to reuse for `path` without reading it, if its stat is unchanged, it was read,
@@ -166,6 +163,19 @@ impl StatCache {
             Some(written) => stat.mtime.as_duration() + RACY_WINDOW > written.as_duration(),
         }
     }
+}
+
+/// The item of `items`, sorted by path bytes (git's index order, which every list of files in
+/// this crate keeps), whose path is `path`, by binary search. `key` gives an item's path.
+pub(crate) fn find_by_path<'a, T>(
+    items: &'a [T],
+    path: &str,
+    key: impl Fn(&T) -> &str,
+) -> Option<&'a T> {
+    items
+        .binary_search_by(|item| key(item).as_bytes().cmp(path.as_bytes()))
+        .ok()
+        .and_then(|index| items.get(index))
 }
 
 #[cfg(test)]

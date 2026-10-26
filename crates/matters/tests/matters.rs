@@ -32,6 +32,10 @@ mod skipped;
 mod undo;
 
 #[cfg(test)]
+#[path = "matters/undo_case.rs"]
+mod undo_case;
+
+#[cfg(test)]
 #[path = "matters/reopen.rs"]
 mod reopen;
 

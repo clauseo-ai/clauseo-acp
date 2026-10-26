@@ -169,7 +169,7 @@ fn history_git_holds_only_head_config_index_objects_refs() {
     );
     assert_eq!(
         std::fs::read_to_string(git.join("HEAD")).unwrap(),
-        "ref: refs/clauseo/timeline\n"
+        "ref: refs/heads/clauseo\n"
     );
     assert_eq!(names(&git.join("refs")), set(&["clauseo"]));
     assert_eq!(names(&git.join("refs/clauseo")), set(&["timeline"]));

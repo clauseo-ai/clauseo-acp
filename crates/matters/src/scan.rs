@@ -27,7 +27,7 @@ pub fn scan(
     let walked = walk::walk(
         folder,
         settings.probe.as_ref(),
-        settings.limits.file_cap_bytes,
+        settings.limits.effective_cap(),
         Some(cancel),
         &mut |found| {
             seen.files += 1;
@@ -35,7 +35,7 @@ pub fn scan(
             progress(seen);
         },
     )?;
-    let Some(found) = walked else {
+    let Some(listing) = walked else {
         return Ok(Scanned::Cancelled);
     };
     let mut report = ScanReport {
@@ -47,7 +47,7 @@ pub fn scan(
         warnings: Vec::new(),
     };
     let mut largest = Vec::new();
-    for file in found {
+    for file in listing.files {
         match file.kind {
             FoundKind::File => {
                 report.files += 1;

@@ -116,7 +116,7 @@ impl Matter {
         let history = GixStore::create(&git_dir, &new.folder)?;
         json::write(&new.folder, new.id, new.created_at)?;
         let mut core = Core::load(history)?;
-        let Some(snapshot) = core.snapshot(&new.folder, &settings, cancel, progress)? else {
+        let Some(walked) = core.scan_folder(&new.folder, &settings, cancel, progress)? else {
             return Ok(Made::Cancelled);
         };
         let spec = Spec {
@@ -129,7 +129,7 @@ impl Matter {
             at: new.created_at,
             tool_paths: None,
         };
-        let root = core.commit(snapshot, &spec)?;
+        let root = core.commit(walked, &spec)?;
         let summary = summary(&core, &root);
         let matter = Self {
             id: new.id,
@@ -233,8 +233,10 @@ impl Matter {
 
     /// Undoes the step `request` names, file by file. Checks every decision and every lock
     /// before writing anything; takes an `outside-edits` checkpoint first if the folder changed
-    /// since the last checkpoint; then writes the before-step contents (temp file and rename),
-    /// deletes files the step created, and takes an `undo` checkpoint.
+    /// since the last checkpoint; then writes every before-step content to a temp file, checks
+    /// that no target changed since that checkpoint (`matter.file_locked` if one did), deletes
+    /// the files the step created, renames the temp files into place, and takes an `undo`
+    /// checkpoint. Its ids are single-use: see [`UndoRequest`] for retrying a failed undo.
     pub fn undo(&mut self, request: &UndoRequest<'_>) -> Result<Undone, Error> {
         json::check(&self.folder, self.id)?;
         undo::undo(&mut self.core, &self.folder, &self.settings, request)

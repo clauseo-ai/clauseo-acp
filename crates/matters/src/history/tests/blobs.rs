@@ -179,7 +179,7 @@ fn a_file_grown_over_the_cap_is_refused() {
         Err(Error::Io { source, .. }) => Some(source.kind()),
         _ => None,
     };
-    assert_eq!(kind, Some(io::ErrorKind::InvalidData), "{refused:?}");
+    assert_eq!(kind, Some(io::ErrorKind::FileTooLarge), "{refused:?}");
     assert_eq!(files_under(&git_dir.join("objects")), Vec::<PathBuf>::new());
 }
 

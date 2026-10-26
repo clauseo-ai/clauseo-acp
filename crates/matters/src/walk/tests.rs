@@ -40,7 +40,10 @@ fn paths(found: &[Found]) -> Vec<&str> {
 }
 
 fn walk_all(root: &Path, probe: &dyn PlaceholderProbe, cap: u64) -> Vec<Found> {
-    walk(root, probe, cap, None, &mut |_| {}).unwrap().unwrap()
+    walk(root, probe, cap, None, &mut |_| {})
+        .unwrap()
+        .unwrap()
+        .files
 }
 
 #[test]
@@ -126,7 +129,7 @@ fn walk_calls_progress_once_per_file() {
     .unwrap();
     let mut seen = seen.into_inner().unwrap();
     seen.sort();
-    assert_eq!(seen, paths(&found));
+    assert_eq!(seen, paths(&found.files));
 }
 
 #[test]
