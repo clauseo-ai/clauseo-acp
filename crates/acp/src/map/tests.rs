@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clauseo_protocol::{
     LimitStopReason, MatterPath, RawFrom, TextOrBlob, ToolCallContent, ToolLocation,
@@ -115,34 +115,51 @@ fn text_chunk_over_1_mib_split() {
     assert_eq!(map_update(exact, None).len(), 1);
 }
 
+/// An absolute path on this platform: `/a/b` as it is on Unix, `C:\a\b` on Windows, where a
+/// path without a drive is not absolute.
+fn absolute(path: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(format!("C:{}", path.replace('/', "\\")))
+    } else {
+        PathBuf::from(path)
+    }
+}
+
 #[test]
 fn location_outside_cwd() {
-    let cwd = Path::new("/matters/lease");
+    let cwd = absolute("/matters/lease");
     let inside = |path: &str| ToolLocation::Inside {
         path: MatterPath::new(path).unwrap(),
         line: None,
     };
-    let outside = |path: &str| ToolLocation::Outside {
-        display: path.to_owned(),
+    let outside = |path: &Path| ToolLocation::Outside {
+        display: path.display().to_string(),
     };
-    let at = |path: &str| tool::location(Path::new(path), None, Some(cwd));
-    assert_eq!(at("/matters/lease/notes/a.txt"), inside("notes/a.txt"));
-    assert_eq!(at("/matters/other/a.txt"), outside("/matters/other/a.txt"));
+    let at = |path: &Path| tool::location(path, None, Some(&cwd));
+    let abs = absolute;
     assert_eq!(
-        at("/matters/lease-2/a.txt"),
-        outside("/matters/lease-2/a.txt")
+        at(&abs("/matters/lease/notes/a.txt")),
+        inside("notes/a.txt")
     );
-    assert_eq!(
-        at("/matters/lease/../other/a.txt"),
-        outside("/matters/lease/../other/a.txt")
-    );
-    assert_eq!(at("notes/a.txt"), inside("notes/a.txt"));
-    assert_eq!(at("../a.txt"), outside("../a.txt"));
+    for path in [
+        "/matters/other/a.txt",
+        "/matters/lease-2/a.txt",
+        "/matters/lease/../other/a.txt",
+    ] {
+        assert_eq!(at(&abs(path)), outside(&abs(path)), "{path}");
+    }
+    assert_eq!(at(Path::new("notes/a.txt")), inside("notes/a.txt"));
+    assert_eq!(at(Path::new("../a.txt")), outside(Path::new("../a.txt")));
+    if cfg!(windows) {
+        // A path from the root of no drive is neither under `cwd` nor relative to it.
+        let rooted = Path::new("\\matters\\lease\\a.txt");
+        assert_eq!(at(rooted), outside(rooted));
+    }
     // No session folder known: every absolute path is outside.
-    let unknown = tool::location(Path::new("/matters/lease/a.txt"), Some(3), None);
-    assert_eq!(unknown, outside("/matters/lease/a.txt"));
+    let unknown = tool::location(&abs("/matters/lease/a.txt"), Some(3), None);
+    assert_eq!(unknown, outside(&abs("/matters/lease/a.txt")));
     // The line survives inside.
-    let with_line = tool::location(Path::new("/matters/lease/a.txt"), Some(3), Some(cwd));
+    let with_line = tool::location(&abs("/matters/lease/a.txt"), Some(3), Some(&cwd));
     assert_eq!(
         with_line,
         ToolLocation::Inside {
@@ -154,18 +171,25 @@ fn location_outside_cwd() {
 
 #[test]
 fn location_at_cwd_is_left_out() {
+    let cwd = absolute("/m");
+    let path = |path: &str| absolute(path).display().to_string();
     let call = json!({
         "sessionUpdate": "tool_call",
         "toolCallId": "tc-1",
         "title": "Run",
-        "locations": [{"path": "/m"}, {"path": "/m/a.txt"}],
+        "locations": [{"path": path("/m")}, {"path": path("/m/a.txt")}],
     });
-    let AgentUpdate::ToolCall(call) = only_update(map_update(call, Some(Path::new("/m")))) else {
+    let AgentUpdate::ToolCall(call) = only_update(map_update(call, Some(&cwd))) else {
         panic!("expected a tool call");
     };
-    assert_eq!(call.locations.len(), 1);
+    assert_eq!(
+        call.locations,
+        [ToolLocation::Inside {
+            path: MatterPath::new("a.txt").unwrap(),
+            line: None
+        }]
+    );
 }
-
 #[test]
 fn rate_limit_fields_and_unknown_status() {
     let usage = |limit: Value| json!({"sessionUpdate": "usage_update", "used": 1, "size": 2, "_meta": {"_claude/rateLimit": limit}});
