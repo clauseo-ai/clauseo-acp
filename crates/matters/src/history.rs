@@ -1,0 +1,134 @@
+//! The shadow repository behind one trait, so `git2` could replace gix if a spike finds a
+//! blocker. [`GixStore`] is the one implementation. Nothing outside this module names a gix type.
+//!
+//! The repository is a bare-style git dir (`history.git`) with `core.worktree` set to the matter
+//! folder, `HEAD` a symbolic ref to `refs/clauseo/timeline`, loose objects only, and the stat
+//! cache as its `index` file. Decision record 0007 is the format; this module writes it.
+
+mod blob;
+mod durable;
+mod gix_store;
+mod index_file;
+#[cfg(test)]
+mod tests;
+mod tree;
+
+use std::fmt;
+use std::io::Write;
+use std::path::Path;
+
+pub(crate) use gix_store::GixStore;
+
+use crate::Error;
+use crate::stat::StatCache;
+
+/// The ref every checkpoint moves forward. The only ref besides `HEAD`, which names it.
+pub(crate) const TIMELINE_REF: &str = "refs/clauseo/timeline";
+
+/// A git object id (SHA-1), kept free of gix's types.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct Oid(pub(crate) [u8; 20]);
+
+impl Oid {
+    /// Lowercase hex, as `ContentId` carries it.
+    pub(crate) fn to_hex(self) -> String {
+        use fmt::Write as _;
+        let mut text = String::with_capacity(40);
+        for byte in self.0 {
+            // Writing to a String cannot fail.
+            write!(text, "{byte:02x}").unwrap_or_default();
+        }
+        text
+    }
+}
+
+impl fmt::Debug for Oid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.to_hex())
+    }
+}
+
+/// One commit of the timeline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CommitRecord {
+    /// The commit.
+    pub(crate) id: Oid,
+    /// Its tree.
+    pub(crate) tree: Oid,
+    /// Its whole message, trailers included.
+    pub(crate) message: String,
+}
+
+/// One file of a flattened tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TreeFile {
+    /// Its path from the tree's root, `/`-separated.
+    pub(crate) path: String,
+    /// Its blob.
+    pub(crate) blob: Oid,
+}
+
+/// What a checkpoint needs from a git repository. Writes of objects are not durable until
+/// [`HistoryStore::publish`]; nothing names them until then.
+pub(crate) trait HistoryStore: Sized {
+    /// Makes the git dir `git_dir`, which must not exist (its parent may not either), with
+    /// `core.worktree` set to `worktree`, and opens it.
+    fn create(git_dir: &Path, worktree: &Path) -> Result<Self, Error>;
+
+    /// Opens the git dir `git_dir` isolated from every git config and environment variable,
+    /// and sets `core.worktree` to `worktree` if it says otherwise (the folder was moved).
+    fn open(git_dir: &Path, worktree: &Path) -> Result<Self, Error>;
+
+    /// Hashes the file `file` as a blob and stores it as a loose object unless it is already
+    /// there: zlib level 0 when its first bytes say it is already compressed, level 1
+    /// otherwise. `len` is its size from the walk's metadata; returns the blob and the bytes
+    /// actually read.
+    fn store_file(&mut self, file: &Path, len: u64) -> Result<(Oid, u64), Error>;
+
+    /// Hashes the file `file` as a blob without storing anything.
+    fn hash_file(&mut self, file: &Path, len: u64) -> Result<(Oid, u64), Error>;
+
+    /// Writes the content of blob `blob` to `out`; returns the bytes written.
+    fn read_blob(&self, blob: Oid, out: &mut dyn Write) -> Result<u64, Error>;
+
+    /// The size of blob `blob` in bytes, from its header.
+    fn blob_len(&self, blob: Oid) -> Result<u64, Error>;
+
+    /// Stores the trees for `files` (sorted by path bytes, `/`-separated, every file mode
+    /// `100644`) and returns the root tree.
+    fn write_tree(&mut self, files: &[TreeFile]) -> Result<Oid, Error>;
+
+    /// Every file of tree `tree`, flattened and sorted by path bytes.
+    fn read_tree(&self, tree: Oid) -> Result<Vec<TreeFile>, Error>;
+
+    /// Stores a commit of `tree` with parent `parent`, author and committer `Clauseo`, at
+    /// `seconds` since the epoch in UTC, with `message`.
+    fn write_commit(
+        &mut self,
+        tree: Oid,
+        parent: Option<Oid>,
+        message: &str,
+        seconds: i64,
+    ) -> Result<Oid, Error>;
+
+    /// The timeline's commits, oldest first, following first parents from [`TIMELINE_REF`];
+    /// empty when the ref does not exist yet.
+    fn timeline(&self) -> Result<Vec<CommitRecord>, Error>;
+
+    /// The stat cache, or `None` when the file is missing or does not read (it is then
+    /// rebuilt, at the cost of reading every file once).
+    fn load_cache(&self) -> Result<Option<StatCache>, Error>;
+
+    /// Makes every object written since the last publish durable, then moves [`TIMELINE_REF`]
+    /// from `expected` (`None`: it must not exist) to `commit` and writes `cache`, then makes
+    /// those durable: the sync order of decision record 0007. Sets `cache.written_at`.
+    fn publish(
+        &mut self,
+        commit: Oid,
+        expected: Option<Oid>,
+        cache: &mut StatCache,
+    ) -> Result<(), Error>;
+
+    /// Writes `cache` alone, durably, when no commit is made. Sets `cache.written_at`.
+    fn save_cache(&mut self, cache: &mut StatCache) -> Result<(), Error>;
+}

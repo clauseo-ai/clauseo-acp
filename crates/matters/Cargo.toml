@@ -1,0 +1,34 @@
+[package]
+name = "clauseo-matters"
+version = "0.1.0"
+description = "Matter folders and their history: shadow git repositories, checkpoints and undo."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+clauseo-protocol = { path = "../protocol" }
+# index: the stat cache (a git index file); revision: walking the timeline; sha1: gix's own
+# collision-detecting SHA-1. Nothing else: changes come from this crate's own walk.
+gix = { workspace = true, features = ["index", "revision", "sha1"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# clippy.toml bans std's canonicalize in favour of dunce's, for the refused-folder check.
+dunce = { workspace = true }
+
+# The durability sequence: plain fsync, F_BARRIERFSYNC and one F_FULLFSYNC per checkpoint.
+[target.'cfg(target_os = "macos")'.dependencies]
+nix = { workspace = true, features = ["fs"] }
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "checkpoint"
+harness = false
+
+[lints]
+workspace = true

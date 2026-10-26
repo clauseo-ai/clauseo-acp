@@ -77,3 +77,13 @@ crates/store/tests/store/write.rs - clippy::disallowed_methods
 crates/store/benches/common/dir.rs - clippy::disallowed_methods
 crates/store/benches/reopen.rs - clippy::unwrap_used
 crates/store/benches/commit.rs - clippy::unwrap_used
+
+# Added by R8: matters' write module, its tests' and bench's write modules, a unit test's symlink,
+# and the sync calls that have nothing to do off macOS (or, for folders, off Unix).
+crates/matters/src/write.rs - clippy::disallowed_methods
+crates/matters/tests/matters/support.rs - clippy::disallowed_methods
+crates/matters/src/walk/tests.rs symlink clippy::disallowed_methods
+crates/matters/benches/checkpoint.rs bench::fs_setup clippy::disallowed_methods
+crates/matters/src/fsync.rs sync_dir clippy::unnecessary_wraps
+crates/matters/src/fsync.rs barrier clippy::unnecessary_wraps
+crates/matters/src/fsync.rs full_flush clippy::unnecessary_wraps
