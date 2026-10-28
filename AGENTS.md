@@ -35,6 +35,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - `crates/desktop`: the Tauri shell. Blank for now.
 - `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `crates/fake_agent/scenarios/` (README.md).
 - `crates/matters`: matter folders and their shadow git history (checkpoints, undo). See `docs/decisions/0007-matter-history-format.md`.
+- `crates/process`: starts an agent in its own process tree, shuts it down and kills the tree; the `Launcher` seam.
 - `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.
 - `crates/reducer`: the pure fold from events to state and view changes, and snapshots; its gungraun bench is `crates/reducer_bench` (Linux).
 - `crates/store`: the event log, snapshots, blobs and receipts in one SQLite file; format in `docs/decisions/0006-store-format.md`.
@@ -58,8 +59,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 
 <!-- Each phrased as a trap. Details live in the failure's `fix:` line. -->
 - A crate never depends on what `ARCHITECTURE.md` lists under "Never depends on".
-- Capability files and the desktop crate's permission files (`permissions/`) never contain
-  `remote`, `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`.
+- Capability files and the desktop crate's permission files (`permissions/`) never contain `remote`, `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`.
 - Only `#[expect(lint, reason = "...")]` may silence a lint, never `allow` or `warn` in any form
   (outer, inner, `cfg_attr`, macro bodies). Every `#[expect]` is listed in `xtask/expect-allowlist.txt`.
 - A crate that `ARCHITECTURE.md` marks as banning I/O or the clock gets no exception to the bans,
