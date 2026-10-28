@@ -852,6 +852,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "clauseo-process"
+version = "0.1.0"
+dependencies = [
+ "async-io",
+ "async-process",
+ "clauseo-fake_agent",
+ "clauseo-process",
+ "clauseo-protocol",
+ "futures",
+ "memchr",
+ "nix",
+ "serde_json",
+ "thiserror 2.0.21",
+ "windows",
+]
+
+[[package]]
 name = "clauseo-protocol"
 version = "0.1.0"
 dependencies = [
