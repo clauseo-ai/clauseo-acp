@@ -1,0 +1,46 @@
+[package]
+name = "clauseo-process"
+version = "0.1.0"
+description = "Starts an agent with stdio pipes in its own process tree, shuts it down by a ladder and kills the whole tree."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Exports `ManualTimer`, which this crate's tests use to decide when the shutdown waits end.
+test-support = []
+
+[dependencies]
+clauseo-protocol = { path = "../protocol" }
+async-process = { workspace = true }
+async-io = { workspace = true }
+futures = { workspace = true }
+memchr = { workspace = true }
+thiserror = { workspace = true }
+
+# killpg for the shutdown ladder and the tree kill.
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["signal"] }
+
+# The Job Object, the suspended start and the thread resume (src/os/windows.rs).
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+
+[dev-dependencies]
+# Itself with test-support, so the pipe tests reach `ManualTimer` with no flag.
+clauseo-process = { path = ".", features = ["test-support"] }
+clauseo-fake_agent = { path = "../fake_agent" }
+# The ACP requests that bring `exit-mid-turn` to its exit.
+serde_json = { workspace = true }
+
+# The exit watch: a subreaper and waitpid on Linux, kqueue on macOS, and SIGSTOP for one test.
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true, features = ["signal", "process", "event"] }
+
+# The exit watch on Windows: OpenProcess and WaitForSingleObject.
+[target.'cfg(windows)'.dev-dependencies]
+windows = { workspace = true }
+
+[lints]
+workspace = true

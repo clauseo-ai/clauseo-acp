@@ -100,6 +100,9 @@ tracing = "0.1.44"
 # (memchr splits lines); async-process starts fake_agent in its tests.
 memchr = "2.8"
 async-process = "2"
+# clauseo-process (it also uses the async-process, futures, memchr, nix and windows lines above):
+# the timer of its shutdown ladder.
+async-io = "2"
 
 [workspace.lints.rust]
 unsafe_code = "deny"               # deny, not forbid: an FFI module overrides with #[expect(unsafe_code, reason = "…")]
