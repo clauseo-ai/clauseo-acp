@@ -76,3 +76,14 @@ fn a_file_policy_is_absent_read_or_unreadable() {
     // FilePolicy reads through the Files it was given, not the disk.
     assert!(MemFiles::default().read(Path::new(PATH)).unwrap().is_none());
 }
+
+#[cfg(not(any(windows, target_os = "macos")))]
+#[test]
+fn system_policy_absent_on_clean_machine() {
+    let sources = crate::system_policy_sources();
+    let names: Vec<_> = sources.iter().map(|source| source.name()).collect();
+    assert_eq!(names, [PATH]);
+    for source in &sources {
+        assert!(matches!(source.read(), PolicyRead::Absent));
+    }
+}
