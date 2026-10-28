@@ -3,12 +3,15 @@ use crate::leaf::KEYS;
 use crate::policy::Kind;
 use serde_json::Value;
 
+// The ACP SDK turns on serde_json's `preserve_order`, so the schema's key order depends on which
+// crates are in the build. The tests sort keys.
 #[test]
 fn schema_snapshot() {
     insta::with_settings!({
         snapshot_path => "../snapshots",
         prepend_module_to_snapshot => false,
         omit_expression => true,
+        sort_maps => true,
     }, {
         insta::assert_json_snapshot!("settings_schema", json_schema());
     });
@@ -67,12 +70,13 @@ fn the_keys_and_their_kinds_are_the_schemas() {
     actual.sort();
     assert_eq!(actual, expected);
     let schema = json_schema();
-    let sections: Vec<&str> = schema["properties"]
+    let mut sections: Vec<&str> = schema["properties"]
         .as_object()
         .unwrap()
         .keys()
         .map(String::as_str)
         .collect();
+    sections.sort_unstable();
     let mut known = SECTIONS.to_vec();
     known.sort_unstable();
     assert_eq!(sections, known);

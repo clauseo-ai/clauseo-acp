@@ -35,9 +35,9 @@ tauri-plugin-os = "2.4.0"
 tauri-plugin-notification = "2.7.0"
 # tauri::generate_context! writes the plugin configuration as serde_json values, and
 # crates/desktop/src/rust_only.rs names serde_json::Value in the plugin hooks it forwards.
-# clauseo-settings holds every policy value as a serde_json::Value. No crate turns on
-# `preserve_order`: Cargo unifies features across the workspace, and it would reorder every
-# serde_json map.
+# The ACP SDK turns on `preserve_order`, and Cargo unifies features across the workspace, so a
+# serde_json map keeps insertion order in a workspace build and is sorted in a one-crate build.
+# clauseo-settings holds every policy value as a serde_json::Value and relies on neither order.
 serde_json = "1.0.154"
 # canonicalize without the `\\?\` prefix std adds on Windows, which most tools refuse; clippy.toml
 # bans std's canonicalize in its favour.
