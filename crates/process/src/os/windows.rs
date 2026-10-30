@@ -31,8 +31,9 @@ use windows::core::PCWSTR;
 
 use crate::{Error, SpawnOptions};
 
-/// The exit code `TerminateJobObject` gives the processes it ends.
-const TERMINATED: u32 = 1;
+/// The exit code `TerminateJobObject` gives the processes it ends: one nothing else uses (std's
+/// `Child::kill` gives 1), so a test sees that the job ended the agent.
+const TERMINATED: u32 = 0xC1A0;
 
 /// Makes the agent start suspended and without a console, plus any flags `opts` adds.
 pub(crate) fn prepare(command: &mut Command, opts: &SpawnOptions) {

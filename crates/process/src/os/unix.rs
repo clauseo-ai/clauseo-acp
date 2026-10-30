@@ -5,6 +5,7 @@ use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 use async_process::Child;
+use nix::errno::Errno;
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
 
@@ -39,19 +40,18 @@ impl Tree {
         }
     }
 
-    /// Sends SIGTERM to the group.
+    /// Sends SIGTERM to the group. A failure is dropped: the ladder's next step still comes.
     pub(crate) fn terminate(&self) {
         self.signal(Signal::SIGTERM);
     }
 
-    /// Sends SIGKILL to the group.
-    pub(crate) fn kill(&self) {
-        self.signal(Signal::SIGKILL);
+    /// Sends SIGKILL to the group. Returns whether it went, an empty group (`ESRCH`) counting as
+    /// gone; the ladder kills the agent's own pid as well either way.
+    pub(crate) fn kill(&self) -> bool {
+        self.signal(Signal::SIGKILL)
     }
 
-    /// An empty group (`ESRCH`) is fine. Any other failure is dropped too: the ladder's next step,
-    /// or the kill of the agent's own pid at its end, still ends the agent.
-    fn signal(&self, signal: Signal) {
-        killpg(self.group, signal).unwrap_or_default();
+    fn signal(&self, signal: Signal) -> bool {
+        matches!(killpg(self.group, signal), Ok(()) | Err(Errno::ESRCH))
     }
 }

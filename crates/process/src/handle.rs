@@ -91,9 +91,12 @@ impl Handle {
             #[cfg(unix)]
             Step::Terminate => self.tree.terminate(),
             Step::Kill => {
-                self.kill_tree();
-                // The agent's own pid too, in case it left its group.
-                drop(self.child.kill());
+                let tree_ended = self.kill_tree();
+                // The agent's own pid too: on Unix in case it left its group; on Windows only
+                // when the job would not end, so the agent reports the job's exit code.
+                if cfg!(unix) || !tree_ended {
+                    drop(self.child.kill());
+                }
             }
         }
     }
@@ -116,11 +119,14 @@ impl Handle {
         }
     }
 
-    fn kill_tree(&mut self) {
-        if !self.tree_killed {
-            self.tree.kill();
-            self.tree_killed = true;
+    /// Sends the tree its kill, once. Returns whether the OS took it (an empty Unix group counts),
+    /// or true when it was sent before.
+    fn kill_tree(&mut self) -> bool {
+        if self.tree_killed {
+            return true;
         }
+        self.tree_killed = true;
+        self.tree.kill()
     }
 }
 
