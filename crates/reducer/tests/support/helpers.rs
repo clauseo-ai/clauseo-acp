@@ -3,8 +3,10 @@
 //! A test root includes it with `#[path = "support/helpers.rs"] pub mod helpers;` (`pub` keeps
 //! a root that uses only some helpers free of unused warnings). Tests only: it unwraps.
 
+use crate::fixtures::{Log, turn_ended};
 use clauseo_protocol::{
-    AppendTarget, Envelope, MessageId, Seq, TextKind, TurnId, ViewEntry, ViewWindow,
+    AppendTarget, DomainEvent, Envelope, MessageId, Seq, StopReason, TextKind, TurnId,
+    UserMessageStatus, ViewEntry, ViewWindow,
 };
 use clauseo_reducer::{
     Applied, Snapshot, StreamState, TextDelta, ViewChange, apply, apply_text_delta, view_snapshot,
@@ -103,6 +105,26 @@ pub fn shown_text(state: &StreamState, message: MessageId) -> Option<String> {
 pub fn agent_text(window: &ViewWindow, message: MessageId) -> Option<String> {
     window.entries.iter().find_map(|entry| match entry {
         ViewEntry::AgentText(text) if text.message == message => Some(text.text.clone()),
+        _ => None,
+    })
+}
+
+/// A `TurnEnded` of `turn`, cancelled (no usage, no checkpoint), pushed and applied.
+pub fn cancel(log: &mut Log, state: &mut StreamState, turn: TurnId) -> Applied {
+    let checkpoint = log.fresh().unwrap();
+    let mut ended = turn_ended(turn, checkpoint).unwrap();
+    if let DomainEvent::TurnEnded(event) = &mut ended {
+        event.stop = StopReason::Cancelled;
+        event.checkpoint_after = None;
+        event.usage = None;
+    }
+    apply(state, &log.push(ended).unwrap()).unwrap()
+}
+
+/// The status of the user message `message` in `state`.
+pub fn prompt_status(state: &StreamState, message: MessageId) -> Option<UserMessageStatus> {
+    state.entries().values().find_map(|entry| match entry {
+        ViewEntry::UserMessage(prompt) if prompt.message == message => Some(prompt.status),
         _ => None,
     })
 }
