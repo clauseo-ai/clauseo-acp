@@ -1,10 +1,11 @@
-// The computer's own dialog at the edge of the matter. When the lawyer allows Clauseo past the matter's folder, the
-// host asks the computer to confirm, in a dialog the computer draws itself, so nothing inside the window can answer it
-// for the lawyer. On the Mac it is macOS 26's alert: the app's icon, the question in bold, the risk put both ways, a
-// box to remember the answer and two capsule buttons. On Windows it is a window of its own: Clauseo's title bar, the
-// question, the risk both ways, and a foot holding the box and the buttons. Each draws in its system's own type and
-// colour, which are the system's marks and never Clauseo's. Clauseo writes only the words (edgeDialogWords in
-// words-versions.ts).
+// A picture of the computer's own confirmation at the edge of the matter, for galleries and tests. When the lawyer
+// allows Clauseo past the matter's folder, the host asks the computer to confirm. That confirmation is native: the
+// host has the system draw it outside the window, so nothing inside the window can answer it for the lawyer. Never
+// render this part as the confirmation itself; it only shows what the system's dialog looks like. On the Mac that is
+// macOS 26's alert: the app's icon, the question in bold, the risk put both ways, a box to remember the answer and
+// two capsule buttons. On Windows it is a window of its own: Clauseo's title bar, the question, the risk both ways,
+// and a foot holding the box and the buttons. Each is drawn in its system's own type and colour, which are the
+// system's marks and never Clauseo's. Clauseo writes only the words (edgeDialogWords in words-versions.ts).
 import { useEffect, useId, useRef, type KeyboardEvent } from "react";
 import iconMac from "../assets/icon.svg";
 import iconWin from "../assets/icon-windows.svg";
@@ -12,7 +13,7 @@ import { IconTick } from "../icons/icons.tsx";
 import type { Platform } from "../lib/display.ts";
 import { Say } from "./say.tsx";
 
-export type OsDialogProps = {
+export type OsDialogPreviewProps = {
   platform: Platform;
   /** The question, in the computer's own bold: "Allow Clauseo to read the folder 'Precedents'?" */
   title: string;
@@ -32,9 +33,9 @@ export type OsDialogProps = {
   onCancel: () => void;
 };
 
-/** The computer's own dialog, drawn over the window where the system puts it. Return answers with the default
- * button and Escape with Cancel's, as both systems do. */
-export function OsDialog(p: OsDialogProps) {
+/** A picture of the computer's own dialog, drawn where the system puts it, for galleries and tests only. Return
+ * answers with the default button and Escape with Cancel's, as both systems do. */
+export function OsDialogPreview(p: OsDialogPreviewProps) {
   const id = useId();
   const primaryRef = useRef<HTMLButtonElement>(null);
   useEffect(() => primaryRef.current?.focus(), []);

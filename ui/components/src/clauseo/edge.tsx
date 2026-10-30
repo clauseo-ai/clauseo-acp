@@ -19,6 +19,8 @@ import {
 } from "../icons/icons.tsx";
 import type { Platform } from "../lib/display.ts";
 import { useVersionWords } from "../lib/words-versions.ts";
+import { fromComposer } from "./composer-keys.ts";
+import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
 
 /** Which edge: a folder beyond the matter, a website not used before, or protection switched off. */
@@ -30,15 +32,9 @@ export type EdgeState =
   | { kind: "allowed"; remembered: boolean; at: string }
   | { kind: "refused"; remembered: boolean };
 
-/** Whether a key pressed where focus stands is the prompt's: in the composer's field, or with nothing focused. */
-function fromComposer(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return true;
-  if (target === target.ownerDocument.body) return true;
-  return target instanceof HTMLTextAreaElement && target.form?.dataset["composer"] !== undefined;
-}
-
 /** Enter for the first answer, Escape for the second, from the composer, while the prompt waits. */
 function useKeys(on: boolean, first: () => void, second: () => void) {
+  const room = useRoom();
   useEffect(() => {
     if (!on) return;
     const onKey = (e: KeyboardEvent) => {
@@ -49,7 +45,7 @@ function useKeys(on: boolean, first: () => void, second: () => void) {
         e.metaKey ||
         e.ctrlKey ||
         e.shiftKey ||
-        !fromComposer(e.target)
+        !fromComposer(room, e.target)
       )
         return;
       if (e.key === "Enter") first();
@@ -59,7 +55,7 @@ function useKeys(on: boolean, first: () => void, second: () => void) {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [on, first, second]);
+  }, [on, first, second, room]);
 }
 
 const ICON = { folder: IconFolder, site: IconWebsite, off: IconNotProtected } as const;

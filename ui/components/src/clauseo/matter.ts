@@ -46,7 +46,8 @@ export type Cite = {
   readonly name: string;
   /** The report: "(2001) 1 SCC 1". */
   readonly cite: string;
-  /** The date it was decided, in words: "1 January 2001". */
+  /** The day it was decided, as the app formats it in the lawyer's language ("1 January 2001" for an English
+   * lawyer, a Hindi date for a Hindi one). The part shows it as given and never reads it as a date. */
   readonly decided: string;
   readonly court: string;
   /** How many judges sat. */

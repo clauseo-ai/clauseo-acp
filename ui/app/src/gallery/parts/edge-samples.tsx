@@ -14,7 +14,7 @@ import {
   type EdgeKind,
   type EdgeState,
 } from "@clauseo/components/clauseo/edge.tsx";
-import { OsDialog } from "@clauseo/components/clauseo/os-dialog.tsx";
+import { OsDialogPreview } from "@clauseo/components/clauseo/os-dialog.tsx";
 import { NotProtectedNote } from "@clauseo/components/clauseo/protection.tsx";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import type { Platform } from "@clauseo/components/lib/display.ts";
@@ -70,7 +70,7 @@ export function EdgeFlow({
         onRefuse={() => setState({ kind: "refused", remembered: false })}
       />
       {state.kind === "confirming" && (
-        <OsDialog
+        <OsDialogPreview
           platform={platform}
           title={d.title}
           lines={d.lines}

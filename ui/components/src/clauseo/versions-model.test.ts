@@ -7,14 +7,14 @@ import {
   changedSince,
   differing,
   eraOf,
+  FOLD_AT,
   foldedSpan,
   groupsOf,
+  OPEN_DAYS,
   papersOf,
-  restore,
   rowVersion,
   sameHand,
   undoChange,
-  undoRestore,
   whoOf,
   type Calendar,
   type Version,
@@ -69,29 +69,31 @@ test("the plain line names the time in both languages, and says today for today"
   expect(asItStood("en", later, at("v8"))).toBe("The matter as it stood at 4:31 pm on 29 March");
 });
 
-test("restoring 3:42 pm on 9 March changes three documents, keeps what was added since, and moves forward", () => {
+test("restoring 3:42 pm on 9 March would change three documents and keep what was added since", () => {
   const v4 = at("v4");
   expect(differing(v4.state, now.state)).toEqual(["draft", "dates", "memo"]);
   expect(addedSince(v4.state, now.state)).toEqual(["letter"]);
-  const r = restore(HISTORY, "v4", [], stamp);
-  expect(r?.changed).toEqual(["draft", "dates", "memo"]);
-  expect(rev(r?.version, "draft")).toBe("P1");
-  expect(r?.version.state.papers).toContain("letter");
-  expect(r?.version.day).toBe(TODAY);
-  const after = [...HISTORY, ...(r === null ? [] : [r.version])];
-  expect(after.length).toBe(HISTORY.length + 1);
-  expect(whoOf("en", CAL, after[after.length - 1] ?? now, after)).toBe(
-    "Restore to 3:42 pm on 9 March",
+  // a restore the host made reads as one, and one to a version no longer there reads as nothing
+  const restored: Version = { ...now, id: "r1", who: { kind: "restore", to: "v4" } };
+  expect(whoOf("en", CAL, restored, [...HISTORY, restored])).toBe("Restore to 3:42 pm on 9 March");
+  expect(whoOf("en", CAL, { ...restored, who: { kind: "restore", to: "nope" } }, HISTORY)).toBe("");
+});
+
+test("an undo names the version it undid by id, so two versions made in the same minute stay apart", () => {
+  const a: Version = { ...at("v4"), id: "a", at: "3:42 pm" };
+  const b: Version = { ...at("v4"), id: "b", at: "3:42 pm", day: "2027-03-10" };
+  const undo: Version = { ...now, id: "u", who: { kind: "undo", of: "b" } };
+  const all = [a, b, undo];
+  expect(whoOf("en", CAL, undo, all)).toBe("Undo of the change at 3:42 pm on 10 March");
+  expect(whoOf("en", CAL, { ...undo, who: { kind: "undo", of: "a" } }, all)).toBe(
+    "Undo of the change at 3:42 pm on 9 March",
   );
-  // keeping the draft as it is leaves two to change
-  expect(restore(HISTORY, "v4", ["draft"], stamp)?.changed).toEqual(["dates", "memo"]);
-  // and the restore can be undone, forward again
-  const u = undoRestore(after, { day: TODAY, at: "5:13 pm" });
-  expect(u?.state).toEqual(now.state);
-  expect(whoOf("en", CAL, u ?? now, after)).toBe("Undo of the restore at 5:12 pm");
-  // nothing to restore to, or no restore to undo
-  expect(restore(HISTORY, "nope", [], stamp)).toBeNull();
-  expect(undoRestore(HISTORY, stamp)).toBeNull();
+  // undoing a version made the same day names only its time
+  expect(whoOf("en", CAL, { ...undo, day: "2027-03-10" }, all)).toBe(
+    "Undo of the change at 3:42 pm",
+  );
+  // an undo of a version not in the history says nothing rather than a wrong time
+  expect(whoOf("en", CAL, { ...undo, who: { kind: "undo", of: "gone" } }, all)).toBe("");
 });
 
 test("the restore dialog's words name the time, every document and what stays", () => {
@@ -186,7 +188,10 @@ test("undoing one change asks about each paper changed again since, and moves fo
   const anyway = undoChange(HISTORY, "v8", [], stamp);
   expect(anyway?.changed).toEqual(["draft", "dates"]);
   expect(rev(anyway?.version, "dates")).toBe("D1");
-  expect(whoOf("en", CAL, anyway?.version ?? now, HISTORY)).toBe("Undo of the change at 4:31 pm");
+  expect(anyway?.version.who).toEqual({ kind: "undo", of: "v8" });
+  expect(whoOf("en", CAL, anyway?.version ?? now, [...HISTORY, anyway?.version ?? now])).toBe(
+    "Undo of the change at 4:31 pm",
+  );
   expect(undoChange(HISTORY, "nope", [], stamp)).toBeNull();
   expect(changedSince(HISTORY, "nope")).toEqual([]);
   // the dialog's words
@@ -238,6 +243,46 @@ test("a run of 3 or more by one hand on one day folds behind its latest; now, an
   expect(sameHand(at("v8"), at("v4"))).toBe(false);
   expect(sameHand(at("v3"), at("v4"))).toBe(false);
   expect(sameHand(at("v4"), at("v5"))).toBe(true);
+});
+
+/** A bare version by the lawyer, outside Clauseo, on a day of March 2027. */
+const bare = (id: string, day: string, time: string): Version => ({
+  ...at("v9"),
+  id,
+  day: `2027-03-${day}`,
+  at: time,
+  who: { kind: "outside" },
+  touched: ["draft"],
+  added: [],
+  made: [],
+});
+const kinds = (h: readonly Version[], day: string) =>
+  groupsOf(h, "all", "en", CAL)
+    .find((g) => g.key === `2027-03-${day}`)
+    ?.rows.map((r) => r.kind);
+
+test("a run folds at exactly FOLD_AT versions by one hand on one day, and not one fewer", () => {
+  expect(FOLD_AT).toBe(3);
+  const now = bare("now", "29", "5:00 pm");
+  const three = [
+    bare("a", "20", "10:00 am"),
+    bare("b", "20", "10:05 am"),
+    bare("c", "20", "10:10 am"),
+  ];
+  expect(kinds([...three, now], "20")).toEqual(["run"]);
+  expect(kinds([...three.slice(1), now], "20")).toEqual(["one", "one"]);
+});
+
+test("exactly OPEN_DAYS days show no Earlier, and one day more folds under it", () => {
+  expect(OPEN_DAYS).toBe(4);
+  const days = ["21", "22", "23", "24", "25"].map((d) => bare(`d${d}`, d, "10:00 am"));
+  const four = groupsOf(days.slice(1), "all", "en", CAL);
+  expect(four.length).toBe(4);
+  expect(four.slice(OPEN_DAYS)).toEqual([]);
+  expect(foldedSpan("en", CAL, four)).toBe("");
+  const five = groupsOf(days, "all", "en", CAL);
+  expect(five.slice(OPEN_DAYS).map((g) => g.key)).toEqual(["2027-03-21"]);
+  expect(foldedSpan("en", CAL, five)).toBe("21 to 21 March");
 });
 
 test("the switch shows only Clauseo's versions or only the lawyer's", () => {

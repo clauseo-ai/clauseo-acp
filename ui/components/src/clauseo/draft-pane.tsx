@@ -394,7 +394,7 @@ export function DraftPane({
           className="rd-tabs"
           tabs={[
             { value: "changes", label: `${w.r("Changes")} ${nChanges}` },
-            { value: "citations", label: `${w.r("Citations")} ${nCites}` },
+            { value: "citations", label: `${w.t("Citations")} ${nCites}` },
           ]}
         />
         <TabsPanel value="changes" className="rd-tab-panel">

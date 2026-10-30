@@ -16,7 +16,7 @@ import { Say } from "./say.tsx";
 /** What the working line says. One check names what it reads; a series counts the judgments and names the one in
  * hand; queued waits for another answer in the matter; limit, retrying and stopped are the errors. */
 export type WorkingState =
-  /** name and waitingFor are the app's words, in the language: "Acme Ltd v. State", "judgments since 2005 that cite
+  /** name and waitingFor are the app's words, in the language: "Acme Ltd v. State", "judgments since 2001 that cite
    * it". */
   | { kind: "check"; name: string; waitingFor: string; expected: string }
   | { kind: "series"; total: number; current: string | null; expected: string }

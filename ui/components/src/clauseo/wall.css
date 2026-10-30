@@ -58,7 +58,7 @@
   .tile {
     position: relative;
   }
-  .tile:is([data-hand], [data-force~="hand"]) {
+  .tile[data-hand] {
     z-index: 3;
   }
   /* uncited: flat on the wall, no shadow, no highlight */
@@ -103,10 +103,6 @@
     .tile[data-state="uncited"] .tile-face:hover {
       background: var(--flat-hover);
     }
-  }
-  /* a hovered tile laid out at rest with data-force, as a control can be */
-  .tile[data-state="uncited"][data-force~="hover"] .tile-face {
-    background: var(--flat-hover);
   }
   .tile-face:active {
     transform: scale(var(--press-scale));
@@ -217,13 +213,6 @@
       opacity: 1;
     }
   }
-  .tile:not([data-state="uncited"])[data-force~="hover"] .tile-face {
-    background: var(--c);
-    transform: translateY(var(--lift));
-  }
-  .tile:not([data-state="uncited"])[data-force~="hover"] .tile-face::after {
-    opacity: 1;
-  }
   .tile:not([data-state="uncited"]) .tile-face:active {
     transform: scale(var(--press-scale));
   }
@@ -231,10 +220,10 @@
     opacity: 0;
   }
   /* in hand: forward off the wall toward the work, with the longer shadow */
-  .tile:is([data-hand], [data-force~="hand"]) .tile-face {
+  .tile[data-hand] .tile-face {
     transform: var(--hand-tile);
   }
-  .tile:is([data-hand], [data-force~="hand"]) .tile-face::after {
+  .tile[data-hand] .tile-face::after {
     opacity: 1;
     box-shadow: var(--e-hand);
   }

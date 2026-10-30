@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { t } from "../lib/words.ts";
-import { rt, roomWords } from "../lib/words-room.ts";
+import { rt, roomHindi } from "../lib/words-room.ts";
 import {
   acceptNext,
   fitCitations,
@@ -93,12 +93,12 @@ describe("word lookups in both languages", () => {
   });
   test("the room's own strings, in both languages", () => {
     expect(rt("en", "Show fewer")).toBe("Show fewer");
-    expect(rt("hi", "Show fewer")).toBe(roomWords.hi["Show fewer"]);
+    expect(rt("hi", "Show fewer")).toBe("कम दिखाएँ");
     expect(rt("hi", "Turn to it")).toBe(t("hi", "Turn to it"));
   });
   test("no banned word in the room's own strings", () => {
     const banned = /pencil|\bink\b|\bstep\b|पेंसिल|स्याही|चरण|कदम|मैं\b/i;
-    for (const [en, hi] of Object.entries(roomWords.hi)) {
+    for (const [en, hi] of Object.entries(roomHindi)) {
       expect(en).not.toMatch(banned);
       expect(hi).not.toMatch(banned);
     }
@@ -122,7 +122,12 @@ describe("the matter's words", () => {
     expect(benchOf("Tribunal", 3)).toBe("tribunal");
   });
   test("identifiers hold together", () => {
-    expect(keepIds("(2005) 8 SCC 89")).toBe("(2005)\u00A08\u00A0SCC\u00A089");
+    expect(keepIds("(2001) 1 SCC 1")).toBe("(2001)\u00A01\u00A0SCC\u00A01");
+    expect(keepIds("Acme Ltd v. State, (2001) 1 SCC 1, para 3")).toBe(
+      "Acme Ltd v. State, (2001)\u00A01\u00A0SCC\u00A01, para\u00A03",
+    );
+    // a report it doesn't know stays as given
+    expect(keepIds("(2001) 1 ABC 1")).toBe("(2001) 1 ABC 1");
     expect(keepIds("Form DIR-12")).toBe("Form\u00A0DIR-\u206012");
     expect(tileTitle("Reply to the notice, 3 March 2001")).toBe("Reply");
   });

@@ -95,14 +95,9 @@ const CORE: readonly Version[] = [
   v("v5", OCT(23), "4:05 pm", DRAFT, state(WITH_DRAFT, "P2", "D2"), {
     touched: ["dates", "draft"],
   }),
-  v(
-    "v6",
-    OCT(26),
-    "11:20 am",
-    { kind: "undo", of: "4:05 pm", ofDay: OCT(23) },
-    state(WITH_DRAFT, "P1", "D1"),
-    { touched: ["dates", "draft"] },
-  ),
+  v("v6", OCT(26), "11:20 am", { kind: "undo", of: "v5" }, state(WITH_DRAFT, "P1", "D1"), {
+    touched: ["dates", "draft"],
+  }),
   v("v7", OCT(27), "10:14 am", YOU, state(WITH_ORDER, "P1", "D1"), { added: ["order"] }),
   v("v8", TODAY, "4:31 pm", DRAFT, state(WITH_ORDER, "P3", "D3"), {
     touched: ["dates", "draft"],
