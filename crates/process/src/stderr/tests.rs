@@ -120,6 +120,11 @@ fn redaction_rules_stand_alone() {
         "Bearer  two spaces, Bearer"
     );
     assert_eq!(rules.redact("Bearer a\"b"), "Bearer [redacted]\"b");
+    // Header names and schemes come in any case.
+    assert_eq!(
+        rules.redact("authorization: bearer abc.def BEARER xyz"),
+        "authorization: bearer [redacted] BEARER [redacted]"
+    );
     // A secret that holds another goes whole.
     let rules = Redactor::new(
         None,
