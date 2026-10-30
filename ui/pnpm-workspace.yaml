@@ -18,3 +18,5 @@ blockExoticSubdeps: true
 strictDepBuilds: true
 allowBuilds: # empty: add a package only when an install fails without it, with a comment saying why
 savePrefix: "" # exact versions in package.json
+# Off: pnpm's up-to-date shortcut skips the devPreinstall hook, which makes ui/app/components (see scripts/components-link.mjs).
+optimisticRepeatInstall: false
