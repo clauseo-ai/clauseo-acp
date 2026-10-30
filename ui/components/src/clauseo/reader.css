@@ -46,10 +46,12 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    flex-wrap: wrap;
     gap: var(--s0-5) var(--s2);
   }
   /* the title holds one line while the bar has room for it, and wraps only when it's truly short of room: the bar's
-     tools may run past the reading column into the margin, to the bar's own edge, rather than squeeze the title */
+     tools may run past the reading column into the margin, to the bar's own edge, rather than squeeze the title. On
+     a phone's width the quiet words after it take a line of their own, never lying over the title's words */
   .rd-what b {
     @apply font-ui text-primary;
     min-width: 0;
@@ -412,5 +414,22 @@
   }
   .rd-desk {
     padding-inline: var(--s2);
+  }
+}
+
+/* a phone's width: the bar's title takes a line of its own under Back and Open in Word, as the turned page's does,
+   rather than squeezing to a word a line between them */
+@variant max-narrow {
+  .rd-bar {
+    flex-wrap: wrap;
+  }
+  .rd-what {
+    order: 1;
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+  .rd-word,
+  .rd-word-since {
+    margin-left: auto;
   }
 }

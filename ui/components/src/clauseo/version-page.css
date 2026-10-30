@@ -78,6 +78,13 @@
     @apply text-read;
     text-wrap: pretty;
   }
+  /* on a phone's width the date stands over its event, which keeps the sheet's whole measure */
+  @variant max-narrow {
+    .ver-date-row {
+      grid-template-columns: minmax(0, 1fr);
+      row-gap: var(--s0-5);
+    }
+  }
 
   /* ---------- over the sheet: which paper and when, and Save as a new draft ---------- */
   /* it holds the desk's top while the sheet scrolls under it, so Save as a new draft is always to hand */

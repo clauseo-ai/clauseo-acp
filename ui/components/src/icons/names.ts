@@ -1,6 +1,7 @@
 // Every icon in icons.tsx, with the shape it was cut from and what it means on screen.
 
-/** Every icon, in icons.tsx order, with the shape it was cut from and what it means in the room. */
+/** Every icon icons.tsx exports (its Lucide shapes, and the glyphs it re-exports from glyphs.tsx), with the shape it
+ * was cut from and what it means in the room. */
 export const ICON_NAMES = [
   { component: "IconFold", source: "chevron", meaning: "A fold" },
   { component: "IconMore", source: "chevronDown", meaning: "N more" },
