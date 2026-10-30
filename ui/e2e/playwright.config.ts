@@ -6,8 +6,9 @@ import { defineConfig } from "@playwright/test";
  *
  * The file name picks the project: `*.test.ts` is a pure unit test that runs on any OS,
  * `*.spec.ts` drives the real app and runs on Windows only. scoreboard/ holds the speed
- * scoreboard's shared metrics and comment code (R13), which has unit tests only. The unit tests use Playwright's runner
- * rather than ui/app's vitest, so this package needs no second test dependency.
+ * scoreboard's shared metrics and comment code (R13), which has unit tests only. The unit tests
+ * use Playwright's runner rather than ui/app's vitest, so this package needs no second test
+ * dependency.
  */
 export default defineConfig({
   testDir: ".",
