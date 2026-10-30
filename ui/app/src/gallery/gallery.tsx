@@ -4,7 +4,7 @@ import {
   useDisplay,
   type Display,
 } from "@clauseo/components/lib/display.ts";
-import { useUiWords } from "@clauseo/components/lib/words-ui.ts";
+import { useGalleryWords } from "./words.ts";
 import * as icons from "@clauseo/components/icons/icons.tsx";
 import { LayerProvider } from "@clauseo/components/ui/layer.tsx";
 import { SegmentedSwitch } from "@clauseo/components/ui/segmented.tsx";
@@ -52,7 +52,7 @@ function Labelled({ label, children }: { label: string; children: ReactNode }) {
 /** The display's switches: theme, language, lite, reduced motion, platform and text size. */
 function Bar() {
   const d = useDisplay();
-  const w = useUiWords();
+  const w = useGalleryWords();
   const set = (patch: Partial<Display>) => showDisplay({ ...d, ...patch });
   return (
     <header className="flex flex-wrap items-center gap-x-s6 gap-y-s3 px-s6 py-s3 text-small text-muted rule-under-band">

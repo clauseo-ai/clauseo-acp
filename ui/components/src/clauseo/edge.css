@@ -1,0 +1,412 @@
+/* The edge of the matter: the permission prompt's own additions for an edge, the refusals' list, the room's line as
+   the way into what the matter allows, the card that lists it, Not protected, and the computer's own dialogs, drawn
+   in each system's type and colour from the tokens that name them. Every value comes from a token. */
+
+@layer components {
+  /* ---------- asking at the edge: the room's permission pattern, and what it adds ---------- */
+  .edge[data-state="confirming"] .perm-actions {
+    opacity: 0.45;
+  }
+  .edge-confirming {
+    @apply text-small text-primary;
+    margin-top: var(--s2);
+    padding-left: var(--perm-indent);
+  }
+  .edge-after {
+    margin-top: var(--s5);
+  }
+  .edge-refused {
+    margin-top: var(--s2);
+    padding-left: calc(var(--perm-indent) - var(--s2));
+  }
+  .edge-refused-head {
+    @apply text-small text-muted;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1-5);
+    min-height: var(--size-target);
+    padding: 0 var(--s2);
+    border-radius: var(--r-small);
+    transition: background-color var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-hover is-hover:text-primary;
+  }
+  .edge-refused-chev {
+    flex: none;
+    transition: transform var(--dur-forward) var(--ease-arrive);
+  }
+  .edge-refused-head[data-panel-open] .edge-refused-chev {
+    transform: rotate(90deg);
+  }
+  .edge-refused-list {
+    display: grid;
+    gap: var(--s0-5);
+    margin-top: var(--s1);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-tile);
+    background: var(--well-strong);
+  }
+  .edge-refused-row {
+    @apply text-small-row text-muted;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--s3);
+    overflow-wrap: anywhere;
+  }
+  .edge-refused-earlier {
+    color: var(--quiet);
+  }
+
+  /* ---------- the room's line: a press opens what the matter allows ---------- */
+  .ws-line {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: var(--s2);
+    margin-left: calc(-1 * var(--s2));
+    /* the press starts 8 px left of the line's text, so it may run 8 px past the line's right edge: the sentence then
+       holds one line */
+    max-width: calc(100% + var(--s2));
+    padding: 0 var(--s2);
+    border-radius: var(--r-small);
+    text-align: left;
+    color: inherit;
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      color var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-hover is-hover:text-primary data-popup-open:bg-hover data-popup-open:text-primary;
+  }
+  .ws-line-icon {
+    flex: none;
+    margin-top: var(--s0-5);
+  }
+
+  /* ---------- Not protected, explained: the mark itself stands in shell.css, with the room ---------- */
+  .np-note-title {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+  }
+  .np-note-icon {
+    flex: none;
+    background: var(--tile);
+    color: var(--primary);
+    box-shadow: var(--e1);
+  }
+  .np-note-body {
+    display: grid;
+    gap: var(--s2);
+  }
+  .np-note-body > span {
+    display: block;
+  }
+
+  /* ---------- what this matter allows ---------- */
+  .allows {
+    width: var(--edge-allows-w);
+    max-width: calc(var(--view-w) - 2 * var(--s4));
+  }
+  .allows-card {
+    padding: var(--s4) var(--s4) var(--s4);
+  }
+  .allows-title {
+    @apply text-ui stretch-voice font-chip text-primary tracking-head;
+    padding: 0 var(--s2);
+  }
+  .allows-sub {
+    @apply text-small text-muted;
+    margin-top: var(--s0-5);
+    padding: 0 var(--s2);
+  }
+  .allows-group {
+    margin-top: var(--s4);
+  }
+  .allows-head {
+    @apply text-small stretch-voice font-ui text-quiet;
+    padding: 0 var(--s2);
+  }
+  .allows-list {
+    display: grid;
+    margin-top: var(--s1);
+  }
+  .allows-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    column-gap: var(--s3);
+    row-gap: var(--s1);
+    padding: var(--s2);
+    box-shadow: inset 0 calc(-1 * var(--hairline)) 0 var(--divide);
+  }
+  .allows-row:last-child {
+    box-shadow: none;
+  }
+  .allows-icon {
+    flex: none;
+    margin-top: var(--s0-5);
+    color: var(--muted);
+  }
+  .allows-what {
+    flex: 1 1 var(--edge-row-min);
+    min-width: 0;
+    display: grid;
+  }
+  .allows-place {
+    @apply text-ui text-primary;
+    overflow-wrap: anywhere;
+  }
+  .allows-note {
+    @apply text-small text-muted;
+    overflow-wrap: anywhere;
+  }
+  .allows-scope {
+    @apply text-small text-quiet;
+    margin-left: auto;
+    white-space: nowrap;
+  }
+  .allows-remove,
+  .allows-undo {
+    margin: calc(-1 * var(--s1)) calc(-1 * var(--s2)) 0 auto;
+  }
+  .allows-removed {
+    align-items: center;
+  }
+  .allows-removed-words {
+    @apply text-small text-muted;
+    flex: 1 1 var(--edge-row-min);
+  }
+  .allows-foot {
+    margin-top: var(--s4);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2) var(--s3);
+    padding: var(--s3);
+    border-radius: var(--r-tile);
+    background: var(--well);
+  }
+  .allows-protection {
+    flex: 1 1 var(--edge-row-min);
+    display: grid;
+  }
+  .allows-protection-name {
+    @apply text-ui font-chip text-primary;
+  }
+  .allows-protection-state {
+    @apply text-small text-muted;
+  }
+
+  /* ---------- the computer's own dialogs: macOS's alert, Windows' dialog ---------- */
+  .sysd-place {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: grid;
+    place-items: center;
+    padding: var(--s4) var(--s4) var(--s12);
+    pointer-events: none;
+  }
+  .sysd-dialog {
+    pointer-events: auto;
+    max-width: 100%;
+    text-align: left;
+    box-shadow: var(--os-shadow);
+    letter-spacing: normal;
+    font-stretch: normal;
+  }
+  .sysd-detail {
+    overflow-wrap: anywhere;
+  }
+  .sysd-lines {
+    display: grid;
+    gap: var(--s1-5);
+  }
+  .sysd-check {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    cursor: default;
+  }
+  .sysd-check-input {
+    position: absolute;
+    opacity: 0;
+    width: var(--hairline);
+    height: var(--hairline);
+  }
+  .sysd-check-box {
+    flex: none;
+    display: grid;
+    place-items: center;
+    color: transparent;
+  }
+  .sysd-check-input:checked + .sysd-check-box {
+    color: var(--os-mac-on-accent);
+  }
+  .sysd-buttons {
+    display: flex;
+    gap: var(--s2);
+  }
+  .sysd-button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0 var(--s3);
+    white-space: nowrap;
+  }
+
+  /* macOS 26: the app's icon, the question in bold, capsule buttons, its own blue for the default */
+  .sysd-mac {
+    width: var(--os-mac-w);
+    display: grid;
+    gap: var(--s2);
+    padding: var(--os-mac-pad);
+    border-radius: var(--os-mac-r);
+    background: var(--os-mac-plane);
+    color: var(--os-mac-text);
+    font-family: var(--os-font-mac);
+    font-size: var(--os-mac-body);
+    line-height: var(--os-mac-body-lh);
+  }
+  .sysd-mac-icon {
+    width: var(--os-mac-icon);
+    height: var(--os-mac-icon);
+    margin-bottom: var(--s1);
+  }
+  .sysd-mac .sysd-title {
+    font-size: var(--os-mac-title);
+    line-height: var(--os-mac-title-lh);
+    font-weight: 700;
+  }
+  .sysd-mac .sysd-detail {
+    color: var(--os-mac-text-2);
+  }
+  .sysd-mac .sysd-check {
+    margin-top: var(--s1);
+  }
+  .sysd-mac .sysd-check-box {
+    width: var(--os-mac-check);
+    height: var(--os-mac-check);
+    border-radius: var(--os-mac-check-r);
+    background: var(--os-mac-button);
+  }
+  .sysd-mac .sysd-check-input:checked + .sysd-check-box {
+    background: var(--os-mac-accent);
+  }
+  .sysd-mac .sysd-check-input:focus-visible + .sysd-check-box,
+  .sysd-mac .sysd-button:focus-visible {
+    outline: var(--ring-w) solid var(--os-mac-accent);
+    outline-offset: var(--ring-gap);
+  }
+  .sysd-mac .sysd-buttons {
+    margin-top: var(--s3);
+  }
+  .sysd-mac .sysd-button {
+    height: var(--os-mac-button-h);
+    border-radius: calc(var(--os-mac-button-h) / 2);
+    background: var(--os-mac-button);
+    color: var(--os-mac-text);
+    font-weight: 500;
+  }
+  /* macOS's default button in macOS's own blue. Its white words fall under 4.5:1 at night (3.65:1 on #0A84FF), kept
+     on purpose: the dialog depicts the computer's own, which macOS draws inside the app, so its colours are macOS's */
+  .sysd-mac .sysd-button[data-primary] {
+    background: var(--os-mac-accent);
+    color: var(--os-mac-on-accent);
+  }
+
+  /* Windows 11: a window of its own, Clauseo's title bar, the question, and a foot holding the box and the buttons */
+  .sysd-win {
+    width: var(--os-win-w);
+    overflow: hidden;
+    border-radius: var(--os-win-r);
+    background: var(--os-win-plane);
+    color: var(--os-win-text);
+    font-family: var(--os-font-win);
+    font-size: var(--os-win-body);
+    line-height: var(--os-win-body-lh);
+  }
+  .sysd-win-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    height: var(--os-win-bar-h);
+    padding-left: var(--s3);
+  }
+  .sysd-win-icon {
+    width: var(--os-win-icon);
+    height: var(--os-win-icon);
+  }
+  .sysd-win-name {
+    font-size: var(--os-win-small);
+    line-height: var(--os-win-small-lh);
+  }
+  .sysd-win-close {
+    margin-left: auto;
+    width: var(--size-caption-w);
+    height: var(--size-caption-h);
+    display: grid;
+    place-items: center;
+    color: var(--os-win-text);
+    transition: background-color var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-win-close is-hover:text-on-colour;
+  }
+  .sysd-win-glyph {
+    width: var(--size-caption-glyph);
+    height: var(--size-caption-glyph);
+    fill: none;
+    stroke: currentColor;
+    stroke-width: var(--hairline);
+  }
+  .sysd-win-body {
+    display: grid;
+    gap: var(--s3);
+    padding: var(--s3) var(--os-win-pad) var(--os-win-pad);
+  }
+  .sysd-win .sysd-title {
+    font-size: var(--os-win-title);
+    line-height: var(--os-win-title-lh);
+    font-weight: 600;
+  }
+  .sysd-win .sysd-detail {
+    margin-top: calc(-1 * var(--s2));
+    color: var(--os-win-text-2);
+    font-size: var(--os-win-small);
+    line-height: var(--os-win-small-lh);
+  }
+  .sysd-win .sysd-foot-line {
+    color: var(--os-win-text-2);
+  }
+  .sysd-win-foot {
+    display: grid;
+    gap: var(--s4);
+    padding: var(--os-win-pad);
+    background: var(--os-win-foot);
+    box-shadow: inset 0 var(--hairline) 0 var(--os-win-line);
+  }
+  .sysd-win .sysd-check-box {
+    width: var(--os-win-check);
+    height: var(--os-win-check);
+    border-radius: var(--os-win-check-r);
+    background: var(--os-win-button);
+    box-shadow: inset 0 0 0 var(--hairline) var(--os-win-text-2);
+  }
+  .sysd-win .sysd-check-input:checked + .sysd-check-box {
+    background: var(--os-win-accent);
+    color: var(--os-win-on-accent);
+    box-shadow: none;
+  }
+  .sysd-win .sysd-check-input:focus-visible + .sysd-check-box,
+  .sysd-win .sysd-button:focus-visible {
+    outline: var(--ring-w) solid var(--os-win-text);
+    outline-offset: var(--ring-gap);
+  }
+  .sysd-win .sysd-button {
+    height: var(--os-win-button-h);
+    border-radius: var(--os-win-button-r);
+    background: var(--os-win-button);
+    color: var(--os-win-text);
+    box-shadow: inset 0 0 0 var(--hairline) var(--os-win-line);
+  }
+  .sysd-win .sysd-button[data-primary] {
+    background: var(--os-win-accent);
+    color: var(--os-win-on-accent);
+    box-shadow: none;
+  }
+}

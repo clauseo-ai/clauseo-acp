@@ -1,0 +1,61 @@
+/* The rail's notice. A quiet card on the ground in the tile's tone, in its own row at the
+   rail's foot above Scratch matter, or at the head of the wall, before the papers, where the rail folds away. Every value is a
+   token. */
+@layer components {
+  .rail-notice {
+    display: grid;
+    justify-items: start;
+    gap: var(--s1);
+    padding: var(--s3);
+    border-radius: var(--r-card);
+    background: var(--tile);
+    box-shadow: var(--e1);
+    @apply edge-lite;
+  }
+  .rail-notice-title {
+    @apply text-ui font-chip text-primary deva-nudge;
+  }
+  .rail-notice-line {
+    @apply text-small text-muted;
+  }
+  .rail-notice-firm {
+    @apply text-primary;
+  }
+  .rail-notice-ask {
+    @apply text-small font-chip text-primary;
+  }
+  .rail-notice-acts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s1) var(--s2);
+    margin-top: var(--s1);
+  }
+  /* a link on the question's line, such as "See what it contains": the line's own words, underlined */
+  .rail-notice-link {
+    display: inline;
+    font: inherit;
+    font-weight: var(--w-ui);
+    color: var(--primary);
+    text-decoration: underline;
+    text-decoration-color: var(--ref-line);
+    text-underline-offset: var(--cite-offset);
+    border-radius: var(--r-ref);
+    white-space: nowrap;
+  }
+  .rail-notice-link:focus-visible {
+    outline: var(--ring-w) solid var(--primary);
+    outline-offset: var(--ring-gap);
+  }
+  /* at the rail's foot: its own row, the rail's matters scrolling above it, Scratch matter's hairline under it */
+  .room-rail-foot > .rail-notice {
+    margin-top: var(--s3);
+  }
+  .room-rail-foot > .rail-notice + .room-scratch {
+    margin-top: var(--s3);
+  }
+  /* at the wall's head, before the papers, in flow: seen without a scroll, and it never stands over a tile */
+  .rail-notice-top {
+    margin-top: var(--s2);
+  }
+}

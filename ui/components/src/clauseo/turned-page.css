@@ -1,0 +1,125 @@
+/* The turned page: the prepared draft's first page, over the thread, on the tokens. */
+
+@layer components {
+  /* ---------- the turned page: the draft's first page, over the thread ---------- */
+  .turn {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: var(--composer-h, var(--composer-h-rest));
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    background: var(--desk);
+    border-radius: var(--r-surface) var(--r-surface) 0 0;
+  }
+  .turn[hidden] {
+    display: none;
+  }
+  .turn-bar {
+    flex: none;
+    background: var(--surface);
+    border-radius: var(--r-surface) var(--r-surface) 0 0;
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s3) var(--gutter) var(--s3) calc(var(--gutter) - var(--s3));
+    box-shadow: 0 var(--hairline) 0 var(--divide);
+  }
+  .turn-what {
+    @apply text-small-row text-muted;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    margin-left: auto;
+    margin-right: var(--s3);
+    white-space: nowrap;
+  }
+  .turn-what b {
+    @apply font-ui text-primary;
+    min-width: min-content;
+    white-space: normal;
+    text-wrap: balance;
+  }
+  .turn-scroll:focus-visible {
+    outline-offset: var(--ring-inset);
+  }
+  .turn-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    padding: var(--s7) var(--s6) var(--s10);
+  }
+  .page {
+    position: relative;
+    max-width: calc(var(--measure) + var(--page-extra));
+    margin: 0 auto;
+    padding: var(--page-pad-top) var(--page-pad-side) var(--s10);
+    background: var(--sheet);
+    border-radius: var(--r-label);
+    box-shadow: var(--shadow-page);
+    font-weight: var(--w-clauseo);
+    font-stretch: var(--wd-read);
+    hanging-punctuation: first allow-end last;
+  }
+  .page-court {
+    @apply text-ui-loose stretch-voice tracking-caps;
+    text-align: center;
+    text-transform: uppercase;
+  }
+  .page-case {
+    @apply text-ui-loose text-muted;
+    text-align: center;
+    margin-top: var(--s2);
+  }
+  .page-parties {
+    margin: var(--s8) 0 0;
+    display: grid;
+    gap: var(--s2);
+  }
+  .page-party {
+    @apply text-asked;
+    font-weight: inherit;
+    display: flex;
+    align-items: baseline;
+    gap: var(--s3);
+  }
+  .page-party::after {
+    content: "";
+    order: 1;
+    flex: 1;
+    border-bottom: var(--hairline) dotted var(--leader);
+    transform: translateY(var(--leader-rise));
+  }
+  .page-role {
+    order: 2;
+    @apply text-ui text-muted stretch-wide;
+    line-height: inherit;
+  }
+  .page-versus {
+    @apply text-small-row text-muted tracking-caps;
+    text-align: center;
+  }
+  .page-title {
+    @apply text-read stretch-wide;
+    margin-top: var(--s8);
+    text-align: center;
+    text-wrap: balance;
+  }
+  .page-paras {
+    margin-top: var(--s7);
+    display: grid;
+    gap: var(--para-gap);
+  }
+  .page-paras p {
+    @apply text-read;
+  }
+  .page-foot {
+    @apply font-numeral text-small-row text-muted stretch-broad;
+    margin-top: var(--s12);
+    text-align: center;
+  }
+}

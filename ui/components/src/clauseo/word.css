@@ -1,0 +1,266 @@
+/* The draft in review. Word's tracked changes on the sheet, the lawyer's own at 600, and
+   beside it the changes with Accept and Reject and the citations with their checks. Every value comes from a token. */
+
+@layer components {
+  /* ---------- the draft in review: tracked changes on the sheet ---------- */
+  /* a tracked insertion: the one underline every page draws, the same token and offset as the limit's draft */
+  .rd-ins {
+    text-decoration-line: underline;
+    text-decoration-thickness: var(--ins-thickness);
+    text-decoration-color: var(--primary);
+    text-underline-offset: var(--ins-offset);
+    text-decoration-skip-ink: none;
+    border-radius: var(--r-ref);
+    cursor: pointer;
+    transition: background-color var(--dur-quick) var(--ease-arrive);
+  }
+  /* the lawyer's own words, from Word, at the lawyer's weight */
+  .rd-ins[data-by="you"] {
+    font-weight: var(--w-accepted);
+    font-stretch: var(--wd-accepted);
+  }
+  .rd-del {
+    color: var(--muted);
+    text-decoration-line: line-through;
+    text-decoration-thickness: var(--hairline);
+    text-decoration-color: var(--primary);
+    border-radius: var(--r-ref);
+    cursor: pointer;
+    transition: background-color var(--dur-quick) var(--ease-arrive);
+  }
+  :is(.rd-ins, .rd-del):hover {
+    background: var(--hover-faint);
+  }
+  :is(.rd-ins, .rd-del)[data-focus] {
+    background: var(--select);
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+  /* accepted: no longer a mark, and the lawyer's weight, because the lawyer has taken it on */
+  .rd-acc {
+    font-weight: var(--w-accepted);
+    font-stretch: var(--wd-accepted);
+  }
+  /* while the citations are in view, each carries its check's colour under it; a citation the change inserted keeps
+     the insertion's own underline, and shows its check only when pointed at or picked from the list */
+  .rd-draft[data-tab="citations"] .rd-cite {
+    text-decoration-line: underline;
+    text-decoration-thickness: var(--underline-firm);
+    text-underline-offset: var(--ref-offset);
+    text-decoration-color: var(--relied);
+    cursor: pointer;
+  }
+  .rd-draft[data-tab="citations"] .rd-cite[data-focus] {
+    background: var(--select);
+    border-radius: var(--r-ref);
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+  .rd-draft[data-tab="citations"] .rd-cite[data-status="verified"] {
+    text-decoration-color: var(--green);
+  }
+  .rd-draft[data-tab="citations"]
+    .rd-cite:is([data-status="mismatched"], [data-status="notfound"]) {
+    text-decoration-color: var(--red);
+  }
+  .rd-draft[data-tab="citations"] .rd-ins .rd-cite:not(:hover, [data-focus]) {
+    text-decoration-thickness: var(--ins-thickness);
+    text-underline-offset: var(--ins-offset);
+    text-decoration-color: var(--primary);
+  }
+
+  /* ---------- beside the draft: its changes and its citations ---------- */
+  .rd-review .rd-tabs {
+    margin: 0 calc(-1 * var(--s3));
+  }
+  .rd-tab-panel {
+    margin-top: var(--s3);
+    display: flex;
+    flex-direction: column;
+  }
+  .rd-tab-panel:focus-visible {
+    outline: var(--ring-w) solid var(--primary);
+    outline-offset: var(--ring-gap);
+    border-radius: var(--r-tile);
+  }
+  .rd-review-head {
+    display: grid;
+    gap: var(--s3);
+  }
+  .rd-review-sub {
+    @apply text-small text-quiet;
+  }
+  .rd-review-all {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+  }
+  .rd-review-all button {
+    gap: var(--s1-5);
+  }
+  .rd-came-back {
+    @apply text-small-row text-primary;
+    margin-top: var(--s3);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-control);
+    background: var(--inset);
+    box-shadow: var(--set-in-field);
+  }
+  .rd-changes,
+  .rd-checks {
+    margin-top: var(--s3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+  }
+  /* each change a raised card on the ground; the one in view comes forward */
+  .rd-change,
+  .rd-checkrow {
+    padding: var(--s3) var(--s3) var(--s2);
+    border-radius: var(--r-tile);
+    background: var(--surface);
+    box-shadow: var(--e0);
+    transition:
+      transform var(--dur-forward) var(--ease-arrive),
+      box-shadow var(--dur-forward) var(--ease-arrive),
+      background-color var(--dur-quick) var(--ease-arrive);
+  }
+  .rd-change[data-focus],
+  .rd-checkrow[data-focus] {
+    box-shadow: var(--e1-hover);
+    transform: translate(calc(-1 * var(--s1)), calc(-1 * var(--s0-5)));
+  }
+  [data-motion="reduced"] :is(.rd-change, .rd-checkrow)[data-focus] {
+    transform: none;
+  }
+  /* answered, it settles back onto the ground's own tone */
+  .rd-change:not([data-state="pending"]) {
+    background: var(--tile);
+    box-shadow: none;
+  }
+  .rd-change-head {
+    @apply text-small-row text-muted;
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+  }
+  .rd-change-head b {
+    @apply text-ui font-chip text-primary;
+  }
+  .rd-change[data-by="you"] .rd-change-head b {
+    font-weight: var(--w-accepted);
+  }
+  .rd-change-when {
+    margin-left: auto;
+    white-space: nowrap;
+  }
+  .rd-change-words {
+    margin-top: var(--s2);
+    display: grid;
+    gap: var(--s1-5);
+  }
+  .rd-change-run {
+    @apply text-quote font-clauseo stretch-read text-primary;
+  }
+  /* the words before an insertion, for its place: muted, at the text's own weight, never marked */
+  .rd-change-ctx {
+    color: var(--muted);
+    font-weight: var(--w-clauseo);
+  }
+  /* in the card the label says Added, so the insertion carries no underline; the lawyer's own stay at 600 */
+  .rd-change-run .rd-ins {
+    text-decoration-line: none;
+    cursor: auto;
+  }
+  .rd-change-run .rd-ins:hover {
+    background: none;
+  }
+  .rd-change-kind {
+    @apply text-small font-chip text-quiet;
+    display: block;
+  }
+  .rd-change:not([data-state="pending"]) .rd-change-run {
+    color: var(--muted);
+  }
+  .rd-change[data-state="accepted"] .rd-change-run ins {
+    font-weight: var(--w-accepted);
+  }
+  .rd-change-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s1) var(--s2);
+    margin-top: var(--s2);
+    min-height: var(--size-control-small);
+  }
+  .rd-change-state {
+    @apply text-small-row text-muted;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1-5);
+    white-space: nowrap;
+  }
+  .rd-change[data-state="accepted"] .rd-change-state {
+    color: var(--primary);
+    font-weight: var(--w-accepted);
+  }
+  .rd-change-acts {
+    display: flex;
+    gap: var(--s1);
+    margin-right: calc(-1 * var(--s1));
+  }
+  .rd-review-foot {
+    @apply text-small text-quiet;
+    margin-top: var(--s4);
+  }
+
+  /* a citation's check: the chip, where it came from, the citation, and what the check found */
+  .rd-checkrow-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s1) var(--s2);
+  }
+  .rd-checkrow-from {
+    @apply text-small text-quiet;
+  }
+  .rd-checkrow-name {
+    @apply text-ui-loose stretch-wide text-primary;
+    margin-top: var(--s2);
+  }
+  .rd-checkrow-note {
+    @apply text-small text-muted;
+    margin-top: var(--s1);
+  }
+  .rd-checkrow-again {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s2);
+    padding-bottom: var(--s1);
+  }
+  .rd-mismatch {
+    display: grid;
+    gap: var(--s2);
+    padding-bottom: var(--s1);
+  }
+  .rd-source {
+    margin: 0;
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-control);
+    background: var(--well);
+  }
+  .rd-source figcaption {
+    @apply text-small font-chip text-muted;
+  }
+  .rd-source blockquote {
+    @apply text-quote font-clauseo stretch-read text-primary;
+    margin-top: var(--s0-5);
+  }
+  .rd-source[data-of="draft"] blockquote {
+    color: var(--muted);
+  }
+}

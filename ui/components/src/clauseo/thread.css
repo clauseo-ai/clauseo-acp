@@ -1,0 +1,389 @@
+/* The thread. The question, Clauseo's answer with its references, the other side's best case, Accept, the Ready
+   card and the turned page, on the tokens. Weight carries
+   authorship: Clauseo's words at 400, the lawyer's and anything accepted at 600. */
+
+@layer components {
+  .step {
+    max-width: var(--measure);
+  }
+  .who {
+    @apply text-small-row text-muted;
+  }
+  .who b {
+    @apply font-ui text-primary;
+  }
+  .asked {
+    @apply text-asked font-accepted;
+    margin-top: var(--s1);
+  }
+  .reply {
+    margin-top: var(--s4);
+  }
+  .reply-text {
+    @apply text-reply font-clauseo;
+    margin-top: var(--s1);
+  }
+
+  /* the earlier exchange, folded to one line that keeps the accepted list in view */
+  .fold-time {
+    white-space: nowrap;
+  }
+  .fold-title {
+    @apply text-ui text-primary font-accepted;
+  }
+  .fold-state {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--fold-state-gap);
+    color: var(--primary);
+    white-space: nowrap;
+  }
+  .fold-body {
+    padding-top: var(--s2);
+  }
+  /* a card set into the thread: the list of dates, accepted */
+  .made {
+    margin-top: var(--s3);
+    display: grid;
+    grid-template-columns: var(--size-tile-icon) minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: var(--s3);
+    padding: var(--s3) var(--s4) var(--s3) var(--s3);
+    background: var(--well);
+    border-radius: var(--r-card);
+  }
+  .card-icon {
+    width: var(--size-tile-icon);
+    height: var(--size-tile-icon);
+    border-radius: var(--r-control);
+    display: grid;
+    place-items: center;
+  }
+  .made .card-icon {
+    background: var(--primary);
+    color: var(--on-primary);
+    box-shadow: var(--shadow-icon-primary);
+  }
+  .made-title {
+    @apply text-ui font-accepted;
+  }
+  .made-sub {
+    @apply text-small font-ui text-muted;
+  }
+  .made-state {
+    @apply text-small text-muted;
+    text-align: right;
+  }
+  .made-state > span {
+    display: block;
+  }
+  .made-word {
+    display: flex !important;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--s1-5);
+    color: var(--primary);
+    font-weight: var(--w-accepted);
+  }
+
+  /* the meta line under the question: who wrote the step, then what was checked */
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--s3);
+    row-gap: var(--s1);
+    min-height: calc(var(--s5) * var(--k));
+  }
+  .work-done {
+    @apply text-small font-ui text-muted;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1-5);
+    min-height: calc(var(--s6) * var(--k));
+    padding: 0 var(--s2) 0 var(--s1-5);
+    margin-left: calc(-1 * var(--s1-5));
+    border-radius: var(--r-chip);
+    background: transparent;
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      color var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-well is-hover:text-primary is-active:bg-well-strong;
+  }
+  .work-icon {
+    color: var(--green);
+  }
+  .work-chev {
+    transition: transform var(--dur-forward) var(--ease-arrive);
+  }
+  .work-done[data-panel-open] .work-chev {
+    transform: rotate(90deg);
+  }
+  .work-list {
+    margin: var(--s2) 0 var(--s1);
+    padding: var(--s2) var(--s3);
+    display: grid;
+    gap: var(--s0-5);
+    background: var(--well);
+    border-radius: var(--r-control);
+  }
+  .work-list li {
+    @apply text-small-row text-muted;
+  }
+
+  /* reading type: 18 px on 29, a slightly open cut, punctuation hung where the browser can */
+  .answer {
+    font-stretch: var(--wd-read);
+    hanging-punctuation: first allow-end last;
+    font-kerning: normal;
+  }
+  .lead {
+    @apply text-lead stretch-wide tracking-lead font-clauseo;
+    margin-top: var(--s3);
+  }
+  .para {
+    @apply text-read tracking-read font-clauseo;
+    margin-top: var(--para-gap);
+  }
+  /* English runs inside Hindi keep their Latin tracking */
+  :root:lang(hi) .lead [lang="en"] {
+    letter-spacing: var(--tr-lead);
+  }
+  :root:lang(hi) :is(.para, .os-text) [lang="en"] {
+    letter-spacing: var(--tr-read);
+  }
+  /* accepted: the lawyer's weight, set narrower by exactly what the weight adds, measured in this browser, so every
+     word keeps its width and every line its break */
+  .answer[data-accept="accepted"] .says {
+    font-weight: var(--w-accepted);
+    font-stretch: var(--ink-s, var(--wd-accepted));
+  }
+
+  /* references: inline padding widens the tap target without moving the lines */
+  .ref {
+    text-decoration-line: underline;
+    text-decoration-thickness: var(--hairline);
+    text-underline-offset: var(--ref-offset);
+    text-decoration-color: var(--ref-line);
+    border-radius: var(--r-ref);
+    padding: var(--s1) 0;
+    cursor: pointer;
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      text-decoration-color var(--dur-quick) var(--ease-arrive);
+  }
+  .ref:hover {
+    text-decoration-color: var(--primary);
+  }
+  .ref:active {
+    background: var(--press);
+  }
+  .ref[data-cite] {
+    white-space: nowrap;
+  }
+  .ref[data-role] {
+    text-decoration-thickness: var(--underline-firm);
+    text-decoration-color: var(--relied);
+  }
+  .ref[data-role="supports"] {
+    text-decoration-color: var(--green);
+  }
+  .ref[data-role="against"] {
+    text-decoration-color: var(--red);
+  }
+  .ref[data-role]:hover,
+  .ref[data-role][data-open] {
+    background: var(--hover-faint);
+  }
+  .ref[data-role="supports"]:hover,
+  .ref[data-role="supports"][data-open] {
+    background: var(--supports-ref);
+  }
+  .ref[data-role="against"]:hover,
+  .ref[data-role="against"][data-open] {
+    background: var(--against-ref);
+  }
+  /* the cited words while their paper is in hand and its line is drawn */
+  .ref[data-tied] {
+    text-decoration-thickness: var(--underline-firm);
+    text-decoration-color: var(--tc, var(--primary));
+  }
+  .ref[data-tied="supports"] {
+    --tc: var(--green);
+  }
+  .ref[data-tied="against"] {
+    --tc: var(--red);
+  }
+  .ref[data-tied="relied"] {
+    --tc: var(--relied);
+  }
+
+  /* the other side's best case: a header row, then its body on a warmed plane */
+  .otherside {
+    margin-top: var(--s7);
+  }
+  .os-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    min-height: calc(var(--s6) * var(--k));
+  }
+  .os-label {
+    @apply text-ui stretch-voice font-chrome text-primary;
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+  }
+  .os-mark {
+    width: var(--size-dot-otherside);
+    height: var(--size-dot-otherside);
+    border-radius: var(--r-round);
+    background: var(--red);
+    flex: none;
+    box-shadow: var(--shadow-dot);
+  }
+  .os-count {
+    @apply text-small text-muted;
+    white-space: nowrap;
+  }
+  .os-plane {
+    margin-top: var(--s2);
+    padding: var(--s4) var(--s5) var(--otherside-pad-end);
+    background: var(--otherside);
+    border-radius: var(--r-card);
+    box-shadow: var(--shadow-otherside);
+  }
+  .os-text {
+    @apply text-read font-clauseo;
+  }
+
+  /* the answer's foot: Not yet accepted until the lawyer accepts it */
+  .accept-row {
+    @apply text-small-row text-muted;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--s2) var(--s3);
+    min-height: var(--size-control);
+    margin-top: var(--s5);
+  }
+  .accept-mark {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1-5);
+    white-space: nowrap;
+  }
+  .accept-row[data-state="accepted"] .accept-mark {
+    color: var(--primary);
+    font-weight: var(--w-accepted);
+  }
+  .accept-undo {
+    margin-left: calc(-1 * var(--s1));
+  }
+  /* with a pointer, Accept waits out of sight until the answer is hovered or focused; it never moves the lines */
+  @media (hover: hover) {
+    .accept-row[data-state="pending"] .accept-btn {
+      opacity: 0;
+      transition:
+        opacity var(--dur-reveal) var(--ease-arrive),
+        background-color var(--dur-quick) var(--ease-arrive),
+        box-shadow var(--dur-quick) var(--ease-arrive),
+        transform var(--dur-quick) var(--ease-arrive);
+    }
+    .step-answer:hover .accept-btn,
+    .step-answer[data-force~="hover"] .accept-btn,
+    .step-answer:focus-within .accept-btn,
+    .accept-btn:focus-visible {
+      opacity: 1 !important;
+    }
+  }
+
+  /* the prepared draft, ready at the end of the answer: yellow means prepared, and it stays shut until turned to */
+  .ready {
+    margin-top: var(--s4);
+    display: grid;
+    grid-template-columns: var(--size-tile-icon) minmax(0, 1fr) auto;
+    grid-template-areas: "icon title turn" "icon detail turn";
+    column-gap: var(--s3);
+    align-items: center;
+    padding: var(--s3);
+    background: var(--well);
+    border-radius: var(--r-card);
+  }
+  .ready .card-icon {
+    grid-area: icon;
+    align-self: start;
+    margin-top: var(--s0-5);
+    background: var(--yellow);
+    color: var(--on-yellow);
+    box-shadow: var(--shadow-icon-yellow);
+  }
+  .ready-title {
+    @apply text-ui-loose text-primary font-clauseo;
+    grid-area: title;
+    min-width: 0;
+  }
+  .ready-detail {
+    @apply text-small-row text-muted;
+    grid-area: detail;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--s0-5) var(--s2);
+    min-width: 0;
+    margin-top: var(--s0-5);
+  }
+  .ready-pages {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+  }
+  .ready-state {
+    white-space: nowrap;
+  }
+  .ready-turn {
+    grid-area: turn;
+  }
+
+  /* the question, pinned to the top of the thread once it has scrolled away */
+  .room-pin {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 2;
+    display: block;
+    padding: var(--pin-pad-y) var(--gutter);
+    text-align: left;
+    color: var(--primary);
+    background: var(--surface);
+    box-shadow: var(--shadow-pin);
+    cursor: pointer;
+    transition: background-color var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-surface-hover is-active:bg-well;
+  }
+  .room-pin[hidden] {
+    display: none;
+  }
+  /* it stands flush with the work's clipped top and sides, where a ring outside it would be cut away: the ring keeps
+     its 2 px gap on the inside instead, following the surface's corners */
+  .room-pin:focus-visible {
+    outline-offset: var(--ring-inset);
+    border-radius: var(--r-surface) var(--r-surface) 0 0;
+  }
+  .room-pin-line {
+    display: block;
+    min-width: 0;
+    max-width: var(--measure);
+  }
+  .room-pin-who {
+    @apply text-small text-muted;
+    line-height: calc(var(--lh-ui-loose) * var(--k));
+    white-space: nowrap;
+    margin-right: var(--pin-who-gap);
+  }
+  .room-pin-text {
+    @apply text-ui-loose font-accepted;
+  }
+}

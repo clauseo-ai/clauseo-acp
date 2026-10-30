@@ -1,0 +1,229 @@
+/* Indian Kanoon in the thread. The research's results, the guard at 300 lookups, Indian
+   Kanoon unavailable, and the index's entry as the answer offers it. Every value comes from a token. */
+
+@layer components {
+  /* ---------- Indian Kanoon's results, in the answer ---------- */
+  .rd-answer .lead {
+    margin-top: var(--s3);
+  }
+  .ik-results {
+    margin-top: var(--s5);
+  }
+  .ik-results-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    min-height: calc(var(--s6) * var(--k));
+  }
+  .ik-results-title {
+    @apply text-ui stretch-voice font-chip text-primary tracking-head;
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+  }
+  .ik-results-icon {
+    color: var(--muted);
+    flex: none;
+  }
+  .ik-results-count {
+    @apply text-small text-muted;
+    white-space: nowrap;
+  }
+  .ik-result-list {
+    margin-top: var(--s2);
+    padding: var(--s1) var(--s4);
+    border-radius: var(--r-card);
+    background: var(--well);
+  }
+  .ik-result {
+    @apply join-divide;
+    display: grid;
+    grid-template-columns: var(--s5) minmax(0, 1fr) auto;
+    column-gap: var(--s3);
+    row-gap: var(--s1);
+    padding: var(--s3) 0;
+  }
+  .ik-result-mark {
+    height: var(--cite-line);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .ik-result-name {
+    @apply text-ui-loose font-chip text-primary;
+    line-height: var(--cite-line);
+  }
+  .ik-result-stance {
+    align-self: center;
+  }
+  .ik-result-where,
+  .ik-result-fragment,
+  .ik-result-foot {
+    grid-column: 2 / 4;
+  }
+  .ik-result-where {
+    @apply text-small-row text-muted;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--s2);
+  }
+  .ik-result-cite {
+    font-stretch: var(--wd-wide);
+  }
+  .ik-result-fragment {
+    @apply text-quote font-clauseo stretch-read text-muted;
+    margin-top: var(--s0-5);
+  }
+  .ik-result-fragment mark {
+    background: var(--select);
+    color: var(--primary);
+    border-radius: var(--r-ref);
+    padding: var(--mark-pad-y) var(--s0-5);
+    margin: 0 calc(-1 * var(--s0-5));
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    font-weight: var(--w-ui);
+  }
+  .ik-result-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    margin-top: var(--s1);
+  }
+  .ik-result-foot button {
+    gap: var(--s1-5);
+  }
+  .ik-result-read {
+    @apply text-small text-quiet;
+  }
+  .ik-results-more {
+    @apply text-small-row text-muted;
+    padding: var(--s2) var(--s4) 0;
+  }
+  .ik-results-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    margin-top: var(--s2);
+  }
+  .ik-results-fold {
+    width: auto;
+  }
+
+  /* the guard: a question for the lawyer, so its dot is court yellow */
+  .ik-guard-ask {
+    align-items: center;
+  }
+  .ik-guard-dot {
+    width: var(--size-dot-hint);
+    height: var(--size-dot-hint);
+    margin: 0 var(--s1);
+    flex: none;
+    border-radius: var(--r-round);
+    background: var(--yellow);
+    box-shadow: var(--shadow-dot);
+  }
+  /* what Continue costs, in time, at the actions' far end */
+  .ik-guard-when {
+    @apply text-small text-muted;
+    margin-left: auto;
+    align-self: center;
+  }
+  .ik-guard-so {
+    @apply text-primary;
+    margin-top: var(--s2);
+  }
+
+  /* Indian Kanoon unavailable: in concrete, with the clock time it tries again, and what still opens */
+  .ik-down {
+    max-width: var(--measure);
+    margin-top: var(--s4);
+    padding: var(--s3) var(--s4) var(--s3);
+    border-radius: var(--r-card);
+    background: var(--well);
+  }
+  .ik-down-head {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+  }
+  .ik-down-icon {
+    color: var(--muted);
+    flex: none;
+  }
+  .ik-down-title {
+    @apply text-ui-loose font-chrome text-primary;
+  }
+  .ik-down-body {
+    @apply text-small text-muted;
+    margin-top: var(--s0-5);
+    padding-left: var(--perm-indent);
+  }
+  .ik-down-sub {
+    @apply text-small font-chip text-primary;
+    margin-top: var(--s3);
+    padding-left: var(--perm-indent);
+  }
+  .ik-down-list {
+    margin-top: var(--s1);
+    padding-left: var(--perm-indent);
+    display: grid;
+  }
+  .ik-down-row {
+    @apply join-divide;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    column-gap: var(--s3);
+    min-height: var(--size-control);
+  }
+  .ik-down-name {
+    @apply text-ui text-primary;
+  }
+  .ik-down-cite {
+    @apply text-small-row text-muted stretch-wide;
+    white-space: nowrap;
+  }
+  /* inside its row: no pull past the row's edge */
+  .ik-down-open {
+    gap: var(--s1-5);
+  }
+  .ik-down-foot {
+    margin-top: var(--s2);
+    padding-left: var(--perm-indent);
+  }
+
+  /* the index's entry, as the answer offers it */
+  .rd-index-card {
+    margin-top: var(--s4);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: var(--s4);
+    row-gap: var(--s1);
+    align-items: center;
+    padding: var(--s3) var(--s4);
+    border-radius: var(--r-card);
+    background: var(--well);
+  }
+  .rd-index-card-kind {
+    @apply text-small font-chip text-muted stretch-wide;
+    grid-column: 1;
+  }
+  .rd-index-card-title {
+    @apply text-ui-loose font-chip text-primary;
+    grid-column: 1;
+  }
+  .rd-index-card-note {
+    @apply text-small text-muted;
+    grid-column: 1;
+  }
+  .rd-index-card-open {
+    grid-column: 2;
+    grid-row: 1 / 4;
+    gap: var(--s1-5);
+  }
+}

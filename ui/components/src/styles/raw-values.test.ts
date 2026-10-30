@@ -1,9 +1,9 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 
-// No raw values in the controls and icons: every colour, size and shadow comes from a token class. No published
-// lint rule checks Tailwind classes against a token set, so this scan stands in for one.
-const roots = ["../ui/", "../icons/"].map((p) => new URL(p, import.meta.url));
+// No raw values in the controls, icons and Clauseo's parts: every colour, size and shadow comes from a token class.
+// No published lint rule checks Tailwind classes against a token set, so this scan stands in for one.
+const roots = ["../ui/", "../icons/", "../clauseo/"].map((p) => new URL(p, import.meta.url));
 
 /** Rules on the code itself. */
 const CODE: [string, RegExp][] = [
@@ -35,7 +35,7 @@ export function scan(text: string): string[] {
   return found;
 }
 
-test("no raw colours, arbitrary values or style attributes in the controls and icons", () => {
+test("no raw colours, arbitrary values or style attributes in the controls, icons and parts", () => {
   const found: string[] = [];
   let scanned = 0;
   for (const root of roots) {
@@ -55,7 +55,8 @@ test("no raw colours, arbitrary values or style attributes in the controls and i
 // reason is a named token in tokens.css, in the block for Clauseo's parts; a hairline too. Zero, percentages,
 // angles and plain numbers (a scale, an opacity, a weight) aren't values a token holds. The base and primitives
 // stylesheets set the page's own geometry and are not held to it. The stylesheets of Clauseo's parts hold no raw
-// values; scanCss is the check for them, and ui/components has none of their stylesheets yet.
+// values.
+const cssRoot = new URL("../clauseo/", import.meta.url);
 
 const UNITS = "px|rem|em|vw|vh|dvh|svh|lvh|vmin|vmax|ch|ex|lh|cqw|cqh|cqi|cqb|cm|mm|in|pt|pc";
 const CSS: [string, RegExp][] = [
@@ -87,6 +88,19 @@ export function scanCss(text: string): string[] {
   });
   return found;
 }
+
+test("no raw lengths, colours or durations in the stylesheets of Clauseo's parts", () => {
+  const found: string[] = [];
+  let scanned = 0;
+  for (const file of readdirSync(cssRoot)) {
+    if (!file.endsWith(".css")) continue;
+    scanned++;
+    for (const f of scanCss(readFileSync(new URL(file, cssRoot), "utf8")))
+      found.push(`${file}:${f}`);
+  }
+  expect(scanned).toBeGreaterThanOrEqual(15);
+  expect(found).toEqual([]);
+});
 
 test("the stylesheet scan catches what it's for", () => {
   expect(scanCss(".a { padding: 10px var(--s2); }")).toHaveLength(1);

@@ -1,0 +1,367 @@
+/* The parts of living in matters. The rail's find field and its answers, the current matter opened on
+   one raised plane with its conversations, a folder that moved, Settings at the rail's foot; the queue over the
+   composer, the wait for another conversation, and the lawyer's words sent into a running answer. Every value comes
+   from a token. */
+
+@layer components {
+  /* ---------- the rail: finding a matter ---------- */
+  .room-find {
+    flex: none;
+    margin-top: var(--s2);
+  }
+  .room-groups-find {
+    margin-top: var(--s1);
+  }
+  /* nothing found: the words take the column's full width, past the rows' own right padding, and break where the
+     line is full rather than early to even out a short last line */
+  .room-find-none {
+    display: grid;
+    gap: var(--s1);
+    margin-top: var(--s1);
+    padding: 0 0 0 var(--s3);
+  }
+  .room-find-none > p {
+    text-wrap: wrap;
+  }
+  /* why a search found it, where the name alone doesn't show: a client, a case number, when it was opened */
+  .room-matter-match {
+    @apply text-small text-muted;
+  }
+  /* a folder that moved: an open ring, since nothing is there to fill it */
+  .room-dot-ring {
+    background: transparent;
+    box-shadow: inset 0 0 0 var(--underline-firm) var(--muted);
+  }
+
+  /* ---------- the current matter, opened: its row and its conversations on one raised plane ---------- */
+  .room-house {
+    border-radius: var(--r-tile);
+    background: var(--tile-hover);
+    box-shadow: var(--e0);
+    padding-bottom: var(--s1-5);
+  }
+  .room-house-head {
+    position: relative;
+  }
+  /* doubled, to stand over the current row's own raised tone: inside the house the house is the plane */
+  .room-house .room-matter-row.room-matter-row[aria-current="page"] {
+    background: transparent;
+    box-shadow: none;
+    padding-right: calc(var(--size-control-small) + var(--s1));
+  }
+  .room-house-more {
+    position: absolute;
+    top: var(--s0-5);
+    right: var(--s0-5);
+  }
+  .room-convs {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s0-5);
+    padding: var(--s0-5) var(--s1-5) 0;
+  }
+  .room-conv-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s0-5);
+  }
+  .room-conv-item {
+    position: relative;
+  }
+  .room-conv {
+    width: 100%;
+    display: grid;
+    text-align: left;
+    padding: var(--s1) var(--s2) var(--s1) var(--s2);
+    border-radius: var(--r-small);
+    background: transparent;
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      box-shadow var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-hover is-active:bg-press;
+  }
+  /* the conversation in view stands one plane higher, on the work's own tone */
+  .room-conv.room-conv[aria-current] {
+    background: var(--surface);
+    box-shadow: var(--e0);
+    padding-right: var(--mat-conv-more);
+  }
+  .room-conv-title {
+    @apply text-small-row text-muted;
+  }
+  @media (hover: hover) {
+    .room-conv:hover .room-conv-title {
+      color: var(--primary);
+    }
+  }
+  .room-conv[aria-current] .room-conv-title {
+    @apply text-primary font-chip;
+  }
+  /* one line: the title, the plan where it differs from the matter's first, and the status dot at the line's end, where
+     every row's dot lines up with the next */
+  .room-conv-line {
+    display: flex;
+    align-items: center;
+    gap: var(--s1-5);
+    min-width: 0;
+  }
+  .room-conv-title {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .room-conv-plan {
+    @apply text-small text-quiet;
+    flex: none;
+  }
+  .room-conv-dot {
+    flex: none;
+    width: var(--size-dot-hint);
+    height: var(--size-dot-hint);
+    border-radius: var(--r-round);
+  }
+  /* a question for the lawyer, the one status said in words on the row */
+  .room-conv-ask {
+    @apply text-small font-chip text-primary;
+  }
+  .room-conv-more {
+    position: absolute;
+    top: 0;
+    right: 0;
+  }
+  .room-conv-new {
+    @apply text-small-row text-muted;
+    display: flex;
+    align-items: center;
+    gap: var(--s1-5);
+    min-height: var(--size-control-small);
+  }
+  .room-conv-new-icon {
+    flex: none;
+  }
+
+  /* ---------- Matters, folded: a matter waits on the lawyer's hand ---------- */
+  /* one 8 px court-yellow dot at the button's end, as the rail's own rows lead their waits */
+  .room-rail-wait {
+    flex: none;
+    width: var(--size-dot-hint);
+    height: var(--size-dot-hint);
+    border-radius: var(--r-round);
+    background: var(--yellow);
+    box-shadow: inset 0 0 0 var(--hairline) var(--yellow-ring);
+  }
+
+  /* ---------- a new conversation's plan, chosen on the status line before its first message ---------- */
+  .room-status:has(.room-status-seg) {
+    height: auto;
+  }
+  .room-status-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+  }
+
+  /* ---------- the queue over the composer ---------- */
+  .queue {
+    max-width: var(--measure);
+    margin-bottom: var(--s2);
+    padding: var(--s1-5);
+    border-radius: var(--r-card);
+    background: var(--well);
+  }
+  .queue-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s1) var(--s3);
+    padding: var(--s1) var(--s1) var(--s1-5) var(--s2);
+  }
+  .queue-say {
+    @apply text-small text-muted;
+    flex: 1 1 var(--mat-queue-text-min);
+    min-width: 0;
+  }
+  .queue[data-held] .queue-say {
+    color: var(--primary);
+  }
+  .queue-next {
+    flex: none;
+  }
+  .queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s1);
+    max-height: var(--mat-queue-max);
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+  /* each message is a slip on the tray, in the lawyer's own words at the lawyer's weight */
+  .queue-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--s2);
+    padding: var(--s0-5) var(--s0-5) var(--s0-5) var(--s3);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    box-shadow: var(--e0);
+  }
+  .queue-text {
+    @apply text-ui font-accepted text-primary;
+    flex: 1 1 var(--mat-queue-text-min);
+    min-width: 0;
+    padding: var(--s1-5) 0;
+  }
+  .queue-acts {
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s0-5);
+    margin-left: auto;
+  }
+  .queue-send {
+    color: var(--primary);
+  }
+  /* Edit and Remove come in under the pointer or with focus, as the answer's Accept does, and never move a line */
+  .queue-more-act {
+    opacity: 0;
+    transition: opacity var(--dur-quick) var(--ease-arrive);
+  }
+  .queue-item:hover .queue-more-act,
+  .queue-item:focus-within .queue-more-act {
+    opacity: 1;
+  }
+  @media (hover: none) {
+    .queue-more-act {
+      opacity: 1;
+    }
+  }
+  /* two slips show, then one quiet row opens the rest; opened, the list scrolls and the row casts an edge onto its cut */
+  .queue-fold {
+    @apply text-small text-muted;
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--s1-5);
+    width: 100%;
+    min-height: var(--size-target);
+    margin-top: var(--s1);
+    padding: var(--s0-5) var(--s2);
+    border-radius: var(--r-small);
+    text-align: left;
+    background: var(--well);
+    transition: background-color var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-hover is-hover:text-primary is-active:bg-press;
+  }
+  .queue-list[data-cut] + .queue-fold {
+    box-shadow: var(--shadow-edge-up);
+  }
+  .queue-fold-icon {
+    flex: none;
+    transition: transform var(--dur-forward) var(--ease-arrive);
+  }
+  .queue-fold[aria-expanded="true"] .queue-fold-icon {
+    transform: rotate(90deg);
+  }
+  .queue-item[data-editing] {
+    padding: var(--s1-5);
+    row-gap: var(--s1-5);
+  }
+  .queue-edit {
+    @apply text-ui font-accepted text-primary;
+    flex: 1 1 100%;
+    resize: none;
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-small);
+    background: var(--well);
+    box-shadow: var(--set-in-field);
+    outline: none;
+  }
+  .queue-edit:focus-visible {
+    outline: var(--ring-w) solid var(--primary);
+    outline-offset: var(--ring-gap);
+  }
+  /* waiting for another conversation in the same matter */
+  .queue-wait {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2) var(--s3);
+    padding: var(--s2) var(--s2) var(--s2) var(--s4);
+  }
+  .queue-wait-text {
+    flex: 1 1 var(--mat-queue-text-min);
+    min-width: 0;
+    display: grid;
+    gap: var(--s0-5);
+  }
+  .queue-wait-head {
+    @apply text-ui font-chip text-primary;
+  }
+  /* the line above the field while Clauseo works: what Send now does, then Send now and Queue at its right end */
+  .steer-hint {
+    max-width: var(--measure);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s0-5) var(--s3);
+    padding: 0 var(--s1) var(--s1) var(--s4);
+  }
+  .steer-hint-text {
+    @apply text-small text-muted;
+    flex: 1 1 var(--mat-queue-text-min);
+    min-width: 0;
+  }
+  .steer-hint-acts {
+    flex: none;
+    display: flex;
+    gap: var(--s0-5);
+    margin-left: auto;
+  }
+
+  /* ---------- the lawyer's words sent into a running answer, and the note an answer carries ---------- */
+  .steer-mark {
+    margin: var(--s1) 0;
+    padding: var(--s2) var(--s3) var(--s2) var(--s4);
+    border-radius: var(--r-control);
+    background: var(--well);
+    box-shadow: var(--set-in-field);
+  }
+  .steer-mark-who {
+    @apply text-small text-muted;
+  }
+  .steer-mark-text {
+    @apply text-ui-loose font-accepted text-primary;
+  }
+  .steer-note {
+    max-width: var(--measure);
+    margin-top: var(--s5);
+    padding: var(--s1-5) var(--s1-5) var(--s1-5) var(--s3);
+    border-radius: var(--r-card);
+    background: var(--well);
+  }
+  .steer-note-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--s1) var(--s2);
+  }
+  .steer-note-row .change-icon {
+    margin-top: var(--s2);
+  }
+  .steer-note-text {
+    @apply text-small-row text-muted;
+    flex: 1 1 var(--change-text-min);
+    min-width: 0;
+    padding: var(--s1-5) 0;
+  }
+  .steer-note-more {
+    flex: none;
+    margin-left: auto;
+  }
+  .steer-note-more[data-panel-open] .work-chev {
+    transform: rotate(90deg);
+  }
+  .steer-note-list {
+    padding: 0 var(--s2) var(--s1-5) var(--s6);
+  }
+}

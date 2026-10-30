@@ -14,15 +14,9 @@ test("the computer's own file manager: Finder on the Mac, File Explorer on Windo
 });
 
 test("slots fill in both languages, and Hindi takes the part of the day first", () => {
-  expect(
-    ui("en", "Restore the {time} version of the petition?", { time: clock("en", "3:58 pm") }),
-  ).toBe("Restore the 3:58 pm version of the petition?");
-  expect(
-    ui("hi", "Restore the {time} version of the petition?", { time: clock("hi", "3:58 pm") }),
-  ).toBe("याचिका का दोपहर 3:58 बजे वाला संस्करण पुनर्स्थापित करें?");
-  expect(ui("hi", "Reading papers, {n} of {total}", { n: 120, total: 400 })).toBe(
-    "दस्तावेज़ पढ़े जा रहे हैं, 400 में से 120",
-  );
+  expect(ui("en", "Actions for {name}", { name: "Lease" })).toBe("Actions for Lease");
+  expect(ui("hi", "Actions for {name}", { name: "Lease" })).toBe("Lease के विकल्प");
+  expect(clock("hi", "3:58 pm")).toBe("दोपहर 3:58");
 });
 
 test.each([["./words.ts"], ["./words-ui.ts"], ["./words-frame.ts"]])(

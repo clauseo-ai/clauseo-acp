@@ -1,6 +1,7 @@
 // The controls that raise a plane: each stands as its trigger, and opens on a click, a hover or focus.
 import { IconHistory } from "@clauseo/components/icons/icons.tsx";
-import { currentOs, revealKey, useUiWords } from "@clauseo/components/lib/words-ui.ts";
+import { currentOs, revealKey } from "@clauseo/components/lib/words-ui.ts";
+import { useGalleryWords } from "./words.ts";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -33,7 +34,7 @@ import { Section, State } from "./layout.tsx";
 import type { LiteChoice } from "./options.ts";
 
 export function Overlays() {
-  const w = useUiWords();
+  const w = useGalleryWords();
   const toasts = useToasts();
   const [pinned, setPinned] = useState(true);
   const [lite, setLite] = useState<LiteChoice>("auto");

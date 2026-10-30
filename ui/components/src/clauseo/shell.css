@@ -1,0 +1,358 @@
+/* The room's shell. The window as a grid of three columns under the toolbar, the rail of matters, the work's surface
+   and its composer, on the tokens. Values
+   that belong to one part and have no token are named here, with their reason. */
+
+:root {
+  --rail-col: var(--rail-w);
+  --work-w: calc(var(--view-w) - var(--rail-col) - var(--pane-w) + var(--overlap));
+  /* the reading column stands alone, centred in the work, under the matter title */
+  --gutter: max(var(--thread-pad), calc((var(--work-w) - var(--measure)) / 2));
+}
+
+@layer components {
+  .room-window {
+    width: 100%;
+    height: var(--view-h);
+    height: var(--view-dh);
+    min-height: var(--window-min-h);
+    display: grid;
+    grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--pane-w);
+    /* the toolbar is 64 px, and grows rather than clip when a larger text size wraps the matter's title */
+    grid-template-rows: minmax(var(--toolbar), auto) minmax(0, 1fr);
+    grid-template-areas: "top top top" "rail centre pane";
+    overflow: hidden;
+    background: var(--ground);
+  }
+
+  /* ---------- toolbar: the matter as the header, then search, History and Undo, the plan ---------- */
+  .room-top {
+    grid-area: top;
+    display: flex;
+    align-items: center;
+    padding-right: var(--s6);
+    min-width: 0;
+  }
+  .room-lead {
+    width: var(--rail-w);
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    padding-left: var(--s5);
+    align-self: flex-start;
+    height: var(--lead-h);
+  }
+  .room-lights {
+    display: flex;
+    gap: var(--s2);
+  }
+  .room-lights i {
+    width: var(--s3);
+    height: var(--s3);
+    border-radius: var(--r-round);
+    background: var(--lights);
+    display: block;
+    box-shadow: var(--set-in-lights);
+  }
+  /* the title sits over the reading column. It's never cut short: it wraps, and the search field gives way first */
+  .room-matter {
+    min-width: 0;
+    /* it gives way only once the search field has folded to its least width: a near-zero share of the shrinking */
+    flex: 0 0.01 auto;
+    padding-left: var(--gutter);
+    padding-right: var(--s6);
+  }
+  .room-title {
+    @apply text-title font-chrome stretch-voice tracking-title;
+  }
+  .room-next {
+    @apply text-small text-muted;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--s2);
+    margin-top: var(--s0-5);
+  }
+  .room-next-value {
+    @apply text-primary font-chrome;
+  }
+  .room-dot {
+    display: block;
+    flex: none;
+    width: var(--size-dot);
+    height: var(--size-dot);
+    border-radius: var(--r-round);
+    background: currentColor;
+  }
+  .room-case {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+  }
+  .room-tools {
+    margin-left: auto;
+    flex: 0 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+  }
+  .room-tools > :not(.room-tools-bar) {
+    flex: none;
+  }
+  /* the toolbar holds the search field, which gives up its width first */
+  .room-tools-bar {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .room-tools-bar > :not(.room-search) {
+    flex: none;
+  }
+  .room-search {
+    flex: 0 1 var(--size-search);
+    container-type: inline-size;
+  }
+  /* squeezed below what its placeholder needs, as at a large text size, it folds to its icon rather than cut its
+     words; focused, it takes its full width back and the title wraps instead */
+  @variant search-folded {
+    .room-search input {
+      width: 0;
+      flex: 0 0 0;
+    }
+  }
+  .room-search:focus-within {
+    flex-shrink: 0;
+  }
+  .room-pair-icon {
+    color: var(--muted);
+  }
+  /* Undo waiting while Clauseo writes: its icon goes faint with its words */
+  .room-undo:is(:disabled, [data-disabled]) .room-pair-icon {
+    color: inherit;
+  }
+  .room-plan {
+    @apply text-small text-muted;
+  }
+  /* the toolbar's plan holds the width of its widest state, so search never moves as the plan runs down */
+  .room-tools > .room-plan {
+    min-width: var(--size-plan);
+  }
+  /* Windows has no corner lights: at full width the lead gives up its place, and the title stands at the window's
+     edge padding, as a Windows title bar's does */
+  @variant wide {
+    .room-top[data-platform="windows"] .room-lead {
+      display: none;
+    }
+    .room-top[data-platform="windows"] .room-matter {
+      padding-left: var(--s5);
+    }
+  }
+
+  /* ---------- the rail: matters by their next date, on the bare ground ---------- */
+  .room-rail {
+    grid-area: rail;
+    display: flex;
+    flex-direction: column;
+    padding: 0 var(--s3) var(--s4);
+    min-height: 0;
+    overflow-y: auto;
+    /* the scrollbar's room is kept whether it shows or not: with classic scrollbars, as WebView2 draws them, a list
+       within a scrollbar's width of fitting would otherwise flip the bar on and off and the page would never paint */
+    scrollbar-gutter: stable;
+  }
+  /* New matter, and Find where the rail has it: a sticky head on the ground's own tone, so the list scrolls under it
+     and the way to a new or another matter is always in view, as the foot keeps the scratch matter and Settings */
+  .room-rail-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: var(--s3);
+    background: var(--ground);
+  }
+  .room-groups {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s4);
+    margin-top: var(--s2);
+  }
+  .room-when {
+    @apply text-small stretch-voice font-ui text-quiet;
+    padding: 0 var(--s3);
+    margin-bottom: var(--s0-5);
+  }
+  .room-matters {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s0-5);
+  }
+  .room-matter-row {
+    width: 100%;
+    display: grid;
+    text-align: left;
+    padding: var(--s1-5) var(--s3);
+    border-radius: var(--r-tile);
+    background: transparent;
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      box-shadow var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-ground-hover is-active:bg-ground-press;
+  }
+  /* doubled, so the current matter keeps its raised tone under the pointer */
+  .room-matter-row.room-matter-row[aria-current="page"] {
+    background: var(--tile-hover);
+    box-shadow: var(--e0);
+  }
+  .room-matter-name {
+    @apply text-ui text-muted;
+  }
+  @media (hover: hover) {
+    .room-matter-row:hover .room-matter-name {
+      color: var(--primary);
+    }
+  }
+  .room-matter-row[aria-current="page"] .room-matter-name {
+    @apply text-primary font-chip;
+  }
+  .room-matter-note {
+    @apply text-small text-quiet;
+  }
+  .room-scratch {
+    margin-top: var(--s4);
+    padding-top: var(--s4);
+    box-shadow: inset 0 var(--hairline) 0 var(--divide-mid);
+  }
+  .room-scratch .room-matter-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s3);
+  }
+  .room-scratch-icon {
+    margin-top: var(--s0-5);
+    color: var(--muted);
+  }
+  .room-scratch-text {
+    display: grid;
+  }
+
+  /* ---------- the work, on the highest surface ---------- */
+  .room-centre {
+    grid-area: centre;
+    background: var(--surface);
+    border-radius: var(--r-surface);
+    box-shadow: var(--e2);
+    margin-bottom: var(--s3);
+    /* the work stands in front of the wall: it reaches over the wall's edge, and the wall's tiles start in its shade */
+    margin-right: calc(-1 * var(--overlap));
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+  }
+  .room-thread {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    min-height: 0;
+    position: relative;
+  }
+  .room-thread-inner {
+    padding: var(--s8) var(--gutter) var(--s6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s8);
+  }
+  .room-centre[data-turn="page"] .room-thread {
+    visibility: hidden;
+  }
+  .room-centre:is([data-turn="page"], [data-turn="opening"]) .room-pin {
+    visibility: hidden;
+  }
+
+  /* ---------- Settings, at the rail's foot ---------- */
+  .room-settings {
+    @apply text-ui text-muted;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s2);
+    min-height: var(--size-control);
+    padding: 0 var(--s3);
+    border-radius: var(--r-tile);
+    transition: background-color var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-ground-hover is-hover:text-primary is-active:bg-ground-press;
+  }
+  .room-settings:focus-visible {
+    outline: var(--ring-w) solid var(--primary);
+    outline-offset: var(--ring-gap);
+  }
+  /* the scratch matter and Settings, on the rail's foot: they stay in view as the matters scroll under them */
+  .room-rail-foot {
+    position: sticky;
+    bottom: 0;
+    padding-bottom: var(--s4);
+    z-index: 1;
+    margin-top: auto;
+    display: grid;
+    gap: var(--s1);
+    background: var(--ground);
+  }
+  /* the foot keeps the rail's own foot padding, so nothing scrolls by beneath it */
+  .room-rail:has(> .room-rail-foot) {
+    padding-bottom: 0;
+  }
+  .room-rail-foot .room-settings {
+    margin-top: 0;
+  }
+  /* while the list runs under them, the head casts the pinned edge down and the foot casts its edge up, so a row
+     passes under an edge rather than being cut in half */
+  .room-rail-head[data-stuck] {
+    box-shadow: var(--shadow-pin);
+  }
+  .room-rail-foot[data-under] {
+    box-shadow: var(--shadow-edge-up);
+  }
+  /* ---------- Not protected: the open lock and the words, in concrete, for as long as it lasts. One mark across the
+     app: the room's line, first launch's line, and the short form on the rail and in the toolbar ---------- */
+  .np-mark {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: var(--s2);
+    min-width: 0;
+  }
+  .np-icon {
+    flex: none;
+    margin-top: var(--s0-5);
+    color: var(--primary);
+  }
+  .np-name {
+    font-weight: var(--w-chip);
+    color: var(--primary);
+  }
+  /* the short form, on a rail row and on the toolbar's matter line: the lock and two words, at the line's own size */
+  .np-mark[data-short] {
+    gap: var(--s1-5);
+    align-items: center;
+  }
+  .np-mark[data-short] .np-icon {
+    margin-top: 0;
+  }
+  /* Not protected on a rail row: the open lock alone, 14 px, at the end of the name line, in concrete */
+  .room-matter-np {
+    display: inline-flex;
+    vertical-align: middle;
+    margin-left: var(--s1-5);
+    color: var(--primary);
+  }
+}
+
+/* Matters folds the rail away only on a mid or narrow window (responsive.css); on the full room it isn't there.
+   Outside the layers, so it overrides the button's own display. */
+.room-rail-toggle {
+  display: none;
+}

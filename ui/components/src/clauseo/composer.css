@@ -1,0 +1,220 @@
+/* The composer: a field set into the work's surface, its status line and the room's line under it. Values that
+   belong to one part and have no token are named here, with their reason. */
+
+@layer components {
+  /* ---------- the composer: a field set into the surface ---------- */
+  .room-composer {
+    position: relative;
+    z-index: 1;
+    order: 2;
+    padding: var(--s2) var(--gutter) var(--s3);
+    background: var(--surface);
+    transition: box-shadow var(--dur-forward) var(--ease-arrive);
+  }
+  /* when the thread runs on below, the composer's top edge casts a soft shadow up onto it */
+  .room-centre[data-more] .room-composer {
+    box-shadow: var(--shadow-edge-up);
+  }
+  .room-status {
+    @apply text-small-row text-muted;
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    max-width: var(--measure);
+    /* one 20 px line on the composer's edge; Hindi's 22 px line stands centred over it */
+    height: calc(var(--s5) * var(--k));
+    margin-bottom: var(--s1-5);
+    padding-left: var(--s4);
+    white-space: nowrap;
+  }
+  .room-status-line {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-width: 0;
+    white-space: nowrap;
+  }
+  .room-status-took {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+  }
+  .room-status-took b {
+    @apply font-ui text-primary;
+  }
+  .room-status-plan {
+    flex: none;
+  }
+  /* nothing on the line is ever cut short: tight, the hint keeps only its key cap; wrapped, the line takes two */
+  .room-status:is([data-fit="tight"], [data-fit="wrapped"]) .room-hint-turn {
+    display: none;
+  }
+  .room-status[data-fit="wrapped"] {
+    height: auto;
+    min-height: calc(var(--s5) * var(--k));
+    flex-wrap: wrap;
+    row-gap: var(--s0-5);
+    white-space: normal;
+  }
+  .room-status[data-fit="wrapped"] .room-status-line {
+    flex-wrap: wrap;
+    row-gap: 0;
+    white-space: normal;
+  }
+  .room-status[data-fit="wrapped"] .room-status-plan {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  /* the ready hint: the draft waits, said once, quietly, at the line's right */
+  .room-hint {
+    @apply text-small-row font-ui text-muted;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    min-height: var(--size-hint);
+    margin: calc(-1 * var(--s1)) calc(-1 * var(--s2)) calc(-1 * var(--s1)) auto;
+    padding: 0 var(--s2);
+    border-radius: var(--r-small);
+    background: transparent;
+    white-space: nowrap;
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      color var(--dur-quick) var(--ease-arrive),
+      transform var(--dur-quick) var(--ease-arrive);
+    @apply is-active:press is-active:bg-press is-hover:bg-hover is-hover:text-primary;
+  }
+  .room-hint[hidden] {
+    display: none;
+  }
+  .room-hint-dot {
+    width: var(--size-dot-hint);
+    height: var(--size-dot-hint);
+    border-radius: var(--r-round);
+    background: var(--yellow);
+    box-shadow: inset 0 0 0 var(--hairline) var(--yellow-ring);
+    flex: none;
+  }
+  .room-hint-what {
+    color: var(--primary);
+  }
+  .room-hint[data-state="opened"] .room-hint-what {
+    color: var(--muted);
+  }
+  .room-hint[data-state="opened"] .room-hint-turn {
+    display: none;
+  }
+  .room-hint-go {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1-5);
+  }
+  .room-hint-go::before {
+    content: "";
+    width: var(--size-dot);
+    height: var(--size-dot);
+    border-radius: var(--r-round);
+    background: currentColor;
+    margin-right: var(--s0-5);
+  }
+  .room-hint .kbd-cap {
+    transition: color var(--dur-quick) var(--ease-arrive);
+  }
+  @media (hover: hover) {
+    .room-hint:hover .kbd-cap {
+      color: var(--primary);
+    }
+  }
+  .room-field {
+    max-width: var(--measure);
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+    padding: var(--s1-5);
+    background: var(--well);
+    border-radius: var(--r-field);
+    box-shadow: var(--set-in);
+    cursor: text;
+  }
+  .room-field:has(textarea:focus-visible) {
+    outline: var(--ring-w) solid var(--primary);
+    outline-offset: var(--ring-gap);
+  }
+  .room-field textarea {
+    @apply text-field font-accepted deva-nudge-field;
+    display: block;
+    flex: 1;
+    min-width: 0;
+    order: 1;
+    resize: none;
+    outline: none;
+    background: transparent;
+    padding: 0 0 0 var(--s0-5);
+    height: calc(var(--lh-field) * var(--k));
+    margin: 0;
+  }
+  .room-field textarea::placeholder {
+    @apply font-ui text-muted;
+  }
+  .room-field-add {
+    order: 0;
+  }
+  /* the one act left before the field takes a question, such as signing in: it stands in the field's row, on its
+     well, and the well no longer takes the pointer as text does */
+  .room-field[data-gate] {
+    cursor: default;
+    min-height: calc(var(--size-control) + 2 * var(--s1-5));
+  }
+  .room-field[data-gate]:has(input:focus-visible) {
+    outline: var(--ring-w) solid var(--primary);
+    outline-offset: var(--ring-gap);
+  }
+  /* questions drawn from the matter's papers, offered over an empty field as small quiet pills */
+  .room-prompts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s1-5);
+    max-width: var(--measure);
+    margin-bottom: var(--s2);
+  }
+  .room-prompt {
+    @apply text-small-row font-ui text-muted;
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--size-hint);
+    padding: var(--s0-5) var(--s2);
+    border-radius: var(--r-chip);
+    background: var(--well);
+    text-align: left;
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      color var(--dur-quick) var(--ease-arrive),
+      transform var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-well-strong is-hover:text-primary is-active:press;
+  }
+  /* Stop stands exactly where Ask stood and as wide, so the field never changes width as they swap */
+  .room-field-ask {
+    order: 2;
+    min-width: var(--size-ask);
+  }
+  .room-line {
+    @apply text-small-row text-muted;
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    margin-top: var(--s2);
+    padding-left: var(--s4);
+    min-height: calc(var(--s5) * var(--k));
+  }
+  /* the room's line keeps a 20 px line in Hindi too, so the composer holds one height in both scripts */
+  .room-line > span {
+    line-height: calc(var(--s5) * var(--k));
+  }
+  /* a line that wraps keeps its lock on the first line, centred on that line's 20 px */
+  .room-line:has(> svg + span) {
+    align-items: flex-start;
+  }
+  .room-line:has(> svg + span) > svg {
+    flex: none;
+    margin-top: calc((var(--s5) * var(--k) - var(--size-icon-line)) / 2);
+  }
+}

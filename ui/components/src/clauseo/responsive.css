@@ -1,0 +1,368 @@
+/* The room at other widths. A mid window folds the rail behind Matters; under 1000 px the room is one column, the
+   composer docked to the bottom. These rules stand outside
+   the cascade layers on purpose: at these widths they override the primitives' own classes, such as the search
+   field's width and the Ask button's sides. */
+@variant rail-folded {
+  :root {
+    --rail-col: 0px;
+    --pane-w: var(--pane-w-mid);
+    --thread-pad: var(--thread-pad-mid);
+  }
+  .room-window {
+    grid-template-columns: 0 minmax(0, 1fr) var(--pane-w);
+    position: relative;
+  }
+  .room-lead {
+    width: var(--lead-w-mid);
+  }
+  .room-rail-toggle {
+    display: inline-flex;
+  }
+  .room-rail {
+    display: none;
+    position: absolute;
+    z-index: 10;
+    left: var(--s3);
+    top: var(--rail-panel-top);
+    bottom: var(--s3);
+    width: var(--rail-panel-w);
+    padding-top: var(--s3);
+    border-radius: var(--r-card);
+    background: var(--ground);
+    box-shadow: var(--e3);
+  }
+  .room-rail[data-open] {
+    display: flex;
+  }
+  /* the floating rail's top padding is its sticky head's own, so nothing scrolls by above New matter */
+  .room-rail {
+    padding-top: 0;
+  }
+  .room-rail-head {
+    padding-top: var(--s3);
+  }
+  .room-matter {
+    padding-left: max(var(--s2), calc(var(--gutter) - var(--lead-w-mid)));
+  }
+  /* the work keeps the window's edge padding at its left, as it keeps 12 px at its foot: it never touches the edge */
+  .room-centre {
+    margin-left: var(--s3);
+  }
+  /* Windows has no corner lights, so the lead holds Matters alone and is only as wide as it: the plan keeps clear of
+       Undo with the caption buttons at the right */
+  .room-top[data-platform="windows"] .room-lead {
+    width: auto;
+    padding-right: var(--s3);
+  }
+  /* the tools never squeeze under their own width, so History and Undo never slide under the plan; at a large text
+       size the title gives way instead and wraps, and the toolbar grows */
+  .room-tools {
+    min-width: min-content;
+  }
+  .room-matter {
+    flex-shrink: 1;
+  }
+  /* search folds to its icon and opens when focused */
+  .room-search {
+    flex: none;
+    width: var(--size-control);
+    padding: 0 var(--search-fold-pad);
+    transition: width var(--dur-forward) var(--ease-arrive);
+  }
+  .room-search input {
+    width: 0;
+    flex: 0 0 0;
+  }
+  .room-search:focus-within {
+    width: var(--search-open-w);
+  }
+  .room-search:focus-within input {
+    flex: 1;
+    width: auto;
+  }
+}
+
+@variant max-mid {
+  .room-window {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+  }
+  /* on a phone the page runs under the status bar and the home indicator: the header and the composer keep clear of
+       both, and of the notch's sides when it lies on its side */
+  .room-top {
+    flex-wrap: wrap;
+    padding: calc(var(--s3) + env(safe-area-inset-top)) calc(var(--s4) + env(safe-area-inset-right))
+      var(--s5) calc(var(--s4) + env(safe-area-inset-left));
+    gap: var(--s2);
+    align-items: center;
+  }
+  .room-lead,
+  .room-tools,
+  .room-tools-bar {
+    display: contents;
+  }
+  .room-lights {
+    order: 0;
+    margin-right: auto;
+  }
+  .room-search {
+    order: 1;
+    flex: none;
+    width: var(--size-control);
+    padding: 0 var(--search-fold-pad);
+  }
+  .room-search input {
+    width: 0;
+    flex: 0 0 0;
+  }
+  .room-search:focus-within {
+    flex: 1 1 100%;
+    order: 5;
+  }
+  .room-search:focus-within input {
+    flex: 1;
+    width: auto;
+  }
+  .room-pair {
+    order: 2;
+  }
+  .room-rail-toggle {
+    display: inline-flex;
+    order: 3;
+  }
+  .room-matter {
+    order: 6;
+    flex: 1 1 100%;
+    padding: 0;
+    margin-top: var(--s2);
+  }
+  /* the toolbar's plan block only: the status line's plan button carries room-plan too, and must keep its words' own
+     spacing */
+  .room-tools > .room-plan {
+    order: 7;
+    flex: 1 1 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--s3);
+  }
+  .room-rail {
+    display: none;
+    padding: 0 var(--s2) var(--s4);
+    overflow: visible;
+  }
+  .room-rail[data-open] {
+    display: flex;
+  }
+  .room-groups {
+    margin-top: var(--s4);
+  }
+  .room-centre {
+    display: contents;
+  }
+  .room-thread {
+    order: 1;
+    overflow: visible;
+    background: var(--surface);
+    border-radius: var(--r-surface);
+    box-shadow: var(--e2);
+    margin: 0 var(--s2);
+  }
+  .room-thread-inner {
+    padding: var(--s5) var(--s4) var(--s6);
+    gap: var(--s6);
+  }
+  .room-pane {
+    order: 2;
+    overflow: visible;
+    padding: var(--s8) var(--s4) var(--s2);
+  }
+  .wall-sub {
+    display: none;
+  }
+  .facade {
+    gap: var(--s2);
+  }
+  /* the composer sits on a solid surface that runs down to the bottom edge */
+  .room-composer {
+    order: 3;
+    padding: var(--s2) var(--s2) calc(var(--s3) + env(safe-area-inset-bottom, 0px));
+    background: var(--surface);
+    border-radius: var(--r-surface) var(--r-surface) 0 0;
+    box-shadow: var(--shadow-dock);
+    margin: var(--s2) var(--s2) 0;
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+  }
+  .room-centre[data-more] .room-composer {
+    box-shadow: var(--shadow-dock);
+  }
+  .room-status {
+    height: auto;
+    min-height: calc(var(--s5) * var(--k));
+    padding-left: var(--s3);
+    margin-bottom: var(--s1);
+    flex-wrap: wrap;
+    row-gap: var(--s1);
+  }
+  .room-status-line {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+  .room-status-plan {
+    flex: 0 1 auto;
+    min-width: 0;
+    white-space: normal;
+  }
+  /* no arrow key on a phone: the hint keeps its words, and wraps to its own line when the status line is full */
+  .room-hint .kbd-cap,
+  .room-hint[data-state="opened"] .room-hint-go {
+    display: none;
+  }
+  .room-status[data-fit="wrapped"] .room-hint-turn {
+    display: inline;
+  }
+  .room-field {
+    max-width: none;
+    border-radius: var(--r-card);
+  }
+  .room-field-ask {
+    min-width: var(--size-ask-narrow);
+    padding: 0 var(--s4);
+  }
+  .room-line {
+    padding-left: var(--s3);
+    margin-top: var(--s1-5);
+  }
+  .lead {
+    @apply text-lead-narrow;
+  }
+  .para,
+  .os-text {
+    @apply text-reply;
+  }
+  .answer {
+    font-stretch: var(--wd-read-narrow);
+  }
+  .asked {
+    @apply text-asked-narrow;
+  }
+  .turn {
+    position: static;
+    z-index: auto;
+    order: 1;
+    margin: 0 var(--s2);
+    border-radius: var(--r-surface);
+    box-shadow: var(--e2);
+    overflow: hidden;
+  }
+  .room-centre[data-turn="page"] .room-thread {
+    display: none;
+  }
+  .turn-scroll {
+    overflow: visible;
+    padding: var(--s3) var(--s2) var(--s4);
+  }
+  .turn-bar {
+    flex-wrap: wrap;
+    row-gap: var(--s1);
+    padding: var(--s2) var(--s3);
+  }
+  .turn-what {
+    margin-right: 0;
+  }
+  .turn-what .turn-page,
+  .turn-bar .kbd-cap,
+  .ready .kbd-cap {
+    display: none;
+  }
+  .page {
+    padding: var(--s6) var(--s5);
+    font-stretch: var(--wd-read-narrow);
+  }
+  .page-paras p,
+  .page-title,
+  .page-party {
+    @apply text-reply;
+  }
+  .ready {
+    grid-template-columns: var(--size-tile-icon) minmax(0, 1fr);
+    grid-template-areas: "icon title" "icon detail" "turn turn";
+    row-gap: var(--s1);
+  }
+  .ready-turn {
+    margin-top: var(--s2);
+    justify-self: start;
+  }
+  .os-head {
+    flex-wrap: wrap;
+  }
+  .os-plane {
+    padding: var(--s4);
+  }
+  .made {
+    grid-template-columns: var(--size-tile-icon) minmax(0, 1fr);
+    row-gap: var(--s2);
+  }
+  .made-state {
+    grid-column: 2;
+    text-align: left;
+    display: flex;
+    gap: var(--s2);
+    flex-wrap: wrap;
+  }
+  .room-pin {
+    position: fixed;
+    top: 0;
+    left: var(--s2);
+    right: var(--s2);
+    z-index: 3;
+    padding: calc(var(--pin-pad-y-narrow) + env(safe-area-inset-top)) var(--s4)
+      var(--pin-pad-y-narrow);
+    border-radius: 0 0 var(--r-card) var(--r-card);
+  }
+  /* whatever the focus or a jump brings into view stands clear of the pinned question above and the docked composer
+       below, never under either */
+  .step-question {
+    scroll-margin-top: calc(var(--s3) + env(safe-area-inset-top));
+  }
+  .room-window :is(a[href], button, textarea, [tabindex]) {
+    scroll-margin-top: var(--pin-space);
+    scroll-margin-bottom: calc(var(--composer-h, var(--composer-h-rest)) + var(--s3));
+  }
+  /* touch: references keep their lines but take a taller target */
+  .ref {
+    padding: var(--ref-touch-pad) 0;
+  }
+  .cite-name a {
+    padding: var(--s2) 0;
+  }
+  .cite-check {
+    flex-wrap: wrap;
+    row-gap: var(--s0-5);
+  }
+  /* touch: the quiet chips in the thread take a 32 px target without growing their type */
+  .fold-line {
+    min-height: var(--size-control-small);
+    padding-top: var(--s0-5);
+    padding-bottom: var(--s0-5);
+  }
+  .work-done {
+    min-height: var(--size-control-small);
+  }
+}
+
+@variant max-narrow {
+  .fold-time,
+  .room-lights {
+    display: none;
+  }
+  .room-rail-toggle {
+    margin-left: auto;
+  }
+}
