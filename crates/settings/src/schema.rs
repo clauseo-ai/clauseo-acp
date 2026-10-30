@@ -19,7 +19,9 @@ pub(crate) const SECTIONS: [&str; 3] = ["matters", "agents", "ui"];
 
 /// Every setting, as `Effective::settings` gives it: the defaults, then `settings.json`, then
 /// the policy layer.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+// Serialize only, for `settings_get`: the one way to read settings is `Effective::load`, which
+// checks agent commands, warns and applies policy. (A `///` line here would move the schema.)
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(default)]
 pub struct Settings {
     /// Where matters live.
@@ -31,7 +33,7 @@ pub struct Settings {
 }
 
 /// The `matters` section.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(default)]
 pub struct MattersSettings {
     /// The folder new matters go in, as an absolute path. When absent, `Documents/Clauseo`.
@@ -52,7 +54,7 @@ pub struct AgentLaunch {
 }
 
 /// The `ui` section. Design may change these values before M4 without a decision record.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(default)]
 pub struct UiSettings {
     /// Light, dark, or as the OS is set.
