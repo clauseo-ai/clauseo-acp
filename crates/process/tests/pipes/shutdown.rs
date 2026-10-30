@@ -81,7 +81,9 @@ fn ignore_stdin_close_escalates_to_sigterm() {
 
 /// Starts `scenario` with SIGTERM ignored, which the agent inherits across exec (std resets only
 /// SIGPIPE in the child), so the SIGTERM step cannot end it. A stopped agent will not do: macOS
-/// ends a stopped process on SIGTERM, which raced the 3 s wait.
+/// ends a stopped process on SIGTERM, which raced the 3 s wait. It holds the harness's launch
+/// lock from before the first `signal` to after the second, so no other launch in the process
+/// (under `cargo test` the pipe tests share one) inherits `SIG_IGN`.
 #[cfg(unix)]
 #[expect(
     unsafe_code,
@@ -90,13 +92,15 @@ fn ignore_stdin_close_escalates_to_sigterm() {
 fn launch_ignoring_sigterm(scenario: &str, dir: &RunDir) -> Launched {
     use nix::sys::signal::{SigHandler, Signal, signal};
 
-    // SAFETY: SIG_IGN installs no handler code, so nothing can run in signal context. Nextest runs
-    // this test alone in its own process, and the old disposition is put back right after the
-    // launch, so nothing else in the process depends on SIGTERM meanwhile.
+    let lock = crate::harness::launch_lock();
+    // SAFETY: SIG_IGN installs no handler code, so nothing can run in signal context. The launch
+    // lock is held until the old disposition is back, so no other launch in this process starts
+    // a child that inherits it.
     let old = unsafe { signal(Signal::SIGTERM, SigHandler::SigIgn) }.expect("ignore SIGTERM");
-    let launched = launch(scenario, dir);
+    let launched = crate::harness::launch_locked(&lock, scenario, dir);
     // SAFETY: `old` is the disposition the process had a moment ago, restored as it was.
     unsafe { signal(Signal::SIGTERM, old) }.expect("restore SIGTERM");
+    drop(lock);
     launched.unwrap()
 }
 
