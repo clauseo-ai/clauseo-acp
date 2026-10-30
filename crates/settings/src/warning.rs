@@ -29,7 +29,8 @@ pub enum Origin {
     },
 }
 
-/// A place in a file. Both count from 1; `column` counts bytes, as the JSON parser does.
+/// A place in a file. Both count from 1; `column` counts bytes, as the JSON parser does. A
+/// syntax error at the end of the input (an unclosed object, say) has column 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position {
     /// The line.

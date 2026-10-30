@@ -3,8 +3,9 @@
 //!
 //! `REG_DWORD` is a number, or a boolean (0 or 1) where the setting is one. `REG_SZ` is a string,
 //! or JSON text where the setting is an object (`agents.<id>`). `REG_MULTI_SZ` is a list of
-//! strings. A known key's value of another type gets a warning and locks the key at its default;
-//! an unknown value name is only a warning.
+//! strings. Value names are compared without case, as Windows does (`UI.Theme` is
+//! `ui.theme`); an agent id keeps the case it is written in. A known key's value of another
+//! type gets a warning and locks the key at its default; an unknown value name is only a warning.
 
 #[cfg(test)]
 mod tests;
@@ -60,7 +61,8 @@ pub(crate) fn raw_values(
     let mut raws = Vec::with_capacity(values.len());
     let mut refused = Vec::new();
     let mut warnings = Vec::new();
-    for (key, value) in values {
+    for (name, value) in values {
+        let key = canonical(name);
         let converted = match kinds(&key) {
             Some(kind) => json_value(kind, value),
             None => Err(None),
@@ -85,6 +87,25 @@ pub(crate) fn raw_values(
     }
     (raws, refused, warnings)
 }
+
+/// The dotted key a value name stands for. Windows compares value names without case, so a name
+/// that matches a key but for case is that key. `agents.` matches without case too, but the id
+/// after it keeps its case, since ids are case-sensitive. Any other name is kept as written.
+fn canonical(name: String) -> String {
+    if let Some(&(key, _)) = leaf::KEYS
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(&name))
+    {
+        return key.to_owned();
+    }
+    match (name.get(..AGENTS.len()), name.get(AGENTS.len()..)) {
+        (Some(prefix), Some(id)) if prefix.eq_ignore_ascii_case(AGENTS) => format!("{AGENTS}{id}"),
+        _ => name,
+    }
+}
+
+/// The prefix of an agent's key.
+const AGENTS: &str = "agents.";
 
 /// The JSON value a registry value stands for, or why it stands for none.
 fn json_value(kind: Kind, value: RegValue) -> Result<Value, Option<String>> {

@@ -215,3 +215,28 @@ fn parse_with_keeps_raw_order() {
         .collect();
     assert_eq!(keys, ["x.flag", "x.count"]);
 }
+
+#[test]
+fn value_names_ignore_case_but_agent_ids_keep_theirs() {
+    let spec = format!(r#"{{"command": "{}"}}"#, abs_json("bin/claude"));
+    let values = parse(vec![
+        ("UI.Theme".to_owned(), RegValue::Sz("dark".to_owned())),
+        ("Agents.Claude".to_owned(), RegValue::Sz(spec)),
+        ("UI.Colour".to_owned(), RegValue::Sz("red".to_owned())),
+    ]);
+    assert_eq!(
+        values.keys().collect::<Vec<_>>(),
+        ["ui.theme", "agents.Claude"]
+    );
+    // An unknown name keeps its spelling in the warning.
+    assert_eq!(
+        values
+            .warnings()
+            .iter()
+            .map(|warning| warning.kind.clone())
+            .collect::<Vec<_>>(),
+        [WarningKind::UnknownKey {
+            key: "UI.Colour".to_owned()
+        }]
+    );
+}
