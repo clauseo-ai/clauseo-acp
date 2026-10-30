@@ -104,9 +104,10 @@ crates/process/tests/pipes/shutdown.rs launch_ignoring_sigterm unsafe_code
 crates/process/tests/pipes/write.rs - clippy::disallowed_methods
 crates/process/tests/support/exit_watch.rs os unsafe_code
 
-# Added with clauseo-settings: its one file write, and its FFI to the registry, the known folders
-# and the property list containers of managed preferences.
+# Added with clauseo-settings: its one file write, its disk tests' write module, and its FFI to
+# the registry, the known folders and the property list containers of managed preferences.
 crates/settings/src/files.rs SystemFiles::write_atomic clippy::disallowed_methods
+crates/settings/tests/disk/write.rs - clippy::disallowed_methods
 crates/settings/src/policy/windows.rs - unsafe_code
 crates/settings/src/system/windows.rs - unsafe_code
 crates/settings/src/policy/macos.rs items unsafe_code
