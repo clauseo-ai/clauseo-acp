@@ -13,8 +13,9 @@ import { ensureLink } from "./guard.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
-if (ensureLink({ root: ROOT, rel: "ui/app/components", target: "../components" }) === "made") {
+const done = ensureLink({ root: ROOT, rel: "ui/app/components", target: "../components" });
+if (done !== "kept") {
   process.stdout.write(
-    "components-link.mjs: linked ui/app/components to ../components for oxlint\n",
+    `components-link.mjs: ${done} the link ui/app/components -> ../components for oxlint\n`,
   );
 }

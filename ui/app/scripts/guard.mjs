@@ -16,9 +16,9 @@
 // - A killed run leaves its copy. The next run's `recoverFile` puts it back only when the caller's
 //   `isOwnEdit` says the file is the copy plus an edit the tool itself makes.
 // - `ensureLink` is the guard's one write that is not an edit of a tracked file: it makes an
-//   ignored link to a folder (a junction on Windows, which needs no symlink rights), only where
-//   nothing is, and leaves a link that already reaches the folder alone. Anything else at the path
-//   is the developer's and is never replaced.
+//   ignored link to a folder (a junction on Windows, which needs no symlink rights) where nothing
+//   or only a stale link is, and leaves a link that already reaches the folder alone. A file or
+//   folder at the path is the developer's and is never replaced.
 // The guard starts no process: .oxlintrc.json bans child processes in this file.
 
 import {
@@ -99,8 +99,12 @@ export function isRepoPath(rel) {
 /**
  * Makes repo path `rel` under `root` a link to the folder `target`, written relative to `rel`'s
  * folder (`../components`). A junction on Windows, which needs no symlink rights or Developer
- * Mode; a symlink elsewhere. Returns "made" or "kept" (a link already reaching the folder). Throws
- * when `target` is no folder or something else is at `rel`: that is never replaced.
+ * Mode; a symlink elsewhere. Returns "kept" (a link already reaching the folder), "made", or
+ * "remade": a link that is dangling or reaches elsewhere is replaced, since removing a link loses
+ * nothing, and a junction keeps an absolute target, so moving or copying a Windows checkout leaves
+ * one like that. Throws when `target` is no folder or a file or folder is at `rel`: those are
+ * never replaced. It shares nothing with FileGuard; it lives here because .oxlintrc.json lets only
+ * this file under scripts/ write. Its one caller is components-link.mjs.
  */
 export function ensureLink({ root, rel, target }) {
   if (!isRepoPath(rel)) {
@@ -116,11 +120,19 @@ export function ensureLink({ root, rel, target }) {
     symlinkSync(target, path, "junction");
     return "made";
   }
-  if (there.isSymbolicLink() && realpathOrUndefined(path) === realpathSync(folder)) {
-    return "kept";
+  if (there.isSymbolicLink()) {
+    if (realpathOrUndefined(path) === realpathSync(folder)) {
+      return "kept";
+    }
+    unlinkSync(path);
+    symlinkSync(target, path, "junction");
+    return "remade";
   }
+  const what = there.isDirectory()
+    ? "a folder"
+    : "a plain file (on Windows, likely git's stand-in for the link it once carried)";
   throw new Error(
-    `${rel} should be a link to ${target}, but something else is there; move it away, then run \`pnpm -C ui install\` to make the link`,
+    `${rel} should be a link to ${target}, but it is ${what}; move it away, then run \`pnpm -C ui install\` to make the link`,
   );
 }
 

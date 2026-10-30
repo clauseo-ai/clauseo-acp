@@ -345,19 +345,33 @@ describe("ensureLink", () => {
     expect(ensureLink({ root, ...at })).toBe("kept");
   });
 
-  it("never replaces a file, a folder or a link elsewhere at the path", () => {
+  it("remakes a dangling link and a link that reaches elsewhere", () => {
+    const root = linkRepo();
+    const path = join(root, "ui", "app", "components");
+    const components = realpathSync(join(root, "ui", "components"));
+    // a moved checkout's junction: its absolute target is gone
+    symlinkSync("../nowhere", path, "junction");
+    expect(ensureLink({ root, ...at })).toBe("remade");
+    expect(realpathSync(path)).toBe(components);
+    rmSync(path);
+    // a copied checkout's junction: its target is the original's folder
+    symlinkSync("../app", path, "junction");
+    expect(ensureLink({ root, ...at })).toBe("remade");
+    expect(realpathSync(path)).toBe(components);
+    expect(ensureLink({ root, ...at })).toBe("kept");
+  });
+
+  it("never replaces a file or a folder at the path, and names which it is", () => {
     const root = linkRepo();
     const path = join(root, "ui", "app", "components");
     // git's stand-in for a link on a checkout without symlink support
     writeFileSync(path, "../components");
-    expect(() => ensureLink({ root, ...at })).toThrow("something else is there");
+    expect(() => ensureLink({ root, ...at })).toThrow("it is a plain file");
     expect(read(path)).toBe("../components");
     rmSync(path);
     mkdirSync(path);
-    expect(() => ensureLink({ root, ...at })).toThrow("something else is there");
-    rmSync(path, { recursive: true });
-    symlinkSync("../app", path, "junction");
-    expect(() => ensureLink({ root, ...at })).toThrow("something else is there");
+    expect(() => ensureLink({ root, ...at })).toThrow("it is a folder");
+    expect(lstatSync(path).isDirectory()).toBe(true);
   });
 
   it("refuses a path outside the repo and a target that is no folder", () => {
