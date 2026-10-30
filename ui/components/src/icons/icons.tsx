@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: ISC
 // Copied from https://github.com/lucide-icons/lucide icons/, re-cut on a 20 px grid for a 1.5 px stroke with square
-// ends and sharp joins. Four glyphs are Clauseo's own, in the same cut, not Lucide's: the paper book page (source
-// paperBook), accept, the page turn (pageTurn) and the safe workspace (safeRoom). Licence: LICENSES/ISC-lucide.txt.
-// Every icon is listed in names.ts; icons.test.ts fails when the two disagree.
+// ends and sharp joins. Licence: LICENSES/ISC-lucide.txt. Clauseo's own glyphs, in the same cut, are in glyphs.tsx
+// under the repo's licence; they are re-exported here so every icon has one import. Every icon is listed in names.ts,
+// and icons.test.ts fails when the two disagree.
 import { Icon, type IconProps } from "./icon.tsx";
+
+export { IconAccept, IconPageTurn, IconPaperBookPage, IconSafeWorkspace } from "./glyphs.tsx";
 
 /** A fold (source: chevron) */
 export function IconFold(props: IconProps) {
@@ -163,54 +165,6 @@ export function IconAddPapers(props: IconProps) {
       <path d="M11.5 2.5v4h4" vectorEffect="non-scaling-stroke" />
       <path d="M7.5 12.5h5" vectorEffect="non-scaling-stroke" />
       <path d="M10 10v5" vectorEffect="non-scaling-stroke" />
-    </Icon>
-  );
-}
-
-/** Paper book page, not used in the room yet (source: paperBook) */
-export function IconPaperBookPage(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M4.5 2.5h11v15h-11z" vectorEffect="non-scaling-stroke" />
-      <path d="M7.25 2.5v15" vectorEffect="non-scaling-stroke" />
-      <path d="M9.75 6.5h3" vectorEffect="non-scaling-stroke" />
-      <path d="M9.75 9.25h3" vectorEffect="non-scaling-stroke" />
-      <path d="M11.5 14.5h1.25" vectorEffect="non-scaling-stroke" />
-    </Icon>
-  );
-}
-
-/** Accept into the matter (source: accept) */
-export function IconAccept(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M5 8.5l3 3 6.5-6.5" vectorEffect="non-scaling-stroke" />
-      <path
-        d="M4.5 14.75h11v2h-11z"
-        fill="currentColor"
-        stroke="none"
-        vectorEffect="non-scaling-stroke"
-      />
-    </Icon>
-  );
-}
-
-/** The prepared draft, waiting to be turned to (source: pageTurn) */
-export function IconPageTurn(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M4.5 2.5h11v9l-6 6h-5z" vectorEffect="non-scaling-stroke" />
-      <path d="M15.5 11.5h-6v6" vectorEffect="non-scaling-stroke" />
-    </Icon>
-  );
-}
-
-/** Safe workspace (source: safeRoom) */
-export function IconSafeWorkspace(props: IconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M2.75 9.25h14.5v9h-14.5z" vectorEffect="non-scaling-stroke" />
-      <path d="M6 9.25V6a4 4 0 0 1 8 0v3.25" vectorEffect="non-scaling-stroke" />
     </Icon>
   );
 }
