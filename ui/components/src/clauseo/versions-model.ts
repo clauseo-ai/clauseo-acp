@@ -1,7 +1,8 @@
 // Versions as the room reads them. The matter's history across its conversations, each version saying who made it,
 // when and which papers it touched, and the whole matter as it stood after it: which papers were in the matter, and
 // which revision each kept document stood at. Pure: no DOM, no React, and every history, paper name and date comes
-// in as an argument. Restore and Undo always move forward and become versions of their own.
+// in as an argument. Restore and Undo always move forward and become versions of their own; the host makes those
+// versions, and the parts only hand the lawyer's intent over.
 import type { Lang } from "../lib/display.ts";
 import { clock } from "../lib/words.ts";
 import { listOf, vt } from "../lib/words-versions.ts";
@@ -35,8 +36,9 @@ export type Who =
   | { kind: "clauseo"; conversation: string; plan?: string }
   /** The lawyer, in Word or anywhere outside Clauseo. */
   | { kind: "outside" }
-  /** An undo of the version made at `of` ("4:05 pm") on `ofDay`. */
-  | { kind: "undo"; of: string; ofDay: Day }
+  /** An undo of the version with id `of`. Its time and day are read from that version when shown, so two versions
+   * made in the same minute stay apart. */
+  | { kind: "undo"; of: string }
   /** The papers first brought into the matter. */
   | { kind: "import"; n: number }
   /** A restore to the version with id `to`. */
@@ -59,7 +61,7 @@ export type Version = {
   large?: { file: string; size: string };
 };
 
-/** The time of the version that undoes or restores, and its day. */
+/** The time of the version that undoes, and its day. */
 export type Stamp = { day: Day; at: string };
 
 /** "3:42 pm" from minutes past midnight. */
@@ -116,13 +118,13 @@ export function whoOf(lang: Lang, cal: Calendar, v: Version, all: readonly Versi
       return vt(lang, "Clauseo, in {conversation}", { conversation: w.conversation });
     case "outside":
       return vt(lang, "You, outside Clauseo");
-    case "undo":
-      return w.ofDay === v.day
-        ? vt(lang, "Undo of the change at {time}", { time: clock(lang, w.of) })
-        : vt(lang, "Undo of the change at {time} on {date}", {
-            time: clock(lang, w.of),
-            date: dayWords(lang, cal, w.ofDay, "date"),
-          });
+    case "undo": {
+      const of = all.find((x) => x.id === w.of);
+      if (of === undefined) return "";
+      return of.day === v.day
+        ? vt(lang, "Undo of the change at {time}", { time: timeOf(lang, of) })
+        : vt(lang, "Undo of the change at {time} on {date}", when(lang, cal, of));
+    }
     case "import":
       return vt(lang, "Imported {n} documents", { n: w.n });
     case "restore": {
@@ -210,7 +212,7 @@ export function eraOf(id: string, v: Version): Era {
 /** Whether a version changed or made any kept document, so its change can be undone on its own. */
 export const changedDocs = (v: Version) => [...v.touched, ...v.made].some((d) => d in v.state.docs);
 
-/* ---------- restoring and undoing, always forward ---------- */
+/* ---------- undoing, always forward ---------- */
 
 const versionAt = (
   id: string,
@@ -236,43 +238,6 @@ const mix = (now: MatterState, from: MatterState, changed: readonly string[]): M
     docsOf(now, from).map((d) => [d, changed.includes(d) ? revOf(from, d) : revOf(now, d)]),
   ),
 });
-
-/** Restore moves forward: a new version whose state is the earlier one's, for every document the lawyer lets it
- * change. Papers added since stay. kept names the documents the lawyer keeps as they are. */
-export function restore(
-  history: readonly Version[],
-  toId: string,
-  kept: readonly string[],
-  at: Stamp,
-): { version: Version; changed: string[] } | null {
-  const to = history.find((v) => v.id === toId);
-  const now = history[history.length - 1];
-  if (to === undefined || now === undefined) return null;
-  const changed = differing(to.state, now.state).filter((d) => !kept.includes(d));
-  const version = versionAt(
-    `r${history.length + 1}`,
-    at,
-    { kind: "restore", to: to.id },
-    changed,
-    mix(now.state, to.state, changed),
-  );
-  return { version, changed };
-}
-
-/** Undoing a restore moves forward too: the state from before it comes back as a version of its own. */
-export function undoRestore(history: readonly Version[], at: Stamp): Version | null {
-  const last = history[history.length - 1];
-  const before = history[history.length - 2];
-  if (last === undefined || before === undefined || last.who.kind !== "restore") return null;
-  const who: Who = { kind: "undoRestore", of: last.at };
-  return versionAt(
-    `u${history.length + 1}`,
-    at,
-    who,
-    differing(last.state, before.state),
-    before.state,
-  );
-}
 
 /** The kept documents a version changed or made. */
 const mine = (v: Version) =>
@@ -312,7 +277,7 @@ export function undoChange(
   const changed = mine(v).filter(
     (d) => !kept.includes(d) && revOf(now.state, d) !== revOf(before.state, d),
   );
-  const who: Who = { kind: "undo", of: v.at, ofDay: v.day };
+  const who: Who = { kind: "undo", of: v.id };
   return {
     version: versionAt(
       `n${history.length + 1}`,

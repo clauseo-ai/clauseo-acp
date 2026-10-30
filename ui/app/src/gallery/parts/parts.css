@@ -1,3 +1,8 @@
+/* The parts gallery's stylesheet: the gallery's, then every part's sheet through clauseo/parts.css, which the app's
+   own stylesheet leaves out. */
+@import "../gallery.css";
+@import "@clauseo/components/clauseo/parts.css";
+
 /* The parts gallery's own frames. A pane the room lays over the thread (the turned page, the reader) stops above
    the composer; in a sample there is no composer below it, so the pane reaches the frame's foot. */
 .parts-pane {

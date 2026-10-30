@@ -292,7 +292,6 @@
         transform var(--dur-quick) var(--ease-arrive);
     }
     .step-answer:hover .accept-btn,
-    .step-answer[data-force~="hover"] .accept-btn,
     .step-answer:focus-within .accept-btn,
     .accept-btn:focus-visible {
       opacity: 1 !important;

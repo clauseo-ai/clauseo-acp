@@ -13,6 +13,8 @@ export type Since = {
   id: string;
   short: string;
   cite: string;
+  /** The day the later judgment was decided, as the app formats it in the lawyer's language ("1 January 2001" for an English
+   * lawyer, a Hindi date for a Hindi one). The part shows it as given and never reads it as a date. */
   decided: string;
   bench: number;
   treatment: Treatment;
@@ -25,6 +27,8 @@ export type Judgment = {
   name: string;
   court: "Supreme Court";
   bench: number;
+  /** The day it was decided, as the app formats it in the lawyer's language ("1 January 2001" for an English
+   * lawyer, a Hindi date for a Hindi one). The part shows it as given and never reads it as a date. */
   decided: string;
   stance: Stance;
   /** As the lawyer cites it, SCC first, then AIR: the report, and where the quoted paragraph falls in it. */
@@ -49,7 +53,7 @@ export type Judgment = {
   read: string | null;
 };
 
-/** "(2005) 8 SCC 89, at 103, para 19" and "AIR 2005 SC 3512, at 3518, para 19": SCC first, then AIR, and a judgment
+/** "(2001) 1 SCC 1, at 5, para 3" and "(2001) 1 ABC 1, at 12, para 3": SCC first, then AIR, and a judgment
  * not yet in either by the report it is in. */
 export function citedAs(
   j: Judgment,

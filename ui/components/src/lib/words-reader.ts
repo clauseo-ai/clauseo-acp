@@ -88,7 +88,6 @@ const HI = {
   "Open in Word": "Word में खोलें",
   "Open in Word since {time}": "{time} बजे से Word में खुला",
   Changes: "बदलाव",
-  Citations: "उद्धरण",
   "Changes and citations": "बदलाव और उद्धरण",
   Accept: "स्वीकार करें",
   Reject: "अस्वीकार करें",

@@ -8,7 +8,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { edgeDialogWords, type EdgeAsk } from "../lib/words-versions.ts";
 import { AllowedList, WorkspaceLine } from "./allowed.tsx";
 import { EdgePrompt, RefusalPause } from "./edge.tsx";
-import { OsDialog } from "./os-dialog.tsx";
+import { OsDialogPreview } from "./os-dialog.tsx";
 import { NotProtectedNote } from "./protection.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -153,7 +153,7 @@ const dialog = (
 ) => {
   const d = edgeDialogWords("en", ask);
   return (
-    <OsDialog
+    <OsDialogPreview
       platform={platform}
       title={d.title}
       lines={d.lines}

@@ -103,16 +103,9 @@ export const CORE: readonly Version[] = [
   v("v5", "09", "4:05 pm", DRAFT, state(WITH_DRAFT, "P2", "D2", "M1"), {
     touched: ["dates", "draft"],
   }),
-  v(
-    "v6",
-    "11",
-    "11:20 am",
-    { kind: "undo", of: "4:05 pm", ofDay: "2027-03-09" },
-    state(WITH_DRAFT, "P1", "D1", "M1"),
-    {
-      touched: ["dates", "draft"],
-    },
-  ),
+  v("v6", "11", "11:20 am", { kind: "undo", of: "v5" }, state(WITH_DRAFT, "P1", "D1", "M1"), {
+    touched: ["dates", "draft"],
+  }),
   v("v7", "15", "10:14 am", YOU, state(WITH_LETTER, "P1", "D1", "M2"), {
     touched: ["memo"],
     added: ["letter"],

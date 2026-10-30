@@ -1,5 +1,6 @@
 /* The app's stylesheet: the design system's, with the app's own classes. Tests and the dev-only gallery are not
-   sources, so their classes never reach the shipped CSS. */
+   sources, so their classes never reach the shipped CSS. It carries no part's stylesheet: a screen imports the sheets
+   of the parts it shows, so the app ships only what its screens use. */
 @import "./system.css";
 @source "..";
 @source not "../gallery";

@@ -1,6 +1,7 @@
 /* Every stylesheet of Clauseo's parts, in the order the room lays them over each other: the room's frame, the wall
-   and the thread first, then the cards and the narrow-window rules, then each area's parts. A page imports this once,
-   after the design system's own stylesheets. parts-css.test.ts fails when a part's stylesheet is missing here. */
+   and the thread first, then the cards and the narrow-window rules, then each area's parts. It gathers every part's
+   sheet for galleries and tests; a screen imports only the sheets of the parts it shows, after the design system's
+   own stylesheets. parts-css.test.ts fails when a part's stylesheet is missing here. */
 @import "./shell.css";
 @import "./composer.css";
 @import "./wall.css";

@@ -9,15 +9,9 @@ import { IconAccept, IconNewMatter, IconPaperBookPage } from "../icons/icons.tsx
 import { currentOs } from "../lib/words-ui.ts";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { permissionKey, type PermissionAnswer, type PermissionState } from "./permission-keys.ts";
+import { fromComposer } from "./composer-keys.ts";
+import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
-
-/** Whether a key pressed where focus stands is the prompt's: in the composer's field, or with nothing focused. A
- * focused button or another field keeps its own Enter. */
-function fromComposer(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return true;
-  if (target === target.ownerDocument.body) return true;
-  return target instanceof HTMLTextAreaElement && target.form?.dataset["composer"] !== undefined;
-}
 
 export function PermissionPrompt({
   paper,
@@ -35,11 +29,12 @@ export function PermissionPrompt({
   const w = useThreadWords();
   const id = useId();
   const mac = currentOs() === "mac";
+  const room = useRoom();
 
   useEffect(() => {
     if (!keys || state !== "pending") return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing || !fromComposer(e.target)) return;
+      if (e.defaultPrevented || e.isComposing || !fromComposer(room, e.target)) return;
       const a = permissionKey(e);
       if (a === null) return;
       e.preventDefault();
@@ -47,7 +42,7 @@ export function PermissionPrompt({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [keys, state, onAnswer]);
+  }, [keys, state, onAnswer, room]);
 
   const ask = w.th("Clauseo wants to save a new version of {paper}.", { paper });
   if (state !== "pending") {

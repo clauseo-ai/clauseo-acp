@@ -47,8 +47,8 @@ const ACME: Judgment = {
     {
       id: "beta",
       short: "Beta Traders",
-      cite: "(2005) 3 ABC 30",
-      decided: "2 February 2005",
+      cite: "(2002) 3 ABC 30",
+      decided: "2 February 2002",
       bench: 2,
       treatment: "followed",
       note: "Followed for the notice.",
@@ -81,8 +81,8 @@ const RESULTS: Result[] = [
     id: "beta",
     short: "Beta Traders",
     name: "Beta Traders v. Union",
-    cite: "(2005) 3 ABC 30",
-    decided: "2 February 2005",
+    cite: "(2002) 3 ABC 30",
+    decided: "2 February 2002",
     bench: 2,
     stance: "for",
     fragment: "the **notice** named no debt",
@@ -103,7 +103,7 @@ const RESULTS: Result[] = [
 
 const READ: ReadAlready[] = [
   { id: "acme", short: "Acme Ltd", cite: "(2001) 1 ABC 1", read: "4:31 pm" },
-  { id: "beta", short: "Beta Traders", cite: "(2005) 3 ABC 30", read: "4:38 pm" },
+  { id: "beta", short: "Beta Traders", cite: "(2002) 3 ABC 30", read: "4:38 pm" },
 ];
 
 const ENTRY: IndexEntry = {

@@ -275,7 +275,7 @@ export function useVersionWords() {
   };
 }
 
-/** What the computer's own dialog says at each edge, for OsDialog. name: the folder's last part, "Precedents";
+/** What the computer's own dialog says at each edge, for OsDialogPreview. name: the folder's last part, "Precedents";
  * place: a website, "example.org"; matter: the matter's name as filed. */
 export type EdgeAsk =
   | { kind: "folder"; name: string }

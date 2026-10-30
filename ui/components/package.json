@@ -20,7 +20,8 @@
     "./styles/*.test.ts": null,
     "./icons/*.test.tsx": null,
     "./styles/*.test.tsx": null,
-    "./styles/css-blocks.ts": null
+    "./styles/css-blocks.ts": null,
+    "./clauseo/*-fixture.ts": null
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",
