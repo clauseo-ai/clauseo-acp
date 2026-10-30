@@ -3,7 +3,8 @@
 A scenario is a `.jsonl` file that `fake_agent` plays over stdio, one line at a time. It stands
 in for a real ACP v1 agent in tests: it waits for the client lines the scenario expects, and
 sends the lines the scenario writes. It never waits for anything but the next client line: no
-timers, no sleeps.
+timers, no sleeps. The one exception is `--pace-ms`, which the speed scoreboard uses (see
+[Running](#running)); it adds no timer to a scenario.
 
 This file is the full reference. The code behind a rule is sometimes named in parentheses, such
 as (`body.rs`), for whoever wants to check it; nobody needs to read the code to write a scenario.
@@ -19,6 +20,7 @@ The code lives in `crates/fake_agent/src/`.
 - [`raw` and SDK validation](#raw-and-sdk-validation)
 - [Running](#running)
 - [Exit codes](#exit-codes)
+- [Generated scenarios](#generated-scenarios)
 - [Add a scenario](#add-a-scenario)
 
 ## The file
@@ -228,10 +230,17 @@ match it.
 ## Running
 
 ```sh
-fake_agent --scenario <name or path>
+fake_agent --scenario <name or path> [--pace-ms <n>]
 ```
 
 A bare name plays a bundled scenario; anything with `/`, `\` or a `.jsonl` suffix is a file.
+
+`--pace-ms <n>` waits `n` milliseconds before each `update` step that follows another `update`
+step, so a scenario plays at a readable pace. `n` is a whole number from 0 to 60000, and 0 means
+no pause. The flag needs `--scenario` and goes before or after it. Anything else about it (a
+missing or bad number, a second `--pace-ms`, no `--scenario`) exits 2 with one line on stderr.
+It exists for the speed scoreboard (R13), which plays `scoreboard` with `--pace-ms 5`. The
+scenarios themselves stay timer-free, and only the tests of the flag itself pass it.
 
 - Each client line must end with `\n` (a `\r` before it is dropped) and be a JSON-RPC 2.0
   request, notification or response, with a string or number `id`. Anything else is a mismatch.
@@ -267,6 +276,17 @@ numbers.
 An `exit` step may not use 2 or 3, so those codes always mean `fake_agent` itself. It may use 0
 and 1 (`exit-mid-turn` uses 1); 1 means `EXIT_WRITE` only for `--list` and `--check`, which play
 no scenario.
+
+## Generated scenarios
+
+`scoreboard.jsonl` is generated, not written by hand. `tests/stdio/scoreboard.rs` writes its
+text from a fixed seed, with the prose from `tests/stdio/scoreboard_prose.rs`. Its header says
+so. The test `scoreboard_file_matches_its_generator` fails when the file and the generator
+disagree. To regenerate the file after a change to the generator, run this from the repo root:
+
+```sh
+CLAUSEO_REGENERATE_SCOREBOARD=1 cargo nextest run -p clauseo-fake_agent scoreboard_file_matches_its_generator
+```
 
 ## Add a scenario
 

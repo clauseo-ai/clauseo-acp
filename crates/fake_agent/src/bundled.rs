@@ -49,6 +49,7 @@ bundled! {
         "plan",
         "prompt-stream",
         "queue-two-prompts",
+        "scoreboard",
         "send-now",
         "session-failure",
         "session-state",

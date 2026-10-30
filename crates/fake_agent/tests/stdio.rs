@@ -26,6 +26,12 @@ mod permission;
 #[path = "stdio/process.rs"]
 mod process;
 #[cfg(test)]
+#[path = "stdio/scoreboard.rs"]
+mod scoreboard;
+#[cfg(test)]
+#[path = "stdio/scoreboard_prose.rs"]
+mod scoreboard_prose;
+#[cfg(test)]
 #[path = "stdio/stream.rs"]
 mod stream;
 #[cfg(test)]

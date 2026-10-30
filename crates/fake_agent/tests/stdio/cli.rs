@@ -1,11 +1,18 @@
-//! `--check`, `--list`, bad arguments, and validation of every bundled scenario.
+//! `--check`, `--list`, `--pace-ms`, bad arguments, and validation of every bundled scenario.
 
 use std::path::Path;
 
 use clauseo_fake_agent::{EXIT_LOAD, EXIT_OK, SCENARIOS, Scenario, bin_path, scenario_path};
+use serde_json::json;
 
-use crate::harness::{Agent, Scratch};
+use crate::harness::{Agent, Scratch, prompt, result, update};
 use crate::write;
+
+const USAGE: &str = "fake_agent: usage: fake_agent --scenario <name or path> [--pace-ms <n>] \
+     | --check <path>... | --list | --hold\n";
+const NUMBER: &str = "fake_agent: --pace-ms takes a whole number of milliseconds from 0 to 60000\n";
+const NEEDS: &str = "fake_agent: --pace-ms needs --scenario\n";
+const TWICE: &str = "fake_agent: --pace-ms may be given only once\n";
 
 fn scenarios_dir() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/scenarios"))
@@ -134,8 +141,6 @@ fn check_of_an_empty_folder_fails() {
 #[test]
 fn bad_arguments_exit_2_with_usage() {
     let dir = Scratch::new("bad_arguments_exit_2_with_usage");
-    let usage = "fake_agent: usage: fake_agent --scenario <name or path> | --check <path>... | --list | \
-                 --hold\n";
     for args in [
         &[][..],
         &["--scenario"],
@@ -145,7 +150,7 @@ fn bad_arguments_exit_2_with_usage() {
     ] {
         let finished = Agent::start_args(args, dir.path()).finish();
         assert_eq!(finished.status.code(), Some(EXIT_LOAD), "{args:?}");
-        assert_eq!(finished.stderr, usage, "{args:?}");
+        assert_eq!(finished.stderr, USAGE, "{args:?}");
     }
     let finished = Agent::start_args(&["--scenario", "no-such"], dir.path()).finish();
     assert_eq!(finished.status.code(), Some(EXIT_LOAD));
@@ -194,4 +199,109 @@ fn check_of_a_folder_takes_only_the_jsonl_files() {
     let finished = Agent::start_args(&["--check", "."], dir.path()).finish();
     assert_eq!(finished.status.code(), Some(EXIT_OK), "{}", finished.stderr);
     assert_eq!(finished.stdout, "ok 1\n");
+}
+
+/// One `prompt-stream` answer chunk, as the scenario writes it.
+fn answer_chunk(text: &str) -> serde_json::Value {
+    update(
+        json!({"sessionUpdate": "agent_message_chunk", "messageId": "m-answer-1",
+        "content": {"type": "text", "text": text}}),
+    )
+}
+
+/// Plays `prompt-stream` started with `args` to its end, with the lines `prompt_stream_over_stdio`
+/// checks.
+fn prompt_stream_plays(args: &[&str], test: &str) {
+    let dir = Scratch::new(test);
+    let mut agent = Agent::start_args(args, dir.path());
+    agent.handshake(&dir.cwd());
+    agent.send(&prompt(2, "Summarise the indemnity clause"));
+    for text in ["Reading the ", "indemnity clause ", "first."] {
+        agent.expect_line(&update(json!({"sessionUpdate": "agent_thought_chunk",
+            "messageId": "m-thought-1", "content": {"type": "text", "text": text}})));
+    }
+    for text in [
+        "The clause ",
+        "caps liability ",
+        "at the fees ",
+        "paid in the ",
+        "last twelve months.",
+    ] {
+        agent.expect_line(&answer_chunk(text));
+    }
+    agent.expect_line(&result(2, json!({"stopReason": "end_turn"})));
+    agent.expect_exit(EXIT_OK);
+}
+
+#[test]
+fn pace_ms_before_the_scenario_plays_to_the_end() {
+    prompt_stream_plays(
+        &["--pace-ms", "1", "--scenario", "prompt-stream"],
+        "pace_ms_before_the_scenario",
+    );
+}
+
+#[test]
+fn pace_ms_after_the_scenario_plays_to_the_end() {
+    prompt_stream_plays(
+        &["--scenario", "prompt-stream", "--pace-ms", "0"],
+        "pace_ms_after_the_scenario",
+    );
+}
+
+/// Each bad `--pace-ms` form exits `EXIT_LOAD` with its one-line diagnostic and plays nothing.
+#[test]
+fn pace_ms_bad_forms_exit_2_with_a_diagnostic() {
+    let dir = Scratch::new("pace_ms_bad_forms");
+    let cases: [(&[&str], &str); 14] = [
+        (&["--pace-ms", "5"], NEEDS),
+        (&["--pace-ms"], NEEDS),
+        (&["--check", ".", "--pace-ms", "5"], NEEDS),
+        (&["--pace-ms", "5", "--list"], NEEDS),
+        (&["--scenario", "prompt-stream", "--pace-ms"], NUMBER),
+        (&["--pace-ms", "x", "--scenario", "prompt-stream"], NUMBER),
+        (&["--pace-ms", "-1", "--scenario", "prompt-stream"], NUMBER),
+        (&["--pace-ms", "1.5", "--scenario", "prompt-stream"], NUMBER),
+        (
+            &["--pace-ms", "60001", "--scenario", "prompt-stream"],
+            NUMBER,
+        ),
+        (&["--pace-ms", "", "--scenario", "prompt-stream"], NUMBER),
+        (
+            &[
+                "--pace-ms",
+                "1",
+                "--scenario",
+                "prompt-stream",
+                "--pace-ms",
+                "2",
+            ],
+            TWICE,
+        ),
+        (
+            &[
+                "--pace-ms",
+                "1",
+                "--pace-ms",
+                "1",
+                "--scenario",
+                "prompt-stream",
+            ],
+            TWICE,
+        ),
+        (
+            &["--scenario", "prompt-stream", "--pace-ms", "1", "extra"],
+            USAGE,
+        ),
+        (
+            &["--scenario", "prompt-stream", "--pace-ms", "1", "--list"],
+            USAGE,
+        ),
+    ];
+    for (args, diagnostic) in cases {
+        let finished = Agent::start_args(args, dir.path()).finish();
+        assert_eq!(finished.status.code(), Some(EXIT_LOAD), "{args:?}");
+        assert_eq!(finished.stdout, "", "{args:?}");
+        assert_eq!(finished.stderr, diagnostic, "{args:?}");
+    }
 }
