@@ -1,0 +1,216 @@
+/* The motion and the Base UI geometry of the controls in ui/. Every value comes from tokens.css. Arrivals fade and move a short way on the arrive curve; leaving is always faster.
+   Under reduced motion the shifts go to 0 px and the durations to 120 ms or less (tokens.css), so only the fades
+   remain; in lite base.css takes every transition away. */
+
+/* ---------- arrivals and departures ---------- */
+
+/* a raised plane opening from a control: a menu, a select's list. It fades in and moves 6 px out from its
+   trigger's side over 160 ms, and leaves in 90 ms on the leave curve. */
+@utility motion-menu {
+  --from-x: 0px;
+  --from-y: 0px;
+  transform-origin: var(--transform-origin);
+  transition:
+    opacity var(--dur-forward) var(--ease-arrive),
+    transform var(--dur-forward) var(--ease-arrive);
+  &[data-side="bottom"] {
+    --from-y: calc(-1 * var(--shift-menu));
+  }
+  &[data-side="top"] {
+    --from-y: var(--shift-menu);
+  }
+  &[data-side="left"],
+  &[data-side="inline-start"] {
+    --from-x: var(--shift-menu);
+  }
+  &[data-side="right"],
+  &[data-side="inline-end"] {
+    --from-x: calc(-1 * var(--shift-menu));
+  }
+  &[data-starting-style],
+  &[data-ending-style] {
+    opacity: 0;
+    transform: translate(var(--from-x), var(--from-y));
+  }
+  &[data-ending-style] {
+    transition-duration: var(--dur-leave);
+    transition-timing-function: var(--ease-leave);
+  }
+  &[data-instant] {
+    transition-duration: 0ms;
+  }
+}
+
+/* the scrim under a dialog: a flat tone that dims, with no blur. It fades in 120 ms and out in 90. */
+@utility motion-scrim {
+  transition: opacity var(--dur-quick) var(--ease-arrive);
+  &[data-starting-style],
+  &[data-ending-style] {
+    opacity: 0;
+  }
+  &[data-ending-style] {
+    transition-duration: var(--dur-leave);
+    transition-timing-function: var(--ease-leave);
+  }
+}
+
+/* a dialog: an arrival that rises 8 px and stops, 220 ms; it leaves in 160, half the way back */
+@utility motion-dialog {
+  transition:
+    opacity var(--dur-arrive) var(--ease-arrive),
+    transform var(--dur-arrive) var(--ease-arrive);
+  &[data-starting-style] {
+    opacity: 0;
+    transform: translateY(var(--shift-dialog));
+  }
+  &[data-ending-style] {
+    opacity: 0;
+    transform: translateY(calc(var(--shift-dialog) / 2));
+    transition-duration: var(--dur-forward);
+    transition-timing-function: var(--ease-leave);
+  }
+}
+
+/* a toast rises 12 px on the spring over 220 ms and leaves in 160. A swipe carries it with the finger. */
+@utility motion-toast {
+  transform: translate(var(--toast-swipe-movement-x, 0px), var(--toast-swipe-movement-y, 0px));
+  transition:
+    opacity var(--dur-arrive) var(--ease-arrive),
+    transform var(--dur-arrive) var(--ease-spring);
+  &[data-starting-style] {
+    opacity: 0;
+    transform: translateY(var(--shift-toast));
+  }
+  &[data-ending-style] {
+    opacity: 0;
+    transform: translate(
+      var(--toast-swipe-movement-x, 0px),
+      calc(var(--toast-swipe-movement-y, 0px) + var(--shift-toast) / 2)
+    );
+    transition-duration: var(--dur-forward);
+    transition-timing-function: var(--ease-leave);
+  }
+}
+
+/* a switch's thumb travels the track on the spring, 160 ms; under reduced motion it lands at once */
+@utility motion-thumb {
+  transition:
+    transform var(--dur-forward) var(--ease-spring),
+    background-color var(--dur-quick) var(--ease-arrive),
+    box-shadow var(--dur-quick) var(--ease-arrive);
+  &[data-checked] {
+    transform: translateX(calc(var(--size-switch-w) - var(--size-switch-h)));
+  }
+  [data-motion="reduced"] & {
+    transition-property: background-color, box-shadow;
+  }
+}
+
+/* the chosen tab's raised plane, behind the tab's words, at Base UI's measure of the active tab. It moves to the
+   next tab on the spring, 160 ms; under reduced motion it lands at once. */
+@utility tab-plane {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--active-tab-width);
+  height: var(--active-tab-height);
+  transform: translate(var(--active-tab-left), var(--active-tab-top));
+  transition:
+    transform var(--dur-forward) var(--ease-spring),
+    width var(--dur-forward) var(--ease-spring);
+  [data-motion="reduced"] & {
+    transition-duration: 0ms;
+  }
+}
+
+/* ---------- small controls ---------- */
+
+/* a field set into its plane: a text field, the search field, a select's trigger. The field's own set-in shade under
+   its top lip and nothing drawn round it: its tone, its label and its words or chevron say what it is. In lite the
+   shade goes and the tone alone parts it from its plane. */
+@utility set-in-control {
+  box-shadow: var(--set-in-field);
+}
+
+/* a checkbox, a radio, or a switch's track while it's clear or off: set into its plane and lit from above, with a lip
+   that says it's a control and what state it's in, 3:1 against its plane (tokens.css, --lip-top). Nothing is drawn
+   round it. The lip is a border on a layer under the control's content, not a shadow, so it stays in lite, where
+   every shadow goes. Disabled, the lip fades with the words; checked, the primary fill takes over and the lip
+   goes. */
+@utility set-in-lip {
+  position: relative;
+  isolation: isolate;
+  box-shadow: var(--set-in-field);
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    border-style: solid;
+    /* a ring all round in the control's edge tone, at least 3:1 against every plate in both lights (4:1 on
+       the day well, 4.6:1 on the night well), with the top lip kept heavier so it still reads as set in */
+    border-color: var(--control-ring);
+    border-width: var(--lip-top-w) var(--control-ring-w) var(--control-ring-w);
+    pointer-events: none;
+  }
+  &:is(:disabled, [data-disabled])::before {
+    border-color: color-mix(in srgb, var(--control-ring) 40%, transparent);
+  }
+  &[data-checked]::before {
+    border-color: transparent;
+  }
+}
+
+/* the search field, squeezed below what its placeholder needs, as at a large text size or beside Windows' caption
+   buttons, folds to its icon rather than cut its words; focused, it takes its width back. 9rem is the icon, its gap and
+   "Search this matter", the longer of the two languages' placeholders, and it follows the text size */
+@utility search-fold {
+  container-type: inline-size;
+  @container (max-width: 9rem) {
+    &:not(:focus-within) input {
+      width: 0;
+      flex: 0 0 0;
+    }
+  }
+}
+
+/* where toasts stand: the window's foot, clear of a phone's home indicator and Safari's toolbar, 16 px in, 24 px from
+   1000 px */
+@utility toast-place {
+  bottom: calc(var(--s4) + env(safe-area-inset-bottom));
+  left: max(var(--s4), env(safe-area-inset-left));
+  right: max(var(--s4), env(safe-area-inset-right));
+  @media (width >= 480px) {
+    left: auto;
+  }
+  @media (width >= 1000px) {
+    bottom: calc(var(--s6) + env(safe-area-inset-bottom));
+    right: max(var(--s6), env(safe-area-inset-right));
+  }
+}
+
+/* ---------- geometry from Base UI's measures ---------- */
+
+/* a select's list is at least as wide as its trigger */
+@utility min-w-anchor {
+  min-width: var(--anchor-width);
+}
+/* a raised plane never runs past the window's edge: it scrolls instead */
+@utility max-h-available {
+  max-height: var(--available-height);
+}
+/* a dialog, centred in the window, 440 px or the window less 16 px a side, scrolling if the window is short */
+@utility dialog-place {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(var(--size-dialog), calc(100% - 2 * var(--s4)));
+  height: fit-content;
+  max-height: calc(100dvh - 2 * var(--s4));
+  overflow-y: auto;
+}
+/* a box as tall as the interface line, so a checkbox or radio centres on its label's first line in either script */
+@utility h-ui-line {
+  height: calc(var(--lh-ui) * var(--k));
+}

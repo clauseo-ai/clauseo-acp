@@ -5,3 +5,7 @@
 # nothing in them is ours to spell. MessagePack files are binary. The pre-commit hook passes
 # --force-exclude, so these hold for the staged files it names too.
 extend-exclude = ["Cargo.lock", "ui/pnpm-lock.yaml", "*.msgpack"]
+
+[default]
+# A code point in a stylesheet's unicode-range (U+0100-02BA) is hex, not a word.
+extend-ignore-re = ["U\\+[0-9A-Fa-f]{4,6}(?:-[0-9A-Fa-f]{4,6})?"]

@@ -93,8 +93,13 @@ to write instead.
 
 The broker (keys, cache and limits for outside services, plus the socket the sandboxed sidecar
 reaches) is a module of `host`, not a crate. Frontend packages: `ui/app` (exists),
-`ui/components` (planned) and `ui/bindings` (planned). Nothing in `ui/` imports Tauri APIs outside
-`ui/app/src/transport/`.
+`ui/components` (exists: the design system's tokens, icons, words and parts, which take data as props
+and hold no host logic) and `ui/bindings` (planned). Nothing in `ui/` imports Tauri APIs outside
+`ui/app/src/transport/`. `cargo xtask check` runs only ui/app's scripts, so ui/app checks
+ui/components too: its tsconfig includes `../components/src`, its vitest config has a `components`
+project, and oxlint, which refuses paths with `..`, reaches it through a symlink in ui/app named
+components.
+A version both packages need lives once, in the `catalog` of `ui/pnpm-workspace.yaml`.
 
 "fs", "process", "any I/O" and "clock" in the "Never depends on" column mean the standard
 library's APIs, not the `process` crate, and cover the crate's own code. "fs", "process" or "any

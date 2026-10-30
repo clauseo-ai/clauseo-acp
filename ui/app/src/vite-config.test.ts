@@ -1,4 +1,4 @@
-import { createServer } from "vite";
+import { createServer, resolveConfig } from "vite";
 import { expect, test } from "vitest";
 import tauriConf from "../../../crates/desktop/tauri.conf.json" with { type: "json" };
 import { devCsp } from "../vite.config.ts";
@@ -46,4 +46,10 @@ test("the dev CSP refuses a production CSP without a directive it adds to", () =
   expect(() => devCsp("default-src 'self'; style-src 'self'; connect-src ipc:", 1420)).toThrow(
     /no script-src/,
   );
+});
+
+test("the build's only input is index.html, so the dev-only gallery stays out of the shipped bundle", async () => {
+  const config = await resolveConfig({ configFile: "vite.config.ts", logLevel: "silent" }, "build");
+  expect(config.build.rolldownOptions.input).toBeUndefined();
+  expect(config.build.assetsInlineLimit).toBe(0);
 });

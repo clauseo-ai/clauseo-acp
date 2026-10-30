@@ -38,7 +38,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.
 - `crates/reducer`: the pure fold from events to state and view changes, and snapshots; its gungraun bench is `crates/reducer_bench` (Linux).
 - `crates/store`: the event log, snapshots, blobs and receipts in one SQLite file; format in `docs/decisions/0006-store-format.md`.
-- `ui/app`: the React app. Empty for now. Tauri APIs only under `ui/app/src/transport/`.
+- `ui/app`: the React app, empty for now; `ui/components`: its tokens, icons, words and controls, checked by ui/app's scripts. Tauri APIs only under `ui/app/src/transport/`.
 - `xtask`: checks, build timing, budgets. Builds without any app crate. Frozen: no new checks.
 
 ## Never

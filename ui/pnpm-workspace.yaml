@@ -1,6 +1,15 @@
 packages:
   - "app"
+  - "components"
   - "e2e"
+
+# The one home of a version two packages share; each names it as "catalog:".
+catalog:
+  "@types/react": "19.2.18"
+  "@types/react-dom": "19.2.7"
+  react: "19.2.8"
+  react-dom: "19.2.8"
+  vitest: "4.1.11"
 
 minimumReleaseAge: 10080 # 7 days, in minutes; pnpm 11 default is 1440
 minimumReleaseAgeExclude: [] # add exact name@version only for urgent security fixes, with a dated comment

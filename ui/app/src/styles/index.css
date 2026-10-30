@@ -1,0 +1,13 @@
+/* One stylesheet for every page: Tailwind's preflight and utilities, without its theme, so only Clauseo's tokens
+   (ui/components' tokens.css) exist as classes. The utilities are built from the classes in the app and in
+   ui/components, which sits outside this package, so it is named as a source. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@source "../../../components/src";
+@source "..";
+
+@import "@clauseo/components/styles/tokens.css";
+@import "./fonts.css";
+@import "@clauseo/components/styles/base.css";
+@import "@clauseo/components/styles/primitives.css";
