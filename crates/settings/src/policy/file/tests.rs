@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::files::Files;
 use crate::leaf::Leaf;
 use crate::policy::{FilePolicy, PolicyRead, PolicySource};
-use crate::schema::Theme;
+use crate::schema::{Density, Theme};
 use crate::testing::MemFiles;
 use crate::warning::{Origin, Position, WarningKind};
 use std::path::{Path, PathBuf};
@@ -96,4 +96,27 @@ fn system_policy_absent_on_clean_machine() {
     for source in &sources {
         assert!(matches!(source.read(), PolicyRead::Absent));
     }
+}
+
+#[test]
+fn a_key_set_twice_keeps_its_last_value_as_in_settings_json() {
+    let values = parse(
+        Path::new(PATH),
+        br#"{"ui": {"theme": "purple", "density": "compact", "theme": "dark"}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        values.into_parts().0,
+        [Leaf::Density(Density::Compact), Leaf::Theme(Theme::Dark)]
+    );
+    // The other order: the last value does not type, so the key is locked at its default.
+    let values = parse(
+        Path::new(PATH),
+        br#"{"ui": {"theme": "dark", "theme": "purple"}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        values.into_parts().0,
+        [Leaf::Refused("ui.theme".to_owned())]
+    );
 }

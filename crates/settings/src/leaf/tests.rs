@@ -229,27 +229,43 @@ fn every_fixed_key_types_and_the_kinds_agree() {
 
 #[test]
 fn a_refused_key_goes_back_to_its_default() {
-    let mut settings = Settings::default();
-    settings.matters.default_location = Some(abs("m"));
-    settings.ui.theme = Theme::Dark;
-    settings.ui.font_size = FontSize::try_from(20).unwrap();
-    settings.ui.density = Density::Compact;
-    settings.ui.language = Language::try_from("fr".to_owned()).unwrap();
+    // One value per KEYS row that is not its default, so a row with no `reset` arm leaves its
+    // value in force and fails below.
+    let samples = [
+        json!(abs_str("m")),
+        json!("dark"),
+        json!(20),
+        json!("compact"),
+        json!("fr"),
+    ];
+    assert_eq!(samples.len(), KEYS.len());
+    for ((key, _), sample) in KEYS.iter().zip(samples) {
+        let mut settings = Settings::default();
+        one(key, sample).unwrap().apply(&mut settings);
+        assert_ne!(
+            settings,
+            Settings::default(),
+            "{key}: the sample is the default"
+        );
+        let refused = Leaf::Refused((*key).to_owned());
+        assert_eq!(refused.key(), *key);
+        assert!(!refused.is_value());
+        refused.apply(&mut settings);
+        assert_eq!(
+            settings,
+            Settings::default(),
+            "{key} did not go back to its default"
+        );
+    }
+    // An agent's refused key drops that agent and no other.
     let launch = AgentLaunch {
         command: abs_str("bin/x"),
         args: Vec::new(),
         env: BTreeMap::new(),
     };
+    let mut settings = Settings::default();
     settings.agents.insert("x".to_owned(), launch.clone());
     settings.agents.insert("y".to_owned(), launch);
-    for (key, _) in KEYS {
-        let refused = Leaf::Refused(key.to_owned());
-        assert_eq!(refused.key(), key);
-        assert!(!refused.is_value());
-        refused.apply(&mut settings);
-    }
     Leaf::Refused("agents.x".to_owned()).apply(&mut settings);
-    assert_eq!(settings.matters, Settings::default().matters);
-    assert_eq!(settings.ui, Settings::default().ui);
     assert_eq!(settings.agents.keys().collect::<Vec<_>>(), ["y"]);
 }
