@@ -5,16 +5,17 @@ import { defineConfig } from "@playwright/test";
  * launched: the tests attach to the app's own WebView2.
  *
  * The file name picks the project: `*.test.ts` is a pure unit test that runs on any OS,
- * `*.spec.ts` drives the real app and runs on Windows only. The unit tests use Playwright's runner
+ * `*.spec.ts` drives the real app and runs on Windows only. scoreboard/ holds the speed
+ * scoreboard's shared metrics and comment code (R13), which has unit tests only. The unit tests use Playwright's runner
  * rather than ui/app's vitest, so this package needs no second test dependency.
  */
 export default defineConfig({
-  testDir: "app-windows",
+  testDir: ".",
   projects: [
-    // Pure functions of the harness, on any OS: `pnpm run test:unit`.
-    { name: "unit", testMatch: "**/*.test.ts" },
+    // Pure functions of the harness and the scoreboard, on any OS: `pnpm run test:unit`.
+    { name: "unit", testMatch: ["app-windows/**/*.test.ts", "scoreboard/**/*.test.ts"] },
     // The real app, Windows only: `pnpm test`.
-    { name: "app", testMatch: "**/*.spec.ts" },
+    { name: "app", testMatch: "app-windows/**/*.spec.ts" },
   ],
   // One app at a time: the single-instance plugin ends a second launch.
   workers: 1,

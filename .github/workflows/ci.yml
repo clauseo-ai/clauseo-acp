@@ -17,7 +17,9 @@
 #   still reports its check as "mutants". It only reports: a missed mutant never fails the run.
 # - The Linux job runs the tests with the network cut off, so a test that reaches the network fails.
 # - reducer-bench counts clauseo-reducer's instructions under Valgrind on every run and, on a pull
-#   request, compares them with the merge-base on main.
+#   request, compares them with the merge-base on main. It uploads the counts as the
+#   reducer-bench-summary artifact, which the speed scoreboard's comment reads
+#   (scoreboard-comment.yml).
 # - Every action is pinned by commit SHA, with its tag in a comment.
 
 name: CI
@@ -397,6 +399,9 @@ jobs:
   # - The soft limit is in apply.rs, not on the command line: gungraun's `--callgrind-limits`
   #   replaces each case's own limits, hard ones included. A run without `--baseline` compares with
   #   nothing, so it checks the hard limits only.
+  # - The head run saves each case's summary (`--save-summary=json`); the job joins them into one
+  #   JSON array and uploads it as reducer-bench-summary, even when the bench failed, so the
+  #   scoreboard comment shows this run's counts next to main's (scoreboard-comment.yml).
   reducer-bench:
     name: reducer-bench
     runs-on: ubuntu-24.04
@@ -463,10 +468,31 @@ jobs:
             fi
           fi
           if [ "$baseline" = true ] && [ "$BENCH_OK" != true ]; then
-            "${bench[@]}" --baseline=main
+            "${bench[@]}" --baseline=main --save-summary=json
           else
             if [ "$BENCH_OK" = true ]; then
               echo "Label bench-ok: hard limits only"
             fi
-            "${bench[@]}"
+            "${bench[@]}" --save-summary=json
           fi
+
+      # One file for the artifact: every summary.json of the head run, as a JSON array. The base
+      # run saves none, and the step before removed any from a cached run.
+      - name: Collect the instruction counts
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          mapfile -d '' summaries < <(find "$CARGO_TARGET_DIR/gungraun" -name summary.json -print0 2>/dev/null | sort -z)
+          if [ "${#summaries[@]}" -eq 0 ]; then
+            echo "No gungraun summary.json: the bench did not get as far as a case."
+            exit 0
+          fi
+          jq -s . "${summaries[@]}" > "$RUNNER_TEMP/reducer-bench-summary.json"
+          echo "${#summaries[@]} cases in reducer-bench-summary.json"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: reducer-bench-summary
+          path: ${{ runner.temp }}/reducer-bench-summary.json
+          if-no-files-found: warn

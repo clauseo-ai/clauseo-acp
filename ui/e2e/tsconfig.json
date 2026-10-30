@@ -18,5 +18,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["playwright.config.ts", "app-windows"]
+  "include": ["playwright.config.ts", "app-windows", "scoreboard"]
 }
