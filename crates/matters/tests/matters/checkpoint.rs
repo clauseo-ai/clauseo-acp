@@ -1,7 +1,7 @@
 //! `before_turn` and `after_turn`: reuse, the diff, the lawyer-edits flag, the exclusion list and
 //! racily clean files.
 
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use clauseo_matters::{CheckpointOutcome, Limits, TimelineEntry};
 use clauseo_protocol::CheckpointKind;
@@ -189,8 +189,13 @@ fn office_lock_files_never_versioned() {
 fn same_size_rewrite_in_same_second_is_seen() {
     let fx = Fixture::new("racy");
     fx.write("a.txt", "aaaa");
+    // An mtime after every write of the stat cache (2100-01-01, within the index's 32-bit
+    // seconds), so the file is racily clean however slow the machine is. The write's own mtime
+    // is racy only while the cache is written within 2 s of it; past that, the rewrite below has
+    // an equal stat on Windows (ctime is the creation time there) and is rightly not read.
+    let old = SystemTime::UNIX_EPOCH + Duration::from_secs(4_102_444_800);
+    support::set_mtime(fx.file("a.txt"), old);
     let mut matter = fx.import();
-    let old: SystemTime = fx.file("a.txt").metadata().unwrap().modified().unwrap();
     assert_eq!(matter.before_turn(&meta(2)).unwrap().outcome.id(), cid(1));
 
     fx.write("a.txt", "bbbb");
