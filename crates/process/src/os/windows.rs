@@ -9,6 +9,7 @@
 )]
 
 use std::io;
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::os::windows::process::CommandExt;
 use std::process::Command;
 
@@ -39,13 +40,11 @@ pub(crate) fn prepare(command: &mut Command, opts: &SpawnOptions) {
 }
 
 /// The agent's Job Object. Dropping it closes the handle, which ends what is left of the tree.
+/// An `OwnedHandle`, so the tree is `Send + Sync` as on Unix, and closes once on drop.
 #[derive(Debug)]
 pub(crate) struct Tree {
-    job: HANDLE,
+    job: OwnedHandle,
 }
-
-// SAFETY: a job handle is a kernel handle that any thread may use; only `Drop` closes it.
-unsafe impl Send for Tree {}
 
 impl Tree {
     /// The tree of `child`, just started suspended from a `prepare`d command: a new job holds it,
@@ -71,10 +70,15 @@ impl Tree {
         Ok(tree)
     }
 
-    /// Ends every process in the job.
-    pub(crate) fn kill(&self) {
-        // SAFETY: `self.job` is a job handle `self` holds.
-        drop(unsafe { TerminateJobObject(self.job, TERMINATED) });
+    /// Ends every process in the job. Returns whether Windows took the call.
+    pub(crate) fn kill(&self) -> bool {
+        // SAFETY: `self.job()` is the job handle `self` owns, open until `self` drops.
+        unsafe { TerminateJobObject(self.job(), TERMINATED) }.is_ok()
+    }
+
+    /// The job handle, borrowed for a Win32 call.
+    fn job(&self) -> HANDLE {
+        HANDLE(self.job.as_raw_handle())
     }
 
     /// A new job that ends its processes when its last handle closes.
@@ -83,6 +87,9 @@ impl Tree {
         // owned by the `Tree` built from it, which closes it once.
         let job = unsafe { CreateJobObjectW(None, PCWSTR::null()) }
             .map_err(|error| os_error("could not create a job object", error))?;
+        // SAFETY: `job` is the open handle CreateJobObjectW just returned, which nothing else owns
+        // or closes; the `OwnedHandle` closes it once, on drop.
+        let job = unsafe { OwnedHandle::from_raw_handle(job.0) };
         let tree = Tree { job };
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -94,10 +101,10 @@ impl Tree {
                 }
             })?;
         // SAFETY: `limits` is a live JOBOBJECT_EXTENDED_LIMIT_INFORMATION of `size` bytes, the
-        // struct this information class takes, and `tree.job` is a job handle `tree` holds.
+        // struct this information class takes, and `tree.job()` is the job handle `tree` owns.
         unsafe {
             SetInformationJobObject(
-                tree.job,
+                tree.job(),
                 JobObjectExtendedLimitInformation,
                 (&raw const limits).cast(),
                 size,
@@ -108,29 +115,25 @@ impl Tree {
     }
 }
 
-impl Drop for Tree {
-    fn drop(&mut self) {
-        // SAFETY: `self.job` is a handle this tree owns and closes only here.
-        drop(unsafe { CloseHandle(self.job) });
-    }
-}
-
 /// Puts process `pid` in `tree`'s job. async-process gives no process handle, so one is opened by
 /// pid: the caller's `Child` holds its own handle, so the pid cannot be reused meanwhile.
 fn join(tree: &Tree, pid: u32) -> Result<(), Error> {
     // SAFETY: opening a process by id takes no pointer; the handle is closed below.
     let process = unsafe { OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, pid) }
         .map_err(|error| os_error("could not open the agent's process", error))?;
-    // SAFETY: `tree.job` is the job handle `tree` holds, and `process` the live handle opened
+    // SAFETY: `tree.job()` is the job handle `tree` owns, and `process` the live handle opened
     // above with the rights AssignProcessToJobObject needs.
-    let joined = unsafe { AssignProcessToJobObject(tree.job, process) };
+    let joined = unsafe { AssignProcessToJobObject(tree.job(), process) };
     // SAFETY: `process` is a handle this function owns and closes only here.
     drop(unsafe { CloseHandle(process) });
     joined.map_err(|error| os_error("could not put the agent in its job", error))
 }
 
 /// Resumes every thread of process `pid`, which started suspended. Std gives no thread handle, so
-/// the threads are found with a Toolhelp snapshot. Fails when it resumes none.
+/// the threads are found with a Toolhelp snapshot. Fails unless at least one thread was suspended
+/// and resumed: a thread whose suspend count was already 0 means `CREATE_SUSPENDED` was lost and
+/// the agent ran before it joined its job. A running thread beside a suspended one is not that
+/// (security software can inject one), so it does not fail the launch.
 fn resume(pid: u32) -> Result<(), Error> {
     // Before the snapshot opens, so no early return leaves its handle open.
     let mut entry = THREADENTRY32 {
@@ -145,18 +148,29 @@ fn resume(pid: u32) -> Result<(), Error> {
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) }
         .map_err(|error| os_error("could not list the agent's threads", error))?;
     let mut resumed = 0_usize;
+    let mut running = 0_usize;
     // SAFETY: `snapshot` is the live snapshot handle and `entry` a THREADENTRY32 whose `dwSize`
     // is set, as Thread32First and Thread32Next require.
     let mut next = unsafe { Thread32First(snapshot, &raw mut entry) };
     while next.is_ok() {
-        if entry.th32OwnerProcessID == pid && resume_thread(entry.th32ThreadID) {
-            resumed += 1;
+        if entry.th32OwnerProcessID == pid {
+            match resume_thread(entry.th32ThreadID) {
+                Resume::Resumed => resumed += 1,
+                Resume::WasRunning => running += 1,
+                Resume::Failed => {}
+            }
         }
         // SAFETY: as for Thread32First above.
         next = unsafe { Thread32Next(snapshot, &raw mut entry) };
     }
     // SAFETY: `snapshot` is a handle this function owns and closes only here.
     drop(unsafe { CloseHandle(snapshot) });
+    if resumed == 0 && running > 0 {
+        return Err(Error::Os {
+            what: "the agent did not start suspended",
+            source: io::Error::other("its threads were already running"),
+        });
+    }
     if resumed == 0 {
         return Err(Error::Os {
             what: "could not resume the agent, which started suspended",
@@ -166,17 +180,31 @@ fn resume(pid: u32) -> Result<(), Error> {
     Ok(())
 }
 
-/// Resumes thread `id`. Returns whether it did.
-fn resume_thread(id: u32) -> bool {
+/// What [`resume_thread`] found.
+enum Resume {
+    /// The thread was suspended, and now runs.
+    Resumed,
+    /// The thread's suspend count was already 0: it was running.
+    WasRunning,
+    /// The thread could not be opened or resumed.
+    Failed,
+}
+
+/// Resumes thread `id`. `ResumeThread` returns the previous suspend count, `u32::MAX` on error.
+fn resume_thread(id: u32) -> Resume {
     // SAFETY: opening a thread by id takes no pointer; the handle is closed below.
     let Ok(thread) = (unsafe { OpenThread(THREAD_SUSPEND_RESUME, false, id) }) else {
-        return false;
+        return Resume::Failed;
     };
     // SAFETY: `thread` is a live handle opened with THREAD_SUSPEND_RESUME.
     let count = unsafe { ResumeThread(thread) };
     // SAFETY: `thread` is a handle this function owns and closes only here.
     drop(unsafe { CloseHandle(thread) });
-    count != u32::MAX
+    match count {
+        u32::MAX => Resume::Failed,
+        0 => Resume::WasRunning,
+        _ => Resume::Resumed,
+    }
 }
 
 /// An [`Error::Os`] saying `what` failed, with the Win32 error.
