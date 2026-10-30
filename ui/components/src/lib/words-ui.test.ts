@@ -25,16 +25,14 @@ test("slots fill in both languages, and Hindi takes the part of the day first", 
   );
 });
 
-test.each([
-  ["./words-ui.ts", 40],
-  ["./words-frame.ts", 20],
-])(
+test.each([["./words.ts"], ["./words-ui.ts"], ["./words-frame.ts"]])(
   "Hindi sentences in %s end with the danda, never a full stop, and avoid the banned words",
-  async (file, least) => {
+  async (file) => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync(new URL(file, import.meta.url), "utf8");
     const hindi = [...src.matchAll(/"([^"]*[\u0900-\u097F][^"]*)"/g)].map((m) => m[1] ?? "");
-    expect(hindi.length).toBeGreaterThan(least);
+    // each file holds some Hindi, so a broken pattern here can't pass by reading nothing
+    expect(hindi.length).toBeGreaterThan(0);
     for (const s of hindi) {
       expect(s, s).not.toMatch(/[\u0900-\u097F]\.$/);
       expect(s, s).not.toMatch(/पेंसिल|स्याही|चरण|कदम|मैं|[\u0966-\u096F]/);

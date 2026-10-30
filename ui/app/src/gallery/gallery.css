@@ -1,0 +1,4 @@
+/* The dev-only gallery's stylesheet: the design system's, with the gallery's own layout classes. It is a separate
+   entry from the app's index.css, which leaves the gallery out of its sources. */
+@import "../styles/system.css";
+@source ".";

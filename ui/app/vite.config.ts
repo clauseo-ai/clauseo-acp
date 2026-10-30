@@ -88,6 +88,8 @@ export default defineConfig({
         extends: true,
         test: {
           name: "components",
+          // ui/components' tests that ask for "// @vitest-environment happy-dom" get it from ui/app's devDependencies:
+          // vitest runs from here, so the environment resolves here.
           root: "../components",
           include: ["src/**/*.test.{ts,tsx}"],
           environment: "node",

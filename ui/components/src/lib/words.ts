@@ -52,7 +52,7 @@ export function clock(lang: Lang, time: string): string {
   });
 }
 
-/** The words of the page's language, bound: const w = useWords(); w.t("Turn to it"). */
+/** The words of the page's language, bound: const w = useWords(); w.t("{n} more", { n: 3 }). */
 export function useWords() {
   const { lang } = useDisplay();
   return {

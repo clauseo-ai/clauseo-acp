@@ -1,7 +1,8 @@
-// The words of the window's frame: the title bar on Windows, the plan meter's states, the matter list's states and the settings. As in words.ts the English is the
-// key, the exact string on screen, and a key with slots fills them in either language; {time} takes clock(), so
-// Hindi puts the part of the day first. The Hindi is a specialist's draft, waiting for a Hindi-speaking lawyer: the
-// formal आप, the danda, Western digits, English names in Latin script, which <Mixed> sets in lang="en" runs.
+// The words of the window's frame: the title bar on Windows, the plan meter's states, the matter list's states and
+// the settings. As in words.ts the English is the key, the exact string on screen, and a key with slots fills them in
+// either language; {time} takes clock(), so Hindi puts the part of the day first. The Hindi is a specialist's draft,
+// waiting for a Hindi-speaking lawyer: the formal आप, the danda, Western digits, English names in Latin script, which
+// <Mixed> sets in lang="en" runs.
 import type { Lang } from "./display.ts";
 
 const HI = {

@@ -8,8 +8,9 @@ export type PlanState = "plenty" | "close" | "reached";
 
 /** The plan meter: the plan's name in primary with a 44 by 4 px meter, primary on the inset tone, and what's left
  * beneath it in the muted tone. From close to the limit, the line turns to primary at the chip's weight, so it's
- * noticed by its words and weight without any amber; reached, the meter stands empty as well. The meter tells assistive technology the same in words. The meter's words are
- * part of the title bar, so a press on them drags the window, as the toolbar's empty space does. */
+ * noticed by its words and weight without any amber; reached, the meter stands empty as well. The meter tells
+ * assistive technology the same in words. The meter's words are part of the title bar, so a press on them drags the
+ * window, as the toolbar's empty space does. */
 export function PlanMeter({
   name,
   value,
