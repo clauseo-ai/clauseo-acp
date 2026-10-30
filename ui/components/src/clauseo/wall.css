@@ -1,0 +1,423 @@
+/* The wall. The matter's papers as a facade of tiles set back on the ground, then the citations, on the tokens. */
+
+@layer components {
+  .room-pane {
+    grid-area: pane;
+    padding: var(--s1) var(--s5) var(--s2) calc(var(--overlap) + var(--s5));
+    margin-bottom: var(--pill-clear);
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s5);
+  }
+
+  /* section heads: a title, its count, one quiet action; quieter than anything in the work */
+  .wall-head {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-height: var(--size-control-small);
+  }
+  .wall-title {
+    @apply text-ui stretch-voice font-chip text-primary tracking-head;
+    white-space: nowrap;
+  }
+  .wall-count {
+    @apply font-ui text-quiet;
+    margin-left: var(--s0-5);
+  }
+  .wall-sub {
+    @apply text-small text-quiet;
+    margin-left: var(--s1);
+    min-width: 0;
+  }
+  .wall-action {
+    margin-left: auto;
+    margin-right: calc(-1 * var(--s3));
+    flex: none;
+  }
+
+  /* ---------- the facade: every tile one size, the chips on one line across each row ---------- */
+  .facade {
+    --num-h: calc(var(--lh-numeral) * var(--k));
+    --title-h: calc(var(--lh-tile) * var(--k));
+    --slot-h: calc(var(--slot) * var(--k));
+    --tile-h: calc(
+      var(--tile-pad) + var(--num-h) + var(--title-h) + var(--slot-gap) + var(--slot-h) +
+        var(--tile-pad)
+    );
+    margin-top: var(--s2);
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    /* a title that wraps makes its row taller, and every tile in the row with it */
+    grid-auto-rows: minmax(var(--tile-h), auto);
+    gap: var(--tile-gap);
+  }
+  .tile {
+    position: relative;
+  }
+  .tile:is([data-hand], [data-force~="hand"]) {
+    z-index: 3;
+  }
+  /* uncited: flat on the wall, no shadow, no highlight */
+  .tile-face {
+    --c: var(--flat);
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: var(--tile-pad) var(--tile-pad) calc(var(--tile-pad) + var(--slot-h) + var(--slot-gap));
+    border-radius: var(--r-control);
+    background: var(--flat);
+    text-align: left;
+    color: var(--primary);
+    contain: layout style;
+    cursor: default;
+    transition:
+      background-color var(--dur-arrive) var(--ease-arrive),
+      color var(--dur-arrive) var(--ease-arrive),
+      transform var(--dur-forward) var(--ease-arrive);
+  }
+  .tile:not([data-state="uncited"]) .tile-face {
+    cursor: pointer;
+  }
+  .tile[data-state="uncited"] .tile-face {
+    padding-bottom: var(--tile-pad);
+  }
+  /* the longer shadow of a tile brought forward, laid in once and faded by opacity alone */
+  .tile-face::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow: var(--raised-lift);
+    opacity: 0;
+    transition: opacity var(--dur-forward) var(--ease-arrive);
+  }
+  @media (hover: hover) {
+    .tile[data-state="uncited"] .tile-face:hover {
+      background: var(--flat-hover);
+    }
+  }
+  /* a hovered tile laid out at rest with data-force, as a control can be */
+  .tile[data-state="uncited"][data-force~="hover"] .tile-face {
+    background: var(--flat-hover);
+  }
+  .tile-face:active {
+    transform: scale(var(--press-scale));
+    transition-duration: var(--dur-press);
+  }
+  /* under reduced motion the move lands at once; colour keeps its short change */
+  [data-motion="reduced"] :is(.tile-face, .cite-row) {
+    transition-property: background-color, color;
+  }
+
+  .tile-no {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s1);
+    height: var(--num-h);
+    white-space: nowrap;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .tile-num {
+    @apply font-numeral text-numeral stretch-broad font-monument tracking-numeral text-flat-num;
+    line-height: var(--num-h);
+  }
+  .tile-num[data-word] {
+    @apply text-numeral-word tracking-numeral-word;
+    line-height: var(--num-h);
+  }
+  /* a word in a numeral's place is 22 px, too small for the flat numeral's 3.2:1, so uncited it takes the quiet tone */
+  .tile[data-state="uncited"] .tile-num[data-word] {
+    color: var(--quiet);
+  }
+  .tile:not([data-state="uncited"]) .tile-num {
+    color: currentColor;
+  }
+  .tile-to {
+    @apply text-tight stretch-wide text-quiet;
+  }
+  .tile-title {
+    @apply text-tile-title stretch-tile-title text-quiet deva-nudge;
+    line-height: var(--title-h);
+    max-width: 100%;
+    display: block;
+    overflow-wrap: anywhere;
+  }
+  .tile:not([data-state="uncited"]) .tile-title {
+    color: currentColor;
+  }
+  .tile[data-state="accepted"] .tile-title {
+    font-weight: var(--w-accepted);
+  }
+  .tile[data-state="prepared"] .tile-title {
+    font-weight: var(--w-clauseo);
+  }
+  /* the chip's slot: one inset from the tile's bottom-left corner, on every tile */
+  .tile-foot {
+    position: absolute;
+    left: var(--tile-pad);
+    bottom: var(--tile-pad);
+    display: flex;
+    height: var(--slot-h);
+    overflow: hidden;
+    border-radius: var(--r-label);
+  }
+
+  /* cited: the court's colour, lit and staying lit */
+  .tile[data-state="supports"] .tile-face {
+    --c: var(--green);
+  }
+  .tile[data-state="against"] .tile-face {
+    --c: var(--red);
+  }
+  .tile[data-state="prepared"] .tile-face {
+    --c: var(--yellow);
+  }
+  .tile:is([data-state="supports"], [data-state="against"], [data-state="prepared"]) .tile-face {
+    background: var(--c);
+    box-shadow: var(--lit);
+  }
+  .tile:is([data-state="supports"], [data-state="against"]) .tile-face {
+    color: var(--on-colour);
+  }
+  .tile[data-state="prepared"] .tile-face {
+    color: var(--on-yellow);
+    box-shadow: var(--lit-y);
+  }
+  .tile:is([data-state="relied"], [data-state="accepted"]) .tile-face {
+    --c: var(--surface);
+    background: var(--surface);
+    box-shadow: var(--raised);
+  }
+  .tile:is([data-state="relied"], [data-state="accepted"]) .tile-num {
+    color: var(--primary);
+  }
+  .tile:not([data-state="uncited"]) ::selection {
+    background: var(--on-colour);
+    color: var(--on-yellow);
+  }
+  @media (hover: hover) {
+    .tile:not([data-state="uncited"]) .tile-face:hover {
+      background: var(--c);
+      transform: translateY(var(--lift));
+    }
+    .tile:not([data-state="uncited"]) .tile-face:hover::after {
+      opacity: 1;
+    }
+  }
+  .tile:not([data-state="uncited"])[data-force~="hover"] .tile-face {
+    background: var(--c);
+    transform: translateY(var(--lift));
+  }
+  .tile:not([data-state="uncited"])[data-force~="hover"] .tile-face::after {
+    opacity: 1;
+  }
+  .tile:not([data-state="uncited"]) .tile-face:active {
+    transform: scale(var(--press-scale));
+  }
+  .tile:not([data-state="uncited"]) .tile-face:active::after {
+    opacity: 0;
+  }
+  /* in hand: forward off the wall toward the work, with the longer shadow */
+  .tile:is([data-hand], [data-force~="hand"]) .tile-face {
+    transform: var(--hand-tile);
+  }
+  .tile:is([data-hand], [data-force~="hand"]) .tile-face::after {
+    opacity: 1;
+    box-shadow: var(--e-hand);
+  }
+  .tile-face > *,
+  .cite-row > * {
+    transition: opacity var(--dur-words-out) linear var(--delay-words);
+  }
+  /* under its card the tile stays on the wall and its own words step out */
+  .tile[data-carded] .tile-face > *,
+  .cite-row[data-carded] > * {
+    opacity: 0;
+    transition-delay: 0s;
+  }
+  .tile[data-carded] .tile-face {
+    transform: none;
+  }
+
+  /* Hindi: the title takes 96%, stands 2 px lower to clear the numeral, and the tile's top padding gives the 2 px back */
+  :root:lang(hi) .facade {
+    --slot-gap: var(--s1);
+  }
+  :root:lang(hi) .tile-face {
+    padding-top: calc(var(--tile-pad) - var(--s0-5));
+  }
+  :root:lang(hi) .tile-title {
+    /* every title on a Hindi wall takes the near-reading width, an English one as filed too */
+    font-stretch: var(--wd-label-hi);
+    margin-top: var(--s0-5);
+    margin-right: calc(-1 * var(--s1));
+    max-width: calc(100% + var(--s1));
+  }
+
+  /* ---------- citations: two-line rows on the ground ---------- */
+  .cite-list {
+    margin: var(--s1) calc(-1 * var(--s3)) 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s0-5);
+  }
+  .cite-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--s5) minmax(0, 1fr) auto;
+    column-gap: var(--s3);
+    row-gap: var(--s0-5);
+    padding: var(--s1-5) var(--s3);
+    border-radius: var(--r-tile);
+    cursor: default;
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      transform var(--dur-forward) var(--ease-arrive);
+  }
+  .cite {
+    position: relative;
+  }
+  .cite:has([data-hand]) {
+    z-index: 3;
+  }
+  .cite-row::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow: var(--e-hand);
+    opacity: 0;
+    transition: opacity var(--dur-forward) var(--ease-arrive);
+  }
+  .cite-row:has(:focus-visible) {
+    background: var(--tile-hover);
+    box-shadow: var(--e0);
+  }
+  @media (hover: hover) {
+    .cite-row:hover {
+      background: var(--tile-hover);
+      box-shadow: var(--e0);
+    }
+  }
+  .cite-row[data-hand] {
+    background: var(--surface);
+    box-shadow: none;
+    transform: var(--hand-row);
+  }
+  .cite-row[data-hand]::after {
+    opacity: 1;
+  }
+  .cite-mark {
+    grid-row: 1;
+    height: var(--cite-line);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .bench {
+    display: block;
+    flex: none;
+    border-radius: var(--r-round);
+    background: var(--primary);
+  }
+  .bench[data-stance="against"] {
+    background: var(--red);
+  }
+  .bench[data-bench="constitution"] {
+    width: var(--s4);
+    height: var(--s4);
+  }
+  .bench[data-bench="three"] {
+    width: var(--s3);
+    height: var(--s3);
+  }
+  .bench[data-bench="two"] {
+    width: var(--s2);
+    height: var(--s2);
+  }
+  .bench[data-bench="single"] {
+    width: var(--s1-5);
+    height: var(--s1-5);
+  }
+  .bench[data-bench="tribunal"] {
+    width: var(--s1);
+    height: var(--s1);
+  }
+  .cite-name {
+    @apply text-ui-loose;
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+  }
+  /* a citation's first line holds a judgment's English name and a chip, so it keeps the Latin line in Hindi */
+  :root:lang(hi) .cite-name {
+    line-height: var(--cite-line);
+  }
+  .cite-name a {
+    text-decoration: underline;
+    text-decoration-thickness: var(--hairline);
+    text-decoration-color: var(--ref-line-quiet);
+    text-underline-offset: var(--cite-offset);
+    padding: var(--s1) 0;
+    border-radius: var(--r-ref);
+    /* its own taller cut inside a Hindi line hangs from the line's top, so it never pushes the line */
+    vertical-align: top;
+    cursor: pointer;
+  }
+  .cite-name a:hover,
+  .cite-row[data-hand] .cite-name a {
+    text-decoration-color: var(--primary);
+  }
+  .cite-name a:active {
+    text-decoration-thickness: var(--underline-firm);
+  }
+  .cite-stance {
+    grid-column: 3;
+    grid-row: 1;
+    align-self: center;
+  }
+  /* the citation is never cut short: it wraps under its chip, and its identifiers hold together */
+  .cite-check {
+    @apply text-small-row text-muted;
+    grid-column: 2 / 4;
+    grid-row: 2;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s2);
+    min-width: 0;
+  }
+  .cite-where {
+    min-width: 0;
+    font-stretch: var(--wd-wide);
+  }
+  .cite-empty {
+    @apply text-small-row text-quiet;
+    margin-top: var(--s2);
+  }
+}
+
+/* in hand, a tile comes forward toward the work and a row lifts. Under reduced motion it lands there at once: the
+   transition goes, the state stays */
+@variant max-mid {
+  :root {
+    --hand-tile: var(--hand-tile-narrow);
+    --hand-row: none;
+  }
+}
+
+/* "N more": a quiet strip in the wall's own tone, directly under the last whole row and as wide as the rows. Outside
+   the layers, so it sets the fold trigger's own width and margins. */
+.cite-more {
+  width: calc(100% + 2 * var(--s3));
+  margin: 0 calc(-1 * var(--s3));
+}

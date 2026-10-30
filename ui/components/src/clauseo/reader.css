@@ -1,0 +1,416 @@
+/* The reader's parts. The judgment reader and the pane beside it, Indian Kanoon's results,
+   its guard and its absence, the CCI and NCLAT index, and the draft in review with its tracked changes and its
+   citations checked. Every value comes from a token. */
+
+@layer components {
+  /* ---------- the frame a reading opens in, over the thread, above the composer ---------- */
+  .rd-reader {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: var(--composer-h, var(--composer-h-rest));
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    background: var(--desk);
+    border-radius: var(--r-surface) var(--r-surface) 0 0;
+  }
+  .rd-reader[data-leaving] {
+    pointer-events: none;
+  }
+  /* once the reader has grown over it, the thread steps out of reach; it comes back at once, exactly where it was */
+  .room-centre[data-reading] .room-thread {
+    visibility: hidden;
+    transition: visibility 0s linear var(--dur-turn);
+  }
+  .room-centre[data-reading] .room-pin {
+    visibility: hidden;
+  }
+  .rd-bar {
+    flex: none;
+    background: var(--surface);
+    border-radius: var(--r-surface) var(--r-surface) 0 0;
+    display: flex;
+    align-items: center;
+    gap: var(--s2) var(--s3);
+    padding: var(--s3) calc(var(--gutter) - var(--s3)) var(--s3) calc(var(--gutter) - var(--s3));
+    box-shadow: 0 var(--hairline) 0 var(--divide);
+    position: relative;
+    z-index: 1;
+  }
+  .rd-what {
+    @apply text-small-row text-muted;
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--s0-5) var(--s2);
+  }
+  /* the title holds one line while the bar has room for it, and wraps only when it's truly short of room: the bar's
+     tools may run past the reading column into the margin, to the bar's own edge, rather than squeeze the title */
+  .rd-what b {
+    @apply font-ui text-primary;
+    min-width: 0;
+    text-wrap: pretty;
+  }
+  @variant wide {
+    .rd-bar {
+      padding-right: var(--s4);
+    }
+  }
+  .rd-what-quiet {
+    white-space: nowrap;
+  }
+  .rd-what-ik {
+    margin-left: var(--s2);
+  }
+  .rd-word,
+  .rd-word-since {
+    flex: none;
+  }
+  .rd-word {
+    gap: var(--s2);
+  }
+  .rd-word-since {
+    @apply text-small-row text-muted;
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--size-control-small);
+    padding: 0 var(--s3);
+    border-radius: var(--r-small);
+    background: var(--well-strong);
+    box-shadow: var(--set-in-field);
+  }
+  .rd-desk-wrap {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .rd-desk {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    padding: var(--s7) var(--s6) var(--s10);
+    scroll-padding-top: var(--rd-pin-h);
+  }
+  .rd-desk:focus-visible {
+    outline: var(--ring-w) solid var(--primary);
+    outline-offset: var(--ring-inset);
+  }
+
+  /* the quoted paragraph, pinned once it has scrolled away: a press brings it back */
+  .rd-pin {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 2;
+    display: grid;
+    gap: var(--s0-5);
+    padding: var(--pin-pad-y) var(--gutter);
+    text-align: left;
+    background: var(--surface);
+    box-shadow: var(--shadow-pin);
+    cursor: pointer;
+    transition: background-color var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-surface-hover is-active:bg-well;
+  }
+  .rd-pin[hidden] {
+    display: none;
+  }
+  .rd-pin:focus-visible {
+    outline-offset: var(--ring-inset);
+  }
+  .rd-pin-who {
+    @apply text-small text-muted;
+  }
+  .rd-pin-text {
+    @apply text-ui-loose font-clauseo stretch-read text-primary;
+    max-width: var(--measure);
+  }
+
+  /* ---------- a judgment's sheet ---------- */
+  .rd-page {
+    hanging-punctuation: first allow-end last;
+  }
+  .rd-title {
+    @apply tracking-caps;
+    text-transform: uppercase;
+  }
+  .rd-bench {
+    @apply text-small-row text-muted stretch-wide;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--s2);
+    margin-top: var(--s2);
+  }
+  .rd-paras {
+    margin-top: var(--s7);
+    display: grid;
+    gap: var(--para-gap);
+    list-style: none;
+    padding: 0;
+  }
+  .rd-para {
+    position: relative;
+  }
+  .rd-para p {
+    @apply text-read;
+  }
+  /* the paragraph's number hangs in the sheet's margin, in the numerals' broad cut */
+  /* the numerals' broad cut: 125% wide at the chip's weight, in the quiet tone */
+  .rd-num {
+    @apply font-numeral text-small-row text-quiet stretch-broad font-chip;
+    position: absolute;
+    left: calc(-1 * (var(--rd-num-w) + var(--s3)));
+    width: var(--rd-num-w);
+    text-align: right;
+    top: calc((var(--lh-read) - var(--lh-small-row)) * var(--k) / 2);
+  }
+  .rd-para[data-quoted] .rd-num {
+    color: var(--primary);
+    font-weight: var(--w-chrome);
+    top: calc(
+      var(--s3) + var(--lh-small) * var(--k) + var(--s1) + (var(--lh-read) - var(--lh-small-row)) *
+        var(--k) / 2
+    );
+  }
+  /* the paragraph the answer quotes stands set apart on the well, with a bar in the margin and its words marked */
+  .rd-quoted {
+    padding: var(--s3) var(--s4) var(--s4);
+    border-radius: var(--r-control);
+    background: var(--well);
+    box-shadow: var(--set-in-lights);
+    position: relative;
+  }
+  .rd-quoted-label {
+    @apply text-small font-chip text-muted;
+    margin-bottom: var(--s1);
+  }
+  .rd-quoted mark {
+    background: var(--select);
+    color: var(--primary);
+    border-radius: var(--r-ref);
+    padding: var(--mark-pad-y) var(--s0-5);
+    margin: 0 calc(-1 * var(--s0-5));
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    font-weight: var(--w-ui);
+  }
+  .rd-page-foot {
+    margin-top: var(--s10);
+    text-align: center;
+  }
+
+  /* Indian Kanoon's own line: quiet, and never cut short */
+  .ik-powered {
+    @apply text-small font-ui text-quiet;
+    white-space: nowrap;
+  }
+
+  /* ---------- the CCI and NCLAT index's entry ---------- */
+  .rd-index-kind {
+    @apply text-small font-chip text-muted stretch-wide;
+  }
+  .rd-index-title {
+    @apply text-title font-chrome stretch-voice tracking-title text-primary;
+    margin-top: var(--s2);
+    text-wrap: balance;
+  }
+  .rd-index-note {
+    @apply text-ui-loose text-primary;
+    margin-top: var(--s4);
+    padding: var(--s3) var(--s4);
+    border-radius: var(--r-control);
+    background: var(--well);
+    box-shadow: var(--set-in-lights);
+  }
+  .rd-index-rows {
+    margin-top: var(--s6);
+    display: grid;
+  }
+  .rd-index-row {
+    @apply join-divide;
+    display: grid;
+    grid-template-columns: var(--ver-date-col) minmax(0, 1fr);
+    column-gap: var(--s4);
+    padding: var(--s3) 0;
+    align-items: baseline;
+  }
+  .rd-index-row dt {
+    @apply text-small font-chip text-muted;
+  }
+  .rd-index-row dd {
+    @apply text-ui-loose text-primary;
+  }
+  .rd-index-foot {
+    margin-top: var(--s6);
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  /* ---------- beside a reading, in the wall's place ---------- */
+  .room-pane[data-reading] {
+    gap: var(--s6);
+  }
+  .rd-pane {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s6);
+    min-height: 100%;
+  }
+  /* how to cite it, raised, because it's what the lawyer takes away */
+  .rd-cited {
+    margin-top: var(--s2);
+    display: grid;
+    gap: var(--s1);
+    padding: var(--s3) var(--s4);
+    border-radius: var(--r-tile);
+    background: var(--surface);
+    box-shadow: var(--e0);
+  }
+  .rd-cited-row {
+    display: grid;
+    grid-template-columns: var(--rd-report-w) minmax(0, 1fr);
+    column-gap: var(--s2);
+    align-items: baseline;
+  }
+  .rd-cited-row dt {
+    @apply text-chip font-chip text-quiet tracking-chip;
+  }
+  .rd-cited-row dd {
+    @apply text-ui-loose stretch-wide text-primary;
+  }
+  .rd-cited-row + .rd-cited-row dd {
+    color: var(--muted);
+  }
+  .rd-check {
+    margin-top: var(--s3);
+  }
+  .rd-checked {
+    @apply text-small text-quiet;
+    margin-top: var(--s2);
+  }
+  .rd-since {
+    margin: var(--s1) calc(-1 * var(--s3)) 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s0-5);
+  }
+  .rd-since-row {
+    display: grid;
+    grid-template-columns: var(--s5) minmax(0, 1fr) auto;
+    column-gap: var(--s3);
+    row-gap: var(--s0-5);
+    padding: var(--s1-5) var(--s3);
+    border-radius: var(--r-tile);
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      box-shadow var(--dur-quick) var(--ease-arrive);
+  }
+  .rd-since-row:has(.rd-since-open:hover),
+  .rd-since-row:has(.rd-since-open:focus-visible) {
+    background: var(--tile-hover);
+    box-shadow: var(--e0);
+  }
+  .rd-since-mark {
+    height: var(--cite-line);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .rd-since-open {
+    text-align: left;
+    cursor: pointer;
+    border-radius: var(--r-ref);
+  }
+  .rd-since-open .rd-since-name {
+    text-decoration: underline;
+    text-decoration-thickness: var(--hairline);
+    text-decoration-color: var(--ref-line-quiet);
+    text-underline-offset: var(--cite-offset);
+  }
+  .rd-since-name {
+    @apply text-ui-loose text-primary;
+    line-height: var(--cite-line);
+  }
+  .rd-since-chip {
+    align-self: center;
+  }
+  .rd-since-where,
+  .rd-since-note {
+    @apply text-small-row text-muted;
+    grid-column: 2 / 4;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--s2);
+  }
+  .rd-since-cite {
+    font-stretch: var(--wd-wide);
+  }
+  .rd-since-note {
+    color: var(--quiet);
+  }
+  .rd-since-more {
+    @apply text-small text-quiet;
+    margin-top: var(--s3);
+    display: grid;
+    gap: var(--s1);
+  }
+  .rd-since-none {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1-5);
+    color: var(--primary);
+  }
+  .rd-since-tick {
+    color: var(--green);
+    flex: none;
+  }
+  .rd-pane-foot {
+    margin-top: auto;
+    padding-top: var(--s4);
+    display: grid;
+    gap: var(--s1);
+    box-shadow: inset 0 var(--hairline) 0 var(--divide-mid);
+  }
+  .rd-read {
+    @apply text-small text-quiet;
+  }
+  .rd-about {
+    margin-top: var(--s2);
+    display: grid;
+    gap: var(--s2);
+    @apply text-ui-loose text-muted;
+  }
+  .rd-about-date {
+    @apply font-chip text-primary stretch-wide;
+  }
+  .rd-about-note {
+    @apply text-small text-quiet;
+  }
+}
+
+/* one column: the reader takes the whole window, above everything, and scrolls as the page does */
+@variant max-mid {
+  .rd-reader {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    border-radius: 0;
+  }
+  .rd-bar {
+    border-radius: 0;
+    padding-inline: var(--s3);
+  }
+  .rd-desk {
+    padding-inline: var(--s2);
+  }
+}

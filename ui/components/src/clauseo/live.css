@@ -1,0 +1,398 @@
+/* The live thread's parts. The working line on the composer's edge and its errors, the
+   plan on the status line, papers added to a question, the work behind an answer, the permission prompt, the change
+   note, the empty states, and the flourish of a paper as it's cited. Every value is a token; the few fits that
+   belong to one part are named with it. */
+
+@layer components {
+  /* ---------- the working line: in the status line's place while Clauseo works ---------- */
+  .room-status[hidden] {
+    display: none;
+  }
+  /* the field's well, which takes the working line as its top row while Clauseo works: one region set into the
+     surface, the row divided from the field by tone alone */
+  .room-entry {
+    max-width: var(--measure);
+    border-radius: var(--r-field);
+    container: entry / inline-size;
+  }
+  .room-entry[data-working] {
+    background: var(--well);
+    box-shadow: var(--set-in);
+  }
+  .room-entry[data-working] > .room-field {
+    background: transparent;
+    box-shadow: none;
+  }
+  .room-entry[data-working]:has(textarea:focus-visible) {
+    outline: var(--ring-w) solid var(--primary);
+    outline-offset: var(--ring-gap);
+  }
+  .room-entry[data-working] > .room-field:has(textarea:focus-visible) {
+    outline: none;
+  }
+  .working {
+    @apply text-small-row text-muted;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--s2);
+    row-gap: 0;
+    /* one 36 px line; a second only when the words must wrap, never cut short */
+    min-height: var(--size-control);
+    /* the wait icon stands over Add papers' icon, and the words start over the field's own */
+    padding: 0 var(--s1-5) 0 var(--s4);
+    background: var(--well-strong);
+    border-radius: var(--r-field) var(--r-field) 0 0;
+  }
+  .working-icon {
+    flex: none;
+    margin-right: var(--s2);
+    color: var(--muted);
+  }
+  .working-text {
+    /* the words keep a readable column; when the time and the actions can't share their line, the actions go to a
+       second line at the right rather than squeezing the words */
+    flex: 1 1 var(--working-text-min);
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    padding-block: var(--s2);
+  }
+  /* the time stands in the row, and beside Stop where the field is empty and has room for it: the lawyer's own words
+     always keep the field's whole width */
+  .room-field > .working-time {
+    display: none;
+    order: 2;
+  }
+  @variant entry-roomy {
+    .room-entry:has(textarea:placeholder-shown) .working > .working-time {
+      display: none;
+    }
+    .room-entry:has(textarea:placeholder-shown) .room-field > .working-time {
+      display: inline-flex;
+    }
+  }
+  .working-time {
+    @apply text-small-row font-ui;
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    height: var(--working-time-h);
+    padding: 0 var(--s2);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    box-shadow: var(--e1);
+    color: var(--primary);
+    white-space: nowrap;
+  }
+  .working-acts {
+    display: flex;
+    flex: none;
+    gap: var(--s0-5);
+    margin-left: auto;
+  }
+  .working-more .work-chev {
+    transition: transform var(--dur-forward) var(--ease-arrive);
+  }
+  .working-more[data-panel-open] .work-chev {
+    transform: rotate(90deg);
+  }
+  .working-wrap {
+    background: var(--well-strong);
+    border-radius: var(--r-field) var(--r-field) 0 0;
+  }
+  .working-details {
+    @apply text-small text-muted;
+    /* under the words, past the icon: the row's 16 px, the 16 px icon and its 16 px to the words */
+    padding: 0 var(--s3) var(--s2) calc(var(--s4) + var(--size-icon) + var(--s4));
+  }
+
+  /* ---------- the plan on the status line: its own words at rest, a quiet fill under the pointer ---------- */
+  /* the fill reaches past the words by a box-shadow of its own colour, which takes no room, so the line measures and
+     wraps exactly as it does with plain words */
+  .room-plan {
+    border-radius: var(--r-label);
+    text-align: inherit;
+    white-space: inherit;
+    cursor: default;
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      box-shadow var(--dur-quick) var(--ease-arrive),
+      color var(--dur-quick) var(--ease-arrive);
+  }
+  @media (hover: hover) {
+    .room-plan:hover {
+      background: var(--hover);
+      box-shadow: 0 0 0 var(--s1) var(--hover);
+      color: var(--primary);
+    }
+  }
+  .room-plan:active,
+  .room-plan[data-popup-open] {
+    background: var(--press);
+    box-shadow: 0 0 0 var(--s1) var(--press);
+    color: var(--primary);
+  }
+
+  /* ---------- papers added to the question: small raised pills on the field's well ---------- */
+  .room-field[data-papers] {
+    flex-wrap: wrap;
+    row-gap: var(--s1-5);
+  }
+  .q-papers {
+    order: -1;
+    flex: 1 0 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s1-5);
+    padding: var(--s0-5) var(--s0-5) 0;
+  }
+  .q-paper {
+    @apply text-small-row font-ui text-primary;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s1-5);
+    min-height: var(--size-hint);
+    max-width: 100%;
+    padding: 0 var(--s0-5) 0 var(--s2);
+    border-radius: var(--r-small);
+    background: var(--surface);
+    box-shadow: var(--e1);
+  }
+  .q-paper-icon {
+    flex: none;
+    color: var(--muted);
+  }
+  .q-paper-title {
+    min-width: 0;
+  }
+  .q-paper-pb {
+    color: var(--muted);
+    white-space: nowrap;
+    font-stretch: var(--wd-wide);
+  }
+  .q-paper-remove {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: var(--size-target);
+    height: var(--size-target);
+    border-radius: var(--r-chip);
+    color: var(--muted);
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      color var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-hover is-hover:text-primary is-active:bg-press;
+  }
+
+  /* the meta line while Clauseo works holds the height its chip will take, so the answer never moves down when the
+     chip arrives */
+  .meta-live {
+    min-height: calc(var(--s6) * var(--k));
+  }
+
+  /* ---------- the work behind an answer: a plain list, each line with its time ---------- */
+  .work-item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--s3);
+  }
+  .work-at {
+    min-width: var(--work-at-w);
+    color: var(--quiet);
+    white-space: nowrap;
+  }
+
+  /* ---------- asking before a change: inline in the thread, on the well ---------- */
+  .perm {
+    max-width: var(--measure);
+    margin-top: var(--s5);
+    padding: var(--s3) var(--s3) var(--s3) var(--s4);
+    background: var(--well);
+    border-radius: var(--r-card);
+  }
+  .perm-ask {
+    @apply text-ui-loose text-primary;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s2);
+  }
+  .perm-icon {
+    flex: none;
+    color: var(--muted);
+    margin-top: var(--perm-icon-drop);
+  }
+  .perm-kept {
+    @apply text-small text-muted;
+    margin-top: var(--s0-5);
+    padding-left: var(--perm-indent);
+  }
+  .perm-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+    margin-top: var(--s3);
+    padding-left: calc(var(--perm-indent) - var(--s3));
+  }
+  .perm-key {
+    margin-right: calc(-1 * var(--s1));
+  }
+  .perm-done {
+    @apply text-small-row text-muted;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s1-5);
+    max-width: var(--measure);
+    margin-top: var(--s5);
+  }
+  .perm-done-icon {
+    flex: none;
+    color: var(--muted);
+    margin-top: var(--perm-icon-drop);
+  }
+
+  /* ---------- the change note: one line in the thread, the papers named, Compare and Undo ---------- */
+  .change-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--s2);
+    row-gap: var(--s1);
+    max-width: var(--measure);
+    margin-top: var(--s5);
+    padding: var(--s1-5) var(--s1-5) var(--s1-5) var(--s3);
+    background: var(--well);
+    border-radius: var(--r-card);
+  }
+  .change-icon {
+    flex: none;
+    color: var(--muted);
+  }
+  .change-text {
+    flex: 1 1 var(--change-text-min);
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: var(--s2);
+  }
+  .change-what {
+    @apply text-ui text-primary;
+  }
+  .change-papers {
+    @apply text-small-row text-muted;
+    align-self: center;
+  }
+  .change-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s1);
+    margin-left: auto;
+  }
+  .change-undone {
+    @apply text-small-row text-muted;
+    background: transparent;
+    padding-left: 0;
+  }
+
+  /* ---------- empty states ---------- */
+  .empty-papers {
+    display: grid;
+    justify-items: start;
+    gap: var(--s1);
+    padding: var(--s4);
+    border-radius: var(--r-tile);
+    background: var(--flat);
+  }
+  .empty-title {
+    @apply text-ui font-chip text-primary;
+  }
+  .empty-body {
+    @apply text-small text-quiet;
+    max-width: var(--empty-measure);
+  }
+  .empty-action {
+    margin-top: var(--s3);
+  }
+  .first-q {
+    max-width: var(--measure);
+    padding: var(--s6) 0 var(--s4) var(--s4);
+  }
+  .first-q-title {
+    @apply text-ui font-chip text-primary;
+  }
+  .first-q-body {
+    @apply text-small text-muted;
+    margin-top: var(--s1);
+  }
+  .search-empty {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s3);
+    width: min(100%, var(--size-card-row));
+    padding: var(--s4);
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--e3);
+  }
+  .search-empty-icon {
+    flex: none;
+    color: var(--muted);
+    margin-top: var(--search-empty-icon-drop);
+  }
+  .search-empty-title {
+    @apply text-ui text-primary;
+  }
+  .search-empty-body {
+    @apply text-small text-muted;
+    margin-top: var(--s0-5);
+  }
+
+  /* ---------- the flourish: a paper or a judgment comes forward in its colour as it's cited, then settles ---------- */
+  .tile[data-flash] {
+    z-index: 3;
+  }
+  .tile[data-flash] .tile-face {
+    transform: var(--hand-tile);
+  }
+  .tile[data-flash] .tile-face::after {
+    opacity: 1;
+    box-shadow: var(--e-hand);
+  }
+  .cite:has([data-flash]) {
+    z-index: 3;
+  }
+  .cite-row[data-flash] {
+    background: var(--surface);
+    box-shadow: none;
+    transform: var(--hand-row);
+  }
+  .cite-row[data-flash]::after {
+    opacity: 1;
+  }
+  .cite-wait {
+    min-width: 0;
+  }
+}
+
+/* lite: planes part by tone, so the time's pill and a paper's pill take the lite outline instead of a shadow */
+[data-render="lite"] :is(.working-time, .q-paper, .search-empty) {
+  outline: var(--hairline) solid var(--outline-lite);
+  outline-offset: calc(-1 * var(--hairline));
+}
+
+/* a narrow window has no keys to show, and the working line keeps its time beside the words */
+@variant max-mid {
+  .perm .kbd-cap {
+    display: none;
+  }
+  .working {
+    flex-wrap: wrap;
+    padding-block: var(--s1);
+  }
+  /* on a phone the words hold the height of their two lines, so the row stays put as a judgment's name changes: two
+     lines of the words' own line height (the small row's line, 20 px in English and 22 px in Hindi, at the text size)
+     and the words' padding. The row is the same height in every state. */
+  .working-text {
+    min-height: calc(2 * var(--lh-small-row) * var(--k) + 2 * var(--s2));
+  }
+}

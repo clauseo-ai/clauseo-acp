@@ -1,0 +1,49 @@
+/* The new matter form. Its fields on the work's surface, the lawyer's words in them at the
+   composer's 17 px and 600, and the folder Clauseo will make as one muted line in the computer's own words, with a
+   quiet Change. Every value is a token. */
+@layer components {
+  .matter-form {
+    display: grid;
+    gap: var(--s5);
+    width: 100%;
+  }
+  .matter-form-title {
+    @apply text-title stretch-voice tracking-title text-primary;
+    font-weight: var(--w-chrome);
+  }
+  /* the lawyer's own words, as the composer sets them: 17 px at 600, set by the control's own classes */
+  .matter-form-input::placeholder {
+    @apply font-ui;
+  }
+  /* client and next date side by side, folding under each other where the column is narrow */
+  .matter-form-pair {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--form-pair-min)), 1fr));
+    gap: var(--s5) var(--s4);
+  }
+  .matter-form-folder {
+    @apply text-small-row text-muted;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s2);
+  }
+  .matter-form-folder-icon {
+    flex: none;
+    margin-top: var(--s0-5);
+  }
+  .matter-form-folder-words {
+    flex: 1;
+    min-width: 0;
+    padding-top: var(--s0-5);
+  }
+  .matter-form-path {
+    font-family: var(--font-en);
+    color: var(--primary);
+    overflow-wrap: anywhere;
+  }
+  .matter-form-change {
+    flex: none;
+    margin-top: calc(-1 * var(--s1));
+    color: var(--primary);
+  }
+}

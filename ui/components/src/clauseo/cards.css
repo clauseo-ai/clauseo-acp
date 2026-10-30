@@ -1,0 +1,233 @@
+/* What floats. The excerpt card grown from a tile or a row, the provenance line and the scrim it draws on request,
+   History, and the sheet in flight during the page turn. */
+
+@layer components {
+  .card {
+    @apply text-ui-loose;
+    width: var(--size-card-ref);
+    max-width: calc(var(--view-w) - 2 * var(--s2));
+    padding: 0;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    color: var(--primary);
+    box-shadow: var(--e3);
+    overflow: hidden;
+    transform-origin: 0 0;
+    outline: none;
+    --c: var(--surface);
+    --on: var(--primary);
+    --m: var(--select);
+  }
+  .card[data-from="wall"] {
+    box-shadow: var(--e-hand), var(--e-card);
+  }
+  .card[data-role="supports"] {
+    --c: var(--green);
+    --on: var(--on-colour);
+    --m: var(--supports-mark);
+  }
+  .card[data-role="against"] {
+    --c: var(--red);
+    --on: var(--on-colour);
+    --m: var(--against-mark);
+  }
+  .card[data-role="relied"] {
+    --m: var(--relied-mark);
+  }
+  [data-render="lite"] .card {
+    outline: var(--hairline) solid var(--outline-lite);
+  }
+
+  /* the band: the tile's own face, numeral, pin, title and chip, in its own colour */
+  .card-band {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: var(--s3);
+    align-items: start;
+    min-height: var(--size-band);
+    padding: var(--size-band-pad) var(--s3);
+    background: var(--c);
+    color: var(--on);
+  }
+  .card:is([data-role="relied"], [data-role="cite"]) .card-band {
+    box-shadow: inset 0 calc(-1 * var(--hairline)) 0 var(--divide-band);
+  }
+  .card-num {
+    @apply font-numeral text-numeral-band stretch-broad font-monument tracking-numeral;
+    white-space: nowrap;
+  }
+  .card-head {
+    min-width: 0;
+    padding-top: var(--card-head-nudge);
+  }
+  .card-pin {
+    @apply text-small stretch-wide font-chip;
+    display: block;
+    opacity: 0.92;
+  }
+  .card-title {
+    @apply text-ui font-chrome;
+    margin-top: var(--s0-5);
+  }
+  .card-band .chip-slot {
+    margin-top: var(--card-head-nudge);
+  }
+  .card-band .bench {
+    margin: var(--card-bench-top) var(--s0-5) 0 var(--s1);
+  }
+  .card-body {
+    padding: var(--s3) var(--s4);
+  }
+  .card-quote {
+    @apply text-quote font-clauseo text-primary stretch-read;
+    hanging-punctuation: first allow-end last;
+  }
+  .card-quote mark {
+    background: var(--m);
+    color: var(--primary);
+    border-radius: var(--r-ref);
+    padding: var(--mark-pad-y) var(--s0-5);
+    margin: 0 calc(-1 * var(--s0-5));
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    font-weight: var(--w-ui);
+  }
+  .card-bench {
+    @apply text-small-row text-muted;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--s0-5) var(--s2);
+  }
+  .card-decided {
+    margin-left: auto;
+    white-space: nowrap;
+  }
+  .card-status {
+    @apply text-ui-loose text-primary;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s2);
+    margin-top: var(--s3);
+    padding: var(--card-status-pad) var(--card-status-pad-end) var(--card-status-pad)
+      var(--card-status-pad);
+    background: var(--well);
+    border-radius: var(--r-control);
+  }
+  .card-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    margin-top: var(--s3);
+  }
+  .card-where {
+    @apply text-small text-muted;
+  }
+  /* the card's content steps in once its shape is about 60% grown */
+  .card > * {
+    transition: opacity var(--dur-words-out) linear;
+  }
+
+  /* the provenance line: one fine line in the role's colour, from the cited words to what they cite */
+  .provenance {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: var(--view-w);
+    height: var(--view-h);
+    overflow: visible;
+    pointer-events: none;
+    z-index: 20;
+  }
+  .provenance path {
+    fill: none;
+    stroke: var(--tc, var(--primary));
+    stroke-width: 1.5;
+    stroke-linecap: round;
+  }
+  .provenance .line-end {
+    fill: var(--tc, var(--primary));
+  }
+  .provenance .line-start {
+    fill: var(--surface);
+    stroke: var(--tc, var(--primary));
+    stroke-width: 1.5;
+  }
+  .provenance g[data-role="supports"] {
+    --tc: var(--green);
+  }
+  .provenance g[data-role="against"] {
+    --tc: var(--red);
+  }
+  .provenance g[data-role="relied"] {
+    --tc: var(--relied);
+  }
+  .provenance g[data-role="cite"] {
+    --tc: var(--primary);
+  }
+  .provenance g[data-role="prepared"] {
+    --tc: var(--yellow-line);
+  }
+
+  /* what an open card covers on the wall: one scrim of the wall's own tone over whole tiles, under the card */
+  .wall-scrim {
+    position: fixed;
+    z-index: 15;
+    pointer-events: none;
+    border-radius: var(--r-tile);
+    background: var(--scrim);
+  }
+  .wall-scrim[hidden] {
+    display: none;
+  }
+
+  /* History: every step kept, newest first, on a raised card */
+  .history-card {
+    padding: var(--s2) 0 0;
+    width: var(--size-history);
+  }
+  .history-list {
+    display: grid;
+    padding: 0 var(--s2);
+  }
+  .history-row {
+    @apply text-ui join-divide;
+    display: flex;
+    align-items: baseline;
+    gap: var(--s4);
+    padding: var(--history-row-pad) var(--s2);
+  }
+  .history-what {
+    flex: 1;
+    min-width: 0;
+    text-wrap: pretty;
+  }
+  .history-time {
+    @apply text-small-row text-muted;
+    flex: none;
+    white-space: nowrap;
+  }
+  .history-foot {
+    @apply text-small text-muted;
+    margin-top: var(--s1);
+    padding: var(--size-band-pad) var(--s4) var(--history-foot-pad-end);
+    background: var(--well);
+  }
+
+  /* the page turn in flight: a sheet that grows out of the draft's tile, yellow, and pales to paper as it lands */
+  .turn-ghost {
+    position: fixed;
+    z-index: 25;
+    pointer-events: none;
+    background: var(--sheet);
+  }
+  .turn-ghost[hidden] {
+    display: none;
+  }
+  .turn-ghost > i {
+    position: absolute;
+    inset: 0;
+    background: var(--yellow);
+  }
+}

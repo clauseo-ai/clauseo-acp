@@ -1,0 +1,472 @@
+/* Versions: the page under the review bar, the timeline where the rail stood, the band that says when the room
+   stands, the papers as they stood, and the restore dialog's own rows. The desk, its sheet, the blackline and a PDF
+   changed or unchanged are in version-page.css. Every value comes from a token. */
+
+@layer components {
+  /* ---------- the page: the review bar above, the window filling the rest ---------- */
+  .ver-shell {
+    height: var(--view-h);
+    height: var(--view-dh);
+    display: flex;
+    flex-direction: column;
+    background: var(--ground);
+  }
+  .ver-window {
+    flex: 1;
+    height: auto;
+    min-height: var(--window-min-h);
+  }
+
+  /* ---------- the head of the work ---------- */
+  .ver-bar {
+    min-height: calc(var(--size-control-small) + 2 * var(--s3));
+  }
+  .ver-open-panel {
+    gap: var(--s2);
+  }
+  .ver-open-count {
+    @apply font-ui text-quiet;
+  }
+  /* at now: one line under the bar for what just happened or failed, with its one way on */
+  .ver-notice {
+    @apply text-small-row text-muted;
+    flex: none;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s2);
+    min-height: calc(var(--size-control-small) + var(--s2));
+    padding: var(--s1-5) calc(var(--gutter) - var(--s3)) var(--s1-5) var(--gutter);
+    background: var(--surface);
+    box-shadow: 0 var(--hairline) 0 var(--divide);
+    position: relative;
+  }
+  .ver-notice-icon {
+    flex: none;
+    margin-top: var(--perm-icon-drop);
+    color: var(--primary);
+  }
+  .ver-notice-text {
+    flex: 1 1 var(--change-text-min);
+    min-width: 0;
+    align-self: center;
+    color: var(--primary);
+  }
+  .ver-notice[data-tone="failed"] .ver-notice-text {
+    color: var(--muted);
+  }
+  .ver-notice[data-tone="failed"] .ver-notice-icon {
+    color: var(--muted);
+  }
+  .ver-notice-wait .ver-notice-icon,
+  .ver-notice-wait .ver-notice-text {
+    color: var(--muted);
+  }
+  .ver-notice-act {
+    flex: none;
+    margin-left: auto;
+  }
+  .ver-band {
+    flex: none;
+    display: grid;
+    gap: var(--s2);
+    padding: var(--s4) var(--gutter) var(--s3);
+    background: var(--surface);
+    border-radius: var(--r-surface) var(--r-surface) 0 0;
+    box-shadow: 0 var(--hairline) 0 var(--divide);
+    position: relative;
+    z-index: 1;
+  }
+  .ver-back {
+    flex: none;
+    margin: calc(-1 * var(--s1-5)) calc(-1 * var(--s3)) calc(-1 * var(--s1-5)) auto;
+  }
+  .ver-line {
+    @apply text-title font-chrome stretch-voice tracking-title text-primary;
+    text-wrap: balance;
+  }
+  .ver-band-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2) var(--s4);
+  }
+  .ver-meta {
+    @apply text-small text-muted;
+    flex: 1 1 var(--change-text-min);
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--s2);
+  }
+  .ver-meta-did {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+  }
+  .ver-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+    transition: opacity var(--dur-quick) var(--ease-arrive);
+  }
+  /* Compare with now, pressed in: set into the plane, as a chosen side is */
+  .ver-compare[aria-pressed="true"] {
+    background: var(--well-strong);
+    box-shadow: var(--set-in-field);
+  }
+  .ver-wait {
+    @apply text-small text-muted;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s2);
+  }
+  .ver-wait-icon {
+    flex: none;
+    margin-top: var(--s0-5);
+  }
+
+  /* ---------- comparing: which document, and how to read the marks ---------- */
+  .ver-compare-bar {
+    flex: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2) var(--s4);
+    padding: var(--s3) var(--gutter) var(--s2);
+    background: var(--desk);
+  }
+  .ver-legend {
+    @apply text-small text-muted;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: var(--s3);
+  }
+  .ver-unchanged {
+    color: var(--quiet);
+  }
+
+  /* ---------- the papers as they stood ---------- */
+  .ver-facade .tile {
+    transition:
+      opacity var(--dur-forward) var(--ease-arrive),
+      transform var(--dur-forward) var(--ease-arrive);
+  }
+  /* not in the matter yet: it leaves the wall, faster than it comes back */
+  .ver-facade .tile[data-era="gone"] {
+    opacity: 0;
+    transform: scale(0.94);
+    transition-duration: var(--dur-leave);
+    transition-timing-function: var(--ease-leave);
+  }
+  [data-motion="reduced"] .ver-facade .tile[data-era="gone"] {
+    transform: none;
+  }
+  /* changed by the version in view: it comes forward off the wall, its lifted shadow faded in */
+  .ver-facade .tile[data-era="touched"] {
+    z-index: 2;
+  }
+  .ver-facade .tile[data-era="touched"] .tile-face {
+    transform: translate(calc(-1 * var(--s0-5)), calc(-1 * var(--s0-5)));
+  }
+  .ver-facade .tile[data-era="touched"][data-state="uncited"] .tile-face {
+    background: var(--surface);
+  }
+  .ver-facade .tile[data-era="touched"] .tile-face::after {
+    opacity: 1;
+  }
+  [data-motion="reduced"] .ver-facade .tile[data-era="touched"] .tile-face {
+    transform: none;
+  }
+
+  /* ---------- the restore dialog's own rows ---------- */
+  .ver-dialog-note {
+    @apply text-small text-muted;
+    margin-top: var(--s2);
+  }
+  .ver-edited {
+    margin-top: var(--s4);
+    padding: var(--s3);
+    border-radius: var(--r-tile);
+    background: var(--well);
+    box-shadow: var(--set-in-field);
+  }
+  .ver-edited-head {
+    @apply text-small font-chip text-primary;
+  }
+  .ver-edited-list {
+    display: grid;
+    gap: var(--s3);
+    margin-top: var(--s3);
+  }
+  .ver-edited-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s2) var(--s3);
+  }
+  .ver-edited-what {
+    display: grid;
+    min-width: 0;
+  }
+  .ver-edited-name {
+    @apply text-ui text-primary;
+  }
+  .ver-edited-at {
+    @apply text-small text-muted;
+  }
+  .ver-dialog .ver-wait {
+    margin-top: var(--s4);
+  }
+
+  /* ---------- the timeline, in the rail's place ---------- */
+  .ver-window[data-panel] {
+    --rail-col: var(--ver-panel-w);
+    --work-w: calc(var(--view-w) - var(--rail-col) - var(--pane-w) + var(--overlap));
+    --gutter: max(var(--thread-pad), calc((var(--work-w) - var(--measure)) / 2));
+    grid-template-columns: var(--ver-panel-w) minmax(0, 1fr) var(--pane-w);
+  }
+  .ver-window[data-panel] .room-lead {
+    width: var(--ver-panel-w);
+  }
+  .ver-panel {
+    grid-area: rail;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 0 var(--s3) var(--s3);
+  }
+  .ver-panel-head {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-height: var(--size-control-small);
+    padding: 0 var(--s3);
+  }
+  .ver-panel-close {
+    margin-left: auto;
+    margin-right: calc(-1 * var(--s3));
+  }
+  .ver-show {
+    flex: none;
+    align-self: flex-start;
+    margin: var(--s2) var(--s3) 0;
+  }
+  .ver-panel-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s3);
+    margin-top: var(--s3);
+    position: relative;
+  }
+  /* a day's heading holds the top of the list while its versions pass under it, on the ground's own tone */
+  .ver-day {
+    @apply text-small stretch-voice font-ui text-quiet;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s2);
+    min-height: var(--ver-day-h);
+    padding: 0 var(--s3);
+    background: var(--ground);
+  }
+  .ver-day-count {
+    @apply text-small font-ui text-quiet;
+    font-stretch: normal;
+    white-space: nowrap;
+  }
+  .ver-entries {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s0-5);
+  }
+  .ver-entry {
+    width: 100%;
+    display: grid;
+    grid-template-columns: var(--ver-at-w) minmax(0, 1fr);
+    column-gap: var(--s2);
+    text-align: left;
+    padding: var(--s1-5) var(--s3);
+    border-radius: var(--r-tile);
+    background: transparent;
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      box-shadow var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-ground-hover is-active:bg-ground-press;
+  }
+  .ver-entry.ver-entry[aria-current="true"] {
+    background: var(--tile-hover);
+    box-shadow: var(--e0);
+  }
+  .ver-entry-time {
+    @apply text-ui text-primary;
+    white-space: nowrap;
+  }
+  .ver-entry-who {
+    @apply text-ui text-muted;
+  }
+  .ver-entry[aria-current="true"] .ver-entry-who {
+    @apply text-primary font-chip;
+  }
+  /* the plan, muted and last: "Clauseo, in Draft · Claude" */
+  .ver-entry-plan {
+    color: var(--quiet);
+    font-weight: var(--w-ui);
+    white-space: nowrap;
+  }
+  .ver-entry-papers,
+  .ver-entry-note {
+    @apply text-small text-quiet;
+    grid-column: 2;
+  }
+  .ver-entry-note {
+    color: var(--muted);
+  }
+  /* a run of small versions by one hand: its latest, then one quiet line that opens the rest */
+  .ver-run-fold {
+    @apply text-small text-quiet;
+    display: flex;
+    align-items: center;
+    gap: var(--s1-5);
+    width: 100%;
+    min-height: var(--size-target);
+    padding: var(--s0-5) var(--s3) var(--s0-5) var(--ver-fold-indent);
+    border-radius: var(--r-small);
+    text-align: left;
+    transition: background-color var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-ground-hover is-hover:text-primary is-active:bg-ground-press;
+  }
+  .ver-run-icon {
+    flex: none;
+    transition: transform var(--dur-forward) var(--ease-arrive);
+  }
+  .ver-run-fold[aria-expanded="true"] .ver-run-icon {
+    transform: rotate(90deg);
+  }
+  .ver-run-rest {
+    margin-top: var(--s0-5);
+  }
+  /* the days before the last few, folded under one line */
+  .ver-older {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s1-5);
+    width: 100%;
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-tile);
+    text-align: left;
+    background: var(--inset);
+    box-shadow: var(--set-in-field);
+    transition: background-color var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-inset-hover;
+  }
+  .ver-older .ver-run-icon {
+    margin-top: var(--s1);
+    color: var(--muted);
+  }
+  .ver-older-words {
+    display: grid;
+  }
+  .ver-older-head {
+    @apply text-ui text-primary;
+  }
+  /* a change that couldn't be kept: where it would stand, said plainly, not a version to choose */
+  .ver-unsaved {
+    display: grid;
+    grid-template-columns: var(--ver-at-w) minmax(0, 1fr);
+    column-gap: var(--s2);
+    padding: var(--s1-5) var(--s3);
+    border-radius: var(--r-tile);
+    background: var(--inset);
+    box-shadow: var(--set-in-field);
+  }
+  .ver-unsaved .ver-entry-time,
+  .ver-unsaved .ver-entry-who {
+    color: var(--muted);
+  }
+  /* the foot: where the history is kept, a press for the rest */
+  .ver-foot {
+    @apply text-small text-muted;
+    flex: none;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s2);
+    width: 100%;
+    margin-top: var(--s3);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-small);
+    text-align: left;
+    box-shadow: inset 0 var(--hairline) 0 var(--divide-mid);
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      color var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-ground-hover is-hover:text-primary data-popup-open:text-primary;
+  }
+  .ver-foot-icon {
+    flex: none;
+    margin-top: var(--s0-5);
+  }
+  /* over the sticky day headings and the raised work: the card's positioner, which moves by transform and so
+     stands as a layer of its own, takes the floating layer's place */
+  .ver-where {
+    padding: var(--s4) var(--s5) var(--s4);
+    display: grid;
+    gap: var(--s2);
+  }
+  .ver-where-line {
+    @apply text-small text-muted;
+  }
+  .ver-where-path {
+    @apply text-small stretch-wide text-primary;
+    overflow-wrap: anywhere;
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-small);
+    background: var(--well);
+    box-shadow: var(--set-in-field);
+  }
+  .ver-where-size {
+    color: var(--primary);
+  }
+  .ver-where-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+    margin-top: var(--s2);
+  }
+  /* under 1200 px the band stays three short rows: the line one size down, then the meta row with Versions at its left
+     and Back to now at its right, then the three acts in one row */
+  @variant max-wide {
+    .ver-line {
+      @apply text-read;
+      text-wrap: wrap;
+    }
+    .ver-band-row .ver-open-panel {
+      flex: none;
+      margin-left: calc(-1 * var(--s3));
+    }
+  }
+  /* a mid window: the panel opens over the work, as the folded rail does */
+  @variant rail-folded {
+    .ver-window[data-panel] .ver-panel {
+      position: absolute;
+      z-index: 10;
+      left: var(--s3);
+      top: var(--rail-panel-top);
+      bottom: var(--s3);
+      width: var(--ver-panel-w);
+      padding-top: var(--s3);
+      border-radius: var(--r-card);
+      background: var(--ground);
+      box-shadow: var(--e3);
+    }
+  }
+}

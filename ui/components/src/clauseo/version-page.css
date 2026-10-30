@@ -1,0 +1,201 @@
+/* Versions: the desk and the sheet on it, the blackline, the list of dates, the head over the sheet, a PDF changed
+   or unchanged, and a paper not made yet. Every value comes from a token. */
+
+@layer components {
+  /* ---------- the desk and the sheet on it ---------- */
+  .ver-desk {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    padding: var(--s7) var(--s6) var(--s10);
+    background: var(--desk);
+  }
+  .ver-desk:focus-visible {
+    outline: var(--ring-w) solid var(--primary);
+    outline-offset: var(--ring-inset);
+  }
+  .ver-desk-compare {
+    padding-top: var(--s3);
+  }
+  .ver-page {
+    /* the change bar stands in the sheet's own margin */
+    overflow: visible;
+  }
+
+  /* ---------- the blackline: words in underlined, words out struck, the lawyer's own at 600 ---------- */
+  .ver-ins {
+    text-decoration-line: underline;
+    text-decoration-thickness: var(--underline-firm);
+    text-decoration-color: var(--primary);
+    text-underline-offset: var(--ref-offset);
+    text-decoration-skip-ink: none;
+  }
+  .ver-del {
+    color: var(--muted);
+    text-decoration-line: line-through;
+    text-decoration-thickness: var(--hairline);
+    text-decoration-color: var(--primary);
+  }
+  .ver-mine {
+    font-weight: var(--w-accepted);
+    font-stretch: var(--wd-accepted);
+  }
+  /* a paragraph that changed carries a bar in the sheet's margin, as a blackline does */
+  :is(.page-paras p, .ver-date-row)[data-change] {
+    position: relative;
+  }
+  :is(.page-paras p, .ver-date-row)[data-change]::before {
+    content: "";
+    position: absolute;
+    left: calc(-1 * var(--s6));
+    top: var(--s1);
+    bottom: var(--s1);
+    width: var(--underline-firm);
+    border-radius: var(--hairline);
+    background: var(--primary);
+  }
+
+  /* ---------- the list of dates on its sheet ---------- */
+  .ver-dates-title {
+    margin-top: 0;
+  }
+  .ver-dates {
+    margin-top: var(--s7);
+    display: grid;
+    gap: var(--s3);
+  }
+  .ver-date-row {
+    display: grid;
+    grid-template-columns: var(--ver-date-col) minmax(0, 1fr);
+    column-gap: var(--s4);
+    align-items: baseline;
+  }
+  .ver-date-row dt {
+    @apply text-ui stretch-wide text-muted;
+  }
+  .ver-date-row dd {
+    @apply text-read;
+    text-wrap: pretty;
+  }
+
+  /* ---------- over the sheet: which paper and when, and Save as a new draft ---------- */
+  /* it holds the desk's top while the sheet scrolls under it, so Save as a new draft is always to hand */
+  .ver-sheet-head {
+    position: sticky;
+    top: calc(-1 * var(--s7));
+    z-index: 2;
+    max-width: calc(var(--measure) + var(--page-extra));
+    margin: calc(-1 * var(--s7)) auto var(--s3);
+    padding: var(--s2) 0;
+    background: var(--desk);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s1) var(--s3);
+  }
+  /* stuck, it casts the pinned question's edge, so the sheet passes under an edge rather than being cut in half */
+  .ver-sheet-head[data-stuck],
+  .ver-day[data-stuck] {
+    box-shadow: var(--shadow-pin);
+  }
+  .ver-desk-compare .ver-sheet-head {
+    top: calc(-1 * var(--s3));
+    margin-top: calc(-1 * var(--s3));
+  }
+  .ver-sheet-label {
+    @apply text-small text-muted;
+    min-width: 0;
+  }
+  /* Save as a new draft stays inside the sheet's width: a quiet button's padding is its own room, never past the edge */
+  .ver-save-draft {
+    margin-right: 0;
+  }
+
+  /* ---------- a PDF: changed or unchanged, what the file was then and is now, and a way to open each ---------- */
+  .ver-pdf {
+    max-width: calc(var(--measure) + var(--page-extra));
+    margin: var(--s2) auto 0;
+    padding: var(--s6);
+    border-radius: var(--r-label);
+    background: var(--sheet);
+    box-shadow: var(--shadow-page);
+  }
+  .ver-pdf-head {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+  }
+  .ver-pdf-icon {
+    flex: none;
+    background: var(--tile);
+    color: var(--muted);
+    box-shadow: var(--e1);
+  }
+  .ver-pdf-name {
+    display: grid;
+    min-width: 0;
+  }
+  .ver-pdf-title {
+    @apply text-ui stretch-voice font-chip text-primary;
+  }
+  .ver-pdf-state {
+    @apply text-small text-muted;
+  }
+  .ver-pdf-state[data-changed] {
+    @apply text-primary font-chip;
+  }
+  .ver-pdf-pair {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s3);
+    margin-top: var(--s5);
+  }
+  .ver-pdf-side {
+    flex: 1 1 var(--ver-pdf-side-min);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--s0-5);
+    padding: var(--s4);
+    border-radius: var(--r-tile);
+    background: var(--well);
+    box-shadow: var(--set-in-field);
+  }
+  .ver-pdf-when {
+    @apply text-small stretch-voice text-quiet;
+  }
+  .ver-pdf-facts {
+    @apply text-ui text-primary;
+    margin-top: var(--s1);
+  }
+  .ver-pdf-saved {
+    @apply text-small text-muted;
+  }
+  .ver-pdf-open {
+    margin-top: var(--s3);
+  }
+  .ver-pdf-note {
+    @apply text-small text-muted;
+    margin-top: var(--s4);
+  }
+
+  /* ---------- a paper not made yet: a bare sheet that says so ---------- */
+  .ver-missing {
+    max-width: calc(var(--measure) + var(--page-extra));
+    margin: 0 auto;
+    padding: var(--s12) var(--page-pad-side);
+    border-radius: var(--r-label);
+    background: var(--sheet);
+    box-shadow: var(--shadow-page);
+    text-align: center;
+  }
+  .ver-missing-title {
+    @apply text-read text-primary;
+  }
+  .ver-missing-note {
+    @apply text-small text-muted;
+    margin-top: var(--s2);
+  }
+}

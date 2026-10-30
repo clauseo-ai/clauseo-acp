@@ -93,8 +93,8 @@ to write instead.
 
 The broker (keys, cache and limits for outside services, plus the socket the sandboxed sidecar
 reaches) is a module of `host`, not a crate. Frontend packages: `ui/app` (exists),
-`ui/components` (exists: the design system's tokens, icons, words and controls, which take data as
-props and hold no host logic) and `ui/bindings` (planned). Nothing in `ui/` imports Tauri APIs outside
+`ui/components` (exists: the design system's tokens, icons, words, controls and Clauseo's parts,
+which take data as props and hold no host logic) and `ui/bindings` (planned). Nothing in `ui/` imports Tauri APIs outside
 `ui/app/src/transport/`. `cargo xtask check` runs only ui/app's scripts, so ui/app checks
 ui/components too: its tsconfig includes `../components/src`, its vitest config has a `components`
 project, and oxlint, which refuses paths with `..`, reaches it through a link in ui/app named

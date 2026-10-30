@@ -1,6 +1,6 @@
 // The controls that stand in place: buttons, chips, fields, choices, settings, measures and folds.
 import { IconUndo, IconSearch } from "@clauseo/components/icons/icons.tsx";
-import { useUiWords } from "@clauseo/components/lib/words-ui.ts";
+import { useGalleryWords } from "./words.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { ButtonPair, PairButton } from "@clauseo/components/ui/button-pair.tsx";
 import { Checkbox } from "@clauseo/components/ui/checkbox.tsx";
@@ -138,7 +138,7 @@ export function Pressables() {
 }
 
 export function Fields() {
-  const w = useUiWords();
+  const w = useGalleryWords();
   return (
     <Section title="Fields">
       <State name="Search">
@@ -228,7 +228,7 @@ export function Choices() {
 }
 
 export function Settings() {
-  const w = useUiWords();
+  const w = useGalleryWords();
   const [warn, setWarn] = useState(true);
   const [lite, setLite] = useState<LiteChoice>("auto");
   return (
@@ -282,7 +282,7 @@ export function Settings() {
 }
 
 export function Measures() {
-  const w = useUiWords();
+  const w = useGalleryWords();
   const at = w.clock("4:30 pm");
   return (
     <Section title="Progress and meter">
@@ -318,7 +318,7 @@ export function Measures() {
 }
 
 export function Folds() {
-  const w = useUiWords();
+  const w = useGalleryWords();
   return (
     <Section title="Tabs and folds">
       <Tabs defaultValue="settings" className="grid gap-s3 w-full">

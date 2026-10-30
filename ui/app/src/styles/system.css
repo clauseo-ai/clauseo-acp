@@ -12,3 +12,4 @@
 @import "./fonts.css";
 @import "@clauseo/components/styles/base.css";
 @import "@clauseo/components/styles/primitives.css";
+@import "@clauseo/components/clauseo/parts.css";

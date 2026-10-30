@@ -21,8 +21,8 @@ test("wholly Latin text inside Hindi is one English run", () => {
 });
 
 test("every Latin run inside a Hindi string is marked, whole, and the rest is kept as it was", () => {
-  const s = ui("hi", "Lease.docx changed after Clauseo's edit.");
-  expect(en("hi", s)).toEqual(["Clauseo", "Lease.docx"]);
+  const s = ui("hi", "Actions for {name}", { name: "Lease.docx" }) + " Clauseo";
+  expect(en("hi", s)).toEqual(["Lease.docx", "Clauseo"]);
   expect(
     runs("hi", s)
       .map((r) => r.text)
@@ -30,9 +30,6 @@ test("every Latin run inside a Hindi string is marked, whole, and the rest is ke
   ).toBe(s);
   expect(en("hi", ui("hi", "Show in File Explorer"))).toEqual(["File Explorer"]);
   expect(en("hi", ui("hi", "Show in Finder"))).toEqual(["Finder"]);
-  expect(en("hi", ui("hi", "On by itself over remote desktops such as Citrix"))).toEqual([
-    "Citrix",
-  ]);
   expect(en("hi", "Claude प्लान की सीमा पूरी हो गई")).toEqual(["Claude"]);
   expect(en("hi", "S.P. Mani का भी हवाला")).toEqual(["S.P. Mani"]);
   expect(en("hi", "a का")).toEqual(["a"]);
