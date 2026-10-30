@@ -19,6 +19,8 @@ mod fold;
 mod fold_edges;
 #[path = "reducer/props.rs"]
 mod props;
+#[path = "reducer/queued.rs"]
+mod queued;
 #[path = "reducer/snapshot.rs"]
 mod snapshot;
 #[path = "reducer/text.rs"]
