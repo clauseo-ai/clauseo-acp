@@ -97,8 +97,9 @@ reaches) is a module of `host`, not a crate. Frontend packages: `ui/app` (exists
 props and hold no host logic) and `ui/bindings` (planned). Nothing in `ui/` imports Tauri APIs outside
 `ui/app/src/transport/`. `cargo xtask check` runs only ui/app's scripts, so ui/app checks
 ui/components too: its tsconfig includes `../components/src`, its vitest config has a `components`
-project, and oxlint, which refuses paths with `..`, reaches it through a symlink in ui/app named
-components.
+project, and oxlint, which refuses paths with `..`, reaches it through a link in ui/app named
+components. git does not carry that link: `pnpm -C ui install` makes it (a junction on Windows), git
+ignores it, and `ui/app/.eslintignore` un-ignores it for oxlint.
 A version both packages need lives once, in the `catalog` of `ui/pnpm-workspace.yaml`.
 
 "fs", "process", "any I/O" and "clock" in the "Never depends on" column mean the standard

@@ -1,5 +1,7 @@
 target/
 node_modules/
+# made by `pnpm -C ui install` (ui/app/scripts/components-link.mjs), not by git
+/ui/app/components
 dist/
 .claude/worktrees/
 CLAUDE.local.md

@@ -1,6 +1,7 @@
 {
   "private": true,
   "scripts": {
+    "pnpm:devPreinstall": "node app/scripts/components-link.mjs",
     "tauri": "cd ../crates/desktop && tauri",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check"

@@ -2,11 +2,14 @@ import {
   chmodSync,
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +17,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ConflictError,
+  ensureLink,
   FileGuard,
   guardPaths,
   isRepoPath,
@@ -319,4 +323,51 @@ describe("FileGuard's copy and modes", () => {
       expect(read(at.file)).toBe(ORIGINAL);
     },
   );
+});
+
+describe("ensureLink", () => {
+  /** A fresh repo under the OS temp dir with the folder ui/components, removed after each test. */
+  function linkRepo() {
+    const root = mkdtempSync(join(tmpdir(), "guard-link-"));
+    dirs.push(root);
+    mkdirSync(join(root, "ui", "components", "src"), { recursive: true });
+    mkdirSync(join(root, "ui", "app"));
+    return root;
+  }
+  const at = { rel: "ui/app/components", target: "../components" };
+
+  it("makes the link where nothing is, then keeps it", () => {
+    const root = linkRepo();
+    expect(ensureLink({ root, ...at })).toBe("made");
+    const link = join(root, "ui", "app", "components");
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(realpathSync(link)).toBe(realpathSync(join(root, "ui", "components")));
+    expect(ensureLink({ root, ...at })).toBe("kept");
+  });
+
+  it("never replaces a file, a folder or a link elsewhere at the path", () => {
+    const root = linkRepo();
+    const path = join(root, "ui", "app", "components");
+    // git's stand-in for a link on a checkout without symlink support
+    writeFileSync(path, "../components");
+    expect(() => ensureLink({ root, ...at })).toThrow("something else is there");
+    expect(read(path)).toBe("../components");
+    rmSync(path);
+    mkdirSync(path);
+    expect(() => ensureLink({ root, ...at })).toThrow("something else is there");
+    rmSync(path, { recursive: true });
+    symlinkSync("../app", path, "junction");
+    expect(() => ensureLink({ root, ...at })).toThrow("something else is there");
+  });
+
+  it("refuses a path outside the repo and a target that is no folder", () => {
+    const root = linkRepo();
+    expect(() => ensureLink({ root, rel: "../components", target: "app" })).toThrow(
+      "not a relative path inside the repo",
+    );
+    expect(() => ensureLink({ root, rel: at.rel, target: "../missing" })).toThrow(
+      "is not a folder",
+    );
+    expect(existsSync(join(root, "ui", "app", "components"))).toBe(false);
+  });
 });
