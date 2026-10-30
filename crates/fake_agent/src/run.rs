@@ -5,6 +5,7 @@ mod effects;
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
+use std::time::Duration;
 
 use agent_client_protocol::schema::v1 as acp;
 use serde_json::{Map, Value, json};
@@ -37,11 +38,16 @@ struct Runner<'s, R, W> {
     cwd: Option<String>,
     session: Option<String>,
     labels: HashMap<String, Label>,
+    /// The `--pace-ms` pause between consecutive updates; zero for none.
+    pace: Duration,
+    /// What waits out the pace: a sleep in the real run, a recorder in tests.
+    pause: Box<dyn FnMut(Duration)>,
 }
 
-/// Runs `scenario` on the real stdin, stdout and stderr and returns the exit code. Never returns
-/// when stdin closes under `on_stdin_close: "hang"`.
-pub(crate) fn run(scenario: &Scenario) -> i32 {
+/// Runs `scenario` on the real stdin, stdout and stderr and returns the exit code. `pace_ms` is
+/// the `--pace-ms` pause between consecutive updates, 0 for none. Never returns when stdin
+/// closes under `on_stdin_close: "hang"`.
+pub(crate) fn run(scenario: &Scenario, pace_ms: u32) -> i32 {
     let stdin = std::io::stdin().lock();
     let stdout = std::io::BufWriter::new(std::io::stdout().lock());
     let mut runner = Runner {
@@ -51,6 +57,8 @@ pub(crate) fn run(scenario: &Scenario) -> i32 {
         cwd: None,
         session: None,
         labels: HashMap::new(),
+        pace: Duration::from_millis(u64::from(pace_ms)),
+        pause: Box::new(effects::pause),
     };
     match runner.play() {
         Stop::Exit(code) => code,
@@ -71,13 +79,19 @@ pub(crate) fn run(scenario: &Scenario) -> i32 {
 
 impl<R: BufRead, W: Write> Runner<'_, R, W> {
     /// Plays every step, then reads until EOF; any client message after the last step is a
-    /// mismatch.
+    /// mismatch. With a pace, waits before each update that follows an update.
     fn play(&mut self) -> Stop {
         let scenario = self.scenario;
+        let mut after_update = false;
         for step in &scenario.steps {
+            let is_update = matches!(step.kind, StepKind::Update { .. });
+            if is_update && after_update && !self.pace.is_zero() {
+                (self.pause)(self.pace);
+            }
             if let Err(stop) = self.step(&step.at, &step.kind) {
                 return stop;
             }
+            after_update = is_update;
         }
         match self.read(&scenario.end) {
             Ok(incoming) => Stop::Fail(

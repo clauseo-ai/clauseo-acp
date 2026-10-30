@@ -3,8 +3,15 @@
 [files]
 # Lock files hold only generated text (checksums, integrity hashes, package names and versions):
 # nothing in them is ours to spell. MessagePack files are binary. The pre-commit hook passes
-# --force-exclude, so these hold for the staged files it names too.
-extend-exclude = ["Cargo.lock", "ui/pnpm-lock.yaml", "*.msgpack"]
+# --force-exclude, so these hold for the staged files it names too. The scoreboard scenario is
+# generated: its chunks cut words at random, and its prose is checked where it is written,
+# crates/fake_agent/tests/stdio/scoreboard_prose.rs.
+extend-exclude = [
+  "Cargo.lock",
+  "ui/pnpm-lock.yaml",
+  "*.msgpack",
+  "crates/fake_agent/scenarios/scoreboard.jsonl",
+]
 
 [default]
 # A code point in a stylesheet's unicode-range (U+0100-02BA) is hex, not a word.

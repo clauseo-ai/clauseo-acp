@@ -1,4 +1,4 @@
-//! The command line: `--scenario`, `--check`, `--list` and `--hold`, parsed by hand.
+//! The command line: `--scenario`, `--pace-ms`, `--check`, `--list` and `--hold`, parsed by hand.
 
 use std::ffi::OsString;
 use std::io::Write;
@@ -6,8 +6,11 @@ use std::path::{Path, PathBuf};
 
 use crate::{EXIT_LOAD, EXIT_OK, EXIT_WRITE, Error, Scenario, bundled, diagnostic};
 
-const USAGE: &str =
-    "usage: fake_agent --scenario <name or path> | --check <path>... | --list | --hold";
+const USAGE: &str = "usage: fake_agent --scenario <name or path> [--pace-ms <n>] \
+    | --check <path>... | --list | --hold";
+
+/// The most `--pace-ms` may name: one minute.
+const MAX_PACE_MS: u32 = 60_000;
 
 /// Runs the command line `args` (without the program name) and returns the exit code: one of
 /// [`EXIT_OK`], [`EXIT_WRITE`], [`EXIT_LOAD`] and [`crate::EXIT_MISMATCH`], or an `exit` step's
@@ -17,18 +20,45 @@ pub fn cli(args: Vec<OsString>) -> i32 {
     let Some(args) = args else {
         return fail(&diagnostic(USAGE));
     };
-    match args
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>()
-        .as_slice()
-    {
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    match args.as_slice() {
         ["--list"] => list(),
         ["--hold"] => hold(),
-        ["--scenario", target] => scenario(target),
+        ["--scenario", target] => scenario(target, 0),
+        _ if args.contains(&"--pace-ms") => paced(&args),
         ["--check", paths @ ..] if !paths.is_empty() => check(paths),
         _ => fail(&diagnostic(USAGE)),
     }
+}
+
+/// `--pace-ms <n>` with `--scenario <target>`, in either order, and nothing else. Every other
+/// use of the flag is refused with one line that says what is wrong.
+fn paced(args: &[&str]) -> i32 {
+    if args.iter().filter(|arg| **arg == "--pace-ms").count() > 1 {
+        return fail(&diagnostic("--pace-ms may be given only once"));
+    }
+    let (pace, target) = match args {
+        ["--pace-ms", pace, "--scenario", target] | ["--scenario", target, "--pace-ms", pace] => {
+            (Some(*pace), *target)
+        }
+        ["--scenario", target, "--pace-ms"] => (None, *target),
+        _ if args.contains(&"--scenario") => return fail(&diagnostic(USAGE)),
+        _ => return fail(&diagnostic("--pace-ms needs --scenario")),
+    };
+    match pace.and_then(pace_ms) {
+        Some(ms) => scenario(target, ms),
+        None => fail(&diagnostic(
+            "--pace-ms takes a whole number of milliseconds from 0 to 60000",
+        )),
+    }
+}
+
+/// `text` as a pace: digits only, at most [`MAX_PACE_MS`].
+fn pace_ms(text: &str) -> Option<u32> {
+    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    text.parse().ok().filter(|ms| *ms <= MAX_PACE_MS)
 }
 
 /// Writes `fake_agent: holding` to stderr, so a test that reads that line knows the process is
@@ -78,7 +108,8 @@ fn list() -> i32 {
 }
 
 /// A bare name is a bundled scenario; anything with a path separator or `.jsonl` is a file.
-fn scenario(target: &str) -> i32 {
+/// `pace_ms` is the `--pace-ms` pause between consecutive updates; 0 for none.
+fn scenario(target: &str, pace_ms: u32) -> i32 {
     let loaded = if target.contains(['/', '\\'])
         || Path::new(target)
             .extension()
@@ -96,7 +127,7 @@ fn scenario(target: &str) -> i32 {
         }
     };
     match loaded {
-        Ok(scenario) => crate::run::run(&scenario),
+        Ok(scenario) => crate::run::run(&scenario, pace_ms),
         Err(error) => fail(&diagnostic(error)),
     }
 }

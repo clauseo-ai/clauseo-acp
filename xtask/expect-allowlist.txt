@@ -64,6 +64,7 @@ crates/protocol/src/raw.rs JsonValue dead_code
 crates/fake_agent/src/write.rs - clippy::disallowed_methods
 crates/fake_agent/tests/stdio/write.rs - clippy::disallowed_methods
 crates/fake_agent/src/run/effects.rs start_hold clippy::disallowed_methods
+crates/fake_agent/src/run/effects.rs pause clippy::disallowed_methods
 crates/fake_agent/tests/stdio/harness.rs Agent::start_args clippy::disallowed_methods
 crates/fake_agent/tests/stdio/harness.rs kill_pid clippy::disallowed_methods
 

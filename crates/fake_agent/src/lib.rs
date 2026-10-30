@@ -15,9 +15,9 @@
 //! - [`bin_path`]: the built binary, for another crate's tests. [`Error`]: every failure.
 //! - [`cli`]: the command line, for the binary's `main` only.
 //! - The exit codes: [`EXIT_OK`] 0, [`EXIT_WRITE`] 1, [`EXIT_LOAD`] 2, [`EXIT_MISMATCH`] 3.
-//! - The binary: `fake_agent --scenario <name or path>`, `--check <path>...` (prints
-//!   `ok <count>`), `--list`, `--hold`. Exit [`EXIT_OK`] when stdin closes, [`EXIT_LOAD`] for
-//!   bad arguments or a scenario that fails to load, [`EXIT_MISMATCH`] for a mismatch,
+//! - The binary: `fake_agent --scenario <name or path> [--pace-ms <n>]`, `--check <path>...`
+//!   (prints `ok <count>`), `--list`, `--hold`. Exit [`EXIT_OK`] when stdin closes, [`EXIT_LOAD`]
+//!   for bad arguments or a scenario that fails to load, [`EXIT_MISMATCH`] for a mismatch,
 //!   [`EXIT_WRITE`] when `--list` or `--check` cannot write its result to stdout, or an `exit`
 //!   step's code (never 2 or 3, refused at load). Every failure is one stderr line
 //!   `fake_agent: <file>:<line>: <what>`.
@@ -27,6 +27,8 @@
 //! - Stdout carries only JSON-RPC lines (and `send_line` text), each flushed. Diagnostics go to
 //!   stderr.
 //! - The agent waits only for the next client line: no timers, sleeps, randomness or clock.
+//!   The one exception is `--pace-ms`, which sleeps between consecutive updates for the speed
+//!   scoreboard (R13) and never touches a scenario.
 //! - Every sent message without `"raw": true` survives the SDK's v1 schema for its method at load
 //!   (`validate.rs`): deserialised, serialised again, and every value the scenario wrote is still
 //!   there. A method the SDK does not know must be marked raw.

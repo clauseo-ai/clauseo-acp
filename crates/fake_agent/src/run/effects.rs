@@ -1,7 +1,9 @@
-//! Steps that act outside stdout: files under the cwd, stderr lines, and the grandchild.
+//! Steps that act outside stdout: files under the cwd, stderr lines, the grandchild, and the
+//! `--pace-ms` pause.
 
 use std::io::Write;
 use std::path::Path;
+use std::time::Duration;
 
 use crate::diagnostic;
 use crate::scenario::FileOp;
@@ -11,6 +13,16 @@ pub(super) fn write_stderr(text: &str) -> std::io::Result<()> {
     let mut stderr = std::io::stderr().lock();
     stderr.write_all(text.as_bytes())?;
     stderr.flush()
+}
+
+/// Sleeps for `duration`: the `--pace-ms` pause between updates, for the speed scoreboard's
+/// session only. Scenarios themselves stay timer-free.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "--pace-ms paces the speed scoreboard's session; scenarios stay timer-free"
+)]
+pub(super) fn pause(duration: Duration) {
+    std::thread::sleep(duration);
 }
 
 /// Writes `line` to stderr `repeat` times, in one write.

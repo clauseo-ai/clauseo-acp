@@ -1,13 +1,29 @@
 //! Plays scenarios through [`Runner`] over in-memory pipes: the client's lines are read from a
 //! `Cursor`, the agent's lines are written to a `Vec`. No process and no clock.
 
+use std::cell::RefCell;
 use std::io::Cursor;
+use std::rc::Rc;
+use std::time::Duration;
 
 use super::*;
 
 /// Plays `scenario` against the client lines `input`. Returns why the run stopped and the
 /// agent's stdout lines, each parsed as JSON.
 fn play(scenario: &Scenario, input: &str) -> (Stop, Vec<Value>) {
+    let (stop, lines, _) = play_paced(scenario, input, Duration::ZERO);
+    (stop, lines)
+}
+
+/// Plays `scenario` with `pace` between updates. Also returns every pause the runner asked
+/// for, so no test sleeps.
+fn play_paced(
+    scenario: &Scenario,
+    input: &str,
+    pace: Duration,
+) -> (Stop, Vec<Value>, Vec<Duration>) {
+    let pauses = Rc::new(RefCell::new(Vec::new()));
+    let recorder = Rc::clone(&pauses);
     let mut runner = Runner {
         scenario,
         input: Cursor::new(input.as_bytes()),
@@ -15,6 +31,8 @@ fn play(scenario: &Scenario, input: &str) -> (Stop, Vec<Value>) {
         cwd: None,
         session: None,
         labels: HashMap::new(),
+        pace,
+        pause: Box::new(move |duration| recorder.borrow_mut().push(duration)),
     };
     let stop = runner.play();
     let text = String::from_utf8(runner.out).unwrap();
@@ -22,7 +40,8 @@ fn play(scenario: &Scenario, input: &str) -> (Stop, Vec<Value>) {
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    (stop, lines)
+    let recorded = pauses.borrow().clone();
+    (stop, lines, recorded)
 }
 
 /// The `file:line: message` of a run that failed, or `None` when it reached EOF.
@@ -46,6 +65,9 @@ fn scenario_of(steps: &[&str]) -> Scenario {
 
 const INITIALIZE: &str =
     r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":1}}"#;
+
+const PROMPT: &str =
+    r#"{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"sess-1"}}"#;
 
 #[test]
 fn load_replay_takes_the_cwd_and_session_from_session_load() {
@@ -112,4 +134,34 @@ fn cwd_before_any_session_fails_the_step() {
     let (stop, lines) = play(&scenario, "");
     assert_eq!(outcome(stop), Some(format!("t.jsonl:2: {NO_CWD}")));
     assert!(lines.is_empty(), "{lines:?}");
+}
+
+#[test]
+fn pace_pauses_before_each_update_that_follows_an_update() {
+    let update = r#"{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Clause."}},"session":"sess-1"}}"#;
+    let scenario = scenario_of(&[
+        update,
+        update,
+        r#"{"expect":{"method":"session/prompt","as":"p1"}}"#,
+        update,
+        update,
+    ]);
+    let input = format!("{PROMPT}\n");
+    let pace = Duration::from_millis(7);
+    let (stop, lines, pauses) = play_paced(&scenario, &input, pace);
+    assert_eq!(outcome(stop), None);
+    assert_eq!(lines.len(), 4);
+    // Before the second update and before the fourth. The third follows the expect, so no pause
+    // comes before it.
+    assert_eq!(pauses, [pace, pace]);
+}
+
+#[test]
+fn pace_zero_never_pauses() {
+    let update = r#"{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Clause."}},"session":"sess-1"}}"#;
+    let scenario = scenario_of(&[update, update, update]);
+    let (stop, lines, pauses) = play_paced(&scenario, "", Duration::ZERO);
+    assert_eq!(outcome(stop), None);
+    assert_eq!(lines.len(), 3);
+    assert!(pauses.is_empty(), "{pauses:?}");
 }
