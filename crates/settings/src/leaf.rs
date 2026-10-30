@@ -10,12 +10,14 @@
 //! - its row in [`KEYS`], with its kind: the macOS shim asks managed preferences only for these
 //!   keys, and the registry calls any other value name unknown;
 //! - a [`Leaf`] variant, and its arms in `Leaf::parse`, `Leaf::key` and `Leaf::apply`, and
-//!   in `reset`, which a policy value that does not type locks the key at;
+//!   in `reset`, which a policy value that does not type locks the key at
+//!   (`leaf/tests.rs`' `a_refused_key_goes_back_to_its_default` fails for a row with no arm);
 //! - for a `ui` key, its field in `UiPatch` (`ui.rs`) and in `Settings::apply_ui_patch`;
-//! - a sample value in `leaf/tests.rs`' `every_fixed_key_types_and_the_kinds_agree`.
+//! - a sample value in `leaf/tests.rs`' `every_fixed_key_types_and_the_kinds_agree`, and a
+//!   value that is not the default in `a_refused_key_goes_back_to_its_default`.
 //!
 //! `schema::tests::the_keys_and_their_kinds_are_the_schemas` fails when the schema and [`KEYS`]
-//! disagree, and the samples test fails when [`KEYS`] has a row without a sample.
+//! disagree, and the two samples tests fail when [`KEYS`] has a row without a sample.
 
 #[cfg(test)]
 mod tests;

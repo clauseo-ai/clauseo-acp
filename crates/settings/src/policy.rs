@@ -24,6 +24,7 @@ use crate::error::Error;
 use crate::files::Files;
 use crate::leaf::{self, Leaf};
 use crate::warning::Warning;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 /// One place policy can come from.
@@ -117,8 +118,20 @@ pub fn system_policy_sources() -> Vec<Box<dyn PolicySource>> {
 }
 
 impl PolicyValues {
+    /// The source's values. A key set twice in one source (a `policy.json` may repeat a key)
+    /// keeps its last value, as in `settings.json`.
     pub(crate) fn new(leaves: Vec<Leaf>, warnings: Vec<Warning>) -> PolicyValues {
-        PolicyValues { leaves, warnings }
+        let mut seen = BTreeSet::new();
+        let mut last: Vec<Leaf> = leaves
+            .into_iter()
+            .rev()
+            .filter(|leaf| seen.insert(leaf.key()))
+            .collect();
+        last.reverse();
+        PolicyValues {
+            leaves: last,
+            warnings,
+        }
     }
 
     /// The dotted keys this source locks, in its order: those it sets, then those whose value

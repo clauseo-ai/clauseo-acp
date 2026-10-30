@@ -10,7 +10,9 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
 
 ## Decision
 
-- **Sources, strongest first.** A key the first source sets is not taken from a later one.
+- **Sources, strongest first.** A key the first source sets is not taken from a later one. Within
+  one source, a key set twice (a `policy.json` may repeat one) keeps its last value, as in
+  `settings.json`.
   - Windows: the registry key `HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Clauseo\Clauseo`, read
     through the 64-bit view, then `<ProgramData>\Clauseo\policy.json`, where `<ProgramData>` is the
     `FOLDERID_ProgramData` known folder (usually `C:\ProgramData`).
