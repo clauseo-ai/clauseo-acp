@@ -1,6 +1,7 @@
 //! What the stderr tail hides: the home folder, the values of the spec's secret variables, words
-//! starting `sk-` and the word after `Bearer `.
+//! starting `sk-` and the word after `Bearer ` (in any case).
 
+use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -40,7 +41,7 @@ impl Redactor {
     }
 
     /// `text` with every rule applied: secret values first, then the home folder, then `sk-`
-    /// words and the word after `Bearer `.
+    /// words and the word after `Bearer ` (in any case: `authorization: bearer ..` too).
     pub(crate) fn redact(&self, text: &str) -> String {
         let mut text = text.to_owned();
         for secret in &self.secrets {
@@ -54,7 +55,7 @@ impl Redactor {
             text = text.replace(home.as_str(), "~");
         }
         let text = replace_runs(&text, "sk-", Marker::Starts, is_key_char);
-        replace_runs(&text, "Bearer ", Marker::Precedes, is_token68_char)
+        replace_runs(&text, "bearer ", Marker::Precedes, is_token68_char)
     }
 }
 
@@ -68,16 +69,22 @@ fn is_secret_name(name: &OsStr) -> bool {
 enum Marker {
     /// The marker starts a word, and the word goes (`sk-`). A marker inside a word is left.
     Starts,
-    /// The marker stays, and the run after it goes (`Bearer `).
+    /// The marker, matched in any ASCII case, stays, and the run after it goes (`Bearer `).
     Precedes,
 }
 
 /// `text` with each `marker` and the run of `run` chars after it replaced, as `how` says.
+/// A `Precedes` marker is matched in any ASCII case, so give it in lower case.
 fn replace_runs(text: &str, marker: &str, how: Marker, run: fn(char) -> bool) -> String {
+    // Lowering ASCII keeps every byte where it was, so offsets found in `haystack` hold in `text`.
+    let haystack = match how {
+        Marker::Starts => Cow::Borrowed(text),
+        Marker::Precedes => Cow::Owned(text.to_ascii_lowercase()),
+    };
     let mut out = String::with_capacity(text.len());
     let mut copied = 0;
     let mut from = 0;
-    while let Some(found) = text.get(from..).and_then(|rest| rest.find(marker)) {
+    while let Some(found) = haystack.get(from..).and_then(|rest| rest.find(marker)) {
         let found = from + found;
         let after = found + marker.len();
         let end = text
