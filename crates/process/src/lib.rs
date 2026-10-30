@@ -9,8 +9,8 @@
 //!   `killpg`); on Windows a Job Object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, which the agent
 //!   joins while suspended (`CREATE_SUSPENDED`, then its threads resume) and which it never runs
 //!   outside. Windows children get `CREATE_NO_WINDOW`. Every Win32 call is in `os/windows.rs`.
-//! - The shutdown ladder: close stdin, 2 s, SIGTERM to the group, 3 s, SIGKILL to the group. On
-//!   Windows: close stdin, 2 s, end the job.
+//! - The shutdown ladder: close stdin, 2 s, SIGTERM to the group, 3 s, SIGKILL to the group, and
+//!   2 s more for the exit. On Windows: close stdin, 2 s, end the job, 2 s.
 //! - The stderr ring (256 KiB per agent, never uploaded) and its redacted tail of at most 4 KiB.
 //!
 //! # Interface
@@ -27,7 +27,7 @@
 //!   `test-support` feature `ManualTimer`), and `Drop` (kills the tree, no waits).
 //! - [`ExitReport`]: the code or signal, [`ExitReport::stderr_tail`], and
 //!   [`ExitReport::detach_reason`] for `AgentSessionDetached`. [`ShutdownOutcome`] names the
-//!   ladder step that ended the agent.
+//!   ladder step that ended the agent, or says it never exited (`Unresponsive`).
 //! - [`Error`], every failed launch, with [`Error::code`] (`agent.launch_failed`).
 //!
 //! # Invariants
