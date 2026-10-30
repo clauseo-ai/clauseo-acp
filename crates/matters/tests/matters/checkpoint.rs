@@ -193,6 +193,9 @@ fn same_size_rewrite_in_same_second_is_seen() {
     // seconds), so the file is racily clean however slow the machine is. The write's own mtime
     // is racy only while the cache is written within 2 s of it; past that, the rewrite below has
     // an equal stat on Windows (ctime is the creation time there) and is rightly not read.
+    // On Unix the rewrite changes ctime, which alone forces the re-read, so only Windows checks
+    // the racy rule here; the unit tests in src/stat/tests.rs and src/checkpoint/tests.rs cover
+    // it on every platform.
     let old = SystemTime::UNIX_EPOCH + Duration::from_secs(4_102_444_800);
     support::set_mtime(fx.file("a.txt"), old);
     let mut matter = fx.import();
