@@ -1,8 +1,4 @@
-// The guard over oxlint's reach into ui/components. `lint:types` lints ui/components through the
-// link ui/app/components, which `pnpm -C ui install` makes (components-link.mjs) and git ignores;
-// ui/app/.eslintignore un-ignores it for oxlint. If the link is missing, or oxlint stops walking
-// into it, `oxlint --type-aware` would lint nothing in ui/components without a word, so this fails
-// instead. It also fails when a file would be linted twice.
+// Fails when oxlint stops linting ui/components (or lints a file twice); why the link: components-link.mjs.
 
 import { lstatSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -32,7 +28,9 @@ function isLink(path) {
 describe("oxlint's reach into ui/components", () => {
   it("goes through the link ui/app/components", () => {
     expect(isLink(LINK), `ui/app/components is not a link; ${FIX}`).toBe(true);
-    expect(realpathSync(LINK), FIX).toBe(realpathSync(join(UI_DIR, "components")));
+    expect(realpathSync(LINK), `ui/app/components is not a link to ui/components; ${FIX}`).toBe(
+      realpathSync(join(UI_DIR, "components")),
+    );
   });
 
   it("lints every source file of ui/components, and every file once", async () => {
