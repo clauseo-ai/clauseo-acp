@@ -196,7 +196,7 @@ fn same_size_rewrite_in_same_second_is_seen() {
     // On Unix the rewrite changes ctime, which alone forces the re-read, so only Windows checks
     // the racy rule here; the unit tests in src/stat/tests.rs and src/checkpoint/tests.rs cover
     // it on every platform.
-    let old = SystemTime::UNIX_EPOCH + Duration::from_secs(4_102_444_800);
+    let old = SystemTime::UNIX_EPOCH + Duration::from_hours(1_139_568);
     support::set_mtime(fx.file("a.txt"), old);
     let mut matter = fx.import();
     assert_eq!(matter.before_turn(&meta(2)).unwrap().outcome.id(), cid(1));
