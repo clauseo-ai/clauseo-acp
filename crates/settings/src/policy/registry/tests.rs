@@ -19,9 +19,10 @@ fn kinds(key: &str) -> Option<Kind> {
 
 /// The JSON values, or the warnings, of one registry value.
 fn convert(key: &str, value: RegValue) -> Result<Value, WarningKind> {
-    let (mut raws, mut warnings) = raw_values(vec![(key.to_owned(), value)], kinds);
+    let (mut raws, refused, mut warnings) = raw_values(vec![(key.to_owned(), value)], kinds);
     match (raws.pop(), warnings.pop()) {
         (Some(raw), None) => {
+            assert_eq!(refused, Vec::<String>::new());
             assert_eq!(raw.key, key);
             assert_eq!(
                 raw.origin,
@@ -32,6 +33,12 @@ fn convert(key: &str, value: RegValue) -> Result<Value, WarningKind> {
             Ok(raw.value)
         }
         (None, Some(warning)) => {
+            // A known key whose value is refused is locked at its default; an unknown one is not.
+            let expected: Vec<String> = match &warning.kind {
+                WarningKind::InvalidValue { .. } => vec![key.to_owned()],
+                _ => Vec::new(),
+            };
+            assert_eq!(refused, expected);
             assert_eq!(
                 warning.origin,
                 Origin::Store {
@@ -173,11 +180,13 @@ fn parse_types_with_the_settings_kinds() {
         ("ui.colour".to_owned(), RegValue::Sz("red".to_owned())),
     ]);
     let (leaves, warnings) = values.into_parts();
+    // The density does not type, so it is locked at its default; the unknown colour is not.
     assert_eq!(
         leaves,
         [
             Leaf::Theme(Theme::Dark),
-            Leaf::FontSize(FontSize::try_from(18).unwrap())
+            Leaf::FontSize(FontSize::try_from(18).unwrap()),
+            Leaf::Refused("ui.density".to_owned()),
         ]
     );
     let kinds: Vec<_> = warnings.into_iter().map(|warning| warning.kind).collect();

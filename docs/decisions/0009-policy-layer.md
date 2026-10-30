@@ -36,9 +36,19 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
   the user's value for its key, and the key shows as locked. An agent's policy entry replaces the
   user's whole entry for that id (args and env are not merged), and the locked key is
   `agents.<id>`.
-- **What is left out.** A key this version does not know is a warning, so one profile serves
-  machines on mixed versions. A value of the wrong type is a warning, and its key is not locked.
-  An agent whose `command` is not an absolute path is left out with a warning.
+- **What is left out.** A key this version does not know is a warning and locks nothing, so one
+  profile serves machines on mixed versions.
+- **An invalid policy value fails closed, key by key** (Rohan, 2026-10-31). A value of the wrong
+  type for a known key is a warning, and the key is still locked, at its default: the user's value
+  never stands in for a broken policy value. An agent whose `command` is not an absolute path, or
+  whose launch spec does not type, is a warning, and `agents.<id>` is still locked with no entry:
+  the user's entry for that id is dropped, so that agent does not launch. A stronger source's
+  invalid value wins over a weaker source's valid one, as any value does. A malformed section of a
+  `policy.json`, or a managed-preferences `agents` value that is not a dictionary, names no key,
+  so it is only a warning. This replaces the first draft's rule, under which an invalid value was
+  left out and its key not locked.
+- **Applied sources.** `PolicyStatus` lists a source as applied only when it set at least one
+  valid value; a source whose every value was refused still locks the keys it named.
 - **A source that cannot be read** (a `policy.json` that does not parse or cannot be opened, a
   registry read that fails) is dropped whole. Start-up goes on with the other sources, and the
   error is listed in `PolicyStatus` for `host` to log. No M1 key is security-relevant; M2 revisits

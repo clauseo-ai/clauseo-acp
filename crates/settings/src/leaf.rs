@@ -9,7 +9,8 @@
 //!   snapshot;
 //! - its row in [`KEYS`], with its kind: the macOS shim asks managed preferences only for these
 //!   keys, and the registry calls any other value name unknown;
-//! - a [`Leaf`] variant, and its arms in `Leaf::parse`, `Leaf::key` and `Leaf::apply`;
+//! - a [`Leaf`] variant, and its arms in `Leaf::parse`, `Leaf::key` and `Leaf::apply`, and
+//!   in `reset`, which a policy value that does not type locks the key at;
 //! - for a `ui` key, its field in `UiPatch` (`ui.rs`) and in `Settings::apply_ui_patch`;
 //! - a sample value in `leaf/tests.rs`' `every_fixed_key_types_and_the_kinds_agree`.
 //!
@@ -19,7 +20,7 @@
 #[cfg(test)]
 mod tests;
 
-use crate::policy::Kind;
+use crate::policy::{Kind, kind_of};
 use crate::schema::{AgentLaunch, Density, FontSize, Language, Settings, Theme};
 use crate::warning::{Origin, Warning, WarningKind};
 use serde::de::DeserializeOwned;
@@ -56,6 +57,10 @@ pub(crate) enum Leaf {
     FontSize(FontSize),
     Density(Density),
     Language(Language),
+    /// A known key a policy set to a value that does not type. The key is locked at its
+    /// default; for `agents.<id>`, the user's entry for that id is dropped (fail closed,
+    /// Rohan, 2026-10-31).
+    Refused(String),
 }
 
 /// The agent id in an `agents.<id>` key.
@@ -63,14 +68,38 @@ pub(crate) fn agent_id(key: &str) -> Option<&str> {
     key.strip_prefix("agents.").filter(|id| !id.is_empty())
 }
 
-/// Types every raw value, in order. A value that cannot be typed is left out with a warning.
+/// Types every raw value of the user's `settings.json`, in order. A value that cannot be typed
+/// is left out with a warning, and the default or the file's other values stand.
 pub(crate) fn typed(raws: Vec<Raw>, warnings: &mut Vec<Warning>) -> Vec<Leaf> {
+    type_all(raws, warnings, false)
+}
+
+/// Types every raw value of a policy source, in order. A value that cannot be typed gets a
+/// warning, and when its key is known it becomes [`Leaf::Refused`], which locks the key at its
+/// default: a firm's broken value never leaves the user's in force. `refused` holds the known
+/// keys the source's own reader already refused (a registry value of the wrong type).
+pub(crate) fn typed_policy(
+    raws: Vec<Raw>,
+    refused: Vec<String>,
+    warnings: &mut Vec<Warning>,
+) -> Vec<Leaf> {
+    let mut leaves = type_all(raws, warnings, true);
+    leaves.extend(refused.into_iter().map(Leaf::Refused));
+    leaves
+}
+
+fn type_all(raws: Vec<Raw>, warnings: &mut Vec<Warning>, policy: bool) -> Vec<Leaf> {
     let mut leaves = Vec::with_capacity(raws.len());
     for raw in raws {
         let mut kinds = Vec::new();
         match Leaf::parse(&raw.key, raw.value, &mut kinds) {
             Ok(leaf) => leaves.push(leaf),
-            Err(kind) => kinds.push(kind),
+            Err(kind) => {
+                if policy && kind_of(&raw.key).is_some() {
+                    leaves.push(Leaf::Refused(raw.key.clone()));
+                }
+                kinds.push(kind);
+            }
         }
         warnings.extend(kinds.into_iter().map(|kind| Warning {
             origin: raw.origin.clone(),
@@ -117,7 +146,13 @@ impl Leaf {
             Leaf::FontSize(_) => "ui.font_size".to_owned(),
             Leaf::Density(_) => "ui.density".to_owned(),
             Leaf::Language(_) => "ui.language".to_owned(),
+            Leaf::Refused(key) => key.clone(),
         }
+    }
+
+    /// Whether this is a value, not a [`Leaf::Refused`] key.
+    pub(crate) fn is_value(&self) -> bool {
+        !matches!(self, Leaf::Refused(_))
     }
 
     /// Writes the value into `settings`, replacing what was there. An agent replaces the whole
@@ -132,6 +167,23 @@ impl Leaf {
             Leaf::FontSize(size) => settings.ui.font_size = size,
             Leaf::Density(density) => settings.ui.density = density,
             Leaf::Language(language) => settings.ui.language = language,
+            Leaf::Refused(key) => reset(&key, settings),
+        }
+    }
+}
+
+/// Puts the setting `key` back to its default; for `agents.<id>`, drops that agent.
+fn reset(key: &str, settings: &mut Settings) {
+    match key {
+        "matters.default_location" => settings.matters.default_location = None,
+        "ui.theme" => settings.ui.theme = Theme::default(),
+        "ui.font_size" => settings.ui.font_size = FontSize::default(),
+        "ui.density" => settings.ui.density = Density::default(),
+        "ui.language" => settings.ui.language = Language::default(),
+        _ => {
+            if let Some(id) = agent_id(key) {
+                settings.agents.remove(id);
+            }
         }
     }
 }

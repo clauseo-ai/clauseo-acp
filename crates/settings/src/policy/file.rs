@@ -9,7 +9,8 @@ use crate::{json, leaf};
 use std::path::Path;
 
 /// The values the file sets. A file that does not parse is an error, so the caller drops the
-/// whole source; a value that cannot be typed is left out with a warning.
+/// whole source; a value that cannot be typed gets a warning, and a known key's locks it at its
+/// default.
 pub fn parse(path: &Path, bytes: &[u8]) -> Result<PolicyValues, Error> {
     let (raws, mut warnings) = json::read(path, bytes).map_err(|syntax| Error::Parse {
         path: path.to_owned(),
@@ -17,6 +18,6 @@ pub fn parse(path: &Path, bytes: &[u8]) -> Result<PolicyValues, Error> {
         column: syntax.position.column,
         message: syntax.message,
     })?;
-    let leaves = leaf::typed(raws, &mut warnings);
+    let leaves = leaf::typed_policy(raws, Vec::new(), &mut warnings);
     Ok(PolicyValues::new(leaves, warnings))
 }

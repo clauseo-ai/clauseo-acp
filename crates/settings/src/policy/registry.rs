@@ -3,7 +3,8 @@
 //!
 //! `REG_DWORD` is a number, or a boolean (0 or 1) where the setting is one. `REG_SZ` is a string,
 //! or JSON text where the setting is an object (`agents.<id>`). `REG_MULTI_SZ` is a list of
-//! strings. Any other type is left out with a warning.
+//! strings. A known key's value of another type gets a warning and locks the key at its default;
+//! an unknown value name is only a warning.
 
 #[cfg(test)]
 mod tests;
@@ -42,20 +43,22 @@ pub(crate) fn parse_with(
     values: Vec<(String, RegValue)>,
     kinds: fn(&str) -> Option<Kind>,
 ) -> PolicyValues {
-    let (raws, mut warnings) = raw_values(values, kinds);
-    let leaves = leaf::typed(raws, &mut warnings);
+    let (raws, refused, mut warnings) = raw_values(values, kinds);
+    let leaves = leaf::typed_policy(raws, refused, &mut warnings);
     PolicyValues::new(leaves, warnings)
 }
 
-/// Each value as JSON, by its setting's kind; a warning for each that cannot be.
+/// Each value as JSON, by its setting's kind; a warning for each that cannot be, and the known
+/// keys among those (refused, so locked at their default).
 pub(crate) fn raw_values(
     values: Vec<(String, RegValue)>,
     kinds: fn(&str) -> Option<Kind>,
-) -> (Vec<Raw>, Vec<Warning>) {
+) -> (Vec<Raw>, Vec<String>, Vec<Warning>) {
     let origin = Origin::Store {
         name: SOURCE.to_owned(),
     };
     let mut raws = Vec::with_capacity(values.len());
+    let mut refused = Vec::new();
     let mut warnings = Vec::new();
     for (key, value) in values {
         let converted = match kinds(&key) {
@@ -71,13 +74,16 @@ pub(crate) fn raw_values(
             Err(message) => warnings.push(Warning {
                 origin: origin.clone(),
                 kind: match message {
-                    Some(message) => WarningKind::InvalidValue { key, message },
+                    Some(message) => {
+                        refused.push(key.clone());
+                        WarningKind::InvalidValue { key, message }
+                    }
                     None => WarningKind::UnknownKey { key },
                 },
             }),
         }
     }
-    (raws, warnings)
+    (raws, refused, warnings)
 }
 
 /// The JSON value a registry value stands for, or why it stands for none.

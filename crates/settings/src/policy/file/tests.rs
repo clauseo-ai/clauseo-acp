@@ -17,7 +17,11 @@ fn a_policy_file_has_the_settings_shape() {
         b"{\n  // the firm's look\n  \"ui\": {\"theme\": \"dark\", \"density\": 1},\n}",
     )
     .unwrap();
-    assert_eq!(values.keys().collect::<Vec<_>>(), ["ui.theme"]);
+    // The density does not type, so it is locked at its default.
+    assert_eq!(
+        values.keys().collect::<Vec<_>>(),
+        ["ui.theme", "ui.density"]
+    );
     let warning = &values.warnings()[0];
     assert_eq!(
         warning.origin,
@@ -30,7 +34,13 @@ fn a_policy_file_has_the_settings_shape() {
         }
     );
     assert!(matches!(&warning.kind, WarningKind::InvalidValue { key, .. } if key == "ui.density"));
-    assert_eq!(values.into_parts().0, [Leaf::Theme(Theme::Dark)]);
+    assert_eq!(
+        values.into_parts().0,
+        [
+            Leaf::Theme(Theme::Dark),
+            Leaf::Refused("ui.density".to_owned())
+        ]
+    );
 }
 
 #[test]

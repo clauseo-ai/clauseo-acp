@@ -40,7 +40,8 @@ pub enum PolicyRead {
     Unreadable(Error),
 }
 
-/// The values a policy source set, typed, with a warning for each it left out.
+/// The values a policy source set, typed, with a warning for each it left out. A known key whose
+/// value did not type is kept too, to lock the key at its default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PolicyValues {
     leaves: Vec<Leaf>,
@@ -114,9 +115,15 @@ impl PolicyValues {
         PolicyValues { leaves, warnings }
     }
 
-    /// The dotted keys this source sets, in its order.
+    /// The dotted keys this source locks, in its order: those it sets, then those whose value
+    /// did not type (locked at their default).
     pub fn keys(&self) -> impl Iterator<Item = String> {
         self.leaves.iter().map(Leaf::key)
+    }
+
+    /// Whether the source set at least one valid value. Only such a source counts as applied.
+    pub fn sets_a_value(&self) -> bool {
+        self.leaves.iter().any(Leaf::is_value)
     }
 
     /// The values it left out, and why.
@@ -130,12 +137,13 @@ impl PolicyValues {
 }
 
 impl PolicyStatus {
-    /// Whether no source holds a policy. A source that could not be read does not count.
+    /// Whether no source set a valid policy value. A source that could not be read, or whose
+    /// every value was refused, does not count, though the keys it named are still locked.
     pub fn is_absent(&self) -> bool {
         self.applied.is_empty()
     }
 
-    /// The sources that hold a policy, strongest first.
+    /// The sources that set at least one valid value, strongest first.
     pub fn applied(&self) -> &[String] {
         &self.applied
     }

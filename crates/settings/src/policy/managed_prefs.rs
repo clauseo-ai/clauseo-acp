@@ -66,6 +66,7 @@ pub fn parse(values: Vec<(String, PlistValue, bool)>) -> PolicyRead {
         name: SOURCE.to_owned(),
     };
     let mut raws = Vec::new();
+    let mut refused = Vec::new();
     let mut warnings = Vec::new();
     for (key, value) in entries {
         let kind = match value.map(plain_json) {
@@ -77,7 +78,10 @@ pub fn parse(values: Vec<(String, PlistValue, bool)>) -> PolicyRead {
                 });
                 continue;
             }
-            Some(Err(message)) => WarningKind::InvalidValue { key, message },
+            Some(Err(message)) => {
+                refused.push(key.clone());
+                WarningKind::InvalidValue { key, message }
+            }
             None if key == AGENTS_KEY => WarningKind::InvalidValue {
                 key,
                 message: "it must be a dictionary from agent id to launch spec".to_owned(),
@@ -89,7 +93,7 @@ pub fn parse(values: Vec<(String, PlistValue, bool)>) -> PolicyRead {
             kind,
         });
     }
-    let leaves = leaf::typed(raws, &mut warnings);
+    let leaves = leaf::typed_policy(raws, refused, &mut warnings);
     PolicyRead::Read(PolicyValues::new(leaves, warnings))
 }
 
