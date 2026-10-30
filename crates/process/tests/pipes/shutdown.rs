@@ -79,50 +79,54 @@ fn ignore_stdin_close_escalates_to_sigterm() {
     assert_eq!(timer.fired(), 1, "the 3 s wait was armed and never fired");
 }
 
+/// Starts `scenario` with SIGTERM ignored, which the agent inherits across exec (std resets only
+/// SIGPIPE in the child), so the SIGTERM step cannot end it. A stopped agent will not do: macOS
+/// ends a stopped process on SIGTERM, which raced the 3 s wait.
+#[cfg(unix)]
+#[expect(
+    unsafe_code,
+    reason = "nix's signal() is unsafe; the agent inherits SIGTERM ignored across exec"
+)]
+fn launch_ignoring_sigterm(scenario: &str, dir: &RunDir) -> Launched {
+    use nix::sys::signal::{SigHandler, Signal, signal};
+
+    // SAFETY: SIG_IGN installs no handler code, so nothing can run in signal context. Nextest runs
+    // this test alone in its own process, and the old disposition is put back right after the
+    // launch, so nothing else in the process depends on SIGTERM meanwhile.
+    let old = unsafe { signal(Signal::SIGTERM, SigHandler::SigIgn) }.expect("ignore SIGTERM");
+    let launched = launch(scenario, dir);
+    // SAFETY: `old` is the disposition the process had a moment ago, restored as it was.
+    unsafe { signal(Signal::SIGTERM, old) }.expect("restore SIGTERM");
+    launched.unwrap()
+}
+
 #[cfg(unix)]
 #[test]
-fn stopped_agent_is_killed() {
-    use nix::sys::signal::{Signal, kill};
-    use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
-
+fn sigterm_ignoring_agent_is_killed() {
     let dir = RunDir::new();
     let Launched {
         stdout: _stdout,
         stderr,
         handle,
         ..
-    } = launch("idle", &dir).unwrap();
-    // Stopped before shutdown starts, as `waitpid` shows, so it can neither read the end of
-    // stdin nor act on SIGTERM: only SIGKILL ends it.
-    let pid = nix::unistd::Pid::from_raw(i32::try_from(handle.pid()).unwrap());
-    kill(pid, Signal::SIGSTOP).unwrap();
-    let stopped = waitpid(pid, Some(WaitPidFlag::WUNTRACED)).unwrap();
-    assert_eq!(stopped, WaitStatus::Stopped(pid, Signal::SIGSTOP));
+    } = launch_ignoring_sigterm("ignore-stdin-close", &dir);
     let timer = ManualTimer::new();
+    let (pumped, mut lines) = lines(stderr);
     let script = async {
+        // It has read the end of stdin and holds, and SIGTERM is ignored: only SIGKILL ends it.
+        lines.until("fake_agent: stdin closed, holding").await;
         assert_eq!(timer.next_armed().await, Duration::from_secs(2));
         assert!(timer.fire());
         assert_eq!(timer.next_armed().await, Duration::from_secs(3));
         assert!(timer.fire());
     };
-    let (outcome, (), pumped) =
-        block_on(async { join!(handle.shutdown(&timer), script, stderr.drain()) });
+    let (outcome, (), pumped) = block_on(async { join!(handle.shutdown(&timer), script, pumped) });
     let ShutdownOutcome::Killed(report) = outcome else {
         panic!("expected Killed, got {outcome:?}");
     };
-    // Linux reports SIGKILL. macOS lets SIGKILL wake the stopped agent, which then dies of the
-    // SIGTERM still pending, so it may report that one.
-    let expected = if cfg!(target_os = "linux") {
-        vec![Signal::SIGKILL as i32]
-    } else {
-        vec![Signal::SIGKILL as i32, Signal::SIGTERM as i32]
-    };
-    assert!(
-        report
-            .signal()
-            .is_some_and(|signal| expected.contains(&signal)),
-        "ended by {:?}",
-        report.signal()
+    assert_eq!(
+        report.signal(),
+        Some(nix::sys::signal::Signal::SIGKILL as i32)
     );
     assert_eq!(report.code(), None);
     pumped.unwrap();

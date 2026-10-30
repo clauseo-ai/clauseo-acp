@@ -98,7 +98,8 @@ crates/reducer_bench/benches/apply.rs main clippy::print_stdout
 crates/reducer_bench/benches/apply.rs linux::fail clippy::panic
 
 # clauseo-process: its Windows Job Object calls, its pipe tests' write module (each run's own
-# folder), and the tests' Windows exit watch.
+# folder), the tests' Windows exit watch, and the pipe test that launches with SIGTERM ignored.
 crates/process/src/os/windows.rs - unsafe_code
+crates/process/tests/pipes/shutdown.rs launch_ignoring_sigterm unsafe_code
 crates/process/tests/pipes/write.rs - clippy::disallowed_methods
 crates/process/tests/support/exit_watch.rs os unsafe_code
