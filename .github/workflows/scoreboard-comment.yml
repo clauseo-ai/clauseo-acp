@@ -6,8 +6,9 @@
 # - workflow_run runs the copy of this file on the default branch, with a token that can comment,
 #   also for a fork's pull request. So it never checks out or runs the pull request's code: the
 #   checkout is the default branch, sparse, and holds only the script, its inputs, Node's
-#   version and ui/e2e/package.json (`"type": "module"`, so Node reads the files as ES modules). Every artifact is untrusted data, written by the pull request's code: comment.ts caps
-#   its size, parses it as JSON, checks every field and runs nothing from it.
+#   version and ui/e2e/package.json (`"type": "module"`, so Node reads the files as ES
+#   modules). Every artifact is untrusted data, written by the pull request's code: comment.ts
+#   caps its size, parses it as JSON, checks every field and runs nothing from it.
 # - The pull request comes from the GitHub API, never from an artifact: workflow_run.pull_requests
 #   is empty for a fork, so the script also asks for the open pull requests from the run's head
 #   repository and branch, and keeps one only when its head commit is the run's.
