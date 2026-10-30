@@ -164,8 +164,9 @@ fn ignore_stdin_close_terminates_job() {
     let ShutdownOutcome::Killed(report) = outcome else {
         panic!("expected Killed, got {outcome:?}");
     };
-    // `TerminateJobObject`'s exit code.
-    assert_eq!(report.code(), Some(1));
+    // The code only `TerminateJobObject` gives (std's `Child::kill` gives 1), so the job, not a
+    // kill of the agent alone, ended it.
+    assert_eq!(report.code(), Some(0xC1A0));
     assert_eq!(report.signal(), None);
     pumped.unwrap();
     assert_eq!(timer.fired(), 1);
