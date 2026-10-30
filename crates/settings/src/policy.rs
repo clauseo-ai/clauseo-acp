@@ -4,6 +4,12 @@
 //! and a `policy.json` on every OS. Each store's raw input goes through a plain parser, compiled
 //! and tested on every OS: [`registry::parse`], [`managed_prefs::parse`] and [`file::parse`].
 //! Only the code that collects the raw input is per OS.
+//!
+//! Each parser returns what its store can report. The registry parser runs only once the shim
+//! found the key, so it returns [`PolicyValues`]; managed preferences are asked key by key, so
+//! their parser is the one that sees that nothing is forced and returns [`PolicyRead`]; a
+//! `policy.json` that exists can still fail to parse, so its parser returns a `Result`. A new
+//! store picks the shape that says what it can report.
 
 pub mod file;
 pub mod managed_prefs;

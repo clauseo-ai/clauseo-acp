@@ -4,12 +4,13 @@
 //! A value counts as policy only when it is forced (`CFPreferencesAppValueIsForced`): the same
 //! call also returns what a user wrote with `defaults write`, which is not policy. Keys are the
 //! dotted keys, except agents: the key `agents` holds a dictionary from agent id to launch spec,
-//! since managed preferences are read key by key and cannot list the ids.
+//! since managed preferences are read key by key and cannot list the ids. An `agents.<id>` key
+//! is never read there (the shim never asks for one), and [`parse`] calls it unknown.
 
 #[cfg(test)]
 mod tests;
 
-use super::{PolicyRead, PolicyValues, kind_of};
+use super::{PolicyRead, PolicyValues};
 use crate::leaf::{self, Raw};
 use crate::warning::{Origin, Warning, WarningKind};
 use serde_json::{Map, Number, Value};
@@ -56,7 +57,7 @@ pub fn parse(values: Vec<(String, PlistValue, bool)>) -> PolicyRead {
                     .into_iter()
                     .map(|(id, launch)| (format!("{AGENTS_KEY}.{id}"), Some(launch))),
             ),
-            value if kind_of(&key).is_some() => {
+            value if leaf::KEYS.iter().any(|&(known, _)| known == key) => {
                 entries.push((key, Some(value)));
             }
             _ => entries.push((key, None)),

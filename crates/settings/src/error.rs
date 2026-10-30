@@ -18,7 +18,8 @@ pub enum Error {
         #[source]
         source: io::Error,
     },
-    /// A JSON file does not parse. `line` and `column` count from 1.
+    /// A JSON file does not parse. `line` and `column` count from 1, except that an error at
+    /// the end of the input has column 0, as the JSON parser reports it.
     #[error("{}:{line}:{column}: {message}", path.display())]
     Parse {
         /// The file.

@@ -191,12 +191,18 @@ fn a_date_or_a_non_finite_number_has_no_json_value() {
 }
 
 #[test]
-fn an_agent_key_on_its_own_is_read_too() {
+fn an_agent_key_on_its_own_is_unknown() {
+    // The shim never asks for one; agents come only in the `agents` dictionary.
     let launch = PlistValue::Dict(vec![(
         "command".to_owned(),
         PlistValue::String(abs_str("bin/claude")),
     )]);
     let (leaves, warnings) = values(vec![("agents.claude", launch, true)]);
-    assert!(matches!(&leaves[..], [Leaf::Agent(id, _)] if id == "claude"));
-    assert_eq!(warnings, []);
+    assert_eq!(leaves, []);
+    assert_eq!(
+        warnings,
+        [WarningKind::UnknownKey {
+            key: "agents.claude".to_owned()
+        }]
+    );
 }

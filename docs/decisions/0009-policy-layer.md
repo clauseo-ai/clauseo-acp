@@ -23,13 +23,15 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
   `ui.font_size`, `ui.density`, `ui.language`, and `agents.<id>` for one agent's launch spec.
 - **Registry format.** One value per dotted key. `REG_DWORD` is a number, or a boolean (0 or 1)
   where the setting is one. `REG_SZ` is a string, or JSON text where the setting is an object
-  (`agents.<id>`). `REG_MULTI_SZ` is a list of strings. A value of another type is left out with a
-  warning.
+  (`agents.<id>`). `REG_MULTI_SZ` is a list of strings. A value of another type is a warning (and
+  locks its key, below). Value names are compared without case, as Windows does: `UI.Theme` is
+  `ui.theme`, and `Agents.Claude` is `agents.Claude`, whose id keeps its case.
 - **Managed preferences.** A key counts only when `CFPreferencesAppValueIsForced` says it is
   forced; a value the user wrote with `defaults write` is not policy. Keys are read one by one, so
-  agents sit under one key, `agents`, a dictionary from agent id to launch spec. Property list
-  values become JSON values (dictionary, array, string, number, boolean); a date or data value is
-  left out with a warning.
+  agents sit under one key, `agents`, a dictionary from agent id to launch spec; an `agents.<id>`
+  key is never read on macOS. Property list values become JSON values (dictionary, array, string,
+  number, boolean); a date, a data value or a number that is not finite is a warning (and locks its
+  key, below).
 - **`policy.json`** has the shape of `settings.json`: sections `matters`, `agents` and `ui`, each
   an object, in JSON with comments and trailing commas.
 - **Merge rule.** Defaults, then the user's `settings.json`, then policy. A policy value replaces
@@ -59,8 +61,9 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
 
 ## Consequences
 
-- A new policy key is a new settings key: add it to the schema and to the key table in
-  `crates/settings/src/leaf.rs`, and the registry, managed preferences and `policy.json` read it.
+- A new policy key is a new settings key: add it in each place the checklist at the top of
+  `crates/settings/src/leaf.rs` names (the schema, the key table and the rest), and the registry,
+  managed preferences and `policy.json` read it.
   A boolean or string-list key is read from `REG_DWORD` and `REG_MULTI_SZ` as above.
 - Managed preferences cannot list unknown keys, since they are read key by key; an unknown key
   there is not reported.
