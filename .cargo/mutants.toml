@@ -68,7 +68,7 @@ exclude_re = [
   'ids\.rs:\d+:\d+: replace \| with \^ in <impl FromStr for BlobHash>::from_str$',
   # clauseo-settings' `SystemDirs` (crates/settings/src/system.rs) asks the real OS for its
   # folders. Off Windows, `home` is `std::env::home_dir`, which no test may read (tests read no
-  # real home folder), and the others return `None` with no caller there; on Windows they call
-  # the known-folder shim excluded above.
-  'crates/settings/src/system\.rs:\d+:\d+: replace <impl PlatformDirs for SystemDirs>::(home|local_data|documents|known_folder) -> Option<PathBuf> with ',
+  # real home folder), and `known_folder` returns `None` with no caller there; on Windows both
+  # call the known-folder shim excluded above.
+  'crates/settings/src/system\.rs:\d+:\d+: replace <impl PlatformDirs for SystemDirs>::(home|known_folder) -> Option<PathBuf> with ',
 ]

@@ -85,7 +85,6 @@ fn windows_refuses_its_known_folders_default_and_the_drive_root_folders() {
             (KnownFolder::ProgramData, PathBuf::from("/C/ProgramData")),
             (KnownFolder::Public, PathBuf::from("/C/Users/Public")),
         ],
-        ..FakeDirs::default()
     };
     let refused = refused_for(Os::Windows, &dirs);
     let expected = paths(&[
