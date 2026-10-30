@@ -100,6 +100,14 @@ test("summarise: what WebKit cannot measure is null, not zero", () => {
   expect(result.metrics.first_token_on_screen.median).toBe(90);
 });
 
+test("summarise: a metric measured in some runs but not all is refused", () => {
+  // The scroll failed in one run: its dropped frames are null while the other two have them.
+  const broken = { ...windowsRun(1), raf_timestamps_ms: null };
+  expect(() => summarise("windows", [windowsRun(1), broken, windowsRun(1)])).toThrow(
+    "dropped_frames_streaming was measured in 2 of 3 runs; it must be every run or none",
+  );
+});
+
 test("summarise: exactly three measured runs", () => {
   expect(() => summarise("windows", [windowsRun(1), windowsRun(1)])).toThrow(
     "expected 3 measured runs, got 2",
@@ -178,6 +186,18 @@ test("parseResult treats the artifact as untrusted and never quotes it", () => {
   );
   expect(values.memory_after_session).toBeNull();
   expect(Object.keys(values)).toEqual(METRICS.map((m) => m.id));
+  // A metric measured in some runs but not all, or a null median over measured runs, is refused.
+  const runs = (r: unknown[], median: number | null = 90) =>
+    bad((v) => {
+      (v["metrics"] as Record<string, unknown>)["first_token_on_screen"] = { median, runs: r };
+      return v;
+    });
+  expect(() => parseResult(runs([90, null, 91]), "windows")).toThrow(
+    "metrics.first_token_on_screen was measured in some runs but not all",
+  );
+  expect(() => parseResult(runs([90, 90, 91], null), "windows")).toThrow("some runs but not all");
+  expect(() => parseResult(runs(["x"]), "windows")).toThrow("runs is not a short list");
+  expect(parseResult(runs([null, null, null], null), "windows").first_token_on_screen).toBeNull();
 });
 
 test("budgets.toml has a row for every metric, in the same unit", () => {
@@ -209,7 +229,7 @@ test("parseBudgets reads the flat rows, comments and all", () => {
   expect([...parseBudgets(text)]).toEqual([["a", { limit: 1500, unit: "ms" }]]);
 });
 
-test("parseReducerSummaries: Callgrind's total Ir of each gungraun case", () => {
+test("parseReducerSummaries: each case's name and total Ir", () => {
   const counts = parseReducerSummaries(fixture("reducer-bench-summary.json"));
   expect([...counts]).toEqual([
     ["apply_group::fold_events.scripted_turn", 1_234_567],
@@ -217,13 +237,27 @@ test("parseReducerSummaries: Callgrind's total Ir of each gungraun case", () => 
   ]);
 });
 
+test("parseReducerSummaries reads what ci.yml's collect step made of a real reducer-bench run", () => {
+  // Run 41120092360's nine gungraun summaries (137,670 bytes) through the step's jq: 1,184 bytes.
+  const counts = parseReducerSummaries(fixture("reducer-bench-summary-run-41120092360.json"));
+  expect(counts.size).toBe(9);
+  expect(counts.get("apply_group::fold_events.replay_20k")).toBe(46_602_348);
+});
+
 test("parseReducerSummaries drops a case whose name could inject Markdown", () => {
-  const summaries = JSON.parse(fixture("reducer-bench-summary.json")) as Record<string, unknown>[];
-  summaries[0]!["module_path"] = "apply::group::x](https://evil.example)";
-  summaries[1]!["id"] = "a|b";
-  expect(parseReducerSummaries(JSON.stringify(summaries)).size).toBe(0);
-  expect(() => parseReducerSummaries("{}")).toThrow("not a JSON array");
-  expect(() => parseReducerSummaries(JSON.stringify(new Array(65).fill({})))).toThrow(
-    "more than 64 cases",
-  );
+  const value = JSON.parse(fixture("reducer-bench-summary.json")) as {
+    cases: Record<string, unknown>[];
+  };
+  value.cases[0]!["module_path"] = "apply::group::x](https://evil.example)";
+  value.cases[1]!["id"] = "a|b";
+  expect(parseReducerSummaries(JSON.stringify(value)).size).toBe(0);
+  value.cases[0]!["module_path"] = "apply::group::x";
+  value.cases[0]!["ir"] = -1;
+  expect(parseReducerSummaries(JSON.stringify(value)).size).toBe(0);
+  expect(() => parseReducerSummaries("[]")).toThrow("not a JSON object");
+  expect(() => parseReducerSummaries('{"schema":2,"cases":[]}')).toThrow("schema is not 1");
+  expect(() => parseReducerSummaries('{"schema":1}')).toThrow("cases is not a list");
+  expect(() =>
+    parseReducerSummaries(JSON.stringify({ schema: 1, cases: new Array(65).fill({}) })),
+  ).toThrow("more than 64 cases");
 });

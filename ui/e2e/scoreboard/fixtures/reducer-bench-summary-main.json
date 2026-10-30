@@ -1,128 +1,15 @@
-[
-  {
-    "baselines": ["main", null],
-    "benchmark_exe": "target/release/deps/apply-1a2b",
-    "benchmark_file": "crates/reducer_bench/benches/apply.rs",
-    "duration_ns": 123456789,
-    "function_name": "fold_events",
-    "group": "apply_group",
-    "id": "scripted_turn",
-    "kind": "LibraryBenchmark",
-    "module_path": "apply::apply_group::fold_events",
-    "output_dir": "target/gungraun/clauseo-reducer_bench/apply/apply_group/x",
-    "package_dir": "crates/reducer_bench",
-    "profiles": [
-      {
-        "flamegraphs": [],
-        "data": {
-          "parts": [
-            {
-              "tool_run": {
-                "new": {
-                  "command": "apply",
-                  "pid": 42,
-                  "part": 0
-                }
-              },
-              "metrics": {
-                "Ir": {
-                  "change": null,
-                  "values": {
-                    "new": 1100000
-                  }
-                }
-              }
-            }
-          ],
-          "total": {
-            "regressions": [],
-            "metrics": {
-              "Ir": {
-                "change": null,
-                "values": {
-                  "new": 1100000
-                }
-              },
-              "Dr": {
-                "change": null,
-                "values": {
-                  "new": 5
-                }
-              }
-            }
-          }
-        },
-        "duration_ns": 123456,
-        "process_ns": 120000,
-        "started_at": "2026-10-31T10:00:00Z",
-        "tool": "Callgrind"
-      }
-    ],
-    "project_root": "/home/runner/work/clauseo-acp/clauseo-acp",
-    "started_at": "2026-10-31T10:00:00Z",
-    "version": "7"
-  },
-  {
-    "baselines": ["main", null],
-    "benchmark_exe": "target/release/deps/apply-1a2b",
-    "benchmark_file": "crates/reducer_bench/benches/apply.rs",
-    "duration_ns": 123456789,
-    "function_name": "one_event_on_long_thread",
-    "group": "apply_group",
-    "id": "text_on_8k",
-    "kind": "LibraryBenchmark",
-    "module_path": "apply::apply_group::one_event_on_long_thread",
-    "output_dir": "target/gungraun/clauseo-reducer_bench/apply/apply_group/x",
-    "package_dir": "crates/reducer_bench",
-    "profiles": [
-      {
-        "flamegraphs": [],
-        "data": {
-          "parts": [
-            {
-              "tool_run": {
-                "new": {
-                  "command": "apply",
-                  "pid": 42,
-                  "part": 0
-                }
-              },
-              "metrics": {
-                "Ir": {
-                  "change": null,
-                  "values": {
-                    "new": 41000
-                  }
-                }
-              }
-            }
-          ],
-          "total": {
-            "regressions": [],
-            "metrics": {
-              "Ir": {
-                "change": null,
-                "values": {
-                  "new": 41000
-                }
-              },
-              "Dr": {
-                "change": null,
-                "values": {
-                  "new": 5
-                }
-              }
-            }
-          }
-        },
-        "duration_ns": 123456,
-        "process_ns": 120000,
-        "started_at": "2026-10-31T10:00:00Z",
-        "tool": "Callgrind"
-      }
-    ],
-    "project_root": "/home/runner/work/clauseo-acp/clauseo-acp",
-    "started_at": "2026-10-31T10:00:00Z",
-    "version": "7"
-  }
-]
+{
+  "schema": 1,
+  "cases": [
+    {
+      "module_path": "apply::apply_group::fold_events",
+      "id": "scripted_turn",
+      "ir": 1100000
+    },
+    {
+      "module_path": "apply::apply_group::one_event_on_long_thread",
+      "id": "text_on_8k",
+      "ir": 41000
+    }
+  ]
+}
