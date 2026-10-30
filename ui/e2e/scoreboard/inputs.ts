@@ -50,11 +50,12 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * Reads reducer-bench-summary.json: a JSON array of gungraun 0.20 `summary.json` objects, one per
- * benchmark case (`--save-summary=json`). Untrusted data, like every artifact. The case name is
- * the `module_path` without its first part (the bench file) plus `.<id>`; the count is the
- * Callgrind profile's total `Ir` of this run (`values.new`). A case whose name or count does not
- * fit is left out; a file that is not such an array throws.
+ * Reads reducer-bench-summary.json, which reducer-bench's collect step (ci.yml) writes from
+ * gungraun 0.20's `summary.json` files: `{"schema": 1, "cases": [{"module_path", "id", "ir"}]}`,
+ * one case per benchmark, with `ir` the Callgrind profile's total `Ir` of this run. Untrusted
+ * data, like every artifact. The case name is the `module_path` without its first part (the bench
+ * file) plus `.<id>`. A case whose name or count does not fit is left out; a file that is not
+ * this shape throws.
  */
 export function parseReducerSummaries(text: string): ReducerCounts {
   let value: unknown;
@@ -63,33 +64,21 @@ export function parseReducerSummaries(text: string): ReducerCounts {
   } catch {
     throw new Error("not valid JSON");
   }
-  if (!Array.isArray(value)) throw new Error("not a JSON array");
-  if (value.length > MAX_CASES) throw new Error(`more than ${MAX_CASES} cases`);
+  if (!isRecord(value)) throw new Error("not a JSON object");
+  if (value["schema"] !== 1) throw new Error("schema is not 1");
+  const cases = value["cases"];
+  if (!Array.isArray(cases)) throw new Error("cases is not a list");
+  if (cases.length > MAX_CASES) throw new Error(`more than ${MAX_CASES} cases`);
   const out: ReducerCounts = new Map();
-  for (const summary of value) {
-    if (!isRecord(summary)) continue;
-    const path = summary["module_path"];
-    const id = summary["id"];
+  for (const entry of cases) {
+    if (!isRecord(entry)) continue;
+    const path = entry["module_path"];
+    const id = entry["id"];
+    const ir = entry["ir"];
     if (typeof path !== "string" || (id != null && typeof id !== "string")) continue;
     const name = path.split("::").slice(1).join("::") + (id ? `.${id}` : "");
     if (name.length > 120 || !CASE_NAME.test(name)) continue;
-    const ir = callgrindIr(summary["profiles"]);
-    if (ir !== null) out.set(name, ir);
+    if (typeof ir === "number" && Number.isSafeInteger(ir) && ir >= 0) out.set(name, ir);
   }
   return out;
-}
-
-function callgrindIr(profiles: unknown): number | null {
-  if (!Array.isArray(profiles)) return null;
-  for (const profile of profiles) {
-    if (!isRecord(profile) || profile["tool"] !== "Callgrind") continue;
-    const data = profile["data"];
-    const total = isRecord(data) ? data["total"] : undefined;
-    const metrics = isRecord(total) ? total["metrics"] : undefined;
-    const ir = isRecord(metrics) ? metrics["Ir"] : undefined;
-    const values = isRecord(ir) ? ir["values"] : undefined;
-    const now = isRecord(values) ? values["new"] : undefined;
-    return typeof now === "number" && Number.isSafeInteger(now) && now >= 0 ? now : null;
-  }
-  return null;
 }

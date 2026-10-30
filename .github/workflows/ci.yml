@@ -399,9 +399,11 @@ jobs:
   # - The soft limit is in apply.rs, not on the command line: gungraun's `--callgrind-limits`
   #   replaces each case's own limits, hard ones included. A run without `--baseline` compares with
   #   nothing, so it checks the hard limits only.
-  # - The head run saves each case's summary (`--save-summary=json`); the job joins them into one
-  #   JSON array and uploads it as reducer-bench-summary, even when the bench failed, so the
-  #   scoreboard comment shows this run's counts next to main's (scoreboard-comment.yml).
+  # - The head run saves each case's summary (`--save-summary=json`); the job keeps each case's
+  #   module path, id and Callgrind total `Ir` in one small JSON file and uploads it as
+  #   reducer-bench-summary, even when the bench failed, so the scoreboard comment shows this
+  #   run's counts next to main's (scoreboard-comment.yml). Both steps continue on error: the
+  #   job's result stays the bench's.
   reducer-bench:
     name: reducer-bench
     runs-on: ubuntu-24.04
@@ -476,10 +478,12 @@ jobs:
             "${bench[@]}" --save-summary=json
           fi
 
-      # One file for the artifact: every summary.json of the head run, as a JSON array. The base
+      # One small file for the artifact, `{"schema": 1, "cases": [{"module_path", "id", "ir"}]}`,
+      # from every summary.json of the head run (a full summary is about 15 KB a case). The base
       # run saves none, and the step before removed any from a cached run.
       - name: Collect the instruction counts
         if: ${{ !cancelled() }}
+        continue-on-error: true
         run: |
           set -euo pipefail
           mapfile -d '' summaries < <(find "$CARGO_TARGET_DIR/gungraun" -name summary.json -print0 2>/dev/null | sort -z)
@@ -487,11 +491,14 @@ jobs:
             echo "No gungraun summary.json: the bench did not get as far as a case."
             exit 0
           fi
-          jq -s . "${summaries[@]}" > "$RUNNER_TEMP/reducer-bench-summary.json"
+          jq -s '{schema: 1, cases: map({module_path, id,
+            ir: ([.profiles[]? | select(.tool == "Callgrind") | .data.total.metrics.Ir.values.new][0])})}' \
+            "${summaries[@]}" > "$RUNNER_TEMP/reducer-bench-summary.json"
           echo "${#summaries[@]} cases in reducer-bench-summary.json"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
+        continue-on-error: true
         with:
           name: reducer-bench-summary
           path: ${{ runner.temp }}/reducer-bench-summary.json

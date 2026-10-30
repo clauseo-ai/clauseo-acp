@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "module_path": "apply::apply_group::fold_events",
+      "id": "replay_20k",
+      "ir": 46602348
+    },
+    {
+      "module_path": "apply::apply_group::fold_events",
+      "id": "scripted_turn",
+      "ir": 1072718
+    },
+    {
+      "module_path": "apply::apply_group::one_event_on_long_thread",
+      "id": "permission_requested",
+      "ir": 2590
+    },
+    {
+      "module_path": "apply::apply_group::one_event_on_long_thread",
+      "id": "text_appended_256k",
+      "ir": 2234
+    },
+    {
+      "module_path": "apply::apply_group::one_event_on_long_thread",
+      "id": "text_appended_8k",
+      "ir": 10773
+    },
+    {
+      "module_path": "apply::apply_group::one_event_on_long_thread",
+      "id": "tool_call_updated",
+      "ir": 2925
+    },
+    {
+      "module_path": "apply::apply_group::one_event_on_long_thread",
+      "id": "turn_ended",
+      "ir": 2354
+    },
+    {
+      "module_path": "apply::apply_group::text_delta_on_long_thread",
+      "id": "text_delta_256k",
+      "ir": 1832
+    },
+    {
+      "module_path": "apply::apply_group::view_snapshot_20k",
+      "id": "view_snapshot_20k",
+      "ir": 124899
+    }
+  ]
+}

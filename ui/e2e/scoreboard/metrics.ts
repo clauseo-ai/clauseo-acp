@@ -162,8 +162,9 @@ export function runMetrics(run: RawRun): Record<MetricId, number | null> {
 
 /**
  * The result of {@link MEASURED_RUNS} measured runs, played after {@link WARMUP_RUNS} warm-up runs
- * the caller threw away. A metric's median covers the runs that measured it; it is null (shown as
- * "not measured") when none did.
+ * the caller threw away. A metric is measured in every run, or in none (null, shown as "not
+ * measured": an engine that cannot measure it). Measured in some runs but not all means a run
+ * went wrong, and throws: the median of two runs is not the median of three.
  */
 export function summarise(os: Os, runs: readonly RawRun[]): ScoreboardResult {
   if (runs.length !== MEASURED_RUNS) {
@@ -173,7 +174,13 @@ export function summarise(os: Os, runs: readonly RawRun[]): ScoreboardResult {
   const metrics = {} as Record<MetricId, MetricResult>;
   for (const { id } of METRICS) {
     const values = perRun.map((m) => m[id]);
-    metrics[id] = { median: median(values.filter((v) => v !== null)), runs: values };
+    const measured = values.filter((v) => v !== null);
+    if (measured.length !== 0 && measured.length !== values.length) {
+      throw new Error(
+        `${id} was measured in ${measured.length} of ${values.length} runs; it must be every run or none`,
+      );
+    }
+    metrics[id] = { median: median(measured), runs: values };
   }
   return { schema: SCHEMA, os, warmup_runs: WARMUP_RUNS, measured_runs: MEASURED_RUNS, metrics };
 }
@@ -211,7 +218,9 @@ export type ResultValues = Record<MetricId, number | null>;
 /**
  * Reads scoreboard-<os>.json from an artifact, which is untrusted data: a pull request's own code
  * wrote it. Only the medians of known metrics are kept, each a number from 0 to 1e9 or null; a
- * metric left out reads as null. Anything else throws, with a message that never quotes the input.
+ * metric left out reads as null. A metric whose `runs` mix null and numbers, or whose median is
+ * null while its runs measured it, is refused, as {@link summarise} would have refused it. Anything
+ * else throws, with a message that never quotes the input.
  */
 export function parseResult(text: string, os: Os): ResultValues {
   let value: unknown;
@@ -236,6 +245,20 @@ export function parseResult(text: string, os: Os): ResultValues {
     const m = entry["median"];
     if (m !== null && !isValue(m))
       throw new Error(`metrics.${id}.median is not a number from 0 to 1e9 or null`);
+    const runs = entry["runs"];
+    if (runs !== undefined) {
+      if (
+        !Array.isArray(runs) ||
+        runs.length > 16 ||
+        !runs.every((r) => r === null || isValue(r))
+      ) {
+        throw new Error(`metrics.${id}.runs is not a short list of numbers and nulls`);
+      }
+      const measured = runs.filter((r) => r !== null).length;
+      if ((measured !== 0 && measured !== runs.length) || (m === null && measured !== 0)) {
+        throw new Error(`metrics.${id} was measured in some runs but not all`);
+      }
+    }
     out[id] = m;
   }
   return out;
