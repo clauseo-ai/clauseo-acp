@@ -64,6 +64,14 @@ impl Ring {
         !self.wrapped
     }
 
+    /// The byte just before its last `n` bytes, if it holds one.
+    fn byte_before_last(&self, n: usize) -> Option<u8> {
+        if n >= self.len() {
+            return None;
+        }
+        Some(self.buf[(self.pos + RING - n - 1) % RING])
+    }
+
     /// Replaces `out` with the last `n` bytes it holds, oldest first (`n` at most [`Ring::len`]).
     fn last(&self, n: usize, out: &mut Vec<u8>) {
         out.clear();
@@ -193,28 +201,27 @@ fn emit(line: &[u8], on_line: &mut impl FnMut(&str)) {
 
 /// The end of the ring as text, at most [`TAIL`] bytes, redacted, opening on a whole line.
 ///
-/// It redacts the last 16 KiB, starting after the first `\n` in it when the ring holds more,
-/// then keeps the last [`TAIL`] bytes, cut at a char boundary and after the first `\n` when it
-/// cut. Redacting before cutting means no part of a secret survives at the start. When the
-/// redacted text is shorter than [`TAIL`] while the ring holds more, the window doubles. Where a
-/// cut part holds no `\n`, the text starts mid-line instead of coming out empty.
+/// It redacts the last 16 KiB, opened on a whole line (after its first `\n`, unless the byte
+/// before the window is a `\n` or the window holds stderr's start), then keeps the last [`TAIL`]
+/// bytes the same way, cut at a char boundary. Redacting before cutting means no part of a secret
+/// survives at the start. When the redacted text is shorter than [`TAIL`] while the ring holds
+/// more, the window doubles. When opening on a whole line would leave nothing (one line longer
+/// than the cut), the text starts mid-line instead of coming out empty.
 pub(crate) fn tail(ring: &Mutex<Ring>, redactor: &Redactor) -> String {
     let mut window = WINDOW;
     let mut bytes = Vec::new();
     loop {
         // Only the copy holds the lock, so the pump never waits for the redaction.
-        let (whole, from_start) = {
+        let (whole, on_line) = {
             let ring = ring.lock().unwrap_or_else(PoisonError::into_inner);
             ring.last(window, &mut bytes);
             let whole = bytes.len() == ring.len();
-            (whole, whole && ring.holds_start())
+            let on_line =
+                (whole && ring.holds_start()) || ring.byte_before_last(window) == Some(b'\n');
+            (whole, on_line)
         };
         let text = String::from_utf8_lossy(&bytes);
-        let text = if from_start {
-            &text
-        } else {
-            after_first_newline(&text)
-        };
+        let text = open_on_line(&text, on_line);
         let redacted = redactor.redact(text);
         if redacted.len() >= TAIL || whole {
             return keep_last(&redacted, TAIL).to_owned();
@@ -223,13 +230,20 @@ pub(crate) fn tail(ring: &Mutex<Ring>, redactor: &Redactor) -> String {
     }
 }
 
-/// `text` after its first `\n`, or all of it when it has none.
-fn after_first_newline(text: &str) -> &str {
-    text.split_once('\n').map_or(text, |(_, rest)| rest)
+/// `text` from its first whole line: all of it when `on_line` says it opens on one, else what
+/// follows its first `\n`. When that leaves nothing (no `\n`, or only a last one), all of it.
+fn open_on_line(text: &str, on_line: bool) -> &str {
+    if on_line {
+        return text;
+    }
+    match text.split_once('\n') {
+        Some((_, rest)) if !rest.is_empty() => rest,
+        _ => text,
+    }
 }
 
-/// The last at most `max` bytes of `text`, starting on a char boundary and, when it cut, after
-/// the first `\n`.
+/// The last at most `max` bytes of `text`, starting on a char boundary and, when it cut
+/// mid-line, after the first `\n` (see [`open_on_line`]).
 fn keep_last(text: &str, max: usize) -> &str {
     let Some(mut start) = text.len().checked_sub(max).filter(|&start| start > 0) else {
         return text;
@@ -237,7 +251,8 @@ fn keep_last(text: &str, max: usize) -> &str {
     while !text.is_char_boundary(start) {
         start += 1;
     }
-    after_first_newline(&text[start..])
+    let on_line = text.as_bytes().get(start - 1) == Some(&b'\n');
+    open_on_line(&text[start..], on_line)
 }
 
 #[cfg(test)]
