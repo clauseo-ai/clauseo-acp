@@ -1,10 +1,10 @@
 //! `TurnQueued`: a turn waiting behind another thread's writer shows `Queued { behind }`; one
-//! waiting behind its own thread keeps a running turn's status and leaves a thread with no turn
-//! running `Idle` (a held queue, and the host's start-up repair). A queued turn cancelled before
+//! waiting behind its own thread keeps a running turn's status and, with no turn running, settles
+//! the status (`Idle` unless the lawyer is asked). A queued turn cancelled before
 //! it starts settles the status.
 
 use clauseo_protocol::{
-    DomainEvent, MessageId, StopReason, ThreadId, ThreadStatus, TurnId, TurnQueued, TurnStarted,
+    DomainEvent, MessageId, ThreadId, ThreadStatus, TurnId, TurnQueued, TurnStarted,
     UserMessageStatus, ViewEntry,
 };
 use clauseo_reducer::{Applied, StreamState, ViewChange, apply};
@@ -13,7 +13,7 @@ use crate::fixtures::{
     Log, permission_requested, permission_resolved, start_turn, thread_created, thread_id,
     turn_ended, user_message,
 };
-use crate::helpers::{fold, round_trip};
+use crate::helpers::{cancel, fold, prompt_status, round_trip};
 
 /// A log with its thread created, the state folded so far, and the thread.
 #[cfg(test)]
@@ -71,18 +71,6 @@ fn end(log: &mut Log, state: &mut StreamState, turn: TurnId) -> Applied {
     push(log, state, turn_ended(turn, checkpoint).unwrap())
 }
 
-/// A `TurnEnded` of `turn`, cancelled (no usage, no checkpoint), pushed and applied.
-#[cfg(test)]
-fn cancel(log: &mut Log, state: &mut StreamState, turn: TurnId) -> Applied {
-    let mut ended = turn_ended(turn, log.fresh().unwrap()).unwrap();
-    if let DomainEvent::TurnEnded(event) = &mut ended {
-        event.stop = StopReason::Cancelled;
-        event.checkpoint_after = None;
-        event.usage = None;
-    }
-    push(log, state, ended)
-}
-
 #[cfg(test)]
 fn status(state: &StreamState) -> ThreadStatus {
     state.as_thread().unwrap().status()
@@ -102,14 +90,6 @@ fn header_statuses(out: &Applied) -> Vec<ThreadStatus> {
             other => panic!("not an upsert: {other:?}"),
         })
         .collect()
-}
-
-#[cfg(test)]
-fn prompt_status(state: &StreamState, message: MessageId) -> Option<UserMessageStatus> {
-    state.entries().values().find_map(|entry| match entry {
-        ViewEntry::UserMessage(prompt) if prompt.message == message => Some(prompt.status),
-        _ => None,
-    })
 }
 
 #[cfg(test)]
@@ -212,6 +192,23 @@ fn held_queue_gives_idle() {
 }
 
 #[test]
+fn own_thread_queue_while_asked_gives_needs_you() {
+    // No turn runs and a request still waits: the wait behind the thread's own queue settles to
+    // `NeedsYou`, not `Idle`, and to `Idle` once the request is answered.
+    let (mut log, mut state, thread) = created();
+    let (turn, _) = prompt(&mut log, &mut state, "Read the lease.");
+    let request = log.fresh().unwrap();
+    push(&mut log, &mut state, permission_requested(request, None));
+    assert_eq!(status(&state), ThreadStatus::NeedsYou);
+    let out = push(&mut log, &mut state, queued(thread, turn, thread, None));
+    assert_eq!(header_statuses(&out), []);
+    assert_eq!(status(&state), ThreadStatus::NeedsYou);
+    push(&mut log, &mut state, permission_resolved(request));
+    assert_eq!(status(&state), ThreadStatus::Idle);
+    assert_eq!(state, fold(log.events()));
+}
+
+#[test]
 fn restart_repair_of_writer_wait_gives_idle() {
     // R11's `restart_holds_writer_waiting_turn`: the first turn waits for another thread's
     // writer when the host stops; at the next start the host queues it behind its own thread,
@@ -267,7 +264,14 @@ fn cancel_queued_turn_ends_once() {
     log.push(queued(thread, third, writer, None)).unwrap();
     let mut state = fold(log.events());
     assert_eq!(status(&state), ThreadStatus::Queued { behind: writer });
+    // The wait made `third` the thread's last turn; a snapshot keeps it, so a cancel on the
+    // restored state settles too.
+    assert_eq!(round_trip(&state), state);
+    let mut restored = round_trip(&state);
+    let ended = log.events().len();
     let out = cancel(&mut log, &mut state, third);
+    apply(&mut restored, &log.events()[ended]).unwrap();
+    assert_eq!(restored, state);
     assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
     assert_eq!(status(&state), ThreadStatus::Idle);
     assert_eq!(

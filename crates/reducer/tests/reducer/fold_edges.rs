@@ -2,15 +2,15 @@
 //! nothing to change.
 
 use clauseo_protocol::{
-    ErrorCode, MessageId, StopReason, ThreadStatus, TurnFailed, TurnId, UsageUpdated,
-    UserMessageStatus, ViewEntry,
+    ErrorCode, MessageId, ThreadStatus, TurnFailed, TurnId, UsageUpdated, UserMessageStatus,
+    ViewEntry,
 };
 use clauseo_reducer::{StreamState, ViewChange, apply};
 
 use crate::fixtures::{
     Log, files_changed, start_turn, thread_created, turn_ended, usage, user_message,
 };
-use crate::helpers::fold;
+use crate::helpers::{cancel, fold, prompt_status};
 
 /// The state's JSON with `seq` cleared, to compare states that folded different event counts.
 #[cfg(test)]
@@ -49,28 +49,6 @@ fn turn_ended_of_unstarted_turn_drops_its_files_and_failure() {
     assert_eq!(state.as_thread().unwrap().status(), ThreadStatus::Idle);
     // Dropped: the state is the created thread's but for seq.
     assert_eq!(without_seq(&state), without_seq(&created));
-}
-
-/// The status of the user message `message` in `state`.
-#[cfg(test)]
-fn prompt_status(state: &StreamState, message: MessageId) -> Option<UserMessageStatus> {
-    state.entries().values().find_map(|entry| match entry {
-        ViewEntry::UserMessage(prompt) if prompt.message == message => Some(prompt.status),
-        _ => None,
-    })
-}
-
-/// A `TurnEnded` cancelled, of `turn`, pushed and applied.
-#[cfg(test)]
-fn cancel(log: &mut Log, state: &mut StreamState, turn: TurnId) -> clauseo_reducer::Applied {
-    let checkpoint = log.fresh().unwrap();
-    let mut ended = turn_ended(turn, checkpoint).unwrap();
-    if let clauseo_protocol::DomainEvent::TurnEnded(event) = &mut ended {
-        event.stop = StopReason::Cancelled;
-        event.checkpoint_after = None;
-        event.usage = None;
-    }
-    apply(state, &log.push(ended).unwrap()).unwrap()
 }
 
 #[test]
