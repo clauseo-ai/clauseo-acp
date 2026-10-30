@@ -1,6 +1,20 @@
 //! One setting, typed. Every source (`settings.json`, `policy.json`, the registry, managed
 //! preferences) turns its keys into dotted keys with JSON values, and this module types them
 //! the same way for all of them.
+//!
+//! # Adding a key
+//!
+//! A new key goes in every one of these places, or some source never reads it:
+//! - its field in `schema.rs` (`Settings` and the section's struct), which moves the schema
+//!   snapshot;
+//! - its row in [`KEYS`], with its kind: the macOS shim asks managed preferences only for these
+//!   keys, and the registry calls any other value name unknown;
+//! - a [`Leaf`] variant, and its arms in `Leaf::parse`, `Leaf::key` and `Leaf::apply`;
+//! - for a `ui` key, its field in `UiPatch` (`ui.rs`) and in `Settings::apply_ui_patch`;
+//! - a sample value in `leaf/tests.rs`' `every_fixed_key_types_and_the_kinds_agree`.
+//!
+//! `schema::tests::the_keys_and_their_kinds_are_the_schemas` fails when the schema and [`KEYS`]
+//! disagree, and the samples test fails when [`KEYS`] has a row without a sample.
 
 #[cfg(test)]
 mod tests;
@@ -13,6 +27,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, an object.
+/// `schema::tests::the_keys_and_their_kinds_are_the_schemas` holds this to the schema.
 pub(crate) const KEYS: [(&str, Kind); 5] = [
     ("matters.default_location", Kind::String),
     ("ui.theme", Kind::String),
