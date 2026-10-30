@@ -7,9 +7,9 @@ use std::os::windows::ffi::OsStringExt as _;
 use std::path::PathBuf;
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{
-    FOLDERID_LocalAppData, FOLDERID_ProgramData, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86,
-    FOLDERID_Public, FOLDERID_RoamingAppData, FOLDERID_Windows, KF_FLAG_DEFAULT,
-    SHGetKnownFolderPath,
+    FOLDERID_Documents, FOLDERID_LocalAppData, FOLDERID_ProgramData, FOLDERID_ProgramFiles,
+    FOLDERID_ProgramFilesX86, FOLDERID_Public, FOLDERID_RoamingAppData, FOLDERID_Windows,
+    KF_FLAG_DEFAULT, SHGetKnownFolderPath,
 };
 use windows::core::GUID;
 
@@ -18,6 +18,7 @@ pub(super) fn folder(folder: KnownFolder) -> Option<PathBuf> {
     let id = match folder {
         KnownFolder::RoamingAppData => FOLDERID_RoamingAppData,
         KnownFolder::LocalAppData => FOLDERID_LocalAppData,
+        KnownFolder::Documents => FOLDERID_Documents,
         KnownFolder::Windows => FOLDERID_Windows,
         KnownFolder::ProgramFiles => FOLDERID_ProgramFiles,
         KnownFolder::ProgramFilesX86 => FOLDERID_ProgramFilesX86,

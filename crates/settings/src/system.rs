@@ -31,14 +31,6 @@ impl PlatformDirs for SystemDirs {
         windows::known_folder(&::windows::Win32::UI::Shell::FOLDERID_Profile)
     }
 
-    fn local_data(&self) -> Option<PathBuf> {
-        self.known_folder(KnownFolder::LocalAppData)
-    }
-
-    fn documents(&self) -> Option<PathBuf> {
-        windows::known_folder(&::windows::Win32::UI::Shell::FOLDERID_Documents)
-    }
-
     fn known_folder(&self, folder: KnownFolder) -> Option<PathBuf> {
         windows::folder(folder)
     }
@@ -48,14 +40,6 @@ impl PlatformDirs for SystemDirs {
 impl PlatformDirs for SystemDirs {
     fn home(&self) -> Option<PathBuf> {
         std::env::home_dir()
-    }
-
-    fn local_data(&self) -> Option<PathBuf> {
-        None
-    }
-
-    fn documents(&self) -> Option<PathBuf> {
-        None
     }
 
     fn known_folder(&self, _: KnownFolder) -> Option<PathBuf> {

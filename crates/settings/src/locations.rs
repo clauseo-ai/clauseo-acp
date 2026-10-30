@@ -26,26 +26,28 @@ pub struct Locations {
     default_matters_dir: PathBuf,
 }
 
-/// The OS's folders. [`crate::SystemDirs`] asks the OS; tests pass their own.
+/// The OS's folders. [`crate::SystemDirs`] asks the OS; tests pass their own. Off Windows only
+/// [`PlatformDirs::home`] is asked, so a fake for macOS or Linux can return `None` from
+/// [`PlatformDirs::known_folder`].
 pub trait PlatformDirs {
     /// The user's home folder.
     fn home(&self) -> Option<PathBuf>;
-    /// Windows' per-user local (never roaming) app data folder. Not used on other OSes.
-    fn local_data(&self) -> Option<PathBuf>;
-    /// Windows' Documents folder, wherever Known Folder Move put it. Not used on other OSes.
-    fn documents(&self) -> Option<PathBuf>;
     /// A Windows known folder. `None` on other OSes, and for a folder this machine lacks.
     fn known_folder(&self, folder: KnownFolder) -> Option<PathBuf>;
 }
 
-/// The Windows known folders [`crate::refused_folders`] and the policy file need.
+/// The Windows known folders [`Locations::resolve`], [`crate::refused_folders`] and the policy
+/// file need.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum KnownFolder {
     /// `%APPDATA%`, the roaming app data folder.
     RoamingAppData,
-    /// `%LOCALAPPDATA%`.
+    /// `%LOCALAPPDATA%`, the per-user local (never roaming) app data folder: the data folder's
+    /// parent.
     LocalAppData,
+    /// The user's Documents folder, wherever Known Folder Move put it: new matters go in it.
+    Documents,
     /// `%SystemRoot%`.
     Windows,
     /// `Program Files`.
@@ -131,7 +133,7 @@ impl Locations {
             }
             None => match os {
                 Os::Windows => dirs
-                    .local_data()
+                    .known_folder(KnownFolder::LocalAppData)
                     .ok_or(Error::NoFolder {
                         folder: "LocalAppData",
                     })?
@@ -148,9 +150,11 @@ impl Locations {
             },
         };
         let documents = match os {
-            Os::Windows => dirs.documents().ok_or(Error::NoFolder {
-                folder: "Documents",
-            })?,
+            Os::Windows => dirs
+                .known_folder(KnownFolder::Documents)
+                .ok_or(Error::NoFolder {
+                    folder: "Documents",
+                })?,
             Os::Mac => home()?.join("Documents"),
             Os::Linux => match absolute_var(env, "XDG_DOCUMENTS_DIR") {
                 Some(documents) => documents,

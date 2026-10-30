@@ -62,22 +62,12 @@ impl Files for MemFiles {
 #[derive(Debug, Default)]
 pub(crate) struct FakeDirs {
     pub home: Option<PathBuf>,
-    pub local_data: Option<PathBuf>,
-    pub documents: Option<PathBuf>,
     pub known: Vec<(KnownFolder, PathBuf)>,
 }
 
 impl PlatformDirs for FakeDirs {
     fn home(&self) -> Option<PathBuf> {
         self.home.clone()
-    }
-
-    fn local_data(&self) -> Option<PathBuf> {
-        self.local_data.clone()
-    }
-
-    fn documents(&self) -> Option<PathBuf> {
-        self.documents.clone()
     }
 
     fn known_folder(&self, folder: KnownFolder) -> Option<PathBuf> {

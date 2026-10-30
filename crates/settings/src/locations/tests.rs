@@ -1,4 +1,4 @@
-use super::{DATA_DIR_VAR, IDENTIFIER, Locations, Os, SETTINGS_FILE};
+use super::{DATA_DIR_VAR, IDENTIFIER, KnownFolder, Locations, Os, SETTINGS_FILE};
 use crate::error::Error;
 use crate::testing::{FakeDirs, FakeEnv, abs, abs_str};
 use std::path::{Path, PathBuf};
@@ -11,11 +11,22 @@ fn home_dirs() -> FakeDirs {
 }
 
 fn windows_dirs() -> FakeDirs {
+    windows_dirs_without(None)
+}
+
+/// [`windows_dirs`], less the known folder `missing`.
+fn windows_dirs_without(missing: Option<KnownFolder>) -> FakeDirs {
+    let known = [
+        (KnownFolder::LocalAppData, "/C/Users/ada/AppData/Local"),
+        (KnownFolder::Documents, "/D/OneDrive/Documents"),
+    ];
     FakeDirs {
         home: Some(PathBuf::from("/C/Users/ada")),
-        local_data: Some(PathBuf::from("/C/Users/ada/AppData/Local")),
-        documents: Some(PathBuf::from("/D/OneDrive/Documents")),
-        ..FakeDirs::default()
+        known: known
+            .into_iter()
+            .filter(|&(folder, _)| Some(folder) != missing)
+            .map(|(folder, path)| (folder, PathBuf::from(path)))
+            .collect(),
     }
 }
 
@@ -47,10 +58,7 @@ fn windows_data_dir_is_local_not_roaming() {
 
 #[test]
 fn windows_needs_its_known_folders() {
-    let no_local = FakeDirs {
-        local_data: None,
-        ..windows_dirs()
-    };
+    let no_local = windows_dirs_without(Some(KnownFolder::LocalAppData));
     let error = Locations::resolve_for(Os::Windows, &no_local, &FakeEnv::default()).unwrap_err();
     assert!(matches!(
         error,
@@ -58,10 +66,7 @@ fn windows_needs_its_known_folders() {
             folder: "LocalAppData"
         }
     ));
-    let no_documents = FakeDirs {
-        documents: None,
-        ..windows_dirs()
-    };
+    let no_documents = windows_dirs_without(Some(KnownFolder::Documents));
     let error =
         Locations::resolve_for(Os::Windows, &no_documents, &FakeEnv::default()).unwrap_err();
     assert!(matches!(
@@ -167,9 +172,10 @@ fn under_root_reads_nothing() {
 fn resolve_uses_this_os() {
     let dirs = FakeDirs {
         home: Some(PathBuf::from("/h")),
-        local_data: Some(PathBuf::from("/l")),
-        documents: Some(PathBuf::from("/d")),
-        known: Vec::new(),
+        known: vec![
+            (KnownFolder::LocalAppData, PathBuf::from("/l")),
+            (KnownFolder::Documents, PathBuf::from("/d")),
+        ],
     };
     let env = FakeEnv::default();
     assert_eq!(
