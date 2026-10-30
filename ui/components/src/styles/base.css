@@ -1,0 +1,369 @@
+/* The base. The page itself, the browser's own surfaces themed from the palette, the states every
+   part shares, and the three attributes on <html>: data-render (lite), data-motion (reduced) and lang. Values come
+   from tokens.css. */
+
+/* ---------- the states every part shares ----------
+   A real pointer, a press and keyboard focus, or the same state forced with data-force="hover|active|focus" so a
+   catalogue of the parts can lay every state out at rest; the app never sets it. A disabled control takes none of
+   them. */
+@custom-variant is-hover {
+  @media (hover: hover) {
+    &:hover:not(:disabled, [data-disabled]) {
+      @slot;
+    }
+  }
+  &[data-force~="hover"]:not(:disabled, [data-disabled]) {
+    @slot;
+  }
+}
+@custom-variant is-active {
+  &:active:not(:disabled, [data-disabled]) {
+    @slot;
+  }
+  &[data-force~="active"]:not(:disabled, [data-disabled]) {
+    @slot;
+  }
+}
+@custom-variant is-focus {
+  &:focus-visible {
+    @slot;
+  }
+  &[data-force~="focus"] {
+    @slot;
+  }
+}
+@custom-variant is-focus-within {
+  &:has(:focus-visible) {
+    @slot;
+  }
+  &[data-force~="focus"] {
+    @slot;
+  }
+}
+@custom-variant is-disabled (&:is(:disabled, [data-disabled]));
+/* lite: the planes part by tone alone, so a floating card takes a hairline where its shadow was */
+@custom-variant lite (&:where([data-render='lite'] *));
+/* a Devanagari run, and Hindi on the page */
+@custom-variant hi (&:where(:lang(hi)));
+
+/* ---------- motion: what each kind of part may change, over the token's time ----------
+   Under reduced motion the tokens shorten (tokens.css) and the press and lift variables go to rest, so these keep
+   colour and opacity changes and drop movement. In lite, the rule at the foot takes every transition away. */
+@utility motion-control {
+  transition:
+    background-color var(--dur-quick) var(--ease-arrive),
+    box-shadow var(--dur-quick) var(--ease-arrive),
+    transform var(--dur-quick) var(--ease-arrive),
+    color var(--dur-quick) var(--ease-arrive);
+}
+@utility motion-colour {
+  transition:
+    background-color var(--dur-quick) var(--ease-arrive),
+    color var(--dur-quick) var(--ease-arrive),
+    text-decoration-color var(--dur-quick) var(--ease-arrive);
+}
+@utility motion-turn {
+  transition: transform var(--dur-forward) var(--ease-arrive);
+  [data-motion="reduced"] & {
+    transition-duration: 0ms;
+  }
+}
+/* every press: down to 0.98, never under reduced motion */
+@utility press {
+  transform: scale(var(--press-scale));
+}
+@utility press-small {
+  transform: scale(var(--press-scale-small));
+}
+/* a floating card: History, an excerpt card, a tooltip. It drops in from 4 px above and 0.97 scale on the arrive
+   curve, and leaves faster than it came. */
+@utility motion-float {
+  transform-origin: var(--transform-origin);
+  transition:
+    opacity var(--dur-forward) var(--ease-arrive),
+    transform var(--dur-forward) var(--ease-arrive);
+  &[data-starting-style] {
+    opacity: 0;
+    transform: translateY(var(--drop)) scale(var(--drop-scale));
+  }
+  &[data-ending-style] {
+    opacity: 0;
+    transform: translateY(var(--drop)) scale(var(--drop-scale));
+    transition-duration: var(--dur-leave);
+    transition-timing-function: var(--ease-leave);
+  }
+  &[data-instant] {
+    transition-duration: 0ms;
+  }
+}
+/* a tooltip rises 4 px from the side it stands on */
+@utility motion-tip {
+  transition:
+    opacity var(--dur-forward) var(--ease-arrive),
+    transform var(--dur-forward) var(--ease-arrive);
+  &[data-starting-style],
+  &[data-ending-style] {
+    opacity: 0;
+  }
+  &[data-side="top"][data-starting-style] {
+    transform: translateY(var(--tip-rise));
+  }
+  &[data-side="bottom"][data-starting-style] {
+    transform: translateY(calc(-1 * var(--tip-rise)));
+  }
+  &[data-ending-style] {
+    transition-duration: var(--dur-leave);
+    transition-timing-function: var(--ease-leave);
+  }
+  &[data-instant] {
+    transition-duration: 0ms;
+  }
+}
+/* a fold opening: the panel's own measured height, from Base UI's --collapsible-panel-height */
+@utility motion-fold {
+  overflow: hidden;
+  height: var(--collapsible-panel-height);
+  transition: height var(--dur-forward) var(--ease-arrive);
+  [data-motion="reduced"] & {
+    transition-duration: 0ms;
+  }
+  &[data-starting-style],
+  &[data-ending-style] {
+    height: 0;
+  }
+  &[hidden]:not([hidden="until-found"]) {
+    display: none;
+  }
+}
+/* the chip's words, trimmed to cap height and centred; without text-box a 20 px line puts Anek's cap height within
+   0.4 px of the middle at 12 px */
+@utility cap-trim {
+  display: block;
+  line-height: 1;
+  text-box: trim-both cap alphabetic;
+  @supports not (text-box: trim-both cap alphabetic) {
+    line-height: calc(var(--lh-chip) * var(--k));
+  }
+}
+/* words in a control, in Devanagari, where WebKit ignores the face's centred metrics: display.ts measures how far
+   off they sit and sets --deva-nudge on <html>, and they move by exactly that */
+@utility deva-nudge {
+  :root.no-metrics &:lang(hi) {
+    position: relative;
+    top: var(--deva-nudge, 0px);
+  }
+}
+@utility deva-nudge-field {
+  :root.no-metrics &:lang(hi) {
+    transform: translateY(var(--deva-nudge, 0px));
+  }
+}
+/* 1 px of inset division, the only drawn line between joined parts: History | Undo */
+@utility pair-divide {
+  & + & {
+    box-shadow: inset 1px 0 0 var(--divide-strong);
+  }
+}
+/* between History's rows */
+@utility join-divide {
+  & + & {
+    box-shadow: inset 0 1px 0 var(--divide);
+  }
+}
+@utility rule-top-mid {
+  box-shadow: 0 -1px 0 var(--divide-mid);
+}
+@utility rule-under-band {
+  box-shadow: inset 0 -1px 0 var(--divide-band);
+}
+/* a key cap: one inner hairline */
+@utility ring-kbd {
+  box-shadow: inset 0 0 0 1px var(--ring-kbd);
+  [data-render="lite"] & {
+    outline: 1px solid var(--ring-kbd);
+    outline-offset: -1px;
+  }
+}
+/* the ready hint's yellow dot, held on the ground by a hairline */
+@utility ring-yellow {
+  box-shadow: inset 0 0 0 1px var(--yellow-ring);
+}
+/* a floating card in lite: the hairline that stands in for its shadow */
+@utility edge-lite {
+  [data-render="lite"] & {
+    outline: 1px solid var(--outline-lite);
+  }
+}
+@utility hang-punctuation {
+  hanging-punctuation: first allow-end last;
+}
+
+@layer base {
+  /* ---------- the page ---------- */
+  html {
+    background: var(--ground);
+    color: var(--primary);
+    accent-color: var(--primary);
+    scroll-behavior: smooth;
+  }
+  /* until display.ts has set the light, nothing shows, so night never starts as day */
+  html:not([data-theme]) body {
+    visibility: hidden;
+  }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    font-weight: var(--w-ui);
+    font-size: var(--t15);
+    line-height: calc(var(--lh-ui-loose) * var(--k));
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-synthesis: none;
+    caret-color: var(--primary);
+  }
+  p {
+    text-wrap: pretty;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  button {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:disabled,
+  [data-disabled] {
+    cursor: default;
+  }
+  /* English standing alone inside Hindi, such as a matter's name as filed, keeps the Latin cut's own size */
+  :root:lang(hi) [lang="en"].as-en {
+    font-family: var(--font-latin);
+  }
+
+  /* ---------- the browser's own surfaces ---------- */
+  ::selection {
+    background: var(--select);
+    color: var(--primary);
+  }
+  :focus {
+    outline: none;
+  }
+  :focus-visible,
+  [data-force~="focus"] {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+  /* a dialog's starting focus draws no ring until a key is pressed in it (components/ui/dialog-start.ts) */
+  [data-quiet-start] :focus-visible {
+    outline-color: transparent;
+  }
+  a {
+    color: inherit;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 4px;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar);
+    border-radius: var(--r-small);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-hover);
+  }
+  input::placeholder {
+    color: var(--muted);
+    opacity: 1;
+  }
+  input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+  }
+
+  /* the probe display.ts sets to learn whether the browser honours the Devanagari face's centred metrics */
+  .metrics-probe {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    font-family: var(--font-deva);
+    font-size: 13px;
+    font-weight: 450;
+    line-height: 22px;
+    white-space: nowrap;
+    visibility: hidden;
+  }
+  .metrics-probe > i {
+    display: inline-block;
+    width: 1px;
+    height: 0;
+    vertical-align: baseline;
+  }
+
+  /* ---------- icons: a 1.5 px stroke whatever the size, square ends, sharp joins ---------- */
+  .icon {
+    flex: none;
+    overflow: visible;
+  }
+
+  /* ---------- the light changing ----------
+   With view transitions the whole room cross-fades in 320 ms on the arrive curve, the language in 200 ms. Without
+   them, display.ts sets data-theming for 360 ms and every colour eases together instead. */
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: var(--dur-theme);
+    animation-timing-function: var(--ease-arrive);
+  }
+  :root[data-switching="lang"]::view-transition-old(root),
+  :root[data-switching="lang"]::view-transition-new(root) {
+    animation-duration: var(--dur-lang);
+  }
+  :root[data-theming],
+  :root[data-theming] *,
+  :root[data-theming] *::before,
+  :root[data-theming] *::after {
+    transition:
+      background-color var(--dur-theme) var(--ease-arrive),
+      color var(--dur-theme) var(--ease-arrive),
+      box-shadow var(--dur-theme) var(--ease-arrive),
+      fill var(--dur-theme) var(--ease-arrive),
+      stroke var(--dur-theme) var(--ease-arrive),
+      outline-color var(--dur-theme) var(--ease-arrive),
+      text-decoration-color var(--dur-theme) var(--ease-arrive) !important;
+  }
+
+  /* ---------- reduced motion: nothing moves, nothing scales ---------- */
+  :root[data-motion="reduced"] {
+    scroll-behavior: auto;
+  }
+  :root[data-motion="reduced"] *,
+  :root[data-motion="reduced"] *::before,
+  :root[data-motion="reduced"] *::after {
+    animation: none !important;
+  }
+
+  /* ---------- lite: no shadow, no transition, no animation, no smooth scroll ---------- */
+  :root[data-render="lite"] {
+    scroll-behavior: auto;
+  }
+  :root[data-render="lite"] *,
+  :root[data-render="lite"] *::before,
+  :root[data-render="lite"] *::after {
+    animation: none !important;
+    transition: none !important;
+    box-shadow: none !important;
+    filter: none !important;
+  }
+}

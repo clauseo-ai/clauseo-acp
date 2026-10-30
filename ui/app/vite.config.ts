@@ -1,5 +1,6 @@
 /// <reference types="vitest/config" />
 import babel from "@rolldown/plugin-babel";
+import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import tauriConf from "../../crates/desktop/tauri.conf.json" with { type: "json" };
@@ -62,17 +63,36 @@ function devCspHeader(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), babel({ presets: [reactCompilerPreset()] }), devCspHeader()],
+  plugins: [tailwindcss(), react(), babel({ presets: [reactCompilerPreset()] }), devCspHeader()],
   server: {
-    // Tauri's devUrl. The watcher stays out of the Rust crates and the multi-GB target folders.
+    // Tauri's devUrl. The watcher stays out of the Rust crates and the multi-GB target folders, and out of
+    // ui/app/components, the link to ui/components for oxlint: Vite already watches those files by their real path.
     port: 1420,
     strictPort: true,
-    watch: { ignored: ["**/crates/**", "**/target/**"] },
+    watch: { ignored: ["**/crates/**", "**/target/**", "**/app/components/**"] },
   },
-  // WebView2 (Chromium), WKWebView (Safari 16+) and WebKitGTK all run ES2022.
-  build: { target: "es2022" },
+  // WebView2 (Chromium), WKWebView (Safari 16+) and WebKitGTK all run ES2022. Fonts and every other asset load as
+  // files under the CSP's 'self', never inlined as data: URLs.
+  build: { target: "es2022", assetsInlineLimit: 0 },
   test: {
-    include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
-    environment: "node",
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "app",
+          include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
+          environment: "node",
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "components",
+          root: "../components",
+          include: ["src/**/*.test.{ts,tsx}"],
+          environment: "node",
+        },
+      },
+    ],
   },
 });
