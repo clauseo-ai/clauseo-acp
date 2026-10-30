@@ -15,12 +15,12 @@
 //! At start-up, `host` and `cli` call [`Locations::resolve`] (or [`Locations::under_root`] in
 //! tests and `cli`), then [`Effective::load`] with [`system_policy_sources`], and keep the
 //! [`Effective`] in an `Arc`. It answers [`Effective::settings`], [`Effective::agent`],
-//! [`Effective::default_matters_dir`], [`Effective::data_dir`], [`Effective::policy`],
-//! [`Effective::is_locked`] and [`Effective::warnings`]. Every input is a trait: [`PlatformDirs`],
-//! [`Env`], [`Files`] and [`PolicySource`], with [`SystemDirs`], [`SystemEnv`] and
-//! [`SystemFiles`] over the OS. The parsers of each policy store are in [`policy`]. The webview's
-//! settings are a [`UiPatch`], applied with [`Settings::apply_ui_patch`] and saved with
-//! [`write_user_settings`].
+//! [`Effective::default_matters_dir`], [`Effective::data_dir`], [`Effective::locations`],
+//! [`Effective::policy`], [`Effective::is_locked`] and [`Effective::warnings`]. Every input is a
+//! trait: [`PlatformDirs`], [`Env`], [`Files`] and [`PolicySource`], with [`SystemDirs`],
+//! [`SystemEnv`] and [`SystemFiles`] over the OS. The parsers of each policy store are in
+//! [`policy`]. The webview's settings are a [`UiPatch`], applied with
+//! [`Settings::apply_ui_patch`] and saved with [`write_user_settings`].
 //!
 //! # Invariants
 //!

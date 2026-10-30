@@ -44,6 +44,7 @@ fn no_policy_reports_absent() {
     assert_eq!(effective.locked().count(), 0);
     assert_eq!(effective.warnings(), []);
     assert_eq!(effective.data_dir(), Path::new("/data"));
+    assert_eq!(effective.locations(), &locations());
     assert_eq!(
         effective.default_matters_dir(),
         Path::new("/data/Documents/Clauseo")
