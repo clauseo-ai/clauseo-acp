@@ -1,6 +1,7 @@
-// Fails when oxlint stops linting ui/components (or lints a file twice); why the link: components-link.mjs.
+// Fails when oxlint stops linting ui/components (or lints a file twice), or when pnpm would skip the
+// link's hook on a plain install; why the link: components-link.mjs.
 
-import { lstatSync, readdirSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -24,6 +25,16 @@ function isLink(path) {
     return false;
   }
 }
+
+describe("the link's hook runs on every pnpm install", () => {
+  it("keeps pnpm's up-to-date shortcut off, so a plain `pnpm -C ui install` remakes the link", () => {
+    const yaml = readFileSync(join(UI_DIR, "pnpm-workspace.yaml"), "utf8");
+    expect(
+      yaml,
+      `ui/pnpm-workspace.yaml lacks \`optimisticRepeatInstall: false\`; without it a plain \`pnpm -C ui install\` skips the devPreinstall hook, and the link ui/app/components is not remade (scripts/components-link.mjs)`,
+    ).toMatch(/^optimisticRepeatInstall: false\b/m);
+  });
+});
 
 describe("oxlint's reach into ui/components", () => {
   it("goes through the link ui/app/components", () => {
