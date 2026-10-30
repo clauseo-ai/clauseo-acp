@@ -44,8 +44,8 @@
 //! - No I/O, no clock, no randomness: time comes in as the envelope's `ts`.
 //! - The fold is total and never panics: an event that names something the state does not hold
 //!   changes nothing and adds an [`Anomaly`]; an unknown kind advances `seq` and changes nothing.
-//!   Queue and steer events and the restart and idle-stop detach reasons are not folded yet:
-//!   they advance `seq` and add [`Anomaly::NotYetFolded`].
+//!   `QueuedPromptEdited`, `SteerResolved` and the restart and idle-stop detach reasons are not
+//!   folded yet: they advance `seq` and add [`Anomaly::NotYetFolded`].
 //! - No change for an unchanged entry: each field is compared as it is set, and an `Upsert` is
 //!   emitted only when something changed.
 //! - No change carries more than `INLINE_LIMIT_BYTES` of text, counted as `escaped_len` counts

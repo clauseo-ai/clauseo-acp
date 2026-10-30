@@ -3,9 +3,9 @@
 
 use clauseo_protocol::{
     AgentSessionDetached, BlobHash, BlobRef, ContentAppended, ContentBlock, Count, DetachReason,
-    DomainEvent, EntryId, Envelope, LimitStopReason, ModeChanged, StepUndone, TextKind, TextOrBlob,
-    ThreadStatus, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted, ToolCallStatus,
-    ToolCallUpdated, ToolKind, TurnQueued, TurnStoppedAtLimit, ViewEntry,
+    DomainEvent, EntryId, Envelope, LimitStopReason, ModeChanged, QueuedPromptEdited, StepUndone,
+    TextKind, TextOrBlob, ThreadStatus, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted,
+    ToolCallStatus, ToolCallUpdated, ToolKind, TurnStoppedAtLimit, ViewEntry,
 };
 use clauseo_reducer::{Anomaly, Error, StreamState, ViewChange, apply, view_snapshot};
 
@@ -165,15 +165,20 @@ fn later_event_is_not_yet_folded() {
     let turn = start_turn(&mut log, "Read the lease.").unwrap();
     catch_up(&log, &mut state);
     let before = view_snapshot(&state);
-    let thread = state.as_thread().unwrap().thread();
-    let behind = crate::fixtures::thread_id(77).unwrap();
-    let queued = TurnQueued::new(thread, turn, behind, None).unwrap();
-    let out = push(&mut log, &mut state, queued);
+    let message = log.fresh().unwrap();
+    let edited = QueuedPromptEdited {
+        turn,
+        message,
+        content: vec![ContentBlock::Text {
+            text: "Read clause 2.".to_owned(),
+        }],
+    };
+    let out = push(&mut log, &mut state, edited);
     assert!(out.changes.is_empty(), "{:?}", out.changes);
     assert_eq!(
         out.anomalies,
         [Anomaly::NotYetFolded {
-            event: "turn_queued"
+            event: "queued_prompt_edited"
         }]
     );
     assert_eq!(state.seq(), Some(seq(4)));

@@ -2,8 +2,8 @@
 
 use clauseo_protocol::{
     DetachReason, EntryId, EventId, FilesChanged, LimitStopEntry, MarkerKind, Seq, StepEntry,
-    StepUndone, ThreadStatus, TurnEnded, TurnFailed, TurnId, TurnStoppedAtLimit, UserMessage,
-    UserMessageEntry, UserMessageStatus, ViewEntry,
+    StepUndone, ThreadStatus, TurnEnded, TurnFailed, TurnId, TurnQueued, TurnStoppedAtLimit,
+    UserMessage, UserMessageEntry, UserMessageStatus, ViewEntry,
 };
 
 use super::{insert_marker, insert_new, not_yet, set, set_status, set_vec};
@@ -92,6 +92,26 @@ pub(super) fn user_message(
     }
 }
 
+/// A turn waits. Behind another thread's writer it gives `Queued { behind }`, also as the turn's
+/// second `TurnQueued`, and when no turn runs it becomes the thread's last turn, so its
+/// `TurnEnded` before it starts (a cancel) settles the status. Behind its own thread it leaves
+/// the status while a turn runs, and when none runs it settles (to `Idle` unless the lawyer is
+/// asked): the queue is held, as after the host's start-up repair (R11).
+pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut Applied) {
+    let behind = event.behind();
+    if behind != state.thread {
+        if state.running.is_none() {
+            state.turn = Some(event.turn());
+        }
+        set_status(state, "turn_queued", out, ThreadStatus::Queued { behind });
+        return;
+    }
+    if state.running.is_none() {
+        let status = settled_status(state);
+        set_status(state, "turn_queued", out, status);
+    }
+}
+
 pub(super) fn turn_started(state: &mut ThreadState, turn: TurnId, out: &mut Applied) {
     state.running = Some(turn);
     state.turn = Some(turn);
@@ -160,9 +180,9 @@ pub(super) fn stopped_at_limit(
 
 /// Ends the running turn: its step, then the status. A `TurnEnded` of a turn that is not
 /// running (one that never started) makes no step and marks its user message `Removed`
-/// (0002); it leaves the status, but for `Starting` from that turn's own prompt while no turn
-/// runs, which settles (to `Idle` unless the lawyer is asked). A second `TurnEnded` of a turn
-/// with a step is [`Anomaly::Duplicate`].
+/// (0002); it leaves the status, but for `Starting` from that turn's own prompt, or `Queued` from
+/// its wait for another thread's writer, while no turn runs, which settles (to `Idle` unless the
+/// lawyer is asked). A second `TurnEnded` of a turn with a step is [`Anomaly::Duplicate`].
 pub(super) fn turn_ended(state: &mut ThreadState, seq: Seq, event: &TurnEnded, out: &mut Applied) {
     if state.index.steps.contains_key(&event.turn) {
         out.anomalies.push(Anomaly::Duplicate {
@@ -177,7 +197,10 @@ pub(super) fn turn_ended(state: &mut ThreadState, seq: Seq, event: &TurnEnded, o
         remove_prompts(state, event.turn, out);
         if state.running.is_none()
             && state.turn == Some(event.turn)
-            && matches!(state.status(), ThreadStatus::Starting)
+            && matches!(
+                state.status(),
+                ThreadStatus::Starting | ThreadStatus::Queued { .. }
+            )
         {
             let status = settled_status(state);
             set_status(state, "turn_ended", out, status);

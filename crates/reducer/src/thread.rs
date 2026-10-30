@@ -40,7 +40,7 @@ pub(crate) fn fold(state: &mut ThreadState, envelope: &Envelope, out: &mut Appli
         DomainEvent::AgentSessionAttached(_) | DomainEvent::Unknown { .. } => {}
         DomainEvent::AgentSessionDetached(event) => turn::detached(state, &event.reason, out),
         DomainEvent::UserMessage(event) => turn::user_message(state, seq, event, out),
-        DomainEvent::TurnQueued(_) => not_yet(out, "turn_queued"),
+        DomainEvent::TurnQueued(event) => turn::turn_queued(state, event, out),
         DomainEvent::QueuedPromptEdited(_) => not_yet(out, "queued_prompt_edited"),
         DomainEvent::SteerResolved(_) => not_yet(out, "steer_resolved"),
         DomainEvent::TurnStarted(event) => turn::turn_started(state, event.turn, out),
