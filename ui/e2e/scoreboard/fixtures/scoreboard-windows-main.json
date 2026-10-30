@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "os": "windows",
+  "warmup_runs": 1,
+  "measured_runs": 3,
+  "metrics": {
+    "warm_start_interactive": {
+      "median": 760,
+      "runs": [760, 760, 760]
+    },
+    "first_token_on_screen": {
+      "median": 141,
+      "runs": [141, 141, 141]
+    },
+    "chunk_to_paint_p50": {
+      "median": 9.4,
+      "runs": [9.4, 9.4, 9.4]
+    },
+    "chunk_to_paint_p95": {
+      "median": 38,
+      "runs": [38, 38, 38]
+    },
+    "long_frames_streaming": {
+      "median": 0,
+      "runs": [0, 0, 0]
+    },
+    "dropped_frames_streaming": {
+      "median": 4.4,
+      "runs": [4.4, 4.4, 4.4]
+    },
+    "keystroke_latency_p95": {
+      "median": 22,
+      "runs": [22, 22, 22]
+    },
+    "keystroke_handler": {
+      "median": 2.2,
+      "runs": [2.2, 2.2, 2.2]
+    },
+    "idle_memory_total": {
+      "median": 210.1,
+      "runs": [210.1, 210.1, 210.1]
+    },
+    "memory_after_session": {
+      "median": 265,
+      "runs": [265, 265, 265]
+    }
+  }
+}

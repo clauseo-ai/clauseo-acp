@@ -136,6 +136,66 @@ measured_by = "Long Animation Frames"
 status = "unmeasured"
 source = "synthesis §4; doc 14; doc 15"
 
+# The speed scoreboard's rows (R13): the fixed `scoreboard` session played into the app, medians of
+# three runs after one warm-up (ui/e2e/scoreboard/metrics.ts). Each limit is proposed, for Rohan to
+# confirm in review; the schema has no field for that, so a comment above each limit says it.
+# Drop the comment once a limit is confirmed.
+
+[[budget]]
+id = "first_token_on_screen"
+metric = "send to first token on screen, scoreboard session"
+# Proposed (R13), for Rohan to confirm.
+limit = 150.0
+unit = "ms"
+gate = "alert"
+measured_by = "speed scoreboard (ui/e2e/scoreboard)"
+status = "unmeasured"
+source = "build-order stage A item 8; replan decision 6; R13"
+
+[[budget]]
+id = "chunk_to_paint_p50"
+metric = "bridge receiving a patch to the frame that paints it, p50, scoreboard session"
+# Proposed (R13), for Rohan to confirm.
+limit = 17.0
+unit = "ms"
+gate = "alert"
+measured_by = "speed scoreboard (ui/e2e/scoreboard)"
+status = "unmeasured"
+source = "build-order stage A item 8; replan decision 6; R13"
+
+[[budget]]
+id = "chunk_to_paint_p95"
+metric = "bridge receiving a patch to the frame that paints it, p95, scoreboard session"
+# Proposed (R13), for Rohan to confirm.
+limit = 50.0
+unit = "ms"
+gate = "alert"
+measured_by = "speed scoreboard (ui/e2e/scoreboard)"
+status = "unmeasured"
+source = "build-order stage A item 8; replan decision 6; R13"
+
+[[budget]]
+id = "dropped_frames_streaming"
+metric = "requestAnimationFrame gaps over 16.7 ms per 10 s while streaming and scrolling"
+# Proposed (R13), for Rohan to confirm.
+limit = 30.0
+unit = "count"
+gate = "alert"
+measured_by = "speed scoreboard (ui/e2e/scoreboard)"
+status = "unmeasured"
+source = "research 15 W6 (95% of frames under 16.7 ms); R13"
+
+[[budget]]
+id = "memory_after_session"
+metric = "process-group memory after the scoreboard session"
+# Proposed (R13), for Rohan to confirm.
+limit = 300.0
+unit = "MB"
+gate = "alert"
+measured_by = "speed scoreboard (ui/e2e/scoreboard)"
+status = "unmeasured"
+source = "build-order stage A item 8; replan decision 6; R13"
+
 [[budget]]
 id = "react_commits_per_frame"
 metric = "React commits per frame while streaming"

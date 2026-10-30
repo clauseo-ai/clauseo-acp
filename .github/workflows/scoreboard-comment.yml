@@ -1,0 +1,72 @@
+# The speed scoreboard's pull request comment (R13). When a CI or e2e-windows run of a pull request
+# ends, this finds the pull request, reads the head's scoreboard and reducer-bench artifacts and
+# main's, and creates or edits the one comment that starts with <!-- scoreboard -->. The logic is
+# in ui/e2e/scoreboard/comment.ts, with its tests beside it.
+#
+# - workflow_run runs the copy of this file on the default branch, with a token that can comment,
+#   also for a fork's pull request. So it never checks out or runs the pull request's code: the
+#   checkout is the default branch, sparse, and holds only the script, its inputs and Node's
+#   version. Every artifact is untrusted data, written by the pull request's code: comment.ts caps
+#   its size, parses it as JSON, checks every field and runs nothing from it.
+# - The pull request comes from the GitHub API, never from an artifact: workflow_run.pull_requests
+#   is empty for a fork, so the script also asks for the open pull requests from the run's head
+#   repository and branch, and keeps one only when its head commit is the run's.
+# - Main's numbers come from main's newest successful run (push, nightly or on demand) that has
+#   each artifact. A pull request that changes no product code (crates/, ui/, Cargo.toml,
+#   Cargo.lock) gets no comment.
+# - Artifacts it reads: scoreboard-windows and scoreboard-macos (the measuring jobs, after R12) and
+#   reducer-bench-summary (ci.yml, reducer-bench). One that is missing shows as "not run".
+# - It runs Node without installing anything: comment.ts imports only Node's own modules.
+# - Every action is pinned by commit SHA, with its tag in a comment.
+
+name: scoreboard-comment
+
+on:
+  workflow_run:
+    # The `name:`s of the workflows in WATCHED in ui/e2e/scoreboard/comment.ts; a test checks both
+    # lists agree.
+    workflows: [CI, e2e-windows]
+    types: [completed]
+
+permissions: {}
+
+# One run at a time per pull request head, so two runs that end together cannot both create a
+# comment. A later run waits; it reads everything again, so none is cancelled.
+concurrency:
+  group: scoreboard-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  comment:
+    name: comment
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      # List the runs and download their artifacts.
+      actions: read
+      # The sparse checkout of the default branch.
+      contents: read
+      # Read the pull request and its files; create and edit the comment.
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /budgets.toml
+            /ui/package.json
+            /ui/e2e/scoreboard/
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+
+      - name: Create or edit the scoreboard comment
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BUDGETS_FILE: budgets.toml
+        run: node ui/e2e/scoreboard/comment.ts
