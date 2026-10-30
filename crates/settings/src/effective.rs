@@ -92,6 +92,12 @@ impl Effective {
         self.locations.data_dir()
     }
 
+    /// The folders it was loaded from, for [`crate::write_user_settings`], so a caller that
+    /// holds the `Effective` needs no second `Locations`.
+    pub fn locations(&self) -> &Locations {
+        &self.locations
+    }
+
     /// Which policy sources applied, and which could not be read.
     pub fn policy(&self) -> &PolicyStatus {
         &self.policy
