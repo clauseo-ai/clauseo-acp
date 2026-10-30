@@ -89,10 +89,12 @@ fn the_agents_dictionary_holds_one_launch_spec_per_id() {
         ("codex".to_owned(), launch("codex".to_owned())),
     ]);
     let (leaves, warnings) = values(vec![(AGENTS_KEY, agents, true)]);
-    assert_eq!(leaves.len(), 1);
+    assert_eq!(leaves.len(), 2);
     assert!(
         matches!(&leaves[0], Leaf::Agent(id, launch) if id == "claude" && launch.args == ["--acp"])
     );
+    // A relative command locks the agent with no entry.
+    assert_eq!(leaves[1], Leaf::Refused("agents.codex".to_owned()));
     assert_eq!(
         warnings,
         [WarningKind::RelativeAgentCommand {
@@ -177,7 +179,7 @@ fn a_date_or_a_non_finite_number_has_no_json_value() {
     ];
     for (value, message) in cases {
         let (leaves, warnings) = values(vec![("ui.font_size", value, true)]);
-        assert_eq!(leaves, []);
+        assert_eq!(leaves, [Leaf::Refused("ui.font_size".to_owned())]);
         assert_eq!(
             warnings,
             [WarningKind::InvalidValue {

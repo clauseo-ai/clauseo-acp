@@ -29,6 +29,8 @@
 //!   A policy source that cannot be read is dropped whole and listed in [`PolicyStatus`].
 //! - Policy wins: a policy value replaces the user's for its key, and locks it. An agent's
 //!   policy entry replaces the user's whole entry for that id. Earlier sources win over later.
+//! - Policy fails closed per key: a policy value for a known key that does not type is a
+//!   warning and still locks the key, at its default (an agent: with no entry).
 //! - A key this version does not know is a warning, never an error, so a firm's profile for a
 //!   newer version still loads.
 //! - No variable moves or hides a policy source: [`DATA_DIR_VAR`] moves only the data folder.

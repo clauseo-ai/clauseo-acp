@@ -2,7 +2,7 @@ use super::Effective;
 use crate::error::Error;
 use crate::locations::Locations;
 use crate::policy::{FilePolicy, PolicyRead, PolicySource, file};
-use crate::schema::{AgentLaunch, Density, Theme};
+use crate::schema::{AgentLaunch, Density, FontSize, Theme};
 use crate::testing::{FakeSource, MemFiles, abs, abs_json};
 use crate::warning::WarningKind;
 use std::path::Path;
@@ -234,4 +234,63 @@ fn a_file_policy_reads_through_files() {
     assert_eq!(source.name(), path.display().to_string());
     let effective = Effective::load(&locations(), &MemFiles::default(), &[&source]);
     assert_eq!(effective.settings().ui.theme, Theme::Dark);
+}
+
+// Fail closed (Rohan, 2026-10-31): a policy value for a known key that does not type still locks
+// the key, at its default; an agent's still locks `agents.<id>`, with no entry.
+#[test]
+fn invalid_policy_value_still_locks() {
+    let files = user(&format!(
+        r#"{{"ui": {{"font_size": 18, "theme": "dark"}}, "agents": {{"claude": {{"command": "{}"}}}}}}"#,
+        abs_json("bin/claude")
+    ));
+    let firm = policy(
+        "firm",
+        r#"{"ui": {"font_size": "big", "colour": "red"}, "agents": {"claude": {"command": "claude"}}}"#,
+    );
+    let effective = Effective::load(&locations(), &files, &[&firm]);
+    assert_eq!(effective.settings().ui.font_size, FontSize::default());
+    assert!(effective.is_locked("ui.font_size"));
+    assert_eq!(effective.agent("claude"), None);
+    assert!(effective.is_locked("agents.claude"));
+    // The user's other values stand, and an unknown policy key locks nothing.
+    assert_eq!(effective.settings().ui.theme, Theme::Dark);
+    assert!(!effective.is_locked("ui.theme"));
+    assert!(!effective.is_locked("ui.colour"));
+    let kinds: Vec<_> = effective
+        .warnings()
+        .iter()
+        .map(|warning| warning.kind.clone())
+        .collect();
+    assert!(
+        matches!(&kinds[..], [
+            WarningKind::InvalidValue { key, .. },
+            WarningKind::UnknownKey { key: unknown },
+            WarningKind::RelativeAgentCommand { id, .. },
+        ] if key == "ui.font_size" && unknown == "ui.colour" && id == "claude"),
+        "{kinds:?}"
+    );
+}
+
+#[test]
+fn an_invalid_value_in_a_stronger_source_beats_a_valid_one_in_a_weaker() {
+    let registry = policy("registry", r#"{"ui": {"density": "roomy"}}"#);
+    let file = policy("file", r#"{"ui": {"density": "compact"}}"#);
+    let effective = Effective::load(&locations(), &MemFiles::default(), &[&registry, &file]);
+    assert_eq!(effective.settings().ui.density, Density::default());
+    assert!(effective.is_locked("ui.density"));
+}
+
+#[test]
+fn only_a_source_that_sets_a_valid_value_is_applied() {
+    let broken = policy("registry", r#"{"ui": {"font_size": 99}}"#);
+    let effective = Effective::load(&locations(), &MemFiles::default(), &[&broken]);
+    assert!(effective.policy().is_absent());
+    assert_eq!(effective.policy().applied(), Vec::<String>::new());
+    assert!(effective.is_locked("ui.font_size"));
+
+    let firm = policy("file", r#"{"ui": {"theme": "light", "font_size": 99}}"#);
+    let effective = Effective::load(&locations(), &MemFiles::default(), &[&broken, &firm]);
+    assert_eq!(effective.policy().applied(), ["file"]);
+    assert_eq!(effective.settings().ui.theme, Theme::Light);
 }

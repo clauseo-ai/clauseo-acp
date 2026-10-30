@@ -30,7 +30,9 @@ impl Effective {
     ///
     /// `policy` lists the sources strongest first: a key the first source sets is not taken
     /// from a later one. A policy value replaces the user's value for its key, and an agent's
-    /// replaces the user's whole entry for that id; each such key is locked.
+    /// replaces the user's whole entry for that id; each such key is locked. A policy value for a
+    /// known key that does not type locks the key at its default (an agent: no entry), with a
+    /// warning: fail closed (Rohan, 2026-10-31).
     pub fn load(
         locations: &Locations,
         files: &dyn Files,
@@ -48,7 +50,9 @@ impl Effective {
                 PolicyRead::Absent => {}
                 PolicyRead::Unreadable(error) => status.push_error(source.name(), error),
                 PolicyRead::Read(values) => {
-                    status.push_applied(source.name());
+                    if values.sets_a_value() {
+                        status.push_applied(source.name());
+                    }
                     let (leaves, source_warnings) = values.into_parts();
                     warnings.extend(source_warnings);
                     for leaf in leaves {
