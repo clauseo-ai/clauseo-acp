@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, test } from "vitest";
 import { AlertDialog, AlertDialogClose, AlertDialogPopup } from "./alert-dialog.tsx";
 import { Button } from "./button.tsx";
+import { startAtField, startOf } from "./dialog-start.ts";
 import { Dialog, DialogClose, DialogPopup } from "./dialog.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -67,4 +68,28 @@ test("an act that can't be undone leaves the starting focus on the safe choice",
     </AlertDialog>,
   );
   expect(document.activeElement?.textContent).toBe("Keep protection");
+});
+
+test("the starting focus is found inside the dialog's own plane, never in another plane on the page", () => {
+  const plane = (labels: string[]) => {
+    const node = document.createElement("div");
+    node.dataset["dialogPlane"] = "";
+    const field = document.createElement("input");
+    const row = document.createElement("div");
+    row.dataset["dialogActs"] = "";
+    for (const label of labels) {
+      const button = document.createElement("button");
+      button.textContent = label;
+      row.append(button);
+    }
+    node.append(field, row);
+    return node;
+  };
+  const mine = plane(["Cancel", "Restore"]);
+  // another room's dialog, later in the document, where a page-wide lookup would land
+  document.body.append(mine, plane(["Elsewhere", "Not mine"]));
+  expect(startOf(true, () => mine)?.()).toBe(mine.querySelectorAll("button")[1]);
+  expect(startOf(false, () => mine)?.()).toBe(mine.querySelectorAll("button")[0]);
+  expect(startAtField(() => mine)()).toBe(mine.querySelector("input"));
+  expect(startOf(true, () => null)?.()).toBe(true);
 });

@@ -4,7 +4,16 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./*": "./src/*"
+    "./ui/*": "./src/ui/*",
+    "./icons/*": "./src/icons/*",
+    "./lib/*": "./src/lib/*",
+    "./styles/*": "./src/styles/*",
+    "./ui/*.test.tsx": null,
+    "./ui/*.test.ts": null,
+    "./icons/*.test.ts": null,
+    "./lib/*.test.ts": null,
+    "./lib/*.test.tsx": null,
+    "./styles/*.test.ts": null
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",

@@ -114,7 +114,7 @@ export function currentOs(): Os {
 export const say = (s: string): ReactNode => createElement(Mixed, null, s);
 
 /** The new words of the page's language, bound, with the room's words and the frame's beside them:
- * const w = useUiWords(); w.ui("Rename"), w.t("History"), w.f("Pinned"), w.clock("3:58 pm"). ui, t and f give
+ * const w = useUiWords(); w.ui("Rename"), w.t("{n} more", { n: 3 }), w.f("Pinned"), w.clock("3:58 pm"). ui, t and f give
  * strings, for attributes such as aria-label; say gives the words to render, with their English runs marked. */
 export function useUiWords() {
   const { lang } = useDisplay();

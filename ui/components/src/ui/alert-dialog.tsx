@@ -1,7 +1,7 @@
 import { AlertDialog as Base } from "@base-ui/react/alert-dialog";
-import type { ComponentProps, ReactNode } from "react";
+import { useState, type ComponentProps, type ReactNode } from "react";
 import { cn } from "../lib/cn.ts";
-import { quietStart, startOf } from "./dialog-start.ts";
+import { focusPlane } from "./dialog-start.ts";
 import {
   dialogActions,
   dialogBody,
@@ -42,14 +42,16 @@ export function AlertDialogPopup({
    * first in the row, when it can't. Unsaid, Base UI's first focusable. An initialFocus given still wins. */
   undoable?: boolean;
 }) {
+  // one plane for the dialog's life: a new ref callback each render would mark it quiet again
+  const [{ mount, start }] = useState(focusPlane);
   return (
     <Base.Portal>
       <Base.Backdrop className={scrim} />
       <Base.Popup
-        ref={quietStart}
+        ref={mount}
         data-dialog-plane=""
         className={cn(dialogPlace, dialogPlane, className)}
-        initialFocus={initialFocus ?? startOf(undoable)}
+        initialFocus={initialFocus ?? start(undoable)}
         {...props}
       >
         <Base.Title className={dialogTitle}>{title}</Base.Title>

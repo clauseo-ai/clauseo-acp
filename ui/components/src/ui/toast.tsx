@@ -5,11 +5,11 @@ import { IconTick } from "../icons/icons.tsx";
 import { Button } from "./button.tsx";
 import { toast, toastViewport } from "./recipes-overlays.ts";
 
-/** Toasts, rarely: a confirmation of something done out of sight, such as "List of citations copied.", and never
- * an error in a thread, which stays inline on the working line where it happened. Queue one with useToasts().show(title)
- * (toast-queue.ts) inside this provider. A toast rises 12 px on the spring, stays 5 s while
- * the window is in view and the pointer or focus isn't on it, and leaves in 160 ms. F6 reaches it from the keyboard,
- * and Escape or Close dismisses it. */
+/** Toasts, rarely: a confirmation of something done out of sight, such as "List of citations copied.", and never an
+ * error in a thread, which stays inline on the working line where it happened. Queue one with useToasts().show(title)
+ * (toast-queue.ts) inside this provider. A toast rises 12 px on the spring, stays 5 s while the window is in view and
+ * the pointer or focus isn't on it, and leaves in 160 ms. F6 reaches it from the keyboard, and Escape or Close
+ * dismisses it. */
 export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <Toast.Provider timeout={5000} limit={2}>

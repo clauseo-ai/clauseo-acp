@@ -1,6 +1,6 @@
 // The dev-only gallery of the design system's controls: gallery.html loads it, and Vite's build never does. A query
 // such as ?theme=night&lang=hi&lite=1 sets the first look, for screenshots.
-import "../styles/index.css";
+import "./gallery.css";
 import { startDisplay } from "@clauseo/components/lib/display.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { StrictMode } from "react";

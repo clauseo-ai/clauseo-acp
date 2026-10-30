@@ -1,6 +1,7 @@
-// The few Node APIs the tests in ui/components and ui/app call. The ui workspace installs no @types/node, so these
-// declarations stand in for exactly what the tests use. ui/app's tsconfig includes ui/components/src, so they hold
-// in both packages.
+// The few Node APIs the tests in ui/components and ui/app call. Neither package installs @types/node (only ui/e2e
+// does, for its own scripts, and its version's one home is there), so these declarations stand in for exactly what
+// the tests use. ui/app's tsconfig includes ui/components/src, so they hold in both packages. If @types/node ever
+// becomes visible to either program, delete this file: the two would declare "node:fs" twice.
 declare module "node:fs" {
   export function readFileSync(path: URL | string): Uint8Array;
   export function readFileSync(path: URL | string, encoding: "utf8"): string;
