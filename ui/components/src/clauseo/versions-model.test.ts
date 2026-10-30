@@ -79,6 +79,12 @@ test("restoring 3:42 pm on 9 March would change three documents and keep what wa
   expect(whoOf("en", CAL, { ...restored, who: { kind: "restore", to: "nope" } }, HISTORY)).toBe("");
 });
 
+test("an undo whose version isn't in the history still says what it is", () => {
+  const undo: Version = { ...now, id: "u", who: { kind: "undo", of: "gone" } };
+  expect(whoOf("en", CAL, undo, HISTORY)).toBe("Undo of a change");
+  expect(whoOf("hi", CAL, undo, HISTORY)).toBe("बदलाव पूर्ववत किया गया");
+});
+
 test("an undo names the version it undid by id, so two versions made in the same minute stay apart", () => {
   const a: Version = { ...at("v4"), id: "a", at: "3:42 pm" };
   const b: Version = { ...at("v4"), id: "b", at: "3:42 pm", day: "2027-03-10" };
@@ -92,8 +98,6 @@ test("an undo names the version it undid by id, so two versions made in the same
   expect(whoOf("en", CAL, { ...undo, day: "2027-03-10" }, all)).toBe(
     "Undo of the change at 3:42 pm",
   );
-  // an undo of a version not in the history says nothing rather than a wrong time
-  expect(whoOf("en", CAL, { ...undo, who: { kind: "undo", of: "gone" } }, all)).toBe("");
 });
 
 test("the restore dialog's words name the time, every document and what stays", () => {

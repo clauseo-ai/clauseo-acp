@@ -120,7 +120,8 @@ export function whoOf(lang: Lang, cal: Calendar, v: Version, all: readonly Versi
       return vt(lang, "You, outside Clauseo");
     case "undo": {
       const of = all.find((x) => x.id === w.of);
-      if (of === undefined) return "";
+      // the undone version isn't in the history passed in: say what it is without its time
+      if (of === undefined) return vt(lang, "Undo of a change");
       return of.day === v.day
         ? vt(lang, "Undo of the change at {time}", { time: timeOf(lang, of) })
         : vt(lang, "Undo of the change at {time} on {date}", when(lang, cal, of));

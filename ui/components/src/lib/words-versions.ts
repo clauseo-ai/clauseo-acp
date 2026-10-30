@@ -36,6 +36,8 @@ const HI = {
   "Clauseo, in {conversation}": "Clauseo, '{conversation}' में",
   "You, outside Clauseo": "आप, Clauseo के बाहर",
   "Undo of the change at {time}": "{time} बजे का बदलाव पूर्ववत किया गया",
+  // the approved sentence without its time, for an undo whose version isn't in the history at hand
+  "Undo of a change": "बदलाव पूर्ववत किया गया",
   "Undo of the change at {time} on {date}": "{date} को {time} बजे का बदलाव पूर्ववत किया गया",
   "Imported {n} documents": "{n} दस्तावेज़ आयात किए गए",
   "Restore to {time} on {date}": "{date}, {time} बजे पर पुनर्स्थापित",

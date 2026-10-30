@@ -1,35 +1,27 @@
 // @vitest-environment happy-dom
 // Two rooms on one page, under StrictMode, each with a permission prompt waiting. A key pressed in one room's composer
-// answers that room's prompt and never the other's, whichever prompt listened first.
-import { act, StrictMode, type ReactNode } from "react";
+// answers that room's prompt and never the other's, whichever prompt listened first. The rooms' windows are the
+// provider's own, as on a screen: nothing here registers them.
+import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { TooltipProvider } from "../ui/tooltip.tsx";
 import { PermissionPrompt } from "./permission.tsx";
 import type { PermissionAnswer } from "./permission-keys.ts";
-import { useRoom } from "./room-scope.ts";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-/** The room's window, which its scope finds as "window", holding a prompt and a composer. */
-function Window({ children }: { children: ReactNode }) {
-  const { nodes } = useRoom();
-  return <div ref={nodes.slot("window")}>{children}</div>;
-}
-
 function Room({ onAnswer }: { onAnswer: (a: PermissionAnswer) => void }) {
   return (
     <RoomScopeProvider>
-      <Window>
-        <PermissionPrompt paper="Notice to the bank" state="pending" onAnswer={onAnswer} keys />
-        <button type="button" className="other">
-          Other
-        </button>
-        <form data-composer="">
-          <textarea />
-        </form>
-      </Window>
+      <PermissionPrompt paper="Notice to the bank" state="pending" onAnswer={onAnswer} keys />
+      <button type="button" className="other">
+        Other
+      </button>
+      <form data-composer="">
+        <textarea />
+      </form>
     </RoomScopeProvider>
   );
 }
