@@ -144,6 +144,10 @@
   .tile-to {
     @apply text-tight stretch-wide text-quiet;
   }
+  /* on a lit tile the range takes the tile's ink, as its numeral and title do: the quiet tone fails on colour */
+  .tile:not([data-state="uncited"]) .tile-to {
+    color: currentColor;
+  }
   .tile-title {
     @apply text-tile-title stretch-tile-title text-quiet deva-nudge;
     line-height: var(--title-h);

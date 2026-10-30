@@ -17,7 +17,10 @@
     "./icons/*.test.ts": null,
     "./lib/*.test.ts": null,
     "./lib/*.test.tsx": null,
-    "./styles/*.test.ts": null
+    "./styles/*.test.ts": null,
+    "./icons/*.test.tsx": null,
+    "./styles/*.test.tsx": null,
+    "./styles/css-blocks.ts": null
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",

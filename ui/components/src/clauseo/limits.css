@@ -357,6 +357,15 @@
   .lim-band-label {
     @apply text-primary font-ui;
   }
+  /* on a phone's width each label stands over its words, which keep the band's whole width, never a word a line */
+  @variant max-narrow {
+    .lim-band-rows {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .lim-band-row + .lim-band-row > dt {
+      margin-top: var(--s1);
+    }
+  }
 
   /* ---------- Matters, where the rail folds: the rail's court yellow dot while a matter waits on the lawyer ---------- */
   .room-rail-waits {
