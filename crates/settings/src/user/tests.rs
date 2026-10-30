@@ -182,3 +182,57 @@ fn writing_reports_read_and_write_failures() {
         format!("{}: disk full", settings_file().display())
     );
 }
+
+/// Files with nothing in them but whitespace and comments: `touch`, an editor saving an empty
+/// buffer, or a comment left on its own.
+const BLANK_FILES: [&str; 6] = [
+    "",
+    "\u{feff}",
+    " \n\t\r\n",
+    "// my settings",
+    "// my settings\n/* more\n * lines */\n",
+    "/**/",
+];
+
+#[test]
+fn an_empty_or_comment_only_file_reads_as_no_settings_without_a_warning() {
+    for text in BLANK_FILES {
+        let (leaves, warnings) = read_text(text);
+        assert_eq!(leaves, Vec::new(), "{text:?}");
+        assert_eq!(warnings, Vec::new(), "{text:?}");
+    }
+}
+
+#[test]
+fn an_empty_or_comment_only_file_saves_as_the_patch() {
+    for text in BLANK_FILES {
+        let files = MemFiles::with(&settings_file(), text);
+        write_user_settings(&locations(), &files, &dark()).unwrap();
+        assert_eq!(
+            files.text(&settings_file()).unwrap(),
+            "{\n  \"ui\": {\n    \"theme\": \"dark\",\n    \"font_size\": 16\n  }\n}\n",
+            "{text:?}"
+        );
+    }
+}
+
+#[test]
+fn an_open_comment_or_a_lone_slash_is_still_a_syntax_error() {
+    for text in ["/* never closed", "/", "// fine\n/"] {
+        let (leaves, warnings) = read_text(text);
+        assert_eq!(leaves, Vec::new(), "{text:?}");
+        assert!(
+            matches!(
+                &warnings[..],
+                [Warning {
+                    kind: WarningKind::Syntax { .. },
+                    ..
+                }]
+            ),
+            "{text:?}: {warnings:?}"
+        );
+        let files = MemFiles::with(&settings_file(), text);
+        let error = write_user_settings(&locations(), &files, &dark()).unwrap_err();
+        assert!(matches!(error, Error::Parse { .. }), "{text:?}: {error}");
+    }
+}

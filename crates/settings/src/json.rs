@@ -32,7 +32,11 @@ pub(crate) struct Syntax {
 /// The values of a file: one per key of a known section, in file order, with a warning for each
 /// unknown section and each section that is not an object.
 pub(crate) fn read(path: &Path, bytes: &[u8]) -> Result<(Vec<Raw>, Vec<Warning>), Syntax> {
-    let text = blank_trailing_commas(bytes.strip_prefix(BOM).unwrap_or(bytes));
+    let text = bytes.strip_prefix(BOM).unwrap_or(bytes);
+    if is_blank(text) {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let text = blank_trailing_commas(text);
     let text = text.as_ref();
     let newlines: Vec<usize> = text
         .iter()
@@ -92,6 +96,25 @@ enum Scan {
     String,
     /// After a `\` in a string.
     Escape,
+}
+
+/// Whether `text` holds only whitespace and comments: a file `touch` made, or one an editor saved
+/// with nothing but a comment in it. Such a file reads as `{}`, with no warning. An unclosed
+/// block comment or a lone `/` is not blank, so the parser reports it.
+pub(crate) fn is_blank(text: &[u8]) -> bool {
+    let mut scan = Scan::Code;
+    for &byte in text {
+        scan = match (scan, byte) {
+            (Scan::Code, b'/') => Scan::Slash,
+            (Scan::Code, _) if byte.is_ascii_whitespace() => Scan::Code,
+            (Scan::LineComment, b'\n') | (Scan::BlockStar, b'/') => Scan::Code,
+            (Scan::LineComment, _) | (Scan::Slash, b'/') => Scan::LineComment,
+            (Scan::BlockComment | Scan::BlockStar, b'*') => Scan::BlockStar,
+            (Scan::BlockComment | Scan::BlockStar, _) | (Scan::Slash, b'*') => Scan::BlockComment,
+            _ => return false,
+        };
+    }
+    matches!(scan, Scan::Code | Scan::LineComment)
 }
 
 /// `text` with each trailing comma (one that only whitespace and comments separate from a `}`

@@ -90,9 +90,13 @@ pub fn write_user_settings(
     files.write_atomic(path, &bytes).map_err(io)
 }
 
-/// The file's top-level object, or a parse error with its line and column.
+/// The file's top-level object, or a parse error with its line and column. A file of only
+/// whitespace and comments is an empty object.
 fn object(path: &Path, bytes: &[u8]) -> Result<Map<String, Value>, Error> {
     let text = bytes.strip_prefix(json::BOM).unwrap_or(bytes);
+    if json::is_blank(text) {
+        return Ok(Map::new());
+    }
     serde_json_lenient::from_slice(text).map_err(|error| {
         let syntax = json::syntax(&error);
         Error::Parse {
