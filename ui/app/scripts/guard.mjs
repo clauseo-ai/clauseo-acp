@@ -15,6 +15,10 @@
 //   them. Any failed restore fails the run and keeps the copy (`restoreFailure`).
 // - A killed run leaves its copy. The next run's `recoverFile` puts it back only when the caller's
 //   `isOwnEdit` says the file is the copy plus an edit the tool itself makes.
+// - `ensureLink` is the guard's one write that is not an edit of a tracked file: it makes an
+//   ignored link to a folder (a junction on Windows, which needs no symlink rights), only where
+//   nothing is, and leaves a link that already reaches the folder alone. Anything else at the path
+//   is the developer's and is never replaced.
 // The guard starts no process: .oxlintrc.json bans child processes in this file.
 
 import {
@@ -23,16 +27,19 @@ import {
   fchmodSync,
   fsyncSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmdirSync,
   statSync,
+  symlinkSync,
   unlinkSync,
   writeSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, win32 } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, win32 } from "node:path";
 
 /** A conflict over a guarded file: both files are kept, and `fix` says what to do with them. */
 export class ConflictError extends Error {
@@ -87,6 +94,42 @@ export function isRepoPath(rel) {
     return false;
   }
   return rel.split(/[\\/]/).every((part) => part !== "" && part !== "." && part !== "..");
+}
+
+/**
+ * Makes repo path `rel` under `root` a link to the folder `target`, written relative to `rel`'s
+ * folder (`../components`). A junction on Windows, which needs no symlink rights or Developer
+ * Mode; a symlink elsewhere. Returns "made" or "kept" (a link already reaching the folder). Throws
+ * when `target` is no folder or something else is at `rel`: that is never replaced.
+ */
+export function ensureLink({ root, rel, target }) {
+  if (!isRepoPath(rel)) {
+    throw new Error(`refusing to link \`${rel}\`: it is not a relative path inside the repo`);
+  }
+  const path = join(root, rel);
+  const folder = resolve(dirname(path), target);
+  if (!statSync(folder, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new Error(`cannot link ${rel} to ${target}: ${folder} is not a folder`);
+  }
+  const there = lstatSync(path, { throwIfNoEntry: false });
+  if (there === undefined) {
+    symlinkSync(target, path, "junction");
+    return "made";
+  }
+  if (there.isSymbolicLink() && realpathOrUndefined(path) === realpathSync(folder)) {
+    return "kept";
+  }
+  throw new Error(
+    `${rel} should be a link to ${target}, but something else is there; move it away, then run \`pnpm -C ui install\` to make the link`,
+  );
+}
+
+function realpathOrUndefined(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

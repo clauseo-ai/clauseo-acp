@@ -1,0 +1,3 @@
+# oxlint skips what git ignores, and git ignores ui/app/components (made by `pnpm -C ui install`, see
+# scripts/components-link.mjs). This un-ignores it for oxlint only: git does not read this file.
+!/components
