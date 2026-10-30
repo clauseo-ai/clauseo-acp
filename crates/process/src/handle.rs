@@ -2,7 +2,7 @@
 
 use std::future::Future;
 use std::io;
-use std::pin::pin;
+use std::pin::{Pin, pin};
 use std::process::ExitStatus;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,6 +21,8 @@ const STDIN_GRACE: Duration = Duration::from_secs(2);
 /// How long shutdown waits after SIGTERM, before SIGKILL.
 #[cfg(unix)]
 const TERM_GRACE: Duration = Duration::from_secs(3);
+/// How long shutdown waits for the exit after the kill, before it reports the agent unresponsive.
+const KILL_GRACE: Duration = Duration::from_secs(2);
 
 /// An agent's process and its tree. Dropping it kills the tree at once, without waiting.
 #[derive(Debug)]
@@ -64,36 +66,49 @@ impl Handle {
     }
 
     /// Stops the agent by the ladder: close its stdin and wait 2 s, then (Unix) SIGTERM to its
-    /// group and wait 3 s, then SIGKILL to the group, or on Windows end its job. Whichever way it
-    /// exits, what is left of its tree is killed. The outcome names the step that ended it.
+    /// group and wait 3 s, then SIGKILL to the group, or on Windows end its job, and wait 2 s
+    /// more for the exit. Whichever way it exits, what is left of its tree is killed. The outcome
+    /// names the step that ended it, or says the agent never exited.
+    ///
+    /// Keep reading the agent's stdout, or drop it, while this runs: an agent blocked writing to
+    /// a full stdout pipe never sees its stdin close, and costs the whole 2 s and the SIGTERM.
     pub async fn shutdown<T: Timer>(mut self, timer: &T) -> ShutdownOutcome {
         self.stdin.close();
-        let mut exit = pin!(self.child.status());
-        if let Some(status) = within(exit.as_mut(), timer.after(STDIN_GRACE)).await {
-            return ShutdownOutcome::StdinClosed(self.finish(&status));
+        let exit = pin!(self.child.status());
+        let ended = ladder(exit, timer, |step| self.step(step)).await;
+        match ended {
+            Ended::StdinClosed(status) => ShutdownOutcome::StdinClosed(self.finish(&status)),
+            #[cfg(unix)]
+            Ended::Terminated(status) => ShutdownOutcome::Terminated(self.finish(&status)),
+            Ended::Killed(status) => ShutdownOutcome::Killed(self.finish(&status)),
+            Ended::Unresponsive => ShutdownOutcome::Unresponsive(self.report(None, None)),
         }
-        #[cfg(unix)]
-        {
-            self.tree.terminate();
-            if let Some(status) = within(exit.as_mut(), timer.after(TERM_GRACE)).await {
-                return ShutdownOutcome::Terminated(self.finish(&status));
+    }
+
+    /// Takes one escalation step of the ladder.
+    fn step(&mut self, step: Step) {
+        match step {
+            #[cfg(unix)]
+            Step::Terminate => self.tree.terminate(),
+            Step::Kill => {
+                self.kill_tree();
+                // The agent's own pid too, in case it left its group.
+                drop(self.child.kill());
             }
         }
-        self.kill_tree();
-        // The agent's own pid too, in case it left its group.
-        drop(self.child.kill());
-        let status = exit.await;
-        ShutdownOutcome::Killed(self.finish(&status))
     }
 
     /// Kills what is left of the tree once the agent has exited, and reports how it exited.
     fn finish(&mut self, status: &io::Result<ExitStatus>) -> ExitReport {
         self.kill_tree();
-        let (code, signal) = match status {
-            Ok(status) => (status.code(), signal(*status)),
+        match status {
+            Ok(status) => self.report(status.code(), signal(*status)),
             // Waiting on a child this process started does not fail in practice.
-            Err(_) => (None, None),
-        };
+            Err(_) => self.report(None, None),
+        }
+    }
+
+    fn report(&self, code: Option<i32>, signal: Option<i32>) -> ExitReport {
         ExitReport {
             code,
             signal,
@@ -112,6 +127,50 @@ impl Handle {
 impl Drop for Handle {
     fn drop(&mut self) {
         self.kill_tree();
+    }
+}
+
+/// An escalation step of the ladder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Step {
+    /// SIGTERM to the group.
+    #[cfg(unix)]
+    Terminate,
+    /// SIGKILL to the group and the agent, or end the job.
+    Kill,
+}
+
+/// Where the ladder ended, with the exit status when one came.
+#[derive(Debug)]
+enum Ended<S> {
+    StdinClosed(S),
+    #[cfg(unix)]
+    Terminated(S),
+    Killed(S),
+    Unresponsive,
+}
+
+/// The ladder's waits, once stdin is closed: `exit` against each grace period, with `act`
+/// taking the step that follows a wait that ran out.
+async fn ladder<S, T: Timer>(
+    mut exit: Pin<&mut impl Future<Output = S>>,
+    timer: &T,
+    mut act: impl FnMut(Step),
+) -> Ended<S> {
+    if let Some(status) = within(exit.as_mut(), timer.after(STDIN_GRACE)).await {
+        return Ended::StdinClosed(status);
+    }
+    #[cfg(unix)]
+    {
+        act(Step::Terminate);
+        if let Some(status) = within(exit.as_mut(), timer.after(TERM_GRACE)).await {
+            return Ended::Terminated(status);
+        }
+    }
+    act(Step::Kill);
+    match within(exit, timer.after(KILL_GRACE)).await {
+        Some(status) => Ended::Killed(status),
+        None => Ended::Unresponsive,
     }
 }
 
@@ -188,7 +247,8 @@ impl ExitReport {
     }
 }
 
-/// The step of the shutdown ladder that ended the agent.
+/// The step of the shutdown ladder that ended the agent. Not `#[non_exhaustive]`: the ladder's
+/// steps are fixed, and a new one should make every match on it fail to build.
 #[derive(Debug, Clone)]
 pub enum ShutdownOutcome {
     /// It exited within 2 s of its stdin closing.
@@ -197,6 +257,10 @@ pub enum ShutdownOutcome {
     Terminated(ExitReport),
     /// It was killed: SIGKILL on Unix, its job ended on Windows.
     Killed(ExitReport),
+    /// It did not exit within 2 s of its kill, so the OS still holds it (uninterruptible I/O,
+    /// such as a dead network share). The report has no code and no signal. Its tree was sent
+    /// its kill; it is reaped in the background once it does exit.
+    Unresponsive(ExitReport),
 }
 
 impl ShutdownOutcome {
@@ -205,7 +269,11 @@ impl ShutdownOutcome {
         match self {
             ShutdownOutcome::StdinClosed(report)
             | ShutdownOutcome::Terminated(report)
-            | ShutdownOutcome::Killed(report) => report,
+            | ShutdownOutcome::Killed(report)
+            | ShutdownOutcome::Unresponsive(report) => report,
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

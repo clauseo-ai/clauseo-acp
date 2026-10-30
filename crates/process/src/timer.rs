@@ -23,10 +23,10 @@ impl Timer for AsyncIoTimer {
     }
 }
 
-#[cfg(feature = "test-support")]
+#[cfg(any(test, feature = "test-support"))]
 pub use manual::ManualTimer;
 
-#[cfg(feature = "test-support")]
+#[cfg(any(test, feature = "test-support"))]
 mod manual {
     use std::collections::VecDeque;
     use std::future::Future;

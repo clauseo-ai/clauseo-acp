@@ -119,6 +119,8 @@ fn sigterm_ignoring_agent_is_killed() {
         assert!(timer.fire());
         assert_eq!(timer.next_armed().await, Duration::from_secs(3));
         assert!(timer.fire());
+        // The wait for the exit after SIGKILL, which the exit beats.
+        assert_eq!(timer.next_armed().await, Duration::from_secs(2));
     };
     let (outcome, (), pumped) = block_on(async { join!(handle.shutdown(&timer), script, pumped) });
     let ShutdownOutcome::Killed(report) = outcome else {
@@ -131,6 +133,7 @@ fn sigterm_ignoring_agent_is_killed() {
     assert_eq!(report.code(), None);
     pumped.unwrap();
     assert_eq!(timer.fired(), 2);
+    assert_eq!(timer.armed(), 3);
 }
 
 #[cfg(windows)]
@@ -149,17 +152,20 @@ fn ignore_stdin_close_terminates_job() {
         lines.until("fake_agent: stdin closed, holding").await;
         assert_eq!(timer.next_armed().await, Duration::from_secs(2));
         assert!(timer.fire());
+        // No SIGTERM step, so no 3 s wait: the next is the 2 s wait for the exit after the job
+        // ends, which the exit beats.
+        assert_eq!(timer.next_armed().await, Duration::from_secs(2));
     };
     let (outcome, (), pumped) = block_on(async { join!(handle.shutdown(&timer), script, pumped) });
     let ShutdownOutcome::Killed(report) = outcome else {
         panic!("expected Killed, got {outcome:?}");
     };
-    // `TerminateJobObject`'s exit code; Windows has no SIGTERM step, so no 3 s wait.
+    // `TerminateJobObject`'s exit code.
     assert_eq!(report.code(), Some(1));
     assert_eq!(report.signal(), None);
     pumped.unwrap();
     assert_eq!(timer.fired(), 1);
-    assert_eq!(timer.armed(), 1);
+    assert_eq!(timer.armed(), 2);
 }
 
 #[test]
