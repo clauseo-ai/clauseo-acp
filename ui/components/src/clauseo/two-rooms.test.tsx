@@ -2,7 +2,7 @@
 // Two rooms on one page, under StrictMode, so every effect runs, cleans up and runs again. Each room, built from the
 // room's parts inside its own RoomScopeProvider, keeps its own ids, its own hand and its own accept: a press in one
 // never reaches the other, and one room leaving the page leaves the other working.
-import { act, StrictMode, useEffect, useState, type ReactNode } from "react";
+import { act, StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { TooltipProvider } from "../ui/tooltip.tsx";
@@ -15,7 +15,6 @@ import type { AcceptState } from "./logic.ts";
 import type { MatterData } from "./matter.ts";
 import { MatterContext } from "./matter-context.ts";
 import { PapersWall } from "./paper-tile.tsx";
-import { useRoom } from "./room-scope.ts";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -83,39 +82,27 @@ const DRAFT = {
   label: "Prepared",
 };
 
-/** The room's window: the element its scope finds as "window". */
-function Window({ children }: { children: ReactNode }) {
-  const { nodes } = useRoom();
-  return (
-    <div className="room-window" ref={nodes.slot("window")}>
-      {children}
-    </div>
-  );
-}
-
 function Room() {
   const [accept, setAccept] = useState<AcceptState>("pending");
   const cite = MATTER.cites["acme"];
   return (
-    <RoomScopeProvider>
+    <RoomScopeProvider className="room-window">
       <MatterContext value={MATTER}>
-        <Window>
-          <PapersWall papers={MATTER.papers} draft={DRAFT} onTurn={() => {}} />
-          {cite !== undefined && <Citations cites={[{ id: "acme", cite }]} />}
-          <AnswerBlocks
-            blocks={[
-              { kind: "lead", text: "The bank had notice [[p:notice|PB 1]], as [[c:acme]] holds." },
-            ]}
-            count="1"
-          />
-          <Accept
-            state={accept}
-            words={ACCEPT_WORDS}
-            onAccept={() => setAccept("accepted")}
-            onUndo={() => setAccept("pending")}
-          />
-          <ExcerptCard />
-        </Window>
+        <PapersWall papers={MATTER.papers} draft={DRAFT} onTurn={() => {}} />
+        {cite !== undefined && <Citations cites={[{ id: "acme", cite }]} />}
+        <AnswerBlocks
+          blocks={[
+            { kind: "lead", text: "The bank had notice [[p:notice|PB 1]], as [[c:acme]] holds." },
+          ]}
+          count="1"
+        />
+        <Accept
+          state={accept}
+          words={ACCEPT_WORDS}
+          onAccept={() => setAccept("accepted")}
+          onUndo={() => setAccept("pending")}
+        />
+        <ExcerptCard />
       </MatterContext>
     </RoomScopeProvider>
   );

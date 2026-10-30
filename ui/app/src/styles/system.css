@@ -1,9 +1,10 @@
 /* The design system's stylesheet, shared by every page's entry: Tailwind's preflight and utilities, without its
    theme, so only Clauseo's tokens (ui/components' tokens.css) exist as classes. The utilities are built from the
    classes in ui/components, which sits outside this package, so it is named as a source; its tests are not. Each
-   entry that imports this adds its own sources. No part's stylesheet is here: a screen imports the sheets of the
-   parts it shows (ui/components' clauseo/*.css), and the parts gallery imports clauseo/parts.css, which gathers
-   them all. */
+   entry that imports this adds its own sources. No part's stylesheet is here. A screen imports the sheets of the
+   parts it shows (ui/components' clauseo/*.css) with @import in ui/app's index.css, after system.css and in
+   clauseo/parts.css's order, so Tailwind compiles them with the tokens; imported from JavaScript instead, a sheet
+   fails with "unknown utility class". The parts gallery imports clauseo/parts.css, which gathers them all. */
 @layer theme, base, components, utilities;
 @import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
