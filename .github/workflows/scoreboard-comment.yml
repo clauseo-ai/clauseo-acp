@@ -5,8 +5,8 @@
 #
 # - workflow_run runs the copy of this file on the default branch, with a token that can comment,
 #   also for a fork's pull request. So it never checks out or runs the pull request's code: the
-#   checkout is the default branch, sparse, and holds only the script, its inputs and Node's
-#   version. Every artifact is untrusted data, written by the pull request's code: comment.ts caps
+#   checkout is the default branch, sparse, and holds only the script, its inputs, Node's
+#   version and ui/e2e/package.json (`"type": "module"`, so Node reads the files as ES modules). Every artifact is untrusted data, written by the pull request's code: comment.ts caps
 #   its size, parses it as JSON, checks every field and runs nothing from it.
 # - The pull request comes from the GitHub API, never from an artifact: workflow_run.pull_requests
 #   is empty for a fork, so the script also asks for the open pull requests from the run's head
@@ -31,7 +31,7 @@ on:
 permissions: {}
 
 # One run at a time per pull request head, so two runs that end together cannot both create a
-# comment. A later run waits; it reads everything again, so none is cancelled.
+# comment. A later run waits; a newer one replaces a waiting one, and each reads everything again.
 concurrency:
   group: scoreboard-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
@@ -58,6 +58,7 @@ jobs:
           sparse-checkout: |
             /budgets.toml
             /ui/package.json
+            /ui/e2e/package.json
             /ui/e2e/scoreboard/
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
