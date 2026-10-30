@@ -216,6 +216,8 @@ fn every_fixed_key_types_and_the_kinds_agree() {
         json!("compact"),
         json!("en"),
     ];
+    // One sample per row, so a new row cannot go unchecked.
+    assert_eq!(samples.len(), KEYS.len());
     for ((key, kind), sample) in KEYS.iter().zip(samples) {
         assert!(one(key, sample).is_ok(), "{key}");
         assert_eq!(kind_of(key), Some(*kind), "{key}");
