@@ -6,7 +6,8 @@ use std::ffi::OsString;
 use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use clauseo_process::{
     Error, LaunchSpec, Launched, Launcher, PassthroughLauncher, SpawnOptions, StderrPump,
@@ -14,14 +15,19 @@ use clauseo_process::{
 use futures::StreamExt;
 use futures::channel::mpsc;
 
-/// This run's folder under the temp folder: the agent's working directory, removed when the run
-/// ends. Nextest runs each test in its own process.
+/// Numbers the run folders of one process, so tests that share it (`cargo test`) get one each.
+static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
+
+/// This test's folder under the temp folder: the agent's working directory, removed when the
+/// test ends. Named by the process and a counter, so it is the test's own under nextest (one
+/// process per test) and under `cargo test` (one process for all).
 pub(crate) struct RunDir(PathBuf);
 
 impl RunDir {
     pub(crate) fn new() -> Self {
+        let n = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
         let dir =
-            std::env::temp_dir().join(format!("clauseo-process-pipes-{}", std::process::id()));
+            std::env::temp_dir().join(format!("clauseo-process-pipes-{}-{n}", std::process::id()));
         crate::write::create_dir_all(&dir).expect("create the run folder");
         Self(dir)
     }
@@ -37,11 +43,31 @@ impl Drop for RunDir {
     }
 }
 
+/// Every launch holds it, so a test that changes what a child inherits (SIGTERM ignored) keeps
+/// other launches out meanwhile, under `cargo test` where the pipe tests share one process.
+static LAUNCH: Mutex<()> = Mutex::new(());
+
+/// The launch lock, for a test that changes what a child inherits around its own launch.
+pub(crate) fn launch_lock() -> MutexGuard<'static, ()> {
+    LAUNCH.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// `fake_agent --scenario <scenario>`, started in `dir` the way `host` will start an agent:
 /// through an `Arc<dyn Launcher>`.
 pub(crate) fn launch(scenario: &str, dir: &RunDir) -> Result<Launched, Error> {
-    let bin = clauseo_fake_agent::bin_path().expect("fake_agent binary");
-    launch_program(bin, &["--scenario", scenario], dir)
+    launch_locked(&launch_lock(), scenario, dir)
+}
+
+/// As [`launch`], under the launch lock the caller holds.
+pub(crate) fn launch_locked(
+    _lock: &MutexGuard<'static, ()>,
+    scenario: &str,
+    dir: &RunDir,
+) -> Result<Launched, Error> {
+    let bin = clauseo_fake_agent::bin_path().expect(
+        "fake_agent binary; `-p clauseo-process` does not build it: run `cargo build -p clauseo-fake_agent` first",
+    );
+    start(bin, &["--scenario", scenario], dir)
 }
 
 /// `program` with `args`, started in `dir`.
@@ -50,6 +76,12 @@ pub(crate) fn launch_program(
     args: &[&str],
     dir: &RunDir,
 ) -> Result<Launched, Error> {
+    let _lock = launch_lock();
+    start(program, args, dir)
+}
+
+/// Starts `program` with `args` in `dir`, under the launch lock the caller holds.
+fn start(program: PathBuf, args: &[&str], dir: &RunDir) -> Result<Launched, Error> {
     let args = args.iter().map(OsString::from).collect();
     let spec = LaunchSpec::new(program, args, BTreeMap::new(), dir.path().to_owned())?;
     let launcher: Arc<dyn Launcher> = Arc::new(PassthroughLauncher::new(SpawnOptions::new()));
