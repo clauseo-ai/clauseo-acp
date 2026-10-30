@@ -90,8 +90,8 @@ pub enum Anomaly {
         /// The event's kind.
         event: &'static str,
     },
-    /// An event this version does not fold yet (queue and steer events, the restart and idle-stop
-    /// detach reasons). It advanced `seq` and changed nothing else.
+    /// An event this version does not fold yet (`QueuedPromptEdited`, `SteerResolved`, the
+    /// restart and idle-stop detach reasons). It advanced `seq` and changed nothing else.
     NotYetFolded {
         /// The event's kind.
         event: &'static str,

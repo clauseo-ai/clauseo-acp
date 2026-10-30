@@ -95,8 +95,8 @@ pub(super) fn user_message(
 /// A turn waits. Behind another thread's writer it gives `Queued { behind }`, also as the turn's
 /// second `TurnQueued`, and when no turn runs it becomes the thread's last turn, so its
 /// `TurnEnded` before it starts (a cancel) settles the status. Behind its own thread it leaves
-/// the status while a turn runs, and when none runs it settles (to `Idle` unless the lawyer is
-/// asked): the queue is held, as after the host's start-up repair (R11).
+/// the status while a turn runs; when none runs, it settles (to `Idle` unless the lawyer is
+/// asked).
 pub(super) fn turn_queued(state: &mut ThreadState, event: &TurnQueued, out: &mut Applied) {
     let behind = event.behind();
     if behind != state.thread {

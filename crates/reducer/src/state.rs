@@ -106,7 +106,8 @@ pub struct ThreadState {
     pub(crate) header: Option<HeaderEntry>,
     /// Every entry but the header, by `order`.
     pub(crate) entries: BTreeMap<Seq, ViewEntry>,
-    /// The turn the last `UserMessage` or `TurnStarted` named.
+    /// The turn the last `UserMessage`, `TurnStarted` or writer-wait `TurnQueued` (behind
+    /// another thread) named.
     pub(crate) turn: Option<TurnId>,
     /// The turn that started and has not ended.
     pub(crate) running: Option<TurnId>,
