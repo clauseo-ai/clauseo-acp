@@ -268,4 +268,70 @@ fn keep_last_cuts_at_a_char_and_after_a_newline() {
     assert_eq!(keep_last("ab\ncd", 3), "cd");
     assert_eq!(keep_last("éé", 3), "é");
     assert_eq!(keep_last("a\nbcdef", 6), "bcdef");
+    // A cut that lands on a line start keeps that line.
+    assert_eq!(keep_last("ab\ncd\n", 3), "cd\n");
+    // A cut inside the last line, which ends in `\n`, keeps that line's end, not nothing.
+    assert_eq!(keep_last("ab\ncdef\n", 3), "ef\n");
+}
+
+#[test]
+fn a_long_last_line_ending_in_a_newline_is_kept() {
+    // One big JSON error, then the exit: the tail is its last 4096 bytes, not empty.
+    let stderr = format!("starting\n{{\"error\":\"{}\"}}\n", "z".repeat(5000));
+    let kept = tail(&ring_with(stderr.as_bytes()), &no_rules());
+    assert_eq!(kept.len(), TAIL);
+    assert!(stderr.ends_with(&kept));
+    assert!(kept.ends_with("zz\"}\n"), "{kept:?}");
+    // 4095 bytes and its `\n` fit exactly: the whole line comes, nothing before it.
+    let line = "y".repeat(TAIL - 1) + "\n";
+    let stderr = format!("starting\n{line}");
+    assert_eq!(tail(&ring_with(stderr.as_bytes()), &no_rules()), line);
+}
+
+#[test]
+fn a_cut_on_a_line_start_keeps_that_line() {
+    // 200 lines of 32 bytes: 4096 bytes hold exactly the last 128.
+    let mut stderr = String::new();
+    for n in 1..=200 {
+        writeln!(stderr, "line {n:05} of stderr, 32 bytes.").unwrap();
+    }
+    assert_eq!(stderr.len(), 200 * 32);
+    let tail = tail(&ring_with(stderr.as_bytes()), &no_rules());
+    assert_eq!(tail.len(), 128 * 32);
+    assert!(tail.starts_with("line 00073 "), "{tail:?}");
+}
+
+#[test]
+fn a_window_that_opens_on_a_line_start_keeps_its_first_line() {
+    // The last 16 KiB start on a line start, and redact to exactly 4096 bytes, so the tail is
+    // the whole redacted window, its first line included.
+    let secret = "v".repeat(58);
+    let rules = Redactor::new(None, &env(&[("AGENT_API_KEY", &secret)]));
+    let before = "p".repeat(999) + "\n";
+    let mut window = String::from("keep me\n");
+    for _ in 0..256 {
+        window.push_str(&secret);
+        window.push('\n');
+    }
+    window.push_str(&"f".repeat(1271));
+    window.push('\n');
+    assert_eq!(window.len(), WINDOW);
+    let stderr = before + &window;
+    let tail = tail(&ring_with(stderr.as_bytes()), &rules);
+    assert_eq!(tail.len(), TAIL);
+    assert!(tail.starts_with("keep me\n[redacted]\n"), "{tail:?}");
+}
+
+#[test]
+fn byte_before_last_reads_across_the_wrap() {
+    let mut ring = Ring::new();
+    ring.push(b"ab\ncd");
+    assert_eq!(ring.byte_before_last(2), Some(b'\n'));
+    assert_eq!(ring.byte_before_last(6), None);
+    ring.push(&vec![b'x'; RING - 3]);
+    ring.push(b"\nyz");
+    // The ring has wrapped; the last three bytes are "\nyz" and before them an 'x'.
+    assert_eq!(ring.byte_before_last(2), Some(b'\n'));
+    assert_eq!(ring.byte_before_last(3), Some(b'x'));
+    assert_eq!(ring.byte_before_last(RING), None);
 }
