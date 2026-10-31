@@ -68,7 +68,10 @@ limit = 800.0
 unit = "ms"
 gate = "release"
 measured_by = "marks across Rust and JS"
-status = "unmeasured"
+status = "measured"
+# The scoreboard's first CI run, e2e-windows 41214678308 (R13).
+measured = 1421.0
+measured_on = "windows-x86_64-gha"
 source = "synthesis §4; doc 15"
 
 [[budget]]
@@ -78,7 +81,10 @@ limit = 60.0
 unit = "MB"
 gate = "release"
 measured_by = "process-group accounting against a blank control"
-status = "unmeasured"
+status = "measured"
+# The scoreboard's first CI run, e2e-windows 41214678308 (R13).
+measured = 2.7
+measured_on = "windows-x86_64-gha"
 source = "synthesis §4; doc 15"
 
 [[budget]]
@@ -89,7 +95,10 @@ limit = 150.0
 unit = "MB"
 gate = "alert"
 measured_by = "process-group accounting"
-status = "unmeasured"
+status = "measured"
+# The scoreboard's first CI run, e2e-windows 41214678308 (R13).
+measured = 71.4
+measured_on = "windows-x86_64-gha"
 source = "synthesis §4; doc 15"
 
 [[budget]]
@@ -142,7 +151,11 @@ limit = 32.0
 unit = "ms"
 gate = "alert"
 measured_by = "Event Timing"
-status = "unmeasured"
+status = "measured"
+# Upper bound: a keystroke Event Timing does not report (under 16 ms) counts as 16 ms.
+# The scoreboard's first CI run, e2e-windows 41214678308 (R13).
+measured = 16.0
+measured_on = "windows-x86_64-gha"
 source = "synthesis §4; doc 15"
 
 [[budget]]
@@ -163,7 +176,10 @@ limit = 4.0
 unit = "ms"
 gate = "alert"
 measured_by = "Event Timing"
-status = "unmeasured"
+status = "measured"
+# The scoreboard's first CI run, e2e-windows 41214678308 (R13).
+measured = 1.1
+measured_on = "windows-x86_64-gha"
 source = "synthesis §4; doc 15"
 
 [[budget]]
@@ -184,7 +200,10 @@ limit = 8.0
 unit = "count"
 gate = "alert"
 measured_by = "speed scoreboard (ui/e2e/scoreboard), Long Animation Frames"
-status = "unmeasured"
+status = "measured"
+# The scoreboard's first CI run, e2e-windows 41214678308 (R13).
+measured = 0.0
+measured_on = "windows-x86_64-gha"
 source = "G1b (#120); synthesis §4; doc 14; doc 15"
 
 # The speed scoreboard's rows (R13): the fixed `scoreboard` session played into the app, medians
@@ -199,7 +218,10 @@ limit = 150.0
 unit = "ms"
 gate = "alert"
 measured_by = "speed scoreboard (ui/e2e/scoreboard)"
-status = "unmeasured"
+status = "measured"
+# The scoreboard's first CI run, e2e-windows 41214678308 (R13).
+measured = 401.9
+measured_on = "windows-x86_64-gha"
 source = "build-order stage A item 8; replan decision 6; R13"
 
 [[budget]]
@@ -210,7 +232,10 @@ limit = 17.0
 unit = "ms"
 gate = "alert"
 measured_by = "speed scoreboard (ui/e2e/scoreboard)"
-status = "unmeasured"
+status = "measured"
+# The scoreboard's first CI run, e2e-windows 41214678308 (R13).
+measured = 23.4
+measured_on = "windows-x86_64-gha"
 source = "build-order stage A item 8; replan decision 6; R13"
 
 [[budget]]
@@ -232,7 +257,10 @@ limit = 50.0
 unit = "ms"
 gate = "alert"
 measured_by = "speed scoreboard (ui/e2e/scoreboard)"
-status = "unmeasured"
+status = "measured"
+# The scoreboard's first CI run, e2e-windows 41214678308 (R13).
+measured = 31.2
+measured_on = "windows-x86_64-gha"
 source = "build-order stage A item 8; replan decision 6; R13"
 
 [[budget]]
@@ -254,7 +282,10 @@ limit = 100.0
 unit = "count"
 gate = "alert"
 measured_by = "speed scoreboard (ui/e2e/scoreboard)"
-status = "unmeasured"
+status = "measured"
+# The scoreboard's first CI run, e2e-windows 41214678308 (R13).
+measured = 0.0
+measured_on = "windows-x86_64-gha"
 source = "G1b (#120); research 15 W6; R13"
 
 [[budget]]
@@ -265,7 +296,10 @@ limit = 300.0
 unit = "MB"
 gate = "alert"
 measured_by = "speed scoreboard (ui/e2e/scoreboard)"
-status = "unmeasured"
+status = "measured"
+# The scoreboard's first CI run, e2e-windows 41214678308 (R13).
+measured = 105.1
+measured_on = "windows-x86_64-gha"
 source = "build-order stage A item 8; replan decision 6; R13"
 
 [[budget]]
