@@ -46,8 +46,8 @@ export function Overlays() {
   return (
     <Section title="Overlays">
       <State name="Tooltip">
-        <Tooltip content="History">
-          <Button kind="quiet" shape="icon" aria-label="History">
+        <Tooltip content="Versions">
+          <Button kind="quiet" shape="icon" aria-label="Versions">
             <IconHistory size={16} />
           </Button>
         </Tooltip>
@@ -115,7 +115,7 @@ export function Overlays() {
             title={w.ui("Restore the {time} version of the petition?", {
               time: w.clock("3:58 pm"),
             })}
-            body={w.ui("The current version stays in History.")}
+            body={w.ui("The current version stays in Versions.")}
             actions={
               <>
                 <DialogClose render={<Button kind="quiet" />}>{w.ui("Cancel")}</DialogClose>
@@ -135,7 +135,7 @@ export function Overlays() {
             title={w.say(w.ui("Lease.docx changed after Clauseo's edit."))}
             body={w.say(
               w.ui(
-                "Undo anyway puts back the version from before Clauseo's edit. The changes made since stay in History.",
+                "Undo anyway puts back the version from before Clauseo's edit. The changes made since stay in Versions.",
               ),
             )}
             actions={

@@ -2,13 +2,14 @@ import { Popover } from "@base-ui/react/popover";
 import { floating } from "../ui/recipes.ts";
 import { cn } from "../lib/cn.ts";
 import { useWords } from "../lib/words.ts";
+import { useVersionWords } from "../lib/words-versions.ts";
 import type { HistoryRow } from "./matter.ts";
 import { Say } from "./say.tsx";
 
-/** History: every step kept, with its time, in one place. A 380 px card under the History button, its right edge on
- * the History and Undo pair's, 8 px below and always inside the window. Rows put the actor first, newest first, each
+/** Versions: every step kept, with its time, in one place. A 380 px card under the Versions button, its right edge on
+ * the Versions and Undo pair's, 8 px below and always inside the window. Rows put the actor first, newest first, each
  * with its time at the right; the foot says "Every change is kept." It drops in from 4 px above and 0.97 scale over
- * 160 ms and leaves in 90; Escape, a press outside or a second press closes it, and focus returns to History. */
+ * 160 ms and leaves in 90; Escape, a press outside or a second press closes it, and focus returns to Versions. */
 export function HistoryPanel({
   rows,
   anchor,
@@ -16,7 +17,7 @@ export function HistoryPanel({
   rows: readonly HistoryRow[];
   anchor: () => Element | null;
 }) {
-  const w = useWords();
+  const vw = useVersionWords();
   return (
     <Popover.Portal>
       <Popover.Positioner
@@ -30,7 +31,7 @@ export function HistoryPanel({
       >
         <Popover.Popup
           className={cn(floating({ width: "history" }), "shadow-e3 history-card")}
-          aria-label={w.t("History")}
+          aria-label={vw.v("Versions")}
         >
           <HistoryRows rows={rows} />
         </Popover.Popup>
@@ -39,7 +40,7 @@ export function HistoryPanel({
   );
 }
 
-/** What History holds: the rows, newest first, and the foot. */
+/** What Versions holds: the rows, newest first, and the foot. */
 function HistoryRows({ rows }: { rows: readonly HistoryRow[] }) {
   const w = useWords();
   return (

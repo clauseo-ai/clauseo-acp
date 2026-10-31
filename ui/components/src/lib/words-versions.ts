@@ -15,7 +15,7 @@ const HI = {
   "1 version": "1 संस्करण",
   Now: "अभी",
   Today: "आज",
-  "Version history is kept on this computer.": "संस्करणों का इतिहास इसी कंप्यूटर पर रहता है।",
+  "The matter's versions are kept on this computer.": "मामले के संस्करण इसी कंप्यूटर पर रखे जाते हैं।",
   // the timeline, with hundreds of versions
   "Show versions by": "किसके संस्करण दिखाएँ",
   All: "सभी",

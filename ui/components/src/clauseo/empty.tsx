@@ -57,7 +57,7 @@ export function SearchEmpty({ query }: { query: string }) {
           <Say>{w.th("Nothing in this matter matches '{q}'.", { q: query })}</Say>
         </p>
         <p className="search-empty-body">
-          <Say>{w.th("Search covers the papers, the answers and History.")}</Say>
+          <Say>{w.th("Search covers the papers, the answers and Versions.")}</Say>
         </p>
       </div>
     </div>

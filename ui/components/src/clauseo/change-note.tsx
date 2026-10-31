@@ -82,7 +82,7 @@ export function ChangeNote({
             initialFocus={keep}
             title={w.th("{name} changed after Clauseo's edit.", { name: editedSince })}
             body={w.ui(
-              "Undo anyway puts back the version from before Clauseo's edit. The changes made since stay in History.",
+              "Undo anyway puts back the version from before Clauseo's edit. The changes made since stay in Versions.",
             )}
             actions={
               <>

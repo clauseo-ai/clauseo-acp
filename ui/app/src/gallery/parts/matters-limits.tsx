@@ -102,7 +102,7 @@ export function LimitSamples() {
               Open in Word
             </Button>
           }
-          note="Accepted changes stay in the matter's history."
+          note="Accepted changes stay in the matter's versions."
           noteFirst
         />
       </Sample>

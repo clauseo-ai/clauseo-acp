@@ -8,7 +8,7 @@ import { t, type Key } from "./words.ts";
 const HI = {
   // the "N more" fold at the wall's foot, once it's open: it folds the rest of the citations away again
   "Show fewer": "कम दिखाएँ",
-  // the toolbar's name for assistive technology: search, History and Undo
+  // the toolbar's name for assistive technology: search, Versions and Undo
   "Tools for this matter": "इस मामले के टूल",
   // the room's line, one line in every room, saying what the Safe workspace does and promising nothing.
   // Inside a matter it names this matter's folder; where no matter is open yet, each matter's.

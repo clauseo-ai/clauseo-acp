@@ -19,7 +19,7 @@ export const ICON_NAMES = [
   { component: "IconBackToAnswer", source: "back", meaning: "Back to the answer" },
   { component: "IconMatters", source: "panel", meaning: "Matters" },
   { component: "IconSearch", source: "search", meaning: "Search this matter" },
-  { component: "IconHistory", source: "history", meaning: "History" },
+  { component: "IconHistory", source: "history", meaning: "Versions" },
   { component: "IconUndo", source: "undo", meaning: "Undo" },
   { component: "IconNewMatter", source: "plus", meaning: "New matter" },
   { component: "IconAddPapers", source: "addPaper", meaning: "Add papers" },

@@ -1,4 +1,4 @@
-// Where the history lives. The Versions panel's foot says it in one line, "Version history is kept on this
+// Where the versions live. The Versions panel's foot says it in one line, "The matter's versions are kept on this
 // computer.", and a press on it says the rest: in Clauseo's own folder, as the computer writes it, never in OneDrive
 // or any folder that syncs; the matter's own folder syncs as it always has; another computer starts afresh; how much
 // room it takes, kept for good, with the way to keep 90 days instead in Settings.
@@ -21,7 +21,7 @@ export function VersionWhere({
   onShow,
 }: {
   platform: Platform;
-  /** Clauseo's own folder for the matter's history, as the computer writes it. */
+  /** Clauseo's own folder for the matter's versions, as the computer writes it. */
   folder: string;
   /** How much room this matter's versions take: "412 MB". */
   size: string;
@@ -38,7 +38,7 @@ export function VersionWhere({
       <BasePopover.Trigger className="ver-foot">
         <IconSafeWorkspace size={14} className="ver-foot-icon" />
         <span>
-          <Say>{w.v("Version history is kept on this computer.")}</Say>
+          <Say>{w.v("The matter's versions are kept on this computer.")}</Say>
         </span>
       </BasePopover.Trigger>
       <FloatingCard side="top" width="history" className="ver-where">
