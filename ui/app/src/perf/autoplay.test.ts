@@ -157,7 +157,11 @@ describe("autoplay", () => {
     });
     await autoplay(d);
     expect(finished).toEqual([
-      { run: null, error: 'autoplay, at step "permission": over 120000 ms' },
+      {
+        run: null,
+        error:
+          'autoplay, at step "permission": over 120000 ms; answer text so far 8 characters, stop reason none',
+      },
     ]);
     expect(log).not.toContain("stopStream");
   });
@@ -170,7 +174,11 @@ describe("autoplay", () => {
     });
     await autoplay(d);
     expect(finished).toEqual([
-      { run: null, error: 'autoplay, at step "idle memory": marks_memory failed' },
+      {
+        run: null,
+        error:
+          'autoplay, at step "idle memory": marks_memory failed; answer text so far 0 characters, stop reason none',
+      },
     ]);
   });
 });
