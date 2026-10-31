@@ -7,12 +7,16 @@ use std::task::{Context, Poll};
 
 use clauseo_protocol::{AgentSessionId, ContentBlock, ErrorCode, TextOrBlob, TurnId};
 use futures::channel::mpsc;
-use futures::{AsyncWrite, StreamExt, TryStreamExt};
+use futures::{AsyncRead, AsyncWrite, StreamExt};
 use serde_json::{Value, json};
 
 use super::*;
 
 mod interface;
+mod prompts;
+mod requests;
+mod stdout;
+mod updates;
 
 /// The agent's stdin: each write arrives as one message (the line sink writes a line at once).
 struct Stdin(mpsc::UnboundedSender<Vec<u8>>);
@@ -37,6 +41,36 @@ impl AsyncWrite for Stdin {
     }
 }
 
+/// The agent's stdout: the chunks the test sends, read in order. A chunk that is an error fails
+/// that one read only, as a pipe read interrupted by a signal does, and reading goes on
+/// (`into_async_read` would end the stream at the first error).
+struct Stdout {
+    chunks: mpsc::UnboundedReceiver<io::Result<Vec<u8>>>,
+    /// What is left of the chunk being read.
+    rest: Vec<u8>,
+}
+
+impl AsyncRead for Stdout {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+        while this.rest.is_empty() {
+            match futures::ready!(this.chunks.poll_next_unpin(cx)) {
+                Some(Ok(chunk)) => this.rest = chunk,
+                Some(Err(error)) => return Poll::Ready(Err(error)),
+                None => return Poll::Ready(Ok(0)),
+            }
+        }
+        let count = this.rest.len().min(buf.len());
+        buf[..count].copy_from_slice(&this.rest[..count]);
+        this.rest.drain(..count);
+        Poll::Ready(Ok(count))
+    }
+}
+
 /// The test's side of the agent: what the client wrote, and what to write back.
 struct Agent {
     written: mpsc::UnboundedReceiver<Vec<u8>>,
@@ -48,6 +82,16 @@ impl Agent {
         let line = self.written.next().await.expect("the client closed stdin");
         assert_eq!(line.last(), Some(&b'\n'));
         serde_json::from_slice(&line).unwrap()
+    }
+
+    /// Asserts the client writes nothing more and closes stdin.
+    async fn read_end(&mut self) {
+        if let Some(line) = self.written.next().await {
+            panic!(
+                "expected stdin to close, got {}",
+                String::from_utf8_lossy(&line)
+            );
+        }
     }
 
     fn send(&self, message: &Value) {
@@ -65,6 +109,24 @@ impl Agent {
         let init = self.read().await;
         assert_eq!(init["method"], "initialize");
         self.respond(&init, &json!({"protocolVersion": 1}));
+    }
+
+    /// Answers `initialize` with version 1 and `capabilities` as its `agentCapabilities`.
+    async fn initialize_with(&mut self, capabilities: Value) {
+        let init = self.read().await;
+        assert_eq!(init["method"], "initialize");
+        self.respond(
+            &init,
+            &json!({"protocolVersion": 1, "agentCapabilities": capabilities}),
+        );
+    }
+
+    /// Answers `initialize` with `capabilities`, then `session/new` with session `s-1`.
+    async fn start_with(&mut self, capabilities: Value) {
+        self.initialize_with(capabilities).await;
+        let new = self.read().await;
+        assert_eq!(new["method"], "session/new");
+        self.respond(&new, &json!({"sessionId": "s-1"}));
     }
 
     /// Answers `initialize`, then `session/new` with session `s-1`.
@@ -89,12 +151,44 @@ fn pipes_with(
 ) -> (AcpClient, async_channel::Receiver<AcpEvent>, Driver, Agent) {
     let (written_tx, written) = mpsc::unbounded();
     let (stdout, stdout_rx) = mpsc::unbounded();
-    let (client, events, driver) = connect(Stdin(written_tx), stdout_rx.into_async_read(), options);
+    let stdout_rx = Stdout {
+        chunks: stdout_rx,
+        rest: Vec::new(),
+    };
+    let (client, events, driver) = connect(Stdin(written_tx), stdout_rx, options);
     (client, events, driver, Agent { written, stdout })
 }
 
 fn cwd() -> PathBuf {
     PathBuf::from("/matters/lease")
+}
+
+/// Every event the receiver holds now.
+fn drain(events: &async_channel::Receiver<AcpEvent>) -> Vec<AcpEvent> {
+    std::iter::from_fn(|| events.try_recv().ok()).collect()
+}
+
+fn session() -> AgentSessionId {
+    AgentSessionId::new("s-1").unwrap()
+}
+
+/// A fresh turn id: a fixed v7 uuid with `n` in its last bits.
+fn turn(n: u128) -> TurnId {
+    TurnId::new(uuid::Uuid::from_u128(
+        0x0190_0000_0000_7000_8000_0000_0000_0000 | n,
+    ))
+    .unwrap()
+}
+
+/// `initialize` then `session/new` of session `s-1` in [`cwd`], which [`Agent::start`] answers.
+async fn handshake(client: &AcpClient) {
+    client.initialize().await.unwrap();
+    let start = client.new_session(NewSession {
+        cwd: cwd(),
+        mcp_servers: Vec::new(),
+        meta: None,
+    });
+    assert_eq!(start.await.unwrap().session.as_str(), "s-1");
 }
 
 #[test]

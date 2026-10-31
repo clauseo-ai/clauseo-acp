@@ -1,40 +1,41 @@
 //! How agent updates reach the host: chunk sizes, command hints, grouped config values and a
 //! tool call's raw input and output.
 
-use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole};
 use clauseo_protocol::{
     AvailableCommand, ConfigChoice, ConfigOptionKind, ContentBlock, TextOrBlob,
 };
-use serde_json::{Value, json};
 
-use crate::harness::{drain, handshake, pipes};
+use super::*;
 
 /// Plays the agent sending `updates` after the handshake, and returns the first `count` updates
 /// the host received.
 fn received(updates: &[Value], count: usize) -> Vec<AgentUpdate> {
     let (client, events, driver, mut agent) = pipes();
+    let events_ref = &events;
     let calls = async move {
         handshake(&client).await;
         let mut received = Vec::new();
         while received.len() < count {
-            match events.recv().await.unwrap() {
-                AcpEvent::Update { update, .. } => received.push(update),
-                other => panic!("expected an update, got {other:?}"),
-            }
+            let event = events_ref.recv().await.unwrap();
+            let AcpEvent::Update { update, .. } = event else {
+                panic!("expected an update, got {event:?}");
+            };
+            received.push(update);
         }
-        assert_eq!(drain(&events), []);
         received
     };
     let script = async {
         agent.start().await;
         for update in updates {
-            agent.update(update);
+            agent.update(&json!({"sessionId": "s-1", "update": update}));
         }
         agent.read_end().await;
     };
     let (driver, received, ()) =
         futures::executor::block_on(async { futures::join!(driver, calls, script) });
     assert_eq!(driver, Ok(()));
+    // Nothing else reached the host.
+    assert_eq!(drain(&events), []);
     received
 }
 
@@ -47,13 +48,16 @@ fn answer_chunk(text: &str) -> Value {
 fn chunk_texts(updates: Vec<AgentUpdate>) -> Vec<String> {
     updates
         .into_iter()
-        .map(|update| match update {
-            AgentUpdate::MessageChunk {
+        .map(|update| {
+            let AgentUpdate::MessageChunk {
                 role: MessageRole::Answer,
                 content: ContentBlock::Text { text },
                 ..
-            } => text,
-            other => panic!("expected an answer chunk, got {other:?}"),
+            } = update
+            else {
+                panic!("expected an answer chunk, got {update:?}");
+            };
+            text
         })
         .collect()
 }
