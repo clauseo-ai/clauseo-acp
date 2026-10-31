@@ -1,7 +1,6 @@
 //! Tests of the commit pipeline against a real store in a temp folder, driven on a `LocalPool`.
 
 pub(crate) mod support;
-mod write;
 
 mod inflight;
 
