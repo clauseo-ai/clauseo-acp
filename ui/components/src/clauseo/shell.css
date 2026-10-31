@@ -137,13 +137,13 @@
   .room-tools > .room-plan {
     min-width: var(--size-plan);
   }
-  /* Windows has no corner lights: at full width the lead gives up its place, and the title stands at the window's
-     edge padding, as a Windows title bar's does */
+  /* Windows and Linux have no corner lights: at full width the lead gives up its place, and the title stands at the
+     window's edge padding, as a Windows title bar's does */
   @variant wide {
-    .room-top[data-platform="windows"] .room-lead {
+    .room-top:not([data-platform="mac"]) .room-lead {
       display: none;
     }
-    .room-top[data-platform="windows"] .room-matter {
+    .room-top:not([data-platform="mac"]) .room-matter {
       padding-left: var(--s5);
     }
   }

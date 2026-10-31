@@ -48,9 +48,9 @@
   .room-centre {
     margin-left: var(--s3);
   }
-  /* Windows has no corner lights, so the lead holds Matters alone and is only as wide as it: the plan keeps clear of
+  /* Windows and Linux have no corner lights, so the lead holds Matters alone and is only as wide as it: the plan keeps clear of
        Undo with the caption buttons at the right */
-  .room-top[data-platform="windows"] .room-lead {
+  .room-top:not([data-platform="mac"]) .room-lead {
     width: auto;
     padding-right: var(--s3);
   }

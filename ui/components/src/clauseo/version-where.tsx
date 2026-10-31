@@ -6,6 +6,7 @@ import { Popover as BasePopover } from "@base-ui/react/popover";
 import { Button } from "../ui/button.tsx";
 import { IconSafeWorkspace } from "../icons/icons.tsx";
 import type { Platform } from "../lib/display.ts";
+import { revealKey } from "../lib/words-ui.ts";
 import { useVersionWords } from "../lib/words-versions.ts";
 import { FloatingCard } from "./floating-card.tsx";
 import { Heading } from "./heading.tsx";
@@ -68,9 +69,7 @@ export function VersionWhere({
         </p>
         <div className="ver-where-actions">
           <Button kind="tone" size="small" onClick={onShow}>
-            <span className="deva-nudge">
-              {platform === "mac" ? w.ui("Show in Finder") : w.ui("Show in File Explorer")}
-            </span>
+            <span className="deva-nudge">{w.ui(revealKey(platform))}</span>
           </Button>
           <Button kind="quiet" size="small" render={<a href={settings} />} nativeButton={false}>
             <span className="deva-nudge">{w.v("Keep 90 days instead")}</span>

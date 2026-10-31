@@ -7,12 +7,12 @@ import { useState } from "react";
 import { focusPlane } from "../ui/dialog-start.ts";
 import { dialogPlace, dialogPlane, dialogTitle, scrim } from "../ui/recipes-overlays.ts";
 import { cn } from "../lib/cn.ts";
-import { useDisplay } from "../lib/display.ts";
+import { useDisplay, type Platform } from "../lib/display.ts";
 import { useMatterFormWords } from "../lib/words-matter-form.ts";
 import { NewMatterForm } from "./matter-form.tsx";
 
 /** The folder Clauseo makes for a new matter, as the computer writes it: always in English. */
-const newMatterFolder = (platform: "mac" | "windows", name: string) =>
+const newMatterFolder = (platform: Platform, name: string) =>
   ["Documents", "Clauseo", name].join(platform === "windows" ? "\\" : "/");
 
 export function NewMatterDialog({

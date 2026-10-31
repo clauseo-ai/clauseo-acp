@@ -5,8 +5,8 @@
 import { useEffect, useId } from "react";
 import { Button } from "../ui/button.tsx";
 import { Kbd } from "../ui/kbd.tsx";
+import { useDisplay } from "../lib/display.ts";
 import { IconAccept, IconNewMatter, IconPaperBookPage } from "../icons/icons.tsx";
-import { currentOs } from "../lib/words-ui.ts";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { permissionKey, type PermissionAnswer, type PermissionState } from "./permission-keys.ts";
 import { fromComposer } from "./composer-keys.ts";
@@ -28,7 +28,7 @@ export function PermissionPrompt({
 }) {
   const w = useThreadWords();
   const id = useId();
-  const mac = currentOs() === "mac";
+  const mac = useDisplay().platform === "mac";
   const room = useRoom();
 
   useEffect(() => {

@@ -84,6 +84,8 @@ export function RoomToolbar(p: RoomToolbarProps) {
   const vw = useVersionWords();
   const display = useDisplay();
   const platform = p.platform ?? display.platform;
+  // Windows and Linux: the caption buttons at the top right, and no corner lights
+  const captions = platform !== "mac";
   const room = useRoom();
   const undo = useRef<HTMLButtonElement>(null);
   // Versions opens under the pair, its right edge on the pair's: Undo's own group
@@ -91,7 +93,7 @@ export function RoomToolbar(p: RoomToolbarProps) {
   const writing = p.writing === true;
   return (
     <header
-      className={cn("room-top", platform === "windows" && "mid:pr-0")}
+      className={cn("room-top", captions && "mid:pr-0")}
       data-platform={platform}
       data-tauri-drag-region
     >
@@ -157,18 +159,12 @@ export function RoomToolbar(p: RoomToolbarProps) {
       </div>
       {/* on Windows the caption buttons take the toolbar's last 158 px, so the tools give way a hundred times faster
           than the title, which then never loses the fraction of a pixel that would wrap it */}
-      <div
-        className={cn("room-tools", platform === "windows" && "shrink-100")}
-        data-tauri-drag-region
-      >
+      <div className={cn("room-tools", captions && "shrink-100")} data-tauri-drag-region>
         <Toolbar label={rt(w.lang, "Tools for this matter")} className="room-tools-bar">
           <SearchField
             label={p.searchLabel ?? w.t("Search this matter")}
             place="toolbar"
-            className={cn(
-              "room-search",
-              platform === "windows" && "max-mid:ml-auto max-narrow:ml-0",
-            )}
+            className={cn("room-search", captions && "max-mid:ml-auto max-narrow:ml-0")}
           />
           <Popover.Root
             onOpenChange={(open, details) => {
@@ -212,7 +208,7 @@ export function RoomToolbar(p: RoomToolbarProps) {
         </Toolbar>
         {p.plan !== null && <ToolbarPlan plan={p.plan} />}
       </div>
-      {platform === "windows" && (
+      {captions && (
         // flush with the window's top right: beside the plan on a wide window, on the first row of tools on a narrow
         // one, where the toolbar's own padding is taken back
         <CaptionButtons className="self-start mid:ml-s5 max-mid:order-4 max-mid:-mt-s3 max-mid:-mr-s4" />
