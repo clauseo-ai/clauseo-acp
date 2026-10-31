@@ -13,8 +13,10 @@
 //! # Interface
 //!
 //! At start-up, `host` and `cli` call [`Locations::resolve`] (or [`Locations::under_root`] in
-//! tests and `cli`), then [`Effective::load`] with [`system_policy_sources`], and keep the
-//! [`Effective`] in an `Arc`. It answers [`Effective::settings`], [`Effective::agent`],
+//! tests and `cli`), then [`Effective::load`] with [`system_policy_sources`]. [`Effective`] has
+//! one owner. [`Effective::apply_ui_patch`] takes `&mut self`, so the owner holds a
+//! `Mutex<Effective>` (or the task that serialises settings writes) for the whole call, and
+//! readers go through that owner. It answers [`Effective::settings`], [`Effective::agent`],
 //! [`Effective::default_matters_dir`], [`Effective::data_dir`], [`Effective::locations`],
 //! [`Effective::policy`], [`Effective::is_locked`], [`Effective::warnings`] and
 //! [`Effective::apply_ui_patch`]. Every input is a trait: [`PlatformDirs`], [`Env`], [`Files`]
