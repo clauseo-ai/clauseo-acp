@@ -21,7 +21,7 @@ const FMT_TIMEOUT: Duration = Duration::from_mins(5);
 const BUILD_TIMEOUT: Duration = Duration::from_mins(45);
 
 /// The steps for `scope`, in run order: fmt, clippy, clippy-featureless, deny, shear, typos, taplo,
-/// gitleaks, every static check, the six ui steps, nextest, nextest-specta, doctest. With
+/// gitleaks, every static check, the eight ui steps, nextest, nextest-specta, doctest. With
 /// `Scope::Nothing`, the five package steps (clippy, clippy-featureless, nextest, nextest-specta,
 /// doctest) are skipped; the others never depend on the scope. `ci` picks the CI variants of the
 /// clippy and nextest commands.

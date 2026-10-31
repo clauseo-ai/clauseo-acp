@@ -40,7 +40,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - `crates/settings`: settings, data folders and the policy layer. See `docs/decisions/0009-policy-layer.md`.
 - `crates/store`: the event log, snapshots, blobs and receipts in one SQLite file; format in `docs/decisions/0006-store-format.md`.
 - `ui/app`: the React app, empty for now; `ui/components`: its tokens, icons, words, controls and parts, checked by ui/app's scripts. Tauri APIs only under `ui/app/src/transport/`.
-- `ui/e2e`: Playwright tests of the real app over CDP on Windows, and the speed scoreboard's code. Its typecheck and unit tests run only in `e2e-windows.yml` until #45 lands.
+- `ui/e2e`: Playwright tests of the real app over CDP on Windows, and the speed scoreboard's code. `cargo xtask check` typechecks it and runs its unit tests; it has no lint step yet.
 - `xtask`: checks, build timing, budgets. Builds without any app crate. Frozen: no new checks.
 
 ## Never

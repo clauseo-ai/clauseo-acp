@@ -77,22 +77,26 @@ fn skip_reasons(steps: &[Step]) -> Vec<(&'static str, &'static str)> {
 }
 
 /// The ui step names, in run order, when they run.
-const UI: [&str; 6] = [
+const UI: [&str; 8] = [
     "pnpm-install",
     "tsc",
+    "tsc-e2e",
     "oxlint",
     "oxfmt",
     "vitest",
+    "playwright-unit",
     "vite-build",
 ];
 
 /// The ui step names, in run order, when they are skipped.
-const UI_SKIPPED: [&str; 6] = [
+const UI_SKIPPED: [&str; 8] = [
     "pnpm-install skipped",
     "tsc skipped",
+    "tsc-e2e skipped",
     "oxlint skipped",
     "oxfmt skipped",
     "vitest skipped",
+    "playwright-unit skipped",
     "vite-build skipped",
 ];
 
@@ -109,7 +113,7 @@ const PACKAGE: [&str; 5] = [
 /// The names a plan should have: fmt, the two clippy steps (`package`: running or skipped), the
 /// tool steps around every registered static check, the ui steps (`ui`: running or skipped), then
 /// the two nextest steps and the doc tests (`package`).
-fn expected_names(package: [&str; 5], ui: [&str; 6]) -> Vec<String> {
+fn expected_names(package: [&str; 5], ui: [&str; 8]) -> Vec<String> {
     let [clippy, featureless, nextest, specta, doctest] = package;
     let mut names: Vec<String> = [
         "fmt",
@@ -183,9 +187,11 @@ fn plan_commands_for_the_workspace_in_both_modes() {
             "gitleaks git --redact --no-banner --verbose --no-color --log-opts=abc..HEAD",
             "pnpm -C ui install --frozen-lockfile",
             "pnpm -C ui/app run typecheck --pretty false",
+            "pnpm -C ui/e2e run typecheck --pretty false",
             "pnpm -C ui/app run lint:types --format unix",
             "pnpm -C ui run fmt:check",
             "pnpm -C ui/app run test",
+            "pnpm -C ui/e2e run test:unit",
             "pnpm -C ui/app run build",
             "cargo nextest run --workspace --no-tests=pass",
             "cargo nextest run -p clauseo-protocol --features specta --test specta_export --test enum_table",
@@ -250,9 +256,11 @@ fn in_ci_the_ui_steps_run_even_without_pnpm() {
         [
             "pnpm -C ui install --frozen-lockfile",
             "pnpm -C ui/app run typecheck --pretty false",
+            "pnpm -C ui/e2e run typecheck --pretty false",
             "pnpm -C ui/app run lint:types --format unix",
             "pnpm -C ui run fmt:check",
             "pnpm -C ui/app run test",
+            "pnpm -C ui/e2e run test:unit",
             "pnpm -C ui/app run build",
         ]
     );
