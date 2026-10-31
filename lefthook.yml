@@ -11,6 +11,9 @@ pre-commit:
     oxfmt:    { root: "ui/", glob: "**/*.{ts,tsx,js,mjs,cjs,json,jsonc,yaml,yml,html,css,md}", exclude: "**/pnpm-lock.yaml", run: "pnpm run fmt:check {staged_files}" }
     # The type-aware script, as `cargo xtask check` runs it, so the hook and the check fail on the same rules.
     oxlint:   { root: "ui/app/", glob: "**/*.{ts,tsx,js,mjs,cjs}", run: "pnpm run lint:types {staged_files}" }
+    # The same script on ui/components, through the link ui/app/components, the way `lint:types` reaches it
+    # (oxlint refuses a path with `..`), so each staged path gets `components/` in front.
+    oxlint-components: { root: "ui/components/", glob: "**/*.{ts,tsx,js,mjs,cjs}", run: "for f in {staged_files}; do set -- \"$@\" \"components/$f\"; done; pnpm -C ../app run lint:types \"$@\"" }
 pre-push:
   commands:
     check: { run: cargo xtask check --quick }
