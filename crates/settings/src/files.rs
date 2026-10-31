@@ -62,6 +62,7 @@ impl Files for SystemFiles {
             #[cfg(unix)]
             match fs::metadata(path) {
                 Ok(old) => file.set_permissions(old.permissions())?,
+                // Defensive: link_target stat'ed this path, so only a race or I/O fault gets here.
                 Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
                 Err(_) => {}
             }
