@@ -2,17 +2,25 @@
 //! never taken for a missing file, an empty timeline or a file that changed.
 
 use std::io;
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 
-use super::{files_under, git_id, new_store, noise, write_file};
+use super::new_store;
+#[cfg(unix)]
+use super::{files_under, git_id, noise, write_file};
 use crate::Error;
 use crate::history::{GixStore, HistoryStore, TIMELINE_REF};
+#[cfg(unix)]
 use crate::no_download::NoDownload;
 use crate::test_dir::TestDir;
 use crate::write;
+#[cfg(unix)]
 use crate::{OsProbe, PlaceholderProbe};
 
 /// A guard for a test's direct reads, with the OS probe.
+#[cfg(unix)]
 fn no_download() -> NoDownload<'static> {
     const PROBE: &dyn PlaceholderProbe = &OsProbe;
     NoDownload::begin(PROBE)

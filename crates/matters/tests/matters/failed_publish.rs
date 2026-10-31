@@ -1,7 +1,9 @@
 //! A checkpoint whose publish fails after its ref moved (the stat cache did not write): the
 //! matter reads its timeline again and goes on from what is on disk.
 
-use clauseo_matters::{CompareSide, Matter};
+#[cfg(unix)]
+use clauseo_matters::CompareSide;
+use clauseo_matters::Matter;
 use clauseo_protocol::ErrorCode;
 
 use crate::fixture::{Fixture, cid, meta};
