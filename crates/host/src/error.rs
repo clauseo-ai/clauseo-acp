@@ -5,6 +5,7 @@ use clauseo_protocol::{ErrorCode, HostError};
 /// Why a host call failed. [`Error::code`] gives the client's code; `From<Error> for HostError`
 /// gives the wire form.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// A command or query broke a shape rule (`command.invalid`).
     #[error("invalid input: {0}")]
