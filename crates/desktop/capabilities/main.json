@@ -1,7 +1,17 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The main window, by the label MAIN_WINDOW in src/lib.rs; rename both together. Grants nothing: every permission widens what script in the page can reach.",
+  "description": "The main window, by the label MAIN_WINDOW in src/lib.rs; rename both together. Grants the nine bridge commands of src/commands.rs, one permission each, and nothing else: every permission widens what script in the page can reach (docs/decisions/0012-desktop-bridge.md).",
   "windows": ["main"],
-  "permissions": []
+  "permissions": [
+    "allow-dispatch",
+    "allow-query",
+    "allow-open-stream",
+    "allow-subscribe",
+    "allow-unsubscribe",
+    "allow-ack",
+    "allow-answer-permission",
+    "allow-pick-folder",
+    "allow-display-info"
+  ]
 }

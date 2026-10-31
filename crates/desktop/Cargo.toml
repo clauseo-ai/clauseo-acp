@@ -13,7 +13,9 @@ crate-type = ["rlib"]
 workspace = true
 
 [features]
-# Windows only: the webview opens a DevTools port for Playwright (src/e2e.rs). Never on by default.
+# The end-to-end build (src/e2e.rs), never on by default: on Windows the webview opens a DevTools
+# port for Playwright; on every OS `pick_folder` reads E2E_MATTER_DIR and the "always allow"
+# confirm reads E2E_CONFIRM_ALWAYS instead of drawing a dialog.
 e2e = []
 
 [build-dependencies]
@@ -31,3 +33,27 @@ tauri-plugin-opener.workspace = true
 tauri-plugin-os.workspace = true
 tauri-plugin-notification.workspace = true
 serde_json.workspace = true
+serde = { workspace = true, features = ["derive"] }
+# The session host and what starting it takes: settings, the launcher, the boundary types.
+clauseo-host = { path = "../host" }
+clauseo-protocol = { path = "../protocol" }
+clauseo-settings = { path = "../settings" }
+clauseo-process = { path = "../process" }
+# Polling host subscriptions on Tauri's runtime; the bridge's watchdog timer.
+futures = { workspace = true }
+async-io = { workspace = true }
+# Finding the quotes and backslashes to escape when an event is split into fragments.
+memchr = { workspace = true }
+# The command ids the bridge mints for `answer_permission`.
+uuid = { workspace = true, features = ["v7"] }
+
+[dev-dependencies]
+# The TypeScript bindings (src/commands/bindings.rs) are written by a unit test, so tauri-specta,
+# specta and protocol's `specta` feature stay out of the app: the commands carry
+# `#[cfg_attr(test, specta::specta)]`, and tauri's `specta` feature types the Channel.
+tauri-specta = { workspace = true, features = ["typescript"] }
+specta = { workspace = true, features = ["derive", "function"] }
+specta-typescript = { workspace = true }
+clauseo-protocol = { path = "../protocol", features = ["specta"] }
+# The mock runtime, to see what Tauri itself rejects with.
+tauri = { workspace = true, features = ["test", "specta"] }
