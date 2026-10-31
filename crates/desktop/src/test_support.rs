@@ -23,6 +23,9 @@ use crate::frame::Frame;
 /// The agent id the settings name.
 pub(crate) const AGENT: &str = "fake";
 
+/// The folder under a [`Scratch`] root that new matters go in (`matters.default_location`).
+pub(crate) const MATTERS_DIR: &str = "matters";
+
 /// How long a test waits for one frame before it fails. A bound, not a sleep.
 const FRAME_WAIT: Duration = Duration::from_secs(20);
 
@@ -65,8 +68,11 @@ impl Scratch {
         for dir in dirs {
             std::fs::create_dir_all(root.join(dir)).unwrap();
         }
+        // New matters, the Scratch matter included, go in the scratch folder on every OS, set
+        // here and not only through `Locations::under_root`: never the real Documents folder.
         let settings = serde_json::json!({
-            "agents": { AGENT: { "command": agent.display().to_string(), "args": args } }
+            "agents": { AGENT: { "command": agent.display().to_string(), "args": args } },
+            "matters": { "default_location": root.join(MATTERS_DIR).display().to_string() }
         });
         std::fs::write(root.join("settings.json"), settings.to_string()).unwrap();
         Self { root }
@@ -207,4 +213,15 @@ impl Frames {
 /// The thread's stream.
 pub(crate) fn stream(thread: ThreadId) -> StreamId {
     StreamId::Thread(thread)
+}
+
+/// A host started on a [`Scratch`] makes its Scratch matter inside the scratch folder, on every
+/// OS: never in the real Documents folder.
+#[test]
+fn the_scratch_matter_stays_in_the_scratch_folder() {
+    let scratch = Scratch::new("scratch-matter", &[]);
+    let host = scratch.start(Vec::new());
+    let _matter = host.scratch();
+    let made = scratch.path().join(MATTERS_DIR).join("Scratch");
+    assert!(made.is_dir(), "{}", made.display());
 }
