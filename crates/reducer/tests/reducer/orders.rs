@@ -22,7 +22,7 @@ fn text_upsert_orders(changes: &[ViewChange], message: MessageId) -> Vec<Seq> {
         .collect()
 }
 
-/// The orders `message`'s entries hold, and whether each sits at the key of its own order.
+/// The key and order of each of `message`'s entries.
 #[cfg(test)]
 fn entries_of(state: &clauseo_reducer::StreamState, message: MessageId) -> Vec<(Seq, Seq)> {
     state
