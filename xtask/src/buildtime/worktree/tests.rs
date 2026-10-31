@@ -122,6 +122,9 @@ enum Trick {
     /// `git worktree remove` succeeds but leaves `ui/app/components` and the folders above it,
     /// as Git for Windows does with the junction `pnpm install` makes there.
     RemoveLeavesFolder,
+    /// `git worktree remove` succeeds but leaves `ui/app/components` as a symlink to `outside`
+    /// next to the worktree, a folder holding `kept.txt`: a junction's stand-in on Unix.
+    RemoveLeavesLink,
     /// `git worktree add` makes the folder, then fails.
     AddFailsAfterMakingIt,
     /// `git worktree list` fails once a `git worktree add` ran.
@@ -171,6 +174,16 @@ impl Fake {
                 let left = Path::new(path).join("ui/app/components");
                 Scratch::create_dir_all(&left).expect("the folders git left");
                 Scratch::write(left.join("button.tsx"), "left").expect("what git left");
+                Ok(ran)
+            }
+            (Program::Git, ["worktree", "remove", "--force", path])
+                if self.tricks.contains(&Trick::RemoveLeavesLink) =>
+            {
+                let ran = process::run_quiet(cmd, dir)?;
+                let app = Path::new(path).join("ui/app");
+                Scratch::create_dir_all(&app).expect("the folders git left");
+                let outside = Path::new(path).with_file_name("outside");
+                Scratch::symlink_dir(&outside, app.join("components")).expect("the link git left");
                 Ok(ran)
             }
             (Program::Git, ["worktree", "add", "--detach", path, "HEAD"])

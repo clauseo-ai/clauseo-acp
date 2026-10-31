@@ -124,16 +124,16 @@ pub(super) fn remove(
 /// After `git worktree remove --force` succeeded: removes what it left at `path`, which this run
 /// made. Git for Windows exits 0 but cannot delete a junction, so the ignored
 /// `ui/app/components` that `pnpm install` links (`ui/app/scripts/components-link.mjs`) stays,
-/// with the folders above it. `write::remove_in` removes a junction or symlink without following
-/// it. Nothing there is `Ok`.
+/// with the folders above it. `write::remove_in` removes the folder without following a junction
+/// or symlink inside it (`fs::remove_dir_all`). Nothing there is `Ok`.
 fn remove_what_git_left(path: &Path) -> io::Result<()> {
-    if fs::symlink_metadata(path).is_err() {
-        return Ok(());
-    }
     let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
         return Err(io::Error::other("the path has no parent folder"));
     };
-    write::remove_in(parent, &name.to_string_lossy())
+    match write::remove_in(parent, &name.to_string_lossy()) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        removed => removed,
+    }
 }
 
 /// Whether `git worktree list --porcelain` names the worktree.
