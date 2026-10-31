@@ -142,6 +142,10 @@ export type Progress = {
   permission: { state: string; allowOnce: boolean };
   stopReason: string | null;
   messages: number;
+  /** Whether the composer still shows Cancel (the turn is running as far as the page knows). */
+  cancel: boolean;
+  /** The transcript's distance from its end in px; null when it has no scrolling element. */
+  fromEnd: number | null;
 };
 
 /** The plain-words verdict on a failed play's progress. */
@@ -161,7 +165,9 @@ export function verdict(p: Progress): string {
   }
   if (p.answerGrowth > 0) return "crawling: the answer text is still growing, only slowly";
   if (p.answerBytes >= p.expectedAnswerBytes) {
-    return `the whole answer arrived; the turn end never reached the page (${channel})`;
+    const list =
+      p.fromEnd === null ? "no transcript list" : `list ${Math.round(p.fromEnd)} px from its end`;
+    return `the whole answer arrived; the turn-end row isn't in the page (Cancel ${p.cancel ? "still shown" : "gone"}, ${list}, ${channel})`;
   }
   const where =
     p.permission.state === "none"
@@ -188,13 +194,26 @@ async function describeProgress(d: AutoplayDeps, sent: boolean): Promise<string>
     stopReason:
       d.doc.querySelector('[data-testid="turn-stopped"]')?.getAttribute("data-stop-reason") ?? null,
     messages: d.doc.querySelectorAll('[data-testid="message-agent"]').length,
+    cancel: byId(d.doc, "cancel") !== null,
+    fromEnd: distanceFromEnd(d.doc),
   };
   return (
     `. Verdict: ${verdict(p)}. Figures: answer text ${p.answerBytes} of ${p.expectedAnswerBytes} bytes (+${p.answerGrowth} in the last ` +
     `${PROGRESS_WINDOW_MS} ms), channel bytes +${p.channelGrowth ?? "unknown"} in that time, ` +
     `${p.messages} answer message(s) on screen, permission card ${p.permission.state}` +
-    `${p.permission.allowOnce ? " with its allow once button" : ""}, stop reason ${p.stopReason ?? "none"}`
+    `${p.permission.allowOnce ? " with its allow once button" : ""}, stop reason ${p.stopReason ?? "none"}, Cancel ${p.cancel ? "shown" : "gone"}, ` +
+    `list ${p.fromEnd === null ? "not found" : `${Math.round(p.fromEnd)} px from its end`}`
   );
+}
+
+/** The transcript list's distance from its end in px, or null when there is no list. */
+function distanceFromEnd(doc: Document): number | null {
+  try {
+    const list = scroller(doc);
+    return list.scrollHeight - list.scrollTop - list.clientHeight;
+  } catch {
+    return null;
+  }
 }
 
 async function play(d: AutoplayDeps, state: { step: string; expired: boolean; sent: boolean }) {
@@ -273,14 +292,20 @@ async function play(d: AutoplayDeps, state: { step: string; expired: boolean; se
     list.scrollBy(0, SCROLL_PX);
     await d.frame();
   }
+  // Back to the very end, so the transcript follows it again. Scrolling up stops LegendList following, and 1,200 px
+  // back down lands short of an end that grew meanwhile (it re-follows only within ~10% of the viewport), so the
+  // turn's last rows would never be drawn (the macos-15 "stall", stall-diagnosis.md).
+  list.scrollTo(0, list.scrollHeight);
+  await d.frame();
 
   step("end of turn");
-  await until(
-    "the end of the turn",
-    () =>
-      byId(doc, "turn-stopped")?.getAttribute("data-stop-reason") === "end_turn" &&
-      byId(doc, "cancel") === null,
-  );
+  // Cancel is in the composer, which is not virtualized: it goes when the turn ends, whether or not the transcript
+  // has drawn its "turn-stopped" row. A drawn row with another reason fails the play.
+  await until("the end of the turn", () => byId(doc, "cancel") === null);
+  const stopped = byId(doc, "turn-stopped")?.getAttribute("data-stop-reason");
+  if (stopped !== undefined && stopped !== null && stopped !== "end_turn") {
+    throw new Error(`the turn stopped with ${stopped}, not end_turn`);
+  }
 
   step("stop");
   const stream = await perf.stopStream();

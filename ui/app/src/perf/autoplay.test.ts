@@ -35,7 +35,10 @@ const el = (html: string): HTMLElement => {
 /** The internal window, as far as the autoplay reads it, answering the way the real one does. `permission: false`
  * leaves the permission card out, so the session never ends; `clicksToAnswer` is how many clicks on "allow once" it
  * takes to answer the card (Infinity: never). */
-function fakeWindow(log: string[], { permission = true, clicksToAnswer = 1 } = {}) {
+function fakeWindow(
+  log: string[],
+  { permission = true, clicksToAnswer = 1, stepRowRendered = true } = {},
+) {
   document.body.innerHTML = `
     <input data-testid="matter-name" value="Matter">
     <button data-testid="new-matter">Pick folder…</button>
@@ -71,7 +74,10 @@ function fakeWindow(log: string[], { permission = true, clicksToAnswer = 1 } = {
       if (++clicks < clicksToAnswer) return;
       card.setAttribute("data-state", "resolved");
       card.replaceChildren();
-      scroller.append(el('<div data-testid="turn-stopped" data-stop-reason="end_turn"></div>'));
+      // A virtualized transcript that stopped following the end renders no row below its window: the turn ended
+      // (Cancel is gone) but its "turn-stopped" row is not in the DOM.
+      if (stepRowRendered)
+        scroller.append(el('<div data-testid="turn-stopped" data-stop-reason="end_turn"></div>'));
       q("cancel").remove();
     });
     scroller.append(card);
@@ -161,6 +167,25 @@ describe("autoplay", () => {
     });
   });
 
+  // Stall diagnosis (R13 macos-15): autoplay's scroll runs while the second message streams, so LegendList stops
+  // following the end and never mounts the step row 7,000+ px below. The turn has ended; the play must see that.
+  test("a turn whose step row the virtualized transcript does not render still finishes the play", async () => {
+    const log: string[] = [];
+    fakeWindow(log, { stepRowRendered: false });
+    let fail: (error: Error) => void = () => {};
+    const deadline = new Promise<never>((_, f) => (fail = f));
+    const { d, finished } = deps(log, {
+      deadline,
+      step: (name) => {
+        log.push(name);
+        if (name === "end of turn") setTimeout(() => fail(new Error("over 300000 ms")), 50);
+      },
+    });
+    await autoplay(d);
+    expect(finished).toHaveLength(1);
+    expect(finished[0]!.error).toBeNull();
+  });
+
   test("a session that never ends finishes with the error and the step it stopped at", async () => {
     const log: string[] = [];
     fakeWindow(log, { permission: false });
@@ -178,7 +203,7 @@ describe("autoplay", () => {
       {
         run: null,
         error:
-          'autoplay, at step "permission": over 120000 ms. Verdict: the page stopped applying before the permission came: channel bytes still came but no answer text grew. Figures: answer text 80257 of 80259 bytes (+0 in the last 5000 ms), channel bytes +1000 in that time, 1 answer message(s) on screen, permission card none, stop reason none',
+          'autoplay, at step "permission": over 120000 ms. Verdict: the page stopped applying before the permission came: channel bytes still came but no answer text grew. Figures: answer text 80257 of 80259 bytes (+0 in the last 5000 ms), channel bytes +1000 in that time, 1 answer message(s) on screen, permission card none, stop reason none, Cancel shown, list 0 px from its end',
       },
     ]);
     expect(log).not.toContain("stopStream");
@@ -195,7 +220,7 @@ describe("autoplay", () => {
       {
         run: null,
         error:
-          'autoplay, at step "idle memory": marks_memory failed. Verdict: stopped before the prompt was sent. Figures: answer text 80257 of 80259 bytes (+0 in the last 5000 ms), channel bytes +1000 in that time, 0 answer message(s) on screen, permission card none, stop reason none',
+          'autoplay, at step "idle memory": marks_memory failed. Verdict: stopped before the prompt was sent. Figures: answer text 80257 of 80259 bytes (+0 in the last 5000 ms), channel bytes +1000 in that time, 0 answer message(s) on screen, permission card none, stop reason none, Cancel gone, list 0 px from its end',
       },
     ]);
   });
@@ -240,6 +265,8 @@ describe("verdict", () => {
     permission: { state: "resolved", allowOnce: false },
     stopReason: null,
     messages: 2,
+    cancel: false,
+    fromEnd: 7_600,
     ...over,
   });
 
@@ -257,10 +284,12 @@ describe("verdict", () => {
 
   test("the whole answer on screen and no turn end is its own case (CI 41225647542, play 4)", () => {
     expect(verdict(p({ answerBytes: ANSWER_BYTES }))).toBe(
-      "the whole answer arrived; the turn end never reached the page (no channel bytes in 5 s)",
+      "the whole answer arrived; the turn-end row isn't in the page (Cancel gone, list 7600 px from its end, no channel bytes in 5 s)",
     );
-    expect(verdict(p({ answerBytes: ANSWER_BYTES, channelGrowth: null }))).toBe(
-      "the whole answer arrived; the turn end never reached the page (channel bytes unknown)",
+    expect(
+      verdict(p({ answerBytes: ANSWER_BYTES, channelGrowth: null, cancel: true, fromEnd: null })),
+    ).toBe(
+      "the whole answer arrived; the turn-end row isn't in the page (Cancel still shown, no transcript list, channel bytes unknown)",
     );
   });
 
