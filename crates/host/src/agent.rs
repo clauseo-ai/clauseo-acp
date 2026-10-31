@@ -71,7 +71,7 @@ impl StopStep {
     fn of(outcome: &ShutdownOutcome) -> Self {
         match outcome {
             ShutdownOutcome::StdinClosed(_) => Self::StdinClosed,
-            #[cfg(unix)]
+            // The variant exists on every OS; only Unix ever returns it.
             ShutdownOutcome::Terminated(_) => Self::Terminated,
             ShutdownOutcome::Killed(_) => Self::Killed,
             ShutdownOutcome::Unresponsive(_) => Self::Unresponsive,
