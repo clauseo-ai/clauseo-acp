@@ -136,6 +136,27 @@ fn saving_keeps_the_files_permissions() {
 
 #[cfg(unix)]
 #[test]
+fn a_settings_path_under_a_file_is_an_error_and_creates_nothing() {
+    // `file.txt` is a regular file, so the link check of `file.txt/settings.json` fails with
+    // ENOTDIR (not NotFound), and the write returns that error before it creates anything.
+    let root = fresh("not-a-folder").unwrap();
+    write::write(&root.join("file.txt"), b"not a folder").unwrap();
+    let path = root.join("file.txt").join("settings.json");
+    let error = SystemFiles.write_atomic(&path, b"{}").unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::NotADirectory, "{error}");
+    assert_eq!(
+        std::fs::read(root.join("file.txt")).unwrap(),
+        b"not a folder"
+    );
+    let names: Vec<_> = std::fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(names, ["file.txt"]);
+}
+
+#[cfg(unix)]
+#[test]
 fn a_symlink_loop_is_an_error() {
     let root = fresh("loop").unwrap();
     let (a, b) = (root.join("a.json"), root.join("b.json"));
