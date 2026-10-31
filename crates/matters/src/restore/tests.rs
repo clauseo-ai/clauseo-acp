@@ -1,3 +1,5 @@
+mod writeback;
+
 use std::collections::BTreeSet;
 
 use clauseo_protocol::{MatterPath, RestoreRequest};
