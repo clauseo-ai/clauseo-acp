@@ -6,3 +6,5 @@
 fn main() -> tauri::Result<()> {
     clauseo_desktop::run()
 }
+
+// scratch for #51: app-change proof, never merged
