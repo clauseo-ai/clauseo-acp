@@ -20,9 +20,6 @@ mod handshake;
 #[path = "stdio/manifest.rs"]
 mod manifest;
 #[cfg(test)]
-#[path = "stdio/pace_digits.rs"]
-mod pace_digits;
-#[cfg(test)]
 #[path = "stdio/permission.rs"]
 mod permission;
 #[cfg(test)]
