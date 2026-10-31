@@ -202,6 +202,32 @@ fn what_git_left_after_removing_the_worktree_is_removed_and_the_next_run_starts(
     assert!(!left_behind(&root, &path), "nothing is left");
 }
 
+/// Windows makes a symlink only with a privilege the tests do not assume; a junction cannot be made
+/// on Unix, so a symlink stands in for it there.
+#[cfg(unix)]
+#[test]
+fn a_link_git_left_in_the_worktree_is_removed_and_never_followed() {
+    let scratch = Scratch::new("worktree-left-link");
+    let root = repo(&scratch);
+    let path = place(&root).expect("a place");
+    let outside = path.with_file_name("outside");
+    Scratch::create_dir_all(&outside).expect("a folder outside the worktree");
+    Scratch::write(outside.join("kept.txt"), "kept").expect("a file in it");
+    let mut fake = Fake {
+        builds: vec![app_only()],
+        tricks: vec![Trick::RemoveLeavesLink],
+        ..Fake::default()
+    };
+    let measured = measure_with(&root, false, 2, &mut fake).expect("measured");
+    assert!(measured.errors.is_empty(), "{:?}", measured.errors);
+    assert_eq!(fake.ran("git worktree add"), 2, "the second run started");
+    assert!(!left_behind(&root, &path), "nothing is left");
+    assert_eq!(
+        std::fs::read_to_string(outside.join("kept.txt")).expect("the link's target survives"),
+        "kept"
+    );
+}
+
 #[test]
 fn a_folder_git_made_but_does_not_know_fails_the_removal_and_is_left_as_it_is() {
     let scratch = Scratch::new("worktree-unknown-folder");
