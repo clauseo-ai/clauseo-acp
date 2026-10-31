@@ -355,6 +355,12 @@ jobs:
       - name: Build fake_agent
         run: cargo build --release --locked -p clauseo-fake_agent
 
+      # The app starts from a background Node process, so macOS may give it App Nap, which
+      # stretches its timers and its children's: the first run's 5 ms pace came out near 34 ms per
+      # update (86 s streams instead of 13 s). The runner is thrown away after the job.
+      - name: Turn off App Nap on the runner
+        run: defaults write -g NSAppSleepDisabled -bool YES
+
       # Plain Node, no install: macos.ts imports Node's own modules and ui/e2e files only.
       - name: Speed scoreboard
         env:

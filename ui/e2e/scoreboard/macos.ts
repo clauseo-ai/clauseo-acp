@@ -28,7 +28,7 @@ import { PACE_ARGS, RUNS_DIR, SCENARIO, playName, resultTable } from "./session.
  * How long one play may take, launch to exit. The session streams for about 15 s at 5 ms a step;
  * the rest is the launch, the idle settle and a slow runner.
  */
-export const PLAY_TIMEOUT_MS = 180_000;
+export const PLAY_TIMEOUT_MS = 360_000;
 /** The file the app writes its run to, in each play's scratch root. */
 const RUN_FILE = "run.json";
 
