@@ -268,11 +268,11 @@ fn undo_after_file_grew_over_cap_needs_no_decision_for_it() {
 
 /// Once armed, sets `target`'s mtime the `nth` time it is asked about it: a write landing
 /// after the walk took the file's stat. Never cloud-only.
-struct TouchingProbe {
-    target: PathBuf,
-    nth: usize,
-    armed: AtomicBool,
-    seen: AtomicUsize,
+pub(crate) struct TouchingProbe {
+    pub(crate) target: PathBuf,
+    pub(crate) nth: usize,
+    pub(crate) armed: AtomicBool,
+    pub(crate) seen: AtomicUsize,
 }
 
 impl PlaceholderProbe for TouchingProbe {

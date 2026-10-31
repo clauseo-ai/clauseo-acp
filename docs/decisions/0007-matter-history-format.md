@@ -174,11 +174,13 @@ flush per checkpoint:
 - Linux: `File::sync_all` on each written file and each changed folder, in the same order.
 - Windows: `File::sync_all` on each written file, in the same order; folders are not synced.
 
-Files Clauseo writes into the matter folder (undo) go to a temp file in the same folder, are synced
-the same way, and are renamed over the target. A file is never truncated in place. Undo writes every
-temp file first, then makes its deletions, then renames the temp files into place, so on a case- or
-normalisation-insensitive file system (APFS by default, NTFS) a deletion never removes a file just
-put back.
+Files Clauseo writes into the matter folder (undo and restore) go to a temp file in the same
+folder, are synced the same way, and are renamed over the target. A file is never truncated in
+place. Undo writes every temp file first, then makes its deletions, then renames the temp files
+into place, so on a case- or normalisation-insensitive file system (APFS by default, NTFS) a
+deletion never removes a file just put back. Neither writes a name the folder holds only spelled
+otherwise (another case or normalisation), which would replace that other file; a restore never
+deletes.
 
 ### `ARCHITECTURE.md`
 

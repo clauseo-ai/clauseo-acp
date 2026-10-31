@@ -56,6 +56,23 @@ impl fmt::Debug for Oid {
     }
 }
 
+/// Hashes files as blobs without storing anything, with its own reused buffer, so a walk that
+/// writes nothing (a restore preview, a compare with the folder) needs no `&mut` on the store.
+pub(crate) struct Hasher(blob::Blobs);
+
+impl Hasher {
+    pub(crate) const fn new() -> Self {
+        Self(blob::Blobs::new())
+    }
+
+    /// Hashes the file `file` (`len` bytes by its metadata) as a blob; returns it and the bytes
+    /// read. A length over `cap` is an [`Error::Io`] of kind `FileTooLarge`, as for
+    /// [`HistoryStore::store_file`].
+    pub(crate) fn hash(&mut self, file: &Path, len: u64, cap: u64) -> Result<(Oid, u64), Error> {
+        self.0.read(file, len, cap, None)
+    }
+}
+
 /// One commit of the timeline.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CommitRecord {
@@ -111,6 +128,11 @@ pub(crate) trait HistoryStore: Sized {
 
     /// Every file of tree `tree`, flattened and sorted by path bytes.
     fn read_tree(&self, tree: Oid) -> Result<Vec<TreeFile>, Error>;
+
+    /// The files of trees `a` and `b` that the other does not hold with the same blob, each
+    /// list sorted by path bytes, reading no subtree whose id both share. A diff of the two
+    /// lists equals the diff of the whole trees.
+    fn changed_files(&self, a: Oid, b: Oid) -> Result<(Vec<TreeFile>, Vec<TreeFile>), Error>;
 
     /// Stores a commit of `tree` with parent `parent`, author and committer `Clauseo`, at
     /// `seconds` since the epoch in UTC, with `message`.

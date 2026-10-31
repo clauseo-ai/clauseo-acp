@@ -9,8 +9,8 @@ use clauseo_protocol::{
     CheckpointId, CheckpointKind, FileChange, MatterPath, SkippedFile, SkippedFileReason, Timestamp,
 };
 
-use crate::diff::{diff, flag};
-use crate::history::{CommitRecord, GixStore, HistoryStore, Oid, TreeFile};
+use crate::diff::{DiffFile, diff, diff_by, flag};
+use crate::history::{CommitRecord, GixStore, Hasher, HistoryStore, Oid, TreeFile};
 use crate::stat::{CacheEntry, EntryState, Stat, StatCache};
 use crate::types::{Checkpoint, CheckpointOutcome, Progress, Settings, TimelineEntry};
 use crate::walk::{self, FoundKind};
@@ -75,6 +75,11 @@ impl Timeline {
         self.tip
     }
 
+    /// Whether checkpoint `id` is on the timeline.
+    pub(crate) fn contains(&self, id: CheckpointId) -> bool {
+        self.by_id.contains_key(&id)
+    }
+
     /// The tree of checkpoint `id`.
     pub(crate) fn tree(&self, id: CheckpointId) -> Result<Oid, Error> {
         self.by_id
@@ -103,6 +108,13 @@ pub(crate) struct Walked {
     /// A file was read: if only racily clean files were, the entries may equal the cache's and
     /// the cache must still be written, so its time moves past them.
     read_any: bool,
+}
+
+impl Walked {
+    /// The folder as walked: one entry per file, sorted by path bytes.
+    pub(crate) fn entries(&self) -> &[CacheEntry] {
+        &self.entries
+    }
 }
 
 /// One file of a tree, with its size.
@@ -140,42 +152,48 @@ impl Core {
         if self.cache_tree == Some(tree) {
             return Ok(());
         }
+        if let Some(rebuilt) = self.rebuilt_cache(tree)? {
+            self.cache = rebuilt;
+        }
+        self.cache_tree = Some(tree);
+        Ok(())
+    }
+
+    /// `None` when the cache's blobs match tree `tree`; otherwise the cache rebuilt from the tree
+    /// with empty stats.
+    fn rebuilt_cache(&self, tree: Oid) -> Result<Option<StatCache>, Error> {
         let files = self.history.read_tree(tree)?;
         let cached = self
             .cache
             .entries
             .iter()
             .filter_map(|entry| entry.state.blob().map(|blob| (entry.path.as_str(), blob)));
-        let same = cached.eq(files.iter().map(|file| (file.path.as_str(), file.blob)));
-        if !same {
-            tracing::info!("the stat cache does not match the timeline's tip; rebuilding it");
-            let mut entries = Vec::with_capacity(files.len());
-            for file in files {
-                let path =
-                    MatterPath::new(&file.path).map_err(|err| Error::history("tree", err))?;
-                let size = self.history.blob_len(file.blob)?;
-                let stat = Stat {
-                    size: u32::try_from(size).unwrap_or(u32::MAX),
-                    ..Stat::default()
-                };
-                entries.push(CacheEntry {
-                    path,
-                    stat,
-                    state: EntryState::Read(file.blob),
-                });
-            }
-            self.cache = StatCache {
-                entries,
-                written_at: None,
-            };
+        if cached.eq(files.iter().map(|file| (file.path.as_str(), file.blob))) {
+            return Ok(None);
         }
-        self.cache_tree = Some(tree);
-        Ok(())
+        tracing::info!("the stat cache does not match the timeline's tip; rebuilding it");
+        let mut entries = Vec::with_capacity(files.len());
+        for file in files {
+            let path = MatterPath::new(&file.path).map_err(|err| Error::history("tree", err))?;
+            let size = self.history.blob_len(file.blob)?;
+            let stat = Stat {
+                size: u32::try_from(size).unwrap_or(u32::MAX),
+                ..Stat::default()
+            };
+            entries.push(CacheEntry {
+                path,
+                stat,
+                state: EntryState::Read(file.blob),
+            });
+        }
+        Ok(Some(StatCache {
+            entries,
+            written_at: None,
+        }))
     }
 
     /// Walks `folder` and hashes and stores every file the cache cannot vouch for. `Ok(None)`
-    /// when cancelled. A file found over the cap when read is skipped like one the walk found
-    /// over it; the entries under a subfolder that does not read are kept as they were.
+    /// when cancelled. See [`walk_folder`].
     pub(crate) fn scan_folder(
         &mut self,
         folder: &Path,
@@ -184,108 +202,30 @@ impl Core {
         progress: &mut dyn FnMut(Progress),
     ) -> Result<Option<Walked>, Error> {
         self.check_cache()?;
-        let probe = settings.probe.as_ref();
-        let cap = settings.limits.effective_cap();
-        let Some(listing) = walk::walk(folder, probe, cap, cancel, &mut |_| {})? else {
-            return Ok(None);
-        };
-        let mut entries = Vec::with_capacity(listing.files.len());
-        let mut skipped = Vec::new();
-        let mut done = Progress { files: 0, bytes: 0 };
-        let mut read_any = false;
-        for mut file in listing.files {
-            if cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
-                return Ok(None);
-            }
-            let old = self.cache.get(file.path.as_str());
-            let mut state = None;
-            if file.kind == FoundKind::File {
-                if let Some(blob) = self.cache.clean_blob(file.path.as_str(), &file.stat) {
-                    state = Some(EntryState::Read(blob));
-                } else {
-                    let path = folder.join(file.path.as_str());
-                    match self.history.store_file(&path, file.len, cap) {
-                        Ok((blob, read)) => {
-                            done.bytes = done.bytes.saturating_add(read);
-                            read_any = true;
-                            state = Some(EntryState::Read(blob));
-                        }
-                        // Gone since the walk listed it: it is deleted.
-                        Err(Error::Io { source, .. })
-                            if source.kind() == std::io::ErrorKind::NotFound =>
-                        {
-                            continue;
-                        }
-                        // Grown over the cap since the walk listed it: skipped, with its stat now.
-                        Err(Error::Io { source, .. })
-                            if source.kind() == std::io::ErrorKind::FileTooLarge =>
-                        {
-                            file.kind = FoundKind::OverCap;
-                            if let Ok(metadata) = std::fs::symlink_metadata(&path) {
-                                file.stat = Stat::from_metadata(&metadata);
-                            }
-                        }
-                        Err(err) => return Err(err),
-                    }
-                }
-            }
-            let state = if let Some(state) = state {
-                state
-            } else {
-                let reason = if file.kind == FoundKind::CloudOnly {
-                    SkippedFileReason::CloudOnly
-                } else {
-                    SkippedFileReason::OverSizeCap
-                };
-                if worth_listing(old, &file.stat) {
-                    skipped.push(SkippedFile {
-                        path: file.path.clone(),
-                        reason,
-                    });
-                }
-                // A versioned file that is now cloud-only keeps its blob: dehydration does
-                // not change content. A file over the cap leaves the tree.
-                match old.map(|old| old.state.blob()) {
-                    Some(Some(blob)) if file.kind == FoundKind::CloudOnly => {
-                        EntryState::Unread(blob)
-                    }
-                    Some(_) | None => EntryState::Skipped,
-                }
-            };
-            done.files += 1;
-            progress(done);
-            entries.push(CacheEntry {
-                path: file.path,
-                stat: file.stat,
-                state,
-            });
-        }
-        if !listing.unread.is_empty() {
-            self.keep_unread(&mut entries, &listing.unread);
-        }
-        Ok(Some(Walked {
-            entries,
-            skipped,
-            read_any,
-        }))
+        let history = &mut self.history;
+        let mut store = |path: &Path, len: u64, cap: u64| history.store_file(path, len, cap);
+        walk_folder(&self.cache, folder, settings, cancel, progress, &mut store)
     }
 
-    /// Adds to `entries` (sorted) the cache's entries under each folder of `unread` that the
-    /// walk did not find, as they were, and sorts them again.
-    fn keep_unread(&self, entries: &mut Vec<CacheEntry>, unread: &[String]) {
-        let found: BTreeSet<String> = entries
-            .iter()
-            .map(|entry| entry.path.as_str().to_owned())
-            .collect();
-        for dir in unread {
-            let prefix = format!("{dir}/");
-            let kept = self.cache.entries.iter().filter(|entry| {
-                entry.path.as_str().starts_with(&prefix) && !found.contains(entry.path.as_str())
-            });
-            entries.extend(kept.cloned());
-        }
-        entries.sort_by(|a, b| a.path.as_str().as_bytes().cmp(b.path.as_str().as_bytes()));
-        entries.dedup_by(|a, b| a.path == b.path);
+    /// The folder as a checkpoint would see it now, sorted by path, without storing anything or
+    /// writing the cache: every file the cache cannot vouch for is hashed only. Takes `&self`,
+    /// so a preview or a compare never needs the writer.
+    pub(crate) fn snapshot(
+        &self,
+        folder: &Path,
+        settings: &Settings,
+    ) -> Result<Vec<CacheEntry>, Error> {
+        let rebuilt = match self.timeline.tip() {
+            None => Some(StatCache::default()),
+            Some((_, tree)) if self.cache_tree != Some(tree) => self.rebuilt_cache(tree)?,
+            Some(_) => None,
+        };
+        let cache = rebuilt.as_ref().unwrap_or(&self.cache);
+        let mut hasher = Hasher::new();
+        let mut hash = |path: &Path, len: u64, cap: u64| hasher.hash(path, len, cap);
+        let walked = walk_folder(cache, folder, settings, None, &mut |_| {}, &mut hash)?
+            .ok_or_else(|| Error::history("walk", "cancelled without a cancel flag"))?;
+        Ok(walked.entries)
     }
 
     /// Commits `walked` as checkpoint `spec`, or reuses the last checkpoint when the folder
@@ -396,23 +336,29 @@ impl Core {
         Ok(())
     }
 
+    /// The files of checkpoint `id`'s tree, without sizes, sorted by path.
+    pub(crate) fn tree_files(&self, id: CheckpointId) -> Result<Vec<VersionEntry>, Error> {
+        let tree = self.timeline.tree(id)?;
+        version_entries(self.history.read_tree(tree)?)
+    }
+
+    /// The size of `blob` at `path`: the cache's when it holds that blob there, otherwise the
+    /// size in the blob's header.
+    pub(crate) fn size_of(&self, path: &str, blob: Oid) -> Result<u64, Error> {
+        match self.cache.get(path) {
+            Some(entry) if entry.state.blob() == Some(blob) => Ok(u64::from(entry.stat.size)),
+            Some(_) | None => self.history.blob_len(blob),
+        }
+    }
+
     /// The files of checkpoint `id`'s tree, with sizes, sorted by path.
     pub(crate) fn files_of(&self, id: CheckpointId) -> Result<Vec<SizedFile>, Error> {
-        let tree = self.timeline.tree(id)?;
-        let files = self.history.read_tree(tree)?;
-        files
+        self.tree_files(id)?
             .into_iter()
             .map(|file| {
-                let path =
-                    MatterPath::new(&file.path).map_err(|err| Error::history("tree", err))?;
-                let size = match self.cache.get(&file.path) {
-                    Some(entry) if entry.state.blob() == Some(file.blob) => {
-                        u64::from(entry.stat.size)
-                    }
-                    Some(_) | None => self.history.blob_len(file.blob)?,
-                };
+                let size = self.size_of(file.path.as_str(), file.blob)?;
                 Ok(SizedFile {
-                    path,
+                    path: file.path,
                     blob: file.blob,
                     size,
                 })
@@ -420,16 +366,170 @@ impl Core {
             .collect()
     }
 
-    /// The changes from checkpoint `before` to `after`, sorted by path, unflagged.
+    /// The changes from checkpoint `before` to `after`, sorted by path, unflagged: the diff of
+    /// only the files that differ, read without the subtrees both share. Sizes are looked up
+    /// only for the files a change reports.
     pub(crate) fn changes_between(
         &self,
         before: CheckpointId,
         after: CheckpointId,
     ) -> Result<Vec<FileChange>, Error> {
-        let old = self.files_of(before)?;
-        let new = self.files_of(after)?;
-        diff(&old, &new, &BTreeSet::new())
+        let (old, new) = self
+            .history
+            .changed_files(self.timeline.tree(before)?, self.timeline.tree(after)?)?;
+        let (old, new) = (version_entries(old)?, version_entries(new)?);
+        diff_by(&old, &new, &BTreeSet::new(), &mut |file| {
+            self.size_of(file.path.as_str(), file.blob)
+        })
     }
+}
+
+/// `files` (sorted by path bytes) as checked paths.
+fn version_entries(files: Vec<TreeFile>) -> Result<Vec<VersionEntry>, Error> {
+    files
+        .into_iter()
+        .map(|file| {
+            let path = MatterPath::new(&file.path).map_err(|err| Error::history("tree", err))?;
+            Ok(VersionEntry {
+                path,
+                blob: file.blob,
+            })
+        })
+        .collect()
+}
+
+/// One file of a checkpoint's tree, without its size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VersionEntry {
+    pub(crate) path: MatterPath,
+    pub(crate) blob: Oid,
+}
+
+impl DiffFile for VersionEntry {
+    fn path(&self) -> &MatterPath {
+        &self.path
+    }
+
+    fn blob(&self) -> Oid {
+        self.blob
+    }
+}
+
+/// Reads one file as a blob: `(path, len, cap)` to the blob and the bytes read.
+type ReadFile<'a> = dyn FnMut(&Path, u64, u64) -> Result<(Oid, u64), Error> + 'a;
+
+/// Walks `folder` against `cache` and reads every file `cache` cannot vouch for with `read`
+/// (`(path, len, cap)` to blob and bytes read: storing it, or only hashing it). `Ok(None)` when
+/// cancelled. A file found over the cap when read is skipped like one the walk found over it;
+/// the entries under a subfolder that does not read are kept as they were.
+fn walk_folder(
+    cache: &StatCache,
+    folder: &Path,
+    settings: &Settings,
+    cancel: Option<&AtomicBool>,
+    progress: &mut dyn FnMut(Progress),
+    read: &mut ReadFile<'_>,
+) -> Result<Option<Walked>, Error> {
+    let probe = settings.probe.as_ref();
+    let cap = settings.limits.effective_cap();
+    let Some(listing) = walk::walk(folder, probe, cap, cancel, &mut |_| {})? else {
+        return Ok(None);
+    };
+    let mut entries = Vec::with_capacity(listing.files.len());
+    let mut skipped = Vec::new();
+    let mut done = Progress { files: 0, bytes: 0 };
+    let mut read_any = false;
+    for mut file in listing.files {
+        if cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)) {
+            return Ok(None);
+        }
+        let old = cache.get(file.path.as_str());
+        let mut state = None;
+        if file.kind == FoundKind::File {
+            if let Some(blob) = cache.clean_blob(file.path.as_str(), &file.stat) {
+                state = Some(EntryState::Read(blob));
+            } else {
+                let path = folder.join(file.path.as_str());
+                match read(&path, file.len, cap) {
+                    Ok((blob, bytes)) => {
+                        done.bytes = done.bytes.saturating_add(bytes);
+                        read_any = true;
+                        state = Some(EntryState::Read(blob));
+                    }
+                    // Gone since the walk listed it: it is deleted.
+                    Err(Error::Io { source, .. })
+                        if source.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        continue;
+                    }
+                    // Grown over the cap since the walk listed it: skipped, with its stat now.
+                    Err(Error::Io { source, .. })
+                        if source.kind() == std::io::ErrorKind::FileTooLarge =>
+                    {
+                        file.kind = FoundKind::OverCap;
+                        if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+                            file.stat = Stat::from_metadata(&metadata);
+                        }
+                    }
+                    Err(err) => return Err(err),
+                }
+            }
+        }
+        let state = if let Some(state) = state {
+            state
+        } else {
+            let reason = if file.kind == FoundKind::CloudOnly {
+                SkippedFileReason::CloudOnly
+            } else {
+                SkippedFileReason::OverSizeCap
+            };
+            if worth_listing(old, &file.stat) {
+                skipped.push(SkippedFile {
+                    path: file.path.clone(),
+                    reason,
+                });
+            }
+            // A versioned file that is now cloud-only keeps its blob: dehydration does
+            // not change content. A file over the cap leaves the tree.
+            match old.map(|old| old.state.blob()) {
+                Some(Some(blob)) if file.kind == FoundKind::CloudOnly => EntryState::Unread(blob),
+                Some(_) | None => EntryState::Skipped,
+            }
+        };
+        done.files += 1;
+        progress(done);
+        entries.push(CacheEntry {
+            path: file.path,
+            stat: file.stat,
+            state,
+        });
+    }
+    if !listing.unread.is_empty() {
+        keep_unread(cache, &mut entries, &listing.unread);
+    }
+    Ok(Some(Walked {
+        entries,
+        skipped,
+        read_any,
+    }))
+}
+
+/// Adds to `entries` (sorted) the entries of `cache` under each folder of `unread` that the
+/// walk did not find, as they were, and sorts them again.
+fn keep_unread(cache: &StatCache, entries: &mut Vec<CacheEntry>, unread: &[String]) {
+    let found: BTreeSet<String> = entries
+        .iter()
+        .map(|entry| entry.path.as_str().to_owned())
+        .collect();
+    for dir in unread {
+        let prefix = format!("{dir}/");
+        let kept = cache.entries.iter().filter(|entry| {
+            entry.path.as_str().starts_with(&prefix) && !found.contains(entry.path.as_str())
+        });
+        entries.extend(kept.cloned());
+    }
+    entries.sort_by(|a, b| a.path.as_str().as_bytes().cmp(b.path.as_str().as_bytes()));
+    entries.dedup_by(|a, b| a.path == b.path);
 }
 
 /// Whether a skipped file goes in a checkpoint's `skipped` list: it is new, or its size or
@@ -440,7 +540,7 @@ pub(crate) fn worth_listing(old: Option<&CacheEntry>, stat: &Stat) -> bool {
 }
 
 /// The tree a list of cache entries describes, with sizes.
-fn tree_of(entries: &[CacheEntry]) -> Vec<SizedFile> {
+pub(crate) fn tree_of(entries: &[CacheEntry]) -> Vec<SizedFile> {
     entries
         .iter()
         .filter_map(|entry| {
