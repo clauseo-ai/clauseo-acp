@@ -138,7 +138,7 @@ fn a_raw_control_character_is_escaped_inside_a_fragment() {
 }
 
 /// The top-level keys the reader takes for a message of the bridge's own, never an event's.
-const RESERVED: [&str; 2] = ["fragment", "stream_failed"];
+const RESERVED: [&str; 3] = ["fragment", "stream_failed", "timed"];
 
 /// The number of `HostEvent` variants [`variant`] names.
 const VARIANTS: usize = 4;
@@ -207,4 +207,79 @@ fn a_stream_failure_is_one_message_below_the_limit() {
     assert!(message.len() < FRAME_LIMIT);
     let value: serde_json::Value = serde_json::from_str(message.text()).unwrap();
     assert_eq!(value["stream_failed"]["error"]["code"], "store.io");
+}
+
+/// An event of exactly `len` bytes.
+#[cfg(feature = "e2e")]
+fn event_of(len: usize) -> String {
+    let json = batch(vec![ViewPatchBody::AppendText {
+        message_id: MessageId::new(v7()).unwrap(),
+        target: AppendTarget::AgentText,
+        from_len: 0,
+        text: String::new(),
+    }]);
+    let pad = len - json.len();
+    json.replacen(
+        r#""text":"""#,
+        &format!(r#""text":"{}""#, "a".repeat(pad)),
+        1,
+    )
+}
+
+#[cfg(feature = "e2e")]
+#[test]
+fn a_timed_message_splices_the_event_in_as_it_is() {
+    let json = batch(vec![ViewPatchBody::AppendText {
+        message_id: MessageId::new(v7()).unwrap(),
+        target: AppendTarget::AgentText,
+        from_len: 0,
+        text: text(300),
+    }]);
+    let sent = timed_messages(&json, 1_730_380_000_123.456, 0).unwrap();
+    let [only] = sent.as_slice() else {
+        panic!("{} messages", sent.len());
+    };
+    let expected = format!(r#"{{"timed":{{"received_ms":1730380000123.456,"event":{json}}}}}"#);
+    assert_eq!(only.text(), expected);
+    let value: serde_json::Value = serde_json::from_str(only.text()).unwrap();
+    let keys: Vec<&String> = value.as_object().unwrap().keys().collect();
+    assert_eq!(keys, ["timed"]);
+    assert_eq!(value["timed"]["received_ms"], 1_730_380_000_123.456);
+    let event: HostEvent = serde_json::from_value(value["timed"]["event"].clone()).unwrap();
+    assert_eq!(serde_json::to_string(&event).unwrap(), json);
+    // A whole millisecond is written without a fraction, still a JSON number.
+    let whole = timed_messages(&json, 5.0, 0).unwrap();
+    assert!(
+        whole[0]
+            .text()
+            .starts_with(r#"{"timed":{"received_ms":5,"event":{"#)
+    );
+}
+
+#[cfg(feature = "e2e")]
+#[test]
+fn an_event_too_long_to_wrap_goes_as_it_would_untimed() {
+    let time = 1_730_380_000_123.456;
+    let overhead = format!(r#"{{"timed":{{"received_ms":{time},"event":}}}}"#).len();
+    // The longest event that fits wrapped: one message below the limit.
+    let fits = event_of(FRAME_LIMIT - 1 - overhead);
+    let sent = timed_messages(&fits, time, 3).unwrap();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].len(), FRAME_LIMIT - 1);
+    // One byte more goes plain, exactly as `messages` sends it.
+    let plain = event_of(FRAME_LIMIT - overhead);
+    assert_eq!(timed_messages(&plain, time, 3), messages(&plain, 3));
+    assert_eq!(timed_messages(&plain, time, 3).unwrap(), vec![Frame(plain)]);
+    // Past the limit itself, fragments.
+    let long = event_of(FRAME_LIMIT + 10);
+    let sent = timed_messages(&long, time, 3).unwrap();
+    assert_eq!(Some(sent.clone()), messages(&long, 3));
+    assert!(sent.len() > 1);
+    assert!(
+        sent.iter()
+            .all(|message| message.text().starts_with(r#"{"fragment":"#))
+    );
+    // A time that is not finite goes plain.
+    let small = event_of(500);
+    assert_eq!(timed_messages(&small, f64::NAN, 0), messages(&small, 0));
 }

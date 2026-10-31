@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "e2e",
+  "description": "The e2e build only (src/e2e.rs): src/e2e.rs (grant_scoreboard) adds this file at setup with --features e2e or marks, and tauri.conf.json does not name it, so the default build never grants it. Grants the main window the speed scoreboard's perf_channel_bytes.",
+  "windows": ["main"],
+  "permissions": ["allow-perf-channel-bytes"]
+}

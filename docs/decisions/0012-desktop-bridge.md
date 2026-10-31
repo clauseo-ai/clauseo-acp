@@ -59,9 +59,21 @@ watchdog fire) failed to subscribe: `{"stream_failed":{"stream":<StreamId>,"erro
 the stream stays followed and the bridge's clock tries it again 5 s later, the wait doubling with
 each failure up to 60 s, until a try succeeds or the webview subscribes or unsubscribes it. A
 `subscribe` the host refuses returns the error and follows nothing. Every message is shorter than
-8192 bytes. The reader tells the kinds apart by the top-level key: `fragment` and `stream_failed`
-are reserved, and no `HostEvent` kind may take either (a desktop test serialises one value of
-every `HostEvent` variant and checks).
+8192 bytes. The reader tells the kinds apart by the top-level key: `fragment`, `stream_failed` and
+`timed` (below) are reserved, and no `HostEvent` kind may take one (a desktop test serialises one
+value of every `HostEvent` variant and checks).
+
+**Timed events (`e2e` builds only).** For the speed scoreboard, the `e2e` build (and `marks`,
+which includes it) sends an event whose text fits one message with the wrapper as
+`{"timed":{"received_ms":<f64>,"event":<the event's text>}}`: `received_ms` is when the bridge
+took the event from the host subscription, in ms since the Unix epoch, and the event's text goes
+in as it is, between a fixed prefix and suffix. A longer event goes as above, with no time. A
+timed message counts as one message of its wrapped length for acks and the cap. The default build
+never sends one. The same builds add, each in its own capability file that `tauri.conf.json` does
+not name (`capabilities/e2e.json`, `capabilities/marks.json`; with the feature, setup adds them with
+`add_capability`, since the checks refuse every way to name them in the config): `perf_channel_bytes` (`e2e`, the bytes sent down every
+channel since start) and `marks_memory` and `marks_finish` (`marks`, `crates/desktop/src/marks.rs`).
+The default build's commands, permissions and capability are as listed above.
 
 **Backpressure.** The bridge counts bytes by message: the webview acks with `messages`, the number
 of channel messages it has received and processed since `open_stream` (a fragment and a
@@ -104,7 +116,7 @@ saves in this build, so e2e runs do not write the real app config folder.
 
 ## Consequences
 
-- The page reaches nine typed commands and no plugin; a tenth command needs a new record, a
+- In the default build the page reaches nine typed commands and no plugin; a tenth command needs a new record, a
   permission and a line in each list the test compares.
 - A large patch costs a few fragment messages instead of one fetch round trip.
 - A window that falls 256 KB behind stops receiving until it catches up, then gets the tail or a
@@ -112,7 +124,7 @@ saves in this build, so e2e runs do not write the real app config folder.
 - Whether a folder may be a matter stays the host's rule, checked at `CreateMatter`; `pick_folder`
   only registers what the lawyer picked.
 - A change to the message format, the cap or the watchdog is a change to the patch protocol and
-  needs a new record.
+  needs a new record (or, while this one is proposed, an amendment here, as `timed` was).
 - A window whose page stops acking holds a bounded amount unacknowledged, not one event more
   every 5 s. The cost: when the ack that follows a watchdog fire is lost as well, the window waits
   for its next ack (the next event it is sent) instead of a second fire.

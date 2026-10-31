@@ -10,10 +10,15 @@
 //!   texts, joined in index order, are the event's text exactly; the transport joins them and
 //!   parses once;
 //! - a stream the bridge could not restart: `{"stream_failed":{"stream":<StreamId>,
-//!   "error":<HostError>}}`.
+//!   "error":<HostError>}}`;
+//! - in the `e2e` build only, an event with the time the bridge received it from the host:
+//!   `{"timed":{"received_ms":<f64>,"event":<the event's text>}}`, `received_ms` in ms since
+//!   the Unix epoch. The event's text goes in as it is, between a fixed prefix and suffix. An
+//!   event that does not fit one message so wrapped goes as above, with no time. The default
+//!   build never sends it.
 //!
-//! The reader tells them apart by the top-level key: `fragment` and `stream_failed` are
-//! reserved, and no `HostEvent` kind may take either (a test in `frame/tests.rs` checks).
+//! The reader tells them apart by the top-level key: `fragment`, `stream_failed` and `timed`
+//! are reserved, and no `HostEvent` kind may take one (a test in `frame/tests.rs` checks).
 //! Every message is below [`FRAME_LIMIT`] bytes, so Tauri hands it to the page with one `eval`
 //! instead of a second fetch round trip.
 
@@ -168,6 +173,32 @@ pub(crate) fn messages(json: &str, id: u32) -> Option<Vec<Frame>> {
         out.push(Frame(text));
     }
     Some(out)
+}
+
+/// [`messages`] in the `e2e` build: `json`, an event the bridge received at `received_ms` (ms
+/// since the Unix epoch), as one `timed` message when that is below [`FRAME_LIMIT`], else as
+/// [`messages`] sends it, with no time. A time that is not finite goes untimed too.
+#[cfg(feature = "e2e")]
+pub(crate) fn timed_messages(json: &str, received_ms: f64, id: u32) -> Option<Vec<Frame>> {
+    const PREFIX: &str = r#"{"timed":{"received_ms":"#;
+    const EVENT: &str = r#","event":"#;
+    const SUFFIX: &str = "}}";
+    if !received_ms.is_finite() {
+        return messages(json, id);
+    }
+    // Rust writes an f64 in plain decimal, never with an exponent: valid JSON as it is.
+    let time = received_ms.to_string();
+    let len = PREFIX.len() + time.len() + EVENT.len() + json.len() + SUFFIX.len();
+    if len >= FRAME_LIMIT {
+        return messages(json, id);
+    }
+    let mut text = String::with_capacity(len);
+    text.push_str(PREFIX);
+    text.push_str(&time);
+    text.push_str(EVENT);
+    text.push_str(json);
+    text.push_str(SUFFIX);
+    Some(vec![Frame(text)])
 }
 
 /// Cuts `json` into pieces whose escaped length is at most [`PIECE_BUDGET`], each on a char

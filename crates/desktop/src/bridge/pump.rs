@@ -73,11 +73,19 @@ impl Window {
         window
     }
 
-    /// Sends `messages` in order. Stops at the first that fails: the webview is gone.
+    /// Sends `messages` in order. Stops at the first that fails: the webview is gone. The e2e
+    /// build adds each message's length to `perf_channel_bytes`'s total once it is sent.
     fn send(&self, messages: Vec<Frame>) -> bool {
-        messages
-            .into_iter()
-            .all(|message| self.channel.send(message).is_ok())
+        messages.into_iter().all(|message| {
+            #[cfg(feature = "e2e")]
+            let len = message.len();
+            let sent = self.channel.send(message).is_ok();
+            #[cfg(feature = "e2e")]
+            if sent {
+                crate::e2e::count_channel_bytes(len);
+            }
+            sent
+        })
     }
 
     /// The window's stream state.
@@ -229,15 +237,24 @@ async fn pump(
     mut subscription: Subscription,
 ) {
     while let Some(event) = subscription.next().await {
+        // The e2e build's receive time: when the event left the host subscription.
+        #[cfg(feature = "e2e")]
+        let received_ms = crate::e2e::epoch_ms();
         let Some(window) = window.upgrade() else {
             return;
         };
         let mut window = lock(&window);
         let elapsed = window.opened.elapsed();
-        match window
+        #[cfg(not(feature = "e2e"))]
+        let forwarded = window
             .state
-            .forward(stream, restart_id, event.json(), elapsed)
-        {
+            .forward(stream, restart_id, event.json(), elapsed);
+        #[cfg(feature = "e2e")]
+        let forwarded =
+            window
+                .state
+                .forward_timed(stream, restart_id, event.json(), received_ms, elapsed);
+        match forwarded {
             Forward::Send { messages, pause } => {
                 if !window.send(messages) {
                     return;

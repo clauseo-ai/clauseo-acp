@@ -92,6 +92,38 @@ fn a_stale_cursor_gets_reset() {
     );
 }
 
+/// The e2e build sends an event that fits wrapped as `timed`, with the time the bridge received
+/// it, and counts its wrapped length in `perf_channel_bytes`'s total. The default build sends
+/// it plain.
+#[test]
+fn only_the_e2e_build_sends_an_event_timed_and_counts_its_bytes() {
+    let scratch = Scratch::new("timed-event", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let (channel, messages) = collector();
+    bridge.open_stream(MAIN, channel);
+    #[cfg(feature = "e2e")]
+    let (before, start) = (crate::e2e::channel_bytes(), crate::e2e::epoch_ms());
+    block_on(bridge.subscribe(MAIN, StreamId::Matter(host.scratch()), None)).unwrap();
+    let _reset = batch(messages.next_event());
+    let timed = messages.timed();
+    #[cfg(not(feature = "e2e"))]
+    assert!(timed.is_empty(), "{timed:?}");
+    #[cfg(feature = "e2e")]
+    check_timed(&timed, before, start);
+}
+
+/// One timed message, received after `start`, its length counted in the total past `before`.
+#[cfg(feature = "e2e")]
+fn check_timed(timed: &[(f64, usize)], before: u64, start: f64) {
+    let [(received_ms, len)] = timed else {
+        panic!("{timed:?}");
+    };
+    assert!(start <= *received_ms && *received_ms <= crate::e2e::epoch_ms());
+    // Other tests send too, so the total grew by this message at least.
+    assert!(crate::e2e::channel_bytes() >= before + *len as u64);
+}
+
 #[test]
 fn a_resubscribe_from_an_older_cursor_gets_the_tail_in_the_same_epoch() {
     let scratch = Scratch::new("older-cursor", &[]);
@@ -159,7 +191,8 @@ fn past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up() {
     // A rename may make more than one message: take every one sent before the pause. The pump
     // sends while holding the window's lock, so all of them are in the channel by now.
     sent.extend(messages.drain());
-    let unacked: usize = sent.iter().map(String::len).sum();
+    // In the e2e build each message the collector unwrapped was longer by its wrapper.
+    let unacked = sent.iter().map(String::len).sum::<usize>() + messages.timed_overhead();
     assert!(unacked > 256 * 1024, "paused at {unacked} bytes");
     // The pause dropped the host subscription: a rename now reaches no message.
     host.rename(thread, "while paused");
