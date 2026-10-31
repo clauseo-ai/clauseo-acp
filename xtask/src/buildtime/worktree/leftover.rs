@@ -5,7 +5,9 @@ use super::super::verdict::Failure;
 use super::Worktree;
 use super::steps::{GIT_TIMEOUT, Where, ran, same_path, with_output};
 use crate::process::{Cmd, Program, QuietRunner};
+use crate::write;
 use std::fs;
+use std::io;
 use std::path::Path;
 use std::time::Duration;
 
@@ -58,7 +60,8 @@ pub(super) fn refuse(worktree: &Worktree<'_>, runner: &mut QuietRunner<'_>) -> R
 }
 
 /// After a run: removes the worktree with `git worktree remove --force` when this run's
-/// `git worktree add` succeeded (`added`), then makes sure it is gone from disk and from
+/// `git worktree add` succeeded (`added`), and then whatever that left at its path
+/// (`remove_what_git_left`), then makes sure it is gone from disk and from
 /// `git worktree list`. Nothing was at its path right before the add (`refuse`), so after a
 /// successful add what is there this run made. When the add failed, xtask removes nothing: git
 /// undoes a failed add itself, and xtask cannot tell whether git or someone else made what is
@@ -74,8 +77,13 @@ pub(super) fn remove(
         let path = worktree.path.to_string_lossy();
         let remove = ["worktree", "remove", "--force", &path];
         let cmd = Cmd::new(Program::Git, remove, REMOVE_TIMEOUT);
-        if let Err(failure) = ran(runner, &cmd, worktree.root, Where::Checkout) {
-            why.push(with_output(failure));
+        match ran(runner, &cmd, worktree.root, Where::Checkout) {
+            Err(failure) => why.push(with_output(failure)),
+            Ok(_) => {
+                if let Err(error) = remove_what_git_left(&worktree.path) {
+                    why.push(format!("removing what git left there failed ({error})"));
+                }
+            }
         }
     }
     let list_failed = match listed(worktree, runner) {
@@ -111,6 +119,21 @@ pub(super) fn remove(
         }
     };
     Err(Failure::new(message, leftover_fix(&worktree.path)))
+}
+
+/// After `git worktree remove --force` succeeded: removes what it left at `path`, which this run
+/// made. Git for Windows exits 0 but cannot delete a junction, so the ignored
+/// `ui/app/components` that `pnpm install` links (`ui/app/scripts/components-link.mjs`) stays,
+/// with the folders above it. `write::remove_in` removes a junction or symlink without following
+/// it. Nothing there is `Ok`.
+fn remove_what_git_left(path: &Path) -> io::Result<()> {
+    if fs::symlink_metadata(path).is_err() {
+        return Ok(());
+    }
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return Err(io::Error::other("the path has no parent folder"));
+    };
+    write::remove_in(parent, &name.to_string_lossy())
 }
 
 /// Whether `git worktree list --porcelain` names the worktree.

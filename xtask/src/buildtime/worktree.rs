@@ -39,11 +39,12 @@
 //!
 //! The gated probe, `fresh_worktree`, is each run's six steps added up; a run with a failed step
 //! gives it no sample. After every run, a failed one too, the worktree is removed with
-//! `git worktree remove --force` when the run's `git worktree add` succeeded, and must be gone
-//! from disk and from `git worktree list`; when it is not, the run fails with a fix line and no
-//! further run starts. When the add failed, xtask removes nothing: it names what is left at the
-//! path, since it cannot tell whether git or someone else made it. Whatever is left, before a run
-//! or after one, gets one fix line (`leftover.rs`).
+//! `git worktree remove --force` when the run's `git worktree add` succeeded, together with what
+//! that leaves on disk (Git for Windows leaves the junction `pnpm install` makes at
+//! `ui/app/components`), and must be gone from disk and from `git worktree list`; when it is not,
+//! the run fails with a fix line and no further run starts. When the add failed, xtask removes
+//! nothing: it names what is left at the path, since it cannot tell whether git or someone else
+//! made it. Whatever is left, before a run or after one, gets one fix line (`leftover.rs`).
 //!
 //! `--json` prints one object: `{"rustc", "profile", "incremental", "ci", "runs", "passed",
 //! "probes": [...]}`, each probe in the shape `report.rs` gives both halves, the six steps then
