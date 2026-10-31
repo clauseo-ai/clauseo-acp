@@ -1,11 +1,10 @@
 //! `Effective::apply_ui_patch`: the lock check, the write, and memory left alone when either
-//! fails. The fakes and policy sources are the ones in `tests.rs`.
+//! fails. The fakes and policy sources are the ones in `crate::testing`.
 
 use super::Effective;
-use super::tests::{locations, policy, user};
 use crate::error::Error;
-use crate::schema::{Density, FontSize, Language, Theme};
-use crate::testing::MemFiles;
+use crate::schema::{Density, FontSize, Language, Theme, UiSettings};
+use crate::testing::{MemFiles, locations, policy, user};
 use crate::ui::UiPatch;
 use std::path::PathBuf;
 
@@ -212,4 +211,29 @@ fn an_empty_patch_leaves_a_commented_file_byte_identical() {
         .apply_ui_patch(&no_file, &UiPatch::default())
         .unwrap();
     assert_eq!(file_text(&no_file), None);
+}
+
+#[test]
+fn an_all_fields_patch_reaches_memory_and_a_fresh_load_alike() {
+    // Every field set to a value that is not its default, so a field the write or the apply
+    // drops shows as a default.
+    let files = MemFiles::default();
+    let mut effective = Effective::load(&locations(), &files, &[]);
+    let patch = UiPatch {
+        theme: Some(Theme::Dark),
+        font_size: Some(FontSize::try_from(18).unwrap()),
+        density: Some(Density::Compact),
+        language: Some(Language::try_from("fr".to_owned()).unwrap()),
+    };
+    effective.apply_ui_patch(&files, &patch).unwrap();
+    let expected = UiSettings {
+        theme: Theme::Dark,
+        font_size: FontSize::try_from(18).unwrap(),
+        density: Density::Compact,
+        language: Language::try_from("fr".to_owned()).unwrap(),
+    };
+    assert_eq!(effective.settings().ui, expected);
+    let fresh = Effective::load(&locations(), &files, &[]);
+    assert_eq!(fresh.settings().ui, expected);
+    assert_eq!(fresh.warnings(), []);
 }

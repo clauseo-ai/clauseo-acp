@@ -40,14 +40,32 @@ fn an_empty_patch_changes_nothing_and_serialises_empty() {
     assert_eq!(serde_json::to_string(&UiPatch::default()).unwrap(), "{}");
 }
 
+/// A patch that sets all four fields, to values that are not the defaults.
+fn every_field() -> UiPatch {
+    UiPatch {
+        theme: Some(Theme::Dark),
+        font_size: Some(FontSize::try_from(18).unwrap()),
+        density: Some(Density::Compact),
+        language: Some(Language::try_from("fr".to_owned()).unwrap()),
+    }
+}
+
+#[test]
+fn the_keys_are_the_names_the_writer_saves() {
+    // The writer saves `to_value(patch)` (user.rs); the lock check reads `keys()`. They must agree.
+    let saved = serde_json_lenient::to_value(every_field()).unwrap();
+    let names: Vec<String> = saved
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|name| format!("ui.{name}"))
+        .collect();
+    assert_eq!(every_field().keys(), names);
+}
+
 #[test]
 fn the_keys_a_patch_sets_are_the_ui_policy_keys_in_field_order() {
-    let all = UiPatch {
-        theme: Some(Theme::Dark),
-        font_size: Some(FontSize::default()),
-        density: Some(Density::Compact),
-        language: Some(Language::default()),
-    };
+    let all = every_field();
     let ui_keys: Vec<&str> = KEYS
         .iter()
         .map(|(key, _)| *key)

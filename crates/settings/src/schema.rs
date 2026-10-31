@@ -106,16 +106,23 @@ impl Settings {
     /// Sets each `ui` field the patch holds. Only [`crate::Effective::apply_ui_patch`] calls it,
     /// after the write has succeeded, so the file and memory never disagree.
     pub(crate) fn apply_ui_patch(&mut self, patch: &UiPatch) {
-        if let Some(theme) = patch.theme {
-            self.ui.theme = theme;
+        // Every field is named here, so a new field does not compile until it is applied.
+        let UiPatch {
+            theme,
+            font_size,
+            density,
+            language,
+        } = patch;
+        if let Some(theme) = theme {
+            self.ui.theme = *theme;
         }
-        if let Some(font_size) = patch.font_size {
-            self.ui.font_size = font_size;
+        if let Some(font_size) = font_size {
+            self.ui.font_size = *font_size;
         }
-        if let Some(density) = patch.density {
-            self.ui.density = density;
+        if let Some(density) = density {
+            self.ui.density = *density;
         }
-        if let Some(language) = &patch.language {
+        if let Some(language) = language {
             self.ui.language = language.clone();
         }
     }

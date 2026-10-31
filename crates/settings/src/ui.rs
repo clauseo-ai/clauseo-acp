@@ -31,11 +31,18 @@ impl UiPatch {
     /// The dotted keys this patch sets, in field order (theme, font size, density, language).
     /// A key the patch leaves out is not in the list, so an empty list means an empty patch.
     pub(crate) fn keys(&self) -> Vec<&'static str> {
+        // Every field is named here, so a new field does not compile until it is listed.
+        let UiPatch {
+            theme,
+            font_size,
+            density,
+            language,
+        } = self;
         [
-            ("ui.theme", self.theme.is_some()),
-            ("ui.font_size", self.font_size.is_some()),
-            ("ui.density", self.density.is_some()),
-            ("ui.language", self.language.is_some()),
+            ("ui.theme", theme.is_some()),
+            ("ui.font_size", font_size.is_some()),
+            ("ui.density", density.is_some()),
+            ("ui.language", language.is_some()),
         ]
         .into_iter()
         .filter_map(|(key, set)| set.then_some(key))

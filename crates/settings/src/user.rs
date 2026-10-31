@@ -1,4 +1,5 @@
-//! The user's `settings.json`: reading it, and the one write, a [`UiPatch`].
+//! The user's `settings.json`: reading it, and the write of a [`UiPatch`]. Only
+//! [`crate::Effective::apply_ui_patch`] calls that write, after it has checked policy locks.
 
 #[cfg(test)]
 mod tests;
