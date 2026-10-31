@@ -1,15 +1,19 @@
-//! `SystemFiles` on a real disk, under `CARGO_TARGET_TMPDIR` only: a settings file written with
-//! `write_user_settings` loads back through `Effective::load`.
+//! `SystemFiles` on a real disk, under `CARGO_TARGET_TMPDIR` only: a `ui` change applied with
+//! `Effective::apply_ui_patch` is saved to a settings file that loads back through
+//! `Effective::load`.
 
-use clauseo_settings::{
-    Effective, Files as _, FontSize, Locations, SystemFiles, Theme, UiPatch, write_user_settings,
-};
+use clauseo_settings::{Effective, Files as _, FontSize, Locations, SystemFiles, Theme, UiPatch};
 use std::path::PathBuf;
 use std::process;
 
 #[cfg(unix)]
 #[path = "disk/write.rs"]
 mod write;
+
+/// The effective settings of `locations` with no policy, as a fresh start loads them.
+fn load(locations: &Locations) -> Effective {
+    Effective::load(locations, &SystemFiles, &[])
+}
 
 #[test]
 fn round_trip_under_target_tmpdir() {
@@ -22,18 +26,20 @@ fn round_trip_under_target_tmpdir() {
     files
         .write_atomic(locations.settings_file(), b"{\"zeta\": true}")
         .unwrap();
+    let mut effective = load(&locations);
     let theme = UiPatch {
         theme: Some(Theme::Dark),
         ..UiPatch::default()
     };
-    write_user_settings(&locations, &files, &theme).unwrap();
+    effective.apply_ui_patch(&files, &theme).unwrap();
     let size = UiPatch {
         font_size: Some(FontSize::try_from(18).unwrap()),
         ..UiPatch::default()
     };
-    write_user_settings(&locations, &files, &size).unwrap();
+    effective.apply_ui_patch(&files, &size).unwrap();
+    assert_eq!(effective.settings().ui.font_size.get(), 18);
 
-    let effective = Effective::load(&locations, &files, &[]);
+    let effective = load(&locations);
     assert_eq!(effective.settings().ui.theme, Theme::Dark);
     assert_eq!(effective.settings().ui.font_size.get(), 18);
     // The unknown key stayed, and is the one warning.
@@ -81,7 +87,9 @@ fn saving_through_a_symlink_writes_the_linked_file_and_keeps_the_link() {
         theme: Some(Theme::Dark),
         ..UiPatch::default()
     };
-    write_user_settings(&locations, &SystemFiles, &dark).unwrap();
+    load(&locations)
+        .apply_ui_patch(&SystemFiles, &dark)
+        .unwrap();
 
     let link = std::fs::symlink_metadata(locations.settings_file()).unwrap();
     assert!(link.file_type().is_symlink());
@@ -90,8 +98,7 @@ fn saving_through_a_symlink_writes_the_linked_file_and_keeps_the_link() {
         text.contains("\"zeta\": 1") && text.contains("\"dark\""),
         "{text}"
     );
-    let effective = Effective::load(&locations, &SystemFiles, &[]);
-    assert_eq!(effective.settings().ui.theme, Theme::Dark);
+    assert_eq!(load(&locations).settings().ui.theme, Theme::Dark);
     // Only the two names: no temporary file is left in the folder.
     let mut names: Vec<_> = std::fs::read_dir(&root)
         .unwrap()
@@ -117,7 +124,9 @@ fn saving_keeps_the_files_permissions() {
         theme: Some(Theme::Dark),
         ..UiPatch::default()
     };
-    write_user_settings(&locations, &SystemFiles, &dark).unwrap();
+    load(&locations)
+        .apply_ui_patch(&SystemFiles, &dark)
+        .unwrap();
     let mode = std::fs::metadata(locations.settings_file())
         .unwrap()
         .permissions()

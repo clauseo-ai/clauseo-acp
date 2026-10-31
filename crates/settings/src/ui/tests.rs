@@ -1,4 +1,5 @@
 use super::UiPatch;
+use crate::leaf::KEYS;
 use crate::schema::{Density, FontSize, Language, Settings, Theme};
 
 #[test]
@@ -37,4 +38,29 @@ fn an_empty_patch_changes_nothing_and_serialises_empty() {
     settings.apply_ui_patch(&UiPatch::default());
     assert_eq!(settings.ui.theme, Theme::Light);
     assert_eq!(serde_json::to_string(&UiPatch::default()).unwrap(), "{}");
+}
+
+#[test]
+fn the_keys_a_patch_sets_are_the_ui_policy_keys_in_field_order() {
+    let all = UiPatch {
+        theme: Some(Theme::Dark),
+        font_size: Some(FontSize::default()),
+        density: Some(Density::Compact),
+        language: Some(Language::default()),
+    };
+    let ui_keys: Vec<&str> = KEYS
+        .iter()
+        .map(|(key, _)| *key)
+        .filter(|key| key.starts_with("ui."))
+        .collect();
+    assert_eq!(all.keys(), ui_keys);
+    assert_eq!(
+        UiPatch {
+            density: Some(Density::Compact),
+            ..UiPatch::default()
+        }
+        .keys(),
+        ["ui.density"]
+    );
+    assert_eq!(UiPatch::default().keys(), Vec::<&str>::new());
 }

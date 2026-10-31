@@ -56,8 +56,9 @@ pub(crate) fn read(path: &Path, files: &dyn Files, warnings: &mut Vec<Warning>) 
 /// Saves a [`UiPatch`] to the user's `settings.json`: the patch's fields replace those in the
 /// file's `ui` section, and every other key stays, in its order, unknown keys included. The
 /// file is written as plain JSON, so its comments are lost. A file that does not parse is left
-/// alone and the save fails, so nothing the user wrote is lost.
-pub fn write_user_settings(
+/// alone and the save fails, so nothing the user wrote is lost. It does not check policy locks:
+/// [`crate::Effective::apply_ui_patch`] does, before it calls this.
+pub(crate) fn write_user_settings(
     locations: &Locations,
     files: &dyn Files,
     patch: &UiPatch,

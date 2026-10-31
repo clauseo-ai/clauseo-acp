@@ -5,10 +5,10 @@
 //! The settings schema ([`Settings`] and its sections) and its JSON Schema; where the data
 //! folder, `settings.json` and new matters go on each OS ([`Locations`]); the folders a lawyer
 //! may not pick as a matter ([`refused_folders`]); reading `settings.json` (JSON with comments)
-//! and the one write to it, a [`UiPatch`]; and the policy layer a firm's IT pushes: the Windows
-//! registry, macOS managed preferences and a `policy.json`. Decision record
-//! `docs/decisions/0009-policy-layer.md` fixes the policy sources, paths, formats and the
-//! merge rule.
+//! and its one runtime write, [`Effective::apply_ui_patch`] of a [`UiPatch`]; and the policy
+//! layer a firm's IT pushes: the Windows registry, macOS managed preferences and a
+//! `policy.json`. Decision record `docs/decisions/0009-policy-layer.md` fixes the policy
+//! sources, paths, formats and the merge rule.
 //!
 //! # Interface
 //!
@@ -16,11 +16,12 @@
 //! tests and `cli`), then [`Effective::load`] with [`system_policy_sources`], and keep the
 //! [`Effective`] in an `Arc`. It answers [`Effective::settings`], [`Effective::agent`],
 //! [`Effective::default_matters_dir`], [`Effective::data_dir`], [`Effective::locations`],
-//! [`Effective::policy`], [`Effective::is_locked`] and [`Effective::warnings`]. Every input is a
-//! trait: [`PlatformDirs`], [`Env`], [`Files`] and [`PolicySource`], with [`SystemDirs`],
-//! [`SystemEnv`] and [`SystemFiles`] over the OS. The parsers of each policy store are in
-//! [`policy`]. The webview's settings are a [`UiPatch`], applied with
-//! [`Settings::apply_ui_patch`] and saved with [`write_user_settings`].
+//! [`Effective::policy`], [`Effective::is_locked`], [`Effective::warnings`] and
+//! [`Effective::apply_ui_patch`]. Every input is a trait: [`PlatformDirs`], [`Env`], [`Files`]
+//! and [`PolicySource`], with [`SystemDirs`], [`SystemEnv`] and [`SystemFiles`] over the OS. The
+//! parsers of each policy store are in [`policy`]. The webview's `ui` changes are a [`UiPatch`],
+//! applied with [`Effective::apply_ui_patch`]: the only write to `settings.json` and the only
+//! change to settings after `load`. Everything else takes effect on the next start.
 //!
 //! # Invariants
 //!
@@ -36,6 +37,8 @@
 //! - No variable moves or hides a policy source: [`DATA_DIR_VAR`] moves only the data folder.
 //!   Only `HKEY_LOCAL_MACHINE` and forced managed preferences count as policy.
 //! - [`UiPatch`] holds only the four `ui` fields and refuses any other key.
+//! - A [`UiPatch`] that names a locked key is refused with [`Error::Locked`], and nothing is
+//!   written or changed in memory.
 //! - An agent's `command` is an absolute path, or the agent is left out with a warning.
 //! - Tests read and write no real folder: every input is injected.
 //!
@@ -82,5 +85,4 @@ pub use schema::{
 };
 pub use system::{SystemDirs, SystemEnv};
 pub use ui::UiPatch;
-pub use user::write_user_settings;
 pub use warning::{Origin, Position, Warning, WarningKind};
