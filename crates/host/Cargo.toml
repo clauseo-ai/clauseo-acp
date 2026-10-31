@@ -1,0 +1,46 @@
+[package]
+name = "clauseo-host"
+version = "0.1.0"
+description = "The Clauseo session host: one thread and executor serving commands, turns, coalescing, subscriptions and per-turn checkpoints."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Exports `ManualClock`, `SequentialIds`, `HostConfig::with_patch_window_bytes` and
+# `HostHandle::abort_for_test` for this crate's tests and its dependents' tests.
+test-support = []
+
+[dependencies]
+clauseo-protocol = { path = "../protocol" }
+clauseo-reducer = { path = "../reducer" }
+clauseo-store = { path = "../store" }
+clauseo-matters = { path = "../matters" }
+clauseo-process = { path = "../process" }
+clauseo-acp = { path = "../acp" }
+clauseo-settings = { path = "../settings" }
+async-channel = { workspace = true, features = ["std"] }
+async-io = { workspace = true }
+# `executor` for `LocalPool` (QR11.2); the root line's default features include it already.
+futures = { workspace = true, features = ["executor"] }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# Itself with test-support, so its tests reach ManualClock and SequentialIds with no flag.
+clauseo-host = { path = ".", features = ["test-support"] }
+clauseo-fake_agent = { path = "../fake_agent" }
+# The reopen bench's fixture.
+clauseo-store = { path = "../store", features = ["test-support"] }
+proptest = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "reopen"
+harness = false
+
+[lints]
+workspace = true
