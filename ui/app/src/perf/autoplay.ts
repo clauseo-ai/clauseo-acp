@@ -91,8 +91,16 @@ export async function autoplay(d: AutoplayDeps): Promise<void> {
     await d.finish(JSON.stringify(run), null);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // How far the session got, so a timeout tells a crawling stream from a stalled one.
+    const answer = d.doc.querySelector('[data-testid="message-agent"]')?.textContent?.length ?? 0;
+    const stop = d.doc
+      .querySelector('[data-testid="turn-stopped"]')
+      ?.getAttribute("data-stop-reason");
+    const progress = `; answer text so far ${answer} characters, stop reason ${stop ?? "none"}`;
     // MARKS_OUT unset makes this refuse too; the app then stays open, as the contract says.
-    await d.finish(null, `autoplay, at step "${state.step}": ${message}`).catch(() => {});
+    await d
+      .finish(null, `autoplay, at step "${state.step}": ${message}${progress}`)
+      .catch(() => {});
   }
 }
 
