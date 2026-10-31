@@ -1,0 +1,13 @@
+{"scenario":"undo-note","description":"Turn 1 writes notes/a.txt; after the lawyer undoes that step, turn 2's prompt must open with Clauseo's undo note as its first block","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"write_file":{"path":"notes/a.txt","content":"Alpha\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-write-a","title":"Write notes/a.txt","name":"Write","kind":"edit","status":"completed","content":[{"type":"diff","path":"{{cwd}}/notes/a.txt","newText":"Alpha\n"}],"locations":[{"path":"{{cwd}}/notes/a.txt"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Wrote one note."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-1","prompt":[{"type":"text","text":"Note from Clauseo: since your last turn, the lawyer put these files back to an earlier version: notes/a.txt. Read them again before relying on what you remember about them."},{"type":"text","text":"Carry on."}]}},"note":"prompt[0] is the undo note, prompt[1] the lawyer's text"}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-2","content":{"type":"text","text":"I will read notes/a.txt again."}}}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

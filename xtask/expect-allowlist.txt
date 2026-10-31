@@ -115,3 +115,4 @@ crates/settings/src/policy/macos.rs entries unsafe_code
 crates/host/src/clock.rs SystemClock::now clippy::disallowed_methods
 crates/host/src/write.rs - clippy::disallowed_methods
 crates/host/src/pipeline/tests/write.rs - clippy::disallowed_methods
+crates/host/tests/host/write.rs - clippy::disallowed_methods
