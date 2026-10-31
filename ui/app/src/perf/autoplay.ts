@@ -294,7 +294,7 @@ async function play(d: AutoplayDeps, state: { step: string; expired: boolean; se
   }
   // Back to the very end, so the transcript follows it again. Scrolling up stops LegendList following, and 1,200 px
   // back down lands short of an end that grew meanwhile (it re-follows only within ~10% of the viewport), so the
-  // turn's last rows would never be drawn (the macos-15 "stall", stall-diagnosis.md).
+  // turn's last rows would never be drawn (the macos-15 "stall" in #106).
   list.scrollTo(0, list.scrollHeight);
   await d.frame();
 
