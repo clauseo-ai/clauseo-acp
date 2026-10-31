@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: ISC
-// Copied from https://github.com/lucide-icons/lucide icons/, re-cut on a 20 px grid for a 1.5 px stroke with square
-// ends and sharp joins. Licence: LICENSES/ISC-lucide.txt. Clauseo's own glyphs, in the same cut, are in glyphs.tsx
-// under the repo's licence; they are re-exported here so every icon has one import. Every icon is listed in names.ts,
-// and icons.test.ts fails when the two disagree.
+// Copied from https://github.com/lucide-icons/lucide icons/ at an unrecorded release, re-cut on a 20 px grid for a
+// 1.5 px stroke with square ends and sharp joins. The re-cut redrew the shapes, so no release matches them exactly,
+// and the design recorded none. The newest release when the set was cut, on 27 Oct 2026, was 1.62.0 (commit
+// 03f11e2d6adc319ea21e9a1d5820a99cd3767257). Licence: LICENSES/ISC-lucide.txt. Clauseo's own glyphs, in the same
+// cut, are in glyphs.tsx under the repo's licence; they are re-exported here so every icon has one import. Every icon
+// is listed in names.ts, and icons.test.ts fails when the two disagree.
 import { Icon, type IconProps } from "./icon.tsx";
 
 export { IconAccept, IconPageTurn, IconPaperBookPage, IconSafeWorkspace } from "./glyphs.tsx";
