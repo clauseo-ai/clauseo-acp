@@ -1,35 +1,29 @@
 //! [`GixStore`]: the [`HistoryStore`] over gix's loose object store. Commits are encoded and
-//! hashed here (blobs in `blob.rs`, trees in `tree.rs`) and written through two loose stores
-//! on one `objects` folder, so the compression level is chosen per object and every new object
-//! file is known for the sync in [`HistoryStore::publish`].
+//! hashed here (blobs in `blob.rs`, trees in `tree.rs`) and written through the two loose stores
+//! of [`Objects`] on one `objects` folder, so the compression level is chosen per object and
+//! every new object file is known for the sync in [`HistoryStore::publish`]. Every read goes
+//! through [`Objects`], which checks each object against its id.
 
 use std::fs::File;
-use std::io::{self, BufReader, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use gix::hash::{Kind as HashKind, ObjectId};
 use gix::objs::{CommitRef, Kind};
-use gix::odb::loose;
-use gix::zlib::Compression;
 
-use super::blob::{Blobs, Target, count};
-use super::check;
+use super::blob::{Blobs, Target};
 use super::durable::{self, NewObjects, put};
+use super::objects::Objects;
 use super::{CommitRecord, HEAD_REF, HistoryStore, Oid, TreeFile, index_file, tree};
 use crate::stat::{FileTime, StatCache};
 use crate::{Error, fsync, write};
 
-/// The chunk in which a blob is inflated by [`HistoryStore::read_blob`].
-const READ_CHUNK: usize = 64 * 1024;
-
-/// The shadow repository of one matter: its git dir and the loose object stores in it.
+/// The shadow repository of one matter: its git dir and the loose objects in it.
 pub(crate) struct GixStore {
     /// `history.git`.
     git_dir: PathBuf,
-    /// Writes blobs that are already compressed, at zlib level 0.
-    stored: loose::Store,
-    /// Writes every other object at zlib level 1, and reads every object.
-    deflated: loose::Store,
+    /// The loose objects: every read checked against its id.
+    objects: Objects,
     /// Reads files as blobs.
     blobs: Blobs,
     /// Object files written since the last publish.
@@ -127,19 +121,9 @@ pub(super) fn modified(file: &File, path: &Path) -> Result<FileTime, Error> {
 impl GixStore {
     /// The store of the git dir `git_dir`, which exists.
     fn at(git_dir: &Path) -> Self {
-        let objects = git_dir.join("objects");
-        let options = |compression| loose::Options {
-            alloc_limit_bytes: None,
-            compression,
-        };
         Self {
             git_dir: git_dir.to_path_buf(),
-            stored: loose::Store::at_opts(&objects, HashKind::Sha1, options(Compression::NONE)),
-            deflated: loose::Store::at_opts(
-                objects,
-                HashKind::Sha1,
-                options(Compression::BEST_SPEED),
-            ),
+            objects: Objects::at(&git_dir.join("objects")),
             blobs: Blobs::new(),
             new_objects: NewObjects::default(),
         }
@@ -216,8 +200,8 @@ impl HistoryStore for GixStore {
 
     fn store_file(&mut self, file: &Path, len: u64, cap: u64) -> Result<(Oid, u64), Error> {
         let target = Target {
-            stored: &self.stored,
-            deflated: &self.deflated,
+            stored: self.objects.stored(),
+            deflated: self.objects.deflated(),
             new_objects: &mut self.new_objects,
         };
         self.blobs.read(file, len, cap, Some(target))
@@ -228,61 +212,14 @@ impl HistoryStore for GixStore {
     }
 
     fn read_blob(&self, blob: Oid, path: &str, out: &mut dyn Write) -> Result<u64, Error> {
-        let id = to_gix(blob);
-        let object = self.deflated.object_path(&id);
-        let file = File::open(&object).map_err(|err| Error::io("open", &object, err))?;
-        let mut input = BufReader::with_capacity(READ_CHUNK, file);
-        let mut state = gix::zlib::Decompress::new();
-        let mut chunk = vec![0_u8; READ_CHUNK];
-        let mut inflate = |chunk: &mut [u8]| {
-            gix::zlib::stream::inflate::read(&mut input, &mut state, chunk)
-                .map_err(|err| Error::io("read", &object, err))
-        };
-        let mut last = inflate(&mut chunk)?;
-        let first = chunk.get(..last).unwrap_or_default();
-        let (kind, size, header) = gix::objs::decode::loose_header(first)
-            .map_err(|err| Error::history("read blob", err))?;
-        if kind != Kind::Blob {
-            return Err(Error::history("read blob", format!("{id} is not a blob")));
-        }
-        // The id is the hash of the header and the body as inflated, hashed in the pass that
-        // writes them.
-        let mut hasher = gix::hash::hasher(HashKind::Sha1);
-        hasher.update(first.get(..header).unwrap_or_default());
-        let body = first.get(header..).unwrap_or_default();
-        hasher.update(body);
-        out.write_all(body)
-            .map_err(|err| Error::history("write blob", err))?;
-        let mut written = count(body.len());
-        while last == chunk.len() {
-            last = inflate(&mut chunk)?;
-            let part = chunk.get(..last).unwrap_or_default();
-            hasher.update(part);
-            out.write_all(part)
-                .map_err(|err| Error::history("write blob", err))?;
-            written += count(last);
-        }
-        if written != size {
-            let message = format!("{path}: {id} holds {written} bytes, its header says {size}");
-            return Err(Error::history("read blob", message));
-        }
-        let found = hasher
-            .try_finalize()
-            .map_err(|err| Error::history("read blob", err))?;
-        check::same(&id, found, "read blob", path)?;
-        Ok(written)
+        self.objects.read_blob(&to_gix(blob), path, out)
     }
 
     fn blob_len(&self, blob: Oid) -> Result<u64, Error> {
         let id = to_gix(blob);
-        let header = self
-            .deflated
-            .try_header(&id)
-            .map_err(|err| Error::history("read object", err))?;
-        match header {
-            Some((size, Kind::Blob)) => Ok(size),
-            Some(_) => Err(Error::history("read object", format!("{id} is not a blob"))),
-            None => Err(Error::history("read object", format!("{id} is missing"))),
+        match self.objects.header(&id)? {
+            (size, Kind::Blob) => Ok(size),
+            _ => Err(Error::history("read object", format!("{id} is not a blob"))),
         }
     }
 
@@ -295,24 +232,24 @@ impl HistoryStore for GixStore {
                 return Err(Error::history("write tree", message));
             }
         }
-        let id = tree::write(&self.deflated, &mut self.new_objects, files, 0)?;
+        let id = tree::write(self.objects.deflated(), &mut self.new_objects, files, 0)?;
         to_oid(&id)
     }
 
     fn read_tree(&self, tree: Oid) -> Result<Vec<TreeFile>, Error> {
         let mut files = Vec::new();
-        tree::read(&self.deflated, to_gix(tree), "", &mut files)?;
+        tree::read(&self.objects, to_gix(tree), "", &mut files)?;
         files.sort_unstable_by(|a, b| a.path.as_bytes().cmp(b.path.as_bytes()));
         Ok(files)
     }
 
     fn file_at(&self, tree: Oid, path: &str) -> Result<Option<Oid>, Error> {
-        tree::file_at(&self.deflated, to_gix(tree), path)
+        tree::file_at(&self.objects, to_gix(tree), path)
     }
 
     fn changed_files(&self, a: Oid, b: Oid) -> Result<(Vec<TreeFile>, Vec<TreeFile>), Error> {
         let (mut old, mut new) = (Vec::new(), Vec::new());
-        tree::changed(&self.deflated, to_gix(a), to_gix(b), &mut old, &mut new)?;
+        tree::changed(&self.objects, to_gix(a), to_gix(b), &mut old, &mut new)?;
         old.sort_unstable_by(|x, y| x.path.as_bytes().cmp(y.path.as_bytes()));
         new.sort_unstable_by(|x, y| x.path.as_bytes().cmp(y.path.as_bytes()));
         Ok((old, new))
@@ -336,7 +273,7 @@ impl HistoryStore for GixStore {
         let id = gix::objs::compute_hash(HashKind::Sha1, Kind::Commit, data.as_bytes())
             .map_err(|err| Error::history("hash", err))?;
         put(
-            &self.deflated,
+            self.objects.deflated(),
             &mut self.new_objects,
             Kind::Commit,
             data.as_bytes(),
@@ -350,7 +287,9 @@ impl HistoryStore for GixStore {
         let mut next = durable::read_ref(&self.git_dir)?;
         let mut buffer = Vec::new();
         while let Some(oid) = next {
-            let data = tree::find(&self.deflated, &to_gix(oid), Kind::Commit, "", &mut buffer)?;
+            let data = self
+                .objects
+                .find(&to_gix(oid), Kind::Commit, "", &mut buffer)?;
             let commit = CommitRef::from_bytes(data, HashKind::Sha1)
                 .map_err(|err| Error::history("read commit", err))?;
             records.push(CommitRecord {
@@ -374,12 +313,12 @@ impl HistoryStore for GixStore {
         expected: Option<Oid>,
         cache: &mut StatCache,
     ) -> Result<(), Error> {
-        if !self.deflated.contains(&to_gix(commit)) {
+        if !self.objects.contains(&to_gix(commit)) {
             let message = format!("commit {} is not stored", commit.to_hex());
             return Err(Error::history("publish", message));
         }
         durable::check_ref(&self.git_dir, expected)?;
-        self.new_objects.make_durable(self.deflated.path())?;
+        self.new_objects.make_durable(self.objects.path())?;
         durable::move_ref(&self.git_dir, commit, expected)?;
         self.new_objects
             .set_published_at(durable::ref_time(&self.git_dir)?);

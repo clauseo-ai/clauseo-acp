@@ -267,11 +267,8 @@ fn a_corrupt_tree_is_never_followed() {
             CompareSide::Checkpoint(cid(3)),
         )
         .unwrap_err();
-    assert!(matches!(err, Error::History { .. }), "{err:?}");
-    assert!(
-        format!("{err:?}").contains(&tree.to_hex().to_string()),
-        "{err:?}"
-    );
+    // The diff reads the subtree without knowing its folder: the error names the object.
+    assert_names(&err, tree, None);
 
     let err = matter
         .restore(&restore_request(1, RestoreFiles::All, 4, 5))

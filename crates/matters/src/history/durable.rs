@@ -6,9 +6,9 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use super::objects::Writer;
 use gix::hash::ObjectId;
-use gix::objs::{Kind, Write as _};
-use gix::odb::loose;
+use gix::objs::Kind;
 
 use super::check;
 use super::gix_store::{sync_dir, to_oid};
@@ -87,7 +87,7 @@ impl NewObjects {
 /// renames the new object onto it (on Windows, where that rename is skipped when the target
 /// exists, it is removed first). An I/O error reading it is returned and the file kept.
 pub(super) fn present(
-    store: &loose::Store,
+    store: Writer<'_>,
     new_objects: &mut NewObjects,
     id: &ObjectId,
     kind: Kind,
@@ -129,7 +129,7 @@ pub(super) fn present(
 /// Writes object `id` (`kind`, `data`) through `store` unless it is [`present`], and records
 /// the file in `new_objects`.
 pub(super) fn put(
-    store: &loose::Store,
+    store: Writer<'_>,
     new_objects: &mut NewObjects,
     kind: Kind,
     data: &[u8],
@@ -141,9 +141,7 @@ pub(super) fn put(
     }
     let path = store.object_path(&id);
     let made_folder = !path.parent().is_some_and(Path::is_dir);
-    store
-        .write_buf_with_known_id(kind, data, id)
-        .map_err(|err| Error::history("write object", err))?;
+    store.write_buf(kind, data, id)?;
     new_objects.record(path, made_folder);
     Ok(())
 }
