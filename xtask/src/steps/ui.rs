@@ -121,8 +121,9 @@ fn vitest_step() -> ToolStep {
     }
 }
 
-/// ui/e2e's unit tests (`test:unit`): Playwright's runner with its `unit` project, which runs on
-/// any OS. Like vitest, its output is not parsed for findings.
+/// ui/e2e's unit tests (`test:unit`): Playwright's runner with its `unit` project. The project has
+/// no platform code: CI's fast lane runs it on Linux, and e2e-windows.yml runs the same script on
+/// Windows. Like vitest, its output is not parsed for findings.
 fn playwright_unit_step() -> ToolStep {
     ToolStep {
         name: "playwright-unit",
@@ -372,6 +373,28 @@ mod tests {
     const TSC_E2E_FAILING: &str = "$ tsc --noEmit --pretty false\n\
         app-windows/zz_planted.ts(2,14): error TS2322: Type 'string' is not assignable to type 'number'.\n\
         [ELIFECYCLE] Command failed with exit code 1.\n";
+
+    /// The same error with the backslashes a Windows path has, as `ui_path` receives it.
+    const TSC_E2E_FAILING_WINDOWS: &str = "$ tsc --noEmit --pretty false\n\
+        app-windows\\zz_planted.ts(2,14): error TS2322: Type 'string' is not assignable to type 'number'.\n\
+        [ELIFECYCLE] Command failed with exit code 1.\n";
+
+    #[test]
+    fn tsc_turns_a_windows_ui_e2e_path_into_a_forward_slash_path_under_ui_e2e() {
+        assert_eq!(
+            findings(
+                tsc_e2e_step().parse,
+                &tsc_e2e_step().cmd,
+                TSC_E2E_FAILING_WINDOWS
+            ),
+            [row(
+                "ui/e2e/app-windows/zz_planted.ts",
+                2,
+                "error TS2322: Type 'string' is not assignable to type 'number'.",
+                true,
+            )]
+        );
+    }
 
     #[test]
     fn tsc_turns_a_ui_e2e_error_into_a_finding_under_ui_e2e() {
