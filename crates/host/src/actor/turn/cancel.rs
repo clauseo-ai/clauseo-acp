@@ -4,9 +4,9 @@
 //! every running turn the same way and stops every agent.
 
 use clauseo_protocol::{
-    CommandOutcome, ElicitationOutcome, ElicitationResolved, ElicitationResponse, PermissionChoice,
-    PermissionResolved, Principal, StopReason, StreamId, ThreadId, ToolCallPatch, ToolCallStatus,
-    ToolCallUpdated, TurnEnded, TurnId,
+    AgentSessionDetached, CommandOutcome, ElicitationOutcome, ElicitationResolved,
+    ElicitationResponse, ExpiryReason, PermissionChoice, PermissionResolved, Principal, StopReason,
+    StreamId, ThreadId, ToolCallPatch, ToolCallStatus, ToolCallUpdated, TurnEnded, TurnId,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -14,8 +14,8 @@ use super::super::{Actor, Tag};
 use super::agents::{self, Stage};
 use super::out::Out;
 use super::{
-    CANCEL_WAIT, End, Phase, Then, TimerKind, TurnTimer, current, end, matter_of, spawn, state,
-    updates,
+    CANCEL_WAIT, End, Phase, Then, TimerKind, TurnTag, TurnTimer, current, end, failure, matter_of,
+    spawn, state, updates,
 };
 use crate::error::Error;
 
@@ -35,8 +35,9 @@ pub(super) fn cancel_command(
             cancel_running(actor, thread, Some(ctx));
             Ok(())
         }
-        Some((Phase::Checkpointing, false, _)) => {
-            // Ended when the checkpoint answers, before anything is sent.
+        Some((Phase::Checkpointing | Phase::Starting, false, _)) => {
+            // Ended when the checkpoint (or the `TurnStarted` commit) answers, before the
+            // prompt is sent.
             if let Some(current) = current(actor, thread) {
                 current.cancelled = true;
             }
@@ -65,13 +66,15 @@ fn done_tag(ctx: CommandCtx) -> Tag {
     }
 }
 
-/// A turn that has not started: `TurnEnded { Cancelled, None }`, no `TurnStarted`.
+/// A turn that has not started: `TurnEnded { Cancelled, None }`, no `TurnStarted`, then the
+/// detach of an agent that exited while the turn waited.
 fn dequeue(
     actor: &mut Actor,
     ctx: CommandCtx,
     thread: ThreadId,
     turn: TurnId,
 ) -> Result<(), Error> {
+    let detach = current(actor, thread).and_then(|current| current.detach.clone());
     let mut out = Out::new(actor, thread, Some(ctx.id))?;
     out.push(
         actor,
@@ -82,10 +85,23 @@ fn dequeue(
             checkpoint_after: None,
         },
     )?;
+    if let Some(reason) = detach.clone() {
+        out.push(actor, AgentSessionDetached { reason })?;
+    }
     let now = actor.now().wall;
     out.draft
         .receipt(ctx.receipt(Some(StreamId::Thread(thread)), CommandOutcome::Done, now));
-    out.send_tagged(actor, done_tag(ctx))?;
+    let tag = Tag::Command {
+        id: ctx.id,
+        outcome: CommandOutcome::Done,
+        after: AfterCommand::Turn(TurnTag {
+            thread,
+            then: Then::Closing(turn),
+        }),
+    };
+    out.send_tagged(actor, tag)?;
+    let reasons = (ExpiryReason::TurnEnded, detach);
+    failure::closing_sent(actor, thread, turn, reasons, Ok(()));
     if let Some(state) = state(actor, thread) {
         state.current = None;
     }
@@ -153,19 +169,20 @@ pub(super) fn cancel_running(actor: &mut Actor, thread: ThreadId, ctx: Option<Co
     }
 }
 
-fn log_cancel(
+/// The cancel commit of a running turn, read from the sent view: it holds nothing (and is not
+/// sent, unless a command asked) when nothing is pending.
+pub(super) fn log_cancel(
     actor: &mut Actor,
     thread: ThreadId,
     turn: TurnId,
     ctx: Option<CommandCtx>,
 ) -> Result<(), Error> {
-    let (permissions, elicitations, tools): (Vec<_>, Vec<_>, Vec<_>) = actor
+    let (permissions, elicitations): (Vec<_>, Vec<_>) = actor
         .loaded(StreamId::Thread(thread))
         .map(|loaded| {
             (
                 loaded.sent.permissions().map(|(id, _)| id).collect(),
                 loaded.sent.elicitations().map(|(id, _)| id).collect(),
-                loaded.sent.unfinished_tools(turn).collect(),
             )
         })
         .unwrap_or_default();
@@ -186,13 +203,7 @@ fn log_cancel(
         };
         out.push(actor, resolved)?;
     }
-    for tool_call in tools {
-        let patch = ToolCallPatch {
-            status: Some(ToolCallStatus::Cancelled),
-            ..ToolCallPatch::default()
-        };
-        out.push(actor, ToolCallUpdated { tool_call, patch })?;
-    }
+    push_tool_cancels(actor, thread, turn, &mut out)?;
     match ctx {
         Some(ctx) => {
             let now = actor.now().wall;
@@ -205,6 +216,27 @@ fn log_cancel(
         }
         None => out.send(actor, Then::Nothing),
     }
+}
+
+/// `Cancelled` for each tool call of `turn` whose status is not final, as sent.
+pub(super) fn push_tool_cancels(
+    actor: &mut Actor,
+    thread: ThreadId,
+    turn: TurnId,
+    out: &mut Out,
+) -> Result<(), Error> {
+    let tools: Vec<_> = actor
+        .loaded(StreamId::Thread(thread))
+        .map(|loaded| loaded.sent.unfinished_tools(turn).collect())
+        .unwrap_or_default();
+    for tool_call in tools {
+        let patch = ToolCallPatch {
+            status: Some(ToolCallStatus::Cancelled),
+            ..ToolCallPatch::default()
+        };
+        out.push(actor, ToolCallUpdated { tool_call, patch })?;
+    }
+    Ok(())
 }
 
 /// The cancel fallback fired before the agent answered: drop the prompt, stop the agent; the
@@ -242,14 +274,15 @@ pub(super) fn shutdown(actor: &mut Actor) {
         let found = current(actor, thread).map(|current| (current.phase, current.cancelled));
         match found {
             Some((Phase::Prompting, false)) => cancel_running(actor, thread, None),
-            Some((Phase::Checkpointing, false)) => {
+            Some((Phase::Checkpointing | Phase::Starting, false)) => {
                 if let Some(current) = current(actor, thread) {
                     current.cancelled = true;
                 }
             }
             Some((Phase::Accepting | Phase::Launching | Phase::Queued, _)) => {
-                if let Some(state) = state(actor, thread) {
-                    state.current = None;
+                let dropped = state(actor, thread).and_then(|state| state.current.take());
+                if let Some(reason) = dropped.and_then(|current| current.detach) {
+                    agents::log_detach(actor, thread, reason);
                 }
                 if let Ok(matter) = matter_of(actor, thread) {
                     end::release_writer(actor, matter, thread);
@@ -257,7 +290,7 @@ pub(super) fn shutdown(actor: &mut Actor) {
                 agents::stop(actor, thread);
             }
             Some(
-                (Phase::Prompting | Phase::Checkpointing, true)
+                (Phase::Prompting | Phase::Checkpointing | Phase::Starting, true)
                 | (Phase::Stopping | Phase::Ending, _),
             ) => {}
             None => agents::stop(actor, thread),

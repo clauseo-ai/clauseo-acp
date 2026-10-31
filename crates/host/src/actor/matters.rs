@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use clauseo_matters::{DEFAULT_MARKER, NewMatter};
 use clauseo_protocol::{
-    CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, Envelope, ErrorCode,
-    ImportSummary, MatterCreated, MatterId, MatterKind, MatterSource, StreamId, Title,
+    CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, ErrorCode, ImportSummary,
+    MatterCreated, MatterId, MatterKind, MatterSource, StreamId, Title,
 };
 use clauseo_store::MatterRow;
 
@@ -320,10 +320,10 @@ fn matter_commit(
 pub(super) fn scratch_committed(
     actor: &mut Actor,
     entry: MatterEntry,
-    outcome: Result<&[Envelope], &Failure>,
+    outcome: Result<(), &Failure>,
 ) {
     match outcome {
-        Ok(_) => {
+        Ok(()) => {
             actor.matters.insert(entry.row.id, entry);
         }
         Err(failure) => {

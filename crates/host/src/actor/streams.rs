@@ -167,6 +167,15 @@ fn finish_load(actor: &mut Actor, stream: StreamId, mut state: StreamState, tail
         }
     }
     sent.on_committed(newer);
+    sent.on_sent(newer);
+    // Commits sent and not returned yet, past what the read holds, are in the sent layer only.
+    for envelope in actor
+        .pipeline
+        .unreleased(stream)
+        .filter(|envelope| is_new(&state, envelope))
+    {
+        sent.on_sent(std::slice::from_ref(envelope));
+    }
     let loaded = Box::new(Loaded {
         state,
         view,
@@ -219,24 +228,33 @@ pub(super) fn on_committed(
     actor.work.commits = actor.work.commits.saturating_sub(1);
     let completed = actor.pipeline.on_result(ticket, result);
     let mut touched: Vec<StreamId> = Vec::new();
+    // Every commit that returned `Ok` is folded first, then the sent views of drained streams
+    // roll back to what is durable, and only then do continuations run: a commit they send is
+    // built on, and folded into, the rolled-back view.
+    let mut continuations = Vec::with_capacity(completed.done.len());
     for done in completed.done {
         match done.outcome {
             Ok(envelopes) => {
-                apply_commit(actor, &envelopes, &mut touched);
-                continue_commit(actor, done.tag, Ok(&envelopes));
+                apply_commit(actor, envelopes, &mut touched);
+                continuations.push((done.tag, Ok(())));
             }
             Err(failure) => {
                 if failure.first {
                     tracing::warn!(error = %failure.error, "a commit failed");
                 }
-                continue_commit(actor, done.tag, Err(&failure));
+                continuations.push((done.tag, Err(failure)));
             }
         }
     }
-    for stream in completed.unblocked {
-        if let Some(StreamSlot::Loaded(loaded)) = actor.streams.get_mut(&stream) {
+    for stream in &completed.unblocked {
+        if let Some(StreamSlot::Loaded(loaded)) = actor.streams.get_mut(stream) {
             loaded.sent.roll_back();
         }
+    }
+    for (tag, outcome) in continuations {
+        continue_commit(actor, tag, outcome.as_ref().map(|&()| ()));
+    }
+    for stream in completed.unblocked {
         turn::unblocked(actor, stream);
         touched.push(stream);
     }
@@ -245,7 +263,7 @@ pub(super) fn on_committed(
     }
 }
 
-fn continue_commit(actor: &mut Actor, tag: Tag, outcome: Result<&[Envelope], &Failure>) {
+fn continue_commit(actor: &mut Actor, tag: Tag, outcome: Result<(), &Failure>) {
     match tag {
         Tag::Command {
             id,
@@ -264,19 +282,18 @@ fn continue_commit(actor: &mut Actor, tag: Tag, outcome: Result<&[Envelope], &Fa
     }
 }
 
-/// Applies one returned commit, stream by stream: fold, publish to view subscribers,
-/// deliver to event subscribers, take a snapshot when one is due.
-fn apply_commit(actor: &mut Actor, envelopes: &[Envelope], touched: &mut Vec<StreamId>) {
-    for (index, first) in envelopes.iter().enumerate() {
-        let stream = first.stream;
-        if envelopes
-            .iter()
-            .take(index)
-            .any(|earlier| earlier.stream == stream)
-        {
-            continue;
+/// Applies one returned commit, stream by stream: fold, publish to view subscribers, take a
+/// snapshot when one is due; then hands each stream's envelopes to its event subscribers.
+fn apply_commit(actor: &mut Actor, envelopes: Vec<Envelope>, touched: &mut Vec<StreamId>) {
+    let mut streams: Vec<StreamId> = Vec::new();
+    for envelope in &envelopes {
+        if !streams.contains(&envelope.stream) {
+            streams.push(envelope.stream);
         }
+    }
+    for &stream in &streams {
         touched.push(stream);
+        let envelopes = envelopes.as_slice();
         match actor.streams.get_mut(&stream) {
             Some(StreamSlot::Loaded(loaded)) => {
                 let due = fold_commit(loaded, stream, envelopes);
@@ -302,7 +319,21 @@ fn apply_commit(actor: &mut Actor, envelopes: &[Envelope], touched: &mut Vec<Str
             ),
             None => {}
         }
-        super::subs::deliver_events(actor, stream, envelopes);
+    }
+    // The batch is built once per stream; a commit of one stream hands over its own.
+    if let [stream] = streams.as_slice() {
+        super::subs::deliver_events(actor, *stream, envelopes);
+        return;
+    }
+    for stream in streams {
+        if actor.event_subs.contains_key(&stream) {
+            let batch = envelopes
+                .iter()
+                .filter(|envelope| envelope.stream == stream)
+                .cloned()
+                .collect();
+            super::subs::deliver_events(actor, stream, batch);
+        }
     }
 }
 

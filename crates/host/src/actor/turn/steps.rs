@@ -1,28 +1,28 @@
 //! The steps of a turn: the prompt's commit (step 1), the writer queue (step 3), the
-//! before-turn checkpoint (step 4), the prompt (step 5), and the end (steps 6 to 8), plus the
-//! failures that cut a turn short: the launch, a host bug, a store failure.
+//! before-turn checkpoint and the `TurnStarted` commit (step 4), and the end of a turn that
+//! never started (a failed launch or checkpoint). The prompt itself (step 5) is in
+//! `prompt.rs`; steps 6 to 8 are in `end.rs`.
 
 use clauseo_matters::{Checkpoint, CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
-    CheckpointKind, CheckpointRecorded, CommandOutcome, ContentBlock, Delivery, ErrorCode,
-    MatterId, OutsideEdits, PromptBlock, StopReason, StreamId, ThreadId, TurnEnded, TurnFailed,
-    TurnId, TurnQueued, TurnStarted, ViewEntry,
+    AgentSessionDetached, CheckpointKind, CheckpointRecorded, CommandOutcome, ContentBlock,
+    Delivery, ErrorCode, ExpiryReason, MatterId, OutsideEdits, PromptBlock, StopReason, StreamId,
+    ThreadId, TurnEnded, TurnFailed, TurnId, TurnQueued, TurnStarted,
 };
-use futures::future::{AbortHandle, Abortable};
 
 use super::super::commands::{AfterCommand, CommandCtx};
-use super::super::input::{Input, MatterTag};
+use super::super::input::MatterTag;
 use super::super::{Actor, Tag};
-use super::agents::{self, Stage, Waiting};
+use super::agents::{self, Waiting};
 use super::out::Out;
+use super::state::STORE_DETAIL;
 use super::{
-    AgentReply, Current, End, JobKind, Phase, Then, TurnInput, TurnJob, TurnTag, current, end,
-    lost, matter_of, spawn, state, stopping,
+    Current, End, JobKind, Phase, Then, TurnJob, TurnTag, current, end, failure, lost, matter_of,
+    prompt, state, stopping,
 };
 use crate::build;
 use crate::error::Error;
 use crate::matter_worker::MatterJob;
-use crate::undo_note::{self, NoteInput};
 
 /// Step 1: `SendPrompt` on a thread with no current turn logs `UserMessage` with the receipt.
 pub(super) fn send_prompt(
@@ -48,7 +48,9 @@ pub(super) fn send_prompt(
     Ok(())
 }
 
-/// `command.invalid` for an archived thread, `thread.turn_running` while a turn is current.
+/// `command.invalid` for an archived thread; `thread.turn_running` while a turn is current,
+/// while the last turn's end is not durable, or while the thread's own undo holds the writer
+/// (a turn queued behind its own thread would wait on nothing it can see).
 fn refuse_busy(actor: &Actor, thread: ThreadId) -> Result<(), Error> {
     let entry = actor.check_thread(thread)?;
     if entry.row.archived {
@@ -57,7 +59,11 @@ fn refuse_busy(actor: &Actor, thread: ThreadId) -> Result<(), Error> {
             "the thread is archived",
         ));
     }
-    if entry.turn.current.is_some() {
+    let own_undo = actor
+        .matters
+        .get(&entry.row.matter)
+        .is_some_and(|matter| matter.turns.holder == Some(thread));
+    if entry.turn.current.is_some() || entry.turn.closing.is_some() || own_undo {
         return Err(Error::refused(
             ErrorCode::ThreadTurnRunning,
             "a turn is running in this thread; wait for it or cancel it",
@@ -155,10 +161,12 @@ pub(super) fn on_refused(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     }
 }
 
-/// Drops the current turn from memory without logging anything.
+/// Drops the current turn from memory without logging anything but the detach of an agent
+/// that exited while the turn waited.
 fn forget(actor: &mut Actor, thread: ThreadId) {
-    if let Some(state) = state(actor, thread) {
-        state.current = None;
+    let dropped = state(actor, thread).and_then(|state| state.current.take());
+    if let Some(reason) = dropped.and_then(|current| current.detach) {
+        agents::log_detach(actor, thread, reason);
     }
     if let Ok(matter) = matter_of(actor, thread)
         && let Some(entry) = actor.matters.get_mut(&matter)
@@ -220,7 +228,8 @@ pub(super) fn on_launch_failed(actor: &mut Actor, thread: ThreadId, turn: TurnId
     forget(actor, thread);
 }
 
-/// Ends a turn that never started (no `TurnStarted`) with one commit, and lets it go.
+/// Ends a turn that never started (no `TurnStarted`) with one commit, and lets it go. The
+/// detach of an agent that exited while the turn waited goes last.
 pub(super) fn end_unstarted(
     actor: &mut Actor,
     thread: ThreadId,
@@ -229,6 +238,8 @@ pub(super) fn end_unstarted(
     stop: StopReason,
     checkpoint: Option<(MatterId, Checkpoint)>,
 ) {
+    let detach = current(actor, thread).and_then(|current| current.detach.take());
+    let last = detach.clone();
     let sent = (|| -> Result<(), Error> {
         let mut out = Out::new(actor, thread, None)?;
         if let Some((matter, checkpoint)) = checkpoint {
@@ -246,11 +257,12 @@ pub(super) fn end_unstarted(
                 checkpoint_after: None,
             },
         )?;
-        out.send(actor, Then::Nothing)
+        if let Some(reason) = last {
+            out.push(actor, AgentSessionDetached { reason })?;
+        }
+        out.send(actor, Then::Closing(turn))
     })();
-    if let Err(error) = sent {
-        tracing::warn!(%thread, %error, "the end of a turn was not logged");
-    }
+    failure::closing_sent(actor, thread, turn, (ExpiryReason::TurnEnded, detach), sent);
     end::finish(actor, thread);
 }
 
@@ -284,19 +296,20 @@ pub(super) fn before_turn(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
 }
 
 /// The before-turn checkpoint answered: `TurnStarted` (with the checkpoint's events when it is
-/// new), then the prompt. A cancel that came meanwhile ends the turn instead.
+/// new), and the prompt once that commit is durable. A cancel or a failed commit that came
+/// meanwhile ends the turn instead.
 pub(super) fn on_before_turn(
     actor: &mut Actor,
     thread: ThreadId,
     turn: TurnId,
     result: Result<Checkpoint, Error>,
 ) {
-    let Some(current) = current(actor, thread)
+    let Some(found) = current(actor, thread)
         .filter(|current| current.turn == turn && current.phase == Phase::Checkpointing)
     else {
         return;
     };
-    let cancelled = current.cancelled;
+    let (cancelled, store_failed) = (found.cancelled, found.store_failed);
     let matter = match matter_of(actor, thread) {
         Ok(matter) => matter,
         Err(error) => {
@@ -317,10 +330,30 @@ pub(super) fn on_before_turn(
             return;
         }
     };
+    if let Some(code) = store_failed {
+        let failed = TurnFailed {
+            turn,
+            code,
+            detail: Some(STORE_DETAIL.to_owned()),
+        };
+        let checkpoint = Some((matter, checkpoint));
+        end_unstarted(
+            actor,
+            thread,
+            turn,
+            Some(failed),
+            StopReason::Failed,
+            checkpoint,
+        );
+        return;
+    }
     if cancelled {
         let checkpoint = Some((matter, checkpoint));
         end_unstarted(actor, thread, turn, None, StopReason::Cancelled, checkpoint);
         return;
+    }
+    if let Some(current) = current(actor, thread) {
+        current.phase = Phase::Starting;
     }
     let started = (|| -> Result<(), Error> {
         let mut out = Out::new(actor, thread, None)?;
@@ -333,14 +366,41 @@ pub(super) fn on_before_turn(
                 checkpoint_before: before,
             },
         )?;
-        out.send(actor, Then::Nothing)
+        out.send(actor, Then::Started(turn))
     })();
-    match started {
-        Ok(()) => prompt(actor, thread, turn),
-        Err(error) => {
-            tracing::warn!(%thread, %error, "a turn's start was not logged");
-            end::finish(actor, thread);
+    if let Err(error) = started {
+        tracing::warn!(%thread, %error, "a turn's start was not logged");
+        if failure::blocked(actor, thread) {
+            // The unblock ends it.
+            if let Some(current) = current(actor, thread) {
+                current.store_failed.get_or_insert(error.code());
+            }
+        } else {
+            let failed = TurnFailed {
+                turn,
+                code: error.code(),
+                detail: Some(error.to_string()),
+            };
+            end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
         }
+    }
+}
+
+/// The `TurnStarted` commit is durable: step 5, the prompt. A cancel or a failed commit that
+/// came meanwhile ends the turn through steps 6 to 8 instead.
+pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    let Some(current) = current(actor, thread)
+        .filter(|current| current.turn == turn && current.phase == Phase::Starting)
+    else {
+        return;
+    };
+    if current.cancelled {
+        end::end_turn(actor, thread, End::cancelled(None));
+    } else if let Some(code) = current.store_failed {
+        let detail = Some(STORE_DETAIL.to_owned());
+        end::end_turn(actor, thread, End::failed(code, detail, None));
+    } else {
+        prompt::prompt(actor, thread, turn);
     }
 }
 
@@ -368,102 +428,4 @@ fn before_events(
         out.push_matter(actor, matter, edits)?;
     }
     Ok(())
-}
-
-/// Step 5: the prompt, with the undo note first.
-fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
-    let note = take_note(actor, thread);
-    let agent = state(actor, thread)
-        .and_then(|state| state.agent.as_deref())
-        .filter(|agent| agent.stage == Stage::Attached)
-        .and_then(|agent| {
-            let session = agent.session.clone()?;
-            Some((
-                agent.id,
-                agent.link.client.clone(),
-                agent.link.fence(),
-                session,
-            ))
-        });
-    let Some((id, client, fence, session)) = agent else {
-        if let Some(current) = current(actor, thread) {
-            current.phase = Phase::Prompting;
-        }
-        let end = End::failed(
-            ErrorCode::AgentExited,
-            Some("the agent is gone".to_owned()),
-            None,
-        );
-        end::end_turn(actor, thread, end);
-        return;
-    };
-    let Some(current) = current(actor, thread) else {
-        return;
-    };
-    current.phase = Phase::Prompting;
-    let blocks = std::mem::take(&mut current.prompt);
-    let mut content = Vec::with_capacity(blocks.len() + 1);
-    if let Some(text) = note {
-        content.push(ContentBlock::Text { text });
-    }
-    content.extend(blocks);
-    let (abort, registration) = AbortHandle::new_pair();
-    current.prompt_call = Some(abort);
-    let call = Abortable::new(
-        async move {
-            let result = client.prompt(&session, turn, content).await;
-            fence.await;
-            result
-        },
-        registration,
-    );
-    let post = actor.post.clone();
-    spawn(actor, async move {
-        // Aborted: the cancel fallback dropped the prompt; nothing to post.
-        if let Ok(result) = call.await {
-            let reply = AgentReply::Prompt { turn, result };
-            let input = TurnInput::Agent {
-                thread,
-                agent: id,
-                reply,
-            };
-            let _gone = post.try_send(Input::Turn(input));
-        }
-    });
-}
-
-/// The undo note's text for the next prompt, and the note cleared for the turn starting now.
-fn take_note(actor: &mut Actor, thread: ThreadId) -> Option<String> {
-    ensure_note(actor, thread);
-    let paths = state(actor, thread)?.note.replace(Vec::new())?;
-    undo_note::note_text(&paths)
-}
-
-/// Reads the note from the loaded state the first time it is needed: the files undone since
-/// the last turn's step.
-pub(super) fn ensure_note(actor: &mut Actor, thread: ThreadId) {
-    if state(actor, thread).is_none_or(|state| state.note.is_some()) {
-        return;
-    }
-    let paths = actor
-        .loaded(StreamId::Thread(thread))
-        .and_then(|loaded| loaded.state.as_thread())
-        .map(|state| {
-            let inputs = state.entries().values().filter_map(|entry| {
-                if matches!(entry, ViewEntry::Step(_)) {
-                    Some(NoteInput::TurnStarted)
-                } else if let ViewEntry::Marker(marker) = entry
-                    && let clauseo_protocol::MarkerKind::StepUndone { restored, .. } = &marker.kind
-                {
-                    Some(NoteInput::Undone { restored })
-                } else {
-                    None
-                }
-            });
-            undo_note::paths_since_last_turn(inputs)
-        })
-        .unwrap_or_default();
-    if let Some(state) = state(actor, thread) {
-        state.note = Some(paths);
-    }
 }

@@ -13,10 +13,13 @@ mod answers;
 mod asks;
 mod cancel;
 mod end;
+mod failure;
 mod inputs;
 mod out;
+mod prompt;
 mod reconcile;
 mod session;
+mod state;
 mod steps;
 mod text;
 mod undo;
@@ -25,8 +28,8 @@ mod updates;
 use std::collections::{BTreeSet, VecDeque};
 
 use clauseo_protocol::{
-    AgentChoiceId, ContentBlock, ElicitationResponse, Envelope, ErrorCode, HostCommand,
-    LimitStopReason, MatterId, MatterPath, StreamId, ThreadId, Timestamp, TurnId,
+    AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, ExpiryReason,
+    HostCommand, LimitStopReason, MatterId, MatterPath, StreamId, ThreadId, Timestamp, TurnId,
 };
 use futures::future::AbortHandle;
 
@@ -59,6 +62,23 @@ pub(crate) struct TurnState {
     note: Option<Vec<MatterPath>>,
     /// Start-up reconciliation of this thread is in progress.
     reconciling: bool,
+    /// The last turn, until the commit holding its `TurnEnded` returns `Ok`. A new prompt is
+    /// refused while it is here, so the open turn reconciliation looks for stays the last one.
+    closing: Option<Closing>,
+}
+
+/// A turn whose `TurnEnded` is sent but not durable yet.
+#[derive(Debug)]
+struct Closing {
+    turn: TurnId,
+    /// That commit, or one ahead of it, failed with this code; the retry logs it.
+    failed: Option<ErrorCode>,
+    /// The one retry was tried.
+    retried: bool,
+    /// The reason the retry's expiries give.
+    expiry: ExpiryReason,
+    /// The detach the end logs last, if the agent exited.
+    detach: Option<DetachReason>,
 }
 
 /// A matter's turn state: who holds its writer and who waits for it. One per matter.
@@ -95,61 +115,8 @@ struct Current {
     abort: bool,
     /// An agent-driven commit of the turn failed with this code.
     store_failed: Option<ErrorCode>,
-}
-
-impl End {
-    /// A turn the lawyer (or shutdown) cancelled.
-    fn cancelled(detach: Option<clauseo_protocol::DetachReason>) -> Self {
-        Self {
-            stop: clauseo_protocol::StopReason::Cancelled,
-            failure: None,
-            expiry: clauseo_protocol::ExpiryReason::TurnEnded,
-            detach,
-        }
-    }
-
-    /// A turn that failed with `code`.
-    fn failed(
-        code: ErrorCode,
-        detail: Option<String>,
-        detach: Option<clauseo_protocol::DetachReason>,
-    ) -> Self {
-        let expiry = if code == ErrorCode::AgentExited {
-            clauseo_protocol::ExpiryReason::AgentExited
-        } else {
-            clauseo_protocol::ExpiryReason::TurnEnded
-        };
-        Self {
-            stop: clauseo_protocol::StopReason::Failed,
-            failure: Some((code, detail)),
-            expiry,
-            detach,
-        }
-    }
-}
-
-impl Current {
-    fn new(turn: TurnId, prompt: Vec<ContentBlock>) -> Self {
-        Self {
-            turn,
-            prompt,
-            phase: Phase::Accepting,
-            cancelled: false,
-            limit: None,
-            tool_paths: BTreeSet::new(),
-            prompt_call: None,
-            cancel_timer: None,
-            end: None,
-            failure: None,
-            abort: false,
-            store_failed: None,
-        }
-    }
-
-    /// Whether agent updates of the turn are logged: its prompt is in flight, not cancelled.
-    fn live(&self) -> bool {
-        self.phase == Phase::Prompting && !self.cancelled
-    }
+    /// The agent exited before the prompt went out; logged last, after `TurnEnded`.
+    detach: Option<DetachReason>,
 }
 
 /// Where a current turn is.
@@ -163,6 +130,8 @@ enum Phase {
     Queued,
     /// Its before-turn checkpoint runs (step 4).
     Checkpointing,
+    /// Its `TurnStarted` commit is in flight; the prompt goes out once it is durable.
+    Starting,
     /// Its prompt is in flight (step 5).
     Prompting,
     /// The cancel fallback fired: the agent is being stopped.
@@ -202,6 +171,10 @@ enum Then {
     Nothing,
     /// The `UserMessage` of `turn`: launch its agent.
     Launch(TurnId),
+    /// The `TurnStarted` of `turn`: send the prompt.
+    Started(TurnId),
+    /// The commit holding the `TurnEnded` of `turn`: forget its closing record.
+    Closing(TurnId),
     /// A permission answer: tell the agent.
     Permission {
         agent: u64,
@@ -365,15 +338,20 @@ pub(crate) fn matter_reply(actor: &mut Actor, _matter: MatterId, job: TurnJob, r
     }
 }
 
-/// A commit tagged `tag` returned: `Ok` with its envelopes, already applied and published, or
+/// A commit tagged `tag` returned: `Ok` (its envelopes already applied and published), or
 /// the failure (its `error` is the stream's first failure). For a command commit the actor
 /// answers the command right after this call.
-pub(crate) fn committed(actor: &mut Actor, tag: TurnTag, outcome: Result<&[Envelope], &Failure>) {
+pub(crate) fn committed(actor: &mut Actor, tag: TurnTag, outcome: Result<(), &Failure>) {
     let TurnTag { thread, then } = tag;
     match (then, outcome) {
-        (Then::Launch(turn), Ok(_)) => steps::on_accepted(actor, thread, turn),
+        (Then::Launch(turn), Ok(())) => steps::on_accepted(actor, thread, turn),
         (Then::Launch(turn), Err(_)) => steps::on_refused(actor, thread, turn),
-        (Then::Permission { agent, key, option }, Ok(_)) => {
+        (Then::Started(turn), Ok(())) => steps::on_started(actor, thread, turn),
+        (Then::Closing(turn), Ok(())) => failure::on_closed(actor, thread, turn),
+        (Then::Closing(turn), Err(failed)) => {
+            failure::on_closing_failed(actor, thread, turn, failed);
+        }
+        (Then::Permission { agent, key, option }, Ok(())) => {
             answers::tell_permission(actor, thread, agent, key, option);
         }
         (
@@ -382,10 +360,12 @@ pub(crate) fn committed(actor: &mut Actor, tag: TurnTag, outcome: Result<&[Envel
                 key,
                 response,
             },
-            Ok(_),
+            Ok(()),
         ) => answers::tell_elicitation(actor, thread, agent, key, response),
-        (Then::Permission { .. } | Then::Elicitation { .. }, Err(_)) | (Then::Nothing, Ok(_)) => {}
-        (Then::Nothing, Err(failure)) => end::on_store_failure(actor, thread, failure),
+        (Then::Permission { .. } | Then::Elicitation { .. }, Err(_)) | (Then::Nothing, Ok(())) => {}
+        (Then::Nothing | Then::Started(_), Err(failed)) => {
+            failure::on_store_failure(actor, thread, failed);
+        }
     }
 }
 
@@ -393,7 +373,7 @@ pub(crate) fn committed(actor: &mut Actor, tag: TurnTag, outcome: Result<&[Envel
 /// durable head again and its sent view has rolled back. "Store failures" try once more here.
 pub(crate) fn unblocked(actor: &mut Actor, stream: StreamId) {
     if let StreamId::Thread(thread) = stream {
-        end::on_unblocked(actor, thread);
+        failure::on_unblocked(actor, thread);
     }
 }
 
@@ -423,25 +403,37 @@ pub(crate) fn busy(actor: &Actor) -> bool {
             || state.current.as_ref().is_some_and(|current| {
                 matches!(
                     current.phase,
-                    Phase::Checkpointing | Phase::Prompting | Phase::Stopping | Phase::Ending
+                    Phase::Checkpointing
+                        | Phase::Starting
+                        | Phase::Prompting
+                        | Phase::Stopping
+                        | Phase::Ending
                 )
             })
     })
 }
 
-/// Whether `thread` has a current turn (`thread.turn_running` for `ArchiveThread`).
+/// Whether `thread` has a current turn, or a last turn whose end is not durable yet
+/// (`thread.turn_running` for `ArchiveThread`).
 pub(crate) fn turn_running(actor: &Actor, thread: ThreadId) -> bool {
     actor
         .threads
         .get(&thread)
-        .is_some_and(|entry| entry.turn.current.is_some())
+        .is_some_and(|entry| entry.turn.current.is_some() || entry.turn.closing.is_some())
 }
 
-/// Whether `thread`'s stream must stay loaded: a live agent, an open turn, a repair.
+/// Whether `thread`'s stream must stay loaded: a live agent, an open turn, a repair, an end
+/// that may still be retried.
 pub(crate) fn keeps_loaded(actor: &Actor, thread: ThreadId) -> bool {
     actor.threads.get(&thread).is_some_and(|entry| {
         let state = &entry.turn;
-        state.agent.is_some() || state.current.is_some() || state.reconciling
+        state.agent.is_some()
+            || state.current.is_some()
+            || state.reconciling
+            || state
+                .closing
+                .as_ref()
+                .is_some_and(|closing| !closing.retried)
     })
 }
 

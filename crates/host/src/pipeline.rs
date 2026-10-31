@@ -82,6 +82,12 @@ impl Draft {
         self.commit.snapshot = Some(snapshot);
     }
 
+    /// The events pushed so far (tests).
+    #[cfg(test)]
+    pub(crate) fn events(&self) -> &[Envelope] {
+        &self.commit.events
+    }
+
     fn span(&self, stream: StreamId) -> Option<&Span> {
         self.spans.iter().find(|span| span.stream == stream)
     }
@@ -287,6 +293,14 @@ impl<T> Pipeline<T> {
             .rev()
             .find(|flight| flight.ticket == ticket)
             .map_or(&[], |flight| flight.envelopes.as_slice())
+    }
+
+    /// The events of `stream` in commits sent and not released yet, in send order.
+    pub(crate) fn unreleased(&self, stream: StreamId) -> impl Iterator<Item = &Envelope> {
+        self.in_flight
+            .iter()
+            .flat_map(|flight| flight.envelopes.iter())
+            .filter(move |envelope| envelope.stream == stream)
     }
 
     /// One commit's result came back. Returns the commits now complete, in send order, and the

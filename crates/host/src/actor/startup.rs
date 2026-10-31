@@ -91,6 +91,8 @@ pub(super) async fn open(
         work: Work::default(),
         phase: Phase::Starting(ready),
         scratch: None,
+        #[cfg(test)]
+        fault: None,
     })
 }
 

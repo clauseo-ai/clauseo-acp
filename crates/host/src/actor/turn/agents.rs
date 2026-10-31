@@ -18,6 +18,7 @@ use super::super::input::Input;
 use super::out::Out;
 use super::{
     AgentReply, End, Phase, Then, TurnInput, current, end, lost, session, state, steps, stopping,
+    updates,
 };
 use crate::agent::{self, AgentLink, Ended, StopStep};
 use crate::error::Error;
@@ -103,6 +104,11 @@ fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
             fail_waiting(actor, thread, &item, &Error::Closed);
         }
         return;
+    }
+    // A new session attaches after the old one's detach, which a waiting turn still holds.
+    let held = current(actor, thread).and_then(|current| current.detach.take());
+    if let Some(reason) = held {
+        log_detach(actor, thread, reason);
     }
     let link = match launch(actor, thread) {
         Ok(link) => link,
@@ -221,6 +227,11 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
             loaded: true,
         } => {
             tracing::warn!(%thread, %error, "session/load failed; starting a new session");
+            // The old session's replay belongs to no session the new one knows.
+            if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
+                agent.replayed.clear();
+                agent.replay = None;
+            }
             session::new_session(actor, thread);
         }
     }
@@ -292,6 +303,8 @@ pub(super) fn stop(actor: &mut Actor, thread: ThreadId) {
 /// The agent's tasks are done: log the detach, end a turn the exit cut short, and start a new
 /// agent for work that came while it stopped.
 pub(super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
+    // Updates the rate cap holds came before the exit, while the turn is still live.
+    updates::flush_rate(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.take()) else {
         return;
     };
@@ -340,6 +353,13 @@ pub(super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
                         current.end = Some(End::failed(ErrorCode::AgentExited, None, Some(reason)));
                     }
                 }
+            }
+        }
+        (Some((Phase::Queued | Phase::Checkpointing | Phase::Starting, _)), Some(reason)) => {
+            // The turn ends when it reaches its prompt and finds no agent; the detach goes
+            // after its `TurnEnded`.
+            if let Some(current) = current(actor, thread) {
+                current.detach = Some(reason);
             }
         }
         (_, Some(reason)) => log_detach(actor, thread, reason),
