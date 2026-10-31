@@ -12,7 +12,8 @@
 //! - a [`Leaf`] variant, and its arms in `Leaf::parse`, `Leaf::key` and `Leaf::apply`, and
 //!   in `reset`, which a policy value that does not type locks the key at
 //!   (`leaf/tests.rs`' `a_refused_key_goes_back_to_its_default` fails for a row with no arm);
-//! - for a `ui` key, its field in `UiPatch` (`ui.rs`) and in `Settings::apply_ui_patch`;
+//! - for a `ui` key, its field in `UiPatch` (`ui.rs`, and its name in `UiPatch::keys`) and in
+//!   `Settings::apply_ui_patch`;
 //! - a sample value in `leaf/tests.rs`' `every_fixed_key_types_and_the_kinds_agree`, and a
 //!   value that is not the default in `a_refused_key_goes_back_to_its_default`.
 //!

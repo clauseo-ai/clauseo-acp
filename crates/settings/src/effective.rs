@@ -1,19 +1,25 @@
-//! [`Effective`]: the settings `host` and `cli` run with, read once at start-up.
+//! [`Effective`]: the settings `host` and `cli` run with. Read at start-up; the `ui` section
+//! changes at runtime through [`Effective::apply_ui_patch`].
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod ui_patch_tests;
 
+use crate::error::Error;
 use crate::files::Files;
 use crate::locations::Locations;
 use crate::policy::{PolicyRead, PolicySource, PolicyStatus};
 use crate::schema::{AgentLaunch, Settings};
+use crate::ui::UiPatch;
 use crate::user;
 use crate::warning::Warning;
 use std::collections::BTreeSet;
 use std::path::Path;
 
 /// The settings after the defaults, the user's `settings.json` and the policy layer, in that
-/// order: policy wins. Read once and never changed; a change takes effect on the next start.
+/// order: policy wins. The `ui` section changes at runtime only through
+/// [`Effective::apply_ui_patch`]; everything else takes effect on the next start.
 #[derive(Debug)]
 pub struct Effective {
     locations: Locations,
@@ -77,6 +83,31 @@ impl Effective {
         &self.settings
     }
 
+    /// Changes the `ui` section: saves the patch to `settings.json` through `files`, then sets
+    /// it in memory. It is the one runtime write; a caller reads the result from
+    /// [`Effective::settings`].
+    ///
+    /// A patch that names any key policy locked is refused as a whole with
+    /// [`Error::Locked`], the first locked key in field order, even when the patch also sets
+    /// unlocked fields or the value equals the locked one: nothing is written and nothing
+    /// changes. An empty patch returns `Ok` without touching the file, so its comments stay. A
+    /// failed write (an [`Error::Io`], or an [`Error::Parse`] of a file that does not parse)
+    /// returns the error with nothing changed in memory.
+    pub fn apply_ui_patch(&mut self, files: &dyn Files, patch: &UiPatch) -> Result<(), Error> {
+        let keys = patch.keys();
+        if let Some(key) = keys.iter().find(|key| self.is_locked(key)) {
+            return Err(Error::Locked {
+                key: (*key).to_owned(),
+            });
+        }
+        if keys.is_empty() {
+            return Ok(());
+        }
+        user::write_user_settings(&self.locations, files, patch)?;
+        self.settings.apply_ui_patch(patch);
+        Ok(())
+    }
+
     /// How to launch the agent `id`, if one is set.
     pub fn agent(&self, id: &str) -> Option<&AgentLaunch> {
         self.settings.agents.get(id)
@@ -96,8 +127,7 @@ impl Effective {
         self.locations.data_dir()
     }
 
-    /// The folders it was loaded from, for [`crate::write_user_settings`], so a caller that
-    /// holds the `Effective` needs no second `Locations`.
+    /// The folders it was loaded from.
     pub fn locations(&self) -> &Locations {
         &self.locations
     }

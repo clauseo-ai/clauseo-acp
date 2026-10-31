@@ -103,8 +103,9 @@ pub struct FontSize(u8);
 pub struct Language(String);
 
 impl Settings {
-    /// Sets each `ui` field the patch holds. This is the one way the webview changes settings.
-    pub fn apply_ui_patch(&mut self, patch: &UiPatch) {
+    /// Sets each `ui` field the patch holds. Only [`crate::Effective::apply_ui_patch`] calls it,
+    /// after the write has succeeded, so the file and memory never disagree.
+    pub(crate) fn apply_ui_patch(&mut self, patch: &UiPatch) {
         if let Some(theme) = patch.theme {
             self.ui.theme = theme;
         }

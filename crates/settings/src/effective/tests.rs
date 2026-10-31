@@ -7,16 +7,19 @@ use crate::testing::{FakeSource, MemFiles, abs, abs_json};
 use crate::warning::WarningKind;
 use std::path::Path;
 
-fn locations() -> Locations {
+pub(super) fn locations() -> Locations {
     Locations::under_root(Path::new("/data"))
 }
 
-fn user(text: &str) -> MemFiles {
+pub(super) fn user(text: &str) -> MemFiles {
     MemFiles::with(locations().settings_file(), text)
 }
 
 /// A source whose `policy.json` is `text`.
-fn policy(name: &'static str, text: impl Into<String>) -> FakeSource<impl Fn() -> PolicyRead> {
+pub(super) fn policy(
+    name: &'static str,
+    text: impl Into<String>,
+) -> FakeSource<impl Fn() -> PolicyRead> {
     let text: String = text.into();
     FakeSource {
         name,

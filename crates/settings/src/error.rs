@@ -31,6 +31,12 @@ pub enum Error {
         /// What the parser said.
         message: String,
     },
+    /// A change names a key that policy set, so the user cannot change it. Nothing was written.
+    #[error("{key} is set by policy and cannot be changed")]
+    Locked {
+        /// The dotted key, such as `ui.theme`.
+        key: String,
+    },
     /// The OS gave no path for a folder this crate needs.
     #[error("the OS gives no {folder} folder")]
     NoFolder {
