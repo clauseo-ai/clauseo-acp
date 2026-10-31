@@ -9,19 +9,20 @@
 //
 //   MARKS_APP        path to the marks build's binary (required)
 //   MARKS_FAKE_AGENT absolute path to the release fake_agent (required)
-//   SCOREBOARD_OUT   folder that receives scoreboard-macos.json (required)
+//   SCOREBOARD_OUT   folder that receives scoreboard-macos.json (required), and in runs/ each
+//                    play's run file as the app wrote it (play-1-warmup.json, play-2.json, ...)
 //
 //   MARKS_APP=target/release/clauseo-desktop MARKS_FAKE_AGENT=$PWD/target/release/fake_agent \
 //     SCOREBOARD_OUT=out node ui/e2e/scoreboard/macos.ts
 
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { makeScratch, removeScratch, scratchEnv, type Scratch } from "../app-windows/scratch.ts";
 import { MEASURED_RUNS, WARMUP_RUNS, parseRawRun, summarise, type RawRun } from "./metrics.ts";
-import { PACE_ARGS, SCENARIO, resultTable } from "./session.ts";
+import { PACE_ARGS, RUNS_DIR, SCENARIO, playName, resultTable } from "./session.ts";
 
 /**
  * How long one play may take, launch to exit. The session streams for about 15 s at 5 ms a step;
@@ -111,8 +112,15 @@ export async function play(
     const env = playEnv(scratch);
     const started = performance.now();
     const code = await runToExit(cfg.app, [], env, timeoutMs);
+    const file = env["MARKS_OUT"]!;
+    // Kept as written, before any check, so a run the checks refuse can still be read.
+    if (existsSync(file)) {
+      const runs = join(cfg.out, RUNS_DIR);
+      mkdirSync(runs, { recursive: true });
+      copyFileSync(file, join(runs, `${playName(n)}.json`));
+    }
     if (code !== 0) throw new Error(`play ${n}: the app exited with ${code} (its stderr says why)`);
-    const run = parseRawRun(JSON.parse(readFileSync(env["MARKS_OUT"]!, "utf8")));
+    const run = parseRawRun(JSON.parse(readFileSync(file, "utf8")));
     process.stdout.write(
       `[scoreboard] play ${n} done in ${Math.round(performance.now() - started)} ms\n`,
     );

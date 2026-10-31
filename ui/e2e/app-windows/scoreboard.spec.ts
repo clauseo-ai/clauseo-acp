@@ -10,7 +10,9 @@
 // keeps it out of the `app` project unless the command line names this file. Run it with
 //   E2E_APP=<clauseo-desktop.exe> [SCOREBOARD_OUT=<folder>] pnpm -C ui/e2e test scoreboard.spec.ts
 //
-//   SCOREBOARD_OUT   folder that receives scoreboard-windows.json; nothing is written when unset
+//   SCOREBOARD_OUT   folder that receives scoreboard-windows.json, and in runs/ each play's raw run
+//                    and debug numbers (play-1-warmup.json, play-1-warmup.debug.json, play-2.json,
+//                    ...); nothing is written when unset
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,7 +26,15 @@ import {
   summarise,
   type RawRun,
 } from "../scoreboard/metrics.ts";
-import { PACE_ARGS, PROMPT, SCENARIO, resultTable } from "../scoreboard/session.ts";
+import {
+  PACE_ARGS,
+  PROMPT,
+  RUNS_DIR,
+  SCENARIO,
+  playDebug,
+  playName,
+  resultTable,
+} from "../scoreboard/session.ts";
 import { test, type App } from "./fixture.ts";
 import { expectTurnEnded, openMatter } from "./flow.ts";
 import { processTree, settle, treeMemory } from "./memory.ts";
@@ -107,8 +117,23 @@ async function scrollUpAndDown(page: Page, w: AppWindow): Promise<void> {
   }
 }
 
-/** One play of the session on a fresh launch; quits the app at the end. */
-async function play(app: App, stop: (app: App) => Promise<void>): Promise<RawRun> {
+/** SCOREBOARD_OUT, or null when unset. */
+function outFolder(): string | null {
+  const out = process.env["SCOREBOARD_OUT"];
+  return out === undefined || out === "" ? null : out;
+}
+
+/** Writes `value` as `<SCOREBOARD_OUT>/runs/<name>.json`; nothing when SCOREBOARD_OUT is unset. */
+function writeRunFile(name: string, value: unknown): void {
+  const out = outFolder();
+  if (out === null) return;
+  const folder = join(out, RUNS_DIR);
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, `${name}.json`), `${JSON.stringify(value, null, 2)}\n`);
+}
+
+/** Play `n` of the session on a fresh launch; quits the app at the end. */
+async function play(app: App, stop: (app: App) => Promise<void>, n: number): Promise<RawRun> {
   const { page } = app;
   const w = appWindow(page);
 
@@ -142,7 +167,7 @@ async function play(app: App, stop: (app: App) => Promise<void>): Promise<RawRun
     return await page.evaluate(() => window.__clauseoPerf!.stopKeystrokes());
   });
 
-  const { sample, bytes } = await test.step("stream the session", async () => {
+  const { sample, bytes, before, after } = await test.step("stream the session", async () => {
     const before = await page.evaluate(() => window.__clauseoPerf!.channelBytes());
     await page.evaluate(() => window.__clauseoPerf!.startStream());
     await w.send.click();
@@ -153,7 +178,7 @@ async function play(app: App, stop: (app: App) => Promise<void>): Promise<RawRun
     await expectTurnEnded(w, "end_turn");
     const recorded = await page.evaluate(() => window.__clauseoPerf!.stopStream());
     const after = await page.evaluate(() => window.__clauseoPerf!.channelBytes());
-    return { sample: recorded, bytes: after - before };
+    return { sample: recorded, bytes: after - before, before, after };
   });
 
   const afterSession = await test.step("memory after the session", async () => {
@@ -163,7 +188,7 @@ async function play(app: App, stop: (app: App) => Promise<void>): Promise<RawRun
   });
   await cdp.detach();
 
-  const run = parseRawRun({
+  const raw = {
     start_to_interactive_ms: startToInteractive,
     first_token_on_screen_ms: sample.first_token_on_screen_ms,
     chunk_to_paint_ms: sample.chunk_to_paint_ms,
@@ -175,7 +200,20 @@ async function play(app: App, stop: (app: App) => Promise<void>): Promise<RawRun
     memory_after_session_mb: afterSession,
     react_commits_per_frame: sample.react_commits_per_frame,
     ipc_bytes_per_text_byte: sample.answer_text_bytes > 0 ? bytes / sample.answer_text_bytes : null,
-  } satisfies RawRun);
+  } satisfies RawRun;
+  // Written before the checks, so a run they refuse can still be read.
+  writeRunFile(playName(n), raw);
+  writeRunFile(
+    `${playName(n)}.debug`,
+    playDebug({
+      bytesBefore: before,
+      bytesAfter: after,
+      answerTextBytes: sample.answer_text_bytes,
+      raf: sample.raf_timestamps_ms,
+      chunks: sample.chunk_to_paint_ms,
+    }),
+  );
+  const run = parseRawRun(raw);
   await stop(app);
   return run;
 }
@@ -188,7 +226,7 @@ for (let n = 1; n <= WARMUP_RUNS + MEASURED_RUNS; n++) {
     app,
     apps,
   }) => {
-    const run = await play(app, (a) => apps.stop(a, "close"));
+    const run = await play(app, (a) => apps.stop(a, "close"), n);
     if (!warmup) measured.push(run);
   });
 }
@@ -196,8 +234,8 @@ for (let n = 1; n <= WARMUP_RUNS + MEASURED_RUNS; n++) {
 test("the result: medians of the measured plays", () => {
   const result = summarise("windows", measured);
   process.stdout.write(resultTable(result));
-  const out = process.env["SCOREBOARD_OUT"];
-  if (out !== undefined && out !== "") {
+  const out = outFolder();
+  if (out !== null) {
     mkdirSync(out, { recursive: true });
     const file = join(out, "scoreboard-windows.json");
     writeFileSync(file, `${JSON.stringify(result, null, 2)}\n`);
