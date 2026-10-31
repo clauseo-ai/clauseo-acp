@@ -51,6 +51,7 @@ the same thing. Lawyer-facing words are marked (UI).
 | Denial | A blocked path or domain, reported to the host as an event and shown as a card. | error |
 | Launcher | The trait `process` uses to start an agent: passthrough or one of the sandbox launchers. | runner, spawner |
 | Policy layer | Settings pushed by a firm's IT (registry, managed preferences, policy file). | admin config |
+| Locked key | A setting the policy layer sets, so the user cannot change it; `Effective::apply_ui_patch` refuses a patch that names one (`Error::Locked`). | managed setting, admin lock |
 | Profile | Clauseo's instructions, tools, helper agents and skills, translated per agent. | persona, prompt |
 | Skill | A packaged instruction set in Agent Skills format (`SKILL.md`). | recipe, macro |
 | Workspace | Only Anthropic's API workspace, as named in limit reasons (`LimitStopReason::WorkspaceCredits`, `WorkspaceSpendCap`); those logged names stay. Never a matter. | |

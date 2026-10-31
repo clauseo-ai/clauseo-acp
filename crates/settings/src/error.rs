@@ -3,7 +3,8 @@
 use std::io;
 use std::path::PathBuf;
 
-/// What can go wrong finding a folder, reading a policy source or writing `settings.json`.
+/// What can go wrong finding a folder, reading a policy source, writing `settings.json`, or
+/// changing a setting that policy locks.
 ///
 /// It never reaches a client as it is: `host` maps it to an error code.
 #[derive(Debug, thiserror::Error)]
