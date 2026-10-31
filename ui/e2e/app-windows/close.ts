@@ -31,7 +31,7 @@ public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr w, IntPtr l)
 $posted = 0
 $hwnd = [IntPtr]::Zero
 while ($true) {
-  $hwnd = [ClauseoE2E.Win]::FindWindowEx([IntPtr]::Zero, $hwnd, '${WINDOW_CLASS}', $null)
+  $hwnd = [ClauseoE2E.Win]::FindWindowEx([IntPtr]::Zero, $hwnd, '${WINDOW_CLASS}', [NullString]::Value)
   if ($hwnd -eq [IntPtr]::Zero) { break }
   $owner = [uint32]0
   [void][ClauseoE2E.Win]::GetWindowThreadProcessId($hwnd, [ref]$owner)
