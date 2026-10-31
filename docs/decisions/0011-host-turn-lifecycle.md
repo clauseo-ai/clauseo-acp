@@ -72,10 +72,15 @@ since the thread's last `TurnStarted`.
   If the prompt does not return, the agent is stopped by `process`'s shutdown ladder
   (`AgentSessionDetached { Closed }`) and steps 6 to 8 run with `Cancelled`. An agent request that
   arrives with no running turn, or while it is cancelling, is answered cancelled and not logged.
+  Everything else the agent sends after `session/cancel` (text, tool calls) is dropped too: R10
+  tags it `Late` and the host drops `Late` updates, keeping only what the cancel commit needs.
 - Start-up reconciliation, before serving, once per thread with an open turn or pending request:
   expire with `HostRestarted`; a started turn gets an after-turn checkpoint and step 7 with
   `TurnFailed { thread.interrupted }`; `AgentSessionDetached { Closed }` when a session was
-  attached. A turn with `TurnEnded` is never touched, so each repair happens once.
+  attached. A turn that never started (its `UserMessage` logged, no `TurnStarted`) gets
+  `TurnQueued { behind: <its own thread>, behind_turn: <the thread's previous turn, or None> }`,
+  so the reducer shows the thread `Idle`. A turn with `TurnEnded` is never touched, so each
+  repair happens once.
 - Shutdown cancels running turns, stops each agent by the ladder, flushes, takes due snapshots,
   stops the matter threads and closes `store`.
 
@@ -102,11 +107,16 @@ since the thread's last `TurnStarted`.
   `ConfigOptionsReplaced`, `UsageUpdated`, `Notice`, `ThreadRenamed { by: Agent }` and
   `CompactionChanged`.
 - An undo keeps every path of the step the command leaves out.
-- The agent's launch spec carries the whole inherited environment, so `process` redacts every
-  inherited secret from stderr tails.
+- The agent's launch spec carries the inherited environment, so `process` redacts every
+  inherited secret from stderr tails. An inherited name an agent or hook variable also names,
+  ignoring case, is left out: on Windows `Path` and `PATH` are one variable, and the inherited
+  one must not win.
+- A prompt's file must resolve to a path inside the thread's matter folder, else
+  `command.invalid`; it goes to the agent as a percent-encoded `file://` URI.
 
 In `ARCHITECTURE.md`, the `host` row's "May depend on" adds `async-channel, async-io, futures,
-uuid, serde_json, tracing`; "Never depends on" stays `tauri, tokio, agents`; status `exists`.
+uuid, serde_json, tracing, dunce` (dunce resolves a prompt's file to check it is in the matter
+folder); "Never depends on" stays `tauri, tokio, agents`; status `exists`.
 
 ## Consequences
 
