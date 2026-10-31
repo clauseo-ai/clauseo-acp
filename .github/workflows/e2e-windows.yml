@@ -6,6 +6,9 @@
 # the scripted fake_agent, built beside the app: each test gets a scratch CLAUSEO_DATA_DIR whose
 # settings.json starts fake_agent on that test's scenario as agents.claude, and a scratch
 # E2E_MATTER_DIR (ui/e2e/app-windows/scratch.ts), so no run touches the runner's real data folder.
+# On windows-2025 the job then plays the speed scoreboard (R13, ui/e2e/app-windows/scoreboard.spec.ts)
+# and uploads scoreboard-windows.json as the artifact scoreboard-windows, which the pull request's
+# scoreboard comment reads (scoreboard-comment.yml).
 #
 # - No version is written here, as in ci.yml: Rust comes from rust-toolchain.toml, pnpm from
 #   "packageManager" and Node from "engines.node" in ui/package.json, Playwright from
@@ -17,17 +20,22 @@
 name: e2e-windows
 
 # Every pull request gets the check `smoke (windows-2025)`, the x64 smoke test. Branch protection on
-# main requires it (#51). The job e2e-changes decides whether the steps run: a pull request that
-# touches none of the app's paths (crates/desktop/, the crates it runs on and fake_agent, ui/, this
-# workflow) starts the job and skips every step, so the check reports in seconds. One that touches
-# them runs the smoke test in full, on x64 only. A failed
-# decision runs the full test, so the check always reports. A change elsewhere that breaks the app
-# (another crate, Cargo.lock, the toolchain) shows up on the next push to main. smoke is never
-# skipped as a whole: a job skipped that way reports under the literal name
-# `smoke (${{ matrix.runner }})`, and a required check that never reports blocks the merge.
-# Every push to main, the nightly run and a run on demand cover x64 and ARM64 (windows-11-arm),
-# which gives the budgets their baseline and keeps main's Rust cache, the one pull requests can
-# read, warm.
+# main requires it (#51). The job e2e-changes decides whether the steps run, with two outputs:
+# - `run`: the pull request touches the app's paths (crates/desktop/, the crates it runs on and
+#   fake_agent, ui/, this workflow).
+# - `scoreboard`: it touches product code (crates/, ui/, Cargo.toml, Cargo.lock: the paths for
+#   which scoreboard-comment.yml comments, comment.ts's isProductPath).
+# The steps run, on x64 only, when either is true: the smoke test in full, then the speed
+# scoreboard (windows-2025, normal mode) when `scoreboard` is true. So a pull request that touches
+# product code outside the app's paths (another crate, Cargo.lock) runs the smoke test too. One
+# that touches neither starts the job and skips every step, so the check reports in seconds. A
+# failed decision runs everything, so the check always reports. A change elsewhere that breaks the
+# app (the toolchain, another workflow) shows up on the next push to main. smoke is never skipped
+# as a whole: a job skipped that way reports under the literal name `smoke (${{ matrix.runner }})`,
+# and a required check that never reports blocks the merge.
+# Every push to main, the nightly run and a run on demand cover x64 and ARM64 (windows-11-arm) and
+# play the scoreboard on x64, which gives the budgets their baseline and keeps main's Rust cache,
+# the one pull requests can read, warm.
 on:
   pull_request:
   push:
@@ -53,11 +61,13 @@ jobs:
     timeout-minutes: 5
     outputs:
       run: ${{ steps.filter.outputs.run }}
+      scoreboard: ${{ steps.filter.outputs.scoreboard }}
     steps:
-      # A push, the nightly run and a run on demand run the smoke test; a pull request runs it only
-      # when it changes the desktop crate, a crate the app runs (host and what it uses), fake_agent,
-      # the ui or this workflow.
-      - name: Decide whether the smoke test runs
+      # A push, the nightly run and a run on demand run the smoke test and the scoreboard; a pull
+      # request runs the smoke test only when it changes the desktop crate, a crate the app runs
+      # (host and what it uses), fake_agent, the ui or this workflow, and the scoreboard only when it
+      # changes product code (crates/, ui/, Cargo.toml, Cargo.lock; comment.ts's isProductPath).
+      - name: Decide whether the smoke test and the scoreboard run
         id: filter
         env:
           EVENT: ${{ github.event_name }}
@@ -68,6 +78,7 @@ jobs:
           set -euo pipefail
           if [ "$EVENT" != pull_request ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "scoreboard=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git init -q work
@@ -88,13 +99,21 @@ jobs:
             echo "No change to the app's crates, fake_agent, ui/ or this workflow: the steps skip."
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
+          product=$(printf '%s\n' "$changed" | grep -E '^(crates/|ui/|Cargo\.toml$|Cargo\.lock$)' || true)
+          if [ -n "$product" ]; then
+            echo "scoreboard=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No change to product code (crates/, ui/, Cargo.toml, Cargo.lock): no scoreboard."
+            echo "scoreboard=false" >> "$GITHUB_OUTPUT"
+          fi
 
   smoke:
     name: smoke (${{ matrix.runner }})
     needs: e2e-changes
     if: ${{ !cancelled() }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    # The scoreboard's four plays add about five minutes on windows-2025.
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       # x64 always; ARM64 on every event but a pull request. One JSON list per case, because an
@@ -106,7 +125,9 @@ jobs:
             || '[{"runner": "windows-2025", "target": "x86_64-pc-windows-msvc"},
                  {"runner": "windows-11-arm", "target": "aarch64-pc-windows-msvc"}]') }}
     env:
-      RUN: ${{ needs.e2e-changes.result == 'success' && needs.e2e-changes.outputs.run || 'true' }}
+      # A failed decision runs everything, so the check always reports.
+      RUN: ${{ needs.e2e-changes.result != 'success' || needs.e2e-changes.outputs.run == 'true' || needs.e2e-changes.outputs.scoreboard == 'true' }}
+      SCOREBOARD: ${{ matrix.runner == 'windows-2025' && (needs.e2e-changes.result != 'success' || needs.e2e-changes.outputs.scoreboard == 'true') }}
       TARGET: ${{ matrix.target }}
       E2E_APP: ${{ github.workspace }}/target/${{ matrix.target }}/release/clauseo-desktop.exe
       # The scripted agent the window's specs launch through settings.json (fixture.ts).
@@ -116,9 +137,9 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Skip, the app's crates, ui and this workflow are unchanged
+      - name: Skip, the app's crates, ui, product code and this workflow are unchanged
         if: env.RUN != 'true'
-        run: echo "No change to the app's crates, fake_agent, ui/ or this workflow; nothing to smoke-test."
+        run: echo "No change to the app's crates, fake_agent, ui/, product code or this workflow; nothing to smoke-test."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.RUN == 'true'
@@ -209,3 +230,29 @@ jobs:
           name: e2e-results-${{ matrix.runner }}
           path: ${{ env.OUT }}
           if-no-files-found: warn
+
+      # The speed scoreboard (R13): one warm-up and three measured plays of fake_agent's scoreboard
+      # session, each a fresh launch, normal mode (ui/e2e/app-windows/scoreboard.spec.ts). Its numbers
+      # report and alert and never block a merge, so a failure here leaves the check green with a
+      # warning on the run; the comment then shows this pull request's Windows numbers as not run.
+      - name: Speed scoreboard
+        id: scoreboard
+        if: ${{ env.RUN == 'true' && env.SCOREBOARD == 'true' && !cancelled() && steps.build.outcome == 'success' && steps.fake_agent.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          SCOREBOARD_OUT: ${{ github.workspace }}/scoreboard-out
+        run: |
+          status=0
+          pnpm -C ui/e2e test scoreboard.spec.ts || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::warning title=Speed scoreboard failed::scoreboard.spec.ts exited with $status; no scoreboard-windows.json"
+            exit "$status"
+          fi
+
+      # comment.ts reads scoreboard-windows.json from the artifact scoreboard-windows.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && steps.scoreboard.outcome == 'success' }}
+        with:
+          name: scoreboard-windows
+          path: ${{ github.workspace }}/scoreboard-out/scoreboard-windows.json
+          if-no-files-found: error

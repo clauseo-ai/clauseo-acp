@@ -3,7 +3,15 @@
 // artifact that reaches the comment is a reducer case name, which must match a strict pattern.
 
 import type { Budget, ReducerCounts } from "./inputs.ts";
-import { METRICS, OSES, type Os, type ResultValues, type Unit } from "./metrics.ts";
+import {
+  METRICS,
+  OSES,
+  isReportOnly,
+  type Metric,
+  type Os,
+  type ResultValues,
+  type Unit,
+} from "./metrics.ts";
 
 /** The first line of the comment. The workflow edits the comment whose body starts with it. */
 export const MARKER = "<!-- scoreboard -->";
@@ -40,10 +48,59 @@ export function formatNumber(value: number): string {
   return rounded.toLocaleString("en-US", { maximumFractionDigits: 1 });
 }
 
-/** The number and its unit; a count goes without one. */
+/** The number and its unit; a count goes without one, a ratio as `2.5×`. */
 function withUnit(value: number, unit: string): string {
-  return unit === "count" ? formatNumber(value) : `${formatNumber(value)} ${unit}`;
+  if (unit === "count") return formatNumber(value);
+  if (unit === "ratio") return `${formatNumber(value)}×`;
+  return `${formatNumber(value)} ${unit}`;
 }
+
+/** The suffix of a budgets.toml row that holds a metric's limit for GitHub's virtual machine runners. */
+export const VM_SUFFIX = "_vm";
+
+/** The limit a metric is compared with, and where it came from. */
+export type MetricBudget =
+  /** `vm`: from the `<id>_vm` row; else from the metric's own row. */
+  | { kind: "limit"; limit: number; vm: boolean }
+  /** No row in budgets.toml (or one in another unit). */
+  | { kind: "none" }
+  /** A metric that reports without a budget. */
+  | { kind: "report-only" };
+
+/**
+ * The budget of `metric`: its `<id>_vm` row when budgets.toml has one, else its `<id>` row. A row
+ * in another unit than the metric's is not used.
+ */
+export function budgetOf(metric: Metric, budgets: Map<string, Budget>): MetricBudget {
+  if (isReportOnly(metric)) return { kind: "report-only" };
+  for (const [id, vm] of [
+    [`${metric.id}${VM_SUFFIX}`, true],
+    [metric.id, false],
+  ] as const) {
+    const row = budgets.get(id);
+    if (row !== undefined && row.unit === metric.unit)
+      return { kind: "limit", limit: row.limit, vm };
+  }
+  return { kind: "none" };
+}
+
+/** The Budget column's cell. */
+function budgetCell(budget: MetricBudget, unit: Unit): string {
+  switch (budget.kind) {
+    case "report-only":
+      return "report only";
+    case "none":
+      return "–";
+    default:
+      return `${withUnit(budget.limit, unit)}${budget.vm ? " (VM)" : ""}`;
+  }
+}
+
+/** The line under each scoreboard table. */
+export const BUDGET_NOTE =
+  "A budget marked (VM) is the metric's `_vm` row in budgets.toml, the limit for GitHub's virtual " +
+  "machine runners (the Windows one renders without a GPU); the metric's own row is the release limit, " +
+  "measured on a laptop (stage F).";
 
 /** The flags of one row: over its budget, more than 10% worse than main, both, or none. */
 export function flags(pr: number | null, main: number | null, limit: number | null): string[] {
@@ -119,8 +176,8 @@ function scoreboardSection(input: RenderInput, os: Os): string[] {
     "|---|---|---|---|---|---|",
   ];
   for (const metric of METRICS) {
-    const budget = input.budgets.get(metric.id);
-    const limit = budget !== undefined && budget.unit === metric.unit ? budget.limit : null;
+    const budget = budgetOf(metric, input.budgets);
+    const limit = budget.kind === "limit" ? budget.limit : null;
     const prValue = pr.state === "found" ? pr.data[metric.id] : null;
     const mainValue = main.state === "found" ? main.data[metric.id] : null;
     const cell = (source: Source<ResultValues>, value: number | null, unit: Unit) =>
@@ -132,10 +189,11 @@ function scoreboardSection(input: RenderInput, os: Os): string[] {
     const flagged = flags(prValue, mainValue, limit);
     lines.push(
       `| ${metric.label} | ${cell(pr, prValue, metric.unit)} | ${cell(main, mainValue, metric.unit)} | ` +
-        `${change(prValue, mainValue, metric.unit)} | ${limit === null ? "–" : withUnit(limit, metric.unit)} | ` +
+        `${change(prValue, mainValue, metric.unit)} | ${budgetCell(budget, metric.unit)} | ` +
         `${flagged.length > 0 ? `⚠️ ${flagged.join(", ")}` : ""} |`,
     );
   }
+  lines.push("", BUDGET_NOTE);
   return lines;
 }
 
@@ -186,7 +244,7 @@ export function renderComment(input: RenderInput): string {
     `For ${short(input.headSha)}, the head of this pull request. The fixed \`scoreboard\` session ` +
       "(`fake_agent --pace-ms 5`) played into the app; each number is the median of three runs after one " +
       "warm-up. Wall-clock numbers report and alert; they never block a merge. ⚠️ marks a row over its " +
-      "budget (budgets.toml) or more than 10% worse than main.",
+      "budget (budgets.toml) or more than 10% worse than main; a report-only row has no budget.",
     "",
   ];
   for (const os of OSES) lines.push(...scoreboardSection(input, os), "");

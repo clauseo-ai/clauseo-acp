@@ -20,6 +20,10 @@
       "median": 19,
       "runs": [19, 19, 19]
     },
+    "chunk_to_paint_lite_p50": {
+      "median": null,
+      "runs": [null, null, null]
+    },
     "long_frames_streaming": {
       "median": null,
       "runs": [null, null, null]
@@ -28,7 +32,15 @@
       "median": 1.2,
       "runs": [1.2, 1.2, 1.2]
     },
+    "react_commits_per_frame_streaming": {
+      "median": 1.1,
+      "runs": [1.1, 1.1, 1.1]
+    },
     "keystroke_latency_p95": {
+      "median": null,
+      "runs": [null, null, null]
+    },
+    "keystroke_latency_ime_p95": {
       "median": null,
       "runs": [null, null, null]
     },
@@ -40,9 +52,17 @@
       "median": 151,
       "runs": [151, 151, 151]
     },
+    "idle_memory_over_blank": {
+      "median": null,
+      "runs": [null, null, null]
+    },
     "memory_after_session": {
       "median": 190,
       "runs": [190, 190, 190]
+    },
+    "ipc_bytes_per_text_byte": {
+      "median": 2.3,
+      "runs": [2.3, 2.3, 2.3]
     }
   }
 }

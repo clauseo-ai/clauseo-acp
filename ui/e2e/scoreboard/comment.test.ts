@@ -170,7 +170,7 @@ function world(pr = 7, headRepo = REPO, owner = "clauseo", branch = "feature"): 
 }
 
 function ctx(event: unknown): Context {
-  return { repo: REPO, defaultBranch: "main", event, budgetsText: repoFile("budgets.toml") };
+  return { repo: REPO, defaultBranch: "main", event, budgetsText: fixture("budgets.toml") };
 }
 
 test("a same-repo pull request gets one new comment with this PR's and main's numbers", async () => {

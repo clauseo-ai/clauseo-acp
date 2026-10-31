@@ -30,6 +30,8 @@ export interface ScratchOptions {
   scenario: string | null;
   /** Files the matter folder starts with: `/`-separated relative path to content. */
   matterFiles: Readonly<Record<string, string>>;
+  /** More arguments for fake_agent after `--scenario <name>`, e.g. `--pace-ms 5`. */
+  agentArgs?: readonly string[];
 }
 
 /** One test's folders. */
@@ -46,12 +48,18 @@ export interface Scratch {
   agentCommand: string | null;
 }
 
-/** The `agents` section that starts `command --scenario <scenario>` as `agents.claude`. */
-export function agentSettings(command: string, scenario: string): Record<string, unknown> {
+/**
+ * The `agents` section that starts `command --scenario <scenario> [...extra]` as `agents.claude`.
+ */
+export function agentSettings(
+  command: string,
+  scenario: string,
+  extra: readonly string[] = [],
+): Record<string, unknown> {
   if (!isAbsolute(command)) {
     throw new Error(`the agent command must be an absolute path (S5), not ${command}`);
   }
-  return { agents: { [AGENT_ID]: { command, args: ["--scenario", scenario] } } };
+  return { agents: { [AGENT_ID]: { command, args: ["--scenario", scenario, ...extra] } } };
 }
 
 /**
@@ -61,14 +69,14 @@ export function agentSettings(command: string, scenario: string): Record<string,
  */
 export function scratchSettings(
   mattersDir: string,
-  agent: { command: string; scenario: string } | null,
+  agent: { command: string; scenario: string; args?: readonly string[] } | null,
 ): Record<string, unknown> {
   if (!isAbsolute(mattersDir)) {
     throw new Error(`matters.default_location must be an absolute path, not ${mattersDir}`);
   }
   return {
     matters: { default_location: mattersDir },
-    ...(agent === null ? {} : agentSettings(agent.command, agent.scenario)),
+    ...(agent === null ? {} : agentSettings(agent.command, agent.scenario, agent.args)),
   };
 }
 
@@ -128,7 +136,7 @@ export function makeScratch(
       mattersDir,
       agentCommand === null || options.scenario === null
         ? null
-        : { command: agentCommand, scenario: options.scenario },
+        : { command: agentCommand, scenario: options.scenario, args: options.agentArgs ?? [] },
     );
     writeFileSync(join(dataDir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
     return { root, dataDir, matterDir, mattersDir, agentCommand };

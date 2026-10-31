@@ -23,26 +23,75 @@ export const LONG_FRAME_MS = 50;
 /** The result format's version. A reader refuses any other. */
 export const SCHEMA = 1;
 
-/** Every metric the scoreboard reports, in the comment's order. Each `id` is a budgets.toml row. */
+/** Bytes in one MB, as every memory number of the scoreboard counts it: 2^20 (a MiB). */
+export const BYTES_PER_MB = 2 ** 20;
+
+/**
+ * The blank app's idle memory on Windows, the control `idle_memory_over_blank` subtracts. Main's
+ * last e2e-windows run before R12 merged: run 41206906369 on main 11c965f9, artifact
+ * `e2e-results-windows-2025`, file e2e-results-windows-2025-normal.json,
+ * `groupPrivateWorkingSetBytes` 72,118,272 B (control.spec.ts: the e2e build, DevTools port open,
+ * private working set of the process tree through memory.ts, settled, after one GC). About 68.8 MB.
+ * There is no macOS blank measured, so the metric is Windows only.
+ */
+export const BLANK_APP_IDLE_MB = 72_118_272 / BYTES_PER_MB;
+
+/**
+ * Every metric the scoreboard reports, in the comment's order. Each `id` is a budgets.toml row
+ * (the comment compares with `<id>_vm` when that row exists, render.ts), except the ones marked
+ * `reportOnly`, which have no budget and must have no row (metrics.test.ts checks both).
+ */
 export const METRICS = [
   { id: "warm_start_interactive", label: "Start-up to interactive", unit: "ms" },
   { id: "first_token_on_screen", label: "Send to first token on screen", unit: "ms" },
   { id: "chunk_to_paint_p50", label: "Chunk to paint, p50", unit: "ms" },
   { id: "chunk_to_paint_p95", label: "Chunk to paint, p95", unit: "ms" },
+  // Lite mode is not in the app yet: always null, shown as "not measured".
+  { id: "chunk_to_paint_lite_p50", label: "Chunk to paint, lite mode, p50", unit: "ms" },
   { id: "long_frames_streaming", label: "Long animation frames while streaming", unit: "count" },
   {
     id: "dropped_frames_streaming",
     label: "Dropped frames while streaming, per 10 s",
     unit: "count",
   },
+  {
+    id: "react_commits_per_frame_streaming",
+    label: "React commits per frame while streaming",
+    unit: "count",
+    reportOnly: true,
+  },
   { id: "keystroke_latency_p95", label: "Typing to screen, p95", unit: "ms" },
+  // No input method on a CI runner: always null, shown as "not measured".
+  {
+    id: "keystroke_latency_ime_p95",
+    label: "Typing to screen, composed IME keystrokes, p95",
+    unit: "ms",
+  },
   { id: "keystroke_handler", label: "Keystroke handler, p95", unit: "ms" },
   { id: "idle_memory_total", label: "Memory at idle", unit: "MB" },
+  { id: "idle_memory_over_blank", label: "Memory at idle over the blank app", unit: "MB" },
   { id: "memory_after_session", label: "Memory after the session", unit: "MB" },
-] as const;
+  {
+    id: "ipc_bytes_per_text_byte",
+    label: "IPC bytes per byte of answer text",
+    unit: "ratio",
+    reportOnly: true,
+  },
+] as const satisfies readonly {
+  id: string;
+  label: string;
+  unit: "ms" | "count" | "MB" | "ratio";
+  reportOnly?: true;
+}[];
 
-export type MetricId = (typeof METRICS)[number]["id"];
-export type Unit = (typeof METRICS)[number]["unit"];
+export type Metric = (typeof METRICS)[number];
+export type MetricId = Metric["id"];
+export type Unit = Metric["unit"];
+
+/** Whether `metric` reports without a budget. */
+export function isReportOnly(metric: Metric): boolean {
+  return "reportOnly" in metric && metric.reportOnly;
+}
 
 /**
  * What one play of the session records, raw. `null` means the engine cannot measure it: WebKit has
@@ -66,8 +115,15 @@ export interface RawRun {
   keystroke_handler_ms: number[] | null;
   /** Memory of the whole process group before the session (Windows: private working set). */
   idle_memory_mb: number | null;
-  /** The same, after the session ended. */
+  /** The same, after the session ended (Windows: after two forced GCs; macOS: none). */
   memory_after_session_mb: number | null;
+  /** Mean React commits over the frames that had at least one, while streaming. */
+  react_commits_per_frame: number | null;
+  /**
+   * Bytes the bridge sent down the window's channel during the session (read before
+   * `startStream` and after `stopStream`) over the UTF-8 bytes of the answer text at the end.
+   */
+  ipc_bytes_per_text_byte: number | null;
 }
 
 const RAW_KEYS = [
@@ -80,7 +136,12 @@ const RAW_KEYS = [
   "keystroke_handler_ms",
   "idle_memory_mb",
   "memory_after_session_mb",
+  "react_commits_per_frame",
+  "ipc_bytes_per_text_byte",
 ] as const satisfies readonly (keyof RawRun)[];
+
+/** Every key of {@link RawRun}, in order: the list ui/app's autoplay mirrors. */
+export const RAW_RUN_KEYS: readonly (keyof RawRun)[] = RAW_KEYS;
 
 /** The keys of {@link RawRun} that hold a list of samples; the rest hold one number. */
 const LIST_KEYS = [
@@ -139,8 +200,11 @@ export function droppedFramesPer10s(timestamps: readonly number[]): number | nul
   return span > 0 ? (dropped * DROPPED_WINDOW_MS) / span : null;
 }
 
-/** One run's value of each metric. */
-export function runMetrics(run: RawRun): Record<MetricId, number | null> {
+/**
+ * One run's value of each metric on `os`. Memory over the blank app is Windows only (the blank
+ * was measured there) and never below 0: a run at or under the blank reads as 0 over it.
+ */
+export function runMetrics(run: RawRun, os: Os): Record<MetricId, number | null> {
   const of = (values: number[] | null, f: (v: number[]) => number | null) =>
     values === null ? null : f(values);
   return {
@@ -148,15 +212,23 @@ export function runMetrics(run: RawRun): Record<MetricId, number | null> {
     first_token_on_screen: run.first_token_on_screen_ms,
     chunk_to_paint_p50: of(run.chunk_to_paint_ms, (v) => percentile(v, 50)),
     chunk_to_paint_p95: of(run.chunk_to_paint_ms, (v) => percentile(v, 95)),
+    chunk_to_paint_lite_p50: null,
     long_frames_streaming: of(
       run.long_animation_frames_ms,
       (v) => v.filter((d) => d > LONG_FRAME_MS).length,
     ),
     dropped_frames_streaming: of(run.raf_timestamps_ms, droppedFramesPer10s),
+    react_commits_per_frame_streaming: run.react_commits_per_frame,
     keystroke_latency_p95: of(run.keystroke_latency_ms, (v) => percentile(v, 95)),
+    keystroke_latency_ime_p95: null,
     keystroke_handler: of(run.keystroke_handler_ms, (v) => percentile(v, 95)),
     idle_memory_total: run.idle_memory_mb,
+    idle_memory_over_blank:
+      os === "windows" && run.idle_memory_mb !== null
+        ? Math.max(0, run.idle_memory_mb - BLANK_APP_IDLE_MB)
+        : null,
     memory_after_session: run.memory_after_session_mb,
+    ipc_bytes_per_text_byte: run.ipc_bytes_per_text_byte,
   };
 }
 
@@ -170,7 +242,7 @@ export function summarise(os: Os, runs: readonly RawRun[]): ScoreboardResult {
   if (runs.length !== MEASURED_RUNS) {
     throw new Error(`expected ${MEASURED_RUNS} measured runs, got ${runs.length}`);
   }
-  const perRun = runs.map(runMetrics);
+  const perRun = runs.map((run) => runMetrics(run, os));
   const metrics = {} as Record<MetricId, MetricResult>;
   for (const { id } of METRICS) {
     const values = perRun.map((m) => m[id]);
@@ -218,7 +290,7 @@ export type ResultValues = Record<MetricId, number | null>;
 /**
  * Reads scoreboard-<os>.json from an artifact, which is untrusted data: a pull request's own code
  * wrote it. Only the medians of known metrics are kept, each a number from 0 to 1e9 or null; a
- * metric left out reads as null. A metric whose `runs` mix null and numbers, or whose median is
+ * metric left out reads as null, so a result written before a metric existed still reads. A metric whose `runs` mix null and numbers, or whose median is
  * null while its runs measured it, is refused, as {@link summarise} would have refused it. Anything
  * else throws, with a message that never quotes the input.
  */

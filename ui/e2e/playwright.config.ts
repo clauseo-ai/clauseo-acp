@@ -9,14 +9,25 @@ import { defineConfig } from "@playwright/test";
  * scoreboard's shared metrics and comment code (R13), which has unit tests only. The unit tests
  * use Playwright's runner rather than ui/app's vitest, so this package needs no second test
  * dependency.
+ *
+ * app-windows/scoreboard.spec.ts plays the speed scoreboard's session four times (about a minute
+ * each), so the `app` project leaves it out unless the command line names it:
+ * `pnpm test scoreboard.spec.ts` runs it alone, a plain `pnpm test` never does.
  */
+const SCOREBOARD_SPEC = "app-windows/scoreboard.spec.ts";
+const scoreboardNamed = process.argv.some((arg) => arg.includes("scoreboard.spec"));
+
 export default defineConfig({
   testDir: ".",
   projects: [
     // Pure functions of the harness and the scoreboard, on any OS: `pnpm run test:unit`.
     { name: "unit", testMatch: ["app-windows/**/*.test.ts", "scoreboard/**/*.test.ts"] },
     // The real app, Windows only: `pnpm test`.
-    { name: "app", testMatch: "app-windows/**/*.spec.ts" },
+    {
+      name: "app",
+      testMatch: "app-windows/**/*.spec.ts",
+      testIgnore: scoreboardNamed ? [] : [SCOREBOARD_SPEC],
+    },
   ],
   // One app at a time: the single-instance plugin ends a second launch.
   workers: 1,
