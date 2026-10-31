@@ -5,18 +5,17 @@
 //! answer or the cancel fallback, then steps 6 to 8 with `TurnFailed { code }`.
 //!
 //! A turn's last commit, the one holding its `TurnEnded`, leaves a closing record on the
-//! thread until it returns `Ok`. When it (or a commit ahead of it) fails, the end is tried once
-//! more as soon as the stream drains: expiries, cancelled tool calls, `TurnFailed`, `TurnEnded`.
+//! thread until it returns `Ok`. When it (or a commit ahead of it) fails, the same close is tried
+//! once more as soon as the stream drains, with the store's failure and the cancelled tool calls
+//! added (`TurnClose::store_failed`), so the after-turn checkpoint stays recorded.
 //! If that fails too, the record stays and the thread refuses new prompts; start-up
 //! reconciliation ends the turn at the next start, because the open turn is still the last
 //! `UserMessage` in the log.
 
-use clauseo_protocol::{
-    DetachReason, ErrorCode, ExpiryReason, StopReason, StreamId, ThreadId, TurnFailed, TurnId,
-};
+use clauseo_protocol::{StopReason, StreamId, ThreadId, TurnFailed, TurnId};
 
 use super::super::Actor;
-use super::close::{Expiries, TurnClose};
+use super::close::TurnClose;
 use super::state::STORE_DETAIL;
 use super::{Closing, Phase, Then, cancel, current, state, steps};
 use crate::error::Error;
@@ -89,7 +88,6 @@ pub(super) fn closing_sent(
     close: &TurnClose,
     sent: Result<(), Error>,
 ) {
-    let (turn, expiry, detach) = (close.turn, close.expiry(), close.detach.clone());
     let failed = sent.err().map(|error| {
         tracing::warn!(%thread, %error, "the end of a turn was not logged");
         error.code()
@@ -98,11 +96,9 @@ pub(super) fn closing_sent(
         return;
     };
     state.closing = Some(Closing {
-        turn,
+        close: close.clone(),
         failed,
         retried: false,
-        expiry,
-        detach,
     });
     if failed.is_some() && !blocked(actor, thread) {
         retry_closing(actor, thread);
@@ -115,7 +111,7 @@ pub(super) fn on_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         && state
             .closing
             .as_ref()
-            .is_some_and(|closing| closing.turn == turn)
+            .is_some_and(|closing| closing.close.turn == turn)
     {
         state.closing = None;
     }
@@ -130,14 +126,16 @@ pub(super) fn on_closing_failed(
 ) {
     if let Some(closing) = state(actor, thread)
         .and_then(|state| state.closing.as_mut())
-        .filter(|closing| closing.turn == turn)
+        .filter(|closing| closing.close.turn == turn)
     {
         closing.failed.get_or_insert(failure.error.code());
     }
 }
 
-/// The one retry of a failed end: expiries, cancelled tool calls, `TurnFailed { code }`,
-/// `TurnEnded { Failed }`, and the detach last.
+/// The one retry of a failed end: the same close (the after-turn checkpoint's record, the
+/// changes, the turn's failure, `checkpoint_after`, the limit card, the detach last), with the
+/// expiries and the cancelled tool calls read again from the rolled-back view, and the store's
+/// failure as the turn's failure unless it had one already.
 fn retry_closing(actor: &mut Actor, thread: ThreadId) {
     let Some(closing) = state(actor, thread)
         .and_then(|state| state.closing.as_mut())
@@ -149,25 +147,10 @@ fn retry_closing(actor: &mut Actor, thread: ThreadId) {
         return;
     };
     closing.retried = true;
-    let (turn, expiry, detach) = (closing.turn, closing.expiry, closing.detach.clone());
-    let sent = retry_commit(actor, thread, turn, code, expiry, detach);
+    let mut close = closing.close.clone();
+    close.store_failed(code);
+    let sent = close.send(actor, thread, Then::Closing(close.turn));
     if let Err(error) = sent {
         tracing::warn!(%thread, %error, "a turn's end failed twice; the next start ends it");
     }
-}
-
-fn retry_commit(
-    actor: &mut Actor,
-    thread: ThreadId,
-    turn: TurnId,
-    code: ErrorCode,
-    expiry: ExpiryReason,
-    detach: Option<DetachReason>,
-) -> Result<(), Error> {
-    let mut close = TurnClose::new(turn, StopReason::Failed);
-    close.expiries = Expiries::Pending(expiry);
-    close.cancel_tools = true;
-    close.failure = Some((code, Some("the commit ending the turn failed".to_owned())));
-    close.detach = detach;
-    close.send(actor, thread, Then::Closing(turn))
 }

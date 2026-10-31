@@ -29,8 +29,8 @@ mod updates;
 use std::collections::{BTreeSet, VecDeque};
 
 use clauseo_protocol::{
-    AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, ExpiryReason,
-    HostCommand, LimitStopReason, MatterId, MatterPath, StreamId, ThreadId, Timestamp, TurnId,
+    AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, HostCommand,
+    LimitStopReason, MatterId, MatterPath, StreamId, ThreadId, Timestamp, TurnId,
 };
 use futures::future::AbortHandle;
 
@@ -71,15 +71,12 @@ pub(crate) struct TurnState {
 /// A turn whose `TurnEnded` is sent but not durable yet.
 #[derive(Debug)]
 struct Closing {
-    turn: TurnId,
+    /// The close that commit holds; the retry pushes it again.
+    close: close::TurnClose,
     /// That commit, or one ahead of it, failed with this code; the retry logs it.
     failed: Option<ErrorCode>,
     /// The one retry was tried.
     retried: bool,
-    /// The reason the retry's expiries give.
-    expiry: ExpiryReason,
-    /// The detach the end logs last, if the agent exited.
-    detach: Option<DetachReason>,
 }
 
 /// A matter's turn state: who holds its writer and who waits for it. One per matter.
