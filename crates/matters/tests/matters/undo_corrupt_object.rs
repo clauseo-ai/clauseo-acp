@@ -276,3 +276,20 @@ fn a_corrupt_tree_is_never_followed() {
     assert_names(&err, tree, Some("sub"));
     assert_folder_untouched(&fx);
 }
+
+/// A replaced tip tree stops the matter from opening, as a torn object does: the stat cache is
+/// checked against the tip's tree on open, and a history that cannot be read is not trusted.
+#[test]
+fn a_corrupt_tip_tree_stops_the_open() {
+    let (fx, matter) = stepped("tip-tree-corrupt");
+    drop(matter);
+    let tip = object_id(gix::objs::Kind::Tree, &tree_data(&[("brief.txt", EDITED)]));
+    let wrong = tree_data(&[("brief.txt", BRIEF)]);
+    replace_file(
+        &id_path(&fx, tip),
+        loose_kind(&fx, gix::objs::Kind::Tree, &wrong),
+    );
+    let err = fx.open(&fx.folder).unwrap_err();
+    assert_names(&err, tip, None);
+    assert_eq!(fx.read("brief.txt"), EDITED);
+}
