@@ -19,6 +19,7 @@ import {
   step,
   STREAM,
   THREAD,
+  toolCall,
   TURN,
   userMessage,
   uuid,
@@ -187,6 +188,54 @@ test("permission buttons are labelled by option kind, never the agent's label, a
   expect(transport.only("answer_permission")).toEqual([
     { call: "answer_permission", thread: THREAD, request: "req-1", option: "opt-allow_always" },
   ]);
+});
+
+test("a permission whose tool call is not in view keeps its kind buttons under a neutral heading", async () => {
+  const { show } = await open();
+  const options = [
+    { option_id: "a", kind: "allow_once" as const, agent_label: "Sure!" },
+    { option_id: "r", kind: "reject_once" as const, agent_label: "Nope" },
+  ];
+  const permission = (n: number, toolCall?: string): ViewEntry => ({
+    permission: {
+      order: n,
+      request: `req-${n}`,
+      ...(toolCall === undefined ? {} : { tool_call: toolCall }),
+      options,
+      deliverable: "live",
+      state: "pending",
+    },
+  });
+  // No tool call named; one named but not held; one named and held.
+  await show(
+    [
+      toolCall(6, 1, "pending"),
+      permission(7),
+      permission(8, uuid(9, 7)),
+      permission(9, uuid(1, 7)),
+    ],
+    header("needs_you"),
+  );
+  expect(all("permission-heading").map((h) => h.textContent)).toEqual([
+    "The agent asks permission.",
+    "The agent asks permission.",
+    "The agent asks permission for Read file 1.",
+  ]);
+  for (const card of all("permission")) {
+    expect([...card.querySelectorAll("button")].map((b) => b.textContent)).toEqual([
+      PERMISSION_LABEL.allow_once,
+      PERMISSION_LABEL.reject_once,
+    ]);
+  }
+});
+
+test("a tool call row carries Clauseo's tool call id and its status", async () => {
+  const { show } = await open();
+  await show([toolCall(6, 1, "in_progress")]);
+  const row = $("tool-call")!;
+  expect(row.dataset["toolCallId"]).toBe(uuid(1, 7));
+  expect(row.dataset["entryId"]).toBe(`tool_call:${uuid(1, 7)}`);
+  expect(row.dataset["status"]).toBe("in_progress");
 });
 
 test("undo sends the turn's files; a limit stop shows its reset time as ISO UTC", async () => {

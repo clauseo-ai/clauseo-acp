@@ -27,7 +27,9 @@ export class Subscriptions {
   constructor(
     host: SubscriptionHost,
     onError: (stream: StreamId, error: unknown) => void,
-    defer: (run: () => void) => void = queueMicrotask,
+    // Wrapped, never passed bare: stored as a field and called as `this.#defer`, a host function gets the wrong
+    // `this`, and WebView2 throws "Illegal invocation".
+    defer: (run: () => void) => void = (run) => queueMicrotask(run),
   ) {
     this.#host = host;
     this.#onError = onError;

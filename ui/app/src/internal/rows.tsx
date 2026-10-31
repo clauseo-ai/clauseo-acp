@@ -132,9 +132,16 @@ function ToolCall({ id, entry }: { id: EntryId; entry: ToolCallEntry }) {
   );
 }
 
-function ToolTitle({ stream, id }: { stream: StreamId; id: EntryId }) {
-  const entry = useEntry(useViewStore(), stream, id);
-  return entry?.tool_call !== undefined ? <strong>{entry.tool_call.title}</strong> : null;
+/** The title of the tool call a permission is for; null when the request names none or the view does not hold it. */
+function useToolTitle(stream: StreamId, toolCall: string | undefined): string | null {
+  const pick = useCallback(
+    (v: StreamView | undefined) =>
+      toolCall === undefined
+        ? null
+        : (v?.entries.get(`tool_call:${toolCall}`)?.tool_call?.title ?? null),
+    [toolCall],
+  );
+  return useStreamPart(useViewStore(), stream, pick);
 }
 
 function Permission({
@@ -147,6 +154,7 @@ function Permission({
   entry: PermissionEntry;
 }) {
   const { answer } = useThreadActions();
+  const title = useToolTitle(stream, entry.tool_call);
   const state =
     typeof entry.state === "string"
       ? entry.state
@@ -177,15 +185,15 @@ function Permission({
       data-entry-id={id}
       data-state={state}
     >
-      <p style={{ margin: 0 }}>
-        The agent asks permission
-        {entry.tool_call !== undefined && (
+      {/* A request with no tool call in view (some agents ask before any tool call) gets the neutral heading alone. */}
+      <p style={{ margin: 0 }} data-testid="permission-heading">
+        {title === null ? (
+          "The agent asks permission."
+        ) : (
           <>
-            {" for "}
-            <ToolTitle stream={stream} id={`tool_call:${entry.tool_call}`} />
+            The agent asks permission for <strong>{title}</strong>.
           </>
         )}
-        .
       </p>
       {open ? (
         <div style={{ display: "flex", gap: 8, marginTop: 6 }}>

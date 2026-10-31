@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { Subscriptions } from "./subscriptions.ts";
 import type { PatchBatch } from "./protocol.ts";
 
@@ -123,4 +123,32 @@ test("a failed host call is reported and the next call for the stream still runs
   await new Promise((done) => setTimeout(done, 0));
   expect(calls).toEqual(["subscribe", "unsubscribe"]);
   expect(errors).toEqual(["s: Error: no"]);
+});
+
+test("the default release scheduler calls queueMicrotask unbound, as WebView2 requires", async () => {
+  // WebView2 throws "Illegal invocation" when a host function runs with another object as `this`.
+  const strict = vi.fn(function (this: unknown, run: () => void) {
+    if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+    run();
+  });
+  vi.stubGlobal("queueMicrotask", strict);
+  try {
+    const calls: string[] = [];
+    const subs = new Subscriptions(
+      {
+        subscribe: async () => {
+          calls.push("subscribe");
+        },
+        unsubscribe: async () => {
+          calls.push("unsubscribe");
+        },
+      },
+      () => {},
+    );
+    expect(() => subs.add("s", null, () => {})()).not.toThrow();
+    expect(strict).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+  await new Promise((done) => setTimeout(done, 0));
 });
