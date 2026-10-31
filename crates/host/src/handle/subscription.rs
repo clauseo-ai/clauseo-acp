@@ -91,7 +91,8 @@ pub struct Subscription(Feed<EncodedEvent>);
 
 /// An event subscription: `HostEvent::Events` with the stream's envelopes in `seq` order, no
 /// gap and no duplicate, and one `HostEvent::CaughtUp` between the replayed and the live ones.
-/// Ends when the host stops.
+/// Ends when the host stops. It also ends, with the host still up, when a store read failed
+/// while replaying or refilling it: subscribe again with `after_seq` set to the last `seq` seen.
 #[derive(Debug)]
 pub struct EventSubscription(Feed<HostEvent>);
 
