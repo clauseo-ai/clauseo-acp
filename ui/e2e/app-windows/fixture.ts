@@ -11,6 +11,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { setTimeout as wait } from "node:timers/promises";
 import { promisify } from "node:util";
 import { chromium, test as base, type Browser, type Page } from "@playwright/test";
@@ -85,35 +86,51 @@ async function readPort(
 ): Promise<number> {
   const file = join(userDataFolder, "EBWebView", "DevToolsActivePort");
   let failure: Error | undefined;
-  child.once("error", (error) => {
+  const onError = (error: Error): void => {
     failure = new Error(`the app did not start: ${appPath()}`, { cause: error });
-  });
-  child.once("exit", (code) => {
+  };
+  const onExit = (code: number | null): void => {
     failure ??= new Error(`the app exited with ${String(code)} before WebView2 wrote ${file}`);
-  });
-  for (;;) {
-    if (failure !== undefined) {
-      throw failure;
+  };
+  child.once("error", onError);
+  child.once("exit", onExit);
+  try {
+    for (;;) {
+      if (failure !== undefined) {
+        throw failure;
+      }
+      const port = portIn(file);
+      if (port !== undefined) {
+        return port;
+      }
+      if (performance.now() + RETRY_MS > deadline) {
+        throw new Error(
+          `WebView2 wrote no port to ${file} within the ${SETUP_TIMEOUT_MS} ms setup time;` +
+            ` EBWebView holds: ${entries(join(userDataFolder, "EBWebView"))}`,
+        );
+      }
+      await wait(RETRY_MS);
     }
-    let text = "";
-    try {
-      text = readFileSync(file, "utf8");
-    } catch {
-      // Not written yet.
-    }
-    // The line ends with a newline once the port is whole; a file caught mid-write waits a round.
-    const match = /^(\d+)\r?\n/.exec(text);
-    if (match?.[1] !== undefined) {
-      return Number(match[1]);
-    }
-    if (performance.now() + RETRY_MS > deadline) {
-      throw new Error(
-        `WebView2 wrote no port to ${file} within the ${SETUP_TIMEOUT_MS} ms setup time;` +
-          ` EBWebView holds: ${entries(join(userDataFolder, "EBWebView"))}`,
-      );
-    }
-    await wait(RETRY_MS);
+  } finally {
+    // The "error" handler stays: a ChildProcess "error" with no handler would end the worker.
+    child.off("exit", onExit);
   }
+}
+
+/** The port on the first line of `file`, or undefined while the file is missing or half written. */
+function portIn(file: string): number | undefined {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+  // The line ends with a newline once the port is whole; a file caught mid-write waits a round.
+  const match = /^(\d+)\r?\n/.exec(text);
+  return match?.[1] === undefined ? undefined : Number(match[1]);
 }
 
 /** Connects to WebView2 on `port`, retrying while it opens the port. */
@@ -178,7 +195,11 @@ export const test = base.extend<{ app: App }>({
     const deadline = startedAt + SETUP_TIMEOUT_MS;
     const child = spawn(appPath(), [], {
       env: { ...process.env, WEBVIEW2_USER_DATA_FOLDER: userDataFolder },
-      stdio: ["ignore", "inherit", "inherit"],
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    // Each line the app prints goes on to the test log with a prefix, so the pipe never fills.
+    createInterface({ input: child.stdout }).on("line", (line) => {
+      process.stdout.write(`[app] ${line}\n`);
     });
     let browser: Browser | undefined;
     try {
