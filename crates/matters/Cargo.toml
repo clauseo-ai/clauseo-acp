@@ -34,5 +34,9 @@ criterion = { workspace = true, features = ["cargo_bench_support"] }
 name = "checkpoint"
 harness = false
 
+[[bench]]
+name = "read"
+harness = false
+
 [lints]
 workspace = true

@@ -81,7 +81,7 @@ crates/store/benches/commit.rs - clippy::unwrap_used
 crates/matters/src/write.rs - clippy::disallowed_methods
 crates/matters/tests/matters/support.rs - clippy::disallowed_methods
 crates/matters/src/walk/tests.rs symlink clippy::disallowed_methods
-crates/matters/benches/checkpoint.rs bench::fs_setup clippy::disallowed_methods
+crates/matters/benches/common/mod.rs fs_setup clippy::disallowed_methods
 crates/matters/src/fsync.rs sync_dir clippy::unnecessary_wraps
 crates/matters/src/fsync.rs barrier clippy::unnecessary_wraps
 crates/matters/src/fsync.rs full_flush clippy::unnecessary_wraps

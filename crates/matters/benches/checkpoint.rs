@@ -7,137 +7,56 @@
 //! deep) and on a flat one (2,000 files in the folder itself): comparing two checkpoints and a
 //! checkpoint with the folder, reading one file of a version, a restore preview, and restores
 //! of 100 files in one folder, of 1,000 files across all of them, and of 3 files after 3
-//! outside edits. Last, reading one 8 MiB file of a version, text (stored deflated) and
-//! `.docx`-like (stored at zlib level 0, so the read is mostly the hash and the copy).
+//! outside edits. Reading one large file is in `read.rs`; the shared setup in `common/mod.rs`.
 //!
 //! Everything is under `cfg(test)`, which `cargo bench` sets, so clippy's test allowances
 //! (unwrap, expect, indexing) apply.
 
 #[cfg(test)]
+#[path = "common/mod.rs"]
+mod common;
+
+#[cfg(test)]
 mod bench {
     use std::collections::BTreeSet;
     use std::path::{Path, PathBuf};
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
-    use std::time::{Duration, SystemTime};
+    use std::time::Duration;
 
-    use clauseo_matters::{
-        CompareSide, DEFAULT_MARKER, Imported, Limits, Matter, NewMatter, OsProbe, Restore,
-        RestoreFiles, Retention, Settings, TurnMeta,
-    };
-    use clauseo_protocol::{CheckpointId, MatterPath, Timestamp};
+    use clauseo_matters::{CompareSide, Matter, Restore, RestoreFiles, TurnMeta};
+    use clauseo_protocol::{MatterPath, Timestamp};
     use criterion::{BatchSize, Criterion, criterion_group};
+
+    use crate::common::{BASE_MTIME, Rng, at_seconds, checkpoint_id, fs_setup, import};
 
     /// How many documents the folder holds.
     const FILES: usize = 500;
     /// How many are rewritten before each measured checkpoint.
     const REWRITTEN: usize = 3;
-    /// 2020-01-01T00:00:00Z: every generated file's modification time.
-    const BASE_MTIME: u64 = 1_577_836_800;
     /// 2021-01-01T00:00:00Z: the rewritten files' time, plus the iteration in seconds.
     const REWRITE_MTIME: u64 = 1_609_459_200;
 
-    /// The file system writes the bench's setup makes; the crate's own go through its write module.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "the checkpoint bench generates its folder with std's writes here alone"
-    )]
-    mod fs_setup {
-        use std::fs::{File, FileTimes};
-        use std::path::Path;
-        use std::time::SystemTime;
-
-        /// Writes `contents` to `path` (parents made) and sets its modification time.
-        pub(super) fn write(path: &Path, contents: &[u8], mtime: SystemTime) {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).unwrap();
-            }
-            std::fs::write(path, contents).unwrap();
-            let file = File::options().write(true).open(path).unwrap();
-            file.set_times(FileTimes::new().set_modified(mtime))
-                .unwrap();
-        }
-
-        /// Removes `path` and everything under it, if it exists.
-        pub(super) fn remove_all(path: &Path) {
-            if let Err(err) = std::fs::remove_dir_all(path) {
-                assert_eq!(err.kind(), std::io::ErrorKind::NotFound, "{err}");
-            }
-        }
+    /// A number below `bound`.
+    fn below(rng: &mut Rng, bound: u64) -> u64 {
+        rng.next() % bound
     }
 
-    /// A xorshift64 generator: the same folder on every run.
-    struct Rng(u64);
-
-    impl Rng {
-        fn next(&mut self) -> u64 {
-            let mut x = self.0;
-            x ^= x << 13;
-            x ^= x >> 7;
-            x ^= x << 17;
-            self.0 = x;
-            x
+    /// One document: about 70% `.docx`-like, 15% PDF-like, 15% text; 20 KB to 2 MB, smaller
+    /// sizes likelier.
+    fn document(rng: &mut Rng) -> (&'static str, Vec<u8>) {
+        let base = 20_000_u64 << below(rng, 7);
+        let len = usize::try_from((base + below(rng, base)).min(2_000_000)).unwrap();
+        match below(rng, 100) {
+            0..70 => ("docx", rng.contents(b"PK\x03\x04", len)),
+            70..85 => ("pdf", rng.contents(b"%PDF-1.7\n", len)),
+            _ => ("txt", rng.contents(b"", len)),
         }
-
-        /// A number below `bound`.
-        fn below(&mut self, bound: u64) -> u64 {
-            self.next() % bound
-        }
-
-        /// `len` bytes: random after `magic`, or text-like (compressible) when `magic` is empty.
-        fn contents(&mut self, magic: &[u8], len: usize) -> Vec<u8> {
-            const WORDS: [&str; 8] = [
-                "agreement ",
-                "the party ",
-                "shall ",
-                "indemnify ",
-                "notwithstanding ",
-                "clause ",
-                "hereinafter ",
-                "governing law\n",
-            ];
-            let mut bytes = Vec::with_capacity(len + 16);
-            bytes.extend_from_slice(magic);
-            while bytes.len() < len {
-                let word = self.next();
-                if magic.is_empty() {
-                    let index = usize::try_from(word % 8).unwrap();
-                    bytes.extend_from_slice(WORDS[index].as_bytes());
-                } else {
-                    bytes.extend_from_slice(&word.to_le_bytes());
-                }
-            }
-            bytes.truncate(len);
-            bytes
-        }
-
-        /// One document: about 70% `.docx`-like, 15% PDF-like, 15% text; 20 KB to 2 MB, smaller
-        /// sizes likelier.
-        fn document(&mut self) -> (&'static str, Vec<u8>) {
-            let base = 20_000_u64 << self.below(7);
-            let len = usize::try_from((base + self.below(base)).min(2_000_000)).unwrap();
-            match self.below(100) {
-                0..70 => ("docx", self.contents(b"PK\x03\x04", len)),
-                70..85 => ("pdf", self.contents(b"%PDF-1.7\n", len)),
-                _ => ("txt", self.contents(b"", len)),
-            }
-        }
-    }
-
-    fn at_seconds(seconds: u64) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_secs(seconds)
-    }
-
-    /// Checkpoint `n`'s id: the counter in the UUID's low bits.
-    fn checkpoint_id(n: u64) -> CheckpointId {
-        format!("01900000-0000-7000-8000-{n:012x}").parse().unwrap()
     }
 
     /// Writes the folder: 500 documents, some in 2 or 3 levels of subfolders.
     fn generate(folder: &Path, rng: &mut Rng) -> Vec<PathBuf> {
         let mut paths = Vec::with_capacity(FILES);
         for n in 0..FILES {
-            let (extension, contents) = rng.document();
+            let (extension, contents) = document(rng);
             let dir = match n % 5 {
                 0 => "pleadings/drafts/",
                 1 => "correspondence/2019/march/",
@@ -149,27 +68,6 @@ mod bench {
             paths.push(path);
         }
         paths
-    }
-
-    fn import(root: &Path, folder: &Path) -> Matter {
-        let settings = Settings {
-            matters_root: root.to_owned(),
-            limits: Limits::DEFAULT,
-            retention: Retention::KeepAll,
-            probe: Arc::new(OsProbe),
-        };
-        let new = NewMatter {
-            id: "01910000-0000-7000-8000-000000000001".parse().unwrap(),
-            folder: folder.to_owned(),
-            created_at: Timestamp::new(1_700_000_000_000).unwrap(),
-            marker: DEFAULT_MARKER,
-            checkpoint: checkpoint_id(1),
-        };
-        let cancel = AtomicBool::new(false);
-        match Matter::import(settings, new, &[], &mut |_| {}, &cancel).unwrap() {
-            Imported::Done { matter, .. } => *matter,
-            Imported::Cancelled => unreachable!("no cancel flag was set"),
-        }
     }
 
     fn checkpoint_per_turn(c: &mut Criterion) {
@@ -191,7 +89,7 @@ mod bench {
                     iteration += 1;
                     for k in 0..REWRITTEN {
                         let n = usize::try_from(iteration).unwrap() * REWRITTEN + k * 167;
-                        let (_, contents) = rng.document();
+                        let (_, contents) = document(&mut rng);
                         let mtime = at_seconds(REWRITE_MTIME + iteration);
                         fs_setup::write(&paths[n % FILES], &contents, mtime);
                     }
@@ -239,8 +137,8 @@ mod bench {
 
     /// A small document: 2 KB to 20 KB, about 70% `.docx`-like, the rest text.
     fn small_document(rng: &mut Rng) -> (&'static str, Vec<u8>) {
-        let len = usize::try_from(2_000 + rng.below(18_000)).unwrap();
-        if rng.below(10) < 7 {
+        let len = usize::try_from(2_000 + below(rng, 18_000)).unwrap();
+        if below(rng, 10) < 7 {
             ("docx", rng.contents(b"PK\x03\x04", len))
         } else {
             ("txt", rng.contents(b"", len))
@@ -476,41 +374,6 @@ mod bench {
         fs_setup::remove_all(base);
     }
 
-    /// Reads one 8 MiB file of checkpoint 1: text, then `.docx`-like.
-    fn read_large_file(c: &mut Criterion) {
-        const LEN: usize = 8 << 20;
-        let base =
-            std::env::temp_dir().join(format!("clauseo-matters-bench-read-{}", std::process::id()));
-        fs_setup::remove_all(&base);
-        let folder = base.join("matter");
-        let mut rng = Rng(0xbb67_ae85_84ca_a73b);
-        let cases = [("text.txt", &b""[..]), ("brief.docx", &b"PK\x03\x04"[..])];
-        for (name, magic) in cases {
-            let contents = rng.contents(magic, LEN);
-            fs_setup::write(&folder.join(name), &contents, at_seconds(BASE_MTIME));
-        }
-        let matter = import(&base.join("root"), &folder);
-        for (bench, name) in [
-            ("read_file_8mib_text", "text.txt"),
-            ("read_file_8mib_docx", "brief.docx"),
-        ] {
-            let path = MatterPath::new(name).unwrap();
-            let mut bytes = Vec::with_capacity(LEN);
-            c.bench_function(bench, |b| {
-                b.iter(|| {
-                    bytes.clear();
-                    let len = matter
-                        .read_file(checkpoint_id(1), &path, &mut bytes)
-                        .unwrap();
-                    assert_eq!(len, u64::try_from(LEN).unwrap());
-                    len
-                });
-            });
-        }
-        drop(matter);
-        fs_setup::remove_all(&base);
-    }
-
     criterion_group! {
         name = benches;
         config = Criterion::default()
@@ -524,7 +387,7 @@ mod bench {
         config = Criterion::default()
             .sample_size(10)
             .measurement_time(Duration::from_secs(5));
-        targets = versions, read_large_file
+        targets = versions
     }
 }
 
