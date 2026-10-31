@@ -8,7 +8,7 @@ use clauseo_protocol::{
 use clauseo_store::{Commit, DB_FILE, Error, SnapshotIn};
 use futures::executor::block_on;
 
-use crate::common::{TestDir, seq, sql, texts, thread};
+use crate::common::{TestDir, count, seq, sql, texts, thread};
 
 fn limits(agent: AgentKind, account: &str) -> AccountLimits {
     AccountLimits {
@@ -23,7 +23,7 @@ fn limits(agent: AgentKind, account: &str) -> AccountLimits {
 }
 
 /// Account limits are kept per agent and account: the same account name under Claude and
-/// under Codex is two accounts, and both read back, Claude's first.
+/// under Codex is two accounts, and both read back (in no promised order).
 #[test]
 fn account_limits_of_two_agents_with_one_account_name_are_both_kept() {
     let dir = TestDir::new("account_limits_of_two_agents_with_one_account_name_are_both_kept");
@@ -32,16 +32,18 @@ fn account_limits_of_two_agents_with_one_account_name_are_both_kept() {
     let codex = limits(AgentKind::Codex, "work");
     block_on(store.put_account_limits(codex.clone())).unwrap();
     block_on(store.put_account_limits(claude.clone())).unwrap();
-    assert_eq!(
-        block_on(store.account_limits()).unwrap(),
-        vec![claude, codex]
-    );
+    let read = block_on(store.account_limits()).unwrap();
+    assert_eq!(read.len(), 2, "{read:?}");
+    assert!(read.contains(&claude) && read.contains(&codex), "{read:?}");
     block_on(store.close()).unwrap();
 }
 
 /// A commit that cannot take the write lock, held by another connection past the busy
 /// timeout (5 s), fails with `Io` whose `IoError` says busy, carries SQLite's failure as its
 /// source and shows it; once the lock is free the next commit goes through.
+///
+/// It takes about 5 s: it waits out the writer's fixed `busy_timeout`. The only faster route
+/// converts a hand-built `SqliteFailure` and would lose the end-to-end lock.
 #[test]
 fn commit_blocked_by_another_writer_is_a_busy_io_error() {
     let dir = TestDir::new("commit_blocked_by_another_writer_is_a_busy_io_error");
@@ -77,6 +79,9 @@ fn snapshot_claiming_more_than_the_cap_is_skipped() {
     block_on(store.close()).unwrap();
 
     // A frame header alone: magic, single segment with an 8-byte content size, then 2^62.
+    // 2^62 because without the cap the reader allocates the claimed size, and 2^62 bytes exceeds
+    // any x86-64 or aarch64 address space, so that allocation aborts; under any smaller claim a
+    // header-only frame just fails to decompress, the same outcome as the cap's.
     let mut frame = vec![0x28, 0xB5, 0x2F, 0xFD, 0xE0];
     frame.extend_from_slice(&(1_u64 << 62).to_le_bytes());
     sql(&dir)
@@ -110,5 +115,7 @@ fn close_truncates_the_wal_while_another_connection_is_open() {
 
     block_on(store.close()).unwrap();
     assert_eq!(std::fs::metadata(&wal).map_or(0, |meta| meta.len()), 0);
+    // With the WAL empty, the 20 events are read from the main file.
+    assert_eq!(count(&other, "SELECT count(*) FROM events"), 20);
     drop(other);
 }
