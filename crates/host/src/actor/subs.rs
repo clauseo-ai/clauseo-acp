@@ -274,32 +274,49 @@ pub(super) fn on_event_page(
     }
 }
 
-/// Hands a returned commit's envelopes of `stream` to its live event subscribers.
-pub(super) fn deliver_events(actor: &mut Actor, stream: StreamId, envelopes: &[Envelope]) {
+/// Hands a returned commit's envelopes of `stream` (`batch`, all of that stream, in seq order)
+/// to its live event subscribers. A subscriber that has none of them yet (the usual case) gets
+/// the batch itself: cloned for all but the last such subscriber, which takes it. One that has
+/// some already gets only the rest.
+pub(super) fn deliver_events(actor: &mut Actor, stream: StreamId, batch: Vec<Envelope>) {
     let Some(subs) = actor.event_subs.get_mut(&stream) else {
         return;
     };
-    subs.retain_mut(|sub| {
-        if sub.mode != Mode::Live {
-            return true;
+    let (Some(first), Some(last)) = (
+        batch.first().map(|envelope| envelope.seq),
+        batch.last().map(|envelope| envelope.seq),
+    ) else {
+        return;
+    };
+    let mut closed: Vec<SubId> = Vec::new();
+    let mut whole: Vec<SubId> = Vec::new();
+    for sub in subs.iter_mut().filter(|sub| sub.mode == Mode::Live) {
+        if sub.delivered < Some(first) {
+            whole.push(sub.id);
+            continue;
         }
-        let fresh: Vec<Envelope> = envelopes
+        let rest: Vec<Envelope> = batch
             .iter()
-            .filter(|envelope| envelope.stream == stream && Some(envelope.seq) > sub.delivered)
+            .filter(|envelope| Some(envelope.seq) > sub.delivered)
             .cloned()
             .collect();
-        let Some(last) = fresh.last().map(|envelope| envelope.seq) else {
-            return true;
-        };
-        match sub.send(HostEvent::Events(fresh)) {
-            Sent::Ok => {
-                sub.delivered = Some(last);
-                true
-            }
-            Sent::Full => true,
-            Sent::Closed => false,
+        if let Some(seq) = rest.last().map(|envelope| envelope.seq) {
+            offer(sub, rest, seq, &mut closed);
         }
-    });
+    }
+    let mut batch = Some(batch);
+    let count = whole.len();
+    for (index, id) in whole.into_iter().enumerate() {
+        let events = if index + 1 == count {
+            batch.take()
+        } else {
+            batch.clone()
+        };
+        if let (Some(events), Some(sub)) = (events, subs.iter_mut().find(|sub| sub.id == id)) {
+            offer(sub, events, last, &mut closed);
+        }
+    }
+    subs.retain(|sub| !closed.contains(&sub.id));
     let owing: Vec<SubId> = subs
         .iter()
         .filter(|sub| sub.owes_caught_up && sub.mode == Mode::Live)
@@ -307,6 +324,15 @@ pub(super) fn deliver_events(actor: &mut Actor, stream: StreamId, envelopes: &[E
         .collect();
     for id in owing {
         pump(actor, stream, id);
+    }
+}
+
+/// Sends one batch ending at `last` to a live subscriber; a closed one goes in `closed`.
+fn offer(sub: &mut EventSub, events: Vec<Envelope>, last: Seq, closed: &mut Vec<SubId>) {
+    match sub.send(HostEvent::Events(events)) {
+        Sent::Ok => sub.delivered = Some(last),
+        Sent::Full => {}
+        Sent::Closed => closed.push(sub.id),
     }
 }
 

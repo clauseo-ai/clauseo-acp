@@ -1,6 +1,6 @@
 //! The end of a turn: the prompt's answer, steps 6 to 8 (the held text and the expiries, the
-//! after-turn checkpoint and the commit that ends the turn, the writer passing on), and the
-//! failures that end a turn early: a host bug, a store failure.
+//! after-turn checkpoint and the commit that ends the turn, the writer passing on), and a host
+//! bug that ends a turn early. Store failures are in `failure.rs`.
 
 use clauseo_matters::{Checkpoint, CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
@@ -14,12 +14,11 @@ use super::super::input::MatterTag;
 use super::agents;
 use super::out::Out;
 use super::{
-    End, JobKind, Phase, Then, TurnJob, asks, cancel, current, matter_of, state, steps, stopping,
-    updates,
+    End, JobKind, Phase, Then, TurnJob, asks, cancel, current, failure, matter_of, state, steps,
+    stopping, updates,
 };
 use crate::error::Error;
 use crate::matter_worker::MatterJob;
-use crate::pipeline::Failure;
 
 /// The prompt returned: step 6.
 pub(super) fn on_prompt_done(
@@ -78,6 +77,10 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
     {
         end.stop = StopReason::Failed;
         end.failure = Some((code, detail));
+    }
+    end.store_failed(current.store_failed);
+    if end.detach.is_none() {
+        end.detach = current.detach.take();
     }
     let turn = current.turn;
     let expiry = end.expiry;
@@ -167,14 +170,24 @@ pub(super) fn on_after_turn(
     else {
         return;
     };
-    let end = current
+    let mut end = current
         .end
         .take()
         .unwrap_or_else(|| End::failed(ErrorCode::Internal, None, None));
+    // A commit of steps 6 and 7 may have failed after `end_turn` ran.
+    end.store_failed(current.store_failed);
     let limit = current.limit.take();
+    let (expiry, detach) = (end.expiry, end.detach.clone());
+    // A turn stopped at its limit stays `AtLimit` when only its checkpoint fails.
+    let stop = match (&limit, end.stop, &end.failure) {
+        (Some(_), StopReason::EndTurn, None) => StopReason::AtLimit,
+        (_, stop, _) => stop,
+    };
     let logged = (|| -> Result<(), Error> {
         let matter = matter_of(actor, thread)?;
         let mut out = Out::new(actor, thread, None)?;
+        // Expiries step 6 could not log (its commit failed, the stream rolled back).
+        expiries(actor, thread, &mut out, expiry)?;
         let mut failure = end.failure;
         let mut checkpoint_after = None;
         match result {
@@ -203,10 +216,6 @@ pub(super) fn on_after_turn(
                 failure.get_or_insert((error.code(), Some(error.to_string())));
             }
         }
-        let stop = match (&limit, end.stop, &failure) {
-            (Some(_), StopReason::EndTurn, None) => StopReason::AtLimit,
-            (_, stop, _) => stop,
-        };
         if let Some((code, detail)) = failure {
             out.push(actor, TurnFailed { turn, code, detail })?;
         }
@@ -231,11 +240,9 @@ pub(super) fn on_after_turn(
         if let Some(reason) = end.detach {
             out.push(actor, AgentSessionDetached { reason })?;
         }
-        out.send(actor, Then::Nothing)
+        out.send(actor, Then::Closing(turn))
     })();
-    if let Err(error) = logged {
-        tracing::warn!(%thread, %error, "the end of a turn was not logged");
-    }
+    failure::closing_sent(actor, thread, turn, (expiry, detach), logged);
     finish(actor, thread);
 }
 
@@ -311,45 +318,4 @@ pub(super) fn check_abort(actor: &mut Actor, thread: ThreadId) {
     if current.live() {
         cancel::cancel_running(actor, thread, None);
     }
-}
-
-/// An agent-driven commit of `thread` failed: the turn is cancelled, and once the stream's
-/// commits have all returned, [`on_unblocked`] logs its end.
-pub(super) fn on_store_failure(actor: &mut Actor, thread: ThreadId, failure: &Failure) {
-    let Some(current) = current(actor, thread) else {
-        tracing::warn!(%thread, error = %failure.error, "an agent-driven commit failed");
-        return;
-    };
-    if current.store_failed.is_some() {
-        return;
-    }
-    tracing::warn!(%thread, error = %failure.error, "a turn's commit failed; cancelling it");
-    current.store_failed = Some(failure.error.code());
-    if current.live() {
-        cancel::cancel_running(actor, thread, None);
-    }
-}
-
-/// `thread`'s stream drained after a failure: one try at `TurnFailed { code }` and
-/// `TurnEnded`; if that fails too, reconciliation ends the turn at the next start.
-pub(super) fn on_unblocked(actor: &mut Actor, thread: ThreadId) {
-    let Some(current) = current(actor, thread) else {
-        return;
-    };
-    let Some(code) = current.store_failed else {
-        return;
-    };
-    let turn = current.turn;
-    if let Some(call) = current.prompt_call.take() {
-        call.abort();
-    }
-    if let Some(timer) = current.cancel_timer.take() {
-        timer.abort();
-    }
-    let failed = TurnFailed {
-        turn,
-        code,
-        detail: Some("a commit of the turn failed".to_owned()),
-    };
-    steps::end_unstarted(actor, thread, turn, Some(failed), StopReason::Failed, None);
 }

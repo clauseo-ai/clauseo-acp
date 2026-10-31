@@ -14,7 +14,7 @@ use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::input::{Input, MatterTag};
 use super::super::{Actor, Tag};
 use super::out::Out;
-use super::{JobKind, LogFor, TurnInput, TurnJob, end, lost, matter_of, state, steps};
+use super::{JobKind, LogFor, TurnInput, TurnJob, end, lost, matter_of, prompt, state};
 use crate::error::Error;
 use crate::matter_worker::{MatterJob, UndoJob};
 
@@ -296,7 +296,7 @@ fn log_undo(
     };
     out.send_tagged(actor, tag)?;
     // The next prompt starts with the note on these files.
-    steps::ensure_note(actor, thread);
+    prompt::ensure_note(actor, thread);
     if let Some(note) = state(actor, thread).and_then(|state| state.note.as_mut()) {
         for path in restored {
             if !note.contains(&path) {

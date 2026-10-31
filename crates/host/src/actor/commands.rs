@@ -7,9 +7,9 @@
 //! failure.
 
 use clauseo_protocol::{
-    CommandEnvelope, CommandId, CommandOutcome, DomainEvent, Envelope, ErrorCode, HostCommand,
-    HostError, MatterId, Principal, RenameSource, StreamId, ThreadArchived, ThreadCreated,
-    ThreadId, ThreadRenamed, Timestamp, ValidatedCommand,
+    CommandEnvelope, CommandId, CommandOutcome, DomainEvent, ErrorCode, HostCommand, HostError,
+    MatterId, Principal, RenameSource, StreamId, ThreadArchived, ThreadCreated, ThreadId,
+    ThreadRenamed, Timestamp, ValidatedCommand,
 };
 use clauseo_store::{Receipt, ThreadRow, command_hash};
 
@@ -218,13 +218,13 @@ pub(super) fn command_committed(
     id: CommandId,
     answer: CommandOutcome,
     after: AfterCommand,
-    outcome: Result<&[Envelope], &Failure>,
+    outcome: Result<(), &Failure>,
 ) {
     match (after, outcome) {
-        (AfterCommand::Matter(entry), Ok(_)) => {
+        (AfterCommand::Matter(entry), Ok(())) => {
             actor.matters.insert(entry.row.id, *entry);
         }
-        (AfterCommand::Thread(entry), Ok(_)) => {
+        (AfterCommand::Thread(entry), Ok(())) => {
             actor.threads.insert(entry.row.id, *entry);
         }
         (AfterCommand::Row { before }, Err(_)) => {
@@ -242,7 +242,7 @@ pub(super) fn command_committed(
         (AfterCommand::Turn(tag), outcome) => turn::committed(actor, tag, outcome),
     }
     let result = outcome
-        .map(|_| answer)
+        .map(|()| answer)
         .map_err(|failure| Error::Store(failure.error.clone()));
     actor.finish_command(id, result);
 }

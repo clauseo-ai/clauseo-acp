@@ -157,7 +157,15 @@ pub(crate) struct Actor {
     pub(crate) phase: Phase,
     /// The Scratch matter being created at start-up.
     pub(crate) scratch: Option<Box<matters::PendingMatter>>,
+    /// Picks commits for the store to refuse (tests): given a commit's events, a command id the
+    /// store already holds. The commit then carries a receipt with it: `DuplicateCommand`.
+    #[cfg(test)]
+    pub(crate) fault: Option<Fault>,
 }
+
+/// See [`Actor::fault`].
+#[cfg(test)]
+pub(crate) type Fault = Box<dyn FnMut(&[clauseo_protocol::Envelope]) -> Option<CommandId>>;
 
 /// Starts the host thread and returns once it serves.
 pub(crate) fn start(config: HostConfig) -> Result<(HostHandle, HostJoin), Error> {
@@ -345,6 +353,8 @@ impl Actor {
 
     /// Sends `draft` with `tag` and folds its events into the sent views of loaded streams.
     pub(crate) fn send_commit(&mut self, draft: Draft, tag: Tag) -> Result<Ticket, Error> {
+        #[cfg(test)]
+        let draft = self.with_fault(draft);
         let ticket = self.pipeline.send(draft, tag, &self.feeder)?;
         self.work.commits += 1;
         let events = self.pipeline.events(ticket);
@@ -359,6 +369,24 @@ impl Actor {
             }
         }
         Ok(ticket)
+    }
+
+    /// Gives `draft` a receipt the store refuses when [`Actor::fault`] picks it.
+    #[cfg(test)]
+    fn with_fault(&mut self, mut draft: Draft) -> Draft {
+        let ts = self.clock.now().wall;
+        if let Some(fault) = self.fault.as_mut()
+            && let Some(command_id) = fault(draft.events())
+        {
+            draft.receipt(clauseo_store::Receipt {
+                command_id,
+                stream: None,
+                payload_hash: [0; 32],
+                result: CommandOutcome::Done,
+                ts,
+            });
+        }
+        draft
     }
 
     /// One request from a handle.

@@ -86,9 +86,11 @@ fn send_answer(
         outcome,
         after: match then {
             Then::Nothing => AfterCommand::Nothing,
-            then @ (Then::Launch(_) | Then::Permission { .. } | Then::Elicitation { .. }) => {
-                AfterCommand::Turn(TurnTag { thread, then })
-            }
+            then @ (Then::Launch(_)
+            | Then::Started(_)
+            | Then::Closing(_)
+            | Then::Permission { .. }
+            | Then::Elicitation { .. }) => AfterCommand::Turn(TurnTag { thread, then }),
         },
     };
     out.send_tagged(actor, tag)
