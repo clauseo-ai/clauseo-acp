@@ -76,7 +76,47 @@ test("restoring 3:42 pm on 9 March would change three documents and keep what wa
   // a restore the host made reads as one, and one to a version no longer there reads as nothing
   const restored: Version = { ...now, id: "r1", who: { kind: "restore", to: "v4" } };
   expect(whoOf("en", CAL, restored, [...HISTORY, restored])).toBe("Restore to 3:42 pm on 9 March");
-  expect(whoOf("en", CAL, { ...restored, who: { kind: "restore", to: "nope" } }, HISTORY)).toBe("");
+});
+
+test("a restore names the version it restored by id, and one whose version is missing still says what it is", () => {
+  const a: Version = { ...at("v4"), id: "a", at: "3:42 pm" };
+  const b: Version = { ...at("v4"), id: "b", at: "3:42 pm", day: "2027-03-10" };
+  const restore: Version = { ...now, id: "r", who: { kind: "restore", to: "b" } };
+  const all = [a, b, restore];
+  expect(whoOf("en", CAL, restore, all)).toBe("Restore to 3:42 pm on 10 March");
+  expect(whoOf("en", CAL, { ...restore, who: { kind: "restore", to: "a" } }, all)).toBe(
+    "Restore to 3:42 pm on 9 March",
+  );
+  const gone: Version = { ...now, id: "g", who: { kind: "restore", to: "nope" } };
+  expect(whoOf("en", CAL, gone, HISTORY)).toBe("Restore of a version");
+  expect(whoOf("hi", CAL, gone, HISTORY)).toBe("संस्करण पुनर्स्थापित किया गया");
+});
+
+test("an undo of a restore names the restore by id, with its time and day read at render", () => {
+  const restore: Version = {
+    ...at("v4"),
+    id: "r",
+    at: "3:42 pm",
+    who: { kind: "restore", to: "v4" },
+  };
+  const other: Version = { ...at("v4"), id: "o", at: "3:42 pm", day: "2027-03-10" };
+  const undo: Version = { ...now, id: "u", who: { kind: "undoRestore", of: "r" } };
+  const all = [restore, other, undo];
+  expect(whoOf("en", CAL, undo, all)).toBe("Undo of the restore at 3:42 pm on 9 March");
+  expect(whoOf("en", CAL, { ...undo, who: { kind: "undoRestore", of: "o" } }, all)).toBe(
+    "Undo of the restore at 3:42 pm on 10 March",
+  );
+  // undoing a restore made the same day names only its time
+  expect(whoOf("en", CAL, { ...undo, day: restore.day }, all)).toBe(
+    "Undo of the restore at 3:42 pm",
+  );
+  expect(whoOf("hi", CAL, undo, all)).toBe("9 March को दोपहर 3:42 बजे का पुनर्स्थापन पूर्ववत किया गया");
+});
+
+test("an undo of a restore whose version isn't in the history still says what it is", () => {
+  const undo: Version = { ...now, id: "u", who: { kind: "undoRestore", of: "gone" } };
+  expect(whoOf("en", CAL, undo, HISTORY)).toBe("Undo of a restore");
+  expect(whoOf("hi", CAL, undo, HISTORY)).toBe("पुनर्स्थापन पूर्ववत किया गया");
 });
 
 test("an undo whose version isn't in the history still says what it is", () => {
