@@ -1,22 +1,10 @@
 {
+  "extends": "../components/tsconfig.base.json",
   "compilerOptions": {
-    "target": "es2022",
     "lib": ["es2022", "dom"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "types": ["node"],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "verbatimModuleSyntax": true,
-    "isolatedModules": true,
-    "allowImportingTsExtensions": true,
-    "skipLibCheck": true,
-    "noEmit": true
+    "types": ["node"]
   },
   "include": ["playwright.config.ts", "app-windows", "scoreboard"]
 }

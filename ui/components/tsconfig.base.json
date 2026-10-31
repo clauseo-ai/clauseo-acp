@@ -1,0 +1,19 @@
+// Options shared by ui/components and ui/e2e. It lives here, not at ui/: oxlint resolves an extends
+// through the ui/app/components link, so a base at ui/ fails `pnpm -C ui/app run lint:types`.
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  }
+}
