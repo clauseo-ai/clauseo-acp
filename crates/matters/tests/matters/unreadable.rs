@@ -16,10 +16,10 @@ use crate::support;
 
 /// Sets `path`'s mode while alive and puts back `0o755` when dropped, so the test folder can be
 /// removed even when an assertion fails.
-struct Mode(PathBuf);
+pub(crate) struct Mode(PathBuf);
 
 impl Mode {
-    fn set(path: impl Into<PathBuf>, mode: u32) -> Self {
+    pub(crate) fn set(path: impl Into<PathBuf>, mode: u32) -> Self {
         let path = path.into();
         support::set_mode(&path, mode);
         Self(path)

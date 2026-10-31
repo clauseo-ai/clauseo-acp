@@ -86,15 +86,19 @@ fn a_present_object_that_cannot_be_stat_is_an_io_error() {
     let (git_dir, mut store) = new_store(&dir);
     let content = b"the signed lease\n";
     let hex = git_id("blob", content).to_hex();
-    let (folder, _) = hex.split_at(2);
+    let (folder, name) = hex.split_at(2);
     write_file(&git_dir.join("objects").join(folder), b"not a folder");
     let path = dir.path().join("lease.txt");
     write_file(&path, content);
 
     let stored = store.store_file(&path, 17, u64::MAX, &no_download());
-    assert_eq!(
-        io_kind(&stored),
-        Some(("stat", io::ErrorKind::NotADirectory)),
+    let object = git_dir.join("objects").join(folder).join(name);
+    assert!(
+        matches!(
+            &stored,
+            Err(Error::Io { op: "stat", path, source })
+                if *path == object && source.kind() == io::ErrorKind::NotADirectory
+        ),
         "{stored:?}"
     );
 }
