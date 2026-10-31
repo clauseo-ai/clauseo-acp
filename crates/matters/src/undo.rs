@@ -1,10 +1,8 @@
 //! Undoing a step: put back, file by file, what the step between two checkpoints changed.
 //! Everything moves forward: the result is a new `undo` checkpoint, so an undo can be undone.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ffi::{OsStr, OsString};
+use std::collections::BTreeMap;
 use std::fs::Metadata;
-use std::io;
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::{ChangeKind, CheckpointId, CheckpointKind, FileChoice, MatterPath};
@@ -13,25 +11,8 @@ use crate::checkpoint::{Core, SizedFile, Spec};
 use crate::history::{HistoryStore, Oid};
 use crate::stat::{EntryState, Stat, find_by_path};
 use crate::types::{CheckpointOutcome, Settings, TimelineEntry, UndoRequest, Undone};
-use crate::walk::{self, FoundKind};
-use crate::{Error, fsync, locks, write};
-
-/// One file operation that puts a path back as it was before the step.
-#[derive(Debug, Clone)]
-enum Op {
-    /// Write this blob to the path.
-    Write(MatterPath, Oid),
-    /// Delete the path (the step created it).
-    Delete(MatterPath),
-}
-
-impl Op {
-    const fn path(&self) -> &MatterPath {
-        match self {
-            Self::Write(path, _) | Self::Delete(path) => path,
-        }
-    }
-}
+use crate::writeback::{self, Names, Op, same_entry, skipped, writable};
+use crate::{Error, locks};
 
 /// One changed file of the step, by the path decisions name, and the operations undoing it.
 struct Step {
@@ -92,58 +73,6 @@ fn step(
 
 fn find<'a>(files: &'a [SizedFile], path: &str) -> Option<&'a SizedFile> {
     find_by_path(files, path, |file| file.path.as_str())
-}
-
-/// Folder listings, each read once, to tell whether a path names its entries by their exact
-/// bytes. On a case- or normalisation-insensitive file system (APFS by default, NTFS)
-/// `symlink_metadata` of `memo.txt` also finds `Memo.txt`, which the history counts as
-/// another file.
-#[derive(Default)]
-struct Names {
-    listed: HashMap<PathBuf, HashSet<OsString>>,
-}
-
-impl Names {
-    /// The metadata of `folder`/`path`, taken without following a symlink, when every part of
-    /// `path` is an entry of exactly that name; `None` when something is missing or only an
-    /// entry spelled otherwise is there.
-    fn metadata(&mut self, folder: &Path, path: &MatterPath) -> Result<Option<Metadata>, Error> {
-        let abs = folder.join(path.as_str());
-        let metadata = match std::fs::symlink_metadata(&abs) {
-            Ok(metadata) => metadata,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => return Err(Error::io("stat", abs, err)),
-        };
-        let mut dir = folder.to_owned();
-        for part in path.as_str().split('/') {
-            if !self.holds(&dir, part)? {
-                return Ok(None);
-            }
-            dir.push(part);
-        }
-        Ok(Some(metadata))
-    }
-
-    /// Whether the folder `dir` holds an entry named exactly `name`.
-    fn holds(&mut self, dir: &Path, name: &str) -> Result<bool, Error> {
-        if !self.listed.contains_key(dir) {
-            let mut names = HashSet::new();
-            let entries = match std::fs::read_dir(dir) {
-                Ok(entries) => Some(entries),
-                Err(err) if err.kind() == io::ErrorKind::NotFound => None,
-                Err(err) => return Err(Error::io("read folder", dir, err)),
-            };
-            for entry in entries.into_iter().flatten() {
-                let entry = entry.map_err(|err| Error::io("read folder", dir, err))?;
-                names.insert(entry.file_name());
-            }
-            self.listed.insert(dir.to_owned(), names);
-        }
-        Ok(self
-            .listed
-            .get(dir)
-            .is_some_and(|names| names.contains(OsStr::new(name))))
-    }
 }
 
 /// What is at a path in the folder now.
@@ -221,42 +150,6 @@ fn now_skipped(
         .is_some_and(|metadata| metadata.is_file() && skipped(settings, &abs, &metadata)))
 }
 
-/// Whether the entry at `abs` is one the crate never reads or writes, by the walk's rule:
-/// not a regular file, cloud-only, or over the cap.
-fn skipped(settings: &Settings, abs: &Path, metadata: &Metadata) -> bool {
-    let cap = settings.limits.effective_cap();
-    walk::classify(settings.probe.as_ref(), abs, metadata, cap) != Some(FoundKind::File)
-}
-
-/// Whether undo may write or delete `path`: no folder on the way is a symlink (or a junction,
-/// or not a folder), the entry itself is a regular file or absent, and it is not cloud-only or
-/// over the cap. On Windows, no part of the path is a device name.
-fn writable(folder: &Path, settings: &Settings, path: &MatterPath) -> Result<bool, Error> {
-    let mut at = folder.to_owned();
-    let mut parts = path.as_str().split('/').peekable();
-    while let Some(part) = parts.next() {
-        #[cfg(windows)]
-        if clauseo_protocol::is_windows_reserved_name(part) {
-            return Ok(false);
-        }
-        at.push(part);
-        let metadata = match std::fs::symlink_metadata(&at) {
-            Ok(metadata) => metadata,
-            // Nothing there: the rest of the path is made fresh.
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(true),
-            Err(err) => return Err(Error::io("stat", &at, err)),
-        };
-        if parts.peek().is_some() {
-            if !metadata.is_dir() {
-                return Ok(false);
-            }
-        } else {
-            return Ok(!skipped(settings, &at, &metadata));
-        }
-    }
-    Ok(true)
-}
-
 /// See [`crate::Matter::undo`].
 pub(crate) fn undo(
     core: &mut Core,
@@ -281,6 +174,7 @@ pub(crate) fn undo(
             kept.push(step.path.clone());
         }
     }
+    keep_respelled(folder, &mut acting, &mut kept)?;
     let targets: Vec<MatterPath> = acting
         .iter()
         .flat_map(|step| step.ops.iter().map(|op| op.path().clone()))
@@ -321,7 +215,8 @@ pub(crate) fn undo(
             edited_since.push(step.path.clone());
         }
     }
-    apply(core, folder, &acting)?;
+    let ops: Vec<&Op> = acting.iter().flat_map(|step| &step.ops).collect();
+    writeback::apply(core, folder, &ops)?;
     let checkpoint = core.take(
         folder,
         settings,
@@ -396,88 +291,50 @@ fn choices(steps: &[Step], request: &UndoRequest<'_>) -> Result<Vec<FileChoice>,
         .collect()
 }
 
-/// Carries out the steps' operations so that a failure while writing changes nothing, and a
-/// deletion never removes a file just restored:
-///
-/// 1. every write goes to a synced temp file beside its target (making missing folders);
-/// 2. every target is stat'd again against the cache the `outside-edits` checkpoint just
-///    wrote: one that changed since fails the undo with `matter.file_locked`;
-/// 3. the deletions are made;
-/// 4. the temp files are renamed over their targets, each folder synced.
-///
-/// Deleting before renaming matters on a case- or normalisation-insensitive file system: undoing
-/// a rename of `Brief.txt` to `brief.txt` deletes `brief.txt`, which is the same file as
-/// `Brief.txt` there; deleting after the rename would remove what was just put back.
-fn apply(core: &Core, folder: &Path, steps: &[&Step]) -> Result<(), Error> {
-    let mut staged = Vec::new();
-    for op in steps.iter().flat_map(|step| &step.ops) {
-        if let Op::Write(path, blob) = op {
-            let abs = make_parents(folder, path)?;
-            let file = write::stage(&abs, &mut |file| {
-                core.history.read_blob(*blob, file).map(drop)
-            })?;
-            staged.push(file);
-        }
-    }
-    let moved = moved_since(core, folder, steps)?;
-    if !moved.is_empty() {
-        return Err(Error::FileLocked { paths: moved });
-    }
-    for op in steps.iter().flat_map(|step| &step.ops) {
-        if let Op::Delete(path) = op {
-            let abs = folder.join(path.as_str());
-            match write::remove_file(&abs) {
-                Ok(()) => {}
-                Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
-                Err(err) => return Err(Error::io("delete", abs, err)),
-            }
-            let dir = abs.parent().unwrap_or(folder);
-            fsync::sync_dir(dir).map_err(|err| Error::io("sync", dir, err))?;
-        }
-    }
-    for file in staged {
-        file.commit()?;
-    }
-    Ok(())
-}
-
-/// The targets of `steps` whose stat differs from the cache's entry (or that appeared or went
-/// since), sorted: something wrote to them after the cache was written.
-fn moved_since(core: &Core, folder: &Path, steps: &[&Step]) -> Result<Vec<MatterPath>, Error> {
+/// Moves to `kept` each acting step that writes a path the folder holds only spelled otherwise
+/// (another case or Unicode normalisation, on APFS or NTFS), unless that file is one this undo
+/// deletes: writing it would replace an unrelated file, such as a `memo.txt` made after the step
+/// when the undo puts back `Memo.txt`. Undoing a case-only rename deletes the file it finds, so
+/// that undo goes ahead. Repeated until nothing moves, since a kept step deletes nothing.
+fn keep_respelled(
+    folder: &Path,
+    acting: &mut Vec<&Step>,
+    kept: &mut Vec<MatterPath>,
+) -> Result<(), Error> {
     let mut names = Names::default();
-    let mut moved = Vec::new();
-    for op in steps.iter().flat_map(|step| &step.ops) {
-        let path = op.path();
-        let now = names
-            .metadata(folder, path)?
-            .map(|metadata| Stat::from_metadata(&metadata));
-        let then = core.cache.get(path.as_str()).map(|entry| entry.stat);
-        if now != then {
-            moved.push(path.clone());
+    loop {
+        let mut deleted: Vec<(PathBuf, Metadata)> = Vec::new();
+        for op in acting.iter().flat_map(|step| &step.ops) {
+            if let Op::Delete(path) = op
+                && let Some(metadata) = names.metadata(folder, path)?
+            {
+                deleted.push((folder.join(path.as_str()), metadata));
+            }
+        }
+        let before = acting.len();
+        let mut still = Vec::with_capacity(before);
+        for step in acting.drain(..) {
+            let mut clash = false;
+            for op in &step.ops {
+                if let Op::Write(path, _) = op
+                    && let Some(other) = names.other_spelling(folder, path)?
+                {
+                    let abs = folder.join(path.as_str());
+                    let ours = deleted
+                        .iter()
+                        .any(|(gone, metadata)| same_entry(gone, metadata, &abs, &other));
+                    clash = clash || !ours;
+                }
+            }
+            if clash {
+                kept.push(step.path.clone());
+            } else {
+                still.push(step);
+            }
+        }
+        *acting = still;
+        if acting.len() == before {
+            return Ok(());
         }
     }
-    moved.sort();
-    moved.dedup();
-    Ok(moved)
-}
-
-/// `folder`/`path`, after making each missing folder on the way (and syncing the folder
-/// that holds it). [`writable`] already refused a path through a symlink.
-fn make_parents(folder: &Path, path: &MatterPath) -> Result<std::path::PathBuf, Error> {
-    let mut at = folder.to_owned();
-    let mut parts = path.as_str().split('/').peekable();
-    while let Some(part) = parts.next() {
-        if parts.peek().is_none() {
-            at.push(part);
-            break;
-        }
-        let parent = at.clone();
-        at.push(part);
-        match write::create_dir(&at) {
-            Ok(()) => fsync::sync_dir(&parent).map_err(|err| Error::io("sync", &parent, err))?,
-            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(err) => return Err(Error::io("create", &at, err)),
-        }
-    }
-    Ok(at)
 }

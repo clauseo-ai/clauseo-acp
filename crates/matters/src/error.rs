@@ -57,6 +57,17 @@ pub enum Error {
         /// The path named.
         path: MatterPath,
     },
+    /// A restore names a file that neither the version nor the folder has, or names one twice;
+    /// or [`Matter::read_file`](crate::Matter::read_file) names a file the version does not
+    /// have (`command.invalid`).
+    #[error("{path} is not a file of the version, or is named twice")]
+    UnknownFile {
+        /// The path named.
+        path: MatterPath,
+    },
+    /// A restore of chosen files names none (`command.invalid`).
+    #[error("the restore names no file")]
+    NoFilesChosen,
     /// [`Matter::create`](crate::Matter::create) was given a folder that already exists
     /// (`command.invalid`); an existing folder is imported instead.
     #[error("{} already exists; import it instead", folder.display())]
@@ -169,6 +180,8 @@ impl Error {
             | Self::DuplicateCheckpoint { .. }
             | Self::MissingDecision { .. }
             | Self::UnexpectedDecision { .. }
+            | Self::UnknownFile { .. }
+            | Self::NoFilesChosen
             | Self::FolderExists { .. }
             | Self::HistoryExists { .. }
             | Self::MarkerNotBuilt => ErrorCode::CommandInvalid,

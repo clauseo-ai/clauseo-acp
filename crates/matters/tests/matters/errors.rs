@@ -4,10 +4,12 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
-use clauseo_matters::{Error, Matter, MissingReason, NewMatter, Refusal};
+use clauseo_matters::{Error, Matter, MissingReason, NewMatter, Refusal, RestoreFiles};
 use clauseo_protocol::{ErrorCode, FileChoice, FileDecision};
 
-use crate::fixture::{Fixture, cid, matter_id, meta, path, tools, undo, undo_request};
+use crate::fixture::{
+    Fixture, cid, matter_id, meta, path, restore_request, tools, undo, undo_request,
+};
 
 /// Names the variant, with no wildcard, so a new variant fails to compile here until it is
 /// added to the list below.
@@ -20,6 +22,8 @@ fn variant(err: &Error) -> &'static str {
         Error::DuplicateCheckpoint { .. } => "DuplicateCheckpoint",
         Error::MissingDecision { .. } => "MissingDecision",
         Error::UnexpectedDecision { .. } => "UnexpectedDecision",
+        Error::UnknownFile { .. } => "UnknownFile",
+        Error::NoFilesChosen => "NoFilesChosen",
         Error::FolderExists { .. } => "FolderExists",
         Error::HistoryExists { .. } => "HistoryExists",
         Error::MarkerNotBuilt => "MarkerNotBuilt",
@@ -34,7 +38,7 @@ fn assert_code(err: &Error, code: ErrorCode, name: &str) {
 }
 
 /// One of each variant, with the code it maps to.
-fn hand_built() -> [(Error, ErrorCode); 12] {
+fn hand_built() -> [(Error, ErrorCode); 14] {
     let folder = PathBuf::from("/m");
     [
         (
@@ -73,6 +77,11 @@ fn hand_built() -> [(Error, ErrorCode); 12] {
             Error::UnexpectedDecision { path: path("a") },
             ErrorCode::CommandInvalid,
         ),
+        (
+            Error::UnknownFile { path: path("a") },
+            ErrorCode::CommandInvalid,
+        ),
+        (Error::NoFilesChosen, ErrorCode::CommandInvalid),
         (
             Error::FolderExists {
                 folder: folder.clone(),
@@ -158,7 +167,33 @@ fn undo_errors(fx: &Fixture) -> Matter {
     let err = undo(&mut matter, (1, 3), &["a.txt"], (4, 5)).unwrap_err();
     assert_code(&err, ErrorCode::MatterFileLocked, "FileLocked");
     assert_eq!(matter.timeline().len(), 2);
+    let err = matter
+        .restore(&restore_request(1, RestoreFiles::All, 4, 5))
+        .unwrap_err();
+    assert_code(&err, ErrorCode::MatterFileLocked, "FileLocked");
     crate::support::remove_file(fx.file("~$a.txt"));
+    let nowhere = [path("nowhere.txt")];
+    let err = matter
+        .restore(&restore_request(1, RestoreFiles::Only(&nowhere), 4, 5))
+        .unwrap_err();
+    assert_code(&err, ErrorCode::CommandInvalid, "UnknownFile");
+    let err = matter
+        .read_file(cid(1), &path("nowhere.txt"), &mut Vec::<u8>::new())
+        .unwrap_err();
+    assert_code(&err, ErrorCode::CommandInvalid, "UnknownFile");
+    let err = matter
+        .restore(&restore_request(1, RestoreFiles::Only(&[]), 4, 5))
+        .unwrap_err();
+    assert_code(&err, ErrorCode::CommandInvalid, "NoFilesChosen");
+    let err = matter
+        .restore(&restore_request(99, RestoreFiles::All, 4, 5))
+        .unwrap_err();
+    assert_code(&err, ErrorCode::CommandInvalid, "UnknownCheckpoint");
+    let err = matter
+        .restore(&restore_request(1, RestoreFiles::All, 3, 5))
+        .unwrap_err();
+    assert_code(&err, ErrorCode::CommandInvalid, "DuplicateCheckpoint");
+    assert_eq!(matter.timeline().len(), 2);
 
     // A real change checkpointed under an id the timeline already has.
     fx.write("a.txt", "three");

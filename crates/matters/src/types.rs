@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clauseo_protocol::{
-    CheckpointId, CheckpointKind, FileChange, ImportSummary, MatterId, MatterPath, SkippedFile,
-    ThreadId, Timestamp, TurnId,
+    CheckpointId, CheckpointKind, ContentId, FileChange, ImportSummary, MatterId, MatterPath,
+    SkippedFile, ThreadId, Timestamp, TurnId,
 };
 
 use crate::{Matter, PlaceholderProbe};
@@ -190,12 +190,105 @@ pub struct Undone {
     pub checkpoint: Checkpoint,
     /// The files put back as they were before the step (written or deleted), sorted.
     pub restored: Vec<MatterPath>,
-    /// The files left as they are, sorted: those decided `Keep`, and those that are now
-    /// cloud-only, over the cap or behind a symlink.
+    /// The files left as they are, sorted: those decided `Keep`, those that are now
+    /// cloud-only, over the cap or behind a symlink, and those whose name the folder holds only
+    /// spelled otherwise (another case or Unicode normalisation, on APFS or NTFS), where writing
+    /// would replace that other file.
     pub kept: Vec<MatterPath>,
     /// The undone files that had been edited since the step ("Undo anyway"), sorted. Their
     /// edits are in the `outside_edits` checkpoint or an earlier one.
     pub edited_since: Vec<MatterPath>,
+}
+
+/// Which files a restore puts back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestoreFiles<'a> {
+    /// Every file of the version. Files added since stay.
+    All,
+    /// These files only: at least one, none named twice; otherwise the restore fails with
+    /// `command.invalid` before writing anything.
+    Only(&'a [MatterPath]),
+}
+
+/// A restore of an earlier version: the whole matter or chosen files, from any checkpoint.
+///
+/// The two checkpoint ids are single-use and must differ, and neither may be on the timeline
+/// already (`command.invalid`, `DuplicateCheckpoint`, before anything is written). Retry a
+/// failed restore with fresh ids. A restore that failed after its `outside-edits` checkpoint
+/// has put that id on the timeline. One that failed partway through its renames leaves the
+/// folder partly restored, recorded by nothing until the next checkpoint, which takes it as it
+/// is; a retry writes only what still differs from the version, so it finishes the restore.
+#[derive(Debug, Clone, Copy)]
+pub struct Restore<'a> {
+    /// The checkpoint to bring back.
+    pub from: CheckpointId,
+    /// Which files.
+    pub files: RestoreFiles<'a>,
+    /// The id of the `outside-edits` checkpoint, used only if the folder changed since the last
+    /// checkpoint.
+    pub outside_edits: CheckpointId,
+    /// The id of the `restore` checkpoint.
+    pub checkpoint: CheckpointId,
+    /// The commit time of both.
+    pub at: Timestamp,
+}
+
+/// What a restore of a version would do, file by file: what [`Matter::preview_restore`]
+/// returns and [`Matter::restore`] carries out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestorePlan {
+    /// Each file the restore writes, as the change from the folder now to the version
+    /// (`Modified`, or `Added` for a file brought back), sorted by path. Empty when the folder
+    /// already stands as the version.
+    pub writes: Vec<FileChange>,
+    /// Files in the folder now that the version does not have, sorted: they stay. For
+    /// [`RestoreFiles::Only`], only the chosen ones.
+    pub added_since: Vec<MatterPath>,
+    /// Files that differ from the version but are left as they are, sorted: cloud-only or over
+    /// the cap now, larger than the cap in the version, reached through a symlink or a file
+    /// where a folder should be, a folder or device name where the file should be, a name the
+    /// folder holds only spelled otherwise, or a name the exclusion list now matches.
+    pub kept: Vec<MatterPath>,
+    /// Files of `writes` that look open in another program now, sorted; a restore would fail
+    /// with `matter.file_locked` and write nothing.
+    pub locked: Vec<MatterPath>,
+}
+
+/// What a restore did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Restored {
+    /// The checkpoint of unrecorded edits taken before writing, if the folder had changed.
+    pub outside_edits: Option<Checkpoint>,
+    /// The `restore` checkpoint; `Reused` (the last checkpoint's id, no changes) when nothing
+    /// needed writing.
+    pub checkpoint: Checkpoint,
+    /// The files written, sorted.
+    pub written: Vec<MatterPath>,
+    /// As [`RestorePlan::added_since`]: left in place.
+    pub added_since: Vec<MatterPath>,
+    /// As [`RestorePlan::kept`].
+    pub kept: Vec<MatterPath>,
+}
+
+/// One side of a comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompareSide {
+    /// A checkpoint's tree.
+    Checkpoint(CheckpointId),
+    /// The folder as it is now, by a checkpoint walk's rules, with nothing stored and no
+    /// checkpoint taken.
+    Folder,
+}
+
+/// One file of a version.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionFile {
+    /// The file, relative to the matter folder.
+    pub path: MatterPath,
+    /// Its content: the git blob id, as `FileChange` carries it.
+    pub content: ContentId,
+    /// Its size in bytes.
+    pub size: u64,
 }
 
 /// One checkpoint on the timeline, from its commit's trailers.

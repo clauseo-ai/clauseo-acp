@@ -8,7 +8,8 @@
 //!   trailers, the exclusion list, the stat cache (`history.git/index`), the loose-object
 //!   compression rule and the sync order.
 //! - Creating and importing a matter (the scan, refused folders, warnings, cancel), opening one
-//!   again, `before-turn` and `after-turn` checkpoints with their diff, and undoing a step.
+//!   again, `before-turn` and `after-turn` checkpoints with their diff, undoing a step,
+//!   restoring a version (the whole matter or chosen files), and comparing and reading versions.
 //! - The document rules: excluded names, the per-file size cap, cloud-only placeholders (never
 //!   read), racily clean files.
 //!
@@ -17,7 +18,11 @@
 //! - [`Matter`]: [`Matter::create`], [`Matter::import`] and [`Matter::open`] make one;
 //!   [`Matter::before_turn`] and [`Matter::after_turn`] take checkpoints ([`Checkpoint`]);
 //!   [`Matter::edited_since`] and [`Matter::undo`] undo a step ([`UndoRequest`], [`Undone`]);
-//!   [`Matter::timeline`] lists the checkpoints, rebuilt from the trailers on open.
+//!   [`Matter::timeline`] lists the checkpoints, rebuilt from the trailers on open;
+//!   [`Matter::restore`] restores a version ([`Restore`], [`RestoreFiles`], [`Restored`]) and
+//!   [`Matter::preview_restore`] says what it would do ([`RestorePlan`]); [`Matter::compare`]
+//!   ([`CompareSide`]), [`Matter::files_at`] ([`VersionFile`]) and [`Matter::read_file`] read
+//!   versions and take `&self`.
 //! - [`scan`]: what importing a folder would take ([`ScanReport`]), before any write.
 //! - Inputs the host passes, so nothing depends on the machine: [`Settings`] (the matters root,
 //!   [`Limits`], [`Retention`], the [`PlaceholderProbe`]), [`NewMatter`] (ids, `created_at`,
@@ -34,7 +39,9 @@
 //!   ([`CheckpointOutcome::Reused`]).
 //! - Objects, then the ref and the stat cache, are durable before a checkpoint returns.
 //! - Excluded, over-cap and cloud-only files are never read, written or deleted.
-//! - Files in the folder change only by a temp file in the same folder and a rename.
+//! - Files in the folder change only by a temp file in the same folder and a rename. Undo and
+//!   restore check every target and lock before writing any, and a name in the folder matches
+//!   the history's byte for byte. A restore never deletes.
 //! - The API is synchronous; writes take `&mut Matter`. The writer lock, the turn queue and the
 //!   "turn running" check are the host's. No clock is read and no id is minted here.
 //!
@@ -47,7 +54,8 @@
 //! # Start reading
 //!
 //! `matter.rs` (create, import, open), then `checkpoint.rs` (walk, stat cache, tree, diff),
-//! `undo.rs`, and `history.rs` (the `HistoryStore` trait over gix).
+//! `undo.rs` and `restore.rs` (both write through `writeback.rs`), `compare.rs`, and
+//! `history.rs` (the `HistoryStore` trait over gix).
 
 #![deny(
     clippy::indexing_slicing,
@@ -58,6 +66,7 @@
 )]
 
 mod checkpoint;
+mod compare;
 mod diff;
 mod error;
 mod fsync;
@@ -66,6 +75,7 @@ mod locks;
 mod matter;
 mod probe;
 mod refuse;
+mod restore;
 mod rules;
 mod scan;
 mod stat;
@@ -76,13 +86,15 @@ mod types;
 mod undo;
 mod walk;
 mod write;
+mod writeback;
 
 pub use error::{Error, MissingReason, Refusal};
 pub use matter::Matter;
 pub use probe::{OsProbe, PlaceholderProbe};
 pub use scan::scan;
 pub use types::{
-    Checkpoint, CheckpointOutcome, DEFAULT_MARKER, FILE_CAP_BYTES, IMPORT_WARN_BYTES,
+    Checkpoint, CheckpointOutcome, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES, IMPORT_WARN_BYTES,
     ImportWarning, Imported, LARGEST_FILES, LargeFile, Limits, Marker, NewMatter, Progress,
-    Retention, ScanReport, Scanned, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone,
+    Restore, RestoreFiles, RestorePlan, Restored, Retention, ScanReport, Scanned, Settings,
+    TimelineEntry, TurnMeta, UndoRequest, Undone, VersionFile,
 };

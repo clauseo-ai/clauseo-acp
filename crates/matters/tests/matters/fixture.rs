@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use clauseo_matters::{
-    Checkpoint, DEFAULT_MARKER, Error, Imported, Limits, Matter, NewMatter, Settings, TurnMeta,
-    UndoRequest, Undone,
+    Checkpoint, DEFAULT_MARKER, Error, Imported, Limits, Matter, NewMatter, Restore, RestoreFiles,
+    Settings, TurnMeta, UndoRequest, Undone,
 };
 use clauseo_protocol::{
     ChangeKind, CheckpointId, ContentId, Count, FileChange, FileChoice, FileDecision,
@@ -141,6 +141,29 @@ pub(crate) fn undo(
     matter.undo(&undo_request(
         before, after, &decisions, outside, checkpoint,
     ))
+}
+
+/// A restore of checkpoint `from`, outside-edits id `outside` and restore id `checkpoint`.
+pub(crate) fn restore_request(
+    from: u64,
+    files: RestoreFiles<'_>,
+    outside: u64,
+    checkpoint: u64,
+) -> Restore<'_> {
+    Restore {
+        from: cid(from),
+        files,
+        outside_edits: cid(outside),
+        checkpoint: cid(checkpoint),
+        at: at(checkpoint),
+    }
+}
+
+/// The bytes of `rel` at checkpoint `n`.
+pub(crate) fn read_at(matter: &Matter, n: u64, rel: &str) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    matter.read_file(cid(n), &path(rel), &mut bytes).unwrap();
+    bytes
 }
 
 /// A test's matter: `<dir>/matter` is the folder and `<dir>/root` the matters root.

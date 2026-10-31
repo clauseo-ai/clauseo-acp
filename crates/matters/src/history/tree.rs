@@ -120,6 +120,107 @@ pub(super) fn read(
     Ok(())
 }
 
+/// One entry of a tree: its name, whether it is a folder, and its id.
+type Entry = (Vec<u8>, bool, ObjectId);
+
+/// The entries of tree `id` in `store`, in git's order; an error for an entry that is neither
+/// a blob nor a tree.
+fn entries(store: &loose::Store, id: &ObjectId) -> Result<Vec<Entry>, Error> {
+    let mut buffer = Vec::new();
+    let data = find(store, id, Kind::Tree, &mut buffer)?;
+    let mut entries = Vec::new();
+    for entry in TreeRefIter::from_bytes(data, HashKind::Sha1) {
+        let entry = entry.map_err(|err| Error::history("read tree", err))?;
+        let is_folder = entry.mode.is_tree();
+        if !is_folder && !entry.mode.is_blob() {
+            let name = String::from_utf8_lossy(entry.filename);
+            return Err(Error::history("read tree", format!("{name} is not a file")));
+        }
+        entries.push((entry.filename.to_vec(), is_folder, entry.oid.to_owned()));
+    }
+    Ok(entries)
+}
+
+/// Appends to `old` and `new` the files of trees `a` and `b` (whose path is `prefix`, empty
+/// or ending in `/`) that the other tree does not hold with the same blob, skipping every
+/// subtree whose id is the same on both sides. Unsorted: git's order is not path order.
+pub(super) fn changed(
+    store: &loose::Store,
+    a: ObjectId,
+    b: ObjectId,
+    prefix: &str,
+    old: &mut Vec<TreeFile>,
+    new: &mut Vec<TreeFile>,
+) -> Result<(), Error> {
+    if a == b {
+        return Ok(());
+    }
+    let (a_entries, b_entries) = (entries(store, &a)?, entries(store, &b)?);
+    let (mut a_iter, mut b_iter) = (
+        a_entries.into_iter().peekable(),
+        b_entries.into_iter().peekable(),
+    );
+    loop {
+        let order = match (a_iter.peek(), b_iter.peek()) {
+            (None, None) => break,
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (Some(x), Some(y)) => git_order((x.0.as_slice(), x.1), (y.0.as_slice(), y.1)),
+        };
+        match order {
+            Ordering::Less => {
+                if let Some(entry) = a_iter.next() {
+                    take(store, &entry, prefix, old)?;
+                }
+            }
+            Ordering::Greater => {
+                if let Some(entry) = b_iter.next() {
+                    take(store, &entry, prefix, new)?;
+                }
+            }
+            Ordering::Equal => {
+                let (Some(x), Some(y)) = (a_iter.next(), b_iter.next()) else {
+                    break;
+                };
+                if x.2 == y.2 {
+                    continue;
+                }
+                if x.1 {
+                    let path = format!("{prefix}{}/", name_of(&x.0)?);
+                    changed(store, x.2, y.2, &path, old, new)?;
+                } else {
+                    take(store, &x, prefix, old)?;
+                    take(store, &y, prefix, new)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn name_of(name: &[u8]) -> Result<&str, Error> {
+    std::str::from_utf8(name).map_err(|err| Error::history("read tree", err))
+}
+
+/// Appends the file `entry` under `prefix` to `files`, or every file under it if a folder.
+fn take(
+    store: &loose::Store,
+    entry: &Entry,
+    prefix: &str,
+    files: &mut Vec<TreeFile>,
+) -> Result<(), Error> {
+    let path = format!("{prefix}{}", name_of(&entry.0)?);
+    if entry.1 {
+        read(store, entry.2, &format!("{path}/"), files)
+    } else {
+        files.push(TreeFile {
+            path,
+            blob: to_oid(&entry.2)?,
+        });
+        Ok(())
+    }
+}
+
 /// The content of object `id` in `store`, which must be of `kind`, read into `buffer`.
 pub(super) fn find<'a>(
     store: &loose::Store,

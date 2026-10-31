@@ -16,7 +16,7 @@ use crate::support;
 
 /// Whether the file system holding `fx` finds `variant` once `name` exists. Panics when it
 /// does not and `required` says this OS must.
-fn insensitive(fx: &Fixture, name: &str, variant: &str, required: bool) -> bool {
+pub(crate) fn insensitive(fx: &Fixture, name: &str, variant: &str, required: bool) -> bool {
     let dir = fx.dir.path().join("probe");
     support::write(dir.join(name), "probe");
     let found = dir.join(variant).symlink_metadata().is_ok();
@@ -32,10 +32,10 @@ fn insensitive(fx: &Fixture, name: &str, variant: &str, required: bool) -> bool 
     found
 }
 
-const CASE_REQUIRED: bool = cfg!(any(target_os = "macos", windows));
+pub(crate) const CASE_REQUIRED: bool = cfg!(any(target_os = "macos", windows));
 
 /// The names in the matter folder besides `.clauseo`, sorted.
-fn names(folder: &Path) -> Vec<String> {
+pub(crate) fn names(folder: &Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(folder)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
@@ -116,4 +116,38 @@ fn undo_of_nfc_to_nfd_rename_restores_the_nfc_name() {
         return;
     }
     rename_and_undo(&fx, nfc, nfd, b"the CV");
+}
+
+#[test]
+fn undo_keeps_a_file_spelled_otherwise_made_after_the_step() {
+    let fx = Fixture::new("undo-case-unrelated");
+    if !insensitive(&fx, "Memo.txt", "memo.txt", CASE_REQUIRED) {
+        return;
+    }
+    fx.write("Memo.txt", "the step deletes this");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    support::remove_file(fx.file("Memo.txt"));
+    let changes = created(
+        matter.after_turn(&meta(3), &tools(&["Memo.txt"])).unwrap(),
+        3,
+    );
+    assert_eq!(changes, [deleted("Memo.txt", b"the step deletes this")]);
+    // The lawyer then makes an unrelated file whose name differs only in case.
+    fx.write("memo.txt", "the lawyer's own memo");
+
+    let undone = undo(&mut matter, (1, 3), &["Memo.txt"], (4, 5)).unwrap();
+    assert_none(&undone.restored);
+    assert_eq!(undone.kept, [path("Memo.txt")]);
+    assert_eq!(
+        created(undone.outside_edits.unwrap(), 4),
+        [added("memo.txt", b"the lawyer's own memo")]
+    );
+    assert_eq!(
+        undone.checkpoint.outcome,
+        clauseo_matters::CheckpointOutcome::Reused(cid(4))
+    );
+    assert_eq!(names(&fx.folder), ["memo.txt"]);
+    assert_eq!(fx.read("memo.txt"), b"the lawyer's own memo");
+    assert_no_temp_files(&fx.folder);
 }

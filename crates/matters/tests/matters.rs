@@ -36,6 +36,14 @@ mod undo;
 mod undo_case;
 
 #[cfg(test)]
+#[path = "matters/restore.rs"]
+mod restore;
+
+#[cfg(test)]
+#[path = "matters/compare.rs"]
+mod compare;
+
+#[cfg(test)]
 #[path = "matters/reopen.rs"]
 mod reopen;
 

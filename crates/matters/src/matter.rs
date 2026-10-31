@@ -9,16 +9,18 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
-use clauseo_protocol::{CheckpointId, CheckpointKind, ImportSummary, MatterId, MatterPath};
+use clauseo_protocol::{
+    CheckpointId, CheckpointKind, FileChange, ImportSummary, MatterId, MatterPath,
+};
 
 use crate::checkpoint::{Core, Spec};
 use crate::history::{GixStore, HistoryStore};
 use crate::stat::EntryState;
 use crate::types::{
-    Checkpoint, Imported, Marker, NewMatter, Progress, Settings, TimelineEntry, TurnMeta,
-    UndoRequest, Undone,
+    Checkpoint, CompareSide, Imported, Marker, NewMatter, Progress, Restore, RestoreFiles,
+    RestorePlan, Restored, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, VersionFile,
 };
-use crate::{Error, refuse, scan, undo, write};
+use crate::{Error, compare, refuse, restore, scan, undo, write};
 
 /// The git dir's name inside `<matters root>/<matter id>/`.
 const GIT_DIR: &str = "history.git";
@@ -240,6 +242,58 @@ impl Matter {
     pub fn undo(&mut self, request: &UndoRequest<'_>) -> Result<Undone, Error> {
         json::check(&self.folder, self.id)?;
         undo::undo(&mut self.core, &self.folder, &self.settings, request)
+    }
+
+    /// Restores version `request.from`: the whole matter or chosen files. Checks the request,
+    /// plans against the folder and checks every target and every lock before committing or
+    /// writing anything (`matter.file_locked` names the locked files); takes an `outside-edits`
+    /// checkpoint if the folder changed since the last checkpoint; writes each file through a
+    /// synced temp file, checks that no target changed since that checkpoint, renames them into
+    /// place, and takes a `restore` checkpoint (no thread, no turn). Files added since stay, and
+    /// nothing is deleted. Cloud-only, over-cap and excluded files are never read or written. See
+    /// [`Restore`] for the ids and retrying, [`RestorePlan`] for what is kept.
+    pub fn restore(&mut self, request: &Restore<'_>) -> Result<Restored, Error> {
+        json::check(&self.folder, self.id)?;
+        restore::restore(&mut self.core, &self.folder, &self.settings, request)
+    }
+
+    /// What [`Matter::restore`] of `from` would do now, from the same plan, with the files a
+    /// program holds in `locked` instead of failing. Writes nothing: no object, no stat cache,
+    /// no checkpoint.
+    pub fn preview_restore(
+        &self,
+        from: CheckpointId,
+        files: RestoreFiles<'_>,
+    ) -> Result<RestorePlan, Error> {
+        json::check(&self.folder, self.id)?;
+        restore::preview(&self.core, &self.folder, &self.settings, from, files)
+    }
+
+    /// The files that differ from `from` to `to`, sorted by path, unflagged.
+    /// [`CompareSide::Folder`] is the folder now, walked as a checkpoint would walk it, hashing
+    /// without storing; a file now over the cap is not reported deleted. Two checkpoints need
+    /// only the history, so they compare while the folder is missing.
+    pub fn compare(&self, from: CompareSide, to: CompareSide) -> Result<Vec<FileChange>, Error> {
+        if from == CompareSide::Folder || to == CompareSide::Folder {
+            json::check(&self.folder, self.id)?;
+        }
+        compare::compare(&self.core, &self.folder, &self.settings, from, to)
+    }
+
+    /// Every file of checkpoint `checkpoint`'s tree, sorted by path. Needs only the history.
+    pub fn files_at(&self, checkpoint: CheckpointId) -> Result<Vec<VersionFile>, Error> {
+        compare::files_at(&self.core, checkpoint)
+    }
+
+    /// Writes the bytes `path` had at checkpoint `checkpoint` to `out`; returns how many.
+    /// `UnknownFile` if the checkpoint has no such file. Needs only the history.
+    pub fn read_file(
+        &self,
+        checkpoint: CheckpointId,
+        path: &MatterPath,
+        out: &mut dyn std::io::Write,
+    ) -> Result<u64, Error> {
+        compare::read_file(&self.core, checkpoint, path, out)
     }
 }
 
