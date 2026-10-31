@@ -168,3 +168,70 @@ fn envelope_counts_only_what_the_handler_counts_off() {
     assert!(!counted("session/update", &serde_json::Value::Null));
     assert!(!counted("elicitation/complete", &serde_json::json!({})));
 }
+
+/// A `session/update` whose `params` holds `value` under `"v"`.
+fn update_with(value: &str) -> String {
+    format!(
+        r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"s","v":{value}}}}}"#
+    )
+}
+
+/// A value nested in `depth` arrays.
+fn nested(depth: usize) -> String {
+    format!("{}{}", "[".repeat(depth), "]".repeat(depth))
+}
+
+#[test]
+fn envelope_refuses_what_the_sdk_value_decode_refuses() {
+    // serde_json reads at most 127 levels; the line's object and `params` take two.
+    let deepest = update_with(&nested(125));
+    let too_deep = update_with(&nested(126));
+    for line in [
+        update_with("1e400"),
+        update_with("-1e400"),
+        r#"{"jsonrpc":"2.0","id":1e400,"result":{}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"result":{"a":[1e400]}}"#.to_owned(),
+        update_with(r#""\ud800""#),
+        update_with(r#""\udc00""#),
+        update_with(r#"{"\ud800":1}"#),
+        too_deep,
+        // serde_json's RawValue key: refused when its text is not JSON, read as another value
+        // (here an array) when it is, escaped or not, first key or not.
+        update_with(r#"{"$serde_json::private::RawValue":"x"}"#),
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"$serde_json::private::RawValue":"[1]"}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"\u0024serde_json::private::RawValue":"x"}}"#.to_owned(),
+        update_with(r#"{"a":1,"$serde_json::private::RawValue":"x"}"#),
+        r#"{"$serde_json::private::RawValue":"{}","jsonrpc":"2.0","method":"x"}"#.to_owned(),
+    ] {
+        assert_eq!(classify(&line), None, "{line}");
+    }
+    // The SDK's decode refuses each line above that the filter used to pass, and reads the
+    // `[1]` one as an array; and both accept the ones below.
+    assert!(serde_json::from_str::<serde_json::Value>(&update_with("1e400")).is_err());
+    assert!(serde_json::from_str::<serde_json::Value>(&update_with(r#""\udc00""#)).is_err());
+    assert!(serde_json::from_str::<serde_json::Value>(&update_with(&nested(126))).is_err());
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&update_with(
+            r#"{"$serde_json::private::RawValue":"x"}"#
+        ))
+        .is_err()
+    );
+    let raw = serde_json::from_str::<serde_json::Value>(
+        r#"{"params":{"$serde_json::private::RawValue":"[1]"}}"#,
+    );
+    assert_eq!(raw.ok(), Some(serde_json::json!({"params": [1]})));
+    for line in [
+        deepest,
+        update_with("1.7976931348623157e308"),
+        update_with("-9223372036854775809"),
+        update_with("18446744073709551616"),
+        update_with(r#""\ud83d\ude00 \u0000""#),
+        update_with(r#"{"$serde_json::private::Number":"1"}"#),
+    ] {
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&line).is_ok(),
+            "{line}"
+        );
+        assert_eq!(classify(&line), Some((true, true)), "{line}");
+    }
+}
