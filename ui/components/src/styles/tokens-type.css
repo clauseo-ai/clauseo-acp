@@ -1,0 +1,146 @@
+/* Type: the family, the size scale and line heights, weight, width and tracking per role, the Hindi values, and the
+   text size setting. Imported by tokens.css, which says why the order matters. */
+
+/* ---------- type: one family, Anek, in two scripts ----------
+   Width gives a word its voice and weight tells who wrote it: Clauseo at 400, the lawyer's accepted words at 600.
+   Devanagari's letters stand 1.30 times Latin's x-height at one size, and need a taller line: an 18 px line needs
+   31 px. Latin set inside Hindi (case names, citations, quotes from English papers) comes from 'Anek Latin Hi', the
+   same file scaled to sit level with the Devanagari, with Devanagari's own ascent and descent so a mixed line never
+   grows. Numerals keep the Latin cut in both scripts. */
+
+:root {
+  --font-latin: "Anek Latin", "Anek Devanagari", "Segoe UI", system-ui, sans-serif;
+  --font-deva:
+    "Anek Devanagari", "Anek Latin Hi", "Nirmala UI", "Kohinoor Devanagari", system-ui, sans-serif;
+  --font-num: "Anek Latin", "Anek Devanagari", "Segoe UI", system-ui, sans-serif;
+  --font: var(--font-latin);
+
+  /* one fixed scale, in small increments, in rem on a 16 px root */
+  --t12: 0.75rem; /* a chip's words */
+  --t13: 0.8125rem; /* small: meta lines, notes, times */
+  --t15: 0.9375rem; /* the interface */
+  --t17: 1.0625rem; /* the composer; reading text on a narrow window */
+  --t18: 1.125rem; /* reading text */
+  --t22: 1.375rem; /* the matter title, a word in a numeral's place */
+  --t26: 1.625rem; /* the answer's first line, the wall's numerals */
+
+  /* fixed pixel line heights, per role, never ratios */
+  --lh-chip: 20px; /* 12: the one chip */
+  --lh-tight: 16px; /* 13: "to 40" under a numeral */
+  --lh-tile: 15px; /* 13: a tile's title, two lines at most */
+  --lh-small: 18px; /* 13: meta, notes */
+  --lh-small-row: 20px; /* 13: rows of small text that sit on a 20 px line */
+  --lh-ui: 20px; /* 15: buttons, rows, heads */
+  --lh-ui-loose: 22px; /* 15: citation names, cards, the pinned question */
+  --lh-quote: 24px; /* 15: an excerpt */
+  --lh-field: 26px; /* 17: the composer */
+  --lh-reply: 27px; /* 17: the earlier reply; reading text on a narrow window */
+  --lh-asked: 28px; /* 18: the lawyer's question, a turned page's parties */
+  --lh-read: 29px; /* 18: the answer, the other side's case, the turned page */
+  --lh-title: 28px; /* 22: the matter title */
+  --lh-lead-narrow: 30px; /* 22: the answer's first line on a narrow window */
+  --lh-asked-narrow: 26px; /* 17: the question on a narrow window */
+  --lh-numeral: 24px; /* 26: the wall's numerals */
+  --lh-numeral-band: 30px; /* 26: the numeral in a card's band */
+  --lh-lead: 34px; /* 26: the answer's first line */
+
+  /* weight carries authorship; the interface has its own weights */
+  --w-clauseo: 400; /* everything Clauseo writes */
+  --w-ui: 450; /* the interface */
+  --w-chip: 520; /* a chip's words, section heads, the current matter */
+  --w-chrome: 560; /* the matter title, the other side's head */
+  --w-accepted: 600; /* the lawyer's words and anything accepted */
+  --w-monument: 620; /* the wall's numerals */
+
+  /* width carries voice */
+  --wd-broad: 125%; /* the numerals */
+  --wd-voice: 116%; /* the matter's voice: title, section heads */
+  --wd-wide: 110%; /* the answer's first line, citations, small data */
+  --wd-read: 104%; /* reading text */
+  --wd-label: 88%; /* a tile's title under its broad numeral */
+  --wd-read-narrow: 100%; /* reading text on a narrow window */
+  /* accepted text at 600 sets as wide as Clauseo's 400 at 104%; the exact pairing differs per block */
+  --wd-accepted: 101.5%;
+
+  /* tracking, per role */
+  --tr-numeral: -0.02em;
+  --tr-numeral-word: -0.01em;
+  --tr-lead: -0.014em;
+  --tr-title: -0.01em;
+  --tr-read: 0.002em;
+  --tr-head: 0.005em;
+  --tr-chip: 0.01em;
+  --tr-caps: 0.06em;
+}
+
+/* Hindi: the same sizes on taller lines and its own width for accepted text, for the whole page */
+:root:lang(hi) {
+  --font: var(--font-deva);
+  --lh-tile: 18px;
+  --lh-small: 20px;
+  --lh-small-row: 22px;
+  --lh-ui: 22px;
+  --lh-ui-loose: 24px;
+  --lh-reply: 29px;
+  --lh-asked: 30px;
+  --lh-read: 31px;
+  --lh-lead-narrow: 36px;
+  --lh-asked-narrow: 29px;
+  --lh-lead: 42px;
+  --wd-accepted: 101.5%;
+}
+/* No tracking on Devanagari, which would break the headline that joins its letters. It applies to Devanagari runs
+   only: a run marked lang="en" inside Hindi, such as a matter's name as filed, keeps its Latin tracking, so an
+   English title in the Hindi interface still sets at -0.01em. */
+:lang(hi) {
+  --tr-numeral-word: 0;
+  --tr-lead: 0;
+  --tr-title: 0;
+  --tr-read: 0;
+  --tr-head: 0;
+  --tr-chip: 0;
+  --tr-caps: 0;
+}
+:lang(en) {
+  --tr-numeral-word: -0.01em;
+  --tr-lead: -0.014em;
+  --tr-title: -0.01em;
+  --tr-read: 0.002em;
+  --tr-head: 0.005em;
+  --tr-chip: 0.01em;
+  --tr-caps: 0.06em;
+}
+
+/* ---------- the text size setting: the root from 14 to 20 px, 16 by default ----------
+   Every type size is in rem, so it follows. Line heights stay whole pixels at 16 and scale by --k with it. */
+:root {
+  font-size: 16px;
+}
+:root[data-text-size="14"] {
+  font-size: 14px;
+  --k: 0.875;
+}
+:root[data-text-size="15"] {
+  font-size: 15px;
+  --k: 0.9375;
+}
+:root[data-text-size="16"] {
+  font-size: 16px;
+  --k: 1;
+}
+:root[data-text-size="17"] {
+  font-size: 17px;
+  --k: 1.0625;
+}
+:root[data-text-size="18"] {
+  font-size: 18px;
+  --k: 1.125;
+}
+:root[data-text-size="19"] {
+  font-size: 19px;
+  --k: 1.1875;
+}
+:root[data-text-size="20"] {
+  font-size: 20px;
+  --k: 1.25;
+}

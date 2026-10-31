@@ -1,9 +1,23 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { blocks } from "./css-blocks.ts";
 
-const css = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
+const read = (file: string) => readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+const index = read("tokens.css");
+// The token files in the index's import order, which is the cascade's order: the day values below take the last one.
+const imported = [...index.matchAll(/^@import "\.\/(tokens-[a-z]+\.css)";$/gm)].map(
+  (m) => m[1] ?? "",
+);
+const css = imported.map(read).join("\n");
 const list = blocks(css);
+
+test("tokens.css imports every token file in the folder", () => {
+  const files = readdirSync(new URL(".", import.meta.url)).filter((f) =>
+    /^tokens-.*\.css$/.test(f),
+  );
+  expect(files.length).toBeGreaterThan(0);
+  expect([...files].sort()).toEqual([...imported].sort());
+});
 /** The day values: every custom property set on :root outside any at-rule. */
 const day = new Map(
   list.filter((b) => b.selector === ":root" && b.context === "").flatMap((b) => [...b.decls]),

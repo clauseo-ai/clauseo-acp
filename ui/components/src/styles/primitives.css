@@ -1,5 +1,5 @@
 /* The motion and the Base UI geometry of the controls in ui/. Every value comes from tokens.css. Arrivals fade and move a short way on the arrive curve; leaving is always faster.
-   Under reduced motion the shifts go to 0 px and the durations to 120 ms or less (tokens.css), so only the fades
+   Under reduced motion the shifts go to 0 px and the durations to 120 ms or less (tokens-parts.css), so only the fades
    remain; in lite base.css takes every transition away. */
 
 /* ---------- arrivals and departures ---------- */
@@ -133,7 +133,7 @@
 }
 
 /* a checkbox, a radio, or a switch's track while it's clear or off: set into its plane and lit from above, with a lip
-   that says it's a control and what state it's in, 3:1 against its plane (tokens.css, --lip-top). Nothing is drawn
+   that says it's a control and what state it's in, 3:1 against its plane (tokens-colour.css, --lip-top). Nothing is drawn
    round it. The lip is a border on a layer under the control's content, not a shadow, so it stays in lite, where
    every shadow goes. Disabled, the lip fades with the words; checked, the primary fill takes over and the lip
    goes. */
