@@ -17,7 +17,7 @@ use clauseo_protocol::{StopReason, StreamId, ThreadId, TurnFailed, TurnId};
 use super::super::Actor;
 use super::close::TurnClose;
 use super::state::STORE_DETAIL;
-use super::{Closing, Phase, Then, cancel, current, state, steps, undo};
+use super::{Closing, Then, TurnPhase, cancel, current, state, steps, undo};
 use crate::error::Error;
 use crate::pipeline::Failure;
 
@@ -60,16 +60,18 @@ pub(super) fn on_unblocked(actor: &mut Actor, thread: ThreadId) {
     };
     let (turn, phase, cancelled) = (current.turn, current.phase, current.cancelled);
     match phase {
-        Phase::Prompting | Phase::Stopping if cancelled => {
+        TurnPhase::Prompting | TurnPhase::FallbackStop if cancelled => {
             // Logs nothing when the cancel commit was durable: the view no longer holds
             // anything for it to close.
             if let Err(error) = cancel::log_cancel(actor, thread, turn, None) {
                 tracing::warn!(%thread, %error, "a cancel was not logged");
             }
         }
-        Phase::Prompting | Phase::Stopping => cancel::cancel_running(actor, thread, None),
-        Phase::Checkpointing | Phase::Ending => {}
-        Phase::Accepting | Phase::Launching | Phase::Queued | Phase::Starting => {
+        TurnPhase::Prompting | TurnPhase::FallbackStop => {
+            cancel::cancel_running(actor, thread, None);
+        }
+        TurnPhase::Checkpointing | TurnPhase::Ending => {}
+        TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued | TurnPhase::Starting => {
             let failed = TurnFailed {
                 turn,
                 code,

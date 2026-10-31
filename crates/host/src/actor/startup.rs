@@ -10,7 +10,7 @@ use clauseo_store::{Store, StoreOptions};
 use futures::executor::LocalSpawner;
 
 use super::input::Input;
-use super::{Actor, MatterEntry, Phase, ThreadEntry, Work, turn};
+use super::{Actor, HostPhase, MatterEntry, ThreadEntry, Work, turn};
 use crate::config::HostConfig;
 use crate::encode::Encoder;
 use crate::error::Error;
@@ -89,7 +89,7 @@ pub(super) async fn open(
         files: BTreeMap::new(),
         next_sub: 0,
         work: Work::default(),
-        phase: Phase::Starting(ready),
+        phase: HostPhase::Starting(ready),
         scratch: None,
         #[cfg(test)]
         fault: None,

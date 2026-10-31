@@ -20,8 +20,8 @@ use super::close::TurnClose;
 use super::out::Out;
 use super::state::STORE_DETAIL;
 use super::{
-    Current, End, JobKind, Phase, Then, TurnJob, TurnTag, current, end, failure, known, lost,
-    matter_of, prompt, state, stopping,
+    Current, End, JobKind, Then, TurnJob, TurnPhase, TurnTag, current, end, failure, host_stopping,
+    known, lost, matter_of, prompt, state,
 };
 use crate::build;
 use crate::error::Error;
@@ -159,11 +159,11 @@ fn accept(
 
 /// The `UserMessage` is durable: step 2, the agent.
 pub(super) fn on_accepted(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
-    let shutting = stopping(actor);
+    let shutting = host_stopping(actor);
     let Some(current) = current(actor, thread).filter(|current| current.turn == turn) else {
         return;
     };
-    if current.phase != Phase::Accepting {
+    if current.phase != TurnPhase::Accepting {
         return;
     }
     if shutting {
@@ -171,7 +171,7 @@ pub(super) fn on_accepted(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         forget(actor, thread);
         return;
     }
-    current.phase = Phase::Launching;
+    current.phase = TurnPhase::Launching;
     agents::ensure(actor, thread, Waiting::Turn(turn));
 }
 
@@ -200,8 +200,8 @@ fn forget(actor: &mut Actor, thread: ThreadId) {
 /// The agent's session is attached: step 3, the writer.
 pub(super) fn on_launched(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let launching = current(actor, thread)
-        .is_some_and(|current| current.turn == turn && current.phase == Phase::Launching);
-    if !launching || stopping(actor) {
+        .is_some_and(|current| current.turn == turn && current.phase == TurnPhase::Launching);
+    if !launching || host_stopping(actor) {
         return;
     }
     let taken = (|| -> Result<(), Error> {
@@ -218,7 +218,7 @@ pub(super) fn on_launched(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         };
         turns.queue.push_back(thread);
         if let Some(current) = current(actor, thread) {
-            current.phase = Phase::Queued;
+            current.phase = TurnPhase::Queued;
         }
         let queued = TurnQueued::new(thread, turn, holder, None)
             .map_err(|error| Error::Internal(error.to_string()))?;
@@ -237,7 +237,7 @@ pub(super) fn on_launch_failed(actor: &mut Actor, thread: ThreadId, turn: TurnId
     if current(actor, thread).is_none_or(|current| current.turn != turn) {
         return;
     }
-    if !stopping(actor) {
+    if !host_stopping(actor) {
         let failed = TurnFailed {
             turn,
             code: error.code(),
@@ -277,7 +277,7 @@ pub(super) fn end_unstarted(
 /// Step 4: the before-turn checkpoint on the matter's thread.
 pub(super) fn before_turn(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     if let Some(current) = current(actor, thread) {
-        current.phase = Phase::Checkpointing;
+        current.phase = TurnPhase::Checkpointing;
     }
     let sent = (|| -> Result<(), Error> {
         let matter = matter_of(actor, thread)?;
@@ -313,7 +313,7 @@ pub(super) fn on_before_turn(
     result: Result<TurnCheckpoint, Error>,
 ) {
     let Some(found) = current(actor, thread)
-        .filter(|current| current.turn == turn && current.phase == Phase::Checkpointing)
+        .filter(|current| current.turn == turn && current.phase == TurnPhase::Checkpointing)
     else {
         return;
     };
@@ -362,7 +362,7 @@ pub(super) fn on_before_turn(
     }
     let before = checkpoint.checkpoint.outcome.id();
     if let Some(current) = current(actor, thread) {
-        current.phase = Phase::Starting;
+        current.phase = TurnPhase::Starting;
         current.checkpoint_before = Some(before);
     }
     let started = (|| -> Result<(), Error> {
@@ -401,7 +401,7 @@ pub(super) fn on_before_turn(
 /// came meanwhile ends the turn through steps 6 to 8 instead.
 pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let Some(current) = current(actor, thread)
-        .filter(|current| current.turn == turn && current.phase == Phase::Starting)
+        .filter(|current| current.turn == turn && current.phase == TurnPhase::Starting)
     else {
         return;
     };

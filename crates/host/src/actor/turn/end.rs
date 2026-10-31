@@ -14,8 +14,8 @@ use super::agents;
 use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{
-    End, JobKind, Phase, Then, TurnJob, asks, cancel, current, failure, known, matter_of, state,
-    steps, stopping, updates,
+    End, JobKind, Then, TurnJob, TurnPhase, asks, cancel, current, failure, host_stopping, known,
+    matter_of, state, steps, updates,
 };
 use crate::error::Error;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
@@ -28,7 +28,7 @@ pub(super) fn on_prompt_done(
     result: Result<clauseo_acp::PromptEnd, clauseo_acp::Error>,
 ) {
     let prompting = current(actor, thread)
-        .is_some_and(|current| current.turn == turn && current.phase == Phase::Prompting);
+        .is_some_and(|current| current.turn == turn && current.phase == TurnPhase::Prompting);
     if !prompting {
         return;
     }
@@ -62,10 +62,10 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
     let Some(current) = current(actor, thread) else {
         return;
     };
-    if current.phase == Phase::Ending {
+    if current.phase == TurnPhase::Ending {
         return;
     }
-    current.phase = Phase::Ending;
+    current.phase = TurnPhase::Ending;
     if let Some(call) = current.prompt_call.take() {
         call.abort();
     }
@@ -137,7 +137,7 @@ pub(super) fn on_after_turn(
     result: Result<TurnCheckpoint, Error>,
 ) {
     let Some(current) = current(actor, thread)
-        .filter(|current| current.turn == turn && current.phase == Phase::Ending)
+        .filter(|current| current.turn == turn && current.phase == TurnPhase::Ending)
     else {
         return;
     };
@@ -222,7 +222,7 @@ pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
     if let Ok(matter) = matter_of(actor, thread) {
         release_writer(actor, matter, thread);
     }
-    if stopping(actor) {
+    if host_stopping(actor) {
         agents::stop(actor, thread);
     }
     actor.release(StreamId::Thread(thread));
@@ -231,7 +231,7 @@ pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
 /// `thread` lets go of `matter`'s writer (or its place in the queue); the next queued turn
 /// takes it at step 4. Nothing new starts during shutdown.
 pub(super) fn release_writer(actor: &mut Actor, matter: MatterId, thread: ThreadId) {
-    let shutting = stopping(actor);
+    let shutting = host_stopping(actor);
     let Some(entry) = actor.matters.get_mut(&matter) else {
         return;
     };
@@ -255,7 +255,7 @@ pub(super) fn release_writer(actor: &mut Actor, matter: MatterId, thread: Thread
             return;
         };
         let waiting = current(actor, next)
-            .filter(|current| current.phase == Phase::Queued)
+            .filter(|current| current.phase == TurnPhase::Queued)
             .map(|current| current.turn);
         if let Some(turn) = waiting {
             if let Some(entry) = actor.matters.get_mut(&matter) {

@@ -15,8 +15,8 @@ use super::agents::{self, Stage};
 use super::close::TurnClose;
 use super::out::Out;
 use super::{
-    CANCEL_WAIT, End, Phase, Then, TimerKind, TurnTag, TurnTimer, current, end, failure, matter_of,
-    spawn, state, updates,
+    CANCEL_WAIT, End, Then, TimerKind, TurnPhase, TurnTag, TurnTimer, current, end, failure,
+    matter_of, spawn, state, updates,
 };
 use crate::error::Error;
 
@@ -29,14 +29,14 @@ pub(super) fn cancel_command(
     let found =
         current(actor, thread).map(|current| (current.phase, current.cancelled, current.turn));
     match found {
-        Some((Phase::Accepting | Phase::Launching | Phase::Queued, false, turn)) => {
+        Some((TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued, false, turn)) => {
             dequeue(actor, ctx, thread, turn)
         }
-        Some((Phase::Prompting, false, _)) => {
+        Some((TurnPhase::Prompting, false, _)) => {
             cancel_running(actor, thread, Some(ctx));
             Ok(())
         }
-        Some((Phase::Checkpointing | Phase::Starting, false, _)) => {
+        Some((TurnPhase::Checkpointing | TurnPhase::Starting, false, _)) => {
             // Ended when the checkpoint (or the `TurnStarted` commit) answers, before the
             // prompt is sent.
             if let Some(current) = current(actor, thread) {
@@ -44,7 +44,7 @@ pub(super) fn cancel_command(
             }
             receipt_only(actor, ctx, thread)
         }
-        Some((_, true, _) | (Phase::Stopping | Phase::Ending, false, _)) | None => {
+        Some((_, true, _) | (TurnPhase::FallbackStop | TurnPhase::Ending, false, _)) | None => {
             receipt_only(actor, ctx, thread)
         }
     }
@@ -227,7 +227,7 @@ pub(super) fn push_tool_cancels(
 /// turn ends once it is gone (`agents::on_ended`).
 pub(super) fn on_cancel_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let Some(current) = current(actor, thread).filter(|current| {
-        current.turn == turn && current.phase == Phase::Prompting && current.cancelled
+        current.turn == turn && current.phase == TurnPhase::Prompting && current.cancelled
     }) else {
         return;
     };
@@ -235,7 +235,7 @@ pub(super) fn on_cancel_timer(actor: &mut Actor, thread: ThreadId, turn: TurnId)
     if let Some(call) = current.prompt_call.take() {
         call.abort();
     }
-    current.phase = Phase::Stopping;
+    current.phase = TurnPhase::FallbackStop;
     let has_agent = state(actor, thread).is_some_and(|state| state.agent.is_some());
     if has_agent {
         tracing::warn!(%thread, "the agent did not answer its cancel; stopping it");
@@ -257,13 +257,13 @@ pub(super) fn shutdown(actor: &mut Actor) {
     for thread in threads {
         let found = current(actor, thread).map(|current| (current.phase, current.cancelled));
         match found {
-            Some((Phase::Prompting, false)) => cancel_running(actor, thread, None),
-            Some((Phase::Checkpointing | Phase::Starting, false)) => {
+            Some((TurnPhase::Prompting, false)) => cancel_running(actor, thread, None),
+            Some((TurnPhase::Checkpointing | TurnPhase::Starting, false)) => {
                 if let Some(current) = current(actor, thread) {
                     current.cancelled = true;
                 }
             }
-            Some((Phase::Accepting | Phase::Launching | Phase::Queued, _)) => {
+            Some((TurnPhase::Accepting | TurnPhase::Launching | TurnPhase::Queued, _)) => {
                 let dropped = state(actor, thread).and_then(|state| state.current.take());
                 if let Some(reason) = dropped.and_then(|current| current.detach) {
                     agents::log_detach(actor, thread, reason);
@@ -274,8 +274,8 @@ pub(super) fn shutdown(actor: &mut Actor) {
                 agents::stop(actor, thread);
             }
             Some(
-                (Phase::Prompting | Phase::Checkpointing | Phase::Starting, true)
-                | (Phase::Stopping | Phase::Ending, _),
+                (TurnPhase::Prompting | TurnPhase::Checkpointing | TurnPhase::Starting, true)
+                | (TurnPhase::FallbackStop | TurnPhase::Ending, _),
             ) => {}
             None => agents::stop(actor, thread),
         }
