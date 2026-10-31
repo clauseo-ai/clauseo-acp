@@ -11,9 +11,9 @@ use futures::channel::mpsc;
 use futures::executor::LocalPool;
 use std::rc::Rc;
 
-use super::write;
 use crate::ids::{Ids, SequentialIds};
 use crate::pipeline::{Post, Ticket};
+use crate::write;
 
 /// A folder under `std::env::temp_dir()` that one test owns; removed on drop.
 pub(crate) struct TempDir(PathBuf);
@@ -22,8 +22,8 @@ impl TempDir {
     /// A fresh, empty folder named for `test` and this process.
     pub(crate) fn new(test: &str) -> Self {
         let path = std::env::temp_dir().join(format!("clauseo-host-{test}-{}", std::process::id()));
-        write::remove_dir_all(&path);
-        write::create_dir_all(&path);
+        write::remove_dir_all(&path).unwrap();
+        write::create_dir_all(&path).unwrap();
         Self(path)
     }
 
@@ -35,7 +35,10 @@ impl TempDir {
 
 impl Drop for TempDir {
     fn drop(&mut self) {
-        write::remove_dir_all(&self.0);
+        // Never panic in a drop that may run while a test unwinds.
+        if let Err(error) = write::remove_dir_all(&self.0) {
+            eprintln!("removing {}: {error}", self.0.display());
+        }
     }
 }
 
