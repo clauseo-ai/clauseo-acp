@@ -1,8 +1,11 @@
-# The blank app end to end on Windows: built with the `e2e` feature, started, and driven by
-# Playwright over CDP (ui/e2e), on x64 and, after the merge, ARM64. One launch warms up the new
-# exe unmeasured; then the tests run once as is and once with --disable-gpu, and each run writes
-# the control's numbers (time to #app-root, memory of the process tree, JS heap, DOM nodes) to
-# e2e-results-<runner>-<mode>.json. The numbers are recorded, not gated.
+# The app end to end on Windows: built with the `e2e` feature, started, and driven by Playwright
+# over CDP (ui/e2e), on x64 and, after the merge, ARM64. One launch warms up the new exe
+# unmeasured; then the tests run once as is and once with --disable-gpu, and each run writes the
+# control's numbers (time to #app-root, memory of the process tree, JS heap, DOM nodes) to
+# e2e-results-<runner>-<mode>.json. The numbers are recorded, not gated. The window's specs drive
+# the scripted fake_agent, built beside the app: each test gets a scratch CLAUSEO_DATA_DIR whose
+# settings.json starts fake_agent on that test's scenario as agents.claude, and a scratch
+# E2E_MATTER_DIR (ui/e2e/app-windows/scratch.ts), so no run touches the runner's real data folder.
 #
 # - No version is written here, as in ci.yml: Rust comes from rust-toolchain.toml, pnpm from
 #   "packageManager" and Node from "engines.node" in ui/package.json, Playwright from
@@ -15,8 +18,9 @@ name: e2e-windows
 
 # Every pull request gets the check `smoke (windows-2025)`, the x64 smoke test. Branch protection on
 # main requires it (#51). The job e2e-changes decides whether the steps run: a pull request that
-# touches none of crates/desktop/, ui/ or this workflow starts the job and skips every step, so the
-# check reports in seconds. One that touches them runs the smoke test in full, on x64 only. A failed
+# touches none of the app's paths (crates/desktop/, the crates it runs on and fake_agent, ui/, this
+# workflow) starts the job and skips every step, so the check reports in seconds. One that touches
+# them runs the smoke test in full, on x64 only. A failed
 # decision runs the full test, so the check always reports. A change elsewhere that breaks the app
 # (another crate, Cargo.lock, the toolchain) shows up on the next push to main. smoke is never
 # skipped as a whole: a job skipped that way reports under the literal name
@@ -51,7 +55,8 @@ jobs:
       run: ${{ steps.filter.outputs.run }}
     steps:
       # A push, the nightly run and a run on demand run the smoke test; a pull request runs it only
-      # when it changes the desktop crate, the ui or this workflow.
+      # when it changes the desktop crate, a crate the app runs (host and what it uses), fake_agent,
+      # the ui or this workflow.
       - name: Decide whether the smoke test runs
         id: filter
         env:
@@ -70,15 +75,15 @@ jobs:
           git fetch -q --no-tags --filter=blob:none "$REPO_URL" \
             "+refs/heads/${BASE_REF}:refs/ci/base" \
             "+${HEAD_SHA}:refs/ci/head"
-          # --no-renames lists both sides of a rename, so a file renamed out of crates/desktop/ or
-          # ui/ still runs the smoke test.
+          # --no-renames lists both sides of a rename, so a file renamed out of an app path still
+          # runs the smoke test.
           changed=$(git diff --no-renames -z --name-only refs/ci/base...refs/ci/head | tr '\0' '\n')
           app=$(printf '%s\n' "$changed" \
-            | grep -E '^(crates/desktop/|ui/|\.github/workflows/e2e-windows\.yml$)' || true)
+            | grep -E '^(crates/(desktop|host|protocol|acp|process|reducer|store|matters|settings|fake_agent)/|ui/|\.github/workflows/e2e-windows\.yml$)' || true)
           if [ -n "$app" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No change to crates/desktop/, ui/ or this workflow: the steps skip."
+            echo "No change to the app's crates, fake_agent, ui/ or this workflow: the steps skip."
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -102,14 +107,16 @@ jobs:
       RUN: ${{ needs.e2e-changes.result == 'success' && needs.e2e-changes.outputs.run || 'true' }}
       TARGET: ${{ matrix.target }}
       E2E_APP: ${{ github.workspace }}/target/${{ matrix.target }}/release/clauseo-desktop.exe
+      # The scripted agent the window's specs launch through settings.json (fixture.ts).
+      E2E_FAKE_AGENT: ${{ github.workspace }}/target/${{ matrix.target }}/release/fake_agent.exe
       OUT: ${{ github.workspace }}/e2e-out
     defaults:
       run:
         shell: bash
     steps:
-      - name: Skip, crates/desktop, ui and this workflow are unchanged
+      - name: Skip, the app's crates, ui and this workflow are unchanged
         if: env.RUN != 'true'
-        run: echo "No change to crates/desktop/, ui/ or this workflow; nothing to smoke-test."
+        run: echo "No change to the app's crates, fake_agent, ui/ or this workflow; nothing to smoke-test."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.RUN == 'true'
@@ -162,6 +169,12 @@ jobs:
         if: env.RUN == 'true'
         run: pnpm -C ui tauri build --no-bundle --features e2e --target "$TARGET"
 
+      # Release, same target, beside the app: E2E_FAKE_AGENT above. The specs run it as agents.claude.
+      - name: Build fake_agent
+        id: fake_agent
+        if: env.RUN == 'true'
+        run: cargo build --release --locked -p clauseo-fake_agent --target "$TARGET"
+
       - name: Make the results folder
         if: env.RUN == 'true'
         run: mkdir -p "$OUT"
@@ -174,7 +187,7 @@ jobs:
 
       # Runs even when the warm-up failed, so a failure there still leaves the numbers.
       - name: Tests and numbers
-        if: ${{ env.RUN == 'true' && !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ env.RUN == 'true' && !cancelled() && steps.build.outcome == 'success' && steps.fake_agent.outcome == 'success' }}
         env:
           E2E_RESULTS: ${{ env.OUT }}/e2e-results-${{ matrix.runner }}-normal.json
         run: pnpm -C ui/e2e test
@@ -182,7 +195,7 @@ jobs:
       # Runs even when the run before failed: GitHub's Windows runners have no GPU, and the two runs
       # tell apart a failure of the GPU path from a failure of the app.
       - name: Tests and numbers with --disable-gpu
-        if: ${{ env.RUN == 'true' && !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ env.RUN == 'true' && !cancelled() && steps.build.outcome == 'success' && steps.fake_agent.outcome == 'success' }}
         env:
           E2E_DISABLE_GPU: "1"
           E2E_RESULTS: ${{ env.OUT }}/e2e-results-${{ matrix.runner }}-disable-gpu.json

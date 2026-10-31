@@ -1,25 +1,41 @@
 // The real app on Windows under Playwright. The e2e build (`--features e2e`) opens WebView2's
 // DevTools port on a port the browser picks, which it writes to `EBWebView/DevToolsActivePort` in
-// its data folder; the fixture starts the app with a temporary WebView2 data folder, reads the port
+// its data folder; the fixture starts the app with a new WebView2 data folder, reads the port
 // from that file, attaches with `connectOverCDP`, hands the test the app's page, then closes the
-// connection, ends the app's whole process tree by its PID and deletes the folder.
+// connection, ends the app's whole process tree by its PID and deletes the folders.
+//
+// Every launch runs on the test's scratch folders (scratch.ts): `CLAUSEO_DATA_DIR` is a new data
+// folder, never the real one, and `E2E_MATTER_DIR` the matter folder. A spec picks fake_agent's
+// scenario and the matter's files with `test.use({ scenario, matterFiles })`; `apps` starts and
+// stops more launches on the same folders (the restart spec).
 //
 //   E2E_APP           path to the e2e build of clauseo-desktop.exe (required)
+//   E2E_FAKE_AGENT    path to fake_agent.exe (default: beside E2E_APP; needed with a scenario)
 //   E2E_DISABLE_GPU   `1` runs the webview with --disable-gpu; the app reads it too
+//   E2E_KEEP_SCRATCH  `1` keeps the scratch folders and prints where they are
 
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as wait } from "node:timers/promises";
 import { promisify } from "node:util";
 import { chromium, test as base, type Browser, type Page } from "@playwright/test";
+import {
+  fakeAgentPath,
+  makeScratch,
+  removeScratch,
+  scratchEnv,
+  webviewFolder,
+  type Scratch,
+} from "./scratch.ts";
 
 /** The time from starting the app to having its page: the port file, connecting, the page. */
 const SETUP_TIMEOUT_MS = 60_000;
 /** How long `taskkill` may take. */
 const KILL_TIMEOUT_MS = 30_000;
+/** How long the app may take to exit after its window is asked to close. */
+const CLOSE_TIMEOUT_MS = 30_000;
 /** The pause between two tries while WebView2 writes its port file, listens or opens its page. */
 const RETRY_MS = 200;
 
@@ -39,8 +55,26 @@ export interface App {
   pid: number;
   /** `performance.now()` just before the app was started. */
   startedAt: number;
-  /** The temporary WebView2 data folder (`WEBVIEW2_USER_DATA_FOLDER`). */
+  /** The temporary WebView2 data folder (`WEBVIEW2_USER_DATA_FOLDER`), new for each launch. */
   userDataFolder: string;
+  /** Which launch on this test's folders: 1 for the first. */
+  launch: number;
+}
+
+/** How a launch ends: its window asked to close (as a user would), or its tree killed. */
+export type Stop = "close" | "kill";
+
+/** Launches of the app on one test's scratch folders. */
+export interface Apps {
+  scratch: Scratch;
+  /** Starts the app once more on the same data and matter folders, with a new WebView2 folder. */
+  start(): Promise<App>;
+  /**
+   * Ends a launch and waits for it to exit. `close` sends the window WM_CLOSE (`taskkill` without
+   * `/F`) so the app shuts down as it does for a user, and kills the tree only if it has not
+   * exited within CLOSE_TIMEOUT_MS, with a warning on the run.
+   */
+  stop(app: App, how?: Stop): Promise<void>;
 }
 
 function appPath(): string {
@@ -194,38 +228,147 @@ async function cleanUp(steps: readonly (() => unknown)[]): Promise<void> {
   }
 }
 
-export const test = base.extend<{ app: App }>({
-  app: async ({}, use) => {
-    const userDataFolder = mkdtempSync(join(tmpdir(), "clauseo-e2e-"));
-    const startedAt = performance.now();
-    const deadline = startedAt + SETUP_TIMEOUT_MS;
-    const child = spawn(appPath(), [], {
-      env: { ...process.env, WEBVIEW2_USER_DATA_FOLDER: userDataFolder },
-      stdio: ["ignore", "pipe", "inherit"],
-    });
-    // Each line the app prints goes on to the test log with a prefix, so the pipe never fills.
-    createInterface({ input: child.stdout }).on("line", (line) => {
-      process.stdout.write(`[app] ${line}\n`);
-    });
-    let browser: Browser | undefined;
-    try {
-      const port = await readPort(child, userDataFolder, deadline);
-      const { pid } = child;
-      if (pid === undefined) {
-        throw new Error(`the app has no PID: ${appPath()}`);
+/** Whether `child` exits within `ms`. */
+async function exited(child: ChildProcess, ms: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return true;
+  }
+  return await new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      resolve(false);
+    }, ms);
+    const onExit = (): void => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    child.once("exit", onExit);
+  });
+}
+
+/** A launch the fixture owns, with what it needs to end it. */
+interface Launched {
+  app: App | undefined;
+  child: ChildProcess;
+  browser: Browser | undefined;
+}
+
+/** Starts the app on `scratch` as launch number `launch`. */
+async function launch(scratch: Scratch, n: number, owned: Set<Launched>): Promise<App> {
+  const userDataFolder = webviewFolder(scratch, n);
+  const startedAt = performance.now();
+  const deadline = startedAt + SETUP_TIMEOUT_MS;
+  const child = spawn(appPath(), [], {
+    env: { ...process.env, ...scratchEnv(scratch), WEBVIEW2_USER_DATA_FOLDER: userDataFolder },
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  const launched: Launched = { app: undefined, child, browser: undefined };
+  owned.add(launched);
+  // Each line the app prints goes on to the test log with a prefix, so the pipe never fills.
+  createInterface({ input: child.stdout }).on("line", (line) => {
+    process.stdout.write(`[app ${n}] ${line}\n`);
+  });
+  const port = await readPort(child, userDataFolder, deadline);
+  const { pid } = child;
+  if (pid === undefined) {
+    throw new Error(`the app has no PID: ${appPath()}`);
+  }
+  launched.browser = await connect(port, deadline);
+  const page = await firstPage(launched.browser, deadline);
+  launched.app = {
+    page,
+    browser: launched.browser,
+    port,
+    mode: mode(),
+    pid,
+    startedAt,
+    userDataFolder,
+    launch: n,
+  };
+  return launched.app;
+}
+
+/** Ends `launched`: disconnects, then closes or kills, and waits for the exit. */
+async function end(launched: Launched, how: Stop): Promise<void> {
+  const { child } = launched;
+  await cleanUp([
+    () => launched.browser?.close(),
+    async () => {
+      if (child.pid === undefined || (await exited(child, 0))) {
+        return;
       }
-      browser = await connect(port, deadline);
-      const page = await firstPage(browser, deadline);
-      await use({ page, browser, port, mode: mode(), pid, startedAt, userDataFolder });
+      if (how === "close") {
+        // No /T, no /F: WM_CLOSE to the app's window. A non-zero exit here only means it did not
+        // take; the wait decides.
+        await promisify(execFile)("taskkill", ["/pid", String(child.pid)], {
+          timeout: KILL_TIMEOUT_MS,
+        }).catch(() => undefined);
+        if (await exited(child, CLOSE_TIMEOUT_MS)) {
+          return;
+        }
+        const warning = `the app did not exit within ${CLOSE_TIMEOUT_MS} ms of closing its window; killed`;
+        base.info().annotations.push({ type: "warning", description: warning });
+        process.stdout.write(`::warning title=Close timed out::${warning}\n`);
+      }
+      await killTree(child.pid);
+      await exited(child, KILL_TIMEOUT_MS);
+    },
+  ]);
+}
+
+/** Options a spec sets with `test.use`. */
+export interface AppOptions {
+  /** The fake_agent scenario `agents.claude` plays, or null for none (smoke, control). */
+  scenario: string | null;
+  /** The matter folder's files at the start, `/`-separated relative path to content. */
+  matterFiles: Readonly<Record<string, string>>;
+}
+
+export const test = base.extend<AppOptions & { scratch: Scratch; apps: Apps; app: App }>({
+  scenario: [null, { option: true }],
+  matterFiles: [{}, { option: true }],
+
+  scratch: async ({ scenario, matterFiles }, use) => {
+    const scratch = makeScratch({ scenario, matterFiles }, () =>
+      fakeAgentPath(process.env, appPath(), process.platform === "win32"),
+    );
+    try {
+      await use(scratch);
     } finally {
-      await cleanUp([
-        () => browser?.close(),
-        () =>
-          child.pid !== undefined && child.exitCode === null ? killTree(child.pid) : undefined,
-        // WebView2's processes may hold the folder for a moment after they are ended.
-        () =>
-          rmSync(userDataFolder, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }),
-      ]);
+      if (process.env["E2E_KEEP_SCRATCH"] === "1") {
+        process.stdout.write(`scratch folders kept in ${scratch.root}\n`);
+      } else {
+        removeScratch(scratch);
+      }
     }
+  },
+
+  apps: async ({ scratch }, use) => {
+    const owned = new Set<Launched>();
+    let launches = 0;
+    const apps: Apps = {
+      scratch,
+      start: async () => {
+        launches += 1;
+        return await launch(scratch, launches, owned);
+      },
+      stop: async (app, how = "kill") => {
+        const launched = [...owned].find((entry) => entry.app === app);
+        if (launched === undefined) {
+          throw new Error(`launch ${app.launch} is not running`);
+        }
+        owned.delete(launched);
+        await end(launched, how);
+      },
+    };
+    try {
+      await use(apps);
+    } finally {
+      await cleanUp([...owned].map((launched) => () => end(launched, "kill")));
+    }
+  },
+
+  app: async ({ apps }, use) => {
+    await use(await apps.start());
   },
 });
