@@ -52,6 +52,11 @@ Each step is one commit on the thread stream unless it names the matter stream.
    it is durable, `SendPrompt` on the thread is refused with `thread.turn_running`.
 8. Thread snapshot; the writer passes to the next turn waiting at step 4.
 
+When `matters` answers a checkpoint with `Reused` and the matter's log does not hold that id, the
+host records it first (`CheckpointRecorded` with the kind, thread and turn from `matters`'s
+timeline), at step 4, at step 7 and in start-up repair, so no logged event names an unrecorded
+checkpoint.
+
 Agent exit: expiries with `AgentExited`, step 7 with `TurnFailed { agent.exited }`, then
 `AgentSessionDetached { Exited }` last.
 
@@ -62,7 +67,8 @@ then `SendPrompt` on a thread with a current turn is refused with `thread.turn_r
 The undo note (QR11.1) is not logged. Its words: "Note from Clauseo: since your last turn, the
 lawyer put these files back to an earlier version: notes/a.txt, brief.txt. Read them again before
 relying on what you remember about them." The paths are the undo and restore checkpoints' files
-since the thread's last `TurnStarted`.
+since the thread's last `TurnStarted`. An undo keeps the writer and leaves the note unchanged
+until `StepUndone` is durable; a failed undo commit is retried once, as a turn's end is.
 
 ### Cancel, reconciliation, shutdown
 
@@ -77,7 +83,10 @@ since the thread's last `TurnStarted`.
 - Start-up reconciliation, before serving, once per thread with an open turn or pending request:
   expire with `HostRestarted`; a started turn gets an after-turn checkpoint and step 7 with
   `TurnFailed { thread.interrupted }`; `AgentSessionDetached { Closed }` when a session was
-  attached. A turn that never started (its `UserMessage` logged, no `TurnStarted`) gets
+  attached. When the after-turn checkpoint was made but never logged (a crash, or an end that
+  failed twice), the repair records it, logs `FilesChanged` from `Matter::changes_between`
+  (from `checkpoint_before` to it) with every path flagged as possibly holding lawyer edits,
+  and keeps `checkpoint_after`, so the turn stays undoable (Rohan, 2026-10-31). A turn that never started (its `UserMessage` logged, no `TurnStarted`) gets
   `TurnQueued { behind: <its own thread>, behind_turn: <the thread's previous turn, or None> }`,
   so the reducer shows the thread `Idle`. A turn with `TurnEnded` is never touched, so each
   repair happens once.
