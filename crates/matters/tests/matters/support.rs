@@ -91,6 +91,16 @@ pub(crate) fn set_mode(path: impl AsRef<Path>, mode: u32) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
 }
 
+/// A modification time long past (2017-07-14), for a file the stat cache must vouch for: a file
+/// whose mtime is that old is never racily clean, so no walk reads it again and a probe hook
+/// counts only the stat and the checks, never a read's check of the open file.
+pub(crate) fn settle(path: impl AsRef<Path>) {
+    set_mtime(
+        path,
+        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_500_000_007),
+    );
+}
+
 /// Sets the file's modification time with `File::set_times`.
 pub(crate) fn set_mtime(path: impl AsRef<Path>, mtime: SystemTime) {
     let file = File::options().write(true).open(path).unwrap();

@@ -312,6 +312,8 @@ fn undo_refuses_a_target_written_after_its_outside_edits_checkpoint() {
     let mut matter = *matter;
     matter.before_turn(&meta(2)).unwrap();
     fx.write("a.txt", "two");
+    // The cache vouches for a.txt, so the outside-edits walk only stats it (no read's check).
+    crate::support::settle(fx.file("a.txt"));
     fx.write("c.txt", "sea");
     crate::support::remove_file(fx.file("b.txt"));
     created(matter.after_turn(&meta(3), &tools(&STEP)).unwrap(), 3);
@@ -322,8 +324,7 @@ fn undo_refuses_a_target_written_after_its_outside_edits_checkpoint() {
         matches!(&err, Error::FileLocked { paths } if *paths == [path("a.txt")]),
         "{err:?}"
     );
-    // The writable check, the outside-edits walk's stat, and its read's check of the open file.
-    assert_eq!(probe.seen.load(Ordering::Relaxed), 3);
+    assert_eq!(probe.seen.load(Ordering::Relaxed), 2);
     assert_eq!(fx.read("a.txt"), b"two");
     assert!(!fx.exists("b.txt"));
     assert_eq!(fx.read("c.txt"), b"sea");
