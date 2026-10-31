@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
+use crate::no_download::NoDownload;
 use crate::walk::{self, FoundKind};
 use crate::{
     Error, ImportWarning, LARGEST_FILES, LargeFile, Limits, Progress, ScanReport, Scanned,
@@ -13,7 +14,8 @@ use crate::{
 /// (a drive root, or an entry of `refused` or an ancestor of one), then walks it with the
 /// settings' probe and size cap. `progress` gets the running count of files seen and their bytes
 /// after each file. Returns [`Scanned::Cancelled`] once `cancel` is set. Reads no file's content
-/// and writes nothing.
+/// and writes nothing; lists folders under a [`NoDownload`] guard, so a folder that is not
+/// downloaded stays so.
 pub fn scan(
     folder: &Path,
     refused: &[PathBuf],
@@ -24,9 +26,10 @@ pub fn scan(
     refuse::check_folder(folder, refused)?;
     refuse::check_new_matter(folder, &settings.matters_root)?;
     let mut seen = Progress { files: 0, bytes: 0 };
+    let guard = NoDownload::begin(settings.probe.as_ref());
     let walked = walk::walk(
         folder,
-        settings.probe.as_ref(),
+        &guard,
         settings.limits.effective_cap(),
         Some(cancel),
         &mut |found| {

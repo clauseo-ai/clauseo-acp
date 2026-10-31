@@ -195,6 +195,12 @@ impl Error {
         }
     }
 
+    /// Whether this is an [`Error::Io`] saying a file or folder is not downloaded
+    /// ([`crate::no_download::not_downloaded`]).
+    pub(crate) fn is_not_downloaded(&self) -> bool {
+        matches!(self, Self::Io { source, .. } if crate::no_download::not_downloaded(source))
+    }
+
     /// An [`Error::Io`].
     pub(crate) fn io(op: &'static str, path: impl Into<PathBuf>, source: io::Error) -> Self {
         Self::Io {

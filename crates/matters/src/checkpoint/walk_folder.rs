@@ -1,7 +1,8 @@
 //! The walk of a checkpoint: the folder against the stat cache, each file the cache cannot
 //! vouch for read by the caller's `read` (stored for a checkpoint, only hashed for a preview or
-//! a compare), and what is kept of the entries under a folder that does not read. A guard on
-//! what a read may touch (cloud placeholders) belongs here.
+//! a compare), and what is kept of the entries under a folder that does not read. The walk and
+//! every read run under one [`NoDownload`] guard, taken here: this is where every checkpoint,
+//! import, restore, preview and compare with the folder reads the folder.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -12,17 +13,21 @@ use clauseo_protocol::{SkippedFile, SkippedFileReason};
 use super::Walked;
 use crate::Error;
 use crate::history::Oid;
+use crate::no_download::{NoDownload, not_downloaded};
 use crate::stat::{CacheEntry, EntryState, Stat, StatCache};
 use crate::types::{Progress, Settings};
 use crate::walk::{self, FoundKind};
 
-/// Reads one file as a blob: `(path, len, cap)` to the blob and the bytes read.
-pub(super) type ReadFile<'a> = dyn FnMut(&Path, u64, u64) -> Result<(Oid, u64), Error> + 'a;
+/// Reads one file as a blob: `(path, len, cap, guard)` to the blob and the bytes read.
+pub(super) type ReadFile<'a> =
+    dyn FnMut(&Path, u64, u64, &NoDownload<'_>) -> Result<(Oid, u64), Error> + 'a;
 
 /// Walks `folder` against `cache` and reads every file `cache` cannot vouch for with `read`
 /// (`(path, len, cap)` to blob and bytes read: storing it, or only hashing it). `Ok(None)` when
-/// cancelled. A file found over the cap when read is skipped like one the walk found over it;
-/// the entries under a subfolder that does not read are kept as they were.
+/// cancelled. A file found over the cap when read is skipped like one the walk found over it,
+/// and a file found not downloaded when read (evicted since the walk's stat) like one the walk
+/// found cloud-only; the entries under a subfolder that does not read are kept as they were.
+/// Reads nothing again after either.
 pub(super) fn walk_folder(
     cache: &StatCache,
     folder: &Path,
@@ -31,9 +36,9 @@ pub(super) fn walk_folder(
     progress: &mut dyn FnMut(Progress),
     read: &mut ReadFile<'_>,
 ) -> Result<Option<Walked>, Error> {
-    let probe = settings.probe.as_ref();
+    let guard = NoDownload::begin(settings.probe.as_ref());
     let cap = settings.limits.effective_cap();
-    let Some(listing) = walk::walk(folder, probe, cap, cancel, &mut |_| {})? else {
+    let Some(listing) = walk::walk(folder, &guard, cap, cancel, &mut |_| {})? else {
         return Ok(None);
     };
     let mut entries = Vec::with_capacity(listing.files.len());
@@ -51,7 +56,7 @@ pub(super) fn walk_folder(
                 state = Some(EntryState::Read(blob));
             } else {
                 let path = folder.join(file.path.as_str());
-                match read(&path, file.len, cap) {
+                match read(&path, file.len, cap, &guard) {
                     Ok((blob, bytes)) => {
                         done.bytes = done.bytes.saturating_add(bytes);
                         read_any = true;
@@ -68,6 +73,13 @@ pub(super) fn walk_folder(
                         if source.kind() == std::io::ErrorKind::FileTooLarge =>
                     {
                         file.kind = FoundKind::OverCap;
+                        if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+                            file.stat = Stat::from_metadata(&metadata);
+                        }
+                    }
+                    // Evicted since the walk listed it: cloud-only, with its stat now.
+                    Err(Error::Io { source, .. }) if not_downloaded(&source) => {
+                        file.kind = FoundKind::CloudOnly;
                         if let Ok(metadata) = std::fs::symlink_metadata(&path) {
                             file.stat = Stat::from_metadata(&metadata);
                         }

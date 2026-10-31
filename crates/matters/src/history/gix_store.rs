@@ -15,6 +15,7 @@ use super::blob::{Blobs, Target};
 use super::durable::{self, NewObjects, put};
 use super::objects::Objects;
 use super::{CommitRecord, HEAD_REF, HistoryStore, Oid, TreeFile, index_file, tree};
+use crate::no_download::NoDownload;
 use crate::stat::{FileTime, StatCache};
 use crate::{Error, fsync, write};
 
@@ -198,17 +199,28 @@ impl HistoryStore for GixStore {
         Ok(store)
     }
 
-    fn store_file(&mut self, file: &Path, len: u64, cap: u64) -> Result<(Oid, u64), Error> {
+    fn store_file(
+        &mut self,
+        file: &Path,
+        len: u64,
+        cap: u64,
+        guard: &NoDownload<'_>,
+    ) -> Result<(Oid, u64), Error> {
         let target = Target {
             stored: self.objects.stored(),
             deflated: self.objects.deflated(),
             new_objects: &mut self.new_objects,
         };
-        self.blobs.read(file, len, cap, Some(target))
+        self.blobs.read(file, len, cap, Some(target), guard)
     }
 
-    fn hash_file(&mut self, file: &Path, len: u64) -> Result<(Oid, u64), Error> {
-        self.blobs.read(file, len, u64::MAX, None)
+    fn hash_file(
+        &mut self,
+        file: &Path,
+        len: u64,
+        guard: &NoDownload<'_>,
+    ) -> Result<(Oid, u64), Error> {
+        self.blobs.read(file, len, u64::MAX, None, guard)
     }
 
     fn read_blob(&self, blob: Oid, path: &str, out: &mut dyn Write) -> Result<u64, Error> {

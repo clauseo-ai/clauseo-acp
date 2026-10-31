@@ -341,7 +341,9 @@ impl Matter {
     /// since the last checkpoint; then writes every before-step content to a temp file, checks
     /// that no target changed since that checkpoint (`matter.file_locked` if one did), deletes
     /// the files the step created, renames the temp files into place, and takes an `undo`
-    /// checkpoint. Its ids are single-use: see [`UndoRequest`] for retrying a failed undo.
+    /// checkpoint. A step whose target the `outside-edits` walk finds cloud-only or over the cap
+    /// (it changed after the first check, or was not downloaded when read) is kept, not written.
+    /// Its ids are single-use: see [`UndoRequest`] for retrying a failed undo.
     pub fn undo(&mut self, request: &UndoRequest<'_>) -> Result<Undone, Error> {
         json::check(&self.folder, self.id)?;
         undo::undo(&mut self.core, &self.folder, &self.settings, request)
