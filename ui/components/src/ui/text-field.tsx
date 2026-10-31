@@ -14,6 +14,8 @@ export function TextField({
   error,
   action,
   defaultValue,
+  value,
+  onValueChange,
   placeholder,
   invalid = false,
   disabled = false,
@@ -27,7 +29,11 @@ export function TextField({
   error?: string;
   /** The one way to mend it, beside the error: a Button, "Locate folder". */
   action?: ReactNode;
+  /** The words to start with, when the field keeps its own. */
   defaultValue?: string;
+  /** The words, when a store keeps them: the field shows this and reports each change through onValueChange. */
+  value?: string;
+  onValueChange?: (value: string) => void;
   placeholder?: string;
   invalid?: boolean;
   disabled?: boolean;
@@ -55,6 +61,8 @@ export function TextField({
           lang === "en" && "font-en",
         )}
         {...(defaultValue === undefined ? {} : { defaultValue })}
+        {...(value === undefined ? {} : { value })}
+        {...(onValueChange === undefined ? {} : { onValueChange })}
         {...(placeholder === undefined ? {} : { placeholder })}
       />
       <Field.Description className={fieldNote}>
