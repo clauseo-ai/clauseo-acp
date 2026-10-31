@@ -7,7 +7,7 @@ use clauseo_protocol::{
 use clauseo_store::{BlobIn, Commit, Error, MatterRow, READ_PAGE_MAX, SnapshotIn, Store};
 use futures::executor::block_on;
 use proptest::prelude::*;
-use proptest::test_runner::RngSeed;
+use proptest::test_runner::{RngSeed, TestRunner};
 
 use crate::common::{
     TestDir, assert_seq_gap, count, id, matter, receipt, seq, seqs, sql, stored_envelope,
@@ -516,9 +516,9 @@ fn op() -> impl Strategy<Value = Op> {
     ]
 }
 
-fn run_model(ops: &[Op]) {
-    let dir = TestDir::new("read_after_matches_model");
-    let store = dir.open();
+/// Runs `ops` against `store`, op stream `n` as `thread(base + n)`, which no earlier case used.
+fn run_model(store: &Store, base: u64, ops: &[Op]) {
+    let thread = |stream: u64| thread(base + stream);
     let mut model: Vec<Vec<Envelope>> = vec![Vec::new(); 4];
     for op in ops {
         match *op {
@@ -546,29 +546,33 @@ fn run_model(ops: &[Op]) {
                     .min(events.len());
                 let to = (from + usize::try_from(limit).unwrap()).min(events.len());
                 assert_eq!(
-                    read(&store, thread(stream), after, limit),
+                    read(store, thread(stream), after, limit),
                     events[from..to],
                     "{op:?}"
                 );
             }
         }
     }
-    block_on(store.close()).unwrap();
 }
 
-proptest! {
-    // Each commit pays a real sync, so few cases; a fixed seed keeps the run the same each time,
-    // and nothing is written beside the source.
-    #![proptest_config(ProptestConfig {
+#[test]
+fn read_after_matches_model() {
+    // Few cases as each commit syncs, a fixed seed, nothing beside the source, one store for all.
+    let dir = TestDir::new("read_after_matches_model");
+    let store = dir.open();
+    let next = std::cell::Cell::new(0);
+    TestRunner::new(ProptestConfig {
         cases: 32,
         rng_seed: RngSeed::Fixed(0x0051_07e7),
         failure_persistence: None,
         ..ProptestConfig::default()
-    })]
-    #[test]
-    fn read_after_matches_model(ops in prop::collection::vec(op(), 1..16)) {
-        run_model(&ops);
-    }
+    })
+    .run(&prop::collection::vec(op(), 1..16), |ops| {
+        run_model(&store, next.replace(next.get() + 4), &ops);
+        Ok(())
+    })
+    .unwrap();
+    block_on(store.close()).unwrap();
 }
 
 /// Where `needle` first starts in `bytes`.
