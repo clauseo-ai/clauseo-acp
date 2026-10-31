@@ -6,9 +6,9 @@ use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek};
 use std::path::Path;
 
+use super::objects::Writer;
 use gix::hash::{Kind as HashKind, ObjectId};
-use gix::objs::{Kind, Write as _};
-use gix::odb::loose;
+use gix::objs::Kind;
 
 use super::Oid;
 use super::durable::{self, NewObjects, put};
@@ -42,16 +42,16 @@ pub(super) fn count(bytes: usize) -> u64 {
 /// object files.
 pub(super) struct Target<'a> {
     /// Writes blobs that are already compressed, at zlib level 0.
-    pub(super) stored: &'a loose::Store,
+    pub(super) stored: Writer<'a>,
     /// Writes every other blob, at zlib level 1.
-    pub(super) deflated: &'a loose::Store,
+    pub(super) deflated: Writer<'a>,
     /// Object files written since the last publish.
     pub(super) new_objects: &'a mut NewObjects,
 }
 
 impl<'a> Target<'a> {
     /// The store for a blob whose first bytes are `head`.
-    fn store_for(&self, head: &[u8]) -> &'a loose::Store {
+    fn store_for(&self, head: &[u8]) -> Writer<'a> {
         if is_already_compressed(head) {
             self.stored
         } else {
@@ -219,10 +219,9 @@ impl Blobs {
         let object = target.deflated.object_path(&id);
         let made_folder = !object.parent().is_some_and(Path::is_dir);
         let mut source = Checked::new(file, len, id);
-        let written =
-            target
-                .store_for(&head)
-                .write_stream_with_known_id(Kind::Blob, len, &mut source, id);
+        let written = target
+            .store_for(&head)
+            .write_stream(Kind::Blob, len, &mut source, id);
         match written {
             Ok(_) => {
                 target.new_objects.record(object, made_folder);

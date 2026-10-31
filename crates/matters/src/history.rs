@@ -13,6 +13,7 @@ mod check;
 mod durable;
 mod gix_store;
 mod index_file;
+mod objects;
 #[cfg(test)]
 mod tests;
 mod tree;
