@@ -34,6 +34,7 @@ import {
   playDebug,
   playName,
   resultTable,
+  startupBreakdown,
 } from "../scoreboard/session.ts";
 import { test, type App } from "./fixture.ts";
 import { expectTurnEnded, openMatter } from "./flow.ts";
@@ -53,12 +54,20 @@ interface ClauseoPerf {
   startStream(): void;
   stopStream(): Promise<StreamSample>;
   startKeystrokes(): void;
-  stopKeystrokes(): { latency_ms: number[] | null; handler_ms: number[] | null };
+  stopKeystrokes(): {
+    latency_ms: number[] | null;
+    handler_ms: number[] | null;
+    /** Beyond the contract; optional so an older page still types. */
+    entry_share?: number | null;
+  };
   channelBytes(): Promise<number>;
 }
 interface StreamSample {
   first_token_on_screen_ms: number | null;
   chunk_to_paint_ms: number[];
+  /** The older double-rAF measure of the same chunks, for the debug file only; optional so an
+   * older page still runs. */
+  chunk_to_paint_double_raf_ms?: number[];
   raf_timestamps_ms: number[];
   long_animation_frames_ms: number[] | null;
   react_commits_per_frame: number | null;
@@ -67,6 +76,8 @@ interface StreamSample {
 }
 declare global {
   interface Window {
+    /** The init script's start time (contract §3); the debug file's start-up breakdown needs t0. */
+    __CLAUSEO_PERF__?: { t0EpochMs: number };
     __clauseoPerf?: ClauseoPerf;
   }
 }
@@ -159,6 +170,27 @@ async function play(app: App, stop: (app: App) => Promise<void>, n: number): Pro
     return await groupMemoryMb(app);
   });
 
+  // Read after the settle, so the page's load event has long passed.
+  const startup = await page.evaluate(() => {
+    const nav = performance.getEntriesByType("navigation")[0] as
+      | PerformanceNavigationTiming
+      | undefined;
+    return {
+      t0EpochMs: window.__CLAUSEO_PERF__?.t0EpochMs ?? null,
+      timeOriginEpochMs: performance.timeOrigin,
+      navigation:
+        nav === undefined
+          ? null
+          : {
+              responseEnd: nav.responseEnd,
+              domContentLoadedEventEnd: nav.domContentLoadedEventEnd,
+              loadEventEnd: nav.loadEventEnd,
+            },
+      marks: window.__clauseoPerf!.marks(),
+    };
+  });
+  if (startup.t0EpochMs === null) throw new Error("the page has no __CLAUSEO_PERF__.t0EpochMs");
+
   await openMatter(w);
 
   const keys = await test.step("type the prompt", async () => {
@@ -211,6 +243,16 @@ async function play(app: App, stop: (app: App) => Promise<void>, n: number): Pro
       answerTextBytes: sample.answer_text_bytes,
       raf: sample.raf_timestamps_ms,
       chunks: sample.chunk_to_paint_ms,
+      doubleRafChunks: sample.chunk_to_paint_double_raf_ms ?? null,
+      keystrokeLatency: keys.latency_ms,
+      entryShare: keys.entry_share ?? null,
+      startup: startupBreakdown({
+        ...startup,
+        t0EpochMs: startup.t0EpochMs,
+        // The fixture's times are on this process's performance clock.
+        spawnEpochMs: performance.timeOrigin + app.startedAt,
+        connectedEpochMs: performance.timeOrigin + app.connectedAt,
+      }),
     }),
   );
   const run = parseRawRun(raw);

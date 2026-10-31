@@ -15,7 +15,15 @@ import { join } from "node:path";
 
 import { expect, test } from "@playwright/test";
 
-import { config, play, playEnv, playScratch, runToExit } from "./macos.ts";
+import {
+  config,
+  play,
+  playEnv,
+  playScratch,
+  playWithRetries,
+  retryWarning,
+  runToExit,
+} from "./macos.ts";
 
 let base: string;
 let agent: string;
@@ -108,4 +116,40 @@ test("a play reads the run the app wrote to MARKS_OUT, and fails on a non-zero e
   expect(existsSync(join(cfg.out, "runs", "play-3.json"))).toBe(false);
   // Each play's scratch folders are gone afterwards, after a failure too.
   expect(readdirSync(base).sort()).toEqual(["app.sh", "fake_agent", "out"]);
+});
+
+test("retryWarning is one escaped workflow-command line", () => {
+  expect(retryWarning(3, 1, "50% done\nthen stopped")).toBe(
+    "::warning title=Scoreboard play retried::play 3, attempt 1 failed, played again: 50%25 done%0Athen stopped\n",
+  );
+});
+
+test("playWithRetries plays again after a failure and records every launch in runs/", async () => {
+  const out = join(base, "out");
+  const read = (name: string): unknown =>
+    JSON.parse(readFileSync(join(out, "runs", `${name}.attempts.json`), "utf8"));
+  // Passes on the first launch: one attempt, no failures.
+  expect(await playWithRetries(out, 1, () => Promise.resolve("ok"))).toBe("ok");
+  expect(read("play-1-warmup")).toEqual({ play: 1, attempts: 1, succeeded: true, failures: [] });
+  // Fails once, then passes.
+  let calls = 0;
+  const flaky = (): Promise<string> =>
+    ++calls === 1 ? Promise.reject(new Error("stopped at 40%")) : Promise.resolve("ok");
+  expect(await playWithRetries(out, 2, flaky)).toBe("ok");
+  expect(read("play-2")).toEqual({
+    play: 2,
+    attempts: 2,
+    succeeded: true,
+    failures: ["stopped at 40%"],
+  });
+  // Fails every time: the last failure is thrown and the file still says so.
+  await expect(
+    playWithRetries(out, 3, () => Promise.reject(new Error("no run")), 2),
+  ).rejects.toThrow("no run");
+  expect(read("play-3")).toEqual({
+    play: 3,
+    attempts: 2,
+    succeeded: false,
+    failures: ["no run", "no run"],
+  });
 });

@@ -177,8 +177,8 @@ test("the Budget column names a VM limit, and report-only rows say so", () => {
   );
   expect(row(body, "Dropped frames while streaming, per 10 s")).toContain("| 100 (VM) |  |");
   expect(row(body, "Start-up to interactive")).toContain("| 800 ms |");
-  expect(row(body, "React commits per frame while streaming")).toBe(
-    "| React commits per frame while streaming | 1.3 | not measured | – | report only |  |",
+  expect(row(body, "React commits per frame while streaming, in the app")).toBe(
+    "| React commits per frame while streaming, in the app | 1.3 | not measured | – | report only |  |",
   );
   expect(row(body, "IPC bytes per byte of answer text")).toBe(
     "| IPC bytes per byte of answer text | 2.4× | not measured | – | report only |  |",

@@ -32,17 +32,16 @@ export function heldPace(run: RawRun): boolean | null {
 
 /**
  * The run without the numbers a stretched pace distorts: first token (it waits out the paced steps
- * before the first answer chunk), chunk to paint, dropped frames, React commits per frame and IPC
- * bytes per byte of text (a slower stream batches fewer chunks per event). Start-up, memory and
- * keystrokes do not depend on the pace and stay.
+ * before the first answer chunk), React commits per frame and IPC bytes per byte of text (a slower
+ * stream batches fewer chunks per event, so both count fewer chunks per frame or per event). The
+ * frames (rAF timestamps, so dropped frames, and long animation frames) and chunk to paint stay:
+ * each frame and each chunk is measured on its own, however far apart the chunks arrive, and a
+ * slower stream only gives fewer of them. Start-up, memory and keystrokes stay too.
  */
 export function withoutPacedMetrics(run: RawRun): RawRun {
   return {
     ...run,
     first_token_on_screen_ms: null,
-    chunk_to_paint_ms: null,
-    raf_timestamps_ms: null,
-    long_animation_frames_ms: null,
     react_commits_per_frame: null,
     ipc_bytes_per_text_byte: null,
   };
@@ -63,6 +62,61 @@ export function playName(n: number): string {
   return n <= WARMUP_RUNS ? `play-${n}-warmup` : `play-${n}`;
 }
 
+/**
+ * Where a Windows launch spends its time before `interactive`, each as ms since t0 (the desktop
+ * crate's `run()`, the page's `__CLAUSEO_PERF__.t0EpochMs`): to tell a slow process start from a
+ * slow webview or a slow page (the GitHub runner reads 1,421 to 1,969 ms where the VM reads 420).
+ */
+export interface StartupBreakdown {
+  /** The spec's spawn of the app: negative, since t0 comes after it. */
+  spawn_ms: number;
+  /** The spec's CDP connection to the webview. */
+  cdp_connected_ms: number;
+  /** Spawn to CDP connection. */
+  launch_to_cdp_ms: number;
+  /** `performance.timeOrigin`: when the webview began navigating to the page. */
+  navigation_start_ms: number;
+  /** The navigation entry's responseEnd, domContentLoadedEventEnd and loadEventEnd; null when the
+   * page has no navigation entry or has not reached the event yet. */
+  response_end_ms: number | null;
+  dom_content_loaded_ms: number | null;
+  load_event_end_ms: number | null;
+  /** The perf API's marks (`marks()`), already ms since t0. */
+  first_paint_ms: number | null;
+  interactive_ms: number | null;
+}
+
+/** {@link StartupBreakdown} from the epoch times and the page's own clock. */
+export function startupBreakdown(input: {
+  t0EpochMs: number;
+  /** The page's `performance.timeOrigin`. */
+  timeOriginEpochMs: number;
+  /** The page's navigation entry: ms on its performance clock, 0 for an event not yet reached. */
+  navigation: {
+    responseEnd: number;
+    domContentLoadedEventEnd: number;
+    loadEventEnd: number;
+  } | null;
+  marks: { first_paint_ms: number | null; interactive_ms: number | null };
+  spawnEpochMs: number;
+  connectedEpochMs: number;
+}): StartupBreakdown {
+  const origin = input.timeOriginEpochMs - input.t0EpochMs;
+  const nav = (v: number | undefined): number | null =>
+    v === undefined || v <= 0 ? null : origin + v;
+  return {
+    spawn_ms: input.spawnEpochMs - input.t0EpochMs,
+    cdp_connected_ms: input.connectedEpochMs - input.t0EpochMs,
+    launch_to_cdp_ms: input.connectedEpochMs - input.spawnEpochMs,
+    navigation_start_ms: origin,
+    response_end_ms: nav(input.navigation?.responseEnd),
+    dom_content_loaded_ms: nav(input.navigation?.domContentLoadedEventEnd),
+    load_event_end_ms: nav(input.navigation?.loadEventEnd),
+    first_paint_ms: input.marks.first_paint_ms,
+    interactive_ms: input.marks.interactive_ms,
+  };
+}
+
 /** What the Windows spec writes beside each play's raw run, to check the medians by hand. */
 export interface PlayDebug {
   channel_bytes_before: number;
@@ -77,6 +131,15 @@ export interface PlayDebug {
   raf_gap_max_ms: number | null;
   /** Chunk-to-paint samples: timed events that patched the transcript while recording. */
   chunk_samples: number;
+  /** Median chunk to paint as the scoreboard measures it, and as the older double rAF measured
+   * the same chunks (`chunk_to_paint_double_raf_ms`), for comparison; null without samples. */
+  chunk_to_paint_median_ms: number | null;
+  chunk_to_paint_double_raf_median_ms: number | null;
+  /** Keystrokes sampled while typing the prompt, and the share of them timed by Event Timing
+   * entries rather than the fallbacks (`entry_share`); null where the page gives none. */
+  keystroke_count: number | null;
+  keystroke_entry_share: number | null;
+  startup: StartupBreakdown;
 }
 
 /** {@link PlayDebug} from the channel byte counts and the stream sample's lists. */
@@ -86,6 +149,11 @@ export function playDebug(input: {
   answerTextBytes: number;
   raf: readonly number[];
   chunks: readonly number[];
+  /** Absent while the page predates the double-rAF list. */
+  doubleRafChunks?: readonly number[] | null;
+  keystrokeLatency: readonly number[] | null;
+  entryShare?: number | null;
+  startup: StartupBreakdown;
 }): PlayDebug {
   const { raf } = input;
   const gaps = raf.slice(1).map((t, i) => t - raf[i]!);
@@ -99,6 +167,11 @@ export function playDebug(input: {
     raf_gap_median_ms: median(gaps),
     raf_gap_max_ms: gaps.length === 0 ? null : Math.max(...gaps),
     chunk_samples: input.chunks.length,
+    chunk_to_paint_median_ms: median(input.chunks),
+    chunk_to_paint_double_raf_median_ms: median(input.doubleRafChunks ?? []),
+    keystroke_count: input.keystrokeLatency?.length ?? null,
+    keystroke_entry_share: input.entryShare ?? null,
+    startup: input.startup,
   };
 }
 

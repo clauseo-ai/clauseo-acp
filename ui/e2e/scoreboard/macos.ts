@@ -11,6 +11,7 @@
 //   MARKS_FAKE_AGENT absolute path to the release fake_agent (required)
 //   SCOREBOARD_OUT   folder that receives scoreboard-macos.json (required), and in runs/ each
 //                    play's run file as the app wrote it (play-1-warmup.json, play-2.json, ...)
+//                    and its launches (play-1-warmup.attempts.json, ...: PlayAttempts)
 //
 //   MARKS_APP=target/release/clauseo-desktop MARKS_FAKE_AGENT=$PWD/target/release/fake_agent \
 //     SCOREBOARD_OUT=out node ui/e2e/scoreboard/macos.ts
@@ -34,16 +35,84 @@ import {
 } from "./session.ts";
 
 /**
- * How long one play may take, launch to exit. The session streams for about 15 s at 5 ms a step;
- * the rest is the launch, the idle settle and a slow runner.
+ * How long one play may take, launch to exit: a minute past the page's own 180 s limit on the
+ * session (ui/app/src/perf/autoplay.ts, TIMEOUT_MS), so the page reports how far it got before
+ * this kills it. The session streams for about 15 s at 5 ms a step, about 85 s where the runner
+ * stretches the pace. ci.yml's job timeout fits 4 plays × PLAY_ATTEMPTS × this, plus the build.
  */
-export const PLAY_TIMEOUT_MS = 360_000;
+export const PLAY_TIMEOUT_MS = 240_000;
 /**
  * Launches per play before the runner gives up. On the macos-15 runner a play now and then stops
  * streaming partway (PR #106: 3 of 13 launches; the app's message says how far it got), so a
  * failed play is played again on fresh scratch folders and the log keeps each failure.
  */
 export const PLAY_ATTEMPTS = 3;
+/**
+ * What `runs/play-N.attempts.json` holds: how many launches play N took and why each failed one
+ * failed, so the retry rate can be counted across main's runs. Written for every play, retried or
+ * not, and for a play that ran out of attempts.
+ */
+export interface PlayAttempts {
+  play: number;
+  attempts: number;
+  succeeded: boolean;
+  failures: string[];
+}
+
+/**
+ * A GitHub Actions warning annotation for a retried play: `::warning title=...::<message>`, the
+ * message's `%`, CR and LF escaped as the workflow command syntax wants.
+ */
+export function retryWarning(n: number, attempt: number, message: string): string {
+  const escaped = `play ${n}, attempt ${attempt} failed, played again: ${message}`
+    .replaceAll("%", "%25")
+    .replaceAll("\r", "%0D")
+    .replaceAll("\n", "%0A");
+  return `::warning title=Scoreboard play retried::${escaped}\n`;
+}
+
+/** Writes `attempts` as `<out>/runs/play-N.attempts.json`. */
+export function writeAttempts(out: string, attempts: PlayAttempts): void {
+  const runs = join(out, RUNS_DIR);
+  mkdirSync(runs, { recursive: true });
+  writeFileSync(
+    join(runs, `${playName(attempts.play)}.attempts.json`),
+    `${JSON.stringify(attempts, null, 2)}\n`,
+  );
+}
+
+/**
+ * Plays play `n` with `playOnce` until one attempt succeeds or PLAY_ATTEMPTS have failed. Each
+ * failure that is played again prints a log line and a warning annotation; the attempts file is
+ * written either way. Rethrows the last failure.
+ */
+export async function playWithRetries<T>(
+  out: string,
+  n: number,
+  playOnce: () => Promise<T>,
+  attemptsAllowed = PLAY_ATTEMPTS,
+): Promise<T> {
+  const failures: string[] = [];
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const run = await playOnce();
+      writeAttempts(out, { play: n, attempts: attempt, succeeded: true, failures });
+      return run;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push(message);
+      if (attempt >= attemptsAllowed) {
+        writeAttempts(out, { play: n, attempts: attempt, succeeded: false, failures });
+        throw error;
+      }
+      process.stdout.write(
+        `[scoreboard] play ${n}, attempt ${attempt} failed, again: ${message}\n`,
+      );
+      process.stdout.write(retryWarning(n, attempt, message));
+    }
+  }
+}
+
 /** The file the app writes its run to, in each play's scratch root. */
 const RUN_FILE = "run.json";
 
@@ -154,18 +223,7 @@ export async function main(env: NodeJS.ProcessEnv): Promise<void> {
   const cfg = config(env);
   const measured: RawRun[] = [];
   for (let n = 1; n <= WARMUP_RUNS + MEASURED_RUNS; n++) {
-    let run: RawRun | undefined;
-    for (let attempt = 1; run === undefined; attempt++) {
-      try {
-        run = await play(cfg, n);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (attempt >= PLAY_ATTEMPTS) throw error;
-        process.stdout.write(
-          `[scoreboard] play ${n}, attempt ${attempt} failed, again: ${message}\n`,
-        );
-      }
-    }
+    const run = await playWithRetries(cfg.out, n, () => play(cfg, n));
     if (n > WARMUP_RUNS) measured.push(run);
   }
   // A pace the runner stretched distorts the paced numbers in every run alike, so one run off the
@@ -176,8 +234,8 @@ export async function main(env: NodeJS.ProcessEnv): Promise<void> {
   });
   if (measured.some((run) => heldPace(run) === false)) {
     process.stdout.write(
-      `[scoreboard] not measured: first token, chunk to paint, dropped frames, React commits and IPC ` +
-        `bytes. The streams took ${spans.join(", ")} ms against about ${PACED_STREAM_MS} ms at a ` +
+      `[scoreboard] not measured: first token, React commits per frame and IPC bytes per byte of ` +
+        `text. The streams took ${spans.join(", ")} ms against about ${PACED_STREAM_MS} ms at a ` +
         `5 ms pace: this machine stretches the agent's sleeps (the probe above).\n`,
     );
     measured.splice(0, measured.length, ...measured.map(withoutPacedMetrics));
