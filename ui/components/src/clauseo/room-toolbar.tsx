@@ -233,6 +233,7 @@ function ToolbarPlan({ plan }: { plan: NonNullable<RoomToolbarProps["plan"]> }) 
       state={plan.state ?? planState(plan.left)}
       track={plan.look !== "none" && plan.look !== "bare"}
       inButton={plan.card !== undefined}
+      dragRegion
       className={cn("room-plan", plan.card !== undefined && "room-plan-in")}
     />
   );
