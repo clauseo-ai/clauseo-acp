@@ -23,11 +23,11 @@ pub(super) type ReadFile<'a> =
     dyn FnMut(&Path, u64, u64, &NoDownload<'_>) -> Result<(Oid, u64), Error> + 'a;
 
 /// Walks `folder` against `cache` and reads every file `cache` cannot vouch for with `read`
-/// (`(path, len, cap, guard)` to blob and bytes read: storing it, or only hashing it). `Ok(None)` when
-/// cancelled. A file found over the cap when read is skipped like one the walk found over it,
-/// and a file found not downloaded when read (evicted since the walk's stat) like one the walk
-/// found cloud-only; the entries under a subfolder that does not read are kept as they were.
-/// Reads nothing again after either.
+/// (`(path, len, cap, guard)` to blob and bytes read: storing it, or only hashing it).
+/// `Ok(None)` when cancelled. A file found over the cap when read is skipped like one the walk
+/// found over it, and a file found not downloaded when read (evicted since the walk's stat) like
+/// one the walk found cloud-only; the entries under a subfolder that does not read are kept as
+/// they were. Reads nothing again after either.
 pub(super) fn walk_folder(
     cache: &StatCache,
     folder: &Path,
