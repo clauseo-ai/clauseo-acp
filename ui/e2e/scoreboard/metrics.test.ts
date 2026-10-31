@@ -7,7 +7,11 @@ import { expect, test } from "@playwright/test";
 
 import { parseBudgets, parseReducerSummaries } from "./inputs.ts";
 import {
+  BLANK_APP_IDLE_MB,
+  BYTES_PER_MB,
   METRICS,
+  RAW_RUN_KEYS,
+  isReportOnly,
   droppedFramesPer10s,
   median,
   parseRawRun,
@@ -34,6 +38,8 @@ function windowsRun(scale: number): RawRun {
     keystroke_handler_ms: [1, 2, 3],
     idle_memory_mb: 180 * scale,
     memory_after_session_mb: 240 * scale,
+    react_commits_per_frame: 1.5,
+    ipc_bytes_per_text_byte: 2.5 * scale,
   };
 }
 
@@ -90,6 +96,30 @@ test("summarise: the median of three measured runs for each metric", () => {
   expect(result.metrics.keystroke_latency_p95.median).toBe(30);
   expect(result.metrics.keystroke_handler.median).toBe(3);
   expect(result.metrics.memory_after_session.median).toBe(240);
+  expect(result.metrics.react_commits_per_frame_streaming.median).toBe(1.5);
+  expect(result.metrics.ipc_bytes_per_text_byte.median).toBe(2.5);
+  expect(result.metrics.idle_memory_over_blank.median).toBeCloseTo(180 - BLANK_APP_IDLE_MB);
+  // Not measurable yet: no input method on a runner, no lite mode in the app.
+  expect(result.metrics.keystroke_latency_ime_p95).toEqual({
+    median: null,
+    runs: [null, null, null],
+  });
+  expect(result.metrics.chunk_to_paint_lite_p50.median).toBeNull();
+});
+
+test("the blank app's idle memory: run 41206906369's 72,118,272 B in MiB", () => {
+  expect(BYTES_PER_MB).toBe(1_048_576);
+  expect(BLANK_APP_IDLE_MB).toBeCloseTo(68.78, 2);
+});
+
+test("memory over the blank app: Windows only, never below zero", () => {
+  const low = { ...windowsRun(1), idle_memory_mb: 50 };
+  const result = summarise("windows", [low, low, low]);
+  expect(result.metrics.idle_memory_over_blank.median).toBe(0);
+  const noIdle = { ...windowsRun(1), idle_memory_mb: null };
+  expect(
+    summarise("windows", [noIdle, noIdle, noIdle]).metrics.idle_memory_over_blank.median,
+  ).toBeNull();
 });
 
 test("summarise: what WebKit cannot measure is null, not zero", () => {
@@ -98,6 +128,9 @@ test("summarise: what WebKit cannot measure is null, not zero", () => {
   expect(result.metrics.keystroke_latency_p95.median).toBeNull();
   expect(result.metrics.keystroke_handler.median).toBeNull();
   expect(result.metrics.first_token_on_screen.median).toBe(90);
+  // The blank app was measured on Windows only.
+  expect(result.metrics.idle_memory_over_blank).toEqual({ median: null, runs: [null, null, null] });
+  expect(result.metrics.idle_memory_total.median).toBe(180);
 });
 
 test("summarise: a metric measured in some runs but not all is refused", () => {
@@ -126,6 +159,21 @@ test("parseRawRun: every key, nothing else, numbers or null", () => {
   );
   expect(() => parseRawRun({ ...windowsRun(1), idle_memory_mb: -1 })).toThrow("a number or null");
   expect(() => parseRawRun([])).toThrow("JSON object");
+});
+
+test("RAW_RUN_KEYS lists every key of a run, in order", () => {
+  expect(RAW_RUN_KEYS).toEqual(Object.keys(windowsRun(1)));
+  const { ipc_bytes_per_text_byte: _, ...old } = windowsRun(1);
+  expect(() => parseRawRun(old)).toThrow("missing key `ipc_bytes_per_text_byte`");
+});
+
+test("parseResult reads a result written before the newer metrics existed", () => {
+  // scoreboard-windows-main.json has the first half's ten metrics only, as main's artifacts do.
+  const values = parseResult(fixture("scoreboard-windows-main.json"), "windows");
+  expect(values.first_token_on_screen).toBe(141);
+  expect(values.idle_memory_over_blank).toBeNull();
+  expect(values.react_commits_per_frame_streaming).toBeNull();
+  expect(values.ipc_bytes_per_text_byte).toBeNull();
 });
 
 test("parseResult reads back what summarise wrote", () => {
@@ -200,12 +248,27 @@ test("parseResult treats the artifact as untrusted and never quotes it", () => {
   expect(parseResult(runs([null, null, null], null), "windows").first_token_on_screen).toBeNull();
 });
 
-test("budgets.toml has a row for every metric, in the same unit", () => {
+test("budgets.toml has a row for every metric but the report-only ones, in the same unit", () => {
   const budgets = parseBudgets(repoFile("budgets.toml"));
   for (const metric of METRICS) {
+    if (isReportOnly(metric)) {
+      // A row added later would be silently ignored: drop the flag instead.
+      expect(budgets.get(metric.id), metric.id).toBeUndefined();
+      expect(budgets.get(`${metric.id}_vm`), metric.id).toBeUndefined();
+      continue;
+    }
     expect(budgets.get(metric.id), metric.id).toBeDefined();
     expect(budgets.get(metric.id)!.unit, metric.id).toBe(metric.unit);
+    const vm = budgets.get(`${metric.id}_vm`);
+    if (vm !== undefined) expect(vm.unit, `${metric.id}_vm`).toBe(metric.unit);
   }
+  expect(METRICS.filter(isReportOnly).map((m) => m.id)).toEqual([
+    "react_commits_per_frame_streaming",
+    "ipc_bytes_per_text_byte",
+  ]);
+  // The VM limits decided in #120.
+  expect(budgets.get("dropped_frames_streaming_vm")!.limit).toBe(100);
+  expect(budgets.get("long_frames_streaming_vm")!.limit).toBe(8);
   // R13's new rows, as proposed in the brief.
   expect(budgets.get("first_token_on_screen")!.limit).toBe(150);
   expect(budgets.get("chunk_to_paint_p50")!.limit).toBe(17);

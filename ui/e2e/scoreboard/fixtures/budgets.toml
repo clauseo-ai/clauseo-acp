@@ -1,0 +1,89 @@
+# The scoreboard's rows of budgets.toml as the render and comment tests read them: fixed here so
+# a change to a limit in the real file does not change the expected comment. The three `_vm` rows
+# are the ones decided in #120; metrics.test.ts checks the real file's rows and units.
+
+[[budget]]
+id = "cold_start_interactive_vm"
+limit = 4500.0
+unit = "ms"
+
+[[budget]]
+id = "warm_start_interactive"
+limit = 800.0
+unit = "ms"
+
+[[budget]]
+id = "first_token_on_screen"
+limit = 150.0
+unit = "ms"
+
+[[budget]]
+id = "chunk_to_paint_p50"
+limit = 17.0
+unit = "ms"
+
+[[budget]]
+id = "chunk_to_paint_lite_p50"
+limit = 25.0
+unit = "ms"
+
+[[budget]]
+id = "chunk_to_paint_p95"
+limit = 50.0
+unit = "ms"
+
+[[budget]]
+id = "long_frames_streaming"
+limit = 0.0
+unit = "count"
+
+[[budget]]
+id = "long_frames_streaming_vm"
+limit = 8.0
+unit = "count"
+
+[[budget]]
+id = "dropped_frames_streaming"
+limit = 30.0
+unit = "count"
+
+[[budget]]
+id = "dropped_frames_streaming_vm"
+limit = 100.0
+unit = "count"
+
+[[budget]]
+id = "keystroke_latency_p95"
+limit = 32.0
+unit = "ms"
+
+[[budget]]
+id = "keystroke_latency_ime_p95"
+limit = 64.0
+unit = "ms"
+
+[[budget]]
+id = "keystroke_handler"
+limit = 4.0
+unit = "ms"
+
+[[budget]]
+id = "idle_memory_total"
+limit = 150.0
+unit = "MB"
+
+[[budget]]
+id = "idle_memory_over_blank"
+limit = 60.0
+unit = "MB"
+
+[[budget]]
+id = "memory_after_session"
+limit = 300.0
+unit = "MB"
+
+# A row a report-only metric's id might collide with: never used as its budget.
+[[budget]]
+id = "react_commits_per_frame"
+limit = 1.0
+unit = "count"

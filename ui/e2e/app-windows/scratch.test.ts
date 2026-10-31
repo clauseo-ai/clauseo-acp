@@ -32,6 +32,12 @@ test("settings start fake_agent on the scenario as agents.claude", () => {
   expect(agentSettings(agent, "prompt-stream")).toEqual({
     agents: { claude: { command: agent, args: ["--scenario", "prompt-stream"] } },
   });
+  // The scoreboard's pace goes after the scenario.
+  expect(agentSettings(agent, "scoreboard", ["--pace-ms", "5"])).toEqual({
+    agents: {
+      claude: { command: agent, args: ["--scenario", "scoreboard", "--pace-ms", "5"] },
+    },
+  });
 });
 
 test("settings refuse a relative command", () => {

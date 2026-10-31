@@ -21,6 +21,13 @@
 #   request, compares them with the merge-base on main. It uploads the counts as the
 #   reducer-bench-summary artifact, which the speed scoreboard's comment reads
 #   (scoreboard-comment.yml).
+# - scoreboard-macos plays the speed scoreboard on macOS Apple silicon (R13): the `marks` build of
+#   the app plays fake_agent's scoreboard session by itself, one warm-up and three measured launches
+#   (ui/e2e/scoreboard/macos.ts), and the job uploads scoreboard-macos.json as the artifact
+#   scoreboard-macos for the scoreboard comment. It runs on pull requests that touch product code
+#   (crates/, ui/, Cargo.toml, Cargo.lock; the `product` output of changes), on every push to
+#   main, nightly and on demand. It is not a required check: on other pull requests it is skipped
+#   as a whole.
 # - Every third-party action is pinned by commit SHA, with its tag in a comment.
 
 name: CI
@@ -52,9 +59,12 @@ jobs:
     timeout-minutes: 5
     outputs:
       build: ${{ steps.filter.outputs.build }}
+      product: ${{ steps.filter.outputs.product }}
     steps:
       # A push, the nightly run and a run on demand build everything; a pull request builds unless
-      # it changes only Markdown or docs/.
+      # it changes only Markdown or docs/. `product` (the scoreboard) is true for a push, nightly,
+      # on demand, and a pull request that touches crates/, ui/, Cargo.toml or Cargo.lock (the
+      # paths of comment.ts's isProductPath).
       - name: Decide whether the build jobs run
         id: filter
         env:
@@ -66,6 +76,7 @@ jobs:
           set -euo pipefail
           if [ "$EVENT" != pull_request ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "product=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git init -q work
@@ -82,6 +93,13 @@ jobs:
           else
             echo "Only Markdown or docs/ changed: the build jobs skip their steps."
             echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+          product=$(printf '%s\n' "$changed" | grep -E '^(crates/|ui/|Cargo\.toml$|Cargo\.lock$)' || true)
+          if [ -n "$product" ]; then
+            echo "product=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No change to product code (crates/, ui/, Cargo.toml, Cargo.lock): no macOS scoreboard."
+            echo "product=false" >> "$GITHUB_OUTPUT"
           fi
 
   fast-lane:
@@ -290,6 +308,68 @@ jobs:
               echo "uid inside the namespace: $(as_runner id -u)"
               as_runner cargo nextest run --workspace --profile ci --no-tests=pass
             '
+
+  # The speed scoreboard on macOS (R13). The `marks` build plays the session itself and writes each
+  # run to MARKS_OUT; macos.ts launches it four times and writes the medians. Its numbers report and
+  # alert, so a failure leaves the run green (continue-on-error, as mutants): a red CI run on main
+  # would also hide that run's reducer-bench-summary from the comment, which reads main's
+  # successful runs only. The job is not a required check.
+  scoreboard-macos:
+    name: scoreboard-macos
+    needs: changes
+    if: needs.changes.outputs.product == 'true'
+    runs-on: macos-15
+    continue-on-error: true
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: ui/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui/package.json
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      # Its own key: the marks feature changes the desktop crate's build.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: scoreboard-macos
+          cache-bin: "false"
+
+      - name: Install the ui workspace
+        run: pnpm -C ui install --frozen-lockfile
+
+      # `tauri build` embeds ui/app/dist (custom-protocol); `marks` turns on e2e as well.
+      - name: Build the app with the marks feature
+        run: pnpm -C ui tauri build --no-bundle --features marks
+
+      - name: Build fake_agent
+        run: cargo build --release --locked -p clauseo-fake_agent
+
+      # Plain Node, no install: macos.ts imports Node's own modules and ui/e2e files only.
+      - name: Speed scoreboard
+        env:
+          MARKS_APP: ${{ github.workspace }}/target/release/clauseo-desktop
+          MARKS_FAKE_AGENT: ${{ github.workspace }}/target/release/fake_agent
+          SCOREBOARD_OUT: ${{ runner.temp }}/scoreboard-out
+        run: node ui/e2e/scoreboard/macos.ts
+
+      # comment.ts reads scoreboard-macos.json from the artifact scoreboard-macos.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: scoreboard-macos
+          path: ${{ runner.temp }}/scoreboard-out/scoreboard-macos.json
+          if-no-files-found: warn
 
   # cargo-mutants on main's changes of the last 24 hours, nightly and on demand. It only reports:
   # a missed mutant, or a run that reaches `MUTANTS_TIMEOUT` in xtask/src/mutants.rs, shows in the

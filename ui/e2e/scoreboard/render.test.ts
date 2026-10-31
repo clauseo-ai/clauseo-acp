@@ -6,14 +6,23 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
 import { parseBudgets, parseReducerSummaries } from "./inputs.ts";
-import { parseResult } from "./metrics.ts";
-import { MARKER, change, flags, formatNumber, renderComment, type RenderInput } from "./render.ts";
+import { METRICS, parseResult } from "./metrics.ts";
+import {
+  BUDGET_NOTE,
+  MARKER,
+  budgetOf,
+  change,
+  flags,
+  formatNumber,
+  renderComment,
+  type RenderInput,
+} from "./render.ts";
 
 const fixture = (name: string) =>
   readFileSync(new URL(`fixtures/${name}`, import.meta.url), "utf8");
-const budgets = parseBudgets(
-  readFileSync(new URL("../../../budgets.toml", import.meta.url), "utf8"),
-);
+// Fixed rows with the #120 `_vm` limits, so a change to the real budgets.toml leaves these alone.
+const budgets = parseBudgets(fixture("budgets.toml"));
+const metric = (id: string) => METRICS.find((m) => m.id === id)!;
 const HEAD = "a".repeat(40);
 const MAIN = "b".repeat(40);
 const run = (id: number) => `https://github.com/clauseo/clauseo-acp/actions/runs/${id}`;
@@ -112,7 +121,7 @@ test("the comment starts with the marker and flags the rows the brief names", ()
 
 test("a job that did not run shows every metric as not run", () => {
   const macos = section(renderComment(input()), "### macOS");
-  expect(macos).toHaveLength(10);
+  expect(macos).toHaveLength(METRICS.length);
   for (const line of macos)
     expect(line).toMatch(/^\| [^|]+ \| not run \| not run \| – \| [^|]+ \|  \|$/);
 });
@@ -133,6 +142,62 @@ test("what an engine cannot measure shows as not measured", () => {
   expect(macos.find((l) => l.startsWith("| Send to first token"))).toContain(
     "| 88 ms | not run | – | 150 ms |",
   );
+});
+
+test("each metric's budget: its _vm row when there is one, else its own row", () => {
+  expect(budgetOf(metric("dropped_frames_streaming"), budgets)).toEqual({
+    kind: "limit",
+    limit: 100,
+    vm: true,
+  });
+  expect(budgetOf(metric("first_token_on_screen"), budgets)).toEqual({
+    kind: "limit",
+    limit: 150,
+    vm: false,
+  });
+  // A report-only metric never takes a row, even one that shares its name's start.
+  expect(budgetOf(metric("react_commits_per_frame_streaming"), budgets)).toEqual({
+    kind: "report-only",
+  });
+  // A _vm row in another unit is not used; the metric's own row is.
+  const odd = new Map(budgets);
+  odd.set("long_frames_streaming_vm", { limit: 8, unit: "ms" });
+  expect(budgetOf(metric("long_frames_streaming"), odd)).toEqual({
+    kind: "limit",
+    limit: 0,
+    vm: false,
+  });
+  expect(budgetOf(metric("long_frames_streaming"), new Map())).toEqual({ kind: "none" });
+});
+
+test("the Budget column names a VM limit, and report-only rows say so", () => {
+  const body = renderComment(input());
+  expect(row(body, "Long animation frames while streaming")).toBe(
+    "| Long animation frames while streaming | 9 | 0 | +9 | 8 (VM) | ⚠️ over budget, more than 10% worse than main |",
+  );
+  expect(row(body, "Dropped frames while streaming, per 10 s")).toContain("| 100 (VM) |  |");
+  expect(row(body, "Start-up to interactive")).toContain("| 800 ms |");
+  expect(row(body, "React commits per frame while streaming")).toBe(
+    "| React commits per frame while streaming | 1.3 | not measured | – | report only |  |",
+  );
+  expect(row(body, "IPC bytes per byte of answer text")).toBe(
+    "| IPC bytes per byte of answer text | 2.4× | not measured | – | report only |  |",
+  );
+  expect(row(body, "Memory at idle over the blank app")).toContain(
+    "| 143.6 MB | not measured | – | 60 MB |",
+  );
+  // Under each scoreboard table, once.
+  expect(body.split(BUDGET_NOTE)).toHaveLength(3);
+  expect(BUDGET_NOTE).toContain("virtual machine runners");
+  expect(BUDGET_NOTE).toContain("laptop (stage F)");
+});
+
+test("metrics the runners cannot measure yet show as not measured", () => {
+  const body = renderComment(input());
+  expect(row(body, "Typing to screen, composed IME keystrokes, p95")).toContain(
+    "| not measured | not measured | – | 64 ms |",
+  );
+  expect(row(body, "Chunk to paint, lite mode, p50")).toContain("| not measured | not measured |");
 });
 
 test("pending and refused results say so", () => {

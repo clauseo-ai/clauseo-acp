@@ -20,17 +20,29 @@
       "median": 44,
       "runs": [44, 44, 44]
     },
+    "chunk_to_paint_lite_p50": {
+      "median": null,
+      "runs": [null, null, null]
+    },
     "long_frames_streaming": {
-      "median": 0,
-      "runs": [0, 0, 0]
+      "median": 9,
+      "runs": [9, 9, 9]
     },
     "dropped_frames_streaming": {
       "median": 4.2,
       "runs": [4.2, 4.2, 4.2]
     },
+    "react_commits_per_frame_streaming": {
+      "median": 1.3,
+      "runs": [1.3, 1.3, 1.3]
+    },
     "keystroke_latency_p95": {
       "median": 21,
       "runs": [21, 21, 21]
+    },
+    "keystroke_latency_ime_p95": {
+      "median": null,
+      "runs": [null, null, null]
     },
     "keystroke_handler": {
       "median": 2.1,
@@ -40,9 +52,17 @@
       "median": 212.4,
       "runs": [212.4, 212.4, 212.4]
     },
+    "idle_memory_over_blank": {
+      "median": 143.6,
+      "runs": [143.6, 143.6, 143.6]
+    },
     "memory_after_session": {
       "median": 268,
       "runs": [268, 268, 268]
+    },
+    "ipc_bytes_per_text_byte": {
+      "median": 2.4,
+      "runs": [2.4, 2.4, 2.4]
     }
   }
 }

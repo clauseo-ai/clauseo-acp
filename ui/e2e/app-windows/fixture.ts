@@ -6,7 +6,8 @@
 //
 // Every launch runs on the test's scratch folders (scratch.ts): `CLAUSEO_DATA_DIR` is a new data
 // folder, never the real one, and `E2E_MATTER_DIR` the matter folder. A spec picks fake_agent's
-// scenario and the matter's files with `test.use({ scenario, matterFiles })`; `apps` starts and
+// scenario, its extra arguments and the matter's files with
+// `test.use({ scenario, agentArgs, matterFiles })`; `apps` starts and
 // stops more launches on the same folders (the restart spec).
 //
 //   E2E_APP           path to the e2e build of clauseo-desktop.exe (required)
@@ -341,14 +342,17 @@ export interface AppOptions {
   scenario: string | null;
   /** The matter folder's files at the start, `/`-separated relative path to content. */
   matterFiles: Readonly<Record<string, string>>;
+  /** More fake_agent arguments after the scenario (the scoreboard's `--pace-ms 5`). */
+  agentArgs: readonly string[];
 }
 
 export const test = base.extend<AppOptions & { scratch: Scratch; apps: Apps; app: App }>({
   scenario: [null, { option: true }],
   matterFiles: [{}, { option: true }],
+  agentArgs: [[], { option: true }],
 
-  scratch: async ({ scenario, matterFiles }, use) => {
-    const scratch = makeScratch({ scenario, matterFiles }, () =>
+  scratch: async ({ scenario, matterFiles, agentArgs }, use) => {
+    const scratch = makeScratch({ scenario, matterFiles, agentArgs }, () =>
       fakeAgentPath(process.env, appPath(), process.platform === "win32"),
     );
     try {
