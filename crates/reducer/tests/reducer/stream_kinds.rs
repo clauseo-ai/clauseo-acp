@@ -103,4 +103,5 @@ fn a_state_gives_its_own_kind_with_its_seq_and_header() {
     let inner = thread.as_thread().unwrap();
     assert!(inner.seq().is_some());
     assert_eq!(inner.seq(), thread.seq());
+    assert!(inner.header().is_some());
 }
