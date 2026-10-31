@@ -155,3 +155,5 @@ the Rust-to-webview boundary need a record in `docs/decisions/`. Anyone who adds
 anything else the webview can reach, reads `docs/decisions/0001-rust-webview-boundary.md` and
 `docs/threat-model.md` first. Anyone who changes a type in `protocol` reads
 `docs/decisions/0002-event-schema.md` first: it says which changes keep the log readable.
+
+<!-- scratch for #51: docs-only proof, never merged -->
