@@ -76,8 +76,13 @@ export interface StartupBreakdown {
   launch_to_cdp_ms: number;
   /** `performance.timeOrigin`: when the webview began navigating to the page. */
   navigation_start_ms: number;
-  /** The navigation entry's responseEnd, domContentLoadedEventEnd and loadEventEnd; null when the
-   * page has no navigation entry or has not reached the event yet. */
+  /** The navigation entry's fetchStart, requestStart, responseStart, responseEnd,
+   * domContentLoadedEventEnd and loadEventEnd; null when the page has no navigation entry or has
+   * not reached the event yet. requestStart to responseStart is the app's asset protocol answering
+   * index.html; fetchStart to requestStart is the browser getting the request out. */
+  fetch_start_ms: number | null;
+  request_start_ms: number | null;
+  response_start_ms: number | null;
   response_end_ms: number | null;
   dom_content_loaded_ms: number | null;
   load_event_end_ms: number | null;
@@ -93,6 +98,9 @@ export function startupBreakdown(input: {
   timeOriginEpochMs: number;
   /** The page's navigation entry: ms on its performance clock, 0 for an event not yet reached. */
   navigation: {
+    fetchStart?: number;
+    requestStart?: number;
+    responseStart?: number;
     responseEnd: number;
     domContentLoadedEventEnd: number;
     loadEventEnd: number;
@@ -109,6 +117,9 @@ export function startupBreakdown(input: {
     cdp_connected_ms: input.connectedEpochMs - input.t0EpochMs,
     launch_to_cdp_ms: input.connectedEpochMs - input.spawnEpochMs,
     navigation_start_ms: origin,
+    fetch_start_ms: nav(input.navigation?.fetchStart),
+    request_start_ms: nav(input.navigation?.requestStart),
+    response_start_ms: nav(input.navigation?.responseStart),
     response_end_ms: nav(input.navigation?.responseEnd),
     dom_content_loaded_ms: nav(input.navigation?.domContentLoadedEventEnd),
     load_event_end_ms: nav(input.navigation?.loadEventEnd),

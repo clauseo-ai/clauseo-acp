@@ -182,6 +182,9 @@ async function play(app: App, stop: (app: App) => Promise<void>, n: number): Pro
         nav === undefined
           ? null
           : {
+              fetchStart: nav.fetchStart,
+              requestStart: nav.requestStart,
+              responseStart: nav.responseStart,
               responseEnd: nav.responseEnd,
               domContentLoadedEventEnd: nav.domContentLoadedEventEnd,
               loadEventEnd: nav.loadEventEnd,
