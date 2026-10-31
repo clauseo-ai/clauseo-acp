@@ -119,6 +119,9 @@ enum Trick {
     RebuildXtask,
     /// `git worktree remove` fails.
     RefuseRemove,
+    /// `git worktree remove` succeeds but leaves `ui/app/components` and the folders above it,
+    /// as Git for Windows does with the junction `pnpm install` makes there.
+    RemoveLeavesFolder,
     /// `git worktree add` makes the folder, then fails.
     AddFailsAfterMakingIt,
     /// `git worktree list` fails once a `git worktree add` ran.
@@ -160,6 +163,15 @@ impl Fake {
                 if self.tricks.contains(&Trick::RefuseRemove) =>
             {
                 Ok(Ran::exited(false, "", "fatal: refused by the test\n"))
+            }
+            (Program::Git, ["worktree", "remove", "--force", path])
+                if self.tricks.contains(&Trick::RemoveLeavesFolder) =>
+            {
+                let ran = process::run_quiet(cmd, dir)?;
+                let left = Path::new(path).join("ui/app/components");
+                Scratch::create_dir_all(&left).expect("the folders git left");
+                Scratch::write(left.join("button.tsx"), "left").expect("what git left");
+                Ok(ran)
             }
             (Program::Git, ["worktree", "add", "--detach", path, "HEAD"])
                 if self.tricks.contains(&Trick::AddFailsAfterMakingIt) =>

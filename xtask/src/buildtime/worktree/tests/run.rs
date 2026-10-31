@@ -186,6 +186,23 @@ fn a_worktree_that_cannot_be_removed_fails_the_run_and_no_further_run_starts() {
 }
 
 #[test]
+fn what_git_left_after_removing_the_worktree_is_removed_and_the_next_run_starts() {
+    let scratch = Scratch::new("worktree-left-by-git");
+    let root = repo(&scratch);
+    let mut fake = Fake {
+        builds: vec![app_only()],
+        tricks: vec![Trick::RemoveLeavesFolder],
+        ..Fake::default()
+    };
+    let measured = measure_with(&root, false, 2, &mut fake).expect("measured");
+    assert!(measured.errors.is_empty(), "{:?}", measured.errors);
+    assert_eq!(fake.ran("git worktree add"), 2, "the second run started");
+    assert_eq!(samples(find(&measured, TOTAL)).len(), 2);
+    let path = place(&root).expect("a place");
+    assert!(!left_behind(&root, &path), "nothing is left");
+}
+
+#[test]
 fn a_folder_git_made_but_does_not_know_fails_the_removal_and_is_left_as_it_is() {
     let scratch = Scratch::new("worktree-unknown-folder");
     let root = repo(&scratch);
