@@ -9,7 +9,7 @@
 #[cfg(test)]
 mod tests;
 
-use crate::leaf::Raw;
+use crate::leaf::{self, Raw};
 use crate::schema::SECTIONS;
 use crate::warning::{Origin, Position, Warning, WarningKind};
 use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
@@ -51,7 +51,9 @@ pub(crate) fn read(path: &Path, bytes: &[u8]) -> Result<(Vec<Raw>, Vec<Warning>)
         serde_json_lenient::from_slice(text).map_err(|error| syntax(&error))?;
     let mut raws = Vec::new();
     let mut warnings = Vec::new();
-    for (section, value) in sections.0 {
+    // A section the file sets twice is its last copy, whole: the save keeps only that copy, so
+    // the earlier copy's entries must not load either. Its warnings go with it.
+    for (section, value) in leaf::keep_last(sections.0, |(section, _)| section.clone()) {
         if !SECTIONS.contains(&section.as_str()) {
             warnings.push(Warning {
                 origin: origin(value),

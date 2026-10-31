@@ -295,3 +295,27 @@ fn a_repeated_key_takes_its_last_value_valid_or_not() {
         effective.warnings()
     );
 }
+
+#[test]
+fn a_repeated_section_is_its_last_copy_on_load() {
+    // The first `ui` copy is gone, whole: its theme does not stand.
+    let files = user(r#"{"ui": {"theme": "dark"}, "ui": {"density": "compact"}}"#);
+    let effective = Effective::load(&locations(), &files, &[]);
+    assert_eq!(effective.settings().ui.theme, Theme::System);
+    assert_eq!(effective.settings().ui.density, Density::Compact);
+    assert_eq!(effective.warnings(), []);
+
+    // The first `agents` copy's ids are gone, the last copy's stand.
+    let text = format!(
+        r#"{{"agents": {{"claude": {{"command": "{a}"}}}}, "agents": {{"codex": {{"command": "{b}"}}}}}}"#,
+        a = abs_json("user/claude"),
+        b = abs_json("user/codex"),
+    );
+    let effective = Effective::load(&locations(), &user(&text), &[]);
+    assert_eq!(effective.agent("claude"), None);
+    assert_eq!(
+        effective.agent("codex").map(|codex| codex.command.clone()),
+        Some(abs("user/codex").display().to_string())
+    );
+    assert_eq!(effective.warnings(), []);
+}

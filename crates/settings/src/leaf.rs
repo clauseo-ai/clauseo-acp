@@ -79,7 +79,8 @@ pub(crate) fn agent_id(key: &str) -> Option<&str> {
 /// key goes back to its default, so a broken value never leaves an earlier one in force. A key
 /// the source sets twice keeps its last value, valid or not, as `policy.json` always did; the
 /// result holds each key once. `refused` holds the known keys a policy source's own reader
-/// already refused (a registry value of the wrong type).
+/// already refused (a registry value of the wrong type); they count as after every raw value,
+/// so a refused key wins wherever its raw values sit.
 pub(crate) fn typed(
     raws: Vec<Raw>,
     refused: Vec<String>,
@@ -103,16 +104,18 @@ pub(crate) fn typed(
         }));
     }
     leaves.extend(refused.into_iter().map(Leaf::Refused));
-    last_per_key(leaves)
+    keep_last(leaves, Leaf::key)
 }
 
-/// The last leaf of each key, in the order those last leaves came.
-fn last_per_key(leaves: Vec<Leaf>) -> Vec<Leaf> {
+/// The last item of each key, in the order those last items came. A source that sets a key
+/// twice keeps the last one: a section of `settings.json` as a whole ([`crate::json::read`]),
+/// and each key's value ([`typed`]).
+pub(crate) fn keep_last<T>(items: Vec<T>, key: impl Fn(&T) -> String) -> Vec<T> {
     let mut seen = BTreeSet::new();
-    let mut last: Vec<Leaf> = leaves
+    let mut last: Vec<T> = items
         .into_iter()
         .rev()
-        .filter(|leaf| seen.insert(leaf.key()))
+        .filter(|item| seen.insert(key(item)))
         .collect();
     last.reverse();
     last
