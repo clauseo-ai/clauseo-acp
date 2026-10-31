@@ -266,13 +266,9 @@ pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<(), Error
         fsync::sync_dir(&dir).map_err(|err| Error::io("sync", &dir, err))?;
     }
     // macOS: the syncs above reach the drive but not past its cache, and the checkpoint's
-    // `F_FULLFSYNC` is on the matters root, which may be another drive.
-    #[cfg(target_os = "macos")]
-    {
-        let dir = std::fs::File::open(folder).map_err(|err| Error::io("open", folder, err))?;
-        fsync::full_flush(&dir).map_err(|err| Error::io("sync", folder, err))?;
-    }
-    Ok(())
+    // `F_FULLFSYNC` is on the matters root, which may be another drive. A share or an exFAT
+    // drive without `F_FULLFSYNC` keeps the folder syncs.
+    fsync::full_flush_dir(folder).map_err(|err| Error::io("sync", folder, err))
 }
 
 /// Steps 1 and 2 of [`apply`]: the staged writes, or an error with every temp file removed;

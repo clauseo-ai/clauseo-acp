@@ -239,10 +239,17 @@ fn plan(
     };
     for candidate in draft.candidates {
         let size = core.size_of(candidate.path.as_str(), candidate.blob)?;
+        // A name the folder holds only spelled otherwise, by the rule undo and `apply` use
+        // (a restore deletes nothing, so no write is let through as one it deletes).
         let ok = !rules::is_excluded_path(candidate.path.as_str())
             && size <= cap
             && writable(folder, settings, &candidate.path)?
-            && names.other_spelling(folder, &candidate.path)?.is_none();
+            && writeback::respelled(
+                &mut names,
+                folder,
+                &[&Op::Write(candidate.path.clone(), candidate.blob)],
+            )?
+            .is_empty();
         if ok {
             plan.writes.push(Write {
                 path: candidate.path,
