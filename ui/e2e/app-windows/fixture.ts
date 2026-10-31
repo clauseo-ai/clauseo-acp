@@ -13,6 +13,11 @@
 //   E2E_FAKE_AGENT    path to fake_agent.exe (default: beside E2E_APP; needed with a scenario)
 //   E2E_DISABLE_GPU   `1` runs the webview with --disable-gpu; the app reads it too
 //   E2E_KEEP_SCRATCH  `1` keeps the scratch folders and prints where they are
+//   E2E_RESULTS       JSON file control.spec.ts writes its numbers to (required by that spec)
+//
+// A local run on Windows, after `pnpm -C ui tauri build --no-bundle --features e2e --target <t>`
+// and `cargo build --release -p clauseo-fake_agent --target <t>`:
+//   E2E_APP=<repo>/target/<t>/release/clauseo-desktop.exe E2E_RESULTS=<tmp>/results.json pnpm -C ui/e2e test
 
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
@@ -21,6 +26,7 @@ import { createInterface } from "node:readline";
 import { setTimeout as wait } from "node:timers/promises";
 import { promisify } from "node:util";
 import { chromium, test as base, type Browser, type Page } from "@playwright/test";
+import { closeWindow } from "./close.ts";
 import {
   fakeAgentPath,
   makeScratch,
@@ -34,8 +40,11 @@ import {
 const SETUP_TIMEOUT_MS = 60_000;
 /** How long `taskkill` may take. */
 const KILL_TIMEOUT_MS = 30_000;
-/** How long the app may take to exit after its window is asked to close. */
-const CLOSE_TIMEOUT_MS = 30_000;
+/**
+ * How long the app may take to exit after WM_CLOSE. The e2e build exits right after the host
+ * stops, well under a second; the rest is headroom for a slow runner.
+ */
+const CLOSE_TIMEOUT_MS = 15_000;
 /** The pause between two tries while WebView2 writes its port file, listens or opens its page. */
 const RETRY_MS = 200;
 
@@ -70,9 +79,9 @@ export interface Apps {
   /** Starts the app once more on the same data and matter folders, with a new WebView2 folder. */
   start(): Promise<App>;
   /**
-   * Ends a launch and waits for it to exit. `close` sends the window WM_CLOSE (`taskkill` without
-   * `/F`) so the app shuts down as it does for a user, and kills the tree only if it has not
-   * exited within CLOSE_TIMEOUT_MS, with a warning on the run.
+   * Ends a launch and waits for it to exit. `close` posts WM_CLOSE to the app's window (close.ts)
+   * so the app shuts down as it does for a user; if that fails or the app has not exited within
+   * CLOSE_TIMEOUT_MS, it kills the tree and puts an error annotation on the run.
    */
   stop(app: App, how?: Stop): Promise<void>;
 }
@@ -298,17 +307,27 @@ async function end(launched: Launched, how: Stop): Promise<void> {
         return;
       }
       if (how === "close") {
-        // No /T, no /F: WM_CLOSE to the app's window. A non-zero exit here only means it did not
-        // take; the wait decides.
-        await promisify(execFile)("taskkill", ["/pid", String(child.pid)], {
-          timeout: KILL_TIMEOUT_MS,
-        }).catch(() => undefined);
-        if (await exited(child, CLOSE_TIMEOUT_MS)) {
-          return;
+        // WM_CLOSE posted to the app's window (close.ts); taskkill without /F cannot, in session 0.
+        const start = performance.now();
+        let why: string;
+        try {
+          await closeWindow(child.pid);
+          if (await exited(child, CLOSE_TIMEOUT_MS)) {
+            process.stdout.write(
+              `[app] exited ${Math.round(performance.now() - start)} ms after WM_CLOSE\n`,
+            );
+            return;
+          }
+          why = `the app did not exit within ${CLOSE_TIMEOUT_MS} ms of WM_CLOSE`;
+        } catch (error) {
+          why = `closing the app's window failed: ${error instanceof Error ? error.message : String(error)}`;
         }
-        const warning = `the app did not exit within ${CLOSE_TIMEOUT_MS} ms of closing its window; killed`;
-        base.info().annotations.push({ type: "warning", description: warning });
-        process.stdout.write(`::warning title=Close timed out::${warning}\n`);
+        // The test goes on with the kill, but the run shows that the graceful close did not work.
+        const message = `${why}; killed it instead`;
+        base.info().annotations.push({ type: "close-fallback", description: message });
+        process.stdout.write(
+          `::error title=Close fell back to kill::${message.replace(/\r?\n/g, " ")}\n`,
+        );
       }
       await killTree(child.pid);
       await exited(child, KILL_TIMEOUT_MS);
