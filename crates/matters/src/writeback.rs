@@ -189,12 +189,15 @@ pub(crate) fn writable(
 /// 2. every target is stat'd again against the cache the caller's `outside-edits` checkpoint
 ///    just wrote: one that changed since fails with `matter.file_locked`;
 /// 3. the deletions are made;
-/// 4. the temp files are renamed over their targets, each folder synced.
+/// 4. the temp files are renamed over their targets, then each folder that got one is synced
+///    once (one sync per folder, not per file).
 ///
 /// A crash in step 1 or 2 leaves the folder's files as they were, with `.clauseo-<n>.tmp` files
 /// beside them at worst (excluded from every checkpoint); a crash in step 3 or 4 leaves the
 /// folder partly written, each file old or new and never torn (each was synced before its
-/// rename), recorded by nothing until the next checkpoint.
+/// rename; a rename whose folder was not synced yet may be lost, leaving the old file),
+/// recorded by nothing until the next checkpoint. `apply` returns only after every folder is
+/// synced, so the checkpoint the caller takes next never records a rename that could be lost.
 ///
 /// Deleting before renaming matters on a case- or normalisation-insensitive file system: undoing
 /// a rename of `Brief.txt` to `brief.txt` deletes `brief.txt`, which is the same file as
@@ -226,8 +229,14 @@ pub(crate) fn apply(core: &Core, folder: &Path, ops: &[&Op]) -> Result<(), Error
             fsync::sync_dir(dir).map_err(|err| Error::io("sync", dir, err))?;
         }
     }
+    // Every rename, then each folder synced once: the renames are durable before the
+    // checkpoint that follows records them.
+    let mut dirs = std::collections::BTreeSet::new();
     for file in staged {
-        file.commit()?;
+        dirs.insert(file.rename()?);
+    }
+    for dir in dirs {
+        fsync::sync_dir(&dir).map_err(|err| Error::io("sync", &dir, err))?;
     }
     Ok(())
 }

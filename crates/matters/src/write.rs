@@ -156,16 +156,23 @@ pub(crate) fn stage(
 impl Staged {
     /// Renames the temp file over the target, then syncs the folder. Never truncates the
     /// target in place.
-    pub(crate) fn commit(mut self) -> Result<(), Error> {
+    pub(crate) fn commit(self) -> Result<(), Error> {
+        let dir = self.rename()?;
+        fsync::sync_dir(&dir).map_err(|err| Error::io("sync", &dir, err))
+    }
+
+    /// Renames the temp file over the target without syncing the folder; returns the folder,
+    /// which the caller syncs (once for many renames in it) before relying on the rename.
+    pub(crate) fn rename(mut self) -> Result<PathBuf, Error> {
+        let dir = self.target.parent().unwrap_or(&self.target).to_owned();
         let Some(temp) = self.temp.take() else {
-            return Ok(());
+            return Ok(dir);
         };
         if let Err(err) = rename(&temp, &self.target) {
             self.temp = Some(temp);
             return Err(Error::io("rename", &self.target, err));
         }
-        let dir = self.target.parent().unwrap_or(&self.target);
-        fsync::sync_dir(dir).map_err(|err| Error::io("sync", dir, err))
+        Ok(dir)
     }
 }
 

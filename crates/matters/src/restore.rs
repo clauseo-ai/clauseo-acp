@@ -13,10 +13,11 @@
 //!    spelled otherwise, skipped files, locks. A lock fails the restore here.
 //! 4. The walk is committed as the `outside-edits` checkpoint if the folder changed. A crash in
 //!    its publish leaves the ref old or new, by decision record 0007's sync order.
-//! 5. `writeback::apply`: stage, check the targets again, rename. A crash while staging leaves
-//!    the folder as it was (with `.clauseo-<n>.tmp` files at worst); while renaming, partly
-//!    restored, each file old or new, recorded by nothing until the next checkpoint, which takes
-//!    it as outside edits. A retry with fresh ids writes only what still differs.
+//! 5. `writeback::apply`: stage, check the targets again, rename, then sync each folder once.
+//!    A crash while staging leaves the folder as it was (with `.clauseo-<n>.tmp` files at
+//!    worst); while renaming or before the folder syncs, partly restored, each file old or new,
+//!    recorded by nothing until the next checkpoint, which takes it as outside edits. A retry
+//!    with fresh ids writes only what still differs.
 //! 6. The `restore` checkpoint. A crash before its publish leaves the folder restored and
 //!    recorded by the next checkpoint as outside edits; a retry finds nothing to write.
 
