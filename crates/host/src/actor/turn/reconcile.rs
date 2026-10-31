@@ -6,20 +6,19 @@
 
 use std::collections::BTreeSet;
 
-use clauseo_matters::{Checkpoint, CheckpointOutcome, TurnMeta};
+use clauseo_matters::{Checkpoint, TurnMeta};
 use clauseo_protocol::{
-    AgentSessionDetached, CheckpointKind, CheckpointRecorded, DetachReason, DomainEvent,
-    ElicitationExpired, ElicitationId, ElicitationState, Envelope, ErrorCode, ExpiryReason,
-    FilesChanged, MatterPath, PermissionExpired, PermissionRequestId, PermissionState, StopReason,
-    StreamId, ThreadId, ThreadStatus, ToolCallId, TurnEnded, TurnFailed, TurnId, TurnQueued,
-    UserMessageStatus, ViewEntry,
+    AgentSessionDetached, DetachReason, DomainEvent, ElicitationId, ElicitationState, Envelope,
+    ErrorCode, MatterPath, PermissionRequestId, PermissionState, StopReason, StreamId, ThreadId,
+    ThreadStatus, ToolCallId, TurnId, TurnQueued, UserMessageStatus, ViewEntry,
 };
 use clauseo_reducer::ThreadState;
 
 use super::super::Actor;
 use super::super::input::{Input, MatterTag};
+use super::close::{Expiries, TurnClose};
 use super::out::Out;
-use super::{JobKind, LogFor, Then, TurnInput, TurnJob, matter_of, state, updates};
+use super::{JobKind, LogFor, Then, TurnInput, TurnJob, end, matter_of, state, updates};
 use crate::error::Error;
 use crate::matter_worker::MatterJob;
 use crate::sent::SentView;
@@ -133,7 +132,7 @@ pub(super) fn on_log(
                 .then(|| TurnQueued::new(thread, turn, thread, previous_turn(&log, turn)));
             let logged = (|| -> Result<(), Error> {
                 let mut out = Out::new(actor, thread, None)?;
-                expire(actor, &mut out, &pending)?;
+                pending.expiries().push_into(actor, &mut out)?;
                 if let Some(queued) = queued {
                     out.push(
                         actor,
@@ -151,7 +150,7 @@ pub(super) fn on_log(
         None => {
             let logged = (|| -> Result<(), Error> {
                 let mut out = Out::new(actor, thread, None)?;
-                expire(actor, &mut out, &pending)?;
+                pending.expiries().push_into(actor, &mut out)?;
                 detach(actor, &mut out, &pending)?;
                 out.send(actor, Then::Nothing)
             })();
@@ -261,76 +260,35 @@ pub(super) fn on_after_turn(
     result: Result<Checkpoint, Error>,
 ) {
     let Repair { turn, pending } = repair;
-    let logged = (|| -> Result<(), Error> {
-        let matter = matter_of(actor, thread)?;
-        let mut out = Out::new(actor, thread, None)?;
-        expire(actor, &mut out, &pending)?;
-        let checkpoint_after = match result {
-            Ok(checkpoint) => {
-                if let CheckpointOutcome::Created(id) = checkpoint.outcome {
-                    let recorded = CheckpointRecorded::new(
-                        id,
-                        CheckpointKind::AfterTurn,
-                        Some(thread),
-                        Some(turn),
-                    )
-                    .map_err(|error| Error::Internal(error.to_string()))?;
-                    out.push_matter(actor, matter, recorded)?;
-                }
-                if !checkpoint.changes.is_empty() || !checkpoint.skipped.is_empty() {
-                    let changed = FilesChanged {
-                        turn,
-                        files: checkpoint.changes,
-                        skipped: checkpoint.skipped,
-                    };
-                    out.push(actor, changed)?;
-                }
-                Some(checkpoint.outcome.id())
-            }
+    let mut close = TurnClose::new(turn, StopReason::Failed);
+    close.expiries = pending.expiries();
+    close.failure = Some((ErrorCode::ThreadInterrupted, None));
+    if pending.attached {
+        close.detach = Some(DetachReason::Closed);
+    }
+    let logged = matter_of(actor, thread).and_then(|matter| {
+        match result {
+            Ok(checkpoint) => end::after_events(&mut close, matter, thread, checkpoint)?,
             Err(error) => {
                 tracing::warn!(%thread, %error, "an interrupted turn's checkpoint failed");
-                None
             }
-        };
-        let failed = TurnFailed {
-            turn,
-            code: ErrorCode::ThreadInterrupted,
-            detail: None,
-        };
-        out.push(actor, failed)?;
-        let ended = TurnEnded {
-            turn,
-            stop: StopReason::Failed,
-            usage: None,
-            checkpoint_after,
-        };
-        out.push(actor, ended)?;
-        detach(actor, &mut out, &pending)?;
-        out.send(actor, Then::Nothing)
-    })();
+        }
+        close.send(actor, thread, Then::Nothing)
+    });
     if let Err(error) = logged {
         tracing::warn!(%thread, %error, "an interrupted turn was not ended");
     }
     done(actor, thread);
 }
 
-fn expire(actor: &mut Actor, out: &mut Out, pending: &Pending) -> Result<(), Error> {
-    let reason = ExpiryReason::HostRestarted;
-    for request in &pending.permissions {
-        let request = *request;
-        out.push(actor, PermissionExpired { request, reason })?;
+impl Pending {
+    /// The requests to expire `HostRestarted`.
+    fn expiries(&self) -> Expiries {
+        Expiries::Listed {
+            permissions: self.permissions.clone(),
+            elicitations: self.elicitations.clone(),
+        }
     }
-    for elicitation in &pending.elicitations {
-        let elicitation = *elicitation;
-        out.push(
-            actor,
-            ElicitationExpired {
-                elicitation,
-                reason,
-            },
-        )?;
-    }
-    Ok(())
 }
 
 fn detach(actor: &mut Actor, out: &mut Out, pending: &Pending) -> Result<(), Error> {

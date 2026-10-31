@@ -7,15 +7,16 @@ use std::path::Path;
 
 use clauseo_matters::{Checkpoint, CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
-    AgentSessionDetached, CheckpointKind, CheckpointRecorded, CommandOutcome, ContentBlock,
-    Delivery, ErrorCode, ExpiryReason, MatterId, OutsideEdits, PromptBlock, StopReason, StreamId,
-    ThreadId, TurnEnded, TurnFailed, TurnId, TurnQueued, TurnStarted,
+    CheckpointKind, CheckpointRecorded, CommandOutcome, ContentBlock, Delivery, DomainEvent,
+    ErrorCode, MatterId, OutsideEdits, PromptBlock, StopReason, StreamId, ThreadId, TurnFailed,
+    TurnId, TurnQueued, TurnStarted,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::input::MatterTag;
 use super::super::{Actor, Tag};
 use super::agents::{self, Waiting};
+use super::close::TurnClose;
 use super::out::Out;
 use super::state::STORE_DETAIL;
 use super::{
@@ -258,31 +259,18 @@ pub(super) fn end_unstarted(
     stop: StopReason,
     checkpoint: Option<(MatterId, Checkpoint)>,
 ) {
-    let detach = current(actor, thread).and_then(|current| current.detach.take());
-    let last = detach.clone();
+    let mut close = TurnClose::new(turn, stop);
+    close.failure = failed.map(|failed| (failed.code, failed.detail));
+    close.detach = current(actor, thread).and_then(|current| current.detach.take());
     let sent = (|| -> Result<(), Error> {
-        let mut out = Out::new(actor, thread, None)?;
         if let Some((matter, checkpoint)) = checkpoint {
-            before_events(actor, &mut out, matter, thread, turn, checkpoint)?;
+            for event in before_events(thread, turn, checkpoint)? {
+                close.push_matter(matter, event);
+            }
         }
-        if let Some(failed) = failed {
-            out.push(actor, failed)?;
-        }
-        out.push(
-            actor,
-            TurnEnded {
-                turn,
-                stop,
-                usage: None,
-                checkpoint_after: None,
-            },
-        )?;
-        if let Some(reason) = last {
-            out.push(actor, AgentSessionDetached { reason })?;
-        }
-        out.send(actor, Then::Closing(turn))
+        close.send(actor, thread, Then::Closing(turn))
     })();
-    failure::closing_sent(actor, thread, turn, (ExpiryReason::TurnEnded, detach), sent);
+    failure::closing_sent(actor, thread, &close, sent);
     end::finish(actor, thread);
 }
 
@@ -378,7 +366,9 @@ pub(super) fn on_before_turn(
     let started = (|| -> Result<(), Error> {
         let mut out = Out::new(actor, thread, None)?;
         let before = checkpoint.outcome.id();
-        before_events(actor, &mut out, matter, thread, turn, checkpoint)?;
+        for event in before_events(thread, turn, checkpoint)? {
+            out.push_matter(actor, matter, event)?;
+        }
         out.push(
             actor,
             TurnStarted {
@@ -426,26 +416,23 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
 
 /// A new before-turn checkpoint's events in the matter's stream.
 fn before_events(
-    actor: &mut Actor,
-    out: &mut Out,
-    matter: MatterId,
     thread: ThreadId,
     turn: TurnId,
     checkpoint: Checkpoint,
-) -> Result<(), Error> {
+) -> Result<Vec<DomainEvent>, Error> {
     let CheckpointOutcome::Created(id) = checkpoint.outcome else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let recorded =
         CheckpointRecorded::new(id, CheckpointKind::BeforeTurn, Some(thread), Some(turn))
             .map_err(|error| Error::Internal(error.to_string()))?;
-    out.push_matter(actor, matter, recorded)?;
+    let mut events = vec![recorded.into()];
     if !checkpoint.changes.is_empty() {
         let edits = OutsideEdits {
             checkpoint: id,
             files: checkpoint.changes,
         };
-        out.push_matter(actor, matter, edits)?;
+        events.push(edits.into());
     }
-    Ok(())
+    Ok(events)
 }

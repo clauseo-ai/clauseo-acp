@@ -4,14 +4,15 @@
 //! every running turn the same way and stops every agent.
 
 use clauseo_protocol::{
-    AgentSessionDetached, CommandOutcome, ElicitationOutcome, ElicitationResolved,
-    ElicitationResponse, ExpiryReason, PermissionChoice, PermissionResolved, Principal, StopReason,
-    StreamId, ThreadId, ToolCallPatch, ToolCallStatus, ToolCallUpdated, TurnEnded, TurnId,
+    CommandOutcome, ElicitationOutcome, ElicitationResolved, ElicitationResponse, PermissionChoice,
+    PermissionResolved, Principal, StopReason, StreamId, ThreadId, ToolCallPatch, ToolCallStatus,
+    ToolCallUpdated, TurnId,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::{Actor, Tag};
 use super::agents::{self, Stage};
+use super::close::TurnClose;
 use super::out::Out;
 use super::{
     CANCEL_WAIT, End, Phase, Then, TimerKind, TurnTag, TurnTimer, current, end, failure, matter_of,
@@ -74,20 +75,10 @@ fn dequeue(
     thread: ThreadId,
     turn: TurnId,
 ) -> Result<(), Error> {
-    let detach = current(actor, thread).and_then(|current| current.detach.clone());
+    let mut close = TurnClose::new(turn, StopReason::Cancelled);
+    close.detach = current(actor, thread).and_then(|current| current.detach.clone());
     let mut out = Out::new(actor, thread, Some(ctx.id))?;
-    out.push(
-        actor,
-        TurnEnded {
-            turn,
-            stop: StopReason::Cancelled,
-            usage: None,
-            checkpoint_after: None,
-        },
-    )?;
-    if let Some(reason) = detach.clone() {
-        out.push(actor, AgentSessionDetached { reason })?;
-    }
+    close.push_into(actor, &mut out)?;
     let now = actor.now().wall;
     out.draft
         .receipt(ctx.receipt(Some(StreamId::Thread(thread)), CommandOutcome::Done, now));
@@ -100,15 +91,8 @@ fn dequeue(
         }),
     };
     out.send_tagged(actor, tag)?;
-    let reasons = (ExpiryReason::TurnEnded, detach);
-    failure::closing_sent(actor, thread, turn, reasons, Ok(()));
-    if let Some(state) = state(actor, thread) {
-        state.current = None;
-    }
-    if let Ok(matter) = matter_of(actor, thread) {
-        end::release_writer(actor, matter, thread);
-    }
-    actor.release(StreamId::Thread(thread));
+    failure::closing_sent(actor, thread, &close, Ok(()));
+    end::finish(actor, thread);
     Ok(())
 }
 

@@ -12,14 +12,13 @@
 //! `UserMessage` in the log.
 
 use clauseo_protocol::{
-    AgentSessionDetached, DetachReason, ErrorCode, ExpiryReason, StopReason, StreamId, ThreadId,
-    TurnEnded, TurnFailed, TurnId,
+    DetachReason, ErrorCode, ExpiryReason, StopReason, StreamId, ThreadId, TurnFailed, TurnId,
 };
 
 use super::super::Actor;
-use super::out::Out;
+use super::close::{Expiries, TurnClose};
 use super::state::STORE_DETAIL;
-use super::{Closing, Phase, Then, cancel, current, end, state, steps};
+use super::{Closing, Phase, Then, cancel, current, state, steps};
 use crate::error::Error;
 use crate::pipeline::Failure;
 
@@ -87,10 +86,10 @@ pub(super) fn on_unblocked(actor: &mut Actor, thread: ThreadId) {
 pub(super) fn closing_sent(
     actor: &mut Actor,
     thread: ThreadId,
-    turn: TurnId,
-    (expiry, detach): (ExpiryReason, Option<DetachReason>),
+    close: &TurnClose,
     sent: Result<(), Error>,
 ) {
+    let (turn, expiry, detach) = (close.turn, close.expiry(), close.detach.clone());
     let failed = sent.err().map(|error| {
         tracing::warn!(%thread, %error, "the end of a turn was not logged");
         error.code()
@@ -165,22 +164,10 @@ fn retry_commit(
     expiry: ExpiryReason,
     detach: Option<DetachReason>,
 ) -> Result<(), Error> {
-    let mut out = Out::new(actor, thread, None)?;
-    end::expiries(actor, thread, &mut out, expiry)?;
-    cancel::push_tool_cancels(actor, thread, turn, &mut out)?;
-    let detail = Some("the commit ending the turn failed".to_owned());
-    out.push(actor, TurnFailed { turn, code, detail })?;
-    out.push(
-        actor,
-        TurnEnded {
-            turn,
-            stop: StopReason::Failed,
-            usage: None,
-            checkpoint_after: None,
-        },
-    )?;
-    if let Some(reason) = detach {
-        out.push(actor, AgentSessionDetached { reason })?;
-    }
-    out.send(actor, Then::Closing(turn))
+    let mut close = TurnClose::new(turn, StopReason::Failed);
+    close.expiries = Expiries::Pending(expiry);
+    close.cancel_tools = true;
+    close.failure = Some((code, Some("the commit ending the turn failed".to_owned())));
+    close.detach = detach;
+    close.send(actor, thread, Then::Closing(turn))
 }
