@@ -11,7 +11,7 @@
 //!   sent view of what is in flight to the store.
 //! - One `clauseo-matter` thread per open matter and one `clauseo-snapshot` thread.
 //! - The Scratch matter: a first start creates it.
-//! - The profile hook: [`ProfileHook`], with [`NoProfile`] as the default.
+//! - The profile hook: [`ProfileHook`], with [`NoProfile`] as the default; held, not called yet.
 //!
 //! # Interface
 //!
