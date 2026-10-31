@@ -90,7 +90,7 @@ function scroller(doc: Document): Element {
 
 /** Plays the session and ends in `finish`; never rejects. */
 export async function autoplay(d: AutoplayDeps): Promise<void> {
-  const state = { step: "start", expired: false };
+  const state = { step: "start", expired: false, sent: false };
   // A wait still polling when the deadline passes stops at its next look.
   d.deadline.catch(() => (state.expired = true));
   try {
@@ -101,7 +101,7 @@ export async function autoplay(d: AutoplayDeps): Promise<void> {
     // How far the session got, and whether it still moves over `PROGRESS_WINDOW_MS`: answer
     // text and channel bytes both still growing is a slow stream; neither is a stall, and bytes
     // without text is a page that stopped applying.
-    const progress = await describeProgress(d);
+    const progress = await describeProgress(d, state.sent);
     // MARKS_OUT unset makes this refuse too; the app then stays open, as the contract says.
     await d
       .finish(null, `autoplay, at step "${state.step}": ${message}${progress}`)
@@ -125,9 +125,17 @@ function permissionState(doc: Document): { state: string; allowOnce: boolean } {
 const PENDING_ALLOW_ONCE =
   '[data-testid="permission"][data-state="pending"] [data-testid="permission-allow_once"]';
 
+/** UTF-8 bytes of the scoreboard scenario's whole answer: every `agent_message_chunk` text in
+ * crates/fake_agent/scenarios/scoreboard.jsonl (a test reads the file and checks). Every Windows play ends at it. */
+export const ANSWER_BYTES = 80_259;
+
 /** What a failed play watched over `PROGRESS_WINDOW_MS`. */
 export type Progress = {
+  /** Whether the play had clicked Send. */
+  sent: boolean;
   answerBytes: number;
+  /** The answer's full size, `ANSWER_BYTES` in a real play. */
+  expectedAnswerBytes: number;
   answerGrowth: number;
   /** null when `perf_channel_bytes` failed. */
   channelGrowth: number | null;
@@ -138,12 +146,23 @@ export type Progress = {
 
 /** The plain-words verdict on a failed play's progress. */
 export function verdict(p: Progress): string {
+  const window = `${PROGRESS_WINDOW_MS / 1000} s`;
+  const channel =
+    p.channelGrowth === null
+      ? "channel bytes unknown"
+      : p.channelGrowth > 0
+        ? "channel bytes still came"
+        : `no channel bytes in ${window}`;
   if (p.stopReason !== null)
     return `the turn ended (${p.stopReason}) but the play did not see it finish`;
+  if (!p.sent) return "stopped before the prompt was sent";
   if (p.permission.allowOnce) {
     return 'stopped at the permission: "allow once" did not take, the card is still pending';
   }
   if (p.answerGrowth > 0) return "crawling: the answer text is still growing, only slowly";
+  if (p.answerBytes >= p.expectedAnswerBytes) {
+    return `the whole answer arrived; the turn end never reached the page (${channel})`;
+  }
   const where =
     p.permission.state === "none"
       ? "before the permission came"
@@ -151,16 +170,18 @@ export function verdict(p: Progress): string {
   if (p.channelGrowth !== null && p.channelGrowth > 0) {
     return `the page stopped applying ${where}: channel bytes still came but no answer text grew`;
   }
-  return `stalled ${where}: no answer text and no channel bytes in ${PROGRESS_WINDOW_MS / 1000} s`;
+  return `stalled ${where}: no answer text in ${window}, ${channel}`;
 }
 
-async function describeProgress(d: AutoplayDeps): Promise<string> {
+async function describeProgress(d: AutoplayDeps, sent: boolean): Promise<string> {
   const bytes = () => d.perf.channelBytes().catch(() => null);
   const [answerBefore, bytesBefore] = [d.answerBytes(), await bytes()];
   await d.sleep(PROGRESS_WINDOW_MS);
   const [answerAfter, bytesAfter] = [d.answerBytes(), await bytes()];
   const p: Progress = {
+    sent,
     answerBytes: answerAfter,
+    expectedAnswerBytes: ANSWER_BYTES,
     answerGrowth: answerAfter - answerBefore,
     channelGrowth: bytesBefore === null || bytesAfter === null ? null : bytesAfter - bytesBefore,
     permission: permissionState(d.doc),
@@ -169,14 +190,14 @@ async function describeProgress(d: AutoplayDeps): Promise<string> {
     messages: d.doc.querySelectorAll('[data-testid="message-agent"]').length,
   };
   return (
-    `. Verdict: ${verdict(p)}. Figures: answer text ${p.answerBytes} bytes (+${p.answerGrowth} in the last ` +
+    `. Verdict: ${verdict(p)}. Figures: answer text ${p.answerBytes} of ${p.expectedAnswerBytes} bytes (+${p.answerGrowth} in the last ` +
     `${PROGRESS_WINDOW_MS} ms), channel bytes +${p.channelGrowth ?? "unknown"} in that time, ` +
     `${p.messages} answer message(s) on screen, permission card ${p.permission.state}` +
     `${p.permission.allowOnce ? " with its allow once button" : ""}, stop reason ${p.stopReason ?? "none"}`
   );
 }
 
-async function play(d: AutoplayDeps, state: { step: string; expired: boolean }) {
+async function play(d: AutoplayDeps, state: { step: string; expired: boolean; sent: boolean }) {
   const { doc, perf } = d;
   const step = (name: string) => {
     state.step = name;
@@ -221,6 +242,7 @@ async function play(d: AutoplayDeps, state: { step: string; expired: boolean }) 
   const channelBytesBefore = await perf.channelBytes();
   perf.startStream();
   need(doc, "send").click();
+  state.sent = true;
 
   step("first answer");
   const pending = () => doc.querySelector<HTMLElement>(PENDING_ALLOW_ONCE);
