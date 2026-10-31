@@ -105,6 +105,22 @@ fn other_matter_ids_refused() {
         ErrorCode::CommandInvalid,
         "foreign checkpoint: {error}"
     );
+    assert!(
+        error.to_string().contains("not a version of this matter"),
+        "foreign checkpoint: {error}"
+    );
+    // Its own checkpoints pass the check and reach the refusal that compare is not built.
+    let own = host
+        .query(HostQuery::CompareVersions {
+            matter: two,
+            from: from_two,
+            to: from_two,
+        })
+        .unwrap_err();
+    assert!(
+        own.to_string().contains("not built yet"),
+        "own checkpoints: {own}"
+    );
 
     host.refused(
         HostCommand::UndoStep {

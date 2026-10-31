@@ -1,9 +1,10 @@
 //! Queries: answered from host memory (`ListMatters`, `ListThreads`), a loaded stream
-//! (`PageEntries`) or a store read on a task of its own (`ReadBlob`).
+//! (`PageEntries`, and `CompareVersions`'s check that both versions are the matter's) or a
+//! store read on a task of its own (`ReadBlob`).
 
 use clauseo_protocol::{
-    CompactString, ErrorCode, HostQuery, MatterSummary, Principal, QueryResult, StreamId,
-    ThreadStatus, ThreadSummary,
+    CheckpointId, CompactString, ErrorCode, HostQuery, MatterId, MatterSummary, Principal,
+    QueryResult, StreamId, ThreadStatus, ThreadSummary, ViewEntry,
 };
 
 use super::Actor;
@@ -70,12 +71,27 @@ pub(super) fn query(
                 }),
             );
         }
-        HostQuery::CompareVersions { .. } => {
-            let refusal = Error::refused(
-                ErrorCode::CommandInvalid,
-                "comparing versions is not built yet",
+        HostQuery::CompareVersions { matter, from, to } => {
+            if let Err(error) = actor.check_matter(matter) {
+                let _gone = reply.send(Err(error));
+                return;
+            }
+            let stream = StreamId::Matter(matter);
+            actor.with_loaded(
+                stream,
+                Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
+                    let answer = loaded
+                        .and_then(|()| own_versions(actor, matter, [from, to]))
+                        .and_then(|()| {
+                            Err(Error::refused(
+                                ErrorCode::CommandInvalid,
+                                "comparing versions is not built yet",
+                            ))
+                        });
+                    let _gone = reply.send(answer);
+                    actor.release(stream);
+                }),
             );
-            let _gone = reply.send(Err(refusal));
         }
         HostQuery::ReadBlob { hash, offset, len } => {
             let store = actor.store.clone();
@@ -95,9 +111,33 @@ pub(super) fn query(
     }
 }
 
+/// `command.invalid` unless every checkpoint is a version in `matter`'s loaded timeline.
+fn own_versions(
+    actor: &Actor,
+    matter: MatterId,
+    checkpoints: [CheckpointId; 2],
+) -> Result<(), Error> {
+    let state = actor
+        .loaded(StreamId::Matter(matter))
+        .and_then(|loaded| loaded.state.as_matter())
+        .ok_or_else(|| Error::Internal(format!("matter {matter} is not loaded")))?;
+    for checkpoint in checkpoints {
+        let known = state.entries().values().any(|entry| {
+            matches!(entry, ViewEntry::Version(version) if version.checkpoint == checkpoint)
+        });
+        if !known {
+            return Err(Error::refused(
+                ErrorCode::CommandInvalid,
+                format!("checkpoint {checkpoint} is not a version of this matter"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The threads of `matter`, each with the status of its header: the loaded state's, or
 /// the header kept when it was last unloaded, or from its row.
-fn list_threads(actor: &Actor, matter: clauseo_protocol::MatterId) -> Vec<ThreadSummary> {
+fn list_threads(actor: &Actor, matter: MatterId) -> Vec<ThreadSummary> {
     actor
         .threads
         .values()
