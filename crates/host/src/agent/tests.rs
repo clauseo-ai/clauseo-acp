@@ -20,6 +20,10 @@ use crate::clock::ManualClock;
 const FAKE_GITHUB_TOKEN: &str = "ghp_fakeToken0123456";
 /// A fake Gemini key, also echoed by `stderr-secrets.jsonl`.
 const FAKE_GEMINI_KEY: &str = "AIzaFakeGeminiKey01234";
+/// A fake SMTP secret, also echoed by `stderr-secrets.jsonl`.
+const FAKE_SMTP_SECRET: &str = "smtpFakeSecret98765";
+/// A fake database password, also echoed by `stderr-secrets.jsonl`.
+const FAKE_DB_PASSWORD: &str = "dbFakePassword45678";
 
 fn scenario(name: &str) -> String {
     let local =
@@ -121,6 +125,41 @@ fn launch_spec_layers_inherited_then_agent_then_hook() {
     );
 }
 
+/// On Windows env names ignore case: an inherited `Path` must not stand beside (and beat) the
+/// agent's `PATH`, nor an agent's `Mode` beside the hook's `MODE`.
+#[test]
+fn launch_spec_keeps_one_variable_per_name_ignoring_case() {
+    let agent = AgentLaunch {
+        command: "/bin/agent".to_owned(),
+        args: Vec::new(),
+        env: BTreeMap::from([
+            ("PATH".to_owned(), r"C:\node;C:\Windows".to_owned()),
+            ("Mode".to_owned(), "agent".to_owned()),
+        ]),
+    };
+    let hook = BTreeMap::from([(OsString::from("MODE"), OsString::from("hook"))]);
+    let inherited = [
+        ("Path", r"C:\Windows"),
+        ("mode", "host"),
+        ("HOME", "/home/x"),
+    ]
+    .map(|(name, value)| (OsString::from(name), OsString::from(value)));
+    let spec = launch_spec(&agent, hook, inherited.into_iter(), std::env::temp_dir()).unwrap();
+    let env: Vec<_> = spec
+        .env()
+        .iter()
+        .map(|(k, v)| (k.to_str().unwrap(), v.to_str().unwrap()))
+        .collect();
+    assert_eq!(
+        env,
+        [
+            ("HOME", "/home/x"),
+            ("MODE", "hook"),
+            ("PATH", r"C:\node;C:\Windows")
+        ]
+    );
+}
+
 /// Private issue #80: inherited secrets reach the redactor without touching the process env.
 #[test]
 fn inherited_secrets_are_redacted_from_the_stderr_tail() {
@@ -133,6 +172,14 @@ fn inherited_secrets_are_redacted_from_the_stderr_tail() {
             OsString::from("GEMINI_API_KEY"),
             OsString::from(FAKE_GEMINI_KEY),
         ),
+        (
+            OsString::from("SMTP_SECRET"),
+            OsString::from(FAKE_SMTP_SECRET),
+        ),
+        (
+            OsString::from("DB_PASSWORD"),
+            OsString::from(FAKE_DB_PASSWORD),
+        ),
     ];
     let (mut pool, _link, _clock, mut rx) =
         run_agent(&fake_agent(scenario("stderr-secrets")), inherited);
@@ -141,8 +188,14 @@ fn inherited_secrets_are_redacted_from_the_stderr_tail() {
         panic!("{ended:?}")
     };
     assert_eq!(code, Some(1));
-    assert!(!stderr_tail.contains(FAKE_GITHUB_TOKEN), "{stderr_tail}");
-    assert!(!stderr_tail.contains(FAKE_GEMINI_KEY), "{stderr_tail}");
+    for secret in [
+        FAKE_GITHUB_TOKEN,
+        FAKE_GEMINI_KEY,
+        FAKE_SMTP_SECRET,
+        FAKE_DB_PASSWORD,
+    ] {
+        assert!(!stderr_tail.contains(secret), "{stderr_tail}");
+    }
     assert!(stderr_tail.contains("[redacted]"), "{stderr_tail}");
     // The report waited for the pump's end: the agent's last line is in the tail.
     assert!(
