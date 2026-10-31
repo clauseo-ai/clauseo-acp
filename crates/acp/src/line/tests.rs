@@ -6,6 +6,9 @@ use futures::io::AsyncRead;
 
 use super::*;
 
+mod gate;
+mod sink;
+
 /// Hands out its bytes `step` at a time, as a pipe that delivers a little per read.
 struct Trickle {
     bytes: Vec<u8>,
