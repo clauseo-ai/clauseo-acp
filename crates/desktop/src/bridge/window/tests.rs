@@ -26,7 +26,7 @@ fn event(len: usize) -> String {
 
 /// Forwards one event and returns its frame count and whether it paused the window.
 fn send(state: &mut WindowState, stream: StreamId, generation: u64, len: usize) -> (u32, bool) {
-    match state.forward(stream, generation, &event(len)) {
+    match state.forward(stream, generation, &event(len), Duration::ZERO) {
         Forward::Send { frames, pause } => (u32::try_from(frames.len()).unwrap(), pause),
         other => panic!("not sent: {other:?}"),
     }
@@ -60,8 +60,14 @@ fn past_256_kb_unacknowledged_the_bridge_drops_then_resubscribes_after_the_last_
     );
     assert!(state.is_paused());
     // Paused: nothing more is forwarded, from either stream.
-    assert_eq!(state.forward(one, g1, &event(100)), Forward::Drop);
-    assert_eq!(state.forward(two, g2, &event(100)), Forward::Drop);
+    assert_eq!(
+        state.forward(one, g1, &event(100), Duration::ZERO),
+        Forward::Drop
+    );
+    assert_eq!(
+        state.forward(two, g2, &event(100), Duration::ZERO),
+        Forward::Drop
+    );
 
     // Acks part of the way: still paused, nothing restarts.
     let restarts = state.ack(one, at(e, 10), 20, start).unwrap();
@@ -77,7 +83,10 @@ fn past_256_kb_unacknowledged_the_bridge_drops_then_resubscribes_after_the_last_
     expected.sort_by_key(|(stream, _)| *stream);
     assert_eq!(after, expected);
     // The old subscriptions' events are dropped; the new ones' are sent.
-    assert_eq!(state.forward(one, g1, &event(100)), Forward::Drop);
+    assert_eq!(
+        state.forward(one, g1, &event(100), Duration::ZERO),
+        Forward::Drop
+    );
     for restart in &restarts {
         assert!(state.is_current(restart.stream, restart.generation));
         send(&mut state, restart.stream, restart.generation, 100);
@@ -179,7 +188,7 @@ fn an_unfollowed_stream_is_dropped() {
     let generation = state.follow(stream, None);
     assert!(state.unfollow(stream));
     assert_eq!(
-        state.forward(stream, generation, &event(100)),
+        state.forward(stream, generation, &event(100), Duration::ZERO),
         Forward::Drop
     );
 }
@@ -191,7 +200,8 @@ fn fragments_count_as_one_frame_each() {
     let stream = thread();
     let generation = state.follow(stream, None);
     let big = format!("{{\"patches\":\"{}\"}}", "y".repeat(20_000));
-    let Forward::Send { frames, .. } = state.forward(stream, generation, &big) else {
+    let Forward::Send { frames, .. } = state.forward(stream, generation, &big, Duration::ZERO)
+    else {
         panic!("not sent");
     };
     assert_eq!(frames.len(), 3);
@@ -199,4 +209,17 @@ fn fragments_count_as_one_frame_each() {
     assert_eq!(state.unacked_bytes(), total as u64);
     state.ack(stream, at(epoch(), 1), 2, start).unwrap();
     assert_eq!(state.unacked_bytes(), frames[2].len() as u64);
+}
+
+#[test]
+fn the_watchdog_waits_from_the_first_send_after_an_idle_spell() {
+    let mut state = WindowState::new();
+    let stream = thread();
+    let generation = state.follow(stream, None);
+    assert_eq!(state.tick(Duration::from_secs(60)), []);
+    let sent = state.forward(stream, generation, &event(500), Duration::from_secs(60));
+    assert!(matches!(sent, Forward::Send { .. }));
+    assert_eq!(state.tick(Duration::from_millis(60_500)), []);
+    assert_eq!(state.tick(Duration::from_millis(64_999)), []);
+    assert_eq!(state.tick(Duration::from_secs(65)).len(), 1);
 }

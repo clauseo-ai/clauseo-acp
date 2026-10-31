@@ -20,7 +20,7 @@ which check ids and bounded values as they decode; the bridge then checks what d
 
 | Command | Arguments | Answer | Rust checks |
 |---|---|---|---|
-| `dispatch` | `command: CommandEnvelope` | `CommandOutcome` | `CommandEnvelope::validate`; refuses `AnswerPermission` and a `CreateMatter` whose folder ref this run's `pick_folder` did not issue (`command.invalid`) |
+| `dispatch` | `command: CommandEnvelope` | `CommandOutcome` | `CommandEnvelope::validate`; refuses `AnswerPermission`, `SetMode`, `SetConfigOption`, and a `CreateMatter` whose folder ref this run's `pick_folder` did not issue (`command.invalid`) |
 | `query` | `query: HostQuery` | `QueryResult` | decoding (`PageLimit`, `ReadLen` bounds) |
 | `open_stream` | `channel: Channel<StreamMessage>` | `()` | one channel per window; a second call replaces it and drops its subscriptions |
 | `subscribe` | `stream: StreamId, after: ViewPosition \| null` | `()` | needs `open_stream` first |
@@ -30,7 +30,11 @@ which check ids and bounded values as they decode; the bridge then checks what d
 | `pick_folder` | none | `FolderRefId \| null` | the native folder dialog drawn by Rust, then `register_folder`; `CreateMatter` refuses a refused folder with `matter.folder_refused` |
 | `display_info` | none | `{ platform: "mac" \| "windows" \| "linux" }` | none |
 
-The confirm shows fixed text: nothing the agent wrote reaches it. A Tauri rejection (an argument
+The confirm shows fixed text: nothing the agent wrote reaches it. `SetMode` and
+`SetConfigOption` are refused because a mode can widen what the agent does without asking
+(Claude's `bypassPermissions`), an escalation 0001 puts behind a native dialog drawn by Rust; the
+internal window never sends them. Follow-up: a mode command that classifies the mode and draws
+that confirm first. A Tauri rejection (an argument
 that does not decode, a command no capability grants) reaches the page as a plain string; the
 webview's transport maps it to `{ code: "internal", message, retryable: false }`.
 

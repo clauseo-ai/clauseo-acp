@@ -813,6 +813,7 @@ name = "clauseo-desktop"
 version = "0.0.0"
 dependencies = [
  "async-io",
+ "clauseo-fake_agent",
  "clauseo-host",
  "clauseo-process",
  "clauseo-protocol",

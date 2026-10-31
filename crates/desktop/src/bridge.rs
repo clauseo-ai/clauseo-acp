@@ -62,7 +62,8 @@ impl Bridge {
         &self.host
     }
 
-    /// Checks `command`'s shape, refuses what goes another way, and runs it.
+    /// Checks `command`'s shape, refuses what goes another way (`AnswerPermission`) or may not
+    /// come from the window at all (`SetMode`, `SetConfigOption`), and runs it.
     pub(crate) async fn dispatch(
         &self,
         command: CommandEnvelope,
@@ -72,6 +73,14 @@ impl Bridge {
             HostCommand::AnswerPermission { .. } => {
                 return Err(invalid(
                     "a permission is answered with answer_permission, not dispatch",
+                ));
+            }
+            // A mode or option can widen what the agent may do without asking (Claude's
+            // bypassPermissions), an escalation 0001 puts behind a native dialog drawn by Rust.
+            // That path does not exist yet, and the window never sends either.
+            HostCommand::SetMode { .. } | HostCommand::SetConfigOption { .. } => {
+                return Err(invalid(
+                    "modes and config options are not settable from the window yet",
                 ));
             }
             HostCommand::CreateMatter { source, .. } => {
