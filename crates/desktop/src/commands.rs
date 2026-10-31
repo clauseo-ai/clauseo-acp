@@ -32,6 +32,16 @@ pub(crate) const COMMANDS: [&str; 9] = [
     "display_info",
 ];
 
+/// The commands the `e2e` build adds (`e2e.rs`), as `build.rs`'s `E2E` and
+/// `capabilities/e2e.json` list them. Not in the bindings: the page calls them with `invoke`.
+#[cfg(test)]
+pub(crate) const E2E_COMMANDS: [&str; 1] = ["perf_channel_bytes"];
+
+/// The commands the `marks` build adds to e2e's (`marks.rs`), as `build.rs`'s `MARKS` and
+/// `capabilities/marks.json` list them.
+#[cfg(test)]
+pub(crate) const MARKS_COMMANDS: [&str; 2] = ["marks_memory", "marks_finish"];
+
 /// The OS the host runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(specta::Type))]

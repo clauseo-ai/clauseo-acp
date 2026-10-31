@@ -26,6 +26,13 @@ crates/desktop/src/frame.rs StreamMessage dead_code
 crates/desktop/src/lib.rs context clippy::disallowed_methods
 crates/desktop/src/lib.rs raise_main_window clippy::let_underscore_must_use
 crates/desktop/src/lib.rs stop_host_then_exit clippy::exit
+# R13: the speed scoreboard's e2e and marks builds (never in release), and build.rs's cleanup of
+# the permission files tauri-build wrote for them.
+crates/desktop/build.rs remove_permissions clippy::disallowed_methods
+crates/desktop/src/e2e.rs epoch_ms clippy::disallowed_methods
+crates/desktop/src/e2e.rs grant_scoreboard clippy::disallowed_methods
+crates/desktop/src/marks.rs write_run clippy::disallowed_methods
+crates/desktop/src/marks/macos.rs - unsafe_code
 crates/desktop/src/rust_only.rs Builder::plugin_rust_only clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::with_agent clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::drop clippy::disallowed_methods

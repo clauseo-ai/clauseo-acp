@@ -3,8 +3,8 @@
 //! an absolute path) that `CreateThread` accepts and no test prompts.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clauseo_host::{Host, HostConfig, HostHandle, HostJoin};
@@ -173,26 +173,57 @@ pub(crate) fn envelope(command: HostCommand) -> CommandEnvelope {
     }
 }
 
-/// A channel like a window's, and the messages sent on it.
+/// A channel like a window's, and the messages sent on it. In the e2e build it reads a `timed`
+/// message as the page does: it keeps the event inside and counts the message as timed.
 pub(crate) fn collector() -> (Channel<Frame>, Messages) {
     let (tx, rx) = channel();
+    let timed = Arc::new(Vec::new().into());
+    let seen = Arc::clone(&timed);
     let channel = Channel::new(move |body| {
         let InvokeResponseBody::Json(text) = body else {
             panic!("a channel message went as raw bytes");
         };
+        let text = untimed(text, &seen);
         let _gone = tx.send(text);
         Ok(())
     });
-    (channel, Messages(rx))
+    (channel, Messages { rx, timed })
+}
+
+/// `text` itself, or the event of a `timed` message, whose time and length go in `seen`.
+fn untimed(text: String, seen: &Mutex<Vec<(f64, usize)>>) -> String {
+    let Some(rest) = text.strip_prefix(r#"{"timed":{"received_ms":"#) else {
+        return text;
+    };
+    let (time, rest) = rest.split_once(r#","event":"#).unwrap();
+    let event = rest.strip_suffix("}}").unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        parsed["timed"]["event"],
+        serde_json::from_str::<serde_json::Value>(event).unwrap()
+    );
+    let received_ms: f64 = time.parse().unwrap();
+    assert_eq!(text.len(), wrapper_len(received_ms) + event.len());
+    crate::bridge::lock(seen).push((received_ms, text.len()));
+    event.to_owned()
+}
+
+/// The bytes a `timed` wrapper with `received_ms` adds around its event.
+fn wrapper_len(received_ms: f64) -> usize {
+    format!(r#"{{"timed":{{"received_ms":{received_ms},"event":}}}}"#).len()
 }
 
 /// The messages a [`collector`] channel received.
-pub(crate) struct Messages(Receiver<String>);
+pub(crate) struct Messages {
+    rx: Receiver<String>,
+    /// The receive time and length of each `timed` message, in order.
+    timed: Arc<Mutex<Vec<(f64, usize)>>>,
+}
 
 impl Messages {
     /// The next message's text, as sent.
     pub(crate) fn next_text(&self) -> String {
-        self.0
+        self.rx
             .recv_timeout(MESSAGE_WAIT)
             .unwrap_or_else(|err| panic!("no channel message: {err}"))
     }
@@ -206,7 +237,19 @@ impl Messages {
 
     /// Messages already received, without waiting.
     pub(crate) fn drain(&self) -> Vec<String> {
-        self.0.try_iter().collect()
+        self.rx.try_iter().collect()
+    }
+
+    /// The receive time and length of each `timed` message so far.
+    pub(crate) fn timed(&self) -> Vec<(f64, usize)> {
+        crate::bridge::lock(&self.timed).clone()
+    }
+
+    /// The bytes `timed` wrappers added to the messages so far: what the bridge counted beyond
+    /// the texts [`next_text`](Self::next_text) returned. 0 outside the e2e build.
+    pub(crate) fn timed_overhead(&self) -> usize {
+        let timed = crate::bridge::lock(&self.timed);
+        timed.iter().map(|&(time, _)| wrapper_len(time)).sum()
     }
 }
 

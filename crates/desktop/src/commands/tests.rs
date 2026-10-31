@@ -29,9 +29,17 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
             answer_permission,
             pick_folder,
             display_info,
+            #[cfg(feature = "e2e")]
+            crate::e2e::perf_channel_bytes,
+            #[cfg(feature = "marks")]
+            crate::marks::marks_memory,
+            #[cfg(feature = "marks")]
+            crate::marks::marks_finish,
         ])
         .build(context)
         .unwrap();
+    #[cfg(feature = "e2e")]
+    crate::e2e::grant_scoreboard(&app).unwrap();
     app.manage(bridge);
     let window = WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::default())
         .build()
@@ -140,45 +148,152 @@ fn a_tauri_rejection_is_a_string_and_a_refusal_is_a_host_error() {
     assert!(denied, "{foreign:?}");
 }
 
-/// `COMMANDS`, `lib.rs`'s handler, `build.rs`, `capabilities/main.json` and the bindings name the
-/// same commands,
-/// and the capability grants nothing else.
+/// The e2e and marks commands answer only in their builds; the default build's capabilities do
+/// not grant them, so Tauri refuses them before any handler.
 #[test]
-fn every_list_of_commands_agrees() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let ours: BTreeSet<&str> = COMMANDS.iter().copied().collect();
-    assert_eq!(ours.len(), COMMANDS.len());
+fn the_scoreboard_commands_answer_only_in_their_builds() {
+    let scratch = Scratch::new("scoreboard-commands", &[]);
+    let host = scratch.start(Vec::new());
+    let (_app, window) = app(host.bridge());
+    let denied = |answer: &Result<Value, Value>| {
+        answer
+            .as_ref()
+            .err()
+            .and_then(Value::as_str)
+            .is_some_and(|text| text.contains("not allowed"))
+    };
 
-    let build = std::fs::read_to_string(dir.join("build.rs")).unwrap();
-    let start = build.find(".commands(&[").unwrap();
-    let end = start + build[start..].find("])").unwrap();
-    let listed: BTreeSet<&str> = build[start..end].split('"').skip(1).step_by(2).collect();
-    assert_eq!(listed, ours, "build.rs");
+    let bytes = invoke(&window, "perf_channel_bytes", json!({}));
+    if cfg!(feature = "e2e") {
+        assert!(bytes.as_ref().is_ok_and(Value::is_u64), "{bytes:?}");
+    } else {
+        assert!(denied(&bytes), "{bytes:?}");
+    }
 
-    let capability: Value =
-        serde_json::from_str(&std::fs::read_to_string(dir.join("capabilities/main.json")).unwrap())
-            .unwrap();
-    let granted: BTreeSet<String> = capability["permissions"]
+    let memory = invoke(&window, "marks_memory", json!({}));
+    if !cfg!(feature = "marks") {
+        assert!(denied(&memory), "{memory:?}");
+    } else if cfg!(target_os = "macos") {
+        assert!(memory.as_ref().is_ok_and(Value::is_f64), "{memory:?}");
+    } else {
+        assert_eq!(memory.unwrap_err()["code"], "internal");
+    }
+
+    // With MARKS_OUT set (a scoreboard run), the call would quit: only checked without it.
+    if std::env::var_os("MARKS_OUT").is_none() {
+        let finish = invoke(
+            &window,
+            "marks_finish",
+            json!({ "run": "{}", "error": null }),
+        );
+        if cfg!(feature = "marks") {
+            assert_eq!(finish.unwrap_err()["code"], "command.invalid");
+        } else {
+            assert!(denied(&finish), "{finish:?}");
+        }
+    }
+}
+
+/// The command names of `list`, a set.
+fn set<'a>(list: &[&'a str]) -> BTreeSet<&'a str> {
+    let set: BTreeSet<&str> = list.iter().copied().collect();
+    assert_eq!(set.len(), list.len(), "{list:?}");
+    set
+}
+
+/// The names in `build.rs`'s `const <name>: &[&str] = &[...];`.
+fn build_list<'a>(build: &'a str, name: &str) -> BTreeSet<&'a str> {
+    let start = build.find(&format!("const {name}: &[&str] = &[")).unwrap();
+    let end = start + build[start..].find("];").unwrap();
+    let list = &build[start..end];
+    let list = &list[list.find("= &[").unwrap()..];
+    list.split('"').skip(1).step_by(2).collect()
+}
+
+/// The permissions `capabilities/<file>` grants, and the window it grants them to.
+fn granted(dir: &std::path::Path, file: &str) -> BTreeSet<String> {
+    let path = dir.join("capabilities").join(file);
+    let capability: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(capability["windows"], json!(["main"]), "{file}");
+    capability["permissions"]
         .as_array()
         .unwrap()
         .iter()
         .map(|permission| permission.as_str().unwrap().to_owned())
-        .collect();
-    let expected: BTreeSet<String> = COMMANDS
+        .collect()
+}
+
+/// The `allow-<command>` permissions of `commands`.
+fn allowed(commands: &BTreeSet<&str>) -> BTreeSet<String> {
+    commands
         .iter()
         .map(|name| format!("allow-{}", name.replace('_', "-")))
-        .collect();
-    assert_eq!(granted, expected, "capabilities/main.json");
+        .collect()
+}
+
+/// `COMMANDS`, `lib.rs`'s handler, `build.rs`, `capabilities/main.json` and the bindings name the
+/// same commands,
+/// and the capability grants nothing else. Likewise `E2E_COMMANDS` and `MARKS_COMMANDS` with
+/// `build.rs`'s `E2E` and `MARKS`, `capabilities/e2e.json` and `marks.json`, and the handler's
+/// entries under `#[cfg(feature = "e2e")]` and `#[cfg(feature = "marks")]`.
+#[test]
+fn every_list_of_commands_agrees() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ours = set(&COMMANDS);
+    let e2e = set(&E2E_COMMANDS);
+    let marks = set(&MARKS_COMMANDS);
+
+    let build = std::fs::read_to_string(dir.join("build.rs")).unwrap();
+    assert_eq!(build_list(&build, "RELEASE"), ours, "build.rs");
+    assert_eq!(build_list(&build, "E2E"), e2e, "build.rs");
+    assert_eq!(build_list(&build, "MARKS"), marks, "build.rs");
+
+    assert_eq!(
+        granted(dir, "main.json"),
+        allowed(&ours),
+        "capabilities/main.json"
+    );
+    assert_eq!(
+        granted(dir, "e2e.json"),
+        allowed(&e2e),
+        "capabilities/e2e.json"
+    );
+    assert_eq!(
+        granted(dir, "marks.json"),
+        allowed(&marks),
+        "capabilities/marks.json"
+    );
+    // The default build names only main; e2e::grant_scoreboard adds the other two in their builds.
+    let config: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("tauri.conf.json")).unwrap())
+            .unwrap();
+    assert_eq!(config["app"]["security"]["capabilities"], json!(["main"]));
 
     let lib = std::fs::read_to_string(dir.join("src/lib.rs")).unwrap();
-    let start = lib.find("generate_handler![").unwrap();
-    let end = start + lib[start..].find(']').unwrap();
-    let handled: BTreeSet<&str> = lib[start..end]
-        .split("commands::")
-        .skip(1)
-        .map(|rest| rest.trim_end_matches(|c: char| c == ',' || c.is_whitespace()))
-        .collect();
-    assert_eq!(handled, ours, "lib.rs");
+    let start = lib.find("generate_handler![").unwrap() + "generate_handler![".len();
+    let end = start + lib[start..].find("])").unwrap();
+    let mut handled: [BTreeSet<&str>; 3] = Default::default();
+    for entry in lib[start..end]
+        .split(',')
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+    {
+        let (feature, path) = match entry.rsplit_once(char::is_whitespace) {
+            Some((attribute, path)) => (Some(attribute.trim()), path),
+            None => (None, entry),
+        };
+        let (place, module) = match feature {
+            None => (0, "commands::"),
+            Some(r#"#[cfg(feature = "e2e")]"#) => (1, "e2e::"),
+            Some(r#"#[cfg(feature = "marks")]"#) => (2, "marks::"),
+            Some(other) => panic!("lib.rs: {other} {path}"),
+        };
+        let name = path
+            .strip_prefix(module)
+            .unwrap_or_else(|| panic!("lib.rs: {entry}"));
+        handled[place].insert(name);
+    }
+    assert_eq!(handled, [ours.clone(), e2e, marks], "lib.rs");
 
     let bindings =
         std::fs::read_to_string(dir.join("../../ui/app/src/transport/bindings.ts")).unwrap();

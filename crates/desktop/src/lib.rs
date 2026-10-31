@@ -9,8 +9,13 @@
 //! - Nine async commands (`commands.rs`), each granted by its own permission in
 //!   `capabilities/main.json` and listed in `build.rs`'s `AppManifest`; nothing else is granted.
 //!   Every argument is checked in Rust first, and every host call runs as `LocalDesktop`.
+//!   The `e2e` build adds `perf_channel_bytes` (`e2e.rs`, granted by `capabilities/e2e.json`),
+//!   and the `marks` build `marks_memory` and `marks_finish` (`marks.rs`,
+//!   `capabilities/marks.json`). `tauri.conf.json` names only `main`: those builds add the
+//!   two at setup (`e2e::grant_scoreboard`), and the default build has neither.
 //! - One `ipc::Channel` per window carries its stream (`bridge/`): each message an event's JSON
-//!   as the host encoded it, a fragment of one, or a stream failure, always below 8 KB. At most
+//!   as the host encoded it, a fragment of one, or a stream failure, always below 8 KB (and in
+//!   the `e2e` build an event with its receive time, `timed`). At most
 //!   256 KB unacknowledged per window; a 5 s watchdog that fires once per stall.
 //!   `docs/decisions/0012-desktop-bridge.md` records the commands, the capability and the message
 //!   format. Never Tauri events.
@@ -31,6 +36,8 @@ mod dialogs;
 #[cfg(feature = "e2e")]
 mod e2e;
 mod frame;
+#[cfg(feature = "marks")]
+mod marks;
 mod rust_only;
 #[cfg(test)]
 mod test_support;
@@ -77,6 +84,9 @@ struct HostThread(Mutex<Option<HostJoin>>);
 
 /// Builds the app and runs it until it exits.
 pub fn run() -> tauri::Result<()> {
+    // The scoreboard's t0, before anything else the app does.
+    #[cfg(feature = "e2e")]
+    e2e::mark_start();
     let context = context::<tauri::Wry>();
     let app = tauri::Builder::default()
         // First, so a second launch ends before any other plugin starts.
@@ -107,8 +117,17 @@ pub fn run() -> tauri::Result<()> {
             commands::answer_permission,
             commands::pick_folder,
             commands::display_info,
+            #[cfg(feature = "e2e")]
+            e2e::perf_channel_bytes,
+            #[cfg(feature = "marks")]
+            marks::marks_memory,
+            #[cfg(feature = "marks")]
+            marks::marks_finish,
         ])
         .setup(|app| {
+            // The scoreboard commands' capabilities, in the e2e and marks builds only.
+            #[cfg(feature = "e2e")]
+            e2e::grant_scoreboard(app)?;
             start_host(app)?;
             open_main_window(app)?;
             Ok(())
@@ -212,6 +231,9 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
         .use_https_scheme(true);
     #[cfg(all(windows, feature = "e2e"))]
     let builder = e2e::with_debugging_port(builder);
+    // The page's perf globals, before any page script.
+    #[cfg(feature = "e2e")]
+    let builder = builder.initialization_script(e2e::init_script());
     builder.build()?;
     Ok(())
 }

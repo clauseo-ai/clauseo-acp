@@ -17,6 +17,11 @@ workspace = true
 # port for Playwright; on every OS `pick_folder` reads E2E_MATTER_DIR and the "always allow"
 # confirm reads E2E_CONFIRM_ALWAYS instead of drawing a dialog.
 e2e = []
+# The speed scoreboard's macOS build (src/marks.rs), never on by default: e2e, plus the page plays
+# the scoreboard session itself and reports through `marks_memory` and `marks_finish`, which
+# writes the run to MARKS_OUT and quits. e2e alone also stamps channel events with their receive
+# time, sets the page's perf globals and adds `perf_channel_bytes` (src/e2e.rs).
+marks = ["e2e"]
 
 [build-dependencies]
 tauri-build.workspace = true

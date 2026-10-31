@@ -390,3 +390,45 @@ fn nothing_retries_while_paused_and_the_pause_end_restarts_a_failed_stream_once(
     assert_eq!(state.retry_at(broken), Some(6 * SECOND + RETRY_FIRST));
     assert_eq!(state.tick(7 * SECOND), []);
 }
+
+#[cfg(feature = "e2e")]
+#[test]
+fn a_timed_event_counts_as_one_message_of_its_wrapped_length() {
+    let mut state = WindowState::new();
+    let stream = thread();
+    let restart = state.follow(stream, None);
+    let json = event(1000);
+    let Forward::Send { messages, pause } =
+        state.forward_timed(stream, restart, &json, 1_730_380_000_123.5, Duration::ZERO)
+    else {
+        panic!("not sent");
+    };
+    assert!(!pause);
+    let [only] = messages.as_slice() else {
+        panic!("{} messages", messages.len());
+    };
+    assert!(only.text().starts_with(r#"{"timed":"#));
+    assert_eq!(state.unacked_bytes(), only.len() as u64);
+    assert!(only.len() > json.len());
+    // One ack of one message covers it all.
+    state.ack(&[], 1, Duration::ZERO).unwrap();
+    assert_eq!(state.unacked_bytes(), 0);
+    assert_eq!(
+        state.ack(&[], 2, Duration::ZERO),
+        Err(AckError::TooManyMessages)
+    );
+
+    // Too long to wrap: fragments, counted one by one, no time.
+    let long = event(20_000);
+    let Forward::Send { messages, .. } =
+        state.forward_timed(stream, restart, &long, 1.0, Duration::ZERO)
+    else {
+        panic!("not sent");
+    };
+    assert!(messages.len() > 1);
+    let total: usize = messages.iter().map(Frame::len).sum();
+    assert_eq!(state.unacked_bytes(), total as u64);
+    let count = u32::try_from(messages.len()).unwrap();
+    state.ack(&[], 1 + count, Duration::ZERO).unwrap();
+    assert_eq!(state.unacked_bytes(), 0);
+}

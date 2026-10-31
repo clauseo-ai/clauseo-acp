@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "marks",
+  "description": "The marks build only (src/marks.rs): src/e2e.rs (grant_scoreboard) adds this file at setup with --features marks, and tauri.conf.json does not name it, so no other build grants it. Grants the main window the speed scoreboard's marks_memory and marks_finish.",
+  "windows": ["main"],
+  "permissions": ["allow-marks-memory", "allow-marks-finish"]
+}

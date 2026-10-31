@@ -220,7 +220,8 @@ impl WindowState {
 
     /// Frames `json`, an event of `stream`'s subscription `restart_id`, and counts what it
     /// sends. The first bytes sent with nothing unacknowledged start the watchdog's wait at
-    /// `now`.
+    /// `now`. The e2e build's pump calls [`forward_timed`](Self::forward_timed) instead.
+    #[cfg(any(test, not(feature = "e2e")))]
     pub(crate) fn forward(
         &mut self,
         stream: StreamId,
@@ -228,10 +229,38 @@ impl WindowState {
         json: &str,
         now: Duration,
     ) -> Forward {
+        self.forward_framed(stream, restart_id, now, |id| frame::messages(json, id))
+    }
+
+    /// [`forward`](Self::forward) in the `e2e` build: `json` was received from the host at
+    /// `received_ms` (ms since the Unix epoch) and goes as a `timed` message when it fits one
+    /// (`frame::timed_messages`). A timed message counts as one message of its own length.
+    #[cfg(feature = "e2e")]
+    pub(crate) fn forward_timed(
+        &mut self,
+        stream: StreamId,
+        restart_id: u64,
+        json: &str,
+        received_ms: f64,
+        now: Duration,
+    ) -> Forward {
+        self.forward_framed(stream, restart_id, now, |id| {
+            frame::timed_messages(json, received_ms, id)
+        })
+    }
+
+    /// Forwards one event that `framed` turns into messages, given the next fragment id.
+    fn forward_framed(
+        &mut self,
+        stream: StreamId,
+        restart_id: u64,
+        now: Duration,
+        framed: impl FnOnce(u32) -> Option<Vec<Frame>>,
+    ) -> Forward {
         if self.paused || !self.is_current(stream, restart_id) {
             return Forward::Drop;
         }
-        let Some(messages) = frame::messages(json, self.next_fragment) else {
+        let Some(messages) = framed(self.next_fragment) else {
             return Forward::TooLarge;
         };
         if messages.len() > 1 {
