@@ -2,6 +2,7 @@
 // recorder. `deliver` plays a channel message as the bridge would send it; `respond` scripts command answers.
 import { ChannelReader } from "./channel.ts";
 import {
+  FrameListeners,
   internalError,
   toHostError,
   type BatchListener,
@@ -56,6 +57,7 @@ export class FakeTransport implements HostTransport {
   bytes = 0;
   host: FakeHost;
   readonly #reader: ChannelReader;
+  readonly #frameListeners = new FrameListeners();
   readonly #subs: Subscriptions;
 
   constructor(host: FakeHost = {}) {
@@ -76,6 +78,7 @@ export class FakeTransport implements HostTransport {
         if ("patches" in event && event.patches !== undefined) this.#subs.deliver(event.patches);
       },
       (problem) => this.problems.push(problem),
+      this.#frameListeners.run,
     );
   }
 
@@ -142,5 +145,8 @@ export class FakeTransport implements HostTransport {
 
   frames(): number {
     return this.#reader.frames;
+  }
+  onFrame(listener: () => void): () => void {
+    return this.#frameListeners.add(listener);
   }
 }

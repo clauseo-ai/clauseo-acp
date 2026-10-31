@@ -6,9 +6,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, expect, test } from "vitest";
 import { App } from "../App.tsx";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
-import type { ViewEntry } from "../transport/protocol.ts";
+import type { ViewEntry, ViewPatchBody } from "../transport/protocol.ts";
 import { manualBatch, stubLayout } from "../testing/dom.ts";
 import {
+  agentText,
+  append,
   batch,
   event,
   header,
@@ -42,6 +44,15 @@ const REOPEN: FakeHost = {
 
 async function open(host: FakeHost = REOPEN) {
   const transport = new FakeTransport(host);
+  // Counts every hand-off to a store listener. Each subscribe wraps its listener anew, so a second subscription
+  // from a double effect would show as two hand-offs per batch.
+  let handed = 0;
+  const subscribe = transport.subscribe.bind(transport);
+  transport.subscribe = (stream, after, listener) =>
+    subscribe(stream, after, (b) => {
+      handed += 1;
+      listener(b);
+    });
   const frames = manualBatch();
   container = document.createElement("div");
   document.body.append(container);
@@ -53,12 +64,18 @@ async function open(host: FakeHost = REOPEN) {
       </StrictMode>,
     );
   });
+  let cursor = 0;
   const show = async (entries: ViewEntry[], head: ViewEntry = header()) => {
-    const cursor = (transport.frames() ?? 0) + 1;
+    cursor += 1;
     transport.deliver(JSON.stringify(event(batch(cursor, [reset(entries, head)]))));
     await act(async () => frames.run());
   };
-  return { transport, show };
+  const play = async (bodies: ViewPatchBody[]) => {
+    transport.deliver(JSON.stringify(event(batch(cursor + 1, bodies))));
+    cursor += bodies.length;
+    await act(async () => frames.run());
+  };
+  return { transport, show, play, handed: () => handed };
 }
 
 const $ = (id: string) => container.querySelector<HTMLElement>(`[data-testid="${id}"]`);
@@ -75,12 +92,16 @@ async function type(text: string) {
   });
 }
 
-test("on start it reopens the newest matter's last thread and subscribes once under Strict Mode", async () => {
-  const { transport, show } = await open();
+test("on start it reopens the newest matter's last thread, subscribes once under Strict Mode and applies each patch once", async () => {
+  const { transport, show, play, handed } = await open();
   expect($("matter")?.textContent).toBe("Lease review");
   expect(transport.only("subscribe")).toEqual([{ call: "subscribe", stream: STREAM, after: null }]);
-  await show([userMessage(5, 1, "What does clause nine say?")]);
+  await show([userMessage(5, 1, "What does clause nine say?"), agentText(6, 1)]);
+  await play([append(1, 0, "Clause nine "), append(1, 12, "covers notice.")]);
   expect(all("message-user").map((e) => e.textContent)).toEqual(["What does clause nine say?"]);
+  expect(all("message-agent").map((e) => e.textContent)).toEqual(["Clause nine covers notice."]);
+  expect(handed()).toBe(2);
+  expect(transport.only("subscribe")).toHaveLength(1);
 });
 
 test("new matter picks a folder, creates the matter, then its first thread with agent claude", async () => {

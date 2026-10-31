@@ -2,19 +2,25 @@
 import { vi } from "vitest";
 import type { Batch } from "../store/batch.ts";
 
-/** happy-dom lays nothing out. Gives a scroller (overflow auto or scroll) a viewport tall enough for every row and
- * every other element a 40 px height, so the virtualized transcript renders all its rows. */
+/** The stubbed viewport: room for 100 rows of 40 px, more than any test shows (the scripted stream has 42; its test
+ * asserts every row rendered, so a test that outgrows this fails on that assertion, not quietly). Kept small on purpose:
+ * LegendList sizes its container pool from the viewport, and a 1,000,000 px viewport made it build ~20,000 containers,
+ * which took ~0.9 s per mount and pushed the commit test past vitest's 5 s timeout under CPU load. */
+const VIEWPORT = 4000;
+
+/** happy-dom lays nothing out. Gives a scroller (overflow auto or scroll) a viewport of `VIEWPORT` px and every other
+ * element a 40 px height, so the virtualized transcript renders all its rows. */
 export function stubLayout(): void {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
     this: HTMLElement,
   ) {
     const tall = /auto|scroll/.test(this.style.overflowY + this.style.overflow);
-    const height = tall ? 1_000_000 : 40;
+    const height = tall ? VIEWPORT : 40;
     const rect = { x: 0, y: 0, top: 0, left: 0, width: 800, height, right: 800, bottom: height };
     return { ...rect, toJSON: () => rect };
   });
-  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(1_000_000);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(VIEWPORT);
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
 }
 
