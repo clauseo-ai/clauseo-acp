@@ -19,15 +19,17 @@ pub(crate) fn locked(folder: &Path, paths: &[MatterPath]) -> Vec<MatterPath> {
     locked
 }
 
-/// The owner files Office makes beside a file it has open: `~$` + the name, and `~$` + the name
-/// without its first two characters when it has more than two.
+/// The owner files Office makes beside a file it has open: `~$` + the name, `~$` + the name
+/// without its first character, and `~$` + the name without its first two, each when the name
+/// is longer than what it drops. Word keeps a stem of up to 6 characters whole, drops one at 7
+/// and two from 8 (research 38, `word-lock.json` `name_lengths`); checking all three costs one
+/// stat each and needs no stem rule.
 pub(crate) fn owner_names(name: &str) -> Vec<String> {
-    let mut names = vec![format!("~${name}")];
-    if name.chars().count() > 2 {
-        let rest: String = name.chars().skip(2).collect();
-        names.push(format!("~${rest}"));
-    }
-    names
+    let count = name.chars().count();
+    (0..3)
+        .filter(|&dropped| dropped == 0 || count > dropped)
+        .map(|dropped| format!("~${}", name.chars().skip(dropped).collect::<String>()))
+        .collect()
 }
 
 fn is_locked(folder: &Path, path: &MatterPath) -> bool {
