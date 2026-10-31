@@ -200,7 +200,7 @@ fn draft(
 }
 
 /// The chosen paths of `files` as a set; `None` for every file. `NoFilesChosen` for an empty
-/// list, `UnknownFile` for a path named twice.
+/// list, `DuplicateFile` for a path named twice.
 fn chosen(files: RestoreFiles<'_>) -> Result<Option<BTreeSet<&str>>, Error> {
     let RestoreFiles::Only(paths) = files else {
         return Ok(None);
@@ -211,7 +211,7 @@ fn chosen(files: RestoreFiles<'_>) -> Result<Option<BTreeSet<&str>>, Error> {
     let mut set = BTreeSet::new();
     for path in paths {
         if !set.insert(path.as_str()) {
-            return Err(Error::UnknownFile { path: path.clone() });
+            return Err(Error::DuplicateFile { path: path.clone() });
         }
     }
     Ok(Some(set))

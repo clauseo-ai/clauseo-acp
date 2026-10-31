@@ -23,6 +23,7 @@ fn variant(err: &Error) -> &'static str {
         Error::MissingDecision { .. } => "MissingDecision",
         Error::UnexpectedDecision { .. } => "UnexpectedDecision",
         Error::UnknownFile { .. } => "UnknownFile",
+        Error::DuplicateFile { .. } => "DuplicateFile",
         Error::NoFilesChosen => "NoFilesChosen",
         Error::FolderExists { .. } => "FolderExists",
         Error::HistoryExists { .. } => "HistoryExists",
@@ -38,7 +39,7 @@ fn assert_code(err: &Error, code: ErrorCode, name: &str) {
 }
 
 /// One of each variant, with the code it maps to.
-fn hand_built() -> [(Error, ErrorCode); 14] {
+fn hand_built() -> [(Error, ErrorCode); 15] {
     let folder = PathBuf::from("/m");
     [
         (
@@ -79,6 +80,10 @@ fn hand_built() -> [(Error, ErrorCode); 14] {
         ),
         (
             Error::UnknownFile { path: path("a") },
+            ErrorCode::CommandInvalid,
+        ),
+        (
+            Error::DuplicateFile { path: path("a") },
             ErrorCode::CommandInvalid,
         ),
         (Error::NoFilesChosen, ErrorCode::CommandInvalid),
@@ -177,6 +182,11 @@ fn undo_errors(fx: &Fixture) -> Matter {
         .restore(&restore_request(1, RestoreFiles::Only(&nowhere), 4, 5))
         .unwrap_err();
     assert_code(&err, ErrorCode::CommandInvalid, "UnknownFile");
+    let twice = [path("a.txt"), path("a.txt")];
+    let err = matter
+        .restore(&restore_request(1, RestoreFiles::Only(&twice), 4, 5))
+        .unwrap_err();
+    assert_code(&err, ErrorCode::CommandInvalid, "DuplicateFile");
     let err = matter
         .read_file(cid(1), &path("nowhere.txt"), &mut Vec::<u8>::new())
         .unwrap_err();

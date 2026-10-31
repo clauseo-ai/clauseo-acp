@@ -57,12 +57,17 @@ pub enum Error {
         /// The path named.
         path: MatterPath,
     },
-    /// A restore names a file that neither the version nor the folder has, or names one twice;
-    /// or [`Matter::read_file`](crate::Matter::read_file) names a file the version does not
-    /// have (`command.invalid`).
-    #[error("{path} is not a file of the version, or is named twice")]
+    /// [`Matter::read_file`](crate::Matter::read_file) names a file the version does not have,
+    /// or a restore names one that neither the version nor the folder has (`command.invalid`).
+    #[error("{path} is not a file of the version")]
     UnknownFile {
         /// The path named.
+        path: MatterPath,
+    },
+    /// A restore of chosen files names this file more than once (`command.invalid`).
+    #[error("the restore names {path} more than once")]
+    DuplicateFile {
+        /// The path named twice.
         path: MatterPath,
     },
     /// A restore of chosen files names none (`command.invalid`).
@@ -181,6 +186,7 @@ impl Error {
             | Self::MissingDecision { .. }
             | Self::UnexpectedDecision { .. }
             | Self::UnknownFile { .. }
+            | Self::DuplicateFile { .. }
             | Self::NoFilesChosen
             | Self::FolderExists { .. }
             | Self::HistoryExists { .. }
