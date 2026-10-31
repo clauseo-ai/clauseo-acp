@@ -18,6 +18,6 @@ pub fn parse(path: &Path, bytes: &[u8]) -> Result<PolicyValues, Error> {
         column: syntax.position.column,
         message: syntax.message,
     })?;
-    let leaves = leaf::typed_policy(raws, Vec::new(), &mut warnings);
+    let leaves = leaf::typed(raws, Vec::new(), &mut warnings);
     Ok(PolicyValues::new(leaves, warnings))
 }

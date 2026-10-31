@@ -14,8 +14,10 @@ use crate::warning::{Origin, Warning, WarningKind};
 use serde_json_lenient::{Map, Value};
 use std::path::Path;
 
-/// The user's values, in file order. A missing file holds none. A file that cannot be read or
-/// parsed holds none either, with a warning: a broken file never stops the app from starting.
+/// The user's values, one per key, in the order of each key's last occurrence: a key the file
+/// sets twice keeps its last value, valid or not. A missing file holds none. A file that cannot
+/// be read or parsed holds none either, with a warning: a broken file never stops the app from
+/// starting.
 pub(crate) fn read(path: &Path, files: &dyn Files, warnings: &mut Vec<Warning>) -> Vec<Leaf> {
     let whole_file = |kind| Warning {
         origin: Origin::File {
@@ -37,7 +39,7 @@ pub(crate) fn read(path: &Path, files: &dyn Files, warnings: &mut Vec<Warning>) 
     match json::read(path, &bytes) {
         Ok((raws, file_warnings)) => {
             warnings.extend(file_warnings);
-            leaf::typed(raws, warnings)
+            leaf::typed(raws, Vec::new(), warnings)
         }
         Err(syntax) => {
             warnings.push(Warning {

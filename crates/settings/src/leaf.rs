@@ -10,7 +10,7 @@
 //! - its row in [`KEYS`], with its kind: the macOS shim asks managed preferences only for these
 //!   keys, and the registry calls any other value name unknown;
 //! - a [`Leaf`] variant, and its arms in `Leaf::parse`, `Leaf::key` and `Leaf::apply`, and
-//!   in `reset`, which a policy value that does not type locks the key at
+//!   in `reset`, which a value that does not type puts the key back at its default
 //!   (`leaf/tests.rs`' `a_refused_key_goes_back_to_its_default` fails for a row with no arm);
 //! - for a `ui` key, its field in `UiPatch` (`ui.rs`, and its name in `UiPatch::keys`) and in
 //!   `Settings::apply_ui_patch`. Two tests in `ui/tests.rs` fail when `keys()` misses a `ui`
@@ -30,6 +30,7 @@ use crate::schema::{AgentLaunch, Density, FontSize, Language, Settings, Theme};
 use crate::warning::{Origin, Warning, WarningKind};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, an object.
@@ -62,9 +63,9 @@ pub(crate) enum Leaf {
     FontSize(FontSize),
     Density(Density),
     Language(Language),
-    /// A known key a policy set to a value that does not type. The key is locked at its
-    /// default; for `agents.<id>`, the user's entry for that id is dropped (fail closed,
-    /// Rohan, 2026-10-31).
+    /// A known key whose value does not type, or that a policy source refused. Applied, it puts
+    /// the key back at its default; for `agents.<id>`, the entry for that id is dropped. A
+    /// policy also locks the key (fail closed, Rohan, 2026-10-31).
     Refused(String),
 }
 
@@ -73,34 +74,24 @@ pub(crate) fn agent_id(key: &str) -> Option<&str> {
     key.strip_prefix("agents.").filter(|id| !id.is_empty())
 }
 
-/// Types every raw value of the user's `settings.json`, in order. A value that cannot be typed
-/// is left out with a warning, and the default or the file's other values stand.
-pub(crate) fn typed(raws: Vec<Raw>, warnings: &mut Vec<Warning>) -> Vec<Leaf> {
-    type_all(raws, warnings, false)
-}
-
-/// Types every raw value of a policy source, in order. A value that cannot be typed gets a
-/// warning, and when its key is known it becomes [`Leaf::Refused`], which locks the key at its
-/// default: a firm's broken value never leaves the user's in force. `refused` holds the known
-/// keys the source's own reader already refused (a registry value of the wrong type).
-pub(crate) fn typed_policy(
+/// Types every raw value of a source, in order, with one rule for every source. A value that
+/// cannot be typed gets a warning, and when its key is known it becomes [`Leaf::Refused`]: the
+/// key goes back to its default, so a broken value never leaves an earlier one in force. A key
+/// the source sets twice keeps its last value, valid or not, as `policy.json` always did; the
+/// result holds each key once. `refused` holds the known keys a policy source's own reader
+/// already refused (a registry value of the wrong type).
+pub(crate) fn typed(
     raws: Vec<Raw>,
     refused: Vec<String>,
     warnings: &mut Vec<Warning>,
 ) -> Vec<Leaf> {
-    let mut leaves = type_all(raws, warnings, true);
-    leaves.extend(refused.into_iter().map(Leaf::Refused));
-    leaves
-}
-
-fn type_all(raws: Vec<Raw>, warnings: &mut Vec<Warning>, policy: bool) -> Vec<Leaf> {
     let mut leaves = Vec::with_capacity(raws.len());
     for raw in raws {
         let mut kinds = Vec::new();
         match Leaf::parse(&raw.key, raw.value, &mut kinds) {
             Ok(leaf) => leaves.push(leaf),
             Err(kind) => {
-                if policy && kind_of(&raw.key).is_some() {
+                if kind_of(&raw.key).is_some() {
                     leaves.push(Leaf::Refused(raw.key.clone()));
                 }
                 kinds.push(kind);
@@ -111,7 +102,20 @@ fn type_all(raws: Vec<Raw>, warnings: &mut Vec<Warning>, policy: bool) -> Vec<Le
             kind,
         }));
     }
-    leaves
+    leaves.extend(refused.into_iter().map(Leaf::Refused));
+    last_per_key(leaves)
+}
+
+/// The last leaf of each key, in the order those last leaves came.
+fn last_per_key(leaves: Vec<Leaf>) -> Vec<Leaf> {
+    let mut seen = BTreeSet::new();
+    let mut last: Vec<Leaf> = leaves
+        .into_iter()
+        .rev()
+        .filter(|leaf| seen.insert(leaf.key()))
+        .collect();
+    last.reverse();
+    last
 }
 
 impl Leaf {
