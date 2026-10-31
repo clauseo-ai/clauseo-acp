@@ -73,7 +73,8 @@ impl Names {
     /// Unicode normalisation) on a case- or normalisation-insensitive file system. Writing
     /// `path` would replace it. `None` when nothing is there or `path` is there exactly. A
     /// folder on the way spelled otherwise, with no file under the name, is not one: a write
-    /// then makes a new file in that folder and replaces nothing.
+    /// then makes a new file in that folder and replaces nothing, and the next checkpoint
+    /// records it under the folder's spelling (the exception the crate's invariants name).
     pub(crate) fn other_spelling(
         &mut self,
         folder: &Path,
