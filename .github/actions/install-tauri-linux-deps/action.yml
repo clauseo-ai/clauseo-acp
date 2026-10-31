@@ -1,6 +1,8 @@
 # Installs the apt packages the desktop crate links against: libwebkit2gtk-4.1-dev (WebKitGTK 4.1),
 # the one home of that package name, plus the packages a job passes in `extra-packages`.
 #
+# - Linux runners only: it runs apt-get and sudo, so a caller on macOS or Windows fails. The caller
+#   guards the step with `runner.os == 'Linux'`, as the build job does.
 # - No version is pinned here: apt installs the one the runner's package index offers.
 # - A job must check out the repo before it uses this action, since `uses: ./...` reads the action
 #   from the checkout.
@@ -27,6 +29,8 @@ runs:
       run: |
         set -euo pipefail
         sudo apt-get update -q
-        # $EXTRA_PACKAGES is a space-separated list of package names and is split on purpose.
-        # shellcheck disable=SC2086
-        sudo apt-get install -y -q --no-install-recommends libwebkit2gtk-4.1-dev $EXTRA_PACKAGES
+        # EXTRA_PACKAGES is a space-separated list. read splits it without globbing, so a `*` in it
+        # stays a literal name for apt to reject. The ${extra[@]+...} form expands an empty array
+        # to nothing under set -u, on bash 3.2 as on the runners' bash 5.
+        read -ra extra <<< "$EXTRA_PACKAGES"
+        sudo apt-get install -y -q --no-install-recommends libwebkit2gtk-4.1-dev ${extra[@]+"${extra[@]}"}

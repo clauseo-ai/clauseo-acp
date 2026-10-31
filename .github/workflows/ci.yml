@@ -4,7 +4,8 @@
 # - No version is written here. Rust comes from rust-toolchain.toml, pnpm from "packageManager" and
 #   Node from "engines.node" in ui/package.json, and the cargo tools and gitleaks from
 #   xtask/src/setup.rs, which .github/actions/install-pinned-tools reads with
-#   `cargo xtask setup --list=json` and installs as prebuilt binaries.
+#   `cargo xtask setup --list=json` and installs as prebuilt binaries. The WebKitGTK packages come
+#   from .github/actions/install-tauri-linux-deps.
 # - Tier 1 (macOS Apple silicon, Windows x64) and Linux build and test on every pull request.
 #   Tier 2 (Intel macOS, Windows ARM64) waits for the merge: on a pull request its build jobs start
 #   but skip every step, and they run in full on each push to main, nightly and on demand. The
@@ -20,7 +21,7 @@
 #   request, compares them with the merge-base on main. It uploads the counts as the
 #   reducer-bench-summary artifact, which the speed scoreboard's comment reads
 #   (scoreboard-comment.yml).
-# - Every action is pinned by commit SHA, with its tag in a comment.
+# - Every third-party action is pinned by commit SHA, with its tag in a comment.
 
 name: CI
 
