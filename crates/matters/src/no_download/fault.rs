@@ -3,9 +3,9 @@
 //! and a test's reads run on its own thread.
 //!
 //! The hooks sit where the crate reads a file (each read call of `history/blob.rs`, after the
-//! open, as on the Mac: the open succeeds and the read fails) and lists a folder (`walk.rs`).
-//! On macOS they also record the thread's download policy at each call, so a test can check
-//! that every read ran under the guard.
+//! open, as on the Mac: the open succeeds and the read fails) and lists a folder (`walk.rs`,
+//! and `writeback::Names`). On macOS the reads and the walk's listings also record the thread's
+//! download policy at each call, so a test can check that every one ran under the guard.
 
 use std::cell::RefCell;
 use std::io;
@@ -77,14 +77,26 @@ pub(crate) fn read() -> io::Result<()> {
     hit(&path)
 }
 
-/// One listing of the folder `dir`.
+/// One listing of the folder `dir` by a walk, which runs under the guard.
 pub(crate) fn read_dir(dir: &Path) -> io::Result<()> {
-    hit(dir)
+    #[cfg(target_os = "macos")]
+    POLICIES.with_borrow_mut(|seen| seen.push(super::macos::thread_policy().unwrap_or(-1)));
+    fault(dir)
+}
+
+/// One listing of the folder `dir` to match names byte for byte (`writeback::Names`), which
+/// undo's and restore's plans make outside the guard: its policy is not recorded.
+pub(crate) fn list_names(dir: &Path) -> io::Result<()> {
+    fault(dir)
 }
 
 fn hit(path: &Path) -> io::Result<()> {
     #[cfg(target_os = "macos")]
     POLICIES.with_borrow_mut(|seen| seen.push(super::macos::thread_policy().unwrap_or(-1)));
+    fault(path)
+}
+
+fn fault(path: &Path) -> io::Result<()> {
     FAULTS.with_borrow_mut(|faults| {
         for fault in faults.iter_mut().filter(|fault| fault.path == path) {
             if fault.allowed == 0 {

@@ -98,7 +98,7 @@ impl Names {
             let mut names = HashSet::new();
             #[cfg(test)]
             let listed =
-                crate::no_download::fault::read_dir(dir).and_then(|()| std::fs::read_dir(dir));
+                crate::no_download::fault::list_names(dir).and_then(|()| std::fs::read_dir(dir));
             #[cfg(not(test))]
             let listed = std::fs::read_dir(dir);
             let entries = match listed {

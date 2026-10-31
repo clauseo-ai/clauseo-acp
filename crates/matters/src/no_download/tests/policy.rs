@@ -119,6 +119,17 @@ fn every_read_of_every_entry_point_runs_with_downloads_off_and_the_caller_keeps_
         created.unwrap();
         check("create");
 
+        // Before the import: a scan refuses a folder that is a matter already.
+        crate::scan(
+            &fx.folder,
+            &[],
+            &fx.settings,
+            &mut |_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        check("scan");
+
         let (mut matter, _) = fx.import();
         check("import");
         write::append(&fx.file("a.txt"), b" before").unwrap();
@@ -138,15 +149,6 @@ fn every_read_of_every_entry_point_runs_with_downloads_off_and_the_caller_keeps_
             .compare(CompareSide::Checkpoint(cid(1)), CompareSide::Folder)
             .unwrap();
         check("compare");
-        crate::scan(
-            &fx.folder,
-            &[],
-            &fx.settings,
-            &mut |_| {},
-            &AtomicBool::new(false),
-        )
-        .unwrap();
-        check("scan");
 
         let decisions = [FileDecision {
             path: path("a.txt"),
