@@ -11,13 +11,15 @@ use futures::executor::block_on;
 
 use crate::write;
 
-/// A fresh folder for one test, `temp_dir()/clauseo-store-<name>-<pid>`, removed on drop.
+/// A fresh folder for one test, `CARGO_TARGET_TMPDIR/clauseo-store-<name>-<pid>`, removed on
+/// drop. Under the target folder rather than `temp_dir()`, so the tests' syncs go to the disk
+/// the build uses (D: on the GitHub Windows runner, whose temp folder is on C:; issue #83).
 pub(crate) struct TestDir(PathBuf);
 
 impl TestDir {
     pub(crate) fn new(name: &str) -> Self {
-        let path =
-            std::env::temp_dir().join(format!("clauseo-store-{name}-{}", std::process::id()));
+        let path = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("clauseo-store-{name}-{}", std::process::id()));
         write::remove_dir_all(&path);
         write::create_dir_all(&path);
         Self(path)
