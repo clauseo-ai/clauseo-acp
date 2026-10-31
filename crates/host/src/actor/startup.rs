@@ -74,7 +74,7 @@ pub(super) async fn open(
         snapshots,
         effective: parts.effective,
         launcher: parts.launcher,
-        profile: parts.profile,
+        _profile: parts.profile,
         refused_folders: parts.refused_folders,
         clock: parts.clock,
         ids: Ids::new(parts.ids),

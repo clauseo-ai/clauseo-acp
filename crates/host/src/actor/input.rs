@@ -124,10 +124,7 @@ pub(crate) enum Input {
     /// A subscription was dropped.
     Unsubscribed { stream: StreamId, id: SubId },
     /// End the thread at once (tests); the sender is answered once the store is closed.
-    #[cfg_attr(
-        not(feature = "test-support"),
-        expect(dead_code, reason = "test-support only")
-    )]
+    #[cfg(feature = "test-support")]
     Abort(oneshot::Sender<()>),
 }
 
@@ -145,6 +142,7 @@ impl std::fmt::Debug for Input {
             Self::Turn(_) => "Turn",
             Self::Drained { .. } => "Drained",
             Self::Unsubscribed { .. } => "Unsubscribed",
+            #[cfg(feature = "test-support")]
             Self::Abort(_) => "Abort",
         };
         f.write_str(name)

@@ -123,6 +123,7 @@ pub(crate) enum Phase {
 /// How the loop ended.
 enum Exit {
     Shutdown(Vec<input::Reply<()>>),
+    #[cfg(feature = "test-support")]
     Abort(futures::channel::oneshot::Sender<()>),
 }
 
@@ -137,8 +138,8 @@ pub(crate) struct Actor {
     pub(crate) snapshots: SnapshotWorker,
     pub(crate) effective: Arc<Effective>,
     pub(crate) launcher: Arc<dyn Launcher>,
-    #[expect(dead_code, reason = "calling the profile hook is a later follow-up")]
-    pub(crate) profile: Box<dyn ProfileHook>,
+    /// Kept for the later `session/new` and launch calls; the host does not call it yet.
+    pub(crate) _profile: Box<dyn ProfileHook>,
     pub(crate) refused_folders: Vec<PathBuf>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) ids: Ids,
@@ -194,7 +195,7 @@ fn run(
 ) -> Result<(), Error> {
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
-    let ended = pool.run_until(async move {
+    let ended: Result<_, futures::channel::oneshot::Sender<()>> = pool.run_until(async move {
         let mut actor = match startup::open(config, spawner, post, ready.clone()).await {
             Ok(actor) => actor,
             Err(error) => {
@@ -209,6 +210,7 @@ fn run(
                 let closed = shutdown::close(actor).await;
                 Ok(Some((closed, replies)))
             }
+            #[cfg(feature = "test-support")]
             Exit::Abort(reply) => {
                 drop(actor);
                 Err(reply)
@@ -253,6 +255,7 @@ async fn main_loop(
             Some(Next::Request(request)) => actor.on_request(request),
             // Every handle is gone (the internal channel never ends: the actor holds a sender).
             Some(Next::HandlesGone) | None => shutdown::begin_shutdown(actor, None),
+            #[cfg(feature = "test-support")]
             Some(Next::Input(Input::Abort(reply))) => return Exit::Abort(reply),
             Some(Next::Input(input)) => actor.on_input(input),
         }
@@ -444,6 +447,7 @@ impl Actor {
             Input::Drained { stream, id } => subs::on_drained(self, stream, id),
             Input::Unsubscribed { stream, id } => subs::on_unsubscribed(self, stream, id),
             // The loop handles an abort before it gets here.
+            #[cfg(feature = "test-support")]
             Input::Abort(reply) => {
                 let _gone = reply.send(());
             }
