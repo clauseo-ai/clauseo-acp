@@ -34,6 +34,8 @@
 //!   policy entry replaces the user's whole entry for that id. Earlier sources win over later.
 //! - Policy fails closed per key: a policy value for a known key that does not type is a
 //!   warning and still locks the key, at its default (an agent: with no entry).
+//! - A key that `settings.json` or `policy.json` sets twice keeps its last value, valid or not:
+//!   a last value that does not type puts the key back at its default, with a warning.
 //! - A key this version does not know is a warning, never an error, so a firm's profile for a
 //!   newer version still loads.
 //! - No variable moves or hides a policy source: [`DATA_DIR_VAR`] moves only the data folder.
