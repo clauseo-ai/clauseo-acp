@@ -9,9 +9,9 @@ use gix::objs::tree::{EntryKind, EntryMode};
 use gix::objs::{Kind, TreeRefIter};
 use gix::odb::loose;
 
-use super::TreeFile;
 use super::durable::{NewObjects, put};
 use super::gix_store::{to_gix, to_oid};
+use super::{Oid, TreeFile};
 use crate::Error;
 
 /// The order of entries in a git tree: by name, a folder's name read as if it ended in `/`.
@@ -120,6 +120,38 @@ pub(super) fn read(
         read(store, id, &format!("{path}/"), files)?;
     }
     Ok(())
+}
+
+/// The blob of the file at `path` (`/`-separated) in tree `id`, reading only the trees of the
+/// folders on the way; `None` when no file is there (a folder, or nothing).
+pub(super) fn file_at(
+    store: &loose::Store,
+    id: ObjectId,
+    path: &str,
+) -> Result<Option<Oid>, Error> {
+    let mut buffer = Vec::new();
+    let mut tree = id;
+    let mut parts = path.split('/').peekable();
+    while let Some(part) = parts.next() {
+        let data = find(store, &tree, Kind::Tree, &mut buffer)?;
+        let mut found = None;
+        for entry in TreeRefIter::from_bytes(data, HashKind::Sha1) {
+            let entry = entry.map_err(|err| Error::history("read tree", err))?;
+            if entry.filename == part.as_bytes() {
+                found = Some((entry.mode, entry.oid.to_owned()));
+                break;
+            }
+        }
+        let Some((mode, oid)) = found else {
+            return Ok(None);
+        };
+        match (parts.peek().is_some(), mode.is_tree()) {
+            (true, true) => tree = oid,
+            (false, false) if mode.is_blob() => return to_oid(&oid).map(Some),
+            _ => return Ok(None),
+        }
+    }
+    Ok(None)
 }
 
 /// Lets `gix::diff::tree` read trees from the loose store.

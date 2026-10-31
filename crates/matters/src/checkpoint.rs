@@ -210,6 +210,10 @@ impl Core {
     /// The folder as a checkpoint would see it now, sorted by path, without storing anything or
     /// writing the cache: every file the cache cannot vouch for is hashed only. Takes `&self`,
     /// so a preview or a compare never needs the writer.
+    ///
+    /// When the cache on disk was written for another tree than the tip's (after an open, until
+    /// the next checkpoint), each call rebuilds it from the tip's tree, since `&self` cannot
+    /// keep the result; the next checkpoint writes the cache and ends that.
     pub(crate) fn snapshot(
         &self,
         folder: &Path,
