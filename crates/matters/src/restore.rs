@@ -34,8 +34,8 @@ use crate::types::{
     Checkpoint, CheckpointOutcome, Restore, RestoreFiles, RestorePlan, Restored, Settings,
     TimelineEntry,
 };
-use crate::writeback::{self, Names, Op, excluded, writable};
-use crate::{Error, locks};
+use crate::writeback::{self, Names, Op, writable};
+use crate::{Error, locks, rules};
 
 /// One file the restore writes: the version's blob, the blob there now (`None`: absent), and
 /// the version's size.
@@ -239,7 +239,7 @@ fn plan(
     };
     for candidate in draft.candidates {
         let size = core.size_of(candidate.path.as_str(), candidate.blob)?;
-        let ok = !excluded(&candidate.path)
+        let ok = !rules::is_excluded_path(candidate.path.as_str())
             && size <= cap
             && writable(folder, settings, &candidate.path)?
             && names.other_spelling(folder, &candidate.path)?.is_none();

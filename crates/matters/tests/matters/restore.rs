@@ -2,12 +2,13 @@
 //! the outside-edits checkpoint; locks, links, skipped files and names spelled otherwise; the
 //! preview; and every refusal before anything is written.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use clauseo_matters::{
-    CheckpointOutcome, Error, Imported, Matter, RestoreFiles, RestorePlan, Settings, TimelineEntry,
+    CheckpointOutcome, Error, Imported, Matter, PlaceholderProbe, RestoreFiles, RestorePlan,
+    Settings, TimelineEntry,
 };
 use clauseo_protocol::{CheckpointKind, ErrorCode, MatterPath};
 
@@ -391,15 +392,13 @@ fn restore_refuses_a_target_written_after_its_outside_edits_checkpoint() {
         ..fx.settings()
     };
     fx.write("a.txt", "one");
-    let cancel = AtomicBool::new(false);
-    let imported = Matter::import(settings, fx.new_matter(), &[], &mut |_| {}, &cancel);
-    let Ok(Imported::Done { matter, .. }) = imported else {
-        panic!("{imported:?}");
-    };
-    let mut matter = *matter;
+    fx.write("sub/deep/c.txt", "sea");
+    let mut matter = import_with(&fx, settings);
     matter.before_turn(&meta(2)).unwrap();
     fx.write("a.txt", "two");
-    created(matter.after_turn(&meta(3), &tools(&["a.txt"])).unwrap(), 3);
+    support::remove_dir_all(fx.file("sub"));
+    let step = tools(&["a.txt", "sub/deep/c.txt"]);
+    created(matter.after_turn(&meta(3), &step).unwrap(), 3);
 
     probe.armed.store(true, Ordering::Relaxed);
     let err = matter
@@ -410,6 +409,86 @@ fn restore_refuses_a_target_written_after_its_outside_edits_checkpoint() {
         "{err:?}"
     );
     assert_eq!(probe.seen.load(Ordering::Relaxed), 2);
+    assert_eq!(fx.read("a.txt"), b"two");
+    assert!(!fx.exists("sub"), "the folders staging made are gone again");
+    assert_no_temp_files(&fx.folder);
+}
+
+/// Imports `fx`'s folder as matter 1 with `settings`.
+fn import_with(fx: &Fixture, settings: Settings) -> Matter {
+    let cancel = AtomicBool::new(false);
+    let imported = Matter::import(settings, fx.new_matter(), &[], &mut |_| {}, &cancel);
+    let Ok(Imported::Done { matter, .. }) = imported else {
+        panic!("{imported:?}");
+    };
+    *matter
+}
+
+/// Once armed, writes `create` the `nth` time it is asked about `target`: a file landing
+/// after the plan checked the names. Never cloud-only.
+struct CreatingProbe {
+    target: PathBuf,
+    nth: usize,
+    create: PathBuf,
+    armed: AtomicBool,
+    seen: AtomicUsize,
+}
+
+impl PlaceholderProbe for CreatingProbe {
+    fn is_cloud_only(&self, path: &Path, _metadata: &std::fs::Metadata) -> bool {
+        if path == self.target
+            && self.armed.load(Ordering::Relaxed)
+            && self.seen.fetch_add(1, Ordering::Relaxed) + 1 == self.nth
+        {
+            support::write(&self.create, "made during the restore");
+        }
+        false
+    }
+}
+
+#[test]
+fn restore_refuses_a_name_spelled_otherwise_that_appears_after_the_plan() {
+    let fx = Fixture::new("restore-case-late");
+    if !insensitive(&fx, "Memo.txt", "memo.txt", CASE_REQUIRED) {
+        return;
+    }
+    // Asked about a.txt by the restore's walk, then by the plan's writable check, which comes
+    // after the plan found nothing spelled otherwise for Memo.txt (`M` sorts first).
+    let probe = Arc::new(CreatingProbe {
+        target: fx.file("a.txt"),
+        nth: 2,
+        create: fx.file("memo.txt"),
+        armed: AtomicBool::new(false),
+        seen: AtomicUsize::new(0),
+    });
+    let settings = Settings {
+        probe: Arc::<CreatingProbe>::clone(&probe),
+        ..fx.settings()
+    };
+    fx.write("Memo.txt", "the version's memo");
+    fx.write("a.txt", "one");
+    let mut matter = import_with(&fx, settings);
+    matter.before_turn(&meta(2)).unwrap();
+    support::remove_file(fx.file("Memo.txt"));
+    fx.write("a.txt", "two");
+    created(
+        matter
+            .after_turn(&meta(3), &tools(&["Memo.txt", "a.txt"]))
+            .unwrap(),
+        3,
+    );
+
+    probe.armed.store(true, Ordering::Relaxed);
+    let err = matter
+        .restore(&restore_request(1, RestoreFiles::All, 4, 5))
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::FileLocked { paths } if *paths == [path("Memo.txt")]),
+        "{err:?}"
+    );
+    assert_eq!(probe.seen.load(Ordering::Relaxed), 2);
+    assert_eq!(names(&fx.folder), ["a.txt", "memo.txt"]);
+    assert_eq!(fx.read("memo.txt"), b"made during the restore");
     assert_eq!(fx.read("a.txt"), b"two");
     assert_no_temp_files(&fx.folder);
 }

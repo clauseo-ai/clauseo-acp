@@ -151,3 +151,41 @@ fn undo_keeps_a_file_spelled_otherwise_made_after_the_step() {
     assert_eq!(fx.read("memo.txt"), b"the lawyer's own memo");
     assert_no_temp_files(&fx.folder);
 }
+
+#[test]
+fn undo_keeps_a_file_spelled_otherwise_where_the_step_added_one() {
+    let fx = Fixture::new("undo-case-delete");
+    if !insensitive(&fx, "memo.txt", "Memo.txt", CASE_REQUIRED) {
+        return;
+    }
+    fx.write("a.txt", "one");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    fx.write("memo.txt", "the agent's memo");
+    let changes = created(
+        matter.after_turn(&meta(3), &tools(&["memo.txt"])).unwrap(),
+        3,
+    );
+    assert_eq!(changes, [added("memo.txt", b"the agent's memo")]);
+    // The lawyer deletes it, then makes an unrelated file whose name differs only in case.
+    support::remove_file(fx.file("memo.txt"));
+    fx.write("Memo.txt", "the lawyer's memo");
+
+    let undone = undo(&mut matter, (1, 3), &["memo.txt"], (4, 5)).unwrap();
+    assert_none(&undone.restored);
+    assert_eq!(undone.kept, [path("memo.txt")]);
+    assert_eq!(
+        created(undone.outside_edits.unwrap(), 4),
+        [
+            added("Memo.txt", b"the lawyer's memo"),
+            deleted("memo.txt", b"the agent's memo")
+        ]
+    );
+    assert_eq!(
+        undone.checkpoint.outcome,
+        clauseo_matters::CheckpointOutcome::Reused(cid(4))
+    );
+    assert_eq!(names(&fx.folder), ["Memo.txt", "a.txt"]);
+    assert_eq!(fx.read("Memo.txt"), b"the lawyer's memo");
+    assert_no_temp_files(&fx.folder);
+}

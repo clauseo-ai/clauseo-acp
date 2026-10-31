@@ -2,8 +2,7 @@
 //! Everything moves forward: the result is a new `undo` checkpoint, so an undo can be undone.
 
 use std::collections::BTreeMap;
-use std::fs::Metadata;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use clauseo_protocol::{ChangeKind, CheckpointId, CheckpointKind, FileChoice, MatterPath};
 
@@ -11,7 +10,7 @@ use crate::checkpoint::{Core, SizedFile, Spec};
 use crate::history::{HistoryStore, Oid};
 use crate::stat::{EntryState, Stat, find_by_path};
 use crate::types::{CheckpointOutcome, Settings, TimelineEntry, UndoRequest, Undone};
-use crate::writeback::{self, Names, Op, same_entry, skipped, writable};
+use crate::writeback::{self, Names, Op, skipped, writable};
 use crate::{Error, locks};
 
 /// One changed file of the step, by the path decisions name, and the operations undoing it.
@@ -291,11 +290,12 @@ fn choices(steps: &[Step], request: &UndoRequest<'_>) -> Result<Vec<FileChoice>,
         .collect()
 }
 
-/// Moves to `kept` each acting step that writes a path the folder holds only spelled otherwise
-/// (another case or Unicode normalisation, on APFS or NTFS), unless that file is one this undo
-/// deletes: writing it would replace an unrelated file, such as a `memo.txt` made after the step
-/// when the undo puts back `Memo.txt`. Undoing a case-only rename deletes the file it finds, so
-/// that undo goes ahead. Repeated until nothing moves, since a kept step deletes nothing.
+/// Moves to `kept` each acting step that touches a file the folder holds only spelled
+/// otherwise ([`writeback::respelled`]): writing would replace an unrelated file, such as a
+/// `memo.txt` made after the step when the undo puts back `Memo.txt`, and deleting would
+/// remove one, such as a `Memo.txt` made after the lawyer deleted the `memo.txt` the step
+/// added. Undoing a case-only rename deletes the file it finds, so that undo goes ahead.
+/// Repeated until nothing moves, since a kept step deletes nothing.
 fn keep_respelled(
     folder: &Path,
     acting: &mut Vec<&Step>,
@@ -303,38 +303,17 @@ fn keep_respelled(
 ) -> Result<(), Error> {
     let mut names = Names::default();
     loop {
-        let mut deleted: Vec<(PathBuf, Metadata)> = Vec::new();
-        for op in acting.iter().flat_map(|step| &step.ops) {
-            if let Op::Delete(path) = op
-                && let Some(metadata) = names.metadata(folder, path)?
-            {
-                deleted.push((folder.join(path.as_str()), metadata));
-            }
-        }
-        let before = acting.len();
-        let mut still = Vec::with_capacity(before);
-        for step in acting.drain(..) {
-            let mut clash = false;
-            for op in &step.ops {
-                if let Op::Write(path, _) = op
-                    && let Some(other) = names.other_spelling(folder, path)?
-                {
-                    let abs = folder.join(path.as_str());
-                    let ours = deleted
-                        .iter()
-                        .any(|(gone, metadata)| same_entry(gone, metadata, &abs, &other));
-                    clash = clash || !ours;
-                }
-            }
-            if clash {
-                kept.push(step.path.clone());
-            } else {
-                still.push(step);
-            }
-        }
-        *acting = still;
-        if acting.len() == before {
+        let ops: Vec<&Op> = acting.iter().flat_map(|step| &step.ops).collect();
+        let clashes = writeback::respelled(&mut names, folder, &ops)?;
+        if clashes.is_empty() {
             return Ok(());
         }
+        acting.retain(|step| {
+            let clash = step.ops.iter().any(|op| clashes.contains(op.path()));
+            if clash {
+                kept.push(step.path.clone());
+            }
+            !clash
+        });
     }
 }
