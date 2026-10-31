@@ -22,8 +22,11 @@ use crate::{
 
 /// A host on `dir` with `fake-agent` in its settings, the manual clock and run `run`'s ids.
 fn start(dir: &Path, run: u16) -> (HostHandle, HostJoin) {
-    let settings = br#"{"agents": {"fake-agent": {"command": "/usr/bin/true"}}}"#;
-    crate::write::write_file(&dir.join("settings.json"), settings).unwrap();
+    // Settings keep only an agent whose command is absolute, so the path is absolute on every
+    // OS (`/usr/bin/true` is not on Windows). Nothing here launches it.
+    let command = dir.join("agent");
+    let settings = serde_json::json!({ "agents": { "fake-agent": { "command": command } } });
+    crate::write::write_file(&dir.join("settings.json"), settings.to_string().as_bytes()).unwrap();
     let effective = Effective::load(&Locations::under_root(dir), &SystemFiles, &[]);
     let launcher = PassthroughLauncher::new(SpawnOptions::new().home(dir.join("home")));
     let config = HostConfig::new(effective, Arc::new(launcher))

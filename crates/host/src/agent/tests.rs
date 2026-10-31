@@ -90,10 +90,20 @@ async fn ended(rx: &mut mpsc::UnboundedReceiver<AgentInput>) -> Ended {
     }
 }
 
+/// An absolute program path on every OS (`/bin/agent` is not absolute on Windows); the spec
+/// checks only that it is absolute, and nothing launches it.
+fn absolute_program() -> String {
+    std::env::temp_dir()
+        .join("agent")
+        .to_str()
+        .unwrap()
+        .to_owned()
+}
+
 #[test]
 fn launch_spec_layers_inherited_then_agent_then_hook() {
     let agent = AgentLaunch {
-        command: "/bin/agent".to_owned(),
+        command: absolute_program(),
         args: vec!["--acp".to_owned()],
         env: BTreeMap::from([
             ("MODE".to_owned(), "agent".to_owned()),
@@ -130,7 +140,7 @@ fn launch_spec_layers_inherited_then_agent_then_hook() {
 #[test]
 fn launch_spec_keeps_one_variable_per_name_ignoring_case() {
     let agent = AgentLaunch {
-        command: "/bin/agent".to_owned(),
+        command: absolute_program(),
         args: Vec::new(),
         env: BTreeMap::from([
             ("PATH".to_owned(), r"C:\node;C:\Windows".to_owned()),
