@@ -5,6 +5,17 @@ import { cn } from "../lib/cn.ts";
 import { Mixed } from "../lib/mixed.tsx";
 import { fieldError, fieldLabel, fieldNote, textControl } from "./recipes-controls.ts";
 
+/** The words, when a store keeps them: the field shows value and reports each change through onValueChange. A field
+ * with value cannot take defaultValue, and a field with value must take onValueChange, or nobody could type in it. */
+type Words =
+  | { value: string; onValueChange: (value: string) => void; defaultValue?: never }
+  | {
+      /** The words to start with, when the field keeps its own. */
+      defaultValue?: string;
+      value?: never;
+      onValueChange?: (value: string) => void;
+    };
+
 /** A text field on the work's surface, with its label above and one line on what it's for beneath. multiline makes
  * it a textarea three lines tall that the lawyer can drag taller. When what's in it no longer holds, such as a
  * folder that has moved, the error says so in concrete, never red, with the one action that mends it beside it. */
@@ -29,11 +40,6 @@ export function TextField({
   error?: string;
   /** The one way to mend it, beside the error: a Button, "Locate folder". */
   action?: ReactNode;
-  /** The words to start with, when the field keeps its own. */
-  defaultValue?: string;
-  /** The words, when a store keeps them: the field shows this and reports each change through onValueChange. */
-  value?: string;
-  onValueChange?: (value: string) => void;
   placeholder?: string;
   invalid?: boolean;
   disabled?: boolean;
@@ -41,7 +47,7 @@ export function TextField({
   /** The words' own language, where they stay as filed: a folder's path is lang="en". */
   lang?: "en";
   className?: string;
-}) {
+} & Words) {
   const control = multiline ? <textarea rows={3} /> : <Input />;
   return (
     <Field.Root

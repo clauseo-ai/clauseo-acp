@@ -53,8 +53,13 @@ test("controlled: a keystroke reports the new text, and the shown text stays wha
 });
 
 test("controlled: a new value from the store shows; the text follows value", async () => {
-  await render(<TextField label="Folder" note="Where the matter lives" value="Old" />);
-  await render(<TextField label="Folder" note="Where the matter lives" value="Moved" />);
+  const keep = () => {};
+  await render(
+    <TextField label="Folder" note="Where the matter lives" value="Old" onValueChange={keep} />,
+  );
+  await render(
+    <TextField label="Folder" note="Where the matter lives" value="Moved" onValueChange={keep} />,
+  );
   expect(field()?.value).toBe("Moved");
 });
 
