@@ -3,7 +3,9 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "../lib/cn.ts";
 import { button, pair, pairButton } from "./recipes.ts";
 
-/** A row of tools, as the room's toolbar: Tab enters and leaves it, the arrow keys move along it. */
+/** A row of tools, as the room's toolbar: Tab enters and leaves it, the arrow keys move along it. Narrower than its
+ * tools, it wraps them onto a second line rather than run past its box; the room's toolbar, which folds its search
+ * instead, sets flex-nowrap. */
 export function Toolbar({
   label,
   children,
@@ -16,7 +18,7 @@ export function Toolbar({
   return (
     <BaseToolbar.Root
       aria-label={label}
-      className={cn("flex items-center gap-s3 min-w-0", className)}
+      className={cn("flex flex-wrap items-center gap-s3 min-w-0", className)}
     >
       {children}
     </BaseToolbar.Root>
