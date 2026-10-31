@@ -16,7 +16,7 @@ import { useWords } from "../lib/words.ts";
 import { BenchMark } from "./citations.tsx";
 import { useHandState, type Hand, type Target } from "./hand.ts";
 import { useWide } from "./layout.ts";
-import { benchOf, benchWords, keepIds, pages, paperIn, roleOf, type MatterData } from "./matter.ts";
+import { benchOf, benchWords, citedPaper, keepIds, type MatterData } from "./matter.ts";
 import { useMatter } from "./matter-context.ts";
 import { dur, ease } from "./motion.ts";
 import { useRoom, type RoomNodes } from "./room-scope.ts";
@@ -27,19 +27,17 @@ import { Say } from "./say.tsx";
 function PaperCard({ id, openRef }: { id: string; openRef: RefObject<HTMLButtonElement | null> }) {
   const w = useWords();
   const goTo = useGoTo();
-  const p = useMatter().paper(id);
-  if (p === undefined) return null;
-  const role = roleOf(p) ?? "relied";
-  const pb = pages(p.pb);
-  const excerpt = p.excerpt ?? "";
-  const mark = p.mark ?? "";
+  const cited = useMatter().cited(id);
+  if (cited === undefined) return null;
+  const { paper: p, citation } = cited;
+  const { role, excerpt, mark, pin } = citation;
+  const pb = p.pb;
   const at = mark === "" ? -1 : excerpt.indexOf(mark);
   const title = p.title;
-  const pin = p.pin ?? p.pb;
   return (
     <>
       <div className="card-band">
-        <span className="card-num">{pb.kind === "pages" ? pb.from : pb.word}</span>
+        <span className="card-num">{"word" in pb ? pb.word : pb.from}</span>
         <div className="card-head">
           <span className="card-pin">
             <Say>{keepIds(pin)}</Say>
@@ -97,7 +95,7 @@ function CiteCard({
   const { hand } = useRoom();
   const c = useMatter().cite(id);
   if (c === undefined) return null;
-  const bench = benchOf(c.court, c.bench);
+  const bench = benchOf(c.forum, c.bench);
   const stance = c.stance === "against" ? "against" : "for";
   const pin = [c.cite, c.pin].filter((s) => s !== null).join(", ");
   return (
@@ -199,8 +197,7 @@ const shown = (h: Hand) => (h.state === "none" ? null : h);
 /** The card's colour: a judgment's stays on the surface; a paper takes its role's. */
 function cardRole(matter: MatterData, t: Target): string {
   if (t.kind === "cite") return "cite";
-  const p = paperIn(matter, t.id);
-  return (p === undefined ? null : roleOf(p)) ?? "relied";
+  return citedPaper(matter.citations, matter.papers, t.id)?.citation.role ?? "relied";
 }
 
 /** What stands behind a reference, on request: the paper's verbatim paragraph, or the judgment's citation and check.

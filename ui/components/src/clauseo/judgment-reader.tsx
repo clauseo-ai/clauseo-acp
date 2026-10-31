@@ -169,7 +169,7 @@ function JudgmentSheet({
 }) {
   const w = useReaderWords();
   const { id } = useRoom();
-  const bench = benchOf(j.court, j.bench);
+  const bench = benchOf("court", j.bench);
   const reports = [j.reports.scc, j.reports.air, j.reports.other ?? null]
     .filter((r) => r !== null)
     .join("  ·  ");
@@ -299,7 +299,7 @@ export function JudgmentReader({
       onBack={onBack}
       what={
         <>
-          <BenchMark bench={benchOf(j.court, j.bench)} stance={j.stance} />
+          <BenchMark bench={benchOf("court", j.bench)} stance={j.stance} />
           <b lang="en">{j.short}</b>
           <Chip role={j.stance === "against" ? "cite" : "for"} />
         </>

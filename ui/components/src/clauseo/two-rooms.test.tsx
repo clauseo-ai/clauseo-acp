@@ -30,29 +30,31 @@ const MATTER: MatterData = {
     {
       id: "notice",
       title: "Notice to the bank.docx",
-      pb: "PB 1 to 4",
+      pb: { from: 1, to: 4 },
       kind: "correspondence",
+    },
+    { id: "reply", title: "Reply to the notice", pb: { from: 5, to: 5 }, kind: "correspondence" },
+    {
+      id: "minutes",
+      title: "Board minutes, 2 March 2001",
+      pb: { from: 6, to: 9 },
+      kind: "document",
+    },
+  ],
+  citations: [
+    {
+      paperId: "notice",
       role: "supports",
       pin: "Para 2, PB 1",
       excerpt: "The bank was told in writing on the first of the month.",
       mark: "told in writing",
     },
     {
-      id: "reply",
-      title: "Reply to the notice",
-      pb: "PB 5",
-      kind: "correspondence",
+      paperId: "reply",
       role: "against",
       pin: "Para 3, PB 5",
       excerpt: "The bank denies that any notice reached it.",
       mark: "denies",
-    },
-    {
-      id: "minutes",
-      title: "Board minutes, 2 March 2001",
-      pb: "PB 6 to 9",
-      kind: "document",
-      role: null,
     },
   ],
   cites: {
@@ -62,6 +64,7 @@ const MATTER: MatterData = {
       cite: "(2001) 1 ABC 1",
       decided: "1 January 2001",
       court: "Supreme Court",
+      forum: "court",
       bench: 3,
       pin: "para 4",
       stance: "for",
@@ -88,7 +91,12 @@ function Room() {
   return (
     <RoomScopeProvider className="room-window">
       <MatterContext value={MATTER}>
-        <PapersWall papers={MATTER.papers} draft={DRAFT} onTurn={() => {}} />
+        <PapersWall
+          papers={MATTER.papers}
+          citations={MATTER.citations}
+          draft={DRAFT}
+          onTurn={() => {}}
+        />
         {cite !== undefined && <Citations cites={[{ id: "acme", cite }]} />}
         <AnswerBlocks
           blocks={[

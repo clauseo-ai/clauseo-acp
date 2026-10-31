@@ -4,7 +4,7 @@ import { CollapsiblePanel } from "../ui/collapsible.tsx";
 import { IconFold, IconGoodLaw } from "../icons/icons.tsx";
 import { useWords } from "../lib/words.ts";
 import type { Target } from "./hand.ts";
-import { isLatinOnly, keepIds, roleOf, segmentsOf, type Block, type Segment } from "./matter.ts";
+import { isLatinOnly, keepIds, segmentsOf, type Block, type Segment } from "./matter.ts";
 import { useMatter } from "./matter-context.ts";
 import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
@@ -96,9 +96,9 @@ export function Reference({ seg }: { seg: Extract<Segment, { type: "ref" }> }) {
   const matter = useMatter();
   const { hand, nodes } = room;
   const target: Target = { kind: seg.kind, id: seg.id };
-  const paper = seg.kind === "paper" ? matter.paper(seg.id) : undefined;
-  const role = paper === undefined ? null : roleOf(paper);
-  const card = seg.kind === "cite" || paper?.excerpt !== undefined;
+  const cited = seg.kind === "paper" ? matter.cited(seg.id) : undefined;
+  const role = cited?.citation.role ?? null;
+  const card = seg.kind === "cite" || cited !== undefined;
   const label = keepIds(seg.label);
   const latin = w.lang === "hi" && isLatinOnly(label);
 

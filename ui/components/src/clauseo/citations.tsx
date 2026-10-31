@@ -45,7 +45,7 @@ export function CitationRow({ id, cite, checked = true }: CitationRowProps) {
   const target: Target = { kind: "cite", id };
   const inHand = useInHand(hand, target);
   const carded = useCarded(hand, target, wide);
-  const bench = benchOf(cite.court, cite.bench);
+  const bench = benchOf(cite.forum, cite.bench);
   const stance = cite.stance === "against" ? "against" : "for";
   const where = [cite.cite, cite.pin, benchWords(w.lang, bench)]
     .filter((s) => s !== null)

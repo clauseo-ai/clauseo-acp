@@ -40,7 +40,7 @@ function ResultRow({
   return (
     <li className="ik-result">
       <span className="ik-result-mark">
-        <BenchMark bench={benchOf("Supreme Court", r.bench)} stance={r.stance} />
+        <BenchMark bench={benchOf("court", r.bench)} stance={r.stance} />
       </span>
       <p className="ik-result-name" lang="en">
         {r.short}

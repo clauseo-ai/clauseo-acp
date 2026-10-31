@@ -4,22 +4,28 @@ import { Chip } from "../ui/chip.tsx";
 import { useWords } from "../lib/words.ts";
 import { useCarded, useDraftHolders, useInHand, type Target } from "./hand.ts";
 import { useWide } from "./layout.ts";
-import { isLatinOnly, pages, pbWords, shortTitle, type TileState } from "./matter.ts";
+import {
+  citedPapers,
+  isLatinOnly,
+  pbWords,
+  shortTitle,
+  type Citation,
+  type CitedRole,
+  type Paper,
+  type PaperBookPlace,
+  type TileState,
+} from "./matter.ts";
 import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
 import { Heading } from "./heading.tsx";
-
-/** What a tile shows where a paper book page would stand: a page with its range, "1 to 12", or one of Clauseo's own
- * words, "Note", "Dates", "Draft". */
-export type Numeral =
-  | { kind: "pages"; from: string; to: string | null }
-  | { kind: "word"; word: string };
 
 export type PaperTileProps = {
   /** The paper's id, "dates" for the accepted list of dates, or the prepared draft's id. */
   id: string;
   state: TileState;
-  numeral: Numeral;
+  /** What stands where a paper book page would: the paper's pages, "1 to 12", or a word such as "Note", or one of
+   * Clauseo's own, "Dates", "Draft". */
+  numeral: PaperBookPlace;
   /** The short title, in the language. */
   title: string;
   /** What the tile says beyond its visible words, for assistive technology: its role in words, or what a press
@@ -109,17 +115,17 @@ export function PaperTile({
         onKeyDown={onKeyDown}
       >
         <span className="tile-no">
-          {numeral.kind === "pages" ? (
-            <>
-              <span className="tile-num">{numeral.from}</span>
-              {numeral.to !== null && (
-                <span className="tile-to">{w.t("to {n}", { n: numeral.to })}</span>
-              )}
-            </>
-          ) : (
+          {"word" in numeral ? (
             <span className="tile-num" data-word="">
               {numeral.word}
             </span>
+          ) : (
+            <>
+              <span className="tile-num">{numeral.from}</span>
+              {numeral.to !== numeral.from && (
+                <span className="tile-to">{w.t("to {n}", { n: numeral.to })}</span>
+              )}
+            </>
           )}
         </span>
         <span className="tile-title" lang={latin ? "en" : undefined}>
@@ -145,23 +151,18 @@ export function PaperTile({
 
 /* ---------- the wall of papers ---------- */
 
-type PaperLike = { id: string; title: string; pb: string; role: string | null; excerpt?: string };
-
-/** A paper's tile, in the room's words. */
-function paperTile(lang: "en" | "hi", p: PaperLike, t: ReturnType<typeof useWords>) {
-  const role = p.role === "supports" || p.role === "against" || p.role === "relied" ? p.role : null;
+/** A paper's tile, in the room's words: lit in its role and carded where the answer cites it. */
+function paperTile(p: Paper, role: CitedRole | undefined, t: ReturnType<typeof useWords>) {
   const state: TileState = role ?? "uncited";
-  const pb = pages(p.pb);
-  const numeral: Numeral = pb.kind === "pages" ? pb : { kind: "word", word: pb.word };
   const title = p.title;
   // its name is what it shows; its description, the paper's full title and paper book page
-  const label = t.t("{title}, {pb}", { title, pb: pbWords(lang, p.pb) });
+  const label = t.t("{title}, {pb}", { title, pb: pbWords(t.lang, p.pb) });
   return {
     state,
-    numeral,
+    numeral: p.pb,
     title: shortTitle(title),
     label,
-    card: role !== null && p.excerpt !== undefined,
+    card: role !== undefined,
   };
 }
 
@@ -169,7 +170,9 @@ function paperTile(lang: "en" | "hi", p: PaperLike, t: ReturnType<typeof useWord
 export type PreparedTile = { id: string; short: string; title: string; label: string };
 
 export type PapersWallProps = {
-  papers: readonly PaperLike[];
+  papers: readonly Paper[];
+  /** The answer's citations of the papers. */
+  citations: readonly Citation[];
   /** The list of dates the lawyer accepted earlier, where there is one: a matter just opened has none. */
   dates?: { title: string; accepted: string } | null;
   /** The prepared draft, waiting flagged and unopened, once Clauseo has prepared it. */
@@ -179,8 +182,9 @@ export type PapersWallProps = {
 
 /** The matter's papers as a facade of tiles in paper book order, under "Papers 14", "By paper book page" and "All
  * 14". Three equal columns; a title that wraps makes its whole row taller rather than clipping. */
-export function PapersWall({ papers, dates = null, draft, onTurn }: PapersWallProps) {
+export function PapersWall({ papers, citations, dates = null, draft, onTurn }: PapersWallProps) {
   const w = useWords();
+  const roles = citedPapers(citations, papers);
   const { id, nodes } = useRoom();
   const n = papers.length;
   return (
@@ -196,14 +200,14 @@ export function PapersWall({ papers, dates = null, draft, onTurn }: PapersWallPr
       </header>
       <ol className="facade" ref={nodes.slot("facade")}>
         {papers.map((p) => {
-          const tile = paperTile(w.lang, p, w);
+          const tile = paperTile(p, roles.get(p.id), w);
           return <PaperTile key={p.id} id={p.id} {...tile} />;
         })}
         {dates !== null && (
           <PaperTile
             id="dates"
             state="accepted"
-            numeral={{ kind: "word", word: w.t("Dates") }}
+            numeral={{ word: w.t("Dates") }}
             title={dates.title}
             label={dates.accepted}
             hint={w.t("{title}. {accepted}", { title: dates.title, accepted: dates.accepted })}
@@ -213,7 +217,7 @@ export function PapersWall({ papers, dates = null, draft, onTurn }: PapersWallPr
           <PaperTile
             id={draft.id}
             state="prepared"
-            numeral={{ kind: "word", word: w.t("Draft") }}
+            numeral={{ word: w.t("Draft") }}
             title={draft.short}
             label={draft.label}
             hint={draft.title}

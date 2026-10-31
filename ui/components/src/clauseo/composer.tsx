@@ -17,6 +17,7 @@ import {
 import { motionAllowed, useDisplay } from "../lib/display.ts";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { rt } from "../lib/words-room.ts";
+import { pbWords, type Paper } from "./matter.ts";
 import { dur, ease } from "./motion.ts";
 import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
@@ -27,7 +28,7 @@ export type { PlanChoice, ReadyHint } from "./status-line.tsx";
 
 /** A paper added to the question, as a small raised pill on the field's well: the paper book page glyph, its short
  * title and page, and a press to take it off again. */
-export type QuestionPaper = { id: string; title: string; pb: string };
+export type QuestionPaper = Pick<Paper, "id" | "title" | "pb">;
 
 function PaperChips({
   papers,
@@ -45,7 +46,7 @@ function PaperChips({
           <span className="q-paper-title">
             <Say>{p.title}</Say>
           </span>
-          <span className="q-paper-pb">{p.pb}</span>
+          <span className="q-paper-pb">{pbWords(w.lang, p.pb)}</span>
           <button
             type="button"
             className="q-paper-remove"
