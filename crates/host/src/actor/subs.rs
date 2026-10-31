@@ -9,6 +9,11 @@
 //! An event subscriber catches up by reading pages of the store up to the stream's durable
 //! head, reading again while the head moves; it gets live envelopes only once it is caught up.
 //! So it sees exactly the envelopes after its `after_seq`, in order, once each.
+//!
+//! A store read that fails during replay or refill (or comes back short of the durable head)
+//! removes the subscription, so its stream ends. While the host is up that means "subscribe
+//! again from the last `seq` you saw", as `EventSubscription`'s doc tells the caller; there is
+//! no event for it.
 
 use clauseo_protocol::{Cursor, Envelope, HostEvent, Principal, Seq, StreamId, ViewEpoch};
 use clauseo_store::READ_PAGE_MAX;
