@@ -31,10 +31,46 @@ fn the_init_script_sets_the_perf_globals_before_the_react_hook() {
 }
 
 #[test]
-fn autoplay_is_on_only_in_the_marks_build() {
+fn autoplay_needs_marks_and_both_variables_set() {
+    let dir = Some(OsStr::new("/tmp/matter"));
+    let out = Some(OsStr::new("/tmp/run.json"));
+    let empty = Some(OsStr::new(""));
+    assert!(autoplay_with(true, out, dir));
+    // Not a marks build.
+    assert!(!autoplay_with(false, out, dir));
+    // A marks build started by hand: a variable unset or empty.
+    for (marks_out, matter_dir) in [
+        (None, dir),
+        (out, None),
+        (None, None),
+        (empty, dir),
+        (out, empty),
+        (empty, empty),
+    ] {
+        assert!(
+            !autoplay_with(true, marks_out, matter_dir),
+            "{marks_out:?} {matter_dir:?}"
+        );
+    }
+}
+
+#[test]
+fn autoplay_is_off_outside_the_marks_build() {
     let script = init_script();
-    let expected = format!("autoplay: {},", cfg!(feature = "marks"));
-    assert!(script.contains(&expected), "{script}");
+    // The test run sets neither MARKS_OUT nor E2E_MATTER_DIR unless a harness does, and a
+    // marks build plays only with both.
+    let expected = autoplay_with(
+        cfg!(feature = "marks"),
+        std::env::var_os(MARKS_OUT_VAR).as_deref(),
+        std::env::var_os(MATTER_DIR_VAR).as_deref(),
+    );
+    assert!(
+        script.contains(&format!("autoplay: {expected},")),
+        "{script}"
+    );
+    if !cfg!(feature = "marks") {
+        assert!(script.contains("autoplay: false,"), "{script}");
+    }
 }
 
 #[test]
