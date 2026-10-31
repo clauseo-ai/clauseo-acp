@@ -354,20 +354,22 @@ test("the sheets: the blackline keeps the lawyer's weight, a PDF says only chang
 
 const MATTER: MatterData = {
   papers: [
-    { id: "plaint", title: "Plaint", pb: "PB 1 to 6", kind: "pleading", role: null },
+    { id: "plaint", title: "Plaint", pb: { from: 1, to: 6 }, kind: "pleading" },
     {
       id: "notice",
       title: "Notice to the bank, 7 July 2026",
-      pb: "PB 7",
+      pb: { from: 7, to: 7 },
       kind: "correspondence",
-      role: "supports",
     },
-    { id: "reply", title: "Reply from the bank", pb: "PB 8", kind: "correspondence", role: null },
-    { id: "letter", title: "Letter from the bank", pb: "PB 9", kind: "correspondence", role: null },
-    { id: "receipt", title: "Postal receipt", pb: "PB 10", kind: "document", role: null },
-    { id: "memo", title: "Junior's note", pb: "Note", kind: "note", role: null },
+    { id: "reply", title: "Reply from the bank", pb: { from: 8, to: 8 }, kind: "correspondence" },
+    { id: "letter", title: "Letter from the bank", pb: { from: 9, to: 9 }, kind: "correspondence" },
+    { id: "receipt", title: "Postal receipt", pb: { from: 10, to: 10 }, kind: "document" },
+    { id: "memo", title: "Junior's note", pb: { word: "Note" }, kind: "note" },
   ],
   cites: {},
+  citations: [
+    { paperId: "notice", role: "supports", pin: "Para 1, PB 7", excerpt: "Take notice.", mark: "" },
+  ],
 };
 const OWN = [
   { id: "dates", title: "List of dates", state: "accepted", word: "Dates" },

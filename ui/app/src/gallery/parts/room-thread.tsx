@@ -172,6 +172,7 @@ export function ThreadSamples() {
         <Own>
           <PapersWall
             papers={PAPERS}
+            citations={MATTER.citations}
             dates={{ title: "List of dates", accepted: "Accepted 4:02 pm" }}
             draft={DRAFT_TILE}
             onTurn={nothing}

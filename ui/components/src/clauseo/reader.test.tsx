@@ -202,6 +202,7 @@ test("the pane gives the matter's own check note when the matter has the judgmen
     cite: "(2001) 1 ABC 1",
     decided: "1 January 2001",
     court: "Supreme Court",
+    forum: "court",
     bench: 3,
     pin: "para 3",
     stance: "for",
@@ -213,7 +214,7 @@ test("the pane gives the matter's own check note when the matter has the judgmen
     },
   };
   await mount(
-    <MatterContext value={{ papers: [], cites: { acme: cite } }}>
+    <MatterContext value={{ papers: [], cites: { acme: cite }, citations: [] }}>
       <JudgmentPane judgment={ACME} offline opens={() => false} onOpen={() => {}} />
     </MatterContext>,
   );

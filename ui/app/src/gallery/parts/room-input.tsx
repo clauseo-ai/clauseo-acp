@@ -66,7 +66,9 @@ export function InputSamples() {
             took="Took 38 seconds"
             plan={PLAN}
             hint={READY_HINT}
-            papers={[{ id: "notice", title: "Notice to the bank, 3 March 2024", pb: "PB 1 to 4" }]}
+            papers={[
+              { id: "notice", title: "Notice to the bank, 3 March 2024", pb: { from: 1, to: 4 } },
+            ]}
             onRemovePaper={nothing}
           />
         </Own>

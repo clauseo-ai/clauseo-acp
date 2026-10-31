@@ -7,24 +7,36 @@ import { t, type Key } from "../lib/words.ts";
 /** What a paper is. */
 export type PaperKind = "pleading" | "correspondence" | "document" | "order" | "note";
 
-/** One paper of the matter, as its tile and its excerpt card show it. */
+/** Where a paper sits in the paper book: its pages, from and to (the same page twice for one page), or a word such
+ * as "Note" in the numeral's place where it has no page. The word is the app's and shows as it is. */
+export type PaperBookPlace =
+  | { readonly from: number; readonly to: number }
+  | { readonly word: string };
+
+/** One paper of the matter: what the matter knows about it, whichever answer cites it. */
 export type Paper = {
   readonly id: string;
   /** The title as filed, for example "Notice to the bank, 3 March 2024". Shown as it is, never translated. */
   readonly title: string;
-  /** Where it sits in the paper book: "PB 13", "PB 1 to 12", or a word such as "Note" where it has no page. */
-  readonly pb: string;
+  readonly pb: PaperBookPlace;
   readonly kind: PaperKind;
-  /** How the answer uses it, or null when the answer doesn't cite it. */
-  readonly role: "supports" | "against" | "relied" | null;
-  /** The pinned place the answer quotes: "Para 9, PB 4". */
-  readonly pin?: string;
-  /** The words quoted from that place, verbatim. */
-  readonly excerpt?: string;
-  /** The span of the excerpt the answer turns on, marked inside it. */
-  readonly mark?: string;
 };
 export type PaperId = Paper["id"];
+
+/** How an answer uses a paper it cites. */
+export type CitedRole = "supports" | "against" | "relied";
+
+/** One answer's use of one paper: its role, the place it pins and the words it quotes from there. */
+export type Citation = {
+  readonly paperId: PaperId;
+  readonly role: CitedRole;
+  /** The pinned place the answer quotes: "Para 9, PB 4". */
+  readonly pin: string;
+  /** The words quoted from that place, verbatim. */
+  readonly excerpt: string;
+  /** The span of the excerpt the answer turns on, marked inside it; "" marks nothing. */
+  readonly mark: string;
+};
 
 /** A judgment's check against later decisions, as the answer reports it. */
 export type CiteCheck = {
@@ -50,6 +62,8 @@ export type Cite = {
    * lawyer, a Hindi date for a Hindi one). The part shows it as given and never reads it as a date. */
   readonly decided: string;
   readonly court: string;
+  /** Whether a court or a tribunal decided it. */
+  readonly forum: Forum;
   /** How many judges sat. */
   readonly bench: number;
   /** The pinned paragraph, "para 17", or null. */
@@ -60,14 +74,15 @@ export type Cite = {
 };
 export type CiteId = string;
 
-/** The papers and judgments the parts can name, by id. */
+/** The papers and judgments the parts can name, by id, and the answer in view's citations of the papers. */
 export type MatterData = {
   readonly papers: readonly Paper[];
   readonly cites: Readonly<Record<CiteId, Cite>>;
+  readonly citations: readonly Citation[];
 };
 
 /** How the answer uses a paper. "accepted" is earlier work the lawyer accepted into the matter. */
-export type PaperRole = "supports" | "against" | "relied" | "prepared" | "accepted";
+export type PaperRole = CitedRole | "prepared" | "accepted";
 /** A paper tile's whole state on the wall: uncited, or lit in its role. */
 export type TileState = "uncited" | PaperRole;
 
@@ -75,9 +90,6 @@ export const paperIn = (matter: MatterData, id: string): Paper | undefined =>
   matter.papers.find((p) => p.id === id);
 export const citeIn = (matter: MatterData, id: string): Cite | undefined =>
   Object.hasOwn(matter.cites, id) ? matter.cites[id] : undefined;
-
-/** A cited paper's role in the answer. */
-export const roleOf = (p: Paper): PaperRole | null => p.role;
 
 export const ROLE_WORD: Record<PaperRole, Key> = {
   supports: "Supports",
@@ -89,6 +101,9 @@ export const ROLE_WORD: Record<PaperRole, Key> = {
 
 /* ---------- the bench mark: one filled circle on a fixed scale ---------- */
 
+/** Who decided a judgment: a court, or a tribunal. */
+export type Forum = "court" | "tribunal";
+
 export type Bench = "constitution" | "three" | "two" | "single" | "tribunal";
 export const BENCH_LABEL: Record<Bench, Key> = {
   constitution: "Constitution bench",
@@ -98,8 +113,8 @@ export const BENCH_LABEL: Record<Bench, Key> = {
   tribunal: "Tribunal",
 };
 /** 16 px for five or more judges, 12 for three or four, 8 for two, 6 for one, 4 for a tribunal. */
-export function benchOf(court: string, judges: number): Bench {
-  if (court === "Tribunal") return "tribunal";
+export function benchOf(forum: Forum, judges: number): Bench {
+  if (forum === "tribunal") return "tribunal";
   if (judges >= 5) return "constitution";
   if (judges >= 3) return "three";
   if (judges === 2) return "two";
@@ -125,22 +140,13 @@ export const keepIds = (s: string) =>
 
 /* ---------- paper book pages ---------- */
 
-/** "PB 33 to 40" -> { from: "33", to: "40" }; "Note" -> a word in the numeral's place. */
-export function pages(
-  pb: string,
-): { kind: "pages"; from: string; to: string | null } | { kind: "word"; word: string } {
-  const m = /^PB (\d+)(?: to (\d+))?$/.exec(pb);
-  if (m === null || m[1] === undefined) return { kind: "word", word: pb };
-  return { kind: "pages", from: m[1], to: m[2] ?? null };
-}
-/** A paper book page in words, for labels: "PB 33 to 40", "PB 33 से 40". A word in the numeral's place, such as
- * "Note", is the app's and comes as it is. */
-export function pbWords(lang: Lang, pb: string): string {
-  const p = pages(pb);
-  if (p.kind === "word") return pb;
-  return p.to === null
-    ? t(lang, "PB {n}", { n: p.from })
-    : t(lang, "PB {from} to {to}", { from: p.from, to: p.to });
+/** A paper book place in words, for labels: "PB 31", "PB 33 to 40", "PB 33 से 40". A word in the numeral's place,
+ * such as "Note", comes as it is. */
+export function pbWords(lang: Lang, pb: PaperBookPlace): string {
+  if ("word" in pb) return pb.word;
+  return pb.from === pb.to
+    ? t(lang, "PB {n}", { n: pb.from })
+    : t(lang, "PB {from} to {to}", { from: pb.from, to: pb.to });
 }
 /** A paper's short title: cut before the first comma. */
 export const shortTitle = (title: string) => title.split(",")[0] ?? title;
@@ -182,12 +188,31 @@ export function segmentsOf(block: string, matter: MatterData): Segment[] {
   return out;
 }
 
-/** The papers an answer cites, by id, with their role. */
-export function citedPapers(matter: MatterData): Map<string, PaperRole> {
-  const out = new Map<string, PaperRole>();
-  for (const p of matter.papers) {
-    const r = roleOf(p);
-    if (r !== null) out.set(p.id, r);
+/** A paper the answer cites, with its citation. */
+export type CitedPaper = { readonly paper: Paper; readonly citation: Citation };
+
+/** The answer's citation of a paper, with the paper. Undefined when the answer doesn't cite it, and when the citation
+ * names a paper the matter doesn't hold: such a citation lights nothing and opens no card. Where the answer cites one
+ * paper twice, the first citation counts. */
+export function citedPaper(
+  citations: readonly Citation[],
+  papers: readonly Paper[],
+  id: PaperId,
+): CitedPaper | undefined {
+  const citation = citations.find((c) => c.paperId === id);
+  const paper = citation === undefined ? undefined : papers.find((p) => p.id === id);
+  return citation === undefined || paper === undefined ? undefined : { paper, citation };
+}
+
+/** The papers an answer cites, by id, with their role, in the order the answer cites them. A citation of a paper the
+ * matter doesn't hold is left out. */
+export function citedPapers(
+  citations: readonly Citation[],
+  papers: readonly Paper[],
+): Map<PaperId, CitedRole> {
+  const out = new Map<PaperId, CitedRole>();
+  for (const c of citations) {
+    if (!out.has(c.paperId) && papers.some((p) => p.id === c.paperId)) out.set(c.paperId, c.role);
   }
   return out;
 }

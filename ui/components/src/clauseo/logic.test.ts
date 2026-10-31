@@ -10,7 +10,16 @@ import {
   type AcceptState,
 } from "./logic.ts";
 import { runs } from "../lib/runs.ts";
-import { benchOf, keepIds, pages, pbWords, tileTitle } from "./matter.ts";
+import {
+  benchOf,
+  citedPaper,
+  citedPapers,
+  keepIds,
+  pbWords,
+  tileTitle,
+  type Citation,
+  type Paper,
+} from "./matter.ts";
 
 describe("Citations show whole rows only", () => {
   // four rows of 56 px, 2 px apart, from 692 down: the room at 1440 by 900
@@ -106,20 +115,41 @@ describe("word lookups in both languages", () => {
 });
 
 describe("the matter's words", () => {
-  test("paper book pages: a range, or a word in the numeral's place", () => {
-    expect(pages("PB 1 to 12")).toEqual({ kind: "pages", from: "1", to: "12" });
-    expect(pages("PB 31")).toEqual({ kind: "pages", from: "31", to: null });
-    expect(pages("Note")).toEqual({ kind: "word", word: "Note" });
-    expect(pbWords("hi", "PB 33 to 40")).toBe(
-      t("hi", "PB {from} to {to}", { from: "33", to: "40" }),
-    );
+  test("paper book pages in words: a range, one page, or a word in the numeral's place", () => {
+    expect(pbWords("en", { from: 33, to: 40 })).toBe("PB 33 to 40");
+    expect(pbWords("hi", { from: 33, to: 40 })).toBe("PB 33 से 40");
+    expect(pbWords("en", { from: 31, to: 31 })).toBe("PB 31");
+    expect(pbWords("hi", { from: 31, to: 31 })).toBe("PB 31");
+    expect(pbWords("en", { word: "Note" })).toBe("Note");
+    expect(pbWords("hi", { word: "टिप्पणी" })).toBe("टिप्पणी");
   });
-  test("the bench mark's fixed scale", () => {
-    expect(benchOf("Supreme Court", 5)).toBe("constitution");
-    expect(benchOf("Supreme Court", 3)).toBe("three");
-    expect(benchOf("Supreme Court", 2)).toBe("two");
-    expect(benchOf("High Court", 1)).toBe("single");
-    expect(benchOf("Tribunal", 3)).toBe("tribunal");
+  test("the bench mark's fixed scale: a court by its judges, a tribunal whatever its size", () => {
+    expect(benchOf("court", 5)).toBe("constitution");
+    expect(benchOf("court", 3)).toBe("three");
+    expect(benchOf("court", 2)).toBe("two");
+    expect(benchOf("court", 1)).toBe("single");
+    expect(benchOf("tribunal", 3)).toBe("tribunal");
+    expect(benchOf("tribunal", 1)).toBe("tribunal");
+  });
+  test("the answer's citations, looked up against the matter's papers", () => {
+    const papers: Paper[] = [
+      { id: "notice", title: "Notice", pb: { from: 1, to: 4 }, kind: "correspondence" },
+      { id: "plaint", title: "Plaint", pb: { from: 5, to: 9 }, kind: "pleading" },
+    ];
+    const quote = { pin: "Para 2, PB 1", excerpt: "told in writing", mark: "" };
+    const citations: Citation[] = [
+      { paperId: "notice", role: "supports", ...quote },
+      { paperId: "gone", role: "against", ...quote },
+      { paperId: "notice", role: "against", ...quote },
+    ];
+    expect(citedPaper(citations, papers, "notice")).toEqual({
+      paper: papers[0],
+      citation: citations[0],
+    });
+    // uncited, and cited but missing from the matter: neither lights nor opens a card
+    expect(citedPaper(citations, papers, "plaint")).toBeUndefined();
+    expect(citedPaper(citations, papers, "gone")).toBeUndefined();
+    expect([...citedPapers(citations, papers)]).toEqual([["notice", "supports"]]);
   });
   test("identifiers hold together", () => {
     expect(keepIds("(2001) 1 SCC 1")).toBe("(2001)\u00A01\u00A0SCC\u00A01");

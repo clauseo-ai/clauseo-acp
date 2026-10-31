@@ -2,9 +2,17 @@ import { Button } from "../ui/button.tsx";
 import { useWords } from "../lib/words.ts";
 import { vt } from "../lib/words-versions.ts";
 import { Heading } from "./heading.tsx";
-import { pages, pbWords, shortTitle, type Cite, type Paper, type TileState } from "./matter.ts";
+import {
+  citedPapers,
+  pbWords,
+  shortTitle,
+  type Cite,
+  type Citation,
+  type Paper,
+  type TileState,
+} from "./matter.ts";
 import { useMatter } from "./matter-context.ts";
-import { PaperTile, type Numeral } from "./paper-tile.tsx";
+import { PaperTile } from "./paper-tile.tsx";
 import { useRoom } from "./room-scope.ts";
 import { eraOf, type Version } from "./versions-model.ts";
 import { Citations } from "./citations.tsx";
@@ -28,6 +36,7 @@ export function VersionWall({
   own,
   copy = null,
   papers,
+  citations,
   cites,
 }: {
   version: Version;
@@ -39,6 +48,8 @@ export function VersionWall({
   copy?: string | null;
   /** The matter's papers in paper book order; the matter in reach when left out. */
   papers?: readonly Paper[];
+  /** The answer's citations of the papers; the matter in reach when left out. */
+  citations?: readonly Citation[];
   /** The judgments the draft cites, by id; the matter in reach when left out. */
   cites?: Readonly<Record<string, Cite>>;
 }) {
@@ -46,6 +57,7 @@ export function VersionWall({
   const { id } = useRoom();
   const matter = useMatter();
   const all = papers ?? matter.papers;
+  const roles = citedPapers(citations ?? matter.citations, all);
   const cited = cites ?? matter.cites;
   const count = all.filter((p) => version.state.papers.includes(p.id)).length;
   const era = (p: string) => {
@@ -76,9 +88,8 @@ export function VersionWall({
         <ol className="facade ver-facade" data-looking={looking ? "" : undefined}>
           {all.map((paper) => {
             const more = sr(paper.id);
-            const state: TileState = paper.role ?? "uncited";
-            const pb = pages(paper.pb);
-            const numeral: Numeral = pb.kind === "pages" ? pb : { kind: "word", word: pb.word };
+            const role = roles.get(paper.id);
+            const state: TileState = role ?? "uncited";
             const label = w.t("{title}, {pb}", {
               title: paper.title,
               pb: pbWords(w.lang, paper.pb),
@@ -88,10 +99,10 @@ export function VersionWall({
                 key={paper.id}
                 id={paper.id}
                 state={state}
-                numeral={numeral}
+                numeral={paper.pb}
                 title={shortTitle(paper.title)}
                 label={more === null ? label : `${label}. ${more}`}
-                card={paper.role !== null && paper.excerpt !== undefined && !looking}
+                card={role !== undefined && !looking}
                 era={era(paper.id)}
               />
             );
@@ -102,7 +113,7 @@ export function VersionWall({
                 key={o.id}
                 id={o.id}
                 state={o.state}
-                numeral={{ kind: "word", word: o.word }}
+                numeral={{ word: o.word }}
                 title={o.title}
                 label={sr(o.id) ?? o.title}
                 era={era(o.id)}
@@ -116,7 +127,7 @@ export function VersionWall({
                 key={copyId}
                 id={copyId}
                 state="uncited"
-                numeral={{ kind: "word", word: o.word }}
+                numeral={{ word: o.word }}
                 title={copy}
                 label={copy}
               />,

@@ -2,7 +2,7 @@ import { use, useEffect, useRef } from "react";
 import { motionAllowed } from "../lib/display.ts";
 import { isWide } from "./layout.ts";
 import { dur } from "./motion.ts";
-import { citeIn, paperIn, roleOf, type MatterData } from "./matter.ts";
+import { citedPaper, citeIn, type MatterData } from "./matter.ts";
 import { MatterContext } from "./matter-context.ts";
 import { useRoom, type RoomNodes } from "./room-scope.ts";
 
@@ -67,8 +67,7 @@ function line(g: SVGGElement, r: Route) {
 /** The line's colour: the paper's role, or for a judgment primary for us and red for theirs. */
 function lineRole(matter: MatterData, kind: "paper" | "cite", id: string): string {
   if (kind === "cite") return citeIn(matter, id)?.stance === "against" ? "against" : "cite";
-  const p = paperIn(matter, id);
-  return (p === undefined ? null : roleOf(p)) ?? "relied";
+  return citedPaper(matter.citations, matter.papers, id)?.citation.role ?? "relied";
 }
 
 /** The provenance line, on request only, and the scrim under an open card. One fine 1.5 px line in the role's colour

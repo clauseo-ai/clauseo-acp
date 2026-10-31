@@ -123,7 +123,7 @@ export function JudgmentPane({
             return (
               <li key={s.id} className="rd-since-row" data-treatment={s.treatment}>
                 <span className="rd-since-mark">
-                  <BenchMark bench={benchOf("Supreme Court", s.bench)} stance="for" />
+                  <BenchMark bench={benchOf("court", s.bench)} stance="for" />
                 </span>
                 {can ? (
                   <button

@@ -1,5 +1,11 @@
 // The parts gallery's invented matter: papers and judgments the parts name by id. None of it is real.
-import type { Cite, CiteCheck, MatterData, Paper } from "@clauseo/components/clauseo/matter.ts";
+import type {
+  Cite,
+  CiteCheck,
+  Citation,
+  MatterData,
+  Paper,
+} from "@clauseo/components/clauseo/matter.ts";
 
 const CHECK: CiteCheck = {
   waitingFor: "judgments since 2001 that cite it",
@@ -12,8 +18,35 @@ export const PAPERS: readonly Paper[] = [
   {
     id: "notice",
     title: "Notice to the bank, 3 March 2024",
-    pb: "PB 1 to 4",
+    pb: { from: 1, to: 4 },
     kind: "correspondence",
+  },
+  {
+    id: "reply",
+    title: "Reply to the notice, 20 March 2024",
+    pb: { from: 5, to: 7 },
+    kind: "correspondence",
+  },
+  {
+    id: "agreement",
+    title: "Supply agreement, 1 April 2022",
+    pb: { from: 8, to: 21 },
+    kind: "document",
+  },
+  { id: "plaint", title: "Plaint, 2 May 2024", pb: { from: 22, to: 40 }, kind: "pleading" },
+  {
+    id: "order",
+    title: "Order of the trial court, 9 July 2024",
+    pb: { from: 41, to: 43 },
+    kind: "order",
+  },
+  { id: "note", title: "Note on limitation", pb: { word: "Note" }, kind: "note" },
+];
+
+/** The answer's citations of the papers. */
+export const CITATIONS: readonly Citation[] = [
+  {
+    paperId: "notice",
     role: "supports",
     pin: "Para 2, PB 1",
     excerpt:
@@ -21,45 +54,18 @@ export const PAPERS: readonly Paper[] = [
     mark: "told in writing",
   },
   {
-    id: "reply",
-    title: "Reply to the notice, 20 March 2024",
-    pb: "PB 5 to 7",
-    kind: "correspondence",
+    paperId: "reply",
     role: "against",
     pin: "Para 3, PB 5",
     excerpt: "The bank denies that any notice reached its branch before the account was closed.",
     mark: "denies",
   },
   {
-    id: "agreement",
-    title: "Supply agreement, 1 April 2022",
-    pb: "PB 8 to 21",
-    kind: "document",
+    paperId: "agreement",
     role: "relied",
     pin: "Clause 14, PB 17",
     excerpt: "Either party may end this agreement by thirty days' written notice to the other.",
     mark: "thirty days' written notice",
-  },
-  {
-    id: "plaint",
-    title: "Plaint, 2 May 2024",
-    pb: "PB 22 to 40",
-    kind: "pleading",
-    role: null,
-  },
-  {
-    id: "order",
-    title: "Order of the trial court, 9 July 2024",
-    pb: "PB 41 to 43",
-    kind: "order",
-    role: null,
-  },
-  {
-    id: "note",
-    title: "Note on limitation",
-    pb: "Note",
-    kind: "note",
-    role: null,
   },
 ];
 
@@ -70,6 +76,7 @@ export const CITES: Readonly<Record<string, Cite>> = {
     cite: "(2001) 1 SCC 1",
     decided: "12 January 2001",
     court: "Supreme Court",
+    forum: "court",
     bench: 3,
     pin: "para 17",
     stance: "for",
@@ -81,6 +88,7 @@ export const CITES: Readonly<Record<string, Cite>> = {
     cite: "(2004) 3 SCC 210",
     decided: "4 March 2004",
     court: "Supreme Court",
+    forum: "court",
     bench: 2,
     pin: "para 9",
     stance: "for",
@@ -92,6 +100,7 @@ export const CITES: Readonly<Record<string, Cite>> = {
     cite: "(2010) 2 ABC 45",
     decided: "18 August 2010",
     court: "High Court of Delhi",
+    forum: "court",
     bench: 1,
     pin: null,
     stance: "against",
@@ -103,4 +112,4 @@ export const CITES: Readonly<Record<string, Cite>> = {
   },
 };
 
-export const MATTER: MatterData = { papers: PAPERS, cites: CITES };
+export const MATTER: MatterData = { papers: PAPERS, cites: CITES, citations: CITATIONS };
