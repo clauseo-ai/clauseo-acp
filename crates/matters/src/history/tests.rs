@@ -10,6 +10,9 @@ use crate::write;
 
 mod blobs;
 mod cache;
+mod io_errors;
+mod present;
+mod refusals;
 mod repo;
 mod trees;
 
