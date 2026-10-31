@@ -14,6 +14,9 @@ mod write;
 #[path = "store/close.rs"]
 mod close;
 #[cfg(test)]
+#[path = "store/edges.rs"]
+mod edges;
+#[cfg(test)]
 #[path = "store/errors.rs"]
 mod errors;
 #[cfg(test)]
