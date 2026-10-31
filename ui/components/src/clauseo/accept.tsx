@@ -81,7 +81,6 @@ export function Accept({ state, words, onAccept, onUndo }: AcceptProps) {
           kind="quiet"
           size="small"
           className="accept-undo"
-          aria-label={w.t("Undo accepting this answer")}
           onClick={() => {
             focusNext.current = true;
             onUndo();

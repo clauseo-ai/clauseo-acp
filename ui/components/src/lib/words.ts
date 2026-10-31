@@ -74,7 +74,6 @@ const HI = {
   "This answer": "यह उत्तर",
   "Accept into the matter": "स्वीकार कर मामले में जोड़ें",
   "Not yet accepted": "अभी स्वीकृत नहीं",
-  "Undo accepting this answer": "इस उत्तर की स्वीकृति पूर्ववत करें",
   "Undo accepting the answer": "उत्तर की स्वीकृति पूर्ववत करें",
   "{why}.": "{why}।",
   "{title}. {where}.": "{title}। {where}।",

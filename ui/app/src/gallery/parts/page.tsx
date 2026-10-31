@@ -16,7 +16,7 @@ export function PartsPage() {
       <LayerProvider>
         <MatterContext value={MATTER}>
           <RoomScopeProvider>
-            <div className="grid content-start gap-s8 min-h-screen bg-ground text-primary px-s6 pt-s6 pb-s10">
+            <main className="grid content-start gap-s8 min-h-screen bg-ground text-primary px-s6 pt-s6 pb-s10">
               <h1 lang="en" className="font-en text-ui text-primary">
                 Clauseo parts
               </h1>
@@ -25,7 +25,7 @@ export function PartsPage() {
               <VersionsParts />
               <EdgeParts />
               <ReaderParts />
-            </div>
+            </main>
           </RoomScopeProvider>
         </MatterContext>
       </LayerProvider>
