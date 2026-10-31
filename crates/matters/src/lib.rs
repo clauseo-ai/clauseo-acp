@@ -8,7 +8,7 @@
 //!   trailers, the exclusion list, the stat cache (`history.git/index`), the loose-object
 //!   compression rule and the sync order.
 //! - Creating and importing a matter (the scan, refused folders, warnings, cancel), opening one
-//!   again, locating a moved folder and repairing a deleted marker, `before-turn` and
+//!   again, locating a moved folder and repairing a deleted `matter.json`, `before-turn` and
 //!   `after-turn` checkpoints with their diff, undoing a step, restoring a version (the whole
 //!   matter or chosen files), and comparing and reading versions.
 //! - The document rules: excluded names, the per-file size cap, cloud-only placeholders (never
@@ -18,8 +18,8 @@
 //!
 //! - [`Matter`]: [`Matter::create`], [`Matter::import`] and [`Matter::open`] make one;
 //!   [`Matter::locate`] opens one from the folder the lawyer picked after it moved, and
-//!   [`Matter::relink`] writes a deleted or damaged marker again where the history says the
-//!   folder is;
+//!   [`Matter::relink`] writes a deleted or damaged `matter.json` again where the history says
+//!   the folder is; [`same_or_nested`] compares two folders as the refused-folder check does;
 //!   [`Matter::before_turn`] and [`Matter::after_turn`] take checkpoints ([`Checkpoint`]);
 //!   [`Matter::edited_since`] and [`Matter::undo`] undo a step ([`UndoRequest`], [`Undone`]);
 //!   [`Matter::timeline`] lists the checkpoints, rebuilt from the trailers on open;
@@ -101,6 +101,7 @@ mod writeback;
 pub use error::{Error, MissingReason, Refusal};
 pub use matter::Matter;
 pub use probe::{OsProbe, PlaceholderProbe};
+pub use refuse::same_or_nested;
 pub use scan::scan;
 pub use types::{
     Checkpoint, CheckpointOutcome, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES, IMPORT_WARN_BYTES,

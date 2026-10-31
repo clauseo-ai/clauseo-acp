@@ -68,7 +68,7 @@ pub(crate) enum Found {
     /// The folder does not exist, or is not a folder.
     NoFolder,
     /// The folder has no `matter.json`.
-    None,
+    NoMarker,
     /// A file that does not read as `matter.json`.
     Unreadable,
     /// A matter's id.
@@ -77,12 +77,12 @@ pub(crate) enum Found {
 
 impl Found {
     /// The [`Error::FolderMissing`] for matter `id` in `folder`, or `Ok` when the marker names it.
-    pub(crate) fn expect(self, folder: &Path, id: MatterId) -> Result<(), Error> {
+    pub(crate) fn require(self, folder: &Path, id: MatterId) -> Result<(), Error> {
         let reason = match self {
             Self::Matter(found) if found == id => return Ok(()),
             Self::Matter(other) => MissingReason::OtherMatter(other),
             Self::NoFolder => MissingReason::NoFolder,
-            Self::None => MissingReason::NoMatterJson,
+            Self::NoMarker => MissingReason::NoMatterJson,
             Self::Unreadable => MissingReason::Unreadable,
         };
         Err(Error::FolderMissing {
@@ -105,14 +105,14 @@ pub(crate) fn read(folder: &Path) -> Result<Found, Error> {
     match std::fs::read(&file) {
         Ok(bytes) => Ok(serde_json::from_slice::<MatterJson>(&bytes)
             .map_or(Found::Unreadable, |json| Found::Matter(json.matter_id))),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Found::None),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Found::NoMarker),
         Err(err) => Err(Error::io("read", file, err)),
     }
 }
 
 /// Checks that `folder` exists and its `matter.json` names matter `id`.
 pub(crate) fn check(folder: &Path, id: MatterId) -> Result<(), Error> {
-    read(folder)?.expect(folder, id)
+    read(folder)?.require(folder, id)
 }
 
 /// Removes `matter.json`, and `.clauseo` if that leaves it empty; for a cancelled or failed

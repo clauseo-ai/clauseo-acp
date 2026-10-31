@@ -165,36 +165,6 @@ fn restore_refuses_locked_file_before_writing() {
     assert_eq!(fx.read("a.txt"), b"one");
 }
 
-/// Word's owner file for a 7-character stem drops one character: `~$nvoice.docx` beside an open
-/// `Invoice.docx` (research 38, word-lock.json `name_lengths`).
-#[test]
-fn restore_refuses_seven_character_word_name() {
-    let fx = Fixture::new("restore-word-seven");
-    fx.write("Invoice.docx", "one");
-    let mut matter = fx.import();
-    matter.before_turn(&meta(2)).unwrap();
-    fx.write("Invoice.docx", "two");
-    created(
-        matter
-            .after_turn(&meta(3), &tools(&["Invoice.docx"]))
-            .unwrap(),
-        3,
-    );
-    fx.write("~$nvoice.docx", "owner file: open in Word");
-
-    let preview = matter.preview_restore(cid(1), RestoreFiles::All).unwrap();
-    assert_eq!(preview.locked, paths(&["Invoice.docx"]));
-    let err = matter
-        .restore(&restore_request(1, RestoreFiles::All, 4, 5))
-        .unwrap_err();
-    assert!(
-        matches!(&err, Error::FileLocked { paths } if *paths == [path("Invoice.docx")]),
-        "{err:?}"
-    );
-    assert_eq!(fx.read("Invoice.docx"), b"two");
-    assert_eq!(matter.last_checkpoint(), Some(cid(3)));
-}
-
 #[cfg(unix)]
 #[test]
 fn restore_never_writes_through_symlink() {

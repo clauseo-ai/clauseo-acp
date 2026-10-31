@@ -117,29 +117,32 @@ pub(crate) const fn hidden_attributes(current: u32) -> Option<u32> {
 }
 
 /// Windows: sets `FILE_ATTRIBUTE_HIDDEN` on the folder `dir`, keeping the attributes it has,
-/// unless it is hidden already or is not a plain folder (a link or junction is left alone). A
-/// failure is logged, not returned: hiding is cosmetic. Elsewhere nothing; the leading dot of
-/// `.clauseo` hides it on macOS and Linux.
+/// unless it is hidden already or is not a plain folder. "Plain" is std's `is_dir` on the
+/// link's own metadata: a symlink or junction (a name-surrogate reparse point) is left alone; a
+/// folder with any other reparse point, such as a `OneDrive` placeholder, is hidden like any other.
+/// A failure is logged, not returned: hiding is cosmetic. The first failure in a process is a
+/// warning and later ones are debug, so a share that refuses the attribute does not warn on every
+/// open. Elsewhere nothing; the leading dot of `.clauseo` hides it on macOS and Linux.
 pub(crate) fn hide_dir(dir: &Path) {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt as _;
-        let metadata = match std::fs::symlink_metadata(dir) {
-            Ok(metadata) => metadata,
-            Err(err) => {
-                tracing::warn!(path = %dir.display(), error = %err, "folder not hidden");
-                return;
+        let result = std::fs::symlink_metadata(dir).and_then(|metadata| {
+            if !metadata.is_dir() {
+                tracing::debug!(path = %dir.display(), "not a plain folder; not hidden");
+                return Ok(());
             }
-        };
-        if !metadata.is_dir() {
-            tracing::debug!(path = %dir.display(), "not a plain folder; not hidden");
-            return;
-        }
-        let Some(attributes) = hidden_attributes(metadata.file_attributes()) else {
-            return;
-        };
-        if let Err(err) = win32::set_attributes(dir, attributes) {
-            tracing::warn!(path = %dir.display(), error = %err, "folder not hidden");
+            match hidden_attributes(metadata.file_attributes()) {
+                Some(attributes) => windows::set_attributes(dir, attributes),
+                None => Ok(()),
+            }
+        });
+        if let Err(err) = result {
+            if HIDE_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                tracing::debug!(path = %dir.display(), error = %err, "folder not hidden");
+            } else {
+                tracing::warn!(path = %dir.display(), error = %err, "folder not hidden");
+            }
         }
     }
     #[cfg(not(windows))]
@@ -148,8 +151,12 @@ pub(crate) fn hide_dir(dir: &Path) {
     }
 }
 
+/// Whether [`hide_dir`] has warned once in this process.
 #[cfg(windows)]
-mod win32;
+static HIDE_WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(windows)]
+mod windows;
 
 /// Sets the modification time of the file `path`.
 #[cfg(test)]

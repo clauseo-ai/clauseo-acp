@@ -23,7 +23,7 @@ dunce = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 nix = { workspace = true, features = ["fs"] }
 
-# `SetFileAttributesW`, to hide `.clauseo` (write/win32.rs); the workspace's one `windows` line.
+# `SetFileAttributesW`, to hide `.clauseo` (write/windows.rs); the workspace's one `windows` line.
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 
