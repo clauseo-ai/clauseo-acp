@@ -1,5 +1,6 @@
-// Options shared by ui/components and ui/e2e. It lives here, not at ui/: oxlint resolves an extends
-// through the ui/app/components link, so a base at ui/ fails `pnpm -C ui/app run lint:types`.
+// Options shared by ui/components and ui/e2e. ui/app gets them through components/tsconfig.json.
+// The file lives here, not at ui/: oxlint resolves an extends through the ui/app/components link,
+// so a base at ui/ fails `pnpm -C ui/app run lint:types`.
 {
   "compilerOptions": {
     "target": "es2022",
