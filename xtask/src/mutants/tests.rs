@@ -16,7 +16,7 @@ mod wire;
 const UNTRACKED_CMD: &str = "git ls-files -z --others --exclude-standard -- *.rs";
 
 const CMD: &str = "cargo mutants --workspace --exclude crates/protocol/src/wire.rs --in-diff \
-                   target/xtask/mutants.diff --output target/xtask --jobs 4";
+                   target/xtask/mutants.diff --output target/xtask --jobs 2";
 const MISSED_FIX: &str = "    fix: add a test that fails on this change, or exclude it with a \
                           reason in .cargo/mutants.toml (the code owner approves it)";
 const DIFF_TEXT: &str = "diff --git a/xtask/src/main.rs b/xtask/src/main.rs\n";
