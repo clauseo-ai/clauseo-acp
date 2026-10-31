@@ -65,6 +65,8 @@ export interface App {
   pid: number;
   /** `performance.now()` just before the app was started. */
   startedAt: number;
+  /** `performance.now()` once the CDP connection to its webview was made. */
+  connectedAt: number;
   /** The temporary WebView2 data folder (`WEBVIEW2_USER_DATA_FOLDER`), new for each launch. */
   userDataFolder: string;
   /** Which launch on this test's folders: 1 for the first. */
@@ -284,6 +286,7 @@ async function launch(scratch: Scratch, n: number, owned: Set<Launched>): Promis
     throw new Error(`the app has no PID: ${appPath()}`);
   }
   launched.browser = await connect(port, deadline);
+  const connectedAt = performance.now();
   const page = await firstPage(launched.browser, deadline);
   launched.app = {
     page,
@@ -292,6 +295,7 @@ async function launch(scratch: Scratch, n: number, owned: Set<Launched>): Promis
     mode: mode(),
     pid,
     startedAt,
+    connectedAt,
     userDataFolder,
     launch: n,
   };

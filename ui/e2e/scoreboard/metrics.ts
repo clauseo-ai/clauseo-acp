@@ -56,7 +56,7 @@ export const METRICS = [
   },
   {
     id: "react_commits_per_frame_streaming",
-    label: "React commits per frame while streaming",
+    label: "React commits per frame while streaming, in the app",
     unit: "count",
     reportOnly: true,
   },

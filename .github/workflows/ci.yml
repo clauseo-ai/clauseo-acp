@@ -313,14 +313,18 @@ jobs:
   # run to MARKS_OUT; macos.ts launches it four times and writes the medians. Its numbers report and
   # alert, so a failure leaves the run green (continue-on-error, as mutants): a red CI run on main
   # would also hide that run's reducer-bench-summary from the comment, which reads main's
-  # successful runs only. The job is not a required check.
+  # successful runs only. The job is not a required check. It also runs the desktop crate's tests
+  # and clippy with the marks feature, which no other job builds: a failure there marks this job
+  # failed and skips the plays, and the run stays green as above.
   scoreboard-macos:
     name: scoreboard-macos
     needs: changes
     if: needs.changes.outputs.product == 'true'
     runs-on: macos-15
     continue-on-error: true
-    timeout-minutes: 60
+    # About 12 minutes of build and tests, then at worst 4 plays × 3 launches × 240 s
+    # (PLAY_TIMEOUT_MS and PLAY_ATTEMPTS in ui/e2e/scoreboard/macos.ts): 60 minutes.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -355,6 +359,19 @@ jobs:
       - name: Build fake_agent
         run: cargo build --release --locked -p clauseo-fake_agent
 
+      # The desktop crate's marks-only code and tests, which no other job compiles. After the app
+      # build, which writes the ui/app/dist the crate embeds.
+      - name: Install nextest at its pin
+        uses: ./.github/actions/install-pinned-tools
+        with:
+          tools: cargo-nextest
+
+      - name: Test the desktop crate with the marks feature
+        run: cargo nextest run -p clauseo-desktop --features marks --locked --profile ci
+
+      - name: clippy the desktop crate with the marks feature
+        run: cargo clippy -p clauseo-desktop --all-targets --features marks --locked -- -D warnings
+
       # Plain Node, no install: macos.ts imports Node's own modules and ui/e2e files only.
       - name: Speed scoreboard
         env:
@@ -363,8 +380,8 @@ jobs:
           SCOREBOARD_OUT: ${{ runner.temp }}/scoreboard-out
         # The runner stretches short sleeps: in PR #106's runs, 200 sleeps of 5 ms took 5.5 to 6.2 s
         # (App Nap off and `taskpolicy -a` changed nothing), so the stream ran about 85 s instead
-        # of 13 s. macos.ts then reports the paced numbers as not measured and keeps start-up and
-        # memory. The probe prints this run's figure first.
+        # of 13 s. macos.ts then reports first token, React commits per frame and IPC as not
+        # measured and keeps the rest. The probe prints this run's figure first.
         run: |
           set -euo pipefail
           # shellcheck disable=SC2016 # Perl's variables, not the shell's.

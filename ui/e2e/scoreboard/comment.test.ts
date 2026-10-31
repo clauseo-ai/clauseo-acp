@@ -254,6 +254,38 @@ test("docs-, CI- and xtask-only pull requests get no comment", async () => {
   expect(isProductPath("xtask/Cargo.toml")).toBe(false);
 });
 
+// The two workflows decide with grep whether a change is product code (and so whether the
+// scoreboards run); the comment decides with isProductPath. They must agree, or a pull request gets
+// a scoreboard the comment skips, or a comment waiting on a scoreboard that never ran.
+test("the workflows' product-path greps agree with isProductPath", () => {
+  const paths = [
+    "crates/x",
+    "ui/x",
+    "Cargo.lock",
+    "Cargo.toml",
+    "docs/x",
+    "xtask/x",
+    ".github/x",
+    "README.md",
+    "crates/x/Cargo.toml",
+    "xtask/Cargo.toml",
+  ];
+  for (const workflow of [".github/workflows/ci.yml", ".github/workflows/e2e-windows.yml"]) {
+    const lines = repoFile(workflow)
+      .split("\n")
+      .filter((line) => line.includes("product=$("));
+    expect(lines, workflow).toHaveLength(1);
+    const pattern = /grep -E '([^']+)'/.exec(lines[0]!)?.[1];
+    expect(pattern, workflow).toBeDefined();
+    // The pattern uses only what ERE and JavaScript read alike: anchors, groups, alternation and
+    // escaped dots.
+    const re = new RegExp(pattern!);
+    for (const path of paths) {
+      expect(re.test(path), `${workflow}: ${path}`).toBe(isProductPath(path));
+    }
+  }
+});
+
 test("a missing artifact is pending while a watched run is in progress, then not run", async () => {
   const gh = world()
     .route(`/repos/${REPO}/actions/runs?head_sha=${HEAD}&event=pull_request&per_page=100`, {
