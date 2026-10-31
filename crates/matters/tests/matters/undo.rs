@@ -203,6 +203,32 @@ fn undo_refuses_locked_file_and_writes_nothing() {
     assert_eq!(fx.read("a.txt"), b"one");
 }
 
+/// Word's owner file for a 7-character stem drops one character: `~$nvoice.docx` beside an open
+/// `Invoice.docx` (research 38, word-lock.json `name_lengths`).
+#[test]
+fn undo_refuses_seven_character_word_name() {
+    let fx = Fixture::new("undo-word-seven");
+    fx.write("Invoice.docx", "one");
+    let mut matter = fx.import();
+    matter.before_turn(&meta(2)).unwrap();
+    fx.write("Invoice.docx", "two");
+    created(
+        matter
+            .after_turn(&meta(3), &tools(&["Invoice.docx"]))
+            .unwrap(),
+        3,
+    );
+    fx.write("~$nvoice.docx", "owner file: open in Word");
+
+    let err = undo(&mut matter, (1, 3), &["Invoice.docx"], (4, 5)).unwrap_err();
+    assert!(
+        matches!(&err, Error::FileLocked { paths } if *paths == [path("Invoice.docx")]),
+        "{err:?}"
+    );
+    assert_eq!(fx.read("Invoice.docx"), b"two");
+    assert_eq!(matter.last_checkpoint(), Some(cid(3)));
+}
+
 #[test]
 fn undo_recreates_deleted_subfolder() {
     let fx = Fixture::new("undo-subfolder");

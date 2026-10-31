@@ -12,10 +12,44 @@ fn path(text: &str) -> MatterPath {
 fn owner_names_of_a_word_file() {
     assert_eq!(
         owner_names("Contract.docx"),
-        ["~$Contract.docx", "~$ntract.docx"]
+        ["~$Contract.docx", "~$ontract.docx", "~$ntract.docx"]
     );
-    assert_eq!(owner_names("ab"), ["~$ab"]);
-    assert_eq!(owner_names("éàb"), ["~$éàb", "~$b"]);
+    assert_eq!(owner_names("ab"), ["~$ab", "~$b"]);
+    assert_eq!(owner_names("a"), ["~$a"]);
+    assert_eq!(owner_names("éàb"), ["~$éàb", "~$àb", "~$b"]);
+}
+
+/// Every `name_lengths` row of R9's Word for Mac run (private #112,
+/// `measurements/g9-versions/results/macos-arm64/word-lock.json`): the owner file Word made is
+/// one of the names checked. The accented row is written here in NFC, as the document was.
+#[test]
+fn owner_names_cover_words_rule() {
+    let rows = [
+        ("a.docx", "~$a.docx"),
+        ("ab.docx", "~$ab.docx"),
+        ("abc.docx", "~$abc.docx"),
+        ("abcd.docx", "~$abcd.docx"),
+        ("abcde.docx", "~$abcde.docx"),
+        ("abcdef.docx", "~$abcdef.docx"),
+        ("abcdefg.docx", "~$bcdefg.docx"),
+        ("abcdefgh.docx", "~$cdefgh.docx"),
+        ("abcdefghijklmnopqrst.docx", "~$cdefghijklmnopqrst.docx"),
+        (
+            "Petition to quash the order of the lower court, final draft v3.docx",
+            "~$tition to quash the order of the lower court, final draft v3.docx",
+        ),
+        (
+            "P\u{e9}tition \u{e0} casser \u{f1}.docx",
+            "~$tition \u{e0} casser \u{f1}.docx",
+        ),
+    ];
+    for (document, owner) in rows {
+        assert!(
+            owner_names(document).iter().any(|name| name == owner),
+            "{document}: {owner} not in {:?}",
+            owner_names(document)
+        );
+    }
 }
 
 #[test]
@@ -27,8 +61,10 @@ fn files_with_an_owner_file_beside_them_are_locked() {
         "Contract.docx",
         "sub/Brief.docx",
         "Free.docx",
+        "Invoice.docx",
         "~$ntract.docx",
         "sub/~$Brief.docx",
+        "~$nvoice.docx",
     ] {
         drop(write::create_new(&root.join(name)).unwrap());
     }
@@ -40,9 +76,17 @@ fn files_with_an_owner_file_beside_them_are_locked() {
             path("Contract.docx"),
             path("Contract.docx"),
             path("Missing.docx"),
+            path("Invoice.docx"),
         ],
     );
-    assert_eq!(found, [path("Contract.docx"), path("sub/Brief.docx")]);
+    assert_eq!(
+        found,
+        [
+            path("Contract.docx"),
+            path("Invoice.docx"),
+            path("sub/Brief.docx")
+        ]
+    );
 }
 
 #[test]
