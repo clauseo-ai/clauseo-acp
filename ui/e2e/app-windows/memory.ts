@@ -132,9 +132,24 @@ export function treeMemory(tree: readonly TreeProcess[]): TreeMemory {
 
 /** What `command` prints. */
 async function powershell(command: string): Promise<string> {
+  return await runPowershell(["-Command", command]);
+}
+
+/**
+ * What the multi-line `script` prints. It goes as `-EncodedCommand` (UTF-16LE, base64), so its
+ * newlines and quotes reach PowerShell as written (close.ts's here-string needs both).
+ */
+export async function powershellScript(script: string): Promise<string> {
+  return await runPowershell([
+    "-EncodedCommand",
+    Buffer.from(script, "utf16le").toString("base64"),
+  ]);
+}
+
+async function runPowershell(args: readonly string[]): Promise<string> {
   const { stdout } = await promisify(execFile)(
     "powershell",
-    ["-NoProfile", "-NonInteractive", "-Command", command],
+    ["-NoProfile", "-NonInteractive", ...args],
     { encoding: "utf8", timeout: POWERSHELL_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 },
   );
   return stdout;
