@@ -70,7 +70,7 @@ to write instead.
 | Crate | Owns | May depend on | Never depends on | Status |
 |---|---|---|---|---|
 | `xtask` | check, ci, buildtime, budgets, doc checks | none of ours | tauri | exists |
-| `desktop` | Tauri shell: fixed plugin set, AppManifest, capabilities; later commands and the Channel bridge | host, settings, tauri | | exists |
+| `desktop` | Tauri shell: fixed plugin set, AppManifest, capabilities, the nine commands and the Channel bridge (0012) | host, protocol, settings, process, tauri, futures, async-io, serde, serde_json, memchr, uuid (dev: tauri-specta, specta) | | exists |
 | `protocol` | Event envelope, domain events, commands, queries, view patches, account limits, ids, error codes | serde, serde_json, uuid, compact_str, thiserror, specta, specta-serde | tauri, tokio, fs, process | exists |
 | `reducer` | Pure fold from events to thread and matter state and view patches; the snapshot format (`MessagePack`, `REDUCER_SCHEMA_VERSION`) | protocol, serde, rmp-serde | any I/O, clock, tauri | exists |
 | `reducer_bench` | The gungraun instruction-count bench of `reducer`'s fold (Linux, CI) | none (dev: protocol, reducer, gungraun) | tauri | exists |

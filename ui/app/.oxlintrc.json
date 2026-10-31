@@ -741,5 +741,5 @@
       }
     }
   ],
-  "ignorePatterns": ["dist/**"]
+  "ignorePatterns": ["dist/**", "src/transport/bindings.ts"]
 }

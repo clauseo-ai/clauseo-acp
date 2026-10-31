@@ -30,21 +30,23 @@ converted document. From there they can call any IPC command the page can reach.
 
 **What stops them.**
 
-- `built`: The one capability file grants no permission today; the `capabilities` check fails on
-  `remote`, `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`
+- `built`: The one capability file grants only the nine bridge commands, one permission each
+  ([0012](decisions/0012-desktop-bridge.md)); the `capabilities` check fails on `remote`,
+  `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`
 - `built`: A pinned CSP: no remote images or connections, no `unsafe-eval`, `object-src 'none'`,
   `base-uri 'none'`, Trusted Types enforced with one allowed policy, `clauseo-sanitize` (defence in
   depth: engines without support ignore it); the `tauri-config` check pins the string
-- `built`: An `AppManifest` in `build.rs`, so app commands go through the access check; the command
-  list is empty
+- `built`: An `AppManifest` in `build.rs`, so app commands go through the access check; it lists
+  the nine commands, and a test checks it against the code and the capability
 - `built`: No global Tauri object and a frozen prototype (`tauri-config` check); no asset protocol
   (`tauri-config` check, and `deny.toml` bans tauri's `protocol-asset` feature); no devtools in
   release builds (`deny.toml` bans the feature; Tauri turns devtools on in debug builds)
-- `designed`: Rust validates every command (types, opaque ids, allowed values); files are named by
-  opaque ids, never paths
-- `designed`: A minimal command surface: send, subscribe, acknowledge, answer a permission, pick a
-  folder, open a file or link
-- `designed`: Escalations only through native dialogs drawn by Rust, never a webview confirm.
+- `built`: Rust validates every command (types, opaque ids, allowed values); folders are named by
+  opaque ids the bridge issued, never paths
+- `built`: A minimal command surface: dispatch, query, subscribe, acknowledge, answer a permission,
+  pick a folder ([0012](decisions/0012-desktop-bridge.md)); `designed`: open a file or link
+- `built` for "always allow" and the folder picker: escalations only through native dialogs drawn
+  by Rust, never a webview confirm; `designed` for the rest
 - `designed`: The webview never navigates; links go through one `open_external` (https, http,
   mailto) with a native confirm; `open_file` opens only document types inside a matter
 - `designed`: Markdown renders without raw HTML; DOMPurify only on the few HTML-string paths
@@ -64,8 +66,8 @@ any ACP message, including permission requests with misleading text.
 - `designed`: A human approves only escalations: paths outside the matter, new web domains, sandbox
   off, full-access modes, "always allow", all through native dialogs drawn by Rust or a denial card that
   opens one
-- `designed`: Permission answers are checked against the options offered; options are labelled by
-  kind, not by the agent's text
+- `built`: Permission answers are checked against the options offered, in the bridge and again in
+  the host; `designed`: options are labelled by kind, not by the agent's text (the internal window)
 - `designed`: ACP message sizes are capped; Clauseo advertises no file or terminal access to the
   adapter
 - `designed`: The host checkpoints the matter before and after every turn, so any step can be undone
