@@ -4,14 +4,14 @@
 
 use clauseo_matters::{Checkpoint, CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
-    AgentSessionDetached, CheckpointKind, CheckpointRecorded, ElicitationExpired, ErrorCode,
-    ExpiryReason, FilesChanged, MatterId, PermissionExpired, StopReason, StreamId, ThreadId,
-    TurnEnded, TurnFailed, TurnId, TurnStoppedAtLimit,
+    CheckpointKind, CheckpointRecorded, ErrorCode, ExpiryReason, FilesChanged, MatterId,
+    StopReason, StreamId, ThreadId, TurnId,
 };
 
 use super::super::Actor;
 use super::super::input::MatterTag;
 use super::agents;
+use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{
     End, JobKind, Phase, Then, TurnJob, asks, cancel, current, failure, matter_of, state, steps,
@@ -88,7 +88,7 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
     current.end = Some(end);
     let expired = (|| -> Result<(), Error> {
         let mut out = Out::new(actor, thread, None)?;
-        expiries(actor, thread, &mut out, expiry)?;
+        Expiries::Pending(expiry).push_into(actor, &mut out)?;
         out.send(actor, Then::Nothing)
     })();
     if let Err(error) = expired {
@@ -127,36 +127,6 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
     }
 }
 
-/// `PermissionExpired` and `ElicitationExpired` for every request still pending.
-pub(super) fn expiries(
-    actor: &mut Actor,
-    thread: ThreadId,
-    out: &mut Out,
-    reason: ExpiryReason,
-) -> Result<(), Error> {
-    let (permissions, elicitations): (Vec<_>, Vec<_>) = actor
-        .loaded(StreamId::Thread(thread))
-        .map(|loaded| {
-            let permissions = loaded.sent.permissions().map(|(id, _)| id).collect();
-            let elicitations = loaded.sent.elicitations().map(|(id, _)| id).collect();
-            (permissions, elicitations)
-        })
-        .unwrap_or_default();
-    for request in permissions {
-        out.push(actor, PermissionExpired { request, reason })?;
-    }
-    for elicitation in elicitations {
-        out.push(
-            actor,
-            ElicitationExpired {
-                elicitation,
-                reason,
-            },
-        )?;
-    }
-    Ok(())
-}
-
 /// The after-turn checkpoint answered: step 7's commit, then step 8 (the snapshot is taken when
 /// `TurnEnded` folds; the writer passes on now).
 pub(super) fn on_after_turn(
@@ -177,73 +147,56 @@ pub(super) fn on_after_turn(
     // A commit of steps 6 and 7 may have failed after `end_turn` ran.
     end.store_failed(current.store_failed);
     let limit = current.limit.take();
-    let (expiry, detach) = (end.expiry, end.detach.clone());
     // A turn stopped at its limit stays `AtLimit` when only its checkpoint fails.
     let stop = match (&limit, end.stop, &end.failure) {
         (Some(_), StopReason::EndTurn, None) => StopReason::AtLimit,
         (_, stop, _) => stop,
     };
-    let logged = (|| -> Result<(), Error> {
-        let matter = matter_of(actor, thread)?;
-        let mut out = Out::new(actor, thread, None)?;
-        // Expiries step 6 could not log (its commit failed, the stream rolled back).
-        expiries(actor, thread, &mut out, expiry)?;
-        let mut failure = end.failure;
-        let mut checkpoint_after = None;
+    let mut close = TurnClose::new(turn, stop);
+    // Expiries step 6 could not log (its commit failed, the stream rolled back).
+    close.expiries = Expiries::Pending(end.expiry);
+    close.failure = end.failure;
+    close.limit = limit;
+    close.detach = end.detach;
+    let logged = matter_of(actor, thread).and_then(|matter| {
         match result {
-            Ok(checkpoint) => {
-                if let CheckpointOutcome::Created(id) = checkpoint.outcome {
-                    let recorded = CheckpointRecorded::new(
-                        id,
-                        CheckpointKind::AfterTurn,
-                        Some(thread),
-                        Some(turn),
-                    )
-                    .map_err(|error| Error::Internal(error.to_string()))?;
-                    out.push_matter(actor, matter, recorded)?;
-                }
-                if !checkpoint.changes.is_empty() || !checkpoint.skipped.is_empty() {
-                    let changed = FilesChanged {
-                        turn,
-                        files: checkpoint.changes,
-                        skipped: checkpoint.skipped,
-                    };
-                    out.push(actor, changed)?;
-                }
-                checkpoint_after = Some(checkpoint.outcome.id());
-            }
+            Ok(checkpoint) => after_events(&mut close, matter, thread, checkpoint)?,
             Err(error) => {
-                failure.get_or_insert((error.code(), Some(error.to_string())));
+                close
+                    .failure
+                    .get_or_insert((error.code(), Some(error.to_string())));
             }
         }
-        if let Some((code, detail)) = failure {
-            out.push(actor, TurnFailed { turn, code, detail })?;
-        }
-        out.push(
-            actor,
-            TurnEnded {
-                turn,
-                stop,
-                usage: None,
-                checkpoint_after,
-            },
-        )?;
-        if let (Some(limit), StopReason::AtLimit) = (limit, stop) {
-            let stopped = TurnStoppedAtLimit {
-                turn,
-                window: limit.window,
-                resets_at: limit.resets_at,
-                reason: limit.reason,
-            };
-            out.push(actor, stopped)?;
-        }
-        if let Some(reason) = end.detach {
-            out.push(actor, AgentSessionDetached { reason })?;
-        }
-        out.send(actor, Then::Closing(turn))
-    })();
-    failure::closing_sent(actor, thread, turn, (expiry, detach), logged);
+        close.send(actor, thread, Then::Closing(turn))
+    });
+    failure::closing_sent(actor, thread, &close, logged);
     finish(actor, thread);
+}
+
+/// The after-turn checkpoint's part of a close: matter `CheckpointRecorded { AfterTurn }` when
+/// R8 created it, `FilesChanged` when anything changed or was skipped, and `checkpoint_after`.
+pub(super) fn after_events(
+    close: &mut TurnClose,
+    matter: MatterId,
+    thread: ThreadId,
+    checkpoint: Checkpoint,
+) -> Result<(), Error> {
+    let turn = close.turn;
+    if let CheckpointOutcome::Created(id) = checkpoint.outcome {
+        let recorded =
+            CheckpointRecorded::new(id, CheckpointKind::AfterTurn, Some(thread), Some(turn))
+                .map_err(|error| Error::Internal(error.to_string()))?;
+        close.push_matter(matter, recorded);
+    }
+    if !checkpoint.changes.is_empty() || !checkpoint.skipped.is_empty() {
+        close.files = Some(FilesChanged {
+            turn,
+            files: checkpoint.changes,
+            skipped: checkpoint.skipped,
+        });
+    }
+    close.checkpoint_after = Some(checkpoint.outcome.id());
+    Ok(())
 }
 
 /// The turn is over: it lets go of the writer, which passes to the next queued turn; during

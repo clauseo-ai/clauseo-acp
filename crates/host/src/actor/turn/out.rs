@@ -35,6 +35,11 @@ impl Out {
         })
     }
 
+    /// The thread whose commit this is.
+    pub(super) const fn thread(&self) -> ThreadId {
+        self.thread
+    }
+
     /// Adds an event to the thread's stream.
     pub(super) fn push(
         &mut self,

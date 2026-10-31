@@ -12,6 +12,7 @@ mod agents;
 mod answers;
 mod asks;
 mod cancel;
+mod close;
 mod end;
 mod failure;
 mod inputs;
