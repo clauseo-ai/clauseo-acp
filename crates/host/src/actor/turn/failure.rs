@@ -46,9 +46,10 @@ pub(super) fn on_store_failure(actor: &mut Actor, thread: ThreadId, failure: &Fa
 
 /// `thread`'s stream drained after a failure; its sent view is the log's again.
 ///
-/// A failed end, and a failed undo commit, is retried once. A turn whose prompt is in flight logs its cancel commit if the
-/// failure refused it, and keeps waiting for the prompt's answer or the cancel fallback. A turn
-/// whose checkpoint runs ends when the checkpoint answers. A turn that never started ends now.
+/// A failed end, and a failed undo commit, is retried once. A turn whose prompt is in flight
+/// logs its cancel commit if the failure refused it, and keeps waiting for the prompt's answer
+/// or the cancel fallback. A turn whose checkpoint runs ends when the checkpoint answers. A turn
+/// that never started ends now.
 pub(super) fn on_unblocked(actor: &mut Actor, thread: ThreadId) {
     retry_closing(actor, thread);
     undo::retry(actor, thread);
