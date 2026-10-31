@@ -36,6 +36,7 @@ pub use clock::{Clock, Now, SystemClock};
 pub use config::{HostConfig, NoProfile, ProfileHook};
 pub use encode::EncodedEvent;
 pub use error::Error;
+pub use handle::{EventSubscription, Host, HostHandle, HostJoin, Subscription};
 #[cfg(feature = "test-support")]
 pub use ids::SequentialIds;
 pub use ids::{IdSource, RandomV7};
