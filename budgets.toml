@@ -235,6 +235,20 @@ measured_by = "bundle analysis"
 status = "unmeasured"
 source = "synthesis §4; doc 14; doc 17"
 
+# Measured when the room lands: ui/app's index.css imports the sheets of the parts the room shows.
+# All of the parts' CSS together came to 26,807 B brotli through the parts gallery build (#74).
+
+[[budget]]
+id = "room_css"
+metric = "the room's CSS, brotli"
+# Confirmed by Rohan, 2026-10-31 (#95).
+limit = 25.0
+unit = "KB"
+gate = "pr"
+measured_by = "bundle analysis"
+status = "unmeasured"
+source = "design DESIGN.md, Size"
+
 [[budget]]
 id = "checkpoint_per_turn"
 metric = "checkpoint per turn for a matter of 500 documents with 3 changed (proposed)"
