@@ -187,9 +187,17 @@ fn reopen_reads_snapshot_and_tail_only() {
         ]
     );
 
+    // The 81 commits go in as one group, so the log costs one sync rather than 81 (issue #83):
+    // the writer is held while they queue (81 of its 256 slots), then takes them all at once.
     let store = dir.open();
-    for commit in commits {
-        block_on(store.commit(commit)).unwrap();
+    let release = block_on(store.hold_writer()).unwrap();
+    let replies: Vec<_> = commits
+        .into_iter()
+        .map(|commit| block_on(store.send_commit(commit)).unwrap())
+        .collect();
+    release.send(()).unwrap();
+    for reply in replies {
+        block_on(reply).unwrap();
     }
     let stream = fixtures::stream();
     let reopen = block_on(store.reopen(stream, 4)).unwrap();

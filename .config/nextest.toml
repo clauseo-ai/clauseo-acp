@@ -3,14 +3,16 @@ slow-timeout = { period = "10s", terminate-after = 3 } # unit tests are fast; 30
 fail-fast = false
 
 # The store's tests wait on real syncs (synchronous=FULL), so they run at the disk's speed, not
-# the CPU's. On the Windows runner the disk once stalled for about 100 s and made most store tests
-# 25 to 57 times slower while tests that touch no disk ran at their usual speed (issue #83, run
-# 41131302912 attempt 1): seq_gap_on_commit_is_rejected took 21.5 s, not 0.46 s. Up to 120 s
-# rides out a stall that long; a hung test still ends there.
+# the CPU's. On the Windows runner the disk once stalled for about 140 s (issue #83, run
+# 41131302912 attempt 1): store tests were 25 to 57 times slower from 21:37:38 to 21:39:16, and
+# xtask tests that write to the temp folder stayed slow until about 21:40:00, while tests that
+# touch no disk kept their speed. A test slowed only while a stall of S seconds lasts ends within
+# S plus its usual time, whatever the slowdown: 140 s plus 8.9 s, the slowest store test on a good
+# Windows run before #83's fixes, is under 160 s. A hung test still ends there.
 # Applies to the ci profile too, which inherits default's overrides.
 [[profile.default.overrides]]
 filter = 'package(clauseo-store)'
-slow-timeout = { period = "10s", terminate-after = 12 }
+slow-timeout = { period = "10s", terminate-after = 16 }
 
 [profile.ci]
 retries = 0                        # flakes are bugs; reproduce with SEED
