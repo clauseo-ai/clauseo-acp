@@ -1,11 +1,9 @@
 //! What a prompt sends, how its stop reason comes back, and when a dropped prompt frees its
 //! session.
 
-use clauseo_acp::Error;
 use clauseo_protocol::{ContentBlock, StopReason, TextOrBlob};
-use serde_json::json;
 
-use crate::harness::{handshake, pipes, session, turn};
+use super::*;
 
 fn image() -> ContentBlock {
     ContentBlock::Image {

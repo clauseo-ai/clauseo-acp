@@ -66,7 +66,8 @@ fn line_at_8_mib_passes_and_one_byte_more_fails() {
     let mut exact = vec![b'x'; MAX_LINE_BYTES];
     exact.push(b'\n');
     assert_eq!(lines(exact, 1024 * 1024).unwrap()[0].len(), MAX_LINE_BYTES);
-    // Over the cap within one buffer, and over it across reads.
+    // Over the cap delivered in one read and in 1 MiB reads. Either way the line spans many fills
+    // of the 64 KiB read buffer, so the cap is checked on the joined line.
     for step in [usize::MAX / 2, 1024 * 1024] {
         let mut over = vec![b'x'; MAX_LINE_BYTES + 1];
         over.push(b'\n');

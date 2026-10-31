@@ -20,11 +20,6 @@ fn new_session() -> NewSession {
     }
 }
 
-/// Every event the receiver holds now.
-fn drain(events: &async_channel::Receiver<AcpEvent>) -> Vec<AcpEvent> {
-    std::iter::from_fn(|| events.try_recv().ok()).collect()
-}
-
 fn warning(session: Option<AgentSessionId>, warning: ProtocolWarning) -> AcpEvent {
     AcpEvent::Warning { session, warning }
 }

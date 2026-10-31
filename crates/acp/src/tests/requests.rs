@@ -1,11 +1,9 @@
 //! Answers to the agent's requests: each pending request has its own key, and a URL
 //! elicitation's accept is exactly `{"action": "accept"}`.
 
-use clauseo_acp::{AcpEvent, PendingKey};
 use clauseo_protocol::{AgentChoiceId, ElicitationRequest, ElicitationResponse};
-use serde_json::{Value, json};
 
-use crate::harness::{handshake, pipes};
+use super::*;
 
 fn permission_request(id: &str, tool_call: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "method": "session/request_permission", "params": {

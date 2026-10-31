@@ -2,10 +2,7 @@
 
 use std::io;
 
-use clauseo_acp::Error;
-use serde_json::json;
-
-use crate::harness::{Agent, pipes};
+use super::*;
 
 /// The longest line the agent may send, newline excluded: 8 MiB.
 const EIGHT_MIB: usize = 8 * 1024 * 1024;
@@ -70,7 +67,8 @@ fn interrupted_stdout_read_is_retried() {
     assert_eq!(driver, Ok(()));
 }
 
-/// A stdout read that fails for any other reason ends the connection: nothing after it is read.
+/// A stdout read that fails for any other reason ends the connection as a closed stdout does
+/// (`Error::Closed`): nothing after it is read.
 #[test]
 fn failed_stdout_read_ends_the_connection() {
     let (client, _events, driver, mut agent) = pipes();
@@ -83,6 +81,6 @@ fn failed_stdout_read_ends_the_connection() {
     };
     let (driver, init, ()) =
         futures::executor::block_on(async { futures::join!(driver, calls, script) });
-    assert!(driver.is_err(), "{driver:?}");
+    assert_eq!(driver, Err(Error::Closed));
     assert_eq!(init, Err(Error::Closed));
 }
