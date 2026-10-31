@@ -117,13 +117,19 @@ async function readPort(
   }
 }
 
-/** The port on the first line of `file`, or undefined while the file is missing or half written. */
+/**
+ * The read errors that mean "not yet": ENOENT before WebView2 creates the file, EBUSY while it
+ * holds the file open to write it (seen on windows-2025, run 41168327806).
+ */
+const NOT_YET = new Set(["ENOENT", "EBUSY"]);
+
+/** The port on the first line of `file`, or undefined while the file is missing or being written. */
 function portIn(file: string): number | undefined {
   let text: string;
   try {
     text = readFileSync(file, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    if (NOT_YET.has((error as NodeJS.ErrnoException).code ?? "")) {
       return undefined;
     }
     throw error;
