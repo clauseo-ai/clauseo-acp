@@ -1,9 +1,10 @@
-//! Lines the line filter passes on as JSON-RPC but the SDK's own decode refuses: a number out
-//! of `f64`'s range (`1e400`, which `serde_json` skips when it ignores a value but refuses when it
-//! builds one) and `serde_json`'s private `RawValue` token used as a map key, which the SDK refuses
-//! or reads as another value. Such a line is a malformed line like any other: it becomes a
-//! `ProtocolWarning::MalformedLine`, nothing is written back to the agent, and it never holds
-//! back the lines after it.
+//! Lines the line filter used to pass on as JSON-RPC but the SDK's own decode refuses or reads
+//! differently: a number out of `f64`'s range (`1e400`, which `serde_json` skips when it ignores a
+//! value but refuses when it builds one), `serde_json`'s private `RawValue` token used as a map
+//! key, shapes its `RawJsonRpcMessage` decode refuses, and an agent's line naming the filter's
+//! own marker method. Such a line is a malformed line like any other: it becomes a
+//! `ProtocolWarning::MalformedLine` of its own size, nothing is written back to the agent, and
+//! it never holds back the lines after it.
 
 use futures::executor::LocalPool;
 use futures::task::LocalSpawnExt;
@@ -18,6 +19,26 @@ const RAW_VALUE_KEY: &str = r#"{"jsonrpc":"2.0","method":"session/update","param
 /// A `session/update` whose `params` the SDK's decode reads as the array `[1]`: the `RawValue`
 /// token's string holds JSON, so the line is not refused but read differently.
 const RAW_VALUE_PARAMS: &str = r#"{"jsonrpc":"2.0","method":"session/update","params":{"$serde_json::private::RawValue":"[1]"}}"#;
+
+/// Lines the SDK's `RawJsonRpcMessage` decode refuses after its `Value` decode: a `method` that
+/// is not a string, an `id` that is not a `RequestId`, `params` that are not an object or an
+/// array, an `error` that is not a JSON-RPC error object.
+const NOT_JSON_RPC: [&str; 4] = [
+    r#"{"jsonrpc":"2.0","method":5,"params":{"sessionId":"s-1"}}"#,
+    r#"{"jsonrpc":"2.0","id":1.5,"method":"session/update","params":{"sessionId":"s-1"}}"#,
+    r#"{"jsonrpc":"2.0","method":"session/update","params":"s-1"}"#,
+    r#"{"jsonrpc":"2.0","id":0,"error":{}}"#,
+];
+/// An agent's line naming the filter's own malformed-line marker method, with a made-up size.
+const FAKE_MARKER: &str =
+    r#"{"jsonrpc":"2.0","method":"_clauseo/malformed_line","params":{"bytes":1}}"#;
+
+/// Every line above.
+fn refused() -> Vec<&'static str> {
+    let mut lines = vec![HUGE_NUMBER, RAW_VALUE_KEY, RAW_VALUE_PARAMS, FAKE_MARKER];
+    lines.extend(NOT_JSON_RPC);
+    lines
+}
 
 /// Starts a session, sends `line` `count` times and then one good update, and runs the driver
 /// until nothing more can happen. Returns the events and every line the client wrote after the
@@ -66,7 +87,7 @@ fn after() -> AcpEvent {
 
 #[test]
 fn a_line_the_sdk_refuses_is_a_malformed_line_and_nothing_is_written_back() {
-    for line in [HUGE_NUMBER, RAW_VALUE_KEY, RAW_VALUE_PARAMS] {
+    for line in refused() {
         let (received, written) = send_after_start(line, 1);
         assert_eq!(written, Vec::<String>::new(), "written back for {line}");
         assert_eq!(
@@ -85,7 +106,7 @@ fn a_line_the_sdk_refuses_is_a_malformed_line_and_nothing_is_written_back() {
 
 #[test]
 fn lines_the_sdk_refuses_never_stall_the_reader() {
-    for line in [HUGE_NUMBER, RAW_VALUE_KEY, RAW_VALUE_PARAMS] {
+    for line in refused() {
         let (received, _) = send_after_start(line, MAX_LINES_IN_FLIGHT + 1);
         assert!(
             received.contains(&after()),

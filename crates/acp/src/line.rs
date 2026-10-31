@@ -8,14 +8,16 @@
 //! `ProtocolWarning::MalformedLine` and nothing goes back. `Lines` caps nothing, so the 8 MiB
 //! cap and the [`Gate`] are here too.
 //!
-//! The SDK decodes each line it gets as a `serde_json` `Value` first, and answers a line that
-//! fails that decode with an error response too, so [`Envelope`]'s decode refuses every line
-//! the `Value` decode refuses or reads differently (see `envelope.rs`).
+//! The SDK decodes each line it gets as a `serde_json` `Value` and then as a
+//! `RawJsonRpcMessage`, and answers a line that fails either with an error response too, so
+//! [`Envelope`]'s decode refuses every line either refuses or reads differently (see
+//! `envelope.rs`).
 //!
 //! Hot path: every agent message takes it. The measured choices (64 KiB buffer, `memchr`,
-//! `from_utf8` then a decode that builds nothing, one exact allocation for a line that sits whole
-//! in the buffer) are in pull request #64; checking values in that decode rather than building a
-//! `Value` is in the pull request that added that check.
+//! `from_utf8` then a decode that builds no `Value`, escaped strings going through
+//! `serde_json`'s scratch buffer, one exact allocation for a line that sits whole in the buffer)
+//! are in pull request #64; checking values in that decode rather than building a `Value` is in
+//! pull request #102.
 
 use std::io;
 use std::pin::Pin;
@@ -184,12 +186,11 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
 }
 
 /// The lines the SDK's `Lines` transport reads, each copied to the frame tap. A UTF-8 JSON-RPC
-/// message that the SDK's `Value` decode reads the same way passes as it is
-/// ([`Envelope::is_message`]). Blank
-/// lines are skipped; any other line becomes a [`MALFORMED_LINE_METHOD`] notification, which the
-/// inbound handler turns into a
-/// [`ProtocolWarning::MalformedLine`](crate::ProtocolWarning::MalformedLine). A line over 8 MiB
-/// ends the stream with an error, which closes the connection (the driver reports
+/// message that the SDK's decode reads the same way passes as it is ([`Envelope::is_message`]).
+/// Blank lines are skipped; any other line, an agent's line naming [`MALFORMED_LINE_METHOD`]
+/// included, becomes a [`MALFORMED_LINE_METHOD`] notification, which the inbound handler turns
+/// into a [`ProtocolWarning::MalformedLine`](crate::ProtocolWarning::MalformedLine). A line
+/// over 8 MiB ends the stream with an error, which closes the connection (the driver reports
 /// `Error::Protocol`). Before each line it waits for the [`Gate`].
 pub(crate) fn incoming<R>(
     reader: R,
@@ -258,8 +259,9 @@ pub(crate) const MALFORMED_LINE_METHOD: &str = "_clauseo/malformed_line";
 
 /// Whether the inbound handler counts this notification off the [`Gate`]: the same lines
 /// [`incoming`] counted, a `session/update` whose `params` is an object ([`Envelope::is_update`])
-/// or a malformed-line marker. The SDK hands each of these to the handler exactly once (see
-/// [`Gate`] for when that holds).
+/// or a malformed-line marker, which only [`incoming`] writes (it turns an agent's line naming
+/// that method into a marker of its own). The SDK hands each of these to the handler exactly
+/// once (see [`Gate`] for when that holds).
 pub(crate) fn counted(method: &str, params: &serde_json::Value) -> bool {
     (method == "session/update" || method == MALFORMED_LINE_METHOD) && params.is_object()
 }

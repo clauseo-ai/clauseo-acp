@@ -1,45 +1,72 @@
-//! What the stdout line filter reads of a line ([`Envelope`]), decoded without a `Value` and
-//! refusing every line the SDK's `Value` decode refuses or reads differently ([`Checked`]).
+//! What the stdout line filter reads of a line ([`Envelope`]), decoded without a `Value`,
+//! refusing every line the SDK's decode refuses or reads differently: its `Value` decode
+//! ([`Checked`]) and then its `RawJsonRpcMessage` decode ([`Envelope::is_message`]).
 
 use std::fmt;
 
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 
-/// What the filter reads of a line, with no `Value` and no allocation: which JSON-RPC keys it
-/// has, and the shapes [`Envelope::is_update`] needs. Only a JSON object decodes: a number, a
-/// string or an array (ACP sends no batches) fails like a line that is not JSON, and so does a
-/// line the SDK's `Value` decode refuses ([`Checked`]). A key that appears twice counts as its
-/// last value, as in the SDK's own decode.
+use super::MALFORMED_LINE_METHOD;
+
+/// What the filter reads of a line, with no `Value` (escaped strings go through `serde_json`'s
+/// scratch buffer): which JSON-RPC keys it has, and the shapes of their values. Only a JSON
+/// object decodes: a number, a string or an array (ACP sends no batches) fails like a line that
+/// is not JSON, and so does a line the SDK's `Value` decode refuses ([`Checked`]). A key that
+/// appears twice counts as its last value, as in the SDK's own decode, which reads a `Value`
+/// first.
 #[derive(Debug, Default)]
 pub(super) struct Envelope {
     jsonrpc: Option<Shape>,
     method: Option<Shape>,
     params: Option<Shape>,
-    id: bool,
+    id: Option<Shape>,
     result: bool,
-    error: bool,
+    error: Option<Shape>,
 }
 
 impl Envelope {
-    /// A JSON-RPC message as the SDK's own decode reads one (`RawJsonRpcMessage`): `jsonrpc` is
-    /// `"2.0"`, and there is a `method` with no `result` or `error` (a request or a
-    /// notification), or an `id` with exactly one of `result` and `error` and no `method` (a
-    /// response). Anything else the SDK would answer with an error, and a log line an adapter
-    /// wrote to stdout is not one.
+    /// A JSON-RPC message as the SDK's own decode reads one (`RawJsonRpcMessage` in
+    /// agent-client-protocol 3.3.0, over the schema crate's `rpc` types): `jsonrpc` is `"2.0"`,
+    /// and either
+    /// - there is a `method` with no `result` or `error` (a request when it has an `id`, a
+    ///   notification when not): `method` is a string, `params` is absent, `null`, an object or
+    ///   an array, and the `id` if any is a `RequestId` (`null`, a string or an `i64`); or
+    /// - there is no `method`, a `RequestId` `id`, and exactly one of `result` (any value) and
+    ///   `error` (an object whose `code` is an `i32` and whose `message` is a string): a response.
+    ///
+    /// Anything else the SDK answers with an error, and a log line an adapter wrote to stdout is
+    /// not one. Nor is a line naming [`MALFORMED_LINE_METHOD`]: only the filter's own marker may
+    /// (the inbound handler counts it off the gate and turns it into a warning).
     pub(super) fn is_message(&self) -> bool {
-        let request = self.method.is_some() && !self.result && !self.error;
-        let response = self.method.is_none() && self.id && self.result != self.error;
-        self.jsonrpc == Some(Shape::Text { matches: true }) && (request || response)
+        if self.jsonrpc != Some(Shape::Text(Word::Version)) {
+            return false;
+        }
+        let id_fits = |id: Option<Shape>| id.is_some_and(Shape::is_request_id);
+        if self.method.is_some() && !self.result && self.error.is_none() {
+            matches!(self.method, Some(Shape::Text(word)) if word != Word::Marker)
+                && matches!(
+                    self.params,
+                    None | Some(Shape::Null | Shape::Object { .. } | Shape::Array)
+                )
+                && (self.id.is_none() || id_fits(self.id))
+        } else if self.method.is_none() && self.result != self.error.is_some() {
+            id_fits(self.id)
+                && (self.result || self.error == Some(Shape::Object { is_error: true }))
+        } else {
+            false
+        }
     }
 
-    /// A `session/update` notification the SDK decodes and hands the inbound handler: `jsonrpc`
-    /// is `"2.0"`, `params` an object, and there is no `id`, `result` or `error`.
+    /// A `session/update` notification the SDK decodes and hands the inbound handler: a message
+    /// ([`Envelope::is_message`]) whose `params` is an object, with no `id`, `result` or `error`.
     pub(super) fn is_update(&self) -> bool {
-        self.jsonrpc == Some(Shape::Text { matches: true })
-            && self.method == Some(Shape::Text { matches: true })
-            && self.params == Some(Shape::Object)
-            && !(self.id || self.result || self.error)
+        self.is_message()
+            && self.method == Some(Shape::Text(Word::Update))
+            && matches!(self.params, Some(Shape::Object { .. }))
+            && self.id.is_none()
+            && !self.result
+            && self.error.is_none()
     }
 }
 
@@ -62,14 +89,12 @@ impl<'de> Visitor<'de> for EnvelopeVisitor {
         let mut envelope = Envelope::default();
         while let Some(key) = map.next_key::<Key>()? {
             match key {
-                Key::Jsonrpc => envelope.jsonrpc = Some(map.next_value_seed(ShapeOf("2.0"))?),
-                Key::Method => {
-                    envelope.method = Some(map.next_value_seed(ShapeOf("session/update"))?);
-                }
-                Key::Params => envelope.params = Some(map.next_value_seed(ShapeOf(""))?),
-                Key::Id => envelope.id = map.next_value_seed(Checked).map(|()| true)?,
+                Key::Jsonrpc => envelope.jsonrpc = Some(map.next_value_seed(ShapeOf::VALUE)?),
+                Key::Method => envelope.method = Some(map.next_value_seed(ShapeOf::VALUE)?),
+                Key::Params => envelope.params = Some(map.next_value_seed(ShapeOf::VALUE)?),
+                Key::Id => envelope.id = Some(map.next_value_seed(ShapeOf::VALUE)?),
                 Key::Result => envelope.result = map.next_value_seed(Checked).map(|()| true)?,
-                Key::Error => envelope.error = map.next_value_seed(Checked).map(|()| true)?,
+                Key::Error => envelope.error = Some(map.next_value_seed(ShapeOf::ERROR)?),
                 Key::Other => map.next_value_seed(Checked)?,
             }
         }
@@ -112,7 +137,10 @@ impl Visitor<'_> for KeyVisitor {
             "id" => Key::Id,
             "result" => Key::Result,
             "error" => Key::Error,
-            _ => return CheckedKey.visit_str(v).map(|()| Key::Other),
+            _ => {
+                CheckedKey.visit_str(v)?;
+                Key::Other
+            }
         })
     }
 }
@@ -127,9 +155,9 @@ const RAW_VALUE_TOKEN: &str = "$serde_json::private::RawValue";
 /// differently. `IgnoredAny` would skip it without reading it: `serde_json` skips a number or a
 /// string escape by its characters alone and has no depth limit there, so a number out of
 /// `f64`'s range (`1e400`), a lone surrogate (`"\ud800"`) or nesting deeper than `serde_json`'s
-/// limit (127 levels) would pass here and fail in the SDK. `deserialize_any` decodes each number
-/// and string and counts depth as `Value` does, and [`CheckedKey`] refuses [`RAW_VALUE_TOKEN`] as
-/// a key.
+/// limit (127 levels) would pass here and fail in the SDK. `deserialize_any` decodes the value
+/// fully, counting depth as `Value` does, and calls the matching `visit_*` below; each returns
+/// `()`, so nothing is kept. [`CheckedKey`] refuses [`RAW_VALUE_TOKEN`] as a key.
 struct Checked;
 
 impl<'de> DeserializeSeed<'de> for Checked {
@@ -213,16 +241,56 @@ impl Visitor<'_> for CheckedKey {
 /// The kind of one value, read without keeping it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Shape {
-    /// A string; `matches` when it is the one [`ShapeOf`] looks for.
-    Text { matches: bool },
-    /// An object.
-    Object,
-    /// Anything else.
+    /// A string, and which of the words the filter looks for it is.
+    Text(Word),
+    /// An integer, and whether it fits the SDK's `i64` id and `i32` error code.
+    Integer { i64: bool, i32: bool },
+    /// An object; `is_error` when its `code` is an `i32` and its `message` a string, as the
+    /// SDK's `RawJsonRpcError` needs.
+    Object { is_error: bool },
+    /// An array.
+    Array,
+    /// `null`.
+    Null,
+    /// A boolean or a number with a fraction or an exponent.
     Other,
 }
 
-/// Reads a value's [`Shape`], comparing a string with the text it holds.
-struct ShapeOf(&'static str);
+impl Shape {
+    /// A `RequestId`: `null`, a string or an `i64`.
+    fn is_request_id(self) -> bool {
+        matches!(
+            self,
+            Self::Null | Self::Text(_) | Self::Integer { i64: true, .. }
+        )
+    }
+}
+
+/// The strings the filter tells apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Word {
+    /// `"2.0"`.
+    Version,
+    /// `"session/update"`.
+    Update,
+    /// [`MALFORMED_LINE_METHOD`].
+    Marker,
+    /// Any other string.
+    Other,
+}
+
+/// Reads a value's [`Shape`], walking what it does not keep with [`Checked`]. Only for `error`
+/// does it read an object's `code` and `message` ([`Shape::Object`]'s `is_error`).
+struct ShapeOf {
+    error: bool,
+}
+
+impl ShapeOf {
+    /// Any value but `error`.
+    const VALUE: Self = Self { error: false };
+    /// The value of `error`.
+    const ERROR: Self = Self { error: true };
+}
 
 impl<'de> DeserializeSeed<'de> for ShapeOf {
     type Value = Shape;
@@ -240,29 +308,56 @@ impl<'de> Visitor<'de> for ShapeOf {
     }
 
     fn visit_str<E: de::Error>(self, v: &str) -> Result<Shape, E> {
-        Ok(Shape::Text {
-            matches: v == self.0,
+        Ok(Shape::Text(match v {
+            "2.0" => Word::Version,
+            "session/update" => Word::Update,
+            MALFORMED_LINE_METHOD => Word::Marker,
+            _ => Word::Other,
+        }))
+    }
+
+    /// For `error`, reads `code` and `message` one level down, last value wins; everything else
+    /// is walked.
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Shape, A::Error> {
+        if !self.error {
+            return Checked
+                .visit_map(map)
+                .map(|()| Shape::Object { is_error: false });
+        }
+        let (mut code, mut message) = (None, None);
+        while let Some(key) = map.next_key::<ErrorKey>()? {
+            match key {
+                ErrorKey::Code => code = Some(map.next_value_seed(ShapeOf::VALUE)?),
+                ErrorKey::Message => message = Some(map.next_value_seed(ShapeOf::VALUE)?),
+                ErrorKey::Other => map.next_value_seed(Checked)?,
+            }
+        }
+        Ok(Shape::Object {
+            is_error: matches!(code, Some(Shape::Integer { i32: true, .. }))
+                && matches!(message, Some(Shape::Text(_))),
         })
     }
 
-    fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Shape, A::Error> {
-        Checked.visit_map(map).map(|()| Shape::Object)
-    }
-
     fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Shape, A::Error> {
-        Checked.visit_seq(seq).map(|()| Shape::Other)
+        Checked.visit_seq(seq).map(|()| Shape::Array)
     }
 
     fn visit_bool<E: de::Error>(self, _: bool) -> Result<Shape, E> {
         Ok(Shape::Other)
     }
 
-    fn visit_i64<E: de::Error>(self, _: i64) -> Result<Shape, E> {
-        Ok(Shape::Other)
+    fn visit_i64<E: de::Error>(self, v: i64) -> Result<Shape, E> {
+        Ok(Shape::Integer {
+            i64: true,
+            i32: i32::try_from(v).is_ok(),
+        })
     }
 
-    fn visit_u64<E: de::Error>(self, _: u64) -> Result<Shape, E> {
-        Ok(Shape::Other)
+    fn visit_u64<E: de::Error>(self, v: u64) -> Result<Shape, E> {
+        Ok(Shape::Integer {
+            i64: i64::try_from(v).is_ok(),
+            i32: i32::try_from(v).is_ok(),
+        })
     }
 
     fn visit_f64<E: de::Error>(self, _: f64) -> Result<Shape, E> {
@@ -270,6 +365,41 @@ impl<'de> Visitor<'de> for ShapeOf {
     }
 
     fn visit_unit<E: de::Error>(self) -> Result<Shape, E> {
-        Ok(Shape::Other)
+        Ok(Shape::Null)
+    }
+}
+
+/// A key of an `error` object, read without copying it.
+#[derive(Clone, Copy)]
+enum ErrorKey {
+    Code,
+    Message,
+    Other,
+}
+
+impl<'de> Deserialize<'de> for ErrorKey {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_identifier(ErrorKeyVisitor)
+    }
+}
+
+struct ErrorKeyVisitor;
+
+impl Visitor<'_> for ErrorKeyVisitor {
+    type Value = ErrorKey;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a key")
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<ErrorKey, E> {
+        Ok(match v {
+            "code" => ErrorKey::Code,
+            "message" => ErrorKey::Message,
+            _ => {
+                CheckedKey.visit_str(v)?;
+                ErrorKey::Other
+            }
+        })
     }
 }

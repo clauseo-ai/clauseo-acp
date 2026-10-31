@@ -181,12 +181,22 @@ fn nested(depth: usize) -> String {
     format!("{}{}", "[".repeat(depth), "]".repeat(depth))
 }
 
+/// Whether the SDK's own parse of a line gives one message (and not a malformed frame).
+fn sdk_reads_a_message(line: &str) -> bool {
+    match agent_client_protocol::TransportFrame::parse_json(line) {
+        agent_client_protocol::TransportFrame::Single(_) => true,
+        agent_client_protocol::TransportFrame::Malformed { .. } => false,
+        agent_client_protocol::TransportFrame::Batch(_) => panic!("a batch: {line}"),
+    }
+}
+
+/// The filter passes a line exactly when the SDK's parse reads it as a message. Each list says
+/// what the SDK does, so a change to the SDK in either direction fails here.
 #[test]
-fn envelope_refuses_what_the_sdk_value_decode_refuses() {
+fn envelope_passes_exactly_what_the_sdk_parse_reads() {
     // serde_json reads at most 127 levels; the line's object and `params` take two.
-    let deepest = update_with(&nested(125));
-    let too_deep = update_with(&nested(126));
-    for line in [
+    let refused = [
+        // The SDK's `Value` decode refuses these.
         update_with("1e400"),
         update_with("-1e400"),
         r#"{"jsonrpc":"2.0","id":1e400,"result":{}}"#.to_owned(),
@@ -194,44 +204,96 @@ fn envelope_refuses_what_the_sdk_value_decode_refuses() {
         update_with(r#""\ud800""#),
         update_with(r#""\udc00""#),
         update_with(r#"{"\ud800":1}"#),
-        too_deep,
-        // serde_json's RawValue key: refused when its text is not JSON, read as another value
-        // (here an array) when it is, escaped or not, first key or not.
+        update_with(&nested(126)),
         update_with(r#"{"$serde_json::private::RawValue":"x"}"#),
-        r#"{"jsonrpc":"2.0","method":"session/update","params":{"$serde_json::private::RawValue":"[1]"}}"#.to_owned(),
         r#"{"jsonrpc":"2.0","method":"session/update","params":{"\u0024serde_json::private::RawValue":"x"}}"#.to_owned(),
-        update_with(r#"{"a":1,"$serde_json::private::RawValue":"x"}"#),
-        r#"{"$serde_json::private::RawValue":"{}","jsonrpc":"2.0","method":"x"}"#.to_owned(),
-    ] {
-        assert_eq!(classify(&line), None, "{line}");
+        // Its `RawJsonRpcMessage` decode refuses these: a `method` that is not a string,
+        r#"{"jsonrpc":"2.0","method":5,"params":{}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","method":null,"params":{}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","method":{},"params":{}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","method":["session/update"],"params":{}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","method":true,"params":{}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":7,"method":5,"params":{}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":7,"method":null}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","method":"session/update","method":5,"params":{}}"#.to_owned(),
+        // an `id` that is not `null`, a string or an `i64`,
+        r#"{"jsonrpc":"2.0","id":{},"method":"x"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":[],"method":"x"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":true,"method":"x"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1.5,"method":"x"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1.0,"method":"x"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":18446744073709551615,"method":"x"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":9223372036854775808,"method":"x"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"id":{},"method":"x"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1.5,"result":{}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":{},"error":{"code":1,"message":"m"}}"#.to_owned(),
+        // `params` that is not an object, an array or `null`,
+        r#"{"jsonrpc":"2.0","method":"x","params":"x"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","method":"x","params":5}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","method":"x","params":true}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":7,"method":"x","params":5}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{},"params":5}"#.to_owned(),
+        // an `error` that is not an object with an `i32` `code` and a string `message`.
+        r#"{"jsonrpc":"2.0","id":1,"error":{}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"error":5}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"error":null}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"error":{"code":"x","message":"m"}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"error":{"code":1.5,"message":"m"}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"error":{"code":2147483648,"message":"m"}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"error":{"code":1,"message":5}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"error":{"code":1}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"error":{"code":1,"message":"m","code":"x"}}"#.to_owned(),
+    ];
+    for line in &refused {
+        assert!(!sdk_reads_a_message(line), "the SDK reads {line}");
+        assert!(!classify(line).is_some_and(|c| c.0), "{line}");
     }
-    // The SDK's decode refuses each line above that the filter used to pass, and reads the
-    // `[1]` one as an array; and both accept the ones below.
-    assert!(serde_json::from_str::<serde_json::Value>(&update_with("1e400")).is_err());
-    assert!(serde_json::from_str::<serde_json::Value>(&update_with(r#""\udc00""#)).is_err());
-    assert!(serde_json::from_str::<serde_json::Value>(&update_with(&nested(126))).is_err());
-    assert!(
-        serde_json::from_str::<serde_json::Value>(&update_with(
-            r#"{"$serde_json::private::RawValue":"x"}"#
-        ))
-        .is_err()
-    );
-    let raw = serde_json::from_str::<serde_json::Value>(
-        r#"{"params":{"$serde_json::private::RawValue":"[1]"}}"#,
-    );
-    assert_eq!(raw.ok(), Some(serde_json::json!({"params": [1]})));
-    for line in [
-        deepest,
+    let passed = [
+        update_with(&nested(125)),
         update_with("1.7976931348623157e308"),
         update_with("-9223372036854775809"),
         update_with("18446744073709551616"),
         update_with(r#""\ud83d\ude00 \u0000""#),
+        // Only `raw_value` is on: serde_json's `Number` token is an ordinary key.
         update_with(r#"{"$serde_json::private::Number":"1"}"#),
+        r#"{"jsonrpc":"2.0","method":"x"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","method":"x","params":null}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","method":"x","params":[1]}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","method":"x","params":5,"params":{}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":null,"method":"x"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":"a","method":"x","params":{}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":-9223372036854775808,"method":"x"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":9223372036854775807,"method":"x"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":{},"id":1,"method":"x"}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"result":null}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"result":5}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"error":{"code":-2147483648,"message":"m"}}"#.to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"error":{"code":1,"message":"m","data":null,"x":[]}}"#
+            .to_owned(),
+        r#"{"jsonrpc":"2.0","id":1,"error":{"code":"x","message":"m","code":1}}"#.to_owned(),
+    ];
+    for line in &passed {
+        assert!(sdk_reads_a_message(line), "the SDK refuses {line}");
+        assert_eq!(classify(line).map(|c| c.0), Some(true), "{line}");
+    }
+    // serde_json builds a `Value` with the `Number` token as a key: `arbitrary_precision` is off.
+    let number =
+        serde_json::from_str::<serde_json::Value>(r#"{"$serde_json::private::Number":"x"}"#);
+    assert_eq!(
+        number.ok(),
+        Some(serde_json::json!({"$serde_json::private::Number": "x"}))
+    );
+    // The SDK reads these as messages, but not as the line says, so the filter refuses them: a
+    // RawValue key whose text is JSON (here `params` becomes `[1]`), first key of `params` or of
+    // the line, and an agent's line naming the filter's own marker method. The filter also
+    // refuses the RawValue key in any other place, where the SDK reads it as an ordinary key.
+    for line in [
+        update_with(r#"{"a":1,"$serde_json::private::RawValue":"x"}"#),
+        r#"{"jsonrpc":"2.0","method":"session/update","params":{"$serde_json::private::RawValue":"[1]"}}"#.to_owned(),
+        r#"{"$serde_json::private::RawValue":"{\"jsonrpc\":\"2.0\",\"method\":\"x\"}"}"#.to_owned(),
+        format!(r#"{{"jsonrpc":"2.0","method":"{MALFORMED_LINE_METHOD}","params":{{"bytes":1}}}}"#),
     ] {
-        assert!(
-            serde_json::from_str::<serde_json::Value>(&line).is_ok(),
-            "{line}"
-        );
-        assert_eq!(classify(&line), Some((true, true)), "{line}");
+        assert!(sdk_reads_a_message(&line), "the SDK refuses {line}");
+        assert!(!classify(&line).is_some_and(|c| c.0), "{line}");
     }
 }
