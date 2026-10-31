@@ -7,7 +7,7 @@ use super::*;
 
 const WIRE_CMD: &str = "cargo mutants --package clauseo-protocol --features \
                         clauseo-protocol/specta --file crates/protocol/src/wire.rs --in-diff \
-                        target/xtask/mutants.diff --output target/xtask/wire --jobs 4";
+                        target/xtask/mutants.diff --output target/xtask/wire --jobs 2";
 const MAIN_LINE: &str = "mutants, everything but crates/protocol/src/wire.rs: ";
 const WIRE_LINE: &str = "mutants, crates/protocol/src/wire.rs with protocol's specta feature: ";
 
