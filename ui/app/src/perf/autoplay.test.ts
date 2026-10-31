@@ -160,7 +160,7 @@ describe("autoplay", () => {
       {
         run: null,
         error:
-          'autoplay, at step "permission": over 120000 ms; answer text so far 8 characters, stop reason none',
+          'autoplay, at step "permission": over 120000 ms; answer text so far 8 characters (+0 in the last 5000 ms), channel bytes +1000 in that time, stop reason none',
       },
     ]);
     expect(log).not.toContain("stopStream");
@@ -177,7 +177,7 @@ describe("autoplay", () => {
       {
         run: null,
         error:
-          'autoplay, at step "idle memory": marks_memory failed; answer text so far 0 characters, stop reason none',
+          'autoplay, at step "idle memory": marks_memory failed; answer text so far 0 characters (+0 in the last 5000 ms), channel bytes +1000 in that time, stop reason none',
       },
     ]);
   });

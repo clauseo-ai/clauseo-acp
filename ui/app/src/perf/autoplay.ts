@@ -91,17 +91,36 @@ export async function autoplay(d: AutoplayDeps): Promise<void> {
     await d.finish(JSON.stringify(run), null);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    // How far the session got, so a timeout tells a crawling stream from a stalled one.
-    const answer = d.doc.querySelector('[data-testid="message-agent"]')?.textContent?.length ?? 0;
-    const stop = d.doc
-      .querySelector('[data-testid="turn-stopped"]')
-      ?.getAttribute("data-stop-reason");
-    const progress = `; answer text so far ${answer} characters, stop reason ${stop ?? "none"}`;
+    // How far the session got, and whether it still moves over `PROGRESS_WINDOW_MS`: answer
+    // text and channel bytes both still growing is a slow stream; neither is a stall, and bytes
+    // without text is a page that stopped applying.
+    const progress = await describeProgress(d);
     // MARKS_OUT unset makes this refuse too; the app then stays open, as the contract says.
     await d
       .finish(null, `autoplay, at step "${state.step}": ${message}${progress}`)
       .catch(() => {});
   }
+}
+
+/** How long a failed play watches the session before it reports how far it got. */
+export const PROGRESS_WINDOW_MS = 5_000;
+
+async function describeProgress(d: AutoplayDeps): Promise<string> {
+  const answer = () =>
+    d.doc.querySelector('[data-testid="message-agent"]')?.textContent?.length ?? 0;
+  const bytes = () => d.perf.channelBytes().catch(() => null);
+  const [answerBefore, bytesBefore] = [answer(), await bytes()];
+  await d.sleep(PROGRESS_WINDOW_MS);
+  const [answerAfter, bytesAfter] = [answer(), await bytes()];
+  const stop = d.doc
+    .querySelector('[data-testid="turn-stopped"]')
+    ?.getAttribute("data-stop-reason");
+  const grew =
+    bytesBefore === null || bytesAfter === null ? "unknown" : String(bytesAfter - bytesBefore);
+  return (
+    `; answer text so far ${answerAfter} characters (+${answerAfter - answerBefore} in the last ` +
+    `${PROGRESS_WINDOW_MS} ms), channel bytes +${grew} in that time, stop reason ${stop ?? "none"}`
+  );
 }
 
 async function play(d: AutoplayDeps, state: { step: string; expired: boolean }) {

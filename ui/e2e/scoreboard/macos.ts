@@ -38,6 +38,12 @@ import {
  * the rest is the launch, the idle settle and a slow runner.
  */
 export const PLAY_TIMEOUT_MS = 360_000;
+/**
+ * Launches per play before the runner gives up. On the macos-15 runner a play now and then stops
+ * streaming partway (PR #106: 3 of 13 launches; the app's message says how far it got), so a
+ * failed play is played again on fresh scratch folders and the log keeps each failure.
+ */
+export const PLAY_ATTEMPTS = 3;
 /** The file the app writes its run to, in each play's scratch root. */
 const RUN_FILE = "run.json";
 
@@ -148,7 +154,18 @@ export async function main(env: NodeJS.ProcessEnv): Promise<void> {
   const cfg = config(env);
   const measured: RawRun[] = [];
   for (let n = 1; n <= WARMUP_RUNS + MEASURED_RUNS; n++) {
-    const run = await play(cfg, n);
+    let run: RawRun | undefined;
+    for (let attempt = 1; run === undefined; attempt++) {
+      try {
+        run = await play(cfg, n);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (attempt >= PLAY_ATTEMPTS) throw error;
+        process.stdout.write(
+          `[scoreboard] play ${n}, attempt ${attempt} failed, again: ${message}\n`,
+        );
+      }
+    }
     if (n > WARMUP_RUNS) measured.push(run);
   }
   // A pace the runner stretched distorts the paced numbers in every run alike, so one run off the
