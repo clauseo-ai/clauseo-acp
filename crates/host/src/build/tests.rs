@@ -338,12 +338,27 @@ fn user_message_and_agent_content_match_view_counts() {
     assert_eq!(entry.inline_len(), 9);
 }
 
+/// Characters with each escape cost: plain ASCII (1 byte), a short escape (2), a `\u00XX`
+/// escape (6), a quote and a backslash (2), and a 2-byte UTF-8 char with no escape.
+const CHARS: [char; 6] = ['a', '\t', '\u{1}', '"', '\\', 'é'];
+
 fn text_strategy() -> impl Strategy<Value = String> {
-    // Mostly plain text with escapes, sized around the limit.
-    proptest::string::string_regex("[a-z\t\"\\\\\u{1}é]{0,3000}").unwrap()
+    // Up to three runs of one character each, so values reach the limit and mix escape costs
+    // without generating thousands of characters one by one.
+    proptest::collection::vec((0..CHARS.len(), 0..1_500usize), 0..4).prop_map(|runs| {
+        runs.into_iter()
+            .map(|(pick, len)| CHARS[pick].to_string().repeat(len))
+            .collect()
+    })
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 64,
+        rng_seed: proptest::test_runner::RngSeed::Fixed(0x5EED_B11D),
+        ..ProptestConfig::default()
+    })]
+
     #[test]
     fn inline_total_stays_within_limit_and_matches_view(
         input in proptest::option::of(text_strategy()),
