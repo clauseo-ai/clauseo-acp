@@ -52,6 +52,38 @@ const composer = (p: Partial<ComposerProps>) => (
   <Composer took={null} plan="Uses your Claude plan" hint={null} {...p} />
 );
 
+test("the field's size observer leaves its height alone while its width holds", async () => {
+  // a second delivery after the fit, as the browser makes when the fit has resized the form, must settle
+  const seen: { cb: ResizeObserverCallback; targets: Element[] }[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      targets: Element[] = [];
+      constructor(cb: ResizeObserverCallback) {
+        seen.push({ cb, targets: this.targets });
+      }
+      observe(t: Element) {
+        this.targets.push(t);
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  try {
+    await mount(composer({ text: "What did the bank know?" }));
+    const area = host?.querySelector("textarea");
+    expect(area).not.toBeNull();
+    if (area === null || area === undefined) return;
+    const own = seen.filter((o) => o.targets.includes(area));
+    expect(own.length).toBeGreaterThan(0);
+    area.style.height = "130px";
+    for (const o of own) o.cb([], {} as ResizeObserver);
+    expect(area.style.height).toBe("130px");
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 test("a note under the field never blocks Ask", async () => {
   await mount(
     composer({

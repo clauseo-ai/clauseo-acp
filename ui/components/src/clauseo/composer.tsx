@@ -185,6 +185,10 @@ export function Composer<V extends string = string>({
       if (a.scrollHeight > one + 4) a.style.height = `${Math.min(a.scrollHeight, one * 6)}px`;
     };
     fit();
+    // the fit can change the field's height and so the form's, which the status line's observer, watching the form,
+    // has already been told of this frame: the browser keeps that change for the next frame and reports
+    // "ResizeObserver loop completed with undelivered notifications" once. It is no loop: the next delivery finds
+    // the width unchanged and fits nothing. (Chromium, a composer at 390 px whose width alone changes.)
     let width = a.clientWidth;
     const ro = new ResizeObserver(() => {
       if (a.clientWidth === width) return;
