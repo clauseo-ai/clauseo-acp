@@ -7,7 +7,6 @@ import { setTimedHook } from "../transport/channel.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import { marksFinish, marksMemory, perfChannelBytes } from "../transport/perf-commands.ts";
 import type { StreamId } from "../transport/protocol.ts";
-import { TauriTransport } from "../transport/tauri-transport.ts";
 import { autoplay, TIMEOUT_MS } from "./autoplay.ts";
 import { afterFrames, pageClock } from "./clock.ts";
 import type { ClauseoPerf, PerfInit } from "./env.ts";
@@ -17,14 +16,15 @@ import { pageLongFrames, StreamRecorder } from "./stream.ts";
 
 const utf8 = new TextEncoder();
 
-/** UTF-8 bytes of the answer texts (not thoughts) the view store holds for `stream`. */
-export function answerBytes(store: ViewStore, stream: StreamId): number {
+/** UTF-8 bytes of the agent texts the view store holds for `stream`: answers only, or with `thoughts` thoughts too. */
+export function textBytes(store: ViewStore, stream: StreamId, thoughts = false): number {
   const view = store.view(stream);
   if (view === undefined) return 0;
   let bytes = 0;
   for (const [id, entry] of view.entries) {
-    if (entry.agent_text?.kind !== "answer") continue;
-    bytes += utf8.encode(view.texts.get(textKey(id)) ?? entry.agent_text.text).length;
+    const text = entry.agent_text;
+    if (text === undefined || (text.kind !== "answer" && !thoughts)) continue;
+    bytes += utf8.encode(view.texts.get(textKey(id)) ?? text.text).length;
   }
   return bytes;
 }
@@ -42,26 +42,25 @@ export function start(transport: HostTransport, store: ViewStore): void {
     clock,
     paintEntries: () => performance.getEntriesByType("paint"),
     rendered: () => byTestId("new-matter") !== null && byTestId("composer") !== null,
-    connected: transport instanceof TauriTransport ? transport.connected() : Promise.resolve(),
+    connected: transport.connected(),
   });
 
   const stream = new StreamRecorder({
     clock,
     reactCommits: () => init.reactCommits,
     longFrames: pageLongFrames(),
-    answerBytes: (s) => answerBytes(store, s),
+    answerBytes: (s) => textBytes(store, s),
+    transcriptTextBytes: (s) => textBytes(store, s, true),
   });
   setTimedHook((event, receivedMs) => stream.onTimed(event, receivedMs));
   store.subscribe(() => stream.onStoreChange());
   // The send: the moment the window issues `send_prompt` through the transport.
-  const dispatch = transport.dispatch.bind(transport);
-  transport.dispatch = (envelope) => {
+  transport.onDispatch((envelope) => {
     const body = envelope.command;
     if (typeof body === "object" && body.send_prompt !== undefined) {
       stream.onPrompt(body.send_prompt.thread);
     }
-    return dispatch(envelope);
-  };
+  });
 
   const keystrokes = new KeystrokeRecorder({
     timing: pageEventTiming(),
@@ -85,6 +84,8 @@ export function start(transport: HostTransport, store: ViewStore): void {
       doc: document,
       perf,
       memory: marksMemory,
+      answerBytes: () => stream.answerBytesNow(),
+      now: () => performance.now(),
       finish: marksFinish,
       sleep: (ms) => new Promise((done) => window.setTimeout(done, ms)),
       frame: () => afterFrames(clock, 1),

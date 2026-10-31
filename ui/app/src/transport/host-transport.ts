@@ -60,6 +60,11 @@ export interface HostTransport {
    * its channel messages there and sends one call per flush.
    */
   ack(stream: StreamId, position: ViewPosition): void;
+  /** Resolves once the transport can carry streams (the desktop one: its channel registered); the others at once. */
+  connected(): Promise<void>;
+  /** Hears every command `dispatch` is given, as it is issued (the perf build times the send by it). Returns the
+   * unsubscribe. */
+  onDispatch(listener: (command: CommandEnvelope) => void): () => void;
 }
 
 /** A host error the transport made itself, for a failure that is not the host's answer. */
@@ -103,4 +108,10 @@ export class NullTransport implements HostTransport {
   }
   resubscribe(): void {}
   ack(): void {}
+  connected(): Promise<void> {
+    return Promise.resolve();
+  }
+  onDispatch(): () => void {
+    return () => {};
+  }
 }

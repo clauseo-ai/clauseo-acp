@@ -7,6 +7,23 @@ export interface Clock {
   readonly timeOrigin: number;
   /** Runs `run` at the next animation frame with the frame's timestamp. */
   frame(run: (timestamp: number) => void): void;
+  /** Runs `run` as a task of its own (a MessageChannel message). Posted from an animation frame callback, it runs once
+   * that frame's rendering steps are done: the earliest moment script can see that the frame was painted. */
+  post(run: () => void): void;
+}
+
+/** One MessageChannel for every `post`: messages run in the order they were posted. */
+function poster(): (run: () => void) => void {
+  let channel: MessageChannel | null = null;
+  const waiting: (() => void)[] = [];
+  return (run) => {
+    if (channel === null) {
+      channel = new MessageChannel();
+      channel.port1.onmessage = () => waiting.shift()?.();
+    }
+    waiting.push(run);
+    channel.port2.postMessage(null);
+  };
 }
 
 export const pageClock: Clock = {
@@ -17,6 +34,7 @@ export const pageClock: Clock = {
   frame: (run) => {
     requestAnimationFrame(run);
   },
+  post: poster(),
 };
 
 /** Now as ms since the Unix epoch: `timeOrigin + now()`, the clock the bridge's `received_ms` is compared with. */

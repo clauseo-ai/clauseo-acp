@@ -13,10 +13,14 @@ export interface PerfInit {
 
 /** What one recorded stream gives (contract §5). */
 export interface StreamSample {
-  /** The prompt command issued to the frame that painted the first answer text. */
+  /** The prompt command issued to the first painted frame showing the turn's text, thought or answer (stream.ts). */
   first_token_on_screen_ms: number | null;
-  /** Per timed event that changed a thread's transcript: received_ms to the frame that painted it, epoch ms both. */
+  /** Per timed event that changed a thread's transcript: received_ms to just after the frame showing it was rendered
+   * (stream.ts), epoch ms both. */
   chunk_to_paint_ms: number[];
+  /** The same events stamped the earlier way, at the next frame's animation frame callback (about a frame later than
+   * `chunk_to_paint_ms`); for comparison runs, not in RawRun. */
+  chunk_to_paint_double_raf_ms: number[];
   /** Every rAF timestamp while recording (ms on the page's performance clock). */
   raf_timestamps_ms: number[];
   /** Durations of long-animation-frame entries while recording; null where unsupported (WebKit). */
