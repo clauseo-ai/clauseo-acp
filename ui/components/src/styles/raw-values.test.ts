@@ -52,7 +52,7 @@ test("no raw colours, arbitrary values or style attributes in the controls, icon
 /* ---------- the stylesheets ---------- */
 
 // Every length, colour and duration in a part's stylesheet comes from a token, through var(). A one-off with a
-// reason is a named token in tokens.css, in the block for Clauseo's parts; a hairline too. Zero, percentages,
+// reason is a named token in tokens-parts.css, in the block for Clauseo's parts; a hairline too. Zero, percentages,
 // angles and plain numbers (a scale, an opacity, a weight) aren't values a token holds. The base and primitives
 // stylesheets set the page's own geometry and are not held to it. The stylesheets of Clauseo's parts hold no raw
 // values.

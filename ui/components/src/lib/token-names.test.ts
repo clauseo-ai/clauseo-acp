@@ -4,8 +4,8 @@ import * as names from "./token-names.ts";
 
 const byName = (a: string | undefined, b: string | undefined) => (a ?? "").localeCompare(b ?? "");
 
-// cn() merges classes by the names tokens.css's @theme gives each namespace; the two lists must agree.
-const css = readFileSync(new URL("../styles/tokens.css", import.meta.url), "utf8");
+// cn() merges classes by the names tokens-theme.css's @theme gives each namespace; the two lists must agree.
+const css = readFileSync(new URL("../styles/tokens-theme.css", import.meta.url), "utf8");
 const theme = css.slice(css.indexOf("@theme inline reference"));
 const keys = (ns: string) => [
   ...new Set(

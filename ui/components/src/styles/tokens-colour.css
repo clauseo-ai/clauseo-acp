@@ -1,0 +1,534 @@
+/* Colour: the day and night values, the planes and their shadows, the lite render, the operating system's own windows
+   at night, and the computer's own dialogs at night. Imported by tokens.css, which says why the order matters. */
+
+/* ---------- colour: day ---------- */
+
+:root {
+  color-scheme: light;
+  --page: oklch(72.73% 0.0158 80.69); /* #ACA69C */
+  --ground: oklch(91.35% 0.0087 84.57); /* #E5E2DC */
+  --ground-hover: oklch(88.04% 0.0105 81.79); /* #DBD7D0 */
+  --ground-press: oklch(85.01% 0.0123 79.78); /* #D2CDC5 */
+  --inset: oklch(88.34% 0.0105 81.79); /* #DCD8D1 */
+  --inset-hover: oklch(87.09% 0.0117 84.58); /* #D8D4CC */
+  --flat: oklch(92.59% 0.0075 80.72); /* #E9E6E1 */
+  --flat-hover: oklch(94.35% 0.0058 84.57); /* #EEECE8 */
+  --flat-num: oklch(59.63% 0.0171 76.99); /* #857E74 */
+  --tile: oklch(93.8% 0.0074 80.72); /* #EDEAE5 */
+  --tile-hover: oklch(95.56% 0.0057 84.57); /* #F2F0EC */
+  --surface: oklch(99.13% 0.0029 84.56); /* #FDFCFA */
+  --surface-hover: oklch(97.61% 0.0041 91.45); /* #F8F7F4 */
+  --well: oklch(95.86% 0.0057 84.57); /* #F3F1ED */
+  --well-strong: oklch(92.86% 0.0087 84.57); /* #EAE7E1 */
+  --desk: oklch(95% 0.0074 80.72); /* #F1EEE9 */
+  --sheet: oklch(100% 0 0); /* #FFFFFF */
+  --lights: oklch(84.08% 0.0123 79.78); /* #CFCAC2 */
+  --scrollbar: oklch(81.87% 0.0136 82.4); /* #C8C3BA */
+  --scrollbar-hover: oklch(73.05% 0.0158 80.69); /* #ADA79D */
+  --primary: oklch(24.58% 0.0072 67.48); /* #23201D */
+  --primary-hover: oklch(33.53% 0.0103 73.56); /* #3A3631 */
+  --primary-press: oklch(39.34% 0.012 72.48); /* #4A453F */
+  --muted: oklch(38.28% 0.0142 71.65); /* #48423B */
+  --quiet: oklch(46.42% 0.0169 74.24); /* #5F584F */
+  --on-primary: oklch(99.13% 0.0029 84.56); /* #FDFCFA */
+  --on-yellow: oklch(24.58% 0.0072 67.48); /* #23201D */
+  --select: oklch(88.69% 0.0298 87.55); /* #E2D9C4 */
+  --yellow: oklch(81.322% 0.16654 85.595); /* #F2B800 */
+  --red: oklch(54.38% 0.1786 28.86); /* #C2362B */
+  --green: oklch(51.06% 0.1027 153.75); /* #2D774A */
+  --relied: oklch(46.33% 0.0162 78.15); /* #5E584F */
+  --yellow-line: oklch(65.985% 0.13527 84.828); /* #B88A00 */
+  --green-tint: oklch(93.86% 0.0158 154.46); /* #E3EEE6 */
+  --green-text: oklch(43.82% 0.0894 153.46); /* #22603A */
+  --red-tint: oklch(93.03% 0.0213 28.33); /* #F6E3E0 */
+  --red-text: oklch(46.8% 0.1526 28.79); /* #9E2B22 */
+  --neutral-tint: oklch(94.1% 0.0074 80.72); /* #EEEBE6 */
+  --otherside: oklch(94.98% 0.0121 43.28); /* #F6ECE8 */
+  --supports-mark: oklch(91.32% 0.0267 155.94); /* #D5E8DB */
+  --against-mark: oklch(90.05% 0.0354 28.67); /* #F5D6D1 */
+  --relied-mark: oklch(90.84% 0.0162 82.79); /* #E6E0D5 */
+  --supports-ref: oklch(92.13% 0.0233 157.57); /* #D9EADF */
+  --against-ref: oklch(89.48% 0.0321 29.77); /* #F1D5D0 */
+  /* the court's three colours keep their meaning on every surface */
+  --on-colour: oklch(100% 0 0); /* #FFFFFF: words on green and red, 5.4:1 */
+  --faint: rgba(35, 32, 29, 0.38); /* disabled words only */
+  --scrim: rgba(229, 226, 220, 0.82); /* the ground at 82%, over the tiles an open card covers */
+  --yellow-ring: rgba(
+    120,
+    88,
+    0,
+    0.35
+  ); /* the hairline that holds the ready hint's dot on the ground */
+  /* brick means Clauseo itself: never a button, a header, a state or a court colour */
+  --brand: #a3482f; /* the mark only */
+  --brand-night: #d07455; /* the mark only */
+  /* a chip on a lit tile: the tile's own colour, deeper, mixed opaque, so its words hold their contrast whatever
+     the tile behind is doing; the same colour as rgba(20, 14, 8, 0.22) laid over the tile */
+  --chip-green: color-mix(in srgb, var(--green), rgb(20, 14, 8) 22%); /* #28603B */
+  --chip-red: color-mix(in srgb, var(--red), rgb(20, 14, 8) 22%); /* #9C2D23 */
+  --chip-yellow: color-mix(in srgb, var(--yellow), rgb(35, 32, 29) 13%); /* #D7A404 */
+
+  /* quiet fills and hairlines, in the shadow's own warm brown */
+  --hover: rgba(56, 44, 30, 0.07); /* a quiet control under the pointer */
+  --press: rgba(56, 44, 30, 0.12); /* and pressed */
+  --hover-faint: rgba(56, 44, 30, 0.06); /* a reference to their own pleading, in hand */
+  --divide: rgba(56, 44, 30, 0.07); /* between History's rows, under the page's bar */
+  --divide-band: rgba(56, 44, 30, 0.08); /* under a card's band in the surface tone */
+  --divide-mid: rgba(56, 44, 30, 0.1); /* above the scratch matter, above the wall's foot */
+  --divide-strong: rgba(56, 44, 30, 0.12); /* between History and Undo */
+  --ring-kbd: rgba(56, 44, 30, 0.2); /* a key cap's inner ring */
+  --outline-lite: rgba(
+    56,
+    44,
+    30,
+    0.24
+  ); /* lite mode: a floating card's edge, in place of its shadow */
+  --leader: rgba(56, 44, 30, 0.3); /* the dotted leader on a turned page's party lines */
+  --ref-line: rgba(35, 32, 29, 0.45); /* a reference's underline */
+  --ref-line-quiet: rgba(35, 32, 29, 0.35); /* a citation's name, underlined */
+  /* the lip of a control whose edge is all that says what state it's in: a checkbox, a radio or a switch's track
+     while clear or off. Nothing is drawn round it. It is set into its plane like the concrete's other set-in
+     surfaces, lit from above: by day its top lip falls into shade deep enough to hold 3:1 against every plane it
+     stands on, from the ground (3.4:1) to the work (4.3:1) and the sheet (4.4:1), as WCAG 1.4.11 asks, and its bottom lip catches the
+     light. A text field, a select or a segmented switch takes no lip: its tone, its label and its words say what it
+     is. --edge-control is also the off thumb's disc. */
+  --edge-control: oklch(57.25% 0.0173 76.98); /* #7E776D */
+  --lip-top: var(--edge-control);
+  --control-ring: var(--edge-control); /* an unchecked control's ring, 3:1 or more on every plate */
+  --lip-top-w: 2px;
+  --lip-bottom: rgba(255, 255, 255, 0.7);
+  --lip-bottom-w: 1px;
+  /* Windows' own close button under the pointer, and pressed: the platform's chrome follows the platform */
+  --win-close: oklch(53.61% 0.1912 30.07); /* #C42B1C */
+  --win-close-press: rgba(196, 43, 28, 0.9);
+}
+
+/* ---------- colour: night, the same concrete, unlit ----------
+   The day concrete's own hue, 84, with the chroma all but taken out: 0.004 for every plane, so it reads as graphite,
+   neither blue nor brown, and never black. The facade keeps its relief. The ground sits at 22% lightness, an uncited
+   paper one clear step up at 30%, so the wall still reads as a wall of papers, and the answer's work surface is the
+   lightest working plane at 35.5%. Every raised plane carries a top edge you can see and a deeper neutral shadow.
+   Yellow, red and green keep their meanings and their full tiles; everything around the yellow stays graphite. */
+
+:root[data-theme="night"] {
+  color-scheme: dark;
+  --page: oklch(17% 0.003 84); /* #100F0E: behind the window on a very large screen */
+  --ground: oklch(22% 0.004 84); /* #1B1A18: the one ground */
+  --ground-hover: oklch(25% 0.004 84); /* #22211F */
+  --ground-press: oklch(27.5% 0.004 84); /* #292725 */
+  --inset: oklch(19.5% 0.004 84); /* #161513: set into the ground, below it */
+  --inset-hover: oklch(20.8% 0.004 84); /* #191816 */
+  --flat: oklch(30% 0.004 84); /* #2F2E2C: an uncited paper, one clear step off the ground */
+  --flat-hover: oklch(32.5% 0.004 84); /* #353432 */
+  --flat-num: oklch(60% 0.004 84); /* #81807D: 3.4:1 on the flat tile, 26 px only */
+  --tile: oklch(33% 0.004 84); /* #363533: a raised control */
+  --tile-hover: oklch(36% 0.004 84); /* #3E3D3B */
+  --surface: oklch(35.5% 0.004 84); /* #3D3C39: the work, the lightest working plane */
+  --surface-hover: oklch(37% 0.004 84); /* #41403D */
+  --well: oklch(31% 0.004 84); /* #31302E: set into the work */
+  --well-strong: oklch(29% 0.004 84); /* #2C2B29 */
+  --desk: oklch(31% 0.004 84); /* #31302E: the plane under a turned page */
+  --sheet: oklch(39.5% 0.004 84); /* #474644: a turned page, a step above the work */
+  --lights: oklch(34% 0.004 84); /* #393836 */
+  --scrollbar: oklch(40% 0.004 84); /* #494745 */
+  --scrollbar-hover: oklch(48% 0.004 84); /* #5F5D5B */
+  --primary: oklch(94% 0.003 84); /* #ECEBE9 */
+  --primary-hover: oklch(87% 0.003 84); /* #D5D4D2 */
+  --primary-press: oklch(82% 0.003 84); /* #C5C4C2 */
+  --muted: oklch(84% 0.003 84); /* #CBCAC8 */
+  --quiet: oklch(77% 0.003 84); /* #B5B4B2 */
+  --on-primary: oklch(22% 0.004 84); /* #1B1A18 */
+  --on-yellow: oklch(22% 0.004 84); /* #1B1A18 */
+  --select: oklch(45% 0.006 84); /* #575552: selected words, a step up, never yellow */
+  --yellow: oklch(79% 0.145 86); /* #E4B336 */
+  --red: oklch(53.5% 0.158 28); /* #B73E35 */
+  --green: oklch(50.5% 0.098 153); /* #317549 */
+  --relied: oklch(68% 0.004 84); /* #999895 */
+  --yellow-line: oklch(74% 0.13 86); /* #CFA43A */
+  --green-tint: oklch(36% 0.045 155); /* #294433 */
+  --green-text: oklch(85% 0.085 155); /* #A1DFB6 */
+  --red-tint: oklch(36% 0.05 27); /* #55332F */
+  --red-text: oklch(86% 0.065 27); /* #F9C1BA */
+  --neutral-tint: oklch(41% 0.004 84); /* #4B4A48 */
+  --otherside: oklch(33% 0.014 28); /* #3C3331: the work, warmed toward red */
+  --supports-mark: oklch(42% 0.06 155); /* #31573F */
+  --against-mark: oklch(42% 0.065 27); /* #6C3F3A */
+  --relied-mark: oklch(44% 0.004 84); /* #535250 */
+  --supports-ref: oklch(40% 0.05 155); /* #31503C */
+  --against-ref: oklch(40% 0.055 27); /* #623C37 */
+  --on-colour: oklch(100% 0 0); /* #FFFFFF: 5.6:1 on night green and night red */
+  --faint: rgba(236, 235, 233, 0.38);
+  --scrim: rgba(27, 26, 24, 0.82); /* the night ground at 82% */
+  --yellow-ring: rgba(0, 0, 0, 0.3);
+  --chip-green: color-mix(in srgb, var(--green), #000 26%);
+  --chip-red: color-mix(in srgb, var(--red), #000 26%);
+  --chip-yellow: color-mix(in srgb, var(--yellow), #1b1a18 14%);
+
+  --hover: rgba(255, 255, 255, 0.06);
+  --press: rgba(255, 255, 255, 0.1);
+  --hover-faint: rgba(255, 255, 255, 0.05);
+  --divide: rgba(255, 255, 255, 0.07);
+  --divide-band: rgba(255, 255, 255, 0.06);
+  --divide-mid: rgba(255, 255, 255, 0.08);
+  --divide-strong: rgba(255, 255, 255, 0.1);
+  --ring-kbd: rgba(255, 255, 255, 0.22);
+  --outline-lite: rgba(255, 255, 255, 0.2);
+  --leader: rgba(255, 255, 255, 0.24);
+  --ref-line: rgba(236, 235, 233, 0.45);
+  --ref-line-quiet: rgba(236, 235, 233, 0.35);
+  /* at night no shade is dark enough to hold 3:1 on the unlit planes (black on the work is 1.9:1), so the light
+     carries it: the top lip stays in shade and the bottom lip, which faces the light, takes the edge's tone, 3.3:1 on
+     the sheet, 3.8:1 on the work and 6:1 on the ground. Light along the bottom and shade under the top is how every
+     set-in surface is lit, so the control still reads as set in */
+  --edge-control: oklch(68% 0.004 84); /* #999895 */
+  --lip-top: rgba(0, 0, 0, 0.5);
+  --lip-bottom: var(--edge-control);
+  --lip-bottom-w: 2px;
+}
+
+/* ---------- depth: three planes, light from the upper left ----------
+   The wall at the back, the work in front, and the paper in hand brought forward between them. Every raised thing
+   has a lit top edge, a tight contact shadow and a soft ambient one. */
+
+:root {
+  --hl: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  /* e0, a quiet raise: the current matter, a hovered citation row */
+  --e0:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 1px rgba(56, 44, 30, 0.08),
+    0 2px 6px -3px rgba(56, 44, 30, 0.14);
+  /* e1, a raised control: tonal buttons, History and Undo, the expected time */
+  --e1: var(--hl), 0 1px 1px rgba(56, 44, 30, 0.1), 0 4px 10px -4px rgba(56, 44, 30, 0.2);
+  --e1-hover: var(--hl), 0 1px 2px rgba(56, 44, 30, 0.1), 0 12px 22px -10px rgba(56, 44, 30, 0.3);
+  --e1-press: var(--hl), 0 1px 1px rgba(56, 44, 30, 0.14), 0 2px 4px -2px rgba(56, 44, 30, 0.14);
+  /* e2, the work: the last layer reaches 18 px right, so the work's shadow falls on the wall */
+  --e2:
+    inset 0 1px 0 #ffffff, 0 1px 2px rgba(56, 44, 30, 0.08), 0 4px 10px -6px rgba(56, 44, 30, 0.12),
+    0 30px 64px -30px rgba(56, 44, 30, 0.38), 18px 26px 56px -30px rgba(56, 44, 30, 0.26);
+  /* in hand: a tile or a citation row brought forward off the wall; a card grown from the wall adds e-card */
+  --e-hand:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 2px 4px rgba(40, 28, 16, 0.16),
+    0 22px 40px -16px rgba(40, 28, 16, 0.44);
+  --e-card: 0 40px 70px -30px rgba(40, 28, 16, 0.3);
+  /* e3, a floating card: excerpt cards, History, the folded rail */
+  --e3:
+    inset 0 1px 0 #ffffff, 0 2px 6px -1px rgba(56, 44, 30, 0.16),
+    0 28px 60px -20px rgba(56, 44, 30, 0.46);
+  /* set into a surface: shade under the top lip, light on the bottom lip */
+  --set-in: inset 0 1px 3px rgba(56, 44, 30, 0.14), inset 0 -1px 0 rgba(255, 255, 255, 0.7);
+  --set-in-field: inset 0 1px 2px rgba(56, 44, 30, 0.14), inset 0 -1px 0 rgba(255, 255, 255, 0.45);
+  --set-in-lights: inset 0 1px 1px rgba(56, 44, 30, 0.12);
+  /* the wall: lit tiles throw a neutral shadow, never their own colour; cited tiles in the surface tone rise less */
+  --lit:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 1px 1px rgba(40, 28, 16, 0.2),
+    0 4px 10px -6px rgba(40, 28, 16, 0.3);
+  --lit-y:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42), 0 1px 1px rgba(40, 28, 16, 0.22),
+    0 8px 16px -8px rgba(40, 28, 16, 0.36);
+  --raised: 0 1px 2px rgba(56, 44, 30, 0.14), 0 3px 8px -5px rgba(56, 44, 30, 0.24);
+  --raised-lift: 0 3px 4px -1px rgba(56, 44, 30, 0.1), 0 16px 26px -10px rgba(56, 44, 30, 0.38);
+  /* single parts */
+  --shadow-primary:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 1px 1px rgba(35, 32, 29, 0.2),
+    0 4px 10px -4px rgba(35, 32, 29, 0.4);
+  --shadow-primary-press: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 1px 1px rgba(35, 32, 29, 0.2);
+  --shadow-icon-primary: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --shadow-icon-yellow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 1px 2px rgba(40, 28, 16, 0.18);
+  --shadow-dot: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  --shadow-otherside:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 1px 2px rgba(120, 40, 30, 0.06),
+    0 6px 14px -8px rgba(120, 40, 30, 0.14);
+  --shadow-page:
+    inset 0 1px 0 #ffffff, 0 1px 2px rgba(56, 44, 30, 0.1), 0 2px 6px -2px rgba(56, 44, 30, 0.1),
+    0 22px 44px -24px rgba(56, 44, 30, 0.34);
+  --shadow-pin: 0 1px 2px rgba(56, 44, 30, 0.06), 0 10px 18px -12px rgba(56, 44, 30, 0.28);
+  --shadow-edge-up: 0 -1px 0 rgba(56, 44, 30, 0.06), 0 -12px 20px -14px rgba(56, 44, 30, 0.3);
+  --shadow-dock:
+    inset 0 1px 0 #ffffff, 0 -1px 2px rgba(56, 44, 30, 0.08),
+    0 -14px 32px -18px rgba(56, 44, 30, 0.4);
+  --shadow-pill:
+    inset 0 1px 0 #ffffff, 0 1px 2px rgba(56, 44, 30, 0.14), 0 6px 16px -8px rgba(56, 44, 30, 0.36);
+  --shadow-window: 0 24px 64px -28px rgba(40, 32, 22, 0.45);
+}
+
+/* night: the same light from the upper left. Top edges stay visible on every raised plane, and shadows fall deeper
+   and wholly neutral, a near-black with no blue and no brown in it. */
+:root[data-theme="night"] {
+  --hl: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --e0:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 1px 1px rgba(0, 0, 0, 0.3),
+    0 2px 6px -3px rgba(0, 0, 0, 0.42);
+  --e1: var(--hl), 0 1px 1px rgba(0, 0, 0, 0.36), 0 4px 10px -4px rgba(0, 0, 0, 0.52);
+  --e1-hover: var(--hl), 0 1px 2px rgba(0, 0, 0, 0.36), 0 12px 22px -10px rgba(0, 0, 0, 0.66);
+  --e1-press: var(--hl), 0 1px 1px rgba(0, 0, 0, 0.42), 0 2px 4px -2px rgba(0, 0, 0, 0.42);
+  --e2:
+    inset 0 1px 0 rgba(255, 255, 255, 0.13), 0 1px 2px rgba(0, 0, 0, 0.32),
+    0 4px 10px -6px rgba(0, 0, 0, 0.42), 0 30px 64px -30px rgba(0, 0, 0, 0.8),
+    18px 26px 56px -30px rgba(0, 0, 0, 0.66);
+  --e-hand:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 2px 4px rgba(0, 0, 0, 0.42),
+    0 22px 40px -16px rgba(0, 0, 0, 0.8);
+  --e-card: 0 40px 70px -30px rgba(0, 0, 0, 0.66);
+  --e3:
+    inset 0 1px 0 rgba(255, 255, 255, 0.13), 0 2px 6px -1px rgba(0, 0, 0, 0.48),
+    0 28px 60px -20px rgba(0, 0, 0, 0.84);
+  --set-in: inset 0 1px 3px rgba(0, 0, 0, 0.42), inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+  --set-in-field: inset 0 1px 2px rgba(0, 0, 0, 0.42), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+  --set-in-lights: inset 0 1px 1px rgba(0, 0, 0, 0.32);
+  --lit:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 1px rgba(0, 0, 0, 0.42),
+    0 4px 10px -6px rgba(0, 0, 0, 0.58);
+  --lit-y:
+    inset 0 1px 0 rgba(255, 255, 255, 0.36), 0 1px 1px rgba(0, 0, 0, 0.44),
+    0 8px 16px -8px rgba(0, 0, 0, 0.62);
+  --raised:
+    inset 0 1px 0 rgba(255, 255, 255, 0.11), 0 1px 2px rgba(0, 0, 0, 0.42),
+    0 3px 8px -5px rgba(0, 0, 0, 0.58);
+  --raised-lift: 0 3px 4px -1px rgba(0, 0, 0, 0.36), 0 16px 26px -10px rgba(0, 0, 0, 0.68);
+  --shadow-primary:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 1px rgba(0, 0, 0, 0.42),
+    0 4px 10px -4px rgba(0, 0, 0, 0.58);
+  --shadow-primary-press: inset 0 1px 0 rgba(255, 255, 255, 0.36), 0 1px 1px rgba(0, 0, 0, 0.42);
+  --shadow-icon-primary: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  --shadow-icon-yellow: inset 0 1px 0 rgba(255, 255, 255, 0.36), 0 1px 2px rgba(0, 0, 0, 0.42);
+  --shadow-dot: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  --shadow-otherside:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 1px 2px rgba(0, 0, 0, 0.28),
+    0 6px 14px -8px rgba(0, 0, 0, 0.48);
+  --shadow-page:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 1px 2px rgba(0, 0, 0, 0.32),
+    0 2px 6px -2px rgba(0, 0, 0, 0.32), 0 22px 44px -24px rgba(0, 0, 0, 0.74);
+  --shadow-pin: 0 1px 2px rgba(0, 0, 0, 0.28), 0 10px 18px -12px rgba(0, 0, 0, 0.64);
+  --shadow-edge-up: 0 -1px 0 rgba(0, 0, 0, 0.22), 0 -12px 20px -14px rgba(0, 0, 0, 0.64);
+  --shadow-dock:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 -1px 2px rgba(0, 0, 0, 0.32),
+    0 -14px 32px -18px rgba(0, 0, 0, 0.74);
+  --shadow-pill:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 1px 2px rgba(0, 0, 0, 0.42),
+    0 6px 16px -8px rgba(0, 0, 0, 0.64);
+  --shadow-window: 0 24px 64px -28px rgba(0, 0, 0, 0.74);
+}
+
+/* lite: for remote desktops. No shadow anywhere; the planes part by tone alone, and floating cards take a hairline.
+   It is data-render="lite" on <html>, set by src/lib/display.ts. */
+:root[data-render="lite"] {
+  --hl: none;
+  --e0: none;
+  --e1: none;
+  --e1-hover: none;
+  --e1-press: none;
+  --e2: none;
+  --e-hand: none;
+  --e-card: none;
+  --e3: none;
+  --set-in: none;
+  --set-in-field: none;
+  --set-in-lights: none;
+  --lit: none;
+  --lit-y: none;
+  --raised: none;
+  --raised-lift: none;
+  --shadow-primary: none;
+  --shadow-primary-press: none;
+  --shadow-icon-primary: none;
+  --shadow-icon-yellow: none;
+  --shadow-dot: none;
+  --shadow-otherside: none;
+  --shadow-page: none;
+  --shadow-pin: none;
+  --shadow-edge-up: none;
+  --shadow-dock: none;
+  --shadow-pill: none;
+  --shadow-window: none;
+}
+
+/* ---------- The operating system's own windows stay light at night ----------
+   An NSIS installer and a Win32 task dialog don't follow the system's dark mode, so they're drawn in the day's
+   values whatever the light: [data-os-light] puts every value the night changes back to the day's, generated from
+   the blocks above. */
+[data-os-light] {
+  color-scheme: light;
+  --page: oklch(72.73% 0.0158 80.69);
+  --ground: oklch(91.35% 0.0087 84.57);
+  --ground-hover: oklch(88.04% 0.0105 81.79);
+  --ground-press: oklch(85.01% 0.0123 79.78);
+  --inset: oklch(88.34% 0.0105 81.79);
+  --inset-hover: oklch(87.09% 0.0117 84.58);
+  --flat: oklch(92.59% 0.0075 80.72);
+  --flat-hover: oklch(94.35% 0.0058 84.57);
+  --flat-num: oklch(59.63% 0.0171 76.99);
+  --tile: oklch(93.8% 0.0074 80.72);
+  --tile-hover: oklch(95.56% 0.0057 84.57);
+  --surface: oklch(99.13% 0.0029 84.56);
+  --surface-hover: oklch(97.61% 0.0041 91.45);
+  --well: oklch(95.86% 0.0057 84.57);
+  --well-strong: oklch(92.86% 0.0087 84.57);
+  --desk: oklch(95% 0.0074 80.72);
+  --sheet: oklch(100% 0 0);
+  --lights: oklch(84.08% 0.0123 79.78);
+  --scrollbar: oklch(81.87% 0.0136 82.4);
+  --scrollbar-hover: oklch(73.05% 0.0158 80.69);
+  --primary: oklch(24.58% 0.0072 67.48);
+  --primary-hover: oklch(33.53% 0.0103 73.56);
+  --primary-press: oklch(39.34% 0.012 72.48);
+  --muted: oklch(38.28% 0.0142 71.65);
+  --quiet: oklch(46.42% 0.0169 74.24);
+  --on-primary: oklch(99.13% 0.0029 84.56);
+  --on-yellow: oklch(24.58% 0.0072 67.48);
+  --select: oklch(88.69% 0.0298 87.55);
+  --yellow: oklch(81.322% 0.16654 85.595);
+  --red: oklch(54.38% 0.1786 28.86);
+  --green: oklch(51.06% 0.1027 153.75);
+  --relied: oklch(46.33% 0.0162 78.15);
+  --yellow-line: oklch(65.985% 0.13527 84.828);
+  --green-tint: oklch(93.86% 0.0158 154.46);
+  --green-text: oklch(43.82% 0.0894 153.46);
+  --red-tint: oklch(93.03% 0.0213 28.33);
+  --red-text: oklch(46.8% 0.1526 28.79);
+  --neutral-tint: oklch(94.1% 0.0074 80.72);
+  --otherside: oklch(94.98% 0.0121 43.28);
+  --supports-mark: oklch(91.32% 0.0267 155.94);
+  --against-mark: oklch(90.05% 0.0354 28.67);
+  --relied-mark: oklch(90.84% 0.0162 82.79);
+  --supports-ref: oklch(92.13% 0.0233 157.57);
+  --against-ref: oklch(89.48% 0.0321 29.77);
+  --on-colour: oklch(100% 0 0);
+  --faint: rgba(35, 32, 29, 0.38);
+  --scrim: rgba(229, 226, 220, 0.82);
+  --yellow-ring: rgba(120, 88, 0, 0.35);
+  --chip-green: color-mix(in srgb, var(--green), rgb(20, 14, 8) 22%);
+  --chip-red: color-mix(in srgb, var(--red), rgb(20, 14, 8) 22%);
+  --chip-yellow: color-mix(in srgb, var(--yellow), rgb(35, 32, 29) 13%);
+  --hover: rgba(56, 44, 30, 0.07);
+  --press: rgba(56, 44, 30, 0.12);
+  --hover-faint: rgba(56, 44, 30, 0.06);
+  --divide: rgba(56, 44, 30, 0.07);
+  --divide-band: rgba(56, 44, 30, 0.08);
+  --divide-mid: rgba(56, 44, 30, 0.1);
+  --divide-strong: rgba(56, 44, 30, 0.12);
+  --ring-kbd: rgba(56, 44, 30, 0.2);
+  --outline-lite: rgba(56, 44, 30, 0.24);
+  --leader: rgba(56, 44, 30, 0.3);
+  --ref-line: rgba(35, 32, 29, 0.45);
+  --ref-line-quiet: rgba(35, 32, 29, 0.35);
+  --edge-control: oklch(57.25% 0.0173 76.98);
+  --lip-top: var(--edge-control);
+  --lip-bottom: rgba(255, 255, 255, 0.7);
+  --lip-bottom-w: 1px;
+  --hl: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  --e0:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 1px rgba(56, 44, 30, 0.08),
+    0 2px 6px -3px rgba(56, 44, 30, 0.14);
+  --e1: var(--hl), 0 1px 1px rgba(56, 44, 30, 0.1), 0 4px 10px -4px rgba(56, 44, 30, 0.2);
+  --e1-hover: var(--hl), 0 1px 2px rgba(56, 44, 30, 0.1), 0 12px 22px -10px rgba(56, 44, 30, 0.3);
+  --e1-press: var(--hl), 0 1px 1px rgba(56, 44, 30, 0.14), 0 2px 4px -2px rgba(56, 44, 30, 0.14);
+  --e2:
+    inset 0 1px 0 #ffffff, 0 1px 2px rgba(56, 44, 30, 0.08), 0 4px 10px -6px rgba(56, 44, 30, 0.12),
+    0 30px 64px -30px rgba(56, 44, 30, 0.38), 18px 26px 56px -30px rgba(56, 44, 30, 0.26);
+  --e-hand:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 2px 4px rgba(40, 28, 16, 0.16),
+    0 22px 40px -16px rgba(40, 28, 16, 0.44);
+  --e-card: 0 40px 70px -30px rgba(40, 28, 16, 0.3);
+  --e3:
+    inset 0 1px 0 #ffffff, 0 2px 6px -1px rgba(56, 44, 30, 0.16),
+    0 28px 60px -20px rgba(56, 44, 30, 0.46);
+  --set-in: inset 0 1px 3px rgba(56, 44, 30, 0.14), inset 0 -1px 0 rgba(255, 255, 255, 0.7);
+  --set-in-field: inset 0 1px 2px rgba(56, 44, 30, 0.14), inset 0 -1px 0 rgba(255, 255, 255, 0.45);
+  --set-in-lights: inset 0 1px 1px rgba(56, 44, 30, 0.12);
+  --lit:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 1px 1px rgba(40, 28, 16, 0.2),
+    0 4px 10px -6px rgba(40, 28, 16, 0.3);
+  --lit-y:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42), 0 1px 1px rgba(40, 28, 16, 0.22),
+    0 8px 16px -8px rgba(40, 28, 16, 0.36);
+  --raised: 0 1px 2px rgba(56, 44, 30, 0.14), 0 3px 8px -5px rgba(56, 44, 30, 0.24);
+  --raised-lift: 0 3px 4px -1px rgba(56, 44, 30, 0.1), 0 16px 26px -10px rgba(56, 44, 30, 0.38);
+  --shadow-primary:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 1px 1px rgba(35, 32, 29, 0.2),
+    0 4px 10px -4px rgba(35, 32, 29, 0.4);
+  --shadow-primary-press: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 1px 1px rgba(35, 32, 29, 0.2);
+  --shadow-icon-primary: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  --shadow-icon-yellow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 1px 2px rgba(40, 28, 16, 0.18);
+  --shadow-dot: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  --shadow-otherside:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 1px 2px rgba(120, 40, 30, 0.06),
+    0 6px 14px -8px rgba(120, 40, 30, 0.14);
+  --shadow-page:
+    inset 0 1px 0 #ffffff, 0 1px 2px rgba(56, 44, 30, 0.1), 0 2px 6px -2px rgba(56, 44, 30, 0.1),
+    0 22px 44px -24px rgba(56, 44, 30, 0.34);
+  --shadow-pin: 0 1px 2px rgba(56, 44, 30, 0.06), 0 10px 18px -12px rgba(56, 44, 30, 0.28);
+  --shadow-edge-up: 0 -1px 0 rgba(56, 44, 30, 0.06), 0 -12px 20px -14px rgba(56, 44, 30, 0.3);
+  --shadow-dock:
+    inset 0 1px 0 #ffffff, 0 -1px 2px rgba(56, 44, 30, 0.08),
+    0 -14px 32px -18px rgba(56, 44, 30, 0.4);
+  --shadow-pill:
+    inset 0 1px 0 #ffffff, 0 1px 2px rgba(56, 44, 30, 0.14), 0 6px 16px -8px rgba(56, 44, 30, 0.36);
+  --shadow-window: 0 24px 64px -28px rgba(40, 32, 22, 0.45);
+  --os-mac-plane: #f2f2f2;
+  --os-mac-text: #1d1d1f;
+  --os-mac-text-2: #3c3c43;
+  --os-mac-accent: #0a7aff;
+  --os-mac-button: #e3e3e8;
+  --os-win-plane: #ffffff;
+  --os-win-foot: #f3f3f3;
+  --os-win-text: #1b1b1b;
+  --os-win-text-2: #5d5d5d;
+  --os-win-accent: #005fb8;
+  --os-win-on-accent: #ffffff;
+  --os-win-button: #fbfbfb;
+  --os-win-line: rgba(0, 0, 0, 0.0578);
+  --os-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 22px 70px 4px rgba(0, 0, 0, 0.26);
+}
+:root[data-render="lite"] [data-os-light] {
+  --hl: none;
+  --e0: none;
+  --e1: none;
+  --e1-hover: none;
+  --e1-press: none;
+  --e2: none;
+  --e-hand: none;
+  --e-card: none;
+  --e3: none;
+  --set-in: none;
+  --set-in-field: none;
+  --set-in-lights: none;
+  --lit: none;
+  --lit-y: none;
+  --raised: none;
+  --raised-lift: none;
+  --shadow-primary: none;
+  --shadow-primary-press: none;
+  --shadow-icon-primary: none;
+  --shadow-icon-yellow: none;
+  --shadow-dot: none;
+  --shadow-otherside: none;
+  --shadow-page: none;
+  --shadow-pin: none;
+  --shadow-edge-up: none;
+  --shadow-dock: none;
+  --shadow-pill: none;
+  --shadow-window: none;
+  --os-shadow: 0 0 0 1px var(--outline-lite);
+}
+
+/* the computer's own dialogs at night: each system's dark appearance */
+:root[data-theme="night"] {
+  --os-mac-plane: #2c2c2e;
+  --os-mac-text: #f5f5f7;
+  --os-mac-text-2: #c7c7cc;
+  /* macOS's own dark-appearance blue. White on it is 3.65:1, under 4.5:1, and is kept on purpose: this depicts the
+     computer's own dialog, which macOS draws inside the app in its own colours, not Clauseo's */
+  --os-mac-accent: #0a84ff;
+  --os-mac-button: #48484a;
+  --os-win-plane: #2b2b2b;
+  --os-win-foot: #202020;
+  --os-win-text: #ffffff;
+  --os-win-text-2: #c5c5c5;
+  --os-win-accent: #60cdff;
+  --os-win-on-accent: #000000;
+  --os-win-button: #373737;
+  --os-win-line: rgba(255, 255, 255, 0.0698);
+  --os-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.6), 0 22px 70px 4px rgba(0, 0, 0, 0.56);
+}
+:root[data-render="lite"] {
+  --os-shadow: 0 0 0 1px var(--outline-lite);
+}

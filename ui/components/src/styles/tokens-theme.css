@@ -1,0 +1,374 @@
+/* Tailwind's theme: @theme inline reference maps every token onto its namespace, and the utilities and variants that
+   Tailwind takes from no namespace. Imported by tokens.css, which says why the order matters. */
+
+/* ---------- Tailwind: every token onto its namespace ----------
+   inline: a class reads the variable where it's used, so night, lite, Hindi and a run's own lang apply.
+   reference: nothing here is emitted as a variable of its own; the classes point at the variables above. */
+
+@theme inline reference {
+  --*: initial;
+
+  /* widths the room changes at: narrow phones, the mid window, the full room */
+  --breakpoint-narrow: 480px;
+  --breakpoint-mid: 1000px;
+  --breakpoint-wide: 1200px;
+
+  /* colour */
+  --color-page: var(--page);
+  --color-ground: var(--ground);
+  --color-ground-hover: var(--ground-hover);
+  --color-ground-press: var(--ground-press);
+  --color-inset: var(--inset);
+  --color-inset-hover: var(--inset-hover);
+  --color-flat: var(--flat);
+  --color-flat-hover: var(--flat-hover);
+  --color-flat-num: var(--flat-num);
+  --color-tile: var(--tile);
+  --color-tile-hover: var(--tile-hover);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-well: var(--well);
+  --color-well-strong: var(--well-strong);
+  --color-desk: var(--desk);
+  --color-sheet: var(--sheet);
+  --color-lights: var(--lights);
+  --color-scrollbar: var(--scrollbar);
+  --color-scrollbar-hover: var(--scrollbar-hover);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-press: var(--primary-press);
+  --color-muted: var(--muted);
+  --color-quiet: var(--quiet);
+  --color-on-primary: var(--on-primary);
+  --color-on-yellow: var(--on-yellow);
+  --color-select: var(--select);
+  --color-yellow: var(--yellow);
+  --color-red: var(--red);
+  --color-green: var(--green);
+  --color-relied: var(--relied);
+  --color-yellow-line: var(--yellow-line);
+  --color-green-tint: var(--green-tint);
+  --color-green-text: var(--green-text);
+  --color-red-tint: var(--red-tint);
+  --color-red-text: var(--red-text);
+  --color-neutral-tint: var(--neutral-tint);
+  --color-otherside: var(--otherside);
+  --color-supports-mark: var(--supports-mark);
+  --color-against-mark: var(--against-mark);
+  --color-relied-mark: var(--relied-mark);
+  --color-supports-ref: var(--supports-ref);
+  --color-against-ref: var(--against-ref);
+  --color-on-colour: var(--on-colour);
+  --color-faint: var(--faint);
+  --color-scrim: var(--scrim);
+  --color-yellow-ring: var(--yellow-ring);
+  --color-chip-green: var(--chip-green);
+  --color-chip-red: var(--chip-red);
+  --color-chip-yellow: var(--chip-yellow);
+  --color-hover: var(--hover);
+  --color-press: var(--press);
+  --color-hover-faint: var(--hover-faint);
+  --color-divide: var(--divide);
+  --color-divide-band: var(--divide-band);
+  --color-divide-mid: var(--divide-mid);
+  --color-divide-strong: var(--divide-strong);
+  --color-ring-kbd: var(--ring-kbd);
+  --color-outline-lite: var(--outline-lite);
+  --color-leader: var(--leader);
+  --color-ref-line: var(--ref-line);
+  --color-ref-line-quiet: var(--ref-line-quiet);
+  --color-edge-control: var(--edge-control);
+  --color-win-close: var(--win-close);
+  --color-win-close-press: var(--win-close-press);
+
+  /* font: the page's stack, which turns Devanagari under lang="hi"; Latin for English standing alone; numerals */
+  --font-room: var(--font);
+  --font-en: var(--font-latin);
+  --font-hi: var(--font-deva);
+  --font-numeral: var(--font-num);
+
+  /* text: each role's size with its own line height, which Hindi makes taller */
+  --text-chip: var(--t12);
+  --text-chip--line-height: calc(var(--lh-chip) * var(--k));
+  --text-tight: var(--t13);
+  --text-tight--line-height: calc(var(--lh-tight) * var(--k));
+  --text-tile-title: var(--t13);
+  --text-tile-title--line-height: calc(var(--lh-tile) * var(--k));
+  --text-small: var(--t13);
+  --text-small--line-height: calc(var(--lh-small) * var(--k));
+  --text-small-row: var(--t13);
+  --text-small-row--line-height: calc(var(--lh-small-row) * var(--k));
+  --text-ui: var(--t15);
+  --text-ui--line-height: calc(var(--lh-ui) * var(--k));
+  --text-ui-loose: var(--t15);
+  --text-ui-loose--line-height: calc(var(--lh-ui-loose) * var(--k));
+  --text-quote: var(--t15);
+  --text-quote--line-height: calc(var(--lh-quote) * var(--k));
+  --text-field: var(--t17);
+  --text-field--line-height: calc(var(--lh-field) * var(--k));
+  --text-reply: var(--t17);
+  --text-reply--line-height: calc(var(--lh-reply) * var(--k));
+  --text-asked-narrow: var(--t17);
+  --text-asked-narrow--line-height: calc(var(--lh-asked-narrow) * var(--k));
+  --text-asked: var(--t18);
+  --text-asked--line-height: calc(var(--lh-asked) * var(--k));
+  --text-read: var(--t18);
+  --text-read--line-height: calc(var(--lh-read) * var(--k));
+  --text-title: var(--t22);
+  --text-title--line-height: calc(var(--lh-title) * var(--k));
+  --text-lead-narrow: var(--t22);
+  --text-lead-narrow--line-height: calc(var(--lh-lead-narrow) * var(--k));
+  --text-numeral-word: var(--t22);
+  --text-numeral-word--line-height: calc(var(--lh-numeral) * var(--k));
+  --text-numeral: var(--t26);
+  --text-numeral--line-height: calc(var(--lh-numeral) * var(--k));
+  --text-numeral-band: var(--t26);
+  --text-numeral-band--line-height: calc(var(--lh-numeral-band) * var(--k));
+  --text-lead: var(--t26);
+  --text-lead--line-height: calc(var(--lh-lead) * var(--k));
+  --leading-chip: calc(var(--lh-chip) * var(--k));
+  --leading-tight: calc(var(--lh-tight) * var(--k));
+  --leading-tile-title: calc(var(--lh-tile) * var(--k));
+  --leading-small: calc(var(--lh-small) * var(--k));
+  --leading-small-row: calc(var(--lh-small-row) * var(--k));
+  --leading-ui: calc(var(--lh-ui) * var(--k));
+  --leading-ui-loose: calc(var(--lh-ui-loose) * var(--k));
+  --leading-quote: calc(var(--lh-quote) * var(--k));
+  --leading-field: calc(var(--lh-field) * var(--k));
+  --leading-reply: calc(var(--lh-reply) * var(--k));
+  --leading-asked: calc(var(--lh-asked) * var(--k));
+  --leading-read: calc(var(--lh-read) * var(--k));
+  --leading-title: calc(var(--lh-title) * var(--k));
+  --leading-lead-narrow: calc(var(--lh-lead-narrow) * var(--k));
+  --leading-asked-narrow: calc(var(--lh-asked-narrow) * var(--k));
+  --leading-numeral: calc(var(--lh-numeral) * var(--k));
+  --leading-numeral-band: calc(var(--lh-numeral-band) * var(--k));
+  --leading-lead: calc(var(--lh-lead) * var(--k));
+
+  /* weight carries authorship */
+  --font-weight-clauseo: var(--w-clauseo);
+  --font-weight-ui: var(--w-ui);
+  --font-weight-chip: var(--w-chip);
+  --font-weight-chrome: var(--w-chrome);
+  --font-weight-accepted: var(--w-accepted);
+  --font-weight-monument: var(--w-monument);
+
+  /* tracking, per role */
+  --tracking-numeral: var(--tr-numeral);
+  --tracking-numeral-word: var(--tr-numeral-word);
+  --tracking-lead: var(--tr-lead);
+  --tracking-title: var(--tr-title);
+  --tracking-read: var(--tr-read);
+  --tracking-head: var(--tr-head);
+  --tracking-chip: var(--tr-chip);
+  --tracking-caps: var(--tr-caps);
+
+  /* space: the 4 px grid, the optical values that keep a reason, and the room's part geometry */
+  --spacing-0: 0px;
+  --spacing-s0-5: var(--s0-5);
+  --spacing-s1: var(--s1);
+  --spacing-s1-5: var(--s1-5);
+  --spacing-s2: var(--s2);
+  --spacing-s3: var(--s3);
+  --spacing-s4: var(--s4);
+  --spacing-s5: var(--s5);
+  --spacing-s6: var(--s6);
+  --spacing-s7: var(--s7);
+  --spacing-s8: var(--s8);
+  --spacing-s10: var(--s10);
+  --spacing-s12: var(--s12);
+  --spacing-chip-pad: var(--chip-pad);
+  --spacing-para-gap: var(--para-gap);
+  --spacing-overlap: var(--overlap);
+  --spacing-tile-pad: var(--tile-pad);
+  --spacing-tile-gap: var(--tile-gap);
+  --spacing-slot: var(--slot);
+  --spacing-slot-gap: var(--slot-gap);
+  --spacing-toolbar: var(--toolbar);
+  --spacing-measure: var(--measure);
+  --spacing-thread-pad: var(--thread-pad);
+  --spacing-control: var(--size-control);
+  --spacing-control-small: var(--size-control-small);
+  --spacing-control-large: var(--size-control-large);
+  --spacing-hint: var(--size-hint);
+  --spacing-seg: var(--size-seg);
+  --spacing-chip: var(--size-chip);
+  --spacing-kbd: var(--size-kbd);
+  --spacing-kbd-w: var(--size-kbd-w);
+  --spacing-more: var(--size-more);
+  --spacing-ask: var(--size-ask);
+  --spacing-search: var(--size-search);
+  --spacing-meter: var(--size-meter);
+  --spacing-meter-h: var(--size-meter-h);
+  --spacing-card-tile: var(--size-card-tile);
+  --spacing-card-row: var(--size-card-row);
+  --spacing-card-ref: var(--size-card-ref);
+  --spacing-history: var(--size-history);
+  --spacing-band: var(--size-band);
+  --spacing-icon-chip: var(--size-icon-chip);
+  --spacing-icon-fold: var(--size-icon-fold);
+  --spacing-icon-line: var(--size-icon-line);
+  --spacing-icon: var(--size-icon);
+  --spacing-icon-card: var(--size-icon-card);
+  --spacing-icon-chev: var(--size-icon-chev);
+  --spacing-seg-pad: var(--size-seg-pad);
+  --spacing-band-pad: var(--size-band-pad);
+  --spacing-facade: var(--size-facade);
+  --spacing-tile-icon: var(--size-tile-icon);
+  --spacing-dot: var(--size-dot);
+  --spacing-dot-hint: var(--size-dot-hint);
+  --spacing-dot-otherside: var(--size-dot-otherside);
+  --spacing-menu: var(--size-menu);
+  --spacing-dialog: var(--size-dialog);
+  --spacing-switch-w: var(--size-switch-w);
+  --spacing-switch-h: var(--size-switch-h);
+  --spacing-switch-thumb: var(--size-switch-thumb);
+  --spacing-check: var(--size-check);
+  --spacing-check-dot: var(--size-check-dot);
+  --spacing-caption-w: var(--size-caption-w);
+  --spacing-caption-h: var(--size-caption-h);
+  --spacing-caption-glyph: var(--size-caption-glyph);
+
+  /* shape */
+  --radius-ref: var(--r-ref);
+  --radius-label: var(--r-label);
+  --radius-kbd: var(--r-kbd);
+  --radius-chip: var(--r-chip);
+  --radius-small: var(--r-small);
+  --radius-control: var(--r-control);
+  --radius-tile: var(--r-tile);
+  --radius-card: var(--r-card);
+  --radius-field: var(--r-field);
+  --radius-surface: var(--r-surface);
+  --radius-meter: var(--r-meter);
+
+  /* depth: every shadow, day and night, none in lite */
+  --shadow-hl: var(--hl);
+  --shadow-e0: var(--e0);
+  --shadow-e1: var(--e1);
+  --shadow-e1-hover: var(--e1-hover);
+  --shadow-e1-press: var(--e1-press);
+  --shadow-e2: var(--e2);
+  --shadow-e-hand: var(--e-hand);
+  --shadow-e-card: var(--e-card);
+  --shadow-e3: var(--e3);
+  --shadow-set-in: var(--set-in);
+  --shadow-set-in-field: var(--set-in-field);
+  --shadow-set-in-lights: var(--set-in-lights);
+  --shadow-lit: var(--lit);
+  --shadow-lit-y: var(--lit-y);
+  --shadow-raised: var(--raised);
+  --shadow-raised-lift: var(--raised-lift);
+  --shadow-ask: var(--shadow-primary);
+  --shadow-ask-press: var(--shadow-primary-press);
+  --shadow-icon-primary: var(--shadow-icon-primary);
+  --shadow-icon-yellow: var(--shadow-icon-yellow);
+  --shadow-dot: var(--shadow-dot);
+  --shadow-otherside-plane: var(--shadow-otherside);
+  --shadow-turned-page: var(--shadow-page);
+  --shadow-pin: var(--shadow-pin);
+  --shadow-edge-up: var(--shadow-edge-up);
+  --shadow-dock: var(--shadow-dock);
+  --shadow-pill: var(--shadow-pill);
+  --shadow-window: var(--shadow-window);
+  --shadow-hand-card: var(--e-hand), var(--e-card);
+
+  /* motion */
+  --ease-arrive: var(--ease-arrive);
+  --ease-leave: var(--ease-leave);
+  --ease-spring: var(--ease-spring);
+}
+
+/* Width carries voice. Tailwind has no theme namespace for font-stretch, so each width is a utility. */
+@utility stretch-broad {
+  font-stretch: var(--wd-broad);
+}
+@utility stretch-voice {
+  font-stretch: var(--wd-voice);
+}
+@utility stretch-wide {
+  font-stretch: var(--wd-wide);
+}
+@utility stretch-read {
+  font-stretch: var(--wd-read);
+}
+@utility stretch-label {
+  font-stretch: var(--wd-label);
+}
+@utility stretch-read-narrow {
+  font-stretch: var(--wd-read-narrow);
+}
+@utility stretch-accepted {
+  font-stretch: var(--wd-accepted);
+}
+
+/* a tile's title: the narrow label cut under its broad numeral, a near-reading width in Devanagari */
+@utility stretch-tile-title {
+  font-stretch: var(--wd-label);
+  &:lang(hi) {
+    font-stretch: var(--wd-label-hi);
+  }
+}
+
+/* Durations: Tailwind has no theme namespace for them either. */
+@utility dur-press {
+  transition-duration: var(--dur-press);
+}
+@utility dur-words-out {
+  transition-duration: var(--dur-words-out);
+}
+@utility dur-leave {
+  transition-duration: var(--dur-leave);
+}
+@utility dur-quick {
+  transition-duration: var(--dur-quick);
+}
+@utility dur-shrink {
+  transition-duration: var(--dur-shrink);
+}
+@utility dur-forward {
+  transition-duration: var(--dur-forward);
+}
+@utility dur-state {
+  transition-duration: var(--dur-state);
+}
+@utility dur-arrive {
+  transition-duration: var(--dur-arrive);
+}
+@utility dur-grow {
+  transition-duration: var(--dur-grow);
+}
+@utility dur-settle {
+  transition-duration: var(--dur-settle);
+}
+@utility dur-accept {
+  transition-duration: var(--dur-accept);
+}
+@utility dur-drop {
+  transition-duration: var(--dur-drop);
+}
+@utility dur-cite {
+  transition-duration: var(--dur-cite);
+}
+@utility dur-fly {
+  transition-duration: var(--dur-fly);
+}
+@utility dur-turn {
+  transition-duration: var(--dur-turn);
+}
+@utility dur-turn-back {
+  transition-duration: var(--dur-turn-back);
+}
+@utility dur-theme {
+  transition-duration: var(--dur-theme);
+}
+@utility dur-lang {
+  transition-duration: var(--dur-lang);
+}
+
+/* the folded search's width, in its own container; the rail folded behind Matters */
+@custom-variant search-folded (@container (max-width: 11rem));
+@custom-variant rail-folded (@media (min-width: 1000px) and (max-width: 1199px));
+/* the field's well with room for the expected time beside Stop and its own words: 33 rem, so a larger text size
+   puts the time back in the working line's row */
+@custom-variant entry-roomy (@container entry (min-width: 33rem));

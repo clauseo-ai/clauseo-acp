@@ -1,0 +1,424 @@
+/* Parts: space, radius, motion and the room's part geometry, with the reduced-motion values, and the values of
+   Clauseo's parts (their lines, sizes and the dialogs' geometry). Imported by tokens.css, which says why the order matters. */
+
+/* ---------- space: a 4 px grid ---------- */
+
+:root {
+  --s0-5: 2px; /* half values, for optical fits inside small parts */
+  --s1: 4px;
+  --s1-5: 6px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 24px;
+  --s7: 28px;
+  --s8: 32px;
+  --s10: 40px;
+  --s12: 48px;
+  /* optical values that keep a reason */
+  --chip-pad: 7px; /* a chip's sides: its words centre on 12 px type */
+  --para-gap: 14px; /* between paragraphs: half the reading line */
+  --overlap: 14px; /* the work reaches this far over the wall, so its shadow falls on the tiles */
+  --tile-pad: 8px;
+  --tile-gap: 6px; /* the facade's joints */
+  --slot: 20px; /* the chip's slot at a tile's foot */
+  --slot-gap: 8px;
+  --toolbar: 64px;
+  --measure: 540px; /* about 66 characters of the answer */
+  --thread-pad: 48px;
+}
+
+/* ---------- shape: one radius scale ---------- */
+
+:root {
+  --r-ref: 3px; /* a reference's pressed tint */
+  --r-label: 4px; /* the one chip, the turned page */
+  --r-kbd: 5px; /* a key cap */
+  --r-chip: 6px; /* small quiet pills in the thread */
+  --r-small: 8px; /* small buttons */
+  --r-control: 10px; /* controls, the wall's tiles */
+  --r-tile: 12px; /* rail rows, citation rows, large buttons */
+  --r-card: 14px; /* cards and planes */
+  --r-field: 16px; /* the composer */
+  --r-surface: 18px; /* the work's surface, the page's pill */
+}
+
+/* ---------- motion: in answer to the lawyer, still at rest ----------
+   The spring is a heavily damped one (damping ratio 0.78, about 2% overshoot), sampled at 41 points into linear().
+   A browser that can't parse linear() gets the arrive curve in its place. */
+
+:root {
+  --ease-arrive: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-leave: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: var(--ease-arrive);
+  --dur-press: 60ms; /* a tile's press */
+  --dur-words-out: 80ms; /* a tile's words fading out under its card */
+  --dur-leave: 90ms; /* History or a card closing */
+  --dur-quick: 120ms; /* colour and shadow on buttons, rows and fields; the scrim */
+  --dur-shrink: 130ms; /* a card shrinking back into its tile */
+  --dur-forward: 160ms; /* a tile or row coming forward, History opening, chevrons */
+  --dur-state: 200ms; /* the pinned question, the accept mark, the time taken */
+  --dur-arrive: 220ms; /* arrivals that slide 8 px and stop, a tick drawing itself */
+  --dur-grow: 240ms; /* a card growing out of its tile, the working line opening */
+  --dur-settle: 260ms; /* a chip settling into its slot */
+  --dur-accept: 280ms; /* accepted text settling from 400 to 600 */
+  --dur-drop: 320ms; /* the draft's tile dropping in; the light changing between day and night */
+  --dur-cite: 340ms; /* a tile coming forward as the answer cites it */
+  --dur-fly: 360ms; /* the question flying into the thread */
+  --dur-turn: 420ms; /* the page turn opening */
+  --dur-turn-back: 300ms; /* and back */
+  --dur-theme: 320ms;
+  --dur-lang: 200ms; /* the words re-setting in the other language */
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --ease-spring: linear(
+      0,
+      0.0247,
+      0.0872,
+      0.1728,
+      0.2706,
+      0.3721,
+      0.4715,
+      0.5649,
+      0.6497,
+      0.7246,
+      0.7893,
+      0.8438,
+      0.8887,
+      0.925,
+      0.9536,
+      0.9755,
+      0.9918,
+      1.0035,
+      1.0114,
+      1.0163,
+      1.0189,
+      1.0199,
+      1.0196,
+      1.0185,
+      1.0169,
+      1.015,
+      1.013,
+      1.011,
+      1.0091,
+      1.0074,
+      1.0058,
+      1.0045,
+      1.0033,
+      1.0024,
+      1.0016,
+      1.001,
+      1.0006,
+      1.0002,
+      1,
+      0.9998,
+      1
+    );
+  }
+}
+
+/* ---------- the room's part geometry ----------
+   The sizes single parts are drawn at. Heights that hold words scale with
+   the text size setting through --k, so a 20 px root still fits its words; at the default 16 px they are exact. */
+
+:root {
+  --k: 1; /* root font size over 16 px, set with data-text-size */
+  --size-control: calc(36px * var(--k)); /* a button, the search field, History and Undo */
+  --size-control-small: calc(32px * var(--k));
+  --size-control-large: calc(48px * var(--k));
+  --size-hint: calc(28px * var(--k)); /* the ready hint, a fold's line */
+  --size-seg: calc(24px * var(--k)); /* a segmented switch's side */
+  --size-chip: calc(var(--slot) * var(--k)); /* the one chip */
+  --size-kbd: calc(18px * var(--k)); /* a key cap */
+  --size-kbd-w: calc(20px * var(--k));
+  --size-more: calc(40px * var(--k)); /* the "N more" strip at the wall's foot */
+  --size-ask: calc(72px * var(--k)); /* the Ask button's least width */
+  --size-search: calc(208px * var(--k)); /* the search field */
+  --size-meter: 44px; /* the plan meter */
+  --size-meter-h: 4px;
+  --r-meter: 2px;
+  --size-card-tile: 320px; /* an excerpt card grown from a tile */
+  --size-card-row: 348px; /* from a citation row */
+  --size-card-ref: 368px; /* against a reference */
+  --size-history: 380px; /* the History card */
+  --size-band: 64px; /* an excerpt card's band, at least */
+  --size-icon-chip: 11px; /* icons: in a chip */
+  --size-icon-fold: 13px; /* in a fold */
+  --size-icon-line: 14px; /* the room's line, the accept mark, Open */
+  --size-icon: 16px; /* buttons and the toolbar */
+  --size-icon-card: 18px; /* a card's icon tile */
+  --size-tile-icon: 36px; /* a card's icon tile */
+  --size-dot: 3px; /* separators in meta lines */
+  --size-dot-hint: 8px; /* the ready hint's yellow dot */
+  --size-dot-otherside: 10px; /* the other side's red dot */
+  --size-band-pad: 9px; /* an excerpt card's band, above and below */
+  --size-facade: 349px; /* the facade's width at 1440 by 900 */
+  --wd-label-hi: 96%; /* a tile's title in Devanagari, whose matras need the room */
+  --size-seg-pad: 3px; /* the switch's track round the chosen side */
+  --size-icon-chev: 12px; /* a fold's chevron, as the room draws it */
+  --press-scale: 0.98; /* every press */
+  --press-scale-small: 0.97; /* a press on a segmented switch's side */
+  --lift: -1px; /* a cited tile under the pointer */
+  --drop: -4px; /* History and floating cards drop in from 4 px above */
+  --drop-scale: 0.97;
+  --tip-rise: 4px; /* a tooltip arrives 4 px from its side */
+  --delay-words: 70ms; /* a card's words wait for its shape to be about 60% grown */
+  /* The controls in ui/. Sizes holding words scale with the text size */
+  --size-menu: 224px; /* a menu's least width, the rail's own width */
+  --size-dialog: 440px; /* a dialog: its title in two lines at most */
+  --size-switch-w: calc(36px * var(--k)); /* a switch's track */
+  --size-switch-h: calc(20px * var(--k));
+  --size-switch-thumb: calc(16px * var(--k));
+  --size-check: calc(18px * var(--k)); /* a checkbox, a radio */
+  --size-check-dot: calc(8px * var(--k)); /* a radio's chosen dot */
+  --shift-menu: 6px; /* a menu or select arrives 6 px from its trigger's side */
+  --shift-dialog: 8px; /* a dialog rises 8 px */
+  --shift-toast: 12px; /* a toast rises 12 px */
+  /* Windows 11's caption buttons, in the platform's own metrics, which don't follow the text size */
+  --size-caption-w: 46px; /* minimise, maximise and close, each */
+  --size-caption-h: 32px;
+  --size-caption-glyph: 10px; /* the glyph, drawn in 1 px as Windows draws it */
+}
+
+/* reduced motion: no movement and no scaling. Colour and opacity keep their changes of up to 120 ms; everything
+   else lands at once. Lite implies it, and takes every transition away besides. */
+:root[data-motion="reduced"] {
+  --press-scale: 1;
+  --press-scale-small: 1;
+  --lift: 0px;
+  --drop: 0px;
+  --drop-scale: 1;
+  --tip-rise: 0px;
+  --shift-menu: 0px;
+  --shift-dialog: 0px;
+  --shift-toast: 0px;
+  --delay-words: 0ms;
+  --dur-words-out: 80ms;
+  --dur-forward: 120ms;
+  --dur-state: 120ms;
+  --dur-arrive: 120ms;
+  --dur-grow: 0ms;
+  --dur-settle: 120ms;
+  --dur-accept: 0ms;
+  --dur-drop: 0ms;
+  --dur-cite: 0ms;
+  --dur-fly: 0ms;
+  --dur-turn: 0ms;
+  --dur-turn-back: 0ms;
+  --dur-theme: 0ms;
+  --dur-lang: 0ms;
+  --dur-shrink: 0ms;
+}
+
+/* ========== Clauseo's parts: the room's own values ==========
+   Lengths, durations and lines the stylesheets of Clauseo's parts and the room draw at, which no wider token holds,
+   each with its reason. The parts' stylesheets take every value from a token; a hairline too. Heights and widths
+   that hold words scale with the text size through --k. */
+
+:root {
+  /* lines */
+  --hairline: 1px; /* every drawn line and inset division, and an underline at rest */
+  --control-ring-w: 1.5px; /* an unchecked checkbox, radio or switch track, ringed all round */
+  --underline-firm: 2px; /* a reference's underline in its role's colour, in hand or pressed */
+  --ring-w: 2px; /* the focus ring */
+  --ring-gap: 2px; /* the focus ring's offset */
+  --ring-inset: -4px; /* a ring drawn inside, where outside it would fall past an edge */
+  --r-round: 50%; /* circles: the bench mark, the dots, the corner lights */
+  /* the viewport */
+  --view-w: 100vw;
+  --view-h: 100vh;
+  --view-dh: 100dvh; /* the visible height, under a phone's own bars */
+  /* the window and its columns */
+  --rail-w: clamp(200px, 15vw, 224px); /* the rail */
+  --pane-w: clamp(352px, 28vw, 416px); /* the wall */
+  --pane-w-mid: 400px; /* the wall at 1000 to 1199 px */
+  --thread-pad-mid: 36px; /* the work's sides at 1000 to 1199 px */
+  --window-min-h: 600px; /* the least height the room lays out for; it scrolls below it */
+  --lead-h: 52px; /* the toolbar's lead: the corner lights sit in its top 52 px */
+  --lead-w-mid: 196px; /* the toolbar's lead with the rail folded behind Matters */
+  --rail-panel-top: 60px; /* the folded rail opens just under Matters */
+  --rail-panel-w: 260px; /* the folded rail, open */
+  --pill-clear: 52px; /* the wall's foot keeps clear of the presentation pill */
+  --search-fold-pad: 10px; /* the folded search centres its 16 px icon in 36 */
+  --search-open-w: 220px; /* the folded search, opened by focus */
+  --size-plan: 13rem; /* the plan in the toolbar: its widest state, "Close to the limit. Resets at 9:40 pm." at the chip weight, in Hindi, 203 px at text size 16 */
+  --dur-reveal: 140ms; /* Accept fading in beside the answer */
+  /* the thread */
+  --fold-state-gap: 5px; /* the check and "Accepted" on a folded exchange's line */
+  --ref-offset: 5px; /* a reference's underline clears Devanagari's descenders */
+  --ref-touch-pad: 7px; /* a reference grows to a 32 px target, narrow, without moving its line */
+  --otherside-pad-end: 18px; /* the other side's plane: 16 above, 20 at the sides, 18 below */
+  --pin-pad-y: 11px; /* the pinned question: two loose lines in a 66 px band */
+  --pin-pad-y-narrow: 10px;
+  --pin-space: calc(
+    4.5rem + 2 * var(--pin-pad-y-narrow) + env(safe-area-inset-top)
+  ); /* the pinned question, narrow */
+  --pin-who-gap: 10px; /* "You, 4:31 pm" before the pinned question */
+  --composer-h-rest: 140px; /* the composer's height before it's measured, for the turned page */
+  --page-extra: 128px; /* the turned page: the measure and 64 px either side */
+  --page-pad-top: 56px;
+  --page-pad-side: 64px;
+  --leader-rise: -6px; /* the dotted leader stands on the party's baseline */
+  --card-status-pad: 10px; /* a judgment card's Good law panel */
+  --card-status-pad-end: 14px;
+  --card-head-nudge: 1px; /* a card band's pin and title, level with its numeral's cap height */
+  --card-bench-top: 7px; /* a card band's bench mark, centred on its first line */
+  --mark-pad-y: 1px; /* the excerpt's marked phrase: its tint just past the letters */
+  --history-row-pad: 7px; /* History's rows: 7 px by 8 px */
+  --history-foot-pad-end: 11px; /* History's foot: its line centred on the well */
+  /* the wall */
+  --cite-line: calc(22px * var(--k)); /* a citation's name line, 22 px in both scripts */
+  --cite-offset: 4px; /* a citation name's underline */
+  --hand-tile: translate(-4px, -3px) scale(1.06); /* a tile in hand comes forward toward the work */
+  --hand-row: translate(-4px, -2px); /* a citation row in hand */
+  --hand-tile-narrow: translateY(-2px); /* one column: a tile in hand rises in place */
+  /* the composer's parts */
+  --size-target: calc(24px * var(--k)); /* the least target: a paper's remove, WCAG 2.2 */
+  --size-ask-narrow: calc(64px * var(--k)); /* Ask, docked on a narrow window */
+  --working-text-min: calc(
+    200px * var(--k)
+  ); /* the working line's words before its pill wraps under */
+  --working-time-h: calc(22px * var(--k)); /* the expected time's pill */
+  --work-at-w: calc(56px * var(--k)); /* a work list's clock column: "4:31 pm" */
+  --perm-icon-drop: calc(3px * var(--k)); /* a permission line's icon on its first line's middle */
+  --perm-indent: calc(
+    24px * var(--k)
+  ); /* a permission prompt's lines, past its 16 px icon and gap */
+  --change-text-min: calc(
+    240px * var(--k)
+  ); /* the change note's words before its actions wrap under */
+  --empty-measure: calc(320px * var(--k)); /* an empty state's words */
+  --search-empty-icon-drop: calc(
+    2px * var(--k)
+  ); /* the empty search's icon on its title's middle */
+  /* Versions: the matter as it stood */
+  --ver-panel-w: 304px; /* the Versions panel, where the rail stood, wide enough for who and what */
+  --ver-at-w: calc(76px * var(--k)); /* an entry's clock column, "सुबह 11:02" on one line */
+  --ver-date-col: calc(140px * var(--k)); /* the list of dates' date column, "14 November 2023" */
+  /* The usage limit and what breaks */
+  --lim-label-w: calc(
+    84px * var(--k)
+  ); /* the limit note's row labels, "Finished", "Left", "पूरा हुआ" on one line */
+  --lim-note-indent: calc(
+    60px * var(--k)
+  ); /* the note's actions line up with its title, past the 36 px icon tile */
+  --lim-track-h: 6px; /* a window's bar in the plan's card, a step fuller than the toolbar's 4 px */
+  --lim-date-w: calc(
+    124px * var(--k)
+  ); /* a list of dates' date column, "22 September 2026" and "22 सितंबर 2026" */
+  --ins-thickness: var(
+    --hairline
+  ); /* a tracked insertion, as Word marks it, in primary: one underline everywhere */
+  --ins-offset: var(--ref-offset); /* and its one offset, clear of Devanagari's descenders */
+  /* The reader: judgments, Indian Kanoon and Word */
+  --rd-num-w: calc(
+    32px * var(--k)
+  ); /* a judgment's paragraph number, in the sheet's margin: "19" and "144" */
+  --rd-report-w: calc(56px * var(--k)); /* "Cited as": the report's column, SCC, AIR or LiveLaw */
+  --rd-pin-h: calc(
+    66px * var(--k)
+  ); /* the quoted paragraph, pinned: two loose lines in a band, as the question pins */
+  --ver-day-h: calc(
+    28px * var(--k)
+  ); /* a day's heading, held at the list's top while its versions pass under it */
+  --ver-fold-indent: calc(
+    42px * var(--k)
+  ); /* a run's fold, indented half the clock column, so every fold fits one line */
+  --ver-pdf-side-min: calc(
+    200px * var(--k)
+  ); /* a PDF's then and now, side by side until they can't be */
+  /* The edge of the matter: what it allows, and the computer's own dialogs */
+  --edge-allows-w: 400px; /* What this matter allows, opened from the room's line */
+  --edge-row-min: calc(
+    180px * var(--k)
+  ); /* a place the matter allows, before its Remove wraps under */
+  /* the computer's own dialogs, drawn as each system draws them, in its own type and colour. They are the system's
+     marks, as Windows' close red is, never Clauseo's. Sizes are the systems' own and don't follow the text size */
+  --os-font-mac: -apple-system, BlinkMacSystemFont, system-ui, "Kohinoor Devanagari", sans-serif;
+  --os-font-win: "Segoe UI Variable Text", "Segoe UI", "Nirmala UI", system-ui, sans-serif;
+  --os-mac-w: 372px; /* macOS 26's alert */
+  --os-mac-r: 26px;
+  --os-mac-pad: 20px;
+  --os-mac-icon: 64px; /* the app's icon, on the alert */
+  --os-mac-title: 14px;
+  --os-mac-title-lh: 18px;
+  --os-mac-body: 12px;
+  --os-mac-body-lh: 16px;
+  --os-mac-check: 14px;
+  --os-mac-check-r: 4px;
+  --os-mac-button-h: 28px;
+  --os-mac-plane: #f2f2f2; /* the alert's plane, opaque where macOS frosts it */
+  --os-mac-text: #1d1d1f;
+  --os-mac-text-2: #3c3c43;
+  --os-mac-accent: #0a7aff; /* macOS's own blue: its default button and a ticked box */
+  --os-mac-on-accent: #ffffff;
+  --os-mac-button: #e3e3e8;
+  --os-win-w: 456px; /* Windows 11's dialog, a window of its own */
+  --os-win-r: 8px;
+  --os-win-bar-h: 32px; /* its title bar, as tall as the caption buttons */
+  --os-win-pad: 24px;
+  --os-win-icon: 16px;
+  --os-win-title: 20px;
+  --os-win-title-lh: 28px;
+  --os-win-body: 14px;
+  --os-win-body-lh: 20px;
+  --os-win-small: 12px;
+  --os-win-small-lh: 16px;
+  --os-win-check: 20px;
+  --os-win-check-r: 4px;
+  --os-win-button-h: 32px;
+  --os-win-button-r: 4px;
+  --os-win-plane: #ffffff;
+  --os-win-foot: #f3f3f3; /* the dialog's foot, where its buttons stand */
+  --os-win-text: #1b1b1b;
+  --os-win-text-2: #5d5d5d;
+  --os-win-accent: #005fb8; /* Windows' own accent: its default button and a ticked box */
+  --os-win-on-accent: #ffffff;
+  --os-win-button: #fbfbfb;
+  --os-win-line: rgba(0, 0, 0, 0.0578); /* Windows' own stroke round a control and over the foot */
+  --os-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 22px 70px 4px rgba(0, 0, 0, 0.26); /* a system window's own */
+  /* Matters: the rail's conversations, the queue and the corridor */
+  --mat-queue-max: calc(
+    196px * var(--k)
+  ); /* the queue, opened past its two, shows about four, then scrolls inside itself */
+  --mat-queue-text-min: calc(
+    200px * var(--k)
+  ); /* a queued message's words before its actions wrap under */
+  --mat-conv-more: calc(
+    30px * var(--k)
+  ); /* the current conversation's words keep clear of its chevron */
+  --mat-board-gap: 40px; /* the rail states board: room between rails, so each reads alone */
+  --mat-shift: 16px; /* the next room along comes in this far as the lawyer moves */
+  /* Settings: install, the settings window, updates and the first crash */
+  --set-win-w: 960px; /* the settings window at 1440 by 900: the side and a 600 px column */
+  --set-win-h: 700px;
+  --set-side-w: calc(
+    232px * var(--k)
+  ); /* the window's sections, wide enough for a note on two lines */
+  --set-measure: 600px; /* a section's column: two usage tiles side by side */
+  --set-dest-w: calc(
+    168px * var(--k)
+  ); /* privacy: where each thing goes, "To Claude, on your plan" */
+  --set-dmg-w: 660px; /* the disk image's window, on its art's own grid */
+  --set-dmg-h: 400px;
+  --set-dmg-icon: 128px; /* Finder's icons at the size the disk image sets */
+  --set-dmg-app-x: 180px; /* the icons' centres, as Tauri's dmg settings place them */
+  --set-dmg-apps-x: 480px;
+  --set-dmg-icon-y: 170px;
+  --set-finder-bar: 28px; /* Finder's title bar */
+  --set-nsis-w: 620px; /* the installer, NSIS's 497 by 360 drawn at 125% */
+  --set-nsis-h: 392px; /* its pages, above the foot */
+  --set-nsis-side: 205px; /* the sidebar art, 164 by 314 at 125% */
+  --set-nsis-head-h: 71px; /* the inner pages' white band, 57 px at 125% */
+  --set-nsis-head-art: 188px;
+  --set-task-w: 520px; /* Windows' task dialog */
+  --set-icon-task: 32px; /* the task dialog's own icon */
+  --set-icon-title: 16px; /* a dialog's icon in its title bar */
+  /* First launch and settings */
+  --form-pair-min: calc(
+    200px * var(--k)
+  ); /* the new matter's client and next date stand side by side above this */
+}

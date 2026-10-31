@@ -1,5 +1,5 @@
 // A small reader for the token stylesheets: every rule's selector, the at-rules around it, and its custom
-// properties. Enough for tokens.css; not a general CSS parser.
+// properties. Enough for the token files; not a general CSS parser.
 
 export type Block = { context: string; selector: string; decls: Map<string, string> };
 

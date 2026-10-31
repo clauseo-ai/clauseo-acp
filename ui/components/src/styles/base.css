@@ -47,7 +47,7 @@
 @custom-variant hi (&:where(:lang(hi)));
 
 /* ---------- motion: what each kind of part may change, over the token's time ----------
-   Under reduced motion the tokens shorten (tokens.css) and the press and lift variables go to rest, so these keep
+   Under reduced motion the tokens shorten (tokens-parts.css) and the press and lift variables go to rest, so these keep
    colour and opacity changes and drop movement. In lite, the rule at the foot takes every transition away. */
 @utility motion-control {
   transition:
