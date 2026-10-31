@@ -17,7 +17,7 @@ import {
 import { OsDialogPreview } from "@clauseo/components/clauseo/os-dialog.tsx";
 import { NotProtectedNote } from "@clauseo/components/clauseo/protection.tsx";
 import { Button } from "@clauseo/components/ui/button.tsx";
-import type { Platform } from "@clauseo/components/lib/display.ts";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
 import {
   edgeDialogWords,
   useVersionWords,
@@ -39,16 +39,15 @@ const noop = () => {};
 export function EdgeFlow({
   kind,
   place,
-  platform,
   keys = false,
 }: {
   kind: EdgeKind;
   place: string;
-  platform: Platform;
   /** Whether this prompt takes the keys: one prompt on the page at a time. */
   keys?: boolean;
 }) {
   const { lang } = useVersionWords();
+  const { platform } = useDisplay();
   const [state, setState] = useState<EdgeState>({ kind: "pending" });
   const [remember, setRemember] = useState(true);
   const ask: EdgeAsk =
@@ -64,7 +63,6 @@ export function EdgeFlow({
         kind={kind}
         place={place}
         state={state}
-        platform={platform}
         keys={keys}
         onAllow={() => setState({ kind: "confirming" })}
         onRefuse={() => setState({ kind: "refused", remembered: false })}
@@ -117,7 +115,7 @@ export function RefusalFlow() {
 }
 
 /** Not protected, explained once. Its trigger is the mark itself, so the note stays shut until a press. */
-export function NoteSample({ why, platform }: { why: Unprotected["why"]; platform: Platform }) {
+export function NoteSample({ why }: { why: Unprotected["why"] }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -128,7 +126,6 @@ export function NoteSample({ why, platform }: { why: Unprotected["why"]; platfor
         open={open}
         matter={MATTER_NAME}
         why={why}
-        platform={platform}
         onClose={() => setOpen(false)}
         onProtect={() => setOpen(false)}
       />

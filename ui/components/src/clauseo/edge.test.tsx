@@ -5,6 +5,7 @@
 import { act, StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, test, vi } from "vitest";
+import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
 import { edgeDialogWords, type EdgeAsk } from "../lib/words-versions.ts";
 import { AllowedList, WorkspaceLine } from "./allowed.tsx";
 import { EdgePrompt, RefusalPause } from "./edge.tsx";
@@ -26,7 +27,12 @@ afterEach(async () => {
   await act(async () => root?.unmount());
   root = null;
   document.body.replaceChildren();
+  showDisplay(DEFAULT_DISPLAY);
 });
+
+/** The computer the display says it runs on: the words that name it are the page's, not a prop's. */
+const onComputer = (platform: "mac" | "windows" | "linux") =>
+  showDisplay({ ...DEFAULT_DISPLAY, motion: "reduced", platform });
 
 const one = <T extends Element>(selector: string, box: ParentNode = document) => {
   const n = box.querySelector<T>(selector);
@@ -59,7 +65,6 @@ test("a folder beyond the matter: the thread asks, Allow hands it to the compute
       kind="folder"
       place="Documents/Precedents"
       state={{ kind: "pending" }}
-      platform="mac"
       keys
       onAllow={onAllow}
       onRefuse={() => {}}
@@ -76,23 +81,30 @@ test("a folder beyond the matter: the thread asks, Allow hands it to the compute
   expect(onAllow).toHaveBeenCalledTimes(2);
 });
 
-test("while the computer's dialog is up the prompt says so, and its keys rest", async () => {
-  const onAllow = vi.fn();
-  await show(
-    <EdgePrompt
-      kind="folder"
-      place="Documents/Precedents"
-      state={{ kind: "confirming" }}
-      platform="mac"
-      keys
-      onAllow={onAllow}
-      onRefuse={() => {}}
-    />,
-  );
-  expect(one(".edge-confirming").textContent).toBe("macOS is asking you to confirm.");
-  await key(document.body, "Enter");
-  expect(onAllow).not.toHaveBeenCalled();
-});
+test.each([
+  ["mac", "macOS is asking you to confirm."],
+  ["windows", "Windows is asking you to confirm."],
+  ["linux", "Linux is asking you to confirm."],
+] as const)(
+  "on %s, while the computer's dialog is up the prompt says so, and its keys rest",
+  async (platform, said) => {
+    onComputer(platform);
+    const onAllow = vi.fn();
+    await show(
+      <EdgePrompt
+        kind="folder"
+        place="Documents/Precedents"
+        state={{ kind: "confirming" }}
+        keys
+        onAllow={onAllow}
+        onRefuse={() => {}}
+      />,
+    );
+    expect(one(".edge-confirming").textContent).toBe(said);
+    await key(document.body, "Enter");
+    expect(onAllow).not.toHaveBeenCalled();
+  },
+);
 
 test("answered, the prompt is one past-tense line", async () => {
   await show(
@@ -101,7 +113,6 @@ test("answered, the prompt is one past-tense line", async () => {
         kind="folder"
         place="Documents/Precedents"
         state={{ kind: "allowed", remembered: true, at: "5:12 pm" }}
-        platform="mac"
         onAllow={() => {}}
         onRefuse={() => {}}
       />
@@ -109,7 +120,6 @@ test("answered, the prompt is one past-tense line", async () => {
         kind="site"
         place="example.org"
         state={{ kind: "refused", remembered: false }}
-        platform="windows"
         onAllow={() => {}}
         onRefuse={() => {}}
       />
@@ -131,7 +141,6 @@ test("switching protection off: Enter and Escape both keep protection, and Switc
       kind="off"
       place=""
       state={{ kind: "pending" }}
-      platform="mac"
       keys
       onAllow={onAllow}
       onRefuse={onRefuse}
@@ -207,13 +216,33 @@ test("switching protection off: the computer asks, and keeping protection is the
   expect(os.querySelector(".sysd-check-input")).toBeNull();
 });
 
+test.each([
+  ["mac", "macOS didn't allow the protected space on this computer."],
+  ["windows", "Windows didn't allow the protected space on this computer."],
+  ["linux", "Linux didn't allow the protected space on this computer."],
+] as const)(
+  "on %s, a matter whose protection couldn't be set up says which computer refused",
+  async (platform, said) => {
+    onComputer(platform);
+    await show(
+      <NotProtectedNote
+        open
+        matter="Acme Ltd v. State"
+        why="setup"
+        onClose={() => {}}
+        onProtect={() => {}}
+      />,
+    );
+    expect(one('[role="alertdialog"]').textContent).toContain(said);
+  },
+);
+
 test("Not protected is explained once: three plain lines, and Understood, the dark primary, starts focused", async () => {
   await show(
     <NotProtectedNote
       open
       matter="Acme Ltd v. State"
       why="off"
-      platform="mac"
       onClose={() => {}}
       onProtect={() => {}}
     />,

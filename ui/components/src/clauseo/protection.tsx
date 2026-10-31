@@ -6,7 +6,7 @@
 import { AlertDialog, AlertDialogClose, AlertDialogPopup } from "../ui/alert-dialog.tsx";
 import { Button } from "../ui/button.tsx";
 import { IconNotProtected } from "../icons/icons.tsx";
-import type { Platform } from "../lib/display.ts";
+import { useDisplay } from "../lib/display.ts";
 import { useVersionWords } from "../lib/words-versions.ts";
 import type { Unprotected } from "./allowed.tsx";
 import { Say } from "./say.tsx";
@@ -15,7 +15,6 @@ export function NotProtectedNote({
   open,
   matter,
   why,
-  platform,
   onClose,
   onProtect,
 }: {
@@ -23,12 +22,12 @@ export function NotProtectedNote({
   /** The matter's name as filed. */
   matter: string;
   why: Unprotected["why"];
-  platform: Platform;
   onClose: () => void;
   /** Switch protection back on, or try setting it up again. */
   onProtect: () => void;
 }) {
   const w = useVersionWords();
+  const { platform } = useDisplay();
   return (
     <AlertDialog open={open} onOpenChange={(o) => !o && onClose()}>
       <AlertDialogPopup
@@ -61,7 +60,9 @@ export function NotProtectedNote({
                 <Say>
                   {platform === "windows"
                     ? w.v("Windows didn't allow the protected space on this computer.")
-                    : w.v("macOS didn't allow the protected space on this computer.")}
+                    : platform === "linux"
+                      ? w.v("Linux didn't allow the protected space on this computer.")
+                      : w.v("macOS didn't allow the protected space on this computer.")}
                 </Say>
               </span>
             )}

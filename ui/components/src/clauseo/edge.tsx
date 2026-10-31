@@ -17,7 +17,7 @@ import {
   IconNotProtected,
   IconWebsite,
 } from "../icons/icons.tsx";
-import type { Platform } from "../lib/display.ts";
+import { useDisplay } from "../lib/display.ts";
 import { useVersionWords } from "../lib/words-versions.ts";
 import { fromComposer } from "./composer-keys.ts";
 import { useRoom } from "./room-scope.ts";
@@ -64,7 +64,6 @@ export function EdgePrompt({
   kind,
   place,
   state,
-  platform,
   keys = false,
   onAllow,
   onRefuse,
@@ -73,7 +72,6 @@ export function EdgePrompt({
   /** Where it reaches, as the thread names it: "Documents/Precedents", "example.org". */
   place: string;
   state: EdgeState;
-  platform: Platform;
   /** Whether this prompt takes the keys: one prompt on the page at a time. */
   keys?: boolean;
   /** For a folder or a website, allowing; for protection, switching it off. Either opens the computer's dialog. */
@@ -81,6 +79,7 @@ export function EdgePrompt({
   onRefuse: () => void;
 }) {
   const w = useVersionWords();
+  const { platform } = useDisplay();
   const id = useId();
   const pending = state.kind === "pending";
   // protection's safe answer comes first and takes both keys: Escape dismisses, so a reflex Escape keeps protection,
@@ -200,7 +199,9 @@ export function EdgePrompt({
           <Say>
             {platform === "mac"
               ? w.v("macOS is asking you to confirm.")
-              : w.v("Windows is asking you to confirm.")}
+              : platform === "linux"
+                ? w.v("Linux is asking you to confirm.")
+                : w.v("Windows is asking you to confirm.")}
           </Say>
         </p>
       )}
