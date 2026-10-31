@@ -20,6 +20,7 @@ mod known;
 mod out;
 mod prompt;
 mod reconcile;
+mod route;
 mod session;
 mod state;
 mod steps;
@@ -30,12 +31,11 @@ mod updates;
 use std::collections::{BTreeSet, VecDeque};
 
 use clauseo_protocol::{
-    AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, HostCommand,
-    LimitStopReason, MatterId, MatterPath, StreamId, ThreadId, Timestamp, TurnId,
+    AgentChoiceId, ContentBlock, DetachReason, ElicitationResponse, ErrorCode, LimitStopReason,
+    MatterId, MatterPath, StreamId, ThreadId, Timestamp, TurnId,
 };
 use futures::future::AbortHandle;
 
-use super::commands::CommandCtx;
 use super::{Actor, HostPhase};
 use crate::agent::AgentInput;
 use crate::coalesce::ThreadText;
@@ -45,6 +45,7 @@ use crate::pipeline::Failure;
 
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
 pub(crate) use out::flush_text;
+pub(crate) use route::{TurnCommand, command};
 
 /// How long a cancelled turn waits for the agent's answer before the host stops the agent.
 const CANCEL_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -223,60 +224,6 @@ enum JobKind {
     After(TurnId),
     Reconcile(Box<reconcile::Repair>),
     Undo(Box<undo::UndoAsk>),
-}
-
-/// A turn command, after its shape, principal and receipt checks passed and its thread is
-/// known: `SendPrompt`, `Cancel`, `AnswerPermission`, `AnswerElicitation`, `SetConfigOption`,
-/// `SetMode`, `UndoStep`. It ends in `actor.finish_command(ctx.id, ..)`, at once for a
-/// refusal (no receipt) or from the continuation of a commit that carries the receipt.
-pub(crate) fn command(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, command: HostCommand) {
-    let ctx = *ctx;
-    let done = match command {
-        HostCommand::SendPrompt {
-            content, delivery, ..
-        } => steps::send_prompt(actor, ctx, thread, content, delivery.into()),
-        HostCommand::Cancel { .. } => cancel::cancel_command(actor, ctx, thread),
-        HostCommand::AnswerPermission {
-            request, option_id, ..
-        } => answers::answer_permission(actor, ctx, thread, request, option_id),
-        HostCommand::AnswerElicitation {
-            elicitation,
-            response,
-            ..
-        } => answers::answer_elicitation(actor, ctx, thread, elicitation, response),
-        HostCommand::SetConfigOption {
-            option_id, value, ..
-        } => {
-            agents::ensure(
-                actor,
-                thread,
-                agents::Waiting::Config(ctx, option_id, value),
-            );
-            Ok(())
-        }
-        HostCommand::SetMode { mode_id, .. } => {
-            agents::ensure(actor, thread, agents::Waiting::Mode(ctx, mode_id));
-            Ok(())
-        }
-        HostCommand::UndoStep { turn, files, .. } => {
-            undo::undo_step(actor, ctx, thread, turn, files)
-        }
-        HostCommand::CreateMatter { .. }
-        | HostCommand::CreateThread { .. }
-        | HostCommand::EditQueuedPrompt { .. }
-        | HostCommand::RemoveQueuedPrompt { .. }
-        | HostCommand::SendQueuedNow { .. }
-        | HostCommand::ResumeQueue { .. }
-        | HostCommand::RestartAgent { .. }
-        | HostCommand::RenameThread { .. }
-        | HostCommand::ArchiveThread { .. }
-        | HostCommand::RestoreVersion { .. } => {
-            Err(Error::Internal("not a turn command".to_owned()))
-        }
-    };
-    if let Err(error) = done {
-        actor.finish_command(ctx.id, Err(error));
-    }
 }
 
 /// An agent's event or its end, in the order its tasks posted them, for `thread`.
