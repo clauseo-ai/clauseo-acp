@@ -4,8 +4,8 @@
 //! while it is not durable, and held text survives a blocked stream.
 
 use clauseo_protocol::{
-    DomainEvent, ErrorCode, HostCommand, HostError, PromptBlock, StopReason, StreamId, TextKind,
-    ThreadId, ToolCallStarted, ToolCallStatus, ToolKind, TurnId,
+    CheckpointKind, DomainEvent, ErrorCode, HostCommand, HostError, PromptBlock, StopReason,
+    StreamId, TextKind, ThreadId, ToolCallStarted, ToolCallStatus, ToolKind, TurnId,
 };
 
 use super::rig::{Rig, kind};
@@ -168,6 +168,44 @@ fn a_failed_end_is_retried_once() {
     rig.finish();
 }
 
+#[test]
+fn a_retried_end_keeps_the_after_turn_checkpoint() {
+    let mut rig = Rig::start("turn-end-retried-checkpoint", "");
+    let thread = rig.thread();
+    let turn = rig.running_turn(thread);
+    rig.write_file("brief.txt", "The lease ends in May.");
+    end_failing(&mut rig, thread, 1);
+    let log = rig.log(thread);
+    assert_failed_end(&log);
+    let ended = log.iter().find_map(|event| {
+        if let DomainEvent::TurnEnded(ended) = event {
+            Some(*ended)
+        } else {
+            None
+        }
+    });
+    let after = ended.and_then(|ended| ended.checkpoint_after);
+    let recorded = rig.recorded();
+    let last = recorded.last().unwrap();
+    assert_eq!(after, Some(last.checkpoint()), "the step can be undone");
+    assert_eq!(last.kind(), CheckpointKind::AfterTurn);
+    assert_eq!(last.turn(), Some(turn));
+    let changed: Vec<_> = log
+        .iter()
+        .filter_map(|event| {
+            if let DomainEvent::FilesChanged(changed) = event {
+                Some(changed.files.clone())
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .map(|file| file.path().as_str().to_owned())
+        .collect();
+    assert_eq!(changed, ["brief.txt"]);
+    rig.finish();
+}
+
 fn prompt(thread: ThreadId) -> HostCommand {
     HostCommand::SendPrompt {
         thread,
@@ -196,7 +234,7 @@ fn an_end_that_fails_twice_refuses_prompts_and_stays_open() {
         "the open turn is left to the next start"
     );
     let closing = rig.actor.threads[&thread].turn.closing.as_ref();
-    assert!(closing.is_some_and(|closing| closing.turn == turn && closing.retried));
+    assert!(closing.is_some_and(|closing| closing.close.turn == turn && closing.retried));
     let refused = rig.dispatch(10, prompt(thread)).unwrap_err();
     assert_turn_running(&refused);
     rig.finish();

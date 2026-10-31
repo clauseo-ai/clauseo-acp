@@ -8,9 +8,9 @@ use std::time::Duration;
 
 use clauseo_process::{PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{
-    AgentCapabilities, AgentId, AgentSessionAttached, CommandEnvelope, CommandId, CommandOutcome,
-    Delivery, DomainEvent, Envelope, HostCommand, MatterId, MatterKind, StreamId, ThreadId,
-    Timestamp, TurnId, TurnStarted, UserMessage,
+    AgentCapabilities, AgentId, AgentSessionAttached, CheckpointId, CheckpointRecorded,
+    CommandEnvelope, CommandId, CommandOutcome, Delivery, DomainEvent, Envelope, HostCommand,
+    MatterId, MatterKind, StreamId, ThreadId, Timestamp, TurnId, TurnStarted, UserMessage,
 };
 use clauseo_settings::{Effective, Locations, SystemFiles};
 use futures::channel::oneshot;
@@ -244,7 +244,7 @@ impl Rig {
             .into(),
             TurnStarted {
                 turn,
-                checkpoint_before: self.actor.ids.mint(now).unwrap(),
+                checkpoint_before: self.last_recorded(),
             }
             .into(),
         ];
@@ -285,6 +285,44 @@ impl Rig {
             .into_iter()
             .map(|envelope| envelope.event)
             .collect()
+    }
+
+    /// Every stored event of the Scratch matter's stream.
+    pub(super) fn matter_log(&mut self) -> Vec<DomainEvent> {
+        let store = self.actor.store.clone();
+        let read = streams::read_whole_log(&store, StreamId::Matter(self.matter()));
+        let reopen = self.pool.run_until(read).unwrap();
+        reopen
+            .tail
+            .into_iter()
+            .map(|envelope| envelope.event)
+            .collect()
+    }
+
+    /// The checkpoints the Scratch matter's log records, in order.
+    pub(super) fn recorded(&mut self) -> Vec<CheckpointRecorded> {
+        self.matter_log()
+            .into_iter()
+            .filter_map(|event| {
+                if let DomainEvent::CheckpointRecorded(recorded) = event {
+                    Some(recorded)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// The last checkpoint the Scratch matter's log records.
+    pub(super) fn last_recorded(&mut self) -> CheckpointId {
+        self.recorded().last().unwrap().checkpoint()
+    }
+
+    /// Writes `text` to `name` in the Scratch matter's folder.
+    pub(super) fn write_file(&self, name: &str, text: &str) {
+        let matter = &self.actor.matters[&self.matter()];
+        let path = std::path::Path::new(&matter.row.folder_path).join(name);
+        crate::write::write_file(&path, text.as_bytes()).unwrap();
     }
 
     /// Shuts the host down and closes the store.

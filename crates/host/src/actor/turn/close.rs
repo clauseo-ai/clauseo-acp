@@ -184,8 +184,19 @@ impl TurnClose {
         out.send(actor, then)
     }
 
-    /// The reason the close's expiries give.
-    pub(super) fn expiry(&self) -> ExpiryReason {
-        self.expiries.reason()
+    /// The commit holding the close failed with `code`; its retry closes the turn `Failed`
+    /// with that code, unless the turn failed already (the first failure is the one logged). A
+    /// turn stopped at its limit stays `AtLimit`, as when only its checkpoint fails. The
+    /// expiries and the tool calls not finished are read again from the rolled-back view.
+    pub(super) fn store_failed(&mut self, code: ErrorCode) {
+        if self.failure.is_none() {
+            let detail = Some("the commit ending the turn failed".to_owned());
+            self.failure = Some((code, detail));
+        }
+        if self.stop != StopReason::AtLimit {
+            self.stop = StopReason::Failed;
+        }
+        self.expiries = Expiries::Pending(self.expiries.reason());
+        self.cancel_tools = true;
     }
 }
