@@ -9,7 +9,7 @@
 //! Untracked files are not in the diff, so a run with an untracked `.rs` file fails before
 //! cargo-mutants starts, naming the file to `git add`. Each missed mutant (one no test fails on)
 //! is a failure at its file and line. Both passes together are capped at `MUTANTS_TIMEOUT`,
-//! measured on the Mac and on CI's runner (see there).
+//! measured on the Mac and on CI's runner (see `MUTANTS_TIMEOUT`).
 
 mod build_dirs;
 mod fix;
@@ -46,13 +46,15 @@ const OUTPUT_DIR: &str = "target/xtask/mutants.out";
 const OUTCOMES: &str = "target/xtask/mutants.out/outcomes.json";
 
 /// The cap on one run, both passes together: the review loop waits for it, so a change whose
-/// mutants take longer is split instead. On the 12-core Apple M6 Mac, 20 minutes covered about
-/// 270 mutants at 4 jobs. On CI's ubuntu-24.04 runner (4 vCPU, 16 GB), run 41166189760 of
-/// 2026-10-31 tested one fixed set of 141 mutants (83 in reducer's thread files, 40 in
-/// xtask/src/checks/pins/forms.rs, 18 in crates/desktop/src) at 8.74 a minute after the baseline
-/// at 2 jobs, so 20 minutes covers about 155 of that mix there: a change that fits on the Mac can
-/// still fail on CI. How many fit depends on the crate: per mutant, reducer took 7 s, desktop 17 s
-/// and xtask 24 s at 2 jobs. Kept at 20 minutes: a longer cap makes every review loop wait longer.
+/// mutants take longer is split instead. Kept at 20 minutes, since a longer cap makes every review
+/// loop wait longer. Run 41166189760 (2026-10-31, CI's ubuntu-24.04 runner, 4 vCPU, 16 GB) tested
+/// 141 mutants: whole files diffed against the empty tree, reducer's thread.rs and thread/ (83),
+/// xtask/src/checks/pins/forms.rs (40) and crates/desktop/src (18). At 2 jobs that took 7.76 a
+/// minute of wall time, baseline included, so 20 minutes covers about 155 of that mix, ±15% (one
+/// run per job count). Per mutant, reducer took 7 s, desktop 17 s and xtask 24 s. The Mac covered
+/// about 270 in 20 minutes at 4 jobs, before this change (October 2026). To re-measure, run
+/// `cargo mutants` with pass.rs's arguments, `--in-diff` on such a diff and each `--jobs` value,
+/// and time it; in `outcomes.json`, a mutant's time is the sum of its `phase_results[].duration`.
 const MUTANTS_TIMEOUT: Duration = Duration::from_mins(20);
 
 /// How long cargo-mutants has between the door's SIGTERM and its SIGKILL at the cap. It starts
@@ -71,11 +73,10 @@ const VERSION_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// cargo-mutants' `--jobs`: how many mutants build and test at once, each in its own copy of the
 /// tree. Each build and test run is itself parallel, so this is far below the core count. On CI's
-/// 4-vCPU ubuntu-24.04 runner, run 41166189760 of 2026-10-31 tested the same 141 mutants in
-/// 1089 s at 2 jobs (7.8 a minute), 1466 s at 4 (5.8) and 1245 s at 6 (6.8), one run each: past
-/// 2 the jobs fight over 4 cores, and each one builds the workspace cold in its own copy. On the
-/// 12-core, 24 GB Mac mini, 34 mutants took 162 s at 2 jobs, 129 s at 4 and 126 s at 8, so 2 jobs
-/// costs the Mac about a quarter; CI, where a run reaches the cap, gets the jobs that suit it.
+/// 4-vCPU runner, run 41166189760 tested `MUTANTS_TIMEOUT`'s 141 mutants in 1089 s at 2 jobs,
+/// 1466 s at 4 and 1245 s at 6, one run each. On the 12-core Mac mini (October 2026, before this
+/// change), 34 mutants took 162 s at 2 jobs, 129 s at 4 and 126 s at 8, so 2 jobs costs the Mac
+/// about a quarter to save CI as much, where runs reach the cap.
 const JOBS: &str = "2";
 
 /// Runs a command in the repo root, passing each chunk of its merged output to the callback as it
