@@ -837,6 +837,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "clauseo-host"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "async-io",
+ "clauseo-acp",
+ "clauseo-fake_agent",
+ "clauseo-host",
+ "clauseo-matters",
+ "clauseo-process",
+ "clauseo-protocol",
+ "clauseo-reducer",
+ "clauseo-settings",
+ "clauseo-store",
+ "criterion",
+ "futures",
+ "proptest",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "clauseo-matters"
 version = "0.1.0"
 dependencies = [
