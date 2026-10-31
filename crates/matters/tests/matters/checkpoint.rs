@@ -131,6 +131,39 @@ fn may_include_lawyer_edits_without_tool_call() {
     );
 }
 
+#[test]
+fn changes_between_reads_two_checkpoints_from_history() {
+    let fx = Fixture::new("changes-between");
+    fx.write("mod.txt", "before");
+    fx.write("del.txt", "doomed");
+    let mut matter = fx.import();
+    fx.write("mod.txt", "after, longer");
+    fx.write("new.txt", "fresh");
+    support::remove_file(fx.file("del.txt"));
+    let tool_paths = tools(&["mod.txt", "new.txt", "del.txt"]);
+    let made = created(matter.after_turn(&meta(2), &tool_paths).unwrap(), 2);
+    // The folder moves on; the answer comes from history alone.
+    fx.write("mod.txt", "a later edit");
+
+    let between = matter.changes_between(cid(1), cid(2)).unwrap();
+    assert_eq!(
+        between,
+        [
+            deleted("del.txt", b"doomed"),
+            modified("mod.txt", b"before", b"after, longer"),
+            added("new.txt", b"fresh"),
+        ]
+    );
+    assert_eq!(between, made);
+    assert!(
+        !between
+            .iter()
+            .any(clauseo_protocol::FileChange::may_include_lawyer_edits)
+    );
+    assert_none(&matter.changes_between(cid(2), cid(2)).unwrap());
+    assert!(matter.changes_between(cid(1), cid(9)).is_err());
+}
+
 /// Lock and system files, each spelling in its own folder (macOS folders ignore case).
 const EXCLUDED: [&str; 6] = [
     "~$x.docx",

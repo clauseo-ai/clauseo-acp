@@ -197,7 +197,7 @@ fn finish_load(actor: &mut Actor, stream: StreamId, mut state: StreamState, tail
 }
 
 /// Unloads `stream` when nothing needs it: no view subscriber, no commit in flight, and
-/// the turn path does not keep it. A thread keeps its header for `ListThreads`.
+/// the turn path does not keep it (a thread's open turn, a matter whose writer is held). A thread keeps its header for `ListThreads`.
 pub(crate) fn release(actor: &mut Actor, stream: StreamId) {
     let Some(StreamSlot::Loaded(loaded)) = actor.streams.get(&stream) else {
         return;
@@ -207,6 +207,11 @@ pub(crate) fn release(actor: &mut Actor, stream: StreamId) {
     }
     if let StreamId::Thread(thread) = stream
         && turn::keeps_loaded(actor, thread)
+    {
+        return;
+    }
+    if let StreamId::Matter(matter) = stream
+        && turn::keeps_matter_loaded(actor, matter)
     {
         return;
     }

@@ -65,7 +65,7 @@ fn failing_tool_call(rig: &mut Rig) -> (ThreadId, TurnId, clauseo_protocol::Tool
 }
 
 /// Handles inputs until `thread` has no turn and nothing is in flight.
-fn until_ended(rig: &mut Rig, thread: ThreadId) {
+pub(super) fn until_ended(rig: &mut Rig, thread: ThreadId) {
     rig.run_until("the turn's end", |actor| {
         let state = &actor.threads[&thread].turn;
         state.current.is_none() && actor.work.commits == 0 && actor.work.matter_jobs == 0
@@ -140,7 +140,7 @@ fn a_cancel_the_failure_refused_is_logged_after_the_unblock() {
 
 /// Ends `thread`'s running turn `EndTurn` while the store refuses `times` commits that hold a
 /// `TurnEnded`.
-fn end_failing(rig: &mut Rig, thread: ThreadId, times: usize) {
+pub(super) fn end_failing(rig: &mut Rig, thread: ThreadId, times: usize) {
     rig.fail(times, |event| matches!(event, DomainEvent::TurnEnded(_)));
     let end = End {
         stop: StopReason::EndTurn,
