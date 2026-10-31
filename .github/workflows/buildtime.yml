@@ -25,7 +25,7 @@ jobs:
   measure:
     name: measure (${{ matrix.machine }})
     runs-on: ${{ matrix.runner }}
-    # About twice the slowest job so far: windows-11-arm took 23 minutes in run 41168653043.
+    # About twice the slowest job so far: windows-11-arm took about 24 minutes in run 41168653043.
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -101,7 +101,8 @@ jobs:
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: link.exe
           CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER: link.exe
         run: |
-          cargo xtask buildtime rust --runs 5 --json > "$OUT/buildtime-$MACHINE-link-exe.json"
+          # A failed probe still leaves the linker to check; the step fails at the end.
+          cargo xtask buildtime rust --runs 5 --json > "$OUT/buildtime-$MACHINE-link-exe.json" || status=$?
           touch crates/desktop/src/lib.rs
           cargo build -v -p clauseo-desktop 2>&1 | tee "$OUT/link-exe-build-v.log"
           if ! grep -e '--crate-name clauseo_desktop' "$OUT/link-exe-build-v.log" \
@@ -110,6 +111,7 @@ jobs:
             exit 1
           fi
           echo "cargo build -v: the clauseo-desktop binary was linked with -C linker=link.exe"
+          exit "${status:-0}"
 
       - name: Write every probe to the step summary
         if: ${{ !cancelled() }}
@@ -135,6 +137,10 @@ jobs:
               echo "::warning title=buildtime $name::$file is missing or empty"
               continue
             fi
+            if ! jq empty "$file" 2>/dev/null; then
+              echo "::warning title=buildtime $name::$file is not valid JSON"
+              continue
+            fi
             jq -r --arg run "$name" '
               ((.probes // []) + (.web.probes // []))[]
               | "| \($run) | \(.probe) | \(.status) | \(.median // "") | \(.min // "") | \(.max // "") | \(.unit) | \(.budget // "") |"
@@ -152,4 +158,7 @@ jobs:
         with:
           name: buildtime-${{ matrix.machine }}
           path: ${{ env.OUT }}
-          if-no-files-found: error
+          # A job that fails before the cold build makes $OUT has nothing to upload, and its own
+          # error says why.
+          if-no-files-found: warn
+          retention-days: 30
