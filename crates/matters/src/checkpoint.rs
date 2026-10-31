@@ -11,6 +11,7 @@ use clauseo_protocol::{
 
 use crate::diff::{DiffFile, diff, diff_by, flag};
 use crate::history::{CommitRecord, GixStore, Hasher, HistoryStore, Oid, TreeFile};
+use crate::no_download::NoDownload;
 use crate::stat::{CacheEntry, EntryState, Stat, StatCache};
 use crate::types::{Checkpoint, CheckpointOutcome, Progress, Settings, TimelineEntry};
 use crate::{Error, trailers};
@@ -203,7 +204,9 @@ impl Core {
     ) -> Result<Option<Walked>, Error> {
         self.check_cache()?;
         let history = &mut self.history;
-        let mut store = |path: &Path, len: u64, cap: u64| history.store_file(path, len, cap);
+        let mut store = |path: &Path, len: u64, cap: u64, guard: &NoDownload<'_>| {
+            history.store_file(path, len, cap, guard)
+        };
         walk_folder(&self.cache, folder, settings, cancel, progress, &mut store)
     }
 
@@ -226,7 +229,9 @@ impl Core {
         };
         let cache = rebuilt.as_ref().unwrap_or(&self.cache);
         let mut hasher = Hasher::new();
-        let mut hash = |path: &Path, len: u64, cap: u64| hasher.hash(path, len, cap);
+        let mut hash = |path: &Path, len: u64, cap: u64, guard: &NoDownload<'_>| {
+            hasher.hash(path, len, cap, guard)
+        };
         let walked = walk_folder(cache, folder, settings, None, &mut |_| {}, &mut hash)?
             .ok_or_else(|| Error::history("walk", "cancelled without a cancel flag"))?;
         Ok(walked.entries)

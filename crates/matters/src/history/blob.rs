@@ -13,6 +13,7 @@ use gix::objs::Kind;
 use super::Oid;
 use super::durable::{self, NewObjects, put};
 use super::gix_store::to_oid;
+use crate::no_download::{NoDownload, not_downloaded, not_downloaded_error};
 use crate::{Error, write};
 
 /// Files up to this size are read whole into a reused buffer; larger ones are streamed.
@@ -61,14 +62,19 @@ impl<'a> Target<'a> {
 }
 
 /// The file at `path` opened without following a symlink; `None` when the open file is not a
-/// regular file or (on Unix) not the one `symlink_metadata` of `path` names.
-fn open_checked(path: &Path) -> Result<Option<File>, Error> {
+/// regular file or (on Unix) not the one `symlink_metadata` of `path` names. A file the probe
+/// finds cloud-only by the open file's metadata is not read: an [`Error::Io`] that
+/// [`not_downloaded`] names, as the read itself would give under the guard.
+fn open_checked(path: &Path, guard: &NoDownload<'_>) -> Result<Option<File>, Error> {
     let file = write::open_read_nofollow(path).map_err(|err| Error::io("open", path, err))?;
     let opened = file
         .metadata()
         .map_err(|err| Error::io("stat", path, err))?;
     let named = std::fs::symlink_metadata(path).map_err(|err| Error::io("stat", path, err))?;
     let same = opened.is_file() && named.is_file() && same_file(&opened, &named);
+    if same && guard.is_cloud_only(path, &opened) {
+        return Err(Error::io("read", path, not_downloaded_error()));
+    }
     Ok(same.then_some(file))
 }
 
@@ -113,17 +119,22 @@ impl Blobs {
     /// `path` (a symlink or another file swapped in), is opened, stat'd and read again, at most
     /// [`ATTEMPTS`] times in all; a length over `cap` (the walk's
     /// [`crate::Limits::effective_cap`]) is refused as an [`Error::Io`] of kind
-    /// `FileTooLarge`, and nothing is stored.
+    /// `FileTooLarge`, and nothing is stored. A file that is not downloaded (cloud-only by the
+    /// open file's metadata, or a read failing with `EDEADLK` under `guard`) is an
+    /// [`Error::Io`] that [`not_downloaded`] names, returned at once and never read again.
     pub(super) fn read(
         &mut self,
         path: &Path,
         len: u64,
         cap: u64,
         mut target: Option<Target<'_>>,
+        guard: &NoDownload<'_>,
     ) -> Result<(Oid, u64), Error> {
+        #[cfg(test)]
+        crate::no_download::fault::reading(path);
         let mut expected = len;
         for attempt in 0..ATTEMPTS {
-            let Some(mut file) = open_checked(path)? else {
+            let Some(mut file) = open_checked(path, guard)? else {
                 continue;
             };
             if attempt > 0 {
@@ -159,6 +170,8 @@ impl Blobs {
         target: Option<&mut Target<'_>>,
     ) -> Result<Option<(Oid, u64)>, Error> {
         self.buffer.clear();
+        #[cfg(test)]
+        crate::no_download::fault::read().map_err(|err| Error::io("read", path, err))?;
         let read = file
             .take(len.saturating_add(1))
             .read_to_end(&mut self.buffer)
@@ -192,6 +205,8 @@ impl Blobs {
         let mut read = 0_u64;
         let mut limited = Read::by_ref(file).take(len.saturating_add(1));
         loop {
+            #[cfg(test)]
+            crate::no_download::fault::read().map_err(|err| Error::io("read", path, err))?;
             let n = match limited.read(&mut self.buffer) {
                 Ok(0) => break,
                 Ok(n) => n,
@@ -227,6 +242,7 @@ impl Blobs {
                 target.new_objects.record(object, made_folder);
                 Ok(Some((to_oid(&id)?, len)))
             }
+            Err(_) if source.not_downloaded => Err(Error::io("read", path, not_downloaded_error())),
             Err(_) if source.changed => Ok(None),
             Err(err) => Err(Error::history("write object", err)),
         }
@@ -235,13 +251,15 @@ impl Blobs {
 
 /// The second pass over a streamed file: yields at most `remaining` bytes, hashing them, and
 /// fails (setting `changed`) if the file ends early, goes on past them, or hashes differently
-/// from the first pass, so a changed file is never stored.
+/// from the first pass, so a changed file is never stored. A read that fails because the file
+/// is not downloaded (evicted since the first pass) sets `not_downloaded`.
 struct Checked<'a> {
     file: &'a mut File,
     remaining: u64,
     hasher: Option<gix::hash::Hasher>,
     expected: ObjectId,
     changed: bool,
+    not_downloaded: bool,
 }
 
 impl<'a> Checked<'a> {
@@ -254,7 +272,16 @@ impl<'a> Checked<'a> {
             hasher: Some(hasher),
             expected,
             changed: false,
+            not_downloaded: false,
         }
+    }
+
+    /// Notes a failed read of the file and passes its error on.
+    fn failed(&mut self, err: io::Error) -> io::Error {
+        if not_downloaded(&err) {
+            self.not_downloaded = true;
+        }
+        err
     }
 
     fn changed(&mut self) -> io::Error {
@@ -271,7 +298,8 @@ impl<'a> Checked<'a> {
             return Ok(0);
         };
         let mut extra = [0_u8; 1];
-        if self.file.read(&mut extra)? != 0 {
+        let n = self.file.read(&mut extra).map_err(|err| self.failed(err))?;
+        if n != 0 {
             return Err(self.changed());
         }
         match hasher.try_finalize() {
@@ -293,7 +321,9 @@ impl Read for Checked<'_> {
         let Some(window) = buf.get_mut(..limit) else {
             return Ok(0);
         };
-        let n = self.file.read(window)?;
+        #[cfg(test)]
+        crate::no_download::fault::read().map_err(|err| self.failed(err))?;
+        let n = self.file.read(window).map_err(|err| self.failed(err))?;
         if n == 0 {
             return Err(self.changed());
         }

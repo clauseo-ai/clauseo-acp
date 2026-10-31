@@ -8,6 +8,7 @@ use clauseo_protocol::{ChangeKind, CheckpointId, CheckpointKind, FileChoice, Mat
 
 use crate::checkpoint::{Core, SizedFile, Spec};
 use crate::history::{HistoryStore, Oid};
+use crate::no_download::NoDownload;
 use crate::stat::{EntryState, Stat, find_by_path};
 use crate::types::{CheckpointOutcome, Settings, TimelineEntry, UndoRequest, Undone};
 use crate::writeback::{self, Names, Op, skipped, writable};
@@ -95,10 +96,11 @@ pub(crate) fn edited_since(
     let after_files = core.files_of(after)?;
     let mut edited = Vec::new();
     let mut names = Names::default();
+    let guard = NoDownload::begin(settings.probe.as_ref());
     for step in &steps {
         for op in &step.ops {
             let then = find(&after_files, op.path().as_str()).map(|file| file.blob);
-            let now = current(core, &mut names, folder, settings, op.path())?;
+            let now = current(core, &mut names, folder, settings, op.path(), &guard)?;
             let same = match (now, then) {
                 (Current::Missing, None) | (Current::Unread, _) => true,
                 (Current::Blob(now), Some(then)) => now == then,
@@ -114,12 +116,15 @@ pub(crate) fn edited_since(
 }
 
 /// The content at `path` now, hashing (without storing) only what the cache cannot vouch for.
+/// A file found not downloaded when hashed is [`Current::Unread`], as one the stat found
+/// cloud-only.
 fn current(
     core: &mut Core,
     names: &mut Names,
     folder: &Path,
     settings: &Settings,
     path: &MatterPath,
+    guard: &NoDownload<'_>,
 ) -> Result<Current, Error> {
     let abs = folder.join(path.as_str());
     let Some(metadata) = names.metadata(folder, path)? else {
@@ -132,8 +137,11 @@ fn current(
     if let Some(blob) = core.cache.clean_blob(path.as_str(), &stat) {
         return Ok(Current::Blob(blob));
     }
-    let (blob, _) = core.history.hash_file(&abs, metadata.len())?;
-    Ok(Current::Blob(blob))
+    match core.history.hash_file(&abs, metadata.len(), guard) {
+        Ok((blob, _)) => Ok(Current::Blob(blob)),
+        Err(err) if err.is_not_downloaded() => Ok(Current::Unread),
+        Err(err) => Err(err),
+    }
 }
 
 /// Whether a regular file is at `path` now that is over the cap or cloud-only.
@@ -196,6 +204,20 @@ pub(crate) fn undo(
         CheckpointOutcome::Created(_) => Some(outside),
         CheckpointOutcome::Reused(_) => None,
     };
+    // A target that the outside-edits walk found cloud-only or over the cap (it went so after
+    // `writable` looked at it, or was found not downloaded when read) is never written or
+    // deleted: its step is kept. Nothing is written yet.
+    acting.retain(|step| {
+        let ok = step.ops.iter().all(|op| {
+            core.cache
+                .get(op.path().as_str())
+                .is_none_or(|entry| matches!(entry.state, EntryState::Read(_)))
+        });
+        if !ok {
+            kept.push(step.path.clone());
+        }
+        ok
+    });
     let after_files = core.files_of(request.after)?;
     let mut edited_since = Vec::new();
     for step in &acting {

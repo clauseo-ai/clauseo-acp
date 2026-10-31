@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicBool;
 
 use super::{Found, FoundKind, walk};
 use crate::PlaceholderProbe;
+use crate::no_download::NoDownload;
 use crate::test_dir::TestDir;
 use crate::write;
 
@@ -40,7 +41,7 @@ fn paths(found: &[Found]) -> Vec<&str> {
 }
 
 fn walk_all(root: &Path, probe: &dyn PlaceholderProbe, cap: u64) -> Vec<Found> {
-    walk(root, probe, cap, None, &mut |_| {})
+    walk(root, &NoDownload::begin(probe), cap, None, &mut |_| {})
         .unwrap()
         .unwrap()
         .files
@@ -118,7 +119,7 @@ fn walk_calls_progress_once_per_file() {
     let seen = Mutex::new(Vec::new());
     let found = walk(
         dir.path(),
-        &NamedProbe(vec![]),
+        &NoDownload::begin(&NamedProbe(vec![])),
         u64::MAX,
         None,
         &mut |found| {
@@ -139,7 +140,7 @@ fn walk_stops_when_cancelled() {
     let cancel = AtomicBool::new(true);
     let walked = walk(
         dir.path(),
-        &NamedProbe(vec![]),
+        &NoDownload::begin(&NamedProbe(vec![])),
         u64::MAX,
         Some(&cancel),
         &mut |_| {},
@@ -152,7 +153,7 @@ fn walk_of_a_missing_folder_fails() {
     let dir = TestDir::new("walk-missing");
     let err = walk(
         &dir.path().join("gone"),
-        &NamedProbe(vec![]),
+        &NoDownload::begin(&NamedProbe(vec![])),
         1,
         None,
         &mut |_| {},

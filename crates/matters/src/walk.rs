@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use clauseo_protocol::MatterPath;
 
+use crate::no_download::{NoDownload, not_downloaded};
 use crate::stat::Stat;
 use crate::{Error, PlaceholderProbe, rules};
 
@@ -74,17 +75,19 @@ pub(crate) fn classify(
 /// other non-regular entries are skipped and never descended; so are names that are not UTF-8
 /// or do not make a [`MatterPath`] (with a warning). An entry gone before its stat is skipped,
 /// and so is a subfolder gone before it is read. A subfolder that does not read (permission
-/// denied, say) is listed in [`Listing::unread`] with a warning; the root not reading is an
-/// error. Returns `Ok(None)` once `cancel` is set (checked before each folder and each entry).
+/// denied, say, or not downloaded) is listed in [`Listing::unread`], with a warning unless it
+/// is not downloaded; the root not reading is an error. Returns `Ok(None)` once `cancel` is
+/// set (checked before each folder and each entry). `guard`'s probe tells cloud-only files;
+/// the guard keeps a listing from downloading a folder.
 pub(crate) fn walk(
     root: &Path,
-    probe: &dyn PlaceholderProbe,
+    guard: &NoDownload<'_>,
     cap: u64,
     cancel: Option<&AtomicBool>,
     progress: &mut dyn FnMut(&Found),
 ) -> Result<Option<Listing>, Error> {
     let mut walker = Walker {
-        probe,
+        probe: guard.probe(),
         cap,
         cancel,
         progress,
@@ -97,10 +100,19 @@ pub(crate) fn walk(
         if walker.cancelled() {
             return Ok(None);
         }
-        let entries = match fs::read_dir(&dir) {
+        #[cfg(test)]
+        let listed = crate::no_download::fault::read_dir(&dir).and_then(|()| fs::read_dir(&dir));
+        #[cfg(not(test))]
+        let listed = fs::read_dir(&dir);
+        let entries = match listed {
             Ok(entries) => entries,
             Err(err) if relative.is_empty() => return Err(Error::io("read folder", &dir, err)),
             Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(err) if not_downloaded(&err) => {
+                tracing::info!(path = %dir.display(), "kept a folder that is not downloaded as it was");
+                unread.push(relative);
+                continue;
+            }
             Err(err) => {
                 tracing::warn!(path = %dir.display(), error = %err, "skipped a folder that does not read");
                 unread.push(relative);
@@ -115,6 +127,11 @@ pub(crate) fn walk(
                 Ok(entry) => entry,
                 Err(err) if relative.is_empty() => {
                     return Err(Error::io("read folder", &dir, err));
+                }
+                Err(err) if not_downloaded(&err) => {
+                    tracing::info!(path = %dir.display(), "kept a folder that is not downloaded as it was");
+                    unread.push(relative);
+                    break;
                 }
                 Err(err) => {
                     tracing::warn!(path = %dir.display(), error = %err, "stopped reading a folder");

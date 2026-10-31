@@ -25,6 +25,7 @@ use std::path::Path;
 pub(crate) use gix_store::{GixStore, recorded_worktree};
 
 use crate::Error;
+use crate::no_download::NoDownload;
 use crate::stat::StatCache;
 
 /// The ref every checkpoint moves forward. The only ref that exists besides `HEAD`.
@@ -68,9 +69,15 @@ impl Hasher {
 
     /// Hashes the file `file` (`len` bytes by its metadata) as a blob; returns it and the bytes
     /// read. A length over `cap` is an [`Error::Io`] of kind `FileTooLarge`, as for
-    /// [`HistoryStore::store_file`].
-    pub(crate) fn hash(&mut self, file: &Path, len: u64, cap: u64) -> Result<(Oid, u64), Error> {
-        self.0.read(file, len, cap, None)
+    /// [`HistoryStore::store_file`], and so is a file that is not downloaded.
+    pub(crate) fn hash(
+        &mut self,
+        file: &Path,
+        len: u64,
+        cap: u64,
+        guard: &NoDownload<'_>,
+    ) -> Result<(Oid, u64), Error> {
+        self.0.read(file, len, cap, None, guard)
     }
 }
 
@@ -111,11 +118,25 @@ pub(crate) trait HistoryStore: Sized {
     /// otherwise. `len` is its size from the walk's metadata and `cap` the walk's size cap
     /// ([`crate::Limits::effective_cap`]): a file found over it when read is an
     /// [`Error::Io`] of kind `FileTooLarge`, and nothing is stored. Returns the blob and the
-    /// bytes actually read.
-    fn store_file(&mut self, file: &Path, len: u64, cap: u64) -> Result<(Oid, u64), Error>;
+    /// bytes actually read. A file that is not downloaded is an [`Error::Io`] that
+    /// [`crate::no_download::not_downloaded`] names, and nothing is stored; `guard` proves the
+    /// read cannot download it.
+    fn store_file(
+        &mut self,
+        file: &Path,
+        len: u64,
+        cap: u64,
+        guard: &NoDownload<'_>,
+    ) -> Result<(Oid, u64), Error>;
 
-    /// Hashes the file `file` as a blob without storing anything.
-    fn hash_file(&mut self, file: &Path, len: u64) -> Result<(Oid, u64), Error>;
+    /// Hashes the file `file` as a blob without storing anything, as [`Self::store_file`]
+    /// reads it.
+    fn hash_file(
+        &mut self,
+        file: &Path,
+        len: u64,
+        guard: &NoDownload<'_>,
+    ) -> Result<(Oid, u64), Error>;
 
     /// Writes the content of blob `blob`, read for the file `path`, to `out`; returns the bytes
     /// written. The content is hashed as it streams: an object that does not hash to `blob` is

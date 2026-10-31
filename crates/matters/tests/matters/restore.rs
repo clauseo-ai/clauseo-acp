@@ -381,7 +381,8 @@ fn restore_leaves_cloud_only_and_over_cap_files() {
 #[test]
 fn restore_refuses_a_target_written_after_its_outside_edits_checkpoint() {
     let fx = Fixture::new("restore-moved-since");
-    // Asked about a.txt once by the restore's walk, then by its writable check.
+    // Asked about a.txt by the restore's walk (its stat, then its read's check of the open
+    // file, where the write lands, after the stat), then by its writable check.
     let probe = Arc::new(TouchingProbe {
         target: fx.file("a.txt"),
         nth: 2,
@@ -409,7 +410,7 @@ fn restore_refuses_a_target_written_after_its_outside_edits_checkpoint() {
         matches!(&err, Error::FileLocked { paths } if *paths == [path("a.txt")]),
         "{err:?}"
     );
-    assert_eq!(probe.seen.load(Ordering::Relaxed), 2);
+    assert_eq!(probe.seen.load(Ordering::Relaxed), 3);
     assert_eq!(fx.read("a.txt"), b"two");
     assert!(!fx.exists("sub"), "the folders staging made are gone again");
     assert_no_temp_files(&fx.folder);

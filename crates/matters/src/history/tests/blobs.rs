@@ -9,8 +9,16 @@ use super::{files_under, git_id, new_store, noise, write_file};
 use crate::Error;
 use crate::history::blob::is_already_compressed;
 use crate::history::{GixStore, HistoryStore, Oid};
+use crate::no_download::NoDownload;
 use crate::test_dir::TestDir;
 use crate::write;
+use crate::{OsProbe, PlaceholderProbe};
+
+/// A guard for a test's direct reads, with the OS probe.
+fn no_download() -> NoDownload<'static> {
+    const PROBE: &dyn PlaceholderProbe = &OsProbe;
+    NoDownload::begin(PROBE)
+}
 
 #[test]
 fn compressed_formats_are_recognised_by_their_first_bytes() {
@@ -52,13 +60,15 @@ fn a_file_above_the_threshold_is_streamed_to_the_same_blob() {
     let path = dir.path().join("big.txt");
     write_file(&path, &content);
 
-    let (buffered, read) = store.hash_file(&path, len).unwrap();
+    let (buffered, read) = store.hash_file(&path, len, &no_download()).unwrap();
     assert_eq!((buffered, read), (git_id("blob", &content), len));
     assert_eq!(files_under(&git_dir.join("objects")), Vec::<PathBuf>::new());
 
     store.set_stream_threshold(1024);
-    let (hashed, _) = store.hash_file(&path, len).unwrap();
-    let (streamed, read) = store.store_file(&path, len, u64::MAX).unwrap();
+    let (hashed, _) = store.hash_file(&path, len, &no_download()).unwrap();
+    let (streamed, read) = store
+        .store_file(&path, len, u64::MAX, &no_download())
+        .unwrap();
     assert_eq!((hashed, streamed, read), (buffered, buffered, len));
     assert_eq!(files_under(&git_dir.join("objects")).len(), 1);
     assert_eq!(store.blob_len(streamed).unwrap(), len);
@@ -78,7 +88,9 @@ fn a_wrong_length_is_read_again_from_the_file() {
     write_file(&path, b"twelve bytes");
     for (threshold, guess) in [(u64::MAX, 3), (4, 30)] {
         store.set_stream_threshold(threshold);
-        let (blob, read) = store.store_file(&path, guess, u64::MAX).unwrap();
+        let (blob, read) = store
+            .store_file(&path, guess, u64::MAX, &no_download())
+            .unwrap();
         assert_eq!((blob, read), (git_id("blob", b"twelve bytes"), 12));
     }
 }
@@ -89,12 +101,16 @@ fn storing_an_existing_object_creates_no_file() {
     let (git_dir, mut store) = new_store(&dir);
     let path = dir.path().join("note.txt");
     write_file(&path, b"same bytes\n");
-    let first = store.store_file(&path, 11, u64::MAX).unwrap();
+    let first = store
+        .store_file(&path, 11, u64::MAX, &no_download())
+        .unwrap();
     let files = files_under(&git_dir.join("objects"));
     assert_eq!(files.len(), 1);
     assert_eq!(store.new_object_files(), files.as_slice());
 
-    let second = store.store_file(&path, 11, u64::MAX).unwrap();
+    let second = store
+        .store_file(&path, 11, u64::MAX, &no_download())
+        .unwrap();
     assert_eq!(first, second);
     assert_eq!(files_under(&git_dir.join("objects")), files);
     assert_eq!(store.new_object_files(), files.as_slice());
@@ -121,7 +137,9 @@ fn a_torn_object_is_written_again() {
         write_file(&path, content);
 
         assert_eq!(
-            store.store_file(&path, 17, u64::MAX).unwrap(),
+            store
+                .store_file(&path, 17, u64::MAX, &no_download())
+                .unwrap(),
             (blob, 17),
             "{case}"
         );
@@ -138,13 +156,20 @@ fn a_present_object_is_synced_at_the_next_publish() {
     let (git_dir, mut store) = new_store(&dir);
     let path = dir.path().join("note.txt");
     write_file(&path, b"kept bytes\n");
-    let (blob, _) = store.store_file(&path, 11, u64::MAX).unwrap();
+    let (blob, _) = store
+        .store_file(&path, 11, u64::MAX, &no_download())
+        .unwrap();
     // A run that wrote the object and stopped before publishing.
     drop(store);
 
     let mut store = GixStore::open(&git_dir, &dir.path().join("folder")).unwrap();
     assert_eq!(store.new_object_files(), Vec::<PathBuf>::new());
-    assert_eq!(store.store_file(&path, 11, u64::MAX).unwrap(), (blob, 11));
+    assert_eq!(
+        store
+            .store_file(&path, 11, u64::MAX, &no_download())
+            .unwrap(),
+        (blob, 11)
+    );
     assert_eq!(store.new_object_files(), [object_path(&git_dir, blob)]);
 }
 
@@ -163,7 +188,12 @@ fn a_present_object_with_a_wrong_body_is_written_again() {
     let path = dir.path().join("note.txt");
     write_file(&path, content);
 
-    assert_eq!(store.store_file(&path, 12, u64::MAX).unwrap(), (blob, 12));
+    assert_eq!(
+        store
+            .store_file(&path, 12, u64::MAX, &no_download())
+            .unwrap(),
+        (blob, 12)
+    );
     let mut out = Vec::new();
     store.read_blob(blob, "file", &mut out).unwrap();
     assert_eq!(out, content);
@@ -177,7 +207,7 @@ fn a_file_grown_over_the_cap_is_refused() {
     write_file(&path, &[b'x'; 30]);
 
     // The walk saw 10 bytes under a cap of 20; the file now holds 30.
-    let refused = store.store_file(&path, 10, 20);
+    let refused = store.store_file(&path, 10, 20, &no_download());
     let kind = match &refused {
         Err(Error::Io { source, .. }) => Some(source.kind()),
         _ => None,
@@ -200,10 +230,10 @@ fn compressed_files_stored_at_level_0() {
     write_file(&zip_path, &zip);
     write_file(&text_path, &text);
     let (zip_blob, _) = store
-        .store_file(&zip_path, zip.len() as u64, u64::MAX)
+        .store_file(&zip_path, zip.len() as u64, u64::MAX, &no_download())
         .unwrap();
     let (text_blob, _) = store
-        .store_file(&text_path, text.len() as u64, u64::MAX)
+        .store_file(&text_path, text.len() as u64, u64::MAX, &no_download())
         .unwrap();
 
     let raw = |blob: Oid| {
@@ -236,4 +266,25 @@ fn compressed_files_stored_at_level_0() {
         text_raw.len(),
         text.len()
     );
+}
+
+#[test]
+fn a_streamed_file_evicted_before_its_second_pass_is_not_downloaded_and_not_stored() {
+    let dir = TestDir::new("history-stream-evicted");
+    let (git_dir, mut store) = new_store(&dir);
+    store.set_stream_threshold(1024);
+    let content = noise(5000);
+    let path = dir.path().join("big.bin");
+    write_file(&path, &content);
+    // The first pass makes two read calls (the bytes, then the end); the second pass fails.
+    crate::no_download::fault::fail(&path, 2, io::ErrorKind::Deadlock);
+
+    let err = store
+        .store_file(&path, 5000, u64::MAX, &no_download())
+        .unwrap_err();
+
+    assert!(err.is_not_downloaded(), "{err}");
+    assert_eq!(crate::no_download::fault::failed(&path), 1);
+    assert_eq!(files_under(&git_dir.join("objects")), Vec::<PathBuf>::new());
+    crate::no_download::fault::clear();
 }
