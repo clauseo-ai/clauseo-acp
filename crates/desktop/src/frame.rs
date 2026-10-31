@@ -1,17 +1,27 @@
-//! What goes down a window's channel: a [`Frame`] holds one message's JSON text, sent as it is.
+//! What goes down a window's channel: a [`Frame`] holds one channel message's JSON text, sent as
+//! it is.
 //!
-//! A message is either an event's text (`EncodedEvent::json()`, a `HostEvent` object) when it is
-//! below [`FRAME_LIMIT`], or one fragment of a longer event:
-//! `{"fragment":{"id":<u32>,"index":<u16>,"count":<u16>,"text":"<piece>"}}`. The pieces' texts,
-//! joined in index order, are the event's text exactly; the transport joins them and parses
-//! once. Every message, fragments included, is below [`FRAME_LIMIT`] bytes, so Tauri hands it
-//! to the page with one `eval` instead of a second fetch round trip.
+//! A message is one of:
+//!
+//! - an event's text (`EncodedEvent::json()`, a `HostEvent` object) when it is below
+//!   [`FRAME_LIMIT`];
+//! - one fragment of a longer event:
+//!   `{"fragment":{"id":<u32>,"index":<u16>,"count":<u16>,"text":"<piece>"}}`. The pieces'
+//!   texts, joined in index order, are the event's text exactly; the transport joins them and
+//!   parses once;
+//! - a stream the bridge could not restart: `{"stream_failed":{"stream":<StreamId>,
+//!   "error":<HostError>}}`.
+//!
+//! The reader tells them apart by the top-level key: `fragment` and `stream_failed` are
+//! reserved, and no `HostEvent` kind may take either (a test in `frame/tests.rs` checks).
+//! Every message is below [`FRAME_LIMIT`] bytes, so Tauri hands it to the page with one `eval`
+//! instead of a second fetch round trip.
 
 use std::fmt::Write as _;
 
 #[cfg(test)]
 use clauseo_protocol::HostEvent;
-#[cfg(test)]
+use clauseo_protocol::{HostError, StreamId};
 use serde::Serialize;
 use tauri::ipc::{InvokeResponseBody, IpcResponse};
 
@@ -64,13 +74,53 @@ impl specta::Type for Frame {
 #[serde(untagged)]
 #[expect(
     dead_code,
-    reason = "a type for the bindings only; frames are written as text"
+    reason = "a type for the bindings only; messages are written as text"
 )]
 enum StreamMessage {
     /// An event, as the host encoded it.
     Event(HostEvent),
     /// A piece of an event too long for one message.
     Fragment(FragmentMessage),
+    /// A stream the bridge could not restart.
+    StreamFailed(StreamFailedMessage),
+}
+
+/// `{"stream_failed": {...}}`.
+#[derive(Serialize)]
+#[cfg_attr(test, derive(specta::Type))]
+struct StreamFailedMessage {
+    stream_failed: StreamFailed,
+}
+
+/// A stream whose host subscription failed when the bridge restarted it. It stays followed, and
+/// the bridge tries it again on its clock; a `subscribe` from the webview starts it at once.
+#[derive(Serialize)]
+#[cfg_attr(test, derive(specta::Type))]
+struct StreamFailed {
+    /// The stream.
+    stream: StreamId,
+    /// Why the host refused it.
+    error: HostError,
+}
+
+/// The message that tells the webview `stream`'s restart failed with `error`. An error whose
+/// message would take it to [`FRAME_LIMIT`] goes with its code and a fixed message instead.
+pub(crate) fn stream_failed(stream: StreamId, error: &HostError) -> Frame {
+    let text = |error: HostError| {
+        let message = StreamFailedMessage {
+            stream_failed: StreamFailed { stream, error },
+        };
+        // A struct of a stream id and an error, which serialise to JSON without fail.
+        serde_json::to_string(&message).unwrap_or_default()
+    };
+    let full = text(error.clone());
+    if full.len() < FRAME_LIMIT && !full.is_empty() {
+        return Frame(full);
+    }
+    Frame(text(HostError::new(
+        error.code(),
+        "the error's message was too long for one channel message",
+    )))
 }
 
 /// `{"fragment": {...}}`.
@@ -94,10 +144,10 @@ struct Fragment {
     text: String,
 }
 
-/// Turns `json`, one event's text, into the frames that carry it: the text itself when it is
-/// below [`FRAME_LIMIT`], else fragments with id `id`. `None` when the text needs more than
-/// `u16::MAX` fragments (over 200 MB, which no event reaches).
-pub(crate) fn frames(json: &str, id: u32) -> Option<Vec<Frame>> {
+/// Turns `json`, one event's text, into the channel messages that carry it: the text itself
+/// when it is below [`FRAME_LIMIT`], else fragments with id `id`. `None` when the text needs more
+/// than `u16::MAX` fragments (over 200 MB, which no event reaches).
+pub(crate) fn messages(json: &str, id: u32) -> Option<Vec<Frame>> {
     if json.len() < FRAME_LIMIT {
         return Some(vec![Frame(json.to_owned())]);
     }

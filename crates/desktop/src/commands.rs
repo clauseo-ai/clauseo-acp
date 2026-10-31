@@ -7,8 +7,8 @@
 //! test that writes the TypeScript bindings (`commands/bindings.rs`).
 
 use clauseo_protocol::{
-    AgentChoiceId, CommandEnvelope, CommandOutcome, Cursor, FolderRefId, HostError, HostQuery,
-    PermissionRequestId, QueryResult, StreamId, ThreadId, ViewEpoch, ViewPosition,
+    Ack, AgentChoiceId, CommandEnvelope, CommandOutcome, FolderRefId, HostError, HostQuery,
+    PermissionRequestId, QueryResult, StreamId, ThreadId, ViewPosition,
 };
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -124,21 +124,18 @@ pub(crate) async fn unsubscribe<R: Runtime>(
     bridge.unsubscribe(webview.label(), stream)
 }
 
-/// Records that the window applied `stream` up to `cursor` of `epoch`, and that it has received
-/// and processed `frames` channel messages since `open_stream`.
+/// Records that the window has received and processed `messages` channel messages since
+/// `open_stream`, and applied each stream in `positions` (maybe none) up to its cursor. Refused
+/// whole when `messages` is more than the window was sent or a stream is named twice.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn ack<R: Runtime>(
     webview: Webview<R>,
     bridge: State<'_, Bridge>,
-    stream: StreamId,
-    epoch: ViewEpoch,
-    cursor: Cursor,
-    frames: u32,
+    positions: Vec<Ack>,
+    messages: u32,
 ) -> Result<(), HostError> {
-    bridge
-        .ack(webview.label(), stream, epoch, cursor, frames)
-        .await
+    bridge.ack(webview.label(), positions, messages).await
 }
 
 /// Answers a permission request with an option it offered. An `allow_always` option first asks

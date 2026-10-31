@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use clauseo_host::HostHandle;
 use clauseo_protocol::{
-    AgentChoiceId, CommandEnvelope, CommandId, CommandOutcome, Cursor, ErrorCode, FolderRefId,
+    Ack, AgentChoiceId, CommandEnvelope, CommandId, CommandOutcome, ErrorCode, FolderRefId,
     HostCommand, HostError, HostQuery, MAX_PAGE_ENTRIES, MatterSource, PageLimit, PermissionEntry,
     PermissionKind, PermissionRequestId, PermissionState, Principal, QueryResult, StreamId,
-    ThreadId, ViewEntry, ViewEpoch, ViewPosition,
+    ThreadId, ViewEntry, ViewPosition,
 };
 use tauri::ipc::Channel;
 
@@ -26,6 +26,18 @@ use window::AckError;
 
 /// The principal of every call: the desktop app on this computer.
 const PRINCIPAL: Principal = Principal::LocalDesktop;
+
+/// The option ids claude-agent-acp 0.89.1 offers when it leaves plan mode that switch the
+/// session to `bypassPermissions` (`exit-plan-bypass`, `exit-plan-clear-bypass`) or to auto
+/// mode (`exit-plan-auto`, `exit-plan-clear-auto`). Choosing one is a mode change, refused for
+/// the reason `SetMode` is (see `dispatch`). Follow-up: acp's session meta sends
+/// `allowDangerouslySkipPermissions: false`, so the bypass options are never offered.
+const MODE_OPTIONS: [&str; 4] = [
+    "exit-plan-bypass",
+    "exit-plan-clear-bypass",
+    "exit-plan-auto",
+    "exit-plan-clear-auto",
+];
 
 /// What the commands share: the host, the windows and the folder refs issued.
 pub(crate) struct Bridge {
@@ -45,6 +57,21 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// A `command.invalid` failure with `message`.
 fn invalid(message: impl Into<String>) -> HostError {
     HostError::new(ErrorCode::CommandInvalid, message)
+}
+
+/// Whether answering with an option of `kind` first needs the lawyer's native confirm. Fails
+/// closed: only the once kinds and `reject_always` skip it, `allow_always` needs it, and a
+/// kind this version does not know is refused with `command.invalid`.
+fn needs_confirm(kind: PermissionKind) -> Result<bool, HostError> {
+    match kind {
+        PermissionKind::AllowOnce | PermissionKind::RejectOnce | PermissionKind::RejectAlways => {
+            Ok(false)
+        }
+        PermissionKind::AllowAlways => Ok(true),
+        PermissionKind::Unknown => Err(invalid(
+            "an option of a kind this version does not know cannot be answered",
+        )),
+    }
 }
 
 impl Bridge {
@@ -128,7 +155,9 @@ impl Bridge {
         let window = self.window(label)?;
         let after = after.map(|position| (position.epoch, position.cursor));
         let restart = pump::follow(&window, stream, after);
-        pump::start(&self.host, &window, restart).await
+        pump::start(&self.host, &window, restart)
+            .await
+            .inspect_err(|_| pump::forget(&window, restart))
     }
 
     /// Stops following `stream` on the window's channel.
@@ -138,30 +167,37 @@ impl Bridge {
         Ok(())
     }
 
-    /// Records the window's ack and passes the position on to the host.
+    /// Records the window's ack, `messages` channel messages processed since `open_stream` and
+    /// the stream positions in `positions` (maybe none), and passes each position of a stream
+    /// the window follows on to the host. An ack naming a stream twice, or more messages than
+    /// were sent, is refused whole.
     pub(crate) async fn ack(
         &self,
         label: &str,
-        stream: StreamId,
-        epoch: ViewEpoch,
-        cursor: Cursor,
-        frames: u32,
+        positions: Vec<Ack>,
+        messages: u32,
     ) -> Result<(), HostError> {
         let window = self.window(label)?;
-        match pump::ack(&window, stream, (epoch, cursor), frames) {
-            Ok(()) => {}
-            Err(AckError::TooManyFrames) => {
-                return Err(invalid(format!(
-                    "ack of {frames} frames is more than the window was sent"
-                )));
+        let followed = pump::ack(&window, &positions, messages).map_err(|error| match error {
+            AckError::TooManyMessages => invalid(format!(
+                "ack of {messages} messages is more than the window was sent"
+            )),
+            AckError::RepeatedStream(stream) => {
+                invalid(format!("ack names stream {stream} more than once"))
             }
+        })?;
+        for position in followed {
+            self.host
+                .ack(PRINCIPAL, position.stream, position.epoch, position.cursor)
+                .await?;
         }
-        self.host.ack(PRINCIPAL, stream, epoch, cursor).await
+        Ok(())
     }
 
     /// Answers a permission request with `option`, which it must have offered. An
     /// `allow_always` option first goes past `confirm`; declined there, nothing is answered and
-    /// the call fails with `transport.unauthorized`.
+    /// the call fails with `transport.unauthorized`. One of [`MODE_OPTIONS`], or an option of a
+    /// kind this version does not know, is refused with `command.invalid`.
     pub(crate) async fn answer_permission(
         &self,
         confirm: &dyn Confirm,
@@ -169,6 +205,11 @@ impl Bridge {
         request: PermissionRequestId,
         option: AgentChoiceId,
     ) -> Result<(), HostError> {
+        if MODE_OPTIONS.contains(&option.as_str()) {
+            return Err(invalid(format!(
+                "option {option} changes the session's mode, which the window cannot do yet"
+            )));
+        }
         let entry = self.pending_permission(thread, request).await?;
         let offered = entry
             .options
@@ -180,7 +221,7 @@ impl Bridge {
                     format!("permission request {request} did not offer option {option}"),
                 )
             })?;
-        if offered.kind == PermissionKind::AllowAlways && !confirm.confirm().await {
+        if needs_confirm(offered.kind)? && !confirm.confirm().await {
             return Err(HostError::new(
                 ErrorCode::TransportUnauthorized,
                 "the lawyer declined to always allow",

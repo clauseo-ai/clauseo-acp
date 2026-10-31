@@ -26,8 +26,8 @@ pub(crate) const AGENT: &str = "fake";
 /// The folder under a [`Scratch`] root that new matters go in (`matters.default_location`).
 pub(crate) const MATTERS_DIR: &str = "matters";
 
-/// How long a test waits for one frame before it fails. A bound, not a sleep.
-const FRAME_WAIT: Duration = Duration::from_secs(20);
+/// How long a test waits for one channel message before it fails. A bound, not a sleep.
+const MESSAGE_WAIT: Duration = Duration::from_secs(20);
 
 /// `<temp>/clauseo-desktop-<test>-<pid>`, removed when dropped. The data folder is the root
 /// itself (`Locations::under_root`), so nothing touches the real app data folder.
@@ -173,38 +173,38 @@ pub(crate) fn envelope(command: HostCommand) -> CommandEnvelope {
     }
 }
 
-/// A channel like a window's, and the frames sent on it.
-pub(crate) fn collector() -> (Channel<Frame>, Frames) {
+/// A channel like a window's, and the messages sent on it.
+pub(crate) fn collector() -> (Channel<Frame>, Messages) {
     let (tx, rx) = channel();
     let channel = Channel::new(move |body| {
         let InvokeResponseBody::Json(text) = body else {
-            panic!("a frame went as raw bytes");
+            panic!("a channel message went as raw bytes");
         };
         let _gone = tx.send(text);
         Ok(())
     });
-    (channel, Frames(rx))
+    (channel, Messages(rx))
 }
 
-/// The frames a [`collector`] channel received.
-pub(crate) struct Frames(Receiver<String>);
+/// The messages a [`collector`] channel received.
+pub(crate) struct Messages(Receiver<String>);
 
-impl Frames {
-    /// The next frame's text, as sent.
+impl Messages {
+    /// The next message's text, as sent.
     pub(crate) fn next_text(&self) -> String {
         self.0
-            .recv_timeout(FRAME_WAIT)
-            .unwrap_or_else(|err| panic!("no frame: {err}"))
+            .recv_timeout(MESSAGE_WAIT)
+            .unwrap_or_else(|err| panic!("no channel message: {err}"))
     }
 
-    /// The next frame, an event below the limit, decoded.
+    /// The next message, an event below the limit, decoded.
     pub(crate) fn next_event(&self) -> HostEvent {
         let text = self.next_text();
         assert!(text.len() < crate::frame::FRAME_LIMIT);
         serde_json::from_str(&text).unwrap_or_else(|err| panic!("not an event ({err}): {text}"))
     }
 
-    /// Frames already received, without waiting.
+    /// Messages already received, without waiting.
     pub(crate) fn drain(&self) -> Vec<String> {
         self.0.try_iter().collect()
     }
