@@ -11,7 +11,8 @@ use clauseo_protocol::{
     ChangeKind, CheckpointId, CheckpointKind, MatterPath, SkippedFileReason, Timestamp,
 };
 
-use super::{Core, Spec, worth_listing};
+use super::walk_folder::worth_listing;
+use super::{Core, Spec};
 use crate::history::{GixStore, HistoryStore};
 use crate::stat::{CacheEntry, EntryState, FileTime, Stat, StatCache};
 use crate::test_dir::TestDir;
