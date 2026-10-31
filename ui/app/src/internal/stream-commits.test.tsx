@@ -62,7 +62,7 @@ function touchedBy(bodies: readonly ViewPatchBody[]): Set<string> {
   return touched;
 }
 
-test("a scripted 500-chunk, 20-tool-call stream commits once a frame and never for an unchanged row", () => {
+test("500 chunks and 20 tool calls: one commit a frame without a new row, three on a frame that adds one, none for an unchanged row", () => {
   const transport = new FakeTransport();
   const manual = manualBatch();
   const frame = () => act(manual.run);
@@ -94,10 +94,15 @@ test("a scripted 500-chunk, 20-tool-call stream commits once a frame and never f
   const { bodies, chunks, tools } = scriptedTurn();
   expect([chunks, tools]).toEqual([500, 20]);
   let frames = 0;
-  let maxStoreCommits = 0;
+  /** Every commit of a frame, whatever scheduled it. */
   let maxCommitsNoNewRow = 0;
   let maxCommitsNewRow = 0;
+  /** Of those, the ones the store's flush made ("update") and the ones a layout effect scheduled inside it before
+   * paint ("nested-update", LegendList placing and measuring a new row). */
+  let maxUpdateCommits = 0;
+  let maxNestedCommits = 0;
   let framesWithNewRow = 0;
+  let framesOverOneCommit = 0;
   let changedRowCommits = 0;
   let unchangedRowCommits = 0;
   let cursor = 2;
@@ -112,9 +117,10 @@ test("a scripted 500-chunk, 20-tool-call stream commits once a frame and never f
     phases.length = 0;
     frame();
     frames += 1;
-    // "nested-update": a commit a layout effect scheduled inside this one, before the browser paints.
-    const storeCommits = phases.filter((p) => p !== "nested-update").length;
-    maxStoreCommits = Math.max(maxStoreCommits, storeCommits);
+    const nested = phases.filter((p) => p === "nested-update").length;
+    maxUpdateCommits = Math.max(maxUpdateCommits, phases.length - nested);
+    maxNestedCommits = Math.max(maxNestedCommits, nested);
+    if (phases.length > 1) framesOverOneCommit += 1;
     if (added) {
       framesWithNewRow += 1;
       maxCommitsNewRow = Math.max(maxCommitsNewRow, phases.length);
@@ -126,29 +132,38 @@ test("a scripted 500-chunk, 20-tool-call stream commits once a frame and never f
       else unchangedRowCommits += n;
     }
   }
-  release();
 
   expect(container.querySelectorAll("[data-entry-id]")).toHaveLength(seen.size);
   expect(store.view(STREAM)?.cursor).toBe(cursor - 1);
-  expect(maxStoreCommits).toBe(1);
+  // The brief's gate, `react_commits_per_frame` = 1, holds on every frame that adds no row.
   expect(maxCommitsNoNewRow).toBe(1);
+  // It misses on the frames that add one: LegendList commits twice more inside the store's commit, before paint. No
+  // LegendList prop removes those (fixed item sizes, recycling, pool size, list size, no end alignment, no initial-
+  // layout wait: all measured at 3). Kept by the brief's choice of LegendList; reported as a deviation.
+  expect(maxCommitsNewRow).toBe(3);
+  expect(framesOverOneCommit).toBe(framesWithNewRow);
   expect(unchangedRowCommits).toBe(0);
+  release();
   expect({
     frames,
-    maxStoreCommits,
-    maxCommitsNoNewRow,
     framesWithNewRow,
+    framesOverOneCommit,
+    maxCommitsNoNewRow,
     maxCommitsNewRow,
+    maxUpdateCommits,
+    maxNestedCommits,
     unchangedRowCommits,
     changedRowCommits,
   }).toMatchInlineSnapshot(`
     {
       "changedRowCommits": 222,
       "frames": 194,
+      "framesOverOneCommit": 41,
       "framesWithNewRow": 41,
       "maxCommitsNewRow": 3,
       "maxCommitsNoNewRow": 1,
-      "maxStoreCommits": 1,
+      "maxNestedCommits": 2,
+      "maxUpdateCommits": 1,
       "unchangedRowCommits": 0,
     }
   `);

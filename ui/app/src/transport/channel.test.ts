@@ -1,9 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { ChannelReader } from "./channel.ts";
+import type { ChannelEvent } from "./channel.ts";
 import type { HostEvent } from "./protocol.ts";
 
 function reader() {
-  const events: HostEvent[] = [];
+  const events: ChannelEvent[] = [];
   const problems: string[] = [];
   const r = new ChannelReader(
     (e) => events.push(e),
@@ -28,17 +29,17 @@ function pieces(text: string, n: number, id = 1) {
 }
 
 describe("ChannelReader", () => {
-  test("a whole event as text, as bytes and as an object each arrive once and count one frame", () => {
+  test("a whole event as text, as bytes and as an object each arrive once and count one message", () => {
     const { r, events, problems } = reader();
     r.receive(JSON.stringify(EVENT));
     r.receive(new TextEncoder().encode(JSON.stringify(EVENT)).buffer);
     r.receive(EVENT);
     expect(events).toEqual([EVENT, EVENT, EVENT]);
-    expect(r.frames).toBe(3);
+    expect(r.messages).toBe(3);
     expect(problems).toEqual([]);
   });
 
-  test("fragments join in index order into one event, each counting a frame", () => {
+  test("fragments join in index order into one event, each counting a message", () => {
     const { r, events } = reader();
     const parts = pieces(JSON.stringify(EVENT), 4);
     r.receive(JSON.stringify(parts[2]));
@@ -47,7 +48,7 @@ describe("ChannelReader", () => {
     expect(events).toEqual([]);
     r.receive(JSON.stringify(parts[1]));
     expect(events).toEqual([EVENT]);
-    expect(r.frames).toBe(4);
+    expect(r.messages).toBe(4);
   });
 
   test("a newer fragment id drops an older unfinished event and says so", () => {
@@ -68,6 +69,6 @@ describe("ChannelReader", () => {
     r.receive(dup[0]!);
     expect(events).toEqual([]);
     expect(problems).toHaveLength(4);
-    expect(r.frames).toBe(5);
+    expect(r.messages).toBe(5);
   });
 });

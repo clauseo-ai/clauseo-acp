@@ -2,7 +2,7 @@
 // store, so a row renders again only when its entry changes. Plain text throughout; the new design replaces these.
 import { memo, useCallback } from "react";
 import { useEntry, useStreamPart, useText, useViewStore } from "../store/hooks.ts";
-import { kindOf, textKey, type StreamView } from "../store/view.ts";
+import { entryId, kindOf, textKey, type StreamView } from "../store/view.ts";
 import type {
   AgentTextEntry,
   EntryId,
@@ -138,7 +138,7 @@ function useToolTitle(stream: StreamId, toolCall: string | undefined): string | 
     (v: StreamView | undefined) =>
       toolCall === undefined
         ? null
-        : (v?.entries.get(`tool_call:${toolCall}`)?.tool_call?.title ?? null),
+        : (v?.entries.get(entryId("tool_call", toolCall))?.tool_call?.title ?? null),
     [toolCall],
   );
   return useStreamPart(useViewStore(), stream, pick);

@@ -1,12 +1,21 @@
 // One window's channel, read: each message is a `HostEvent`'s JSON or a fragment of one (R12 contract, "Channel
-// messages"). Fragments are joined in index order and the joined text is parsed once. Every message counts as one
-// frame, the number `ack` reports so the bridge can free the bytes it holds for unacknowledged frames.
-import type { HostEvent } from "./protocol.ts";
+// messages"). Fragments are joined in index order and the joined text is parsed once. Every message counts, fragments
+// one each: the count the desktop transport acks so the bridge can free the bytes it holds for unprocessed messages.
+import type { HostEvent, StreamFailed, StreamFailedMessage } from "./protocol.ts";
+
+/** What a channel message carries once whole: a host event, or the bridge's report that it could not restart a
+ * stream. */
+export type ChannelEvent = HostEvent | StreamFailedMessage;
+
+/** The stream failure an event reports, or null for a host event. */
+export const streamFailedOf = (event: ChannelEvent): StreamFailed | null =>
+  "stream_failed" in event && event.stream_failed !== undefined ? event.stream_failed : null;
 
 /** A piece of an event's JSON text that was over the frame limit. */
 export type Fragment = { id: number; index: number; count: number; text: string };
 
-type Pending = { count: number; pieces: (string | undefined)[]; have: number };
+/** An event still arriving: its pieces, and the message count before its first piece. */
+type Pending = { count: number; pieces: (string | undefined)[]; have: number; start: number };
 
 function fragmentOf(message: unknown): Fragment | null {
   if (typeof message !== "object" || message === null || !("fragment" in message)) return null;
@@ -28,36 +37,52 @@ function parsed(message: unknown): unknown {
 }
 
 export class ChannelReader {
-  #frames = 0;
+  #messages = 0;
+  #eventStart = 0;
   readonly #pending = new Map<number, Pending>();
-  readonly #onEvent: (event: HostEvent) => void;
+  readonly #onEvent: (event: ChannelEvent) => void;
   readonly #onError: (problem: string) => void;
-  readonly #onFrame: () => void;
+  readonly #onMessage: () => void;
 
-  /** `onFrame` runs after every message, once whatever event it completed has been handed on, so a frame that
-   * delivers nothing (a fragment, an event for a stream nobody holds, an event that is not patches) still counts. */
+  /** `onMessage` runs after every message, once whatever event it completed has been handed to `onEvent`, so a
+   * message that delivers nothing (a fragment, a malformed message) still reaches the caller. */
   constructor(
-    onEvent: (event: HostEvent) => void,
+    onEvent: (event: ChannelEvent) => void,
     onError: (problem: string) => void,
-    onFrame: () => void = () => {},
+    onMessage: () => void = () => {},
   ) {
     this.#onEvent = onEvent;
     this.#onError = onError;
-    this.#onFrame = onFrame;
+    this.#onMessage = onMessage;
   }
 
   /** Messages received so far, fragments one each. */
-  get frames(): number {
-    return this.#frames;
+  get messages(): number {
+    return this.#messages;
+  }
+
+  /** For the event `onEvent` is handling: the message count before its first message (its first piece, if it came in
+   * pieces). */
+  get eventStart(): number {
+    return this.#eventStart;
+  }
+
+  /** The message count before the first piece of the oldest event still arriving; null when none is. Messages from
+   * there on carry an event nobody has had yet. */
+  get unfinishedSince(): number | null {
+    let since: number | null = null;
+    for (const p of this.#pending.values())
+      since = since === null ? p.start : Math.min(since, p.start);
+    return since;
   }
 
   /** One channel message. */
   receive(raw: unknown): void {
-    this.#frames += 1;
+    this.#messages += 1;
     try {
       this.#read(raw);
     } finally {
-      this.#onFrame();
+      this.#onMessage();
     }
   }
 
@@ -75,7 +100,8 @@ export class ChannelReader {
         this.#onError("a fragment is malformed");
         return;
       }
-      this.#onEvent(message as HostEvent);
+      this.#eventStart = this.#messages - 1;
+      this.#onEvent(message as ChannelEvent);
       return;
     }
     this.#piece(fragment);
@@ -95,6 +121,7 @@ export class ChannelReader {
         count: f.count,
         pieces: Array.from<string | undefined>({ length: f.count }),
         have: 0,
+        start: this.#messages - 1,
       };
       this.#pending.set(f.id, pending);
     }
@@ -114,6 +141,7 @@ export class ChannelReader {
       this.#onError(`fragment ${f.id} does not join to JSON: ${String(error)}`);
       return;
     }
-    this.#onEvent(event as HostEvent);
+    this.#eventStart = pending.start;
+    this.#onEvent(event as ChannelEvent);
   }
 }

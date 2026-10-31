@@ -10,6 +10,7 @@ import type { ViewEntry, ViewPatchBody } from "../transport/protocol.ts";
 import { manualBatch, stubLayout } from "../testing/dom.ts";
 import {
   agentText,
+  EPOCH,
   append,
   batch,
   event,
@@ -45,14 +46,17 @@ const REOPEN: FakeHost = {
 
 async function open(host: FakeHost = REOPEN) {
   const transport = new FakeTransport(host);
-  // Counts every hand-off to a store listener. Each subscribe wraps its listener anew, so a second subscription
+  // Counts every hand-off to a store subscriber. Each subscribe wraps its subscriber anew, so a second subscription
   // from a double effect would show as two hand-offs per batch.
   let handed = 0;
   const subscribe = transport.subscribe.bind(transport);
-  transport.subscribe = (stream, after, listener) =>
-    subscribe(stream, after, (b) => {
-      handed += 1;
-      listener(b);
+  transport.subscribe = (stream, after, subscriber) =>
+    subscribe(stream, after, {
+      batch: (b) => {
+        handed += 1;
+        subscriber.batch(b);
+      },
+      failed: (e) => subscriber.failed(e),
     });
   const frames = manualBatch();
   container = document.createElement("div");
@@ -261,6 +265,29 @@ test("undo sends the turn's files; a limit stop shows its reset time as ISO UTC"
   const time = $("limit-resets-at") as HTMLTimeElement;
   expect(time.dateTime).toBe("2026-11-01T09:30:00.000Z");
   expect($("limit-stop")?.contains(time)).toBe(true);
+});
+
+test("a failed stream shows its error by code above the transcript; Try again resubscribes after the position held", async () => {
+  const { transport, show } = await open();
+  await show([userMessage(5, 1, "q")]);
+  await act(async () =>
+    transport.deliver({
+      stream_failed: {
+        stream: STREAM,
+        error: { code: "store.io", message: "disk said no", retryable: true },
+      },
+    }),
+  );
+  expect($("stream-error")?.dataset["code"]).toBe("store.io");
+  expect($("stream-error")?.textContent).toContain(ERROR_COPY["store.io"]);
+  expect($("stream-error")?.textContent).not.toContain("disk said no");
+  await click($("stream-retry"));
+  await act(async () => new Promise((done) => setTimeout(done, 0)));
+  expect(transport.only("subscribe").map((c) => c.after)).toEqual([
+    null,
+    { epoch: EPOCH, cursor: 1 },
+  ]);
+  expect($("stream-error")).toBeNull();
 });
 
 test("a failed command shows copy chosen by its code, not its message", async () => {

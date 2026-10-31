@@ -1,6 +1,9 @@
-// One stream's view as the window holds it, and the pure fold of the host's patch batches into it. Entries live in
-// one map keyed by entry id; streaming text lives in its own map, so an `AppendText` replaces one string and never
-// an entry object, and a row that reads only its entry is never rendered again while another row's text grows.
+// One stream's view as the window holds it, and the fold of the host's patch batches into it. The view is kept in
+// place: entries and streaming texts live in maps that a patch changes key by key, so an `AppendText` writes one
+// string and an `Upsert` of a known entry writes one map slot; nothing a patch does copies anything that grows with
+// the thread. Only adding or removing an entry makes a new id list, once per batch. Readers (hooks.ts) take one value
+// from the view (a text, an entry object, the id list, the header), and each of those changes identity exactly when
+// its part changes, so a flush renders only the rows whose part changed.
 // A patch applies only at the next cursor of the view's epoch; a replayed one is a no-op. A `Reset` replaces the view.
 // An `AppendText` whose `from_len` is not the text's UTF-16 length, or a gap in the cursors, asks the caller to
 // subscribe again after the last applied cursor.
@@ -10,6 +13,7 @@ import type {
   PatchBatch,
   StreamHeader,
   StreamId,
+  ThreadId,
   ViewEntry,
   ViewEpoch,
   ViewPatch,
@@ -17,31 +21,40 @@ import type {
   ViewWindow,
 } from "../transport/protocol.ts";
 
-export type StreamView = {
+/** A stream's view, read-only to its readers. The store changes it only inside a flush. */
+export interface StreamView {
   readonly stream: StreamId;
   /** The epoch the cursor belongs to; null before the first `Reset`. */
   readonly epoch: ViewEpoch | null;
   /** The last cursor applied; null before the first `Reset`. */
   readonly cursor: Cursor | null;
   readonly header: StreamHeader | null;
-  /** Every entry but the header, by id. An agent text's and a user message's text blocks read from `texts`. */
+  /** Every entry but the header, by id. An upsert puts a new entry object; an agent text's and a user message's text
+   * blocks read from `texts`. */
   readonly entries: ReadonlyMap<EntryId, ViewEntry>;
   /** The entry ids, sorted by `order`. The same array while no entry is added or removed. */
   readonly ids: readonly EntryId[];
-  /** Streaming text by text key (`textKey`): an agent text's text, a user message's text blocks. A plain object, not
-   * a Map: copying it per batch measured faster (0.069 ms vs 0.097 ms median per scripted turn, Apple M6, node 26). */
-  readonly texts: Readonly<Record<string, string>>;
+  /** Streaming text by text key (`textKey`): an agent text's text, a user message's text blocks. */
+  readonly texts: ReadonlyMap<string, string>;
   readonly hasOlder: boolean;
+}
+
+/** The same view, writable: only `applyBatch` writes it. */
+export type LiveView = {
+  -readonly [K in keyof StreamView]: StreamView[K];
+} & {
+  readonly entries: Map<EntryId, ViewEntry>;
+  readonly texts: Map<string, string>;
 };
 
-export const emptyView = (stream: StreamId): StreamView => ({
+export const newView = (stream: StreamId): LiveView => ({
   stream,
   epoch: null,
   cursor: null,
   header: null,
   entries: new Map(),
   ids: [],
-  texts: {},
+  texts: new Map(),
   hasOlder: false,
 });
 
@@ -50,7 +63,12 @@ export const positionOf = (view: StreamView | undefined): ViewPosition | null =>
     ? null
     : { epoch: view.epoch, cursor: view.cursor };
 
-/** Where a view entry's id comes from: its kind, and the field holding the domain id (crates/protocol view.rs). */
+/** Every key of the `ViewEntry` union: its kinds. */
+type Kind = keyof ViewEntry;
+
+/** Where a view entry's id comes from: for each kind, the field of its body holding the domain id, as
+ * crates/protocol view.rs's `view_entries!` table says. Typed over every kind of the generated union, so a kind
+ * protocol adds fails typecheck here until it has a row, and a row naming a field the body lacks fails too. */
 const ID_FIELD = {
   header: "thread",
   user_message: "message",
@@ -65,9 +83,13 @@ const ID_FIELD = {
   marker: "event",
   matter_header: "matter",
   version: "checkpoint",
-} as const;
+} as const satisfies { readonly [K in Kind]-?: keyof NonNullable<ViewEntry[K]> };
 
-type Kind = keyof typeof ID_FIELD;
+/** The stream of a thread's view, in protocol's text form. */
+export const streamOf = (thread: ThreadId): StreamId => `thread:${thread}`;
+
+/** An entry id from its kind and domain id, as `ViewEntry::id` builds it: `<kind>:<domain id>`. */
+export const entryId = (kind: Kind, id: string): EntryId => `${kind}:${id}`;
 
 /** The entry's kind: its one key. */
 export function kindOf(entry: ViewEntry): Kind {
@@ -82,203 +104,168 @@ function bodyOf(entry: ViewEntry): { order: number } & Record<string, unknown> {
   ]!;
 }
 
-/** `<kind>:<domain id>`, as `ViewEntry::id` builds it. */
+/** The entry's id. */
 export function entryIdOf(entry: ViewEntry): EntryId {
   const kind = kindOf(entry);
-  return `${kind}:${String(bodyOf(entry)[ID_FIELD[kind]])}`;
+  return entryId(kind, String(bodyOf(entry)[ID_FIELD[kind]]));
 }
 
 export const orderOf = (entry: ViewEntry): number => bodyOf(entry).order;
 
 /** The key of a text in `texts`: an agent text's entry id, or a user message's entry id and block index. */
-export const textKey = (entryId: EntryId, block?: number): string =>
-  block === undefined ? entryId : `${entryId}#${block}`;
+export const textKey = (entry: EntryId, block?: number): string =>
+  block === undefined ? entry : `${entry}#${block}`;
 
 /** What applying a batch did. */
 export type Applied = {
-  readonly view: StreamView;
-  /** Whether any patch applied (the cursor moved or a `Reset` replaced the view). */
-  readonly advanced: boolean;
+  /** Whether any patch applied: the view changed, so readers must look again. */
+  readonly changed: boolean;
   /** Set when the view cannot follow the batch: subscribe again after `positionOf(view)`. */
   readonly resubscribe: boolean;
 };
 
-/** A view being changed inside one batch: entries, ids and texts each copied at most once, on its first write. */
-class Draft {
-  view: StreamView;
-  cursor: Cursor | null;
-  #entries: Map<EntryId, ViewEntry> | null = null;
-  #texts: Record<string, string> | null = null;
-  #ids: EntryId[] | null = null;
-
-  constructor(view: StreamView) {
-    this.view = view;
-    this.cursor = view.cursor;
-  }
-
-  get entries(): Map<EntryId, ViewEntry> {
-    this.#entries ??= new Map(this.view.entries);
-    return this.#entries;
-  }
-  get texts(): Record<string, string> {
-    this.#texts ??= { ...this.view.texts };
-    return this.#texts;
-  }
-  get ids(): EntryId[] {
-    this.#ids ??= this.view.ids.slice();
-    return this.#ids;
-  }
-  readText(key: string): string | undefined {
-    return (this.#texts ?? this.view.texts)[key];
-  }
-  hasEntry(id: EntryId): boolean {
-    return (this.#entries ?? this.view.entries).has(id);
-  }
-  orderAt(i: number): number {
-    const ids = this.#ids ?? this.view.ids;
-    const entry = (this.#entries ?? this.view.entries).get(ids[i]!);
-    return entry === undefined ? 0 : orderOf(entry);
-  }
-  idsLength(): number {
-    return (this.#ids ?? this.view.ids).length;
-  }
-
-  done(): StreamView {
-    const same = this.#entries === null && this.#texts === null && this.#ids === null;
-    if (same && this.cursor === this.view.cursor) return this.view;
-    return {
-      ...this.view,
-      cursor: this.cursor,
-      entries: this.#entries ?? this.view.entries,
-      texts: this.#texts ?? this.view.texts,
-      ids: this.#ids ?? this.view.ids,
-    };
-  }
-}
-
 /** Puts an entry's texts in the text map. */
-function takeTexts(texts: Record<string, string>, id: EntryId, entry: ViewEntry): void {
+function takeTexts(texts: Map<string, string>, id: EntryId, entry: ViewEntry): void {
   if (entry.agent_text !== undefined) {
-    texts[textKey(id)] = entry.agent_text.text;
+    texts.set(textKey(id), entry.agent_text.text);
   } else if (entry.user_message !== undefined) {
     entry.user_message.content.forEach((block, i) => {
-      if (block.text !== undefined) texts[textKey(id, i)] = block.text.text;
+      if (block.text !== undefined) texts.set(textKey(id, i), block.text.text);
     });
   }
 }
 
-function upsert(draft: Draft, entry: ViewEntry): void {
+/** One batch's writes to a view: the id list is copied at most once, on the first add or remove. */
+class Writer {
+  readonly view: LiveView;
+  #ids: EntryId[] | null = null;
+
+  constructor(view: LiveView) {
+    this.view = view;
+  }
+
+  get ids(): readonly EntryId[] {
+    return this.#ids ?? this.view.ids;
+  }
+  writableIds(): EntryId[] {
+    this.#ids ??= this.view.ids.slice();
+    return this.#ids;
+  }
+  /** Ends the batch: a new id list, if any, becomes the view's. */
+  done(): void {
+    if (this.#ids !== null) this.view.ids = this.#ids;
+    this.#ids = null;
+  }
+}
+
+function upsert(w: Writer, entry: ViewEntry): void {
+  const view = w.view;
   const kind = kindOf(entry);
   if (kind === "header" || kind === "matter_header") {
-    draft.view = {
-      ...draft.view,
-      header:
-        entry.header !== undefined
-          ? { header: entry.header }
-          : { matter_header: entry.matter_header! },
-    };
+    view.header =
+      entry.header !== undefined
+        ? { header: entry.header }
+        : { matter_header: entry.matter_header! };
     return;
   }
   const id = entryIdOf(entry);
-  if (!draft.hasEntry(id)) {
+  if (!view.entries.has(id)) {
     // Entries usually arrive newest last; look from the end for the place that keeps `order` sorted.
     const order = orderOf(entry);
-    let at = draft.idsLength();
-    while (at > 0 && draft.orderAt(at - 1) > order) at -= 1;
-    draft.ids.splice(at, 0, id);
+    const ids = w.ids;
+    let at = ids.length;
+    while (at > 0 && orderOf(view.entries.get(ids[at - 1]!)!) > order) at -= 1;
+    w.writableIds().splice(at, 0, id);
   }
-  draft.entries.set(id, entry);
-  takeTexts(draft.texts, id, entry);
+  view.entries.set(id, entry);
+  takeTexts(view.texts, id, entry);
 }
 
-function remove(draft: Draft, id: EntryId): void {
+function remove(w: Writer, id: EntryId): void {
+  const view = w.view;
   if (id.startsWith("header:") || id.startsWith("matter_header:")) {
-    draft.view = { ...draft.view, header: null };
+    view.header = null;
     return;
   }
-  if (!draft.hasEntry(id)) return;
-  draft.entries.delete(id);
-  const at = draft.ids.indexOf(id);
-  if (at >= 0) draft.ids.splice(at, 1);
-  for (const key of Object.keys(draft.texts)) {
-    if (key === id || key.startsWith(`${id}#`)) delete draft.texts[key];
-  }
+  const entry = view.entries.get(id);
+  if (entry === undefined) return;
+  view.entries.delete(id);
+  const ids = w.writableIds();
+  const at = ids.lastIndexOf(id);
+  if (at >= 0) ids.splice(at, 1);
+  view.texts.delete(textKey(id));
+  entry.user_message?.content.forEach((_, i) => view.texts.delete(textKey(id, i)));
 }
 
-function fromWindow(stream: StreamId, epoch: ViewEpoch, cursor: Cursor, w: ViewWindow): StreamView {
-  const entries = new Map<EntryId, ViewEntry>();
-  const texts: Record<string, string> = {};
+function reset(view: LiveView, epoch: ViewEpoch, cursor: Cursor, w: ViewWindow): void {
+  view.entries.clear();
+  view.texts.clear();
   const ids: EntryId[] = [];
   for (const entry of w.entries) {
     const id = entryIdOf(entry);
-    if (!entries.has(id)) ids.push(id);
-    entries.set(id, entry);
-    takeTexts(texts, id, entry);
+    if (!view.entries.has(id)) ids.push(id);
+    view.entries.set(id, entry);
+    takeTexts(view.texts, id, entry);
   }
-  return {
-    stream,
-    epoch,
-    cursor,
-    header: w.header ?? null,
-    entries,
-    ids,
-    texts,
-    hasOlder: w.has_older,
-  };
+  view.epoch = epoch;
+  view.cursor = cursor;
+  view.header = w.header ?? null;
+  view.ids = ids;
+  view.hasOlder = w.has_older;
 }
 
 /** Applies one patch body that is not a `Reset`; false when the view cannot take it. */
-function applyBody(draft: Draft, patch: ViewPatch): boolean {
+function applyBody(w: Writer, patch: ViewPatch): boolean {
   const body = patch.body;
   if (body.upsert !== undefined) {
-    upsert(draft, body.upsert.entry);
+    upsert(w, body.upsert.entry);
     return true;
   }
   if (body.remove !== undefined) {
-    remove(draft, body.remove.entry_id);
+    remove(w, body.remove.entry_id);
     return true;
   }
   if (body.append_text !== undefined) {
     const a = body.append_text;
     const key =
       a.target === "agent_text"
-        ? textKey(`agent_text:${a.message_id}`)
-        : textKey(`user_message:${a.message_id}`, a.target.user_block);
-    const was = draft.readText(key);
+        ? textKey(entryId("agent_text", a.message_id))
+        : textKey(entryId("user_message", a.message_id), a.target.user_block);
+    const texts = w.view.texts;
+    const was = texts.get(key);
     if (was === undefined || was.length !== a.from_len) return false;
-    draft.texts[key] = was + a.text;
+    texts.set(key, was + a.text);
     return true;
   }
   // A body this version does not know: skip it, but keep the cursor moving.
   return true;
 }
 
-/** Folds one batch into a view. The view passed in is never changed. */
-export function applyBatch(view: StreamView, batch: PatchBatch): Applied {
-  let draft = new Draft(view);
-  let advanced = false;
-  for (const patch of batch.patches) {
-    const v = draft.view;
-    const cursor = draft.cursor;
-    if (patch.body.reset !== undefined) {
-      const fresh = v.epoch !== batch.epoch || cursor === null || patch.cursor > cursor;
-      if (!fresh) continue;
-      draft = new Draft(
-        fromWindow(v.stream, batch.epoch, patch.cursor, patch.body.reset.view_window),
-      );
-      advanced = true;
-      continue;
-    }
-    if (v.epoch !== batch.epoch || cursor === null) {
+/** Folds one batch into a view, in place. Patches before one the view cannot take stay applied. */
+export function applyBatch(view: LiveView, batch: PatchBatch): Applied {
+  const w = new Writer(view);
+  let changed = false;
+  try {
+    for (const patch of batch.patches) {
+      if (patch.body.reset !== undefined) {
+        const fresh =
+          view.epoch !== batch.epoch || view.cursor === null || patch.cursor > view.cursor;
+        if (!fresh) continue;
+        w.done();
+        reset(view, batch.epoch, patch.cursor, patch.body.reset.view_window);
+        changed = true;
+        continue;
+      }
       // Another epoch without its `Reset`: nothing here can follow it.
-      return { view: draft.done(), advanced, resubscribe: true };
+      if (view.epoch !== batch.epoch || view.cursor === null) return { changed, resubscribe: true };
+      if (patch.cursor <= view.cursor) continue;
+      if (patch.cursor !== view.cursor + 1 || !applyBody(w, patch))
+        return { changed, resubscribe: true };
+      view.cursor = patch.cursor;
+      changed = true;
     }
-    if (patch.cursor <= cursor) continue;
-    if (patch.cursor !== cursor + 1 || !applyBody(draft, patch)) {
-      return { view: draft.done(), advanced, resubscribe: true };
-    }
-    draft.cursor = patch.cursor;
-    advanced = true;
+    return { changed, resubscribe: false };
+  } finally {
+    w.done();
   }
-  return { view: draft.done(), advanced, resubscribe: false };
 }

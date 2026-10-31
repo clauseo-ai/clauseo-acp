@@ -2,11 +2,11 @@
 // its tool calls, answer permissions, cancel, undo a turn's files, see a usage-limit stop. Never shown to a lawyer;
 // the new design replaces it. Every control has a stable `data-testid` for the e2e specs (ui/e2e/app-windows).
 import { useCallback, useState, type KeyboardEvent } from "react";
-import { useStreamPart, useViewStore, useWatch } from "../store/hooks.ts";
-import type { StreamView } from "../store/view.ts";
+import { useStreamError, useStreamPart, useViewStore, useWatch } from "../store/hooks.ts";
+import { entryId, streamOf, type StreamView } from "../store/view.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { StreamId } from "../transport/protocol.ts";
-import { threadStream, ThreadContext, useSession, type Session } from "./session.ts";
+import { ThreadContext, useSession, type Session } from "./session.ts";
 import { Transcript } from "./transcript.tsx";
 import { errorCopy, turnRunning } from "./words.ts";
 
@@ -27,7 +27,8 @@ function useBusy(stream: StreamId | null, sent: Session["sentTurn"]): boolean {
       if (sent === null) return false;
       // Until the view holds the sent turn's end, the turn counts as running.
       return (
-        v === undefined || !(v.entries.has(`step:${sent}`) || v.entries.has(`limit_stop:${sent}`))
+        v === undefined ||
+        !(v.entries.has(entryId("step", sent)) || v.entries.has(entryId("limit_stop", sent)))
       );
     },
     [sent],
@@ -78,11 +79,32 @@ function Composer({ session, stream }: { session: Session; stream: StreamId | nu
   );
 }
 
+/** Why the open thread's stream stopped, by the error's code, with a way to ask for it again. */
+function StreamError({ stream }: { stream: StreamId }) {
+  const store = useViewStore();
+  const error = useStreamError(store, stream);
+  if (error === null) return null;
+  return (
+    <p
+      role="alert"
+      data-testid="stream-error"
+      data-code={error.code}
+      style={{ margin: 0, padding: 8, background: "#fdecec" }}
+    >
+      {errorCopy(error)}{" "}
+      <button type="button" data-testid="stream-retry" onClick={() => store.retry(stream)}>
+        Try again
+      </button>
+    </p>
+  );
+}
+
 function ThreadView({ session, stream }: { session: Session; stream: StreamId }) {
   useWatch(useViewStore(), stream);
   const thread = session.thread!;
   return (
     <ThreadContext value={{ thread, stream, answer: session.answer, undo: session.undo }}>
+      <StreamError stream={stream} />
       <Transcript stream={stream} />
     </ThreadContext>
   );
@@ -91,7 +113,7 @@ function ThreadView({ session, stream }: { session: Session; stream: StreamId })
 export function InternalWindow({ transport }: { transport: HostTransport }) {
   const session = useSession(transport);
   const [name, setName] = useState("Matter");
-  const stream = session.thread === null ? null : threadStream(session.thread);
+  const stream = session.thread === null ? null : streamOf(session.thread);
   return (
     <div
       style={{

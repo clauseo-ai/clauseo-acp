@@ -31,10 +31,11 @@ export const commands = {
 	/**  Ends the window's subscription to `stream`. */
 	unsubscribe: (stream: StreamId) => typedError<null, HostError>(__TAURI_INVOKE("unsubscribe", { stream })),
 	/**
-	 *  Records that the window applied `stream` up to `cursor` of `epoch`, and that it has received
-	 *  and processed `frames` channel messages since `open_stream`.
+	 *  Records that the window has received and processed `messages` channel messages since
+	 *  `open_stream`, and applied each stream in `positions` (maybe none) up to its cursor. Refused
+	 *  whole when `messages` is more than the window was sent or a stream is named twice.
 	 */
-	ack: (stream: StreamId, epoch: ViewEpoch, cursor: Cursor, frames: number) => typedError<null, HostError>(__TAURI_INVOKE("ack", { stream, epoch, cursor, frames })),
+	ack: (positions: Ack[], messages: number) => typedError<null, HostError>(__TAURI_INVOKE("ack", { positions, messages })),
 	/**
 	 *  Answers a permission request with an option it offered. An `allow_always` option first asks
 	 *  the lawyer in a native dialog; declined there, the call fails with `transport.unauthorized`.
@@ -2306,6 +2307,22 @@ export type StopReason =
 "unknown";
 
 /**
+ *  A stream whose host subscription failed when the bridge restarted it. It stays followed, and
+ *  the bridge tries it again on its clock; a `subscribe` from the webview starts it at once.
+ */
+export type StreamFailed = {
+	/**  The stream. */
+	stream: StreamId,
+	/**  Why the host refused it. */
+	error: HostError,
+};
+
+/**  `{"stream_failed": {...}}`. */
+export type StreamFailedMessage = {
+	stream_failed: StreamFailed,
+};
+
+/**
  *  A stream's header entry, as a `ViewWindow` carries it: only the two header kinds decode
  *  here. JSON as the entry's: `{"header": {...}}` or `{"matter_header": {...}}`.
  */
@@ -2327,7 +2344,9 @@ export type StreamMessage =
 /**  An event, as the host encoded it. */
 HostEvent | 
 /**  A piece of an event too long for one message. */
-FragmentMessage;
+FragmentMessage | 
+/**  A stream the bridge could not restart. */
+StreamFailedMessage;
 
 /**
  *  The parameters of `subscribe`: the tail after `after`, or a `Reset` when `after` is `None`,

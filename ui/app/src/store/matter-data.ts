@@ -1,9 +1,10 @@
 // The matter data the room's parts read (ui/components MatterData), assembled from what the host says about a matter,
 // with one check: every citation names a paper the matter holds. A citation that names any other paper is logged and
-// dropped, so no part ever shows a reference to a paper the lawyer does not have.
+// dropped here; the parts drop such a citation too (they never show a reference to a paper the lawyer does not have),
+// so this layer's drop changes nothing they show, and its log is the record of it.
 //
-// The protocol carries no papers or citations yet, so today the window assembles it from empty lists; the check runs
-// on whatever arrives once it does.
+// Nothing builds MatterData yet: the protocol carries no papers or citations, so the store has nothing to build it
+// from. The check is ready for when they arrive; the store calls it then, where it builds the matter's view.
 import type {
   AnswerId,
   Citation,

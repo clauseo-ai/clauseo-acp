@@ -1,5 +1,13 @@
 import { expect, test, vi } from "vitest";
 import { Subscriptions } from "./subscriptions.ts";
+import type { BatchSubscriber } from "./host-transport.ts";
+import type { HostError } from "./protocol.ts";
+
+/** A subscriber that does nothing, or hands batches and failures to the functions given. */
+const sub = (
+  batch: (b: PatchBatch) => void = () => {},
+  failed: (e: HostError) => void = () => {},
+): BatchSubscriber => ({ batch, failed });
 import type { PatchBatch } from "./protocol.ts";
 
 function rig() {
@@ -28,10 +36,10 @@ function rig() {
 
 const B: PatchBatch = { stream: "s", epoch: "e", patches: [] };
 
-test("two listeners share one host subscription; it ends after the last leaves", async () => {
+test("two subscribers share one host subscription; it ends after the last leaves", async () => {
   const { subs, calls, settle } = rig();
-  const a = subs.add("s", null, () => {});
-  const b = subs.add("s", null, () => {});
+  const a = subs.add("s", null, sub());
+  const b = subs.add("s", null, sub());
   a();
   await settle();
   expect(calls).toEqual(["subscribe s null"]);
@@ -44,9 +52,9 @@ test("two listeners share one host subscription; it ends after the last leaves",
 test("Strict Mode's unsubscribe then subscribe keeps one host subscription and delivers each batch once", async () => {
   const { subs, calls, settle } = rig();
   const got: PatchBatch[] = [];
-  const listener = (b: PatchBatch) => got.push(b);
-  subs.add("s", null, listener)();
-  subs.add("s", null, listener);
+  const subscriber = sub((b) => got.push(b));
+  subs.add("s", null, subscriber)();
+  subs.add("s", null, subscriber);
   await settle();
   subs.deliver(B);
   expect(calls).toEqual(["subscribe s null"]);
@@ -56,11 +64,15 @@ test("Strict Mode's unsubscribe then subscribe keeps one host subscription and d
 test("resubscribe asks the host again only for a held stream; an unheld stream's batch is dropped", async () => {
   const { subs, calls, settle } = rig();
   subs.resubscribe("s", { epoch: "e", cursor: 4 });
-  subs.add("s", null, () => {});
+  subs.add("s", null, sub());
   subs.resubscribe("s", { epoch: "e", cursor: 4 });
   let got = 0;
   subs.deliver({ ...B, stream: "other" });
-  subs.add("t", null, () => (got += 1));
+  subs.add(
+    "t",
+    null,
+    sub(() => (got += 1)),
+  );
   subs.deliver({ ...B, stream: "t" });
   await settle();
   // Each stream's calls in order; streams are independent of each other.
@@ -89,9 +101,9 @@ test("a stream's host calls run in order: a subscribe waits for the unsubscribe 
     // A macrotask runs only once every microtask queued before it has, chained host calls included.
     await new Promise((done) => setTimeout(done, 0));
   };
-  subs.add("s", null, () => {})();
-  subs.add("s", null, () => {});
-  subs.add("t", null, () => {});
+  subs.add("s", null, sub())();
+  subs.add("s", null, sub());
+  subs.add("t", null, sub());
   await settle();
   expect(log).toEqual(["start subscribe s", "start subscribe t"]);
   open.shift()!();
@@ -102,9 +114,10 @@ test("a stream's host calls run in order: a subscribe waits for the unsubscribe 
   expect(log.slice(4)).toEqual(["end unsubscribe s", "start subscribe s"]);
 });
 
-test("a failed host call is reported and the next call for the stream still runs", async () => {
+test("a refused subscribe reaches every subscriber as a HostError; the stream's next call still runs", async () => {
   const calls: string[] = [];
-  const errors: string[] = [];
+  const warnings: string[] = [];
+  const failures: HostError[] = [];
   const subs = new Subscriptions(
     {
       subscribe: async () => {
@@ -113,16 +126,44 @@ test("a failed host call is reported and the next call for the stream still runs
       },
       unsubscribe: async () => {
         calls.push("unsubscribe");
+        throw "gone";
       },
     },
-    (s, e) => errors.push(`${s}: ${String(e)}`),
+    (problem) => warnings.push(problem),
     (run) => run(),
   );
-  subs.add("s", null, () => {})();
+  const release = subs.add(
+    "s",
+    null,
+    sub(undefined, (e) => failures.push(e)),
+  );
   // A macrotask runs only once every microtask queued before it has, chained host calls included.
   await new Promise((done) => setTimeout(done, 0));
+  release();
+  await new Promise((done) => setTimeout(done, 0));
   expect(calls).toEqual(["subscribe", "unsubscribe"]);
-  expect(errors).toEqual(["s: Error: no"]);
+  expect(failures).toEqual([{ code: "internal", message: "no", retryable: false }]);
+  expect(warnings).toEqual([
+    'unsubscribe of s failed: {"code":"internal","message":"gone","retryable":false}',
+  ]);
+});
+
+test("fail tells each subscriber of the stream once; deliver says how many got the batch", () => {
+  const { subs } = rig();
+  const failures: string[] = [];
+  const one = sub(undefined, (e) => failures.push(`one ${e.code}`));
+  subs.add("s", null, one);
+  subs.add("s", null, one);
+  subs.add(
+    "s",
+    null,
+    sub(undefined, (e) => failures.push(`two ${e.code}`)),
+  );
+  subs.fail("s", { code: "store.io", message: "", retryable: true });
+  subs.fail("nobody", { code: "store.io", message: "", retryable: true });
+  expect(failures).toEqual(["one store.io", "two store.io"]);
+  expect(subs.deliver(B)).toBe(2);
+  expect(subs.deliver({ ...B, stream: "nobody" })).toBe(0);
 });
 
 test("the default release scheduler calls queueMicrotask unbound, as WebView2 requires", async () => {
@@ -145,7 +186,7 @@ test("the default release scheduler calls queueMicrotask unbound, as WebView2 re
       },
       () => {},
     );
-    expect(() => subs.add("s", null, () => {})()).not.toThrow();
+    expect(() => subs.add("s", null, sub())()).not.toThrow();
     expect(strict).toHaveBeenCalledTimes(1);
   } finally {
     vi.unstubAllGlobals();
