@@ -65,7 +65,7 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
         .title(title)
         .use_https_scheme(true);
     #[cfg(all(windows, feature = "e2e"))]
-    let builder = e2e::with_debugging_port(builder)?;
+    let builder = e2e::with_debugging_port(builder);
     builder.build()?;
     Ok(())
 }

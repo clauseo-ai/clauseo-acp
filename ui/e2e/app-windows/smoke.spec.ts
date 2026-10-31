@@ -46,7 +46,8 @@ test("the blank app starts, renders #app-root and runs as the e2e build says", a
     );
     expect(browsers).toHaveLength(1);
     const args = argumentsOf(browsers[0]?.commandLine ?? "");
-    expect(args).toContain(`--remote-debugging-port=${app.port}`);
+    // Port 0: the browser picks the port and writes it to DevToolsActivePort.
+    expect(args).toContain("--remote-debugging-port=0");
     // Each feature in any --disable-features= argument, so a runtime that merges or reorders the
     // lists still passes.
     const disabled = args

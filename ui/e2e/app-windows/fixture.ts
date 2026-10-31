@@ -1,25 +1,25 @@
 // The real app on Windows under Playwright. The e2e build (`--features e2e`) opens WebView2's
-// DevTools port and prints `E2E_CDP_PORT=<port>`; the fixture starts the app with a temporary
-// WebView2 data folder, attaches with `connectOverCDP`, hands the test the app's page, then closes
-// the connection, ends the app's whole process tree by its PID and deletes the folder.
+// DevTools port on a port the browser picks, which it writes to `EBWebView/DevToolsActivePort` in
+// its data folder; the fixture starts the app with a temporary WebView2 data folder, reads the port
+// from that file, attaches with `connectOverCDP`, hands the test the app's page, then closes the
+// connection, ends the app's whole process tree by its PID and deletes the folder.
 //
 //   E2E_APP           path to the e2e build of clauseo-desktop.exe (required)
 //   E2E_DISABLE_GPU   `1` runs the webview with --disable-gpu; the app reads it too
 
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { setTimeout as wait } from "node:timers/promises";
 import { promisify } from "node:util";
 import { chromium, test as base, type Browser, type Page } from "@playwright/test";
 
-/** The time from starting the app to having its page: printing the port, connecting, the page. */
+/** The time from starting the app to having its page: the port file, connecting, the page. */
 const SETUP_TIMEOUT_MS = 60_000;
 /** How long `taskkill` may take. */
 const KILL_TIMEOUT_MS = 30_000;
-/** The pause between two attempts while WebView2 opens its port or creates its page. */
+/** The pause between two tries while WebView2 writes its port file, listens or opens its page. */
 const RETRY_MS = 200;
 
 /** How the webview runs, from `E2E_DISABLE_GPU`. */
@@ -31,7 +31,7 @@ export interface App {
   page: Page;
   /** The CDP connection to the app's WebView2. */
   browser: Browser;
-  /** The DevTools port the app printed. */
+  /** The DevTools port, from `DevToolsActivePort`. */
   port: number;
   mode: Mode;
   /** The app's PID: the root of its process tree, WebView2's processes included. */
@@ -63,46 +63,57 @@ function remaining(deadline: number, step: string): number {
   return left;
 }
 
+/** The names in `folder`, for an error message. */
+function entries(folder: string): string {
+  try {
+    return readdirSync(folder).join(", ") || "nothing";
+  } catch (error) {
+    return `nothing readable (${String(error)})`;
+  }
+}
+
 /**
- * The port from the app's `E2E_CDP_PORT=<port>` line. Every line the app prints goes on to the
- * test log, so the pipe never fills. Rejects if the app does not start, exits, or stays silent.
+ * The port from the first line of `<userDataFolder>/EBWebView/DevToolsActivePort`, which WebView2
+ * writes once it listens on the port that `--remote-debugging-port=0` let it pick. The folder is
+ * new for each launch, so the file is never left from an earlier one. Rejects if the app does not
+ * start, exits, or writes no file within the setup time.
  */
-function readPort(child: ChildProcess, deadline: number): Promise<number> {
-  return new Promise((done, fail) => {
-    // Declared before the handlers, which clear it, and set after them, since setting it can throw
-    // and the "error" handler must be in place by then.
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      fail(new Error(`the app did not start: ${appPath()}`, { cause: error }));
-    });
-    child.once("exit", (code) => {
-      clearTimeout(timer);
-      fail(new Error(`the app exited with ${String(code)} before it printed E2E_CDP_PORT`));
-    });
-    if (child.stdout === null) {
-      fail(new Error("the app was started without a stdout pipe"));
-      return;
-    }
-    timer = setTimeout(
-      () => {
-        fail(
-          new Error(
-            `reading E2E_CDP_PORT did not finish within the ${SETUP_TIMEOUT_MS} ms setup time`,
-          ),
-        );
-      },
-      remaining(deadline, "reading E2E_CDP_PORT"),
-    );
-    createInterface({ input: child.stdout }).on("line", (line) => {
-      process.stdout.write(`[app] ${line}\n`);
-      const match = /^E2E_CDP_PORT=(\d+)$/.exec(line.trim());
-      if (match?.[1] !== undefined) {
-        clearTimeout(timer);
-        done(Number(match[1]));
-      }
-    });
+async function readPort(
+  child: ChildProcess,
+  userDataFolder: string,
+  deadline: number,
+): Promise<number> {
+  const file = join(userDataFolder, "EBWebView", "DevToolsActivePort");
+  let failure: Error | undefined;
+  child.once("error", (error) => {
+    failure = new Error(`the app did not start: ${appPath()}`, { cause: error });
   });
+  child.once("exit", (code) => {
+    failure ??= new Error(`the app exited with ${String(code)} before WebView2 wrote ${file}`);
+  });
+  for (;;) {
+    if (failure !== undefined) {
+      throw failure;
+    }
+    let text = "";
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      // Not written yet.
+    }
+    // The line ends with a newline once the port is whole; a file caught mid-write waits a round.
+    const match = /^(\d+)\r?\n/.exec(text);
+    if (match?.[1] !== undefined) {
+      return Number(match[1]);
+    }
+    if (performance.now() + RETRY_MS > deadline) {
+      throw new Error(
+        `WebView2 wrote no port to ${file} within the ${SETUP_TIMEOUT_MS} ms setup time;` +
+          ` EBWebView holds: ${entries(join(userDataFolder, "EBWebView"))}`,
+      );
+    }
+    await wait(RETRY_MS);
+  }
 }
 
 /** Connects to WebView2 on `port`, retrying while it opens the port. */
@@ -167,11 +178,11 @@ export const test = base.extend<{ app: App }>({
     const deadline = startedAt + SETUP_TIMEOUT_MS;
     const child = spawn(appPath(), [], {
       env: { ...process.env, WEBVIEW2_USER_DATA_FOLDER: userDataFolder },
-      stdio: ["ignore", "pipe", "inherit"],
+      stdio: ["ignore", "inherit", "inherit"],
     });
     let browser: Browser | undefined;
     try {
-      const port = await readPort(child, deadline);
+      const port = await readPort(child, userDataFolder, deadline);
       const { pid } = child;
       if (pid === undefined) {
         throw new Error(`the app has no PID: ${appPath()}`);
