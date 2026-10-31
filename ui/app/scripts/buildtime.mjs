@@ -152,12 +152,12 @@ const NO_CHROME =
   "CHROME_PATH to a Chrome or Chromium binary";
 
 /**
- * Headless Google Chrome through playwright-core (`channel: "chrome"`, its standard install paths),
+ * Headless Google Chrome through Playwright (`channel: "chrome"`, its standard install paths),
  * or the Chrome or Chromium binary at CHROME_PATH. Throws when neither launches: NO_CHROME for the
  * channel, playwright's own error for a CHROME_PATH binary. hmr fails either way, never skips.
  */
 async function launchBrowser() {
-  const { chromium } = await import("playwright-core");
+  const { chromium } = await import("@playwright/test");
   const chromePath = process.env.CHROME_PATH;
   if (chromePath !== undefined && chromePath !== "") {
     return chromium.launch({ headless: true, executablePath: chromePath });
