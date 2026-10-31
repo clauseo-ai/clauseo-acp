@@ -39,13 +39,31 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
     (app, window)
 }
 
+/// The app's own origin, which the capability's `local` grant matches. The main window sets
+/// `use_https_scheme(true)` (`lib.rs`), so `WebView2` serves it from `https://tauri.localhost`;
+/// the other webviews serve it from `tauri://localhost`.
+#[cfg(windows)]
+const LOCAL_ORIGIN: &str = "https://tauri.localhost";
+#[cfg(not(windows))]
+const LOCAL_ORIGIN: &str = "tauri://localhost";
+
 /// Invokes `cmd` with `body` as the page would.
 fn invoke(window: &WebviewWindow<MockRuntime>, cmd: &str, body: Value) -> Result<Value, Value> {
+    invoke_from(window, LOCAL_ORIGIN, cmd, body)
+}
+
+/// Invokes `cmd` with `body` from a page at `origin`.
+fn invoke_from(
+    window: &WebviewWindow<MockRuntime>,
+    origin: &str,
+    cmd: &str,
+    body: Value,
+) -> Result<Value, Value> {
     let request = InvokeRequest {
         cmd: cmd.to_owned(),
         callback: CallbackFn(0),
         error: CallbackFn(1),
-        url: "tauri://localhost".parse().unwrap(),
+        url: origin.parse().unwrap(),
         body: InvokeBody::Json(body),
         headers: tauri::http::HeaderMap::default(),
         invoke_key: INVOKE_KEY.to_owned(),
@@ -111,6 +129,15 @@ fn a_tauri_rejection_is_a_string_and_a_refusal_is_a_host_error() {
         "linux"
     };
     assert_eq!(info, json!({ "platform": platform }));
+
+    // The same command from a page that is not the app's is refused.
+    let foreign = invoke_from(&window, "https://example.com", "display_info", json!({}));
+    let denied = foreign
+        .as_ref()
+        .err()
+        .and_then(Value::as_str)
+        .is_some_and(|text| text.contains("not allowed"));
+    assert!(denied, "{foreign:?}");
 }
 
 /// `COMMANDS`, `lib.rs`'s handler, `build.rs`, `capabilities/main.json` and the bindings name the
