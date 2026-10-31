@@ -42,12 +42,14 @@ Each step is one commit on the thread stream unless it names the matter stream.
 3. The matter's writer held by another thread: `TurnQueued`, first in first out per matter.
 4. Before-turn checkpoint, then `TurnStarted`. A checkpoint failure ends the turn with
    `TurnFailed` carrying the matter error's code, and nothing goes to the agent.
-5. `session/prompt`, the undo note first. It ends on a stop reason, the cancel fallback, agent
-   exit or a failed commit.
+5. Once `TurnStarted` is durable, `session/prompt`, the undo note first. It ends on a stop
+   reason, the cancel fallback or agent exit. A failed commit cancels the turn as `Cancel` does,
+   and step 7 adds `TurnFailed` with the store error's code.
 6. Flush display, then durable text; expire pending permission requests and elicitations.
 7. After-turn checkpoint with the paths the turn's tool calls named. One commit: the matter's
    `CheckpointRecorded { AfterTurn }`, `FilesChanged` when not empty, `TurnFailed` on failure,
-   `TurnEnded`.
+   `TurnEnded`. If a turn's last commit fails, it is retried once when the stream drains; until
+   it is durable, `SendPrompt` on the thread is refused with `thread.turn_running`.
 8. Thread snapshot; the writer passes to the next turn waiting at step 4.
 
 Agent exit: expiries with `AgentExited`, step 7 with `TurnFailed { agent.exited }`, then
