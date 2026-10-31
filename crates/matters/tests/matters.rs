@@ -70,3 +70,31 @@ mod undo_corrupt_object;
 #[cfg(test)]
 #[path = "matters/stat_cache_errors.rs"]
 mod stat_cache_errors;
+
+#[cfg(test)]
+#[path = "matters/messages.rs"]
+mod messages;
+
+#[cfg(test)]
+#[path = "matters/unreadable.rs"]
+mod unreadable;
+
+#[cfg(test)]
+#[path = "matters/vanishing.rs"]
+mod vanishing;
+
+#[cfg(test)]
+#[path = "matters/version_sizes.rs"]
+mod version_sizes;
+
+#[cfg(test)]
+#[path = "matters/commit_summary.rs"]
+mod commit_summary;
+
+#[cfg(test)]
+#[path = "matters/failed_publish.rs"]
+mod failed_publish;
+
+#[cfg(test)]
+#[path = "matters/drive_root.rs"]
+mod drive_root;
