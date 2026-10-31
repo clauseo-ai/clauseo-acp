@@ -1,7 +1,8 @@
-// walkTree and treeMemory on fixed snapshots; no Windows or app needed.
+// walkTree and treeMemory on fixed snapshots, and settle's rule on fixed readings; no Windows or
+// app needed.
 
 import { expect, test } from "@playwright/test";
-import { treeMemory, walkTree, type Row } from "./memory.ts";
+import { isSettled, parseCommit, treeMemory, walkTree, type Row } from "./memory.ts";
 
 function row(
   pid: number,
@@ -57,4 +58,27 @@ test("sums the tree, and has no working set total if one process lacks the count
   expect(treeMemory(tree)).toEqual({ privateWorkingSetBytes: 2_100, commitBytes: 21_000 });
   const missing = walkTree([row(10, 4, 100), { ...row(11, 10, 200), WorkingSetPrivate: null }], 10);
   expect(treeMemory(missing)).toEqual({ privateWorkingSetBytes: null, commitBytes: 21_000 });
+});
+
+test("settles when the last three readings agree within 1%", () => {
+  // The shape seen on windows-11-arm: a first reading a few MiB high, then two that agree.
+  expect(isSettled([120_000_000, 100_000_000, 100_500_000, 100_990_000])).toBe(true);
+  expect(isSettled([100_000_000, 100_000_000, 100_000_000])).toBe(true);
+});
+
+test("does not settle with fewer than three readings, or while the commit moves", () => {
+  expect(isSettled([])).toBe(false);
+  expect(isSettled([100_000_000, 100_000_000])).toBe(false);
+  // 100 to 101.1 MB is just over 1% of the largest.
+  expect(isSettled([100_000_000, 100_500_000, 101_100_000])).toBe(false);
+  // Settled earlier, but the last three spread.
+  expect(isSettled([100_000_000, 100_000_000, 100_000_000, 110_000_000])).toBe(false);
+});
+
+test("reads a commit total from PowerShell's line, and null from an empty or other line", () => {
+  expect(parseCommit("104857600")).toBe(104_857_600);
+  expect(parseCommit(" 104857600\r")).toBe(104_857_600);
+  expect(parseCommit("")).toBeNull();
+  expect(parseCommit("  ")).toBeNull();
+  expect(parseCommit("Get-Process : Cannot find a process")).toBeNull();
 });
