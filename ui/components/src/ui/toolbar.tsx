@@ -3,9 +3,8 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "../lib/cn.ts";
 import { button, pair, pairButton } from "./recipes.ts";
 
-/** A row of tools, as the room's toolbar: Tab enters and leaves it, the arrow keys move along it. Narrower than its
- * tools, it wraps them onto a second line rather than run past its box; the room's toolbar, which folds its search
- * instead, sets flex-nowrap. */
+/** A row of tools: Tab enters and leaves it, the arrow keys move along it. When it runs out of width, its tools wrap
+ * onto the next line; its text never truncates. */
 export function Toolbar({
   label,
   children,
