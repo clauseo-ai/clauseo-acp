@@ -146,3 +146,20 @@ fn only_trailing_commas_are_blanked() {
     }
     assert!(matches!(blank_trailing_commas(b"[1]"), Cow::Borrowed(_)));
 }
+
+#[test]
+fn a_section_the_file_sets_twice_is_its_last_copy_whole() {
+    // The earlier `ui` and `agents` copies contribute nothing, and neither warns: the last copy
+    // is the section, as the save keeps it.
+    let text = "{\"ui\": {\"theme\": \"dark\", \"font_size\": 16}, \"agents\": {\"a\": {\"command\": \"/x\"}}, \
+                \"ui\": {\"density\": \"compact\"}, \"agents\": {\"b\": {\"command\": \"/y\"}}}";
+    let (raws, warnings) = read(Path::new(PATH), text.as_bytes()).unwrap();
+    assert_eq!(
+        raws,
+        vec![
+            raw("ui.density", json!("compact"), 1, 98),
+            raw("agents.b", json!({"command": "/y"}), 1, 126),
+        ]
+    );
+    assert_eq!(warnings, Vec::new());
+}

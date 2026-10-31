@@ -255,3 +255,24 @@ fn a_repeated_key_reads_the_same_after_a_save_of_another_key() {
     assert_eq!(fresh.settings().ui.density, Density::Compact);
     assert_eq!(fresh.warnings().len(), 1, "{:?}", fresh.warnings());
 }
+
+#[test]
+fn a_repeated_section_reads_the_same_after_a_save_of_another_key() {
+    // The file sets `ui` twice. The save keeps the last copy whole, so a save of `language` must
+    // not change what the first load read: the theme stays the default, and density stays.
+    let files = user(r#"{"ui": {"theme": "dark"}, "ui": {"density": "compact"}}"#);
+    let mut effective = Effective::load(&locations(), &files, &[]);
+    assert_eq!(effective.settings().ui.theme, Theme::System);
+    assert_eq!(effective.settings().ui.density, Density::Compact);
+    let language = UiPatch {
+        language: Some(Language::try_from("fr".to_owned()).unwrap()),
+        ..UiPatch::default()
+    };
+    effective.apply_ui_patch(&files, &language).unwrap();
+    let fresh = Effective::load(&locations(), &files, &[]);
+    assert_eq!(fresh.settings().ui, effective.settings().ui);
+    assert_eq!(fresh.settings().ui.theme, Theme::System);
+    assert_eq!(fresh.settings().ui.density, Density::Compact);
+    assert_eq!(fresh.settings().ui.language.as_str(), "fr");
+    assert_eq!(fresh.warnings(), []);
+}
