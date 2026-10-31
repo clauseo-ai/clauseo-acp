@@ -15,6 +15,7 @@ use clauseo_store::{Receipt, ThreadRow, command_hash};
 
 use super::input::Reply;
 use super::matters::PendingMatter;
+use super::turn::TurnCommand;
 use super::{Actor, MatterEntry, Tag, ThreadEntry, turn};
 use crate::error::Error;
 use crate::pipeline::{Draft, Failure};
@@ -190,16 +191,52 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::ArchiveThread { thread } => {
             thread_command(actor, ctx, thread, ThreadChange::Archive);
         }
-        HostCommand::SendPrompt { thread, .. }
-        | HostCommand::Cancel { thread }
-        | HostCommand::AnswerPermission { thread, .. }
-        | HostCommand::AnswerElicitation { thread, .. }
-        | HostCommand::SetConfigOption { thread, .. }
-        | HostCommand::SetMode { thread, .. }
-        | HostCommand::UndoStep { thread, .. } => match actor.check_thread(thread) {
-            Ok(_) => turn::command(actor, ctx, thread, command),
-            Err(error) => actor.finish_command(ctx.id, Err(error)),
-        },
+        HostCommand::SendPrompt {
+            thread,
+            content,
+            delivery,
+        } => turn_command(
+            actor,
+            ctx,
+            thread,
+            TurnCommand::SendPrompt { content, delivery },
+        ),
+        HostCommand::Cancel { thread } => turn_command(actor, ctx, thread, TurnCommand::Cancel),
+        HostCommand::AnswerPermission {
+            thread,
+            request,
+            option_id,
+        } => {
+            let command = TurnCommand::AnswerPermission { request, option_id };
+            turn_command(actor, ctx, thread, command);
+        }
+        HostCommand::AnswerElicitation {
+            thread,
+            elicitation,
+            response,
+        } => {
+            let command = TurnCommand::AnswerElicitation {
+                elicitation,
+                response,
+            };
+            turn_command(actor, ctx, thread, command);
+        }
+        HostCommand::SetConfigOption {
+            thread,
+            option_id,
+            value,
+        } => {
+            let command = TurnCommand::SetConfigOption { option_id, value };
+            turn_command(actor, ctx, thread, command);
+        }
+        HostCommand::SetMode { thread, mode_id } => {
+            turn_command(actor, ctx, thread, TurnCommand::SetMode { mode_id });
+        }
+        HostCommand::UndoStep {
+            thread,
+            turn,
+            files,
+        } => turn_command(actor, ctx, thread, TurnCommand::UndoStep { turn, files }),
         HostCommand::EditQueuedPrompt { .. }
         | HostCommand::RemoveQueuedPrompt { .. }
         | HostCommand::SendQueuedNow { .. }
@@ -209,6 +246,14 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");
             actor.finish_command(ctx.id, Err(refusal));
         }
+    }
+}
+
+/// A turn command for a known thread goes to the turn path; an unknown one is refused.
+fn turn_command(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, command: TurnCommand) {
+    match actor.check_thread(thread) {
+        Ok(_) => turn::command(actor, ctx, thread, command),
+        Err(error) => actor.finish_command(ctx.id, Err(error)),
     }
 }
 
