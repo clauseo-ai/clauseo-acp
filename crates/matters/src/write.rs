@@ -100,11 +100,68 @@ pub(crate) fn open_exclusive(path: &Path) -> io::Result<File> {
     OpenOptions::new().read(true).share_mode(0).open(path)
 }
 
+/// `FILE_ATTRIBUTE_HIDDEN`.
+#[cfg(any(windows, test))]
+const HIDDEN: u32 = 0x2;
+
+/// The attributes that hide a file or folder whose attributes are `current`, keeping every
+/// other one: `None` when it is hidden already. Git for Windows' rule for `.git`
+/// (`set_hidden_flag` in its `compat/mingw.c`). Plain arithmetic, so tested on every OS.
+#[cfg(any(windows, test))]
+pub(crate) const fn hidden_attributes(current: u32) -> Option<u32> {
+    if current & HIDDEN == 0 {
+        Some(current | HIDDEN)
+    } else {
+        None
+    }
+}
+
+/// Windows: sets `FILE_ATTRIBUTE_HIDDEN` on the folder `dir`, keeping the attributes it has,
+/// unless it is hidden already or is not a plain folder (a link or junction is left alone). A
+/// failure is logged, not returned: hiding is cosmetic. Elsewhere nothing; the leading dot of
+/// `.clauseo` hides it on macOS and Linux.
+pub(crate) fn hide_dir(dir: &Path) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        let metadata = match std::fs::symlink_metadata(dir) {
+            Ok(metadata) => metadata,
+            Err(err) => {
+                tracing::warn!(path = %dir.display(), error = %err, "folder not hidden");
+                return;
+            }
+        };
+        if !metadata.is_dir() {
+            tracing::debug!(path = %dir.display(), "not a plain folder; not hidden");
+            return;
+        }
+        let Some(attributes) = hidden_attributes(metadata.file_attributes()) else {
+            return;
+        };
+        if let Err(err) = win32::set_attributes(dir, attributes) {
+            tracing::warn!(path = %dir.display(), error = %err, "folder not hidden");
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = dir;
+    }
+}
+
+#[cfg(windows)]
+mod win32;
+
 /// Sets the modification time of the file `path`.
 #[cfg(test)]
 pub(crate) fn set_mtime(path: &Path, mtime: std::time::SystemTime) -> io::Result<()> {
     let file = OpenOptions::new().write(true).open(path)?;
     file.set_times(std::fs::FileTimes::new().set_modified(mtime))
+}
+
+/// `fs::set_permissions`.
+#[cfg(all(test, windows))]
+pub(crate) fn set_permissions(path: &Path, permissions: std::fs::Permissions) -> io::Result<()> {
+    std::fs::set_permissions(path, permissions)
 }
 
 /// Appends `bytes` to the file `path` in place.
@@ -202,3 +259,6 @@ fn new_temp(dir: &Path) -> Result<(PathBuf, File), Error> {
         io::ErrorKind::AlreadyExists.into(),
     ))
 }
+
+#[cfg(test)]
+mod tests;

@@ -59,11 +59,22 @@ pub(crate) fn check_new_matter(folder: &Path, matters_root: &Path) -> Result<(),
         folder: folder.to_path_buf(),
         reason,
     };
-    match json::existing(folder)? {
-        json::Existing::None => {}
-        json::Existing::Matter(id) => return Err(refuse(Refusal::AlreadyMatter(id))),
-        json::Existing::Unreadable => return Err(refuse(Refusal::UnreadableMatterJson)),
+    match json::read(folder)? {
+        json::Found::NoFolder | json::Found::None => {}
+        json::Found::Matter(id) => return Err(refuse(Refusal::AlreadyMatter(id))),
+        json::Found::Unreadable => return Err(refuse(Refusal::UnreadableMatterJson)),
     }
+    check_outside_root(folder, matters_root)
+}
+
+/// Refuses `folder` if it is, contains or sits inside the matters root (`Refusal::MattersRoot`):
+/// the history would version itself. Import checks it after the marker; locate and relink, which
+/// need a marker, check it alone.
+pub(crate) fn check_outside_root(folder: &Path, matters_root: &Path) -> Result<(), Error> {
+    let refuse = |reason| Error::FolderRefused {
+        folder: folder.to_path_buf(),
+        reason,
+    };
     let canonical =
         dunce::canonicalize(folder).map_err(|err| Error::io("canonicalize", folder, err))?;
     let root = dunce::canonicalize(matters_root).unwrap_or_else(|_| matters_root.to_path_buf());
@@ -78,6 +89,17 @@ pub(crate) fn check_new_matter(folder: &Path, matters_root: &Path) -> Result<(),
         return Err(refuse(Refusal::MattersRoot));
     }
     Ok(())
+}
+
+/// Whether `a` and `b` name the same folder once canonicalised, compared as [`check_folder`]
+/// compares paths (case-insensitively on macOS and Windows, firmlink spellings on macOS). A path
+/// that does not canonicalise (it no longer exists) is the same as nothing.
+pub(crate) fn same_folder(a: &Path, b: &Path) -> bool {
+    let (Ok(a), Ok(b)) = (dunce::canonicalize(a), dunce::canonicalize(b)) else {
+        return false;
+    };
+    let (a, b) = (spellings(&a), spellings(&b));
+    a.iter().any(|key| b.contains(key))
 }
 
 /// Whether `folder` is on a network share: `\\server\share...` or `\\?\UNC\...`.

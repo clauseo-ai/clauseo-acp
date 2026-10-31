@@ -88,6 +88,20 @@ fn config_text(worktree: &Path) -> Result<String, Error> {
     ))
 }
 
+/// The `core.worktree` of the git dir `git_dir`, read with gix's isolated options and written
+/// nowhere: the folder the matter was last opened from. `None` when the key is missing or not
+/// UTF-8 (this crate writes only UTF-8).
+pub(crate) fn recorded_worktree(git_dir: &Path) -> Result<Option<PathBuf>, Error> {
+    Ok(recorded(git_dir)?.map(PathBuf::from))
+}
+
+fn recorded(git_dir: &Path) -> Result<Option<String>, Error> {
+    let options = gix::open::Options::isolated().open_path_as_is(true);
+    let repo = gix::open_opts(git_dir, options).map_err(|err| Error::history("open", err))?;
+    let value = repo.config_snapshot().string("core.worktree");
+    Ok(value.and_then(|text| String::from_utf8(text.into()).ok()))
+}
+
 /// Creates the new file `path` with `bytes` and syncs it.
 fn new_file(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     let mut file = write::create_new(path).map_err(|err| Error::io("create", path, err))?;
@@ -174,10 +188,7 @@ impl HistoryStore for GixStore {
     }
 
     fn open(git_dir: &Path, worktree: &Path) -> Result<Self, Error> {
-        let options = gix::open::Options::isolated().open_path_as_is(true);
-        let repo = gix::open_opts(git_dir, options).map_err(|err| Error::history("open", err))?;
-        let current = repo.config_snapshot().string("core.worktree");
-        drop(repo);
+        let current = recorded(git_dir)?;
         let head = git_dir.join("HEAD");
         let text = head_text();
         let head_now = std::fs::read(&head).map_err(|err| Error::io("read", &head, err))?;
@@ -187,8 +198,7 @@ impl HistoryStore for GixStore {
                     .map_err(|err| Error::io("write", &head, err))
             })?;
         }
-        let wanted = worktree.to_str().map(str::as_bytes);
-        if current.as_deref().map(Vec::as_slice) != wanted {
+        if current.as_deref() != worktree.to_str() {
             let config = config_text(worktree)?;
             let path = git_dir.join("config");
             write::replace(&path, &mut |file| {

@@ -34,13 +34,14 @@ pub(crate) fn path(folder: &Path) -> PathBuf {
 }
 
 /// Writes `matter.json` for matter `id` into `folder` by temp file and rename, making
-/// `.clauseo` if needed.
+/// `.clauseo` if needed and hiding it on Windows.
 pub(crate) fn write(folder: &Path, id: MatterId, created_at: Timestamp) -> Result<(), Error> {
     let dir = folder.join(DIR);
     if !dir.is_dir() {
         write::create_dir_all(&dir).map_err(|err| Error::io("create", &dir, err))?;
         fsync::sync_dir(folder).map_err(|err| Error::io("sync", folder, err))?;
     }
+    write::hide_dir(&dir);
     let json = MatterJson {
         version: VERSION,
         matter_id: id,
@@ -54,59 +55,64 @@ pub(crate) fn write(folder: &Path, id: MatterId, created_at: Timestamp) -> Resul
     })
 }
 
-/// Checks that `folder` exists and its `matter.json` names matter `id`.
-pub(crate) fn check(folder: &Path, id: MatterId) -> Result<(), Error> {
-    let missing = |reason| Error::FolderMissing {
-        folder: folder.to_owned(),
-        reason,
-    };
+/// Hides `folder`'s `.clauseo` again on Windows, where a zip or a sync can drop the attribute;
+/// logged, never an error.
+pub(crate) fn hide(folder: &Path) {
+    write::hide_dir(&folder.join(DIR));
+}
+
+/// What the marker check finds in a folder: the one reading of `.clauseo/matter.json` that
+/// opening, every checkpoint, import, locate and relink share.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Found {
+    /// The folder does not exist, or is not a folder.
+    NoFolder,
+    /// The folder has no `matter.json`.
+    None,
+    /// A file that does not read as `matter.json`.
+    Unreadable,
+    /// A matter's id.
+    Matter(MatterId),
+}
+
+impl Found {
+    /// The [`Error::FolderMissing`] for matter `id` in `folder`, or `Ok` when the marker names it.
+    pub(crate) fn expect(self, folder: &Path, id: MatterId) -> Result<(), Error> {
+        let reason = match self {
+            Self::Matter(found) if found == id => return Ok(()),
+            Self::Matter(other) => MissingReason::OtherMatter(other),
+            Self::NoFolder => MissingReason::NoFolder,
+            Self::None => MissingReason::NoMatterJson,
+            Self::Unreadable => MissingReason::Unreadable,
+        };
+        Err(Error::FolderMissing {
+            folder: folder.to_owned(),
+            reason,
+        })
+    }
+}
+
+/// Reads `folder`'s marker. A read that fails for any reason but a missing file (permissions,
+/// an offline cloud placeholder) is an [`Error::Io`], not a finding.
+pub(crate) fn read(folder: &Path) -> Result<Found, Error> {
     match std::fs::metadata(folder) {
         Ok(metadata) if metadata.is_dir() => {}
-        Ok(_) => return Err(missing(MissingReason::NoFolder)),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            return Err(missing(MissingReason::NoFolder));
-        }
+        Ok(_) => return Ok(Found::NoFolder),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Found::NoFolder),
         Err(err) => return Err(Error::io("stat", folder, err)),
     }
     let file = path(folder);
-    let bytes = match std::fs::read(&file) {
-        Ok(bytes) => bytes,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            return Err(missing(MissingReason::NoMatterJson));
-        }
-        Err(err) => return Err(Error::io("read", file, err)),
-    };
-    let Ok(json) = serde_json::from_slice::<MatterJson>(&bytes) else {
-        return Err(missing(MissingReason::Unreadable));
-    };
-    if json.matter_id == id {
-        Ok(())
-    } else {
-        Err(missing(MissingReason::OtherMatter(json.matter_id)))
-    }
-}
-
-/// What `.clauseo/matter.json` holds before an import.
-pub(crate) enum Existing {
-    /// No file.
-    None,
-    /// A matter's id.
-    Matter(MatterId),
-    /// A file that does not read as `matter.json`.
-    Unreadable,
-}
-
-/// Reads `folder`'s `matter.json`, if it has one.
-pub(crate) fn existing(folder: &Path) -> Result<Existing, Error> {
-    let file = path(folder);
     match std::fs::read(&file) {
         Ok(bytes) => Ok(serde_json::from_slice::<MatterJson>(&bytes)
-            .map_or(Existing::Unreadable, |json| {
-                Existing::Matter(json.matter_id)
-            })),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Existing::None),
+            .map_or(Found::Unreadable, |json| Found::Matter(json.matter_id))),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(Found::None),
         Err(err) => Err(Error::io("read", file, err)),
     }
+}
+
+/// Checks that `folder` exists and its `matter.json` names matter `id`.
+pub(crate) fn check(folder: &Path, id: MatterId) -> Result<(), Error> {
+    read(folder)?.expect(folder, id)
 }
 
 /// Removes `matter.json`, and `.clauseo` if that leaves it empty; for a cancelled or failed
