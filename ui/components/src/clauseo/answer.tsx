@@ -1,11 +1,19 @@
+import { use } from "react";
 import type { FocusEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactNode, Ref } from "react";
 import { Collapsible as BaseCollapsible } from "@base-ui/react/collapsible";
 import { CollapsiblePanel } from "../ui/collapsible.tsx";
 import { IconFold, IconGoodLaw } from "../icons/icons.tsx";
 import { useWords } from "../lib/words.ts";
 import type { Target } from "./hand.ts";
-import { isLatinOnly, keepIds, segmentsOf, type Block, type Segment } from "./matter.ts";
-import { useMatter } from "./matter-context.ts";
+import {
+  isLatinOnly,
+  keepIds,
+  segmentsOf,
+  type AnswerId,
+  type Block,
+  type Segment,
+} from "./matter.ts";
+import { AnswerContext, useMatter } from "./matter-context.ts";
 import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
 import { Heading } from "./heading.tsx";
@@ -89,14 +97,19 @@ export function MetaLine({
 }
 
 /** A reference in the answer's words: underlined in its role's colour, a paper's in green, red or the relied-on
- * grey, a judgment's in the quiet line. Hover, focus or a tap brings what it cites into hand. It never navigates. */
+ * grey, a judgment's in the quiet line. Hover, focus or a tap brings what it cites into hand. It never navigates.
+ * A paper's reference names one of its own answer's citations; one that names none is words with no card. */
 export function Reference({ seg }: { seg: Extract<Segment, { type: "ref" }> }) {
   const w = useWords();
   const room = useRoom();
   const matter = useMatter();
+  const answer = use(AnswerContext);
   const { hand, nodes } = room;
-  const target: Target = { kind: seg.kind, id: seg.id };
-  const cited = seg.kind === "paper" ? matter.cited(seg.id) : undefined;
+  const cited = seg.kind === "paper" && answer !== null ? matter.cited(answer, seg.id) : undefined;
+  const target: Target =
+    cited === undefined || answer === null
+      ? { kind: seg.kind, id: seg.id }
+      : { kind: "paper", id: cited.paper.id, citation: { answer, id: seg.id } };
   const role = cited?.citation.role ?? null;
   const card = seg.kind === "cite" || cited !== undefined;
   const label = keepIds(seg.label);
@@ -126,11 +139,13 @@ export function Reference({ seg }: { seg: Extract<Segment, { type: "ref" }> }) {
   };
   return (
     <a
-      ref={card ? nodes.ref(`${seg.kind}:${seg.id}`) : undefined}
+      ref={card ? nodes.ref(`${target.kind}:${target.id}`) : undefined}
       className={card ? "ref card-trigger" : "ref"}
-      href={`#${room.id(`${seg.kind === "cite" ? "cite" : "paper"}-${seg.id}`)}`}
+      href={card ? `#${room.id(`${target.kind}-${target.id}`)}` : undefined}
       lang={latin ? "en" : undefined}
-      data-card={card ? `${seg.kind}:${seg.id}` : undefined}
+      data-card={card ? `${target.kind}:${target.id}` : undefined}
+      data-citation={target.citation?.id}
+      data-answer={target.citation?.answer}
       data-role={role ?? undefined}
       data-cite={seg.kind === "cite" ? "" : undefined}
       onPointerEnter={onPointerEnter}
@@ -200,21 +215,29 @@ export function OtherSide({ label, count, text }: { label: string; count: string
   );
 }
 
-/** The answer's blocks in order: the lead, the paragraphs, the other side's case. */
+/** The answer's blocks in order: the lead, the paragraphs, the other side's case. Their references look among this
+ * answer's citations only. */
 export function AnswerBlocks({
+  answer,
   blocks,
   count,
 }: {
+  /** The answer's id, as the matter keys its citations. */
+  answer: AnswerId;
   blocks: readonly Block[];
   count: string;
 }): ReactNode {
-  return blocks.map((b, i) =>
-    b.kind === "lead" ? (
-      <AnswerLead key={i} text={b.text} />
-    ) : b.kind === "otherside" ? (
-      <OtherSide key={i} label={b.label ?? ""} count={count} text={b.text} />
-    ) : (
-      <AnswerParagraph key={i} text={b.text} />
-    ),
+  return (
+    <AnswerContext value={answer}>
+      {blocks.map((b, i) =>
+        b.kind === "lead" ? (
+          <AnswerLead key={i} text={b.text} />
+        ) : b.kind === "otherside" ? (
+          <OtherSide key={i} label={b.label ?? ""} count={count} text={b.text} />
+        ) : (
+          <AnswerParagraph key={i} text={b.text} />
+        ),
+      )}
+    </AnswerContext>
   );
 }

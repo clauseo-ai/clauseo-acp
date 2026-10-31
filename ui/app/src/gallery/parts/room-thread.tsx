@@ -11,7 +11,7 @@ import { ReadyCard, TurnedPage } from "@clauseo/components/clauseo/ready.tsx";
 import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
 import { Thread } from "@clauseo/components/clauseo/thread.tsx";
 import { Sample } from "./frame.tsx";
-import { MATTER } from "./matter.ts";
+import { ANSWER_ID, CARD_ANSWER_ID, MATTER } from "./matter.ts";
 import { Own } from "./room-own.tsx";
 import {
   ACCEPT_WORDS,
@@ -60,7 +60,7 @@ function ThreadWithAnswer() {
         <AnswerStep>
           <MetaLine who={ANSWER_WHO.who} time={ANSWER_WHO.time} done={ANSWER_DONE} read={WORK} />
           <AcceptedAnswer state={state}>
-            <AnswerBlocks blocks={ANSWER} count={ANSWER_COUNT} />
+            <AnswerBlocks answer={ANSWER_ID} blocks={ANSWER} count={ANSWER_COUNT} />
           </AcceptedAnswer>
           <Accept
             state={state}
@@ -112,7 +112,7 @@ function DraftPage() {
 function AnswerAndCard() {
   return (
     <div className="flex flex-col gap-s4">
-      <AnswerBlocks blocks={CARD_ANSWER} count="2" />
+      <AnswerBlocks answer={CARD_ANSWER_ID} blocks={CARD_ANSWER} count="2" />
       <ExcerptCard />
     </div>
   );
@@ -172,7 +172,6 @@ export function ThreadSamples() {
         <Own>
           <PapersWall
             papers={PAPERS}
-            citations={MATTER.citations}
             dates={{ title: "List of dates", accepted: "Accepted 4:02 pm" }}
             draft={DRAFT_TILE}
             onTurn={nothing}

@@ -41,22 +41,27 @@ const MATTER: MatterData = {
       kind: "document",
     },
   ],
-  citations: [
-    {
-      paperId: "notice",
-      role: "supports",
-      pin: "Para 2, PB 1",
-      excerpt: "The bank was told in writing on the first of the month.",
-      mark: "told in writing",
-    },
-    {
-      paperId: "reply",
-      role: "against",
-      pin: "Para 3, PB 5",
-      excerpt: "The bank denies that any notice reached it.",
-      mark: "denies",
-    },
-  ],
+  citations: {
+    answer: [
+      {
+        id: "notice-2",
+        paperId: "notice",
+        role: "supports",
+        pin: "Para 2, PB 1",
+        excerpt: "The bank was told in writing on the first of the month.",
+        mark: "told in writing",
+      },
+      {
+        id: "reply-3",
+        paperId: "reply",
+        role: "against",
+        pin: "Para 3, PB 5",
+        excerpt: "The bank denies that any notice reached it.",
+        mark: "denies",
+      },
+    ],
+  },
+  inView: "answer",
   cites: {
     acme: {
       short: "Acme Ltd",
@@ -91,16 +96,12 @@ function Room() {
   return (
     <RoomScopeProvider className="room-window">
       <MatterContext value={MATTER}>
-        <PapersWall
-          papers={MATTER.papers}
-          citations={MATTER.citations}
-          draft={DRAFT}
-          onTurn={() => {}}
-        />
+        <PapersWall papers={MATTER.papers} draft={DRAFT} onTurn={() => {}} />
         {cite !== undefined && <Citations cites={[{ id: "acme", cite }]} />}
         <AnswerBlocks
+          answer="answer"
           blocks={[
-            { kind: "lead", text: "The bank had notice [[p:notice|PB 1]], as [[c:acme]] holds." },
+            { kind: "lead", text: "The bank had notice [[p:notice-2|PB 1]], as [[c:acme]] holds." },
           ]}
           count="1"
         />

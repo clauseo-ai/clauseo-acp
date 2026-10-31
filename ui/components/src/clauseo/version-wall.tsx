@@ -3,6 +3,7 @@ import { useWords } from "../lib/words.ts";
 import { vt } from "../lib/words-versions.ts";
 import { Heading } from "./heading.tsx";
 import {
+  citationsOf,
   citedPapers,
   pbWords,
   shortTitle,
@@ -48,7 +49,7 @@ export function VersionWall({
   copy?: string | null;
   /** The matter's papers in paper book order; the matter in reach when left out. */
   papers?: readonly Paper[];
-  /** The answer's citations of the papers; the matter in reach when left out. */
+  /** The answer's citations of the papers; the answer in view's when left out. */
   citations?: readonly Citation[];
   /** The judgments the draft cites, by id; the matter in reach when left out. */
   cites?: Readonly<Record<string, Cite>>;
@@ -57,7 +58,7 @@ export function VersionWall({
   const { id } = useRoom();
   const matter = useMatter();
   const all = papers ?? matter.papers;
-  const roles = citedPapers(citations ?? matter.citations, all);
+  const lit = citedPapers(citations ?? citationsOf(matter, matter.inView), all);
   const cited = cites ?? matter.cites;
   const count = all.filter((p) => version.state.papers.includes(p.id)).length;
   const era = (p: string) => {
@@ -88,7 +89,7 @@ export function VersionWall({
         <ol className="facade ver-facade" data-looking={looking ? "" : undefined}>
           {all.map((paper) => {
             const more = sr(paper.id);
-            const role = roles.get(paper.id);
+            const role = lit.get(paper.id)?.citation.role;
             const state: TileState = role ?? "uncited";
             const label = w.t("{title}, {pb}", {
               title: paper.title,
