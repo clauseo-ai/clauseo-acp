@@ -3,6 +3,8 @@
 //! never started (a failed launch or checkpoint). The prompt itself (step 5) is in
 //! `prompt.rs`; steps 6 to 8 are in `end.rs`.
 
+use std::path::Path;
+
 use clauseo_matters::{Checkpoint, CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
     AgentSessionDetached, CheckpointKind, CheckpointRecorded, CommandOutcome, ContentBlock,
@@ -22,6 +24,7 @@ use super::{
 };
 use crate::build;
 use crate::error::Error;
+use crate::file_link;
 use crate::matter_worker::MatterJob;
 
 /// Step 1: `SendPrompt` on a thread with no current turn logs `UserMessage` with the receipt.
@@ -33,7 +36,7 @@ pub(super) fn send_prompt(
     delivery: Delivery,
 ) -> Result<(), Error> {
     refuse_busy(actor, thread)?;
-    let blocks = prompt_blocks(actor, content)?;
+    let blocks = prompt_blocks(actor, thread, content)?;
     let stream = StreamId::Thread(thread);
     actor.with_loaded(
         stream,
@@ -72,8 +75,19 @@ fn refuse_busy(actor: &Actor, thread: ThreadId) -> Result<(), Error> {
     Ok(())
 }
 
-/// The prompt's blocks as content: text as it is, a file as a link to it.
-fn prompt_blocks(actor: &Actor, content: Vec<PromptBlock>) -> Result<Vec<ContentBlock>, Error> {
+/// The prompt's blocks as content: text as it is, a file as a link to it. A file must lie in
+/// the thread's matter folder, else `command.invalid`.
+fn prompt_blocks(
+    actor: &Actor,
+    thread: ThreadId,
+    content: Vec<PromptBlock>,
+) -> Result<Vec<ContentBlock>, Error> {
+    let folder = Path::new(
+        &actor
+            .check_matter(matter_of(actor, thread)?)?
+            .row
+            .folder_path,
+    );
     content
         .into_iter()
         .map(|block| match block {
@@ -82,12 +96,18 @@ fn prompt_blocks(actor: &Actor, content: Vec<PromptBlock>) -> Result<Vec<Content
                 let path = actor.files.get(&file).ok_or_else(|| {
                     Error::refused(ErrorCode::CommandInvalid, format!("no file {file}"))
                 })?;
+                if !file_link::inside(path, folder) {
+                    return Err(Error::refused(
+                        ErrorCode::CommandInvalid,
+                        format!("file {file} is not in this thread's matter folder"),
+                    ));
+                }
                 let name = path
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 Ok(ContentBlock::ResourceLink {
-                    uri: format!("file://{}", path.display()),
+                    uri: file_link::file_uri(path),
                     name,
                     mime_type: None,
                     title: None,

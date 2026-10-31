@@ -91,6 +91,7 @@ mod coalesce;
 mod config;
 mod encode;
 mod error;
+mod file_link;
 mod handle;
 mod ids;
 mod matter_worker;

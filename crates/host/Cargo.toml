@@ -28,6 +28,8 @@ serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 tracing = { workspace = true }
 thiserror = { workspace = true }
+# The matter folder check on a prompt's file (std's canonicalize is banned in clippy.toml).
+dunce = { workspace = true }
 
 [dev-dependencies]
 # Itself with test-support, so its tests reach ManualClock and SequentialIds with no flag.
