@@ -99,6 +99,7 @@ pub(crate) struct ThreadText {
 
 impl ThreadText {
     /// No text held.
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         Self::default()
     }

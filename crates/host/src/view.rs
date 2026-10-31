@@ -40,16 +40,19 @@ impl StreamView {
     }
 
     /// The epoch every cursor of this view belongs to.
+    #[cfg(test)]
     pub(crate) fn epoch(&self) -> ViewEpoch {
         self.epoch
     }
 
     /// The cursor of the last patch published, 0 before the first.
+    #[cfg(test)]
     pub(crate) fn cursor(&self) -> Cursor {
         self.cursor
     }
 
     /// The serialised bytes the window holds.
+    #[cfg(test)]
     pub(crate) fn window_bytes(&self) -> usize {
         self.window.bytes_held()
     }

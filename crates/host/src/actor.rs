@@ -70,7 +70,6 @@ pub(crate) enum Tag {
     /// A snapshot with no events.
     Snapshot,
     /// A turn's commit.
-    #[expect(dead_code, reason = "the turn path's commits use it")]
     Turn(turn::TurnTag),
 }
 
@@ -79,7 +78,6 @@ pub(crate) struct MatterEntry {
     pub(crate) row: MatterRow,
     /// Its thread, started (and the matter opened) on first use.
     pub(crate) worker: Option<MatterWorker<MatterTag>>,
-    #[expect(dead_code, reason = "the turn path keeps the writer queue in it")]
     pub(crate) turns: turn::MatterTurns,
 }
 
@@ -89,7 +87,6 @@ pub(crate) struct ThreadEntry {
     pub(crate) row: ThreadRow,
     /// The header as of the last time the stream was unloaded, for `ListThreads`.
     pub(crate) header: Option<clauseo_protocol::HeaderEntry>,
-    #[expect(dead_code, reason = "the turn path keeps the thread's turn in it")]
     pub(crate) turn: turn::TurnState,
 }
 
@@ -139,7 +136,6 @@ pub(crate) struct Actor {
     pub(crate) feeder: FeederTx,
     pub(crate) snapshots: SnapshotWorker,
     pub(crate) effective: Arc<Effective>,
-    #[expect(dead_code, reason = "the turn path launches agents with it")]
     pub(crate) launcher: Arc<dyn Launcher>,
     #[expect(dead_code, reason = "calling the profile hook is a later follow-up")]
     pub(crate) profile: Box<dyn ProfileHook>,
@@ -300,10 +296,6 @@ impl Actor {
     }
 
     /// The worker of a known matter, started and sent its open on first use.
-    #[expect(
-        dead_code,
-        reason = "the turn path sends its checkpoints and undos through it"
-    )]
     pub(crate) fn matter_worker(
         &mut self,
         matter: MatterId,
@@ -329,7 +321,6 @@ impl Actor {
     }
 
     /// Posts `timer` after `delay` on the host clock. Abort the handle to disarm it.
-    #[expect(dead_code, reason = "the turn path arms its timers with it")]
     pub(crate) fn arm_timer(&self, delay: Duration, timer: turn::TurnTimer) -> AbortHandle {
         let (handle, registration) = AbortHandle::new_pair();
         let after = self.clock.after(delay);
@@ -449,6 +440,7 @@ impl Actor {
             Input::Snapshot(snapshot) => streams::on_snapshot(self, snapshot),
             Input::Agent { thread, input } => turn::agent_input(self, thread, input),
             Input::Timer(timer) => turn::timer(self, timer),
+            Input::Turn(input) => turn::turn_input(self, input),
             Input::Drained { stream, id } => subs::on_drained(self, stream, id),
             Input::Unsubscribed { stream, id } => subs::on_unsubscribed(self, stream, id),
             // The loop handles an abort before it gets here.

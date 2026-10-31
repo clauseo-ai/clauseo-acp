@@ -67,11 +67,6 @@ pub(crate) enum MatterJob {
         meta: TurnMeta,
         tool_paths: BTreeSet<MatterPath>,
     },
-    /// The paths of the step `before`..`after` edited since.
-    EditedSince {
-        before: CheckpointId,
-        after: CheckpointId,
-    },
     /// Undo one step.
     Undo(UndoJob),
 }
@@ -97,7 +92,6 @@ pub(crate) enum MatterReply {
     Opened(Result<Option<CheckpointId>, Error>),
     BeforeTurn(Result<Checkpoint, Error>),
     AfterTurn(Result<Checkpoint, Error>),
-    EditedSince(Result<Vec<MatterPath>, Error>),
     Undone(Result<Undone, Error>),
 }
 
@@ -198,9 +192,6 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         ),
         MatterJob::AfterTurn { meta, tool_paths } => MatterReply::AfterTurn(
             open(settings, slot).and_then(|matter| Ok(matter.after_turn(&meta, &tool_paths)?)),
-        ),
-        MatterJob::EditedSince { before, after } => MatterReply::EditedSince(
-            open(settings, slot).and_then(|matter| Ok(matter.edited_since(before, after)?)),
         ),
         MatterJob::Undo(job) => MatterReply::Undone(open(settings, slot).and_then(|matter| {
             let request = UndoRequest {

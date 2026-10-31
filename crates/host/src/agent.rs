@@ -86,12 +86,27 @@ pub(crate) struct AgentLink {
     pub(crate) client: AcpClient,
     pid: u32,
     stop: Option<oneshot::Sender<()>>,
+    /// The connection's event channel, read only to see whether it is empty ([`Self::fence`]).
+    events: async_channel::Receiver<AcpEvent>,
 }
 
 impl AgentLink {
     /// The agent's process id, for logs.
     pub(crate) fn pid(&self) -> u32 {
         self.pid
+    }
+
+    /// A future that ends once every event the connection has emitted so far was posted. A
+    /// call's task awaits it before posting the call's result, so the result reaches the actor
+    /// after every event the agent sent before its answer: the forwarder takes an event and posts
+    /// it in one step on this thread, so an empty channel means all of them were posted.
+    pub(crate) fn fence(&self) -> impl Future<Output = ()> + 'static {
+        let events = self.events.clone();
+        async move {
+            while !events.is_empty() {
+                YieldNow(false).await;
+            }
+        }
     }
 
     /// Asks the owner task to stop the agent with the shutdown ladder. It posts
@@ -146,6 +161,7 @@ pub(crate) fn start(
         }
     })?;
     let forward = Rc::clone(&post);
+    let fence_events = events.clone();
     spawn(spawner, async move {
         while let Ok(event) = events.recv().await {
             forward(AgentInput::Event(Box::new(event)));
@@ -161,7 +177,27 @@ pub(crate) fn start(
         client,
         pid,
         stop: Some(stop),
+        events: fence_events,
     })
+}
+
+/// Gives the pool's other tasks one turn before going on.
+struct YieldNow(bool);
+
+impl Future for YieldNow {
+    type Output = ();
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<()> {
+        if self.0 {
+            return std::task::Poll::Ready(());
+        }
+        self.0 = true;
+        cx.waker().wake_by_ref();
+        std::task::Poll::Pending
+    }
 }
 
 fn spawn(spawner: &LocalSpawner, task: impl Future<Output = ()> + 'static) -> Result<(), Error> {

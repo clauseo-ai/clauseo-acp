@@ -11,7 +11,7 @@ use clauseo_protocol::{
 use clauseo_store::{Committed, Receipt, Reopen, SnapshotIn};
 use futures::channel::oneshot;
 
-use super::turn::{TurnJob, TurnTimer};
+use super::turn::{TurnInput, TurnJob, TurnTimer};
 use crate::agent::AgentInput;
 use crate::error::Error;
 use crate::handle::{EventSubscription, Subscription};
@@ -79,7 +79,6 @@ pub(crate) enum MatterTag {
     /// The open the actor sends first to a matter's new worker; its reply is only logged.
     Open,
     /// A turn's job.
-    #[expect(dead_code, reason = "the turn path's matter jobs use it")]
     Turn(TurnJob),
 }
 
@@ -115,10 +114,11 @@ pub(crate) enum Input {
     /// A snapshot compressed on the snapshot thread, to store.
     Snapshot(SnapshotIn),
     /// An agent's event or its end, for the thread it serves.
-    #[expect(dead_code, reason = "the turn path posts it")]
     Agent { thread: ThreadId, input: AgentInput },
     /// A turn timer fired.
     Timer(TurnTimer),
+    /// A turn task's result: an agent call or a log read.
+    Turn(TurnInput),
     /// A subscription drained its channel after the actor found it full.
     Drained { stream: StreamId, id: SubId },
     /// A subscription was dropped.
@@ -142,6 +142,7 @@ impl std::fmt::Debug for Input {
             Self::Snapshot(_) => "Snapshot",
             Self::Agent { .. } => "Agent",
             Self::Timer(_) => "Timer",
+            Self::Turn(_) => "Turn",
             Self::Drained { .. } => "Drained",
             Self::Unsubscribed { .. } => "Unsubscribed",
             Self::Abort(_) => "Abort",

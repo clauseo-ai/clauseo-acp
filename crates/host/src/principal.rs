@@ -19,6 +19,7 @@ pub(crate) enum Access {
 }
 
 /// Every `HostHandle` entry point, one each.
+#[cfg(test)]
 pub(crate) const ENTRY_POINTS: &[Access] = &[
     Access::Dispatch,
     Access::Query,

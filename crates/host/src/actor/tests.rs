@@ -48,7 +48,10 @@ fn envelope(n: u128, command: HostCommand) -> CommandEnvelope {
 fn matters(host: &HostHandle) -> Vec<(MatterId, MatterKind)> {
     match block_on(host.query(Principal::LocalDesktop, HostQuery::ListMatters)).unwrap() {
         QueryResult::Matters(matters) => matters.iter().map(|m| (m.matter, m.kind)).collect(),
-        other => panic!("not matters: {other:?}"),
+        other @ (QueryResult::Threads(_)
+        | QueryResult::Entries(_)
+        | QueryResult::FileChanges(_)
+        | QueryResult::Blob(_)) => panic!("not matters: {other:?}"),
     }
 }
 
@@ -67,7 +70,11 @@ fn create_thread(host: &HostHandle, n: u128, matter: MatterId) -> ThreadId {
     };
     match block_on(host.dispatch(envelope(n, command))).unwrap() {
         CommandOutcome::ThreadCreated { thread } => thread,
-        other => panic!("not a thread: {other:?}"),
+        other @ (CommandOutcome::Done
+        | CommandOutcome::MatterCreated { .. }
+        | CommandOutcome::PromptAccepted { .. }
+        | CommandOutcome::StepUndone { .. }
+        | CommandOutcome::VersionRestored { .. }) => panic!("not a thread: {other:?}"),
     }
 }
 
@@ -84,7 +91,9 @@ fn replay(events: &mut EventSubscription) -> (Vec<&'static str>, Vec<u64>, Seq) 
                 }
             }
             HostEvent::CaughtUp { last_seq, .. } => return (kinds, seqs, last_seq),
-            other => panic!("unexpected {other:?}"),
+            other @ (HostEvent::Patches(_) | HostEvent::AccountLimitsChanged(_)) => {
+                panic!("unexpected {other:?}")
+            }
         }
     }
 }
@@ -244,7 +253,7 @@ fn concurrent_duplicates_share_the_first_answer() {
 fn a_second_start_is_locked_and_abort_frees_the_folder() {
     let dir = TempDir::new("actor-lock");
     let (host, _join) = start(dir.path(), 0);
-    let settings = br#"{}"#;
+    let settings = b"{}";
     crate::write::write_file(&dir.path().join("settings.json"), settings).unwrap();
     let effective = Effective::load(&Locations::under_root(dir.path()), &SystemFiles, &[]);
     let launcher = PassthroughLauncher::new(SpawnOptions::new());

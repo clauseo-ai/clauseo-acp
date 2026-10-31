@@ -17,9 +17,7 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use clauseo_protocol::{CommandId, DomainEvent, Envelope, EventId, Seq, StreamId, Timestamp};
-use clauseo_store::{
-    BlobIn, CheckpointRow, Commit, Committed, MatterRow, Receipt, SnapshotIn, ThreadRow,
-};
+use clauseo_store::{BlobIn, Commit, Committed, MatterRow, Receipt, SnapshotIn, ThreadRow};
 
 use crate::error::Error;
 use crate::ids::Ids;
@@ -54,16 +52,6 @@ impl Draft {
         Self::default()
     }
 
-    /// The events pushed so far, in order.
-    pub(crate) fn events(&self) -> &[Envelope] {
-        &self.commit.events
-    }
-
-    /// The last seq this draft takes in `stream`, if it holds an event of it.
-    pub(crate) fn last_seq(&self, stream: StreamId) -> Option<Seq> {
-        self.span(stream).map(|span| span.last)
-    }
-
     /// Whether the draft holds nothing to write.
     pub(crate) fn is_empty(&self) -> bool {
         self.commit == Commit::default()
@@ -87,11 +75,6 @@ impl Draft {
     /// Sets the matter row to upsert.
     pub(crate) fn matter_row(&mut self, row: MatterRow) {
         self.commit.matter = Some(row);
-    }
-
-    /// Adds a checkpoint row.
-    pub(crate) fn checkpoint(&mut self, row: CheckpointRow) {
-        self.commit.checkpoints.push(row);
     }
 
     /// Sets the compressed snapshot to store.
@@ -140,8 +123,6 @@ pub(crate) struct Failure {
 /// One commit released by [`Pipeline::on_result`].
 #[derive(Debug)]
 pub(crate) struct Done<T> {
-    /// Its ticket.
-    pub(crate) ticket: Ticket,
     /// What the caller tagged it with at send.
     pub(crate) tag: T,
     /// `Ok` with its events, to apply and publish in this order, or the failure.
@@ -353,7 +334,6 @@ impl<T> Pipeline<T> {
                 }
             }
             completed.done.push(Done {
-                ticket: flight.ticket,
                 tag: flight.tag,
                 outcome: outcome.map(|()| flight.envelopes),
             });
