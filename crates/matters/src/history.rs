@@ -21,7 +21,7 @@ use std::fmt;
 use std::io::Write;
 use std::path::Path;
 
-pub(crate) use gix_store::GixStore;
+pub(crate) use gix_store::{GixStore, recorded_worktree};
 
 use crate::Error;
 use crate::stat::StatCache;

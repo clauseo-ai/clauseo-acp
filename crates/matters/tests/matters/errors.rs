@@ -8,7 +8,7 @@ use clauseo_matters::{Error, Matter, MissingReason, NewMatter, Refusal, RestoreF
 use clauseo_protocol::{ErrorCode, FileChoice, FileDecision};
 
 use crate::fixture::{
-    Fixture, cid, matter_id, meta, path, restore_request, tools, undo, undo_request,
+    Fixture, at, cid, matter_id, meta, path, restore_request, tools, undo, undo_request,
 };
 
 /// Names the variant, with no wildcard, so a new variant fails to compile here until it is
@@ -269,6 +269,14 @@ fn folder_errors(fx: &Fixture) {
             ..
         }
     ));
+
+    // Locate and relink answer with the same codes.
+    let err = Matter::locate(fx.settings(), matter_id(1), &elsewhere, &[]).unwrap_err();
+    assert_code(&err, ErrorCode::MatterFolderMissing, "FolderMissing");
+    let err = Matter::relink(fx.settings(), matter_id(1), &elsewhere, at(0), &[]).unwrap_err();
+    assert_code(&err, ErrorCode::MatterFolderMissing, "FolderMissing");
+    let err = Matter::locate(fx.settings(), matter_id(1), &elsewhere, &refused).unwrap_err();
+    assert_code(&err, ErrorCode::MatterFolderRefused, "FolderRefused");
 
     let err = Matter::create(
         fx.settings(),

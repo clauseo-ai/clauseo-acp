@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::{check_folder, is_unc, is_unc_text, is_windows_drive_root_text};
+use super::{check_folder, is_unc, is_unc_text, is_windows_drive_root_text, same_folder};
 use crate::test_dir::TestDir;
 use crate::{Error, MissingReason, Refusal, write};
 
@@ -132,4 +132,23 @@ fn volumes_are_drive_roots_on_macos() {
     ));
     let keys = super::spellings(Path::new("/System/Volumes/Data"));
     assert!(keys.iter().any(|key| super::is_macos_volume_key(key)));
+}
+
+#[test]
+fn same_folder_compares_canonical_spellings() {
+    let dir = TestDir::new("refuse-same");
+    let matter = dir.path().join("Matter");
+    let sibling = dir.path().join("Sibling");
+    write::create_dir_all(&matter).unwrap();
+    write::create_dir_all(&sibling).unwrap();
+    assert!(same_folder(&matter, &matter));
+    assert!(same_folder(&matter, &sibling.join("..").join("Matter")));
+    assert!(!same_folder(&matter, &sibling));
+    assert!(!same_folder(&matter, &dir.path().join("gone")));
+    assert!(!same_folder(
+        &dir.path().join("gone"),
+        &dir.path().join("gone")
+    ));
+    #[cfg(any(target_os = "macos", windows))]
+    assert!(same_folder(&matter, &dir.path().join("MATTER")));
 }

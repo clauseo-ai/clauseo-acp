@@ -182,3 +182,45 @@ fn history_git_holds_only_head_config_index_objects_refs() {
         );
     }
 }
+
+/// Windows: whether `path` has `FILE_ATTRIBUTE_HIDDEN`.
+#[cfg(windows)]
+fn hidden(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt as _;
+    std::fs::symlink_metadata(path).unwrap().file_attributes() & 0x2 != 0
+}
+
+#[cfg(windows)]
+#[test]
+fn clauseo_hidden_after_create_and_import() {
+    let fx = Fixture::new("hidden-create");
+    drop(Matter::create(fx.settings(), fx.new_matter()).unwrap());
+    assert!(hidden(&fx.file(".clauseo")));
+
+    let imported = fx.dir.path().join("imported");
+    crate::support::write(imported.join("a.txt"), "a");
+    let new = NewMatter {
+        id: matter_id(2),
+        folder: imported.clone(),
+        ..fx.new_matter()
+    };
+    let cancel = AtomicBool::new(false);
+    drop(Matter::import(fx.settings(), new, &[], &mut |_| {}, &cancel).unwrap());
+    assert!(hidden(&imported.join(".clauseo")));
+}
+
+/// A zip or a sync can drop the attribute: opening the matter sets it again.
+#[cfg(windows)]
+#[test]
+fn clauseo_hidden_again_on_open() {
+    let fx = Fixture::new("hidden-open");
+    fx.write("a.txt", "a");
+    drop(fx.import());
+    let marker = fx.read(".clauseo/matter.json");
+    crate::support::remove_dir_all(fx.file(".clauseo"));
+    fx.write(".clauseo/matter.json", &marker);
+    assert!(!hidden(&fx.file(".clauseo")));
+
+    drop(fx.open(&fx.folder).unwrap());
+    assert!(hidden(&fx.file(".clauseo")));
+}

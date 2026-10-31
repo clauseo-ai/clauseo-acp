@@ -10,17 +10,17 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
 use clauseo_protocol::{
-    CheckpointId, CheckpointKind, FileChange, ImportSummary, MatterId, MatterPath,
+    CheckpointId, CheckpointKind, FileChange, ImportSummary, MatterId, MatterPath, Timestamp,
 };
 
 use crate::checkpoint::{Core, Spec};
-use crate::history::{GixStore, HistoryStore};
+use crate::history::{GixStore, HistoryStore, recorded_worktree};
 use crate::stat::EntryState;
 use crate::types::{
     Checkpoint, CompareSide, Imported, Marker, NewMatter, Progress, Restore, RestoreFiles,
     RestorePlan, Restored, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, VersionFile,
 };
-use crate::{Error, compare, refuse, restore, scan, undo, write};
+use crate::{Error, MissingReason, compare, refuse, restore, scan, undo, write};
 
 /// The git dir's name inside `<matters root>/<matter id>/`.
 const GIT_DIR: &str = "history.git";
@@ -143,10 +143,92 @@ impl Matter {
     }
 
     /// Opens matter `id` in `folder`: `matter.folder_missing` if the folder is gone or its
-    /// `matter.json` is missing or names another matter. Rebuilds the timeline from the
-    /// trailers and loads the stat cache (rebuilt if it does not match).
+    /// `matter.json` is missing, does not read or names another matter. Points the history's
+    /// work tree (`core.worktree`) at `folder` if it named another, rebuilds the timeline from
+    /// the trailers, loads the stat cache (rebuilt if it does not match) and, on Windows, hides
+    /// `.clauseo` again if it lost the attribute.
     pub fn open(settings: Settings, id: MatterId, folder: &Path) -> Result<Self, Error> {
         json::check(folder, id)?;
+        let matter = Self::open_history(settings, id, folder)?;
+        json::hide(folder);
+        Ok(matter)
+    }
+
+    /// "Locate folder": opens matter `id` from `folder`, the folder the lawyer picked after the
+    /// matter's folder moved. Writes nothing and changes nothing when it refuses:
+    ///
+    /// - a folder import would refuse for its place: `matter.folder_refused` for a drive root,
+    ///   an entry of `refused` or an ancestor of one, and the matters root or a folder nested
+    ///   with it; `matter.folder_missing` (`NoFolder`) for a folder that does not exist;
+    /// - a folder whose `.clauseo/matter.json` is missing, does not read or names another
+    ///   matter: `matter.folder_missing` with that reason.
+    ///
+    /// Then it opens the matter as [`Matter::open`] does, which points the history's work tree at
+    /// `folder`. The host stores `folder` as the matter's path only after `Ok`, and drops any
+    /// older `Matter` of this id first.
+    ///
+    /// The host refuses, before calling this, a folder that is, contains or sits inside another
+    /// listed matter's folder: that is a registry lookup this crate cannot make. Passing the
+    /// other matters' folders in `refused` covers the "contains" and "is" halves
+    /// (`Refusal::Listed`), not "sits inside".
+    pub fn locate(
+        settings: Settings,
+        id: MatterId,
+        folder: &Path,
+        refused: &[PathBuf],
+    ) -> Result<Self, Error> {
+        refuse::check_folder(folder, refused)?;
+        refuse::check_outside_root(folder, &settings.matters_root)?;
+        Self::open(settings, id, folder)
+    }
+
+    /// Repairs a deleted or damaged marker: writes `.clauseo/matter.json` for matter `id` into
+    /// `folder` again, with `created_at` (the matter's creation time as the host recorded it),
+    /// when the marker is missing or does not read and `folder` is the folder the history
+    /// records (`core.worktree`, the folder the matter was last opened from, compared as paths
+    /// are compared for refused folders). With a marker naming `id` already there it is
+    /// [`Matter::open`]. Writes nothing when it refuses:
+    ///
+    /// - the places [`Matter::locate`] refuses (`refused`, a drive root, the matters root);
+    /// - a marker naming another matter: `matter.folder_missing` (`OtherMatter`), never
+    ///   overwritten;
+    /// - a folder the history does not record: `matter.folder_missing` with the reason
+    ///   `open` gave (`NoMatterJson` or `Unreadable`); it moved, so locate it instead;
+    /// - a history that does not open or has no checkpoint (`matter.checkpoint_failed`): the
+    ///   history is opened before the marker is written.
+    pub fn relink(
+        settings: Settings,
+        id: MatterId,
+        folder: &Path,
+        created_at: Timestamp,
+        refused: &[PathBuf],
+    ) -> Result<Self, Error> {
+        refuse::check_folder(folder, refused)?;
+        refuse::check_outside_root(folder, &settings.matters_root)?;
+        let reason = match json::read(folder)? {
+            json::Found::None => MissingReason::NoMatterJson,
+            json::Found::Unreadable => MissingReason::Unreadable,
+            json::Found::Matter(_) | json::Found::NoFolder => {
+                return Self::open(settings, id, folder);
+            }
+        };
+        let git_dir = matter_home(&settings, id).join(GIT_DIR);
+        let recorded = recorded_worktree(&git_dir)?;
+        if !recorded.is_some_and(|recorded| refuse::same_folder(folder, &recorded)) {
+            return Err(Error::FolderMissing {
+                folder: folder.to_owned(),
+                reason,
+            });
+        }
+        let matter = Self::open_history(settings, id, folder)?;
+        json::write(folder, id, created_at)?;
+        Ok(matter)
+    }
+
+    /// Opens the history of matter `id` against `folder`, whose marker was checked: rewrites a
+    /// wrong `HEAD` and a `core.worktree` naming another folder, loads the timeline and the
+    /// stat cache, and refuses a timeline with no checkpoint.
+    fn open_history(settings: Settings, id: MatterId, folder: &Path) -> Result<Self, Error> {
         let git_dir = matter_home(&settings, id).join(GIT_DIR);
         let history = GixStore::open(&git_dir, folder)?;
         let core = Core::load(history)?;

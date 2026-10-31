@@ -37,7 +37,9 @@ documents with 3 changed).
     ```
     `core.worktree` is quoted, with `\`, `"`, newline and tab escaped (`\\`, `\"`, `\n`, `\t`);
     it must be absolute and valid UTF-8. Opening the matter rewrites it when the folder
-    was moved and located again. Clauseo never reads it back for anything but that comparison.
+    was moved and located again, so it names the folder the matter was last opened from.
+    Clauseo reads it back for that comparison and for one more: repairing a deleted or
+    unreadable `matter.json` (`Matter::relink`) only in the folder it names.
   - `objects/` and `refs/`, empty.
 
   No hooks, no `description`, no `info/`, no reflogs (`logs/`), no packs, no attributes, no filters,
@@ -47,7 +49,9 @@ documents with 3 changed).
   by temp file and rename. Readers accept any `version` (or none) and ignore keys they do not know;
   they need `matter_id` and `created_at`. A later format that drops either uses a new file name. Opening a
   matter whose folder is gone, has no `matter.json`, has one that does not read, or has one naming
-  another matter fails with `matter.folder_missing` (the "Locate folder" answer).
+  another matter fails with `matter.folder_missing` (the "Locate folder" answer). On Windows
+  `.clauseo` gets `FILE_ATTRIBUTE_HIDDEN` (keeping its other attributes) when `matter.json` is
+  written and again on open if a zip or a sync dropped it; a failure to set it is logged only.
 - `Marker`, chosen per create or import, is what else goes in the folder: `None` (nothing) or
   `EmptyRepository`. `EmptyRepository` runs a plain non-bare `git init` only when the folder has no
   `.git`: no commits, no remote, never a `gitdir:` file, unrelated to the shadow repository, and

@@ -8,14 +8,18 @@
 //!   trailers, the exclusion list, the stat cache (`history.git/index`), the loose-object
 //!   compression rule and the sync order.
 //! - Creating and importing a matter (the scan, refused folders, warnings, cancel), opening one
-//!   again, `before-turn` and `after-turn` checkpoints with their diff, undoing a step,
-//!   restoring a version (the whole matter or chosen files), and comparing and reading versions.
+//!   again, locating a moved folder and repairing a deleted marker, `before-turn` and
+//!   `after-turn` checkpoints with their diff, undoing a step, restoring a version (the whole
+//!   matter or chosen files), and comparing and reading versions.
 //! - The document rules: excluded names, the per-file size cap, cloud-only placeholders (never
 //!   read), racily clean files.
 //!
 //! # Interface
 //!
 //! - [`Matter`]: [`Matter::create`], [`Matter::import`] and [`Matter::open`] make one;
+//!   [`Matter::locate`] opens one from the folder the lawyer picked after it moved, and
+//!   [`Matter::relink`] writes a deleted or damaged marker again where the history says the
+//!   folder is;
 //!   [`Matter::before_turn`] and [`Matter::after_turn`] take checkpoints ([`Checkpoint`]);
 //!   [`Matter::edited_since`] and [`Matter::undo`] undo a step ([`UndoRequest`], [`Undone`]);
 //!   [`Matter::timeline`] lists the checkpoints, rebuilt from the trailers on open;
@@ -39,7 +43,8 @@
 //!   ([`CheckpointOutcome::Reused`]).
 //! - Objects, then the ref and the stat cache, are durable before a checkpoint returns.
 //! - Excluded, over-cap and cloud-only files are never read, written or deleted.
-//! - Files in the folder change only by a temp file in the same folder and a rename. Undo and
+//! - Files in the folder change only by a temp file in the same folder and a rename; the one
+//!   other change is the hidden attribute of `.clauseo` on Windows. Undo and
 //!   restore check every target and lock before writing any, and never write or delete a file
 //!   whose name the folder holds only spelled otherwise (another case or normalisation). A
 //!   restore never deletes. One exception to names matching byte for byte: a folder on the way
@@ -53,7 +58,8 @@
 //!
 //! `protocol` (ids, `FileChange`, `SkippedFile`, error codes), `gix` (features `index`,
 //! `revision`, `sha1`), `serde` and `serde_json` (`matter.json`), `tracing`, `dunce`; `nix` on
-//! macOS for the sync calls.
+//! macOS for the sync calls; `windows` (`Win32_Storage_FileSystem`) on Windows to hide
+//! `.clauseo`.
 //!
 //! # Start reading
 //!

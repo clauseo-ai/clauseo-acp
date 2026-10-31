@@ -48,6 +48,10 @@ mod compare;
 mod reopen;
 
 #[cfg(test)]
+#[path = "matters/locate.rs"]
+mod locate;
+
+#[cfg(test)]
 #[path = "matters/errors.rs"]
 mod errors;
 
