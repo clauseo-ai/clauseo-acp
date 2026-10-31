@@ -8,6 +8,10 @@ test("the script posts WM_CLOSE to the Tauri windows the PID owns, and prints th
   expect(script).toContain(`'${WINDOW_CLASS}'`);
   expect(script).toContain("if ($owner -ne 4242) { continue }");
   expect(script).toContain("PostMessage($hwnd, 16,");
+  // PowerShell passes $null to a string parameter as "", which matches only untitled windows; the
+  // app's window is titled, so the title must go as a real null.
+  expect(script).toContain("[NullString]::Value)");
+  expect(script).not.toContain("$null");
   expect(script.trimEnd().endsWith("$posted")).toBe(true);
   // The here-string's markers must each stand on a line of their own.
   expect(script).toMatch(/@'\n/);
