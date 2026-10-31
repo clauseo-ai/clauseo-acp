@@ -2,8 +2,10 @@
 
 use std::cmp::Ordering;
 
+use gix::diff::tree::Recorder;
+use gix::diff::tree::recorder::Change;
 use gix::hash::{Kind as HashKind, ObjectId};
-use gix::objs::tree::EntryKind;
+use gix::objs::tree::{EntryKind, EntryMode};
 use gix::objs::{Kind, TreeRefIter};
 use gix::odb::loose;
 
@@ -120,105 +122,97 @@ pub(super) fn read(
     Ok(())
 }
 
-/// One entry of a tree: its name, whether it is a folder, and its id.
-type Entry = (Vec<u8>, bool, ObjectId);
+/// Lets `gix::diff::tree` read trees from the loose store.
+struct LooseFind<'s>(&'s loose::Store);
 
-/// The entries of tree `id` in `store`, in git's order; an error for an entry that is neither
-/// a blob nor a tree.
-fn entries(store: &loose::Store, id: &ObjectId) -> Result<Vec<Entry>, Error> {
-    let mut buffer = Vec::new();
-    let data = find(store, id, Kind::Tree, &mut buffer)?;
-    let mut entries = Vec::new();
-    for entry in TreeRefIter::from_bytes(data, HashKind::Sha1) {
-        let entry = entry.map_err(|err| Error::history("read tree", err))?;
-        let is_folder = entry.mode.is_tree();
-        if !is_folder && !entry.mode.is_blob() {
-            let name = String::from_utf8_lossy(entry.filename);
-            return Err(Error::history("read tree", format!("{name} is not a file")));
-        }
-        entries.push((entry.filename.to_vec(), is_folder, entry.oid.to_owned()));
+impl gix::objs::Find for LooseFind<'_> {
+    fn try_find<'b>(
+        &self,
+        id: &gix::oid,
+        buffer: &'b mut Vec<u8>,
+    ) -> gix::Result<Option<gix::objs::Data<'b>>> {
+        self.0.try_find(id, buffer)
     }
-    Ok(entries)
 }
 
-/// Appends to `old` and `new` the files of trees `a` and `b` (whose path is `prefix`, empty
-/// or ending in `/`) that the other tree does not hold with the same blob, skipping every
-/// subtree whose id is the same on both sides. Unsorted: git's order is not path order.
+/// Appends to `old` and `new` the files of trees `a` and `b` that the other tree does not
+/// hold with the same blob, reading no subtree whose id both share (`gix::diff::tree`, git's
+/// tree-to-tree diff). Unsorted: git's order is not path order. An error for an entry that is
+/// neither a blob nor a tree.
 pub(super) fn changed(
     store: &loose::Store,
     a: ObjectId,
     b: ObjectId,
-    prefix: &str,
     old: &mut Vec<TreeFile>,
     new: &mut Vec<TreeFile>,
 ) -> Result<(), Error> {
     if a == b {
         return Ok(());
     }
-    let (a_entries, b_entries) = (entries(store, &a)?, entries(store, &b)?);
-    let (mut a_iter, mut b_iter) = (
-        a_entries.into_iter().peekable(),
-        b_entries.into_iter().peekable(),
-    );
-    loop {
-        let order = match (a_iter.peek(), b_iter.peek()) {
-            (None, None) => break,
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            (Some(x), Some(y)) => git_order((x.0.as_slice(), x.1), (y.0.as_slice(), y.1)),
-        };
-        match order {
-            Ordering::Less => {
-                if let Some(entry) = a_iter.next() {
-                    take(store, &entry, prefix, old)?;
-                }
-            }
-            Ordering::Greater => {
-                if let Some(entry) = b_iter.next() {
-                    take(store, &entry, prefix, new)?;
-                }
-            }
-            Ordering::Equal => {
-                let (Some(x), Some(y)) = (a_iter.next(), b_iter.next()) else {
-                    break;
-                };
-                if x.2 == y.2 {
-                    continue;
-                }
-                if x.1 {
-                    let path = format!("{prefix}{}/", name_of(&x.0)?);
-                    changed(store, x.2, y.2, &path, old, new)?;
-                } else {
-                    take(store, &x, prefix, old)?;
-                    take(store, &y, prefix, new)?;
-                }
+    let (mut a_buffer, mut b_buffer) = (Vec::new(), Vec::new());
+    let a_tree = find(store, &a, Kind::Tree, &mut a_buffer)?;
+    let b_tree = find(store, &b, Kind::Tree, &mut b_buffer)?;
+    let mut recorder = Recorder::default();
+    gix::diff::tree(
+        TreeRefIter::from_bytes(a_tree, HashKind::Sha1),
+        TreeRefIter::from_bytes(b_tree, HashKind::Sha1),
+        gix::diff::tree::State::default(),
+        LooseFind(store),
+        &mut recorder,
+    )
+    .map_err(|err| Error::history("diff trees", err))?;
+    for change in recorder.records {
+        match change {
+            Change::Addition {
+                entry_mode,
+                oid,
+                path,
+                ..
+            } => push(new, entry_mode, &oid, &path)?,
+            Change::Deletion {
+                entry_mode,
+                oid,
+                path,
+                ..
+            } => push(old, entry_mode, &oid, &path)?,
+            Change::Modification {
+                previous_entry_mode,
+                previous_oid,
+                entry_mode,
+                oid,
+                path,
+            } => {
+                push(old, previous_entry_mode, &previous_oid, &path)?;
+                push(new, entry_mode, &oid, &path)?;
             }
         }
     }
     Ok(())
 }
 
-fn name_of(name: &[u8]) -> Result<&str, Error> {
-    std::str::from_utf8(name).map_err(|err| Error::history("read tree", err))
-}
-
-/// Appends the file `entry` under `prefix` to `files`, or every file under it if a folder.
-fn take(
-    store: &loose::Store,
-    entry: &Entry,
-    prefix: &str,
+/// Appends the file at `path` to `files` if `mode` is a blob's; a tree's adds nothing (the
+/// diff reports its files one by one).
+fn push(
     files: &mut Vec<TreeFile>,
+    mode: EntryMode,
+    oid: &ObjectId,
+    path: &[u8],
 ) -> Result<(), Error> {
-    let path = format!("{prefix}{}", name_of(&entry.0)?);
-    if entry.1 {
-        read(store, entry.2, &format!("{path}/"), files)
-    } else {
-        files.push(TreeFile {
-            path,
-            blob: to_oid(&entry.2)?,
-        });
-        Ok(())
+    let path = std::str::from_utf8(path).map_err(|err| Error::history("diff trees", err))?;
+    if mode.is_tree() {
+        return Ok(());
     }
+    if !mode.is_blob() {
+        return Err(Error::history(
+            "diff trees",
+            format!("{path} is not a file"),
+        ));
+    }
+    files.push(TreeFile {
+        path: path.to_owned(),
+        blob: to_oid(oid)?,
+    });
+    Ok(())
 }
 
 /// The content of object `id` in `store`, which must be of `kind`, read into `buffer`.
