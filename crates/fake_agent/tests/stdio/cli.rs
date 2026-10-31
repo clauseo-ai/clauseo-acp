@@ -253,7 +253,7 @@ fn pace_ms_after_the_scenario_plays_to_the_end() {
 #[test]
 fn pace_ms_bad_forms_exit_2_with_a_diagnostic() {
     let dir = Scratch::new("pace_ms_bad_forms");
-    let cases: [(&[&str], &str); 14] = [
+    let cases: [(&[&str], &str); 17] = [
         (&["--pace-ms", "5"], NEEDS),
         (&["--pace-ms"], NEEDS),
         (&["--check", ".", "--pace-ms", "5"], NEEDS),
@@ -267,6 +267,14 @@ fn pace_ms_bad_forms_exit_2_with_a_diagnostic() {
             NUMBER,
         ),
         (&["--pace-ms", "", "--scenario", "prompt-stream"], NUMBER),
+        // Rust's integer parse accepts a leading `+`, so `pace_ms` checks every byte is a digit
+        // before parsing.
+        (&["--pace-ms", "+5", "--scenario", "prompt-stream"], NUMBER),
+        (&["--pace-ms", "+0", "--scenario", "prompt-stream"], NUMBER),
+        (
+            &["--pace-ms", "+60000", "--scenario", "prompt-stream"],
+            NUMBER,
+        ),
         (
             &[
                 "--pace-ms",
