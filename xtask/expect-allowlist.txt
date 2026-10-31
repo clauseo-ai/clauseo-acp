@@ -116,3 +116,6 @@ crates/host/src/clock.rs SystemClock::now clippy::disallowed_methods
 crates/host/src/write.rs - clippy::disallowed_methods
 crates/host/src/pipeline/tests/write.rs - clippy::disallowed_methods
 crates/host/tests/host/write.rs - clippy::disallowed_methods
+crates/host/benches/reopen.rs - clippy::unwrap_used
+crates/host/benches/reopen.rs timed_first_item clippy::disallowed_methods
+crates/host/benches/common/dir.rs - clippy::disallowed_methods

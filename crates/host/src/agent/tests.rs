@@ -178,17 +178,21 @@ fn settle_waits_for_the_pipes_at_most_the_bound() {
     pool.spawner()
         .spawn_local(async move {
             tx.unbounded_send(settle(pending(), &task_clock).await)
-                .unwrap()
+                .unwrap();
         })
         .unwrap();
     pool.run_until_stalled();
     assert_eq!(clock.armed(), 1);
-    clock.advance(PUMP_END_BOUND - std::time::Duration::from_millis(1));
+    clock.advance(
+        PUMP_END_BOUND
+            .checked_sub(std::time::Duration::from_millis(1))
+            .unwrap(),
+    );
     pool.run_until_stalled();
-    assert!(rx.try_next().is_err(), "settled before the bound");
+    assert!(rx.try_recv().is_err(), "settled before the bound");
     clock.advance(std::time::Duration::from_millis(1));
     pool.run_until_stalled();
-    assert_eq!(rx.try_next().unwrap(), Some(false));
+    assert!(!rx.try_recv().unwrap());
 
     // Pipes that end first settle at once, with no time passing.
     assert!(pool.run_until(settle(ready(()), &clock)));

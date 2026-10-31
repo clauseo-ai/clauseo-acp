@@ -98,7 +98,7 @@ fn create_then_checkpoints_on_the_matter_thread() {
         after
             .changes
             .iter()
-            .all(|change| change.may_include_lawyer_edits())
+            .all(clauseo_protocol::FileChange::may_include_lawyer_edits)
     );
 
     worker.stop().unwrap();
@@ -116,10 +116,12 @@ fn a_job_before_any_matter_is_an_internal_error() {
     .unwrap();
     worker
         .send(
-            MatterJob::EditedSince {
-                before: CheckpointId::new(v7(1)).unwrap(),
-                after: CheckpointId::new(v7(2)).unwrap(),
-            },
+            MatterJob::BeforeTurn(TurnMeta {
+                checkpoint: CheckpointId::new(v7(1)).unwrap(),
+                thread: ThreadId::new(v7(2)).unwrap(),
+                turn: TurnId::new(v7(3)).unwrap(),
+                at: Timestamp::new(1_790_000_000_000).unwrap(),
+            }),
             (),
         )
         .unwrap();
@@ -127,7 +129,7 @@ fn a_job_before_any_matter_is_an_internal_error() {
     assert!(
         matches!(
             reply,
-            MatterReply::EditedSince(Err(crate::error::Error::Internal(_)))
+            MatterReply::BeforeTurn(Err(crate::error::Error::Internal(_)))
         ),
         "{reply:?}"
     );

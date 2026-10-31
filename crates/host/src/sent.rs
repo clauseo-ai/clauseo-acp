@@ -253,6 +253,7 @@ impl SentView {
     }
 
     /// The tool call with this id.
+    #[cfg(test)]
     pub(crate) fn tool(&self, id: ToolCallId) -> Option<&SentTool> {
         self.sent.tools.get(&id)
     }

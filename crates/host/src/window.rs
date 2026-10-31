@@ -85,6 +85,7 @@ impl PatchWindow {
     }
 
     /// The serialised bytes held: never more than the cap.
+    #[cfg(test)]
     pub(crate) fn bytes_held(&self) -> usize {
         self.bytes.len()
     }

@@ -27,7 +27,7 @@ fn append(text: &str) -> ViewChange {
     }
 }
 
-/// The patches of `events` as (cursor, is_reset), checking each is `serde_json`'s own text.
+/// The patches of `events` as (cursor, `is_reset`), checking each is `serde_json`'s own text.
 fn patches(events: &[EncodedEvent]) -> Vec<(u64, bool)> {
     let mut all = Vec::new();
     for event in events {
@@ -49,7 +49,8 @@ fn patches(events: &[EncodedEvent]) -> Vec<(u64, bool)> {
 }
 
 fn at(cursor: u64) -> Option<(ViewEpoch, Cursor)> {
-    Some((epoch(), Cursor::new(cursor).unwrap()))
+    let cursor = Cursor::new(cursor).ok()?;
+    Some((epoch(), cursor))
 }
 
 #[test]

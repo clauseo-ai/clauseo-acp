@@ -48,10 +48,6 @@ fn start_worker(actor: &Actor, matter: MatterId) -> Result<MatterWorker<MatterTa
 }
 
 /// The worker of a known matter, started and sent its open on first use.
-#[expect(
-    dead_code,
-    reason = "the turn path sends its checkpoints and undos through it"
-)]
 pub(crate) fn matter_worker(
     actor: &mut Actor,
     matter: MatterId,
@@ -361,7 +357,6 @@ fn made(reply: MatterReply) -> Result<Option<ImportSummary>, Error> {
         MatterReply::Opened(_)
         | MatterReply::BeforeTurn(_)
         | MatterReply::AfterTurn(_)
-        | MatterReply::EditedSince(_)
         | MatterReply::Undone(_) => Err(Error::Internal(
             "a matter's create got another job's reply".to_owned(),
         )),

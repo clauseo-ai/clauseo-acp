@@ -215,8 +215,9 @@ fn place_of<'a, T: Rated>(held: &'a [T], item: &'a T) -> Option<(Option<usize>, 
 /// `CurrentMode`, `ConfigOptions`, `Usage` and `SessionTitle` keep their last value per kind;
 /// everything else (text, new tool calls, permission requests, limits, ...) is never held.
 /// Updates merge only within the same [`Origin`], so a late update never folds into a turn's.
+/// It keeps the box the agent's event came in: moving the event out of it measured slower.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct RatedUpdate(pub(crate) AcpEvent);
+pub(crate) struct RatedUpdate(pub(crate) Box<AcpEvent>);
 
 /// What [`RatedUpdate`]s must share to merge or replace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,7 +242,7 @@ impl Rated for RatedUpdate {
     type Key<'a> = UpdateKey<'a>;
 
     fn class(&self) -> RateClass<UpdateKey<'_>> {
-        let AcpEvent::Update { origin, update, .. } = &self.0 else {
+        let AcpEvent::Update { origin, update, .. } = &*self.0 else {
             return RateClass::Other;
         };
         let replace = |what| {
@@ -283,7 +284,7 @@ impl Rated for RatedUpdate {
                     },
                 ..
             },
-        ) = (&mut self.0, later.0)
+        ) = (&mut *self.0, *later.0)
         else {
             // Only tool call patches merge; the cap never calls this for anything else.
             return;

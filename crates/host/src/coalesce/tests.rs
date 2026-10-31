@@ -90,8 +90,8 @@ fn durable_flush_in_first_delta_order() {
 #[test]
 fn flush_before_non_text_event() {
     let mut text = ThreadText::new();
-    let _ = text.push(ms(0), delta(1, "ab"));
-    let _ = text.push(ms(1), delta(2, "x"));
+    let _pushed = text.push(ms(0), delta(1, "ab"));
+    let _pushed = text.push(ms(1), delta(2, "x"));
     // The display timer fires: both messages show, merged, in first-delta order.
     assert_eq!(
         shown(&mut text),
@@ -123,7 +123,7 @@ fn flush_before_non_text_event() {
     );
 
     // When showing fails, nothing is made durable and the text stays held.
-    let _ = text.push(ms(10), delta(1, "e"));
+    let _pushed = text.push(ms(10), delta(1, "e"));
     assert_eq!(
         text.flush_durable(|_| Err("reducer refused")),
         Err("reducer refused")

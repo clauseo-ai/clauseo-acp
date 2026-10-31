@@ -13,8 +13,8 @@
 
 use clauseo_protocol::{
     CompactString, CompactionChanged, CompactionStatus, ContentAppended, ContentBlock, Delivery,
-    INLINE_LIMIT_BYTES, MessageId, QueuedPromptEdited, TextKind, TextOrBlob, ToolCallContent,
-    ToolCallId, ToolCallPatch, ToolCallStarted, ToolCallUpdated, TurnId, UserMessage, escaped_len,
+    INLINE_LIMIT_BYTES, MessageId, TextKind, TextOrBlob, ToolCallContent, ToolCallId,
+    ToolCallPatch, ToolCallStarted, ToolCallUpdated, TurnId, UserMessage, escaped_len,
 };
 use clauseo_store::BlobIn;
 
@@ -65,6 +65,7 @@ impl ToolFields {
     }
 
     /// The entry's inline total: what `ViewEntry::inline_len` gives for its `ToolCall` entry.
+    #[cfg(test)]
     pub(crate) const fn inline_len(self) -> usize {
         self.raw_input + self.raw_output + self.content
     }
@@ -187,22 +188,6 @@ pub(crate) fn user_message(
         acp_message_id,
         content,
         delivery,
-    })
-}
-
-/// Builds `QueuedPromptEdited` with the same rule as [`user_message`]: the edited content
-/// replaces the entry's content, so it is counted alone.
-pub(crate) fn queued_prompt_edited(
-    turn: TurnId,
-    message: MessageId,
-    mut content: Vec<ContentBlock>,
-) -> Built<QueuedPromptEdited> {
-    let mut fit = Fit::new(INLINE_LIMIT_BYTES);
-    fit.blocks(&mut content);
-    fit.built(QueuedPromptEdited {
-        turn,
-        message,
-        content,
     })
 }
 

@@ -415,7 +415,7 @@ fn fold(stream: StreamId, reopen: Reopen) -> Result<Folded, LoadFailure> {
 }
 
 /// Every envelope of `stream`, as a reopen with no snapshot.
-async fn read_whole_log(
+pub(super) async fn read_whole_log(
     store: &clauseo_store::Store,
     stream: StreamId,
 ) -> Result<Reopen, clauseo_store::Error> {

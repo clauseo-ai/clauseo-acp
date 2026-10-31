@@ -68,7 +68,6 @@ pub(crate) enum AfterCommand {
         before: Box<ThreadRow>,
     },
     /// A turn command's continuation.
-    #[expect(dead_code, reason = "the turn path's commands use it")]
     Turn(turn::TurnTag),
 }
 
@@ -380,6 +379,8 @@ fn change_thread(
     };
     let outcome = CommandOutcome::Done;
     let mut draft = Draft::new();
+    // Text the thread holds goes first, so it keeps its place before the rename.
+    turn::flush_text(actor, thread, &mut draft)?;
     draft.receipt(ctx.receipt(Some(stream), outcome, now.wall));
     let after = match event {
         Some(event) => {

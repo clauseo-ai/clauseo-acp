@@ -20,11 +20,11 @@ fn turn_origin() -> Origin {
 }
 
 fn update(origin: Origin, update: AgentUpdate) -> RatedUpdate {
-    RatedUpdate(AcpEvent::Update {
+    RatedUpdate(Box::new(AcpEvent::Update {
         session: session(),
         origin,
         update,
-    })
+    }))
 }
 
 fn tool_patch(acp_id: &str, patch: ToolCallPatch) -> RatedUpdate {
@@ -131,9 +131,9 @@ fn over_cap_merges_tool_call_patches() {
 #[test]
 fn non_mergeable_event_flushes_held_first() {
     let mut cap = full_cap();
-    let _ = cap.admit(ms(2), titled("a", "one"));
-    let _ = cap.admit(ms(3), plan(1));
-    let _ = cap.admit(ms(4), plan(2));
+    let _admitted = cap.admit(ms(2), titled("a", "one"));
+    let _admitted = cap.admit(ms(3), plan(1));
+    let _admitted = cap.admit(ms(4), plan(2));
     // Replace keeps the last value, at the place of the first one held.
     let flushed = cap.admit(ms(5), notice("other"));
     let Admitted::Flush(items) = flushed else {
@@ -143,13 +143,13 @@ fn non_mergeable_event_flushes_held_first() {
     assert!(!cap.is_holding());
 
     // A permission request is not an update: it flushes too.
-    let _ = cap.admit(ms(6), titled("a", "two"));
-    let ask = RatedUpdate(AcpEvent::PermissionRequested {
+    let _admitted = cap.admit(ms(6), titled("a", "two"));
+    let ask = RatedUpdate(Box::new(AcpEvent::PermissionRequested {
         session: session(),
         key: PendingKey(1),
         acp_tool_call_id: CompactString::from("a"),
         options: Vec::new(),
-    });
+    }));
     let items: Vec<RatedUpdate> = cap.admit(ms(7), ask.clone()).into_iter().collect();
     assert_eq!(items, vec![titled("a", "two"), ask]);
 }
@@ -157,7 +157,7 @@ fn non_mergeable_event_flushes_held_first() {
 #[test]
 fn late_updates_never_merge_into_a_turns() {
     let mut cap = full_cap();
-    let _ = cap.admit(ms(2), titled("a", "turn"));
+    let _admitted = cap.admit(ms(2), titled("a", "turn"));
     let late_origin = Origin::Late(TurnId::new(v7(1)).unwrap());
     let patch = ToolCallPatch {
         title: Some(CompactString::from("late")),
@@ -170,19 +170,19 @@ fn late_updates_never_merge_into_a_turns() {
             patch,
         },
     );
-    let _ = cap.admit(ms(3), late.clone());
+    let _admitted = cap.admit(ms(3), late.clone());
     assert_eq!(cap.flush(), vec![titled("a", "turn"), late]);
 }
 
 #[test]
 fn a_new_window_releases_what_is_held() {
     let mut cap = full_cap();
-    let _ = cap.admit(ms(2), titled("a", "one"));
+    let _admitted = cap.admit(ms(2), titled("a", "one"));
     // The timer was late: the next item opens a new window, after what was held.
     let items: Vec<RatedUpdate> = cap
         .admit(ms(1500), titled("a", "two"))
         .into_iter()
         .collect();
     assert_eq!(items, vec![titled("a", "one"), titled("a", "two")]);
-    assert!(cap.window_end(ms(2500)).is_empty());
+    assert_eq!(cap.window_end(ms(2500)), [] as [RatedUpdate; 0]);
 }

@@ -59,7 +59,7 @@ fn patch_batches_stay_under_8_kb() {
     let big = vec![append(100), append(9000), append(100)];
     let events = view.publish(big, &mut enc).unwrap();
     assert_eq!(events.len(), 3);
-    assert!(events.get(1).unwrap().json().len() >= MAX_BATCH_BYTES);
+    assert!(events.get(1).expect("the big patch").json().len() >= MAX_BATCH_BYTES);
     assert_eq!(cursors(&events), vec![17, 18, 19]);
     assert_eq!(view.cursor(), Cursor::new(19).unwrap());
 }

@@ -259,6 +259,12 @@ fn subscribe_events_no_gap_no_dup() {
         if n.is_multiple_of(8)
             && let Some(prompt) = prompts.get(n / 8)
         {
+            // A prompt while a turn is current is refused (`thread.turn_running`) until the
+            // queue lands, so the next prompt waits for the previous turn's end.
+            let previous = turns.borrow().last().copied();
+            if let Some(previous) = previous {
+                main.borrow_mut().until_turn_ended(previous);
+            }
             turns.borrow_mut().push(host.prompt(thread, prompt).0);
         }
         let known = main.borrow_mut().drain_ready().head();
