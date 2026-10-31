@@ -33,6 +33,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - `crates/acp`: the ACP client over the agent's pipes; agent traffic as events. Scenarios in `tests/scenarios/`.
 - `crates/desktop`: the Tauri shell. Blank for now.
 - `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `crates/fake_agent/scenarios/` (README.md).
+- `crates/host`: the session host thread: commands, turns, coalescing, subscriptions. See `docs/decisions/0011-host-turn-lifecycle.md`.
 - `crates/matters`: matter folders and their shadow git history (checkpoints, undo). See `docs/decisions/0007-matter-history-format.md`.
 - `crates/process`: starts an agent in its own process tree, shuts it down and kills the tree; the `Launcher` seam.
 - `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.
@@ -46,8 +47,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 ## Never
 
 - Never add `tauri` or `tokio` to a core crate (see "Never depends on" in `ARCHITECTURE.md`). Tauri is about 90% of cold build time, and the core must run without a window.
-- Never add a Tauri plugin or grant a webview permission. The plugin set is fixed (each change forces
-  a near-cold rebuild), and every permission widens what an XSS can reach.
+- Never add a Tauri plugin or grant a webview permission. The plugin set is fixed (each change forces a near-cold rebuild), and every permission widens what an XSS can reach.
 - Never write a sync `#[tauri::command]` or stream through Tauri events. Sync commands block the UI
   thread; events go to every webview. Use async commands and one `ipc::Channel` per window.
 - Never read or write the real app data folder, `~/.claude` or `~/.codex`. Those hold a lawyer's data and agent credentials.
