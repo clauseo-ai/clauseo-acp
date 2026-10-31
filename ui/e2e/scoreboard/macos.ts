@@ -155,18 +155,38 @@ export function playEnv(scratch: Scratch): Record<string, string> {
   return { ...scratchEnv(scratch), MARKS_OUT: join(scratch.root, RUN_FILE) };
 }
 
+/** The most of the child's stderr kept for {@link marksFailure}, from its end. */
+const STDERR_KEPT = 64 * 1024;
+
+/** The message of the last `marks run failed: …` line the app printed (marks.rs), or null. */
+export function marksFailure(stderr: string): string | null {
+  const lines = stderr.split(/\r?\n/).filter((line) => line.startsWith("marks run failed: "));
+  const last = lines.at(-1);
+  return last === undefined ? null : last.slice("marks run failed: ".length);
+}
+
 /**
  * Runs `command` with `env` added until it exits; kills it (its own PID, SIGKILL) after
- * `timeoutMs`. Resolves to the exit code; rejects on a failed start, a signal or the timeout.
+ * `timeoutMs`. Its stderr still reaches the log, and its end is kept. Resolves to the exit code
+ * and that stderr; rejects on a failed start, a signal or the timeout.
  */
 export async function runToExit(
   command: string,
   args: readonly string[],
   env: Record<string, string>,
   timeoutMs: number,
-): Promise<number> {
-  const child = spawn(command, args, { env: { ...process.env, ...env }, stdio: "inherit" });
-  return await new Promise<number>((resolve, reject) => {
+): Promise<{ code: number; stderr: string }> {
+  const child = spawn(command, args, {
+    env: { ...process.env, ...env },
+    stdio: ["inherit", "inherit", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    process.stderr.write(chunk);
+    stderr = (stderr + chunk).slice(-STDERR_KEPT);
+  });
+  return await new Promise<{ code: number; stderr: string }>((resolve, reject) => {
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
@@ -180,7 +200,7 @@ export async function runToExit(
       clearTimeout(timer);
       if (timedOut) reject(new Error(`${command} did not exit within ${timeoutMs} ms; killed it`));
       else if (code === null) reject(new Error(`${command} ended by ${String(signal)}`));
-      else resolve(code);
+      else resolve({ code, stderr });
     });
   });
 }
@@ -195,7 +215,7 @@ export async function play(
   try {
     const env = playEnv(scratch);
     const started = performance.now();
-    const code = await runToExit(cfg.app, [], env, timeoutMs);
+    const { code, stderr } = await runToExit(cfg.app, [], env, timeoutMs);
     const file = env["MARKS_OUT"]!;
     // Kept as written, before any check, so a run the checks refuse can still be read.
     if (existsSync(file)) {
@@ -203,7 +223,11 @@ export async function play(
       mkdirSync(runs, { recursive: true });
       copyFileSync(file, join(runs, `${playName(n)}.json`));
     }
-    if (code !== 0) throw new Error(`play ${n}: the app exited with ${code} (its stderr says why)`);
+    if (code !== 0) {
+      // The page's verdict (autoplay.ts), so the retry warning and attempts file say where it stopped.
+      const why = marksFailure(stderr) ?? "no `marks run failed` line on its stderr";
+      throw new Error(`play ${n}: the app exited with ${code}: ${why}`);
+    }
     const run = parseRawRun(JSON.parse(readFileSync(file, "utf8")));
     process.stdout.write(
       `[scoreboard] play ${n} done in ${Math.round(performance.now() - started)} ms\n`,

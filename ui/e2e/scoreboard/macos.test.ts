@@ -23,6 +23,7 @@ import {
   playWithRetries,
   retryWarning,
   runToExit,
+  marksFailure,
 } from "./macos.ts";
 
 let base: string;
@@ -74,7 +75,22 @@ test("a play's settings start fake_agent on the scoreboard scenario at --pace-ms
 
 test("runToExit returns the exit code, and kills a child past its timeout", async () => {
   const node = process.execPath;
-  expect(await runToExit(node, ["-e", "process.exit(3)"], {}, 30_000)).toBe(3);
+  expect(await runToExit(node, ["-e", "process.exit(3)"], {}, 30_000)).toEqual({
+    code: 3,
+    stderr: "",
+  });
+  const failed = await runToExit(
+    node,
+    [
+      "-e",
+      "process.stderr.write('noise\\nmarks run failed: autoplay, at step \"end of turn\"\\n'); process.exit(1)",
+    ],
+    {},
+    30_000,
+  );
+  expect(failed.code).toBe(1);
+  expect(marksFailure(failed.stderr)).toBe('autoplay, at step "end of turn"');
+  expect(marksFailure("nothing here\n")).toBeNull();
   await expect(runToExit(node, ["-e", "setInterval(() => {}, 1000)"], {}, 300)).rejects.toThrow(
     "did not exit within 300 ms; killed it",
   );
