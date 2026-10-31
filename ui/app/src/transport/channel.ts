@@ -1,6 +1,12 @@
 // One window's channel, read: each message is a `HostEvent`'s JSON or a fragment of one (R12 contract, "Channel
 // messages"). Fragments are joined in index order and the joined text is parsed once. Every message counts, fragments
 // one each: the count the desktop transport acks so the bridge can free the bytes it holds for unprocessed messages.
+//
+// The e2e and marks builds wrap an event that fits in one message as `{"timed":{"received_ms":…,"event":{…}}}`, with
+// the bridge's receive time (ms since the Unix epoch; R13 contract §2). The reader unwraps it only while a timed hook
+// is installed (`setTimedHook`, which main.tsx does only when the build's init script set `__CLAUSEO_PERF__`), hands
+// the event on as if it had come plain (one message, counted once), then reports it with its time to the hook. A
+// release page never installs the hook and never gets a timed message, so its only cost is one null check per event.
 import type { HostEvent, StreamFailed, StreamFailedMessage } from "./protocol.ts";
 
 /** What a channel message carries once whole: a host event, or the bridge's report that it could not restart a
@@ -16,6 +22,20 @@ export type Fragment = { id: number; index: number; count: number; text: string 
 
 /** An event still arriving: its pieces, and the message count before its first piece. */
 type Pending = { count: number; pieces: (string | undefined)[]; have: number; start: number };
+
+/** Hears each unwrapped timed event, after it was handed on, with the bridge's receive time (epoch ms). */
+export type TimedHook = (event: ChannelEvent, receivedMs: number) => void;
+
+/** The installed timed hook: null in release. */
+let timedHook: TimedHook | null = null;
+
+/** Installs (or with null removes) the timed hook. While one is installed, `timed` messages are unwrapped. */
+export function setTimedHook(hook: TimedHook | null): void {
+  timedHook = hook;
+}
+
+/** The bridge's `timed` wrapper (contract §2). Like a plain event, it is trusted as the bridge sent it. */
+type Timed = { timed?: { received_ms: number; event: ChannelEvent } };
 
 function fragmentOf(message: unknown): Fragment | null {
   if (typeof message !== "object" || message === null || !("fragment" in message)) return null;
@@ -100,11 +120,28 @@ export class ChannelReader {
         this.#onError("a fragment is malformed");
         return;
       }
+      if (timedHook !== null) {
+        this.#timed(message, timedHook);
+        return;
+      }
       this.#eventStart = this.#messages - 1;
       this.#onEvent(message as ChannelEvent);
       return;
     }
     this.#piece(fragment);
+  }
+
+  /** A whole message while a timed hook is installed: a `timed` wrapper is unwrapped and its event handed on, then
+   * reported to `hook`; anything else is handed on as it is. */
+  #timed(message: unknown, hook: TimedHook): void {
+    this.#eventStart = this.#messages - 1;
+    const timed = (message as Timed | null)?.timed;
+    if (timed === undefined) {
+      this.#onEvent(message as ChannelEvent);
+      return;
+    }
+    this.#onEvent(timed.event);
+    hook(timed.event, timed.received_ms);
   }
 
   #piece(f: Fragment): void {
