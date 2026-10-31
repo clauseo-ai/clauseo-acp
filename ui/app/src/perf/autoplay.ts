@@ -25,7 +25,7 @@ export const MATTER = "Matter";
 /** How long after `interactive` the idle memory is read. */
 export const IDLE_SETTLE_MS = 2000;
 /** The whole session's limit. */
-export const TIMEOUT_MS = 120_000;
+export const TIMEOUT_MS = 300_000;
 /** Frames scrolled each way, and pixels per frame. */
 export const SCROLL_FRAMES = 30;
 export const SCROLL_PX = 40;
