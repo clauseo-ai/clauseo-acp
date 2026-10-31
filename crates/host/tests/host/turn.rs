@@ -121,7 +121,10 @@ fn text_reaches_view_before_durable() {
     let is_text = |event: &DomainEvent| matches!(event, DomainEvent::TextAppended(_));
 
     host.prompt(thread, "Summarise the cap.");
+    // The first delta arms the display timer, then the durable one, on the host thread. Moving
+    // the clock between the two would arm the durable timer 16 ms late, so wait for both.
     host.wait_armed(DISPLAY);
+    host.wait_armed(DURABLE);
     host.clock.advance(DISPLAY);
     view.until("the answer text in the view", |v| v.mentions("The clause "));
     host.settle();
