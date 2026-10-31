@@ -41,9 +41,9 @@ export type Who =
   | { kind: "undo"; of: string }
   /** The papers first brought into the matter. */
   | { kind: "import"; n: number }
-  /** A restore to the version with id `to`. */
+  /** A restore to the version with id `to`. Its time and day are read from that version when shown, as undo's are. */
   | { kind: "restore"; to: string }
-  /** An undo of the restore made at `of`. */
+  /** An undo of the restore with id `of`. Its time and day are read from that restore when shown. */
   | { kind: "undoRestore"; of: string };
 
 export type Version = {
@@ -130,13 +130,20 @@ export function whoOf(lang: Lang, cal: Calendar, v: Version, all: readonly Versi
       return vt(lang, "Imported {n} documents", { n: w.n });
     case "restore": {
       const to = all.find((x) => x.id === w.to);
-      if (to === undefined) return "";
+      // the version restored isn't in the history passed in: say what it is without its time
+      if (to === undefined) return vt(lang, "Restore of a version");
       return isToday(cal, to)
         ? vt(lang, "Restore to {time} today", { time: timeOf(lang, to) })
         : vt(lang, "Restore to {time} on {date}", when(lang, cal, to));
     }
-    case "undoRestore":
-      return vt(lang, "Undo of the restore at {time}", { time: clock(lang, w.of) });
+    case "undoRestore": {
+      const of = all.find((x) => x.id === w.of);
+      // the restore undone isn't in the history passed in: say what it is without its time
+      if (of === undefined) return vt(lang, "Undo of a restore");
+      return of.day === v.day
+        ? vt(lang, "Undo of the restore at {time}", { time: timeOf(lang, of) })
+        : vt(lang, "Undo of the restore at {time} on {date}", when(lang, cal, of));
+    }
   }
 }
 

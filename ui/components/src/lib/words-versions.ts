@@ -42,7 +42,10 @@ const HI = {
   "Imported {n} documents": "{n} दस्तावेज़ आयात किए गए",
   "Restore to {time} on {date}": "{date}, {time} बजे पर पुनर्स्थापित",
   "Restore to {time} today": "आज {time} बजे पर पुनर्स्थापित",
+  "Undo of a restore": "पुनर्स्थापन पूर्ववत किया गया",
   "Undo of the restore at {time}": "{time} बजे का पुनर्स्थापन पूर्ववत किया गया",
+  "Undo of the restore at {time} on {date}": "{date} को {time} बजे का पुनर्स्थापन पूर्ववत किया गया",
+  "Restore of a version": "संस्करण पुनर्स्थापित किया गया",
   // what a version did to the papers
   "Changed {papers}.": "बदले गए: {papers}।",
   "Added {papers}.": "जोड़े गए: {papers}।",
