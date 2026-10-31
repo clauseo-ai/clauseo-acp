@@ -151,6 +151,7 @@ const EDGE = {
   "Switch off": "बंद करें",
   "macOS is asking you to confirm.": "macOS आपसे पुष्टि माँग रहा है।",
   "Windows is asking you to confirm.": "Windows आपसे पुष्टि माँग रहा है।",
+  "Linux is asking you to confirm.": "Linux आपसे पुष्टि माँग रहा है।",
   // answered, in the past tense
   "Allowed for this matter. Clauseo can read {place}.":
     "इस मामले के लिए अनुमति दी गई। Clauseo {place} पढ़ सकता है।",
@@ -227,6 +228,8 @@ const EDGE = {
     "Windows ने इस कंप्यूटर पर संरक्षित स्थान की अनुमति नहीं दी।",
   "macOS didn't allow the protected space on this computer.":
     "macOS ने इस कंप्यूटर पर संरक्षित स्थान की अनुमति नहीं दी।",
+  "Linux didn't allow the protected space on this computer.":
+    "Linux ने इस कंप्यूटर पर संरक्षित स्थान की अनुमति नहीं दी।",
   "Every change inside the matter's folder is still kept, and Versions can undo it.":
     "मामले के फ़ोल्डर के भीतर हर बदलाव अब भी रखा जाता है, और संस्करण उसे पूर्ववत कर सकते हैं।",
   Understood: "ठीक है",

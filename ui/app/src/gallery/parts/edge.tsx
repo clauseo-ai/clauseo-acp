@@ -14,29 +14,22 @@ export function EdgeParts() {
   return (
     <Group title="The edge">
       <Sample name="EdgePrompt, folder, asking">
-        <EdgeFlow kind="folder" place={FOLDER.place} platform="mac" keys />
+        <EdgeFlow kind="folder" place={FOLDER.place} keys />
       </Sample>
       <Sample name="EdgePrompt, website, asking">
-        <EdgeFlow kind="site" place={SITE} platform="windows" />
+        <EdgeFlow kind="site" place={SITE} />
       </Sample>
       <Sample name="EdgePrompt, protection off, asking">
-        <EdgeFlow kind="off" place="" platform="mac" />
+        <EdgeFlow kind="off" place="" />
       </Sample>
       <Sample name="EdgePrompt, folder, confirming">
-        <EdgePrompt
-          kind="folder"
-          place={FOLDER.place}
-          state={{ kind: "confirming" }}
-          platform="windows"
-          {...still}
-        />
+        <EdgePrompt kind="folder" place={FOLDER.place} state={{ kind: "confirming" }} {...still} />
       </Sample>
       <Sample name="EdgePrompt, website, allowed for this matter">
         <EdgePrompt
           kind="site"
           place={SITE}
           state={{ kind: "allowed", remembered: true, at: NOW }}
-          platform="mac"
           {...still}
         />
       </Sample>
@@ -45,7 +38,6 @@ export function EdgeParts() {
           kind="folder"
           place={FOLDER.place}
           state={{ kind: "allowed", remembered: false, at: NOW }}
-          platform="mac"
           {...still}
         />
       </Sample>
@@ -54,7 +46,6 @@ export function EdgeParts() {
           kind="folder"
           place={FOLDER.place}
           state={{ kind: "refused", remembered: false }}
-          platform="windows"
           {...still}
         />
       </Sample>
@@ -63,7 +54,6 @@ export function EdgeParts() {
           kind="site"
           place={OTHER_SITE}
           state={{ kind: "refused", remembered: true }}
-          platform="windows"
           {...still}
         />
       </Sample>
@@ -72,18 +62,11 @@ export function EdgeParts() {
           kind="off"
           place=""
           state={{ kind: "allowed", remembered: false, at: NOW }}
-          platform="mac"
           {...still}
         />
       </Sample>
       <Sample name="EdgePrompt, protection off, kept">
-        <EdgePrompt
-          kind="off"
-          place=""
-          state={{ kind: "refused", remembered: false }}
-          platform="mac"
-          {...still}
-        />
+        <EdgePrompt kind="off" place="" state={{ kind: "refused", remembered: false }} {...still} />
       </Sample>
       <Sample name="RefusalPause, 3 in a row, asking">
         <RefusalFlow />
@@ -119,10 +102,10 @@ export function EdgeParts() {
         />
       </Sample>
       <Sample name="NotProtectedNote, protection off">
-        <NoteSample why="off" platform="mac" />
+        <NoteSample why="off" />
       </Sample>
       <Sample name="NotProtectedNote, couldn't be set up">
-        <NoteSample why="setup" platform="windows" />
+        <NoteSample why="setup" />
       </Sample>
       <Sample name="NotProtectedMark, full">
         <NotProtectedMark />
