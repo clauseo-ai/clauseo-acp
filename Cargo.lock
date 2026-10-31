@@ -852,6 +852,7 @@ dependencies = [
  "clauseo-settings",
  "clauseo-store",
  "criterion",
+ "dunce",
  "futures",
  "proptest",
  "serde_json",

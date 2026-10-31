@@ -1,12 +1,13 @@
-//! Commands: receipts, unknown ids, ids from another matter, undo with its note.
+//! Commands: receipts, unknown ids, ids from another matter, a prompt's file outside its
+//! matter, undo with its note.
 
 use clauseo_protocol::{
-    AgentId, CommandOutcome, DomainEvent, ErrorCode, FileChoice, FileDecision, HostCommand,
-    HostQuery, MatterId, MatterPath, StopReason, StreamId, ThreadId,
+    AgentId, CommandOutcome, DeliveryRequest, DomainEvent, ErrorCode, FileChoice, FileDecision,
+    HostCommand, HostQuery, MatterId, MatterPath, PromptBlock, StopReason, StreamId, ThreadId,
 };
 
 use crate::support::{
-    Dir, FAKE, Scenario, command_id, foreign_uuid, matter_with_thread, send_prompt,
+    Dir, FAKE, Scenario, command_id, foreign_uuid, matter_with_thread, send_prompt, wait,
 };
 
 #[test]
@@ -116,6 +117,53 @@ fn other_matter_ids_refused() {
         },
         ErrorCode::CommandInvalid,
     );
+    host.shutdown();
+}
+
+#[test]
+fn prompt_file_outside_matter_refused() {
+    let dir = Dir::new(
+        "prompt_file_outside_matter_refused",
+        &[(FAKE, Scenario::Bundled("prompt-stream"))],
+    );
+    let host = dir.start(0);
+    let (_, thread, folder) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let elsewhere = dir.folder("elsewhere", &[("secret.txt", "s\n")]);
+    let register =
+        |path: std::path::PathBuf| wait("register_file", host.handle.register_file(path)).unwrap();
+    let prompt = |file| HostCommand::SendPrompt {
+        thread,
+        content: vec![PromptBlock::File { file }],
+        delivery: DeliveryRequest::Queue,
+    };
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    let head = events.head();
+
+    let id = command_id();
+    let outside = register(elsewhere.join("secret.txt"));
+    let error = host.dispatch_as(id, prompt(outside)).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::CommandInvalid, "{error}");
+    // Through `..` it is still outside.
+    let dotted = register(folder.join("..").join("elsewhere").join("secret.txt"));
+    let error = host.dispatch(prompt(dotted)).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::CommandInvalid, "{error}");
+    host.settle();
+    events.drain_ready();
+    assert_eq!(
+        events.head(),
+        head,
+        "a refused prompt logged: {}",
+        events.dump()
+    );
+
+    // No receipt was kept: the same id with a file in the matter is accepted, not a conflict.
+    let inside = register(folder.join("brief.txt"));
+    let accepted = host.dispatch_as(id, prompt(inside)).unwrap();
+    let CommandOutcome::PromptAccepted { turn, .. } = accepted else {
+        panic!("SendPrompt answered {accepted:?}");
+    };
+    assert_eq!(events.until_turn_ended(turn).stop, StopReason::EndTurn);
     host.shutdown();
 }
 
