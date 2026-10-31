@@ -71,4 +71,10 @@ exclude_re = [
   # real home folder), and `known_folder` returns `None` with no caller there; on Windows both
   # call the known-folder shim excluded above.
   'crates/settings/src/system\.rs:\d+:\d+: replace <impl PlatformDirs for SystemDirs>::(home|known_folder) -> Option<PathBuf> with ',
+  # clauseo-settings' `write_atomic` (crates/settings/src/files.rs) reads the target's metadata to
+  # keep its permissions, and only a non-NotFound error from that read reaches the arm this
+  # mutant makes `false`. `link_target` made the same call on the same path just before, so that
+  # error needs a race between the two calls or an I/O fault. No test makes one without fault
+  # injection, and EACCES on the file itself needs no read permission for metadata.
+  'crates/settings/src/files\.rs:\d+:\d+: replace match guard error\.kind\(\) != io::ErrorKind::NotFound with false in <impl Files for SystemFiles>::write_atomic$',
 ]
