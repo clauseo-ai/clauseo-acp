@@ -14,6 +14,9 @@
 //! - Built only with `--features e2e`. The default build has no `e2e` feature, so a release
 //!   never opens a debugging port and never reads these variables.
 //! - `E2E_DISABLE_GPU=1` adds `--disable-gpu`, for the second CI run (Windows).
+//! - Once the host has stopped and joined, the app ends with `std::process::exit` instead of
+//!   `app.exit` (`lib.rs`, `stop_host_then_exit`): in a Windows session with no visible window,
+//!   `app.exit` never returns from the event loop. So window-state never saves in this build.
 
 use std::path::PathBuf;
 

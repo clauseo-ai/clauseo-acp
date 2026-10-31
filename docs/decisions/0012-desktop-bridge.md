@@ -79,6 +79,11 @@ The `e2e` build likewise answers the "always allow" confirm from `E2E_CONFIRM_AL
 `decline`) instead of drawing it, since a native dialog cannot be clicked over CDP; never in
 release builds. With either variable unset, the dialog is drawn.
 
+At exit the `e2e` build calls `std::process::exit` once the host thread has joined, instead of
+`app.exit`. On Windows in a session with no visible window (CI), tao's loop never delivers
+`RunEvent::Exit`, so `app.exit` would leave the process running. A side effect: window-state never
+saves in this build, so e2e runs do not write the real app config folder.
+
 ## Consequences
 
 - The page reaches nine typed commands and no plugin; a tenth command needs a new record, a
