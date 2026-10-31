@@ -12,11 +12,14 @@ const FACES: Record<string, string> = {
   "AnekDevanagari-var-devanagari.woff2":
     "04c5b4f109c124a20aa45ec221ad5dcae085198c80f656a3ca6c4c2846ef3668",
 };
+/** The Anek licence, shipped with the faces so the built app carries it; LICENSES/ is its home. */
+const NOTICE = "OFL.txt";
 const FONTS = new URL("../../public/fonts/", import.meta.url);
+const LICENCE = new URL("../../../../LICENSES/OFL-1.1-anek.txt", import.meta.url);
 const sha = (url: URL) => createHash("sha256").update(readFileSync(url)).digest("hex");
 
-test("public/fonts holds exactly the recorded faces", () => {
-  expect(readdirSync(FONTS).sort()).toEqual(Object.keys(FACES).sort());
+test("public/fonts holds exactly the recorded faces and their licence", () => {
+  expect(readdirSync(FONTS).sort()).toEqual([...Object.keys(FACES), NOTICE].sort());
 });
 
 test.each(Object.entries(FACES))("%s is the recorded file", (file, hash) => {
@@ -31,9 +34,9 @@ test("fonts.css loads only the recorded faces, as files from the app's own origi
 });
 
 test("the Anek licence is recorded with the repo's other licences", () => {
-  const licence = readFileSync(
-    new URL("../../../../LICENSES/OFL-1.1-anek.txt", import.meta.url),
-    "utf8",
-  );
-  expect(licence).toContain("SIL OPEN FONT LICENSE Version 1.1");
+  expect(readFileSync(LICENCE, "utf8")).toContain("SIL OPEN FONT LICENSE Version 1.1");
+});
+
+test("the licence shipped with the faces is LICENSES/' copy, byte for byte", () => {
+  expect(sha(new URL(NOTICE, FONTS))).toBe(sha(LICENCE));
 });
