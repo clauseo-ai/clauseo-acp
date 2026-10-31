@@ -381,8 +381,8 @@ fn restore_leaves_cloud_only_and_over_cap_files() {
 #[test]
 fn restore_refuses_a_target_written_after_its_outside_edits_checkpoint() {
     let fx = Fixture::new("restore-moved-since");
-    // Asked about a.txt by the restore's walk (its stat, then its read's check of the open
-    // file, where the write lands, after the stat), then by its writable check.
+    // Asked about a.txt once by the restore's walk (its stat: `settle` keeps the walk from
+    // reading it), then by the plan's writable check, where the write lands.
     let probe = Arc::new(TouchingProbe {
         target: fx.file("a.txt"),
         nth: 2,
@@ -398,6 +398,7 @@ fn restore_refuses_a_target_written_after_its_outside_edits_checkpoint() {
     let mut matter = import_with(&fx, settings);
     matter.before_turn(&meta(2)).unwrap();
     fx.write("a.txt", "two");
+    support::settle(fx.file("a.txt"));
     support::remove_dir_all(fx.file("sub"));
     let step = tools(&["a.txt", "sub/deep/c.txt"]);
     created(matter.after_turn(&meta(3), &step).unwrap(), 3);
@@ -410,7 +411,7 @@ fn restore_refuses_a_target_written_after_its_outside_edits_checkpoint() {
         matches!(&err, Error::FileLocked { paths } if *paths == [path("a.txt")]),
         "{err:?}"
     );
-    assert_eq!(probe.seen.load(Ordering::Relaxed), 3);
+    assert_eq!(probe.seen.load(Ordering::Relaxed), 2);
     assert_eq!(fx.read("a.txt"), b"two");
     assert!(!fx.exists("sub"), "the folders staging made are gone again");
     assert_no_temp_files(&fx.folder);
@@ -454,8 +455,10 @@ fn restore_refuses_a_name_spelled_otherwise_that_appears_after_the_plan() {
     if !insensitive(&fx, "Memo.txt", "memo.txt", CASE_REQUIRED) {
         return;
     }
-    // Asked about a.txt by the restore's walk, then by the plan's writable check, which comes
-    // after the plan found nothing spelled otherwise for Memo.txt (`M` sorts first).
+    // Asked about a.txt once by the restore's walk (its stat: `settle` keeps the walk from
+    // reading it, so no read's check of the open file comes first), then by the plan's writable
+    // check, which comes after the plan found nothing spelled otherwise for Memo.txt (`M` sorts
+    // first).
     let probe = Arc::new(CreatingProbe {
         target: fx.file("a.txt"),
         nth: 2,
@@ -473,6 +476,7 @@ fn restore_refuses_a_name_spelled_otherwise_that_appears_after_the_plan() {
     matter.before_turn(&meta(2)).unwrap();
     support::remove_file(fx.file("Memo.txt"));
     fx.write("a.txt", "two");
+    support::settle(fx.file("a.txt"));
     created(
         matter
             .after_turn(&meta(3), &tools(&["Memo.txt", "a.txt"]))
