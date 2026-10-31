@@ -116,8 +116,11 @@ pub(crate) trait HistoryStore: Sized {
     /// Hashes the file `file` as a blob without storing anything.
     fn hash_file(&mut self, file: &Path, len: u64) -> Result<(Oid, u64), Error>;
 
-    /// Writes the content of blob `blob` to `out`; returns the bytes written.
-    fn read_blob(&self, blob: Oid, out: &mut dyn Write) -> Result<u64, Error>;
+    /// Writes the content of blob `blob`, read for the file `path`, to `out`; returns the bytes
+    /// written. The content is hashed as it streams: an object that does not hash to `blob` is
+    /// an [`Error::History`] naming it and `path`, returned after the last byte, so `out`
+    /// must be a staging place (a temp file, a buffer) its caller drops on an error.
+    fn read_blob(&self, blob: Oid, path: &str, out: &mut dyn Write) -> Result<u64, Error>;
 
     /// The size of blob `blob` in bytes, from its header.
     fn blob_len(&self, blob: Oid) -> Result<u64, Error>;

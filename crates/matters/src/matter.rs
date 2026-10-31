@@ -389,7 +389,9 @@ impl Matter {
     }
 
     /// Writes the bytes `path` had at checkpoint `checkpoint` to `out`; returns how many.
-    /// `UnknownFile` if the checkpoint has no such file. Needs only the history.
+    /// `UnknownFile` if the checkpoint has no such file. Needs only the history. The bytes are
+    /// checked against the file's id as they stream: on an [`Error::History`] (a corrupt object),
+    /// what `out` received is not the file's content and must be dropped.
     pub fn read_file(
         &self,
         checkpoint: CheckpointId,

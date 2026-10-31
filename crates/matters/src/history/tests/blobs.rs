@@ -63,7 +63,10 @@ fn a_file_above_the_threshold_is_streamed_to_the_same_blob() {
     assert_eq!(files_under(&git_dir.join("objects")).len(), 1);
     assert_eq!(store.blob_len(streamed).unwrap(), len);
     let mut out = Vec::new();
-    assert_eq!(store.read_blob(streamed, &mut out).unwrap(), len);
+    assert_eq!(
+        store.read_blob(streamed, "streamed", &mut out).unwrap(),
+        len
+    );
     assert!(out == content, "the blob reads back different bytes");
 }
 
@@ -123,7 +126,7 @@ fn a_torn_object_is_written_again() {
             "{case}"
         );
         let mut out = Vec::new();
-        store.read_blob(blob, &mut out).unwrap();
+        store.read_blob(blob, "file", &mut out).unwrap();
         assert_eq!(out, content, "{case}");
         assert_eq!(store.new_object_files(), [object], "{case}");
     }
@@ -162,7 +165,7 @@ fn a_present_object_with_a_wrong_body_is_written_again() {
 
     assert_eq!(store.store_file(&path, 12, u64::MAX).unwrap(), (blob, 12));
     let mut out = Vec::new();
-    store.read_blob(blob, &mut out).unwrap();
+    store.read_blob(blob, "file", &mut out).unwrap();
     assert_eq!(out, content);
 }
 

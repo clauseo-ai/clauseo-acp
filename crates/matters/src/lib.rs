@@ -42,6 +42,10 @@
 //!   tip. No empty commits: an unchanged tree reuses the last checkpoint
 //!   ([`CheckpointOutcome::Reused`]).
 //! - Objects, then the ref and the stat cache, are durable before a checkpoint returns.
+//! - Every object read from history is checked against its id: blobs as they stream, trees and
+//!   commits before they are parsed. One that does not match is an [`Error::History`] naming it,
+//!   and undo and restore then change no file. Only a blob's size ([`VersionFile::size`],
+//!   checkpoint sizes) comes from its header without the check.
 //! - Excluded, over-cap and cloud-only files are never read, written or deleted.
 //! - Files in the folder change only by a temp file in the same folder and a rename; the one
 //!   other change is the hidden attribute of `.clauseo` on Windows. Undo and

@@ -62,3 +62,7 @@ mod errors;
 #[cfg(test)]
 #[path = "matters/refuse.rs"]
 mod refuse;
+
+#[cfg(test)]
+#[path = "matters/undo_corrupt_object.rs"]
+mod undo_corrupt_object;

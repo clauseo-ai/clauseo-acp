@@ -13,6 +13,7 @@ use gix::odb::loose;
 use gix::zlib::Compression;
 
 use super::blob::{Blobs, Target, count};
+use super::check;
 use super::durable::{self, NewObjects, put};
 use super::{CommitRecord, HEAD_REF, HistoryStore, Oid, TreeFile, index_file, tree};
 use crate::stat::{FileTime, StatCache};
@@ -226,16 +227,16 @@ impl HistoryStore for GixStore {
         self.blobs.read(file, len, u64::MAX, None)
     }
 
-    fn read_blob(&self, blob: Oid, out: &mut dyn Write) -> Result<u64, Error> {
+    fn read_blob(&self, blob: Oid, path: &str, out: &mut dyn Write) -> Result<u64, Error> {
         let id = to_gix(blob);
-        let path = self.deflated.object_path(&id);
-        let file = File::open(&path).map_err(|err| Error::io("open", &path, err))?;
+        let object = self.deflated.object_path(&id);
+        let file = File::open(&object).map_err(|err| Error::io("open", &object, err))?;
         let mut input = BufReader::with_capacity(READ_CHUNK, file);
         let mut state = gix::zlib::Decompress::new();
         let mut chunk = vec![0_u8; READ_CHUNK];
         let mut inflate = |chunk: &mut [u8]| {
             gix::zlib::stream::inflate::read(&mut input, &mut state, chunk)
-                .map_err(|err| Error::io("read", &path, err))
+                .map_err(|err| Error::io("read", &object, err))
         };
         let mut last = inflate(&mut chunk)?;
         let first = chunk.get(..last).unwrap_or_default();
@@ -244,21 +245,31 @@ impl HistoryStore for GixStore {
         if kind != Kind::Blob {
             return Err(Error::history("read blob", format!("{id} is not a blob")));
         }
+        // The id is the hash of the header and the body as inflated, hashed in the pass that
+        // writes them.
+        let mut hasher = gix::hash::hasher(HashKind::Sha1);
+        hasher.update(first.get(..header).unwrap_or_default());
         let body = first.get(header..).unwrap_or_default();
+        hasher.update(body);
         out.write_all(body)
             .map_err(|err| Error::history("write blob", err))?;
         let mut written = count(body.len());
         while last == chunk.len() {
             last = inflate(&mut chunk)?;
             let part = chunk.get(..last).unwrap_or_default();
+            hasher.update(part);
             out.write_all(part)
                 .map_err(|err| Error::history("write blob", err))?;
             written += count(last);
         }
         if written != size {
-            let message = format!("{id} holds {written} bytes, its header says {size}");
+            let message = format!("{path}: {id} holds {written} bytes, its header says {size}");
             return Err(Error::history("read blob", message));
         }
+        let found = hasher
+            .try_finalize()
+            .map_err(|err| Error::history("read blob", err))?;
+        check::same(&id, found, "read blob", path)?;
         Ok(written)
     }
 
@@ -339,7 +350,7 @@ impl HistoryStore for GixStore {
         let mut next = durable::read_ref(&self.git_dir)?;
         let mut buffer = Vec::new();
         while let Some(oid) = next {
-            let data = tree::find(&self.deflated, &to_gix(oid), Kind::Commit, &mut buffer)?;
+            let data = tree::find(&self.deflated, &to_gix(oid), Kind::Commit, "", &mut buffer)?;
             let commit = CommitRef::from_bytes(data, HashKind::Sha1)
                 .map_err(|err| Error::history("read commit", err))?;
             records.push(CommitRecord {
