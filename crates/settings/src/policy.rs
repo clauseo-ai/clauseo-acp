@@ -117,13 +117,23 @@ pub fn system_policy_sources() -> Vec<Box<dyn PolicySource>> {
 }
 
 impl PolicyValues {
-    /// The source's values, as [`leaf::typed`] returned them: each key once, with its last value.
+    /// The source's values, as [`leaf::typed`] returned them. Its leaves must come from there:
+    /// each key once, with its last value, since the lock loop in [`crate::Effective::load`]
+    /// keeps the first leaf it sees for a key.
     pub(crate) fn new(leaves: Vec<Leaf>, warnings: Vec<Warning>) -> PolicyValues {
+        debug_assert!(
+            {
+                let mut keys = std::collections::BTreeSet::new();
+                leaves.iter().all(|leaf| keys.insert(leaf.key()))
+            },
+            "a policy source's leaves must come from leaf::typed: one leaf per key"
+        );
         PolicyValues { leaves, warnings }
     }
 
-    /// The dotted keys this source locks, in its order: those it sets, then those whose value
-    /// did not type (locked at their default).
+    /// The dotted keys this source locks, each once, in the order of its last value in the
+    /// source. A key whose value did not type sits where that value sits (locked at its
+    /// default); a key a registry refused, for its value's type, comes after the rest.
     pub fn keys(&self) -> impl Iterator<Item = String> {
         self.leaves.iter().map(Leaf::key)
     }
