@@ -4,7 +4,7 @@
 // Western digits, English legal names and file names in Latin script.
 import { createElement, type ReactNode } from "react";
 import { clock, t as roomWords, type Key } from "./words.ts";
-import { useDisplay } from "./display.ts";
+import { useDisplay, type Platform } from "./display.ts";
 import { frame, type FrameKey } from "./words-frame.ts";
 import { Mixed } from "./mixed.tsx";
 import { wordsOf, type Slots } from "./words-core.ts";
@@ -44,35 +44,23 @@ export type UiKey = keyof typeof HI;
 /** A new string in the language, its slots filled. */
 export const ui = wordsOf<UiKey>(HI);
 
-/** The computer's own file manager, for "Show in Finder": Finder on the Mac, File Explorer on Windows, and on Linux,
- * whose file manager has no one name, the folder itself. */
-export type Os = "mac" | "windows" | "linux";
-
 /** The OS from what the webview reports: navigator.userAgentData.platform where there is one, else
  * navigator.platform or the user agent. */
-export function osOf(platform: string): Os {
+export function osOf(platform: string): Platform {
   const p = platform.toLowerCase();
   if (p.includes("win")) return "windows";
   if (p.includes("linux") || p.includes("x11")) return "linux";
   return "mac";
 }
 
-/** "Show in Finder" on the Mac, "Show in File Explorer" on Windows, "Show in folder" on Linux. */
-export function revealKey(os: Os): UiKey {
+/** The computer's own file manager: "Show in Finder" on the Mac, "Show in File Explorer" on Windows, and on Linux,
+ * whose file manager has no one name, "Show in folder". */
+export function revealKey(os: Platform): UiKey {
   return os === "windows"
     ? "Show in File Explorer"
     : os === "linux"
       ? "Show in folder"
       : "Show in Finder";
-}
-
-/** What this webview runs on. */
-export function currentOs(): Os {
-  const nav = globalThis.navigator as
-    | (Navigator & { userAgentData?: { platform?: string } })
-    | undefined;
-  if (nav === undefined) return "mac";
-  return osOf(nav.userAgentData?.platform || nav.platform || nav.userAgent);
 }
 
 /** Words to render: a string with every English run inside Hindi set in lang="en". */

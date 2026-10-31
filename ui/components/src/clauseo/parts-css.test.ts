@@ -40,3 +40,18 @@ test("on a phone's width a list of dates and the room's band stack each label ov
   expect(phone).toMatch(/\.rd-bar \{[^}]*flex-wrap: wrap;/);
   expect(phone).toMatch(/\.rd-what \{[^}]*flex-basis: 100%;/);
 });
+
+test("Linux takes Windows' chrome: the toolbar's rules for the caption buttons key on any platform but the Mac", () => {
+  const sheets = readdirSync(here).filter((f) => f.endsWith(".css"));
+  const keyed = sheets.flatMap((f) =>
+    [...readFileSync(new URL(f, here), "utf8").matchAll(/\[data-platform="(\w+)"\]/g)].map(
+      (m) => `${f}: ${m[0]}`,
+    ),
+  );
+  expect(keyed.length).toBeGreaterThan(0);
+  for (const k of keyed) expect(k).toMatch(/\[data-platform="mac"\]$/);
+  const shell = readFileSync(new URL("shell.css", here), "utf8");
+  expect(shell).toMatch(
+    /\.room-top:not\(\[data-platform="mac"\]\) \.room-lead \{[^}]*display: none;/,
+  );
+});

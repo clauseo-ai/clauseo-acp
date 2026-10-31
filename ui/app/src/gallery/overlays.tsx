@@ -1,6 +1,7 @@
 // The controls that raise a plane: each stands as its trigger, and opens on a click, a hover or focus.
 import { IconHistory } from "@clauseo/components/icons/icons.tsx";
-import { currentOs, revealKey } from "@clauseo/components/lib/words-ui.ts";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
+import { revealKey } from "@clauseo/components/lib/words-ui.ts";
 import { useGalleryWords } from "./words.ts";
 import {
   AlertDialog,
@@ -36,6 +37,7 @@ import type { LiteChoice } from "./options.ts";
 export function Overlays() {
   const w = useGalleryWords();
   const toasts = useToasts();
+  const { platform } = useDisplay();
   const [pinned, setPinned] = useState(true);
   const [lite, setLite] = useState<LiteChoice>("auto");
   const choices = [
@@ -75,7 +77,7 @@ export function Overlays() {
             <MenuGroup>
               <MenuGroupLabel lang="en">Lease</MenuGroupLabel>
               <MenuItem label={w.ui("Rename")} />
-              <MenuItem label={w.ui(revealKey(currentOs()))} />
+              <MenuItem label={w.ui(revealKey(platform))} />
               <MenuCheckboxItem
                 label={w.ui("Pin to the top")}
                 checked={pinned}

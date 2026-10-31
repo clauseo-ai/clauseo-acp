@@ -20,6 +20,7 @@ export const LANGS = [
 export const PLATFORMS = [
   { value: "mac", label: "Mac" },
   { value: "windows", label: "Windows" },
+  { value: "linux", label: "Linux" },
 ] as const satisfies readonly { value: Platform; label: string }[];
 
 export const SIZES = TEXT_SIZES.map((s) => ({ value: String(s), label: String(s) }));

@@ -5,7 +5,9 @@
 //   data-motion="full|reduced"  reduced: nothing moves or scales. Lite implies it.
 //   lang="en|hi"                the language. Hindi tokens apply through :lang(hi).
 //   data-text-size="14..20"     the root font size, 16 by default. Every type size is in rem.
-//   data-platform="mac|windows" the window's chrome: the corner lights on the Mac, the caption buttons on Windows.
+//   data-platform="mac|windows|linux"
+//                               the computer's OS, and with it the window's chrome: the corner lights on the Mac, the
+//                               caption buttons on Windows and Linux.
 // This module only shows a display and lets the parts read it. Which display to show (the lawyer's settings, the
 // computer's light and motion preferences, what the host reports about remote sessions) is the app's to decide.
 
@@ -16,8 +18,9 @@ export type Theme = "day" | "night";
 export type Render = "full" | "lite";
 export type Motion = "full" | "reduced";
 export type Lang = "en" | "hi";
-/** The window's chrome. Linux takes Windows' caption buttons at the right, where its own desktops put them. */
-export type Platform = "mac" | "windows";
+/** The computer's OS, which the host reports. It sets the window's chrome, where Linux takes Windows' caption buttons
+ * at the right, where its own desktops put them, and the words that name the computer's keys and file manager. */
+export type Platform = "mac" | "windows" | "linux";
 export const TEXT_SIZES = [14, 15, 16, 17, 18, 19, 20] as const;
 export type TextSize = (typeof TEXT_SIZES)[number];
 
