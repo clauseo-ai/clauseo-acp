@@ -189,6 +189,8 @@ export function Composer<V extends string = string>({
     // has already been told of this frame: the browser keeps that change for the next frame and reports
     // "ResizeObserver loop completed with undelivered notifications" once. It is no loop: the next delivery finds
     // the width unchanged and fits nothing. (Chromium, a composer at 390 px whose width alone changes.)
+    // The WebKit probe must allow this one message ("ResizeObserver loop completed with undelivered notifications"),
+    // decided in review: it fires once per width change and settles.
     let width = a.clientWidth;
     const ro = new ResizeObserver(() => {
       if (a.clientWidth === width) return;
