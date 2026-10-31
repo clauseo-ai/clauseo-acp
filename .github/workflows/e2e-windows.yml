@@ -1,7 +1,7 @@
 # The blank app end to end on Windows: built with the `e2e` feature, started, and driven by
-# Playwright over CDP (ui/e2e), on x64 and, after the merge, ARM64. One launch warms up the new exe unmeasured; then
-# the tests run once as is and once with --disable-gpu, and each run writes the control's numbers
-# (time to #app-root, memory of the process tree, JS heap, DOM nodes) to
+# Playwright over CDP (ui/e2e), on x64 and, after the merge, ARM64. One launch warms up the new
+# exe unmeasured; then the tests run once as is and once with --disable-gpu, and each run writes
+# the control's numbers (time to #app-root, memory of the process tree, JS heap, DOM nodes) to
 # e2e-results-<runner>-<mode>.json. The numbers are recorded, not gated.
 #
 # - No version is written here, as in ci.yml: Rust comes from rust-toolchain.toml, pnpm from
@@ -13,20 +13,18 @@
 
 name: e2e-windows
 
-# Pull requests run only when they touch the desktop crate, the ui or this workflow, and only on
-# windows-2025 (x64). A change elsewhere that breaks the app (another crate, Cargo.lock, the
-# toolchain) shows up on the next push to main. Filtering is fine while no check of this workflow
-# is required; before one is, drop the filter, for the reason ci.yml gives: a required check that
-# never reports blocks the merge.
+# Every pull request gets the check `smoke (windows-2025)`, the x64 smoke test, and the check is
+# meant to be required. The job e2e-changes decides whether the steps run: a pull request that
+# touches none of crates/desktop/, ui/ or this workflow starts the job and skips every step, so the
+# check reports in about a minute. One that touches them runs the smoke test in full, on x64 only.
+# A change elsewhere that breaks the app (another crate, Cargo.lock, the toolchain) shows up on the
+# next push to main. The job is never skipped as a whole: a skipped job reports its check under the
+# unexpanded name, and a required check that never reports blocks the merge.
 # Every push to main, the nightly run and a run on demand cover x64 and ARM64 (windows-11-arm),
 # which gives the budgets their baseline and keeps main's Rust cache, the one pull requests can
 # read, warm.
 on:
   pull_request:
-    paths:
-      - crates/desktop/**
-      - ui/**
-      - .github/workflows/e2e-windows.yml
   push:
     branches: [main]
   schedule:
@@ -43,8 +41,48 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  e2e-changes:
+    name: e2e-changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.filter.outputs.run }}
+    steps:
+      # A push, the nightly run and a run on demand run the smoke test; a pull request runs it only
+      # when it changes the desktop crate, the ui or this workflow.
+      - name: Decide whether the smoke test runs
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != pull_request ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git init -q work
+          cd work
+          git fetch -q --no-tags --filter=blob:none "$REPO_URL" \
+            "+refs/heads/${BASE_REF}:refs/ci/base" \
+            "+${HEAD_SHA}:refs/ci/head"
+          # --no-renames lists both sides of a rename, so a file renamed out of crates/desktop/ or
+          # ui/ still runs the smoke test.
+          changed=$(git diff --no-renames --name-only refs/ci/base...refs/ci/head)
+          app=$(printf '%s\n' "$changed" \
+            | grep -E '^(crates/desktop/|ui/|\.github/workflows/e2e-windows\.yml$)' || true)
+          if [ -n "$app" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No change to crates/desktop/, ui/ or this workflow: the steps skip."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   smoke:
     name: smoke (${{ matrix.runner }})
+    needs: e2e-changes
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -58,6 +96,7 @@ jobs:
             || '[{"runner": "windows-2025", "target": "x86_64-pc-windows-msvc"},
                  {"runner": "windows-11-arm", "target": "aarch64-pc-windows-msvc"}]') }}
     env:
+      RUN: ${{ needs.e2e-changes.outputs.run }}
       TARGET: ${{ matrix.target }}
       E2E_APP: ${{ github.workspace }}/target/${{ matrix.target }}/release/clauseo-desktop.exe
       OUT: ${{ github.workspace }}/e2e-out
@@ -65,58 +104,74 @@ jobs:
       run:
         shell: bash
     steps:
+      - name: Skip, the app, ui and this workflow are unchanged
+        if: env.RUN != 'true'
+        run: echo "No change to crates/desktop/, ui/ or this workflow; nothing to smoke-test."
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.RUN == 'true'
         with:
           persist-credentials: false
 
       - name: Install the Rust toolchain from rust-toolchain.toml, and the target
+        if: env.RUN == 'true'
         run: |
           rustup toolchain install
           rustup target add "$TARGET"
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: env.RUN == 'true'
         with:
           package_json_file: ui/package.json
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: env.RUN == 'true'
         with:
           node-version-file: ui/package.json
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: env.RUN == 'true'
         with:
           key: e2e-${{ matrix.target }}
           cache-bin: "false"
 
       - name: Install the ui workspace
+        if: env.RUN == 'true'
         run: pnpm -C ui install --frozen-lockfile
 
       - name: Typecheck ui/e2e
+        if: env.RUN == 'true'
         run: pnpm -C ui/e2e run typecheck
 
       - name: Unit tests of the harness
+        if: env.RUN == 'true'
         run: pnpm -C ui/e2e run test:unit
 
       # No other job builds the Windows-only e2e code, so it is linted here.
       - name: Clippy with the e2e feature
+        if: env.RUN == 'true'
         run: cargo clippy -p clauseo-desktop --all-targets --features e2e --target "$TARGET" -- -D warnings
 
       - name: Build the app with the e2e feature
         id: build
+        if: env.RUN == 'true'
         run: pnpm -C ui tauri build --no-bundle --features e2e --target "$TARGET"
 
       - name: Make the results folder
+        if: env.RUN == 'true'
         run: mkdir -p "$OUT"
 
       # The first start of a freshly built exe is slower than the rest, so the smoke test runs once
       # before the measured runs and its launch is not measured.
       - name: Warm-up launch (smoke test, not measured)
+        if: env.RUN == 'true'
         run: pnpm -C ui/e2e test smoke.spec.ts
 
       # Runs even when the warm-up failed, so a failure there still leaves the numbers.
       - name: Tests and numbers
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ env.RUN == 'true' && !cancelled() && steps.build.outcome == 'success' }}
         env:
           E2E_RESULTS: ${{ env.OUT }}/e2e-results-${{ matrix.runner }}-normal.json
         run: pnpm -C ui/e2e test
@@ -124,14 +179,14 @@ jobs:
       # Runs even when the run before failed: GitHub's Windows runners have no GPU, and the two runs
       # tell apart a failure of the GPU path from a failure of the app.
       - name: Tests and numbers with --disable-gpu
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ env.RUN == 'true' && !cancelled() && steps.build.outcome == 'success' }}
         env:
           E2E_DISABLE_GPU: "1"
           E2E_RESULTS: ${{ env.OUT }}/e2e-results-${{ matrix.runner }}-disable-gpu.json
         run: pnpm -C ui/e2e test
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ env.RUN == 'true' && !cancelled() && steps.build.outcome == 'success' }}
         with:
           name: e2e-results-${{ matrix.runner }}
           path: ${{ env.OUT }}
