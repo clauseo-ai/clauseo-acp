@@ -284,7 +284,7 @@ fn stage_all(
         if let Op::Write(path, blob) = op {
             let abs = make_parents(folder, path, made)?;
             let file = write::stage(&abs, &mut |file| {
-                core.history.read_blob(*blob, file).map(drop)
+                core.history.read_blob(*blob, path.as_str(), file).map(drop)
             })?;
             staged.push(file);
         }

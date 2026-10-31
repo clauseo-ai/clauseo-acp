@@ -9,6 +9,7 @@ use gix::objs::tree::{EntryKind, EntryMode};
 use gix::objs::{Kind, TreeRefIter};
 use gix::odb::loose;
 
+use super::check;
 use super::durable::{NewObjects, put};
 use super::gix_store::{to_gix, to_oid};
 use super::{Oid, TreeFile};
@@ -98,7 +99,8 @@ pub(super) fn read(
     files: &mut Vec<TreeFile>,
 ) -> Result<(), Error> {
     let mut buffer = Vec::new();
-    let data = find(store, &id, Kind::Tree, &mut buffer)?;
+    let folder = prefix.strip_suffix('/').unwrap_or(prefix);
+    let data = find(store, &id, Kind::Tree, folder, &mut buffer)?;
     let mut folders = Vec::new();
     for entry in TreeRefIter::from_bytes(data, HashKind::Sha1) {
         let entry = entry.map_err(|err| Error::history("read tree", err))?;
@@ -132,8 +134,10 @@ pub(super) fn file_at(
     let mut buffer = Vec::new();
     let mut tree = id;
     let mut parts = path.split('/').peekable();
+    let mut folder: usize = 0;
     while let Some(part) = parts.next() {
-        let data = find(store, &tree, Kind::Tree, &mut buffer)?;
+        let at = path.get(..folder.saturating_sub(1)).unwrap_or_default();
+        let data = find(store, &tree, Kind::Tree, at, &mut buffer)?;
         let mut found = None;
         for entry in TreeRefIter::from_bytes(data, HashKind::Sha1) {
             let entry = entry.map_err(|err| Error::history("read tree", err))?;
@@ -146,7 +150,10 @@ pub(super) fn file_at(
             return Ok(None);
         };
         match (parts.peek().is_some(), mode.is_tree()) {
-            (true, true) => tree = oid,
+            (true, true) => {
+                tree = oid;
+                folder += part.len() + 1;
+            }
             (false, false) if mode.is_blob() => return to_oid(&oid).map(Some),
             _ => return Ok(None),
         }
@@ -154,7 +161,7 @@ pub(super) fn file_at(
     Ok(None)
 }
 
-/// Lets `gix::diff::tree` read trees from the loose store.
+/// Lets `gix::diff::tree` read trees from the loose store, each checked against its id.
 struct LooseFind<'s>(&'s loose::Store);
 
 impl gix::objs::Find for LooseFind<'_> {
@@ -163,7 +170,11 @@ impl gix::objs::Find for LooseFind<'_> {
         id: &gix::oid,
         buffer: &'b mut Vec<u8>,
     ) -> gix::Result<Option<gix::objs::Data<'b>>> {
-        self.0.try_find(id, buffer)
+        let data = self.0.try_find(id, buffer)?;
+        if let Some(data) = &data {
+            data.verify_checksum(id)?;
+        }
+        Ok(data)
     }
 }
 
@@ -182,8 +193,8 @@ pub(super) fn changed(
         return Ok(());
     }
     let (mut a_buffer, mut b_buffer) = (Vec::new(), Vec::new());
-    let a_tree = find(store, &a, Kind::Tree, &mut a_buffer)?;
-    let b_tree = find(store, &b, Kind::Tree, &mut b_buffer)?;
+    let a_tree = find(store, &a, Kind::Tree, "", &mut a_buffer)?;
+    let b_tree = find(store, &b, Kind::Tree, "", &mut b_buffer)?;
     let mut recorder = Recorder::default();
     gix::diff::tree(
         TreeRefIter::from_bytes(a_tree, HashKind::Sha1),
@@ -247,11 +258,14 @@ fn push(
     Ok(())
 }
 
-/// The content of object `id` in `store`, which must be of `kind`, read into `buffer`.
+/// The content of object `id` in `store`, which must be of `kind` and hash to `id`, read into
+/// `buffer`; `path` is the folder it was read for (empty for the root or a commit), named in
+/// the error. gix's `try_find` checks the header and the length but not the hash.
 pub(super) fn find<'a>(
     store: &loose::Store,
     id: &ObjectId,
     kind: Kind,
+    path: &str,
     buffer: &'a mut Vec<u8>,
 ) -> Result<&'a [u8], Error> {
     let data = store
@@ -264,5 +278,8 @@ pub(super) fn find<'a>(
             format!("{id} is not a {kind}"),
         ));
     }
+    let found = gix::objs::compute_hash(HashKind::Sha1, kind, data.data)
+        .map_err(|err| Error::history("hash", err))?;
+    check::same(id, found, "read object", path)?;
     Ok(data.data)
 }

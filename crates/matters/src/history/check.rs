@@ -1,6 +1,7 @@
 //! Checks of a loose object file found already present: its header alone, or its whole content
 //! inflated and hashed. A file that does not decode is unsound (`false`); an I/O error reading
-//! it is an error, so a transient failure never counts as a torn object.
+//! it is an error, so a transient failure never counts as a torn object. And [`same`], the
+//! check every object read from history passes.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
@@ -93,4 +94,25 @@ pub(super) fn whole(path: &Path, id: &ObjectId, kind: Kind, size: u64) -> Result
     };
     let total = u64::try_from(len).unwrap_or(u64::MAX).saturating_add(size);
     Ok(state.total_out() == total && hasher.try_finalize().is_ok_and(|found| found == *id))
+}
+
+/// Nothing when `found`, the hash of an object read for `id`, is `id`; otherwise a history
+/// error of `op` that names the object and `path`, the file or folder it was read for (empty
+/// for the root tree or a commit).
+pub(super) fn same(
+    id: &ObjectId,
+    found: ObjectId,
+    op: &'static str,
+    path: &str,
+) -> Result<(), Error> {
+    if found == *id {
+        return Ok(());
+    }
+    let at = if path.is_empty() {
+        String::new()
+    } else {
+        format!("{path}: ")
+    };
+    let message = format!("{at}{id} does not match its content (hashes to {found})");
+    Err(Error::history(op, message))
 }

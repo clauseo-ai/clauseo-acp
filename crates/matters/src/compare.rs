@@ -125,5 +125,5 @@ pub(crate) fn read_file(
         .history
         .file_at(tree, path.as_str())?
         .ok_or_else(|| Error::UnknownFile { path: path.clone() })?;
-    core.history.read_blob(blob, out)
+    core.history.read_blob(blob, path.as_str(), out)
 }
