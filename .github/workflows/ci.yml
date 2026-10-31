@@ -100,9 +100,7 @@ jobs:
 
       # clippy builds the desktop crate, which links WebKitGTK.
       - name: Install the Linux system packages Tauri needs
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends libwebkit2gtk-4.1-dev
+        uses: ./.github/actions/install-tauri-linux-deps
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
@@ -178,9 +176,9 @@ jobs:
 
       - name: Install the Linux system packages Tauri needs
         if: env.BUILD == 'true' && runner.os == 'Linux'
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends libwebkit2gtk-4.1-dev xvfb
+        uses: ./.github/actions/install-tauri-linux-deps
+        with:
+          extra-packages: xvfb
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         if: env.BUILD == 'true'
@@ -334,9 +332,7 @@ jobs:
 
       # A mutant in the desktop crate builds and tests it, which links WebKitGTK.
       - name: Install the Linux system packages Tauri needs
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends libwebkit2gtk-4.1-dev
+        uses: ./.github/actions/install-tauri-linux-deps
 
       # Saves the crate registry downloads and xtask's own build. It does not speed up the mutants:
       # each one builds in a copy of the tree with its own target/.
