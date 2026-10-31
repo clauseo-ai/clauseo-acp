@@ -168,9 +168,11 @@ impl Matter {
     /// older `Matter` of this id first.
     ///
     /// The host refuses, before calling this, a folder that is, contains or sits inside another
-    /// listed matter's folder: that is a registry lookup this crate cannot make. Passing the
-    /// other matters' folders in `refused` covers the "contains" and "is" halves
-    /// (`Refusal::Listed`), not "sits inside".
+    /// registered matter's folder: that needs the registry, which this crate does not have. It
+    /// checks all three cases with [`crate::same_or_nested`] against each other matter's folder,
+    /// and words the refusal itself. `refused` is for protected folders (home, system folders):
+    /// another matter's folder passed there would come back as `Refusal::Listed`, and "sits
+    /// inside" would still not be covered.
     pub fn locate(
         settings: Settings,
         id: MatterId,
@@ -182,20 +184,27 @@ impl Matter {
         Self::open(settings, id, folder)
     }
 
-    /// Repairs a deleted or damaged marker: writes `.clauseo/matter.json` for matter `id` into
-    /// `folder` again, with `created_at` (the matter's creation time as the host recorded it),
-    /// when the marker is missing or does not read and `folder` is the folder the history
+    /// Repairs a deleted or damaged `matter.json`: writes `.clauseo/matter.json` for matter `id`
+    /// into `folder` again, with `created_at` (the matter's creation time as the host recorded
+    /// it), when `matter.json` is missing or does not read and `folder` is the folder the history
     /// records (`core.worktree`, the folder the matter was last opened from, compared as paths
-    /// are compared for refused folders). With a marker naming `id` already there it is
-    /// [`Matter::open`]. Writes nothing when it refuses:
+    /// are compared for refused folders). With a `matter.json` naming `id` already there it is
+    /// [`Matter::open`].
+    ///
+    /// Two histories can record the same folder: a folder imported again as a new matter after
+    /// its `matter.json` was deleted. With `matter.json` deleted once more, relink succeeds for
+    /// either matter, and the folder goes to whichever runs first; nothing is lost, every version
+    /// stays in its history. So the host must not relink a folder that another registered matter
+    /// claims: the same registry check, with [`crate::same_or_nested`], as for
+    /// [`Matter::locate`]. Writes nothing when it refuses:
     ///
     /// - the places [`Matter::locate`] refuses (`refused`, a drive root, the matters root);
-    /// - a marker naming another matter: `matter.folder_missing` (`OtherMatter`), never
+    /// - a `matter.json` naming another matter: `matter.folder_missing` (`OtherMatter`), never
     ///   overwritten;
     /// - a folder the history does not record: `matter.folder_missing` with the reason
     ///   `open` gave (`NoMatterJson` or `Unreadable`); it moved, so locate it instead;
     /// - a history that does not open or has no checkpoint (`matter.checkpoint_failed`): the
-    ///   history is opened before the marker is written.
+    ///   history is opened before `matter.json` is written.
     pub fn relink(
         settings: Settings,
         id: MatterId,
@@ -206,7 +215,7 @@ impl Matter {
         refuse::check_folder(folder, refused)?;
         refuse::check_outside_root(folder, &settings.matters_root)?;
         let reason = match json::read(folder)? {
-            json::Found::None => MissingReason::NoMatterJson,
+            json::Found::NoMarker => MissingReason::NoMatterJson,
             json::Found::Unreadable => MissingReason::Unreadable,
             json::Found::Matter(_) | json::Found::NoFolder => {
                 return Self::open(settings, id, folder);
@@ -225,9 +234,9 @@ impl Matter {
         Ok(matter)
     }
 
-    /// Opens the history of matter `id` against `folder`, whose marker was checked: rewrites a
-    /// wrong `HEAD` and a `core.worktree` naming another folder, loads the timeline and the
-    /// stat cache, and refuses a timeline with no checkpoint.
+    /// Opens the history of matter `id` against `folder`, whose `matter.json` was checked:
+    /// rewrites a wrong `HEAD` and a `core.worktree` naming another folder, loads the timeline
+    /// and the stat cache, and refuses a timeline with no checkpoint.
     fn open_history(settings: Settings, id: MatterId, folder: &Path) -> Result<Self, Error> {
         let git_dir = matter_home(&settings, id).join(GIT_DIR);
         let history = GixStore::open(&git_dir, folder)?;

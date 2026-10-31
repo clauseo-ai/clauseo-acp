@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use super::{check_folder, is_unc, is_unc_text, is_windows_drive_root_text, same_folder};
+use super::{
+    check_folder, is_unc, is_unc_text, is_windows_drive_root_text, same_folder, same_or_nested,
+};
 use crate::test_dir::TestDir;
 use crate::{Error, MissingReason, Refusal, write};
 
@@ -151,4 +153,24 @@ fn same_folder_compares_canonical_spellings() {
     ));
     #[cfg(any(target_os = "macos", windows))]
     assert!(same_folder(&matter, &dir.path().join("MATTER")));
+}
+
+#[test]
+fn same_or_nested_holds_for_the_folder_its_parents_and_its_children() {
+    let dir = TestDir::new("refuse-nested");
+    let matter = dir.path().join("Matter");
+    let inside = matter.join("Sub");
+    let sibling = dir.path().join("Matter 2");
+    write::create_dir_all(&inside).unwrap();
+    write::create_dir_all(&sibling).unwrap();
+    assert!(same_or_nested(&matter, &matter));
+    assert!(same_or_nested(&matter, &inside));
+    assert!(same_or_nested(&inside, &matter));
+    assert!(same_or_nested(dir.path(), &matter));
+    assert!(!same_or_nested(&matter, &sibling));
+    // A registered folder that has moved away compares as written.
+    assert!(same_or_nested(&matter.join("gone"), &matter));
+    assert!(!same_or_nested(&dir.path().join("gone"), &matter));
+    #[cfg(any(target_os = "macos", windows))]
+    assert!(same_or_nested(&dir.path().join("MATTER"), &inside));
 }

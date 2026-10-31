@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
-use clauseo_matters::{Error, Matter, NewMatter, Refusal, Settings, scan};
+use clauseo_matters::{Error, Matter, MissingReason, NewMatter, Refusal, Settings, scan};
 use clauseo_protocol::ErrorCode;
 
 use crate::fixture::{Fixture, matter_id};
@@ -76,4 +76,38 @@ fn import_refuses_matters_root_nesting() {
         assert!(!folder.join(".clauseo").exists(), "{}", folder.display());
     }
     assert!(!root.join("inside/.clauseo").exists());
+}
+
+/// A plain file is refused before anything is written, by scan and import alike.
+#[test]
+fn import_refuses_plain_file_up_front() {
+    let fx = Fixture::new("refuse-file");
+    let file = fx.dir.path().join("notes.txt");
+    support::write(&file, "a file, not a folder");
+    let settings = fx.settings();
+    let cancel = AtomicBool::new(false);
+    let scanned = scan(&file, &[], &settings, &mut |_| {}, &cancel).unwrap_err();
+    let new = NewMatter {
+        id: matter_id(2),
+        folder: file.clone(),
+        ..fx.new_matter()
+    };
+    let imported = Matter::import(settings.clone(), new, &[], &mut |_| {}, &cancel).unwrap_err();
+    for err in [scanned, imported] {
+        assert!(
+            matches!(
+                err,
+                Error::FolderMissing {
+                    reason: MissingReason::NoFolder,
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+    }
+    assert!(
+        !settings.matters_root.exists(),
+        "nothing written, not even the matters root"
+    );
+    assert_eq!(std::fs::read(&file).unwrap(), b"a file, not a folder");
 }

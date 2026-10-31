@@ -9,7 +9,9 @@ use windows::Win32::Storage::FileSystem::{FILE_FLAGS_AND_ATTRIBUTES, SetFileAttr
 use windows::core::HSTRING;
 
 /// Sets the attributes of `path` to `attributes`, all of them: the caller passes the ones it
-/// keeps.
+/// keeps. The path goes as it is, without a `\\?\` prefix, so one over 260 characters fails
+/// (and [`super::hide_dir`] logs it, leaving the folder visible) unless the process is
+/// long-path aware.
 pub(super) fn set_attributes(path: &Path, attributes: u32) -> io::Result<()> {
     let wide = HSTRING::from(path);
     // SAFETY: `wide` is a NUL-terminated UTF-16 string that outlives the call, and the call

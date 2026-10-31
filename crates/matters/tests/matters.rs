@@ -48,6 +48,10 @@ mod compare;
 mod reopen;
 
 #[cfg(test)]
+#[path = "matters/owner_file.rs"]
+mod owner_file;
+
+#[cfg(test)]
 #[path = "matters/locate.rs"]
 mod locate;
 

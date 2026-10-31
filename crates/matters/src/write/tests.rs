@@ -41,5 +41,5 @@ fn hide_dir_sets_hidden_and_keeps_readonly() {
 
     super::hide_dir(&dir.path().join("missing"));
     // Writable again, so the test folder can be removed.
-    super::win32::set_attributes(&target, attributes & !READONLY).unwrap();
+    super::windows::set_attributes(&target, attributes & !READONLY).unwrap();
 }

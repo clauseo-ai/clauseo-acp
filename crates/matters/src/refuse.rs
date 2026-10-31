@@ -60,7 +60,13 @@ pub(crate) fn check_new_matter(folder: &Path, matters_root: &Path) -> Result<(),
         reason,
     };
     match json::read(folder)? {
-        json::Found::NoFolder | json::Found::None => {}
+        json::Found::NoMarker => {}
+        json::Found::NoFolder => {
+            return Err(Error::FolderMissing {
+                folder: folder.to_path_buf(),
+                reason: MissingReason::NoFolder,
+            });
+        }
         json::Found::Matter(id) => return Err(refuse(Refusal::AlreadyMatter(id))),
         json::Found::Unreadable => return Err(refuse(Refusal::UnreadableMatterJson)),
     }
@@ -78,17 +84,30 @@ pub(crate) fn check_outside_root(folder: &Path, matters_root: &Path) -> Result<(
     let canonical =
         dunce::canonicalize(folder).map_err(|err| Error::io("canonicalize", folder, err))?;
     let root = dunce::canonicalize(matters_root).unwrap_or_else(|_| matters_root.to_path_buf());
-    let (candidate, root) = (spellings(&canonical), spellings(&root));
-    let nested = candidate.iter().any(|folder_key| {
-        root.iter().any(|root_key| {
-            root_key.starts_with(folder_key.as_slice())
-                || folder_key.starts_with(root_key.as_slice())
-        })
-    });
-    if nested {
+    if nested(&spellings(&canonical), &spellings(&root)) {
         return Err(refuse(Refusal::MattersRoot));
     }
     Ok(())
+}
+
+/// Whether `a` and `b` are the same folder or one holds the other, compared as the refused-folder
+/// check compares paths: each canonicalised (taken as written when that fails, so a folder that
+/// has moved away still compares), by components, case-insensitively on macOS and Windows, and on
+/// macOS with and without `/System/Volumes/Data`. For the host's registry check before
+/// [`Matter::locate`](crate::Matter::locate) and [`Matter::relink`](crate::Matter::relink): a
+/// folder that is, contains or sits inside another registered matter's folder.
+pub fn same_or_nested(a: &Path, b: &Path) -> bool {
+    let keys =
+        |path: &Path| spellings(&dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
+    nested(&keys(a), &keys(b))
+}
+
+/// Whether a key of `a` starts with a key of `b`, or the other way round.
+fn nested(a: &[Vec<OsString>], b: &[Vec<OsString>]) -> bool {
+    a.iter().any(|a_key| {
+        b.iter()
+            .any(|b_key| a_key.starts_with(b_key) || b_key.starts_with(a_key))
+    })
 }
 
 /// Whether `a` and `b` name the same folder once canonicalised, compared as [`check_folder`]
