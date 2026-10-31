@@ -58,15 +58,15 @@ export const WORK: readonly WorkItem[] = [
   { at: "4:31 pm", what: "Checked Acme Traders v. State against later decisions" },
 ];
 
-/** The answer in blocks: a lead, two paragraphs and the other side's best case. Refs are [[p:id|label]] or [[c:id]]. */
+/** The answer in blocks: a lead, two paragraphs and the other side's best case. Refs are [[p:citation|label]] or [[c:id]]. */
 export const ANSWER: readonly Block[] = [
   {
     kind: "lead",
-    text: "The bank was told in writing on the first of the month [[p:notice|PB 1]], before it closed the account.",
+    text: "The bank was told in writing on the first of the month [[p:notice-2|PB 1]], before it closed the account, and a copy went to its head office [[p:notice-9|PB 3]].",
   },
   {
     kind: "para",
-    text: "The reply denies that any notice reached the branch [[p:reply|PB 5]]. The supply agreement, though, needs only written notice to the other party [[p:agreement|Clause 14, PB 17]].",
+    text: "The reply denies that any notice reached the branch [[p:reply-3|PB 5]]. The supply agreement, though, needs only written notice to the other party [[p:agreement-14|Clause 14, PB 17]].",
   },
   {
     kind: "para",
@@ -84,7 +84,7 @@ export const ANSWER_COUNT = "Cites 1 judgment";
 export const CARD_ANSWER: readonly Block[] = [
   {
     kind: "lead",
-    text: "The bank was told in writing [[p:notice|PB 1]], and the supply agreement sets the notice period [[p:agreement|Clause 14]].",
+    text: "The bank was told in writing [[p:notice-2|PB 1]], and the supply agreement sets the notice period [[p:agreement-14|Clause 14]].",
   },
   {
     kind: "para",

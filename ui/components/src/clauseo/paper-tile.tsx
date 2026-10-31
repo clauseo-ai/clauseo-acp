@@ -5,16 +5,17 @@ import { useWords } from "../lib/words.ts";
 import { useCarded, useDraftHolders, useInHand, type Target } from "./hand.ts";
 import { useWide } from "./layout.ts";
 import {
+  citationsOf,
   citedPapers,
   isLatinOnly,
   pbWords,
   shortTitle,
-  type Citation,
   type CitedRole,
   type Paper,
   type PaperBookPlace,
   type TileState,
 } from "./matter.ts";
+import { useMatter } from "./matter-context.ts";
 import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
 import { Heading } from "./heading.tsx";
@@ -171,8 +172,6 @@ export type PreparedTile = { id: string; short: string; title: string; label: st
 
 export type PapersWallProps = {
   papers: readonly Paper[];
-  /** The answer's citations of the papers. */
-  citations: readonly Citation[];
   /** The list of dates the lawyer accepted earlier, where there is one: a matter just opened has none. */
   dates?: { title: string; accepted: string } | null;
   /** The prepared draft, waiting flagged and unopened, once Clauseo has prepared it. */
@@ -181,10 +180,12 @@ export type PapersWallProps = {
 };
 
 /** The matter's papers as a facade of tiles in paper book order, under "Papers 14", "By paper book page" and "All
- * 14". Three equal columns; a title that wraps makes its whole row taller rather than clipping. */
-export function PapersWall({ papers, citations, dates = null, draft, onTurn }: PapersWallProps) {
+ * 14". Three equal columns; a title that wraps makes its whole row taller rather than clipping. A paper the answer in
+ * view cites lights in the role of the citation citedPapers picks for it, read from useMatter() as the card reads it. */
+export function PapersWall({ papers, dates = null, draft, onTurn }: PapersWallProps) {
   const w = useWords();
-  const roles = citedPapers(citations, papers);
+  const matter = useMatter();
+  const lit = citedPapers(citationsOf(matter, matter.inView), papers);
   const { id, nodes } = useRoom();
   const n = papers.length;
   return (
@@ -200,7 +201,7 @@ export function PapersWall({ papers, citations, dates = null, draft, onTurn }: P
       </header>
       <ol className="facade" ref={nodes.slot("facade")}>
         {papers.map((p) => {
-          const tile = paperTile(p, roles.get(p.id), w);
+          const tile = paperTile(p, lit.get(p.id)?.citation.role, w);
           return <PaperTile key={p.id} id={p.id} {...tile} />;
         })}
         {dates !== null && (

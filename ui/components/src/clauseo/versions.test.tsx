@@ -367,9 +367,19 @@ const MATTER: MatterData = {
     { id: "memo", title: "Junior's note", pb: { word: "Note" }, kind: "note" },
   ],
   cites: {},
-  citations: [
-    { paperId: "notice", role: "supports", pin: "Para 1, PB 7", excerpt: "Take notice.", mark: "" },
-  ],
+  citations: {
+    answer: [
+      {
+        id: "notice-1",
+        paperId: "notice",
+        role: "supports",
+        pin: "Para 1, PB 7",
+        excerpt: "Take notice.",
+        mark: "",
+      },
+    ],
+  },
+  inView: "answer",
 };
 const OWN = [
   { id: "dates", title: "List of dates", state: "accepted", word: "Dates" },

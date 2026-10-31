@@ -2,8 +2,9 @@ import { use, useEffect, useRef } from "react";
 import { motionAllowed } from "../lib/display.ts";
 import { isWide } from "./layout.ts";
 import { dur } from "./motion.ts";
-import { citedPaper, citeIn, type MatterData } from "./matter.ts";
+import { citationFor, citeIn, type MatterData } from "./matter.ts";
 import { MatterContext } from "./matter-context.ts";
+import type { Target } from "./hand.ts";
 import { useRoom, type RoomNodes } from "./room-scope.ts";
 
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -65,14 +66,14 @@ function line(g: SVGGElement, r: Route) {
 }
 
 /** The line's colour: the paper's role, or for a judgment primary for us and red for theirs. */
-function lineRole(matter: MatterData, kind: "paper" | "cite", id: string): string {
-  if (kind === "cite") return citeIn(matter, id)?.stance === "against" ? "against" : "cite";
-  return citedPaper(matter.citations, matter.papers, id)?.citation.role ?? "relied";
+function lineRole(matter: MatterData, t: Target): string {
+  if (t.kind === "cite") return citeIn(matter, t.id)?.stance === "against" ? "against" : "cite";
+  return citationFor(matter, t.id, t.citation)?.citation.role ?? "relied";
 }
 
 /** The provenance line, on request only, and the scrim under an open card. One fine 1.5 px line in the role's colour
  * joins the cited words to the card that grew from the wall: pointing at a reference draws one; pointing at a tile
- * draws one to every place the answer cites it. The Ready card and the draft's tile join the same way. Nothing draws
+ * draws one to every place the answer in view cites it. The Ready card and the draft's tile join the same way. Nothing draws
  * on its own, and at rest there are none. Positioned from measured boxes and redrawn on resize and scroll. */
 export function Provenance({
   turned,
@@ -169,9 +170,14 @@ export function Provenance({
         const cr = card.getBoundingClientRect();
         cover(cr);
         const key = `${h.target.kind}:${h.target.id}`;
+        // from the wall, to the answer in view's references only
         const refs =
-          nodes.get("thread")?.contains(h.trigger) === true ? [h.trigger] : nodes.refsTo(key);
-        const role = lineRole(matter, h.target.kind, h.target.id);
+          nodes.get("thread")?.contains(h.trigger) === true
+            ? [h.trigger]
+            : nodes
+                .refsTo(key)
+                .filter((r) => h.target.kind === "cite" || r.dataset["answer"] === matter.inView);
+        const role = lineRole(matter, h.target);
         const g = document.createElementNS(SVGNS, "g");
         g.dataset["role"] = role;
         for (const ref of refs) {

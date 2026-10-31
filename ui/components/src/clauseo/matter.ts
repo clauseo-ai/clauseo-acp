@@ -26,8 +26,14 @@ export type PaperId = Paper["id"];
 /** How an answer uses a paper it cites. */
 export type CitedRole = "supports" | "against" | "relied";
 
-/** One answer's use of one paper: its role, the place it pins and the words it quotes from there. */
+/** The id of an answer in the thread. */
+export type AnswerId = string;
+
+/** One answer's use of one place in a paper: its role, the place it pins and the words it quotes from there. An
+ * answer that quotes two places in one paper holds two citations, each with its own id. */
 export type Citation = {
+  /** Its id within its answer; another answer's citation may use the same id. */
+  readonly id: CitationId;
   readonly paperId: PaperId;
   readonly role: CitedRole;
   /** The pinned place the answer quotes: "Para 9, PB 4". */
@@ -37,6 +43,9 @@ export type Citation = {
   /** The span of the excerpt the answer turns on, marked inside it; "" marks nothing. */
   readonly mark: string;
 };
+export type CitationId = string;
+/** A citation as a reference names it: its answer, and its id there. */
+export type CitationRef = { readonly answer: AnswerId; readonly id: CitationId };
 
 /** A judgment's check against later decisions, as the answer reports it. */
 export type CiteCheck = {
@@ -74,11 +83,15 @@ export type Cite = {
 };
 export type CiteId = string;
 
-/** The papers and judgments the parts can name, by id, and the answer in view's citations of the papers. */
+/** The papers and judgments the parts can name, by id, and each answer's citations of the papers. */
 export type MatterData = {
   readonly papers: readonly Paper[];
   readonly cites: Readonly<Record<CiteId, Cite>>;
-  readonly citations: readonly Citation[];
+  /** Each answer's citations, by the answer's id, in the order the answer cites them. A reference in an answer
+   * looks only among its own answer's citations. */
+  readonly citations: Readonly<Record<AnswerId, readonly Citation[]>>;
+  /** The answer in view, whose citations light the wall; null before there is one. */
+  readonly inView: AnswerId | null;
 };
 
 /** How the answer uses a paper. "accepted" is earlier work the lawyer accepted into the matter. */
@@ -163,12 +176,14 @@ export const bare = (s: string) => s.replace(/[.\u0964]$/, "");
 export const sentence = (lang: Lang, s: string) =>
   s.replace(/[.\u0964]?$/, lang === "hi" ? "\u0964" : ".");
 
-/** A block's words and references: text, or a reference to a paper or a judgment with its label. */
+/** A block's words and references: text, or a reference with its label. A paper's reference carries the id of the
+ * answer's citation; a judgment's, the judgment's id. */
 export type Segment =
   | { type: "text"; text: string }
   | { type: "ref"; kind: "paper" | "cite"; id: string; label: string };
 
-/** A reference inside a block: [[p:id|label]] names a paper, [[c:id]] a judgment by its short name. */
+/** A reference inside a block: [[p:id|label]] names one of the answer's citations of a paper, by the citation's id;
+ * [[c:id]] a judgment by its short name. */
 const REF = /\[\[([pc]):([\w-]+)(?:\|([^\]]+))?\]\]/g;
 
 /** A block's text split into words and references. A judgment's reference without its own label takes its short
@@ -188,33 +203,63 @@ export function segmentsOf(block: string, matter: MatterData): Segment[] {
   return out;
 }
 
-/** A paper the answer cites, with its citation. */
+/** A citation, with the paper it names. */
 export type CitedPaper = { readonly paper: Paper; readonly citation: Citation };
 
-/** The answer's citation of a paper, with the paper. Undefined when the answer doesn't cite it, and when the citation
- * names a paper the matter doesn't hold: such a citation lights nothing and opens no card. Where the answer cites one
- * paper twice, the first citation counts. */
+/** One answer's citations; none for an answer the matter has no citations for, or for no answer. */
+export const citationsOf = (matter: MatterData, answer: AnswerId | null): readonly Citation[] =>
+  answer !== null && Object.hasOwn(matter.citations, answer)
+    ? (matter.citations[answer] ?? [])
+    : [];
+
+/** A citation by its id among one answer's citations, with the paper it names. Undefined when the answer has no
+ * citation of that id, and when the citation names a paper the matter doesn't hold. Such a citation is bad data from
+ * the host or the store: the parts drop it, so it lights nothing and opens no card, and whoever builds MatterData
+ * (R12) checks for it and logs it, so the drop isn't the only place it shows. */
 export function citedPaper(
   citations: readonly Citation[],
   papers: readonly Paper[],
-  id: PaperId,
+  id: CitationId,
 ): CitedPaper | undefined {
-  const citation = citations.find((c) => c.paperId === id);
-  const paper = citation === undefined ? undefined : papers.find((p) => p.id === id);
+  const citation = citations.find((c) => c.id === id);
+  const paper = citation === undefined ? undefined : papers.find((p) => p.id === citation.paperId);
   return citation === undefined || paper === undefined ? undefined : { paper, citation };
 }
 
-/** The papers an answer cites, by id, with their role, in the order the answer cites them. A citation of a paper the
- * matter doesn't hold is left out. */
+/** Which role lights a paper the answer cites more than once in different roles: against over supports over relied
+ * on, so a paper that tells against the lawyer anywhere in the answer never lights as support. */
+const ROLE_ORDER: readonly CitedRole[] = ["against", "supports", "relied"];
+const rank = (r: CitedRole) => ROLE_ORDER.indexOf(r);
+
+/** The papers an answer cites, by the paper's id, in the order the answer first cites them, each with the citation
+ * that lights its tile and opens from it: of its citations, the first in the strongest role (ROLE_ORDER). A citation
+ * of a paper the matter doesn't hold is left out, as citedPaper leaves it out. */
 export function citedPapers(
   citations: readonly Citation[],
   papers: readonly Paper[],
-): Map<PaperId, CitedRole> {
-  const out = new Map<PaperId, CitedRole>();
-  for (const c of citations) {
-    if (!out.has(c.paperId) && papers.some((p) => p.id === c.paperId)) out.set(c.paperId, c.role);
+): Map<PaperId, CitedPaper> {
+  const out = new Map<PaperId, CitedPaper>();
+  for (const citation of citations) {
+    const paper = papers.find((p) => p.id === citation.paperId);
+    if (paper === undefined) continue;
+    const held = out.get(paper.id);
+    if (held === undefined || rank(citation.role) < rank(held.citation.role))
+      out.set(paper.id, { paper, citation });
   }
   return out;
+}
+
+/** What a paper's card shows: the citation a reference named, or, from the paper's tile, the citation that lights it
+ * for the answer in view. Undefined when there is none, or when the named citation is of another paper. */
+export function citationFor(
+  matter: MatterData,
+  paperId: PaperId,
+  named: CitationRef | undefined,
+): CitedPaper | undefined {
+  if (named === undefined)
+    return citedPapers(citationsOf(matter, matter.inView), matter.papers).get(paperId);
+  const found = citedPaper(citationsOf(matter, named.answer), matter.papers, named.id);
+  return found?.paper.id === paperId ? found : undefined;
 }
 
 /* ---------- History ---------- */

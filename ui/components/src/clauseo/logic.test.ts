@@ -12,12 +12,15 @@ import {
 import { runs } from "../lib/runs.ts";
 import {
   benchOf,
+  citationFor,
+  citationsOf,
   citedPaper,
   citedPapers,
   keepIds,
   pbWords,
   tileTitle,
   type Citation,
+  type MatterData,
   type Paper,
 } from "./matter.ts";
 
@@ -131,25 +134,95 @@ describe("the matter's words", () => {
     expect(benchOf("tribunal", 3)).toBe("tribunal");
     expect(benchOf("tribunal", 1)).toBe("tribunal");
   });
-  test("the answer's citations, looked up against the matter's papers", () => {
+  test("a citation is found by its own id: two places quoted in one paper keep their own pins and excerpts", () => {
     const papers: Paper[] = [
       { id: "notice", title: "Notice", pb: { from: 1, to: 4 }, kind: "correspondence" },
       { id: "plaint", title: "Plaint", pb: { from: 5, to: 9 }, kind: "pleading" },
     ];
-    const quote = { pin: "Para 2, PB 1", excerpt: "told in writing", mark: "" };
     const citations: Citation[] = [
-      { paperId: "notice", role: "supports", ...quote },
-      { paperId: "gone", role: "against", ...quote },
-      { paperId: "notice", role: "against", ...quote },
+      {
+        id: "n2",
+        paperId: "notice",
+        role: "supports",
+        pin: "Para 2, PB 1",
+        excerpt: "told",
+        mark: "",
+      },
+      {
+        id: "n9",
+        paperId: "notice",
+        role: "supports",
+        pin: "Para 9, PB 3",
+        excerpt: "sent",
+        mark: "",
+      },
+      { id: "g", paperId: "gone", role: "against", pin: "Para 1", excerpt: "lost", mark: "" },
     ];
-    expect(citedPaper(citations, papers, "notice")).toEqual({
+    expect(citedPaper(citations, papers, "n2")).toEqual({
       paper: papers[0],
       citation: citations[0],
     });
-    // uncited, and cited but missing from the matter: neither lights nor opens a card
-    expect(citedPaper(citations, papers, "plaint")).toBeUndefined();
-    expect(citedPaper(citations, papers, "gone")).toBeUndefined();
-    expect([...citedPapers(citations, papers)]).toEqual([["notice", "supports"]]);
+    expect(citedPaper(citations, papers, "n9")).toEqual({
+      paper: papers[0],
+      citation: citations[1],
+    });
+    // an id the answer doesn't hold, and a citation of a paper the matter doesn't hold: nothing
+    expect(citedPaper(citations, papers, "nope")).toBeUndefined();
+    expect(citedPaper(citations, papers, "g")).toBeUndefined();
+    // a paper's id is not a citation's
+    expect(citedPaper(citations, papers, "notice")).toBeUndefined();
+  });
+  test("a reference looks only among its own answer's citations", () => {
+    const papers: Paper[] = [
+      { id: "notice", title: "Notice", pb: { from: 1, to: 4 }, kind: "correspondence" },
+    ];
+    const quote = { paperId: "notice", role: "supports", excerpt: "told", mark: "" } as const;
+    const matter: MatterData = {
+      papers,
+      cites: {},
+      citations: { a: [{ id: "n2", pin: "Para 2", ...quote }], b: [] },
+      inView: "b",
+    };
+    expect(citedPaper(citationsOf(matter, "a"), papers, "n2")?.citation.pin).toBe("Para 2");
+    expect(citedPaper(citationsOf(matter, "b"), papers, "n2")).toBeUndefined();
+    expect(citationsOf(matter, "unknown")).toEqual([]);
+    expect(citationsOf(matter, null)).toEqual([]);
+    // the card from a reference in a: a's citation; from the tile, the answer in view (b) cites nothing
+    expect(citationFor(matter, "notice", { answer: "a", id: "n2" })?.citation.pin).toBe("Para 2");
+    expect(citationFor(matter, "notice", { answer: "b", id: "n2" })).toBeUndefined();
+    expect(citationFor(matter, "notice", undefined)).toBeUndefined();
+  });
+  test("a paper cited twice in different roles lights in the stronger: against, then supports, then relied on", () => {
+    const papers: Paper[] = [
+      { id: "notice", title: "Notice", pb: { from: 1, to: 4 }, kind: "correspondence" },
+      { id: "plaint", title: "Plaint", pb: { from: 5, to: 9 }, kind: "pleading" },
+    ];
+    const at = (id: string, paperId: string, role: Citation["role"]): Citation => ({
+      id,
+      paperId,
+      role,
+      pin: id,
+      excerpt: "",
+      mark: "",
+    });
+    const citations = [
+      at("p1", "plaint", "relied"),
+      at("n1", "notice", "supports"),
+      at("n2", "notice", "against"),
+      at("n3", "notice", "against"),
+      at("p2", "plaint", "supports"),
+      at("g", "gone", "against"),
+    ];
+    const lit = citedPapers(citations, papers);
+    // in the order first cited; of a paper's citations, the first in its strongest role
+    expect([...lit].map(([p, c]) => [p, c.citation.id])).toEqual([
+      ["plaint", "p2"],
+      ["notice", "n2"],
+    ]);
+    const matter: MatterData = { papers, cites: {}, citations: { a: citations }, inView: "a" };
+    expect(citationFor(matter, "notice", undefined)?.citation.id).toBe("n2");
+    // a named citation of another paper opens nothing on this one
+    expect(citationFor(matter, "notice", { answer: "a", id: "p1" })).toBeUndefined();
   });
   test("identifiers hold together", () => {
     expect(keepIds("(2001) 1 SCC 1")).toBe("(2001)\u00A01\u00A0SCC\u00A01");

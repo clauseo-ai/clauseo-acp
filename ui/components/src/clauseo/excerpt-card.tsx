@@ -16,19 +16,27 @@ import { useWords } from "../lib/words.ts";
 import { BenchMark } from "./citations.tsx";
 import { useHandState, type Hand, type Target } from "./hand.ts";
 import { useWide } from "./layout.ts";
-import { benchOf, benchWords, citedPaper, keepIds, type MatterData } from "./matter.ts";
+import { benchOf, benchWords, citationFor, keepIds, type MatterData } from "./matter.ts";
 import { useMatter } from "./matter-context.ts";
 import { dur, ease } from "./motion.ts";
 import { useRoom, type RoomNodes } from "./room-scope.ts";
 import { Say } from "./say.tsx";
 
 /** A paper's card: its tile's face as the band (numeral, pin, title, role), then the verbatim excerpt with the
- * phrase the answer relies on marked, "Verbatim from the paper" and Open. */
-function PaperCard({ id, openRef }: { id: string; openRef: RefObject<HTMLButtonElement | null> }) {
+ * phrase the answer relies on marked, "Verbatim from the paper" and Open. It shows the citation the reference named,
+ * or from the tile the one that lights it (citationFor); with neither it shows nothing. */
+function PaperCard({
+  target,
+  openRef,
+}: {
+  target: Target;
+  openRef: RefObject<HTMLButtonElement | null>;
+}) {
   const w = useWords();
   const goTo = useGoTo();
-  const cited = useMatter().cited(id);
+  const cited = citationFor(useMatter(), target.id, target.citation);
   if (cited === undefined) return null;
+  const id = cited.paper.id;
   const { paper: p, citation } = cited;
   const { role, excerpt, mark, pin } = citation;
   const pb = p.pb;
@@ -197,7 +205,7 @@ const shown = (h: Hand) => (h.state === "none" ? null : h);
 /** The card's colour: a judgment's stays on the surface; a paper takes its role's. */
 function cardRole(matter: MatterData, t: Target): string {
   if (t.kind === "cite") return "cite";
-  return citedPaper(matter.citations, matter.papers, t.id)?.citation.role ?? "relied";
+  return citationFor(matter, t.id, t.citation)?.citation.role ?? "relied";
 }
 
 /** What stands behind a reference, on request: the paper's verbatim paragraph, or the judgment's citation and check.
@@ -440,7 +448,7 @@ function CardPopover({
             {h.target.kind === "cite" ? (
               <CiteCard id={h.target.id} openRef={openRef} onOpenJudgment={onOpenJudgment} />
             ) : (
-              <PaperCard id={h.target.id} openRef={openRef} />
+              <PaperCard target={h.target} openRef={openRef} />
             )}
           </Popover.Popup>
         </Popover.Positioner>

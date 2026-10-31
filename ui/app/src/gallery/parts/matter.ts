@@ -43,31 +43,52 @@ export const PAPERS: readonly Paper[] = [
   { id: "note", title: "Note on limitation", pb: { word: "Note" }, kind: "note" },
 ];
 
-/** The answer's citations of the papers. */
-export const CITATIONS: readonly Citation[] = [
-  {
-    paperId: "notice",
-    role: "supports",
-    pin: "Para 2, PB 1",
-    excerpt:
-      "The bank was told in writing on the first of the month that the account was in dispute.",
-    mark: "told in writing",
-  },
-  {
-    paperId: "reply",
-    role: "against",
-    pin: "Para 3, PB 5",
-    excerpt: "The bank denies that any notice reached its branch before the account was closed.",
-    mark: "denies",
-  },
-  {
-    paperId: "agreement",
-    role: "relied",
-    pin: "Clause 14, PB 17",
-    excerpt: "Either party may end this agreement by thirty days' written notice to the other.",
-    mark: "thirty days' written notice",
-  },
-];
+/** The answer in the thread, and the shorter one beside the excerpt card, as the matter keys their citations. */
+export const ANSWER_ID = "answer";
+export const CARD_ANSWER_ID = "card-answer";
+
+const NOTICE: Citation = {
+  id: "notice-2",
+  paperId: "notice",
+  role: "supports",
+  pin: "Para 2, PB 1",
+  excerpt:
+    "The bank was told in writing on the first of the month that the account was in dispute.",
+  mark: "told in writing",
+};
+const AGREEMENT: Citation = {
+  id: "agreement-14",
+  paperId: "agreement",
+  role: "relied",
+  pin: "Clause 14, PB 17",
+  excerpt: "Either party may end this agreement by thirty days' written notice to the other.",
+  mark: "thirty days' written notice",
+};
+
+/** Each answer's citations of the papers. The thread's answer quotes two places in the notice. */
+export const CITATIONS: Readonly<Record<string, readonly Citation[]>> = {
+  [ANSWER_ID]: [
+    NOTICE,
+    {
+      id: "notice-9",
+      paperId: "notice",
+      role: "supports",
+      pin: "Para 9, PB 3",
+      excerpt: "A copy of this notice is sent to your head office by registered post.",
+      mark: "head office",
+    },
+    {
+      id: "reply-3",
+      paperId: "reply",
+      role: "against",
+      pin: "Para 3, PB 5",
+      excerpt: "The bank denies that any notice reached its branch before the account was closed.",
+      mark: "denies",
+    },
+    AGREEMENT,
+  ],
+  [CARD_ANSWER_ID]: [NOTICE, AGREEMENT],
+};
 
 export const CITES: Readonly<Record<string, Cite>> = {
   acme: {
@@ -112,4 +133,9 @@ export const CITES: Readonly<Record<string, Cite>> = {
   },
 };
 
-export const MATTER: MatterData = { papers: PAPERS, cites: CITES, citations: CITATIONS };
+export const MATTER: MatterData = {
+  papers: PAPERS,
+  cites: CITES,
+  citations: CITATIONS,
+  inView: ANSWER_ID,
+};

@@ -2,8 +2,11 @@
 // excerpt card and the provenance line each read only their own part and re-render alone: a press on a reference
 // repaints its tile, not the room. Two rooms on one page each keep their own.
 import { useSyncExternalStore } from "react";
+import type { CitationRef } from "./matter.ts";
 
-export type Target = { kind: "paper" | "cite"; id: string };
+/** What a card speaks for: a paper or a judgment by its id. A paper put in hand from a reference carries the
+ * citation the reference named; from its tile, none. The tile is in hand either way. */
+export type Target = { kind: "paper" | "cite"; id: string; citation?: CitationRef | undefined };
 /** Where the card was asked for: a reference in the answer, a tile on the wall, a citation row. */
 export type Source = "ref" | "tile" | "row";
 
@@ -50,6 +53,7 @@ export type HandStore = {
 };
 
 const NONE: Hand = { state: "none" };
+/** The same paper or judgment, whichever citation of it. */
 const same = (a: Target, b: Target) => a.kind === b.kind && a.id === b.id;
 
 /** The words that opened a card, ready for the focus: the trigger itself, or the link or button inside it. */
