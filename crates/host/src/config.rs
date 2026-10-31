@@ -15,8 +15,9 @@ use crate::ids::{IdSource, RandomV7};
 
 use crate::window::PATCH_WINDOW_BYTES;
 
-/// What a firm's profile adds to an agent's session and launch. The host calls it for
-/// `session/new` and for each launch.
+/// What a firm's profile adds to an agent's session and launch. The host holds the hook but does
+/// not call it yet: `session/new` gets no `_meta` and a launch no extra variables. The
+/// profile-hook follow-up turns it on, for `session/new` and for each launch.
 pub trait ProfileHook: Send {
     /// The `_meta` object for `session/new` with `agent`, or `None` for none.
     fn session_meta(&self, agent: &AgentId) -> Option<serde_json::Map<String, Value>>;
