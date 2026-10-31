@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@clauseo/components": "workspace:*",
+    "@legendapp/list": "3.6.0",
+    "@tauri-apps/api": "2.12.4",
     "react": "catalog:",
     "react-dom": "catalog:"
   },
