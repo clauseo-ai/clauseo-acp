@@ -1,4 +1,4 @@
-import { createServer, resolveConfig } from "vite";
+import { build, createServer, resolveConfig, type Rolldown } from "vite";
 import { expect, test } from "vitest";
 import tauriConf from "../../../crates/desktop/tauri.conf.json" with { type: "json" };
 import { devCsp } from "../vite.config.ts";
@@ -52,4 +52,26 @@ test("the build's only input is index.html, so the dev-only gallery stays out of
   const config = await resolveConfig({ configFile: "vite.config.ts", logLevel: "silent" }, "build");
   expect(config.build.rolldownOptions.input).toBeUndefined();
   expect(config.build.assetsInlineLimit).toBe(0);
+});
+
+// The perf module (src/perf/) loads only in the e2e and marks builds; a release page must not pay for it. This builds
+// the app in memory and checks the perf code sits in its own chunk, imported with a bare import() from the entry
+// chunk, and that Vite's preload helper (about 1.8 KB, which vite.config.ts's bareDynamicImports unwraps) is gone.
+test("the release build keeps the perf module in a lazy chunk, with no preload helper in the entry", async () => {
+  const out = (await build({
+    configFile: "vite.config.ts",
+    logLevel: "silent",
+    build: { write: false },
+  })) as Rolldown.RolldownOutput | Rolldown.RolldownOutput[];
+  const chunks = (Array.isArray(out) ? out : [out])
+    .flatMap((o) => o.output)
+    .filter((c): c is Rolldown.OutputChunk => c.type === "chunk");
+  const entry = chunks.find((c) => c.isEntry);
+  const perf = chunks.find((c) => c.fileName.startsWith("assets/perf-"));
+  expect(entry).toBeDefined();
+  expect(perf).toBeDefined();
+  expect(perf!.isDynamicEntry).toBe(true);
+  expect(entry!.code).toMatch(/[^>]import\(`\.\/perf-[\w-]+\.js`\)/);
+  expect(entry!.code).not.toContain("vite:preloadError");
+  expect(entry!.code).not.toContain("startStream");
 });

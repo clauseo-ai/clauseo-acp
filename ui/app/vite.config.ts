@@ -62,8 +62,35 @@ function devCspHeader(): Plugin {
   };
 }
 
+/** The perf module's dynamic import as Vite's import analysis wraps it, before its preload list is filled in. */
+const PERF_PRELOAD = /__vitePreload\(\(\) => (import\("\.\/perf-[^"]+"\)), __VITE_PRELOAD__\)/g;
+
+/**
+ * Unwraps the perf module's dynamic import (src/main.tsx; loaded only in the e2e and marks builds) from Vite's preload
+ * helper back to a plain `import()`, so the minifier drops the helper: the perf chunk imports only what the main chunk
+ * already holds and has nothing to preload, and the helper would add about 1.8 KB to every release page's initial JS.
+ * Only that import: any other dynamic import keeps its preloads.
+ */
+function bareDynamicImports(): Plugin {
+  return {
+    name: "clauseo-bare-dynamic-imports",
+    apply: "build",
+    enforce: "post",
+    renderChunk(code) {
+      const bare = code.replace(PERF_PRELOAD, "$1");
+      return bare === code ? null : bare;
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [tailwindcss(), react(), babel({ presets: [reactCompilerPreset()] }), devCspHeader()],
+  plugins: [
+    tailwindcss(),
+    react(),
+    babel({ presets: [reactCompilerPreset()] }),
+    devCspHeader(),
+    bareDynamicImports(),
+  ],
   server: {
     // Tauri's devUrl. The watcher stays out of the Rust crates and the multi-GB target folders, and out of
     // ui/app/components, the link to ui/components for oxlint: Vite already watches those files by their real path.

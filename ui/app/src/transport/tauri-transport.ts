@@ -160,6 +160,12 @@ export class TauriTransport implements HostTransport {
     });
   }
 
+  /** Resolves once the window's channel is registered (`open_stream` answered); the perf build's `interactive` mark
+   * waits for it. A failed attempt rejects, and the next call tries again. */
+  connected(): Promise<void> {
+    return this.#open();
+  }
+
   dispatch(command: CommandEnvelope): Promise<CommandOutcome> {
     return call(commands.dispatch(command));
   }

@@ -1,5 +1,5 @@
-import { describe, expect, test } from "vitest";
-import { ChannelReader } from "./channel.ts";
+import { afterEach, describe, expect, test } from "vitest";
+import { ChannelReader, setTimedHook } from "./channel.ts";
 import type { ChannelEvent } from "./channel.ts";
 import type { HostEvent } from "./protocol.ts";
 
@@ -70,5 +70,64 @@ describe("ChannelReader", () => {
     expect(events).toEqual([]);
     expect(problems).toHaveLength(4);
     expect(r.messages).toBe(5);
+  });
+
+  test("an event split in fragments still joins while a timed hook is installed, with no time reported", () => {
+    const heard: unknown[] = [];
+    setTimedHook((e, ms) => heard.push([e, ms]));
+    const { r, events } = reader();
+    for (const p of pieces(JSON.stringify(EVENT), 3)) r.receive(p);
+    setTimedHook(null);
+    expect(events).toEqual([EVENT]);
+    expect(heard).toEqual([]);
+  });
+});
+
+describe("ChannelReader with timed messages (e2e builds)", () => {
+  afterEach(() => setTimedHook(null));
+
+  /** The bridge's wrapper: the event's JSON text spliced in raw. */
+  const timed = (event: unknown, receivedMs: number) =>
+    `{"timed":{"received_ms":${receivedMs},"event":${JSON.stringify(event)}}}`;
+
+  test("a timed message is unwrapped: the event is handed on once, counts one message, then reaches the hook", () => {
+    const order: string[] = [];
+    const heard: [unknown, number][] = [];
+    setTimedHook((e, ms) => {
+      order.push("hook");
+      heard.push([e, ms]);
+    });
+    const events: ChannelEvent[] = [];
+    const r = new ChannelReader(
+      (e) => {
+        order.push("event");
+        events.push(e);
+      },
+      () => {},
+      () => order.push("message"),
+    );
+    r.receive(timed(EVENT, 1730380000123.456));
+    expect(events).toEqual([EVENT]);
+    expect(heard).toEqual([[EVENT, 1730380000123.456]]);
+    expect(order).toEqual(["event", "hook", "message"]);
+    expect(r.messages).toBe(1);
+    expect(r.eventStart).toBe(0);
+  });
+
+  test("plain events still pass while the hook is installed, without reaching it", () => {
+    const heard: unknown[] = [];
+    setTimedHook((e) => heard.push(e));
+    const { r, events } = reader();
+    r.receive(JSON.stringify(EVENT));
+    r.receive(timed(EVENT, 5));
+    expect(events).toEqual([EVENT, EVENT]);
+    expect(heard).toEqual([EVENT]);
+    expect(r.messages).toBe(2);
+  });
+
+  test("without a hook (release) the reader does not look for the key: the message is handed on as it is", () => {
+    const { r, events } = reader();
+    r.receive(timed(EVENT, 5));
+    expect(events).toEqual([{ timed: { received_ms: 5, event: EVENT } }]);
   });
 });
