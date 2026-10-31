@@ -90,7 +90,8 @@ source = "synthesis §4; doc 15"
 [[budget]]
 id = "idle_memory_total"
 metric = "idle private memory, absolute"
-# Rohan, 2026-10-31 (#120): was 250. The measured blank app is 62.3 MB.
+# Rohan, 2026-10-31 (#120): was 250. G1b's blank app is 62.3 MiB (budgets' MB is 2^20 bytes). The
+# scoreboard's idle_memory_over_blank subtracts a different blank: e2e-windows 41206906369's 68.8 MB.
 limit = 150.0
 unit = "MB"
 gate = "alert"
