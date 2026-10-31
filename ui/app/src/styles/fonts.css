@@ -1,7 +1,7 @@
 /* The faces. One family, Anek, in two scripts, self-hosted under font-src 'self': the files are in ui/app/public/fonts,
    served as they are, never inlined. They are under the SIL Open Font License, LICENSES/OFL-1.1-anek.txt, and
-   fonts.test.ts pins each file by hash. display.ts in ui/components loads the Devanagari faces at 400 and 600 from
-   the start, so a language switch never waits on a font. */
+   fonts.test.ts pins each file by hash. display.ts in ui/components starts the Devanagari faces at 400 and 600 when
+   the display is first in Hindi, at start or on a switch. */
 
 /* Anek Latin, the English face: variable, weights 100 to 800, widths 75% to 125% */
 @font-face {

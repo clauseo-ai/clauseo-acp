@@ -71,6 +71,8 @@ const canTransition = (d: Display) =>
  * animation's promise, settles what follows. Under reduced motion and in lite every change lands at once. */
 export function showDisplay(next: Display): void {
   const prev = current;
+  // the first switch to Hindi starts its faces
+  if (next.lang === "hi") startHindiFaces();
   const update = () => {
     current = next;
     setAttributes(next);
@@ -140,11 +142,14 @@ function checkMetrics(): void {
   else root.style.removeProperty("--deva-nudge");
 }
 
-/** Shows the first display without a transition and starts the fonts. Call once, before the first render. */
-export function startDisplay(first: Display): void {
-  current = first;
-  setAttributes(first);
-  // Both scripts' faces load from the start, so a switch of language never waits on a font or reflows after one.
+let hindiFaces = false;
+
+/** Starts Hindi's faces at 400 and 600, once: Anek Devanagari, 726 KB, and Anek Latin Hi, the Latin set inside Hindi,
+ * which only :lang(hi) asks for. The metrics check runs once both are in. An English page never loads them from here;
+ * fonts.css still fetches Anek Devanagari for any Devanagari letter on it, such as the language switch's "हिन्दी". */
+function startHindiFaces(): void {
+  if (hindiFaces || !("fonts" in document)) return;
+  hindiFaces = true;
   const fonts = document.fonts;
   for (const w of [400, 600]) {
     fonts.load(`${w} 16px 'Anek Devanagari'`, "a\u0915").catch(() => {});
@@ -154,6 +159,14 @@ export function startDisplay(first: Display): void {
     fonts.load("400 100px 'Anek Devanagari'", "\u0915"),
     fonts.load("400 100px 'Anek Latin Hi'", "a"),
   ]).then(checkMetrics, () => {});
+}
+
+/** Shows the first display without a transition, and starts Hindi's faces if it is in Hindi. Call once, before the
+ * first render. */
+export function startDisplay(first: Display): void {
+  current = first;
+  setAttributes(first);
+  if (first.lang === "hi") startHindiFaces();
 }
 
 const subscribe = (listener: () => void) => {
