@@ -4,14 +4,14 @@
 use std::path::PathBuf;
 
 use clauseo_protocol::{
-    AgentChoiceId, Cursor, ErrorCode, HostEvent, PatchBatch, PermissionRequestId, StreamHeader,
-    Title, ViewPatchBody,
+    AgentChoiceId, ConfigValue, Cursor, DeliveryRequest, ErrorCode, HostEvent, PatchBatch,
+    PermissionRequestId, PromptBlock, StreamHeader, Title, ViewPatchBody,
 };
 use uuid::Uuid;
 
 use super::*;
 use crate::dialogs::BoxFuture;
-use crate::test_support::{Scratch, collector, envelope, stream};
+use crate::test_support::{Frames, Scratch, collector, envelope, stream};
 
 const MAIN: &str = "main";
 
@@ -47,8 +47,9 @@ fn batch(event: HostEvent) -> PatchBatch {
     batch
 }
 
-/// What the webview does with a stream's patches: a `Reset` replaces the view, a patch applies
-/// only at the next cursor, and any other cursor is a replay that changes nothing.
+/// A model of what the webview does with a stream's patches (ui's `view.test.ts` checks the real
+/// one): a `Reset` replaces the view, a patch applies only at the next cursor, and any other
+/// cursor is a replay that changes nothing.
 #[derive(Default)]
 struct Applier {
     applied: Option<(ViewEpoch, Cursor)>,
@@ -102,8 +103,8 @@ fn a_stale_cursor_gets_reset() {
 }
 
 #[test]
-fn a_replayed_cursor_is_a_no_op() {
-    let scratch = Scratch::new("replayed-cursor", &[]);
+fn a_resubscribe_from_an_older_cursor_gets_the_tail_in_the_same_epoch() {
+    let scratch = Scratch::new("older-cursor", &[]);
     let host = scratch.start(Vec::new());
     let thread = host.thread();
     let bridge = host.bridge();
@@ -263,6 +264,125 @@ fn dispatch_refuses_a_folder_ref_it_did_not_issue_and_a_permission_answer() {
     });
     let refusal = block_on(bridge.dispatch(answer)).unwrap_err();
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
+}
+
+#[test]
+fn dispatch_refuses_set_mode_and_set_config_option() {
+    let scratch = Scratch::new("dispatch-mode", &[]);
+    let host = scratch.start(Vec::new());
+    let thread = host.thread();
+    let bridge = host.bridge();
+    let bypass = AgentChoiceId::new("bypassPermissions").unwrap();
+    let commands = [
+        HostCommand::SetMode {
+            thread,
+            mode_id: bypass.clone(),
+        },
+        HostCommand::SetConfigOption {
+            thread,
+            option_id: AgentChoiceId::new("mode").unwrap(),
+            value: ConfigValue::Select(bypass),
+        },
+    ];
+    for command in commands {
+        let refusal = block_on(bridge.dispatch(envelope(command.clone()))).unwrap_err();
+        assert_eq!(
+            refusal.code(),
+            ErrorCode::CommandInvalid,
+            "{command:?}: {refusal:?}"
+        );
+    }
+}
+
+/// Reads `frames` until `n` permission requests have shown as pending, recording each once in
+/// `seen`, and returns the `n`th.
+fn until_pending(
+    frames: &Frames,
+    seen: &mut Vec<PermissionRequestId>,
+    n: usize,
+) -> PermissionRequestId {
+    while seen.len() < n {
+        let text = frames.next_text();
+        let Ok(HostEvent::Patches(batch)) = serde_json::from_str::<HostEvent>(&text) else {
+            continue;
+        };
+        for patch in batch.patches {
+            let entries = match patch.body {
+                ViewPatchBody::Upsert { entry } => vec![*entry],
+                ViewPatchBody::Reset { view_window } => view_window.entries,
+                _ => Vec::new(),
+            };
+            for entry in entries {
+                if let ViewEntry::Permission(permission) = entry
+                    && matches!(permission.state, PermissionState::Pending)
+                    && !seen.contains(&permission.request)
+                {
+                    seen.push(permission.request);
+                }
+            }
+        }
+    }
+    seen[n - 1]
+}
+
+/// `permission-kinds` asks four times and expects allow-once, allow-always, reject-once and
+/// reject-always, in that order; it stops on any other answer, so its closing text shows the
+/// bridge sent exactly those.
+#[test]
+fn answer_permission_checks_the_option_and_confirms_always_allow() {
+    let scratch = Scratch::with_fake_agent("answer-permission", "permission-kinds");
+    let host = scratch.start(Vec::new());
+    let thread = host.thread();
+    let bridge = host.bridge();
+    let (channel, frames) = collector();
+    bridge.open_stream(MAIN, channel);
+    block_on(bridge.subscribe(MAIN, stream(thread), None)).unwrap();
+    host.run(HostCommand::SendPrompt {
+        thread,
+        content: vec![PromptBlock::Text {
+            text: "Edit the four clauses.".to_owned(),
+        }],
+        delivery: DeliveryRequest::Queue,
+    });
+    let answer = |confirm: &dyn Confirm, request, option: &str| {
+        let option = AgentChoiceId::new(option).unwrap();
+        block_on(bridge.answer_permission(confirm, thread, request, option))
+    };
+    let mut seen = Vec::new();
+
+    // An option the request did not offer is refused before anything is asked or sent.
+    let first = until_pending(&frames, &mut seen, 1);
+    let refusal = answer(&Answers(None), first, "allow-forever").unwrap_err();
+    assert_eq!(
+        refusal.code(),
+        ErrorCode::PermissionUnknownOption,
+        "{refusal:?}"
+    );
+    answer(&Answers(None), first, "allow-once").unwrap();
+
+    // Always allow, declined in the confirm: refused, and the request is still pending.
+    let second = until_pending(&frames, &mut seen, 2);
+    let refusal = answer(&Answers(Some(false)), second, "allow-always").unwrap_err();
+    assert_eq!(
+        refusal.code(),
+        ErrorCode::TransportUnauthorized,
+        "{refusal:?}"
+    );
+    block_on(bridge.pending_permission(thread, second)).unwrap();
+    // Accepted: sent.
+    answer(&Answers(Some(true)), second, "allow-always").unwrap();
+    let refusal = block_on(bridge.pending_permission(thread, second)).unwrap_err();
+    assert_eq!(
+        refusal.code(),
+        ErrorCode::PermissionNotPending,
+        "{refusal:?}"
+    );
+
+    let third = until_pending(&frames, &mut seen, 3);
+    answer(&Answers(None), third, "reject-once").unwrap();
+    let fourth = until_pending(&frames, &mut seen, 4);
+    answer(&Answers(None), fourth, "reject-always").unwrap();
+    while !frames.next_text().contains("Four edits were decided.") {}
 }
 
 #[test]

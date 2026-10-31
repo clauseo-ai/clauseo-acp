@@ -201,7 +201,11 @@ async fn pump(
             return;
         };
         let mut window = lock(&window);
-        match window.state.forward(stream, generation, event.json()) {
+        let elapsed = window.opened.elapsed();
+        match window
+            .state
+            .forward(stream, generation, event.json(), elapsed)
+        {
             Forward::Send { frames, pause } => {
                 if !window.send(frames) {
                     return;

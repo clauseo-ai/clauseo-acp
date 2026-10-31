@@ -64,6 +64,13 @@ fn context<R: Runtime>() -> tauri::Context<R> {
     tauri::generate_context!()
 }
 
+/// Where exit stands: a stopper started, and the host stopped (so the next request exits).
+#[derive(Default)]
+struct Exit {
+    stopping: AtomicBool,
+    stopped: AtomicBool,
+}
+
 /// The host thread, joined at exit.
 struct HostThread(Mutex<Option<HostJoin>>);
 
@@ -106,13 +113,21 @@ pub fn run() -> tauri::Result<()> {
             Ok(())
         })
         .build(context)?;
-    let stopped = Arc::new(AtomicBool::new(false));
+    let exit = Arc::new(Exit::default());
     app.run(move |app, event| {
         if let RunEvent::ExitRequested { api, code, .. } = event
-            && !stopped.load(Ordering::Acquire)
+            && !exit.stopped.load(Ordering::Acquire)
         {
             api.prevent_exit();
-            stop_host_then_exit(app, Arc::clone(&stopped), code.unwrap_or(0));
+            // One stopper: a later request (another close, the stopper's own exit racing a
+            // second one) only waits for it.
+            let first = exit
+                .stopping
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok();
+            if first {
+                stop_host_then_exit(app, Arc::clone(&exit), code.unwrap_or(0));
+            }
         }
     });
     Ok(())
@@ -139,9 +154,9 @@ fn start_host(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Stops the host off the UI thread (shutdown, then join), then exits with `code`.
-fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, stopped: Arc<AtomicBool>, code: i32) {
+fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i32) {
     let fallback = app.clone();
-    let fallback_stopped = Arc::clone(&stopped);
+    let fallback_exit = Arc::clone(&exit);
     let app = app.clone();
     let host = app
         .try_state::<Bridge>()
@@ -159,12 +174,12 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, stopped: Arc<AtomicBool>,
             if let Some(join) = join {
                 let _joined = join.join();
             }
-            stopped.store(true, Ordering::Release);
+            exit.stopped.store(true, Ordering::Release);
             app.exit(code);
         });
     if stopper.is_err() {
         // No thread for it: exit now; the host's next start repairs what it left open.
-        fallback_stopped.store(true, Ordering::Release);
+        fallback_exit.stopped.store(true, Ordering::Release);
         fallback.exit(code);
     }
 }

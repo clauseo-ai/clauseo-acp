@@ -34,12 +34,28 @@ pub(crate) struct Scratch {
 
 impl Scratch {
     /// A fresh folder for `test` with `settings.json` naming [`AGENT`] and the folders in
-    /// `dirs` made under it.
+    /// `dirs` made under it. The agent is never started.
+    pub(crate) fn new(test: &str, dirs: &[&str]) -> Self {
+        let agent = std::env::current_exe().unwrap();
+        Self::with_agent(test, dirs, &agent, &[])
+    }
+
+    /// [`Scratch::new`] with [`AGENT`] playing the bundled `fake_agent` scenario `scenario`.
+    /// `fake_agent` is built only in a workspace run:
+    /// `cargo nextest run --workspace -E 'package(clauseo-desktop)'`, or
+    /// `cargo build -p clauseo-fake_agent` first.
+    pub(crate) fn with_fake_agent(test: &str, scenario: &str) -> Self {
+        let bin = clauseo_fake_agent::bin_path()
+            .unwrap_or_else(|e| panic!("{e} (run cargo build -p clauseo-fake_agent)"));
+        Self::with_agent(test, &[], &bin, &["--scenario", scenario])
+    }
+
+    /// A fresh folder whose settings run `agent` with `args` for [`AGENT`].
     #[expect(
         clippy::disallowed_methods,
         reason = "test set-up writes its scratch folder; the desktop crate has no write module"
     )]
-    pub(crate) fn new(test: &str, dirs: &[&str]) -> Self {
+    fn with_agent(test: &str, dirs: &[&str], agent: &Path, args: &[&str]) -> Self {
         let root =
             std::env::temp_dir().join(format!("clauseo-desktop-{test}-{}", std::process::id()));
         if root.exists() {
@@ -49,9 +65,8 @@ impl Scratch {
         for dir in dirs {
             std::fs::create_dir_all(root.join(dir)).unwrap();
         }
-        let agent = std::env::current_exe().unwrap();
         let settings = serde_json::json!({
-            "agents": { AGENT: { "command": agent.display().to_string(), "args": [] } }
+            "agents": { AGENT: { "command": agent.display().to_string(), "args": args } }
         });
         std::fs::write(root.join("settings.json"), settings.to_string()).unwrap();
         Self { root }

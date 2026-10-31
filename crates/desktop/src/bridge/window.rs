@@ -158,7 +158,14 @@ impl WindowState {
     }
 
     /// Frames `json`, an event of `stream`'s subscription `generation`, and counts what it sends.
-    pub(crate) fn forward(&mut self, stream: StreamId, generation: u64, json: &str) -> Forward {
+    /// The first bytes sent with nothing unacknowledged start the watchdog's wait at `now`.
+    pub(crate) fn forward(
+        &mut self,
+        stream: StreamId,
+        generation: u64,
+        json: &str,
+        now: Duration,
+    ) -> Forward {
         if self.paused || !self.is_current(stream, generation) {
             return Forward::Drop;
         }
@@ -167,6 +174,9 @@ impl WindowState {
         };
         if frames.len() > 1 {
             self.next_fragment = self.next_fragment.wrapping_add(1);
+        }
+        if self.unacked_bytes() == 0 {
+            self.progress_at = now;
         }
         for sent in &frames {
             self.sent_bytes += sent.len() as u64;

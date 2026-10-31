@@ -55,5 +55,7 @@ tauri-specta = { workspace = true, features = ["typescript"] }
 specta = { workspace = true, features = ["derive", "function"] }
 specta-typescript = { workspace = true }
 clauseo-protocol = { path = "../protocol", features = ["specta"] }
+# The scripted agent for the permission tests (its binary is built in a workspace run).
+clauseo-fake_agent = { path = "../fake_agent" }
 # The mock runtime, to see what Tauri itself rejects with.
 tauri = { workspace = true, features = ["test", "specta"] }
