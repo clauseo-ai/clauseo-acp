@@ -5,17 +5,17 @@
 use clauseo_protocol::HostError;
 
 use super::input::Reply;
-use super::{Actor, Phase, turn};
+use super::{Actor, HostPhase, turn};
 use crate::error::Error;
 
 /// Starts shutdown, or adds `reply` to a shutdown already running. The loop ends once
 /// the work in flight is done (see `Actor::settle`).
 pub(super) fn begin_shutdown(actor: &mut Actor, reply: Option<Reply<()>>) {
-    if let Phase::Stopping(replies) = &mut actor.phase {
+    if let HostPhase::Stopping(replies) = &mut actor.phase {
         replies.extend(reply);
         return;
     }
-    actor.phase = Phase::Stopping(reply.into_iter().collect());
+    actor.phase = HostPhase::Stopping(reply.into_iter().collect());
     super::matters::cancel_imports(actor);
     turn::shutdown(actor);
 }

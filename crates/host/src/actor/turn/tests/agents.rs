@@ -9,7 +9,7 @@ use clauseo_protocol::{
 use super::rig::{Rig, kind};
 use crate::actor::input::Input;
 use crate::actor::turn::agents::Stage;
-use crate::actor::turn::{AgentReply, Phase, TurnInput, end};
+use crate::actor::turn::{AgentReply, TurnInput, TurnPhase, end};
 use crate::agent::AgentInput;
 use crate::rate::RateCap;
 
@@ -62,7 +62,7 @@ fn prompt_waits_for_turn_started_and_exit_flushes_the_rate_cap() {
     rig.hold_next("the TurnStarted commit", started);
     let state = &mut rig.actor.threads.get_mut(&thread).unwrap().turn;
     let current = state.current.as_ref().unwrap();
-    assert_eq!(current.phase, Phase::Starting);
+    assert_eq!(current.phase, TurnPhase::Starting);
     assert!(
         current.prompt_call.is_none(),
         "no prompt before TurnStarted is durable"
@@ -128,7 +128,7 @@ fn an_agent_exit_while_queued_detaches_after_turn_ended() {
         state
             .current
             .as_ref()
-            .is_some_and(|c| c.phase == Phase::Queued)
+            .is_some_and(|c| c.phase == TurnPhase::Queued)
             && actor.work.commits == 0
     });
     if rig.held.is_empty() {

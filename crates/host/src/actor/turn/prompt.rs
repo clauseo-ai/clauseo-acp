@@ -6,7 +6,7 @@ use futures::future::{AbortHandle, Abortable};
 use super::super::Actor;
 use super::super::input::Input;
 use super::agents::Stage;
-use super::{AgentReply, End, Phase, TurnInput, current, end, spawn, state};
+use super::{AgentReply, End, TurnInput, TurnPhase, current, end, spawn, state};
 use crate::undo_note::{self, NoteInput};
 
 /// Step 5: the prompt, with the undo note first.
@@ -26,7 +26,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
         });
     let Some((id, client, fence, session)) = agent else {
         if let Some(current) = current(actor, thread) {
-            current.phase = Phase::Prompting;
+            current.phase = TurnPhase::Prompting;
         }
         let end = End::failed(
             ErrorCode::AgentExited,
@@ -39,7 +39,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let Some(current) = current(actor, thread) else {
         return;
     };
-    current.phase = Phase::Prompting;
+    current.phase = TurnPhase::Prompting;
     let blocks = std::mem::take(&mut current.prompt);
     let mut content = Vec::with_capacity(blocks.len() + 1);
     if let Some(text) = note {

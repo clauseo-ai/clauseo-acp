@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use clauseo_protocol::{ContentBlock, DetachReason, ErrorCode, ExpiryReason, StopReason, TurnId};
 
-use super::{Current, End, Phase};
+use super::{Current, End, TurnPhase};
 
 /// The detail of a `TurnFailed` logged because a commit of the turn failed.
 pub(super) const STORE_DETAIL: &str = "a commit of the turn failed";
@@ -56,7 +56,7 @@ impl Current {
         Self {
             turn,
             prompt,
-            phase: Phase::Accepting,
+            phase: TurnPhase::Accepting,
             cancelled: false,
             limit: None,
             tool_paths: BTreeSet::new(),
@@ -73,6 +73,6 @@ impl Current {
 
     /// Whether agent updates of the turn are logged: its prompt is in flight, not cancelled.
     pub(super) fn live(&self) -> bool {
-        self.phase == Phase::Prompting && !self.cancelled
+        self.phase == TurnPhase::Prompting && !self.cancelled
     }
 }

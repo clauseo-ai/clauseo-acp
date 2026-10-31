@@ -17,8 +17,8 @@ use super::super::commands::CommandCtx;
 use super::super::input::Input;
 use super::out::Out;
 use super::{
-    AgentReply, End, Phase, Then, TurnInput, current, end, lost, session, state, steps, stopping,
-    updates,
+    AgentReply, End, Then, TurnInput, TurnPhase, current, end, host_stopping, lost, session, state,
+    steps, updates,
 };
 use crate::agent::{self, AgentLink, Ended, StopStep};
 use crate::error::Error;
@@ -99,7 +99,7 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
 
 /// Launches `thread`'s agent and sends `initialize`.
 fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
-    if stopping(actor) {
+    if host_stopping(actor) {
         for item in waiting {
             fail_waiting(actor, thread, &item, &Error::Closed);
         }
@@ -330,7 +330,7 @@ pub(super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
     let detach = session.is_some().then_some(reason);
     let phase = current(actor, thread).map(|current| (current.phase, current.cancelled));
     match (phase, detach) {
-        (Some((Phase::Prompting, cancelled)), detach) => {
+        (Some((TurnPhase::Prompting, cancelled)), detach) => {
             let end = if cancelled {
                 End::cancelled(detach)
             } else {
@@ -338,13 +338,13 @@ pub(super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
             };
             end::end_turn(actor, thread, end);
         }
-        (Some((Phase::Stopping, _)), detach) => {
+        (Some((TurnPhase::FallbackStop, _)), detach) => {
             if let Some(reason) = detach {
                 log_detach(actor, thread, reason);
             }
             end::end_turn(actor, thread, End::cancelled(None));
         }
-        (Some((Phase::Ending, _)), Some(reason)) => {
+        (Some((TurnPhase::Ending, _)), Some(reason)) => {
             // Logged after the turn's `TurnEnded`, which is still to come.
             if let Some(current) = current(actor, thread) {
                 match &mut current.end {
@@ -355,7 +355,10 @@ pub(super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
                 }
             }
         }
-        (Some((Phase::Queued | Phase::Checkpointing | Phase::Starting, _)), Some(reason)) => {
+        (
+            Some((TurnPhase::Queued | TurnPhase::Checkpointing | TurnPhase::Starting, _)),
+            Some(reason),
+        ) => {
             // The turn ends when it reaches its prompt and finds no agent; the detach goes
             // after its `TurnEnded`.
             if let Some(current) = current(actor, thread) {

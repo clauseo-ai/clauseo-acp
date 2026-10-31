@@ -19,9 +19,9 @@ use futures::future::Either;
 use uuid::Uuid;
 
 use super::super::super::input::{Input, Request};
-use super::super::super::{Actor, Phase as HostPhase, shutdown, startup, streams};
+use super::super::super::{Actor, HostPhase, shutdown, startup, streams};
 use super::super::out::Out;
-use super::super::{Current, Phase, Then};
+use super::super::{Current, Then, TurnPhase};
 use crate::error::Error;
 use crate::pipeline::tests::support::TempDir;
 use crate::{HostConfig, ManualClock, SequentialIds};
@@ -236,7 +236,7 @@ impl Rig {
     /// A turn of `thread` whose prompt is in flight, with no agent: its stream loaded, and
     /// `AgentSessionAttached`, `UserMessage` and `TurnStarted` durable.
     pub(super) fn running_turn(&mut self, thread: ThreadId) -> TurnId {
-        let turn = self.current_turn(thread, Phase::Prompting);
+        let turn = self.current_turn(thread, TurnPhase::Prompting);
         let now = self.actor.now().wall;
         let events: Vec<DomainEvent> = vec![
             AgentSessionAttached {
@@ -265,7 +265,7 @@ impl Rig {
     }
 
     /// A current turn of `thread` in `phase`, with the thread's stream loaded; nothing logged.
-    pub(super) fn current_turn(&mut self, thread: ThreadId, phase: Phase) -> TurnId {
+    pub(super) fn current_turn(&mut self, thread: ThreadId, phase: TurnPhase) -> TurnId {
         let now = self.actor.now().wall;
         let turn: TurnId = self.actor.ids.mint(now).unwrap();
         let mut current = Current::new(turn, Vec::new());

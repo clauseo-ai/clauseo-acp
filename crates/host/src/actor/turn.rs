@@ -36,7 +36,7 @@ use clauseo_protocol::{
 use futures::future::AbortHandle;
 
 use super::commands::CommandCtx;
-use super::{Actor, Phase as HostPhase};
+use super::{Actor, HostPhase};
 use crate::agent::AgentInput;
 use crate::coalesce::ThreadText;
 use crate::error::Error;
@@ -98,7 +98,7 @@ struct Current {
     turn: TurnId,
     /// The prompt's content, until step 5 sends it.
     prompt: Vec<ContentBlock>,
-    phase: Phase,
+    phase: TurnPhase,
     /// The lawyer cancelled it (or shutdown did); it ends `Cancelled`.
     cancelled: bool,
     /// The first limit signal of the turn.
@@ -125,7 +125,7 @@ struct Current {
 
 /// Where a current turn is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Phase {
+enum TurnPhase {
     /// Its `UserMessage` commit is in flight.
     Accepting,
     /// Its agent is launching (step 2).
@@ -139,7 +139,7 @@ enum Phase {
     /// Its prompt is in flight (step 5).
     Prompting,
     /// The cancel fallback fired: the agent is being stopped.
-    Stopping,
+    FallbackStop,
     /// Steps 6 to 8.
     Ending,
 }
@@ -417,11 +417,11 @@ pub(crate) fn busy(actor: &Actor) -> bool {
             || state.current.as_ref().is_some_and(|current| {
                 matches!(
                     current.phase,
-                    Phase::Checkpointing
-                        | Phase::Starting
-                        | Phase::Prompting
-                        | Phase::Stopping
-                        | Phase::Ending
+                    TurnPhase::Checkpointing
+                        | TurnPhase::Starting
+                        | TurnPhase::Prompting
+                        | TurnPhase::FallbackStop
+                        | TurnPhase::Ending
                 )
             })
     })
@@ -461,7 +461,7 @@ pub(crate) fn keeps_matter_loaded(actor: &Actor, matter: MatterId) -> bool {
 }
 
 /// Whether the host is shutting down.
-fn stopping(actor: &Actor) -> bool {
+fn host_stopping(actor: &Actor) -> bool {
     matches!(actor.phase, HostPhase::Stopping(_))
 }
 

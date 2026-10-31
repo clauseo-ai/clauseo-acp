@@ -112,7 +112,7 @@ impl Work {
 
 /// Where the host is in its life.
 #[derive(Debug)]
-pub(crate) enum Phase {
+pub(crate) enum HostPhase {
     /// Start-up work runs; `ready` hears once it is done.
     Starting(mpsc::Sender<Result<(), Error>>),
     Serving,
@@ -154,7 +154,7 @@ pub(crate) struct Actor {
     pub(crate) files: BTreeMap<FileRefId, PathBuf>,
     pub(crate) next_sub: u64,
     pub(crate) work: Work,
-    pub(crate) phase: Phase,
+    pub(crate) phase: HostPhase,
     /// The Scratch matter being created at start-up.
     pub(crate) scratch: Option<Box<matters::PendingMatter>>,
     /// Picks commits for the store to refuse (tests): given a commit's events, a command id the
@@ -391,7 +391,7 @@ impl Actor {
 
     /// One request from a handle.
     fn on_request(&mut self, request: Request) {
-        if !matches!(self.phase, Phase::Serving) {
+        if !matches!(self.phase, HostPhase::Serving) {
             if let Request::Shutdown { reply } = request {
                 shutdown::begin_shutdown(self, Some(reply));
             } else {
@@ -487,18 +487,18 @@ impl Actor {
         if !self.work.idle() || turn::busy(self) {
             return None;
         }
-        match std::mem::replace(&mut self.phase, Phase::Serving) {
-            Phase::Starting(ready) => {
+        match std::mem::replace(&mut self.phase, HostPhase::Serving) {
+            HostPhase::Starting(ready) => {
                 if self.scratch.is_some() {
-                    self.phase = Phase::Starting(ready);
+                    self.phase = HostPhase::Starting(ready);
                     return None;
                 }
                 // `start` may have given up waiting; then nobody is listening.
                 let _gone = ready.send(Ok(()));
                 None
             }
-            Phase::Serving => None,
-            Phase::Stopping(replies) => Some(Exit::Shutdown(replies)),
+            HostPhase::Serving => None,
+            HostPhase::Stopping(replies) => Some(Exit::Shutdown(replies)),
         }
     }
 }

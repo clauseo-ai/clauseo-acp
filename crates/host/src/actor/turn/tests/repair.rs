@@ -9,7 +9,7 @@ use clauseo_protocol::{
 
 use super::failures::{end_failing, until_ended};
 use super::rig::Rig;
-use crate::actor::turn::{Phase, steps};
+use crate::actor::turn::{TurnPhase, steps};
 
 /// The `TurnEnded` of `turn` in `log`.
 fn ended(log: &[DomainEvent], turn: TurnId) -> Option<TurnEnded> {
@@ -106,7 +106,7 @@ fn a_reused_checkpoint_the_log_lost_is_recorded_before_turn_started() {
 
     // Another thread's turn takes the free writer; R8 reuses the lost checkpoint at step 4.
     let second = rig.thread_by(2);
-    let turn = rig.current_turn(second, Phase::Queued);
+    let turn = rig.current_turn(second, TurnPhase::Queued);
     let matter = rig.matter();
     rig.actor.matters.get_mut(&matter).unwrap().turns.holder = Some(second);
     steps::before_turn(&mut rig.actor, second, turn);

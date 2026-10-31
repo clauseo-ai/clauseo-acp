@@ -10,7 +10,7 @@ use clauseo_protocol::{
 
 use super::rig::{Rig, kind};
 use crate::actor::input::Input;
-use crate::actor::turn::{CANCEL_WAIT, End, Phase, end, out};
+use crate::actor::turn::{CANCEL_WAIT, End, TurnPhase, end, out};
 use crate::coalesce::TextIn;
 use crate::pipeline::Draft;
 use crate::pipeline::tests::support::notice;
@@ -102,7 +102,7 @@ fn cancel_after_a_failed_commit_reads_the_rolled_back_view() {
     // The turn waits for the prompt's answer; with no answer the fallback ends it.
     let current = rig.actor.threads[&thread].turn.current.as_ref();
     let current = current.expect("the turn is still running");
-    assert!(current.phase == Phase::Prompting && current.cancelled);
+    assert!(current.phase == TurnPhase::Prompting && current.cancelled);
     rig.clock.advance(CANCEL_WAIT);
     until_ended(&mut rig, thread);
     let log = rig.log(thread);
@@ -266,7 +266,7 @@ fn an_at_limit_turn_whose_checkpoint_fails_stays_at_limit() {
         .current
         .as_mut();
     let current = current.unwrap();
-    current.phase = Phase::Ending;
+    current.phase = TurnPhase::Ending;
     current.limit = Some(crate::actor::turn::LimitMark {
         window: None,
         resets_at: None,

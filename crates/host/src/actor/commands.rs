@@ -137,7 +137,7 @@ pub(super) fn on_receipt(
             let Some(command) = pending.command.take() else {
                 return;
             };
-            if !matches!(actor.phase, super::Phase::Serving) {
+            if !matches!(actor.phase, super::HostPhase::Serving) {
                 actor.finish_command(id, Err(Error::Closed));
                 return;
             }
