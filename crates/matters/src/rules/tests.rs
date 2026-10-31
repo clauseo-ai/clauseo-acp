@@ -1,4 +1,4 @@
-use super::{is_excluded_any, is_excluded_file};
+use super::{is_excluded, is_excluded_any, is_excluded_file, is_excluded_path};
 
 #[test]
 fn excluded_file_names_in_any_case() {
@@ -55,4 +55,18 @@ fn only_git_and_clauseo_exclude_folders() {
     assert!(!is_excluded_any("x.tmp"));
     assert!(!is_excluded_any("Thumbs.db"));
     assert!(!is_excluded_any(".github"));
+}
+
+#[test]
+fn a_path_is_excluded_by_any_folder_on_the_way_or_its_file_name() {
+    assert!(is_excluded_path(".git/config"));
+    assert!(is_excluded_path("a/.Clauseo/b.txt"));
+    assert!(is_excluded_path("a/~$memo.docx"));
+    assert!(is_excluded_path("Thumbs.db"));
+    // File-name rules do not apply to folders.
+    assert!(!is_excluded_path("x.tmp/a.txt"));
+    assert!(!is_excluded_path("a/b.txt"));
+    assert!(is_excluded("x.tmp", false));
+    assert!(!is_excluded("x.tmp", true));
+    assert!(is_excluded(".git", true));
 }

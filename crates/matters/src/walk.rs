@@ -159,16 +159,13 @@ impl Walker<'_> {
             tracing::warn!(path = %path.display(), "skipped a name that is not UTF-8");
             return Ok(None);
         };
-        if rules::is_excluded_any(name) {
-            return Ok(None);
-        }
         let file_type = match entry.file_type() {
             Ok(file_type) => file_type,
             Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(err) => return Err(Error::io("stat", &path, err)),
         };
         let is_dir = file_type.is_dir();
-        if !is_dir && (!file_type.is_file() || rules::is_excluded_file(name)) {
+        if rules::is_excluded(name, is_dir) || (!is_dir && !file_type.is_file()) {
             return Ok(None);
         }
         let relative = if parent.is_empty() {
