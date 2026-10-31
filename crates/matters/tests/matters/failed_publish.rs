@@ -38,8 +38,8 @@ fn the_timeline_holds_the_checkpoint_whose_ref_moved() {
 #[test]
 fn the_folder_compares_against_the_checkpoint_whose_ref_moved() {
     let (fx, matter) = failed("failed-publish-compare");
-    support::set_mode(fx.file("sub"), 0o000);
+    let locked = crate::unreadable::Mode::set(fx.file("sub"), 0o000);
     let changes = matter.compare(CompareSide::Checkpoint(cid(2)), CompareSide::Folder);
-    support::set_mode(fx.file("sub"), 0o755);
+    drop(locked);
     assert_eq!(changes.unwrap(), []);
 }

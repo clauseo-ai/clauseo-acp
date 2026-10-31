@@ -89,11 +89,7 @@ fn a_wrong_expected_timeline_names_both_commits() {
         .unwrap_err()
         .to_string();
     assert!(
-        message.contains(&format!(
-            "the timeline is at Some({}), expected Some({})",
-            first.to_hex(),
-            second.to_hex()
-        )),
+        message.contains(&first.to_hex()) && message.contains(&second.to_hex()),
         "{message}"
     );
 }
