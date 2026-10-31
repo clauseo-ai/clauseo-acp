@@ -41,11 +41,11 @@ enum Op {
         count: u64,
         gap: bool,
     },
-    /// `read_after` in stream `stream` (stream 3 never has events), or with `filled` in the
-    /// `stream`-th of the streams that have events (stream 3 when none has).
+    /// `read_after` in stream `pick`; with `filled`, `pick` chooses among the streams that have
+    /// events instead (stream 3, which never has any, when none has).
     Read {
         filled: bool,
-        stream: usize,
+        pick: usize,
         cursor: Cursor,
         limit: Limit,
     },
@@ -62,13 +62,15 @@ fn op() -> impl Strategy<Value = Op> {
         3 => (0..13_u32).prop_map(Limit::Fixed),
         2 => (-1..=1_i8).prop_map(Limit::ToHead),
     ];
+    // 85 % of reads ask for a stream with events. They get one once the case has committed; reads
+    // before that see only empty streams (151 of the seeded run's 236 reads hit events).
     prop_oneof![
         1 => (0..3_usize, 1..10_u64, prop::bool::weighted(0.15))
             .prop_map(|(stream, count, gap)| Op::Commit { stream, count, gap }),
         2 => (prop::bool::weighted(0.85), 0..4_usize, cursor, limit).prop_map(
-            |(filled, stream, cursor, limit)| Op::Read {
+            |(filled, pick, cursor, limit)| Op::Read {
                 filled,
-                stream,
+                pick,
                 cursor,
                 limit,
             }
@@ -102,15 +104,15 @@ fn run_model(store: &Store, base: u64, ops: &[Op]) {
             }
             Op::Read {
                 filled,
-                stream,
+                pick,
                 cursor,
                 limit,
             } => {
                 let with_events: Vec<usize> = (0..4).filter(|&s| !model[s].is_empty()).collect();
                 let stream = match (filled, with_events.len()) {
-                    (false, _) => stream,
+                    (false, _) => pick,
                     (true, 0) => 3,
-                    (true, n) => with_events[stream % n],
+                    (true, n) => with_events[pick % n],
                 };
                 let events = &model[stream];
                 let after = match cursor {
