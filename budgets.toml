@@ -13,6 +13,14 @@
 # measured_on  optional, required with measured: os-arch-machine kind, never a private host name
 # source       the plan section the budget comes from
 #
+# Two limits for one metric are two rows. The release row keeps the metric's id and its limit for a
+# real laptop (gate release); the row `<id>_vm` holds the limit for the GPU-less CI virtual machines
+# (gate alert). The speed scoreboard compares a metric with its `<id>_vm` row when there is one,
+# else with `<id>` (ui/e2e/scoreboard/render.ts). measured_on `windows-x86_64-vm` is gate G1b's
+# Google Cloud n4d-standard-2 (Windows Server 2025, WebView2 156, software rendering; private
+# measurements/g1b-windows-reality.md); `windows-x86_64-gha` and `macos-arm64-gha` are GitHub's
+# windows-2025 and macos-15 runners.
+#
 # Not a row yet: sandbox overhead per agent. Its budget is set after measuring our own launcher and
 # proxy (synthesis §4; doc 21).
 
@@ -24,17 +32,34 @@ unit = "ms"
 gate = "alert"
 measured_by = "in-process marks"
 status = "unmeasured"
+# G1b, warm, the prototype's slower renderer (median of 20).
+measured = 32.4
+measured_on = "windows-x86_64-vm"
 source = "synthesis §4; doc 15"
 
 [[budget]]
 id = "cold_start_interactive"
-metric = "cold start to interactive, median"
+metric = "cold start to interactive, median, on a real laptop (stage F)"
 limit = 1500.0
 unit = "ms"
 gate = "release"
 measured_by = "marks across Rust and JS"
 status = "unmeasured"
 source = "synthesis §4; doc 15"
+
+[[budget]]
+id = "cold_start_interactive_vm"
+metric = "cold start to interactive, median, on the CI virtual machine (first launch after a restart)"
+# Rohan, 2026-10-31 (#120): the VM spends 3.6 s before the webview exists.
+limit = 4500.0
+unit = "ms"
+gate = "alert"
+measured_by = "marks across Rust and JS"
+status = "unmeasured"
+# G1b, the prototype's slower renderer (median of 5).
+measured = 3838.7
+measured_on = "windows-x86_64-vm"
+source = "G1b (#120); synthesis §4; doc 15"
 
 [[budget]]
 id = "warm_start_interactive"
@@ -59,7 +84,8 @@ source = "synthesis §4; doc 15"
 [[budget]]
 id = "idle_memory_total"
 metric = "idle private memory, absolute"
-limit = 250.0
+# Rohan, 2026-10-31 (#120): was 250. The measured blank app is 62.3 MB.
+limit = 150.0
 unit = "MB"
 gate = "alert"
 measured_by = "process-group accounting"
@@ -84,6 +110,9 @@ unit = "MB"
 gate = "pr"
 measured_by = "CDP in headless Chromium"
 status = "unmeasured"
+# G1b, the prototype with 30 threads, the slower renderer, after two forced GCs.
+measured = 6.2
+measured_on = "windows-x86_64-vm"
 source = "synthesis §4; doc 15; doc 14"
 
 [[budget]]
@@ -108,13 +137,24 @@ source = "synthesis §4; doc 15; doc 14"
 
 [[budget]]
 id = "keystroke_latency_p95"
-metric = "keystroke latency, p95"
+metric = "keystroke latency, p95, plain (not composed) keystrokes"
 limit = 32.0
 unit = "ms"
 gate = "alert"
 measured_by = "Event Timing"
 status = "unmeasured"
 source = "synthesis §4; doc 15"
+
+[[budget]]
+id = "keystroke_latency_ime_p95"
+metric = "keystroke latency, p95, composed IME keystrokes"
+# Rohan, 2026-10-31 (#120). G1a: composed Hindi at p95 48 to 56 ms; that time is the input method's.
+limit = 64.0
+unit = "ms"
+gate = "alert"
+measured_by = "Event Timing"
+status = "unmeasured"
+source = "G1a; G1b (#120)"
 
 [[budget]]
 id = "keystroke_handler"
@@ -128,13 +168,24 @@ source = "synthesis §4; doc 15"
 
 [[budget]]
 id = "long_frames_streaming"
-metric = "animation frames over 50 ms while streaming at 4x CPU throttle"
+metric = "animation frames over 50 ms per stream at 4x CPU throttle, on a real laptop (stage F)"
 limit = 0.0
 unit = "count"
-gate = "alert"
+gate = "release"
 measured_by = "Long Animation Frames"
 status = "unmeasured"
 source = "synthesis §4; doc 14; doc 15"
+
+[[budget]]
+id = "long_frames_streaming_vm"
+metric = "animation frames over 50 ms per stream, scoreboard session, unthrottled (1x), on the CI virtual machine"
+# Rohan, 2026-10-31 (#120): at 4x the VM has hundreds per stream, so its limit is at 1x.
+limit = 8.0
+unit = "count"
+gate = "alert"
+measured_by = "speed scoreboard (ui/e2e/scoreboard), Long Animation Frames"
+status = "unmeasured"
+source = "G1b (#120); synthesis §4; doc 14; doc 15"
 
 # The speed scoreboard's rows (R13): the fixed `scoreboard` session played into the app, medians
 # of three runs after one warm-up (ui/e2e/scoreboard/metrics.ts). Rohan confirmed each limit in
@@ -163,6 +214,17 @@ status = "unmeasured"
 source = "build-order stage A item 8; replan decision 6; R13"
 
 [[budget]]
+id = "chunk_to_paint_lite_p50"
+metric = "bridge receiving a patch to the frame that paints it, p50, lite mode, scoreboard session"
+# Rohan, 2026-10-31 (#120). G1b measured 21.2 / 17.2 ms in lite on the VM.
+limit = 25.0
+unit = "ms"
+gate = "alert"
+measured_by = "speed scoreboard (ui/e2e/scoreboard)"
+status = "unmeasured"
+source = "G1b (#120); R13"
+
+[[budget]]
 id = "chunk_to_paint_p95"
 metric = "bridge receiving a patch to the frame that paints it, p95, scoreboard session"
 # Confirmed by Rohan, 2026-10-31 (R13).
@@ -175,18 +237,29 @@ source = "build-order stage A item 8; replan decision 6; R13"
 
 [[budget]]
 id = "dropped_frames_streaming"
-metric = "requestAnimationFrame gaps over 16.7 ms per 10 s while streaming and scrolling"
-# Confirmed by Rohan, 2026-10-31 (R13).
+metric = "requestAnimationFrame gaps over 16.7 ms per 10 s while streaming and scrolling, on a real laptop (stage F)"
+# Confirmed by Rohan, 2026-10-31 (R13); release gate on the laptop from #120.
 limit = 30.0
 unit = "count"
-gate = "alert"
+gate = "release"
 measured_by = "speed scoreboard (ui/e2e/scoreboard)"
 status = "unmeasured"
 source = "research 15 W6 (95% of frames under 16.7 ms); R13"
 
 [[budget]]
+id = "dropped_frames_streaming_vm"
+metric = "requestAnimationFrame gaps over 16.7 ms per 10 s while streaming and scrolling, unthrottled, on the CI virtual machine"
+# Rohan, 2026-10-31 (#120): the VM's software compositor makes 30 unreachable; the rule is unchanged.
+limit = 100.0
+unit = "count"
+gate = "alert"
+measured_by = "speed scoreboard (ui/e2e/scoreboard)"
+status = "unmeasured"
+source = "G1b (#120); research 15 W6; R13"
+
+[[budget]]
 id = "memory_after_session"
-metric = "process-group memory after the scoreboard session"
+metric = "process-group memory after the scoreboard session, after two forced GCs on Windows (none on macOS)"
 # Confirmed by Rohan, 2026-10-31 (R13).
 limit = 300.0
 unit = "MB"
@@ -223,6 +296,9 @@ unit = "count"
 gate = "pr"
 measured_by = "headless check"
 status = "unmeasured"
+# G1b, every idle and after-stream window of the prototype.
+measured = 0.0
+measured_on = "windows-x86_64-vm"
 source = "synthesis §4; doc 15"
 
 [[budget]]
