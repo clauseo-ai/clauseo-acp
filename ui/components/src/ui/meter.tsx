@@ -9,8 +9,8 @@ export type PlanState = "plenty" | "close" | "reached";
 /** The plan meter: the plan's name in primary with a 44 by 4 px meter, primary on the inset tone, and what's left
  * beneath it in the muted tone. From close to the limit, the line turns to primary at the chip's weight, so it's
  * noticed by its words and weight without any amber; reached, the meter stands empty as well. The meter tells
- * assistive technology the same in words. The meter's words are part of the title bar, so a press on them drags the
- * window, as the toolbar's empty space does. */
+ * assistive technology the same in words. dragRegion makes the meter's four elements part of a title bar: a press on
+ * them drags the window, as the toolbar's empty space does. */
 export function PlanMeter({
   name,
   value,
@@ -19,6 +19,7 @@ export function PlanMeter({
   state = "plenty",
   track = true,
   inButton = false,
+  dragRegion = false,
   className,
 }: {
   /** "Claude plan" */
@@ -37,22 +38,26 @@ export function PlanMeter({
    * button is named by its words, so the meter drops its role, whose value text would take the plan's name's place in
    * the button's name, and the hidden "x" Base UI adds for VoiceOver. The host says the share in words itself. */
   inButton?: boolean;
+  /** Optional: the meter's four elements carry data-tauri-drag-region, so a press on them drags the window. Only a
+   * title bar passes it; the control itself knows nothing of the host. */
+  dragRegion?: boolean;
   className?: string;
 }) {
+  const drag = dragRegion ? true : undefined;
   return (
     <div
       className={cn("grid text-small text-muted", className)}
       data-state={state}
-      data-tauri-drag-region
+      data-tauri-drag-region={drag}
     >
       <BaseMeter.Root
         value={value}
         aria-valuetext={valueText}
         className="flex items-center gap-s2"
-        data-tauri-drag-region
+        data-tauri-drag-region={drag}
         {...(inButton ? { render: withoutHiddenX, role: "none", "aria-valuetext": undefined } : {})}
       >
-        <BaseMeter.Label className="text-primary" data-tauri-drag-region>
+        <BaseMeter.Label className="text-primary" data-tauri-drag-region={drag}>
           {name}
         </BaseMeter.Label>
         {track && (
@@ -61,7 +66,10 @@ export function PlanMeter({
           </BaseMeter.Track>
         )}
       </BaseMeter.Root>
-      <p className={cn(state !== "plenty" && "text-primary font-chip")} data-tauri-drag-region>
+      <p
+        className={cn(state !== "plenty" && "text-primary font-chip")}
+        data-tauri-drag-region={drag}
+      >
         {status}
       </p>
     </div>
