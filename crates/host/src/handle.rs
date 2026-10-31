@@ -41,6 +41,8 @@ impl Host {
 #[derive(Debug, Clone)]
 pub struct HostHandle {
     requests: async_channel::Sender<Request>,
+    /// The actor's internal input channel, for `abort_for_test`.
+    #[cfg(feature = "test-support")]
     internal: async_channel::Sender<Input>,
 }
 
@@ -72,7 +74,13 @@ impl HostHandle {
         requests: async_channel::Sender<Request>,
         internal: async_channel::Sender<Input>,
     ) -> Self {
-        Self { requests, internal }
+        #[cfg(not(feature = "test-support"))]
+        drop(internal);
+        Self {
+            requests,
+            #[cfg(feature = "test-support")]
+            internal,
+        }
     }
 
     /// Sends one request and waits for its reply.
