@@ -160,7 +160,7 @@ export function RoomToolbar(p: RoomToolbarProps) {
       {/* on Windows the caption buttons take the toolbar's last 158 px, so the tools give way a hundred times faster
           than the title, which then never loses the fraction of a pixel that would wrap it */}
       <div className={cn("room-tools", captions && "shrink-100")} data-tauri-drag-region>
-        <Toolbar label={rt(w.lang, "Tools for this matter")} className="room-tools-bar">
+        <Toolbar label={rt(w.lang, "Tools for this matter")} className="room-tools-bar flex-nowrap">
           <SearchField
             label={p.searchLabel ?? w.t("Search this matter")}
             place="toolbar"

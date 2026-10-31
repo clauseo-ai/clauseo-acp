@@ -68,6 +68,18 @@ test("the plan's meter in the title bar drags the window on its four elements", 
   expect(dragging(meter)).toBe(4);
 });
 
+test("the room's tools stay on one line, where the search folds instead of wrapping", async () => {
+  await mount({
+    name: "Claude",
+    left: 0.6,
+    valueText: "60 percent of the plan left",
+    status: "Plenty left",
+  });
+  const bar = host?.querySelector(".room-tools-bar");
+  expect(bar?.classList.contains("flex-nowrap")).toBe(true);
+  expect(bar?.classList.contains("flex-wrap")).toBe(false);
+});
+
 test("a plan with a card keeps the drag region on the meter inside its press", async () => {
   await mount({
     name: "Claude",
