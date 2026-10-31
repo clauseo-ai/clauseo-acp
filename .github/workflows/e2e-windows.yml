@@ -13,13 +13,14 @@
 
 name: e2e-windows
 
-# Every pull request gets the check `smoke (windows-2025)`, the x64 smoke test, and the check is
-# meant to be required. The job e2e-changes decides whether the steps run: a pull request that
+# Every pull request gets the check `smoke (windows-2025)`, the x64 smoke test. Branch protection on
+# main requires it (#51). The job e2e-changes decides whether the steps run: a pull request that
 # touches none of crates/desktop/, ui/ or this workflow starts the job and skips every step, so the
-# check reports in about a minute. One that touches them runs the smoke test in full, on x64 only.
-# A change elsewhere that breaks the app (another crate, Cargo.lock, the toolchain) shows up on the
-# next push to main. The job is never skipped as a whole: a skipped job reports its check under the
-# unexpanded name, and a required check that never reports blocks the merge.
+# check reports in seconds. One that touches them runs the smoke test in full, on x64 only. A failed
+# decision runs the full test, so the check always reports. A change elsewhere that breaks the app
+# (another crate, Cargo.lock, the toolchain) shows up on the next push to main. smoke is never
+# skipped as a whole: a job skipped that way reports under the literal name
+# `smoke (${{ matrix.runner }})`, and a required check that never reports blocks the merge.
 # Every push to main, the nightly run and a run on demand cover x64 and ARM64 (windows-11-arm),
 # which gives the budgets their baseline and keeps main's Rust cache, the one pull requests can
 # read, warm.
@@ -41,6 +42,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Not named changes (ci.yml's required check). Copies ci.yml's fetch and diff: fix both together.
   e2e-changes:
     name: e2e-changes
     runs-on: ubuntu-24.04
@@ -70,7 +72,7 @@ jobs:
             "+${HEAD_SHA}:refs/ci/head"
           # --no-renames lists both sides of a rename, so a file renamed out of crates/desktop/ or
           # ui/ still runs the smoke test.
-          changed=$(git diff --no-renames --name-only refs/ci/base...refs/ci/head)
+          changed=$(git diff --no-renames -z --name-only refs/ci/base...refs/ci/head | tr '\0' '\n')
           app=$(printf '%s\n' "$changed" \
             | grep -E '^(crates/desktop/|ui/|\.github/workflows/e2e-windows\.yml$)' || true)
           if [ -n "$app" ]; then
@@ -83,6 +85,7 @@ jobs:
   smoke:
     name: smoke (${{ matrix.runner }})
     needs: e2e-changes
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -96,7 +99,7 @@ jobs:
             || '[{"runner": "windows-2025", "target": "x86_64-pc-windows-msvc"},
                  {"runner": "windows-11-arm", "target": "aarch64-pc-windows-msvc"}]') }}
     env:
-      RUN: ${{ needs.e2e-changes.outputs.run }}
+      RUN: ${{ needs.e2e-changes.result == 'success' && needs.e2e-changes.outputs.run || 'true' }}
       TARGET: ${{ matrix.target }}
       E2E_APP: ${{ github.workspace }}/target/${{ matrix.target }}/release/clauseo-desktop.exe
       OUT: ${{ github.workspace }}/e2e-out
@@ -104,7 +107,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Skip, the app, ui and this workflow are unchanged
+      - name: Skip, crates/desktop, ui and this workflow are unchanged
         if: env.RUN != 'true'
         run: echo "No change to crates/desktop/, ui/ or this workflow; nothing to smoke-test."
 
