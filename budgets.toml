@@ -277,8 +277,10 @@ metric = "reopen a 20k-event thread from its snapshot"
 limit = 100.0
 unit = "ms"
 gate = "release"
-measured_by = "fixture bench"
-status = "unmeasured"
+measured_by = "cargo bench -p clauseo-host --bench reopen"
+status = "measured"
+measured = 2.48
+measured_on = "macos-arm64-desktop"
 source = "synthesis §4; doc 04"
 
 [[budget]]
