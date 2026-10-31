@@ -1,34 +1,10 @@
 use super::Effective;
 use crate::error::Error;
-use crate::locations::Locations;
-use crate::policy::{FilePolicy, PolicyRead, PolicySource, file};
+use crate::policy::{FilePolicy, PolicyRead, PolicySource};
 use crate::schema::{AgentLaunch, Density, FontSize, Theme};
-use crate::testing::{FakeSource, MemFiles, abs, abs_json};
+use crate::testing::{FakeSource, MemFiles, abs, abs_json, locations, policy, user};
 use crate::warning::WarningKind;
 use std::path::Path;
-
-pub(super) fn locations() -> Locations {
-    Locations::under_root(Path::new("/data"))
-}
-
-pub(super) fn user(text: &str) -> MemFiles {
-    MemFiles::with(locations().settings_file(), text)
-}
-
-/// A source whose `policy.json` is `text`.
-pub(super) fn policy(
-    name: &'static str,
-    text: impl Into<String>,
-) -> FakeSource<impl Fn() -> PolicyRead> {
-    let text: String = text.into();
-    FakeSource {
-        name,
-        read: move || match file::parse(Path::new(name), text.as_bytes()) {
-            Ok(values) => PolicyRead::Read(values),
-            Err(error) => PolicyRead::Unreadable(error),
-        },
-    }
-}
 
 fn absent() -> FakeSource<impl Fn() -> PolicyRead> {
     FakeSource {

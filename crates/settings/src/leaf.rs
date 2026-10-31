@@ -13,7 +13,9 @@
 //!   in `reset`, which a policy value that does not type locks the key at
 //!   (`leaf/tests.rs`' `a_refused_key_goes_back_to_its_default` fails for a row with no arm);
 //! - for a `ui` key, its field in `UiPatch` (`ui.rs`, and its name in `UiPatch::keys`) and in
-//!   `Settings::apply_ui_patch`;
+//!   `Settings::apply_ui_patch`. Two tests in `ui/tests.rs` fail when `keys()` misses a `ui`
+//!   key or differs from the names the writer saves: `the_keys_are_the_names_the_writer_saves`
+//!   and `the_keys_a_patch_sets_are_the_ui_policy_keys_in_field_order`;
 //! - a sample value in `leaf/tests.rs`' `every_fixed_key_types_and_the_kinds_agree`, and a
 //!   value that is not the default in `a_refused_key_goes_back_to_its_default`.
 //!

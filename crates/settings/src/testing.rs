@@ -2,8 +2,8 @@
 //! return what they were given.
 
 use crate::files::Files;
-use crate::locations::{Env, KnownFolder, PlatformDirs};
-use crate::policy::{PolicyRead, PolicySource};
+use crate::locations::{Env, KnownFolder, Locations, PlatformDirs};
+use crate::policy::{PolicyRead, PolicySource, file};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -104,6 +104,31 @@ impl<F: Fn() -> PolicyRead> PolicySource for FakeSource<F> {
 
     fn read(&self) -> PolicyRead {
         (self.read)()
+    }
+}
+
+/// The data folder every test in the crate loads settings from: `/data`.
+pub(crate) fn locations() -> Locations {
+    Locations::under_root(Path::new("/data"))
+}
+
+/// Memory files holding `settings.json` with `text`, at the data folder of [`locations`].
+pub(crate) fn user(text: &str) -> MemFiles {
+    MemFiles::with(locations().settings_file(), text)
+}
+
+/// A policy source whose `policy.json` is `text`, read through the real policy parser.
+pub(crate) fn policy(
+    name: &'static str,
+    text: impl Into<String>,
+) -> FakeSource<impl Fn() -> PolicyRead> {
+    let text: String = text.into();
+    FakeSource {
+        name,
+        read: move || match file::parse(Path::new(name), text.as_bytes()) {
+            Ok(values) => PolicyRead::Read(values),
+            Err(error) => PolicyRead::Unreadable(error),
+        },
     }
 }
 
