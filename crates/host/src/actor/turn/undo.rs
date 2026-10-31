@@ -1,5 +1,7 @@
 //! `UndoStep`: the matter's writer must be free and is held during the undo; the step is read
-//! from the thread's log; R8 undoes it on the matter's thread; one commit logs it.
+//! from the thread's log; R8 undoes it on the matter's thread; one commit logs it. The writer
+//! and the undo note wait until that commit is durable; a failed one is sent once more when the
+//! stream drains, as the end of a turn is.
 
 use std::collections::BTreeSet;
 
@@ -14,7 +16,10 @@ use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::input::{Input, MatterTag};
 use super::super::{Actor, Tag};
 use super::out::Out;
-use super::{JobKind, LogFor, TurnInput, TurnJob, end, lost, matter_of, prompt, state};
+use super::{
+    JobKind, LogFor, Then, TurnInput, TurnJob, TurnTag, end, failure, lost, matter_of, prompt,
+    state,
+};
 use crate::error::Error;
 use crate::matter_worker::{MatterJob, UndoJob};
 
@@ -206,7 +211,8 @@ fn give_up(actor: &mut Actor, thread: ThreadId, ask: &UndoAsk, error: Error) {
 }
 
 /// R8 answered. A refused `Keep` the host filled (a deletion now cloud-only or over the cap)
-/// is dropped and the undo tried once more with the same ids.
+/// is dropped and the undo tried once more with the same ids. The writer stays held until the
+/// commit logging the undo is durable (or its one retry has returned).
 pub(super) fn on_undone(
     actor: &mut Actor,
     thread: ThreadId,
@@ -214,13 +220,10 @@ pub(super) fn on_undone(
     result: Result<Undone, Error>,
 ) {
     match result {
-        Ok(undone) => {
-            let logged = log_undo(actor, thread, &ask, undone);
-            if let Err(error) = logged {
-                actor.finish_command(ask.ctx.id, Err(error));
-            }
-            end::release_writer(actor, ask.matter, thread);
-        }
+        Ok(undone) => match undo_log(thread, &ask, undone) {
+            Ok(log) => send_log(actor, thread, log),
+            Err(error) => give_up(actor, thread, &ask, error),
+        },
         Err(Error::Matters(clauseo_matters::Error::UnexpectedDecision { path }))
             if !ask.retried && ask.filled.contains(&path) =>
         {
@@ -234,14 +237,25 @@ pub(super) fn on_undone(
     }
 }
 
-/// One commit: the outside-edits checkpoint and its event when R8 made one, the undo
-/// checkpoint when R8 created it, `StepUndone`, the thread row and the receipt.
-fn log_undo(
-    actor: &mut Actor,
-    thread: ThreadId,
-    ask: &UndoAsk,
-    undone: Undone,
-) -> Result<(), Error> {
+/// The commit that logs an undo R8 has done, kept until it is durable so it can be sent once
+/// more: R8 has already put the files back.
+#[derive(Debug)]
+pub(crate) struct UndoLog {
+    ctx: CommandCtx,
+    matter: MatterId,
+    /// The matter's events: the outside-edits checkpoint and its event, the undo checkpoint.
+    matter_events: Vec<DomainEvent>,
+    step: StepUndone,
+    outcome: CommandOutcome,
+    /// That commit failed; the unblock sends it again.
+    failed: bool,
+    /// The one retry was sent.
+    retried: bool,
+}
+
+/// The events of the commit logging `undone`: the outside-edits checkpoint and its event when
+/// R8 made one, the undo checkpoint when R8 created it, then `StepUndone`.
+fn undo_log(thread: ThreadId, ask: &UndoAsk, undone: Undone) -> Result<UndoLog, Error> {
     let Undone {
         outside_edits,
         checkpoint,
@@ -249,36 +263,53 @@ fn log_undo(
         kept,
         ..
     } = undone;
-    let (ctx, matter, turn) = (ask.ctx, ask.matter, ask.turn);
+    let (matter, turn) = (ask.matter, ask.turn);
     let internal = |error: clauseo_protocol::Error| Error::Internal(error.to_string());
-    let mut out = Out::new(actor, thread, Some(ctx.id))?;
+    let mut matter_events: Vec<DomainEvent> = Vec::new();
     if let Some(edits) = outside_edits
         && let CheckpointOutcome::Created(id) = edits.outcome
     {
         let recorded = CheckpointRecorded::new(id, CheckpointKind::OutsideEdits, None, None)
             .map_err(internal)?;
-        out.push_matter(actor, matter, recorded)?;
+        matter_events.push(recorded.into());
         let event = OutsideEdits {
             checkpoint: id,
             files: edits.changes,
         };
-        out.push_matter(actor, matter, event)?;
+        matter_events.push(event.into());
     }
     if let CheckpointOutcome::Created(id) = checkpoint.outcome {
         let recorded = CheckpointRecorded::new(id, CheckpointKind::Undo, Some(thread), Some(turn))
             .map_err(internal)?;
-        out.push_matter(actor, matter, recorded)?;
+        matter_events.push(recorded.into());
     }
     let undo = checkpoint.outcome.id();
-    out.push(
-        actor,
-        StepUndone {
+    Ok(UndoLog {
+        ctx: ask.ctx,
+        matter,
+        matter_events,
+        step: StepUndone {
             turn,
             checkpoint: undo,
-            restored: restored.clone(),
+            restored,
             kept,
         },
-    )?;
+        outcome: CommandOutcome::StepUndone { checkpoint: undo },
+        failed: false,
+        retried: false,
+    })
+}
+
+/// One commit: the matter's events, `StepUndone`, the thread row and the receipt. The first
+/// send answers the command; the retry carries the receipt again, so the same command sent
+/// again finds the stored outcome.
+fn log_commit(actor: &mut Actor, thread: ThreadId, log: &UndoLog) -> Result<(), Error> {
+    let ctx = log.ctx;
+    let mut out = Out::new(actor, thread, Some(ctx.id))?;
+    for event in &log.matter_events {
+        out.push_matter(actor, log.matter, event.clone())?;
+    }
+    out.push(actor, log.step.clone())?;
     let now = actor.now().wall;
     let entry = actor
         .threads
@@ -286,23 +317,95 @@ fn log_undo(
         .ok_or_else(|| lost("a thread"))?;
     entry.row.updated = now;
     out.draft.thread_row(entry.row.clone());
-    let outcome = CommandOutcome::StepUndone { checkpoint: undo };
     out.draft
-        .receipt(ctx.receipt(Some(StreamId::Thread(thread)), outcome, now));
+        .receipt(ctx.receipt(Some(StreamId::Thread(thread)), log.outcome, now));
+    let then = TurnTag {
+        thread,
+        then: Then::Undone,
+    };
+    if log.retried {
+        return out.send_tagged(actor, Tag::Turn(then));
+    }
     let tag = Tag::Command {
         id: ctx.id,
-        outcome,
-        after: AfterCommand::Nothing,
+        outcome: log.outcome,
+        after: AfterCommand::Turn(then),
     };
-    out.send_tagged(actor, tag)?;
-    // The next prompt starts with the note on these files.
+    out.send_tagged(actor, tag)
+}
+
+/// Sends the commit logging the undo and keeps it on the thread until it returns.
+fn send_log(actor: &mut Actor, thread: ThreadId, log: UndoLog) {
+    let sent = log_commit(actor, thread, &log);
+    let (ctx, matter) = (log.ctx, log.matter);
+    let Some(state) = state(actor, thread) else {
+        end::release_writer(actor, matter, thread);
+        return;
+    };
+    state.undo = Some(Box::new(log));
+    if let Err(error) = sent {
+        tracing::warn!(%thread, %error, "an undo was not logged");
+        actor.finish_command(ctx.id, Err(error));
+        on_failed(actor, thread);
+        if !failure::blocked(actor, thread) {
+            retry(actor, thread);
+        }
+    }
+}
+
+/// The commit logging the undo is durable (or its retry returned): the next prompt's note
+/// names the files put back, and the writer passes on.
+pub(super) fn on_logged(actor: &mut Actor, thread: ThreadId) {
+    let Some(log) = state(actor, thread).and_then(|state| state.undo.take()) else {
+        return;
+    };
     prompt::ensure_note(actor, thread);
     if let Some(note) = state(actor, thread).and_then(|state| state.note.as_mut()) {
-        for path in restored {
+        for path in log.step.restored {
             if !note.contains(&path) {
                 note.push(path);
             }
         }
     }
-    Ok(())
+    end::release_writer(actor, log.matter, thread);
+}
+
+/// The commit logging the undo failed: the unblock sends it once more; a retry that fails too
+/// lets the writer go, with the undo done on disk and not in the log.
+pub(super) fn on_failed(actor: &mut Actor, thread: ThreadId) {
+    let Some(log) = state(actor, thread).and_then(|state| state.undo.as_mut()) else {
+        return;
+    };
+    if !log.retried {
+        log.failed = true;
+        return;
+    }
+    let matter = log.matter;
+    tracing::warn!(%thread, "an undo failed to log twice; its files are back on disk");
+    if let Some(state) = state(actor, thread) {
+        state.undo = None;
+    }
+    end::release_writer(actor, matter, thread);
+}
+
+/// The thread's stream drained after a failure: send a failed undo commit once more.
+pub(super) fn retry(actor: &mut Actor, thread: ThreadId) {
+    let Some(log) = state(actor, thread)
+        .and_then(|state| state.undo.as_mut())
+        .filter(|log| log.failed && !log.retried)
+    else {
+        return;
+    };
+    log.retried = true;
+    let Some(log) = state(actor, thread).and_then(|state| state.undo.take()) else {
+        return;
+    };
+    let sent = log_commit(actor, thread, &log);
+    if let Some(state) = state(actor, thread) {
+        state.undo = Some(log);
+    }
+    if let Err(error) = sent {
+        tracing::warn!(%thread, %error, "an undo was not logged");
+        on_failed(actor, thread);
+    }
 }

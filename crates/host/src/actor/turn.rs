@@ -67,6 +67,9 @@ pub(crate) struct TurnState {
     /// The last turn, until the commit holding its `TurnEnded` returns `Ok`. A new prompt is
     /// refused while it is here, so the open turn reconciliation looks for stays the last one.
     closing: Option<Closing>,
+    /// An undo R8 has done, until the commit logging it returns `Ok` or its retry returns;
+    /// the thread holds its matter's writer meanwhile.
+    undo: Option<Box<undo::UndoLog>>,
 }
 
 /// A turn whose `TurnEnded` is sent but not durable yet.
@@ -176,6 +179,8 @@ enum Then {
     Started(TurnId),
     /// The commit holding the `TurnEnded` of `turn`: forget its closing record.
     Closing(TurnId),
+    /// The commit logging an undo: update the note, let the writer go.
+    Undone,
     /// A permission answer: tell the agent.
     Permission {
         agent: u64,
@@ -358,6 +363,8 @@ pub(crate) fn committed(actor: &mut Actor, tag: TurnTag, outcome: Result<(), &Fa
         (Then::Closing(turn), Err(failed)) => {
             failure::on_closing_failed(actor, thread, turn, failed);
         }
+        (Then::Undone, Ok(())) => undo::on_logged(actor, thread),
+        (Then::Undone, Err(_)) => undo::on_failed(actor, thread),
         (Then::Permission { agent, key, option }, Ok(())) => {
             answers::tell_permission(actor, thread, agent, key, option);
         }
