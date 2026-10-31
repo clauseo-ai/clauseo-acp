@@ -59,6 +59,19 @@ impl Rig {
     pub(super) fn start(test: &str, steps: &str) -> Self {
         let dir = TempDir::new(test);
         let root = dir.path();
+        Self::prepare(root, test, steps);
+        Self::open(dir, 0)
+    }
+
+    /// Shuts the host down and starts it again on the same data folder, minting ids with run
+    /// number `run` so they never repeat the earlier runs' ids.
+    pub(super) fn restart(self, run: u16) -> Self {
+        let dir = self.close();
+        Self::open(dir, run)
+    }
+
+    /// The data folder: the agent's home, its scenario and the settings naming it.
+    fn prepare(root: &std::path::Path, test: &str, steps: &str) {
         crate::write::create_dir_all(&root.join("home")).unwrap();
         let scenario = root.join(format!("{test}.jsonl"));
         let header = format!(
@@ -73,12 +86,17 @@ impl Rig {
         }}});
         crate::write::write_file(&root.join("settings.json"), settings.to_string().as_bytes())
             .unwrap();
+    }
+
+    /// The host on the data folder `dir`, started and serving.
+    fn open(dir: TempDir, run: u16) -> Self {
+        let root = dir.path();
         let effective = Effective::load(&Locations::under_root(root), &SystemFiles, &[]);
         let launcher = PassthroughLauncher::new(SpawnOptions::new().home(root.join("home")));
         let clock = ManualClock::new(Timestamp::new(1_790_000_000_000).unwrap());
         let config = HostConfig::new(effective, Arc::new(launcher))
             .with_clock(Arc::new(clock.clone()))
-            .with_ids(Box::new(SequentialIds::new()));
+            .with_ids(Box::new(SequentialIds::with_run(run)));
         let mut pool = LocalPool::new();
         let (post, internal) = async_channel::unbounded();
         let (ready, _ready) = std::sync::mpsc::channel();
@@ -218,15 +236,8 @@ impl Rig {
     /// A turn of `thread` whose prompt is in flight, with no agent: its stream loaded, and
     /// `AgentSessionAttached`, `UserMessage` and `TurnStarted` durable.
     pub(super) fn running_turn(&mut self, thread: ThreadId) -> TurnId {
+        let turn = self.current_turn(thread, Phase::Prompting);
         let now = self.actor.now().wall;
-        let turn: TurnId = self.actor.ids.mint(now).unwrap();
-        let mut current = Current::new(turn, Vec::new());
-        current.phase = Phase::Prompting;
-        self.actor.threads.get_mut(&thread).unwrap().turn.current = Some(Box::new(current));
-        let stream = StreamId::Thread(thread);
-        self.actor
-            .with_loaded(stream, Box::new(|_, loaded| loaded.unwrap()));
-        self.run_until("the thread loaded", |actor| actor.loaded(stream).is_some());
         let events: Vec<DomainEvent> = vec![
             AgentSessionAttached {
                 session: "sess-1".parse().unwrap(),
@@ -250,6 +261,20 @@ impl Rig {
         ];
         self.commit(thread, events);
         self.settle_commits();
+        turn
+    }
+
+    /// A current turn of `thread` in `phase`, with the thread's stream loaded; nothing logged.
+    pub(super) fn current_turn(&mut self, thread: ThreadId, phase: Phase) -> TurnId {
+        let now = self.actor.now().wall;
+        let turn: TurnId = self.actor.ids.mint(now).unwrap();
+        let mut current = Current::new(turn, Vec::new());
+        current.phase = phase;
+        self.actor.threads.get_mut(&thread).unwrap().turn.current = Some(Box::new(current));
+        let stream = StreamId::Thread(thread);
+        self.actor
+            .with_loaded(stream, Box::new(|_, loaded| loaded.unwrap()));
+        self.run_until("the thread loaded", |actor| actor.loaded(stream).is_some());
         turn
     }
 
@@ -318,15 +343,24 @@ impl Rig {
         self.recorded().last().unwrap().checkpoint()
     }
 
+    /// The path of `name` in the Scratch matter's folder.
+    pub(super) fn scratch_file(&self, name: &str) -> std::path::PathBuf {
+        let matter = &self.actor.matters[&self.matter()];
+        std::path::Path::new(&matter.row.folder_path).join(name)
+    }
+
     /// Writes `text` to `name` in the Scratch matter's folder.
     pub(super) fn write_file(&self, name: &str, text: &str) {
-        let matter = &self.actor.matters[&self.matter()];
-        let path = std::path::Path::new(&matter.row.folder_path).join(name);
-        crate::write::write_file(&path, text.as_bytes()).unwrap();
+        crate::write::write_file(&self.scratch_file(name), text.as_bytes()).unwrap();
     }
 
     /// Shuts the host down and closes the store.
-    pub(super) fn finish(mut self) {
+    pub(super) fn finish(self) {
+        drop(self.close());
+    }
+
+    /// Shuts the host down, closes the store and hands back the data folder.
+    fn close(mut self) -> TempDir {
         shutdown::begin_shutdown(&mut self.actor, None);
         // A cancelled turn with no agent to answer ends at its fallback.
         self.clock.advance(super::super::CANCEL_WAIT);
@@ -338,9 +372,13 @@ impl Rig {
             self.actor.on_input(input);
         }
         let Self {
-            actor, mut pool, ..
+            actor,
+            mut pool,
+            _dir: dir,
+            ..
         } = self;
         pool.run_until(shutdown::close(actor)).unwrap();
+        dir
     }
 }
 

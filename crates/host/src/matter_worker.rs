@@ -10,11 +10,12 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use clauseo_matters::{
-    Checkpoint, ImportWarning, Imported, Limits, Matter, NewMatter, OsProbe, Retention, Settings,
-    TurnMeta, UndoRequest, Undone,
+    Checkpoint, CheckpointOutcome, ImportWarning, Imported, Limits, Matter, NewMatter, OsProbe,
+    Retention, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone,
 };
 use clauseo_protocol::{
-    CheckpointId, FileDecision, ImportSummary, MatterId, MatterPath, ThreadId, Timestamp, TurnId,
+    CheckpointId, FileChange, FileDecision, ImportSummary, MatterId, MatterPath, ThreadId,
+    Timestamp, TurnId,
 };
 
 use crate::error::Error;
@@ -62,10 +63,12 @@ pub(crate) enum MatterJob {
     Open { id: MatterId, folder: PathBuf },
     /// The before-turn checkpoint.
     BeforeTurn(TurnMeta),
-    /// The after-turn checkpoint with the paths the turn's tool calls named.
+    /// The after-turn checkpoint with the paths the turn's tool calls named, and the turn's
+    /// before-turn checkpoint when the host knows it (for a reused id's changes).
     AfterTurn {
         meta: TurnMeta,
         tool_paths: BTreeSet<MatterPath>,
+        before: Option<CheckpointId>,
     },
     /// Undo one step.
     Undo(UndoJob),
@@ -90,9 +93,28 @@ pub(crate) enum MatterReply {
     Imported(Result<ImportEnd, Error>),
     /// The open matter's last checkpoint.
     Opened(Result<Option<CheckpointId>, Error>),
-    BeforeTurn(Result<Checkpoint, Error>),
-    AfterTurn(Result<Checkpoint, Error>),
+    BeforeTurn(Result<TurnCheckpoint, Error>),
+    AfterTurn(Result<TurnCheckpoint, Error>),
     Undone(Result<Undone, Error>),
+}
+
+/// A turn's checkpoint, and for an id R8 reused what the host needs to record it when its log
+/// lost that checkpoint (a crash, or a commit that failed, between R8 and the log).
+#[derive(Debug)]
+pub(crate) struct TurnCheckpoint {
+    pub(crate) checkpoint: Checkpoint,
+    /// `Some` when the outcome is `Reused`.
+    pub(crate) reused: Option<Reused>,
+}
+
+/// A reused checkpoint as R8's timeline has it.
+#[derive(Debug, Clone)]
+pub(crate) struct Reused {
+    /// Its kind, thread and turn; `None` if the timeline does not hold the id.
+    pub(crate) entry: Option<TimelineEntry>,
+    /// For an after-turn checkpoint: the changes from the turn's before-turn checkpoint to it,
+    /// empty when they are the same checkpoint or the before id is not known.
+    pub(crate) changes: Vec<FileChange>,
 }
 
 /// What the worker holds.
@@ -187,12 +209,20 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             *slot = Slot::Unopened { id, folder };
             MatterReply::Opened(open(settings, slot).map(|matter| matter.last_checkpoint()))
         }
-        MatterJob::BeforeTurn(meta) => MatterReply::BeforeTurn(
-            open(settings, slot).and_then(|matter| Ok(matter.before_turn(&meta)?)),
-        ),
-        MatterJob::AfterTurn { meta, tool_paths } => MatterReply::AfterTurn(
-            open(settings, slot).and_then(|matter| Ok(matter.after_turn(&meta, &tool_paths)?)),
-        ),
+        MatterJob::BeforeTurn(meta) => {
+            MatterReply::BeforeTurn(open(settings, slot).and_then(|matter| {
+                let checkpoint = matter.before_turn(&meta)?;
+                turn_checkpoint(matter, checkpoint, None)
+            }))
+        }
+        MatterJob::AfterTurn {
+            meta,
+            tool_paths,
+            before,
+        } => MatterReply::AfterTurn(open(settings, slot).and_then(|matter| {
+            let checkpoint = matter.after_turn(&meta, &tool_paths)?;
+            turn_checkpoint(matter, checkpoint, before)
+        })),
         MatterJob::Undo(job) => MatterReply::Undone(open(settings, slot).and_then(|matter| {
             let request = UndoRequest {
                 before: job.before,
@@ -207,6 +237,35 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             Ok(matter.undo(&request)?)
         })),
     }
+}
+
+/// `checkpoint` with, when R8 reused an id, its timeline entry and the changes from `before`.
+fn turn_checkpoint(
+    matter: &Matter,
+    checkpoint: Checkpoint,
+    before: Option<CheckpointId>,
+) -> Result<TurnCheckpoint, Error> {
+    let CheckpointOutcome::Reused(id) = checkpoint.outcome else {
+        return Ok(TurnCheckpoint {
+            checkpoint,
+            reused: None,
+        });
+    };
+    // A reused id is the last checkpoint, so the search from the end stops at once.
+    let entry = matter
+        .timeline()
+        .iter()
+        .rev()
+        .find(|entry| entry.id == id)
+        .copied();
+    let changes = match before {
+        Some(before) if before != id => matter.changes_between(before, id)?,
+        Some(_) | None => Vec::new(),
+    };
+    Ok(TurnCheckpoint {
+        checkpoint,
+        reused: Some(Reused { entry, changes }),
+    })
 }
 
 fn import(

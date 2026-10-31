@@ -70,8 +70,13 @@ fn create_then_checkpoints_on_the_matter_thread() {
     let MatterReply::BeforeTurn(Ok(before)) = reply else {
         panic!("{reply:?}")
     };
-    // Nothing changed since the import checkpoint.
-    assert_eq!(before.outcome, CheckpointOutcome::Reused(root_checkpoint));
+    // Nothing changed since the import checkpoint; the reply carries its timeline entry.
+    assert_eq!(
+        before.checkpoint.outcome,
+        CheckpointOutcome::Reused(root_checkpoint)
+    );
+    let entry = before.reused.and_then(|reused| reused.entry).unwrap();
+    assert_eq!(entry.kind, clauseo_protocol::CheckpointKind::Import);
 
     // The turn writes a file no tool call named.
     write::write_file(&folder.join("notes.txt"), b"Alpha\n").unwrap();
@@ -80,6 +85,7 @@ fn create_then_checkpoints_on_the_matter_thread() {
             MatterJob::AfterTurn {
                 meta: meta(4),
                 tool_paths: BTreeSet::new(),
+                before: Some(root_checkpoint),
             },
             3,
         )
@@ -89,6 +95,8 @@ fn create_then_checkpoints_on_the_matter_thread() {
     let MatterReply::AfterTurn(Ok(after)) = reply else {
         panic!("{reply:?}")
     };
+    assert!(after.reused.is_none(), "a new checkpoint was made");
+    let after = after.checkpoint;
     assert_eq!(
         after.outcome,
         CheckpointOutcome::Created(meta(4).checkpoint)
@@ -100,6 +108,27 @@ fn create_then_checkpoints_on_the_matter_thread() {
             .iter()
             .all(clauseo_protocol::FileChange::may_include_lawyer_edits)
     );
+
+    // R8 reuses that checkpoint for the next after-turn: the reply has its changes since
+    // the import, as if the log had lost it.
+    worker
+        .send(
+            MatterJob::AfterTurn {
+                meta: meta(5),
+                tool_paths: BTreeSet::new(),
+                before: Some(root_checkpoint),
+            },
+            4,
+        )
+        .unwrap();
+    let (_, reply, _) = rx.recv().unwrap();
+    let MatterReply::AfterTurn(Ok(again)) = reply else {
+        panic!("{reply:?}")
+    };
+    let reused = again.reused.unwrap();
+    assert_eq!(reused.entry.map(|entry| entry.id), Some(meta(4).checkpoint));
+    let paths: Vec<_> = reused.changes.iter().map(|c| c.path().as_str()).collect();
+    assert_eq!(paths, ["notes.txt"]);
 
     worker.stop().unwrap();
     write::remove_dir_all(&root).unwrap();

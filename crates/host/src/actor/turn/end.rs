@@ -2,10 +2,10 @@
 //! after-turn checkpoint and the commit that ends the turn, the writer passing on), and a host
 //! bug that ends a turn early. Store failures are in `failure.rs`.
 
-use clauseo_matters::{Checkpoint, CheckpointOutcome, TurnMeta};
+use clauseo_matters::{CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
-    CheckpointKind, CheckpointRecorded, ErrorCode, ExpiryReason, FilesChanged, MatterId,
-    StopReason, StreamId, ThreadId, TurnId,
+    CheckpointKind, CheckpointRecorded, ErrorCode, ExpiryReason, FileChange, FilesChanged,
+    MatterId, StopReason, StreamId, ThreadId, TurnId,
 };
 
 use super::super::Actor;
@@ -14,11 +14,11 @@ use super::agents;
 use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{
-    End, JobKind, Phase, Then, TurnJob, asks, cancel, current, failure, matter_of, state, steps,
-    stopping, updates,
+    End, JobKind, Phase, Then, TurnJob, asks, cancel, current, failure, known, matter_of, state,
+    steps, stopping, updates,
 };
 use crate::error::Error;
-use crate::matter_worker::MatterJob;
+use crate::matter_worker::{MatterJob, TurnCheckpoint};
 
 /// The prompt returned: step 6.
 pub(super) fn on_prompt_done(
@@ -82,7 +82,7 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
     if end.detach.is_none() {
         end.detach = current.detach.take();
     }
-    let turn = current.turn;
+    let (turn, before) = (current.turn, current.checkpoint_before);
     let expiry = end.expiry;
     let paths = std::mem::take(&mut current.tool_paths);
     current.end = Some(end);
@@ -115,6 +115,7 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
         let after = MatterJob::AfterTurn {
             meta,
             tool_paths: paths,
+            before,
         };
         actor
             .matter_worker(matter)?
@@ -133,7 +134,7 @@ pub(super) fn on_after_turn(
     actor: &mut Actor,
     thread: ThreadId,
     turn: TurnId,
-    result: Result<Checkpoint, Error>,
+    result: Result<TurnCheckpoint, Error>,
 ) {
     let Some(current) = current(actor, thread)
         .filter(|current| current.turn == turn && current.phase == Phase::Ending)
@@ -160,7 +161,7 @@ pub(super) fn on_after_turn(
     close.detach = end.detach;
     let logged = matter_of(actor, thread).and_then(|matter| {
         match result {
-            Ok(checkpoint) => after_events(&mut close, matter, thread, checkpoint)?,
+            Ok(done) => after_events(actor, &mut close, matter, thread, done)?,
             Err(error) => {
                 close
                     .failure
@@ -175,27 +176,40 @@ pub(super) fn on_after_turn(
 
 /// The after-turn checkpoint's part of a close: matter `CheckpointRecorded { AfterTurn }` when
 /// R8 created it, `FilesChanged` when anything changed or was skipped, and `checkpoint_after`.
+/// A reused id the matter's log does not hold is recorded first, with the changes the lost
+/// commit held (the turn's before-turn checkpoint to that id); no tool-call paths are known
+/// for them, so each is flagged as possibly holding the lawyer's edits.
 pub(super) fn after_events(
+    actor: &Actor,
     close: &mut TurnClose,
     matter: MatterId,
     thread: ThreadId,
-    checkpoint: Checkpoint,
+    done: TurnCheckpoint,
 ) -> Result<(), Error> {
     let turn = close.turn;
+    let unrecorded = known::unrecorded(actor, matter, &done)?;
+    let TurnCheckpoint { checkpoint, reused } = done;
+    let mut files = checkpoint.changes;
+    let id = checkpoint.outcome.id();
     if let CheckpointOutcome::Created(id) = checkpoint.outcome {
         let recorded =
             CheckpointRecorded::new(id, CheckpointKind::AfterTurn, Some(thread), Some(turn))
                 .map_err(|error| Error::Internal(error.to_string()))?;
         close.push_matter(matter, recorded);
     }
-    if !checkpoint.changes.is_empty() || !checkpoint.skipped.is_empty() {
+    if let Some(recorded) = unrecorded {
+        close.push_matter(matter, recorded);
+        let lost = reused.map(|reused| reused.changes).unwrap_or_default();
+        files.extend(lost.into_iter().map(FileChange::with_lawyer_edits));
+    }
+    if !files.is_empty() || !checkpoint.skipped.is_empty() {
         close.files = Some(FilesChanged {
             turn,
-            files: checkpoint.changes,
+            files,
             skipped: checkpoint.skipped,
         });
     }
-    close.checkpoint_after = Some(checkpoint.outcome.id());
+    close.checkpoint_after = Some(id);
     Ok(())
 }
 
@@ -228,6 +242,7 @@ pub(super) fn release_writer(actor: &mut Actor, matter: MatterId, thread: Thread
     }
     turns.holder = None;
     if shutting {
+        actor.release(StreamId::Matter(matter));
         return;
     }
     loop {
@@ -236,6 +251,7 @@ pub(super) fn release_writer(actor: &mut Actor, matter: MatterId, thread: Thread
             .get_mut(&matter)
             .and_then(|entry| entry.turns.queue.pop_front())
         else {
+            actor.release(StreamId::Matter(matter));
             return;
         };
         let waiting = current(actor, next)

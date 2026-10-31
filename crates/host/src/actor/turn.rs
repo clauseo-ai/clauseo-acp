@@ -16,6 +16,7 @@ mod close;
 mod end;
 mod failure;
 mod inputs;
+mod known;
 mod out;
 mod prompt;
 mod reconcile;
@@ -101,6 +102,8 @@ struct Current {
     limit: Option<LimitMark>,
     /// The matter paths the turn's tool calls named, for the after-turn checkpoint.
     tool_paths: BTreeSet<MatterPath>,
+    /// The before-turn checkpoint, once step 4 has it.
+    checkpoint_before: Option<clauseo_protocol::CheckpointId>,
     /// Drops the prompt's call (the cancel fallback).
     prompt_call: Option<AbortHandle>,
     /// The cancel fallback timer.
@@ -315,13 +318,19 @@ pub(crate) fn matter_reply(actor: &mut Actor, _matter: MatterId, job: TurnJob, r
     let TurnJob { thread, kind } = job;
     match (kind, reply) {
         (JobKind::Before(turn), MatterReply::BeforeTurn(result)) => {
-            steps::on_before_turn(actor, thread, turn, result);
+            known::when_loaded(actor, thread, result, move |actor, result| {
+                steps::on_before_turn(actor, thread, turn, result);
+            });
         }
         (JobKind::After(turn), MatterReply::AfterTurn(result)) => {
-            end::on_after_turn(actor, thread, turn, result);
+            known::when_loaded(actor, thread, result, move |actor, result| {
+                end::on_after_turn(actor, thread, turn, result);
+            });
         }
         (JobKind::Reconcile(repair), MatterReply::AfterTurn(result)) => {
-            reconcile::on_after_turn(actor, thread, *repair, result);
+            known::when_loaded(actor, thread, result, move |actor, result| {
+                reconcile::on_after_turn(actor, thread, *repair, result);
+            });
         }
         (JobKind::Undo(ask), MatterReply::Undone(result)) => {
             undo::on_undone(actor, thread, *ask, result);
@@ -433,6 +442,15 @@ pub(crate) fn keeps_loaded(actor: &Actor, thread: ThreadId) -> bool {
                 .as_ref()
                 .is_some_and(|closing| !closing.retried)
     })
+}
+
+/// Whether `matter`'s stream, once loaded to check a reused checkpoint, stays loaded: while a
+/// turn or an undo holds its writer, so the turn's next checkpoint reads it without a reload.
+pub(crate) fn keeps_matter_loaded(actor: &Actor, matter: MatterId) -> bool {
+    actor
+        .matters
+        .get(&matter)
+        .is_some_and(|entry| entry.turns.holder.is_some())
 }
 
 /// Whether the host is shutting down.

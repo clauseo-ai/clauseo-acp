@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use clauseo_matters::{Checkpoint, CheckpointOutcome, TurnMeta};
+use clauseo_matters::{CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
     CheckpointKind, CheckpointRecorded, CommandOutcome, ContentBlock, Delivery, DomainEvent,
     ErrorCode, MatterId, OutsideEdits, PromptBlock, StopReason, StreamId, ThreadId, TurnFailed,
@@ -20,13 +20,13 @@ use super::close::TurnClose;
 use super::out::Out;
 use super::state::STORE_DETAIL;
 use super::{
-    Current, End, JobKind, Phase, Then, TurnJob, TurnTag, current, end, failure, lost, matter_of,
-    prompt, state, stopping,
+    Current, End, JobKind, Phase, Then, TurnJob, TurnTag, current, end, failure, known, lost,
+    matter_of, prompt, state, stopping,
 };
 use crate::build;
 use crate::error::Error;
 use crate::file_link;
-use crate::matter_worker::MatterJob;
+use crate::matter_worker::{MatterJob, TurnCheckpoint};
 
 /// Step 1: `SendPrompt` on a thread with no current turn logs `UserMessage` with the receipt.
 pub(super) fn send_prompt(
@@ -257,14 +257,14 @@ pub(super) fn end_unstarted(
     turn: TurnId,
     failed: Option<TurnFailed>,
     stop: StopReason,
-    checkpoint: Option<(MatterId, Checkpoint)>,
+    checkpoint: Option<(MatterId, TurnCheckpoint)>,
 ) {
     let mut close = TurnClose::new(turn, stop);
     close.failure = failed.map(|failed| (failed.code, failed.detail));
     close.detach = current(actor, thread).and_then(|current| current.detach.take());
     let sent = (|| -> Result<(), Error> {
         if let Some((matter, checkpoint)) = checkpoint {
-            for event in before_events(thread, turn, checkpoint)? {
+            for event in before_events(actor, matter, thread, turn, checkpoint)? {
                 close.push_matter(matter, event);
             }
         }
@@ -310,7 +310,7 @@ pub(super) fn on_before_turn(
     actor: &mut Actor,
     thread: ThreadId,
     turn: TurnId,
-    result: Result<Checkpoint, Error>,
+    result: Result<TurnCheckpoint, Error>,
 ) {
     let Some(found) = current(actor, thread)
         .filter(|current| current.turn == turn && current.phase == Phase::Checkpointing)
@@ -360,13 +360,14 @@ pub(super) fn on_before_turn(
         end_unstarted(actor, thread, turn, None, StopReason::Cancelled, checkpoint);
         return;
     }
+    let before = checkpoint.checkpoint.outcome.id();
     if let Some(current) = current(actor, thread) {
         current.phase = Phase::Starting;
+        current.checkpoint_before = Some(before);
     }
     let started = (|| -> Result<(), Error> {
         let mut out = Out::new(actor, thread, None)?;
-        let before = checkpoint.outcome.id();
-        for event in before_events(thread, turn, checkpoint)? {
+        for event in before_events(actor, matter, thread, turn, checkpoint)? {
             out.push_matter(actor, matter, event)?;
         }
         out.push(
@@ -414,12 +415,19 @@ pub(super) fn on_started(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     }
 }
 
-/// A new before-turn checkpoint's events in the matter's stream.
+/// A before-turn checkpoint's events in the matter's stream: `CheckpointRecorded { BeforeTurn }`
+/// and `OutsideEdits` for a new one, the record of a reused id the matter's log does not hold.
 fn before_events(
+    actor: &Actor,
+    matter: MatterId,
     thread: ThreadId,
     turn: TurnId,
-    checkpoint: Checkpoint,
+    done: TurnCheckpoint,
 ) -> Result<Vec<DomainEvent>, Error> {
+    if let Some(recorded) = known::unrecorded(actor, matter, &done)? {
+        return Ok(vec![recorded.into()]);
+    }
+    let checkpoint = done.checkpoint;
     let CheckpointOutcome::Created(id) = checkpoint.outcome else {
         return Ok(Vec::new());
     };

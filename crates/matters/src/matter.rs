@@ -9,7 +9,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
-use clauseo_protocol::{CheckpointId, CheckpointKind, ImportSummary, MatterId, MatterPath};
+use clauseo_protocol::{
+    CheckpointId, CheckpointKind, FileChange, ImportSummary, MatterId, MatterPath,
+};
 
 use crate::checkpoint::{Core, Spec};
 use crate::history::{GixStore, HistoryStore};
@@ -218,6 +220,18 @@ impl Matter {
             tool_paths,
         };
         self.core.take(&self.folder, &self.settings, &spec)
+    }
+
+    /// The file changes from checkpoint `from` to checkpoint `to`, read from history alone (the
+    /// folder is not scanned), sorted by path. No change is flagged `may_include_lawyer_edits`:
+    /// the history does not know which paths a turn's tool calls named. The host uses it to log
+    /// the `FilesChanged` of an after-turn checkpoint whose log entry was lost.
+    pub fn changes_between(
+        &self,
+        from: CheckpointId,
+        to: CheckpointId,
+    ) -> Result<Vec<FileChange>, Error> {
+        self.core.changes_between(from, to)
     }
 
     /// The files the step from `before` to `after` changed whose content now differs from

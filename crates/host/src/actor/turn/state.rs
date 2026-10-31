@@ -60,6 +60,7 @@ impl Current {
             cancelled: false,
             limit: None,
             tool_paths: BTreeSet::new(),
+            checkpoint_before: None,
             prompt_call: None,
             cancel_timer: None,
             end: None,

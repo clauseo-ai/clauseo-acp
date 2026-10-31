@@ -1,16 +1,17 @@
 //! Start-up reconciliation: a thread whose log ends inside a turn (the host stopped without
 //! ending it) gets one commit. Pending requests expire `HostRestarted`; a started turn gets an
-//! after-turn checkpoint and ends `TurnFailed { thread.interrupted }`; a turn that never
+//! after-turn checkpoint and ends `TurnFailed { thread.interrupted }` (a checkpoint R8 made
+//! whose record the log lost is recorded with the turn's changes, `known.rs`); a turn that never
 //! started stays queued, held behind its own thread; an attached session is detached. A turn
 //! with a `TurnEnded` is never touched, so each repair happens once.
 
 use std::collections::BTreeSet;
 
-use clauseo_matters::{Checkpoint, TurnMeta};
+use clauseo_matters::TurnMeta;
 use clauseo_protocol::{
-    AgentSessionDetached, DetachReason, DomainEvent, ElicitationId, ElicitationState, Envelope,
-    ErrorCode, MatterPath, PermissionRequestId, PermissionState, StopReason, StreamId, ThreadId,
-    ThreadStatus, ToolCallId, TurnId, TurnQueued, UserMessageStatus, ViewEntry,
+    AgentSessionDetached, CheckpointId, DetachReason, DomainEvent, ElicitationId, ElicitationState,
+    Envelope, ErrorCode, MatterPath, PermissionRequestId, PermissionState, StopReason, StreamId,
+    ThreadId, ThreadStatus, ToolCallId, TurnId, TurnQueued, UserMessageStatus, ViewEntry,
 };
 use clauseo_reducer::ThreadState;
 
@@ -20,7 +21,7 @@ use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{JobKind, LogFor, Then, TurnInput, TurnJob, end, matter_of, state, updates};
 use crate::error::Error;
-use crate::matter_worker::MatterJob;
+use crate::matter_worker::{MatterJob, TurnCheckpoint};
 use crate::sent::SentView;
 
 /// A started turn's repair, while its after-turn checkpoint runs.
@@ -190,6 +191,19 @@ fn previous_turn(log: &[Envelope], turn: TurnId) -> Option<TurnId> {
     previous
 }
 
+/// The before-turn checkpoint `turn`'s `TurnStarted` names.
+fn checkpoint_before(log: &[Envelope], turn: TurnId) -> Option<CheckpointId> {
+    log.iter().find_map(|envelope| {
+        if let DomainEvent::TurnStarted(started) = &envelope.event
+            && started.turn == turn
+        {
+            Some(started.checkpoint_before)
+        } else {
+            None
+        }
+    })
+}
+
 /// The matter paths the turn's tool calls named.
 fn turn_paths(log: &[Envelope], turn: TurnId) -> BTreeSet<MatterPath> {
     let mut tools: BTreeSet<ToolCallId> = BTreeSet::new();
@@ -236,7 +250,12 @@ fn after_turn(
             thread,
             kind: JobKind::Reconcile(Box::new(Repair { turn, pending })),
         };
-        let after = MatterJob::AfterTurn { meta, tool_paths };
+        let before = checkpoint_before(log, turn);
+        let after = MatterJob::AfterTurn {
+            meta,
+            tool_paths,
+            before,
+        };
         actor
             .matter_worker(matter)?
             .send(after, MatterTag::Turn(job))?;
@@ -257,7 +276,7 @@ pub(super) fn on_after_turn(
     actor: &mut Actor,
     thread: ThreadId,
     repair: Repair,
-    result: Result<Checkpoint, Error>,
+    result: Result<TurnCheckpoint, Error>,
 ) {
     let Repair { turn, pending } = repair;
     let mut close = TurnClose::new(turn, StopReason::Failed);
@@ -268,7 +287,7 @@ pub(super) fn on_after_turn(
     }
     let logged = matter_of(actor, thread).and_then(|matter| {
         match result {
-            Ok(checkpoint) => end::after_events(&mut close, matter, thread, checkpoint)?,
+            Ok(done) => end::after_events(actor, &mut close, matter, thread, done)?,
             Err(error) => {
                 tracing::warn!(%thread, %error, "an interrupted turn's checkpoint failed");
             }
