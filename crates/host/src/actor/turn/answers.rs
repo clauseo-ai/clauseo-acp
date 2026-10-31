@@ -89,6 +89,7 @@ fn send_answer(
             then @ (Then::Launch(_)
             | Then::Started(_)
             | Then::Closing(_)
+            | Then::Undone
             | Then::Permission { .. }
             | Then::Elicitation { .. }) => AfterCommand::Turn(TurnTag { thread, then }),
         },

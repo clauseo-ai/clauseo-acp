@@ -17,7 +17,7 @@ use clauseo_protocol::{StopReason, StreamId, ThreadId, TurnFailed, TurnId};
 use super::super::Actor;
 use super::close::TurnClose;
 use super::state::STORE_DETAIL;
-use super::{Closing, Phase, Then, cancel, current, state, steps};
+use super::{Closing, Phase, Then, cancel, current, state, steps, undo};
 use crate::error::Error;
 use crate::pipeline::Failure;
 
@@ -46,11 +46,12 @@ pub(super) fn on_store_failure(actor: &mut Actor, thread: ThreadId, failure: &Fa
 
 /// `thread`'s stream drained after a failure; its sent view is the log's again.
 ///
-/// A failed end is retried once. A turn whose prompt is in flight logs its cancel commit if the
+/// A failed end, and a failed undo commit, is retried once. A turn whose prompt is in flight logs its cancel commit if the
 /// failure refused it, and keeps waiting for the prompt's answer or the cancel fallback. A turn
 /// whose checkpoint runs ends when the checkpoint answers. A turn that never started ends now.
 pub(super) fn on_unblocked(actor: &mut Actor, thread: ThreadId) {
     retry_closing(actor, thread);
+    undo::retry(actor, thread);
     let Some(current) = current(actor, thread) else {
         return;
     };
