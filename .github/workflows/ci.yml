@@ -366,8 +366,12 @@ jobs:
         with:
           tools: cargo-nextest
 
+      # The permission tests start fake_agent from target/debug (test_support.rs), which only a
+      # workspace run builds, so the dev build comes first; the release one above is for the plays.
       - name: Test the desktop crate with the marks feature
-        run: cargo nextest run -p clauseo-desktop --features marks --locked --profile ci
+        run: |
+          cargo build --locked -p clauseo-fake_agent
+          cargo nextest run -p clauseo-desktop --features marks --locked --profile ci
 
       - name: clippy the desktop crate with the marks feature
         run: cargo clippy -p clauseo-desktop --all-targets --features marks --locked -- -D warnings
