@@ -1,8 +1,8 @@
 //! The frontend steps: `pnpm install` for the `ui` workspace, then the package.json scripts that
-//! run tsc, oxlint, oxfmt, vitest and vite build. The scripts are the one source of each command;
-//! xtask only appends the flags its parsers need. Each builder says what one tool runs and how its
-//! output is read. `plan` decides whether they run or are skipped; the pnpm version is pinned by
-//! `packageManager` in `ui/package.json`.
+//! run tsc (in ui/app and ui/e2e), oxlint, oxfmt, vitest, ui/e2e's unit tests and vite build. The
+//! scripts are the one source of each command; xtask only appends the flags its parsers need. Each
+//! builder says what one tool runs and how its output is read. `plan` decides whether they run or
+//! are skipped; the pnpm version is pinned by `packageManager` in `ui/package.json`.
 
 use super::ToolStep;
 use super::plan::{parse_none, reproduce};
@@ -15,8 +15,8 @@ use std::time::Duration;
 /// How long `pnpm install` may run: it downloads the packages the store lacks, minutes on a slow
 /// link.
 const INSTALL_TIMEOUT: Duration = Duration::from_mins(15);
-/// How long one package.json script may run: tsc, oxlint, oxfmt, vitest and vite build each take
-/// under a minute on the blank app.
+/// How long one package.json script may run: tsc, oxlint, oxfmt, the unit tests and vite build
+/// each take under a minute on the blank app.
 const SCRIPT_TIMEOUT: Duration = Duration::from_mins(10);
 
 /// Why the ui steps are skipped on a machine without pnpm. CI never skips them.
@@ -26,14 +26,17 @@ pub(super) const NO_PNPM: &str =
 /// The fix when pnpm cannot start: install the version `ui/package.json` names, then the workspace.
 const PNPM_FIX: &str = "install the pnpm version in ui/package.json `packageManager`, then run `pnpm -C ui install --frozen-lockfile`";
 
-/// The six ui steps in run order: the install, then the four checks and the two builds.
+/// The eight ui steps in run order: the install, then the six checks (tsc in each package, oxlint,
+/// oxfmt, vitest and the ui/e2e unit tests), then the build.
 pub(super) fn steps() -> Vec<ToolStep> {
     vec![
         install_step(),
         tsc_step(),
+        tsc_e2e_step(),
         oxlint_step(),
         oxfmt_step(),
         vitest_step(),
+        playwright_unit_step(),
         vite_build_step(),
     ]
 }
@@ -69,7 +72,18 @@ fn tsc_step() -> ToolStep {
     ToolStep {
         name: "tsc",
         cmd: script("ui/app", "typecheck", &["--pretty", "false"]),
-        parse: tsc_findings,
+        parse: |output, _ctx, _cmd| tsc_findings("ui/app", output),
+        fix: ui_fix,
+        render: None,
+    }
+}
+
+/// tsc in ui/e2e, which has the same `typecheck` script as ui/app.
+fn tsc_e2e_step() -> ToolStep {
+    ToolStep {
+        name: "tsc-e2e",
+        cmd: script("ui/e2e", "typecheck", &["--pretty", "false"]),
+        parse: |output, _ctx, _cmd| tsc_findings("ui/e2e", output),
         fix: ui_fix,
         render: None,
     }
@@ -107,6 +121,18 @@ fn vitest_step() -> ToolStep {
     }
 }
 
+/// ui/e2e's unit tests (`test:unit`): Playwright's runner with its `unit` project, which runs on
+/// any OS. Like vitest, its output is not parsed for findings.
+fn playwright_unit_step() -> ToolStep {
+    ToolStep {
+        name: "playwright-unit",
+        cmd: script("ui/e2e", "test:unit", &[]),
+        parse: parse_none,
+        fix: ui_fix,
+        render: None,
+    }
+}
+
 fn vite_build_step() -> ToolStep {
     ToolStep {
         name: "vite-build",
@@ -126,8 +152,8 @@ fn ui_fix(cmd: &Cmd, output: Option<&str>) -> String {
     }
 }
 
-/// Repo-relative form of a path a ui tool printed. The tool ran in `base` (`ui/app` for tsc and
-/// oxlint, `ui` for oxfmt), so its paths are relative to that directory.
+/// Repo-relative form of a path a ui tool printed. The tool ran in `base` (`ui/app` or `ui/e2e`
+/// for tsc, `ui/app` for oxlint, `ui` for oxfmt), so its paths are relative to that directory.
 fn ui_path(base: &str, raw: &str) -> String {
     let path = raw.trim().replace('\\', "/");
     format!(
@@ -136,13 +162,17 @@ fn ui_path(base: &str, raw: &str) -> String {
     )
 }
 
-/// The `path(line,col): error TSnnnn: message` lines from `tsc --noEmit --pretty false`. Every
-/// other line (tsc's summary, a config error without a location) is ignored.
-fn tsc_findings(output: &str, _ctx: &Context, _cmd: &Cmd) -> Vec<Finding> {
-    output.lines().filter_map(tsc_finding).collect()
+/// The `path(line,col): error TSnnnn: message` lines from `tsc --noEmit --pretty false` run in
+/// `package` (`ui/app` or `ui/e2e`). Every other line (tsc's summary, a config error without a
+/// location) is ignored.
+fn tsc_findings(package: &str, output: &str) -> Vec<Finding> {
+    output
+        .lines()
+        .filter_map(|line| tsc_finding(package, line))
+        .collect()
 }
 
-fn tsc_finding(line: &str) -> Option<Finding> {
+fn tsc_finding(package: &str, line: &str) -> Option<Finding> {
     let (location, message) = line.split_once("): ")?;
     let (path, position) = location.rsplit_once('(')?;
     let line_no: u32 = position.split_once(',')?.0.parse().ok()?;
@@ -151,10 +181,12 @@ fn tsc_finding(line: &str) -> Option<Finding> {
     }
     Some(Finding {
         violation: Violation {
-            path: ui_path("ui/app", path),
+            path: ui_path(package, path),
             line: line_no,
             message: message.to_owned(),
-            fix: Fix::tool("`pnpm -C ui/app run typecheck` shows the full error"),
+            fix: Fix::tool(format!(
+                "`pnpm -C {package} run typecheck` shows the full error"
+            )),
         },
         is_error: message.starts_with("error "),
     })
@@ -267,11 +299,19 @@ mod tests {
             "pnpm -C ui/app run typecheck --pretty false"
         );
         assert_eq!(
+            tsc_e2e_step().cmd.to_string(),
+            "pnpm -C ui/e2e run typecheck --pretty false"
+        );
+        assert_eq!(
             oxlint_step().cmd.to_string(),
             "pnpm -C ui/app run lint:types --format unix"
         );
         assert_eq!(oxfmt_step().cmd.to_string(), "pnpm -C ui run fmt:check");
         assert_eq!(vitest_step().cmd.to_string(), "pnpm -C ui/app run test");
+        assert_eq!(
+            playwright_unit_step().cmd.to_string(),
+            "pnpm -C ui/e2e run test:unit"
+        );
         assert_eq!(
             vite_build_step().cmd.to_string(),
             "pnpm -C ui/app run build"
@@ -302,7 +342,7 @@ mod tests {
     fn tsc_turns_each_error_line_into_a_finding_under_ui_app() {
         let cmd = tsc_step().cmd;
         assert_eq!(
-            findings(tsc_findings, &cmd, TSC_FAILING),
+            findings(tsc_step().parse, &cmd, TSC_FAILING),
             [
                 row(
                     "ui/app/src/zz_planted.tsx",
@@ -319,11 +359,38 @@ mod tests {
             ]
         );
         assert_eq!(
-            tsc_findings(TSC_FAILING, &context(), &cmd)[0]
+            (tsc_step().parse)(TSC_FAILING, &context(), &cmd)[0]
                 .violation
                 .fix
                 .to_string(),
             "`pnpm -C ui/app run typecheck` shows the full error"
+        );
+    }
+
+    /// Real `pnpm -C ui/e2e run typecheck --pretty false` output with an error planted in
+    /// `app-windows/zz_planted.ts`: tsc prints the path relative to ui/e2e.
+    const TSC_E2E_FAILING: &str = "$ tsc --noEmit --pretty false\n\
+        app-windows/zz_planted.ts(2,14): error TS2322: Type 'string' is not assignable to type 'number'.\n\
+        [ELIFECYCLE] Command failed with exit code 1.\n";
+
+    #[test]
+    fn tsc_turns_a_ui_e2e_error_into_a_finding_under_ui_e2e() {
+        let cmd = tsc_e2e_step().cmd;
+        assert_eq!(
+            findings(tsc_e2e_step().parse, &cmd, TSC_E2E_FAILING),
+            [row(
+                "ui/e2e/app-windows/zz_planted.ts",
+                2,
+                "error TS2322: Type 'string' is not assignable to type 'number'.",
+                true,
+            )]
+        );
+        assert_eq!(
+            (tsc_e2e_step().parse)(TSC_E2E_FAILING, &context(), &cmd)[0]
+                .violation
+                .fix
+                .to_string(),
+            "`pnpm -C ui/e2e run typecheck` shows the full error"
         );
     }
 
@@ -332,8 +399,16 @@ mod tests {
         // Real output of a passing run: pnpm echoes the script, tsc prints nothing.
         assert_eq!(
             findings(
-                tsc_findings,
+                tsc_step().parse,
                 &tsc_step().cmd,
+                "$ tsc --noEmit --pretty false\n"
+            ),
+            Vec::<Row>::new()
+        );
+        assert_eq!(
+            findings(
+                tsc_e2e_step().parse,
+                &tsc_e2e_step().cmd,
                 "$ tsc --noEmit --pretty false\n"
             ),
             Vec::<Row>::new()
