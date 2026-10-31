@@ -19,7 +19,7 @@ use clauseo_protocol::{
     CommandId, CommandOutcome, FileRefId, FolderRefId, MatterId, Principal, StreamId, ThreadId,
 };
 use clauseo_settings::Effective;
-use clauseo_store::{MatterRow, Store, ThreadRow};
+use clauseo_store::Store;
 use futures::executor::{LocalPool, LocalSpawner};
 use futures::future::{AbortHandle, Abortable};
 use futures::task::LocalSpawnExt;
@@ -42,12 +42,14 @@ mod matters;
 mod query;
 mod shutdown;
 mod startup;
+mod state;
 mod streams;
 mod subs;
 pub(crate) mod turn;
 
-use commands::{AfterCommand, PendingCommand};
+use commands::PendingCommand;
 use input::{Input, MatterTag, Request};
+pub(crate) use state::{HostPhase, MatterEntry, Tag, ThreadEntry, Work};
 use streams::StreamSlot;
 use subs::EventSub;
 
@@ -56,69 +58,6 @@ const THREAD_NAME: &str = "clauseo-host";
 
 /// The capacity of the request channel from handles.
 const REQUEST_CAPACITY: usize = 256;
-
-/// What a commit continues with once its result is back.
-pub(crate) enum Tag {
-    /// A command's commit: answer `outcome` (or the failure) after `after`.
-    Command {
-        id: CommandId,
-        outcome: CommandOutcome,
-        after: AfterCommand,
-    },
-    /// The Scratch matter's commit at start-up.
-    Scratch(Box<MatterEntry>),
-    /// A snapshot with no events.
-    Snapshot,
-    /// A turn's commit.
-    Turn(turn::TurnTag),
-}
-
-/// A matter the host knows.
-pub(crate) struct MatterEntry {
-    pub(crate) row: MatterRow,
-    /// Its thread, started (and the matter opened) on first use.
-    pub(crate) worker: Option<MatterWorker<MatterTag>>,
-    pub(crate) turns: turn::MatterTurns,
-}
-
-/// A thread the host knows.
-#[derive(Debug)]
-pub(crate) struct ThreadEntry {
-    pub(crate) row: ThreadRow,
-    /// The header as of the last time the stream was unloaded, for `ListThreads`.
-    pub(crate) header: Option<clauseo_protocol::HeaderEntry>,
-    pub(crate) turn: turn::TurnState,
-}
-
-/// Work in flight that start-up and shutdown wait for.
-#[derive(Debug, Default)]
-pub(crate) struct Work {
-    pub(crate) commits: usize,
-    pub(crate) loads: usize,
-    pub(crate) receipts: usize,
-    pub(crate) matter_jobs: usize,
-    pub(crate) snapshots: usize,
-}
-
-impl Work {
-    fn idle(&self) -> bool {
-        self.commits == 0
-            && self.loads == 0
-            && self.receipts == 0
-            && self.matter_jobs == 0
-            && self.snapshots == 0
-    }
-}
-
-/// Where the host is in its life.
-#[derive(Debug)]
-pub(crate) enum HostPhase {
-    /// Start-up work runs; `ready` hears once it is done.
-    Starting(mpsc::Sender<Result<(), Error>>),
-    Serving,
-    /// Shutdown runs; every reply hears once the store is closed.
-    Stopping(Vec<input::Reply<()>>),
-}
 
 /// How the loop ended.
 enum Exit {
