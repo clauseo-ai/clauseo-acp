@@ -355,29 +355,22 @@ jobs:
       - name: Build fake_agent
         run: cargo build --release --locked -p clauseo-fake_agent
 
-      # The app starts from a background Node process, so macOS may give it App Nap, which
-      # stretches its timers and its children's: the first run's 5 ms pace came out near 34 ms per
-      # update (86 s streams instead of 13 s). The runner is thrown away after the job.
-      - name: Turn off App Nap on the runner
-        run: defaults write -g NSAppSleepDisabled -bool YES
-
       # Plain Node, no install: macos.ts imports Node's own modules and ui/e2e files only.
       - name: Speed scoreboard
         env:
           MARKS_APP: ${{ github.workspace }}/target/release/clauseo-desktop
           MARKS_FAKE_AGENT: ${{ github.workspace }}/target/release/fake_agent
           SCOREBOARD_OUT: ${{ runner.temp }}/scoreboard-out
-        # The runner service may run its jobs with a background policy (throttled timers and disk),
-        # which stretched the 5 ms pace to about 34 ms per update. `taskpolicy -a` gives the plays,
-        # and the app and agent they start, the policies an application gets. The probe prints how
-        # long 200 sleeps of 5 ms take with and without it, for the record.
+        # The runner stretches short sleeps: in PR #106's runs, 200 sleeps of 5 ms took 5.5 to 6.2 s
+        # (App Nap off and `taskpolicy -a` changed nothing), so the stream ran about 85 s instead
+        # of 13 s. macos.ts then reports the paced numbers as not measured and keeps start-up and
+        # memory. The probe prints this run's figure first.
         run: |
           set -euo pipefail
           # shellcheck disable=SC2016 # Perl's variables, not the shell's.
           probe='use Time::HiRes qw(sleep time); my $t = time; sleep(0.005) for 1..200; printf "200 sleeps of 5 ms: %.0f ms\n", (time - $t) * 1000'
-          echo "As the runner starts jobs:"; perl -e "$probe"
-          echo "Under taskpolicy -a:"; taskpolicy -a -d default -t 0 -l 0 perl -e "$probe"
-          taskpolicy -a -d default -t 0 -l 0 node ui/e2e/scoreboard/macos.ts
+          perl -e "$probe"
+          node ui/e2e/scoreboard/macos.ts
 
       # comment.ts reads scoreboard-macos.json from the artifact scoreboard-macos.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

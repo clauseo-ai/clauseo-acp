@@ -22,7 +22,16 @@ import { pathToFileURL } from "node:url";
 
 import { makeScratch, removeScratch, scratchEnv, type Scratch } from "../app-windows/scratch.ts";
 import { MEASURED_RUNS, WARMUP_RUNS, parseRawRun, summarise, type RawRun } from "./metrics.ts";
-import { PACE_ARGS, RUNS_DIR, SCENARIO, playName, resultTable } from "./session.ts";
+import {
+  PACE_ARGS,
+  RUNS_DIR,
+  SCENARIO,
+  playName,
+  resultTable,
+  PACED_STREAM_MS,
+  heldPace,
+  withoutPacedMetrics,
+} from "./session.ts";
 
 /**
  * How long one play may take, launch to exit. The session streams for about 15 s at 5 ms a step;
@@ -141,6 +150,20 @@ export async function main(env: NodeJS.ProcessEnv): Promise<void> {
   for (let n = 1; n <= WARMUP_RUNS + MEASURED_RUNS; n++) {
     const run = await play(cfg, n);
     if (n > WARMUP_RUNS) measured.push(run);
+  }
+  // A pace the runner stretched distorts the paced numbers in every run alike, so one run off the
+  // pace drops them from all three (summarise needs every run or none): "not measured".
+  const spans = measured.map((run) => {
+    const raf = run.raf_timestamps_ms;
+    return raf !== null && raf.length > 1 ? Math.round(raf[raf.length - 1]! - raf[0]!) : null;
+  });
+  if (measured.some((run) => heldPace(run) === false)) {
+    process.stdout.write(
+      `[scoreboard] not measured: first token, chunk to paint, dropped frames, React commits and IPC ` +
+        `bytes. The streams took ${spans.join(", ")} ms against about ${PACED_STREAM_MS} ms at a ` +
+        `5 ms pace: this machine stretches the agent's sleeps (the probe above).\n`,
+    );
+    measured.splice(0, measured.length, ...measured.map(withoutPacedMetrics));
   }
   const result = summarise("macos", measured);
   mkdirSync(cfg.out, { recursive: true });
