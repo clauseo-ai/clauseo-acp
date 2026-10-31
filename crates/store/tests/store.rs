@@ -29,6 +29,9 @@ mod group;
 #[path = "store/log.rs"]
 mod log;
 #[cfg(test)]
+#[path = "store/log_model.rs"]
+mod log_model;
+#[cfg(test)]
 #[path = "store/reopen.rs"]
 mod reopen;
 #[cfg(test)]

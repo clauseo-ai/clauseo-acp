@@ -1,13 +1,12 @@
 //! The log: commits, `read_after` pages, the commit rules (atomic, no seq gap, one receipt per
 //! command), unknown kinds and newer fields read back, the key bounds and the debug view.
+//! `read_after` against a model is in `log_model.rs`.
 
 use clauseo_protocol::{
     CommandOutcome, DomainEvent, Envelope, ErrorCode, MatterKind, StreamId, ThreadId,
 };
 use clauseo_store::{BlobIn, Commit, Error, MatterRow, READ_PAGE_MAX, SnapshotIn, Store};
 use futures::executor::block_on;
-use proptest::prelude::*;
-use proptest::test_runner::{RngSeed, TestRunner};
 
 use crate::common::{
     TestDir, assert_seq_gap, count, id, matter, receipt, seq, seqs, sql, stored_envelope,
@@ -487,92 +486,6 @@ fn events_readable_view_shows_stream() {
     );
     let none = "SELECT count(*) FROM events_readable WHERE stream = 'thread:none'";
     assert_eq!(count(&conn, none), 0);
-}
-
-/// One step of [`read_after_matches_model`].
-#[derive(Debug, Clone)]
-enum Op {
-    /// `count` events in stream `stream`, starting one past the head, or two past with `gap`.
-    Commit { stream: u64, count: u64, gap: bool },
-    /// `read_after(stream, after, limit)`; stream 3 never has events.
-    Read {
-        stream: u64,
-        after: Option<u64>,
-        limit: u32,
-    },
-}
-
-fn op() -> impl Strategy<Value = Op> {
-    prop_oneof![
-        (0..3_u64, 1..6_u64, prop::bool::weighted(0.15))
-            .prop_map(|(stream, count, gap)| Op::Commit { stream, count, gap }),
-        (0..4_u64, prop::option::of(1..24_u64), 0..12_u32).prop_map(|(stream, after, limit)| {
-            Op::Read {
-                stream,
-                after,
-                limit,
-            }
-        }),
-    ]
-}
-
-/// Runs `ops` against `store`, op stream `n` as `thread(base + n)`, which no earlier case used.
-fn run_model(store: &Store, base: u64, ops: &[Op]) {
-    let thread = |stream: u64| thread(base + stream);
-    let mut model: Vec<Vec<Envelope>> = vec![Vec::new(); 4];
-    for op in ops {
-        match *op {
-            Op::Commit { stream, count, gap } => {
-                let index = usize::try_from(stream).unwrap();
-                let next = u64::try_from(model[index].len()).unwrap() + 1;
-                let start = if gap { next + 1 } else { next };
-                let commit = texts(thread(stream), start, start + count - 1);
-                let result = block_on(store.commit(commit.clone()));
-                if gap {
-                    assert_seq_gap(result, thread(stream), next, start);
-                } else {
-                    result.unwrap();
-                    model[index].extend(commit.events);
-                }
-            }
-            Op::Read {
-                stream,
-                after,
-                limit,
-            } => {
-                let events = &model[usize::try_from(stream).unwrap()];
-                let from = after
-                    .map_or(0, |after| usize::try_from(after).unwrap())
-                    .min(events.len());
-                let to = (from + usize::try_from(limit).unwrap()).min(events.len());
-                assert_eq!(
-                    read(store, thread(stream), after, limit),
-                    events[from..to],
-                    "{op:?}"
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn read_after_matches_model() {
-    // Few cases as each commit syncs, a fixed seed, nothing beside the source, one store for all.
-    let dir = TestDir::new("read_after_matches_model");
-    let store = dir.open();
-    let next = std::cell::Cell::new(0);
-    TestRunner::new(ProptestConfig {
-        cases: 32,
-        rng_seed: RngSeed::Fixed(0x0051_07e7),
-        failure_persistence: None,
-        ..ProptestConfig::default()
-    })
-    .run(&prop::collection::vec(op(), 1..16), |ops| {
-        run_model(&store, next.replace(next.get() + 4), &ops);
-        Ok(())
-    })
-    .unwrap();
-    block_on(store.close()).unwrap();
 }
 
 /// Where `needle` first starts in `bytes`.
