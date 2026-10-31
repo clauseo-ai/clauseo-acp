@@ -25,16 +25,21 @@ which check ids and bounded values as they decode; the bridge then checks what d
 | `open_stream` | `channel: Channel<StreamMessage>` | `()` | one channel per window; a second call replaces it and drops its subscriptions |
 | `subscribe` | `stream: StreamId, after: ViewPosition \| null` | `()` | needs `open_stream` first |
 | `unsubscribe` | `stream: StreamId` | `()` | needs `open_stream` first |
-| `ack` | `stream, epoch: ViewEpoch, cursor: Cursor, frames: u32` | `()` | `frames` at most what the window was sent |
-| `answer_permission` | `thread: ThreadId, request: PermissionRequestId, option: AgentChoiceId` | `()` | the request is pending and offered `option`; an `allow_always` option first opens a native confirm drawn by Rust, and declined there the call fails with `transport.unauthorized` |
+| `ack` | `positions: Ack[], messages: u32` | `()` | `messages` at most what the window was sent; no stream named twice (both refused whole, `command.invalid`); a position of a stream the window does not follow is dropped |
+| `answer_permission` | `thread: ThreadId, request: PermissionRequestId, option: AgentChoiceId` | `()` | the request is pending and offered `option`; the plan-exit mode options are refused (`command.invalid`, below); an `allow_always` option first opens a native confirm drawn by Rust, and declined there the call fails with `transport.unauthorized`; only `allow_once`, `reject_once` and `reject_always` skip it, and a kind this version does not know is refused (`command.invalid`) |
 | `pick_folder` | none | `FolderRefId \| null` | the native folder dialog drawn by Rust, then `register_folder`; `CreateMatter` refuses a refused folder with `matter.folder_refused` |
 | `display_info` | none | `{ platform: "mac" \| "windows" \| "linux" }` | none |
 
 The confirm shows fixed text: nothing the agent wrote reaches it. `SetMode` and
 `SetConfigOption` are refused because a mode can widen what the agent does without asking
 (Claude's `bypassPermissions`), an escalation 0001 puts behind a native dialog drawn by Rust; the
-internal window never sends them. Follow-up: a mode command that classifies the mode and draws
-that confirm first. A Tauri rejection (an argument
+internal window never sends them. For the same reason `answer_permission` refuses the four
+option ids claude-agent-acp 0.89.1 offers on leaving plan mode that switch the session's mode:
+`exit-plan-bypass` and `exit-plan-clear-bypass` (`allow_always`, to `bypassPermissions`), and
+`exit-plan-auto` and `exit-plan-clear-auto` (auto mode). Follow-ups: a mode command that
+classifies the mode and draws that confirm first; and acp sending
+`allowDangerouslySkipPermissions: false` in its session meta, so the bypass options are never
+offered. A Tauri rejection (an argument
 that does not decode, a command no capability grants) reaches the page as a plain string; the
 webview's transport maps it to `{ code: "internal", message, retryable: false }`.
 
@@ -49,14 +54,27 @@ text sent as it is (`InvokeResponseBody::Json`, never parsed or encoded again) w
 than 8192 bytes, or a fragment of a longer one:
 `{"fragment":{"id":<u32, per window, increasing>,"index":<u16 from 0>,"count":<u16>,"text":"<piece>"}}`.
 The pieces' texts joined in index order are the event's text exactly; the transport joins them and
-parses once. Every message, fragments included, is shorter than 8192 bytes.
+parses once. A third kind tells the webview a stream the bridge restarted (after a pause or a
+watchdog fire) failed to subscribe: `{"stream_failed":{"stream":<StreamId>,"error":<HostError>}}`;
+the stream stays followed and the bridge's clock tries it again 5 s later, the wait doubling with
+each failure up to 60 s, until a try succeeds or the webview subscribes or unsubscribes it. A
+`subscribe` the host refuses returns the error and follows nothing. Every message is shorter than
+8192 bytes. The reader tells the kinds apart by the top-level key: `fragment` and `stream_failed`
+are reserved, and no `HostEvent` kind may take either (a desktop test serialises one value of
+every `HostEvent` variant and checks).
 
-**Backpressure.** The bridge counts bytes by message: the webview acks with `frames`, the number of
-channel messages it has received and processed since `open_stream` (a fragment counts one). Past
+**Backpressure.** The bridge counts bytes by message: the webview acks with `messages`, the number
+of channel messages it has received and processed since `open_stream` (a fragment and a
+`stream_failed` count one each), and with the positions it has applied, at most one per stream and
+maybe none, so one `ack` call per flush carries both. Each position goes to `HostHandle::ack` and
+becomes its stream's restart point. Past
 256 KB unacknowledged the window pauses: its host subscriptions are dropped, and once acks bring
 the count to 0 each stream is subscribed again after its last acknowledged `(epoch, cursor)` (or
 from a `Reset` with none). 5 s with bytes unacknowledged and no ack progress restarts every stream
-the same way at once, paused or not, so a lost ack cannot stall a window. The host answers a
+the same way at once, paused or not, so a lost ack cannot stall a window. The watchdog fires once
+per stall: it fires again only once acks cover every message sent before it fired. A page that
+stops acking so gets one event more after the fire, never one every 5 s: its unacknowledged bytes
+stay at most the larger of 256 KB and what was unacknowledged at the fire, plus one event. The host answers a
 restart with the tail or a `Reset`; the webview applies only the next cursor, so replays are no-ops.
 The logic is a sans-IO state machine (`bridge/window.rs`) that takes time as an argument.
 
@@ -95,6 +113,9 @@ saves in this build, so e2e runs do not write the real app config folder.
   only registers what the lawyer picked.
 - A change to the message format, the cap or the watchdog is a change to the patch protocol and
   needs a new record.
+- A window whose page stops acking holds a bounded amount unacknowledged, not one event more
+  every 5 s. The cost: when the ack that follows a watchdog fire is lost as well, the window waits
+  for its next ack (the next event it is sent) instead of a second fire.
 
 ## Status
 

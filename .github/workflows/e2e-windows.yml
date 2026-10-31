@@ -78,6 +78,8 @@ jobs:
           # --no-renames lists both sides of a rename, so a file renamed out of an app path still
           # runs the smoke test.
           changed=$(git diff --no-renames -z --name-only refs/ci/base...refs/ci/head | tr '\0' '\n')
+          # The crates here are clauseo-desktop and its path dependencies: update the list with
+          # crates/desktop/Cargo.toml's dependencies.
           app=$(printf '%s\n' "$changed" \
             | grep -E '^(crates/(desktop|host|protocol|acp|process|reducer|store|matters|settings|fake_agent)/|ui/|\.github/workflows/e2e-windows\.yml$)' || true)
           if [ -n "$app" ]; then

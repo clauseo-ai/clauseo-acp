@@ -4,14 +4,14 @@
 use std::path::PathBuf;
 
 use clauseo_protocol::{
-    AgentChoiceId, ConfigValue, Cursor, DeliveryRequest, ErrorCode, HostEvent, PatchBatch,
-    PermissionRequestId, PromptBlock, StreamHeader, Title, ViewPatchBody,
+    AgentChoiceId, ConfigValue, Cursor, ErrorCode, HostEvent, PatchBatch, PermissionRequestId,
+    StreamHeader, Title, ViewEpoch, ViewPatchBody,
 };
 use uuid::Uuid;
 
 use super::*;
 use crate::dialogs::BoxFuture;
-use crate::test_support::{Frames, Scratch, collector, envelope, stream};
+use crate::test_support::{Scratch, collector, envelope, stream};
 
 const MAIN: &str = "main";
 
@@ -22,16 +22,6 @@ impl Picker for Picks {
     fn pick(&self) -> BoxFuture<'_, Option<PathBuf>> {
         let folder = self.0.clone();
         Box::pin(async move { folder })
-    }
-}
-
-/// A confirm that answers `self.0`, and must not be asked when `self.0` is `None`.
-struct Answers(Option<bool>);
-
-impl Confirm for Answers {
-    fn confirm(&self) -> BoxFuture<'_, bool> {
-        let answer = self.0.expect("the confirm was not to be asked");
-        Box::pin(async move { answer })
     }
 }
 
@@ -83,7 +73,7 @@ fn a_stale_cursor_gets_reset() {
     let scratch = Scratch::new("stale-cursor", &[]);
     let host = scratch.start(Vec::new());
     let bridge = host.bridge();
-    let (channel, frames) = collector();
+    let (channel, messages) = collector();
     bridge.open_stream(MAIN, channel);
     let stream = StreamId::Matter(host.scratch());
 
@@ -93,7 +83,7 @@ fn a_stale_cursor_gets_reset() {
         cursor: Cursor::new(3).unwrap(),
     };
     block_on(bridge.subscribe(MAIN, stream, Some(stale))).unwrap();
-    let batch = batch(frames.next_event());
+    let batch = batch(messages.next_event());
     assert_eq!(batch.stream, stream);
     assert_ne!(batch.epoch, stale.epoch);
     assert!(
@@ -108,19 +98,19 @@ fn a_resubscribe_from_an_older_cursor_gets_the_tail_in_the_same_epoch() {
     let host = scratch.start(Vec::new());
     let thread = host.thread();
     let bridge = host.bridge();
-    let (channel, frames) = collector();
+    let (channel, messages) = collector();
     bridge.open_stream(MAIN, channel);
     let stream = stream(thread);
     let mut view = Applier::default();
 
     block_on(bridge.subscribe(MAIN, stream, None)).unwrap();
-    view.apply(&batch(frames.next_event()));
+    view.apply(&batch(messages.next_event()));
     let (epoch, reset_at) = view.applied.unwrap();
 
     host.rename(thread, "One");
-    view.apply(&batch(frames.next_event()));
+    view.apply(&batch(messages.next_event()));
     host.rename(thread, "Two");
-    view.apply(&batch(frames.next_event()));
+    view.apply(&batch(messages.next_event()));
     assert_eq!((view.patches_applied, view.replays), (2, 0));
 
     // Restarting from an older position (as a lagging ack would) replays the second rename,
@@ -130,13 +120,13 @@ fn a_resubscribe_from_an_older_cursor_gets_the_tail_in_the_same_epoch() {
         cursor: Cursor::new(reset_at.get() + 1).unwrap(),
     };
     block_on(bridge.subscribe(MAIN, stream, Some(older))).unwrap();
-    let replay = batch(frames.next_event());
+    let replay = batch(messages.next_event());
     assert_eq!(replay.epoch, epoch, "a Reset, not the tail: {replay:?}");
     view.apply(&replay);
     assert_eq!((view.patches_applied, view.replays), (2, 1));
 
     host.rename(thread, "Three");
-    view.apply(&batch(frames.next_event()));
+    view.apply(&batch(messages.next_event()));
     assert_eq!((view.patches_applied, view.replays), (3, 1));
     assert_eq!(
         view.applied.map(|(_, cursor)| cursor.get()),
@@ -150,39 +140,44 @@ fn past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up() {
     let host = scratch.start(Vec::new());
     let thread = host.thread();
     let bridge = host.bridge();
-    let (channel, frames) = collector();
+    let (channel, messages) = collector();
     bridge.open_stream(MAIN, channel);
     let stream = stream(thread);
     block_on(bridge.subscribe(MAIN, stream, None)).unwrap();
-    let mut sent = vec![frames.next_text()];
+    let mut sent = vec![messages.next_text()];
 
     // Long titles, so each rename's patch is large: renames until the window pauses.
     let window = bridge.window(MAIN).unwrap();
     let long = "x".repeat(150);
     let mut renames = 0;
-    while !lock(&window).is_paused() {
+    while !lock(&window).state().is_paused() {
         renames += 1;
         assert!(renames < 5000, "never paused");
         host.rename(thread, &format!("{renames} {long}"));
-        sent.push(frames.next_text());
+        sent.push(messages.next_text());
     }
-    // A rename may make more than one frame: take every frame sent before the pause. The pump
+    // A rename may make more than one message: take every one sent before the pause. The pump
     // sends while holding the window's lock, so all of them are in the channel by now.
-    sent.extend(frames.drain());
+    sent.extend(messages.drain());
     let unacked: usize = sent.iter().map(String::len).sum();
     assert!(unacked > 256 * 1024, "paused at {unacked} bytes");
-    // The pause dropped the host subscription: a rename now reaches no frame.
+    // The pause dropped the host subscription: a rename now reaches no message.
     host.rename(thread, "while paused");
 
     // The webview applies everything it got and acks it all: the bridge resubscribes after
     // the last acknowledged cursor, and the host sends the tail from there.
     let last = batch(serde_json::from_str(sent.last().unwrap()).unwrap());
     let cursor = last.patches.last().unwrap().cursor;
-    let frame_count = u32::try_from(sent.len()).unwrap();
-    block_on(bridge.ack(MAIN, stream, last.epoch, cursor, frame_count)).unwrap();
+    let count = u32::try_from(sent.len()).unwrap();
+    let position = Ack {
+        stream,
+        epoch: last.epoch,
+        cursor,
+    };
+    block_on(bridge.ack(MAIN, vec![position], count)).unwrap();
     // The host answers with the tail after that cursor or, when it unloaded the stream while
     // nobody followed it, a Reset in a new epoch. Either way the rename made while paused shows.
-    let next = batch(frames.next_event());
+    let next = batch(messages.next_event());
     let first = next.patches.first().unwrap();
     let header = match &first.body {
         ViewPatchBody::Upsert { entry } => {
@@ -294,112 +289,39 @@ fn dispatch_refuses_set_mode_and_set_config_option() {
     }
 }
 
-/// Reads `frames` until `n` permission requests have shown as pending, recording each once in
-/// `seen`, and returns the `n`th.
-fn until_pending(
-    frames: &Frames,
-    seen: &mut Vec<PermissionRequestId>,
-    n: usize,
-) -> PermissionRequestId {
-    while seen.len() < n {
-        let text = frames.next_text();
-        let Ok(HostEvent::Patches(batch)) = serde_json::from_str::<HostEvent>(&text) else {
-            continue;
-        };
-        for patch in batch.patches {
-            let entries = match patch.body {
-                ViewPatchBody::Upsert { entry } => vec![*entry],
-                ViewPatchBody::Reset { view_window } => view_window.entries,
-                _ => Vec::new(),
-            };
-            for entry in entries {
-                if let ViewEntry::Permission(permission) = entry
-                    && matches!(permission.state, PermissionState::Pending)
-                    && !seen.contains(&permission.request)
-                {
-                    seen.push(permission.request);
-                }
-            }
-        }
-    }
-    seen[n - 1]
-}
-
-/// `permission-kinds` asks four times and expects allow-once, allow-always, reject-once and
-/// reject-always, in that order; it stops on any other answer, so its closing text shows the
-/// bridge sent exactly those.
+/// A restart the host refuses (here a stopped host) tells the window with a `stream_failed`
+/// message and leaves the stream followed, its retry scheduled; a `subscribe` the host refuses
+/// returns the error and follows nothing.
 #[test]
-fn answer_permission_checks_the_option_and_confirms_always_allow() {
-    let scratch = Scratch::with_fake_agent("answer-permission", "permission-kinds");
+fn a_failed_restart_tells_the_window_and_waits_for_a_retry() {
+    let scratch = Scratch::new("failed-restart", &[]);
     let host = scratch.start(Vec::new());
     let thread = host.thread();
     let bridge = host.bridge();
-    let (channel, frames) = collector();
+    let (channel, messages) = collector();
     bridge.open_stream(MAIN, channel);
-    block_on(bridge.subscribe(MAIN, stream(thread), None)).unwrap();
-    host.run(HostCommand::SendPrompt {
-        thread,
-        content: vec![PromptBlock::Text {
-            text: "Edit the four clauses.".to_owned(),
-        }],
-        delivery: DeliveryRequest::Queue,
-    });
-    let answer = |confirm: &dyn Confirm, request, option: &str| {
-        let option = AgentChoiceId::new(option).unwrap();
-        block_on(bridge.answer_permission(confirm, thread, request, option))
-    };
-    let mut seen = Vec::new();
+    let window = bridge.window(MAIN).unwrap();
+    let other = StreamId::Matter(host.scratch());
+    block_on(host.host.shutdown()).unwrap();
 
-    // An option the request did not offer is refused before anything is asked or sent.
-    let first = until_pending(&frames, &mut seen, 1);
-    let refusal = answer(&Answers(None), first, "allow-forever").unwrap_err();
-    assert_eq!(
-        refusal.code(),
-        ErrorCode::PermissionUnknownOption,
-        "{refusal:?}"
-    );
-    answer(&Answers(None), first, "allow-once").unwrap();
+    let refusal = block_on(bridge.subscribe(MAIN, other, None)).unwrap_err();
+    assert_ne!(refusal.code(), ErrorCode::CommandInvalid, "{refusal:?}");
+    assert!(!lock(&window).state().follows(other));
 
-    // Always allow, declined in the confirm: refused, and the request is still pending.
-    let second = until_pending(&frames, &mut seen, 2);
-    let refusal = answer(&Answers(Some(false)), second, "allow-always").unwrap_err();
+    let restart = pump::follow(&window, stream(thread), None);
+    pump::spawn_restarts(&host.host, &window, vec![restart]);
+    let text = messages.next_text();
+    let message: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let failed = &message["stream_failed"];
     assert_eq!(
-        refusal.code(),
-        ErrorCode::TransportUnauthorized,
-        "{refusal:?}"
+        failed["stream"],
+        serde_json::json!(stream(thread)),
+        "{text}"
     );
-    block_on(bridge.pending_permission(thread, second)).unwrap();
-    // Accepted: sent.
-    answer(&Answers(Some(true)), second, "allow-always").unwrap();
-    let refusal = block_on(bridge.pending_permission(thread, second)).unwrap_err();
-    assert_eq!(
-        refusal.code(),
-        ErrorCode::PermissionNotPending,
-        "{refusal:?}"
-    );
-
-    let third = until_pending(&frames, &mut seen, 3);
-    answer(&Answers(None), third, "reject-once").unwrap();
-    let fourth = until_pending(&frames, &mut seen, 4);
-    answer(&Answers(None), fourth, "reject-always").unwrap();
-    while !frames.next_text().contains("Four edits were decided.") {}
-}
-
-#[test]
-fn answer_permission_refuses_a_request_that_is_not_pending() {
-    let scratch = Scratch::new("permission-not-pending", &[]);
-    let host = scratch.start(Vec::new());
-    let thread = host.thread();
-    let bridge = host.bridge();
-    let request = PermissionRequestId::new(Uuid::now_v7()).unwrap();
-    let option = AgentChoiceId::new("allow").unwrap();
-    let refusal =
-        block_on(bridge.answer_permission(&Answers(None), thread, request, option)).unwrap_err();
-    assert_eq!(
-        refusal.code(),
-        ErrorCode::PermissionNotPending,
-        "{refusal:?}"
-    );
+    assert!(failed["error"]["code"].is_string(), "{text}");
+    assert!(lock(&window).state().retry_at(stream(thread)).is_some());
+    // The message counts: an ack of it is not more than was sent.
+    block_on(bridge.ack(MAIN, Vec::new(), 1)).unwrap();
 }
 
 #[test]
@@ -411,14 +333,25 @@ fn stream_commands_need_open_stream_and_acks_are_bounded() {
     let refusal = block_on(bridge.subscribe(MAIN, stream, None)).unwrap_err();
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid);
 
-    let (channel, frames) = collector();
+    let (channel, messages) = collector();
     bridge.open_stream(MAIN, channel);
     block_on(bridge.subscribe(MAIN, stream, None)).unwrap();
-    let reset = batch(frames.next_event());
+    let reset = batch(messages.next_event());
     let cursor = reset.patches[0].cursor;
-    let refusal = block_on(bridge.ack(MAIN, stream, reset.epoch, cursor, 2)).unwrap_err();
+    let position = Ack {
+        stream,
+        epoch: reset.epoch,
+        cursor,
+    };
+    let refusal = block_on(bridge.ack(MAIN, vec![position], 2)).unwrap_err();
     assert_eq!(refusal.code(), ErrorCode::CommandInvalid);
-    block_on(bridge.ack(MAIN, stream, reset.epoch, cursor, 1)).unwrap();
+    let refusal = block_on(bridge.ack(MAIN, vec![position, position], 1)).unwrap_err();
+    assert_eq!(refusal.code(), ErrorCode::CommandInvalid);
+    // A messages-only ack, then one with the position.
+    block_on(bridge.ack(MAIN, Vec::new(), 1)).unwrap();
+    block_on(bridge.ack(MAIN, vec![position], 1)).unwrap();
     bridge.unsubscribe(MAIN, stream).unwrap();
-    assert_eq!(frames.drain(), Vec::<String>::new());
+    assert_eq!(messages.drain(), Vec::<String>::new());
 }
+
+mod permission;

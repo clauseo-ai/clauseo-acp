@@ -88,7 +88,7 @@ fn a_tauri_rejection_is_a_string_and_a_refusal_is_a_host_error() {
         ("dispatch", json!({})),
         (
             "ack",
-            json!({ "stream": "not a stream", "epoch": "x", "cursor": -1, "frames": 0 }),
+            json!({ "positions": [{ "stream": "not a stream", "epoch": "x", "cursor": -1 }], "messages": 0 }),
         ),
         (
             "query",

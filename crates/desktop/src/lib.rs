@@ -10,9 +10,10 @@
 //!   `capabilities/main.json` and listed in `build.rs`'s `AppManifest`; nothing else is granted.
 //!   Every argument is checked in Rust first, and every host call runs as `LocalDesktop`.
 //! - One `ipc::Channel` per window carries its stream (`bridge/`): each message an event's JSON
-//!   as the host encoded it, or a fragment of one, always below 8 KB. At most 256 KB
-//!   unacknowledged per window; a 5 s watchdog. `docs/decisions/0012-desktop-bridge.md` records
-//!   the commands, the capability and the message format. Never Tauri events.
+//!   as the host encoded it, a fragment of one, or a stream failure, always below 8 KB. At most
+//!   256 KB unacknowledged per window; a 5 s watchdog that fires once per stall.
+//!   `docs/decisions/0012-desktop-bridge.md` records the commands, the capability and the message
+//!   format. Never Tauri events.
 //! - No command takes a path: folders come from the native dialog drawn in Rust (`dialogs.rs`).
 //! - Plugins are called from Rust only. Each is registered with `plugin_rust_only`, which drops the
 //!   script a plugin would inject into the page (`rust_only.rs`). clippy's `disallowed-methods`

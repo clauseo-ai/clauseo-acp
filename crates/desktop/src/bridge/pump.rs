@@ -1,9 +1,10 @@
 //! The driver of each window's [`WindowState`] on Tauri's async runtime: one task per followed
 //! stream pumps its host [`Subscription`] into the window's channel, a watchdog task ticks the
-//! state's clock once a second, and acks may restart subscriptions.
+//! state's clock once a second, and acks may restart subscriptions. A restart the host refuses
+//! sends the webview a `stream_failed` message, and the clock tries the stream again.
 //!
-//! Frames are sent while the window's lock is held, so the order the state counts them in is
-//! the order the webview receives them. Tasks hold the window weakly: dropping the window (a
+//! Channel messages are sent while the window's lock is held, so the order the state counts them
+//! in is the order the webview receives them. Tasks hold the window weakly: dropping the window (a
 //! new `open_stream`, or the bridge going away) aborts every task and so drops every host
 //! subscription.
 
@@ -12,14 +13,14 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use clauseo_host::{HostHandle, Subscription};
-use clauseo_protocol::{HostError, StreamId};
+use clauseo_protocol::{Ack, HostError, StreamId};
 use futures::StreamExt as _;
 use tauri::async_runtime::{self, JoinHandle};
 use tauri::ipc::Channel;
 
 use super::window::{AckError, Forward, Position, Restart, WindowState};
 use super::{PRINCIPAL, lock};
-use crate::frame::Frame;
+use crate::frame::{self, Frame};
 
 /// How often the watchdog reads the clock.
 const TICK: Duration = Duration::from_secs(1);
@@ -72,17 +73,17 @@ impl Window {
         window
     }
 
-    /// Sends `frames` in order. Stops at the first that fails: the webview is gone.
-    fn send(&self, frames: Vec<Frame>) -> bool {
-        frames
+    /// Sends `messages` in order. Stops at the first that fails: the webview is gone.
+    fn send(&self, messages: Vec<Frame>) -> bool {
+        messages
             .into_iter()
-            .all(|frame| self.channel.send(frame).is_ok())
+            .all(|message| self.channel.send(message).is_ok())
     }
 
-    /// Whether the window is paused past the cap.
+    /// The window's stream state.
     #[cfg(test)]
-    pub(crate) fn is_paused(&self) -> bool {
-        self.state.is_paused()
+    pub(crate) fn state(&self) -> &WindowState {
+        &self.state
     }
 
     /// Drops every host subscription by aborting its pump.
@@ -98,11 +99,22 @@ impl Window {
 /// answer with the tail rather than a `Reset`. Its events are dropped from now on.
 pub(crate) fn follow(window: &Mutex<Window>, stream: StreamId, after: Option<Position>) -> Restart {
     let mut window = lock(window);
-    let generation = window.state.follow(stream, after);
+    let restart_id = window.state.follow(stream, after);
     Restart {
         stream,
-        generation,
+        id: restart_id,
         after,
+    }
+}
+
+/// Stops following the stream of `restart`, a `subscribe` the host refused, unless a newer
+/// subscription of it came since: the webview has the error, and nothing retries it.
+pub(crate) fn forget(window: &Mutex<Window>, restart: Restart) {
+    let mut window = lock(window);
+    if window.state.unfollow_restart(restart.stream, restart.id)
+        && let Some(pump) = window.pumps.remove(&restart.stream)
+    {
+        pump.abort();
     }
 }
 
@@ -115,35 +127,54 @@ pub(crate) fn unfollow(window: &Mutex<Window>, stream: StreamId) {
     }
 }
 
-/// Counts the window's ack and starts the subscriptions it restarts.
+/// Counts the window's ack and starts the subscriptions it restarts. Returns the positions of
+/// followed streams, for the host.
 pub(crate) fn ack(
     window: &Arc<Mutex<Window>>,
-    stream: StreamId,
-    position: Position,
-    frames: u32,
-) -> Result<(), AckError> {
-    let (host, restarts) = {
+    positions: &[Ack],
+    messages: u32,
+) -> Result<Vec<Ack>, AckError> {
+    let (host, acked) = {
         let mut guard = lock(window);
         let elapsed = guard.opened.elapsed();
         // Restarts end a pause, whose pumps are already stopped.
-        let restarts = guard.state.ack(stream, position, frames, elapsed)?;
-        (guard.host.clone(), restarts)
+        let acked = guard.state.ack(positions, messages, elapsed)?;
+        (guard.host.clone(), acked)
     };
-    spawn_restarts(&host, window, restarts);
-    Ok(())
+    spawn_restarts(&host, window, acked.restarts);
+    Ok(acked.positions)
 }
 
-/// Starts each of `restarts` in its own task.
-fn spawn_restarts(host: &HostHandle, window: &Arc<Mutex<Window>>, restarts: Vec<Restart>) {
+/// Starts each of `restarts` in its own task. One the host refuses stays followed with no
+/// subscription: the webview gets a `stream_failed` message, and the clock tries it again.
+pub(crate) fn spawn_restarts(
+    host: &HostHandle,
+    window: &Arc<Mutex<Window>>,
+    restarts: Vec<Restart>,
+) {
     for restart in restarts {
         let host = host.clone();
         let window = Arc::clone(window);
         drop(async_runtime::spawn(async move {
-            // A restart that fails leaves the stream followed with no subscription; the
-            // webview's next subscribe starts it again.
-            let _failed = start(&host, &window, restart).await;
+            if let Err(error) = start(&host, &window, restart).await {
+                failed(&window, restart, &error);
+            }
         }));
     }
+}
+
+/// The host refused `restart` with `error`: when it is still its stream's current subscription,
+/// schedules the next try and tells the webview.
+fn failed(window: &Mutex<Window>, restart: Restart, error: &HostError) {
+    let mut window = lock(window);
+    let elapsed = window.opened.elapsed();
+    if !window.state.failed(restart.stream, restart.id, elapsed) {
+        return;
+    }
+    let message = frame::stream_failed(restart.stream, error);
+    window.state.count_notice(&message, elapsed);
+    // A send that fails means the webview is gone; its window is about to be dropped.
+    let _sent = window.send(vec![message]);
 }
 
 /// Subscribes to the host for `restart` and starts its pump, unless the window paused or a
@@ -164,7 +195,7 @@ pub(crate) async fn start(
         Ok(subscription) => subscription,
         Err(error) => {
             let mut guard = lock(window);
-            if guard.state.is_current(restart.stream, restart.generation)
+            if guard.state.is_current(restart.stream, restart.id)
                 && let Some(old) = guard.pumps.remove(&restart.stream)
             {
                 old.abort();
@@ -173,13 +204,14 @@ pub(crate) async fn start(
         }
     };
     let mut guard = lock(window);
-    if guard.state.is_paused() || !guard.state.is_current(restart.stream, restart.generation) {
+    if guard.state.is_paused() || !guard.state.is_current(restart.stream, restart.id) {
         return Ok(());
     }
+    guard.state.started(restart.stream, restart.id);
     let pump = async_runtime::spawn(pump(
         Arc::downgrade(window),
         restart.stream,
-        restart.generation,
+        restart.id,
         subscription,
     ));
     if let Some(old) = guard.pumps.insert(restart.stream, pump) {
@@ -188,12 +220,12 @@ pub(crate) async fn start(
     Ok(())
 }
 
-/// Forwards `subscription`'s events, generation `generation` of `stream`, until it ends, the
+/// Forwards `subscription`'s events, restart `restart_id` of `stream`, until it ends, the
 /// window is gone, or the subscription is no longer current.
 async fn pump(
     window: Weak<Mutex<Window>>,
     stream: StreamId,
-    generation: u64,
+    restart_id: u64,
     mut subscription: Subscription,
 ) {
     while let Some(event) = subscription.next().await {
@@ -204,10 +236,10 @@ async fn pump(
         let elapsed = window.opened.elapsed();
         match window
             .state
-            .forward(stream, generation, event.json(), elapsed)
+            .forward(stream, restart_id, event.json(), elapsed)
         {
-            Forward::Send { frames, pause } => {
-                if !window.send(frames) {
+            Forward::Send { messages, pause } => {
+                if !window.send(messages) {
                     return;
                 }
                 if pause {
@@ -223,7 +255,8 @@ async fn pump(
     }
 }
 
-/// Ticks the window's clock every [`TICK`] and starts the restarts the watchdog asks for.
+/// Ticks the window's clock every [`TICK`] and starts the restarts it asks for: the watchdog's,
+/// and the retries of streams whose restart failed.
 async fn watch(window: Weak<Mutex<Window>>) {
     let mut ticks = async_io::Timer::interval(TICK);
     while ticks.next().await.is_some() {
@@ -233,7 +266,7 @@ async fn watch(window: Weak<Mutex<Window>>) {
         let (host, restarts) = {
             let mut guard = lock(&window);
             let elapsed = guard.opened.elapsed();
-            // Each restart replaces its stream's pump once the new subscription starts.
+            // Each restart replaces its stream's pump, if any, once the new subscription starts.
             let restarts = guard.state.tick(elapsed);
             (guard.host.clone(), restarts)
         };

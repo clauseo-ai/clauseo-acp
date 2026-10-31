@@ -1,0 +1,10 @@
+{"scenario":"plan-exit","description":"One plan-exit permission request offering claude-agent-acp 0.89.1's option ids, the four mode ones among them; the client must answer default","on_stdin_close":"exit"}
+{"note":"The steps of fake_agent's common/handshake.jsonl, written out: a scenario played from a path takes includes from a common/ folder beside it.","expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"request":{"id":"perm-1","method":"session/request_permission","params":{"sessionId":"sess-1","toolCall":{"toolCallId":"tc-plan-1","title":"Ready to code?","kind":"switch_mode","status":"pending"},"options":[{"optionId":"exit-plan-auto","name":"Yes, and use auto mode","kind":"allow_always"},{"optionId":"exit-plan-clear-auto","name":"Yes, clear context and use auto mode","kind":"allow_always"},{"optionId":"exit-plan-bypass","name":"Yes, and bypass permissions","kind":"allow_always"},{"optionId":"exit-plan-clear-bypass","name":"Yes, clear context and bypass permissions","kind":"allow_always"},{"optionId":"default","name":"Yes, and manually approve edits","kind":"allow_once"},{"optionId":"plan","name":"No, keep planning","kind":"reject_once"}]}}}
+{"expect_response":{"id":"perm-1","result":{"outcome":{"outcome":"selected","optionId":"default"}}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Leaving plan mode, edits approved one by one."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
