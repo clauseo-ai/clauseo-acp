@@ -45,8 +45,8 @@ fn turn_of(event: &DomainEvent) -> Option<TurnId> {
     }
 }
 
-/// The commits run seq 1 to 20,000 in order, one per turn, with the turn holding the snapshot
-/// cut after it: the first carries the thread's matter and thread rows, and only the commit
+/// The commits run seq 1 to 20,000 in order, one per turn, with turn 73 split after its first
+/// event (seq 18,001): the first carries the thread's matter and thread rows, and only the commit
 /// ending at `SNAPSHOT_SEQ` carries the snapshot, of events 1 to `SNAPSHOT_SEQ`.
 #[test]
 fn reopen_fixture_commits_cut_at_turn_ends_and_the_snapshot() {
