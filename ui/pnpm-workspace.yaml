@@ -5,6 +5,9 @@ packages:
 
 # The one home of a version two packages share; each names it as "catalog:".
 catalog:
+  # Playwright's two packages move together: the anchor writes the version once.
+  playwright-core: &playwright 1.64.0
+  "@playwright/test": *playwright
   "@types/react": "19.2.18"
   "@types/react-dom": "19.2.7"
   react: "19.2.8"
