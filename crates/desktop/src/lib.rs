@@ -175,6 +175,23 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
                 let _joined = join.join();
             }
             exit.stopped.store(true, Ordering::Release);
+            // The e2e build ends the process itself once the host has joined. On a Windows
+            // session with no visible window (session 0, as in CI) `app.exit` never yields
+            // `RunEvent::Exit`: tao's loop ends only after a paint on a visible window (tao
+            // 0.37.2 `event_loop.rs:271`, `:2290`). `cleanup_before_exit` clears resources and
+            // hides windows; it does not send `RunEvent::Exit`, so window-state (which saves on
+            // that event only) writes nothing to the real config folder. The default build
+            // keeps `app.exit`.
+            #[cfg(feature = "e2e")]
+            #[expect(
+                clippy::exit,
+                reason = "e2e build only: app.exit never ends the loop without a visible window"
+            )]
+            {
+                app.cleanup_before_exit();
+                std::process::exit(code);
+            }
+            #[cfg(not(feature = "e2e"))]
             app.exit(code);
         });
     if stopper.is_err() {

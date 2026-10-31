@@ -25,6 +25,7 @@ crates/desktop/src/bridge/pump.rs now clippy::disallowed_methods
 crates/desktop/src/frame.rs StreamMessage dead_code
 crates/desktop/src/lib.rs context clippy::disallowed_methods
 crates/desktop/src/lib.rs raise_main_window clippy::let_underscore_must_use
+crates/desktop/src/lib.rs stop_host_then_exit clippy::exit
 crates/desktop/src/rust_only.rs Builder::plugin_rust_only clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::with_agent clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::drop clippy::disallowed_methods
