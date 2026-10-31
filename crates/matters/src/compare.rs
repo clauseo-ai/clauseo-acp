@@ -9,10 +9,10 @@ use std::path::Path;
 use clauseo_protocol::{CheckpointId, FileChange, MatterPath};
 
 use crate::Error;
-use crate::checkpoint::{Core, VersionEntry};
+use crate::checkpoint::Core;
 use crate::diff::{DiffFile, content_id, diff_by};
 use crate::history::{HistoryStore, Oid};
-use crate::stat::{CacheEntry, EntryState, find_by_path};
+use crate::stat::{CacheEntry, EntryState};
 use crate::types::{CompareSide, Settings, VersionFile};
 
 /// One file of a side of a comparison, with its size when it is known without a lookup.
@@ -43,22 +43,18 @@ pub(crate) fn compare(
     if let (CompareSide::Checkpoint(a), CompareSide::Checkpoint(b)) = (from, to) {
         return core.changes_between(a, b);
     }
-    let now = if from == CompareSide::Folder || to == CompareSide::Folder {
-        Some(core.snapshot(folder, settings)?)
-    } else {
-        None
-    };
+    // At least one side is the folder now.
+    let now = core.snapshot(folder, settings)?;
     // Files the folder holds but never versions (over the cap, or cloud-only and never read)
     // are left out of a checkpoint side too, so one now over the cap is not reported deleted
     // (or, the other way round, added), as a checkpoint reports it skipped.
     let unversioned: BTreeSet<&str> = now
         .iter()
-        .flatten()
         .filter(|entry| entry.state == EntryState::Skipped)
         .map(|entry| entry.path.as_str())
         .collect();
-    let old = side(core, from, now.as_deref(), &unversioned)?;
-    let new = side(core, to, now.as_deref(), &unversioned)?;
+    let old = side(core, from, &now, &unversioned)?;
+    let new = side(core, to, &now, &unversioned)?;
     diff_by(&old, &new, &BTreeSet::new(), &mut |file| match file.size {
         Some(size) => Ok(size),
         None => core.size_of(file.path.as_str(), file.blob),
@@ -69,7 +65,7 @@ pub(crate) fn compare(
 fn side(
     core: &Core,
     side: CompareSide,
-    now: Option<&[CacheEntry]>,
+    now: &[CacheEntry],
     unversioned: &BTreeSet<&str>,
 ) -> Result<Vec<SideFile>, Error> {
     match side {
@@ -84,7 +80,6 @@ fn side(
             })
             .collect()),
         CompareSide::Folder => {
-            let now = now.ok_or_else(|| Error::history("compare", "the folder was not walked"))?;
             Ok(now
                 .iter()
                 .filter_map(|entry| {
@@ -125,8 +120,10 @@ pub(crate) fn read_file(
     path: &MatterPath,
     out: &mut dyn Write,
 ) -> Result<u64, Error> {
-    let files = core.tree_files(checkpoint)?;
-    let file: &VersionEntry = find_by_path(&files, path.as_str(), |file| file.path.as_str())
+    let tree = core.timeline.tree(checkpoint)?;
+    let blob = core
+        .history
+        .file_at(tree, path.as_str())?
         .ok_or_else(|| Error::UnknownFile { path: path.clone() })?;
-    core.history.read_blob(file.blob, out)
+    core.history.read_blob(blob, out)
 }

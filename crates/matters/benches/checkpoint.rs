@@ -5,8 +5,9 @@
 //!
 //! Beside it, Versions on a large matter (10,000 files of 2 to 20 KB in 100 folders two levels
 //! deep) and on a flat one (2,000 files in the folder itself): comparing two checkpoints and a
-//! checkpoint with the folder, a restore preview, and restores of 100 files in one folder, of
-//! 1,000 files across all of them, and of 3 files after 3 outside edits.
+//! checkpoint with the folder, reading one file of a version, a restore preview, and restores
+//! of 100 files in one folder, of 1,000 files across all of them, and of 3 files after 3
+//! outside edits.
 //!
 //! Everything is under `cfg(test)`, which `cargo bench` sets, so clippy's test allowances
 //! (unwrap, expect, indexing) apply.
@@ -335,6 +336,18 @@ mod bench {
                 let changes = matter.compare(cp(3), cp(5)).unwrap();
                 assert_eq!(changes.len(), 1000);
                 changes
+            });
+        });
+        // One document of a version, two folders down, as the compare screen opens it.
+        let deep = MatterPath::new(&paths[5_050]).unwrap();
+        c.bench_function("read_file_large", |b| {
+            b.iter(|| {
+                let mut bytes = Vec::new();
+                let len = matter
+                    .read_file(checkpoint_id(1), &deep, &mut bytes)
+                    .unwrap();
+                assert!(len >= 2_000);
+                bytes
             });
         });
         // Three edits nothing has recorded yet: compare and preview see them.

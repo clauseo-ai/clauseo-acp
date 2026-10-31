@@ -129,6 +129,10 @@ pub(crate) trait HistoryStore: Sized {
     /// Every file of tree `tree`, flattened and sorted by path bytes.
     fn read_tree(&self, tree: Oid) -> Result<Vec<TreeFile>, Error>;
 
+    /// The blob of the file at `path` in tree `tree`, reading only the trees on the way; `None`
+    /// when the tree has no file there.
+    fn file_at(&self, tree: Oid, path: &str) -> Result<Option<Oid>, Error>;
+
     /// The files of trees `a` and `b` that the other does not hold with the same blob, each
     /// list sorted by path bytes, reading no subtree whose id both share. A diff of the two
     /// lists equals the diff of the whole trees.

@@ -102,3 +102,30 @@ fn changed_files_are_the_files_the_trees_do_not_share() {
         );
     }
 }
+
+#[test]
+fn file_at_finds_each_file_and_nothing_else() {
+    let dir = TestDir::new("history-tree-file-at");
+    let (_git_dir, mut store) = new_store(&dir);
+    let mut state = 0x2545_f491_4f6c_dd1d_u64;
+    for _ in 0..100 {
+        let files = random_tree(&mut state);
+        let id = store.write_tree(&files).unwrap();
+        for file in &files {
+            assert_eq!(
+                store.file_at(id, &file.path).unwrap(),
+                Some(file.blob),
+                "{files:?}"
+            );
+            // A folder on the way, and a name under the file, are not files.
+            if let Some((folder, _)) = file.path.rsplit_once('/') {
+                assert_eq!(store.file_at(id, folder).unwrap(), None);
+            }
+            assert_eq!(
+                store.file_at(id, &format!("{}/x", file.path)).unwrap(),
+                None
+            );
+        }
+        assert_eq!(store.file_at(id, "missing").unwrap(), None);
+    }
+}
