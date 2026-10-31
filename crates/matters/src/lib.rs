@@ -40,8 +40,12 @@
 //! - Objects, then the ref and the stat cache, are durable before a checkpoint returns.
 //! - Excluded, over-cap and cloud-only files are never read, written or deleted.
 //! - Files in the folder change only by a temp file in the same folder and a rename. Undo and
-//!   restore check every target and lock before writing any, and a name in the folder matches
-//!   the history's byte for byte. A restore never deletes.
+//!   restore check every target and lock before writing any, and never write or delete a file
+//!   whose name the folder holds only spelled otherwise (another case or normalisation). A
+//!   restore never deletes. One exception to names matching byte for byte: a folder on the way
+//!   that the folder spells otherwise (`sub/` for the history's `Sub/c.txt`) is written into
+//!   as the file system finds it, so the next checkpoint records `sub/c.txt`; no file is
+//!   replaced.
 //! - The API is synchronous; writes take `&mut Matter`. The writer lock, the turn queue and the
 //!   "turn running" check are the host's. No clock is read and no id is minted here.
 //!
