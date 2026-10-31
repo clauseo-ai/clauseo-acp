@@ -256,3 +256,12 @@ jobs:
           name: scoreboard-windows
           path: ${{ github.workspace }}/scoreboard-out/scoreboard-windows.json
           if-no-files-found: error
+
+      # Each play's raw run and debug numbers (warm-up included), for checking the medians by hand.
+      # A separate artifact the comment never reads; uploaded after a failed play too.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && steps.scoreboard.outcome != 'skipped' }}
+        with:
+          name: scoreboard-windows-runs
+          path: ${{ github.workspace }}/scoreboard-out/runs
+          if-no-files-found: warn

@@ -1,7 +1,15 @@
 // macos.ts without the app: its configuration, each play's folders and settings, the launch with
 // its timeout, and one whole play against a stand-in for the marks build.
 
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -91,8 +99,13 @@ test("a play reads the run the app wrote to MARKS_OUT, and fails on a non-zero e
   chmodSync(app, 0o755);
   const cfg = { app, fakeAgent: agent, out: join(base, "out") };
   expect(await play(cfg, 1, { base })).toEqual(run);
+  expect(await play(cfg, 2, { base })).toEqual(run);
+  // Each play's run file, as the app wrote it, under SCOREBOARD_OUT/runs, named by play.
+  expect(readdirSync(join(cfg.out, "runs")).sort()).toEqual(["play-1-warmup.json", "play-2.json"]);
+  expect(JSON.parse(readFileSync(join(cfg.out, "runs", "play-2.json"), "utf8"))).toEqual(run);
   writeFileSync(app, "#!/bin/sh\necho 'marks: the session failed' >&2\nexit 1\n");
-  await expect(play(cfg, 2, { base })).rejects.toThrow("play 2: the app exited with 1");
+  await expect(play(cfg, 3, { base })).rejects.toThrow("play 3: the app exited with 1");
+  expect(existsSync(join(cfg.out, "runs", "play-3.json"))).toBe(false);
   // Each play's scratch folders are gone afterwards, after a failure too.
-  expect(readdirSync(base).sort()).toEqual(["app.sh", "fake_agent"]);
+  expect(readdirSync(base).sort()).toEqual(["app.sh", "fake_agent", "out"]);
 });

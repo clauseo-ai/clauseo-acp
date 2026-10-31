@@ -371,6 +371,15 @@ jobs:
           path: ${{ runner.temp }}/scoreboard-out/scoreboard-macos.json
           if-no-files-found: warn
 
+      # Each play's run file as the app wrote it (warm-up included), for checking the medians by
+      # hand. A separate artifact the comment never reads.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: scoreboard-macos-runs
+          path: ${{ runner.temp }}/scoreboard-out/runs
+          if-no-files-found: warn
+
   # cargo-mutants on main's changes of the last 24 hours, nightly and on demand. It only reports:
   # a missed mutant, or a run that reaches `MUTANTS_TIMEOUT` in xtask/src/mutants.rs, shows in the
   # job summary and the `mutants-report` artifact and never fails the run.
