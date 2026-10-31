@@ -260,3 +260,86 @@ fn a_subfolder_not_downloaded_keeps_its_files_and_the_root_is_an_error() {
     assert!(err.is_not_downloaded(), "{err}");
     fault::clear();
 }
+
+#[test]
+fn edited_since_reads_a_file_behind_a_folder_not_downloaded_as_unread() {
+    let fx = Fixture::new("no-download-edited-folder", &[("sub/b.txt", b"two")]);
+    let (mut matter, _) = fx.import();
+    write::append(&fx.file("sub/b.txt"), b" agent").unwrap();
+    matter
+        .after_turn(&meta(2), &std::collections::BTreeSet::new())
+        .unwrap();
+    write::append(&fx.file("sub/b.txt"), b" lawyer").unwrap();
+    // Listing `sub` to match the name byte for byte fails: the folder is not downloaded.
+    fault::fail(&fx.file("sub"), 0, ErrorKind::Deadlock);
+
+    assert_eq!(matter.edited_since(cid(1), cid(2)).unwrap(), []);
+    assert_eq!(fault::failed(&fx.file("sub")), 1);
+
+    fault::clear();
+    assert_eq!(
+        matter.edited_since(cid(1), cid(2)).unwrap(),
+        [path("sub/b.txt")]
+    );
+}
+
+/// Whether the test folder's file system finds `b.txt` under `B.txt` (APFS, NTFS by default).
+/// Panics on macOS and Windows when it does not: these tests need the OS's default.
+fn case_insensitive(dir: &std::path::Path) -> bool {
+    let probe = dir.join("case-probe");
+    put(&probe.join("B.txt"), b"probe");
+    let found = probe.join("b.txt").symlink_metadata().is_ok();
+    write::remove_dir_all(&probe).unwrap();
+    assert!(
+        found || !cfg!(any(target_os = "macos", windows)),
+        "this test needs the OS's default, case-insensitive file system"
+    );
+    found
+}
+
+#[test]
+fn undo_keeps_a_write_whose_respelled_delete_was_kept_for_not_downloaded() {
+    let fx = Fixture::new("no-download-undo-case", &[("Memo.txt", b"old")]);
+    if !case_insensitive(fx.folder.parent().unwrap()) {
+        return;
+    }
+    let (mut matter, _) = fx.import();
+    write::remove_file(&fx.file("Memo.txt")).unwrap();
+    put(&fx.file("memo.txt"), b"new");
+    let checkpoint = matter
+        .after_turn(&meta(2), &std::collections::BTreeSet::new())
+        .unwrap();
+    assert_eq!(checkpoint.changes.len(), 2);
+    // Edited since, so the outside-edits walk reads memo.txt; evicted by then.
+    write::append(&fx.file("memo.txt"), b" edited").unwrap();
+    fault::fail(&fx.file("memo.txt"), 0, ErrorKind::Deadlock);
+    let decisions = [
+        FileDecision {
+            path: path("Memo.txt"),
+            choice: FileChoice::Undo,
+        },
+        FileDecision {
+            path: path("memo.txt"),
+            choice: FileChoice::Undo,
+        },
+    ];
+
+    let undone = matter
+        .undo(&UndoRequest {
+            before: cid(1),
+            after: cid(2),
+            decisions: &decisions,
+            thread: Some(thread()),
+            turn: Some(turn(2)),
+            outside_edits: cid(3),
+            checkpoint: cid(4),
+            at: super::at(4),
+        })
+        .unwrap();
+
+    // The delete of memo.txt is kept (not downloaded), so writing Memo.txt would replace it.
+    assert_eq!(undone.kept, [path("Memo.txt"), path("memo.txt")]);
+    assert_eq!(undone.restored, []);
+    assert_eq!(read(&fx.file("memo.txt")), b"new edited");
+    fault::clear();
+}

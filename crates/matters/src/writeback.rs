@@ -96,7 +96,12 @@ impl Names {
     fn holds(&mut self, dir: &Path, name: &str) -> Result<bool, Error> {
         if !self.listed.contains_key(dir) {
             let mut names = HashSet::new();
-            let entries = match std::fs::read_dir(dir) {
+            #[cfg(test)]
+            let listed =
+                crate::no_download::fault::read_dir(dir).and_then(|()| std::fs::read_dir(dir));
+            #[cfg(not(test))]
+            let listed = std::fs::read_dir(dir);
+            let entries = match listed {
                 Ok(entries) => Some(entries),
                 Err(err) if err.kind() == io::ErrorKind::NotFound => None,
                 Err(err) => return Err(Error::io("read folder", dir, err)),

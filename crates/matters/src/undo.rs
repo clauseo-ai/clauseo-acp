@@ -116,8 +116,8 @@ pub(crate) fn edited_since(
 }
 
 /// The content at `path` now, hashing (without storing) only what the cache cannot vouch for.
-/// A file found not downloaded when hashed is [`Current::Unread`], as one the stat found
-/// cloud-only.
+/// A file found not downloaded when hashed, or behind a folder that does not list because it
+/// is not downloaded, is [`Current::Unread`], as one the stat found cloud-only.
 fn current(
     core: &mut Core,
     names: &mut Names,
@@ -127,8 +127,11 @@ fn current(
     guard: &NoDownload<'_>,
 ) -> Result<Current, Error> {
     let abs = folder.join(path.as_str());
-    let Some(metadata) = names.metadata(folder, path)? else {
-        return Ok(Current::Missing);
+    let metadata = match names.metadata(folder, path) {
+        Ok(Some(metadata)) => metadata,
+        Ok(None) => return Ok(Current::Missing),
+        Err(err) if err.is_not_downloaded() => return Ok(Current::Unread),
+        Err(err) => return Err(err),
     };
     if skipped(settings, &abs, &metadata) {
         return Ok(Current::Unread);
@@ -218,6 +221,9 @@ pub(crate) fn undo(
         }
         ok
     });
+    // A step kept here can leave a file that another step's write would now replace (a delete
+    // of `memo.txt` kept, a write of `Memo.txt` acting): check the names again.
+    keep_respelled(folder, &mut acting, &mut kept)?;
     let after_files = core.files_of(request.after)?;
     let mut edited_since = Vec::new();
     for step in &acting {
