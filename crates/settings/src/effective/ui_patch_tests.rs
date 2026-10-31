@@ -237,3 +237,21 @@ fn an_all_fields_patch_reaches_memory_and_a_fresh_load_alike() {
     assert_eq!(fresh.settings().ui, expected);
     assert_eq!(fresh.warnings(), []);
 }
+
+#[test]
+fn a_repeated_key_reads_the_same_after_a_save_of_another_key() {
+    // The last value of `ui.theme` does not type. A save of `density` rewrites the file through
+    // a map, which keeps that last value, so the theme must still read as the default.
+    let files = user(r#"{"ui": {"theme": "dark", "theme": "purple"}}"#);
+    let mut effective = Effective::load(&locations(), &files, &[]);
+    assert_eq!(effective.settings().ui.theme, Theme::System);
+    let density = UiPatch {
+        density: Some(Density::Compact),
+        ..UiPatch::default()
+    };
+    effective.apply_ui_patch(&files, &density).unwrap();
+    let fresh = Effective::load(&locations(), &files, &[]);
+    assert_eq!(fresh.settings().ui.theme, Theme::System);
+    assert_eq!(fresh.settings().ui.density, Density::Compact);
+    assert_eq!(fresh.warnings().len(), 1, "{:?}", fresh.warnings());
+}

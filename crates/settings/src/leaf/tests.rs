@@ -20,7 +20,7 @@ fn one(key: &str, value: Value) -> Result<Leaf, Vec<WarningKind>> {
         value,
         origin: origin(),
     };
-    let mut leaves = typed(vec![raw], &mut warnings);
+    let mut leaves = typed(vec![raw], Vec::new(), &mut warnings);
     let kinds: Vec<WarningKind> = warnings
         .into_iter()
         .inspect(|warning| assert_eq!(warning.origin, origin()))
@@ -115,7 +115,7 @@ fn an_agent_needs_an_absolute_command_and_warns_on_fields_it_does_not_know() {
         value: json!({"command": command, "args": ["--acp"], "env": {"A": "1"}, "cwd": "/"}),
         origin: origin(),
     };
-    let leaves = typed(vec![raw], &mut warnings);
+    let leaves = typed(vec![raw], Vec::new(), &mut warnings);
     assert_eq!(leaves, vec![Leaf::Agent("claude".to_owned(), launch)]);
     assert_eq!(
         warnings,
@@ -153,20 +153,57 @@ fn unknown_keys_are_warnings() {
     }
 }
 
+fn theme_raws(themes: &[&str]) -> Vec<Raw> {
+    themes
+        .iter()
+        .map(|theme| Raw {
+            key: "ui.theme".to_owned(),
+            value: json!(theme),
+            origin: origin(),
+        })
+        .collect()
+}
+
 #[test]
-fn values_are_typed_in_order_and_bad_ones_dropped() {
-    let raws = ["dark", "nope", "light"].map(|theme| Raw {
-        key: "ui.theme".to_owned(),
-        value: json!(theme),
-        origin: origin(),
-    });
+fn a_repeated_key_keeps_its_last_value_valid_or_not() {
+    // A valid last value wins over an earlier one, and an invalid one in the middle is only a
+    // warning: the last value is what stands.
     let mut warnings = Vec::new();
-    let leaves = typed(raws.to_vec(), &mut warnings);
+    let leaves = typed(
+        theme_raws(&["dark", "nope", "light"]),
+        Vec::new(),
+        &mut warnings,
+    );
+    assert_eq!(leaves, vec![Leaf::Theme(Theme::Light)]);
+    assert_eq!(warnings.len(), 1);
+
+    // An invalid last value refuses the key, so it goes back to its default and the earlier
+    // valid value does not stand.
+    let mut warnings = Vec::new();
+    let leaves = typed(theme_raws(&["dark", "purple"]), Vec::new(), &mut warnings);
+    assert_eq!(leaves, vec![Leaf::Refused("ui.theme".to_owned())]);
+    assert_eq!(warnings.len(), 1);
+}
+
+#[test]
+fn each_key_comes_once_in_the_order_of_its_last_occurrence() {
+    let raw = |key: &str, value: Value| Raw {
+        key: key.to_owned(),
+        value,
+        origin: origin(),
+    };
+    let raws = vec![
+        raw("ui.theme", json!("light")),
+        raw("ui.density", json!("compact")),
+        raw("ui.theme", json!("dark")),
+    ];
+    let mut warnings = Vec::new();
+    let leaves = typed(raws, Vec::new(), &mut warnings);
     assert_eq!(
         leaves,
-        vec![Leaf::Theme(Theme::Dark), Leaf::Theme(Theme::Light)]
+        vec![Leaf::Density(Density::Compact), Leaf::Theme(Theme::Dark)]
     );
-    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings, Vec::new());
 }
 
 #[test]

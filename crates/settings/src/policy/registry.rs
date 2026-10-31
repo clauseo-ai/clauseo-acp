@@ -45,7 +45,7 @@ pub(crate) fn parse_with(
     kinds: fn(&str) -> Option<Kind>,
 ) -> PolicyValues {
     let (raws, refused, mut warnings) = raw_values(values, kinds);
-    let leaves = leaf::typed_policy(raws, refused, &mut warnings);
+    let leaves = leaf::typed(raws, refused, &mut warnings);
     PolicyValues::new(leaves, warnings)
 }
 

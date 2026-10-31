@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::policy::{FilePolicy, PolicyRead, PolicySource};
 use crate::schema::{AgentLaunch, Density, FontSize, Theme};
 use crate::testing::{FakeSource, MemFiles, abs, abs_json, locations, policy, user};
-use crate::warning::WarningKind;
+use crate::warning::{Warning, WarningKind};
 use std::path::Path;
 
 fn absent() -> FakeSource<impl Fn() -> PolicyRead> {
@@ -272,4 +272,26 @@ fn only_a_source_that_sets_a_valid_value_is_applied() {
     let effective = Effective::load(&locations(), &MemFiles::default(), &[&broken, &firm]);
     assert_eq!(effective.policy().applied(), ["file"]);
     assert_eq!(effective.settings().ui.theme, Theme::Light);
+}
+
+#[test]
+fn a_repeated_key_takes_its_last_value_valid_or_not() {
+    // The last value is valid: it wins over the earlier one.
+    let files = user(r#"{"ui": {"theme": "purple", "theme": "dark"}}"#);
+    let effective = Effective::load(&locations(), &files, &[]);
+    assert_eq!(effective.settings().ui.theme, Theme::Dark);
+    assert_eq!(effective.warnings().len(), 1, "{:?}", effective.warnings());
+
+    // The last value does not type: the key is the default, though an earlier value was valid.
+    let files = user(r#"{"ui": {"theme": "dark", "theme": "purple"}}"#);
+    let effective = Effective::load(&locations(), &files, &[]);
+    assert_eq!(effective.settings().ui.theme, Theme::System);
+    assert!(
+        matches!(
+            effective.warnings(),
+            [Warning { kind: WarningKind::InvalidValue { key, .. }, .. }] if key == "ui.theme"
+        ),
+        "{:?}",
+        effective.warnings()
+    );
 }
