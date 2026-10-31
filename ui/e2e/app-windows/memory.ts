@@ -158,8 +158,15 @@ export async function processTree(
   return walkTree(parsed, root);
 }
 
-/** How many readings in a row `settle` needs to agree. */
+/** The fewest readings `settle`'s window holds. */
 const SETTLE_WINDOW = 3;
+/**
+ * The shortest time `settle`'s window spans, from its first reading to its last. Readings come
+ * `SETTLE_INTERVAL_MS` apart, so three in a row span only 2 s, and any drift under 0.5% a second
+ * would pass. Over 10 s, the window passes only a drift under 0.1% a second. For scale, main's
+ * windows-11-arm readings, 23 s apart, fell 115.5, 113.2, 112.0 MB: 0.09 and 0.05% a second.
+ */
+const SETTLE_MIN_SPAN_MS = 10_000;
 /** How far apart the window's readings may be, as a fraction of the largest. */
 const SETTLE_TOLERANCE = 0.01;
 /** The pause between two readings. */
@@ -191,34 +198,62 @@ export function parseCommit(line: string): number | null {
   return text === "" || !Number.isFinite(total) ? null : total;
 }
 
-/** Whether the last `SETTLE_WINDOW` commits agree within `SETTLE_TOLERANCE` of the largest. */
-export function isSettled(commits: readonly number[]): boolean {
-  const window = commits.slice(-SETTLE_WINDOW);
-  return (
-    window.length === SETTLE_WINDOW &&
-    Math.max(...window) - Math.min(...window) <= SETTLE_TOLERANCE * Math.max(...window)
-  );
+/**
+ * Whether the window agrees: the last readings that span at least `SETTLE_MIN_SPAN_MS` and number
+ * at least `SETTLE_WINDOW` are all within `SETTLE_TOLERANCE` of the largest of them.
+ */
+export function isSettled(readings: readonly Reading[]): boolean {
+  const last = readings.at(-1);
+  if (last === undefined || readings.length < SETTLE_WINDOW) {
+    return false;
+  }
+  // The latest reading at least the span before the last one.
+  let first = readings.length - 1;
+  while (first >= 0 && last.ms - (readings[first]?.ms ?? last.ms) < SETTLE_MIN_SPAN_MS) {
+    first -= 1;
+  }
+  if (first < 0) {
+    return false;
+  }
+  const window = readings
+    .slice(Math.min(first, readings.length - SETTLE_WINDOW))
+    .map((reading) => reading.commitBytes);
+  return Math.max(...window) - Math.min(...window) <= SETTLE_TOLERANCE * Math.max(...window);
 }
 
 /**
- * Reads the commit of `pids` until the last `SETTLE_WINDOW` readings agree within
- * `SETTLE_TOLERANCE`, or `maxMs` has passed. It reads `Get-Process`, the same counter as
+ * Reads the commit of `pids` until the readings agree (`isSettled`), or `maxMs` has passed. It reads `Get-Process`, the same counter as
  * `PrivatePageCount` without WMI's cost; a process that has ended counts as nothing. One PowerShell
  * prints a reading every `SETTLE_INTERVAL_MS` for the whole wait, so its start (about 23 s on
  * windows-11-arm) is paid once; it is ended when `settle` returns or throws.
  */
 export async function settle(pids: readonly number[], maxMs: number): Promise<Settled> {
+  const timeoutMs = maxMs + POWERSHELL_TIMEOUT_MS;
   const query = `(Get-Process -Id ${pids.join(",")} -ErrorAction SilentlyContinue | Measure-Object PrivateMemorySize64 -Sum).Sum`;
-  const script = `while ($true) { [Console]::Out.WriteLine([string](${query})); [Console]::Out.Flush(); Start-Sleep -Milliseconds ${SETTLE_INTERVAL_MS} }`;
+  // The script ends itself at `timeoutMs`: if the test's worker dies, nothing else ends it, since
+  // it is the worker's child and not the app's, and a write to a closed pipe does not stop it.
+  const script =
+    `$ErrorActionPreference = 'Stop'; $end = (Get-Date).AddMilliseconds(${timeoutMs});` +
+    ` while ((Get-Date) -lt $end) { [Console]::Out.WriteLine([string](${query}));` +
+    ` [Console]::Out.Flush(); Start-Sleep -Milliseconds ${SETTLE_INTERVAL_MS} }`;
   const start = performance.now();
   const child = spawn("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
     stdio: ["ignore", "pipe", "pipe"],
-    // Ends a PowerShell that hangs; the loop below then sees its output end.
-    timeout: maxMs + POWERSHELL_TIMEOUT_MS,
   });
-  let failure: Error | undefined;
-  child.once("error", (error) => {
-    failure = error;
+  // Ends a PowerShell that hangs; the loop below then sees its output end.
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill();
+  }, timeoutMs);
+  // How PowerShell ended: it did not start, or it exited with a code or a signal.
+  const ended = new Promise<string>((done) => {
+    child.once("error", (error) => {
+      done(`PowerShell did not start: ${error.message}`);
+    });
+    child.once("close", (code, signal) => {
+      done(`PowerShell exited with ${signal ?? String(code)}`);
+    });
   });
   let stderr = "";
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
@@ -235,16 +270,18 @@ export async function settle(pids: readonly number[], maxMs: number): Promise<Se
       }
       const ms = Math.round(performance.now() - start);
       readings.push({ ms, commitBytes: total });
-      const settled = isSettled(readings.map((reading) => reading.commitBytes));
+      const settled = isSettled(readings);
       if (settled || ms > maxMs) {
         return { settled, ms, readings };
       }
     }
+    const how = timedOut ? `timed out after ${timeoutMs} ms` : await ended;
     throw new Error(
-      `PowerShell stopped printing readings after ${readings.length}: ${stderr.trim()}`,
-      { cause: failure },
+      `PowerShell stopped printing readings after ${readings.length} (${how})` +
+        (stderr.trim() === "" ? "" : `: ${stderr.trim()}`),
     );
   } finally {
+    clearTimeout(timer);
     child.kill();
   }
 }

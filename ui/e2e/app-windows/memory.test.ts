@@ -2,7 +2,7 @@
 // app needed.
 
 import { expect, test } from "@playwright/test";
-import { isSettled, parseCommit, treeMemory, walkTree, type Row } from "./memory.ts";
+import { isSettled, parseCommit, treeMemory, walkTree, type Reading, type Row } from "./memory.ts";
 
 function row(
   pid: number,
@@ -60,19 +60,57 @@ test("sums the tree, and has no working set total if one process lacks the count
   expect(treeMemory(missing)).toEqual({ privateWorkingSetBytes: null, commitBytes: 21_000 });
 });
 
-test("settles when the last three readings agree within 1%", () => {
-  // The shape seen on windows-11-arm: a first reading a few MiB high, then two that agree.
-  expect(isSettled([120_000_000, 100_000_000, 100_500_000, 100_990_000])).toBe(true);
-  expect(isSettled([100_000_000, 100_000_000, 100_000_000])).toBe(true);
+/** Readings 1 s apart, the first at `firstMs`, as settle takes them. */
+const readings = (commits: readonly number[], firstMs = 0): Reading[] =>
+  commits.map((commitBytes, index) => ({ ms: firstMs + index * 1_000, commitBytes }));
+
+/** `count` readings of `commit`. */
+const flat = (count: number, commit = 100_000_000): number[] => Array<number>(count).fill(commit);
+
+test("settles when the readings of the last 10 s agree within 1%", () => {
+  // The shape seen on windows-11-arm: a first reading a few MiB high, then the rest within 1%.
+  expect(
+    isSettled(readings([120_000_000, 100_000_000, ...flat(9, 100_500_000), 100_990_000])),
+  ).toBe(true);
+  expect(isSettled(readings(flat(11), 23_000))).toBe(true);
 });
 
-test("does not settle with fewer than three readings, or while the commit moves", () => {
+test("settles at exactly 1% apart, and not just past it", () => {
+  expect(isSettled(readings([...flat(10, 99), 100]))).toBe(true);
+  expect(isSettled(readings([...flat(10, 9_899), 10_000]))).toBe(false);
+});
+
+test("does not settle before the readings span 10 s, or with fewer than three", () => {
   expect(isSettled([])).toBe(false);
-  expect(isSettled([100_000_000, 100_000_000])).toBe(false);
-  // 100 to 101.1 MB is just over 1% of the largest.
-  expect(isSettled([100_000_000, 100_500_000, 101_100_000])).toBe(false);
-  // Settled earlier, but the last three spread.
-  expect(isSettled([100_000_000, 100_000_000, 100_000_000, 110_000_000])).toBe(false);
+  expect(isSettled(readings(flat(10)))).toBe(false);
+  expect(
+    isSettled([
+      { ms: 0, commitBytes: 100 },
+      { ms: 20_000, commitBytes: 100 },
+    ]),
+  ).toBe(false);
+  // Two readings 10 s apart are too few; a third makes the window.
+  expect(
+    isSettled([
+      { ms: 0, commitBytes: 100 },
+      { ms: 10_000, commitBytes: 100 },
+    ]),
+  ).toBe(false);
+  expect(
+    isSettled([
+      { ms: 0, commitBytes: 100 },
+      { ms: 10_000, commitBytes: 100 },
+      { ms: 11_000, commitBytes: 100 },
+    ]),
+  ).toBe(true);
+});
+
+test("does not settle while the commit moves within the last 10 s", () => {
+  // A drift of 0.2% a second: under 1% over any 2 s, over 1% over 10 s.
+  const drift = Array.from({ length: 11 }, (_, index) => 100_000_000 - index * 200_000);
+  expect(isSettled(readings(drift))).toBe(false);
+  // Settled earlier, but the last reading jumps.
+  expect(isSettled(readings([...flat(15), 110_000_000]))).toBe(false);
 });
 
 test("reads a commit total from PowerShell's line, and null from an empty or other line", () => {
