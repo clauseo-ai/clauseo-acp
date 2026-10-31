@@ -8,11 +8,15 @@
 //! `ProtocolWarning::MalformedLine` and nothing goes back. `Lines` caps nothing, so the 8 MiB
 //! cap and the [`Gate`] are here too.
 //!
+//! The SDK decodes each line it gets as a `serde_json` `Value` first, and answers a line that
+//! fails that decode with an error response too, so [`Envelope`]'s decode refuses every line
+//! the `Value` decode refuses or reads differently (see `envelope.rs`).
+//!
 //! Hot path: every agent message takes it. The measured choices (64 KiB buffer, `memchr`,
 //! `from_utf8` then a decode that builds nothing, one exact allocation for a line that sits whole
-//! in the buffer) are in pull request #64.
+//! in the buffer) are in pull request #64; checking values in that decode rather than building a
+//! `Value` is in the pull request that added that check.
 
-use std::fmt;
 use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -22,14 +26,15 @@ use std::task::{Context, Poll};
 use futures::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
 use futures::task::AtomicWaker;
 use futures::{Sink, Stream};
-use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
-use serde::{Deserialize, Deserializer};
 
 use crate::event::FrameDirection;
 use crate::state::Shared;
 
+mod envelope;
 #[cfg(test)]
 mod tests;
+
+use envelope::Envelope;
 
 /// The longest JSON-RPC line the agent may send: 8 MiB, newline excluded.
 pub(crate) const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
@@ -179,7 +184,8 @@ impl<R: AsyncRead + Unpin> LineSplitter<R> {
 }
 
 /// The lines the SDK's `Lines` transport reads, each copied to the frame tap. A UTF-8 JSON-RPC
-/// message passes as it is ([`Envelope::is_message`]). Blank
+/// message that the SDK's `Value` decode reads the same way passes as it is
+/// ([`Envelope::is_message`]). Blank
 /// lines are skipped; any other line becomes a [`MALFORMED_LINE_METHOD`] notification, which the
 /// inbound handler turns into a
 /// [`ProtocolWarning::MalformedLine`](crate::ProtocolWarning::MalformedLine). A line over 8 MiB
@@ -262,182 +268,6 @@ fn malformed_marker(bytes: usize) -> String {
     format!(
         r#"{{"jsonrpc":"2.0","method":"{MALFORMED_LINE_METHOD}","params":{{"bytes":{bytes}}}}}"#
     )
-}
-
-/// What the filter reads of a line, with no `Value` and no allocation: which JSON-RPC keys it
-/// has, and the shapes [`Envelope::is_update`] needs. Only a JSON object decodes: a number, a
-/// string or an array (ACP sends no batches) fails like a line that is not JSON. A key that
-/// appears twice counts as its last value, as in the SDK's own decode.
-#[derive(Debug, Default)]
-struct Envelope {
-    jsonrpc: Option<Shape>,
-    method: Option<Shape>,
-    params: Option<Shape>,
-    id: bool,
-    result: bool,
-    error: bool,
-}
-
-impl Envelope {
-    /// A JSON-RPC message as the SDK's own decode reads one (`RawJsonRpcMessage`): `jsonrpc` is
-    /// `"2.0"`, and there is a `method` with no `result` or `error` (a request or a
-    /// notification), or an `id` with exactly one of `result` and `error` and no `method` (a
-    /// response). Anything else the SDK would answer with an error, and a log line an adapter
-    /// wrote to stdout is not one.
-    fn is_message(&self) -> bool {
-        let request = self.method.is_some() && !self.result && !self.error;
-        let response = self.method.is_none() && self.id && self.result != self.error;
-        self.jsonrpc == Some(Shape::Text { matches: true }) && (request || response)
-    }
-
-    /// A `session/update` notification the SDK decodes and hands the inbound handler: `jsonrpc`
-    /// is `"2.0"`, `params` an object, and there is no `id`, `result` or `error`.
-    fn is_update(&self) -> bool {
-        self.jsonrpc == Some(Shape::Text { matches: true })
-            && self.method == Some(Shape::Text { matches: true })
-            && self.params == Some(Shape::Object)
-            && !(self.id || self.result || self.error)
-    }
-}
-
-impl<'de> Deserialize<'de> for Envelope {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_map(EnvelopeVisitor)
-    }
-}
-
-struct EnvelopeVisitor;
-
-impl<'de> Visitor<'de> for EnvelopeVisitor {
-    type Value = Envelope;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a JSON-RPC message")
-    }
-
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Envelope, A::Error> {
-        let mut envelope = Envelope::default();
-        while let Some(key) = map.next_key::<Key>()? {
-            match key {
-                Key::Jsonrpc => envelope.jsonrpc = Some(map.next_value_seed(ShapeOf("2.0"))?),
-                Key::Method => {
-                    envelope.method = Some(map.next_value_seed(ShapeOf("session/update"))?);
-                }
-                Key::Params => envelope.params = Some(map.next_value_seed(ShapeOf(""))?),
-                Key::Id => envelope.id = map.next_value::<IgnoredAny>().map(|_| true)?,
-                Key::Result => envelope.result = map.next_value::<IgnoredAny>().map(|_| true)?,
-                Key::Error => envelope.error = map.next_value::<IgnoredAny>().map(|_| true)?,
-                Key::Other => drop(map.next_value::<IgnoredAny>()?),
-            }
-        }
-        Ok(envelope)
-    }
-}
-
-/// A key of a JSON-RPC message, read without copying it.
-#[derive(Clone, Copy)]
-enum Key {
-    Jsonrpc,
-    Method,
-    Params,
-    Id,
-    Result,
-    Error,
-    Other,
-}
-
-impl<'de> Deserialize<'de> for Key {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_identifier(KeyVisitor)
-    }
-}
-
-struct KeyVisitor;
-
-impl Visitor<'_> for KeyVisitor {
-    type Value = Key;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a key")
-    }
-
-    fn visit_str<E: de::Error>(self, v: &str) -> Result<Key, E> {
-        Ok(match v {
-            "jsonrpc" => Key::Jsonrpc,
-            "method" => Key::Method,
-            "params" => Key::Params,
-            "id" => Key::Id,
-            "result" => Key::Result,
-            "error" => Key::Error,
-            _ => Key::Other,
-        })
-    }
-}
-
-/// The kind of one value, read without keeping it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Shape {
-    /// A string; `matches` when it is the one [`ShapeOf`] looks for.
-    Text { matches: bool },
-    /// An object.
-    Object,
-    /// Anything else.
-    Other,
-}
-
-/// Reads a value's [`Shape`], comparing a string with the text it holds.
-struct ShapeOf(&'static str);
-
-impl<'de> DeserializeSeed<'de> for ShapeOf {
-    type Value = Shape;
-
-    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Shape, D::Error> {
-        deserializer.deserialize_any(self)
-    }
-}
-
-impl<'de> Visitor<'de> for ShapeOf {
-    type Value = Shape;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("any value")
-    }
-
-    fn visit_str<E: de::Error>(self, v: &str) -> Result<Shape, E> {
-        Ok(Shape::Text {
-            matches: v == self.0,
-        })
-    }
-
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Shape, A::Error> {
-        while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
-        Ok(Shape::Object)
-    }
-
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Shape, A::Error> {
-        while seq.next_element::<IgnoredAny>()?.is_some() {}
-        Ok(Shape::Other)
-    }
-
-    fn visit_bool<E: de::Error>(self, _: bool) -> Result<Shape, E> {
-        Ok(Shape::Other)
-    }
-
-    fn visit_i64<E: de::Error>(self, _: i64) -> Result<Shape, E> {
-        Ok(Shape::Other)
-    }
-
-    fn visit_u64<E: de::Error>(self, _: u64) -> Result<Shape, E> {
-        Ok(Shape::Other)
-    }
-
-    fn visit_f64<E: de::Error>(self, _: f64) -> Result<Shape, E> {
-        Ok(Shape::Other)
-    }
-
-    fn visit_unit<E: de::Error>(self) -> Result<Shape, E> {
-        Ok(Shape::Other)
-    }
 }
 
 /// Writes each line and a `\n` to the agent's stdin, flushing after each, and copies it to the

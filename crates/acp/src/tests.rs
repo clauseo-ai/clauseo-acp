@@ -15,6 +15,7 @@ use super::*;
 mod interface;
 mod prompts;
 mod requests;
+mod sdk_refused_lines;
 mod stdout;
 mod updates;
 
