@@ -8,7 +8,10 @@ import { window } from "./selectors.ts";
 
 test.use({ scenario: "tool-calls" });
 
-/** The scenario's tool calls: id, title, last status. */
+/**
+ * The scenario's tool calls: its id (a step name only), title, last status. Rows are found by
+ * title, which no other title contains, so the test does not depend on which id the row carries.
+ */
 const CALLS = [
   ["tc-read-1", "Read brief.txt", "completed"],
   ["tc-edit-1", "Edit brief.txt", "completed"],
@@ -31,8 +34,8 @@ test("ten tool calls render with their titles and last status", async ({ app }) 
   await expect(w.toolCalls).toHaveCount(CALLS.length);
   for (const [id, title, status] of CALLS) {
     await test.step(id, async () => {
-      const row = w.toolCall(id);
-      await expect(row).toContainText(title);
+      const row = w.toolCallTitled(title);
+      await expect(row).toHaveCount(1);
       await expect(row).toHaveAttribute("data-status", status);
     });
   }

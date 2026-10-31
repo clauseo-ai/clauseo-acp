@@ -78,9 +78,9 @@ export function window(page: Page) {
     toolCalls: id(ids.toolCall),
     toolCall: (toolCallId: string): Locator =>
       page.locator(`[data-testid="${ids.toolCall}"][data-tool-call-id="${toolCallId}"]`),
+    /** The tool call rows whose text contains `title`. */
+    toolCallTitled: (title: string): Locator => id(ids.toolCall).filter({ hasText: title }),
     permissions: id(ids.permission),
-    /** The permission request whose card shows `text` (its tool call's title). */
-    permission: (text: string): Locator => id(ids.permission).filter({ hasText: text }),
     permissionButton: (card: Locator, kind: OptionKind): Locator =>
       card.getByTestId(permissionButton(kind)),
     turnStopped: id(ids.turnStopped),

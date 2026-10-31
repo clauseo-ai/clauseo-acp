@@ -1,7 +1,9 @@
-// The folders one test gives the app, so it never touches the real data folder: a temporary root
-// holding the data folder (`CLAUSEO_DATA_DIR`, with a `settings.json` whose `agents.claude` starts
-// `fake_agent` on the test's scenario), the matter folder (`E2E_MATTER_DIR`, which the e2e build's
-// pick_folder returns instead of opening the dialog), and one WebView2 data folder per launch.
+// The folders one test gives the app, so it never touches the real data or Documents folders: a
+// temporary root holding the data folder (`CLAUSEO_DATA_DIR`, with a `settings.json` whose
+// `matters.default_location` is the scratch `matters/` folder, where the host makes its Scratch
+// matter, and, with a scenario, whose `agents.claude` starts `fake_agent` on it), the matter folder
+// (`E2E_MATTER_DIR`, which the e2e build's pick_folder returns instead of opening the dialog), and
+// one WebView2 data folder per launch.
 // Pure file work, no app: scratch.test.ts runs it on any OS.
 //
 //   E2E_FAKE_AGENT    absolute path to fake_agent(.exe); default: beside E2E_APP
@@ -38,16 +40,36 @@ export interface Scratch {
   dataDir: string;
   /** `E2E_MATTER_DIR`: the folder the window opens as a matter. */
   matterDir: string;
+  /** `matters.default_location`: new matters (the host's Scratch matter) go here, not Documents. */
+  mattersDir: string;
   /** The fake_agent the settings start, or null when the test has no scenario. */
   agentCommand: string | null;
 }
 
-/** The `settings.json` that starts `command --scenario <scenario>` as `agents.claude`. */
-export function agentSettings(command: string, scenario: string): unknown {
+/** The `agents` section that starts `command --scenario <scenario>` as `agents.claude`. */
+export function agentSettings(command: string, scenario: string): Record<string, unknown> {
   if (!isAbsolute(command)) {
     throw new Error(`the agent command must be an absolute path (S5), not ${command}`);
   }
   return { agents: { [AGENT_ID]: { command, args: ["--scenario", scenario] } } };
+}
+
+/**
+ * The whole `settings.json`: new matters in `mattersDir` (S5 `matters.default_location`, absolute;
+ * without it the host's Scratch matter lands in the real Documents/Clauseo), plus the agent when
+ * there is one.
+ */
+export function scratchSettings(
+  mattersDir: string,
+  agent: { command: string; scenario: string } | null,
+): Record<string, unknown> {
+  if (!isAbsolute(mattersDir)) {
+    throw new Error(`matters.default_location must be an absolute path, not ${mattersDir}`);
+  }
+  return {
+    matters: { default_location: mattersDir },
+    ...(agent === null ? {} : agentSettings(agent.command, agent.scenario)),
+  };
 }
 
 /**
@@ -81,11 +103,13 @@ export function makeScratch(
   // after canonicalising them.
   const root = realpathSync.native(mkdtempSync(join(base, "clauseo-e2e-")));
   try {
-    // Siblings: a matter may not contain or sit inside the data folder.
+    // Siblings: a matter may not contain or sit inside the data folder or the matters root.
     const dataDir = join(root, "data");
     const matterDir = join(root, "matter");
+    const mattersDir = join(root, "matters");
     mkdirSync(dataDir);
     mkdirSync(matterDir);
+    mkdirSync(mattersDir);
     for (const [path, content] of Object.entries(options.matterFiles)) {
       const file = under(matterDir, path);
       mkdirSync(dirname(file), { recursive: true });
@@ -99,12 +123,15 @@ export function makeScratch(
           `fake_agent is not at ${agentCommand}; build it (cargo build -p clauseo-fake_agent) or set E2E_FAKE_AGENT`,
         );
       }
-      writeFileSync(
-        join(dataDir, "settings.json"),
-        `${JSON.stringify(agentSettings(agentCommand, options.scenario), null, 2)}\n`,
-      );
     }
-    return { root, dataDir, matterDir, agentCommand };
+    const settings = scratchSettings(
+      mattersDir,
+      agentCommand === null || options.scenario === null
+        ? null
+        : { command: agentCommand, scenario: options.scenario },
+    );
+    writeFileSync(join(dataDir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
+    return { root, dataDir, matterDir, mattersDir, agentCommand };
   } catch (error) {
     rmSync(root, { recursive: true, force: true });
     throw error;

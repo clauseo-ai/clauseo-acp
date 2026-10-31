@@ -11,6 +11,7 @@ import {
   readTree,
   removeScratch,
   scratchEnv,
+  scratchSettings,
   webviewFolder,
 } from "./scratch.ts";
 
@@ -58,7 +59,13 @@ test("the folders: data with settings, a seeded matter beside it, and the launch
   const settings: unknown = JSON.parse(
     readFileSync(join(scratch.dataDir, "settings.json"), "utf8"),
   );
-  expect(settings).toEqual(agentSettings(agent, "files-one-turn"));
+  expect(settings).toEqual({
+    matters: { default_location: scratch.mattersDir },
+    agents: { claude: { command: agent, args: ["--scenario", "files-one-turn"] } },
+  });
+  expect(scratch.mattersDir.startsWith(scratch.root)).toBe(true);
+  expect(existsSync(scratch.mattersDir)).toBe(true);
+  expect(readTree(scratch.mattersDir)).toEqual({});
   expect(readTree(scratch.matterDir)).toEqual({
     "brief.txt": "Clause 4 draft\n",
     "notes/b.txt": "B\n",
@@ -75,7 +82,7 @@ test("the folders: data with settings, a seeded matter beside it, and the launch
   expect(existsSync(scratch.root)).toBe(false);
 });
 
-test("no scenario: no settings file, and fake_agent is never asked for", () => {
+test("no scenario: settings hold only the matters' location, and fake_agent is never asked for", () => {
   const scratch = makeScratch(
     { scenario: null, matterFiles: {} },
     () => {
@@ -83,8 +90,15 @@ test("no scenario: no settings file, and fake_agent is never asked for", () => {
     },
     base,
   );
-  expect(existsSync(join(scratch.dataDir, "settings.json"))).toBe(false);
+  const settings: unknown = JSON.parse(
+    readFileSync(join(scratch.dataDir, "settings.json"), "utf8"),
+  );
+  expect(settings).toEqual({ matters: { default_location: scratch.mattersDir } });
   expect(scratch.agentCommand).toBeNull();
+});
+
+test("scratchSettings refuses a relative matters location", () => {
+  expect(() => scratchSettings("matters", null)).toThrow(/absolute/);
 });
 
 test("a missing fake_agent fails and leaves no folder", () => {
