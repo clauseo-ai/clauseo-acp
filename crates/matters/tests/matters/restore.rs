@@ -289,7 +289,7 @@ fn restore_refuses_bad_requests_before_writing() {
         ),
         (
             restore_request(1, RestoreFiles::Only(&twice), 4, 5),
-            "UnknownFile",
+            "DuplicateFile",
         ),
         (
             restore_request(1, RestoreFiles::Only(&[]), 4, 5),
@@ -312,6 +312,7 @@ fn restore_refuses_bad_requests_before_writing() {
         let err = matter.restore(&request).unwrap_err();
         let got = match &err {
             Error::UnknownFile { .. } => "UnknownFile",
+            Error::DuplicateFile { .. } => "DuplicateFile",
             Error::NoFilesChosen => "NoFilesChosen",
             Error::UnknownCheckpoint { .. } => "UnknownCheckpoint",
             Error::DuplicateCheckpoint { .. } => "DuplicateCheckpoint",

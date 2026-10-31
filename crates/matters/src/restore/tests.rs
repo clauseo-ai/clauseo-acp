@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use clauseo_protocol::MatterPath;
+use clauseo_protocol::{MatterPath, RestoreRequest};
 
 use super::{Candidate, Draft, chosen, draft};
 use crate::Error;
@@ -138,7 +138,7 @@ fn chosen_list_must_name_files_once() {
     let twice = paths(&["a.txt", "a.txt"]);
     assert!(matches!(
         chosen(RestoreFiles::Only(&twice)),
-        Err(Error::UnknownFile { path: p }) if p == path("a.txt")
+        Err(Error::DuplicateFile { path: p }) if p == path("a.txt")
     ));
     assert_eq!(chosen(RestoreFiles::All).unwrap(), None);
 }
@@ -148,4 +148,17 @@ fn equal_lists_draft_nothing() {
     let then = vec![then("a.txt", 1)];
     let now = vec![now("a.txt", read(1))];
     assert_eq!(draft(&then, &now, None).unwrap(), Draft::default());
+}
+
+#[test]
+fn a_command_scope_names_the_same_files() {
+    assert_eq!(
+        RestoreFiles::from(&RestoreRequest::Matter),
+        RestoreFiles::All
+    );
+    let chosen = paths(&["a.txt", "b/c.txt"]);
+    let request = RestoreRequest::Files {
+        paths: chosen.clone(),
+    };
+    assert_eq!(RestoreFiles::from(&request), RestoreFiles::Only(&chosen));
 }

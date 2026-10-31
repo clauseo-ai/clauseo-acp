@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, ContentId, FileChange, ImportSummary, MatterId, MatterPath,
-    SkippedFile, ThreadId, Timestamp, TurnId,
+    RestoreRequest, SkippedFile, ThreadId, Timestamp, TurnId,
 };
 
 use crate::{Matter, PlaceholderProbe};
@@ -210,6 +210,16 @@ pub enum RestoreFiles<'a> {
     Only(&'a [MatterPath]),
 }
 
+impl<'a> From<&'a RestoreRequest> for RestoreFiles<'a> {
+    /// The files a `RestoreVersion` command's scope names.
+    fn from(request: &'a RestoreRequest) -> Self {
+        match request {
+            RestoreRequest::Matter => Self::All,
+            RestoreRequest::Files { paths } => Self::Only(paths),
+        }
+    }
+}
+
 /// A restore of an earlier version: the whole matter or chosen files, from any checkpoint.
 ///
 /// The two checkpoint ids are single-use and must differ, and neither may be on the timeline
@@ -259,8 +269,12 @@ pub struct RestorePlan {
 pub struct Restored {
     /// The checkpoint of unrecorded edits taken before writing, if the folder had changed.
     pub outside_edits: Option<Checkpoint>,
-    /// The `restore` checkpoint; `Reused` (the last checkpoint's id, no changes) when nothing
-    /// needed writing.
+    /// The `restore` checkpoint. `Created` when files were written. `Reused` when nothing
+    /// needed writing: no `restore` checkpoint exists, and the id is the last checkpoint's
+    /// (the `outside-edits` one when `outside_edits` is `Some`). The host then records only
+    /// the outside edits, if any (`OutsideEdits` and its `CheckpointRecorded`), and neither a
+    /// `CheckpointRecorded` of kind `Restore` nor `VersionRestored`, whose `checkpoint` is
+    /// one the restore wrote.
     pub checkpoint: Checkpoint,
     /// The files written, sorted.
     pub written: Vec<MatterPath>,
