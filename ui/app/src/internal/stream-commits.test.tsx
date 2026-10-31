@@ -172,6 +172,9 @@ function coalesced(bodies: readonly ViewPatchBody[]): ViewPatchBody[][] {
   return frames;
 }
 
+// The brief's IPC target, at most 1.3x the text bytes, is R13's to measure on the running app; a follow-up tracks it.
+// This records where the encoding stands today: each ~11 B chunk rides in ~140 B of JSON envelope, so even one batch
+// per frame is about 13x. Closing the gap is host-side (longer coalescing, a leaner encoding), not the window's.
 test("IPC bytes against text bytes for the scripted stream", () => {
   const { bodies, textBytes } = scriptedTurn();
   const perChunk = new FakeTransport();

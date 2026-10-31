@@ -1,7 +1,9 @@
 // The window's views, built from the host's patch batches (the design's stream store with the protocol's patches as
 // its input). Batches wait in a queue and apply together once a frame (`frameBatch`, every 100 ms in lite), so React
 // commits at most once a frame however fast the text comes. After each flush the store acknowledges, once per stream
-// that advanced, with the window's frame count, which is how the bridge frees what it holds.
+// that advanced, with the window's frame count, which is how the bridge frees what it holds. Every channel message
+// schedules a flush, so frames that deliver no batch (a stream already released, an event that is not patches) are
+// acknowledged too.
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { PatchBatch, StreamId } from "../transport/protocol.ts";
 import type { Batch } from "./batch.ts";
@@ -46,9 +48,12 @@ export function createViewStore(transport: HostTransport, options: StoreOptions)
       .catch((e: unknown) => warn(`ack of ${view.stream} failed: ${JSON.stringify(e)}`));
   };
 
+  const schedule = () => {
+    cancel ??= options.batch()(flush);
+  };
+
   const flush = () => {
     cancel = null;
-    if (queue.length === 0) return;
     const batches = queue;
     queue = [];
     const advanced = new Set<StreamId>();
@@ -78,24 +83,26 @@ export function createViewStore(transport: HostTransport, options: StoreOptions)
     const frames = transport.frames();
     for (const stream of advanced) ack(views.get(stream)!, frames);
     if (advanced.size === 0 && frames > ackedFrames) {
-      // Frames that moved no cursor (replays, a stale tail) still free the bridge's bytes.
-      for (const stream of watched.keys()) {
-        const view = views.get(stream);
-        if (view !== undefined && view.cursor !== null) {
-          ack(view, frames);
-          break;
-        }
-      }
+      // Frames that moved no cursor still free the bridge's bytes. The bridge counts frames per window whatever the
+      // stream, so the ack goes with any position the store holds, a watched stream's first. With no position at all
+      // there is nothing to ack with; the frames wait for the next ack.
+      const held = [...watched.keys(), ...views.keys()]
+        .map((stream) => views.get(stream))
+        .find((view) => view !== undefined && view.cursor !== null);
+      if (held !== undefined) ack(held, frames);
+      else return;
     }
     ackedFrames = frames;
   };
+
+  const stopFrames = transport.onFrame(schedule);
 
   const listenerFor = (stream: StreamId) => {
     let fn = listenersOf.get(stream);
     if (fn === undefined) {
       fn = (batch) => {
         queue.push(batch);
-        cancel ??= options.batch()(flush);
+        schedule();
       };
       listenersOf.set(stream, fn);
     }
@@ -130,6 +137,7 @@ export function createViewStore(transport: HostTransport, options: StoreOptions)
       flush();
     },
     dispose: () => {
+      stopFrames();
       cancel?.();
       cancel = null;
       queue = [];

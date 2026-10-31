@@ -4,6 +4,7 @@ import { Channel, isTauri } from "@tauri-apps/api/core";
 import { commands, type StreamMessage } from "./bindings.ts";
 import { ChannelReader } from "./channel.ts";
 import {
+  FrameListeners,
   NullTransport,
   toHostError,
   type BatchListener,
@@ -44,6 +45,7 @@ async function call<T>(answer: Promise<Answer<T>>): Promise<T> {
 export class TauriTransport implements HostTransport {
   readonly kind = "tauri";
   readonly #reader: ChannelReader;
+  readonly #frameListeners = new FrameListeners();
   readonly #subs: Subscriptions;
   readonly #opened: Promise<void>;
 
@@ -62,9 +64,13 @@ export class TauriTransport implements HostTransport {
       (stream, error) =>
         warn(`subscription to ${stream} failed: ${JSON.stringify(toHostError(error))}`),
     );
-    this.#reader = new ChannelReader((event) => {
-      if (event.patches !== undefined) this.#subs.deliver(event.patches);
-    }, warn);
+    this.#reader = new ChannelReader(
+      (event) => {
+        if (event.patches !== undefined) this.#subs.deliver(event.patches);
+      },
+      warn,
+      this.#frameListeners.run,
+    );
     const channel = new Channel<StreamMessage>((message) => this.#reader.receive(message));
     this.#opened = call(commands.openStream(channel)).then(() => undefined);
     this.#opened.catch((e: unknown) => warn(`open_stream failed: ${JSON.stringify(e)}`));
@@ -100,6 +106,9 @@ export class TauriTransport implements HostTransport {
   }
   frames(): number {
     return this.#reader.frames;
+  }
+  onFrame(listener: () => void): () => void {
+    return this.#frameListeners.add(listener);
   }
 }
 

@@ -32,10 +32,18 @@ export class ChannelReader {
   readonly #pending = new Map<number, Pending>();
   readonly #onEvent: (event: HostEvent) => void;
   readonly #onError: (problem: string) => void;
+  readonly #onFrame: () => void;
 
-  constructor(onEvent: (event: HostEvent) => void, onError: (problem: string) => void) {
+  /** `onFrame` runs after every message, once whatever event it completed has been handed on, so a frame that
+   * delivers nothing (a fragment, an event for a stream nobody holds, an event that is not patches) still counts. */
+  constructor(
+    onEvent: (event: HostEvent) => void,
+    onError: (problem: string) => void,
+    onFrame: () => void = () => {},
+  ) {
     this.#onEvent = onEvent;
     this.#onError = onError;
+    this.#onFrame = onFrame;
   }
 
   /** Messages received so far, fragments one each. */
@@ -46,6 +54,14 @@ export class ChannelReader {
   /** One channel message. */
   receive(raw: unknown): void {
     this.#frames += 1;
+    try {
+      this.#read(raw);
+    } finally {
+      this.#onFrame();
+    }
+  }
+
+  #read(raw: unknown): void {
     let message: unknown;
     try {
       message = parsed(raw);

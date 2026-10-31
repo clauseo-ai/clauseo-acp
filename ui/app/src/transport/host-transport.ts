@@ -53,6 +53,21 @@ export interface HostTransport {
   ack(stream: StreamId, epoch: ViewEpoch, cursor: Cursor, frames: number): Promise<void>;
   /** Channel messages received and processed since the stream opened, fragments one each. */
   frames(): number;
+  /** Runs `listener` after every channel message, whether or not it delivered a batch, so whoever acks can ack
+   * frames that moved no cursor. Returns the removal. */
+  onFrame(listener: () => void): () => void;
+}
+
+/** The listeners of `onFrame`, for a transport to keep. */
+export class FrameListeners {
+  readonly #listeners = new Set<() => void>();
+  add(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+  readonly run = (): void => {
+    for (const listener of this.#listeners) listener();
+  };
 }
 
 /** A host error the transport made itself, for a failure that is not the host's answer. */
@@ -98,5 +113,8 @@ export class NullTransport implements HostTransport {
   resubscribe(): void {}
   frames(): number {
     return 0;
+  }
+  onFrame(): () => void {
+    return () => {};
   }
 }

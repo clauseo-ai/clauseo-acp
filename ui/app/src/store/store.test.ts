@@ -29,6 +29,12 @@ function rig() {
   return { transport, store, frame, pending, notified: () => notified };
 }
 
+/** Lets each stream's chained host calls run. */
+const settle = async () => {
+  // A macrotask runs only once every microtask queued before it has, chained host calls included.
+  await new Promise((done) => setTimeout(done, 0));
+};
+
 const START = event(batch(1, [reset([userMessage(5, 1, "q"), agentText(6, 1, "")])]));
 
 test("batches wait for the frame, apply together, notify once and ack once per stream with the frame count", () => {
@@ -47,7 +53,7 @@ test("batches wait for the frame, apply together, notify once and ack once per s
   ]);
 });
 
-test("a from_len mismatch resubscribes once after the last applied cursor, until a batch applies", () => {
+test("a from_len mismatch resubscribes once after the last applied cursor, until a batch applies", async () => {
   const { transport, store, frame } = rig();
   store.watch(STREAM);
   transport.deliver(START);
@@ -57,6 +63,7 @@ test("a from_len mismatch resubscribes once after the last applied cursor, until
   frame();
   transport.deliver(event(batch(2, [append(1, 7, "z")])));
   frame();
+  await settle();
   expect(transport.only("subscribe").map((c) => c.after)).toEqual([
     null,
     { epoch: EPOCH, cursor: 1 },
@@ -66,6 +73,7 @@ test("a from_len mismatch resubscribes once after the last applied cursor, until
   expect(store.view(STREAM)?.cursor).toBe(2);
   transport.deliver(event(batch(4, [upsert(toolCall(9, 1, "pending"))])));
   frame();
+  await settle();
   expect(transport.only("subscribe")).toHaveLength(3);
 });
 
@@ -92,9 +100,40 @@ test("watching twice subscribes once; a stream watched again starts after the po
   b();
   await Promise.resolve();
   store.watch(STREAM);
+  await settle();
   expect(transport.calls.filter((c) => c.call !== "ack")).toEqual([
     { call: "subscribe", stream: STREAM, after: null },
     { call: "unsubscribe", stream: STREAM },
     { call: "subscribe", stream: STREAM, after: { epoch: EPOCH, cursor: 1 } },
   ]);
+});
+
+test("frames that deliver no batch still schedule a flush and are acknowledged", async () => {
+  const { transport, store, frame, pending } = rig();
+  const release = store.watch(STREAM);
+  transport.deliver(START);
+  frame();
+  release();
+  await Promise.resolve();
+  // In flight when the stream was released: dropped, but the bridge counted it.
+  transport.deliver(event(batch(2, [append(1, 0, "late")])));
+  // An event that is not patches.
+  transport.deliver({ account_limits_changed: {} });
+  expect(pending).toHaveLength(1);
+  frame();
+  expect(transport.only("ack").map((a) => [a.stream, a.cursor, a.frames])).toEqual([
+    [STREAM, 1, 1],
+    [STREAM, 1, 3],
+  ]);
+});
+
+test("with no position held there is nothing to ack with, and the frames wait for the next ack", () => {
+  const { transport, store, frame } = rig();
+  transport.deliver({ account_limits_changed: {} });
+  frame();
+  expect(transport.only("ack")).toEqual([]);
+  store.watch(STREAM);
+  transport.deliver(START);
+  frame();
+  expect(transport.only("ack").map((a) => a.frames)).toEqual([2]);
 });
