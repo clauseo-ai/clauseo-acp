@@ -49,12 +49,12 @@
 //!   does for a torn object; nothing is repaired on open. Only a blob's size
 //!   ([`VersionFile::size`], checkpoint sizes) comes from its header without the check.
 //! - Excluded, over-cap and cloud-only files are never read, written or deleted. On macOS every
-//!   read of a file's content and every listing in the folder runs with the calling thread's
-//!   download of dataless files off (`no_download.rs`; the thread's policy is put back after,
-//!   never the process's), so a file evicted after its stat is not downloaded: its read fails
-//!   with `EDEADLK` and it counts as cloud-only, never read again. A file the probe finds
-//!   cloud-only by the metadata of the open file is not read either. `matter.json` and the
-//!   history are read without the guard.
+//!   read of a file's content in the folder, and every listing of the checkpoint walk and the
+//!   scan, runs with the calling thread's download of dataless files off (`no_download.rs`; the
+//!   thread's policy is put back after, never the process's), so a file evicted after its stat
+//!   is not downloaded: its read fails with `EDEADLK` and it counts as cloud-only, never read
+//!   again. A file the probe finds cloud-only by the metadata of the open file is not read
+//!   either. `no_download.rs` lists what runs outside the guard.
 //! - Files in the folder change only by a temp file in the same folder and a rename; the one
 //!   other change is the hidden attribute of `.clauseo` on Windows. Undo and
 //!   restore check every target and lock before writing any, and never write or delete a file

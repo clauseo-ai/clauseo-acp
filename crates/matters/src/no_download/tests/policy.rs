@@ -6,11 +6,17 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::super::macos::{DEFAULT, OFF, ON, process_policy, set_thread_policy, thread_policy};
+use super::super::macos::{
+    IOPOL_MATERIALIZE_DATALESS_FILES_DEFAULT as DEFAULT,
+    IOPOL_MATERIALIZE_DATALESS_FILES_OFF as OFF, IOPOL_MATERIALIZE_DATALESS_FILES_ON as ON,
+    process_policy, set_thread_policy, thread_policy,
+};
 use super::super::{NoDownload, fault};
-use super::{Fixture, Local, cid, meta};
-use crate::types::{CompareSide, RestoreFiles};
-use crate::{PlaceholderProbe, write};
+use clauseo_protocol::{FileChoice, FileDecision};
+
+use super::{Fixture, Local, at, cid, meta, path, thread, turn};
+use crate::types::{CompareSide, Marker, NewMatter, Restore, RestoreFiles, UndoRequest};
+use crate::{Matter, PlaceholderProbe, write};
 
 fn on_own_thread(test: impl FnOnce() + Send + 'static) {
     std::thread::spawn(test).join().unwrap();
@@ -99,15 +105,32 @@ fn every_read_of_every_entry_point_runs_with_downloads_off_and_the_caller_keeps_
             assert!(seen.iter().all(|policy| *policy == OFF), "{what}: {seen:?}");
             assert_eq!(thread_policy().unwrap(), ON, "{what}");
         };
+
+        let created = Matter::create(
+            fx.settings.clone(),
+            NewMatter {
+                id: "01910000-0000-7000-8000-000000000002".parse().unwrap(),
+                folder: fx.folder.parent().unwrap().join("created"),
+                created_at: at(1),
+                marker: Marker::None,
+                checkpoint: cid(1),
+            },
+        );
+        created.unwrap();
+        check("create");
+
         let (mut matter, _) = fx.import();
         check("import");
+        write::append(&fx.file("a.txt"), b" before").unwrap();
+        matter.before_turn(&meta(2)).unwrap();
+        check("before_turn");
         write::append(&fx.file("a.txt"), b" agent").unwrap();
         matter
-            .after_turn(&meta(2), &std::collections::BTreeSet::new())
+            .after_turn(&meta(3), &std::collections::BTreeSet::new())
             .unwrap();
         check("after_turn");
         write::append(&fx.file("a.txt"), b" lawyer").unwrap();
-        matter.edited_since(cid(1), cid(2)).unwrap();
+        matter.edited_since(cid(2), cid(3)).unwrap();
         check("edited_since");
         matter.preview_restore(cid(1), RestoreFiles::All).unwrap();
         check("preview_restore");
@@ -120,10 +143,39 @@ fn every_read_of_every_entry_point_runs_with_downloads_off_and_the_caller_keeps_
             &[],
             &fx.settings,
             &mut |_| {},
-            &std::sync::atomic::AtomicBool::new(false),
+            &AtomicBool::new(false),
         )
         .unwrap();
         check("scan");
+
+        let decisions = [FileDecision {
+            path: path("a.txt"),
+            choice: FileChoice::Undo,
+        }];
+        matter
+            .undo(&UndoRequest {
+                before: cid(2),
+                after: cid(3),
+                decisions: &decisions,
+                thread: Some(thread()),
+                turn: Some(turn(3)),
+                outside_edits: cid(4),
+                checkpoint: cid(5),
+                at: at(5),
+            })
+            .unwrap();
+        check("undo");
+        write::append(&fx.file("a.txt"), b" again").unwrap();
+        matter
+            .restore(&Restore {
+                from: cid(1),
+                files: RestoreFiles::All,
+                outside_edits: cid(6),
+                checkpoint: cid(7),
+                at: at(7),
+            })
+            .unwrap();
+        check("restore");
     });
 }
 

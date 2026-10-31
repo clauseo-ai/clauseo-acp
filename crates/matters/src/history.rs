@@ -68,8 +68,8 @@ impl Hasher {
     }
 
     /// Hashes the file `file` (`len` bytes by its metadata) as a blob; returns it and the bytes
-    /// read. A length over `cap` is an [`Error::Io`] of kind `FileTooLarge`, as for
-    /// [`HistoryStore::store_file`], and so is a file that is not downloaded.
+    /// read. A length over `cap` is an [`Error::Io`] of kind `FileTooLarge`, and a file that is
+    /// not downloaded one of kind `Deadlock`, as for [`HistoryStore::store_file`].
     pub(crate) fn hash(
         &mut self,
         file: &Path,
