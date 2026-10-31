@@ -15,10 +15,14 @@
 //!     the host subscription (`frame::timed_messages`); a larger one goes as in release;
 //!   - an initialization script, run in the window before any page script, sets
 //!     `window.__CLAUSEO_PERF__ = { t0EpochMs, autoplay, reactCommits: 0 }` (`t0EpochMs` the
-//!     app's start, read on the first line of `run()`; `autoplay` true only with `marks`) and,
+//!     app's start, read on the first line of `run()`; `autoplay` true only in a `marks` build
+//!     with both `MARKS_OUT` and `E2E_MATTER_DIR` set and not empty, as the harness launches
+//!     it, so a `marks` build started by hand plays nothing by itself) and,
 //!     unless the page has one, a `__REACT_DEVTOOLS_GLOBAL_HOOK__` whose `onCommitFiberRoot`
 //!     counts React commits into `reactCommits`;
-//!   - the command `perf_channel_bytes`: the bytes sent down every window channel since start.
+//!   - the command `perf_channel_bytes`: the bytes the release framing would have sent down
+//!     every window channel since start: a `timed` message counts as its event alone, without
+//!     the wrapper (`Frame::release_len`); flow control still counts the wrapped length.
 //! - The `marks` feature (`marks.rs`) adds to all of this `marks_memory` and `marks_finish`.
 //!
 //! Contract:
@@ -32,6 +36,7 @@
 //!   `app.exit` (`lib.rs`, `stop_host_then_exit`): in a Windows session with no visible window,
 //!   `app.exit` never returns from the event loop. So window-state never saves in this build.
 
+use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -61,7 +66,7 @@ pub(crate) fn mark_start() {
     T0_EPOCH_MS.get_or_init(epoch_ms);
 }
 
-/// Adds `len` bytes, one channel message sent, to the total.
+/// Adds `len` bytes, one channel message sent (its release length), to the total.
 pub(crate) fn count_channel_bytes(len: usize) {
     CHANNEL_BYTES.fetch_add(len as u64, Ordering::Relaxed);
 }
@@ -70,8 +75,25 @@ pub(crate) fn count_channel_bytes(len: usize) {
 pub(crate) fn init_script() -> String {
     init_script_with(
         T0_EPOCH_MS.get().copied().unwrap_or_else(epoch_ms),
-        cfg!(feature = "marks"),
+        autoplay_with(
+            cfg!(feature = "marks"),
+            std::env::var_os(MARKS_OUT_VAR).as_deref(),
+            std::env::var_os(MATTER_DIR_VAR).as_deref(),
+        ),
     )
+}
+
+/// The variable `marks_finish` writes the run to (`marks.rs`), read here only to decide
+/// `autoplay`.
+const MARKS_OUT_VAR: &str = "MARKS_OUT";
+
+/// Whether the page plays the scoreboard's script by itself: only in a `marks` build launched
+/// by the harness, which sets both `MARKS_OUT` and `E2E_MATTER_DIR`, not empty. A `marks` build
+/// started by hand (`tauri dev --features marks`) lacks them, so it never sends the scripted
+/// prompt to the person's real agent or approves its permission.
+fn autoplay_with(marks: bool, marks_out: Option<&OsStr>, matter_dir: Option<&OsStr>) -> bool {
+    let set = |value: Option<&OsStr>| value.is_some_and(|value| !value.is_empty());
+    marks && set(marks_out) && set(matter_dir)
 }
 
 /// [`init_script`] for a start at `t0_epoch_ms` and the given `autoplay`.
@@ -112,8 +134,8 @@ pub(crate) fn grant_scoreboard<R: Runtime, M: Manager<R>>(manager: &M) -> tauri:
     Ok(())
 }
 
-/// The bytes the bridge has sent down every window channel since the app started: the sum of
-/// the message lengths it counts for flow control.
+/// The bytes the bridge has sent down every window channel since the app started, as the
+/// release framing would have sent them: a `timed` message counts as its event's length.
 #[tauri::command]
 pub(crate) async fn perf_channel_bytes<R: Runtime>(_app: AppHandle<R>) -> Result<u64, HostError> {
     Ok(channel_bytes())

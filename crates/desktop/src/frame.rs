@@ -58,7 +58,31 @@ impl Frame {
     pub(crate) fn len(&self) -> usize {
         self.0.len()
     }
+
+    /// The bytes the release framing would have sent for this message: a `timed` message's
+    /// event alone, without its wrapper; any other message's own length. `perf_channel_bytes`
+    /// counts this, so the scoreboard's IPC ratio leaves out the e2e-only wrapper.
+    #[cfg(feature = "e2e")]
+    pub(crate) fn release_len(&self) -> usize {
+        // No event, fragment or notice starts so: `timed` is a reserved top-level key, and the
+        // time, a plain decimal, holds no comma.
+        self.0
+            .strip_prefix(TIMED_PREFIX)
+            .and_then(|rest| rest.split_once(TIMED_EVENT))
+            .and_then(|(_, rest)| rest.strip_suffix(TIMED_SUFFIX))
+            .map_or(self.0.len(), str::len)
+    }
 }
+
+/// A `timed` message's text before its time.
+#[cfg(feature = "e2e")]
+const TIMED_PREFIX: &str = r#"{"timed":{"received_ms":"#;
+/// Between a `timed` message's time and its event.
+#[cfg(feature = "e2e")]
+const TIMED_EVENT: &str = r#","event":"#;
+/// A `timed` message's text after its event.
+#[cfg(feature = "e2e")]
+const TIMED_SUFFIX: &str = "}}";
 
 impl IpcResponse for Frame {
     fn body(self) -> tauri::Result<InvokeResponseBody> {
@@ -180,24 +204,21 @@ pub(crate) fn messages(json: &str, id: u32) -> Option<Vec<Frame>> {
 /// [`messages`] sends it, with no time. A time that is not finite goes untimed too.
 #[cfg(feature = "e2e")]
 pub(crate) fn timed_messages(json: &str, received_ms: f64, id: u32) -> Option<Vec<Frame>> {
-    const PREFIX: &str = r#"{"timed":{"received_ms":"#;
-    const EVENT: &str = r#","event":"#;
-    const SUFFIX: &str = "}}";
     if !received_ms.is_finite() {
         return messages(json, id);
     }
     // Rust writes an f64 in plain decimal, never with an exponent: valid JSON as it is.
     let time = received_ms.to_string();
-    let len = PREFIX.len() + time.len() + EVENT.len() + json.len() + SUFFIX.len();
+    let len = TIMED_PREFIX.len() + time.len() + TIMED_EVENT.len() + json.len() + TIMED_SUFFIX.len();
     if len >= FRAME_LIMIT {
         return messages(json, id);
     }
     let mut text = String::with_capacity(len);
-    text.push_str(PREFIX);
+    text.push_str(TIMED_PREFIX);
     text.push_str(&time);
-    text.push_str(EVENT);
+    text.push_str(TIMED_EVENT);
     text.push_str(json);
-    text.push_str(SUFFIX);
+    text.push_str(TIMED_SUFFIX);
     Some(vec![Frame(text)])
 }
 

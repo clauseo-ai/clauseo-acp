@@ -30,14 +30,17 @@ converted document. From there they can call any IPC command the page can reach.
 
 **What stops them.**
 
-- `built`: The one capability file grants only the nine bridge commands, one permission each
-  ([0012](decisions/0012-desktop-bridge.md)); the `capabilities` check fails on `remote`,
-  `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`
+- `built`: The release context names one capability, `main`, which grants only the nine bridge
+  commands, one permission each ([0012](decisions/0012-desktop-bridge.md)); the `e2e` and `marks`
+  builds add `e2e.json` and `marks.json` at setup (`e2e::grant_scoreboard`), and their permissions
+  exist only in those builds; the `capabilities` check reads all three files and fails on
+  `remote`, `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`
 - `built`: A pinned CSP: no remote images or connections, no `unsafe-eval`, `object-src 'none'`,
   `base-uri 'none'`, Trusted Types enforced with one allowed policy, `clauseo-sanitize` (defence in
   depth: engines without support ignore it); the `tauri-config` check pins the string
 - `built`: An `AppManifest` in `build.rs`, so app commands go through the access check; it lists
-  the nine commands, and a test checks it against the code and the capability
+  the nine commands in release (the `e2e` and `marks` builds add theirs), and a test checks it
+  against the code and the capabilities
 - `built`: No global Tauri object and a frozen prototype (`tauri-config` check); no asset protocol
   (`tauri-config` check, and `deny.toml` bans tauri's `protocol-asset` feature); no devtools in
   release builds (`deny.toml` bans the feature; Tauri turns devtools on in debug builds)

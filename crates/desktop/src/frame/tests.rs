@@ -256,6 +256,33 @@ fn a_timed_message_splices_the_event_in_as_it_is() {
     );
 }
 
+/// `perf_channel_bytes` counts what release would send: a timed message as its event alone,
+/// a fragment, a plain event or a notice as it is.
+#[cfg(feature = "e2e")]
+#[test]
+fn the_release_length_leaves_out_the_timed_wrapper_only() {
+    let json = event_of(500);
+    let [timed] = timed_messages(&json, 1_730_380_000_123.456, 0)
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert!(timed.len() > json.len());
+    assert_eq!(timed.release_len(), json.len());
+    let long = event_of(FRAME_LIMIT + 10);
+    let fragments = timed_messages(&long, 5.0, 1).unwrap();
+    assert!(fragments.len() > 1);
+    for fragment in &fragments {
+        assert_eq!(fragment.release_len(), fragment.len());
+    }
+    let plain = Frame(json.clone());
+    assert_eq!(plain.release_len(), json.len());
+    let notice = stream_failed(
+        StreamId::Thread(ThreadId::new(v7()).unwrap()),
+        &HostError::new(ErrorCode::StoreIo, "disk full"),
+    );
+    assert_eq!(notice.release_len(), notice.len());
+}
+
 #[cfg(feature = "e2e")]
 #[test]
 fn an_event_too_long_to_wrap_goes_as_it_would_untimed() {

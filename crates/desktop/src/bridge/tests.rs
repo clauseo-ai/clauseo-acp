@@ -93,8 +93,8 @@ fn a_stale_cursor_gets_reset() {
 }
 
 /// The e2e build sends an event that fits wrapped as `timed`, with the time the bridge received
-/// it, and counts its wrapped length in `perf_channel_bytes`'s total. The default build sends
-/// it plain.
+/// it, and counts only the event's length in `perf_channel_bytes`'s total, what release sends:
+/// never the wrapper. The default build sends it plain.
 #[test]
 fn only_the_e2e_build_sends_an_event_timed_and_counts_its_bytes() {
     let scratch = Scratch::new("timed-event", &[]);
@@ -105,23 +105,26 @@ fn only_the_e2e_build_sends_an_event_timed_and_counts_its_bytes() {
     #[cfg(feature = "e2e")]
     let (before, start) = (crate::e2e::channel_bytes(), crate::e2e::epoch_ms());
     block_on(bridge.subscribe(MAIN, StreamId::Matter(host.scratch()), None)).unwrap();
-    let _reset = batch(messages.next_event());
+    let event = messages.next_text();
+    let _reset = batch(serde_json::from_str(&event).unwrap());
     let timed = messages.timed();
     #[cfg(not(feature = "e2e"))]
     assert!(timed.is_empty(), "{timed:?}");
     #[cfg(feature = "e2e")]
-    check_timed(&timed, before, start);
+    check_timed(&timed, before, start, event.len());
 }
 
-/// One timed message, received after `start`, its length counted in the total past `before`.
+/// One timed message, received after `start`, its event of `event_len` bytes counted in the
+/// total past `before` and its wrapper not.
 #[cfg(feature = "e2e")]
-fn check_timed(timed: &[(f64, usize)], before: u64, start: f64) {
-    let [(received_ms, len)] = timed else {
+fn check_timed(timed: &[(f64, usize)], before: u64, start: f64, event_len: usize) {
+    let [(received_ms, wrapped_len)] = timed else {
         panic!("{timed:?}");
     };
     assert!(start <= *received_ms && *received_ms <= crate::e2e::epoch_ms());
-    // Other tests send too, so the total grew by this message at least.
-    assert!(crate::e2e::channel_bytes() >= before + *len as u64);
+    assert!(*wrapped_len > event_len);
+    // nextest runs each test in its own process, so only this test's message is in the total.
+    assert_eq!(crate::e2e::channel_bytes() - before, event_len as u64);
 }
 
 #[test]

@@ -1,6 +1,8 @@
 //! The `marks` feature: the speed scoreboard's macOS build. It is the `e2e` build (`e2e.rs`)
 //! plus two commands for the page, which plays the scoreboard session itself (`autoplay` in
-//! `window.__CLAUSEO_PERF__`) and reports what it measured:
+//! `window.__CLAUSEO_PERF__`) and reports what it measured. It plays only when launched with
+//! both `MARKS_OUT` and `E2E_MATTER_DIR` set and not empty (`e2e::init_script`): a `marks`
+//! build started by hand shows the app as usual and sends nothing to the person's agent.
 //!
 //! - `marks_memory`: the app's memory now, in MiB (2^20 bytes): the `phys_footprint` of the app
 //!   process plus every `WebKit` process working for it (`marks/macos.rs` says how they are found).
