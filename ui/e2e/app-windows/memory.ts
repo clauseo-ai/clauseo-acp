@@ -2,8 +2,8 @@
 // msedgewebview2.exe browser, renderer, GPU and utility processes), from one snapshot of
 // Win32_Process and of the per-process performance counters.
 
-import { execFile } from "node:child_process";
-import { setTimeout as wait } from "node:timers/promises";
+import { execFile, spawn } from "node:child_process";
+import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 
 /** One process of the tree. */
@@ -182,31 +182,69 @@ export interface Settled {
 }
 
 /**
+ * The commit total from one line of `settle`'s PowerShell, or null if the line is not a number:
+ * an empty line means none of the processes is running.
+ */
+export function parseCommit(line: string): number | null {
+  const text = line.trim();
+  const total = Number(text);
+  return text === "" || !Number.isFinite(total) ? null : total;
+}
+
+/** Whether the last `SETTLE_WINDOW` commits agree within `SETTLE_TOLERANCE` of the largest. */
+export function isSettled(commits: readonly number[]): boolean {
+  const window = commits.slice(-SETTLE_WINDOW);
+  return (
+    window.length === SETTLE_WINDOW &&
+    Math.max(...window) - Math.min(...window) <= SETTLE_TOLERANCE * Math.max(...window)
+  );
+}
+
+/**
  * Reads the commit of `pids` until the last `SETTLE_WINDOW` readings agree within
  * `SETTLE_TOLERANCE`, or `maxMs` has passed. It reads `Get-Process`, the same counter as
- * `PrivatePageCount` without WMI's cost; a process that has ended counts as nothing.
+ * `PrivatePageCount` without WMI's cost; a process that has ended counts as nothing. One PowerShell
+ * prints a reading every `SETTLE_INTERVAL_MS` for the whole wait, so its start (about 23 s on
+ * windows-11-arm) is paid once; it is ended when `settle` returns or throws.
  */
 export async function settle(pids: readonly number[], maxMs: number): Promise<Settled> {
   const query = `(Get-Process -Id ${pids.join(",")} -ErrorAction SilentlyContinue | Measure-Object PrivateMemorySize64 -Sum).Sum`;
+  const script = `while ($true) { [Console]::Out.WriteLine([string](${query})); [Console]::Out.Flush(); Start-Sleep -Milliseconds ${SETTLE_INTERVAL_MS} }`;
   const start = performance.now();
+  const child = spawn("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    stdio: ["ignore", "pipe", "pipe"],
+    // Ends a PowerShell that hangs; the loop below then sees its output end.
+    timeout: maxMs + POWERSHELL_TIMEOUT_MS,
+  });
+  let failure: Error | undefined;
+  child.once("error", (error) => {
+    failure = error;
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+    stderr = (stderr + chunk).slice(-2_000);
+  });
   const readings: Reading[] = [];
-  for (;;) {
-    const out = (await powershell(query)).trim();
-    const total = Number(out);
-    if (out === "" || !Number.isFinite(total)) {
-      throw new Error(
-        `none of processes ${pids.join(", ")} is running, or Get-Process printed ${out}`,
-      );
+  try {
+    for await (const line of createInterface({ input: child.stdout })) {
+      const total = parseCommit(line);
+      if (total === null) {
+        throw new Error(
+          `none of processes ${pids.join(", ")} is running, or Get-Process printed ${line}`,
+        );
+      }
+      const ms = Math.round(performance.now() - start);
+      readings.push({ ms, commitBytes: total });
+      const settled = isSettled(readings.map((reading) => reading.commitBytes));
+      if (settled || ms > maxMs) {
+        return { settled, ms, readings };
+      }
     }
-    const ms = Math.round(performance.now() - start);
-    readings.push({ ms, commitBytes: total });
-    const window = readings.slice(-SETTLE_WINDOW).map((reading) => reading.commitBytes);
-    const settled =
-      window.length === SETTLE_WINDOW &&
-      Math.max(...window) - Math.min(...window) <= SETTLE_TOLERANCE * Math.max(...window);
-    if (settled || ms > maxMs) {
-      return { settled, ms, readings };
-    }
-    await wait(SETTLE_INTERVAL_MS);
+    throw new Error(
+      `PowerShell stopped printing readings after ${readings.length}: ${stderr.trim()}`,
+      { cause: failure },
+    );
+  } finally {
+    child.kill();
   }
 }
