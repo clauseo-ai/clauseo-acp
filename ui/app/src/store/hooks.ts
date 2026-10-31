@@ -1,7 +1,14 @@
 // Reading the store from React. Each hook picks one part of one stream's view, a part that keeps its identity while it
-// is unchanged (an entry object, the id list, a string), so a flush that changes one row renders that row alone.
+// is unchanged (an entry object, the id list, a string), so a flush that changes one row renders that row alone. The
+// view itself is changed in place, so no hook hands out the whole view.
 import { createContext, use, useCallback, useEffect, useSyncExternalStore } from "react";
-import type { EntryId, StreamHeader, StreamId, ViewEntry } from "../transport/protocol.ts";
+import type {
+  EntryId,
+  HostError,
+  StreamHeader,
+  StreamId,
+  ViewEntry,
+} from "../transport/protocol.ts";
 import type { ViewStore } from "./store.ts";
 import type { StreamView } from "./view.ts";
 
@@ -50,13 +57,15 @@ export function useEntry(store: ViewStore, stream: StreamId, id: EntryId): ViewE
 
 /** A streaming text by its key (`textKey`); "" before it exists. */
 export function useText(store: ViewStore, stream: StreamId, key: string): string {
-  const pick = useCallback((v: StreamView | undefined) => v?.texts[key] ?? "", [key]);
+  const pick = useCallback((v: StreamView | undefined) => v?.texts.get(key) ?? "", [key]);
   return useStreamPart(store, stream, pick);
 }
 
-/** The stream's whole view, for logic that needs every entry (not for rows). */
-export function useView(store: ViewStore, stream: StreamId | null): StreamView | undefined {
-  return useStreamPart(store, stream, identity);
+/** Why a stream stopped, or null while it runs. */
+export function useStreamError(store: ViewStore, stream: StreamId | null): HostError | null {
+  const read = useCallback(
+    () => (stream === null ? null : (store.error(stream) ?? null)),
+    [store, stream],
+  );
+  return useSyncExternalStore(store.subscribe, read, read);
 }
-
-const identity = (v: StreamView | undefined) => v;

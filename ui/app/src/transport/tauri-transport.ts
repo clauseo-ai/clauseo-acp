@@ -1,13 +1,20 @@
 // The transport inside the desktop app: Tauri's IPC. The only module that imports `@tauri-apps/api` (with the generated
 // bindings beside it). One channel per page load, opened once by the module singleton, never per React effect.
+//
+// Acknowledgement. The bridge holds the bytes of every channel message the window has not processed, and frees them on
+// `ack(positions, messages)`: the positions the store applied, and how many channel messages the window has processed
+// since `open_stream`. A message counts as processed once what it carried was applied (the store's ack after its
+// flush says so), or at once when it carried nothing for a subscriber (a fragment piece, an event for a stream nobody
+// holds, an event that is not patches, a stream_failed report). The store's acks of one flush and the message count go to the bridge as one
+// call, a microtask after the flush; messages that carried nothing and no flush followed are acked on the next
+// animation frame with no positions.
 import { Channel, isTauri } from "@tauri-apps/api/core";
-import { commands, type StreamMessage } from "./bindings.ts";
-import { ChannelReader } from "./channel.ts";
+import { commands, type Ack, type StreamMessage } from "./bindings.ts";
+import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import {
-  FrameListeners,
   NullTransport,
   toHostError,
-  type BatchListener,
+  type BatchSubscriber,
   type DisplayInfo,
   type HostTransport,
 } from "./host-transport.ts";
@@ -15,14 +22,12 @@ import type {
   AgentChoiceId,
   CommandEnvelope,
   CommandOutcome,
-  Cursor,
   FolderRefId,
   HostQuery,
   PermissionRequestId,
   QueryResult,
   StreamId,
   ThreadId,
-  ViewEpoch,
   ViewPosition,
 } from "./protocol.ts";
 import { Subscriptions } from "./subscriptions.ts";
@@ -42,38 +47,117 @@ async function call<T>(answer: Promise<Answer<T>>): Promise<T> {
   throw toHostError(settled.error);
 }
 
+export type TauriOptions = {
+  warn?: (message: string) => void;
+  /** Runs `run` on the next animation frame; a test passes its own. */
+  nextFrame?: (run: () => void) => void;
+};
+
 export class TauriTransport implements HostTransport {
   readonly kind = "tauri";
   readonly #reader: ChannelReader;
-  readonly #frameListeners = new FrameListeners();
   readonly #subs: Subscriptions;
-  readonly #opened: Promise<void>;
+  readonly #warn: (message: string) => void;
+  readonly #nextFrame: (run: () => void) => void;
+  #opened: Promise<void> | null = null;
+  /** Positions the store acked since the last call, one per stream (the bridge refuses an ack naming a stream twice),
+   * sent with the next. */
+  #positions = new Map<StreamId, Ack>();
+  /** The message count the bridge last heard. */
+  #ackedMessages = 0;
+  /** Messages before the first one since the store's last ack that handed a batch to a subscriber; null when there
+   * is none. Messages from it on wait for the store's next ack. */
+  #processedBefore: number | null = null;
+  /** Whether the message being read handed a batch to a subscriber. */
+  #carried = false;
+  #sendQueued = false;
+  #frameQueued = false;
 
-  constructor(warn: (message: string) => void = (m) => console.warn(m)) {
+  constructor(options: TauriOptions = {}) {
+    const warn = options.warn ?? ((m: string) => console.warn(m));
+    this.#warn = warn;
+    this.#nextFrame = options.nextFrame ?? ((run) => requestAnimationFrame(() => run()));
     this.#subs = new Subscriptions(
       {
         subscribe: async (stream, after) => {
-          await this.#opened;
+          await this.#open();
           await call(commands.subscribe(stream, after));
         },
         unsubscribe: async (stream) => {
-          await this.#opened;
+          await this.#open();
           await call(commands.unsubscribe(stream));
         },
       },
-      (stream, error) =>
-        warn(`subscription to ${stream} failed: ${JSON.stringify(toHostError(error))}`),
+      warn,
     );
     this.#reader = new ChannelReader(
-      (event) => {
-        if (event.patches !== undefined) this.#subs.deliver(event.patches);
+      (event: ChannelEvent) => {
+        const failed = streamFailedOf(event);
+        if (failed !== null) {
+          this.#subs.fail(failed.stream, toHostError(failed.error));
+        } else if ("patches" in event && event.patches !== undefined) {
+          this.#carried = this.#subs.deliver(event.patches) > 0;
+        }
       },
       warn,
-      this.#frameListeners.run,
+      () => this.#onMessage(),
     );
-    const channel = new Channel<StreamMessage>((message) => this.#reader.receive(message));
-    this.#opened = call(commands.openStream(channel)).then(() => undefined);
-    this.#opened.catch((e: unknown) => warn(`open_stream failed: ${JSON.stringify(e)}`));
+    void this.#open().catch(() => {});
+  }
+
+  /** Registers the channel, once; after a failed attempt the next host call tries again. */
+  #open(): Promise<void> {
+    if (this.#opened === null) {
+      const channel = new Channel<StreamMessage>((message) => this.#reader.receive(message));
+      const opened = call(commands.openStream(channel)).then(() => undefined);
+      this.#opened = opened;
+      opened.catch((e: unknown) => {
+        this.#warn(`open_stream failed: ${JSON.stringify(toHostError(e))}`);
+        if (this.#opened === opened) this.#opened = null;
+      });
+    }
+    return this.#opened;
+  }
+
+  #onMessage(): void {
+    if (this.#carried) {
+      this.#processedBefore ??= this.#reader.eventStart;
+      this.#carried = false;
+      return;
+    }
+    if (this.#frameQueued) return;
+    this.#frameQueued = true;
+    this.#nextFrame(() => {
+      this.#frameQueued = false;
+      this.#send();
+    });
+  }
+
+  /** One bridge call with the positions waiting and the messages processed, when there is anything new. */
+  #send(): void {
+    const messages = Math.min(
+      this.#processedBefore ?? this.#reader.messages,
+      this.#reader.unfinishedSince ?? this.#reader.messages,
+    );
+    if (this.#positions.size === 0 && messages <= this.#ackedMessages) return;
+    const positions = [...this.#positions.values()];
+    this.#positions.clear();
+    this.#ackedMessages = Math.max(this.#ackedMessages, messages);
+    call(commands.ack(positions, messages)).catch((e: unknown) =>
+      this.#warn(`ack failed: ${JSON.stringify(toHostError(e))}`),
+    );
+  }
+
+  ack(stream: StreamId, position: ViewPosition): void {
+    this.#positions.set(stream, { stream, epoch: position.epoch, cursor: position.cursor });
+    // The store acks after a flush, which applied every batch handed to it so far.
+    this.#processedBefore = null;
+    if (this.#sendQueued) return;
+    this.#sendQueued = true;
+    queueMicrotask(() => {
+      this.#sendQueued = false;
+      this.#send();
+    });
   }
 
   dispatch(command: CommandEnvelope): Promise<CommandOutcome> {
@@ -95,20 +179,11 @@ export class TauriTransport implements HostTransport {
   displayInfo(): Promise<DisplayInfo> {
     return call(commands.displayInfo());
   }
-  subscribe(stream: StreamId, after: ViewPosition | null, listener: BatchListener): () => void {
-    return this.#subs.add(stream, after, listener);
+  subscribe(stream: StreamId, after: ViewPosition | null, subscriber: BatchSubscriber): () => void {
+    return this.#subs.add(stream, after, subscriber);
   }
   resubscribe(stream: StreamId, after: ViewPosition | null): void {
     this.#subs.resubscribe(stream, after);
-  }
-  async ack(stream: StreamId, epoch: ViewEpoch, cursor: Cursor, frames: number): Promise<void> {
-    await call(commands.ack(stream, epoch, cursor, frames));
-  }
-  frames(): number {
-    return this.#reader.frames;
-  }
-  onFrame(listener: () => void): () => void {
-    return this.#frameListeners.add(listener);
   }
 }
 

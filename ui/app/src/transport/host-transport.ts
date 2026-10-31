@@ -7,7 +7,6 @@ import type {
   AgentChoiceId,
   CommandEnvelope,
   CommandOutcome,
-  Cursor,
   DisplayInfo,
   FolderRefId,
   HostError,
@@ -17,18 +16,24 @@ import type {
   QueryResult,
   StreamId,
   ThreadId,
-  ViewEpoch,
   ViewPosition,
 } from "./protocol.ts";
 
 export type { DisplayInfo };
 
-/** Receives one stream's patch batches, in the order the channel delivered them. */
-export type BatchListener = (batch: PatchBatch) => void;
+/** Receives one stream's patch batches, in the order the channel delivered them, and hears when the stream fails: a
+ * subscribe the host refused, or the host's own restart of the stream failing. A failed stream gets nothing more until
+ * `resubscribe`. */
+export type BatchSubscriber = {
+  batch(batch: PatchBatch): void;
+  failed(error: HostError): void;
+};
+
+/** Which transport this is: `"tauri"` reaches the desktop host, `"fake"` a test's scripted host, `"null"` nothing. */
+export type TransportKind = "tauri" | "fake" | "null";
 
 export interface HostTransport {
-  /** Which transport this is, for logs and tests: `"tauri"`, `"fake"`, `"null"`. */
-  readonly kind: string;
+  readonly kind: TransportKind;
   dispatch(command: CommandEnvelope): Promise<CommandOutcome>;
   query(query: HostQuery): Promise<QueryResult>;
   /** Answers a permission request with one of the options it offered. */
@@ -42,32 +47,19 @@ export interface HostTransport {
   displayInfo(): Promise<DisplayInfo>;
   /**
    * Starts receiving a stream's patches, `after` a position (the tail after it, or one `Reset`). Ref-counted per
-   * stream: the host is subscribed once however many listeners there are, and released a microtask after the last
+   * stream: the host is subscribed once however many subscribers there are, and released a microtask after the last
    * one leaves, so an unsubscribe followed at once by a subscribe (React Strict Mode's double effect) keeps the one
    * host subscription. Returns the unsubscribe.
    */
-  subscribe(stream: StreamId, after: ViewPosition | null, listener: BatchListener): () => void;
-  /** Asks the host for a subscribed stream again from `after`; listeners stay. */
+  subscribe(stream: StreamId, after: ViewPosition | null, subscriber: BatchSubscriber): () => void;
+  /** Asks the host for a subscribed stream again from `after`; subscribers stay. */
   resubscribe(stream: StreamId, after: ViewPosition | null): void;
-  /** Records what the window has applied; `frames` is `frames()` at the time. */
-  ack(stream: StreamId, epoch: ViewEpoch, cursor: Cursor, frames: number): Promise<void>;
-  /** Channel messages received and processed since the stream opened, fragments one each. */
-  frames(): number;
-  /** Runs `listener` after every channel message, whether or not it delivered a batch, so whoever acks can ack
-   * frames that moved no cursor. Returns the removal. */
-  onFrame(listener: () => void): () => void;
-}
-
-/** The listeners of `onFrame`, for a transport to keep. */
-export class FrameListeners {
-  readonly #listeners = new Set<() => void>();
-  add(listener: () => void): () => void {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
-  }
-  readonly run = (): void => {
-    for (const listener of this.#listeners) listener();
-  };
+  /**
+   * Records that the window applied `stream` up to `position`. Called once per stream after each flush that applied a
+   * batch of it, and only then. How the host hears it is the transport's own business: the desktop one also counts
+   * its channel messages there and sends one call per flush.
+   */
+  ack(stream: StreamId, position: ViewPosition): void;
 }
 
 /** A host error the transport made itself, for a failure that is not the host's answer. */
@@ -106,15 +98,9 @@ export class NullTransport implements HostTransport {
   answerPermission = nothing;
   pickFolder = nothing;
   displayInfo = nothing;
-  ack = nothing;
   subscribe(): () => void {
     return () => {};
   }
   resubscribe(): void {}
-  frames(): number {
-    return 0;
-  }
-  onFrame(): () => void {
-    return () => {};
-  }
+  ack(): void {}
 }

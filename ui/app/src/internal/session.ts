@@ -37,8 +37,6 @@ export function useThreadActions(): ThreadActions {
   return actions;
 }
 
-export const threadStream = (thread: ThreadId): StreamId => `thread:${thread}`;
-
 export type Session = {
   readonly matter: OpenMatter | null;
   readonly thread: ThreadId | null;

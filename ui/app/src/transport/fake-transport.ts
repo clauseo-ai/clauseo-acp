@@ -1,11 +1,11 @@
 // A transport for tests: the same channel reader and subscriptions as the Tauri one, with the host replaced by a
-// recorder. `deliver` plays a channel message as the bridge would send it; `respond` scripts command answers.
-import { ChannelReader } from "./channel.ts";
+// recorder. `deliver` plays a channel message as the bridge would send it; `host` scripts the answers. It counts no
+// messages: that bookkeeping is the desktop transport's own.
+import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import {
-  FrameListeners,
   internalError,
   toHostError,
-  type BatchListener,
+  type BatchSubscriber,
   type DisplayInfo,
   type HostTransport,
 } from "./host-transport.ts";
@@ -13,15 +13,13 @@ import type {
   AgentChoiceId,
   CommandEnvelope,
   CommandOutcome,
-  Cursor,
   FolderRefId,
-  HostEvent,
+  HostError,
   HostQuery,
   PermissionRequestId,
   QueryResult,
   StreamId,
   ThreadId,
-  ViewEpoch,
   ViewPosition,
 } from "./protocol.ts";
 import { Subscriptions } from "./subscriptions.ts";
@@ -30,7 +28,7 @@ import { Subscriptions } from "./subscriptions.ts";
 export type FakeCall =
   | { call: "subscribe"; stream: StreamId; after: ViewPosition | null }
   | { call: "unsubscribe"; stream: StreamId }
-  | { call: "ack"; stream: StreamId; epoch: ViewEpoch; cursor: Cursor; frames: number }
+  | { call: "ack"; stream: StreamId; position: ViewPosition }
   | { call: "dispatch"; command: CommandEnvelope }
   | { call: "query"; query: HostQuery }
   | {
@@ -45,6 +43,8 @@ export type FakeHost = {
   dispatch?: (command: CommandEnvelope) => CommandOutcome | Promise<CommandOutcome>;
   query?: (query: HostQuery) => QueryResult | Promise<QueryResult>;
   pickFolder?: () => FolderRefId | null;
+  /** Answers each subscribe; throwing refuses it. */
+  subscribe?: (stream: StreamId, after: ViewPosition | null) => void;
   platform?: DisplayInfo["platform"];
 };
 
@@ -57,7 +57,6 @@ export class FakeTransport implements HostTransport {
   bytes = 0;
   host: FakeHost;
   readonly #reader: ChannelReader;
-  readonly #frameListeners = new FrameListeners();
   readonly #subs: Subscriptions;
 
   constructor(host: FakeHost = {}) {
@@ -66,19 +65,22 @@ export class FakeTransport implements HostTransport {
       {
         subscribe: async (stream, after) => {
           this.calls.push({ call: "subscribe", stream, after });
+          this.host.subscribe?.(stream, after);
         },
         unsubscribe: async (stream) => {
           this.calls.push({ call: "unsubscribe", stream });
         },
       },
-      (_stream, error) => this.problems.push(String(error)),
+      (problem) => this.problems.push(problem),
     );
     this.#reader = new ChannelReader(
-      (event: HostEvent) => {
-        if ("patches" in event && event.patches !== undefined) this.#subs.deliver(event.patches);
+      (event: ChannelEvent) => {
+        const failed = streamFailedOf(event);
+        if (failed !== null) this.#subs.fail(failed.stream, toHostError(failed.error));
+        else if ("patches" in event && event.patches !== undefined)
+          this.#subs.deliver(event.patches);
       },
       (problem) => this.problems.push(problem),
-      this.#frameListeners.run,
     );
   }
 
@@ -88,6 +90,11 @@ export class FakeTransport implements HostTransport {
       typeof message === "string" ? message : JSON.stringify(message),
     ).length;
     this.#reader.receive(message);
+  }
+
+  /** The bridge's report that a stream failed, as its channel message would say. */
+  failStream(stream: StreamId, error: HostError): void {
+    this.#subs.fail(stream, error);
   }
 
   only<C extends FakeCall["call"]>(call: C): Extract<FakeCall, { call: C }>[] {
@@ -131,22 +138,15 @@ export class FakeTransport implements HostTransport {
     return { platform: this.host.platform ?? "linux" };
   }
 
-  subscribe(stream: StreamId, after: ViewPosition | null, listener: BatchListener): () => void {
-    return this.#subs.add(stream, after, listener);
+  subscribe(stream: StreamId, after: ViewPosition | null, subscriber: BatchSubscriber): () => void {
+    return this.#subs.add(stream, after, subscriber);
   }
 
   resubscribe(stream: StreamId, after: ViewPosition | null): void {
     this.#subs.resubscribe(stream, after);
   }
 
-  async ack(stream: StreamId, epoch: ViewEpoch, cursor: Cursor, frames: number): Promise<void> {
-    this.calls.push({ call: "ack", stream, epoch, cursor, frames });
-  }
-
-  frames(): number {
-    return this.#reader.frames;
-  }
-  onFrame(listener: () => void): () => void {
-    return this.#frameListeners.add(listener);
+  ack(stream: StreamId, position: ViewPosition): void {
+    this.calls.push({ call: "ack", stream, position });
   }
 }
