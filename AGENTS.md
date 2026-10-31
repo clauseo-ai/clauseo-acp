@@ -23,7 +23,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - `cargo xtask check --quick`: changed crates only. Run it before every report.
 - `cargo xtask check`: exactly CI's fast lane plus this OS's tests.
 - `cargo xtask buildtime`: build-loop timings against `budgets.toml`.
-- `cargo xtask setup`: installs the pinned cargo tools and checks gitleaks and lefthook; with `--binaries` it also installs the binaries `--only` names (repeatable; all if none).
+- `cargo xtask setup`: installs the pinned cargo tools and checks gitleaks and lefthook.
 - `pnpm -C ui install --frozen-lockfile`: frontend dependencies.
 - Run every xtask command from the repo root (why: the alias in `.cargo/config.toml`).
 
@@ -33,7 +33,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - `crates/acp`: the ACP client over the agent's pipes; agent traffic as events. Scenarios in `tests/scenarios/`.
 - `crates/desktop`: the Tauri shell. Blank for now.
 - `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `crates/fake_agent/scenarios/` (README.md).
-- `crates/host`: the session host thread: commands, turns, coalescing, subscriptions. See `docs/decisions/0011-host-turn-lifecycle.md`.
+- `crates/host`: the session host thread. See `docs/decisions/0011-host-turn-lifecycle.md`.
 - `crates/matters`: matter folders and their shadow git history (checkpoints, undo). See `docs/decisions/0007-matter-history-format.md`.
 - `crates/process`: starts an agent in its own process tree, shuts it down and kills the tree; the `Launcher` seam.
 - `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.
