@@ -28,16 +28,15 @@ fn closed_stdin_refuses_writes_and_flushes_and_ends_the_agents_input() {
         mut handle,
         ..
     } = spawn_in_tree(&spec, &SpawnOptions::new()).unwrap();
-    let (write, flush, again, (report, pumped)) = block_on(async {
+    let (report, pumped) = block_on(async {
         stdin.close().await.unwrap();
         let write = stdin.write_all(b"{}\n").await;
+        assert_eq!(write.unwrap_err().kind(), io::ErrorKind::BrokenPipe);
         let flush = stdin.flush().await;
-        let again = stdin.close().await;
-        (write, flush, again, join!(handle.exited(), stderr.drain()))
+        assert_eq!(flush.unwrap_err().kind(), io::ErrorKind::BrokenPipe);
+        stdin.close().await.unwrap();
+        join!(handle.exited(), stderr.drain())
     });
-    assert_eq!(write.unwrap_err().kind(), io::ErrorKind::BrokenPipe);
-    assert_eq!(flush.unwrap_err().kind(), io::ErrorKind::BrokenPipe);
-    again.unwrap();
     pumped.unwrap();
     // `idle` exits 0 only when its stdin ends.
     assert_eq!(report.code(), Some(0));

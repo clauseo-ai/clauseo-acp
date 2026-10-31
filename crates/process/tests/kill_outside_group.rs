@@ -28,7 +28,7 @@ const LEFT: &str = "agent: left its process group";
 /// returns at once.
 #[test]
 fn agent_leaves_its_group_and_holds() {
-    if self_agent::role().is_none() {
+    if !self_agent::is_agent() {
         return;
     }
     let group = getpgid(Some(getppid())).expect("the test's process group");
@@ -38,6 +38,17 @@ fn agent_leaves_its_group_and_holds() {
     stderr.flush().expect("flush stderr");
     drop(stderr);
     hold();
+}
+
+/// SIGKILLs the agent's pid when dropped, as when the test panics, unless the pid was taken out.
+struct KillOnDrop(Option<Pid>);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        if let Some(pid) = self.0 {
+            kill(pid, Signal::SIGKILL).unwrap_or_default();
+        }
+    }
 }
 
 fn hold() -> ! {
@@ -56,13 +67,10 @@ fn ladder_kills_an_agent_that_left_its_group() {
         stderr,
         handle,
         ..
-    } = self_agent::launch(
-        "agent_leaves_its_group_and_holds",
-        "leave",
-        &SpawnOptions::new(),
-    )
-    .unwrap();
-    let pid = Pid::from_raw(i32::try_from(handle.pid()).unwrap());
+    } = self_agent::launch("agent_leaves_its_group_and_holds", &SpawnOptions::new()).unwrap();
+    // Out of its group, the agent outlives the handle's tree kill; the guard ends it if the test
+    // fails before the ladder does.
+    let mut guard = KillOnDrop(Some(Pid::from_raw(i32::try_from(handle.pid()).unwrap())));
     let (tx, mut lines) = mpsc::unbounded();
     let pumped = stderr.lines(move |line| drop(tx.unbounded_send(line.to_owned())));
     let timer = ManualTimer::new();
@@ -94,9 +102,9 @@ fn ladder_kills_an_agent_that_left_its_group() {
         }
     });
     let ShutdownOutcome::Killed(report) = outcome else {
-        // The agent is in this test's group and alive: end it before failing.
-        kill(pid, Signal::SIGKILL).unwrap_or_default();
         panic!("expected Killed, got {outcome:?}");
     };
+    // It is dead and reaped, so its pid may be reused: the guard must not kill it.
+    guard.0 = None;
     assert_eq!(report.signal(), Some(Signal::SIGKILL as i32));
 }

@@ -244,21 +244,21 @@ fn lines_split_across_reads() {
 
 #[test]
 fn a_line_longer_than_16_kib_comes_in_pieces() {
-    let mut read = vec![b'a'; MAX_LINE * 2 + 5];
+    let mut read = vec![b'a'; 16_384 * 2 + 5];
     read.push(b'\n');
     let reads: Vec<&[u8]> = read.chunks(1000).collect();
     let lens: Vec<usize> = split(&reads).iter().map(String::len).collect();
-    assert_eq!(lens, [MAX_LINE, MAX_LINE, 5]);
+    assert_eq!(lens, [16_384, 16_384, 5]);
 }
 
 #[test]
 fn a_line_of_exactly_16_kib_comes_whole() {
-    let line = vec![b'a'; MAX_LINE];
+    let line = vec![b'a'; 16_384];
     let lens: Vec<usize> = split(&[&line, b"\nnext\n"])
         .iter()
         .map(String::len)
         .collect();
-    assert_eq!(lens, [MAX_LINE, 4]);
+    assert_eq!(lens, [16_384, 4]);
     assert_eq!(split(&[&line]).len(), 1);
 }
 
@@ -340,3 +340,5 @@ fn byte_before_last_reads_across_the_wrap() {
     assert_eq!(ring.byte_before_last(3), Some(b'x'));
     assert_eq!(ring.byte_before_last(RING), None);
 }
+
+mod tail_opening;
