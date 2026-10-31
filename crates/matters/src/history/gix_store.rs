@@ -287,7 +287,7 @@ impl HistoryStore for GixStore {
 
     fn changed_files(&self, a: Oid, b: Oid) -> Result<(Vec<TreeFile>, Vec<TreeFile>), Error> {
         let (mut old, mut new) = (Vec::new(), Vec::new());
-        tree::changed(&self.deflated, to_gix(a), to_gix(b), "", &mut old, &mut new)?;
+        tree::changed(&self.deflated, to_gix(a), to_gix(b), &mut old, &mut new)?;
         old.sort_unstable_by(|x, y| x.path.as_bytes().cmp(y.path.as_bytes()));
         new.sort_unstable_by(|x, y| x.path.as_bytes().cmp(y.path.as_bytes()));
         Ok((old, new))
