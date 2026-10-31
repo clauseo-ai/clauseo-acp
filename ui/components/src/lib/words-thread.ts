@@ -57,7 +57,7 @@ const HI = {
   "Ask the first question below. Each answer cites the paper and page it relies on.":
     "नीचे पहला प्रश्न पूछें। हर उत्तर उसी दस्तावेज़ और पृष्ठ का हवाला देता है जिस पर वह आधारित है।",
   "Nothing in this matter matches '{q}'.": "इस मामले में '{q}' से मेल खाता कुछ नहीं है।",
-  "Search covers the papers, the answers and History.": "खोज में दस्तावेज़, उत्तर और इतिहास शामिल हैं।",
+  "Search covers the papers, the answers and Versions.": "खोज में दस्तावेज़, उत्तर और संस्करण शामिल हैं।",
 } as const;
 
 /** Every new string of the live thread, in English. */

@@ -1,5 +1,5 @@
 // The room's states: asking before a change, what Clauseo changed, the empty states, an earlier exchange folded to its
-// line, and History opened from its button.
+// line, and Versions opened from its button.
 import { useRef, useState } from "react";
 import { ChangeNote } from "@clauseo/components/clauseo/change-note.tsx";
 import { EarlierExchange } from "@clauseo/components/clauseo/earlier.tsx";
@@ -35,13 +35,13 @@ function AskingPermission() {
   );
 }
 
-/** History, opened from its own button under a tone trigger, its right edge on the button's. */
+/** Versions, opened from its own button under a tone trigger, its right edge on the button's. */
 function HistoryFromButton() {
   const box = useRef<HTMLDivElement>(null);
   return (
     <div ref={box} className="flex justify-end">
       <Popover>
-        <PopoverTrigger render={<Button kind="tone" />}>History</PopoverTrigger>
+        <PopoverTrigger render={<Button kind="tone" />}>Versions</PopoverTrigger>
         <HistoryPanel rows={HISTORY} anchor={() => box.current} />
       </Popover>
     </div>

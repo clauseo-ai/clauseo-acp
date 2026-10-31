@@ -10,7 +10,7 @@ const HI = {
   "Questions go to this plan, which you already pay for.":
     "प्रश्न इसी प्लान पर जाते हैं, जिसका भुगतान आप पहले से करते हैं।",
   "Restore the {time} version of the petition?": "याचिका का {time} बजे वाला संस्करण पुनर्स्थापित करें?",
-  "The current version stays in History.": "मौजूदा संस्करण इतिहास में बना रहता है।",
+  "The current version stays in Versions.": "मौजूदा संस्करण संस्करणों की सूची में बना रहता है।",
   "Lease.docx changed after Clauseo's edit.": "Clauseo के संपादन के बाद Lease.docx में बदलाव हुए हैं।",
   Plan: "प्लान",
   "Warn before adding a network folder": "नेटवर्क फ़ोल्डर जोड़ने से पहले चेतावनी दें",

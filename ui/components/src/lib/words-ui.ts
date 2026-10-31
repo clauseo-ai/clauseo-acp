@@ -24,8 +24,8 @@ const HI = {
   Restore: "पुनर्स्थापित करें",
   Cancel: "रद्द करें",
   // undoing over a later edit
-  "Undo anyway puts back the version from before Clauseo's edit. The changes made since stay in History.":
-    "फिर भी पूर्ववत करने पर Clauseo के संपादन से पहले का संस्करण लौट आता है। उसके बाद के बदलाव इतिहास में बने रहते हैं।",
+  "Undo anyway puts back the version from before Clauseo's edit. The changes made since stay in Versions.":
+    "फिर भी पूर्ववत करने पर Clauseo के संपादन से पहले का संस्करण लौट आता है। उसके बाद के बदलाव संस्करणों में बने रहते हैं।",
   "Undo anyway": "फिर भी पूर्ववत करें",
   "Keep current": "मौजूदा संस्करण रखें",
   // settings, in sections

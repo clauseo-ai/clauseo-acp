@@ -122,7 +122,7 @@ function RailFinding() {
 export function ChromeSamples() {
   return (
     <>
-      <Sample name="RoomToolbar, Mac, plan and History" wide>
+      <Sample name="RoomToolbar, Mac, plan and Versions" wide>
         <MacToolbar />
       </Sample>
       <Sample name="RoomToolbar, Windows, Undo ready, a matter waits" wide>

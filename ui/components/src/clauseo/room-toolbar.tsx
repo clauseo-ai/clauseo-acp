@@ -11,6 +11,7 @@ import { cn } from "../lib/cn.ts";
 import { useDisplay, type Platform } from "../lib/display.ts";
 import { useWords } from "../lib/words.ts";
 import { rt } from "../lib/words-room.ts";
+import { useVersionWords } from "../lib/words-versions.ts";
 import { HistoryPanel } from "./history.tsx";
 import type { HistoryRow } from "./matter.ts";
 import { CaptionButtons, CornerLights } from "./caption.tsx";
@@ -74,17 +75,18 @@ export type RoomToolbarProps = {
 const planState = (left: number): PlanState =>
   left <= 0 ? "reached" : left <= 0.25 ? "close" : "plenty";
 
-/** The toolbar: the matter as the header, then search, History and Undo, and the plan. 64 px on the ground, and the
+/** The toolbar: the matter as the header, then search, Versions and Undo, and the plan. 64 px on the ground, and the
  * window's title bar on both platforms: its empty space drags the window (data-tauri-drag-region, which Tauri reads
  * on the element pressed, not its children). The corner lights lead it on the Mac; on Windows the plan stands left
  * of the caption buttons, which end it at the top right. */
 export function RoomToolbar(p: RoomToolbarProps) {
   const w = useWords();
+  const vw = useVersionWords();
   const display = useDisplay();
   const platform = p.platform ?? display.platform;
   const room = useRoom();
   const undo = useRef<HTMLButtonElement>(null);
-  // History opens under the pair, its right edge on the pair's: Undo's own group
+  // Versions opens under the pair, its right edge on the pair's: Undo's own group
   const pairOf = () => undo.current?.parentElement ?? null;
   const writing = p.writing === true;
   return (
@@ -170,7 +172,7 @@ export function RoomToolbar(p: RoomToolbarProps) {
           />
           <Popover.Root
             onOpenChange={(open, details) => {
-              // Undo keeps History up, so the row it takes out can be seen to go
+              // Undo keeps Versions up, so the row it takes out can be seen to go
               const t = details.event?.target;
               if (
                 !open &&
@@ -182,10 +184,10 @@ export function RoomToolbar(p: RoomToolbarProps) {
               }
             }}
           >
-            <ToolbarPair label={w.t("History and Undo")} className="room-pair">
+            <ToolbarPair label={w.t("Versions and Undo")} className="room-pair">
               <ToolbarPairButton render={<Popover.Trigger />}>
                 <IconHistory size={16} className="room-pair-icon" />
-                <span className="deva-nudge">{w.t("History")}</span>
+                <span className="deva-nudge">{vw.v("Versions")}</span>
               </ToolbarPairButton>
               {/* while Clauseo writes, Undo waits disabled and stays focusable, as Base UI's toolbar draws a disabled
                     button: aria-disabled and data-disabled. Set here rather than through `disabled`, which re-registers
@@ -254,7 +256,7 @@ function ToolbarPlan({ plan }: { plan: NonNullable<RoomToolbarProps["plan"]> }) 
         {meter}
         <span className="sr-only">{`${/[.\u0964]$/.test(plan.status) ? "" : "."} ${plan.valueText}${plan.cardLabel === undefined ? "" : `. ${plan.cardLabel}`}`}</span>
       </Popover.Trigger>
-      {/* over the work and the wall, as History stands: its right edge on the plan's, 8 px below */}
+      {/* over the work and the wall, as Versions stands: its right edge on the plan's, 8 px below */}
       <Popover.Portal>
         <Popover.Positioner
           side="bottom"
