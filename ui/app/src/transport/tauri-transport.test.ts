@@ -188,6 +188,27 @@ describe("TauriTransport", () => {
     expect(invoked.filter((i) => i.command === "subscribe")).toHaveLength(1);
   });
 
+  test("onDispatch hears each command as it is issued, before the host call, until unsubscribed", async () => {
+    const t = new TauriTransport({ warn: () => {} });
+    const heard: string[] = [];
+    const off = t.onDispatch((c) =>
+      heard.push(
+        `${c.command_id} before ${invoked.filter((i) => i.command === "dispatch").length} calls`,
+      ),
+    );
+    await t.dispatch({ command_id: "a", command: { cancel: { thread: "x" } } });
+    off();
+    await t.dispatch({ command_id: "b", command: { cancel: { thread: "x" } } });
+    expect(heard).toEqual(["a before 0 calls"]);
+    expect(invoked.filter((i) => i.command === "dispatch")).toHaveLength(2);
+  });
+
+  test("connected resolves once open_stream answered", async () => {
+    const t = new TauriTransport({ warn: () => {} });
+    await expect(t.connected()).resolves.toBeUndefined();
+    expect(invoked.some((i) => i.command === "open_stream")).toBe(true);
+  });
+
   test("outside Tauri the page transport reaches nothing", async () => {
     const t = pageTransport();
     expect(t.kind).toBe("null");

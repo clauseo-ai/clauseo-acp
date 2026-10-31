@@ -58,6 +58,7 @@ export class FakeTransport implements HostTransport {
   host: FakeHost;
   readonly #reader: ChannelReader;
   readonly #subs: Subscriptions;
+  readonly #dispatched = new Set<(command: CommandEnvelope) => void>();
 
   constructor(host: FakeHost = {}) {
     this.host = host;
@@ -101,7 +102,17 @@ export class FakeTransport implements HostTransport {
     return this.calls.filter((c): c is Extract<FakeCall, { call: C }> => c.call === call);
   }
 
+  connected(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  onDispatch(listener: (command: CommandEnvelope) => void): () => void {
+    this.#dispatched.add(listener);
+    return () => this.#dispatched.delete(listener);
+  }
+
   async dispatch(command: CommandEnvelope): Promise<CommandOutcome> {
+    for (const listener of this.#dispatched) listener(command);
     this.calls.push({ call: "dispatch", command });
     if (this.host.dispatch === undefined) return "done";
     try {

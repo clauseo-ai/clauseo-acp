@@ -1,12 +1,22 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
-import { autoplay, PROMPT, SCROLL_FRAMES, SCROLL_PX, type AutoplayDeps } from "./autoplay.ts";
+import {
+  ANSWER_LIMIT_MS,
+  autoplay,
+  PROMPT,
+  SCROLL_FRAMES,
+  SCROLL_PX,
+  verdict,
+  type AutoplayDeps,
+  type Progress,
+} from "./autoplay.ts";
 import type { ClauseoPerf, StreamSample } from "./env.ts";
 
 const SAMPLE: StreamSample = {
   first_token_on_screen_ms: 120,
   chunk_to_paint_ms: [20, 30],
+  chunk_to_paint_double_raf_ms: [36, 46],
   raf_timestamps_ms: [1, 17, 33],
   long_animation_frames_ms: null,
   react_commits_per_frame: 1,
@@ -21,8 +31,9 @@ const el = (html: string): HTMLElement => {
 };
 
 /** The internal window, as far as the autoplay reads it, answering the way the real one does. `permission: false`
- * leaves the permission card out, so the session never ends. */
-function fakeWindow(log: string[], { permission = true } = {}) {
+ * leaves the permission card out, so the session never ends; `clicksToAnswer` is how many clicks on "allow once" it
+ * takes to answer the card (Infinity: never). */
+function fakeWindow(log: string[], { permission = true, clicksToAnswer = 1 } = {}) {
   document.body.innerHTML = `
     <input data-testid="matter-name" value="Matter">
     <button data-testid="new-matter">Pick folder…</button>
@@ -52,8 +63,10 @@ function fakeWindow(log: string[], { permission = true } = {}) {
     const card = el(
       '<div data-testid="permission" data-state="pending"><button data-testid="permission-allow_once">Allow</button></div>',
     );
+    let clicks = 0;
     card.querySelector("button")!.addEventListener("click", () => {
       log.push("click allow_once");
+      if (++clicks < clicksToAnswer) return;
       card.setAttribute("data-state", "resolved");
       card.replaceChildren();
       scroller.append(el('<div data-testid="turn-stopped" data-stop-reason="end_turn"></div>'));
@@ -69,6 +82,7 @@ function deps(log: string[], overrides: Partial<AutoplayDeps> = {}) {
   let polls = 0;
   let memory = 40;
   let bytes = 1000;
+  let clock = 0;
   const perf: ClauseoPerf = {
     marks: () => ({ first_paint_ms: 50, interactive_ms: ++polls > 2 ? 300 : null }),
     startStream: () => void log.push("startStream"),
@@ -82,7 +96,10 @@ function deps(log: string[], overrides: Partial<AutoplayDeps> = {}) {
     perf,
     memory: async () => (log.push("memory"), (memory += 10)),
     finish: async (run, error) => void finished.push({ run, error }),
-    sleep: () => new Promise((done) => setTimeout(done, 0)),
+    answerBytes: () => 80_257,
+    now: () => clock,
+    // Each sleep moves the fake clock by its length and yields to the event loop.
+    sleep: (ms) => ((clock += ms), new Promise((done) => setTimeout(done, 0))),
     frame: () => Promise.resolve(),
     deadline: new Promise(() => {}),
     step: (name) => void log.push(`step ${name}`),
@@ -149,7 +166,6 @@ describe("autoplay", () => {
     const deadline = new Promise<never>((_, f) => (fail = f));
     const { d, finished } = deps(log, {
       deadline,
-      sleep: () => new Promise((done) => setTimeout(done, 0)),
       step: (name) => {
         log.push(name);
         if (name === "permission") setTimeout(() => fail(new Error("over 120000 ms")), 5);
@@ -160,7 +176,7 @@ describe("autoplay", () => {
       {
         run: null,
         error:
-          'autoplay, at step "permission": over 120000 ms; answer text so far 8 characters (+0 in the last 5000 ms), channel bytes +1000 in that time, stop reason none',
+          'autoplay, at step "permission": over 120000 ms. Verdict: the page stopped applying before the permission came: channel bytes still came but no answer text grew. Figures: answer text 80257 bytes (+0 in the last 5000 ms), channel bytes +1000 in that time, 1 answer message(s) on screen, permission card none, stop reason none',
       },
     ]);
     expect(log).not.toContain("stopStream");
@@ -177,9 +193,74 @@ describe("autoplay", () => {
       {
         run: null,
         error:
-          'autoplay, at step "idle memory": marks_memory failed; answer text so far 0 characters (+0 in the last 5000 ms), channel bytes +1000 in that time, stop reason none',
+          'autoplay, at step "idle memory": marks_memory failed. Verdict: the page stopped applying before the permission came: channel bytes still came but no answer text grew. Figures: answer text 80257 bytes (+0 in the last 5000 ms), channel bytes +1000 in that time, 0 answer message(s) on screen, permission card none, stop reason none',
       },
     ]);
+  });
+});
+
+describe("autoplay at the permission", () => {
+  test("a click that does not take is tried once more after the limit, and the play goes on", async () => {
+    const log: string[] = [];
+    fakeWindow(log, { clicksToAnswer: 2 });
+    const { d, finished } = deps(log);
+    await autoplay(d);
+    expect(log.filter((l) => l === "click allow_once")).toHaveLength(2);
+    expect(finished[0]!.error).toBeNull();
+  });
+
+  test("a click that never takes fails at step permission within two limits, saying so", async () => {
+    const log: string[] = [];
+    fakeWindow(log, { clicksToAnswer: Infinity });
+    let now = 0;
+    const { d, finished } = deps(log, {
+      now: () => now,
+      sleep: (ms) => ((now += ms), new Promise((done) => setTimeout(done, 0))),
+    });
+    await autoplay(d);
+    expect(log.filter((l) => l === "click allow_once")).toHaveLength(2);
+    const error = finished[0]!.error!;
+    expect(error).toMatch(
+      /^autoplay, at step "permission": "allow once" did not take: the card was still pending 10 s after each of two clicks\. Verdict: stopped at the permission: "allow once" did not take, the card is still pending\. Figures: .*permission card pending with its allow once button/,
+    );
+    // Two limits plus the progress window, not the session's whole timeout.
+    expect(now).toBeLessThan(2 * ANSWER_LIMIT_MS + 6_000 + 3_000);
+  });
+});
+
+describe("verdict", () => {
+  const p = (over: Partial<Progress>): Progress => ({
+    answerBytes: 40_146,
+    answerGrowth: 0,
+    channelGrowth: 0,
+    permission: { state: "resolved", allowOnce: false },
+    stopReason: null,
+    messages: 2,
+    ...over,
+  });
+
+  test("tells the three failures apart", () => {
+    expect(verdict(p({ permission: { state: "pending", allowOnce: true } }))).toBe(
+      'stopped at the permission: "allow once" did not take, the card is still pending',
+    );
+    expect(verdict(p({}))).toBe(
+      "stalled in the second message, after the permission was answered: no answer text and no channel bytes in 5 s",
+    );
+    expect(verdict(p({ answerGrowth: 120, channelGrowth: 900 }))).toBe(
+      "crawling: the answer text is still growing, only slowly",
+    );
+  });
+
+  test("bytes without text, a stall before the permission, and a turn that ended", () => {
+    expect(verdict(p({ channelGrowth: 500 }))).toBe(
+      "the page stopped applying in the second message, after the permission was answered: channel bytes still came but no answer text grew",
+    );
+    expect(
+      verdict(p({ permission: { state: "none", allowOnce: false }, channelGrowth: null })),
+    ).toBe("stalled before the permission came: no answer text and no channel bytes in 5 s");
+    expect(verdict(p({ stopReason: "end_turn" }))).toBe(
+      "the turn ended (end_turn) but the play did not see it finish",
+    );
   });
 });
 

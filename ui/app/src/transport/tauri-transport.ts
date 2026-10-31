@@ -71,6 +71,8 @@ export class TauriTransport implements HostTransport {
   /** Whether the message being read handed a batch to a subscriber. */
   #carried = false;
   #sendQueued = false;
+  /** `onDispatch` listeners; none in release. */
+  readonly #dispatched = new Set<(command: CommandEnvelope) => void>();
   #frameQueued = false;
 
   constructor(options: TauriOptions = {}) {
@@ -160,13 +162,19 @@ export class TauriTransport implements HostTransport {
     });
   }
 
-  /** Resolves once the window's channel is registered (`open_stream` answered); the perf build's `interactive` mark
-   * waits for it. A failed attempt rejects, and the next call tries again. */
+  /** Resolves once the window's channel is registered (`open_stream` answered). A failed attempt rejects, and the
+   * next call tries again. */
   connected(): Promise<void> {
     return this.#open();
   }
 
+  onDispatch(listener: (command: CommandEnvelope) => void): () => void {
+    this.#dispatched.add(listener);
+    return () => this.#dispatched.delete(listener);
+  }
+
   dispatch(command: CommandEnvelope): Promise<CommandOutcome> {
+    for (const listener of this.#dispatched) listener(command);
     return call(commands.dispatch(command));
   }
   query(query: HostQuery): Promise<QueryResult> {
