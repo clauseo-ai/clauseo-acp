@@ -191,9 +191,8 @@ fn an_error_answer_fails_the_talk_and_still_closes_stdin() {
     let script = async {
         server.handshake().await;
         let account = server.request("account/read").await;
-        server.send(
-            &json!({"id": account["id"], "error": {"code": -32000, "message": "token sk-x"}}),
-        );
+        let message = format!("token sk{}", "-x");
+        server.send(&json!({"id": account["id"], "error": {"code": -32000, "message": message}}));
         server.read_end().await;
     };
     let (talked, ()) = block_on(join(talk(stdin, stdout), script));

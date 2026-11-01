@@ -16,7 +16,7 @@ fn refused(setup: &Setup) -> String {
     let ReadOutcome::Failed(ReadFailure::LaunchFailed(message)) = outcome else {
         panic!("not a refusal: {outcome:?}");
     };
-    assert_eq!(launcher.specs(), [], "nothing is launched");
+    assert_eq!(launcher.launches(), 0, "nothing is launched");
     assert!(!setup.run_dir().exists(), "no run folder is made");
     message
 }
@@ -41,6 +41,19 @@ fn no_node_modules_above_args_0_is_refused() {
     setup.settings(&script);
     let message = refused(&setup);
     assert!(message.contains("no node_modules folder"), "{message}");
+}
+
+#[test]
+fn no_sdk_in_the_install_folder_is_refused_and_nothing_written() {
+    let setup = Setup::new();
+    setup.settings(&setup.script());
+    crate::write::remove_dir_all(&setup.install().join("node_modules/@anthropic-ai")).unwrap();
+    let message = refused(&setup);
+    assert!(
+        message.contains("no @anthropic-ai/claude-agent-sdk/package.json in"),
+        "{message}"
+    );
+    assert!(!setup.helper().exists(), "no helper is written");
 }
 
 #[test]
@@ -119,6 +132,6 @@ fn a_linked_run_folder_is_refused_and_its_target_untouched() {
         panic!("not a refusal: {outcome:?}");
     };
     assert!(message.contains("is a link"), "{message}");
-    assert_eq!(launcher.specs(), []);
+    assert_eq!(launcher.launches(), 0);
     assert_eq!(Setup::names(&elsewhere), Vec::<String>::new());
 }

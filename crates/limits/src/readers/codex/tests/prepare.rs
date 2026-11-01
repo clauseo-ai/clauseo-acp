@@ -115,6 +115,17 @@ fn a_missing_codex_home_is_signed_out_and_nothing_is_made() {
 }
 
 #[test]
+fn a_relative_codex_home_is_refused_and_nothing_is_made() {
+    let scratch = Scratch::new("codex-home-relative");
+    let launch = codex_launch(&scratch);
+    let run_dir = scratch.0.join("data/limits/run");
+    let relative = std::path::Path::new("data/codex-home");
+    let err = prepare(&launch, &run_dir, relative, std::iter::empty()).unwrap_err();
+    assert!(err.ends_with("is not an absolute path"), "{err}");
+    assert!(!run_dir.exists());
+}
+
+#[test]
 fn a_codex_home_that_is_a_file_or_a_link_is_refused() {
     let scratch = Scratch::new("codex-home-bad");
     let launch = codex_launch(&scratch);

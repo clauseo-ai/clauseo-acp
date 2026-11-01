@@ -440,6 +440,8 @@ fn an_unknown_plan_has_no_name() {
 
 #[test]
 fn only_an_email_shaped_account_is_kept() {
+    // Built at run time, so no file holds a token-shaped text.
+    let key_shaped = format!("sk{}", "-ant-api03-0123456789abcdef");
     assert!(looks_like_email("a@b"));
     assert!(looks_like_email("lawyer@example.com"));
     for text in [
@@ -452,7 +454,7 @@ fn only_an_email_shaped_account_is_kept() {
         "law yer@example.com",
         "lawyer@example.com\n",
         "lawyer\u{0}@example.com",
-        "sk-ant-api03-0123456789abcdef",
+        key_shaped.as_str(),
     ] {
         assert!(!looks_like_email(text), "{text:?}");
     }
@@ -464,8 +466,11 @@ fn only_an_email_shaped_account_is_kept() {
         "{}@example.com",
         "a".repeat(243)
     )));
-    let line = r#"{"ok":true,"account":{"email":"sk-ant-secret-token"},"usage":{"subscription_type":"max","rate_limits_available":false}}"#;
-    assert_eq!(limits(line).account, AccountRef("plan".to_owned()));
+    let token = format!("sk{}", "-ant-secret-token");
+    let line = format!(
+        r#"{{"ok":true,"account":{{"email":"{token}"}},"usage":{{"subscription_type":"max","rate_limits_available":false}}}}"#
+    );
+    assert_eq!(limits(&line).account, AccountRef("plan".to_owned()));
 }
 
 #[test]

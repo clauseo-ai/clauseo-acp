@@ -48,8 +48,11 @@ pub(crate) enum Ran<R> {
 }
 
 /// Launches `spec` and runs `talk` on its stdin and stdout, beside the stderr pump and the wait
-/// for its exit, all racing `timer.after(limit)`. The talk returns its answer and stdout, which
-/// is then read to its end and dropped, so the program never blocks on a full pipe.
+/// for its exit, all racing `timer.after(limit)`. The talk returns its answer and the stdout it
+/// gives back, which is then read to its end and dropped, so the program never blocks on a full
+/// pipe. Claude's talk gives back the real stdout. Codex's gives back `io::empty()`: the
+/// app-server client's driver owns the real stdout and drops it when the talk ends, which closes
+/// it undrained. That is harmless, since the app-server gets `EPIPE` as it exits.
 ///
 /// The stderr tail is read once the exit is in and both pipes have ended (`process`'s order), so
 /// it holds the last lines. Once `answered` says the talk has its answer, the exit and the pipe

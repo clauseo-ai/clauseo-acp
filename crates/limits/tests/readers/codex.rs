@@ -53,7 +53,6 @@ fn a_crash_reports_its_code_and_the_redacted_tail() {
         stderr_tail.contains("codex app-server: giving up"),
         "{stderr_tail}"
     );
-    #[cfg(unix)]
     launcher.wait_stdout_closed();
 }
 
@@ -83,7 +82,7 @@ fn a_missing_codex_home_is_signed_out_without_a_launch() {
     crate::write::remove_dir_all(&setup.codex_home()).unwrap();
     let (outcome, launcher) = read_once(&setup, Play::Scenario("codex-silent"));
     assert_eq!(outcome, ReadOutcome::SignedOut);
-    assert_eq!(launcher.specs(), []);
+    assert_eq!(launcher.launches(), 0);
     assert!(!setup.codex_home().exists(), "the home is never made");
 }
 
@@ -100,7 +99,7 @@ fn a_linked_codex_home_is_refused_without_a_launch() {
         panic!("not a refusal: {outcome:?}");
     };
     assert!(message.contains("is a link"), "{message}");
-    assert_eq!(launcher.specs(), []);
+    assert_eq!(launcher.launches(), 0);
 }
 
 #[test]
@@ -126,8 +125,7 @@ fn the_deadline_is_10_seconds_and_kills_the_tree() {
         assert!(timer.0.fire());
     }));
     assert_eq!(outcome, ReadOutcome::Failed(ReadFailure::TimedOut));
-    assert_eq!(launcher.specs().len(), 1);
-    #[cfg(unix)]
+    assert_eq!(launcher.launches(), 1);
     launcher.wait_stdout_closed();
 }
 
@@ -157,9 +155,10 @@ fn the_spec_runs_codex_js_app_server_with_codex_home_forced() {
             &setup.codex_home().into_os_string()
         )]
     );
-    assert_eq!(
-        spec.env().get(std::ffi::OsStr::new("OPENAI_API_KEY")),
-        Some(&OsString::from(FAKE_OPENAI_KEY))
+    assert!(
+        spec.env().get(std::ffi::OsStr::new("OPENAI_API_KEY"))
+            == Some(&OsString::from(FAKE_OPENAI_KEY)),
+        "OPENAI_API_KEY is not the settings value"
     );
     assert_eq!(
         Setup::names(&setup.codex_home()),
@@ -200,7 +199,7 @@ fn no_codex_js_is_refused_and_nothing_launched() {
         message.contains("no @openai/codex/bin/codex.js"),
         "{message}"
     );
-    assert_eq!(launcher.specs(), []);
+    assert_eq!(launcher.launches(), 0);
     assert!(!setup.run_dir().exists());
 }
 
@@ -223,7 +222,7 @@ fn a_linked_openai_codex_package_is_refused() {
         message.contains("is a link inside the install folder"),
         "{message}"
     );
-    assert_eq!(launcher.specs(), []);
+    assert_eq!(launcher.launches(), 0);
 }
 
 #[test]
@@ -237,5 +236,5 @@ fn no_codex_entry_is_refused() {
             "no settings entry for codex-acp".to_owned()
         ))
     );
-    assert_eq!(launcher.specs(), []);
+    assert_eq!(launcher.launches(), 0);
 }

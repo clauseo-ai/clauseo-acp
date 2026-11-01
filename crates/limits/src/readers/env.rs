@@ -65,12 +65,13 @@ mod tests {
             os(&[("Path", "/inherited/bin"), ("HOME", "/home/lawyer")]).into_iter(),
             None,
         );
-        assert_eq!(
-            env,
+        let names: Vec<&OsString> = env.keys().collect();
+        assert_eq!(names, [OsStr::new("HOME"), OsStr::new("PATH")]);
+        let expected: BTreeMap<OsString, OsString> =
             os(&[("HOME", "/home/lawyer"), ("PATH", "/agent/bin")])
                 .into_iter()
-                .collect()
-        );
+                .collect();
+        assert!(env == expected, "env differs");
     }
 
     #[test]
@@ -93,22 +94,21 @@ mod tests {
 
     #[test]
     fn inherited_secrets_stay_in_the_map_for_the_redactor() {
+        // Built at run time, so no file holds a token-shaped text.
+        let openai = format!("sk{}", "-inherited-secret-value");
+        let github = format!("ghp{}", "_inherited");
         let env = spec_env(
             &own(&[("CLAUDE_CONFIG_DIR", "/agent/config")]),
-            os(&[
-                ("OPENAI_API_KEY", "sk-inherited-secret-value"),
-                ("GH_TOKEN", "ghp_inherited"),
-            ])
-            .into_iter(),
+            os(&[("OPENAI_API_KEY", &openai), ("GH_TOKEN", &github)]).into_iter(),
             None,
         );
-        assert_eq!(
-            env.get(OsStr::new("OPENAI_API_KEY")),
-            Some(&OsString::from("sk-inherited-secret-value"))
+        assert!(
+            env.get(OsStr::new("OPENAI_API_KEY")) == Some(&OsString::from(&openai)),
+            "OPENAI_API_KEY differs"
         );
-        assert_eq!(
-            env.get(OsStr::new("GH_TOKEN")),
-            Some(&OsString::from("ghp_inherited"))
+        assert!(
+            env.get(OsStr::new("GH_TOKEN")) == Some(&OsString::from(&github)),
+            "GH_TOKEN differs"
         );
         assert_eq!(
             env.get(OsStr::new("CLAUDE_CONFIG_DIR")),

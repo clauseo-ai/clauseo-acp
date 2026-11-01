@@ -4,10 +4,11 @@
 //! # Owns
 //!
 //! - Plan usage readers: the Claude usage helper (`helper/claude-usage.mjs`, embedded and written
-//!   into claude-agent-acp's install folder) and the Codex reader (`codex app-server` through
-//!   `codex_appserver`'s client). Each runs the vendor's binary with the agent's settings
-//!   environment, so the vendor reads its own login. Clauseo reads no token and calls no usage
-//!   endpoint.
+//!   into claude-agent-acp's install folder, which must hold the Claude Agent SDK as a regular
+//!   `node_modules/@anthropic-ai/claude-agent-sdk/package.json`) and the Codex reader
+//!   (`codex app-server` through `codex_appserver`'s client). Each runs the vendor's binary with
+//!   the agent's settings environment, so the vendor reads its own login. Clauseo reads no token
+//!   and calls no usage endpoint.
 //! - The limits model: [`Limits`], a pure state machine with no I/O and no clock. It takes
 //!   inputs and `now`, and answers with [`Action`]s: which reads to start, what to persist and
 //!   publish.
@@ -16,12 +17,12 @@
 //!
 //! # Interface
 //!
-//! - [`Limits`]: `new`, `input`, `view`, `next_deadline`, `next_read_at`, `at_limit`; with
-//!   [`Input`], [`Action`], [`LiveSignal`], [`LiveStatus`] and [`LimitHit`].
+//! - [`Limits`]: `new`, `input`, `view`, `next_deadline`, `next_read_at`,
+//!   `at_limit(agent, now)`; with [`Input`], [`Action`], [`LiveSignal`], [`LiveStatus`] and
+//!   [`LimitHit`].
 //! - [`ReadLimits`], [`ReadOutcome`], [`ReadFailure`], and [`ProcessReaders`], which reads over a
-//!   `process::Launcher` and a `process::Timer`.
-//! - [`Error`]: why a reader could not be set up (a refused settings path, a failed file step);
-//!   a read reports it as `ReadFailure::LaunchFailed` with its text.
+//!   `process::Launcher` and a `process::Timer`. A refused settings path or a failed file step
+//!   comes back as `ReadFailure::LaunchFailed` with its text.
 //!
 //! # Invariants
 //!
@@ -53,7 +54,6 @@ mod view;
 mod words;
 mod write;
 
-pub use error::Error;
 pub use model::{LimitHit, LiveSignal, LiveStatus};
 pub use policy::{Action, Input, Limits};
 pub use readers::{ProcessReaders, ReadFailure, ReadLimits, ReadOutcome};

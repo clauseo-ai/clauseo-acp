@@ -15,7 +15,7 @@ use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::Error;
+use crate::error::Error;
 
 /// Numbers the temp files of one process, so two calls never pick the same name.
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
@@ -127,7 +127,7 @@ impl Drop for Temp {
 pub(crate) mod scratch {
     //! A test's own folder, and the file changes the unit tests make in it.
 
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::sync::atomic::Ordering;
 
     use super::NEXT_TEMP;
@@ -161,7 +161,7 @@ pub(crate) mod scratch {
 
         /// A link at `rel` to `target` (Unix).
         #[cfg(unix)]
-        pub(crate) fn link(&self, rel: &str, target: &Path) -> PathBuf {
+        pub(crate) fn link(&self, rel: &str, target: &std::path::Path) -> PathBuf {
             let path = self.0.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::os::unix::fs::symlink(target, &path).unwrap();
