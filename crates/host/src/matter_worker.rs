@@ -14,8 +14,8 @@ use clauseo_matters::{
     Retention, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone,
 };
 use clauseo_protocol::{
-    CheckpointId, FileChange, FileDecision, ImportSummary, MatterId, MatterPath, ThreadId,
-    Timestamp, TurnId,
+    CheckpointId, CheckpointKind, FileChange, FileDecision, ImportSummary, MatterId, MatterPath,
+    ThreadId, Timestamp, TurnId,
 };
 
 use crate::error::Error;
@@ -70,6 +70,15 @@ pub(crate) enum MatterJob {
         tool_paths: BTreeSet<MatterPath>,
         before: Option<CheckpointId>,
     },
+    /// The start-up repair of a turn the log left open, answered as [`MatterReply::AfterTurn`]:
+    /// the turn's own after-turn checkpoint when R8's timeline has one, `before` when another
+    /// writer checkpointed since the turn started, a new after-turn checkpoint otherwise
+    /// (see [`repair`]).
+    Repair {
+        meta: TurnMeta,
+        tool_paths: BTreeSet<MatterPath>,
+        before: Option<CheckpointId>,
+    },
     /// Undo one step.
     Undo(UndoJob),
 }
@@ -115,6 +124,10 @@ pub(crate) struct Reused {
     /// For an after-turn checkpoint: the changes from the turn's before-turn checkpoint to it,
     /// empty when they are the same checkpoint or the before id is not known.
     pub(crate) changes: Vec<FileChange>,
+    /// The id is the turn's own after-turn checkpoint, which the start-up repair found on the
+    /// timeline: `changes` are the turn's even when the matter's log already records the id
+    /// (another turn's start reused it), since the commit that would have logged them failed.
+    pub(crate) own: bool,
 }
 
 /// What the worker holds.
@@ -223,6 +236,13 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             let checkpoint = matter.after_turn(&meta, &tool_paths)?;
             turn_checkpoint(matter, checkpoint, before)
         })),
+        MatterJob::Repair {
+            meta,
+            tool_paths,
+            before,
+        } => MatterReply::AfterTurn(
+            open(settings, slot).and_then(|matter| repair(matter, &meta, &tool_paths, before)),
+        ),
         MatterJob::Undo(job) => MatterReply::Undone(open(settings, slot).and_then(|matter| {
             let request = UndoRequest {
                 before: job.before,
@@ -264,8 +284,80 @@ fn turn_checkpoint(
     };
     Ok(TurnCheckpoint {
         checkpoint,
-        reused: Some(Reused { entry, changes }),
+        reused: Some(Reused {
+            entry,
+            changes,
+            own: false,
+        }),
     })
+}
+
+/// The checkpoint that ends an interrupted turn at start-up, `before` being its before-turn
+/// checkpoint.
+///
+/// - The timeline holds the turn's own after-turn checkpoint (matched by thread and turn): its
+///   end ran and was never logged (it failed twice). That checkpoint is taken, with the changes
+///   from `before` to it; the folder is not looked at, since another turn may have changed it
+///   after the writer was freed.
+/// - Otherwise, when R8's last checkpoint is not `before`: while a turn runs it holds the
+///   matter's writer, so no other checkpoint is taken until its end frees it. A later
+///   checkpoint means the end ran, and having left no after-turn checkpoint of its own, R8
+///   reused `before` (the turn changed nothing) or the checkpoint failed (then the next
+///   writer's before-turn checkpoint logged the folder's changes as outside edits). The step is
+///   empty: `before` is taken, never the later checkpoint, which is another writer's.
+/// - Otherwise the crash came before the after-turn checkpoint: one is taken now, as at step 7.
+fn repair(
+    matter: &mut Matter,
+    meta: &TurnMeta,
+    tool_paths: &BTreeSet<MatterPath>,
+    before: Option<CheckpointId>,
+) -> Result<TurnCheckpoint, Error> {
+    let timeline = matter.timeline();
+    let own = timeline
+        .iter()
+        .rev()
+        .find(|entry| {
+            entry.kind == CheckpointKind::AfterTurn
+                && entry.thread == Some(meta.thread)
+                && entry.turn == Some(meta.turn)
+        })
+        .copied();
+    if let Some(entry) = own {
+        let changes = match before {
+            Some(before) if before != entry.id => matter.changes_between(before, entry.id)?,
+            Some(_) | None => Vec::new(),
+        };
+        return Ok(reused(entry.id, Some(entry), changes, true));
+    }
+    if let Some(before) = before
+        && matter.last_checkpoint() != Some(before)
+        && let Some(entry) = timeline.iter().rev().find(|entry| entry.id == before)
+    {
+        return Ok(reused(before, Some(*entry), Vec::new(), false));
+    }
+    let checkpoint = matter.after_turn(meta, tool_paths)?;
+    turn_checkpoint(matter, checkpoint, before)
+}
+
+/// A checkpoint the repair takes from the timeline, answered as R8 answers a reused id.
+fn reused(
+    id: CheckpointId,
+    entry: Option<TimelineEntry>,
+    changes: Vec<FileChange>,
+    own: bool,
+) -> TurnCheckpoint {
+    TurnCheckpoint {
+        checkpoint: Checkpoint {
+            outcome: CheckpointOutcome::Reused(id),
+            changes: Vec::new(),
+            skipped: Vec::new(),
+        },
+        reused: Some(Reused {
+            entry,
+            changes,
+            own,
+        }),
+    }
 }
 
 fn import(

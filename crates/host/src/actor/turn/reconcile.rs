@@ -3,7 +3,9 @@
 //! after-turn checkpoint and ends `TurnFailed { thread.interrupted }` (a checkpoint R8 made
 //! whose record the log lost is recorded with the turn's changes, `known.rs`); a turn that never
 //! started stays queued, held behind its own thread; an attached session is detached. A turn
-//! with a `TurnEnded` is never touched, so each repair happens once.
+//! whose end ran but was never logged takes its own after-turn checkpoint from R8's timeline,
+//! never one another thread's turn took after the writer was freed (`MatterJob::Repair`). A
+//! turn with a `TurnEnded` is never touched, so each repair happens once.
 
 use std::collections::BTreeSet;
 
@@ -251,7 +253,7 @@ fn after_turn(
             kind: JobKind::Reconcile(Box::new(Repair { turn, pending })),
         };
         let before = checkpoint_before(log, turn);
-        let after = MatterJob::AfterTurn {
+        let after = MatterJob::Repair {
             meta,
             tool_paths,
             before,
