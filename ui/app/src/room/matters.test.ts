@@ -37,7 +37,7 @@ async function rig(host: FakeHost) {
     return () => {};
   };
   const store = createViewStore(transport, { batch: () => manual });
-  const matters = new Matters(transport, store);
+  const matters = new Matters(transport, store, manual);
   stops.push(matters.start());
   const settle = async () => {
     for (let i = 0; i < 4; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
@@ -62,7 +62,7 @@ function nextHost(list: () => MatterInfo[], command?: FakeNextHost["command"]): 
         if (query === "list_matters") return { matters: list() };
         if (query === "get_settings") return { settings: { ui: DEFAULT_UI, locked: [] } };
         if (query === "get_default_location")
-          return { default_location: { display: "~/Documents/Clauseo" } };
+          return { default_location: { display: "Documents/Clauseo" } };
         throw new Error(`not scripted: ${JSON.stringify(query)}`);
       },
       ...(command === undefined ? {} : { command }),
@@ -213,17 +213,130 @@ test("with a NextHost: the last opened reopens, opening sends open_matter, the o
 });
 
 test("matters_changed updates a row, and matters_removed takes it off", async () => {
-  const { matters, transport } = await rig(nextHost(() => [info(A), info(B)]));
+  const { matters, transport, settle } = await rig(nextHost(() => [info(A), info(B)]));
   expect(matters.view().status.has(A.matter)).toBe(false);
   transport.appEvent({
     matters_changed: {
       matters: [info(A, { status: "needs_answer", client: "Asha Rao" }), info(B)],
     },
   });
+  await settle();
   expect(matters.view().status.get(A.matter)).toEqual({ state: "question" });
   expect(matters.view().matters.find((m) => m.matter === A.matter)?.client).toBe("Asha Rao");
   transport.appEvent({ matters_removed: { matters: [A.matter] } });
+  await settle();
   expect(matters.view().matters.map((m) => m.matter)).toEqual([B.matter]);
+});
+
+test("app events are applied once a frame: a burst of them is one view change", async () => {
+  const { matters, transport, settle } = await rig(nextHost(() => [info(A), info(B)]));
+  let changes = 0;
+  const stop = matters.subscribe(() => (changes += 1));
+  transport.appEvent({ matters_changed: { matters: [info(A, { status: "working" }), info(B)] } });
+  transport.appEvent({ matters_changed: { matters: [info(A), info(B, { status: "ready" })] } });
+  transport.appEvent({ matters_removed: { matters: [A.matter] } });
+  // nothing applies before the frame
+  expect(changes).toBe(0);
+  await settle();
+  expect(changes).toBe(1);
+  expect(matters.view().matters.map((m) => m.matter)).toEqual([B.matter]);
+  expect(matters.view().status.get(B.matter)).toEqual({ state: "ready" });
+  stop();
+});
+
+/** A NextHost whose list_matters answers wait until the test answers them, in any order. */
+function heldLists() {
+  const asked: ((list: MatterInfo[]) => void)[] = [];
+  const host: FakeHost = {
+    next: {
+      query: (query) => {
+        if (query !== "list_matters") throw new Error(`not scripted: ${JSON.stringify(query)}`);
+        return new Promise((resolve) => asked.push((matters) => resolve({ matters })));
+      },
+    },
+  };
+  return { host, asked };
+}
+
+test("an older list_matters answer never overwrites a newer one, nor an app event heard after it was asked", async () => {
+  const { host, asked } = heldLists();
+  const { matters, transport, settle } = await rig(host);
+  // the first read is on its way; an app event arrives first
+  transport.appEvent({ matters_changed: { matters: [info(A), info(B)] } });
+  await settle();
+  expect(matters.view().matters.map((m) => m.matter)).toEqual([A.matter, B.matter]);
+  asked[0]?.([info(A)]);
+  await settle();
+  expect(matters.view().matters.map((m) => m.matter)).toEqual([A.matter, B.matter]);
+  // two reads answered out of order: the later read's list stands
+  const first = matters.refresh();
+  const second = matters.refresh();
+  await settle();
+  asked[2]?.([info(A), info(B), info(SCRATCH)]);
+  await second;
+  asked[1]?.([info(A)]);
+  await first;
+  expect(matters.view().matters.map((m) => m.matter)).toEqual([A.matter, B.matter, SCRATCH.matter]);
+});
+
+test("create ends with the new matter shown even when the list read after fails, and with H5 tells the host it is open", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const made = uuid(3, 2);
+  let reads = 0;
+  const host: FakeHost = {
+    next: {
+      query: (query) => {
+        if (query !== "list_matters") throw new Error("not scripted");
+        reads += 1;
+        if (reads > 1) throw new Error("the host is busy");
+        return { matters: [info(A)] };
+      },
+      command: (command) =>
+        "create_matter" in command ? { matter_created: { matter: made } } : undefined,
+    },
+  };
+  const { matters, transport } = await rig(host);
+  await matters.create("New v. Old", "default_location");
+  expect(matters.view().open?.matter).toBe(made);
+  expect(matters.view().open?.name).toBe("New v. Old");
+  expect(transport.only("next_command").map((c) => c.command)).toContainEqual({
+    open_matter: { matter: made },
+  });
+  warn.mockRestore();
+});
+
+test("create, with H5: open_matter goes out even when the list read after already opened the new matter", async () => {
+  const made = uuid(3, 2);
+  let list: MatterInfo[] = [];
+  const host = nextHost(
+    () => list,
+    (command) => {
+      if (!("create_matter" in command)) return undefined;
+      list = [info({ matter: made, name: "New", kind: "folder" })];
+      return { matter_created: { matter: made } };
+    },
+  );
+  const { matters, transport } = await rig(host);
+  expect(matters.view().open).toBeNull();
+  // with no matter open, the new list opens the new matter itself, before create does
+  await matters.create("New", "default_location");
+  expect(matters.view().open?.matter).toBe(made);
+  expect(transport.only("next_command").map((c) => c.command)).toContainEqual({
+    open_matter: { matter: made },
+  });
+});
+
+test("H8 before H5: with only the papers part the list is today's list_matters, with no details and no app events", async () => {
+  const { matters, transport } = await rig({
+    ...today([A, B]),
+    next: { parts: ["papers"], query: () => ({ matters: [] }) },
+  });
+  expect(matters.view().detailed).toBe(false);
+  expect(matters.view().matters.map((m) => m.matter)).toEqual([A.matter, B.matter]);
+  expect(matters.next.papers).not.toBeNull();
+  expect(matters.next.matters).toBeNull();
+  expect(transport.only("query")).toEqual([{ call: "query", query: "list_matters" }]);
+  expect(transport.only("next_query")).toEqual([]);
 });
 
 test("pin, remove and locate send H5's and H3's commands; a cancelled locate sends nothing", async () => {
@@ -245,7 +358,7 @@ test("pin, remove and locate send H5's and H3's commands; a cancelled locate sen
   await matters.locate(B.matter);
   expect(transport.only("pick_folder")).toHaveLength(1);
   expect(commands.some((c) => "relocate_matter" in c)).toBe(false);
-  transport.host.pickFolder = () => ({ folder: "ref-1", display: "~/Documents/Sharma" });
+  transport.host.pickFolder = () => ({ folder: "ref-1", display: "Documents/Sharma" });
   await matters.locate(B.matter);
   expect(commands.at(-1)).toEqual({ relocate_matter: { matter: B.matter, folder: "ref-1" } });
   // removing the open matter opens the next one

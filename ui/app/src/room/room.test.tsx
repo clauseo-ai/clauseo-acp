@@ -5,6 +5,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
+import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { rt } from "@clauseo/components/lib/words-room.ts";
 import { t } from "@clauseo/components/lib/words.ts";
 import { vt } from "@clauseo/components/lib/words-versions.ts";
@@ -13,7 +14,7 @@ import type { MatterSummary } from "../transport/protocol.ts";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
 import { uuid } from "../testing/stream-script.ts";
 import { detailed, fakeNext } from "./fake-next.ts";
-import type { PaperSummary, UiSettings } from "./host-next.ts";
+import type { MatterInfo, PaperSummary, UiSettings } from "./host-next.ts";
 import { Room } from "./room.tsx";
 import { connectRoom } from "./start.ts";
 
@@ -97,10 +98,18 @@ test("while list_matters is on its way, and after it fails, the toolbar has no h
     root = createRoot(host);
     await act(async () => root?.render(<Room transport={failing} />));
     expect(host.querySelector("h1")).toBeNull();
+    // the rail while the list is on its way: no "No matters yet", no scratch row that opens nothing
+    const rail = () => host?.querySelector("nav.room-rail");
+    expect(rail()?.textContent).not.toContain("No matters yet");
+    expect(rail()?.querySelector("[data-kind=scratch]")).toBeNull();
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("list_matters failed"));
     expect(host.querySelector("h1")).toBeNull();
     expect(host.querySelector("header.room-top .room-rail-toggle")).not.toBeNull();
+    // and after it failed: still neither, nor a Find field with nothing to find
+    expect(rail()?.textContent).not.toContain("No matters yet");
+    expect(rail()?.querySelector("[data-kind=scratch]")).toBeNull();
+    expect(rail()?.querySelector("[data-testid=find]")).toBeNull();
   } finally {
     warn.mockRestore();
   }
@@ -196,3 +205,122 @@ for (const lang of ["en", "hi"] as const) {
     host = null;
   });
 }
+
+/** A NextHost with these matters, details and all. */
+const withDetails = (matters: MatterInfo[]) =>
+  new FakeTransport({ next: fakeNext({ matters: () => matters }) });
+
+test("Matters carries the court-yellow dot while another matter waits with a question or for permission, never for the limit", async () => {
+  const dot = () =>
+    host?.querySelector("[data-testid=rail-toggle]")?.classList.contains("room-rail-waits");
+  const m = (n: number, status: MatterInfo["status"], over: Partial<MatterInfo> = {}) =>
+    detailed({ matter: uuid(n, 2), name: `Matter ${n}`, kind: "folder" }, { status, ...over });
+  for (const [status, waits] of [
+    ["needs_answer", true],
+    ["needs_permission", true],
+    [{ paused_at_limit: {} }, false],
+    ["working", false],
+  ] as const) {
+    await mount(withDetails([m(1, "idle", { last_opened: 10 }), m(2, status)]));
+    expect(dot(), JSON.stringify(status)).toBe(waits);
+    await act(async () => root?.unmount());
+    host?.remove();
+  }
+  // the open matter's own question is in view: no dot for it
+  await mount(withDetails([m(1, "needs_answer", { last_opened: 10 }), m(2, "idle")]));
+  expect(dot()).toBe(false);
+});
+
+test("the open scratch matter says its line under its title, in the design's words", async () => {
+  const scratch: MatterSummary = { matter: uuid(9, 2), name: "Scratch", kind: "scratch" };
+  for (const language of ["en", "hi"] as const) {
+    await mount(fake([NEWER, scratch]), { language });
+    expect(host?.querySelector(".room-next")?.textContent).toBe("");
+    await act(async () => host?.querySelector<HTMLElement>("[data-kind=scratch]")?.click());
+    expect(host?.querySelector("header.room-top")?.textContent).toContain(
+      mt(language, "Quick questions, kept like any matter"),
+    );
+    await act(async () => root?.unmount());
+    host?.remove();
+  }
+});
+
+test("H8 before H5: with only the papers part the wall has its tiles and the rail today's list, with no details", async () => {
+  const transport = new FakeTransport({
+    query: (query) => {
+      if (query === "list_matters") return { matters: [NEWER, OLDER] };
+      throw new Error("not scripted");
+    },
+    next: {
+      ...fakeNext({ matters: () => [], papers: [paper(1, "Reply.docx")] }),
+      parts: ["papers"],
+    },
+  });
+  await mount(transport);
+  expect(title()?.textContent).toBe(NEWER.name);
+  expect(host?.querySelectorAll("[data-testid=matter-row]")).toHaveLength(2);
+  expect([...(pane()?.querySelectorAll("li.tile") ?? [])].map((t) => t.textContent)).toEqual([
+    "Reply.docx",
+  ]);
+  expect(transport.only("next_query").map((q) => q.query)).toEqual([
+    { list_papers: { matter: NEWER.matter } },
+  ]);
+  // find names only: no client to search without H5
+  expect(host?.querySelector("[data-testid=find]")?.closest("label")?.textContent).toContain(
+    mt("en", "Find a matter by its name"),
+  );
+});
+
+test("the keyboard at the folded width: a row opened folds the rail and focus goes back to Matters; Escape does too", async () => {
+  await mount(fake([NEWER, OLDER]));
+  const toggle = () => host?.querySelector<HTMLButtonElement>("[data-testid=rail-toggle]");
+  const rail = () => host?.querySelector("nav.room-rail");
+  const row = (name: string) =>
+    [...(rail()?.querySelectorAll<HTMLButtonElement>("[data-testid=matter-row]") ?? [])].find((r) =>
+      r.textContent?.includes(name),
+    );
+  await act(async () => toggle()?.click());
+  expect(rail()?.hasAttribute("data-open")).toBe(true);
+  // focus on the row, then Enter: happy-dom has no Tab order or key activation, so the row is focused and clicked as
+  // Enter clicks a focused button
+  await act(async () => row(OLDER.name)?.focus());
+  expect(document.activeElement).toBe(row(OLDER.name));
+  await act(async () => {
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    (document.activeElement as HTMLElement | null)?.click();
+  });
+  expect(title()?.textContent).toBe(OLDER.name);
+  expect(rail()?.hasAttribute("data-open")).toBe(false);
+  expect(document.activeElement).toBe(toggle());
+  // opened again, Escape on a row folds it and focus goes back to Matters
+  await act(async () => toggle()?.click());
+  await act(async () => row(NEWER.name)?.focus());
+  await act(async () =>
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    ),
+  );
+  expect(rail()?.hasAttribute("data-open")).toBe(false);
+  expect(document.activeElement).toBe(toggle());
+  // Escape in Find with words clears them and keeps focus there, with the rail open; on the empty field it folds
+  await act(async () => toggle()?.click());
+  const find = host?.querySelector<HTMLInputElement>("[data-testid=find]");
+  await act(async () => find?.focus());
+  await act(async () => {
+    Reflect.set(HTMLInputElement.prototype, "value", "acme", find);
+    find?.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () =>
+    find?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
+  );
+  expect(find?.value).toBe("");
+  expect(document.activeElement).toBe(find);
+  expect(rail()?.hasAttribute("data-open")).toBe(true);
+  await act(async () =>
+    find?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
+  );
+  expect(rail()?.hasAttribute("data-open")).toBe(false);
+  expect(document.activeElement).toBe(toggle());
+});

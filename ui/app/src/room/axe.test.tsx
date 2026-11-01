@@ -114,7 +114,7 @@ for (const theme of THEMES) {
               expect(document.querySelector('[role="dialog"]'), name).not.toBeNull();
             }
             if (scene.matters === "states")
-              expect(host.querySelectorAll('[data-testid="matter-row"]'), name).toHaveLength(11);
+              expect(host.querySelectorAll('[data-testid="matter-row"]'), name).toHaveLength(13);
             // the display the case names is the one on <html>
             const html = document.documentElement;
             expect(html.dataset["theme"]).toBe(theme === "dark" ? "night" : "day");

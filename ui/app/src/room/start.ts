@@ -34,7 +34,7 @@ export function connectRoom(
   const store = createDisplayStore({
     storage: pageStorage(),
     matchMedia: typeof matchMedia === "function" ? (query) => matchMedia(query) : null,
-    host: nextHostOf(transport),
+    host: nextHostOf(transport).settings,
     start: startDisplay,
     show: showDisplay,
     // the first frame lays out for the webview's own OS; display_info confirms it or corrects it

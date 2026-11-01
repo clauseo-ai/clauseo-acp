@@ -136,7 +136,7 @@ let railMeasured = "(function () { var errs = " + measured + ", rail = document.
 let railRendered = { (theme: String, lang: String) in
   "document.querySelector('#root main.room-centre') !== null" +
     " && (document.querySelector('[data-testid=\"matter\"]')?.textContent ?? '') !== ''" +
-    " && document.querySelectorAll('nav.room-rail [data-testid=\"matter-row\"]').length === 11" +
+    " && document.querySelectorAll('nav.room-rail [data-testid=\"matter-row\"]').length === 13" +
     " && document.querySelector('nav.room-rail [data-kind=\"scratch\"]') !== null" +
     " && document.documentElement.dataset.theme === '\(theme)' && document.documentElement.lang === '\(lang)'"
 }

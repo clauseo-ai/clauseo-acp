@@ -1,9 +1,12 @@
 // The room's frame, as the approved room composes it (design/03-system/src/pages/room/room.tsx): one RoomScopeProvider
 // with Base UI's CSP mode inside, then the window: the toolbar, the rail, the work and the wall, laid out by shell.css
 // and responsive.css. Three columns from 1200 px, the rail folded behind Matters as a floating panel from 1000 px, one
-// column below. The rail is U2's (rail.tsx over matters.ts); the work is U3's slot. Until H19 the computer draws the title bar, so the
-// toolbar draws no window controls; until U12 there is no plan, until a host query no search, until U8 no Versions and
-// Undo, and until H5 nothing under the title. The wall shows its surface only until H8 (host-next.ts).
+// column below. The rail is U2's (rail.tsx over matters.ts); the work is U3's slot. Until H19 the computer draws the
+// title bar, so the toolbar draws no window controls; until U12 there is no plan, until a host query no search, until
+// U8 no Versions and Undo, and until H5 nothing under a matter's title (the scratch matter's line stands). The wall
+// shows its surface only until H8 (host-next.ts's papers part). Folded, the rail closes on Escape and on opening a
+// matter or making one, and focus goes back to Matters; Matters carries the court-yellow dot while another matter
+// waits on the lawyer.
 import { use, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { EmptyPapers } from "@clauseo/components/clauseo/empty.tsx";
 import { PaperTile } from "@clauseo/components/clauseo/paper-tile.tsx";
@@ -11,6 +14,7 @@ import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
 import { RoomScopeProvider } from "@clauseo/components/clauseo/room-scope-provider.tsx";
 import { RoomToolbar } from "@clauseo/components/clauseo/room-toolbar.tsx";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
+import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
 import { frameBatch } from "../store/batch.ts";
@@ -18,13 +22,13 @@ import { StoreContext } from "../store/hooks.ts";
 import { createViewStore } from "../store/store.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
-import type { NextHost, Papers } from "./host-next.ts";
-import { Matters } from "./matters.ts";
+import type { Papers, PapersHost } from "./host-next.ts";
+import { Matters, type MattersView } from "./matters.ts";
 import { NewMatter } from "./new-matter.tsx";
 import { RoomRail } from "./rail.tsx";
 
-/** The matter's papers from H8, or null: before they arrive, without a NextHost, or when the read fails. */
-function usePapers(next: NextHost | null, matter: MatterId | null): Papers | null {
+/** The matter's papers from H8, or null: before they arrive, without H8, or when the read fails. */
+function usePapers(next: PapersHost | null, matter: MatterId | null): Papers | null {
   const [listed, setListed] = useState<{ matter: MatterId; papers: Papers } | null>(null);
   useEffect(() => {
     if (next === null || matter === null) return;
@@ -41,6 +45,13 @@ function usePapers(next: NextHost | null, matter: MatterId | null): Papers | nul
   }, [next, matter]);
   return listed !== null && listed.matter === matter ? listed.papers : null;
 }
+
+/** Whether a matter the lawyer isn't looking at waits on them, with a question or for permission: Matters' dot. The
+ * limit stays muted (QU.6 (ii)): nothing to choose, only a time to wait for. */
+const railWaits = (view: MattersView): boolean =>
+  [...view.status].some(
+    ([id, s]) => id !== view.open?.matter && (s.state === "question" || s.state === "permission"),
+  );
 
 /** A file's name, the last part of its path in the matter folder. */
 const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
@@ -63,6 +74,14 @@ function RoomFrame({ transport }: { transport: HostTransport }) {
   const [railOpen, setRailOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const newMatter = useRef<HTMLButtonElement>(null);
+  const railToggle = useRef<HTMLButtonElement>(null);
+  // a matter made from the folded rail folds it, so focus goes back to Matters, not to New matter's hidden button
+  const madeFolded = useRef(false);
+  const [newFocus] = useState(() => ({
+    get current(): HTMLElement | null {
+      return madeFolded.current ? railToggle.current : newMatter.current;
+    },
+  }));
   // the app's view store; a room mounted alone (tests, the review) makes its own
   const shared = use(StoreContext);
   const [matters] = useState(
@@ -71,7 +90,13 @@ function RoomFrame({ transport }: { transport: HostTransport }) {
   useEffect(() => matters.start(), [matters]);
   const view = useSyncExternalStore(matters.subscribe, matters.view, matters.view);
   const open = view.open;
-  const papers = usePapers(matters.next, open?.matter ?? null);
+  const papers = usePapers(matters.next.papers, open?.matter ?? null);
+  /** The folded rail closes, and focus goes back to Matters, which opened it. */
+  const fold = () => {
+    if (!railOpen) return;
+    setRailOpen(false);
+    railToggle.current?.focus();
+  };
   // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
   // frame's words stand in its place
   const scratch = open?.kind === "scratch";
@@ -93,7 +118,7 @@ function RoomFrame({ transport }: { transport: HostTransport }) {
         title={title}
         titleLang={open !== null && !scratch ? "en" : w.lang}
         titleHint=""
-        subtitle=""
+        subtitle={scratch ? mt(w.lang, "Quick questions, kept like any matter") : ""}
         nextDate=""
         caseNo=""
         court=""
@@ -102,15 +127,21 @@ function RoomFrame({ transport }: { transport: HostTransport }) {
         onUndo={() => {}}
         railOpen={railOpen}
         onRail={() => setRailOpen((open) => !open)}
-        testIds={{ title: "matter" }}
+        railWaits={railWaits(view)}
+        railRef={railToggle}
+        testIds={{ title: "matter", rail: "rail-toggle" }}
       />
-      {/* Matters opens and folds it below 1200 px; opening a matter folds it again */}
+      {/* Matters opens and folds it below 1200 px; opening a matter, making one or Escape folds it again */}
       <RoomRail
         matters={matters}
         view={view}
         open={railOpen}
-        onNewMatter={() => setNewOpen(true)}
-        onMoved={() => setRailOpen(false)}
+        onNewMatter={() => {
+          madeFolded.current = false;
+          setNewOpen(true);
+        }}
+        onMoved={fold}
+        onEscape={fold}
         newMatterRef={newMatter}
       />
       <NewMatter
@@ -118,7 +149,11 @@ function RoomFrame({ transport }: { transport: HostTransport }) {
         detailed={view.detailed}
         open={newOpen}
         onOpenChange={setNewOpen}
-        finalFocus={newMatter}
+        onMade={() => {
+          madeFolded.current = railOpen;
+          setRailOpen(false);
+        }}
+        finalFocus={newFocus}
       />
       {/* U3's work goes here, one per matter: {open !== null && <Work key={open.matter} transport={transport}
           matter={open} onThread={matters.onThread} />}; while view.folderMissing it shows moved.tsx's MovedFolder in the

@@ -28,7 +28,7 @@ afterEach(async () => {
 
 const MOVED = detailed(
   { matter: uuid(1, 2), name: "Khan Leather Works v. Customs", kind: "folder" },
-  { folder_state: "missing", folder_display: "~/Documents/Khan" },
+  { folder_state: "missing", folder_display: "Documents/Khan" },
 );
 
 async function render(node: React.ReactNode, transport = new FakeTransport()) {
@@ -42,7 +42,7 @@ async function render(node: React.ReactNode, transport = new FakeTransport()) {
 test("the moved folder's line says where it was, that nothing is lost, and Locate folder relocates the open matter", async () => {
   const sent: NextCommand[] = [];
   const transport = new FakeTransport({
-    pickFolder: () => ({ folder: "ref-found", display: "~/Desktop/Khan" }),
+    pickFolder: () => ({ folder: "ref-found", display: "Desktop/Khan" }),
     next: fakeNext({ matters: () => [MOVED], command: (c) => void sent.push(c) }),
   });
   const matters = new Matters(
@@ -64,7 +64,8 @@ test("the moved folder's line says where it was, that nothing is lost, and Locat
   );
   const text = host?.textContent ?? "";
   expect(text).toContain(mt("en", "This matter's folder has moved."));
-  expect(text).toContain("It was at ~/Documents/Khan.");
+  // the path isolated, FSI before and PDI after
+  expect(text).toContain("It was at \u2068Documents/Khan\u2069.");
   expect(text).toContain("nothing is lost while the folder is away");
   expect(host?.querySelector('[role="status"]')).not.toBeNull();
   await act(async () => host?.querySelector("button")?.click());

@@ -1,9 +1,10 @@
 // The host calls the room needs that the host doesn't have yet: H8's list of a matter's papers, H7's display
 // settings, and the matters' rows: H5's details and statuses, H3's moved folders, H4's app events, H6's thread marks and
-// H20's default location. Their wire shapes as the briefs give them, and one small interface, NextHost, that a transport may
-// implement. FakeTransport does, from scripted answers; TauriTransport doesn't and never sends these. The room asks for
-// it only through `nextHostOf`, so when those rows land, the swap to the generated bindings touches this file alone.
-// Without a NextHost the wall shows its surface only, and the display settings live in localStorage (display-store.ts).
+// H20's default location. Their wire shapes as the briefs give them (names in WIRE), and NextHost: one optional part per
+// host row, which a transport may give. FakeTransport does, from scripted answers; TauriTransport doesn't and never
+// sends these. The room asks for them only through `nextHostOf`, so as each row lands, the swap to the generated
+// bindings touches this file alone. Without papers the wall shows its surface only; without settings they live in
+// localStorage (display-store.ts); without matters the rail lists today's matters with no details.
 import type { TextSize } from "@clauseo/components/lib/display.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type {
@@ -36,8 +37,14 @@ export type PaperSummary = {
   modified: Timestamp;
 };
 
-/** `list_papers`'s answer: the files, the files left out and why, and whether the list stops short. */
-export type Papers = { papers: PaperSummary[]; skipped: SkippedFile[]; truncated: boolean };
+/** `list_papers`'s answer: the files, the files left out and why, the folders the host couldn't read (sorted, counted
+ * inside the same 2,000 cap), and whether the list stops short. */
+export type Papers = {
+  papers: PaperSummary[];
+  skipped: SkippedFile[];
+  unread: MatterPath[];
+  truncated: boolean;
+};
 
 /* ---------- H7: display settings ---------- */
 
@@ -84,7 +91,7 @@ export type MatterDetails = {
   /** H3: whether its folder is where it was. */
   folder_state: "found" | "missing";
   status: MatterStatus;
-  /** H20: its folder as the lawyer would write it, home-relative: "~/Documents/Acme". */
+  /** H20: its folder as the lawyer would write it: under home, the parts below it ("Documents/Acme"); else in full. */
   folder_display?: string;
 };
 
@@ -161,33 +168,92 @@ export type AppEvent =
   | { threads_changed: { matter: MatterId; threads: ThreadInfo[] } }
   | { matters_removed: { matters: MatterId[] } };
 
-/** The calls a transport makes for the room until H3 to H8 and H20 land. Each rejects with a HostError. */
-export interface NextHost {
+/** The wire names, one home each: the reads, the commands and the events as the host will spell them. */
+export const WIRE = {
+  listPapers: "list_papers",
+  getSettings: "get_settings",
+  setUiSettings: "set_ui_settings",
+  settingsChanged: "settings_changed",
+  listMatters: "list_matters",
+  listThreads: "list_threads",
+  getDefaultLocation: "get_default_location",
+  createMatter: "create_matter",
+  updateMatter: "update_matter",
+  openMatter: "open_matter",
+  forgetMatter: "forget_matter",
+  relocateMatter: "relocate_matter",
+  markSeen: "mark_seen",
+  matterCreated: "matter_created",
+  mattersChanged: "matters_changed",
+  threadsChanged: "threads_changed",
+  mattersRemoved: "matters_removed",
+} as const;
+
+/** H8: a matter's papers. */
+export interface PapersHost {
   listPapers(matter: MatterId): Promise<Papers>;
+}
+
+/** H7: the display settings. */
+export interface SettingsHost {
   getSettings(): Promise<Settings>;
   setUiSettings(patch: Partial<UiSettings>): Promise<void>;
   /** Hears each `settings_changed`. Returns the unsubscribe. */
   onSettingsChanged(listener: (settings: Settings) => void): () => void;
+}
+
+/** H5, H3, H6 and H20's matter half: the matters' rows and their commands. */
+export interface MattersHost {
   listMatters(): Promise<MatterInfo[]>;
   listThreads(matter: MatterId): Promise<ThreadInfo[]>;
-  /** H20's default location, as the lawyer would write it. */
-  getDefaultLocation(): Promise<string>;
   /** One of the matters' commands; create_matter gives `matter_created`. */
-  matters(command: MattersCommand): Promise<NextOutcome>;
-  /** Hears each AppEvent (H4). Returns the unsubscribe. */
+  command(command: MattersCommand): Promise<NextOutcome>;
+}
+
+/** H20: the default location, as the lawyer would write it. */
+export interface LocationHost {
+  getDefaultLocation(): Promise<string>;
+}
+
+/** H4: the app's events. */
+export interface AppHost {
+  /** Hears each AppEvent. Returns the unsubscribe. */
   subscribeApp(listener: (event: AppEvent) => void): () => void;
 }
 
-/** A transport that may carry the calls above: `nextHost()` gives them, or null where its host has none. */
+/** The calls a transport makes for the room until H3 to H8 and H20 land, one part per host row, each null where the
+ * host lacks it: H8 may land before H5, so the room works with papers and no matters. Each call rejects with a
+ * HostError. */
+export type NextHost = {
+  papers: PapersHost | null;
+  settings: SettingsHost | null;
+  matters: MattersHost | null;
+  location: LocationHost | null;
+  app: AppHost | null;
+};
+
+/** One part of NextHost: a host row. */
+export type NextPart = keyof NextHost;
+
+/** No part at all: today's desktop host. */
+export const NO_NEXT: NextHost = {
+  papers: null,
+  settings: null,
+  matters: null,
+  location: null,
+  app: null,
+};
+
+/** A transport that may carry the calls above: `nextHost()` gives the parts its host has. */
 export interface NextHostSource {
-  nextHost(): NextHost | null;
+  nextHost(): NextHost;
 }
 
 const isSource = (transport: object): transport is NextHostSource =>
   typeof (transport as Partial<NextHostSource>).nextHost === "function";
 
-/** The calls the room needs beyond today's host, or null where the transport's host has none (the desktop one, for
- * now). The one place the room asks for them. */
-export function nextHostOf(transport: HostTransport): NextHost | null {
-  return isSource(transport) ? transport.nextHost() : null;
+/** The calls the room needs beyond today's host, each part null where the transport's host lacks it (every part, on
+ * the desktop host for now). The one place the room asks for them. */
+export function nextHostOf(transport: HostTransport): NextHost {
+  return isSource(transport) ? transport.nextHost() : NO_NEXT;
 }
