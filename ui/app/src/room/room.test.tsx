@@ -16,10 +16,15 @@ import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
 import { uuid } from "../testing/stream-script.ts";
 import { detailed, fakeNext } from "./fake-next.ts";
 import type { MatterInfo, PaperSummary, UiSettings } from "./host-next.ts";
+import { frameBatch } from "../store/batch.ts";
+import { StoreContext } from "../store/hooks.ts";
+import { createViewStore } from "../store/store.ts";
 import { Room } from "./room.tsx";
+import { stubFonts } from "./thread/testing.ts";
 import { connectRoom } from "./start.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+stubFonts();
 
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -48,6 +53,7 @@ function fake(
     ...(platform === undefined ? {} : { platform }),
     query: (query) => {
       if (query === "list_matters") return { matters };
+      if (typeof query === "object" && query.list_threads !== undefined) return { threads: [] };
       throw new Error("not scripted");
     },
   };
@@ -55,6 +61,13 @@ function fake(
     h.next = fakeNext({ matters: () => matters.map((m) => detailed(m)), papers });
   return new FakeTransport(h);
 }
+
+/** The room as App mounts it: inside the page's view store. */
+const inStore = (transport: FakeTransport, windowControls?: WindowControls) => (
+  <StoreContext value={createViewStore(transport, { batch: () => frameBatch })}>
+    <Room transport={transport} windowControls={windowControls} />
+  </StoreContext>
+);
 
 async function mount(
   transport: FakeTransport,
@@ -65,9 +78,7 @@ async function mount(
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(async () =>
-    root?.render(<Room transport={transport} windowControls={windowControls} />),
-  );
+  await act(async () => root?.render(inStore(transport, windowControls)));
   // list_matters, then list_papers
   await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 }
@@ -108,7 +119,7 @@ test("while list_matters is on its way, and after it fails, the toolbar has no h
     host = document.createElement("div");
     document.body.append(host);
     root = createRoot(host);
-    await act(async () => root?.render(<Room transport={failing} />));
+    await act(async () => root?.render(inStore(failing)));
     expect(host.querySelector("h1")).toBeNull();
     // the rail while the list is on its way: no "No matters yet", no scratch row that opens nothing
     const rail = () => host?.querySelector("nav.room-rail");
@@ -131,7 +142,10 @@ test("the frame has the toolbar, the rail slot, the work and the wall, and no se
   await mount(fake([NEWER]));
   const win = host?.querySelector(".room-window");
   expect(win?.querySelector("header.room-top .room-lead .room-rail-toggle")).not.toBeNull();
-  expect(win?.querySelector("main.room-centre")?.childElementCount).toBe(0);
+  // the work: the thread's list and the composer (thread/work.test.tsx tests them)
+  const centre = win?.querySelector("main.room-centre");
+  expect(centre?.querySelector('[data-testid="transcript"] .room-thread')).not.toBeNull();
+  expect(centre?.querySelector('form.room-composer [data-testid="composer"]')).not.toBeNull();
   // the rail (rail.tsx): New matter at its head, the matter's row, the scratch matter at its foot
   expect(win?.querySelector("nav.room-rail [data-testid='new-matter']")).not.toBeNull();
   expect(win?.querySelectorAll("nav.room-rail [data-testid='matter-row']")).toHaveLength(1);

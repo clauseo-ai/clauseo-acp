@@ -1,7 +1,8 @@
 // The room's frame, as the approved room composes it (design/03-system/src/pages/room/room.tsx): one RoomScopeProvider
 // with Base UI's CSP mode inside, then the window: the toolbar, the rail, the work and the wall, laid out by shell.css
 // and responsive.css. Three columns from 1200 px, the rail folded behind Matters as a floating panel from 1000 px, one
-// column below. The rail is U2's (rail.tsx over matters.ts); the work is U3's slot. The window draws its own frame
+// column below. The rail is U2's (rail.tsx over matters.ts); the work is the live thread (thread/work.tsx). The window
+// draws its own frame
 // (H19): the toolbar is the title bar, with the caption buttons wired to the window off the Mac and macOS's own traffic
 // lights over the corner lights' place on it, inside the desktop app; elsewhere (tests, the probe, a browser) the
 // buttons log their presses and the lights are painted. Until U12 there is no plan, until a host query no search, until
@@ -28,7 +29,10 @@ import type { MatterId } from "../transport/protocol.ts";
 import type { Papers, PapersHost } from "./host-next.ts";
 import { Matters, type MattersView } from "./matters.ts";
 import { NewMatter } from "./new-matter.tsx";
+import { LocateGate, MovedFolder } from "./moved.tsx";
 import { RoomRail } from "./rail.tsx";
+import { ScratchLine } from "./scratch-line.tsx";
+import { Work } from "./thread/work.tsx";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
 import { useWindowFrame } from "../window/use-window-frame.ts";
 
@@ -101,11 +105,10 @@ function RoomFrame({
       return madeFolded.current ? railToggle.current : newMatter.current;
     },
   }));
-  // the app's view store; a room mounted alone (tests, the review) makes its own
+  // the app's view store; a room mounted alone (tests, the review) makes its own, and gives it to the work
   const shared = use(StoreContext);
-  const [matters] = useState(
-    () => new Matters(transport, shared ?? createViewStore(transport, { batch: () => frameBatch })),
-  );
+  const [store] = useState(() => shared ?? createViewStore(transport, { batch: () => frameBatch }));
+  const [matters] = useState(() => new Matters(transport, store));
   useEffect(() => matters.start(), [matters]);
   const view = useSyncExternalStore(matters.subscribe, matters.view, matters.view);
   const open = view.open;
@@ -189,10 +192,29 @@ function RoomFrame({
         }}
         finalFocus={newFocus}
       />
-      {/* U3's work goes here, one per matter: {open !== null && <Work key={open.matter} transport={transport}
-          matter={open} onThread={matters.onThread} />}; while view.folderMissing it shows moved.tsx's MovedFolder in the
-          thread's place and LocateGate as the composer's gate, both with onLocate={() => matters.locate(open.matter)} */}
-      <main className="room-centre" ref={nodes.slot("centre")} />
+      <main className="room-centre" ref={nodes.slot("centre")}>
+        {open !== null && view.folderMissing ? (
+          // the folder moved (H3): its line in the thread's place, and Locate folder as the composer's gate
+          <>
+            <MovedFolder
+              {...(open.folder_display === undefined ? {} : { folder: open.folder_display })}
+              onLocate={() => void matters.locate(open.matter)}
+            />
+            <LocateGate onLocate={() => void matters.locate(open.matter)} />
+          </>
+        ) : (
+          <StoreContext value={store}>
+            {scratch && <ScratchLine />}
+            {/* one thread's state per matter: a new matter starts its own; with none open, the composer waits */}
+            <Work
+              key={open?.matter ?? "none"}
+              transport={transport}
+              matter={open}
+              onThread={matters.onThread}
+            />
+          </StoreContext>
+        )}
+      </main>
       <aside className="room-pane" ref={nodes.slot("pane")}>
         {papers !== null &&
           (papers.papers.length === 0 ? (

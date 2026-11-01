@@ -1,14 +1,62 @@
-// The states the registered strings show in: the real room (src/room/room.tsx) over a host scripted for the state, and
-// the room after the steps a state takes once rendered (New matter, a name, Change, Create).
+// The states the registered strings show in: the real room (src/room/room.tsx) over a host scripted for the state,
+// inside the page's view store, as App mounts it; and the room after the steps a state takes once rendered (New
+// matter, a name, Change, Create).
 import { useEffect, useRef, useState } from "react";
 import { Room } from "../room/room.tsx";
+import { frameBatch } from "../store/batch.ts";
+import { StoreContext } from "../store/hooks.ts";
+import { createViewStore } from "../store/store.ts";
 import type { FakeTransport } from "../transport/fake-transport.ts";
 import type { Step } from "./hosts.ts";
 
 /** The room over the transport `host` builds, built once for the frame's life. */
 export function RoomOver({ host }: { host: () => FakeTransport }) {
   const [transport] = useState(host);
-  return <Room transport={transport} />;
+  const [store] = useState(() => createViewStore(transport, { batch: () => frameBatch }));
+  return (
+    <StoreContext value={store}>
+      <Room transport={transport} />
+    </StoreContext>
+  );
+}
+
+/** The room, and once its composer takes words, the lawyer asking `question` with Enter: for a state that follows a
+ * send, such as the host refusing it. */
+export function RoomAsking({ host, question }: { host: () => FakeTransport; question: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (el === null) return;
+    let asked = false;
+    const ask = () => {
+      const field = el.querySelector<HTMLTextAreaElement>('[data-testid="composer"]');
+      if (asked || field === null || field.disabled) return;
+      asked = true;
+      watch.disconnect();
+      // the prototype's setter, past React's own value tracker, then the input React hears
+      Reflect.set(HTMLTextAreaElement.prototype, "value", question, field);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      queueMicrotask(() =>
+        field.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Enter",
+            keyCode: 13,
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      );
+    };
+    const watch = new MutationObserver(ask);
+    watch.observe(el, { subtree: true, childList: true, attributes: true });
+    ask();
+    return () => watch.disconnect();
+  }, [question]);
+  return (
+    <div ref={box} className="contents">
+      <RoomOver host={host} />
+    </div>
+  );
 }
 
 /** The room over `host`, then `steps` taken in order as the lawyer would, each once the last has settled. */
