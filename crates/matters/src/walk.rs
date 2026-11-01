@@ -149,7 +149,7 @@ pub(crate) fn walk(
                 Entry::Skip => {}
                 Entry::Folder(path, sub) => pending.push((path, sub)),
                 Entry::Denied(err) if relative.is_empty() => {
-                    return Err(Error::io("stat", &entry.path(), err));
+                    return Err(Error::io("stat", entry.path(), err));
                 }
                 Entry::Denied(err) => {
                     // Lists but cannot be entered: kept as unread, the same as a folder that
