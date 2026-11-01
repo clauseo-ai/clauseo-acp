@@ -171,8 +171,9 @@ export const TAG_CASES: HostileCase[] = [
   {
     id: "tags-block-html",
     markdown:
-      "Before.\n\n<br>\n<br/>\n\n<sup>\nnot a tag pair\n</sup>\n\n<div onclick=\"window.__g4pwn('tags-block-html')\">\n<sup>1</sup>\n</div>\n\nAfter.",
-    text: ["<sup>\nnot a tag pair", "<div onclick="],
+      "Before.\n\n<br>\n<br/>\n\n<sup>\nnot a tag pair\n</sup>\n\n<div onclick=\"window.__g4pwn('tags-block-html')\">\n<sup>1</sup>\n</div>\n\n<br>\nShown, not swallowed <sup>2</sup>\n\nAfter.",
+    // The last HTML block holds a <br> and more: all of it shows as text, nothing is swallowed.
+    text: ["<sup>\nnot a tag pair", "<div onclick=", "<br>\nShown, not swallowed <sup>2</sup>"],
     tags: { br: 2, sup: 0 },
   },
   {
@@ -180,6 +181,14 @@ export const TAG_CASES: HostileCase[] = [
     markdown:
       "A claim[^n].\n\n[^n]: See <sup>2</sup> and <sup onclick=\"window.__g4pwn('tags-in-footnote')\">3</sup>.",
     tags: { "li sup": 2 },
+  },
+  {
+    // Mid-stream, an unpaired tag is hidden only where its closer can still arrive: not inside an
+    // emphasis that has closed.
+    id: "tags-in-closed-emphasis-streamed",
+    markdown: "*a <sup>b* c, and the answer goes on.",
+    text: ["<sup>b"],
+    tags: { sup: 0 },
   },
   {
     id: "extras-caret-and-equals",

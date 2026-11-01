@@ -132,7 +132,7 @@ function renderCases(streaming: boolean) {
 
 test("the corpus holds G4's 28 cases and the ones added since, each with its own id", () => {
   expect(CASES[27]?.id).toBe("unterminated-fence");
-  expect(CASES).toHaveLength(97);
+  expect(CASES).toHaveLength(98);
   expect(new Set(CASES.map((c) => c.id)).size).toBe(CASES.length);
 });
 
