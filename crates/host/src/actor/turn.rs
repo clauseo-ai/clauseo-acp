@@ -352,9 +352,10 @@ pub(crate) fn expect_reconcile(actor: &mut Actor, thread: ThreadId) {
     reconcile::expect(actor, thread);
 }
 
-/// `thread` could not be loaded at start-up, so it will not be reconciled.
+/// `thread` could not be loaded at start-up, so it will not be reconciled; its matter's
+/// repairs no longer know which open turn started last.
 pub(crate) fn reconcile_skipped(actor: &mut Actor, thread: ThreadId) {
-    reconcile::looked_at(actor, thread);
+    reconcile::skipped(actor, thread);
 }
 
 /// Shutdown, after the host stopped taking commands: cancel every running turn through the
