@@ -129,12 +129,16 @@ test("for every prefix the incremental split equals a fresh split, and the block
 /**
  * A document as the one-piece comparison takes it. Footnotes are left out (`[^` becomes `[`, a link
  * definition and reference): a note in one block and its call in another do not meet yet, which is the
- * document-wide footnote work that follows this renderer. Ordered items start at 1: micromark 4.0.3 parses
- * an item starting at another number as a paragraph when it follows an indented code block and a blank
- * line, where CommonMark (and commonmark.js 0.31.2) starts a list; split there, we give CommonMark's
- * answer (see the test below), so one piece is the wrong reference for that case.
+ * document-wide footnote work that follows this renderer. And one micromark 4.0.3 quirk: an ordered item
+ * starting at a number other than 1, right after an indented line and a blank line, is a paragraph where
+ * CommonMark (and commonmark.js 0.31.2) starts a list; split there, we give CommonMark's answer (see the
+ * test below), so one piece is the wrong reference, and only such an item starts at 1 here.
  */
-const comparable = (text: string) => text.replaceAll("[^", "[").replace(/^(?:10\.|2\)) /gm, "1. ");
+const AFTER_INDENTED = /^((?: {4}|\t)[^\n]*\S[^\n]*\n(?:[ \t]*\n)+)\d{1,9}([.)])(?=[ \t\n])/gm;
+const comparable = (text: string) =>
+  text
+    .replaceAll("[^", "[")
+    .replace(AFTER_INDENTED, (_, before: string, delimiter: string) => `${before}1${delimiter}`);
 
 test("rendered block by block, every document renders exactly as it does in one piece", () => {
   let cuts = 0;
