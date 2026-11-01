@@ -76,8 +76,10 @@ test("the release build keeps the perf module in a lazy chunk, with no preload h
   expect(entry!.code).not.toContain("startStream");
 });
 
-/** A build in memory under `mode`, its chunks and its index.html. */
+/** A build in memory under `mode`, its chunks, its other files and its index.html. */
 async function builtWith(mode?: string) {
+  // as `vite build` runs it: vitest's NODE_ENV=test would make the build a development one (import.meta.env.DEV)
+  vi.stubEnv("NODE_ENV", "production");
   const out = (await build({
     configFile: "vite.config.ts",
     logLevel: "silent",
@@ -89,11 +91,12 @@ async function builtWith(mode?: string) {
   const page = files.find(
     (f): f is Rolldown.OutputAsset => f.type === "asset" && f.fileName === "index.html",
   );
-  return { chunks, html: String(page?.source ?? "") };
+  return { chunks, files, html: String(page?.source ?? "") };
 }
 
+// the page's charset first, inside the HTML prescan's 1024 bytes, then the CSP before any script, style or link
 const META =
-  /^<!doctype html>\s*<html[^>]*>\s*<head>\s*<meta http-equiv="Content-Security-Policy" content="([^"]*)">/i;
+  /^<!doctype html>\s*<html[^>]*>\s*<head>\s*<meta charset="UTF-8"\s*\/?>\s*<meta http-equiv="Content-Security-Policy" content="([^"]*)">/i;
 const unescape = (html: string) => html.replaceAll("&#39;", "'").replaceAll("&quot;", '"');
 
 afterEach(() => {
@@ -102,43 +105,97 @@ afterEach(() => {
 
 test("the meta CSP is the production CSP less frame-ancestors, which a meta tag may not carry", () => {
   const production = tauriConf.app.security.csp;
-  expect(production).toContain("frame-ancestors");
+  expect(production).toContain("frame-ancestors 'none'");
   const meta = metaCsp(production);
   expect(meta).not.toContain("frame-ancestors");
-  expect(meta).toBe(
-    production
-      .split(";")
-      .map((d) => d.trim())
-      .filter((d) => d !== "" && !d.startsWith("frame-ancestors"))
-      .join("; "),
+  expect(meta.startsWith("default-src 'self'; script-src 'self'; style-src 'self'; ")).toBe(true);
+  expect(meta).toContain(
+    "; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; ",
   );
+  expect(
+    meta.endsWith("; require-trusted-types-for 'script'; trusted-types clauseo-sanitize"),
+  ).toBe(true);
+  // one directive fewer than the production policy, which has 17
+  expect(production.split(";").length).toBe(17);
+  expect(meta.split("; ").length).toBe(16);
 });
 
-test("the default build's page carries no meta CSP: Tauri's header is its only policy", async () => {
-  const { html } = await builtWith();
+/** What only the room's code, its axe-core or the copy review page holds: none of it may reach the default build. */
+const ROOM_ONLY = [
+  "room-window",
+  "__clauseoAxe",
+  "__clauseoDisplay",
+  "axe.run",
+  "Tools for this matter",
+  "U1-01",
+  "copy-approvals",
+  "clauseo.display",
+];
+
+test("the default build is R12's window alone: no meta CSP, no room, review or axe code, and no stylesheet", async () => {
+  const { html, chunks, files } = await builtWith();
   expect(html).not.toContain("Content-Security-Policy");
+  expect(chunks.some((c) => c.isEntry)).toBe(true);
+  for (const chunk of chunks) {
+    for (const word of ROOM_ONLY)
+      expect(chunk.code, `${chunk.fileName}: ${word}`).not.toContain(word);
+    const strays = chunk.moduleIds.filter(
+      (id) => id.includes("/src/room/") || id.includes("/src/review/") || id.includes("/axe-core/"),
+    );
+    expect(strays, chunk.fileName).toEqual([]);
+  }
+  expect(files.map((f) => f.fileName).filter((name) => name.endsWith(".css"))).toEqual([]);
 });
 
-// The room's build (VITE_CLAUSEO_WINDOW=room) carries the policy as the first thing in its head, and keeps the hooks
-// for checks by hand (room/dev-hooks.ts) and axe-core in chunks of their own that no release page loads at start.
-test("the room build's page starts its head with the meta CSP; its hooks and axe-core are chunks of their own", async () => {
+test("the default build check finds the room where it is: the room build", async () => {
+  vi.stubEnv("VITE_CLAUSEO_WINDOW", "room");
+  const { chunks, files } = await builtWith();
+  expect(chunks.some((c) => c.moduleIds.some((id) => id.includes("/src/room/")))).toBe(true);
+  expect(chunks.some((c) => c.code.includes("room-window"))).toBe(true);
+  expect(files.some((f) => f.fileName.endsWith(".css"))).toBe(true);
+});
+
+/** The room build's hooks for checks by hand and axe-core's chunk, where it has them. */
+function handCheckChunks(chunks: Rolldown.OutputChunk[]) {
+  return {
+    hooks: chunks.filter(
+      (c) => c.fileName.startsWith("assets/dev-hooks-") || c.code.includes("__clauseoAxe"),
+    ),
+    axe: chunks.filter(
+      (c) =>
+        c.fileName.startsWith("assets/axe") ||
+        c.code.includes("axe.run") ||
+        c.moduleIds.some((id) => id.includes("/axe-core/")),
+    ),
+  };
+}
+
+// A room build without VITE_CLAUSEO_HAND_CHECKS, as a release build will be once the room is the default (U5): the
+// policy as its head's first element after the charset, and neither the hooks nor axe-core anywhere in it.
+test("the room build without VITE_CLAUSEO_HAND_CHECKS has the meta CSP and no hooks or axe-core chunk", async () => {
   vi.stubEnv("VITE_CLAUSEO_WINDOW", "room");
   const { html, chunks } = await builtWith();
   expect(unescape(META.exec(html)?.[1] ?? "")).toBe(metaCsp(tauriConf.app.security.csp));
-  const hooks = chunks.find((c) => c.fileName.startsWith("assets/dev-hooks-"));
-  expect(hooks?.isDynamicEntry).toBe(true);
-  const carrying = chunks.filter((c) => c.code.includes("__clauseoAxe")).map((c) => c.fileName);
-  expect(carrying).toEqual([hooks?.fileName]);
-  const axe = chunks.find((c) => c.code.includes("axe.run") || c.fileName.startsWith("assets/axe"));
-  expect(axe?.isDynamicEntry).toBe(true);
+  expect(handCheckChunks(chunks)).toEqual({ hooks: [], axe: [] });
+});
+
+// With VITE_CLAUSEO_HAND_CHECKS=1, the room's e2e build: the hooks (room/dev-hooks.ts) and axe-core in chunks of their
+// own that the page doesn't load at start.
+test("the room build with VITE_CLAUSEO_HAND_CHECKS=1 keeps its hooks and axe-core in chunks of their own", async () => {
+  vi.stubEnv("VITE_CLAUSEO_WINDOW", "room");
+  vi.stubEnv("VITE_CLAUSEO_HAND_CHECKS", "1");
+  const { html, chunks } = await builtWith();
+  const { hooks, axe } = handCheckChunks(chunks);
+  expect(hooks.map((c) => c.isDynamicEntry)).toEqual([true]);
+  expect(axe.map((c) => c.isDynamicEntry)).toEqual([true]);
   const initial = new Set(
     [...html.matchAll(/(?:src|href)="\/(assets\/[^"]+\.js)"/g)].map((m) => m[1]),
   );
-  expect(initial.has(hooks?.fileName ?? "")).toBe(false);
-  expect(initial.has(axe?.fileName ?? "")).toBe(false);
+  expect(initial.has(hooks[0]?.fileName ?? "")).toBe(false);
+  expect(initial.has(axe[0]?.fileName ?? "")).toBe(false);
 });
 
-test("the probe build mounts the room over FakeTransport from room/probe-main.tsx, under the meta CSP", async () => {
+test("the probe build mounts the room over FakeTransport from room/probe-main.tsx, under the meta CSP, with the hooks", async () => {
   const config = await resolveConfig(
     { configFile: "vite.config.ts", logLevel: "silent", mode: "probe" },
     "build",
@@ -150,4 +207,5 @@ test("the probe build mounts the room over FakeTransport from room/probe-main.ts
   const modules = entry?.moduleIds ?? [];
   expect(modules.some((id) => id.endsWith("/src/room/probe-main.tsx"))).toBe(true);
   expect(modules.some((id) => id.endsWith("/src/main.tsx"))).toBe(false);
+  expect(handCheckChunks(chunks).axe.length).toBe(1);
 });

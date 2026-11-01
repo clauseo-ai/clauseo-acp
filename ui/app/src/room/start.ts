@@ -17,10 +17,10 @@ function pageStorage(): Storage | null {
   }
 }
 
-/** Whether this build may carry the hooks for checks by hand: the dev server, or the e2e build, whose init script sets
- * `__CLAUSEO_PERF__` before any page script (perf/env.ts). Never a release build. */
-const handChecks = () =>
-  import.meta.env.DEV || (typeof window !== "undefined" && window.__CLAUSEO_PERF__ !== undefined);
+/** Whether this build carries the hooks for checks by hand: the dev server, or a build made with
+ * VITE_CLAUSEO_HAND_CHECKS=1 (the room's e2e build, the probe build). Settled when the build is made, so any other
+ * build has neither the hooks' chunk nor axe-core's: never a release build. */
+const HAND_CHECKS = import.meta.env.DEV || import.meta.env.VITE_CLAUSEO_HAND_CHECKS === "1";
 
 /** Starts the room's display for a transport, once: a second call with the same transport (Strict Mode's second
  * render) gives the same store; another transport replaces it. `override` holds settings for this page only, never
@@ -46,7 +46,7 @@ export function connectRoom(
     (error: unknown) => console.warn(`display_info failed: ${JSON.stringify(error)}`),
   );
   // its own chunk, so a release build's initial JS doesn't carry it
-  if (handChecks()) {
+  if (HAND_CHECKS) {
     import("./dev-hooks.ts").then(
       (hooks) => hooks.installDevHooks(store),
       (error: unknown) => console.warn(`the dev hooks did not load: ${String(error)}`),
