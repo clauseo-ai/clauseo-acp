@@ -18,6 +18,7 @@ const HI = {
   "Needs your permission": "आपकी अनुमति चाहिए",
   "Answer ready": "उत्तर तैयार है",
   "Stopped at {time}": "{time} बजे रोका गया",
+  "Stopped on {day} at {time}": "{day} को {time} बजे रोका गया",
   // paused at the plan's limit, until the reset; the usage limit
   "Paused until {time}": "{time} बजे तक रुका है",
   "Paused until {day} {time}": "{day} {time} बजे तक रुका है",

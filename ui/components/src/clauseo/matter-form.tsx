@@ -64,10 +64,12 @@ function TextInput({
   className,
   error,
   testId,
+  onBlur,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
+  onBlur?: () => void;
   placeholder?: string;
   className?: string;
   error?: string | null;
@@ -91,6 +93,7 @@ function TextInput({
         aria-describedby={wrong ? id : undefined}
         data-testid={testId}
         onChange={(e) => onChange(e.currentTarget.value)}
+        onBlur={onBlur}
         className={cn(
           textControl,
           "matter-form-input font-en text-field font-accepted h-auto min-h-control py-s2",
@@ -130,6 +133,9 @@ export function NewMatterForm({
   const [picked, setPicked] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [pending, setPending] = useState(false);
+  // the next date's line waits until the lawyer leaves the field or tries Create, so a date half typed isn't wrong
+  const [dateLeft, setDateLeft] = useState(false);
+  const folderId = useId();
   // a promise that settles after the form has gone sets nothing
   const live = useRef(true);
   useEffect(() => {
@@ -144,6 +150,7 @@ export function NewMatterForm({
       ? nextError
       : nextDateError(lang, next);
   const ready = name.trim() !== "" && dateLine === null;
+  const dateShown = dateLeft ? dateLine : null;
   const folder =
     picked ?? (given !== undefined ? given : (folderFor?.(name.trim() || name0) ?? null));
   const change = async () => {
@@ -159,7 +166,10 @@ export function NewMatterForm({
     }
   };
   const create = async () => {
-    if (!ready || pending) return;
+    if (!ready || pending) {
+      setDateLeft(true);
+      return;
+    }
     const typed = details ? next.trim() : "";
     const made = onCreate(name.trim(), details ? client.trim() : "", typed, parseNextDate(typed));
     if (!(made instanceof Promise)) return;
@@ -211,7 +221,8 @@ export function NewMatterForm({
             value={next}
             onChange={setNext}
             placeholder={w("30 October 2026")}
-            error={dateLine}
+            error={dateShown}
+            onBlur={() => setDateLeft(true)}
           />
         </div>
       )}
@@ -222,14 +233,18 @@ export function NewMatterForm({
           : {})}
       >
         <IconFolder size={16} className="matter-form-folder-icon" />
-        <p className="matter-form-folder-words">
-          {folder !== null && (
+        {/* what Change changes: the folder line, or where there is none, its name for a screen reader */}
+        <p id={folderId} className="matter-form-folder-words">
+          {folder !== null ? (
             <>
               <Say>{w("Folder:")}</Say>{" "}
-              <span lang="en" className="matter-form-path">
+              {/* a path is isolated, so a name with right-to-left marks can't reorder the line around it */}
+              <bdi lang="en" className="matter-form-path">
                 {folder}
-              </span>
+              </bdi>
             </>
+          ) : (
+            <span className="sr-only">{w("The matter's folder")}</span>
           )}
         </p>
         <Button
@@ -237,6 +252,7 @@ export function NewMatterForm({
           size="small"
           className="matter-form-change"
           disabled={picking}
+          aria-describedby={folderId}
           data-testid={testIds?.existing}
           onClick={() => void change()}
         >

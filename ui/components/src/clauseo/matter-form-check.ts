@@ -1,6 +1,7 @@
 // The new matter form's checks, pure: the next date as the lawyer types it, read into a calendar date, and the line
 // the form shows when the host refuses a folder or a matter can't be made. Never the host's own message.
 import type { Lang } from "../lib/display.ts";
+import { isolate } from "../lib/bidi.ts";
 import { mt } from "../lib/words-matters.ts";
 
 const EN_MONTHS = [
@@ -70,15 +71,17 @@ export function nextDateError(lang: Lang, text: string): string | null {
 }
 
 /** The form's line for a matter the host wouldn't make, from the error's code and, where the caller has it, the
- * folder's display ("~/Documents/Acme", "C:\\"). matter.folder_refused, which doesn't say why, takes the drive
- * screen's second line, true of a drive, the home folder and a system folder alike. */
-export function createErrorLine(lang: Lang, code: string, path?: string): string {
+ * folder's display ("Documents/Acme", "C:\\"), isolated in the line. matter.folder_refused, which doesn't say why,
+ * takes a line true of every reason the host gives it: a folder already a matter, an unreadable matter file, the
+ * matters' own folder, a drive, the home folder, a system folder. H5's codes each say their reason. */
+export function createErrorLine(lang: Lang, code: string, shown?: string): string {
   const both = (first: string | null, second: string) =>
     first === null ? second : `${first} ${second}`;
-  const named = path !== undefined && path !== "";
+  const named = shown !== undefined && shown !== "";
+  const path = named ? isolate(shown) : "";
   switch (code) {
     case "matter.folder_refused":
-      return mt(lang, "A matter is one folder of papers. Choose the folder for one matter.");
+      return mt(lang, "Clauseo can't make a matter of this folder. Choose another folder.");
     case "matter.folder_is_drive":
       return both(
         named ? mt(lang, "{path} is a whole drive.", { path }) : null,

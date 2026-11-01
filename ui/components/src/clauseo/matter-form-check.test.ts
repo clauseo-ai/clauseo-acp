@@ -28,22 +28,30 @@ test("anything else reads as no date: a day that doesn't exist, words, or nothin
 });
 
 test("a refusal says why in the form's words, never the host's message", () => {
+  // folder_refused, which doesn't say why: one line true of every reason behind it
   expect(createErrorLine("en", "matter.folder_refused", "C:\\")).toBe(
-    "A matter is one folder of papers. Choose the folder for one matter.",
+    "Clauseo can't make a matter of this folder. Choose another folder.",
   );
+  expect(createErrorLine("hi", "matter.folder_refused")).toBe(
+    "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
+  );
+  // a path is isolated between FSI and PDI
   expect(createErrorLine("en", "matter.folder_is_drive", "C:\\")).toBe(
-    "C:\\ is a whole drive. A matter is one folder of papers. Choose the folder for one matter.",
+    "\u2068C:\\\u2069 is a whole drive. A matter is one folder of papers. Choose the folder for one matter.",
+  );
+  expect(createErrorLine("en", "matter.folder_unreadable", "a\u202Efdp.exe")).toBe(
+    "Clauseo can't read \u2068a\u202Efdp.exe\u2069. It may be locked, or on a drive that's no longer connected.",
   );
   expect(createErrorLine("en", "matter.folder_is_home")).toBe(
     "It holds far more than one matter. Choose the folder for one matter.",
   );
   expect(createErrorLine("hi", "matter.folder_is_system", "/System")).toBe(
-    "/System वह फ़ोल्डर है जिसे कंप्यूटर अपने लिए रखता है। वह फ़ोल्डर चुनें जिसमें मामले के दस्तावेज़ हैं।",
+    "\u2068/System\u2069 वह फ़ोल्डर है जिसे कंप्यूटर अपने लिए रखता है। वह फ़ोल्डर चुनें जिसमें मामले के दस्तावेज़ हैं।",
   );
   expect(createErrorLine("en", "matter.folder_unreadable")).toBe(
     "Clauseo can't read that folder. It may be locked, or on a drive that's no longer connected.",
   );
-  expect(createErrorLine("en", "command.unknown_matter", "~/Acme")).toBe(
+  expect(createErrorLine("en", "command.unknown_matter", "Acme")).toBe(
     "Clauseo couldn't create the matter. Try again, or choose another folder.",
   );
 });

@@ -17,10 +17,21 @@ const HI = {
   "Matching matters": "मेल खाते मामले",
   "No matter matches '{q}'.": "कोई मामला '{q}' से मेल नहीं खाता।",
   "Search covers names, clients and case numbers.": "खोज में नाम, मुवक्किल और केस नंबर शामिल हैं।",
+  // where the host gives no client (today's), find searches names only; with clients, names and clients
+  "Find a matter by its name": "नाम से मामला खोजें",
+  "Find a matter by its name or client": "नाम या मुवक्किल से मामला खोजें",
+  "Search covers names.": "खोज में नाम शामिल हैं।",
+  "Search covers names and clients.": "खोज में नाम और मुवक्किल शामिल हैं।",
+  // the scratch matter's line under its title in the toolbar
+  "Quick questions, kept like any matter": "त्वरित प्रश्न, किसी भी मामले की तरह सहेजे गए",
   "Client, {client}": "मुवक्किल, {client}",
   "Folder moved": "फ़ोल्डर कहीं और ले जाया गया",
   "A matter waits for you": "एक मामला आपकी प्रतीक्षा में है",
   /* ---------- a new matter: a folder the host refused, a create that failed, a next date that doesn't read ---------- */
+  // matter.folder_refused, which doesn't say why: true of a folder already a matter, an unreadable matter file, the
+  // matters' own folder, a drive, the home folder and a system folder alike
+  "Clauseo can't make a matter of this folder. Choose another folder.":
+    "Clauseo इस फ़ोल्डर से मामला नहीं बना सकता। दूसरा फ़ोल्डर चुनें।",
   "{path} is a whole drive.": "{path} पूरी ड्राइव है।",
   "A matter is one folder of papers. Choose the folder for one matter.":
     "एक मामला दस्तावेज़ों का एक फ़ोल्डर होता है। किसी एक मामले का फ़ोल्डर चुनें।",
