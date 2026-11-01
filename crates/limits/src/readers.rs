@@ -1,10 +1,11 @@
 //! The readers: one read of an agent's plan usage through its vendor's own tool.
 //!
 //! `paths.rs` finds and checks the adapter's install folder, `env.rs` builds the environment,
-//! `run.rs` runs a program under a deadline, and `claude.rs` is Claude's reader. The Codex reader
-//! (`codex.rs`) follows R14.
+//! `run.rs` runs a program under a deadline, `claude.rs` is Claude's reader and `codex.rs`
+//! Codex's.
 
 mod claude;
+mod codex;
 mod env;
 mod paths;
 mod run;
@@ -19,7 +20,7 @@ use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::{AccountLimits, AgentKind, LimitStopReason};
 use clauseo_settings::{AgentLaunch, Effective};
 
-use paths::CLAUDE_ID;
+use paths::{CLAUDE_ID, CODEX_ID};
 
 /// How a read ended.
 #[derive(Debug, Clone, PartialEq)]
@@ -37,6 +38,9 @@ pub enum ReadOutcome {
     /// The usage method is missing or reshaped (Claude only): the source is unavailable, which
     /// is not an error.
     MethodMissing,
+    /// The vendor's tool answered that no account is signed in (Codex's `account/read` with no
+    /// account). The model shows the sign-in-again state for the agent, and stores nothing.
+    SignedOut,
     /// The read failed.
     Failed(ReadFailure),
 }
@@ -67,10 +71,11 @@ pub trait ReadLimits: Send + Sync {
 
 /// [`ReadLimits`] over a [`Launcher`] and a [`Timer`].
 ///
-/// Each read checks the adapter's paths again, writes the helper into its install folder when
-/// the file there differs, makes the working folder `<data_dir>/limits/run` if it is missing
-/// (nothing in Clauseo writes there), and runs the helper with the inherited environment under
-/// the agent's settings variables.
+/// Each read checks the adapter's paths again and makes the working folder
+/// `<data_dir>/limits/run` if it is missing (nothing in Clauseo writes there). Claude's read
+/// writes the helper into its install folder when the file there differs and runs it; Codex's
+/// runs `codex app-server` from codex-acp's install with `CODEX_HOME` forced to Clauseo's own
+/// Codex home. Both run with the inherited environment under the agent's settings variables.
 ///
 /// The read future does a little blocking file work before the launch, on its first poll: the
 /// path checks, the compare of a ~4 KiB file, at most one small write, and the folder creation.
@@ -80,6 +85,8 @@ pub struct ProcessReaders<T> {
     timer: T,
     /// Claude's settings entry, if it has one. Never `Debug`-printed: its env may hold secrets.
     claude: Option<AgentLaunch>,
+    /// Codex's settings entry, if it has one. Never `Debug`-printed either.
+    codex: Option<AgentLaunch>,
     /// The readers' working folder, `<data_dir>/limits/run`.
     run_dir: PathBuf,
     /// Clauseo's own Codex home, which the Codex reader forces as `CODEX_HOME`.
@@ -87,8 +94,8 @@ pub struct ProcessReaders<T> {
 }
 
 impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
-    /// Readers for the agents `effective` has entries for. A Claude entry whose paths break a
-    /// rule is logged once here, at `warn`, and each of its reads fails with the rule.
+    /// Readers for the agents `effective` has entries for. A Claude or Codex entry whose paths
+    /// break a rule is logged once here, at `warn`, and each of its reads fails with the rule.
     ///
     /// `codex_home` is Clauseo's own Codex home, required and with no default. The Codex reader
     /// sets `CODEX_HOME` to it last, over any inherited or settings variable of that name in any
@@ -102,15 +109,22 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
         timer: T,
     ) -> ProcessReaders<T> {
         let claude = effective.agent(CLAUDE_ID).cloned();
+        let codex = effective.agent(CODEX_ID).cloned();
         if let Some(launch) = &claude
             && let Err(err) = paths::claude(launch)
         {
             tracing::warn!(error = %err, "Claude's limits reader is refused");
         }
+        if let Some(launch) = &codex
+            && let Err(err) = paths::codex_js(launch)
+        {
+            tracing::warn!(error = %err, "Codex's limits reader is refused");
+        }
         ProcessReaders {
             launcher,
             timer,
             claude,
+            codex,
             run_dir: effective.data_dir().join("limits").join("run"),
             codex_home,
         }
@@ -132,15 +146,20 @@ impl<T: Timer + Clone + Send + Sync + 'static> ReadLimits for ProcessReaders<T> 
                 let run_dir = self.run_dir.clone();
                 Box::pin(async move { claude::read(&*launcher, &timer, &launch, &run_dir).await })
             }
-            // Replaced by the Codex reader after R14.
             AgentKind::Codex => {
-                tracing::debug!(
-                    codex_home = %self.codex_home.display(),
-                    "the Codex reader is not built yet"
-                );
-                Box::pin(ready(ReadOutcome::Failed(ReadFailure::LaunchFailed(
-                    "the Codex reader is not built yet".to_owned(),
-                ))))
+                let Some(launch) = self.codex.clone() else {
+                    let message = format!("no settings entry for {CODEX_ID}");
+                    return Box::pin(ready(ReadOutcome::Failed(ReadFailure::LaunchFailed(
+                        message,
+                    ))));
+                };
+                let launcher = Arc::clone(&self.launcher);
+                let timer = self.timer.clone();
+                let run_dir = self.run_dir.clone();
+                let codex_home = self.codex_home.clone();
+                Box::pin(async move {
+                    codex::read(&*launcher, &timer, &launch, &run_dir, &codex_home).await
+                })
             }
         }
     }

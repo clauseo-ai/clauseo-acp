@@ -1,0 +1,26 @@
+{
+  "accountRead": {
+    "account": {
+      "type": "chatgpt",
+      "email": "team.user@example.com",
+      "planType": "team"
+    },
+    "requiresOpenaiAuth": true
+  },
+  "rateLimitsRead": {
+    "rateLimits": {
+      "limitId": "codex",
+      "planType": "team",
+      "primary": {
+        "usedPercent": 100,
+        "windowDurationMins": 300,
+        "resetsAt": 1793642400
+      },
+      "credits": {
+        "hasCredits": false,
+        "unlimited": false
+      },
+      "rateLimitReachedType": "workspace_member_credits_depleted"
+    }
+  }
+}

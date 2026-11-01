@@ -93,3 +93,49 @@ pub(crate) fn claude_plan(subscription_type: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+
+/// The plan's name for Codex's `planType` wire value; `None` for one whose plain name is not
+/// clear from its id (`self_serve_business_*`, `ent26`, `enterprise_cbp_*`, `unknown`, and any
+/// value this crate does not know).
+pub(crate) fn codex_plan(plan_type: &str) -> Option<&'static str> {
+    match plan_type {
+        "free" => Some("ChatGPT Free"),
+        "go" => Some("ChatGPT Go"),
+        "plus" => Some("ChatGPT Plus"),
+        "pro" => Some("ChatGPT Pro"),
+        "prolite" => Some("ChatGPT Pro Lite"),
+        "promax" => Some("ChatGPT Pro Max"),
+        "team" => Some("ChatGPT Team"),
+        "business" => Some("ChatGPT Business"),
+        "enterprise" => Some("ChatGPT Enterprise"),
+        "edu" => Some("ChatGPT Edu"),
+        "edu_plus" => Some("ChatGPT Edu Plus"),
+        "edu_pro" => Some("ChatGPT Edu Pro"),
+        _ => None,
+    }
+}
+
+/// The label of Codex's 5-hour window.
+pub(crate) const CODEX_SESSION: &str = "5-hour limit";
+/// The label of Codex's weekly window.
+pub(crate) const CODEX_WEEKLY: &str = "Weekly limit";
+/// The label of a Codex window of 28 to 31 days, and of Free's and Go's window of unknown length.
+pub(crate) const CODEX_MONTHLY: &str = "Monthly limit";
+/// The label of a Codex window of unknown length on any other plan.
+pub(crate) const CODEX_USAGE: &str = "Usage limit";
+
+/// The label of a Codex window of another length, in minutes (positive): "N-hour limit" for
+/// whole hours under 48, "N-day limit" for whole days, "N-hour limit" for other whole hours,
+/// else "N-minute limit".
+pub(crate) fn codex_window_label(mins: i64) -> String {
+    let (hours, days) = (mins / 60, mins / (24 * 60));
+    if mins % 60 == 0 && hours < 48 {
+        format!("{hours}-hour limit")
+    } else if mins % (24 * 60) == 0 {
+        format!("{days}-day limit")
+    } else if mins % 60 == 0 {
+        format!("{hours}-hour limit")
+    } else {
+        format!("{mins}-minute limit")
+    }
+}

@@ -24,3 +24,7 @@ mod claude;
 #[cfg(test)]
 #[path = "readers/refusals.rs"]
 mod refusals;
+
+#[cfg(test)]
+#[path = "readers/codex.rs"]
+mod codex;

@@ -1,0 +1,167 @@
+//! Codex's reader: `codex app-server` started from codex-acp's install, one `initialize`, one
+//! `account/read` and, for a `ChatGPT` sign-in, one `account/rateLimits/read`, mapped to
+//! `AccountLimits`.
+//!
+//! The app-server runs with Clauseo's own `CODEX_HOME`, forced last over any inherited or settings
+//! variable of that name (#160), so it never reads the user's `~/.codex`. Nothing here reads inside
+//! that home.
+
+mod map;
+
+use std::ffi::{OsStr, OsString};
+use std::path::Path;
+use std::time::Duration;
+
+use clauseo_codex_appserver::{
+    Account, ClientInfo, Error as AppServerError, GetAccountRateLimitsParams,
+    GetAccountRateLimitsResponse, GetAccountResponse, connect,
+};
+use clauseo_process::{LaunchSpec, Launcher, Timer};
+use clauseo_settings::AgentLaunch;
+use futures::future::join;
+use futures::{AsyncRead, AsyncWrite};
+
+use super::env::spec_env;
+use super::paths;
+use super::run::{Ran, Stdout, run};
+use crate::{ReadFailure, ReadOutcome, write};
+
+pub(crate) use map::outcome;
+
+/// How long a read may take before its tree is killed.
+pub(crate) const LIMIT: Duration = Duration::from_secs(10);
+/// The variable that names Codex's home.
+const CODEX_HOME: &str = "CODEX_HOME";
+
+/// What the app-server answered.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Answers {
+    /// `account/read`'s response.
+    pub(crate) account: GetAccountResponse,
+    /// `account/rateLimits/read`'s response; asked only for a `ChatGPT` sign-in.
+    pub(crate) limits: Option<GetAccountRateLimitsResponse>,
+}
+
+/// How the talk ended.
+#[derive(Debug, Default)]
+pub(crate) enum Talked {
+    /// Every answer came.
+    Answered(Box<Answers>),
+    /// A call or the connection failed.
+    Failed(AppServerError),
+    /// No talk ended (the run never gives this when it reports an exit).
+    #[default]
+    Nothing,
+}
+
+/// One read of Codex's limits: check the paths and the run folder, make the run folder, then run
+/// `codex app-server` and talk to it.
+pub(crate) async fn read<T: Timer>(
+    launcher: &dyn Launcher,
+    timer: &T,
+    launch: &AgentLaunch,
+    run_dir: &Path,
+    codex_home: &Path,
+) -> ReadOutcome {
+    let spec = match prepare(launch, run_dir, codex_home, std::env::vars_os()) {
+        Ok(spec) => spec,
+        Err(message) => return ReadOutcome::Failed(ReadFailure::LaunchFailed(message)),
+    };
+    let ran = run(
+        launcher,
+        &spec,
+        timer,
+        LIMIT,
+        |stdin, stdout| async move {
+            let talked = talk(stdin, stdout).await;
+            let rest: Stdout = Box::new(futures::io::empty());
+            (talked, rest)
+        },
+        |talked| matches!(talked, Talked::Answered(_)),
+    )
+    .await;
+    match ran {
+        Ran::LaunchFailed(message) => ReadOutcome::Failed(ReadFailure::LaunchFailed(message)),
+        Ran::TimedOut => ReadOutcome::Failed(ReadFailure::TimedOut),
+        Ran::Exited {
+            code, stderr_tail, ..
+        } if code != Some(0) => ReadOutcome::Failed(ReadFailure::Exited { code, stderr_tail }),
+        Ran::Exited { talked, .. } => match talked {
+            Talked::Answered(answers) => outcome(*answers),
+            Talked::Failed(err) => malformed(failure_reason(&err)),
+            Talked::Nothing => malformed("no answer"),
+        },
+    }
+}
+
+/// The app-server's spec: settings `command` running `<codex.js> app-server` in `run_dir`, with
+/// the `inherited` environment under the agent's settings variables and `CODEX_HOME` forced to
+/// `codex_home`. Makes `run_dir` if it is missing (nothing in Clauseo writes there); on a refused
+/// path or run folder it writes nothing. Writes no helper.
+pub(crate) fn prepare(
+    launch: &AgentLaunch,
+    run_dir: &Path,
+    codex_home: &Path,
+    inherited: impl Iterator<Item = (OsString, OsString)>,
+) -> Result<LaunchSpec, String> {
+    let (located, codex_js) = paths::codex_js(launch).map_err(|err| err.to_string())?;
+    paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
+    write::create_dir_all(run_dir).map_err(|err| err.to_string())?;
+    paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
+    let forced = (OsStr::new(CODEX_HOME), codex_home.as_os_str());
+    let env = spec_env(&launch.env, inherited, Some(forced));
+    let args = vec![codex_js.into_os_string(), OsString::from("app-server")];
+    LaunchSpec::new(located.program, args, env, run_dir.to_owned()).map_err(|err| err.to_string())
+}
+
+/// The talk over the app-server's stdin and stdout: `initialize` (which sends `initialized`),
+/// `account/read`, and for a `ChatGPT` sign-in `account/rateLimits/read` without reset-credit
+/// details. The driver runs beside the calls; once they end the client is dropped, so the driver
+/// closes stdin and ends, and the app-server exits. Notifications are dropped unread.
+pub(crate) async fn talk<W, R>(stdin: W, stdout: R) -> Talked
+where
+    W: AsyncWrite + Send + Unpin + 'static,
+    R: AsyncRead + Send + Unpin + 'static,
+{
+    let (client, notifications, driver) = connect(stdin, stdout);
+    drop(notifications);
+    let calls = async move {
+        client.initialize(ClientInfo::clauseo()).await?;
+        let account = client.account().await?;
+        let limits = if matches!(account.account, Some(Account::Chatgpt(_))) {
+            let params = GetAccountRateLimitsParams {
+                exclude_reset_credit_details: Some(true),
+                ..GetAccountRateLimitsParams::default()
+            };
+            Some(client.rate_limits(params).await?)
+        } else {
+            None
+        };
+        Ok::<_, AppServerError>(Answers { account, limits })
+    };
+    let (driven, answered) = join(driver, calls).await;
+    if let Err(err) = driven {
+        tracing::debug!(error = %err.code().as_str(), "the Codex app-server connection ended");
+    }
+    match answered {
+        Ok(answers) => Talked::Answered(Box::new(answers)),
+        Err(err) => Talked::Failed(err),
+    }
+}
+
+/// A short reason for a failed talk, with nothing the app-server sent.
+fn failure_reason(err: &AppServerError) -> &'static str {
+    match err {
+        AppServerError::Closed => "the app-server closed the connection",
+        AppServerError::Rpc { .. } => "the app-server answered with an error",
+        AppServerError::Protocol(_) => "the app-server broke the protocol",
+    }
+}
+
+/// A malformed answer, with a short reason that never quotes it.
+fn malformed(reason: &str) -> ReadOutcome {
+    ReadOutcome::Failed(ReadFailure::Malformed(reason.to_owned()))
+}
+
+#[cfg(test)]
+mod tests;

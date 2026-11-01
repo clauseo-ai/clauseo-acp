@@ -17,12 +17,10 @@ use crate::Error;
 /// Claude's settings id.
 pub(crate) const CLAUDE_ID: &str = "claude-acp";
 /// Codex's settings id.
-#[cfg(test)]
 pub(crate) const CODEX_ID: &str = "codex-acp";
 /// The helper's file name in Claude's install folder.
 pub(crate) const CLAUDE_HELPER: &str = "clauseo-claude-usage.mjs";
 /// Where the Codex CLI's script sits inside a `node_modules` folder.
-#[cfg(test)]
 const CODEX_JS: [&str; 4] = ["@openai", "codex", "bin", "codex.js"];
 
 /// An adapter's checked paths: the program, its install folder and its script.
@@ -64,9 +62,7 @@ pub(crate) fn claude(launch: &AgentLaunch) -> Result<(Located, PathBuf), Error> 
 
 /// The Codex CLI's `codex.js`: codex-acp's own `node_modules/@openai/codex/bin/codex.js`
 /// first, then the install folder's, each by the no-symlink rule. A candidate that is missing
-/// moves on to the next; one that breaks the rule refuses. Built and tested now; the Codex
-/// reader (after R14) drops the `cfg(test)` and calls it.
-#[cfg(test)]
+/// moves on to the next; one that breaks the rule refuses.
 pub(crate) fn codex_js(launch: &AgentLaunch) -> Result<(Located, PathBuf), Error> {
     let located = locate(CODEX_ID, launch)?;
     let modules = located.install.join("node_modules");
@@ -179,7 +175,6 @@ fn has_dot_part(path: &Path) -> bool {
 
 /// The adapter's package folder: the folder right under `modules` that holds `script`, with its
 /// scope (`@agentclientprotocol/claude-agent-acp`).
-#[cfg(test)]
 fn package_dir(modules: &Path, script: &Path) -> Option<PathBuf> {
     let mut parts = script.strip_prefix(modules).ok()?.components();
     let Some(Component::Normal(first)) = parts.next() else {

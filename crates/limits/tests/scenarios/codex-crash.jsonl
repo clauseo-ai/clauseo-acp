@@ -1,0 +1,6 @@
+{"scenario":"codex-crash","description":"The Codex app-server writes a line that is not JSON-RPC, three stderr lines (the middle one echoing the fake OPENAI_API_KEY the test sets in settings env), then exits 1. The reader must report the exit with the redacted tail. No handshake: it never reads stdin."}
+{"send_line":"codex app-server: starting"}
+{"stderr":{"line":"codex app-server: loading config"}}
+{"note":"The value is the fake key the test puts in settings env; the tail must show [redacted].","stderr":{"line":"codex app-server: the key fakeOpenAiKey0123456 was refused"}}
+{"stderr":{"line":"codex app-server: giving up"}}
+{"exit":{"code":1}}

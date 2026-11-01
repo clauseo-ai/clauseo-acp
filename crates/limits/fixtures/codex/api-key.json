@@ -1,0 +1,8 @@
+{
+  "accountRead": {
+    "account": {
+      "type": "apiKey"
+    },
+    "requiresOpenaiAuth": true
+  }
+}

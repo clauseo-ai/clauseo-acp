@@ -1,0 +1,21 @@
+{
+  "accountRead": {
+    "account": {
+      "type": "chatgpt",
+      "email": null,
+      "planType": "go"
+    },
+    "requiresOpenaiAuth": true
+  },
+  "rateLimitsRead": {
+    "rateLimits": {
+      "limitId": "codex",
+      "planType": "go",
+      "primary": {
+        "usedPercent": 15,
+        "windowDurationMins": 40320,
+        "resetsAt": 1795000000
+      }
+    }
+  }
+}

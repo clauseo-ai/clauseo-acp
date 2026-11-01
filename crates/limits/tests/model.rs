@@ -22,6 +22,10 @@ mod policy;
 mod deadlines;
 
 #[cfg(test)]
+#[path = "model/signed_out.rs"]
+mod signed_out;
+
+#[cfg(test)]
 #[path = "model/view.rs"]
 mod view;
 

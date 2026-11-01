@@ -2,8 +2,8 @@
 //! failed read keeps the last good numbers as stale; a live signal upserts one window.
 
 use clauseo_protocol::{
-    AccountLimits, AgentKind, Finite, LimitSource, LimitStopReason, LimitWindow, StaleReason,
-    Timestamp, UnavailableReason,
+    AccountLimits, AgentKind, AtLimitBehaviour, Billing, Finite, LimitSource, LimitStopReason,
+    LimitWindow, StaleReason, Timestamp, UnavailableReason,
 };
 
 use crate::model::{AgentState, LiveSignal, LiveStatus, Row, kind_rank};
@@ -35,11 +35,35 @@ pub(crate) fn apply_read(
             failed_read(state);
             Some(notice(state))
         }
+        ReadOutcome::SignedOut => signed_out(state).then_some(Action::ViewChanged),
         ReadOutcome::Failed(failure) => {
             log_failure(state.agent, &failure);
             failed_read(state).then(|| notice(state))
         }
     }
+}
+
+/// Forgets the account in memory: no account, no windows, the sign-in-again state
+/// (`Unavailable { MissingScope }`). Nothing is stored, so no `Changed` goes out, and an earlier
+/// account's stored entry stays as it is. Returns whether the view changed.
+fn signed_out(state: &mut AgentState) -> bool {
+    let source = LimitSource::Unavailable {
+        reason: UnavailableReason::MissingScope,
+    };
+    let unchanged = state.account.is_none()
+        && state.plan.is_none()
+        && state.billing == Billing::Plan
+        && state.rows.is_empty()
+        && state.at_limit == AtLimitBehaviour::Pauses
+        && state.source == source
+        && state.reached.is_none();
+    let reads = std::mem::take(&mut state.reads);
+    *state = AgentState {
+        source,
+        reads,
+        ..AgentState::loading(state.agent)
+    };
+    !unchanged
 }
 
 /// Replaces the account's data with `limits`. Live updates that arrived while the read ran are

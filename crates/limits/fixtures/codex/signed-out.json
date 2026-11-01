@@ -1,0 +1,6 @@
+{
+  "accountRead": {
+    "account": null,
+    "requiresOpenaiAuth": true
+  }
+}
