@@ -46,9 +46,9 @@ export const MAX_UNMATCHED_BRACKETS = 64;
 /**
  * How far a `[` may stay open within a paragraph. GFM's autolink-literal check walks back to an unbalanced
  * `[` at every word, so one `[` left open before 10 KB of prose took 145 ms. Link text is never this long;
- * 999 is also the longest reference label.
+ * the longest footnote reference, `[^`, a 999-character label and `]`, closes 1,001 characters on.
  */
-export const MAX_BRACKET_SPAN = 1000;
+export const MAX_BRACKET_SPAN = 1001;
 /** The brackets in code spans a paragraph may leave uncounted (`Use \`[\`` in prose, a short fenced block). */
 export const MAX_CODE_BRACKETS = 64;
 /** Levels of mdast below a block's root: 32 nested lists are 64 (list and item), plus their inline content. */

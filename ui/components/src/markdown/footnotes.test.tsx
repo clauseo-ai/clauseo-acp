@@ -306,6 +306,27 @@ test("a note's reference inside another note gets its own back-reference, as in 
   expect(target(backB[1])?.closest("li")).toBe(items[1]);
 });
 
+test("the bracket limits (nesting.ts) leave footnote references and notes alone", () => {
+  // 40 references in one paragraph open and close 40 brackets, past the 32 a paragraph may hold open.
+  const refs = Array.from({ length: 40 }, (_, index) => `Claim ${index}[^n${index}].`).join(" ");
+  const notes = Array.from({ length: 40 }, (_, index) => `[^n${index}]: Note ${index}.`).join(
+    "\n\n",
+  );
+  for (const streaming of [true, false]) {
+    render(`${refs}\n\n${notes}\n`, streaming);
+    const links = [...host.querySelectorAll("p sup a")].slice(0, 40);
+    expect(links.map((link) => link.textContent)).toEqual(
+      Array.from({ length: 40 }, (_, index) => String(index + 1)),
+    );
+    expect(host.textContent).not.toContain("[^");
+  }
+  expect(target(host.querySelector("p sup a"))?.textContent).toMatch(/^Note 0\./);
+  // The longest label: `[^`, 999 characters and `]`.
+  const label = "a".repeat(999);
+  render(`See[^${label}].\n\n[^${label}]: Long.\n`);
+  expect(target(host.querySelector("p sup a"))?.textContent).toMatch(/^Long\./);
+});
+
 test("a finished answer re-rendered with no change keeps every view", () => {
   const answer = createAnswer("t");
   const first = answer.update(DOC, false);
