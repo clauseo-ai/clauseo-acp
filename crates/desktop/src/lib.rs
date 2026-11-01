@@ -7,7 +7,9 @@
 //!   sources), the `PassthroughLauncher`, and the refused folders of `refused_folders`. Exit
 //!   waits for `HostHandle::shutdown` and `HostJoin::join` on their own thread, then exits.
 //! - Nine async commands (`commands.rs`), each granted by its own permission in
-//!   `capabilities/main.json` and listed in `build.rs`'s `AppManifest`; nothing else is granted.
+//!   `capabilities/main.json` and listed in `build.rs`'s `AppManifest`. Beside them that file
+//!   grants only the six core window commands of the room's title bar (`window_frame.rs`,
+//!   `docs/decisions/0015-window-frame.md`).
 //!   Every argument is checked in Rust first, and every host call runs as `LocalDesktop`.
 //!   The `e2e` build adds `perf_channel_bytes` (`e2e.rs`, granted by `capabilities/e2e.json`),
 //!   and the `marks` build `marks_memory` and `marks_finish` (`marks.rs`,
@@ -42,6 +44,7 @@ mod picked;
 mod rust_only;
 #[cfg(test)]
 mod test_support;
+mod window_frame;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -101,7 +104,15 @@ pub fn run() -> tauri::Result<()> {
         // No endpoints, and an empty `pubkey` in tauri.conf.json: it never finds or installs an
         // update.
         .plugin_rust_only(tauri_plugin_updater::Builder::new().build())
-        .plugin_rust_only(tauri_plugin_window_state::Builder::new().build())
+        // Not decorations: the frame is this build's (window_frame.rs), never a saved one.
+        .plugin_rust_only(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::DECORATIONS,
+                )
+                .build(),
+        )
         // dialog and opener are called from Rust only; the webview gets no permission for them.
         .plugin_rust_only(tauri_plugin_dialog::init())
         .plugin_rust_only(tauri_plugin_opener::init())
@@ -223,19 +234,21 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
 }
 
 /// Builds the `main` window in code, not in `tauri.conf.json`, so builds can add webview arguments
-/// here. The https scheme is fixed before the first release: changing it moves web storage. The
+/// here, and give it this build's frame (`window_frame.rs`). The https scheme is fixed before the first release: changing it moves web storage. The
 /// title is `productName` from `tauri.conf.json`.
 fn open_main_window(app: &App) -> tauri::Result<()> {
     let title = app.package_info().name.clone();
     let builder = WebviewWindowBuilder::new(app, MAIN_WINDOW, WebviewUrl::App("index.html".into()))
         .title(title)
         .use_https_scheme(true);
+    let builder = window_frame::with_frame(builder);
     #[cfg(all(windows, feature = "e2e"))]
     let builder = e2e::with_debugging_port(builder);
     // The page's perf globals, before any page script.
     #[cfg(feature = "e2e")]
     let builder = builder.initialization_script(e2e::init_script());
-    builder.build()?;
+    let window = builder.build()?;
+    window_frame::after_build(&window);
     Ok(())
 }
 

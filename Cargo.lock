@@ -849,6 +849,7 @@ dependencies = [
  "tauri-runtime",
  "tauri-specta",
  "uuid",
+ "windows",
 ]
 
 [[package]]

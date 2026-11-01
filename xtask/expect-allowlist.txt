@@ -33,6 +33,7 @@ crates/desktop/src/e2e.rs epoch_ms clippy::disallowed_methods
 crates/desktop/src/e2e.rs grant_scoreboard clippy::disallowed_methods
 crates/desktop/src/marks.rs write_run clippy::disallowed_methods
 crates/desktop/src/marks/macos.rs - unsafe_code
+crates/desktop/src/window_frame/windows.rs - unsafe_code
 crates/desktop/src/rust_only.rs Builder::plugin_rust_only clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::with_agent clippy::disallowed_methods
 crates/desktop/src/test_support.rs Scratch::drop clippy::disallowed_methods

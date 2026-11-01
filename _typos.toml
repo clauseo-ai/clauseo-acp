@@ -22,3 +22,5 @@ extend-ignore-re = ["U\\+[0-9A-Fa-f]{4,6}(?:-[0-9A-Fa-f]{4,6})?"]
 [default.extend-words]
 # HTML's named character reference for ¤ (the currency sign), in ui/patches/'s entity decoder.
 curren = "curren"
+# Win32's TrackMouseEvent flags (TME_LEAVE, TME_NONCLIENT), in crates/desktop/src/window_frame/.
+TME = "TME"
