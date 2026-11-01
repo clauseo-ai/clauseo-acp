@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
-use super::{Found, FoundKind, walk};
+use super::{Found, FoundKind, walk, walk_first};
 use crate::PlaceholderProbe;
 use crate::no_download::NoDownload;
 use crate::test_dir::TestDir;
@@ -258,4 +258,46 @@ fn walk_of_a_root_that_cannot_be_entered_fails() {
         matches!(err, crate::Error::Io { op: "stat", .. }),
         "{err:?}"
     );
+}
+
+#[test]
+fn walk_first_lists_what_walk_lists_in_order_and_stops_past_the_limit() {
+    let dir = TestDir::new("walk-first");
+    let root = dir.path();
+    // `a.txt` sorts before `a/` and `a0` after it; uppercase before lowercase.
+    for relative in [
+        "a.txt",
+        "a/b.txt",
+        "a/a/c.txt",
+        "a0",
+        "a-b/x",
+        "Z",
+        "b/~$lock.docx",
+        "b/c/d/e.txt",
+        "c.tmp",
+        ".git/HEAD",
+        "z",
+    ] {
+        put(root, relative, 1);
+    }
+    let probe = NamedProbe(vec![]);
+    let all = walk_all(root, &probe, u64::MAX);
+    assert_eq!(
+        paths(&all),
+        [
+            "Z",
+            "a-b/x",
+            "a.txt",
+            "a/a/c.txt",
+            "a/b.txt",
+            "a0",
+            "b/c/d/e.txt",
+            "z"
+        ]
+    );
+    for limit in 0..=all.len() + 1 {
+        let first = walk_first(root, &NoDownload::begin(&probe), u64::MAX, limit).unwrap();
+        let expected = &all[..all.len().min(limit + 1)];
+        assert_eq!(first.files, expected, "limit {limit}");
+    }
 }

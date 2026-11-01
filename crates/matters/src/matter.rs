@@ -21,7 +21,7 @@ use crate::types::{
     RestoreFiles, RestorePlan, Restored, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone,
     VersionFile,
 };
-use crate::{Error, MissingReason, compare, refuse, restore, scan, undo, write};
+use crate::{Error, MissingReason, compare, papers, refuse, restore, scan, undo, write};
 
 /// The git dir's name inside `<matters root>/<matter id>/`.
 const GIT_DIR: &str = "history.git";
@@ -390,6 +390,23 @@ impl Matter {
             json::check(&self.folder, self.id)?;
         }
         compare::compare(&self.core, &self.folder, &self.settings, from, to)
+    }
+
+    /// The first `limit` files of the folder as it is now, sorted by path bytes: the files
+    /// Clauseo versions as [`PaperList::papers`](crate::PaperList::papers) with their size and
+    /// modification time, the ones it does not (over the size cap, cloud-only) as
+    /// [`PaperList::skipped`](crate::PaperList::skipped) with the reason, and
+    /// [`PaperList::truncated`](crate::PaperList::truncated) when the folder holds more. The rules
+    /// are the checkpoint walk's (`walk.rs`): the same exclusions, never a symlink, the same
+    /// size cap and cloud-only probe, under the same no-download guard. It only stats: no file
+    /// is opened, so an unreadable file is listed as a paper (a checkpoint tries to version it),
+    /// and the files under a subfolder that does not read are not listed at all. The walk stops
+    /// at the first file past `limit` and never reads a folder that sorts after it.
+    /// `matter.folder_missing` when the folder is gone or its `matter.json` names another
+    /// matter.
+    pub fn papers(&self, limit: usize) -> Result<crate::PaperList, Error> {
+        json::check(&self.folder, self.id)?;
+        papers::papers(&self.folder, &self.settings, limit)
     }
 
     /// Every file of checkpoint `checkpoint`'s tree, sorted by path. Needs only the history.

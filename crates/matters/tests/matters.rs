@@ -101,3 +101,7 @@ mod failed_publish;
 #[cfg(test)]
 #[path = "matters/drive_root.rs"]
 mod drive_root;
+
+#[cfg(test)]
+#[path = "matters/papers.rs"]
+mod papers;
