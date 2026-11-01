@@ -47,6 +47,11 @@ test.each([
   ["a lone list marker", "Before.\n- ", "<p>Before.</p>"],
   ["a lone heading marker", "Before.\n##", "<p>Before.</p>"],
   ["a fence's first backticks", "Before.\n``", "<p>Before.</p>"],
+  [
+    "five open runs: the innermost four close, the outer one stays text",
+    "*a _b ~~c **d *e f",
+    "<p>*a <em>b <del>c <strong>d <em>e f</em></strong></del></em></p>",
+  ],
 ])("the streaming tail with %s", (_, text, html) => {
   expect(tail(text)).toBe(html);
 });
