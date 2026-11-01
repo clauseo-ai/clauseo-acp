@@ -55,6 +55,7 @@ pub struct HostConfig {
     managed_mcp: PathBuf,
     app_capacity: usize,
     codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
+    pre_write_guard: Option<PathBuf>,
 }
 
 /// A `HostConfig` taken apart by the host thread.
@@ -69,6 +70,7 @@ pub(crate) struct ConfigParts {
     pub(crate) managed_mcp: PathBuf,
     pub(crate) app_capacity: usize,
     pub(crate) codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
+    pub(crate) pre_write_guard: Option<PathBuf>,
 }
 
 impl HostConfig {
@@ -86,6 +88,7 @@ impl HostConfig {
             app_capacity: SUBSCRIPTION_CAPACITY,
             managed_mcp: crate::agent::loads::managed_mcp_path(),
             codex_hooks: None,
+            pre_write_guard: None,
         }
     }
 
@@ -110,6 +113,16 @@ impl HostConfig {
     /// of their own.
     pub fn with_managed_mcp_path(mut self, path: PathBuf) -> Self {
         self.managed_mcp = path;
+        self
+    }
+
+    /// The program Claude Code's `PreToolUse` hook runs, with the one argument
+    /// [`pre_write_guard::FLAG`](crate::pre_write_guard::FLAG), before each file edit and shell
+    /// command (default: none, and no hook goes). The desktop passes its own executable, whose
+    /// `main` runs [`pre_write_guard::run`](crate::pre_write_guard::run) on that argument.
+    /// `agent/loads.rs` builds the hook entry.
+    pub fn with_pre_write_guard(mut self, program: PathBuf) -> Self {
+        self.pre_write_guard = Some(program);
         self
     }
 
@@ -161,6 +174,7 @@ impl HostConfig {
             app_capacity: self.app_capacity,
             managed_mcp: self.managed_mcp,
             codex_hooks: self.codex_hooks,
+            pre_write_guard: self.pre_write_guard,
         }
     }
 }

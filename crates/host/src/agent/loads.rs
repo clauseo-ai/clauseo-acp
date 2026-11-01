@@ -11,8 +11,11 @@
 //! over it or taken out: the hook cannot widen `settingSources` (clauseo-acp-private#185), not
 //! even through `extraArgs`.
 
+mod codex;
 #[cfg(test)]
 mod tests;
+
+pub use codex::codex_hook_config;
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -96,9 +99,13 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 /// - Under [`McpControl::Managed`]: `strictMcpConfig: false`, `settingSources`
 ///   [`CLAUDE_MANAGED_SETTING_SOURCES`], no `mcpServers`, and no `mcp-config` or
 ///   `strict-mcp-config` in `extraArgs` (either makes Claude Code refuse to start there).
+/// - With a `guard` program: [`guard_entry`] appended to
+///   `claudeCode.options.settings.hooks.PreToolUse`, after any entries the hook put there; a
+///   hook value at `settings`, `hooks` or `PreToolUse` of another type is replaced.
 pub(crate) fn session_meta(
     hook: Option<Map<String, Value>>,
     control: McpControl,
+    guard: Option<&Path>,
 ) -> Map<String, Value> {
     let mut meta = hook.unwrap_or_default();
     let mut claude = take_object(&mut meta, "claudeCode");
@@ -123,6 +130,18 @@ pub(crate) fn session_meta(
     }
     options.insert("strictMcpConfig".to_owned(), Value::Bool(strict));
     options.insert("settingSources".to_owned(), Value::from(sources.to_vec()));
+    if let Some(entry) = guard.and_then(guard_entry) {
+        let mut settings = take_object(&mut options, "settings");
+        let mut hooks = take_object(&mut settings, "hooks");
+        let mut pre_tool_use = match hooks.remove("PreToolUse") {
+            Some(Value::Array(entries)) => entries,
+            _ => Vec::new(),
+        };
+        pre_tool_use.push(entry);
+        hooks.insert("PreToolUse".to_owned(), Value::Array(pre_tool_use));
+        settings.insert("hooks".to_owned(), Value::Object(hooks));
+        options.insert("settings".to_owned(), Value::Object(settings));
+    }
     claude.insert("options".to_owned(), Value::Object(options));
     meta.insert("claudeCode".to_owned(), Value::Object(claude));
     meta
@@ -141,6 +160,50 @@ const SETTING_SOURCES_FLAG: &str = "setting-sources";
 /// The flags that make Claude Code refuse to start while `managed-mcp.json` is present: a
 /// server config, and strict MCP config.
 const MANAGED_MCP_FLAGS: [&str; 2] = ["mcp-config", "strict-mcp-config"];
+
+/// The tools the pre-write guard's hook runs before: Claude Code's file tools (`MultiEdit` is
+/// only a legacy alias at 2.1.293, harmless to keep) and `Bash`, which the guard checks by a
+/// heuristic. A matcher of names joined by `|` is an exact list.
+pub(crate) const GUARD_MATCHER: &str = "Edit|Write|MultiEdit|NotebookEdit|Bash";
+
+/// The seconds Claude Code waits for the guard before going on without it (default 600).
+pub(crate) const GUARD_TIMEOUT_SECONDS: u64 = 10;
+
+/// The `PreToolUse` entry that runs `program` with [`pre_write_guard::FLAG`]
+/// (`crate::pre_write_guard`) before each of [`GUARD_MATCHER`]'s tools. `None`, with a
+/// warning, when `program` is no UTF-8 string: JSON cannot carry it, and a lossy copy could run
+/// another program.
+///
+/// It goes in Claude Code's flag settings (`options.settings`), which load whatever the
+/// `settingSources`. It uses the exec form (`command` plus `args`): Claude Code spawns
+/// `command` directly with `args`, with no shell on any OS, so the path needs no quoting for
+/// `/bin/sh`, Git Bash or PowerShell (CLI 2.1.293, the one bundled with claude-agent-acp
+/// 0.89.1: the command hook schema's `args`, "spawned directly with these arguments, no shell",
+/// and the runner's `spawn(command, args)` without `shell` when `args` is set;
+/// research-claude.md's `cli-embedded.js.txt` at characters 972200 and 11214500). Its one
+/// risk: a CLI that predates the exec form would drop `args` and run `command` alone through
+/// its shell, which starts the app on every edit. The CLI comes bundled with the pinned
+/// adapter, so that needs an adapter downgrade.
+///
+/// [`pre_write_guard::FLAG`]: crate::pre_write_guard::FLAG
+pub(crate) fn guard_entry(program: &Path) -> Option<Value> {
+    let Some(command) = program.to_str() else {
+        tracing::warn!(
+            program = %program.display(),
+            "the pre-write guard's program path is not UTF-8: no guard hook goes to the agent"
+        );
+        return None;
+    };
+    Some(serde_json::json!({
+        "matcher": GUARD_MATCHER,
+        "hooks": [{
+            "type": "command",
+            "command": command,
+            "args": [crate::pre_write_guard::FLAG],
+            "timeout": GUARD_TIMEOUT_SECONDS,
+        }],
+    }))
+}
 
 /// The object at `key`, taken out of `map`; empty when it is missing or not an object.
 fn take_object(map: &mut Map<String, Value>, key: &str) -> Map<String, Value> {

@@ -93,6 +93,8 @@ pub(crate) struct Actor {
     /// The Codex hooks object a test set (`HostConfig::with_codex_hooks`); read only through
     /// the codex hooks seam, `turn::agents::codex_hooks`.
     pub(crate) codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
+    /// The program the pre-write guard hook runs, if any (`HostConfig::with_pre_write_guard`).
+    pub(crate) pre_write_guard: Option<std::path::PathBuf>,
     pub(crate) refused_folders: Vec<PathBuf>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) ids: Ids,

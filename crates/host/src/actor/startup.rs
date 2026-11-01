@@ -77,6 +77,7 @@ pub(super) async fn open(
         profile: parts.profile,
         managed_mcp: parts.managed_mcp,
         codex_hooks: parts.codex_hooks,
+        pre_write_guard: parts.pre_write_guard,
         refused_folders: parts.refused_folders,
         clock: parts.clock,
         ids: Ids::new(parts.ids),

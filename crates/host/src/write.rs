@@ -123,6 +123,19 @@ pub(crate) fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
 }
 
+/// Opens `path` for reading with a share mode that lets others read but not write or delete
+/// (`FILE_SHARE_READ`), as Word holds a document. For the pre-write guard's Windows test.
+#[cfg(all(test, windows))]
+pub(crate) fn open_deny_write(path: &Path) -> io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    /// `FILE_SHARE_READ`.
+    const SHARE_READ: u32 = 0x1;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(SHARE_READ)
+        .open(path)
+}
+
 /// Makes `link` a symbolic link to `target`. For unit tests: a matter stored as a link.
 #[cfg(all(test, unix))]
 pub(crate) fn symlink(target: &Path, link: &Path) -> io::Result<()> {

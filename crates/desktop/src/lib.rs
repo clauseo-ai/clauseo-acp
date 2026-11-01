@@ -9,6 +9,8 @@
 //!   `Effective::load` with the system policy sources), the `PassthroughLauncher`, and the
 //!   refused folders of `refused_folders`. Exit waits for the start, then for
 //!   `HostHandle::shutdown` and `HostJoin::join`, on their own thread, then exits.
+//! - The host's pre-write guard hook runs this executable with `--pre-write-guard`, which `main`
+//!   answers before anything starts ([`guard_requested`], `pre_write_guard.rs`).
 //! - Thirteen async commands (`commands.rs`), each granted by its own permission in
 //!   `capabilities/main.json` and listed in `build.rs`'s `AppManifest`. Beside them that file
 //!   grants only the two window commands of Tauri's drag script, and `window_frame.rs` adds
@@ -51,6 +53,7 @@ mod host_start;
 mod marks;
 mod open;
 mod picked;
+mod pre_write_guard;
 mod rust_only;
 #[cfg(test)]
 mod test_support;
@@ -67,6 +70,7 @@ use clauseo_settings::{
     Effective, Locations, PlatformDirs as _, SystemDirs, SystemEnv, SystemFiles,
 };
 use host_start::{HostCell, HostStart};
+pub use pre_write_guard::guard_requested;
 use rust_only::PluginRustOnly;
 use tauri::{App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder};
 
@@ -205,8 +209,13 @@ fn host_config(locations: &Locations) -> HostConfig {
         spawn = spawn.home(home);
     }
     let launcher = PassthroughLauncher::new(spawn);
-    HostConfig::new(effective, Arc::new(launcher))
-        .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs))
+    let config = HostConfig::new(effective, Arc::new(launcher))
+        .with_refused_folders(clauseo_settings::refused_folders(&SystemDirs));
+    // With no path to this executable no guard hook goes; the permission check remains.
+    match std::env::current_exe() {
+        Ok(exe) => config.with_pre_write_guard(exe),
+        Err(_) => config,
+    }
 }
 
 /// Stops the host off the UI thread (waits for its start, shuts it down, joins it), then exits
