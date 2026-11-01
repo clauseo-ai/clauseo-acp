@@ -121,7 +121,8 @@ function RoomFrame({ transport }: { transport: HostTransport }) {
         finalFocus={newMatter}
       />
       {/* U3's work goes here, one per matter: {open !== null && <Work key={open.matter} transport={transport}
-          matter={open} onThread={matters.onThread} />}, with view.folderMissing for its composer's gate */}
+          matter={open} onThread={matters.onThread} />}; while view.folderMissing it shows moved.tsx's MovedFolder in the
+          thread's place and LocateGate as the composer's gate, both with onLocate={() => matters.locate(open.matter)} */}
       <main className="room-centre" ref={nodes.slot("centre")} />
       <aside className="room-pane" ref={nodes.slot("pane")}>
         {papers !== null &&

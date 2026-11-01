@@ -2,6 +2,7 @@
 // next free id for the brief ("U1-04"), the words file and English key (words.ts's helpers), the screen, the state
 // that shows it (the real screen over a scripted host, built in the render function), and, where the default desktop
 // window (entry.ts) doesn't suit, the width and height to render at. Approvals live in ui/app/copy-approvals.json.
+import { LocateGate, MovedFolder } from "../room/moved.tsx";
 import { ScratchLine } from "../room/scratch-line.tsx";
 import type { Entry } from "./entry.ts";
 import { MATTER, NEW_MATTER, railHost, refusingHost, roomHost, type Step } from "./hosts.ts";
@@ -176,5 +177,42 @@ export const REGISTRY: readonly Entry[] = [
     width: 640,
     height: 120,
     render: () => <ScratchLine />,
+  },
+  // matters/moved: the parts U3's Work renders from folderMissing (room/moved.tsx)
+  {
+    id: "U2-23",
+    words: matterWords("This matter's folder has moved."),
+    screen: "matters/moved",
+    width: 640,
+    height: 320,
+    render: () => <MovedFolder folder="~/Documents/Khan Leather Works" onLocate={() => {}} />,
+  },
+  {
+    id: "U2-24",
+    words: matterWords(
+      "It was at {path}. Find it where it is now, and the matter opens as you left it.",
+    ),
+    screen: "matters/moved",
+    width: 640,
+    height: 320,
+    render: () => <MovedFolder folder="~/Documents/Khan Leather Works" onLocate={() => {}} />,
+  },
+  {
+    id: "U2-25",
+    words: matterWords(
+      "Its conversations and versions are kept on this computer, so nothing is lost while the folder is away.",
+    ),
+    screen: "matters/moved",
+    width: 640,
+    height: 320,
+    render: () => <MovedFolder folder="~/Documents/Khan Leather Works" onLocate={() => {}} />,
+  },
+  {
+    id: "U2-26",
+    words: matterWords("Locate the folder to ask about this matter"),
+    screen: "matters/moved",
+    width: 640,
+    height: 120,
+    render: () => <LocateGate onLocate={() => {}} />,
   },
 ];
