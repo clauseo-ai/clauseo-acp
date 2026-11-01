@@ -12,8 +12,12 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 import spec from "commonmark-spec/spec.txt?raw";
 import { createAnswer } from "./answer.ts";
 import gfmSpec from "./gfm-spec.json";
+import { loadEntities } from "./entities.ts";
 import { Markdown } from "./markdown.tsx";
 import { examplesOf, withTabs } from "./spec-fixture.ts";
+
+// The full entity table, which the renderer loads lazily (entities.ts), is loaded first.
+await loadEntities();
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

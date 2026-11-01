@@ -1,3 +1,253 @@
+diff --git a/index.d.ts b/index.d.ts
+index 874bb5c29f16e985123eb24749cba1cf1749131e..683e712d3dc29fa0c1259ad574b7e834855d2e6d 100644
+--- a/index.d.ts
++++ b/index.d.ts
+@@ -1,13 +1,13 @@
+ /**
+- * Decode a single character reference (without the `&` or `;`).
+- * You probably only need this when you’re building parsers yourself that follow
+- * different rules compared to HTML.
+- * This is optimized to be tiny in browsers.
+- *
+- * @param {string} value
+- *   `notin` (named), `#123` (deci), `#x123` (hexa).
+- * @returns {string|false}
+- *   Decoded reference.
++ * Decode a single named character reference (without the `&` or `;`): the common set until the full
++ * table has loaded (loadCharacterEntities), the full table after.
+  */
+ export function decodeNamedCharacterReference(value: string): string | false;
+-//# sourceMappingURL=index.d.ts.map
+\ No newline at end of file
++/** Whether the full table has loaded. */
++export function characterEntitiesLoaded(): boolean;
++/** How many lookups missed before the full table loaded. */
++export function characterReferenceMisses(): number;
++/** Load the full table (its own chunk), once. */
++export function loadCharacterEntities(): Promise<void>;
++/** Hear when the full table has arrived; returns the unsubscribe. */
++export function onCharacterEntities(listener: () => void): () => void;
+diff --git a/index.d.ts.map b/index.d.ts.map
+deleted file mode 100644
+index 5b0e0481ae3274178f33465a729b18f6818ecacf..0000000000000000000000000000000000000000
+diff --git a/index.dom.d.ts b/index.dom.d.ts
+index 9e3f4258abdf26abf272e9465d166ee808f3c53d..ee01cc9bd3233f5e67b050d48e22202b495a4a0a 100644
+--- a/index.dom.d.ts
++++ b/index.dom.d.ts
+@@ -1,6 +1 @@
+-/**
+- * @param {string} value
+- * @returns {string | false}
+- */
+-export function decodeNamedCharacterReference(value: string): string | false;
+-//# sourceMappingURL=index.dom.d.ts.map
+\ No newline at end of file
++export * from './index.js';
+diff --git a/index.dom.d.ts.map b/index.dom.d.ts.map
+deleted file mode 100644
+index 5cb104535c3e35bab0b8ea0fd7b8f26b3db2e414..0000000000000000000000000000000000000000
+diff --git a/index.dom.js b/index.dom.js
+index 477e4d116c623630f0fa52ade6d6672bb5e02f5d..f6bf710b21d5da27a615d8b084dbfa0e91257ceb 100644
+--- a/index.dom.js
++++ b/index.dom.js
+@@ -1,32 +1,2 @@
+-/// <reference lib="dom" />
+-
+-/* global document */
+-
+-const element = document.createElement('i')
+-
+-/**
+- * @param {string} value
+- * @returns {string | false}
+- */
+-export function decodeNamedCharacterReference(value) {
+-  const characterReference = '&' + value + ';'
+-  element.innerHTML = characterReference
+-  const character = element.textContent
+-
+-  // Some named character references do not require the closing semicolon
+-  // (`&not`, for instance), which leads to situations where parsing the assumed
+-  // named reference of `&notit;` will result in the string `¬it;`.
+-  // When we encounter a trailing semicolon after parsing, and the character
+-  // reference to decode was not a semicolon (`&semi;`), we can assume that the
+-  // matching was not complete.
+-  if (
+-    character.charCodeAt(character.length - 1) === 59 /* `;` */ &&
+-    value !== 'semi'
+-  ) {
+-    return false
+-  }
+-
+-  // If the decoded string is equal to the input, the character reference was
+-  // not valid.
+-  return character === characterReference ? false : character
+-}
++// Patched by Clauseo: the DOM build decoded by assigning HTML to an element; it is index.js now.
++export * from './index.js'
+diff --git a/index.js b/index.js
+index 97952af0a6ed28b4e6d625952770b3758d1c3a5c..0567350e0b8c6ad0aeb32803e68798fa84c35f7b 100644
+--- a/index.js
++++ b/index.js
+@@ -1,19 +1,149 @@
+-import {characterEntities} from 'character-entities'
++// Patched by Clauseo (ui/patches/, ui/pnpm-workspace.yaml): micromark decodes named character references
++// here, for every consumer of the answer renderer. The full HTML table (character-entities, about 10 KB
++// brotli) is no longer part of the first load: the references people actually write are known at once, the
++// table arrives later as its own chunk (loadCharacterEntities, which the renderer calls when the browser is
++// idle), and a parse that met a name the common set does not know can be redone once it has arrived. No
++// HTML parsing anywhere: the original browser build decoded by assigning HTML to an element, which Trusted Types refuses.
+ 
+-// To do: next major: use `Object.hasOwn`.
+ const own = {}.hasOwnProperty
+ 
+ /**
+- * Decode a single character reference (without the `&` or `;`).
+- * You probably only need this when you’re building parsers yourself that follow
+- * different rules compared to HTML.
+- * This is optimized to be tiny in browsers.
++ * The common set: the HTML 4 Latin-1 names (U+00A0 to U+00FF in order; copyright, section and paragraph
++ * signs, fractions, currency, accented letters), the five markup characters (upper case too), and the
++ * HTML 4 typography, arrows and relations that writers and models reach for.
++ */
++const LATIN1 =
++  'nbsp iexcl cent pound curren yen brvbar sect uml copy ordf laquo not shy reg macr deg plusmn sup2 ' +
++  'sup3 acute micro para middot cedil sup1 ordm raquo frac14 frac12 frac34 iquest Agrave Aacute Acirc ' +
++  'Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml ETH Ntilde Ograve ' +
++  'Oacute Ocirc Otilde Ouml times Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig agrave aacute ' +
++  'acirc atilde auml aring aelig ccedil egrave eacute ecirc euml igrave iacute icirc iuml eth ntilde ' +
++  'ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml yacute thorn yuml'
++
++/** @type {Record<string, string>} */
++const common = {
++  amp: '&',
++  AMP: '&',
++  lt: '<',
++  LT: '<',
++  gt: '>',
++  GT: '>',
++  quot: '"',
++  QUOT: '"',
++  apos: "'",
++  COPY: '\u00A9',
++  REG: '\u00AE',
++  trade: '\u2122',
++  TRADE: '\u2122',
++  ensp: '\u2002',
++  emsp: '\u2003',
++  thinsp: '\u2009',
++  zwnj: '\u200C',
++  zwj: '\u200D',
++  lrm: '\u200E',
++  rlm: '\u200F',
++  ndash: '\u2013',
++  mdash: '\u2014',
++  lsquo: '\u2018',
++  rsquo: '\u2019',
++  sbquo: '\u201A',
++  ldquo: '\u201C',
++  rdquo: '\u201D',
++  bdquo: '\u201E',
++  dagger: '\u2020',
++  Dagger: '\u2021',
++  bull: '\u2022',
++  hellip: '\u2026',
++  permil: '\u2030',
++  prime: '\u2032',
++  Prime: '\u2033',
++  lsaquo: '\u2039',
++  rsaquo: '\u203A',
++  euro: '\u20AC',
++  larr: '\u2190',
++  uarr: '\u2191',
++  rarr: '\u2192',
++  darr: '\u2193',
++  harr: '\u2194',
++  lArr: '\u21D0',
++  rArr: '\u21D2',
++  hArr: '\u21D4',
++  minus: '\u2212',
++  infin: '\u221E',
++  asymp: '\u2248',
++  ne: '\u2260',
++  le: '\u2264',
++  ge: '\u2265',
++  check: '\u2713',
++  cross: '\u2717'
++}
++
++LATIN1.split(' ').forEach(function (name, index) {
++  common[name] = String.fromCharCode(160 + index)
++})
++
++/** @type {Record<string, string> | undefined} */
++let table
++/** @type {Promise<void> | undefined} */
++let loading
++let misses = 0
++/** @type {Set<() => void>} */
++const listeners = new Set()
++
++/**
++ * Decode a single named character reference (without the `&` or `;`): the common set until the full table
++ * has loaded, the full table after. A name the common set does not know counts as a miss.
+  *
+  * @param {string} value
+- *   `notin` (named), `#123` (deci), `#x123` (hexa).
+  * @returns {string|false}
+- *   Decoded reference.
+  */
+ export function decodeNamedCharacterReference(value) {
+-  return own.call(characterEntities, value) ? characterEntities[value] : false
++  const entities = table || common
++  if (own.call(entities, value)) return entities[value]
++  if (!table) misses++
++  return false
++}
++
++/** @returns {boolean} Whether the full table has loaded. */
++export function characterEntitiesLoaded() {
++  return table !== undefined
++}
++
++/** @returns {number} How many lookups missed before the full table loaded. */
++export function characterReferenceMisses() {
++  return misses
++}
++
++/**
++ * Load the full table (its own chunk), once; listeners hear when it has arrived.
++ *
++ * @returns {Promise<void>}
++ */
++export function loadCharacterEntities() {
++  if (!loading) {
++    loading = import('character-entities').then(
++      function (module) {
++        table = module.characterEntities
++        for (const listener of listeners) listener()
++      },
++      function (error) {
++        loading = undefined
++        throw error
++      }
++    )
++  }
++  return loading
++}
++
++/**
++ * @param {() => void} listener
++ *   Called once the full table has arrived.
++ * @returns {() => void}
++ *   Unsubscribe.
++ */
++export function onCharacterEntities(listener) {
++  listeners.add(listener)
++  return function () {
++    listeners.delete(listener)
++  }
+ }
 diff --git a/package.json b/package.json
 index 7acaf6ce27ac9571c01dfee43b1db3590c9223cf..cb01a42c69251d143aa1bb19501bdb4a8ddcc113 100644
 --- a/package.json

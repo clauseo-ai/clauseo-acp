@@ -1,10 +1,11 @@
 // The answer renderer: one memoised block per top-level Markdown block, so finished blocks never re-render
 // while the tail streams. The model (answer.ts) does the split, the definitions, the parse and the
 // sanitiser; this file only maps each block's sanitised hast to React through our components.
-import { memo, useId, useState } from "react";
+import { memo, useEffect, useId, useState, useSyncExternalStore } from "react";
 import { createAnswer } from "./answer.ts";
 import type { BlockView } from "./answer.ts";
 import { BlockBoundary } from "./boundary.tsx";
+import { characterEntitiesLoaded, onCharacterEntities, prefetchEntities } from "./entities.ts";
 import { AnswerScopeContext, InertLinksContext, scopeOf } from "./host.ts";
 import { toReact } from "./to-react.ts";
 
@@ -37,6 +38,9 @@ function BlockContent({ view }: { view: BlockView }) {
 export function Markdown({ text, streaming = false }: MarkdownProps) {
   const scope = scopeOf(useId());
   const [answer] = useState(() => createAnswer(scope));
+  // Re-render once the full entity table arrives: the model then re-parses only the blocks that need it.
+  useSyncExternalStore(onCharacterEntities, characterEntitiesLoaded, characterEntitiesLoaded);
+  useEffect(prefetchEntities, []);
   const blocks = answer.update(text, streaming);
   return (
     <AnswerScopeContext value={scope}>

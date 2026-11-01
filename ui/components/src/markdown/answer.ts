@@ -22,6 +22,7 @@ import {
   prefixFor,
 } from "./definitions.ts";
 import type { DefinitionLine, DefinitionLines } from "./definitions.ts";
+import { characterEntitiesLoaded, characterReferenceMisses } from "./entities.ts";
 import {
   capNesting,
   deeperThan,
@@ -112,6 +113,10 @@ function createCache<V>() {
     keep(key: string) {
       used.add(key);
     },
+    /** Forget every entry whose key holds `text`. */
+    forget(text: string) {
+      for (const key of map.keys()) if (key.includes(text)) map.delete(key);
+    },
     sweep() {
       if (map.size > 2 * used.size + 16)
         for (const key of map.keys()) if (!used.has(key)) map.delete(key);
@@ -132,7 +137,16 @@ export function createAnswer(scope: string): Answer {
   const inputs = createCache<{ prefix: string; input: string }>();
   const views = createCache<BlockView>();
   const tails = createCache<BlockView>();
-  const tree = (source: string) => trees.get(source, () => parse(source));
+  // Whether a parse met a named character reference before the full table had loaded (entities.ts).
+  let missed = false;
+  let entities = characterEntitiesLoaded();
+  const tree = (source: string) =>
+    trees.get(source, () => {
+      const misses = characterReferenceMisses();
+      const root = parse(source);
+      if (!entities && characterReferenceMisses() !== misses) missed = true;
+      return root;
+    });
   const split = createSplitter((block) => ends.get(block, () => endOf(block, tree(block))));
   const options = { clobberPrefix: `${scope}-`, handlers: { html: htmlAsText } };
 
@@ -215,6 +229,15 @@ export function createAnswer(scope: string): Answer {
   let lastLinesUsed: DefinitionLines | undefined;
   return {
     update(raw, streaming) {
+      if (!entities && characterEntitiesLoaded()) {
+        // The full table arrived: blocks holding `&` are parsed again, the rest keep their views.
+        entities = true;
+        if (missed) {
+          for (const cache of [trees, owned, views, tails]) cache.forget("&");
+          lastLinesUsed = undefined;
+          lastText = undefined;
+        }
+      }
       if (raw === lastText && streaming === lastStreaming) return lastViews;
       const text = capNesting(raw.includes("\r") ? raw.replace(/\r\n?/g, "\n") : raw);
       let blocks: readonly string[];
