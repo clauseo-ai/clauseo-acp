@@ -25,8 +25,9 @@ export type PaperTileProps = {
   id: string;
   state: TileState;
   /** What stands where a paper book page would: the paper's pages, "1 to 12", or a word such as "Note", or one of
-   * Clauseo's own, "Dates", "Draft". */
-  numeral: PaperBookPlace;
+   * Clauseo's own, "Dates", "Draft". Optional: left out, the tile shows its title alone, as a file known only by its
+   * name. */
+  numeral?: PaperBookPlace;
   /** The short title, in the language. */
   title: string;
   /** What the tile says beyond its visible words, for assistive technology: its role in words, or what a press
@@ -115,20 +116,22 @@ export function PaperTile({
         onClick={onClick}
         onKeyDown={onKeyDown}
       >
-        <span className="tile-no">
-          {"word" in numeral ? (
-            <span className="tile-num" data-word="">
-              {numeral.word}
-            </span>
-          ) : (
-            <>
-              <span className="tile-num">{numeral.from}</span>
-              {numeral.to !== numeral.from && (
-                <span className="tile-to">{w.t("to {n}", { n: numeral.to })}</span>
-              )}
-            </>
-          )}
-        </span>
+        {numeral !== undefined && (
+          <span className="tile-no">
+            {"word" in numeral ? (
+              <span className="tile-num" data-word="">
+                {numeral.word}
+              </span>
+            ) : (
+              <>
+                <span className="tile-num">{numeral.from}</span>
+                {numeral.to !== numeral.from && (
+                  <span className="tile-to">{w.t("to {n}", { n: numeral.to })}</span>
+                )}
+              </>
+            )}
+          </span>
+        )}
         <span className="tile-title" lang={latin ? "en" : undefined}>
           {latin ? title : <Say>{title}</Say>}
         </span>

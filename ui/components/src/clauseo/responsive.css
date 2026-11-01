@@ -54,6 +54,11 @@
     width: auto;
     padding-right: var(--s3);
   }
+  /* likewise under the computer's own title bar (RoomToolbar's chrome "os"), on any platform */
+  .room-top[data-chrome="os"] .room-lead {
+    width: auto;
+    padding-right: var(--s3);
+  }
   /* the tools never squeeze under their own width, so History and Undo never slide under the plan; at a large text
        size the title gives way instead and wraps, and the toolbar grows */
   .room-tools {
