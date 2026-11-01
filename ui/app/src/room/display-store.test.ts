@@ -2,7 +2,7 @@
 // The room's display settings: read from and written to localStorage["clauseo.display"] in H7's `ui` shape, the
 // computer's light and reduced motion followed live until set, lite's batch, and with a NextHost the host's settings.
 import type { Display } from "@clauseo/components/lib/display.ts";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { frameBatch, liteBatch } from "../store/batch.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import {
@@ -13,6 +13,7 @@ import {
   type DisplayEnv,
 } from "./display-store.ts";
 import { nextHostOf, type Settings, type UiSettings } from "./host-next.ts";
+import { connectRoom } from "./start.ts";
 
 /** A media query the test flips by hand. */
 class FakeQuery extends EventTarget {
@@ -134,6 +135,29 @@ test("the platform is the host's, never a setting", () => {
   store.setPlatform("windows");
   expect(store.display().platform).toBe("windows");
   expect(saved()).toBeUndefined();
+});
+
+test("the first display is laid out for the platform the store starts with; the host's same answer moves nothing", () => {
+  const { store, started, shown } = harness({ platform: "windows" });
+  expect(started.map((d) => d.platform)).toEqual(["windows"]);
+  store.setPlatform("windows");
+  expect(shown).toEqual([]);
+  // a wrong guess is corrected by the host's answer
+  store.setPlatform("mac");
+  expect(shown.map((d) => d.platform)).toEqual(["mac"]);
+});
+
+test("connectRoom starts the display on the webview's own OS, and display_info confirms it", async () => {
+  vi.stubGlobal("navigator", { platform: "Win32", userAgent: "Windows NT 10.0" });
+  try {
+    const store = connectRoom(new FakeTransport({ platform: "windows" }));
+    expect(store.display().platform).toBe("windows");
+    expect(document.documentElement.dataset["platform"]).toBe("windows");
+    await settled();
+    expect(store.display().platform).toBe("windows");
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 test("an override shows for this page only, is never written, and a later set of the same key takes over", () => {

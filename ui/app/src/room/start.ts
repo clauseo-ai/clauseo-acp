@@ -1,7 +1,7 @@
 // The room's start, before its first render: its display settings on <html> (display-store.ts), the host's OS, and in
 // dev and e2e builds the hooks for checks by hand (dev-hooks.ts).
 import { showDisplay, startDisplay } from "@clauseo/components/lib/display.ts";
-import { hostPlatform } from "../platform.ts";
+import { guessPlatform, hostPlatform } from "../platform.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import { createDisplayStore, type DisplayStore } from "./display-store.ts";
 import { nextHostOf, type UiSettings } from "./host-next.ts";
@@ -37,6 +37,8 @@ export function connectRoom(
     host: nextHostOf(transport),
     start: startDisplay,
     show: showDisplay,
+    // the first frame lays out for the webview's own OS; display_info confirms it or corrects it
+    platform: guessPlatform(),
     ...(override === undefined ? {} : { override }),
   });
   connected = { transport, store };
