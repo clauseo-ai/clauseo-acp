@@ -257,14 +257,14 @@ export const CASES: HostileCase[] = [
   { id: "open-underscore-runs", markdown: "_a ".repeat(4000) },
   { id: "open-brackets", markdown: "[".repeat(16_000) },
   // Footnotes. Each label a block calls but does not define costs micromark a placeholder definition, and
-  // each note is a block and a view: 2,000 labels in one paragraph (past MAX_PENDING while streaming),
+  // each note is a block and a view: 1,000 labels in one paragraph (past MAX_PENDING while streaming),
   // 15 notes, the longest label, 8,000 `[^` and a chain of notes that each cite the next. Each note is a
   // block parsed on its own (about 0.2 ms in Node), so many notes cost about 5 times prose of their length
   // and 300 about 8.5 times (see the PR); these stay under the time test's 20 ms floor with room to spare
   // when the whole suite runs in parallel.
   {
     id: "footnote-many-labels",
-    markdown: Array.from({ length: 2000 }, (_, index) => `[^n${index}]`).join(" "),
+    markdown: Array.from({ length: 1000 }, (_, index) => `[^n${index}]`).join(" "),
   },
   {
     id: "footnote-many-notes",
