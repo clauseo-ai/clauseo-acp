@@ -115,11 +115,19 @@ fn token_px(css: &str, name: &str) -> f64 {
         .unwrap()
 }
 
-/// The declarations of the first rule whose selector is exactly `selector`.
+/// The declarations of the first rule whose selector is exactly `selector`, alone on its line
+/// (so `.room-top` is not found inside `:root[data-frame="own"] .room-top`).
 fn rule<'a>(css: &'a str, selector: &str) -> &'a str {
     let head = format!("{selector} {{");
-    let start = css.find(&head).unwrap_or_else(|| panic!("no {head}")) + head.len();
-    &css[start..start + css[start..].find('}').unwrap()]
+    let mut at = 0;
+    for line in css.split_inclusive('\n') {
+        if line.trim() == head {
+            let start = at + line.len();
+            return &css[start..start + css[start..].find('}').unwrap()];
+        }
+        at += line.len();
+    }
+    panic!("no {head}")
 }
 
 #[test]
