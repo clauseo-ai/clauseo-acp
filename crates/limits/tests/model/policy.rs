@@ -93,7 +93,7 @@ fn new_asks_no_read_for_a_cached_agent_not_given() {
     let (model, actions) = Limits::new(cached, &[CLAUDE], t0());
     assert_eq!(actions, vec![Action::Read(CLAUDE)]);
     assert!(!model.view(t0()).0.contains_key(&CODEX));
-    assert_eq!(model.at_limit(CODEX), None);
+    assert_eq!(model.at_limit(CODEX, t0()), None);
 }
 
 #[test]
@@ -103,15 +103,57 @@ fn new_counts_an_agent_given_twice_once() {
     assert_eq!(model.view(t0()).0.len(), 1);
 }
 
+/// A cached Claude entry of `email`, checked at `checked_at` with the 5-hour window at `used`.
+fn cached(email: &str, checked_at: clauseo_protocol::Timestamp, used: f64) -> AccountLimits {
+    AccountLimits {
+        account: clauseo_protocol::AccountRef(email.to_owned()),
+        source: LimitSource::Fresh { checked_at },
+        ..account(CLAUDE, vec![five_hour(used)])
+    }
+}
+
+/// The used percentage of Claude's meter at the start time.
+fn meter_percent(model: &Limits) -> f64 {
+    let meter = view_of(model, CLAUDE, t0()).meter.expect("a meter");
+    meter.used_percent.get()
+}
+
 #[test]
-fn new_takes_the_last_cached_entry_of_an_agent() {
-    let older = account(CLAUDE, vec![five_hour(10.0)]);
-    let newer = AccountLimits {
-        source: LimitSource::Fresh { checked_at: at(-1) },
-        ..account(CLAUDE, vec![five_hour(20.0)])
+fn new_keeps_the_newest_cached_entry_of_an_agent_in_store_order() {
+    let alice = cached("alice@example.com", at(-10), 10.0);
+    let zed = cached("zed@example.com", at(-30 * 24 * 60), 99.0);
+    let (model, _) = Limits::new(vec![alice, zed], &[CLAUDE], t0());
+    assert_eq!(view_of(&model, CLAUDE, t0()).checked_at, Some(at(-10)));
+    assert_eq!(meter_percent(&model), 10.0);
+}
+
+#[test]
+fn new_keeps_the_later_of_two_cached_entries_checked_at_the_same_time() {
+    let first = cached("alice@example.com", at(-1), 10.0);
+    let second = cached("zed@example.com", at(-1), 20.0);
+    let (model, _) = Limits::new(vec![first, second], &[CLAUDE], t0());
+    assert_eq!(meter_percent(&model), 20.0);
+}
+
+#[test]
+fn new_ranks_a_cached_entry_with_no_time_below_a_timed_one() {
+    let timed = AccountLimits {
+        source: LimitSource::LiveOnly {
+            updated_at: at(-60),
+        },
+        ..cached("alice@example.com", at(-60), 10.0)
     };
-    let (model, _) = Limits::new(vec![older, newer], &[CLAUDE], t0());
-    assert_eq!(view_of(&model, CLAUDE, t0()).checked_at, Some(at(-1)));
+    let untimed = AccountLimits {
+        billing: Billing::PayAsYouGo {
+            via: BillingProvider::Anthropic,
+        },
+        source: LimitSource::NotApplicable,
+        ..cached("zed@example.com", at(0), 0.0)
+    };
+    let (model, _) = Limits::new(vec![timed, untimed], &[CLAUDE], t0());
+    let view = view_of(&model, CLAUDE, t0());
+    assert_eq!(view.freshness, Freshness::Stale);
+    assert_eq!(view.checked_at, Some(at(-60)));
 }
 
 #[test]

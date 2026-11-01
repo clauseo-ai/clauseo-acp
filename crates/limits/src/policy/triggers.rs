@@ -1,17 +1,13 @@
 //! The read triggers: when a focus, a turn's end, a "try again" or an answered question starts
 //! a read. At most one read runs per agent, and none while the agent asks a question.
 
-use clauseo_protocol::{AgentKind, Timestamp};
+use clauseo_protocol::Timestamp;
 
 use crate::model::AgentState;
-use crate::policy::Action;
+use crate::policy::{Action, kind_rules};
 
 /// A window shown again reads when the last read started at least 5 minutes ago.
 const SHOWN_AFTER_MS: i64 = 5 * 60 * 1000;
-/// A Claude turn's end reads when the last read started at least 10 minutes ago.
-const CLAUDE_TURN_AFTER_MS: i64 = 10 * 60 * 1000;
-/// A Codex turn's end reads when the last read started at least 60 seconds ago.
-const CODEX_TURN_AFTER_MS: i64 = 60 * 1000;
 
 /// One agent's read policy state.
 #[derive(Debug, Clone, Default)]
@@ -47,7 +43,7 @@ pub(crate) fn shown(state: &mut AgentState, now: Timestamp, actions: &mut Vec<Ac
     read_if_older(state, SHOWN_AFTER_MS, now, actions);
 }
 
-/// A turn ended; `read_now` reads whatever the age.
+/// A turn ended; `read_now` reads whatever the age, else the agent kind's age applies.
 pub(crate) fn turn_ended(
     state: &mut AgentState,
     read_now: bool,
@@ -58,10 +54,7 @@ pub(crate) fn turn_ended(
         request_read(state, now, actions);
         return;
     }
-    let min_age = match state.agent {
-        AgentKind::Claude => CLAUDE_TURN_AFTER_MS,
-        AgentKind::Codex => CODEX_TURN_AFTER_MS,
-    };
+    let min_age = kind_rules(state.agent).turn_read_after_ms;
     read_if_older(state, min_age, now, actions);
 }
 

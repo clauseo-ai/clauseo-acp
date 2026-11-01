@@ -8,8 +8,8 @@ use crate::policy::Action;
 use crate::policy::triggers::request_read;
 
 /// Acts on every mark of `state` that passed by `now`: a row past its reset time shows no
-/// percentage and asks one read; a row past its stale mark is noted. Returns whether the view
-/// changed.
+/// percentage, drops its rejected flag (that limit is over) and asks one read; a row past its
+/// stale mark is noted. Returns whether the view changed.
 ///
 /// A reset that passed before the last read started asks no read: that read came after it. This
 /// keeps a vendor that reports a past reset time from starting a read after every read.
@@ -23,6 +23,7 @@ pub(crate) fn sweep(state: &mut AgentState, now: Timestamp, actions: &mut Vec<Ac
             && resets_at <= now
         {
             row.reset_passed = true;
+            row.rejected = false;
             changed = true;
             read |= last_started.is_none_or(|started| started < resets_at);
         }

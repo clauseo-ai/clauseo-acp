@@ -8,17 +8,50 @@ mod triggers;
 
 use std::collections::BTreeMap;
 
-use clauseo_protocol::{AccountLimits, AgentKind, LimitsView, Timestamp};
+use clauseo_protocol::{AccountLimits, AgentKind, LimitSource, LimitsView, Timestamp};
 
 use crate::model::{AgentState, LimitHit, LiveSignal, apply_live, apply_read};
 use crate::readers::ReadOutcome;
 use crate::view::agent_view;
+use crate::view::at_limit_words;
 
 pub(crate) use triggers::Reads;
 use triggers::request_read;
 
+/// What differs between agent kinds. Every per-kind rule of the model reads it, so a new kind
+/// is one more arm in [`kind_rules`], which the compiler asks for.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct KindRules {
+    /// A turn's end reads when the last read started at least this long ago, in milliseconds.
+    pub(crate) turn_read_after_ms: i64,
+    /// A live signal may add a window no read named yet (Claude's 5-hour and weekly windows).
+    pub(crate) live_rows: bool,
+    /// The at-limit line of an account that pauses at its limit, which names the agent.
+    pub(crate) pauses_words: &'static str,
+}
+
+/// The rules of `agent`'s kind.
+pub(crate) const fn kind_rules(agent: AgentKind) -> KindRules {
+    match agent {
+        AgentKind::Claude => KindRules {
+            turn_read_after_ms: 10 * 60 * 1000,
+            live_rows: true,
+            pauses_words: at_limit_words::CLAUDE_PAUSES,
+        },
+        AgentKind::Codex => KindRules {
+            turn_read_after_ms: 60 * 1000,
+            live_rows: false,
+            pauses_words: at_limit_words::CODEX_PAUSES,
+        },
+    }
+}
+
 /// The limits model: pure, no I/O and no clock. The host feeds it [`Input`]s with `now` and
 /// carries out the [`Action`]s it returns.
+///
+/// The host keeps one timer. After [`Limits::new`] and after every [`Limits::input`] it calls
+/// [`Limits::next_deadline`] again and re-arms the timer at that time, or cancels it on `None`:
+/// a read replaces rows and moves stale marks, and any input can move the deadline.
 #[derive(Debug)]
 pub struct Limits {
     /// One state per agent passed to `new`, in the order given.
@@ -52,11 +85,13 @@ pub enum Input {
         /// Read at once: an at-limit stop, or R16's Codex fallback.
         read_now: bool,
     },
-    /// A permission or elicitation of `agent` is pending (`asking: true`), or no longer.
+    /// Whether any permission or elicitation is pending in any session of `agent`. The host
+    /// counts them over every session and sends `asking: false` only when none is left; one
+    /// answered question among several still pending sends nothing.
     Asking {
         /// The agent.
         agent: AgentKind,
-        /// Whether a question is pending.
+        /// Whether any question of any of its sessions is pending.
         asking: bool,
     },
     /// A live rate-limit signal from `agent`.
@@ -66,7 +101,10 @@ pub enum Input {
         /// The signal.
         signal: LiveSignal,
     },
-    /// A read the model asked for has ended.
+    /// A read the model asked for has ended. The host sends exactly one `ReadDone` per
+    /// [`Action::Read`], as `Failed(TimedOut)` when it drops the read's future; until it comes,
+    /// every later read of that agent stays blocked. A `ReadDone` while no read of that agent is
+    /// in flight is ignored: nothing merges and no action goes out.
     ReadDone {
         /// The agent.
         agent: AgentKind,
@@ -80,7 +118,9 @@ pub enum Input {
 /// What the host does next.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
-    /// Start a read of this agent's limits, and send its outcome back as [`Input::ReadDone`].
+    /// Start a read of this agent's limits, and send its outcome back as exactly one
+    /// [`Input::ReadDone`]: `Failed(TimedOut)` if the host drops the read's future. Until that
+    /// `ReadDone` comes, the model asks for no other read of the agent.
     Read(AgentKind),
     /// Persist these limits, publish them, and publish the view again.
     Changed(AccountLimits),
@@ -96,11 +136,7 @@ impl Limits {
         agents: &[AgentKind],
         now: Timestamp,
     ) -> (Limits, Vec<Action>) {
-        // The last cached entry of each agent wins.
-        let mut cached: BTreeMap<AgentKind, AccountLimits> = cached
-            .into_iter()
-            .map(|limits| (limits.agent, limits))
-            .collect();
+        let mut cached = newest_per_agent(cached);
         let mut states: Vec<AgentState> = Vec::with_capacity(agents.len());
         let mut actions = Vec::with_capacity(agents.len());
         for &agent in agents {
@@ -162,7 +198,9 @@ impl Limits {
                 }
             }
             Input::ReadDone { agent, outcome } => {
-                if let Some(state) = self.state_mut(agent) {
+                if let Some(state) = self.state_mut(agent)
+                    && state.reads.in_flight
+                {
                     state.reads.in_flight = false;
                     actions.extend(apply_read(state, outcome, now));
                 }
@@ -190,7 +228,9 @@ impl Limits {
         )
     }
 
-    /// When the host should send [`Input::Deadline`]; `None` while nobody watches.
+    /// When the host should send [`Input::Deadline`]; `None` while nobody watches. The host
+    /// calls it again after [`Limits::new`] and after every [`Limits::input`], and re-arms or
+    /// cancels its one timer.
     pub fn next_deadline(&self) -> Option<Timestamp> {
         if self.watching {
             deadlines::next_deadline(&self.agents)
@@ -204,9 +244,11 @@ impl Limits {
         self.state(agent).and_then(deadlines::next_read_at)
     }
 
-    /// The limit `agent` is at, if any.
-    pub fn at_limit(&self, agent: AgentKind) -> Option<LimitHit> {
-        self.state(agent).and_then(crate::model::at_limit)
+    /// The limit `agent` is at, at `now`, if any. A row whose reset time is `now` or earlier
+    /// never counts, even when no [`Input::Deadline`] marked it yet.
+    pub fn at_limit(&self, agent: AgentKind, now: Timestamp) -> Option<LimitHit> {
+        self.state(agent)
+            .and_then(|state| crate::model::at_limit(state, now))
     }
 
     /// `agent`'s state, when it was passed to `new`.
@@ -224,5 +266,35 @@ impl Limits {
         self.agents
             .iter_mut()
             .filter(move |state| agent.is_none_or(|agent| agent == state.agent))
+    }
+}
+
+/// Keeps, for each agent, the cached entry with the newest checked time. The store returns its
+/// entries by agent and account, so after an account switch the input order says nothing about
+/// age. An entry with no time ranks below any timed one; among equals the later one wins.
+fn newest_per_agent(cached: Vec<AccountLimits>) -> BTreeMap<AgentKind, AccountLimits> {
+    let mut newest: BTreeMap<AgentKind, AccountLimits> = BTreeMap::new();
+    for limits in cached {
+        let keep_held = newest
+            .get(&limits.agent)
+            .is_some_and(|held| checked_time(&held.source) > checked_time(&limits.source));
+        if !keep_held {
+            newest.insert(limits.agent, limits);
+        }
+    }
+    newest
+}
+
+/// When a cached entry's numbers were checked; `None` for a source with no time.
+fn checked_time(source: &LimitSource) -> Option<Timestamp> {
+    match source {
+        LimitSource::Fresh { checked_at } | LimitSource::Stale { checked_at, .. } => {
+            Some(*checked_at)
+        }
+        LimitSource::LiveOnly { updated_at } => Some(*updated_at),
+        LimitSource::NotApplicable
+        | LimitSource::Unavailable { .. }
+        | LimitSource::Loading
+        | LimitSource::Unknown { .. } => None,
     }
 }

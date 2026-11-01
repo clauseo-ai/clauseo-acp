@@ -64,7 +64,8 @@ pub(crate) struct Row {
     pub(crate) window: LimitWindow,
     /// When a read or a live signal last changed it.
     pub(crate) updated_at: Timestamp,
-    /// A live signal said `rejected`; only the next good read clears it.
+    /// A live signal said `rejected`. A good read, a later `allowed` or `allowed_warning` for
+    /// the window, or its passed reset clears it.
     pub(crate) rejected: bool,
     /// Its reset time passed: its old percentage is no longer shown.
     pub(crate) reset_passed: bool,

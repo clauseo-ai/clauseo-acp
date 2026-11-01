@@ -1,15 +1,15 @@
 //! The view: `AgentState` mapped to `AgentLimitsView` at a given `now`. Stale is worked out
 //! here from `now`; the stored limits never change for it.
 
-mod words;
+pub(crate) mod at_limit_words;
 
 use clauseo_protocol::{
-    AgentKind, AgentLimitsView, AtLimitBehaviour, Billing, BillingKind, Freshness, LimitMeter,
-    LimitSource, LimitStopReason, LimitWindowView, MeterTone, Timestamp, UnavailableReason,
-    WindowFreshness,
+    AgentLimitsView, AtLimitBehaviour, Billing, BillingKind, Freshness, LimitMeter, LimitSource,
+    LimitStopReason, LimitWindowView, MeterTone, Timestamp, UnavailableReason, WindowFreshness,
 };
 
 use crate::model::{AgentState, Row, STALE_AFTER_MS};
+use crate::policy::kind_rules;
 
 /// Used from this percentage, a window's tone is `Near`.
 const NEAR_PERCENT: f64 = 75.0;
@@ -125,17 +125,16 @@ fn freshness(source: &LimitSource, now: Timestamp) -> Freshness {
 /// What happens at the limit, in words.
 fn at_limit_text(state: &AgentState) -> &'static str {
     if matches!(state.billing, Billing::PayAsYouGo { .. }) {
-        return words::PAY_AS_YOU_GO;
+        return at_limit_words::PAY_AS_YOU_GO;
     }
     match state.reached {
-        Some(LimitStopReason::WorkspaceCredits) => return words::WORKSPACE_CREDITS,
-        Some(LimitStopReason::WorkspaceSpendCap) => return words::WORKSPACE_SPEND_CAP,
+        Some(LimitStopReason::WorkspaceCredits) => return at_limit_words::WORKSPACE_CREDITS,
+        Some(LimitStopReason::WorkspaceSpendCap) => return at_limit_words::WORKSPACE_SPEND_CAP,
         _ => {}
     }
-    match (state.at_limit, state.agent) {
-        (AtLimitBehaviour::ExtraUsage { enabled: true }, _) => words::EXTRA_USAGE,
-        (AtLimitBehaviour::Credits { has_credits: true }, _) => words::CREDITS,
-        (_, AgentKind::Claude) => words::CLAUDE_PAUSES,
-        (_, AgentKind::Codex) => words::CODEX_PAUSES,
+    match state.at_limit {
+        AtLimitBehaviour::ExtraUsage { enabled: true } => at_limit_words::EXTRA_USAGE,
+        AtLimitBehaviour::Credits { has_credits: true } => at_limit_words::CREDITS,
+        _ => kind_rules(state.agent).pauses_words,
     }
 }

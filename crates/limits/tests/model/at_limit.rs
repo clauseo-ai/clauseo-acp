@@ -35,7 +35,7 @@ fn window_at_100_gives_its_id_reset_time_and_plan_window() {
         resets_at: Some(at(600)),
         reason: LimitStopReason::PlanWindow,
     };
-    assert_eq!(model.at_limit(CLAUDE), Some(hit));
+    assert_eq!(model.at_limit(CLAUDE, t0()), Some(hit));
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn rejected_window_gives_its_id_reset_time_and_plan_window() {
         resets_at: Some(at(60)),
         reason: LimitStopReason::PlanWindow,
     };
-    assert_eq!(model.at_limit(CLAUDE), Some(hit));
+    assert_eq!(model.at_limit(CLAUDE, t0()), Some(hit));
 }
 
 #[test]
@@ -61,7 +61,7 @@ fn workspace_credits_gives_workspace_credits() {
         resets_at: None,
         reason: LimitStopReason::WorkspaceCredits,
     };
-    assert_eq!(model.at_limit(CODEX), Some(hit));
+    assert_eq!(model.at_limit(CODEX, t0()), Some(hit));
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn workspace_spend_cap_gives_workspace_spend_cap_with_the_window_at_its_limit() 
         resets_at: Some(at(30)),
         reason: LimitStopReason::WorkspaceSpendCap,
     };
-    assert_eq!(model.at_limit(CODEX), Some(hit));
+    assert_eq!(model.at_limit(CODEX, t0()), Some(hit));
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn reached_plan_window_gives_plan_window_on_the_tightest_window() {
         resets_at: Some(at(300)),
         reason: LimitStopReason::PlanWindow,
     };
-    assert_eq!(model.at_limit(CODEX), Some(hit));
+    assert_eq!(model.at_limit(CODEX, t0()), Some(hit));
 }
 
 #[test]
@@ -96,21 +96,21 @@ fn reached_temporary_without_windows_gives_plan_window_on_no_window() {
         resets_at: None,
         reason: LimitStopReason::PlanWindow,
     };
-    assert_eq!(model.at_limit(CODEX), Some(hit));
+    assert_eq!(model.at_limit(CODEX, t0()), Some(hit));
 }
 
 #[test]
 fn no_window_at_its_limit_gives_none() {
     let model = read_once(account(CLAUDE, vec![five_hour(99.9), seven_day(10.0)]));
-    assert_eq!(model.at_limit(CLAUDE), None);
+    assert_eq!(model.at_limit(CLAUDE, t0()), None);
 }
 
 #[test]
 fn window_at_100_past_its_reset_does_not_count() {
     let mut model = read_once(account(CLAUDE, vec![resetting(five_hour(100.0), at(10))]));
-    assert!(model.at_limit(CLAUDE).is_some());
+    assert!(model.at_limit(CLAUDE, t0()).is_some());
     model.input(Input::Deadline, at(10));
-    assert_eq!(model.at_limit(CLAUDE), None);
+    assert_eq!(model.at_limit(CLAUDE, at(10)), None);
 }
 
 #[test]
@@ -130,14 +130,14 @@ fn not_applicable_gives_none_even_when_a_limit_was_reached() {
         ),
         t0(),
     );
-    assert_eq!(model.at_limit(CODEX), None);
+    assert_eq!(model.at_limit(CODEX, t0()), None);
 }
 
 #[test]
 fn rejected_live_signal_without_an_account_gives_its_hit() {
     let (mut model, _) = Limits::new(Vec::new(), &[CLAUDE], t0());
     model.input(done(CLAUDE, ReadOutcome::MethodMissing), t0());
-    assert_eq!(model.at_limit(CLAUDE), None, "no shown row yet");
+    assert_eq!(model.at_limit(CLAUDE, t0()), None, "no shown row yet");
     let signal = live("five_hour", LiveStatus::Rejected, Some(90.0), Some(at(45)));
     let actions = model.input(live_input(CLAUDE, signal), at(1));
     assert_eq!(actions, vec![Action::ViewChanged], "still no account");
@@ -146,7 +146,7 @@ fn rejected_live_signal_without_an_account_gives_its_hit() {
         resets_at: Some(at(45)),
         reason: LimitStopReason::PlanWindow,
     };
-    assert_eq!(model.at_limit(CLAUDE), Some(hit));
+    assert_eq!(model.at_limit(CLAUDE, at(1)), Some(hit));
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn rejected_live_signal_without_a_figure_or_an_account_gives_its_hit() {
         resets_at: Some(at(45)),
         reason: LimitStopReason::PlanWindow,
     };
-    assert_eq!(model.at_limit(CLAUDE), Some(hit));
+    assert_eq!(model.at_limit(CLAUDE, at(1)), Some(hit));
 }
 
 #[test]
@@ -172,11 +172,28 @@ fn warning_live_signal_without_a_figure_or_an_account_adds_nothing() {
     model.input(done(CLAUDE, ReadOutcome::MethodMissing), t0());
     let signal = live("five_hour", LiveStatus::Warning, None, Some(at(45)));
     assert_eq!(model.input(live_input(CLAUDE, signal), at(1)), vec![]);
-    assert_eq!(model.at_limit(CLAUDE), None);
+    assert_eq!(model.at_limit(CLAUDE, at(1)), None);
 }
 
 #[test]
 fn no_account_gives_none() {
     let (model, _) = Limits::new(Vec::new(), &[CLAUDE], t0());
-    assert_eq!(model.at_limit(CLAUDE), None);
+    assert_eq!(model.at_limit(CLAUDE, t0()), None);
+}
+
+#[test]
+fn window_at_100_past_its_reset_does_not_count_without_a_watcher() {
+    let model = read_once(account(CLAUDE, vec![resetting(five_hour(100.0), at(10))]));
+    assert_eq!(
+        model.next_deadline(),
+        None,
+        "nobody watches, so no sweep runs"
+    );
+    let hit = LimitHit {
+        window: Some("five_hour".to_owned()),
+        resets_at: Some(at(10)),
+        reason: LimitStopReason::PlanWindow,
+    };
+    assert_eq!(model.at_limit(CLAUDE, at(9)), Some(hit));
+    assert_eq!(model.at_limit(CLAUDE, at(11)), None);
 }

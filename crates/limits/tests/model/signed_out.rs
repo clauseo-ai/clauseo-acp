@@ -33,7 +33,7 @@ fn signed_out_with_no_earlier_account_shows_missing_scope_and_stores_nothing() {
     let view = view_of(&model, AgentKind::Codex, at(1));
     assert_eq!(view.freshness, Freshness::MissingScope);
     assert_eq!(view.windows, vec![]);
-    assert_eq!(model.at_limit(AgentKind::Codex), None);
+    assert_eq!(model.at_limit(AgentKind::Codex, t0()), None);
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn signed_out_after_a_good_read_forgets_the_account_until_the_next_good_read() {
     assert_eq!(view.windows, vec![]);
     assert_eq!(view.plan, None);
     assert_eq!(view.meter, None);
-    assert_eq!(model.at_limit(CLAUDE), None);
+    assert_eq!(model.at_limit(CLAUDE, at(7)), None);
     let signal = live("five_hour", LiveStatus::Rejected, Some(100.0), None);
     assert_eq!(
         model.input(live_input(CLAUDE, signal), at(8)),
