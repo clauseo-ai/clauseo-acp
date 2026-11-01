@@ -144,6 +144,8 @@ export class Matters {
   #heard: AppEvent[] = [];
   #heardAt = 0;
   #cancelHeard: (() => void) | null = null;
+  /** Matters removed before any list arrived: taken out of the first list applied, which may not know yet. */
+  readonly #removedEarly = new Set<MatterId>();
   readonly #listeners = new Set<() => void>();
   #view: MattersView;
   /** Thread views the room watches without the matters part, for their headers: the open thread, and threads of left
@@ -338,6 +340,12 @@ export class Matters {
   /** An app event (H4): held until the frame, so a burst is one apply and one render. */
   #hear(event: AppEvent): void {
     if (!this.#live) return;
+    // before the first list there is no list to take a matter off: keep the ids for the list to come, and take no
+    // ticket, so the read on its way still applies
+    if (this.#view.phase !== "ready" && "matters_removed" in event) {
+      for (const id of event.matters_removed.matters) this.#removedEarly.add(id);
+      return;
+    }
     this.#heard.push(event);
     this.#heardAt = this.#ticket += 1;
     this.#cancelHeard ??= this.#batch(() => {
@@ -375,7 +383,10 @@ export class Matters {
   }
 
   /** A new list: the open matter follows it, or, gone or not yet chosen, the matter to reopen takes its place. */
-  #list(matters: readonly MatterInfo[]): void {
+  #list(listed: readonly MatterInfo[]): void {
+    const early = this.#removedEarly;
+    const matters = early.size === 0 ? listed : listed.filter((m) => !early.has(m.matter));
+    early.clear();
     const was = this.#view.open;
     const open =
       (was === null ? undefined : matters.find((m) => m.matter === was.matter)) ??
