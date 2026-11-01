@@ -1,0 +1,68 @@
+{
+  "accountId": "account-1",
+  "ordinaryUsageAllowed": true,
+  "rateLimitResetCredits": {
+    "availableCount": 1
+  },
+  "rateLimits": {
+    "limitId": "codex",
+    "limitName": null,
+    "planType": "pro",
+    "primary": {
+      "usedPercent": 42,
+      "windowDurationMins": 300,
+      "resetsAt": 1793620800
+    },
+    "secondary": {
+      "usedPercent": 7,
+      "windowDurationMins": 10080,
+      "resetsAt": 1794038400
+    },
+    "credits": {
+      "hasCredits": true,
+      "unlimited": false,
+      "balance": "12.50"
+    },
+    "rateLimitReachedType": null,
+    "spendControlReached": false
+  },
+  "rateLimitsByLimitId": {
+    "codex": {
+      "limitId": "codex",
+      "planType": "pro",
+      "primary": {
+        "usedPercent": 42,
+        "windowDurationMins": 300,
+        "resetsAt": 1793620800
+      },
+      "secondary": {
+        "usedPercent": 7,
+        "windowDurationMins": 10080,
+        "resetsAt": 1794038400
+      },
+      "credits": {
+        "hasCredits": true,
+        "unlimited": false,
+        "balance": "12.50"
+      },
+      "spendControlReached": false
+    },
+    "codex_spark": {
+      "limitId": "codex_spark",
+      "limitName": "Spark",
+      "normalModelSlug": "gpt-5.5",
+      "primary": {
+        "usedPercent": 90,
+        "windowDurationMins": 300,
+        "resetsAt": 1793617200
+      },
+      "rateLimitReachedType": "rate_limit_reached",
+      "individualLimit": {
+        "limit": "100",
+        "remainingPercent": 10,
+        "resetsAt": 1794038400,
+        "used": "90"
+      }
+    }
+  }
+}

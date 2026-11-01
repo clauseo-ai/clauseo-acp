@@ -79,6 +79,7 @@ to write instead.
 | `settings` | Settings schema and locations, the policy layer | serde, serde_json, serde_json_lenient, schemars; windows (Windows only); objc2-core-foundation (macOS only) | tauri | exists |
 | `process` | Spawning, graceful shutdown, process-tree kill, restart supervisor, the `Launcher` trait | protocol, async-process, async-io, futures, memchr; windows (Windows only); nix (Unix only) | tauri | exists |
 | `acp` | Wrapper over `agent-client-protocol` | protocol, agent-client-protocol, futures, async-channel, serde, serde_json, memchr | tauri, tokio | exists |
+| `codex_appserver` | Types for the pinned Codex app-server JSON schema, a minimal JSON-RPC client over any pipe pair, the schema drift test; reused by the direct Codex driver after the beta | protocol, serde, serde_json, futures, tracing | tauri, tokio | exists |
 | `host` | Own thread and executor: sessions, commands, permissions, coalescing, subscriptions, checkpoints per turn; the `profile` hook | protocol, reducer, store, matters, process, acp, settings, async-channel, async-io, futures, uuid, serde_json, tracing, dunce | tauri, tokio, agents | exists |
 | `fake_agent` | Scripted ACP agent for tests | agent-client-protocol, serde, serde_json | | exists |
 | `cli` | Headless client for agents and CI | host, settings | tauri | planned |
