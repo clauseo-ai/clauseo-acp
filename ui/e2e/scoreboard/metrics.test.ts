@@ -68,15 +68,20 @@ test("percentile: nearest rank", () => {
   expect(percentile([], 50)).toBeNull();
 });
 
-test("dropped frames: rAF gaps over 16.7 ms, per 10 s of the span", () => {
-  // Steady 60 Hz: no gap over 16.7 ms.
+test("dropped frames: rAF gaps over 25 ms, per 10 s of the span", () => {
+  // Steady 60 Hz: no gap over 25 ms.
   const steady = Array.from({ length: 601 }, (_, i) => i * (1000 / 60));
   expect(droppedFramesPer10s(steady)).toBe(0);
+  // WebKit-style jitter, gaps of 17 to 19 ms: late frames, none dropped (#172).
+  const jitter = Array.from({ length: 601 }, (_, i) => i * 17 + (i % 3 === 1 ? 2 : 0));
+  expect(droppedFramesPer10s(jitter)).toBe(0);
   // Two long gaps (52 ms and 836 ms) in a span of 1 s: 20 per 10 s.
   expect(droppedFramesPer10s([0, 16, 32, 48, 100, 116, 132, 148, 164, 1000])).toBe(20);
-  // A gap of exactly 16.7 ms is not dropped; 16.8 is.
-  expect(droppedFramesPer10s([0, 16.7])).toBe(0);
-  expect(droppedFramesPer10s([0, 16.8])).toBeCloseTo((1 * 10_000) / 16.8);
+  // One skipped frame at 60 Hz (a 33.3 ms gap) counts once.
+  expect(droppedFramesPer10s([0, 16.7, 50, 66.7])).toBeCloseTo((1 * 10_000) / 66.7);
+  // A gap of exactly 25 ms is not dropped; 25.1 is.
+  expect(droppedFramesPer10s([0, 25])).toBe(0);
+  expect(droppedFramesPer10s([0, 25.1])).toBeCloseTo((1 * 10_000) / 25.1);
   expect(droppedFramesPer10s([5])).toBeNull();
   expect(() => droppedFramesPer10s([10, 5])).toThrow("backwards");
 });
@@ -266,14 +271,14 @@ test("budgets.toml has a row for every metric but the report-only ones, in the s
     "react_commits_per_frame_streaming",
     "ipc_bytes_per_text_byte",
   ]);
-  // The VM limits decided in #120.
-  expect(budgets.get("dropped_frames_streaming_vm")!.limit).toBe(100);
+  // The VM limits decided in #120; dropped frames re-set with the 25 ms rule in #172.
+  expect(budgets.get("dropped_frames_streaming_vm")!.limit).toBe(20);
   expect(budgets.get("long_frames_streaming_vm")!.limit).toBe(8);
   // R13's new rows, as proposed in the brief.
   expect(budgets.get("first_token_on_screen")!.limit).toBe(150);
   expect(budgets.get("chunk_to_paint_p50")!.limit).toBe(17);
   expect(budgets.get("chunk_to_paint_p95")!.limit).toBe(50);
-  expect(budgets.get("dropped_frames_streaming")!.limit).toBe(30);
+  expect(budgets.get("dropped_frames_streaming")!.limit).toBe(10);
   expect(budgets.get("memory_after_session")!.limit).toBe(300);
 });
 
