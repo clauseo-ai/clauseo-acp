@@ -90,6 +90,22 @@ test("misnested tags: the inner unpaired one shows as text; tags never pair acro
   expect(html("*a <sup>b</sup> c*")).toBe("<p><em>a <sup>b</sup> c</em></p>");
 });
 
+test("tags never pair across a block sibling or a paragraph break a list item or definition unwraps", () => {
+  const heading = html("- <sup>a\n  # h\n  b</sup>");
+  const fence = html("Term\n: <mark>a\n  ```\n  code\n  ```\n  b</mark>");
+  const paragraphs = html("Term\n: <sup>a\n\n  b</sup>");
+  expect(heading).toContain("&#x3C;sup>a");
+  expect(heading).toContain("b&#x3C;/sup>");
+  expect(fence).toContain("&#x3C;mark>a");
+  expect(fence).toContain("b&#x3C;/mark>");
+  expect(paragraphs).toContain("&#x3C;sup>a");
+  expect(paragraphs).toContain("b&#x3C;/sup>");
+  for (const out of [heading, fence, paragraphs]) expect(out).not.toMatch(/<(sup|mark)>/);
+  // Within one unwrapped paragraph, and in each one on its own, tags still pair.
+  expect(html("- <sup>a</sup>\n  # h\n  <sub>b</sub>")).toMatch(/<sup>a<\/sup>[^]*<sub>b<\/sub>/);
+  expect(html("Term\n: <sup>a\n  b</sup>")).toContain("<sup>ab</sup>");
+});
+
 test("tags in code show as code; in link text, table cells, headings and notes they render", () => {
   expect(html("`<sup>1</sup>`")).toBe("<p><code>&#x3C;sup>1&#x3C;/sup></code></p>");
   expect(html("[clause 4<sup>A</sup>](https://ok.example/)")).toBe(

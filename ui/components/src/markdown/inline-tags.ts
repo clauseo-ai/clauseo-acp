@@ -7,7 +7,8 @@
 // - Any tag not on the list (`<script>`, `<img>`, `<a>`, `<div>`, and placeholders like `<Party A>` or
 //   `<insert date>`), comments, and tags written as entities (`&lt;sup&gt;`, which are text already).
 // - An opening tag with no closing tag in the same parent (a tag cannot pair across a paragraph, a list item
-//   or an emphasis it is not inside), a stray closing tag, a self-closed `<sup/>`, `</br>`, and of
+//   or an emphasis it is not inside, nor across a block element or a new paragraph among its siblings, as
+//   a tight list item or a definition has), a stray closing tag, a self-closed `<sup/>`, `</br>`, and of
 //   misnested tags (`<sup><sub>a</sup></sub>`) the inner one.
 // - Past MAX_TAG_NESTING allowlisted elements inside each other, or MAX_DEPTH levels of hast, the deeper
 //   tags (hostile nesting: the tree is walked recursively later).
@@ -22,6 +23,7 @@
 // `<su` at the very end). Only where a closing tag may still arrive: the children of the elements along the
 // end of the block. Anywhere else such a tag can never pair and shows as text, as it does finished.
 import type { Element, ElementContent, Root, RootContent, Text } from "hast";
+import { defaultHandlers } from "mdast-util-to-hast";
 import type { Handler } from "mdast-util-to-hast";
 
 /** The approved inline tags. */
@@ -64,6 +66,44 @@ export const htmlAsText: Handler = (state, node: { value: string }, parent) => {
   return text;
 };
 
+/**
+ * The first hast node of each paragraph. A tight list item and a definition unwrap their paragraphs, so
+ * one paragraph's inline content follows another's among the same children: a tag never pairs across that.
+ */
+const PARAGRAPH_START = new WeakSet<ElementContent>();
+
+/** mdast-util-to-hast's paragraph, noting its first node. */
+export const paragraphNotingStart: Handler = (state, node) => {
+  const paragraph = defaultHandlers.paragraph(state, node);
+  const first = paragraph.children[0];
+  if (first) PARAGRAPH_START.add(first);
+  return paragraph;
+};
+
+/** Block elements: a tag never pairs across one among its siblings (a tight list item's heading, say). */
+const BLOCKS = new Set([
+  "p",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "pre",
+  "ul",
+  "ol",
+  "dl",
+  "blockquote",
+  "table",
+  "hr",
+]);
+
+/** Whether a tag before `node` can never pair with one after it: a block sibling, or a new paragraph. */
+function isBarrier(node: ElementContent): boolean {
+  if (node.type === "element") return BLOCKS.has(node.tagName);
+  return PARAGRAPH_START.has(node) || (node.type === "text" && BLOCK_HTML.has(node));
+}
+
 type Tag = { name: string; close: boolean; selfClosed: boolean };
 
 const TAG_NAME = /^<(\/?)([A-Za-z][A-Za-z0-9-]*)/;
@@ -88,10 +128,13 @@ function element(tagName: string, children: ElementContent[] = []): Element {
 /**
  * The allowlisted pairs among `nodes`: for each opening tag that pairs, the index of its closing tag. A
  * closing tag pairs with the nearest open tag of its name; tags of other names still open inside that pair
- * are left unpaired for good (`closed`: no closing tag can reach them any more). One stack per name keeps
- * this linear however the tags are nested.
+ * are left unpaired for good (`closed`: no closing tag can reach them any more), and so is every tag still
+ * open at a barrier (isBarrier). One stack per name keeps this linear however the tags are nested.
  */
-function pairsIn(tags: readonly (Tag | undefined)[]): {
+function pairsIn(
+  tags: readonly (Tag | undefined)[],
+  barriers: readonly boolean[],
+): {
   pairs: Map<number, number>;
   closed: Set<number>;
 } {
@@ -99,6 +142,8 @@ function pairsIn(tags: readonly (Tag | undefined)[]): {
   const closed = new Set<number>();
   const open = new Map<string, number[]>();
   for (let index = 0; index < tags.length; index++) {
+    if (barriers[index])
+      for (const stack of open.values()) while (stack.length > 0) closed.add(stack.pop()!);
     const tag = tags[index];
     if (!tag || tag.name === "br" || tag.selfClosed) continue;
     if (!tag.close) {
@@ -127,7 +172,8 @@ function paired(nodes: ElementContent[], hide: boolean, room: number): ElementCo
   const tags = nodes.map((node) =>
     node.type === "text" && INLINE_HTML.delete(node) ? tagOf(node.value) : undefined,
   );
-  const { pairs, closed } = pairsIn(tags);
+  const barriers = nodes.map((node, index) => index > 0 && isBarrier(node));
+  const { pairs, closed } = pairsIn(tags, barriers);
   const root: Frame = { tag: "", children: [], closeAt: -1 };
   const frames: Frame[] = [root];
   for (let index = 0; index < nodes.length; index++) {
