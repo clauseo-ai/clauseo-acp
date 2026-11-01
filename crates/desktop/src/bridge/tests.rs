@@ -1,7 +1,7 @@
 //! The bridge against a real host on a scratch folder: what reaches the window's channel, and
 //! what the commands refuse. No agent runs.
 
-use std::path::{MAIN_SEPARATOR, PathBuf};
+use std::path::PathBuf;
 
 use clauseo_protocol::{
     AgentChoiceId, ConfigValue, Cursor, ErrorCode, HostEvent, PatchBatch, PermissionRequestId,
@@ -271,7 +271,7 @@ fn a_refused_folder_is_rejected() {
     let work = scratch.path().join("work");
     let picked = block_on(bridge.pick_folder(&Picks(Some(work)), Some(home))).unwrap();
     let picked = picked.unwrap();
-    assert_eq!(picked.display, format!("~{MAIN_SEPARATOR}work"));
+    assert_eq!(picked.display, "work");
     block_on(bridge.dispatch(create(picked.folder))).unwrap();
     let cancelled = block_on(bridge.pick_folder(&Picks(None), Some(home))).unwrap();
     assert_eq!(cancelled, None);
