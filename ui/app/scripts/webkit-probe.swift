@@ -6,15 +6,20 @@
 //
 // A page fails when it doesn't answer within 3 s of its load event, logs an error, an unhandled rejection, a console
 // error or a CSP violation, or loses its content process. It answers once the room has its title, its wall's five
-// tiles, and the display the query asked for on <html>. One more page per look freezes Object.prototype in the main
-// frame first, as Tauri's freezePrototype does, and runs window.__clauseoAxe() there: it must resolve with no violation.
+// tiles, and the display the query asked for on <html>; then it is measured: the page never scrolls sideways, the title
+// is never cut off, and each row of file tiles is as tall as its tallest title and the tile's padding, with no room kept
+// for a numeral or a chip. One more page per look freezes Object.prototype in the main frame first, as Tauri's
+// freezePrototype does, and runs window.__clauseoAxe() there: it must resolve with no violation. The room with no
+// matters (?matters=none: "No matters yet" as its title) is loaded in night Hindi at text sizes 16 and 20.
 //
 // Usage, from ui/app: pnpm build:probe, then serve dist-probe/ with `pnpm exec vite preview --mode probe` (port 4173),
-// then pnpm probe:webkit. PROBE_ORIGIN names another server.
+// then pnpm probe:webkit. PROBE_ORIGIN names another server; PROBE_SHOTS names a folder to save a PNG of each page
+// that passes, as WKWebView draws it.
 import Cocoa
 import WebKit
 
 let origin = ProcessInfo.processInfo.environment["PROBE_ORIGIN"] ?? "http://127.0.0.1:4173"
+let shots = ProcessInfo.processInfo.environment["PROBE_SHOTS"].map { URL(fileURLWithPath: $0, isDirectory: true) }
 let budget = 3.0 // seconds from the load event to the first answer
 let watch = 1.5 // seconds after the first answer to keep listening for errors
 let loadLimit = 20.0 // seconds from the request to the load event
@@ -28,7 +33,36 @@ struct Run {
   let rendered: String
   /// Run at document start, after the listeners, in the main frame only (as Tauri's own init scripts on the Mac).
   let setup: String
+  /// Once rendered: an expression giving what is wrong with the page's layout, as a list of lines.
+  var measure: String = measured
 }
+
+/// What every page is measured for once rendered: no sideways scroll, a title that isn't cut off, and rows of file
+/// tiles only as tall as their tallest title and the tile's padding, within 4 px: a Latin file name in Hindi keeps
+/// Hindi's line box, 2 px taller; the room of a numeral and a chip would add 52.
+let measured = """
+(function () {
+  var errs = [], root = document.documentElement;
+  if (root.scrollWidth > innerWidth) errs.push('layout: the page scrolls sideways, ' + root.scrollWidth + ' px in ' + innerWidth);
+  var title = document.querySelector('[data-testid="matter"]');
+  if (title && (title.scrollWidth > title.clientWidth + 1 || title.scrollHeight > title.clientHeight + 1))
+    errs.push('layout: the title is cut off, ' + title.scrollWidth + 'x' + title.scrollHeight + ' in ' + title.clientWidth + 'x' + title.clientHeight);
+  var rows = {};
+  document.querySelectorAll('#root aside.room-pane li.tile > .tile-face').forEach(function (face) {
+    var top = Math.round(face.getBoundingClientRect().top);
+    (rows[top] = rows[top] || []).push(face);
+  });
+  Object.keys(rows).forEach(function (top) {
+    var faces = rows[top], css = getComputedStyle(faces[0]);
+    var pad = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom);
+    var tallest = Math.max.apply(null, faces.map(function (f) { return f.querySelector('.tile-title').getBoundingClientRect().height; }));
+    var height = faces[0].getBoundingClientRect().height;
+    if (Math.abs(height - (tallest + pad)) > 4)
+      errs.push('layout: a row of tiles is ' + height.toFixed(1) + ' px, its title and padding ' + (tallest + pad).toFixed(1));
+  });
+  return errs;
+})()
+"""
 
 let sizes: [(CGFloat, CGFloat)] = [(390, 844), (1100, 800), (1280, 800), (1512, 900), (1920, 1080)]
 let looks = [("day", "en"), ("night", "hi")]
@@ -54,6 +88,19 @@ for (theme, lang) in looks {
     "false)) && Array.isArray(window.__axeOut)"
   runs.append(Run(name: "room \(theme) \(lang), frozen, axe", url: URL(string: "\(origin)/\(q)")!, width: 1280,
                   height: 800, rendered: axe, setup: "Object.freeze(Object.prototype);"))
+}
+// no matters: "No matters yet" in the title's place, in Hindi, at text sizes 16 and 20, and no wall of papers
+for size in [16, 20] {
+  let q = "?matters=none&theme=night&lang=hi&size=\(size)"
+  let rendered = "document.querySelector('#root main.room-centre') !== null" +
+    " && document.querySelector('[data-testid=\"matter\"]')?.lang === 'hi'" +
+    " && (document.querySelector('[data-testid=\"matter\"]')?.textContent ?? '') !== ''" +
+    " && document.querySelectorAll('#root aside.room-pane li.tile').length === 0" +
+    " && document.documentElement.dataset.theme === 'night' && document.documentElement.lang === 'hi'"
+  for (w, h) in sizes {
+    runs.append(Run(name: "no matters night hi \(size)", url: URL(string: "\(origin)/\(q)")!, width: w, height: h,
+                    rendered: rendered, setup: ""))
+  }
 }
 
 // Listens for errors from the first moment, before the page's own scripts run.
@@ -120,7 +167,8 @@ final class Probe: NSObject, WKNavigationDelegate {
   /// Asks whether the page has rendered, forcing a layout; asks again 50 ms after each answer until it has.
   func poll(_ mine: Int) {
     guard seq == mine, let run = current, let view = web else { return }
-    let js = "document.documentElement.getBoundingClientRect(); void document.body.offsetHeight; return (\(run.rendered)) ? document.querySelectorAll('*').length : 0;"
+    let js = "document.documentElement.getBoundingClientRect(); void document.body.offsetHeight; if (!(\(run.rendered))) return 0;" +
+      " (\(run.measure)).forEach(function (e) { __probe.errs.push(e); }); return document.querySelectorAll('*').length;"
     view.callAsyncJavaScript(js, arguments: [:], in: nil, in: .page) { result in
       guard self.seq == mine, let loaded = self.loaded else { return }
       if case .success(let v) = result, let n = v as? Int, n > 0 {
@@ -146,10 +194,32 @@ final class Probe: NSObject, WKNavigationDelegate {
       var errs: [String] = []
       if case .success(let v) = result, let s = v as? String, let data = s.data(using: .utf8),
          let list = try? JSONSerialization.jsonObject(with: data) as? [String] { errs = list }
-      if errs.isEmpty { self.pass() } else { self.fail(errs.prefix(4).joined(separator: " | ")) }
+      if !errs.isEmpty { self.fail(errs.prefix(4).joined(separator: " | ")) } else { self.shoot(mine) }
     }
     DispatchQueue.main.asyncAfter(deadline: .now() + budget) {
       if self.seq == mine && !back { self.fail("answered once, then stopped answering: hung") }
+    }
+  }
+
+  /// With PROBE_SHOTS, a PNG of the page as WKWebView draws it, named for the run and its size; then the page passes.
+  func shoot(_ mine: Int) {
+    guard let dir = shots, let run = current, let view = web else { pass(); return }
+    view.takeSnapshot(with: nil) { image, error in
+      guard self.seq == mine else { return }
+      let slug = "\(run.name) \(Int(run.width))x\(Int(run.height))".replacingOccurrences(of: ",", with: "")
+        .replacingOccurrences(of: " ", with: "-")
+      guard let image, let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+            let png = bitmap.representation(using: .png, properties: [:]) else {
+        self.fail("no snapshot: \(error?.localizedDescription ?? "no image")")
+        return
+      }
+      do {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try png.write(to: dir.appendingPathComponent("\(slug).png"))
+        self.pass()
+      } catch {
+        self.fail("could not save the snapshot: \(error.localizedDescription)")
+      }
     }
   }
 
