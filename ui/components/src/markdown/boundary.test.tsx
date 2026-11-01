@@ -8,14 +8,14 @@ import type { Root } from "react-dom/client";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { Markdown } from "./markdown.tsx";
 
-vi.mock("hast-util-to-jsx-runtime", async (original) => {
-  const real = await original<typeof import("hast-util-to-jsx-runtime")>();
+vi.mock("./to-react.ts", async (original) => {
+  const real = await original<typeof import("./to-react.ts")>();
   return {
     ...real,
-    toJsxRuntime: (...args: Parameters<typeof real.toJsxRuntime>) => {
+    toReact: (...args: Parameters<typeof real.toReact>) => {
       if (JSON.stringify(args[0]).includes("boom"))
         throw new RangeError("Maximum call stack size exceeded");
-      return real.toJsxRuntime(...args);
+      return real.toReact(...args);
     },
   };
 });
