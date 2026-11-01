@@ -246,7 +246,7 @@ fn load_session(
     let key = CompactString::from(request.session.as_str());
     let entry = SessionState::new(request.cwd.clone(), Origin::Replay);
     shared.state().sessions.insert(key.clone(), entry);
-    let sent = acp::LoadSessionRequest::new(request.session.as_str().to_owned(), request.cwd)
+    let mut sent = acp::LoadSessionRequest::new(request.session.as_str().to_owned(), request.cwd)
         .mcp_servers(
             request
                 .mcp_servers
@@ -254,6 +254,7 @@ fn load_session(
                 .map(mcp_server)
                 .collect::<Vec<_>>(),
         );
+    sent.meta = request.meta;
     let state = Arc::clone(shared);
     let session = request.session;
     let on_answer = move |result: Result<acp::LoadSessionResponse, Error>| async move {

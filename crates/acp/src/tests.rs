@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use super::*;
 
 mod interface;
+mod mcp_wire;
 mod prompts;
 mod requests;
 mod sdk_refused_lines;
