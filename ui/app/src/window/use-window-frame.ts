@@ -21,17 +21,21 @@ function attempt(what: string, call: () => Promise<unknown>): void {
 }
 
 /** The window's frame state and presses, ready to spread into CaptionButtons. Maximising or restoring resizes the
- * page, so a resize re-reads the state: at most once per animation frame, and a reply after unmount is dropped. */
+ * page, so a resize re-reads the state: at most once per animation frame. A reply after unmount, or one overtaken by a
+ * later read's, is dropped. */
 export function useWindowFrame(controls: WindowControls): WindowFrame {
   const [maximised, setMaximised] = useState(false);
   useEffect(() => {
     let live = true;
     let frame: number | null = null;
+    // Replies can overlap: only the latest read's answer stands.
+    let latest = 0;
     const read = () => {
       frame = null;
+      const mine = ++latest;
       settle(() => controls.isMaximised()).then(
         (m) => {
-          if (live) setMaximised(m);
+          if (live && mine === latest) setMaximised(m);
         },
         (error: unknown) => console.warn(`window isMaximised failed: ${String(error)}`),
       );

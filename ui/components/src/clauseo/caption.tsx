@@ -5,6 +5,8 @@
 // useWindowFrame); without them each press logs what it would do. The host's hit-testing finds the maximise button by
 // data-caption="maximise" and answers HTMAXBUTTON over it, so Windows shows Snap Layouts; while it does, a native
 // window covers the button and the page gets no :hover, so the host sets data-pointer="hover" or "press" on it instead.
+// For the same reason the maximise button's title never shows as a tooltip there; Snap Layouts takes its place, and the
+// native window carries Windows' own name for it, for screen readers.
 import { useState } from "react";
 import { cn } from "../lib/cn.ts";
 import type { Platform } from "../lib/display.ts";
@@ -39,7 +41,8 @@ function Glyph({ d }: { d: string }) {
   );
 }
 
-const MINIMISE = "M0 5H10";
+/** On the half pixel, as the other glyphs are, so the 1 px line lands on one row of pixels at 100%. */
+const MINIMISE = "M0 5.5H10";
 const MAXIMISE =
   "M1.5 0.5H8.5A1 1 0 0 1 9.5 1.5V8.5A1 1 0 0 1 8.5 9.5H1.5A1 1 0 0 1 0.5 8.5V1.5A1 1 0 0 1 1.5 0.5Z";
 const RESTORE =
@@ -132,7 +135,8 @@ export function CornerLights({ native = false }: { native?: boolean }) {
     <div
       className="room-lights"
       aria-hidden="true"
-      data-tauri-drag-region
+      // deep: Tauri drags only from the element pressed, and the gaps between the native lights fall on the circles
+      data-tauri-drag-region="deep"
       data-native={native ? "" : undefined}
     >
       <i />
