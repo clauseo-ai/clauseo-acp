@@ -2,16 +2,11 @@
 // while the tail streams. The model (answer.ts) does the split, the definitions, the parse and the
 // sanitiser; this file only maps each block's sanitised hast to React through our components.
 import { memo, useId, useState } from "react";
-import { Fragment, jsx, jsxs } from "react/jsx-runtime";
-import { toJsxRuntime } from "hast-util-to-jsx-runtime";
-import type { Components } from "hast-util-to-jsx-runtime";
 import { createAnswer } from "./answer.ts";
 import type { BlockView } from "./answer.ts";
 import { BlockBoundary } from "./boundary.tsx";
-import { CodeBlock } from "./code.tsx";
 import { AnswerScopeContext, InertLinksContext, scopeOf } from "./host.ts";
-import { Image } from "./image.tsx";
-import { LinkOrReference } from "./link.tsx";
+import { toReact } from "./to-react.ts";
 
 /**
  * `text` is the whole answer so far (an AppendText patch's result; what the patch appended is not needed,
@@ -20,9 +15,6 @@ import { LinkOrReference } from "./link.tsx";
  * repair, every link live.
  */
 export type MarkdownProps = { text: string; streaming?: boolean };
-
-const COMPONENTS: Partial<Components> = { a: LinkOrReference, img: Image, pre: CodeBlock };
-const OPTIONS = { Fragment, jsx, jsxs, components: COMPONENTS, passNode: true };
 
 const Block = memo(function Block({ view }: { view: BlockView }) {
   return (
@@ -39,7 +31,7 @@ const Block = memo(function Block({ view }: { view: BlockView }) {
 });
 
 function BlockContent({ view }: { view: BlockView }) {
-  return toJsxRuntime(view.hast, OPTIONS);
+  return toReact(view.hast);
 }
 
 export function Markdown({ text, streaming = false }: MarkdownProps) {

@@ -31,7 +31,6 @@
     "@base-ui/react": "1.9.0",
     "class-variance-authority": "0.7.1",
     "hast-util-sanitize": "5.0.2",
-    "hast-util-to-jsx-runtime": "2.3.6",
     "marked": "18.1.1",
     "mdast-util-from-markdown": "2.1.0",
     "mdast-util-gfm": "3.1.0",
