@@ -4,17 +4,22 @@
 //! Contract:
 //! - The frame is chosen at compile time from `VITE_CLAUSEO_WINDOW`, the variable that also
 //!   switches the page (`ui/app/src/window/`): `room` gives `Own`, anything else or unset `Os`.
-//!   `build.rs` reruns when it changes, so one `pnpm tauri dev` or `tauri build` sets both
-//!   halves. The window is built with its frame, so nothing flashes at start. U5 removes the
-//!   switch on both sides.
+//!   rustc tracks `option_env!`, so the crate rebuilds when it changes, and one `pnpm tauri
+//!   dev` or `tauri build` sets both halves. The window is built with its frame, so nothing
+//!   flashes at start. U5 removes the switch on both sides.
 //! - `Own` on the Mac: an overlay title bar with no title, and the native traffic lights moved to
 //!   where the toolbar's corner lights stand ([`TRAFFIC_LIGHTS`]).
 //! - `Own` on Windows and Linux: no OS decorations; Tauri keeps the system shadow and the resize
 //!   borders of an undecorated window. On Windows a small native window covers the page's
 //!   maximise button and answers `WM_NCHITTEST` with `HTMAXBUTTON`, so hovering it shows Snap
 //!   Layouts (`windows.rs`, `docs/decisions/0015-window-frame.md`).
-//! - The page drags, minimises, maximises and closes its own window with the core window
-//!   permissions `capabilities/main.json` grants; nothing here adds a command.
+//! - The page drags its window with the two core window permissions `capabilities/main.json`
+//!   grants ([`DRAG_PERMISSIONS`]). On Windows and Linux in the room build it also minimises,
+//!   maximises or restores and closes it, and asks whether it is maximised, with the four of
+//!   `capabilities/frame.json` ([`CAPTION_PERMISSIONS`]), which [`grant_caption_commands`] adds
+//!   at setup. Nothing here adds a command.
+//! - Tauri's window commands take a `label`, so they reach every window of the app: `main` must
+//!   stay the only one until the record says otherwise (0015; a test counts the builders).
 
 #[cfg(any(windows, test))]
 mod caption;
@@ -62,21 +67,50 @@ const fn eq(a: &[u8], b: &[u8]) -> bool {
 /// This build's frame, from `VITE_CLAUSEO_WINDOW` when the crate was compiled.
 pub(crate) const CHROME: Chrome = chrome_from(option_env!("VITE_CLAUSEO_WINDOW"));
 
-/// The core permissions `capabilities/main.json` grants for the frame, one window command each,
-/// and why the page needs it. Granted in every build: the default build's page never calls them.
-/// A test checks the capability grants these and no other core permission; nothing else reads it.
+/// The core permissions `capabilities/main.json` grants for the frame, in every build: Tauri's
+/// drag script answers a press on `data-tauri-drag-region` with `start_dragging` and a
+/// double-click with `internal_toggle_maximize` (maximise or restore on Windows and Linux, zoom
+/// on the Mac). The default build's page has no drag region. A test holds the file to this list.
 #[cfg(test)]
-pub(crate) const WINDOW_PERMISSIONS: &[&str] = &[
-    // A press on the toolbar's empty space (`data-tauri-drag-region`, Tauri's drag script).
+pub(crate) const DRAG_PERMISSIONS: &[&str] = &[
     "core:window:allow-start-dragging",
-    // A double-click there: maximise or restore on Windows and Linux, zoom on the Mac.
     "core:window:allow-internal-toggle-maximize",
-    // The caption buttons, and the maximised state that names the middle one.
+];
+
+/// The core permissions `capabilities/frame.json` grants, for the caption buttons and the
+/// maximised state that names the middle one: on Windows and Linux (its `platforms`), in the
+/// room build only ([`grant_caption_commands`]). A test holds the file to this list.
+#[cfg(test)]
+pub(crate) const CAPTION_PERMISSIONS: &[&str] = &[
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
     "core:window:allow-is-maximized",
 ];
+
+/// Grants `main` the caption buttons' window commands, `capabilities/frame.json`, in the room
+/// build. Added at setup, as `e2e::grant_scoreboard` adds `e2e.json`: `tauri.conf.json` names
+/// only `main`, so the default build never has them, and the file's `platforms` leave out the
+/// Mac, whose own traffic lights need no permission.
+pub(crate) fn grant_caption_commands<R: Runtime, M: tauri::Manager<R>>(
+    manager: &M,
+) -> tauri::Result<()> {
+    if CHROME == Chrome::Own {
+        add_frame_capability(manager)?;
+    }
+    Ok(())
+}
+
+/// Adds `capabilities/frame.json`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "room build only: grants the caption buttons' capability file, checked by its tests"
+)]
+pub(crate) fn add_frame_capability<R: Runtime, M: tauri::Manager<R>>(
+    manager: &M,
+) -> tauri::Result<()> {
+    manager.add_capability(include_str!("../capabilities/frame.json"))
+}
 
 /// Where the Mac's native traffic lights go, in logical px from the window's top left: the
 /// position `traffic_light_position` takes (the close button's frame, which is wider and taller

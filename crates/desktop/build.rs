@@ -69,8 +69,9 @@ fn remove_permissions(dir: &str, absent: &[&str]) -> std::io::Result<()> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // The window's frame (src/window_frame.rs) is chosen at compile time from the variable that
-    // also switches the page.
+    // The window's frame (src/window_frame.rs) comes from VITE_CLAUSEO_WINDOW at compile time.
+    // rustc rebuilds the crate when it changes (`option_env!` is an env dependency); this line
+    // only reruns the build script with it, so nothing the script writes falls out of step.
     writeln!(
         std::io::stdout().lock(),
         "cargo:rerun-if-env-changed=VITE_CLAUSEO_WINDOW"
