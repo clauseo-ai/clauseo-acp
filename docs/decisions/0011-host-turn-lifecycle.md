@@ -86,7 +86,17 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   attached. When the after-turn checkpoint was made but never logged (a crash, or an end that
   failed twice), the repair records it, logs `FilesChanged` from `Matter::changes_between`
   (from `checkpoint_before` to it) with every path flagged as possibly holding lawyer edits,
-  and keeps `checkpoint_after`, so the turn stays undoable (Rohan, 2026-10-31). A turn that never started (its `UserMessage` logged, no `TurnStarted`) gets
+  and keeps `checkpoint_after`, so the turn stays undoable (Rohan, 2026-10-31). The repair takes
+  that checkpoint from `matters`'s timeline (matched by thread and turn), not from the folder:
+  once an end fails twice the writer is free, and another thread's turn may have run since
+  (clauseo-ai/clauseo-acp-private#133). A started turn with no after-turn checkpoint of its own
+  whose matter has a later open turn, or a checkpoint after its `checkpoint_before`, gets an
+  empty step (`checkpoint_after` = `checkpoint_before`, no `FilesChanged`): a running turn holds
+  the writer, so its end must have run, and R8 reused `checkpoint_before` or the checkpoint
+  failed. The cost: in that second case the turn's changes are not its own but stay on record as
+  the next writer's `OutsideEdits`. The matter's started turns are repaired once every thread is
+  read, and only the one that started last (by its `TurnStarted`) may take a new after-turn
+  checkpoint. A turn that never started (its `UserMessage` logged, no `TurnStarted`) gets
   `TurnQueued { behind: <its own thread>, behind_turn: <the thread's previous turn, or None> }`,
   so the reducer shows the thread `Idle`. A turn with `TurnEnded` is never touched, so each
   repair happens once.

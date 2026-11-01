@@ -72,12 +72,14 @@ pub(crate) enum MatterJob {
     },
     /// The start-up repair of a turn the log left open, answered as [`MatterReply::AfterTurn`]:
     /// the turn's own after-turn checkpoint when R8's timeline has one, `before` when another
-    /// writer checkpointed since the turn started, a new after-turn checkpoint otherwise
-    /// (see [`repair`]).
+    /// turn started after it or another writer checkpointed since it started, a new after-turn
+    /// checkpoint otherwise (see [`repair`]).
     Repair {
         meta: TurnMeta,
         tool_paths: BTreeSet<MatterPath>,
         before: Option<CheckpointId>,
+        /// No other open turn of the matter started after this one.
+        last: bool,
     },
     /// Undo one step.
     Undo(UndoJob),
@@ -240,8 +242,10 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             meta,
             tool_paths,
             before,
+            last,
         } => MatterReply::AfterTurn(
-            open(settings, slot).and_then(|matter| repair(matter, &meta, &tool_paths, before)),
+            open(settings, slot)
+                .and_then(|matter| repair(matter, &meta, &tool_paths, before, last)),
         ),
         MatterJob::Undo(job) => MatterReply::Undone(open(settings, slot).and_then(|matter| {
             let request = UndoRequest {
@@ -299,18 +303,21 @@ fn turn_checkpoint(
 ///   end ran and was never logged (it failed twice). That checkpoint is taken, with the changes
 ///   from `before` to it; the folder is not looked at, since another turn may have changed it
 ///   after the writer was freed.
-/// - Otherwise, when R8's last checkpoint is not `before`: while a turn runs it holds the
-///   matter's writer, so no other checkpoint is taken until its end frees it. A later
-///   checkpoint means the end ran, and having left no after-turn checkpoint of its own, R8
-///   reused `before` (the turn changed nothing) or the checkpoint failed (then the next
+/// - Otherwise, when another open turn of the matter started after this one (`last` is false)
+///   or R8's last checkpoint is not `before`: while a turn runs it holds the matter's writer,
+///   so no other turn starts and no other checkpoint is taken until its end frees it. A later
+///   turn or checkpoint means the end ran, and having left no after-turn checkpoint of its own,
+///   R8 reused `before` (the turn changed nothing) or the checkpoint failed (then the next
 ///   writer's before-turn checkpoint logged the folder's changes as outside edits). The step is
-///   empty: `before` is taken, never the later checkpoint, which is another writer's.
+///   empty: `before` is taken, never a later checkpoint or the folder, which hold another
+///   writer's changes.
 /// - Otherwise the crash came before the after-turn checkpoint: one is taken now, as at step 7.
 fn repair(
     matter: &mut Matter,
     meta: &TurnMeta,
     tool_paths: &BTreeSet<MatterPath>,
     before: Option<CheckpointId>,
+    last: bool,
 ) -> Result<TurnCheckpoint, Error> {
     let timeline = matter.timeline();
     let own = timeline
@@ -330,10 +337,14 @@ fn repair(
         return Ok(reused(entry.id, Some(entry), changes, true));
     }
     if let Some(before) = before
-        && matter.last_checkpoint() != Some(before)
-        && let Some(entry) = timeline.iter().rev().find(|entry| entry.id == before)
+        && (!last || matter.last_checkpoint() != Some(before))
     {
-        return Ok(reused(before, Some(*entry), Vec::new(), false));
+        let entry = timeline
+            .iter()
+            .rev()
+            .find(|entry| entry.id == before)
+            .copied();
+        return Ok(reused(before, entry, Vec::new(), false));
     }
     let checkpoint = matter.after_turn(meta, tool_paths)?;
     turn_checkpoint(matter, checkpoint, before)
