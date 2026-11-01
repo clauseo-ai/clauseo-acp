@@ -2,12 +2,11 @@
 // memoized on its id, so a flush renders only the rows whose part changed. A paged row (older entries, page_entries)
 // shows the entry it was given. Permissions and elicitations show nothing until U4; markers, versions and compaction
 // show nothing yet.
-import { memo, useState } from "react";
+import { memo, Suspense, useState } from "react";
 import { QuestionLine, Who } from "@clauseo/components/clauseo/answer.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { useThreadWords } from "@clauseo/components/lib/words-thread.ts";
 import { Image } from "@clauseo/components/markdown/image.tsx";
-import { Markdown } from "@clauseo/components/markdown/markdown.tsx";
 import { useEntry, useText, useViewStore } from "../../store/hooks.ts";
 import { entryIdOf, textKey } from "../../store/view.ts";
 import type {
@@ -24,6 +23,7 @@ import type {
 import { entryTime } from "../host-next.ts";
 import { stamp } from "./clock.ts";
 import { shownOf } from "./content.ts";
+import { LazyMarkdown } from "./markdown.ts";
 import { questionText, useQuestionText, useStreaming } from "./live.ts";
 import { LimitStopRow, StepRow } from "./stop-rows.tsx";
 
@@ -103,9 +103,13 @@ function LiveQuestion({
 function Answer({ id, text, streaming }: { id: EntryId; text: string; streaming: boolean }) {
   return (
     <div data-testid="message-agent" data-entry-id={id}>
-      {/* the renderer throws on a streaming answer with no blocks yet (markdown/answer.ts reads the last block's
-          footnotes), so an answer that has no words yet isn't streaming */}
-      <Markdown text={text} streaming={streaming && text.trim() !== ""} />
+      {/* while the renderer's chunk loads (markdown.ts), the row stands empty: never the answer's raw syntax */}
+      <Suspense fallback={null}>
+        {/* the renderer throws on a streaming answer with no blocks yet (markdown/answer.ts reads the last block's
+            footnotes), so an answer that has no words yet isn't streaming */}
+        {/* #123 (b20e196e) fixes that throw: drop this workaround on rebase */}
+        <LazyMarkdown text={text} streaming={streaming && text.trim() !== ""} />
+      </Suspense>
     </div>
   );
 }
@@ -227,7 +231,7 @@ export const PagedRow = memo(function PagedRow({ entry }: { entry: ViewEntry }) 
       <Question
         id={id}
         entry={m}
-        text={questionText(m, () => undefined)}
+        text={questionText(id, m, undefined)}
         time={entryTime(entry)}
         slots={false}
       />

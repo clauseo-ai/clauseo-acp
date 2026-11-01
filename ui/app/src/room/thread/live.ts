@@ -50,22 +50,44 @@ export function useStreaming(stream: StreamId, id: EntryId): boolean {
   return useStreamPart(useViewStore(), stream, pick);
 }
 
-/** A question's words: its text blocks, as `texts` holds them while they arrive, one paragraph each. */
+/** A question's text blocks, by their keys in `texts`, with each block's text as the entry has it. Kept per entry
+ * object (an upsert makes a new one), so a flush reads them without building a key. */
+type Blocks = { readonly keys: readonly string[]; readonly own: readonly string[] };
+const blocksByEntry = new WeakMap<UserMessageEntry, Blocks>();
+
+function blocksOf(id: EntryId, entry: UserMessageEntry): Blocks {
+  let blocks = blocksByEntry.get(entry);
+  if (blocks === undefined) {
+    const keys: string[] = [];
+    const own: string[] = [];
+    entry.content.forEach((block, i) => {
+      if (block.text === undefined) return;
+      keys.push(textKey(id, i));
+      own.push(block.text.text);
+    });
+    blocks = { keys, own };
+    blocksByEntry.set(entry, blocks);
+  }
+  return blocks;
+}
+
+/** A question's words: its text blocks, as `texts` holds them while they arrive (or as the entry has them, when no
+ * view does), one paragraph each. A question of one block, the usual one, is that block's own string: no copy, the
+ * same identity while it is unchanged. */
 export function questionText(
+  id: EntryId,
   entry: UserMessageEntry,
-  text: (block: number) => string | undefined,
+  texts: ReadonlyMap<string, string> | undefined,
 ): string {
-  const out: string[] = [];
-  entry.content.forEach((block, i) => {
-    if (block.text !== undefined) out.push(text(i) ?? block.text.text);
-  });
-  return out.join("\n\n");
+  const { keys, own } = blocksOf(id, entry);
+  if (keys.length === 1) return texts?.get(keys[0]!) ?? own[0]!;
+  return keys.map((key, i) => texts?.get(key) ?? own[i]!).join("\n\n");
 }
 
 /** A question's words from the store, by its id. */
 export function useQuestionText(stream: StreamId, id: EntryId, entry: UserMessageEntry): string {
   const pick = useCallback(
-    (v: StreamView | undefined) => questionText(entry, (i) => v?.texts.get(textKey(id, i))),
+    (v: StreamView | undefined) => questionText(id, entry, v?.texts),
     [id, entry],
   );
   return useStreamPart(useViewStore(), stream, pick);
@@ -74,12 +96,9 @@ export function useQuestionText(stream: StreamId, id: EntryId, entry: UserMessag
 /** The latest question's words, for the question pinned over the thread; "" before the first. */
 export function useLatestQuestion(stream: StreamId | null): string {
   const pick = useCallback((v: StreamView | undefined) => {
-    if (v === undefined) return "";
-    const id = latestQuestion(v.ids);
-    const entry = id === null ? undefined : v.entries.get(id)?.user_message;
-    return id === null || entry === undefined
-      ? ""
-      : questionText(entry, (i) => v.texts.get(textKey(id, i)));
+    const id = v === undefined ? null : latestQuestion(v.ids);
+    const entry = id === null ? undefined : v!.entries.get(id)?.user_message;
+    return id === null || entry === undefined ? "" : questionText(id, entry, v!.texts);
   }, []);
   return useStreamPart(useViewStore(), stream, pick);
 }

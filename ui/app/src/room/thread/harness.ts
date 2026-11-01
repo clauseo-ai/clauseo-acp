@@ -1,7 +1,7 @@
 // A harness for the room's thread tests: the real room (room.tsx) over a FakeTransport scripted for one matter, inside
 // the page's view store with frames run by hand. Not shipped: only tests import it. Written with createElement, so
 // this file holds no component.
-import { act, createElement } from "react";
+import { act, createElement, Profiler, type ProfilerOnRenderCallback } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { StoreContext } from "../../store/hooks.ts";
 import { createViewStore, type ViewStore } from "../../store/store.ts";
@@ -20,6 +20,7 @@ import type {
 import type { UiSettings } from "../host-next.ts";
 import { Room } from "../room.tsx";
 import { connectRoom } from "../start.ts";
+import { loadMarkdown } from "./markdown.ts";
 import { stubFonts } from "./testing.ts";
 
 export const THE_MATTER: MatterSummary = {
@@ -48,6 +49,10 @@ export type Script = {
   /** Answers any other query. */
   query?: (query: HostQuery) => QueryResult;
   display?: Partial<UiSettings>;
+  /** Whether mounting waits for the Markdown renderer's chunk (markdown.ts); true by default. */
+  waitForRenderer?: boolean;
+  /** Hears every commit of the room. */
+  onRender?: ProfilerOnRenderCallback;
 };
 
 export const defaultOutcome = (command: HostCommand): CommandOutcome => {
@@ -63,6 +68,9 @@ export type Harness = {
   host: HTMLElement;
   /** Delivers one batch at the next cursors and runs a frame. The first must hold the Reset. */
   deliver: (bodies: ViewPatchBody[]) => void;
+  /** As `deliver`, inside an awaited act: for a render that may suspend (the renderer's chunk still loading), whose
+   * retry React schedules only for an act it can wait on. */
+  deliverAwaited: (bodies: ViewPatchBody[]) => Promise<void>;
   /** Lets the host's answers and React settle. */
   settle: () => Promise<void>;
   one: (testId: string) => HTMLElement | null;
@@ -100,11 +108,18 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
   const host = document.createElement("div");
   document.body.append(host);
   const root: Root = createRoot(host);
+  const room = createElement(StoreContext, { value: store }, createElement(Room, { transport }));
   await act(async () =>
-    root.render(createElement(StoreContext, { value: store }, createElement(Room, { transport }))),
+    root.render(
+      script.onRender === undefined
+        ? room
+        : createElement(Profiler, { id: "room", onRender: script.onRender }, room),
+    ),
   );
   const settle = () => act(flushAll);
   await settle();
+  // Work started the renderer's chunk as it mounted
+  if (script.waitForRenderer !== false) await act(async () => void (await loadMarkdown()));
   let cursor = 1;
   const field = () => host.querySelector<HTMLTextAreaElement>('[data-testid="composer"]');
   return {
@@ -115,6 +130,11 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
       transport.deliver(JSON.stringify(event(batch(cursor, bodies))));
       cursor += bodies.length;
       act(manual.run);
+    },
+    deliverAwaited: async (bodies) => {
+      transport.deliver(JSON.stringify(event(batch(cursor, bodies))));
+      cursor += bodies.length;
+      await act(async () => manual.run());
     },
     settle,
     one: (id) => host.querySelector<HTMLElement>(`[data-testid="${id}"]`),

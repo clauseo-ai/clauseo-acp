@@ -76,6 +76,8 @@ export function useOlder(
     };
     el.addEventListener("scroll", look, { passive: true });
     window.addEventListener("scroll", look, { passive: true });
+    // a thread that opens at its top, or too short to scroll, is at the top already
+    look();
     return () => {
       el.removeEventListener("scroll", look);
       window.removeEventListener("scroll", look);

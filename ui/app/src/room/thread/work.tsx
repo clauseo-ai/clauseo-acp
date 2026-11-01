@@ -20,6 +20,7 @@ import type {
 } from "../../transport/protocol.ts";
 import { exchangesOf, isQuestion, sameIds } from "./ids.ts";
 import { useBusy, useHasOlder, useLatestQuestion } from "./live.ts";
+import { loadMarkdown } from "./markdown.ts";
 import { useOlder } from "./older.ts";
 import { PagedRow, Row } from "./rows.tsx";
 import { ThreadActionsContext, useThreadSession } from "./session.ts";
@@ -143,7 +144,9 @@ const ThreadList = memo(function ThreadList({
   const first =
     stream === null || ids[0] === undefined ? undefined : store.view(stream)?.entries.get(ids[0]);
   return (
-    <Thread question={question} who={w.t("You")} live={busy} resting={!busy}>
+    // it rests once there is something to rest on: a reopened thread's view arrives after the mount, and the thread
+    // settles on its latest answer then
+    <Thread question={question} who={w.t("You")} live={busy} resting={!busy && ids.length > 0}>
       {older.length > 0 && (
         <OlderPages entries={older} below={first === undefined ? null : orderOf(first)} />
       )}
@@ -167,17 +170,20 @@ export function Work({
   onThread?: (thread: ThreadId | null) => void;
 }) {
   const store = useViewStore();
-  const session = useThreadSession(transport, matter?.matter ?? null);
+  const session = useThreadSession(transport, store, matter?.matter ?? null);
   const stream = session.actions.stream;
   useWatch(store, stream);
   const busy = useBusy(stream, session.sentTurn);
   const failed = useStreamError(store, stream);
   useEffect(() => onThread?.(session.thread), [onThread, session.thread]);
+  // the renderer's chunk, in memory long before a first answer arrives
+  useEffect(() => void loadMarkdown(), []);
   return (
     <MarkdownHostContext value={ANSWER_HOST}>
       <ThreadActionsContext value={session.actions}>
-        {/* the list's test id; `contents` keeps the room's column layout, whose scroller is Thread's .room-thread */}
-        <div data-testid="transcript" className="contents">
+        {/* the list's box, holding Thread, whose .room-thread is the scroller inside it; below 1000 px it takes the
+            thread's place in the one column (responsive.css orders the thread first) */}
+        <div data-testid="transcript" className="flex min-h-0 flex-1 flex-col max-mid:order-1">
           <ThreadList transport={transport} stream={stream} busy={busy} />
         </div>
       </ThreadActionsContext>

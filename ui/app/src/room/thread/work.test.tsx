@@ -49,7 +49,13 @@ test("reopen: the matter's newest thread that isn't archived, watched, with its 
   ]);
   expect(h.one("message-user")?.textContent).toContain("What does clause nine say?");
   expect(h.one("message-agent")?.querySelector("strong")?.textContent).toBe("notice");
-  expect(h.one("transcript")?.querySelector(".room-thread")).not.toBeNull();
+  // the list is a box of its own (the scoreboard measures it), with Thread's scroller inside
+  const list = h.one("transcript");
+  expect(list?.querySelector(".room-thread")).not.toBeNull();
+  expect(list?.classList.contains("contents")).toBe(false);
+  expect([...(list?.classList ?? [])]).toEqual(
+    expect.arrayContaining(["flex", "flex-1", "min-h-0", "flex-col"]),
+  );
   // every row says which entry it is
   expect(h.all("message-user")[0]?.dataset["entryId"]).toBe(`user_message:${uuid(1, 5)}`);
   expect(h.sent("create_thread")).toEqual([]);
@@ -230,4 +236,57 @@ test("Ask's button sends as Enter does", async () => {
   await h.type("By the button");
   await h.click(h.one("send"));
   expect(h.sent("send_prompt")).toHaveLength(1);
+});
+
+test("a sent turn that ends without its step in view stops being busy once the status says nothing runs", async () => {
+  h = await mountRoom();
+  h.deliver([reset([])]);
+  await h.type("Q");
+  await h.key({ key: "Enter", keyCode: 13 });
+  expect(h.one("cancel")).not.toBeNull();
+  h.deliver([upsert(header("running"))]);
+  expect(h.one("cancel")).not.toBeNull();
+  h.deliver([upsert(header("idle"))]);
+  expect(h.one("cancel")).toBeNull();
+  expect(h.one("send")).not.toBeNull();
+});
+
+test("a Reset whose header says nothing runs ends the sent turn's busy", async () => {
+  h = await mountRoom();
+  h.deliver([reset([])]);
+  await h.type("Q");
+  await h.key({ key: "Enter", keyCode: 13 });
+  expect(h.one("cancel")).not.toBeNull();
+  h.deliver([reset([userMessage(5, 1, "Q")], header("idle"))]);
+  expect(h.one("cancel")).toBeNull();
+});
+
+test("a lost stream ends the sent turn's busy", async () => {
+  h = await mountRoom();
+  h.deliver([reset([])]);
+  await h.type("Q");
+  await h.key({ key: "Enter", keyCode: 13 });
+  expect(h.one("cancel")).not.toBeNull();
+  await act(async () => h!.transport.failStream(STREAM, refusal("agent.exited")));
+  expect(h.one("cancel")).toBeNull();
+  expect(h.one("error")?.dataset["code"]).toBe("agent.exited");
+});
+
+test("Stop pressed again while its cancel is on its way sends one cancel", async () => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  h = await mountRoom({
+    dispatch: async (command) => {
+      if (command.cancel !== undefined) await held;
+      return defaultOutcome(command);
+    },
+  });
+  h.deliver([reset([], header("running"))]);
+  await h.click(h.one("cancel"));
+  await h.click(h.one("cancel"));
+  expect(h.sent("cancel")).toHaveLength(1);
+  await act(async () => release());
+  await h.settle();
+  await h.click(h.one("cancel"));
+  expect(h.sent("cancel")).toHaveLength(2);
 });

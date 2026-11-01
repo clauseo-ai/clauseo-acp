@@ -46,10 +46,17 @@ function scanOutput(ids: readonly EntryId[]): EntryId | null {
   return null;
 }
 
-/** The latest question's id, or null. */
+const questions = new WeakMap<readonly EntryId[], EntryId | null>();
+
+/** The latest question's id, or null; kept per id list, as `latestOutput` is. */
 export function latestQuestion(ids: readonly EntryId[]): EntryId | null {
-  for (let i = ids.length - 1; i >= 0; i -= 1) if (isQuestion(ids[i]!)) return ids[i]!;
-  return null;
+  const known = questions.get(ids);
+  if (known !== undefined) return known;
+  let found: EntryId | null = null;
+  for (let i = ids.length - 1; i >= 0 && found === null; i -= 1)
+    if (isQuestion(ids[i]!)) found = ids[i]!;
+  questions.set(ids, found);
+  return found;
 }
 
 /** Whether two id lists hold the same ids in the same order. */

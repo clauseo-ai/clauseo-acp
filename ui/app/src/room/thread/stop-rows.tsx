@@ -23,11 +23,17 @@ function Changed({ entry }: { entry: StepEntry }) {
   const { undo, sentTurn, stream } = useThreadActions();
   const busy = useBusy(stream, sentTurn);
   const [refused, setRefused] = useState<string | null>(null);
+  // one undo at a time: Undo waits while the host answers the first
+  const [pending, setPending] = useState(false);
   const edited = entry.files.find((f) => f.may_include_lawyer_edits)?.path ?? null;
   const undoable = entry.checkpoint_after !== undefined;
   const onUndo = () => {
+    if (pending) return;
+    setPending(true);
     setRefused(null);
-    undo(entry).catch((e: unknown) => setRefused(toHostError(e).code));
+    undo(entry)
+      .catch((e: unknown) => setRefused(toHostError(e).code))
+      .finally(() => setPending(false));
   };
   return (
     <div data-testid="files-changed">
@@ -36,7 +42,7 @@ function Changed({ entry }: { entry: StepEntry }) {
         editedSince={edited}
         state={entry.undone ? "undone" : "changed"}
         {...(undoable ? { onUndo } : {})}
-        undoDisabled={busy}
+        undoDisabled={busy || pending}
         error={refused === null ? null : { words: errorWords(w.lang, refused), code: refused }}
         testIds={{ paper: "file-changed", undo: "undo", error: "error" }}
       />

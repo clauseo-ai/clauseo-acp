@@ -163,6 +163,26 @@ test("a refused Undo shows its words beside Undo, by code", async () => {
   expect(h.host.querySelector('.working[data-testid="error"]')).toBeNull();
 });
 
+test("Undo waits while its undo_step is on its way: one undo however often it is pressed", async () => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  h = await mountRoom({
+    dispatch: async (command) => {
+      if (command.undo_step !== undefined) await held;
+      return defaultOutcome(command);
+    },
+  });
+  h.deliver([reset([changed()])]);
+  const undo = () => h!.one("undo") as HTMLButtonElement;
+  await h.click(undo());
+  expect(undo().disabled).toBe(true);
+  await h.click(undo());
+  expect(h.sent("undo_step")).toHaveLength(1);
+  await act(async () => release());
+  await h.settle();
+  expect(undo().disabled).toBe(false);
+});
+
 test("Undo is disabled while busy", async () => {
   h = await mountRoom();
   h.deliver([reset([changed()], header("running"))]);
@@ -354,6 +374,24 @@ test("older entries page in at the top when the view has more, above the live ro
       .only("query")
       .filter((c) => typeof c.query === "object" && "page_entries" in c.query),
   ).toHaveLength(1);
+});
+
+test("a thread that opens with older entries and can't scroll pages them in at once", async () => {
+  const older: ViewEntry[] = [userMessage(1, 7, "An older question")];
+  h = await mountRoom({
+    query: (query) =>
+      typeof query === "object" && query.page_entries !== undefined
+        ? { entries: older }
+        : { entries: [] },
+  });
+  const window = reset([userMessage(50, 1, "Q")]);
+  window.reset!.view_window.has_older = true;
+  h.deliver([window]);
+  await h.settle();
+  expect(h.transport.only("query").map((c) => c.query)).toContainEqual({
+    page_entries: { stream: STREAM, before_order: 50, limit: 50 },
+  });
+  expect(h.all("message-user")[0]?.textContent).toContain("An older question");
 });
 
 test('H17: a question shows its time when the host gives one, and "You" alone when it doesn\'t', async () => {
