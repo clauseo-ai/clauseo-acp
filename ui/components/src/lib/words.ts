@@ -91,6 +91,7 @@ const HI = {
   "Add the matter's papers and Clauseo reads them before your first question.":
     "मामले के दस्तावेज़ जोड़ें। आपके पहले प्रश्न से पहले Clauseo उन्हें पढ़ लेता है।",
   Stop: "रोकें",
+  "Image blocked": "चित्र रोका गया",
 } as const;
 
 /** Every interface string this file has in both languages. */
