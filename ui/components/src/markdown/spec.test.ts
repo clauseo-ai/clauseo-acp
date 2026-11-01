@@ -3,11 +3,14 @@ import spec from "commonmark-spec/spec.txt?raw";
 import gfmSpec from "./gfm-spec.json";
 import { EXCLUDED, REASONS } from "./spec-exclusions-fixture.ts";
 import type { Exclusion } from "./spec-exclusions-fixture.ts";
+import { loadEntities } from "./entities.ts";
 import { chunkingsFor, examplesOf, normalise, streamed, withTabs } from "./spec-fixture.ts";
 
 // The official suites, run through the streaming path: each example goes into one answer model in several
 // chunkings (splitter, document-wide definitions, tail repair while streaming, sanitiser), and the HTML of
 // the final hast, normalised (spec-fixture.ts), must equal the spec's. Excluded examples must still fail.
+// The full entity table, which the renderer loads lazily (entities.ts), is loaded first.
+await loadEntities();
 
 const EXAMPLES = [
   ...examplesOf(spec).map((example) => ({ ...example, spec: "commonmark" as const })),
