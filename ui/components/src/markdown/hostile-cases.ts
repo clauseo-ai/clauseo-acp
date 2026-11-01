@@ -127,6 +127,17 @@ export const CASES: HostileCase[] = [
     text: ["AT&T", "© 2026", "—…", "<b>not bold</b>"],
   },
   // Nesting that overflowed the stack and unmounted the answer: capped at 32 levels, the rest as text.
+  // Tail repair once stripped a half-arrived tag while streaming, hiding everything after it.
+  {
+    id: "half-tag-mid-stream",
+    markdown: "Note: if a<b then the clause continues",
+    text: ["a<b then the clause continues"],
+  },
+  {
+    id: "open-tag-mid-stream",
+    markdown: '<div class="a"\nmore text after it',
+    text: ['<div class="a"', "more text after it"],
+  },
   { id: "deep-list", markdown: "- ".repeat(1000) + "x", text: ["- - - x"] },
   { id: "deep-quote", markdown: "> ".repeat(3000) + "x", text: ["> > > x"] },
   // Deeper than the tree limit: the block shows its source as text. (5,000 a side overflowed the stack,

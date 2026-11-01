@@ -30,9 +30,22 @@ import type { BlockEnd } from "./split.ts";
 
 /**
  * One block, ready to render: `source` is the block's text, `input` what was parsed for it, `hast` the
- * sanitised result.
+ * sanitised result. `streaming` marks the last block of a streaming answer, whose links stay inert until it
+ * is finished (a URL may still be arriving, and tail repair may have rewritten it).
  */
-export type BlockView = { readonly source: string; readonly input: string; readonly hast: Hast };
+export type BlockView = {
+  readonly source: string;
+  readonly input: string;
+  readonly hast: Hast;
+  readonly streaming: boolean;
+};
+
+/**
+ * Tail repair for the streaming last block: remend's defaults, except that a half-arrived HTML tag is not
+ * stripped (`if a<b then…` showed `if a`; raw HTML is text here, so it cannot restyle what follows) and no
+ * `$$` is closed (we render no maths; `https://a.com/$$x` gained `$$`).
+ */
+const TAIL_REPAIR = { htmlTags: false, katex: false } as const;
 
 export type Answer = {
   /** The blocks for the whole answer so far; `streaming` is false once the turn has ended. */
@@ -111,6 +124,7 @@ export function createAnswer(scope: string): Answer {
   const labels = createCache<readonly string[]>();
   const inputs = createCache<{ prefix: string; input: string }>();
   const views = createCache<BlockView>();
+  const tails = createCache<BlockView>();
   const tree = (source: string) => trees.get(source, () => parse(source));
   const split = createSplitter((block) => ends.get(block, () => endOf(block, tree(block))));
   const options = { clobberPrefix: `${scope}-`, handlers: { html: htmlAsText } };
@@ -121,16 +135,21 @@ export function createAnswer(scope: string): Answer {
    */
   const toView = (source: string, input: string): BlockView =>
     views.get(input, () => {
+      const fallback = { source, input, hast: plainText(source), streaming: false };
       try {
         const root = tree(input);
-        if (deeperThan(root, MAX_TREE_DEPTH)) return { source, input, hast: plainText(source) };
+        if (deeperThan(root, MAX_TREE_DEPTH)) return fallback;
         const hast = toHast(root, options) as Hast;
         if (input.includes("[^")) scopeFootnoteLabel(hast.children, scope);
-        return { source, input, hast: sanitize(hast, SCHEMA) as Hast };
+        return { source, input, hast: sanitize(hast, SCHEMA) as Hast, streaming: false };
       } catch {
-        return { source, input, hast: plainText(source) };
+        return fallback;
       }
     });
+
+  /** The streaming last block's view: the same hast, its links inert. */
+  const toTailView = (source: string, input: string): BlockView =>
+    tails.get(input, () => ({ ...toView(source, input), streaming: true }));
 
   /**
    * The document's definitions, from each block's own; while streaming, the last block's do not count yet.
@@ -199,13 +218,14 @@ export function createAnswer(scope: string): Answer {
           views.keep(before.input);
           return before;
         }
-        return toView(block, inputOf(tail ? remend(block) : block, lines));
+        if (!tail) return toView(block, inputOf(block, lines));
+        return toTailView(block, inputOf(remend(block, TAIL_REPAIR), lines));
       });
       lastBlocks = blocks;
       lastLinesUsed = lines;
       lastText = raw;
       lastStreaming = streaming;
-      for (const cache of [trees, ends, owned, labels, inputs, views]) cache.sweep();
+      for (const cache of [trees, ends, owned, labels, inputs, views, tails]) cache.sweep();
       return lastViews;
     },
   };

@@ -9,13 +9,14 @@ import { createAnswer } from "./answer.ts";
 import type { BlockView } from "./answer.ts";
 import { BlockBoundary } from "./boundary.tsx";
 import { CodeBlock } from "./code.tsx";
-import { AnswerScopeContext, scopeOf } from "./host.ts";
+import { AnswerScopeContext, InertLinksContext, scopeOf } from "./host.ts";
 import { Image } from "./image.tsx";
 import { LinkOrReference } from "./link.tsx";
 
 /**
  * AppendText-shaped props: `text` is the whole answer so far and `appended` what the last patch added;
- * `streaming` is false once the turn has ended.
+ * `streaming` is true while the turn is running. It defaults to false, so a host that leaves it out (a
+ * reopened transcript) shows finished text: no tail repair, every link live.
  */
 export type MarkdownProps = { text: string; appended?: string; streaming?: boolean };
 
@@ -25,7 +26,13 @@ const OPTIONS = { Fragment, jsx, jsxs, components: COMPONENTS, passNode: true };
 const Block = memo(function Block({ view }: { view: BlockView }) {
   return (
     <BlockBoundary source={view.source}>
-      <BlockContent view={view} />
+      {view.streaming ? (
+        <InertLinksContext value={true}>
+          <BlockContent view={view} />
+        </InertLinksContext>
+      ) : (
+        <BlockContent view={view} />
+      )}
     </BlockBoundary>
   );
 });
@@ -34,7 +41,7 @@ function BlockContent({ view }: { view: BlockView }) {
   return toJsxRuntime(view.hast, OPTIONS);
 }
 
-export function Markdown({ text, streaming = true }: MarkdownProps) {
+export function Markdown({ text, streaming = false }: MarkdownProps) {
   const scope = scopeOf(useId());
   const [answer] = useState(() => createAnswer(scope));
   const blocks = answer.update(text, streaming);

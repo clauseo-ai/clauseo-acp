@@ -1,6 +1,6 @@
 import { useContext } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
-import { AnswerScopeContext, MarkdownHostContext } from "./host.ts";
+import { AnswerScopeContext, InertLinksContext, MarkdownHostContext } from "./host.ts";
 import { CLOBBER_PREFIX, LINK_PREFIXES, referenceOf } from "./schema.ts";
 
 type LinkProps = {
@@ -51,13 +51,14 @@ function spoofedHost(text: string, href: string | undefined): string | undefined
 /**
  * Every link in an answer. It renders a real <a href> for display and copy, but a click or middle click
  * never navigates: it is cancelled, and the URL goes to the host's open_external. A fragment scrolls to its
- * target. Relative and other links render without an href, inert. Of the sanitised attributes it keeps the
- * id and the two ARIA ones footnotes use.
+ * target. Relative and other links render without an href, inert, and so does every link in the streaming
+ * last block. Of the sanitised attributes it keeps the id and the two ARIA ones footnotes use.
  */
 export function Link({ href, id, children, ...aria }: LinkProps) {
   const host = useContext(MarkdownHostContext);
   const scope = useContext(AnswerScopeContext);
-  const url = allowed(href, scope);
+  const inert = useContext(InertLinksContext);
+  const url = inert ? undefined : allowed(href, scope);
   const open = (event: MouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
     if (!url) return;
@@ -85,7 +86,10 @@ export function Link({ href, id, children, ...aria }: LinkProps) {
   );
 }
 
-/** A citation or a paper of the matter: opens in the side panel through the host, never navigates. */
+/**
+ * A citation or a paper of the matter: opens in the side panel through the host, never navigates. In the
+ * streaming last block it is plain, with no role and no action, until the block is finished.
+ */
 function Reference({
   kind,
   id,
@@ -96,6 +100,14 @@ function Reference({
   children?: ReactNode;
 }) {
   const host = useContext(MarkdownHostContext);
+  const inert = useContext(InertLinksContext);
+  if (inert) {
+    return (
+      <span data-clauseo={kind} data-ref={id}>
+        {children}
+      </span>
+    );
+  }
   const onKeyDown = (event: KeyboardEvent<HTMLSpanElement>) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();

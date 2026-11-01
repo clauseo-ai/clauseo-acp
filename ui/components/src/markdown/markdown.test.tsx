@@ -154,9 +154,54 @@ test("a blocked image is a placeholder in the page's language, its alt as the la
 });
 
 test("the streaming tail shows repaired emphasis, and the finished text shows the source's", () => {
-  act(() => root.render(<Markdown text={"Done.\n\nThe **key"} />));
+  act(() => root.render(<Markdown text={"Done.\n\nThe **key"} streaming />));
   expect(host.querySelector("strong")?.textContent).toBe("key");
   act(() => root.render(<Markdown text={"Done.\n\nThe **key"} streaming={false} />));
   expect(host.querySelector("strong")).toBeNull();
   expect(host.textContent).toBe("Done.The **key");
+});
+
+test("a host that leaves out streaming gets finished text: no tail repair", () => {
+  act(() => root.render(<Markdown text={"Done.\n\nThe **key"} />));
+  expect(host.querySelector("strong")).toBeNull();
+  expect(host.textContent).toBe("Done.The **key");
+});
+
+test("links in the streaming last block are inert until it finishes; finished blocks' links are live", () => {
+  const text =
+    "See [the act](https://indiacode.nic.in/act).\n\nAnd [the rules](https://indiacode.nic.in/rules), " +
+    "[Smith](clauseo-cite:smith-2019) and https://a.example/$$x";
+  const render = (streaming: boolean) =>
+    act(() =>
+      root.render(
+        <MarkdownHostContext value={HOST}>
+          <Markdown text={text} streaming={streaming} />
+        </MarkdownHostContext>,
+      ),
+    );
+  render(true);
+  const [finished, tail, autolink] = [...host.querySelectorAll("a")];
+  expect(finished?.getAttribute("href")).toBe("https://indiacode.nic.in/act");
+  expect(tail?.hasAttribute("href")).toBe(false);
+  expect(autolink?.hasAttribute("href")).toBe(false);
+  expect(autolink?.textContent).toBe("https://a.example/$$x");
+  const citation = host.querySelector('[data-clauseo="citation"]');
+  expect(citation?.hasAttribute("role")).toBe(false);
+  expect(click(tail).defaultPrevented).toBe(true);
+  click(citation);
+  click(finished);
+  expect(calls).toEqual(["external https://indiacode.nic.in/act"]);
+  render(false);
+  calls.length = 0;
+  click(host.querySelectorAll("a")[1]);
+  click(host.querySelector('[data-clauseo="citation"]'));
+  expect(calls).toEqual(["external https://indiacode.nic.in/rules", "citation smith-2019"]);
+});
+
+test("a half-arrived tag hides nothing while streaming", () => {
+  act(() => root.render(<Markdown text={"Note: if a<b then the clause continues"} streaming />));
+  expect(host.textContent).toBe("Note: if a<b then the clause continues");
+  act(() => root.render(<Markdown text={'Para.\n\n<div class="a"\nmore text'} streaming />));
+  expect(host.textContent).toContain('<div class="a"');
+  expect(host.textContent).toContain("more text");
 });
