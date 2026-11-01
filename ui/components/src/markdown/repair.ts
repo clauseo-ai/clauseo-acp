@@ -175,23 +175,41 @@ const MATCHED = new Set(["inlineCode", "strong", "emphasis", "delete"]);
 /** After other edits: a last line left holding only a list or heading marker. */
 const BARE_MARKER = /\n(?:[ \t]*>)*[ \t]*(?:[-+*]|\d{1,9}[.)]|#{1,6})[ \t]*$/;
 
-/** Where the last lines that must wait start (a lone block marker, a table without its delimiter row), or -1. */
+/** Blocks whose lines are what they are: nothing in them is a marker, and no table forms there. */
+const LITERAL = new Set(["code", "html"]);
+
+/**
+ * Where the last lines that must wait start, or -1: a lone block marker, and a pipe-led line that may be
+ * a table's header row (with the delimiter row still arriving after it). A table can form only where the
+ * pipe-led line's text is paragraph text, a paragraph it opens or one it continues (a table interrupts a
+ * paragraph), never in code, HTML or a table already there. Such a line stays hidden until the next line
+ * shows whether it is a table, so a stream that pauses after it shows it only once more text arrives.
+ */
 function hiddenLines(input: string, root: Root, from: number, end: number): number {
   if (end <= from) return -1;
   const lineStart = Math.max(from, input.lastIndexOf("\n", end - 1) + 1);
   const line = input.slice(lineStart, end);
-  const inTable = (offset: number) =>
-    pathTo(root, input, offset).some((node) => node.type === "table");
+  const pathAt = (start: number, text: string) =>
+    pathTo(root, input, start + Math.max(0, text.search(/[^ \t>]/)));
+  const tableMayForm = (start: number, text: string) => {
+    const path = pathAt(start, text);
+    return (
+      path.some((node) => node.type === "paragraph") &&
+      !path.some((node) => node.type === "table" || LITERAL.has(node.type))
+    );
+  };
   if (PARTIAL_DELIMITER_ROW.test(line) && lineStart > from) {
     const previousStart = Math.max(from, input.lastIndexOf("\n", lineStart - 2) + 1);
     const previous = input.slice(previousStart, lineStart - 1);
-    if (PIPE_LINE.test(previous) && !inTable(previousStart)) return previousStart;
+    if (PIPE_LINE.test(previous) && tableMayForm(previousStart, previous)) return previousStart;
   }
-  if (PIPE_LINE.test(line) && !inTable(lineStart)) return lineStart;
-  // A marker line still open at the end (no line ending after it), unless it closes something.
+  if (PIPE_LINE.test(line) && tableMayForm(lineStart, line)) return lineStart;
+  // A marker line still open at the end (no line ending after it), unless it closes something or is
+  // code or HTML.
   if (!MARKER_LINE.test(line) || input.includes("\n", end)) return -1;
-  const marker = lineStart + line.search(/[^ \t>]/);
-  const inner = pathTo(root, input, marker).at(-1);
+  const path = pathAt(lineStart, line);
+  const inner = path.at(-1);
+  if (path.some((node) => LITERAL.has(node.type))) return -1;
   return inner && MATCHED.has(inner.type) ? -1 : lineStart;
 }
 
@@ -217,8 +235,13 @@ function halfConstructs(input: string, root: Root, from: number): Edit[] {
   const hideFrom = hiddenLines(input, root, from, end);
   if (hideFrom >= 0) cut(hideFrom, input.length);
   end = keptEnd(input, from, cuts);
-  // A trailing backslash: the start of an escape, or of a hard break (then one line ending after it).
-  if (end > from && input[end - 1] === "\\" && !escaped(input, end - 1)) {
+  // A trailing backslash in text: the start of an escape, or of a hard break (then one line ending after it).
+  if (
+    end > from &&
+    input[end - 1] === "\\" &&
+    !escaped(input, end - 1) &&
+    pathTo(root, input, end - 1).at(-1)?.type === "text"
+  ) {
     const after = input.slice(end, hideFrom >= 0 ? hideFrom : input.length);
     if (/^(?:\n[ \t]*)?$/.test(after)) cut(end - 1, end);
   }
