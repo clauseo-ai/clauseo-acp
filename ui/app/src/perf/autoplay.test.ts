@@ -37,7 +37,7 @@ const el = (html: string): HTMLElement => {
  * takes to answer the card (Infinity: never). */
 function fakeWindow(
   log: string[],
-  { permission = true, clicksToAnswer = 1, stepRowRendered = true } = {},
+  { permission = true, clicksToAnswer = 1, stepRowRendered = true, answer = "The edit" } = {},
 ) {
   document.body.innerHTML = `
     <input data-testid="matter-name" value="Matter">
@@ -62,7 +62,7 @@ function fakeWindow(
   });
   q("send").addEventListener("click", () => {
     log.push("click send");
-    scroller.append(el('<div data-testid="message-agent">The edit</div>'));
+    scroller.append(el(`<div data-testid="message-agent">${answer}</div>`));
     document.body.append(el('<button data-testid="cancel">Cancel</button>'));
     if (!permission) return;
     const card = el(
@@ -184,6 +184,24 @@ describe("autoplay", () => {
     await autoplay(d);
     expect(finished).toHaveLength(1);
     expect(finished[0]!.error).toBeNull();
+  });
+
+  // The answer renders as Markdown: its first chunk can be all syntax ("# ", "**"), which shows no text yet. The first
+  // answer is the store's text, not the page's.
+  test("a first answer whose Markdown shows no text yet still counts as the first answer", async () => {
+    const log: string[] = [];
+    fakeWindow(log, { permission: false, answer: '<div data-clauseo="markdown"><h1></h1></div>' });
+    let fail: (error: Error) => void = () => {};
+    const deadline = new Promise<never>((_, f) => (fail = f));
+    const { d, finished } = deps(log, {
+      deadline,
+      step: (name) => {
+        log.push(name);
+        if (name === "first answer") setTimeout(() => fail(new Error("over 120000 ms")), 50);
+      },
+    });
+    await autoplay(d);
+    expect(finished[0]!.error).toMatch(/^autoplay, at step "permission": /);
   });
 
   test("a session that never ends finishes with the error and the step it stopped at", async () => {

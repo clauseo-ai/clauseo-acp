@@ -8,7 +8,7 @@
 //     the matter shows and the composer is enabled;
 //  4. type `PROMPT` into the composer (one value change: keystrokes are not measured on WebKit);
 //  5. `channelBytes`, `startStream`, click Send;
-//  6. wait for the first answer text (or the permission card, whichever comes first);
+//  6. wait for the first answer text in the view store (or the permission card, whichever comes first);
 //  7. answer the permission "allow once", and wait until its card is no longer pending: `ANSWER_LIMIT_MS`, then one
 //     more click and as long again, else the play fails at this step saying the click did not take;
 //  8. scroll the transcript up and back down with `scrollBy`, `SCROLL_FRAMES` frames each way, while the rest of the
@@ -265,10 +265,9 @@ async function play(d: AutoplayDeps, state: { step: string; expired: boolean; se
 
   step("first answer");
   const pending = () => doc.querySelector<HTMLElement>(PENDING_ALLOW_ONCE);
-  await until(
-    "the first answer text",
-    () => (byId(doc, "message-agent")?.textContent ?? "") !== "" || pending() !== null,
-  );
+  // The store's answer text, not the page's: the answer renders as Markdown, and a first chunk that is all syntax
+  // ("# ", "**") shows no text yet.
+  await until("the first answer text", () => d.answerBytes() > 0 || pending() !== null);
 
   step("permission");
   await until("the permission", () => pending() !== null);
