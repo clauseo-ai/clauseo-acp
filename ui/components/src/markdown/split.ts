@@ -64,7 +64,8 @@ function safeCut(text: string, from: number, at: number, endOf: EndOf): boolean 
 /**
  * The block starts in `text` at or after `from` (which is itself a block start), using marked's top-level
  * tokens as the places to try. A token whose raw text is not the next slice of the input (marked can add a
- * line ending when it joins tokens) ends the search: the rest stays one block.
+ * line ending when it joins tokens, and a streamed list item ending in a space gets `\n` for it) still starts
+ * where the tokens before it end, so it may be cut there; it ends the search: the rest stays one block.
  */
 function startsFrom(text: string, from: number, endOf: EndOf): number[] {
   const starts = [from];
@@ -74,11 +75,11 @@ function startsFrom(text: string, from: number, endOf: EndOf): number[] {
   let blockStart = from;
   let at = from;
   for (const token of tokens) {
-    if (!text.startsWith(token.raw, at)) break;
     if (token.type !== "space" && at > blockStart && safeCut(text, blockStart, at, endOf)) {
       starts.push(at);
       blockStart = at;
     }
+    if (!text.startsWith(token.raw, at)) break;
     at += token.raw.length;
   }
   return starts;
