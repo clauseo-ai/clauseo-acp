@@ -12,6 +12,10 @@ import { CASES } from "./hostile-cases.ts";
 // a side 1.4 s, 5,000 short runs 0.56 s), while every case now stays within about 3.5 times (the
 // 20,000-character line, and the tab-nested list whose depth micromark checks on every line). An absolute limit in milliseconds fails on a loaded CI machine and says nothing
 // about size; a frame (16.7 ms) is the real target, measured in real engines by the private harness.
+//
+// Times are this thread's CPU time, not wall time: with other suites running at once (load about 10),
+// wall time counted the time the thread waited for a core, and 4 of 6 runs failed; thread CPU time
+// passed 6 of 6 at that load and still fails with the nesting limits removed (round 1 of PR #115's review).
 const RATIO = 8;
 const FLOOR_MS = 20;
 const DELTA = 16;
@@ -25,13 +29,19 @@ function ends(length: number): number[] {
   return length <= 2_000 ? all : all.filter((end) => end <= 1_000 || end >= length - 640);
 }
 
+/** This thread's CPU time so far, in milliseconds. */
+function now(): number {
+  const { user, system } = process.threadCpuUsage();
+  return (user + system) / 1000;
+}
+
 /** The fastest of three timings of `update`, so one scheduler hiccup does not count. */
 function fastest(update: () => void): number {
   const times: number[] = [];
   for (let attempt = 0; attempt < 3; attempt++) {
-    const start = performance.now();
+    const start = now();
     update();
-    times.push(performance.now() - start);
+    times.push(now() - start);
   }
   return Math.min(...times);
 }
@@ -48,9 +58,9 @@ test.each(CASES.map((c) => [c.id, c] as const))(
     let streaming = 0;
     const answer = createAnswer("s");
     for (const end of ends(c.markdown.length)) {
-      const start = performance.now();
+      const start = now();
       answer.update(c.markdown.slice(0, end), true);
-      const took = performance.now() - start;
+      const took = now() - start;
       // Over the limit: measured again from a fresh model at that length, to tell a hiccup from a slow update.
       streaming = Math.max(
         streaming,
