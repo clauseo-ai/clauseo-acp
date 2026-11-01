@@ -31,12 +31,17 @@ converted document. From there they can call any IPC command the page can reach.
 **What stops them.**
 
 - `built`: The release context names one capability, `main`, which grants only the nine bridge
-  commands, one permission each ([0012](decisions/0012-desktop-bridge.md)), and six core window
-  commands for the room's title bar: drag, double-click, minimise, maximise or restore, close, and
-  whether it is maximised ([0015](decisions/0015-window-frame.md)); the `e2e` and `marks`
+  commands, one permission each ([0012](decisions/0012-desktop-bridge.md)), and the two core
+  window commands of Tauri's drag script, granted in every build: start a drag, and maximise or
+  restore on a double-click ([0015](decisions/0015-window-frame.md)). The room build adds
+  `frame.json` at setup on Windows and Linux (`window_frame::grant_caption_commands`): minimise,
+  maximise or restore, close, and whether the window is maximised. The `e2e` and `marks`
   builds add `e2e.json` and `marks.json` at setup (`e2e::grant_scoreboard`), and their permissions
-  exist only in those builds; the `capabilities` check reads all three files and fails on
+  exist only in those builds; the `capabilities` check reads all four files and fails on
   `remote`, `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`
+- `built`: Tauri's window commands take a `label`, so those granted reach every window of the
+  app; `main` is the only one, and a test fails when a second window is built
+  ([0015](decisions/0015-window-frame.md))
 - `built`: A pinned CSP: no remote images or connections, no `unsafe-eval`, `object-src 'none'`,
   `base-uri 'none'`, Trusted Types enforced with one allowed policy, `clauseo-sanitize` (defence in
   depth: engines without support ignore it); the `tauri-config` check pins the string
