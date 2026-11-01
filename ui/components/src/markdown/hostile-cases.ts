@@ -284,4 +284,16 @@ export const CASES: HostileCase[] = [
       "Start[^n0].\n\n" +
       Array.from({ length: 25 }, (_, index) => `[^n${index}]: Then[^n${index + 1}].`).join("\n\n"),
   },
+  // A note gets a block's protections (round 1 of PR #115's review): what nesting.ts cut reads as
+  // written (a long signature line, brackets, tildes).
+  {
+    id: "footnote-signature",
+    markdown: `Signed[^s].\n\n[^s]: Signature: ${"_".repeat(70)}`,
+    text: ["_".repeat(70)],
+  },
+  {
+    id: "footnote-brackets-tildes",
+    markdown: `See[^b].\n\n[^b]: ${"[".repeat(40)}a${"]".repeat(40)} and ${"~".repeat(70)}`,
+    text: [`${"[".repeat(40)}a${"]".repeat(40)}`, "~".repeat(70)],
+  },
 ];

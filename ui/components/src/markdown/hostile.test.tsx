@@ -33,6 +33,20 @@ const IMAGE_OK = /^(?:clauseo-file:|data:image\/(?:png|jpeg|gif|webp);base64,)/i
 const DELTA = 16;
 
 /** Every failure G4's checkContainer would report for one container. */
+const MAX_DOM_DEPTH = 160;
+
+/** How many elements deep `el`'s deepest descendant is (an iterative walk). */
+function depthOf(el: Element): number {
+  let deepest = 0;
+  const stack: [Element, number][] = [[el, 0]];
+  for (let item = stack.pop(); item; item = stack.pop()) {
+    const [node, depth] = item;
+    deepest = Math.max(deepest, depth);
+    for (const child of node.children) stack.push([child, depth + 1]);
+  }
+  return deepest;
+}
+
 function failuresIn(label: string, el: Element): string[] {
   const failures: string[] = [];
   for (const bad of el.querySelectorAll(FORBIDDEN))
@@ -54,6 +68,12 @@ function failuresIn(label: string, el: Element): string[] {
     if (!node.id.startsWith("user-content-"))
       failures.push(`${label}: id "${node.id}" without the user-content- prefix`);
   }
+  // What nesting.ts cuts never shows, and no tree gets past its depth limit (MAX_TREE_DEPTH, 128 hast
+  // levels, plus the components' own wrappers).
+  if (/[\uFDD1-\uFDDC]/.test(el.textContent ?? ""))
+    failures.push(`${label}: a stand-in for a cut character shows`);
+  const depth = depthOf(el);
+  if (depth > MAX_DOM_DEPTH) failures.push(`${label}: ${depth} elements deep`);
   for (const node of el.querySelectorAll("*")) {
     for (const attribute of node.getAttributeNames()) {
       if (/^on/i.test(attribute)) failures.push(`${label}: event handler attribute ${attribute}`);
@@ -102,7 +122,7 @@ function renderCases(streaming: boolean) {
 
 test("the corpus holds G4's 28 cases and the ones added since, each with its own id", () => {
   expect(CASES[27]?.id).toBe("unterminated-fence");
-  expect(CASES).toHaveLength(61);
+  expect(CASES).toHaveLength(63);
   expect(new Set(CASES.map((c) => c.id)).size).toBe(CASES.length);
 });
 
