@@ -234,8 +234,9 @@ fn stop_host_then_exit<R: Runtime>(app: &AppHandle<R>, exit: Arc<Exit>, code: i3
 }
 
 /// Builds the `main` window in code, not in `tauri.conf.json`, so builds can add webview arguments
-/// here, and give it this build's frame (`window_frame.rs`). The https scheme is fixed before the first release: changing it moves web storage. The
-/// title is `productName` from `tauri.conf.json`.
+/// here, and give it this build's frame (`window_frame.rs`). The https scheme is fixed before the
+/// first release: changing it moves web storage. The title is `productName` from
+/// `tauri.conf.json`.
 fn open_main_window(app: &App) -> tauri::Result<()> {
     let title = app.package_info().name.clone();
     let builder = WebviewWindowBuilder::new(app, MAIN_WINDOW, WebviewUrl::App("index.html".into()))
