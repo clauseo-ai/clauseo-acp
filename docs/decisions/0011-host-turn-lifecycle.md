@@ -151,8 +151,8 @@ A command's answer means its events are durable. The desktop window, the `cli` a
 gapless `seq`, and zstd and git off the actor. Stage B's `limits` arrives as a new actor input
 publishing `HostEvent::AccountLimitsChanged`. The queue, steer and the restart supervisor come
 with follow-ups. The profile hook is called at each session start (clauseo-acp-private#123), and
-a session gets only the MCP servers the lawyer turned on (#160): `crates/host/src/agent/loads.rs`
-holds the switches and their reasons.
+a session gets only the MCP servers the lawyer turned on (clauseo-acp-private#160):
+`crates/host/src/agent/loads.rs` holds the switches and their reasons.
 
 ## Status
 

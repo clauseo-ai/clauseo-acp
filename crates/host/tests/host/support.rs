@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use clauseo_host::{Host, HostConfig, HostHandle, HostJoin, ManualClock, SequentialIds};
-use clauseo_process::{PassthroughLauncher, SpawnOptions};
+use clauseo_process::{Launcher, PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{
     AgentId, CommandEnvelope, CommandId, CommandOutcome, Cursor, DeliveryRequest, ErrorCode,
     HostCommand, HostError, HostQuery, MatterId, MatterSource, MatterSummary, MessageId, Principal,
@@ -155,11 +155,25 @@ impl Dir {
 
     /// The config of run `run` (its clock starts `run` hours after [`START_MS`]).
     pub(crate) fn config(&self, run: u16, clock: &ManualClock) -> HostConfig {
+        self.config_launching(run, clock, Arc::new(self.launcher()))
+    }
+
+    /// The launcher every test uses: no sandbox, with `home/` as the agent's home.
+    pub(crate) fn launcher(&self) -> PassthroughLauncher {
+        PassthroughLauncher::new(SpawnOptions::new().home(self.root.join("home")))
+    }
+
+    /// As [`Dir::config`], launching agents through `launcher`.
+    pub(crate) fn config_launching(
+        &self,
+        run: u16,
+        clock: &ManualClock,
+        launcher: Arc<dyn Launcher>,
+    ) -> HostConfig {
         let locations = Locations::under_root(&self.root);
         let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
         let effective = Effective::load(&locations, &SystemFiles, &[&policy]);
-        let launcher = PassthroughLauncher::new(SpawnOptions::new().home(self.root.join("home")));
-        HostConfig::new(effective, Arc::new(launcher))
+        HostConfig::new(effective, launcher)
             .with_clock(Arc::new(clock.clone()))
             .with_ids(Box::new(SequentialIds::with_run(run)))
             .with_managed_mcp_path(self.root.join("managed-mcp.json"))
@@ -182,8 +196,18 @@ impl Dir {
         run: u16,
         adjust: impl FnOnce(HostConfig) -> HostConfig,
     ) -> Running {
+        self.start_launching(run, Arc::new(self.launcher()), adjust)
+    }
+
+    /// As [`Dir::start_with`], launching agents through `launcher`.
+    pub(crate) fn start_launching(
+        &self,
+        run: u16,
+        launcher: Arc<dyn Launcher>,
+        adjust: impl FnOnce(HostConfig) -> HostConfig,
+    ) -> Running {
         let clock = Self::clock(run);
-        let (handle, join) = Host::start(adjust(self.config(run, &clock)))
+        let (handle, join) = Host::start(adjust(self.config_launching(run, &clock, launcher)))
             .unwrap_or_else(|e| panic!("Host::start (run {run}): {e}"));
         Running {
             handle,

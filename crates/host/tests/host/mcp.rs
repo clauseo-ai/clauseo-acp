@@ -5,15 +5,17 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use clauseo_host::ProfileHook;
+use clauseo_process::{LaunchSpec, Launched, Launcher, PassthroughLauncher};
 use clauseo_protocol::{AgentId, StopReason, StreamId};
 use serde_json::{Map, Value, json};
 
 use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread};
 
-/// A profile hook returning a fixed `_meta` and no variables.
-struct Hook(Value);
+/// A profile hook returning a fixed `_meta` and fixed variables.
+struct Hook(Value, BTreeMap<OsString, OsString>);
 
 impl ProfileHook for Hook {
     fn session_meta(&self, _agent: &AgentId) -> Option<Map<String, Value>> {
@@ -21,7 +23,20 @@ impl ProfileHook for Hook {
     }
 
     fn launch_env(&self, _agent: &AgentId) -> BTreeMap<OsString, OsString> {
-        BTreeMap::new()
+        self.1.clone()
+    }
+}
+
+/// A launcher that keeps each spec's environment, then launches it as the tests' own does.
+struct Recording {
+    inner: PassthroughLauncher,
+    envs: Arc<Mutex<Vec<BTreeMap<OsString, OsString>>>>,
+}
+
+impl Launcher for Recording {
+    fn launch(&self, spec: &LaunchSpec) -> Result<Launched, clauseo_process::Error> {
+        self.envs.lock().unwrap().push(spec.env().clone());
+        self.inner.launch(spec)
     }
 }
 
@@ -43,7 +58,7 @@ fn command(bin: &Path, name: &str) -> String {
 /// Starts run `run` with `hook`, if any.
 fn start(dir: &Dir, run: u16, hook: Option<Value>) -> Running {
     dir.start_with(run, |config| match hook {
-        Some(meta) => config.with_profile_hook(Box::new(Hook(meta))),
+        Some(meta) => config.with_profile_hook(Box::new(Hook(meta, BTreeMap::new()))),
         None => config,
     })
 }
@@ -163,4 +178,47 @@ fn under_managed_mcp_no_server_and_no_strict_go() {
     let host = start(&dir, 0, Some(hook));
     one_turn(&dir, &host);
     host.shutdown();
+}
+
+/// #123's launch half: the hook's variables reach the agent's environment, and the host's
+/// `ENABLE_CLAUDEAI_MCP_SERVERS=false` replaces the hook's own, in any case.
+#[test]
+fn the_hooks_launch_variables_and_the_connector_switch_reach_the_agent() {
+    let dir = dir_playing("mcp_launch_env", "mcp-defaults");
+    let envs = Arc::new(Mutex::new(Vec::new()));
+    let launcher = Recording {
+        inner: dir.launcher(),
+        envs: Arc::clone(&envs),
+    };
+    let variables = BTreeMap::from([
+        (OsString::from("CLAUSEO_FIRM"), OsString::from("acme")),
+        (
+            OsString::from("enable_claudeai_mcp_servers"),
+            OsString::from("true"),
+        ),
+    ]);
+    let host = dir.start_launching(0, Arc::new(launcher), |config| {
+        config.with_profile_hook(Box::new(Hook(json!({}), variables)))
+    });
+    one_turn(&dir, &host);
+    host.shutdown();
+    let envs = envs.lock().unwrap();
+    let [env] = envs.as_slice() else {
+        panic!("one launch, not {}", envs.len());
+    };
+    assert_eq!(
+        env.get(&OsString::from("CLAUSEO_FIRM")),
+        Some(&OsString::from("acme"))
+    );
+    let switches: Vec<_> = env
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("ENABLE_CLAUDEAI_MCP_SERVERS"))
+        .collect();
+    assert_eq!(
+        switches,
+        [(
+            &OsString::from("ENABLE_CLAUDEAI_MCP_SERVERS"),
+            &OsString::from("false")
+        )]
+    );
 }

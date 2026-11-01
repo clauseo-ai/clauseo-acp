@@ -77,7 +77,8 @@ pub(crate) struct Actor {
     pub(crate) snapshots: SnapshotWorker,
     pub(crate) effective: Arc<Effective>,
     pub(crate) launcher: Arc<dyn Launcher>,
-    /// Kept for the later `session/new` and launch calls; the host does not call it yet.
+    /// Called at each session start, for the `_meta` of `session/new` and `session/load`, and
+    /// at each launch, for the agent's variables (`agent/loads.rs`).
     pub(crate) profile: Box<dyn ProfileHook>,
     /// Where Claude Code's enterprise `managed-mcp.json` would be.
     pub(crate) managed_mcp: std::path::PathBuf,
