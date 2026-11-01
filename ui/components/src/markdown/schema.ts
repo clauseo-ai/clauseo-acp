@@ -1,7 +1,8 @@
 // The sanitise schema (research/16-webview-security.md §3.5, as in the G4 spike), narrowed to what our
 // pipeline emits: the tags and attributes mdast-util-to-hast produces for CommonMark and GFM (footnotes
-// included), and nothing from GitHub's broad global list (`name`, `action`, `tabIndex`, `title`…), so tags
-// mapped later (the inline-tag allowlist) start from nothing. Protocols: href https, http, mailto and our
+// included), the syntax extras (definition lists, superscript, highlight) and the approved inline tags
+// (inline-tags.ts), and nothing from GitHub's broad global list (`name`, `action`, `tabIndex`, `title`…):
+// the inline tags carry no attribute at all, and headings only their generated id. Protocols: href https, http, mailto and our
 // two reference schemes; src clauseo-file and data, the latter narrowed to raster data:image/ by the image
 // component. rehype-sanitize's `user-content-` clobber prefix stays. Our components then decide what is
 // clickable.
@@ -50,6 +51,17 @@ export const SCHEMA: Schema = {
     "th",
     "td",
     "sup",
+    // The syntax extras and the approved inline tags (sup, del and br are above).
+    "sub",
+    "u",
+    "ins",
+    "s",
+    "mark",
+    "small",
+    "kbd",
+    "dl",
+    "dt",
+    "dd",
   ],
   attributes: {
     // Links, and footnote references and backlinks.
@@ -62,6 +74,13 @@ export const SCHEMA: Schema = {
       ["className", "data-footnote-backref"],
     ],
     code: [["className", /^language-./]],
+    // A heading's anchor (slugs.ts).
+    h1: ["id"],
+    h2: ["id"],
+    h3: ["id"],
+    h4: ["id"],
+    h5: ["id"],
+    h6: ["id"],
     img: ["src", "alt"],
     // Task list items.
     input: [["type", "checkbox"], ["disabled", true], "checked"],

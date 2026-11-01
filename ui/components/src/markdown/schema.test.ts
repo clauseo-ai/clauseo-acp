@@ -49,12 +49,52 @@ test("the schema keeps no global attribute from GitHub's list (name, action, tab
 test("tags our pipeline does not emit are dropped, their text kept", () => {
   const root: Root = {
     type: "root",
-    children: ["form", "div", "span", "details", "b", "i", "ins", "kbd"].map((tag) =>
+    children: ["form", "div", "span", "details", "b", "i", "font", "center"].map((tag) =>
       element(tag, { action: "https://x", method: "post", encType: "text/plain" }),
     ),
   };
   expect(sanitize(root, SCHEMA)).toEqual({
     type: "root",
     children: Array.from({ length: 8 }, () => ({ type: "text", value: "x" })),
+  });
+});
+
+test("the approved inline tags and the syntax extras keep no attribute; a heading keeps only its id, prefixed", () => {
+  const hostile = {
+    id: "x",
+    className: ["c"],
+    style: "color:red",
+    onClick: "alert(1)",
+    title: "t",
+    dataFootnotePending: "1",
+  };
+  const tags = [
+    "sup",
+    "sub",
+    "u",
+    "ins",
+    "del",
+    "s",
+    "mark",
+    "small",
+    "kbd",
+    "dl",
+    "dt",
+    "dd",
+    "br",
+  ];
+  const root: Root = { type: "root", children: tags.map((tag) => element(tag, hostile)) };
+  expect(sanitize(root, SCHEMA)).toEqual({
+    type: "root",
+    children: tags.map((tag) =>
+      // A footnote reference still waiting for its note is a sup with this mark; the pipeline never puts
+      // it on an inline tag (inline-tags.ts makes elements with no properties).
+      element(tag, tag === "sup" ? { dataFootnotePending: "1" } : {}),
+    ),
+  });
+  const heading: Root = { type: "root", children: [element("h2", hostile)] };
+  expect(sanitize(heading, SCHEMA)).toEqual({
+    type: "root",
+    children: [element("h2", { id: "user-content-x" })],
   });
 });

@@ -7,11 +7,14 @@
 // 4.2 s). So, line by line and run by run:
 // - A line's leading container prefix (block quote and list markers, spaces and tabs) stops at the 33rd
 //   marker or at column MAX_INDENT, whichever comes first: the rest of the line is text.
-// - A run of `*`, `_` or `~` keeps its first MAX_RUN characters as delimiters, and a paragraph (text
+// - A run of `*`, `_`, `~` or `=` keeps its first MAX_RUN characters as delimiters, and a paragraph (text
 //   between blank lines) its first MAX_SEQUENCES delimiter sequences; the rest become text. A `~~~` fence
-//   line is left alone.
+//   line and a setext underline are left alone, and so is a run of `=` that is not two long (only `==`
+//   delimits highlight).
 // - A paragraph keeps at most MAX_OPEN_BRACKETS `[` (link or image openers) open at once, and
 //   MAX_UNMATCHED_BRACKETS `]` with none open; past those a bracket is text.
+// - A definition list keeps its first MAX_DEFINITIONS definitions; the `:` of each one after that is text,
+//   so the rest of a longer glossary shows as paragraphs with a visible `: `.
 // - After parsing, a block whose tree is still deeper than MAX_TREE_DEPTH shows its source as plain text
 //   (answer.ts).
 // Each cut replaces the character that would open a container or delimit emphasis by a stand-in, a
@@ -25,7 +28,7 @@ import type { Nodes } from "mdast";
 export const MAX_NESTING = 32;
 /** The column a line's container prefix may reach: 32 levels of `1. ` items, or 64 of `- `. */
 export const MAX_INDENT = 64;
-/** The `*`, `_` and `~` characters one run keeps as delimiters (the longest legitimate run is a few). */
+/** The `*`, `_`, `~` and `=` characters one run keeps as delimiters (the longest legitimate run is a few). */
 export const MAX_RUN = 64;
 /**
  * The `*`, `_` and `~` delimiter sequences one paragraph keeps: micromark matches each closer against
@@ -51,15 +54,23 @@ export const MAX_UNMATCHED_BRACKETS = 64;
 export const MAX_BRACKET_SPAN = 1001;
 /** The brackets in code spans a paragraph may leave uncounted (`Use \`[\`` in prose, a short fenced block). */
 export const MAX_CODE_BRACKETS = 64;
+/**
+ * The definitions one definition list keeps (the rest of its `: ` markers are text). The definition-list
+ * extension splices each term's events into the middle of the document's, so a list costs the square of
+ * its length (in Node, 50 terms 19 ms, 300 terms 276 ms, against 20 ms as paragraphs), and the splitter
+ * never cuts one, so a streaming glossary is parsed whole on every update. 32 keeps one under about 10 ms.
+ */
+export const MAX_DEFINITIONS = 32;
 /** Levels of mdast below a block's root: 32 nested lists are 64 (list and item), plus their inline content. */
 export const MAX_TREE_DEPTH = 128;
 
 /** The characters a cut replaces, and their stand-ins, the noncharacters U+FDD1 to U+FDDB. */
-const CUT = "*_-+>.) \t~[]";
-const STAND_IN = "\uFDD1\uFDD2\uFDD3\uFDD4\uFDD5\uFDD6\uFDD7\uFDD8\uFDD9\uFDDA\uFDDB\uFDDC";
-const STAND_INS = /[\uFDD1-\uFDDC]/g;
-/** A stand-in in a URL, which micromark percent-encodes (U+FDD1 is EF B7 91, U+FDDC is EF B7 9C). */
-const ENCODED_STAND_INS = /%EF%B7%9([1-9A-C])/gi;
+const CUT = "*_-+>.) \t~[]=:";
+const STAND_IN =
+  "\uFDD1\uFDD2\uFDD3\uFDD4\uFDD5\uFDD6\uFDD7\uFDD8\uFDD9\uFDDA\uFDDB\uFDDC\uFDDD\uFDDE";
+const STAND_INS = /[\uFDD1-\uFDDE]/g;
+/** A stand-in in a URL, which micromark percent-encodes (U+FDD1 is EF B7 91, U+FDDE is EF B7 9E). */
+const ENCODED_STAND_INS = /%EF%B7%9([1-9A-E])/gi;
 
 /** `char` (one of CUT) as its stand-in. */
 export function standIn(char: string): string {
@@ -153,7 +164,10 @@ function capPrefixes(text: string): string {
   return copied === 0 ? text : out + text.slice(copied);
 }
 
-const RUN = /[*_~]+/g;
+const RUN = /[*_~=]+/g;
+/** A setext heading's `=` underline, whose run is no delimiter. */
+const SETEXT_EQUALS = /^ {0,3}=+[ \t]*$/;
+const EQUALS_ONLY = /^=+$/;
 /** A fenced code block's `~~~` opening or closing line, whose run is no delimiter. */
 const TILDE_FENCE = /^ {0,3}~{3,}/;
 const BLANK_LINE = /\n[ \t]*\n/;
@@ -190,6 +204,7 @@ function capRuns(text: string): string {
     }
     if (run[0] === "~" && at - lineStart <= 3 && TILDE_FENCE.test(text.slice(lineStart, previous)))
       continue;
+    if (run.length !== 2 && EQUALS_ONLY.test(run)) continue;
     let keep = Math.min(run.length, MAX_RUN);
     let kept = sequencesIn(run.slice(0, keep));
     while (sequences + kept > MAX_SEQUENCES && keep > 0) {
@@ -198,7 +213,9 @@ function capRuns(text: string): string {
     }
     sequences += kept;
     if (keep === run.length) continue;
-    lineIsBreak ??= THEMATIC_BREAK.test(text.slice(lineStart, lineEnd));
+    lineIsBreak ??=
+      THEMATIC_BREAK.test(text.slice(lineStart, lineEnd)) ||
+      SETEXT_EQUALS.test(text.slice(lineStart, lineEnd));
     if (lineIsBreak) continue;
     let hidden = "";
     for (let index = keep; index < run.length; index++) hidden += standIn(run[index]!);
@@ -338,10 +355,44 @@ function capBrackets(text: string): string {
   return out + text.slice(copied);
 }
 
+/** A definition's marker line (after any block quote markers), and a line with nothing in it. */
+const DEFINITION_LINE = /^(?:[ \t]*>)*[ \t]{0,3}:[ \t]/;
+const EMPTY_LINE = /^[ \t>]*$/;
+const MAY_DEFINE = /(?:^|\n)[ \t>]*:[ \t]/;
+
+/**
+ * Every definition list within MAX_DEFINITIONS. A list runs on while each paragraph of it (text between
+ * blank lines) holds a definition, or is a term whose definition follows the blank line after it.
+ */
+function capDefinitions(text: string): string {
+  if (!MAY_DEFINE.test(text)) return text;
+  const lines = text.split("\n");
+  let count = 0;
+  let defines = false;
+  let changed = false;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    if (EMPTY_LINE.test(line)) {
+      while (index + 1 < lines.length && EMPTY_LINE.test(lines[index + 1]!)) index++;
+      const next = lines[index + 1];
+      if (!defines && !(next !== undefined && DEFINITION_LINE.test(next))) count = 0;
+      defines = false;
+      continue;
+    }
+    if (!DEFINITION_LINE.test(line)) continue;
+    defines = true;
+    if (++count <= MAX_DEFINITIONS) continue;
+    const colon = line.indexOf(":", line.search(/[^ \t>]/));
+    lines[index] = line.slice(0, colon) + standIn(":") + line.slice(colon + 1);
+    changed = true;
+  }
+  return changed ? lines.join("\n") : text;
+}
+
 /** `text` within every limit above: what the splitter and the parser see. */
 export function capNesting(text: string): string {
   const clean = hasStandIns(text) ? text.replace(STAND_INS, "") : text;
-  return capBrackets(capRuns(capPrefixes(clean)));
+  return capDefinitions(capBrackets(capRuns(capPrefixes(clean))));
 }
 
 /** `value` with the characters capNesting replaced put back. */

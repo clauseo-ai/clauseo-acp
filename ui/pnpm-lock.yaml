@@ -288,6 +288,9 @@ importers:
       marked:
         specifier: 18.1.1
         version: 18.1.1
+      mdast-util-definition-list:
+        specifier: 2.0.1
+        version: 2.0.1
       mdast-util-from-markdown:
         specifier: 2.1.0
         version: 2.1.0
@@ -297,9 +300,24 @@ importers:
       mdast-util-to-hast:
         specifier: 13.2.1
         version: 13.2.1
+      micromark-extension-definition-list:
+        specifier: 2.0.1
+        version: 2.0.1
       micromark-extension-gfm:
         specifier: 3.0.0
         version: 3.0.0
+      micromark-util-character:
+        specifier: 2.1.1
+        version: 2.1.1
+      micromark-util-chunked:
+        specifier: 2.0.1
+        version: 2.0.1
+      micromark-util-classify-character:
+        specifier: 2.0.1
+        version: 2.0.1
+      micromark-util-resolve-all:
+        specifier: 2.0.1
+        version: 2.0.1
       shiki:
         specifier: 4.5.0
         version: 4.5.0
@@ -322,12 +340,18 @@ importers:
       commonmark-spec:
         specifier: 0.31.2
         version: 0.31.2
+      github-slugger:
+        specifier: 2.0.0
+        version: 2.0.0
       hast-util-from-html:
         specifier: 2.0.3
         version: 2.0.3
       hast-util-to-html:
         specifier: 9.0.5
         version: 9.0.5
+      micromark-util-types:
+        specifier: 2.0.3
+        version: 2.0.3
       react:
         specifier: 'catalog:'
         version: 19.2.8
@@ -1462,6 +1486,9 @@ packages:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
 
+  github-slugger@2.0.0:
+    resolution: {integrity: sha512-IaOQ9puYtjrkq7Y0Ygl9KDZnrf/aiUJYUpVf89y8kyaxbRG7Y1SrX/jaumrv81vc61+kiMempujsM3Yw7w5qcw==}
+
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
@@ -1675,6 +1702,9 @@ packages:
     engines: {node: '>= 20'}
     hasBin: true
 
+  mdast-util-definition-list@2.0.1:
+    resolution: {integrity: sha512-o3bsHwKEentTj5LtRpKJfGNFH1FCq7igzdxRlPxNJGwOotICE4A7ZHiExd5B9d5rrEB02hrsZHZm0tVSJnpB6Q==}
+
   mdast-util-find-and-replace@3.0.4:
     resolution: {integrity: sha512-z4B5c6jrnJ1ltOQemhWYPBSAo6y42Z8Gt2yEgfgNTMcLSU59B8bfj8Z8AnAlJrBGLnqkdAUZ7jdDEqQw3KuipQ==}
 
@@ -1713,6 +1743,9 @@ packages:
 
   micromark-core-commonmark@2.0.4:
     resolution: {integrity: sha512-wxEeE8v8XVvOrxn1TZj74qYhAtTQsSqufHVS3uNVyT1MupXxhyaHk8/9xDNPh9BmL77QNDgWTkZ3RsYHB2ry7w==}
+
+  micromark-extension-definition-list@2.0.1:
+    resolution: {integrity: sha512-lQSkVTWNR0f9qzUbM4p0chJSecIRYvZBjnI+cWqN0k2zDSvzpduGJifWJj4SpCWF4TlpNV9amCF8Y1VEXdJubQ==}
 
   micromark-extension-gfm-autolink-literal@2.1.0:
     resolution: {integrity: sha512-oOg7knzhicgQ3t4QCjCWgTmfNhvQbDDnJeVu9v81r7NltNCVmhPy1fJRX27pISafdjL+SVc4d3l48Gb6pbRypw==}
@@ -1968,6 +2001,10 @@ packages:
   trim-lines@3.0.1:
     resolution: {integrity: sha512-kRj8B+YHZCc9kQYdWfJB2/oUl9rA99qbowYYBtr4ui4mZyAQ2JpvVBd/6U2YloATfqBhBTSMhTpgBHtU0Mf3Rg==}
 
+  ts-dedent@2.3.0:
+    resolution: {integrity: sha512-JfJeIHke7y2egdGGgRAvpCwYFUsHlM2gPcrVOxFkznt/4uzQ7HFmvE63iFHVLBJNDuyDOQgijDK/tXH/f6Msjg==}
+    engines: {node: '>=6.10'}
+
   typescript@7.0.2:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
     engines: {node: '>=16.20.0'}
@@ -1975,6 +2012,9 @@ packages:
 
   undici-types@7.24.6:
     resolution: {integrity: sha512-WRNW+sJgj5OBN4/0JpHFqtqzhpbnV0GuB+OozA9gCL7a993SmU+1JBZCzLNxYsbMfIeDL+lTsphD5jN5N+n0zg==}
+
+  unist-builder@4.0.0:
+    resolution: {integrity: sha512-wmRFnH+BLpZnTKpc5L7O67Kac89s9HMrtELpnNaE6TAobq5DTZZs5YaTQfAZBA9bFPECx2uVAPO31c+GVug8mg==}
 
   unist-util-is@6.0.1:
     resolution: {integrity: sha512-LsiILbtBETkDz8I9p1dQ0uyRUWuaQzd/cuEeS1hoRSyW5E5XGmTzlwY1OrNzzakGowI9Dr/I8HVaw4hTtnxy8g==}
@@ -2902,6 +2942,8 @@ snapshots:
 
   gensync@1.0.0-beta.2: {}
 
+  github-slugger@2.0.0: {}
+
   graceful-fs@4.2.11: {}
 
   happy-dom@21.0.3:
@@ -3093,6 +3135,18 @@ snapshots:
 
   marked@18.1.1: {}
 
+  mdast-util-definition-list@2.0.1:
+    dependencies:
+      '@types/mdast': 4.0.4
+      '@types/unist': 3.0.3
+      mdast-util-from-markdown: 2.1.0
+      mdast-util-to-hast: 13.2.1
+      mdast-util-to-markdown: 2.2.0
+      micromark-extension-definition-list: 2.0.1
+      unist-builder: 4.0.0
+    transitivePeerDependencies:
+      - supports-color
+
   mdast-util-find-and-replace@3.0.4:
     dependencies:
       '@types/mdast': 4.0.4
@@ -3228,6 +3282,16 @@ snapshots:
       micromark-util-subtokenize: 2.1.0
       micromark-util-symbol: 2.0.1
       micromark-util-types: 2.0.3
+
+  micromark-extension-definition-list@2.0.1:
+    dependencies:
+      micromark-core-commonmark: 2.0.4
+      micromark-factory-space: 2.1.0
+      micromark-util-character: 2.1.1
+      micromark-util-chunked: 2.0.1
+      micromark-util-symbol: 2.0.1
+      micromark-util-types: 2.0.3
+      ts-dedent: 2.3.0
 
   micromark-extension-gfm-autolink-literal@2.1.0:
     dependencies:
@@ -3593,6 +3657,8 @@ snapshots:
 
   trim-lines@3.0.1: {}
 
+  ts-dedent@2.3.0: {}
+
   typescript@7.0.2:
     optionalDependencies:
       '@typescript/typescript-aix-ppc64': 7.0.2
@@ -3617,6 +3683,10 @@ snapshots:
       '@typescript/typescript-win32-x64': 7.0.2
 
   undici-types@7.24.6: {}
+
+  unist-builder@4.0.0:
+    dependencies:
+      '@types/unist': 3.0.3
 
   unist-util-is@6.0.1:
     dependencies:

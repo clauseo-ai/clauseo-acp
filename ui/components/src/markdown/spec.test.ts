@@ -57,10 +57,10 @@ describe.each(["commonmark", "gfm"] as const)("%s spec", (name) => {
   test.for(EXAMPLES.filter((example) => example.spec === name))(
     "example $example ($section)",
     (example) => {
-      const expected = normalise(example.html);
+      const expected = normalise(example.html, false);
       const results = chunkingsFor(example.markdown).map((size) => ({
         size,
-        html: normalise(streamed(example.markdown, size)),
+        html: normalise(streamed(example.markdown, size), false),
       }));
       const exclusion = EXCLUSIONS.get(keyOf(example));
       if (exclusion) {

@@ -88,6 +88,16 @@ const PIECES = [
   "www.example.com",
   "<https://example.com>",
   "\\",
+  // The syntax extras and the inline tags (#137 §3 and §4).
+  "**Term**",
+  ": a definition",
+  "   : an indented definition",
+  "Section 3^A^, the 2^nd^ notice, 2^10 and [^n]",
+  "==highlighted== and a == b",
+  "a <sup>tag that opens",
+  "and closes</sup> <br> <kbd>Ctrl</kbd>",
+  "<br>",
+  "## Notes",
   "",
 ];
 

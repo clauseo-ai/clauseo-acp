@@ -1,7 +1,10 @@
 // The hostile corpus, from the G4 bake-off: the webview security research's list plus G4's own. Each case
 // renders in its own container, so a failure names the case. Payloads call window.__g4pwn(<case>) if they
 // ever run. One home: these tests (hostile.test.tsx, in happy-dom) and the private real-browser harness
-// (Chromium, WebKitGTK, WebView2, WKWebView) import this same file.
+// (Chromium, WebKitGTK, WebView2, WKWebView) import this same file. The cases for the inline-tag allowlist
+// and the syntax extras live in hostile-tags-fixture.ts and are appended here.
+import { TAG_CASES } from "./hostile-tags-fixture.ts";
+
 export type HostileCase = {
   id: string;
   markdown: string;
@@ -17,6 +20,10 @@ export type HostileCase = {
   images?: number;
   /** A link-host hint the link component must show (link-text spoofing). */
   linkHost?: string;
+  /** How many elements each selector matches in the finished render (the allowlisted tags, by name). */
+  tags?: Record<string, number>;
+  /** The characters each streamed delta adds; 16 when unset (1 shows every split of a tag). */
+  delta?: number;
 };
 
 const PNG_1PX =
@@ -301,4 +308,5 @@ export const CASES: HostileCase[] = [
   { id: "footnote-deeper-list", markdown: `[^a]: ${"- ".repeat(3000)}` },
   // Every streamed answer starts empty; #115 made the streaming render of "" throw.
   { id: "empty", markdown: "" },
+  ...TAG_CASES,
 ];

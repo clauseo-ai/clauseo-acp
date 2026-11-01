@@ -3,10 +3,12 @@
 // (footnotes.ts), and turns each block's parse input into sanitised hast, cached by that input and its
 // footnote numbers, so a finished block costs a map lookup and keeps the same view object (the React layer
 // memoises on it). Only the streaming last block gets tail repair (repair.ts). The notes, if any, are one
-// more view after the last block.
+// more view after the last block. Inline HTML is text but for the allowlisted tags (inline-tags.ts), and
+// headings get GitHub's slugs as ids, numbered across the whole answer (slugs.ts).
 import type { Root as Hast, Text } from "hast";
 import type { Root } from "mdast";
 import { sanitize } from "hast-util-sanitize";
+import { defListHastHandlers } from "mdast-util-definition-list";
 import { toHast } from "mdast-util-to-hast";
 import type { Handler, Options } from "mdast-util-to-hast";
 import {
@@ -40,11 +42,14 @@ import {
   restore,
   restoreText,
 } from "./nesting.ts";
+import { htmlAsText, pairTags } from "./inline-tags.ts";
 import { endOf, parse } from "./parse.ts";
 import { repairTail } from "./repair.ts";
-import { SCHEMA } from "./schema.ts";
+import { CLOBBER_PREFIX, SCHEMA } from "./schema.ts";
+import { anchorHeadings, numberSlugs, withSlugs } from "./slugs.ts";
 import { createSplitter } from "./split.ts";
 import type { BlockEnd } from "./split.ts";
+import { extrasHandlers } from "./syntax-extras.ts";
 
 /**
  * One block, ready to render: `source` is the block's text, `input` what was parsed for it (with its
@@ -62,6 +67,8 @@ export type BlockView = {
   readonly notes?: true;
   readonly items?: readonly BlockView[];
   readonly note?: string;
+  /** The slug of each of its headings, in order, before the answer's repeats are numbered. */
+  readonly slugs?: readonly string[];
 };
 
 const EMPTY_HAST: Hast = { type: "root", children: [] };
@@ -71,11 +78,11 @@ export type Answer = {
   update(text: string, streaming: boolean): readonly BlockView[];
 };
 
-/** Raw HTML stays text: an HTML node becomes a text node, which React escapes (no rehype-raw anywhere). */
-const htmlAsText: Handler = (state, node: { value: string }) => {
-  const text: Text = { type: "text", value: node.value };
-  state.patch(node as never, text);
-  return text;
+/** mdast to hast: raw HTML as text, the syntax extras, definition lists. */
+export const HANDLERS: Record<string, Handler> = {
+  html: htmlAsText,
+  ...extrasHandlers,
+  ...(defListHastHandlers as Record<string, Handler>),
 };
 
 /** A block shown as its source, in plain text: what a block that cannot render safely falls back to. */
@@ -195,7 +202,7 @@ export function createAnswer(scope: string): Answer {
       return root;
     });
   const split = createSplitter((block) => ends.get(block, () => endOf(block, tree(block))));
-  const options: Options = { clobberPrefix: `${scope}-`, handlers: { html: htmlAsText } };
+  const options: Options = { clobberPrefix: `${scope}-`, handlers: HANDLERS };
 
   /**
    * A view's cache key: its parse input, and its source when that differs, so a finished block never
@@ -208,17 +215,26 @@ export function createAnswer(scope: string): Answer {
    * A block's view. A tree too deep to walk safely, or any error on the way, shows the block's source as
    * plain text instead: one bad block never takes the answer down (markdown.tsx adds an error boundary).
    * `source` and `input` are as capped (nesting.ts); the view's `source` and text are as written.
+   * `streaming` marks the streaming last block, whose unpaired tags at its end are hidden.
    */
-  const toView = (source: string, input: string, footnote: Handler): BlockView => {
+  const toView = (
+    source: string,
+    input: string,
+    footnote: Handler,
+    streaming = false,
+  ): BlockView => {
     const shown = restore(source);
     const fallback = { source: shown, input, hast: plainText(shown), streaming: false };
     try {
       const root = withoutPlaceholders(tree(input), input.length - source.length);
       if (deeperThan(root, MAX_TREE_DEPTH)) return fallback;
-      const handlers = { html: htmlAsText, footnoteReference: footnote };
+      const handlers = { ...HANDLERS, footnoteReference: footnote };
       const hast = toHast(root, { ...options, handlers }) as Hast;
       if (hasStandIns(input)) restoreText(hast);
-      return { source: shown, input, hast: sanitize(hast, SCHEMA) as Hast, streaming: false };
+      if (input.includes("<")) pairTags(hast, streaming);
+      const slugs = anchorHeadings(hast, scope);
+      const clean = sanitize(hast, SCHEMA) as Hast;
+      return { source: shown, input, hast: clean, streaming: false, slugs };
     } catch {
       return fallback;
     }
@@ -409,6 +425,7 @@ export function createAnswer(scope: string): Answer {
           const raw = noteHast(scope, numbering, id, options);
           // The note's own text, and the link definitions from other blocks it carries, may hold some.
           if (hasStandIns(note.source) || note.definitions.length > 0) restoreText(raw);
+          pairTags(raw, false);
           hast = sanitize(raw, SCHEMA) as Hast;
         }
       } catch {
@@ -432,9 +449,31 @@ export function createAnswer(scope: string): Answer {
     return (lastNotes = { source, input, hast: EMPTY_HAST, streaming: false, notes: true, items });
   };
 
+  /**
+   * The block views with every heading's id numbered across the answer: a block whose slugs an earlier
+   * heading took shows a copy with `-1`, `-2`… ids, made again only when those change.
+   */
+  const renumbered = new WeakMap<BlockView, { key: string; view: BlockView }>();
+  const numberedSlugs = (blockViews: readonly BlockView[]): readonly BlockView[] => {
+    if (!blockViews.some((view) => (view.slugs?.length ?? 0) > 0)) return blockViews;
+    const final = numberSlugs(blockViews.map((view) => view.slugs ?? []));
+    return blockViews.map((view, index) => {
+      const slugs = final[index]!;
+      if (slugs.every((value, at) => value === view.slugs![at])) return view;
+      const key = slugs.join("\u0000");
+      const known = renumbered.get(view);
+      if (known?.key === key) return known.view;
+      const copy = { ...view, hast: withSlugs(view.hast, slugs, `${CLOBBER_PREFIX}${scope}-`) };
+      renumbered.set(view, { key, view: copy });
+      return copy;
+    });
+  };
+
   let lastText: string | undefined;
   let lastStreaming = true;
   let lastViews: readonly BlockView[] = [];
+  /** The block views before numberedSlugs: what a finished block keeps from one update to the next. */
+  let lastBlockViews: readonly BlockView[] = [];
   let lastBlocks: readonly string[] = [];
   let lastEntries: readonly Entry[] = [];
   let lastSignatures: readonly string[] = [];
@@ -485,7 +524,7 @@ export function createAnswer(scope: string): Answer {
         entries.map((entry) => entry.footnotes),
         streaming,
       );
-      const previous = lastViews;
+      const previous = lastBlockViews;
       const blockViews = entries.map((entry, index) => {
         const { signature, nths } = numbering.blocks[index]!;
         const tail = streaming && index === last;
@@ -505,7 +544,7 @@ export function createAnswer(scope: string): Answer {
         const key = keyOf(entry.source, viewInput);
         entry.key = signature === "" ? key : `${key}\u0002${signature}`;
         const make = () =>
-          toView(entry.source, viewInput, referenceHandler(scope, numbering, nths));
+          toView(entry.source, viewInput, referenceHandler(scope, numbering, nths), tail);
         if (!tail) return views.get(entry.key, make);
         // The streaming tail's view holds the block as written (for its fallback), not the repaired text,
         // and so is cached on both.
@@ -519,7 +558,9 @@ export function createAnswer(scope: string): Answer {
       // An empty answer (every streamed answer starts as one) has no blocks, so no tail.
       const tail = streaming ? entries[last] : undefined;
       const notes = notesOf(numbering, tail ? tail.footnotes : NO_FOOTNOTES);
-      lastViews = notes ? [...blockViews, notes] : blockViews;
+      const anchored = numberedSlugs(blockViews);
+      lastViews = notes ? [...anchored, notes] : anchored;
+      lastBlockViews = blockViews;
       lastBlocks = blocks;
       lastEntries = entries;
       lastSignatures = numbering.blocks.map((block) => block.signature);

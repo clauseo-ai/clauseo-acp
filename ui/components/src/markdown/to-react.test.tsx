@@ -58,12 +58,14 @@ test("unknown properties, event handlers and inner HTML never reach React", () =
   };
   const tree = root(
     element("p", hostile, [text("para")]),
+    element("blockquote", hostile, [text("quote")]),
     element("h1", hostile, [text("head")]),
     element("td", { ...hostile, align: "left;background:url(x)" }, [text("cell")]),
     element("code", { ...hostile, className: ["language-ts"] }, [text("c")]),
   );
   expect(html(tree)).toBe(
-    '<p>para</p><h1>head</h1><td>cell</td><code class="language-ts">c</code>',
+    // A heading's id is its anchor (the sanitiser has prefixed it by now); nothing else of it is kept.
+    '<p>para</p><blockquote>quote</blockquote><h1 id="clobber">head</h1><td>cell</td><code class="language-ts">c</code>',
   );
   const [first] = elements(toReact(tree));
   expect(Object.keys(first?.props ?? {})).toEqual(["children"]);
@@ -113,9 +115,10 @@ test("property names: class, table-cell alignment as a style, task-list checkbox
       '<li class="task-list-item"><input type="checkbox" disabled=""/> open</li>\n</ul>',
   );
   expect(render("| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |")).toBe(
-    '<table><thead><tr><th style="text-align:left">a</th><th style="text-align:center">b</th>' +
+    '<div data-clauseo="table" class="max-w-full overflow-x-auto"><table class="break-words">' +
+      '<thead><tr><th style="text-align:left">a</th><th style="text-align:center">b</th>' +
       '<th style="text-align:right">c</th></tr></thead><tbody><tr><td style="text-align:left">1</td>' +
-      '<td style="text-align:center">2</td><td style="text-align:right">3</td></tr></tbody></table>',
+      '<td style="text-align:center">2</td><td style="text-align:right">3</td></tr></tbody></table></div>',
   );
   expect(render("3. three\n4. four")).toBe('<ol start="3">\n<li>three</li>\n<li>four</li>\n</ol>');
   expect(render("```ts\nlet a\n```")).toBe(
