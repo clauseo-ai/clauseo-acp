@@ -809,6 +809,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "clauseo-codex_appserver"
+version = "0.0.0"
+dependencies = [
+ "clauseo-protocol",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
 name = "clauseo-desktop"
 version = "0.0.0"
 dependencies = [

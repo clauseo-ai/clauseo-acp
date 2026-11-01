@@ -1,0 +1,8 @@
+{
+  "account": {
+    "type": "chatgpt",
+    "email": "lawyer@example.com",
+    "planType": "pro"
+  },
+  "requiresOpenaiAuth": true
+}
