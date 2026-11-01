@@ -119,4 +119,11 @@ export const CASES: HostileCase[] = [
   },
   { id: "long-line", markdown: LONG_LINE, text: ["<b>"] },
   { id: "unterminated-fence", markdown: "```python\nimport os\nos.system('echo unterminated')\n" },
+  // Added after G4, from PR #107's security review.
+  {
+    // micromark's browser entity decoder used innerHTML, which Trusted Types refuses (the root unmounted).
+    id: "named-entities",
+    markdown: "AT&amp;T and &copy; 2026; &nbsp;&mdash;&hellip; &lt;b&gt;not bold&lt;/b&gt;",
+    text: ["AT&T", "© 2026", "—…", "<b>not bold</b>"],
+  },
 ];
