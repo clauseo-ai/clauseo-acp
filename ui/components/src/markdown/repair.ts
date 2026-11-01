@@ -11,37 +11,12 @@
 // - A last line holding only a block marker (`-`, `1.`, `#`, `>`, `---`, a fence's first backticks) is
 //   hidden until its content arrives; so are the lines of a table whose delimiter row has not arrived.
 // Any other half tag hides nothing (raw HTML is text); inline-tags.ts hides an allowlisted one till it pairs.
+// The cuts and their application are in repair-edits.ts.
 import type { Nodes, Parent, Root } from "mdast";
 import { standIn } from "./nesting.ts";
 import { ALLOWED_TAGS } from "./inline-tags.ts";
-
-type Edit = { start: number; end: number; text: string };
-
-/**
- * The parts of a text a pass cuts: the edits, and a mask of the characters they remove, so whether a
- * character stays is one lookup however many cuts there are (a hostile `[`×16,000 cuts every one).
- */
-type Cuts = {
-  readonly edits: Edit[];
-  readonly mask: Uint8Array;
-  readonly cut: (start: number, end: number) => void;
-  readonly kept: (at: number) => boolean;
-};
-
-/** New cuts of a text of `length`; with `base`, what `base` cuts counts as cut too (but is not in `edits`). */
-function createCuts(length: number, base?: Cuts): Cuts {
-  const edits: Edit[] = [];
-  const mask = base ? base.mask.slice() : new Uint8Array(length);
-  return {
-    edits,
-    mask,
-    cut: (start, end) => {
-      edits.push({ start, end, text: "" });
-      mask.fill(1, start, end);
-    },
-    kept: (at) => mask[at] !== 1,
-  };
-}
+import { apply, createCuts, keptEnd, originOf } from "./repair-edits.ts";
+import type { Cuts, Edit, Kept } from "./repair-edits.ts";
 
 /**
  * The openers that get a closer, innermost first: at most this many, and the outer rest stay as they are,
@@ -349,13 +324,6 @@ function leafAt(input: string, root: Root, from: number, end: number): Parent | 
   return (children.at(-1)?.end ?? 0) < end ? undefined : (leaf as Parent);
 }
 
-/** The end of what `cuts` keep of `input`, before trailing whitespace. */
-function keptEnd(input: string, from: number, cuts: Cuts): number {
-  let at = input.length;
-  while (at > from && (!cuts.kept(at - 1) || WHITESPACE.test(input[at - 1]!))) at--;
-  return at;
-}
-
 /**
  * The second pass, on a text with nothing half there: each emphasis, strikethrough or code-span opener of
  * the last paragraph, heading or cell gets its closer at the end; an opener with nothing after it, and a
@@ -448,53 +416,6 @@ function closers(input: string, root: Root, from: number, base?: Cuts) {
     insert += run.char.repeat(index === closing.length - 1 ? run.length - partial : run.length);
   }
   return { edits, insert, end };
-}
-
-/** Where a stretch of an output came from: `length` characters at `out`, copied from `at` in the input. */
-type Kept = { out: number; at: number; length: number };
-
-/**
- * `input` with `edits` applied and `insert` placed at `end`. Each stretch copied from `input` is noted
- * in `kept`, if given, so an offset of the result can be traced back (originOf).
- */
-function apply(input: string, edits: Edit[], end: number, insert: string, kept?: Kept[]): string {
-  edits.sort((a, b) => a.start - b.start);
-  let out = "";
-  const copy = (from: number, to: number) => {
-    if (to <= from) return;
-    kept?.push({ out: out.length, at: from, length: to - from });
-    out += input.slice(from, to);
-  };
-  let at = 0;
-  let inserted = insert === "";
-  for (const edit of edits) {
-    if (edit.end <= at) continue;
-    const start = Math.max(at, edit.start);
-    if (!inserted && end <= start) {
-      copy(at, end);
-      out += insert;
-      at = end;
-      inserted = true;
-    }
-    copy(at, start);
-    out += edit.text;
-    at = edit.end;
-  }
-  if (!inserted) {
-    copy(at, Math.max(at, end));
-    out += insert;
-    at = Math.max(at, end);
-  }
-  copy(at, input.length);
-  return out;
-}
-
-/** The input offset an output offset was copied from (apply's `kept`), or -1 for inserted text. */
-function originOf(kept: readonly Kept[], offset: number): number {
-  for (const stretch of kept)
-    if (offset >= stretch.out && offset < stretch.out + stretch.length)
-      return stretch.at + offset - stretch.out;
-  return -1;
 }
 
 /** The links of `root` from `from` on: where each starts (its `[`) and where its text's `]` is. */
