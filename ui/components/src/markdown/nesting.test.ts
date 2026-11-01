@@ -70,6 +70,22 @@ test("a line's container markers past the 32nd are cut, so the rest of the line 
   );
 });
 
+test("a footnote definition's label counts as a container marker, so the markers after it are cut too", () => {
+  // `[^a]: ` + `- `×3,000 got past the limit (its line starts with `[`): a stack overflow, or 2.4 s.
+  expect(capNesting(`[^a]: ${"- ".repeat(40)}x`)).toBe(
+    `[^a]: ${"- ".repeat(29)}-${hide(" ")}${"- ".repeat(10)}x`,
+  );
+  expect(capNesting(`> [^a]: [^b]: ${"> ".repeat(40)}x`)).toBe(
+    `> [^a]: [^b]: ${"> ".repeat(26)}${hide(">")} ${"> ".repeat(13)}x`,
+  );
+  // Not a label: the line is left alone.
+  expect(capNesting(`[^a b]: ${"- ".repeat(40)}x`)).toBe(`[^a b]: ${"- ".repeat(40)}x`);
+  const views = createAnswer("t").update(`x[^a]\n\n[^a]: ${"- ".repeat(3000)}x`, false);
+  const note = views.at(-1)?.items?.[0];
+  expect(note && count(note.hast, "ul")).toBeLessThanOrEqual(MAX_NESTING);
+  expect(note && textOf(note.hast)).toContain("- - - x");
+});
+
 test("a line's container prefix stops at column 64, tabs counted to the next multiple of 4", () => {
   expect(MAX_INDENT).toBe(64);
   expect(capNesting(`${"\t".repeat(20)}- x`)).toBe(

@@ -73,6 +73,8 @@ export function hasStandIns(value: string): boolean {
 }
 
 const THEMATIC_BREAK = /^[ \t>]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+/** A footnote definition's label and colon, as micromark reads one: no whitespace, at most 999 characters. */
+const FOOTNOTE_LABEL = /\[\^(?:[^\s[\]\\]|\\[\s\S]){1,999}\]:/y;
 
 /**
  * The character of `text[start, end)` (one line) to replace by its stand-in to keep the line's container
@@ -110,7 +112,16 @@ function prefixCut(text: string, start: number, end: number): number {
       width = next - at;
       count++;
     } else if (char === 62 /* > */) count++;
-    else if (char !== 32) return -1;
+    else if (char === 91 /* [ */) {
+      // A footnote definition's label holds a flow container like a list item's marker does, so the
+      // markers after it count on (`[^a]: - - - …` nested as deep as `- - - …`). It indents its content
+      // 4 columns.
+      FOOTNOTE_LABEL.lastIndex = at;
+      if (!FOOTNOTE_LABEL.test(text) || FOOTNOTE_LABEL.lastIndex > end) return -1;
+      next = FOOTNOTE_LABEL.lastIndex;
+      width = 4;
+      count++;
+    } else if (char !== 32) return -1;
     if (count > MAX_NESTING || column >= MAX_INDENT) {
       if (THEMATIC_BREAK.test(text.slice(start, end))) return -1;
       return char >= 48 && char <= 57 ? next - 1 : at;

@@ -285,7 +285,8 @@ export const CASES: HostileCase[] = [
       Array.from({ length: 25 }, (_, index) => `[^n${index}]: Then[^n${index + 1}].`).join("\n\n"),
   },
   // A note gets a block's protections (round 1 of PR #115's review): what nesting.ts cut reads as
-  // written (a long signature line, brackets, tildes).
+  // written (a long signature line, brackets, tildes), a list nested past the limit is cut after a
+  // definition's label as after a list marker, and the 3,000-deep one with no reference stays fast.
   {
     id: "footnote-signature",
     markdown: `Signed[^s].\n\n[^s]: Signature: ${"_".repeat(70)}`,
@@ -296,4 +297,6 @@ export const CASES: HostileCase[] = [
     markdown: `See[^b].\n\n[^b]: ${"[".repeat(40)}a${"]".repeat(40)} and ${"~".repeat(70)}`,
     text: [`${"[".repeat(40)}a${"]".repeat(40)}`, "~".repeat(70)],
   },
+  { id: "footnote-deep-list", markdown: `x[^a]\n\n[^a]: ${"- ".repeat(1000)}x`, text: ["- - - x"] },
+  { id: "footnote-deeper-list", markdown: `[^a]: ${"- ".repeat(3000)}` },
 ];
