@@ -31,7 +31,9 @@ converted document. From there they can call any IPC command the page can reach.
 **What stops them.**
 
 - `built`: The release context names one capability, `main`, which grants only the nine bridge
-  commands, one permission each ([0012](decisions/0012-desktop-bridge.md)); the `e2e` and `marks`
+  commands, one permission each ([0012](decisions/0012-desktop-bridge.md)), and six core window
+  commands for the room's title bar: drag, double-click, minimise, maximise or restore, close, and
+  whether it is maximised ([0015](decisions/0015-window-frame.md)); the `e2e` and `marks`
   builds add `e2e.json` and `marks.json` at setup (`e2e::grant_scoreboard`), and their permissions
   exist only in those builds; the `capabilities` check reads all three files and fails on
   `remote`, `core:default`, `fs:`, `shell:`, `http:`, `opener:` or `dialog:`
