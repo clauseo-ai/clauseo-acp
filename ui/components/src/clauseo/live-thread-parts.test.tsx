@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // The parts the live thread uses, with the props it added: the composer's test ids, its disabled state and no room's
-// line; the working line's error code; the change note's papers, its acts only when given, its refused undo and its
+// line, and its field scrolling only past six lines; the working line's error code; the change note's papers, its acts only when given, its refused undo and its
 // dialog; Who without a time.
 import { act, StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
@@ -89,6 +89,46 @@ test("line={false} leaves no room's line at all", async () => {
   await mount(composer({ line: false }));
   expect(document.querySelector(".room-line")).toBeNull();
   expect(document.body.textContent).not.toContain("Safe workspace");
+});
+
+test("the field scrolls only past its six lines: a line a few px over, or a grown field, shows no scroll arrows", async () => {
+  // happy-dom lays nothing out: the field's one line is 26 px and its words measure `words` px
+  let words = 29;
+  const proto = HTMLTextAreaElement.prototype;
+  Object.defineProperty(proto, "clientHeight", { configurable: true, get: () => 26 });
+  Object.defineProperty(proto, "scrollHeight", { configurable: true, get: () => words });
+  const shown = async (text: string) =>
+    act(async () =>
+      root?.render(
+        <StrictMode>
+          <TooltipProvider>
+            <RoomScopeProvider>{composer({ text, testIds: IDS })}</RoomScopeProvider>
+          </TooltipProvider>
+        </StrictMode>,
+      ),
+    );
+  try {
+    // Hindi's empty field: its placeholder's line 3 px over the one line, inside the fit's slack
+    await mount(composer({ text: "", testIds: IDS }), "hi");
+    const area = byId("composer") as HTMLTextAreaElement;
+    expect(area.style.height).toBe("");
+    expect(area.style.overflowY).toBe("hidden");
+    words = 78;
+    await shown("three\nlines\nof words");
+    expect(area.style.height).toBe("78px");
+    expect(area.style.overflowY).toBe("hidden");
+    words = 200;
+    await shown("eight\nlines\nof\nwords\nrun\npast\nthe\ncap");
+    expect(area.style.height).toBe("156px");
+    expect(area.style.overflowY).toBe("");
+    words = 26;
+    await shown("one line");
+    expect(area.style.height).toBe("");
+    expect(area.style.overflowY).toBe("hidden");
+  } finally {
+    Reflect.deleteProperty(proto, "clientHeight");
+    Reflect.deleteProperty(proto, "scrollHeight");
+  }
 });
 
 test("a wait with a code sets it as the row's data-code; without one there is none", async () => {
