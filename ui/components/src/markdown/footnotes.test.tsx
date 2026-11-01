@@ -120,6 +120,19 @@ test("while streaming, a reference without its note is a pending number; at the 
   expect(host.textContent).toContain("A claim[^x] here.");
 });
 
+test.each([
+  ["an undefined reference", "> [^x] is cited in this quoted passage.", "[^x] is cited"],
+  ["a label with a space (no reference)", "> [^a b] quote with a spaced label", "[^a b] quote"],
+])("a block quote of the agent's that starts with %s stays, streaming and finished", (_, text, shown) => {
+  for (const before of ["", "Before.\n\n"])
+    for (const streaming of [true, false]) {
+      const html = htmlOf(createAnswer("t").update(`${before}${text}`, streaming));
+      expect(html, `${before}${streaming}`).toContain("<blockquote>");
+      // While streaming, the undefined reference is a pending number.
+      expect(html).toContain(streaming && shown.startsWith("[^x]") ? "is cited" : shown);
+    }
+});
+
 test("a half-arrived reference at the tail is hidden, and a complete one is a pending number", () => {
   render("Earlier.\n\nThe indemnity survives.[^surv", true);
   expect(host.textContent).toBe("Earlier.The indemnity survives.");
