@@ -113,7 +113,7 @@ test("new matter picks a folder, creates the matter, then its first thread with 
   const commands: string[] = [];
   const { transport } = await open({
     query: (q) => (q === "list_matters" ? { matters: [] } : { threads: [] }),
-    pickFolder: () => ({ folder: "folder-1", display: "~/folder-1" }),
+    pickFolder: () => ({ folder: "folder-1", display: "folder-1" }),
     dispatch: ({ command }) => {
       commands.push(JSON.stringify(command));
       if (command.create_matter !== undefined) return { matter_created: { matter: MATTER } };

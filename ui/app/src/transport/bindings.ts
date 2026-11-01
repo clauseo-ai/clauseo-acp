@@ -48,7 +48,11 @@ export const commands = {
 	pickFolder: () => typedError<{
 	/**  The ref the host issued for the folder. */
 	folder: FolderRefId,
-	/**  The folder as `display` writes it. */
+	/**
+	 *  The path to show: under the home folder, the parts below home joined with the OS
+	 *  separator (`Documents/Acme`, `Documents\Acme` on Windows); otherwise the full path
+	 *  (`/Users/rmehra`, `/Volumes/Work/Acme`, `C:\`, `D:\Cases`).
+	 */
 	display: string,
 } | null, HostError>(__TAURI_INVOKE("pick_folder")),
 	/**  The OS the host runs on. */
@@ -1968,7 +1972,11 @@ export type PermissionState =
 export type PickedFolder = {
 	/**  The ref the host issued for the folder. */
 	folder: FolderRefId,
-	/**  The folder as `display` writes it. */
+	/**
+	 *  The path to show: under the home folder, the parts below home joined with the OS
+	 *  separator (`Documents/Acme`, `Documents\Acme` on Windows); otherwise the full path
+	 *  (`/Users/rmehra`, `/Volumes/Work/Acme`, `C:\`, `D:\Cases`).
+	 */
 	display: string,
 };
 
