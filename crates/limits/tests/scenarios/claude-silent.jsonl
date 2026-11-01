@@ -1,0 +1,2 @@
+{"scenario":"claude-silent","description":"The Claude usage helper exits 0 without writing a line. The reader must report a malformed answer."}
+{"exit":{"code":0}}

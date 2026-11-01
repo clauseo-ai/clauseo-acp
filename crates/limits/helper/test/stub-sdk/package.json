@@ -1,0 +1,6 @@
+{
+  "name": "@anthropic-ai/claude-agent-sdk",
+  "version": "0.3.293-stub",
+  "type": "module",
+  "exports": "./sdk.mjs"
+}

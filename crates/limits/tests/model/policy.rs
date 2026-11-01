@@ -1,0 +1,299 @@
+//! The read policy: the reads at start, the triggers and their ages, one read in flight per
+//! account, no read while the agent asks a question.
+
+use clauseo_limits::{Action, Input, Limits, LiveStatus, ReadFailure, ReadOutcome};
+use clauseo_protocol::{
+    AccountLimits, AgentKind, Billing, BillingProvider, Freshness, LimitSource, StaleReason,
+};
+
+use crate::support::{
+    MINUTE, SECOND, account, at, at_ms, done, five_hour, live, live_input, read_once, t0, usage,
+    view_of,
+};
+
+const CLAUDE: AgentKind = AgentKind::Claude;
+const CODEX: AgentKind = AgentKind::Codex;
+
+/// A model of `agent` whose first read started and ended at the start time.
+fn idle(agent: AgentKind) -> Limits {
+    read_once(account(agent, vec![five_hour(10.0)]))
+}
+
+fn shown(agent: AgentKind) -> Input {
+    Input::Shown { agent: Some(agent) }
+}
+
+fn turn_ended(agent: AgentKind, read_now: bool) -> Input {
+    Input::TurnEnded { agent, read_now }
+}
+
+#[test]
+fn new_turns_cached_values_stale_aged_and_asks_one_read_per_agent() {
+    let claude = AccountLimits {
+        source: LimitSource::Fresh {
+            checked_at: at(-60),
+        },
+        ..account(CLAUDE, vec![five_hour(30.0)])
+    };
+    let codex = AccountLimits {
+        billing: Billing::PayAsYouGo {
+            via: BillingProvider::OpenAi,
+        },
+        source: LimitSource::NotApplicable,
+        ..account(CODEX, vec![])
+    };
+    let (model, actions) = Limits::new(vec![claude, codex], &[CLAUDE, CODEX], t0());
+    assert_eq!(actions, vec![Action::Read(CLAUDE), Action::Read(CODEX)]);
+    let view = view_of(&model, CLAUDE, t0());
+    assert_eq!(view.freshness, Freshness::Stale);
+    assert_eq!(view.checked_at, Some(at(-60)));
+    assert_eq!(
+        view_of(&model, CODEX, t0()).freshness,
+        Freshness::NotApplicable
+    );
+}
+
+#[test]
+fn new_turns_a_live_only_cache_stale_aged() {
+    let cached = AccountLimits {
+        source: LimitSource::LiveOnly { updated_at: at(-5) },
+        ..account(CLAUDE, vec![five_hour(30.0)])
+    };
+    let (mut model, _) = Limits::new(vec![cached], &[CLAUDE], t0());
+    let view = view_of(&model, CLAUDE, t0());
+    assert_eq!(view.freshness, Freshness::Stale);
+    assert_eq!(view.checked_at, Some(at(-5)));
+    let actions = model.input(
+        done(CLAUDE, ReadOutcome::Failed(ReadFailure::TimedOut)),
+        at(1),
+    );
+    let [Action::Changed(limits)] = actions.as_slice() else {
+        panic!("{actions:?}")
+    };
+    assert_eq!(
+        limits.source,
+        LimitSource::Stale {
+            checked_at: at(-5),
+            reason: StaleReason::ReadFailed
+        },
+        "Aged becomes ReadFailed, the numbers' time stays"
+    );
+}
+
+#[test]
+fn new_without_a_cache_is_loading() {
+    let (model, actions) = Limits::new(Vec::new(), &[CODEX], t0());
+    assert_eq!(actions, vec![Action::Read(CODEX)]);
+    assert_eq!(view_of(&model, CODEX, t0()).freshness, Freshness::Loading);
+}
+
+#[test]
+fn new_asks_no_read_for_a_cached_agent_not_given() {
+    let cached = vec![account(CODEX, vec![five_hour(10.0)])];
+    let (model, actions) = Limits::new(cached, &[CLAUDE], t0());
+    assert_eq!(actions, vec![Action::Read(CLAUDE)]);
+    assert!(!model.view(t0()).0.contains_key(&CODEX));
+    assert_eq!(model.at_limit(CODEX), None);
+}
+
+#[test]
+fn new_counts_an_agent_given_twice_once() {
+    let (model, actions) = Limits::new(Vec::new(), &[CLAUDE, CLAUDE], t0());
+    assert_eq!(actions, vec![Action::Read(CLAUDE)]);
+    assert_eq!(model.view(t0()).0.len(), 1);
+}
+
+#[test]
+fn new_takes_the_last_cached_entry_of_an_agent() {
+    let older = account(CLAUDE, vec![five_hour(10.0)]);
+    let newer = AccountLimits {
+        source: LimitSource::Fresh { checked_at: at(-1) },
+        ..account(CLAUDE, vec![five_hour(20.0)])
+    };
+    let (model, _) = Limits::new(vec![older, newer], &[CLAUDE], t0());
+    assert_eq!(view_of(&model, CLAUDE, t0()).checked_at, Some(at(-1)));
+}
+
+#[test]
+fn shown_reads_at_five_minutes_not_before() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(
+        model.input(shown(CLAUDE), at_ms(5 * MINUTE - SECOND)),
+        vec![]
+    );
+    assert_eq!(
+        model.input(shown(CLAUDE), at(5)),
+        vec![Action::Read(CLAUDE)]
+    );
+}
+
+#[test]
+fn shown_for_every_agent_reads_each_one_due() {
+    let (mut model, _) = Limits::new(Vec::new(), &[CLAUDE, CODEX], t0());
+    model.input(done(CLAUDE, usage(account(CLAUDE, vec![]))), t0());
+    model.input(done(CODEX, usage(account(CODEX, vec![]))), t0());
+    let actions = model.input(Input::Shown { agent: None }, at(5));
+    assert_eq!(actions, vec![Action::Read(CLAUDE), Action::Read(CODEX)]);
+}
+
+#[test]
+fn claude_turn_end_reads_at_ten_minutes_not_before() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at_ms(10 * MINUTE - SECOND)),
+        vec![]
+    );
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at(10)),
+        vec![Action::Read(CLAUDE)]
+    );
+}
+
+#[test]
+fn codex_turn_end_reads_at_sixty_seconds_not_before() {
+    let mut model = idle(CODEX);
+    assert_eq!(
+        model.input(turn_ended(CODEX, false), at_ms(59 * SECOND)),
+        vec![]
+    );
+    assert_eq!(
+        model.input(turn_ended(CODEX, false), at_ms(60 * SECOND)),
+        vec![Action::Read(CODEX)]
+    );
+}
+
+#[test]
+fn turn_end_age_counts_from_when_the_last_read_started() {
+    let (mut model, _) = Limits::new(Vec::new(), &[CLAUDE], t0());
+    model.input(done(CLAUDE, usage(account(CLAUDE, vec![]))), at(3));
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, false), at(10)),
+        vec![Action::Read(CLAUDE)]
+    );
+}
+
+#[test]
+fn turn_end_read_now_reads_at_once_whatever_the_age() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(
+        model.input(turn_ended(CLAUDE, true), at_ms(SECOND)),
+        vec![Action::Read(CLAUDE)]
+    );
+}
+
+#[test]
+fn turn_end_read_now_asks_none_while_one_is_in_flight() {
+    let (mut model, _) = Limits::new(Vec::new(), &[CLAUDE], t0());
+    assert_eq!(model.input(turn_ended(CLAUDE, true), at(1)), vec![]);
+}
+
+#[test]
+fn at_most_one_read_is_in_flight_per_account() {
+    let (mut model, _) = Limits::new(Vec::new(), &[CLAUDE], t0());
+    assert_eq!(model.input(Input::Shown { agent: None }, at(10)), vec![]);
+    assert_eq!(
+        model.input(
+            Input::TryAgain {
+                agent: Some(CLAUDE)
+            },
+            at(10)
+        ),
+        vec![]
+    );
+    model.input(done(CLAUDE, usage(account(CLAUDE, vec![]))), at(11));
+    assert_eq!(
+        model.input(Input::TryAgain { agent: None }, at(11)),
+        vec![Action::Read(CLAUDE)],
+        "try again reads whatever the age once nothing is in flight"
+    );
+}
+
+#[test]
+fn no_read_while_asking_and_the_asked_for_read_starts_on_the_answer() {
+    let mut model = idle(CLAUDE);
+    assert_eq!(
+        model.input(
+            Input::Asking {
+                agent: CLAUDE,
+                asking: true
+            },
+            at(1)
+        ),
+        vec![]
+    );
+    assert_eq!(
+        model.input(
+            Input::TryAgain {
+                agent: Some(CLAUDE)
+            },
+            at(2)
+        ),
+        vec![]
+    );
+    assert_eq!(model.input(turn_ended(CLAUDE, true), at(3)), vec![]);
+    assert_eq!(
+        model.input(
+            Input::Asking {
+                agent: CLAUDE,
+                asking: false
+            },
+            at(4)
+        ),
+        vec![Action::Read(CLAUDE)]
+    );
+    assert_eq!(
+        model.input(
+            Input::TryAgain {
+                agent: Some(CLAUDE)
+            },
+            at(5)
+        ),
+        vec![]
+    );
+}
+
+#[test]
+fn answering_when_no_read_was_asked_for_reads_nothing() {
+    let mut model = idle(CLAUDE);
+    model.input(
+        Input::Asking {
+            agent: CLAUDE,
+            asking: true,
+        },
+        at(1),
+    );
+    assert_eq!(
+        model.input(
+            Input::Asking {
+                agent: CLAUDE,
+                asking: false
+            },
+            at(20)
+        ),
+        vec![]
+    );
+}
+
+#[test]
+fn inputs_for_an_agent_not_given_do_nothing() {
+    let (mut model, _) = Limits::new(Vec::new(), &[CLAUDE], t0());
+    let inputs = vec![
+        shown(CODEX),
+        Input::TryAgain { agent: Some(CODEX) },
+        turn_ended(CODEX, true),
+        Input::Asking {
+            agent: CODEX,
+            asking: false,
+        },
+        live_input(
+            CODEX,
+            live("five_hour", LiveStatus::Allowed, Some(30.0), None),
+        ),
+        done(CODEX, usage(account(CODEX, vec![five_hour(10.0)]))),
+    ];
+    for input in inputs {
+        assert_eq!(model.input(input.clone(), at(30)), vec![], "{input:?}");
+    }
+    assert!(!model.view(at(30)).0.contains_key(&CODEX));
+    assert_eq!(model.next_read_at(CODEX), None);
+}

@@ -887,6 +887,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "clauseo-limits"
+version = "0.1.0"
+dependencies = [
+ "async-io",
+ "clauseo-fake_agent",
+ "clauseo-process",
+ "clauseo-protocol",
+ "clauseo-settings",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
 name = "clauseo-matters"
 version = "0.1.0"
 dependencies = [
