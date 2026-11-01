@@ -181,7 +181,7 @@ export function createAnswer(scope: string): Answer {
     const shown = restore(source);
     const fallback = { source: shown, input, hast: plainText(shown), streaming: false };
     try {
-      const root = withoutPlaceholders(tree(input), input);
+      const root = withoutPlaceholders(tree(input), input.length - source.length);
       if (deeperThan(root, MAX_TREE_DEPTH)) return fallback;
       const handlers = { html: htmlAsText, footnoteReference: footnote };
       const hast = toHast(root, { ...options, handlers }) as Hast;

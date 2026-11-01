@@ -49,9 +49,15 @@ export function placeholdersFor(labels: readonly string[]): string {
   return `${prefix}\n`;
 }
 
-/** `root`, parsed from `input`, without the block quote of placeholders it may start with. */
-export function withoutPlaceholders(root: Root, input: string): Root {
-  if (!input.startsWith("> [^") || root.children[0]?.type !== "blockquote") return root;
+/**
+ * `root` without the block quote of placeholders its input may start with. `from` is where the block's own
+ * text starts in the input: only a quote that ends before it is the placeholders' (a block of the agent's
+ * that starts with `> [^` is a quote of its own, and stays).
+ */
+export function withoutPlaceholders(root: Root, from: number): Root {
+  const first = root.children[0];
+  if (from === 0 || first?.type !== "blockquote" || (first.position?.end.offset ?? from + 1) > from)
+    return root;
   return { ...root, children: root.children.slice(1) };
 }
 
