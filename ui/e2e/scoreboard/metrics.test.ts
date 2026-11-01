@@ -72,7 +72,7 @@ test("dropped frames: rAF gaps over 25 ms, per 10 s of the span", () => {
   // Steady 60 Hz: no gap over 25 ms.
   const steady = Array.from({ length: 601 }, (_, i) => i * (1000 / 60));
   expect(droppedFramesPer10s(steady)).toBe(0);
-  // WebKit-style jitter, gaps of 17 to 19 ms: late frames, none dropped (#172).
+  // Jittered frames, gaps of 15 to 19 ms: late frames, none dropped (#172).
   const jitter = Array.from({ length: 601 }, (_, i) => i * 17 + (i % 3 === 1 ? 2 : 0));
   expect(droppedFramesPer10s(jitter)).toBe(0);
   // Two long gaps (52 ms and 836 ms) in a span of 1 s: 20 per 10 s.
