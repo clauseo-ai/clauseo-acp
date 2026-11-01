@@ -62,6 +62,12 @@ windowed controller (`CreateCoreWebView2Controller`, `wry/src/webview2/mod.rs`),
   - Tests hold both files to their lists and check, through Tauri's own access check, that the
     caption commands answer only with `frame.json` and never on the Mac. The page reads the
     maximised state again after its own `resize` event, not from Tauri's window events.
+- **The page keeps its side.** The native controls stand at fixed places in the window: the Mac's
+  lights at the toolbar's first corner light, Windows' maximise window flush with the top right.
+  So in the room build (`data-frame="own"` on `<html>`) the toolbar stays at the window's top at
+  every size, the caption buttons flush with its top right, the pinned question below it, and
+  the lights' box fixed where the native lights stand. The rules are in
+  `ui/components/src/clauseo/responsive.css`, and a test fails when one is missing.
 - **Where the page calls them.** `@tauri-apps/api/window` is imported only in
   `ui/app/src/transport/window-controls.ts`; the hook in `ui/app/src/window/` takes its
   `WindowControls`, and `caption.tsx` stays a part that takes handlers.
