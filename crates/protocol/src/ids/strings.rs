@@ -192,6 +192,26 @@ checked_string! {
     pub struct MatterPath(check_matter_path);
 }
 
+impl MatterPath {
+    /// The matter path a relative path names: its parts joined with `/`, when each is a plain
+    /// name (no root, prefix, `.` or `..`) and valid UTF-8, and the result passes [`MatterPath`]'s
+    /// rules. Reads the path's text only; no file system call.
+    #[must_use]
+    pub fn from_relative(relative: &std::path::Path) -> Option<Self> {
+        let mut joined = String::new();
+        for part in relative.components() {
+            let std::path::Component::Normal(part) = part else {
+                return None;
+            };
+            if !joined.is_empty() {
+                joined.push('/');
+            }
+            joined.push_str(part.to_str()?);
+        }
+        Self::new(&joined).ok()
+    }
+}
+
 /// Windows device names, matched against a name's stem with `eq_ignore_ascii_case`, so the
 /// superscript digits are listed as they are.
 const WINDOWS_RESERVED_NAMES: [&str; 32] = [

@@ -71,10 +71,11 @@ fn permission_with(id: &str, tool_call: Value) -> Value {
     request
 }
 
-/// `PermissionRequested.paths` holds every `locations[].path`, then `rawInput.file_path` and
-/// `rawInput.notebook_path` when they are strings, without repeats, as the agent wrote them:
-/// claude-agent-acp's Edit (the location repeats `file_path`) and `NotebookEdit`, codex-acp's file
-/// change (locations only, which may be empty), a relative path, and a request with neither.
+/// `PermissionRequested.paths` holds every `locations[].path`, then each diff's `path`, then
+/// `rawInput.file_path` and `rawInput.notebook_path`, when they are strings, without repeats, as
+/// the agent wrote them: claude-agent-acp's Edit (the location repeats `file_path`) and
+/// `NotebookEdit`, codex-acp's file change (locations, which may be empty, and diffs, which name
+/// a move's destination), a relative path, and a request with neither.
 #[test]
 fn permission_requests_carry_the_paths_they_name() {
     let call = |raw_input: Value, locations: Value| {
@@ -95,6 +96,13 @@ fn permission_requests_carry_the_paths_they_name() {
             json!([{"path": "/m/a.md"}, {"path": "notes/b.md", "line": 3}, {"path": "/m/a.md"}]),
         ),
         call(json!({"changes": {}}), json!([])),
+        json!({"toolCallId": "tc-paths", "title": "Edit", "kind": "edit", "status": "pending",
+        "locations": [{"path": "/m/a.md"}],
+        "content": [
+            {"type": "diff", "path": "/m/a.md", "oldText": "a", "newText": "b"},
+            {"type": "diff", "path": "/m/moved.md", "oldText": null, "newText": "b"},
+            {"type": "content", "content": {"type": "text", "text": "/m/not-a-path"}},
+        ]}),
         json!({"toolCallId": "tc-paths", "title": "Edit", "kind": "edit", "status": "pending"}),
     ];
     let count = requests.len();
@@ -117,6 +125,7 @@ fn permission_requests_carry_the_paths_they_name() {
                 vec!["/m/blocked.txt", "/m/n.ipynb"],
                 vec!["/m/a.md", "notes/b.md"],
                 vec![],
+                vec!["/m/a.md", "/m/moved.md"],
                 vec![],
             ]
         );

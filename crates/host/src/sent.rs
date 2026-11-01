@@ -9,11 +9,12 @@
 //! have all returned, [`SentView::roll_back`] sets `sent` back to `committed`, which is what the
 //! log holds and what the reducer folded.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use clauseo_protocol::{
     AgentSessionId, CompactString, DomainEvent, ElicitationId, ElicitationRequest, Envelope,
-    MessageId, PermissionOption, PermissionRequestId, StreamId, ToolCallId, ToolCallStatus, TurnId,
+    MatterPath, MessageId, PermissionOption, PermissionRequestId, StreamId, ToolCallContent,
+    ToolCallId, ToolCallStatus, ToolLocation, TurnId,
 };
 
 use crate::build::ToolFields;
@@ -29,6 +30,33 @@ pub(crate) struct SentTool {
     pub(crate) fields: ToolFields,
     /// Whether its status is final: completed, failed or cancelled.
     pub(crate) finished: bool,
+    /// The matter paths it has named so far ([`note_paths`]), for a permission request about
+    /// it that names none.
+    pub(crate) paths: BTreeSet<MatterPath>,
+}
+
+/// Adds the matter paths a tool call names (its in-matter locations and diffs).
+pub(crate) fn note_paths(
+    paths: &mut BTreeSet<MatterPath>,
+    locations: &[ToolLocation],
+    content: &[ToolCallContent],
+) {
+    let diffs = content.iter().filter_map(|item| match item {
+        ToolCallContent::Diff { path, .. } => Some(path),
+        ToolCallContent::Text { .. }
+        | ToolCallContent::Content { .. }
+        | ToolCallContent::Unknown { .. } => None,
+    });
+    for location in locations.iter().chain(diffs) {
+        match location {
+            ToolLocation::Inside { path, .. } => {
+                if !paths.contains(path) {
+                    paths.insert(path.clone());
+                }
+            }
+            ToolLocation::Outside { .. } | ToolLocation::Unknown { .. } => {}
+        }
+    }
 }
 
 /// A permission request with no answer logged yet.
@@ -81,6 +109,8 @@ impl Layer {
                         .or_default()
                         .insert(started.acp_id.clone(), started.tool_call);
                 }
+                let mut paths = BTreeSet::new();
+                note_paths(&mut paths, &started.locations, &started.content);
                 self.tools.insert(
                     started.tool_call,
                     SentTool {
@@ -88,6 +118,7 @@ impl Layer {
                         turn: started.turn,
                         fields: ToolFields::of_started(started),
                         finished: is_final(started.status),
+                        paths,
                     },
                 );
             }
@@ -97,6 +128,9 @@ impl Layer {
                     if let Some(status) = updated.patch.status {
                         tool.finished = is_final(status);
                     }
+                    let locations = updated.patch.locations.as_deref().unwrap_or_default();
+                    let content = updated.patch.content.as_deref().unwrap_or_default();
+                    note_paths(&mut tool.paths, locations, content);
                 }
             }
             DomainEvent::PermissionRequested(requested) => {

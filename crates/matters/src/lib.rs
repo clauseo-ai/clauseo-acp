@@ -29,8 +29,9 @@
 //!   ([`CompareSide`]), [`Matter::files_at`] ([`VersionFile`]) and [`Matter::read_file`] read
 //!   versions and take `&self`.
 //! - [`held_open`]: whether Word (or, on Windows, any program) has a file of the folder open
-//!   ([`HeldOpen`]), by the rule undo and restore refuse with; the host asks it before letting
-//!   an agent write a file.
+//!   ([`HeldOpen`]), by the rule undo and restore refuse with; [`held_open_at`] takes a path
+//!   as an agent names it, resolved into the folder by [`matter_path_in`]. The host asks it
+//!   before letting an agent write a file.
 //! - [`scan`]: what importing a folder would take ([`ScanReport`]), before any write.
 //! - Inputs the host passes, so nothing depends on the machine: [`Settings`] (the matters root,
 //!   [`Limits`], [`Retention`], the [`PlaceholderProbe`]), [`NewMatter`] (ids, `created_at`,
@@ -116,7 +117,7 @@ mod write;
 mod writeback;
 
 pub use error::{Error, MissingReason, Refusal};
-pub use locks::{HeldOpen, held_open};
+pub use locks::{HeldOpen, held_open, held_open_at, matter_path_in};
 pub use matter::Matter;
 pub use probe::{OsProbe, PlaceholderProbe};
 pub use refuse::same_or_nested;

@@ -5,12 +5,8 @@ expression: "event(\"permission_resolved\")"
 {
   "permission_resolved": {
     "request": "01900000-0000-7000-8000-00000000000a",
-    "choice": {
-      "selected": {
-        "option_id": "allow",
-        "kind": "allow_once"
-      }
-    },
-    "by": "local_desktop"
+    "choice": "cancelled",
+    "by": "local_desktop",
+    "held_open": "Brief.docx"
   }
 }

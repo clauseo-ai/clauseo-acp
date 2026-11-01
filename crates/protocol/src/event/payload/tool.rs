@@ -81,7 +81,7 @@ pub struct PermissionResolved {
     pub by: Principal,
     /// A program holds this file open: an Office owner file beside it, or on Windows a sharing
     /// violation; the host refused the request without asking. The choice is then the
-    /// request's reject-once option (`Cancelled` when it offered no reject option).
+    /// request's reject-once option, or `Cancelled` when it offered none.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub held_open: Option<MatterPath>,
 }

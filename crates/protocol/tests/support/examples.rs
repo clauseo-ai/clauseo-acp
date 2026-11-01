@@ -268,12 +268,9 @@ fn session_events() -> Vec<DomainEvent> {
         .into(),
         PermissionResolved {
             request: permission_request_id(10),
-            choice: PermissionChoice::Selected {
-                option_id: short("allow"),
-                kind: PermissionKind::AllowOnce,
-            },
+            choice: PermissionChoice::Cancelled,
             by: Principal::LocalDesktop,
-            held_open: None,
+            held_open: Some(path("Brief.docx")),
         }
         .into(),
         PermissionExpired {

@@ -1,9 +1,11 @@
 //! Which files are open in another program, so an undo or a restore can refuse before writing
 //! anything, and the host can refuse an agent's permission request to write one ([`held_open`]).
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use clauseo_protocol::MatterPath;
+
+use crate::refuse::spellings;
 
 /// What shows that a file is open in another program.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +44,65 @@ pub fn held_open(folder: &Path, path: &MatterPath) -> Option<HeldOpen> {
             && matches!(err.raw_os_error(), Some(SHARING_VIOLATION | LOCK_VIOLATION))
         {
             return Some(HeldOpen::SharingViolation);
+        }
+    }
+    None
+}
+
+/// [`held_open`] for a path as an agent names it: absolute, or relative to `folder` (the
+/// session's working folder). The path counts only when it lies in `folder` ([`matter_path_in`]);
+/// then the matter path it names and what shows it held open, if anything does.
+pub fn held_open_at(folder: &Path, path: &Path) -> Option<(MatterPath, HeldOpen)> {
+    let inside = matter_path_in(folder, path)?;
+    let root = dunce::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+    held_open(&root, &inside).map(|held| (inside, held))
+}
+
+/// The matter path `path` (absolute, or relative to `folder`) names in `folder`, or `None`
+/// when it lies outside. Both sides are resolved with `dunce::canonicalize` (symlinks, `..`,
+/// Windows' `\\?\` prefix), a missing file through its parent, and compared by components as
+/// refused folders are: ignoring case on macOS and Windows, exactly elsewhere. The rest of the
+/// path keeps the spelling the file system gave it. When either side does not resolve, the path's
+/// text is compared with the folder's instead: no `.` or `..` part, and the folder's text as a
+/// prefix.
+pub fn matter_path_in(folder: &Path, path: &Path) -> Option<MatterPath> {
+    let joined = folder.join(path);
+    if let (Ok(root), Some(target)) = (dunce::canonicalize(folder), resolved(&joined)) {
+        return relative_to(&root, &target);
+    }
+    let relative = if path.is_absolute() {
+        path.strip_prefix(folder).ok()?
+    } else {
+        path
+    };
+    MatterPath::from_relative(relative)
+}
+
+/// `path` canonicalised, or for a missing file its canonical parent joined with its name.
+fn resolved(path: &Path) -> Option<PathBuf> {
+    if let Ok(found) = dunce::canonicalize(path) {
+        return Some(found);
+    }
+    let name = match path.components().next_back()? {
+        Component::Normal(name) => name,
+        Component::Prefix(_) | Component::RootDir | Component::CurDir | Component::ParentDir => {
+            return None;
+        }
+    };
+    let parent = dunce::canonicalize(path.parent()?).ok()?;
+    Some(parent.join(name))
+}
+
+/// The matter path of the canonical `target` under the canonical `root`, compared by
+/// [`spellings`].
+fn relative_to(root: &Path, target: &Path) -> Option<MatterPath> {
+    let parts: Vec<Component<'_>> = target.components().collect();
+    for outer in spellings(root) {
+        for key in spellings(target) {
+            if key.len() > outer.len() && key.starts_with(&outer) {
+                let rest = parts.get(parts.len().checked_sub(key.len() - outer.len())?..)?;
+                return MatterPath::from_relative(&rest.iter().collect::<PathBuf>());
+            }
         }
     }
     None

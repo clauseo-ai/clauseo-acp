@@ -129,12 +129,9 @@ fn approval_entries() -> Vec<ViewEntry> {
             }],
             deliverable: Deliverable::Live,
             state: PermissionState::Resolved {
-                choice: PermissionChoice::Selected {
-                    option_id: short("allow"),
-                    kind: PermissionKind::AllowOnce,
-                },
+                choice: PermissionChoice::Cancelled,
                 by: Principal::LocalDesktop,
-                held_open: None,
+                held_open: Some(path("Brief.docx")),
             },
             answered_at: Some(Timestamp::new(1_760_000_002_000).unwrap()),
         }),

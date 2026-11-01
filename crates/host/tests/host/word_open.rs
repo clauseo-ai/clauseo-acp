@@ -15,6 +15,9 @@ use crate::support::{Dir, Scenario, matter_with_thread};
 /// The agent id mapped to the scenario.
 const AGENT: &str = "word-agent";
 
+/// The requests of `permission-word-open` the host answers itself; the rest wait for the lawyer.
+const REFUSED: usize = 6;
+
 /// The resolution of `request`, which must have exactly one.
 fn resolution(events: &Events, request: PermissionRequestId) -> PermissionResolved {
     let found: Vec<&PermissionResolved> = events
@@ -55,10 +58,11 @@ fn selected(option: &str, kind: PermissionKind) -> PermissionChoice {
 }
 
 /// `permission-word-open`: Word's owner files sit beside `Invoice.docx` (`~$nvoice.docx`,
-/// the 7-character rule) and `sub/Brief.docx`, and beside `Invoice.docx` in a folder next to
-/// the matter. The first three requests are answered without the lawyer (the scenario's
-/// `expect_response` lines check what the agent got); the last three only by the lawyer, whose
-/// `AnswerPermission` is refused for a request that is no longer pending.
+/// the 7-character rule) and `sub/Brief.docx`, and beside `Invoice.docx` in two folders next to
+/// the matter (`outside`, and `m-elsewhere`, whose name starts with the matter's). The first
+/// [`REFUSED`] requests are answered without the lawyer (the scenario's `expect_response` lines
+/// check what the agent got); the rest only by the lawyer, whose `AnswerPermission` is refused
+/// for a request that is no longer pending.
 #[test]
 fn write_to_a_document_word_has_open_is_refused() {
     let dir = Dir::new(
@@ -86,13 +90,14 @@ fn write_to_a_document_word_has_open_is_refused() {
     );
     let mut events = host.events(StreamId::Thread(thread));
     let (turn, _) = host.prompt(thread, "Edit the invoice and the brief.");
-    answer_from(&host, &mut events, thread, 3, &["allow", "reject", "allow"]);
+    let lawyer = ["allow", "reject", "allow", "allow"];
+    answer_from(&host, &mut events, thread, REFUSED, &lawyer);
     let ended = events.until_turn_ended(turn);
     events.assert_no_mismatch();
     assert_eq!(ended.stop, StopReason::EndTurn);
 
     let requests = events.permission_requests();
-    assert_eq!(requests.len(), 6, "{}", events.dump());
+    assert_eq!(requests.len(), REFUSED + lawyer.len(), "{}", events.dump());
     let got: Vec<(PermissionChoice, Option<MatterPath>)> = requests
         .iter()
         .map(|request| {
@@ -111,13 +116,23 @@ fn write_to_a_document_word_has_open_is_refused() {
                 selected("abort", PermissionKind::RejectOnce),
                 Some(path("sub/Brief.docx"))
             ),
+            (
+                selected("abort", PermissionKind::RejectOnce),
+                Some(path("sub/Brief.docx"))
+            ),
             (PermissionChoice::Cancelled, Some(path("Invoice.docx"))),
+            (PermissionChoice::Cancelled, Some(path("Invoice.docx"))),
+            (
+                selected("reject", PermissionKind::RejectOnce),
+                Some(path("Invoice.docx"))
+            ),
             (selected("allow", PermissionKind::AllowOnce), None),
             (selected("reject", PermissionKind::RejectOnce), None),
             (selected("allow", PermissionKind::AllowOnce), None),
+            (selected("allow", PermissionKind::AllowOnce), None),
         ]
     );
-    for request in &requests[..3] {
+    for request in &requests[..REFUSED] {
         assert!(
             resolved_with_its_request(&events, *request),
             "{request} was not resolved in its own commit: {}",
