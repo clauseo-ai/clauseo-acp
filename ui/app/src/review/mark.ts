@@ -1,29 +1,41 @@
-// Marks where a string shows in a rendered state: the elements whose own text is the string or holds it (a slot such
-// as {path} standing for any words, and a string that is one sentence of a longer line), or whose accessible name or
-// tooltip is, so the eye finds it at once in the frame.
+// Marks where a string shows in a rendered state: the innermost elements whose text is the string (Say may split it
+// into runs by script, so an element's whole text counts, not only its own text nodes), the elements whose own text
+// holds it (a string that is one sentence of a longer line), or whose accessible name or tooltip is, so the eye finds
+// it at once in the frame. A slot in the string ("Resets {time}", {path}) matches any words in its place.
 
 export const MARK = "data-review-mark";
 
+const escape = (words: string) => words.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A whole-string pattern for a registered string: its words as written, each {slot} any words. */
+export function patternOf(text: string): RegExp {
+  return new RegExp(
+    `^${text
+      .trim()
+      .split(/\{\w+\}/)
+      .map(escape)
+      .join(".+?")}$`,
+    "s",
+  );
+}
+
 /** Marks the elements under root that show text; returns how many. */
 export function markText(root: Element, text: string): number {
-  const want = text.trim();
-  // its slots stand for any words; elsewhere the string as written
-  const held = new RegExp(
-    want
-      .split(/\{\w+\}/)
-      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-      .join(".+?"),
-    "u",
-  );
+  const want = patternOf(text);
+  // its slots stand for any words; elsewhere the string as written, anywhere in an element's own text
+  const held = new RegExp(want.source.slice(1, -1), "su");
+  const is = (value: string | null) => value !== null && want.test(value.trim());
+  const shows = (el: Element) => is(el.textContent);
   let marked = 0;
   for (const el of root.querySelectorAll("*")) {
+    const innermost = shows(el) && ![...el.children].some(shows);
     const own = [...el.childNodes]
       .filter((n) => n.nodeType === Node.TEXT_NODE)
       .map((n) => n.textContent ?? "")
       .join("")
       .trim();
-    const named = el.getAttribute("aria-label") === want || el.getAttribute("title") === want;
-    if (own === want || (own !== "" && held.test(own)) || named) {
+    const holds = own !== "" && held.test(own);
+    if (innermost || holds || is(el.getAttribute("aria-label")) || is(el.getAttribute("title"))) {
       el.setAttribute(MARK, "");
       marked++;
     }
