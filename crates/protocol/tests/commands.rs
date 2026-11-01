@@ -457,3 +457,45 @@ fn compare_versions_to_is_a_checkpoint_or_the_folder_now() {
         "an unknown field is still refused"
     );
 }
+
+/// `ListPapers` and its answer, with the wire names the app reads.
+#[test]
+fn list_papers_and_its_answer_on_the_wire() {
+    use clauseo_protocol::{
+        Count, MAX_PAPERS, MatterId, MatterPath, PaperSummary, QueryResult, SkippedFile,
+        SkippedFileReason, Timestamp,
+    };
+    let matter = MatterId::new(fixtures::v7(1)).unwrap();
+    let query = HostQuery::ListPapers { matter };
+    round_trips(&query);
+    assert_eq!(
+        serde_json::to_string(&query).unwrap(),
+        r#"{"list_papers":{"matter":"01900000-0000-7000-8000-000000000001"}}"#
+    );
+    let result = QueryResult::Papers {
+        papers: vec![PaperSummary {
+            file: fixtures::file_ref_id(2),
+            path: MatterPath::new("pleadings/claim.docx").unwrap(),
+            size: Count::from(1200_u32),
+            modified: Timestamp::new(1_577_836_800_250).unwrap(),
+        }],
+        skipped: vec![SkippedFile {
+            path: MatterPath::new("video.mp4").unwrap(),
+            reason: SkippedFileReason::OverSizeCap,
+        }],
+        truncated: false,
+    };
+    round_trips(&result);
+    assert_eq!(
+        serde_json::to_string(&result).unwrap(),
+        concat!(
+            r#"{"papers":{"papers":[{"file":"01900000-0000-7000-8000-000000000002","#,
+            r#""path":"pleadings/claim.docx","size":1200,"modified":1577836800250}],"#,
+            r#""skipped":[{"path":"video.mp4","reason":"over_size_cap"}],"truncated":false}}"#
+        )
+    );
+    assert_eq!(MAX_PAPERS, 2_000);
+    // A query with a field it does not know is refused.
+    let extra = r#"{"list_papers":{"matter":"01900000-0000-7000-8000-000000000001","x":1}}"#;
+    assert!(serde_json::from_str::<HostQuery>(extra).is_err());
+}
