@@ -251,7 +251,8 @@ export function referenceHandler(scope: string, numbering: Numbering, nths: Nths
       return {
         type: "element",
         tagName: "sup",
-        properties: { dataFootnotePending: true },
+        // Its spoken label is the superscript component's (notes.tsx).
+        properties: { dataFootnotePending: String(number) },
         children: [value],
       };
     }
@@ -270,7 +271,10 @@ export function referenceHandler(scope: string, numbering: Numbering, nths: Nths
   };
 }
 
-/** The back-references of a note: one per reference, as remark-rehype writes them. */
+/**
+ * The back-references of a note: one per reference, as remark-rehype writes them, except that each
+ * carries its label's number (`1`, `1-2`) rather than the English label.
+ */
 function backReferences(scope: string, id: string, index: number, count: number): ElementContent[] {
   const links: ElementContent[] = [];
   for (let nth = 1; nth <= count; nth++) {
@@ -288,8 +292,8 @@ function backReferences(scope: string, id: string, index: number, count: number)
       tagName: "a",
       properties: {
         href: `#${scope}-fnref-${fragment(id)}${nth > 1 ? `-${nth}` : ""}`,
-        dataFootnoteBackref: "",
-        ariaLabel: `Back to reference ${index + 1}${nth > 1 ? `-${nth}` : ""}`,
+        // The back-reference's label, "Back to reference {n}", is the link component's (words.ts).
+        dataFootnoteBackref: `${index + 1}${nth > 1 ? `-${nth}` : ""}`,
         className: ["data-footnote-backref"],
       },
       children,

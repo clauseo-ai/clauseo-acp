@@ -92,6 +92,9 @@ const HI = {
     "मामले के दस्तावेज़ जोड़ें। आपके पहले प्रश्न से पहले Clauseo उन्हें पढ़ लेता है।",
   Stop: "रोकें",
   "Image blocked": "चित्र रोका गया",
+  Footnotes: "फ़ुटनोट",
+  "Back to reference {n}": "संदर्भ {n} पर वापस जाएँ",
+  "Footnote {n}, still to come": "फ़ुटनोट {n}, अभी आना बाकी है",
 } as const;
 
 /** Every interface string this file has in both languages. */

@@ -50,7 +50,6 @@ export const SCHEMA: Schema = {
     "th",
     "td",
     "sup",
-    "section",
   ],
   attributes: {
     // Links, and footnote references and backlinks.
@@ -58,7 +57,6 @@ export const SCHEMA: Schema = {
       "href",
       "id",
       "ariaDescribedBy",
-      "ariaLabel",
       "dataFootnoteRef",
       "dataFootnoteBackref",
       ["className", "data-footnote-backref"],
@@ -70,9 +68,6 @@ export const SCHEMA: Schema = {
     li: ["id", ["className", "task-list-item"]],
     ol: ["start", ["className", "contains-task-list"]],
     ul: [["className", "contains-task-list"]],
-    // The footnotes section and its visually hidden heading.
-    section: ["dataFootnotes", ["className", "footnotes"]],
-    h2: ["id", ["className", "sr-only"]],
     // A footnote reference whose note has not arrived yet.
     sup: ["dataFootnotePending"],
     th: ["align"],
