@@ -6,7 +6,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { createAnswer } from "./answer.ts";
 import { LEGAL } from "./legal-fixture.ts";
 import { Markdown } from "./markdown.tsx";
@@ -272,18 +272,14 @@ test("a reference and its note reach each other by click, whatever the label's c
     "Eins[^straße], zwei[^50%], drei[^a], vier[^a] und fünf[^a-2].\n\n" +
     "[^straße]: Straße.\n\n[^50%]: Half.\n\n[^a]: A.\n\n[^a-2]: Not a repeat of a.\n";
   render(text);
-  const scrolled: Element[] = [];
-  const original = Element.prototype.scrollIntoView;
-  Element.prototype.scrollIntoView = function (this: Element) {
-    scrolled.push(this);
-  };
+  const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
   try {
     const click = (link: Element) => {
-      scrolled.length = 0;
+      scroll.mockClear();
       act(() => {
         link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
       });
-      return scrolled[0];
+      return scroll.mock.contexts[0];
     };
     const refs = [...host.querySelectorAll("p sup a")];
     const items = [...host.querySelectorAll("section[data-footnotes] li")];
@@ -295,7 +291,7 @@ test("a reference and its note reach each other by click, whatever the label's c
     const backs = items.flatMap((item) => [...item.querySelectorAll("a[data-footnote-backref]")]);
     expect(backs.map(click)).toEqual([refs[0], refs[1], refs[2], refs[3], refs[4]]);
   } finally {
-    Element.prototype.scrollIntoView = original;
+    scroll.mockRestore();
   }
 });
 
