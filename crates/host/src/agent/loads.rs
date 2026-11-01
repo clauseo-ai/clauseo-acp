@@ -94,7 +94,8 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 /// - Under [`McpControl::Clauseo`]: `strictMcpConfig: true` and `settingSources`
 ///   [`CLAUDE_SETTING_SOURCES`].
 /// - Under [`McpControl::Managed`]: `strictMcpConfig: false`, `settingSources`
-///   [`CLAUDE_MANAGED_SETTING_SOURCES`], and no `mcpServers`.
+///   [`CLAUDE_MANAGED_SETTING_SOURCES`], no `mcpServers`, and no `mcp-config` or
+///   `strict-mcp-config` in `extraArgs` (either makes Claude Code refuse to start there).
 pub(crate) fn session_meta(
     hook: Option<Map<String, Value>>,
     control: McpControl,
@@ -110,7 +111,12 @@ pub(crate) fn session_meta(
         McpControl::Managed => (false, CLAUDE_MANAGED_SETTING_SOURCES),
     };
     if let Some(Value::Object(extra)) = options.get_mut("extraArgs") {
-        extra.retain(|flag, _| !is_setting_sources_flag(flag));
+        extra.retain(|flag, _| {
+            let taken_out = is_flag(flag, SETTING_SOURCES_FLAG)
+                || (control == McpControl::Managed
+                    && MANAGED_MCP_FLAGS.iter().any(|name| is_flag(flag, name)));
+            !taken_out
+        });
     }
     if control == McpControl::Managed {
         options.remove("mcpServers");
@@ -122,17 +128,19 @@ pub(crate) fn session_meta(
     meta
 }
 
-/// Whether the `extraArgs` key `flag` becomes `--setting-sources`: the SDK writes `--<key>`, then
-/// the value unless it is `null`.
-fn is_setting_sources_flag(flag: &str) -> bool {
-    flag == SETTING_SOURCES_FLAG
-        || flag
-            .strip_prefix(SETTING_SOURCES_FLAG)
-            .is_some_and(|rest| rest.starts_with('='))
+/// Whether the `extraArgs` key `flag` becomes `--<name>`: the SDK writes `--<key>`, then the
+/// value unless it is `null`, so `name` and `name=…` both do.
+fn is_flag(flag: &str, name: &str) -> bool {
+    flag.strip_prefix(name)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('='))
 }
 
 /// The Claude Code flag `settingSources` becomes.
 const SETTING_SOURCES_FLAG: &str = "setting-sources";
+
+/// The flags that make Claude Code refuse to start while `managed-mcp.json` is present: a
+/// server config, and strict MCP config.
+const MANAGED_MCP_FLAGS: [&str; 2] = ["mcp-config", "strict-mcp-config"];
 
 /// The object at `key`, taken out of `map`; empty when it is missing or not an object.
 fn take_object(map: &mut Map<String, Value>, key: &str) -> Map<String, Value> {

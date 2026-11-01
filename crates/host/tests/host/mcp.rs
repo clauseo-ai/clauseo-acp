@@ -40,12 +40,17 @@ impl Launcher for Recording {
     }
 }
 
-/// A hook that asks for what the host overrides: every setting source, no strict MCP config,
-/// claude.ai connectors on.
+/// A hook that asks for what the host overrides: every setting source, also through an extra
+/// flag in both forms, no strict MCP config, claude.ai connectors on.
 fn greedy_hook() -> Value {
     json!({"clauseo_test": true, "claudeCode": {"options": {
         "strictMcpConfig": false,
         "settingSources": ["user", "project", "local"],
+        "extraArgs": {
+            "setting-sources": "user,project,local",
+            "setting-sources=project": null,
+            "model-x": "kept",
+        },
         "env": {"ENABLE_CLAUDEAI_MCP_SERVERS": "true"},
     }}})
 }
@@ -164,7 +169,7 @@ fn a_broken_policy_turns_every_server_off() {
 }
 
 /// Claude Code's enterprise `managed-mcp.json`: no servers and no strict MCP config, even when
-/// the hook asks for strict.
+/// the hook asks for strict, sets servers or passes the MCP flags.
 #[test]
 fn under_managed_mcp_no_server_and_no_strict_go() {
     let dir = Dir::new("mcp_managed", &[]);
@@ -174,7 +179,11 @@ fn under_managed_mcp_no_server_and_no_strict_go() {
     }}});
     dir.set_settings(&[(FAKE, Scenario::Local("mcp-managed"))], user);
     dir.set_managed_mcp();
-    let hook = json!({"claudeCode": {"options": {"strictMcpConfig": true}}});
+    let hook = json!({"claudeCode": {"options": {
+        "strictMcpConfig": true,
+        "mcpServers": {"clauseo": {"command": command(&bin, "clauseo")}},
+        "extraArgs": {"mcp-config": "{}", "strict-mcp-config": null, "model-x": "kept"},
+    }}});
     let host = start(&dir, 0, Some(hook));
     one_turn(&dir, &host);
     host.shutdown();

@@ -1,7 +1,7 @@
-{"scenario":"mcp-managed","description":"Claude Code's enterprise managed-mcp.json is present: session/new sends no MCP servers, strict MCP config off (even though the hook asked for it) and settingSources user only; then one prompt","on_stdin_close":"exit"}
+{"scenario":"mcp-managed","description":"Claude Code's enterprise managed-mcp.json is present: session/new sends no MCP servers, strict MCP config off (even though the hook asked for it) and settingSources user only, and none of the hook's mcpServers, mcp-config or strict-mcp-config; then one prompt","on_stdin_close":"exit"}
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
-{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","mcpServers":[],"_meta":{"claudeCode":{"options":{"strictMcpConfig":false,"settingSources":["user"],"env":{"ENABLE_CLAUDEAI_MCP_SERVERS":"false"}}}}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","mcpServers":[],"_meta":{"claudeCode":{"options":{"strictMcpConfig":false,"settingSources":["user"],"env":{"ENABLE_CLAUDEAI_MCP_SERVERS":"false"},"extraArgs":{"model-x":"kept"}}}}},"off":["/_meta/claudeCode/options/mcpServers","/_meta/claudeCode/options/extraArgs/mcp-config","/_meta/claudeCode/options/extraArgs/strict-mcp-config"]}}
 {"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
 {"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Done."}}}}
