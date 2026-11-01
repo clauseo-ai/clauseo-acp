@@ -3,12 +3,18 @@
 // case, without anything that is not a letter, mark, decimal or letter number, connector punctuation, space
 // or hyphen, and with each space made a hyphen; Devanagari and Tamil vowel signs are marks, so Hindi and
 // Tamil headings keep them. A repeated slug gets `-1`, `-2`… in document order, across the whole answer.
-// The id is scoped to the answer (`<scope>-<slug>`, then the sanitiser's `user-content-` prefix), as
-// footnote ids are, and link.tsx maps a `#fragment` to it. A heading whose slug is empty gets no id.
+// The id is scoped to the answer and kept apart from the ids the pipeline makes (`<scope>-h-<slug>`, then
+// the sanitiser's `user-content-` prefix), so a heading `# fn-1` never takes a footnote's id; link.tsx
+// maps an agent's `#fragment` to it. A heading whose slug is empty gets no id.
 import type { Element, ElementContent, Root } from "hast";
 
 const REMOVED = /[^\p{L}\p{M}\p{Nd}\p{Nl}\p{Pc} -]/gu;
 const HEADING = /^h[1-6]$/;
+
+/** The id of a heading whose slug is `value`, in the answer `scope` (before the sanitiser's prefix). */
+export function headingId(scope: string, value: string): string {
+  return `${scope}-h-${value}`;
+}
 
 /** GitHub's slug of a heading's text. */
 export function slug(text: string): string {
@@ -48,7 +54,7 @@ function headingsIn(root: Root): Element[] {
 export function anchorHeadings(root: Root, scope: string): string[] {
   return headingsIn(root).map((heading) => {
     const value = slug(textOf(heading.children));
-    if (value !== "") heading.properties["id"] = `${scope}-${value}`;
+    if (value !== "") heading.properties["id"] = headingId(scope, value);
     return value;
   });
 }
@@ -66,7 +72,10 @@ export function numberSlugs(perBlock: readonly (readonly string[])[]): string[][
  * One block's final slugs, after the blocks whose slugs `occurrences` has seen (updated in place): what
  * numberSlugs does for each block, so the answer can carry on from the blocks it numbered last update.
  */
-export function numberBlockSlugs(slugs: readonly string[], occurrences: Map<string, number>): string[] {
+export function numberBlockSlugs(
+  slugs: readonly string[],
+  occurrences: Map<string, number>,
+): string[] {
   return slugs.map((value) => {
     if (value === "") return value;
     let result = value;
@@ -81,14 +90,18 @@ export function numberBlockSlugs(slugs: readonly string[], occurrences: Map<stri
 }
 
 /**
- * A copy of the sanitised `root` whose headings carry the ids of `slugs` (one per heading, in order), with
- * `prefix` before each: what a block shows when an earlier heading took some of its slugs.
+ * A copy of the sanitised `root` whose headings carry the ids of `slugs` (one per heading, in order), each
+ * made by `id`: what a block shows when an earlier heading took some of its slugs.
  */
-export function withSlugs(root: Root, slugs: readonly string[], prefix: string): Root {
+export function withSlugs(
+  root: Root,
+  slugs: readonly string[],
+  id: (value: string) => string,
+): Root {
   const copy = structuredClone(root);
   headingsIn(copy).forEach((heading, index) => {
     const value = slugs[index];
-    if (value) heading.properties["id"] = `${prefix}${value}`;
+    if (value) heading.properties["id"] = id(value);
   });
   return copy;
 }

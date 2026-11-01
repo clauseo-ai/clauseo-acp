@@ -305,6 +305,26 @@ test("a reference and its note reach each other by click, whatever the label's c
   }
 });
 
+test("headings named like footnote ids keep their own ids: a reference still reaches its note", () => {
+  render("# fn-1\n\n# fnref-1\n\n# footnote-label\n\nA claim[^1].\n\n[^1]: The note.\n");
+  const ids = [...host.querySelectorAll("[id]")].map((element) => element.id);
+  expect(new Set(ids).size).toBe(ids.length);
+  const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
+  try {
+    const reference = host.querySelector("p sup a")!;
+    act(() => {
+      reference.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    expect(scroll.mock.contexts).toEqual([host.querySelector("section[data-footnotes] li")]);
+    expect(target(reference)?.textContent).toContain("The note.");
+    const described = reference.getAttribute("aria-describedby") ?? "";
+    expect(document.getElementById(described)?.tagName).toBe("H2");
+    expect(document.getElementById(described)?.closest("section[data-footnotes]")).not.toBeNull();
+  } finally {
+    scroll.mockRestore();
+  }
+});
+
 test("a note's reference inside another note gets its own back-reference, as in cmark-gfm", () => {
   // x cites b, a's note cites b, y cites a: b has two back-references, one into a's note. remark's
   // one-piece render gives b one, since it writes b's back-references before it renders a's note.

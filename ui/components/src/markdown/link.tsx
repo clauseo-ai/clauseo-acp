@@ -4,6 +4,7 @@ import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useWords } from "../lib/words.ts";
 import { AnswerScopeContext, InertLinksContext, MarkdownHostContext } from "./host.ts";
 import { CLOBBER_PREFIX, LINK_PREFIXES, referenceOf } from "./schema.ts";
+import { headingId } from "./slugs.ts";
 
 type LinkProps = {
   href?: string | undefined;
@@ -26,12 +27,13 @@ function allowed(href: string | undefined, scope: string): string | undefined {
 
 /**
  * The final id a fragment points at. Ids the pipeline generates already carry the answer's scope and get
- * the sanitiser's prefix; a fragment the agent wrote (`#section-2`) gets both.
+ * the sanitiser's prefix; a fragment the agent wrote (`#section-2`) points at a heading, in the headings'
+ * own namespace (slugs.ts), and gets the prefix too, so it never reaches a footnote's id.
  */
 function targetId(fragment: string, scope: string): string {
   return fragment.startsWith(`${scope}-`)
     ? `${CLOBBER_PREFIX}${fragment}`
-    : `${CLOBBER_PREFIX}${scope}-${fragment}`;
+    : `${CLOBBER_PREFIX}${headingId(scope, fragment)}`;
 }
 
 /** A fragment's id, percent-decoded; as written when it is not valid percent-encoding (`#%E0%A4`). */

@@ -37,7 +37,7 @@ test("==highlight==: exactly two markers; a == b, === and a lone == stay as writ
   expect(html("a == b, x = 1, ===c=== and ==open")).toBe(
     "<p>a == b, x = 1, ===c=== and ==open</p>",
   );
-  expect(html("Title\n===")).toBe('<h1 id="user-content-t-title">Title</h1>');
+  expect(html("Title\n===")).toBe('<h1 id="user-content-t-h-title">Title</h1>');
 });
 
 test("~sub~ is GFM strikethrough and ++ins++ is text: neither is supported syntax", () => {
@@ -103,17 +103,17 @@ test("slugs follow github-slugger on English, Hindi and Tamil headings, punctuat
   const shown = headings.filter((h) => h.trim() !== "");
   const views = createAnswer("t").update(shown.map((h) => `# ${h}`).join("\n\n"), false);
   const ids = htmlOf(views).match(/id="[^"]+"/g);
-  expect(ids).toEqual(shown.map((h) => `id="user-content-t-${slugger.slug(h.trim())}"`));
+  expect(ids).toEqual(shown.map((h) => `id="user-content-t-h-${slugger.slug(h.trim())}"`));
 });
 
 test("heading ids are numbered across blocks, scoped per answer, and links to them resolve", () => {
   const text =
     "## 4.2 Termination\n\nSee [4.2](#42-termination).\n\n### Notes\n\nOne.\n\n### Notes\n\nTwo.";
-  expect(html(text)).toContain('<h2 id="user-content-t-42-termination">');
-  expect(html(text)).toContain('<h3 id="user-content-t-notes">');
-  expect(html(text)).toContain('<h3 id="user-content-t-notes-1">');
+  expect(html(text)).toContain('<h2 id="user-content-t-h-42-termination">');
+  expect(html(text)).toContain('<h3 id="user-content-t-h-notes">');
+  expect(html(text)).toContain('<h3 id="user-content-t-h-notes-1">');
   expect(htmlOf(createAnswer("other").update(text, false))).toContain(
-    'id="user-content-other-notes-1"',
+    'id="user-content-other-h-notes-1"',
   );
   // The link's href (link.tsx maps it to the scoped id) is checked in the DOM by legal-extras.test.tsx.
   expect(html(text)).toContain('<a href="#42-termination">4.2</a>');
@@ -124,7 +124,7 @@ test("a renumbered heading's block keeps its view while the tail streams", () =>
   const first = answer.update("# A\n\ntext\n\n# A\n\nstreaming", true);
   const second = answer.update("# A\n\ntext\n\n# A\n\nstreaming on", true);
   expect(second[2]).toBe(first[2]);
-  expect(htmlOf([second[2]!])).toContain('id="user-content-t-a-1"');
+  expect(htmlOf([second[2]!])).toContain('id="user-content-t-h-a-1"');
 });
 
 const CITATIONS = [
