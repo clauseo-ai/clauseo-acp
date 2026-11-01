@@ -1,0 +1,29 @@
+diff --git a/axe.js b/axe.js
+index 410d149f69df34e9a65b9d29f7fd1d744fc2a3cd..f06c118bf380b59f14878a50d5839f367bcfd241 100644
+--- a/axe.js
++++ b/axe.js
+@@ -14283,12 +14283,19 @@
+             _Color[name] = func;
+           }
+           if (instance2) {
+-            _Color.prototype[name] = function() {
+-              for (var _len6 = arguments.length, args = new Array(_len6), _key6 = 0; _key6 < _len6; _key6++) {
+-                args[_key6] = arguments[_key6];
++            // Clauseo: defined, not assigned, so a page whose Object.prototype is frozen (Tauri's freezePrototype) can load axe:
++            // assigning toString here is the override mistake, which throws in strict code.
++            Object.defineProperty(_Color.prototype, name, {
++              configurable: true,
++              enumerable: true,
++              writable: true,
++              value: function() {
++                for (var _len6 = arguments.length, args = new Array(_len6), _key6 = 0; _key6 < _len6; _key6++) {
++                  args[_key6] = arguments[_key6];
++                }
++                return func.apply(void 0, [ this ].concat(args));
+               }
+-              return func.apply(void 0, [ this ].concat(args));
+-            };
++            });
+           }
+         }
+       }, {

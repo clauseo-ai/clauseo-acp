@@ -1,7 +1,8 @@
 // The probe build's page (vite.config.ts's probe mode, `pnpm build:probe`): the room over FakeTransport, with one
 // matter, its papers, and the scripted stream (testing/stream-script.ts) played to whatever subscribes. The page's
 // query sets its display for this page only (theme=night, lang=hi, lite=1, motion=reduced, size=18), as the WebKit
-// probe (scripts/webkit-probe.swift) asks for it. Not shipped.
+// probe (scripts/webkit-probe.swift) asks for it, and window.__clauseoDisplay and __clauseoAxe are set (dev-hooks.ts).
+// Not shipped.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "../App.tsx";
@@ -16,7 +17,7 @@ import {
   uuid,
   userMessage,
 } from "../testing/stream-script.ts";
-import { queryPatch } from "./dev-hooks.ts";
+import { installDevHooks, queryPatch } from "./dev-hooks.ts";
 import { DEFAULT_UI } from "./display-store.ts";
 import type { PaperSummary } from "./host-next.ts";
 import { connectRoom } from "./start.ts";
@@ -70,8 +71,9 @@ const transport = new FakeTransport({
   },
 });
 
-// the page's query over the settings, before the first render, so night never starts as day
-connectRoom(transport, queryPatch(location.search));
+// the page's query over the settings, before the first render, so night never starts as day; and the hooks the
+// by-hand checks use, so the WebKit probe can run window.__clauseoAxe() as it would run in the app
+installDevHooks(connectRoom(transport, queryPatch(location.search)));
 
 const container = document.getElementById("root");
 if (container === null) throw new Error("index.html has no #root element");

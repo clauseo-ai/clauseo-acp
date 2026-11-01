@@ -29,5 +29,10 @@ optimisticRepeatInstall: false
 # root would unmount), and its other build carries the whole HTML table (~10 KB brotli). The patched index.js knows
 # ~150 common names at once and imports the table (character-entities) lazily, as its own chunk; the `browser`
 # condition is gone and index.dom.js re-exports index.js. Checked by ui/components/src/markdown/entities.test.ts.
+# axe-core: Color's methods are defined on its prototype with Object.defineProperty instead of assigned, so axe loads
+# under Tauri's freezePrototype (tauri.conf.json): with Object.prototype frozen, assigning `toString` there throws in
+# strict code (the override mistake), and Vite's ES module chunk is strict, so window.__clauseoAxe() always failed in the
+# app. Same value, enumerable and writable as the assignment made it. Checked by ui/app/src/room/axe-frozen.test.ts.
 patchedDependencies:
+  axe-core@4.14.0: patches/axe-core@4.14.0.patch
   decode-named-character-reference@1.3.0: patches/decode-named-character-reference@1.3.0.patch
