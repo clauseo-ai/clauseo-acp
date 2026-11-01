@@ -56,6 +56,34 @@ test.each([
   expect(tail(text)).toBe(html);
 });
 
+test.each([
+  ["a fenced code line", "```text\ncode\n| piped code line", "| piped code line"],
+  ["an indented code line", "Before.\n\n    | indented code", "| indented code"],
+  ["a line of an HTML block", "<div>\n| in html", "| in html"],
+  ["a code line in a list item", "- ```\n  | in code", "| in code"],
+  ["a lone marker in code", "```\ncode\n-", "code\n-"],
+  ["a trailing backslash in code", "```\nC:\\", "C:\\"],
+])("the streaming tail shows %s as it is: no table or marker forms there", (_, text, shown) => {
+  expect(tail(text)).toContain(shown);
+});
+
+test.each([
+  ["opens a paragraph", "Before.\n\n| a | b |", ""],
+  ["continues a paragraph", "Before.\n| a | b |", "<p>Before.</p>"],
+  ["opens a block quote", "> | quoted line", ""],
+  [
+    "continues a quoted paragraph",
+    "> quoted\n> | line",
+    "<blockquote>\n<p>quoted</p>\n</blockquote>",
+  ],
+  ["is in a list item", "- item\n  | a |", "<ul>\n<li>item</li>\n</ul>"],
+])(
+  "a pipe-led last line that %s may be a table's header: hidden until the next line",
+  (_, text, html) => {
+    expect(tail(text)).toBe(html);
+  },
+);
+
 test("a half link is never a link, and a link appears only once its destination is complete", () => {
   const text = "See [the Act](https://indiacode.nic.in/act) for the rest.";
   for (let end = 1; end <= text.length; end++) {

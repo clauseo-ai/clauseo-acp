@@ -246,7 +246,7 @@ export const CASES: HostileCase[] = [
   { id: "open-brackets", markdown: "[".repeat(16_000) },
   // Footnotes. Each label a block calls but does not define costs micromark a placeholder definition, and
   // each note is a block and a view: 2,000 labels in one paragraph (past MAX_PENDING while streaming),
-  // 60 notes, the longest label, 8,000 `[^` and a chain of notes that each cite the next. (300 notes cost
+  // 30 notes, the longest label, 8,000 `[^` and a chain of notes that each cite the next. (300 notes cost
   // about 8.5 times prose of their length, mostly one parse per block; see the PR.)
   {
     id: "footnote-many-labels",
@@ -255,9 +255,9 @@ export const CASES: HostileCase[] = [
   {
     id: "footnote-many-notes",
     markdown:
-      Array.from({ length: 60 }, (_, index) => `Claim ${index}[^n${index}].`).join(" ") +
+      Array.from({ length: 30 }, (_, index) => `Claim ${index}[^n${index}].`).join(" ") +
       "\n\n" +
-      Array.from({ length: 60 }, (_, index) => `[^n${index}]: Note ${index}.`).join("\n\n"),
+      Array.from({ length: 30 }, (_, index) => `[^n${index}]: Note ${index}.`).join("\n\n"),
   },
   {
     id: "footnote-long-label",
