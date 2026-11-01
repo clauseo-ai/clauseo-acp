@@ -42,6 +42,8 @@ export type EndOf = (block: string) => BlockEnd;
 const LIST_MARKER = /^(?:([-+*])|\d{1,9}([.)]))(?:[ \t\n]|$)/;
 /** A definition's marker at the start of a line, which joins the term before it, across a blank line too. */
 const DEFINITION = /^:[ \t]/;
+/** One ATX heading line, with its line ending. */
+const ATX_HEADING = /^ {0,3}#{1,6}(?:[ \t][^\n]*)?\n$/;
 /** A line that may hold a definition, so a block may end with a definition list. */
 const MAY_DEFINE = /(?:^|\n) {0,3}:[ \t]/;
 
@@ -61,12 +63,19 @@ function endsWithBlankLine(text: string, from: number, to: number): boolean {
  * the next block does not start with a marker that would continue the list the block before ends with;
  * and no fenced code block or HTML block of kinds 1 to 5 is still open at the end of the block before
  * (those are the only blocks that run on past a blank line and a column-0 line). Fences and HTML blocks
- * nested in a container close with it, at the column-0 line. A definition list is never cut either: a
+ * nested in a container close with it, at the column-0 line. A block that is one ATX heading line and
+ * nothing else needs no blank line after it: nothing continues a heading, and nothing before it reaches it
+ * (`# a\n# b\n…` with no blank lines would otherwise be one block, parsed whole on every update). A
+ * definition list is never cut either: a
  * block starting with a definition's `: ` joins the term before it, and a block after a definition list
  * may be its next term.
  */
 function safeCut(text: string, from: number, at: number, last: number, endOf: EndOf): boolean {
-  if (!endsWithBlankLine(text, from, at)) return false;
+  if (
+    !endsWithBlankLine(text, from, at) &&
+    !(last === from && ATX_HEADING.test(text.slice(from, at)))
+  )
+    return false;
   const first = text.charCodeAt(at);
   if (first === 32 || first === 9 || first === 10) return false;
   const head = text.slice(at, at + 12);
