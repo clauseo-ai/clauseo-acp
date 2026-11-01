@@ -42,7 +42,7 @@ import {
   restore,
   restoreText,
 } from "./nesting.ts";
-import { htmlAsText, pairTags } from "./inline-tags.ts";
+import { htmlAsText, pairTags, paragraphNotingStart } from "./inline-tags.ts";
 import { endOf, parse } from "./parse.ts";
 import { repairTail } from "./repair.ts";
 import { CLOBBER_PREFIX, SCHEMA } from "./schema.ts";
@@ -81,6 +81,7 @@ export type Answer = {
 /** mdast to hast: raw HTML as text, the syntax extras, definition lists. */
 export const HANDLERS: Record<string, Handler> = {
   html: htmlAsText,
+  paragraph: paragraphNotingStart,
   ...extrasHandlers,
   ...(defListHastHandlers as Record<string, Handler>),
 };
