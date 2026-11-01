@@ -52,11 +52,21 @@ afterEach(() => {
 /** Patches the bridge delivers in one frame: the host's 16 ms display batch holds about three agent chunks. */
 const PER_FRAME = 3;
 
-/** The entry ids a frame's patches change. */
-function touchedBy(bodies: readonly ViewPatchBody[]): Set<string> {
+/** The entry ids a frame's patches change. An answer counts as changed in the frame where it finishes (the agent sends
+ * anything else after it): its row renders once more there, its final render. `streaming` carries the answer still
+ * arriving from frame to frame. */
+function touchedBy(
+  bodies: readonly ViewPatchBody[],
+  streaming: { answer: string | null },
+): Set<string> {
   const touched = new Set<string>();
   for (const body of bodies) {
-    if (body.upsert !== undefined) touched.add(entryIdOf(body.upsert.entry));
+    if (body.upsert !== undefined) {
+      const id = entryIdOf(body.upsert.entry);
+      touched.add(id);
+      if (streaming.answer !== null && streaming.answer !== id) touched.add(streaming.answer);
+      streaming.answer = body.upsert.entry.agent_text !== undefined ? id : null;
+    }
     if (body.append_text !== undefined) touched.add(`agent_text:${body.append_text.message_id}`);
   }
   return touched;
@@ -107,10 +117,11 @@ test("500 chunks and 20 tool calls: one commit a frame without a new row, three 
   let unchangedRowCommits = 0;
   let cursor = 2;
   const seen = new Set<string>([entryIdOf(prompt)]);
+  const streaming = { answer: null as string | null };
   for (let i = 0; i < bodies.length; i += PER_FRAME) {
     const slice = bodies.slice(i, i + PER_FRAME);
     for (const body of slice) transport.deliver(JSON.stringify(event(batch(cursor++, [body]))));
-    const touched = touchedBy(slice);
+    const touched = touchedBy(slice, streaming);
     const added = [...touched].some((id) => !seen.has(id));
     for (const id of touched) seen.add(id);
     rowCommits.clear();
@@ -156,7 +167,7 @@ test("500 chunks and 20 tool calls: one commit a frame without a new row, three 
     changedRowCommits,
   }).toMatchInlineSnapshot(`
     {
-      "changedRowCommits": 222,
+      "changedRowCommits": 228,
       "frames": 194,
       "framesOverOneCommit": 41,
       "framesWithNewRow": 41,

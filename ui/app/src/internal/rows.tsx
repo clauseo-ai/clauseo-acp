@@ -1,6 +1,8 @@
 // The transcript's rows: one component per entry kind, each reading only its own entry (and its own text) from the
-// store, so a row renders again only when its entry changes. Plain text throughout; the new design replaces these.
+// store, so a row renders again only when its entry changes. Answers render as Markdown (ui/components' renderer);
+// everything else is plain text. The new design replaces these.
 import { memo, useCallback } from "react";
+import { Markdown } from "@clauseo/components/markdown/markdown.tsx";
 import { useEntry, useStreamPart, useText, useViewStore } from "../store/hooks.ts";
 import { entryId, kindOf, textKey, type StreamView } from "../store/view.ts";
 import type {
@@ -40,6 +42,37 @@ function useRunning(stream: StreamId): boolean {
   return useStreamPart(store, stream, pick);
 }
 
+/** Entry kinds that do not end the agent's message before them: the person's own (queued) prompt and the host's
+ * notes. Any other later entry (a tool call, a permission, another text, the turn's step) means the agent moved on. */
+const NOT_AGENT_OUTPUT = new Set(["user_message", "notice", "marker"]);
+
+/**
+ * Whether the answer `id` is still arriving: its turn runs and no agent output came after it. ACP has no "message
+ * done" signal, so a message is finished once the agent sends anything else, or the turn stops. A boolean, so a
+ * finished answer's row renders exactly once more (its final render, which colours code and makes links live) and
+ * never again. Looks from the end of the list, where a streaming answer is, so a flush costs a step or two per row.
+ */
+function useStreaming(stream: StreamId, id: EntryId): boolean {
+  const pick = useCallback(
+    (v: StreamView | undefined) => {
+      if (v === undefined || !turnRunning(v.header?.header?.status)) return false;
+      for (let at = v.ids.length - 1; at >= 0; at -= 1) {
+        const other = v.ids[at]!;
+        if (other === id) return true;
+        const entry = v.entries.get(other);
+        if (entry === undefined || !NOT_AGENT_OUTPUT.has(kindOf(entry))) return false;
+      }
+      return false;
+    },
+    [id],
+  );
+  return useStreamPart(useViewStore(), stream, pick);
+}
+
+function Answer({ id, stream, text }: { id: EntryId; stream: StreamId; text: string }) {
+  return <Markdown text={text} streaming={useStreaming(stream, id)} />;
+}
+
 function AgentText({
   id,
   stream,
@@ -57,7 +90,7 @@ function AgentText({
       data-testid={thought ? "thought" : "message-agent"}
       data-entry-id={id}
     >
-      <p style={pre}>{text}</p>
+      {thought ? <p style={pre}>{text}</p> : <Answer id={id} stream={stream} text={text} />}
     </div>
   );
 }

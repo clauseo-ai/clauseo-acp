@@ -23,6 +23,7 @@ import {
   toolCall,
   TURN,
   userMessage,
+  upsert,
   uuid,
 } from "../testing/stream-script.ts";
 import { ERROR_COPY, PERMISSION_LABEL } from "./words.ts";
@@ -240,6 +241,32 @@ test("a tool call row carries Clauseo's tool call id and its status", async () =
   expect(row.dataset["toolCallId"]).toBe(uuid(1, 7));
   expect(row.dataset["entryId"]).toBe(`tool_call:${uuid(1, 7)}`);
   expect(row.dataset["status"]).toBe("in_progress");
+});
+
+test("an answer renders as Markdown, streaming until the agent sends something else or the turn stops", async () => {
+  const { show, play } = await open();
+  const link = "**Clause 9** is in [the lease](https://example.com/lease)";
+  await show([agentText(6, 1, link), agentText(7, 3, "Reading.", "thought")], header("running"));
+  // A thought after the answer ends it: its links are live.
+  const first = () => all("message-agent")[0]!;
+  expect(first().querySelector("strong")?.textContent).toBe("Clause 9");
+  expect(first().querySelector("a")?.getAttribute("href")).toBe("https://example.com/lease");
+  expect($("thought")?.textContent).toBe("Reading.");
+
+  await play([upsert(agentText(8, 2)), append(2, 0, link)]);
+  const second = () => all("message-agent")[1]!;
+  // Still arriving: the last block's link is inert, since its URL may still be growing.
+  expect(second().querySelector("a")?.hasAttribute("href")).toBe(false);
+  await play([upsert(userMessage(9, 4, "And clause 10?"))]);
+  expect(second().querySelector("a")?.hasAttribute("href")).toBe(false);
+  await play([upsert(toolCall(10, 1, "pending"))]);
+  expect(second().querySelector("a")?.getAttribute("href")).toBe("https://example.com/lease");
+
+  await play([upsert(agentText(11, 5)), append(5, 0, link)]);
+  const third = () => all("message-agent")[2]!;
+  expect(third().querySelector("a")?.hasAttribute("href")).toBe(false);
+  await play([upsert(header("idle"))]);
+  expect(third().querySelector("a")?.getAttribute("href")).toBe("https://example.com/lease");
 });
 
 test("undo sends the turn's files; a limit stop shows its reset time as ISO UTC", async () => {

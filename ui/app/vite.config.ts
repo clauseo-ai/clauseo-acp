@@ -183,6 +183,10 @@ export default defineConfig(({ mode }) => {
     // WebView2 (Chromium), WKWebView (Safari 16+) and WebKitGTK all run ES2022. Fonts and every other asset load as
     // files under the CSP's 'self', never inlined as data: URLs.
     build: { target: "es2022", assetsInlineLimit: 0, ...(probe ? { outDir: "dist-probe" } : {}) },
+    // The colouring worker (ui/components markdown/highlight/) as an ES module, so each Shiki grammar stays its own
+    // chunk and loads when a block in that language first colours. The default `iife` cannot split, and inlines every
+    // grammar into the worker: 862 KB.
+    worker: { format: "es" },
     test: {
       projects: [
         {
