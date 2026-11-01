@@ -120,6 +120,31 @@ fn the_hooks_setting_sources_flag_is_taken_out_of_extra_args() {
 }
 
 #[test]
+fn under_managed_mcp_the_hooks_mcp_flags_are_taken_out_too() {
+    let hook = object(&json!({"claudeCode": {"options": {"extraArgs": {
+        "mcp-config": "/tmp/servers.json",
+        "strict-mcp-config": null,
+        "strict-mcp-config=true": null,
+        "mcp-configx": "kept",
+    }}}}));
+    let clauseo = Value::Object(session_meta(Some(hook.clone()), McpControl::Clauseo));
+    assert_eq!(
+        clauseo["claudeCode"]["options"]["extraArgs"],
+        json!({
+            "mcp-config": "/tmp/servers.json",
+            "strict-mcp-config": null,
+            "strict-mcp-config=true": null,
+            "mcp-configx": "kept",
+        })
+    );
+    let managed = Value::Object(session_meta(Some(hook), McpControl::Managed));
+    assert_eq!(
+        managed["claudeCode"]["options"]["extraArgs"],
+        json!({"mcp-configx": "kept"})
+    );
+}
+
+#[test]
 fn the_hooks_servers_stay_under_clauseo_and_go_under_managed_mcp() {
     let hook = object(&json!({"claudeCode": {"options": {
         "mcpServers": {"clauseo": {"command": "/opt/clauseo-mcp"}},
