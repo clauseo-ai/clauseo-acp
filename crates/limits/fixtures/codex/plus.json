@@ -1,0 +1,59 @@
+{
+  "accountRead": {
+    "account": {
+      "type": "chatgpt",
+      "email": "plus.user@example.com",
+      "planType": "plus"
+    },
+    "requiresOpenaiAuth": true
+  },
+  "rateLimitsRead": {
+    "rateLimits": {
+      "limitId": "codex",
+      "planType": "plus",
+      "primary": {
+        "usedPercent": 25,
+        "windowDurationMins": 300,
+        "resetsAt": 1793642400
+      },
+      "secondary": {
+        "usedPercent": 40,
+        "windowDurationMins": 10080,
+        "resetsAt": 1793955600
+      },
+      "spendControlReached": false
+    },
+    "rateLimitsByLimitId": {
+      "codex": {
+        "limitId": "codex",
+        "planType": "plus",
+        "primary": {
+          "usedPercent": 25,
+          "windowDurationMins": 300,
+          "resetsAt": 1793642400
+        },
+        "secondary": {
+          "usedPercent": 40,
+          "windowDurationMins": 10080,
+          "resetsAt": 1793955600
+        }
+      },
+      "codex_spark": {
+        "limitId": "codex_spark",
+        "limitName": "Spark",
+        "normalModelSlug": "gpt-5.5",
+        "primary": {
+          "usedPercent": 90,
+          "windowDurationMins": 300,
+          "resetsAt": 1793642400
+        },
+        "secondary": {
+          "usedPercent": 95,
+          "windowDurationMins": 10080,
+          "resetsAt": 1793955600
+        },
+        "rateLimitReachedType": "rate_limit_reached"
+      }
+    }
+  }
+}

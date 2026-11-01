@@ -1,0 +1,2 @@
+{"scenario":"codex-silent","description":"The Codex app-server exits 0 at once without answering. The reader must report a malformed answer (the connection closed)."}
+{"exit":{"code":0}}

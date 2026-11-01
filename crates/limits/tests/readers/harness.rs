@@ -21,6 +21,12 @@ pub(crate) const SCRIPT: &str = "node_modules/@agentclientprotocol/claude-agent-
 pub(crate) const HELPER: &str = "clauseo-claude-usage.mjs";
 /// A fake 20-character key the test sets in settings env; `claude-crash` echoes it.
 pub(crate) const FAKE_KEY: &str = "fakeAnthropicKey0123";
+/// A fake 20-character key the test sets in Codex's settings env; `codex-crash` echoes it.
+pub(crate) const FAKE_OPENAI_KEY: &str = "fakeOpenAiKey0123456";
+/// codex-acp's script under the fake install.
+pub(crate) const CODEX_SCRIPT: &str = "node_modules/@zed-industries/codex-acp/bin/codex-acp.js";
+/// Where the Codex CLI's script sits under a `node_modules` folder.
+pub(crate) const CODEX_JS: &str = "@openai/codex/bin/codex.js";
 /// An inherited variable the settings env overrides in another case; cargo and nextest set it
 /// for every test run.
 pub(crate) const INHERITED: &str = "CARGO_MANIFEST_DIR";
@@ -182,19 +188,48 @@ impl Setup {
 
     /// Writes `settings.json` with `agents.claude-acp` running `script`.
     pub(crate) fn settings(&self, script: &Path) {
-        let settings = serde_json::json!({
-            "agents": {
-                "claude-acp": {
-                    "command": Setup::command(),
-                    "args": [script],
-                    "env": {
-                        "ANTHROPIC_API_KEY": FAKE_KEY,
-                        INHERITED.to_ascii_lowercase(): "from-settings",
-                    },
+        self.write_settings(Some(script), None);
+    }
+
+    /// Writes `settings.json` with `agents.codex-acp` running `script`.
+    pub(crate) fn codex_settings(&self, script: &Path) {
+        self.write_settings(None, Some(script));
+    }
+
+    /// Writes `settings.json` with the agents whose scripts are given.
+    fn write_settings(&self, claude: Option<&Path>, codex: Option<&Path>) {
+        let mut agents = serde_json::Map::new();
+        if let Some(script) = claude {
+            let entry = serde_json::json!({
+                "command": Setup::command(),
+                "args": [script],
+                "env": {
+                    "ANTHROPIC_API_KEY": FAKE_KEY,
+                    INHERITED.to_ascii_lowercase(): "from-settings",
                 },
-            },
-        });
+            });
+            agents.insert("claude-acp".to_owned(), entry);
+        }
+        if let Some(script) = codex {
+            let entry = serde_json::json!({
+                "command": Setup::command(),
+                "args": [script],
+                "env": {"OPENAI_API_KEY": FAKE_OPENAI_KEY, "codex_home": "/from/settings"},
+            });
+            agents.insert("codex-acp".to_owned(), entry);
+        }
+        let settings = serde_json::json!({ "agents": agents });
         write::write(&self.data().join("settings.json"), settings.to_string()).unwrap();
+    }
+
+    /// codex-acp's script under the fake install.
+    pub(crate) fn codex_script(&self) -> PathBuf {
+        self.install().join(CODEX_SCRIPT)
+    }
+
+    /// The Codex home given to `ProcessReaders::new`; never made.
+    pub(crate) fn codex_home(&self) -> PathBuf {
+        self.data().join("codex-home")
     }
 
     /// The settings as `Effective::load` reads them from the data folder.
@@ -209,8 +244,12 @@ impl Setup {
         timer: &SharedTimer,
     ) -> ProcessReaders<SharedTimer> {
         let launcher: Arc<dyn Launcher> = Arc::<TestLauncher>::clone(launcher);
-        let codex_home = self.data().join("codex-home");
-        ProcessReaders::new(&self.effective(), codex_home, launcher, timer.clone())
+        ProcessReaders::new(
+            &self.effective(),
+            self.codex_home(),
+            launcher,
+            timer.clone(),
+        )
     }
 
     /// The names in `dir`, sorted; empty when it is missing.

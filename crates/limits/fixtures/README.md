@@ -22,7 +22,31 @@ with recordings from real accounts and marks each row `recorded`.
 | `claude/method-missing.json` | `ok:false`, `stage: usage`, `missing: true`: `MethodMissing` | helper line contract | synthetic |
 | `claude/init-failed.json` | `ok:false`, `stage: init`, `missing: false`: `Exited { code: Some(0), stderr_tail }`; the line's own `message` is never used | helper line contract | synthetic |
 
-The Codex rows are added with the Codex reader (after R14).
+## Codex
+
+Each file under `codex/` is one read's answers: `accountRead`, the `account/read` result
+(`GetAccountResponse`), and, for a ChatGPT sign-in, `rateLimitsRead`, the
+`account/rateLimits/read` result (`GetAccountRateLimitsResponse`). The unit tests in
+`src/readers/codex/tests.rs` map each one to the exact `ReadOutcome`, and
+`src/readers/codex/tests/talk.rs` serves `plus.json`, `api-key.json` and `signed-out.json` to the
+reader over in-memory pipes. All are synthetic, written from `crates/codex_appserver`'s types
+(`src/types/account.rs`, `src/types/rate_limits.rs`) and its vendored schema
+(`schema/rust-v0.162.1/v2/GetAccountResponse.json`, `v2/GetAccountRateLimitsResponse.json`).
+
+| Fixture | Covers | Source | Kind |
+|---|---|---|---|
+| `codex/plus.json` | Plus: `primary` 300 and `secondary` 10080, and `rateLimitsByLimitId` with a `codex` bucket and a `codex_spark` model bucket whose numbers (and `rate_limit_reached`) differ; the rows and `reached` come from `codex` | `GetAccountRateLimitsResponse`, `RateLimitSnapshot` (rate_limits.rs; v2/GetAccountRateLimitsResponse.json) | synthetic |
+| `codex/free.json` | Free: one `primary` window of 43200 minutes, "Monthly limit" | as above | synthetic |
+| `codex/free-no-duration.json` | Free with no `windowDurationMins` and no `limitId`: the single view, "Monthly limit" by the Free and Go fallback | as above | synthetic |
+| `codex/go.json` | Go: `primary` of 40320 minutes (28 days), `email: null` (ref `plan`) | `ChatgptAccount` (account.rs; v2/GetAccountResponse.json) and as above | synthetic |
+| `codex/api-key.json` | `apiKey`: pay as you go via `OpenAi`, ref `api-key`, no rate-limit call | `Account` (account.rs; v2/GetAccountResponse.json) | synthetic |
+| `codex/bedrock.json` | `amazonBedrock`: pay as you go via Bedrock, ref `bedrock` | as above | synthetic |
+| `codex/signed-out.json` | `account: null`: `SignedOut`, no rate-limit call | `GetAccountResponse` | synthetic |
+| `codex/credits.json` | `credits.hasCredits: true`: `Credits { has_credits: true }`; the snapshot's `planType` (pro) wins over the account's (plus) | `CreditsSnapshot`, `RateLimitSnapshot.planType` | synthetic |
+| `codex/workspace-credits.json` | `workspace_member_credits_depleted`: `WorkspaceCredits`; credits with none left | `RateLimitReachedType` | synthetic |
+| `codex/spend-cap.json` | `workspace_owner_usage_limit_reached`: `WorkspaceSpendCap` | `RateLimitReachedType` | synthetic |
+| `codex/spend-control.json` | `spendControlReached: true` with no reached type: `WorkspaceSpendCap` | `RateLimitSnapshot.spendControlReached`, `SpendControlLimitSnapshot` | synthetic |
+| `codex/plan-window.json` | `rate_limit_reached`: `PlanWindow` | `RateLimitReachedType` | synthetic |
 
 ## Checks for G16's recordings
 

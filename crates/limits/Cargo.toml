@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 clauseo-protocol = { path = "../protocol" }
+clauseo-codex_appserver = { path = "../codex_appserver" }
 clauseo-process = { path = "../process" }
 clauseo-settings = { path = "../settings" }
 futures = { workspace = true }

@@ -1,0 +1,22 @@
+{
+  "accountRead": {
+    "account": {
+      "type": "chatgpt",
+      "email": "business.user@example.com",
+      "planType": "business"
+    },
+    "requiresOpenaiAuth": true
+  },
+  "rateLimitsRead": {
+    "rateLimits": {
+      "limitId": "codex",
+      "planType": "business",
+      "primary": {
+        "usedPercent": 80,
+        "windowDurationMins": 300,
+        "resetsAt": 1793642400
+      },
+      "rateLimitReachedType": "workspace_owner_usage_limit_reached"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "accountRead": {
+    "account": {
+      "type": "amazonBedrock",
+      "usesCodexManagedCredentials": false
+    },
+    "requiresOpenaiAuth": false
+  }
+}

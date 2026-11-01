@@ -181,17 +181,3 @@ fn the_deadline_is_25_seconds_and_kills_the_tree() {
     #[cfg(unix)]
     launcher.wait_stdout_closed();
 }
-
-#[test]
-fn the_codex_reader_is_not_built_yet() {
-    let setup = ready_setup();
-    let launcher = TestLauncher::new(Play::Hold);
-    let reader = setup.readers(&launcher, &SharedTimer::default());
-    assert_eq!(
-        block_on(reader.read(AgentKind::Codex)),
-        ReadOutcome::Failed(ReadFailure::LaunchFailed(
-            "the Codex reader is not built yet".to_owned()
-        ))
-    );
-    assert_eq!(launcher.specs(), []);
-}

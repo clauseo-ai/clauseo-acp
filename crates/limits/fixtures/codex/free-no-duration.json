@@ -1,0 +1,19 @@
+{
+  "accountRead": {
+    "account": {
+      "type": "chatgpt",
+      "email": "free.user@example.com",
+      "planType": "free"
+    },
+    "requiresOpenaiAuth": true
+  },
+  "rateLimitsRead": {
+    "rateLimits": {
+      "planType": "free",
+      "primary": {
+        "usedPercent": 60,
+        "resetsAt": 1795000000
+      }
+    }
+  }
+}

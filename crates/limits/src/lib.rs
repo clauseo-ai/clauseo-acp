@@ -43,7 +43,7 @@
 //!
 //! `policy.rs` (the model's inputs and actions), then `model.rs` (the merge), `view.rs`, and
 //! `readers.rs` with `readers/paths.rs` (the install folder), `readers/run.rs` (one run under a
-//! deadline) and `readers/claude.rs`; `readers/codex.rs` follows R14.
+//! deadline), `readers/claude.rs` and `readers/codex.rs` (with `readers/codex/map.rs`).
 
 mod error;
 mod model;

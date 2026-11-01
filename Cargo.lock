@@ -891,6 +891,7 @@ name = "clauseo-limits"
 version = "0.1.0"
 dependencies = [
  "async-io",
+ "clauseo-codex_appserver",
  "clauseo-fake_agent",
  "clauseo-process",
  "clauseo-protocol",

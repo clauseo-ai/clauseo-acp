@@ -386,7 +386,7 @@ pub(crate) fn clean(label: &str) -> String {
 }
 
 /// The sort rank of a window kind: session, weekly, model, other.
-fn rank(kind: WindowKind) -> u8 {
+pub(crate) fn rank(kind: WindowKind) -> u8 {
     match kind {
         WindowKind::Session => 0,
         WindowKind::Weekly => 1,
