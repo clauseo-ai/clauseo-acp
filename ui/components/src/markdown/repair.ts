@@ -63,7 +63,7 @@ const MARKER_LINE =
 const PIPE_LINE = /^(?:[ \t]*>)*[ \t]*\|/;
 const PARTIAL_DELIMITER_ROW = /^(?:[ \t]*>)*[ \t]*\|?[ \t:|-]*$/;
 /** Constructs that are only half there at the end of the text. */
-const HALF_FOOTNOTE = /\[\^(?:[^\]\s\\]|\\.)*$/;
+const HALF_FOOTNOTE = /\[\^(?:[^[\]\s\\]|\\.)*$/;
 const HALF_IMAGE = /!\[(?:[^[\]\\]|\\.)*(?:\](?:\([^)]*|\[[^\]]*)?)?$/;
 const HALF_LINK = /\[((?:[^[\]\\]|\\.)*)(?:\](?:\([^)]*|\[[^\]]*)?)?$/;
 
