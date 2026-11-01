@@ -33,12 +33,18 @@ export function roomHost(matters: MatterSummary[], papers?: PaperSummary[]): Fak
   return new FakeTransport(host);
 }
 
+/** A NextHost whose matters show the scratch matter open (opened last), with a folder matter beside it. */
+export const scratchHost = (): FakeTransport =>
+  new FakeTransport({
+    next: fakeNext({ matters: () => [detailed(MATTER), detailed(SCRATCH, { last_opened: 1 })] }),
+  });
+
 /** A NextHost whose matters show every rail state, in every date group, one pinned (room/fake-next.ts). */
 export const railHost = (): FakeTransport =>
   new FakeTransport({ next: fakeNext({ matters: () => railStates(MATTER, SCRATCH, Date.now()) }) });
 
 /** A host that refuses create_matter with `code`, its picker giving `display`. With `next`, a NextHost with the
- * default location "~/Documents/Clauseo", so Create sends default_location and the line names no folder. */
+ * default location "Documents/Clauseo", so Create sends default_location and the line names no folder. */
 export function refusingHost(code: NextErrorCode, display = "", next = false): FakeTransport {
   const refusal: NextHostError = { code, message: "a detail for logs", retryable: false };
   const refuse = () => {
@@ -48,7 +54,7 @@ export function refusingHost(code: NextErrorCode, display = "", next = false): F
     return new FakeTransport({
       next: fakeNext({
         matters: () => [detailed(MATTER)],
-        location: "~/Documents/Clauseo",
+        location: "Documents/Clauseo",
         command: (command) => ("create_matter" in command ? refuse() : undefined),
       }),
     });
@@ -59,9 +65,10 @@ export function refusingHost(code: NextErrorCode, display = "", next = false): F
   });
 }
 
-/** One thing a state does once rendered: press the control with this test id, or type into a field of the dialog
- * (by its place among the dialog's fields: 0 the name, 1 the client, 2 the next date). */
-export type Step = { press: string } | { type: { field: number; text: string } };
+/** One thing a state does once rendered: press the control with this test id, type into a field of the dialog (by its
+ * place among the dialog's fields: 0 the name, 1 the client, 2 the next date) and move on from it, or type into the
+ * rail's Find. */
+export type Step = { press: string } | { type: { field: number; text: string } } | { find: string };
 
 /** New matter pressed and the name typed. */
 export const NEW_MATTER: readonly Step[] = [

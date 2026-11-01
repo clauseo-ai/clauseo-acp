@@ -25,12 +25,21 @@ export function RoomAfter({ host, steps }: { host: () => FakeTransport; steps: r
       for (const step of steps) {
         if ("press" in step) {
           document.querySelector<HTMLElement>(`[data-testid="${step.press}"]`)?.click();
+        } else if ("find" in step) {
+          const field = document.querySelector<HTMLInputElement>('[data-testid="find"]');
+          if (field !== null) {
+            field.focus();
+            Reflect.set(HTMLInputElement.prototype, "value", step.find, field);
+            field.dispatchEvent(new Event("input", { bubbles: true }));
+          }
         } else {
           const field =
             document.querySelectorAll<HTMLInputElement>('[role="dialog"] input')[step.type.field];
           if (field !== undefined) {
             Reflect.set(HTMLInputElement.prototype, "value", step.type.text, field);
             field.dispatchEvent(new Event("input", { bubbles: true }));
+            // the lawyer moves on from the field, so a line that waits for that (the next date's) shows
+            field.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
           }
         }
         await settle();
