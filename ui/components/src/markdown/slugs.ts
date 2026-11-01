@@ -59,19 +59,25 @@ export function anchorHeadings(root: Root, scope: string): string[] {
  */
 export function numberSlugs(perBlock: readonly (readonly string[])[]): string[][] {
   const occurrences = new Map<string, number>();
-  return perBlock.map((slugs) =>
-    slugs.map((value) => {
-      if (value === "") return value;
-      let result = value;
-      while (occurrences.has(result)) {
-        const count = occurrences.get(value)! + 1;
-        occurrences.set(value, count);
-        result = `${value}-${count}`;
-      }
-      occurrences.set(result, 0);
-      return result;
-    }),
-  );
+  return perBlock.map((slugs) => numberBlockSlugs(slugs, occurrences));
+}
+
+/**
+ * One block's final slugs, after the blocks whose slugs `occurrences` has seen (updated in place): what
+ * numberSlugs does for each block, so the answer can carry on from the blocks it numbered last update.
+ */
+export function numberBlockSlugs(slugs: readonly string[], occurrences: Map<string, number>): string[] {
+  return slugs.map((value) => {
+    if (value === "") return value;
+    let result = value;
+    while (occurrences.has(result)) {
+      const count = occurrences.get(value)! + 1;
+      occurrences.set(value, count);
+      result = `${value}-${count}`;
+    }
+    occurrences.set(result, 0);
+    return result;
+  });
 }
 
 /**

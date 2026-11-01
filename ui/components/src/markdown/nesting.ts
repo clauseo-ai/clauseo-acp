@@ -83,6 +83,16 @@ export function hasStandIns(value: string): boolean {
   return STAND_INS.test(value);
 }
 
+/**
+ * hasStandIns for a whole answer, which capNesting is given on every update: one indexOf per stand-in is
+ * a vectorised scan, and in Node all fourteen take 24 µs on an 80 KB memo, where STAND_INS' character
+ * class takes 57 µs (on the 30 KB legal answer, 9 µs against 21).
+ */
+function answerHasStandIns(text: string): boolean {
+  for (const char of STAND_IN) if (text.includes(char)) return true;
+  return false;
+}
+
 const THEMATIC_BREAK = /^[ \t>]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 /** A footnote definition's label and colon, as micromark reads one: no whitespace, at most 999 characters. */
 const FOOTNOTE_LABEL = /\[\^(?:[^\s[\]\\]|\\[\s\S]){1,999}\]:/y;
@@ -358,14 +368,33 @@ function capBrackets(text: string): string {
 /** A definition's marker line (after any block quote markers), and a line with nothing in it. */
 const DEFINITION_LINE = /^(?:[ \t]*>)*[ \t]{0,3}:[ \t]/;
 const EMPTY_LINE = /^[ \t>]*$/;
-const MAY_DEFINE = /(?:^|\n)[ \t>]*:[ \t]/;
+
+/**
+ * How many lines of `text` may hold a definition (`:` then a space or tab, after nothing but spaces, tabs
+ * and `>`), counting no further than `limit + 1`. It runs over the whole answer on every update, so it
+ * finds each `:` with indexOf rather than a regex that tries every line start: in Node, a 80 KB memo takes
+ * 4.5 µs, where `/(?:^|\n)[ \t>]*:[ \t]/` took 46 µs (a twentieth of a streaming update).
+ */
+function definitionLines(text: string, limit: number): number {
+  let count = 0;
+  for (let at = text.indexOf(":"); at >= 0 && count <= limit; at = text.indexOf(":", at + 1)) {
+    const next = text.charCodeAt(at + 1);
+    if (next !== 32 && next !== 9) continue;
+    let back = at - 1;
+    for (let char = text.charCodeAt(back); char === 32 || char === 9 || char === 62;)
+      char = text.charCodeAt(--back);
+    if (back < 0 || text.charCodeAt(back) === 10) count++;
+  }
+  return count;
+}
 
 /**
  * Every definition list within MAX_DEFINITIONS. A list runs on while each paragraph of it (text between
  * blank lines) holds a definition, or is a term whose definition follows the blank line after it.
  */
 function capDefinitions(text: string): string {
-  if (!MAY_DEFINE.test(text)) return text;
+  // No list can be too long when the whole text has no more definition lines than one list may keep.
+  if (definitionLines(text, MAX_DEFINITIONS) <= MAX_DEFINITIONS) return text;
   const lines = text.split("\n");
   let count = 0;
   let defines = false;
@@ -391,7 +420,7 @@ function capDefinitions(text: string): string {
 
 /** `text` within every limit above: what the splitter and the parser see. */
 export function capNesting(text: string): string {
-  const clean = hasStandIns(text) ? text.replace(STAND_INS, "") : text;
+  const clean = answerHasStandIns(text) ? text.replace(STAND_INS, "") : text;
   return capDefinitions(capBrackets(capRuns(capPrefixes(clean))));
 }
 

@@ -46,7 +46,7 @@ import { htmlAsText, pairTags } from "./inline-tags.ts";
 import { endOf, parse } from "./parse.ts";
 import { repairTail } from "./repair.ts";
 import { CLOBBER_PREFIX, SCHEMA } from "./schema.ts";
-import { anchorHeadings, numberSlugs, withSlugs } from "./slugs.ts";
+import { anchorHeadings, numberBlockSlugs, withSlugs } from "./slugs.ts";
 import { createSplitter } from "./split.ts";
 import type { BlockEnd } from "./split.ts";
 import { extrasHandlers } from "./syntax-extras.ts";
@@ -454,19 +454,44 @@ export function createAnswer(scope: string): Answer {
    * heading took shows a copy with `-1`, `-2`… ids, made again only when those change.
    */
   const renumbered = new WeakMap<BlockView, { key: string; view: BlockView }>();
+  const renumber = (view: BlockView, slugs: readonly string[]): BlockView => {
+    if (slugs.every((value, at) => value === view.slugs![at])) return view;
+    const key = slugs.join("\u0000");
+    const known = renumbered.get(view);
+    if (known?.key === key) return known.view;
+    const copy = { ...view, hast: withSlugs(view.hast, slugs, `${CLOBBER_PREFIX}${scope}-`) };
+    renumbered.set(view, { key, view: copy });
+    return copy;
+  };
+  /**
+   * What numberedSlugs made of every block but the last, last update: while those views stay the same
+   * (a stream only changes its last block or two), the numbering carries on from there, instead of going
+   * over every heading of the answer on every update.
+   */
+  let numberedBefore: {
+    views: readonly BlockView[];
+    count: number;
+    out: readonly BlockView[];
+    occurrences: ReadonlyMap<string, number>;
+  } = { views: [], count: 0, out: [], occurrences: new Map() };
   const numberedSlugs = (blockViews: readonly BlockView[]): readonly BlockView[] => {
-    if (!blockViews.some((view) => (view.slugs?.length ?? 0) > 0)) return blockViews;
-    const final = numberSlugs(blockViews.map((view) => view.slugs ?? []));
-    return blockViews.map((view, index) => {
-      const slugs = final[index]!;
-      if (slugs.every((value, at) => value === view.slugs![at])) return view;
-      const key = slugs.join("\u0000");
-      const known = renumbered.get(view);
-      if (known?.key === key) return known.view;
-      const copy = { ...view, hast: withSlugs(view.hast, slugs, `${CLOBBER_PREFIX}${scope}-`) };
-      renumbered.set(view, { key, view: copy });
-      return copy;
-    });
+    const before = numberedBefore;
+    let from = 0;
+    while (from < before.count && blockViews[from] === before.views[from]) from++;
+    const reuse = from === before.count;
+    if (!reuse) from = 0;
+    const occurrences = new Map(reuse ? before.occurrences : undefined);
+    const out = reuse ? before.out.slice(0, before.count) : [];
+    for (let index = from; index < blockViews.length; index++) {
+      if (index === blockViews.length - 1) {
+        const snapshot = new Map(occurrences);
+        numberedBefore = { views: blockViews, count: index, out, occurrences: snapshot };
+      }
+      const view = blockViews[index]!;
+      const slugs = view.slugs ?? [];
+      out.push(slugs.length === 0 ? view : renumber(view, numberBlockSlugs(slugs, occurrences)));
+    }
+    return out;
   };
 
   let lastText: string | undefined;
