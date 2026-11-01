@@ -81,6 +81,7 @@ to write instead.
 | `acp` | Wrapper over `agent-client-protocol` | protocol, agent-client-protocol, futures, async-channel, serde, serde_json, memchr | tauri, tokio | exists |
 | `codex_appserver` | Types for the pinned Codex app-server JSON schema, a minimal JSON-RPC client over any pipe pair, the schema drift test; reused by the direct Codex driver after the beta | protocol, serde, serde_json, futures, tracing | tauri, tokio | exists |
 | `host` | Own thread and executor: sessions, commands, permissions, coalescing, subscriptions, checkpoints per turn; the `profile` hook | protocol, reducer, store, matters, process, acp, settings, async-channel, async-io, futures, uuid, serde_json, tracing, dunce | tauri, tokio, agents | exists |
+| `limits` | Plan usage readers: the Claude usage helper and the Codex reader; event-driven refresh; merging live `_claude/rateLimit` signals; the limits model and its view | protocol, process, settings, codex_appserver, serde, serde_json, futures, tracing | tauri, tokio, keyring | exists |
 | `fake_agent` | Scripted ACP agent for tests | agent-client-protocol, serde, serde_json | | exists |
 | `cli` | Headless client for agents and CI | host, settings | tauri | planned |
 | `transport_ws` | Dev and test only WebSocket transport, random token | host | tauri | planned |
