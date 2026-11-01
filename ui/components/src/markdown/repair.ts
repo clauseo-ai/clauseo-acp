@@ -21,8 +21,8 @@ type Edit = { start: number; end: number; text: string };
  */
 type Cuts = {
   readonly edits: Edit[];
-  cut(start: number, end: number): void;
-  kept(at: number): boolean;
+  readonly cut: (start: number, end: number) => void;
+  readonly kept: (at: number) => boolean;
 };
 
 function createCuts(length: number): Cuts {
@@ -30,7 +30,7 @@ function createCuts(length: number): Cuts {
   const mask = new Uint8Array(length);
   return {
     edits,
-    cut(start, end) {
+    cut: (start, end) => {
       edits.push({ start, end, text: "" });
       mask.fill(1, start, end);
     },
