@@ -39,7 +39,9 @@ test("with VITE_CLAUSEO_WINDOW=room the app mounts the room inside #app-root, no
   const html = renderToStaticMarkup(<Fresh transport={new NullTransport()} />);
   expect(html.startsWith(`${ROOT_TAG}>`)).toBe(true);
   expect(html).toContain('class="room-window"');
-  expect(html).toContain('data-testid="matter"');
+  expect(html).toContain("room-rail-toggle");
+  // the title's heading waits for list_matters: never an empty one
+  expect(html).not.toContain("<h1");
   expect(html).not.toContain('data-testid="new-matter"');
   expect(html).not.toContain('data-testid="composer"');
 });
