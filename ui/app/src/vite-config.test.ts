@@ -1,7 +1,7 @@
 import { build, createServer, resolveConfig, type Rolldown } from "vite";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import tauriConf from "../../../crates/desktop/tauri.conf.json" with { type: "json" };
-import { devCsp } from "../vite.config.ts";
+import { devCsp, metaCsp } from "../vite.config.ts";
 
 // The React Compiler skips a function it cannot compile instead of failing the build, so a broken
 // Babel or compiler setup would only lose memoization. This loads the real vite.config.ts and
@@ -74,4 +74,80 @@ test("the release build keeps the perf module in a lazy chunk, with no preload h
   expect(entry!.code).toMatch(/[^>]import\(`\.\/perf-[\w-]+\.js`\)/);
   expect(entry!.code).not.toContain("vite:preloadError");
   expect(entry!.code).not.toContain("startStream");
+});
+
+/** A build in memory under `mode`, its chunks and its index.html. */
+async function builtWith(mode?: string) {
+  const out = (await build({
+    configFile: "vite.config.ts",
+    logLevel: "silent",
+    ...(mode === undefined ? {} : { mode }),
+    build: { write: false },
+  })) as Rolldown.RolldownOutput | Rolldown.RolldownOutput[];
+  const files = (Array.isArray(out) ? out : [out]).flatMap((o) => o.output);
+  const chunks = files.filter((c): c is Rolldown.OutputChunk => c.type === "chunk");
+  const page = files.find(
+    (f): f is Rolldown.OutputAsset => f.type === "asset" && f.fileName === "index.html",
+  );
+  return { chunks, html: String(page?.source ?? "") };
+}
+
+const META =
+  /^<!doctype html>\s*<html[^>]*>\s*<head>\s*<meta http-equiv="Content-Security-Policy" content="([^"]*)">/i;
+const unescape = (html: string) => html.replaceAll("&#39;", "'").replaceAll("&quot;", '"');
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+test("the meta CSP is the production CSP less frame-ancestors, which a meta tag may not carry", () => {
+  const production = tauriConf.app.security.csp;
+  expect(production).toContain("frame-ancestors");
+  const meta = metaCsp(production);
+  expect(meta).not.toContain("frame-ancestors");
+  expect(meta).toBe(
+    production
+      .split(";")
+      .map((d) => d.trim())
+      .filter((d) => d !== "" && !d.startsWith("frame-ancestors"))
+      .join("; "),
+  );
+});
+
+test("the default build's page carries no meta CSP: Tauri's header is its only policy", async () => {
+  const { html } = await builtWith();
+  expect(html).not.toContain("Content-Security-Policy");
+});
+
+// The room's build (VITE_CLAUSEO_WINDOW=room) carries the policy as the first thing in its head, and keeps the hooks
+// for checks by hand (room/dev-hooks.ts) and axe-core in chunks of their own that no release page loads at start.
+test("the room build's page starts its head with the meta CSP; its hooks and axe-core are chunks of their own", async () => {
+  vi.stubEnv("VITE_CLAUSEO_WINDOW", "room");
+  const { html, chunks } = await builtWith();
+  expect(unescape(META.exec(html)?.[1] ?? "")).toBe(metaCsp(tauriConf.app.security.csp));
+  const hooks = chunks.find((c) => c.fileName.startsWith("assets/dev-hooks-"));
+  expect(hooks?.isDynamicEntry).toBe(true);
+  const carrying = chunks.filter((c) => c.code.includes("__clauseoAxe")).map((c) => c.fileName);
+  expect(carrying).toEqual([hooks?.fileName]);
+  const axe = chunks.find((c) => c.code.includes("axe.run") || c.fileName.startsWith("assets/axe"));
+  expect(axe?.isDynamicEntry).toBe(true);
+  const initial = new Set(
+    [...html.matchAll(/(?:src|href)="\/(assets\/[^"]+\.js)"/g)].map((m) => m[1]),
+  );
+  expect(initial.has(hooks?.fileName ?? "")).toBe(false);
+  expect(initial.has(axe?.fileName ?? "")).toBe(false);
+});
+
+test("the probe build mounts the room over FakeTransport from room/probe-main.tsx, under the meta CSP", async () => {
+  const config = await resolveConfig(
+    { configFile: "vite.config.ts", logLevel: "silent", mode: "probe" },
+    "build",
+  );
+  expect(config.build.outDir).toBe("dist-probe");
+  const { html, chunks } = await builtWith("probe");
+  expect(unescape(META.exec(html)?.[1] ?? "")).toBe(metaCsp(tauriConf.app.security.csp));
+  const entry = chunks.find((c) => c.isEntry);
+  const modules = entry?.moduleIds ?? [];
+  expect(modules.some((id) => id.endsWith("/src/room/probe-main.tsx"))).toBe(true);
+  expect(modules.some((id) => id.endsWith("/src/main.tsx"))).toBe(false);
 });

@@ -1,5 +1,5 @@
 // Scripted host traffic for tests: view entries and patch batches as the host encodes them, with ids that are the
-// same on every run. Not shipped: only tests import it.
+// same on every run. Not shipped: only tests and the room's probe build (room/probe-main.tsx) import it.
 import type {
   HostEvent,
   PatchBatch,

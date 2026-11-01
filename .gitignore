@@ -3,6 +3,8 @@ node_modules/
 # why: ui/app/scripts/components-link.mjs
 /ui/app/components
 dist/
+# why: ui/app's probe build (pnpm build:probe), served to scripts/webkit-probe.swift
+dist-probe/
 dist-review/
 .claude/worktrees/
 CLAUDE.local.md

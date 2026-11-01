@@ -2,7 +2,7 @@
 import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import tauriConf from "../../crates/desktop/tauri.conf.json" with { type: "json" };
 
 /** The directives the dev policy loosens, and what each gets, for a dev server on `port`. */
@@ -62,6 +62,65 @@ function devCspHeader(): Plugin {
   };
 }
 
+/**
+ * The production `csp` as a page's meta tag can carry it: without `frame-ancestors`, which a meta tag may not hold
+ * (browsers ignore it there and log a warning). Everything else unchanged.
+ */
+export function metaCsp(csp: string): string {
+  return csp
+    .split(";")
+    .map((directive) => directive.trim())
+    .filter((directive) => directive.length > 0 && directive.split(/\s+/)[0] !== "frame-ancestors")
+    .join("; ");
+}
+
+/**
+ * The production CSP from tauri.conf.json (its one home), less `frame-ancestors`, as the first thing in a built page's
+ * head, so a page served without Tauri's header (`vite preview`, the WebKit probe) runs under the same policy and a
+ * runtime <style>, a style attribute or an HTML string write shows up as a violation. Build only: the dev server sends
+ * its own looser policy as a header (devCspHeader).
+ */
+export function cspMeta(): Plugin {
+  const content = metaCsp(tauriConf.app.security.csp);
+  return {
+    name: "clauseo-csp-meta",
+    apply: "build",
+    transformIndexHtml: {
+      order: "post",
+      handler: () => [
+        {
+          tag: "meta",
+          attrs: { "http-equiv": "Content-Security-Policy", content },
+          injectTo: "head-prepend",
+        },
+      ],
+    },
+  };
+}
+
+/** The mode of `pnpm build:probe`. */
+const PROBE = "probe";
+
+/**
+ * The probe build (`vite build --mode probe`, into dist-probe/): the room over FakeTransport, from
+ * src/room/probe-main.tsx in place of src/main.tsx, for the WebKit probe (scripts/webkit-probe.swift) to load from
+ * `vite preview --mode probe`. Not shipped.
+ */
+function probeEntry(): Plugin {
+  return {
+    name: "clauseo-probe-entry",
+    transformIndexHtml: {
+      order: "pre",
+      handler(html) {
+        const entry = '"/src/main.tsx"';
+        if (!html.includes(entry))
+          throw new Error(`index.html has no ${entry} for the probe build to replace`);
+        return html.replace(entry, '"/src/room/probe-main.tsx"');
+      },
+    },
+  };
+}
+
 /** The perf module's dynamic import as Vite's import analysis wraps it, before its preload list is filled in. */
 const PERF_PRELOAD = /__vitePreload\(\(\) => (import\("\.\/perf-[^"]+"\)), __VITE_PRELOAD__\)/g;
 
@@ -83,45 +142,54 @@ function bareDynamicImports(): Plugin {
   };
 }
 
-export default defineConfig({
-  plugins: [
-    tailwindcss(),
-    react(),
-    babel({ presets: [reactCompilerPreset()] }),
-    devCspHeader(),
-    bareDynamicImports(),
-  ],
-  server: {
-    // Tauri's devUrl. The watcher stays out of the Rust crates and the multi-GB target folders, and out of
-    // ui/app/components, the link to ui/components for oxlint: Vite already watches those files by their real path.
-    port: 1420,
-    strictPort: true,
-    watch: { ignored: ["**/crates/**", "**/target/**", "**/app/components/**"] },
-  },
-  // WebView2 (Chromium), WKWebView (Safari 16+) and WebKitGTK all run ES2022. Fonts and every other asset load as
-  // files under the CSP's 'self', never inlined as data: URLs.
-  build: { target: "es2022", assetsInlineLimit: 0 },
-  test: {
-    projects: [
-      {
-        extends: true,
-        test: {
-          name: "app",
-          include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
-          environment: "node",
-        },
-      },
-      {
-        extends: true,
-        test: {
-          name: "components",
-          // ui/components' tests that ask for "// @vitest-environment happy-dom" get it from ui/app's devDependencies:
-          // vitest runs from here, so the environment resolves here.
-          root: "../components",
-          include: ["src/**/*.test.{ts,tsx}"],
-          environment: "node",
-        },
-      },
+export default defineConfig(({ mode }) => {
+  const probe = mode === PROBE;
+  // App.tsx's switch, as the build sees it: the room's build and the probe's carry the CSP as a meta tag too
+  const room =
+    probe || loadEnv(mode, process.cwd(), "VITE_CLAUSEO_")["VITE_CLAUSEO_WINDOW"] === "room";
+  return {
+    plugins: [
+      tailwindcss(),
+      react(),
+      babel({ presets: [reactCompilerPreset()] }),
+      devCspHeader(),
+      bareDynamicImports(),
+      ...(room ? [cspMeta()] : []),
+      ...(probe ? [probeEntry()] : []),
     ],
-  },
+    ...(probe ? { define: { "import.meta.env.VITE_CLAUSEO_WINDOW": JSON.stringify("room") } } : {}),
+    server: {
+      // Tauri's devUrl. The watcher stays out of the Rust crates and the multi-GB target folders, and out of
+      // ui/app/components, the link to ui/components for oxlint: Vite already watches those files by their real path.
+      port: 1420,
+      strictPort: true,
+      watch: { ignored: ["**/crates/**", "**/target/**", "**/app/components/**"] },
+    },
+    // WebView2 (Chromium), WKWebView (Safari 16+) and WebKitGTK all run ES2022. Fonts and every other asset load as
+    // files under the CSP's 'self', never inlined as data: URLs.
+    build: { target: "es2022", assetsInlineLimit: 0, ...(probe ? { outDir: "dist-probe" } : {}) },
+    test: {
+      projects: [
+        {
+          extends: true,
+          test: {
+            name: "app",
+            include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
+            environment: "node",
+          },
+        },
+        {
+          extends: true,
+          test: {
+            name: "components",
+            // ui/components' tests that ask for "// @vitest-environment happy-dom" get it from ui/app's devDependencies:
+            // vitest runs from here, so the environment resolves here.
+            root: "../components",
+            include: ["src/**/*.test.{ts,tsx}"],
+            environment: "node",
+          },
+        },
+      ],
+    },
+  };
 });
