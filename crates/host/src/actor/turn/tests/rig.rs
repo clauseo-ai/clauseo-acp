@@ -60,14 +60,20 @@ impl Rig {
         let dir = TempDir::new(test);
         let root = dir.path();
         Self::prepare(root, test, steps);
-        Self::open(dir, 0)
+        Self::open(dir, 0, None)
     }
 
     /// Shuts the host down and starts it again on the same data folder, minting ids with run
     /// number `run` so they never repeat the earlier runs' ids.
     pub(super) fn restart(self, run: u16) -> Self {
         let dir = self.close();
-        Self::open(dir, run)
+        Self::open(dir, run, None)
+    }
+
+    /// [`Rig::restart`], with the start-up load of `stream` failing as a corrupt store fails.
+    pub(super) fn restart_failing_load(self, run: u16, stream: StreamId) -> Self {
+        let dir = self.close();
+        Self::open(dir, run, Some(stream))
     }
 
     /// The data folder: the agent's home, its scenario and the settings naming it.
@@ -88,8 +94,9 @@ impl Rig {
             .unwrap();
     }
 
-    /// The host on the data folder `dir`, started and serving.
-    fn open(dir: TempDir, run: u16) -> Self {
+    /// The host on the data folder `dir`, started and serving; the start-up load of `failing`
+    /// fails.
+    fn open(dir: TempDir, run: u16, failing: Option<StreamId>) -> Self {
         let root = dir.path();
         let effective = Effective::load(&Locations::under_root(root), &SystemFiles, &[]);
         let launcher = PassthroughLauncher::new(SpawnOptions::new().home(root.join("home")));
@@ -111,10 +118,22 @@ impl Rig {
             clock,
             _dir: dir,
         };
-        rig.run_until("start-up", |actor| {
-            matches!(actor.phase, HostPhase::Serving)
-        });
-        rig
+        for _ in 0..100_000 {
+            let _exit = rig.actor.settle();
+            if matches!(rig.actor.phase, HostPhase::Serving) {
+                return rig;
+            }
+            let mut input = rig.next();
+            if let Input::Reopened { stream, result } = &mut input
+                && Some(*stream) == failing
+            {
+                *result = Err(clauseo_store::Error::Corrupt {
+                    detail: "a test fails this load".to_owned(),
+                });
+            }
+            rig.actor.on_input(input);
+        }
+        panic!("never reached start-up");
     }
 
     /// The Scratch matter.

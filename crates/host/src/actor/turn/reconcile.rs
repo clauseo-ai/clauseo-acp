@@ -7,11 +7,15 @@
 //!
 //! A turn whose end ran but was never logged (it failed twice) freed the writer, so other
 //! threads' turns in the matter may have run, and one may still be open too. The started turns
-//! of a matter are repaired once every thread of the matter has been looked at, and only the
-//! one that started last may take a new after-turn checkpoint; each earlier one takes its own
-//! from R8's timeline or an empty step (`MatterJob::Repair`), so no repair takes another turn's
-//! changes, in whatever order the threads load.
+//! of a matter are repaired once every thread of the matter that is not archived has been
+//! looked at, and only the one that started last may take a new after-turn checkpoint; each
+//! earlier one takes its own from R8's timeline or an empty step (`MatterJob::Repair`), so no
+//! repair takes another turn's changes, in whatever order the threads load. When a thread of
+//! the matter could not be loaded or its log read, which turn started last is not known, so
+//! none may take a new checkpoint: a lone crashed turn there gets an empty step, and its
+//! changes are logged as outside edits by the next turn's before-turn checkpoint.
 
+use std::cmp::Reverse;
 use std::collections::BTreeSet;
 
 use clauseo_matters::TurnMeta;
@@ -44,6 +48,9 @@ pub(crate) struct Repair {
 pub(crate) struct Repairs {
     /// Threads of the matter start-up has not looked at yet.
     left: usize,
+    /// A thread of the matter could not be loaded or its log read: it may hold an open turn
+    /// that started after every waiting one.
+    incomplete: bool,
     /// The started turns found so far.
     waiting: Vec<Waiting>,
 }
@@ -53,8 +60,11 @@ pub(crate) struct Repairs {
 struct Waiting {
     thread: ThreadId,
     turn: TurnId,
-    /// Its `TurnStarted`'s event id: a v7 UUID the host mints in order, so the largest is the
-    /// turn that started last.
+    /// Its `TurnStarted`'s event id: a v7 UUID the host mints in order within a run
+    /// (`uuid::ContextV7` keeps the order when the clock goes back), so the largest is the
+    /// turn that started last. Across runs the order follows the wall clock: a turn left open
+    /// by a failed repair commit, then a clock set back before a later turn starts, could
+    /// reverse it (follow-up: seed the id source from the newest stored id).
     started: Option<EventId>,
     tool_paths: BTreeSet<MatterPath>,
     before: Option<CheckpointId>,
@@ -143,7 +153,7 @@ pub(super) fn on_log(
         Err(error) => {
             tracing::warn!(%thread, %error, "a thread could not be reconciled");
             done(actor, thread);
-            looked_at(actor, thread);
+            skipped(actor, thread);
             return;
         }
     };
@@ -203,6 +213,14 @@ pub(super) fn expect(actor: &mut Actor, thread: ThreadId) {
     }
 }
 
+/// Start-up could not load `thread` or read its log: its matter's repairs are incomplete.
+pub(super) fn skipped(actor: &mut Actor, thread: ThreadId) {
+    if let Some(repairs) = repairs(actor, thread) {
+        repairs.incomplete = true;
+    }
+    looked_at(actor, thread);
+}
+
 /// Start-up has looked at `thread`; the last thread of a matter sends the matter's repairs.
 pub(super) fn looked_at(actor: &mut Actor, thread: ThreadId) {
     let Some(repairs) = repairs(actor, thread) else {
@@ -212,11 +230,12 @@ pub(super) fn looked_at(actor: &mut Actor, thread: ThreadId) {
     if repairs.left > 0 {
         return;
     }
+    let complete = !repairs.incomplete;
     let mut waiting = std::mem::take(&mut repairs.waiting);
     // The turn that started last first.
-    waiting.sort_by(|a, b| b.started.cmp(&a.started));
+    waiting.sort_by_key(|repair| Reverse(repair.started));
     for (n, repair) in waiting.into_iter().enumerate() {
-        after_turn(actor, repair, n == 0);
+        after_turn(actor, repair, complete && n == 0);
     }
 }
 
