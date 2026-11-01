@@ -42,7 +42,9 @@ cargo fuzz build --fuzz-dir . -O --debug-assertions
 
 `nightly.sh` grows `corpus/<target>` from `seeds/<target>`. It writes findings to `artifacts/` and
 a summary to `out/`. Those three folders are ignored by git. Set `FUZZ_JOBS` to run fewer targets
-at once than there are cores.
+at once than there are cores. Its header says which findings it reports and which it withholds.
+`./test-nightly.sh` checks that with stand-in fuzzers in about a second, and the nightly job runs
+it first; run it after any change to `nightly.sh`.
 
 To check one input, such as a crash input downloaded from a nightly run's artifacts:
 
@@ -57,6 +59,13 @@ earlier fuzzing campaigns: a libFuzzer merge kept the inputs that add coverage, 
 the most features stayed. The nightly corpus lives in the Actions cache. The seeds only start it
 when the cache is empty. To refresh a target's seeds, merge a grown corpus into an empty folder
 with `-merge=1` and keep the result under the same caps.
+
+## Cargo.lock
+
+`Cargo.lock` here started as a copy of the root `Cargo.lock`, so the crates the harnesses share with
+the app are fuzzed at the versions the app ships. It does not follow the root lock by itself: when
+main changes a shared version, copy `../Cargo.lock` over it and run `cargo fetch` here. The nightly
+job builds with this lock as it is (`cargo fetch --locked`).
 
 ## When a crate's API changes
 

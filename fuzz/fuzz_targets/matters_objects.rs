@@ -26,6 +26,10 @@
 //! bytes. An undo that reports brief.txt restored leaves exactly the original bytes in it. After
 //! (a) has checked and rewritten the object, the undo succeeds and restores brief.txt.
 #![no_main]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "fuzz harness, not app code: fuzz_target! and its scratch folder write with std::fs"
+)]
 
 use std::collections::BTreeSet;
 use std::path::Path;

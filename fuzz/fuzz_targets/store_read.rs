@@ -29,6 +29,10 @@
 //! that is not empty and is under the read limit returns the original blob bytes (the store
 //! checks the hash); a ranged read returns at most its length; a receipt that reads re-encodes.
 #![no_main]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "fuzz harness, not app code: fuzz_target! and its scratch folder write with std::fs"
+)]
 
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};

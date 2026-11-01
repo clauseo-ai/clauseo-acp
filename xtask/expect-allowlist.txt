@@ -141,3 +141,13 @@ crates/host/benches/common/dir.rs - clippy::disallowed_methods
 crates/limits/src/write.rs - clippy::disallowed_methods
 crates/limits/tests/readers/write.rs - clippy::disallowed_methods
 crates/limits/tests/live/write.rs - clippy::disallowed_methods
+
+# The fuzz targets (fuzz/, outside the workspace): libfuzzer-sys's fuzz_target! macro writes its
+# debug file with std::fs, and three targets write their own scratch folder.
+fuzz/fuzz_targets/acp_stdout.rs - clippy::disallowed_methods
+fuzz/fuzz_targets/matters_objects.rs - clippy::disallowed_methods
+fuzz/fuzz_targets/matters_read.rs - clippy::disallowed_methods
+fuzz/fuzz_targets/protocol_decode.rs - clippy::disallowed_methods
+fuzz/fuzz_targets/reducer_snapshot.rs - clippy::disallowed_methods
+fuzz/fuzz_targets/settings_parse.rs - clippy::disallowed_methods
+fuzz/fuzz_targets/store_read.rs - clippy::disallowed_methods

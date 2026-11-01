@@ -10,7 +10,9 @@
 //! The decode runs on a thread with a 2 MiB stack, the default for spawned threads. Plain
 //! `rmp_serde::from_slice` (which `from_bytes` uses, with no depth limit set) can overflow a
 //! debug build's 2 MiB stack on deep nesting, as the protocol crate's raw.rs warns, so a stack
-//! overflow here is a finding.
+//! overflow here is a finding. The fuzz build is optimised (`-O`, with debug assertions), so
+//! it needs deeper nesting than a debug build would, and under ASan the overflow is reported as
+//! "AddressSanitizer: stack-overflow", which nightly.sh withholds.
 //!
 //! Invariants, on success:
 //!   - a snapshot whose schema is not `REDUCER_SCHEMA_VERSION` never decodes as Ok; it is
@@ -20,6 +22,10 @@
 //!   - `view_snapshot`, `page_entries` and folding the protocol v1 corpus events (renumbered onto
 //!     the decoded stream and sequence) do not panic.
 #![no_main]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "fuzz harness, not app code: fuzz_target! writes its debug file with std::fs"
+)]
 
 use std::sync::OnceLock;
 
