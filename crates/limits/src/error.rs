@@ -1,0 +1,41 @@
+//! The crate's one error type. A read never returns it: a reader turns it into a
+//! [`ReadFailure`](crate::ReadFailure) with its text.
+
+use std::io;
+use std::path::PathBuf;
+
+/// Why a reader could not be set up or prepared.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    /// An agent's settings entry breaks a rule of the reader's paths. The text names the rule
+    /// and the path, never an environment variable.
+    #[error("agents.{agent}: {rule}")]
+    Refused {
+        /// The agent's settings id, such as `claude-acp`.
+        agent: &'static str,
+        /// The rule it breaks.
+        rule: String,
+    },
+    /// A file step failed.
+    #[error("could not {what} {}: {source}", path.display())]
+    Io {
+        /// The step, such as `write`.
+        what: &'static str,
+        /// The file or folder.
+        path: PathBuf,
+        /// What the OS said.
+        source: io::Error,
+    },
+}
+
+impl Error {
+    /// An [`Error::Io`] for `what` on `path`.
+    pub(crate) fn io(what: &'static str, path: impl Into<PathBuf>, source: io::Error) -> Error {
+        Error::Io {
+            what,
+            path: path.into(),
+            source,
+        }
+    }
+}

@@ -1,0 +1,3 @@
+{"scenario":"claude-garbage","description":"The Claude usage helper writes a line that is not JSON, then exits 0. The reader must report a malformed answer."}
+{"send_line":"claude-usage: this is not JSON {"}
+{"exit":{"code":0}}

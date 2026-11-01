@@ -1,0 +1,5 @@
+{"scenario":"claude-crash","description":"The Claude usage helper crashes: three stderr lines, the middle one echoing the fake ANTHROPIC_API_KEY the test sets in settings env, then exit 1 with no line. The reader must report the redacted tail."}
+{"stderr":{"line":"claude-usage: starting the SDK"}}
+{"note":"The value is the fake key the test puts in settings env; the tail must show [redacted].","stderr":{"line":"claude-usage: the key fakeAnthropicKey0123 was refused"}}
+{"stderr":{"line":"claude-usage: giving up"}}
+{"exit":{"code":1}}

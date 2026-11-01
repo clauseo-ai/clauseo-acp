@@ -1,0 +1,27 @@
+[package]
+name = "clauseo-limits"
+version = "0.1.0"
+description = "Plan usage readers (the Claude usage helper, the Codex reader) and the limits model."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+clauseo-protocol = { path = "../protocol" }
+clauseo-process = { path = "../process" }
+clauseo-settings = { path = "../settings" }
+futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+clauseo-process = { path = "../process", features = ["test-support"] }
+clauseo-fake_agent = { path = "../fake_agent" }
+# Waits, without polling, for the end of a killed reader's stdout (tests/readers/harness.rs).
+async-io = { workspace = true }
+
+[lints]
+workspace = true
