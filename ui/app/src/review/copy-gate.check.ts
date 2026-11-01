@@ -1,0 +1,17 @@
+// The release gate, run by `pnpm -C ui/app copy:check` (vite.review.config.ts), never by `pnpm test` or CI: it fails
+// while any registered string is not approved in copy-approvals.json.
+import { expect, test } from "vitest";
+import { APPROVALS } from "./approvals.ts";
+import { currentOf } from "./entry.ts";
+import { REGISTRY } from "./registry.tsx";
+import { duplicateIds, malformedIds, pending } from "./status.ts";
+
+test("every registered string has a well-formed id of its own", () => {
+  expect(duplicateIds(REGISTRY)).toEqual([]);
+  expect(malformedIds(REGISTRY)).toEqual([]);
+});
+
+test("every registered string is approved in copy-approvals.json, as its words file has it now", () => {
+  expect(REGISTRY.length).toBeGreaterThan(0);
+  expect(pending(REGISTRY.map(currentOf), APPROVALS)).toEqual([]);
+});
