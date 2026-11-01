@@ -50,6 +50,26 @@ reader over in-memory pipes. All are synthetic, written from `crates/codex_appse
 
 ## Checks for G16's recordings
 
+### Recorded fixtures
+
+G16's live tests (`tests/live.rs`) write each read's raw stdout, redacted, to
+`<target>/g16/<test>.jsonl` (emails become `test@example.com`; account, organisation, user,
+workspace and team ids, and UUIDs, become `redacted-<n>`; host names and local paths become
+`redacted-host` and `redacted-path`). Nothing copies them here on its own. The G16 owner reads
+each one, runs the secret check (`cargo nextest run -p clauseo-limits -E
+'test(fixtures_are_redacted)'` once the file is in place), and only then copies it by hand into
+`recorded/<agent>/<name>` beside a row in the table above whose Kind is `recorded`, saying which
+login kind and which pinned versions (`tests/live/package.json`) it came from. Where a recording
+shows S13's schema is wrong, the same PR fixes `src/` and the synthetic fixture it replaces. No
+recording exists yet, so there is no `recorded/` folder.
+
+`fixtures_are_redacted` (`tests/fixtures.rs`) runs over this whole folder, recursively, on every
+test run. It fails on an `@` not followed by `example.com` (this README is exempt from that rule
+alone, since it names npm scopes), on S8's token shapes (`sk-` or `eyJ` followed by 20 or more
+of `A-Z a-z 0-9 _ -`), on a link, and on any file named `auth.json` or `.credentials.json`.
+
+### What the first recordings answer
+
 - **`model_scoped` ids.** With exactly one `model_scoped` entry the reader names its window
   `seven_day_overage_included`, where the live `_claude/rateLimit` signal of that
   `rateLimitType` lands. With two or more, the ids are `model_scoped:<n>` (the array index), and

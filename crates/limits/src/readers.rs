@@ -9,6 +9,7 @@ mod codex;
 mod env;
 mod paths;
 mod run;
+mod tap;
 mod time;
 
 use std::future::{Future, ready};
@@ -21,6 +22,8 @@ use clauseo_protocol::{AccountLimits, AgentKind, LimitStopReason};
 use clauseo_settings::{AgentLaunch, Effective};
 
 use paths::{CLAUDE_ID, CODEX_ID};
+#[doc(hidden)]
+pub use tap::StdoutTap;
 
 /// How a read ended.
 #[derive(Debug, Clone, PartialEq)]
@@ -91,6 +94,8 @@ pub struct ProcessReaders<T> {
     run_dir: PathBuf,
     /// Clauseo's own Codex home, which the Codex reader forces as `CODEX_HOME`.
     codex_home: PathBuf,
+    /// G16's copy of each reader's stdout; `None` everywhere but its live tests.
+    tap: Option<StdoutTap>,
 }
 
 impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
@@ -130,7 +135,18 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
             codex,
             run_dir: effective.data_dir().join("limits").join("run"),
             codex_home,
+            tap: None,
         }
+    }
+
+    /// These readers, copying each read's raw stdout to `tap`: G16's live tests record the
+    /// vendors' answers through it (`tests/live.rs`). Not for the product: the bytes are
+    /// unredacted, and the caller redacts them.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_stdout_tap(mut self, tap: StdoutTap) -> ProcessReaders<T> {
+        self.tap = Some(tap);
+        self
     }
 }
 
@@ -147,7 +163,10 @@ impl<T: Timer + Clone + Send + Sync + 'static> ReadLimits for ProcessReaders<T> 
                 let launcher = Arc::clone(&self.launcher);
                 let timer = self.timer.clone();
                 let run_dir = self.run_dir.clone();
-                Box::pin(async move { claude::read(&*launcher, &timer, &launch, &run_dir).await })
+                let tap = self.tap.clone();
+                Box::pin(
+                    async move { claude::read(&*launcher, &timer, &launch, &run_dir, tap).await },
+                )
             }
             AgentKind::Codex => {
                 let Some(launch) = self.codex.clone() else {
@@ -160,8 +179,9 @@ impl<T: Timer + Clone + Send + Sync + 'static> ReadLimits for ProcessReaders<T> 
                 let timer = self.timer.clone();
                 let run_dir = self.run_dir.clone();
                 let codex_home = self.codex_home.clone();
+                let tap = self.tap.clone();
                 Box::pin(async move {
-                    codex::read(&*launcher, &timer, &launch, &run_dir, &codex_home).await
+                    codex::read(&*launcher, &timer, &launch, &run_dir, &codex_home, tap).await
                 })
             }
         }

@@ -19,6 +19,7 @@ use serde_json::{Map, Value};
 use super::env::spec_env;
 use super::paths;
 use super::run::{Line, Ran, first_line, run};
+use super::tap::{StdoutTap, tapped};
 use super::time::parse_rfc3339;
 use crate::model::kind_rank;
 use crate::words::{self, CLAUDE_WINDOWS};
@@ -49,6 +50,7 @@ pub(crate) async fn read<T: Timer>(
     timer: &T,
     launch: &AgentLaunch,
     run_dir: &Path,
+    tap: Option<StdoutTap>,
 ) -> ReadOutcome {
     let spec = match prepare(launch, run_dir) {
         Ok(spec) => spec,
@@ -59,7 +61,7 @@ pub(crate) async fn read<T: Timer>(
         &spec,
         timer,
         LIMIT,
-        |_stdin, stdout| first_line(stdout),
+        |_stdin, stdout| first_line(tapped(stdout, AgentKind::Claude, tap)),
         |line| matches!(line, Line::Read(_)),
     )
     .await;

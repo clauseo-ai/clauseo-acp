@@ -3,8 +3,8 @@
 //! `AccountLimits`.
 //!
 //! The app-server runs with Clauseo's own `CODEX_HOME`, forced last over any inherited or settings
-//! variable of that name (#160), so it never reads the user's `~/.codex`. Nothing here reads inside
-//! that home.
+//! variable of that name (#160), so it never reads the user's `~/.codex`, and with the host's
+//! switches off as `-c` overrides ([`OVERRIDES`], #203). Nothing here reads inside that home.
 
 mod map;
 
@@ -17,6 +17,7 @@ use clauseo_codex_appserver::{
     GetAccountRateLimitsResponse, GetAccountResponse, connect,
 };
 use clauseo_process::{LaunchSpec, Launcher, Timer};
+use clauseo_protocol::AgentKind;
 use clauseo_settings::AgentLaunch;
 use futures::future::join;
 use futures::{AsyncRead, AsyncWrite};
@@ -24,6 +25,7 @@ use futures::{AsyncRead, AsyncWrite};
 use super::env::spec_env;
 use super::paths;
 use super::run::{Ran, Stdout, run};
+use super::tap::{StdoutTap, tapped};
 use crate::{ReadFailure, ReadOutcome, write};
 
 pub(crate) use map::outcome;
@@ -32,6 +34,21 @@ pub(crate) use map::outcome;
 pub(crate) const LIMIT: Duration = Duration::from_secs(10);
 /// The variable that names Codex's home.
 const CODEX_HOME: &str = "CODEX_HOME";
+/// The `-c` overrides the app-server runs with, before its subcommand: the switches the host
+/// gives codex-acp under #160, apps, plugins, skill MCP installs and cloud skills off. G16's
+/// probe of `@openai/codex` 0.162.1 (#203) found that app-server, with no login, no thread and
+/// even an empty home, starts a git sync of `github.com/openai/plugins` into the home at
+/// start-up, because plugins are on by default. `features.plugins=false` stops it; nothing else
+/// the home's config names (MCP servers, plugin and skill MCP servers, hooks) ran before a
+/// thread. The others cost nothing and keep the reader's Codex the host's. Keys from the
+/// `rust-v0.162.1` source: `features/src/lib.rs` (apps, plugins,
+/// `skill_mcp_dependency_install`) and `config/src/config_toml.rs` (`cloud.skills`).
+pub(crate) const OVERRIDES: [&str; 4] = [
+    "features.apps=false",
+    "features.plugins=false",
+    "features.skill_mcp_dependency_install=false",
+    "cloud.skills.enabled=false",
+];
 
 /// What the app-server answered.
 #[derive(Debug, Clone, PartialEq)]
@@ -62,6 +79,7 @@ pub(crate) async fn read<T: Timer>(
     launch: &AgentLaunch,
     run_dir: &Path,
     codex_home: &Path,
+    tap: Option<StdoutTap>,
 ) -> ReadOutcome {
     let spec = match prepare(launch, run_dir, codex_home, std::env::vars_os()) {
         Ok(Prepared::Spec(spec)) => spec,
@@ -74,7 +92,7 @@ pub(crate) async fn read<T: Timer>(
         timer,
         LIMIT,
         |stdin, stdout| async move {
-            let talked = talk(stdin, stdout).await;
+            let talked = talk(stdin, tapped(stdout, AgentKind::Codex, tap)).await;
             let rest: Stdout = Box::new(futures::io::empty());
             (talked, rest)
         },
@@ -121,7 +139,8 @@ pub(crate) enum Prepared {
     SignedOut,
 }
 
-/// The app-server's spec: settings `command` running `<codex.js> app-server` in `run_dir`, with
+/// The app-server's spec: settings `command` running `<codex.js> -c <override>... app-server`
+/// (the [`OVERRIDES`]) in `run_dir`, with
 /// the `inherited` environment under the agent's settings variables and `CODEX_HOME` forced to
 /// `codex_home`. A missing `codex_home` is [`Prepared::SignedOut`]; one that is a link or not a
 /// folder is refused. It is never made, and nothing inside it is read. Makes `run_dir` if it is
@@ -142,12 +161,11 @@ pub(crate) fn prepare(
     paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
     let forced = (OsStr::new(CODEX_HOME), codex_home.as_os_str());
     let env = spec_env(&launch.env, inherited, Some(forced));
-    // No `CODEX_CONFIG` overrides here, unlike the ones the host gives codex-acp under #160
-    // (apps, plugins, skill MCP installs and cloud skills off). The reader starts no thread and
-    // runs no tool: it sends only `initialize`, `account/read` and `account/rateLimits/read`.
-    // What app-server loads at start-up from Clauseo's home (plugins, apps) is unverified; G16
-    // checks it.
-    let args = vec![codex_js.into_os_string(), OsString::from("app-server")];
+    let mut args = vec![codex_js.into_os_string()];
+    for set in OVERRIDES {
+        args.extend([OsString::from("-c"), OsString::from(set)]);
+    }
+    args.push(OsString::from("app-server"));
     LaunchSpec::new(located.program, args, env, run_dir.to_owned())
         .map(Prepared::Spec)
         .map_err(|err| err.to_string())

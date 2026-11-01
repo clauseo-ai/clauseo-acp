@@ -140,3 +140,4 @@ crates/host/benches/common/dir.rs - clippy::disallowed_methods
 # tests' folders.
 crates/limits/src/write.rs - clippy::disallowed_methods
 crates/limits/tests/readers/write.rs - clippy::disallowed_methods
+crates/limits/tests/live/write.rs - clippy::disallowed_methods
