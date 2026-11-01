@@ -11,9 +11,10 @@
 //! build then defines exactly the permissions of its nine commands, as before the features.
 //!
 //! On Windows (MSVC), the linker embeds `windows-app.manifest` (Common Controls 6, which
-//! tauri-plugin-dialog's `TaskDialogIndirect` needs) into every binary this crate links, the lib's
-//! unit-test binary included. tauri-build would embed its manifest into the app only
-//! (`rustc-link-arg-bins`), and the test binary then fails to start with 0xc0000139
+//! tauri-plugin-dialog's `TaskDialogIndirect` needs, and the supported Windows versions, which the
+//! room's layered child window over its maximise button needs) into every binary this crate
+//! links, the lib's unit-test binary included. tauri-build would embed its manifest into the app
+//! only (`rustc-link-arg-bins`), and the test binary then fails to start with 0xc0000139
 //! (tauri-apps/tauri#13419); `rustc-link-arg-tests` does not reach lib unit tests.
 
 use std::io::Write as _;
@@ -68,6 +69,12 @@ fn remove_permissions(dir: &str, absent: &[&str]) -> std::io::Result<()> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // The window's frame (src/window_frame.rs) is chosen at compile time from the variable that
+    // also switches the page.
+    writeln!(
+        std::io::stdout().lock(),
+        "cargo:rerun-if-env-changed=VITE_CLAUSEO_WINDOW"
+    )?;
     let e2e = std::env::var_os("CARGO_FEATURE_E2E").is_some();
     let marks = std::env::var_os("CARGO_FEATURE_MARKS").is_some();
     let (ours, absent) = commands(e2e, marks);

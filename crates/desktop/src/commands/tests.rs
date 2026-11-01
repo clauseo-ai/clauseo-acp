@@ -249,9 +249,12 @@ fn every_list_of_commands_agrees() {
     assert_eq!(build_list(&build, "MARKS"), marks, "build.rs");
 
     assert_eq!(
-        granted(dir, "main.json"),
+        granted(dir, "main.json")
+            .into_iter()
+            .filter(|permission| !permission.starts_with("core:window:"))
+            .collect::<BTreeSet<_>>(),
         allowed(&ours),
-        "capabilities/main.json"
+        "capabilities/main.json, beside the window permissions window_frame/tests.rs checks"
     );
     assert_eq!(
         granted(dir, "e2e.json"),
