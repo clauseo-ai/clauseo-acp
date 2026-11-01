@@ -82,3 +82,14 @@ test("a fence in a language outside the eight, or with none, never starts the wo
   expect(factory.workers).toHaveLength(0);
   expect(host.querySelectorAll("pre")).toHaveLength(3);
 });
+
+test("a fence named constructor, __proto__ or toString stays plain and the next block still colours", async () => {
+  await show(
+    "```constructor\na\n```\n\n```__proto__\nb\n```\n\n```toString\nc\n```\n\n```json\n{}\n```",
+    false,
+  );
+  expect(asked()).toEqual(["{}"]);
+  await act(async () => factory.workers[0]?.answer([[[3, "{}"]]]));
+  expect(host.querySelectorAll("pre[data-highlighted]")).toHaveLength(1);
+  expect(host.querySelector('pre[data-lang="constructor"]')?.textContent).toBe("a");
+});

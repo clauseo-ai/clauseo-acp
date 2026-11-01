@@ -39,6 +39,19 @@ test("a language outside the eight stays plain and starts nothing", async () => 
   expect(factory.workers).toHaveLength(0);
 });
 
+test("a fence named after an Object property is an unknown language, and later blocks still colour", async () => {
+  const factory = fakeFactory();
+  const client = createHighlightClient(factory);
+  for (const name of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"]) {
+    await expect(client.highlight("x", name)).resolves.toBeNull();
+    expect(client.peek("x", name)).toBeUndefined();
+  }
+  expect(factory.workers).toHaveLength(0);
+  const json = client.highlight("{}", "json");
+  factory.workers[0]?.answer(TOKENS);
+  await expect(json).resolves.toEqual(TOKENS);
+});
+
 test("one worker for every block, asked one block at a time", async () => {
   const factory = fakeFactory();
   const client = createHighlightClient(factory);

@@ -14,39 +14,42 @@ export const LANGUAGES = [
 ] as const;
 export type Language = (typeof LANGUAGES)[number];
 
-/** The other names a fence's info string uses for them. */
-const ALIASES: Readonly<Record<string, Language>> = {
-  ts: "typescript",
-  tsx: "typescript",
-  js: "typescript",
-  jsx: "typescript",
-  javascript: "typescript",
-  mjs: "typescript",
-  cjs: "typescript",
-  py: "python",
-  python3: "python",
-  sh: "bash",
-  shell: "bash",
-  shellscript: "bash",
-  zsh: "bash",
-  console: "bash",
-  md: "markdown",
-  htm: "html",
-  xhtml: "html",
-  svg: "xml",
-  jsonc: "json",
-  json5: "json",
-  postgresql: "sql",
-  mysql: "sql",
-  sqlite: "sql",
-};
+/** The other names a fence's info string uses for them. A Map, not an object: a fence named `constructor` or
+ * `__proto__` must not find Object's own properties. */
+const ALIASES: ReadonlyMap<string, Language> = new Map(
+  Object.entries({
+    ts: "typescript",
+    tsx: "typescript",
+    js: "typescript",
+    jsx: "typescript",
+    javascript: "typescript",
+    mjs: "typescript",
+    cjs: "typescript",
+    py: "python",
+    python3: "python",
+    sh: "bash",
+    shell: "bash",
+    shellscript: "bash",
+    zsh: "bash",
+    console: "bash",
+    md: "markdown",
+    htm: "html",
+    xhtml: "html",
+    svg: "xml",
+    jsonc: "json",
+    json5: "json",
+    postgresql: "sql",
+    mysql: "sql",
+    sqlite: "sql",
+  } satisfies Record<string, Language>),
+);
 
 /** The grammar for a fence's language name, or undefined: a block in any other language stays plain, and asks the
  * worker nothing. */
 export function languageOf(name: string): Language | undefined {
   const lower = name.trim().toLowerCase();
   if ((LANGUAGES as readonly string[]).includes(lower)) return lower as Language;
-  return ALIASES[lower];
+  return ALIASES.get(lower);
 }
 
 /** A token's role, which picks its colour token. 0 is plain code, in the block's own text colour. The worker's
