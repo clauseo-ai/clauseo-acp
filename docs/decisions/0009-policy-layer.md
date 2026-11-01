@@ -58,8 +58,13 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
   the user's entry for that id is dropped, so that agent does not launch. A stronger source's
   invalid value wins over a weaker source's valid one, as any value does. A malformed section of a
   `policy.json`, or a managed-preferences `agents` value that is not a dictionary, names no key,
-  so it is only a warning. A policy `mcp.servers` that is not an object locks the list empty, so
-  no server reaches an agent. This replaces the first draft's rule, under which an invalid value was
+  so it is only a warning, except where the section holds a security-relevant key (below). A
+  policy `mcp.servers` that is not an object locks the list empty, so no server reaches an agent.
+  So does a policy that names it in a form that does not set it: an `mcp` section that is not an
+  object (`"off"`, `[]`, `null`), or a section or key that differs from `mcp` or
+  `mcp.servers` only in case (`"MCP"`, `"Mcp"`, `mcp.Servers`), in any policy source, even
+  beside a valid `mcp` section (review of PR #117). In the user's `settings.json` the same is
+  only a warning. This replaces the first draft's rule, under which an invalid value was
   left out and its key not locked.
 - **Applied sources.** `PolicyStatus` lists a source as applied only when it set at least one
   valid value; a source whose every value was refused still locks the keys it named.

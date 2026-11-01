@@ -206,3 +206,17 @@ fn an_agent_key_on_its_own_is_unknown() {
         }]
     );
 }
+
+// A forced `MCP` key, or an `mcp` key, names the list without setting it: it locks empty.
+#[test]
+fn a_misnamed_mcp_key_locks_the_list() {
+    for key in ["MCP", "mcp", "MCP.Servers"] {
+        let (leaves, kinds) = values(vec![(key, PlistValue::Dict(Vec::new()), true)]);
+        assert_eq!(
+            leaves,
+            vec![Leaf::Refused("mcp.servers".to_owned())],
+            "{key}"
+        );
+        assert_eq!(kinds.len(), 1, "{key}");
+    }
+}

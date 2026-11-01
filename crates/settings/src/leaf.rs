@@ -120,6 +120,43 @@ pub(crate) fn typed(
     keep_last(leaves, Leaf::key)
 }
 
+/// [`typed`] for a policy source. A security-relevant key the source names in a form that does
+/// not set it is also refused, so it locks at its default (ADR 0009): a section that is not an
+/// object (`"mcp": "off"`), or a section or key that differs from it only in case (`"MCP"`,
+/// `mcp.Servers`). What the firm meant there is unknown, and the user's value must not stand in.
+pub(crate) fn typed_policy(
+    raws: Vec<Raw>,
+    mut refused: Vec<String>,
+    warnings: &mut Vec<Warning>,
+) -> Vec<Leaf> {
+    refused.extend(security_keys_misnamed(&raws, warnings));
+    typed(raws, refused, warnings)
+}
+
+/// The security-relevant keys that `raws` or `warnings` name in a form that does not set them.
+fn security_keys_misnamed(raws: &[Raw], warnings: &[Warning]) -> Vec<String> {
+    SECURITY_KEYS
+        .iter()
+        .filter(|&&key| {
+            let section = key.split('.').next().unwrap_or(key);
+            let near = |name: &str| {
+                name != key
+                    && (name.eq_ignore_ascii_case(key) || name.eq_ignore_ascii_case(section))
+            };
+            raws.iter().any(|raw| near(&raw.key))
+                || warnings.iter().any(|warning| match &warning.kind {
+                    WarningKind::UnknownKey { key } | WarningKind::InvalidValue { key, .. } => {
+                        near(key)
+                    }
+                    WarningKind::Unreadable { .. }
+                    | WarningKind::Syntax { .. }
+                    | WarningKind::RelativeAgentCommand { .. } => false,
+                })
+        })
+        .map(|&key| key.to_owned())
+        .collect()
+}
+
 /// The last item of each key, in the order those last items came. A source that sets a key
 /// twice keeps the last one: a section of `settings.json` as a whole ([`crate::json::read`]),
 /// and each key's value ([`typed`]).

@@ -98,7 +98,7 @@ source: crates/settings/src/schema/tests.rs
             "type": "string"
           },
           "default": {},
-          "description": "Variables added to its environment. Never a secret: keys go in the OS keychain.",
+          "description": "Variables added to its environment. Stored in plain text in `settings.json` and sent to\nthe agent in `session/new`: do not put a token here. No keychain store for MCP keys\nexists yet.",
           "type": "object"
         }
       },
