@@ -156,7 +156,7 @@ fn next_agent_id() -> u64 {
 }
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
-/// variables, no profile variables yet), in the matter folder.
+/// variables, then the profile hook's with the host's switches over them), in the matter folder.
 fn launch(actor: &Actor, thread: ThreadId) -> Result<AgentLink, Error> {
     let row = &actor.check_thread(thread)?.row;
     let folder = PathBuf::from(&actor.check_matter(row.matter)?.row.folder_path);
@@ -167,7 +167,8 @@ fn launch(actor: &Actor, thread: ThreadId) -> Result<AgentLink, Error> {
             format!("no agent {} in the settings", row.agent),
         )
     })?;
-    let spec = agent::launch_spec(settings, BTreeMap::new(), std::env::vars_os(), folder)?;
+    let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
+    let spec = agent::launch_spec(settings, hook, std::env::vars_os(), folder)?;
     let post = actor.post.clone();
     let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
         // The actor may be gone by then.

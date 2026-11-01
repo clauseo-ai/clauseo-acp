@@ -78,7 +78,9 @@ pub(crate) struct Actor {
     pub(crate) effective: Arc<Effective>,
     pub(crate) launcher: Arc<dyn Launcher>,
     /// Kept for the later `session/new` and launch calls; the host does not call it yet.
-    pub(crate) _profile: Box<dyn ProfileHook>,
+    pub(crate) profile: Box<dyn ProfileHook>,
+    /// Where Claude Code's enterprise `managed-mcp.json` would be.
+    pub(crate) managed_mcp: std::path::PathBuf,
     pub(crate) refused_folders: Vec<PathBuf>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) ids: Ids,

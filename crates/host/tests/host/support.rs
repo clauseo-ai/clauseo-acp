@@ -1,6 +1,8 @@
 //! The harness every test uses: a folder of its own under the temp folder, a `settings.json`
 //! that maps agent ids to `fake_agent` scenarios, and a host started on it with a
-//! `ManualClock`, `SequentialIds` and a `PassthroughLauncher` whose home is `<tmp>/home`.
+//! `ManualClock`, `SequentialIds` and a `PassthroughLauncher` whose home is `<tmp>/home`. The
+//! one policy source is `<root>/policy.json`, and the host looks for Claude Code's enterprise
+//! `managed-mcp.json` at `<root>/managed-mcp.json`, never at the system path.
 //!
 //! The helpers are blocking: each runs one future to completion with [`wait`], under a
 //! watchdog of real time so a broken host fails the test instead of hanging it. They never nest
@@ -20,7 +22,7 @@ use clauseo_protocol::{
     PromptBlock, QueryResult, Seq, StreamId, ThreadId, ThreadStatus, ThreadSummary, Timestamp,
     Title, TurnId, ViewEpoch,
 };
-use clauseo_settings::{Effective, Locations, SystemFiles};
+use clauseo_settings::{Effective, FilePolicy, Locations, SystemFiles};
 use futures::future::Either;
 
 use crate::observe::{Events, View};
@@ -100,6 +102,12 @@ impl Dir {
     /// Writes `settings.json` mapping each id to `fake_agent --scenario <scenario>`. Read at
     /// the next start.
     pub(crate) fn set_agents(&self, agents: &[(&str, Scenario)]) {
+        self.set_settings(agents, serde_json::json!({}));
+    }
+
+    /// As [`Dir::set_agents`], with the sections of `extra` (an object, such as `{"mcp": ...}`)
+    /// beside `agents`.
+    pub(crate) fn set_settings(&self, agents: &[(&str, Scenario)], extra: serde_json::Value) {
         let bin = clauseo_fake_agent::bin_path()
             .unwrap_or_else(|e| panic!("{e} (run cargo build -p clauseo-fake_agent)"));
         let mut map = serde_json::Map::new();
@@ -112,11 +120,27 @@ impl Dir {
                 }),
             );
         }
-        let settings = serde_json::json!({ "agents": map });
+        let mut settings = serde_json::json!({ "agents": map });
+        if let (Some(settings), serde_json::Value::Object(extra)) =
+            (settings.as_object_mut(), extra)
+        {
+            settings.extend(extra);
+        }
         write::write(
             &self.root.join("settings.json"),
             serde_json::to_string_pretty(&settings).unwrap().as_bytes(),
         );
+    }
+
+    /// Writes `<root>/policy.json`, the one policy source the host reads; read at the next start.
+    pub(crate) fn set_policy(&self, text: &str) {
+        write::write(&self.root.join("policy.json"), text.as_bytes());
+    }
+
+    /// Writes `<root>/managed-mcp.json`, where the host looks for Claude Code's enterprise MCP
+    /// config (never the system path).
+    pub(crate) fn set_managed_mcp(&self) {
+        write::write(&self.root.join("managed-mcp.json"), b"{\"mcpServers\": {}}");
     }
 
     /// Makes `work/<name>` holding `files` (relative path, content) and returns its path.
@@ -132,11 +156,13 @@ impl Dir {
     /// The config of run `run` (its clock starts `run` hours after [`START_MS`]).
     pub(crate) fn config(&self, run: u16, clock: &ManualClock) -> HostConfig {
         let locations = Locations::under_root(&self.root);
-        let effective = Effective::load(&locations, &SystemFiles, &[]);
+        let policy = FilePolicy::new(self.root.join("policy.json"), SystemFiles);
+        let effective = Effective::load(&locations, &SystemFiles, &[&policy]);
         let launcher = PassthroughLauncher::new(SpawnOptions::new().home(self.root.join("home")));
         HostConfig::new(effective, Arc::new(launcher))
             .with_clock(Arc::new(clock.clone()))
             .with_ids(Box::new(SequentialIds::with_run(run)))
+            .with_managed_mcp_path(self.root.join("managed-mcp.json"))
     }
 
     /// The clock of run `run`.

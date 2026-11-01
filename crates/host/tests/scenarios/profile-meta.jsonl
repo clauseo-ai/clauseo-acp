@@ -1,0 +1,8 @@
+{"scenario":"profile-meta","description":"session/new carries the profile hook's _meta key clauseo_test beside the host's switches; then one prompt","on_stdin_close":"exit"}
+{"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","_meta":{"clauseo_test":true,"claudeCode":{"options":{"strictMcpConfig":true,"settingSources":"{{any}}","env":{"ENABLE_CLAUDEAI_MCP_SERVERS":"false"}}}}}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Done."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}

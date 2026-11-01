@@ -32,6 +32,10 @@ mod commands;
 #[path = "host/limits.rs"]
 mod limits;
 #[cfg(test)]
+#[path = "host/mcp.rs"]
+mod mcp;
+
+#[cfg(test)]
 #[path = "host/permissions.rs"]
 mod permissions;
 #[cfg(test)]
