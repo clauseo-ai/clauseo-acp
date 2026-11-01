@@ -63,7 +63,7 @@ pub enum AuthKind {
 pub struct NewSession {
     /// The session's folder; tool locations inside it become matter paths.
     pub cwd: PathBuf,
-    /// The MCP servers; always sent, empty in the first app.
+    /// The MCP servers; always sent, empty when none is turned on.
     pub mcp_servers: Vec<McpServer>,
     /// The `_meta` object, sent verbatim and never read.
     pub meta: Option<serde_json::Map<String, serde_json::Value>>,
@@ -76,11 +76,15 @@ pub struct LoadSession {
     pub session: AgentSessionId,
     /// The session's folder.
     pub cwd: PathBuf,
-    /// The MCP servers; always sent, empty in the first app.
+    /// The MCP servers; always sent, empty when none is turned on.
     pub mcp_servers: Vec<McpServer>,
+    /// The `_meta` object, sent verbatim and never read. An adapter may read its options again
+    /// on load (claude-agent-acp does), so send what `session/new` sent.
+    pub meta: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-/// An MCP server the agent starts.
+/// An MCP server the agent starts. A stdio server goes on the wire with no `type` field, as ACP
+/// v1 has it: claude-agent-acp 0.89.1 drops a stdio server sent with `"type": "stdio"`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum McpServer {
     /// Over stdio, the transport every agent must support.

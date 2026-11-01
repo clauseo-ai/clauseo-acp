@@ -89,6 +89,7 @@ fn load_replay_tagged_replay() {
             session: sess1(),
             cwd: ctx.cwd.clone(),
             mcp_servers: Vec::new(),
+            meta: None,
         };
         let start = ctx.client.load_session(request).await.unwrap();
         assert_eq!(start.session, sess1());
