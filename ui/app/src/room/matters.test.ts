@@ -279,6 +279,25 @@ test("an older list_matters answer never overwrites a newer one, nor an app even
   expect(matters.view().matters.map((m) => m.matter)).toEqual([A.matter, B.matter, SCRATCH.matter]);
 });
 
+test("a matter removed before the first list arrives: the list applies without it, and the rail isn't emptied", async () => {
+  const { host, asked } = heldLists();
+  const { matters, transport, settle } = await rig(host);
+  expect(matters.view().phase).toBe("loading");
+  transport.appEvent({ matters_removed: { matters: [A.matter] } });
+  await settle();
+  expect(matters.view().phase).toBe("loading");
+  // the read asked before the removal still applies, minus the removed matter
+  asked[0]?.([info(A), info(B)]);
+  await settle();
+  expect(matters.view().phase).toBe("ready");
+  expect(matters.view().matters.map((m) => m.matter)).toEqual([B.matter]);
+  expect(matters.view().open?.matter).toBe(B.matter);
+  // only the first list: a later one with A keeps it
+  transport.appEvent({ matters_changed: { matters: [info(A), info(B)] } });
+  await settle();
+  expect(matters.view().matters.map((m) => m.matter)).toEqual([A.matter, B.matter]);
+});
+
 test("create ends with the new matter shown even when the list read after fails, and with H5 tells the host it is open", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   const made = uuid(3, 2);
