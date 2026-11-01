@@ -7,23 +7,28 @@ import { useThreadWords } from "../lib/words-thread.ts";
 import { Say } from "./say.tsx";
 
 /** The wall of a matter with no papers yet, in the facade's place: what goes here, that Clauseo reads it before the
- * first question, and a tonal Add papers. */
-export function EmptyPapers({ onAdd }: { onAdd?: () => void }) {
+ * first question, and a tonal Add papers. `body` false leaves out the second sentence, for an app that doesn't read
+ * the papers yet; without `onAdd` there is no Add papers, as nothing would answer it. */
+export function EmptyPapers({ onAdd, body = true }: { onAdd?: () => void; body?: boolean }) {
   const w = useThreadWords();
   return (
     <div className="empty-papers">
       <p className="empty-title">
         <Say>{w.t("No papers yet.")}</Say>
       </p>
-      <p className="empty-body">
-        <Say>
-          {w.t("Add the matter's papers and Clauseo reads them before your first question.")}
-        </Say>
-      </p>
-      <Button kind="tone" className="empty-action" onClick={onAdd}>
-        <IconAddPapers size={16} />
-        <span className="deva-nudge">{w.t("Add papers")}</span>
-      </Button>
+      {body && (
+        <p className="empty-body">
+          <Say>
+            {w.t("Add the matter's papers and Clauseo reads them before your first question.")}
+          </Say>
+        </p>
+      )}
+      {onAdd !== undefined && (
+        <Button kind="tone" className="empty-action" onClick={onAdd}>
+          <IconAddPapers size={16} />
+          <span className="deva-nudge">{w.t("Add papers")}</span>
+        </Button>
+      )}
     </div>
   );
 }

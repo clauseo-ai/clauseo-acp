@@ -8,7 +8,7 @@ import { PlanMeter, type PlanState } from "../ui/meter.tsx";
 import { Toolbar, ToolbarPair, ToolbarPairButton } from "../ui/toolbar.tsx";
 import { IconHistory, IconMatters, IconUndo } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
-import { useDisplay, type Platform } from "../lib/display.ts";
+import { useDisplay, type Lang, type Platform } from "../lib/display.ts";
 import { useWords } from "../lib/words.ts";
 import { rt } from "../lib/words-room.ts";
 import { useVersionWords } from "../lib/words-versions.ts";
@@ -69,6 +69,20 @@ export type RoomToolbarProps = {
   railWaits?: boolean;
   /** Optional: the search field's name where the room isn't a matter's, such as "Search quick questions". */
   searchLabel?: string;
+  /** Optional: who draws the window's own controls. "own", the default: the toolbar is the title bar, with the corner
+   * lights on the Mac and the caption buttons elsewhere. "os": the computer's title bar stands above the page, so the
+   * toolbar draws neither, and keeps no room for them. */
+  chrome?: "own" | "os";
+  /** Optional, true by default: false leaves the search field out. */
+  search?: boolean;
+  /** Optional, true by default: false leaves the Versions and Undo pair out. (Not `history`, which holds Versions'
+   * rows.) */
+  versions?: boolean;
+  /** Optional: the title's language where it isn't a matter's name as filed, which is English in both languages; such
+   * as words of the interface standing in the title's place. "en" by default. */
+  titleLang?: Lang;
+  /** Optional: test ids for the e2e specs. title: on the title's heading. */
+  testIds?: { title?: string };
 };
 
 /** The plan's state from the share left, where the host hasn't said. */
@@ -84,8 +98,12 @@ export function RoomToolbar(p: RoomToolbarProps) {
   const vw = useVersionWords();
   const display = useDisplay();
   const platform = p.platform ?? display.platform;
+  const own = p.chrome !== "os";
   // Windows and Linux: the caption buttons at the top right, and no corner lights
-  const captions = platform !== "mac";
+  const captions = own && platform !== "mac";
+  const search = p.search !== false;
+  const versions = p.versions !== false;
+  const titleLang = p.titleLang ?? "en";
   const room = useRoom();
   const undo = useRef<HTMLButtonElement>(null);
   // Versions opens under the pair, its right edge on the pair's: Undo's own group
@@ -95,10 +113,11 @@ export function RoomToolbar(p: RoomToolbarProps) {
     <header
       className={cn("room-top", captions && "mid:pr-0")}
       data-platform={platform}
+      data-chrome={own ? undefined : "os"}
       data-tauri-drag-region
     >
       <div className="room-lead" data-tauri-drag-region>
-        {platform === "mac" && <CornerLights />}
+        {own && platform === "mac" && <CornerLights />}
         <Button
           kind="tone"
           size="small"
@@ -120,9 +139,10 @@ export function RoomToolbar(p: RoomToolbarProps) {
       <div className="room-matter" data-tauri-drag-region>
         <Heading
           level={1}
-          className="room-title as-en"
-          lang="en"
+          className={cn("room-title", titleLang === "en" && "as-en")}
+          lang={titleLang}
           title={p.titleHint}
+          data-testid={p.testIds?.title}
           data-tauri-drag-region
         >
           {p.title}
@@ -161,52 +181,61 @@ export function RoomToolbar(p: RoomToolbarProps) {
           than the title, which then never loses the fraction of a pixel that would wrap it */}
       <div className={cn("room-tools", captions && "shrink-100")} data-tauri-drag-region>
         {/* flex-nowrap: the room's toolbar folds its search instead of wrapping its tools onto a second line */}
-        <Toolbar label={rt(w.lang, "Tools for this matter")} className="room-tools-bar flex-nowrap">
-          <SearchField
-            label={p.searchLabel ?? w.t("Search this matter")}
-            place="toolbar"
-            className={cn("room-search", captions && "max-mid:ml-auto max-narrow:ml-0")}
-          />
-          <Popover.Root
-            onOpenChange={(open, details) => {
-              // Undo keeps Versions up, so the row it takes out can be seen to go
-              const t = details.event?.target;
-              if (
-                !open &&
-                details.reason === "outside-press" &&
-                t instanceof Node &&
-                undo.current?.contains(t) === true
-              ) {
-                details.cancel();
-              }
-            }}
+        {(search || versions) && (
+          <Toolbar
+            label={rt(w.lang, "Tools for this matter")}
+            className="room-tools-bar flex-nowrap"
           >
-            <ToolbarPair label={w.t("Versions and Undo")} className="room-pair">
-              <ToolbarPairButton render={<Popover.Trigger />}>
-                <IconHistory size={16} className="room-pair-icon" />
-                <span className="deva-nudge">{vw.v("Versions")}</span>
-              </ToolbarPairButton>
-              {/* while Clauseo writes, Undo waits disabled and stays focusable, as Base UI's toolbar draws a disabled
-                    button: aria-disabled and data-disabled. Set here rather than through `disabled`, which re-registers
-                    the toolbar's items and costs a second commit in the frame the answer starts and the one it ends */}
-              <ToolbarPairButton
-                ref={undo}
-                className="room-undo"
-                aria-disabled={writing ? true : undefined}
-                data-disabled={writing ? "" : undefined}
-                aria-label={p.canUndo ? w.t("Undo accepting the answer") : undefined}
-                onClick={(e) => {
-                  if (writing) e.preventDefault();
-                  else p.onUndo();
+            {search && (
+              <SearchField
+                label={p.searchLabel ?? w.t("Search this matter")}
+                place="toolbar"
+                className={cn("room-search", captions && "max-mid:ml-auto max-narrow:ml-0")}
+              />
+            )}
+            {versions && (
+              <Popover.Root
+                onOpenChange={(open, details) => {
+                  // Undo keeps Versions up, so the row it takes out can be seen to go
+                  const t = details.event?.target;
+                  if (
+                    !open &&
+                    details.reason === "outside-press" &&
+                    t instanceof Node &&
+                    undo.current?.contains(t) === true
+                  ) {
+                    details.cancel();
+                  }
                 }}
               >
-                <IconUndo size={16} className="room-pair-icon" />
-                <span className="deva-nudge room-undo-label">{w.t("Undo")}</span>
-              </ToolbarPairButton>
-            </ToolbarPair>
-            <HistoryPanel rows={p.history} anchor={pairOf} />
-          </Popover.Root>
-        </Toolbar>
+                <ToolbarPair label={w.t("Versions and Undo")} className="room-pair">
+                  <ToolbarPairButton render={<Popover.Trigger />}>
+                    <IconHistory size={16} className="room-pair-icon" />
+                    <span className="deva-nudge">{vw.v("Versions")}</span>
+                  </ToolbarPairButton>
+                  {/* while Clauseo writes, Undo waits disabled and stays focusable, as Base UI's toolbar draws a disabled
+                    button: aria-disabled and data-disabled. Set here rather than through `disabled`, which re-registers
+                    the toolbar's items and costs a second commit in the frame the answer starts and the one it ends */}
+                  <ToolbarPairButton
+                    ref={undo}
+                    className="room-undo"
+                    aria-disabled={writing ? true : undefined}
+                    data-disabled={writing ? "" : undefined}
+                    aria-label={p.canUndo ? w.t("Undo accepting the answer") : undefined}
+                    onClick={(e) => {
+                      if (writing) e.preventDefault();
+                      else p.onUndo();
+                    }}
+                  >
+                    <IconUndo size={16} className="room-pair-icon" />
+                    <span className="deva-nudge room-undo-label">{w.t("Undo")}</span>
+                  </ToolbarPairButton>
+                </ToolbarPair>
+                <HistoryPanel rows={p.history} anchor={pairOf} />
+              </Popover.Root>
+            )}
+          </Toolbar>
+        )}
         {p.plan !== null && <ToolbarPlan plan={p.plan} />}
       </div>
       {captions && (

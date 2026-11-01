@@ -27,7 +27,7 @@ const toolbar: Omit<RoomToolbarProps, "plan"> = {
   platform: "mac",
 };
 
-async function mount(plan: RoomToolbarProps["plan"]) {
+async function mount(plan: RoomToolbarProps["plan"], more: Partial<RoomToolbarProps> = {}) {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -35,7 +35,7 @@ async function mount(plan: RoomToolbarProps["plan"]) {
     root?.render(
       <TooltipProvider>
         <RoomScopeProvider className="room-window">
-          <RoomToolbar {...toolbar} plan={plan} />
+          <RoomToolbar {...toolbar} plan={plan} {...more} />
         </RoomScopeProvider>
       </TooltipProvider>,
     ),
@@ -91,4 +91,77 @@ test("a plan with a card keeps the drag region on the meter inside its press", a
   });
   const press = host?.querySelector(".room-plan-press");
   expect(dragging(press)).toBe(4);
+});
+
+// The room's additive props: each leaves its part out only when asked, and draws today's toolbar at its default.
+const parts = () => ({
+  lights: host?.querySelector(".room-lights") ?? null,
+  captions: host?.querySelector(".room-caption") ?? null,
+  search: host?.querySelector(".room-search") ?? null,
+  pair: host?.querySelector(".room-pair") ?? null,
+  tools: host?.querySelector(".room-tools-bar") ?? null,
+  title: host?.querySelector("h1") ?? null,
+  top: host?.querySelector("header.room-top") ?? null,
+});
+
+test("by default the toolbar draws the lights on the Mac, the search field, the pair and the title in English", async () => {
+  await mount(null);
+  const p = parts();
+  expect(p.lights).not.toBeNull();
+  expect(p.search).not.toBeNull();
+  expect(p.pair).not.toBeNull();
+  expect(p.top?.hasAttribute("data-chrome")).toBe(false);
+  expect(p.title?.getAttribute("lang")).toBe("en");
+  expect(p.title?.classList.contains("as-en")).toBe(true);
+  expect(p.title?.hasAttribute("data-testid")).toBe(false);
+});
+
+test("by default on Windows the toolbar ends in the caption buttons and keeps their room", async () => {
+  await mount(null, { platform: "windows" });
+  expect(parts().captions).not.toBeNull();
+  expect(parts().top?.classList.contains("mid:pr-0")).toBe(true);
+});
+
+test('chrome "os" draws neither the corner lights nor the caption buttons, and keeps no room for them', async () => {
+  await mount(null, { chrome: "os" });
+  expect(parts().lights).toBeNull();
+  expect(parts().top?.getAttribute("data-chrome")).toBe("os");
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount(null, { chrome: "os", platform: "windows" });
+  const p = parts();
+  expect(p.captions).toBeNull();
+  expect(p.top?.classList.contains("mid:pr-0")).toBe(false);
+  expect(host?.querySelector(".room-tools")?.classList.contains("shrink-100")).toBe(false);
+});
+
+test("search false leaves the search field out and keeps the pair", async () => {
+  await mount(null, { search: false });
+  expect(parts().search).toBeNull();
+  expect(host?.querySelector("input")).toBeNull();
+  expect(parts().pair).not.toBeNull();
+});
+
+test("versions false leaves the Versions and Undo pair out and keeps the search field", async () => {
+  await mount(null, { versions: false });
+  expect(parts().pair).toBeNull();
+  expect(host?.querySelector(".room-undo")).toBeNull();
+  expect(parts().search).not.toBeNull();
+});
+
+test("with neither search nor versions there is no empty toolbar group", async () => {
+  await mount(null, { search: false, versions: false });
+  expect(parts().tools).toBeNull();
+  expect(host?.querySelector('[role="toolbar"]')).toBeNull();
+});
+
+test("testIds.title marks the title's heading", async () => {
+  await mount(null, { testIds: { title: "matter" } });
+  expect(host?.querySelector('[data-testid="matter"]')).toBe(parts().title);
+});
+
+test("titleLang sets the title's language for words that stand in a matter's name", async () => {
+  await mount(null, { title: "अभी कोई मामला नहीं", titleLang: "hi" });
+  expect(parts().title?.getAttribute("lang")).toBe("hi");
+  expect(parts().title?.classList.contains("as-en")).toBe(false);
 });
