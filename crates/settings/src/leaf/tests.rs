@@ -1,6 +1,6 @@
 use super::{KEYS, Leaf, Raw, agent_id, typed};
 use crate::policy::kind_of;
-use crate::schema::{AgentLaunch, Density, FontSize, Language, Settings, Theme};
+use crate::schema::{AgentLaunch, Density, FontSize, Language, McpServerLaunch, Settings, Theme};
 use crate::testing::{abs, abs_str};
 use crate::warning::{Origin, Warning, WarningKind};
 use serde_json::{Value, json};
@@ -214,12 +214,22 @@ fn key_names_each_leaf_and_apply_sets_it() {
         args: Vec::new(),
         env: BTreeMap::new(),
     };
+    let server = McpServerLaunch {
+        command: abs_str("bin/s"),
+        args: Vec::new(),
+        env: BTreeMap::new(),
+        enabled: true,
+    };
     let leaves = [
         (
             Leaf::DefaultLocation(Some(abs("m"))),
             "matters.default_location",
         ),
         (Leaf::Agent("x".to_owned(), launch.clone()), "agents.x"),
+        (
+            Leaf::McpServers(BTreeMap::from([("s".to_owned(), server.clone())])),
+            "mcp.servers",
+        ),
         (Leaf::Theme(Theme::Light), "ui.theme"),
         (
             Leaf::FontSize(FontSize::try_from(20).unwrap()),
@@ -238,6 +248,7 @@ fn key_names_each_leaf_and_apply_sets_it() {
     }
     assert_eq!(settings.matters.default_location, Some(abs("m")));
     assert_eq!(settings.agents.get("x"), Some(&launch));
+    assert_eq!(settings.mcp.servers.get("s"), Some(&server));
     assert_eq!(settings.ui.theme, Theme::Light);
     assert_eq!(settings.ui.font_size.get(), 20);
     assert_eq!(settings.ui.density, Density::Compact);
@@ -248,6 +259,7 @@ fn key_names_each_leaf_and_apply_sets_it() {
 fn every_fixed_key_types_and_the_kinds_agree() {
     let samples = [
         json!(abs_str("m")),
+        json!({"a": {"command": abs_str("bin/a")}}),
         json!("dark"),
         json!(14),
         json!("compact"),
@@ -270,6 +282,7 @@ fn a_refused_key_goes_back_to_its_default() {
     // value in force and fails below.
     let samples = [
         json!(abs_str("m")),
+        json!({"a": {"command": abs_str("bin/a"), "enabled": true}}),
         json!("dark"),
         json!(20),
         json!("compact"),
@@ -305,4 +318,90 @@ fn a_refused_key_goes_back_to_its_default() {
     settings.agents.insert("y".to_owned(), launch);
     Leaf::Refused("agents.x".to_owned()).apply(&mut settings);
     assert_eq!(settings.agents.keys().collect::<Vec<_>>(), ["y"]);
+}
+
+#[test]
+fn mcp_servers_type_entry_by_entry() {
+    let command = abs_str("bin/s");
+    let mut value = json!({
+            "ok": {"command": command, "args": ["-v"], "env": {"A": "1"}, "enabled": true, "url": "x"},
+            "off_by-default_9": {"command": command},
+            "relative": {"command": "server"},
+            "no-command": {"args": []},
+            "enabled-not-bool": {"command": command, "enabled": "yes"},
+            "": {"command": command},
+            "has space": {"command": command},
+            "é": {"command": command},
+    });
+    for length in [64, 65] {
+        value["a".repeat(length)] = json!({"command": command});
+    }
+    let mut warnings = Vec::new();
+    let raw = Raw {
+        key: "mcp.servers".to_owned(),
+        value,
+        origin: origin(),
+    };
+    let leaves = typed(vec![raw], Vec::new(), &mut warnings);
+    let Some(Leaf::McpServers(servers)) = leaves.first() else {
+        panic!("{leaves:?}");
+    };
+    assert_eq!(
+        servers.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["a".repeat(64).as_str(), "off_by-default_9", "ok"]
+    );
+    assert_eq!(
+        servers.get("ok"),
+        Some(&McpServerLaunch {
+            command,
+            args: vec!["-v".to_owned()],
+            env: BTreeMap::from([("A".to_owned(), "1".to_owned())]),
+            enabled: true,
+        })
+    );
+    assert!(!servers.get("off_by-default_9").unwrap().enabled);
+    let mut keys: Vec<String> = warnings
+        .into_iter()
+        .map(|warning| match warning.kind {
+            WarningKind::InvalidValue { key, .. } | WarningKind::UnknownKey { key } => key,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    keys.sort();
+    let mut expected: Vec<String> = [
+        "",
+        "a".repeat(65).as_str(),
+        "enabled-not-bool",
+        "has space",
+        "no-command",
+        "ok.url",
+        "relative",
+        "é",
+    ]
+    .iter()
+    .map(|name| format!("mcp.servers.{name}"))
+    .collect();
+    expected.sort();
+    assert_eq!(keys, expected);
+}
+
+#[test]
+fn an_mcp_list_that_is_not_an_object_is_refused() {
+    for value in [json!([]), json!("all"), json!(null)] {
+        assert_eq!(
+            one("mcp.servers", value.clone()),
+            Err(invalid(
+                "mcp.servers",
+                "it must be an object from server name to server"
+            )),
+            "{value}"
+        );
+    }
+    let mut settings = Settings::default();
+    settings.mcp.servers.insert(
+        "s".to_owned(),
+        serde_json::from_value(json!({"command": abs_str("s")})).unwrap(),
+    );
+    Leaf::Refused("mcp.servers".to_owned()).apply(&mut settings);
+    assert!(settings.mcp.servers.is_empty());
 }

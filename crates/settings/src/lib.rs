@@ -17,6 +17,7 @@
 //! one owner. [`Effective::apply_ui_patch`] takes `&mut self`, so the owner holds a
 //! `Mutex<Effective>` (or the task that serialises settings writes) for the whole call, and
 //! readers go through that owner. It answers [`Effective::settings`], [`Effective::agent`],
+//! [`Effective::mcp_servers`], [`Effective::enabled_mcp_servers`],
 //! [`Effective::default_matters_dir`], [`Effective::data_dir`], [`Effective::locations`],
 //! [`Effective::policy`], [`Effective::is_locked`], [`Effective::warnings`] and
 //! [`Effective::apply_ui_patch`]. Every input is a trait: [`PlatformDirs`], [`Env`], [`Files`]
@@ -29,7 +30,8 @@
 //!
 //! - [`Effective::load`] never fails. A missing file is normal; a file or value that cannot be
 //!   read is a [`Warning`] (with path, line and column where there is one) and defaults stand in.
-//!   A policy source that cannot be read is dropped whole and listed in [`PolicyStatus`].
+//!   A policy source that cannot be read is dropped whole and listed in [`PolicyStatus`], and
+//!   locks each security-relevant key (today only `mcp.servers`) at its default.
 //! - Policy wins: a policy value replaces the user's for its key, and locks it. An agent's
 //!   policy entry replaces the user's whole entry for that id. Earlier sources win over later.
 //! - Policy fails closed per key: a policy value for a known key that does not type is a
@@ -44,6 +46,10 @@
 //! - A [`UiPatch`] that names a locked key is refused with [`Error::Locked`], and nothing is
 //!   written or changed in memory.
 //! - An agent's `command` is an absolute path, or the agent is left out with a warning.
+//! - `mcp.servers` is one key: a policy value replaces the user's whole list, with each
+//!   server's `enabled`, and an invalid one locks the list empty. An entry with a bad name, a
+//!   relative `command` or a value that does not type is left out with a warning; `enabled`
+//!   is `false` unless set.
 //! - Tests read and write no real folder: every input is injected.
 //!
 //! # Depends on
@@ -84,8 +90,8 @@ pub use policy::{
     system_policy_sources,
 };
 pub use schema::{
-    AgentLaunch, Density, FontSize, Language, MattersSettings, Settings, Theme, UiSettings,
-    json_schema,
+    AgentLaunch, Density, FontSize, Language, MattersSettings, McpServerLaunch, McpSettings,
+    Settings, Theme, UiSettings, json_schema,
 };
 pub use system::{SystemDirs, SystemEnv};
 pub use ui::UiPatch;

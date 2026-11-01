@@ -73,6 +73,54 @@ source: crates/settings/src/schema/tests.rs
       },
       "type": "object"
     },
+    "McpServerLaunch": {
+      "description": "How to start one MCP server. `host` passes the enabled ones to the agent in\n`session/new`; this crate only reads them.",
+      "properties": {
+        "args": {
+          "default": [],
+          "description": "Its arguments.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "description": "The program, as an absolute path.",
+          "type": "string"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Whether the agent gets it. Off unless set.",
+          "type": "boolean"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Variables added to its environment. Never a secret: keys go in the OS keychain.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "type": "object"
+    },
+    "McpSettings": {
+      "description": "The `mcp` section.",
+      "properties": {
+        "servers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/McpServerLaunch"
+          },
+          "default": {},
+          "description": "The MCP servers by name: 1 to 64 letters, digits, `_` or `-`. Each is off until it is\nturned on. A policy value replaces the whole list. Empty by default.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "Theme": {
       "description": "The colour theme.",
       "oneOf": [
@@ -137,6 +185,13 @@ source: crates/settings/src/schema/tests.rs
         "default_location": null
       },
       "description": "Where matters live."
+    },
+    "mcp": {
+      "$ref": "#/$defs/McpSettings",
+      "default": {
+        "servers": {}
+      },
+      "description": "The MCP servers a lawyer can turn on for their agents' sessions."
     },
     "ui": {
       "$ref": "#/$defs/UiSettings",

@@ -26,25 +26,36 @@
 mod tests;
 
 use crate::policy::{Kind, kind_of};
-use crate::schema::{AgentLaunch, Density, FontSize, Language, Settings, Theme};
+use crate::schema::{AgentLaunch, Density, FontSize, Language, McpServerLaunch, Settings, Theme};
 use crate::warning::{Origin, Warning, WarningKind};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// Every key with a fixed name, and its kind. An agent's key is `agents.<id>`, an object.
 /// `schema::tests::the_keys_and_their_kinds_are_the_schemas` holds this to the schema.
-pub(crate) const KEYS: [(&str, Kind); 5] = [
+pub(crate) const KEYS: [(&str, Kind); 6] = [
     ("matters.default_location", Kind::String),
+    ("mcp.servers", Kind::Object),
     ("ui.theme", Kind::String),
     ("ui.font_size", Kind::Number),
     ("ui.density", Kind::String),
     ("ui.language", Kind::String),
 ];
 
+/// The keys that decide what an agent can reach. A policy source that cannot be read locks each
+/// at its default (ADR 0009): its value there is unknown, and the user's must not stand in.
+pub(crate) const SECURITY_KEYS: [&str; 1] = ["mcp.servers"];
+
 /// The fields an [`AgentLaunch`] reads; any other is an unknown key.
 const AGENT_FIELDS: [&str; 3] = ["command", "args", "env"];
+
+/// The fields an [`McpServerLaunch`] reads; any other is an unknown key.
+const MCP_SERVER_FIELDS: [&str; 4] = ["command", "args", "env", "enabled"];
+
+/// The longest MCP server name.
+const MCP_NAME_MAX: usize = 64;
 
 /// A key and its value as a source holds it, before typing.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,6 +70,8 @@ pub(crate) struct Raw {
 pub(crate) enum Leaf {
     DefaultLocation(Option<PathBuf>),
     Agent(String, AgentLaunch),
+    /// The whole `mcp.servers` list: a policy value replaces the user's list, never merges.
+    McpServers(BTreeMap<String, McpServerLaunch>),
     Theme(Theme),
     FontSize(FontSize),
     Density(Density),
@@ -122,8 +135,9 @@ pub(crate) fn keep_last<T>(items: Vec<T>, key: impl Fn(&T) -> String) -> Vec<T> 
 }
 
 impl Leaf {
-    /// Types one value. `unknown` gets a warning for each field of an agent this version does
-    /// not know; the agent itself still loads.
+    /// Types one value. `unknown` gets a warning for each field of an agent or MCP server this
+    /// version does not know (the entry itself still loads), and for each MCP server entry left
+    /// out (the rest of the list still loads).
     fn parse(key: &str, value: Value, unknown: &mut Vec<WarningKind>) -> Result<Leaf, WarningKind> {
         match key {
             "matters.default_location" => {
@@ -136,6 +150,7 @@ impl Leaf {
                     path => Ok(Leaf::DefaultLocation(path)),
                 }
             }
+            "mcp.servers" => mcp_servers(key, value, unknown).map(Leaf::McpServers),
             "ui.theme" => typed_value(key, value).map(Leaf::Theme),
             "ui.font_size" => typed_value(key, value).map(Leaf::FontSize),
             "ui.density" => typed_value(key, value).map(Leaf::Density),
@@ -154,6 +169,7 @@ impl Leaf {
         match self {
             Leaf::DefaultLocation(_) => "matters.default_location".to_owned(),
             Leaf::Agent(id, _) => format!("agents.{id}"),
+            Leaf::McpServers(_) => "mcp.servers".to_owned(),
             Leaf::Theme(_) => "ui.theme".to_owned(),
             Leaf::FontSize(_) => "ui.font_size".to_owned(),
             Leaf::Density(_) => "ui.density".to_owned(),
@@ -175,6 +191,7 @@ impl Leaf {
             Leaf::Agent(id, launch) => {
                 settings.agents.insert(id, launch);
             }
+            Leaf::McpServers(servers) => settings.mcp.servers = servers,
             Leaf::Theme(theme) => settings.ui.theme = theme,
             Leaf::FontSize(size) => settings.ui.font_size = size,
             Leaf::Density(density) => settings.ui.density = density,
@@ -188,6 +205,7 @@ impl Leaf {
 fn reset(key: &str, settings: &mut Settings) {
     match key {
         "matters.default_location" => settings.matters.default_location = None,
+        "mcp.servers" => settings.mcp.servers.clear(),
         "ui.theme" => settings.ui.theme = Theme::default(),
         "ui.font_size" => settings.ui.font_size = FontSize::default(),
         "ui.density" => settings.ui.density = Density::default(),
@@ -226,6 +244,62 @@ fn agent(
             command: launch.command,
         })
     }
+}
+
+/// The `mcp.servers` list. A value that is not an object refuses the key (a policy's locks the
+/// list empty). Inside it, an entry with a bad name, a value that does not type or a relative
+/// `command` is left out with a warning in `dropped`, and the other entries load.
+fn mcp_servers(
+    key: &str,
+    value: Value,
+    dropped: &mut Vec<WarningKind>,
+) -> Result<BTreeMap<String, McpServerLaunch>, WarningKind> {
+    let Value::Object(entries) = value else {
+        return Err(WarningKind::InvalidValue {
+            key: key.to_owned(),
+            message: "it must be an object from server name to server".to_owned(),
+        });
+    };
+    let mut servers = BTreeMap::new();
+    for (name, entry) in entries {
+        let entry_key = format!("{key}.{name}");
+        if !mcp_name_ok(&name) {
+            dropped.push(WarningKind::InvalidValue {
+                key: entry_key,
+                message: format!("a server name is 1 to {MCP_NAME_MAX} letters, digits, _ or -"),
+            });
+            continue;
+        }
+        if let Value::Object(fields) = &entry {
+            dropped.extend(
+                fields
+                    .keys()
+                    .filter(|field| !MCP_SERVER_FIELDS.contains(&field.as_str()))
+                    .map(|field| WarningKind::UnknownKey {
+                        key: format!("{entry_key}.{field}"),
+                    }),
+            );
+        }
+        match typed_value::<McpServerLaunch>(&entry_key, entry) {
+            Ok(server) if Path::new(&server.command).is_absolute() => {
+                servers.insert(name, server);
+            }
+            Ok(server) => dropped.push(WarningKind::InvalidValue {
+                key: entry_key,
+                message: format!("{} is not an absolute path", server.command),
+            }),
+            Err(kind) => dropped.push(kind),
+        }
+    }
+    Ok(servers)
+}
+
+/// Whether `name` is 1 to [`MCP_NAME_MAX`] ASCII letters, digits, `_` or `-`.
+fn mcp_name_ok(name: &str) -> bool {
+    (1..=MCP_NAME_MAX).contains(&name.len())
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
 /// Reads a JSON value as `T`, naming the key when it cannot.
