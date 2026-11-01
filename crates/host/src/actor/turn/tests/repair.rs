@@ -408,3 +408,25 @@ fn a_thread_that_fails_to_load_keeps_the_others_from_taking_a_new_checkpoint() {
     assert_a_empty(&mut rig, a, a_turn, before);
     rig.finish();
 }
+
+#[test]
+fn a_thread_whose_log_fails_to_read_keeps_the_others_from_taking_a_new_checkpoint() {
+    let (rig, [(a, a_turn), (c, c_turn)], before) =
+        two_open_turns("turn-repair-two-open-c-unread", false);
+    // C's thread loads, but reconciliation cannot read its whole log.
+    let mut rig = rig.restart_failing_log(1, c);
+    assert_a_empty(&mut rig, a, a_turn, before);
+    assert_eq!(
+        rig.recorded().len(),
+        1,
+        "no new checkpoint: only the import"
+    );
+    assert!(
+        ended(&rig.log(c), c_turn).is_none(),
+        "C's turn is still open"
+    );
+
+    let mut rig = rig.restart(2);
+    assert_c_takes_notes(&mut rig, c, c_turn);
+    rig.finish();
+}

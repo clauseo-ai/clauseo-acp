@@ -21,7 +21,7 @@ use uuid::Uuid;
 use super::super::super::input::{Input, Request};
 use super::super::super::{Actor, HostPhase, shutdown, startup, streams};
 use super::super::out::Out;
-use super::super::{Current, Then, TurnPhase};
+use super::super::{Current, LogFor, Then, TurnInput, TurnPhase};
 use crate::error::Error;
 use crate::pipeline::tests::support::TempDir;
 use crate::{HostConfig, ManualClock, SequentialIds};
@@ -73,7 +73,14 @@ impl Rig {
     /// [`Rig::restart`], with the start-up load of `stream` failing as a corrupt store fails.
     pub(super) fn restart_failing_load(self, run: u16, stream: StreamId) -> Self {
         let dir = self.close();
-        Self::open(dir, run, Some(stream))
+        Self::open(dir, run, Some(Failing::Load(stream)))
+    }
+
+    /// [`Rig::restart`], with start-up reconciliation's whole-log read of `thread` failing as
+    /// a corrupt store fails.
+    pub(super) fn restart_failing_log(self, run: u16, thread: ThreadId) -> Self {
+        let dir = self.close();
+        Self::open(dir, run, Some(Failing::Log(thread)))
     }
 
     /// The data folder: the agent's home, its scenario and the settings naming it.
@@ -94,9 +101,9 @@ impl Rig {
             .unwrap();
     }
 
-    /// The host on the data folder `dir`, started and serving; the start-up load of `failing`
-    /// fails.
-    fn open(dir: TempDir, run: u16, failing: Option<StreamId>) -> Self {
+    /// The host on the data folder `dir`, started and serving, with the start-up read
+    /// `failing` names failing.
+    fn open(dir: TempDir, run: u16, failing: Option<Failing>) -> Self {
         let root = dir.path();
         let effective = Effective::load(&Locations::under_root(root), &SystemFiles, &[]);
         let launcher = PassthroughLauncher::new(SpawnOptions::new().home(root.join("home")));
@@ -124,12 +131,8 @@ impl Rig {
                 return rig;
             }
             let mut input = rig.next();
-            if let Input::Reopened { stream, result } = &mut input
-                && Some(*stream) == failing
-            {
-                *result = Err(clauseo_store::Error::Corrupt {
-                    detail: "a test fails this load".to_owned(),
-                });
+            if let Some(failing) = failing {
+                failing.apply(&mut input);
             }
             rig.actor.on_input(input);
         }
@@ -398,6 +401,41 @@ impl Rig {
         } = self;
         pool.run_until(shutdown::close(actor)).unwrap();
         dir
+    }
+}
+
+/// A store read that fails during a start-up.
+#[derive(Debug, Clone, Copy)]
+enum Failing {
+    /// The load of a stream.
+    Load(StreamId),
+    /// Reconciliation's whole-log read of a thread.
+    Log(ThreadId),
+}
+
+impl Failing {
+    /// Swaps a corrupt-store error into `input` when it is the read this names.
+    fn apply(self, input: &mut Input) {
+        let corrupt = || clauseo_store::Error::Corrupt {
+            detail: "a test fails this read".to_owned(),
+        };
+        if let (Self::Load(failing), Input::Reopened { stream, result }) = (self, &mut *input)
+            && *stream == failing
+        {
+            *result = Err(corrupt());
+        }
+        if let (
+            Self::Log(failing),
+            Input::Turn(TurnInput::Log {
+                thread,
+                why: LogFor::Reconcile,
+                result,
+            }),
+        ) = (self, input)
+            && *thread == failing
+        {
+            *result = Err(corrupt());
+        }
     }
 }
 
