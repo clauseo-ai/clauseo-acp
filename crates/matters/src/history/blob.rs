@@ -11,7 +11,7 @@ use gix::hash::{Kind as HashKind, ObjectId};
 use gix::objs::Kind;
 
 use super::Oid;
-use super::durable::{self, NewObjects, put};
+use super::durable::{self, Content, NewObjects, put};
 use super::gix_store::to_oid;
 use crate::no_download::{NoDownload, not_downloaded, not_downloaded_error};
 use crate::{Error, write};
@@ -227,7 +227,13 @@ impl Blobs {
         let Some(target) = target else {
             return Ok(Some((to_oid(&id)?, len)));
         };
-        if durable::present(target.deflated, target.new_objects, &id, Kind::Blob, len)? {
+        if durable::present(
+            target.deflated,
+            target.new_objects,
+            &id,
+            Kind::Blob,
+            Content::Streamed(len),
+        )? {
             return Ok(Some((to_oid(&id)?, len)));
         }
         #[cfg(test)]

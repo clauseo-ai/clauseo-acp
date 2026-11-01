@@ -71,19 +71,30 @@ impl NewObjects {
     }
 }
 
-/// Whether object `id` (`kind`, `size` bytes) is in `store` and sound; if so it is recorded
-/// in `new_objects` for the sync. Every file found is inflated and hashed in full, whenever it
-/// was written: one from before the last publish (a revert to an old version, say) is checked
-/// as closely as one a crashed run left, so a damaged copy is written again while the
-/// checkpoint has the right bytes in hand, not found at undo or restore. A file that fails is logged and left for the caller to write over: gix
-/// renames the new object onto it (on Windows, where that rename is skipped when the target
-/// exists, it is removed first). An I/O error reading it is returned and the file kept.
+/// The content of an object to store, as [`present`] checks a copy already stored.
+#[derive(Clone, Copy)]
+pub(super) enum Content<'a> {
+    /// Its bytes, held in memory (trees, commits, files read whole).
+    InHand(&'a [u8]),
+    /// Only its size: a streamed file, whose bytes are not held.
+    Streamed(u64),
+}
+
+/// Whether object `id` (`kind`, `content`) is in `store` and sound; if so it is recorded in
+/// `new_objects` for the sync. Every file found is inflated in full, whenever it was written:
+/// one from before the last publish (a revert to an old version, say) is checked as closely as
+/// one a crashed run left, so a damaged copy is written again while the checkpoint has the
+/// right bytes, not found at undo or restore. Bytes in hand are compared with what it inflates
+/// to ([`check::same`]); a streamed file's object is hashed against `id` ([`check::whole`]).
+/// A file that fails is logged and left for the caller to write over: gix renames the new
+/// object onto it (on Windows, where that rename is skipped when the target exists, it is
+/// removed first). An I/O error reading it is returned and the file kept.
 pub(super) fn present(
     store: Writer<'_>,
     new_objects: &mut NewObjects,
     id: &ObjectId,
     kind: Kind,
-    size: u64,
+    content: Content<'_>,
 ) -> Result<bool, Error> {
     let path = store.object_path(id);
     if new_objects.files.contains(&path) {
@@ -94,7 +105,11 @@ pub(super) fn present(
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(err) => return Err(Error::io("stat", path, err)),
     };
-    let sound = metadata.is_file() && check::whole(&path, id, kind, size)?;
+    let sound = metadata.is_file()
+        && match content {
+            Content::InHand(data) => check::same(&path, kind, data)?,
+            Content::Streamed(size) => check::whole(&path, id, kind, size)?,
+        };
     if sound {
         new_objects.record(path, false);
         return Ok(true);
@@ -118,8 +133,7 @@ pub(super) fn put(
     data: &[u8],
     id: ObjectId,
 ) -> Result<(), Error> {
-    let size = u64::try_from(data.len()).unwrap_or(u64::MAX);
-    if present(store, new_objects, &id, kind, size)? {
+    if present(store, new_objects, &id, kind, Content::InHand(data))? {
         return Ok(());
     }
     let path = store.object_path(&id);
