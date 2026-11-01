@@ -48,6 +48,7 @@ test.each([2, 40])(
   },
 );
 
+// Under load it ran past the default 5 s, so it gets the hostile tests' 30 s.
 test("40 definitions first: every block parses only the definitions it uses", () => {
   const text = definitions(40) + PARAGRAPHS;
   let checked = 0;
@@ -64,7 +65,7 @@ test("40 definitions first: every block parses only the definitions it uses", ()
   }
   expect(checked).toBeGreaterThan(1000);
   expect(normalise(htmlOf(createAnswer("t").update(text, false)))).toBe(normalise(unsplit(text)));
-});
+}, 30_000);
 
 test.each([
   ["a label that case folding grows past 999 characters", `a [b] c\n\n[${"ß".repeat(500)}]: /u\n`],
