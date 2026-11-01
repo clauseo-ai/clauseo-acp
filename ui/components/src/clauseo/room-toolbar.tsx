@@ -22,7 +22,8 @@ import { Heading } from "./heading.tsx";
 import { NotProtectedMark } from "./allowed.tsx";
 
 export type RoomToolbarProps = {
-  /** The matter's name as filed, in English in both languages. */
+  /** The matter's name as filed, in English in both languages. Empty, the toolbar draws no heading at all, never an
+   * empty one: a title still on its way, or one that could not be read. */
   title: string;
   /** "{court}. {caseNo}. {forWhom}", the title's hint. */
   titleHint: string;
@@ -137,16 +138,18 @@ export function RoomToolbar(p: RoomToolbarProps) {
         </Button>
       </div>
       <div className="room-matter" data-tauri-drag-region>
-        <Heading
-          level={1}
-          className={cn("room-title", titleLang === "en" && "as-en")}
-          lang={titleLang}
-          title={p.titleHint}
-          data-testid={p.testIds?.title}
-          data-tauri-drag-region
-        >
-          {p.title}
-        </Heading>
+        {p.title !== "" && (
+          <Heading
+            level={1}
+            className={cn("room-title", titleLang === "en" && "as-en")}
+            lang={titleLang}
+            title={p.titleHint}
+            data-testid={p.testIds?.title}
+            data-tauri-drag-region
+          >
+            {p.title}
+          </Heading>
+        )}
         {p.subtitle !== undefined ? (
           <p className="room-next" data-tauri-drag-region>
             <Say>{p.subtitle}</Say>

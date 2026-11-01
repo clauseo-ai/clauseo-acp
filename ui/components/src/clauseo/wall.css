@@ -55,6 +55,14 @@
     grid-auto-rows: minmax(var(--tile-h), auto);
     gap: var(--tile-gap);
   }
+  /* a facade of files known only by their names (no page, no chip): each row only as tall as its title and the
+     tile's padding, never keeping the room of a numeral and a chip it doesn't have */
+  .facade-names {
+    --tile-h: calc(var(--tile-pad) + var(--title-h) + var(--tile-pad));
+  }
+  .facade-names .tile-face {
+    padding-bottom: var(--tile-pad);
+  }
   .tile {
     position: relative;
   }

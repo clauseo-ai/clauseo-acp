@@ -126,7 +126,7 @@ function RoomFrame({ transport }: { transport: HostTransport }) {
           (papers.papers.length === 0 ? (
             <EmptyPapers body={false} />
           ) : (
-            <ol className="facade">
+            <ol className="facade facade-names">
               {papers.papers.map((paper) => (
                 <PaperTile
                   key={paper.file}

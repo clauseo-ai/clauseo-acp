@@ -8,7 +8,7 @@ import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { rt } from "@clauseo/components/lib/words-room.ts";
 import { t } from "@clauseo/components/lib/words.ts";
 import { vt } from "@clauseo/components/lib/words-versions.ts";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import type { MatterSummary } from "../transport/protocol.ts";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
 import { uuid } from "../testing/stream-script.ts";
@@ -89,6 +89,29 @@ test("with no matters the title says so, in the page's language", async () => {
   expect(title()?.getAttribute("lang")).toBe("hi");
 });
 
+test("while list_matters is on its way, and after it fails, the toolbar has no heading, never an empty one", async () => {
+  const failing = new FakeTransport({
+    query: () => {
+      throw new Error("the host is gone");
+    },
+  });
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    connectRoom(failing, {});
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => root?.render(<Room transport={failing} />));
+    expect(host.querySelector("h1")).toBeNull();
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("list_matters failed"));
+    expect(host.querySelector("h1")).toBeNull();
+    expect(host.querySelector("header.room-top .room-rail-toggle")).not.toBeNull();
+  } finally {
+    warn.mockRestore();
+  }
+});
+
 test("the frame has the toolbar, the rail slot, the work and the wall, and no window controls, search or plan", async () => {
   await mount(fake([NEWER]));
   const win = host?.querySelector(".room-window");
@@ -139,6 +162,8 @@ test("with H8 the wall has one tile per file, named by its file name, with no pa
     call: "next_query",
     query: { list_papers: { matter: NEWER.matter } },
   });
+  // a facade of names: its rows keep no room for a page or a chip (wall.css)
+  expect(pane()?.querySelector("ol.facade")?.classList.contains("facade-names")).toBe(true);
   const tiles = [...(pane()?.querySelectorAll("ol.facade > li.tile") ?? [])];
   expect(tiles.map((tile) => tile.textContent)).toEqual(["Notice to the bank.pdf", "Reply.docx"]);
   expect(pane()?.querySelector(".tile-no")).toBeNull();

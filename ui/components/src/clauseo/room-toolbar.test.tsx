@@ -191,3 +191,12 @@ test("titleLang sets the title's language for words that stand in a matter's nam
   expect(parts().title?.getAttribute("lang")).toBe("hi");
   expect(parts().title?.classList.contains("as-en")).toBe(false);
 });
+
+test("an empty title draws no heading, never an empty one, and keeps the line under it", async () => {
+  await mount(null, { title: "", testIds: { title: "matter" } });
+  expect(host?.querySelector("h1")).toBeNull();
+  expect(host?.querySelector('[data-testid="matter"]')).toBeNull();
+  expect(host?.querySelector(".room-matter .room-next")).not.toBeNull();
+  await remount({ title: "Acme Ltd v. State" });
+  expect(host?.querySelector("h1")?.textContent).toBe("Acme Ltd v. State");
+});
