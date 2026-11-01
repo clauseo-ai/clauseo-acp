@@ -6,7 +6,8 @@
 //
 // A page fails when it doesn't answer within 3 s of its load event, logs an error, an unhandled rejection, a console
 // error or a CSP violation, or loses its content process. It answers once the room has its title, its wall's five
-// tiles, and the display the query asked for on <html>.
+// tiles, and the display the query asked for on <html>. One more page per look freezes Object.prototype in the main
+// frame first, as Tauri's freezePrototype does, and runs window.__clauseoAxe() there: it must resolve with no violation.
 //
 // Usage, from ui/app: pnpm build:probe, then serve dist-probe/ with `pnpm exec vite preview --mode probe` (port 4173),
 // then pnpm probe:webkit. PROBE_ORIGIN names another server.
@@ -25,7 +26,7 @@ struct Run {
   let height: CGFloat
   /// The page's own answer that it has rendered: a script that returns true.
   let rendered: String
-  /// Run at document start, after the listeners.
+  /// Run at document start, after the listeners, in the main frame only (as Tauri's own init scripts on the Mac).
   let setup: String
 }
 
@@ -43,6 +44,16 @@ for (theme, lang) in looks {
     runs.append(Run(name: "room \(theme) \(lang)", url: URL(string: "\(origin)/\(q)")!, width: w, height: h,
                     rendered: rendered, setup: ""))
   }
+  // Tauri's freezePrototype (tauri.conf.json), as the app runs: Object.prototype frozen in the main frame before any
+  // page script. window.__clauseoAxe() must still load axe and run it over the page, colour contrast included, and
+  // find nothing; a rejection or any violation fails the page.
+  let axe = rendered + " && (window.__axeStarted || (window.__axeStarted = true, window.__clauseoAxe().then(" +
+    "function (v) { window.__axeOut = v; v.forEach(function (x) { __probe.errs.push('axe: ' + x.id + ' ' + " +
+    "x.nodes.map(function (n) { return n.target.join(' '); }).join(', ')); }); }, " +
+    "function (e) { window.__axeOut = []; __probe.errs.push('axe rejected: ' + String(e && (e.stack || e.message) || e).slice(0, 300)); }), " +
+    "false)) && Array.isArray(window.__axeOut)"
+  runs.append(Run(name: "room \(theme) \(lang), frozen, axe", url: URL(string: "\(origin)/\(q)")!, width: 1280,
+                  height: 800, rendered: axe, setup: "Object.freeze(Object.prototype);"))
 }
 
 // Listens for errors from the first moment, before the page's own scripts run.
