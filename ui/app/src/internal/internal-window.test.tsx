@@ -302,6 +302,27 @@ test("an answer the host keeps extending streams on: after its own content block
   expect(live()).toBe(true);
 });
 
+test("a footnoted answer shows its notes; its final render turns a reference without a note into text", async () => {
+  const { show, play } = await open();
+  const text = "Clause 4[^a] and clause 5[^b].\n\n[^a]: The lease, page 3.";
+  await show([agentText(6, 1, text)], header("running"));
+  const answer = () => all("message-agent")[0]!;
+  const notes = () => answer().querySelector("section[data-footnotes]");
+  // Streaming: the note shows in the notes section, the reference without a note is a pending number, no raw syntax.
+  expect(notes()?.textContent).toContain("The lease, page 3.");
+  expect(answer().querySelector("sup a[href]")).not.toBeNull();
+  expect(answer().querySelector("sup[data-footnote-pending]")).not.toBeNull();
+  expect(answer().textContent).not.toContain("[^b]");
+  const back = () => notes()?.querySelector("[data-footnote-backref]");
+  expect(back()?.hasAttribute("href")).toBe(false);
+  // The agent moves on: the final render keeps the notes and shows the undefined reference as text, as GFM does.
+  await play([upsert(toolCall(7, 1, "pending"))]);
+  expect(notes()?.textContent).toContain("The lease, page 3.");
+  expect(answer().textContent).toContain("[^b]");
+  expect(answer().querySelector("sup[data-footnote-pending]")).toBeNull();
+  expect(back()?.getAttribute("href")).toMatch(/-fnref-a$/);
+});
+
 test("undo sends the turn's files; a limit stop shows its reset time as ISO UTC", async () => {
   const sent: unknown[] = [];
   const { show } = await open({
