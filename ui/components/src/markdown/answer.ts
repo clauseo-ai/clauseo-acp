@@ -392,17 +392,29 @@ export function createAnswer(scope: string): Answer {
       key += `;${inner}\u0000${numbering.number.get(inner) ?? ""},${known},${list.join(".")}`;
     }
     return noteViews.get(`${key}\u0002${streaming ? 1 : 0}`, () => {
-      let hast: Hast;
-      try {
-        hast = sanitize(noteHast(scope, numbering, id, options), SCHEMA) as Hast;
-      } catch {
-        const text: Text = { type: "text", value: note.source.trimEnd() };
-        hast = {
+      // As toView does for a block: a note too deep to walk safely, or any error on the way, shows its
+      // source as plain text, and what capNesting replaced reads as written.
+      const shown = restore(note.source);
+      const fallback = (): Hast => {
+        const text: Text = { type: "text", value: shown.trimEnd() };
+        return {
           type: "root",
           children: [{ type: "element", tagName: "li", properties: {}, children: [text] }],
         };
+      };
+      let hast: Hast;
+      try {
+        if (deeperThan(note.node, MAX_TREE_DEPTH)) hast = fallback();
+        else {
+          const raw = noteHast(scope, numbering, id, options);
+          // The note's own text, and the link definitions from other blocks it carries, may hold some.
+          if (hasStandIns(note.source) || note.definitions.length > 0) restoreText(raw);
+          hast = sanitize(raw, SCHEMA) as Hast;
+        }
+      } catch {
+        hast = fallback();
       }
-      return { source: note.source, input: key, hast, streaming, note: id };
+      return { source: shown, input: key, hast, streaming, note: id };
     });
   };
   const notesOf = (numbering: Numbering, streamingNotes: Footnotes): BlockView | undefined => {
