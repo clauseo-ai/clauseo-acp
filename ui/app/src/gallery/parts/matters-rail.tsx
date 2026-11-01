@@ -8,6 +8,9 @@ import { Button } from "@clauseo/components/ui/button.tsx";
 import { Sample } from "./frame.tsx";
 import { ACME, BLUEBELL, CONVERSATIONS, TRUST } from "./matters-data.ts";
 
+/** Every action a matter's menu offers, wired to nothing: a row's menu shows only the actions it is given. */
+const ACTIONS = { onPin: () => {}, onLocate: () => {}, onReveal: () => {}, onRemove: () => {} };
+
 /** The rail's list of matters, as the rail lays them out. */
 function Rows({ children }: { children: ReactNode }) {
   return <ul className="room-matters">{children}</ul>;
@@ -56,19 +59,32 @@ export function RailSamples() {
           <MatterRow {...BLUEBELL} state="pausedSet" at="9:00 am" day="Tuesday" />
         </Rows>
       </Sample>
+      <Sample name="Matter, at the limit: until a time today, until a day, and no reset given">
+        <Rows>
+          <MatterRow {...ACME} state="limit" at="6:10 pm" />
+          <MatterRow {...TRUST} state="limit" at="9:00 am" day="Tuesday" />
+          <MatterRow {...BLUEBELL} state="limit" />
+        </Rows>
+      </Sample>
       <Sample name="Matter, folder moved">
         <Rows>
-          <MatterRow {...BLUEBELL} state="moved" onLocate={() => {}} onPin={() => {}} />
+          <MatterRow {...BLUEBELL} {...ACTIONS} state="moved" />
         </Rows>
       </Sample>
       <Sample name="Matter, pinned, found by a search, not protected">
         <Rows>
-          <MatterRow {...TRUST} pinned match="Client, A. Rao" unprotected onPin={() => {}} />
+          <MatterRow {...TRUST} {...ACTIONS} pinned match="Client, A. Rao" unprotected />
         </Rows>
       </Sample>
       <Sample name="Matter, current, opened with its conversations" wide>
         <Rows>
-          <MatterRow {...ACME} current conversations={CONVERSATIONS} onNewConversation={() => {}} />
+          <MatterRow
+            {...ACME}
+            {...ACTIONS}
+            current
+            conversations={CONVERSATIONS}
+            onNewConversation={() => {}}
+          />
         </Rows>
       </Sample>
       <Sample name="Conversations, each state" wide>
