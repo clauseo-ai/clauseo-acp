@@ -1,5 +1,5 @@
-// The blank app starts, renders #app-root, keeps its WebView2 data in the temporary folder, and its
-// WebView2 browser process got the arguments the e2e build passes.
+// The blank app starts, renders #app-root under its CSP with no violation, keeps its WebView2 data in
+// the temporary folder, and its WebView2 browser process got the arguments the e2e build passes.
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -24,9 +24,39 @@ function argumentsOf(commandLine: string): string[] {
 }
 
 // One test, so the app starts once; each step names what failed.
+/** What the page's CSP refused since it loaded, as the init script below records it. */
+type Refused = { __clauseoRefused?: string[] };
+
 test("the blank app starts, renders #app-root and runs as the e2e build says", async ({ app }) => {
   await test.step("#app-root is attached", async () => {
     await expect(app.page.locator("#app-root")).toBeAttached();
+  });
+
+  await test.step("no securitypolicyviolation event fires", async () => {
+    // The page loaded before Playwright attached, so the listener goes in as an init script, which
+    // runs before any page script, and the page loads again under it: Tauri's CSP header and, in
+    // the room's build, the same policy as a meta tag (ui/app/vite.config.ts, cspMeta).
+    await app.page.addInitScript(() => {
+      const refused: string[] = [];
+      (window as Refused).__clauseoRefused = refused;
+      document.addEventListener("securitypolicyviolation", (event) => {
+        refused.push(
+          `${event.effectiveDirective} ${event.blockedURI} ${event.sourceFile}:${event.lineNumber}`,
+        );
+      });
+    });
+    await app.page.reload({ waitUntil: "load" });
+    await expect(app.page.locator("#app-root")).toBeAttached();
+    // two frames, so what the first render and its effects asked for has been decided
+    const refused = await app.page.evaluate(
+      () =>
+        new Promise<string[] | null>((resolve) =>
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => resolve((window as Refused).__clauseoRefused ?? null)),
+          ),
+        ),
+    );
+    expect(refused).toEqual([]);
   });
 
   await test.step("WebView2 keeps its data in the temporary folder", () => {
