@@ -14,8 +14,12 @@ export type Os = (typeof OSES)[number];
 export const WARMUP_RUNS = 1;
 /** Measured runs; the result holds the median of each metric over them. */
 export const MEASURED_RUNS = 3;
-/** A `requestAnimationFrame` gap over this many milliseconds is a dropped frame. */
-export const FRAME_BUDGET_MS = 16.7;
+/**
+ * A `requestAnimationFrame` gap over this many milliseconds is a dropped frame: about 1.5 frames at
+ * 60 Hz, so a frame that is only late (WebKit's rAF jitters around 17 ms) is not counted, and a
+ * frame that is skipped (a gap near 33 ms) is (#172).
+ */
+export const DROPPED_GAP_MS = 25;
 /** Dropped frames are counted per this many milliseconds of streaming. */
 export const DROPPED_WINDOW_MS = 10_000;
 /** A Long Animation Frame entry over this many milliseconds counts (the budget row's 50 ms). */
@@ -185,7 +189,7 @@ export function percentile(values: readonly number[], p: number): number | null 
 }
 
 /**
- * Gaps between consecutive rAF timestamps over {@link FRAME_BUDGET_MS}, per 10 s of the span the
+ * Gaps between consecutive rAF timestamps over {@link DROPPED_GAP_MS}, per 10 s of the span the
  * timestamps cover. Null with fewer than two timestamps. Each gap counts once, however long.
  */
 export function droppedFramesPer10s(timestamps: readonly number[]): number | null {
@@ -194,7 +198,7 @@ export function droppedFramesPer10s(timestamps: readonly number[]): number | nul
   for (let i = 1; i < timestamps.length; i++) {
     const gap = timestamps[i]! - timestamps[i - 1]!;
     if (gap < 0) throw new Error(`raf_timestamps_ms goes backwards at index ${i}`);
-    if (gap > FRAME_BUDGET_MS) dropped++;
+    if (gap > DROPPED_GAP_MS) dropped++;
   }
   const span = timestamps[timestamps.length - 1]! - timestamps[0]!;
   return span > 0 ? (dropped * DROPPED_WINDOW_MS) / span : null;
