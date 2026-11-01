@@ -24,8 +24,8 @@ an id becomes a kind.
 
 **The model.** `Limits` is pure: no I/O and no clock. `new(cached, agents, now)`, then
 `input(Input, now) -> Vec<Action>`, `view(now)`, `next_deadline()`, `next_read_at(agent)` and
-`at_limit(agent)`. Three shapes differ from the task brief's sketch; `host` (R16) passes each
-through:
+`at_limit(agent, now)`. Four shapes differ from the task brief's sketch. `host` (R16) passes the
+first three through and calls the fourth:
 - `ReadOutcome::Usage { limits, reached: Option<LimitStopReason> }`. `reached` carries Codex's
   `rateLimitReachedType` and `spendControlReached`, which `AccountLimits` has no field for. It is
   model state until the next good read, so a restart forgets it, as it forgets the rejected flag.
@@ -38,20 +38,36 @@ through:
   account would have been stored, and would come back at start beside the real one.
 - `ProcessReaders::new(effective, codex_home, launcher, timer)`, from #160: Clauseo owns the
   Codex home (below).
+- `at_limit(agent, now)`: a row whose `resets_at` is at or before `now` never counts, even when
+  no deadline swept it because nobody watched. R16 asks at a turn stop, outside watching.
+
+The host keeps two contracts. It sends exactly one `ReadDone` per `Action::Read`, as
+`Failed(TimedOut)` if it drops the read; a `ReadDone` the model did not ask for is ignored. And it
+calls `next_deadline()` again after every `new` and `input`, and re-arms or cancels its one timer.
+`Asking { asking: true }` means any permission or elicitation is pending in any session of that
+agent; the host sends `false` only when none is left.
 
 **Merge** (T3's rules). Windows upsert by id. A missing `resets_at` keeps the old one. A no-op is
 ignored. A live signal never revives `NotApplicable`. A rejected live signal leaves the figure as
-the agent sent it, and marks the window rejected until the next good read. The flag drives the
-`AtLimit` tone and `at_limit`. A failed read keeps the last good numbers as
+the agent sent it, and marks the window rejected. The flag drives the `AtLimit` tone and
+`at_limit`. It clears at the next good read, at a later live `allowed` or `allowed_warning` for
+that window, or when the window's `resets_at` passes. This changes the task brief's "until the next
+good read" (review of #114, round 1), for Rohan to confirm: after `MethodMissing` no good read ever
+comes, so the window would stay at the limit for good. A failed read keeps the last good numbers as
 `Stale { ReadFailed }`, or gives `Unavailable { ReadFailed }` when there are none.
 `NotApplicable` and `Unavailable { MissingScope }` survive a failed read. A good read
 replaces everything, live updates that arrived during it included. A live signal for a window
 no read has named is dropped, except Claude's `five_hour` and `seven_day`, so an `overage` event
 before any snapshot is dropped. A rejected `five_hour` or `seven_day` signal with no figure adds
-its row at 100%. A missing usage method (`MethodMissing`, Claude only) gives
+its row at 100%. That 100% is stored with the account, on purpose, although the agent never sent
+it: it is what "rejected" means for a row no read has named, and the next good read replaces it. A missing usage method (`MethodMissing`, Claude only) gives
 `Stale { ReadFailed }` or `Unavailable { ReadFailed }`, then `LiveOnly` once a live signal
-arrives. A live signal before any read has named the account changes the view only, since
-`AccountLimits` needs an `AccountRef`.
+arrives. So does a failed read with no earlier numbers (a timeout, a crash, a refused install):
+live signals still reach the view, so a real limit shows. Only while the first read is in flight,
+and for a signed-out agent, are live signals dropped. While no read has named the account, a live
+signal changes the view only (`ViewChanged`), since `AccountLimits` needs an `AccountRef`. At
+start, the cached entry with the newest checked time is each agent's, whatever order the store
+gives.
 
 **Refresh.** One read per agent at start, and cached values become `Stale { Aged }`
 (`NotApplicable` stays). A focus, or a meter or the settings page opening, reads when the last read
@@ -68,7 +84,7 @@ Claude, 10 s for Codex.
 
 **The view.** Tones: neutral below 75% used, near from 75% or on the agent's warning, at the
 limit at 100% or when rejected. Never red. A row is stale 15 minutes after its last update. The
-meter is the tightest window. The at-limit words are in `src/view/words.rs`.
+meter is the tightest window. The at-limit words are in `src/view/at_limit_words.rs`.
 
 **The Claude helper.** `limits` embeds `helper/claude-usage.mjs` and writes it into
 claude-agent-acp's install folder as `clauseo-claude-usage.mjs`. It writes only when the bytes
@@ -113,7 +129,9 @@ never a key or a token.
 **Codex.** The reader runs `node <codex.js> app-server` and talks through `codex_appserver`'s
 client: `initialize` (then `initialized`), `account/read`, and, for a ChatGPT account only,
 `account/rateLimits/read { excludeResetCreditDetails: true }`. Then it drops the client, which
-closes stdin. `codex.js` is codex-acp's own `node_modules/@openai/codex/bin/codex.js`, else the
+closes stdin. It passes none of the `CODEX_CONFIG` overrides the host gives codex-acp under
+#160, since it starts no thread and runs no tool. What `codex app-server` loads at start-up from
+Clauseo's home (plugins, apps) is not verified; G16 checks it. `codex.js` is codex-acp's own `node_modules/@openai/codex/bin/codex.js`, else the
 install's. No account is `SignedOut`. An API key is `PayAsYouGo { via: OpenAi }` with ref
 `api-key`, and Bedrock is `PayAsYouGo { via: Bedrock }` with ref `bedrock`, both
 `NotApplicable`. For ChatGPT, only the snapshot whose `limitId` is `codex` (from
@@ -131,7 +149,10 @@ from `planType`, and an unknown type gives none.
 `agents.codex-acp`. `command` is the absolute path of `node`. `args[0]` must be an absolute path
 to a regular file, with no `.` or `..` part. The install folder is the parent of the nearest
 `node_modules` above it. No component from the install folder down to the file may be a symlink,
-and the helper is never written through one. The install folder and its parents may be symlinks.
+and the helper is never written through one. Before the helper is written or run,
+`<install>/node_modules/@anthropic-ai/claude-agent-sdk/package.json` must be a regular file on the
+same walk. Otherwise Node would climb to a parent `node_modules` and run some other SDK. A global
+npm install, where the SDK sits nested under the adapter, is refused for the same reason. The install folder and its parents may be symlinks.
 In practice an npm-installed adapter passes, since npm puts real files under `node_modules`. A
 pnpm or linked install puts symlinks on that path, so it reads as "no limits" until stage D's
 `agents` owns the install. A reader's environment is the inherited one, minus every name the
