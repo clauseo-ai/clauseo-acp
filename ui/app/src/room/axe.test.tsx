@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // axe-core 4.14.0 over the room's frame, in every theme, language, lite and motion, with a matter and its papers, with
-// a matter and none, with no matter, and when list_matters fails. happy-dom computes no styles, so axe can't judge colour contrast here: that
+// a matter and none, with no matter (the empty rail), when list_matters fails, with the rail in every state, and with
+// the new matter dialog open, with and without a NextHost. happy-dom computes no styles, so axe can't judge colour contrast here: that
 // is checked by hand in the app, with window.__clauseoAxe() (dev-hooks.ts).
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -12,7 +13,7 @@ import { afterEach, beforeAll, expect, test } from "vitest";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type { MatterSummary } from "../transport/protocol.ts";
 import { uuid } from "../testing/stream-script.ts";
-import { detailed, fakeNext } from "./fake-next.ts";
+import { detailed, fakeNext, railStates } from "./fake-next.ts";
 import type { PaperSummary, UiSettings } from "./host-next.ts";
 import { Room } from "./room.tsx";
 import { connectRoom } from "./start.ts";
@@ -42,19 +43,39 @@ const PAPERS: PaperSummary[] = ["Notice to the bank.pdf", "उत्तर.docx"
   (name, i) => ({ file: uuid(i + 1, 8), path: name, size: 1000, modified: 1_730_000_000_000 }),
 );
 
-const SCENES = {
+type Scene = {
+  matters: boolean | "fails" | "states";
+  papers: readonly PaperSummary[] | undefined;
+  /** New matter, pressed: the dialog open over the room. */
+  dialog?: boolean;
+};
+
+const SCENES: Record<string, Scene> = {
   "a matter with papers": { matters: true, papers: PAPERS },
   "a matter with none": { matters: true, papers: [] },
+  // the empty rail too: "No matters yet" and "Add a matter's folder."
   "no matter": { matters: false, papers: undefined },
   // list_matters rejects: no heading, and nothing else in the title's place
   failed: { matters: "fails", papers: undefined },
-} as const;
+  // every rail state, every date group, Pinned and the scratch matter (fake-next.ts's railStates)
+  "the rail in every state": { matters: "states", papers: PAPERS },
+  "the new matter dialog": { matters: "states", papers: PAPERS, dialog: true },
+  "the new matter dialog without a NextHost": { matters: true, papers: undefined, dialog: true },
+};
 
-function transportFor(scene: (typeof SCENES)[keyof typeof SCENES]): FakeTransport {
-  const matters: MatterSummary[] =
-    scene.matters === true
-      ? [{ matter: uuid(1, 2), name: "Sharma v. State of Delhi", kind: "folder" }]
-      : [];
+const OPEN: MatterSummary = {
+  matter: uuid(1, 2),
+  name: "Sharma v. State of Delhi",
+  kind: "folder",
+};
+const SCRATCH: MatterSummary = { matter: uuid(99, 2), name: "Scratch", kind: "scratch" };
+
+function transportFor(scene: Scene): FakeTransport {
+  const matters: MatterSummary[] = scene.matters === true ? [OPEN, SCRATCH] : [];
+  const infos =
+    scene.matters === "states"
+      ? railStates(OPEN, SCRATCH, Date.now())
+      : matters.map((m) => detailed(m));
   return new FakeTransport({
     query: () => {
       if (scene.matters === "fails") throw new Error("the host is gone");
@@ -62,9 +83,7 @@ function transportFor(scene: (typeof SCENES)[keyof typeof SCENES]): FakeTranspor
     },
     ...(scene.papers === undefined
       ? {}
-      : {
-          next: fakeNext({ matters: () => matters.map((m) => detailed(m)), papers: scene.papers }),
-        }),
+      : { next: fakeNext({ matters: () => infos, papers: scene.papers }) }),
   });
 }
 
@@ -87,6 +106,15 @@ for (const theme of THEMES) {
             root = createRoot(host);
             await act(async () => root?.render(<Room transport={transport} />));
             await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+            if (scene.dialog === true) {
+              await act(async () =>
+                host?.querySelector<HTMLButtonElement>('[data-testid="new-matter"]')?.click(),
+              );
+              await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+              expect(document.querySelector('[role="dialog"]'), name).not.toBeNull();
+            }
+            if (scene.matters === "states")
+              expect(host.querySelectorAll('[data-testid="matter-row"]'), name).toHaveLength(11);
             // the display the case names is the one on <html>
             const html = document.documentElement;
             expect(html.dataset["theme"]).toBe(theme === "dark" ? "night" : "day");
@@ -122,7 +150,7 @@ for (const theme of THEMES) {
 }
 
 test("axe in this environment finds a violation where there is one: a button with no name in the room", async () => {
-  const transport = transportFor(SCENES["a matter with papers"]);
+  const transport = transportFor({ matters: true, papers: PAPERS });
   connectRoom(transport, {});
   host = document.createElement("div");
   document.body.append(host);
