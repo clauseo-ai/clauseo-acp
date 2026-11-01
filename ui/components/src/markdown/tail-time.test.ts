@@ -6,7 +6,8 @@ import { CASES } from "./hostile-cases.ts";
 // hostile-time.test.ts, which covers every case once both are on main): one update of the model may cost
 // at most RATIO times one update of ordinary prose of the same length, measured in the same run (a loaded
 // machine slows both), and at least FLOOR_MS (tiny cases are all noise). Checked finished, and at every
-// 16-character delta while streaming, since tail repair runs only then.
+// 16-character delta while streaming, since tail repair runs only then. One difference: an update over the
+// limit is timed again next to the prose baseline timed again, since this suite runs beside the others.
 //
 // Before the repair's limits, one streaming update of `*a `×4,000 took 6.3 s and of `_a `×4,000 7.5 s
 // (prose of the same length: 7.5 ms, so about 900 times), and of `[`×16,000 0.66 s (about 50 times). Now
@@ -58,24 +59,32 @@ test.each(CASES.filter((c) => IDS.has(c.id)).map((c) => [c.id, c] as const))(
       0,
       c.markdown.length,
     );
-    const limit = Math.max(FLOOR_MS, RATIO * fastest(() => createAnswer("p").update(prose, false)));
-    const finished = fastest(() => createAnswer("t").update(c.markdown, false));
+    const limitNow = () =>
+      Math.max(FLOOR_MS, RATIO * fastest(() => createAnswer("p").update(prose, false)));
+    const limit = limitNow();
+    /**
+     * How far over the limit `update` is (under 1 passes). An update over it is measured again (the
+     * fastest of three), next to the prose baseline measured again, so a stretch of load on a busy
+     * machine, which slows both, does not count, and a slow update still does.
+     */
+    const over = (took: number, update: () => void) => {
+      if (took < limit) return took / limit;
+      const again = fastest(update);
+      return again / Math.max(limit, limitNow());
+    };
+    const whole = () => createAnswer("t").update(c.markdown, false);
+    const finished = over(fastest(whole), whole);
     let streaming = 0;
     const answer = createAnswer("s");
     for (const end of ends(c.markdown.length)) {
-      const start = performance.now();
+      const begin = performance.now();
       answer.update(c.markdown.slice(0, end), true);
-      const took = performance.now() - start;
-      // Over the limit: measured again from a fresh model at that length, to tell a hiccup from a slow update.
-      streaming = Math.max(
-        streaming,
-        took < limit
-          ? took
-          : fastest(() => createAnswer("r").update(c.markdown.slice(0, end), true)),
-      );
+      const took = performance.now() - begin;
+      const update = () => createAnswer("r").update(c.markdown.slice(0, end), true);
+      streaming = Math.max(streaming, over(took, update));
     }
-    expect(finished, "finished").toBeLessThan(limit);
-    expect(streaming, "streaming").toBeLessThan(limit);
+    expect(finished, "finished, as a share of the limit").toBeLessThan(1);
+    expect(streaming, "streaming, as a share of the limit").toBeLessThan(1);
   },
   60_000,
 );

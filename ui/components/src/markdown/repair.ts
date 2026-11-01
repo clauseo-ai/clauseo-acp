@@ -21,15 +21,18 @@ type Edit = { start: number; end: number; text: string };
  */
 type Cuts = {
   readonly edits: Edit[];
+  readonly mask: Uint8Array;
   readonly cut: (start: number, end: number) => void;
   readonly kept: (at: number) => boolean;
 };
 
-function createCuts(length: number): Cuts {
+/** New cuts of a text of `length`; with `base`, what `base` cuts counts as cut too (but is not in `edits`). */
+function createCuts(length: number, base?: Cuts): Cuts {
   const edits: Edit[] = [];
-  const mask = new Uint8Array(length);
+  const mask = base ? base.mask.slice() : new Uint8Array(length);
   return {
     edits,
+    mask,
     cut: (start, end) => {
       edits.push({ start, end, text: "" });
       mask.fill(1, start, end);
@@ -228,12 +231,12 @@ function canClose(char: string, before: string | undefined, after: string | unde
  * backslash, a half footnote reference or image, and a half link's syntax (its text stays), plus any `[` in
  * the last paragraph with no `]` after it. Returns the edits.
  */
-function halfConstructs(input: string, root: Root, from: number): Edit[] {
-  const cuts = createCuts(input.length);
-  const { edits, cut } = cuts;
+function halfConstructs(input: string, root: Root, from: number, cuts: Cuts): boolean {
+  const { cut } = cuts;
   let end = keptEnd(input, from, cuts);
   const hideFrom = hiddenLines(input, root, from, end);
-  if (hideFrom >= 0) cut(hideFrom, input.length);
+  const hid = hideFrom >= 0;
+  if (hid) cut(hideFrom, input.length);
   end = keptEnd(input, from, cuts);
   // A trailing backslash in text: the start of an escape, or of a hard break (then one line ending after it).
   if (
@@ -275,7 +278,7 @@ function halfConstructs(input: string, root: Root, from: number): Edit[] {
     const close = start + 1 + link[1]!.length;
     // `[text]` and nothing more (an empty one is no link).
     const bare = link[0].length === link[1]!.length + 2;
-    if (bare && link[1] === "") return edits;
+    if (bare && link[1] === "") return hid;
     const half =
       close >= end
         ? inText(start)
@@ -290,7 +293,7 @@ function halfConstructs(input: string, root: Root, from: number): Edit[] {
   }
   end = keptEnd(input, from, cuts);
   const leaf = leafAt(input, root, from, end);
-  if (!leaf) return edits;
+  if (!leaf) return hid;
   // A `[` with no `]` after it in the paragraph's text: a link whose text is still arriving. Cutting a
   // `[` moves no `]`, so the last `]` that stays is found once.
   let lastClose = input.length - 1;
@@ -311,7 +314,7 @@ function halfConstructs(input: string, root: Root, from: number): Edit[] {
         if (input[at] === "[" && !escaped(input, at) && cuts.kept(at)) cut(at, at + 1);
     }
   }
-  return edits;
+  return hid;
 }
 
 /** The paragraph, heading or table cell holding `input[end - 1]`, if its inline content runs to there. */
@@ -336,8 +339,8 @@ function keptEnd(input: string, from: number, cuts: Cuts): number {
  * the last paragraph, heading or cell gets its closer at the end; an opener with nothing after it, and a
  * delimiter run at the very end that closes nothing, are cut. Returns the edits and what to insert where.
  */
-function closers(input: string, root: Root, from: number) {
-  const cuts = createCuts(input.length);
+function closers(input: string, root: Root, from: number, base?: Cuts) {
+  const cuts = createCuts(input.length, base);
   const { edits, cut } = cuts;
   const leaf = leafAt(input, root, from, keptEnd(input, from, cuts));
   if (!leaf) return { edits, insert: "", end: input.length };
@@ -485,8 +488,11 @@ function linksIn(root: Root, text: string, from: number): { start: number; close
 /**
  * The repaired text of the streaming last block, or undefined when it needs nothing. `input` is what is
  * parsed for the block (definition lines, then the block from offset `from`); `parse` parses such an
- * input (cached by the caller). When the first pass cuts something, its result is parsed again, so the
- * second pass sees what CommonMark makes of the text that stays.
+ * input (cached by the caller). The raw parse is the only one the repair needs of its own when the first
+ * pass cuts nothing, or cuts only text that holds and touches no delimiter (the usual case: a half link,
+ * reference or image, an unclosed `[`): the second pass then reads the raw parse with those cuts masked.
+ * Otherwise the first pass's result is parsed again, so the second pass sees what CommonMark makes of the
+ * text that stays; when the second pass then changes nothing, that parse is the one the view uses.
  */
 export function repairTail(
   input: string,
@@ -494,27 +500,43 @@ export function repairTail(
   parse: (text: string) => Root,
 ): string | undefined {
   const raw = parse(input);
-  const cuts = halfConstructs(input, raw, from);
+  const firstCuts = createCuts(input.length);
+  const hid = halfConstructs(input, raw, from, firstCuts);
+  const cuts = firstCuts.edits;
+  const finish = (out: string, origin: (offset: number) => number) => {
+    let block = out.slice(from);
+    const bare = BARE_MARKER.exec(`\n${block}`);
+    if (bare) block = block.slice(0, bare.index);
+    return withoutNewLinks(input, raw, from, block, origin, parse);
+  };
+  // Cuts of text that holds no delimiter and touches none leave every run and its flanking as they
+  // were: the second pass reads the raw parse, with those cuts counted as cut, and nothing is parsed again.
+  if (cuts.length > 0 && !hid && runsUnchanged(input, cuts)) {
+    const found = closers(input, raw, from, firstCuts);
+    const kept: Kept[] = [];
+    const out = apply(input, [...cuts, ...found.edits], found.end, found.insert, kept);
+    return finish(out, (offset) => originOf(kept, offset));
+  }
   const first: Kept[] = [];
   const text = cuts.length === 0 ? input : apply(input, cuts, input.length, "", first);
   const { edits, insert, end } = closers(text, cuts.length === 0 ? raw : parse(text), from);
   if (cuts.length === 0 && edits.length === 0 && insert === "") return undefined;
   const second: Kept[] = [];
   const out = edits.length === 0 && insert === "" ? text : apply(text, edits, end, insert, second);
-  let block = out.slice(from);
-  const bare = BARE_MARKER.exec(`\n${block}`);
-  if (bare) block = block.slice(0, bare.index);
-  return withoutNewLinks(
-    input,
-    raw,
-    from,
-    block,
-    (offset) => {
-      const inText = second.length === 0 ? offset : originOf(second, offset);
-      return inText < 0 || first.length === 0 ? inText : originOf(first, inText);
-    },
-    parse,
-  );
+  return finish(out, (offset) => {
+    const inText = second.length === 0 ? offset : originOf(second, offset);
+    return inText < 0 || first.length === 0 ? inText : originOf(first, inText);
+  });
+}
+
+/** Whether no cut holds or touches a delimiter character (`*`, `_`, `~`, a backtick). */
+function runsUnchanged(input: string, cuts: readonly Edit[]): boolean {
+  const delimiter = (at: number) => DELIMITERS.includes(input[at] ?? " ");
+  for (const { start, end } of cuts) {
+    if (delimiter(start - 1) || delimiter(end)) return false;
+    for (let at = start; at < end; at++) if (delimiter(at)) return false;
+  }
+  return true;
 }
 
 /**
