@@ -15,6 +15,17 @@ use std::path::Path;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
+/// The Codex tag the vendored schema comes from, and so the folder under `schema/` the drift
+/// test reads. A pin bump changes it here (`schema/README.md`, "Refreshing on a pin bump").
+pub(crate) const SCHEMA_TAG: &str = "rust-v0.162.1";
+
+/// The folder of the vendored files.
+pub(crate) fn vendored_folder() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("schema")
+        .join(SCHEMA_TAG)
+}
+
 /// One schema file.
 pub(crate) struct Schema {
     name: String,
@@ -22,11 +33,9 @@ pub(crate) struct Schema {
 }
 
 impl Schema {
-    /// A vendored file, by its path under `schema/rust-v0.162.1/`.
+    /// A vendored file, by its path under `schema/<SCHEMA_TAG>/`.
     pub(crate) fn vendored(path: &str) -> Self {
-        let full = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("schema/rust-v0.162.1")
-            .join(path);
+        let full = vendored_folder().join(path);
         let text = std::fs::read_to_string(&full)
             .unwrap_or_else(|error| panic!("cannot read {}: {error}", full.display()));
         Self::new(path, serde_json::from_str(&text).unwrap())
@@ -82,7 +91,7 @@ impl Schema {
 
     /// A value the node accepts: every property present, the first enum value, the first
     /// alternative that is not `null`, one entry in a map or list.
-    fn sample(&self, node: &Value) -> Value {
+    pub(crate) fn sample(&self, node: &Value) -> Value {
         let node = self.resolve(node);
         if let Some(values) = node.get("enum").and_then(Value::as_array) {
             return values.first().cloned().unwrap_or(Value::Null);
