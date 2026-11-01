@@ -73,7 +73,9 @@ pub struct McpServerLaunch {
     /// Its arguments.
     #[serde(default)]
     pub args: Vec<String>,
-    /// Variables added to its environment. Never a secret: keys go in the OS keychain.
+    /// Variables added to its environment. Stored in plain text in `settings.json` and sent to
+    /// the agent in `session/new`: do not put a token here. No keychain store for MCP keys
+    /// exists yet.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     /// Whether the agent gets it. Off unless set.

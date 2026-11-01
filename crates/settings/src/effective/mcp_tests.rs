@@ -165,6 +165,55 @@ fn the_mcp_section_must_be_an_object() {
     ));
 }
 
+// A policy that names the `mcp` section in a form that does not set it fails closed: the
+// firm's list there is unknown, so the user's must not stand in (0009, review of #117).
+#[test]
+fn a_malformed_or_misnamed_policy_mcp_section_locks_the_list_empty() {
+    let files = user(&servers_json(&[("mine", true)]));
+    let key_case = format!(
+        r#"{{"mcp": {{"Servers": {{"firm": {{"command": "{}", "enabled": true}}}}}}}}"#,
+        abs_json("bin/firm")
+    );
+    let texts = [
+        r#"{"mcp": "off"}"#.to_owned(),
+        r#"{"mcp": []}"#.to_owned(),
+        r#"{"mcp": null}"#.to_owned(),
+        r#"{"mcp": false}"#.to_owned(),
+        r#"{"MCP": {"servers": {}}}"#.to_owned(),
+        key_case,
+    ];
+    for text in texts {
+        let firm = policy("firm", text.clone());
+        let effective = Effective::load(&locations(), &files, &[&firm]);
+        assert!(effective.mcp_servers().is_empty(), "{text}");
+        assert!(effective.is_locked("mcp.servers"), "{text}");
+        assert!(!effective.warnings().is_empty(), "{text}");
+    }
+    // A stray case variant beside a valid section still locks it empty: fail closed.
+    let both = format!(
+        r#"{{"mcp": {{"servers": {{"firm": {{"command": "{}", "enabled": true}}}}}}, "Mcp": 1}}"#,
+        abs_json("bin/firm")
+    );
+    let effective = Effective::load(&locations(), &files, &[&policy("firm", both)]);
+    assert!(effective.mcp_servers().is_empty());
+    assert!(effective.is_locked("mcp.servers"));
+    // Another unknown section locks nothing.
+    let other = policy("firm", r#"{"mcpx": {}, "ui": {"colour": "red"}}"#);
+    let effective = Effective::load(&locations(), &files, &[&other]);
+    assert_eq!(enabled(&effective), ["mine"]);
+    assert!(!effective.is_locked("mcp.servers"));
+}
+
+// The user's own misnamed section is only a warning: nothing locks, and their list stands.
+#[test]
+fn a_misnamed_user_mcp_section_locks_nothing() {
+    let mut text = servers_json(&[("mine", true)]);
+    text.insert_str(text.len() - 1, r#", "MCP": 1"#);
+    let effective = Effective::load(&locations(), &user(&text), &[]);
+    assert_eq!(enabled(&effective), ["mine"]);
+    assert!(!effective.is_locked("mcp.servers"));
+}
+
 fn unreadable() -> FakeSource<impl Fn() -> PolicyRead> {
     FakeSource {
         name: "broken",
