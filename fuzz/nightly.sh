@@ -31,7 +31,7 @@ OUT=out
 MINIMISE_SECONDS=300
 # A log matching this is withheld: sanitizer reports, and the panics of Rust's UB checks
 # (debug assertions are on), which report as panics but mean an unsafe precondition broke.
-WITHHELD='ERROR: (Address|Leak|Memory|Thread|UndefinedBehavior)Sanitizer|runtime error:|unsafe precondition\(s\) violated|misaligned pointer dereference|null pointer dereference occurred'
+WITHHELD='ERROR: (Address|Leak|Memory|Thread|UndefinedBehavior)Sanitizer|runtime error:|unsafe precondition\(s\) violated|misaligned pointer dereference|null pointer dereference occurred|trying to construct an enum from an invalid value'
 
 seconds=${1:-}
 if [[ ! $seconds =~ ^[0-9]+$ ]] || ((10#$seconds < 1)); then
@@ -132,7 +132,7 @@ minimise() {
   if "$BIN_DIR/$target" "$@" "$min" >"$rerun" 2>&1; then
     return 0
   fi
-  if grep -qE "$WITHHELD" "$rerun" || [[ $(panic_site "$rerun") != "$site" ]]; then
+  if [[ -z $site ]] || grep -qE "$WITHHELD" "$rerun" || [[ $(panic_site "$rerun") != "$site" ]]; then
     return 0
   fi
   cp "$min" "$dest/minimised-$(basename "$input")"
@@ -169,6 +169,11 @@ run_target() {
   if ((code != 0)); then
     input=$(find "artifacts/$target" -type f | head -n 1)
     kind=$(classify "$log" "$input")
+  fi
+  # libFuzzer's merge survives a crashing input and drops it without a report; a sanitizer
+  # report there is withheld like any other.
+  if grep -qE "$WITHHELD" "$OUT/logs/$target.merge.log"; then
+    kind=withheld
   fi
 
   if [[ $kind != ok && $kind != withheld ]]; then
