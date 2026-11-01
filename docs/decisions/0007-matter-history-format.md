@@ -157,10 +157,15 @@ documents with 3 changed).
   blob, and every tree and commit, is written at level 1, gix's default. A level-0 object is ordinary
   zlib that every git reads, so the rule can change later without rewriting history.
 - Hashing is gix's own collision-detecting SHA-1.
-- An object already present is never written again once it inflates in full to the expected kind
-  and size and hashes to its id, however old its file is (one left by a run that never published,
-  or one from before the last publish that a revert names again). A torn or wrong one is written
-  again from the bytes the checkpoint has in hand.
+- An object already present is inflated in full however old its file is (one left by a run that
+  never published, or one from before the last publish that a revert names again), and never
+  written again once it checks out: for a file of up to 8 MiB, a tree or a commit, whose bytes the
+  checkpoint holds in memory, it must inflate to exactly those bytes (compared, not hashed); for a
+  larger file, which is streamed, it must hash to its id. A torn or wrong one is written again:
+  from the bytes in memory, or for a streamed file from a second read of the file, itself hashed
+  as it is stored. The cost falls on a revert: on the 2026 reference VM (AMD EPYC), about 5.9 ms
+  for an 8 MiB text file and 1.5 ms for an 8 MiB `.docx`, and for a file over 8 MiB about 1.4 ms
+  per MiB of text (about 57 ms for 40 MiB), on top of reading the file.
 - Retention: every version is kept. No pruning, squashing, gc or repack. `Retention::KeepAll` is
   passed at open, so a later policy is a new variant.
 
@@ -170,12 +175,13 @@ gix 0.89 syncs no loose object (it writes a temp file and renames it), so Clause
 flush per checkpoint:
 
 - macOS: a plain `fsync` on each object file the checkpoint wrote or found already present and
-  sound by that full check (an object a killed run left behind may never have been synced), and on each `objects/xx` folder it
-  touched (and `objects/` when a new `xx` folder was made); one `F_BARRIERFSYNC`; then the ref moves (checked
-  against the expected previous commit) and the index is written, each by temp file and rename, each
-  plain-`fsync`ed with its folder; then one `F_FULLFSYNC`. Objects reach the disk before the ref that
-  names them, and the last flush makes everything durable before the checkpoint returns.
-  `File::sync_all` is `F_FULLFSYNC` on macOS, so it is never called per file.
+  sound by that full check (an object a killed run left behind may never have been synced), and
+  on each `objects/xx` folder it touched (and `objects/` when a new `xx` folder was made); one
+  `F_BARRIERFSYNC`; then the ref moves (checked against the expected previous commit) and the
+  index is written, each by temp file and rename, each plain-`fsync`ed with its folder; then one
+  `F_FULLFSYNC`. Objects reach the disk before the ref that names them, and the last flush makes
+  everything durable before the checkpoint returns. `File::sync_all` is `F_FULLFSYNC` on macOS,
+  so it is never called per file.
 - Linux: `File::sync_all` on each written file and each changed folder, in the same order.
 - Windows: `File::sync_all` on each written file, in the same order; folders are not synced.
 
