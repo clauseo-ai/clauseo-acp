@@ -20,7 +20,7 @@ export const REGISTRY: readonly Entry[] = [
     id: "U1-02",
     words: frameWords("No matters yet"),
     screen: "room/toolbar",
-    render: (lang) => <RoomFrameToolbar title={frame(lang, "No matters yet")} />,
+    render: (lang) => <RoomFrameToolbar title={frame(lang, "No matters yet")} titleLang={lang} />,
   },
   {
     id: "U1-03",
