@@ -44,7 +44,9 @@ test("with VITE_CLAUSEO_WINDOW=room the app mounts the room inside #app-root, no
   expect(html).not.toContain("<h1");
   // the rail's New matter stands from the first render, before list_matters answers
   expect(html).toContain('data-testid="new-matter"');
-  expect(html).not.toContain('data-testid="composer"');
+  // the room's own composer (room/thread/), not the internal window's
+  expect(html).toContain('class="room-composer"');
+  expect(html).not.toContain('aria-label="Prompt"');
 });
 
 test("any other value of VITE_CLAUSEO_WINDOW mounts the internal window", async () => {

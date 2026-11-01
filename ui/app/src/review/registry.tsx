@@ -13,17 +13,202 @@ import {
   roomHost,
   scratchHost,
   type Step,
+  threadHost,
+  type ThreadState,
 } from "./hosts.ts";
-import { RoomAfter, RoomOver } from "./states.tsx";
+import { RoomAfter, RoomAsking, RoomOver } from "./states.tsx";
 import {
+  errorWords,
   frameWords,
   limitWords,
   matterFormWords,
   matterWords,
   shared,
+  threadWords,
   type WordsRef,
 } from "./words.ts";
 import type { NextErrorCode } from "../room/host-next.ts";
+import { ERROR_WORDS, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
+import type { ThreadKey } from "@clauseo/components/lib/words-thread.ts";
+import { agentText, step, toolCall, TURN, userMessage, uuid } from "../testing/stream-script.ts";
+import type { ErrorCode, StepEntry, ViewEntry } from "../transport/protocol.ts";
+
+/* ---------- U3: the live thread's states ---------- */
+
+const QUESTION = userMessage(5, 1, "What does clause nine of the lease say about notice?");
+const ANSWER = agentText(
+  6,
+  1,
+  "Clause nine requires **notice in writing**, served at the tenant's registered office, at least thirty days ahead.",
+);
+const PARTIAL = agentText(6, 1, "Clause nine requires **notice in writing**, served at");
+const ended = (over: Partial<StepEntry> = {}): ViewEntry => step(9, over);
+const paper = (undone: boolean): ViewEntry =>
+  ended({
+    files: [
+      {
+        path: "Notice to the bank.docx",
+        change: "modified",
+        size_bytes: 1200,
+        may_include_lawyer_edits: false,
+      },
+    ],
+    checkpoint_after: uuid(1, 9),
+    undone,
+  });
+const content = (block: object): ViewEntry => ({
+  agent_content: {
+    order: 7,
+    event: uuid(1, 12),
+    turn: TURN,
+    message: uuid(1, 6),
+    kind: "answer",
+    block: block as never,
+  },
+});
+/** A local time, `days` from today. */
+const atLocal = (days: number, h: number, m: number) => {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days, h, m).getTime();
+};
+const limit = (reason: string, resets_at?: number): ViewEntry => ({
+  limit_stop: {
+    order: 9,
+    turn: TURN,
+    reason: reason as never,
+    ...(resets_at === undefined ? {} : { resets_at }),
+  },
+});
+
+const thread = (state: ThreadState) => () => <RoomOver host={() => threadHost(state)} />;
+
+/** One entry per sentence of words-errors.ts that is its own: the first code for each, refused on a send. */
+const ERRORS: [ErrorCode, Exclude<ErrorKey, ThreadKey>][] = [];
+for (const [code, key] of Object.entries(ERROR_WORDS) as [ErrorCode, ErrorKey][]) {
+  if (key === "The answer stopped. Your question and the answer so far are kept.") continue;
+  if (!ERRORS.some(([, k]) => k === key)) ERRORS.push([code, key]);
+}
+
+const U3: Omit<Entry, "id">[] = [
+  {
+    words: frameWords("Answering."),
+    screen: "room/composer",
+    render: thread({ entries: [QUESTION, PARTIAL], status: "running" }),
+  },
+  {
+    words: threadWords("Failed"),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, toolCall(7, 1, "failed"), ANSWER, ended()] }),
+  },
+  {
+    words: threadWords("Stopped"),
+    screen: "room/thread",
+    render: thread({
+      entries: [QUESTION, PARTIAL, toolCall(7, 1, "cancelled"), ended({ stop: "cancelled" })],
+    }),
+  },
+  {
+    words: threadWords("You stopped the answer. The answer so far is kept."),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, PARTIAL, ended({ stop: "cancelled" })] }),
+  },
+  {
+    words: threadWords("The answer stopped at its limit, before it finished."),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, PARTIAL, ended({ stop: "max_tokens" })] }),
+  },
+  {
+    words: threadWords("This question was declined, so there is no answer."),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, ended({ stop: "refusal" })] }),
+  },
+  {
+    words: threadWords("The answer stopped. Your question and the answer so far are kept."),
+    screen: "room/thread",
+    render: thread({
+      entries: [QUESTION, PARTIAL, ended({ stop: "failed", failure: "agent.exited" })],
+    }),
+  },
+  {
+    words: threadWords("Your question"),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, ANSWER, ended()] }),
+  },
+  {
+    words: threadWords("Clauseo's answer"),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, ANSWER, ended()] }),
+  },
+  {
+    words: threadWords("Attached: {name}"),
+    screen: "room/thread",
+    render: thread({
+      entries: [
+        QUESTION,
+        content({ resource_link: { uri: "file:///matter/Lease.pdf", name: "Lease.pdf" } }),
+        ended(),
+      ],
+    }),
+  },
+  {
+    words: threadWords("Something here can't be shown in the thread."),
+    screen: "room/thread",
+    render: thread({
+      entries: [
+        QUESTION,
+        content({ audio: { data: { inline: "AAAA" }, mime_type: "audio/wav" } }),
+        ended(),
+      ],
+    }),
+  },
+  {
+    words: threadWords("Clauseo changed 1 paper."),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, ANSWER, paper(false)] }),
+  },
+  {
+    words: threadWords("You undid Clauseo's changes to 1 paper."),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, ANSWER, paper(true)] }),
+  },
+  {
+    words: limitWords("Resets {time}"),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, PARTIAL, limit("plan_window", atLocal(0, 23, 59))] }),
+  },
+  {
+    words: limitWords("Resets {day} {time}"),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, PARTIAL, limit("plan_window", atLocal(2, 9, 0))] }),
+  },
+  {
+    words: limitWords("Limit reached. Reset not given."),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, PARTIAL, limit("plan_window")] }),
+  },
+  {
+    words: limitWords("Try again"),
+    screen: "room/composer",
+    render: thread({ entries: [QUESTION, PARTIAL], lose: "agent.exited" }),
+  },
+  {
+    words: limitWords("Usage limit reached"),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, PARTIAL, limit("workspace_credits", atLocal(2, 9, 0))] }),
+  },
+  ...ERRORS.map(([code, key]) => ({
+    words: errorWords(key),
+    screen: "room/composer",
+    render: () => (
+      <RoomAsking
+        host={() => threadHost({ entries: [QUESTION, ANSWER, ended()], refuse: code })}
+        question="And clause ten?"
+      />
+    ),
+  })),
+];
+
+/* ---------- U2: the rail and matters ---------- */
 
 /** The rail open beside the work, every row in view: a window past the room's 1200 px breakpoint, tall enough for
  * the rail in every state. */
@@ -88,8 +273,8 @@ export const REGISTRY: readonly Entry[] = [
     screen: "room/wall",
     render: () => <RoomOver host={() => roomHost([MATTER], [])} />,
   },
-  // shared with U3's working line: exactly en "Answering.", hi "उत्तर दिया जा रहा है।"
-  railState("U3-01", frameWords("Answering.")),
+  // U3-01 onward, in order
+  ...U3.map((entry, i) => ({ id: `U3-${String(i + 1).padStart(2, "0")}`, ...entry })),
   {
     id: "U2-01",
     words: frameWords("Add a matter's folder."),

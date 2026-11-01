@@ -1,8 +1,16 @@
 // Scripted hosts for the review's room states: a FakeTransport that answers list_matters, and, where a state needs the
-// wall, H8's list_papers (room/host-next.ts), as room.test.tsx and the probe script them; the rail in every state; and
-// hosts that refuse a new matter with a code, for the form's lines. With the steps a state takes once rendered
-// (states.tsx's RoomAfter): New matter pressed, a name typed, Change and Create pressed.
-import type { MatterSummary } from "../transport/protocol.ts";
+// wall, H8's list_papers (room/host-next.ts), as room.test.tsx and the probe script them; the rail in every state;
+// hosts that refuse a new matter with a code, for the form's lines, with the steps a state takes once rendered
+// (states.tsx's RoomAfter): New matter pressed, a name typed, Change and Create pressed; and for the thread's states,
+// one thread whose view the host sends as the room subscribes (testing/stream-script.ts's entries).
+import { batch, event, header, reset, THREAD, TURN } from "../testing/stream-script.ts";
+import type {
+  CommandOutcome,
+  ErrorCode,
+  MatterSummary,
+  ThreadStatus,
+  ViewEntry,
+} from "../transport/protocol.ts";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
 import type { NextErrorCode, NextHostError, PaperSummary } from "../room/host-next.ts";
 import { detailed, fakeNext, railStates } from "../room/fake-next.ts";
@@ -31,6 +39,54 @@ export function roomHost(matters: MatterSummary[], papers?: PaperSummary[]): Fak
   if (papers !== undefined)
     host.next = fakeNext({ matters: () => matters.map((m) => detailed(m)), papers });
   return new FakeTransport(host);
+}
+
+/** A thread's state for the review: its entries and status, and what the host refuses or loses. */
+export type ThreadState = {
+  entries: ViewEntry[];
+  status?: ThreadStatus;
+  /** send_prompt is refused with this code. */
+  refuse?: ErrorCode;
+  /** The stream is lost with this code once its view has arrived. */
+  lose?: ErrorCode;
+};
+
+const refusal = (code: ErrorCode) => ({
+  code,
+  message: "the review's scripted refusal",
+  retryable: false,
+});
+
+/** A host with one matter and its one thread, whose view arrives as the room subscribes. */
+export function threadHost(state: ThreadState): FakeTransport {
+  const head = header();
+  head.header!.status = state.status ?? "idle";
+  const transport: FakeTransport = new FakeTransport({
+    query: (query) => {
+      if (query === "list_matters") return { matters: [MATTER] };
+      if (query.list_threads !== undefined)
+        return {
+          threads: [{ thread: THREAD, matter: MATTER.matter, agent: "claude", status: "idle" }],
+        };
+      throw new Error(`the review's host doesn't answer ${JSON.stringify(query)}`);
+    },
+    dispatch: (envelope): CommandOutcome => {
+      const command = envelope.command;
+      if (command.send_prompt !== undefined) {
+        if (state.refuse !== undefined) throw refusal(state.refuse);
+        return { prompt_accepted: { turn: TURN, message: THREAD } };
+      }
+      return "done";
+    },
+    subscribe: (stream) =>
+      queueMicrotask(() => {
+        transport.deliver(event(batch(1, [reset(state.entries, head)], undefined, stream)));
+        // lost after the view has applied (a frame, or the store's 100 ms catch-up), which would clear it
+        const lose = state.lose;
+        if (lose !== undefined) setTimeout(() => transport.failStream(stream, refusal(lose)), 250);
+      }),
+  });
+  return transport;
 }
 
 /** A NextHost whose matters show the scratch matter open (opened last), with a folder matter beside it. */

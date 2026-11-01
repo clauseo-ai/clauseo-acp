@@ -15,10 +15,15 @@ import type { MatterSummary } from "../transport/protocol.ts";
 import { uuid } from "../testing/stream-script.ts";
 import { detailed, fakeNext, railStates } from "./fake-next.ts";
 import type { PaperSummary, UiSettings } from "./host-next.ts";
+import { frameBatch } from "../store/batch.ts";
+import { StoreContext } from "../store/hooks.ts";
+import { createViewStore } from "../store/store.ts";
 import { Room } from "./room.tsx";
+import { stubFonts } from "./thread/testing.ts";
 import { connectRoom } from "./start.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+stubFonts();
 
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -63,6 +68,13 @@ const SCENES: Record<string, Scene> = {
   "the new matter dialog without a NextHost": { matters: true, papers: undefined, dialog: true },
 };
 
+/** The room as App mounts it: inside the page's view store. */
+const inStore = (transport: FakeTransport) => (
+  <StoreContext value={createViewStore(transport, { batch: () => frameBatch })}>
+    <Room transport={transport} />
+  </StoreContext>
+);
+
 const OPEN: MatterSummary = {
   matter: uuid(1, 2),
   name: "Sharma v. State of Delhi",
@@ -77,8 +89,9 @@ function transportFor(scene: Scene): FakeTransport {
       ? railStates(OPEN, SCRATCH, Date.now())
       : matters.map((m) => detailed(m));
   return new FakeTransport({
-    query: () => {
+    query: (query) => {
       if (scene.matters === "fails") throw new Error("the host is gone");
+      if (typeof query === "object" && query.list_threads !== undefined) return { threads: [] };
       return { matters };
     },
     ...(scene.papers === undefined
@@ -104,7 +117,7 @@ for (const theme of THEMES) {
             host = document.createElement("div");
             document.body.append(host);
             root = createRoot(host);
-            await act(async () => root?.render(<Room transport={transport} />));
+            await act(async () => root?.render(inStore(transport)));
             await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
             if (scene.dialog === true) {
               await act(async () =>
@@ -155,7 +168,7 @@ test("axe in this environment finds a violation where there is one: a button wit
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(async () => root?.render(<Room transport={transport} />));
+  await act(async () => root?.render(inStore(transport)));
   host.querySelector("main")?.append(document.createElement("button"));
   const results = await axe.run(document, { resultTypes: ["violations"] });
   expect(results.violations.map((v) => v.id)).toContain("button-name");

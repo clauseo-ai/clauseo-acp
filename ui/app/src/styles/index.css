@@ -2,11 +2,13 @@
    sources, so their classes never reach the shipped CSS. A screen imports the sheets of the parts it shows, in
    clauseo/parts.css's order, so the app ships only what its screens use. Only the room's build reaches this sheet
    (src/room/entry.ts); R12's internal window draws with inline styles and imports no CSS. The room's frame: the
-   shell, the wall, the empty wall's words (live.css) and the other widths; the rail and its rows (matters.css), and
-   the new matter form (matter-form.css). */
+   shell, the composer, the wall, the thread, the empty wall's words and the change note (live.css) and the other
+   widths; the rail and its rows (matters.css), and the new matter form (matter-form.css). */
 @import "./system.css";
 @import "@clauseo/components/clauseo/shell.css";
+@import "@clauseo/components/clauseo/composer.css";
 @import "@clauseo/components/clauseo/wall.css";
+@import "@clauseo/components/clauseo/thread.css";
 @import "@clauseo/components/clauseo/responsive.css";
 @import "@clauseo/components/clauseo/live.css";
 @import "@clauseo/components/clauseo/matter-form.css";
