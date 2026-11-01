@@ -84,6 +84,12 @@ test.each([
   },
 );
 
+test("a run nesting.ts cut short gets no closer: a signature line's underscores stay underscores", () => {
+  const html = tail(`Signature: ${"_".repeat(70)}`);
+  expect(html).toBe(`<p>Signature: ${"_".repeat(70)}</p>`);
+  expect(tail(`*Signed: ${"_".repeat(70)}`)).toBe(`<p><em>Signed: ${"_".repeat(70)}</em></p>`);
+});
+
 test("a repair never makes a link the raw text does not have: [a][b] with only a defined", () => {
   // The raw text `[a][b]` is literal (a label follows `[a]`); cutting `[b]`'s brackets alone would leave
   // `[a]b`, a shortcut link the finished text never shows.
