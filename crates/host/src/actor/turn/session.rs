@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use clauseo_acp::{AgentInfo, LoadSession, NewSession, SessionStart};
+use clauseo_acp::{AgentInfo, LoadSession, McpServer, NewSession, SessionStart};
 use clauseo_protocol::{
     AgentSessionAttached, ConfigOptionsReplaced, Envelope, ModeChanged, Notice, NoticeLevel,
     StreamId, ThreadId, ViewEntry,
@@ -15,6 +15,7 @@ use super::super::input::Input;
 use super::agents::{Stage, call, launch_failed, run_waiting};
 use super::out::Out;
 use super::{AgentReply, LogFor, Then, TurnInput, lost, state, updates};
+use crate::agent;
 use crate::error::Error;
 use crate::sent::SentView;
 
@@ -62,10 +63,13 @@ pub(super) fn on_replay_log(
         .get(&thread)
         .and_then(|entry| entry.row.acp_session_id.clone());
     let cwd = folder(actor, thread);
+    let loads = session_loads(actor, thread);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
-    let (Some(session), Ok(cwd), Stage::Loading) = (session, cwd, agent.stage) else {
+    let (Some(session), Ok(cwd), Ok((meta, mcp_servers)), Stage::Loading) =
+        (session, cwd, loads, agent.stage)
+    else {
         return;
     };
     match result {
@@ -77,7 +81,8 @@ pub(super) fn on_replay_log(
         let request = LoadSession {
             session,
             cwd,
-            mcp_servers: Vec::new(),
+            mcp_servers,
+            meta: Some(meta),
         };
         let result = client.load_session(request).await;
         fence.await;
@@ -89,8 +94,9 @@ pub(super) fn on_replay_log(
 }
 
 pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
-    let cwd = match folder(actor, thread) {
-        Ok(cwd) => cwd,
+    let started = folder(actor, thread).and_then(|cwd| Ok((cwd, session_loads(actor, thread)?)));
+    let (cwd, (meta, mcp_servers)) = match started {
+        Ok(started) => started,
         Err(error) => {
             launch_failed(actor, thread, &error);
             return;
@@ -103,8 +109,8 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
     call(actor, thread, id, async move {
         let request = NewSession {
             cwd,
-            mcp_servers: Vec::new(),
-            meta: None,
+            mcp_servers,
+            meta: Some(meta),
         };
         let result = client.new_session(request).await;
         fence.await;
@@ -113,6 +119,20 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
             result,
         }
     });
+}
+
+/// The `_meta` and MCP servers for `thread`'s `session/new` or `session/load`, the same for
+/// both: the profile hook's `_meta` with the host's switches over it, and the servers the
+/// lawyer turned on (none when the firm's `managed-mcp.json` is present). See
+/// `agent/loads.rs`.
+fn session_loads(
+    actor: &Actor,
+    thread: ThreadId,
+) -> Result<(serde_json::Map<String, serde_json::Value>, Vec<McpServer>), Error> {
+    let agent = &actor.check_thread(thread)?.row.agent;
+    let control = agent::loads::mcp_control(&actor.managed_mcp);
+    let meta = agent::loads::session_meta(actor.profile.session_meta(agent), control);
+    Ok((meta, agent::loads::mcp_servers(&actor.effective, control)))
 }
 
 fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {

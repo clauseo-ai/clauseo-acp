@@ -15,11 +15,13 @@ use crate::ids::{IdSource, RandomV7};
 
 use crate::window::PATCH_WINDOW_BYTES;
 
-/// What a firm's profile adds to an agent's session and launch. The host holds the hook but does
-/// not call it yet: `session/new` gets no `_meta` and a launch no extra variables. The
-/// profile-hook follow-up turns it on, for `session/new` and for each launch.
+/// What a firm's profile adds to an agent's session and launch. The host calls it at each
+/// session start: `session_meta` becomes the `_meta` of `session/new` and `session/load`, and
+/// `launch_env` fills the hook slot of the agent's launch. The host then sets the keys that keep
+/// out MCP servers the lawyer did not turn on, over whatever the hook returned
+/// (`agent/loads.rs` lists them).
 pub trait ProfileHook: Send {
-    /// The `_meta` object for `session/new` with `agent`, or `None` for none.
+    /// The `_meta` object for `session/new` and `session/load` with `agent`, or `None` for none.
     fn session_meta(&self, agent: &AgentId) -> Option<serde_json::Map<String, Value>>;
     /// Variables set on top of the agent's own when it launches.
     fn launch_env(&self, agent: &AgentId) -> BTreeMap<OsString, OsString>;
@@ -49,6 +51,7 @@ pub struct HostConfig {
     clock: Arc<dyn Clock>,
     ids: Box<dyn IdSource>,
     patch_window_bytes: usize,
+    managed_mcp: PathBuf,
 }
 
 /// A `HostConfig` taken apart by the host thread.
@@ -60,6 +63,7 @@ pub(crate) struct ConfigParts {
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) ids: Box<dyn IdSource>,
     pub(crate) patch_window_bytes: usize,
+    pub(crate) managed_mcp: PathBuf,
 }
 
 impl HostConfig {
@@ -74,6 +78,7 @@ impl HostConfig {
             clock: Arc::new(SystemClock),
             ids: Box::new(RandomV7::new()),
             patch_window_bytes: PATCH_WINDOW_BYTES,
+            managed_mcp: crate::agent::loads::managed_mcp_path(),
         }
     }
 
@@ -87,6 +92,17 @@ impl HostConfig {
     /// (default: none). The host adds its data folder.
     pub fn with_refused_folders(mut self, folders: Vec<PathBuf>) -> Self {
         self.refused_folders = folders;
+        self
+    }
+
+    /// Where to look for Claude Code's enterprise `managed-mcp.json` (default: this OS's path,
+    /// `/etc/claude-code/managed-mcp.json` on Linux, `/Library/Application
+    /// Support/ClaudeCode/managed-mcp.json` on macOS, `C:\Program
+    /// Files\ClaudeCode\managed-mcp.json` on Windows). When a file is there, sessions get no
+    /// MCP servers and no strict MCP config: the firm controls MCP. Tests point it at a folder
+    /// of their own.
+    pub fn with_managed_mcp_path(mut self, path: PathBuf) -> Self {
+        self.managed_mcp = path;
         self
     }
 
@@ -119,6 +135,7 @@ impl HostConfig {
             clock: self.clock,
             ids: self.ids,
             patch_window_bytes: self.patch_window_bytes,
+            managed_mcp: self.managed_mcp,
         }
     }
 }

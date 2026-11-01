@@ -127,7 +127,8 @@ own files and the root `[workspace.lints]`. The other rules `cargo xtask check` 
 ## Seams left open on purpose
 
 1. The host serves subscribers by `seq`. The webview is one subscriber; a phone client can be another.
-2. `session/new` always sends an `mcpServers` list (empty until `clauseo-mcp` exists).
+2. `session/new` and `session/load` always send an `mcpServers` list: the servers the lawyer
+   turned on in `mcp.servers` (empty by default), and `clauseo-mcp` once it exists.
 3. Tool calls render by tool name, with a generic card as the fallback.
 4. Every call has a `principal` (only `LocalDesktop` today). The surface that takes the call
    (desktop bridge, transport, cli) passes it to the host from its connection; it is never read

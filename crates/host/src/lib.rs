@@ -11,16 +11,23 @@
 //!   sent view of what is in flight to the store.
 //! - One `clauseo-matter` thread per open matter and one `clauseo-snapshot` thread.
 //! - The Scratch matter: a first start creates it.
-//! - The profile hook: [`ProfileHook`], with [`NoProfile`] as the default; held, not called yet.
+//! - The profile hook: [`ProfileHook`], with [`NoProfile`] as the default. Its `_meta` goes on
+//!   `session/new` and `session/load`, and its variables into each launch, with the host's
+//!   switches over them.
+//! - What a session loads (`agent/loads.rs`): only the MCP servers the lawyer turned on, under
+//!   Claude Code's strict MCP config with `settingSources: ["user"]` and claude.ai connectors
+//!   off. When Claude Code's enterprise `managed-mcp.json` is present, none of its servers and
+//!   no strict config go: the firm controls MCP there.
 //!
 //! # Interface
 //!
 //! - [`Host::start`] with a [`HostConfig`] ([`HostConfig::new`] takes the settings and the
 //!   [`Launcher`](clauseo_process::Launcher); [`HostConfig::with_profile_hook`],
-//!   [`HostConfig::with_refused_folders`], [`HostConfig::with_clock`] and
-//!   [`HostConfig::with_ids`] set the rest). It returns once start-up is done: the store is
-//!   open in `Effective::data_dir()`, the Scratch matter exists, and start-up reconciliation has
-//!   committed. A second start on the same data folder fails with `store.locked`.
+//!   [`HostConfig::with_refused_folders`], [`HostConfig::with_managed_mcp_path`],
+//!   [`HostConfig::with_clock`] and [`HostConfig::with_ids`] set the rest). It returns once
+//!   start-up is done: the store is open in `Effective::data_dir()`, the Scratch matter exists,
+//!   and start-up reconciliation has committed. A second start on the same data folder fails
+//!   with `store.locked`.
 //! - [`HostHandle`], `Clone` and `Send`: [`HostHandle::dispatch`], [`HostHandle::query`],
 //!   [`HostHandle::subscribe`], [`HostHandle::subscribe_events`], [`HostHandle::ack`],
 //!   [`HostHandle::register_folder`], [`HostHandle::register_file`] and

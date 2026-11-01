@@ -13,6 +13,7 @@ the same thing. Lawyer-facing words are marked (UI).
 | Adapter | The ACP program that wraps an agent (`claude-agent-acp`, `codex-acp`). | bridge, plugin |
 | ACP | Agent Client Protocol, spoken over stdio between Clauseo and an adapter. | |
 | Session | An ACP session, the adapter's view of a thread. Not shown to lawyers. | |
+| MCP server | A tool server an agent starts for a session. Clauseo passes only the ones the lawyer turned on in `mcp.servers` (each is off until then); a firm's policy can replace the list. | tool, plugin, connector (for this) |
 | Host | The Rust session host: one thread that owns sessions, commands, permissions and subscriptions. | backend, server, core (for the host alone) |
 | Core crates | `protocol`, `reducer`, `store`, `matters`, `host`, `acp`, `sandbox` (with the egress proxy). | |
 | Event | One entry in the append-only log, with `event_id`, `stream`, `seq` and kind. | message, record |

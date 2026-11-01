@@ -96,7 +96,8 @@ impl Rig {
         let clock = ManualClock::new(Timestamp::new(1_790_000_000_000).unwrap());
         let config = HostConfig::new(effective, Arc::new(launcher))
             .with_clock(Arc::new(clock.clone()))
-            .with_ids(Box::new(SequentialIds::with_run(run)));
+            .with_ids(Box::new(SequentialIds::with_run(run)))
+            .with_managed_mcp_path(root.join("managed-mcp.json"));
         let mut pool = LocalPool::new();
         let (post, internal) = async_channel::unbounded();
         let (ready, _ready) = std::sync::mpsc::channel();
