@@ -10,6 +10,7 @@
     "./lib/*": "./src/lib/*",
     "./styles/*": "./src/styles/*",
     "./assets/*": "./src/assets/*",
+    "./markdown/*": "./src/markdown/*",
     "./ui/*.test.tsx": null,
     "./ui/*.test.ts": null,
     "./clauseo/*.test.tsx": null,
@@ -21,16 +22,32 @@
     "./icons/*.test.tsx": null,
     "./styles/*.test.tsx": null,
     "./styles/css-blocks.ts": null,
-    "./clauseo/*-fixture.ts": null
+    "./clauseo/*-fixture.ts": null,
+    "./markdown/*.test.ts": null,
+    "./markdown/*.test.tsx": null,
+    "./markdown/*-fixture.ts": null
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",
     "class-variance-authority": "0.7.1",
+    "hast-util-sanitize": "5.0.2",
+    "hast-util-to-jsx-runtime": "2.3.6",
+    "marked": "18.1.1",
+    "mdast-util-from-markdown": "2.1.0",
+    "mdast-util-gfm": "3.1.0",
+    "mdast-util-to-hast": "13.2.1",
+    "micromark-extension-gfm": "3.0.0",
+    "remend": "1.4.0",
     "tailwind-merge": "3.7.0"
   },
   "devDependencies": {
+    "@types/hast": "3.0.5",
+    "@types/mdast": "4.0.4",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "commonmark-spec": "0.31.2",
+    "hast-util-from-html": "2.0.3",
+    "hast-util-to-html": "9.0.5",
     "react": "catalog:",
     "react-dom": "catalog:",
     "vitest": "catalog:"

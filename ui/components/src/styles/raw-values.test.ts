@@ -1,9 +1,14 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 
-// No raw values in the controls, icons and Clauseo's parts: every colour, size and shadow comes from a token class.
+// No raw values in the controls, icons, Clauseo's parts and the Markdown renderer: every colour, size and shadow comes
+// from a token class.
 // No published lint rule checks Tailwind classes against a token set, so this scan stands in for one.
-const roots = ["../ui/", "../icons/", "../clauseo/"].map((p) => new URL(p, import.meta.url));
+const roots = ["../ui/", "../icons/", "../clauseo/", "../markdown/"].map(
+  (p) => new URL(p, import.meta.url),
+);
+/** The renderer's test data (the hostile corpus, the spec fixtures) is Markdown, where [text](url) is a link, not a class. */
+const MARKDOWN_DATA = /^(?:hostile-cases|[\w-]+-fixture)\.ts$/;
 
 /** Rules on the code itself. */
 const CODE: [string, RegExp][] = [
@@ -35,12 +40,13 @@ export function scan(text: string): string[] {
   return found;
 }
 
-test("no raw colours, arbitrary values or style attributes in the controls, icons and parts", () => {
+test("no raw colours, arbitrary values or style attributes in the controls, icons, parts and Markdown renderer", () => {
   const found: string[] = [];
   let scanned = 0;
   for (const root of roots) {
     for (const file of readdirSync(root, { recursive: true })) {
       if (!/\.(tsx?|css)$/.test(file) || /\.test\.tsx?$/.test(file)) continue;
+      if (root.pathname.endsWith("/markdown/") && MARKDOWN_DATA.test(file)) continue;
       scanned++;
       for (const f of scan(readFileSync(new URL(file, root), "utf8"))) found.push(`${file}:${f}`);
     }
