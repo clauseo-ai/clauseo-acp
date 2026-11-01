@@ -42,9 +42,10 @@ message that fails stalls its ordered queue.
   report-only. PR #8 checked it on WKWebView with an `innerHTML` control that threw. Engines without
   support ignore the directive, so it is defence in depth, not the main control. The only allowed
   policy is `clauseo-sanitize`, created once in `ui/components/src/lib/trusted-types.ts`. It has
-  only `createScriptURL`, for the code-colouring Worker: it accepts script URLs from the page's own
-  scheme and host and refuses the rest (blob:, data:, javascript:, other origins). It has no
-  `createHTML`, because nothing in the webview turns a string into HTML.
+  only `createScriptURL`, for the code-colouring worker's URL: it accepts that one URL, on the
+  page's own scheme and host, and refuses every other path, blob:, data:, javascript: and other
+  origins. It has no `createHTML` and no `createScript`, because nothing in the webview turns a
+  string into HTML or code.
 - Release builds have no devtools, no global Tauri object and no asset protocol.
 
 ## Consequences
