@@ -35,6 +35,13 @@ pub(crate) const CODEX_JS: &str = "@openai/codex/bin/codex.js";
 /// for every test run.
 pub(crate) const INHERITED: &str = "CARGO_MANIFEST_DIR";
 
+/// `rel` (`/`-separated) under `base`, joined one component at a time, so it is spelled with
+/// the OS's own separator and compares equal to a path the reader built.
+pub(crate) fn under(base: &Path, rel: &str) -> PathBuf {
+    rel.split('/')
+        .fold(base.to_path_buf(), |path, part| path.join(part))
+}
+
 /// A manual timer the reader can clone.
 #[derive(Clone, Default)]
 pub(crate) struct SharedTimer(pub(crate) Arc<ManualTimer>);
@@ -129,8 +136,7 @@ impl Launcher for TestLauncher {
         let args = match self.play {
             Play::Scenario(name) => vec![
                 OsString::from("--scenario"),
-                Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests/scenarios")
+                under(Path::new(env!("CARGO_MANIFEST_DIR")), "tests/scenarios")
                     .join(format!("{name}.jsonl"))
                     .into_os_string(),
             ],
@@ -171,7 +177,7 @@ impl Setup {
         let setup = Setup { root };
         write::create_dir_all(&setup.data()).unwrap();
         Setup::file(&setup.script(), "");
-        Setup::file(&setup.install().join(SDK), SDK_PACKAGE);
+        Setup::file(&under(&setup.install(), SDK), SDK_PACKAGE);
         setup
     }
 
@@ -180,7 +186,7 @@ impl Setup {
     }
 
     pub(crate) fn script(&self) -> PathBuf {
-        self.install().join(SCRIPT)
+        under(&self.install(), SCRIPT)
     }
 
     pub(crate) fn helper(&self) -> PathBuf {
@@ -248,7 +254,7 @@ impl Setup {
 
     /// codex-acp's script under the fake install.
     pub(crate) fn codex_script(&self) -> PathBuf {
-        self.install().join(CODEX_SCRIPT)
+        under(&self.install(), CODEX_SCRIPT)
     }
 
     /// The Codex home given to `ProcessReaders::new`; never made.

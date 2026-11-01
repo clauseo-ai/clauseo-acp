@@ -60,7 +60,7 @@ fn the_install_folder_is_above_the_nearest_node_modules() {
 
     let nested = scratch.file("outer/node_modules/a/node_modules/b/index.js", "");
     let located = locate(CLAUDE_ID, &launch(&nested)).unwrap();
-    assert_eq!(located.install, scratch.0.join("outer/node_modules/a"));
+    assert_eq!(located.install, scratch.path("outer/node_modules/a"));
 }
 
 #[test]
@@ -81,15 +81,11 @@ fn settings_that_break_a_rule_are_refused_by_name() {
     assert!(rule(locate(CLAUDE_ID, &no_args)).contains("args is empty"));
     let relative = launch(Path::new("node_modules/x/index.js"));
     assert!(rule(locate(CLAUDE_ID, &relative)).contains("(args[0]) is not an absolute path"));
-    let dotted = launch(
-        &scratch
-            .0
-            .join("install/node_modules/../node_modules/x/index.js"),
-    );
+    let dotted = launch(&scratch.path("install/node_modules/../node_modules/x/index.js"));
     assert!(rule(locate(CLAUDE_ID, &dotted)).contains("has a . or .. part"));
     let no_modules = scratch.file("loose/dist/index.js", "");
     assert!(rule(locate(CLAUDE_ID, &launch(&no_modules))).contains("no node_modules folder"));
-    let missing = scratch.0.join("install/node_modules/gone/index.js");
+    let missing = scratch.path("install/node_modules/gone/index.js");
     assert!(rule(locate(CLAUDE_ID, &launch(&missing))).contains("(args[0]) does not exist"));
     let folder = scratch.dir("install/node_modules/folder/index.js");
     assert!(rule(locate(CLAUDE_ID, &launch(&folder))).contains("is not a regular file"));
@@ -132,7 +128,7 @@ fn a_link_under_the_install_folder_is_refused_and_above_it_allowed() {
         "install/node_modules/@agentclientprotocol/claude-agent-acp",
         package,
     );
-    let through_link = scratch.0.join(CLAUDE_SCRIPT);
+    let through_link = scratch.path(CLAUDE_SCRIPT);
     assert!(
         rule(locate(CLAUDE_ID, &launch(&through_link))).contains("is a link inside the install")
     );
@@ -145,7 +141,7 @@ fn a_link_under_the_install_folder_is_refused_and_above_it_allowed() {
     let target = scratch.dir("real-install");
     scratch.file("real-install/node_modules/pkg/index.js", "");
     let linked_install = scratch.link("linked-install", &target);
-    let script = linked_install.join("node_modules/pkg/index.js");
+    let script = crate::write::scratch::under(&linked_install, "node_modules/pkg/index.js");
     assert_eq!(
         locate(CLAUDE_ID, &launch(&script)).unwrap().install,
         linked_install
@@ -250,13 +246,13 @@ fn a_linked_codex_package_is_refused_not_skipped() {
 #[test]
 fn the_run_folder_may_be_missing_or_a_folder_but_nothing_else() {
     let scratch = Scratch::new("paths-run");
-    let run = scratch.0.join("data/limits/run");
+    let run = scratch.path("data/limits/run");
     assert!(check_run_dir(&run).is_ok());
     scratch.dir("data/limits/run");
     assert!(check_run_dir(&run).is_ok());
     let other = Scratch::new("paths-run-file");
     other.file("data/limits", "");
-    let err = check_run_dir(&other.0.join("data/limits/run")).unwrap_err();
+    let err = check_run_dir(&other.path("data/limits/run")).unwrap_err();
     assert!(matches!(err, Error::RunFolder { .. }), "{err}");
     assert!(err.to_string().ends_with("is not a folder"), "{err}");
 }
@@ -268,9 +264,9 @@ fn a_linked_run_folder_or_limits_folder_is_refused() {
     let elsewhere = scratch.dir("elsewhere");
     scratch.dir("data/limits");
     scratch.link("data/limits/run", &elsewhere);
-    let err = check_run_dir(&scratch.0.join("data/limits/run")).unwrap_err();
+    let err = check_run_dir(&scratch.path("data/limits/run")).unwrap_err();
     assert!(err.to_string().ends_with("is a link"), "{err}");
     scratch.link("data2/limits", &elsewhere);
-    let err = check_run_dir(&scratch.0.join("data2/limits/run")).unwrap_err();
+    let err = check_run_dir(&scratch.path("data2/limits/run")).unwrap_err();
     assert!(err.to_string().contains("data2/limits is a link"), "{err}");
 }

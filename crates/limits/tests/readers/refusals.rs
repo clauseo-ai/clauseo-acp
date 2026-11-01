@@ -5,7 +5,7 @@ use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
 use clauseo_protocol::AgentKind;
 use futures::executor::block_on;
 
-use crate::harness::{Play, Setup, SharedTimer, TestLauncher};
+use crate::harness::{Play, Setup, SharedTimer, TestLauncher, under};
 
 /// Reads Claude's limits with the settings in `setup`, expecting a refusal: returns its message
 /// after checking nothing was launched and no run folder was made.
@@ -36,7 +36,7 @@ fn a_dot_dot_part_in_args_0_is_refused() {
 #[test]
 fn no_node_modules_above_args_0_is_refused() {
     let setup = Setup::new();
-    let script = setup.root.join("loose/dist/index.js");
+    let script = under(&setup.root, "loose/dist/index.js");
     Setup::file(&script, "");
     setup.settings(&script);
     let message = refused(&setup);
@@ -47,7 +47,7 @@ fn no_node_modules_above_args_0_is_refused() {
 fn no_sdk_in_the_install_folder_is_refused_and_nothing_written() {
     let setup = Setup::new();
     setup.settings(&setup.script());
-    crate::write::remove_dir_all(&setup.install().join("node_modules/@anthropic-ai")).unwrap();
+    crate::write::remove_dir_all(&under(&setup.install(), "node_modules/@anthropic-ai")).unwrap();
     let message = refused(&setup);
     assert!(
         message.contains("no @anthropic-ai/claude-agent-sdk/package.json in"),
@@ -67,13 +67,14 @@ fn no_claude_entry_is_refused() {
 #[test]
 fn a_linked_package_folder_is_refused_and_nothing_written() {
     let setup = Setup::new();
-    let real = setup.root.join("store/claude-agent-acp");
-    Setup::file(&real.join("dist/index.js"), "");
-    let package = setup
-        .install()
-        .join("node_modules/@agentclientprotocol/linked-acp");
+    let real = under(&setup.root, "store/claude-agent-acp");
+    Setup::file(&under(&real, "dist/index.js"), "");
+    let package = under(
+        &setup.install(),
+        "node_modules/@agentclientprotocol/linked-acp",
+    );
     crate::write::symlink(&real, &package).unwrap();
-    setup.settings(&package.join("dist/index.js"));
+    setup.settings(&under(&package, "dist/index.js"));
     let message = refused(&setup);
     assert!(
         message.contains("is a link inside the install folder"),
