@@ -3,17 +3,22 @@
 //! after-turn checkpoint and ends `TurnFailed { thread.interrupted }` (a checkpoint R8 made
 //! whose record the log lost is recorded with the turn's changes, `known.rs`); a turn that never
 //! started stays queued, held behind its own thread; an attached session is detached. A turn
-//! whose end ran but was never logged takes its own after-turn checkpoint from R8's timeline,
-//! never one another thread's turn took after the writer was freed (`MatterJob::Repair`). A
-//! turn with a `TurnEnded` is never touched, so each repair happens once.
+//! with a `TurnEnded` is never touched, so each repair happens once.
+//!
+//! A turn whose end ran but was never logged (it failed twice) freed the writer, so other
+//! threads' turns in the matter may have run, and one may still be open too. The started turns
+//! of a matter are repaired once every thread of the matter has been looked at, and only the
+//! one that started last may take a new after-turn checkpoint; each earlier one takes its own
+//! from R8's timeline or an empty step (`MatterJob::Repair`), so no repair takes another turn's
+//! changes, in whatever order the threads load.
 
 use std::collections::BTreeSet;
 
 use clauseo_matters::TurnMeta;
 use clauseo_protocol::{
     AgentSessionDetached, CheckpointId, DetachReason, DomainEvent, ElicitationId, ElicitationState,
-    Envelope, ErrorCode, MatterPath, PermissionRequestId, PermissionState, StopReason, StreamId,
-    ThreadId, ThreadStatus, ToolCallId, TurnId, TurnQueued, UserMessageStatus, ViewEntry,
+    Envelope, ErrorCode, EventId, MatterPath, PermissionRequestId, PermissionState, StopReason,
+    StreamId, ThreadId, ThreadStatus, ToolCallId, TurnId, TurnQueued, UserMessageStatus, ViewEntry,
 };
 use clauseo_reducer::ThreadState;
 
@@ -30,6 +35,29 @@ use crate::sent::SentView;
 #[derive(Debug)]
 pub(crate) struct Repair {
     turn: TurnId,
+    pending: Pending,
+}
+
+/// A matter's start-up repairs of started turns, held until every thread of the matter has been
+/// looked at: only then is it known which open turn started last.
+#[derive(Debug, Default)]
+pub(crate) struct Repairs {
+    /// Threads of the matter start-up has not looked at yet.
+    left: usize,
+    /// The started turns found so far.
+    waiting: Vec<Waiting>,
+}
+
+/// A started turn's repair, waiting for the rest of its matter.
+#[derive(Debug)]
+struct Waiting {
+    thread: ThreadId,
+    turn: TurnId,
+    /// Its `TurnStarted`'s event id: a v7 UUID the host mints in order, so the largest is the
+    /// turn that started last.
+    started: Option<EventId>,
+    tool_paths: BTreeSet<MatterPath>,
+    before: Option<CheckpointId>,
     pending: Pending,
 }
 
@@ -51,6 +79,7 @@ pub(super) fn reconcile(actor: &mut Actor, thread: ThreadId) {
         .and_then(|loaded| loaded.state.as_thread())
         .is_some_and(|state| open_turn(state).is_some() || has_pending(state));
     if !needs {
+        looked_at(actor, thread);
         return;
     }
     if let Some(state) = state(actor, thread) {
@@ -114,6 +143,7 @@ pub(super) fn on_log(
         Err(error) => {
             tracing::warn!(%thread, %error, "a thread could not be reconciled");
             done(actor, thread);
+            looked_at(actor, thread);
             return;
         }
     };
@@ -129,7 +159,7 @@ pub(super) fn on_log(
         .and_then(|loaded| loaded.state.as_thread())
         .and_then(open_turn);
     match open {
-        Some((turn, true)) => after_turn(actor, thread, turn, &log, pending),
+        Some((turn, true)) => hold(actor, thread, turn, &log, pending),
         Some((turn, false)) => {
             let queued = needs_queued(&log, thread, turn)
                 .then(|| TurnQueued::new(thread, turn, thread, previous_turn(&log, turn)));
@@ -163,6 +193,69 @@ pub(super) fn on_log(
             done(actor, thread);
         }
     }
+    looked_at(actor, thread);
+}
+
+/// Start-up will look at `thread`: its matter's repairs wait for it.
+pub(super) fn expect(actor: &mut Actor, thread: ThreadId) {
+    if let Some(repairs) = repairs(actor, thread) {
+        repairs.left += 1;
+    }
+}
+
+/// Start-up has looked at `thread`; the last thread of a matter sends the matter's repairs.
+pub(super) fn looked_at(actor: &mut Actor, thread: ThreadId) {
+    let Some(repairs) = repairs(actor, thread) else {
+        return;
+    };
+    repairs.left = repairs.left.saturating_sub(1);
+    if repairs.left > 0 {
+        return;
+    }
+    let mut waiting = std::mem::take(&mut repairs.waiting);
+    // The turn that started last first.
+    waiting.sort_by(|a, b| b.started.cmp(&a.started));
+    for (n, repair) in waiting.into_iter().enumerate() {
+        after_turn(actor, repair, n == 0);
+    }
+}
+
+fn repairs(actor: &mut Actor, thread: ThreadId) -> Option<&mut Repairs> {
+    let matter = matter_of(actor, thread).ok()?;
+    actor
+        .matters
+        .get_mut(&matter)
+        .map(|entry| &mut entry.turns.repairs)
+}
+
+/// A started turn's repair waits for the rest of its matter ([`looked_at`] sends it); one
+/// whose matter is not known is sent now, and fails as it would have.
+fn hold(actor: &mut Actor, thread: ThreadId, turn: TurnId, log: &[Envelope], pending: Pending) {
+    let repair = Waiting {
+        thread,
+        turn,
+        started: turn_started(log, turn),
+        tool_paths: turn_paths(log, turn),
+        before: checkpoint_before(log, turn),
+        pending,
+    };
+    match repairs(actor, thread) {
+        Some(repairs) => repairs.waiting.push(repair),
+        None => after_turn(actor, repair, true),
+    }
+}
+
+/// The event id of `turn`'s `TurnStarted`.
+fn turn_started(log: &[Envelope], turn: TurnId) -> Option<EventId> {
+    log.iter().find_map(|envelope| {
+        if let DomainEvent::TurnStarted(started) = &envelope.event
+            && started.turn == turn
+        {
+            Some(envelope.event_id)
+        } else {
+            None
+        }
+    })
 }
 
 /// Whether the turn's last `TurnQueued` (if any) waits for another thread or is missing.
@@ -227,14 +320,17 @@ fn turn_paths(log: &[Envelope], turn: TurnId) -> BTreeSet<MatterPath> {
     paths
 }
 
-fn after_turn(
-    actor: &mut Actor,
-    thread: ThreadId,
-    turn: TurnId,
-    log: &[Envelope],
-    pending: Pending,
-) {
-    let tool_paths = turn_paths(log, turn);
+/// Sends the repair's checkpoint job; `last` when no other open turn of the matter started after
+/// this one.
+fn after_turn(actor: &mut Actor, repair: Waiting, last: bool) {
+    let Waiting {
+        thread,
+        turn,
+        tool_paths,
+        before,
+        pending,
+        ..
+    } = repair;
     let kept = pending.clone();
     let prepared = (|| -> Result<(clauseo_protocol::MatterId, TurnMeta), Error> {
         let matter = matter_of(actor, thread)?;
@@ -252,11 +348,11 @@ fn after_turn(
             thread,
             kind: JobKind::Reconcile(Box::new(Repair { turn, pending })),
         };
-        let before = checkpoint_before(log, turn);
         let after = MatterJob::Repair {
             meta,
             tool_paths,
             before,
+            last,
         };
         actor
             .matter_worker(matter)?

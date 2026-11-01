@@ -1,6 +1,8 @@
 //! Checkpoint ids the matter's log lost: an after-turn checkpoint R8 made whose commit never
 //! landed is recorded at the next start with the turn's changes, and a reused id the log does
-//! not hold is recorded before a new turn names it.
+//! not hold is recorded before a new turn names it. The start-up repair of a turn whose end
+//! failed twice takes the turn's own after-turn checkpoint, or an empty step, never a
+//! checkpoint or folder changes of another thread's turn that ran (or was left open) after it.
 
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, ErrorCode,
@@ -307,4 +309,64 @@ fn a_crash_before_the_after_turn_checkpoint_takes_one_at_the_next_start() {
     // No tool call named it, so the new checkpoint flags it.
     assert_eq!(changed(&log), [("brief.txt".to_owned(), true)]);
     rig.finish();
+}
+
+/// A's turn changes nothing and its end fails twice; then C, another thread, starts a turn from
+/// the same before-turn checkpoint, writes notes.txt, and the host stops mid-turn. With
+/// `c_thread_first`, C's thread is made first, so start-up looks at it first.
+fn two_open_turns(c_thread_first: bool) -> (Rig, [(ThreadId, TurnId); 2], CheckpointId) {
+    let name = if c_thread_first {
+        "turn-repair-two-open-c-first"
+    } else {
+        "turn-repair-two-open-a-first"
+    };
+    let mut rig = Rig::start(name, "");
+    let (a, c) = if c_thread_first {
+        let c = rig.thread_by(2);
+        (rig.thread(), c)
+    } else {
+        let a = rig.thread();
+        (a, rig.thread_by(2))
+    };
+    let a_turn = rig.running_turn(a);
+    let before = rig.last_recorded();
+    end_failing(&mut rig, a, 2);
+    assert!(ended(&rig.log(a), a_turn).is_none(), "A's turn is open");
+    let c_turn = rig.running_turn(c);
+    rig.write_file("notes.txt", "Signed by both parties.");
+    // The host stops mid-turn: nothing ends C's turn.
+    rig.actor.threads.get_mut(&c).unwrap().turn.current = None;
+    let rig = rig.restart(1);
+    (rig, [(a, a_turn), (c, c_turn)], before)
+}
+
+/// A gets an empty step; C, the turn that started last, gets the new checkpoint with notes.txt.
+fn assert_two_open_turns_repaired(c_thread_first: bool) {
+    let (mut rig, [(a, a_turn), (c, c_turn)], before) = two_open_turns(c_thread_first);
+    let log = rig.log(a);
+    let end = ended(&log, a_turn).expect("A's turn ended");
+    assert_eq!(end.checkpoint_after, Some(before), "A's step is empty");
+    assert_eq!(changed(&log), []);
+
+    let recorded = rig.recorded();
+    let [_import, after] = recorded.as_slice() else {
+        panic!("{recorded:?}");
+    };
+    assert_eq!(after.kind(), CheckpointKind::AfterTurn);
+    assert_eq!((after.thread(), after.turn()), (Some(c), Some(c_turn)));
+    let log = rig.log(c);
+    let end = ended(&log, c_turn).expect("C's turn ended");
+    assert_eq!(end.checkpoint_after, Some(after.checkpoint()));
+    assert_eq!(changed(&log), [("notes.txt".to_owned(), true)]);
+    rig.finish();
+}
+
+#[test]
+fn two_open_turns_the_earlier_thread_first_get_their_own_steps() {
+    assert_two_open_turns_repaired(false);
+}
+
+#[test]
+fn two_open_turns_the_later_thread_first_get_their_own_steps() {
+    assert_two_open_turns_repaired(true);
 }

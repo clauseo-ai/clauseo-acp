@@ -91,6 +91,8 @@ pub(crate) struct MatterTurns {
     holder: Option<ThreadId>,
     /// Threads whose turns wait for the writer, first come first served.
     queue: VecDeque<ThreadId>,
+    /// Start-up repairs held until every thread of the matter has been looked at.
+    repairs: reconcile::Repairs,
 }
 
 /// The current turn of a thread.
@@ -342,6 +344,17 @@ pub(crate) fn unblocked(actor: &mut Actor, stream: StreamId) {
 /// serves. Marks the work in progress so that [`busy`] holds start-up until it is done.
 pub(crate) fn reconcile(actor: &mut Actor, thread: ThreadId) {
     reconcile::reconcile(actor, thread);
+}
+
+/// Start-up will reconcile `thread`: its matter's repairs wait for it (see
+/// [`reconcile::Repairs`]). Called for every thread before any is loaded.
+pub(crate) fn expect_reconcile(actor: &mut Actor, thread: ThreadId) {
+    reconcile::expect(actor, thread);
+}
+
+/// `thread` could not be loaded at start-up, so it will not be reconciled.
+pub(crate) fn reconcile_skipped(actor: &mut Actor, thread: ThreadId) {
+    reconcile::looked_at(actor, thread);
 }
 
 /// Shutdown, after the host stopped taking commands: cancel every running turn through the

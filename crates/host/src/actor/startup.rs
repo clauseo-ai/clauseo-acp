@@ -113,6 +113,9 @@ pub(super) fn begin_startup(actor: &mut Actor) {
         .filter(|thread| !thread.row.archived)
         .map(|thread| thread.row.id)
         .collect();
+    for &thread in &open {
+        turn::expect_reconcile(actor, thread);
+    }
     for thread in open {
         let stream = StreamId::Thread(thread);
         actor.with_loaded(
@@ -122,6 +125,7 @@ pub(super) fn begin_startup(actor: &mut Actor) {
                     Ok(()) => turn::reconcile(actor, thread),
                     Err(error) => {
                         tracing::warn!(%error, %thread, "could not load a thread at start-up");
+                        turn::reconcile_skipped(actor, thread);
                     }
                 }
                 actor.release(stream);
