@@ -12,7 +12,15 @@ export type Entry = {
   screen: string;
   /** The state that shows the string, in the real parts, for one language. */
   render: (lang: Lang) => ReactNode;
+  /** The window's width to render at, in CSS px, before the frame scales it to its cell. Defaults to DESKTOP. */
+  width?: number;
+  /** The window's height, in CSS px. Defaults to DESKTOP. */
+  height?: number;
 };
+
+/** The window a state renders in unless its entry says otherwise: a desktop window between the room's 1000 and
+ * 1200 px breakpoints, at the room's least height (--window-min-h). */
+export const DESKTOP = { width: 1100, height: 600 } as const;
 
 /** An entry's current text in both languages. */
 export const currentOf = (e: Entry): Current => ({

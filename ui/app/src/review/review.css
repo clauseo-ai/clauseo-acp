@@ -39,7 +39,9 @@
   touch-action: manipulation;
 }
 .review-toggle[aria-pressed="true"] {
-  background: var(--inset);
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
 }
 .review-item {
   padding: 20px 0;
@@ -93,10 +95,12 @@
 .review-text dd {
   margin: 0;
 }
+/* English beside Hindi where each frame keeps at least 640 px (about 58% of a desktop window); on an iPad at 1024 px
+   they stack, English over Hindi, each at about 90%, so the words stay readable */
 .review-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 640px), 1fr));
+  gap: 16px 12px;
 }
 .review-figure {
   margin: 0;
@@ -107,19 +111,30 @@
   font-size: 0.8125rem;
   margin-bottom: 4px;
 }
-.review-frame {
-  display: block;
-  width: 100%;
+.review-box {
+  overflow: hidden;
   border: 1px solid var(--divide-strong);
   border-radius: 6px;
 }
+.review-frame {
+  display: block;
+  border: 0;
+  transform-origin: 0 0;
+}
+.review-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.review-segments {
+  display: flex;
+  gap: 4px;
+}
 
 /* ---------- one frame's state ---------- */
-.review-cell {
-  padding: 8px;
-}
-.review-wall {
-  max-width: 360px;
+/* an entry's height may crop the window to the part that shows the string: the frame never scrolls */
+:root:has(.review-cell) {
+  overflow: hidden;
 }
 [data-review-mark] {
   outline: 2px dashed var(--yellow);
