@@ -209,6 +209,13 @@ export const CASES: HostileCase[] = [
     text: ["[[[[a", "](u)](u)"],
   },
   { id: "open-link-brackets", markdown: "[a".repeat(5000) + "]".repeat(5000), text: ["[a[a[a"] },
+  // Brackets in code spans do not count towards that limit, but a backtick that micromark reads as part of
+  // raw HTML must not hide thousands of them.
+  {
+    id: "code-span-hidden-brackets",
+    markdown: '<a title="`">' + "[".repeat(5000) + "a" + "](u)".repeat(5000) + "`",
+    text: ["[[[[a", "](u)](u)"],
+  },
   // Character references in link destinations, before and after the full entity table loads (entities.ts):
   // `&colon;` and `&Tab;` are not in the common set, so they decode only once the table arrives, and the
   // link must stay inert in both states. `&sol;` moves the host from after `@` to before it on arrival.
