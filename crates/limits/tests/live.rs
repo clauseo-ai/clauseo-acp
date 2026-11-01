@@ -38,38 +38,36 @@ mod redact;
 mod run;
 
 #[cfg(test)]
-mod tests {
-    use crate::run::{Kind, live};
+use run::{Kind, live};
 
-    #[test]
-    #[ignore = "live: reads a real Claude Max login (CLAUSEO_G16_CLAUDE_MAX)"]
-    fn claude_max() {
-        live(Kind::ClaudeMax);
-    }
+#[test]
+#[ignore = "live: reads a real Claude Max login (CLAUSEO_G16_CLAUDE_MAX)"]
+fn claude_max() {
+    live(Kind::ClaudeMax);
+}
 
-    #[test]
-    #[ignore = "live: reads a real Claude Team login (CLAUSEO_G16_CLAUDE_TEAM)"]
-    fn claude_team() {
-        live(Kind::ClaudeTeam);
-    }
+#[test]
+#[ignore = "live: reads a real Claude Team login (CLAUSEO_G16_CLAUDE_TEAM)"]
+fn claude_team() {
+    live(Kind::ClaudeTeam);
+}
 
-    #[test]
-    #[ignore = "live: reads a Claude API-key login (CLAUSEO_G16_CLAUDE_API)"]
-    fn claude_api() {
-        live(Kind::ClaudeApi);
-    }
+#[test]
+#[ignore = "live: reads a Claude API-key login (CLAUSEO_G16_CLAUDE_API)"]
+fn claude_api() {
+    live(Kind::ClaudeApi);
+}
 
-    #[test]
-    #[ignore = "live: reads a real ChatGPT Plus login for Codex (CLAUSEO_G16_CODEX_PLUS)"]
-    fn codex_plus() {
-        live(Kind::CodexPlus);
-    }
+#[test]
+#[ignore = "live: reads a real ChatGPT Plus login for Codex (CLAUSEO_G16_CODEX_PLUS)"]
+fn codex_plus() {
+    live(Kind::CodexPlus);
+}
 
-    #[test]
-    #[ignore = "live: reads a Codex API-key login (CLAUSEO_G16_CODEX_API)"]
-    fn codex_api() {
-        live(Kind::CodexApi);
-    }
+#[test]
+#[ignore = "live: reads a Codex API-key login (CLAUSEO_G16_CODEX_API)"]
+fn codex_api() {
+    live(Kind::CodexApi);
 }
 
 #[cfg(test)]

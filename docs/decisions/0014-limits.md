@@ -40,7 +40,9 @@ first three through and calls the fourth:
   Codex home (below).
 - G16 adds one hidden, additive hook: `ProcessReaders::with_stdout_tap(StdoutTap)` copies each
   read's raw stdout to a callback, so its live tests can record the vendors' answers, redacted,
-  under `target/g16/`. Without it the stdout passes as before; R16 never sets it.
+  under `target/g16/`. Without it the stdout passes as before; R16 never sets it. It exists only with
+  the `live-tap` feature, which only `limits`' own dev-dependency turns on, so a crate that
+  wants it must add the feature in a reviewed `Cargo.toml`.
 - `at_limit(agent, now)`: a row whose `resets_at` is at or before `now` never counts, even when
   no deadline swept it because nobody watched. R16 asks at a turn stop, outside watching. A
   Codex `reached` plan window (any reason but credits and the spend cap) ends with its rows: once
@@ -135,9 +137,11 @@ never a key or a token.
 **Codex.** The reader runs `node <codex.js> app-server` and talks through `codex_appserver`'s
 client: `initialize` (then `initialized`), `account/read`, and, for a ChatGPT account only,
 `account/rateLimits/read { excludeResetCreditDetails: true }`. Then it drops the client, which
-closes stdin. It runs `codex.js` with the switches the host gives codex-acp under #160 as `-c`
-overrides before `app-server`: `features.apps=false`, `features.plugins=false`,
-`features.skill_mcp_dependency_install=false` and `cloud.skills.enabled=false` (#203). G16 probed
+closes stdin. It runs `codex.js` with `-c` overrides before `app-server`, one per category #160
+turns off: `features.apps=false`, `features.plugins=false`,
+`features.skill_mcp_dependency_install=false` and `cloud.skills.enabled=false` (#203,
+`CODEX_OVERRIDES`). #160 names categories, not keys, and the host sends none yet: these keys
+come from the `rust-v0.162.1` source, and R15's `CODEX_CONFIG` adopts them from the constant. G16 probed
 `@openai/codex` 0.162.1 with a scratch home and no login: before any thread, nothing the home's
 config names ran (an `[mcp_servers]` entry, a plugin's MCP server and hook, config hooks, a
 skill's MCP dependency), but with plugins on by default app-server ran `git ls-remote` and

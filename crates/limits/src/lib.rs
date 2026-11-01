@@ -23,8 +23,11 @@
 //! - [`ReadLimits`], [`ReadOutcome`], [`ReadFailure`], and [`ProcessReaders`], which reads over a
 //!   `process::Launcher` and a `process::Timer`. A refused settings path or a failed file step
 //!   comes back as `ReadFailure::LaunchFailed` with its text.
+//! - [`CODEX_OVERRIDES`]: the `-c` overrides the Codex reader passes `app-server`, which R15's
+//!   `CODEX_CONFIG` for codex-acp reuses.
 //! - Hidden, for G16's live tests only (`tests/live.rs`): `ProcessReaders::with_stdout_tap` and
-//!   `StdoutTap`, a copy of each read's raw, unredacted stdout. The product never sets one.
+//!   `StdoutTap`, a copy of each read's raw, unredacted stdout. They exist only with the
+//!   `live-tap` feature, which only this crate's own dev-dependency turns on.
 //!
 //! # Invariants
 //!
@@ -58,6 +61,7 @@ mod write;
 
 pub use model::{LimitHit, LiveSignal, LiveStatus};
 pub use policy::{Action, Input, Limits};
+#[cfg(feature = "live-tap")]
 #[doc(hidden)]
 pub use readers::StdoutTap;
-pub use readers::{ProcessReaders, ReadFailure, ReadLimits, ReadOutcome};
+pub use readers::{CODEX_OVERRIDES, ProcessReaders, ReadFailure, ReadLimits, ReadOutcome};

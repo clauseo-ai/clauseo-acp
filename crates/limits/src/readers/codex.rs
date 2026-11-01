@@ -3,8 +3,9 @@
 //! `AccountLimits`.
 //!
 //! The app-server runs with Clauseo's own `CODEX_HOME`, forced last over any inherited or settings
-//! variable of that name (#160), so it never reads the user's `~/.codex`, and with the host's
-//! switches off as `-c` overrides ([`OVERRIDES`], #203). Nothing here reads inside that home.
+//! variable of that name (#160), so it never reads the user's `~/.codex`, and with #160's four
+//! categories off as `-c` overrides ([`CODEX_OVERRIDES`], #203). Nothing here reads inside that
+//! home.
 
 mod map;
 
@@ -34,16 +35,19 @@ pub(crate) use map::outcome;
 pub(crate) const LIMIT: Duration = Duration::from_secs(10);
 /// The variable that names Codex's home.
 const CODEX_HOME: &str = "CODEX_HOME";
-/// The `-c` overrides the app-server runs with, before its subcommand: the switches the host
-/// gives codex-acp under #160, apps, plugins, skill MCP installs and cloud skills off. G16's
-/// probe of `@openai/codex` 0.162.1 (#203) found that app-server, with no login, no thread and
-/// even an empty home, starts a git sync of `github.com/openai/plugins` into the home at
-/// start-up, because plugins are on by default. `features.plugins=false` stops it; nothing else
-/// the home's config names (MCP servers, plugin and skill MCP servers, hooks) ran before a
-/// thread. The others cost nothing and keep the reader's Codex the host's. Keys from the
-/// `rust-v0.162.1` source: `features/src/lib.rs` (apps, plugins,
-/// `skill_mcp_dependency_install`) and `config/src/config_toml.rs` (`cloud.skills`).
-pub(crate) const OVERRIDES: [&str; 4] = [
+/// The `-c` overrides the Codex reader runs `app-server` with, before its subcommand, one per
+/// category #160 turns off: apps, plugins, skill MCP installs and cloud skills. #160 names the
+/// categories, not keys, and the host sends none yet: these keys come from the `@openai/codex`
+/// 0.162.1 source (tag `rust-v0.162.1`: `features/src/lib.rs` for `apps`, `plugins` and
+/// `skill_mcp_dependency_install`; `config/src/config_toml.rs` for `cloud.skills`). R15's
+/// `CODEX_CONFIG` for codex-acp must turn off the same ones, from this constant.
+///
+/// G16's probe of 0.162.1 (#203) found that app-server, with no login, no thread and even an empty
+/// home, starts a git sync of `github.com/openai/plugins` into the home at start-up, because
+/// plugins are on by default. `features.plugins=false` stops it; nothing the home's config names
+/// (MCP servers, plugin and skill MCP servers, hooks) ran before a thread. The other three cost
+/// nothing.
+pub const CODEX_OVERRIDES: [&str; 4] = [
     "features.apps=false",
     "features.plugins=false",
     "features.skill_mcp_dependency_install=false",
@@ -140,7 +144,7 @@ pub(crate) enum Prepared {
 }
 
 /// The app-server's spec: settings `command` running `<codex.js> -c <override>... app-server`
-/// (the [`OVERRIDES`]) in `run_dir`, with
+/// (the [`CODEX_OVERRIDES`]) in `run_dir`, with
 /// the `inherited` environment under the agent's settings variables and `CODEX_HOME` forced to
 /// `codex_home`. A missing `codex_home` is [`Prepared::SignedOut`]; one that is a link or not a
 /// folder is refused. It is never made, and nothing inside it is read. Makes `run_dir` if it is
@@ -162,7 +166,7 @@ pub(crate) fn prepare(
     let forced = (OsStr::new(CODEX_HOME), codex_home.as_os_str());
     let env = spec_env(&launch.env, inherited, Some(forced));
     let mut args = vec![codex_js.into_os_string()];
-    for set in OVERRIDES {
+    for set in CODEX_OVERRIDES {
         args.extend([OsString::from("-c"), OsString::from(set)]);
     }
     args.push(OsString::from("app-server"));

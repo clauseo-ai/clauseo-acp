@@ -17,7 +17,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use crate::check::check_dir;
+    use crate::check::{check_dir, check_file};
     use crate::write;
 
     /// A temp folder of the test's own, removed at the end.
@@ -63,21 +63,57 @@ mod tests {
         );
     }
 
+    /// What the folder's top README may hold: npm scopes are no email.
+    const README_OK: &str =
+        "Written from `@anthropic-ai/claude-agent-sdk`; emails use test@example.com.";
+
     #[test]
     fn the_secret_check_fails_on_each_planted_fault_and_names_its_file() {
-        // Built at run time, so no source file holds a token shape.
+        // Built at run time, so no source file holds a token shape, a UUID or a home path.
         let sk = format!("sk-{}", "a1_-".repeat(6));
         let eyj = format!("eyJ{}", "Zm9v".repeat(6));
+        let uuid = ["0f8fad5b", "d9cb", "469f", "a165", "70867728950e"].join("-");
+        let mac_home = ["", "Users", "someone", "x"].join("/");
+        let windows_home = ["C:", "", "Users", "", "someone"].join("\\");
         let faults = [
             (
                 "email/one.json",
                 r#"{"email":"someone@corp.test"}"#.to_owned(),
             ),
+            (
+                "email/community.json",
+                r#"{"e":"ceo@example.community.org"}"#.to_owned(),
+            ),
+            (
+                "email/evil.json",
+                r#"{"e":"ceo@example.com.evil.io"}"#.to_owned(),
+            ),
+            (
+                "email/bare.json",
+                r#"{"e":"@example.community"}"#.to_owned(),
+            ),
+            (
+                "email/accent.json",
+                r#"{"e":"José.Pérez@bücher.de"}"#.to_owned(),
+            ),
+            ("recorded/codex/README.md", "ask rohan@corp.com".to_owned()),
+            (
+                "recorded/claude/README.md",
+                README_OK.replace("test@example.com", "x"),
+            ),
+            ("README.md", format!("{README_OK} Or a@corp.com.")),
+            ("README.md", format!("{README_OK} {sk}")),
             ("sk/deep/one.json", format!(r#"{{"key":"{sk}"}}"#)),
             ("eyj/one.jsonl", format!("{{}}\n{{\"token\":\"{eyj}\"}}\n")),
+            ("uuid/one.json", format!(r#"{{"id":"{uuid}"}}"#)),
+            ("home/mac.json", format!(r#"{{"cwd":"{mac_home}"}}"#)),
+            (
+                "home/windows.json",
+                format!(r#"{{"cwd":"{windows_home}"}}"#),
+            ),
             ("codex/auth.json", "{}".to_owned()),
+            ("codex/Auth.JSON", "{}".to_owned()),
             ("claude/.credentials.json", "{}".to_owned()),
-            ("readme/README.md", format!("`@anthropic-ai/x` and {sk}")),
         ];
         for (rel, contents) in faults {
             let scratch = Scratch::new();
@@ -85,20 +121,33 @@ mod tests {
                 "clean.json",
                 r#"{"email":"test@example.com","id":"redacted-1"}"#,
             );
+            scratch.file("README.md", README_OK);
             let bad = scratch.file(rel, &contents);
             let report = check_dir(&scratch.0);
-            assert_eq!(report.files, 2, "{rel}");
+            let files = if rel == "README.md" { 2 } else { 3 };
+            assert_eq!(report.files, files, "{rel}");
             assert_eq!(report.findings.len(), 1, "{rel}: {:?}", report.findings);
             let finding = &report.findings[0];
             assert!(
                 finding.starts_with(&bad.display().to_string()),
                 "{rel}: {finding}"
             );
-            assert!(
-                !finding.contains(&sk) && !finding.contains(&eyj),
-                "{rel}: quotes the token"
-            );
+            for value in [&sk, &eyj, &uuid, &mac_home, &windows_home] {
+                assert!(!finding.contains(value.as_str()), "{rel}: quotes the value");
+            }
         }
+    }
+
+    #[test]
+    fn one_file_gets_every_rule_even_when_it_is_named_readme() {
+        let scratch = Scratch::new();
+        let readme = scratch.file("README.md", README_OK);
+        let whole = check_dir(&scratch.0);
+        assert!(whole.findings.is_empty(), "{:?}", whole.findings);
+        let report = check_file(&readme);
+        assert_eq!(report.files, 1);
+        assert_eq!(report.findings.len(), 1, "{:?}", report.findings);
+        assert!(report.findings[0].contains("not followed by example.com"));
     }
 
     #[test]
