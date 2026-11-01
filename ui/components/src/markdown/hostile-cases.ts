@@ -163,7 +163,22 @@ export const CASES: HostileCase[] = [
   },
   { id: "deep-list", markdown: "- ".repeat(1000) + "x", text: ["- - - x"] },
   { id: "deep-quote", markdown: "> ".repeat(3000) + "x", text: ["> > > x"] },
-  // Deeper than the tree limit: the block shows its source as text. (5,000 a side overflowed the stack,
-  // but micromark takes about 1.4 s to parse that, so streaming it here would take minutes.)
-  { id: "deep-emphasis", markdown: "*".repeat(1000) + "a" + "*".repeat(1000), text: ["***a***"] },
+  // Nesting built through indentation, which no line's markers show: 36 lines of 32 markers, each line
+  // indented 16 tabs more (10 KB). It got past the marker cap, and micromark took seconds to parse it.
+  {
+    id: "tab-nesting",
+    markdown: Array.from(
+      { length: 36 },
+      (_, line) => `${"\t".repeat(16 * line)}${"- ".repeat(32)}x${line}\n`,
+    ).join(""),
+    text: ["- - - x35"],
+  },
+  // Long delimiter runs, and many short ones: micromark's emphasis matching is quadratic in them (1.4 s
+  // and 0.56 s to parse these); past the limits the rest is text.
+  {
+    id: "long-delimiter-runs",
+    markdown: "*".repeat(5000) + "a" + "*".repeat(5000),
+    text: ["***a***"],
+  },
+  { id: "delimiter-sequences", markdown: "a* ".repeat(5000), text: ["a* a* a*"] },
 ];
