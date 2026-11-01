@@ -1,0 +1,4 @@
+/* The dev-only frame page's stylesheet: the design system's and the room's shell. Deleted when the room lands. */
+@import "../styles/system.css";
+@import "@clauseo/components/clauseo/shell.css";
+@source ".";
