@@ -15,6 +15,38 @@ import type { Nodes, Parent, Root } from "mdast";
 
 type Edit = { start: number; end: number; text: string };
 
+/**
+ * The parts of a text a pass cuts: the edits, and a mask of the characters they remove, so whether a
+ * character stays is one lookup however many cuts there are (a hostile `[`×16,000 cuts every one).
+ */
+type Cuts = {
+  readonly edits: Edit[];
+  cut(start: number, end: number): void;
+  kept(at: number): boolean;
+};
+
+function createCuts(length: number): Cuts {
+  const edits: Edit[] = [];
+  const mask = new Uint8Array(length);
+  return {
+    edits,
+    cut(start, end) {
+      edits.push({ start, end, text: "" });
+      mask.fill(1, start, end);
+    },
+    kept: (at) => mask[at] !== 1,
+  };
+}
+
+/**
+ * The openers that get a closer, innermost first: at most this many, and the outer rest stay as they are,
+ * as text. Four covers every nesting that reads as prose (strong, emphasis and strikethrough at once, plus
+ * one more of another character; no prefix of the legal answer or the spec examples needs more than 3),
+ * and keeps micromark's work on the repaired text close to its work on the raw text: it matches each
+ * closer against every opener before it, so closing all of `*a `×2,000 took 2 s to parse.
+ */
+const MAX_CLOSERS = 4;
+
 /** A delimiter run in the block's text: its character, where it starts, and how many are unmatched. */
 type Run = { char: string; start: number; length: number };
 
@@ -179,18 +211,18 @@ function canClose(char: string, before: string | undefined, after: string | unde
  * the last paragraph with no `]` after it. Returns the edits.
  */
 function halfConstructs(input: string, root: Root, from: number): Edit[] {
-  const edits: Edit[] = [];
-  const cut = (start: number, end: number) => edits.push({ start, end, text: "" });
-  let end = keptEnd(input, from, edits);
+  const cuts = createCuts(input.length);
+  const { edits, cut } = cuts;
+  let end = keptEnd(input, from, cuts);
   const hideFrom = hiddenLines(input, root, from, end);
   if (hideFrom >= 0) cut(hideFrom, input.length);
-  end = keptEnd(input, from, edits);
+  end = keptEnd(input, from, cuts);
   // A trailing backslash: the start of an escape, or of a hard break (then one line ending after it).
   if (end > from && input[end - 1] === "\\" && !escaped(input, end - 1)) {
     const after = input.slice(end, hideFrom >= 0 ? hideFrom : input.length);
     if (/^(?:\n[ \t]*)?$/.test(after)) cut(end - 1, end);
   }
-  end = keptEnd(input, from, edits);
+  end = keptEnd(input, from, cuts);
   const head = input.slice(from, end);
   const inText = (at: number, reference = false) => {
     if (escaped(input, at)) return false;
@@ -233,10 +265,17 @@ function halfConstructs(input: string, root: Root, from: number): Edit[] {
       if (close < end) cut(close, end);
     }
   }
-  end = keptEnd(input, from, edits);
+  end = keptEnd(input, from, cuts);
   const leaf = leafAt(input, root, from, end);
   if (!leaf) return edits;
-  // A `[` with no `]` after it in the paragraph's text: a link whose text is still arriving.
+  // A `[` with no `]` after it in the paragraph's text: a link whose text is still arriving. Cutting a
+  // `[` moves no `]`, so the last `]` that stays is found once.
+  let lastClose = input.length - 1;
+  while (
+    lastClose >= 0 &&
+    !(input[lastClose] === "]" && cuts.kept(lastClose) && !escaped(input, lastClose))
+  )
+    lastClose--;
   const stack: Nodes[] = [leaf as Nodes];
   for (let node = stack.pop(); node; node = stack.pop()) {
     if (!("children" in node)) continue;
@@ -245,13 +284,8 @@ function halfConstructs(input: string, root: Root, from: number): Edit[] {
         if (child.type !== "inlineCode") stack.push(child);
         continue;
       }
-      for (let at = start; at < stop; at++) {
-        if (input[at] !== "[" || escaped(input, at) || !isKept(edits, at)) continue;
-        let closed = false;
-        for (let next = at + 1; next < input.length && !closed; next++)
-          closed = input[next] === "]" && isKept(edits, next) && !escaped(input, next);
-        if (!closed) cut(at, at + 1);
-      }
+      for (let at = Math.max(start, lastClose + 1); at < stop; at++)
+        if (input[at] === "[" && !escaped(input, at) && cuts.kept(at)) cut(at, at + 1);
     }
   }
   return edits;
@@ -267,14 +301,10 @@ function leafAt(input: string, root: Root, from: number, end: number): Parent | 
   return (children.at(-1)?.end ?? 0) < end ? undefined : (leaf as Parent);
 }
 
-function isKept(edits: readonly Edit[], at: number): boolean {
-  return !edits.some((edit) => edit.start <= at && at < edit.end);
-}
-
-/** The end of what `edits` keep of `input`, before trailing whitespace. */
-function keptEnd(input: string, from: number, edits: readonly Edit[]): number {
+/** The end of what `cuts` keep of `input`, before trailing whitespace. */
+function keptEnd(input: string, from: number, cuts: Cuts): number {
   let at = input.length;
-  while (at > from && (!isKept(edits, at - 1) || WHITESPACE.test(input[at - 1]!))) at--;
+  while (at > from && (!cuts.kept(at - 1) || WHITESPACE.test(input[at - 1]!))) at--;
   return at;
 }
 
@@ -284,9 +314,9 @@ function keptEnd(input: string, from: number, edits: readonly Edit[]): number {
  * delimiter run at the very end that closes nothing, are cut. Returns the edits and what to insert where.
  */
 function closers(input: string, root: Root, from: number) {
-  const edits: Edit[] = [];
-  const cut = (start: number, end: number) => edits.push({ start, end, text: "" });
-  const leaf = leafAt(input, root, from, keptEnd(input, from, edits));
+  const cuts = createCuts(input.length);
+  const { edits, cut } = cuts;
+  const leaf = leafAt(input, root, from, keptEnd(input, from, cuts));
   if (!leaf) return { edits, insert: "", end: input.length };
   const leafStart = leaf.position?.start.offset ?? from;
   const leafEnd = leaf.position?.end.offset ?? input.length;
@@ -317,24 +347,28 @@ function closers(input: string, root: Root, from: number) {
       else cut(last.start, stop);
     }
   }
-  const markers = code ? [...openers, code] : openers;
-  const hasContent = (run: Run) => {
-    for (let at = run.start + run.length; at < input.length; at++) {
-      if (!isKept(edits, at) || WHITESPACE.test(input[at]!)) continue;
-      if (markers.some((other) => other.start <= at && at < other.start + other.length)) continue;
-      return true;
-    }
-    return false;
-  };
+  // The last character that is content: kept, not whitespace, and not an opener's or the code span's
+  // marker. An opener with no content after it is cut, and so is such a code span's.
+  const marker = new Uint8Array(input.length);
+  for (const run of code ? [...openers, code] : openers)
+    marker.fill(1, run.start, run.start + run.length);
+  let lastContent = input.length - 1;
+  while (
+    lastContent >= 0 &&
+    (!cuts.kept(lastContent) || marker[lastContent] === 1 || WHITESPACE.test(input[lastContent]!))
+  )
+    lastContent--;
+  const hasContent = (run: Run) => lastContent >= run.start + run.length;
   if (code && !hasContent(code)) cut(code.start, code.start + code.length);
-  const closing = openers.filter((run) => {
+  const withContent = openers.filter((run) => {
     if (hasContent(run)) return true;
     cut(run.start, run.start + run.length);
     return false;
   });
-  const end = keptEnd(input, from, edits);
+  const closing = withContent.slice(-MAX_CLOSERS);
+  const end = keptEnd(input, from, cuts);
   const codeCloser =
-    code && isKept(edits, code.start)
+    code && cuts.kept(code.start)
       ? `${input[end - 1] === "`" ? " " : ""}${"`".repeat(code.length)}`
       : "";
   // A closer right after a delimiter that stays (`*foo bar *` and a line ending) would join its run:
@@ -351,7 +385,7 @@ function closers(input: string, root: Root, from: number) {
     !canClose(before, input[joined - 1], undefined)
   ) {
     for (const run of closing) cut(run.start, run.start + run.length);
-    return { edits, insert: "", end: keptEnd(input, from, edits) };
+    return { edits, insert: "", end: keptEnd(input, from, cuts) };
   }
   let insert = codeCloser;
   for (let index = closing.length - 1; index >= 0; index--) {

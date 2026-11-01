@@ -239,4 +239,9 @@ export const CASES: HostileCase[] = [
     id: "entity-sol-host",
     markdown: "[bank.example](https://evil.example&sol;@bank.example/login)",
   },
+  // Tail repair once closed every open emphasis at once (micromark took 2 s on the repaired `*a `×2,000,
+  // 11.7 s an update at ×4,000) and scanned to the end of the block for each `[` (2.1 s an update).
+  { id: "open-star-runs", markdown: "x " + "*a ".repeat(4000) },
+  { id: "open-underscore-runs", markdown: "_a ".repeat(4000) },
+  { id: "open-brackets", markdown: "[".repeat(16_000) },
 ];
