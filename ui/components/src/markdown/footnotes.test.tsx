@@ -7,6 +7,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
+import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
 import { createAnswer } from "./answer.ts";
 import { LEGAL } from "./legal-fixture.ts";
 import { Markdown } from "./markdown.tsx";
@@ -265,6 +266,15 @@ test("the notes' heading and back-references are labelled in the page's words", 
     "Back to reference 1-3",
     "Back to reference 2",
   ]);
+  act(() => showDisplay({ ...DEFAULT_DISPLAY, lang: "hi" }));
+  try {
+    expect(host.querySelector("section[data-footnotes] h2")?.textContent).toBe("फ़ुटनोट");
+    expect(host.querySelector("a[data-footnote-backref]")?.getAttribute("aria-label")).toBe(
+      "संदर्भ 1 पर वापस जाएँ",
+    );
+  } finally {
+    act(() => showDisplay(DEFAULT_DISPLAY));
+  }
 });
 
 test("a reference and its note reach each other by click, whatever the label's characters", () => {
