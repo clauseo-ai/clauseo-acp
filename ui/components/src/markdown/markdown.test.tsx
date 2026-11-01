@@ -230,6 +230,37 @@ test.each([
   ],
   ["the same host, other case", "[BANK.example.com/path](https://bank.example.com/x)", null],
   ["prose", "[the bank's page](https://evil.example.net/x)", null],
+  [
+    "a host after a word",
+    "[Visit bank.example.com](https://evil.example.net/x)",
+    "evil.example.net",
+  ],
+  [
+    "a host before an arrow",
+    "[bank.example.com ↗](https://evil.example.net/x)",
+    "evil.example.net",
+  ],
+  [
+    "a host before words",
+    "[bank.example.com (official)](https://evil.example.net/x)",
+    "evil.example.net",
+  ],
+  [
+    "a host after an emoji",
+    "[🔒 bank.example.com](https://evil.example.net/x)",
+    "evil.example.net",
+  ],
+  [
+    "ideographic full stops",
+    "[bank\u3002example\u3002com](https://evil.example.net/x)",
+    "evil.example.net",
+  ],
+  ["the real host among words", "[Visit bank.example.com today](https://bank.example.com/x)", null],
+  [
+    "the real host and another",
+    "[bank.example.com or evil.example.net](https://evil.example.net/x)",
+    "evil.example.net",
+  ],
 ])("the link-host hint with %s", (_, text, expected) => {
   show(text);
   const hint = host.querySelector('[data-clauseo="link-host"]');
