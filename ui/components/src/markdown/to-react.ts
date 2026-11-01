@@ -32,6 +32,7 @@ const ATTRIBUTES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   ul: { className: "className" },
   section: { dataFootnotes: "data-footnotes", className: "className" },
   h2: { id: "id", className: "className" },
+  sup: { dataFootnotePending: "data-footnote-pending" },
 };
 
 /** Every tag the schema allows, and what renders it: our component, or the tag itself. */

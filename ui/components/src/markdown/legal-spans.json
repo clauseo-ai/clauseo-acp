@@ -1,0 +1,490 @@
+{
+  "fixture": "legal.md",
+  "chars": 30014,
+  "sha256": "19f80f31c966f948c3c8335b583597a06faf94e162021c491b7c8e04ffadac6f",
+  "scripts": {
+    "en": 10073,
+    "hi": 5849,
+    "ta": 7687
+  },
+  "instances": [
+    {
+      "id": "F7-h1-en",
+      "feature": "F7",
+      "script": "en",
+      "start": 0,
+      "end": 61
+    },
+    {
+      "id": "F7-h2-en",
+      "feature": "F7",
+      "script": "en",
+      "start": 752,
+      "end": 780
+    },
+    {
+      "id": "F1-en",
+      "feature": "F1",
+      "script": "en",
+      "start": 1431,
+      "end": 1769
+    },
+    {
+      "id": "F4-en",
+      "feature": "F4",
+      "script": "en",
+      "start": 2373,
+      "end": 2572
+    },
+    {
+      "id": "F5-en",
+      "feature": "F5",
+      "script": "en",
+      "start": 3189,
+      "end": 3387
+    },
+    {
+      "id": "F7-h3-en",
+      "feature": "F7",
+      "script": "en",
+      "start": 4070,
+      "end": 4097
+    },
+    {
+      "id": "F6-p-en",
+      "feature": "F6",
+      "script": "en",
+      "start": 4751,
+      "end": 5047
+    },
+    {
+      "id": "F6-list-en",
+      "feature": "F6",
+      "script": "en",
+      "start": 5049,
+      "end": 5271
+    },
+    {
+      "id": "F2-en",
+      "feature": "F2",
+      "script": "en",
+      "start": 5955,
+      "end": 6988
+    },
+    {
+      "id": "F9-en",
+      "feature": "F9",
+      "script": "en",
+      "start": 7683,
+      "end": 7853
+    },
+    {
+      "id": "F12-en",
+      "feature": "F12",
+      "script": "en",
+      "start": 7855,
+      "end": 7918
+    },
+    {
+      "id": "F7-h4-en",
+      "feature": "F7",
+      "script": "en",
+      "start": 8585,
+      "end": 8611
+    },
+    {
+      "id": "F8-en",
+      "feature": "F8",
+      "script": "en",
+      "start": 8613,
+      "end": 8804
+    },
+    {
+      "id": "F10-en",
+      "feature": "F10",
+      "script": "en",
+      "start": 9527,
+      "end": 9632
+    },
+    {
+      "id": "F11-en",
+      "feature": "F11",
+      "script": "en",
+      "start": 9634,
+      "end": 9723
+    },
+    {
+      "id": "F13-en",
+      "feature": "F13",
+      "script": "en",
+      "start": 9725,
+      "end": 9951
+    },
+    {
+      "id": "F14-en",
+      "feature": "F14",
+      "script": "en",
+      "start": 9953,
+      "end": 10230
+    },
+    {
+      "id": "F15-en",
+      "feature": "F15",
+      "script": "en",
+      "start": 10232,
+      "end": 10461
+    },
+    {
+      "id": "F3-en",
+      "feature": "F3",
+      "script": "en",
+      "start": 11132,
+      "end": 11366
+    },
+    {
+      "id": "L0",
+      "feature": "L0",
+      "script": "en",
+      "start": 12002,
+      "end": 12100
+    },
+    {
+      "id": "F7-h1-hi",
+      "feature": "F7",
+      "script": "hi",
+      "start": 12102,
+      "end": 12133
+    },
+    {
+      "id": "F7-h2-hi",
+      "feature": "F7",
+      "script": "hi",
+      "start": 12552,
+      "end": 12578
+    },
+    {
+      "id": "F1-hi",
+      "feature": "F1",
+      "script": "hi",
+      "start": 13005,
+      "end": 13324
+    },
+    {
+      "id": "F4-hi",
+      "feature": "F4",
+      "script": "hi",
+      "start": 13700,
+      "end": 13910
+    },
+    {
+      "id": "F5-hi",
+      "feature": "F5",
+      "script": "hi",
+      "start": 14249,
+      "end": 14410
+    },
+    {
+      "id": "F7-h3-hi",
+      "feature": "F7",
+      "script": "hi",
+      "start": 14782,
+      "end": 14808
+    },
+    {
+      "id": "F6-p-hi",
+      "feature": "F6",
+      "script": "hi",
+      "start": 15143,
+      "end": 15423
+    },
+    {
+      "id": "F6-list-hi",
+      "feature": "F6",
+      "script": "hi",
+      "start": 15425,
+      "end": 15629
+    },
+    {
+      "id": "F2-hi",
+      "feature": "F2",
+      "script": "hi",
+      "start": 15989,
+      "end": 16892
+    },
+    {
+      "id": "F9-hi",
+      "feature": "F9",
+      "script": "hi",
+      "start": 17255,
+      "end": 17406
+    },
+    {
+      "id": "F12-hi",
+      "feature": "F12",
+      "script": "hi",
+      "start": 17408,
+      "end": 17485
+    },
+    {
+      "id": "F7-h4-hi",
+      "feature": "F7",
+      "script": "hi",
+      "start": 17832,
+      "end": 17853
+    },
+    {
+      "id": "F8-hi",
+      "feature": "F8",
+      "script": "hi",
+      "start": 17855,
+      "end": 18062
+    },
+    {
+      "id": "F10-hi",
+      "feature": "F10",
+      "script": "hi",
+      "start": 18404,
+      "end": 18490
+    },
+    {
+      "id": "F11-hi",
+      "feature": "F11",
+      "script": "hi",
+      "start": 18492,
+      "end": 18570
+    },
+    {
+      "id": "F13-hi",
+      "feature": "F13",
+      "script": "hi",
+      "start": 18572,
+      "end": 18787
+    },
+    {
+      "id": "F14-hi",
+      "feature": "F14",
+      "script": "hi",
+      "start": 18789,
+      "end": 19053
+    },
+    {
+      "id": "F15-hi",
+      "feature": "F15",
+      "script": "hi",
+      "start": 19055,
+      "end": 19282
+    },
+    {
+      "id": "F3-hi",
+      "feature": "F3",
+      "script": "hi",
+      "start": 19660,
+      "end": 19876
+    },
+    {
+      "id": "F7-h1-ta",
+      "feature": "F7",
+      "script": "ta",
+      "start": 20241,
+      "end": 20279
+    },
+    {
+      "id": "F7-h2-ta",
+      "feature": "F7",
+      "script": "ta",
+      "start": 20753,
+      "end": 20783
+    },
+    {
+      "id": "F1-ta",
+      "feature": "F1",
+      "script": "ta",
+      "start": 21174,
+      "end": 21554
+    },
+    {
+      "id": "F4-ta",
+      "feature": "F4",
+      "script": "ta",
+      "start": 21943,
+      "end": 22185
+    },
+    {
+      "id": "F5-ta",
+      "feature": "F5",
+      "script": "ta",
+      "start": 22626,
+      "end": 22813
+    },
+    {
+      "id": "F7-h3-ta",
+      "feature": "F7",
+      "script": "ta",
+      "start": 23225,
+      "end": 23250
+    },
+    {
+      "id": "F6-p-ta",
+      "feature": "F6",
+      "script": "ta",
+      "start": 23711,
+      "end": 24042
+    },
+    {
+      "id": "F6-list-ta",
+      "feature": "F6",
+      "script": "ta",
+      "start": 24044,
+      "end": 24295
+    },
+    {
+      "id": "F2-ta",
+      "feature": "F2",
+      "script": "ta",
+      "start": 24776,
+      "end": 25820
+    },
+    {
+      "id": "F9-ta",
+      "feature": "F9",
+      "script": "ta",
+      "start": 26257,
+      "end": 26485
+    },
+    {
+      "id": "F12-ta",
+      "feature": "F12",
+      "script": "ta",
+      "start": 26487,
+      "end": 26561
+    },
+    {
+      "id": "F7-h4-ta",
+      "feature": "F7",
+      "script": "ta",
+      "start": 27008,
+      "end": 27034
+    },
+    {
+      "id": "F8-ta",
+      "feature": "F8",
+      "script": "ta",
+      "start": 27036,
+      "end": 27260
+    },
+    {
+      "id": "F10-ta",
+      "feature": "F10",
+      "script": "ta",
+      "start": 27635,
+      "end": 27736
+    },
+    {
+      "id": "F11-ta",
+      "feature": "F11",
+      "script": "ta",
+      "start": 27738,
+      "end": 27838
+    },
+    {
+      "id": "F13-ta",
+      "feature": "F13",
+      "script": "ta",
+      "start": 27840,
+      "end": 28100
+    },
+    {
+      "id": "F14-ta",
+      "feature": "F14",
+      "script": "ta",
+      "start": 28102,
+      "end": 28384
+    },
+    {
+      "id": "F15-ta",
+      "feature": "F15",
+      "script": "ta",
+      "start": 28386,
+      "end": 28643
+    },
+    {
+      "id": "F3-ta",
+      "feature": "F3",
+      "script": "ta",
+      "start": 29099,
+      "end": 29332
+    },
+    {
+      "id": "F12-en-def",
+      "feature": "F12",
+      "script": "en",
+      "start": 29764,
+      "end": 29844
+    },
+    {
+      "id": "F12-hi-def",
+      "feature": "F12",
+      "script": "hi",
+      "start": 29846,
+      "end": 29921
+    },
+    {
+      "id": "F12-ta-def",
+      "feature": "F12",
+      "script": "ta",
+      "start": 29923,
+      "end": 30013
+    }
+  ],
+  "literals": [
+    {
+      "id": "L0",
+      "start": 12002,
+      "end": 12100,
+      "tokens": {
+        "**": 2,
+        "*": 4,
+        "|": 1,
+        "~~": 1,
+        "~": 2
+      }
+    }
+  ],
+  "cuts": [
+    {
+      "id": "open-bold",
+      "instance": "F9-en",
+      "at": 7704
+    },
+    {
+      "id": "half-link",
+      "instance": "F13-en",
+      "at": 9782
+    },
+    {
+      "id": "half-footnote-ref",
+      "instance": "F12-en",
+      "at": 7913
+    },
+    {
+      "id": "table-header-only",
+      "instance": "F3-en",
+      "at": 11179
+    },
+    {
+      "id": "header-and-separator",
+      "instance": "F3-en",
+      "at": 11203
+    },
+    {
+      "id": "half-row",
+      "instance": "F3-en",
+      "at": 11239
+    },
+    {
+      "id": "half-citation",
+      "instance": "F15-en",
+      "at": 10325
+    }
+  ]
+}

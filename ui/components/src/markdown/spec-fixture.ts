@@ -142,9 +142,13 @@ export function chunkingsFor(markdown: string): number[] {
   return markdown.length <= 400 ? [0, 1, 3, 16] : [0, 3, 16];
 }
 
-/** The answer as one block, without the splitter: what rendering block by block must reproduce. */
+/**
+ * The answer as one block, without the splitter: what rendering block by block must reproduce. Its
+ * footnotes section's heading gets the answer's scope, as every generated id does in ours (remark-rehype
+ * gives it the fixed id `footnote-label`).
+ */
 export function unsplit(text: string): string {
-  return toHtml(
+  const html = toHtml(
     sanitize(
       toHast(parse(text), {
         clobberPrefix: "spec-",
@@ -153,4 +157,5 @@ export function unsplit(text: string): string {
       SCHEMA,
     ) as Root,
   );
+  return html.replaceAll('"user-content-footnote-label"', '"user-content-spec-footnote-label"');
 }
