@@ -1,40 +1,51 @@
-// A frame showing one registered state in one language and light. Its height follows the state's: the frame is the
-// page's own origin, so the list reads its document's height.
-import type { Lang, Theme } from "@clauseo/components/lib/display.ts";
+// A frame showing one registered state in one language and light, rendered in a window of the entry's size (a desktop
+// one by default, so the room's breakpoints follow a window and not the cell) and scaled down to fit the cell.
+import type { Lang, Platform, Theme } from "@clauseo/components/lib/display.ts";
 import { useEffect, useRef, useState } from "react";
 
-export function CellFrame({ id, lang, theme }: { id: string; lang: Lang; theme: Theme }) {
-  const ref = useRef<HTMLIFrameElement>(null);
-  const [height, setHeight] = useState(120);
-  const [loaded, setLoaded] = useState(0);
+type Props = {
+  id: string;
+  lang: Lang;
+  theme: Theme;
+  platform: Platform;
+  /** The window's size in CSS px. */
+  width: number;
+  height: number;
+};
+
+export function CellFrame({ id, lang, theme, platform, width, height }: Props) {
+  const box = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
   useEffect(() => {
-    const doc = ref.current?.contentDocument;
-    const root = doc?.getElementById("root");
-    if (loaded === 0 || root === null || root === undefined) return;
-    // #root holds just the state, so its height is the state's, where the document's would never shrink below the
-    // frame's own
-    const fit = () => setHeight(Math.max(48, Math.ceil(root.getBoundingClientRect().height)));
+    const el = box.current;
+    if (el === null) return;
+    const fit = () => setScale(Math.min(1, el.clientWidth / width));
     fit();
     const watch = new ResizeObserver(fit);
-    watch.observe(root);
+    watch.observe(el);
     return () => watch.disconnect();
-  }, [loaded]);
-  // the same page, with the platform pinned so every reviewer sees the same chrome
-  const src = `?${new URLSearchParams({ cell: id, lang, theme, platform: "mac" }).toString()}`;
+  }, [width]);
+  const src = `?${new URLSearchParams({ cell: id, lang, theme, platform }).toString()}`;
+  const language = lang === "en" ? "English" : "Hindi";
   return (
     <figure className="review-figure">
       <figcaption>
-        {lang === "en" ? "English" : "Hindi"} · {theme}
+        {language} · {theme}
+        {scale < 1 && <span className="review-scale"> · {Math.round(scale * 100)}%</span>}
       </figcaption>
-      <iframe
-        ref={ref}
-        src={src}
-        title={`${id}, ${lang === "en" ? "English" : "Hindi"}, ${theme}`}
-        loading="lazy"
-        height={height}
-        className="review-frame"
-        onLoad={() => setLoaded((n) => n + 1)}
-      />
+      {/* styles set as properties, which the CSP's style-src 'self' allows, unlike a style attribute in markup */}
+      <div ref={box} className="review-box" style={{ height: Math.ceil(height * scale) }}>
+        <iframe
+          key={src}
+          src={src}
+          title={`${id}, ${language}, ${theme}, ${platform}`}
+          loading="lazy"
+          width={width}
+          height={height}
+          className="review-frame"
+          style={{ transform: `scale(${scale})` }}
+        />
+      </div>
     </figure>
   );
 }

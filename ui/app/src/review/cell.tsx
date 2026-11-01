@@ -11,10 +11,12 @@ export function Cell({ id, lang }: { id: string; lang: Lang }) {
     if (entry === undefined || root.current === null) return;
     const el = root.current;
     const text = entry.words.text(lang);
-    // the parts may fill in after the first commit (fonts, popovers); mark again on the next frame
+    // the state fills in as its scripted host answers; mark again on each change of content (marks are attributes,
+    // which this doesn't watch, so marking never wakes it)
     markText(el, text);
-    const frame = requestAnimationFrame(() => markText(el, text));
-    return () => cancelAnimationFrame(frame);
+    const watch = new MutationObserver(() => markText(el, text));
+    watch.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => watch.disconnect();
   }, [entry, lang]);
   if (entry === undefined)
     return <p className="review-missing">No registered string has the id {id}.</p>;
