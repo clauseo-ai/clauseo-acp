@@ -51,12 +51,13 @@ export async function createRoomMatter(
  * enables the composer (it shows but stays disabled while no thread is open).
  *
  * Room (`E2E_WINDOW=room`): New matter, the name, Change, Create the matter; the toolbar title
- * then names the matter. The composer is not awaited: the room has none until U3 puts its work in
- * the centre slot; U3 adds `await expect(w.composer).toBeEnabled()` here with it.
+ * then names the matter, and the composer is enabled, as in the internal window: today's specs type
+ * at once. The room has a composer once U3's work stands in the centre slot.
  */
 export async function openMatter(w: Window, name = "Matter"): Promise<void> {
   if (isRoom()) {
     await createRoomMatter(w, name, { existing: true });
+    await expect(w.composer).toBeEnabled();
     return;
   }
   await w.matterName.fill(name);

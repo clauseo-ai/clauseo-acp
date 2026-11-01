@@ -9,14 +9,7 @@
 
 import { expect } from "@playwright/test";
 import { test } from "./fixture.ts";
-import {
-  createRoomMatter,
-  expectTurnEnded,
-  moveTo,
-  openMatter,
-  sendPrompt,
-  showRail,
-} from "./flow.ts";
+import { createRoomMatter, expectTurnEnded, moveTo, sendPrompt, showRail } from "./flow.ts";
 import { window, type Window } from "./selectors.ts";
 
 test.skip(process.env["E2E_WINDOW"] !== "room", "the room's e2e build only (E2E_WINDOW=room)");
@@ -38,7 +31,7 @@ async function expectCurrent(w: Window, name: string, other: string): Promise<vo
 
 test("an existing folder becomes a matter and opens", async ({ app }) => {
   const w = window(app.page);
-  await openMatter(w, FIRST);
+  await createRoomMatter(w, FIRST, { existing: true });
   await expect(w.matterRows).toHaveCount(1);
   await expect(w.matterRow(FIRST)).toHaveAttribute("aria-current", "page");
 });
