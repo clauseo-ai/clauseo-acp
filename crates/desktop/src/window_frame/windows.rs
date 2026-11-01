@@ -32,17 +32,17 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, FindWindowExW, GWLP_USERDATA, GetClientRect,
-    GetWindowLongPtrW, HTMAXBUTTON, HWND_TOP, IDC_ARROW, IsZoomed, LWA_ALPHA, LoadCursorW,
-    PostMessageW, RegisterClassExW, SC_MAXIMIZE, SC_RESTORE, SWP_NOACTIVATE, SWP_NOOWNERZORDER,
-    SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, WM_CAPTURECHANGED, WM_DPICHANGED,
-    WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN,
-    WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_NCRBUTTONDBLCLK, WM_NCRBUTTONDOWN,
-    WM_NCRBUTTONUP, WM_SIZE, WM_SYSCOMMAND, WNDCLASSEXW, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_LAYERED,
-    WS_EX_NOREDIRECTIONBITMAP, WS_VISIBLE,
+    GetMenuStringW, GetSystemMenu, GetWindowLongPtrW, HTMAXBUTTON, HWND_TOP, IDC_ARROW, IsZoomed,
+    LWA_ALPHA, LoadCursorW, MF_BYCOMMAND, PostMessageW, RegisterClassExW, SC_MAXIMIZE, SC_RESTORE,
+    SWP_NOACTIVATE, SWP_NOOWNERZORDER, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos,
+    SetWindowTextW, WM_CAPTURECHANGED, WM_DPICHANGED, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY,
+    WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE,
+    WM_NCMOUSEMOVE, WM_NCRBUTTONDBLCLK, WM_NCRBUTTONDOWN, WM_NCRBUTTONUP, WM_SIZE, WM_SYSCOMMAND,
+    WNDCLASSEXW, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_EX_NOREDIRECTIONBITMAP, WS_VISIBLE,
 };
 use windows::core::{PCWSTR, w};
 
-use super::caption::{Capture, Input, Look, Pointer, lparam_point, step};
+use super::caption::{Capture, Input, Look, Pointer, lparam_point, menu_word, step};
 use super::geometry;
 
 /// The native window's class.
@@ -65,6 +65,8 @@ struct Button {
     pointer: Cell<Pointer>,
     /// Puts a look on the page's button.
     page: Box<dyn Fn(Look)>,
+    /// Whether the window was maximised when the native window was last named, `None` before.
+    named: Cell<Option<bool>>,
 }
 
 /// Covers the page's maximise button with a native window answering `HTMAXBUTTON`. Does
@@ -82,6 +84,7 @@ pub(super) fn cover_maximise<R: Runtime>(window: &WebviewWindow<R>) {
         top,
         pointer: Cell::new(Pointer::Away),
         page: Box::new(page),
+        named: Cell::new(None),
     };
     create(button);
 }
@@ -158,6 +161,7 @@ fn create(button: Button) -> Option<HWND> {
     }
     // SAFETY: `top` is alive.
     place(top, child, unsafe { GetDpiForWindow(top) });
+    name(child);
     Some(child)
 }
 
@@ -184,6 +188,42 @@ fn place(top: HWND, child: HWND, dpi: u32) {
     });
 }
 
+/// Names the native window, for screen readers and UI Automation, with Windows' own word for
+/// what a click does, from the top-level window's system menu: Restore while it is maximised,
+/// else Maximize, in the language Windows speaks (the page's words have no Hindi for the OS's
+/// command, and new English ones would be new interface strings). Only when the state changed
+/// since the last name. Empty when the menu or its item is missing.
+fn name(child: HWND) {
+    with_button(child, |button| {
+        // SAFETY: `button.top` is the live top-level window that owns `child`.
+        let zoomed = unsafe { IsZoomed(button.top) }.as_bool();
+        if button.named.get() == Some(zoomed) {
+            return;
+        }
+        button.named.set(Some(zoomed));
+        let command = if zoomed { SC_RESTORE } else { SC_MAXIMIZE };
+        let word = menu_item(button.top, command).map_or_else(String::new, |item| menu_word(&item));
+        let wide: Vec<u16> = word.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: `wide` is NUL-terminated and outlives the call; `child` is ours and alive.
+        drop(unsafe { SetWindowTextW(child, PCWSTR(wide.as_ptr())) });
+    });
+}
+
+/// The text of `command`'s item in `top`'s system menu, as the menu has it.
+fn menu_item(top: HWND, command: u32) -> Option<String> {
+    // SAFETY: `top` is alive; without revert the call hands back the window's own menu copy
+    // (making it on first use) and changes nothing.
+    let menu = unsafe { GetSystemMenu(top, false) };
+    if menu.0.is_null() {
+        return None;
+    }
+    let mut text = [0u16; 128];
+    // SAFETY: `menu` is the live system menu; the slice bounds what Windows writes.
+    let len = unsafe { GetMenuStringW(menu, command, Some(&mut text), MF_BYCOMMAND) };
+    let len = usize::try_from(len).ok().filter(|&len| len > 0)?;
+    Some(String::from_utf16_lossy(text.get(..len)?))
+}
+
 /// The top-level window's subclass: keeps the native window over the button. `data` is the
 /// native window's handle.
 unsafe extern "system" fn top_proc(
@@ -196,8 +236,11 @@ unsafe extern "system" fn top_proc(
 ) -> LRESULT {
     let child = HWND(ptr::with_exposed_provenance_mut(data));
     match msg {
-        // SAFETY: `top` is alive while it handles a message.
-        WM_SIZE => place(top, child, unsafe { GetDpiForWindow(top) }),
+        WM_SIZE => {
+            // SAFETY: `top` is alive while it handles a message.
+            place(top, child, unsafe { GetDpiForWindow(top) });
+            name(child);
+        }
         WM_DPICHANGED => {
             // Tao resizes the window for the new DPI first; then the button goes where the
             // new scale puts it. The new DPI is the low word of `wparam`.
@@ -271,14 +314,23 @@ fn over(hwnd: HWND, lparam: LPARAM) -> bool {
 
 /// Runs one input through the pointer states and does what the step says.
 fn act(hwnd: HWND, input: Input) {
+    with_button(hwnd, |button| act_on(hwnd, button, input));
+}
+
+/// Calls `f` with the native window's state, if it still has it.
+fn with_button(hwnd: HWND, f: impl FnOnce(&Button)) {
     // SAFETY: GWLP_USERDATA holds our boxed `Button` from creation until WM_NCDESTROY (or 0),
-    // and nothing in this function destroys the window.
+    // and nothing `f` does destroys the window.
     let raw = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
     let state: *const Button = ptr::with_exposed_provenance(raw.cast_unsigned());
     // SAFETY: as above; only shared references to the box are ever made.
-    let Some(button) = (unsafe { state.as_ref() }) else {
-        return;
-    };
+    if let Some(button) = unsafe { state.as_ref() } {
+        f(button);
+    }
+}
+
+/// Does what `input`'s step says, for the native window `hwnd` and its state.
+fn act_on(hwnd: HWND, button: &Button, input: Input) {
     let step = step(button.pointer.get(), input);
     button.pointer.set(step.next);
     if step.track_leave {

@@ -1,4 +1,4 @@
-use super::{Capture, Input, Look, Pointer, Step, lparam_point, step};
+use super::{Capture, Input, Look, Pointer, Step, lparam_point, menu_word, step};
 
 #[test]
 fn lparam_points_are_signed_words() {
@@ -162,4 +162,24 @@ fn the_scripts_are_fixed_and_name_only_the_maximise_button() {
             .script()
             .ends_with("removeAttribute('data-pointer')")
     );
+}
+
+#[test]
+fn menu_words_lose_the_accelerator_and_the_shortcut() {
+    assert_eq!(menu_word("Ma&ximize"), "Maximize");
+    assert_eq!(menu_word("&Restore"), "Restore");
+    assert_eq!(menu_word("&Close\tAlt+F4"), "Close");
+    assert_eq!(menu_word("最大化(&X)"), "最大化");
+    assert_eq!(menu_word("Save && &Quit"), "Save & Quit");
+    assert_eq!(menu_word("अधिकतम करें(&X)"), "अधिकतम करें");
+    assert_eq!(menu_word(" Agrandir "), "Agrandir");
+}
+
+#[test]
+fn an_empty_or_bare_item_gives_no_name() {
+    assert_eq!(menu_word(""), "");
+    assert_eq!(menu_word("&"), "");
+    assert_eq!(menu_word("\tAlt+F10"), "");
+    // A lone "(&" at the end is kept apart from its "&".
+    assert_eq!(menu_word("Zoom (&"), "Zoom (");
 }
