@@ -110,7 +110,6 @@ test("by default the toolbar draws the lights on the Mac, the search field, the 
   expect(p.lights).not.toBeNull();
   expect(p.search).not.toBeNull();
   expect(p.pair).not.toBeNull();
-  expect(p.top?.hasAttribute("data-chrome")).toBe(false);
   expect(p.title?.getAttribute("lang")).toBe("en");
   expect(p.title?.classList.contains("as-en")).toBe(true);
   expect(p.title?.hasAttribute("data-testid")).toBe(false);
@@ -122,17 +121,44 @@ test("by default on Windows the toolbar ends in the caption buttons and keeps th
   expect(parts().top?.classList.contains("mid:pr-0")).toBe(true);
 });
 
-test('chrome "os" draws neither the corner lights nor the caption buttons, and keeps no room for them', async () => {
-  await mount(null, { chrome: "os" });
-  expect(parts().lights).toBeNull();
-  expect(parts().top?.getAttribute("data-chrome")).toBe("os");
+/** The toolbar's layout as the stylesheets key on it: each element's tag, classes and attributes, lights and caption
+ * buttons left out. */
+const layout = () =>
+  [...(host?.querySelectorAll("header.room-top, header.room-top *") ?? [])]
+    .filter((e) => e.closest(".room-lights, .room-caption") === null)
+    .map((e) => `${e.tagName} ${e.className} ${[...e.attributes].map((a) => a.name).join(",")}`);
+
+async function remount(more: Partial<RoomToolbarProps>) {
   await act(async () => root?.unmount());
   host?.remove();
-  await mount(null, { chrome: "os", platform: "windows" });
+  await mount(null, more);
+}
+
+test('on the Mac chrome "os" leaves out the corner lights and moves nothing else', async () => {
+  await mount(null, { platform: "mac" });
+  const own = layout();
+  expect(parts().lights).not.toBeNull();
+  await remount({ platform: "mac", chrome: "os" });
+  expect(parts().lights).toBeNull();
+  // the lead keeps its place, with Matters in it, and the title stands where it stood
+  expect(host?.querySelector(".room-lead .room-rail-toggle")).not.toBeNull();
+  expect(layout()).toEqual(own);
+});
+
+test('on Windows chrome "os" leaves out the caption buttons and their room at the right, and moves nothing else', async () => {
+  await mount(null, { platform: "windows" });
+  const own = layout();
+  expect(parts().captions).not.toBeNull();
+  await remount({ platform: "windows", chrome: "os" });
   const p = parts();
   expect(p.captions).toBeNull();
+  expect(p.top?.getAttribute("data-platform")).toBe("windows");
   expect(p.top?.classList.contains("mid:pr-0")).toBe(false);
   expect(host?.querySelector(".room-tools")?.classList.contains("shrink-100")).toBe(false);
+  // the caption buttons' room: the header's mid:pr-0, the tools' shrink-100 and the search's margins; nothing else
+  const room = (line: string) =>
+    line.replace(/ mid:pr-0| shrink-100| max-mid:ml-auto| max-narrow:ml-0/g, "");
+  expect(layout().map(room)).toEqual(own.map(room));
 });
 
 test("search false leaves the search field out and keeps the pair", async () => {

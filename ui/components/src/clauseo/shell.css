@@ -146,13 +146,6 @@
     .room-top:not([data-platform="mac"]) .room-matter {
       padding-left: var(--s5);
     }
-    /* nor are there under the computer's own title bar (RoomToolbar's chrome "os"), on any platform */
-    .room-top[data-chrome="os"] .room-lead {
-      display: none;
-    }
-    .room-top[data-chrome="os"] .room-matter {
-      padding-left: var(--s5);
-    }
   }
 
   /* ---------- the rail: matters by their next date, on the bare ground ---------- */
