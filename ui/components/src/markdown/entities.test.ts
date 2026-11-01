@@ -95,6 +95,43 @@ test("the browser-resolved code sets no innerHTML and parses no HTML", () => {
   expect(sinks).toEqual([]);
 });
 
+/** The patched decoder's own source, in a child Node, with its table import pointed at `loader`. */
+const RETRY = `
+import { readFileSync } from "node:fs";
+const [file] = JSON.parse(process.argv[1]);
+const source = readFileSync(file, "utf8");
+if (!source.includes("import('character-entities')")) throw new Error("no lazy table import");
+let calls = 0;
+globalThis.__loadTable = () => ++calls === 1
+  ? Promise.reject(new Error("chunk blocked"))
+  : Promise.resolve({ characterEntities: { ngE: "\\u2267\\u0338" } });
+const url = "data:text/javascript," + encodeURIComponent(
+  source.replace("import('character-entities')", "globalThis.__loadTable()"));
+const m = await import(url);
+const failed = await m.loadCharacterEntities().then(() => "loaded", () => "failed");
+const before = m.characterEntitiesLoaded();
+await m.loadCharacterEntities();
+process.stdout.write(JSON.stringify({ failed, before, after: m.characterEntitiesLoaded(), calls, ngE: m.decodeNamedCharacterReference("ngE") }));
+`;
+
+test("the patched decoder imports the table again after a failed import", () => {
+  const decoder = GRAPH.files.find((file) =>
+    /decode-named-character-reference[\\/]index\.js$/.test(file),
+  )!;
+  const output = execFileSync(
+    process.execPath,
+    ["--input-type=module", "--eval", RETRY, JSON.stringify([decoder])],
+    { encoding: "utf8" },
+  );
+  expect(JSON.parse(output)).toEqual({
+    failed: "failed",
+    before: false,
+    after: true,
+    calls: 2,
+    ngE: "\u2267\u0338",
+  });
+});
+
 /** The text of an answer's first paragraph. */
 function paragraphText(markdown: string): string {
   const [view] = createAnswer("t").update(markdown, false);

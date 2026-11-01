@@ -18,8 +18,9 @@ test("the component fetches the table when idle and re-renders with it", async (
   const root = createRoot(host);
   await act(async () => root.render(<Markdown text={TEXT} />));
   expect(host.textContent).toContain("&ngE;");
-  await vi.waitFor(() => expect(characterEntitiesLoaded()).toBe(true), { timeout: 5000 });
-  await act(async () => {});
+  await act(async () => {
+    await vi.waitFor(() => expect(characterEntitiesLoaded()).toBe(true), { timeout: 5000 });
+  });
   expect(host.textContent).toContain("A rare ≧̸ here.");
   expect(host.textContent).toContain("A common & one.");
   act(() => root.unmount());

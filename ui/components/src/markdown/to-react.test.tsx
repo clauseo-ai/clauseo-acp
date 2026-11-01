@@ -22,8 +22,7 @@ const render = (markdown: string) =>
   createAnswer("t")
     .update(markdown, false)
     .map((view) => renderToStaticMarkup(toReact(view.hast)))
-    .join("")
-    .replace(/>\n</g, "><");
+    .join("");
 
 test("every tag and attribute the schema allows has a mapping, and nothing more", () => {
   expect([...MAPPED.tags].sort()).toEqual([...(SCHEMA.tagNames ?? [])].sort());
@@ -70,6 +69,18 @@ test("unknown properties, event handlers and inner HTML never reach React", () =
   expect(Object.keys(first?.props ?? {})).toEqual(["children"]);
 });
 
+test("properties named like Object.prototype's own are not mapped", () => {
+  const tree = root(
+    element("ol", { constructor: "x", toString: "y", hasOwnProperty: "w" } as never),
+    element("code", { constructor: "x", valueOf: "v", className: ["language-a"] } as never),
+  );
+  expect(html(tree)).toBe('<ol></ol><code class="language-a"></code>');
+  // React drops an invalid prop name from the markup, so the props themselves are checked.
+  const [, ol, code] = elements(toReact(tree));
+  expect(Object.keys(ol?.props ?? {})).toEqual([]);
+  expect(Object.keys(code?.props ?? {})).toEqual(["className"]);
+});
+
 test("values that are not strings, numbers, booleans or lists of them are dropped", () => {
   const tree = root(
     element("ol", { start: { valueOf: () => 3 } as never, className: ["contains-task-list"] }),
@@ -98,15 +109,15 @@ test("text is escaped by React", () => {
 
 test("property names: class, table-cell alignment as a style, task-list checkboxes, list start", () => {
   expect(render("- [x] done\n- [ ] open")).toBe(
-    '<ul class="contains-task-list"><li class="task-list-item"><input type="checkbox" disabled="" checked=""/> done</li>' +
-      '<li class="task-list-item"><input type="checkbox" disabled=""/> open</li></ul>',
+    '<ul class="contains-task-list">\n<li class="task-list-item"><input type="checkbox" disabled="" checked=""/> done</li>\n' +
+      '<li class="task-list-item"><input type="checkbox" disabled=""/> open</li>\n</ul>',
   );
   expect(render("| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |")).toBe(
     '<table><thead><tr><th style="text-align:left">a</th><th style="text-align:center">b</th>' +
       '<th style="text-align:right">c</th></tr></thead><tbody><tr><td style="text-align:left">1</td>' +
       '<td style="text-align:center">2</td><td style="text-align:right">3</td></tr></tbody></table>',
   );
-  expect(render("3. three\n4. four")).toBe('<ol start="3"><li>three</li><li>four</li></ol>');
+  expect(render("3. three\n4. four")).toBe('<ol start="3">\n<li>three</li>\n<li>four</li>\n</ol>');
   expect(render("```ts\nlet a\n```")).toBe(
     '<pre data-clauseo="code" data-lang="ts"><code>let a</code></pre>',
   );

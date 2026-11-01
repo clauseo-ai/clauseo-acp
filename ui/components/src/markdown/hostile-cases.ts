@@ -187,4 +187,27 @@ export const CASES: HostileCase[] = [
     text: ["***a***"],
   },
   { id: "delimiter-sequences", markdown: "a* ".repeat(5000), text: ["a* a* a*"] },
+  // Character references in link destinations, before and after the full entity table loads (entities.ts):
+  // `&colon;` and `&Tab;` are not in the common set, so they decode only once the table arrives, and the
+  // link must stay inert in both states. `&sol;` moves the host from after `@` to before it on arrival.
+  {
+    id: "entity-colon-link",
+    markdown: "[click](javascript&colon;window.__g4pwn('entity-colon-link'))",
+  },
+  {
+    id: "entity-tab-colon-link",
+    markdown: "[click](java&Tab;script&colon;window.__g4pwn('entity-tab-colon-link'))",
+  },
+  {
+    id: "entity-colon-definition",
+    markdown: "[click][d]\n\n[d]: javascript&colon;window.__g4pwn('entity-colon-definition')\n",
+  },
+  {
+    id: "entity-colon-autolink",
+    markdown: "<javascript&colon;window.__g4pwn('entity-colon-autolink')>",
+  },
+  {
+    id: "entity-sol-host",
+    markdown: "[bank.example](https://evil.example&sol;@bank.example/login)",
+  },
 ];

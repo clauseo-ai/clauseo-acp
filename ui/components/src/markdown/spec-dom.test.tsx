@@ -16,7 +16,9 @@ import { loadEntities } from "./entities.ts";
 import { Markdown } from "./markdown.tsx";
 import { examplesOf, withTabs } from "./spec-fixture.ts";
 
-// The full entity table, which the renderer loads lazily (entities.ts), is loaded first.
+// The full entity table, which the renderer loads lazily (entities.ts), is loaded first. These examples would
+// pass without it (none compares rare names), but the component prefetches the table when idle, so without
+// this the table would arrive part-way through the suite; loading it first keeps every run in one state.
 await loadEntities();
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
