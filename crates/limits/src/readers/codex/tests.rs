@@ -297,6 +297,22 @@ fn an_unknown_reached_value_is_a_plan_window_and_false_spend_control_is_nothing(
     assert_eq!((limits.windows, reached), (Vec::new(), None));
 }
 
+/// Spend control wins over a plain or unknown reached type, never over credits.
+#[test]
+fn spend_control_beats_a_plan_window_but_not_credits() {
+    for kind in ["rate_limit_reached", "brand_new_limit"] {
+        let snapshot = json!({"rateLimitReachedType": kind, "spendControlReached": true});
+        let (_, reached) = limits_of(chatgpt("team", &snapshot));
+        assert_eq!(reached, Some(LimitStopReason::WorkspaceSpendCap), "{kind}");
+    }
+    let snapshot = json!({
+        "rateLimitReachedType": "workspace_member_credits_depleted",
+        "spendControlReached": true
+    });
+    let (_, reached) = limits_of(chatgpt("team", &snapshot));
+    assert_eq!(reached, Some(LimitStopReason::WorkspaceCredits));
+}
+
 #[test]
 fn other_lengths_get_plain_labels_and_bad_ones_a_fallback() {
     let label = |mins: Value| {
