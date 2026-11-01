@@ -128,14 +128,60 @@ function probeEntry(): Plugin {
   };
 }
 
-/** The perf module's dynamic import as Vite's import analysis wraps it, before its preload list is filled in. */
-const PERF_PRELOAD = /__vitePreload\(\(\) => (import\("\.\/perf-[^"]+"\)), __VITE_PRELOAD__\)/g;
+/** The chunks whose dynamic import is unwrapped: each imports nothing the page would need to preload. */
+const BARE_CHUNKS = ["perf", "character-entities"];
+
+const HELPER = "__vitePreload(() => ";
+const DEPS = ", __VITE_PRELOAD__)";
 
 /**
- * Unwraps the perf module's dynamic import (src/main.tsx; loaded only in the e2e and marks builds) from Vite's preload
- * helper back to a plain `import()`, so the minifier drops the helper: the perf chunk imports only what the main chunk
- * already holds and has nothing to preload, and the helper would add about 1.8 KB to every release page's initial JS.
- * Only that import: any other dynamic import keeps its preloads.
+ * `code` with every `__vitePreload(() => <body>, __VITE_PRELOAD__)` whose body starts with
+ * `import("./<chunk>-` for a chunk in BARE_CHUNKS replaced by `<body>`. The body can run past the import
+ * (`import(...).then(...)`), so its end is found by counting brackets, skipping string literals.
+ */
+export function unwrapPreloads(code: string, chunks: readonly string[] = BARE_CHUNKS): string {
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const found = code.indexOf(HELPER, at);
+    if (found < 0) return out + code.slice(at);
+    const body = found + HELPER.length;
+    if (!chunks.some((chunk) => code.startsWith(`import("./${chunk}-`, body))) {
+      out += code.slice(at, body);
+      at = body;
+      continue;
+    }
+    const close = closingBracket(code, found + "__vitePreload".length);
+    if (close < 0 || !code.slice(close - DEPS.length + 1, close + 1).endsWith(DEPS)) {
+      throw new Error(`clauseo-bare-dynamic-imports: cannot unwrap the preload at ${found}`);
+    }
+    out += code.slice(at, found) + code.slice(body, close + 1 - DEPS.length);
+    at = close + 1;
+  }
+}
+
+/** The index of the `)` that closes the `(` at `open`, or -1. */
+function closingBracket(code: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    const c = code[i]!;
+    if (c === '"' || c === "'" || c === "`") {
+      for (i++; i < code.length && code[i] !== c; i++) if (code[i] === "\\") i++;
+    } else if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") {
+      depth--;
+      if (depth === 0) return c === ")" ? i : -1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Unwraps two dynamic imports from Vite's preload helper back to a plain `import()`, so the minifier drops the
+ * helper, which would add about 1.8 KB to every release page's initial JS: the perf module (src/main.tsx; loaded only
+ * in the e2e and marks builds), which imports only what the main chunk already holds, and the answer renderer's full
+ * entity table (`import("character-entities")` in ui/patches/' decode-named-character-reference), a data module
+ * with no imports. Neither has anything to preload. Any other dynamic import keeps its preloads.
  */
 function bareDynamicImports(): Plugin {
   return {
@@ -143,7 +189,7 @@ function bareDynamicImports(): Plugin {
     apply: "build",
     enforce: "post",
     renderChunk(code) {
-      const bare = code.replace(PERF_PRELOAD, "$1");
+      const bare = unwrapPreloads(code);
       return bare === code ? null : bare;
     },
   };

@@ -1,7 +1,7 @@
 import { build, createServer, resolveConfig, type Rolldown } from "vite";
 import { afterEach, expect, test, vi } from "vitest";
 import tauriConf from "../../../crates/desktop/tauri.conf.json" with { type: "json" };
-import { devCsp, metaCsp } from "../vite.config.ts";
+import { devCsp, metaCsp, unwrapPreloads } from "../vite.config.ts";
 
 // The React Compiler skips a function it cannot compile instead of failing the build, so a broken
 // Babel or compiler setup would only lose memoization. This loads the real vite.config.ts and
@@ -57,7 +57,7 @@ test("the build's only input is index.html, so the dev-only gallery stays out of
 // The perf module (src/perf/) loads only in the e2e and marks builds; a release page must not pay for it. This builds
 // the app in memory and checks the perf code sits in its own chunk, imported with a bare import() from the entry
 // chunk, and that Vite's preload helper (about 1.8 KB, which vite.config.ts's bareDynamicImports unwraps) is gone.
-test("the release build keeps the perf module in a lazy chunk, with no preload helper in the entry", async () => {
+test("the release build keeps the perf module and the entity table in lazy chunks, with no preload helper in the entry", async () => {
   const out = (await build({
     configFile: "vite.config.ts",
     logLevel: "silent",
@@ -72,6 +72,10 @@ test("the release build keeps the perf module in a lazy chunk, with no preload h
   expect(perf).toBeDefined();
   expect(perf!.isDynamicEntry).toBe(true);
   expect(entry!.code).toMatch(/[^>]import\(`\.\/perf-[\w-]+\.js`\)/);
+  const entities = chunks.find((c) => c.fileName.startsWith("assets/character-entities-"));
+  expect(entities).toBeDefined();
+  expect(entities!.isDynamicEntry).toBe(true);
+  expect(entry!.code).toMatch(/[^>]import\(`\.\/character-entities-[\w-]+\.js`\)\.then\(/);
   expect(entry!.code).not.toContain("vite:preloadError");
   expect(entry!.code).not.toContain("startStream");
 });
@@ -208,4 +212,18 @@ test("the probe build mounts the room over FakeTransport from room/probe-main.ts
   expect(modules.some((id) => id.endsWith("/src/room/probe-main.tsx"))).toBe(true);
   expect(modules.some((id) => id.endsWith("/src/main.tsx"))).toBe(false);
   expect(handCheckChunks(chunks).axe.length).toBe(1);
+});
+
+test("unwrapPreloads unwraps only the listed chunks, bodies with brackets and strings included", () => {
+  const wrapped = (body: string) => `__vitePreload(() => ${body}, __VITE_PRELOAD__)`;
+  const entities =
+    'import("./character-entities-x1.js").then(function (m) { t = m[")"]; }, function (e) { throw e; })';
+  const perf = 'import("./perf-x2.js")';
+  const other = 'import("./html-x3.js")';
+  expect(
+    unwrapPreloads(`a = ${wrapped(entities)}; b = ${wrapped(perf)}; c = ${wrapped(other)};`),
+  ).toBe(`a = ${entities}; b = ${perf}; c = ${wrapped(other)};`);
+  expect(() => unwrapPreloads('__vitePreload(() => import("./perf-x.js")')).toThrow(
+    /cannot unwrap/,
+  );
 });
