@@ -24,7 +24,7 @@ import {
   footnotesIn,
   identifierOf,
   NO_FOOTNOTES,
-  notesHast,
+  noteHast,
   numberFootnotes,
   placeholdersFor,
   referenceHandler,
@@ -50,7 +50,9 @@ import type { BlockEnd } from "./split.ts";
  * One block, ready to render: `source` is the block's text, `input` what was parsed for it (with its
  * footnote numbers, for the notes view a key), `hast` the sanitised result. `streaming` marks the last
  * block of a streaming answer, whose links stay inert until it is finished (a URL may still be arriving,
- * and tail repair may have rewritten it). `notes` marks the answer's notes, after its last block.
+ * and tail repair may have rewritten it). `notes` marks the answer's notes, after its last block: `items`
+ * holds one view per note, in number order, each with its note's identifier as `note`, and its `hast` is
+ * empty (the section around the items is the renderer's).
  */
 export type BlockView = {
   readonly source: string;
@@ -58,7 +60,11 @@ export type BlockView = {
   readonly hast: Hast;
   readonly streaming: boolean;
   readonly notes?: true;
+  readonly items?: readonly BlockView[];
+  readonly note?: string;
 };
+
+const EMPTY_HAST: Hast = { type: "root", children: [] };
 
 export type Answer = {
   /** The blocks for the whole answer so far; `streaming` is false once the turn has ended. */
@@ -162,6 +168,7 @@ export function createAnswer(scope: string): Answer {
   const repairs = createCache<{ text: string | undefined }>();
   const views = createCache<BlockView>();
   const tails = createCache<BlockView>();
+  const noteViews = createCache<BlockView>();
   const caches = [
     trees,
     ends,
@@ -174,6 +181,7 @@ export function createAnswer(scope: string): Answer {
     repairs,
     views,
     tails,
+    noteViews,
   ];
   const idOf = createIds();
   // Whether a parse met a named character reference before the full table had loaded (entities.ts).
@@ -370,32 +378,46 @@ export function createAnswer(scope: string): Answer {
     return inputOf(entry.source, lines, defined);
   };
 
-  /** The notes view, rebuilt only when a note, its number or its references change. */
+  /**
+   * The notes view: one view per shown note, each rebuilt only when its note, its number, its references
+   * or the numbers of the references inside it change; the notes view itself only when one of them does.
+   * A note still streaming in the last block has inert links, as that block does.
+   */
   let lastNotes: BlockView | undefined;
+  const noteViewOf = (id: string, numbering: Numbering, streaming: boolean): BlockView => {
+    const note = numbering.notes.get(id)!;
+    let key = `${idOf(note.node)}:${numbering.number.get(id)},${numbering.total.get(id)}`;
+    for (const [inner, list] of numbering.inNotes.get(id) ?? []) {
+      const known = numbering.notes.has(inner) ? 1 : 0;
+      key += `;${inner}\u0000${numbering.number.get(inner) ?? ""},${known},${list.join(".")}`;
+    }
+    return noteViews.get(`${key}\u0002${streaming ? 1 : 0}`, () => {
+      let hast: Hast;
+      try {
+        hast = sanitize(noteHast(scope, numbering, id, options), SCHEMA) as Hast;
+      } catch {
+        const text: Text = { type: "text", value: note.source.trimEnd() };
+        hast = {
+          type: "root",
+          children: [{ type: "element", tagName: "li", properties: {}, children: [text] }],
+        };
+      }
+      return { source: note.source, input: key, hast, streaming, note: id };
+    });
+  };
   const notesOf = (numbering: Numbering, streamingNotes: Footnotes): BlockView | undefined => {
-    let key = "";
-    let source = "";
-    let streaming = false;
+    const items: BlockView[] = [];
     for (const id of numbering.order) {
       const note = numbering.notes.get(id);
-      if (!note) continue;
-      key += `${idOf(note.node)}:${numbering.number.get(id)},${numbering.total.get(id)}`;
-      for (const [inner, list] of numbering.inNotes.get(id) ?? [])
-        key += `;${numbering.number.get(inner) ?? ""},${list.join(".")}`;
-      key += "\u0001";
-      source += note.source;
-      streaming ||= streamingNotes.notes.includes(note);
+      if (note) items.push(noteViewOf(id, numbering, streamingNotes.notes.includes(note)));
     }
-    if (key === "") return (lastNotes = undefined);
-    if (lastNotes?.input === key && lastNotes.streaming === streaming) return lastNotes;
-    let hast: Hast;
-    try {
-      const notes = notesHast(scope, numbering, options);
-      hast = notes ? (sanitize(notes, SCHEMA) as Hast) : plainText(source);
-    } catch {
-      hast = plainText(source);
-    }
-    return (lastNotes = { source, input: key, hast, streaming, notes: true });
+    if (items.length === 0) return (lastNotes = undefined);
+    const before = lastNotes?.items;
+    if (before?.length === items.length && items.every((item, index) => item === before[index]))
+      return lastNotes;
+    const source = items.map((item) => item.source).join("");
+    const input = items.map((item) => item.input).join("\u0001");
+    return (lastNotes = { source, input, hast: EMPTY_HAST, streaming: false, notes: true, items });
   };
 
   let lastText: string | undefined;

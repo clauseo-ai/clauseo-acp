@@ -120,9 +120,43 @@ export function normalise(html: string): string {
   return children(tree.children, false, true);
 }
 
-/** The HTML of the answer model's final hast: each block's sanitised hast, in order. */
-export function htmlOf(views: readonly { hast: Root }[]): string {
-  return views.map((view) => toHtml(view.hast)).join("\n");
+type View = { hast: Root; items?: readonly { hast: Root }[] | undefined };
+
+/**
+ * The notes section the renderer puts around the notes view's items (notes.tsx), as hast: remark-rehype's
+ * footer, its heading's id scoped as each item's is.
+ */
+function notesSection(items: readonly { hast: Root }[]): Root {
+  const children: ElementContent[] = [{ type: "text", value: "\n" }];
+  for (const item of items)
+    for (const child of item.hast.children)
+      if (child.type === "element") children.push(child, { type: "text", value: "\n" });
+  const first = children.find((child) => child.type === "element");
+  const id = first?.type === "element" ? String(first.properties.id ?? "") : "";
+  const scope = id.replace(/^user-content-/, "").replace(/-fn-.*$/, "");
+  const heading: ElementContent = {
+    type: "element",
+    tagName: "h2",
+    properties: { className: ["sr-only"], id: `user-content-${scope}-footnote-label` },
+    children: [{ type: "text", value: "Footnotes" }],
+  };
+  const list: ElementContent = { type: "element", tagName: "ol", properties: {}, children };
+  return {
+    type: "root",
+    children: [
+      {
+        type: "element",
+        tagName: "section",
+        properties: { dataFootnotes: true, className: ["footnotes"] },
+        children: [heading, { type: "text", value: "\n" }, list, { type: "text", value: "\n" }],
+      },
+    ],
+  };
+}
+
+/** The HTML of the answer model's final hast: each block's sanitised hast, in order, then the notes. */
+export function htmlOf(views: readonly View[]): string {
+  return views.map((view) => toHtml(view.items ? notesSection(view.items) : view.hast)).join("\n");
 }
 
 /**
