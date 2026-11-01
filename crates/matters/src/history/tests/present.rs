@@ -127,26 +127,35 @@ fn a_sound_object_modified_since_the_last_publish_is_kept_as_it_is() {
     }
 }
 
-/// A sound object from before the last publish passes its full check and is kept as it is.
+/// The two ways a file reaches the store: read whole, so its bytes are in hand and a present
+/// object is compared with them, or streamed (the threshold set below it), so a present object
+/// is hashed against its id.
+const PATHS: [(&str, u64); 2] = [("in-hand", u64::MAX), ("streamed", 1)];
+
+/// A sound object from before the last publish passes its full check and is kept as it is, on
+/// both paths.
 #[test]
 fn a_sound_object_from_before_the_last_publish_is_kept_as_it_is() {
-    let dir = TestDir::new("history-present-old-sound");
-    let (git_dir, store) = new_store(&dir);
-    let mut store = published_at(&dir, &git_dir, store, far_ahead());
-    let content = b"the signed lease\n";
-    let id = other_writer(&git_dir, Compression::NONE)
-        .write_buf(Kind::Blob, content)
-        .unwrap();
-    let blob = Oid(id.as_slice().try_into().unwrap());
-    let object = object_path(&git_dir, blob);
-    let planted = std::fs::read(&object).unwrap();
+    for (case, threshold) in PATHS {
+        let dir = TestDir::new(&format!("history-present-old-sound-{case}"));
+        let (git_dir, store) = new_store(&dir);
+        let mut store = published_at(&dir, &git_dir, store, far_ahead());
+        store.set_stream_threshold(threshold);
+        let content = b"the signed lease\n";
+        let id = other_writer(&git_dir, Compression::NONE)
+            .write_buf(Kind::Blob, content)
+            .unwrap();
+        let blob = Oid(id.as_slice().try_into().unwrap());
+        let object = object_path(&git_dir, blob);
+        let planted = std::fs::read(&object).unwrap();
 
-    assert_eq!(store_content(&dir, &mut store, content), blob);
-    assert!(
-        std::fs::read(&object).unwrap() == planted,
-        "a sound object was written again"
-    );
-    assert_eq!(store.new_object_files(), [object]);
+        assert_eq!(store_content(&dir, &mut store, content), blob, "{case}");
+        assert!(
+            std::fs::read(&object).unwrap() == planted,
+            "{case}: a sound object was written again"
+        );
+        assert_eq!(store.new_object_files(), [object], "{case}");
+    }
 }
 
 /// An object from before the last publish whose header names another size or another kind
@@ -189,24 +198,28 @@ fn an_object_modified_since_the_last_publish_with_a_wrong_body_is_written_again(
 
 /// An object from before the last publish with the right header (same kind and size) but
 /// other bytes, as a disk or a sync tool could leave it, is inflated and hashed in full, found
-/// wrong, and written again: the checkpoint has the right bytes in hand.
+/// wrong, and written again: compared with the bytes in hand when the file was read whole,
+/// hashed against its id when it was streamed.
 #[test]
 fn an_object_from_before_the_last_publish_with_a_wrong_body_is_written_again() {
-    let dir = TestDir::new("history-present-old-body");
-    let (git_dir, store) = new_store(&dir);
-    let mut store = published_at(&dir, &git_dir, store, far_ahead());
-    let content = b"right bytes\n";
-    let blob = git_id("blob", content);
-    other_writer(&git_dir, Compression::BEST_SPEED)
-        .write_buf_with_known_id(Kind::Blob, b"wrong bytes\n", gix::ObjectId::Sha1(blob.0))
-        .unwrap();
+    for (case, threshold) in PATHS {
+        let dir = TestDir::new(&format!("history-present-old-body-{case}"));
+        let (git_dir, store) = new_store(&dir);
+        let mut store = published_at(&dir, &git_dir, store, far_ahead());
+        store.set_stream_threshold(threshold);
+        let content = b"right bytes\n";
+        let blob = git_id("blob", content);
+        other_writer(&git_dir, Compression::BEST_SPEED)
+            .write_buf_with_known_id(Kind::Blob, b"wrong bytes\n", gix::ObjectId::Sha1(blob.0))
+            .unwrap();
 
-    assert_eq!(store_content(&dir, &mut store, content), blob);
-    assert_reads_back(&store, blob, content, "wrong body");
+        assert_eq!(store_content(&dir, &mut store, content), blob, "{case}");
+        assert_reads_back(&store, blob, content, case);
+    }
 }
 
 /// An object torn by a crash (cut short) or damaged on disk (one byte flipped in its zlib
-/// stream) since the last publish is found unsound and written again.
+/// stream) since the last publish is found unsound and written again, on both paths.
 #[test]
 fn a_truncated_or_flipped_object_modified_since_the_last_publish_is_written_again() {
     let truncate: fn(&mut Vec<u8>) = |bytes| bytes.truncate(bytes.len() / 2);
@@ -214,11 +227,14 @@ fn a_truncated_or_flipped_object_modified_since_the_last_publish_is_written_agai
         let middle = bytes.len() / 2;
         bytes[middle] ^= 0x20;
     };
-    for (case, damage) in [("truncated", truncate), ("flipped", flip)] {
+    let cases = [("truncated", truncate), ("flipped", flip)];
+    for ((case, damage), (path, threshold)) in cases.into_iter().flat_map(|c| PATHS.map(|p| (c, p)))
+    {
         for (kind, content, compression) in contents() {
-            let case = format!("{case}-{kind}");
+            let case = format!("{case}-{kind}-{path}");
             let dir = TestDir::new(&format!("history-present-torn-{case}"));
             let (git_dir, mut store) = new_store(&dir);
+            store.set_stream_threshold(threshold);
             let id = other_writer(&git_dir, compression)
                 .write_buf(Kind::Blob, &content)
                 .unwrap();
