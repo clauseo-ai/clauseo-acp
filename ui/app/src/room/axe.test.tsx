@@ -10,8 +10,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, expect, test } from "vitest";
 import { FakeTransport } from "../transport/fake-transport.ts";
+import type { MatterSummary } from "../transport/protocol.ts";
 import { uuid } from "../testing/stream-script.ts";
-import { DEFAULT_UI } from "./display-store.ts";
+import { detailed, fakeNext } from "./fake-next.ts";
 import type { PaperSummary, UiSettings } from "./host-next.ts";
 import { Room } from "./room.tsx";
 import { connectRoom } from "./start.ts";
@@ -50,24 +51,19 @@ const SCENES = {
 } as const;
 
 function transportFor(scene: (typeof SCENES)[keyof typeof SCENES]): FakeTransport {
+  const matters: MatterSummary[] =
+    scene.matters === true
+      ? [{ matter: uuid(1, 2), name: "Sharma v. State of Delhi", kind: "folder" }]
+      : [];
   return new FakeTransport({
     query: () => {
       if (scene.matters === "fails") throw new Error("the host is gone");
-      return {
-        matters: scene.matters
-          ? [{ matter: uuid(1, 2), name: "Sharma v. State of Delhi", kind: "folder" }]
-          : [],
-      };
+      return { matters };
     },
     ...(scene.papers === undefined
       ? {}
       : {
-          next: {
-            query: (query) =>
-              query === "get_settings"
-                ? { settings: { ui: DEFAULT_UI, locked: [] } }
-                : { papers: { papers: [...scene.papers], skipped: [], truncated: false } },
-          },
+          next: fakeNext({ matters: () => matters.map((m) => detailed(m)), papers: scene.papers }),
         }),
   });
 }
