@@ -2,14 +2,15 @@
 //! matter, undo with its note.
 
 use clauseo_protocol::{
-    AgentId, CommandOutcome, DeliveryRequest, DomainEvent, ErrorCode, FileChoice, FileDecision,
-    HostCommand, HostQuery, MatterId, MatterPath, PromptBlock, QueryResult, StopReason, StreamId,
-    ThreadId,
+    AgentId, CheckpointKind, CommandOutcome, DeliveryRequest, DomainEvent, ErrorCode, FileChoice,
+    FileDecision, HostCommand, HostQuery, MatterId, MatterPath, PromptBlock, QueryResult,
+    StopReason, StreamId, ThreadId,
 };
 
 use crate::support::{
     Dir, FAKE, Scenario, command_id, foreign_uuid, matter_with_thread, send_prompt, wait,
 };
+use crate::versions;
 
 #[test]
 fn command_id_repeat_and_conflict() {
@@ -188,7 +189,7 @@ fn undo_step_and_note_reach_agent() {
         &[(FAKE, Scenario::Local("undo-note"))],
     );
     let host = dir.start(0);
-    let (_, thread, folder) =
+    let (matter, thread, folder) =
         matter_with_thread(&dir, &host, "m", &[("brief.txt", "Clause 4 draft\n")], FAKE);
     let mut events = host.events(StreamId::Thread(thread));
     let (first, _) = host.prompt(thread, "Write a note.");
@@ -234,5 +235,14 @@ fn undo_step_and_note_reach_agent() {
     events.drain_ready();
     events.assert_no_mismatch();
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
+    // The undo's checkpoint has its row, like every other.
+    let logged = versions::recorded(&versions::matter_events(&host, matter));
+    assert!(
+        logged
+            .iter()
+            .any(|(_, kind, _)| *kind == CheckpointKind::Undo),
+        "{logged:?}"
+    );
     host.shutdown();
+    versions::assert_every_checkpoint_has_its_row(&dir, matter, &logged);
 }

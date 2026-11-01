@@ -156,14 +156,7 @@ impl HostCommand {
                 matter: _,
                 checkpoint: _,
                 scope,
-            } => match scope {
-                RestoreRequest::Matter => Ok(()),
-                RestoreRequest::Files { paths } if paths.is_empty() => Err(Error::Format {
-                    kind: "RestoreVersion",
-                    rule: "a files scope names at least one file",
-                }),
-                RestoreRequest::Files { paths } => check_paths("RestoreVersion", paths.iter()),
-            },
+            } => scope.check("RestoreVersion"),
             Self::CreateThread {
                 matter: _,
                 agent: _,
@@ -192,6 +185,22 @@ impl HostCommand {
                 thread: _,
                 title: _,
             } => Ok(()),
+        }
+    }
+}
+
+impl RestoreRequest {
+    /// The shape checks of a restore's scope, for `RestoreVersion` and `PreviewRestore` (`kind`
+    /// names which in the error): a files scope names at least one file, at most
+    /// [`MAX_FILE_LIST`] of them in at most [`MAX_PATH_LIST_BYTES`], none twice.
+    pub fn check(&self, kind: &'static str) -> Result<(), Error> {
+        match self {
+            Self::Matter => Ok(()),
+            Self::Files { paths } if paths.is_empty() => Err(Error::Format {
+                kind,
+                rule: "a files scope names at least one file",
+            }),
+            Self::Files { paths } => check_paths(kind, paths.iter()),
         }
     }
 }

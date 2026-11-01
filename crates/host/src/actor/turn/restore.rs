@@ -15,9 +15,9 @@ use super::super::commands::{AfterCommand, CommandCtx};
 use super::super::input::MatterTag;
 use super::super::query::own_versions;
 use super::super::{Actor, Tag};
-use super::{Holder, end, lost, undo};
+use super::{Holder, end, known, lost, undo};
 use crate::error::Error;
-use crate::matter_worker::{MatterJob, RestoreJob};
+use crate::matter_worker::{MatterJob, RestoreDone, RestoreJob};
 use crate::pipeline::{Draft, MatterEvent};
 
 /// A restore between its checks and R8's answer.
@@ -70,14 +70,16 @@ fn take_writer(actor: &mut Actor, matter: MatterId) -> Result<(), Error> {
         .get_mut(&matter)
         .ok_or_else(|| lost("a matter"))?
         .turns;
-    if turns.holder.is_some() || !turns.queue.is_empty() {
-        return Err(Error::refused(
-            ErrorCode::MatterTurnRunning,
-            "a turn is running in this matter; wait for it or cancel it",
-        ));
-    }
-    turns.holder = Some(Holder::Restore);
-    Ok(())
+    let message = match turns.holder {
+        Some(Holder::Restore) => "a restore is running in this matter; wait for it",
+        Some(Holder::Thread(_)) => "a turn is running in this matter; wait for it or cancel it",
+        None if turns.queue.is_empty() => {
+            turns.holder = Some(Holder::Restore);
+            return Ok(());
+        }
+        None => "turns are waiting in this matter; wait for them or cancel them",
+    };
+    Err(Error::refused(ErrorCode::MatterTurnRunning, message))
 }
 
 /// Mints the two checkpoint ids and sends the restore to the matter's thread.
@@ -121,9 +123,9 @@ pub(crate) struct RestoreLog {
 }
 
 /// R8 answered.
-pub(crate) fn on_restored(actor: &mut Actor, ask: &RestoreAsk, result: Result<Restored, Error>) {
+pub(crate) fn on_restored(actor: &mut Actor, ask: &RestoreAsk, result: Result<RestoreDone, Error>) {
     let (ctx, matter) = (ask.ctx, ask.matter);
-    match result.and_then(|restored| restore_log(ask, restored)) {
+    match result.and_then(|done| restore_log(actor, ask, done)) {
         Ok(log) => send_log(actor, matter, log),
         Err(error) => give_up(actor, matter, ctx, error),
     }
@@ -134,8 +136,11 @@ pub(crate) fn on_restored(actor: &mut Actor, ask: &RestoreAsk, result: Result<Re
 /// A restore with nothing to write (R8's `Reused`) logs only the outside edits and answers
 /// `VersionRestored` with the reused id, as `UndoStep` answers `StepUndone` with the
 /// checkpoint it reused: the outcome alone does not tell a restore that wrote nothing from
-/// one that did; the absence of the `VersionRestored` event does.
-fn restore_log(ask: &RestoreAsk, restored: Restored) -> Result<RestoreLog, Error> {
+/// one that did; the absence of the `VersionRestored` event does. A reused id the matter's log
+/// does not hold (its commit never landed: a crash, or a log commit that failed twice) is
+/// recorded first, with its row, so the outcome never names an unrecorded checkpoint.
+fn restore_log(actor: &Actor, ask: &RestoreAsk, done: RestoreDone) -> Result<RestoreLog, Error> {
+    let RestoreDone { restored, reused } = done;
     let Restored {
         outside_edits,
         checkpoint,
@@ -144,6 +149,18 @@ fn restore_log(ask: &RestoreAsk, restored: Restored) -> Result<RestoreLog, Error
     } = restored;
     let mut events = undo::outside_edits_events(outside_edits)?;
     let id = checkpoint.outcome.id();
+    if events.is_empty()
+        && let CheckpointOutcome::Reused(id) = checkpoint.outcome
+        && !known::recorded(actor, ask.matter, id)
+    {
+        if let Some(entry) = reused {
+            let recorded = CheckpointRecorded::new(id, entry.kind, entry.thread, entry.turn)
+                .map_err(|error| Error::Internal(error.to_string()))?;
+            events.push(MatterEvent::checkpoint(recorded, checkpoint.commit.clone()));
+        } else {
+            tracing::error!(%id, "R8 reused a checkpoint its timeline does not hold");
+        }
+    }
     if let CheckpointOutcome::Created(id) = checkpoint.outcome {
         let recorded = CheckpointRecorded::new(id, CheckpointKind::Restore, None, None)
             .map_err(|error| Error::Internal(error.to_string()))?;
@@ -242,7 +259,12 @@ fn note_restored(actor: &mut Actor, matter: MatterId, written: &[MatterPath]) {
     }
     for entry in actor.threads.values_mut() {
         if entry.row.matter == matter {
-            entry.turn.restored.extend(written.iter().cloned());
+            let note = &mut entry.turn.restored;
+            for path in written {
+                if !note.contains(path) {
+                    note.push(path.clone());
+                }
+            }
         }
     }
 }
@@ -262,8 +284,13 @@ fn on_failed(actor: &mut Actor, matter: MatterId) {
         return;
     }
     tracing::warn!(%matter, "a restore failed to log twice; its files are written on disk");
-    if let Some(entry) = actor.matters.get_mut(&matter) {
-        entry.turns.restore = None;
+    let dropped = actor
+        .matters
+        .get_mut(&matter)
+        .and_then(|entry| entry.turns.restore.take());
+    // The files are restored on disk whether or not the log says so: the agent is told.
+    if let Some(log) = dropped {
+        note_restored(actor, matter, &log.written);
     }
     end::pass_writer(actor, matter);
 }

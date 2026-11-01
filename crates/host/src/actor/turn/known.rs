@@ -46,9 +46,10 @@ pub(super) fn when_loaded(
 /// The `CheckpointRecorded` of the id R8 reused, with the kind, thread and turn of R8's
 /// timeline, when the matter's log does not hold it and no commit in flight records it.
 /// `None` for a new checkpoint (its own events record it) or a known one. It carries its
-/// `CheckpointRow` when the matter's stream is loaded: the row and the event are written in
-/// one commit, so a log without the event has no row. With the stream not loaded the host
-/// cannot tell, and a second row of one id would fail the whole commit, so none is written.
+/// `CheckpointRow`: the row and the event are written in one commit, so a log without the
+/// event has no row. [`when_loaded`] loads the matter's stream first; only when the matter's
+/// log could not be read does the host not know, and since a second row of one id would fail
+/// the whole commit, none is written then.
 pub(super) fn unrecorded(
     actor: &Actor,
     matter: MatterId,
@@ -68,7 +69,7 @@ pub(super) fn unrecorded(
     let recorded = CheckpointRecorded::new(id, entry.kind, entry.thread, entry.turn)
         .map_err(|error| Error::Internal(error.to_string()))?;
     if actor.loaded(StreamId::Matter(matter)).is_none() {
-        tracing::warn!(%id, "recording a checkpoint without its row: the matter's log is not read");
+        tracing::warn!(%id, "recording a checkpoint without its row: the matter's log could not be read");
         return Ok(Some(MatterEvent::plain(recorded)));
     }
     Ok(Some(MatterEvent::checkpoint(
@@ -80,7 +81,7 @@ pub(super) fn unrecorded(
 /// Whether the matter's log holds checkpoint `id`, or a commit in flight records it. A matter
 /// whose stream is not loaded (its read failed) is taken not to: recording an id twice only
 /// makes the reducer note a duplicate, while using one unrecorded loses the version.
-fn recorded(actor: &Actor, matter: MatterId, id: CheckpointId) -> bool {
+pub(super) fn recorded(actor: &Actor, matter: MatterId, id: CheckpointId) -> bool {
     let stream = StreamId::Matter(matter);
     let durable = actor
         .loaded(stream)

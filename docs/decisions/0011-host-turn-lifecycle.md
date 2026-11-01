@@ -74,16 +74,21 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
 
 - Every checkpoint gets its `CheckpointRow` (id, matter, git commit, the `seq` of its
   `CheckpointRecorded`) in the same commit as that event: the import, before-turn, after-turn,
-  outside-edits, undo and restore checkpoints. A `Reused` checkpoint the host records late gets
-  its row only when the matter's stream is loaded; otherwise the host cannot tell whether a row
-  exists, and a second row of one id would fail the whole commit.
+  outside-edits, undo and restore checkpoints. A `Reused` checkpoint the host records late
+  (at step 4, step 7, start-up repair or a restore that writes nothing) gets its row too, except
+  when the matter's log could not be read: the host then cannot tell whether a row exists, and a
+  second row of one id would fail the whole commit.
 - `RestoreVersion` holds the matter's writer for the whole restore, and is refused with
   `matter.turn_running` while a turn or an undo holds it or turns wait. A turn reaching step 3
-  meanwhile logs `TurnQueued` behind its own thread, the form start-up reconciliation uses. The
+  meanwhile logs `TurnQueued` behind its own thread, the form start-up reconciliation uses; the
+  reducer folds that to `Idle` while no turn of the thread runs, so the thread shows Idle, not
+  Queued, for the few moments the restore holds the writer. The
   version must be the matter's (`command.invalid`). One commit of the matter's stream logs the
   outside-edits checkpoint, `CheckpointRecorded { Restore }` and `VersionRestored`; a failed one
-  is retried once when the stream drains. A restore with nothing to write logs only the outside
-  edits and answers `VersionRestored` with the reused id, as `UndoStep` does: the missing
+  is retried once when the stream drains; if the retry fails too, the files stay restored on disk,
+  the log does not say so, the threads are still told, and the writer passes on. A restore with
+  nothing to write logs only the outside edits (and the reused id, if the log lacks it) and
+  answers `VersionRestored` with the reused id, as `UndoStep` does: the missing
   `VersionRestored` event, not the outcome, tells the client nothing was written.
 - The files a restore wrote join the note of every thread of the matter once its commit is
   durable. `VersionRestored` does not list them, so this part of the note is held in memory and

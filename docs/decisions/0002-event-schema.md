@@ -242,12 +242,12 @@ Every limit and rule, with its constant:
 | `AnswerElicitation` with `Accept` | the values are a JSON object with string keys | |
 | same | at most 64 KiB as compact JSON | `MAX_ELICITATION_VALUES_BYTES` |
 | `UndoStep.files` | at least one `Undo` entry: a list of only `Keep` entries, or none, undoes nothing and is refused; files the list leaves out are kept | |
-| `RestoreVersion` `Files` scope | at least one path | |
-| `UndoStep.files`, `RestoreVersion` `Files` scope | at most 10,000 paths | `MAX_FILE_LIST` |
+| `RestoreVersion` and `HostQuery::PreviewRestore` `Files` scope | at least one path; the host checks the query's scope with the command's rules (`RestoreRequest::check`) | |
+| `UndoStep.files`, `RestoreVersion` and `PreviewRestore` `Files` scope | at most 10,000 paths | `MAX_FILE_LIST` |
 | same | at most 1 MiB of path bytes in all | `MAX_PATH_LIST_BYTES` |
 | same | no path named twice, paths compared as bytes (the `MatterPath` rule) | |
 | `UndoStep.files` | every path is in the step's `FilesChanged` (the host's check) | |
-| `RestoreVersion.scope` | a `RestoreRequest`: closed, refuses unknown kinds and fields | |
+| `RestoreVersion.scope`, `PreviewRestore.scope` | a `RestoreRequest`: closed, refuses unknown kinds and fields | |
 | `MatterPath` | the rules under Envelope; at most 255 bytes per segment, 4096 in all | |
 | `HostQuery::PageEntries.limit` | 1 to 200: a `PageLimit`, checked when the query decodes | `MAX_PAGE_ENTRIES` |
 | `HostQuery::ReadBlob.len` | 1 to 1 MiB: a `ReadLen`, checked when the query decodes; `offset` at most 2^53 - 1 | `MAX_BLOB_READ_BYTES` |
@@ -480,6 +480,8 @@ as the room left by the blocks before it allows, so a block past the limit comes
   `ViewEntry` variant, is additive: it needs a decision record and the code owner's approval, and no
   `schema_version` bump. Renaming, removing or retyping one of these needs the same, plus a plan for
   the clients that use it.
+- `HostQuery::PreviewRestore` and `QueryResult::RestorePreview` are recorded with the host's
+  versions rules in `0011-host-turn-lifecycle.md` (Versions); their limits are in the table above.
 - "Additive" for view and client-to-host types holds only because the desktop app and the cli
   ship with the host, so both ends change together. `ThreadStatus`, `ViewEntry`, `ViewPatchBody`,
   `HostEvent` and most other enums there have no catch-all: an older cli or a phone client fails
