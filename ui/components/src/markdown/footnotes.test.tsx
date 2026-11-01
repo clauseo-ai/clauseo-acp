@@ -202,6 +202,25 @@ test("streaming, a block calling more than 64 undefined labels shows the rest as
   expect(after).toContain('href="#t-fn-n69"');
 });
 
+test("a note's own references number where the note stands, as cmark-gfm (GitHub) numbers them", () => {
+  // remark numbers this a=1, c=2, b=3 (a note's references after all the text's); cmark-gfm a=1, b=2,
+  // c=3, meeting the references in document order.
+  render("x[^a]\n\n[^a]: cites[^b]\n\ny[^c]\n\n[^b]: Note b.\n\n[^c]: Note c.\n");
+  const number = (text: string) =>
+    [...host.querySelectorAll("sup a")].find((ref) =>
+      ref.closest("p, li")?.textContent?.startsWith(text),
+    )?.textContent;
+  expect(number("x")).toBe("1");
+  expect(number("cites")).toBe("2");
+  expect(number("y")).toBe("3");
+  const items = [...host.querySelectorAll("section[data-footnotes] li")];
+  expect(items.map((item) => item.textContent?.slice(0, 6))).toEqual([
+    "cites2",
+    "Note b",
+    "Note c",
+  ]);
+});
+
 test("a finished answer re-rendered with no change keeps every view", () => {
   const answer = createAnswer("t");
   const first = answer.update(DOC, false);

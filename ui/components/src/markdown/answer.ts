@@ -380,8 +380,8 @@ export function createAnswer(scope: string): Answer {
       const note = numbering.notes.get(id);
       if (!note) continue;
       key += `${idOf(note.node)}:${numbering.number.get(id)},${numbering.total.get(id)}`;
-      for (const [inner, seen] of numbering.inNotes.get(id) ?? [])
-        key += `;${numbering.number.get(inner) ?? ""},${seen}`;
+      for (const [inner, list] of numbering.inNotes.get(id) ?? [])
+        key += `;${numbering.number.get(inner) ?? ""},${list.join(".")}`;
       key += "\u0001";
       source += note.source;
       streaming ||= streamingNotes.notes.includes(note);
@@ -453,7 +453,7 @@ export function createAnswer(scope: string): Answer {
       );
       const previous = lastViews;
       const blockViews = entries.map((entry, index) => {
-        const { signature, before } = numbering.blocks[index]!;
+        const { signature, nths } = numbering.blocks[index]!;
         const tail = streaming && index === last;
         const old = previous[index];
         if (
@@ -471,7 +471,7 @@ export function createAnswer(scope: string): Answer {
         const key = keyOf(entry.source, viewInput);
         entry.key = signature === "" ? key : `${key}\u0002${signature}`;
         const make = () =>
-          toView(entry.source, viewInput, referenceHandler(scope, numbering, before));
+          toView(entry.source, viewInput, referenceHandler(scope, numbering, nths));
         if (!tail) return views.get(entry.key, make);
         return tails.get(entry.key, () => ({ ...make(), streaming: true }));
       });

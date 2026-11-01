@@ -3,7 +3,8 @@
 // micromark makes footnoteReference nodes there; the placeholders themselves are never shown. The
 // references and the real definitions of every block are then numbered for the whole answer, as GFM
 // numbers one document: in order of first reference, repeats keep their number and each gets its own
-// back-reference, and references inside notes follow the ones in the text (GitHub's footer loop). A
+// back-reference. As cmark-gfm (GitHub) does, the references are met in document order, those inside a
+// note where the note stands, so a note's own references can take a number before later text's. A
 // block's view depends only on its references' numbers and states, so a note that arrives re-renders
 // just the blocks that call it. The notes render once, after the last block, as remark-rehype's footer
 // would render them for the whole answer, with every id carrying the answer's scope.
@@ -96,10 +97,17 @@ export type Note = {
   readonly source: string;
 };
 
-/** What a block's parse says about footnotes: its references outside notes, in order, and its notes. */
-export type Footnotes = { readonly refs: readonly string[]; readonly notes: readonly Note[] };
+/**
+ * What a block's parse says about footnotes: its references outside notes, in order; its notes; and both
+ * in document order (a reference's identifier, or a note where it stands).
+ */
+export type Footnotes = {
+  readonly refs: readonly string[];
+  readonly notes: readonly Note[];
+  readonly order: readonly (string | Note)[];
+};
 
-export const NO_FOOTNOTES: Footnotes = { refs: [], notes: [] };
+export const NO_FOOTNOTES: Footnotes = { refs: [], notes: [], order: [] };
 
 /**
  * The footnote references and real definitions of `root`, parsed from `input`, whose block text starts at
@@ -108,14 +116,20 @@ export const NO_FOOTNOTES: Footnotes = { refs: [], notes: [] };
 export function footnotesIn(root: Root, input: string, from: number): Footnotes {
   const refs: string[] = [];
   const found: FootnoteDefinition[] = [];
+  const events: (string | FootnoteDefinition)[] = [];
   const definitions: Definition[] = [];
   const collect = (start: Nodes, into: string[], notes: boolean) => {
     const stack: Nodes[] = [start];
     for (let node = stack.pop(); node; node = stack.pop()) {
-      if (node.type === "footnoteReference") into.push(node.identifier);
-      else if (node.type === "definition") definitions.push(node);
+      if (node.type === "footnoteReference") {
+        into.push(node.identifier);
+        if (notes) events.push(node.identifier);
+      } else if (node.type === "definition") definitions.push(node);
       else if (node.type === "footnoteDefinition" && node !== start) {
-        if (notes && (node.position?.start.offset ?? 0) >= from) found.push(node);
+        if (notes && (node.position?.start.offset ?? 0) >= from) {
+          found.push(node);
+          events.push(node);
+        }
       } else if ("children" in node)
         for (let index = node.children.length - 1; index >= 0; index--)
           stack.push(node.children[index]!);
@@ -123,13 +137,17 @@ export function footnotesIn(root: Root, input: string, from: number): Footnotes 
   };
   collect(root, refs, true);
   if (refs.length === 0 && found.length === 0) return NO_FOOTNOTES;
+  const byNode = new Map<FootnoteDefinition, Note>();
   const notes = found.map((node) => {
     const inner: string[] = [];
     collect(node, inner, false);
     const source = input.slice(node.position?.start.offset ?? 0, node.position?.end.offset ?? 0);
-    return { id: node.identifier, node, refs: inner, definitions, source };
+    const note = { id: node.identifier, node, refs: inner, definitions, source };
+    byNode.set(node, note);
+    return note;
   });
-  return { refs, notes };
+  const order = events.map((event) => (typeof event === "string" ? event : byNode.get(event)!));
+  return { refs, notes, order };
 }
 
 /** The answer's footnote numbering for one update. */
@@ -140,56 +158,74 @@ export type Numbering = {
   readonly notes: ReadonlyMap<string, Note>;
   /** References to each identifier in the whole answer, notes included. */
   readonly total: ReadonlyMap<string, number>;
-  /** Per block: references to each of its identifiers before the block; and its view signature. */
-  readonly blocks: readonly { before: ReadonlyMap<string, number>; signature: string }[];
-  /** Per note, in number order: references before it, for the references inside it. */
-  readonly inNotes: ReadonlyMap<string, ReadonlyMap<string, number>>;
+  /** Per block: the occurrence number (nth) of each of its references, per identifier; its view signature. */
+  readonly blocks: readonly { nths: Nths; signature: string }[];
+  /** Per shown note: the occurrence numbers of the references inside it. */
+  readonly inNotes: ReadonlyMap<string, Nths>;
   readonly order: readonly string[];
 };
 
+/** Per identifier, the occurrence number of each of its references in one block or note, in order. */
+export type Nths = ReadonlyMap<string, readonly number[]>;
+
 /**
- * Number the references of `perBlock` (each block's footnotes, in order) for the whole answer. A reference
- * counts when its label is defined, or always while streaming (it shows as a pending number).
+ * Number the references of `perBlock` (each block's footnotes) for the whole answer. A reference counts
+ * when its label is defined, or always while streaming (it shows as a pending number). A note is shown
+ * when a counted reference outside notes, or inside a shown note, calls it; only a shown note's own
+ * references count, so no back-reference points into a note that is not shown (cmark-gfm counts those
+ * too, and its back-reference then leads nowhere). Then every counted reference is met in document order,
+ * a shown note's where the note stands, as cmark-gfm meets them.
  */
 export function numberFootnotes(perBlock: readonly Footnotes[], streaming: boolean): Numbering {
   const notes = new Map<string, Note>();
   for (const footnotes of perBlock)
     for (const note of footnotes.notes) if (!notes.has(note.id)) notes.set(note.id, note);
+  const counts = (id: string) => streaming || notes.has(id);
+  const shown = new Set<Note>();
+  const queue: string[] = [];
+  for (const footnotes of perBlock) for (const id of footnotes.refs) if (counts(id)) queue.push(id);
+  for (let id = queue.pop(); id !== undefined; id = queue.pop()) {
+    const note = notes.get(id);
+    if (!note || shown.has(note)) continue;
+    shown.add(note);
+    for (const inner of note.refs) if (counts(inner)) queue.push(inner);
+  }
   const number = new Map<string, number>();
   const total = new Map<string, number>();
   const order: string[] = [];
-  const count = (id: string) => {
-    if (!streaming && !notes.has(id)) return;
+  const count = (id: string, into: Map<string, number[]>) => {
     if (!number.has(id)) {
       order.push(id);
       number.set(id, order.length);
     }
-    total.set(id, (total.get(id) ?? 0) + 1);
+    const nth = (total.get(id) ?? 0) + 1;
+    total.set(id, nth);
+    const list = into.get(id);
+    if (list) list.push(nth);
+    else into.set(id, [nth]);
   };
+  const inNotes = new Map<string, Nths>();
   const blocks = perBlock.map((footnotes) => {
-    if (footnotes.refs.length === 0) return { before: EMPTY, signature: "" };
-    const before = new Map<string, number>();
-    for (const id of footnotes.refs)
-      if (!before.has(id) && (streaming || notes.has(id))) before.set(id, total.get(id) ?? 0);
-    for (const id of footnotes.refs) count(id);
+    if (footnotes.order.length === 0) return { nths: EMPTY, signature: "" };
+    const nths = new Map<string, number[]>();
+    for (const event of footnotes.order) {
+      if (typeof event === "string") {
+        if (counts(event)) count(event, nths);
+      } else if (shown.has(event)) {
+        const inner = new Map<string, number[]>();
+        for (const id of event.refs) if (counts(id)) count(id, inner);
+        inNotes.set(event.id, inner);
+      }
+    }
     let signature = "";
-    for (const [id, seen] of before)
-      signature += `${id}\u0000${number.get(id)},${seen},${notes.has(id) ? 1 : 0}\u0001`;
-    return { before, signature };
+    for (const [id, list] of nths)
+      signature += `${id}\u0000${number.get(id)},${list.join(".")},${notes.has(id) ? 1 : 0}\u0001`;
+    return { nths: nths.size === 0 ? EMPTY : nths, signature };
   });
-  const inNotes = new Map<string, Map<string, number>>();
-  for (let index = 0; index < order.length; index++) {
-    const note = notes.get(order[index]!);
-    if (!note) continue;
-    const before = new Map<string, number>();
-    for (const id of note.refs) if (!before.has(id)) before.set(id, total.get(id) ?? 0);
-    inNotes.set(note.id, before);
-    for (const id of note.refs) count(id);
-  }
   return { number, notes, total, blocks, inNotes, order };
 }
 
-const EMPTY: ReadonlyMap<string, number> = new Map();
+const EMPTY: Nths = new Map();
 
 /** A fragment for an id: its characters percent-encoded where a URL needs it. */
 const fragment = (id: string) => encodeURIComponent(id);
@@ -198,12 +234,8 @@ const fragment = (id: string) => encodeURIComponent(id);
  * The footnoteReference handler for one block (or note): the reference's answer-wide number, its own
  * back-reference id for each repeat, a link to the note when it is defined, and a pending number when not.
  */
-export function referenceHandler(
-  scope: string,
-  numbering: Numbering,
-  before: ReadonlyMap<string, number>,
-): Handler {
-  const seen = new Map(before);
+export function referenceHandler(scope: string, numbering: Numbering, nths: Nths): Handler {
+  const met = new Map<string, number>();
   return (_state, node: FootnoteReference) => {
     const id = node.identifier;
     const number = numbering.number.get(id);
@@ -211,8 +243,9 @@ export function referenceHandler(
       const text: Text = { type: "text", value: `[^${node.label ?? id}]` };
       return text;
     }
-    const nth = (seen.get(id) ?? 0) + 1;
-    seen.set(id, nth);
+    const index = met.get(id) ?? 0;
+    met.set(id, index + 1);
+    const nth = nths.get(id)?.[index] ?? index + 1;
     const value: Text = { type: "text", value: String(number) };
     if (!numbering.notes.has(id)) {
       return {
