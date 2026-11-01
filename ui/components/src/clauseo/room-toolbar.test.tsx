@@ -3,7 +3,7 @@
 // elements, and the plan's card, when it has one, is a press that does not drag.
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { TooltipProvider } from "../ui/tooltip.tsx";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
 import { RoomToolbar, type RoomToolbarProps } from "./room-toolbar.tsx";
@@ -199,4 +199,38 @@ test("an empty title draws no heading, never an empty one, and keeps the line un
   expect(host?.querySelector(".room-matter .room-next")).not.toBeNull();
   await remount({ title: "Acme Ltd v. State" });
   expect(host?.querySelector("h1")?.textContent).toBe("Acme Ltd v. State");
+});
+
+test("the caption wiring reaches the buttons: each press calls its handler, and maximised shows Restore", async () => {
+  const caption = {
+    maximised: true,
+    onMinimise: vi.fn(),
+    onToggleMaximise: vi.fn(),
+    onClose: vi.fn(),
+  };
+  await mount(null, { platform: "windows", caption });
+  const max = host?.querySelector<HTMLButtonElement>('[data-caption="maximise"]');
+  expect(max?.getAttribute("aria-label")).toBe("Restore");
+  const [min, , close] = [...(parts().captions?.querySelectorAll("button") ?? [])];
+  await act(async () => min?.click());
+  await act(async () => max?.click());
+  await act(async () => close?.click());
+  expect(caption.onMinimise).toHaveBeenCalledTimes(1);
+  expect(caption.onToggleMaximise).toHaveBeenCalledTimes(1);
+  expect(caption.onClose).toHaveBeenCalledTimes(1);
+});
+
+test("nativeLights marks the corner lights for macOS's own, and only then", async () => {
+  await mount(null, { platform: "mac", nativeLights: true });
+  expect(parts().lights?.hasAttribute("data-native")).toBe(true);
+  await remount({ platform: "mac" });
+  expect(parts().lights?.hasAttribute("data-native")).toBe(false);
+});
+
+test('chrome "os" draws neither the lights nor the buttons, wiring or not', async () => {
+  const caption = { maximised: false, onClose: vi.fn() };
+  await mount(null, { platform: "mac", chrome: "os", nativeLights: true, caption });
+  expect(parts().lights).toBeNull();
+  await remount({ platform: "windows", chrome: "os", nativeLights: true, caption });
+  expect(parts().captions).toBeNull();
 });

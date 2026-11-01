@@ -20,12 +20,13 @@ function attempt(what: string, call: () => Promise<unknown>): void {
   settle(call).catch((error: unknown) => console.warn(`window ${what} failed: ${String(error)}`));
 }
 
-/** The window's frame state and presses, ready to spread into CaptionButtons. Maximising or restoring resizes the
- * page, so a resize re-reads the state: at most once per animation frame. A reply after unmount, or one overtaken by a
- * later read's, is dropped. */
-export function useWindowFrame(controls: WindowControls): WindowFrame {
+/** The window's frame state and presses, ready to spread into CaptionButtons; undefined without controls (no desktop
+ * window: the buttons' own fallback stands). Maximising or restoring resizes the page, so a resize re-reads the state:
+ * at most once per animation frame. A reply after unmount, or one overtaken by a later read's, is dropped. */
+export function useWindowFrame(controls: WindowControls | null): WindowFrame | undefined {
   const [maximised, setMaximised] = useState(false);
   useEffect(() => {
+    if (controls === null) return;
     let live = true;
     let frame: number | null = null;
     // Replies can overlap: only the latest read's answer stands.
@@ -51,6 +52,7 @@ export function useWindowFrame(controls: WindowControls): WindowFrame {
       if (frame !== null) cancelAnimationFrame(frame);
     };
   }, [controls]);
+  if (controls === null) return undefined;
   return {
     maximised,
     onMinimise: () => attempt("minimise", () => controls.minimise()),

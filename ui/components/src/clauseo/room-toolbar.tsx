@@ -1,4 +1,4 @@
-import { useRef, type Ref } from "react";
+import { useEffect, useRef, type Ref } from "react";
 import type { ReactNode } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { floating } from "../ui/recipes.ts";
@@ -14,7 +14,7 @@ import { rt } from "../lib/words-room.ts";
 import { useVersionWords } from "../lib/words-versions.ts";
 import { HistoryPanel } from "./history.tsx";
 import type { HistoryRow } from "./matter.ts";
-import { CaptionButtons, CornerLights } from "./caption.tsx";
+import { CaptionButtons, CornerLights, type CaptionWiring } from "./caption.tsx";
 import { useRoom } from "./room-scope.ts";
 import { mt } from "../lib/words-matters.ts";
 import { Dot, Say } from "./say.tsx";
@@ -75,6 +75,12 @@ export type RoomToolbarProps = {
    * toolbar draws neither, nor keeps the caption buttons' room at the right. The lead and the title stand as with
    * "own", by the platform's rules, so turning to "own" only adds the lights or the buttons and moves nothing. */
   chrome?: "own" | "os";
+  /** Optional: the caption buttons wired to the window (with chrome "own", off the Mac). Without it each press logs
+   * what it would do. */
+  caption?: CaptionWiring | undefined;
+  /** Optional: macOS draws its own traffic lights over the corner lights' place (with chrome "own", on the Mac), so the
+   * lights keep their box and paint nothing. */
+  nativeLights?: boolean;
   /** Optional, true by default: false leaves the search field out. */
   search?: boolean;
   /** Optional, true by default: false leaves the Versions and Undo pair out. (Not `history`, which holds Versions'
@@ -113,14 +119,31 @@ export function RoomToolbar(p: RoomToolbarProps) {
   // Versions opens under the pair, its right edge on the pair's: Undo's own group
   const pairOf = () => undo.current?.parentElement ?? null;
   const writing = p.writing === true;
+  const top = useRef<HTMLElement>(null);
+  // the room keeps the toolbar's height, so what pins under it on a narrow window (responsive.css) stands clear of it
+  useEffect(() => {
+    const header = top.current;
+    const win = room.nodes.get("window");
+    if (header === null || win === null) return;
+    let h = -1;
+    const ro = new ResizeObserver(() => {
+      const next = Math.round(header.offsetHeight);
+      if (next === h) return;
+      h = next;
+      win.style.setProperty("--top-h", `${next}px`);
+    });
+    ro.observe(header);
+    return () => ro.disconnect();
+  }, [room]);
   return (
     <header
+      ref={top}
       className={cn("room-top", captions && "mid:pr-0")}
       data-platform={platform}
       data-tauri-drag-region
     >
       <div className="room-lead" data-tauri-drag-region>
-        {own && platform === "mac" && <CornerLights />}
+        {own && platform === "mac" && <CornerLights native={p.nativeLights === true} />}
         <Button
           kind="tone"
           size="small"
@@ -248,7 +271,10 @@ export function RoomToolbar(p: RoomToolbarProps) {
       {captions && (
         // flush with the window's top right: beside the plan on a wide window, on the first row of tools on a narrow
         // one, where the toolbar's own padding is taken back
-        <CaptionButtons className="self-start mid:ml-s5 max-mid:order-4 max-mid:-mt-s3 max-mid:-mr-s4" />
+        <CaptionButtons
+          className="self-start mid:ml-s5 max-mid:order-4 max-mid:-mt-s3 max-mid:-mr-s4"
+          {...p.caption}
+        />
       )}
     </header>
   );

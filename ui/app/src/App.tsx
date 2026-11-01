@@ -5,9 +5,11 @@ import { StoreContext } from "./store/hooks.ts";
 import { createViewStore, type ViewStore } from "./store/store.ts";
 import type { HostTransport } from "./transport/host-transport.ts";
 
-// The window this build mounts: R12's internal window, or with VITE_CLAUSEO_WINDOW=room the room (src/room/). A
-// compile-time constant, so the default build drops the room's import and carries none of its code or CSS; the room
-// build loads it before the first render. main.tsx tests the same variable to leave the display to the room.
+// The window this build mounts: R12's internal window, or in the room build the room (src/room/). A compile-time
+// constant, so the default build drops the room's import and carries none of its code or CSS; the room build loads it
+// before the first render. The switch is spelt inline here, not imported from room-build.ts: Rolldown does not fold an
+// imported constant, so the default build would keep the room's chunk. room-build.test.ts holds the two spellings
+// together. main.tsx tests room-build.ts's constant to leave the display to the room.
 const room =
   import.meta.env.VITE_CLAUSEO_WINDOW === "room" ? await import("./room/entry.ts") : null;
 

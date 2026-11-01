@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { DEFAULT_DISPLAY, startDisplay } from "@clauseo/components/lib/display.ts";
 import { App } from "./App.tsx";
 import { hostPlatform } from "./platform.ts";
+import { ROOM_BUILD } from "./room-build.ts";
 import { setTimedHook } from "./transport/channel.ts";
 import { pageTransport } from "./transport/tauri-transport.ts";
 
@@ -17,9 +18,9 @@ const perf = window.__CLAUSEO_PERF__ === undefined ? null : import("./perf/index
 if (perf !== null) setTimedHook(() => {});
 
 const transport = pageTransport();
-// The window's chrome follows the OS the host reports; nothing on the page waits for it. The room (App.tsx's switch)
-// shows its own display settings, the platform included (src/room/start.ts).
-if (import.meta.env.VITE_CLAUSEO_WINDOW !== "room") {
+// The window's chrome follows the OS the host reports; nothing on the page waits for it. The room build
+// (room-build.ts) shows its own display settings, the platform included (src/room/start.ts).
+if (!ROOM_BUILD) {
   hostPlatform(transport).then(
     (platform) => startDisplay({ ...DEFAULT_DISPLAY, platform }),
     (error: unknown) => console.warn(`display_info failed: ${JSON.stringify(error)}`),
