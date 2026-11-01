@@ -347,6 +347,28 @@ impl Rig {
             .collect()
     }
 
+    /// The seq of every `CheckpointRecorded` of checkpoint `id` in the Scratch matter's log,
+    /// and the store's `CheckpointRow` of `id`.
+    pub(super) fn checkpoint_seqs_and_row(
+        &mut self,
+        id: CheckpointId,
+    ) -> (Vec<u64>, Option<clauseo_store::CheckpointRow>) {
+        let store = self.actor.store.clone();
+        let read = streams::read_whole_log(&store, StreamId::Matter(self.matter()));
+        let reopen = self.pool.run_until(read).unwrap();
+        let seqs = reopen
+            .tail
+            .iter()
+            .filter(|envelope| {
+                matches!(&envelope.event, DomainEvent::CheckpointRecorded(recorded)
+                    if recorded.checkpoint() == id)
+            })
+            .map(|envelope| envelope.seq.get())
+            .collect();
+        let row = self.pool.run_until(store.checkpoint(id)).unwrap();
+        (seqs, row)
+    }
+
     /// The checkpoints the Scratch matter's log records, in order.
     pub(super) fn recorded(&mut self) -> Vec<CheckpointRecorded> {
         self.matter_log()
