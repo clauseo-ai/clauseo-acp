@@ -187,4 +187,11 @@ export const CASES: HostileCase[] = [
     text: ["***a***"],
   },
   { id: "delimiter-sequences", markdown: "a* ".repeat(5000), text: ["a* a* a*"] },
+  // Fence languages named after Object's own properties: once found Object itself in the alias table,
+  // which made the colouring worker's postMessage throw and turned colouring off for the page.
+  {
+    id: "fence-object-property-names",
+    markdown: "```constructor\nfirst\n```\n\n```__proto__\nsecond\n```\n\n```toString\nthird\n```",
+    text: ["first", "second", "third"],
+  },
 ];
