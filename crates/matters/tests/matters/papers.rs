@@ -134,7 +134,7 @@ fn the_cap_counts_papers_and_skipped_together() {
 
 #[cfg(unix)]
 #[test]
-fn an_unreadable_file_is_a_paper_and_an_unreadable_folder_is_left_out() {
+fn an_unreadable_file_is_a_paper_and_an_unreadable_folder_is_listed_unread() {
     let fx = Fixture::new("papers-unreadable");
     fx.write("open.docx", "open");
     let matter = fx.import();
@@ -146,17 +146,30 @@ fn an_unreadable_file_is_a_paper_and_an_unreadable_folder_is_left_out() {
     let shut = std::fs::read_dir(fx.file("shut")).is_err();
 
     let papers = matter.papers(100).unwrap();
+    // With a limit that ends at the unread folder: it counts as one entry, `shut/`.
+    let cut = matter.papers(3).unwrap();
+    let two = matter.papers(2).unwrap();
     support::set_mode(fx.file("shut"), 0o755);
     support::set_mode(fx.file("locked.docx"), 0o644);
+    assert_eq!(papers.skipped, []);
     if shut {
         assert_eq!(paths(&papers), ["locked.docx", "open.docx"]);
+        assert_eq!(papers.unread, [path("shut")]);
+        assert!(!papers.truncated);
+        assert_eq!(paths(&cut), ["locked.docx", "open.docx"]);
+        assert_eq!(cut.unread, [path("shut")]);
+        assert!(!cut.truncated);
+        assert_eq!(paths(&two), ["locked.docx", "open.docx"]);
+        assert!(two.unread.is_empty() && two.truncated, "{two:?}");
     } else {
         assert_eq!(
             paths(&papers),
             ["locked.docx", "open.docx", "shut/inside.docx"]
         );
+        assert_eq!(papers.unread, []);
+        assert_eq!(cut.unread, []);
+        assert!(two.truncated);
     }
-    assert_eq!(papers.skipped, []);
 }
 
 #[test]

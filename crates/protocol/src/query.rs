@@ -21,8 +21,8 @@ pub const MAX_PAGE_ENTRIES: u32 = 200;
 /// today.
 pub const MAX_BLOB_READ_BYTES: u32 = 1024 * 1024;
 
-/// Most files one `ListPapers` returns, papers and skipped files together: one reply stays
-/// bounded however large the folder.
+/// Most entries one `ListPapers` returns, papers, skipped files and unread folders together:
+/// one reply stays bounded however large the folder.
 pub const MAX_PAPERS: u32 = 2_000;
 
 /// Defines a newtype over `u32` in `1..=$max`, which its constructor and its decoder both
@@ -172,8 +172,13 @@ pub enum QueryResult {
         /// The files a checkpoint does not version (over the size cap, cloud-only), with why,
         /// sorted by path bytes.
         skipped: Vec<SkippedFile>,
-        /// Whether the folder holds more than [`MAX_PAPERS`] files: `papers` and `skipped`
-        /// together are then its first [`MAX_PAPERS`] by path.
+        /// The subfolders that could not be read (permission denied, or not downloaded from
+        /// the cloud), sorted by path bytes. What they hold is not listed; a checkpoint keeps
+        /// it as it was.
+        unread: Vec<MatterPath>,
+        /// Whether the folder holds more than [`MAX_PAPERS`] entries: `papers`, `skipped` and
+        /// `unread` together are then its first [`MAX_PAPERS`] by path (a folder counted
+        /// where `<folder>/` sorts).
         truncated: bool,
     },
 }

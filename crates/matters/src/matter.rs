@@ -392,18 +392,20 @@ impl Matter {
         compare::compare(&self.core, &self.folder, &self.settings, from, to)
     }
 
-    /// The first `limit` files of the folder as it is now, sorted by path bytes: the files
+    /// The first `limit` entries of the folder as it is now, sorted by path bytes: the files
     /// Clauseo versions as [`PaperList::papers`](crate::PaperList::papers) with their size and
     /// modification time, the ones it does not (over the size cap, cloud-only) as
-    /// [`PaperList::skipped`](crate::PaperList::skipped) with the reason, and
-    /// [`PaperList::truncated`](crate::PaperList::truncated) when the folder holds more. The rules
-    /// are the checkpoint walk's (`walk.rs`): the same exclusions, never a symlink, the same
-    /// size cap and cloud-only probe, under the same no-download guard. It only stats: no file
-    /// is opened, so an unreadable file is listed as a paper (a checkpoint tries to version it),
-    /// and the files under a subfolder that does not read are not listed at all. The walk stops
-    /// at the first file past `limit` and never reads a folder that sorts after it.
-    /// `matter.folder_missing` when the folder is gone or its `matter.json` names another
-    /// matter.
+    /// [`PaperList::skipped`](crate::PaperList::skipped) with the reason, the subfolders that
+    /// do not read (permission denied, not downloaded) as
+    /// [`PaperList::unread`](crate::PaperList::unread), and
+    /// [`PaperList::truncated`](crate::PaperList::truncated) when the folder holds more. The
+    /// rules are the checkpoint walk's (`walk.rs`): the same exclusions, never a symlink, the
+    /// same size cap and cloud-only probe, under the same no-download guard. It only stats: no
+    /// file is opened, so an unreadable file is listed as a paper (a checkpoint tries to version
+    /// it). What an unread subfolder holds is not listed; a checkpoint keeps those files as they
+    /// were, so the folder itself is in `unread`. The walk stops at the first entry past
+    /// `limit` and never reads a folder that sorts after it. `matter.folder_missing` when the
+    /// folder is gone or its `matter.json` names another matter.
     pub fn papers(&self, limit: usize) -> Result<crate::PaperList, Error> {
         json::check(&self.folder, self.id)?;
         papers::papers(&self.folder, &self.settings, limit)
