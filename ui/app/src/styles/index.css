@@ -4,4 +4,5 @@
 @import "./system.css";
 @source "..";
 @source not "../gallery";
+@source not "../review";
 @source not "../**/*.test.*";

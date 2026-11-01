@@ -3,6 +3,7 @@ node_modules/
 # why: ui/app/scripts/components-link.mjs
 /ui/app/components
 dist/
+dist-review/
 .claude/worktrees/
 CLAUDE.local.md
 *.local.*
