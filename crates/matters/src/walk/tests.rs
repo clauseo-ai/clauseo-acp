@@ -184,3 +184,78 @@ fn walk_skips_names_that_are_not_utf8() {
     let found = walk_all(dir.path(), &NamedProbe(vec![]), u64::MAX);
     assert_eq!(paths(&found), ["kept"]);
 }
+
+/// Sets `path`'s mode while alive and puts back `0o755` when dropped.
+#[cfg(unix)]
+struct Mode(std::path::PathBuf);
+
+#[cfg(unix)]
+impl Mode {
+    fn set(path: &Path, mode: u32) -> Self {
+        use std::os::unix::fs::PermissionsExt;
+        write::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+        Self(path.to_path_buf())
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Mode {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = write::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+    }
+}
+
+/// A subfolder that lists but cannot be entered (mode `0o444`: its entries' stats are denied)
+/// gives the same listing as one that does not list at all (`0o000`): unread, with nothing
+/// under it found, and the rest of the matter walked.
+#[cfg(unix)]
+#[test]
+fn walk_keeps_a_folder_that_lists_but_cannot_be_entered_as_unread() {
+    let dir = TestDir::new("walk-unenterable");
+    let root = dir.path();
+    put(root, "a.txt", 1);
+    put(root, "sub/b.txt", 1);
+    put(root, "sub/deeper/c.txt", 1);
+    put(root, "z/d.txt", 1);
+    let listing = |mode| {
+        let _mode = Mode::set(&root.join("sub"), mode);
+        walk(
+            root,
+            &NoDownload::begin(&NamedProbe(vec![])),
+            u64::MAX,
+            None,
+            &mut |_| {},
+        )
+        .unwrap()
+        .unwrap()
+    };
+    let unlisted = listing(0o000);
+    let unentered = listing(0o444);
+    assert_eq!(paths(&unentered.files), ["a.txt", "z/d.txt"]);
+    assert_eq!(unentered.unread, ["sub"]);
+    assert_eq!(unentered, unlisted);
+}
+
+/// The root listing but not entering is an error, as the root not listing is: an unread root
+/// would leave every file out.
+#[cfg(unix)]
+#[test]
+fn walk_of_a_root_that_cannot_be_entered_fails() {
+    let dir = TestDir::new("walk-unenterable-root");
+    put(dir.path(), "matter/a.txt", 1);
+    let root = dir.path().join("matter");
+    let _mode = Mode::set(&root, 0o444);
+    let err = walk(
+        &root,
+        &NoDownload::begin(&NamedProbe(vec![])),
+        u64::MAX,
+        None,
+        &mut |_| {},
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, crate::Error::Io { op: "stat", .. }),
+        "{err:?}"
+    );
+}

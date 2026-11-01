@@ -4,7 +4,6 @@
 use std::collections::BTreeSet;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 use super::objects::Writer;
 use gix::hash::ObjectId;
@@ -25,9 +24,6 @@ pub(super) struct NewObjects {
     folders: BTreeSet<PathBuf>,
     /// Whether any of those folders was new, so `objects` gained an entry.
     made_folder: bool,
-    /// The timeline ref's modification time at the last publish (or open); `None` before the
-    /// first. A present object modified since then is checked in full.
-    published_at: Option<SystemTime>,
 }
 
 impl NewObjects {
@@ -38,11 +34,6 @@ impl NewObjects {
         }
         self.made_folder |= made_folder;
         self.files.insert(file);
-    }
-
-    /// Sets the timeline ref's modification time, after open or a publish.
-    pub(super) fn set_published_at(&mut self, time: Option<SystemTime>) {
-        self.published_at = time;
     }
 
     /// The files recorded so far.
@@ -81,9 +72,10 @@ impl NewObjects {
 }
 
 /// Whether object `id` (`kind`, `size` bytes) is in `store` and sound; if so it is recorded
-/// in `new_objects` for the sync. A file written since the last publish (by this run, or by
-/// one that crashed before syncing it) is inflated and hashed in full, any other has its
-/// header checked. A file that fails is logged and left for the caller to write over: gix
+/// in `new_objects` for the sync. Every file found is inflated and hashed in full, whenever it
+/// was written: one from before the last publish (a revert to an old version, say) is checked
+/// as closely as one a crashed run left, so a damaged copy is written again while the
+/// checkpoint has the right bytes in hand, not found at undo or restore. A file that fails is logged and left for the caller to write over: gix
 /// renames the new object onto it (on Windows, where that rename is skipped when the target
 /// exists, it is removed first). An I/O error reading it is returned and the file kept.
 pub(super) fn present(
@@ -102,16 +94,7 @@ pub(super) fn present(
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(err) => return Err(Error::io("stat", path, err)),
     };
-    let recent = match (new_objects.published_at, metadata.modified()) {
-        (Some(published), Ok(modified)) => modified >= published,
-        (None, _) | (Some(_), Err(_)) => true,
-    };
-    let sound = metadata.is_file()
-        && if recent {
-            check::whole(&path, id, kind, size)?
-        } else {
-            check::header(&path, kind, size)?
-        };
+    let sound = metadata.is_file() && check::whole(&path, id, kind, size)?;
     if sound {
         new_objects.record(path, false);
         return Ok(true);
@@ -144,17 +127,6 @@ pub(super) fn put(
     store.write_buf(kind, data, id)?;
     new_objects.record(path, made_folder);
     Ok(())
-}
-
-/// The timeline ref's modification time in the git dir `git_dir`; `None` when it does not
-/// exist.
-pub(super) fn ref_time(git_dir: &Path) -> Result<Option<SystemTime>, Error> {
-    let path = ref_path(git_dir);
-    match std::fs::symlink_metadata(&path).and_then(|metadata| metadata.modified()) {
-        Ok(time) => Ok(Some(time)),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(Error::io("stat", path, err)),
-    }
 }
 
 /// The timeline ref's file in the git dir `git_dir`.

@@ -288,3 +288,36 @@ fn a_streamed_file_evicted_before_its_second_pass_is_not_downloaded_and_not_stor
     assert_eq!(files_under(&git_dir.join("objects")), Vec::<PathBuf>::new());
     crate::no_download::fault::clear();
 }
+
+/// A streamed file changed between its hash pass and its store pass (same length, other
+/// bytes) is never stored under the first pass's id: the store pass hashes what it writes,
+/// finds it differs, and the file is read again from the start. The store returns the blob of
+/// the bytes it found the second time, so a checkpoint records the file as changed to those;
+/// every object it leaves hashes to its id.
+#[test]
+fn a_streamed_file_changed_between_its_passes_is_stored_only_under_its_new_id() {
+    let dir = TestDir::new("history-stream-changed");
+    let (git_dir, mut store) = new_store(&dir);
+    store.set_stream_threshold(1024);
+    let first = noise(5000);
+    let mut second = first.clone();
+    second[2500] ^= 0xff;
+    let path = dir.path().join("big.bin");
+    write_file(&path, &first);
+    crate::no_download::fault::change_between_passes(&path, &second);
+
+    let stored = store.store_file(&path, 5000, u64::MAX, &no_download());
+    crate::no_download::fault::clear();
+
+    assert_eq!(stored.unwrap(), (git_id("blob", &second), 5000));
+    let objects = files_under(&git_dir.join("objects"));
+    assert_eq!(objects, [object_path(&git_dir, git_id("blob", &second))]);
+    let mut out = Vec::new();
+    store
+        .read_blob(git_id("blob", &second), "big.bin", &mut out)
+        .unwrap();
+    assert!(
+        out == second,
+        "the blob does not read back as the second bytes"
+    );
+}

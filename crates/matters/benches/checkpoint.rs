@@ -9,6 +9,10 @@
 //! of 100 files in one folder, of 1,000 files across all of them, and of 3 files after 3
 //! outside edits. Reading one large file is in `read.rs`; the shared setup in `common/mod.rs`.
 //!
+//! And `checkpoint_revert_8mib_text` and `_docx`: an `after_turn` checkpoint of one 8 MiB file
+//! (the fixture of `read.rs`) whose content goes back to a version stored before the last
+//! publish, so the checkpoint finds its blob already present and checks the stored object.
+//!
 //! Everything is under `cfg(test)`, which `cargo bench` sets, so clippy's test allowances
 //! (unwrap, expect, indexing) apply.
 
@@ -127,6 +131,66 @@ mod bench {
             });
         });
         drop(matter);
+        fs_setup::remove_all(&base);
+    }
+
+    /// One 8 MiB file reverted at each checkpoint to the other of two versions stored before
+    /// the last publish: text (stored deflated), then `.docx`-like (stored at level 0).
+    fn checkpoint_revert(c: &mut Criterion) {
+        const LEN: usize = 8 << 20;
+        let base = std::env::temp_dir().join(format!(
+            "clauseo-matters-bench-revert-{}",
+            std::process::id()
+        ));
+        let mut rng = Rng(0xbb67_ae85_84ca_a73b);
+        for (bench, name, magic) in [
+            ("checkpoint_revert_8mib_text", "text.txt", &b""[..]),
+            (
+                "checkpoint_revert_8mib_docx",
+                "brief.docx",
+                &b"PK\x03\x04"[..],
+            ),
+        ] {
+            fs_setup::remove_all(&base);
+            let path = base.join("matter").join(name);
+            let versions = [rng.contents(magic, LEN), rng.contents(magic, LEN)];
+            fs_setup::write(&path, &versions[0], at_seconds(BASE_MTIME));
+            let mut matter = import(&base.join("root"), &base.join("matter"));
+            let mut iteration: u64 = 1;
+            // Writes the version for `iteration` and names its checkpoint.
+            let revert = |iteration: u64| {
+                let version = &versions[usize::try_from(iteration % 2).unwrap()];
+                fs_setup::write(&path, version, at_seconds(REWRITE_MTIME + iteration));
+                TurnMeta {
+                    checkpoint: checkpoint_id(iteration + 1),
+                    thread: "01920000-0000-7000-8000-000000000001".parse().unwrap(),
+                    turn: "01930000-0000-7000-8000-000000000001".parse().unwrap(),
+                    at: Timestamp::new(
+                        1_700_000_000_000 + 1000 * i64::try_from(iteration).unwrap(),
+                    )
+                    .unwrap(),
+                }
+            };
+            // The second version is stored and published once, outside the measurement.
+            matter
+                .after_turn(&revert(iteration), &BTreeSet::new())
+                .unwrap();
+            c.bench_function(bench, |b| {
+                b.iter_batched(
+                    || {
+                        iteration += 1;
+                        revert(iteration)
+                    },
+                    |meta| {
+                        let done = matter.after_turn(&meta, &BTreeSet::new()).unwrap();
+                        assert_eq!(done.changes.len(), 1, "{done:?}");
+                        done
+                    },
+                    BatchSize::PerIteration,
+                );
+            });
+            drop(matter);
+        }
         fs_setup::remove_all(&base);
     }
 
@@ -389,10 +453,22 @@ mod bench {
             .measurement_time(Duration::from_secs(5));
         targets = versions
     }
+
+    criterion_group! {
+        name = revert_benches;
+        config = Criterion::default()
+            .sample_size(10)
+            .measurement_time(Duration::from_secs(5));
+        targets = checkpoint_revert
+    }
 }
 
 #[cfg(test)]
-criterion::criterion_main!(bench::benches, bench::versions_benches);
+criterion::criterion_main!(
+    bench::benches,
+    bench::versions_benches,
+    bench::revert_benches
+);
 
 #[cfg(not(test))]
 fn main() {}

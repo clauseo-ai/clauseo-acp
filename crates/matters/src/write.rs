@@ -166,7 +166,7 @@ pub(crate) fn set_mtime(path: &Path, mtime: std::time::SystemTime) -> io::Result
 }
 
 /// `fs::set_permissions`.
-#[cfg(all(test, windows))]
+#[cfg(test)]
 pub(crate) fn set_permissions(path: &Path, permissions: std::fs::Permissions) -> io::Result<()> {
     std::fs::set_permissions(path, permissions)
 }
@@ -176,6 +176,13 @@ pub(crate) fn set_permissions(path: &Path, permissions: std::fs::Permissions) ->
 pub(crate) fn append(path: &Path, bytes: &[u8]) -> io::Result<()> {
     use std::io::Write as _;
     OpenOptions::new().append(true).open(path)?.write_all(bytes)
+}
+
+/// Writes `bytes` over the start of the file `path` in place, keeping the same file.
+#[cfg(test)]
+pub(crate) fn overwrite(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    use std::io::Write as _;
+    OpenOptions::new().write(true).open(path)?.write_all(bytes)
 }
 
 /// The most temp names [`replace`] tries in one folder before giving up.

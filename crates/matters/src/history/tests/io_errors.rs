@@ -52,22 +52,24 @@ fn a_timeline_ref_that_does_not_read_is_an_error_not_an_empty_timeline() {
     );
 }
 
-/// A timeline ref that cannot be stat'd (its folder is a file) fails the open, rather than
-/// opening as a history never published.
+/// A timeline ref that cannot be reached (its folder is a file) is an error naming why, never
+/// a history never published: reading the timeline fails, so the next checkpoint does not start
+/// a new timeline over it.
 #[cfg(unix)]
 #[test]
-fn a_timeline_ref_that_cannot_be_stat_fails_the_open() {
+fn a_timeline_ref_whose_folder_is_a_file_is_an_error_not_an_empty_timeline() {
     let dir = TestDir::new("history-ref-no-stat");
     let (git_dir, store) = new_store(&dir);
     drop(store);
     let folder = git_dir.join(TIMELINE_REF);
     write_file(folder.parent().unwrap(), b"not a folder");
 
-    let opened = GixStore::open(&git_dir, &dir.path().join("folder"));
+    let store = GixStore::open(&git_dir, &dir.path().join("folder")).unwrap();
+    let timeline = store.timeline();
     assert_eq!(
-        io_kind(&opened),
-        Some(("stat", io::ErrorKind::NotADirectory)),
-        "{opened:?}"
+        io_kind(&timeline),
+        Some(("read", io::ErrorKind::NotADirectory)),
+        "{timeline:?}"
     );
 }
 

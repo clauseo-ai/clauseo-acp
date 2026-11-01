@@ -1,9 +1,9 @@
-//! Checks of a loose object file found already present: its header alone, or its whole content
-//! inflated and hashed. A file that does not decode is unsound (`false`); an I/O error reading
+//! The check of a loose object file found already present: its whole content inflated and
+//! hashed. A file that does not decode is unsound (`false`); an I/O error reading
 //! it is an error, so a transient failure never counts as a torn object.
 
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use gix::hash::{Kind as HashKind, ObjectId};
@@ -12,8 +12,6 @@ use gix::zlib::{Decompress, FlushDecompress, Status};
 
 use crate::Error;
 
-/// The compressed bytes read to find a header: more than any loose header deflates to.
-const HEADER_INPUT: u64 = 256;
 /// The most bytes a loose header inflates to (`gix` allows the same).
 const HEADER_MAX: usize = 64;
 /// The chunk in which a whole object is inflated.
@@ -29,27 +27,6 @@ fn header_len(head: &[u8], kind: Kind, size: u64) -> Option<usize> {
         Ok((found, found_size, len)) if found == kind && found_size == size => Some(len),
         Ok(_) | Err(_) => None,
     }
-}
-
-/// Whether the file at `path` inflates to a header of `kind` and `size`, reading at most a
-/// few hundred bytes.
-pub(super) fn header(path: &Path, kind: Kind, size: u64) -> Result<bool, Error> {
-    let mut input = Vec::new();
-    open(path)?
-        .take(HEADER_INPUT)
-        .read_to_end(&mut input)
-        .map_err(|err| Error::io("read", path, err))?;
-    let mut state = Decompress::new();
-    let mut out = [0_u8; HEADER_MAX];
-    if state
-        .decompress(&input, &mut out, FlushDecompress::None)
-        .is_err()
-    {
-        return Ok(false);
-    }
-    let produced = usize::try_from(state.total_out()).unwrap_or(0);
-    let head = out.get(..produced).unwrap_or_default();
-    Ok(header_len(head, kind, size).is_some())
 }
 
 /// Whether the file at `path` inflates in full to an object of `kind` and `size` whose hash

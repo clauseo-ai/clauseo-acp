@@ -192,11 +192,7 @@ impl HistoryStore for GixStore {
                     .map_err(|err| Error::io("write", &path, err))
             })?;
         }
-        let mut store = Self::at(git_dir);
-        store
-            .new_objects
-            .set_published_at(durable::ref_time(git_dir)?);
-        Ok(store)
+        Ok(Self::at(git_dir))
     }
 
     fn store_file(
@@ -332,8 +328,6 @@ impl HistoryStore for GixStore {
         durable::check_ref(&self.git_dir, expected)?;
         self.new_objects.make_durable(self.objects.path())?;
         durable::move_ref(&self.git_dir, commit, expected)?;
-        self.new_objects
-            .set_published_at(durable::ref_time(&self.git_dir)?);
         let index = self.git_dir.join("index");
         index_file::save(&index, cache)?;
         let file = File::open(&index).map_err(|err| Error::io("open", &index, err))?;
