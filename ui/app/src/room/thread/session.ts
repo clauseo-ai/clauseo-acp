@@ -3,6 +3,7 @@
 // one, so a visit leaves no empty thread behind. A refused command shows by its code only, never its message.
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pickReopenThread } from "../../store/reopen.ts";
+import type { ViewStore } from "../../store/store.ts";
 import { streamOf } from "../../store/view.ts";
 import { internalError, toHostError, type HostTransport } from "../../transport/host-transport.ts";
 import type {
@@ -10,10 +11,12 @@ import type {
   HostCommand,
   MatterId,
   StepEntry,
+  StreamHeader,
   StreamId,
   ThreadId,
   TurnId,
 } from "../../transport/protocol.ts";
+import { turnRunning } from "./live.ts";
 
 /** The agent every thread the room starts runs: `agents.claude` in the user settings, until U6 lets the lawyer choose
  * (as R12's internal window, internal/session.ts). */
@@ -48,7 +51,11 @@ export type ThreadSession = {
   actions: ThreadActions;
 };
 
-export function useThreadSession(transport: HostTransport, matter: MatterId | null): ThreadSession {
+export function useThreadSession(
+  transport: HostTransport,
+  store: ViewStore,
+  matter: MatterId | null,
+): ThreadSession {
   const [thread, setThread] = useState<ThreadId | null>(null);
   const [sentTurn, setSentTurn] = useState<TurnId | null>(null);
   const [refused, setRefused] = useState<ErrorCode | null>(null);
@@ -56,6 +63,9 @@ export function useThreadSession(transport: HostTransport, matter: MatterId | nu
   const open = useRef<ThreadId | null>(null);
   const lookup = useRef<Promise<ThreadId | null> | null>(null);
   const sending = useRef(false);
+  const stopping = useRef(false);
+  /** The view's header as the last prompt went: its turn is over once a later header says nothing runs. */
+  const headerAtSend = useRef<StreamHeader | null>(null);
 
   const adopt = useCallback((id: ThreadId) => {
     open.current = id;
@@ -102,6 +112,7 @@ export function useThreadSession(transport: HostTransport, matter: MatterId | nu
           id = made.thread_created.thread;
           adopt(id);
         }
+        headerAtSend.current = store.view(streamOf(id))?.header ?? null;
         const sent = await command({ send_prompt: { thread: id, content: [{ text: { text } }] } });
         if (typeof sent !== "string" && sent.prompt_accepted !== undefined)
           setSentTurn(sent.prompt_accepted.turn);
@@ -113,13 +124,36 @@ export function useThreadSession(transport: HostTransport, matter: MatterId | nu
         sending.current = false;
       }
     },
-    [matter, find, command, adopt],
+    [matter, find, command, adopt, store],
   );
+
+  // The sent turn holds busy until its step or limit stop is in the view (live.ts, useBusy). A turn can end without
+  // either reaching the view: so it is also over once a header after the send (an update, or a Reset's) says nothing
+  // runs, and when the stream fails.
+  useEffect(() => {
+    if (sentTurn === null || thread === null) return;
+    const stream = streamOf(thread);
+    const check = () => {
+      const header = store.view(stream)?.header ?? null;
+      const ended =
+        store.error(stream) !== undefined ||
+        (header !== headerAtSend.current && !turnRunning(header?.header?.status));
+      if (ended) setSentTurn(null);
+    };
+    check();
+    return store.subscribe(check);
+  }, [store, sentTurn, thread]);
 
   const stop = useCallback(() => {
     const id = open.current;
-    if (id === null) return;
-    command({ cancel: { thread: id } }).catch((e: unknown) => setRefused(toHostError(e).code));
+    // one cancel at a time: a second press while the first is on its way sends nothing
+    if (id === null || stopping.current) return;
+    stopping.current = true;
+    command({ cancel: { thread: id } })
+      .catch((e: unknown) => setRefused(toHostError(e).code))
+      .finally(() => {
+        stopping.current = false;
+      });
   }, [command]);
 
   const undo = useCallback(

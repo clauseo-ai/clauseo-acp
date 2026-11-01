@@ -118,6 +118,8 @@ test("500 chunks and 20 tool calls into the room's thread: one commit a frame, n
     ),
   );
   await settle();
+  // Work started the renderer's chunk as it mounted; it is in memory before the first answer
+  await act(() => vi.dynamicImportSettled());
   const stream = transport.only("subscribe")[0]?.stream;
   expect(stream).toBe(`thread:${summary().thread}`);
   const prompt = userMessage(5, 1, "What does clause nine say?");
