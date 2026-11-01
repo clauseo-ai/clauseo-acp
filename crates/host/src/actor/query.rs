@@ -1,7 +1,8 @@
 //! Queries: answered from host memory (`ListMatters`, `ListThreads`, `GetSettings`), a
 //! loaded stream (`PageEntries`), a loaded stream and then the matter's thread
 //! (`CompareVersions`, with a version or the folder now, and `PreviewRestore`) or a store
-//! read on a task of its own (`ReadBlob`).
+//! read on a task of its own (`ReadBlob`); `ListPapers` runs on the matter's worker
+//! (`papers.rs`).
 
 use clauseo_matters::CompareSide;
 use clauseo_protocol::{
@@ -99,6 +100,13 @@ pub(super) fn query(
         HostQuery::GetSettings => {
             let view = super::settings::view(&actor.effective);
             let _gone = reply.send(Ok(QueryResult::Settings(view)));
+        }
+        HostQuery::ListPapers { matter } => {
+            if let Err(error) = actor.check_matter(matter) {
+                let _gone = reply.send(Err(error));
+                return;
+            }
+            super::papers::list(actor, matter, reply);
         }
         HostQuery::ReadBlob { hash, offset, len } => {
             let store = actor.store.clone();

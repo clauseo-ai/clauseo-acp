@@ -316,12 +316,14 @@ pub(super) fn on_matter_reply(
                 | MatterReply::Undone(_)
                 | MatterReply::Restored(_)
                 | MatterReply::Located(_)
-                | MatterReply::HeldOpen(_)) => Err(Error::Internal(format!(
+                | MatterReply::HeldOpen(_)
+                | MatterReply::Papers(_)) => Err(Error::Internal(format!(
                     "a query answered with another job's reply: {other:?}"
                 ))),
             };
             let _gone = answer.send(result);
         }
+        MatterTag::Papers(answer) => super::papers::answer(actor, matter, reply, answer),
     }
 }
 
@@ -445,7 +447,8 @@ fn made(reply: MatterReply) -> Result<(CommitId, Option<ImportSummary>), Error> 
         | MatterReply::Restored(_)
         | MatterReply::Compared(_)
         | MatterReply::Previewed(_)
-        | MatterReply::HeldOpen(_) => Err(Error::Internal(
+        | MatterReply::HeldOpen(_)
+        | MatterReply::Papers(_) => Err(Error::Internal(
             "a matter's create got another job's reply".to_owned(),
         )),
     }

@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use clauseo_process::Launcher;
 use clauseo_protocol::{
-    CommandId, CommandOutcome, FileRefId, FolderRefId, MatterId, Principal, StreamId, ThreadId,
+    CommandId, CommandOutcome, FolderRefId, MatterId, Principal, StreamId, ThreadId,
 };
 use clauseo_settings::Effective;
 use clauseo_store::Store;
@@ -41,6 +41,7 @@ mod commands;
 mod folder_state;
 pub(crate) mod input;
 mod matters;
+mod papers;
 mod query;
 mod relocate;
 mod settings;
@@ -108,7 +109,7 @@ pub(crate) struct Actor {
     pub(crate) claims: BTreeMap<CommandId, (MatterId, PathBuf)>,
     /// Matter folders whose `ListMatters` stat is still running (`folder_state.rs`).
     pub(crate) stats_running: folder_state::Running,
-    pub(crate) files: BTreeMap<FileRefId, PathBuf>,
+    pub(crate) files: papers::FileRefs,
     pub(crate) next_sub: u64,
     pub(crate) work: Work,
     pub(crate) phase: HostPhase,
@@ -398,10 +399,8 @@ impl Actor {
             }
             Request::RegisterFile { path, reply } => {
                 let minted = authorize(&Principal::LocalDesktop, Access::RegisterFile)
-                    .and_then(|()| self.ids.mint::<FileRefId>(self.clock.now().wall));
-                let _gone = reply.send(minted.inspect(|id| {
-                    self.files.insert(*id, path);
-                }));
+                    .and_then(|()| papers::file_ref(self, path));
+                let _gone = reply.send(minted);
             }
             Request::Shutdown { reply } => {
                 match authorize(&Principal::LocalDesktop, Access::Shutdown) {

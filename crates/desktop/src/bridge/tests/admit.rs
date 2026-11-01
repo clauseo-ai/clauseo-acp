@@ -55,6 +55,8 @@ fn every_command_and_read_the_windows_send_today_is_admitted() {
         json!("list_matters"),
         json!({"list_threads": {"matter": host.scratch()}}),
         json!("get_settings"),
+        // The wall's file list (H8).
+        json!({"list_papers": {"matter": host.scratch()}}),
     ];
     for body in reads {
         let answer = block_on(bridge.query(read(body.clone())));

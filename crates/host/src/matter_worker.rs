@@ -1,7 +1,7 @@
 //! One OS thread, `clauseo-matter`, per open matter. It owns the matter's R8 [`Matter`] and runs
 //! its synchronous jobs (create, import, open, checkpoints, undo, restore, compare, preview, the
-//! open-in-Word check) off the actor, which sends each job with a tag and gets each reply back
-//! through `post`, tagged the same way.
+//! open-in-Word check, listing papers) off the actor, which sends each job with a tag and gets
+//! each reply back through `post`, tagged the same way.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -12,8 +12,8 @@ use std::thread::{self, JoinHandle};
 
 use clauseo_matters::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, HeldOpen, ImportWarning, Imported,
-    Limits, Matter, MissingReason, NewMatter, OsProbe, Restore, RestorePlan, Restored, Retention,
-    Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, held_open_at,
+    Limits, Matter, MissingReason, NewMatter, OsProbe, PaperList, Restore, RestorePlan, Restored,
+    Retention, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, held_open_at,
 };
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, FileChange, FileDecision, ImportSummary, MatterId, MatterPath,
@@ -126,6 +126,8 @@ pub(crate) enum MatterJob {
         folder: PathBuf,
         paths: Vec<PathBuf>,
     },
+    /// `Matter::papers`: the folder as it is now, its first `limit` files.
+    ListPapers { limit: usize },
 }
 
 /// How an import ended.
@@ -160,6 +162,7 @@ pub(crate) enum MatterReply {
     Previewed(Result<Box<RestorePlan>, Error>),
     /// The first path held open, with what shows it.
     HeldOpen(Option<(MatterPath, HeldOpen)>),
+    Papers(Result<PaperList, Error>),
 }
 
 /// A turn's checkpoint, and for an id R8 reused what the host needs to record it when its log
@@ -368,6 +371,9 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
                 .into_iter()
                 .find_map(|path| held_open_at(&folder, &path)),
         ),
+        MatterJob::ListPapers { limit } => {
+            MatterReply::Papers(open(settings, slot).and_then(|matter| Ok(matter.papers(limit)?)))
+        }
     }
 }
 
