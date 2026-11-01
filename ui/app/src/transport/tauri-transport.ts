@@ -22,9 +22,9 @@ import type {
   AgentChoiceId,
   CommandEnvelope,
   CommandOutcome,
-  FolderRefId,
   HostQuery,
   PermissionRequestId,
+  PickedFolder,
   QueryResult,
   StreamId,
   ThreadId,
@@ -187,7 +187,7 @@ export class TauriTransport implements HostTransport {
   ): Promise<void> {
     await call(commands.answerPermission(thread, request, option));
   }
-  pickFolder(): Promise<FolderRefId | null> {
+  pickFolder(): Promise<PickedFolder | null> {
     return call(commands.pickFolder());
   }
   displayInfo(): Promise<DisplayInfo> {

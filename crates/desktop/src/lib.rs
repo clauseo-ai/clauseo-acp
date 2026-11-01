@@ -38,6 +38,7 @@ mod e2e;
 mod frame;
 #[cfg(feature = "marks")]
 mod marks;
+mod picked;
 mod rust_only;
 #[cfg(test)]
 mod test_support;

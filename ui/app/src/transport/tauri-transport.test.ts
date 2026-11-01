@@ -84,6 +84,17 @@ describe("TauriTransport", () => {
     });
   });
 
+  test("pick_folder resolves to the picked folder's ref and display, or null when cancelled", async () => {
+    answers.set("pick_folder", () => ({ folder: "folder-1", display: "~/Documents/Acme" }));
+    const t = new TauriTransport({ warn: () => {} });
+    await expect(t.pickFolder()).resolves.toEqual({
+      folder: "folder-1",
+      display: "~/Documents/Acme",
+    });
+    answers.set("pick_folder", () => null);
+    await expect(t.pickFolder()).resolves.toBeNull();
+  });
+
   test("one channel per transport; batches reach the stream's subscriber", async () => {
     const { got, send } = await rig("thread:x");
     expect(invoked.filter((i) => i.command === "subscribe").map((i) => i.args)).toEqual([

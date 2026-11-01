@@ -41,8 +41,16 @@ export const commands = {
 	 *  the lawyer in a native dialog; declined there, the call fails with `transport.unauthorized`.
 	 */
 	answerPermission: (thread: ThreadId, request: PermissionRequestId, option: AgentChoiceId) => typedError<null, HostError>(__TAURI_INVOKE("answer_permission", { thread, request, option })),
-	/**  Opens the native folder dialog and registers the folder picked; `None` when cancelled. */
-	pickFolder: () => typedError<string | null, HostError>(__TAURI_INVOKE("pick_folder")),
+	/**
+	 *  Opens the native folder dialog and registers the folder picked: its ref, and its display
+	 *  relative to the home folder (`picked.rs`). `None` when cancelled.
+	 */
+	pickFolder: () => typedError<{
+	/**  The ref the host issued for the folder. */
+	folder: FolderRefId,
+	/**  The folder as `display` writes it. */
+	display: string,
+} | null, HostError>(__TAURI_INVOKE("pick_folder")),
 	/**  The OS the host runs on. */
 	displayInfo: () => typedError<DisplayInfo, HostError>(__TAURI_INVOKE("display_info")),
 };
@@ -1955,6 +1963,14 @@ export type PermissionState =
 	/**  Why. */
 	reason: ExpiryReason,
 } }) & { resolved?: never };
+
+/**  A folder the lawyer picked: the ref `CreateMatter` takes, and the path to show. */
+export type PickedFolder = {
+	/**  The ref the host issued for the folder. */
+	folder: FolderRefId,
+	/**  The folder as `display` writes it. */
+	display: string,
+};
 
 /**  One entry of the agent's plan. ACP v1 sends the full plan each time. */
 export type PlanEntry = {

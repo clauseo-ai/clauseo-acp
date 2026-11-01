@@ -1,7 +1,7 @@
 //! The bridge against a real host on a scratch folder: what reaches the window's channel, and
 //! what the commands refuse. No agent runs.
 
-use std::path::PathBuf;
+use std::path::{MAIN_SEPARATOR, PathBuf};
 
 use clauseo_protocol::{
     AgentChoiceId, ConfigValue, Cursor, ErrorCode, HostEvent, PatchBatch, PermissionRequestId,
@@ -242,8 +242,9 @@ fn a_refused_folder_is_rejected() {
     let host = scratch.start(vec![refused.clone()]);
     let bridge = host.bridge();
 
-    let folder = block_on(bridge.pick_folder(&Picks(Some(refused)))).unwrap();
-    let folder = folder.unwrap();
+    let home = scratch.path();
+    let picked = block_on(bridge.pick_folder(&Picks(Some(refused)), Some(home))).unwrap();
+    let folder = picked.unwrap().folder;
     let create = |folder| {
         envelope(HostCommand::CreateMatter {
             name: Title::new("Smith v Jones").unwrap(),
@@ -258,8 +259,8 @@ fn a_refused_folder_is_rejected() {
     );
 
     // The data folder is always refused.
-    let data = block_on(bridge.pick_folder(&Picks(Some(scratch.path().to_owned())))).unwrap();
-    let refusal = block_on(bridge.dispatch(create(data.unwrap()))).unwrap_err();
+    let data = block_on(bridge.pick_folder(&Picks(Some(scratch.path().to_owned())), None));
+    let refusal = block_on(bridge.dispatch(create(data.unwrap().unwrap().folder))).unwrap_err();
     assert_eq!(
         refusal.code(),
         ErrorCode::MatterFolderRefused,
@@ -267,9 +268,13 @@ fn a_refused_folder_is_rejected() {
     );
 
     // A folder that is allowed works; a cancelled pick is `None`.
-    let work = block_on(bridge.pick_folder(&Picks(Some(scratch.path().join("work"))))).unwrap();
-    block_on(bridge.dispatch(create(work.unwrap()))).unwrap();
-    assert_eq!(block_on(bridge.pick_folder(&Picks(None))).unwrap(), None);
+    let work = scratch.path().join("work");
+    let picked = block_on(bridge.pick_folder(&Picks(Some(work)), Some(home))).unwrap();
+    let picked = picked.unwrap();
+    assert_eq!(picked.display, format!("~{MAIN_SEPARATOR}work"));
+    block_on(bridge.dispatch(create(picked.folder))).unwrap();
+    let cancelled = block_on(bridge.pick_folder(&Picks(None), Some(home))).unwrap();
+    assert_eq!(cancelled, None);
 }
 
 #[test]

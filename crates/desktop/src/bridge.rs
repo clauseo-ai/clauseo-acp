@@ -4,6 +4,7 @@
 //! `Principal::LocalDesktop`; the webview never names a principal.
 
 use std::collections::{HashMap, HashSet};
+use std::path::{MAIN_SEPARATOR, Path};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use clauseo_host::HostHandle;
@@ -17,6 +18,7 @@ use tauri::ipc::Channel;
 
 use crate::dialogs::{Confirm, Picker};
 use crate::frame::Frame;
+use crate::picked::{self, PickedFolder};
 
 mod pump;
 mod window;
@@ -289,19 +291,21 @@ impl Bridge {
         }
     }
 
-    /// Asks `picker` for a folder and registers it; `None` when the lawyer cancelled. Whether
-    /// the folder may be a matter is the host's rule: `CreateMatter` refuses a refused folder
-    /// with `matter.folder_refused`.
+    /// Asks `picker` for a folder and registers it, with the display `picked::display` gives
+    /// it under `home`; `None` when the lawyer cancelled. Whether the folder may be a matter is
+    /// the host's rule: `CreateMatter` refuses a refused folder with `matter.folder_refused`.
     pub(crate) async fn pick_folder(
         &self,
         picker: &dyn Picker,
-    ) -> Result<Option<FolderRefId>, HostError> {
+        home: Option<&Path>,
+    ) -> Result<Option<PickedFolder>, HostError> {
         let Some(path) = picker.pick().await else {
             return Ok(None);
         };
+        let display = picked::display(&path, home, MAIN_SEPARATOR);
         let folder = self.host.register_folder(path).await?;
         lock(&self.issued).insert(folder);
-        Ok(Some(folder))
+        Ok(Some(PickedFolder { folder, display }))
     }
 }
 

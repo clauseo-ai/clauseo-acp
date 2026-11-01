@@ -123,10 +123,10 @@ export function useSession(transport: HostTransport): Session {
     newMatter: (name) => {
       (async () => {
         setError(null);
-        const folder = await transport.pickFolder();
-        if (folder === null) return;
+        const picked = await transport.pickFolder();
+        if (picked === null) return;
         const outcome = await command({
-          create_matter: { name, source: { existing_folder: { folder } } },
+          create_matter: { name, source: { existing_folder: { folder: picked.folder } } },
         });
         if (typeof outcome === "string" || outcome.matter_created === undefined) return;
         const id = outcome.matter_created.matter;
