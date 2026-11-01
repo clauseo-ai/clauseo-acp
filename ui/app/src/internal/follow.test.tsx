@@ -4,9 +4,13 @@
 // LegendList's re-follow threshold, so the list stops following and the turn's last rows stay out of sight. The window
 // must offer a way back to following.
 //
-// happy-dom lays nothing out and LegendList's scroll state does not track a scroll there, so the list is a model of
-// what LegendList 3.6 does (react.mjs, the isWithinMaintainScrollAtEndThreshold update): it follows a growing end only
-// while the scroll is within 10% of the viewport of it, and `scrollToEnd` lands on the end.
+// What this test covers: the window's side only. It tests a model of LegendList's follow rule, not LegendList: the mock
+// below stands in for the list and copies its rule from LegendList 3.6 (react.mjs, the
+// isWithinMaintainScrollAtEndThreshold update): it follows a growing end only while the scroll is within 10% of the
+// viewport of it, and `scrollToEnd` lands on the end. happy-dom lays nothing out, and the real list's scroll state does
+// not track a scroll there. That the real list sends this signal and that `scrollToEnd({ animated: false })` makes it
+// follow again was checked by hand in headless Chromium, with the issue's repro page (the real App, store and list on a
+// fake transport). A committed browser test is a follow-up: ui/e2e was out of scope for this change.
 import { act, useImperativeHandle, useLayoutEffect, type ReactNode, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
@@ -27,6 +31,7 @@ import {
 import { manualBatch, stubLayout } from "../testing/dom.ts";
 import { ThreadContext } from "./session.ts";
 import { Transcript } from "./transcript.tsx";
+import { JUMP_TO_LATEST } from "./words.ts";
 
 const VIEWPORT = 680;
 const ROW = 40;
@@ -66,6 +71,7 @@ vi.mock("@legendapp/list/react", () => ({
   }) {
     useImperativeHandle(props.ref, () => ({
       getState: () => ({
+        isWithinMaintainScrollAtEndThreshold: list.within,
         listen: (_: string, listener: (within: boolean) => void) => {
           list.listeners.add(listener);
           return () => list.listeners.delete(listener);
@@ -130,11 +136,13 @@ test("scrolled up and back down while the answer grew, the person can jump to th
   for (let i = 0; i < 30; i++) await act(async () => list.scrollBy(40));
   await more(10);
   expect(list.fromEnd()).toBe(40 * ROW);
-  expect(jump()?.textContent).toBe("Jump to latest");
+  expect(jump()?.textContent).toBe(JUMP_TO_LATEST);
 
   await act(async () => jump()!.click());
   expect(list.fromEnd()).toBe(0);
   expect(jump()).toBeNull();
+  // The button left with the click; focus is on the log, not lost to the page.
+  expect(document.activeElement).toBe(container.querySelector('[data-testid="transcript"]'));
   await more(10);
   expect(list.fromEnd()).toBe(0);
   release();

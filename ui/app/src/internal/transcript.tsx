@@ -3,10 +3,11 @@
 // "Jump to latest" once they have scrolled away from it.
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { MarkdownHostContext, type MarkdownHost } from "@clauseo/components/markdown/host.ts";
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useRef, useSyncExternalStore, type RefObject } from "react";
 import { useEntryIds, useViewStore } from "../store/hooks.ts";
 import type { EntryId, StreamId } from "../transport/protocol.ts";
 import { Row } from "./rows.tsx";
+import { JUMP_TO_LATEST } from "./words.ts";
 
 const keyOf = (id: EntryId) => id;
 
@@ -24,12 +25,12 @@ const ANSWER_HOST: MarkdownHost = {
  * true again only when they come back that close, or jump.
  */
 function useFollowing(list: RefObject<LegendListRef | null>): boolean {
-  const [following, setFollowing] = useState(true);
-  useEffect(
-    () => list.current?.getState().listen("isWithinMaintainScrollAtEndThreshold", setFollowing),
-    [list],
-  );
-  return following;
+  const subscribe = (changed: () => void) =>
+    list.current?.getState().listen("isWithinMaintainScrollAtEndThreshold", changed) ?? (() => {});
+  // Read from the list itself, so a list that mounts away from its end shows the button at once. Before the list
+  // mounts there is nothing to jump to: following.
+  const read = () => list.current?.getState().isWithinMaintainScrollAtEndThreshold ?? true;
+  return useSyncExternalStore(subscribe, read, read);
 }
 
 export function Transcript({ stream }: { stream: StreamId }) {
@@ -44,7 +45,12 @@ export function Transcript({ stream }: { stream: StreamId }) {
   // keeps moving the end away, so no fixed region catches their return (in the macOS scoreboard's stall, #106, the list
   // ended the turn 7,600 px short of its end after 1,200 px up and back), and a region large enough would pull a reader
   // past text they have not read. The person decides; once at the end, the list follows again.
-  const jump = useCallback(() => void list.current?.scrollToEnd({ animated: false }), []);
+  // The button leaves with the click, so focus goes to the log, not to the page's body.
+  const log = useRef<HTMLDivElement>(null);
+  const jump = useCallback(() => {
+    void list.current?.scrollToEnd({ animated: false });
+    log.current?.focus({ preventScroll: true });
+  }, []);
   return (
     <div
       style={{
@@ -56,6 +62,8 @@ export function Transcript({ stream }: { stream: StreamId }) {
       }}
     >
       <div
+        ref={log}
+        tabIndex={-1}
         data-testid="transcript"
         role="log"
         aria-label="Transcript"
@@ -82,7 +90,7 @@ export function Transcript({ stream }: { stream: StreamId }) {
           onClick={jump}
           style={{ position: "absolute", bottom: 8, left: "50%", transform: "translateX(-50%)" }}
         >
-          Jump to latest
+          {JUMP_TO_LATEST}
         </button>
       )}
     </div>
