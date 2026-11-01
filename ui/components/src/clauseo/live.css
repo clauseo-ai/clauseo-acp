@@ -288,6 +288,10 @@
     gap: var(--s1);
     margin-left: auto;
   }
+  .change-error {
+    @apply text-small-row text-muted;
+    align-self: center;
+  }
   .change-undone {
     @apply text-small-row text-muted;
     background: transparent;

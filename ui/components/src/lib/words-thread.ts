@@ -30,6 +30,22 @@ const HI = {
   Restart: "फिर से शुरू करें",
   // the lawyer stopping the answer
   "Stop the answer": "उत्तर रोकें",
+  // how a turn ended, one line in the thread; a tool call that failed or was stopped
+  Failed: "विफल",
+  Stopped: "रोका गया",
+  "You stopped the answer. The answer so far is kept.":
+    "आपने उत्तर रोक दिया। अब तक का उत्तर रखा गया है।",
+  "The answer stopped at its limit, before it finished.": "उत्तर पूरा होने से पहले अपनी सीमा पर रुक गया।",
+  "This question was declined, so there is no answer.":
+    "इस प्रश्न को अस्वीकार किया गया, इसलिए कोई उत्तर नहीं है।",
+  "The answer stopped. Your question and the answer so far are kept.":
+    "उत्तर रुक गया। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",
+  // who said each row, for assistive technology ("You" is words.ts's)
+  "Your question": "आपका प्रश्न",
+  "Clauseo's answer": "Clauseo का उत्तर",
+  // content the thread can't show: a named attachment, or anything else
+  "Attached: {name}": "संलग्न: {name}",
+  "Something here can't be shown in the thread.": "यहाँ का कुछ हिस्सा बातचीत में नहीं दिखाया जा सकता।",
   // the work behind an answer
   // the permission prompt, inline in the thread
   "Clauseo wants to save a new version of {paper}.": "Clauseo {paper} का नया संस्करण सहेजना चाहता है।",
@@ -45,9 +61,11 @@ const HI = {
     "अनुमति नहीं दी गई। Clauseo ने {paper} में कोई बदलाव नहीं किया।",
   // the change note
   "Clauseo changed {n} papers.": "Clauseo ने {n} दस्तावेज़ बदले।",
+  "Clauseo changed 1 paper.": "Clauseo ने 1 दस्तावेज़ बदला।",
   Compare: "तुलना करें",
   "{name} changed after Clauseo's edit.": "Clauseo के संपादन के बाद {name} में बदलाव हुए हैं।",
   "You undid Clauseo's changes to {n} papers.": "आपने {n} दस्तावेज़ों में Clauseo के बदलाव पूर्ववत किए।",
+  "You undid Clauseo's changes to 1 paper.": "आपने 1 दस्तावेज़ में Clauseo के बदलाव पूर्ववत किए।",
   // the composer
   "Papers for this question": "इस प्रश्न के दस्तावेज़",
   "Remove {title}": "{title} हटाएँ",

@@ -118,8 +118,12 @@ export type ComposerProps<V extends string = string> = {
   /** The one act left before the field can take a question, such as signing in to a plan: it stands in the field's
    * row in place of the words, Add papers and Ask, on the same well. */
   gate?: ReactNode;
-  /** Words in the room's line's place, such as the fine print before signing in. */
-  line?: ReactNode;
+  /** Words in the room's line's place, such as the fine print before signing in; false for no line at all. */
+  line?: ReactNode | false;
+  /** No matter open: the field, Add papers and Ask take nothing. */
+  disabled?: boolean;
+  /** data-testid on the field, Ask, Stop and the working line's row. */
+  testIds?: { field?: string; ask?: string; stop?: string; working?: string };
   /** Questions drawn from the matter's papers, offered over an empty field: a press puts one in the field. */
   prompts?: { label: string; items: readonly { text: string; onPick: () => void }[] };
   /** A quiet note under the field, above the room's line, such as the plan running low. Optional. */
@@ -156,6 +160,8 @@ export function Composer<V extends string = string>({
   id = "ask",
   gate,
   line,
+  disabled = false,
+  testIds,
   prompts,
   notice,
   queue,
@@ -245,7 +251,7 @@ export function Composer<V extends string = string>({
       <StatusLine took={took} plan={plan} hint={hint} choice={choice} hidden={working !== null} />
       {/* while Clauseo works the working line is the well's top row, and the field its foot: one set-in region */}
       <div className="room-entry" ref={entry} data-working={working !== null ? "" : undefined}>
-        {working !== null && <WorkingLine state={working} />}
+        {working !== null && <WorkingLine state={working} testId={testIds?.working} />}
         <div
           className="room-field"
           data-papers={papers.length > 0 ? "" : undefined}
@@ -273,6 +279,8 @@ export function Composer<V extends string = string>({
                 }}
                 rows={1}
                 value={text}
+                disabled={disabled}
+                data-testid={testIds?.field}
                 placeholder={placeholder ?? w.t("Ask about this matter")}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => {
@@ -284,6 +292,7 @@ export function Composer<V extends string = string>({
                 shape="icon"
                 className="room-field-add"
                 aria-label={w.t("Add papers")}
+                disabled={disabled}
               >
                 <IconAddPapers size={16} />
               </Button>
@@ -294,6 +303,7 @@ export function Composer<V extends string = string>({
                   className="room-field-ask"
                   aria-label={w.th("Stop the answer")}
                   onClick={onStop}
+                  data-testid={testIds?.stop}
                 >
                   <span className="deva-nudge">{w.t("Stop")}</span>
                 </Button>
@@ -302,7 +312,8 @@ export function Composer<V extends string = string>({
                   kind="primary"
                   type="submit"
                   className="room-field-ask"
-                  disabled={text.trim() === ""}
+                  disabled={disabled || text.trim() === ""}
+                  data-testid={testIds?.ask}
                 >
                   {w.t("Ask")}
                 </Button>
@@ -312,21 +323,23 @@ export function Composer<V extends string = string>({
         </div>
       </div>
       {notice}
-      <p className="room-line">
-        {line ?? (
-          <>
-            <IconSafeWorkspace size={14} />
-            <span>
-              <Say>
-                {rt(
-                  w.lang,
-                  "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
-                )}
-              </Say>
-            </span>
-          </>
-        )}
-      </p>
+      {line !== false && (
+        <p className="room-line">
+          {line ?? (
+            <>
+              <IconSafeWorkspace size={14} />
+              <span>
+                <Say>
+                  {rt(
+                    w.lang,
+                    "Safe workspace. Clauseo works inside this matter's folder and asks before going beyond it.",
+                  )}
+                </Say>
+              </span>
+            </>
+          )}
+        </p>
+      )}
     </form>
   );
 }

@@ -35,6 +35,8 @@ export type WorkingState =
       actions?: ReactNode;
       /** Optional: the details those ways fold open. */
       details?: string | null;
+      /** Optional: the error's code (an ErrorCode), when the wait is an error, set as the row's data-code. */
+      code?: string;
     };
 
 type Parts = { words: string; pill: string | null; actions: ReactNode; details: string | null };
@@ -134,11 +136,23 @@ export function WorkingTime({ state }: { state: WorkingState }) {
 }
 
 /** The row itself, the well's top. */
-export function WorkingLine({ state }: { state: WorkingState }) {
+export function WorkingLine({
+  state,
+  testId,
+}: {
+  state: WorkingState;
+  testId?: string | undefined;
+}) {
   const w = useThreadWords();
   const { words, pill, actions, details } = useParts(state);
   const row = (
-    <div className="working" data-kind={state.kind} role="status">
+    <div
+      className="working"
+      data-kind={state.kind}
+      data-code={state.kind === "wait" ? state.code : undefined}
+      data-testid={testId}
+      role="status"
+    >
       <IconChecking size={16} className="working-icon" />
       <span className="working-text">
         <span>

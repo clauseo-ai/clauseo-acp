@@ -10,10 +10,10 @@ const HI = {
   Window: "विंडो",
   Minimise: "न्यूनतम करें",
   Maximise: "अधिकतम करें",
-  // the matter list: what each matter is doing
-  "Answering. Expected by {time}": "उत्तर तैयार हो रहा है। {time} बजे तक अपेक्षित",
-  // working, with no end time: the app never guesses when an answer will end
+  // the matter list: what each matter is doing; and the composer working, with no end time: the app never guesses
+  // when an answer will end
   "Answering.": "उत्तर दिया जा रहा है।",
+  "Answering. Expected by {time}": "उत्तर तैयार हो रहा है। {time} बजे तक अपेक्षित",
   "A question for you": "आपसे एक प्रश्न",
   "Needs your permission": "आपकी अनुमति चाहिए",
   "Answer ready": "उत्तर तैयार है",

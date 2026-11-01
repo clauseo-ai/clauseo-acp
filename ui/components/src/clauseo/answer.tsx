@@ -18,26 +18,36 @@ import { useRoom } from "./room-scope.ts";
 import { Say } from "./say.tsx";
 import { Heading } from "./heading.tsx";
 
-/** "You, 4:31 pm" or "Clauseo, 4:31 pm": who wrote this, and when. */
+/** "You, 4:31 pm" or "Clauseo, 4:31 pm": who wrote this, and when; "You" alone without a time. */
 export function Who({
   name,
   time,
   ref,
 }: {
   name: string;
-  time: string;
+  time?: string | undefined;
   ref?: Ref<HTMLParagraphElement>;
 }) {
   const w = useWords();
   return (
     <p className="who" ref={ref}>
-      <b lang={w.lang === "hi" && isLatinOnly(name) ? "en" : undefined}>{name}</b>, {time}
+      <b lang={w.lang === "hi" && isLatinOnly(name) ? "en" : undefined}>{name}</b>
+      {time !== undefined && `, ${time}`}
     </p>
   );
 }
 
 /** The lawyer's question in the thread, at the lawyer's weight. */
-export function QuestionLine({ who, time, text }: { who: string; time: string; text: string }) {
+export function QuestionLine({
+  who,
+  time,
+  text,
+}: {
+  who: string;
+  /** Without it, "You" alone: no clock time is recorded for a question yet. */
+  time?: string | undefined;
+  text: string;
+}) {
   const { nodes } = useRoom();
   return (
     <>
