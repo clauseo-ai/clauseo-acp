@@ -77,8 +77,8 @@ pub(crate) fn classify(
 /// and so is a subfolder gone before it is read. A subfolder that does not read (permission
 /// denied, say, or not downloaded) is listed in [`Listing::unread`], with a warning unless it
 /// is not downloaded; the root not reading is an error. Returns `Ok(None)` once `cancel` is
-/// set (checked before each folder and each entry). `guard`'s probe tells cloud-only files;
-/// the guard keeps a listing from downloading a folder.
+/// set (checked before each folder, each entry and each stat). `guard`'s probe tells
+/// cloud-only files; the guard keeps a listing from downloading a folder.
 pub(crate) fn walk(
     root: &Path,
     guard: &NoDownload<'_>,
@@ -103,6 +103,9 @@ pub(crate) fn walk(
         for item in items.drain(..) {
             match item {
                 Item::File(entry, path) => {
+                    if walker.cancelled() {
+                        return Ok(None);
+                    }
                     if let Some(file) = walker.stat(&entry, path)? {
                         progress(&file);
                         found.push(file);
@@ -126,7 +129,9 @@ pub(crate) fn walk(
 /// before what it holds and `a0` after), so the files come out sorted and the walk stops at
 /// the file past `limit`, never reading a folder that sorts after it nor taking the stat of
 /// a file that does (a folder is sorted by its entries' names and types, which reading it
-/// gives). [`Listing::unread`] holds the subfolders it found unreadable before it stopped.
+/// gives). A subfolder that does not read, or stops reading, counts as one entry in its place
+/// (as `<folder>/`), and goes in [`Listing::unread`]: so `files` and `unread` together hold
+/// at most `limit + 1` entries, the first in that order.
 pub(crate) fn walk_first(
     root: &Path,
     guard: &NoDownload<'_>,
@@ -147,7 +152,7 @@ pub(crate) fn walk_first(
             Item::File(entry, path) => {
                 if let Some(file) = walker.stat(&entry, path)? {
                     found.push(file);
-                    if found.len() > limit {
+                    if found.len() + walker.unread.len() > limit {
                         break;
                     }
                 }
@@ -155,6 +160,11 @@ pub(crate) fn walk_first(
             Item::Folder(dir, relative) => {
                 // No cancel flag, so the read always finishes.
                 walker.read_folder(&dir, relative, &mut items)?;
+                if found.len() + walker.unread.len() > limit {
+                    // That folder did not read, and was the entry past the limit.
+                    items.clear();
+                    break;
+                }
                 items.sort_unstable_by(|a, b| a.sort_key().cmp(b.sort_key()));
                 pending.extend(items.drain(..).rev());
             }

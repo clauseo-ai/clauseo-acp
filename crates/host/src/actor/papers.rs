@@ -103,6 +103,7 @@ fn summarise(actor: &mut Actor, matter: MatterId, papers: PaperList) -> Result<Q
     Ok(QueryResult::Papers {
         papers: summaries,
         skipped: papers.skipped,
+        unread: papers.unread,
         truncated: papers.truncated,
     })
 }

@@ -22,6 +22,7 @@ const MTIME_MS: i64 = 1_577_836_800_250;
 struct Listed {
     papers: Vec<PaperSummary>,
     skipped: Vec<SkippedFile>,
+    unread: Vec<MatterPath>,
     truncated: bool,
 }
 
@@ -30,10 +31,12 @@ fn list(host: &Running, matter: MatterId) -> Listed {
         QueryResult::Papers {
             papers,
             skipped,
+            unread,
             truncated,
         } => Listed {
             papers,
             skipped,
+            unread,
             truncated,
         },
         other => panic!("ListPapers answered {other:?}"),
@@ -97,24 +100,39 @@ fn papers_are_the_folder_now_sorted_with_skipped_apart() {
             reason: SkippedFileReason::OverSizeCap,
         }]
     );
+    assert_eq!(listed.unread, []);
     assert!(!listed.truncated);
     host.shutdown();
 }
 
 #[cfg(unix)]
 #[test]
-fn an_unreadable_file_is_a_paper() {
+fn an_unreadable_file_is_a_paper_and_an_unreadable_folder_is_unread() {
     let dir = Dir::new("an_unreadable_file_is_a_paper", &[]);
     let host = dir.start(0);
     let folder = dir.folder("m", &[("brief.txt", "x\n")]);
     let matter = host.create_matter("m", &folder);
     // After the import, which would fail reading it: listing only stats.
     write::write(&folder.join("locked.docx"), b"locked");
+    write::write(&folder.join("shut/inside.docx"), b"inside");
     write::set_mode(&folder.join("locked.docx"), 0o000);
+    write::set_mode(&folder.join("shut"), 0o000);
+    // Root reads a folder whatever its mode: then only the file half of the test holds.
+    let shut = std::fs::read_dir(folder.join("shut")).is_err();
     let listed = list(&host, matter);
+    write::set_mode(&folder.join("shut"), 0o755);
     write::set_mode(&folder.join("locked.docx"), 0o644);
-    assert_eq!(paths(&listed.papers), ["brief.txt", "locked.docx"]);
     assert_eq!(listed.skipped, []);
+    if shut {
+        assert_eq!(paths(&listed.papers), ["brief.txt", "locked.docx"]);
+        assert_eq!(listed.unread, [MatterPath::new("shut").unwrap()]);
+    } else {
+        assert_eq!(
+            paths(&listed.papers),
+            ["brief.txt", "locked.docx", "shut/inside.docx"]
+        );
+        assert_eq!(listed.unread, []);
+    }
     host.shutdown();
 }
 

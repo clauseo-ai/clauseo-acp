@@ -224,7 +224,8 @@ its step card, and compare (below) lists the files between any two versions.
 | Thread list | `HostQuery::ListThreads` returns `QueryResult::Threads` | title, agent, status per thread |
 | Papers (the folder as it is now; asked again after a `checkpoint_recorded` or `outside_edits`) | `HostQuery::ListPapers` returns `QueryResult::Papers` | per file Clauseo versions: `FileRefId`, path, size, modified; sorted by path |
 | Files Clauseo does not version | `QueryResult::Papers` `skipped` | path and `SkippedFileReason` (over the size cap, cloud-only) |
-| More files than the list holds | `QueryResult::Papers` with `truncated` | the first 2,000 files by path (`MAX_PAPERS`), papers and skipped together |
+| Folders that could not be read (no permission, or not downloaded) | `QueryResult::Papers` `unread` | folder paths; their files are kept in the history as they were |
+| More entries than the list holds | `QueryResult::Papers` with `truncated` | the first 2,000 entries by path (`MAX_PAPERS`): papers, skipped files and unread folders together |
 
 ## 8. Account limits
 

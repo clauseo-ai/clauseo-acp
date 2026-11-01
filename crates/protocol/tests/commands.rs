@@ -483,6 +483,7 @@ fn list_papers_and_its_answer_on_the_wire() {
             path: MatterPath::new("video.mp4").unwrap(),
             reason: SkippedFileReason::OverSizeCap,
         }],
+        unread: vec![MatterPath::new("OneDrive/Archive").unwrap()],
         truncated: false,
     };
     round_trips(&result);
@@ -491,7 +492,8 @@ fn list_papers_and_its_answer_on_the_wire() {
         concat!(
             r#"{"papers":{"papers":[{"file":"01900000-0000-7000-8000-000000000002","#,
             r#""path":"pleadings/claim.docx","size":1200,"modified":1577836800250}],"#,
-            r#""skipped":[{"path":"video.mp4","reason":"over_size_cap"}],"truncated":false}}"#
+            r#""skipped":[{"path":"video.mp4","reason":"over_size_cap"}],"#,
+            r#""unread":["OneDrive/Archive"],"truncated":false}}"#
         )
     );
     assert_eq!(MAX_PAPERS, 2_000);

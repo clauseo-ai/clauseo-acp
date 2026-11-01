@@ -12,10 +12,10 @@ so the list must give each file one.
 ## Decision
 
 **Query.** `HostQuery::ListPapers { matter }` returns `QueryResult::Papers { papers, skipped,
-truncated }`; each paper is a `PaperSummary { file: FileRefId, path: MatterPath, size: Count,
-modified: Timestamp }`, and `skipped` reuses `SkippedFile`. JSON:
-`{"list_papers":{"matter":"<id>"}}` answered by
-`{"papers":{"papers":[{"file","path","size","modified"}],"skipped":[{"path","reason"}],"truncated":false}}`.
+unread, truncated }`; each paper is a `PaperSummary { file: FileRefId, path: MatterPath, size:
+Count, modified: Timestamp }`, `skipped` reuses `SkippedFile`, and `unread` is a list of
+`MatterPath` folders. JSON: `{"list_papers":{"matter":"<id>"}}` answered by
+`{"papers":{"papers":[{"file","path","size","modified"}],"skipped":[{"path","reason"}],"unread":["<folder>"],"truncated":false}}`.
 Errors: `command.unknown_matter` for a matter the host does not know, `matter.folder_missing`
 when the folder is gone or its `matter.json` names another matter.
 
@@ -24,11 +24,15 @@ the folder with the checkpoint walk's own code (`walk.rs`): the same excluded na
 `.clauseo`, `~$*`, `*.tmp` and the rest), never a symlink, the same size cap and cloud-only probe,
 under the same no-download guard. `papers` are the files a checkpoint versions; a file over the
 cap or cloud-only goes in `skipped` with the reason a checkpoint gives. The listing only stats:
-no file is opened, so an unreadable file is a paper (a checkpoint tries to version it) and the
-files under a subfolder that does not read are left out, as a checkpoint leaves them.
+no file is opened, so an unreadable file is a paper (a checkpoint tries to version it). A
+subfolder that does not read (permission denied, or a cloud folder not downloaded) cannot be
+listed, but a checkpoint keeps the files it held as they were (`keep_unread`), so the folder
+goes in `unread`: the window can say part of the matter is not on this computer instead of
+showing those papers as gone.
 
-**Bounded.** At most `MAX_PAPERS` (2,000) files, papers and skipped together, the first by
-path bytes; `truncated` says the folder holds more. The walk takes each folder's entries in
+**Bounded.** At most `MAX_PAPERS` (2,000) entries, papers, skipped files and unread folders
+together, the first by path bytes (a folder counted where `<folder>/` sorts); `truncated` says
+the folder holds more. The walk takes each folder's entries in
 path-byte order (a folder `a` sorts as `a/`) and stops at the file past the cap, so it never
 reads a folder, or takes the stat of a file, that sorts after it.
 
@@ -58,8 +62,9 @@ content, only the stat the cache would be compared against.
 ## Consequences
 
 - The window gets the folder as the lawyer left it, and the same rule for what is versioned in
-  the list and in the history: a file is on the wall exactly when the next checkpoint would
-  version it.
+  the list and in the history: a file it can see is on the wall exactly when the next checkpoint
+  would version it. A folder it cannot read is named in `unread`, while the history keeps its
+  files as they were.
 - A folder of more than 2,000 files shows its first 2,000 by path; paging is a later query.
 - The registry grows by one entry per distinct path listed or registered during a run (at most
   2,000 per listing); ids do not survive a restart, as before.

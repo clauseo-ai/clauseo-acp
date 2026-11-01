@@ -149,6 +149,28 @@ fn walk_stops_when_cancelled() {
 }
 
 #[test]
+fn walk_stops_between_the_stats_of_one_folder() {
+    let dir = TestDir::new("walk-cancel-stats");
+    for name in ["a", "b", "c", "d"] {
+        put(dir.path(), name, 1);
+    }
+    let cancel = AtomicBool::new(false);
+    let mut stats = 0;
+    let walked = walk(
+        dir.path(),
+        &NoDownload::begin(&NamedProbe(vec![])),
+        u64::MAX,
+        Some(&cancel),
+        &mut |_| {
+            stats += 1;
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        },
+    );
+    assert!(walked.unwrap().is_none());
+    assert_eq!(stats, 1, "the walk went on taking stats after the cancel");
+}
+
+#[test]
 fn walk_of_a_missing_folder_fails() {
     let dir = TestDir::new("walk-missing");
     let err = walk(
