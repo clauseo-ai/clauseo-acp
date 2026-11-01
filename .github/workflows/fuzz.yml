@@ -170,12 +170,14 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
+          # Byte-wise matching, so the character classes below hold only printable ASCII.
+          export LC_ALL=C
           marker='<!-- fuzz-nightly -->'
           title="nightly fuzz: the job failed"
           text="The fuzz job failed. The run below has the details."
           title_re='^nightly fuzz: ([a-z_]+ (panicked|timed out|ran out of memory|crashed|stopped with an error)|findings in [a-z_]+(, [a-z_]+)*)$'
           # shellcheck disable=SC2016 # the backticks in line_re are literal, not command substitution
-          line_re='^- `[a-z_]+`( panicked at `[^`]{0,300}`|: an input ran past its timeout\.|: an input went over the memory limit \(2048 MB\)\.| crashed\. Its report and input are not posted\.|: the fuzzer stopped with an error before its time was up\.)$'
+          line_re='^- `[a-z_]+`( panicked at `[ -_a-~]{0,300}`|: an input ran past its timeout\.|: an input went over the memory limit \(2048 MB\)\.| crashed\. Its report and input are not posted\.|: the fuzzer stopped with an error before its time was up\.)$'
           if [[ $FOUND == true && $FINDING_TITLE =~ $title_re && -n $FINDING_TEXT ]] &&
             (($(printf '%s\n' "$FINDING_TEXT" | wc -l) <= 7)) &&
             ! printf '%s\n' "$FINDING_TEXT" | grep -Evq "$line_re"; then

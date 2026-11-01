@@ -5,7 +5,9 @@
 # Each stand-in is a copy of FAKE below, named after a target, acting out the case its file in
 # $FAKE_CASES names, in each of the ways nightly.sh runs a libFuzzer binary: fuzzing, merging,
 # minimising and re-running one input. A withheld detail carries the text WITHHELD-DETAIL, which
-# must never reach nightly.sh's output, out/upload/, summary.md, issue.md or title.txt.
+# must never reach nightly.sh's output, out/upload/, summary.md, issue.md or title.txt. Each title
+# and issue it writes must also pass the report job's own checks, title_re and line_re, read from
+# .github/workflows/fuzz.yml, so a change of wording on one side fails here.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -42,20 +44,27 @@ panic() {
   echo "==1== ERROR: libFuzzer: deadly signal"
 }
 case $mode in
-  merge) cp -r "${pos[1]}"/. "${pos[0]}"/ && exit 0 ;;
+  merge)
+    if [[ $case == merge-asan ]]; then asan; fi
+    cp -r "${pos[1]}"/. "${pos[0]}"/ && exit 0
+    ;;
   # libFuzzer keeps any crash a step finds; for drift, that is the sanitizer report below.
   minimise) printf 'mini' >"${prefix}minimized-from-1" && exit 0 ;;
 esac
 if [[ -f ${pos[0]} ]]; then
-  if [[ $case == drift ]]; then asan; else panic "the same panic"; fi
+  case $case in
+    drift) asan ;;
+    drift-site) echo "thread '<unnamed>' (7) panicked at fuzz_targets/$name.rs:99:1:" && echo other ;;
+    *) panic "the same panic" ;;
+  esac
   exit 1
 fi
 echo new >"${pos[0]}/new-input"
 echo "stat::number_of_executed_units: 42"
 echo "stat::average_exec_per_sec: 7"
 case $case in
-  ok) exit 0 ;;
-  panic | drift)
+  ok | merge-asan) exit 0 ;;
+  panic | drift | drift-site)
     printf 'crash input' >"${prefix}crash-1"
     panic 'assertion `left == right` failed @someone'
     ;;
@@ -64,6 +73,12 @@ case $case in
     echo "thread '<unnamed>' (7) panicked at library/core/src/panicking.rs:220:5:"
     echo "unsafe precondition(s) violated: slice::from_raw_parts WITHHELD-DETAIL"
     echo "thread caused non-unwinding panic. aborting."
+    echo "==1== ERROR: libFuzzer: deadly signal"
+    ;;
+  ub-enum)
+    printf 'x' >"${prefix}crash-1"
+    echo "thread '<unnamed>' (7) panicked at fuzz_targets/$name.rs:30:9:"
+    echo "trying to construct an enum from an invalid value 0x7 WITHHELD-DETAIL"
     echo "==1== ERROR: libFuzzer: deadly signal"
     ;;
   asan) printf 'x' >"${prefix}crash-1" && asan ;;
@@ -96,6 +111,13 @@ for target in "${TARGETS[@]}"; do
 done
 export FAKE_CASES="$work/cases" FUZZ_JOBS=4
 out="$work/fuzz/out"
+workflow="$here/../.github/workflows/fuzz.yml"
+title_re=$(sed -n "s/^ *title_re='\(.*\)'$/\1/p" "$workflow")
+line_re=$(sed -n "s/^ *line_re='\(.*\)'$/\1/p" "$workflow")
+if [[ -z $title_re || -z $line_re ]]; then
+  echo "test-nightly.sh: title_re or line_re not found in $workflow" >&2
+  exit 1
+fi
 
 # run "<target>=<case> ..." [targets to pass to nightly.sh...]: every target not named is ok.
 run() {
@@ -108,6 +130,14 @@ run() {
   if grep -rq WITHHELD-DETAIL "$work/stdout" "$out/upload" "$out/summary.md" "$out/issue.md" \
     "$out/title.txt" 2>/dev/null; then
     fail "a withheld detail reached a public output"
+  fi
+  if [[ -s $out/title.txt ]]; then
+    if ! LC_ALL=C bash -c '[[ $(cat "$1") =~ $2 ]]' _ "$out/title.txt" "$title_re"; then
+      fail "the report job's title_re refuses: $(cat "$out/title.txt")"
+    fi
+    if LC_ALL=C grep -Evq "$line_re" "$out/issue.md"; then
+      fail "the report job's line_re refuses: $(LC_ALL=C grep -Ev "$line_re" "$out/issue.md")"
+    fi
   fi
 }
 
@@ -148,15 +178,23 @@ expect "issue" "$(cat "$out/issue.md")" "$(
 EOF
 )"
 
-run "acp_stdout=oom-asan protocol_decode=error matters_objects=long"
+run "acp_stdout=oom-asan protocol_decode=error matters_objects=long store_read=merge-asan \
+settings_parse=drift-site reducer_snapshot=ub-enum"
 expect "oom with a sanitizer report" "$(kind acp_stdout)" withheld
+expect "a sanitizer report during the merge" "$(kind store_read)" withheld
+expect "merge-asan upload" "$(files store_read)" ""
+expect "drift to another site (no minimised input)" "$(files settings_parse)" \
+  "crash-1 settings_parse.log "
+expect "enum UB check" "$(kind reducer_snapshot)" withheld
+expect "enum UB check upload" "$(files reducer_snapshot)" ""
 expect "oom-asan upload" "$(files acp_stdout)" ""
 expect "error kind" "$(kind protocol_decode)" error
 expect "error upload" "$(files protocol_decode)" "protocol_decode.log "
 expect "long panic kind" "$(kind matters_objects)" panic
 expect "long panic excerpt length" "$(wc -c <"$out/status/matters_objects.panic")" 300
 expect "title" "$(cat "$out/title.txt")" \
-  "nightly fuzz: findings in acp_stdout, protocol_decode, matters_objects"
+  "nightly fuzz: findings in acp_stdout, protocol_decode, matters_objects, store_read, settings_parse, reducer_snapshot"
+expect "withheld" "$(cat "$out/withheld")" true
 
 run "protocol_decode=panic" protocol_decode
 expect "one target" "$(cut -d '|' -f 2 "$out/summary.md" | tail -n +3 | tr -d ' ')" protocol_decode
