@@ -27,6 +27,9 @@
     "./markdown/*.test.tsx": null,
     "./markdown/*-fixture.ts": null
   },
+  "scripts": {
+    "test": "pnpm -C ../app exec vitest run --project components"
+  },
   "dependencies": {
     "@base-ui/react": "1.9.0",
     "class-variance-authority": "0.7.1",
