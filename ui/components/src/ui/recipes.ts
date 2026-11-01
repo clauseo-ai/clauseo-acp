@@ -154,15 +154,18 @@ export const foldTrigger = cva(
   },
 );
 
-/** The search field: set into the ground on the inset tone, with nothing drawn round it; its icon and its words say
- * what it is. Focused, the surface tone and the primary outline round the whole field. */
-export const searchBox = [
+/** The search field that never folds to its icon: set into the ground on the inset tone, with nothing drawn round it;
+ * its icon and its words say what it is. Focused, the surface tone and the primary outline round the whole field. The
+ * rail's Find, whose column at 1280 px is narrower than the fold's 9 rem. */
+export const searchBoxOpen = [
   "flex items-center gap-s2 w-search min-w-control h-control px-s3 rounded-control bg-inset set-in-control",
-  "text-muted cursor-text motion-colour search-fold",
+  "text-muted cursor-text motion-colour",
   "is-hover:bg-inset-hover is-focus-within:bg-surface is-focus-within:text-primary",
   "is-focus-within:outline-2 is-focus-within:outline-primary is-focus-within:outline-offset-2",
   "data-disabled:bg-ground-hover data-disabled:text-faint data-disabled:shadow-none data-disabled:cursor-default",
 ].join(" ");
+/** The search field, which folds to its icon where it has under 9 rem, until focused. */
+export const searchBox = `${searchBoxOpen} search-fold`;
 export const searchInput = [
   // the words stand the field's whole height, on the composer's 26 px line, so a run of Latin inside Devanagari never
   // reaches past the input's edge

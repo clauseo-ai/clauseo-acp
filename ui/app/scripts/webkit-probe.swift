@@ -12,7 +12,8 @@
 // freezePrototype does, and runs window.__clauseoAxe() there: it must resolve with no violation. The room with no
 // matters (?matters=none: "No matters yet" as its title, the empty rail) is loaded in night Hindi at text sizes 16
 // and 20. The rail in every state (?rail=states) is loaded at every width in both looks, folded and opened at 1100 px,
-// and run through axe, with and without the new matter dialog open.
+// and run through axe, with and without the new matter dialog open; there the find field must show (80 px or more),
+// the moved row its ring, the form's folder line one line, and the scratch matter, opened, its raised row.
 //
 // Usage, from ui/app: pnpm build:probe, then serve dist-probe/ with `pnpm exec vite preview --mode probe` (port 4173),
 // then pnpm probe:webkit. PROBE_ORIGIN names another server; PROBE_SHOTS names a folder to save a PNG of each page
@@ -118,7 +119,20 @@ for i in runs.indices where runs[i].name.hasPrefix("no matters") {
 // a frozen Object.prototype
 let railMeasured = "(function () { var errs = " + measured + ", rail = document.querySelector('nav.room-rail');" +
   " if (rail && rail.clientWidth > 0 && rail.scrollWidth > rail.clientWidth + 1)" +
-  " errs.push('layout: the rail scrolls sideways, ' + rail.scrollWidth + ' px in ' + rail.clientWidth); return errs; })()"
+  " errs.push('layout: the rail scrolls sideways, ' + rail.scrollWidth + ' px in ' + rail.clientWidth);" +
+  // the find field shows its words wherever the rail stands: a field folded to its magnifier fails
+  " var find = rail && rail.clientWidth > 0 ? rail.querySelector('input[type=search]') : null;" +
+  " if (find && find.getBoundingClientRect().width < 80)" +
+  " errs.push('layout: the find field is ' + find.getBoundingClientRect().width.toFixed(0) + ' px wide');" +
+  // the new matter form's folder line: its icon, words and Change on one line (matter-form.css loaded)
+  " var line = document.querySelector('[role=\"dialog\"] [data-testid=\"matter-existing\"]');" +
+  " if (line && line.parentElement && line.parentElement.getBoundingClientRect().height > 60)" +
+  " errs.push('layout: the folder line is ' + line.parentElement.getBoundingClientRect().height.toFixed(0) + ' px tall');" +
+  // the moved folder's ring (matters.css loaded)
+  " var ring = rail && rail.querySelector('[data-state=\"moved\"] .room-dot-ring');" +
+  " if (rail && rail.querySelector('[data-state=\"moved\"]') && !(ring && /inset/.test(getComputedStyle(ring).boxShadow)))" +
+  " errs.push('layout: the moved row has no ring');" +
+  " return errs; })()"
 let railRendered = { (theme: String, lang: String) in
   "document.querySelector('#root main.room-centre') !== null" +
     " && (document.querySelector('[data-testid=\"matter\"]')?.textContent ?? '') !== ''" +
@@ -156,9 +170,21 @@ for (theme, lang) in looks {
   let dialog = rendered + " && (window.__newPressed || (window.__newPressed = true," +
     " document.querySelector('[data-testid=\"new-matter\"]').click(), false))" +
     " && document.querySelector('[role=\"dialog\"] [data-testid=\"matter-name\"]') !== null"
-  runs.append(Run(name: "new matter dialog \(theme) \(lang), frozen, axe", url: URL(string: "\(origin)/\(q)")!,
-                  width: 1280, height: 800, rendered: dialog + axeRun,
-                  setup: "Object.freeze(Object.prototype);"))
+  var newMatter = Run(name: "new matter dialog \(theme) \(lang), frozen, axe", url: URL(string: "\(origin)/\(q)")!,
+                      width: 1280, height: 800, rendered: dialog + axeRun,
+                      setup: "Object.freeze(Object.prototype);")
+  newMatter.measure = railMeasured
+  runs.append(newMatter)
+  // the scratch matter, opened from the foot: its row stands current, on the raised tone
+  let scratch = rendered + " && (window.__scratchPressed || (window.__scratchPressed = true," +
+    " document.querySelector('nav.room-rail [data-kind=\"scratch\"]').click(), false))" +
+    " && document.querySelector('nav.room-rail [data-kind=\"scratch\"]').getAttribute('aria-current') === 'page'"
+  var opened = Run(name: "scratch opened \(theme) \(lang)", url: URL(string: "\(origin)/\(q)")!, width: 1280,
+                   height: 800, rendered: scratch, setup: "")
+  opened.measure = "(function () { var errs = " + railMeasured + ", row = document.querySelector('nav.room-rail [data-kind=\"scratch\"]'), bg = getComputedStyle(row).backgroundColor;" +
+    " if (bg === 'transparent' || bg === 'rgba(0, 0, 0, 0)') errs.push('layout: the open scratch matter row has no raised tone');" +
+    " return errs; })()"
+  runs.append(opened)
 }
 
 // Listens for errors from the first moment, before the page's own scripts run.
