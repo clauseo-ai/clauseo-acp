@@ -6,12 +6,20 @@
 import { Lexer, Tokenizer } from "marked";
 
 /**
- * marked's tokenizer without link definitions: marked drops a definition whose label it has seen before from
- * the token stream (its text then belongs to no token), which would make a fresh split of a text differ from
- * an incremental one. As paragraphs, definitions keep their text; cuts are decided below either way.
+ * marked's tokenizer without link definitions or setext headings; as paragraphs, both keep their text, and
+ * cuts are decided below either way. marked drops a definition whose label it has seen before from the token
+ * stream (its text then belongs to no token), which would make a fresh split of a text differ from an
+ * incremental one. marked's setext-heading regex walks its text one group iteration per character, under
+ * lookaheads holding repeated groups, which JavaScriptCore's regex JIT does not compile: WebKit interprets it
+ * over every paragraph of every update, 18 to 60 ms for 15 KB where V8 takes 0.1 ms (`"a~ ".repeat(5000)`
+ * took 98 s to stream in WebKitGTK).
  */
-class WithoutDefinitions extends Tokenizer {
+class BlockStartTokenizer extends Tokenizer {
   override def(): undefined {
+    return undefined;
+  }
+
+  override lheading(): undefined {
     return undefined;
   }
 }
@@ -69,7 +77,7 @@ function safeCut(text: string, from: number, at: number, endOf: EndOf): boolean 
  */
 function startsFrom(text: string, from: number, endOf: EndOf): number[] {
   const starts = [from];
-  const tokens = new Lexer({ gfm: true, tokenizer: new WithoutDefinitions() }).blockTokens(
+  const tokens = new Lexer({ gfm: true, tokenizer: new BlockStartTokenizer() }).blockTokens(
     text.slice(from),
   );
   let blockStart = from;

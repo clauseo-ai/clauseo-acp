@@ -1,8 +1,10 @@
-import { expect, test } from "vitest";
+import { Lexer } from "marked";
+import { expect, test, vi } from "vitest";
 import spec from "commonmark-spec/spec.txt?raw";
 import { createAnswer } from "./answer.ts";
 import gfmSpec from "./gfm-spec.json";
 import { CASES } from "./hostile-cases.ts";
+import { capNesting } from "./nesting.ts";
 import { endOf, parse } from "./parse.ts";
 import { examplesOf, htmlOf, normalise, unsplit, withTabs } from "./spec-fixture.ts";
 import { createSplitter } from "./split.ts";
@@ -160,6 +162,27 @@ test("prose, headings, lists and closed fences split into blocks at blank lines"
     "```ts\nconst x = 1;\n\nconst y = 2;\n```\n\n",
     "Last para.\n",
   ]);
+});
+
+// JavaScriptCore (WebKitGTK, and WKWebView on a Mac) cannot compile marked's setext-heading regex, whose
+// lookaheads hold repeated groups, so it runs in its regex interpreter, one group iteration per character
+// of the paragraph, over every paragraph of every update: 18 to 60 ms for 15 KB where V8 takes 0.1 ms, and
+// `"a~ ".repeat(5000)` took 98 s to stream in WebKitGTK. A wall-clock limit in Node cannot see that; this
+// test checks that the splitter never runs the regex at all.
+test("the splitter never runs marked's setext-heading regex, and a setext heading is still a block", () => {
+  const lheading = Lexer.rules.block.gfm.lheading;
+  const exec = vi.spyOn(lheading, "exec");
+  try {
+    expect(fresh("Title\n===\n\nSub\n---\n\nText\n")).toEqual([
+      "Title\n===\n\n",
+      "Sub\n---\n\n",
+      "Text\n",
+    ]);
+    for (const c of CASES) fresh(capNesting(c.markdown));
+    expect(exec).not.toHaveBeenCalled();
+  } finally {
+    exec.mockRestore();
+  }
 });
 
 test.each([
