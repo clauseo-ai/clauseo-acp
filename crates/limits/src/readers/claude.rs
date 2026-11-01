@@ -69,23 +69,23 @@ pub(crate) async fn read<T: Timer>(
             code, stderr_tail, ..
         } if code != Some(0) => ReadOutcome::Failed(ReadFailure::Exited { code, stderr_tail }),
         Ran::Exited {
-            talked: Line::Missing,
-            ..
-        } => malformed("no line"),
-        Ran::Exited {
-            talked: Line::TooLong,
-            ..
-        } => malformed("the line is over 1 MiB"),
-        Ran::Exited {
-            talked: Line::Read(line),
+            talked,
             stderr_tail,
             ..
-        } => match answer(&line) {
+        } => line_outcome(talked, Some(0), stderr_tail),
+        // The line came but the helper did not exit; its tree is killed. No tail is left.
+        Ran::Lingered { talked } => line_outcome(talked, None, String::new()),
+    }
+}
+
+/// The outcome of the helper's stdout, with `code` and `stderr_tail` for a helper failure.
+fn line_outcome(talked: Line, code: Option<i32>, stderr_tail: String) -> ReadOutcome {
+    match talked {
+        Line::Missing => malformed("no line"),
+        Line::TooLong => malformed("the line is over 1 MiB"),
+        Line::Read(line) => match answer(&line) {
             Answer::Outcome(outcome) => outcome,
-            Answer::HelperFailed => ReadOutcome::Failed(ReadFailure::Exited {
-                code: Some(0),
-                stderr_tail,
-            }),
+            Answer::HelperFailed => ReadOutcome::Failed(ReadFailure::Exited { code, stderr_tail }),
         },
     }
 }

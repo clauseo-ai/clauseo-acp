@@ -114,6 +114,22 @@ pub(crate) fn check_run_dir(run_dir: &Path) -> Result<(), Error> {
     Ok(())
 }
 
+/// Checks Clauseo's Codex home with `symlink_metadata`, reading nothing inside it: `true` for a
+/// folder, `false` when it is missing, and a refusal for a link or anything else.
+pub(crate) fn check_codex_home(codex_home: &Path) -> Result<bool, Error> {
+    let what = match std::fs::symlink_metadata(codex_home) {
+        Ok(meta) if meta.is_dir() => return Ok(true),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Ok(meta) if meta.file_type().is_symlink() => "is a link".to_owned(),
+        Ok(_) => "is not a folder".to_owned(),
+        Err(err) => format!("does not read: {err}"),
+    };
+    Err(Error::CodexHome {
+        path: codex_home.to_owned(),
+        what,
+    })
+}
+
 /// Checks `launch` and finds its install folder.
 pub(crate) fn locate(agent: &'static str, launch: &AgentLaunch) -> Result<Located, Error> {
     let program = PathBuf::from(&launch.command);

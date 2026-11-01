@@ -382,8 +382,8 @@ fn percents_are_clamped_and_a_reset_that_overflows_is_dropped() {
     assert!(limits.windows[0].used_percent.get().is_sign_positive());
     assert_eq!(limits.windows[0].resets_at, None);
     assert_eq!(
-        limits.windows[1].resets_at,
-        Some(Timestamp::new(-1000).unwrap())
+        limits.windows[1].resets_at, None,
+        "a reset at or before the epoch is dropped"
     );
 }
 

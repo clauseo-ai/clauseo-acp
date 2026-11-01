@@ -24,6 +24,7 @@ fn codex_setup() -> (Setup, PathBuf) {
     let codex_js = setup.install().join("node_modules").join(CODEX_JS);
     Setup::file(&codex_js, "");
     setup.codex_settings(&setup.codex_script());
+    crate::write::create_dir_all(&setup.codex_home()).unwrap();
     (setup, codex_js)
 }
 
@@ -54,6 +55,52 @@ fn a_crash_reports_its_code_and_the_redacted_tail() {
     );
     #[cfg(unix)]
     launcher.wait_stdout_closed();
+}
+
+#[test]
+fn stderr_past_the_pipe_buffer_is_drained_and_its_tail_redacted() {
+    let (setup, _) = codex_setup();
+    let (outcome, _) = read_once(&setup, Play::Scenario("codex-stderr-heavy"));
+    let ReadOutcome::Failed(ReadFailure::Exited { code, stderr_tail }) = outcome else {
+        panic!("not an exit: {outcome:?}");
+    };
+    assert_eq!(code, Some(1));
+    assert!(stderr_tail.len() <= 4096, "{}", stderr_tail.len());
+    assert!(!stderr_tail.contains(FAKE_OPENAI_KEY), "{stderr_tail}");
+    assert!(
+        stderr_tail.ends_with("codex app-server: the key [redacted] was refused\n"),
+        "{stderr_tail}"
+    );
+    assert!(
+        stderr_tail.contains("codex app-server: stderr filler"),
+        "{stderr_tail}"
+    );
+}
+
+#[test]
+fn a_missing_codex_home_is_signed_out_without_a_launch() {
+    let (setup, _) = codex_setup();
+    crate::write::remove_dir_all(&setup.codex_home()).unwrap();
+    let (outcome, launcher) = read_once(&setup, Play::Scenario("codex-silent"));
+    assert_eq!(outcome, ReadOutcome::SignedOut);
+    assert_eq!(launcher.specs(), []);
+    assert!(!setup.codex_home().exists(), "the home is never made");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_codex_home_is_refused_without_a_launch() {
+    let (setup, _) = codex_setup();
+    crate::write::remove_dir_all(&setup.codex_home()).unwrap();
+    let real = setup.root.join("real-home");
+    crate::write::create_dir_all(&real).unwrap();
+    crate::write::symlink(&real, &setup.codex_home()).unwrap();
+    let (outcome, launcher) = read_once(&setup, Play::Scenario("codex-silent"));
+    let ReadOutcome::Failed(ReadFailure::LaunchFailed(message)) = outcome else {
+        panic!("not a refusal: {outcome:?}");
+    };
+    assert!(message.contains("is a link"), "{message}");
+    assert_eq!(launcher.specs(), []);
 }
 
 #[test]
@@ -114,9 +161,10 @@ fn the_spec_runs_codex_js_app_server_with_codex_home_forced() {
         spec.env().get(std::ffi::OsStr::new("OPENAI_API_KEY")),
         Some(&OsString::from(FAKE_OPENAI_KEY))
     );
-    assert!(
-        !setup.codex_home().exists(),
-        "nothing is made inside the Codex home"
+    assert_eq!(
+        Setup::names(&setup.codex_home()),
+        Vec::<String>::new(),
+        "the home stays empty"
     );
     assert_eq!(
         Setup::names(&setup.install()),
