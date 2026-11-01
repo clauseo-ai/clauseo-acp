@@ -31,8 +31,8 @@ use crate::diff::content_id;
 use crate::history::Oid;
 use crate::stat::{CacheEntry, EntryState};
 use crate::types::{
-    Checkpoint, CheckpointOutcome, Restore, RestoreFiles, RestorePlan, Restored, Settings,
-    TimelineEntry,
+    Checkpoint, CheckpointOutcome, CommitId, Restore, RestoreFiles, RestorePlan, Restored,
+    Settings, TimelineEntry,
 };
 use crate::writeback::{self, Names, Op, writable};
 use crate::{Error, locks, rules};
@@ -331,7 +331,7 @@ pub(crate) fn restore(
     let restored: Vec<MatterPath> = plan.targets();
     if restored.is_empty() {
         // Nothing to write: no second walk, so nothing edited meanwhile is called a restore.
-        let (last, _, _) = core
+        let (last, last_commit, _) = core
             .timeline
             .head()
             .ok_or_else(|| Error::history("restore", "the timeline has no checkpoint"))?;
@@ -339,6 +339,7 @@ pub(crate) fn restore(
             outside_edits,
             checkpoint: Checkpoint {
                 outcome: CheckpointOutcome::Reused(last),
+                commit: CommitId::of(last_commit),
                 changes: Vec::new(),
                 skipped: Vec::new(),
             },

@@ -13,7 +13,7 @@ use crate::diff::{DiffFile, diff, diff_by, flag};
 use crate::history::{CommitRecord, GixStore, Hasher, HistoryStore, Oid, TreeFile};
 use crate::no_download::NoDownload;
 use crate::stat::{CacheEntry, EntryState, Stat, StatCache};
-use crate::types::{Checkpoint, CheckpointOutcome, Progress, Settings, TimelineEntry};
+use crate::types::{Checkpoint, CheckpointOutcome, CommitId, Progress, Settings, TimelineEntry};
 use crate::{Error, trailers};
 use walk_folder::walk_folder;
 
@@ -79,6 +79,14 @@ impl Timeline {
     /// Whether checkpoint `id` is on the timeline.
     pub(crate) fn contains(&self, id: CheckpointId) -> bool {
         self.by_id.contains_key(&id)
+    }
+
+    /// The commit of checkpoint `id`, if it is on the timeline.
+    pub(crate) fn commit(&self, id: CheckpointId) -> Option<Oid> {
+        self.by_id
+            .get(&id)
+            .and_then(|index| self.commits.get(*index))
+            .map(|(commit, _)| *commit)
     }
 
     /// The tree of checkpoint `id`.
@@ -262,7 +270,7 @@ impl Core {
                 .zip(&new_tree)
                 .all(|(old, new)| old.path == new.path && old.blob == new.blob);
         let tip_is_head = head.map(|(_, _, tree)| tree) == tip.map(|(_, tree)| tree);
-        if let (Some((last, _, _)), true) = (head, same_tree && tip_is_head) {
+        if let (Some((last, last_commit, _)), true) = (head, same_tree && tip_is_head) {
             if read_any || entries != self.cache.entries {
                 let mut cache = StatCache {
                     entries,
@@ -273,6 +281,7 @@ impl Core {
             }
             return Ok(Checkpoint {
                 outcome: CheckpointOutcome::Reused(last),
+                commit: CommitId::of(last_commit),
                 changes,
                 skipped,
             });
@@ -319,6 +328,7 @@ impl Core {
         self.timeline.push(spec.entry, commit, tree);
         Ok(Checkpoint {
             outcome: CheckpointOutcome::Created(spec.entry.id),
+            commit: CommitId::of(commit),
             changes,
             skipped,
         })

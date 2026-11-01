@@ -20,7 +20,8 @@
 //!   [`Matter::locate`] opens one from the folder the lawyer picked after it moved, and
 //!   [`Matter::relink`] writes a deleted or damaged `matter.json` again where the history says
 //!   the folder is; [`same_or_nested`] compares two folders as the refused-folder check does;
-//!   [`Matter::before_turn`] and [`Matter::after_turn`] take checkpoints ([`Checkpoint`]);
+//!   [`Matter::before_turn`] and [`Matter::after_turn`] take checkpoints ([`Checkpoint`], with
+//!   its [`CommitId`]; [`Matter::commit_of`] gives any checkpoint's, the root one's included);
 //!   [`Matter::edited_since`] and [`Matter::undo`] undo a step ([`UndoRequest`], [`Undone`]);
 //!   [`Matter::timeline`] lists the checkpoints, rebuilt from the trailers on open;
 //!   [`Matter::restore`] restores a version ([`Restore`], [`RestoreFiles`], [`Restored`]) and
@@ -117,8 +118,8 @@ pub use probe::{OsProbe, PlaceholderProbe};
 pub use refuse::same_or_nested;
 pub use scan::scan;
 pub use types::{
-    Checkpoint, CheckpointOutcome, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES, IMPORT_WARN_BYTES,
-    ImportWarning, Imported, LARGEST_FILES, LargeFile, Limits, Marker, NewMatter, Progress,
-    Restore, RestoreFiles, RestorePlan, Restored, Retention, ScanReport, Scanned, Settings,
-    TimelineEntry, TurnMeta, UndoRequest, Undone, VersionFile,
+    Checkpoint, CheckpointOutcome, CommitId, CompareSide, DEFAULT_MARKER, FILE_CAP_BYTES,
+    IMPORT_WARN_BYTES, ImportWarning, Imported, LARGEST_FILES, LargeFile, Limits, Marker,
+    NewMatter, Progress, Restore, RestoreFiles, RestorePlan, Restored, Retention, ScanReport,
+    Scanned, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, VersionFile,
 };

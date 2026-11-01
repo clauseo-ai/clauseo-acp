@@ -243,3 +243,41 @@ fn same_size_rewrite_in_same_second_is_seen() {
     let changes = created(matter.after_turn(&meta(3), &tools(&["a.txt"])).unwrap(), 3);
     assert_eq!(changes, [modified("a.txt", b"aaaa", b"bbbb")]);
 }
+
+/// The commit the timeline's ref names, as 40 hex characters.
+fn tip(fx: &Fixture) -> String {
+    let text = std::fs::read_to_string(fx.git_dir().join("refs/clauseo/timeline")).unwrap();
+    text.trim().to_owned()
+}
+
+#[test]
+fn every_checkpoint_carries_its_commit() {
+    let fx = Fixture::new("commit-ids");
+    fx.write("a.txt", "one");
+    let mut matter = fx.import();
+    let root = matter.commit_of(cid(1)).unwrap();
+    assert_eq!(root.as_str(), tip(&fx));
+
+    // A reused checkpoint carries the commit it reused.
+    let reused = matter.before_turn(&meta(2)).unwrap();
+    assert_eq!(reused.outcome, CheckpointOutcome::Reused(cid(1)));
+    assert_eq!(reused.commit, root);
+
+    fx.write("a.txt", "two");
+    let after = matter.after_turn(&meta(3), &tools(&["a.txt"])).unwrap();
+    assert_eq!(after.outcome, CheckpointOutcome::Created(cid(3)));
+    assert_eq!(after.commit.as_str(), tip(&fx));
+    assert_ne!(after.commit, root);
+    assert_eq!(matter.commit_of(cid(3)), Some(after.commit.clone()));
+    assert_eq!(
+        matter.commit_of(cid(2)),
+        None,
+        "a reused id is no checkpoint of its own"
+    );
+
+    // The timeline rebuilt on open gives the same commits.
+    drop(matter);
+    let reopened = fx.open(&fx.folder).unwrap();
+    assert_eq!(reopened.commit_of(cid(1)), Some(root));
+    assert_eq!(reopened.commit_of(cid(3)), Some(after.commit));
+}

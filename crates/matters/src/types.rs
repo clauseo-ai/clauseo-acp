@@ -138,11 +138,36 @@ impl CheckpointOutcome {
     }
 }
 
+/// A checkpoint's commit in the shadow repository: git's commit id as 40 lowercase hex
+/// characters, what the host stores beside the checkpoint id.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CommitId(String);
+
+impl CommitId {
+    /// The id of commit `oid`.
+    pub(crate) fn of(oid: crate::history::Oid) -> Self {
+        Self(oid.to_hex())
+    }
+
+    /// The 40 hex characters.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for CommitId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// A checkpoint's result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Checkpoint {
     /// The checkpoint, created or reused.
     pub outcome: CheckpointOutcome,
+    /// Its commit: the new one, or for a reused checkpoint the commit it reused.
+    pub commit: CommitId,
     /// The files changed against the previous checkpoint, sorted by path; empty when reused.
     pub changes: Vec<FileChange>,
     /// Files not versioned that are new or whose size or modification time changed since the
