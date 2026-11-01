@@ -148,6 +148,12 @@ export const CASES: HostileCase[] = [
     markdown: "[Bank.Example.Com.](https://evil.example.net/login)",
     linkHost: "evil.example.net",
   },
+  // A host anywhere in the text, with ideographic full stops (round 2).
+  {
+    id: "link-spoof-in-text",
+    markdown: "[🔒 Visit bank\u3002example\u3002com (official) ↗](https://evil.example.net/login)",
+    linkHost: "evil.example.net",
+  },
   // Files are opaque ids (decision 0001), never paths.
   { id: "file-path-image", markdown: "![passwd](clauseo-file:../../etc/passwd)" },
   // Tail repair once stripped a half-arrived tag while streaming, hiding everything after it.

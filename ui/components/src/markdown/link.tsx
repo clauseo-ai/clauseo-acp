@@ -41,6 +41,15 @@ function fragmentId(fragment: string): string {
   }
 }
 
+/** `url` with its percent-encoding undone, or as written when that is malformed. */
+function decoded(url: string): string {
+  try {
+    return decodeURI(url);
+  } catch {
+    return url;
+  }
+}
+
 /** The text of hast nodes, through any markup (`**good.com**`, `` `good.com` ``). */
 function textOf(nodes: readonly ElementContent[]): string {
   let text = "";
@@ -53,34 +62,38 @@ function textOf(nodes: readonly ElementContent[]): string {
 
 /** Characters that show nothing or reorder text: zero-width, bidi controls, soft hyphen, BOM. */
 const INVISIBLE = /[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]/g;
-/** A host at the start of link text, after an optional http(s) scheme. */
-const SHOWN_HOST = /^(?:https?:\/\/)?([\p{L}\p{N}.-]+\.[\p{L}]{2,})(?:[/:?#]|$)/iu;
+/** Full stops that read as `.`: ideographic, and the full-width and half-width forms NFKC may miss. */
+const DOTS = /[\u3002\uFF0E\uFF61]/g;
+/** A host-like token anywhere in link text: labels of letters, digits and `-`, a letter-only last label. */
+const HOST_TOKEN = /(?<![\p{L}\p{N}.-])((?:[\p{L}\p{N}-]+\.)+\p{L}{2,})(?![\p{L}\p{N}-])/gu;
 
-/** The host link text shows: width-folded, invisible characters dropped, wrapping punctuation trimmed. */
-function shownHost(text: string): string | undefined {
-  const plain = text
-    .normalize("NFKC")
-    .replace(INVISIBLE, "")
-    .trim()
-    .replace(/^[("'<[{«“‘]+/u, "")
-    .replace(/[.,;:!?)"'>\]}»”’…]+$/u, "");
-  const shown = SHOWN_HOST.exec(plain)?.[1];
-  if (!shown) return undefined;
-  try {
-    return new URL(`https://${shown}`).hostname;
-  } catch {
-    return undefined;
+/** Every host link text shows: width-folded, dots unified, invisible characters dropped. */
+function shownHosts(text: string): string[] {
+  const plain = text.normalize("NFKC").replace(DOTS, ".").replace(INVISIBLE, "");
+  const hosts: string[] = [];
+  for (const [, token] of plain.matchAll(HOST_TOKEN)) {
+    try {
+      hosts.push(new URL(`https://${token}`).hostname);
+    } catch {
+      // Not a host after all.
+    }
   }
+  return hosts;
 }
 
-/** The real host, shown next to link text that looks like a URL for another host (link-text spoofing). */
+/**
+ * The real host, shown next to link text that names another host anywhere in it (link-text spoofing:
+ * `[Visit bank.example.com](https://evil.example.net)`).
+ */
 function spoofedHost(text: string, href: string | undefined): string | undefined {
   if (!href || !/^https?:\/\//i.test(href)) return undefined;
-  const shown = shownHost(text);
-  if (!shown) return undefined;
+  // An autolink's text is its destination (percent-encoded in the href): there is nothing else to show.
+  if (text === href || text === decoded(href)) return undefined;
+  const shown = shownHosts(text);
+  if (shown.length === 0) return undefined;
   try {
     const real = new URL(href).hostname;
-    return real === shown.replace(/\.$/, "") ? undefined : real;
+    return shown.every((host) => host === real) ? undefined : real;
   } catch {
     return undefined;
   }
