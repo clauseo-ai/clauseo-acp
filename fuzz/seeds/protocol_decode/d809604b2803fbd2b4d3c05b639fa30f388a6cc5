@@ -1,0 +1,1 @@
+{"schema_version":1,"event_id":"01900000-0000-7000-8000-000000000093","stream":"thread:01900000-0000-7000-8000-000000000002","seq":47,"ts":1760000046000,"command_id":"01900000-0000-7000-8000-0000000000f7","event":{"permission_resolved":{"request":"01900000-0000-7000-8000-00000000000b","choice":"cancelled","by":"local_desktop"}}}

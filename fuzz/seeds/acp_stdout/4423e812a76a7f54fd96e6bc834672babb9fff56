@@ -1,0 +1,4 @@
+{"jsonrpcjected"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"caps liability "}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"at the fees paid."}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","id":102,"result":{"stopReason":"end_turn"}}

@@ -1,0 +1,9 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_thought_chunk","messageId":"m-thought-1","content":{"type":"text","text":"Reading the "}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_thought_chunk","messageId":"m-thought-1","content":{"type":"text","text":"indemnity clause "}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_thought_chunk","messageId":"m-thought-1","content":{"type":"text","text":"first."}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"The clause "}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"caps liability "}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"at the fees "}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"paid in the "}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"last twelve months."}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","id":"@ID","result":{"stopReason":"end_turn"}}

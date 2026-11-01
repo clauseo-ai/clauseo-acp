@@ -52,7 +52,8 @@ Rust crates live in `crates/<name>`, package `clauseo-<name>`; `xtask` keeps its
 name. The frontend is a pnpm workspace under `ui/`. `cargo xtask check` reads the table below and
 fails if a crate depends on a crate in its "Never depends on" column, directly or through another
 crate. Rows marked `planned` are checked once the crate exists. Every crate that exists
-must have a row.
+must have a row. The fuzz targets in `fuzz/` are a crate outside the workspace, with its own
+lockfile and a pinned nightly, so they have no row; see `fuzz/README.md`.
 
 A dependency counts when it is a normal or build dependency, on any target, with every feature of
 the crate itself turned on; dev dependencies never count. Each crate's own graph is resolved, so a

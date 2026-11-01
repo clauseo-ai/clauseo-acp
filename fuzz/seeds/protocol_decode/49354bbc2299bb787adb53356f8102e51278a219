@@ -1,0 +1,1 @@
+{"command_id":"01900000-0000-7000-8000-0000000000c9","command":{"send_prompt":{"thread":"01900000-0000-7000-8000-000000000002","content":[{"text":{"text":"Summarise"}},{"file":{"file":"01900000-0000-7000-8000-000000000003"}}],"delivery":"send_now"}}}

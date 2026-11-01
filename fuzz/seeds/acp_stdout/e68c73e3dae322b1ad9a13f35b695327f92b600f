@@ -1,0 +1,3 @@
+20,"size":200000,"cost":{"amount":0.01xt":"The clause is :tandard."}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"usage_update","used":1520,"size":200000,"cost":{"amount":0.0123,"currency":"USD"}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","id":"@ID","result":{"stopReason":"end_turn"}}

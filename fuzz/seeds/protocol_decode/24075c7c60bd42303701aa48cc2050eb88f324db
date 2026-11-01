@@ -1,0 +1,1 @@
+{"command_id":"01900000-0000-7000-8000-0000000000c9","command":{"set_config_option":{"thread":"01900000-0000-7000-8000-000000000002","option_id":"model","value":{"select":"opus"}}}}

@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"updatent":{"type":"text","text":"Focusin ogn clause 4."}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","id":"@ID","result":{"stopReason":"end_turn"}}

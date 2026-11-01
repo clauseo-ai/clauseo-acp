@@ -1,0 +1,6 @@
+ÿ{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Sign the contract to continue. "}},"sessionId":"sess-2"}}
+{"id":"elicit-1","method":"elicitation/create","params":{"mode":"url","sessionId":"sess-1","elicitationId":"el-1","message":"Sign the contrOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOct/21"},"jsonrpc":"2.0"}
+@@
+{"method":"elicitation/complete","params":{"elicitationId":"el-0"},"jsonrpc"5:"2.0"}
+{"jsonrpc":"2.0","id":"@ID","result":{"stopReId":"el-0"},"jsonrpc"5:"2.0"}
+{"jsonrpc":"2.0","id":"@ID","result":{"stopReason":"end_turn"}}
