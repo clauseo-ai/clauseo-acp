@@ -1,3 +1,4 @@
+import type { Element, ElementContent } from "hast";
 import { useContext } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { AnswerScopeContext, InertLinksContext, MarkdownHostContext } from "./host.ts";
@@ -9,6 +10,8 @@ type LinkProps = {
   "aria-describedby"?: string | undefined;
   "aria-label"?: string | undefined;
   children?: ReactNode;
+  /** The link's hast element (passNode), for its whole text whatever markup is inside. */
+  node?: Element | undefined;
 };
 
 /** The href a link may carry: an allowed URL, or a fragment mapped to the id it targets; else none. */
@@ -29,20 +32,46 @@ function targetId(fragment: string, scope: string): string {
     : `${CLOBBER_PREFIX}${scope}-${fragment}`;
 }
 
-function textOf(node: ReactNode): string {
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(textOf).join("");
-  return "";
+/** The text of hast nodes, through any markup (`**good.com**`, `` `good.com` ``). */
+function textOf(nodes: readonly ElementContent[]): string {
+  let text = "";
+  for (const node of nodes) {
+    if (node.type === "text") text += node.value;
+    else if (node.type === "element") text += textOf(node.children);
+  }
+  return text;
+}
+
+/** Characters that show nothing or reorder text: zero-width, bidi controls, soft hyphen, BOM. */
+const INVISIBLE = /[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]/g;
+/** A host at the start of link text, after an optional http(s) scheme. */
+const SHOWN_HOST = /^(?:https?:\/\/)?([\p{L}\p{N}.-]+\.[\p{L}]{2,})(?:[/:?#]|$)/iu;
+
+/** The host link text shows: width-folded, invisible characters dropped, wrapping punctuation trimmed. */
+function shownHost(text: string): string | undefined {
+  const plain = text
+    .normalize("NFKC")
+    .replace(INVISIBLE, "")
+    .trim()
+    .replace(/^[("'<[{«“‘]+/u, "")
+    .replace(/[.,;:!?)"'>\]}»”’…]+$/u, "");
+  const shown = SHOWN_HOST.exec(plain)?.[1];
+  if (!shown) return undefined;
+  try {
+    return new URL(`https://${shown}`).hostname;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The real host, shown next to link text that looks like a URL for another host (link-text spoofing). */
 function spoofedHost(text: string, href: string | undefined): string | undefined {
   if (!href || !/^https?:\/\//i.test(href)) return undefined;
-  const shown = /^(?:https?:\/\/)?([a-z0-9.-]+\.[a-z]{2,})(?:[/:?#]|$)/i.exec(text.trim())?.[1];
+  const shown = shownHost(text);
   if (!shown) return undefined;
   try {
     const real = new URL(href).hostname;
-    return real.toLowerCase() === shown.toLowerCase() ? undefined : real;
+    return real === shown.replace(/\.$/, "") ? undefined : real;
   } catch {
     return undefined;
   }
@@ -54,7 +83,7 @@ function spoofedHost(text: string, href: string | undefined): string | undefined
  * target. Relative and other links render without an href, inert, and so does every link in the streaming
  * last block. Of the sanitised attributes it keeps the id and the two ARIA ones footnotes use.
  */
-export function Link({ href, id, children, ...aria }: LinkProps) {
+export function Link({ href, id, children, node, ...aria }: LinkProps) {
   const host = useContext(MarkdownHostContext);
   const scope = useContext(AnswerScopeContext);
   const inert = useContext(InertLinksContext);
@@ -68,7 +97,7 @@ export function Link({ href, id, children, ...aria }: LinkProps) {
     }
     host.openExternal(url);
   };
-  const realHost = spoofedHost(textOf(children), url);
+  const realHost = spoofedHost(node ? textOf(node.children) : "", url);
   return (
     <a
       href={url}

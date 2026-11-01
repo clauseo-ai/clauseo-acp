@@ -77,7 +77,7 @@ export const CASES: HostileCase[] = [
   { id: "data-svg-image", markdown: `![svg](${SVG_ONLOAD})` },
   {
     id: "allowed-images",
-    markdown: `![dot](${PNG_1PX}) and ![exhibit](clauseo-file:matters/4471/exhibit.png)`,
+    markdown: `![dot](${PNG_1PX}) and ![exhibit](clauseo-file:exhibit-4471)`,
     images: 2,
   },
   {
@@ -127,6 +127,29 @@ export const CASES: HostileCase[] = [
     text: ["AT&T", "© 2026", "—…", "<b>not bold</b>"],
   },
   // Nesting that overflowed the stack and unmounted the answer: capped at 32 levels, the rest as text.
+  // Link text that hid its host from the spoof hint behind markup, invisible characters, case or punctuation.
+  {
+    id: "link-spoof-strong",
+    markdown: "[**bank.example.com**](https://evil.example.net/login)",
+    linkHost: "evil.example.net",
+  },
+  {
+    id: "link-spoof-code",
+    markdown: "[`bank.example.com`](https://evil.example.net/login)",
+    linkHost: "evil.example.net",
+  },
+  {
+    id: "link-spoof-zero-width",
+    markdown: "[bank.example.com\u200b](https://evil.example.net/login)",
+    linkHost: "evil.example.net",
+  },
+  {
+    id: "link-spoof-case-dot",
+    markdown: "[Bank.Example.Com.](https://evil.example.net/login)",
+    linkHost: "evil.example.net",
+  },
+  // Files are opaque ids (decision 0001), never paths.
+  { id: "file-path-image", markdown: "![passwd](clauseo-file:../../etc/passwd)" },
   // Tail repair once stripped a half-arrived tag while streaming, hiding everything after it.
   {
     id: "half-tag-mid-stream",
