@@ -3,6 +3,7 @@
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { frame, type FrameKey } from "@clauseo/components/lib/words-frame.ts";
 import { lim, type LimitKey } from "@clauseo/components/lib/words-limits.ts";
+import { mf, type MatterFormKey } from "@clauseo/components/lib/words-matter-form.ts";
 import { mt, type MatterKey } from "@clauseo/components/lib/words-matters.ts";
 import { rt, type RoomKey } from "@clauseo/components/lib/words-room.ts";
 import { t, type Key } from "@clauseo/components/lib/words.ts";
@@ -44,4 +45,10 @@ export const limitWords = (key: LimitKey): WordsRef => ({
   file: "lib/words-limits.ts",
   key,
   text: (lang) => lim(lang, key),
+});
+
+export const matterFormWords = (key: MatterFormKey): WordsRef => ({
+  file: "lib/words-matter-form.ts",
+  key,
+  text: (lang) => mf(lang, key),
 });

@@ -5,9 +5,24 @@
 import { LocateGate, MovedFolder } from "../room/moved.tsx";
 import { ScratchLine } from "../room/scratch-line.tsx";
 import type { Entry } from "./entry.ts";
-import { MATTER, NEW_MATTER, railHost, refusingHost, roomHost, type Step } from "./hosts.ts";
+import {
+  MATTER,
+  NEW_MATTER,
+  railHost,
+  refusingHost,
+  roomHost,
+  scratchHost,
+  type Step,
+} from "./hosts.ts";
 import { RoomAfter, RoomOver } from "./states.tsx";
-import { frameWords, limitWords, matterWords, shared, type WordsRef } from "./words.ts";
+import {
+  frameWords,
+  limitWords,
+  matterFormWords,
+  matterWords,
+  shared,
+  type WordsRef,
+} from "./words.ts";
 import type { NextErrorCode } from "../room/host-next.ts";
 
 /** The rail open beside the work, every row in view: a window past the room's 1200 px breakpoint, tall enough for
@@ -96,19 +111,24 @@ export const REGISTRY: readonly Entry[] = [
     "matter.folder_is_drive",
     "/Volumes/Case",
   ),
-  // alone for matter.folder_refused, true of a drive, the home folder and a system folder
+  // the second line of a whole drive (matter.folder_refused has its own line, U2-31)
   refusal(
     "U2-11",
     matterWords("A matter is one folder of papers. Choose the folder for one matter."),
-    "matter.folder_refused",
-    "~",
+    "matter.folder_is_drive",
+    "/Volumes/Case",
   ),
-  refusal("U2-12", matterWords("{path} is your home folder."), "matter.folder_is_home", "~"),
+  refusal(
+    "U2-12",
+    matterWords("{path} is your home folder."),
+    "matter.folder_is_home",
+    "/Users/rmehra",
+  ),
   refusal(
     "U2-13",
     matterWords("It holds far more than one matter. Choose the folder for one matter."),
     "matter.folder_is_home",
-    "~",
+    "/Users/rmehra",
   ),
   refusal(
     "U2-14",
@@ -126,7 +146,7 @@ export const REGISTRY: readonly Entry[] = [
     "U2-16",
     matterWords("Clauseo can't read {path}."),
     "matter.folder_unreadable",
-    "~/Documents/Locked",
+    "Documents/Locked",
   ),
   refusal(
     "U2-17",
@@ -139,13 +159,13 @@ export const REGISTRY: readonly Entry[] = [
     "U2-18",
     matterWords("It may be locked, or on a drive that's no longer connected."),
     "matter.folder_unreadable",
-    "~/Documents/Locked",
+    "Documents/Locked",
   ),
   refusal(
     "U2-19",
     matterWords("Clauseo couldn't create the matter. Try again, or choose another folder."),
     "internal",
-    "~/Documents/Mehta",
+    "Documents/Mehta",
   ),
   {
     id: "U2-20",
@@ -185,7 +205,7 @@ export const REGISTRY: readonly Entry[] = [
     screen: "matters/moved",
     width: 640,
     height: 320,
-    render: () => <MovedFolder folder="~/Documents/Khan Leather Works" onLocate={() => {}} />,
+    render: () => <MovedFolder folder="Documents/Khan Leather Works" onLocate={() => {}} />,
   },
   {
     id: "U2-24",
@@ -195,7 +215,7 @@ export const REGISTRY: readonly Entry[] = [
     screen: "matters/moved",
     width: 640,
     height: 320,
-    render: () => <MovedFolder folder="~/Documents/Khan Leather Works" onLocate={() => {}} />,
+    render: () => <MovedFolder folder="Documents/Khan Leather Works" onLocate={() => {}} />,
   },
   {
     id: "U2-25",
@@ -205,7 +225,7 @@ export const REGISTRY: readonly Entry[] = [
     screen: "matters/moved",
     width: 640,
     height: 320,
-    render: () => <MovedFolder folder="~/Documents/Khan Leather Works" onLocate={() => {}} />,
+    render: () => <MovedFolder folder="Documents/Khan Leather Works" onLocate={() => {}} />,
   },
   {
     id: "U2-26",
@@ -214,5 +234,52 @@ export const REGISTRY: readonly Entry[] = [
     width: 640,
     height: 120,
     render: () => <LocateGate onLocate={() => {}} />,
+  },
+  // Find says only what it searches: names without H5's clients, names and clients with them
+  {
+    id: "U2-27",
+    words: matterWords("Find a matter by its name"),
+    screen: "matters/rail",
+    ...RAIL,
+    render: () => <RoomOver host={() => roomHost([MATTER])} />,
+  },
+  railState("U2-28", matterWords("Find a matter by its name or client")),
+  {
+    id: "U2-29",
+    words: matterWords("Search covers names."),
+    screen: "matters/rail-find",
+    ...RAIL,
+    render: () => <RoomAfter host={() => roomHost([MATTER])} steps={[{ find: "Kapoor" }]} />,
+  },
+  {
+    id: "U2-30",
+    words: matterWords("Search covers names and clients."),
+    screen: "matters/rail-find",
+    ...RAIL,
+    render: () => <RoomAfter host={railHost} steps={[{ find: "Zaveri" }]} />,
+  },
+  // matter.folder_refused, which doesn't say why: true of a folder already a matter, an unreadable matter file, the
+  // matters' own folder, a drive, the home folder and a system folder
+  refusal(
+    "U2-31",
+    matterWords("Clauseo can't make a matter of this folder. Choose another folder."),
+    "matter.folder_refused",
+    "Documents/Acme",
+  ),
+  // the design's words (design/03-system/src/lib/words-matters.ts), approved with it
+  {
+    id: "U2-32",
+    words: matterWords("Quick questions, kept like any matter"),
+    screen: "room/toolbar",
+    height: 200,
+    render: () => <RoomOver host={scratchHost} />,
+  },
+  railState("U2-33", frameWords("Stopped on {day} at {time}")),
+  // what Change changes, for a screen reader, where no folder line says it (without H20)
+  {
+    id: "U2-34",
+    words: matterFormWords("The matter's folder"),
+    screen: "matters/new-matter",
+    render: () => <RoomAfter host={() => refusingHost("internal")} steps={NEW_MATTER} />,
   },
 ];
