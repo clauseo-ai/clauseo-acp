@@ -14,6 +14,11 @@
 //! the matter could not be loaded or its log read, which turn started last is not known, so
 //! none may take a new checkpoint: a lone crashed turn there gets an empty step, and its
 //! changes are logged as outside edits by the next turn's before-turn checkpoint.
+//!
+//! This holds within one start, not across starts: if a thread fails to load and other turns
+//! then run in the matter, a later start that repairs that thread's turn as the only open one
+//! takes a new checkpoint holding their changes (follow-up: refuse a new checkpoint when the
+//! matter has a `TurnStarted` newer than the turn's).
 
 use std::cmp::Reverse;
 use std::collections::BTreeSet;

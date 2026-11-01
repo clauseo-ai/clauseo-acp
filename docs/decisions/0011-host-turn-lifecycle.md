@@ -98,7 +98,11 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   the matter that is not archived has been looked at, and only the one that started last (by its
   `TurnStarted`) may take a new after-turn checkpoint. When one of those threads fails to load
   or its log fails to read, none may: a lone crashed turn there gets an empty step, and its
-  changes are logged as outside edits by the next turn. A turn that never started (its `UserMessage` logged, no `TurnStarted`) gets
+  changes are logged as outside edits by the next turn. This holds within one start, not across
+  starts: if a thread fails to load and other turns then run in the matter, a later start that
+  repairs that thread's turn as the only open one takes a new checkpoint holding their changes
+  (follow-up: refuse a new checkpoint when the matter has a `TurnStarted` newer than the turn's).
+  A turn that never started (its `UserMessage` logged, no `TurnStarted`) gets
   `TurnQueued { behind: <its own thread>, behind_turn: <the thread's previous turn, or None> }`,
   so the reducer shows the thread `Idle`. A turn with `TurnEnded` is never touched, so each
   repair happens once.
