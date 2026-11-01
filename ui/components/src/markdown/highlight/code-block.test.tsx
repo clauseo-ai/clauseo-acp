@@ -94,3 +94,23 @@ test("a block the worker cannot colour stays plain text", async () => {
   expect(host.querySelector("code")?.textContent).toBe(CODE);
   expect(host.querySelectorAll("code span")).toHaveLength(0);
 });
+
+test("a block that leaves the streaming tail colours in that render when its tokens are known", async () => {
+  const factory = fakeFactory();
+  const client = createHighlightClient(factory);
+  const first = client.highlight(CODE, "ts");
+  factory.workers[0]?.answer([[[2, "const"]], [[2, "let"]]]);
+  await first;
+  let renders = 0;
+  const Counting = (props: { finished: boolean }) => {
+    renders++;
+    return <HighlightedCode code={CODE} lang="ts" finished={props.finished} client={client} />;
+  };
+  await act(async () => root.render(<Counting finished={false} />));
+  expect(host.querySelector("pre")?.hasAttribute("data-highlighted")).toBe(false);
+  renders = 0;
+  await act(async () => root.render(<Counting finished />));
+  expect(host.querySelector("pre")?.hasAttribute("data-highlighted")).toBe(true);
+  expect(renders).toBe(1);
+  expect(factory.workers[0]?.asked).toEqual([]);
+});

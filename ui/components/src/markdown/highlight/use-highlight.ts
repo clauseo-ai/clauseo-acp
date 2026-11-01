@@ -20,11 +20,11 @@ export function useHighlight(
   const provided = useContext(HighlightClientContext);
   const client = given ?? provided ?? highlightClient();
   const key = `${lang}\u0000${code}`;
-  const [state, setState] = useState<{ key: string; lines: Lines | null }>(() => ({
-    key,
-    lines: finished ? (client.peek(code, lang) ?? null) : null,
-  }));
-  const known = state.key === key ? state.lines : null;
+  const [state, setState] = useState<{ key: string; lines: Lines } | null>(null);
+  // Read on every render where the tokens are not in state yet, so a block that has just finished (left the
+  // streaming tail) and was seen before colours in that same render.
+  const known =
+    state?.key === key ? state.lines : finished ? (client.peek(code, lang) ?? null) : null;
   useEffect(() => {
     if (!finished || known) return;
     let live = true;
