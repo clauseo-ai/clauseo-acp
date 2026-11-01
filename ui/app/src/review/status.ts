@@ -13,8 +13,8 @@ export type Approval = {
 
 export type Approvals = Readonly<Record<string, Approval>>;
 
-/** approved: the approval's text is the current text; changed: approved once, the text moved since; change: a change
- * was asked for; new: no approval yet. */
+/** approved: the approval's text is the current text; changed: the text moved since the approval or the change asked
+ * for; change: a change was asked for and the text hasn't moved yet; new: no approval yet. */
 export type Status = "approved" | "changed" | "change" | "new";
 
 /** The page's names for each status (dev tooling, English only). */
@@ -33,8 +33,10 @@ export function statusOf(
   approval: Approval | undefined,
 ): Status {
   if (approval === undefined) return "new";
-  if (approval.status === "change") return "change";
-  return approval.en === current.en && approval.hi === current.hi ? "approved" : "changed";
+  const same = approval.en === current.en && approval.hi === current.hi;
+  // a change asked for on text that has moved since is changed: the new text waits for a look
+  if (!same) return "changed";
+  return approval.status === "change" ? "change" : "approved";
 }
 
 /** Every string that is not approved, in registry order, with its status. */
@@ -45,6 +47,12 @@ export function pending(
   return rows
     .map((row) => ({ id: row.id, status: statusOf(row, approvals[row.id]) }))
     .filter((row) => row.status !== "approved");
+}
+
+/** Approvals of ids no registry entry has: a string removed or renumbered, its approval left behind. */
+export function staleIds(rows: readonly Pick<Current, "id">[], approvals: Approvals): string[] {
+  const ids = new Set(rows.map((r) => r.id));
+  return Object.keys(approvals).filter((id) => !ids.has(id));
 }
 
 /** Ids registered twice: each id names one string. */

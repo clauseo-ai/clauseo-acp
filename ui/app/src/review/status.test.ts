@@ -6,6 +6,7 @@ import {
   malformedIds,
   parseApprovals,
   pending,
+  staleIds,
   statusOf,
   type Approval,
   type Approvals,
@@ -27,9 +28,15 @@ test("an approval whose English or Hindi has moved since is changed", () => {
   expect(statusOf({ en: "Matters", hi: "मामला" }, approved("Matters", "मामले"))).toBe("changed");
 });
 
-test("a requested change stays a requested change, whatever the text", () => {
+test("a requested change stands while the text is the one it was asked on", () => {
   const change: Approval = { ...approved("Matters", "मामले"), status: "change", note: "Shorter" };
   expect(statusOf({ en: "Matters", hi: "मामले" }, change)).toBe("change");
+});
+
+test("a requested change whose English or Hindi has moved since is changed", () => {
+  const change: Approval = { ...approved("Matters", "मामले"), status: "change", note: "Shorter" };
+  expect(statusOf({ en: "Files", hi: "मामले" }, change)).toBe("changed");
+  expect(statusOf({ en: "Matters", hi: "फ़ाइलें" }, change)).toBe("changed");
 });
 
 test("a string with no approval is new", () => {
@@ -63,6 +70,12 @@ test("the gate lists new strings and requested changes", () => {
     { id: first?.id, status: "new" },
     { id: second?.id, status: "change" },
   ]);
+});
+
+test("approvals of ids the registry no longer has are listed as stale", () => {
+  const approvals = { ...seedApprovals(), "U1-99": approved("Gone", "गया") };
+  expect(staleIds(REGISTRY, approvals)).toEqual(["U1-99"]);
+  expect(staleIds(REGISTRY, seedApprovals())).toEqual([]);
 });
 
 test("registry ids are unique and typeable", () => {

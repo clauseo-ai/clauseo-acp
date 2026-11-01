@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import { APPROVALS } from "./approvals.ts";
 import { currentOf } from "./entry.ts";
 import { REGISTRY } from "./registry.tsx";
-import { duplicateIds, malformedIds, pending } from "./status.ts";
+import { duplicateIds, malformedIds, pending, staleIds } from "./status.ts";
 
 test("every registered string has a well-formed id of its own", () => {
   expect(duplicateIds(REGISTRY)).toEqual([]);
@@ -14,4 +14,8 @@ test("every registered string has a well-formed id of its own", () => {
 test("every registered string is approved in copy-approvals.json, as its words file has it now", () => {
   expect(REGISTRY.length).toBeGreaterThan(0);
   expect(pending(REGISTRY.map(currentOf), APPROVALS)).toEqual([]);
+});
+
+test("copy-approvals.json approves no id the registry no longer has", () => {
+  expect(staleIds(REGISTRY, APPROVALS)).toEqual([]);
 });

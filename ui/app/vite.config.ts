@@ -74,26 +74,33 @@ export function metaCsp(csp: string): string {
     .join("; ");
 }
 
+/** A page's `<meta charset>`, which the HTML prescan must find in the page's first 1024 bytes. */
+const CHARSET = /<meta charset="[^"]*"\s*\/?>/i;
+
+/** `'` and `"` as an attribute value written in double quotes may carry them. */
+const attr = (value: string) => value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+
 /**
- * The production CSP from tauri.conf.json (its one home), less `frame-ancestors`, as the first thing in a built page's
- * head, so a page served without Tauri's header (`vite preview`, the WebKit probe) runs under the same policy and a
- * runtime <style>, a style attribute or an HTML string write shows up as a violation. Build only: the dev server sends
- * its own looser policy as a header (devCspHeader).
+ * The production CSP from tauri.conf.json (its one home), less `frame-ancestors`, as a built page's first element after
+ * its `<meta charset>` (which stays first, inside the prescan's 1024 bytes) and so before any script, style or link, so
+ * a page served without Tauri's header (`vite preview`, the WebKit probe) runs under the same policy and a runtime
+ * <style>, a style attribute or an HTML string write shows up as a violation. Build only: the dev server sends its own
+ * looser policy as a header (devCspHeader).
  */
 export function cspMeta(): Plugin {
-  const content = metaCsp(tauriConf.app.security.csp);
+  const tag = `<meta http-equiv="Content-Security-Policy" content="${attr(metaCsp(tauriConf.app.security.csp))}">`;
   return {
     name: "clauseo-csp-meta",
     apply: "build",
     transformIndexHtml: {
       order: "post",
-      handler: () => [
-        {
-          tag: "meta",
-          attrs: { "http-equiv": "Content-Security-Policy", content },
-          injectTo: "head-prepend",
-        },
-      ],
+      handler(html) {
+        const charset = CHARSET.exec(html);
+        if (charset === null)
+          throw new Error("the page has no <meta charset> for the CSP meta to follow");
+        const at = charset.index + charset[0].length;
+        return `${html.slice(0, at)}\n    ${tag}${html.slice(at)}`;
+      },
     },
   };
 }
@@ -157,7 +164,15 @@ export default defineConfig(({ mode }) => {
       ...(room ? [cspMeta()] : []),
       ...(probe ? [probeEntry()] : []),
     ],
-    ...(probe ? { define: { "import.meta.env.VITE_CLAUSEO_WINDOW": JSON.stringify("room") } } : {}),
+    // the probe is the room with the hooks for checks by hand (room/start.ts's HAND_CHECKS), which the probe runs
+    ...(probe
+      ? {
+          define: {
+            "import.meta.env.VITE_CLAUSEO_WINDOW": JSON.stringify("room"),
+            "import.meta.env.VITE_CLAUSEO_HAND_CHECKS": JSON.stringify("1"),
+          },
+        }
+      : {}),
     server: {
       // Tauri's devUrl. The watcher stays out of the Rust crates and the multi-GB target folders, and out of
       // ui/app/components, the link to ui/components for oxlint: Vite already watches those files by their real path.
