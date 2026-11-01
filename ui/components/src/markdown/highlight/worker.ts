@@ -1,4 +1,4 @@
-// The colouring worker, and the only module that imports Shiki (highlight.test.ts holds every other file to that).
+// The colouring worker, and the only module that imports Shiki (worker.test.ts holds every other file to that).
 // shiki/core with the JavaScript regex engine: the Oniguruma engine is WebAssembly and needs 'wasm-unsafe-eval',
 // which the CSP forbids, and the JavaScript engine compiles each grammar's patterns to RegExp objects, never to code.
 // Each grammar loads the first time a block in it arrives. Tokens go back by message, never HTML.
