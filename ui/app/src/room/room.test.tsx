@@ -92,7 +92,7 @@ test("with no matters the title says so, in the page's language", async () => {
 test("the frame has the toolbar, the rail slot, the work and the wall, and no window controls, search or plan", async () => {
   await mount(fake([NEWER]));
   const win = host?.querySelector(".room-window");
-  expect(win?.querySelector("header.room-top")?.getAttribute("data-chrome")).toBe("os");
+  expect(win?.querySelector("header.room-top .room-lead .room-rail-toggle")).not.toBeNull();
   expect(win?.querySelector("main.room-centre")?.childElementCount).toBe(0);
   expect(win?.querySelector(".room-rail")?.childElementCount).toBe(0);
   for (const gone of [

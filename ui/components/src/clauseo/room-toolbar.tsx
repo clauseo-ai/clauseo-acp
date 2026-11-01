@@ -71,7 +71,8 @@ export type RoomToolbarProps = {
   searchLabel?: string;
   /** Optional: who draws the window's own controls. "own", the default: the toolbar is the title bar, with the corner
    * lights on the Mac and the caption buttons elsewhere. "os": the computer's title bar stands above the page, so the
-   * toolbar draws neither, and keeps no room for them. */
+   * toolbar draws neither, nor keeps the caption buttons' room at the right. The lead and the title stand as with
+   * "own", by the platform's rules, so turning to "own" only adds the lights or the buttons and moves nothing. */
   chrome?: "own" | "os";
   /** Optional, true by default: false leaves the search field out. */
   search?: boolean;
@@ -113,7 +114,6 @@ export function RoomToolbar(p: RoomToolbarProps) {
     <header
       className={cn("room-top", captions && "mid:pr-0")}
       data-platform={platform}
-      data-chrome={own ? undefined : "os"}
       data-tauri-drag-region
     >
       <div className="room-lead" data-tauri-drag-region>
