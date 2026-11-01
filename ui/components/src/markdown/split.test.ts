@@ -1,15 +1,10 @@
 import { expect, test } from "vitest";
 import spec from "commonmark-spec/spec.txt?raw";
-import type { Root as Hast } from "hast";
-import { sanitize } from "hast-util-sanitize";
-import { toHtml } from "hast-util-to-html";
-import { toHast } from "mdast-util-to-hast";
 import { createAnswer } from "./answer.ts";
 import gfmSpec from "./gfm-spec.json";
 import { CASES } from "./hostile-cases.ts";
 import { endOf, parse } from "./parse.ts";
-import { SCHEMA } from "./schema.ts";
-import { examplesOf, htmlOf, normalise, withTabs } from "./spec-fixture.ts";
+import { examplesOf, htmlOf, normalise, unsplit, withTabs } from "./spec-fixture.ts";
 import { createSplitter } from "./split.ts";
 import type { BlockEnd } from "./split.ts";
 
@@ -130,19 +125,6 @@ test("for every prefix the incremental split equals a fresh split, and the block
   }
   expect(prefixes).toBeGreaterThan(100_000);
 }, 30_000);
-
-/** The answer as one block: what the split must reproduce. */
-function unsplit(text: string): string {
-  return toHtml(
-    sanitize(
-      toHast(parse(text), {
-        clobberPrefix: "spec-",
-        handlers: { html: (_, node) => ({ type: "text", value: node.value }) },
-      }),
-      SCHEMA,
-    ) as Hast,
-  );
-}
 
 /**
  * A document as the one-piece comparison takes it. Footnotes are left out (`[^` becomes `[`, a link
