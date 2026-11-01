@@ -20,6 +20,7 @@ use super::env::spec_env;
 use super::paths;
 use super::run::{Line, Ran, first_line, run};
 use super::time::parse_rfc3339;
+use crate::model::kind_rank;
 use crate::words::{self, CLAUDE_WINDOWS};
 use crate::{ReadFailure, ReadOutcome, write};
 
@@ -335,7 +336,7 @@ fn windows(rate_limits: Option<&Map<String, Value>>) -> Vec<LimitWindow> {
         });
         windows.extend(scoped.take(MAX_WINDOWS));
     }
-    windows.sort_by_key(|window| rank(window.kind));
+    windows.sort_by_key(|window| kind_rank(window.kind));
     windows.truncate(MAX_WINDOWS);
     windows
 }
@@ -383,16 +384,6 @@ pub(crate) fn clean(label: &str) -> String {
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
     cleaned.trim().to_owned()
-}
-
-/// The sort rank of a window kind: session, weekly, model, other.
-pub(crate) fn rank(kind: WindowKind) -> u8 {
-    match kind {
-        WindowKind::Session => 0,
-        WindowKind::Weekly => 1,
-        WindowKind::Model => 2,
-        WindowKind::Other => 3,
-    }
 }
 
 #[cfg(test)]

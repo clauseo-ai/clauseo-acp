@@ -1,6 +1,7 @@
 //! Claude reads against `fake_agent`: the outcome of each scenario, the spec the reader built,
 //! the helper file it wrote, and the timeout's kill.
 
+use std::ffi::{OsStr, OsString};
 use std::time::{Duration, SystemTime};
 
 use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
@@ -8,7 +9,7 @@ use clauseo_protocol::{AgentKind, Billing, LimitSource, PlanLabel};
 use futures::executor::block_on;
 use futures::future::join;
 
-use crate::harness::{Play, Setup, SharedTimer, TestLauncher};
+use crate::harness::{FAKE_KEY, INHERITED, Play, Setup, SharedTimer, TestLauncher};
 use crate::write;
 
 /// The helper the reader must write, byte for byte.
@@ -32,7 +33,6 @@ fn ready_setup() -> Setup {
 fn one_line_is_read_and_mapped_after_the_helper_exits() {
     let setup = ready_setup();
     let (outcome, launcher) = read_once(&setup, "claude-ok");
-    #[cfg(unix)]
     launcher.wait_stdout_closed();
     let ReadOutcome::Usage { limits, reached } = outcome else {
         panic!("not usage: {outcome:?}");
@@ -66,7 +66,21 @@ fn the_spec_runs_settings_command_on_the_helper_in_the_run_folder() {
     assert_eq!(spec.cwd(), setup.run_dir());
     assert!(setup.run_dir().is_dir());
     assert_eq!(Setup::names(&setup.run_dir()), Vec::<String>::new());
-    assert_eq!(spec.env(), &Setup::expected_env());
+    // No compare here prints a value of the inherited env: it may hold the machine's secrets.
+    let expected = Setup::expected_env();
+    let names: Vec<&OsString> = spec.env().keys().collect();
+    let expected_names: Vec<&OsString> = expected.keys().collect();
+    assert_eq!(names, expected_names, "the env's names");
+    assert!(
+        spec.env().get(OsStr::new("ANTHROPIC_API_KEY")) == Some(&OsString::from(FAKE_KEY)),
+        "ANTHROPIC_API_KEY is not the settings value"
+    );
+    let lower = INHERITED.to_ascii_lowercase();
+    assert!(
+        spec.env().get(OsStr::new(&lower)) == Some(&OsString::from("from-settings")),
+        "{lower} is not the settings value"
+    );
+    assert!(spec.env() == &expected, "env differs");
 }
 
 #[test]
@@ -106,7 +120,6 @@ fn a_different_helper_file_is_replaced() {
 fn a_crash_reports_its_code_and_the_redacted_tail() {
     let setup = ready_setup();
     let (outcome, launcher) = read_once(&setup, "claude-crash");
-    #[cfg(unix)]
     launcher.wait_stdout_closed();
     let ReadOutcome::Failed(ReadFailure::Exited { code, stderr_tail }) = outcome else {
         panic!("not an exit: {outcome:?}");
@@ -162,7 +175,6 @@ fn stdout_past_the_pipe_buffer_is_drained_to_its_end() {
     let setup = ready_setup();
     let (outcome, launcher) = read_once(&setup, "claude-stdout-heavy");
     assert!(matches!(outcome, ReadOutcome::Usage { .. }), "{outcome:?}");
-    #[cfg(unix)]
     launcher.wait_stdout_closed();
 }
 
@@ -181,7 +193,6 @@ fn a_helper_that_lingers_after_its_line_is_killed_and_its_line_kept() {
         panic!("not usage: {outcome:?}");
     };
     assert_eq!(limits.account.0, "max.user@example.com");
-    #[cfg(unix)]
     launcher.wait_stdout_closed();
 }
 
@@ -196,7 +207,6 @@ fn the_deadline_is_25_seconds_and_kills_the_tree() {
         assert!(timer.0.fire());
     }));
     assert_eq!(outcome, ReadOutcome::Failed(ReadFailure::TimedOut));
-    assert_eq!(launcher.specs().len(), 1);
-    #[cfg(unix)]
+    assert_eq!(launcher.launches(), 1);
     launcher.wait_stdout_closed();
 }

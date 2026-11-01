@@ -9,14 +9,16 @@ pub(crate) const CLAUDE_FIVE_HOUR: &str = "five_hour";
 pub(crate) const CLAUDE_SEVEN_DAY: &str = "seven_day";
 
 /// The kind and label of a Claude window that a live signal may add before any read named it:
-/// only the 5-hour and the weekly window. Any other id (`overage`, a model's bucket) waits for a
-/// read to name it.
+/// only the 5-hour and the weekly window, as [`CLAUDE_WINDOWS`] names them for a read. Any
+/// other id (`overage`, a model's bucket) waits for a read to name it.
 pub(crate) fn claude_live_window(id: &str) -> Option<(WindowKind, &'static str)> {
-    match id {
-        CLAUDE_FIVE_HOUR => Some((WindowKind::Session, "5-hour limit")),
-        CLAUDE_SEVEN_DAY => Some((WindowKind::Weekly, "Weekly limit")),
-        _ => None,
+    if id != CLAUDE_FIVE_HOUR && id != CLAUDE_SEVEN_DAY {
+        return None;
     }
+    CLAUDE_WINDOWS
+        .iter()
+        .find(|window| window.key == id)
+        .map(|window| (window.kind, window.label))
 }
 
 /// One fixed window of Claude's usage read: its key in `rate_limits`, which is also its id, its
@@ -137,5 +139,32 @@ pub(crate) fn codex_window_label(mins: i64) -> String {
         format!("{hours}-hour limit")
     } else {
         format!("{mins}-minute limit")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_live_row_and_a_read_row_get_the_same_kind_and_label() {
+        for id in [CLAUDE_FIVE_HOUR, CLAUDE_SEVEN_DAY] {
+            let read = CLAUDE_WINDOWS
+                .iter()
+                .find(|window| window.key == id)
+                .map(|window| (window.kind, window.label));
+            assert_eq!(claude_live_window(id), read, "{id}");
+            assert!(read.is_some(), "{id}");
+        }
+        assert_eq!(
+            claude_live_window(CLAUDE_FIVE_HOUR),
+            Some((WindowKind::Session, "5-hour limit"))
+        );
+        assert_eq!(
+            claude_live_window(CLAUDE_SEVEN_DAY),
+            Some((WindowKind::Weekly, "Weekly limit"))
+        );
+        assert_eq!(claude_live_window("seven_day_opus"), None);
+        assert_eq!(claude_live_window("overage"), None);
     }
 }

@@ -445,8 +445,10 @@ fn unknown_plans_have_no_name_and_bad_emails_the_plan_ref() {
 
 #[test]
 fn an_unknown_account_type_is_malformed_without_naming_it() {
+    // Built at run time, so no file holds a token-shaped text.
+    let secret_looking = format!("sk{}", "-secret-looking");
     let answers = answers(&json!({
-        "accountRead": {"account": {"type": "sk-secret-looking"}, "requiresOpenaiAuth": true}
+        "accountRead": {"account": {"type": secret_looking}, "requiresOpenaiAuth": true}
     }));
     assert_eq!(
         outcome(answers),

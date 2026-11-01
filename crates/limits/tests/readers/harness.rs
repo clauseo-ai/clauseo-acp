@@ -17,6 +17,10 @@ use crate::write;
 
 /// The adapter's script under the fake install, as `args[0]`.
 pub(crate) const SCRIPT: &str = "node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
+/// The Claude Agent SDK's `package.json` under the fake install.
+const SDK: &str = "node_modules/@anthropic-ai/claude-agent-sdk/package.json";
+/// What the fake SDK's `package.json` holds.
+const SDK_PACKAGE: &str = r#"{"name":"@anthropic-ai/claude-agent-sdk","version":"0.3.293"}"#;
 /// The helper's file name in the install folder.
 pub(crate) const HELPER: &str = "clauseo-claude-usage.mjs";
 /// A fake 20-character key the test sets in settings env; `claude-crash` echoes it.
@@ -71,7 +75,17 @@ impl TestLauncher {
         })
     }
 
-    /// Every spec the reader asked to launch.
+    /// How many specs the reader asked to launch. Compare this, not the specs: a failed compare
+    /// prints them, and their env holds the machine's.
+    pub(crate) fn launches(&self) -> usize {
+        self.specs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
+    }
+
+    /// Every spec the reader asked to launch. Never `Debug`-print one: its env holds the
+    /// inherited environment, secrets included.
     pub(crate) fn specs(&self) -> Vec<LaunchSpec> {
         self.specs
             .lock()
@@ -80,19 +94,27 @@ impl TestLauncher {
     }
 
     /// Waits until every process holding the last agent's stdout has ended: its read end then
-    /// reads end of file. A survivor blocks until nextest's slow-timeout ends the test.
-    #[cfg(unix)]
+    /// reads end of file. A survivor blocks until nextest's slow-timeout ends the test. The wait
+    /// is Unix only (it watches a copy of the pipe's fd); elsewhere it checks only that an agent
+    /// was started.
     pub(crate) fn wait_stdout_closed(&self) {
-        use futures::AsyncReadExt as _;
-        let fd = self
-            .stdouts
-            .lock()
-            .unwrap()
-            .pop()
-            .expect("an agent was started");
-        let mut stdout = async_io::Async::new(std::fs::File::from(fd)).expect("watch stdout");
-        let mut buf = [0; 4096];
-        futures::executor::block_on(async { while stdout.read(&mut buf).await.unwrap() > 0 {} });
+        #[cfg(not(unix))]
+        assert!(self.launches() > 0, "an agent was started");
+        #[cfg(unix)]
+        {
+            use futures::AsyncReadExt as _;
+            let fd = self
+                .stdouts
+                .lock()
+                .unwrap()
+                .pop()
+                .expect("an agent was started");
+            let mut stdout = async_io::Async::new(std::fs::File::from(fd)).expect("watch stdout");
+            let mut buf = [0; 4096];
+            futures::executor::block_on(async {
+                while stdout.read(&mut buf).await.unwrap() > 0 {}
+            });
+        }
     }
 }
 
@@ -140,7 +162,8 @@ pub(crate) struct Setup {
 }
 
 impl Setup {
-    /// A fresh folder with an empty fake install and an empty data folder.
+    /// A fresh folder with a fake install (the adapter's script and the SDK's `package.json`)
+    /// and an empty data folder.
     pub(crate) fn new() -> Setup {
         let n = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
         let root =
@@ -148,6 +171,7 @@ impl Setup {
         let setup = Setup { root };
         write::create_dir_all(&setup.data()).unwrap();
         Setup::file(&setup.script(), "");
+        Setup::file(&setup.install().join(SDK), SDK_PACKAGE);
         setup
     }
 

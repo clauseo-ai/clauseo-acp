@@ -6,13 +6,19 @@
 //! user put it; nothing from it down to a file the reader uses may be. That refuses pnpm and
 //! linked installs, which put links under `node_modules`: they read as "no limits" until stage D's
 //! `agents` owns the install.
+//!
+//! Claude's install folder must hold the SDK the helper imports,
+//! `node_modules/@anthropic-ai/claude-agent-sdk/package.json`, by the same rule. Without it node
+//! would climb to any parent `node_modules` and run some other SDK. A global npm install, whose
+//! install folder is `<prefix>/lib` with the SDK nested under the adapter, is refused too: the
+//! helper could not import the adapter's SDK from there.
 
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use clauseo_settings::AgentLaunch;
 
-use crate::Error;
+use crate::error::Error;
 
 /// Claude's settings id.
 pub(crate) const CLAUDE_ID: &str = "claude-acp";
@@ -20,6 +26,8 @@ pub(crate) const CLAUDE_ID: &str = "claude-acp";
 pub(crate) const CODEX_ID: &str = "codex-acp";
 /// The helper's file name in Claude's install folder.
 pub(crate) const CLAUDE_HELPER: &str = "clauseo-claude-usage.mjs";
+/// Where the Claude Agent SDK's `package.json` sits inside a `node_modules` folder.
+const CLAUDE_SDK: [&str; 3] = ["@anthropic-ai", "claude-agent-sdk", "package.json"];
 /// Where the Codex CLI's script sits inside a `node_modules` folder.
 const CODEX_JS: [&str; 4] = ["@openai", "codex", "bin", "codex.js"];
 
@@ -34,10 +42,35 @@ pub(crate) struct Located {
     pub(crate) script: PathBuf,
 }
 
-/// Claude's program and the helper's path in its install folder. The helper may be missing (the
-/// read writes it), but when something is there it must be a regular file, not a link or a folder.
+/// Claude's program and the helper's path in its install folder. The install folder's
+/// `node_modules/@anthropic-ai/claude-agent-sdk/package.json` must be a regular file reached
+/// through no link. The helper may be missing (the read writes it), but when something is there
+/// it must be a regular file, not a link or a folder.
 pub(crate) fn claude(launch: &AgentLaunch) -> Result<(Located, PathBuf), Error> {
     let located = locate(CLAUDE_ID, launch)?;
+    let modules = located.install.join("node_modules");
+    let sdk = CLAUDE_SDK
+        .iter()
+        .fold(modules.clone(), |path, part| path.join(part));
+    match walk(&located.install, &sdk) {
+        Ok(()) => {}
+        Err(Walk::Missing) => {
+            let rule = format!(
+                "no @anthropic-ai/claude-agent-sdk/package.json in {}",
+                modules.display()
+            );
+            return Err(Error::Refused {
+                agent: CLAUDE_ID,
+                rule,
+            });
+        }
+        Err(Walk::Refused(rule)) => {
+            return Err(Error::Refused {
+                agent: CLAUDE_ID,
+                rule,
+            });
+        }
+    }
     let helper = located.install.join(CLAUDE_HELPER);
     match std::fs::symlink_metadata(&helper) {
         Ok(meta) if meta.is_file() => {}
@@ -115,8 +148,16 @@ pub(crate) fn check_run_dir(run_dir: &Path) -> Result<(), Error> {
 }
 
 /// Checks Clauseo's Codex home with `symlink_metadata`, reading nothing inside it: `true` for a
-/// folder, `false` when it is missing, and a refusal for a link or anything else.
+/// folder, `false` when it is missing, and a refusal for a relative path, a link or anything
+/// else. A relative home is refused first: it would be checked against Clauseo's working folder,
+/// while codex resolves it against the run folder.
 pub(crate) fn check_codex_home(codex_home: &Path) -> Result<bool, Error> {
+    if !codex_home.is_absolute() {
+        return Err(Error::CodexHome {
+            path: codex_home.to_owned(),
+            what: "is not an absolute path".to_owned(),
+        });
+    }
     let what = match std::fs::symlink_metadata(codex_home) {
         Ok(meta) if meta.is_dir() => return Ok(true),
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),

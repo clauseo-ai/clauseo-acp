@@ -6,8 +6,7 @@ use std::path::PathBuf;
 
 /// Why a reader could not be set up or prepared.
 #[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Error {
+pub(crate) enum Error {
     /// An agent's settings entry breaks a rule of the reader's paths. The text names the rule
     /// and the path, never an environment variable.
     #[error("agents.{agent}: {rule}")]

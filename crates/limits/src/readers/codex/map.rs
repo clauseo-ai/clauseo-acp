@@ -9,7 +9,8 @@ use clauseo_protocol::{
 };
 
 use super::Answers;
-use crate::readers::claude::{looks_like_email, rank};
+use crate::model::kind_rank;
+use crate::readers::claude::looks_like_email;
 use crate::words;
 use crate::{ReadFailure, ReadOutcome};
 
@@ -68,7 +69,7 @@ pub(crate) fn outcome(answers: Answers) -> ReadOutcome {
         })
         .filter_map(|(id, window)| limit_window(id, window.as_ref()?, plan_type))
         .collect();
-    windows.sort_by_key(|window| rank(window.kind));
+    windows.sort_by_key(|window| kind_rank(window.kind));
     let at_limit = snapshot
         .and_then(|snapshot| snapshot.credits.as_ref())
         .map_or(AtLimitBehaviour::Pauses, |credits| {

@@ -142,6 +142,11 @@ pub(crate) fn prepare(
     paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
     let forced = (OsStr::new(CODEX_HOME), codex_home.as_os_str());
     let env = spec_env(&launch.env, inherited, Some(forced));
+    // No `CODEX_CONFIG` overrides here, unlike the ones the host gives codex-acp under #160
+    // (apps, plugins, skill MCP installs and cloud skills off). The reader starts no thread and
+    // runs no tool: it sends only `initialize`, `account/read` and `account/rateLimits/read`.
+    // What app-server loads at start-up from Clauseo's home (plugins, apps) is unverified; G16
+    // checks it.
     let args = vec![codex_js.into_os_string(), OsString::from("app-server")];
     LaunchSpec::new(located.program, args, env, run_dir.to_owned())
         .map(Prepared::Spec)
