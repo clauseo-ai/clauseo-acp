@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // axe-core 4.14.0 over the room's frame, in every theme, language, lite and motion, with a matter and its papers, with
-// a matter and none, and with no matter. happy-dom computes no styles, so axe can't judge colour contrast here: that
+// a matter and none, with no matter, and when list_matters fails. happy-dom computes no styles, so axe can't judge colour contrast here: that
 // is checked by hand in the app, with window.__clauseoAxe() (dev-hooks.ts).
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -45,15 +45,20 @@ const SCENES = {
   "a matter with papers": { matters: true, papers: PAPERS },
   "a matter with none": { matters: true, papers: [] },
   "no matter": { matters: false, papers: undefined },
+  // list_matters rejects: no heading, and nothing else in the title's place
+  failed: { matters: "fails", papers: undefined },
 } as const;
 
 function transportFor(scene: (typeof SCENES)[keyof typeof SCENES]): FakeTransport {
   return new FakeTransport({
-    query: () => ({
-      matters: scene.matters
-        ? [{ matter: uuid(1, 2), name: "Sharma v. State of Delhi", kind: "folder" }]
-        : [],
-    }),
+    query: () => {
+      if (scene.matters === "fails") throw new Error("the host is gone");
+      return {
+        matters: scene.matters
+          ? [{ matter: uuid(1, 2), name: "Sharma v. State of Delhi", kind: "folder" }]
+          : [],
+      };
+    },
     ...(scene.papers === undefined
       ? {}
       : {
@@ -93,8 +98,18 @@ for (const theme of THEMES) {
             expect(html.dataset["render"]).toBe(lite);
             expect(html.dataset["motion"]).toBe(motion);
             expect(store.display().lang).toBe(language);
-            expect(host.querySelector("h1")?.textContent, name).not.toBe("");
-            const results = await axe.run(document, { resultTypes: ["violations"] });
+            // a heading with the title, or after a failure none: never an empty one
+            const heading = host.querySelector("h1");
+            if (scene.matters === "fails") expect(heading, name).toBeNull();
+            else expect(heading?.textContent, name).not.toBe("");
+            // after a failure the page has no h1 until the failure's words (QU.8) take the title's place: axe's
+            // page-has-heading-one, a best practice and no WCAG rule, is the one rule that scene leaves off
+            const results = await axe.run(document, {
+              resultTypes: ["violations"],
+              ...(scene.matters === "fails"
+                ? { rules: { "page-has-heading-one": { enabled: false } } }
+                : {}),
+            });
             const found = results.violations.map(
               (v) => `${name}: ${v.id} at ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
             );

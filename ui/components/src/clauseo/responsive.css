@@ -34,6 +34,17 @@
   .room-rail[data-open] {
     display: flex;
   }
+  /* out of the grid's rail area, so its top counts from the window's and it opens just under Matters, not a toolbar
+     lower */
+  .room-rail {
+    grid-area: auto;
+  }
+  /* an empty rail (until U2 fills it) keeps its place and its id for Matters' aria-controls, but draws no panel */
+  .room-rail:empty {
+    background: transparent;
+    box-shadow: none;
+    pointer-events: none;
+  }
   /* the floating rail's top padding is its sticky head's own, so nothing scrolls by above New matter */
   .room-rail {
     padding-top: 0;

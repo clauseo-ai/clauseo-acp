@@ -55,3 +55,33 @@ test("Linux takes Windows' chrome: the toolbar's rules for the caption buttons k
     /\.room-top:not\(\[data-platform="mac"\]\) \.room-lead \{[^}]*display: none;/,
   );
 });
+
+test("a facade of files known by their names keeps no room for a numeral or a chip: its rows are title and padding", () => {
+  const wall = readFileSync(new URL("wall.css", here), "utf8");
+  const tileH = /\.facade \{[^}]*--tile-h: calc\(([^;]*)\);/.exec(wall)?.[1] ?? "";
+  // the full facade's row keeps both
+  expect(tileH).toContain("var(--num-h)");
+  expect(tileH).toContain("var(--slot-h)");
+  expect(wall).toMatch(
+    /\.facade-names \{\s*--tile-h: calc\(var\(--tile-pad\) \+ var\(--title-h\) \+ var\(--tile-pad\)\);\s*\}/,
+  );
+  expect(wall).toMatch(/\.facade-names \.tile-face \{\s*padding-bottom: var\(--tile-pad\);\s*\}/);
+});
+
+test("the folded rail opens from the window's top, just under Matters, and an empty one draws no panel", () => {
+  const responsive = readFileSync(new URL("responsive.css", here), "utf8");
+  const folded = responsive.slice(
+    responsive.indexOf("@variant rail-folded"),
+    responsive.indexOf("@variant max-mid"),
+  );
+  expect(folded).toMatch(/\.room-rail \{[^}]*top: var\(--rail-panel-top\);/);
+  // an absolutely placed grid item counts its top from its grid area unless it has none
+  expect(folded).toMatch(/\.room-rail \{\s*grid-area: auto;\s*\}/);
+  const empty = /\.room-rail:empty \{([^}]*)\}/.exec(folded)?.[1] ?? "";
+  expect(empty).toContain("background: transparent;");
+  expect(empty).toContain("box-shadow: none;");
+  expect(empty).toContain("pointer-events: none;");
+  expect(folded.indexOf(".room-rail:empty")).toBeGreaterThan(
+    folded.indexOf("box-shadow: var(--e3)"),
+  );
+});
