@@ -81,6 +81,9 @@ export type DisplayEnv = {
   show: (display: Display) => void;
   /** Settings for this page only, never written: a dev or probe page's query. */
   override?: Partial<UiSettings>;
+  /** The OS to lay out for until the host says (setPlatform): the webview's own guess (platform.ts's guessPlatform),
+   * so a Windows window doesn't start in the Mac's places and move. The Mac where left out. */
+  platform?: Platform;
 };
 
 export interface DisplayStore {
@@ -116,7 +119,7 @@ function readStored(storage: DisplayEnv["storage"]): UiSettings {
 export function createDisplayStore(env: DisplayEnv): DisplayStore {
   let stored = readStored(env.storage);
   let over: Partial<UiSettings> = uiPatchOf(env.override);
-  let platform: Platform = DEFAULT_DISPLAY.platform;
+  let platform: Platform = env.platform ?? DEFAULT_DISPLAY.platform;
   const dark = env.matchMedia?.(DARK) ?? null;
   const reduced = env.matchMedia?.(REDUCED) ?? null;
   const ui = (): UiSettings => ({ ...stored, ...over });
