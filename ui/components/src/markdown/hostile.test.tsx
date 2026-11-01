@@ -160,7 +160,10 @@ describe.each(["not loaded", "loaded"])("entity table %s", (state) => {
       failures.push("dom-clobber: __g4clobber reachable");
     expect(failures).toEqual([]);
     expect(pwned).toEqual([]);
-  });
+  },
+  // About 2 s alone; under load past the default 5 s, so it gets the per-case test's 30 s.
+  30_000,
+  );
 
   test("every link click and middle click is cancelled; allowed URLs go to the host, nothing else does", () => {
     renderCases(false);
