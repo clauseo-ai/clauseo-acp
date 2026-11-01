@@ -24,11 +24,18 @@ an id becomes a kind.
 
 **The model.** `Limits` is pure: no I/O and no clock. `new(cached, agents, now)`, then
 `input(Input, now) -> Vec<Action>`, `view(now)`, `next_deadline()`, `next_read_at(agent)` and
-`at_limit(agent)`. Two shapes differ from the task brief's sketch:
+`at_limit(agent)`. Three shapes differ from the task brief's sketch; `host` (R16) passes each
+through:
 - `ReadOutcome::Usage { limits, reached: Option<LimitStopReason> }`. `reached` carries Codex's
   `rateLimitReachedType` and `spendControlReached`, which `AccountLimits` has no field for. It is
   model state until the next good read, so a restart forgets it, as it forgets the rejected flag.
   Claude always gives `None`.
+- `ReadOutcome::SignedOut`: the vendor's tool says no account is signed in (Codex's
+  `account/read` with no account, in a home with no login). The model gives that agent a row with
+  no account and no windows, whose view shows `MissingScope`'s freshness and so the sign-in-again
+  action. It sends no `Action::Changed`, so nothing is stored. An earlier account's stored entry
+  stays as it is, and the next good read with an account replaces the row. A fixed `signed-out`
+  account would have been stored, and would come back at start beside the real one.
 - `ProcessReaders::new(effective, codex_home, launcher, timer)`, from #160: Clauseo owns the
   Codex home (below).
 
@@ -86,8 +93,10 @@ ignores unknown fields. `missing: true`, or an `ok:true` line whose usage does n
 is `MethodMissing`: the source is unavailable, which is not an error. `missing: false` is a failed
 read with the process's redacted stderr tail. The line's own `message` is not redacted, so it is
 never shown or logged. Anything else is `Malformed`. A read ends when the reader exits
-and its stdout and stderr close. Once the exit and the line are in, the pipes get 1 s more, so a
-descendant that left the process tree cannot turn a good read into a timeout.
+and its stdout and stderr close. Once the answer is in, the exit and the pipes get 1 s more, then the
+tree is killed and the answer kept, so a reader that lingers, or a descendant that left the
+process tree, cannot turn a good read into a timeout. A complete Codex answer counts whatever
+the exit code.
 
 **Mapping.** No subscription and no rate limits is pay as you go:
 `PayAsYouGo { via }` by `apiProvider` (Anthropic, Bedrock, Vertex, Other), with `NotApplicable`
@@ -101,11 +110,22 @@ the windows are `five_hour` (session), `seven_day` (weekly), `seven_day_opus` an
 looks like one. Otherwise it is a fixed ref: `api-key`, `bedrock`, `vertex`, or `plan`. It is
 never a key or a token.
 
-**Codex.** The reader runs `node <codex.js> app-server` through `codex_appserver`'s client
-(`initialize`, `account/read`, `account/rateLimits/read { excludeResetCreditDetails: true }`),
-then closes stdin. `codex.js` is codex-acp's own
-`node_modules/@openai/codex/bin/codex.js`, else the install's. The mapping and the
-`account/read`-without-account case are recorded below when the reader lands.
+**Codex.** The reader runs `node <codex.js> app-server` and talks through `codex_appserver`'s
+client: `initialize` (then `initialized`), `account/read`, and, for a ChatGPT account only,
+`account/rateLimits/read { excludeResetCreditDetails: true }`. Then it drops the client, which
+closes stdin. `codex.js` is codex-acp's own `node_modules/@openai/codex/bin/codex.js`, else the
+install's. No account is `SignedOut`. An API key is `PayAsYouGo { via: OpenAi }` with ref
+`api-key`, and Bedrock is `PayAsYouGo { via: Bedrock }` with ref `bedrock`, both
+`NotApplicable`. For ChatGPT, only the snapshot whose `limitId` is `codex` (from
+`rateLimitsByLimitId`, else `rateLimits` when its `limitId` is `codex` or absent) sets the
+windows, so a model bucket never overwrites them; other buckets are ignored for now. `primary`
+and `secondary` are positions and keep those ids. `windowDurationMins` gives the kind: 300 is the
+session, 10080 the week, 28 to 31 days "Monthly limit", and Free or Go with no duration one
+monthly window. Credits give `Credits { has_credits }`. `rateLimitReachedType` gives `reached`:
+`workspace_*_credits_depleted` is `WorkspaceCredits`; `workspace_*_usage_limit_reached`, or
+`spendControlReached: true` with any type that does not name credits, is `WorkspaceSpendCap`;
+any other value is `PlanWindow`. The plan names are "ChatGPT Plus", "ChatGPT Pro" and so on, made
+from `planType`, and an unknown type gives none.
 
 **Paths and environment.** The paths come from settings `agents.claude-acp` and
 `agents.codex-acp`. `command` is the absolute path of `node`. `args[0]` must be an absolute path
@@ -121,7 +141,9 @@ agent's settings `env` names (ignoring ASCII case), then the settings variables,
 Clauseo-owned home, after removing every other spelling of that name. codex-acp merges the user's
 `~/.codex/config.toml` (MCP servers, plugins, hooks, rules) unless `CODEX_HOME` points elsewhere,
 so Clauseo owns one and Codex signs in separately inside Clauseo (#160). The reader never reads
-inside that home and never defaults to `~/.codex`. The working folder is `<data_dir>/limits/run`, made if missing and refused when it
+inside that home, never creates it and never defaults to `~/.codex`. A missing home is
+`SignedOut` without a launch, since Codex refuses to start without one and no login can be
+there. A home that is a symlink or not a folder is refused. The working folder is `<data_dir>/limits/run`, made if missing and refused when it
 or `limits` is a symlink. Nothing in Clauseo writes there. An agent with no settings entry has no limits.
 
 ## Consequences
