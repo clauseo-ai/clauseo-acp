@@ -48,10 +48,12 @@ const MAX_LABEL = 999;
  */
 export function labelsIn(text: string): readonly string[] {
   const found = new Set<string>();
+  // The limit counts what micromark sees, so it is checked after the quote markers are dropped.
   const add = (label: string) => {
-    if (label.length > MAX_LABEL) return;
-    found.add(keyOf(label));
-    if (label.includes("\n")) found.add(keyOf(label.replace(/\n[ \t>]*/g, " ")));
+    if (label.length <= MAX_LABEL) found.add(keyOf(label));
+    if (!label.includes("\n")) return;
+    const unquoted = label.replace(/\n[ \t>]*/g, " ");
+    if (unquoted.length <= MAX_LABEL) found.add(keyOf(unquoted));
   };
   for (const escapes of [true, false]) {
     let open = -1;
@@ -93,7 +95,8 @@ function title(value: string): string {
 function labelOf(definition: Definition, source: string): string {
   const start = definition.position?.start.offset;
   if (start !== undefined && source[start] === "[") {
-    for (let at = start + 1; at < source.length && at - start <= MAX_LABEL + 1; at++) {
+    // A label holds no unescaped bracket, so this ends at its own `]` (however many quote markers it spans).
+    for (let at = start + 1; at < source.length; at++) {
       const char = source[at];
       if (char === "\\") at++;
       else if (char === "[") break;
