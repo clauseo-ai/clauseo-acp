@@ -6,16 +6,21 @@
 # - Runs only on the schedule and by hand (workflow_dispatch, which needs write access). No pull
 #   request or push event, so nothing a fork can open or push starts it.
 # - 01:23 UTC: the org's quietest hour, and done before ci.yml's nightly at 03:17.
-# - Builds every target first (a harness that no longer compiles fails the job before any fuzzing),
-#   then fuzzes each for FUZZ_SECONDS, as many at once as the runner has cores (fuzz/nightly.sh).
-# - The corpus lives in the Actions cache, cut to the inputs that add coverage each night, in one
-#   entry. The committed seeds in fuzz/seeds/ start it when there is no cache.
-# - A finding uploads its input, minimised input and log (kept 14 days), fails the job, and the
-#   report job opens one issue or comments on the open one. This repo is public, so all of that
-#   is public. Sanitizer reports are withheld: no log, no input, only the target's name.
+# - First checks nightly.sh's reporting with stand-in fuzzers (fuzz/test-nightly.sh), then builds
+#   every target (a harness that no longer compiles fails the job before any fuzzing), then
+#   fuzzes each for FUZZ_SECONDS, as many at once as the runner has cores (fuzz/nightly.sh).
+# - The corpus lives in the Actions cache. Each night restores the newest entry, cuts the corpus to
+#   the inputs that add coverage, and saves it as a new entry; older entries age out. The
+#   committed seeds in fuzz/seeds/ start it when there is none. The job summary says which.
+# - A panic, timeout or out-of-memory stop uploads its input, log and minimised input (kept 14
+#   days), fails the job, and the report job opens one issue or comments on the open one. This
+#   repo is public, so all of that is public. Withheld: sanitizer reports, the panics of Rust's
+#   UB checks, and crashes with no panic. Their log and input stay on the runner, the issue
+#   names only the target, and that night's corpus is not saved.
 #   Moving crash reports private before the private beta: clauseo-ai/clauseo-acp-private#180.
 # - The fuzz job can read the repo and nothing else. Only the report job can write, and only to
-#   issues. It checks out nothing and runs no code from the repo. No secrets are used.
+#   issues. It checks out nothing, runs no code from the repo, and posts the fuzz job's text only
+#   in the shapes nightly.sh writes. No secrets are used.
 name: fuzz
 
 on:
@@ -54,6 +59,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check what nightly.sh reports and withholds
+        working-directory: fuzz
+        run: ./test-nightly.sh
+
       - name: Install the nightly Rust from fuzz/rust-toolchain.toml
         working-directory: fuzz
         run: rustup toolchain install
@@ -62,11 +71,18 @@ jobs:
         working-directory: fuzz
         run: cargo install --locked cargo-fuzz --version "$CARGO_FUZZ_VERSION"
 
+      # cargo fuzz build has no --locked: fetching first fails the job if fuzz/Cargo.lock no
+      # longer covers the crates, instead of resolving new versions quietly.
+      - name: Fetch the locked dependencies
+        working-directory: fuzz
+        run: cargo fetch --locked
+
       - name: Build every target
         working-directory: fuzz
         run: cargo fuzz build --fuzz-dir . -O --debug-assertions
 
       - name: Restore the corpus
+        id: restore
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: fuzz/corpus
@@ -78,15 +94,21 @@ jobs:
         working-directory: fuzz
         env:
           FUZZ_SECONDS: ${{ inputs.seconds || '480' }}
+          RESTORED: ${{ steps.restore.outputs.cache-matched-key }}
         run: |
           set -euo pipefail
-          if [[ ! $FUZZ_SECONDS =~ ^[0-9]+$ ]] || ((FUZZ_SECONDS < 1 || FUZZ_SECONDS > 900)); then
+          if [[ ! $FUZZ_SECONDS =~ ^[0-9]{1,4}$ ]] || ((10#$FUZZ_SECONDS < 1 || 10#$FUZZ_SECONDS > 900)); then
             echo "seconds must be a whole number from 1 to 900" >&2
             exit 1
           fi
-          ./nightly.sh "$FUZZ_SECONDS"
-          cat out/summary.md >>"$GITHUB_STEP_SUMMARY"
+          ./nightly.sh "$((10#$FUZZ_SECONDS))"
+          {
+            echo "Corpus: ${RESTORED:-none in the cache, so the run started from fuzz/seeds/}"
+            echo
+            cat out/summary.md
+          } >>"$GITHUB_STEP_SUMMARY"
           echo "found=$(cat out/found)" >>"$GITHUB_OUTPUT"
+          echo "withheld=$(cat out/withheld)" >>"$GITHUB_OUTPUT"
           if [[ -s out/title.txt ]]; then
             delimiter="issue-$(openssl rand -hex 16)"
             {
@@ -101,28 +123,28 @@ jobs:
             } >>"$GITHUB_STEP_SUMMARY"
           fi
 
-      # Saved on finding nights too: the corpus never holds a crashing input (libFuzzer writes those
-      # to fuzz/artifacts/), and it keeps the night's coverage.
+      # The corpus never holds a crashing input (libFuzzer writes those to fuzz/artifacts/), so it
+      # is saved on finding nights too, but not after a withheld finding: fork pull requests can
+      # restore this cache, and the corpus holds the inputs that crash was found from.
       - name: Save the corpus
-        if: always() && steps.run.outcome == 'success'
+        if: always() && steps.run.outcome == 'success' && steps.run.outputs.withheld != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: fuzz/corpus
           key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload the findings
-        if: steps.run.outputs.found == 'true'
+        if: always() && hashFiles('fuzz/out/upload/**') != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-findings-${{ github.run_id }}-${{ github.run_attempt }}
           path: fuzz/out/upload/
           retention-days: 14
-          if-no-files-found: ignore
 
       - name: Fail on a finding
         if: steps.run.outputs.found == 'true'
         run: |
-          echo "fuzzing found crashes; see the job summary" >&2
+          echo "fuzzing found problems; see the job summary" >&2
           exit 1
 
   report:
@@ -134,8 +156,10 @@ jobs:
     permissions:
       issues: write # to open the fuzz issue or comment on it
     steps:
-      # One issue at a time: the open one carrying the marker gets a comment, otherwise a new one
-      # opens. A failure with no findings (a build that breaks, a step that errors) reports too.
+      # One issue at a time: the open issue this workflow opened gets a comment, otherwise a new
+      # one opens. A failure with no finding (a build that breaks, a step that errors) reports too.
+      # The fuzz job's title and text are used only in the shapes nightly.sh writes; anything else
+      # gets the generic text.
       - name: Open or update the fuzz issue
         env:
           GH_TOKEN: ${{ github.token }}
@@ -147,16 +171,21 @@ jobs:
         run: |
           set -euo pipefail
           marker='<!-- fuzz-nightly -->'
-          if [[ $FOUND == true ]]; then
+          title="nightly fuzz: the job failed"
+          text="The fuzz job failed. The run below has the details."
+          title_re='^nightly fuzz: ([a-z_]+ (panicked|timed out|ran out of memory|crashed|stopped with an error)|findings in [a-z_]+(, [a-z_]+)*)$'
+          # shellcheck disable=SC2016 # the backticks in line_re are literal, not command substitution
+          line_re='^- `[a-z_]+`( panicked at `[^`]{0,300}`|: an input ran past its timeout\.|: an input went over the memory limit \(2048 MB\)\.| crashed\. Its report and input are not posted\.|: the fuzzer stopped with an error before its time was up\.)$'
+          if [[ $FOUND == true && $FINDING_TITLE =~ $title_re && -n $FINDING_TEXT ]] &&
+            (($(printf '%s\n' "$FINDING_TEXT" | wc -l) <= 7)) &&
+            ! printf '%s\n' "$FINDING_TEXT" | grep -Evq "$line_re"; then
             title=$FINDING_TITLE
             text=$FINDING_TEXT
-          else
-            title="nightly fuzz: the job failed before fuzzing finished"
-            text="The fuzz job failed without a finding, so a build or a step broke."
           fi
           printf '%s\n%s\n\nRun: %s\n' "$marker" "$text" "$RUN_URL" >body.md
-          number=$(gh issue list --state open --limit 200 --json number,body \
-            --jq "map(select(.body | startswith(\"$marker\"))) | .[0].number // empty")
+          number=$(gh api -X GET "repos/$GH_REPO/issues" -f state=open -f creator='github-actions[bot]' \
+            -f per_page=100 --jq "map(select(.pull_request == null and .user.login == \"github-actions[bot]\"
+              and ((.body // \"\") | startswith(\"$marker\")))) | .[0].number // empty")
           if [[ -n $number ]]; then
             printf '%s\n\n' "$title" | cat - body.md >comment.md
             gh issue comment "$number" --body-file comment.md

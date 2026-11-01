@@ -23,6 +23,10 @@
 //!   - index: `Matter::open` always succeeds. An index that does not read is logged and rebuilt,
 //!     and the timeline keeps the one checkpoint that `create` made.
 #![no_main]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "fuzz harness, not app code: fuzz_target! and its scratch folder write with std::fs"
+)]
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};

@@ -30,6 +30,10 @@
 //! `MAX_RAW_ENCODE_DEPTH`, on purpose (crates/protocol/src/raw.rs). An encode error that says
 //! "nest deeper than" is therefore skipped, and any other encode error fails.
 #![no_main]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "fuzz harness, not app code: fuzz_target! writes its debug file with std::fs"
+)]
 
 use std::fmt::Debug;
 use std::str::FromStr;

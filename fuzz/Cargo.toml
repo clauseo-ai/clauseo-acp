@@ -27,11 +27,6 @@ rusqlite = { version = "0.40", features = ["bundled", "blob"] }
 zstd = { version = "0.14.3", default-features = false }
 sha1_smol = "1"
 
-# The repo's clippy.toml bans the std file calls that write through the crate's write module.
-# The harnesses write only their own fixtures and scratch folders, so they allow those calls.
-[lints.clippy]
-disallowed_methods = "allow"
-
 [profile.release]
 debug = 1
 

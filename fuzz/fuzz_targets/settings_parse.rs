@@ -20,6 +20,10 @@
 //!   5. when `apply_ui_patch` fails, the user file does not parse as a JSON object.
 
 #![no_main]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "fuzz harness, not app code: fuzz_target! writes its debug file with std::fs"
+)]
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;

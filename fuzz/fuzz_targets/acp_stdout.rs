@@ -23,6 +23,10 @@
 //! EOF. An agent text chunk is at most 1 MiB, the cap the crate documents. Inputs are at most
 //! 64 KiB (`-max_len`), so that cap cannot be reached here.
 #![no_main]
+#![expect(
+    clippy::disallowed_methods,
+    reason = "fuzz harness, not app code: fuzz_target! writes its debug file with std::fs"
+)]
 
 use std::io;
 use std::path::PathBuf;
