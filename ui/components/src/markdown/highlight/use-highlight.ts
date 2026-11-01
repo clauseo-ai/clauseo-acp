@@ -1,5 +1,5 @@
 // The hook a code block uses: the block's tokens once the worker has them, else null and the block shows plain text.
-import { useContext, useEffect, useState } from "react";
+import { startTransition, useContext, useEffect, useState } from "react";
 import type { HighlightClient } from "./client.ts";
 import { HighlightClientContext } from "./context.ts";
 import type { Lines } from "./languages.ts";
@@ -29,8 +29,9 @@ export function useHighlight(
     if (!finished || known) return;
     let live = true;
     void client.highlight(code, lang).then((lines) => {
-      // Null leaves the block plain, as it already is: no state change and no render.
-      if (live && lines) setState({ key, lines });
+      // Null leaves the block plain, as it already is: no state change and no render. Tokens commit as a
+      // transition, so typing or scrolling is not held behind a large block's spans.
+      if (live && lines) startTransition(() => setState({ key, lines }));
     });
     return () => {
       live = false;

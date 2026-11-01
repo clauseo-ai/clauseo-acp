@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { createHighlightClient } from "./client.ts";
+import { createHighlightClient, MAX_CHARS, MAX_LINES } from "./client.ts";
 import { fakeFactory } from "./worker-fixture.ts";
 import type { Lines } from "./languages.ts";
 
@@ -159,4 +159,46 @@ test("a worker that fails to start or crashes leaves every block plain, and is n
   await expect(Promise.all(blocks)).resolves.toEqual([null, null]);
   await expect(crashing.highlight("c", "md")).resolves.toBeNull();
   expect(factory.workers).toHaveLength(1);
+});
+
+test("a block over the line or character cap stays plain and never reaches the worker", async () => {
+  const factory = fakeFactory();
+  const client = createHighlightClient(factory);
+  const lines = Array.from({ length: MAX_LINES + 1 }, () => "x").join("\n");
+  await expect(client.highlight(lines, "bash")).resolves.toBeNull();
+  await expect(client.highlight("y".repeat(MAX_CHARS + 1), "bash")).resolves.toBeNull();
+  expect(client.peek(lines, "bash")).toBeUndefined();
+  expect(factory.workers).toHaveLength(0);
+  // At the caps it is still coloured.
+  const atCap = client.highlight(Array.from({ length: MAX_LINES }, () => "x").join("\n"), "bash");
+  expect(factory.workers[0]?.asked).toHaveLength(1);
+  factory.workers[0]?.answer(TOKENS);
+  await expect(atCap).resolves.toEqual(TOKENS);
+});
+
+test("the LRU also drops its oldest blocks once their code passes the character limit", async () => {
+  const factory = fakeFactory();
+  const client = createHighlightClient({ ...factory, limitChars: 35 });
+  for (const code of ["a".repeat(10), "b".repeat(10), "c".repeat(10)]) {
+    const done = client.highlight(code, "json");
+    factory.workers[0]?.answer(TOKENS);
+    await done;
+  }
+  expect(client.peek("a".repeat(10), "json")).toBeUndefined();
+  expect(client.peek("b".repeat(10), "json")).toEqual(TOKENS);
+  expect(client.peek("c".repeat(10), "json")).toEqual(TOKENS);
+});
+
+test("an answer refills the restart budget, so misses spread over a session never turn colouring off", async () => {
+  const factory = fakeFactory();
+  const client = createHighlightClient({ ...factory, timeoutMs: 10, restarts: 1 });
+  for (let round = 0; round < 5; round++) {
+    const slow = client.highlight(`slow ${round}`, "sql");
+    await vi.advanceTimersByTimeAsync(10);
+    await expect(slow).resolves.toBeNull();
+    const fine = client.highlight(`fine ${round}`, "sql");
+    factory.workers.at(-1)?.answer(TOKENS);
+    await expect(fine).resolves.toEqual(TOKENS);
+  }
+  expect(factory.workers).toHaveLength(6);
 });
