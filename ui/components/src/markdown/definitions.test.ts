@@ -76,6 +76,14 @@ test.each([
   ["a backslash ending a code span before a reference", "`x\\`[foo]\n\n[foo]: /u\n"],
   ["a full and a collapsed reference", "[text][Foo] and [Foo][]\n\n[foo]: /u\n"],
   ["a reference inside link text", "[a [b] c][d]\n\n[b]: /b\n\n[d]: /d\n"],
+  [
+    "a long label over 400 quote lines, under 999 characters without the markers",
+    `> x [${"a\n> ".repeat(400)}]\n\n[${"a ".repeat(400)}]: /u\n`,
+  ],
+  [
+    "a long definition label over 400 quote lines",
+    `[${"a ".repeat(400)}]\n\n> [${"a\n> ".repeat(400)}]: /u\n`,
+  ],
 ])("block by block renders as in one piece: %s", (_, text) => {
   expect(normalise(htmlOf(createAnswer("t").update(text, false)))).toBe(normalise(unsplit(text)));
 });
