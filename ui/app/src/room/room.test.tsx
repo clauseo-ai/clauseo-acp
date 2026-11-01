@@ -12,7 +12,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { MatterSummary } from "../transport/protocol.ts";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
 import { uuid } from "../testing/stream-script.ts";
-import { DEFAULT_UI } from "./display-store.ts";
+import { detailed, fakeNext } from "./fake-next.ts";
 import type { PaperSummary, UiSettings } from "./host-next.ts";
 import { Room } from "./room.tsx";
 import { connectRoom } from "./start.ts";
@@ -44,14 +44,8 @@ function fake(matters: MatterSummary[], papers?: PaperSummary[]): FakeTransport 
       throw new Error("not scripted");
     },
   };
-  if (papers !== undefined) {
-    h.next = {
-      query: (query) =>
-        query === "get_settings"
-          ? { settings: { ui: DEFAULT_UI, locked: [] } }
-          : { papers: { papers, skipped: [], truncated: false } },
-    };
-  }
+  if (papers !== undefined)
+    h.next = fakeNext({ matters: () => matters.map((m) => detailed(m)), papers });
   return new FakeTransport(h);
 }
 
@@ -117,7 +111,9 @@ test("the frame has the toolbar, the rail slot, the work and the wall, and no wi
   const win = host?.querySelector(".room-window");
   expect(win?.querySelector("header.room-top .room-lead .room-rail-toggle")).not.toBeNull();
   expect(win?.querySelector("main.room-centre")?.childElementCount).toBe(0);
-  expect(win?.querySelector(".room-rail")?.childElementCount).toBe(0);
+  // the rail (rail.tsx): New matter at its head, the matter's row, the scratch matter at its foot
+  expect(win?.querySelector("nav.room-rail [data-testid='new-matter']")).not.toBeNull();
+  expect(win?.querySelectorAll("nav.room-rail [data-testid='matter-row']")).toHaveLength(1);
   for (const gone of [
     ".room-lights",
     ".room-caption",
