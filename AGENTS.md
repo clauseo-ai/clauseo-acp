@@ -40,8 +40,8 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - `crates/reducer`: the pure fold from events to state and view changes, and snapshots; its gungraun bench is `crates/reducer_bench` (Linux).
 - `crates/settings`: settings, data folders and the policy layer.
 - `crates/store`: the event log, snapshots, blobs and receipts in one SQLite file.
-- `ui/app`: the React app; `VITE_CLAUSEO_WINDOW=room` builds `src/room/`. Tauri APIs only in `src/transport/`.
-- `ui/components`: parts. Strings: ids `U<n>-NN` in `ui/app/src/review/registry.tsx`, status in `copy-approvals.json`; `build:review` shows, `copy:check` gates release.
+- `ui/app`: the React app. `VITE_CLAUSEO_WINDOW=room` builds `src/room/`. Tauri APIs only in `src/transport`.
+- `ui/components`: tokens, icons, words, controls, parts. New strings get ids in `ui/app/src/review/registry.tsx`; `build:review` shows them, `copy:check` gates release.
 - `ui/e2e`: Playwright tests of the real app over CDP on Windows, and the speed scoreboard's code. `cargo xtask check` typechecks it and runs its unit tests; no lint or write rule yet (#86).
 - `xtask`: checks, build timing, budgets. Builds without any app crate. Frozen: no new checks.
 
