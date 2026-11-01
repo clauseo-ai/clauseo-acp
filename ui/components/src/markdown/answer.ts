@@ -137,12 +137,19 @@ export function createAnswer(scope: string): Answer {
   const options = { clobberPrefix: `${scope}-`, handlers: { html: htmlAsText } };
 
   /**
+   * A view's cache key: its parse input, and its source when that differs, so a finished block never
+   * keeps the view (and the fallback text) of the streaming text that parsed the same.
+   */
+  const keyOf = (source: string, input: string) =>
+    source === input ? input : `${input}\u0000${source}`;
+
+  /**
    * A block's view. A tree too deep to walk safely, or any error on the way, shows the block's source as
    * plain text instead: one bad block never takes the answer down (markdown.tsx adds an error boundary).
    * `source` and `input` are as capped (nesting.ts); the view's `source` and text are as written.
    */
   const toView = (source: string, input: string): BlockView =>
-    views.get(input, () => {
+    views.get(keyOf(source, input), () => {
       const shown = restore(source);
       const fallback = { source: shown, input, hast: plainText(shown), streaming: false };
       try {
@@ -159,7 +166,7 @@ export function createAnswer(scope: string): Answer {
 
   /** The streaming last block's view: the same hast, its links inert. */
   const toTailView = (source: string, input: string): BlockView =>
-    tails.get(input, () => ({ ...toView(source, input), streaming: true }));
+    tails.get(keyOf(source, input), () => ({ ...toView(source, input), streaming: true }));
 
   /**
    * The document's definitions, from each block's own; while streaming, the last block's do not count yet.
@@ -225,7 +232,7 @@ export function createAnswer(scope: string): Answer {
         const tail = streaming && index === last;
         const before = previous[index];
         if (before && index < reusable && !tail && block === lastBlocks[index]) {
-          views.keep(before.input);
+          views.keep(keyOf(block, before.input));
           return before;
         }
         if (!tail) return toView(block, inputOf(block, lines));
