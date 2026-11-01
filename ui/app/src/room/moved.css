@@ -1,0 +1,25 @@
+/* matters/moved (design/03-system/src/pages/matters/matters.css, .mat-moved and .mat-gate): the moved folder's line,
+   centred on a well at the reading column's top, and the composer's gate in the composer's place */
+.room-moved {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: var(--s2);
+  max-width: var(--empty-measure);
+  margin: var(--s7) auto 0;
+  padding: var(--s5);
+  border-radius: var(--r-card);
+  background: var(--well);
+}
+.room-moved-act {
+  margin-top: var(--s2);
+}
+.room-gate {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2) var(--s3);
+  padding-left: var(--s3);
+}
