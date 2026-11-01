@@ -133,36 +133,38 @@ describe.each(["not loaded", "loaded"])("entity table %s", (state) => {
     expect(characterEntitiesLoaded()).toBe(state === "loaded");
   });
 
-  test.each([true, false])("every case passes G4's DOM checks (streaming %s)", (streaming) => {
-    renderCases(streaming);
-    const failures: string[] = [];
-    for (const c of CASES) {
-      const el = host.querySelector(`[data-case="${c.id}"]`);
-      if (!el) throw new Error(`${c.id} not rendered`);
-      failures.push(...failuresIn(c.id, el));
-      const text = el.textContent ?? "";
-      for (const literal of c.text ?? [])
-        if (!text.includes(literal))
-          failures.push(`${c.id}: raw HTML not shown as text ("${literal}")`);
-      const images = el.querySelectorAll("img").length;
-      if (images !== (c.images ?? 0))
-        failures.push(`${c.id}: ${images} <img>, expected ${c.images ?? 0}`);
-      // The hint goes with a live link; while streaming, the case is the last block and its links are inert.
-      if (
-        !streaming &&
-        c.linkHost &&
-        !(el.querySelector('[data-clauseo="link-host"]')?.textContent ?? "").includes(c.linkHost)
-      ) {
-        failures.push(`${c.id}: real host ${c.linkHost} not shown next to the link text`);
+  test.each([true, false])(
+    "every case passes G4's DOM checks (streaming %s)",
+    (streaming) => {
+      renderCases(streaming);
+      const failures: string[] = [];
+      for (const c of CASES) {
+        const el = host.querySelector(`[data-case="${c.id}"]`);
+        if (!el) throw new Error(`${c.id} not rendered`);
+        failures.push(...failuresIn(c.id, el));
+        const text = el.textContent ?? "";
+        for (const literal of c.text ?? [])
+          if (!text.includes(literal))
+            failures.push(`${c.id}: raw HTML not shown as text ("${literal}")`);
+        const images = el.querySelectorAll("img").length;
+        if (images !== (c.images ?? 0))
+          failures.push(`${c.id}: ${images} <img>, expected ${c.images ?? 0}`);
+        // The hint goes with a live link; while streaming, the case is the last block and its links are inert.
+        if (
+          !streaming &&
+          c.linkHost &&
+          !(el.querySelector('[data-clauseo="link-host"]')?.textContent ?? "").includes(c.linkHost)
+        ) {
+          failures.push(`${c.id}: real host ${c.linkHost} not shown next to the link text`);
+        }
       }
-    }
-    if (g4.__g4clobber !== undefined || document.getElementById("__g4clobber"))
-      failures.push("dom-clobber: __g4clobber reachable");
-    expect(failures).toEqual([]);
-    expect(pwned).toEqual([]);
-  },
-  // About 2 s alone; under load past the default 5 s, so it gets the per-case test's 30 s.
-  30_000,
+      if (g4.__g4clobber !== undefined || document.getElementById("__g4clobber"))
+        failures.push("dom-clobber: __g4clobber reachable");
+      expect(failures).toEqual([]);
+      expect(pwned).toEqual([]);
+    },
+    // About 2 s alone; under load past the default 5 s, so it gets the per-case test's 30 s.
+    30_000,
   );
 
   test("every link click and middle click is cancelled; allowed URLs go to the host, nothing else does", () => {
