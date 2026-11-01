@@ -38,6 +38,9 @@ mod codex_plans;
 #[path = "host/commands.rs"]
 mod commands;
 #[cfg(test)]
+#[path = "host/guard_hook.rs"]
+mod guard_hook;
+#[cfg(test)]
 #[path = "host/limits.rs"]
 mod limits;
 #[cfg(test)]

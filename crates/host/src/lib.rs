@@ -29,12 +29,17 @@
 //!   No agent inherits a `GIT_*` variable. `docs/decisions/0025-codex-in-acp-and-host.md`.
 //! - The session start: `session/load` when the agent offers it, else `session/resume`, else
 //!   `session/new`.
+//! - The pre-write guard ([`pre_write_guard`]): the check Claude Code's `PreToolUse` hook runs
+//!   before each file edit and shell command, refusing a write to a file of the matter that
+//!   Word holds open, in every permission mode; and that hook's entry in the session's `_meta`
+//!   when [`HostConfig::with_pre_write_guard`] names the program to run.
 //!
 //! # Interface
 //!
 //! - [`Host::start`] with a [`HostConfig`] ([`HostConfig::new`] takes the settings and the
 //!   [`Launcher`](clauseo_process::Launcher); [`HostConfig::with_profile_hook`],
 //!   [`HostConfig::with_refused_folders`], [`HostConfig::with_managed_mcp_path`],
+//!   [`HostConfig::with_pre_write_guard`],
 //!   [`HostConfig::with_clock`] and [`HostConfig::with_ids`] set the rest). It returns once
 //!   start-up is done: the store is open in `Effective::data_dir()`, the Scratch matter exists,
 //!   and start-up reconciliation has committed. A second start on the same data folder fails
@@ -68,6 +73,11 @@
 //!   `HostConfig::with_codex_hooks`,
 //!   `EncodedEvent::ptr_eq` and
 //!   `HostHandle::abort_for_test`, which ends the thread with no flush and no graceful stop.
+//! - [`codex_hook_config`]: the `hooks` value for Codex's config that runs the same guard,
+//!   trusted by its own `state` entry; R15 merges it into `CODEX_CONFIG`.
+//! - [`pre_write_guard::run`] reads one hook input object and writes the deny object or nothing;
+//!   [`pre_write_guard::FLAG`] is the argument the hook passes. It runs in the hook's own
+//!   process, with no host thread.
 //! - Stage B's `limits` plugs in as a new actor input and publishes the existing
 //!   `HostEvent::AccountLimitsChanged` to app subscribers (`actor/app.rs`'s `publish`).
 //!
@@ -92,9 +102,9 @@
 //! # Depends on
 //!
 //! `protocol`, `reducer`, `store`, `matters`, `process`, `acp`, `settings`, `limits` (its
-//! `CODEX_OVERRIDES`), `async-channel`,
-//! `async-io`, `futures`, `uuid`, `serde_json`, `tracing` and `thiserror`. Never `tauri`,
-//! `tokio` or `agents`.
+//! `CODEX_OVERRIDES`), `async-channel`, `async-io`, `futures`, `uuid`, `serde_json`, `tracing`,
+//! `thiserror`, `dunce` and `sha2` (the Codex hook's trust hash, 0024). Never `tauri`, `tokio`
+//! or `agents`.
 //!
 //! # Start reading
 //!
@@ -127,6 +137,7 @@ mod handle;
 mod ids;
 mod matter_worker;
 mod pipeline;
+pub mod pre_write_guard;
 mod principal;
 mod rate;
 mod sent;
@@ -136,6 +147,7 @@ mod view;
 mod window;
 mod write;
 
+pub use agent::loads::codex_hook_config;
 pub use agent::session_folder;
 #[cfg(feature = "test-support")]
 pub use clock::ManualClock;
