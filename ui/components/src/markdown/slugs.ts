@@ -82,10 +82,7 @@ export function numberSlugs(perBlock: readonly (readonly string[])[]): string[][
  * One block's final slugs, after the blocks whose slugs `occurrences` has seen (updated in place): what
  * numberSlugs does for each block, so the answer can carry on from the blocks it numbered last update.
  */
-export function numberBlockSlugs(
-  slugs: readonly string[],
-  occurrences: Map<string, number>,
-): string[] {
+function numberBlockSlugs(slugs: readonly string[], occurrences: Map<string, number>): string[] {
   return slugs.map((value) => {
     if (value === "") return value;
     let result = value;
@@ -127,4 +124,52 @@ export function withSlugs(
     return children ? { ...node, children } : node;
   };
   return copy(root);
+}
+
+/** What createSlugNumbering numbers: a view's sanitised hast and its headings' own slugs. */
+type Sluggable = { readonly hast: Root; readonly slugs?: readonly string[] };
+
+/**
+ * A function giving the views of an answer, in order, every heading's id numbered across the answer: a view
+ * whose slugs an earlier heading took becomes a copy with `-1`, `-2`… ids (made by `id`), made again only
+ * when those change. It keeps what it made of every view but the last: while those stay the same views (a
+ * stream only changes its last block or two), the numbering carries on from there, instead of going over
+ * every heading of the answer on every update.
+ */
+export function createSlugNumbering<V extends Sluggable>(
+  id: (value: string) => string,
+): (views: readonly V[]) => readonly V[] {
+  const renumbered = new WeakMap<V, { key: string; view: V }>();
+  const renumber = (view: V, slugs: readonly string[]): V => {
+    if (slugs.every((value, at) => value === view.slugs![at])) return view;
+    const key = slugs.join("\u0000");
+    const known = renumbered.get(view);
+    if (known?.key === key) return known.view;
+    const copy = { ...view, hast: withSlugs(view.hast, slugs, id) };
+    renumbered.set(view, { key, view: copy });
+    return copy;
+  };
+  let before: {
+    views: readonly V[];
+    count: number;
+    out: readonly V[];
+    occurrences: ReadonlyMap<string, number>;
+  } = { views: [], count: 0, out: [], occurrences: new Map() };
+  return (views) => {
+    const last = before;
+    let from = 0;
+    while (from < last.count && views[from] === last.views[from]) from++;
+    const reuse = from === last.count;
+    if (!reuse) from = 0;
+    const occurrences = new Map(reuse ? last.occurrences : undefined);
+    const out = reuse ? last.out.slice(0, last.count) : [];
+    for (let index = from; index < views.length; index++) {
+      if (index === views.length - 1)
+        before = { views, count: index, out, occurrences: new Map(occurrences) };
+      const view = views[index]!;
+      const slugs = view.slugs ?? [];
+      out.push(slugs.length === 0 ? view : renumber(view, numberBlockSlugs(slugs, occurrences)));
+    }
+    return out;
+  };
 }
