@@ -93,6 +93,17 @@ function startsFrom(text: string, from: number, endOf: EndOf): number[] {
   return starts;
 }
 
+/**
+ * The block as a string of its own. A slice of a long string can keep the whole of it alive (V8's sliced
+ * strings and JSC's substrings point into their parent), and a block cut from one update's text outlives
+ * that text: in its views, in the answer's cache keys, and in this splitter's kept blocks. Two 40 KB answers
+ * streamed in 1,300 deltas each kept about 250 old copies of the whole answer, 7 to 9 MB in Node. Joining a
+ * character first makes the engine flatten the block into a new string, which the slice then points into.
+ */
+function ownCopy(block: string): string {
+  return ` ${block}`.slice(1);
+}
+
 /** One splitter per answer: its state is the previous split, which the next call extends. */
 export function createSplitter(endOf: EndOf): (text: string) => readonly string[] {
   let input = "";
@@ -106,7 +117,7 @@ export function createSplitter(endOf: EndOf): (text: string) => readonly string[
     const kept = blocks.slice(0, keep);
     const fresh: string[] = [];
     for (let index = keep; index < next.length; index++) {
-      fresh.push(text.slice(next[index] ?? 0, next[index + 1] ?? text.length));
+      fresh.push(ownCopy(text.slice(next[index] ?? 0, next[index + 1] ?? text.length)));
     }
     input = text;
     starts = next;
