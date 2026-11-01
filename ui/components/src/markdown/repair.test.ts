@@ -84,6 +84,17 @@ test.each([
   },
 );
 
+test("a repair never makes a link the raw text does not have: [a][b] with only a defined", () => {
+  // The raw text `[a][b]` is literal (a label follows `[a]`); cutting `[b]`'s brackets alone would leave
+  // `[a]b`, a shortcut link the finished text never shows.
+  for (const tailText of ["see [a][b]", "see [a][b", "see **[a][b]"]) {
+    const html = tail(`[a]: https://example.com\n\n${tailText}`);
+    expect(html, tailText).not.toContain("<a");
+    expect(html).not.toMatch(/[[\]]/);
+  }
+  expect(tail("[a]: https://example.com\n\nsee [a] and")).toContain("<a");
+});
+
 test("a half link is never a link, and a link appears only once its destination is complete", () => {
   const text = "See [the Act](https://indiacode.nic.in/act) for the rest.";
   for (let end = 1; end <= text.length; end++) {

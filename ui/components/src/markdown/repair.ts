@@ -418,28 +418,68 @@ function closers(input: string, root: Root, from: number) {
   return { edits, insert, end };
 }
 
-/** `input` with `edits` applied and `insert` placed at `end`. */
-function apply(input: string, edits: Edit[], end: number, insert: string): string {
+/** Where a stretch of an output came from: `length` characters at `out`, copied from `at` in the input. */
+type Kept = { out: number; at: number; length: number };
+
+/**
+ * `input` with `edits` applied and `insert` placed at `end`. Each stretch copied from `input` is noted
+ * in `kept`, if given, so an offset of the result can be traced back (originOf).
+ */
+function apply(input: string, edits: Edit[], end: number, insert: string, kept?: Kept[]): string {
   edits.sort((a, b) => a.start - b.start);
   let out = "";
+  const copy = (from: number, to: number) => {
+    if (to <= from) return;
+    kept?.push({ out: out.length, at: from, length: to - from });
+    out += input.slice(from, to);
+  };
   let at = 0;
   let inserted = insert === "";
   for (const edit of edits) {
     if (edit.end <= at) continue;
     const start = Math.max(at, edit.start);
     if (!inserted && end <= start) {
-      out += input.slice(at, end) + insert;
+      copy(at, end);
+      out += insert;
       at = end;
       inserted = true;
     }
-    out += input.slice(at, start) + edit.text;
+    copy(at, start);
+    out += edit.text;
     at = edit.end;
   }
   if (!inserted) {
-    out += input.slice(at, Math.max(at, end)) + insert;
+    copy(at, Math.max(at, end));
+    out += insert;
     at = Math.max(at, end);
   }
-  return out + input.slice(at);
+  copy(at, input.length);
+  return out;
+}
+
+/** The input offset an output offset was copied from (apply's `kept`), or -1 for inserted text. */
+function originOf(kept: readonly Kept[], offset: number): number {
+  for (const stretch of kept)
+    if (offset >= stretch.out && offset < stretch.out + stretch.length)
+      return stretch.at + offset - stretch.out;
+  return -1;
+}
+
+/** The links of `root` from `from` on: where each starts (its `[`) and where its text's `]` is. */
+function linksIn(root: Root, text: string, from: number): { start: number; close: number }[] {
+  const links: { start: number; close: number }[] = [];
+  const stack: Nodes[] = [root];
+  for (let node = stack.pop(); node; node = stack.pop()) {
+    if (node.type === "link" || node.type === "linkReference") {
+      const start = node.position?.start.offset;
+      if (start !== undefined && start >= from && text[start] === "[") {
+        const after = node.children.at(-1)?.position?.end.offset ?? start + 1;
+        links.push({ start, close: text.indexOf("]", after) });
+      }
+    }
+    if ("children" in node) for (const child of node.children) stack.push(child as Nodes);
+  }
+  return links;
 }
 
 /**
@@ -453,16 +493,57 @@ export function repairTail(
   from: number,
   parse: (text: string) => Root,
 ): string | undefined {
-  const cuts = halfConstructs(input, parse(input), from);
-  const text = cuts.length === 0 ? input : apply(input, cuts, input.length, "");
-  const { edits, insert, end } = closers(
-    text,
-    cuts.length === 0 ? parse(input) : parse(text),
-    from,
-  );
+  const raw = parse(input);
+  const cuts = halfConstructs(input, raw, from);
+  const first: Kept[] = [];
+  const text = cuts.length === 0 ? input : apply(input, cuts, input.length, "", first);
+  const { edits, insert, end } = closers(text, cuts.length === 0 ? raw : parse(text), from);
   if (cuts.length === 0 && edits.length === 0 && insert === "") return undefined;
-  const out = edits.length === 0 && insert === "" ? text : apply(text, edits, end, insert);
-  const block = out.slice(from);
+  const second: Kept[] = [];
+  const out = edits.length === 0 && insert === "" ? text : apply(text, edits, end, insert, second);
+  let block = out.slice(from);
   const bare = BARE_MARKER.exec(`\n${block}`);
-  return bare ? block.slice(0, bare.index) : block;
+  if (bare) block = block.slice(0, bare.index);
+  return withoutNewLinks(
+    input,
+    raw,
+    from,
+    block,
+    (offset) => {
+      const inText = second.length === 0 ? offset : originOf(second, offset);
+      return inText < 0 || first.length === 0 ? inText : originOf(first, inText);
+    },
+    parse,
+  );
+}
+
+/**
+ * `block` (the repaired tail) without any link the raw text does not have there: cutting a half link can
+ * leave a label before it free to be a shortcut link (`[a][b]` with only `a` defined is text, but `[a]b`
+ * links), which the finished text would never show. Such a link's brackets are cut too. `origin` traces
+ * an offset of the repaired input back to `input`; the repaired input is parsed as the view parses it.
+ */
+function withoutNewLinks(
+  input: string,
+  raw: Root,
+  from: number,
+  block: string,
+  origin: (offset: number) => number,
+  parse: (text: string) => Root,
+): string {
+  if (!block.includes("]")) return block;
+  const repaired = input.slice(0, from) + block;
+  const links = linksIn(parse(repaired), repaired, from);
+  if (links.length === 0) return block;
+  const before = new Set(linksIn(raw, input, from).map((link) => link.start));
+  const cut = new Set<number>();
+  for (const link of links) {
+    if (before.has(origin(link.start))) continue;
+    cut.add(link.start - from);
+    if (link.close >= 0) cut.add(link.close - from);
+  }
+  if (cut.size === 0) return block;
+  let out = "";
+  for (let at = 0; at < block.length; at++) if (!cut.has(at)) out += block[at];
+  return out;
 }
