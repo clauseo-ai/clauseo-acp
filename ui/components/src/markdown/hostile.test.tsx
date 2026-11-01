@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
-// The 28 hostile cases from G4, rendered by the renderer in happy-dom, with every check of G4's conformance
-// page that a DOM can show: no forbidden element, links and images only through our components, allowed
-// protocols only, every id prefixed, no event-handler attribute, raw HTML visible as text, the link-host
-// hint, no clobbered global, every link click cancelled and handed to the host. Each case is also streamed
-// in 16-character deltas, checked after every delta. What needs a real engine (CSP and Trusted Types
-// violations, a trusted click not navigating, network requests, a payload running) is the private harness's,
-// which imports hostile-cases.ts too.
+// The hostile cases (G4's 28 and the ones added since), rendered by the renderer in happy-dom, with every
+// check of G4's conformance page that a DOM can show: no forbidden element, links and images only through
+// our components, allowed protocols only, every id prefixed, no event-handler attribute, raw HTML visible
+// as text, the link-host hint, no clobbered global, every link click cancelled and handed to the host.
+// Each case is also streamed in 16-character deltas, checked after every delta. What needs a real engine
+// (CSP and Trusted Types violations, a trusted click not navigating, network requests, a payload running)
+// is the private harness's, which imports hostile-cases.ts too.
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
@@ -91,9 +91,9 @@ function renderCases(streaming: boolean) {
   );
 }
 
-test("the corpus holds G4's 28 cases, each with its own id", () => {
-  expect(CASES).toHaveLength(28);
-  expect(new Set(CASES.map((c) => c.id)).size).toBe(28);
+test("the corpus holds G4's 28 cases and the ones added since, each with its own id", () => {
+  expect(CASES[27]?.id).toBe("unterminated-fence");
+  expect(new Set(CASES.map((c) => c.id)).size).toBe(CASES.length);
 });
 
 test.each([true, false])("every case passes G4's DOM checks (streaming %s)", (streaming) => {
