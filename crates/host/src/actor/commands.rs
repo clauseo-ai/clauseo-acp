@@ -70,6 +70,8 @@ pub(crate) enum AfterCommand {
     },
     /// A turn command's continuation.
     Turn(turn::TurnTag),
+    /// The commit logging a restore of this matter.
+    Restore(MatterId),
 }
 
 /// `dispatch`: shape, principal, then the receipt lookup (or joining a duplicate).
@@ -237,12 +239,16 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
             turn,
             files,
         } => turn_command(actor, ctx, thread, TurnCommand::UndoStep { turn, files }),
+        HostCommand::RestoreVersion {
+            matter,
+            checkpoint,
+            scope,
+        } => turn::restore_version(actor, *ctx, matter, checkpoint, scope),
         HostCommand::EditQueuedPrompt { .. }
         | HostCommand::RemoveQueuedPrompt { .. }
         | HostCommand::SendQueuedNow { .. }
         | HostCommand::ResumeQueue { .. }
-        | HostCommand::RestartAgent { .. }
-        | HostCommand::RestoreVersion { .. } => {
+        | HostCommand::RestartAgent { .. } => {
             let refusal = Error::refused(ErrorCode::CommandInvalid, "not built yet");
             actor.finish_command(ctx.id, Err(refusal));
         }
@@ -285,6 +291,9 @@ pub(super) fn command_committed(
             _,
         ) => {}
         (AfterCommand::Turn(tag), outcome) => turn::committed(actor, tag, outcome),
+        (AfterCommand::Restore(matter), outcome) => {
+            turn::restore_committed(actor, matter, outcome.is_ok());
+        }
     }
     let result = outcome
         .map(|()| answer)

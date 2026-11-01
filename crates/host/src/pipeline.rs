@@ -16,8 +16,14 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
-use clauseo_protocol::{CommandId, DomainEvent, Envelope, EventId, Seq, StreamId, Timestamp};
-use clauseo_store::{BlobIn, Commit, Committed, MatterRow, Receipt, SnapshotIn, ThreadRow};
+use clauseo_matters::CommitId;
+use clauseo_protocol::{
+    CheckpointRecorded, CommandId, DomainEvent, Envelope, EventId, MatterId, Seq, StreamId,
+    Timestamp,
+};
+use clauseo_store::{
+    BlobIn, CheckpointRow, Commit, Committed, MatterRow, Receipt, SnapshotIn, ThreadRow,
+};
 
 use crate::error::Error;
 use crate::ids::Ids;
@@ -90,6 +96,33 @@ impl Draft {
 
     fn span(&self, stream: StreamId) -> Option<&Span> {
         self.spans.iter().find(|span| span.stream == stream)
+    }
+}
+
+/// An event of a matter's stream and, for a `CheckpointRecorded`, the checkpoint's commit:
+/// [`Pipeline::push_matter`] writes its `CheckpointRow` in the same commit as the event.
+#[derive(Debug, Clone)]
+pub(crate) struct MatterEvent {
+    event: DomainEvent,
+    commit: Option<CommitId>,
+}
+
+impl MatterEvent {
+    /// `recorded` with its commit, so the commit gets its row.
+    pub(crate) fn checkpoint(recorded: CheckpointRecorded, commit: CommitId) -> Self {
+        Self {
+            event: recorded.into(),
+            commit: Some(commit),
+        }
+    }
+
+    /// An event without a row: `OutsideEdits`, `VersionRestored`, or a `CheckpointRecorded`
+    /// whose row may already exist.
+    pub(crate) fn plain(event: impl Into<DomainEvent>) -> Self {
+        Self {
+            event: event.into(),
+            commit: None,
+        }
     }
 }
 
@@ -234,6 +267,36 @@ impl<T> Pipeline<T> {
                 first: seq,
                 last: seq,
             }),
+        }
+        Ok(seq)
+    }
+
+    /// Adds `event` to `draft` in `matter`'s stream, as [`Pipeline::push`] does, and for a
+    /// checkpoint record with a commit its `CheckpointRow`, carrying the event's `seq`.
+    pub(crate) fn push_matter(
+        &self,
+        draft: &mut Draft,
+        matter: MatterId,
+        event: MatterEvent,
+        command_id: Option<CommandId>,
+        ts: Timestamp,
+        ids: &mut Ids,
+    ) -> Result<Seq, Error> {
+        let MatterEvent { event, commit } = event;
+        let row =
+            if let (DomainEvent::CheckpointRecorded(recorded), Some(commit)) = (&event, commit) {
+                Some((recorded.checkpoint(), commit))
+            } else {
+                None
+            };
+        let seq = self.push(draft, StreamId::Matter(matter), event, command_id, ts, ids)?;
+        if let Some((id, commit)) = row {
+            draft.commit.checkpoints.push(CheckpointRow {
+                id,
+                matter,
+                commit_oid: commit.as_str().to_owned(),
+                seq,
+            });
         }
         Ok(seq)
     }

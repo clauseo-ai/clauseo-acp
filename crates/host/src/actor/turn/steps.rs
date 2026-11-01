@@ -7,9 +7,9 @@ use std::path::Path;
 
 use clauseo_matters::{CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
-    CheckpointKind, CheckpointRecorded, CommandOutcome, ContentBlock, Delivery, DomainEvent,
-    ErrorCode, MatterId, OutsideEdits, PromptBlock, StopReason, StreamId, ThreadId, TurnFailed,
-    TurnId, TurnQueued, TurnStarted,
+    CheckpointKind, CheckpointRecorded, CommandOutcome, ContentBlock, Delivery, ErrorCode,
+    MatterId, OutsideEdits, PromptBlock, StopReason, StreamId, ThreadId, TurnFailed, TurnId,
+    TurnQueued, TurnStarted,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -20,13 +20,14 @@ use super::close::TurnClose;
 use super::out::Out;
 use super::state::STORE_DETAIL;
 use super::{
-    Current, End, JobKind, Then, TurnJob, TurnPhase, TurnTag, current, end, failure, host_stopping,
-    known, lost, matter_of, prompt, state,
+    Current, End, Holder, JobKind, Then, TurnJob, TurnPhase, TurnTag, current, end, failure,
+    host_stopping, known, lost, matter_of, prompt, state,
 };
 use crate::build;
 use crate::error::Error;
 use crate::file_link;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
+use crate::pipeline::MatterEvent;
 
 /// Step 1: `SendPrompt` on a thread with no current turn logs `UserMessage` with the receipt.
 pub(super) fn send_prompt(
@@ -66,7 +67,7 @@ fn refuse_busy(actor: &Actor, thread: ThreadId) -> Result<(), Error> {
     let own_undo = actor
         .matters
         .get(&entry.row.matter)
-        .is_some_and(|matter| matter.turns.holder == Some(thread));
+        .is_some_and(|matter| matter.turns.holder == Some(Holder::Thread(thread)));
     if entry.turn.current.is_some() || entry.turn.closing.is_some() || own_undo {
         return Err(Error::refused(
             ErrorCode::ThreadTurnRunning,
@@ -212,9 +213,15 @@ pub(super) fn on_launched(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             .ok_or_else(|| lost("a matter"))?
             .turns;
         let Some(holder) = turns.holder else {
-            turns.holder = Some(thread);
+            turns.holder = Some(Holder::Thread(thread));
             before_turn(actor, thread, turn);
             return Ok(());
+        };
+        // A restore belongs to no thread: a turn waiting for one is logged behind its own
+        // thread, the form start-up reconciliation uses too.
+        let holder = match holder {
+            Holder::Thread(holder) => holder,
+            Holder::Restore => thread,
         };
         turns.queue.push_back(thread);
         if let Some(current) = current(actor, thread) {
@@ -423,9 +430,9 @@ fn before_events(
     thread: ThreadId,
     turn: TurnId,
     done: TurnCheckpoint,
-) -> Result<Vec<DomainEvent>, Error> {
+) -> Result<Vec<MatterEvent>, Error> {
     if let Some(recorded) = known::unrecorded(actor, matter, &done)? {
-        return Ok(vec![recorded.into()]);
+        return Ok(vec![recorded]);
     }
     let checkpoint = done.checkpoint;
     let CheckpointOutcome::Created(id) = checkpoint.outcome else {
@@ -434,13 +441,13 @@ fn before_events(
     let recorded =
         CheckpointRecorded::new(id, CheckpointKind::BeforeTurn, Some(thread), Some(turn))
             .map_err(|error| Error::Internal(error.to_string()))?;
-    let mut events = vec![recorded.into()];
+    let mut events = vec![MatterEvent::checkpoint(recorded, checkpoint.commit)];
     if !checkpoint.changes.is_empty() {
         let edits = OutsideEdits {
             checkpoint: id,
             files: checkpoint.changes,
         };
-        events.push(edits.into());
+        events.push(MatterEvent::plain(edits));
     }
     Ok(events)
 }

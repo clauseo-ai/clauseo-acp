@@ -64,7 +64,7 @@ fn create_then_checkpoints_on_the_matter_thread() {
 
     let (tag, reply, name) = rx.recv().unwrap();
     assert_eq!((tag, name.as_deref()), (1, Some("clauseo-matter")));
-    assert!(matches!(reply, MatterReply::Created(Ok(()))), "{reply:?}");
+    assert!(matches!(reply, MatterReply::Created(Ok(_))), "{reply:?}");
     let (tag, reply, _) = rx.recv().unwrap();
     assert_eq!(tag, 2);
     let MatterReply::BeforeTurn(Ok(before)) = reply else {

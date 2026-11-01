@@ -70,6 +70,32 @@ relying on what you remember about them." The paths are the undo and restore che
 since the thread's last `TurnStarted`. An undo keeps the writer and leaves the note unchanged
 until `StepUndone` is durable; a failed undo commit is retried once, as a turn's end is.
 
+### Versions
+
+- Every checkpoint gets its `CheckpointRow` (id, matter, git commit, the `seq` of its
+  `CheckpointRecorded`) in the same commit as that event: the import, before-turn, after-turn,
+  outside-edits, undo and restore checkpoints. A `Reused` checkpoint the host records late gets
+  its row only when the matter's stream is loaded; otherwise the host cannot tell whether a row
+  exists, and a second row of one id would fail the whole commit.
+- `RestoreVersion` holds the matter's writer for the whole restore, and is refused with
+  `matter.turn_running` while a turn or an undo holds it or turns wait. A turn reaching step 3
+  meanwhile logs `TurnQueued` behind its own thread, the form start-up reconciliation uses. The
+  version must be the matter's (`command.invalid`). One commit of the matter's stream logs the
+  outside-edits checkpoint, `CheckpointRecorded { Restore }` and `VersionRestored`; a failed one
+  is retried once when the stream drains. A restore with nothing to write logs only the outside
+  edits and answers `VersionRestored` with the reused id, as `UndoStep` does: the missing
+  `VersionRestored` event, not the outcome, tells the client nothing was written.
+- The files a restore wrote join the note of every thread of the matter once its commit is
+  durable. `VersionRestored` does not list them, so this part of the note is held in memory and
+  lost if the host restarts before that thread's next prompt (clauseo-acp-private#183 makes it
+  durable).
+- `CompareVersions` answers `QueryResult::FileChanges` from `matters`'s compare of two
+  checkpoints. A compare with the folder now is not reachable through this query.
+- `HostQuery::PreviewRestore { matter, checkpoint, scope }` is new and additive (0002): it
+  answers `QueryResult::RestorePreview { changes, added_since, kept, locked }` from
+  `Matter::preview_restore` and writes nothing. `locked` lists the files a program holds, which a
+  `RestoreVersion` would refuse with `matter.file_locked`, its message naming them.
+
 ### Cancel, reconciliation, shutdown
 
 - `Cancel` stops the current turn only. A turn not yet started ends `TurnEnded { Cancelled }`. A

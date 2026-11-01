@@ -74,7 +74,13 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
 /// The undo note's text for the next prompt, and the note cleared for the turn starting now.
 fn take_note(actor: &mut Actor, thread: ThreadId) -> Option<String> {
     ensure_note(actor, thread);
-    let paths = state(actor, thread)?.note.replace(Vec::new())?;
+    let state = state(actor, thread)?;
+    let undone = state.note.replace(Vec::new()).unwrap_or_default();
+    let restored = std::mem::take(&mut state.restored);
+    let paths = undo_note::paths_since_last_turn([
+        NoteInput::Undone { restored: &undone },
+        NoteInput::Restored { paths: &restored },
+    ]);
     undo_note::note_text(&paths)
 }
 

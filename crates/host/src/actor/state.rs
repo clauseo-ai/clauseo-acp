@@ -3,7 +3,7 @@
 
 use std::sync::mpsc;
 
-use clauseo_protocol::{CommandId, CommandOutcome};
+use clauseo_protocol::{CommandId, CommandOutcome, MatterId};
 use clauseo_store::{MatterRow, ThreadRow};
 
 use super::commands::AfterCommand;
@@ -26,6 +26,8 @@ pub(crate) enum Tag {
     Snapshot,
     /// A turn's commit.
     Turn(turn::TurnTag),
+    /// The retry of the commit logging a restore of this matter.
+    Restore(MatterId),
 }
 
 /// A matter the host knows.

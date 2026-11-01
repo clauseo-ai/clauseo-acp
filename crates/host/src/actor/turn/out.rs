@@ -7,7 +7,7 @@ use clauseo_protocol::{CommandId, DomainEvent, MatterId, Seq, StreamId, ThreadId
 use super::super::{Actor, Tag};
 use super::{Then, TurnTag, end, text};
 use crate::error::Error;
-use crate::pipeline::Draft;
+use crate::pipeline::{Draft, MatterEvent};
 
 /// A commit being built for one thread.
 pub(super) struct Out {
@@ -57,17 +57,17 @@ impl Out {
         )
     }
 
-    /// Adds an event to a matter's stream.
+    /// Adds an event to a matter's stream, with its checkpoint row if it carries a commit.
     pub(super) fn push_matter(
         &mut self,
         actor: &mut Actor,
         matter: MatterId,
-        event: impl Into<DomainEvent>,
+        event: MatterEvent,
     ) -> Result<Seq, Error> {
-        actor.pipeline.push(
+        actor.pipeline.push_matter(
             &mut self.draft,
-            StreamId::Matter(matter),
-            event.into(),
+            matter,
+            event,
             self.command,
             self.ts,
             &mut actor.ids,

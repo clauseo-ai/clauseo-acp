@@ -110,7 +110,8 @@ fn an_agent_exit_while_queued_detaches_after_turn_ended() {
     let thread = rig.thread();
     let other = rig.thread_by(2);
     let matter = rig.matter();
-    rig.actor.matters.get_mut(&matter).unwrap().turns.holder = Some(other);
+    rig.actor.matters.get_mut(&matter).unwrap().turns.holder =
+        Some(crate::actor::turn::Holder::Thread(other));
     let _turn = send_prompt(&mut rig, 10, thread);
 
     // The agent's end waits until the turn is queued behind the other thread.

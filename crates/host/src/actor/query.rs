@@ -1,6 +1,6 @@
 //! Queries: answered from host memory (`ListMatters`, `ListThreads`), a loaded stream
-//! (`PageEntries`, and `CompareVersions`'s check that both versions are the matter's) or a
-//! store read on a task of its own (`ReadBlob`).
+//! (`PageEntries`), a loaded stream and then the matter's thread (`CompareVersions`,
+//! `PreviewRestore`) or a store read on a task of its own (`ReadBlob`).
 
 use clauseo_protocol::{
     CheckpointId, CompactString, ErrorCode, HostQuery, MatterId, MatterSummary, Principal,
@@ -8,12 +8,13 @@ use clauseo_protocol::{
 };
 
 use super::Actor;
-use super::input::Reply;
+use super::input::{MatterTag, Reply};
 use super::streams::StreamSlot;
 use futures::task::LocalSpawnExt;
 
 use crate::blob_read;
 use crate::error::Error;
+use crate::matter_worker::MatterJob;
 use crate::principal::{Access, authorize};
 
 /// Answers one query.
@@ -72,26 +73,24 @@ pub(super) fn query(
             );
         }
         HostQuery::CompareVersions { matter, from, to } => {
-            if let Err(error) = actor.check_matter(matter) {
-                let _gone = reply.send(Err(error));
-                return;
-            }
-            let stream = StreamId::Matter(matter);
-            actor.with_loaded(
-                stream,
-                Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
-                    let answer = loaded
-                        .and_then(|()| own_versions(actor, matter, [from, to]))
-                        .and_then(|()| {
-                            Err(Error::refused(
-                                ErrorCode::CommandInvalid,
-                                "comparing versions is not built yet",
-                            ))
-                        });
-                    let _gone = reply.send(answer);
-                    actor.release(stream);
-                }),
+            matter_query(
+                actor,
+                matter,
+                [from, to],
+                MatterJob::Compare { from, to },
+                reply,
             );
+        }
+        HostQuery::PreviewRestore {
+            matter,
+            checkpoint,
+            ref scope,
+        } => {
+            let job = MatterJob::Preview {
+                from: checkpoint,
+                scope: scope.clone(),
+            };
+            matter_query(actor, matter, [checkpoint, checkpoint], job, reply);
         }
         HostQuery::ReadBlob { hash, offset, len } => {
             let store = actor.store.clone();
@@ -111,8 +110,46 @@ pub(super) fn query(
     }
 }
 
+/// A query R8 answers (`CompareVersions`, `PreviewRestore`): checks on the loaded matter
+/// stream that both checkpoints are the matter's, then sends `job` to the matter's thread,
+/// whose answer goes to `reply` (`matters.rs`). The compare query names two checkpoints, so
+/// R8's compare with the folder (`CompareSide::Folder`) is not reachable from here.
+fn matter_query(
+    actor: &mut Actor,
+    matter: MatterId,
+    versions: [CheckpointId; 2],
+    job: MatterJob,
+    reply: Reply<QueryResult>,
+) {
+    if let Err(error) = actor.check_matter(matter) {
+        let _gone = reply.send(Err(error));
+        return;
+    }
+    let stream = StreamId::Matter(matter);
+    actor.with_loaded(
+        stream,
+        Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
+            let checked = loaded
+                .and_then(|()| own_versions(actor, matter, versions))
+                .and_then(|()| actor.matter_worker(matter));
+            match checked {
+                // A refused send drops the tag and with it `reply`: the caller sees the host
+                // closed.
+                Ok(worker) => match worker.send(job, MatterTag::Query(reply)) {
+                    Ok(()) => actor.work.matter_jobs += 1,
+                    Err(error) => tracing::warn!(%matter, %error, "a query was not sent"),
+                },
+                Err(error) => {
+                    let _gone = reply.send(Err(error));
+                }
+            }
+            actor.release(stream);
+        }),
+    );
+}
+
 /// `command.invalid` unless every checkpoint is a version in `matter`'s loaded timeline.
-fn own_versions(
+pub(super) fn own_versions(
     actor: &Actor,
     matter: MatterId,
     checkpoints: [CheckpointId; 2],

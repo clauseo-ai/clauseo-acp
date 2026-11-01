@@ -47,5 +47,8 @@ mod subscribe;
 #[path = "host/turn.rs"]
 mod turn;
 #[cfg(test)]
+#[path = "host/versions.rs"]
+mod versions;
+#[cfg(test)]
 #[path = "host/writer.rs"]
 mod writer;

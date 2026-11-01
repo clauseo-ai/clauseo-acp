@@ -20,6 +20,7 @@ mod known;
 mod out;
 mod prompt;
 mod reconcile;
+mod restore;
 mod route;
 mod session;
 mod state;
@@ -45,6 +46,9 @@ use crate::pipeline::Failure;
 
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
 pub(crate) use out::flush_text;
+pub(crate) use restore::{
+    RestoreAsk, committed as restore_committed, on_restored, restore_version,
+};
 pub(crate) use route::{TurnCommand, command};
 
 /// How long a cancelled turn waits for the agent's answer before the host stops the agent.
@@ -63,6 +67,9 @@ pub(crate) struct TurnState {
     /// The files put back since the last `TurnStarted`; `None` until first needed, then
     /// read from the loaded state.
     note: Option<Vec<MatterPath>>,
+    /// The files restores of the thread's matter wrote since the last `TurnStarted`, held in
+    /// memory only (`restore.rs`); the next prompt's note adds them.
+    restored: Vec<MatterPath>,
     /// Start-up reconciliation of this thread is in progress.
     reconciling: bool,
     /// The last turn, until the commit holding its `TurnEnded` returns `Ok`. A new prompt is
@@ -87,12 +94,23 @@ struct Closing {
 /// A matter's turn state: who holds its writer and who waits for it. One per matter.
 #[derive(Debug, Default)]
 pub(crate) struct MatterTurns {
-    /// The thread whose turn or undo holds the writer.
-    holder: Option<ThreadId>,
+    /// The turn, undo or restore holding the writer.
+    holder: Option<Holder>,
     /// Threads whose turns wait for the writer, first come first served.
     queue: VecDeque<ThreadId>,
     /// Start-up repairs held until every thread of the matter has been looked at.
     repairs: reconcile::Repairs,
+    /// A restore R8 has done, until the commit logging it returns `Ok` or its retry returns.
+    restore: Option<Box<restore::RestoreLog>>,
+}
+
+/// What holds a matter's writer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Holder {
+    /// A thread's turn or undo.
+    Thread(ThreadId),
+    /// A `RestoreVersion`, which belongs to no thread.
+    Restore,
 }
 
 /// The current turn of a thread.
@@ -335,8 +353,9 @@ pub(crate) fn committed(actor: &mut Actor, tag: TurnTag, outcome: Result<(), &Fa
 /// `stream`'s in-flight commits have all returned after a failure: its pending head is the
 /// durable head again and its sent view has rolled back. "Store failures" try once more here.
 pub(crate) fn unblocked(actor: &mut Actor, stream: StreamId) {
-    if let StreamId::Thread(thread) = stream {
-        failure::on_unblocked(actor, thread);
+    match stream {
+        StreamId::Thread(thread) => failure::on_unblocked(actor, thread),
+        StreamId::Matter(matter) => restore::retry(actor, matter),
     }
 }
 
@@ -413,7 +432,8 @@ pub(crate) fn keeps_loaded(actor: &Actor, thread: ThreadId) -> bool {
 }
 
 /// Whether `matter`'s stream, once loaded to check a reused checkpoint, stays loaded: while a
-/// turn or an undo holds its writer, so the turn's next checkpoint reads it without a reload.
+/// turn, an undo or a restore holds its writer, so the turn's next checkpoint reads it without
+/// a reload.
 pub(crate) fn keeps_matter_loaded(actor: &Actor, matter: MatterId) -> bool {
     actor
         .matters

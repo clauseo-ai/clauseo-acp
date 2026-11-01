@@ -11,7 +11,7 @@ use clauseo_protocol::{
 use clauseo_store::{Committed, Receipt, Reopen, SnapshotIn};
 use futures::channel::oneshot;
 
-use super::turn::{TurnInput, TurnJob, TurnTimer};
+use super::turn::{RestoreAsk, TurnInput, TurnJob, TurnTimer};
 use crate::agent::AgentInput;
 use crate::error::Error;
 use crate::handle::{EventSubscription, Subscription};
@@ -80,6 +80,10 @@ pub(crate) enum MatterTag {
     Open,
     /// A turn's job.
     Turn(TurnJob),
+    /// A `RestoreVersion`'s restore.
+    Restore(Box<RestoreAsk>),
+    /// A query R8 answers: `CompareVersions`, `PreviewRestore`.
+    Query(Reply<QueryResult>),
 }
 
 /// Everything else the actor reads, posted by its own tasks and by other threads.
