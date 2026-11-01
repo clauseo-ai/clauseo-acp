@@ -208,7 +208,7 @@ export const CASES: HostileCase[] = [
     id: "nested-image-brackets",
     markdown: "![".repeat(1000) + "a" + "](u)".repeat(1000),
     text: ["![![![", "](u)](u)"],
-    streamingText: [],
+    streamingText: ["](u)](u)"],
   },
   {
     id: "nested-link-brackets",
