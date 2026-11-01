@@ -230,6 +230,8 @@ impl Blobs {
         if durable::present(target.deflated, target.new_objects, &id, Kind::Blob, len)? {
             return Ok(Some((to_oid(&id)?, len)));
         }
+        #[cfg(test)]
+        crate::no_download::fault::between_passes(path);
         file.rewind().map_err(|err| Error::io("read", path, err))?;
         let object = target.deflated.object_path(&id);
         let made_folder = !object.parent().is_some_and(Path::is_dir);

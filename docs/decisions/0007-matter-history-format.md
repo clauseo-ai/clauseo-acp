@@ -157,9 +157,10 @@ documents with 3 changed).
   blob, and every tree and commit, is written at level 1, gix's default. A level-0 object is ordinary
   zlib that every git reads, so the rule can change later without rewriting history.
 - Hashing is gix's own collision-detecting SHA-1.
-- An object already present is never written again once its header decodes with the expected kind
-  and size; one whose file is newer than the ref file (left by a run that never published) is
-  inflated and hashed in full first. A torn one is written again.
+- An object already present is never written again once it inflates in full to the expected kind
+  and size and hashes to its id, however old its file is (one left by a run that never published,
+  or one from before the last publish that a revert names again). A torn or wrong one is written
+  again from the bytes the checkpoint has in hand.
 - Retention: every version is kept. No pruning, squashing, gc or repack. `Retention::KeepAll` is
   passed at open, so a later policy is a new variant.
 
@@ -168,8 +169,8 @@ documents with 3 changed).
 gix 0.89 syncs no loose object (it writes a temp file and renames it), so Clauseo syncs, with one full
 flush per checkpoint:
 
-- macOS: a plain `fsync` on each object file the checkpoint wrote or found already present (an
-  object a killed run left behind may never have been synced), and on each `objects/xx` folder it
+- macOS: a plain `fsync` on each object file the checkpoint wrote or found already present and
+  sound by that full check (an object a killed run left behind may never have been synced), and on each `objects/xx` folder it
   touched (and `objects/` when a new `xx` folder was made); one `F_BARRIERFSYNC`; then the ref moves (checked
   against the expected previous commit) and the index is written, each by temp file and rename, each
   plain-`fsync`ed with its folder; then one `F_FULLFSYNC`. Objects reach the disk before the ref that

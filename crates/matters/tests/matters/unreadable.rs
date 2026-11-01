@@ -10,7 +10,7 @@ use clauseo_matters::Error;
 use clauseo_protocol::ErrorCode;
 
 use crate::fixture::{
-    Fixture, added, assert_no_temp_files, cid, created, deleted, meta, tools, undo,
+    Fixture, added, assert_no_temp_files, cid, created, deleted, meta, modified, tools, undo,
 };
 use crate::support;
 
@@ -83,21 +83,27 @@ fn a_deletion_beside_a_folder_that_does_not_read_is_reported() {
     assert_eq!(changes, [deleted("a.txt", b"a")]);
 }
 
-/// A file the walk lists but cannot stat (its folder lists but cannot be searched) fails the
-/// checkpoint; it is never left out as if deleted.
+/// A folder that lists but cannot be entered (mode `0o444`: the walk lists its files but
+/// cannot stat them) is kept as unread, as a folder that does not list is: the checkpoint goes
+/// on, a change beside it is recorded, and its files are never reported deleted. They keep
+/// their entries as they were, so once the folder opens again they are clean and an edit to
+/// one is found.
 #[test]
-fn a_listed_file_that_cannot_be_stat_fails_the_checkpoint() {
+fn a_folder_that_lists_but_cannot_be_entered_is_kept_as_unread() {
     let fx = Fixture::new("unreadable-stat");
     fx.write("a.txt", "a");
     fx.write("sub/b.txt", "b");
     let mut matter = fx.import();
 
+    fx.write("a.txt", "a2");
     let locked = Mode::set(fx.file("sub"), 0o444);
-    let err = matter.before_turn(&meta(2)).unwrap_err();
-    assert_eq!(io_kind(&err).0, io::ErrorKind::PermissionDenied, "{err:?}");
-    assert_eq!(matter.timeline().len(), 1);
+    let changes = created(matter.before_turn(&meta(2)).unwrap(), 2);
+    assert_eq!(changes, [modified("a.txt", b"a", b"a2")]);
     drop(locked);
-    assert_eq!(matter.before_turn(&meta(3)).unwrap().outcome.id(), cid(1));
+    assert_eq!(matter.before_turn(&meta(3)).unwrap().outcome.id(), cid(2));
+    fx.write("sub/b.txt", "b2");
+    let changes = created(matter.before_turn(&meta(4)).unwrap(), 4);
+    assert_eq!(changes, [modified("sub/b.txt", b"b", b"b2")]);
 }
 
 /// `edited_since` fails with an I/O error when a target's folder cannot be searched: it never

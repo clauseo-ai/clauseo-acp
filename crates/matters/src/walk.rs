@@ -76,7 +76,9 @@ pub(crate) fn classify(
 /// or do not make a [`MatterPath`] (with a warning). An entry gone before its stat is skipped,
 /// and so is a subfolder gone before it is read. A subfolder that does not read (permission
 /// denied, say, or not downloaded) is listed in [`Listing::unread`], with a warning unless it
-/// is not downloaded; the root not reading is an error. Returns `Ok(None)` once `cancel` is
+/// is not downloaded; so is one that lists but cannot be entered (an entry's stat is denied, as
+/// for mode `0o444`), with the same warning and nothing of it kept from the listing. The root
+/// not reading, or not entering, is an error. Returns `Ok(None)` once `cancel` is
 /// set (checked before each folder and each entry). `guard`'s probe tells cloud-only files;
 /// the guard keeps a listing from downloading a folder.
 pub(crate) fn walk(
@@ -119,6 +121,10 @@ pub(crate) fn walk(
                 continue;
             }
         };
+        // Subfolders found in this folder are pushed after this mark, so a folder that turns
+        // out not to enter can drop them again.
+        let mark = pending.len();
+        let found = walker.found.len();
         for entry in entries {
             if walker.cancelled() {
                 return Ok(None);
@@ -139,8 +145,21 @@ pub(crate) fn walk(
                     break;
                 }
             };
-            if let Some(sub) = walker.entry(&entry, &relative)? {
-                pending.push(sub);
+            match walker.entry(&entry, &relative)? {
+                Entry::Skip => {}
+                Entry::Folder(path, sub) => pending.push((path, sub)),
+                Entry::Denied(err) if relative.is_empty() => {
+                    return Err(Error::io("stat", &entry.path(), err));
+                }
+                Entry::Denied(err) => {
+                    // Lists but cannot be entered: kept as unread, the same as a folder that
+                    // does not list, so one such folder does not stop the checkpoint.
+                    tracing::warn!(path = %dir.display(), error = %err, "skipped a folder that does not read");
+                    pending.truncate(mark);
+                    walker.found.truncate(found);
+                    unread.push(relative);
+                    break;
+                }
             }
         }
     }
@@ -148,6 +167,16 @@ pub(crate) fn walk(
     files.sort_unstable_by(|a, b| a.path.as_str().as_bytes().cmp(b.path.as_str().as_bytes()));
     unread.sort_unstable();
     Ok(Some(Listing { files, unread }))
+}
+
+/// What [`Walker::entry`] made of one entry.
+enum Entry {
+    /// Recorded as a file, or left out.
+    Skip,
+    /// A folder to read: its absolute path and its path relative to the root.
+    Folder(std::path::PathBuf, String),
+    /// Its stat was denied: the folder it is in lists but cannot be entered.
+    Denied(io::Error),
 }
 
 struct Walker<'a> {
@@ -164,26 +193,25 @@ impl Walker<'_> {
     }
 
     /// Handles one entry of a folder whose path relative to the root is `parent`: records a
-    /// file, or returns a folder to read.
-    fn entry(
-        &mut self,
-        entry: &DirEntry,
-        parent: &str,
-    ) -> Result<Option<(std::path::PathBuf, String)>, Error> {
+    /// file, returns a folder to read, or says the entry's stat was denied.
+    fn entry(&mut self, entry: &DirEntry, parent: &str) -> Result<Entry, Error> {
         let os_name = entry.file_name();
         let path = entry.path();
         let Some(name) = os_name.to_str() else {
             tracing::warn!(path = %path.display(), "skipped a name that is not UTF-8");
-            return Ok(None);
+            return Ok(Entry::Skip);
         };
         let file_type = match entry.file_type() {
             Ok(file_type) => file_type,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Entry::Skip),
+            Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
+                return Ok(Entry::Denied(err));
+            }
             Err(err) => return Err(Error::io("stat", &path, err)),
         };
         let is_dir = file_type.is_dir();
         if rules::is_excluded(name, is_dir) || (!is_dir && !file_type.is_file()) {
-            return Ok(None);
+            return Ok(Entry::Skip);
         }
         let relative = if parent.is_empty() {
             name.to_owned()
@@ -194,20 +222,23 @@ impl Walker<'_> {
             Ok(matter_path) => matter_path,
             Err(err) => {
                 tracing::warn!(path = %path.display(), error = %err, "skipped a path");
-                return Ok(None);
+                return Ok(Entry::Skip);
             }
         };
         if is_dir {
-            return Ok(Some((path, relative)));
+            return Ok(Entry::Folder(path, relative));
         }
         let metadata = match entry.metadata() {
             Ok(metadata) => metadata,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Entry::Skip),
+            Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
+                return Ok(Entry::Denied(err));
+            }
             Err(err) => return Err(Error::io("stat", &path, err)),
         };
         // The entry may have been replaced by something else since it was listed.
         let Some(kind) = classify(self.probe, &path, &metadata, self.cap) else {
-            return Ok(None);
+            return Ok(Entry::Skip);
         };
         let found = Found {
             path: matter_path,
@@ -217,7 +248,7 @@ impl Walker<'_> {
         };
         (self.progress)(&found);
         self.found.push(found);
-        Ok(None)
+        Ok(Entry::Skip)
     }
 }
 

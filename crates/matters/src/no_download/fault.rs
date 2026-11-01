@@ -4,7 +4,8 @@
 //!
 //! The hooks sit where the crate reads a file (each read call of `history/blob.rs`, after the
 //! open, as on the Mac: the open succeeds and the read fails) and lists a folder (`walk.rs`,
-//! and `writeback::Names`). On macOS the reads and the walk's listings also record the thread's
+//! and `writeback::Names`). One more hook changes a streamed file between the hash pass and the
+//! store pass of `history/blob.rs`, as an editor saving it then would. On macOS the reads and the walk's listings also record the thread's
 //! download policy at each call, so a test can check that every one ran under the guard.
 
 use std::cell::RefCell;
@@ -23,6 +24,8 @@ struct Fault {
 
 thread_local! {
     static FAULTS: RefCell<Vec<Fault>> = const { RefCell::new(Vec::new()) };
+    /// A file to overwrite in place, and its new bytes, at the next [`between_passes`] for it.
+    static CHANGES: RefCell<Vec<(PathBuf, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
     /// The file `history/blob.rs` is reading now.
     static READING: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     /// macOS: the thread's download policy at each read call and listing, in order.
@@ -60,9 +63,28 @@ pub(crate) fn failed(path: &Path) -> usize {
     })
 }
 
-/// Disarms every fault of this thread.
+/// Disarms every fault and change of this thread.
 pub(crate) fn clear() {
     FAULTS.with_borrow_mut(Vec::clear);
+    CHANGES.with_borrow_mut(Vec::clear);
+}
+
+/// Makes the next streamed store of `path` (absolute) find it overwritten in place with
+/// `bytes` after its hash pass and before its store pass. Once only.
+pub(crate) fn change_between_passes(path: &Path, bytes: &[u8]) {
+    CHANGES.with_borrow_mut(|changes| changes.push((path.to_owned(), bytes.to_vec())));
+}
+
+/// Between the two passes of a streamed file `path`: applies the change armed for it, if any.
+/// A write that fails is the test's error, so it panics.
+pub(crate) fn between_passes(path: &Path) {
+    let change = CHANGES.with_borrow_mut(|changes| {
+        let at = changes.iter().position(|(armed, _)| armed == path)?;
+        Some(changes.remove(at))
+    });
+    if let Some((path, bytes)) = change {
+        crate::write::overwrite(&path, &bytes).expect("the test's change between passes");
+    }
 }
 
 /// Says which file the next [`read`] calls are for.

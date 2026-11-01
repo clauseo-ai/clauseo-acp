@@ -1,6 +1,6 @@
 //! Objects found already present when a checkpoint stores them: a sound one is kept as it is,
-//! a torn or wrong one is written again. One modified since the last publish is inflated and
-//! hashed whole; an older one has its header checked.
+//! a torn or wrong one is written again. Each is inflated and hashed whole, whether it was
+//! modified since the last publish or before it.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -127,7 +127,7 @@ fn a_sound_object_modified_since_the_last_publish_is_kept_as_it_is() {
     }
 }
 
-/// A sound object from before the last publish passes its header check and is kept as it is.
+/// A sound object from before the last publish passes its full check and is kept as it is.
 #[test]
 fn a_sound_object_from_before_the_last_publish_is_kept_as_it_is() {
     let dir = TestDir::new("history-present-old-sound");
@@ -150,7 +150,7 @@ fn a_sound_object_from_before_the_last_publish_is_kept_as_it_is() {
 }
 
 /// An object from before the last publish whose header names another size or another kind
-/// fails its header check and is written again, so the blob reads back.
+/// fails its check and is written again, so the blob reads back.
 #[test]
 fn an_object_from_before_the_last_publish_with_a_wrong_header_is_written_again() {
     let content = b"the signed lease\n";
@@ -177,6 +177,24 @@ fn an_object_modified_since_the_last_publish_with_a_wrong_body_is_written_again(
     let dir = TestDir::new("history-present-recent-body");
     let (git_dir, store) = new_store(&dir);
     let mut store = published_at(&dir, &git_dir, store, long_ago());
+    let content = b"right bytes\n";
+    let blob = git_id("blob", content);
+    other_writer(&git_dir, Compression::BEST_SPEED)
+        .write_buf_with_known_id(Kind::Blob, b"wrong bytes\n", gix::ObjectId::Sha1(blob.0))
+        .unwrap();
+
+    assert_eq!(store_content(&dir, &mut store, content), blob);
+    assert_reads_back(&store, blob, content, "wrong body");
+}
+
+/// An object from before the last publish with the right header (same kind and size) but
+/// other bytes, as a disk or a sync tool could leave it, is inflated and hashed in full, found
+/// wrong, and written again: the checkpoint has the right bytes in hand.
+#[test]
+fn an_object_from_before_the_last_publish_with_a_wrong_body_is_written_again() {
+    let dir = TestDir::new("history-present-old-body");
+    let (git_dir, store) = new_store(&dir);
+    let mut store = published_at(&dir, &git_dir, store, far_ahead());
     let content = b"right bytes\n";
     let blob = git_id("blob", content);
     other_writer(&git_dir, Compression::BEST_SPEED)
