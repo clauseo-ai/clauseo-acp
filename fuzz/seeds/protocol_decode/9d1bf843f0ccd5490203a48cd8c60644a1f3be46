@@ -1,0 +1,1 @@
+{"schema_version":1,"eveeq":65,"ts":1760000064000,"command_id":"01900000-0000-7000-8000-000000000109","event":{"tool_call_updated":{"tool_call":"01900000-0000-7000-8000-000000000004","patch":{"status":"pending"}}}}

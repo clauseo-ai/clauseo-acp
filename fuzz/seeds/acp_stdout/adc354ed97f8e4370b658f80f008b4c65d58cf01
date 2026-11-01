@@ -1,0 +1,3 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Checking the clause. "}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"session_info_update","_meta":{"jetbrains":{"air":{"version":1,"sessionFailure":{"id":"t1:error","revision":1,"category":"limit","severity":"error","title":"You've hit your usage limit.","actions":[]}}}}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","id":"@ID","result":{"stopReason":"end_turn","_meta":{"jetbrains":{"air":{"version":1,"sessionFailure":{"id":"t1:error","revision":1,"category":"limit","severity":"error","title":"You've hit your usage limit.","actions":[]}}}}}}

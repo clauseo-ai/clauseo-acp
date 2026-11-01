@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Here is the draft clause. "}},"sessionId":"sess-1"}}
+{"jsonrpc":"2.0","id":"ID","error":{"code":-32603,"message":"You've hit your usage limit \u00b7 resets 3pm"}}

@@ -1,0 +1,1 @@
+{"schema_version":1,"event_id":"01900000-0000-7000-8000-00000000007d","stream":"thread:01900000-0000-7000-8000-000000000002","seq":25,"ts":1760000024000,"command_id":"01900000-0000-7000-8000-0000000000e1","event":{"usage_updated":{"context_used":1200,"context_size":200000,"cost":{"amount":0.42,"currency":"USD"}}}}
