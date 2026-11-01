@@ -49,6 +49,14 @@
   --relied-mark: oklch(90.84% 0.0162 82.79); /* #E6E0D5 */
   --supports-ref: oklch(92.13% 0.0233 157.57); /* #D9EADF */
   --against-ref: oklch(89.48% 0.0321 29.77); /* #F1D5D0 */
+  /* a code block's colours, one per token role (markdown/highlight); 4.5:1 or more on the well, the work and the
+     sheet, and none of them the court's red, green or yellow */
+  --code-comment: oklch(52% 0.015 75); /* #6E6860 */
+  --code-keyword: oklch(47% 0.12 345); /* #883B6A */
+  --code-string: oklch(47% 0.08 200); /* #00686C */
+  --code-constant: oklch(47% 0.11 250); /* #215D96 */
+  --code-function: oklch(47% 0.11 290); /* #5B4E94 */
+  --code-type: oklch(47% 0.09 60); /* #7F4D20 */
   /* the court's three colours keep their meaning on every surface */
   --on-colour: oklch(100% 0 0); /* #FFFFFF: words on green and red, 5.4:1 */
   --faint: rgba(35, 32, 29, 0.38); /* disabled words only */
@@ -156,6 +164,12 @@
   --relied-mark: oklch(44% 0.004 84); /* #535250 */
   --supports-ref: oklch(40% 0.05 155); /* #31503C */
   --against-ref: oklch(40% 0.055 27); /* #623C37 */
+  --code-comment: oklch(77% 0.006 75); /* #B6B4B0 */
+  --code-keyword: oklch(82% 0.08 345); /* #EBB0D0 */
+  --code-string: oklch(82% 0.07 200); /* #8DD2D6 */
+  --code-constant: oklch(82% 0.08 250); /* #9DC9F7 */
+  --code-function: oklch(82% 0.08 290); /* #C3BCF5 */
+  --code-type: oklch(82% 0.08 60); /* #EBB890 */
   --on-colour: oklch(100% 0 0); /* #FFFFFF: 5.6:1 on night green and night red */
   --faint: rgba(236, 235, 233, 0.38);
   --scrim: rgba(27, 26, 24, 0.82); /* the night ground at 82% */
@@ -391,6 +405,12 @@
   --relied-mark: oklch(90.84% 0.0162 82.79);
   --supports-ref: oklch(92.13% 0.0233 157.57);
   --against-ref: oklch(89.48% 0.0321 29.77);
+  --code-comment: oklch(52% 0.015 75);
+  --code-keyword: oklch(47% 0.12 345);
+  --code-string: oklch(47% 0.08 200);
+  --code-constant: oklch(47% 0.11 250);
+  --code-function: oklch(47% 0.11 290);
+  --code-type: oklch(47% 0.09 60);
   --on-colour: oklch(100% 0 0);
   --faint: rgba(35, 32, 29, 0.38);
   --scrim: rgba(229, 226, 220, 0.82);

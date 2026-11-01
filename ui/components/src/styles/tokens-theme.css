@@ -58,6 +58,12 @@
   --color-relied-mark: var(--relied-mark);
   --color-supports-ref: var(--supports-ref);
   --color-against-ref: var(--against-ref);
+  --color-code-comment: var(--code-comment);
+  --color-code-keyword: var(--code-keyword);
+  --color-code-string: var(--code-string);
+  --color-code-constant: var(--code-constant);
+  --color-code-function: var(--code-function);
+  --color-code-type: var(--code-type);
   --color-on-colour: var(--on-colour);
   --color-faint: var(--faint);
   --color-scrim: var(--scrim);
