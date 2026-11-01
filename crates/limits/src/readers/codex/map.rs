@@ -151,9 +151,10 @@ fn limit_window(id: &str, window: &RateLimitWindow, plan_type: &PlanType) -> Opt
 /// - `rate_limit_reached`, and any value this crate does not name: a plan window, so
 ///   `PlanWindow`.
 ///
-/// With no reached type, `spendControlReached: true` is `WorkspaceSpendCap`, and anything else
-/// is nothing reached.
+/// `spendControlReached: true` is `WorkspaceSpendCap` unless the type names credits, and with
+/// neither, nothing is reached.
 fn reached(snapshot: &RateLimitSnapshot) -> Option<LimitStopReason> {
+    let spend_control = snapshot.spend_control_reached == Some(true);
     match &snapshot.rate_limit_reached_type {
         Some(
             RateLimitReachedType::WorkspaceOwnerCreditsDepleted
@@ -163,11 +164,9 @@ fn reached(snapshot: &RateLimitSnapshot) -> Option<LimitStopReason> {
             RateLimitReachedType::WorkspaceOwnerUsageLimitReached
             | RateLimitReachedType::WorkspaceMemberUsageLimitReached,
         ) => Some(LimitStopReason::WorkspaceSpendCap),
+        Some(_) | None if spend_control => Some(LimitStopReason::WorkspaceSpendCap),
         Some(RateLimitReachedType::RateLimitReached | RateLimitReachedType::Unknown(_)) => {
             Some(LimitStopReason::PlanWindow)
-        }
-        None if snapshot.spend_control_reached == Some(true) => {
-            Some(LimitStopReason::WorkspaceSpendCap)
         }
         None => None,
     }
