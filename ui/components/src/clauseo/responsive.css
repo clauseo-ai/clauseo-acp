@@ -2,6 +2,23 @@
    composer docked to the bottom. These rules stand outside
    the cascade layers on purpose: at these widths they override the primitives' own classes, such as the search
    field's width and the Ask button's sides. */
+/* ---------- the frame contract: where the window draws its own frame (data-frame="own" on <html>, set by the room's
+   start), the toolbar is the title bar, and the host's native parts sit at fixed places in the window: the caption
+   buttons' hit-test (Windows), the traffic lights (macOS). So the toolbar never leaves the window's top, and what
+   lines up with a native part never moves with the width. ---------- */
+/* the toolbar stays at the window's top at every size, over the pinned question */
+:root[data-frame="own"] .room-top {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: var(--ground);
+}
+/* a window under the least height squeezes its columns, which scroll themselves, rather than scrolling the document and
+   the toolbar with it */
+:root[data-frame="own"] .room-window {
+  min-height: 0;
+}
+
 @variant rail-folded {
   :root {
     --rail-col: 0px;
@@ -375,5 +392,32 @@
   }
   .room-rail-toggle {
     margin-left: auto;
+  }
+}
+
+/* the frame contract, one column: the pinned question and what scrolls into view stand below the toolbar, whose height
+   the toolbar keeps on the window (--top-h); the native lights' box stays where the wide layout puts it, 20 px from the
+   window's left and its circles 20 px from its top, centred in the 52 px lead, since macOS draws them there whatever
+   the width. The narrow toolbar's padding (--s3 at the top, --s4 at the left) is made up to those by margins. */
+@variant max-mid {
+  :root[data-frame="own"] .room-pin {
+    top: var(--top-h, var(--toolbar));
+  }
+  :root[data-frame="own"] .step-question {
+    scroll-margin-top: calc(var(--top-h, var(--toolbar)) + var(--s3));
+  }
+  :root[data-frame="own"] .room-window :is(a[href], button, textarea, [tabindex]) {
+    scroll-margin-top: calc(var(--top-h, var(--toolbar)) + var(--pin-space));
+  }
+  /* the caption buttons end the first row at the window's right: where no search field pushes the tools right, Matters
+     does, as it does at a phone's width */
+  :root[data-frame="own"] .room-top:not(:has(.room-search)) .room-rail-toggle {
+    margin-left: auto;
+  }
+  :root[data-frame="own"] .room-lights[data-native] {
+    display: flex;
+    align-self: flex-start;
+    margin-top: calc((var(--lead-h) - var(--s3)) / 2 - var(--s3) - env(safe-area-inset-top));
+    margin-left: calc(var(--s5) - var(--s4) - env(safe-area-inset-left));
   }
 }

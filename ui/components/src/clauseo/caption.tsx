@@ -53,6 +53,19 @@ const CLOSE = "M0.5 0.5L9.5 9.5M9.5 0.5L0.5 9.5";
 /** Says what the window would do, where there's no window to do it. */
 const would = (what: string) => console.info(`Clauseo would ${what} the window.`);
 
+/** The window, as the app wires the caption buttons to it (ui/app's useWindowFrame): its maximised state and the three
+ * presses, each optional. */
+export type CaptionWiring = {
+  /** Optional: whether the window is maximised, as the window says. Overrides the button's own state. */
+  maximised?: boolean;
+  /** Optional: minimises the window. */
+  onMinimise?: () => void;
+  /** Optional: maximises the window, or restores it when maximised. */
+  onToggleMaximise?: () => void;
+  /** Optional: closes the window. */
+  onClose?: () => void;
+};
+
 /** Minimise, maximise or restore, and close, at the toolbar's right on Windows. Each press calls its handler where
  * one is given and otherwise logs what it would do, button by button. The middle button follows `maximised` where it
  * is given (Restore while true, Maximise while false); without it the button keeps its own state, starting at
@@ -72,15 +85,7 @@ export function CaptionButtons({
    * message box close alone. All three by default. */
   only?: "all" | "minimise-close" | "close";
   className?: string;
-  /** Optional: whether the window is maximised, as the window says. Overrides the button's own state. */
-  maximised?: boolean;
-  /** Optional: minimises the window. */
-  onMinimise?: () => void;
-  /** Optional: maximises the window, or restores it when maximised. */
-  onToggleMaximise?: () => void;
-  /** Optional: closes the window. */
-  onClose?: () => void;
-}) {
+} & CaptionWiring) {
   const w = useUiWords();
   const [own, setOwn] = useState(startMaximised);
   const maximised = shown ?? own;

@@ -34,9 +34,9 @@ const runFrames = async () => {
 
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
-let frame: WindowFrame | null = null;
+let frame: WindowFrame | null | undefined = null;
 
-function Probe({ controls }: { controls: WindowControls }) {
+function Probe({ controls }: { controls: WindowControls | null }) {
   const latest = useWindowFrame(controls);
   useEffect(() => {
     frame = latest;
@@ -44,7 +44,7 @@ function Probe({ controls }: { controls: WindowControls }) {
   return null;
 }
 
-async function mount(controls: WindowControls) {
+async function mount(controls: WindowControls | null) {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -157,4 +157,13 @@ test("a slow reply overtaken by a later read's does not stand", async () => {
   await act(async () => replies[1]?.(true));
   await act(async () => replies[0]?.(false));
   expect(frame?.maximised).toBe(true);
+});
+
+test("without controls there is no frame to wire, and nothing listens for resizes", async () => {
+  const listen = vi.spyOn(window, "addEventListener");
+  await mount(null);
+  expect(frame).toBeUndefined();
+  expect(listen.mock.calls.filter(([type]) => type === "resize")).toEqual([]);
+  await resize();
+  expect(frames.size).toBe(0);
 });

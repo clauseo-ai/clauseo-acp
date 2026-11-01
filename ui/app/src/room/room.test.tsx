@@ -37,9 +37,14 @@ const paper = (n: number, path: string): PaperSummary => ({
   modified: 1_730_000_000_000,
 });
 
-/** A fake host with these matters and, where given, H8's papers. */
-function fake(matters: MatterSummary[], papers?: PaperSummary[]): FakeTransport {
+/** A fake host with these matters and, where given, H8's papers; on Linux unless `platform` says. */
+function fake(
+  matters: MatterSummary[],
+  papers?: PaperSummary[],
+  platform?: FakeHost["platform"],
+): FakeTransport {
   const h: FakeHost = {
+    ...(platform === undefined ? {} : { platform }),
     query: (query) => {
       if (query === "list_matters") return { matters };
       throw new Error("not scripted");
@@ -115,7 +120,7 @@ test("while list_matters is on its way, and after it fails, the toolbar has no h
   }
 });
 
-test("the frame has the toolbar, the rail slot, the work and the wall, and no window controls, search or plan", async () => {
+test("the frame has the toolbar, the rail slot, the work and the wall, and no search or plan", async () => {
   await mount(fake([NEWER]));
   const win = host?.querySelector(".room-window");
   expect(win?.querySelector("header.room-top .room-lead .room-rail-toggle")).not.toBeNull();
@@ -123,16 +128,67 @@ test("the frame has the toolbar, the rail slot, the work and the wall, and no wi
   // the rail (rail.tsx): New matter at its head, the matter's row, the scratch matter at its foot
   expect(win?.querySelector("nav.room-rail [data-testid='new-matter']")).not.toBeNull();
   expect(win?.querySelectorAll("nav.room-rail [data-testid='matter-row']")).toHaveLength(1);
-  for (const gone of [
-    ".room-lights",
-    ".room-caption",
-    ".room-search",
-    ".room-pair",
-    ".room-plan",
-    '[role="toolbar"]',
-  ]) {
+  for (const gone of [".room-search", ".room-pair", ".room-plan", '[role="toolbar"]']) {
     expect(win?.querySelector(gone), gone).toBeNull();
   }
+});
+
+test("the window draws its own frame: caption buttons off the Mac, painted lights on it, outside the desktop app", async () => {
+  const info = vi.spyOn(console, "info").mockImplementation(() => {});
+  try {
+    await mount(fake([NEWER], undefined, "windows"));
+    expect(host?.querySelector(".room-lights")).toBeNull();
+    const max = host?.querySelector<HTMLButtonElement>(
+      'header.room-top .room-caption [data-caption="maximise"]',
+    );
+    expect(max).not.toBeNull();
+    // no desktop window to call: the button's own fallback
+    await act(async () => max?.click());
+    expect(info).toHaveBeenCalledWith("Clauseo would maximise the window.");
+    await act(async () => root?.unmount());
+    host?.remove();
+    await mount(fake([NEWER], undefined, "mac"));
+    const lights = host?.querySelector("header.room-top .room-lead .room-lights");
+    expect(lights).not.toBeNull();
+    expect(lights?.hasAttribute("data-native")).toBe(false);
+    expect(host?.querySelector(".room-caption")).toBeNull();
+  } finally {
+    info.mockRestore();
+  }
+});
+
+test("the room keeps the toolbar's height on the window as --top-h", async () => {
+  const seen: ResizeObserverCallback[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(cb: ResizeObserverCallback) {
+        seen.push(cb);
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  try {
+    await mount(fake([NEWER]));
+    const top = host?.querySelector<HTMLElement>("header.room-top");
+    const win = host?.querySelector<HTMLElement>(".room-window");
+    if (top === null || top === undefined) throw new Error("no toolbar");
+    Object.defineProperty(top, "offsetHeight", { configurable: true, value: 112 });
+    for (const cb of seen) cb([], {} as ResizeObserver);
+    // on the room's window node (the scope's own element, around .room-window), so every part inherits it
+    const holder = host?.querySelector<HTMLElement>('[style*="--top-h"]');
+    expect(holder?.style.getPropertyValue("--top-h")).toBe("112px");
+    expect(win !== null && win !== undefined && holder?.contains(win)).toBe(true);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test("connecting the room marks <html> for the frame contract", async () => {
+  delete document.documentElement.dataset.frame;
+  await mount(fake([NEWER]));
+  expect(document.documentElement.dataset.frame).toBe("own");
 });
 
 test("Matters controls the rail slot and opens and folds it", async () => {

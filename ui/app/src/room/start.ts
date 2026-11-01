@@ -1,5 +1,6 @@
-// The room's start, before its first render: its display settings on <html> (display-store.ts), the host's OS, and in
-// dev and e2e builds the hooks for checks by hand (dev-hooks.ts).
+// The room's start, before its first render: its display settings on <html> (display-store.ts), data-frame="own" on
+// <html> for the frame contract (responsive.css), the host's OS, and in dev and e2e builds the hooks for checks by hand
+// (dev-hooks.ts).
 import { showDisplay, startDisplay } from "@clauseo/components/lib/display.ts";
 import { guessPlatform, hostPlatform } from "../platform.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
@@ -42,6 +43,8 @@ export function connectRoom(
     ...(override === undefined ? {} : { override }),
   });
   connected = { transport, store };
+  // the room draws its own frame, the toolbar as the title bar: responsive.css's frame contract keys on this
+  document.documentElement.dataset.frame = "own";
   // The window's chrome follows the OS the host reports; nothing on the page waits for it.
   hostPlatform(transport).then(
     (platform) => store.setPlatform(platform),

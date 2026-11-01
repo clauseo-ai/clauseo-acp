@@ -1,8 +1,10 @@
 // The room's frame, as the approved room composes it (design/03-system/src/pages/room/room.tsx): one RoomScopeProvider
 // with Base UI's CSP mode inside, then the window: the toolbar, the rail, the work and the wall, laid out by shell.css
 // and responsive.css. Three columns from 1200 px, the rail folded behind Matters as a floating panel from 1000 px, one
-// column below. The rail is U2's (rail.tsx over matters.ts); the work is U3's slot. Until H19 the computer draws the
-// title bar, so the toolbar draws no window controls; until U12 there is no plan, until a host query no search, until
+// column below. The rail is U2's (rail.tsx over matters.ts); the work is U3's slot. The window draws its own frame
+// (H19): the toolbar is the title bar, with the caption buttons wired to the window off the Mac and macOS's own traffic
+// lights over the corner lights' place on it, inside the desktop app; elsewhere (tests, the probe, a browser) the
+// buttons log their presses and the lights are painted. Until U12 there is no plan, until a host query no search, until
 // U8 no Versions and Undo, and until H5 nothing under a matter's title (the scratch matter's line stands). The wall
 // shows its surface only until H8 (host-next.ts's papers part). Folded, the rail closes on Escape and on opening a
 // matter or making one, and focus goes back to Matters; Matters carries the court-yellow dot while another matter
@@ -26,6 +28,8 @@ import type { Papers, PapersHost } from "./host-next.ts";
 import { Matters, type MattersView } from "./matters.ts";
 import { NewMatter } from "./new-matter.tsx";
 import { RoomRail } from "./rail.tsx";
+import { tauriWindowControls } from "../transport/window-controls.ts";
+import { useWindowFrame } from "../window/use-window-frame.ts";
 
 /** The matter's papers from H8, or null: before they arrive, without H8, or when the read fails. */
 function usePapers(next: PapersHost | null, matter: MatterId | null): Papers | null {
@@ -100,6 +104,9 @@ function RoomFrame({ transport }: { transport: HostTransport }) {
   // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
   // frame's words stand in its place
   const scratch = open?.kind === "scratch";
+  // the window's own controls, inside the desktop app only
+  const [controls] = useState(() => (transport.kind === "tauri" ? tauriWindowControls() : null));
+  const caption = useWindowFrame(controls);
   const title =
     open !== null
       ? scratch
@@ -111,7 +118,9 @@ function RoomFrame({ transport }: { transport: HostTransport }) {
   return (
     <div className="room-window" ref={nodes.slot("window")}>
       <RoomToolbar
-        chrome="os"
+        chrome="own"
+        caption={caption}
+        nativeLights={controls !== null}
         search={false}
         versions={false}
         plan={null}
