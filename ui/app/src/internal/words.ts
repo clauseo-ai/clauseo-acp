@@ -81,3 +81,6 @@ export function turnRunning(status: ThreadStatus | undefined): boolean {
   }
   return status.queued !== undefined;
 }
+
+/** The transcript's button back to the end, shown once the person has scrolled away from it. */
+export const JUMP_TO_LATEST = "Jump to latest";
