@@ -110,7 +110,9 @@ test.each([true, false])("every case passes G4's DOM checks (streaming %s)", (st
     const images = el.querySelectorAll("img").length;
     if (images !== (c.images ?? 0))
       failures.push(`${c.id}: ${images} <img>, expected ${c.images ?? 0}`);
+    // The hint goes with a live link; while streaming, the case is the last block and its links are inert.
     if (
+      !streaming &&
       c.linkHost &&
       !(el.querySelector('[data-clauseo="link-host"]')?.textContent ?? "").includes(c.linkHost)
     ) {
@@ -167,12 +169,18 @@ test.each(CASES.map((c) => [c.id, c] as const))(
         root.render(
           <MarkdownHostContext value={HOST}>
             <section data-case={c.id}>
-              <Markdown text={c.markdown.slice(0, end)} />
+              <Markdown text={c.markdown.slice(0, end)} streaming />
             </section>
           </MarkdownHostContext>,
         ),
       );
       failures.push(...failuresIn(`${c.id} at ${end}`, host));
+      // Text that has fully arrived shows, mid-stream too: nothing half-arrived hides what follows it.
+      const shown = host.textContent ?? "";
+      for (const literal of c.text ?? []) {
+        if (c.markdown.slice(0, end).includes(literal) && !shown.includes(literal))
+          failures.push(`${c.id} at ${end}: "${literal}" arrived but does not show`);
+      }
     }
     act(() => root.render(null));
     expect([...new Set(failures)]).toEqual([]);
