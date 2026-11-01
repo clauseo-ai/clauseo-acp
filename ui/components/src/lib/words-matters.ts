@@ -37,6 +37,13 @@ const HI = {
   "Clauseo couldn't create the matter. Try again, or choose another folder.":
     "Clauseo मामला नहीं बना सका। फिर से प्रयास करें, या दूसरा फ़ोल्डर चुनें।",
   "Write the date as 30 October 2026.": "तारीख इस तरह लिखें: 30 अक्टूबर 2026।",
+  /* ---------- a matter whose folder has moved ---------- */
+  "This matter's folder has moved.": "इस मामले का फ़ोल्डर कहीं और ले जाया गया है।",
+  "It was at {path}. Find it where it is now, and the matter opens as you left it.":
+    "यह {path} पर था। यह अब जहाँ है वहाँ इसे ढूँढें, और मामला वैसे ही खुलेगा जैसा आपने छोड़ा था।",
+  "Its conversations and versions are kept on this computer, so nothing is lost while the folder is away.":
+    "इसकी बातचीत और संस्करण इसी कंप्यूटर पर रखे हैं, इसलिए फ़ोल्डर के न मिलने तक भी कुछ नहीं खोता।",
+  "Locate the folder to ask about this matter": "इस मामले के बारे में पूछने के लिए फ़ोल्डर ढूँढें",
   /* ---------- the scratch matter's line ---------- */
   "A matter for quick questions, with no papers of its own.":
     "त्वरित प्रश्नों के लिए एक मामला, जिसके अपने कोई दस्तावेज़ नहीं हैं।",
