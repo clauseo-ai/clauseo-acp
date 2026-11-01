@@ -3,11 +3,15 @@
 // walk the tree recursively: `"> ".repeat(3000)` threw "Maximum call stack size exceeded". micromark's
 // parse time grows with nesting depth times lines (nesting built through 2,000 columns of tabs: 18.8 s
 // for 35 KB) and with the square of an emphasis paragraph's delimiter runs (5,000 `*`, `a`, 5,000 `*`:
-// 1.4 s). So, line by line and run by run:
+// 1.4 s), and with the square of the link and image brackets open at once (5,000 `[`, `a`, 5,000 `](u)`:
+// 4.2 s). So, line by line and run by run:
 // - A line's leading container prefix (block quote and list markers, spaces and tabs) stops at the 33rd
 //   marker or at column MAX_INDENT, whichever comes first: the rest of the line is text.
-// - A run of `*` and `_` keeps its first MAX_RUN characters as delimiters, and a paragraph (text between
-//   blank lines) its first MAX_SEQUENCES delimiter sequences; the rest become text.
+// - A run of `*`, `_` or `~` keeps its first MAX_RUN characters as delimiters, and a paragraph (text
+//   between blank lines) its first MAX_SEQUENCES delimiter sequences; the rest become text. A `~~~` fence
+//   line is left alone.
+// - A paragraph keeps at most MAX_OPEN_BRACKETS `[` (link or image openers) open at once, and
+//   MAX_UNMATCHED_BRACKETS `]` with none open; past those a bracket is text.
 // - After parsing, a block whose tree is still deeper than MAX_TREE_DEPTH shows its source as plain text
 //   (answer.ts).
 // Each cut replaces the character that would open a container or delimit emphasis by a stand-in, a
@@ -21,23 +25,39 @@ import type { Nodes } from "mdast";
 export const MAX_NESTING = 32;
 /** The column a line's container prefix may reach: 32 levels of `1. ` items, or 64 of `- `. */
 export const MAX_INDENT = 64;
-/** The `*` and `_` characters one run keeps as delimiters (the longest legitimate run is a few). */
+/** The `*`, `_` and `~` characters one run keeps as delimiters (the longest legitimate run is a few). */
 export const MAX_RUN = 64;
 /**
- * The `*` and `_` delimiter sequences one paragraph keeps: micromark matches each closer against every
- * opener before it, so `"a* ".repeat(5000)` took 560 ms; at 400 sequences the worst is a few ms, and a
- * paragraph of advice has tens.
+ * The `*`, `_` and `~` delimiter sequences one paragraph keeps: micromark matches each closer against
+ * every opener before it, so `"a* ".repeat(5000)` took 560 ms (`"a~ "`, 400 to 560 ms); at 400 sequences
+ * the worst is a few ms, and a paragraph of advice has tens.
  */
 export const MAX_SEQUENCES = 400;
+/**
+ * The `[` one paragraph may have open at once: micromark looks back over every open label start at each
+ * `]`, so `"![".repeat(1000) + "a" + "](u)".repeat(1000)` took 1.9 s. Legitimate text nests a few.
+ */
+export const MAX_OPEN_BRACKETS = 32;
+/**
+ * The `]` one paragraph may have with no `[` open: micromark looks back over the whole paragraph for a label
+ * start at each, so `"a" + "]".repeat(10000)` took 1.2 s. Legitimate text has a few.
+ */
+export const MAX_UNMATCHED_BRACKETS = 64;
+/**
+ * How far a `[` may stay open within a paragraph. GFM's autolink-literal check walks back to an unbalanced
+ * `[` at every word, so one `[` left open before 10 KB of prose took 145 ms. Link text is never this long;
+ * 999 is also the longest reference label.
+ */
+export const MAX_BRACKET_SPAN = 1000;
 /** Levels of mdast below a block's root: 32 nested lists are 64 (list and item), plus their inline content. */
 export const MAX_TREE_DEPTH = 128;
 
-/** The characters a cut replaces, and their stand-ins, the noncharacters U+FDD1 to U+FDD9. */
-const CUT = "*_-+>.) \t";
-const STAND_IN = "\uFDD1\uFDD2\uFDD3\uFDD4\uFDD5\uFDD6\uFDD7\uFDD8\uFDD9";
-const STAND_INS = /[\uFDD1-\uFDD9]/g;
-/** A stand-in in a URL, which micromark percent-encodes (U+FDD1 is EF B7 91). */
-const ENCODED_STAND_INS = /%EF%B7%9([1-9])/gi;
+/** The characters a cut replaces, and their stand-ins, the noncharacters U+FDD1 to U+FDDB. */
+const CUT = "*_-+>.) \t~[]";
+const STAND_IN = "\uFDD1\uFDD2\uFDD3\uFDD4\uFDD5\uFDD6\uFDD7\uFDD8\uFDD9\uFDDA\uFDDB\uFDDC";
+const STAND_INS = /[\uFDD1-\uFDDC]/g;
+/** A stand-in in a URL, which micromark percent-encodes (U+FDD1 is EF B7 91, U+FDDC is EF B7 9C). */
+const ENCODED_STAND_INS = /%EF%B7%9([1-9A-C])/gi;
 
 /** `char` (one of CUT) as its stand-in. */
 export function standIn(char: string): string {
@@ -120,28 +140,43 @@ function capPrefixes(text: string): string {
   return copied === 0 ? text : out + text.slice(copied);
 }
 
-const RUN = /[*_]+/g;
+const RUN = /[*_~]+/g;
+/** A fenced code block's `~~~` opening or closing line, whose run is no delimiter. */
+const TILDE_FENCE = /^ {0,3}~{3,}/;
 const BLANK_LINE = /\n[ \t]*\n/;
 
-/** Delimiter sequences in a run of `*` and `_`: where the character changes, a new one starts. */
+/** Delimiter sequences in a run of `*`, `_` and `~`: where the character changes, a new one starts. */
 function sequencesIn(run: string): number {
   let sequences = 1;
   for (let at = 1; at < run.length; at++) if (run[at] !== run[at - 1]) sequences++;
   return sequences;
 }
 
-/** Every run and paragraph of `*` and `_` delimiters in bounds (MAX_RUN, MAX_SEQUENCES). */
+/** Every run and paragraph of `*`, `_` and `~` delimiters in bounds (MAX_RUN, MAX_SEQUENCES). */
 function capRuns(text: string): string {
   let out = "";
   let copied = 0;
   let sequences = 0;
   let previous = 0;
+  // The line of the current run, found once per line (a 15 KB line of runs searched once per run was
+  // quadratic), and whether it is a thematic break.
+  let lineStart = 0;
+  let lineEnd = -1;
+  let lineIsBreak: boolean | undefined;
   RUN.lastIndex = 0;
   for (let match = RUN.exec(text); match; match = RUN.exec(text)) {
     const run = match[0];
     const at = match.index;
     if (BLANK_LINE.test(text.slice(previous, at))) sequences = 0;
     previous = at + run.length;
+    if (at > lineEnd) {
+      lineStart = text.lastIndexOf("\n", at) + 1;
+      lineEnd = text.indexOf("\n", at);
+      if (lineEnd < 0) lineEnd = text.length;
+      lineIsBreak = undefined;
+    }
+    if (run[0] === "~" && at - lineStart <= 3 && TILDE_FENCE.test(text.slice(lineStart, previous)))
+      continue;
     let keep = Math.min(run.length, MAX_RUN);
     let kept = sequencesIn(run.slice(0, keep));
     while (sequences + kept > MAX_SEQUENCES && keep > 0) {
@@ -150,9 +185,8 @@ function capRuns(text: string): string {
     }
     sequences += kept;
     if (keep === run.length) continue;
-    const lineStart = text.lastIndexOf("\n", at) + 1;
-    const lineEnd = text.indexOf("\n", at);
-    if (THEMATIC_BREAK.test(text.slice(lineStart, lineEnd < 0 ? text.length : lineEnd))) continue;
+    lineIsBreak ??= THEMATIC_BREAK.test(text.slice(lineStart, lineEnd));
+    if (lineIsBreak) continue;
     let hidden = "";
     for (let index = keep; index < run.length; index++) hidden += standIn(run[index]!);
     out += text.slice(copied, at + keep) + hidden;
@@ -161,10 +195,71 @@ function capRuns(text: string): string {
   return copied === 0 ? text : out + text.slice(copied);
 }
 
+/** An escape, a bracket, or a line break with the next line's quote markers and indentation. */
+const BRACKETS = /\\[\s\S]|[[\]]|\n[ \t>]*/g;
+
+/**
+ * Every paragraph's brackets in bounds: a `[` past MAX_OPEN_BRACKETS open, a `[` still open
+ * MAX_BRACKET_SPAN characters on (not counting the quote markers and indentation that start each line), and
+ * a `]` with none open past MAX_UNMATCHED_BRACKETS of them, become text. The count is approximate (a
+ * bracket in a code span counts), which only matters past the limits.
+ */
+function capBrackets(text: string): string {
+  if (!text.includes("[") && !text.includes("]")) return text;
+  const cuts: number[] = [];
+  /** Each open `[`: where it is, and the line-start characters before it. */
+  const open: { at: number; skipped: number }[] = [];
+  let unmatched = 0;
+  let skipped = 0;
+  /** Cut every `[` still open that `at` is more than the span past. */
+  const expire = (at: number) => {
+    let kept = 0;
+    for (const start of open) {
+      if (at - start.at - (skipped - start.skipped) > MAX_BRACKET_SPAN) cuts.push(start.at);
+      else open[kept++] = start;
+    }
+    open.length = kept;
+  };
+  BRACKETS.lastIndex = 0;
+  for (let match = BRACKETS.exec(text); match; match = BRACKETS.exec(text)) {
+    const token = match[0];
+    const at = match.index;
+    if (token === "]") {
+      expire(at);
+      if (open.length > 0) open.pop();
+      else if (unmatched < MAX_UNMATCHED_BRACKETS) unmatched++;
+      else cuts.push(at);
+    } else if (token === "[") {
+      expire(at);
+      if (open.length < MAX_OPEN_BRACKETS) open.push({ at, skipped });
+      else cuts.push(at);
+    } else if (token[0] === "\n") {
+      expire(at);
+      const next = at + token.length;
+      if (next >= text.length || text[next] === "\n") {
+        // A blank line (or a blank quote line) ends the paragraph.
+        open.length = 0;
+        unmatched = 0;
+      }
+      skipped += token.length;
+    }
+  }
+  expire(text.length);
+  if (cuts.length === 0) return text;
+  cuts.sort((a, b) => a - b);
+  let out = "";
+  let copied = 0;
+  for (const at of cuts) {
+    out += text.slice(copied, at) + standIn(text[at]!);
+    copied = at + 1;
+  }
+  return out + text.slice(copied);
+}
+
 /** `text` within every limit above: what the splitter and the parser see. */
 export function capNesting(text: string): string {
   const clean = hasStandIns(text) ? text.replace(STAND_INS, "") : text;
-  return capRuns(capPrefixes(clean));
+  return capBrackets(capRuns(capPrefixes(clean)));
 }
 
 /** `value` with the characters capNesting replaced put back. */
@@ -177,7 +272,7 @@ export function restore(value: string): string {
 /** A URL with the characters capNesting replaced put back (a space or tab stays percent-encoded). */
 function restoreUrl(value: string): string {
   return restore(value).replace(ENCODED_STAND_INS, (_, digit: string) => {
-    const char = CUT[Number(digit) - 1] ?? "";
+    const char = CUT[Number.parseInt(digit, 16) - 1] ?? "";
     return char === " " ? "%20" : char === "\t" ? "%09" : char;
   });
 }

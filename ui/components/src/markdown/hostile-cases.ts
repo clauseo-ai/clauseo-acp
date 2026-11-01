@@ -194,6 +194,21 @@ export const CASES: HostileCase[] = [
     markdown: "```constructor\nfirst\n```\n\n```__proto__\nsecond\n```\n\n```toString\nthird\n```",
     text: ["first", "second", "third"],
   },
+  // The same with `~` (strikethrough): 0.4 to 0.56 s to parse before `~` was capped.
+  { id: "tilde-sequences", markdown: "a~ ".repeat(5000), text: ["a~ a~ a~"] },
+  // Link and image brackets open at once: micromark took 1.9 s, 4.2 s and 1.0 s to parse these; past
+  // 32 open in a paragraph a `[` is text.
+  {
+    id: "nested-image-brackets",
+    markdown: "![".repeat(1000) + "a" + "](u)".repeat(1000),
+    text: ["![![![", "](u)](u)"],
+  },
+  {
+    id: "nested-link-brackets",
+    markdown: "[".repeat(5000) + "a" + "](u)".repeat(5000),
+    text: ["[[[[a", "](u)](u)"],
+  },
+  { id: "open-link-brackets", markdown: "[a".repeat(5000) + "]".repeat(5000), text: ["[a[a[a"] },
   // Character references in link destinations, before and after the full entity table loads (entities.ts):
   // `&colon;` and `&Tab;` are not in the common set, so they decode only once the table arrives, and the
   // link must stay inert in both states. `&sol;` moves the host from after `@` to before it on arrival.

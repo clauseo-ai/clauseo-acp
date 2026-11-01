@@ -5,10 +5,13 @@ import { createAnswer } from "./answer.ts";
 import {
   capNesting,
   deeperThan,
+  MAX_BRACKET_SPAN,
   MAX_INDENT,
   MAX_NESTING,
+  MAX_OPEN_BRACKETS,
   MAX_RUN,
   MAX_SEQUENCES,
+  MAX_UNMATCHED_BRACKETS,
   restore,
   standIn,
 } from "./nesting.ts";
@@ -30,7 +33,7 @@ const SPACE_NESTING = Array.from(
 const LONG_RUNS = "*".repeat(5000) + "a" + "*".repeat(5000);
 const hide = (text: string) => text.split("").map(standIn).join("");
 
-const hasStandIn = (text: string) => /[\uFDD1-\uFDD9]/.test(text);
+const hasStandIn = (text: string) => /[\uFDD1-\uFDDC]/.test(text);
 
 function count(node: Hast, tagName: string): number {
   let total = 0;
@@ -94,6 +97,50 @@ test("a run of * and _ keeps 64 characters as delimiters, a paragraph 400 sequen
   expect(capNesting(`${"a* ".repeat(MAX_SEQUENCES)}\n\n**b**`)).toBe(
     `${"a* ".repeat(MAX_SEQUENCES)}\n\n**b**`,
   );
+});
+
+test("~ counts with * and _: runs of 64, 400 sequences a paragraph; a ~~~ fence line is left alone", () => {
+  expect(capNesting(`a${"~".repeat(70)}b`)).toBe(`a${"~".repeat(MAX_RUN)}${hide("~").repeat(6)}b`);
+  expect(capNesting("a~ ".repeat(500))).toBe(
+    "a~ ".repeat(MAX_SEQUENCES) + `a${hide("~")} `.repeat(500 - MAX_SEQUENCES),
+  );
+  const fence = `${"~".repeat(100)}\ncode\n${"~".repeat(100)}\n`;
+  expect(capNesting(fence)).toBe(fence);
+  const late = `${"a~ ".repeat(MAX_SEQUENCES)}\n${fence}`;
+  expect(capNesting(late).endsWith(`\n${fence}`)).toBe(true);
+  const [, code] = createAnswer("t").update(`text\n\n~~~ts\nlet a = "~~";\n~~~\n`, false);
+  expect(code && textOf(code.hast)).toBe('let a = "~~";\n');
+});
+
+test("a paragraph keeps 32 `[` open, 64 `]` with none open, and no `[` open over 1,000 characters", () => {
+  expect(capNesting(`${"[".repeat(40)}a`)).toBe(
+    `${"[".repeat(MAX_OPEN_BRACKETS)}${hide("[").repeat(40 - MAX_OPEN_BRACKETS)}a`,
+  );
+  expect(capNesting(`a${"]".repeat(70)}`)).toBe(
+    `a${"]".repeat(MAX_UNMATCHED_BRACKETS)}${hide("]").repeat(70 - MAX_UNMATCHED_BRACKETS)}`,
+  );
+  const long = `[${"a".repeat(MAX_BRACKET_SPAN)} b](u)`;
+  expect(capNesting(long)).toBe(`${hide("[")}${long.slice(1)}`);
+  const fits = `[${"a".repeat(MAX_BRACKET_SPAN - 2)}](u)`;
+  expect(capNesting(fits)).toBe(fits);
+  // Quote markers and indentation at line starts do not count towards the span.
+  const quoted = `> [${"a\n> ".repeat(400)}](u)`;
+  expect(capNesting(quoted)).toBe(quoted);
+  // A blank line starts a new paragraph, with new budgets; escaped brackets do not count.
+  const fresh = `${"[".repeat(MAX_OPEN_BRACKETS)}\n\n[a](u) ${"\\[".repeat(40)}`;
+  expect(capNesting(fresh)).toBe(fresh);
+});
+
+test("links still work past the bracket limits, and every cut bracket reads as written", () => {
+  const text = `${"[".repeat(40)}a${"]".repeat(40)} then [ok](https://b.example/) and [${"x".repeat(1200)}](/far)`;
+  const [view] = createAnswer("t").update(text, false);
+  const hast = view!.hast;
+  expect(count(hast, "a")).toBe(1);
+  expect(JSON.stringify(hast)).toContain('"href":"https://b.example/"');
+  expect(textOf(hast)).toBe(
+    `${"[".repeat(40)}a${"]".repeat(40)} then ok and [${"x".repeat(1200)}](/far)`,
+  );
+  expect(hasStandIn(JSON.stringify(hast))).toBe(false);
 });
 
 test("lines within the limits, thematic breaks and markers after text are left alone", () => {
