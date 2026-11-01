@@ -64,6 +64,7 @@ pub(super) fn answer_permission(
             kind: option.kind,
         },
         by: Principal::LocalDesktop,
+        held_open: None,
     };
     out.push(actor, resolved)?;
     send_answer(actor, ctx, thread, out, then)
@@ -91,6 +92,7 @@ fn send_answer(
             | Then::Closing(_)
             | Then::Undone
             | Then::Permission { .. }
+            | Then::CancelPermission { .. }
             | Then::Elicitation { .. }) => AfterCommand::Turn(TurnTag { thread, then }),
         },
     };
@@ -111,6 +113,18 @@ pub(super) fn tell_permission(
     spawn(actor, async move {
         if let Err(error) = client.answer_permission(key, option).await {
             tracing::warn!(%thread, %error, "a permission answer did not reach the agent");
+        }
+    });
+}
+
+/// The host's cancel of a permission request is durable: the agent hears it.
+pub(super) fn tell_cancel_permission(actor: &Actor, thread: ThreadId, agent: u64, key: PendingKey) {
+    let Some(client) = client_of(actor, thread, agent) else {
+        return;
+    };
+    spawn(actor, async move {
+        if let Err(error) = client.cancel_permission(key).await {
+            tracing::warn!(%thread, %error, "a permission cancel did not reach the agent");
         }
     });
 }

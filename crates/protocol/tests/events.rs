@@ -40,6 +40,10 @@ mod numbers;
 mod json_copies;
 
 #[cfg(test)]
+#[path = "events/held_open.rs"]
+mod held_open;
+
+#[cfg(test)]
 #[path = "events/constructors.rs"]
 mod constructors;
 

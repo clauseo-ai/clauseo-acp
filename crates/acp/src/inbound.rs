@@ -7,6 +7,7 @@
 //! with only a log line: an unknown `sessionUpdate` would vanish without
 //! [`ProtocolWarning::UnknownUpdate`]. Responses pass through to the SDK's router.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use agent_client_protocol::schema::v1 as acp;
@@ -196,6 +197,7 @@ impl Inbound {
                         key,
                         acp_tool_call_id: request.acp_tool_call_id,
                         options: request.options,
+                        paths: request.paths,
                     }
                 }
                 Request::Elicitation(request) => {
@@ -227,6 +229,8 @@ struct PermissionRequest {
     session: AgentSessionId,
     acp_tool_call_id: CompactString,
     options: Vec<PermissionOption>,
+    /// The paths the request names, as [`permission_paths`] reads them.
+    paths: Vec<PathBuf>,
 }
 
 /// Checks a `session/request_permission`. Refuses (-32602) one that does not decode, that offers
@@ -234,6 +238,7 @@ struct PermissionRequest {
 fn permission(params: Value) -> Result<PermissionRequest, agent_client_protocol::Error> {
     let kinds = permission_kinds(&params)
         .map_err(|kind| invalid_params(&format!("unknown option kind {kind}")))?;
+    let paths = permission_paths(&params);
     let request = acp::RequestPermissionRequest::deserialize(params)
         .map_err(|error| invalid_params(&error.to_string()))?;
     let session = AgentSessionId::new(&request.session_id.0)
@@ -254,7 +259,35 @@ fn permission(params: Value) -> Result<PermissionRequest, agent_client_protocol:
         session,
         acp_tool_call_id: CompactString::from(&*request.tool_call.tool_call_id.0),
         options,
+        paths,
     })
+}
+
+/// The paths a permission request names, read from the JSON: every `toolCall.locations[].path`,
+/// then `toolCall.rawInput.file_path` and `toolCall.rawInput.notebook_path` (Claude's Edit, Write
+/// and `NotebookEdit` inputs), each when it is a string, in that order, without repeats, as the
+/// agent wrote them (absolute, or relative to the session's `cwd`). Nothing else of `rawInput`
+/// is read. A path the SDK's decode would refuse never gets this far.
+fn permission_paths(params: &Value) -> Vec<PathBuf> {
+    let tool_call = params.get("toolCall");
+    let locations = tool_call
+        .and_then(|call| call.get("locations"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|location| location.get("path"));
+    let raw_input = tool_call.and_then(|call| call.get("rawInput"));
+    let inputs = ["file_path", "notebook_path"]
+        .into_iter()
+        .filter_map(|key| raw_input.and_then(|input| input.get(key)));
+    let mut paths: Vec<PathBuf> = Vec::new();
+    for path in locations.chain(inputs).filter_map(Value::as_str) {
+        let path = PathBuf::from(path);
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    paths
 }
 
 /// An elicitation request, checked.

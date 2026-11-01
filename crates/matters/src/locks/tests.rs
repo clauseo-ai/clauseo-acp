@@ -1,6 +1,6 @@
 use clauseo_protocol::MatterPath;
 
-use super::{locked, owner_names};
+use super::{HeldOpen, held_open, locked, owner_names};
 use crate::test_dir::TestDir;
 use crate::write;
 
@@ -92,6 +92,24 @@ fn files_with_an_owner_file_beside_them_are_locked() {
             path("sub/Brief.docx")
         ]
     );
+}
+
+/// `held_open` names the owner file it found, the first of `owner_names` that exists, and says
+/// nothing for a file with none.
+#[test]
+fn held_open_names_the_owner_file() {
+    let dir = TestDir::new("locks-held-open");
+    let root = dir.path();
+    write::create_dir_all(&root.join("sub")).unwrap();
+    for name in ["sub/Invoice.docx", "sub/~$nvoice.docx", "Free.docx"] {
+        drop(write::create_new(&root.join(name)).unwrap());
+    }
+    assert_eq!(
+        held_open(root, &path("sub/Invoice.docx")),
+        Some(HeldOpen::OwnerFile("~$nvoice.docx".to_owned()))
+    );
+    assert_eq!(held_open(root, &path("Free.docx")), None);
+    assert_eq!(held_open(root, &path("Invoice.docx")), None);
 }
 
 #[test]

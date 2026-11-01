@@ -1,7 +1,7 @@
 //! One OS thread, `clauseo-matter`, per open matter. It owns the matter's R8 [`Matter`] and runs
-//! its synchronous jobs (create, import, open, checkpoints, undo, restore, compare, preview) off
-//! the actor, which sends each job with a tag and gets each reply back through `post`, tagged
-//! the same way.
+//! its synchronous jobs (create, import, open, checkpoints, undo, restore, compare, preview, the
+//! open-in-Word check) off the actor, which sends each job with a tag and gets each reply back
+//! through `post`, tagged the same way.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -11,9 +11,9 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use clauseo_matters::{
-    Checkpoint, CheckpointOutcome, CommitId, CompareSide, ImportWarning, Imported, Limits, Matter,
-    MissingReason, NewMatter, OsProbe, Restore, RestorePlan, Restored, Retention, Settings,
-    TimelineEntry, TurnMeta, UndoRequest, Undone,
+    Checkpoint, CheckpointOutcome, CommitId, CompareSide, HeldOpen, ImportWarning, Imported,
+    Limits, Matter, MissingReason, NewMatter, OsProbe, Restore, RestorePlan, Restored, Retention,
+    Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, held_open,
 };
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, FileChange, FileDecision, ImportSummary, MatterId, MatterPath,
@@ -121,6 +121,12 @@ pub(crate) enum MatterJob {
         from: CheckpointId,
         scope: RestoreRequest,
     },
+    /// The first of `paths` (matter paths in `folder`) that Word or another program has open,
+    /// by `clauseo_matters::held_open`. Needs no open matter.
+    HeldOpen {
+        folder: PathBuf,
+        paths: Vec<MatterPath>,
+    },
 }
 
 /// How an import ended.
@@ -153,6 +159,8 @@ pub(crate) enum MatterReply {
     Restored(Result<Box<RestoreDone>, Error>),
     Compared(Result<Vec<FileChange>, Error>),
     Previewed(Result<Box<RestorePlan>, Error>),
+    /// The first path held open, with what shows it.
+    HeldOpen(Option<(MatterPath, HeldOpen)>),
 }
 
 /// A turn's checkpoint, and for an id R8 reused what the host needs to record it when its log
@@ -357,6 +365,11 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         MatterJob::Preview { from, scope } => MatterReply::Previewed(
             open(settings, slot)
                 .and_then(|matter| Ok(Box::new(matter.preview_restore(from, (&scope).into())?))),
+        ),
+        MatterJob::HeldOpen { folder, paths } => MatterReply::HeldOpen(
+            paths
+                .into_iter()
+                .find_map(|path| held_open(&folder, &path).map(|held| (path, held))),
         ),
     }
 }

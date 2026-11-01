@@ -46,6 +46,8 @@ bundled! {
         "notice-compaction",
         "permission-cancelled",
         "permission-kinds",
+        "permission-share-mode",
+        "permission-word-open",
         "plan",
         "prompt-stream",
         "queue-two-prompts",

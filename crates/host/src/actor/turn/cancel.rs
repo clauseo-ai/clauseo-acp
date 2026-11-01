@@ -176,6 +176,7 @@ pub(super) fn log_cancel(
             request,
             choice: PermissionChoice::Cancelled,
             by: Principal::LocalDesktop,
+            held_open: None,
         };
         out.push(actor, resolved)?;
     }

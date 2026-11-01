@@ -163,6 +163,7 @@ pub fn permission_resolved(request: PermissionRequestId) -> DomainEvent {
             kind: PermissionKind::AllowOnce,
         },
         by: Principal::LocalDesktop,
+        held_open: None,
     }
     .into()
 }

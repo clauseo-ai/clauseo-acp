@@ -24,6 +24,21 @@ pub(crate) fn remove_dir_all(path: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Windows: opens `path` to read and write with a share mode that lets others read it but not
+/// write it, as Word holds a document it has open.
+#[cfg(windows)]
+pub(crate) fn open_deny_write(path: &Path) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt;
+    /// `FILE_SHARE_READ`.
+    const SHARE_READ: u32 = 1;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(SHARE_READ)
+        .open(path)
+        .unwrap()
+}
+
 /// `fs::write`, creating the parent folder first.
 pub(crate) fn write(path: &Path, bytes: &[u8]) {
     if let Some(parent) = path.parent() {

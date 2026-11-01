@@ -149,6 +149,7 @@ fn non_mergeable_event_flushes_held_first() {
         key: PendingKey(1),
         acp_tool_call_id: CompactString::from("a"),
         options: Vec::new(),
+        paths: Vec::new(),
     }));
     let items: Vec<RatedUpdate> = cap.admit(ms(7), ask.clone()).into_iter().collect();
     assert_eq!(items, vec![titled("a", "two"), ask]);

@@ -106,7 +106,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `tool_call_started` | turn, tool_call, acp_id, title, kind, tool_name?, status, locations, raw_input?, raw_output?, content | acp | yes | T |
 | `tool_call_updated` | tool_call, patch (every field optional; lists replace wholesale) | acp; host on cancel | yes | T |
 | `permission_requested` | request, tool_call?, options, deliverable | acp | yes | T |
-| `permission_resolved` | request, choice, by | host | yes | T |
+| `permission_resolved` | request, choice, by, held_open? (0015) | host | yes | T |
 | `permission_expired` | request, reason | host | yes | T |
 | `elicitation_requested` | elicitation, request (form schema or URL) | acp | yes | T |
 | `elicitation_resolved` | elicitation, outcome, by (never the values) | host | yes | T |

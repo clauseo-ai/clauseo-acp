@@ -177,6 +177,10 @@ pub enum PermissionState {
         choice: PermissionChoice,
         /// Who answered.
         by: Principal,
+        /// The file a program holds open, when the host refused the request without asking
+        /// because of it (`PermissionResolved::held_open`).
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        held_open: Option<MatterPath>,
     },
     /// Expired unanswered.
     Expired {
