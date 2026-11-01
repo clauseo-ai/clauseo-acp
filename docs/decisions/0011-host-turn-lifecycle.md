@@ -86,7 +86,9 @@ until `StepUndone` is durable; a failed undo commit is retried once, as a turn's
   version must be the matter's (`command.invalid`). One commit of the matter's stream logs the
   outside-edits checkpoint, `CheckpointRecorded { Restore }` and `VersionRestored`; a failed one
   is retried once when the stream drains; if the retry fails too, the files stay restored on disk,
-  the log does not say so, the threads are still told, and the writer passes on. A restore with
+  the log does not say so, the threads are still told, and the writer passes on. The
+  outside-edits checkpoint that commit held is lost with it: the lawyer's edit stays in the
+  shadow repository but is never recorded, so it cannot be shown or restored as a version. A restore with
   nothing to write logs only the outside edits (and the reused id, if the log lacks it) and
   answers `VersionRestored` with the reused id, as `UndoStep` does: the missing
   `VersionRestored` event, not the outcome, tells the client nothing was written.

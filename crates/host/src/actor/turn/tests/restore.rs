@@ -132,6 +132,14 @@ fn a_restore_commit_failing_twice_still_notes_the_files() {
         .find(|recorded| recorded.checkpoint() == checkpoint)
         .expect("the reused restore checkpoint is recorded late");
     assert_eq!(late.kind(), CheckpointKind::Restore);
+    let (seqs, row) = rig.checkpoint_seqs_and_row(checkpoint);
+    assert_eq!(seqs.len(), 1, "recorded exactly once: {seqs:?}");
+    let row = row.expect("the late record has its row");
+    assert_eq!(
+        (row.id, row.matter, row.seq.get()),
+        (checkpoint, matter, seqs[0])
+    );
+    assert_eq!(row.commit_oid.len(), 40, "{}", row.commit_oid);
     assert_eq!(
         restores(&mut rig),
         0,
