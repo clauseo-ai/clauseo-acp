@@ -29,7 +29,8 @@ pub(crate) const METHOD_NOT_FOUND: i64 = -32601;
 /// with `Ok(())` once every [`Client`](crate::Client) is dropped (it then closes the
 /// app-server's stdin), or with an [`Error`]: `Closed` when stdout ends or a write fails, and
 /// `Protocol` for a line that is not a JSON-RPC message or is over 8 MiB. Either way every call
-/// still awaiting a response fails with that error.
+/// made before it ended fails with that error, whether it was written or still queued; a call
+/// made after it ended fails with `Closed`.
 #[must_use = "the caller must run the driver, or nothing reaches the app-server"]
 pub struct Driver(Pin<Box<dyn Future<Output = Result<(), Error>> + Send>>);
 
@@ -64,7 +65,8 @@ impl Driver {
 
 type Reply = oneshot::Sender<Result<serde_json::Value, Error>>;
 
-/// The calls awaiting a response, by request id.
+/// The calls awaiting a response, by request id. Both loops run inside the one `Driver` future,
+/// so the lock is never contended; it is a `Mutex` only so that future is `Send`.
 #[derive(Default)]
 struct Pending {
     next_id: u64,
@@ -86,16 +88,29 @@ where
     W: AsyncWrite + Unpin,
     R: AsyncRead + Unpin,
 {
+    let mut commands = commands;
     let pending = Mutex::new(Pending::default());
-    let (answers, answer_receiver) = mpsc::unbounded();
-    let reading = pin!(read_loop(reader, &pending, notifications, answers));
-    let writing = pin!(write_loop(writer, &pending, commands, answer_receiver));
-    let error = match futures::future::select(reading, writing).await {
-        Either::Left((error, _)) | Either::Right((Err(error), _)) => error,
-        Either::Right((Ok(()), _)) => return Ok(()),
+    let error = {
+        let (answers, answer_receiver) = mpsc::unbounded();
+        let reading = pin!(read_loop(reader, &pending, notifications, answers));
+        let writing = pin!(write_loop(writer, &pending, &mut commands, answer_receiver));
+        match futures::future::select(reading, writing).await {
+            Either::Left((error, _)) | Either::Right((Err(error), _)) => error,
+            Either::Right((Ok(()), _)) => return Ok(()),
+        }
     };
-    let calls = std::mem::take(&mut lock(&pending).calls);
-    for reply in calls.into_values() {
+    // Every call made so far gets the error: the ones written, then the ones still queued. Once
+    // the channel is closed, a later call fails at once with `Closed`.
+    let mut replies: Vec<Reply> = std::mem::take(&mut lock(&pending).calls)
+        .into_values()
+        .collect();
+    commands.close();
+    while let Ok(command) = commands.try_recv() {
+        if let Command::Request { reply, .. } = command {
+            replies.push(reply);
+        }
+    }
+    for reply in replies {
         // A caller that dropped its call's future no longer wants the answer.
         drop(reply.send(Err(error.clone())));
     }
@@ -107,18 +122,20 @@ where
 async fn write_loop<W: AsyncWrite + Unpin>(
     mut writer: W,
     pending: &Mutex<Pending>,
-    mut commands: mpsc::UnboundedReceiver<Command>,
+    commands: &mut mpsc::UnboundedReceiver<Command>,
     mut answers: mpsc::UnboundedReceiver<Vec<u8>>,
 ) -> Result<(), Error> {
     loop {
         let line = futures::select_biased! {
-            answer = answers.select_next_some() => answer,
+            answer = answers.select_next_some() => Some(answer),
             command = commands.next().fuse() => match command {
                 Some(command) => encode(pending, command)?,
                 None => break,
             },
         };
-        write_line(&mut writer, &line).await?;
+        if let Some(line) = line {
+            write_line(&mut writer, &line).await?;
+        }
     }
     if let Err(error) = writer.close().await {
         tracing::debug!(%error, "closing the app-server's stdin failed");
@@ -126,15 +143,19 @@ async fn write_loop<W: AsyncWrite + Unpin>(
     Ok(())
 }
 
-/// The line for `command`, a request registered in `pending` before it is written.
-fn encode(pending: &Mutex<Pending>, command: Command) -> Result<Vec<u8>, Error> {
+/// The line for `command`, a request registered in `pending` before it is written. A request
+/// whose caller dropped its future is not written (`None`), and registering one drops the
+/// entries of calls dropped since, so a server that never answers them cannot grow the table.
+fn encode(pending: &Mutex<Pending>, command: Command) -> Result<Option<Vec<u8>>, Error> {
     let encoded = match command {
+        Command::Request { reply, .. } if reply.is_canceled() => return Ok(None),
         Command::Request {
             method,
             params,
             reply,
         } => {
             let mut pending = lock(pending);
+            pending.calls.retain(|_, waiting| !waiting.is_canceled());
             let id = pending.next_id;
             pending.next_id += 1;
             pending.calls.insert(id, reply);
@@ -149,7 +170,7 @@ fn encode(pending: &Mutex<Pending>, command: Command) -> Result<Vec<u8>, Error> 
     let mut line =
         encoded.map_err(|error| Error::Protocol(format!("a message does not encode: {error}")))?;
     line.push(b'\n');
-    Ok(line)
+    Ok(Some(line))
 }
 
 async fn write_line<W: AsyncWrite + Unpin>(writer: &mut W, line: &[u8]) -> Result<(), Error> {

@@ -1,6 +1,7 @@
 //! The app-server messages this crate mirrors, each named as its definition in the vendored
-//! schema (`schema/rust-v0.162.1/`). Field names, and which fields are required, follow the
-//! schema exactly; `tests/schema_drift.rs` fails when they stop matching.
+//! schema (`schema/<tag>/`, the tag being `SCHEMA_TAG` in `tests/schema_drift/checker.rs`).
+//! Field names, and which fields are required, follow the schema exactly; `tests/schema_drift.rs`
+//! fails when they stop matching.
 //!
 //! Decoding is lenient where the schema can grow: an unknown field is ignored, and an unknown
 //! value of any enum here decodes to that enum's `Unknown` variant, which keeps the string. A
@@ -45,12 +46,27 @@ macro_rules! open_enum {
         }
     ) => {
         $(#[doc = $doc])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone)]
         pub enum $name {
             $( $(#[doc = $variant_doc])* $variant, )+
-            /// A value this crate does not name, kept as it was sent. Build it only through
-            /// [`Self::from_wire`], so a named value never lands here.
+            /// A value this crate does not name, kept as it was sent. Decoding and
+            /// [`Self::from_wire`] never put a named value here; one built by hand compares
+            /// equal to its named variant, since equality is by wire value.
             Unknown(String),
+        }
+
+        impl PartialEq for $name {
+            fn eq(&self, other: &Self) -> bool {
+                self.as_str() == other.as_str()
+            }
+        }
+
+        impl Eq for $name {}
+
+        impl std::hash::Hash for $name {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                self.as_str().hash(state);
+            }
         }
 
         impl $name {

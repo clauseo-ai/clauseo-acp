@@ -38,16 +38,22 @@ pub enum Account {
     Unknown(String),
 }
 
+/// `Account`'s `type` values, each written once.
+const API_KEY: &str = "apiKey";
+const CHATGPT: &str = "chatgpt";
+const AMAZON_BEDROCK: &str = "amazonBedrock";
+
 impl Account {
-    /// Every `type` the vendored schema lists, in its order.
-    pub const VALUES: &'static [&'static str] = &["apiKey", "chatgpt", "amazonBedrock"];
+    /// Every `type` the vendored schema lists, in its order. The drift test decodes each one
+    /// and fails if it lands in [`Self::Unknown`].
+    pub const VALUES: &'static [&'static str] = &[API_KEY, CHATGPT, AMAZON_BEDROCK];
 
     /// The `type` as it appears on the wire.
     pub fn type_str(&self) -> &str {
         match self {
-            Self::ApiKey => "apiKey",
-            Self::Chatgpt(_) => "chatgpt",
-            Self::AmazonBedrock(_) => "amazonBedrock",
+            Self::ApiKey => API_KEY,
+            Self::Chatgpt(_) => CHATGPT,
+            Self::AmazonBedrock(_) => AMAZON_BEDROCK,
             Self::Unknown(kind) => kind,
         }
     }
@@ -105,9 +111,9 @@ impl<'de> Deserialize<'de> for Account {
         };
         let fields = serde_json::Value::Object(fields);
         Ok(match kind.as_str() {
-            "apiKey" => Self::ApiKey,
-            "chatgpt" => Self::Chatgpt(serde_json::from_value(fields).map_err(D::Error::custom)?),
-            "amazonBedrock" => {
+            API_KEY => Self::ApiKey,
+            CHATGPT => Self::Chatgpt(serde_json::from_value(fields).map_err(D::Error::custom)?),
+            AMAZON_BEDROCK => {
                 Self::AmazonBedrock(serde_json::from_value(fields).map_err(D::Error::custom)?)
             }
             _ => Self::Unknown(kind),
