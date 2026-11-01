@@ -1,5 +1,5 @@
 // The probe build's page (vite.config.ts's probe mode, `pnpm build:probe`): the room over FakeTransport, with one
-// matter, its papers, and the scripted stream (testing/stream-script.ts) played to whatever subscribes. The page's
+// matter (or none, with ?matters=none), its papers, and the scripted stream (testing/stream-script.ts) played to whatever subscribes. The page's
 // query sets its display for this page only (theme=night, lang=hi, lite=1, motion=reduced, size=18), as the WebKit
 // probe (scripts/webkit-probe.swift) asks for it, and window.__clauseoDisplay and __clauseoAxe are set (dev-hooks.ts).
 // Not shipped.
@@ -50,11 +50,16 @@ function stream(): HostEvent[] {
   return events;
 }
 
+/** ?matters=none: a host with no matters, so the title says so ("No matters yet") and the wall stays empty. */
+const noMatters = new URLSearchParams(location.search).get("matters") === "none";
+
 const transport = new FakeTransport({
   platform: "mac",
   query: (query) => {
     if (query === "list_matters") {
-      return { matters: [{ matter: MATTER, name: "Sharma v. State of Delhi", kind: "folder" }] };
+      return noMatters
+        ? { matters: [] }
+        : { matters: [{ matter: MATTER, name: "Sharma v. State of Delhi", kind: "folder" }] };
     }
     throw new Error(`the probe's host answers list_matters only, not ${JSON.stringify(query)}`);
   },
