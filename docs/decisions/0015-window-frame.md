@@ -89,6 +89,11 @@ windowed controller (`CreateCoreWebView2Controller`, `wry/src/webview2/mod.rs`),
   `GetSystemMenu` and `TrackPopupMenu`, a new command with its own record. A follow-up.
 - The maximise button's tooltip never shows on Windows, since the native window takes the
   pointer; Snap Layouts shows in its place.
+- A screen reader reading under the pointer meets Tauri's resize-border window
+  (`TAURI_DRAG_RESIZE_WINDOW`) over the whole page while the window is restored: it is cut down
+  to the edges only for mouse hit-testing, which UI Automation ignores. Maximised, it shrinks
+  away and our window's name is read. This is Tauri's, for every undecorated window; raising our
+  window above it would cost resizing from the top edge over the button. A follow-up, upstream.
 
 ## Status
 
