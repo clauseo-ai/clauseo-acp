@@ -48,6 +48,9 @@ test("while streaming, a half superscript is hidden and an open highlight shows 
   expect(tail("the 2^nd")).toBe("<p>the 2</p>");
   expect(tail("the 2^nd^")).toBe("<p>the 2<sup>nd</sup></p>");
   expect(tail("2^10 ")).toBe("<p>2^10</p>");
+  // At most 32 characters wait for their closing caret: a longer run is text as written.
+  expect(tail(`x^${"a".repeat(32)}`)).toBe("<p>x</p>");
+  expect(tail(`x^${"a".repeat(33)}`)).toBe(`<p>x^${"a".repeat(33)}</p>`);
   expect(tail("a ==marked")).toBe("<p>a <mark>marked</mark></p>");
   expect(tail("a ==marked=")).toBe("<p>a <mark>marked</mark></p>");
   expect(tail("a ==")).toBe("<p>a</p>");

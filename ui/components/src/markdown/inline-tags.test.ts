@@ -139,6 +139,12 @@ test("streaming: an unpaired opening tag at the end is hidden and what follows s
   expect(tail("a <")).toBe("<p>a</p>");
   // Once more than a tag name has arrived, it shows as written until it is a tag.
   expect(tail("a <sup cla")).toBe("<p>a &#x3C;sup cla</p>");
+  // Once a quoted attribute value has begun, the tag is hidden as its name was, until its `>` arrives.
+  expect(tail('a <sup class="x')).toBe("<p>a</p>");
+  expect(tail("a <SUP\nstyle = 'color: red")).toBe("<p>a</p>");
+  expect(tail('Fee <sup class="x">2')).toBe("<p>Fee 2</p>");
+  expect(tail('a <div class="x')).toBe('<p>a &#x3C;div class="x</p>');
+  expect(tail(`a <sup title="${"x".repeat(130)}`)).toContain("&#x3C;sup title=");
   expect(tail("if x<s then the clause")).toBe("<p>if x&#x3C;s then the clause</p>");
   expect(tail("a <b")).toBe("<p>a</p>");
   expect(tail("a <bo")).toBe("<p>a &#x3C;bo</p>");
