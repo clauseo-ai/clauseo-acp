@@ -1,0 +1,780 @@
+{
+  "spec": [
+    {
+      "id": "X1-en",
+      "feature": "X1",
+      "script": "en",
+      "expect": {
+        "kind": "phrasing",
+        "paragraph": "Section 3A of the Act was inserted in 2019, and this is the 2nd notice under it to the 1st respondent; the formula in Schedule 2 is P1 × R2.",
+        "marks": [
+          {
+            "tag": "sup",
+            "text": "A"
+          },
+          {
+            "tag": "sup",
+            "text": "nd"
+          },
+          {
+            "tag": "sup",
+            "text": "st"
+          },
+          {
+            "tag": "sub",
+            "text": "1"
+          },
+          {
+            "tag": "sub",
+            "text": "2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X1-literal-en",
+      "feature": "X1",
+      "script": "en",
+      "expect": {
+        "kind": "plain",
+        "paragraph": "The escrow holds 2^10 shares, the code samples are in C++, and a == b stays as typed."
+      }
+    },
+    {
+      "id": "X1-footnote-en",
+      "feature": "X1",
+      "script": "en",
+      "expect": {
+        "kind": "footnote",
+        "paragraph": "The cap applies1 from the 2nd year of the term.",
+        "number": "1",
+        "note": "Clause 4.2 of the draft dated 3 March 2026."
+      }
+    },
+    {
+      "id": "X1-hi",
+      "feature": "X1",
+      "script": "hi",
+      "expect": {
+        "kind": "phrasing",
+        "paragraph": "अधिनियम की धारा 3क वर्ष 2019 में जोड़ी गई, और यह दूसरी सूचना है; अनुसूची 2 का सूत्र P1 × R2 है।",
+        "marks": [
+          {
+            "tag": "sup",
+            "text": "क"
+          },
+          {
+            "tag": "sup",
+            "text": "दूसरी"
+          },
+          {
+            "tag": "sub",
+            "text": "1"
+          },
+          {
+            "tag": "sub",
+            "text": "2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X1-ta",
+      "feature": "X1",
+      "script": "ta",
+      "expect": {
+        "kind": "phrasing",
+        "paragraph": "சட்டத்தின் பிரிவு 3அ 2019 இல் சேர்க்கப்பட்டது, இது இரண்டாவது அறிவிப்பு; அட்டவணை 2 இன் சூத்திரம் P1 × R2 ஆகும்.",
+        "marks": [
+          {
+            "tag": "sup",
+            "text": "அ"
+          },
+          {
+            "tag": "sup",
+            "text": "இரண்டாவது"
+          },
+          {
+            "tag": "sub",
+            "text": "1"
+          },
+          {
+            "tag": "sub",
+            "text": "2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X2-en",
+      "feature": "X2",
+      "script": "en",
+      "expect": {
+        "kind": "phrasing",
+        "paragraph": "Redline: the Supplier may must notify within thirty sixty days, and clause 9.4 is withdrawn.",
+        "marks": [
+          {
+            "tag": "del",
+            "text": "may"
+          },
+          {
+            "tag": "ins",
+            "text": "must"
+          },
+          {
+            "tag": "del",
+            "text": "thirty"
+          },
+          {
+            "tag": "u",
+            "text": "sixty"
+          },
+          {
+            "tag": "s",
+            "text": "clause 9.4"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X2-hi",
+      "feature": "X2",
+      "script": "hi",
+      "expect": {
+        "kind": "phrasing",
+        "paragraph": "संशोधन: आपूर्तिकर्ता सकता है करेगा, अवधि तीस साठ दिन, और धारा 9.4 वापस ली गई।",
+        "marks": [
+          {
+            "tag": "del",
+            "text": "सकता है"
+          },
+          {
+            "tag": "ins",
+            "text": "करेगा"
+          },
+          {
+            "tag": "del",
+            "text": "तीस"
+          },
+          {
+            "tag": "u",
+            "text": "साठ"
+          },
+          {
+            "tag": "s",
+            "text": "धारा 9.4"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X2-ta",
+      "feature": "X2",
+      "script": "ta",
+      "expect": {
+        "kind": "phrasing",
+        "paragraph": "திருத்தம்: வழங்குநர் அறிவிக்கலாம் அறிவிக்க வேண்டும், காலம் முப்பது அறுபது நாட்கள், பிரிவு 9.4 திரும்பப் பெறப்பட்டது.",
+        "marks": [
+          {
+            "tag": "del",
+            "text": "அறிவிக்கலாம்"
+          },
+          {
+            "tag": "ins",
+            "text": "அறிவிக்க வேண்டும்"
+          },
+          {
+            "tag": "del",
+            "text": "முப்பது"
+          },
+          {
+            "tag": "u",
+            "text": "அறுபது"
+          },
+          {
+            "tag": "s",
+            "text": "பிரிவு 9.4"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X3-en",
+      "feature": "X3",
+      "script": "en",
+      "expect": {
+        "kind": "phrasing",
+        "paragraph": "The cap excludes indirect loss and the indemnity survives termination.",
+        "marks": [
+          {
+            "tag": "mark",
+            "text": "The cap excludes indirect loss"
+          },
+          {
+            "tag": "mark",
+            "text": "survives termination"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X3-hi",
+      "feature": "X3",
+      "script": "hi",
+      "expect": {
+        "kind": "phrasing",
+        "paragraph": "सीमा में अप्रत्यक्ष हानि शामिल नहीं है और क्षतिपूर्ति समाप्ति के बाद भी लागू रहेगी।",
+        "marks": [
+          {
+            "tag": "mark",
+            "text": "सीमा में अप्रत्यक्ष हानि शामिल नहीं है"
+          },
+          {
+            "tag": "mark",
+            "text": "समाप्ति के बाद भी लागू"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X3-ta",
+      "feature": "X3",
+      "script": "ta",
+      "expect": {
+        "kind": "phrasing",
+        "paragraph": "வரம்பில் மறைமுக இழப்பு சேராது மற்றும் இழப்பீடு முடிவுக்குப் பிறகும் நீடிக்கும்.",
+        "marks": [
+          {
+            "tag": "mark",
+            "text": "வரம்பில் மறைமுக இழப்பு சேராது"
+          },
+          {
+            "tag": "mark",
+            "text": "முடிவுக்குப் பிறகும் நீடிக்கும்"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X4-en",
+      "feature": "X4",
+      "script": "en",
+      "expect": {
+        "kind": "tasks",
+        "items": [
+          {
+            "text": "Board resolution received",
+            "checked": true
+          },
+          {
+            "text": "Escrow agreement signed",
+            "checked": false
+          },
+          {
+            "text": "Stamp duty paid",
+            "checked": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "X4-hi",
+      "feature": "X4",
+      "script": "hi",
+      "expect": {
+        "kind": "tasks",
+        "items": [
+          {
+            "text": "बोर्ड का प्रस्ताव मिला",
+            "checked": true
+          },
+          {
+            "text": "एस्क्रो अनुबंध पर हस्ताक्षर",
+            "checked": false
+          },
+          {
+            "text": "स्टांप शुल्क का भुगतान",
+            "checked": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "X4-ta",
+      "feature": "X4",
+      "script": "ta",
+      "expect": {
+        "kind": "tasks",
+        "items": [
+          {
+            "text": "இயக்குநர் குழுத் தீர்மானம் பெறப்பட்டது",
+            "checked": true
+          },
+          {
+            "text": "எஸ்க்ரோ ஒப்பந்தம் கையெழுத்தானது",
+            "checked": false
+          },
+          {
+            "text": "முத்திரைத் தீர்வை செலுத்தப்பட்டது",
+            "checked": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "X5-en",
+      "feature": "X5",
+      "script": "en",
+      "expect": {
+        "kind": "definitions",
+        "entries": [
+          {
+            "term": "Affiliate",
+            "definitions": [
+              "Any entity that controls, is controlled by, or is under common control with a Party."
+            ]
+          },
+          {
+            "term": "Business Day",
+            "definitions": [
+              "A day other than a Saturday, Sunday or public holiday in Mumbai.",
+              "For notices, a day on which banks in London are open."
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "X5-hi",
+      "feature": "X5",
+      "script": "hi",
+      "expect": {
+        "kind": "definitions",
+        "entries": [
+          {
+            "term": "सहयोगी",
+            "definitions": ["कोई भी इकाई जो किसी पक्षकार को नियंत्रित करती है या उसके नियंत्रण में है।"]
+          },
+          {
+            "term": "कार्य दिवस",
+            "definitions": ["मुंबई में शनिवार, रविवार या सार्वजनिक अवकाश के अलावा कोई भी दिन।"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "X5-ta",
+      "feature": "X5",
+      "script": "ta",
+      "expect": {
+        "kind": "definitions",
+        "entries": [
+          {
+            "term": "துணை நிறுவனம்",
+            "definitions": ["ஒரு தரப்பைக் கட்டுப்படுத்தும் அல்லது அதன் கட்டுப்பாட்டில் உள்ள எந்த நிறுவனமும்."]
+          },
+          {
+            "term": "வேலை நாள்",
+            "definitions": ["மும்பையில் சனி, ஞாயிறு அல்லது பொது விடுமுறை அல்லாத எந்த நாளும்."]
+          }
+        ]
+      }
+    },
+    {
+      "id": "X6-en",
+      "feature": "X6",
+      "script": "en",
+      "expect": {
+        "kind": "list-paragraphs",
+        "heading": {
+          "level": 5,
+          "text": "Advice on termination"
+        },
+        "items": [
+          [
+            "Serve notice under clause 7.1.",
+            "The notice must be in writing and signed by a director."
+          ],
+          ["Keep a record of delivery.", "Courier receipts are enough; email alone is not."]
+        ]
+      }
+    },
+    {
+      "id": "X6-hi",
+      "feature": "X6",
+      "script": "hi",
+      "expect": {
+        "kind": "list-paragraphs",
+        "heading": {
+          "level": 6,
+          "text": "समाप्ति पर सलाह"
+        },
+        "items": [
+          ["धारा 7.1 के तहत सूचना दें।", "सूचना लिखित हो और किसी निदेशक के हस्ताक्षर से हो।"],
+          ["सुपुर्दगी का रिकॉर्ड रखें।", "कूरियर की रसीद पर्याप्त है; केवल ईमेल नहीं।"]
+        ]
+      }
+    },
+    {
+      "id": "X6-ta",
+      "feature": "X6",
+      "script": "ta",
+      "expect": {
+        "kind": "list-paragraphs",
+        "heading": {
+          "level": 5,
+          "text": "முடிவு குறித்த ஆலோசனை"
+        },
+        "items": [
+          [
+            "பிரிவு 7.1 இன் கீழ் அறிவிப்பு அனுப்புங்கள்.",
+            "அறிவிப்பு எழுத்து வடிவில் ஓர் இயக்குநரின் கையொப்பத்துடன் இருக்க வேண்டும்."
+          ],
+          ["ஒப்படைப்பின் பதிவை வைத்திருங்கள்.", "கூரியர் ரசீது போதும்; மின்னஞ்சல் மட்டும் போதாது."]
+        ]
+      }
+    },
+    {
+      "id": "X7-en",
+      "feature": "X7",
+      "script": "en",
+      "expect": {
+        "kind": "quotes",
+        "levels": [
+          "The High Court held:",
+          "The appellate court had observed:",
+          "Liberty is not a gift of the State."
+        ]
+      }
+    },
+    {
+      "id": "X7-hi",
+      "feature": "X7",
+      "script": "hi",
+      "expect": {
+        "kind": "quotes",
+        "levels": ["उच्च न्यायालय ने कहा:", "अपीलीय न्यायालय ने कहा था:", "स्वतंत्रता राज्य का उपहार नहीं है।"]
+      }
+    },
+    {
+      "id": "X7-ta",
+      "feature": "X7",
+      "script": "ta",
+      "expect": {
+        "kind": "quotes",
+        "levels": [
+          "உயர் நீதிமன்றம் கூறியது:",
+          "மேல்முறையீட்டு நீதிமன்றம் குறிப்பிட்டிருந்தது:",
+          "சுதந்திரம் அரசின் கொடை அல்ல."
+        ]
+      }
+    },
+    {
+      "id": "X8-en",
+      "feature": "X8",
+      "script": "en",
+      "expect": {
+        "kind": "anchors",
+        "headings": [
+          {
+            "level": 2,
+            "text": "4.2 Termination",
+            "slug": "42-termination"
+          },
+          {
+            "level": 3,
+            "text": "Notes",
+            "slug": "notes"
+          },
+          {
+            "level": 3,
+            "text": "Notes",
+            "slug": "notes-1"
+          }
+        ],
+        "links": [
+          {
+            "text": "clause 4.2",
+            "slug": "42-termination"
+          },
+          {
+            "text": "second notes",
+            "slug": "notes-1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X8-hi",
+      "feature": "X8",
+      "script": "hi",
+      "expect": {
+        "kind": "anchors",
+        "headings": [
+          {
+            "level": 2,
+            "text": "धारा 4.2: समाप्ति",
+            "slug": "धारा-42-समाप्ति"
+          },
+          {
+            "level": 3,
+            "text": "टिप्पणियाँ",
+            "slug": "टिप्पणियाँ"
+          },
+          {
+            "level": 3,
+            "text": "टिप्पणियाँ",
+            "slug": "टिप्पणियाँ-1"
+          }
+        ],
+        "links": [
+          {
+            "text": "धारा 4.2",
+            "slug": "धारा-42-समाप्ति"
+          },
+          {
+            "text": "दूसरी टिप्पणियाँ",
+            "slug": "टिप्पणियाँ-1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X8-ta",
+      "feature": "X8",
+      "script": "ta",
+      "expect": {
+        "kind": "anchors",
+        "headings": [
+          {
+            "level": 2,
+            "text": "பிரிவு 4.2: முடிவு",
+            "slug": "பிரிவு-42-முடிவு"
+          },
+          {
+            "level": 3,
+            "text": "குறிப்புகள்",
+            "slug": "குறிப்புகள்"
+          },
+          {
+            "level": 3,
+            "text": "குறிப்புகள்",
+            "slug": "குறிப்புகள்-1"
+          }
+        ],
+        "links": [
+          {
+            "text": "பிரிவு 4.2",
+            "slug": "பிரிவு-42-முடிவு"
+          },
+          {
+            "text": "இரண்டாவது குறிப்புகள்",
+            "slug": "குறிப்புகள்-1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X9-en",
+      "feature": "X9",
+      "script": "en",
+      "expect": {
+        "kind": "table",
+        "header": ["Clause", "Obligation", "Days", "Status"],
+        "rows": [
+          [
+            "7.1",
+            "The Supplier shall give not less than ninety days' written notice of termination for convenience, served at the registered office and copied to the General Counsel by email, and the notice shall state the effective date of termination",
+            "90",
+            "Open"
+          ],
+          ["9.3", "Return of confidential information", "30", "Closed"]
+        ],
+        "align": ["left", "left", "right", "center"]
+      }
+    },
+    {
+      "id": "X9-hi",
+      "feature": "X9",
+      "script": "hi",
+      "expect": {
+        "kind": "table",
+        "header": ["धारा", "दायित्व", "दिन", "स्थिति"],
+        "rows": [
+          [
+            "7.1",
+            "आपूर्तिकर्ता सुविधा के लिए समाप्ति की कम से कम नब्बे दिन की लिखित सूचना देगा, जो पंजीकृत कार्यालय पर दी जाएगी और ईमेल से महाधिवक्ता को भेजी जाएगी, और सूचना में समाप्ति की प्रभावी तिथि बताई जाएगी",
+            "90",
+            "खुला"
+          ],
+          ["9.3", "गोपनीय जानकारी की वापसी", "30", "बंद"]
+        ],
+        "align": ["left", "left", "right", "center"]
+      }
+    },
+    {
+      "id": "X9-ta",
+      "feature": "X9",
+      "script": "ta",
+      "expect": {
+        "kind": "table",
+        "header": ["பிரிவு", "கடமை", "நாட்கள்", "நிலை"],
+        "rows": [
+          [
+            "7.1",
+            "வசதிக்காக முடிப்பதற்கு வழங்குநர் குறைந்தது தொண்ணூறு நாள் எழுத்துமூல அறிவிப்பை அளிக்க வேண்டும், அது பதிவு அலுவலகத்தில் வழங்கப்பட்டு மின்னஞ்சலில் பொது ஆலோசகருக்கு அனுப்பப்பட வேண்டும், அறிவிப்பில் முடிவின் நடைமுறைத் தேதி குறிப்பிடப்பட வேண்டும்",
+            "90",
+            "திறந்தது"
+          ],
+          ["9.3", "இரகசியத் தகவலைத் திருப்பி அளித்தல்", "30", "மூடப்பட்டது"]
+        ],
+        "align": ["left", "left", "right", "center"]
+      }
+    },
+    {
+      "id": "X10-en",
+      "feature": "X10",
+      "script": "en",
+      "expect": {
+        "kind": "plain",
+        "paragraph": "The rule in Kesavananda Bharati v State of Kerala, (1973) 4 SCC 225, was applied in (2019) 3 SCC 1; see also AIR 1950 SC 124, [1950] SCR 88 and 2019 SCC OnLine Del 1234."
+      }
+    },
+    {
+      "id": "X10-hi",
+      "feature": "X10",
+      "script": "hi",
+      "expect": {
+        "kind": "plain",
+        "paragraph": "केशवानंद भारती बनाम केरल राज्य, (1973) 4 SCC 225, का सिद्धांत (2019) 3 SCC 1 में लागू हुआ; AIR 1950 SC 124, [1950] SCR 88 और 2019 SCC OnLine Del 1234 भी देखें।"
+      }
+    },
+    {
+      "id": "X10-ta",
+      "feature": "X10",
+      "script": "ta",
+      "expect": {
+        "kind": "plain",
+        "paragraph": "கேசவானந்த பாரதி எதிர் கேரள அரசு, (1973) 4 SCC 225, இல் உள்ள விதி (2019) 3 SCC 1 இல் பின்பற்றப்பட்டது; AIR 1950 SC 124, [1950] SCR 88 மற்றும் 2019 SCC OnLine Del 1234 ஆகியவற்றையும் பார்க்கவும்."
+      }
+    },
+    {
+      "id": "X11-en",
+      "feature": "X11",
+      "script": "en",
+      "expect": {
+        "kind": "phrasing",
+        "paragraph": "Press Ctrl + F to search the bundle.Page 2 of 14 (draft, not for circulation)",
+        "marks": [
+          {
+            "tag": "kbd",
+            "text": "Ctrl"
+          },
+          {
+            "tag": "kbd",
+            "text": "F"
+          },
+          {
+            "tag": "br",
+            "text": ""
+          },
+          {
+            "tag": "small",
+            "text": "(draft, not for circulation)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X11-block-en",
+      "feature": "X11",
+      "script": "en",
+      "expect": {
+        "kind": "block-break",
+        "before": "The signature block follows.",
+        "after": "Signed for the Supplier."
+      }
+    },
+    {
+      "id": "X11-hi",
+      "feature": "X11",
+      "script": "hi",
+      "expect": {
+        "kind": "phrasing",
+        "paragraph": "खोजने के लिए Ctrl + F दबाएँ।पृष्ठ 2 (मसौदा, वितरण के लिए नहीं)",
+        "marks": [
+          {
+            "tag": "kbd",
+            "text": "Ctrl"
+          },
+          {
+            "tag": "kbd",
+            "text": "F"
+          },
+          {
+            "tag": "br",
+            "text": ""
+          },
+          {
+            "tag": "small",
+            "text": "(मसौदा, वितरण के लिए नहीं)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X11-ta",
+      "feature": "X11",
+      "script": "ta",
+      "expect": {
+        "kind": "phrasing",
+        "paragraph": "தேட Ctrl + F அழுத்தவும்.பக்கம் 2 (வரைவு, விநியோகத்துக்கு அல்ல)",
+        "marks": [
+          {
+            "tag": "kbd",
+            "text": "Ctrl"
+          },
+          {
+            "tag": "kbd",
+            "text": "F"
+          },
+          {
+            "tag": "br",
+            "text": ""
+          },
+          {
+            "tag": "small",
+            "text": "(வரைவு, விநியோகத்துக்கு அல்ல)"
+          }
+        ]
+      }
+    },
+    {
+      "id": "X12-en",
+      "feature": "X12",
+      "script": "en",
+      "expect": {
+        "kind": "plain",
+        "paragraph": "This Agreement is made on <insert date> between <Party A> and <Party B>."
+      }
+    },
+    {
+      "id": "X12-hi",
+      "feature": "X12",
+      "script": "hi",
+      "expect": {
+        "kind": "plain",
+        "paragraph": "यह अनुबंध <insert date> को <Party A> और <Party B> के बीच किया गया है।"
+      }
+    },
+    {
+      "id": "X12-ta",
+      "feature": "X12",
+      "script": "ta",
+      "expect": {
+        "kind": "plain",
+        "paragraph": "இந்த ஒப்பந்தம் <insert date> அன்று <Party A> மற்றும் <Party B> இடையே செய்யப்படுகிறது."
+      }
+    }
+  ]
+}
