@@ -16,7 +16,8 @@ function depthOf(root: Hast): number {
   for (let item = stack.pop(); item; item = stack.pop()) {
     const [node, depth] = item;
     deepest = Math.max(deepest, depth);
-    if ("children" in node) for (const child of node.children) stack.push([child as Hast, depth + 1]);
+    if ("children" in node)
+      for (const child of node.children) stack.push([child as Hast, depth + 1]);
   }
   return deepest;
 }
