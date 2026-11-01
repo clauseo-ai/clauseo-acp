@@ -240,3 +240,22 @@ fn value_names_ignore_case_but_agent_ids_keep_theirs() {
         }]
     );
 }
+
+// The registry lists its value names, so an unknown one about MCP locks `mcp.servers` empty
+// (0009), and an unrelated one only warns.
+#[test]
+fn an_unknown_value_name_about_mcp_locks_the_list() {
+    for name in ["mcpServers", "MCP", "mcp_servers", "Mcp.Server"] {
+        let values = parse(vec![(name.to_owned(), RegValue::Sz("{}".to_owned()))]);
+        let (leaves, warnings) = values.into_parts();
+        assert_eq!(leaves, [Leaf::Refused("mcp.servers".to_owned())], "{name}");
+        assert_eq!(warnings.len(), 2, "{name}: {warnings:?}");
+    }
+    let values = parse(vec![(
+        "tools.list".to_owned(),
+        RegValue::Sz("{}".to_owned()),
+    )]);
+    let (leaves, warnings) = values.into_parts();
+    assert_eq!(leaves, []);
+    assert_eq!(warnings.len(), 1);
+}

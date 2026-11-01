@@ -207,16 +207,24 @@ fn an_agent_key_on_its_own_is_unknown() {
     );
 }
 
-// A forced `MCP` key, or an `mcp` key, names the list without setting it: it locks empty.
+// macOS reads `mcp.servers` by its exact name only (0009), so only that key reaches `parse`:
+// a dictionary sets the list, and any other value locks it empty.
 #[test]
-fn a_misnamed_mcp_key_locks_the_list() {
-    for key in ["MCP", "mcp", "MCP.Servers"] {
-        let (leaves, kinds) = values(vec![(key, PlistValue::Dict(Vec::new()), true)]);
-        assert_eq!(
-            leaves,
-            vec![Leaf::Refused("mcp.servers".to_owned())],
-            "{key}"
-        );
-        assert_eq!(kinds.len(), 1, "{key}");
-    }
+fn the_mcp_servers_key_sets_or_locks_the_list() {
+    let server = PlistValue::Dict(vec![(
+        "firm".to_owned(),
+        PlistValue::Dict(vec![
+            ("command".to_owned(), string(&abs_str("bin/firm"))),
+            ("enabled".to_owned(), PlistValue::Bool(true)),
+        ]),
+    )]);
+    let (leaves, kinds) = values(vec![("mcp.servers", server, true)]);
+    assert!(
+        matches!(&leaves[..], [Leaf::McpServers(servers)] if servers.contains_key("firm")),
+        "{leaves:?}"
+    );
+    assert_eq!(kinds, []);
+    let (leaves, kinds) = values(vec![("mcp.servers", string("all"), true)]);
+    assert_eq!(leaves, vec![Leaf::Refused("mcp.servers".to_owned())]);
+    assert_eq!(kinds.len(), 1);
 }

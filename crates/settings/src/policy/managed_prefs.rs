@@ -94,7 +94,7 @@ pub fn parse(values: Vec<(String, PlistValue, bool)>) -> PolicyRead {
             kind,
         });
     }
-    let leaves = leaf::typed_policy(raws, refused, &mut warnings);
+    let leaves = leaf::typed(raws, refused, &mut warnings);
     PolicyRead::Read(PolicyValues::new(leaves, warnings))
 }
 
