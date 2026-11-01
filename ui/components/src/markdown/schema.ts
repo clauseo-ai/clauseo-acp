@@ -73,6 +73,8 @@ export const SCHEMA: Schema = {
     // The footnotes section and its visually hidden heading.
     section: ["dataFootnotes", ["className", "footnotes"]],
     h2: ["id", ["className", "sr-only"]],
+    // A footnote reference whose note has not arrived yet.
+    sup: ["dataFootnotePending"],
     th: ["align"],
     td: ["align"],
   },

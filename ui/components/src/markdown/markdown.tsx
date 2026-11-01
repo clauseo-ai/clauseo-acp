@@ -46,7 +46,7 @@ export function Markdown({ text, streaming = false }: MarkdownProps) {
     <AnswerScopeContext value={scope}>
       <div data-clauseo="markdown">
         {blocks.map((view, index) => (
-          <Block key={index} view={view} />
+          <Block key={view.notes ? "notes" : index} view={view} />
         ))}
       </div>
     </AnswerScopeContext>

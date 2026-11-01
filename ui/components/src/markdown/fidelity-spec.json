@@ -1,0 +1,1014 @@
+{
+  "features": {
+    "F1": "GFM table, 4 columns",
+    "F2": "wide table, 9 columns, long cells",
+    "F3": "table that streams in (aligned columns)",
+    "F4": "ordered list starting at 3",
+    "F5": "nested lists, 4 levels (ol, ul, ol, ul)",
+    "F6": "clause numbering (1.1, 1.2.3, (a), (iv)) as paragraphs and in lists",
+    "F7": "headings h1 to h4",
+    "F8": "blockquote with a nested blockquote",
+    "F9": "bold, italic, bold-italic, strikethrough (Tamil: intraword bold)",
+    "F10": "horizontal rule",
+    "F11": "hard line breaks (two spaces, backslash)",
+    "F12": "footnotes (reference and definition paired)",
+    "F13": "links (https, mailto, autolink) through our a",
+    "F14": "images (clauseo-file:, data:image/) through our img",
+    "F15": "citation and paper link through our components",
+    "L0": "escaped literals stay as text"
+  },
+  "rawKinds": [
+    "**",
+    "*",
+    "~~",
+    "~",
+    "|",
+    "[^",
+    "^",
+    "](",
+    "![",
+    "[",
+    "]",
+    "\\",
+    "lead #",
+    "lead >",
+    "lead -"
+  ],
+  "literal": {
+    "markdown": "Literal characters meant as text: \\*\\*not bold\\*\\*, a pipe \\| and a tilde pair \\~\\~ stay as typed.",
+    "text": "Literal characters meant as text: **not bold**, a pipe | and a tilde pair ~~ stay as typed.",
+    "tokens": {
+      "**": 2,
+      "*": 4,
+      "|": 1,
+      "~~": 1,
+      "~": 2
+    }
+  },
+  "cuts": [
+    {
+      "id": "open-bold",
+      "instance": "F9-en",
+      "after": "**not nego"
+    },
+    {
+      "id": "half-link",
+      "instance": "F13-en",
+      "after": "[SRA guidance on contract review](https://www.sra"
+    },
+    {
+      "id": "half-footnote-ref",
+      "instance": "F12-en",
+      "after": "[^surv"
+    },
+    {
+      "id": "table-header-only",
+      "instance": "F3-en",
+      "after": "| Payment milestone | Amount in rupees | Due |\n"
+    },
+    {
+      "id": "header-and-separator",
+      "instance": "F3-en",
+      "after": "| :--- | ---: | :---: |\n"
+    },
+    {
+      "id": "half-row",
+      "instance": "F3-en",
+      "after": "| Signature of the agreement | 12,00"
+    },
+    {
+      "id": "half-citation",
+      "instance": "F15-en",
+      "after": "[Hadley v Baxendale (1854) 9 Exch 341](clauseo-ci"
+    }
+  ],
+  "spec": [
+    {
+      "id": "F7-h1-en",
+      "feature": "F7",
+      "script": "en",
+      "expect": {
+        "kind": "heading",
+        "level": 1,
+        "text": "Contract review memo: Master Services Agreement, Matter 118"
+      }
+    },
+    {
+      "id": "F7-h2-en",
+      "feature": "F7",
+      "script": "en",
+      "expect": {
+        "kind": "heading",
+        "level": 2,
+        "text": "Summary of the main risks"
+      }
+    },
+    {
+      "id": "F7-h3-en",
+      "feature": "F7",
+      "script": "en",
+      "expect": {
+        "kind": "heading",
+        "level": 3,
+        "text": "Liability and indemnity"
+      }
+    },
+    {
+      "id": "F7-h4-en",
+      "feature": "F7",
+      "script": "en",
+      "expect": {
+        "kind": "heading",
+        "level": 4,
+        "text": "The cap in clause 4.2"
+      }
+    },
+    {
+      "id": "F1-en",
+      "feature": "F1",
+      "script": "en",
+      "expect": {
+        "kind": "table",
+        "header": ["Clause", "Topic", "Risk", "Action"],
+        "rows": [
+          ["4.2", "Liability cap", "High", "Negotiate a cap of twice the annual fees"],
+          ["7.1", "Termination for convenience", "Medium", "Add a ninety-day notice period"],
+          ["9.3", "Confidentiality", "Low", "Accept as drafted"],
+          ["12.4", "Governing law", "Medium", "Prefer the law of England and Wales"]
+        ]
+      }
+    },
+    {
+      "id": "F2-en",
+      "feature": "F2",
+      "script": "en",
+      "expect": {
+        "kind": "table",
+        "header": [
+          "Clause",
+          "Party",
+          "Obligation",
+          "Trigger",
+          "Cure period",
+          "Remedy",
+          "Cap",
+          "Survival",
+          "Comment"
+        ],
+        "rows": [
+          [
+            "4.2",
+            "Supplier",
+            "Pay direct losses caused by its breach of the service levels",
+            "A missed service level in two consecutive months",
+            "Thirty days from written notice",
+            "Service credits, then termination",
+            "Fees paid in the previous twelve months",
+            "Two years after termination",
+            "The cap is low for a contract of this value and should be doubled"
+          ],
+          [
+            "8.5",
+            "Customer",
+            "Keep the supplier's tools and methods confidential",
+            "Any disclosure to a third party without consent",
+            "None",
+            "Injunction and damages",
+            "Uncapped",
+            "Five years after termination",
+            "Standard wording; acceptable as long as the carve-outs stay"
+          ],
+          [
+            "15.2",
+            "Both",
+            "Indemnify the other against third-party claims for infringement",
+            "A claim notified within the limitation period",
+            "Not applicable",
+            "Defence of the claim and payment of any award",
+            "Uncapped",
+            "Indefinitely",
+            "Make the conduct-of-claims steps a condition of the indemnity"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "F3-en",
+      "feature": "F3",
+      "script": "en",
+      "expect": {
+        "kind": "table",
+        "header": ["Payment milestone", "Amount in rupees", "Due"],
+        "rows": [
+          ["Signature of the agreement", "12,00,000", "On signature"],
+          ["Acceptance of phase one", "18,50,000", "Within 45 days"],
+          ["Final acceptance", "9,75,000", "Within 60 days"]
+        ],
+        "align": ["left", "right", "center"]
+      }
+    },
+    {
+      "id": "F4-en",
+      "feature": "F4",
+      "script": "en",
+      "expect": {
+        "kind": "ordered-start",
+        "start": 3,
+        "items": [
+          "Ask the supplier to raise the liability cap in clause 4.2.",
+          "Narrow the indemnity in clause 15.2 to claims the supplier controls.",
+          "Add a ninety-day notice period to termination for convenience."
+        ]
+      }
+    },
+    {
+      "id": "F5-en",
+      "feature": "F5",
+      "script": "en",
+      "expect": {
+        "kind": "nested",
+        "types": ["ol", "ul", "ol", "ul"],
+        "levels": [
+          "Obligations of the supplier",
+          "Service levels in Schedule 3",
+          "Availability of 99.5 per cent each month",
+          "Measured at the customer's network boundary"
+        ],
+        "secondTopItem": "Obligations of the customer"
+      }
+    },
+    {
+      "id": "F6-p-en",
+      "feature": "F6",
+      "script": "en",
+      "expect": {
+        "kind": "clause-paragraphs",
+        "texts": [
+          "1.1 The Supplier shall provide the Services from the Commencement Date.",
+          "1.2.3 Each Party shall bear its own costs of preparing this Agreement.",
+          "(a) the Customer may suspend payment of any disputed invoice in good faith;",
+          "(iv) nothing in this clause limits liability for death or personal injury."
+        ]
+      }
+    },
+    {
+      "id": "F6-list-en",
+      "feature": "F6",
+      "script": "en",
+      "expect": {
+        "kind": "clause-lists",
+        "bullet": [
+          "2.1 The term starts on the date of the last signature.",
+          "(b) the Supplier may not subcontract without consent."
+        ],
+        "ordered": [
+          "3.4.1 Invoices are payable within forty-five days.",
+          "(ii) late payments carry interest at four per cent."
+        ]
+      }
+    },
+    {
+      "id": "F8-en",
+      "feature": "F8",
+      "script": "en",
+      "expect": {
+        "kind": "blockquote",
+        "outer": [
+          "The supplier's counsel wrote on 3 March 2026:",
+          "We read that as an offer to negotiate the cap."
+        ],
+        "inner": "Our client cannot accept uncapped liability for indirect loss under any circumstances."
+      }
+    },
+    {
+      "id": "F9-en",
+      "feature": "F9",
+      "script": "en",
+      "expect": {
+        "kind": "inline",
+        "paragraph": "The cap is not negotiable in the supplier's view, the term is five years, the carve-outs are uncapped, and the earlier draft's two-year term is withdrawn.",
+        "bold": "not negotiable",
+        "italic": "five years",
+        "boldItalic": "uncapped",
+        "struck": "two-year"
+      }
+    },
+    {
+      "id": "F10-en",
+      "feature": "F10",
+      "script": "en",
+      "expect": {
+        "kind": "hr",
+        "before": "That ends the summary of the English draft.",
+        "after": "What follows sets out the notice and reference details."
+      }
+    },
+    {
+      "id": "F11-en",
+      "feature": "F11",
+      "script": "en",
+      "expect": {
+        "kind": "breaks",
+        "lines": [
+          "Notices go to:",
+          "The General Counsel, Clauseo Legal LLP",
+          "14 Fleet Street, London EC4Y 1AA"
+        ]
+      }
+    },
+    {
+      "id": "F12-en",
+      "feature": "F12",
+      "script": "en",
+      "expect": {
+        "kind": "footnote",
+        "sentence": "The indemnity survives termination of the agreement.",
+        "number": "1",
+        "definition": "Clause 15.2 of the draft dated 3 March 2026, read with clause 21.4."
+      }
+    },
+    {
+      "id": "F13-en",
+      "feature": "F13",
+      "script": "en",
+      "expect": {
+        "kind": "links",
+        "paragraph": "See the SRA guidance on contract review, write to counsel1@example.com, or read https://www.legislation.gov.uk/ukpga/1996/23 for the statute itself.",
+        "links": [
+          {
+            "href": "https://www.sra.org.uk/solicitors/guidance/",
+            "text": "SRA guidance on contract review"
+          },
+          {
+            "href": "mailto:counsel1@example.com",
+            "text": "counsel1@example.com"
+          },
+          {
+            "href": "https://www.legislation.gov.uk/ukpga/1996/23",
+            "text": "https://www.legislation.gov.uk/ukpga/1996/23"
+          }
+        ]
+      }
+    },
+    {
+      "id": "F14-en",
+      "feature": "F14",
+      "script": "en",
+      "expect": {
+        "kind": "images",
+        "images": [
+          {
+            "src": "clauseo-file:matter-118/signature-page.png",
+            "alt": "Signed signature page of the MSA"
+          },
+          {
+            "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+            "alt": "Company stamp"
+          }
+        ]
+      }
+    },
+    {
+      "id": "F15-en",
+      "feature": "F15",
+      "script": "en",
+      "expect": {
+        "kind": "references",
+        "paragraph": "The rule on remoteness of damage comes from Hadley v Baxendale (1854) 9 Exch 341, and the clause we are reviewing is in the client's draft MSA, version 3.",
+        "refs": [
+          {
+            "component": "citation",
+            "ref": "hadley-v-baxendale-1854",
+            "text": "Hadley v Baxendale (1854) 9 Exch 341"
+          },
+          {
+            "component": "paper",
+            "ref": "matter-118-msa-v3",
+            "text": "the client's draft MSA, version 3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "F7-h1-hi",
+      "feature": "F7",
+      "script": "hi",
+      "expect": {
+        "kind": "heading",
+        "level": 1,
+        "text": "अनुबंध समीक्षा: हिन्दी सारांश"
+      }
+    },
+    {
+      "id": "F7-h2-hi",
+      "feature": "F7",
+      "script": "hi",
+      "expect": {
+        "kind": "heading",
+        "level": 2,
+        "text": "मुख्य जोखिमों का सारांश"
+      }
+    },
+    {
+      "id": "F7-h3-hi",
+      "feature": "F7",
+      "script": "hi",
+      "expect": {
+        "kind": "heading",
+        "level": 3,
+        "text": "दायित्व और क्षतिपूर्ति"
+      }
+    },
+    {
+      "id": "F7-h4-hi",
+      "feature": "F7",
+      "script": "hi",
+      "expect": {
+        "kind": "heading",
+        "level": 4,
+        "text": "धारा 4.2 की सीमा"
+      }
+    },
+    {
+      "id": "F1-hi",
+      "feature": "F1",
+      "script": "hi",
+      "expect": {
+        "kind": "table",
+        "header": ["धारा", "विषय", "जोखिम", "कार्रवाई"],
+        "rows": [
+          ["4.2", "दायित्व की सीमा", "उच्च", "वार्षिक शुल्क के दोगुने की सीमा माँगें"],
+          ["7.1", "सुविधा के लिए समाप्ति", "मध्यम", "नब्बे दिन की सूचना अवधि जोड़ें"],
+          ["9.3", "गोपनीयता", "निम्न", "जैसा लिखा है वैसा स्वीकार करें"],
+          ["12.4", "शासी कानून", "मध्यम", "भारत का कानून चुनें"]
+        ]
+      }
+    },
+    {
+      "id": "F2-hi",
+      "feature": "F2",
+      "script": "hi",
+      "expect": {
+        "kind": "table",
+        "header": [
+          "धारा",
+          "पक्षकार",
+          "दायित्व",
+          "कारण",
+          "सुधार अवधि",
+          "उपाय",
+          "सीमा",
+          "उत्तरजीविता",
+          "टिप्पणी"
+        ],
+        "rows": [
+          [
+            "4.2",
+            "आपूर्तिकर्ता",
+            "सेवा स्तर के उल्लंघन से हुई प्रत्यक्ष हानि का भुगतान",
+            "लगातार दो महीने सेवा स्तर पूरा न होना",
+            "लिखित सूचना से तीस दिन",
+            "सेवा क्रेडिट, फिर समाप्ति",
+            "पिछले बारह महीनों का शुल्क",
+            "समाप्ति के दो वर्ष बाद तक",
+            "इस मूल्य के अनुबंध के लिए सीमा कम है और दोगुनी होनी चाहिए"
+          ],
+          [
+            "8.5",
+            "ग्राहक",
+            "आपूर्तिकर्ता के उपकरण और विधियाँ गोपनीय रखना",
+            "सहमति के बिना किसी तीसरे पक्ष को खुलासा",
+            "कोई नहीं",
+            "निषेधाज्ञा और हर्जाना",
+            "असीमित",
+            "समाप्ति के पाँच वर्ष बाद तक",
+            "मानक शब्दावली; अपवाद बने रहें तो स्वीकार्य"
+          ],
+          [
+            "15.2",
+            "दोनों",
+            "उल्लंघन के तीसरे पक्ष के दावों से एक दूसरे की क्षतिपूर्ति",
+            "परिसीमा अवधि के भीतर सूचित दावा",
+            "लागू नहीं",
+            "दावे का बचाव और किसी भी निर्णय का भुगतान",
+            "असीमित",
+            "अनिश्चित काल तक",
+            "दावे के संचालन के चरणों को क्षतिपूर्ति की शर्त बनाएँ"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "F3-hi",
+      "feature": "F3",
+      "script": "hi",
+      "expect": {
+        "kind": "table",
+        "header": ["भुगतान का चरण", "राशि रुपये में", "देय"],
+        "rows": [
+          ["अनुबंध पर हस्ताक्षर", "12,00,000", "हस्ताक्षर पर"],
+          ["पहले चरण की स्वीकृति", "18,50,000", "45 दिन के भीतर"],
+          ["अंतिम स्वीकृति", "9,75,000", "60 दिन के भीतर"]
+        ],
+        "align": ["left", "right", "center"]
+      }
+    },
+    {
+      "id": "F4-hi",
+      "feature": "F4",
+      "script": "hi",
+      "expect": {
+        "kind": "ordered-start",
+        "start": 3,
+        "items": [
+          "आपूर्तिकर्ता से धारा 4.2 की दायित्व सीमा बढ़ाने को कहें।",
+          "धारा 15.2 की क्षतिपूर्ति को उन दावों तक सीमित करें जिन पर आपूर्तिकर्ता का नियंत्रण है।",
+          "सुविधा के लिए समाप्ति में नब्बे दिन की सूचना अवधि जोड़ें।"
+        ]
+      }
+    },
+    {
+      "id": "F5-hi",
+      "feature": "F5",
+      "script": "hi",
+      "expect": {
+        "kind": "nested",
+        "types": ["ol", "ul", "ol", "ul"],
+        "levels": [
+          "आपूर्तिकर्ता के दायित्व",
+          "अनुसूची 3 के सेवा स्तर",
+          "हर महीने 99.5 प्रतिशत उपलब्धता",
+          "ग्राहक के नेटवर्क की सीमा पर मापी गई"
+        ],
+        "secondTopItem": "ग्राहक के दायित्व"
+      }
+    },
+    {
+      "id": "F6-p-hi",
+      "feature": "F6",
+      "script": "hi",
+      "expect": {
+        "kind": "clause-paragraphs",
+        "texts": [
+          "1.1 आपूर्तिकर्ता प्रारंभ तिथि से सेवाएँ प्रदान करेगा।",
+          "1.2.3 प्रत्येक पक्षकार इस अनुबंध को तैयार करने का अपना खर्च स्वयं वहन करेगा।",
+          "(a) ग्राहक किसी भी विवादित चालान का भुगतान सद्भावना से रोक सकता है;",
+          "(iv) इस धारा की कोई बात मृत्यु या व्यक्तिगत चोट के दायित्व को सीमित नहीं करती।"
+        ]
+      }
+    },
+    {
+      "id": "F6-list-hi",
+      "feature": "F6",
+      "script": "hi",
+      "expect": {
+        "kind": "clause-lists",
+        "bullet": [
+          "2.1 अवधि अंतिम हस्ताक्षर की तिथि से शुरू होती है।",
+          "(b) आपूर्तिकर्ता सहमति के बिना उप-अनुबंध नहीं कर सकता।"
+        ],
+        "ordered": [
+          "3.4.1 चालान पैंतालीस दिन के भीतर देय हैं।",
+          "(ii) देर से भुगतान पर चार प्रतिशत ब्याज लगेगा।"
+        ]
+      }
+    },
+    {
+      "id": "F8-hi",
+      "feature": "F8",
+      "script": "hi",
+      "expect": {
+        "kind": "blockquote",
+        "outer": [
+          "आपूर्तिकर्ता के वकील ने 3 मार्च 2026 को लिखा:",
+          "हम इसे सीमा पर बातचीत के प्रस्ताव के रूप में पढ़ते हैं।"
+        ],
+        "inner": "हमारा मुवक्किल किसी भी स्थिति में अप्रत्यक्ष हानि के लिए असीमित दायित्व स्वीकार नहीं कर सकता।"
+      }
+    },
+    {
+      "id": "F9-hi",
+      "feature": "F9",
+      "script": "hi",
+      "expect": {
+        "kind": "inline",
+        "paragraph": "आपूर्तिकर्ता के अनुसार सीमा बातचीत योग्य नहीं है, अवधि पाँच वर्ष है, अपवाद असीमित हैं, और पिछले मसौदे की दो वर्ष की अवधि वापस ली गई है।",
+        "bold": "बातचीत योग्य नहीं",
+        "italic": "पाँच वर्ष",
+        "boldItalic": "असीमित",
+        "struck": "दो वर्ष"
+      }
+    },
+    {
+      "id": "F10-hi",
+      "feature": "F10",
+      "script": "hi",
+      "expect": {
+        "kind": "hr",
+        "before": "इसके साथ हिन्दी मसौदे का सारांश समाप्त होता है।",
+        "after": "आगे सूचना और संदर्भ का विवरण है।"
+      }
+    },
+    {
+      "id": "F11-hi",
+      "feature": "F11",
+      "script": "hi",
+      "expect": {
+        "kind": "breaks",
+        "lines": ["सूचना यहाँ भेजें:", "महाधिवक्ता, क्लॉज़ियो लीगल एलएलपी", "14 फ़्लीट स्ट्रीट, लंदन"]
+      }
+    },
+    {
+      "id": "F12-hi",
+      "feature": "F12",
+      "script": "hi",
+      "expect": {
+        "kind": "footnote",
+        "sentence": "क्षतिपूर्ति का दायित्व अनुबंध की समाप्ति के बाद भी बना रहता है।",
+        "number": "2",
+        "definition": "3 मार्च 2026 के मसौदे की धारा 15.2, धारा 21.4 के साथ पढ़ें।"
+      }
+    },
+    {
+      "id": "F13-hi",
+      "feature": "F13",
+      "script": "hi",
+      "expect": {
+        "kind": "links",
+        "paragraph": "अनुबंध समीक्षा पर एसआरए का मार्गदर्शन देखें, वकील को ईमेल करें, या कानून के लिए https://www.indiacode.nic.in/handle/123456789/2187 पढ़ें।",
+        "links": [
+          {
+            "href": "https://www.sra.org.uk/solicitors/guidance/",
+            "text": "अनुबंध समीक्षा पर एसआरए का मार्गदर्शन"
+          },
+          {
+            "href": "mailto:counsel1@example.com",
+            "text": "वकील को ईमेल"
+          },
+          {
+            "href": "https://www.indiacode.nic.in/handle/123456789/2187",
+            "text": "https://www.indiacode.nic.in/handle/123456789/2187"
+          }
+        ]
+      }
+    },
+    {
+      "id": "F14-hi",
+      "feature": "F14",
+      "script": "hi",
+      "expect": {
+        "kind": "images",
+        "images": [
+          {
+            "src": "clauseo-file:matter-118/hi-signature-page.png",
+            "alt": "अनुबंध का हस्ताक्षरित पृष्ठ"
+          },
+          {
+            "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+            "alt": "कंपनी की मुहर"
+          }
+        ]
+      }
+    },
+    {
+      "id": "F15-hi",
+      "feature": "F15",
+      "script": "hi",
+      "expect": {
+        "kind": "references",
+        "paragraph": "हानि की दूरस्थता का नियम हैडली बनाम बैक्सेंडेल (1854) से आता है, और जिस धारा की हम समीक्षा कर रहे हैं वह ग्राहक का मसौदा अनुबंध, संस्करण 3 में है।",
+        "refs": [
+          {
+            "component": "citation",
+            "ref": "hadley-v-baxendale-1854-hi",
+            "text": "हैडली बनाम बैक्सेंडेल (1854)"
+          },
+          {
+            "component": "paper",
+            "ref": "matter-118-msa-v3-hi",
+            "text": "ग्राहक का मसौदा अनुबंध, संस्करण 3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "F7-h1-ta",
+      "feature": "F7",
+      "script": "ta",
+      "expect": {
+        "kind": "heading",
+        "level": 1,
+        "text": "ஒப்பந்த மதிப்பாய்வு: தமிழ் சுருக்கம்"
+      }
+    },
+    {
+      "id": "F7-h2-ta",
+      "feature": "F7",
+      "script": "ta",
+      "expect": {
+        "kind": "heading",
+        "level": 2,
+        "text": "முக்கிய இடர்களின் சுருக்கம்"
+      }
+    },
+    {
+      "id": "F7-h3-ta",
+      "feature": "F7",
+      "script": "ta",
+      "expect": {
+        "kind": "heading",
+        "level": 3,
+        "text": "பொறுப்பும் இழப்பீடும்"
+      }
+    },
+    {
+      "id": "F7-h4-ta",
+      "feature": "F7",
+      "script": "ta",
+      "expect": {
+        "kind": "heading",
+        "level": 4,
+        "text": "பிரிவு 4.2 இன் வரம்பு"
+      }
+    },
+    {
+      "id": "F1-ta",
+      "feature": "F1",
+      "script": "ta",
+      "expect": {
+        "kind": "table",
+        "header": ["பிரிவு", "தலைப்பு", "இடர்", "நடவடிக்கை"],
+        "rows": [
+          ["4.2", "பொறுப்பு வரம்பு", "அதிகம்", "ஆண்டுக் கட்டணத்தின் இரு மடங்கு வரம்பைக் கேளுங்கள்"],
+          ["7.1", "வசதிக்கான முடிவுறுத்தல்", "நடுத்தரம்", "தொண்ணூறு நாள் அறிவிப்புக் காலத்தைச் சேர்க்கவும்"],
+          ["9.3", "இரகசியத்தன்மை", "குறைவு", "எழுதியபடியே ஏற்கவும்"],
+          ["12.4", "ஆளும் சட்டம்", "நடுத்தரம்", "இந்தியச் சட்டத்தைத் தேர்ந்தெடுக்கவும்"]
+        ]
+      }
+    },
+    {
+      "id": "F2-ta",
+      "feature": "F2",
+      "script": "ta",
+      "expect": {
+        "kind": "table",
+        "header": [
+          "பிரிவு",
+          "தரப்பு",
+          "கடமை",
+          "தூண்டுதல்",
+          "சரிசெய்யும் காலம்",
+          "தீர்வு",
+          "வரம்பு",
+          "நீடிப்பு",
+          "கருத்து"
+        ],
+        "rows": [
+          [
+            "4.2",
+            "வழங்குநர்",
+            "சேவை நிலை மீறலால் ஏற்பட்ட நேரடி இழப்பைச் செலுத்துதல்",
+            "தொடர்ந்து இரண்டு மாதங்கள் சேவை நிலை தவறுதல்",
+            "எழுத்து அறிவிப்பிலிருந்து முப்பது நாட்கள்",
+            "சேவைக் கடன், பின்னர் முடிவுறுத்தல்",
+            "கடந்த பன்னிரண்டு மாதக் கட்டணம்",
+            "முடிவுக்குப் பின் இரண்டு ஆண்டுகள்",
+            "இந்த மதிப்புள்ள ஒப்பந்தத்திற்கு வரம்பு குறைவு; இரட்டிப்பாக்க வேண்டும்"
+          ],
+          [
+            "8.5",
+            "வாடிக்கையாளர்",
+            "வழங்குநரின் கருவிகளையும் முறைகளையும் இரகசியமாக வைத்தல்",
+            "ஒப்புதலின்றி மூன்றாம் தரப்பிற்கு வெளிப்படுத்துதல்",
+            "இல்லை",
+            "தடையுத்தரவும் இழப்பீடும்",
+            "வரம்பற்றது",
+            "முடிவுக்குப் பின் ஐந்து ஆண்டுகள்",
+            "வழக்கமான சொற்கள்; விலக்குகள் இருந்தால் ஏற்கலாம்"
+          ],
+          [
+            "15.2",
+            "இருவரும்",
+            "மீறல் தொடர்பான மூன்றாம் தரப்பு கோரிக்கைகளுக்கு ஒருவருக்கொருவர் இழப்பீடு",
+            "காலவரம்புக்குள் அறிவிக்கப்பட்ட கோரிக்கை",
+            "பொருந்தாது",
+            "கோரிக்கையின் தற்காப்பும் தீர்ப்புத் தொகையும்",
+            "வரம்பற்றது",
+            "காலவரையின்றி",
+            "கோரிக்கை நடத்தும் படிகளை இழப்பீட்டின் நிபந்தனையாக்கவும்"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "F3-ta",
+      "feature": "F3",
+      "script": "ta",
+      "expect": {
+        "kind": "table",
+        "header": ["கட்டண நிலை", "ரூபாயில் தொகை", "செலுத்த வேண்டியது"],
+        "rows": [
+          ["ஒப்பந்தத்தில் கையொப்பம்", "12,00,000", "கையொப்பத்தின் போது"],
+          ["முதல் கட்ட ஏற்பு", "18,50,000", "45 நாட்களுக்குள்"],
+          ["இறுதி ஏற்பு", "9,75,000", "60 நாட்களுக்குள்"]
+        ],
+        "align": ["left", "right", "center"]
+      }
+    },
+    {
+      "id": "F4-ta",
+      "feature": "F4",
+      "script": "ta",
+      "expect": {
+        "kind": "ordered-start",
+        "start": 3,
+        "items": [
+          "பிரிவு 4.2 இன் பொறுப்பு வரம்பை உயர்த்துமாறு வழங்குநரிடம் கேளுங்கள்.",
+          "பிரிவு 15.2 இன் இழப்பீட்டை வழங்குநர் கட்டுப்படுத்தும் கோரிக்கைகளுக்கு மட்டுப்படுத்துங்கள்.",
+          "வசதிக்கான முடிவுறுத்தலில் தொண்ணூறு நாள் அறிவிப்புக் காலத்தைச் சேர்க்கவும்."
+        ]
+      }
+    },
+    {
+      "id": "F5-ta",
+      "feature": "F5",
+      "script": "ta",
+      "expect": {
+        "kind": "nested",
+        "types": ["ol", "ul", "ol", "ul"],
+        "levels": [
+          "வழங்குநரின் கடமைகள்",
+          "அட்டவணை 3 இன் சேவை நிலைகள்",
+          "ஒவ்வொரு மாதமும் 99.5 சதவீதக் கிடைப்பு",
+          "வாடிக்கையாளரின் வலையமைப்பு எல்லையில் அளவிடப்படும்"
+        ],
+        "secondTopItem": "வாடிக்கையாளரின் கடமைகள்"
+      }
+    },
+    {
+      "id": "F6-p-ta",
+      "feature": "F6",
+      "script": "ta",
+      "expect": {
+        "kind": "clause-paragraphs",
+        "texts": [
+          "1.1 தொடக்கத் தேதியிலிருந்து வழங்குநர் சேவைகளை வழங்குவார்.",
+          "1.2.3 இந்த ஒப்பந்தத்தைத் தயாரிக்கும் செலவை ஒவ்வொரு தரப்பினரும் தாமே ஏற்பர்.",
+          "(a) சர்ச்சைக்குரிய விலைப்பட்டியலின் கட்டணத்தை வாடிக்கையாளர் நல்லெண்ணத்துடன் நிறுத்தி வைக்கலாம்;",
+          "(iv) இந்தப் பிரிவில் உள்ள எதுவும் மரணம் அல்லது தனிப்பட்ட காயத்திற்கான பொறுப்பைக் கட்டுப்படுத்தாது."
+        ]
+      }
+    },
+    {
+      "id": "F6-list-ta",
+      "feature": "F6",
+      "script": "ta",
+      "expect": {
+        "kind": "clause-lists",
+        "bullet": [
+          "2.1 கடைசிக் கையொப்பத் தேதியிலிருந்து காலம் தொடங்குகிறது.",
+          "(b) ஒப்புதலின்றி வழங்குநர் துணை ஒப்பந்தம் செய்யக்கூடாது."
+        ],
+        "ordered": [
+          "3.4.1 விலைப்பட்டியல்கள் நாற்பத்தைந்து நாட்களுக்குள் செலுத்தப்பட வேண்டும்.",
+          "(ii) தாமதக் கட்டணங்களுக்கு நான்கு சதவீத வட்டி உண்டு."
+        ]
+      }
+    },
+    {
+      "id": "F8-ta",
+      "feature": "F8",
+      "script": "ta",
+      "expect": {
+        "kind": "blockquote",
+        "outer": [
+          "வழங்குநரின் வழக்கறிஞர் 3 மார்ச் 2026 அன்று எழுதினார்:",
+          "இதை வரம்பு குறித்துப் பேச்சுவார்த்தைக்கான அழைப்பாகப் படிக்கிறோம்."
+        ],
+        "inner": "மறைமுக இழப்புக்கு வரம்பற்ற பொறுப்பை எங்கள் கட்சிக்காரர் எந்தச் சூழ்நிலையிலும் ஏற்க முடியாது."
+      }
+    },
+    {
+      "id": "F9-ta",
+      "feature": "F9",
+      "script": "ta",
+      "expect": {
+        "kind": "inline",
+        "paragraph": "வழங்குநரின் பார்வையில் வரம்பு பேச்சுவார்த்தைக்கு உட்படாதது, காலம் ஐந்து ஆண்டுகள், விலக்குகள் வரம்பற்றவை, முந்தைய வரைவின் இரண்டு ஆண்டு காலம் திரும்பப் பெறப்பட்டது. ஒப்பந்தத்தின் விதிகள் இந்த வரைவில் மாறவில்லை.",
+        "bold": "பேச்சுவார்த்தைக்கு உட்படாதது",
+        "italic": "ஐந்து ஆண்டுகள்",
+        "boldItalic": "வரம்பற்றவை",
+        "struck": "இரண்டு ஆண்டு",
+        "intraword": {
+          "stem": "ஒப்பந்த",
+          "suffix": "த்தின்"
+        }
+      }
+    },
+    {
+      "id": "F10-ta",
+      "feature": "F10",
+      "script": "ta",
+      "expect": {
+        "kind": "hr",
+        "before": "இத்துடன் தமிழ் வரைவின் சுருக்கம் முடிகிறது.",
+        "after": "அடுத்து அறிவிப்பு மற்றும் குறிப்பு விவரங்கள் உள்ளன."
+      }
+    },
+    {
+      "id": "F11-ta",
+      "feature": "F11",
+      "script": "ta",
+      "expect": {
+        "kind": "breaks",
+        "lines": [
+          "அறிவிப்புகளை அனுப்ப வேண்டிய முகவரி:",
+          "பொது ஆலோசகர், கிளாசியோ லீகல் எல்எல்பி",
+          "14 ஃப்ளீட் தெரு, லண்டன்"
+        ]
+      }
+    },
+    {
+      "id": "F12-ta",
+      "feature": "F12",
+      "script": "ta",
+      "expect": {
+        "kind": "footnote",
+        "sentence": "ஒப்பந்தம் முடிவுற்ற பின்னரும் இழப்பீட்டுக் கடமை நீடிக்கிறது.",
+        "number": "3",
+        "definition": "3 மார்ச் 2026 வரைவின் பிரிவு 15.2, பிரிவு 21.4 உடன் சேர்த்துப் படிக்கவும்."
+      }
+    },
+    {
+      "id": "F13-ta",
+      "feature": "F13",
+      "script": "ta",
+      "expect": {
+        "kind": "links",
+        "paragraph": "ஒப்பந்த மதிப்பாய்வு குறித்த எஸ்ஆர்ஏ வழிகாட்டுதல் பார்க்கவும், வழக்கறிஞருக்கு மின்னஞ்சல் அனுப்பவும், அல்லது சட்டத்திற்கு https://www.indiacode.nic.in/handle/123456789/1362 படிக்கவும்.",
+        "links": [
+          {
+            "href": "https://www.sra.org.uk/solicitors/guidance/",
+            "text": "ஒப்பந்த மதிப்பாய்வு குறித்த எஸ்ஆர்ஏ வழிகாட்டுதல்"
+          },
+          {
+            "href": "mailto:counsel1@example.com",
+            "text": "வழக்கறிஞருக்கு மின்னஞ்சல்"
+          },
+          {
+            "href": "https://www.indiacode.nic.in/handle/123456789/1362",
+            "text": "https://www.indiacode.nic.in/handle/123456789/1362"
+          }
+        ]
+      }
+    },
+    {
+      "id": "F14-ta",
+      "feature": "F14",
+      "script": "ta",
+      "expect": {
+        "kind": "images",
+        "images": [
+          {
+            "src": "clauseo-file:matter-118/ta-signature-page.png",
+            "alt": "ஒப்பந்தத்தின் கையொப்பமிட்ட பக்கம்"
+          },
+          {
+            "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+            "alt": "நிறுவன முத்திரை"
+          }
+        ]
+      }
+    },
+    {
+      "id": "F15-ta",
+      "feature": "F15",
+      "script": "ta",
+      "expect": {
+        "kind": "references",
+        "paragraph": "இழப்பின் தொலைவு பற்றிய விதி ஹாட்லி எதிர் பாக்சென்டேல் (1854) வழக்கிலிருந்து வருகிறது; நாங்கள் மதிப்பாய்வு செய்யும் பிரிவு வாடிக்கையாளரின் வரைவு ஒப்பந்தம், பதிப்பு 3 இல் உள்ளது.",
+        "refs": [
+          {
+            "component": "citation",
+            "ref": "hadley-v-baxendale-1854-ta",
+            "text": "ஹாட்லி எதிர் பாக்சென்டேல் (1854)"
+          },
+          {
+            "component": "paper",
+            "ref": "matter-118-msa-v3-ta",
+            "text": "வாடிக்கையாளரின் வரைவு ஒப்பந்தம், பதிப்பு 3"
+          }
+        ]
+      }
+    },
+    {
+      "id": "L0",
+      "feature": "L0",
+      "script": "en",
+      "expect": {
+        "kind": "literal",
+        "text": "Literal characters meant as text: **not bold**, a pipe | and a tilde pair ~~ stay as typed."
+      }
+    }
+  ]
+}
