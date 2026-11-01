@@ -1,9 +1,10 @@
-// The window's own controls. On the Mac the window keeps its corner lights; on Windows
-// the toolbar is the title bar and ends in minimise, maximise or restore, and close, in Windows 11's own metrics and
-// glyphs, because the platform's chrome follows the platform. No Mica: the toolbar stays on the ground.
-// In the app each press calls the window (getCurrentWindow().minimize(), toggleMaximize(), close()); in a browser
-// it logs what it would do. Snap Layouts on hovering maximise needs the host's hit-testing: WM_NCHITTEST answering
-// HTMAXBUTTON over this button.
+// The window's own controls. On the Mac the window keeps its corner lights, drawn by macOS over CornerLights' place;
+// on Windows the toolbar is the title bar and ends in minimise, maximise or restore, and close, in Windows 11's own
+// metrics and glyphs, because the platform's chrome follows the platform. No Mica: the toolbar stays on the ground.
+// This is a part: it knows no host. The app passes the handlers and the window's maximised state (ui/app's
+// useWindowFrame); without them each press logs what it would do. The host's hit-testing finds the maximise button by
+// data-caption="maximise" and answers HTMAXBUTTON over it, so Windows shows Snap Layouts; while it does, a native
+// window covers the button and the page gets no :hover, so the host sets data-pointer="hover" or "press" on it instead.
 import { useState } from "react";
 import { cn } from "../lib/cn.ts";
 import type { Platform } from "../lib/display.ts";
@@ -15,6 +16,8 @@ const caption = [
   "inline-grid place-items-center flex-none w-caption-w h-caption-h bg-transparent text-primary motion-colour",
   "is-hover:bg-hover is-active:bg-press is-focus:-outline-offset-4",
 ].join(" ");
+/** The maximise button under the host's pointer, where the page sees none (Snap Layouts' cover): the same fills. */
+const hostPointer = "host-hover:bg-hover host-press:bg-press";
 /** Close turns Windows' own red, with a white glyph. */
 const close =
   "is-hover:bg-win-close is-hover:text-on-colour is-active:bg-win-close-press is-active:text-on-colour";
@@ -47,9 +50,16 @@ const CLOSE = "M0.5 0.5L9.5 9.5M9.5 0.5L0.5 9.5";
 /** Says what the window would do, where there's no window to do it. */
 const would = (what: string) => console.info(`Clauseo would ${what} the window.`);
 
-/** Minimise, maximise or restore, and close, at the toolbar's right on Windows. */
+/** Minimise, maximise or restore, and close, at the toolbar's right on Windows. Each press calls its handler where
+ * one is given and otherwise logs what it would do, button by button. The middle button follows `maximised` where it
+ * is given (Restore while true, Maximise while false); without it the button keeps its own state, starting at
+ * `startMaximised` and flipping on each press, handler or not. */
 export function CaptionButtons({
   startMaximised = false,
+  maximised: shown,
+  onMinimise,
+  onToggleMaximise,
+  onClose,
   only = "all",
   className,
 }: {
@@ -59,9 +69,18 @@ export function CaptionButtons({
    * message box close alone. All three by default. */
   only?: "all" | "minimise-close" | "close";
   className?: string;
+  /** Optional: whether the window is maximised, as the window says. Overrides the button's own state. */
+  maximised?: boolean;
+  /** Optional: minimises the window. */
+  onMinimise?: () => void;
+  /** Optional: maximises the window, or restores it when maximised. */
+  onToggleMaximise?: () => void;
+  /** Optional: closes the window. */
+  onClose?: () => void;
 }) {
   const w = useUiWords();
-  const [maximised, setMaximised] = useState(startMaximised);
+  const [own, setOwn] = useState(startMaximised);
+  const maximised = shown ?? own;
   const maxLabel = maximised ? w.ui("Restore") : w.f("Maximise");
   return (
     <div role="group" aria-label={w.f("Window")} className={cn("room-caption flex", className)}>
@@ -71,7 +90,7 @@ export function CaptionButtons({
           className={caption}
           aria-label={w.f("Minimise")}
           title={w.f("Minimise")}
-          onClick={() => would("minimise")}
+          onClick={onMinimise ?? (() => would("minimise"))}
         >
           <Glyph d={MINIMISE} />
         </button>
@@ -79,12 +98,14 @@ export function CaptionButtons({
       {only === "all" && (
         <button
           type="button"
-          className={caption}
+          className={cn(caption, hostPointer)}
+          data-caption="maximise"
           aria-label={maxLabel}
           title={maxLabel}
           onClick={() => {
-            would(maximised ? "restore" : "maximise");
-            setMaximised(!maximised);
+            if (onToggleMaximise === undefined) would(maximised ? "restore" : "maximise");
+            else onToggleMaximise();
+            if (shown === undefined) setOwn(!maximised);
           }}
         >
           <Glyph d={maximised ? RESTORE : MAXIMISE} />
@@ -95,7 +116,7 @@ export function CaptionButtons({
         className={cn(caption, close)}
         aria-label={w.ui("Close")}
         title={w.ui("Close")}
-        onClick={() => would("close")}
+        onClick={onClose ?? (() => would("close"))}
       >
         <Glyph d={CLOSE} />
       </button>
@@ -103,10 +124,17 @@ export function CaptionButtons({
   );
 }
 
-/** The Mac's corner lights: three 12 px circles in the lights tone, set in. They stand for the window's own. */
-export function CornerLights() {
+/** The Mac's corner lights: three 12 px circles in the lights tone, set in. They stand for the window's own. Where
+ * `native` is set, macOS draws its own traffic lights in this very place (the host puts them there), so the element
+ * keeps its size and its drag region, and paints no circles (shell.css, .room-lights[data-native]). */
+export function CornerLights({ native = false }: { native?: boolean }) {
   return (
-    <div className="room-lights" aria-hidden="true" data-tauri-drag-region>
+    <div
+      className="room-lights"
+      aria-hidden="true"
+      data-tauri-drag-region
+      data-native={native ? "" : undefined}
+    >
       <i />
       <i />
       <i />

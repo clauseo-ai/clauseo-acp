@@ -41,6 +41,10 @@
   }
 }
 @custom-variant is-disabled (&:is(:disabled, [data-disabled]));
+/* the pointer as the host reports it, where a native window covers the element and the page sees no :hover or :active
+   (the maximise button under Windows' Snap Layouts) */
+@custom-variant host-hover (&[data-pointer="hover"]:not(:disabled, [data-disabled]));
+@custom-variant host-press (&[data-pointer="press"]:not(:disabled, [data-disabled]));
 /* lite: the planes part by tone alone, so a floating card takes a hairline where its shadow was */
 @custom-variant lite (&:where([data-render='lite'] *));
 /* a Devanagari run, and Hindi on the page */

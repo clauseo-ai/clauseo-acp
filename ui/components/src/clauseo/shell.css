@@ -54,6 +54,11 @@
     display: block;
     box-shadow: var(--set-in-lights);
   }
+  /* macOS draws the native lights here: the circles keep their place and paint nothing */
+  .room-lights[data-native] i {
+    background: transparent;
+    box-shadow: none;
+  }
   /* the title sits over the reading column. It's never cut short: it wraps, and the search field gives way first */
   .room-matter {
     min-width: 0;
