@@ -22,7 +22,15 @@ export interface HighlightClientOptions {
   readonly timeoutMs?: number;
   /** How many blocks' tokens the LRU keeps. */
   readonly limit?: number;
-  /** How many times a worker that missed a deadline is replaced before every later block stays plain. */
+  /** How many characters of code the LRU keeps, over all its blocks (each block's key and tokens hold its code). */
+  readonly limitChars?: number;
+  /** A block with more lines than this stays plain and never reaches the worker: committing its token spans would
+   * hold the main thread longer than the block is worth (see MAX_LINES). */
+  readonly maxLines?: number;
+  /** The same, in characters, for blocks of few but very long lines. */
+  readonly maxChars?: number;
+  /** How many deadline misses in a row replace the worker before every later block stays plain. Any answer refills
+   * it, so slow blocks spread over a session never use it up. */
   readonly restarts?: number;
 }
 
@@ -30,11 +38,23 @@ export interface HighlightClient {
   /** The tokens already known for this block, at once, or undefined. Counts as a use for the LRU. */
   peek(code: string, lang: string): Lines | undefined;
   /** The block's tokens, or null when it stays plain: a language outside the worker's eight, a worker that could not
-   * start or failed, or a missed deadline. Never rejects. */
+   * start or failed, a missed deadline, or a block over the size caps (which never reaches the worker). Never
+   * rejects. */
   highlight(code: string, lang: string): Promise<Lines | null>;
   /** Stops the worker; later blocks stay plain. */
   dispose(): void;
 }
+
+/**
+ * The largest block that is coloured; a bigger one stays plain text. Measured in Chromium 151 (headless, 60 Hz; the
+ * table is in PR #108): the longest frame when a TypeScript block's token spans are committed stayed at one frame up
+ * to 750 lines (24 KB, about 2,000 spans) and reached 33 to 50 ms at 1,000 lines, where the plain block took one
+ * frame. At 4x CPU throttling a 500-line block's commit took about 50 ms. 500 lines keeps a margin below the first
+ * size that dropped frames.
+ */
+export const MAX_LINES = 500;
+/** The 750-line block's size, for blocks of fewer but longer lines: spans grow with characters, not lines. */
+export const MAX_CHARS = 24_000;
 
 /** A block stays plain for good: it missed its deadline, so asking again would only stall the queue again. */
 const PLAIN = null;
@@ -53,7 +73,12 @@ type WorkerState =
 export function createHighlightClient(options: HighlightClientOptions): HighlightClient {
   const timeoutMs = options.timeoutMs ?? 8000;
   const limit = options.limit ?? 200;
-  let restartsLeft = options.restarts ?? 2;
+  const limitChars = options.limitChars ?? 4_000_000;
+  const maxLines = options.maxLines ?? MAX_LINES;
+  const maxChars = options.maxChars ?? MAX_CHARS;
+  const restarts = options.restarts ?? 2;
+  let restartsLeft = restarts;
+  let cachedChars = 0;
 
   const cache = new Map<string, Lines | typeof PLAIN>();
   const pending = new Map<string, Promise<Lines | null>>();
@@ -63,9 +88,23 @@ export function createHighlightClient(options: HighlightClientOptions): Highligh
   let nextId = 1;
 
   const remember = (key: string, value: Lines | typeof PLAIN) => {
-    cache.delete(key);
+    if (cache.delete(key)) cachedChars -= key.length;
     cache.set(key, value);
-    if (cache.size > limit) cache.delete(cache.keys().next().value ?? "");
+    cachedChars += key.length;
+    while (cache.size > limit || (cachedChars > limitChars && cache.size > 1)) {
+      const oldest = cache.keys().next().value ?? "";
+      cache.delete(oldest);
+      cachedChars -= oldest.length;
+    }
+  };
+
+  /** Too big to colour: more lines or characters than the caps. */
+  const oversized = (code: string) => {
+    if (code.length > maxChars) return true;
+    let lines = 1;
+    for (let at = code.indexOf("\n"); at !== -1; at = code.indexOf("\n", at + 1))
+      if (++lines > maxLines) return true;
+    return false;
   };
 
   const finish = (job: Job, lines: Lines | null, store: boolean) => {
@@ -93,6 +132,8 @@ export function createHighlightClient(options: HighlightClientOptions): Highligh
         clearTimeout(current.timer);
         const { job } = current;
         current = undefined;
+        // The worker answers, so it is healthy: misses before this one no longer count.
+        restartsLeft = restarts;
         // A null answer is the worker failing on this block: plain, and not asked again.
         finish(job, event.data.lines, true);
         pump();
@@ -137,7 +178,7 @@ export function createHighlightClient(options: HighlightClientOptions): Highligh
   return {
     peek(code, lang) {
       const language = languageOf(lang);
-      if (!language) return undefined;
+      if (!language || oversized(code)) return undefined;
       const key = `${language}\u0000${code}`;
       const hit = cache.get(key);
       if (hit) remember(key, hit);
@@ -145,7 +186,7 @@ export function createHighlightClient(options: HighlightClientOptions): Highligh
     },
     highlight(code, lang) {
       const language = languageOf(lang);
-      if (!language || state.kind === "failed") return Promise.resolve(null);
+      if (!language || state.kind === "failed" || oversized(code)) return Promise.resolve(null);
       const key = `${language}\u0000${code}`;
       if (cache.has(key)) {
         const hit = cache.get(key) ?? null;
