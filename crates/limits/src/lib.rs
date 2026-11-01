@@ -23,6 +23,8 @@
 //! - [`ReadLimits`], [`ReadOutcome`], [`ReadFailure`], and [`ProcessReaders`], which reads over a
 //!   `process::Launcher` and a `process::Timer`. A refused settings path or a failed file step
 //!   comes back as `ReadFailure::LaunchFailed` with its text.
+//! - Hidden, for G16's live tests only (`tests/live.rs`): `ProcessReaders::with_stdout_tap` and
+//!   `StdoutTap`, a copy of each read's raw, unredacted stdout. The product never sets one.
 //!
 //! # Invariants
 //!
@@ -56,4 +58,6 @@ mod write;
 
 pub use model::{LimitHit, LiveSignal, LiveStatus};
 pub use policy::{Action, Input, Limits};
+#[doc(hidden)]
+pub use readers::StdoutTap;
 pub use readers::{ProcessReaders, ReadFailure, ReadLimits, ReadOutcome};

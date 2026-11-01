@@ -138,9 +138,20 @@ fn the_spec_runs_codex_js_app_server_with_codex_home_forced() {
         panic!("expected one launch, got {}", specs.len());
     };
     assert_eq!(spec.program(), std::path::Path::new(&Setup::command()));
+    let mut args = vec![codex_js.into_os_string()];
+    for set in [
+        "features.apps=false",
+        "features.plugins=false",
+        "features.skill_mcp_dependency_install=false",
+        "cloud.skills.enabled=false",
+    ] {
+        args.extend([OsString::from("-c"), OsString::from(set)]);
+    }
+    args.push(OsString::from("app-server"));
     assert_eq!(
         spec.args(),
-        [codex_js.into_os_string(), OsString::from("app-server")]
+        args,
+        "#203: the host's switches, before the subcommand"
     );
     assert_eq!(spec.cwd(), setup.run_dir());
     let homes: Vec<_> = spec
@@ -178,7 +189,7 @@ fn codex_acps_own_codex_js_wins_over_the_installs() {
     let own = under(
         &under(
             &setup.install(),
-            "node_modules/@zed-industries/codex-acp/node_modules",
+            "node_modules/@agentclientprotocol/codex-acp/node_modules",
         ),
         CODEX_JS,
     );

@@ -14,7 +14,7 @@ use crate::write::scratch::Scratch;
 
 const CLAUDE_SCRIPT: &str =
     "install/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
-const CODEX_SCRIPT: &str = "install/node_modules/@zed-industries/codex-acp/bin/codex-acp.js";
+const CODEX_SCRIPT: &str = "install/node_modules/@agentclientprotocol/codex-acp/dist/index.js";
 const CLAUDE_SDK: &str = "install/node_modules/@anthropic-ai/claude-agent-sdk/package.json";
 const SDK_PACKAGE: &str = r#"{"name":"@anthropic-ai/claude-agent-sdk","version":"0.3.293"}"#;
 
@@ -201,7 +201,7 @@ fn codex_js_is_codex_acps_own_first_then_the_install_folders() {
     assert_eq!(located.install, scratch.0.join("install"));
     assert_eq!(found, shared);
     let own = scratch.file(
-        "install/node_modules/@zed-industries/codex-acp/node_modules/@openai/codex/bin/codex.js",
+        "install/node_modules/@agentclientprotocol/codex-acp/node_modules/@openai/codex/bin/codex.js",
         "",
     );
     assert_eq!(codex_js(&launch(&script)).unwrap().1, own);
@@ -237,7 +237,7 @@ fn a_linked_codex_package_is_refused_not_skipped() {
     let real = scratch.dir("store/codex");
     scratch.file("store/codex/bin/codex.js", "");
     scratch.link(
-        "install/node_modules/@zed-industries/codex-acp/node_modules/@openai/codex",
+        "install/node_modules/@agentclientprotocol/codex-acp/node_modules/@openai/codex",
         &real,
     );
     assert!(rule(codex_js(&launch(&script))).contains("is a link inside the install"));

@@ -14,6 +14,12 @@ fail-fast = false
 filter = 'package(clauseo-store)'
 slow-timeout = { period = "10s", terminate-after = 16 }
 
+# G16's live tests read real accounts: the Claude reader's own 25 s and the Codex reader's 10 s
+# timeouts, plus Node's and the vendor CLI's start-up, overrun 30 s; 90 s still ends a hung read.
+[[profile.default.overrides]]
+filter = 'package(clauseo-limits) & binary(live)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
 [profile.ci]
 retries = 0                        # flakes are bugs; reproduce with SEED
 failure-output = "immediate-final"

@@ -28,7 +28,7 @@ pub(crate) const FAKE_KEY: &str = "fakeAnthropicKey0123";
 /// A fake 20-character key the test sets in Codex's settings env; `codex-crash` echoes it.
 pub(crate) const FAKE_OPENAI_KEY: &str = "fakeOpenAiKey0123456";
 /// codex-acp's script under the fake install.
-pub(crate) const CODEX_SCRIPT: &str = "node_modules/@zed-industries/codex-acp/bin/codex-acp.js";
+pub(crate) const CODEX_SCRIPT: &str = "node_modules/@agentclientprotocol/codex-acp/dist/index.js";
 /// Where the Codex CLI's script sits under a `node_modules` folder.
 pub(crate) const CODEX_JS: &str = "@openai/codex/bin/codex.js";
 /// An inherited variable the settings env overrides in another case; cargo and nextest set it

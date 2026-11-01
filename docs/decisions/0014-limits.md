@@ -38,8 +38,14 @@ first three through and calls the fourth:
   account would have been stored, and would come back at start beside the real one.
 - `ProcessReaders::new(effective, codex_home, launcher, timer)`, from #160: Clauseo owns the
   Codex home (below).
+- G16 adds one hidden, additive hook: `ProcessReaders::with_stdout_tap(StdoutTap)` copies each
+  read's raw stdout to a callback, so its live tests can record the vendors' answers, redacted,
+  under `target/g16/`. Without it the stdout passes as before; R16 never sets it.
 - `at_limit(agent, now)`: a row whose `resets_at` is at or before `now` never counts, even when
-  no deadline swept it because nobody watched. R16 asks at a turn stop, outside watching.
+  no deadline swept it because nobody watched. R16 asks at a turn stop, outside watching. A
+  Codex `reached` plan window (any reason but credits and the spend cap) ends with its rows: once
+  every shown row is past its reset at `now`, it gives `None` (#204). With no row it stands until
+  the next read. Credits and the spend cap do not reset with time, so they stand.
 
 The host keeps two contracts. It sends exactly one `ReadDone` per `Action::Read`, as
 `Failed(TimedOut)` if it drops the read; a `ReadDone` the model did not ask for is ignored. And it
@@ -129,10 +135,17 @@ never a key or a token.
 **Codex.** The reader runs `node <codex.js> app-server` and talks through `codex_appserver`'s
 client: `initialize` (then `initialized`), `account/read`, and, for a ChatGPT account only,
 `account/rateLimits/read { excludeResetCreditDetails: true }`. Then it drops the client, which
-closes stdin. It passes none of the `CODEX_CONFIG` overrides the host gives codex-acp under
-#160, since it starts no thread and runs no tool. What `codex app-server` loads at start-up from
-Clauseo's home (plugins, apps) is not verified; G16 checks it. `codex.js` is codex-acp's own `node_modules/@openai/codex/bin/codex.js`, else the
-install's. No account is `SignedOut`. An API key is `PayAsYouGo { via: OpenAi }` with ref
+closes stdin. It runs `codex.js` with the switches the host gives codex-acp under #160 as `-c`
+overrides before `app-server`: `features.apps=false`, `features.plugins=false`,
+`features.skill_mcp_dependency_install=false` and `cloud.skills.enabled=false` (#203). G16 probed
+`@openai/codex` 0.162.1 with a scratch home and no login: before any thread, nothing the home's
+config names ran (an `[mcp_servers]` entry, a plugin's MCP server and hook, config hooks, a
+skill's MCP dependency), but with plugins on by default app-server ran `git ls-remote` and
+`git fetch` of `github.com/openai/plugins` into the home, even with an empty home.
+`features.plugins=false` stops that; with all four there was no child process and no socket.
+App-server still writes its own state files into the home and unpacks its bundled skills into
+`skills/.system`. `codex.js` is codex-acp's own `node_modules/@openai/codex/bin/codex.js`, else
+the install's. No account is `SignedOut`. An API key is `PayAsYouGo { via: OpenAi }` with ref
 `api-key`, and Bedrock is `PayAsYouGo { via: Bedrock }` with ref `bedrock`, both
 `NotApplicable`. For ChatGPT, only the snapshot whose `limitId` is `codex` (from
 `rateLimitsByLimitId`, else `rateLimits` when its `limitId` is `codex` or absent) sets the

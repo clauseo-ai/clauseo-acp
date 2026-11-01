@@ -9,7 +9,7 @@ use clauseo_settings::AgentLaunch;
 use crate::readers::codex::{Prepared, prepare};
 use crate::write::scratch::Scratch;
 
-const SCRIPT: &str = "install/node_modules/@zed-industries/codex-acp/bin/codex-acp.js";
+const SCRIPT: &str = "install/node_modules/@agentclientprotocol/codex-acp/dist/index.js";
 const CODEX_JS: &str = "install/node_modules/@openai/codex/bin/codex.js";
 
 fn node() -> String {
@@ -69,9 +69,24 @@ fn codex_home_is_forced_over_inherited_and_settings_values_in_any_case() {
         Some(&OsString::from("https://example.com"))
     );
     assert_eq!(spec.program(), std::path::Path::new(&node()));
+    let overrides = [
+        "-c",
+        "features.apps=false",
+        "-c",
+        "features.plugins=false",
+        "-c",
+        "features.skill_mcp_dependency_install=false",
+        "-c",
+        "cloud.skills.enabled=false",
+    ]
+    .map(OsString::from);
+    let mut args = vec![codex_js.into_os_string()];
+    args.extend(overrides);
+    args.push(OsString::from("app-server"));
     assert_eq!(
         spec.args(),
-        [codex_js.into_os_string(), OsString::from("app-server")]
+        args,
+        "#203: the host's switches, before the subcommand"
     );
     assert_eq!(spec.cwd(), run_dir);
     assert!(run_dir.is_dir());
