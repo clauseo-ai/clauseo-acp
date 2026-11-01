@@ -49,7 +49,7 @@ function createCuts(length: number, base?: Cuts): Cuts {
  * and keeps micromark's work on the repaired text close to its work on the raw text: it matches each
  * closer against every opener before it, so closing all of `*a `×2,000 took 2 s to parse.
  */
-const MAX_CLOSERS = 4;
+export const MAX_CLOSERS = 4;
 
 /** A delimiter run in the block's text: its character, where it starts, and how many are unmatched. */
 type Run = { char: string; start: number; length: number };
