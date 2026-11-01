@@ -38,7 +38,13 @@ export function installDevHooks(store: DisplayStore): void {
   window.__clauseoDisplay = (next) => store.set(next);
   window.__clauseoAxe = async () => {
     const { default: axe } = await import("axe-core");
-    const results = await axe.run(document, { resultTypes: ["violations"] });
+    // Base UI's focus guards, around an open dialog or menu, take role="button" with no name in WebKit once VoiceOver
+    // is detected (FocusGuard.js: VoiceOver's cursor fires focus only on buttons there, so the trap can catch it);
+    // they are visually hidden focus sentinels, not controls, and axe's aria-command-name would flag every one
+    const results = await axe.run(
+      { include: [[":root"]], exclude: [["[data-base-ui-focus-guard]"]] },
+      { resultTypes: ["violations"] },
+    );
     return results.violations;
   };
 }

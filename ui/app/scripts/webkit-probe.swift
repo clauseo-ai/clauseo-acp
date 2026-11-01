@@ -10,7 +10,9 @@
 // is never cut off, and each row of file tiles is as tall as its tallest title and the tile's padding, with no room kept
 // for a numeral or a chip. One more page per look freezes Object.prototype in the main frame first, as Tauri's
 // freezePrototype does, and runs window.__clauseoAxe() there: it must resolve with no violation. The room with no
-// matters (?matters=none: "No matters yet" as its title) is loaded in night Hindi at text sizes 16 and 20.
+// matters (?matters=none: "No matters yet" as its title, the empty rail) is loaded in night Hindi at text sizes 16
+// and 20. The rail in every state (?rail=states) is loaded at every width in both looks, folded and opened at 1100 px,
+// and run through axe, with and without the new matter dialog open.
 //
 // Usage, from ui/app: pnpm build:probe, then serve dist-probe/ with `pnpm exec vite preview --mode probe` (port 4173),
 // then pnpm probe:webkit. PROBE_ORIGIN names another server; PROBE_SHOTS names a folder to save a PNG of each page
@@ -101,6 +103,62 @@ for size in [16, 20] {
     runs.append(Run(name: "no matters night hi \(size)", url: URL(string: "\(origin)/\(q)")!, width: w, height: h,
                     rendered: rendered, setup: ""))
   }
+}
+// the empty rail on the same pages: New matter at its head, its empty state, and no matter row
+for i in runs.indices where runs[i].name.hasPrefix("no matters") {
+  runs[i] = Run(name: runs[i].name, url: runs[i].url, width: runs[i].width, height: runs[i].height,
+                rendered: runs[i].rendered + " && document.querySelector('nav.room-rail [data-testid=\"new-matter\"]') !== null" +
+                  " && document.querySelectorAll('nav.room-rail [data-testid=\"matter-row\"]').length === 0",
+                setup: "")
+}
+
+// the rail in every state (?rail=states, probe-main.tsx): eleven matter rows over every date group, Pinned, and the
+// scratch matter at the foot, measured as every page is and for a rail that never scrolls sideways; at 1100 px the rail
+// folded behind Matters, opened as the floating panel; and axe over the rail and over the open new matter dialog, under
+// a frozen Object.prototype
+let railMeasured = "(function () { var errs = " + measured + ", rail = document.querySelector('nav.room-rail');" +
+  " if (rail && rail.clientWidth > 0 && rail.scrollWidth > rail.clientWidth + 1)" +
+  " errs.push('layout: the rail scrolls sideways, ' + rail.scrollWidth + ' px in ' + rail.clientWidth); return errs; })()"
+let railRendered = { (theme: String, lang: String) in
+  "document.querySelector('#root main.room-centre') !== null" +
+    " && (document.querySelector('[data-testid=\"matter\"]')?.textContent ?? '') !== ''" +
+    " && document.querySelectorAll('nav.room-rail [data-testid=\"matter-row\"]').length === 11" +
+    " && document.querySelector('nav.room-rail [data-kind=\"scratch\"]') !== null" +
+    " && document.documentElement.dataset.theme === '\(theme)' && document.documentElement.lang === '\(lang)'"
+}
+let axeRun = " && (window.__axeStarted || (window.__axeStarted = true, window.__clauseoAxe().then(" +
+  "function (v) { window.__axeOut = v; v.forEach(function (x) { __probe.errs.push('axe: ' + x.id + ' ' + " +
+  "x.nodes.map(function (n) { return n.target.join(' '); }).join(', ')); }); }, " +
+  "function (e) { window.__axeOut = []; __probe.errs.push('axe rejected: ' + String(e && (e.stack || e.message) || e).slice(0, 300)); }), " +
+  "false)) && Array.isArray(window.__axeOut)"
+for (theme, lang) in looks {
+  let q = "?rail=states&theme=\(theme)&lang=\(lang)"
+  let rendered = railRendered(theme, lang)
+  for (w, h) in sizes {
+    var run = Run(name: "rail states \(theme) \(lang)", url: URL(string: "\(origin)/\(q)")!, width: w, height: h,
+                  rendered: rendered, setup: "")
+    run.measure = railMeasured
+    runs.append(run)
+  }
+  // folded at 1100 px: Matters opens the rail as a floating panel over the work
+  let folded = rendered + " && (window.__railPressed || (window.__railPressed = true," +
+    " document.querySelector('.room-rail-toggle').click(), false))" +
+    " && document.querySelector('nav.room-rail[data-open]') !== null" +
+    " && document.querySelector('nav.room-rail').getBoundingClientRect().width > 0"
+  var open = Run(name: "rail states \(theme) \(lang), folded and opened", url: URL(string: "\(origin)/\(q)")!,
+                 width: 1100, height: 800, rendered: folded, setup: "")
+  open.measure = railMeasured
+  runs.append(open)
+  runs.append(Run(name: "rail states \(theme) \(lang), frozen, axe", url: URL(string: "\(origin)/\(q)")!,
+                  width: 1280, height: 800, rendered: rendered + axeRun,
+                  setup: "Object.freeze(Object.prototype);"))
+  // New matter, pressed: the dialog open over the room
+  let dialog = rendered + " && (window.__newPressed || (window.__newPressed = true," +
+    " document.querySelector('[data-testid=\"new-matter\"]').click(), false))" +
+    " && document.querySelector('[role=\"dialog\"] [data-testid=\"matter-name\"]') !== null"
+  runs.append(Run(name: "new matter dialog \(theme) \(lang), frozen, axe", url: URL(string: "\(origin)/\(q)")!,
+                  width: 1280, height: 800, rendered: dialog + axeRun,
+                  setup: "Object.freeze(Object.prototype);"))
 }
 
 // Listens for errors from the first moment, before the page's own scripts run.
