@@ -36,7 +36,7 @@
 //!   A response's callback runs before any later agent message, so tags never guess from timing.
 //! - `_meta` is read only at `_claude/rateLimit` (on `usage_update`) and
 //!   `jetbrains.air.sessionFailure` (on `session_info_update` and the prompt response). A
-//!   `session/new` `_meta` is sent verbatim and never read.
+//!   `session/new` or `session/load` `_meta` is sent verbatim and never read.
 //! - A malformed line (not UTF-8 JSON-RPC), an unknown update or an unknown content block never
 //!   ends the connection, and nothing is written back for it: it becomes a [`ProtocolWarning`],
 //!   naming its session when the message named one, or a `ContentBlock::Unsupported`.
