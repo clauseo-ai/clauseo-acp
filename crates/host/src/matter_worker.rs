@@ -133,10 +133,10 @@ pub(crate) enum MatterReply {
     Opened(Result<Option<CheckpointId>, Error>),
     BeforeTurn(Result<TurnCheckpoint, Error>),
     AfterTurn(Result<TurnCheckpoint, Error>),
-    Undone(Result<Undone, Error>),
-    Restored(Result<Box<Restored>, Error>),
+    Undone(Result<Box<Undone>, Error>),
+    Restored(Result<Box<RestoreDone>, Error>),
     Compared(Result<Vec<FileChange>, Error>),
-    Previewed(Result<RestorePlan, Error>),
+    Previewed(Result<Box<RestorePlan>, Error>),
 }
 
 /// A turn's checkpoint, and for an id R8 reused what the host needs to record it when its log
@@ -146,6 +146,15 @@ pub(crate) struct TurnCheckpoint {
     pub(crate) checkpoint: Checkpoint,
     /// `Some` when the outcome is `Reused`.
     pub(crate) reused: Option<Reused>,
+}
+
+/// A restore R8 has done, with the timeline entry of the id it reused when it wrote nothing,
+/// so the host can record that id late if the log lacks it.
+#[derive(Debug)]
+pub(crate) struct RestoreDone {
+    pub(crate) restored: Restored,
+    /// For a `Reused` restore checkpoint: its kind, thread and turn on R8's timeline.
+    pub(crate) reused: Option<TimelineEntry>,
 }
 
 /// A reused checkpoint as R8's timeline has it.
@@ -295,7 +304,7 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
                 checkpoint: job.checkpoint,
                 at: job.at,
             };
-            Ok(matter.undo(&request)?)
+            Ok(Box::new(matter.undo(&request)?))
         })),
         MatterJob::Restore(job) => MatterReply::Restored(open(settings, slot).and_then(|matter| {
             let request = Restore {
@@ -305,7 +314,12 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
                 checkpoint: job.checkpoint,
                 at: job.at,
             };
-            Ok(Box::new(matter.restore(&request)?))
+            let restored = matter.restore(&request)?;
+            let reused = match restored.checkpoint.outcome {
+                CheckpointOutcome::Reused(id) => timeline_entry(matter, id),
+                CheckpointOutcome::Created(_) => None,
+            };
+            Ok(Box::new(RestoreDone { restored, reused }))
         })),
         MatterJob::Compare { from, to } => {
             MatterReply::Compared(open(settings, slot).and_then(|matter| {
@@ -315,7 +329,7 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         }
         MatterJob::Preview { from, scope } => MatterReply::Previewed(
             open(settings, slot)
-                .and_then(|matter| Ok(matter.preview_restore(from, (&scope).into())?)),
+                .and_then(|matter| Ok(Box::new(matter.preview_restore(from, (&scope).into())?))),
         ),
     }
 }
@@ -325,6 +339,17 @@ fn root_commit(matter: &Matter, root: CheckpointId) -> Result<CommitId, Error> {
     matter
         .commit_of(root)
         .ok_or_else(|| Error::Internal(format!("the new matter has no checkpoint {root}")))
+}
+
+/// The timeline entry of checkpoint `id`. A reused id is the last checkpoint, so the search
+/// from the end stops at once.
+fn timeline_entry(matter: &Matter, id: CheckpointId) -> Option<TimelineEntry> {
+    matter
+        .timeline()
+        .iter()
+        .rev()
+        .find(|entry| entry.id == id)
+        .copied()
 }
 
 /// `checkpoint` with, when R8 reused an id, its timeline entry and the changes from `before`.
@@ -339,13 +364,7 @@ fn turn_checkpoint(
             reused: None,
         });
     };
-    // A reused id is the last checkpoint, so the search from the end stops at once.
-    let entry = matter
-        .timeline()
-        .iter()
-        .rev()
-        .find(|entry| entry.id == id)
-        .copied();
+    let entry = timeline_entry(matter, id);
     let changes = match before {
         Some(before) if before != id => matter.changes_between(before, id)?,
         Some(_) | None => Vec::new(),

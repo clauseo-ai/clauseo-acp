@@ -15,14 +15,14 @@ use crate::support::{Dir, FAKE, Running, Scenario, matter_with_thread, wait};
 use crate::write;
 
 /// The matter's events, read until caught up.
-fn matter_events(host: &Running, matter: MatterId) -> Events {
+pub(crate) fn matter_events(host: &Running, matter: MatterId) -> Events {
     let mut events = host.events(StreamId::Matter(matter));
     events.until_caught_up();
     events
 }
 
 /// Every `CheckpointRecorded` of the matter's log, with the seq it was logged at.
-fn recorded(events: &Events) -> Vec<(CheckpointId, CheckpointKind, u64)> {
+pub(crate) fn recorded(events: &Events) -> Vec<(CheckpointId, CheckpointKind, u64)> {
     events
         .seen
         .iter()
@@ -124,25 +124,41 @@ fn restore_writes_files_notes_next_prompt_and_rows_survive() {
         }
     );
     assert_eq!(log.checkpoint(CheckpointKind::Restore), Some(checkpoint));
-    let logged = recorded(&log);
 
-    // The next prompt opens with the note naming brief.txt (the scenario expects it).
+    // An edit outside Clauseo, then the next prompt: its before-turn checkpoint is new, and
+    // the prompt opens with the note naming brief.txt (the scenario expects it).
+    write::write(&folder.join("extra.txt"), b"typed by the lawyer\n");
     let (second, _) = host.prompt(thread, "Carry on.");
     let ended = events.until_turn_ended(second);
     host.settle();
     events.drain_ready();
     assert_eq!(ended.stop, StopReason::EndTurn, "{}", events.dump());
-    host.shutdown();
-
-    // Every checkpoint has its row: its matter, its commit, the seq of its CheckpointRecorded.
-    let store = wait("Store::open", Store::open(StoreOptions::new(dir.data()))).unwrap();
+    let logged = recorded(&matter_events(&host, matter));
+    let kinds: Vec<_> = logged.iter().map(|(_, kind, _)| *kind).collect();
     assert_eq!(
-        logged.len(),
-        4,
-        "import, after-turn, outside edits (added.txt), restore: {logged:?}"
+        kinds,
+        [
+            CheckpointKind::Import,
+            CheckpointKind::AfterTurn,
+            CheckpointKind::OutsideEdits,
+            CheckpointKind::Restore,
+            CheckpointKind::BeforeTurn,
+        ]
     );
+    host.shutdown();
+    assert_every_checkpoint_has_its_row(&dir, matter, &logged);
+}
+
+/// Reads the store after shutdown: every `CheckpointRecorded` in `logged` has its row, with
+/// the matter, the `seq` of its event and a commit of its own.
+pub(crate) fn assert_every_checkpoint_has_its_row(
+    dir: &Dir,
+    matter: MatterId,
+    logged: &[(CheckpointId, CheckpointKind, u64)],
+) {
+    let store = wait("Store::open", Store::open(StoreOptions::new(dir.data()))).unwrap();
     let mut commits = Vec::new();
-    for (id, kind, seq) in logged {
+    for &(id, kind, seq) in logged {
         let row = wait("checkpoint", store.checkpoint(id))
             .unwrap()
             .unwrap_or_else(|| panic!("no row for the {kind:?} checkpoint"));
@@ -157,7 +173,12 @@ fn restore_writes_files_notes_next_prompt_and_rows_survive() {
     }
     commits.sort();
     commits.dedup();
-    assert_eq!(commits.len(), 4, "each checkpoint has its own commit");
+    assert_eq!(
+        commits.len(),
+        logged.len(),
+        "each checkpoint has its own commit"
+    );
+    wait("Store::close", store.close()).unwrap();
 }
 
 #[test]
@@ -184,17 +205,45 @@ fn restore_of_the_current_version_writes_nothing() {
 }
 
 #[test]
-fn restore_refused_while_a_turn_runs_and_for_another_matter() {
+fn restore_refused_while_turn_runs() {
     let dir = Dir::new(
-        "restore_refused_while_a_turn_runs_and_for_another_matter",
-        &[
-            (PERM, Scenario::Bundled("permission-kinds")),
-            (FAKE, Scenario::Bundled("prompt-stream")),
-        ],
+        "restore_refused_while_turn_runs",
+        &[(PERM, Scenario::Bundled("permission-kinds"))],
     );
     let host = dir.start(0);
     let (matter, thread, folder) =
         matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], PERM);
+    let import = matter_events(&host, matter)
+        .checkpoint(CheckpointKind::Import)
+        .unwrap();
+
+    // A turn waiting on a permission holds the matter's writer.
+    let mut events = host.events(StreamId::Thread(thread));
+    host.prompt(thread, "Go.");
+    until_first_request(&mut events);
+    let head = matter_events(&host, matter).head();
+    let error = host.refused(restore_brief(matter, import), ErrorCode::MatterTurnRunning);
+    assert!(error.to_string().contains("a turn is running"), "{error}");
+    assert_eq!(
+        std::fs::read_to_string(folder.join("brief.txt")).unwrap(),
+        "x\n"
+    );
+    assert_eq!(
+        matter_events(&host, matter).head(),
+        head,
+        "a refused restore logged"
+    );
+    host.shutdown();
+}
+
+#[test]
+fn restore_and_preview_refused_for_another_matter_or_a_bad_scope() {
+    let dir = Dir::new(
+        "restore_and_preview_refused_for_another_matter_or_a_bad_scope",
+        &[(FAKE, Scenario::Bundled("prompt-stream"))],
+    );
+    let host = dir.start(0);
+    let (matter, _, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
     let (other, _, _) = matter_with_thread(&dir, &host, "o", &[("brief.txt", "y\n")], FAKE);
     let import = matter_events(&host, matter)
         .checkpoint(CheckpointKind::Import)
@@ -208,29 +257,26 @@ fn restore_refused_while_a_turn_runs_and_for_another_matter() {
         error.to_string().contains("not a version of this matter"),
         "{error}"
     );
-
-    let preview = HostQuery::PreviewRestore {
+    let preview = |checkpoint, scope| HostQuery::PreviewRestore {
         matter,
-        checkpoint: foreign,
-        scope: RestoreRequest::Matter,
+        checkpoint,
+        scope,
     };
-    let error = host.query(preview).unwrap_err();
+    let error = host
+        .query(preview(foreign, RestoreRequest::Matter))
+        .unwrap_err();
     assert_eq!(error.code(), ErrorCode::CommandInvalid, "{error}");
 
-    // A turn waiting on a permission holds the matter's writer.
-    let mut events = host.events(StreamId::Thread(thread));
-    host.prompt(thread, "Go.");
-    until_first_request(&mut events);
-    let head = matter_events(&host, matter).head();
-    host.refused(restore_brief(matter, import), ErrorCode::MatterTurnRunning);
-    assert_eq!(
-        std::fs::read_to_string(folder.join("brief.txt")).unwrap(),
-        "x\n"
-    );
-    assert_eq!(
-        matter_events(&host, matter).head(),
-        head,
-        "a refused restore logged"
-    );
+    // The query's scope gets the command's shape checks.
+    let brief = MatterPath::new("brief.txt").unwrap();
+    for (paths, why) in [
+        (Vec::new(), "at least one file"),
+        (vec![brief.clone(), brief], "twice"),
+    ] {
+        let error = host
+            .query(preview(import, RestoreRequest::Files { paths }))
+            .unwrap_err();
+        assert_eq!(error.code(), ErrorCode::CommandInvalid, "{why}: {error}");
+    }
     host.shutdown();
 }

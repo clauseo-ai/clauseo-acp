@@ -86,6 +86,10 @@ pub(super) fn query(
             checkpoint,
             ref scope,
         } => {
+            if let Err(invalid) = scope.check("PreviewRestore") {
+                let _gone = reply.send(Err(Error::Invalid(invalid)));
+                return;
+            }
             let job = MatterJob::Preview {
                 from: checkpoint,
                 scope: scope.clone(),

@@ -248,7 +248,7 @@ pub(super) fn on_matter_reply(
         MatterTag::Turn(job) => turn::matter_reply(actor, matter, job, reply),
         MatterTag::Restore(ask) => {
             if let MatterReply::Restored(result) = reply {
-                turn::on_restored(actor, &ask, result.map(|restored| *restored));
+                turn::on_restored(actor, &ask, result.map(|done| *done));
             } else {
                 tracing::error!(?reply, "a restore answered with another job's reply");
             }
@@ -257,6 +257,7 @@ pub(super) fn on_matter_reply(
             let result = match reply {
                 MatterReply::Compared(result) => result.map(QueryResult::FileChanges),
                 MatterReply::Previewed(result) => result.map(|plan| {
+                    let plan = *plan;
                     QueryResult::RestorePreview(RestorePreview {
                         changes: plan.writes,
                         added_since: plan.added_since,
