@@ -16,7 +16,8 @@ message that fails stalls its ordered queue.
 - `build.rs` declares an `AppManifest`, so app commands go through the access check, and each
   capability lists its permissions explicitly (never `core:default`).
 - The command surface stays minimal: send a command to the host, subscribe, acknowledge, answer a
-  permission, pick a folder, open a file or link.
+  permission, pick a folder, open a file or link, and the window commands of
+  [0015](0015-window-frame.md) (drag, maximise or restore, minimise and close its own window).
 - `open_external` is the only path for external links, since the webview never navigates. It
   opens only https, http and mailto links, after a native confirm. `open_file` opens only document
   types inside a matter.
