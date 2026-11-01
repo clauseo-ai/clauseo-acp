@@ -1,33 +1,81 @@
-// The sanitise schema (research/16-webview-security.md §3.5, as in the G4 spike): GitHub's default
-// schema with the protocol lists narrowed (href https, http, mailto and our two reference schemes; src
-// clauseo-file and data, the latter narrowed to raster data:image/ by the image component), the global
-// `title` attribute dropped, and rehype-sanitize's `user-content-` clobber prefix kept. Our components
-// then decide what is clickable.
+// The sanitise schema (research/16-webview-security.md §3.5, as in the G4 spike), narrowed to what our
+// pipeline emits: the tags and attributes mdast-util-to-hast produces for CommonMark and GFM (footnotes
+// included), and nothing from GitHub's broad global list (`name`, `action`, `tabIndex`, `title`…), so tags
+// mapped later (the inline-tag allowlist) start from nothing. Protocols: href https, http, mailto and our
+// two reference schemes; src clauseo-file and data, the latter narrowed to raster data:image/ by the image
+// component. rehype-sanitize's `user-content-` clobber prefix stays. Our components then decide what is
+// clickable.
 import { defaultSchema } from "hast-util-sanitize";
 import type { Schema } from "hast-util-sanitize";
-
-type Attributes = NonNullable<Schema["attributes"]>;
-
-function withoutTitle(attributes: Attributes): Attributes {
-  const out: Attributes = {};
-  for (const [tag, list] of Object.entries(attributes)) {
-    out[tag] = list.filter((entry) => (Array.isArray(entry) ? entry[0] : entry) !== "title");
-  }
-  return out;
-}
 
 /** The prefix the sanitiser puts on every id and name, so content cannot clobber the page's globals. */
 export const CLOBBER_PREFIX = "user-content-";
 
 export const SCHEMA: Schema = {
-  ...defaultSchema,
+  ancestors: defaultSchema.ancestors,
+  clobber: defaultSchema.clobber,
   clobberPrefix: CLOBBER_PREFIX,
+  required: defaultSchema.required,
+  strip: defaultSchema.strip,
   protocols: {
-    ...defaultSchema.protocols,
     href: ["https", "http", "mailto", "clauseo-cite", "clauseo-paper"],
     src: ["clauseo-file", "data"],
   },
-  attributes: withoutTitle(defaultSchema.attributes ?? {}),
+  tagNames: [
+    "p",
+    "blockquote",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr",
+    "pre",
+    "code",
+    "br",
+    "em",
+    "strong",
+    "del",
+    "a",
+    "img",
+    "ul",
+    "ol",
+    "li",
+    "input",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "sup",
+    "section",
+  ],
+  attributes: {
+    // Links, and footnote references and backlinks.
+    a: [
+      "href",
+      "id",
+      "ariaDescribedBy",
+      "ariaLabel",
+      "dataFootnoteRef",
+      "dataFootnoteBackref",
+      ["className", "data-footnote-backref"],
+    ],
+    code: [["className", /^language-./]],
+    img: ["src", "alt"],
+    // Task list items.
+    input: [["type", "checkbox"], ["disabled", true], "checked"],
+    li: ["id", ["className", "task-list-item"]],
+    ol: ["start", ["className", "contains-task-list"]],
+    ul: [["className", "contains-task-list"]],
+    // The footnotes section and its visually hidden heading.
+    section: ["dataFootnotes", ["className", "footnotes"]],
+    h2: ["id", ["className", "sr-only"]],
+    th: ["align"],
+    td: ["align"],
+  },
 };
 
 /** Link destinations the link component hands to the host's open_external. */
@@ -55,4 +103,15 @@ export function referenceOf(href: string | undefined): Reference | "invalid" | n
   if (!kind) return null;
   const id = href.slice(kind === "citation" ? CITE_PREFIX.length : PAPER_PREFIX.length);
   return REFERENCE_ID.test(id) ? { kind, id } : "invalid";
+}
+
+/** An image of the matter's files. */
+export const FILE_PREFIX = "clauseo-file:";
+
+/**
+ * Whether `src` names one of the matter's files: `clauseo-file:` and an opaque id with the reference
+ * pattern (decision 0001: files are ids, never paths, so `clauseo-file:../../etc/passwd` is not one).
+ */
+export function isFileSource(src: string): boolean {
+  return src.startsWith(FILE_PREFIX) && REFERENCE_ID.test(src.slice(FILE_PREFIX.length));
 }

@@ -205,3 +205,45 @@ test("a half-arrived tag hides nothing while streaming", () => {
   expect(host.textContent).toContain('<div class="a"');
   expect(host.textContent).toContain("more text");
 });
+
+test.each([
+  ["plain text", "[bank.example.com](https://bank.example.com/x)", null],
+  ["another host", "[bank.example.com](https://evil.example.net/x)", "evil.example.net"],
+  ["bold", "[**bank.example.com**](https://evil.example.net/x)", "evil.example.net"],
+  ["code", "[`bank.example.com`](https://evil.example.net/x)", "evil.example.net"],
+  [
+    "a zero-width space",
+    "[bank.example.com\u200b](https://evil.example.net/x)",
+    "evil.example.net",
+  ],
+  [
+    "a bidi control",
+    "[\u202Abank.example.com\u202C](https://evil.example.net/x)",
+    "evil.example.net",
+  ],
+  ["case and a full stop", "[Bank.Example.Com.](https://evil.example.net/x)", "evil.example.net"],
+  ["brackets", "[(bank.example.com)](https://evil.example.net/x)", "evil.example.net"],
+  [
+    "full-width dots",
+    "[bank\uFF0Eexample\uFF0Ecom](https://evil.example.net/x)",
+    "evil.example.net",
+  ],
+  ["the same host, other case", "[BANK.example.com/path](https://bank.example.com/x)", null],
+  ["prose", "[the bank's page](https://evil.example.net/x)", null],
+])("the link-host hint with %s", (_, text, expected) => {
+  show(text);
+  const hint = host.querySelector('[data-clauseo="link-host"]');
+  expect(hint?.textContent ?? null).toBe(expected === null ? null : ` (${expected})`);
+});
+
+test.each([
+  ["clauseo-file:exhibit-4471", 1],
+  ["clauseo-file:../../etc/passwd", 0],
+  ["clauseo-file:matters/4471/exhibit.png", 0],
+  ["clauseo-file:", 0],
+])("an image of the matter's files renders only with an opaque id (%s)", (src, images) => {
+  show(`![exhibit](${src})`);
+  expect(host.querySelectorAll("img")).toHaveLength(images);
+  if (images === 0)
+    expect(host.querySelector('[data-clauseo="image"][data-blocked]')).not.toBeNull();
+});

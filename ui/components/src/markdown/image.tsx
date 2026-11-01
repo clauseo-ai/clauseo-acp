@@ -1,4 +1,5 @@
 import { useWords } from "../lib/words.ts";
+import { isFileSource } from "./schema.ts";
 
 type ImageProps = { src?: string | undefined; alt?: string | undefined };
 
@@ -8,14 +9,15 @@ const MAX_DATA_CHARS = Math.ceil((5 * 1024 * 1024 * 4) / 3);
 
 function renderable(src: string | undefined): src is string {
   if (src === undefined) return false;
-  if (src.startsWith("clauseo-file:")) return true;
+  if (isFileSource(src)) return true;
   return src.length <= MAX_DATA_CHARS && DATA_IMAGE.test(src);
 }
 
 /**
- * Every image in an answer. Only clauseo-file: and inline raster data: images render; anything else
- * (remote images above all, the exfiltration channel) is a placeholder that fetches nothing. The sanitiser
- * already drops a src with any other scheme (schema.ts), so the placeholder has no URL to offer.
+ * Every image in an answer. Only clauseo-file: images with a valid file id and inline raster data: images
+ * render; anything else (remote images above all, the exfiltration channel) is a placeholder that fetches
+ * nothing. The sanitiser already drops a src with any other scheme (schema.ts), so the placeholder has no
+ * URL to offer.
  */
 export function Image({ src, alt }: ImageProps) {
   const words = useWords();
