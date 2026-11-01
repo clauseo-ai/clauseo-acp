@@ -245,7 +245,8 @@ impl Limits {
     }
 
     /// The limit `agent` is at, at `now`, if any. A row whose reset time is `now` or earlier
-    /// never counts, even when no [`Input::Deadline`] marked it yet.
+    /// never counts, even when no [`Input::Deadline`] marked it yet. A Codex `reached` plan
+    /// window ends once every shown row is past its reset; credits and the spend cap stand.
     pub fn at_limit(&self, agent: AgentKind, now: Timestamp) -> Option<LimitHit> {
         self.state(agent)
             .and_then(|state| crate::model::at_limit(state, now))
