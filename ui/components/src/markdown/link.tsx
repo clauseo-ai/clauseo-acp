@@ -32,6 +32,15 @@ function targetId(fragment: string, scope: string): string {
     : `${CLOBBER_PREFIX}${scope}-${fragment}`;
 }
 
+/** A fragment's id, percent-decoded; as written when it is not valid percent-encoding (`#%E0%A4`). */
+function fragmentId(fragment: string): string {
+  try {
+    return decodeURIComponent(fragment);
+  } catch {
+    return fragment;
+  }
+}
+
 /** The text of hast nodes, through any markup (`**good.com**`, `` `good.com` ``). */
 function textOf(nodes: readonly ElementContent[]): string {
   let text = "";
@@ -92,7 +101,7 @@ export function Link({ href, id, children, node, ...aria }: LinkProps) {
     event.preventDefault();
     if (!url) return;
     if (url.startsWith("#")) {
-      document.getElementById(decodeURIComponent(url.slice(1)))?.scrollIntoView();
+      document.getElementById(fragmentId(url.slice(1)))?.scrollIntoView();
       return;
     }
     host.openExternal(url);

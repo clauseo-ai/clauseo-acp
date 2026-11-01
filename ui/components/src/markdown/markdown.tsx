@@ -14,11 +14,12 @@ import { Image } from "./image.tsx";
 import { LinkOrReference } from "./link.tsx";
 
 /**
- * AppendText-shaped props: `text` is the whole answer so far and `appended` what the last patch added;
- * `streaming` is true while the turn is running. It defaults to false, so a host that leaves it out (a
- * reopened transcript) shows finished text: no tail repair, every link live.
+ * `text` is the whole answer so far (an AppendText patch's result; what the patch appended is not needed,
+ * since the model finds the unchanged blocks itself). `streaming` is true while the turn is running. It
+ * defaults to false, so a host that leaves it out (a reopened transcript) shows finished text: no tail
+ * repair, every link live.
  */
-export type MarkdownProps = { text: string; appended?: string; streaming?: boolean };
+export type MarkdownProps = { text: string; streaming?: boolean };
 
 const COMPONENTS: Partial<Components> = { a: LinkOrReference, img: Image, pre: CodeBlock };
 const OPTIONS = { Fragment, jsx, jsxs, components: COMPONENTS, passNode: true };
