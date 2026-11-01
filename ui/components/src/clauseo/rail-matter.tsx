@@ -40,7 +40,7 @@ export type MatterRowProps = {
   /** The clock time a state names, in English: "4:32 pm" expected, "4:31 pm" stopped, or the limit's reset. Working
    * with none says "Answering."; the limit with none says the reset wasn't given. */
   at?: string;
-  /** Paused and limit only: the reset's day, in the language, when it isn't today, as for the weekly limit. */
+  /** Paused, limit and stopped: the day of the reset or the stop, in the language, when it isn't today. */
   day?: string;
   /** Pinned above every date group. Its menu's Pin to the top shows it ticked. */
   pinned?: boolean | undefined;
@@ -238,8 +238,9 @@ export function MatterRow({
       />
     </button>
   );
-  // the current matter, opened: its row and its conversations stand on one raised plane, its actions at its end
-  if (current && conversations !== undefined) {
+  // the current matter, opened: its row and its conversations, where given, stand on one raised plane, its actions at
+  // its end, so they are reached by keyboard on every computer, not only by a context key
+  if (current && (conversations !== undefined || menu)) {
     return (
       <li className="room-house">
         <div className="room-house-head">
@@ -265,11 +266,13 @@ export function MatterRow({
             </Menu>
           )}
         </div>
-        <ConversationList
-          matter={name}
-          conversations={conversations}
-          {...(onNewConversation === undefined ? {} : { onNew: onNewConversation })}
-        />
+        {conversations !== undefined && (
+          <ConversationList
+            matter={name}
+            conversations={conversations}
+            {...(onNewConversation === undefined ? {} : { onNew: onNewConversation })}
+          />
+        )}
       </li>
     );
   }

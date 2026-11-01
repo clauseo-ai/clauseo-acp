@@ -11,6 +11,8 @@ const HI = {
   "30 October 2026": "30 अक्टूबर 2026",
   "Folder:": "फ़ोल्डर:",
   Change: "बदलें",
+  // what Change changes, for a screen reader, where no folder line says it
+  "The matter's folder": "मामले का फ़ोल्डर",
   "Clauseo makes this folder. Add papers to it any time.":
     "Clauseo यह फ़ोल्डर बनाता है। इसमें कभी भी दस्तावेज़ जोड़ें।",
   "Create the matter": "मामला बनाएँ",

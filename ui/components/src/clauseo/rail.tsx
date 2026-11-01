@@ -58,24 +58,54 @@ export type RailFind = {
   /** Where the field starts: words in it, or focused and empty. */
   query?: string;
   open?: boolean;
+  /** What the search covers, so its label and its no-match line promise only that: names alone, names and clients,
+   * or, left out, names, clients and case numbers. */
+  covers?: "name" | "nameClient";
 };
 
+/** Find's label and the line under no match, for what it covers. */
+function findWords(lang: "en" | "hi", covers: RailFind["covers"]) {
+  switch (covers) {
+    case "name":
+      return {
+        label: mt(lang, "Find a matter by its name"),
+        none: mt(lang, "Search covers names."),
+      };
+    case "nameClient":
+      return {
+        label: mt(lang, "Find a matter by its name or client"),
+        none: mt(lang, "Search covers names and clients."),
+      };
+    default:
+      return {
+        label: mt(lang, "Find a matter by its name, client or case number"),
+        none: mt(lang, "Search covers names, clients and case numbers."),
+      };
+  }
+}
+
 function FindField({
+  label,
+  testId,
   query,
   onQuery,
   onOpen,
   onClose,
+  onDone,
   onFirst,
 }: {
+  label: string;
+  testId: string | undefined;
   query: string;
   onQuery: (q: string) => void;
   onOpen: () => void;
   onClose: () => void;
+  /** Escape on an empty field: the date groups come back, focus stays. */
+  onDone: () => void;
   onFirst: () => void;
 }) {
   const w = useWords();
   const room = useRoom();
-  const label = mt(w.lang, "Find a matter by its name, client or case number");
   return (
     <label className={cn(searchBoxOpen, "w-full min-w-0 room-find")}>
       <IconSearch size={16} />
@@ -86,14 +116,20 @@ function FindField({
         autoComplete="off"
         className={searchInput}
         placeholder={mt(w.lang, "Find a matter")}
+        data-testid={testId}
         value={query}
         onChange={(e) => onQuery(e.target.value)}
         onFocus={onOpen}
         onBlur={onClose}
         onKeyDown={(e) => {
-          if (e.key === "Escape") {
+          // Escape clears the words and keeps focus here; on an empty field the date groups come back and the key goes
+          // on to the rail, where a folded rail closes
+          if (e.key === "Escape" && query !== "") {
+            e.preventDefault();
+            e.stopPropagation();
             onQuery("");
-            e.currentTarget.blur();
+          } else if (e.key === "Escape") {
+            onDone();
           } else if (e.key === "Enter") {
             e.preventDefault();
             onFirst();
@@ -120,6 +156,8 @@ export function Rail({
   label,
   testIds,
   newMatterRef,
+  empty = true,
+  onEscape,
 }: {
   groups: readonly RailGroup[];
   pinned?: readonly MatterRowProps[];
@@ -127,8 +165,13 @@ export function Rail({
   /** New matter, pressed. */
   onNewMatter?: () => void;
   find?: RailFind;
-  /** The scratch matter: whether it's the room, and its row pressed. */
+  /** The scratch matter: whether it's the room, and its row pressed. Left out, the foot has no scratch row. */
   scratch?: { current?: boolean; onOpen?: () => void };
+  /** Whether no matter means there are none, so the rail says "No matters yet". Default true; false while the list
+   * is on its way or couldn't be read, when the rail draws no list at all. */
+  empty?: boolean;
+  /** Optional: Escape pressed inside the rail, with nothing in it taking the key: a folded rail closes. */
+  onEscape?: () => void;
   /** Where Settings lives, linked from the rail's foot. */
   settings?: string;
   /** Optional: what sets this rail apart where several stand on one page, added to its name, "Matters, …". */
@@ -136,8 +179,9 @@ export function Rail({
   /** Optional: what the room says about Clauseo itself (an update, the first crash, a lab's terms),
    * as a RailNotice, in its own row at the rail's foot above Scratch matter. */
   notice?: ReactNode;
-  /** Optional: test ids for New matter and the scratch matter's row (which also carries data-kind="scratch"). */
-  testIds?: { newMatter?: string; scratch?: string };
+  /** Optional: test ids for New matter, Find's field and the scratch matter's row (which also carries
+   * data-kind="scratch"). */
+  testIds?: { newMatter?: string; scratch?: string; find?: string };
   /** Optional: New matter's button, so a dialog it opens can give focus back to it on close. */
   newMatterRef?: Ref<HTMLButtonElement>;
 }) {
@@ -249,15 +293,16 @@ export function Rail({
                 ),
               },
             ];
-  const scratchRow = (
+  const words = findWords(w.lang, find?.covers);
+  const scratchRow = scratch !== undefined && (
     <div className="room-scratch">
       <button
         type="button"
         className="room-matter-row"
-        aria-current={scratch?.current === true ? "page" : undefined}
+        aria-current={scratch.current === true ? "page" : undefined}
         data-kind="scratch"
         data-testid={testIds?.scratch}
-        onClick={scratch?.onOpen}
+        onClick={scratch.onOpen}
       >
         <IconScratchMatter size={16} className="room-scratch-icon" />
         <span className="room-scratch-text">
@@ -280,6 +325,12 @@ export function Rail({
       onPointerUp={() => {
         pressing.current = false;
       }}
+      onKeyDown={(e) => {
+        // a menu's popup sits outside the rail on the page, though inside it in React: its Escape is its own
+        if (e.key !== "Escape" || e.defaultPrevented || onEscape === undefined) return;
+        if (!(e.target instanceof Node) || nav.current?.contains(e.target) !== true) return;
+        onEscape();
+      }}
     >
       <Heading level={2} className="sr-only">
         {w.t("Matters")}
@@ -298,6 +349,8 @@ export function Rail({
         </Button>
         {find !== undefined && (
           <FindField
+            label={words.label}
+            testId={testIds?.find}
             query={query}
             onQuery={(q) => {
               setQuery(q);
@@ -308,6 +361,7 @@ export function Rail({
               if (pressing.current || query.trim() !== "") return;
               setFinding(false);
             }}
+            onDone={() => setFinding(false)}
             onFirst={() => {
               const first = shown === "none" ? undefined : shown[0]?.matters[0];
               first?.onOpen?.();
@@ -316,14 +370,14 @@ export function Rail({
         )}
       </div>
       {shown !== "none" && shown.length === 0 ? (
-        <NoMatters />
+        empty && <NoMatters />
       ) : shown === "none" ? (
         <div className="room-find-none" role="status">
           <p className="text-ui font-chip text-primary">
             <Say>{mt(w.lang, "No matter matches '{q}'.", { q: query.trim() })}</Say>
           </p>
           <p className="text-small text-quiet">
-            <Say>{mt(w.lang, "Search covers names, clients and case numbers.")}</Say>
+            <Say>{words.none}</Say>
           </p>
         </div>
       ) : (

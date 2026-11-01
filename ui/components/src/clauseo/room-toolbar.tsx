@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, type Ref } from "react";
 import type { ReactNode } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { floating } from "../ui/recipes.ts";
@@ -83,8 +83,10 @@ export type RoomToolbarProps = {
   /** Optional: the title's language where it isn't a matter's name as filed, which is English in both languages; such
    * as words of the interface standing in the title's place. "en" by default. */
   titleLang?: Lang;
-  /** Optional: test ids for the e2e specs. title: on the title's heading. */
-  testIds?: { title?: string };
+  /** Optional: test ids for the e2e specs. title: on the title's heading; rail: on Matters. */
+  testIds?: { title?: string; rail?: string };
+  /** Optional: Matters' button, so focus can go back to it when the folded rail closes. */
+  railRef?: Ref<HTMLButtonElement>;
 };
 
 /** The plan's state from the share left, where the host hasn't said. */
@@ -126,6 +128,8 @@ export function RoomToolbar(p: RoomToolbarProps) {
           aria-expanded={p.railOpen}
           aria-controls={room.id("rail")}
           onClick={p.onRail}
+          {...(p.railRef === undefined ? {} : { ref: p.railRef })}
+          {...(p.testIds?.rail === undefined ? {} : { "data-testid": p.testIds.rail })}
         >
           <IconMatters size={16} />
           {w.t("Matters")}

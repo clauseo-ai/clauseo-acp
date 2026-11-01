@@ -116,10 +116,17 @@ test("without details, the form asks only the name, and gives no client or date"
   expect(made).toEqual([["Acme", "", "", null]]);
 });
 
-test("a next date that doesn't read says how to write it and holds Create back", async () => {
+test("a next date that doesn't read says how to write it once the field is left, and holds Create back", async () => {
   await mount(<NewMatterForm name="Acme" onCreate={() => {}} />);
   const next = document.querySelectorAll<HTMLInputElement>(".matter-form input")[2];
+  // half typed: Create waits, but nothing says the field is wrong yet
+  await type(next, "3");
+  expect(document.querySelector(".matter-form-error")).toBeNull();
+  expect(next?.getAttribute("aria-invalid")).toBeNull();
+  expect(button("Create the matter")?.disabled).toBe(true);
   await type(next, "next Tuesday");
+  expect(document.querySelector(".matter-form-error")).toBeNull();
+  await act(async () => next?.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
   expect(document.querySelector(".matter-form-error")?.textContent).toBe(
     "Write the date as 30 October 2026.",
   );
@@ -148,16 +155,25 @@ test("folder null shows Change alone; Change waits for the picker, and a cancel 
   expect(document.querySelector("[data-testid=matter-name]")?.tagName).toBe("INPUT");
   expect(document.querySelector("[data-testid=create-matter]")).not.toBeNull();
   expect(document.querySelector(".matter-form-path")).toBeNull();
-  expect(document.querySelector(".matter-form-folder-words")?.textContent).toBe("");
+  // no folder words on screen; Change is described, for a screen reader, by what it changes
+  const words = document.querySelector(".matter-form-folder-words");
+  expect(words?.querySelector(".sr-only")?.textContent).toBe("The matter's folder");
+  expect(words?.textContent).toBe("The matter's folder");
   const change = document.querySelector<HTMLButtonElement>("[data-testid=matter-existing]");
+  expect(change?.getAttribute("aria-describedby")).toBe(words?.id);
   await act(async () => change?.click());
   expect(asked).toEqual([""]);
   expect(change?.disabled).toBe(true);
-  await act(async () => pick.resolve("~/Documents/Acme"));
-  expect(document.querySelector(".matter-form-path")?.textContent).toBe("~/Documents/Acme");
+  await act(async () => pick.resolve("Documents/Acme"));
+  expect(document.querySelector(".matter-form-path")?.textContent).toBe("Documents/Acme");
+  // the path is isolated, and Change is described by the folder line
+  expect(document.querySelector(".matter-form-path")?.tagName).toBe("BDI");
+  expect(document.getElementById(change?.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+    "Folder: Documents/Acme",
+  );
   expect(change?.disabled).toBe(false);
   await act(async () => change?.click());
-  expect(asked).toEqual(["", "~/Documents/Acme"]);
+  expect(asked).toEqual(["", "Documents/Acme"]);
 });
 
 test("a picker that gives nothing keeps the folder line hidden", async () => {

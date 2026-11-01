@@ -34,7 +34,7 @@ export type ConversationState = "idle" | "working" | "question" | "ready" | "sto
 const held = (lang: Lang, at: string) => clock(lang, at).replace(/ (am|pm)$/, "\u00a0$1");
 
 /** The line under a matter's note that says what it's doing, in the language; null when it's doing nothing. `day` is
- * the reset's day, in the language, when it isn't today. With `at` "", working says "Answering." and limit says the
+ * the day of the reset or of the stop, in the language, when it isn't today. With `at` "", working says "Answering." and limit says the
  * reset wasn't given. */
 export function matterStatus(lang: Lang, state: MatterState, at: string, day = ""): string | null {
   const time = held(lang, at);
@@ -50,7 +50,9 @@ export function matterStatus(lang: Lang, state: MatterState, at: string, day = "
     case "ready":
       return frame(lang, "Answer ready");
     case "stopped":
-      return frame(lang, "Stopped at {time}", { time });
+      return day === ""
+        ? frame(lang, "Stopped at {time}", { time })
+        : frame(lang, "Stopped on {day} at {time}", { day, time });
     case "paused":
       // the choice still open, asked as a question, so it doesn't read like the paused matter whose choice is made
       if (at !== "")

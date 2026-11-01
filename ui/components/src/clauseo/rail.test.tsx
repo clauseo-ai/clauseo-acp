@@ -59,7 +59,7 @@ describe("the rail's matters", () => {
       { when: "Next week", matters: [] },
       { when: "No date", matters: [trust] },
     ];
-    await mount(<Rail open groups={groups} pinned={[{ ...acme, pinned: true }]} />);
+    await mount(<Rail open groups={groups} pinned={[{ ...acme, pinned: true }]} scratch={{}} />);
     expect([...document.querySelectorAll(".room-when")].map((h) => h.textContent)).toEqual([
       "Pinned",
       "Tomorrow",
@@ -115,12 +115,51 @@ describe("the rail's matters", () => {
   });
 
   test("with no matters, the rail says so in one sentence, and only that", async () => {
-    await mount(<Rail open groups={[{ when: "No date yet", matters: [] }]} />);
+    await mount(<Rail open groups={[{ when: "No date yet", matters: [] }]} scratch={{}} />);
     expect(txt(document.body)).toContain("No matters yet");
     expect(txt(document.body)).toContain("Add a matter's folder.");
     expect(txt(document.body)).not.toContain("reads its papers");
     expect(document.querySelector(".room-groups")).toBeNull();
     expect(document.querySelector("[data-kind=scratch]")).not.toBeNull();
+  });
+
+  test("while no list is known (empty false) the rail says nothing of no matters, and without scratch it has no foot row", async () => {
+    await mount(<Rail open groups={[{ when: "No date yet", matters: [] }]} empty={false} />);
+    expect(txt(document.body)).not.toContain("No matters yet");
+    expect(txt(document.body)).not.toContain("Add a matter's folder.");
+    expect(document.querySelector("[data-kind=scratch]")).toBeNull();
+    expect(
+      document.querySelector("[data-testid=new-matter], .room-rail-head button"),
+    ).not.toBeNull();
+  });
+
+  test("Escape inside the rail reaches onEscape; Escape in Find with words clears them, keeps focus and goes no further", async () => {
+    let escaped = 0;
+    await mount(
+      <Rail
+        open
+        groups={[{ when: "Today", matters: [acme] }]}
+        find={{ all: [{ ...acme, client: "", caseNo: "" }], recent: [] }}
+        onEscape={() => (escaped += 1)}
+        testIds={{ find: "find" }}
+      />,
+    );
+    const input = document.querySelector<HTMLInputElement>("[data-testid=find]");
+    await act(async () => input?.focus());
+    await act(async () => {
+      Reflect.set(HTMLInputElement.prototype, "value", "acme", input);
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const esc = () => new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
+    await act(async () => input?.dispatchEvent(esc()));
+    expect(input?.value).toBe("");
+    expect(document.activeElement).toBe(input);
+    expect(escaped).toBe(0);
+    await act(async () => input?.dispatchEvent(esc()));
+    expect(document.activeElement).toBe(input);
+    expect(escaped).toBe(1);
+    await act(async () => row(acme.name)?.dispatchEvent(esc()));
+    expect(escaped).toBe(2);
   });
 
   test("test ids land on New matter, the scratch row and each row, and rows key by id", async () => {
@@ -136,6 +175,7 @@ describe("the rail's matters", () => {
             ],
           },
         ]}
+        scratch={{}}
         testIds={{ newMatter: "new-matter", scratch: "scratch-matter" }}
       />,
     );
@@ -188,7 +228,7 @@ describe("the rail's matters", () => {
 
   test("in Hindi, the rail's words are Hindi and the matters' names stay as filed", async () => {
     showDisplay({ ...DEFAULT_DISPLAY, motion: "reduced", lang: "hi" });
-    await mount(<Rail open groups={[{ when: "आज", matters: [trust] }]} />);
+    await mount(<Rail open groups={[{ when: "आज", matters: [trust] }]} scratch={{}} />);
     expect(txt(document.body)).toContain("Rao Family Trust");
     expect(txt(document.body)).toContain("कच्चा काम");
     expect(txt(document.body)).not.toMatch(/पेंसिल|स्याही|चरण|कदम|(^|\s)मैं(\s|$)/);
@@ -224,6 +264,21 @@ describe("a matter's actions", () => {
       });
     await press(row("Rao Family Trust"));
     expect(menuLabels()).toEqual([]);
+  });
+
+  test("the current matter without conversations still carries the chevron, so its actions are reached by keyboard", async () => {
+    await mount(
+      <Rail
+        open
+        groups={[
+          { when: "Today", matters: [current({ conversations: undefined, onPin: () => {} })] },
+        ]}
+      />,
+    );
+    expect(document.querySelector(".room-house-more")).not.toBeNull();
+    expect(document.querySelector(".room-convs, [aria-label^='Conversations in']")).toBeNull();
+    await open();
+    expect(menuLabels()).toEqual(["Pin to the top"]);
   });
 
   test("a right-click on a row with a handler opens its menu", async () => {
@@ -352,5 +407,30 @@ describe("finding a matter", () => {
     );
     expect(txt(document.querySelector(".room-find-none"))).toContain("No matter matches 'zebra'.");
     expect(document.querySelector(".room-groups")).toBeNull();
+  });
+
+  test("the label and the no-match line say only what the search covers", async () => {
+    const cases = [
+      [
+        undefined,
+        "Find a matter by its name, client or case number",
+        "Search covers names, clients and case numbers.",
+      ],
+      ["name", "Find a matter by its name", "Search covers names."],
+      ["nameClient", "Find a matter by its name or client", "Search covers names and clients."],
+    ] as const;
+    for (const [covers, label, none] of cases) {
+      await mount(
+        <Rail
+          open
+          groups={[{ when: "Today", matters: [acme] }]}
+          find={{ ...find, query: "zebra", ...(covers === undefined ? {} : { covers }) }}
+        />,
+      );
+      expect(txt(document.querySelector(".room-find .sr-only"))).toBe(label);
+      expect(txt(document.querySelector(".room-find-none"))).toContain(none);
+      await act(async () => root?.unmount());
+      host?.remove();
+    }
   });
 });
