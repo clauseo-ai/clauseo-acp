@@ -114,10 +114,76 @@ describe("the rail's matters", () => {
     expect(added).toBe(1);
   });
 
-  test("with no matters, the rail says so", async () => {
-    await mount(<Rail open groups={[]} />);
+  test("with no matters, the rail says so in one sentence, and only that", async () => {
+    await mount(<Rail open groups={[{ when: "No date yet", matters: [] }]} />);
     expect(txt(document.body)).toContain("No matters yet");
+    expect(txt(document.body)).toContain("Add a matter's folder.");
+    expect(txt(document.body)).not.toContain("reads its papers");
     expect(document.querySelector(".room-groups")).toBeNull();
+    expect(document.querySelector("[data-kind=scratch]")).not.toBeNull();
+  });
+
+  test("test ids land on New matter, the scratch row and each row, and rows key by id", async () => {
+    await mount(
+      <Rail
+        open
+        groups={[
+          {
+            when: "No date yet",
+            matters: [
+              { ...acme, id: "m1", testIds: { row: "matter-row" } },
+              { ...acme, id: "m2", testIds: { row: "matter-row" } },
+            ],
+          },
+        ]}
+        testIds={{ newMatter: "new-matter", scratch: "scratch-matter" }}
+      />,
+    );
+    expect(document.querySelector("[data-testid=new-matter]")?.textContent).toBe("New matter");
+    expect(document.querySelector("[data-testid=scratch-matter]")?.getAttribute("data-kind")).toBe(
+      "scratch",
+    );
+    // two matters of one name both stand, each with its state
+    const found = document.querySelectorAll("[data-testid=matter-row]");
+    expect(found).toHaveLength(2);
+    expect(found[0]?.getAttribute("data-state")).toBe("idle");
+  });
+
+  test("a matter at the plan's limit says until when, muted, or that the reset wasn't given", async () => {
+    const at = (state: "limit", t: string, day?: string): MatterRowProps => ({
+      ...acme,
+      name: `Limit ${t} ${day ?? ""}`,
+      state,
+      at: t,
+      ...(day === undefined ? {} : { day }),
+    });
+    await mount(
+      <Rail
+        open
+        groups={[
+          {
+            when: "Today",
+            matters: [at("limit", "6:10 pm"), at("limit", "9:00 am", "Tuesday"), at("limit", "")],
+          },
+        ]}
+      />,
+    );
+    const limits = rows().filter((r) => r.dataset["state"] === "limit");
+    expect(limits.map((r) => txt(r.querySelector(".min-w-0")))).toEqual([
+      "Limit reached until 6:10 pm",
+      "Limit reached until Tuesday 9:00 am",
+      "Limit reached. Reset not given.",
+    ]);
+    for (const r of limits) {
+      expect(r.querySelector(".bg-muted")).not.toBeNull();
+      expect(r.querySelector(".text-muted")).not.toBeNull();
+    }
+    expect(matterStatus("hi", "limit", "")).toBe("सीमा पूरी। रीसेट का समय नहीं बताया गया।");
+  });
+
+  test("a working matter with no end time says Answering.", () => {
+    expect(matterStatus("en", "working", "")).toBe("Answering.");
+    expect(matterStatus("hi", "working", "")).toBe("उत्तर दिया जा रहा है।");
   });
 
   test("in Hindi, the rail's words are Hindi and the matters' names stay as filed", async () => {
@@ -126,6 +192,82 @@ describe("the rail's matters", () => {
     expect(txt(document.body)).toContain("Rao Family Trust");
     expect(txt(document.body)).toContain("कच्चा काम");
     expect(txt(document.body)).not.toMatch(/पेंसिल|स्याही|चरण|कदम|(^|\s)मैं(\s|$)/);
+  });
+});
+
+describe("a matter's actions", () => {
+  const current = (p: Partial<MatterRowProps>): MatterRowProps => ({
+    ...acme,
+    current: true,
+    conversations: [],
+    ...p,
+  });
+  const menuLabels = () =>
+    [...document.querySelectorAll("[role=menuitem], [role=menuitemcheckbox]")].map((n) =>
+      txt(n).trim(),
+    );
+  const open = async () => {
+    const more = document.querySelector<HTMLButtonElement>(".room-house-more");
+    await act(async () => {
+      more?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+      more?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+      more?.click();
+    });
+  };
+
+  test("with no handlers, a row has no menu: no chevron and no context menu", async () => {
+    await mount(<Rail open groups={[{ when: "Today", matters: [current({}), trust] }]} />);
+    expect(document.querySelector(".room-house-more")).toBeNull();
+    const press = (r: HTMLButtonElement | undefined) =>
+      act(async () => {
+        r?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      });
+    await press(row("Rao Family Trust"));
+    expect(menuLabels()).toEqual([]);
+  });
+
+  test("a right-click on a row with a handler opens its menu", async () => {
+    await mount(
+      <Rail open groups={[{ when: "Today", matters: [{ ...trust, onPin: () => {} }] }]} />,
+    );
+    await act(async () => {
+      row("Rao Family Trust")?.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+    });
+    expect(menuLabels()).toEqual(["Pin to the top"]);
+  });
+
+  test("each item shows only with its handler", async () => {
+    const removed: string[] = [];
+    await mount(
+      <Rail
+        open
+        groups={[{ when: "Today", matters: [current({ onRemove: () => removed.push("acme") })] }]}
+      />,
+    );
+    await open();
+    expect(menuLabels()).toEqual([
+      "Remove from the listThe folder and its papers stay where they are.",
+    ]);
+  });
+
+  test("Locate folder stands only while the folder has moved; Show in Finder with onReveal", async () => {
+    await mount(
+      <Rail
+        open
+        groups={[
+          {
+            when: "Today",
+            matters: [
+              current({ state: "moved", onLocate: () => {}, onReveal: () => {}, onPin: () => {} }),
+            ],
+          },
+        ]}
+      />,
+    );
+    await open();
+    expect(menuLabels()).toEqual(["Pin to the top", "Locate folder", "Show in Finder"]);
   });
 });
 
@@ -187,6 +329,17 @@ describe("finding a matter", () => {
       "Matching matters",
     ]);
     expect(txt(document.querySelector(".room-matter-match"))).toBe("Client, Asha Rao");
+  });
+
+  test("with no recent matters, the field focused and empty keeps the date groups", async () => {
+    await mount(
+      <Rail open groups={[{ when: "No date yet", matters: [trust] }]} find={{ all, recent: [] }} />,
+    );
+    const input = document.querySelector<HTMLInputElement>(".room-find input");
+    await act(async () => input?.focus());
+    expect([...document.querySelectorAll(".room-when")].map((h) => h.textContent)).toEqual([
+      "No date yet",
+    ]);
   });
 
   test("words that match nothing say so", async () => {

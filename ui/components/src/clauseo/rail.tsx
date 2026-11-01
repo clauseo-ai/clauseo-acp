@@ -1,7 +1,7 @@
 // The rail: the matters on the bare ground, grouped by their next date, with the current matter's conversations
 // opened under its row, finding a matter, and the scratch matter at its foot. Matters, their states and their next
 // dates come in as props.
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { Button } from "../ui/button.tsx";
 import { searchBox, searchInput } from "../ui/recipes.ts";
 import { IconNewMatter, IconScratchMatter, IconSearch } from "../icons/icons.tsx";
@@ -25,19 +25,15 @@ export type RailGroup = { when: string; matters: readonly MatterRowProps[] };
 /** A matter the rail can find: its row, with its client and case number. */
 export type FindableRow = MatterRowProps & { client: string; caseNo: string };
 
-/** The list on first launch: what goes here and what Clauseo does with it. New matter, above, is the way forward. */
+/** The list on first launch: what goes here. New matter, above, is the way forward. What Clauseo does with the
+ * folder waits until it does it (the first read), so the line says only what to add. */
 function NoMatters() {
   const w = useWords();
   return (
     <div className="grid gap-s1 px-s3 mt-s5">
       <p className="text-ui font-chip text-primary deva-nudge">{frame(w.lang, "No matters yet")}</p>
       <p className="text-small text-quiet">
-        <Say>
-          {frame(
-            w.lang,
-            "Add a matter's folder. Clauseo reads its papers before your first question.",
-          )}
-        </Say>
+        <Say>{frame(w.lang, "Add a matter's folder.")}</Say>
       </p>
     </div>
   );
@@ -56,7 +52,8 @@ function matchLine(lang: "en" | "hi", m: FindableRow, by: FoundBy): string | und
 export type RailFind = {
   all: readonly FindableRow[];
   /** The matters opened most recently, newest first. Their rows show no match line: the order is all that says when
-   * each was opened. */
+   * each was opened. Empty, as where the host doesn't say when a matter was last opened, the field focused and empty
+   * shows no Recent at all: the date groups stay, as they stand with the field left. */
   recent: readonly MatterRowProps[];
   /** Where the field starts: words in it, or focused and empty. */
   query?: string;
@@ -121,6 +118,8 @@ export function Rail({
   settings,
   notice,
   label,
+  testIds,
+  newMatterRef,
 }: {
   groups: readonly RailGroup[];
   pinned?: readonly MatterRowProps[];
@@ -137,6 +136,10 @@ export function Rail({
   /** Optional: what the room says about Clauseo itself (an update, the first crash, a lab's terms),
    * as a RailNotice, in its own row at the rail's foot above Scratch matter. */
   notice?: ReactNode;
+  /** Optional: test ids for New matter and the scratch matter's row (which also carries data-kind="scratch"). */
+  testIds?: { newMatter?: string; scratch?: string };
+  /** Optional: New matter's button, so a dialog it opens can give focus back to it on close. */
+  newMatterRef?: Ref<HTMLButtonElement>;
 }) {
   const w = useWords();
   const room = useRoom();
@@ -228,7 +231,9 @@ export function Rail({
     find === undefined || !finding
       ? all
       : query.trim() === ""
-        ? [{ when: mt(w.lang, "Recent"), matters: find.recent.map(opening) }]
+        ? find.recent.length === 0
+          ? all
+          : [{ when: mt(w.lang, "Recent"), matters: find.recent.map(opening) }]
         : found.length === 0
           ? "none"
           : [
@@ -250,6 +255,8 @@ export function Rail({
         type="button"
         className="room-matter-row"
         aria-current={scratch?.current === true ? "page" : undefined}
+        data-kind="scratch"
+        data-testid={testIds?.scratch}
         onClick={scratch?.onOpen}
       >
         <IconScratchMatter size={16} className="room-scratch-icon" />
@@ -283,6 +290,8 @@ export function Rail({
           kind="tone"
           className="w-full flex-none justify-start px-s3 text-muted is-hover:text-primary"
           onClick={onNewMatter}
+          {...(newMatterRef === undefined ? {} : { ref: newMatterRef })}
+          {...(testIds?.newMatter === undefined ? {} : { "data-testid": testIds.newMatter })}
         >
           <IconNewMatter size={16} />
           {w.t("New matter")}
@@ -306,7 +315,7 @@ export function Rail({
           />
         )}
       </div>
-      {all.length === 0 && !finding ? (
+      {shown !== "none" && shown.length === 0 ? (
         <NoMatters />
       ) : shown === "none" ? (
         <div className="room-find-none" role="status">
@@ -329,7 +338,7 @@ export function Rail({
               </Heading>
               <ul className="room-matters">
                 {g.matters.map((m) => (
-                  <MatterRow key={m.name} {...m} />
+                  <MatterRow key={m.id ?? m.name} {...m} />
                 ))}
               </ul>
             </section>

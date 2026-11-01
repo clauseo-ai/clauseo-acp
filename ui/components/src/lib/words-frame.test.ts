@@ -14,6 +14,20 @@ test("a matter paused at the plan's limit asks to continue at a clock time, the 
   expect(frame("hi", "Paused until {time}", at("hi"))).toBe("रात 9:40 बजे तक रुका है");
 });
 
+test("a working matter with no end time says only that it's answering", () => {
+  expect(frame("en", "Answering.")).toBe("Answering.");
+  expect(frame("hi", "Answering.")).toBe("उत्तर दिया जा रहा है।");
+});
+
+test("the date groups and the empty rail's line have their Hindi", () => {
+  expect(
+    (["Tomorrow", "This week", "Next week", "Later", "No date yet"] as const).map((k) =>
+      frame("hi", k),
+    ),
+  ).toEqual(["कल", "इस सप्ताह", "अगले सप्ताह", "बाद में", "अभी कोई तारीख नहीं"]);
+  expect(frame("hi", "Add a matter's folder.")).toBe("मामले का फ़ोल्डर जोड़ें।");
+});
+
 test("a working matter gives the clock time it expects to finish", () => {
   expect(frame("en", "Answering. Expected by {time}", { time: clock("en", "4:32 pm") })).toBe(
     "Answering. Expected by 4:32 pm",

@@ -20,6 +20,23 @@ const HI = {
   "Client, {client}": "मुवक्किल, {client}",
   "Folder moved": "फ़ोल्डर कहीं और ले जाया गया",
   "A matter waits for you": "एक मामला आपकी प्रतीक्षा में है",
+  /* ---------- a new matter: a folder the host refused, a create that failed, a next date that doesn't read ---------- */
+  "{path} is a whole drive.": "{path} पूरी ड्राइव है।",
+  "A matter is one folder of papers. Choose the folder for one matter.":
+    "एक मामला दस्तावेज़ों का एक फ़ोल्डर होता है। किसी एक मामले का फ़ोल्डर चुनें।",
+  "{path} is your home folder.": "{path} आपका होम फ़ोल्डर है।",
+  "It holds far more than one matter. Choose the folder for one matter.":
+    "इसमें एक मामले से कहीं अधिक है। किसी एक मामले का फ़ोल्डर चुनें।",
+  "{path} is a folder the computer keeps for itself.":
+    "{path} वह फ़ोल्डर है जिसे कंप्यूटर अपने लिए रखता है।",
+  "Choose the folder that holds the matter's papers.": "वह फ़ोल्डर चुनें जिसमें मामले के दस्तावेज़ हैं।",
+  "Clauseo can't read {path}.": "Clauseo {path} नहीं पढ़ पा रहा।",
+  "Clauseo can't read that folder.": "Clauseo वह फ़ोल्डर नहीं पढ़ पा रहा।",
+  "It may be locked, or on a drive that's no longer connected.":
+    "हो सकता है वह लॉक हो, या ऐसी ड्राइव पर हो जो अब जुड़ी नहीं है।",
+  "Clauseo couldn't create the matter. Try again, or choose another folder.":
+    "Clauseo मामला नहीं बना सका। फिर से प्रयास करें, या दूसरा फ़ोल्डर चुनें।",
+  "Write the date as 30 October 2026.": "तारीख इस तरह लिखें: 30 अक्टूबर 2026।",
   /* ---------- conversations inside a matter ---------- */
   "New conversation": "नई बातचीत",
   "Conversations in {name}": "{name} की बातचीत",

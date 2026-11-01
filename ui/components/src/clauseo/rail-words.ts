@@ -1,17 +1,19 @@
 // What a matter and a conversation on the rail say they're doing, in the language, and the dot that leads each status.
 import { clock } from "../lib/words.ts";
 import { frame } from "../lib/words-frame.ts";
+import { lim } from "../lib/words-limits.ts";
 import { mt } from "../lib/words-matters.ts";
 import type { Lang } from "../lib/display.ts";
 
 /** What a matter is doing while the lawyer looks elsewhere. One at a time:
- * - working: Clauseo is answering, with the clock time it expects to finish;
+ * - working: Clauseo is answering: "Answering.", or with a clock time it expects to finish, where one is given;
  * - question, permission: Clauseo waits on the lawyer, so the row takes court yellow, as the prepared draft does;
  * - ready: the answer finished while the lawyer was away, a quiet mark until the matter is opened;
  * - stopped: the lawyer stopped it, said in concrete;
  * - paused: the plan's limit stopped it until the reset. While the lawyer hasn't chosen how it goes on, Continue at
  *   the reset or ask the other plan, it waits on the lawyer's hand and takes court yellow; pausedSet, once Continue
  *   is chosen, is concrete with its time;
+ * - limit: the plan's limit reached, until the reset if the plan gave one, muted, with no choice asked for;
  * - moved: its folder isn't where it was, said in concrete, with Locate folder in the room and in its menu. */
 export type MatterState =
   | "idle"
@@ -22,6 +24,7 @@ export type MatterState =
   | "stopped"
   | "paused"
   | "pausedSet"
+  | "limit"
   | "moved";
 
 /** What a conversation is doing while the lawyer reads another. waiting: behind another conversation's answer. */
@@ -31,12 +34,15 @@ export type ConversationState = "idle" | "working" | "question" | "ready" | "sto
 const held = (lang: Lang, at: string) => clock(lang, at).replace(/ (am|pm)$/, "\u00a0$1");
 
 /** The line under a matter's note that says what it's doing, in the language; null when it's doing nothing. `day` is
- * the reset's day, in the language, when it isn't today. */
+ * the reset's day, in the language, when it isn't today. With `at` "", working says "Answering." and limit says the
+ * reset wasn't given. */
 export function matterStatus(lang: Lang, state: MatterState, at: string, day = ""): string | null {
   const time = held(lang, at);
   switch (state) {
     case "working":
-      return frame(lang, "Answering. Expected by {time}", { time });
+      return at === ""
+        ? frame(lang, "Answering.")
+        : frame(lang, "Answering. Expected by {time}", { time });
     case "question":
       return frame(lang, "A question for you");
     case "permission":
@@ -58,6 +64,12 @@ export function matterStatus(lang: Lang, state: MatterState, at: string, day = "
       return day === ""
         ? frame(lang, "Paused until {time}", { time })
         : frame(lang, "Paused until {day} {time}", { day, time });
+    case "limit":
+      // the reset, as the limit's words say it: today's time, another day's with its day, or that none was given
+      if (at === "") return lim(lang, "Limit reached. Reset not given.");
+      return day === ""
+        ? lim(lang, "Limit reached until {time}", { time })
+        : lim(lang, "Limit reached until {day} {time}", { day, time });
     case "moved":
       return mt(lang, "Folder moved");
     case "idle":
@@ -76,6 +88,7 @@ export const MATTER_MARK: Record<Exclude<MatterState, "idle">, string> = {
   stopped: "bg-muted",
   paused: "bg-yellow ring-yellow",
   pausedSet: "bg-muted",
+  limit: "bg-muted",
   moved: "room-dot-ring",
 };
 
@@ -89,7 +102,9 @@ export function conversationStatus(
   const time = held(lang, at);
   switch (state) {
     case "working":
-      return frame(lang, "Answering. Expected by {time}", { time });
+      return at === ""
+        ? frame(lang, "Answering.")
+        : frame(lang, "Answering. Expected by {time}", { time });
     case "question":
       return frame(lang, "A question for you");
     case "ready":
