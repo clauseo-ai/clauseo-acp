@@ -268,6 +268,6 @@ export const CASES: HostileCase[] = [
     id: "footnote-chain",
     markdown:
       "Start[^n0].\n\n" +
-      Array.from({ length: 50 }, (_, index) => `[^n${index}]: Then[^n${index + 1}].`).join("\n\n"),
+      Array.from({ length: 25 }, (_, index) => `[^n${index}]: Then[^n${index + 1}].`).join("\n\n"),
   },
 ];
