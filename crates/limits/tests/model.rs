@@ -32,3 +32,11 @@ mod view;
 #[cfg(test)]
 #[path = "model/at_limit.rs"]
 mod at_limit;
+
+#[cfg(test)]
+#[path = "model/rejected.rs"]
+mod rejected;
+
+#[cfg(test)]
+#[path = "model/read_contract.rs"]
+mod read_contract;

@@ -7,7 +7,7 @@ use clauseo_protocol::{
 };
 
 use crate::model::{AgentState, LiveSignal, LiveStatus, Row, kind_rank};
-use crate::policy::Action;
+use crate::policy::{Action, kind_rules};
 use crate::readers::{ReadFailure, ReadOutcome};
 use crate::words::claude_live_window;
 
@@ -31,9 +31,10 @@ pub(crate) fn apply_read(
             }
         }
         ReadOutcome::MethodMissing => {
+            let flipped = !state.method_missing;
             state.method_missing = true;
-            failed_read(state);
-            Some(notice(state))
+            let source_changed = failed_read(state);
+            (flipped || source_changed).then(|| notice(state))
         }
         ReadOutcome::SignedOut => signed_out(state).then_some(Action::ViewChanged),
         ReadOutcome::Failed(failure) => {
@@ -157,6 +158,11 @@ fn log_failure(agent: AgentKind, failure: &ReadFailure) {
 
 /// Merges a live signal at `now`. A signal that changes nothing returns `None` and touches
 /// nothing.
+///
+/// With no account known, a signal is dropped only while the first read runs (it will name the
+/// account and replace everything) and when the agent is signed out (it has no login, so no
+/// signal can come). After a failed first read or `MethodMissing` it applies, the source turns
+/// `LiveOnly`, and only the view is published: there is no account to store it under.
 pub(crate) fn apply_live(
     state: &mut AgentState,
     signal: &LiveSignal,
@@ -169,7 +175,7 @@ pub(crate) fn apply_live(
         tracing::debug!(agent = ?state.agent, "a live limit signal without a window is ignored");
         return None;
     };
-    if state.account.is_none() && !state.method_missing {
+    if state.account.is_none() && drops_live_without_account(state) {
         return None;
     }
     if let Some(row) = state.rows.iter_mut().find(|row| row.window.id == id) {
@@ -193,17 +199,29 @@ pub(crate) fn apply_live(
     Some(notice(state))
 }
 
-/// Applies `signal` to `row`'s window; returns whether anything changed. A rejection is a
-/// flag, never a figure: the percentage stays as the agent sent it.
+/// Whether a state with no account drops a live signal: while its first read runs, or when it is
+/// signed out (`Unavailable { MissingScope }`).
+fn drops_live_without_account(state: &AgentState) -> bool {
+    match state.source {
+        LimitSource::Loading => state.reads.in_flight,
+        LimitSource::Unavailable {
+            reason: UnavailableReason::MissingScope,
+        } => true,
+        _ => false,
+    }
+}
+
+/// Applies `signal` to `row`'s window; returns whether anything changed, the rejected flag
+/// included. A rejection is a flag, never a figure: the percentage stays as the agent sent it.
+/// A later `allowed` or `allowed_warning` for the window clears the flag.
 fn upsert(row: &mut Row, signal: &LiveSignal) -> bool {
     let used_percent = signal.used_percent.unwrap_or(row.window.used_percent);
     let resets_at = signal.resets_at.or(row.window.resets_at);
-    let warning = match signal.status {
-        LiveStatus::Allowed => false,
-        LiveStatus::Warning => true,
-        LiveStatus::Rejected => row.window.warning,
+    let (warning, rejected) = match signal.status {
+        LiveStatus::Allowed => (false, false),
+        LiveStatus::Warning => (true, false),
+        LiveStatus::Rejected => (row.window.warning, true),
     };
-    let rejected = row.rejected || signal.status == LiveStatus::Rejected;
     let changed = used_percent != row.window.used_percent
         || resets_at != row.window.resets_at
         || warning != row.window.warning
@@ -215,11 +233,12 @@ fn upsert(row: &mut Row, signal: &LiveSignal) -> bool {
     changed
 }
 
-/// A row for a window no read named yet: only Claude's 5-hour and weekly windows, and only with
-/// a figure, or rejected: a rejection without a figure is at the limit, so its bar is 100.
-/// Anything else (an `overage` bucket) waits for a read to name it.
+/// A row for a window no read named yet: only for a kind whose rules allow it (Claude's 5-hour
+/// and weekly windows), and only with a figure, or rejected: a rejection without a figure is at
+/// the limit, so its bar is 100. That made-up 100% is stored with the account, and the next good
+/// read replaces it. Anything else (an `overage` bucket) waits for a read to name it.
 fn live_row(agent: AgentKind, id: String, signal: &LiveSignal, now: Timestamp) -> Option<Row> {
-    if agent != AgentKind::Claude {
+    if !kind_rules(agent).live_rows {
         return None;
     }
     let (kind, label) = claude_live_window(&id)?;

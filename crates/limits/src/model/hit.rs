@@ -1,19 +1,25 @@
 //! `at_limit`: which limit an agent is at, for the host's at-limit stop.
 
-use clauseo_protocol::{LimitSource, LimitStopReason};
+use clauseo_protocol::{LimitSource, LimitStopReason, Timestamp};
 
 use crate::model::{AgentState, LimitHit, Row};
 use crate::view::tightest;
 
-/// The limit `state`'s agent is at, if any. Rows past their reset never count. An agent with
-/// no account still has hits from its shown rows (`LiveOnly` after `MethodMissing`), so the
-/// host gets the reset time of the stopped turn; with no row and no reached limit (which only a
-/// good read sets, with the account), the answer is `None`.
-pub(crate) fn at_limit(state: &AgentState) -> Option<LimitHit> {
+/// The limit `state`'s agent is at, at `now`, if any. Rows past their reset never count:
+/// those a sweep marked, and those whose reset time is `now` or earlier, since no sweep runs
+/// while nobody watches. An agent with no account still has hits from its shown rows
+/// (`LiveOnly` after a failed read or `MethodMissing`), so the host gets the reset time of the
+/// stopped turn; with no row and no reached limit (which only a good read sets, with the
+/// account), the answer is `None`.
+pub(crate) fn at_limit(state: &AgentState, now: Timestamp) -> Option<LimitHit> {
     if state.source == LimitSource::NotApplicable {
         return None;
     }
-    let current = || state.visible_rows().iter().filter(|row| !row.reset_passed);
+    let current = || {
+        state.visible_rows().iter().filter(|row| {
+            !row.reset_passed && row.window.resets_at.is_none_or(|resets_at| resets_at > now)
+        })
+    };
     let at_limit_row =
         tightest(current().filter(|row| row.rejected || row.window.used_percent.get() >= 100.0));
     match state.reached {

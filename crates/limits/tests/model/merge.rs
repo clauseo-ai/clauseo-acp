@@ -141,7 +141,7 @@ fn live_signal_never_revives_not_applicable() {
 }
 
 #[test]
-fn live_signal_before_the_first_read_ends_is_ignored() {
+fn live_signal_while_the_first_read_runs_is_ignored() {
     let (mut model, _) = Limits::new(Vec::new(), &[CLAUDE], t0());
     let actions = model.input(
         live_input(
@@ -155,7 +155,27 @@ fn live_signal_before_the_first_read_ends_is_ignored() {
 }
 
 #[test]
-fn rejected_signal_marks_the_window_rejected_until_the_next_good_read() {
+fn live_signal_after_a_failed_first_read_is_live_only() {
+    let model = &mut read_with(ReadOutcome::Failed(ReadFailure::TimedOut));
+    let signal = live("five_hour", LiveStatus::Rejected, Some(90.0), Some(at(45)));
+    assert_eq!(
+        model.input(live_input(CLAUDE, signal), at(1)),
+        vec![Action::ViewChanged],
+        "no account yet, so nothing to persist"
+    );
+    let view = view_of(model, CLAUDE, at(1));
+    assert_eq!(view.freshness, Freshness::LiveOnly);
+    assert_eq!(view.checked_at, Some(at(1)));
+    assert_eq!(row(&view, "five_hour").used_percent, Some(pct(90.0)));
+    let hit = model
+        .at_limit(CLAUDE, at(1))
+        .expect("a rejected row is at its limit");
+    assert_eq!(hit.window.as_deref(), Some("five_hour"));
+    assert_eq!(hit.resets_at, Some(at(45)));
+}
+
+#[test]
+fn rejected_signal_marks_the_window_rejected_until_a_good_read() {
     let mut model = claude_at(60.0);
     let actions = model.input(
         live_input(CLAUDE, live("five_hour", LiveStatus::Rejected, None, None)),
@@ -170,16 +190,9 @@ fn rejected_signal_marks_the_window_rejected_until_the_next_good_read() {
     assert_eq!(row(&view, "five_hour").tone, MeterTone::AtLimit);
     assert_eq!(row(&view, "five_hour").used_percent, Some(pct(60.0)));
     let hit = model
-        .at_limit(CLAUDE)
+        .at_limit(CLAUDE, at(1))
         .expect("a rejected window is at its limit");
     assert_eq!(hit.window.as_deref(), Some("five_hour"));
-
-    let allowed = live("five_hour", LiveStatus::Allowed, Some(61.0), None);
-    model.input(live_input(CLAUDE, allowed), at(2));
-    assert_eq!(
-        row(&view_of(&model, CLAUDE, at(2)), "five_hour").tone,
-        MeterTone::AtLimit
-    );
 
     try_again(&mut model, at(3));
     model.input(
@@ -190,7 +203,7 @@ fn rejected_signal_marks_the_window_rejected_until_the_next_good_read() {
         row(&view_of(&model, CLAUDE, at(3)), "five_hour").tone,
         MeterTone::Neutral
     );
-    assert_eq!(model.at_limit(CLAUDE), None);
+    assert_eq!(model.at_limit(CLAUDE, at(3)), None);
 }
 
 #[test]
@@ -388,7 +401,7 @@ fn overage_signal_before_any_read_named_it_is_dropped() {
         at(1),
     );
     assert_eq!(actions, vec![]);
-    assert!(model.at_limit(CLAUDE).is_none());
+    assert!(model.at_limit(CLAUDE, at(1)).is_none());
 }
 
 #[test]
