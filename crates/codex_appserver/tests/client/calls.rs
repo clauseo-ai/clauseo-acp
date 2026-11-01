@@ -1,12 +1,12 @@
 //! The client's calls, notifications and failures against the scripted app-server.
 
 use clauseo_codex_appserver::{
-    Account, ClientInfo, Error, GetAccountRateLimitsResponse, GetAccountResponse,
-    InitializeResponse, Notification, PlanType, RateLimitReachedType, RateLimitResetCreditStatus,
-    RateLimitResetType,
+    Account, Client, ClientInfo, Driver, Error, GetAccountRateLimitsResponse, GetAccountResponse,
+    InitializeResponse, Notification, Notifications, PlanType, RateLimitReachedType,
+    RateLimitResetCreditStatus, RateLimitResetType,
 };
 use clauseo_protocol::ErrorCode;
-use futures::StreamExt;
+use futures::{FutureExt as _, StreamExt};
 use serde_json::json;
 
 use crate::peer::{MAX_LINE_BYTES, debug_lines, drain, fixture, pipes, reader_params};
@@ -207,8 +207,10 @@ fn unknown_fields_are_ignored_and_unknown_enum_values_keep_their_string() {
         credit.status,
         RateLimitResetCreditStatus::Unknown("expired".to_owned())
     );
-    // The schema's own "unknown" is a named value, not the catch-all.
+    // The schema's own "unknown" is a named value, not the catch-all, and a named value built
+    // by hand as `Unknown` still equals its variant.
     assert_eq!(PlanType::from_wire("unknown"), PlanType::CodexUnknown);
+    assert_eq!(PlanType::Unknown("pro".to_owned()), PlanType::Pro);
 }
 
 #[test]
@@ -349,4 +351,51 @@ fn a_dropped_notification_stream_discards_updates_without_stopping_the_connectio
         futures::executor::block_on(async { futures::join!(driver, calls, script) });
     assert_eq!(ended, Ok(()));
     assert!(account.is_ok(), "{account:?}");
+}
+
+#[test]
+fn a_call_dropped_before_it_is_written_is_never_sent() {
+    let (client, _notifications, driver, mut server) = pipes();
+    // Polled once, so its request is queued, then dropped before the driver runs.
+    assert!(client.rate_limits(reader_params()).now_or_never().is_none());
+    let calls = async move { client.account().await };
+    let script = async move {
+        let account = server.request("account/read").await;
+        server.respond(&account, &fixture("account_response_chatgpt.json"));
+        server.read_end().await;
+    };
+    let (ended, account, ()) =
+        futures::executor::block_on(async { futures::join!(driver, calls, script) });
+    assert_eq!(ended, Ok(()));
+    assert!(account.is_ok(), "{account:?}");
+}
+
+#[test]
+fn calls_still_queued_when_a_bad_line_arrives_fail_with_protocol_too() {
+    let (client, _notifications, driver, server) = pipes();
+    server.send_raw(b"codex: starting up\n");
+    // The calls are polled first, so both requests are queued before the driver reads the line.
+    let calls =
+        async move { futures::join!(client.account(), client.rate_limits(reader_params())) };
+    let ((account, limits), ended) =
+        futures::executor::block_on(async { futures::join!(calls, driver) });
+    let Err(Error::Protocol(message)) = ended else {
+        panic!("expected the driver to end with Error::Protocol, got {ended:?}");
+    };
+    assert_eq!(account, Err(Error::Protocol(message.clone())));
+    assert_eq!(limits, Err(Error::Protocol(message)));
+    drop(server);
+}
+
+#[test]
+fn the_client_its_calls_the_stream_and_the_driver_are_send() {
+    fn send<T: Send>(_: &T) {}
+    fn clone_send<T: Clone + Send>() {}
+    clone_send::<Client>();
+    let (client, notifications, driver, _server) = pipes();
+    send(&client.initialize(ClientInfo::clauseo()));
+    send(&client.account());
+    send(&client.rate_limits(reader_params()));
+    send::<Notifications>(&notifications);
+    send::<Driver>(&driver);
 }

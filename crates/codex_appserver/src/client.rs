@@ -124,6 +124,10 @@ pub enum Notification {
 
 /// The app-server's notifications, in the order it sent them. Unbounded: the driver never
 /// waits for the caller to read. Dropping it discards every later notification.
+///
+/// The stream ends when the [`Driver`](crate::Driver) does, and the driver ends once the last
+/// [`Client`] is dropped, so a caller that keeps only the stream sees it end at once. Hold a
+/// `Client` for as long as you want notifications.
 #[derive(Debug)]
 pub struct Notifications(pub(crate) mpsc::UnboundedReceiver<Notification>);
 
