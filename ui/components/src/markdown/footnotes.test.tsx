@@ -299,6 +299,17 @@ test("a reference and its note reach each other by click, whatever the label's c
   }
 });
 
+test("a note's reference inside another note gets its own back-reference, as in cmark-gfm", () => {
+  // x cites b, a's note cites b, y cites a: b has two back-references, one into a's note. remark's
+  // one-piece render gives b one, since it writes b's back-references before it renders a's note.
+  render("x[^b]\n\n[^a]: see[^b]\n\ny[^a]\n\n[^b]: B.\n");
+  const items = [...host.querySelectorAll("section[data-footnotes] li")];
+  expect(items.map((item) => item.textContent?.slice(0, 3))).toEqual(["B. ", "see"]);
+  const backB = [...items[0]!.querySelectorAll("a[data-footnote-backref]")];
+  expect(backB).toHaveLength(2);
+  expect(target(backB[1])?.closest("li")).toBe(items[1]);
+});
+
 test("a finished answer re-rendered with no change keeps every view", () => {
   const answer = createAnswer("t");
   const first = answer.update(DOC, false);
