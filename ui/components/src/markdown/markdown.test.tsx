@@ -161,6 +161,18 @@ test("the streaming tail shows repaired emphasis, and the finished text shows th
   expect(host.textContent).toBe("Done.The **key");
 });
 
+test("an empty answer renders nothing, streaming or finished, and an answer can grow from empty and back", () => {
+  for (const streaming of [true, false]) {
+    act(() => root.render(<Markdown text="" streaming={streaming} />));
+    expect(host.querySelector('[data-clauseo="markdown"]')?.childElementCount).toBe(0);
+  }
+  act(() => root.render(<Markdown text="" streaming />));
+  act(() => root.render(<Markdown text="a" streaming />));
+  expect(host.textContent).toBe("a");
+  act(() => root.render(<Markdown text="" streaming />));
+  expect(host.textContent).toBe("");
+});
+
 test("a host that leaves out streaming gets finished text: no tail repair", () => {
   act(() => root.render(<Markdown text={"Done.\n\nThe **key"} />));
   expect(host.querySelector("strong")).toBeNull();
