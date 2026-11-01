@@ -269,6 +269,39 @@ test("an answer renders as Markdown, streaming until the agent sends something e
   expect(third().querySelector("a")?.getAttribute("href")).toBe("https://example.com/lease");
 });
 
+test("an answer the host keeps extending streams on: after its own content block, and when the agent goes back to it", async () => {
+  const { show, play } = await open();
+  const link = "See [the lease](https://example.com/lease)";
+  const answer = () => all("message-agent")[0]!;
+  const live = () => answer().querySelector("a")?.hasAttribute("href");
+  await show([agentText(6, 1, link)], header("running"));
+  expect(live()).toBe(false);
+  // An image inside the answer: a content block of the same message, after which its text continues.
+  const image: ViewEntry = {
+    agent_content: {
+      order: 7,
+      event: uuid(1, 8),
+      turn: TURN,
+      message: uuid(1, 6),
+      kind: "answer",
+      block: { image: { data: { inline: "" }, mime_type: "image/png" } },
+    },
+  };
+  await play([upsert(image)]);
+  expect(live()).toBe(false);
+  await play([append(1, link.length, " and **clause 9**")]);
+  expect(live()).toBe(false);
+  expect(answer().querySelector("strong")?.textContent).toBe("clause 9");
+
+  // A tool call ends it; the agent's message id coming back after the tool call reopens it.
+  await play([upsert(toolCall(8, 1, "pending"))]);
+  expect(live()).toBe(true);
+  await play([append(1, link.length + 17, "; also [x](https://example.com/x)")]);
+  expect(live()).toBe(false);
+  await play([upsert(toolCall(9, 2, "pending"))]);
+  expect(live()).toBe(true);
+});
+
 test("undo sends the turn's files; a limit stop shows its reset time as ISO UTC", async () => {
   const sent: unknown[] = [];
   const { show } = await open({

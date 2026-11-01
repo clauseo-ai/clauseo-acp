@@ -6,7 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import { StoreContext } from "../store/hooks.ts";
 import { createViewStore } from "../store/store.ts";
-import { entryIdOf } from "../store/view.ts";
+import { entryIdOf, kindOf } from "../store/view.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import type { EntryId, StreamId, ViewPatchBody } from "../transport/protocol.ts";
 import {
@@ -52,22 +52,39 @@ afterEach(() => {
 /** Patches the bridge delivers in one frame: the host's 16 ms display batch holds about three agent chunks. */
 const PER_FRAME = 3;
 
-/** The entry ids a frame's patches change. An answer counts as changed in the frame where it finishes (the agent sends
- * anything else after it): its row renders once more there, its final render. `streaming` carries the answer still
- * arriving from frame to frame. */
+/** Kinds that never end an answer (the view's `latestOutput` rule). */
+const NOT_OUTPUT = new Set(["user_message", "notice", "marker", "version"]);
+
+/** The entry ids a frame's patches change. An answer counts as changed in the frame where it finishes, by the view's
+ * `latestOutput` rule: another answer gets output, or a new entry of the agent's arrives (not the person's message, a
+ * notice or a marker, and not an update to an entry already in view). Its row renders once more there, its final
+ * render. `streaming` carries the answer still arriving from frame to frame; `seen` holds the ids already in view. */
 function touchedBy(
   bodies: readonly ViewPatchBody[],
   streaming: { answer: string | null },
+  seen: ReadonlySet<string>,
 ): Set<string> {
   const touched = new Set<string>();
+  const known = new Set(seen);
+  const finish = (next: string | null) => {
+    if (streaming.answer !== null && streaming.answer !== next) touched.add(streaming.answer);
+    streaming.answer = next;
+  };
   for (const body of bodies) {
     if (body.upsert !== undefined) {
-      const id = entryIdOf(body.upsert.entry);
+      const entry = body.upsert.entry;
+      const id = entryIdOf(entry);
       touched.add(id);
-      if (streaming.answer !== null && streaming.answer !== id) touched.add(streaming.answer);
-      streaming.answer = body.upsert.entry.agent_text !== undefined ? id : null;
+      const message = entry.agent_text?.message ?? entry.agent_content?.message;
+      if (message !== undefined) finish(`agent_text:${message}`);
+      else if (!known.has(id) && !NOT_OUTPUT.has(kindOf(entry))) finish(null);
+      known.add(id);
     }
-    if (body.append_text !== undefined) touched.add(`agent_text:${body.append_text.message_id}`);
+    if (body.append_text !== undefined) {
+      const id = `agent_text:${body.append_text.message_id}`;
+      touched.add(id);
+      finish(id);
+    }
   }
   return touched;
 }
@@ -121,7 +138,7 @@ test("500 chunks and 20 tool calls: one commit a frame without a new row, three 
   for (let i = 0; i < bodies.length; i += PER_FRAME) {
     const slice = bodies.slice(i, i + PER_FRAME);
     for (const body of slice) transport.deliver(JSON.stringify(event(batch(cursor++, [body]))));
-    const touched = touchedBy(slice, streaming);
+    const touched = touchedBy(slice, streaming, seen);
     const added = [...touched].some((id) => !seen.has(id));
     for (const id of touched) seen.add(id);
     rowCommits.clear();

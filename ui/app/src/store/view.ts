@@ -37,6 +37,15 @@ export interface StreamView {
   /** Streaming text by text key (`textKey`): an agent text's text, a user message's text blocks. */
   readonly texts: ReadonlyMap<string, string>;
   readonly hasOlder: boolean;
+  /**
+   * The agent text the agent's output went to last, or null once something else of the agent's came after it. ACP has
+   * no "message done", so this is how the window knows which answer is still arriving. Text appended to a message, a
+   * content block of the same message, and the message's own upsert keep it (or make it, for a message the agent goes
+   * back to); a new entry of the agent's or the host's turn bookkeeping (a tool call, a permission, an elicitation, a
+   * step, a limit stop, another message's content) clears it. The person's own messages, notices and markers do not
+   * touch it, and neither do updates to entries already in view.
+   */
+  readonly latestOutput: EntryId | null;
 }
 
 /** The same view, writable: only `applyBatch` writes it. */
@@ -56,6 +65,7 @@ export const newView = (stream: StreamId): LiveView => ({
   ids: [],
   texts: new Map(),
   hasOlder: false,
+  latestOutput: null,
 });
 
 export const positionOf = (view: StreamView | undefined): ViewPosition | null =>
@@ -158,6 +168,26 @@ class Writer {
   }
 }
 
+/** Kinds that are not the agent's output: they never end an answer. */
+const NOT_OUTPUT: ReadonlySet<Kind> = new Set(["user_message", "notice", "marker", "version"]);
+
+/** The agent text an entry continues (its own id, or its message's for a content block), or null. */
+function answerOf(entry: ViewEntry): EntryId | null {
+  if (entry.agent_text !== undefined) return entryId("agent_text", entry.agent_text.message);
+  if (entry.agent_content !== undefined) return entryId("agent_text", entry.agent_content.message);
+  return null;
+}
+
+/** `latestOutput` for a freshly reset view: the last entry of the agent's, as its answer when it is one. */
+function latestOutputOf(view: LiveView): EntryId | null {
+  for (let at = view.ids.length - 1; at >= 0; at -= 1) {
+    const entry = view.entries.get(view.ids[at]!)!;
+    if (NOT_OUTPUT.has(kindOf(entry))) continue;
+    return answerOf(entry);
+  }
+  return null;
+}
+
 function upsert(w: Writer, entry: ViewEntry): void {
   const view = w.view;
   const kind = kindOf(entry);
@@ -169,6 +199,9 @@ function upsert(w: Writer, entry: ViewEntry): void {
     return;
   }
   const id = entryIdOf(entry);
+  const answer = answerOf(entry);
+  if (answer !== null) view.latestOutput = answer;
+  else if (!view.entries.has(id) && !NOT_OUTPUT.has(kind)) view.latestOutput = null;
   if (!view.entries.has(id)) {
     // Entries usually arrive newest last; look from the end for the place that keeps `order` sorted.
     const order = orderOf(entry);
@@ -190,6 +223,7 @@ function remove(w: Writer, id: EntryId): void {
   const entry = view.entries.get(id);
   if (entry === undefined) return;
   view.entries.delete(id);
+  if (view.latestOutput === id) view.latestOutput = null;
   const ids = w.writableIds();
   const at = ids.lastIndexOf(id);
   if (at >= 0) ids.splice(at, 1);
@@ -212,6 +246,7 @@ function reset(view: LiveView, epoch: ViewEpoch, cursor: Cursor, w: ViewWindow):
   view.header = w.header ?? null;
   view.ids = ids;
   view.hasOlder = w.has_older;
+  view.latestOutput = latestOutputOf(view);
 }
 
 /** Applies one patch body that is not a `Reset`; false when the view cannot take it. */
@@ -235,6 +270,7 @@ function applyBody(w: Writer, patch: ViewPatch): boolean {
     const was = texts.get(key);
     if (was === undefined || was.length !== a.from_len) return false;
     texts.set(key, was + a.text);
+    if (a.target === "agent_text") w.view.latestOutput = entryId("agent_text", a.message_id);
     return true;
   }
   // A body this version does not know: skip it, but keep the cursor moving.

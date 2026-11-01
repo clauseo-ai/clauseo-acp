@@ -35,6 +35,35 @@ function started(): LiveView {
 }
 
 describe("applyBatch", () => {
+  test("latestOutput follows the answer the agent's output went to last", () => {
+    const v = started();
+    // After a Reset: the last entry of the agent's.
+    expect(v.latestOutput).toBe(AGENT);
+    applyBatch(v, batch(2, [upsert(userMessage(7, 2, "and?"))]));
+    expect(v.latestOutput).toBe(AGENT);
+    applyBatch(v, batch(3, [upsert(toolCall(8, 1, "pending"))]));
+    expect(v.latestOutput).toBeNull();
+    // An update to an entry already in view does not move it; text appended to the answer does.
+    applyBatch(v, batch(4, [append(1, 2, "c"), upsert(toolCall(8, 1, "completed"))]));
+    expect(v.latestOutput).toBe(AGENT);
+    const content: ViewEntry = {
+      agent_content: {
+        order: 9,
+        event: uuid(2, 8),
+        turn: uuid(1, 4),
+        message: uuid(1, 6),
+        kind: "answer",
+        block: { image: { data: { inline: "" }, mime_type: "image/png" } },
+      },
+    };
+    applyBatch(v, batch(6, [upsert(content)]));
+    expect(v.latestOutput).toBe(AGENT);
+    applyBatch(v, batch(7, [upsert(agentText(10, 2, "next"))]));
+    expect(v.latestOutput).toBe(entryId("agent_text", uuid(2, 6)));
+    applyBatch(v, batch(8, [reset([agentText(6, 1, "ab"), toolCall(9, 1, "pending")])]));
+    expect(v.latestOutput).toBeNull();
+  });
+
   test("a Reset replaces the view, header and texts included", () => {
     const v = started();
     expect(positionOf(v)).toEqual({ epoch: EPOCH, cursor: 1 });

@@ -42,28 +42,15 @@ function useRunning(stream: StreamId): boolean {
   return useStreamPart(store, stream, pick);
 }
 
-/** Entry kinds that do not end the agent's message before them: the person's own (queued) prompt and the host's
- * notes. Any other later entry (a tool call, a permission, another text, the turn's step) means the agent moved on. */
-const NOT_AGENT_OUTPUT = new Set(["user_message", "notice", "marker"]);
-
 /**
- * Whether the answer `id` is still arriving: its turn runs and no agent output came after it. ACP has no "message
- * done" signal, so a message is finished once the agent sends anything else, or the turn stops. A boolean, so a
- * finished answer's row renders exactly once more (its final render, which colours code and makes links live) and
- * never again. Looks from the end of the list, where a streaming answer is, so a flush costs a step or two per row.
+ * Whether the answer `id` is still arriving: its turn runs and the agent's latest output went to it (the view's
+ * `latestOutput`). A boolean, so a finished answer's row renders exactly once more (its final render, which colours
+ * code and makes links live) and not again unless the agent goes back to it.
  */
 function useStreaming(stream: StreamId, id: EntryId): boolean {
   const pick = useCallback(
-    (v: StreamView | undefined) => {
-      if (v === undefined || !turnRunning(v.header?.header?.status)) return false;
-      for (let at = v.ids.length - 1; at >= 0; at -= 1) {
-        const other = v.ids[at]!;
-        if (other === id) return true;
-        const entry = v.entries.get(other);
-        if (entry === undefined || !NOT_AGENT_OUTPUT.has(kindOf(entry))) return false;
-      }
-      return false;
-    },
+    (v: StreamView | undefined) =>
+      v !== undefined && v.latestOutput === id && turnRunning(v.header?.header?.status),
     [id],
   );
   return useStreamPart(useViewStore(), stream, pick);
