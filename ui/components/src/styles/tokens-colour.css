@@ -50,7 +50,8 @@
   --supports-ref: oklch(92.13% 0.0233 157.57); /* #D9EADF */
   --against-ref: oklch(89.48% 0.0321 29.77); /* #F1D5D0 */
   /* a code block's colours, one per token role (markdown/highlight); 4.5:1 or more on the well, the work and the
-     sheet, and none of them the court's red, green or yellow */
+     sheet, and none of them the court's red, green or yellow. A code block sits on the well or the sheet, never on
+     the ground: the day comment is 4.27:1 there */
   --code-comment: oklch(52% 0.015 75); /* #6E6860 */
   --code-keyword: oklch(47% 0.12 345); /* #883B6A */
   --code-string: oklch(47% 0.08 200); /* #00686C */
