@@ -17,8 +17,9 @@ use crate::checkpoint::{Core, Spec};
 use crate::history::{GixStore, HistoryStore, recorded_worktree};
 use crate::stat::EntryState;
 use crate::types::{
-    Checkpoint, CompareSide, Imported, Marker, NewMatter, Progress, Restore, RestoreFiles,
-    RestorePlan, Restored, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, VersionFile,
+    Checkpoint, CommitId, CompareSide, Imported, Marker, NewMatter, Progress, Restore,
+    RestoreFiles, RestorePlan, Restored, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone,
+    VersionFile,
 };
 use crate::{Error, MissingReason, compare, refuse, restore, scan, undo, write};
 
@@ -273,6 +274,12 @@ impl Matter {
     /// The last checkpoint's id.
     pub fn last_checkpoint(&self) -> Option<CheckpointId> {
         self.core.timeline.head().map(|(id, _, _)| id)
+    }
+
+    /// The commit of checkpoint `id`, `None` if the timeline does not hold it. The host reads
+    /// the root `import` checkpoint's here after [`Matter::create`] or [`Matter::import`].
+    pub fn commit_of(&self, id: CheckpointId) -> Option<CommitId> {
+        self.core.timeline.commit(id).map(CommitId::of)
     }
 
     /// The checkpoint before a turn: created only if the folder differs from the last
