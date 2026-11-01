@@ -11,8 +11,8 @@ use clauseo_protocol::{AccountLimits, AgentKind, Billing, BillingProvider, Limit
 use clauseo_settings::{Effective, Locations, SystemFiles};
 use futures::executor::block_on;
 
-use crate::check::check_dir;
-use crate::redact::{self, Redactor};
+use crate::check::check_file;
+use crate::redact::Redactor;
 use crate::write;
 
 /// The variable naming the folder `npm ci` filled from the pins file.
@@ -23,6 +23,12 @@ const NODE: &str = "CLAUSEO_G16_NODE";
 const CLAUDE_SCRIPT: &str = "node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js";
 /// codex-acp's bin script under the install.
 const CODEX_SCRIPT: &str = "node_modules/@agentclientprotocol/codex-acp/dist/index.js";
+/// The key variables a plan test blanks in its settings entry, so a key the caller exported for
+/// the whole run cannot turn a plan read into an API-key read. Claude Code and Codex 0.162.1
+/// (`codex-rs/login/src/auth/manager.rs`, `read_non_empty_env_var`) both ignore an empty key.
+const KEY_VARS: [&str; 3] = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY"];
+/// The most raw stdout one read keeps; the rest is dropped and the run says so.
+const RAW_MAX: usize = 4 * 1024 * 1024;
 
 /// A login kind, one per test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +69,16 @@ impl Kind {
         }
     }
 
+    /// A word the plan's name must hold, for a plan kind.
+    fn plan_word(self) -> Option<&'static str> {
+        match self {
+            Kind::ClaudeMax => Some("Max"),
+            Kind::ClaudeTeam => Some("Team"),
+            Kind::CodexPlus => Some("Plus"),
+            Kind::ClaudeApi | Kind::CodexApi => None,
+        }
+    }
+
     /// The pay-as-you-go provider of an API-key kind; `None` for a plan.
     fn pay_as_you_go(self) -> Option<BillingProvider> {
         match self {
@@ -93,20 +109,61 @@ pub(crate) fn live(kind: Kind) {
         AgentKind::Codex => PathBuf::from(&login),
         AgentKind::Claude => scratch.0.join("codex-home"),
     };
-    let raw = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let raw = Arc::new(Mutex::new(Raw::default()));
     let copy = Arc::clone(&raw);
     let tap: StdoutTap = Arc::new(move |_agent, chunk| {
         copy.lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .extend_from_slice(chunk);
+            .keep(chunk);
     });
     let launcher: Arc<dyn Launcher> = Arc::new(PassthroughLauncher::new(SpawnOptions::new()));
-    let readers =
-        ProcessReaders::new(&effective, codex_home, launcher, AsyncIoTimer).with_stdout_tap(tap);
+    let readers = ProcessReaders::new(&effective, codex_home, launcher, AsyncIoTimer);
+    let readers = readers.with_stdout_tap(tap);
     let outcome = block_on(readers.read(kind.agent()));
-    let raw = raw.lock().unwrap_or_else(PoisonError::into_inner).clone();
-    record(kind, &raw);
-    expect(kind, &outcome);
+    let raw = std::mem::take(&mut *raw.lock().unwrap_or_else(PoisonError::into_inner));
+    let mut redactor = Redactor::new(known(&[&login, &install, &node], &scratch.0));
+    record(kind, &raw, &mut redactor);
+    expect(kind, &outcome, &mut redactor);
+}
+
+/// One read's raw stdout, up to [`RAW_MAX`].
+#[derive(Debug, Default)]
+struct Raw {
+    /// The bytes kept.
+    bytes: Vec<u8>,
+    /// Bytes past the cap were dropped.
+    cut: bool,
+}
+
+impl Raw {
+    /// Keeps `chunk`, up to the cap.
+    fn keep(&mut self, chunk: &[u8]) {
+        let room = RAW_MAX.saturating_sub(self.bytes.len());
+        self.cut |= chunk.len() > room;
+        self.bytes
+            .extend_from_slice(chunk.get(..room.min(chunk.len())).unwrap_or_default());
+    }
+}
+
+/// The run's own local values for the redactor: `values`, the temp folder (also under
+/// macOS's `/private`, which the vendors report), the system temp folder and `$HOME`.
+fn known(values: &[&OsString], scratch: &Path) -> Vec<String> {
+    let mut known: Vec<String> = values
+        .iter()
+        .map(|value| value.to_string_lossy().into_owned())
+        .collect();
+    for path in [scratch.to_path_buf(), std::env::temp_dir()] {
+        let path = path
+            .to_string_lossy()
+            .trim_end_matches(['/', '\\'])
+            .to_owned();
+        known.push(format!("/private{path}"));
+        known.push(path);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        known.push(home.to_string_lossy().into_owned());
+    }
+    known
 }
 
 /// The value of `var`, which a live run needs once its login variable is set.
@@ -137,8 +194,19 @@ fn settings(
         AgentKind::Codex => serde_json::json!({
             "command": node,
             "args": [under(CODEX_SCRIPT)],
+            "env": {},
         }),
     };
+    let mut entry = entry;
+    if kind.pay_as_you_go().is_none()
+        && let Some(env) = entry
+            .get_mut("env")
+            .and_then(serde_json::Value::as_object_mut)
+    {
+        for var in KEY_VARS {
+            env.insert(var.to_owned(), serde_json::Value::String(String::new()));
+        }
+    }
     let id = match kind.agent() {
         AgentKind::Claude => "claude-acp",
         AgentKind::Codex => "codex-acp",
@@ -146,11 +214,11 @@ fn settings(
     serde_json::json!({ "agents": { id: entry } })
 }
 
-/// Writes `raw`, redacted line by line, to `<target>/g16/<kind>.jsonl`, and prints the secret
-/// check's findings over that folder.
-fn record(kind: Kind, raw: &[u8]) {
-    let mut redactor = Redactor::default();
-    let text = String::from_utf8_lossy(raw);
+/// Writes `raw`, redacted line by line, to `<target>/g16/<kind>.jsonl`, then fails the test
+/// when the secret check finds anything in that one file. A finding names the line and the rule,
+/// never the value.
+fn record(kind: Kind, raw: &Raw, redactor: &mut Redactor) {
+    let text = String::from_utf8_lossy(&raw.bytes);
     let mut lines = String::new();
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
         lines.push_str(&redactor.line(line));
@@ -160,10 +228,15 @@ fn record(kind: Kind, raw: &[u8]) {
     write::create_dir_all(&dir).unwrap();
     let path = dir.join(format!("{}.jsonl", kind.name()));
     write::write(&path, lines).unwrap();
-    println!("{}: recorded {}", kind.name(), path.display());
-    for finding in check_dir(&dir).findings {
-        println!("{}: the secret check fails: {finding}", kind.name());
-    }
+    let cut = if raw.cut { " (cut at 4 MiB)" } else { "" };
+    println!("{}: recorded {}{cut}", kind.name(), path.display());
+    let findings = check_file(&path).findings;
+    assert!(
+        findings.is_empty(),
+        "{}: the recording fails the secret check, so redaction missed something:\n{}",
+        kind.name(),
+        findings.join("\n")
+    );
 }
 
 /// `CARGO_TARGET_DIR`, else the workspace's `target`.
@@ -176,15 +249,19 @@ fn target_dir() -> PathBuf {
         )
 }
 
-/// Checks `outcome` against what S13's types expect for `kind`: a plan's windows, each 0 to 100,
-/// or pay as you go with no windows and `NotApplicable`. A mismatch names the shape it got,
-/// never the account.
-fn expect(kind: Kind, outcome: &ReadOutcome) {
+/// Checks `outcome` against what S13's types expect for `kind`: a plan whose name holds the
+/// kind's word, with windows each 0 to 100 and a reset time on each one in use (S13's schema
+/// keeps a null `resets_at`, as `fixtures/claude/pro.json` has, and the reader drops one that
+/// is not RFC 3339); or pay as you go with no windows and `NotApplicable`. A mismatch names the
+/// shape it got, never the account.
+fn expect(kind: Kind, outcome: &ReadOutcome, redactor: &mut Redactor) {
     let name = kind.name();
     let limits = match outcome {
         ReadOutcome::Usage { limits, .. } => limits,
-        other => panic!("{name}: expected usage, got {}", describe(other)),
+        other => panic!("{name}: expected usage, got {}", describe(other, redactor)),
     };
+    let plan = limits.plan.as_ref().map(|plan| plan.0.as_str());
+    println!("{name}: plan {plan:?}");
     let shape = shape(limits);
     if let Some(via) = kind.pay_as_you_go() {
         assert_eq!(
@@ -203,6 +280,11 @@ fn expect(kind: Kind, outcome: &ReadOutcome) {
             ),
             "{name}: {shape}"
         );
+        let word = kind.plan_word().unwrap_or_default();
+        assert!(
+            plan.is_some_and(|plan| plan.contains(word)),
+            "{name}: the plan is not {word}; {shape}"
+        );
         assert!(!limits.windows.is_empty(), "{name}: no windows; {shape}");
         for window in &limits.windows {
             let used = window.used_percent.get();
@@ -211,21 +293,26 @@ fn expect(kind: Kind, outcome: &ReadOutcome) {
                 "{name}: {} at {used}",
                 window.id
             );
+            assert!(
+                used <= 0.0 || window.resets_at.is_some(),
+                "{name}: {} is in use with no reset time",
+                window.id
+            );
         }
     }
     println!("{name}: ok, {shape}");
 }
 
 /// The outcome's kind, with a failure's redacted text; never an account.
-fn describe(outcome: &ReadOutcome) -> String {
+fn describe(outcome: &ReadOutcome, redactor: &mut Redactor) -> String {
     match outcome {
         ReadOutcome::Usage { .. } => "usage".to_owned(),
         ReadOutcome::MethodMissing => "MethodMissing".to_owned(),
         ReadOutcome::SignedOut => "SignedOut".to_owned(),
         ReadOutcome::Failed(ReadFailure::Exited { code, stderr_tail }) => {
-            format!("Exited {code:?}: {}", redact::text(stderr_tail))
+            format!("Exited {code:?}: {}", redactor.text(stderr_tail))
         }
-        ReadOutcome::Failed(failure) => format!("{failure:?}"),
+        ReadOutcome::Failed(failure) => redactor.text(&format!("{failure:?}")),
     }
 }
 

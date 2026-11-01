@@ -893,6 +893,7 @@ dependencies = [
  "async-io",
  "clauseo-codex_appserver",
  "clauseo-fake_agent",
+ "clauseo-limits",
  "clauseo-process",
  "clauseo-protocol",
  "clauseo-settings",

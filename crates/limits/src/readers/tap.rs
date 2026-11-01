@@ -13,8 +13,12 @@ use super::run::Stdout;
 
 /// Gets each chunk a reader's program writes to stdout, as the reader reads it, with the agent.
 /// The bytes are raw and unredacted: whoever sets a tap redacts before keeping anything.
+#[cfg(feature = "live-tap")]
 #[doc(hidden)]
 pub type StdoutTap = Arc<dyn Fn(AgentKind, &[u8]) + Send + Sync>;
+/// [`StdoutTap`] without the `live-tap` feature: crate-private, and never set.
+#[cfg(not(feature = "live-tap"))]
+pub(crate) type StdoutTap = Arc<dyn Fn(AgentKind, &[u8]) + Send + Sync>;
 
 /// `stdout`, copied to `tap` as it is read when there is one.
 pub(crate) fn tapped(stdout: Stdout, agent: AgentKind, tap: Option<StdoutTap>) -> Stdout {

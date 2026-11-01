@@ -54,8 +54,8 @@ reader over in-memory pipes. All are synthetic, written from `crates/codex_appse
 
 G16's live tests (`tests/live.rs`) write each read's raw stdout, redacted, to
 `<target>/g16/<test>.jsonl` (emails become `test@example.com`; account, organisation, user,
-workspace and team ids, and UUIDs, become `redacted-<n>`; host names and local paths become
-`redacted-host` and `redacted-path`). Nothing copies them here on its own. The G16 owner reads
+workspace and team ids, and UUIDs, become `redacted-<n>`; host names, the run's own folders and
+home paths become `redacted-host` and `redacted-path`). Nothing copies them here on its own. The G16 owner reads
 each one, runs the secret check (`cargo nextest run -p clauseo-limits -E
 'test(fixtures_are_redacted)'` once the file is in place), and only then copies it by hand into
 `recorded/<agent>/<name>` beside a row in the table above whose Kind is `recorded`, saying which
@@ -64,9 +64,11 @@ shows S13's schema is wrong, the same PR fixes `src/` and the synthetic fixture 
 recording exists yet, so there is no `recorded/` folder.
 
 `fixtures_are_redacted` (`tests/fixtures.rs`) runs over this whole folder, recursively, on every
-test run. It fails on an `@` not followed by `example.com` (this README is exempt from that rule
-alone, since it names npm scopes), on S8's token shapes (`sk-` or `eyJ` followed by 20 or more
-of `A-Z a-z 0-9 _ -`), on a link, and on any file named `auth.json` or `.credentials.json`.
+test run, with the rules at the top of `tests/fixtures/check.rs`: no email outside `example.com`
+(and, in every file but this README, no `@` not followed by `example.com`), no token shape (S8's
+`sk-` or `eyJ` followed by 20 or more of `A-Z a-z 0-9 _ -`), no UUID, no home path, no link, and
+no file named `auth.json` or `.credentials.json` in any case. A live test runs the same check on
+its own recording and fails when it finds anything.
 
 ### What the first recordings answer
 

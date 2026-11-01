@@ -21,7 +21,9 @@ use clauseo_process::{Launcher, Timer};
 use clauseo_protocol::{AccountLimits, AgentKind, LimitStopReason};
 use clauseo_settings::{AgentLaunch, Effective};
 
+pub use codex::CODEX_OVERRIDES;
 use paths::{CLAUDE_ID, CODEX_ID};
+#[cfg(feature = "live-tap")]
 #[doc(hidden)]
 pub use tap::StdoutTap;
 
@@ -95,7 +97,7 @@ pub struct ProcessReaders<T> {
     /// Clauseo's own Codex home, which the Codex reader forces as `CODEX_HOME`.
     codex_home: PathBuf,
     /// G16's copy of each reader's stdout; `None` everywhere but its live tests.
-    tap: Option<StdoutTap>,
+    tap: Option<tap::StdoutTap>,
 }
 
 impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
@@ -144,6 +146,7 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
     /// unredacted, and the caller redacts them.
     #[doc(hidden)]
     #[must_use]
+    #[cfg(feature = "live-tap")]
     pub fn with_stdout_tap(mut self, tap: StdoutTap) -> ProcessReaders<T> {
         self.tap = Some(tap);
         self
