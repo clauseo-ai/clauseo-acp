@@ -8,8 +8,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::open_enum::open_unit_enum;
 use crate::{
-    AgentId, BlobHash, CheckpointId, CompactString, Count, Error, FileChange, MatterId, MatterKind,
-    MatterPath, RestoreRequest, Seq, SettingsView, StreamId, ThreadId, ThreadStatus, ViewEntry,
+    AgentId, BlobHash, CheckpointId, CompactString, Count, Error, FileChange, FileRefId, MatterId,
+    MatterKind, MatterPath, RestoreRequest, Seq, SettingsView, SkippedFile, StreamId, ThreadId,
+    ThreadStatus, Timestamp, ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -19,6 +20,10 @@ pub const MAX_PAGE_ENTRIES: u32 = 200;
 /// Most bytes one `ReadBlob` returns (1 MiB): one reply stays bounded, and every blob is text
 /// today.
 pub const MAX_BLOB_READ_BYTES: u32 = 1024 * 1024;
+
+/// Most files one `ListPapers` returns, papers and skipped files together: one reply stays
+/// bounded however large the folder.
+pub const MAX_PAPERS: u32 = 2_000;
 
 /// Defines a newtype over `u32` in `1..=$max`, which its constructor and its decoder both
 /// check, so an out-of-range value never reaches the host.
@@ -133,6 +138,11 @@ pub enum HostQuery {
     },
     /// The display settings in force, and the keys the firm's policy locks.
     GetSettings,
+    /// The files of a matter's folder as it is now, for its file list (`QueryResult::Papers`).
+    ListPapers {
+        /// The matter.
+        matter: MatterId,
+    },
 }
 
 /// A query's answer.
@@ -154,6 +164,32 @@ pub enum QueryResult {
     Blob(BlobRange),
     /// For `GetSettings`.
     Settings(SettingsView),
+    /// For `ListPapers`: the matter's folder as it is now, by the rules a checkpoint versions
+    /// it by (the same excluded names, size cap and cloud-only files).
+    Papers {
+        /// The files a checkpoint versions, sorted by path bytes.
+        papers: Vec<PaperSummary>,
+        /// The files a checkpoint does not version (over the size cap, cloud-only), with why,
+        /// sorted by path bytes.
+        skipped: Vec<SkippedFile>,
+        /// Whether the folder holds more than [`MAX_PAPERS`] files: `papers` and `skipped`
+        /// together are then its first [`MAX_PAPERS`] by path.
+        truncated: bool,
+    },
+}
+
+/// One file of a matter's folder, as `ListPapers` lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct PaperSummary {
+    /// The file's id for commands, the same for the same path for the host's whole run.
+    pub file: FileRefId,
+    /// The file, relative to the matter folder.
+    pub path: MatterPath,
+    /// Its size in bytes.
+    pub size: Count,
+    /// When it was last modified.
+    pub modified: Timestamp,
 }
 
 /// What a restore would do now, for `PreviewRestore`. Each list is sorted by path.

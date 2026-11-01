@@ -211,9 +211,8 @@ wire_types! {
         ViewPatch, ViewPatchBody, ViewPosition, ViewWindow,
     },
     query::{
-        BlobRange, FolderState, HostQuery, MatterSummary, PageLimit, QueryResult, ReadLen,
-        RestorePreview,
-        ThreadSummary,
+        BlobRange, FolderState, HostQuery, MatterSummary, PageLimit, PaperSummary, QueryResult,
+        ReadLen, RestorePreview, ThreadSummary,
     },
     raw::{RawPayload},
     session::{
@@ -262,7 +261,7 @@ pub use ids::{MAX_ID_TEXT_BYTES, is_windows_reserved_name};
 pub use number::MAX_SAFE;
 // The kind a catch-all holds; the catch-all variants holding it export as `string`.
 pub use open_enum::UnknownKind;
-pub use query::{MAX_BLOB_READ_BYTES, MAX_PAGE_ENTRIES};
+pub use query::{MAX_BLOB_READ_BYTES, MAX_PAGE_ENTRIES, MAX_PAPERS};
 pub use raw::{MAX_MSGPACK_DEPTH, MAX_RAW_DEPTH, MAX_RAW_ENCODE_DEPTH};
 pub use text::{INLINE_LIMIT_BYTES, PREVIEW_BYTES, escaped_len, preview_of, utf16_len};
 pub use title::{MAX_TITLE_CHARS, check_display_title};
