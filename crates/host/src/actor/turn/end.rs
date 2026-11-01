@@ -178,7 +178,8 @@ pub(super) fn on_after_turn(
 /// R8 created it, `FilesChanged` when anything changed or was skipped, and `checkpoint_after`.
 /// A reused id the matter's log does not hold is recorded first, with the changes the lost
 /// commit held (the turn's before-turn checkpoint to that id); no tool-call paths are known
-/// for them, so each is flagged as possibly holding the lawyer's edits.
+/// for them, so each is flagged as possibly holding the lawyer's edits. The start-up repair's
+/// own checkpoint logs those changes even when the id is already recorded.
 pub(super) fn after_events(
     actor: &Actor,
     close: &mut TurnClose,
@@ -197,10 +198,14 @@ pub(super) fn after_events(
                 .map_err(|error| Error::Internal(error.to_string()))?;
         close.push_matter(matter, recorded);
     }
+    let own = reused.as_ref().is_some_and(|reused| reused.own);
+    let lost = unrecorded.is_some() || own;
     if let Some(recorded) = unrecorded {
         close.push_matter(matter, recorded);
-        let lost = reused.map(|reused| reused.changes).unwrap_or_default();
-        files.extend(lost.into_iter().map(FileChange::with_lawyer_edits));
+    }
+    if lost {
+        let changes = reused.map(|reused| reused.changes).unwrap_or_default();
+        files.extend(changes.into_iter().map(FileChange::with_lawyer_edits));
     }
     if !files.is_empty() || !checkpoint.skipped.is_empty() {
         close.files = Some(FilesChanged {
