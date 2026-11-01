@@ -102,7 +102,7 @@ function renderCases(streaming: boolean) {
 
 test("the corpus holds G4's 28 cases and the ones added since, each with its own id", () => {
   expect(CASES[27]?.id).toBe("unterminated-fence");
-  expect(CASES).toHaveLength(53);
+  expect(CASES).toHaveLength(61);
   expect(new Set(CASES.map((c) => c.id)).size).toBe(CASES.length);
 });
 
@@ -198,7 +198,7 @@ describe.each(["not loaded", "loaded"])("entity table %s", (state) => {
         failures.push(...failuresIn(`${c.id} at ${end}`, host));
         // Text that has fully arrived shows, mid-stream too: nothing half-arrived hides what follows it.
         const shown = host.textContent ?? "";
-        for (const literal of c.text ?? []) {
+        for (const literal of c.streamingText ?? c.text ?? []) {
           if (c.markdown.slice(0, end).includes(literal) && !shown.includes(literal))
             failures.push(`${c.id} at ${end}: "${literal}" arrived but does not show`);
         }

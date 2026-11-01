@@ -7,6 +7,12 @@ export type HostileCase = {
   markdown: string;
   /** Literal text that must show in the rendered text (raw HTML shows as text). */
   text?: string[];
+  /**
+   * The literal text that must show mid-stream once it has arrived, when not all of `text` must: tail
+   * repair hides a `[` with no `]` after it yet (a link's text still arriving), so brackets show once
+   * their `]` arrives or the answer is finished.
+   */
+  streamingText?: string[];
   /** Exact number of real <img> elements the case renders. Default 0. */
   images?: number;
   /** A link-host hint the link component must show (link-text spoofing). */
@@ -202,13 +208,19 @@ export const CASES: HostileCase[] = [
     id: "nested-image-brackets",
     markdown: "![".repeat(1000) + "a" + "](u)".repeat(1000),
     text: ["![![![", "](u)](u)"],
+    streamingText: [],
   },
   {
     id: "nested-link-brackets",
     markdown: "[".repeat(5000) + "a" + "](u)".repeat(5000),
     text: ["[[[[a", "](u)](u)"],
   },
-  { id: "open-link-brackets", markdown: "[a".repeat(5000) + "]".repeat(5000), text: ["[a[a[a"] },
+  {
+    id: "open-link-brackets",
+    markdown: "[a".repeat(5000) + "]".repeat(5000),
+    text: ["[a[a[a"],
+    streamingText: [],
+  },
   // Brackets in code spans do not count towards that limit, but a backtick that micromark reads as part of
   // raw HTML must not hide thousands of them.
   {
