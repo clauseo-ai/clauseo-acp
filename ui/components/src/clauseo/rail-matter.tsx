@@ -42,6 +42,9 @@ export type MatterRowProps = {
   at?: string;
   /** Paused, limit and stopped: the day of the reset or the stop, in the language, when it isn't today. */
   day?: string;
+  /** Optional: its folder isn't where it was, for its actions (Locate folder), apart from what its status line says:
+   * the open matter's row says nothing, yet its menu still offers Locate folder. Left out, the moved state says it. */
+  moved?: boolean | undefined;
   /** Pinned above every date group. Its menu's Pin to the top shows it ticked. */
   pinned?: boolean | undefined;
   /** A line under the note saying why a search found it, where the name alone doesn't show: "Client, Asha Rao". */
@@ -70,19 +73,32 @@ export type MatterRowProps = {
  * moved, and take it off the list, which leaves the folder where it is. */
 type ActionProps = Pick<
   MatterRowProps,
-  "name" | "pinned" | "state" | "onPin" | "onLocate" | "onReveal" | "onRemove"
+  "name" | "pinned" | "state" | "moved" | "onPin" | "onLocate" | "onReveal" | "onRemove"
 >;
 
+/** Whether the folder has moved, for the actions: the flag where given, else the moved state. */
+const movedOf = (moved: boolean | undefined, state: MatterState | undefined) =>
+  moved ?? state === "moved";
+
 /** Whether the row has any action to show: each item stands only with its handler. */
-const hasActions = ({ state, onPin, onLocate, onReveal, onRemove }: ActionProps) =>
+const hasActions = ({ state, moved, onPin, onLocate, onReveal, onRemove }: ActionProps) =>
   onPin !== undefined ||
-  (state === "moved" && onLocate !== undefined) ||
+  (movedOf(moved, state) && onLocate !== undefined) ||
   onReveal !== undefined ||
   onRemove !== undefined;
 
-function MatterActions({ name, pinned, state, onPin, onLocate, onReveal, onRemove }: ActionProps) {
+function MatterActions({
+  name,
+  pinned,
+  state,
+  moved: movedFlag,
+  onPin,
+  onLocate,
+  onReveal,
+  onRemove,
+}: ActionProps) {
   const { lang, platform } = useDisplay();
-  const moved = state === "moved";
+  const moved = movedOf(movedFlag, state);
   const locate = moved ? onLocate : undefined;
   const above = onPin !== undefined || locate !== undefined || onReveal !== undefined;
   return (
@@ -202,6 +218,7 @@ export function MatterRow({
   state = "idle",
   at = "",
   day = "",
+  moved,
   pinned,
   match,
   unprotected,
@@ -216,7 +233,7 @@ export function MatterRow({
 }: MatterRowProps) {
   const w = useWords();
   const status = matterStatus(w.lang, state, at, day);
-  const actions: ActionProps = { name, pinned, state, onPin, onLocate, onReveal, onRemove };
+  const actions: ActionProps = { name, pinned, state, moved, onPin, onLocate, onReveal, onRemove };
   const menu = hasActions(actions);
   const button = (
     <button

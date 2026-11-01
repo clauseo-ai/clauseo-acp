@@ -69,6 +69,8 @@ export function RoomRail({
       hint:
         m.folder_display === undefined || m.folder_display === "" ? "" : isolate(m.folder_display),
       current,
+      // the menu's Locate folder follows the folder, apart from the status: the open row says nothing, yet offers it
+      moved: m.folder_state === "missing",
       // the matter the lawyer is looking at says nothing: its work is in view
       ...(current
         ? { state: "idle" as const }

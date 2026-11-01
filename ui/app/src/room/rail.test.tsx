@@ -242,6 +242,23 @@ test("the open matter's row says nothing of its work, which is in view; the othe
   expect(rowOf(B.name)?.dataset["state"]).toBe("working");
 });
 
+test("the open matter with a missing folder says nothing, yet its chevron still offers Locate folder", async () => {
+  await mount(
+    withNext(() => [
+      detailed(A, { folder_state: "missing", status: "working", last_opened: 10 }),
+      detailed(B),
+    ]),
+  );
+  expect(title()).toBe(A.name);
+  expect(rowOf(A.name)?.dataset["state"]).toBe("idle");
+  expect(said(A.name)).not.toContain("Folder moved");
+  const more = rail()?.querySelector<HTMLButtonElement>(".room-house-more");
+  await act(async () => more?.click());
+  await settle();
+  const items = [...document.querySelectorAll('[role="menuitem"]')].map((i) => i.textContent);
+  expect(items).toContainEqual(expect.stringContaining("Locate folder"));
+});
+
 test("a stop on another day says its day and its time", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   const now = new Date(2026, 10, 4, 11, 0).getTime();
