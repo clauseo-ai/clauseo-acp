@@ -188,7 +188,13 @@ export function Composer<V extends string = string>({
     const fit = () => {
       a.style.height = "";
       const one = a.clientHeight;
-      if (a.scrollHeight > one + 4) a.style.height = `${Math.min(a.scrollHeight, one * 6)}px`;
+      const cap = one * 6;
+      if (a.scrollHeight > one + 4) a.style.height = `${Math.min(a.scrollHeight, cap)}px`;
+      // only words past the six lines scroll; short of them the field draws no scroll arrows. A Devanagari line can
+      // measure a few px over the one line, inside the slack above, and WebView2 drew arrows on an empty field
+      const scrolls = a.scrollHeight > cap;
+      a.style.overflowY = scrolls ? "" : "hidden";
+      if (!scrolls) a.scrollTop = 0;
     };
     fit();
     // the fit can change the field's height and so the form's, which the status line's observer, watching the form,

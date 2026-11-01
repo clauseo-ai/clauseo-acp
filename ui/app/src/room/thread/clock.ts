@@ -1,26 +1,36 @@
 // The thread's clock times: a host Timestamp (ms since the epoch, UTC) on the lawyer's own clock, in the computer's
-// time zone. "4:31 pm" today, the weekday before it on another day ("Monday 4:31 pm"), and Hindi through words.ts's
-// clock(), which puts the part of the day first. Never "min ago": nothing here runs a timer to keep such words true.
+// time zone. "4:31 pm" today, the weekday before it within six days either way ("Monday 4:31 pm"), the day and month
+// further off, past or later ("18 October 4:31 pm"): U2's rule, room/when.ts clockOf, which one helper should take on
+// when both land. Hindi through words.ts's clock(), which puts the part of the day first. Never "min ago": nothing here runs a timer to keep such words true.
 import type { Lang } from "@clauseo/components/lib/display.ts";
 import { clock } from "@clauseo/components/lib/words.ts";
 import type { Timestamp } from "../../transport/protocol.ts";
 
 const LOCALE = { en: "en-GB", hi: "hi-IN" } as const satisfies Record<Lang, string>;
 
-const weekdays = new Map<Lang, Intl.DateTimeFormat>();
-function weekdayOf(lang: Lang, at: Date): string {
-  let format = weekdays.get(lang);
+type DayForm = "weekday" | "date";
+const OPTIONS = {
+  weekday: { weekday: "long" },
+  date: { day: "numeric", month: "long" },
+} as const satisfies Record<DayForm, Intl.DateTimeFormatOptions>;
+
+const formats = new Map<string, Intl.DateTimeFormat>();
+function dayOf(lang: Lang, form: DayForm, at: Date): string {
+  const key = `${lang} ${form}`;
+  let format = formats.get(key);
   if (format === undefined) {
-    format = new Intl.DateTimeFormat(LOCALE[lang], { weekday: "long" });
-    weekdays.set(lang, format);
+    format = new Intl.DateTimeFormat(LOCALE[lang], OPTIONS[form]);
+    formats.set(key, format);
   }
   return format.format(at);
 }
 
-const sameDay = (a: Date, b: Date) =>
-  a.getFullYear() === b.getFullYear() &&
-  a.getMonth() === b.getMonth() &&
-  a.getDate() === b.getDate();
+/** Calendar days from `now`'s day to `at`'s, on the local clock: 0 today, 1 tomorrow, -1 yesterday. */
+function daysBetween(now: Date, at: Date): number {
+  const start = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const end = Date.UTC(at.getFullYear(), at.getMonth(), at.getDate());
+  return Math.round((end - start) / 86_400_000);
+}
 
 /** A time as the clock shows it: "4:31 pm", or in Hindi "शाम 4:31". */
 export function clockTime(lang: Lang, ts: Timestamp): string {
@@ -30,20 +40,21 @@ export function clockTime(lang: Lang, ts: Timestamp): string {
   return clock(lang, `${h % 12 === 0 ? 12 : h % 12}:${minutes} ${h < 12 ? "am" : "pm"}`);
 }
 
-/** A time and, when it falls on another day than `now`, that day's weekday; null today. */
+/** A time and its day: null today, the weekday within six days either way, the day and month further off. */
 export function whenOf(
   lang: Lang,
   ts: Timestamp,
   now: number,
 ): { day: string | null; time: string } {
   const at = new Date(ts);
+  const days = daysBetween(new Date(now), at);
   return {
-    day: sameDay(at, new Date(now)) ? null : weekdayOf(lang, at),
+    day: days === 0 ? null : dayOf(lang, Math.abs(days) <= 6 ? "weekday" : "date", at),
     time: clockTime(lang, ts),
   };
 }
 
-/** One line's time: "4:31 pm" today, "Monday 4:31 pm" on another day. */
+/** One line's time: "4:31 pm" today, "Monday 4:31 pm" within six days, "18 October 4:31 pm" further off. */
 export function stamp(lang: Lang, ts: Timestamp, now: number): string {
   const { day, time } = whenOf(lang, ts, now);
   return day === null ? time : `${day} ${time}`;

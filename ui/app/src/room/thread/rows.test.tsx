@@ -66,6 +66,26 @@ test("tool calls: one quiet row each, the title isolated, with its id and status
   expect(h.all("tool-call")[0]?.dataset["status"]).toBe("completed");
 });
 
+test("the answer under a tool call stands the reply's space below it; first in its section, none of its own", async () => {
+  h = await mountRoom();
+  h.deliver([
+    reset([
+      userMessage(5, 1, "First"),
+      agentText(6, 1, "Straight away"),
+      userMessage(7, 2, "Second"),
+      toolCall(8, 200, "completed"),
+      agentText(9, 2, "After the tool"),
+    ]),
+  ]);
+  const [first, after] = h.all("message-agent");
+  // the design's .reply: var(--s4) above the answer, as Tailwind's not-first: variant, so the margin falls only where
+  // a row stands above it in the answer's section
+  expect(after?.previousElementSibling?.getAttribute("data-testid")).toBe("tool-call");
+  expect(after?.classList.contains("not-first:mt-(--s4)")).toBe(true);
+  expect(first?.previousElementSibling).toBeNull();
+  expect(first?.classList.contains("not-first:mt-(--s4)")).toBe(true);
+});
+
 test("each stop: always a turn-stopped row with its reason, and its line where it has one", async () => {
   h = await mountRoom();
   const stops: [StepEntry["stop"], StepEntry["failure"] | undefined, string][] = [
@@ -201,11 +221,12 @@ test("without its checkpoint a step has no Undo, and says why", async () => {
   );
 });
 
-test("the limit stop: the plan's words, its reset as a time today and with the weekday on another day", async () => {
+test("the limit stop: the plan's words, its reset as a time today, with the weekday within six days, with the date further off", async () => {
   h = await mountRoom();
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59).getTime();
   const later = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2, 9, 5).getTime();
+  const past = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 10, 8, 0).getTime();
   const limit = (n: number, reason: string, resets_at?: number): ViewEntry => ({
     limit_stop: {
       order: 10 + n,
@@ -219,9 +240,10 @@ test("the limit stop: the plan's words, its reset as a time today and with the w
       limit(1, "plan_window", today),
       limit(2, "workspace_credits", later),
       limit(3, "temporary"),
+      limit(4, "plan_window", past),
     ]),
   ]);
-  const [plan, credits, none] = h.all("limit-stop");
+  const [plan, credits, none, gone] = h.all("limit-stop");
   expect(plan?.textContent).toContain(t("en", "Claude plan limit reached"));
   const at = plan?.querySelector<HTMLTimeElement>('[data-testid="limit-resets-at"]');
   expect(at?.dateTime).toBe(new Date(today).toISOString());
@@ -233,6 +255,11 @@ test("the limit stop: the plan's words, its reset as a time today and with the w
   );
   expect(none?.querySelector('[data-testid="limit-resets-at"]')).toBeNull();
   expect(none?.textContent).toContain(lim("en", "Limit reached. Reset not given."));
+  // a reset ten days gone reads its date, not a weekday that looks ahead
+  const date = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long" }).format(past);
+  expect(gone?.querySelector('[data-testid="limit-resets-at"]')?.textContent).toBe(
+    lim("en", "Resets {day} {time}", { day: date, time: "8:00 am" }),
+  );
 });
 
 test("a notice is a quiet line; markers, versions, permissions and elicitations show nothing and break nothing", async () => {

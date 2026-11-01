@@ -30,6 +30,9 @@ import { LimitStopRow, StepRow } from "./stop-rows.tsx";
 const QUIET = "text-small text-quiet";
 /** The space above a row under the answer's words, on the spacing tokens. */
 const ROW = "mt-(--s3)";
+/** The space above the answer's words under a tool call, a thought or any row before them in its section: the
+ * design's .reply rhythm (thread.css). First in its section, the thread's own gap between sections stands alone. */
+const REPLY = "not-first:mt-(--s4)";
 
 /** A block that isn't text, as one line or an image. */
 function ContentLine({ block }: { block: ContentBlock }) {
@@ -102,7 +105,7 @@ function LiveQuestion({
 
 function Answer({ id, text, streaming }: { id: EntryId; text: string; streaming: boolean }) {
   return (
-    <div data-testid="message-agent" data-entry-id={id}>
+    <div data-testid="message-agent" data-entry-id={id} className={REPLY}>
       {/* while the renderer's chunk loads (markdown.ts), the row stands empty: never the answer's raw syntax */}
       <Suspense fallback={null}>
         {/* the renderer throws on a streaming answer with no blocks yet (markdown/answer.ts reads the last block's
