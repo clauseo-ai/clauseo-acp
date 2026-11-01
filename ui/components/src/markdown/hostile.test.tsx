@@ -3,7 +3,8 @@
 // check of G4's conformance page that a DOM can show: no forbidden element, links and images only through
 // our components, allowed protocols only, every id prefixed, no event-handler attribute, raw HTML visible
 // as text, the link-host hint, no clobbered global, every link click cancelled and handed to the host.
-// Each case is also streamed in 16-character deltas, checked after every delta. What needs a real engine
+// Each case is also streamed in 16-character deltas (one character for the tag cases that ask), checked after
+// every delta. Every allowlisted inline element carries no attribute, and each case's `tags` counts hold. What needs a real engine
 // (CSP and Trusted Types violations, a trusted click not navigating, network requests, a payload running)
 // is the private harness's, which imports hostile-cases.ts too. Everything runs twice: before the full
 // entity table has loaded (its prefetch is held back here) and after (entities.ts), since a character
@@ -31,6 +32,8 @@ const FORBIDDEN =
 const LINK_OK = /^(?:https?:|mailto:|#)/i;
 const IMAGE_OK = /^(?:clauseo-file:|data:image\/(?:png|jpeg|gif|webp);base64,)/i;
 const DELTA = 16;
+/** The approved inline elements; none may carry an attribute (a kbd only the key cap's own class). */
+const INLINE_TAGS = "sup,sub,u,ins,del,s,mark,small,br,kbd";
 
 /** Every failure G4's checkContainer would report for one container. */
 const MAX_DOM_DEPTH = 160;
@@ -79,6 +82,13 @@ function failuresIn(label: string, el: Element): string[] {
       if (/^on/i.test(attribute)) failures.push(`${label}: event handler attribute ${attribute}`);
     }
   }
+  for (const node of el.querySelectorAll(INLINE_TAGS)) {
+    const own =
+      node.tagName === "KBD" ? ["class"] : node.tagName === "SUP" ? ["data-footnote-pending"] : [];
+    for (const attribute of node.getAttributeNames())
+      if (!own.includes(attribute))
+        failures.push(`${label}: <${node.tagName.toLowerCase()} ${attribute}> kept an attribute`);
+  }
   return failures;
 }
 
@@ -122,7 +132,7 @@ function renderCases(streaming: boolean) {
 
 test("the corpus holds G4's 28 cases and the ones added since, each with its own id", () => {
   expect(CASES[27]?.id).toBe("unterminated-fence");
-  expect(CASES).toHaveLength(66);
+  expect(CASES).toHaveLength(97);
   expect(new Set(CASES.map((c) => c.id)).size).toBe(CASES.length);
 });
 
@@ -143,9 +153,15 @@ describe.each(["not loaded", "loaded"])("entity table %s", (state) => {
         if (!el) throw new Error(`${c.id} not rendered`);
         failures.push(...failuresIn(c.id, el));
         const text = el.textContent ?? "";
-        for (const literal of c.text ?? [])
+        // While streaming, the case is the last block: what must show then is `streamingText`, when given.
+        for (const literal of (streaming ? c.streamingText : undefined) ?? c.text ?? [])
           if (!text.includes(literal))
             failures.push(`${c.id}: raw HTML not shown as text ("${literal}")`);
+        for (const [selector, count] of Object.entries(c.tags ?? {})) {
+          const found = el.querySelectorAll(selector).length;
+          if (!streaming && found !== count)
+            failures.push(`${c.id}: ${found} ${selector}, expected ${count}`);
+        }
         const images = el.querySelectorAll("img").length;
         if (images !== (c.images ?? 0))
           failures.push(`${c.id}: ${images} <img>, expected ${c.images ?? 0}`);
@@ -193,16 +209,16 @@ describe.each(["not loaded", "loaded"])("entity table %s", (state) => {
       openable.flatMap((a) => [a.getAttribute("href"), a.getAttribute("href")]),
     );
     expect(opened.some((url) => /javascript|vbscript|data:|file:/i.test(url))).toBe(false);
-  });
+  }, 30_000);
 
   /**
    * The prefix lengths a case streams through, 16 characters apart. The 20,000-character line is one paragraph
    * that is parsed again on every delta (tens of milliseconds a delta near its end here, about a minute for all
    * 1,250 deltas); it streams its first 1,000 and its last 320 characters (its middle repeats the same 67 characters).
    */
-  function ends(length: number): number[] {
+  function ends(length: number, delta = DELTA): number[] {
     const all: number[] = [];
-    for (let end = DELTA; end < length + DELTA; end += DELTA) all.push(Math.min(end, length));
+    for (let end = delta; end < length + delta; end += delta) all.push(Math.min(end, length));
     return length <= 2_000 ? all : all.filter((end) => end <= 1_000 || end >= length - 320);
   }
 
@@ -210,7 +226,7 @@ describe.each(["not loaded", "loaded"])("entity table %s", (state) => {
     "%s streamed in 16-character deltas stays clean at every step",
     (_, c) => {
       const failures: string[] = [];
-      for (const end of ends(c.markdown.length)) {
+      for (const end of ends(c.markdown.length, c.delta)) {
         act(() =>
           root.render(
             <MarkdownHostContext value={HOST}>
@@ -247,5 +263,5 @@ describe.each(["not loaded", "loaded"])("entity table %s", (state) => {
       expect(new URL(href).hostname).toBe("bank.example");
       expect(hint).toBe("");
     }
-  });
+  }, 30_000);
 });

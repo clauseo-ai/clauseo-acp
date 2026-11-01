@@ -33,7 +33,7 @@ const SPACE_NESTING = Array.from(
 const LONG_RUNS = "*".repeat(5000) + "a" + "*".repeat(5000);
 const hide = (text: string) => text.split("").map(standIn).join("");
 
-const hasStandIn = (text: string) => /[\uFDD1-\uFDDC]/.test(text);
+const hasStandIn = (text: string) => /[\uFDD1-\uFDDE]/.test(text);
 
 function count(node: Hast, tagName: string): number {
   let total = 0;

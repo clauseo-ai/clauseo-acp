@@ -1,7 +1,7 @@
 // Sanitised hast to React elements: our own mapper over exactly the tags and attributes the sanitise schema
 // (schema.ts) allows, in place of hast-util-to-jsx-runtime (about 9 KB brotli with its style parser).
-// Links, images, code blocks and superscripts (footnote numbers) map to our components; every other allowed
-// tag to its own element. What it does not know it drops, whatever the sanitiser let through: an unknown
+// Links, images, code blocks, superscripts (footnote numbers), tables (in a box of their own that scrolls)
+// and key caps map to our components; every other allowed tag to its own element. What it does not know it drops, whatever the sanitiser let through: an unknown
 // tag with everything inside it, an unknown property, a property value that is not a string, number or
 // boolean (or a list of them), and every node that is not an element or text (comments, doctypes, raw
 // HTML). Text goes to React as a string child,
@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 import { CodeBlock } from "./code.tsx";
 import { Image } from "./image.tsx";
 import { LinkOrReference } from "./link.tsx";
+import { Key, Table } from "./blocks.tsx";
 import { Superscript } from "./notes.tsx";
 
 /** hast property name to React prop name, per tag: the schema's attributes, and only those. */
@@ -26,6 +27,12 @@ const ATTRIBUTES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     className: "className",
   },
   code: { className: "className" },
+  h1: { id: "id" },
+  h2: { id: "id" },
+  h3: { id: "id" },
+  h4: { id: "id" },
+  h5: { id: "id" },
+  h6: { id: "id" },
   img: { src: "src", alt: "alt" },
   input: { type: "type", disabled: "disabled", checked: "checked" },
   li: { id: "id", className: "className" },
@@ -55,14 +62,24 @@ const TAGS: ReadonlyMap<string, unknown> = new Map<string, unknown>([
     "ol",
     "li",
     "input",
-    "table",
     "thead",
     "tbody",
     "tr",
     "th",
     "td",
+    "sub",
+    "u",
+    "ins",
+    "s",
+    "mark",
+    "small",
+    "dl",
+    "dt",
+    "dd",
   ].map((tag): [string, unknown] => [tag, tag]),
   ["a", LinkOrReference],
+  ["table", Table],
+  ["kbd", Key],
   ["img", Image],
   ["pre", CodeBlock],
   ["sup", Superscript],

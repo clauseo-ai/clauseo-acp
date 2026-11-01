@@ -1,12 +1,19 @@
-// CommonMark plus GFM to mdast (micromark, as remark-parse with remark-gfm does), and what a parsed block
-// says about its end, for the splitter's cut check.
+// CommonMark plus GFM to mdast (micromark, as remark-parse with remark-gfm does), with the syntax extras
+// (syntax-extras.ts), and what a parsed block says about its end, for the splitter's cut check.
 import type { Root } from "mdast";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
+import { defListFromMarkdown } from "mdast-util-definition-list";
+import { defList } from "micromark-extension-definition-list";
 import { gfm } from "micromark-extension-gfm";
+import { markSyntax } from "./mark-syntax.ts";
 import type { BlockEnd } from "./split.ts";
+import { extrasFromMarkdown, superscriptSyntax } from "./syntax-extras.ts";
 
-const OPTIONS = { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] };
+const OPTIONS = {
+  extensions: [gfm(), superscriptSyntax, markSyntax, defList],
+  mdastExtensions: [gfmFromMarkdown(), extrasFromMarkdown, defListFromMarkdown],
+};
 
 export function parse(source: string): Root {
   return fromMarkdown(source, OPTIONS);
@@ -60,6 +67,8 @@ export function endOf(source: string, root: Root): BlockEnd {
   if (!last || start === undefined || end === undefined) return NOTHING_OPEN;
   if (last.type === "code") return { open: openFence(source.slice(start, end)), list: "" };
   if (last.type === "html") return { open: openHtml(source.slice(start, end)), list: "" };
+  // A definition list takes in a term after it, across a blank line (`Term` then `: definition`).
+  if ((last.type as string) === "defList") return { open: false, list: ":" };
   if (last.type === "list") {
     const item = last.children.at(-1)?.position?.start.offset ?? start;
     return { open: false, list: markerAt(source, item) };

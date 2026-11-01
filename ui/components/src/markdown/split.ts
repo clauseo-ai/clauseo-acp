@@ -28,7 +28,10 @@ class BlockStartTokenizer extends Tokenizer {
 export type BlockEnd = {
   /** A top-level fenced code block, or an HTML block of kinds 1 to 5, is still open at the end. */
   open: boolean;
-  /** The marker of the block's last top-level node when it is a list ("-", "+", "*", "." or ")"), else "". */
+  /**
+   * The marker of the block's last top-level node when it is a list ("-", "+", "*", "." or ")"), ":" when
+   * it is a definition list, else "".
+   */
   list: string;
 };
 
@@ -37,6 +40,10 @@ export type EndOf = (block: string) => BlockEnd;
 
 /** A list item marker at the start of a line: a bullet, or 1 to 9 digits and `.` or `)`, then a space, tab or line end. */
 const LIST_MARKER = /^(?:([-+*])|\d{1,9}([.)]))(?:[ \t\n]|$)/;
+/** A definition's marker at the start of a line, which joins the term before it, across a blank line too. */
+const DEFINITION = /^:[ \t]/;
+/** A line that may hold a definition, so a block may end with a definition list. */
+const MAY_DEFINE = /(?:^|\n) {0,3}:[ \t]/;
 
 /** True when `text[from, to)` ends with a line ending followed by a blank line (or is one blank line). */
 function endsWithBlankLine(text: string, from: number, to: number): boolean {
@@ -54,18 +61,29 @@ function endsWithBlankLine(text: string, from: number, to: number): boolean {
  * the next block does not start with a marker that would continue the list the block before ends with;
  * and no fenced code block or HTML block of kinds 1 to 5 is still open at the end of the block before
  * (those are the only blocks that run on past a blank line and a column-0 line). Fences and HTML blocks
- * nested in a container close with it, at the column-0 line.
+ * nested in a container close with it, at the column-0 line. A definition list is never cut either: a
+ * block starting with a definition's `: ` joins the term before it, and a block after a definition list
+ * may be its next term.
  */
-function safeCut(text: string, from: number, at: number, endOf: EndOf): boolean {
+function safeCut(text: string, from: number, at: number, last: number, endOf: EndOf): boolean {
   if (!endsWithBlankLine(text, from, at)) return false;
   const first = text.charCodeAt(at);
   if (first === 32 || first === 9 || first === 10) return false;
-  const marker = LIST_MARKER.exec(text.slice(at, at + 12));
+  const head = text.slice(at, at + 12);
+  if (DEFINITION.test(head)) return false;
   const before = text.slice(from, at);
+  // A block whose last token holds a definition, or is indented (a definition's continuation) after one,
+  // may end with a definition list: merged, without a parse (a glossary of many terms is one block, and
+  // asking the parser at each of its terms would cost the square of its length).
+  const lastToken = text.slice(last, at);
+  if (MAY_DEFINE.test(lastToken)) return false;
+  if ((lastToken.startsWith(" ") || lastToken.startsWith("\t")) && MAY_DEFINE.test(before))
+    return false;
+  const marker = LIST_MARKER.exec(head);
   const mayBeOpen = before.includes("```") || before.includes("~~~") || before.includes("<");
   if (!marker && !mayBeOpen) return true;
   const end = endOf(before);
-  if (end.open) return false;
+  if (end.open || end.list === ":") return false;
   return !(marker && end.list !== "" && end.list === (marker[1] ?? marker[2]));
 }
 
@@ -82,12 +100,15 @@ function startsFrom(text: string, from: number, endOf: EndOf): number[] {
   );
   let blockStart = from;
   let at = from;
+  // Where the last token before `at` that is not a blank line starts.
+  let last = from;
   for (const token of tokens) {
-    if (token.type !== "space" && at > blockStart && safeCut(text, blockStart, at, endOf)) {
+    if (token.type !== "space" && at > blockStart && safeCut(text, blockStart, at, last, endOf)) {
       starts.push(at);
       blockStart = at;
     }
     if (!text.startsWith(token.raw, at)) break;
+    if (token.type !== "space") last = at;
     at += token.raw.length;
   }
   return starts;

@@ -12,9 +12,11 @@ import { fromHtml } from "hast-util-from-html";
 import { sanitize } from "hast-util-sanitize";
 import { toHtml } from "hast-util-to-html";
 import { toHast } from "mdast-util-to-hast";
-import { createAnswer } from "./answer.ts";
+import { createAnswer, HANDLERS } from "./answer.ts";
+import { pairTags } from "./inline-tags.ts";
 import { parse } from "./parse.ts";
 import { SCHEMA } from "./schema.ts";
+import { anchorHeadings, numberSlugs, withSlugs } from "./slugs.ts";
 
 export type Example = { example: number; section: string; markdown: string; html: string };
 
@@ -61,10 +63,14 @@ const VOID = new Set(
 );
 const OURS = new Set(["contains-task-list", "task-list-item"]);
 
-function attributes(properties: Properties): string {
+/** A heading's anchor (slugs.ts), which is ours: the spec's headings have none. */
+const HEADING = /^h[1-6]$/;
+
+function attributes(properties: Properties, name: string, anchors: boolean): string {
   const out: string[] = [];
   for (const key of Object.keys(properties).sort()) {
     if (key === "title") continue;
+    if (key === "id" && !anchors && HEADING.test(name)) continue;
     let value = properties[key];
     if (key === "className" && Array.isArray(value)) {
       value = value.filter((name) => !OURS.has(String(name)));
@@ -88,6 +94,7 @@ function children(
   nodes: readonly (RootContent | ElementContent)[],
   inPre: boolean,
   inBlock: boolean,
+  anchors: boolean,
 ): string {
   let out = "";
   nodes.forEach((node, index) => {
@@ -103,10 +110,10 @@ function children(
       out += escape(text);
     } else if (node.type === "element") {
       const name = node.tagName;
-      const open = `<${name}${attributes(node.properties)}>`;
+      const open = `<${name}${attributes(node.properties, name, anchors)}>`;
       if (VOID.has(name)) out += open;
       else
-        out += `${open}${children(node.children, inPre || name === "pre", BLOCK.has(name))}</${name}>`;
+        out += `${open}${children(node.children, inPre || name === "pre", BLOCK.has(name), anchors)}</${name}>`;
     } else if (node.type === "comment") {
       out += `<!--${node.value}-->`;
     }
@@ -114,10 +121,10 @@ function children(
   return out;
 }
 
-/** The canonical form of an HTML fragment. */
-export function normalise(html: string): string {
+/** The canonical form of an HTML fragment; without `anchors`, headings lose their ids (the spec has none). */
+export function normalise(html: string, anchors = true): string {
   const tree: Root = fromHtml(html, { fragment: true });
-  return children(tree.children, false, true);
+  return children(tree.children, false, true, anchors);
 }
 
 /** A note's back-references with remark-rehype's English label, as the link component gives them. */
@@ -205,17 +212,22 @@ const FOOTER_SCHEMA = {
 /**
  * The answer as one block, without the splitter: what rendering block by block must reproduce. Its
  * footnotes section's heading gets the answer's scope, as every generated id does in ours (remark-rehype
- * gives it the fixed id `footnote-label`).
+ * gives it the fixed id `footnote-label`). Inline tags and heading anchors as the renderer makes them.
  */
 export function unsplit(text: string): string {
-  const html = toHtml(
-    sanitize(
-      toHast(parse(text), {
-        clobberPrefix: "spec-",
-        handlers: { html: (_, node) => ({ type: "text", value: node.value }) },
-      }),
-      FOOTER_SCHEMA,
-    ) as Root,
+  const hast = toHast(parse(text), { clobberPrefix: "spec-", handlers: HANDLERS }) as Root;
+  pairTags(hast, false);
+  // The answer's headings get anchors, remark-rehype's footer heading does not (the renderer draws its own).
+  const body: Root = {
+    type: "root",
+    children: hast.children.filter(
+      (child) => !(child.type === "element" && child.tagName === "section"),
+    ),
+  };
+  const slugs = numberSlugs([anchorHeadings(body, "spec")])[0]!;
+  const clean = withSlugs(sanitize(hast, FOOTER_SCHEMA) as Root, slugs, "user-content-spec-");
+  return toHtml(clean).replaceAll(
+    '"user-content-footnote-label"',
+    '"user-content-spec-footnote-label"',
   );
-  return html.replaceAll('"user-content-footnote-label"', '"user-content-spec-footnote-label"');
 }

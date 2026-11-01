@@ -1,18 +1,19 @@
 // Tail repair for the streaming last block: what to change in its text so that nothing half-arrived shows
 // as raw syntax. It reads the block's own parse (micromark's verdict on what is matched), so it never
 // guesses at what CommonMark would do with the rest of the text:
-// - An emphasis, strikethrough or code-span opener still waiting for its closer gets the closer, after the
-//   last character of its paragraph, heading or table cell (before trailing whitespace): the text shows
+// - An emphasis, strikethrough, highlight or code-span opener still waiting for its closer gets the closer,
+//   after the last character of its paragraph, heading or table cell (before trailing whitespace): it shows
 //   formatted. One with nothing after it yet is hidden. Only a run that can open counts (CommonMark's
 //   flanking rules), so `Section 2(a)_ and` gains nothing, and escaped literals (`\*\*`) are never runs.
 // - A half link (`[text`, `[text]`, `[text](url`, `[text][ref`) shows its text, plain: never a link that
-//   could later turn back into text. A half image, a half footnote reference (`[^lab`) and a trailing
-//   backslash are hidden.
+//   could later turn back into text. A half image, a half footnote reference (`[^lab`), a half superscript
+//   (`^th`), a half allowlisted tag name (`<su`, `</ma`) and a trailing backslash are hidden.
 // - A last line holding only a block marker (`-`, `1.`, `#`, `>`, `---`, a fence's first backticks) is
 //   hidden until its content arrives; so are the lines of a table whose delimiter row has not arrived.
-// A half-arrived HTML tag hides nothing: raw HTML is text here, so it cannot restyle what follows.
+// Any other half tag hides nothing (raw HTML is text); inline-tags.ts hides an allowlisted one till it pairs.
 import type { Nodes, Parent, Root } from "mdast";
 import { standIn } from "./nesting.ts";
+import { ALLOWED_TAGS } from "./inline-tags.ts";
 
 type Edit = { start: number; end: number; text: string };
 
@@ -55,14 +56,14 @@ export const MAX_CLOSERS = 4;
 type Run = { char: string; start: number; length: number };
 
 const LEAVES = new Set(["paragraph", "heading", "tableCell"]);
-const DELIMITERS = "*_~`";
+const DELIMITERS = "*_~`=";
 const PUNCTUATION = /[\p{P}\p{S}]/u;
 const WHITESPACE = /\s/u;
 const ASCII_PUNCTUATION = /[!-/:-@[-`{-~]/;
 
-/** A last line that is a block marker and nothing yet: list item, heading, quote, rule, fence start. */
+/** A last line that is a block marker and nothing yet: list item (or task), heading, quote, rule, fence start. */
 const MARKER_LINE =
-  /^(?:[ \t]*>)*[ \t]*(?:[-+*]|\d{1,9}[.)]|#{1,6}|[-=_*]{2,}|`{1,2}|~{1,2}|\[\^[^\]\s]*\]?)[ \t]*$/;
+  /^(?:[ \t]*>)*[ \t]*(?:(?:[-+*]|\d{1,9}[.)])(?:[ \t]+\[[ xX]?\]?)?|#{1,6}|[-=_*]{2,}|`{1,2}|~{1,2}|\[\^[^\]\s]*\]?)[ \t]*$/;
 /** A line that may be a table's header row, and a delimiter row still arriving. */
 const PIPE_LINE = /^(?:[ \t]*>)*[ \t]*\|/;
 const PARTIAL_DELIMITER_ROW = /^(?:[ \t]*>)*[ \t]*\|?[ \t:|-]*$/;
@@ -70,6 +71,10 @@ const PARTIAL_DELIMITER_ROW = /^(?:[ \t]*>)*[ \t]*\|?[ \t:|-]*$/;
 const HALF_FOOTNOTE = /\[\^(?:[^[\]\s\\]|\\.)*$/;
 const HALF_IMAGE = /!\[(?:[^[\]\\]|\\.)*(?:\](?:\([^)]*|\[[^\]]*)?)?$/;
 const HALF_LINK = /\[((?:[^[\]\\]|\\.)*)(?:\](?:\([^)]*|\[[^\]]*)?)?$/;
+/** A half superscript or allowlisted tag name (delimiters after it are the second pass's), and what ends one. */
+const HALF_SUPERSCRIPT = /^\^[^\s^[\]\\]*$/;
+const HALF_TAG = /^<\/?([A-Za-z]{0,5})[*_~=`]*$/;
+const HALF_STOP = /[\s^[\]\\<\uFDD1-\uFDDE]/;
 
 /** Whether the character at `at` is escaped by an odd run of backslashes before it. */
 function escaped(text: string, at: number): boolean {
@@ -175,7 +180,7 @@ function runsIn(leaf: Parent, text: string, from: number): Run[] {
 }
 
 /** Inline nodes a marker belongs to once it is matched: such a line is a closer, not a new block. */
-const MATCHED = new Set(["inlineCode", "strong", "emphasis", "delete"]);
+const MATCHED = new Set(["inlineCode", "strong", "emphasis", "delete", "mark"]);
 /** After other edits: a last line left holding only a list or heading marker. */
 const BARE_MARKER = /\n(?:[ \t]*>)*[ \t]*(?:[-+*]|\d{1,9}[.)]|#{1,6})[ \t]*$/;
 
@@ -293,6 +298,22 @@ function halfConstructs(input: string, root: Root, from: number, cuts: Cuts): bo
     }
   }
   end = keptEnd(input, from, cuts);
+  // A half superscript (`^th`) or allowlisted tag name (`<su`, `</ma`) in text, last of all that stays.
+  let [start, after] = [end - 1, end];
+  while (after < input.length && !cuts.kept(after)) after++;
+  while (start >= from && (!cuts.kept(start) || !HALF_STOP.test(input[start]!))) start--;
+  const sign = input[start];
+  if (after === input.length && (sign === "^" || sign === "<") && start >= from && inText(start)) {
+    const kept: number[] = [];
+    for (let at = start; at < end; at++) if (cuts.kept(at)) kept.push(at);
+    const rest = kept.map((at) => input[at]).join("");
+    const tag = HALF_TAG.exec(rest);
+    const named = tag && [...ALLOWED_TAGS].some((name) => name.startsWith(tag[1]!.toLowerCase()));
+    const length = named ? rest.search(/[*_~=`]|$/) : HALF_SUPERSCRIPT.test(rest) ? rest.length : 0;
+    if (length === end - start) cut(start, end);
+    else for (const at of kept.slice(0, length)) cut(at, at + 1); // A cut above fell inside it.
+    end = keptEnd(input, from, cuts);
+  }
   const leaf = leafAt(input, root, from, end);
   if (!leaf) return hid;
   // A `[` with no `]` after it in the paragraph's text: a link whose text is still arriving. Cutting a
@@ -358,6 +379,7 @@ function closers(input: string, root: Root, from: number, base?: Cuts) {
     // A run capNesting cut short (its rest stand-ins) is a hostile run or a signature line's underscores:
     // closing it would nest MAX_RUN / 2 levels around nothing, so it stays as written, as text.
     if (input[end] !== undefined && input[end] === standIn(run.char)) return false;
+    if (run.char === "=" && end - start !== 2) return false;
     return canOpen(run.char, input[start - 1], input[end]);
   });
   // A run at the very end: the start of the last opener's closer, or else cut until it shows what it is.
@@ -365,7 +387,10 @@ function closers(input: string, root: Root, from: number, base?: Cuts) {
   let partial = 0;
   if (last && last !== code && !inCode(last) && !openers.includes(last)) {
     const stop = last.start + last.length;
-    if (stop === input.length) {
+    // A run of `=` delimits only two long: a longer one, or a lone `=` closing nothing, stays.
+    const size = last.char === "=" ? whole(last).end - whole(last).start : 2;
+    const delimits = size === 2 || (size === 1 && openers.some((run) => run.char === "="));
+    if (stop === input.length && delimits) {
       const opener = openers.at(-1);
       const { start } = whole(last);
       if (
@@ -404,7 +429,7 @@ function closers(input: string, root: Root, from: number, base?: Cuts) {
   // A closer right after a delimiter that stays (`*foo bar *` and a line ending) would join its run:
   // then the openers show plain.
   const before = input[end - 1]!;
-  const joined = "*_~".includes(before)
+  const joined = "*_~=".includes(before)
     ? runAround(input, end - 1, before, leafStart, leafEnd).start
     : -1;
   if (
