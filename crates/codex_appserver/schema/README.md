@@ -50,8 +50,8 @@ none.
    to confirm the path and file names still hold.
 2. Recheck the three points above against the new tag's `common.rs`, `ClientRequest.json`,
    `ServerNotification.json` and `ClientNotification.json`.
-3. Copy the files into a new folder `schema/<tag>/`, point `Schema::vendored` in
-   `tests/schema_drift/checker.rs` at it, and remove the old folder.
+3. Copy the files into a new folder `schema/<tag>/`, set `SCHEMA_TAG` in
+   `tests/schema_drift/checker.rs` to the tag, and remove the old folder.
 4. Run `cargo nextest run -p clauseo-codex_appserver`. Fix every type the drift test names
    (a new enum value needs a named variant), and every fixture `fixtures_match_the_schema` names.
 5. Replace the tag, commit and hashes here (`shasum -a 256` on each file), and delete the

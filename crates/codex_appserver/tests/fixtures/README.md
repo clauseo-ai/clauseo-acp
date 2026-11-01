@@ -1,10 +1,11 @@
 # Fixtures
 
 Each file is the `result` (or, for a notification, the `params`) that `tests/client.rs`'s scripted
-app-server sends, written by hand from the vendored schema in `../../schema/rust-v0.162.1/`.
-`fixtures_match_the_schema` in `tests/schema_drift.rs` reads the table below and checks each
-fixture against the definition named for it: types, required fields, enum values, and no field the
-schema does not name. Every `.json` file here must have a row.
+app-server sends, written by hand from the vendored schema in `../../schema/<tag>/` (the tag is
+`SCHEMA_TAG` in `../schema_drift/checker.rs`). `fixtures_match_the_schema` in
+`tests/schema_drift.rs` reads the table below and checks each fixture against the definition named
+for it: types, required fields, enum values, and no field the schema does not name. Every `.json`
+file here must have a row.
 
 | Fixture | Schema file | Definition |
 |---|---|---|

@@ -43,18 +43,21 @@ channels and the oneshot behind each call, and `tracing` for the debug lines on 
 - **The drift test** (`tests/schema_drift.rs`) checks each mirrored type against its definition:
   field names as serde reads them, required against optional (by decoding a sample built from
   the schema with each field removed), `null` where the schema allows it, and every enum value
-  the schema lists having a named variant. A definition in a vendored file that is neither
-  mirrored nor listed as skipped fails it, and so does a fixture that does not fit its
-  definition. The checker has its own tests on a hand-made schema.
+  the schema lists having a named variant. One table in the test names every mirrored
+  definition with its check; a definition in a vendored file that is neither in it nor listed as
+  skipped fails the test, and so does a fixture that does not fit its definition. The checker
+  has its own tests on a hand-made schema.
 - **The line format.** One JSON message per line, at most 8 MiB, as `acp` caps an agent's
   lines. Written messages carry no `"jsonrpc"` member: the schema's JSON-RPC types have none, and
   upstream's `serialize_get_account_rate_limits` test shows that wire form. Read messages may
   carry it or not. A line that is not a JSON-RPC message, or one over 8 MiB, ends the connection
-  with `Error::Protocol`.
+  with `Error::Protocol`, and every call made before then, written or still queued, fails with
+  it.
 - **The interface** S13 builds on: `connect(writer, reader) -> (Client, Notifications, Driver)`.
   `Client` is `Clone + Send`, with `initialize`, `account` and `rate_limits`. `Notifications` is
   an unbounded stream of `RateLimitsUpdated(..)` or `Other { method }`. `Driver` is the future
-  the caller runs. The crate spawns nothing and has no executor, clock or sleep.
+  the caller runs; it ends, and the stream with it, once the last `Client` is dropped. The crate
+  spawns nothing and has no executor, clock or sleep.
 - `initialize` sends `clientInfo` `{ name: "clauseo", version: <crate version> }` and empty
   `capabilities`. At the tag `account/read`, `account/rateLimits/read` and
   `account/rateLimits/updated` carry no `#[experimental]` mark, so the client never sets
@@ -71,9 +74,12 @@ channels and the oneshot behind each call, and `tracing` for the debug lines on 
   direct driver, which may switch to generated types then; the drift test's approach carries
   over.
 - The crate never starts `codex`: S13 spawns it through `process` and hands over the pipes, and
-  owns every timeout. The caller starts `codex app-server` with Clauseo's own `CODEX_HOME` (S13's
-  reader takes it as an input; #160); this crate never reads `~/.codex` and never chooses a home. The client was tested against a scripted peer only; the first run against
-  a live `codex app-server` is G16's, through S13.
+  owns every timeout. The caller starts `codex app-server` with Clauseo's own `CODEX_HOME`
+  (S13's reader takes it as an input; #160); this crate never reads `~/.codex` and never
+  chooses a home. The client was tested against a scripted peer only; the first run against a
+  live `codex app-server` is G16's, through S13.
+- A caller may drop a call's future, as the direct driver will on a timeout: a call dropped
+  before the driver writes it is never sent, and its entry leaves the table of waiting calls.
 - `Notification::Other` carries every notification but `account/rateLimits/updated`, params
   dropped, so a caller can react to `account/updated` by name without this crate decoding it.
 

@@ -12,6 +12,9 @@ mod checker;
 #[path = "schema_drift/checker_tests.rs"]
 mod checker_tests;
 
+use std::collections::BTreeMap;
+use std::path::Path;
+
 use clauseo_codex_appserver::{
     Account, AccountRateLimitsUpdatedNotification, AmazonBedrockAccount, ChatgptAccount,
     ClientInfo, CreditsSnapshot, GetAccountParams, GetAccountRateLimitsParams,
@@ -20,182 +23,190 @@ use clauseo_codex_appserver::{
     RateLimitResetCreditStatus, RateLimitResetCreditsSummary, RateLimitResetType,
     RateLimitSnapshot, RateLimitWindow, SpendControlLimitSnapshot,
 };
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use checker::{Schema, check_enum, check_struct, compare_fields, validate};
+use checker::{Schema, check_enum, check_struct, compare_fields, validate, vendored_folder};
+
+/// Checks one definition; returns one line per finding.
+type Check = fn(&Schema, &Value) -> Vec<String>;
+
+/// A definition in a vendored file (`""` is the file's root) and the check of the type that
+/// mirrors it. This table is the one list of what is mirrored: `schema_drift` runs each check,
+/// and `every_vendored_definition_is_mirrored_or_listed` reads the names.
+struct Mirror {
+    file: &'static str,
+    definition: &'static str,
+    check: Check,
+}
+
+const RESPONSE: &str = "v2/GetAccountRateLimitsResponse.json";
+const UPDATED: &str = "v2/AccountRateLimitsUpdatedNotification.json";
+
+const MIRRORS: &[Mirror] = &[
+    m("v1/InitializeParams.json", "", plain::<InitializeParams>),
+    m(
+        "v1/InitializeParams.json",
+        "ClientInfo",
+        plain::<ClientInfo>,
+    ),
+    m(
+        "v1/InitializeParams.json",
+        "InitializeCapabilities",
+        plain::<InitializeCapabilities>,
+    ),
+    m(
+        "v1/InitializeResponse.json",
+        "",
+        plain::<InitializeResponse>,
+    ),
+    m("ClientNotification.json", "", initialized),
+    m("v2/GetAccountParams.json", "", plain::<GetAccountParams>),
+    m(
+        "v2/GetAccountResponse.json",
+        "",
+        plain::<GetAccountResponse>,
+    ),
+    m("v2/GetAccountResponse.json", "Account", account),
+    m("v2/GetAccountResponse.json", "PlanType", plan_type),
+    m(
+        "v2/NullableGetAccountRateLimitsParams.json",
+        "GetAccountRateLimitsParams",
+        plain::<GetAccountRateLimitsParams>,
+    ),
+    m(RESPONSE, "", plain::<GetAccountRateLimitsResponse>),
+    m(RESPONSE, "RateLimitSnapshot", plain::<RateLimitSnapshot>),
+    m(RESPONSE, "RateLimitWindow", plain::<RateLimitWindow>),
+    m(RESPONSE, "CreditsSnapshot", plain::<CreditsSnapshot>),
+    m(
+        RESPONSE,
+        "SpendControlLimitSnapshot",
+        plain::<SpendControlLimitSnapshot>,
+    ),
+    m(
+        RESPONSE,
+        "RateLimitResetCreditsSummary",
+        plain::<RateLimitResetCreditsSummary>,
+    ),
+    m(
+        RESPONSE,
+        "RateLimitResetCredit",
+        plain::<RateLimitResetCredit>,
+    ),
+    m(RESPONSE, "PlanType", plan_type),
+    m(RESPONSE, "RateLimitReachedType", reached_type),
+    m(RESPONSE, "RateLimitResetCreditStatus", credit_status),
+    m(RESPONSE, "RateLimitResetType", reset_type),
+    m(UPDATED, "", plain::<AccountRateLimitsUpdatedNotification>),
+    m(UPDATED, "RateLimitSnapshot", plain::<RateLimitSnapshot>),
+    m(UPDATED, "RateLimitWindow", plain::<RateLimitWindow>),
+    m(UPDATED, "CreditsSnapshot", plain::<CreditsSnapshot>),
+    m(
+        UPDATED,
+        "SpendControlLimitSnapshot",
+        plain::<SpendControlLimitSnapshot>,
+    ),
+    m(UPDATED, "PlanType", plan_type),
+    m(UPDATED, "RateLimitReachedType", reached_type),
+];
 
 /// Definitions in the vendored files that no mirrored type stands for, and why.
 const NOT_MIRRORED: &[(&str, &str)] = &[
     // A string alias; `InitializeResponse.codexHome` is a `String`.
-    ("AbsolutePathBuf", "v1/InitializeResponse.json"),
+    ("v1/InitializeResponse.json", "AbsolutePathBuf"),
     // Only `account/read`'s experimental `workspaceRouting` field uses these, and the schema's
     // stable form leaves that field out.
-    ("AccountRoutingOverride", "v2/GetAccountResponse.json"),
-    ("WorkspaceRouting", "v2/GetAccountResponse.json"),
+    ("v2/GetAccountResponse.json", "AccountRoutingOverride"),
+    ("v2/GetAccountResponse.json", "WorkspaceRouting"),
 ];
 
-/// The snapshot types, defined alike in both rate limit files.
-fn check_snapshot_types(schema: &Schema, findings: &mut Vec<String>) {
-    findings.extend(check_struct::<RateLimitSnapshot>(
-        schema,
-        schema.def("RateLimitSnapshot"),
-        &[],
-    ));
-    findings.extend(check_struct::<RateLimitWindow>(
-        schema,
-        schema.def("RateLimitWindow"),
-        &[],
-    ));
-    findings.extend(check_struct::<CreditsSnapshot>(
-        schema,
-        schema.def("CreditsSnapshot"),
-        &[],
-    ));
-    findings.extend(check_struct::<SpendControlLimitSnapshot>(
-        schema,
-        schema.def("SpendControlLimitSnapshot"),
-        &[],
-    ));
-    findings.extend(check_enum(
-        "PlanType",
-        PlanType::VALUES,
-        schema.def("PlanType"),
-        None,
-    ));
-    findings.extend(check_enum(
+const fn m(file: &'static str, definition: &'static str, check: Check) -> Mirror {
+    Mirror {
+        file,
+        definition,
+        check,
+    }
+}
+
+fn plain<T: DeserializeOwned>(schema: &Schema, node: &Value) -> Vec<String> {
+    check_struct::<T>(schema, node, &[])
+}
+
+fn plan_type(_: &Schema, node: &Value) -> Vec<String> {
+    check_enum("PlanType", PlanType::VALUES, node, None)
+}
+
+fn reached_type(_: &Schema, node: &Value) -> Vec<String> {
+    check_enum(
         "RateLimitReachedType",
         RateLimitReachedType::VALUES,
-        schema.def("RateLimitReachedType"),
+        node,
         None,
+    )
+}
+
+fn credit_status(_: &Schema, node: &Value) -> Vec<String> {
+    check_enum(
+        "RateLimitResetCreditStatus",
+        RateLimitResetCreditStatus::VALUES,
+        node,
+        None,
+    )
+}
+
+fn reset_type(_: &Schema, node: &Value) -> Vec<String> {
+    check_enum("RateLimitResetType", RateLimitResetType::VALUES, node, None)
+}
+
+/// `initialized` is the client's one notification, and it has no params.
+fn initialized(schema: &Schema, node: &Value) -> Vec<String> {
+    let mut findings = check_enum("ClientNotification", &["initialized"], node, Some("method"));
+    let entry = schema.variant("", "InitializedNotification");
+    findings.extend(compare_fields(
+        "InitializedNotification",
+        &[],
+        entry,
+        &["method"],
     ));
+    findings
+}
+
+/// `Account`'s kinds, the fields of each, and that a sample of each decodes to its own variant.
+fn account(schema: &Schema, node: &Value) -> Vec<String> {
+    let mut findings = check_enum("Account", Account::VALUES, node, Some("type"));
+    let api_key = schema.variant("Account", "ApiKeyAccount");
+    findings.extend(compare_fields("Account::ApiKey", &[], api_key, &["type"]));
+    let chatgpt = schema.variant("Account", "ChatgptAccount");
+    findings.extend(check_struct::<ChatgptAccount>(schema, chatgpt, &["type"]));
+    let bedrock = schema.variant("Account", "AmazonBedrockAccount");
+    findings.extend(check_struct::<AmazonBedrockAccount>(
+        schema,
+        bedrock,
+        &["type"],
+    ));
+    for entry in node["oneOf"].as_array().into_iter().flatten() {
+        let sample = schema.sample(entry);
+        match serde_json::from_value::<Account>(sample.clone()) {
+            Ok(Account::Unknown(kind)) => {
+                findings.push(format!("Account: value `{kind}` decodes to Unknown"));
+            }
+            Ok(_) => {}
+            Err(error) => findings.push(format!("Account: {sample} does not decode: {error}")),
+        }
+    }
+    findings
 }
 
 #[test]
 fn schema_drift() {
+    let mut schemas = BTreeMap::new();
     let mut findings = Vec::new();
-
-    let schema = Schema::vendored("v1/InitializeParams.json");
-    findings.extend(check_struct::<InitializeParams>(
-        &schema,
-        schema.def(""),
-        &[],
-    ));
-    findings.extend(check_struct::<ClientInfo>(
-        &schema,
-        schema.def("ClientInfo"),
-        &[],
-    ));
-    findings.extend(check_struct::<InitializeCapabilities>(
-        &schema,
-        schema.def("InitializeCapabilities"),
-        &[],
-    ));
-
-    let schema = Schema::vendored("v1/InitializeResponse.json");
-    findings.extend(check_struct::<InitializeResponse>(
-        &schema,
-        schema.def(""),
-        &[],
-    ));
-
-    // `initialized` is the client's one notification, and it has no params.
-    let schema = Schema::vendored("ClientNotification.json");
-    let initialized = schema.variant("", "InitializedNotification");
-    findings.extend(check_enum(
-        "ClientNotification",
-        &["initialized"],
-        schema.def(""),
-        Some("method"),
-    ));
-    findings.extend(compare_fields(
-        "InitializedNotification",
-        &[],
-        initialized,
-        &["method"],
-    ));
-
-    let schema = Schema::vendored("v2/GetAccountParams.json");
-    findings.extend(check_struct::<GetAccountParams>(
-        &schema,
-        schema.def(""),
-        &[],
-    ));
-
-    let schema = Schema::vendored("v2/GetAccountResponse.json");
-    findings.extend(check_struct::<GetAccountResponse>(
-        &schema,
-        schema.def(""),
-        &[],
-    ));
-    findings.extend(check_enum(
-        "Account",
-        Account::VALUES,
-        schema.def("Account"),
-        Some("type"),
-    ));
-    let api_key = schema.variant("Account", "ApiKeyAccount");
-    findings.extend(compare_fields("Account::ApiKey", &[], api_key, &["type"]));
-    let chatgpt = schema.variant("Account", "ChatgptAccount");
-    findings.extend(check_struct::<ChatgptAccount>(&schema, chatgpt, &["type"]));
-    let bedrock = schema.variant("Account", "AmazonBedrockAccount");
-    findings.extend(check_struct::<AmazonBedrockAccount>(
-        &schema,
-        bedrock,
-        &["type"],
-    ));
-    findings.extend(check_enum(
-        "PlanType",
-        PlanType::VALUES,
-        schema.def("PlanType"),
-        None,
-    ));
-
-    let schema = Schema::vendored("v2/NullableGetAccountRateLimitsParams.json");
-    let params = schema.def("GetAccountRateLimitsParams");
-    findings.extend(check_struct::<GetAccountRateLimitsParams>(
-        &schema,
-        params,
-        &[],
-    ));
-
-    let schema = Schema::vendored("v2/GetAccountRateLimitsResponse.json");
-    findings.extend(check_struct::<GetAccountRateLimitsResponse>(
-        &schema,
-        schema.def(""),
-        &[],
-    ));
-    check_snapshot_types(&schema, &mut findings);
-    findings.extend(check_struct::<RateLimitResetCreditsSummary>(
-        &schema,
-        schema.def("RateLimitResetCreditsSummary"),
-        &[],
-    ));
-    findings.extend(check_struct::<RateLimitResetCredit>(
-        &schema,
-        schema.def("RateLimitResetCredit"),
-        &[],
-    ));
-    findings.extend(check_enum(
-        "RateLimitResetCreditStatus",
-        RateLimitResetCreditStatus::VALUES,
-        schema.def("RateLimitResetCreditStatus"),
-        None,
-    ));
-    findings.extend(check_enum(
-        "RateLimitResetType",
-        RateLimitResetType::VALUES,
-        schema.def("RateLimitResetType"),
-        None,
-    ));
-
-    let schema = Schema::vendored("v2/AccountRateLimitsUpdatedNotification.json");
-    findings.extend(check_struct::<AccountRateLimitsUpdatedNotification>(
-        &schema,
-        schema.def(""),
-        &[],
-    ));
-    check_snapshot_types(&schema, &mut findings);
-
+    for mirror in MIRRORS {
+        let schema = schemas
+            .entry(mirror.file)
+            .or_insert_with(|| Schema::vendored(mirror.file));
+        findings.extend((mirror.check)(schema, schema.def(mirror.definition)));
+    }
     assert!(
         findings.is_empty(),
         "the types drifted from the schema:\n{}",
@@ -203,55 +214,43 @@ fn schema_drift() {
     );
 }
 
-/// Every definition in a vendored file is checked above or listed in [`NOT_MIRRORED`], so a
-/// pin bump that adds one is noticed.
+/// Every vendored file has a row in [`MIRRORS`], and every definition in it is mirrored there or
+/// listed in [`NOT_MIRRORED`], so a pin bump that adds one is noticed.
 #[test]
 fn every_vendored_definition_is_mirrored_or_listed() {
-    let mirrored: &[(&str, &[&str])] = &[
-        (
-            "v1/InitializeParams.json",
-            &["ClientInfo", "InitializeCapabilities"],
-        ),
-        ("v1/InitializeResponse.json", &[]),
-        ("v2/GetAccountResponse.json", &["Account", "PlanType"]),
-        (
-            "v2/NullableGetAccountRateLimitsParams.json",
-            &["GetAccountRateLimitsParams"],
-        ),
-        (
-            "v2/GetAccountRateLimitsResponse.json",
-            &[
-                "CreditsSnapshot",
-                "PlanType",
-                "RateLimitReachedType",
-                "RateLimitResetCredit",
-                "RateLimitResetCreditStatus",
-                "RateLimitResetCreditsSummary",
-                "RateLimitResetType",
-                "RateLimitSnapshot",
-                "RateLimitWindow",
-                "SpendControlLimitSnapshot",
-            ],
-        ),
-        (
-            "v2/AccountRateLimitsUpdatedNotification.json",
-            &[
-                "CreditsSnapshot",
-                "PlanType",
-                "RateLimitReachedType",
-                "RateLimitSnapshot",
-                "RateLimitWindow",
-                "SpendControlLimitSnapshot",
-            ],
-        ),
-        ("v2/GetAccountParams.json", &[]),
-        ("ClientNotification.json", &[]),
-    ];
+    let mut files: Vec<&str> = MIRRORS.iter().map(|mirror| mirror.file).collect();
+    files.sort_unstable();
+    files.dedup();
+    let mut on_disk = Vec::new();
+    for folder in ["", "v1", "v2"] {
+        for entry in std::fs::read_dir(vendored_folder().join(folder)).unwrap() {
+            let path = entry.unwrap().path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+            {
+                let name = path.file_name().unwrap().to_str().unwrap();
+                on_disk.push(if folder.is_empty() {
+                    name.to_owned()
+                } else {
+                    format!("{folder}/{name}")
+                });
+            }
+        }
+    }
+    on_disk.sort_unstable();
+    assert_eq!(
+        on_disk, files,
+        "every vendored file is read, and every file read is vendored"
+    );
+
     let mut unlisted = Vec::new();
-    for (file, names) in mirrored {
+    for file in files {
         for name in Schema::vendored(file).definition_names() {
-            let skipped = NOT_MIRRORED.contains(&(name.as_str(), *file));
-            if !names.contains(&name.as_str()) && !skipped {
+            let mirrored = MIRRORS
+                .iter()
+                .any(|mirror| mirror.file == file && mirror.definition == name);
+            if !mirrored && !NOT_MIRRORED.contains(&(file, name.as_str())) {
                 unlisted.push(format!("{file}: definition `{name}`"));
             }
         }
@@ -267,7 +266,12 @@ fn every_vendored_definition_is_mirrored_or_listed() {
 /// `tests/fixtures/README.md`'s table names for it.
 #[test]
 fn fixtures_match_the_schema() {
-    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let is_json = |name: &str| {
+        Path::new(name)
+            .extension()
+            .is_some_and(|extension| extension == "json")
+    };
     let readme = std::fs::read_to_string(folder.join("README.md")).unwrap();
     let rows: Vec<(String, String)> = readme
         .lines()
@@ -275,20 +279,13 @@ fn fixtures_match_the_schema() {
             let mut cells = line.split('|').map(|cell| cell.trim().trim_matches('`'));
             let fixture = cells.nth(1)?;
             let file = cells.next()?;
-            std::path::Path::new(fixture)
-                .extension()
-                .is_some_and(|extension| extension == "json")
-                .then(|| (fixture.to_owned(), file.to_owned()))
+            is_json(fixture).then(|| (fixture.to_owned(), file.to_owned()))
         })
         .collect();
     let mut on_disk: Vec<String> = std::fs::read_dir(&folder)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-        .filter(|name| {
-            std::path::Path::new(name)
-                .extension()
-                .is_some_and(|e| e == "json")
-        })
+        .filter(|name| is_json(name))
         .collect();
     on_disk.sort();
     let mut named: Vec<String> = rows.iter().map(|(fixture, _)| fixture.clone()).collect();
