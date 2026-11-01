@@ -267,6 +267,38 @@ test("the notes' heading and back-references are labelled in the page's words", 
   ]);
 });
 
+test("a reference and its note reach each other by click, whatever the label's characters", () => {
+  const text =
+    "Eins[^straße], zwei[^50%], drei[^a], vier[^a] und fünf[^a-2].\n\n" +
+    "[^straße]: Straße.\n\n[^50%]: Half.\n\n[^a]: A.\n\n[^a-2]: Not a repeat of a.\n";
+  render(text);
+  const scrolled: Element[] = [];
+  const original = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this);
+  };
+  try {
+    const click = (link: Element) => {
+      scrolled.length = 0;
+      act(() => {
+        link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+      return scrolled[0];
+    };
+    const refs = [...host.querySelectorAll("p sup a")];
+    const items = [...host.querySelectorAll("section[data-footnotes] li")];
+    expect(refs.map((ref) => ref.textContent)).toEqual(["1", "2", "3", "3", "4"]);
+    expect(refs.map(click)).toEqual([items[0], items[1], items[2], items[2], items[3]]);
+    // Every reference has its own id (the second to a and the first to a-2 too), and each
+    // back-reference returns to its own reference.
+    expect(new Set(refs.map((ref) => ref.id)).size).toBe(5);
+    const backs = items.flatMap((item) => [...item.querySelectorAll("a[data-footnote-backref]")]);
+    expect(backs.map(click)).toEqual([refs[0], refs[1], refs[2], refs[3], refs[4]]);
+  } finally {
+    Element.prototype.scrollIntoView = original;
+  }
+});
+
 test("a finished answer re-rendered with no change keeps every view", () => {
   const answer = createAnswer("t");
   const first = answer.update(DOC, false);
