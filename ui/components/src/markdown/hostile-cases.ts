@@ -126,4 +126,10 @@ export const CASES: HostileCase[] = [
     markdown: "AT&amp;T and &copy; 2026; &nbsp;&mdash;&hellip; &lt;b&gt;not bold&lt;/b&gt;",
     text: ["AT&T", "© 2026", "—…", "<b>not bold</b>"],
   },
+  // Nesting that overflowed the stack and unmounted the answer: capped at 32 levels, the rest as text.
+  { id: "deep-list", markdown: "- ".repeat(1000) + "x", text: ["- - - x"] },
+  { id: "deep-quote", markdown: "> ".repeat(3000) + "x", text: ["> > > x"] },
+  // Deeper than the tree limit: the block shows its source as text. (5,000 a side overflowed the stack,
+  // but micromark takes about 1.4 s to parse that, so streaming it here would take minutes.)
+  { id: "deep-emphasis", markdown: "*".repeat(1000) + "a" + "*".repeat(1000), text: ["***a***"] },
 ];

@@ -7,6 +7,7 @@ import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import type { Components } from "hast-util-to-jsx-runtime";
 import { createAnswer } from "./answer.ts";
 import type { BlockView } from "./answer.ts";
+import { BlockBoundary } from "./boundary.tsx";
 import { CodeBlock } from "./code.tsx";
 import { AnswerScopeContext, scopeOf } from "./host.ts";
 import { Image } from "./image.tsx";
@@ -22,8 +23,16 @@ const COMPONENTS: Partial<Components> = { a: LinkOrReference, img: Image, pre: C
 const OPTIONS = { Fragment, jsx, jsxs, components: COMPONENTS, passNode: true };
 
 const Block = memo(function Block({ view }: { view: BlockView }) {
-  return toJsxRuntime(view.hast, OPTIONS);
+  return (
+    <BlockBoundary source={view.source}>
+      <BlockContent view={view} />
+    </BlockBoundary>
+  );
 });
+
+function BlockContent({ view }: { view: BlockView }) {
+  return toJsxRuntime(view.hast, OPTIONS);
+}
 
 export function Markdown({ text, streaming = true }: MarkdownProps) {
   const scope = scopeOf(useId());
