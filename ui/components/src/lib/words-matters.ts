@@ -37,6 +37,11 @@ const HI = {
   "Clauseo couldn't create the matter. Try again, or choose another folder.":
     "Clauseo मामला नहीं बना सका। फिर से प्रयास करें, या दूसरा फ़ोल्डर चुनें।",
   "Write the date as 30 October 2026.": "तारीख इस तरह लिखें: 30 अक्टूबर 2026।",
+  /* ---------- the scratch matter's line ---------- */
+  "A matter for quick questions, with no papers of its own.":
+    "त्वरित प्रश्नों के लिए एक मामला, जिसके अपने कोई दस्तावेज़ नहीं हैं।",
+  "Every question asked here is kept, with its versions, like any matter's.":
+    "यहाँ पूछा गया हर प्रश्न, अपने संस्करणों के साथ, किसी भी मामले की तरह रखा जाता है।",
   /* ---------- conversations inside a matter ---------- */
   "New conversation": "नई बातचीत",
   "Conversations in {name}": "{name} की बातचीत",
