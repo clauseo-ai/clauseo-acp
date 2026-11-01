@@ -150,5 +150,30 @@ pub(crate) fn lparam_point(lparam: isize) -> (i32, i32) {
     (signed(lparam), signed(lparam >> 16))
 }
 
+/// A system-menu item's text as a name: up to any tab (the shortcut after it), without the
+/// accelerator: a `&` before a letter goes, `&&` is a plain `&`, and a `(&X)` as East Asian
+/// menus write it goes whole. So "Ma&ximize" names "Maximize", and "最大化(&X)" "最大化".
+pub(crate) fn menu_word(item: &str) -> String {
+    let item = item.split('\t').next().unwrap_or_default();
+    let chars: Vec<char> = item.chars().collect();
+    let mut word = String::with_capacity(item.len());
+    let mut at = 0;
+    while let Some(&c) = chars.get(at) {
+        let next = chars.get(at + 1).copied();
+        if c == '(' && next == Some('&') && chars.get(at + 3) == Some(&')') {
+            at += 4;
+        } else if c == '&' && next == Some('&') {
+            word.push('&');
+            at += 2;
+        } else {
+            if c != '&' {
+                word.push(c);
+            }
+            at += 1;
+        }
+    }
+    word.trim().to_owned()
+}
+
 #[cfg(test)]
 mod tests;
