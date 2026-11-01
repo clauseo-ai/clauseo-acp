@@ -1,7 +1,13 @@
 /* The app's stylesheet: the design system's, with the app's own classes. Tests and the dev-only gallery are not
-   sources, so their classes never reach the shipped CSS. It carries no part's stylesheet: a screen imports the sheets
-   of the parts it shows, so the app ships only what its screens use. */
+   sources, so their classes never reach the shipped CSS. A screen imports the sheets of the parts it shows, in
+   clauseo/parts.css's order, so the app ships only what its screens use. Only the room's build reaches this sheet
+   (src/room/entry.ts); R12's internal window draws with inline styles and imports no CSS. The room's frame: the
+   shell, the wall, the empty wall's words (live.css) and the other widths. */
 @import "./system.css";
+@import "@clauseo/components/clauseo/shell.css";
+@import "@clauseo/components/clauseo/wall.css";
+@import "@clauseo/components/clauseo/responsive.css";
+@import "@clauseo/components/clauseo/live.css";
 @source "..";
 @source not "../gallery";
 @source not "../review";

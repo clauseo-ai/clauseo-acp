@@ -9,6 +9,8 @@ catalog:
   "@types/react": "19.2.18"
   "@types/react-dom": "19.2.7"
   "@typescript/native": "npm:typescript@7.0.2"
+  # ui/app: the room's accessibility checks, its tests and window.__clauseoAxe (src/room/dev-hooks.ts)
+  axe-core: "4.14.0"
   react: "19.2.8"
   react-dom: "19.2.8"
   vitest: "4.1.11"

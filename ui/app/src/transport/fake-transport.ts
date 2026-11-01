@@ -1,6 +1,16 @@
-// A transport for tests: the same channel reader and subscriptions as the Tauri one, with the host replaced by a
-// recorder. `deliver` plays a channel message as the bridge would send it; `host` scripts the answers. It counts no
-// messages: that bookkeeping is the desktop transport's own.
+// A transport for tests and the room's probe build (room/probe-main.tsx): the same channel reader and subscriptions as
+// the Tauri one, with the host replaced by a recorder. `deliver` plays a channel message as the bridge would send it;
+// `host` scripts the answers. It counts no messages: that bookkeeping is the desktop transport's own. With `host.next` it also answers the calls the host
+// doesn't have yet (room/host-next.ts), which the desktop transport never sends.
+import type {
+  NextCommand,
+  NextHost,
+  NextHostSource,
+  NextQuery,
+  NextQueryResult,
+  Papers,
+  Settings,
+} from "../room/host-next.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import {
   internalError,
@@ -37,7 +47,16 @@ export type FakeCall =
       request: PermissionRequestId;
       option: AgentChoiceId;
     }
-  | { call: "pick_folder" };
+  | { call: "pick_folder" }
+  | { call: "next_query"; query: NextQuery }
+  | { call: "next_command"; command: NextCommand };
+
+/** Scripted answers to the calls the host doesn't have yet (room/host-next.ts). */
+export type FakeNextHost = {
+  query: (query: NextQuery) => NextQueryResult | Promise<NextQueryResult>;
+  /** Answers each command; throwing refuses it. Without it every command is done. */
+  command?: (command: NextCommand) => void | Promise<void>;
+};
 
 export type FakeHost = {
   dispatch?: (command: CommandEnvelope) => CommandOutcome | Promise<CommandOutcome>;
@@ -46,9 +65,11 @@ export type FakeHost = {
   /** Answers each subscribe; throwing refuses it. */
   subscribe?: (stream: StreamId, after: ViewPosition | null) => void;
   platform?: DisplayInfo["platform"];
+  /** With it, the fake is a NextHost (room/host-next.ts): H7's and H8's calls, answered from here. */
+  next?: FakeNextHost;
 };
 
-export class FakeTransport implements HostTransport {
+export class FakeTransport implements HostTransport, NextHostSource {
   readonly kind = "fake";
   readonly calls: FakeCall[] = [];
   /** Problems the channel reader reported. */
@@ -59,6 +80,32 @@ export class FakeTransport implements HostTransport {
   readonly #reader: ChannelReader;
   readonly #subs: Subscriptions;
   readonly #dispatched = new Set<(command: CommandEnvelope) => void>();
+  readonly #settingsHeard = new Set<(settings: Settings) => void>();
+  readonly #next: NextHost = {
+    listPapers: async (matter) => {
+      const result = await this.#nextQuery({ list_papers: { matter } });
+      if (!("papers" in result)) throw internalError("list_papers answered without papers");
+      return result.papers satisfies Papers;
+    },
+    getSettings: async () => {
+      const result = await this.#nextQuery("get_settings");
+      if (!("settings" in result)) throw internalError("get_settings answered without settings");
+      return result.settings;
+    },
+    setUiSettings: async (patch) => {
+      const command: NextCommand = { set_ui_settings: { patch } };
+      this.calls.push({ call: "next_command", command });
+      try {
+        await this.host.next?.command?.(command);
+      } catch (error) {
+        throw toHostError(error);
+      }
+    },
+    onSettingsChanged: (listener) => {
+      this.#settingsHeard.add(listener);
+      return () => this.#settingsHeard.delete(listener);
+    },
+  };
 
   constructor(host: FakeHost = {}) {
     this.host = host;
@@ -96,6 +143,27 @@ export class FakeTransport implements HostTransport {
   /** The bridge's report that a stream failed, as its channel message would say. */
   failStream(stream: StreamId, error: HostError): void {
     this.#subs.fail(stream, error);
+  }
+
+  /** The calls the host doesn't have yet, when `host.next` scripts them; null otherwise. */
+  nextHost(): NextHost | null {
+    return this.host.next === undefined ? null : this.#next;
+  }
+
+  /** Plays `settings_changed` as the host would send it. */
+  settingsChanged(settings: Settings): void {
+    for (const listener of this.#settingsHeard) listener(settings);
+  }
+
+  async #nextQuery(query: NextQuery): Promise<NextQueryResult> {
+    this.calls.push({ call: "next_query", query });
+    const next = this.host.next;
+    if (next === undefined) throw internalError("the fake host answers no next query");
+    try {
+      return await next.query(query);
+    } catch (error) {
+      throw toHostError(error);
+    }
   }
 
   only<C extends FakeCall["call"]>(call: C): Extract<FakeCall, { call: C }>[] {
