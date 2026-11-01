@@ -23,10 +23,10 @@ import type {
   AgentChoiceId,
   CommandEnvelope,
   CommandOutcome,
-  FolderRefId,
   HostError,
   HostQuery,
   PermissionRequestId,
+  PickedFolder,
   QueryResult,
   StreamId,
   ThreadId,
@@ -61,7 +61,7 @@ export type FakeNextHost = {
 export type FakeHost = {
   dispatch?: (command: CommandEnvelope) => CommandOutcome | Promise<CommandOutcome>;
   query?: (query: HostQuery) => QueryResult | Promise<QueryResult>;
-  pickFolder?: () => FolderRefId | null;
+  pickFolder?: () => PickedFolder | null;
   /** Answers each subscribe; throwing refuses it. */
   subscribe?: (stream: StreamId, after: ViewPosition | null) => void;
   platform?: DisplayInfo["platform"];
@@ -208,7 +208,7 @@ export class FakeTransport implements HostTransport, NextHostSource {
     this.calls.push({ call: "answer_permission", thread, request, option });
   }
 
-  async pickFolder(): Promise<FolderRefId | null> {
+  async pickFolder(): Promise<PickedFolder | null> {
     this.calls.push({ call: "pick_folder" });
     return this.host.pickFolder?.() ?? null;
   }

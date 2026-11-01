@@ -7,15 +7,17 @@
 //! test that writes the TypeScript bindings (`commands/bindings.rs`).
 
 use clauseo_protocol::{
-    Ack, AgentChoiceId, CommandEnvelope, CommandOutcome, FolderRefId, HostError, HostQuery,
-    PermissionRequestId, QueryResult, StreamId, ThreadId, ViewPosition,
+    Ack, AgentChoiceId, CommandEnvelope, CommandOutcome, HostError, HostQuery, PermissionRequestId,
+    QueryResult, StreamId, ThreadId, ViewPosition,
 };
+use clauseo_settings::{PlatformDirs as _, SystemDirs};
 use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Runtime, State, Webview};
 
 use crate::bridge::Bridge;
 use crate::frame::Frame;
+use crate::picked::PickedFolder;
 
 /// The command names, in the order `build.rs` and `capabilities/main.json` list them. A test
 /// checks they, `lib.rs`'s handler and the bindings agree.
@@ -165,15 +167,17 @@ pub(crate) async fn answer_permission<R: Runtime>(
         .await
 }
 
-/// Opens the native folder dialog and registers the folder picked; `None` when cancelled.
+/// Opens the native folder dialog and registers the folder picked: its ref, and its display
+/// relative to the home folder (`picked.rs`). `None` when cancelled.
 #[tauri::command]
 #[cfg_attr(test, specta::specta)]
 pub(crate) async fn pick_folder<R: Runtime>(
     app: AppHandle<R>,
     bridge: State<'_, Bridge>,
-) -> Result<Option<FolderRefId>, HostError> {
+) -> Result<Option<PickedFolder>, HostError> {
     let picker = crate::dialogs::NativePicker::new(app);
-    bridge.pick_folder(&picker).await
+    let home = SystemDirs.home();
+    bridge.pick_folder(&picker, home.as_deref()).await
 }
 
 /// The OS the host runs on.

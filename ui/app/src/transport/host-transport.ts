@@ -8,11 +8,11 @@ import type {
   CommandEnvelope,
   CommandOutcome,
   DisplayInfo,
-  FolderRefId,
   HostError,
   HostQuery,
   PatchBatch,
   PermissionRequestId,
+  PickedFolder,
   QueryResult,
   StreamId,
   ThreadId,
@@ -42,8 +42,8 @@ export interface HostTransport {
     request: PermissionRequestId,
     option: AgentChoiceId,
   ): Promise<void>;
-  /** The native folder dialog; `null` when the lawyer cancels it. */
-  pickFolder(): Promise<FolderRefId | null>;
+  /** The native folder dialog: the folder's ref and its home-relative display; `null` when the lawyer cancels it. */
+  pickFolder(): Promise<PickedFolder | null>;
   displayInfo(): Promise<DisplayInfo>;
   /**
    * Starts receiving a stream's patches, `after` a position (the tail after it, or one `Reset`). Ref-counted per
