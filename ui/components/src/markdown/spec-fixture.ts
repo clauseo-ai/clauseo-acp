@@ -16,7 +16,7 @@ import { createAnswer, HANDLERS } from "./answer.ts";
 import { pairTags } from "./inline-tags.ts";
 import { parse } from "./parse.ts";
 import { SCHEMA } from "./schema.ts";
-import { anchorHeadings, numberSlugs, withSlugs } from "./slugs.ts";
+import { anchorHeadings, headingId, numberSlugs, withSlugs } from "./slugs.ts";
 
 export type Example = { example: number; section: string; markdown: string; html: string };
 
@@ -225,7 +225,9 @@ export function unsplit(text: string): string {
     ),
   };
   const slugs = numberSlugs([anchorHeadings(body, "spec")])[0]!;
-  const clean = withSlugs(sanitize(hast, FOOTER_SCHEMA) as Root, slugs, "user-content-spec-");
+  const clean = withSlugs(sanitize(hast, FOOTER_SCHEMA) as Root, slugs, (value) =>
+    headingId("user-content-spec", value),
+  );
   return toHtml(clean).replaceAll(
     '"user-content-footnote-label"',
     '"user-content-spec-footnote-label"',

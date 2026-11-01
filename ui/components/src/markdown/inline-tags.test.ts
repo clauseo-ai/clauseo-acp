@@ -113,7 +113,7 @@ test("tags in code show as code; in link text, table cells, headings and notes t
   );
   expect(html("| a |\n| - |\n| 4<sup>A</sup><br>b |")).toContain("<td>4<sup>A</sup><br>b</td>");
   expect(html("## Clause 4<sup>A</sup>")).toBe(
-    '<h2 id="user-content-t-clause-4a">Clause 4<sup>A</sup></h2>',
+    '<h2 id="user-content-t-h-clause-4a">Clause 4<sup>A</sup></h2>',
   );
   expect(html("A[^n].\n\n[^n]: See <sup>2</sup>.")).toContain("See <sup>2</sup>.");
 });

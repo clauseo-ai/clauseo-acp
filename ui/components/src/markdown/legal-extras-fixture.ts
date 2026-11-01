@@ -11,7 +11,7 @@
 //   `<u>` (`++text++` is not supported).
 // - The allowlisted inline tags (sup, sub, u, ins, del, s, mark, br, small, kbd) render as their elements
 //   with no attributes; any other tag shows as text, as written (`<Party A>`, `<insert date>`).
-// - Heading ids follow GitHub's slugs, scoped to the answer (`user-content-<scope>-<slug>`), repeats
+// - Heading ids follow GitHub's slugs, scoped to the answer (`user-content-<scope>-h-<slug>`), repeats
 //   numbered (`notes`, `notes-1`); a link to `#<slug>` points at its heading.
 // - A wide table scrolls inside its own box (`[data-clauseo="table"]`, the table's parent), and its long
 //   cells wrap; the wrapping itself needs layout (the private harness).

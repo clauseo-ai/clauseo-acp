@@ -46,7 +46,7 @@ import { htmlAsText, pairTags, paragraphNotingStart } from "./inline-tags.ts";
 import { endOf, parse } from "./parse.ts";
 import { repairTail } from "./repair.ts";
 import { CLOBBER_PREFIX, SCHEMA } from "./schema.ts";
-import { anchorHeadings, numberBlockSlugs, withSlugs } from "./slugs.ts";
+import { anchorHeadings, headingId, numberBlockSlugs, withSlugs } from "./slugs.ts";
 import { createSplitter } from "./split.ts";
 import type { BlockEnd } from "./split.ts";
 import { extrasHandlers } from "./syntax-extras.ts";
@@ -460,7 +460,10 @@ export function createAnswer(scope: string): Answer {
     const key = slugs.join("\u0000");
     const known = renumbered.get(view);
     if (known?.key === key) return known.view;
-    const copy = { ...view, hast: withSlugs(view.hast, slugs, `${CLOBBER_PREFIX}${scope}-`) };
+    const copy = {
+      ...view,
+      hast: withSlugs(view.hast, slugs, (value) => CLOBBER_PREFIX + headingId(scope, value)),
+    };
     renumbered.set(view, { key, view: copy });
     return copy;
   };
