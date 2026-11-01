@@ -190,7 +190,8 @@ impl HostHandle {
             .await
     }
 
-    /// A ref for a file the lawyer picked, for a prompt. Kept in host memory only.
+    /// A ref for a file the lawyer picked, for a prompt. Kept in host memory only. The same
+    /// path (as written) gets the same ref for the host's run, the one `ListPapers` gives it.
     pub async fn register_file(&self, path: PathBuf) -> Result<FileRefId, HostError> {
         self.call(|reply| Request::RegisterFile { path, reply })
             .await

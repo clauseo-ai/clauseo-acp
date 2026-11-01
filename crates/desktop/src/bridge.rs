@@ -160,14 +160,16 @@ impl Bridge {
     /// `admit`'s: a read the host adds does not compile here until the bridge rules on it.
     pub(crate) async fn query(&self, query: HostQuery) -> Result<QueryResult, HostError> {
         match &query {
-            // Slots, once they merge: H8's `ListPapers` (#131), H20's `GetDefaultLocation`.
+            // Slot, once it merges: H20's `GetDefaultLocation`.
             HostQuery::ListMatters
             | HostQuery::ListThreads { .. }
             | HostQuery::PageEntries { .. }
             | HostQuery::CompareVersions { .. }
             | HostQuery::PreviewRestore { .. }
             | HostQuery::ReadBlob { .. }
-            | HostQuery::GetSettings => {}
+            | HostQuery::GetSettings
+            // H8's wall (#131): reads the folder's stats, and names files by refs.
+            | HostQuery::ListPapers { .. } => {}
         }
         self.host.query(PRINCIPAL, query).await
     }

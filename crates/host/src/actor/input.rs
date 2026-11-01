@@ -93,6 +93,8 @@ pub(crate) enum MatterTag {
     Restore(Box<RestoreAsk>),
     /// A query R8 answers: `CompareVersions`, `PreviewRestore`.
     Query(Reply<QueryResult>),
+    /// A `ListPapers` query, answered with the listing.
+    Papers(Reply<QueryResult>),
 }
 
 /// Everything else the actor reads, posted by its own tasks and by other threads.

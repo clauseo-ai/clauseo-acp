@@ -34,7 +34,8 @@ host added later reached the page without anyone deciding it should.
     same check, refused with `command.invalid` before the host. The rest of H3 (the
     `matter_relocated` event and `MatterSummary.folder_state`) rides the existing streams and
     reads and needs no rule here.
-  - Slots wait as comments for `ListPapers` (#131), H5 and H20's `UpdateMatter`, `OpenMatter`
+  - H8's `ListPapers` (#131) is a read and needs no rule: `query` lets it through.
+  - Slots wait as comments for H5 and H20's `UpdateMatter`, `OpenMatter`
     and `ForgetMatter`, and H20's `GetDefaultLocation`. H20's `CreateMatter` source `default_location` carries no folder ref and
     passes; the folder-ref check stays on `new_folder` and `existing_folder`.
 - **One new command, `subscribe_app()`.** It takes no arguments, and it needs `open_stream` first
