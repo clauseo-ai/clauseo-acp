@@ -29,6 +29,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 
 <!-- One line per crate or package that exists. Planned crates are in ARCHITECTURE.md. -->
 - `crates/acp`: the ACP client over the agent's pipes; agent traffic as events. Scenarios in `tests/scenarios/`.
+- `crates/codex_appserver`: Codex app-server types, a JSON-RPC client and the schema drift test.
 - `crates/desktop`: the Tauri shell and the host bridge.
 - `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `crates/fake_agent/scenarios/` (README.md).
 - `crates/host`: the session host thread.
