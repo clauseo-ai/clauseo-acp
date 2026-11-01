@@ -29,6 +29,10 @@ afterAll(() => {
 const render = (text: string, streaming = false) =>
   act(() => root.render(<Markdown text={text} streaming={streaming} />));
 
+/** The number a pending reference shows (its spoken label is apart, for screen readers). */
+const pendingNumber = () =>
+  host.querySelector('sup[data-footnote-pending] [aria-hidden="true"]')?.textContent;
+
 const target = (link: Element | null | undefined) =>
   document.getElementById(decodeURIComponent((link?.getAttribute("href") ?? "").slice(1)));
 
@@ -112,8 +116,10 @@ test.each([
 test("while streaming, a reference without its note is a pending number; at the end it is text", () => {
   const text = "A claim[^x] here.\n\nMore text";
   render(text, true);
-  const pending = host.querySelector("sup[data-footnote-pending]");
-  expect(pending?.textContent).toBe("1");
+  expect(pendingNumber()).toBe("1");
+  expect(host.querySelector("sup[data-footnote-pending] .sr-only")?.textContent).toBe(
+    "Footnote 1, still to come",
+  );
   expect(host.textContent).not.toContain("[^");
   render(text, false);
   expect(host.querySelector("sup")).toBeNull();
@@ -140,8 +146,8 @@ test("a half-arrived reference at the tail is hidden, and a complete one is a pe
   render("Earlier.\n\nThe indemnity survives.[^surv", true);
   expect(host.textContent).toBe("Earlier.The indemnity survives.");
   render("Earlier.\n\nThe indemnity survives.[^survival] The", true);
-  expect(host.querySelector("sup[data-footnote-pending]")?.textContent).toBe("1");
-  expect(host.textContent).toBe("Earlier.The indemnity survives.1 The");
+  expect(pendingNumber()).toBe("1");
+  expect(host.textContent).toBe("Earlier.The indemnity survives.1Footnote 1, still to come The");
 });
 
 test("once its note starts to arrive, a reference links to it, and the note streams in the notes", () => {
@@ -188,7 +194,7 @@ test("a note's own block is parsed as it is, with no placeholder for the label i
 test("a label that looks defined but sits in code still gets its placeholder, so it shows a number", () => {
   const text = "- See[^a].\n\n  ```\n  [^a]: not a note\n  ```\n\nMore";
   render(text, true);
-  expect(host.querySelector("sup[data-footnote-pending]")?.textContent).toBe("1");
+  expect(pendingNumber()).toBe("1");
   expect(host.textContent).not.toContain("See[^a]");
 });
 
@@ -245,6 +251,20 @@ test("each note is its own view: a note streaming in the last block leaves the o
     .at(-1)
     ?.items?.flatMap((item, index) => (item === second?.[index] ? [] : [index]));
   expect(changed).toEqual([4]);
+});
+
+test("the notes' heading and back-references are labelled in the page's words", () => {
+  render(DOC);
+  expect(host.querySelector("section[data-footnotes] h2")?.textContent).toBe("Footnotes");
+  const labels = [...host.querySelectorAll("a[data-footnote-backref]")].map((back) =>
+    back.getAttribute("aria-label"),
+  );
+  expect(labels).toEqual([
+    "Back to reference 1",
+    "Back to reference 1-2",
+    "Back to reference 1-3",
+    "Back to reference 2",
+  ]);
 });
 
 test("a finished answer re-rendered with no change keeps every view", () => {

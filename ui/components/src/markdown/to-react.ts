@@ -1,6 +1,7 @@
 // Sanitised hast to React elements: our own mapper over exactly the tags and attributes the sanitise schema
 // (schema.ts) allows, in place of hast-util-to-jsx-runtime (about 9 KB brotli with its style parser).
-// Links, images and code blocks map to our components; every other allowed tag to its own element. What it
+// Links, images, code blocks and superscripts (footnote numbers) map to our components; every other allowed
+// tag to its own element. What it
 // does not know it drops, whatever the sanitiser let through: an unknown tag with everything inside it, an
 // unknown property, a property value that is not a string, number or boolean (or a list of them), and every
 // node that is not an element or text (comments, doctypes, raw HTML). Text goes to React as a string child,
@@ -12,6 +13,7 @@ import type { ReactNode } from "react";
 import { CodeBlock } from "./code.tsx";
 import { Image } from "./image.tsx";
 import { LinkOrReference } from "./link.tsx";
+import { Superscript } from "./notes.tsx";
 
 /** hast property name to React prop name, per tag: the schema's attributes, and only those. */
 const ATTRIBUTES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
@@ -19,7 +21,6 @@ const ATTRIBUTES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     href: "href",
     id: "id",
     ariaDescribedBy: "aria-describedby",
-    ariaLabel: "aria-label",
     dataFootnoteRef: "data-footnote-ref",
     dataFootnoteBackref: "data-footnote-backref",
     className: "className",
@@ -30,8 +31,6 @@ const ATTRIBUTES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   li: { id: "id", className: "className" },
   ol: { start: "start", className: "className" },
   ul: { className: "className" },
-  section: { dataFootnotes: "data-footnotes", className: "className" },
-  h2: { id: "id", className: "className" },
   sup: { dataFootnotePending: "data-footnote-pending" },
 };
 
@@ -62,12 +61,11 @@ const TAGS: ReadonlyMap<string, unknown> = new Map<string, unknown>([
     "tr",
     "th",
     "td",
-    "sup",
-    "section",
   ].map((tag): [string, unknown] => [tag, tag]),
   ["a", LinkOrReference],
   ["img", Image],
   ["pre", CodeBlock],
+  ["sup", Superscript],
 ]);
 
 /** Tags React renders without children (it throws on a void element given any). */

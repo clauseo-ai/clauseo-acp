@@ -1,6 +1,7 @@
 import type { Element, ElementContent } from "hast";
 import { useContext } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
+import { useWords } from "../lib/words.ts";
 import { AnswerScopeContext, InertLinksContext, MarkdownHostContext } from "./host.ts";
 import { CLOBBER_PREFIX, LINK_PREFIXES, referenceOf } from "./schema.ts";
 
@@ -8,7 +9,8 @@ type LinkProps = {
   href?: string | undefined;
   id?: string | undefined;
   "aria-describedby"?: string | undefined;
-  "aria-label"?: string | undefined;
+  /** A footnote back-reference's number (`1`, `1-2`), for its label. */
+  "data-footnote-backref"?: string | undefined;
   children?: ReactNode;
   /** The link's hast element (passNode), for its whole text whatever markup is inside. */
   node?: Element | undefined;
@@ -103,9 +105,12 @@ function spoofedHost(text: string, href: string | undefined): string | undefined
  * Every link in an answer. It renders a real <a href> for display and copy, but a click or middle click
  * never navigates: it is cancelled, and the URL goes to the host's open_external. A fragment scrolls to its
  * target. Relative and other links render without an href, inert, and so does every link in the streaming
- * last block. Of the sanitised attributes it keeps the id and the two ARIA ones footnotes use.
+ * last block. Of the sanitised attributes it keeps the id and the reference's aria-describedby; a
+ * footnote back-reference gets its label in the page's language.
  */
-export function Link({ href, id, children, node, ...aria }: LinkProps) {
+export function Link({ href, id, children, node, ...rest }: LinkProps) {
+  const words = useWords();
+  const backref = rest["data-footnote-backref"];
   const host = useContext(MarkdownHostContext);
   const scope = useContext(AnswerScopeContext);
   const inert = useContext(InertLinksContext);
@@ -124,8 +129,11 @@ export function Link({ href, id, children, node, ...aria }: LinkProps) {
     <a
       href={url}
       id={id}
-      aria-describedby={aria["aria-describedby"]}
-      aria-label={aria["aria-label"]}
+      aria-describedby={rest["aria-describedby"]}
+      aria-label={
+        backref === undefined ? undefined : words.t("Back to reference {n}", { n: backref })
+      }
+      data-footnote-backref={backref === undefined ? undefined : ""}
       data-clauseo="link"
       rel="noreferrer noopener"
       onClick={open}

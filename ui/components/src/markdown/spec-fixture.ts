@@ -120,6 +120,17 @@ export function normalise(html: string): string {
   return children(tree.children, false, true);
 }
 
+/** A note's back-references with remark-rehype's English label, as the link component gives them. */
+function withLabels(node: ElementContent): ElementContent {
+  if (node.type !== "element") return node;
+  const backref = node.properties.dataFootnoteBackref;
+  const properties =
+    typeof backref === "string" && backref !== ""
+      ? { ...node.properties, dataFootnoteBackref: "", ariaLabel: `Back to reference ${backref}` }
+      : node.properties;
+  return { ...node, properties, children: node.children.map(withLabels) };
+}
+
 type View = { hast: Root; items?: readonly { hast: Root }[] | undefined };
 
 /**
@@ -130,7 +141,7 @@ function notesSection(items: readonly { hast: Root }[]): Root {
   const children: ElementContent[] = [{ type: "text", value: "\n" }];
   for (const item of items)
     for (const child of item.hast.children)
-      if (child.type === "element") children.push(child, { type: "text", value: "\n" });
+      if (child.type === "element") children.push(withLabels(child), { type: "text", value: "\n" });
   const first = children.find((child) => child.type === "element");
   const id = first?.type === "element" ? String(first.properties.id ?? "") : "";
   const scope = id.replace(/^user-content-/, "").replace(/-fn-.*$/, "");
@@ -177,6 +188,21 @@ export function chunkingsFor(markdown: string): number[] {
 }
 
 /**
+ * The sanitiser's schema plus remark-rehype's footer, which the pipeline does not emit (the renderer draws
+ * the notes section itself, notes.tsx): the section, its heading and the back-references' English labels.
+ */
+const FOOTER_SCHEMA = {
+  ...SCHEMA,
+  tagNames: [...(SCHEMA.tagNames ?? []), "section"],
+  attributes: {
+    ...SCHEMA.attributes,
+    a: [...(SCHEMA.attributes?.a ?? []), "ariaLabel"],
+    section: ["dataFootnotes", ["className", "footnotes"]],
+    h2: ["id", ["className", "sr-only"]],
+  },
+} satisfies typeof SCHEMA;
+
+/**
  * The answer as one block, without the splitter: what rendering block by block must reproduce. Its
  * footnotes section's heading gets the answer's scope, as every generated id does in ours (remark-rehype
  * gives it the fixed id `footnote-label`).
@@ -188,7 +214,7 @@ export function unsplit(text: string): string {
         clobberPrefix: "spec-",
         handlers: { html: (_, node) => ({ type: "text", value: node.value }) },
       }),
-      SCHEMA,
+      FOOTER_SCHEMA,
     ) as Root,
   );
   return html.replaceAll('"user-content-footnote-label"', '"user-content-spec-footnote-label"');
