@@ -134,6 +134,7 @@ fn approval_entries() -> Vec<ViewEntry> {
                     kind: PermissionKind::AllowOnce,
                 },
                 by: Principal::LocalDesktop,
+                held_open: None,
             },
             answered_at: Some(Timestamp::new(1_760_000_002_000).unwrap()),
         }),

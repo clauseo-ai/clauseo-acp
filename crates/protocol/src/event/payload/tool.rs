@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     CompactString, Deliverable, ElicitationId, ElicitationOutcome, ElicitationRequest,
-    ExpiryReason, PermissionChoice, PermissionOption, PermissionRequestId, Principal, TextOrBlob,
-    ToolCallContent, ToolCallId, ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation, TurnId,
+    ExpiryReason, MatterPath, PermissionChoice, PermissionOption, PermissionRequestId, Principal,
+    TextOrBlob, ToolCallContent, ToolCallId, ToolCallPatch, ToolCallStatus, ToolKind, ToolLocation,
+    TurnId,
 };
 
 /// A tool call the agent reported.
@@ -78,6 +79,11 @@ pub struct PermissionResolved {
     pub choice: PermissionChoice,
     /// Who answered.
     pub by: Principal,
+    /// A program holds this file open: an Office owner file beside it, or on Windows a sharing
+    /// violation; the host refused the request without asking. The choice is then the
+    /// request's reject-once option (`Cancelled` when it offered no reject option).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub held_open: Option<MatterPath>,
 }
 
 /// A permission request expired unanswered.

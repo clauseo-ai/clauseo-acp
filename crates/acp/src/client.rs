@@ -52,6 +52,10 @@ pub(crate) enum Command {
         option_id: AgentChoiceId,
         reply: Reply<()>,
     },
+    CancelPermission {
+        key: PendingKey,
+        reply: Reply<()>,
+    },
     AnswerElicitation {
         key: PendingKey,
         response: ElicitationResponse,
@@ -191,6 +195,13 @@ impl AcpClient {
             reply,
         })
         .await
+    }
+
+    /// Answers one permission request `cancelled`, leaving the session's turn and its other
+    /// requests as they are (unlike [`cancel`](Self::cancel)).
+    pub async fn cancel_permission(&self, key: PendingKey) -> Result<(), Error> {
+        self.call(|reply| Command::CancelPermission { key, reply })
+            .await
     }
 
     /// Answers an elicitation.

@@ -211,6 +211,11 @@ enum Then {
         key: clauseo_acp::PendingKey,
         option: AgentChoiceId,
     },
+    /// A permission request the host cancelled for the lawyer: tell the agent.
+    CancelPermission {
+        agent: u64,
+        key: clauseo_acp::PendingKey,
+    },
     /// An elicitation answer: tell the agent.
     Elicitation {
         agent: u64,
@@ -247,6 +252,7 @@ enum JobKind {
     After(TurnId),
     Reconcile(Box<reconcile::Repair>),
     Undo(Box<undo::UndoAsk>),
+    Permission(Box<asks::HeldOpenCheck>),
 }
 
 /// An agent's event or its end, in the order its tasks posted them, for `thread`.
@@ -310,6 +316,9 @@ pub(crate) fn matter_reply(actor: &mut Actor, _matter: MatterId, job: TurnJob, r
         (JobKind::Undo(ask), MatterReply::Undone(result)) => {
             undo::on_undone(actor, thread, *ask, result.map(|undone| *undone));
         }
+        (JobKind::Permission(ask), MatterReply::HeldOpen(held)) => {
+            asks::on_held_open(actor, thread, *ask, held);
+        }
         (kind, reply) => {
             tracing::error!(
                 ?kind,
@@ -338,6 +347,9 @@ pub(crate) fn committed(actor: &mut Actor, tag: TurnTag, outcome: Result<(), &Fa
         (Then::Permission { agent, key, option }, Ok(())) => {
             answers::tell_permission(actor, thread, agent, key, option);
         }
+        (Then::CancelPermission { agent, key }, Ok(())) => {
+            answers::tell_cancel_permission(actor, thread, agent, key);
+        }
         (
             Then::Elicitation {
                 agent,
@@ -346,7 +358,11 @@ pub(crate) fn committed(actor: &mut Actor, tag: TurnTag, outcome: Result<(), &Fa
             },
             Ok(()),
         ) => answers::tell_elicitation(actor, thread, agent, key, response),
-        (Then::Permission { .. } | Then::Elicitation { .. }, Err(_)) | (Then::Nothing, Ok(())) => {}
+        (
+            Then::Permission { .. } | Then::CancelPermission { .. } | Then::Elicitation { .. },
+            Err(_),
+        )
+        | (Then::Nothing, Ok(())) => {}
         (Then::Nothing | Then::Started(_), Err(failed)) => {
             failure::on_store_failure(actor, thread, failed);
         }

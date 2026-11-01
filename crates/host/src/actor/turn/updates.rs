@@ -112,7 +112,16 @@ fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             key,
             acp_tool_call_id,
             options,
-        } => asks::on_permission(actor, thread, &session, key, &acp_tool_call_id, options),
+            paths,
+        } => {
+            let ask = asks::PermissionAsk {
+                session,
+                key,
+                acp_tool_call_id,
+                options,
+            };
+            asks::on_permission(actor, thread, ask, &paths);
+        }
         AcpEvent::ElicitationRequested {
             session,
             key,

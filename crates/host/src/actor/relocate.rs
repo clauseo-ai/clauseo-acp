@@ -136,7 +136,8 @@ pub(super) fn located(
         | MatterReply::Undone(_)
         | MatterReply::Restored(_)
         | MatterReply::Compared(_)
-        | MatterReply::Previewed(_) => Err(Error::Internal(
+        | MatterReply::Previewed(_)
+        | MatterReply::HeldOpen(_) => Err(Error::Internal(
             "a matter's locate got another job's reply".to_owned(),
         )),
     };

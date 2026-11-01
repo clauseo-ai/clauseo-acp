@@ -64,6 +64,77 @@ fn pending_permission_requests_have_distinct_keys() {
     assert_eq!(driver, Ok(()));
 }
 
+/// A permission request carrying `tool_call` (the `toolCall` object) and the two options.
+fn permission_with(id: &str, tool_call: Value) -> Value {
+    let mut request = permission_request(id, "tc-paths");
+    request["params"]["toolCall"] = tool_call;
+    request
+}
+
+/// `PermissionRequested.paths` holds every `locations[].path`, then `rawInput.file_path` and
+/// `rawInput.notebook_path` when they are strings, without repeats, as the agent wrote them:
+/// claude-agent-acp's Edit (the location repeats `file_path`) and `NotebookEdit`, codex-acp's file
+/// change (locations only, which may be empty), a relative path, and a request with neither.
+#[test]
+fn permission_requests_carry_the_paths_they_name() {
+    let call = |raw_input: Value, locations: Value| {
+        json!({"toolCallId": "tc-paths", "title": "Edit", "kind": "edit", "status": "pending",
+            "rawInput": raw_input, "locations": locations})
+    };
+    let requests = [
+        call(
+            json!({"file_path": "/m/Brief.docx", "old_string": "a", "new_string": "b"}),
+            json!([{"path": "/m/Brief.docx"}]),
+        ),
+        call(
+            json!({"notebook_path": "/m/n.ipynb", "file_path": 7, "new_source": "/m/x"}),
+            json!([{"path": "/m/blocked.txt"}]),
+        ),
+        call(
+            json!({"changes": {"/m/a.md": {}}}),
+            json!([{"path": "/m/a.md"}, {"path": "notes/b.md", "line": 3}, {"path": "/m/a.md"}]),
+        ),
+        call(json!({"changes": {}}), json!([])),
+        json!({"toolCallId": "tc-paths", "title": "Edit", "kind": "edit", "status": "pending"}),
+    ];
+    let count = requests.len();
+    let (client, events, driver, mut agent) = pipes();
+    let calls = async move {
+        handshake(&client).await;
+        let mut seen: Vec<Vec<String>> = Vec::new();
+        while seen.len() < count {
+            if let AcpEvent::PermissionRequested { key, paths, .. } = events.recv().await.unwrap() {
+                let paths = paths.iter().map(|p| p.display().to_string()).collect();
+                seen.push(paths);
+                let reject = AgentChoiceId::new("reject-once").unwrap();
+                client.answer_permission(key, reject).await.unwrap();
+            }
+        }
+        assert_eq!(
+            seen,
+            [
+                vec!["/m/Brief.docx"],
+                vec!["/m/blocked.txt", "/m/n.ipynb"],
+                vec!["/m/a.md", "notes/b.md"],
+                vec![],
+                vec![],
+            ]
+        );
+    };
+    let script = async {
+        agent.start().await;
+        for (n, tool_call) in requests.into_iter().enumerate() {
+            agent.send(&permission_with(&format!("perm-{n}"), tool_call));
+            let answer = agent.read().await;
+            assert_eq!(answer["result"]["outcome"]["optionId"], "reject-once");
+        }
+        agent.read_end().await;
+    };
+    let (driver, (), ()) =
+        futures::executor::block_on(async { futures::join!(driver, calls, script) });
+    assert_eq!(driver, Ok(()));
+}
+
 /// Accepting a URL elicitation answers `{"action": "accept"}` with no `content`, even when the
 /// host passes values: a URL elicitation collects nothing.
 #[test]

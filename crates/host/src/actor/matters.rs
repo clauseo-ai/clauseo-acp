@@ -315,7 +315,8 @@ pub(super) fn on_matter_reply(
                 | MatterReply::AfterTurn(_)
                 | MatterReply::Undone(_)
                 | MatterReply::Restored(_)
-                | MatterReply::Located(_)) => Err(Error::Internal(format!(
+                | MatterReply::Located(_)
+                | MatterReply::HeldOpen(_)) => Err(Error::Internal(format!(
                     "a query answered with another job's reply: {other:?}"
                 ))),
             };
@@ -443,7 +444,8 @@ fn made(reply: MatterReply) -> Result<(CommitId, Option<ImportSummary>), Error> 
         | MatterReply::Undone(_)
         | MatterReply::Restored(_)
         | MatterReply::Compared(_)
-        | MatterReply::Previewed(_) => Err(Error::Internal(
+        | MatterReply::Previewed(_)
+        | MatterReply::HeldOpen(_) => Err(Error::Internal(
             "a matter's create got another job's reply".to_owned(),
         )),
     }

@@ -42,6 +42,14 @@ pub(crate) fn permission(
     )
 }
 
+/// Answers one permission request `cancelled`.
+pub(crate) fn cancel_permission(shared: &Shared, key: PendingKey) -> Result<(), Error> {
+    let pending = shared.state().permissions.remove(&key);
+    let pending = pending.ok_or(Error::PermissionNotPending)?;
+    let cancelled = acp::RequestPermissionResponse::new(acp::RequestPermissionOutcome::Cancelled);
+    respond(pending.responder, &cancelled)
+}
+
 /// Answers an elicitation. A URL elicitation's accept carries no `content`; a form's carries the
 /// values as JSON.
 pub(crate) fn elicitation(

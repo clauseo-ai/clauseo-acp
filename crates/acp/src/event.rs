@@ -5,6 +5,8 @@
 //! `compactionId`, `elicitationId`, an auth method's `id`) a `CompactString`. `host` mints
 //! Clauseo's ids and dedupes on them.
 
+use std::path::PathBuf;
+
 use clauseo_protocol::{
     AgentSessionId, AvailableCommand, CompactString, ConfigOption, ContentBlock, Cost, Count,
     ElicitationRequest, Finite, LimitStopReason, NoticeLevel, PermissionOption, PlanEntry,
@@ -35,6 +37,11 @@ pub enum AcpEvent {
         acp_tool_call_id: CompactString,
         /// The options the agent offered, in its order.
         options: Vec<PermissionOption>,
+        /// The paths the request names: every `toolCall.locations[].path`, then
+        /// `rawInput.file_path` and `rawInput.notebook_path` when they are strings, without
+        /// repeats, as the agent wrote them (absolute, or relative to the session's `cwd`).
+        /// Empty when it names none.
+        paths: Vec<PathBuf>,
     },
     /// The agent asks the lawyer for input. Answer with `AcpClient::answer_elicitation`.
     ElicitationRequested {

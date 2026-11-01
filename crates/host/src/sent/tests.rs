@@ -172,6 +172,7 @@ fn sent_layer_leads_and_rolls_back() {
                 request,
                 choice: PermissionChoice::Cancelled,
                 by: Principal::LocalDesktop,
+                held_open: None,
             }),
             DomainEvent::ElicitationExpired(ElicitationExpired {
                 elicitation,

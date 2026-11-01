@@ -102,6 +102,9 @@ fn execute(cx: &ConnectionTo<Agent>, shared: &Arc<Shared>, command: Command) {
             option_id,
             reply,
         } => answer(reply, answers::permission(shared, key, &option_id)),
+        Command::CancelPermission { key, reply } => {
+            answer(reply, answers::cancel_permission(shared, key));
+        }
         Command::AnswerElicitation {
             key,
             response,

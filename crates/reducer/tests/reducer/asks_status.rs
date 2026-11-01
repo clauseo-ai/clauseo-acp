@@ -1,13 +1,14 @@
 //! The thread's status around questions to the lawyer and prompts that end before they start:
 //! an expired question settles like an answered one, a turn starts as `NeedsYou` while one
 //! waits, a restored state still counts the questions that wait, and the end of an earlier
-//! prompt's turn leaves the `Starting` of a later one.
+//! prompt's turn leaves the `Starting` of a later one. A request refused because a program holds
+//! the file open keeps the file in its settled state.
 
 use clauseo_protocol::{
     ElicitationExpired, ElicitationOutcome, ElicitationRequest, ElicitationRequested,
-    ElicitationResolved, ElicitationState, ExpiryReason, MessageId, PermissionExpired,
-    PermissionRequestId, PermissionState, Principal, ThreadStatus, TurnId, TurnStarted,
-    UserMessageStatus, ViewEntry,
+    ElicitationResolved, ElicitationState, ExpiryReason, MatterPath, MessageId, PermissionChoice,
+    PermissionExpired, PermissionKind, PermissionRequestId, PermissionResolved, PermissionState,
+    Principal, ThreadStatus, TurnId, TurnStarted, UserMessageStatus, ViewEntry,
 };
 use clauseo_reducer::{StreamState, apply};
 
@@ -40,6 +41,41 @@ fn an_expired_permission_is_settled_and_the_turn_runs_on() {
         panic!("{:?}", out.changes);
     };
     assert_eq!(entry.state, PermissionState::Expired { reason });
+    assert_eq!(status(&state), ThreadStatus::Running);
+}
+
+/// A request the host refused because a program holds the file open settles with the file named.
+#[test]
+fn a_permission_refused_for_an_open_document_names_the_file() {
+    let mut log = Log::thread(23).unwrap();
+    log.push(thread_created().unwrap()).unwrap();
+    start_turn(&mut log, "Edit the brief.").unwrap();
+    let request: PermissionRequestId = log.fresh().unwrap();
+    log.push(permission_requested(request, None)).unwrap();
+    let mut state = fold(log.events());
+    let choice = PermissionChoice::Selected {
+        option_id: "reject".into(),
+        kind: PermissionKind::RejectOnce,
+    };
+    let held_open = Some(MatterPath::new("Brief.docx").unwrap());
+    let refused = PermissionResolved {
+        request,
+        choice: choice.clone(),
+        by: Principal::LocalDesktop,
+        held_open: held_open.clone(),
+    };
+    let out = apply(&mut state, &log.push(refused).unwrap()).unwrap();
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    let ViewEntry::Permission(entry) = first_upsert(&out.changes) else {
+        panic!("{:?}", out.changes);
+    };
+    let by = Principal::LocalDesktop;
+    let settled = PermissionState::Resolved {
+        choice,
+        by,
+        held_open,
+    };
+    assert_eq!(entry.state, settled);
     assert_eq!(status(&state), ThreadStatus::Running);
 }
 

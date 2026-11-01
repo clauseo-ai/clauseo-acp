@@ -273,6 +273,7 @@ fn session_events() -> Vec<DomainEvent> {
                 kind: PermissionKind::AllowOnce,
             },
             by: Principal::LocalDesktop,
+            held_open: None,
         }
         .into(),
         PermissionExpired {

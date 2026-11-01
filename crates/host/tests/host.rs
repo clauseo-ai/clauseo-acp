@@ -56,5 +56,8 @@ mod turn;
 #[path = "host/versions.rs"]
 mod versions;
 #[cfg(test)]
+#[path = "host/word_open.rs"]
+mod word_open;
+#[cfg(test)]
 #[path = "host/writer.rs"]
 mod writer;

@@ -2072,6 +2072,12 @@ export type PermissionResolved = {
 	choice: PermissionChoice,
 	/**  Who answered. */
 	by: Principal,
+	/**
+	 *  A program holds this file open: an Office owner file beside it, or on Windows a sharing
+	 *  violation; the host refused the request without asking. The choice is then the
+	 *  request's reject-once option (`Cancelled` when it offered no reject option).
+	 */
+	held_open?: MatterPath,
 };
 
 /**  Where a permission request or an elicitation stands. */
@@ -2084,6 +2090,11 @@ export type PermissionState =
 	choice: PermissionChoice,
 	/**  Who answered. */
 	by: Principal,
+	/**
+	 *  The file a program holds open, when the host refused the request without asking
+	 *  because of it (`PermissionResolved::held_open`).
+	 */
+	held_open?: MatterPath,
 } }) & { expired?: never } | 
 /**  Expired unanswered. */
 ({ expired: {
