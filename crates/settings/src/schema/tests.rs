@@ -60,6 +60,7 @@ fn the_keys_and_their_kinds_are_the_schemas() {
             let kind = match kind {
                 Kind::Number => "integer",
                 Kind::String => "string",
+                Kind::Object => "object",
                 other => panic!("{key}: {other:?}"),
             };
             ((*key).to_owned(), kind.to_owned())
@@ -120,6 +121,7 @@ fn languages_are_bcp_47_tags() {
 fn each_setting_has_its_default() {
     let settings = Settings::default();
     assert_eq!(settings.agents, std::collections::BTreeMap::new());
+    assert_eq!(settings.mcp.servers, std::collections::BTreeMap::new());
     assert_eq!(settings.matters.default_location, None);
     assert_eq!(
         serde_json::to_value(&settings.ui).unwrap(),

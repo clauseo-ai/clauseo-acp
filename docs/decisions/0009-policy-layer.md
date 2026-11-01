@@ -22,10 +22,12 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
   - Only these count. `HKEY_CURRENT_USER`, roaming app data and user-writable files are never
     policy, and no variable moves a source: `CLAUSEO_DATA_DIR` moves only the data folder.
 - **Keys** are the dotted keys of `settings.json`: `matters.default_location`, `ui.theme`,
-  `ui.font_size`, `ui.density`, `ui.language`, and `agents.<id>` for one agent's launch spec.
+  `ui.font_size`, `ui.density`, `ui.language`, `agents.<id>` for one agent's launch spec, and
+  `mcp.servers` for the whole list of MCP servers a lawyer can turn on (added with
+  clauseo-ai/clauseo-acp-private#160).
 - **Registry format.** One value per dotted key. `REG_DWORD` is a number, or a boolean (0 or 1)
   where the setting is one. `REG_SZ` is a string, or JSON text where the setting is an object
-  (`agents.<id>`). `REG_MULTI_SZ` is a list of strings. A value of another type is a warning (and
+  (`agents.<id>`, `mcp.servers`). `REG_MULTI_SZ` is a list of strings. A value of another type is a warning (and
   locks its key, below). Value names are compared without case, as Windows does: `UI.Theme` is
   `ui.theme`, and `Agents.Claude` is `agents.Claude`, whose id keeps its case.
 - **Managed preferences.** A key counts only when `CFPreferencesAppValueIsForced` says it is
@@ -34,12 +36,19 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
   key is never read on macOS. Property list values become JSON values (dictionary, array, string,
   number, boolean); a date, a data value or a number that is not finite is a warning (and locks its
   key, below).
-- **`policy.json`** has the shape of `settings.json`: sections `matters`, `agents` and `ui`, each
+- **`policy.json`** has the shape of `settings.json`: sections `matters`, `agents`, `mcp` and `ui`, each
   an object, in JSON with comments and trailing commas.
 - **Merge rule.** Defaults, then the user's `settings.json`, then policy. A policy value replaces
   the user's value for its key, and the key shows as locked. An agent's policy entry replaces the
   user's whole entry for that id (args and env are not merged), and the locked key is
   `agents.<id>`.
+- **MCP servers** (Rohan, 2026-11-02). `mcp.servers` maps a server name (1 to 64 letters, digits,
+  `_` or `-`) to `{command, args, env, enabled}`, with `command` an absolute path and
+  `enabled` `false` unless set. It is one key: a policy value replaces the user's whole list, with
+  the firm's `enabled` values, and locks it. An entry with a bad name, a relative `command` or a
+  value that does not type is left out with a warning, and the rest of the list loads; an unknown
+  field in an entry is a warning and is ignored. Only enabled servers reach an agent's session.
+  On macOS it is the managed-preferences key `mcp.servers`, a dictionary.
 - **What is left out.** A key this version does not know is a warning and locks nothing, so one
   profile serves machines on mixed versions.
 - **An invalid policy value fails closed, key by key** (Rohan, 2026-10-31). A value of the wrong
@@ -49,14 +58,18 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
   the user's entry for that id is dropped, so that agent does not launch. A stronger source's
   invalid value wins over a weaker source's valid one, as any value does. A malformed section of a
   `policy.json`, or a managed-preferences `agents` value that is not a dictionary, names no key,
-  so it is only a warning. This replaces the first draft's rule, under which an invalid value was
+  so it is only a warning. A policy `mcp.servers` that is not an object locks the list empty, so
+  no server reaches an agent. This replaces the first draft's rule, under which an invalid value was
   left out and its key not locked.
 - **Applied sources.** `PolicyStatus` lists a source as applied only when it set at least one
   valid value; a source whose every value was refused still locks the keys it named.
 - **A source that cannot be read** (a `policy.json` that does not parse or cannot be opened, a
   registry read that fails) is dropped whole. Start-up goes on with the other sources, and the
-  error is listed in `PolicyStatus` for `host` to log. No M1 key is security-relevant; M2 revisits
-  this when firm keys arrive, where failing closed may be right.
+  error is listed in `PolicyStatus` for `host` to log. **A security-relevant key fails closed on an
+  unreadable source too** (Rohan, 2026-11-02): what the source held for it is unknown, so the key
+  is locked at its default, with a warning, unless a stronger source already set it. Today that is
+  only `mcp.servers` (`SECURITY_KEYS` in `crates/settings/src/leaf.rs`), so a broken firm file
+  turns every MCP server off. Other keys keep the user's value.
 - **`ARCHITECTURE.md`.** The `settings` row becomes `exists`, and its "May depend on" cell lists
   the normal dependencies the crate uses: `serde, serde_json, serde_json_lenient, schemars;
   windows (Windows only); objc2-core-foundation (macOS only)`.

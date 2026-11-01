@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// The top-level keys of `settings.json`, each an object.
-pub(crate) const SECTIONS: [&str; 3] = ["matters", "agents", "ui"];
+pub(crate) const SECTIONS: [&str; 4] = ["matters", "agents", "mcp", "ui"];
 
 /// Every setting, as `Effective::settings` gives it: the defaults, then `settings.json`, then
 /// the policy layer.
@@ -28,6 +28,8 @@ pub struct Settings {
     pub matters: MattersSettings,
     /// The agents Clauseo can launch, by id. Empty by default.
     pub agents: BTreeMap<String, AgentLaunch>,
+    /// The MCP servers a lawyer can turn on for their agents' sessions.
+    pub mcp: McpSettings,
     /// How the app looks. The webview changes these only through a `UiPatch`.
     pub ui: UiSettings,
 }
@@ -51,6 +53,32 @@ pub struct AgentLaunch {
     /// Variables added to its environment. Never a secret: keys go in the OS keychain.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+}
+
+/// The `mcp` section.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(default)]
+pub struct McpSettings {
+    /// The MCP servers by name: 1 to 64 letters, digits, `_` or `-`. Each is off until it is
+    /// turned on. A policy value replaces the whole list. Empty by default.
+    pub servers: BTreeMap<String, McpServerLaunch>,
+}
+
+/// How to start one MCP server. `host` passes the enabled ones to the agent in
+/// `session/new`; this crate only reads them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct McpServerLaunch {
+    /// The program, as an absolute path.
+    pub command: String,
+    /// Its arguments.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Variables added to its environment. Never a secret: keys go in the OS keychain.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    /// Whether the agent gets it. Off unless set.
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 /// The `ui` section. Design may change these values before M4 without a decision record.

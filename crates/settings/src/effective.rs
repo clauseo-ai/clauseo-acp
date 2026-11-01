@@ -2,19 +2,22 @@
 //! changes at runtime through [`Effective::apply_ui_patch`].
 
 #[cfg(test)]
+mod mcp_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod ui_patch_tests;
 
 use crate::error::Error;
 use crate::files::Files;
+use crate::leaf::{self, Leaf};
 use crate::locations::Locations;
 use crate::policy::{PolicyRead, PolicySource, PolicyStatus};
-use crate::schema::{AgentLaunch, Settings};
+use crate::schema::{AgentLaunch, McpServerLaunch, Settings};
 use crate::ui::UiPatch;
 use crate::user;
-use crate::warning::Warning;
-use std::collections::BTreeSet;
+use crate::warning::{Origin, Warning, WarningKind};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// The settings after the defaults, the user's `settings.json` and the policy layer, in that
@@ -38,7 +41,9 @@ impl Effective {
     /// from a later one. A policy value replaces the user's value for its key, and an agent's
     /// replaces the user's whole entry for that id; each such key is locked. A policy value for a
     /// known key that does not type locks the key at its default (an agent: no entry), with a
-    /// warning: fail closed (Rohan, 2026-10-31).
+    /// warning: fail closed (Rohan, 2026-10-31). A source that cannot be read also locks each
+    /// security-relevant key (`leaf::SECURITY_KEYS`) at its default, with a warning, since its
+    /// value is unknown (2026-11-02).
     pub fn load(
         locations: &Locations,
         files: &dyn Files,
@@ -54,7 +59,10 @@ impl Effective {
         for source in policy {
             match source.read() {
                 PolicyRead::Absent => {}
-                PolicyRead::Unreadable(error) => status.push_error(source.name(), error),
+                PolicyRead::Unreadable(error) => {
+                    status.push_error(source.name(), error);
+                    lock_security_keys(source.name(), &mut settings, &mut locked, &mut warnings);
+                }
                 PolicyRead::Read(values) => {
                     if values.sets_a_value() {
                         status.push_applied(source.name());
@@ -113,6 +121,22 @@ impl Effective {
         self.settings.agents.get(id)
     }
 
+    /// Every MCP server in the settings, on or off, by name. When policy sets `mcp.servers`
+    /// this is the firm's list alone.
+    pub fn mcp_servers(&self) -> &BTreeMap<String, McpServerLaunch> {
+        &self.settings.mcp.servers
+    }
+
+    /// The MCP servers turned on, in name order: the only ones an agent's session gets.
+    pub fn enabled_mcp_servers(&self) -> impl Iterator<Item = (&str, &McpServerLaunch)> {
+        self.settings
+            .mcp
+            .servers
+            .iter()
+            .filter(|(_, server)| server.enabled)
+            .map(|(name, server)| (name.as_str(), server))
+    }
+
     /// Where new matters go: `matters.default_location`, or else `Documents/Clauseo`.
     pub fn default_matters_dir(&self) -> &Path {
         self.settings
@@ -137,8 +161,8 @@ impl Effective {
         &self.policy
     }
 
-    /// Whether policy set the dotted `key` (such as `matters.default_location` or
-    /// `agents.<id>`), so the user cannot change it.
+    /// Whether policy set the dotted `key` (such as `matters.default_location`, `mcp.servers`
+    /// or `agents.<id>`), so the user cannot change it.
     pub fn is_locked(&self, key: &str) -> bool {
         self.locked.contains(key)
     }
@@ -151,5 +175,32 @@ impl Effective {
     /// What loading worked round, in the order it was found.
     pub fn warnings(&self) -> &[Warning] {
         &self.warnings
+    }
+}
+
+/// Locks each security-relevant key a stronger source has not set at its default, for the
+/// unreadable source `name`: what it held for the key is unknown, so the user's value must not
+/// stand in for it.
+fn lock_security_keys(
+    name: &str,
+    settings: &mut Settings,
+    locked: &mut BTreeSet<String>,
+    warnings: &mut Vec<Warning>,
+) {
+    for key in leaf::SECURITY_KEYS {
+        if locked.insert(key.to_owned()) {
+            Leaf::Refused(key.to_owned()).apply(settings);
+            warnings.push(Warning {
+                origin: Origin::Store {
+                    name: name.to_owned(),
+                },
+                kind: WarningKind::InvalidValue {
+                    key: key.to_owned(),
+                    message: "the policy source could not be read, so this is locked at its \
+                              default"
+                        .to_owned(),
+                },
+            });
+        }
     }
 }

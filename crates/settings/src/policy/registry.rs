@@ -2,8 +2,8 @@
 //! as Intune's Settings Catalog and ADMX push them.
 //!
 //! `REG_DWORD` is a number, or a boolean (0 or 1) where the setting is one. `REG_SZ` is a string,
-//! or JSON text where the setting is an object (`agents.<id>`). `REG_MULTI_SZ` is a list of
-//! strings. Value names are compared without case, as Windows does (`UI.Theme` is
+//! or JSON text where the setting is an object (`agents.<id>`, `mcp.servers`). `REG_MULTI_SZ` is
+//! a list of strings. Value names are compared without case, as Windows does (`UI.Theme` is
 //! `ui.theme`); an agent id keeps the case it is written in. A known key's value of another
 //! type gets a warning and locks the key at its default; an unknown value name is only a warning.
 
