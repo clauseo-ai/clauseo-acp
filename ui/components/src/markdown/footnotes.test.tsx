@@ -221,6 +221,32 @@ test("a note's own references number where the note stands, as cmark-gfm (GitHub
   ]);
 });
 
+test("each note is its own view: a note streaming in the last block leaves the others as they were", () => {
+  const refs = Array.from({ length: 10 }, (_, index) => `Claim ${index}[^n${index}].`).join(" ");
+  const notes = Array.from({ length: 9 }, (_, index) => `[^n${index}]: Note ${index}.`).join(
+    "\n\n",
+  );
+  const answer = createAnswer("t");
+  const first = answer.update(`${refs}\n\n${notes}\n\n[^n9]: The last no`, true).at(-1)?.items;
+  const second = answer
+    .update(`${refs}\n\n${notes}\n\n[^n9]: The last note grows`, true)
+    .at(-1)?.items;
+  expect(first).toHaveLength(10);
+  expect(second?.slice(0, 9)).toEqual(first?.slice(0, 9));
+  expect(second?.slice(0, 9).every((item, index) => item === first?.[index])).toBe(true);
+  expect(second?.[9]).not.toBe(first?.[9]);
+  expect(second?.[9]?.streaming).toBe(true);
+  // A new reference to one note gives that note a new back-reference, and only that note a new view.
+  const third = answer.update(
+    `${refs} Again[^n4].\n\n${notes}\n\n[^n9]: The last note grows`,
+    true,
+  );
+  const changed = third
+    .at(-1)
+    ?.items?.flatMap((item, index) => (item === second?.[index] ? [] : [index]));
+  expect(changed).toEqual([4]);
+});
+
 test("a finished answer re-rendered with no change keeps every view", () => {
   const answer = createAnswer("t");
   const first = answer.update(DOC, false);

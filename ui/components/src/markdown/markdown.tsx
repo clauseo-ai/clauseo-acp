@@ -7,6 +7,7 @@ import type { BlockView } from "./answer.ts";
 import { BlockBoundary } from "./boundary.tsx";
 import { characterEntitiesLoaded, onCharacterEntities, prefetchEntities } from "./entities.ts";
 import { AnswerScopeContext, InertLinksContext, scopeOf } from "./host.ts";
+import { Notes } from "./notes.tsx";
 import { toReact } from "./to-react.ts";
 
 /**
@@ -31,6 +32,17 @@ const Block = memo(function Block({ view }: { view: BlockView }) {
   );
 });
 
+/** The notes view: the section, and each note as its own memoised block, so one note changing re-renders it alone. */
+const NotesBlock = memo(function NotesBlock({ items }: { items: readonly BlockView[] }) {
+  return (
+    <Notes>
+      {items.map((item) => (
+        <Block key={item.note} view={item} />
+      ))}
+    </Notes>
+  );
+});
+
 function BlockContent({ view }: { view: BlockView }) {
   return toReact(view.hast);
 }
@@ -45,9 +57,13 @@ export function Markdown({ text, streaming = false }: MarkdownProps) {
   return (
     <AnswerScopeContext value={scope}>
       <div data-clauseo="markdown">
-        {blocks.map((view, index) => (
-          <Block key={view.notes ? "notes" : index} view={view} />
-        ))}
+        {blocks.map((view, index) =>
+          view.items ? (
+            <NotesBlock key="notes" items={view.items} />
+          ) : (
+            <Block key={index} view={view} />
+          ),
+        )}
       </div>
     </AnswerScopeContext>
   );

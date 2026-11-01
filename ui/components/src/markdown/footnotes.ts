@@ -299,57 +299,36 @@ function backReferences(scope: string, id: string, index: number, count: number)
 }
 
 /**
- * The notes section for the whole answer, unsanitised: each referenced note in number order, its content
- * rendered with `options` (and the reference handler for references inside it), then its back-references.
- * Undefined when no defined note is referenced.
+ * One note of the notes section, unsanitised: a root holding its list item, its content rendered with
+ * `options` (and the reference handler for the references inside it), then its back-references. `id` is
+ * a shown note's identifier; each note is its own view, so one that changes re-renders alone. The
+ * section around the items (notes.tsx) is the same for every answer.
  */
-export function notesHast(scope: string, numbering: Numbering, options: Options): Hast | undefined {
-  const items: ElementContent[] = [];
-  numbering.order.forEach((id, index) => {
-    const note = numbering.notes.get(id);
-    if (!note) return;
-    const handler = referenceHandler(scope, numbering, numbering.inNotes.get(id) ?? EMPTY);
-    const tree: Root = { type: "root", children: [...note.definitions, ...note.node.children] };
-    const content = (
-      toHast(tree, {
-        ...options,
-        handlers: { ...options.handlers, footnoteReference: handler },
-      }) as Hast
-    ).children.filter((child): child is ElementContent => child.type !== "doctype");
-    const back = backReferences(scope, id, index, numbering.total.get(id) ?? 0);
-    let last: ElementContent | undefined;
-    for (const child of content) if (child.type === "element") last = child;
-    if (last?.type === "element" && last.tagName === "p") {
-      const end = last.children.at(-1);
-      if (end?.type === "text") end.value += " ";
-      else last.children.push({ type: "text", value: " " });
-      last.children.push(...back);
-    } else content.push(...back);
-    items.push({ type: "text", value: "\n" });
-    items.push({
-      type: "element",
-      tagName: "li",
-      properties: { id: `${scope}-fn-${id}` },
-      children: content,
-    });
-  });
-  if (items.length === 0) return undefined;
-  items.push({ type: "text", value: "\n" });
-  const section: Element = {
+export function noteHast(scope: string, numbering: Numbering, id: string, options: Options): Hast {
+  const note = numbering.notes.get(id)!;
+  const index = numbering.number.get(id)! - 1;
+  const handler = referenceHandler(scope, numbering, numbering.inNotes.get(id) ?? EMPTY);
+  const tree: Root = { type: "root", children: [...note.definitions, ...note.node.children] };
+  const content = (
+    toHast(tree, {
+      ...options,
+      handlers: { ...options.handlers, footnoteReference: handler },
+    }) as Hast
+  ).children.filter((child): child is ElementContent => child.type !== "doctype");
+  const back = backReferences(scope, id, index, numbering.total.get(id) ?? 0);
+  let last: ElementContent | undefined;
+  for (const child of content) if (child.type === "element") last = child;
+  if (last?.type === "element" && last.tagName === "p") {
+    const end = last.children.at(-1);
+    if (end?.type === "text") end.value += " ";
+    else last.children.push({ type: "text", value: " " });
+    last.children.push(...back);
+  } else content.push(...back);
+  const item: Element = {
     type: "element",
-    tagName: "section",
-    properties: { dataFootnotes: true, className: ["footnotes"] },
-    children: [
-      {
-        type: "element",
-        tagName: "h2",
-        properties: { className: ["sr-only"], id: `${scope}-footnote-label` },
-        children: [{ type: "text", value: "Footnotes" }],
-      },
-      { type: "text", value: "\n" },
-      { type: "element", tagName: "ol", properties: {}, children: items },
-      { type: "text", value: "\n" },
-    ],
+    tagName: "li",
+    properties: { id: `${scope}-fn-${id}` },
+    children: content,
   };
-  return { type: "root", children: [section] };
+  return { type: "root", children: [item] };
 }
