@@ -5,8 +5,9 @@
 //! The hooks sit where the crate reads a file (each read call of `history/blob.rs`, after the
 //! open, as on the Mac: the open succeeds and the read fails) and lists a folder (`walk.rs`,
 //! and `writeback::Names`). One more hook changes a streamed file between the hash pass and the
-//! store pass of `history/blob.rs`, as an editor saving it then would. On macOS the reads and the walk's listings also record the thread's
-//! download policy at each call, so a test can check that every one ran under the guard.
+//! store pass of `history/blob.rs`, as an editor saving it then would. On macOS the reads and
+//! the walk's listings also record the thread's download policy at each call, so a test can
+//! check that every one ran under the guard.
 
 use std::cell::RefCell;
 use std::io;

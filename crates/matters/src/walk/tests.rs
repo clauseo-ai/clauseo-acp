@@ -202,7 +202,7 @@ impl Mode {
 impl Drop for Mode {
     fn drop(&mut self) {
         use std::os::unix::fs::PermissionsExt;
-        let _ = write::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        write::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 }
 

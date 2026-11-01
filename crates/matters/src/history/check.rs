@@ -1,6 +1,7 @@
 //! The checks of a loose object file found already present, each inflating it in full: against
-//! the bytes in hand when the checkpoint holds them, else hashed against its id. A file that does not decode is unsound (`false`); an I/O error reading
-//! it is an error, so a transient failure never counts as a torn object.
+//! the bytes in hand when the checkpoint holds them, else hashed against its id. A file that
+//! does not decode is unsound (`false`); an I/O error reading it is an error, so a transient
+//! failure never counts as a torn object.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};
