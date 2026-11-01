@@ -142,3 +142,19 @@ test("after unmount a resize reads nothing, and a late reply is dropped", async 
   expect(controls.isMaximised).toHaveBeenCalledTimes(1);
   expect(errors).not.toHaveBeenCalled();
 });
+
+test("a slow reply overtaken by a later read's does not stand", async () => {
+  const replies: ((m: boolean) => void)[] = [];
+  const controls = {
+    ...fakeWindow(false).controls,
+    isMaximised: vi.fn(() => new Promise<boolean>((resolve) => replies.push(resolve))),
+  } satisfies WindowControls;
+  await mount(controls);
+  await resize();
+  await runFrames();
+  expect(replies).toHaveLength(2);
+  // The later read answers first, then the first read's stale answer arrives.
+  await act(async () => replies[1]?.(true));
+  await act(async () => replies[0]?.(false));
+  expect(frame?.maximised).toBe(true);
+});

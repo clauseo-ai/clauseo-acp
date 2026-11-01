@@ -54,7 +54,11 @@
     display: block;
     box-shadow: var(--set-in-lights);
   }
-  /* macOS draws the native lights here: the circles keep their place and paint nothing */
+  /* macOS draws the native lights here: the circles keep their place and paint nothing, and the box takes the native
+     lights' width, wider than the drawn ones, so the gap after them holds */
+  .room-lights[data-native] {
+    width: var(--lights-native-w);
+  }
   .room-lights[data-native] i {
     background: transparent;
     box-shadow: none;

@@ -237,6 +237,10 @@
   --thread-pad-mid: 36px; /* the work's sides at 1000 to 1199 px */
   --window-min-h: 600px; /* the least height the room lays out for; it scrolls below it */
   --lead-h: 52px; /* the toolbar's lead: the corner lights sit in its top 52 px */
+  /* the room of the Mac's own traffic lights, from the lead's padding (20 px in) to the last light's right edge: three
+     14 pt lights 23 pt apart on macOS 27, centred at 26, 49 and 72, so ending at 79; the drawn lights take 52 px.
+     Measured, since the system draws them (crates/desktop/src/window_frame/geometry.rs) */
+  --lights-native-w: 59px;
   --lead-w-mid: 196px; /* the toolbar's lead with the rail folded behind Matters */
   --rail-panel-top: 60px; /* the folded rail opens just under Matters */
   --rail-panel-w: 260px; /* the folded rail, open */
