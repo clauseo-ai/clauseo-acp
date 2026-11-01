@@ -27,6 +27,19 @@ pub enum AgentKind {
     Codex,
 }
 
+impl AgentKind {
+    /// The kind of the agent with registry id `id`: `claude-acp` is Claude, `codex-acp` is
+    /// Codex. Any other id (`fake-agent` in tests) has no kind, so it has no limits. The one
+    /// place an id becomes a kind.
+    pub fn of(id: &crate::AgentId) -> Option<AgentKind> {
+        match id.as_str() {
+            "claude-acp" => Some(AgentKind::Claude),
+            "codex-acp" => Some(AgentKind::Codex),
+            _ => None,
+        }
+    }
+}
+
 /// An opaque account id from the agent's auth status. Never a token: nothing here can tell one
 /// apart, so the `limits` crate keeps tokens out when it fills this.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -370,3 +383,6 @@ pub enum WindowFreshness {
     /// Its reset time passed and a refresh is running ("Reset at 4:10 pm. Refreshing...").
     ResetPassed,
 }
+
+#[cfg(test)]
+mod tests;
