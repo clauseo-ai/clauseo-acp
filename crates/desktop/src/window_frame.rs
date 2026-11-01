@@ -144,10 +144,10 @@ fn own<R: Runtime, M: tauri::Manager<R>>(
 }
 
 /// No OS decorations; the shadow (on by default for an undecorated window) and the resize
-/// borders stay. On Windows the page's scrollbars float over it (Fluent overlay, `WebView2` 125 and
-/// later), so a scrolling page keeps its full width and its caption buttons stay under the native
-/// window placed from the client width.
-#[cfg(not(target_os = "macos"))]
+/// borders stay. The page's scrollbars float over it (Fluent overlay, `WebView2` 125 and later),
+/// so a scrolling page keeps its full width and its caption buttons stay under the native window
+/// placed from the client width.
+#[cfg(windows)]
 fn own<R: Runtime, M: tauri::Manager<R>>(
     builder: WebviewWindowBuilder<'_, R, M>,
 ) -> WebviewWindowBuilder<'_, R, M> {
@@ -155,6 +155,15 @@ fn own<R: Runtime, M: tauri::Manager<R>>(
         .decorations(false)
         .shadow(true)
         .scroll_bar_style(tauri::webview::ScrollBarStyle::FluentOverlay)
+}
+
+/// No OS decorations; the shadow and the resize borders stay. (The overlay scrollbar style is
+/// Windows' alone.)
+#[cfg(not(any(windows, target_os = "macos")))]
+fn own<R: Runtime, M: tauri::Manager<R>>(
+    builder: WebviewWindowBuilder<'_, R, M>,
+) -> WebviewWindowBuilder<'_, R, M> {
+    builder.decorations(false).shadow(true)
 }
 
 /// What the frame needs once the window exists: on Windows with [`Chrome::Own`], the native
