@@ -495,7 +495,14 @@ export function createAnswer(scope: string): Answer {
         const make = () =>
           toView(entry.source, viewInput, referenceHandler(scope, numbering, nths));
         if (!tail) return views.get(entry.key, make);
-        return tails.get(entry.key, () => ({ ...make(), streaming: true }));
+        // The streaming tail's view holds the block as written (for its fallback), not the repaired text,
+        // and so is cached on both.
+        const written = blocks[index]!;
+        return tails.get(`${entry.key}\u0003${written}`, () => ({
+          ...make(),
+          source: restore(written),
+          streaming: true,
+        }));
       });
       const notes = notesOf(numbering, streaming ? entries[last]!.footnotes : NO_FOOTNOTES);
       lastViews = notes ? [...blockViews, notes] : blockViews;

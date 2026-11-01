@@ -1,10 +1,10 @@
 // Sanitised hast to React elements: our own mapper over exactly the tags and attributes the sanitise schema
 // (schema.ts) allows, in place of hast-util-to-jsx-runtime (about 9 KB brotli with its style parser).
 // Links, images, code blocks and superscripts (footnote numbers) map to our components; every other allowed
-// tag to its own element. What it
-// does not know it drops, whatever the sanitiser let through: an unknown tag with everything inside it, an
-// unknown property, a property value that is not a string, number or boolean (or a list of them), and every
-// node that is not an element or text (comments, doctypes, raw HTML). Text goes to React as a string child,
+// tag to its own element. What it does not know it drops, whatever the sanitiser let through: an unknown
+// tag with everything inside it, an unknown property, a property value that is not a string, number or
+// boolean (or a list of them), and every node that is not an element or text (comments, doctypes, raw
+// HTML). Text goes to React as a string child,
 // which React escapes; nothing here sets inner HTML. Keys are the tag and its count among its siblings, as
 // hast-util-to-jsx-runtime made them, so a re-rendered block keeps its elements.
 import type { Element, ElementContent, Properties, Root } from "hast";
