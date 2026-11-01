@@ -13,9 +13,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - `CONTRIBUTING.md`: the steps from task to merge.
 - `docs/review-lessons.md`: rules from past reviews, each with the defect it prevents.
 - The contract at the top of each crate you touch (`//!` in `lib.rs`).
-- Plans and task briefs live in the private repo, cloned next to this one as `../clauseo-acp-private`
-  (start at `../clauseo-acp-private/START-HERE.md`). Outside contributors will not have it; this repo
-  must make sense without it.
+- Plans and task briefs live in the private repo, `../clauseo-acp-private` (start at its `START-HERE.md`); outside contributors will not have it, so this repo must make sense without it.
 
 ## Commands
 
@@ -25,7 +23,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - `cargo xtask buildtime`: build-loop timings against `budgets.toml`.
 - `cargo xtask setup`: installs the pinned cargo tools and checks gitleaks and lefthook.
 - `pnpm -C ui install --frozen-lockfile`: frontend dependencies.
-- Run every xtask command from the repo root (why: the alias in `.cargo/config.toml`).
+- Run xtask commands from the repo root (the alias is in `.cargo/config.toml`).
 
 ## Map
 
@@ -33,13 +31,13 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - `crates/acp`: the ACP client over the agent's pipes; agent traffic as events. Scenarios in `tests/scenarios/`.
 - `crates/desktop`: the Tauri shell and the host bridge.
 - `crates/fake_agent`: scripted ACP agent for tests; scenarios and their format in `crates/fake_agent/scenarios/` (README.md).
-- `crates/host`: the session host thread. See `docs/decisions/0011-host-turn-lifecycle.md`.
+- `crates/host`: the session host thread.
 - `crates/matters`: matter folders and their shadow git history (checkpoints, undo). See `docs/decisions/0007-matter-history-format.md`.
 - `crates/process`: starts an agent in its own process tree, shuts it down and kills the tree; the `Launcher` seam.
 - `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.
 - `crates/reducer`: the pure fold from events to state and view changes, and snapshots; its gungraun bench is `crates/reducer_bench` (Linux).
-- `crates/settings`: settings, data folders and the policy layer. See `docs/decisions/0009-policy-layer.md`.
-- `crates/store`: the event log, snapshots, blobs and receipts in one SQLite file; format in `docs/decisions/0006-store-format.md`.
+- `crates/settings`: settings, data folders and the policy layer.
+- `crates/store`: the event log, snapshots, blobs and receipts in one SQLite file.
 - `ui/app`: the React app, empty for now; `ui/components`: its tokens, icons, words, controls and parts, checked by ui/app's scripts. Tauri APIs only under `ui/app/src/transport/`.
 - `ui/e2e`: Playwright tests of the real app over CDP on Windows, and the speed scoreboard's code. `cargo xtask check` typechecks it and runs its unit tests; no lint or write rule yet (#86).
 - `xtask`: checks, build timing, budgets. Builds without any app crate. Frozen: no new checks.
