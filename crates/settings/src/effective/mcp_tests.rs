@@ -181,13 +181,27 @@ fn a_malformed_or_misnamed_policy_mcp_section_locks_the_list_empty() {
         r#"{"mcp": false}"#.to_owned(),
         r#"{"MCP": {"servers": {}}}"#.to_owned(),
         key_case,
+        // The dotted name the registry and macOS use, at the top of policy.json.
+        r#"{"mcp.servers": {}}"#.to_owned(),
+        r#"{"mcpServers": {}}"#.to_owned(),
+        r#"{"mcp_servers": {}}"#.to_owned(),
+        r#"{"mcp": {"mcpServers": {}}}"#.to_owned(),
+        r#"{"mcp": {"servers ": {}}}"#.to_owned(),
     ];
     for text in texts {
         let firm = policy("firm", text.clone());
         let effective = Effective::load(&locations(), &files, &[&firm]);
         assert!(effective.mcp_servers().is_empty(), "{text}");
         assert!(effective.is_locked("mcp.servers"), "{text}");
-        assert!(!effective.warnings().is_empty(), "{text}");
+        let shape = effective
+            .warnings()
+            .iter()
+            .filter(|w| {
+                matches!(&w.kind, WarningKind::InvalidValue { key, message }
+                if key == "mcp.servers" && message.contains(r#"{"mcp": {"servers": {...}}}"#))
+            })
+            .count();
+        assert_eq!(shape, 1, "{text}: {:?}", effective.warnings());
     }
     // A stray case variant beside a valid section still locks it empty: fail closed.
     let both = format!(
@@ -197,8 +211,12 @@ fn a_malformed_or_misnamed_policy_mcp_section_locks_the_list_empty() {
     let effective = Effective::load(&locations(), &files, &[&policy("firm", both)]);
     assert!(effective.mcp_servers().is_empty());
     assert!(effective.is_locked("mcp.servers"));
-    // Another unknown section locks nothing.
-    let other = policy("firm", r#"{"mcpx": {}, "ui": {"colour": "red"}}"#);
+    // An unrelated unknown key, an empty `mcp` section and a bad entry inside a valid list
+    // lock nothing beyond what they name.
+    let other = policy(
+        "firm",
+        r#"{"tools": {}, "ui": {"colour": "red"}, "mcp": {}}"#,
+    );
     let effective = Effective::load(&locations(), &files, &[&other]);
     assert_eq!(enabled(&effective), ["mine"]);
     assert!(!effective.is_locked("mcp.servers"));

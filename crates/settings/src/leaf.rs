@@ -120,41 +120,84 @@ pub(crate) fn typed(
     keep_last(leaves, Leaf::key)
 }
 
-/// [`typed`] for a policy source. A security-relevant key the source names in a form that does
-/// not set it is also refused, so it locks at its default (ADR 0009): a section that is not an
-/// object (`"mcp": "off"`), or a section or key that differs from it only in case (`"MCP"`,
-/// `mcp.Servers`). What the firm meant there is unknown, and the user's value must not stand in.
+/// [`typed`] for a policy source that lists its own keys (`policy.json` and the registry; macOS
+/// managed preferences are read key by key, by exact name, so they use [`typed`]). A
+/// security-relevant key is also refused, so locked at its default (ADR 0009), when the source
+/// names its topic in a form this version cannot read: its section that is not an object
+/// (`"mcp": "off"`), or any unknown key whose name holds the section's name in any case
+/// (`"mcp.servers"` at the top of `policy.json`, `"MCP"`, `"mcpServers"`, `mcp.Servers`,
+/// `mcp_servers`). What the firm meant there is unknown, so the user's value must not stand in.
+/// Each such key gets one warning naming the shape that sets it. An unrelated unknown key, and an
+/// entry left out inside a valid list, only warn.
 pub(crate) fn typed_policy(
     raws: Vec<Raw>,
     mut refused: Vec<String>,
     warnings: &mut Vec<Warning>,
 ) -> Vec<Leaf> {
-    refused.extend(security_keys_misnamed(&raws, warnings));
+    for (key, origin, found) in security_keys_misnamed(&raws, warnings) {
+        warnings.push(Warning {
+            origin,
+            kind: WarningKind::InvalidValue {
+                key: key.to_owned(),
+                message: format!(
+                    "the policy names {found}, which this version cannot read, so {key} is \
+                     locked at its default; set it as {}",
+                    right_shape(key)
+                ),
+            },
+        });
+        refused.push(key.to_owned());
+    }
     typed(raws, refused, warnings)
 }
 
-/// The security-relevant keys that `raws` or `warnings` name in a form that does not set them.
-fn security_keys_misnamed(raws: &[Raw], warnings: &[Warning]) -> Vec<String> {
-    SECURITY_KEYS
-        .iter()
-        .filter(|&&key| {
-            let section = key.split('.').next().unwrap_or(key);
-            let near = |name: &str| {
-                name != key
-                    && (name.eq_ignore_ascii_case(key) || name.eq_ignore_ascii_case(section))
-            };
-            raws.iter().any(|raw| near(&raw.key))
-                || warnings.iter().any(|warning| match &warning.kind {
-                    WarningKind::UnknownKey { key } | WarningKind::InvalidValue { key, .. } => {
-                        near(key)
-                    }
-                    WarningKind::Unreadable { .. }
-                    | WarningKind::Syntax { .. }
-                    | WarningKind::RelativeAgentCommand { .. } => false,
-                })
-        })
-        .map(|&key| key.to_owned())
-        .collect()
+/// How a policy sets the security-relevant `key`, for the warning of a misnamed one.
+fn right_shape(key: &str) -> String {
+    let (section, name) = key.split_once('.').unwrap_or((key, ""));
+    format!(r#"{{"{section}": {{"{name}": {{...}}}}}} in policy.json, or the registry value {key}"#)
+}
+
+/// Each security-relevant key that `raws` or `warnings` name in a form that does not set it,
+/// once, with where and how it was first named.
+fn security_keys_misnamed(
+    raws: &[Raw],
+    warnings: &[Warning],
+) -> Vec<(&'static str, Origin, String)> {
+    let mut found = Vec::new();
+    for key in SECURITY_KEYS {
+        let section = key.split('.').next().unwrap_or(key);
+        // An unknown name about the key's topic. Not an agent's key, and not an entry inside the
+        // list (`mcp.servers.<name>`): a bad entry is left out and the rest of the list stands.
+        let about = |name: &str| {
+            kind_of(name).is_none()
+                && !name.starts_with("agents.")
+                && !name.starts_with(&format!("{key}."))
+                && name.to_ascii_lowercase().contains(section)
+        };
+        let from_raws = raws
+            .iter()
+            .find(|raw| about(&raw.key))
+            .map(|raw| (raw.origin.clone(), raw.key.clone()));
+        let from_warnings = || {
+            warnings.iter().find_map(|warning| match &warning.kind {
+                WarningKind::UnknownKey { key: name } if about(name) || name == key => {
+                    Some((warning.origin.clone(), name.clone()))
+                }
+                WarningKind::InvalidValue { key: name, .. } if name == section || about(name) => {
+                    Some((warning.origin.clone(), name.clone()))
+                }
+                WarningKind::UnknownKey { .. }
+                | WarningKind::InvalidValue { .. }
+                | WarningKind::Unreadable { .. }
+                | WarningKind::Syntax { .. }
+                | WarningKind::RelativeAgentCommand { .. } => None,
+            })
+        };
+        if let Some((origin, name)) = from_raws.or_else(from_warnings) {
+            found.push((key, origin, format!("`{name}`")));
+        }
+    }
+    found
 }
 
 /// The last item of each key, in the order those last items came. A source that sets a key

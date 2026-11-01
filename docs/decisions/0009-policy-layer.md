@@ -60,11 +60,16 @@ keys need no new mechanism. `clauseo-settings` reads it, and IT writes against t
   `policy.json`, or a managed-preferences `agents` value that is not a dictionary, names no key,
   so it is only a warning, except where the section holds a security-relevant key (below). A
   policy `mcp.servers` that is not an object locks the list empty, so no server reaches an agent.
-  So does a policy that names it in a form that does not set it: an `mcp` section that is not an
-  object (`"off"`, `[]`, `null`), or a section or key that differs from `mcp` or
-  `mcp.servers` only in case (`"MCP"`, `"Mcp"`, `mcp.Servers`), in any policy source, even
-  beside a valid `mcp` section (review of PR #117). In the user's `settings.json` the same is
-  only a warning. This replaces the first draft's rule, under which an invalid value was
+  So does a policy that names MCP servers in a form this version cannot read, as far as each
+  source can see it (review of PR #117). `policy.json` and the registry list their own keys, so
+  in them an `mcp` section that is not an object (`"off"`, `[]`, `null`), and any unknown key
+  whose name holds `mcp` in any case, at the top level or inside the section (`"mcp.servers"` at
+  the top of `policy.json`, `"MCP"`, `"mcpServers"`, `mcp_servers`, `mcp.Servers`), lock the
+  list empty, even beside a valid `mcp` section, with a warning naming the shape that sets it.
+  macOS managed preferences are read key by key by exact name, so a profile must use
+  `mcp.servers` exactly; any other name there is never seen. An entry left out inside a valid
+  list, an unrelated unknown key, and an empty `"mcp": {}` (as for any section) lock nothing. In
+  the user's `settings.json` all of this is only a warning. This replaces the first draft's rule, under which an invalid value was
   left out and its key not locked.
 - **Applied sources.** `PolicyStatus` lists a source as applied only when it set at least one
   valid value; a source whose every value was refused still locks the keys it named.
