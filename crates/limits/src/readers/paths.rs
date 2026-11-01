@@ -99,6 +99,25 @@ pub(crate) fn codex_js(launch: &AgentLaunch) -> Result<(Located, PathBuf), Error
     })
 }
 
+/// Checks the readers' run folder `<data_dir>/limits/run` and its parent `limits`: each may be
+/// missing (the read makes it), but when there it must be a folder, not a link or a file.
+pub(crate) fn check_run_dir(run_dir: &Path) -> Result<(), Error> {
+    for dir in run_dir.parent().into_iter().chain(std::iter::once(run_dir)) {
+        let what = match std::fs::symlink_metadata(dir) {
+            Ok(meta) if meta.is_dir() => continue,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Ok(meta) if meta.file_type().is_symlink() => "is a link".to_owned(),
+            Ok(_) => "is not a folder".to_owned(),
+            Err(err) => format!("does not read: {err}"),
+        };
+        return Err(Error::RunFolder {
+            path: dir.to_owned(),
+            what,
+        });
+    }
+    Ok(())
+}
+
 /// Checks `launch` and finds its install folder.
 pub(crate) fn locate(agent: &'static str, launch: &AgentLaunch) -> Result<Located, Error> {
     let program = PathBuf::from(&launch.command);

@@ -311,6 +311,62 @@ fn good_read_keeps_missing_scope_as_the_reader_set_it() {
 }
 
 #[test]
+fn failed_read_after_missing_scope_keeps_missing_scope() {
+    let source = LimitSource::Unavailable {
+        reason: UnavailableReason::MissingScope,
+    };
+    let limits = clauseo_protocol::AccountLimits {
+        source,
+        ..account(CLAUDE, vec![])
+    };
+    let mut model = read_once(limits);
+    try_again(&mut model, at(6));
+    let outcome = ReadOutcome::Failed(ReadFailure::TimedOut);
+    assert_eq!(
+        model.input(done(CLAUDE, outcome), at(7)),
+        vec![],
+        "nothing visible changed"
+    );
+    assert_eq!(
+        view_of(&model, CLAUDE, at(7)).freshness,
+        Freshness::MissingScope
+    );
+}
+
+#[test]
+fn method_missing_after_missing_scope_keeps_missing_scope() {
+    let source = LimitSource::Unavailable {
+        reason: UnavailableReason::MissingScope,
+    };
+    let limits = clauseo_protocol::AccountLimits {
+        source: source.clone(),
+        ..account(CLAUDE, vec![])
+    };
+    let mut model = read_once(limits);
+    try_again(&mut model, at(6));
+    let actions = model.input(done(CLAUDE, ReadOutcome::MethodMissing), at(7));
+    assert_eq!(changed(&actions).source, source);
+    assert_eq!(
+        view_of(&model, CLAUDE, at(7)).freshness,
+        Freshness::MissingScope
+    );
+}
+
+#[test]
+fn rejected_five_hour_signal_without_a_figure_is_added_at_100() {
+    let mut model = read_once(account(CLAUDE, vec![seven_day(20.0)]));
+    let actions = model.input(
+        live_input(CLAUDE, live("five_hour", LiveStatus::Rejected, None, None)),
+        at(1),
+    );
+    let limits = changed(&actions);
+    assert_eq!(limits.windows[0].id, "five_hour");
+    assert_eq!(limits.windows[0].used_percent, pct(100.0));
+    let view = view_of(&model, CLAUDE, at(1));
+    assert_eq!(row(&view, "five_hour").tone, MeterTone::AtLimit);
+}
+
+#[test]
 fn read_for_another_agent_is_a_failed_read() {
     let (mut claude, _) = Limits::new(Vec::new(), &[CLAUDE], t0());
     let codex_figures = usage(account(AgentKind::Codex, vec![five_hour(5.0)]));

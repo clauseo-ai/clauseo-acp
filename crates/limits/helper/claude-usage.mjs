@@ -20,7 +20,7 @@ const USAGE_UNSUPPORTED =
   /unsupported|not supported|not implemented|unknown (control )?(request|subtype|method)|no such method/i;
 
 const USAGE_METHOD = "usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET";
-const ACCOUNT_KEYS = ["email", "subscriptionType", "apiProvider", "tokenSource", "apiKeySource"];
+const ACCOUNT_KEYS = ["email", "subscriptionType", "apiProvider"];
 const USAGE_KEYS = ["subscription_type", "rate_limits_available", "rate_limits"];
 const MESSAGE_MAX = 200;
 
@@ -128,7 +128,9 @@ async function main() {
     return finish(failure("usage", USAGE_UNSUPPORTED.test(messageOf(err)), err));
   }
 
-  return finish(JSON.stringify({ ok: true, account: pickAccount(init), usage: pickUsage(usage) }));
+  // A lone surrogate would print as an escape that Rust's JSON reader refuses, losing the read.
+  const line = { ok: true, account: pickAccount(init), usage: pickUsage(usage) };
+  return finish(JSON.stringify(line, (_key, value) => (typeof value === "string" ? value.toWellFormed() : value)));
 }
 
 main().catch((err) => {

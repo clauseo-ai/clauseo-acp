@@ -5,7 +5,7 @@ use clauseo_protocol::{
     LimitSource, LimitWindow, PlanLabel, Timestamp, UnavailableReason, WindowKind,
 };
 
-use super::{Answer, answer, looks_like_email};
+use super::{Answer, answer, clean, looks_like_email};
 use crate::{ReadFailure, ReadOutcome};
 
 /// 2026-11-02T18:00:00Z.
@@ -466,4 +466,23 @@ fn only_an_email_shaped_account_is_kept() {
     )));
     let line = r#"{"ok":true,"account":{"email":"sk-ant-secret-token"},"usage":{"subscription_type":"max","rate_limits_available":false}}"#;
     assert_eq!(limits(line).account, AccountRef("plan".to_owned()));
+}
+
+#[test]
+fn format_and_bidi_characters_fail_an_email_and_leave_a_label() {
+    for c in [
+        '\u{200B}', '\u{200F}', '\u{202A}', '\u{202E}', '\u{2060}', '\u{2064}', '\u{2066}',
+        '\u{2069}', '\u{FEFF}',
+    ] {
+        assert!(
+            !looks_like_email(&format!("law{c}yer@example.com")),
+            "{c:?}"
+        );
+        assert_eq!(clean(&format!("{c}Fa{c}ble{c}")), "Fable", "{c:?}");
+    }
+    assert!(looks_like_email("l\u{00E9}a@example.com"));
+    assert_eq!(clean("\u{202E}Opus\u{0007}4"), "Opus 4");
+    let windows =
+        windows_of(r#"{"model_scoped":[{"display_name":"\u202eFable\u200b","utilization":1}]}"#);
+    assert_eq!(windows[0].label, "Fable weekly limit");
 }

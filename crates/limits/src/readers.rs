@@ -68,8 +68,13 @@ pub trait ReadLimits: Send + Sync {
 /// [`ReadLimits`] over a [`Launcher`] and a [`Timer`].
 ///
 /// Each read checks the adapter's paths again, writes the helper into its install folder when
-/// the file there differs, makes the empty working folder `<data_dir>/limits/run`, and runs the
-/// helper with the inherited environment under the agent's settings variables.
+/// the file there differs, makes the working folder `<data_dir>/limits/run` if it is missing
+/// (nothing in Clauseo writes there), and runs the helper with the inherited environment under
+/// the agent's settings variables.
+///
+/// The read future does a little blocking file work before the launch, on its first poll: the
+/// path checks, the compare of a ~4 KiB file, at most one small write, and the folder creation.
+/// Poll it where a brief block is fine.
 pub struct ProcessReaders<T> {
     launcher: Arc<dyn Launcher>,
     timer: T,

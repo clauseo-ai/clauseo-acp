@@ -17,6 +17,15 @@ pub enum Error {
         /// The rule it breaks.
         rule: String,
     },
+    /// The readers' run folder, or the `limits` folder above it, is there but is a link or not
+    /// a folder.
+    #[error("the readers' run folder {} {what}", path.display())]
+    RunFolder {
+        /// The folder.
+        path: PathBuf,
+        /// What is wrong with it.
+        what: String,
+    },
     /// A file step failed.
     #[error("could not {what} {}: {source}", path.display())]
     Io {

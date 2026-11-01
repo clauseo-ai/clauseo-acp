@@ -112,7 +112,6 @@ test("ok: one line with the account keys and the usage keys only", () => {
       email: "pat@example.com",
       subscriptionType: "max",
       apiProvider: "firstParty",
-      tokenSource: "claude.ai",
     },
     usage: {
       subscription_type: "max",
@@ -123,6 +122,14 @@ test("ok: one line with the account keys and the usage keys only", () => {
       },
     },
   });
+});
+
+test("lone surrogates in the SDK's strings print as U+FFFD, so the line stays valid JSON", () => {
+  const result = run({ STUB_MODE: "lone-surrogate" });
+  const line = oneLine(result);
+  assert.ok(!/\\ud[89a-f]/i.test(result.stdout), `escaped lone surrogate: ${result.stdout}`);
+  assert.equal(line.account.email, "pat\uFFFD@example.com");
+  assert.equal(line.usage.rate_limits.model_scoped[0].display_name, "Fa\uFFFDble");
 });
 
 const errorCases = [

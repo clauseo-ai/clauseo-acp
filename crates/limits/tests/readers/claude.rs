@@ -31,7 +31,9 @@ fn ready_setup() -> Setup {
 #[test]
 fn one_line_is_read_and_mapped_after_the_helper_exits() {
     let setup = ready_setup();
-    let (outcome, _launcher) = read_once(&setup, "claude-ok");
+    let (outcome, launcher) = read_once(&setup, "claude-ok");
+    #[cfg(unix)]
+    launcher.wait_stdout_closed();
     let ReadOutcome::Usage { limits, reached } = outcome else {
         panic!("not usage: {outcome:?}");
     };
@@ -52,7 +54,7 @@ fn one_line_is_read_and_mapped_after_the_helper_exits() {
 }
 
 #[test]
-fn the_spec_runs_settings_command_on_the_helper_in_the_empty_run_folder() {
+fn the_spec_runs_settings_command_on_the_helper_in_the_run_folder() {
     let setup = ready_setup();
     let (_, launcher) = read_once(&setup, "claude-ok");
     let specs = launcher.specs();
@@ -103,7 +105,9 @@ fn a_different_helper_file_is_replaced() {
 #[test]
 fn a_crash_reports_its_code_and_the_redacted_tail() {
     let setup = ready_setup();
-    let (outcome, _) = read_once(&setup, "claude-crash");
+    let (outcome, launcher) = read_once(&setup, "claude-crash");
+    #[cfg(unix)]
+    launcher.wait_stdout_closed();
     let ReadOutcome::Failed(ReadFailure::Exited { code, stderr_tail }) = outcome else {
         panic!("not an exit: {outcome:?}");
     };
@@ -151,6 +155,15 @@ fn stderr_past_the_pipe_buffer_is_drained_and_the_line_still_read() {
     let setup = ready_setup();
     let (outcome, _) = read_once(&setup, "claude-stderr-heavy");
     assert!(matches!(outcome, ReadOutcome::Usage { .. }), "{outcome:?}");
+}
+
+#[test]
+fn stdout_past_the_pipe_buffer_is_drained_to_its_end() {
+    let setup = ready_setup();
+    let (outcome, launcher) = read_once(&setup, "claude-stdout-heavy");
+    assert!(matches!(outcome, ReadOutcome::Usage { .. }), "{outcome:?}");
+    #[cfg(unix)]
+    launcher.wait_stdout_closed();
 }
 
 #[test]

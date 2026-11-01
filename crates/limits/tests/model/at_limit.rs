@@ -150,6 +150,32 @@ fn rejected_live_signal_without_an_account_gives_its_hit() {
 }
 
 #[test]
+fn rejected_live_signal_without_a_figure_or_an_account_gives_its_hit() {
+    let (mut model, _) = Limits::new(Vec::new(), &[CLAUDE], t0());
+    model.input(done(CLAUDE, ReadOutcome::MethodMissing), t0());
+    let signal = live("five_hour", LiveStatus::Rejected, None, Some(at(45)));
+    assert_eq!(
+        model.input(live_input(CLAUDE, signal), at(1)),
+        vec![Action::ViewChanged]
+    );
+    let hit = LimitHit {
+        window: Some("five_hour".to_owned()),
+        resets_at: Some(at(45)),
+        reason: LimitStopReason::PlanWindow,
+    };
+    assert_eq!(model.at_limit(CLAUDE), Some(hit));
+}
+
+#[test]
+fn warning_live_signal_without_a_figure_or_an_account_adds_nothing() {
+    let (mut model, _) = Limits::new(Vec::new(), &[CLAUDE], t0());
+    model.input(done(CLAUDE, ReadOutcome::MethodMissing), t0());
+    let signal = live("five_hour", LiveStatus::Warning, None, Some(at(45)));
+    assert_eq!(model.input(live_input(CLAUDE, signal), at(1)), vec![]);
+    assert_eq!(model.at_limit(CLAUDE), None);
+}
+
+#[test]
 fn no_account_gives_none() {
     let (model, _) = Limits::new(Vec::new(), &[CLAUDE], t0());
     assert_eq!(model.at_limit(CLAUDE), None);
