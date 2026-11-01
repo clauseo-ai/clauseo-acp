@@ -1,16 +1,35 @@
-// The internal window's elements, in one place: every spec finds them through here, so a
-// renamed test id changes this file only. The test ids are the ones ui/app/src/internal sets;
-// every transcript row also carries `data-entry-id`.
+// The windows' elements, in one place: every spec finds them through here, so a renamed test id
+// changes this file only. The test ids are the ones ui/app/src/internal (R12's window) and
+// ui/app/src/room (the room, `E2E_WINDOW=room`) set; every transcript row also carries
+// `data-entry-id`. The two windows share `matter-name`, `new-matter` and `matter`.
 
 import type { Locator, Page } from "@playwright/test";
 
 /** The `data-testid` of each element the specs use. */
 export const ids = {
-  /** The new matter's name (prefilled "Matter"; New matter is disabled while it is empty). */
+  /**
+   * The new matter's name. Internal window: prefilled "Matter", New matter is disabled while it
+   * is empty. Room: the New matter form's name field.
+   */
   matterName: "matter-name",
-  /** Button: pick_folder (E2E_MATTER_DIR in the e2e build), then CreateMatter and a thread. */
+  /**
+   * Internal window: pick_folder (E2E_MATTER_DIR in the e2e build), then CreateMatter and a
+   * thread. Room: the rail's New matter, which opens the form.
+   */
   newMatter: "new-matter",
-  /** The open matter's name, "Opening…" or "No matter". */
+  /** Room, in the form: Change, pick_folder for an existing folder (`existing_folder`). */
+  matterExisting: "matter-existing",
+  /**
+   * Room, in the form: Create the matter. With a folder picked by Change, that folder; without,
+   * pick_folder for the parent and the host makes `<parent>/<name>` (`new_folder`).
+   */
+  createMatter: "create-matter",
+  /**
+   * Room: a matter's row button in the rail, with `data-state` (the MatterRow state) and
+   * `aria-current="page"` on the open matter. The scratch matter's foot row is not one.
+   */
+  matterRow: "matter-row",
+  /** The open matter's name; in the internal window also "Opening…" or "No matter". */
   matter: "matter",
   /** The open matter's threads. */
   threadSelect: "thread-select",
@@ -64,6 +83,21 @@ export function window(page: Page) {
   return {
     matterName: id(ids.matterName),
     newMatter: id(ids.newMatter),
+    matterExisting: id(ids.matterExisting),
+    createMatter: id(ids.createMatter),
+    matterRows: id(ids.matterRow),
+    /** Room: the rail row of the matter named `name` (its text also holds its status). */
+    matterRow: (name: string): Locator => id(ids.matterRow).filter({ hasText: name }),
+    /**
+     * Room: the rail's find field, the rail's one search box (it has no test id: the parts'
+     * FindField takes none).
+     */
+    findMatter: page.getByRole("searchbox"),
+    /**
+     * Room: Matters on the toolbar, which unfolds the rail below 1200 px (the e2e window opens at
+     * Tauri's default 800 x 600, so the rail starts folded). Found by its class: it has no test id.
+     */
+    railToggle: page.locator(".room-rail-toggle"),
     matter: id(ids.matter),
     threadSelect: id(ids.threadSelect),
     newThread: id(ids.newThread),
