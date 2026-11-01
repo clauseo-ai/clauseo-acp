@@ -201,6 +201,7 @@ its step card, and compare (below) lists the files between any two versions.
 | Restore of a version | `CheckpointKind::Restore` | time; the version restored from and the scope are on the restore marker (`MarkerKind::VersionRestored`) |
 | Checkpoint of a kind from a newer Clauseo | `CheckpointKind::Unknown` | time only |
 | Compare two versions | `HostQuery::CompareVersions` returns `QueryResult::FileChanges` | per file: change kind, sizes, may include the lawyer's edits |
+| Preview a restore | `HostQuery::PreviewRestore` returns `QueryResult::RestorePreview` | `changes` (files written), `added_since` (left in place), `kept` (left as they are), `locked` (open in another program) |
 | Restore the whole matter | `RestoreRequest::Matter` | `HostCommand::RestoreVersion` |
 | Restore some files | `RestoreRequest::Files` | the chosen paths |
 | Restore refused: a file is open in another program | `ErrorCode::MatterFileLocked` | retryable |

@@ -12,6 +12,7 @@ use super::super::Actor;
 use super::matter_of;
 use crate::error::Error;
 use crate::matter_worker::{Reused, TurnCheckpoint};
+use crate::pipeline::MatterEvent;
 
 /// Runs `then` with a turn checkpoint's result once the matter's stream is loaded, when R8
 /// reused an id, so [`unrecorded`] can read the matter's log; at once otherwise.
@@ -44,12 +45,15 @@ pub(super) fn when_loaded(
 
 /// The `CheckpointRecorded` of the id R8 reused, with the kind, thread and turn of R8's
 /// timeline, when the matter's log does not hold it and no commit in flight records it.
-/// `None` for a new checkpoint (its own events record it) or a known one.
+/// `None` for a new checkpoint (its own events record it) or a known one. It carries its
+/// `CheckpointRow` when the matter's stream is loaded: the row and the event are written in
+/// one commit, so a log without the event has no row. With the stream not loaded the host
+/// cannot tell, and a second row of one id would fail the whole commit, so none is written.
 pub(super) fn unrecorded(
     actor: &Actor,
     matter: MatterId,
     done: &TurnCheckpoint,
-) -> Result<Option<CheckpointRecorded>, Error> {
+) -> Result<Option<MatterEvent>, Error> {
     let Some(Reused { entry, .. }) = &done.reused else {
         return Ok(None);
     };
@@ -63,7 +67,14 @@ pub(super) fn unrecorded(
     };
     let recorded = CheckpointRecorded::new(id, entry.kind, entry.thread, entry.turn)
         .map_err(|error| Error::Internal(error.to_string()))?;
-    Ok(Some(recorded))
+    if actor.loaded(StreamId::Matter(matter)).is_none() {
+        tracing::warn!(%id, "recording a checkpoint without its row: the matter's log is not read");
+        return Ok(Some(MatterEvent::plain(recorded)));
+    }
+    Ok(Some(MatterEvent::checkpoint(
+        recorded,
+        done.checkpoint.commit.clone(),
+    )))
 }
 
 /// Whether the matter's log holds checkpoint `id`, or a commit in flight records it. A matter

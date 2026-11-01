@@ -5,8 +5,9 @@
 //!
 //! - Its own thread, `clauseo-host`, and its executor: sessions, commands and their receipts,
 //!   permission requests and elicitations, text coalescing and the rate cap, subscriptions, and
-//!   the checkpoints before and after each turn. `docs/decisions/0011-host-turn-lifecycle.md`
-//!   records the turn order and the reason for each choice.
+//!   the checkpoints before and after each turn, undo, restore, and a `CheckpointRow` for every
+//!   checkpoint. `docs/decisions/0011-host-turn-lifecycle.md` records the turn order, the
+//!   versions rules and the reason for each choice.
 //! - The next `seq` of every stream, the patch window and epoch of every loaded stream, and the
 //!   sent view of what is in flight to the store.
 //! - One `clauseo-matter` thread per open matter and one `clauseo-snapshot` thread.

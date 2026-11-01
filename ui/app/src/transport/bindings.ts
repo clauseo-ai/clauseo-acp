@@ -1376,7 +1376,7 @@ export type HostQuery =
 ({ list_threads: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { compare_versions?: never; page_entries?: never; read_blob?: never } | 
+} }) & { compare_versions?: never; page_entries?: never; preview_restore?: never; read_blob?: never } | 
 /**
  *  Older entries of a stream's view, for scrolling back: up to `limit` entries with an
  *  `order` below `before_order`, newest last.
@@ -1388,7 +1388,7 @@ export type HostQuery =
 	before_order?: Seq,
 	/**  How many. */
 	limit: PageLimit,
-} }) & { compare_versions?: never; list_threads?: never; read_blob?: never } | 
+} }) & { compare_versions?: never; list_threads?: never; preview_restore?: never; read_blob?: never } | 
 /**  The files that differ between two versions of a matter. */
 ({ compare_versions: {
 	/**  The matter. */
@@ -1397,7 +1397,16 @@ export type HostQuery =
 	from: CheckpointId,
 	/**  The newer version. */
 	to: CheckpointId,
-} }) & { list_threads?: never; page_entries?: never; read_blob?: never } | 
+} }) & { list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never } | 
+/**  What restoring a version would do now, file by file. Writes nothing. */
+({ preview_restore: {
+	/**  The matter. */
+	matter: MatterId,
+	/**  The version to restore. */
+	checkpoint: CheckpointId,
+	/**  The whole matter or chosen files, as `RestoreVersion` takes it. */
+	scope: RestoreRequest,
+} }) & { compare_versions?: never; list_threads?: never; page_entries?: never; read_blob?: never } | 
 /**  Part of a blob's text. */
 ({ read_blob: {
 	/**  The blob. */
@@ -1406,7 +1415,7 @@ export type HostQuery =
 	offset: Count,
 	/**  How many bytes. */
 	len: ReadLen,
-} }) & { compare_versions?: never; list_threads?: never; page_entries?: never };
+} }) & { compare_versions?: never; list_threads?: never; page_entries?: never; preview_restore?: never };
 
 /**
  *  What the first checkpoint of a folder matter found. Counts are at most `u32::MAX`; `bytes`
@@ -2046,15 +2055,17 @@ export type PromptCapabilities = {
 /**  A query's answer. */
 export type QueryResult = 
 /**  For `ListMatters`. */
-({ matters: MatterSummary[] }) & { blob?: never; entries?: never; file_changes?: never; threads?: never } | 
+({ matters: MatterSummary[] }) & { blob?: never; entries?: never; file_changes?: never; restore_preview?: never; threads?: never } | 
 /**  For `ListThreads`. */
-({ threads: ThreadSummary[] }) & { blob?: never; entries?: never; file_changes?: never; matters?: never } | 
+({ threads: ThreadSummary[] }) & { blob?: never; entries?: never; file_changes?: never; matters?: never; restore_preview?: never } | 
 /**  For `PageEntries`, newest last; fewer than `limit` means none older is left. */
-({ entries: ViewEntry[] }) & { blob?: never; file_changes?: never; matters?: never; threads?: never } | 
+({ entries: ViewEntry[] }) & { blob?: never; file_changes?: never; matters?: never; restore_preview?: never; threads?: never } | 
 /**  For `CompareVersions`. */
-({ file_changes: FileChange[] }) & { blob?: never; entries?: never; matters?: never; threads?: never } | 
+({ file_changes: FileChange[] }) & { blob?: never; entries?: never; matters?: never; restore_preview?: never; threads?: never } | 
+/**  For `PreviewRestore`. */
+({ restore_preview: RestorePreview }) & { blob?: never; entries?: never; file_changes?: never; matters?: never; threads?: never } | 
 /**  For `ReadBlob`. */
-({ blob: BlobRange }) & { entries?: never; file_changes?: never; matters?: never; threads?: never };
+({ blob: BlobRange }) & { entries?: never; file_changes?: never; matters?: never; restore_preview?: never; threads?: never };
 
 /**  A queued prompt's content was replaced; the turn keeps its id and its place. */
 export type QueuedPromptEdited = {
@@ -2140,6 +2151,28 @@ export type RenameSource =
 "agent" | 
 /**  A value from a newer Clauseo that this version does not know. */
 "unknown";
+
+/**  What a restore would do now, for `PreviewRestore`. Each list is sorted by path. */
+export type RestorePreview = {
+	/**
+	 *  The files the restore would write, as the change from the folder now to the version
+	 *  (`modified`, or `added` for a file brought back). Empty when the folder already
+	 *  stands as the version.
+	 */
+	changes: FileChange[],
+	/**  Files in the folder now that the version does not have: the restore leaves them. */
+	added_since: MatterPath[],
+	/**
+	 *  Files that differ from the version but the restore cannot write (cloud-only, over the
+	 *  size cap, behind a symlink, and the like): left as they are.
+	 */
+	kept: MatterPath[],
+	/**
+	 *  Files of `changes` open in another program now: `RestoreVersion` would fail with
+	 *  `matter.file_locked`, naming them, and write nothing.
+	 */
+	locked: MatterPath[],
+};
 
 /**
  *  What a restore puts back, as a command asks for it: the strict, closed twin of the logged

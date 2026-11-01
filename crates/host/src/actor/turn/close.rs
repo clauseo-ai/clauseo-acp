@@ -6,16 +6,16 @@
 //! thread in the state the detach gives.
 
 use clauseo_protocol::{
-    AgentSessionDetached, CheckpointId, DetachReason, DomainEvent, ElicitationExpired,
-    ElicitationId, ErrorCode, ExpiryReason, FilesChanged, MatterId, PermissionExpired,
-    PermissionRequestId, StopReason, StreamId, ThreadId, TurnEnded, TurnFailed, TurnId,
-    TurnStoppedAtLimit,
+    AgentSessionDetached, CheckpointId, DetachReason, ElicitationExpired, ElicitationId, ErrorCode,
+    ExpiryReason, FilesChanged, MatterId, PermissionExpired, PermissionRequestId, StopReason,
+    StreamId, ThreadId, TurnEnded, TurnFailed, TurnId, TurnStoppedAtLimit,
 };
 
 use super::super::Actor;
 use super::out::Out;
 use super::{LimitMark, cancel};
 use crate::error::Error;
+use crate::pipeline::MatterEvent;
 
 /// The requests a close expires.
 #[derive(Debug, Clone)]
@@ -89,8 +89,8 @@ pub(super) struct TurnClose {
     pub(super) expiries: Expiries,
     /// `Cancelled` for each tool call of the turn not finished, as sent.
     pub(super) cancel_tools: bool,
-    /// Events of the matter's stream: checkpoint records and outside edits.
-    pub(super) matter: Option<(MatterId, Vec<DomainEvent>)>,
+    /// Events of the matter's stream: checkpoint records (with their rows) and outside edits.
+    pub(super) matter: Option<(MatterId, Vec<MatterEvent>)>,
     pub(super) files: Option<FilesChanged>,
     pub(super) checkpoint_after: Option<CheckpointId>,
     /// The turn's limit signal; `TurnStoppedAtLimit` when it stops `AtLimit`.
@@ -117,10 +117,10 @@ impl TurnClose {
     }
 
     /// Adds an event to the matter's stream part of the close.
-    pub(super) fn push_matter(&mut self, matter: MatterId, event: impl Into<DomainEvent>) {
+    pub(super) fn push_matter(&mut self, matter: MatterId, event: MatterEvent) {
         match &mut self.matter {
-            Some((_, events)) => events.push(event.into()),
-            None => self.matter = Some((matter, vec![event.into()])),
+            Some((_, events)) => events.push(event),
+            None => self.matter = Some((matter, vec![event])),
         }
     }
 

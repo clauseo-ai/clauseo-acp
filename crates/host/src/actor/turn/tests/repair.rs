@@ -160,7 +160,8 @@ fn a_reused_checkpoint_the_log_lost_is_recorded_before_turn_started() {
     let second = rig.thread_by(2);
     let turn = rig.current_turn(second, TurnPhase::Queued);
     let matter = rig.matter();
-    rig.actor.matters.get_mut(&matter).unwrap().turns.holder = Some(second);
+    rig.actor.matters.get_mut(&matter).unwrap().turns.holder =
+        Some(crate::actor::turn::Holder::Thread(second));
     steps::before_turn(&mut rig.actor, second, turn);
     // With no agent the prompt fails at once and the turn ends.
     until_ended(&mut rig, second);

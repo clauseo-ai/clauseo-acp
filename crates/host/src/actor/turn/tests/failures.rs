@@ -245,7 +245,8 @@ fn a_prompt_is_refused_while_its_own_undo_holds_the_writer() {
     let mut rig = Rig::start("turn-own-undo", "");
     let thread = rig.thread();
     let matter = rig.matter();
-    rig.actor.matters.get_mut(&matter).unwrap().turns.holder = Some(thread);
+    rig.actor.matters.get_mut(&matter).unwrap().turns.holder =
+        Some(crate::actor::turn::Holder::Thread(thread));
     let refused = rig.dispatch(10, prompt(thread)).unwrap_err();
     assert_turn_running(&refused);
     rig.actor.matters.get_mut(&matter).unwrap().turns.holder = None;

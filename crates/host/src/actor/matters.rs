@@ -9,10 +9,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use clauseo_matters::{DEFAULT_MARKER, NewMatter};
+use clauseo_matters::{CommitId, DEFAULT_MARKER, NewMatter};
 use clauseo_protocol::{
     CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, ErrorCode, ImportSummary,
-    MatterCreated, MatterId, MatterKind, MatterSource, StreamId, Title,
+    MatterCreated, MatterId, MatterKind, MatterSource, QueryResult, RestorePreview, StreamId,
+    Title,
 };
 use clauseo_store::MatterRow;
 
@@ -21,7 +22,7 @@ use super::input::{Input, MatterTag};
 use super::{Actor, MatterEntry, Tag, turn};
 use crate::error::Error;
 use crate::matter_worker::{ImportEnd, MatterJob, MatterReply, MatterWorker, matter_settings};
-use crate::pipeline::{Draft, Failure};
+use crate::pipeline::{Draft, Failure, MatterEvent};
 
 /// The Scratch matter's name.
 const SCRATCH: &str = "Scratch";
@@ -245,15 +246,46 @@ pub(super) fn on_matter_reply(
             }
         }
         MatterTag::Turn(job) => turn::matter_reply(actor, matter, job, reply),
+        MatterTag::Restore(ask) => {
+            if let MatterReply::Restored(result) = reply {
+                turn::on_restored(actor, &ask, result.map(|restored| *restored));
+            } else {
+                tracing::error!(?reply, "a restore answered with another job's reply");
+            }
+        }
+        MatterTag::Query(answer) => {
+            let result = match reply {
+                MatterReply::Compared(result) => result.map(QueryResult::FileChanges),
+                MatterReply::Previewed(result) => result.map(|plan| {
+                    QueryResult::RestorePreview(RestorePreview {
+                        changes: plan.writes,
+                        added_since: plan.added_since,
+                        kept: plan.kept,
+                        locked: plan.locked,
+                    })
+                }),
+                other @ (MatterReply::Created(_)
+                | MatterReply::Imported(_)
+                | MatterReply::Opened(_)
+                | MatterReply::BeforeTurn(_)
+                | MatterReply::AfterTurn(_)
+                | MatterReply::Undone(_)
+                | MatterReply::Restored(_)) => Err(Error::Internal(format!(
+                    "a query answered with another job's reply: {other:?}"
+                ))),
+            };
+            let _gone = answer.send(result);
+        }
     }
 }
 
-/// The commit of a matter just made: `MatterCreated`, `CheckpointRecorded { Import }` and
-/// the row (with the receipt for a command), and the entry it adds once durable.
+/// The commit of a matter just made: `MatterCreated`, `CheckpointRecorded { Import }`, the
+/// matter's row and the root checkpoint's row (with the receipt for a command), and the entry
+/// it adds once durable.
 fn matter_commit(
     actor: &mut Actor,
     pending: PendingMatter,
-    import: Option<ImportSummary>,
+    (commit, import): (CommitId, Option<ImportSummary>),
     command: Option<(clauseo_protocol::CommandId, CommandOutcome)>,
 ) -> Result<(Draft, MatterEntry), Error> {
     let PendingMatter {
@@ -278,10 +310,10 @@ fn matter_commit(
         now.wall,
         ids,
     )?;
-    actor.pipeline.push(
+    actor.pipeline.push_matter(
         &mut draft,
-        stream,
-        DomainEvent::CheckpointRecorded(checkpoint),
+        new.id,
+        MatterEvent::checkpoint(checkpoint, commit),
         command_id,
         now.wall,
         ids,
@@ -341,23 +373,31 @@ pub(super) fn cancel_imports(actor: &Actor) {
     }
 }
 
-/// The import summary of a create or import that succeeded, `None` for a new folder.
-fn made(reply: MatterReply) -> Result<Option<ImportSummary>, Error> {
+/// The root checkpoint's commit and the import summary of a create or import that succeeded,
+/// `None` for a new folder.
+fn made(reply: MatterReply) -> Result<(CommitId, Option<ImportSummary>), Error> {
     match reply {
-        MatterReply::Created(result) => result.map(|()| None),
+        MatterReply::Created(result) => result.map(|commit| (commit, None)),
         MatterReply::Imported(result) => match result? {
-            ImportEnd::Done { summary, warnings } => {
+            ImportEnd::Done {
+                commit,
+                summary,
+                warnings,
+            } => {
                 for warning in &warnings {
                     tracing::info!(?warning, "import warning");
                 }
-                Ok(Some(summary))
+                Ok((commit, Some(summary)))
             }
             ImportEnd::Cancelled => Err(Error::Closed),
         },
         MatterReply::Opened(_)
         | MatterReply::BeforeTurn(_)
         | MatterReply::AfterTurn(_)
-        | MatterReply::Undone(_) => Err(Error::Internal(
+        | MatterReply::Undone(_)
+        | MatterReply::Restored(_)
+        | MatterReply::Compared(_)
+        | MatterReply::Previewed(_) => Err(Error::Internal(
             "a matter's create got another job's reply".to_owned(),
         )),
     }

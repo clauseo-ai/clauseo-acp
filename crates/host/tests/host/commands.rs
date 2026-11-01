@@ -3,7 +3,8 @@
 
 use clauseo_protocol::{
     AgentId, CommandOutcome, DeliveryRequest, DomainEvent, ErrorCode, FileChoice, FileDecision,
-    HostCommand, HostQuery, MatterId, MatterPath, PromptBlock, StopReason, StreamId, ThreadId,
+    HostCommand, HostQuery, MatterId, MatterPath, PromptBlock, QueryResult, StopReason, StreamId,
+    ThreadId,
 };
 
 use crate::support::{
@@ -109,18 +110,15 @@ fn other_matter_ids_refused() {
         error.to_string().contains("not a version of this matter"),
         "foreign checkpoint: {error}"
     );
-    // Its own checkpoints pass the check and reach the refusal that compare is not built.
+    // Its own checkpoints pass the check: a version compared with itself changes nothing.
     let own = host
         .query(HostQuery::CompareVersions {
             matter: two,
             from: from_two,
             to: from_two,
         })
-        .unwrap_err();
-    assert!(
-        own.to_string().contains("not built yet"),
-        "own checkpoints: {own}"
-    );
+        .unwrap();
+    assert_eq!(own, QueryResult::FileChanges(Vec::new()), "own checkpoints");
 
     host.refused(
         HostCommand::UndoStep {

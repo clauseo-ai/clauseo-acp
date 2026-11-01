@@ -143,6 +143,11 @@ impl Dir {
         write::write(&self.root.join("managed-mcp.json"), b"{\"mcpServers\": {}}");
     }
 
+    /// The data folder (the test's root folder), where the store keeps its database.
+    pub(crate) fn data(&self) -> &Path {
+        &self.root
+    }
+
     /// Makes `work/<name>` holding `files` (relative path, content) and returns its path.
     pub(crate) fn folder(&self, name: &str, files: &[(&str, &str)]) -> PathBuf {
         let folder = self.root.join("work").join(name);

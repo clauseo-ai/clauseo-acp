@@ -14,11 +14,12 @@ use super::agents;
 use super::close::{Expiries, TurnClose};
 use super::out::Out;
 use super::{
-    End, JobKind, Then, TurnJob, TurnPhase, asks, cancel, current, failure, host_stopping, known,
-    matter_of, state, steps, updates,
+    End, Holder, JobKind, Then, TurnJob, TurnPhase, asks, cancel, current, failure, host_stopping,
+    known, matter_of, state, steps, updates,
 };
 use crate::error::Error;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
+use crate::pipeline::MatterEvent;
 
 /// The prompt returned: step 6.
 pub(super) fn on_prompt_done(
@@ -196,7 +197,7 @@ pub(super) fn after_events(
         let recorded =
             CheckpointRecorded::new(id, CheckpointKind::AfterTurn, Some(thread), Some(turn))
                 .map_err(|error| Error::Internal(error.to_string()))?;
-        close.push_matter(matter, recorded);
+        close.push_matter(matter, MatterEvent::checkpoint(recorded, checkpoint.commit));
     }
     let own = reused.as_ref().is_some_and(|reused| reused.own);
     let lost = unrecorded.is_some() || own;
@@ -236,16 +237,25 @@ pub(super) fn finish(actor: &mut Actor, thread: ThreadId) {
 /// `thread` lets go of `matter`'s writer (or its place in the queue); the next queued turn
 /// takes it at step 4. Nothing new starts during shutdown.
 pub(super) fn release_writer(actor: &mut Actor, matter: MatterId, thread: ThreadId) {
-    let shutting = host_stopping(actor);
     let Some(entry) = actor.matters.get_mut(&matter) else {
         return;
     };
     let turns = &mut entry.turns;
-    if turns.holder != Some(thread) {
+    if turns.holder != Some(Holder::Thread(thread)) {
         turns.queue.retain(|queued| *queued != thread);
         return;
     }
-    turns.holder = None;
+    pass_writer(actor, matter);
+}
+
+/// The holder of `matter`'s writer has let go: the next queued turn takes it, or nothing
+/// does during shutdown.
+pub(super) fn pass_writer(actor: &mut Actor, matter: MatterId) {
+    let shutting = host_stopping(actor);
+    let Some(entry) = actor.matters.get_mut(&matter) else {
+        return;
+    };
+    entry.turns.holder = None;
     if shutting {
         actor.release(StreamId::Matter(matter));
         return;
@@ -264,7 +274,7 @@ pub(super) fn release_writer(actor: &mut Actor, matter: MatterId, thread: Thread
             .map(|current| current.turn);
         if let Some(turn) = waiting {
             if let Some(entry) = actor.matters.get_mut(&matter) {
-                entry.turns.holder = Some(next);
+                entry.turns.holder = Some(Holder::Thread(next));
             }
             steps::before_turn(actor, next, turn);
             return;

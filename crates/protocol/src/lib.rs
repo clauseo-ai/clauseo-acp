@@ -208,7 +208,8 @@ wire_types! {
         ViewPatch, ViewPatchBody, ViewPosition, ViewWindow,
     },
     query::{
-        BlobRange, HostQuery, MatterSummary, PageLimit, QueryResult, ReadLen, ThreadSummary,
+        BlobRange, HostQuery, MatterSummary, PageLimit, QueryResult, ReadLen, RestorePreview,
+        ThreadSummary,
     },
     raw::{RawPayload},
     session::{

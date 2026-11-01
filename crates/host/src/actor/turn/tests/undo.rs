@@ -70,7 +70,7 @@ fn a_failed_undo_commit_keeps_the_writer_and_is_retried() {
     assert!(!rig.scratch_file("brief.txt").exists(), "R8 undid the file");
     assert_eq!(
         rig.actor.matters[&matter].turns.holder,
-        Some(thread),
+        Some(crate::actor::turn::Holder::Thread(thread)),
         "the writer waits for the retry"
     );
     let state = &rig.actor.threads[&thread].turn;

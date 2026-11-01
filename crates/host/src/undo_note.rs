@@ -10,9 +10,7 @@ pub(crate) enum NoteInput<'a> {
     TurnStarted,
     /// A step was undone; these files went back.
     Undone { restored: &'a [MatterPath] },
-    /// A version was restored; these files went back. `RestoreVersion` (a later command)
-    /// makes these; until then only the tests do.
-    #[cfg(test)]
+    /// A version was restored; these files went back (`RestoreVersion`, held in memory).
     Restored { paths: &'a [MatterPath] },
 }
 
@@ -30,7 +28,6 @@ pub(crate) fn paths_since_last_turn<'a>(
                 continue;
             }
             NoteInput::Undone { restored } => restored,
-            #[cfg(test)]
             NoteInput::Restored { paths } => paths,
         };
         for path in named {

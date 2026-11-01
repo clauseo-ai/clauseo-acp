@@ -1,6 +1,7 @@
 //! One OS thread, `clauseo-matter`, per open matter. It owns the matter's R8 [`Matter`] and runs
-//! its synchronous jobs (create, import, open, checkpoints, undo) off the actor, which sends each
-//! job with a tag and gets each reply back through `post`, tagged the same way.
+//! its synchronous jobs (create, import, open, checkpoints, undo, restore, compare, preview) off
+//! the actor, which sends each job with a tag and gets each reply back through `post`, tagged
+//! the same way.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -10,12 +11,13 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 
 use clauseo_matters::{
-    Checkpoint, CheckpointOutcome, ImportWarning, Imported, Limits, Matter, NewMatter, OsProbe,
-    Retention, Settings, TimelineEntry, TurnMeta, UndoRequest, Undone,
+    Checkpoint, CheckpointOutcome, CommitId, CompareSide, ImportWarning, Imported, Limits, Matter,
+    NewMatter, OsProbe, Restore, RestorePlan, Restored, Retention, Settings, TimelineEntry,
+    TurnMeta, UndoRequest, Undone,
 };
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, FileChange, FileDecision, ImportSummary, MatterId, MatterPath,
-    ThreadId, Timestamp, TurnId,
+    RestoreRequest, ThreadId, Timestamp, TurnId,
 };
 
 use crate::error::Error;
@@ -42,6 +44,16 @@ pub(crate) struct UndoJob {
     pub(crate) decisions: Vec<FileDecision>,
     pub(crate) thread: Option<ThreadId>,
     pub(crate) turn: Option<TurnId>,
+    pub(crate) outside_edits: CheckpointId,
+    pub(crate) checkpoint: CheckpointId,
+    pub(crate) at: Timestamp,
+}
+
+/// A restore request that owns its scope, so it can cross to the matter thread.
+#[derive(Debug, Clone)]
+pub(crate) struct RestoreJob {
+    pub(crate) from: CheckpointId,
+    pub(crate) scope: RestoreRequest,
     pub(crate) outside_edits: CheckpointId,
     pub(crate) checkpoint: CheckpointId,
     pub(crate) at: Timestamp,
@@ -83,6 +95,18 @@ pub(crate) enum MatterJob {
     },
     /// Undo one step.
     Undo(UndoJob),
+    /// Restore a version.
+    Restore(RestoreJob),
+    /// Compare two checkpoints.
+    Compare {
+        from: CheckpointId,
+        to: CheckpointId,
+    },
+    /// What restoring a version would do now; writes nothing.
+    Preview {
+        from: CheckpointId,
+        scope: RestoreRequest,
+    },
 }
 
 /// How an import ended.
@@ -90,6 +114,8 @@ pub(crate) enum MatterJob {
 pub(crate) enum ImportEnd {
     /// The matter exists; the worker keeps it.
     Done {
+        /// The root checkpoint's commit.
+        commit: CommitId,
         summary: ImportSummary,
         warnings: Vec<ImportWarning>,
     },
@@ -100,13 +126,17 @@ pub(crate) enum ImportEnd {
 /// One job's result, one variant per [`MatterJob`] kind.
 #[derive(Debug)]
 pub(crate) enum MatterReply {
-    Created(Result<(), Error>),
+    /// The root checkpoint's commit.
+    Created(Result<CommitId, Error>),
     Imported(Result<ImportEnd, Error>),
     /// The open matter's last checkpoint.
     Opened(Result<Option<CheckpointId>, Error>),
     BeforeTurn(Result<TurnCheckpoint, Error>),
     AfterTurn(Result<TurnCheckpoint, Error>),
     Undone(Result<Undone, Error>),
+    Restored(Result<Box<Restored>, Error>),
+    Compared(Result<Vec<FileChange>, Error>),
+    Previewed(Result<RestorePlan, Error>),
 }
 
 /// A turn's checkpoint, and for an id R8 reused what the host needs to record it when its log
@@ -210,11 +240,18 @@ fn run<T>(
 /// Runs one job against the slot.
 fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
     match job {
-        MatterJob::Create(new) => MatterReply::Created(
-            Matter::create(settings.clone(), new)
-                .map(|matter| *slot = Slot::Open(Box::new(matter)))
-                .map_err(Error::from),
-        ),
+        MatterJob::Create(new) => {
+            let root = new.checkpoint;
+            MatterReply::Created(
+                Matter::create(settings.clone(), new)
+                    .map_err(Error::from)
+                    .and_then(|matter| {
+                        let commit = root_commit(&matter, root)?;
+                        *slot = Slot::Open(Box::new(matter));
+                        Ok(commit)
+                    }),
+            )
+        }
         MatterJob::Import {
             new,
             refused,
@@ -260,7 +297,34 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             };
             Ok(matter.undo(&request)?)
         })),
+        MatterJob::Restore(job) => MatterReply::Restored(open(settings, slot).and_then(|matter| {
+            let request = Restore {
+                from: job.from,
+                files: (&job.scope).into(),
+                outside_edits: job.outside_edits,
+                checkpoint: job.checkpoint,
+                at: job.at,
+            };
+            Ok(Box::new(matter.restore(&request)?))
+        })),
+        MatterJob::Compare { from, to } => {
+            MatterReply::Compared(open(settings, slot).and_then(|matter| {
+                let (from, to) = (CompareSide::Checkpoint(from), CompareSide::Checkpoint(to));
+                Ok(matter.compare(from, to)?)
+            }))
+        }
+        MatterJob::Preview { from, scope } => MatterReply::Previewed(
+            open(settings, slot)
+                .and_then(|matter| Ok(matter.preview_restore(from, (&scope).into())?)),
+        ),
     }
+}
+
+/// The commit of a new matter's root checkpoint `root`.
+fn root_commit(matter: &Matter, root: CheckpointId) -> Result<CommitId, Error> {
+    matter
+        .commit_of(root)
+        .ok_or_else(|| Error::Internal(format!("the new matter has no checkpoint {root}")))
 }
 
 /// `checkpoint` with, when R8 reused an id, its timeline entry and the changes from `before`.
@@ -334,7 +398,7 @@ fn repair(
             Some(before) if before != entry.id => matter.changes_between(before, entry.id)?,
             Some(_) | None => Vec::new(),
         };
-        return Ok(reused(entry.id, Some(entry), changes, true));
+        return reused(matter, entry.id, Some(entry), changes, true);
     }
     if let Some(before) = before
         && (!last || matter.last_checkpoint() != Some(before))
@@ -344,22 +408,28 @@ fn repair(
             .rev()
             .find(|entry| entry.id == before)
             .copied();
-        return Ok(reused(before, entry, Vec::new(), false));
+        return reused(matter, before, entry, Vec::new(), false);
     }
     let checkpoint = matter.after_turn(meta, tool_paths)?;
     turn_checkpoint(matter, checkpoint, before)
 }
 
-/// A checkpoint the repair takes from the timeline, answered as R8 answers a reused id.
+/// A checkpoint the repair takes from the timeline, answered as R8 answers a reused id, with
+/// its commit, so a late record of it gets its row.
 fn reused(
+    matter: &Matter,
     id: CheckpointId,
     entry: Option<TimelineEntry>,
     changes: Vec<FileChange>,
     own: bool,
-) -> TurnCheckpoint {
-    TurnCheckpoint {
+) -> Result<TurnCheckpoint, Error> {
+    let commit = matter
+        .commit_of(id)
+        .ok_or_else(|| Error::Internal(format!("the timeline has no checkpoint {id}")))?;
+    Ok(TurnCheckpoint {
         checkpoint: Checkpoint {
             outcome: CheckpointOutcome::Reused(id),
+            commit,
             changes: Vec::new(),
             skipped: Vec::new(),
         },
@@ -368,7 +438,7 @@ fn reused(
             changes,
             own,
         }),
-    }
+    })
 }
 
 fn import(
@@ -378,14 +448,20 @@ fn import(
     refused: &[PathBuf],
     cancel: &AtomicBool,
 ) -> Result<ImportEnd, Error> {
+    let root = new.checkpoint;
     match Matter::import(settings.clone(), new, refused, &mut |_progress| {}, cancel)? {
         Imported::Done {
             matter,
             summary,
             warnings,
         } => {
+            let commit = root_commit(&matter, root)?;
             *slot = Slot::Open(matter);
-            Ok(ImportEnd::Done { summary, warnings })
+            Ok(ImportEnd::Done {
+                commit,
+                summary,
+                warnings,
+            })
         }
         Imported::Cancelled => Ok(ImportEnd::Cancelled),
     }

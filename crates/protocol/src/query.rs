@@ -8,7 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::{
     AgentId, BlobHash, CheckpointId, CompactString, Count, Error, FileChange, MatterId, MatterKind,
-    Seq, StreamId, ThreadId, ThreadStatus, ViewEntry,
+    MatterPath, RestoreRequest, Seq, StreamId, ThreadId, ThreadStatus, ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -110,6 +110,15 @@ pub enum HostQuery {
         /// The newer version.
         to: CheckpointId,
     },
+    /// What restoring a version would do now, file by file. Writes nothing.
+    PreviewRestore {
+        /// The matter.
+        matter: MatterId,
+        /// The version to restore.
+        checkpoint: CheckpointId,
+        /// The whole matter or chosen files, as `RestoreVersion` takes it.
+        scope: RestoreRequest,
+    },
     /// Part of a blob's text.
     ReadBlob {
         /// The blob.
@@ -134,8 +143,29 @@ pub enum QueryResult {
     Entries(Vec<ViewEntry>),
     /// For `CompareVersions`.
     FileChanges(Vec<FileChange>),
+    /// For `PreviewRestore`.
+    RestorePreview(RestorePreview),
     /// For `ReadBlob`.
     Blob(BlobRange),
+}
+
+/// What a restore would do now, for `PreviewRestore`. Each list is sorted by path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct RestorePreview {
+    /// The files the restore would write, as the change from the folder now to the version
+    /// (`modified`, or `added` for a file brought back). Empty when the folder already
+    /// stands as the version.
+    pub changes: Vec<FileChange>,
+    /// Files in the folder now that the version does not have: the restore leaves them.
+    pub added_since: Vec<MatterPath>,
+    /// Files that differ from the version but the restore cannot write (cloud-only, over the
+    /// size cap, behind a symlink, and the like): left as they are.
+    pub kept: Vec<MatterPath>,
+    /// Files of `changes` open in another program now: `RestoreVersion` would fail with
+    /// `matter.file_locked`, naming them, and write nothing.
+    pub locked: Vec<MatterPath>,
 }
 
 /// One matter in a list.

@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use clauseo_matters::{CheckpointOutcome, Undone};
+use clauseo_matters::{Checkpoint, CheckpointOutcome, Undone};
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, CheckpointRecorded, CommandOutcome, DomainEvent, Envelope,
     ErrorCode, FileChoice, FileDecision, MatterId, MatterPath, OutsideEdits, StepUndone, StreamId,
@@ -17,11 +17,12 @@ use super::super::input::{Input, MatterTag};
 use super::super::{Actor, Tag};
 use super::out::Out;
 use super::{
-    JobKind, LogFor, Then, TurnInput, TurnJob, TurnTag, end, failure, lost, matter_of, prompt,
-    state,
+    Holder, JobKind, LogFor, Then, TurnInput, TurnJob, TurnTag, end, failure, lost, matter_of,
+    prompt, state,
 };
 use crate::error::Error;
 use crate::matter_worker::{MatterJob, UndoJob};
+use crate::pipeline::MatterEvent;
 
 /// An undo between its checks and its commit.
 #[derive(Debug)]
@@ -63,7 +64,7 @@ pub(super) fn undo_step(
             "a turn is running in this matter; wait for it or cancel it",
         ));
     }
-    turns.holder = Some(thread);
+    turns.holder = Some(Holder::Thread(thread));
     let ask = UndoAsk {
         ctx,
         matter,
@@ -244,7 +245,7 @@ pub(crate) struct UndoLog {
     ctx: CommandCtx,
     matter: MatterId,
     /// The matter's events: the outside-edits checkpoint and its event, the undo checkpoint.
-    matter_events: Vec<DomainEvent>,
+    matter_events: Vec<MatterEvent>,
     step: StepUndone,
     outcome: CommandOutcome,
     /// That commit failed; the unblock sends it again.
@@ -265,23 +266,11 @@ fn undo_log(thread: ThreadId, ask: &UndoAsk, undone: Undone) -> Result<UndoLog, 
     } = undone;
     let (matter, turn) = (ask.matter, ask.turn);
     let internal = |error: clauseo_protocol::Error| Error::Internal(error.to_string());
-    let mut matter_events: Vec<DomainEvent> = Vec::new();
-    if let Some(edits) = outside_edits
-        && let CheckpointOutcome::Created(id) = edits.outcome
-    {
-        let recorded = CheckpointRecorded::new(id, CheckpointKind::OutsideEdits, None, None)
-            .map_err(internal)?;
-        matter_events.push(recorded.into());
-        let event = OutsideEdits {
-            checkpoint: id,
-            files: edits.changes,
-        };
-        matter_events.push(event.into());
-    }
+    let mut matter_events = outside_edits_events(outside_edits)?;
     if let CheckpointOutcome::Created(id) = checkpoint.outcome {
         let recorded = CheckpointRecorded::new(id, CheckpointKind::Undo, Some(thread), Some(turn))
             .map_err(internal)?;
-        matter_events.push(recorded.into());
+        matter_events.push(MatterEvent::checkpoint(recorded, checkpoint.commit));
     }
     let undo = checkpoint.outcome.id();
     Ok(UndoLog {
@@ -298,6 +287,27 @@ fn undo_log(thread: ThreadId, ask: &UndoAsk, undone: Undone) -> Result<UndoLog, 
         failed: false,
         retried: false,
     })
+}
+
+/// The matter's events for the `outside-edits` checkpoint an undo or a restore took first, if
+/// R8 created one: its `CheckpointRecorded` (with its row) and `OutsideEdits`.
+pub(super) fn outside_edits_events(edits: Option<Checkpoint>) -> Result<Vec<MatterEvent>, Error> {
+    let Some(edits) = edits else {
+        return Ok(Vec::new());
+    };
+    let CheckpointOutcome::Created(id) = edits.outcome else {
+        return Ok(Vec::new());
+    };
+    let recorded = CheckpointRecorded::new(id, CheckpointKind::OutsideEdits, None, None)
+        .map_err(|error| Error::Internal(error.to_string()))?;
+    let event = OutsideEdits {
+        checkpoint: id,
+        files: edits.changes,
+    };
+    Ok(vec![
+        MatterEvent::checkpoint(recorded, edits.commit),
+        MatterEvent::plain(event),
+    ])
 }
 
 /// One commit: the matter's events, `StepUndone`, the thread row and the receipt. The first
