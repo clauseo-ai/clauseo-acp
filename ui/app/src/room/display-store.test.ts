@@ -1,0 +1,232 @@
+// @vitest-environment happy-dom
+// The room's display settings: read from and written to localStorage["clauseo.display"] in H7's `ui` shape, the
+// computer's light and reduced motion followed live until set, lite's batch, and with a NextHost the host's settings.
+import type { Display } from "@clauseo/components/lib/display.ts";
+import { expect, test } from "vitest";
+import { frameBatch, liteBatch } from "../store/batch.ts";
+import { FakeTransport } from "../transport/fake-transport.ts";
+import {
+  createDisplayStore,
+  DEFAULT_UI,
+  DISPLAY_KEY,
+  displayOf,
+  type DisplayEnv,
+} from "./display-store.ts";
+import { nextHostOf, type Settings, type UiSettings } from "./host-next.ts";
+
+/** A media query the test flips by hand. */
+class FakeQuery extends EventTarget {
+  constructor(
+    readonly media: string,
+    public matches: boolean,
+  ) {
+    super();
+  }
+  flip(matches: boolean) {
+    this.matches = matches;
+    this.dispatchEvent(new Event("change"));
+  }
+}
+
+function harness(over: Partial<DisplayEnv> = {}, stored: string | null = null) {
+  const items = new Map<string, string>();
+  if (stored !== null) items.set(DISPLAY_KEY, stored);
+  const queries = {
+    dark: new FakeQuery("(prefers-color-scheme: dark)", false),
+    reduced: new FakeQuery("(prefers-reduced-motion: reduce)", false),
+  };
+  const started: Display[] = [];
+  const shown: Display[] = [];
+  const store = createDisplayStore({
+    storage: {
+      getItem: (key) => items.get(key) ?? null,
+      setItem: (key, value) => void items.set(key, value),
+    },
+    matchMedia: (query) =>
+      (query === queries.dark.media ? queries.dark : queries.reduced) as unknown as MediaQueryList,
+    host: null,
+    start: (d) => started.push(d),
+    show: (d) => shown.push(d),
+    ...over,
+  });
+  const saved = () => {
+    const text = items.get(DISPLAY_KEY);
+    return text === undefined ? undefined : (JSON.parse(text) as unknown);
+  };
+  return { store, queries, started, shown, saved };
+}
+
+const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("with nothing stored: the computer's light and motion, full render, English, text size 16", () => {
+  const { started, store } = harness();
+  expect(store.ui()).toEqual(DEFAULT_UI);
+  expect(started).toHaveLength(1);
+  expect(started[0]).toMatchObject({
+    theme: "day",
+    render: "full",
+    motion: "full",
+    lang: "en",
+    textSize: 16,
+  });
+});
+
+test("reads clauseo.display, keeps its valid keys and drops the rest", () => {
+  const { started, store } = harness(
+    {},
+    JSON.stringify({ theme: "dark", language: "hi", font_size: 18, lite: "sideways", motion: 3 }),
+  );
+  expect(store.ui()).toEqual({ ...DEFAULT_UI, theme: "dark", language: "hi", font_size: 18 });
+  expect(started[0]).toMatchObject({ theme: "night", lang: "hi", textSize: 18, render: "full" });
+});
+
+test("an unreadable clauseo.display starts from the defaults", () => {
+  const { store } = harness({}, "{not json");
+  expect(store.ui()).toEqual(DEFAULT_UI);
+});
+
+test("set writes the whole ui table to clauseo.display and shows it", () => {
+  const { store, shown, saved } = harness();
+  store.set({ theme: "dark", font_size: 20 });
+  expect(saved()).toEqual({ ...DEFAULT_UI, theme: "dark", font_size: 20 });
+  expect(shown.at(-1)).toMatchObject({ theme: "night", textSize: 20 });
+});
+
+test("the theme follows prefers-color-scheme, live, until it is set", () => {
+  const { store, queries, shown } = harness();
+  queries.dark.flip(true);
+  expect(store.display().theme).toBe("night");
+  queries.dark.flip(false);
+  expect(store.display().theme).toBe("day");
+  store.set({ theme: "light" });
+  const before = shown.length;
+  queries.dark.flip(true);
+  expect(store.display().theme).toBe("day");
+  expect(shown).toHaveLength(before);
+  store.set({ theme: "system" });
+  expect(store.display().theme).toBe("night");
+});
+
+test("motion follows prefers-reduced-motion, live, until it is set", () => {
+  const { store, queries } = harness();
+  queries.reduced.flip(true);
+  expect(store.display().motion).toBe("reduced");
+  store.set({ motion: "full" });
+  expect(store.display().motion).toBe("full");
+  queries.reduced.flip(false);
+  queries.reduced.flip(true);
+  expect(store.display().motion).toBe("full");
+});
+
+test("lite picks the view store's liteBatch; full and automatic keep frameBatch", () => {
+  const { store } = harness();
+  expect(store.batch()).toBe(frameBatch);
+  store.set({ lite: "lite" });
+  expect(store.display().render).toBe("lite");
+  expect(store.batch()).toBe(liteBatch);
+  store.set({ lite: "automatic" });
+  expect(store.display().render).toBe("full");
+  expect(store.batch()).toBe(frameBatch);
+});
+
+test("the platform is the host's, never a setting", () => {
+  const { store, saved } = harness();
+  store.setPlatform("windows");
+  expect(store.display().platform).toBe("windows");
+  expect(saved()).toBeUndefined();
+});
+
+test("an override shows for this page only, is never written, and a later set of the same key takes over", () => {
+  const { store, saved } = harness({ override: { theme: "dark", language: "hi" } });
+  expect(store.display()).toMatchObject({ theme: "night", lang: "hi" });
+  store.set({ theme: "light" });
+  expect(store.display()).toMatchObject({ theme: "day", lang: "hi" });
+  expect(saved()).toEqual({ ...DEFAULT_UI, theme: "light" });
+});
+
+test("after dispose the computer's preferences no longer move the display", () => {
+  const { store, queries, shown } = harness();
+  store.dispose();
+  queries.dark.flip(true);
+  expect(shown).toHaveLength(0);
+});
+
+test("displayOf maps every setting to the display it shows", () => {
+  const ui: UiSettings = {
+    theme: "system",
+    font_size: 14,
+    language: "hi",
+    lite: "full",
+    motion: "system",
+  };
+  expect(displayOf(ui, { dark: true, reduced: true, platform: "linux" })).toEqual({
+    theme: "night",
+    render: "full",
+    motion: "reduced",
+    lang: "hi",
+    textSize: 14,
+    platform: "linux",
+  });
+});
+
+/* ---------- with a NextHost (H7), over FakeTransport ---------- */
+
+const HOST_SETTINGS: Settings = {
+  ui: { theme: "dark", font_size: 17, language: "hi", lite: "lite", motion: "reduced" },
+  locked: [],
+};
+
+function withHost(settings: Settings = HOST_SETTINGS) {
+  const transport = new FakeTransport({
+    next: {
+      query: (query) => {
+        if (query === "get_settings") return { settings };
+        throw new Error("not scripted");
+      },
+    },
+  });
+  return { transport, ...harness({ host: nextHostOf(transport) }) };
+}
+
+test("a transport whose host has no H7 is no NextHost; the desktop's never is", () => {
+  expect(nextHostOf(new FakeTransport())).toBeNull();
+  expect(nextHostOf(withHost().transport)).not.toBeNull();
+});
+
+test("with a NextHost the store reads get_settings at start and shows them", async () => {
+  const { transport, store } = withHost();
+  await settled();
+  expect(transport.only("next_query")).toEqual([{ call: "next_query", query: "get_settings" }]);
+  expect(store.ui()).toEqual(HOST_SETTINGS.ui);
+  expect(store.display()).toMatchObject({
+    theme: "night",
+    lang: "hi",
+    render: "lite",
+    textSize: 17,
+  });
+  expect(store.batch()).toBe(liteBatch);
+});
+
+test("with a NextHost set sends a set_ui_settings patch of the changed keys and writes no localStorage", async () => {
+  const { transport, store, saved } = withHost();
+  await settled();
+  store.set({ theme: "light" });
+  expect(transport.only("next_command")).toEqual([
+    { call: "next_command", command: { set_ui_settings: { patch: { theme: "light" } } } },
+  ]);
+  expect(store.display().theme).toBe("day");
+  expect(saved()).toBeUndefined();
+});
+
+test("with a NextHost the store follows settings_changed", async () => {
+  const { transport, store } = withHost();
+  await settled();
+  transport.settingsChanged({
+    ui: { ...HOST_SETTINGS.ui, language: "en", lite: "full" },
+    locked: [],
+  });
+  expect(store.display()).toMatchObject({ lang: "en", render: "full" });
+  store.dispose();
+  transport.settingsChanged(HOST_SETTINGS);
+  expect(store.display().lang).toBe("en");
+});

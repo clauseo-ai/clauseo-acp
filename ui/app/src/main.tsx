@@ -17,11 +17,14 @@ const perf = window.__CLAUSEO_PERF__ === undefined ? null : import("./perf/index
 if (perf !== null) setTimedHook(() => {});
 
 const transport = pageTransport();
-// The window's chrome follows the OS the host reports; nothing on the page waits for it.
-hostPlatform(transport).then(
-  (platform) => startDisplay({ ...DEFAULT_DISPLAY, platform }),
-  (error: unknown) => console.warn(`display_info failed: ${JSON.stringify(error)}`),
-);
+// The window's chrome follows the OS the host reports; nothing on the page waits for it. The room (App.tsx's switch)
+// shows its own display settings, the platform included (src/room/start.ts).
+if (import.meta.env.VITE_CLAUSEO_WINDOW !== "room") {
+  hostPlatform(transport).then(
+    (platform) => startDisplay({ ...DEFAULT_DISPLAY, platform }),
+    (error: unknown) => console.warn(`display_info failed: ${JSON.stringify(error)}`),
+  );
+}
 
 createRoot(container).render(
   <StrictMode>
