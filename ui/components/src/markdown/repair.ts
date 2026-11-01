@@ -12,6 +12,7 @@
 //   hidden until its content arrives; so are the lines of a table whose delimiter row has not arrived.
 // A half-arrived HTML tag hides nothing: raw HTML is text here, so it cannot restyle what follows.
 import type { Nodes, Parent, Root } from "mdast";
+import { standIn } from "./nesting.ts";
 
 type Edit = { start: number; end: number; text: string };
 
@@ -354,6 +355,9 @@ function closers(input: string, root: Root, from: number, base?: Cuts) {
     if (run.char === "`" || inCode(run)) return false;
     const { start, end } = whole(run);
     if (run.char === "~" && end - start > 2) return false;
+    // A run capNesting cut short (its rest stand-ins) is a hostile run or a signature line's underscores:
+    // closing it would nest MAX_RUN / 2 levels around nothing, so it stays as written, as text.
+    if (input[end] !== undefined && input[end] === standIn(run.char)) return false;
     return canOpen(run.char, input[start - 1], input[end]);
   });
   // A run at the very end: the start of the last opener's closer, or else cut until it shows what it is.
