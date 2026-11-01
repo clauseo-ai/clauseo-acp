@@ -11,6 +11,7 @@ import { uuid } from "../testing/stream-script.ts";
 import { detailed, fakeNext } from "./fake-next.ts";
 import type { MatterInfo, NextCommand } from "./host-next.ts";
 import { Room } from "./room.tsx";
+import { ScratchLine } from "./scratch-line.tsx";
 import { connectRoom } from "./start.ts";
 import { clockOf, localZone } from "./when.ts";
 
@@ -260,3 +261,19 @@ test("pressing a row opens its matter: the title and the current row move, and w
     open_matter: { matter: A.matter },
   });
 });
+
+// QU.7 (a): before stage C the scratch matter's line promises no Indian Kanoon, no statutes and nothing about other
+// matters' papers; "kept, with its versions" is true on main
+for (const language of ["en", "hi"] as const) {
+  test(`the scratch matter's line promises only what holds before stage C (${language})`, async () => {
+    connectRoom(new FakeTransport(), { language });
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => root?.render(<ScratchLine />));
+    const text = host.textContent ?? "";
+    expect(text).not.toBe("");
+    for (const held of ["Indian Kanoon", "statute", "क़ानून", "another matter", "दूसरे मामले"])
+      expect(text).not.toContain(held);
+  });
+}

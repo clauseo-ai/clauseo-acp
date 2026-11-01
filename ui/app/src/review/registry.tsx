@@ -2,10 +2,52 @@
 // next free id for the brief ("U1-04"), the words file and English key (words.ts's helpers), the screen, the state
 // that shows it (the real screen over a scripted host, built in the render function), and, where the default desktop
 // window (entry.ts) doesn't suit, the width and height to render at. Approvals live in ui/app/copy-approvals.json.
+import { ScratchLine } from "../room/scratch-line.tsx";
 import type { Entry } from "./entry.ts";
-import { MATTER, roomHost } from "./hosts.ts";
-import { RoomOver } from "./states.tsx";
-import { frameWords, shared } from "./words.ts";
+import { MATTER, NEW_MATTER, railHost, refusingHost, roomHost, type Step } from "./hosts.ts";
+import { RoomAfter, RoomOver } from "./states.tsx";
+import { frameWords, limitWords, matterWords, shared, type WordsRef } from "./words.ts";
+import type { NextErrorCode } from "../room/host-next.ts";
+
+/** The rail open beside the work, every row in view: a window past the room's 1200 px breakpoint, tall enough for
+ * the rail in every state. */
+const RAIL = { width: 1280, height: 1500 } as const;
+
+/** A string of the rail in every state (hosts.ts's railHost). */
+const railState = (id: string, words: WordsRef): Entry => ({
+  id,
+  words,
+  screen: "matters/rail-states",
+  ...RAIL,
+  render: () => <RoomOver host={railHost} />,
+});
+
+/** Change, then Create the matter: the picked folder refused with `code`. */
+const CHANGE_CREATE: readonly Step[] = [
+  ...NEW_MATTER,
+  { press: "matter-existing" },
+  { press: "create-matter" },
+];
+
+/** A line of the new matter form's refusal (matter-form-check.ts's createErrorLine), after Change and Create, or with
+ * `next` after Create into the default location, where the line names no folder. */
+const refusal = (
+  id: string,
+  words: WordsRef,
+  code: NextErrorCode,
+  display: string,
+  next = false,
+): Entry => ({
+  id,
+  words,
+  screen: "matters/new-matter",
+  render: () => (
+    <RoomAfter
+      host={() => refusingHost(code, display, next)}
+      steps={next ? [...NEW_MATTER, { press: "create-matter" }] : CHANGE_CREATE}
+    />
+  ),
+});
 
 export const REGISTRY: readonly Entry[] = [
   {
@@ -29,5 +71,110 @@ export const REGISTRY: readonly Entry[] = [
     words: shared("No papers yet."),
     screen: "room/wall",
     render: () => <RoomOver host={() => roomHost([MATTER], [])} />,
+  },
+  // shared with U3's working line: exactly en "Answering.", hi "उत्तर दिया जा रहा है।"
+  railState("U3-01", frameWords("Answering.")),
+  {
+    id: "U2-01",
+    words: frameWords("Add a matter's folder."),
+    screen: "matters/rail-empty",
+    ...RAIL,
+    render: () => <RoomOver host={() => roomHost([])} />,
+  },
+  railState("U2-02", frameWords("Tomorrow")),
+  railState("U2-03", frameWords("This week")),
+  railState("U2-04", frameWords("Next week")),
+  railState("U2-05", frameWords("Later")),
+  railState("U2-06", frameWords("No date yet")),
+  railState("U2-07", limitWords("Limit reached until {time}")),
+  railState("U2-08", limitWords("Limit reached until {day} {time}")),
+  railState("U2-09", limitWords("Limit reached. Reset not given.")),
+  refusal(
+    "U2-10",
+    matterWords("{path} is a whole drive."),
+    "matter.folder_is_drive",
+    "/Volumes/Case",
+  ),
+  // alone for matter.folder_refused, true of a drive, the home folder and a system folder
+  refusal(
+    "U2-11",
+    matterWords("A matter is one folder of papers. Choose the folder for one matter."),
+    "matter.folder_refused",
+    "~",
+  ),
+  refusal("U2-12", matterWords("{path} is your home folder."), "matter.folder_is_home", "~"),
+  refusal(
+    "U2-13",
+    matterWords("It holds far more than one matter. Choose the folder for one matter."),
+    "matter.folder_is_home",
+    "~",
+  ),
+  refusal(
+    "U2-14",
+    matterWords("{path} is a folder the computer keeps for itself."),
+    "matter.folder_is_system",
+    "/System",
+  ),
+  refusal(
+    "U2-15",
+    matterWords("Choose the folder that holds the matter's papers."),
+    "matter.folder_is_system",
+    "/System",
+  ),
+  refusal(
+    "U2-16",
+    matterWords("Clauseo can't read {path}."),
+    "matter.folder_unreadable",
+    "~/Documents/Locked",
+  ),
+  refusal(
+    "U2-17",
+    matterWords("Clauseo can't read that folder."),
+    "matter.folder_unreadable",
+    "",
+    true,
+  ),
+  refusal(
+    "U2-18",
+    matterWords("It may be locked, or on a drive that's no longer connected."),
+    "matter.folder_unreadable",
+    "~/Documents/Locked",
+  ),
+  refusal(
+    "U2-19",
+    matterWords("Clauseo couldn't create the matter. Try again, or choose another folder."),
+    "internal",
+    "~/Documents/Mehta",
+  ),
+  {
+    id: "U2-20",
+    words: matterWords("Write the date as 30 October 2026."),
+    screen: "matters/new-matter",
+    render: () => (
+      <RoomAfter
+        host={() => refusingHost("internal", "", true)}
+        steps={[
+          ...NEW_MATTER,
+          { type: { field: 2, text: "next Tuesday" } },
+          { press: "create-matter" },
+        ]}
+      />
+    ),
+  },
+  {
+    id: "U2-21",
+    words: matterWords("A matter for quick questions, with no papers of its own."),
+    screen: "matters/scratch",
+    width: 640,
+    height: 120,
+    render: () => <ScratchLine />,
+  },
+  {
+    id: "U2-22",
+    words: matterWords("Every question asked here is kept, with its versions, like any matter's."),
+    screen: "matters/scratch",
+    width: 640,
+    height: 120,
+    render: () => <ScratchLine />,
   },
 ];
