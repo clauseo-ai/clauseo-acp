@@ -92,3 +92,33 @@ fn a_link_at_the_helper_path_is_refused_and_its_target_untouched() {
             .is_symlink()
     );
 }
+
+#[test]
+fn a_file_at_the_limits_folder_is_refused() {
+    let setup = Setup::new();
+    setup.settings(&setup.script());
+    Setup::file(&setup.data().join("limits"), "not a folder\n");
+    let message = refused(&setup);
+    assert!(message.contains("is not a folder"), "{message}");
+    assert!(!setup.helper().exists(), "no helper is written");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_run_folder_is_refused_and_its_target_untouched() {
+    let setup = Setup::new();
+    setup.settings(&setup.script());
+    let elsewhere = setup.root.join("elsewhere");
+    crate::write::create_dir_all(&elsewhere).unwrap();
+    crate::write::create_dir_all(&setup.data().join("limits")).unwrap();
+    crate::write::symlink(&elsewhere, &setup.run_dir()).unwrap();
+    let launcher = TestLauncher::new(Play::Scenario("claude-ok"));
+    let reader = setup.readers(&launcher, &SharedTimer::default());
+    let outcome = block_on(reader.read(AgentKind::Claude));
+    let ReadOutcome::Failed(ReadFailure::LaunchFailed(message)) = outcome else {
+        panic!("not a refusal: {outcome:?}");
+    };
+    assert!(message.contains("is a link"), "{message}");
+    assert_eq!(launcher.specs(), []);
+    assert_eq!(Setup::names(&elsewhere), Vec::<String>::new());
+}

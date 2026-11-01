@@ -68,6 +68,9 @@ export function query({ prompt, options }) {
     q.initializationResult = async () => {
       record("initializationResult", []);
       if (mode === "init-throws") throw new Error("not logged in\nline two");
+      if (mode === "lone-surrogate") {
+        return { ...initResult, account: { ...initResult.account, email: "pat\uD800@example.com" } };
+      }
       return initResult;
     };
   }
@@ -79,6 +82,10 @@ export function query({ prompt, options }) {
         throw new Error("Unsupported control request subtype: get_usage");
       }
       if (mode === "usage-throws") throw new Error("x".repeat(500));
+      if (mode === "lone-surrogate") {
+        const scoped = [{ display_name: "Fa\uD800ble", utilization: 5, resets_at: null }];
+        return { ...usageResult, rate_limits: { ...usageResult.rate_limits, model_scoped: scoped } };
+      }
       return usageResult;
     };
   }

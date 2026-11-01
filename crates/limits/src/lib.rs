@@ -30,13 +30,13 @@
 //! - The model starts no timer and no retry: the host waits for [`Limits::next_deadline`].
 //! - Every helper and app-server line is untrusted: size caps, unknown fields ignored, no panic.
 //! - Files change only through `write.rs`, and only inside the adapter's install folder and
-//!   `<data_dir>/limits/run`.
+//!   `<data_dir>/limits/run` (made if missing; nothing in Clauseo writes there).
 //!
 //! # Depends on
 //!
 //! `protocol` (the limits types), `process` (the launcher, the timer, the redacted stderr tail),
 //! `settings` (the agents' launch entries, the data folder), `codex_appserver` (the Codex
-//! client), `serde`, `serde_json`, `futures`, `tracing`, `thiserror`. Never `tauri`, `tokio` or
+//! client), `serde_json`, `futures`, `tracing`, `thiserror`. Never `tauri`, `tokio` or
 //! `keyring`.
 //!
 //! # Start reading

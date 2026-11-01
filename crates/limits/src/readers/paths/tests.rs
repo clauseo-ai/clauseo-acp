@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 
 use clauseo_settings::AgentLaunch;
 
-use super::{CLAUDE_HELPER, CLAUDE_ID, CODEX_ID, Located, claude, codex_js, has_dot_part, locate};
+use super::{
+    CLAUDE_HELPER, CLAUDE_ID, CODEX_ID, Located, check_run_dir, claude, codex_js, has_dot_part,
+    locate,
+};
 use crate::Error;
 use crate::write::scratch::Scratch;
 
@@ -203,4 +206,32 @@ fn a_linked_codex_package_is_refused_not_skipped() {
         &real,
     );
     assert!(rule(codex_js(&launch(&script))).contains("is a link inside the install"));
+}
+
+#[test]
+fn the_run_folder_may_be_missing_or_a_folder_but_nothing_else() {
+    let scratch = Scratch::new("paths-run");
+    let run = scratch.0.join("data/limits/run");
+    assert!(check_run_dir(&run).is_ok());
+    scratch.dir("data/limits/run");
+    assert!(check_run_dir(&run).is_ok());
+    let other = Scratch::new("paths-run-file");
+    other.file("data/limits", "");
+    let err = check_run_dir(&other.0.join("data/limits/run")).unwrap_err();
+    assert!(matches!(err, Error::RunFolder { .. }), "{err}");
+    assert!(err.to_string().ends_with("is not a folder"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_run_folder_or_limits_folder_is_refused() {
+    let scratch = Scratch::new("paths-run-link");
+    let elsewhere = scratch.dir("elsewhere");
+    scratch.dir("data/limits");
+    scratch.link("data/limits/run", &elsewhere);
+    let err = check_run_dir(&scratch.0.join("data/limits/run")).unwrap_err();
+    assert!(err.to_string().ends_with("is a link"), "{err}");
+    scratch.link("data2/limits", &elsewhere);
+    let err = check_run_dir(&scratch.0.join("data2/limits/run")).unwrap_err();
+    assert!(err.to_string().contains("data2/limits is a link"), "{err}");
 }

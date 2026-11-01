@@ -12,7 +12,6 @@ clauseo-protocol = { path = "../protocol" }
 clauseo-process = { path = "../process" }
 clauseo-settings = { path = "../settings" }
 futures = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

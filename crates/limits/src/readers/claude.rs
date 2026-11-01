@@ -53,9 +53,14 @@ pub(crate) async fn read<T: Timer>(
         Ok(spec) => spec,
         Err(message) => return ReadOutcome::Failed(ReadFailure::LaunchFailed(message)),
     };
-    let ran = run(launcher, &spec, timer, LIMIT, |_stdin, stdout| {
-        first_line(stdout)
-    })
+    let ran = run(
+        launcher,
+        &spec,
+        timer,
+        LIMIT,
+        |_stdin, stdout| first_line(stdout),
+        |line| matches!(line, Line::Read(_)),
+    )
     .await;
     match ran {
         Ran::LaunchFailed(message) => ReadOutcome::Failed(ReadFailure::LaunchFailed(message)),
@@ -86,12 +91,15 @@ pub(crate) async fn read<T: Timer>(
 }
 
 /// The helper's spec: settings `command` running the helper, in `run_dir`, with the agent's
-/// environment. Writes the helper (only when it differs) and makes `run_dir` first; on a refused
-/// path it writes nothing.
+/// environment. Writes the helper (only when it differs) and makes `run_dir` if it is missing
+/// (nothing in Clauseo writes there); on a refused path or run folder it writes nothing. The run
+/// folder is checked again once made, in case a link appeared meanwhile.
 fn prepare(launch: &AgentLaunch, run_dir: &Path) -> Result<LaunchSpec, String> {
     let (located, helper) = paths::claude(launch).map_err(|err| err.to_string())?;
+    paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
     write::replace_if_differs(&helper, HELPER.as_bytes()).map_err(|err| err.to_string())?;
     write::create_dir_all(run_dir).map_err(|err| err.to_string())?;
+    paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
     let env = spec_env(&launch.env, std::env::vars_os(), None);
     LaunchSpec::new(
         located.program,
@@ -253,7 +261,23 @@ pub(crate) fn looks_like_email(text: &str) -> bool {
         && text.split_once('@').is_some_and(|(local, domain)| {
             !local.is_empty() && !domain.is_empty() && !domain.contains('@')
         })
-        && !text.chars().any(|c| c.is_whitespace() || c.is_control())
+        && !text
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || is_invisible(c))
+}
+
+/// Whether `c` is a Unicode format or bidi character that changes how text shows without
+/// showing itself: U+200B to U+200F, U+202A to U+202E, U+2060 to U+2064, U+2066 to U+2069 and
+/// U+FEFF.
+pub(crate) fn is_invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{FEFF}'
+    )
 }
 
 /// What happens at the limit: extra usage when `extra_usage` is an object with a boolean
@@ -350,10 +374,12 @@ fn window(
     })
 }
 
-/// A server label with control characters turned into spaces and its ends trimmed.
-fn clean(label: &str) -> String {
+/// A server label with control characters turned into spaces, format and bidi characters
+/// removed, and its ends trimmed.
+pub(crate) fn clean(label: &str) -> String {
     let cleaned: String = label
         .chars()
+        .filter(|&c| !is_invisible(c))
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
     cleaned.trim().to_owned()

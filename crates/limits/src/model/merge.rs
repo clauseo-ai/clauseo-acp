@@ -2,8 +2,8 @@
 //! failed read keeps the last good numbers as stale; a live signal upserts one window.
 
 use clauseo_protocol::{
-    AccountLimits, AgentKind, LimitSource, LimitStopReason, LimitWindow, StaleReason, Timestamp,
-    UnavailableReason,
+    AccountLimits, AgentKind, Finite, LimitSource, LimitStopReason, LimitWindow, StaleReason,
+    Timestamp, UnavailableReason,
 };
 
 use crate::model::{AgentState, LiveSignal, LiveStatus, Row, kind_rank};
@@ -80,11 +80,16 @@ fn good_read(
 }
 
 /// Marks a failed read: the last good numbers stay as `Stale { ReadFailed }`, or the source is
-/// `Unavailable { ReadFailed }` when there are none. `NotApplicable` stays. Rows keep their
-/// flags, so a row past its reset shows no old percentage. Returns whether the source changed.
+/// `Unavailable { ReadFailed }` when there are none. `NotApplicable` and
+/// `Unavailable { MissingScope }` stay: a passing failure must not erase the sign-in
+/// explanation. Rows keep their flags, so a row past its reset shows no old percentage.
+/// Returns whether the source changed.
 fn failed_read(state: &mut AgentState) -> bool {
     let source = match state.source {
-        LimitSource::NotApplicable => return false,
+        LimitSource::NotApplicable
+        | LimitSource::Unavailable {
+            reason: UnavailableReason::MissingScope,
+        } => return false,
         LimitSource::Fresh { checked_at }
         | LimitSource::Stale { checked_at, .. }
         | LimitSource::LiveOnly {
@@ -187,13 +192,18 @@ fn upsert(row: &mut Row, signal: &LiveSignal) -> bool {
 }
 
 /// A row for a window no read named yet: only Claude's 5-hour and weekly windows, and only with
-/// a figure. Anything else (an `overage` bucket) waits for a read to name it.
+/// a figure, or rejected: a rejection without a figure is at the limit, so its bar is 100.
+/// Anything else (an `overage` bucket) waits for a read to name it.
 fn live_row(agent: AgentKind, id: String, signal: &LiveSignal, now: Timestamp) -> Option<Row> {
     if agent != AgentKind::Claude {
         return None;
     }
     let (kind, label) = claude_live_window(&id)?;
-    let used_percent = signal.used_percent?;
+    let used_percent = match (signal.used_percent, signal.status) {
+        (Some(used), _) => used,
+        (None, LiveStatus::Rejected) => Finite::new(100.0)?,
+        (None, LiveStatus::Allowed | LiveStatus::Warning) => return None,
+    };
     let window = LimitWindow {
         id,
         kind,

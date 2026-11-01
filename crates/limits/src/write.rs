@@ -2,7 +2,8 @@
 //! `clippy.toml` bans each of them everywhere else, and the expect below covers only this file.
 //!
 //! Two things change: the helper file in the adapter's install folder ([`replace_if_differs`]),
-//! and the readers' empty working folder `<data_dir>/limits/run` ([`create_dir_all`]).
+//! and the readers' working folder `<data_dir>/limits/run` ([`create_dir_all`]), made if missing;
+//! nothing in Clauseo writes there.
 
 #![expect(
     clippy::disallowed_methods,
@@ -15,9 +16,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::Error;
-
-/// The most bytes [`replace_if_differs`] reads of the file already there. A longer file differs.
-const COMPARE_MAX: u64 = 1024 * 1024;
 
 /// Numbers the temp files of one process, so two calls never pick the same name.
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
@@ -53,15 +51,32 @@ pub(crate) fn replace_if_differs(target: &Path, bytes: &[u8]) -> Result<bool, Er
     Ok(true)
 }
 
-/// Whether the file at `target` holds exactly `bytes`: false when it is missing.
+/// Whether the file at `target` holds exactly `bytes`: false when it is missing, is not a
+/// regular file, or has another size (then it is not opened at all).
 fn holds(target: &Path, bytes: &[u8]) -> Result<bool, Error> {
+    let len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    match std::fs::symlink_metadata(target) {
+        Ok(meta) if meta.is_file() && meta.len() == len => {}
+        Ok(_) => return Ok(false),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(Error::io("read", target, err)),
+    }
+    // A swap between the check above and this open is left open: whoever can write the install
+    // folder can change the adapter itself anyway.
     let file = match File::open(target) {
         Ok(file) => file,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(err) => return Err(Error::io("read", target, err)),
     };
+    if !file
+        .metadata()
+        .map_err(|err| Error::io("read", target, err))?
+        .is_file()
+    {
+        return Ok(false);
+    }
     let mut held = Vec::with_capacity(bytes.len().saturating_add(1));
-    file.take(COMPARE_MAX)
+    file.take(len.saturating_add(1))
         .read_to_end(&mut held)
         .map_err(|err| Error::io("read", target, err))?;
     Ok(held == bytes)
@@ -198,7 +213,7 @@ mod tests {
     #[test]
     fn a_folder_at_the_target_is_an_error_with_no_temp_left() {
         let scratch = Scratch::new("folder");
-        // A non-empty folder at the target: the read or the rename fails on every OS.
+        // A non-empty folder at the target: the rename fails on every OS, and the temp file goes.
         let target = scratch.0.join("helper.mjs");
         std::fs::create_dir_all(target.join("inside")).unwrap();
         let err = replace_if_differs(&target, b"new").unwrap_err();
