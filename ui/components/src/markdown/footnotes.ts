@@ -231,6 +231,15 @@ const EMPTY: Nths = new Map();
 const fragment = (id: string) => encodeURIComponent(id);
 
 /**
+ * The id part of the `nth` reference to note `id`: the identifier, then `-n` for a repeat, as
+ * remark-rehype and cmark-gfm write it, but with each hyphen of the identifier doubled, so the second
+ * reference to `a` (`a-2`) and the first to `a-2` (`a--2`) never share an id.
+ */
+function refPart(id: string, nth: number): string {
+  return `${id.replaceAll("-", "--")}${nth > 1 ? `-${nth}` : ""}`;
+}
+
+/**
  * The footnoteReference handler for one block (or note): the reference's answer-wide number, its own
  * back-reference id for each repeat, a link to the note when it is defined, and a pending number when not.
  */
@@ -261,7 +270,7 @@ export function referenceHandler(scope: string, numbering: Numbering, nths: Nths
       tagName: "a",
       properties: {
         href: `#${scope}-fn-${fragment(id)}`,
-        id: `${scope}-fnref-${id}${nth > 1 ? `-${nth}` : ""}`,
+        id: `${scope}-fnref-${refPart(id, nth)}`,
         dataFootnoteRef: true,
         ariaDescribedBy: [`${scope}-footnote-label`],
       },
@@ -291,7 +300,7 @@ function backReferences(scope: string, id: string, index: number, count: number)
       type: "element",
       tagName: "a",
       properties: {
-        href: `#${scope}-fnref-${fragment(id)}${nth > 1 ? `-${nth}` : ""}`,
+        href: `#${scope}-fnref-${fragment(refPart(id, nth))}`,
         // The back-reference's label, "Back to reference {n}", is the link component's (words.ts).
         dataFootnoteBackref: `${index + 1}${nth > 1 ? `-${nth}` : ""}`,
         className: ["data-footnote-backref"],
