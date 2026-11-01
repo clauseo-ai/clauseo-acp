@@ -93,6 +93,46 @@ fn under_managed_mcp_strict_is_off_even_when_the_hook_asks() {
     assert_eq!(options["env"][CLAUDE_AI_MCP_VAR], "false");
 }
 
+// The hook cannot widen the sources through an extra flag (clauseo-acp-private#185): the SDK
+// writes extraArgs after its own --setting-sources, so a later one would win.
+#[test]
+fn the_hooks_setting_sources_flag_is_taken_out_of_extra_args() {
+    let hook = object(&json!({"claudeCode": {"options": {"extraArgs": {
+        "setting-sources": "user,project,local",
+        "setting-sources=project": null,
+        "setting-sourcesx": "kept",
+        "debug": null,
+    }}}}));
+    for control in [McpControl::Clauseo, McpControl::Managed] {
+        let meta = Value::Object(session_meta(Some(hook.clone()), control));
+        let options = &meta["claudeCode"]["options"];
+        assert_eq!(
+            options["extraArgs"],
+            json!({"setting-sourcesx": "kept", "debug": null}),
+            "{control:?}"
+        );
+        assert_eq!(options["settingSources"], json!(["user"]), "{control:?}");
+    }
+    // extraArgs that is not an object is left as the hook set it.
+    let hook = object(&json!({"claudeCode": {"options": {"extraArgs": "x"}}}));
+    let meta = Value::Object(session_meta(Some(hook), McpControl::Clauseo));
+    assert_eq!(meta["claudeCode"]["options"]["extraArgs"], "x");
+}
+
+#[test]
+fn the_hooks_servers_stay_under_clauseo_and_go_under_managed_mcp() {
+    let hook = object(&json!({"claudeCode": {"options": {
+        "mcpServers": {"clauseo": {"command": "/opt/clauseo-mcp"}},
+    }}}));
+    let clauseo = Value::Object(session_meta(Some(hook.clone()), McpControl::Clauseo));
+    assert_eq!(
+        clauseo["claudeCode"]["options"]["mcpServers"],
+        json!({"clauseo": {"command": "/opt/clauseo-mcp"}})
+    );
+    let managed = Value::Object(session_meta(Some(hook), McpControl::Managed));
+    assert_eq!(managed["claudeCode"]["options"].get("mcpServers"), None);
+}
+
 #[test]
 fn the_launch_variable_is_set_after_the_hooks_in_any_case() {
     let hook = BTreeMap::from([
