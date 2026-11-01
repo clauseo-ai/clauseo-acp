@@ -210,6 +210,17 @@ test.each([
   expect(fresh(text)).toEqual([text]);
 });
 
+test("a block that is one ATX heading line is cut after it without a blank line; nothing else is", () => {
+  expect(fresh("# a\n## b\n# c")).toEqual(["# a\n", "## b\n", "# c"]);
+  expect(fresh("# a\ntext\n# b\n")).toEqual(["# a\n", "text\n# b\n"]);
+  expect(fresh("# a\n    code\n")).toEqual(["# a\n    code\n"]);
+  expect(fresh("> q\n# a\nb\n")).toEqual(["> q\n# a\nb\n"]);
+  for (const text of ["# a\n# b\n- c\n- d\n", "# a\n```\nx\n```\n# b\n", "# a\n<div>\n# b\n"])
+    expect(normalise(htmlOf(createAnswer("spec").update(text, false)))).toBe(
+      normalise(unsplit(text)),
+    );
+});
+
 test("an ordered list after an indented code block starts at its own number, as in CommonMark", () => {
   expect(htmlOf(createAnswer("t").update("    code\n\n10. item\n", false))).toContain(
     '<ol start="10">',
