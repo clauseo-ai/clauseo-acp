@@ -13,13 +13,17 @@ import { toHast } from "mdast-util-to-hast";
 import type { Handler } from "mdast-util-to-hast";
 import remend from "remend";
 import { definitionPrefix, definitionsIn, mayDefine, mayReference } from "./definitions.ts";
+import { capNesting, deeperThan, MAX_TREE_DEPTH } from "./nesting.ts";
 import { endOf, parse } from "./parse.ts";
 import { SCHEMA } from "./schema.ts";
 import { createSplitter } from "./split.ts";
 import type { BlockEnd } from "./split.ts";
 
-/** One block, ready to render: `input` is what was parsed, `hast` the sanitised result. */
-export type BlockView = { readonly input: string; readonly hast: Hast };
+/**
+ * One block, ready to render: `source` is the block's text, `input` what was parsed for it, `hast` the
+ * sanitised result.
+ */
+export type BlockView = { readonly source: string; readonly input: string; readonly hast: Hast };
 
 export type Answer = {
   /** The blocks for the whole answer so far; `streaming` is false once the turn has ended. */
@@ -50,6 +54,12 @@ function scopeFootnoteLabel(nodes: readonly (RootContent | ElementContent)[], sc
     }
     scopeFootnoteLabel(node.children, scope);
   }
+}
+
+/** A block shown as its source, in plain text: what a block that cannot render safely falls back to. */
+export function plainText(source: string): Hast {
+  const text: Text = { type: "text", value: source.trimEnd() };
+  return { type: "root", children: [{ type: "element", tagName: "p", properties: {}, children: [text] }] };
 }
 
 /** A cache that keeps only what the last update used, once it holds more than twice that. */
@@ -87,11 +97,21 @@ export function createAnswer(scope: string): Answer {
   const split = createSplitter((block) => ends.get(block, () => endOf(block, tree(block))));
   const options = { clobberPrefix: `${scope}-`, handlers: { html: htmlAsText } };
 
-  const toView = (input: string): BlockView =>
+  /**
+   * A block's view. A tree too deep to walk safely, or any error on the way, shows the block's source as
+   * plain text instead: one bad block never takes the answer down (markdown.tsx adds an error boundary).
+   */
+  const toView = (source: string, input: string): BlockView =>
     views.get(input, () => {
-      const hast = toHast(tree(input), options) as Hast;
-      if (input.includes("[^")) scopeFootnoteLabel(hast.children, scope);
-      return { input, hast: sanitize(hast, SCHEMA) as Hast };
+      try {
+        const root = tree(input);
+        if (deeperThan(root, MAX_TREE_DEPTH)) return { source, input, hast: plainText(source) };
+        const hast = toHast(root, options) as Hast;
+        if (input.includes("[^")) scopeFootnoteLabel(hast.children, scope);
+        return { source, input, hast: sanitize(hast, SCHEMA) as Hast };
+      } catch {
+        return { source, input, hast: plainText(source) };
+      }
     });
 
   /** Each block's own definitions; while streaming, the last block's do not count yet. */
@@ -112,15 +132,21 @@ export function createAnswer(scope: string): Answer {
   let lastViews: readonly BlockView[] = [];
   return {
     update(raw, streaming) {
-      const text = raw.includes("\r") ? raw.replace(/\r\n?/g, "\n") : raw;
-      if (text === lastText && streaming === lastStreaming) return lastViews;
-      const blocks = split(text);
+      if (raw === lastText && streaming === lastStreaming) return lastViews;
+      const text = capNesting(raw.includes("\r") ? raw.replace(/\r\n?/g, "\n") : raw);
+      let blocks: readonly string[];
+      try {
+        blocks = split(text);
+      } catch {
+        blocks = [text];
+      }
       const last = blocks.length - 1;
       const document = documentOf(blocks, streaming ? last : blocks.length);
-      lastViews = blocks.map((block, index) =>
-        toView(inputOf(streaming && index === last ? remend(block) : block, document)),
-      );
-      lastText = text;
+      lastViews = blocks.map((block, index) => {
+        const source = streaming && index === last ? remend(block) : block;
+        return toView(block, inputOf(source, document));
+      });
+      lastText = raw;
       lastStreaming = streaming;
       for (const cache of [trees, ends, owned, views]) cache.sweep();
       return lastViews;
