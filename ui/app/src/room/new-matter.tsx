@@ -3,7 +3,7 @@
 // folder; with no folder picked, in H20's default location where the host has one (no picker), else in a parent the
 // picker asks for (new_folder), and a cancelled picker sends nothing and leaves the form open. The host's refusal is
 // said in the form by its code (matter-form-check.ts), never its message. Made, the new matter opens, the dialog
-// closes and focus goes back to New matter.
+// closes and focus goes back to New matter (or, where the room folded the rail on onMade, to Matters).
 import { useEffect, useState, type RefObject } from "react";
 import { NewMatterDialog } from "@clauseo/components/clauseo/new-matter-dialog.tsx";
 import { createErrorLine } from "@clauseo/components/clauseo/matter-form-check.ts";
@@ -26,6 +26,7 @@ export function NewMatter({
   detailed,
   open,
   onOpenChange,
+  onMade,
   finalFocus,
 }: {
   matters: Matters;
@@ -33,7 +34,9 @@ export function NewMatter({
   detailed: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** New matter's button, where focus goes back. */
+  /** Optional: the matter was made, before the dialog closes. */
+  onMade?: () => void;
+  /** Where focus goes back as the dialog closes: New matter's button. */
   finalFocus: RefObject<HTMLElement | null>;
 }) {
   const w = useWords();
@@ -83,6 +86,7 @@ export function NewMatter({
       return false;
     }
     setExisting(null);
+    onMade?.();
     return true;
   };
   return (

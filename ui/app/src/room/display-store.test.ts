@@ -209,12 +209,17 @@ function withHost(settings: Settings = HOST_SETTINGS) {
       },
     },
   });
-  return { transport, ...harness({ host: nextHostOf(transport) }) };
+  return { transport, ...harness({ host: nextHostOf(transport).settings }) };
 }
 
-test("a transport whose host has no H7 is no NextHost; the desktop's never is", () => {
-  expect(nextHostOf(new FakeTransport())).toBeNull();
-  expect(nextHostOf(withHost().transport)).not.toBeNull();
+test("a transport whose host has no H7 gives no settings part; one scripting other rows only gives none either", () => {
+  expect(nextHostOf(new FakeTransport()).settings).toBeNull();
+  expect(nextHostOf(withHost().transport).settings).not.toBeNull();
+  const papersOnly = new FakeTransport({
+    next: { parts: ["papers"], query: () => ({ matters: [] }) },
+  });
+  expect(nextHostOf(papersOnly).settings).toBeNull();
+  expect(nextHostOf(papersOnly).papers).not.toBeNull();
 });
 
 test("with a NextHost the store reads get_settings at start and shows them", async () => {

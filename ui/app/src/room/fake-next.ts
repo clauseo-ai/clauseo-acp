@@ -4,7 +4,7 @@ import type { FakeNextHost } from "../transport/fake-transport.ts";
 import type { MatterSummary } from "../transport/protocol.ts";
 import { DEFAULT_UI } from "./display-store.ts";
 import { uuid } from "../testing/stream-script.ts";
-import type { MatterInfo, PaperSummary } from "./host-next.ts";
+import { WIRE, type MatterInfo, type NextPart, type PaperSummary } from "./host-next.ts";
 
 /** A matter with details: unpinned, its folder found, idle, unless `over` says otherwise. */
 export const detailed = (m: MatterSummary, over: Partial<MatterInfo> = {}): MatterInfo => ({
@@ -16,37 +16,41 @@ export const detailed = (m: MatterSummary, over: Partial<MatterInfo> = {}): Matt
 });
 
 /** A NextHost's answers: `matters` read on each list_matters, papers for every matter (none without), the default
- * location (none: the read fails), and the commands' answers. */
+ * location (none: the read fails), and the commands' answers; with `parts`, only those host rows. */
 export function fakeNext({
   matters,
   papers = [],
   location = null,
   command,
+  parts,
 }: {
   matters: () => readonly MatterInfo[];
   papers?: readonly PaperSummary[];
   location?: string | null;
   command?: FakeNextHost["command"];
+  parts?: readonly NextPart[];
 }): FakeNextHost {
   return {
     query: (query) => {
-      if (query === "list_matters") return { matters: [...matters()] };
-      if (query === "get_settings") return { settings: { ui: DEFAULT_UI, locked: [] } };
-      if (query === "get_default_location") {
+      if (query === WIRE.listMatters) return { matters: [...matters()] };
+      if (query === WIRE.getSettings) return { settings: { ui: DEFAULT_UI, locked: [] } };
+      if (query === WIRE.getDefaultLocation) {
         if (location === null) throw new Error("no default location in this host");
         return { default_location: { display: location } };
       }
-      if ("list_papers" in query)
-        return { papers: { papers: [...papers], skipped: [], truncated: false } };
+      if (WIRE.listPapers in query)
+        return { papers: { papers: [...papers], skipped: [], unread: [], truncated: false } };
       return { threads: [] };
     },
     ...(command === undefined ? {} : { command }),
+    ...(parts === undefined ? {} : { parts }),
   };
 }
 
-/** The probe's ?rail=states and axe's: `open` working and opened last, then a matter in every other state the rail
- * draws (a question, a permission, an answer ready, stopped, the limit with a reset today, another day and none, a
- * moved folder), across every date group in the lawyer's zone on `now`, one pinned, and the scratch matter. */
+/** The probe's ?rail=states and axe's: `open` working and opened last (its row says nothing: its work is in view),
+ * then a matter in every state the rail draws (working, a question, a permission, an answer ready, stopped today and on
+ * another day, the limit with a reset today, another day and none, a moved folder), across every date group in the
+ * lawyer's zone on `now`, one pinned, and the scratch matter. */
 export function railStates(open: MatterSummary, scratch: MatterSummary, now: number): MatterInfo[] {
   const iso = (days: number) => {
     const d = new Date(now + days * 86_400_000);
@@ -65,6 +69,8 @@ export function railStates(open: MatterSummary, scratch: MatterSummary, now: num
       status: { stopped: { at: now - 3_600_000 } },
       next_date: iso(40),
     }),
+    m(13, "Chopra Steel v. Chopra", { status: "working", next_date: iso(sunday + 4) }),
+    m(12, "Menon v. Menon", { status: { stopped: { at: now - 2 * 86_400_000 } } }),
     m(6, "Iyer v. Iyer", { status: { paused_at_limit: { resets_at: now + 3_600_000 } } }),
     m(7, "Bose v. Calcutta Port Trust", {
       status: { paused_at_limit: { resets_at: now + 3 * 86_400_000 } },

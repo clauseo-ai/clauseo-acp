@@ -6,6 +6,7 @@
 import "./moved.css";
 import { Button } from "@clauseo/components/ui/button.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
+import { isolate } from "@clauseo/components/lib/bidi.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { ui } from "@clauseo/components/lib/words-ui.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
@@ -25,9 +26,8 @@ export function MovedFolder({ folder, onLocate }: { folder?: string; onLocate: (
             {mt(
               lang,
               "It was at {path}. Find it where it is now, and the matter opens as you left it.",
-              {
-                path: folder,
-              },
+              // isolated, so a folder name with right-to-left marks can't reorder the line
+              { path: isolate(folder) },
             )}
           </Say>
         </p>

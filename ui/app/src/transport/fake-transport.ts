@@ -7,12 +7,14 @@ import type {
   NextCommand,
   NextHost,
   NextHostSource,
+  NextPart,
   NextOutcome,
   NextQuery,
   NextQueryResult,
   Papers,
   Settings,
 } from "../room/host-next.ts";
+import { NO_NEXT, WIRE } from "../room/host-next.ts";
 import { ChannelReader, streamFailedOf, type ChannelEvent } from "./channel.ts";
 import {
   internalError,
@@ -55,6 +57,8 @@ export type FakeCall =
 
 /** Scripted answers to the calls the host doesn't have yet (room/host-next.ts). */
 export type FakeNextHost = {
+  /** The host rows it has (host-next.ts's NextHost parts); every part when left out. */
+  parts?: readonly NextPart[];
   query: (query: NextQuery) => NextQueryResult | Promise<NextQueryResult>;
   /** Answers each command; throwing refuses it. Without it, or returning nothing, the command is done; create_matter
    * gives the outcome it returns. */
@@ -87,44 +91,54 @@ export class FakeTransport implements HostTransport, NextHostSource {
   readonly #dispatched = new Set<(command: CommandEnvelope) => void>();
   readonly #settingsHeard = new Set<(settings: Settings) => void>();
   readonly #appHeard = new Set<(event: AppEvent) => void>();
-  readonly #next: NextHost = {
-    listPapers: async (matter) => {
-      const result = await this.#nextQuery({ list_papers: { matter } });
-      if (!("papers" in result)) throw internalError("list_papers answered without papers");
-      return result.papers satisfies Papers;
+  readonly #parts: { [P in NextPart]-?: NonNullable<NextHost[P]> } = {
+    papers: {
+      listPapers: async (matter) => {
+        const result = await this.#nextQuery({ [WIRE.listPapers]: { matter } });
+        if (!("papers" in result)) throw internalError("list_papers answered without papers");
+        return result.papers satisfies Papers;
+      },
     },
-    getSettings: async () => {
-      const result = await this.#nextQuery("get_settings");
-      if (!("settings" in result)) throw internalError("get_settings answered without settings");
-      return result.settings;
+    settings: {
+      getSettings: async () => {
+        const result = await this.#nextQuery(WIRE.getSettings);
+        if (!("settings" in result)) throw internalError("get_settings answered without settings");
+        return result.settings;
+      },
+      setUiSettings: async (patch) => {
+        await this.#nextCommand({ [WIRE.setUiSettings]: { patch } });
+      },
+      onSettingsChanged: (listener) => {
+        this.#settingsHeard.add(listener);
+        return () => this.#settingsHeard.delete(listener);
+      },
     },
-    setUiSettings: async (patch) => {
-      await this.#nextCommand({ set_ui_settings: { patch } });
+    matters: {
+      listMatters: async () => {
+        const result = await this.#nextQuery(WIRE.listMatters);
+        if (!("matters" in result)) throw internalError("list_matters answered without matters");
+        return result.matters;
+      },
+      listThreads: async (matter) => {
+        const result = await this.#nextQuery({ [WIRE.listThreads]: { matter } });
+        if (!("threads" in result)) throw internalError("list_threads answered without threads");
+        return result.threads;
+      },
+      command: (command) => this.#nextCommand(command),
     },
-    onSettingsChanged: (listener) => {
-      this.#settingsHeard.add(listener);
-      return () => this.#settingsHeard.delete(listener);
+    location: {
+      getDefaultLocation: async () => {
+        const result = await this.#nextQuery(WIRE.getDefaultLocation);
+        if (!("default_location" in result))
+          throw internalError("get_default_location answered without default_location");
+        return result.default_location.display;
+      },
     },
-    listMatters: async () => {
-      const result = await this.#nextQuery("list_matters");
-      if (!("matters" in result)) throw internalError("list_matters answered without matters");
-      return result.matters;
-    },
-    listThreads: async (matter) => {
-      const result = await this.#nextQuery({ list_threads: { matter } });
-      if (!("threads" in result)) throw internalError("list_threads answered without threads");
-      return result.threads;
-    },
-    getDefaultLocation: async () => {
-      const result = await this.#nextQuery("get_default_location");
-      if (!("default_location" in result))
-        throw internalError("get_default_location answered without default_location");
-      return result.default_location.display;
-    },
-    matters: (command) => this.#nextCommand(command),
-    subscribeApp: (listener) => {
-      this.#appHeard.add(listener);
-      return () => this.#appHeard.delete(listener);
+    app: {
+      subscribeApp: (listener) => {
+        this.#appHeard.add(listener);
+        return () => this.#appHeard.delete(listener);
+      },
     },
   };
 
@@ -166,9 +180,19 @@ export class FakeTransport implements HostTransport, NextHostSource {
     this.#subs.fail(stream, error);
   }
 
-  /** The calls the host doesn't have yet, when `host.next` scripts them; null otherwise. */
-  nextHost(): NextHost | null {
-    return this.host.next === undefined ? null : this.#next;
+  /** The calls the host doesn't have yet, the parts `host.next` scripts (every part unless it names some); each part
+   * null without `host.next`. */
+  nextHost(): NextHost {
+    const next = this.host.next;
+    if (next === undefined) return NO_NEXT;
+    const has = (part: NextPart) => next.parts === undefined || next.parts.includes(part);
+    return {
+      papers: has("papers") ? this.#parts.papers : null,
+      settings: has("settings") ? this.#parts.settings : null,
+      matters: has("matters") ? this.#parts.matters : null,
+      location: has("location") ? this.#parts.location : null,
+      app: has("app") ? this.#parts.app : null,
+    };
   }
 
   /** Plays `settings_changed` as the host would send it. */

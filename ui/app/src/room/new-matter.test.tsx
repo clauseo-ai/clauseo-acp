@@ -93,13 +93,13 @@ const created = (transport: FakeTransport) =>
 test("an existing folder through Change: its display shows, create_matter takes it, the new matter opens and focus goes back", async () => {
   const transport = await mount({
     ...today(),
-    pickFolder: () => ({ folder: "ref-existing", display: "~/Documents/Mehta" }),
+    pickFolder: () => ({ folder: "ref-existing", display: "Documents/Mehta" }),
   });
   await openForm();
   // before a pick, no folder words: Change alone
   expect(dialog()?.textContent).not.toContain("Documents");
   await press("matter-existing");
-  expect(dialog()?.textContent).toContain("~/Documents/Mehta");
+  expect(dialog()?.textContent).toContain("Documents/Mehta");
   await press("create-matter");
   expect(created(transport)).toEqual([
     { create_matter: { name: NAME, source: { existing_folder: { folder: "ref-existing" } } } },
@@ -110,10 +110,44 @@ test("an existing folder through Change: its display shows, create_matter takes 
   expect(document.activeElement).toBe(byId("new-matter"));
 });
 
+test("a matter made from the folded rail folds it, and focus goes back to Matters", async () => {
+  await mount({
+    ...today(),
+    pickFolder: () => ({ folder: "ref-existing", display: "Documents/Mehta" }),
+  });
+  const rail = () => host?.querySelector("nav.room-rail");
+  await press("rail-toggle");
+  expect(rail()?.hasAttribute("data-open")).toBe(true);
+  await openForm();
+  await press("matter-existing");
+  await press("create-matter");
+  expect(title()).toBe(NAME);
+  expect(dialog()).toBeNull();
+  expect(rail()?.hasAttribute("data-open")).toBe(false);
+  expect(document.activeElement).toBe(byId("rail-toggle"));
+});
+
+test("a path with a right-to-left override is isolated: the folder line in <bdi>, the refusal line between FSI and PDI", async () => {
+  const spoof = "Documents/a\u202Efdp.exe";
+  const refusal: NextHostError = {
+    code: "matter.folder_unreadable",
+    message: "",
+    retryable: false,
+  };
+  await mount({ ...today(refusal), pickFolder: () => ({ folder: "ref-x", display: spoof }) });
+  await openForm();
+  await press("matter-existing");
+  const path = dialog()?.querySelector(".matter-form-path");
+  expect(path?.tagName).toBe("BDI");
+  expect(path?.textContent).toBe(spoof);
+  await press("create-matter");
+  expect(dialog()?.querySelector('[role="alert"]')?.textContent).toContain(`\u2068${spoof}\u2069`);
+});
+
 test("a new folder: Create the matter asks for the parent and sends new_folder", async () => {
   const transport = await mount({
     ...today(),
-    pickFolder: () => ({ folder: "ref-parent", display: "~/Documents" }),
+    pickFolder: () => ({ folder: "ref-parent", display: "Documents" }),
   });
   await openForm();
   await press("create-matter");
@@ -142,7 +176,7 @@ test("with a NextHost: the default location's folder line, create_matter with de
   const transport = await mount({
     next: fakeNext({
       matters: () => list,
-      location: "~/Documents/Clauseo",
+      location: "Documents/Clauseo",
       command: (c): NextOutcome | undefined => {
         sent.push(c);
         if (!("create_matter" in c)) return undefined;
@@ -152,7 +186,7 @@ test("with a NextHost: the default location's folder line, create_matter with de
     }),
   });
   await openForm();
-  expect(dialog()?.textContent).toContain(`~/Documents/Clauseo/${NAME}`);
+  expect(dialog()?.textContent).toContain(`Documents/Clauseo/${NAME}`);
   const fields = [...(dialog()?.querySelectorAll<HTMLInputElement>("input") ?? [])];
   // name, client, next date: H5's fields show
   expect(fields).toHaveLength(3);

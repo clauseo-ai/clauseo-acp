@@ -1,11 +1,13 @@
 // The room's matters: the list, the matter that's open, and what each row says it's doing. One small store the rail and
 // the frame read (useSyncExternalStore), built once per transport.
 //
-// With a NextHost (host-next.ts: H3 to H6 and H20) the list is `list_matters`'s MatterInfo, each row's status is the
-// host's (H5), H4's app events keep it current, opening a matter sends open_matter and the open thread is marked seen
-// (H6). Without one (today's desktop host) the list is today's `list_matters`, with no dates, pins or statuses, and a
-// row says what it's doing only from the thread headers the room holds: the open matter's thread, and until H4, the
-// thread of a matter the lawyer left while it was working, kept subscribed (header only) until it rests.
+// With the NextHost's matters part (host-next.ts: H3, H5, H6 and H20's rows) the list is `list_matters`'s MatterInfo,
+// each row's status is the host's (H5), opening a matter sends open_matter and the open thread is marked seen (H6).
+// H4's app events (the app part) keep the list current, applied once a frame. Without the matters part (today's
+// desktop host) the list is today's `list_matters`, with no dates, pins or statuses, and a row says what it's doing
+// only from the thread headers the room holds: the open matter's thread, and the thread of a matter the lawyer left
+// while it was working, kept subscribed until it rests. A list answer older than the list shown is dropped.
+import { frameBatch, type Batch } from "../store/batch.ts";
 import type { ViewStore } from "../store/store.ts";
 import { streamOf } from "../store/view.ts";
 import { pickReopenMatter } from "../store/reopen.ts";
@@ -22,6 +24,8 @@ import {
   nextHostOf,
   type AppEvent,
   type MatterInfo,
+  type MattersCommand,
+  type MattersHost,
   type MatterStatus,
   type NextHost,
   type NextMatterSource,
@@ -45,7 +49,7 @@ export type RowStatus = { state: RowState; at?: Timestamp };
 export type MattersView = {
   /** loading until the first list arrives; failed when it couldn't be read. */
   phase: "loading" | "ready" | "failed";
-  /** Whether the host gives each matter's details (a NextHost): dates, pins, clients, statuses. */
+  /** Whether the host gives each matter's details (the NextHost's matters part): dates, pins, clients, statuses. */
   detailed: boolean;
   /** Every matter, the scratch matter too. Without details each has none: no dates, unpinned, its folder found. */
   matters: readonly MatterInfo[];
@@ -61,7 +65,7 @@ export type MattersView = {
   zone: string;
 };
 
-/** A thread working, or waiting on the lawyer: the statuses a left matter keeps its header subscription for. A thread
+/** A thread working, or waiting on the lawyer: the statuses a left matter keeps its thread subscription for. A thread
  * paused at the limit is kept too, so its row keeps saying so until it rests or ends. */
 const keeps = (status: ThreadStatus): boolean =>
   status === "starting" ||
@@ -126,24 +130,39 @@ function reopenOf(matters: readonly MatterInfo[]): MatterInfo | null {
 }
 
 export class Matters {
-  readonly next: NextHost | null;
+  /** The host rows beyond today's, each part null where the host lacks it. */
+  readonly next: NextHost;
+  /** The matters part (H3, H5, H6, H20's rows): what `detailed` and the H5 behaviour key on. */
+  readonly #rows: MattersHost | null;
   readonly #transport: HostTransport;
   readonly #store: ViewStore;
+  readonly #batch: Batch;
+  /** Each list read and each app event takes the next ticket; a list older than the one shown is dropped. */
+  #ticket = 0;
+  #shown = 0;
+  /** App events heard since the last frame, applied together, and the ticket of the last one. */
+  #heard: AppEvent[] = [];
+  #heardAt = 0;
+  #cancelHeard: (() => void) | null = null;
   readonly #listeners = new Set<() => void>();
   #view: MattersView;
-  /** Thread headers the room holds without H4: the open thread, and threads of left matters still working. */
+  /** Thread views the room watches without the matters part, for their headers: the open thread, and threads of left
+   * matters still working. */
   readonly #held = new Map<ThreadId, { matter: MatterId; release: () => void }>();
   #thread: ThreadId | null = null;
   #stop: (() => void)[] = [];
   #live = false;
 
-  constructor(transport: HostTransport, store: ViewStore) {
+  /** `batch` schedules the app events' one apply: once a frame unless given. */
+  constructor(transport: HostTransport, store: ViewStore, batch: Batch = frameBatch) {
     this.#transport = transport;
     this.#store = store;
+    this.#batch = batch;
     this.next = nextHostOf(transport);
+    this.#rows = this.next.matters;
     this.#view = {
       phase: "loading",
-      detailed: this.next !== null,
+      detailed: this.#rows !== null,
       matters: [],
       open: null,
       folderMissing: false,
@@ -163,12 +182,15 @@ export class Matters {
   /** Reads the list and listens for changes; returns the stop. Stopping releases every header the room holds. */
   start(): () => void {
     this.#live = true;
-    const next = this.next;
-    if (next !== null) this.#stop.push(next.subscribeApp((event) => this.#heard(event)));
-    else this.#stop.push(this.#store.subscribe(() => this.#headersChanged()));
+    const app = this.next.app;
+    if (app !== null) this.#stop.push(app.subscribeApp((event) => this.#hear(event)));
+    if (this.#rows === null) this.#stop.push(this.#store.subscribe(() => this.#headersChanged()));
     void this.refresh();
     return () => {
       this.#live = false;
+      this.#cancelHeard?.();
+      this.#cancelHeard = null;
+      this.#heard = [];
       for (const stop of this.#stop.splice(0)) stop();
       for (const held of this.#held.values()) held.release();
       this.#held.clear();
@@ -178,12 +200,16 @@ export class Matters {
 
   /** Reads the list again, and opens the matter to reopen if none is open. */
   async refresh(): Promise<void> {
+    const ticket = (this.#ticket += 1);
     try {
       const matters =
-        this.next === null
+        this.#rows === null
           ? ((await this.#transport.query("list_matters")).matters ?? []).map(undetailed)
-          : await this.next.listMatters();
-      if (this.#live) this.#list(matters);
+          : await this.#rows.listMatters();
+      // an answer older than the list shown (a later read's, or an app event's) changes nothing
+      if (!this.#live || ticket < this.#shown) return;
+      this.#shown = ticket;
+      this.#list(matters);
     } catch (error) {
       console.warn(`list_matters failed: ${JSON.stringify(error)}`);
       if (this.#live && this.#view.phase === "loading") this.#set({ phase: "failed" });
@@ -192,29 +218,41 @@ export class Matters {
 
   /** Opens a matter: the title, the rail's current row and the work move to it. With H5 the host hears it. */
   open(matter: MatterId): void {
+    this.#open(matter, false);
+  }
+
+  /** Opens a matter; `always` tells the host even when it is already open (a matter just made, which the new list may
+   * have opened already). */
+  #open(matter: MatterId, always: boolean): void {
     const info = this.#view.matters.find((m) => m.matter === matter);
-    if (info === undefined || this.#view.open?.matter === matter) return;
-    this.#leaveThread();
-    this.#set({ open: info });
-    this.next?.matters({ open_matter: { matter } }).catch((error: unknown) => {
+    if (info === undefined) return;
+    if (this.#view.open?.matter !== matter) {
+      this.#leaveThread();
+      this.#set({ open: info });
+    } else if (!always) return;
+    this.#rows?.command({ open_matter: { matter } }).catch((error: unknown) => {
       console.warn(`open_matter failed: ${JSON.stringify(error)}`);
     });
   }
 
-  /** The open matter's thread, as the work reports it (U3's onThread). Without H4 the room holds its header, so the
-   * row can say what it's doing and keep saying it once left; with H6 the thread is marked seen. */
+  /** The open matter's thread, as the work reports it (U3's onThread). Without the matters part the room holds its
+   * thread's view, so the row can say what it's doing and keep saying it once left; with it (H6) the thread is marked
+   * seen. */
   onThread = (thread: ThreadId | null): void => {
     if (thread === this.#thread) return;
     this.#leaveThread();
     this.#thread = thread;
     const open = this.#view.open;
     if (thread === null || open === null) return;
-    if (this.next !== null) {
-      this.next.matters({ mark_seen: { thread } }).catch((error: unknown) => {
+    if (this.#rows !== null) {
+      this.#rows.command({ mark_seen: { thread } }).catch((error: unknown) => {
         console.warn(`mark_seen failed: ${JSON.stringify(error)}`);
       });
       return;
     }
+    // the watch receives the thread's whole stream and the store keeps its whole view (entries and streamed text);
+    // the room reads only the header's status, and for needs_you whether a permission entry is pending
+    // U3: if U3's view store gains a header-only watch, use it here, so a left thread holds no entries
     if (!this.#held.has(thread))
       this.#held.set(thread, {
         matter: open.matter,
@@ -223,15 +261,16 @@ export class Matters {
     this.#headersChanged();
   };
 
-  /** Makes a matter and opens it. Rejects with the host's error, for the form to say. */
+  /** Makes a matter and opens it: it ends shown, even when the list read after fails, and the host hears it opened
+   * (H5). Rejects with the host's error, for the form to say. */
   async create(
     name: string,
     source: NextMatterSource,
     details: { client?: string; next_date?: string } = {},
   ): Promise<MatterId> {
     let matter: MatterId;
-    if (this.next !== null) {
-      const outcome = await this.next.matters({ create_matter: { name, source, ...details } });
+    if (this.#rows !== null) {
+      const outcome = await this.#rows.command({ create_matter: { name, source, ...details } });
       if (outcome === "done") throw new Error("create_matter gave no matter");
       matter = outcome.matter_created.matter;
     } else {
@@ -245,7 +284,9 @@ export class Matters {
       matter = outcome.matter_created.matter;
     }
     await this.refresh();
-    this.open(matter);
+    if (this.#live && !this.#view.matters.some((m) => m.matter === matter))
+      this.#fresh([...this.#view.matters, undetailed({ matter, name, kind: "folder" })]);
+    this.#open(matter, true);
     return matter;
   }
 
@@ -256,7 +297,7 @@ export class Matters {
 
   /** H5: takes a matter off the list; its folder stays where it is. */
   async forget(matter: MatterId): Promise<void> {
-    this.#list(this.#view.matters.filter((m) => m.matter !== matter));
+    this.#fresh(this.#view.matters.filter((m) => m.matter !== matter));
     await this.#command({ forget_matter: { matter } }, "forget_matter");
   }
 
@@ -269,9 +310,10 @@ export class Matters {
 
   /** H20: where a new matter's folder goes, as the lawyer would write it; null without it, or when the read fails. */
   async defaultLocation(): Promise<string | null> {
-    if (this.next === null) return null;
+    const location = this.next.location;
+    if (location === null) return null;
     try {
-      return await this.next.getDefaultLocation();
+      return await location.getDefaultLocation();
     } catch (error) {
       console.warn(`get_default_location failed: ${JSON.stringify(error)}`);
       return null;
@@ -283,24 +325,53 @@ export class Matters {
     return this.#transport.pickFolder();
   }
 
-  async #command(command: Parameters<NextHost["matters"]>[0], name: string): Promise<void> {
-    if (this.next === null) return;
+  async #command(command: MattersCommand, name: string): Promise<void> {
+    if (this.#rows === null) return;
     try {
-      await this.next.matters(command);
+      await this.#rows.command(command);
     } catch (error) {
       console.warn(`${name} failed: ${JSON.stringify(error)}`);
     }
     await this.refresh();
   }
 
-  #heard(event: AppEvent): void {
+  /** An app event (H4): held until the frame, so a burst is one apply and one render. */
+  #hear(event: AppEvent): void {
     if (!this.#live) return;
-    if ("matters_changed" in event) this.#list(event.matters_changed.matters);
-    else if ("matters_removed" in event) {
-      const gone = new Set(event.matters_removed.matters);
-      this.#list(this.#view.matters.filter((m) => !gone.has(m.matter)));
+    this.#heard.push(event);
+    this.#heardAt = this.#ticket += 1;
+    this.#cancelHeard ??= this.#batch(() => {
+      this.#cancelHeard = null;
+      this.#applyHeard();
+    });
+  }
+
+  #applyHeard(): void {
+    const events = this.#heard.splice(0);
+    // a list read that started after the last event and was shown first is newer than all of them
+    if (!this.#live || this.#heardAt < this.#shown) return;
+    let matters = this.#view.matters;
+    let changed = false;
+    for (const event of events) {
+      if ("matters_changed" in event) {
+        matters = event.matters_changed.matters;
+        changed = true;
+      } else if ("matters_removed" in event) {
+        const gone = new Set(event.matters_removed.matters);
+        matters = matters.filter((m) => !gone.has(m.matter));
+        changed = true;
+      }
+      // threads_changed carries the threads' own marks, for the work's conversations (U3); a row's status is H5's
     }
-    // threads_changed carries the threads' own marks, for the work's conversations (U3); a row's status is H5's
+    if (!changed) return;
+    this.#shown = this.#heardAt;
+    this.#list(matters);
+  }
+
+  /** A list the room made itself (a matter taken off, a matter just made): newer than any read still on its way. */
+  #fresh(matters: readonly MatterInfo[]): void {
+    this.#shown = this.#ticket += 1;
+    this.#list(matters);
   }
 
   /** A new list: the open matter follows it, or, gone or not yet chosen, the matter to reopen takes its place. */
@@ -334,7 +405,7 @@ export class Matters {
   }
 
   #headersChanged(): void {
-    if (!this.#live || this.next !== null) return;
+    if (!this.#live || this.#rows !== null) return;
     this.#prune();
     const status = this.#statusOf(this.#view.matters);
     if (!sameStatus(status, this.#view.status)) this.#set({ status });
@@ -343,7 +414,7 @@ export class Matters {
   /** Each row's state: H5's, or without it the held headers'. */
   #statusOf(matters: readonly MatterInfo[]): ReadonlyMap<MatterId, RowStatus> {
     const status = new Map<MatterId, RowStatus>();
-    if (this.next !== null) {
+    if (this.#rows !== null) {
       for (const m of matters) {
         const row = rowOf(m);
         if (row !== null) status.set(m.matter, row);

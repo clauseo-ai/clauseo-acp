@@ -10,7 +10,7 @@ import {
   type Platform,
 } from "@clauseo/components/lib/display.ts";
 import { frameBatch, liteBatch, type Batch } from "../store/batch.ts";
-import type { NextHost, UiSettings } from "./host-next.ts";
+import type { SettingsHost, UiSettings } from "./host-next.ts";
 
 /** Where the settings live until H7. */
 export const DISPLAY_KEY = "clauseo.display";
@@ -74,7 +74,8 @@ const same = (a: Display, b: Display) =>
 export type DisplayEnv = {
   storage: Pick<Storage, "getItem" | "setItem"> | null;
   matchMedia: ((query: string) => MediaQueryList) | null;
-  host: NextHost | null;
+  /** H7's part of the NextHost (host-next.ts), or null where the host lacks it. */
+  host: SettingsHost | null;
   /** Shows the first display, before the first render: display.ts's startDisplay. */
   start: (display: Display) => void;
   /** Moves to a later one: display.ts's showDisplay. */

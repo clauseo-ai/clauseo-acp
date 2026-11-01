@@ -1,6 +1,7 @@
 // The room's rail over FakeTransport, at the room's interface: the scratch matter only at the foot, each row's
-// status words, date groups across a Sunday, finding by name only without a NextHost and by client with one, Pinned and
-// Recent, Remove from the list, and matters_changed updating a row.
+// status words (none on the open matter's), date groups across a Sunday, finding by name only without a NextHost and
+// by client with one, each saying so, Pinned and Recent (five), no Find on an empty rail, Remove from the list and the
+// open matter's chevron, isolated folder paths, and matters_changed updating a row.
 // @vitest-environment happy-dom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -77,7 +78,9 @@ function type(input: HTMLInputElement, text: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-const find = () => rail()?.querySelector<HTMLInputElement>('input[type="search"]') ?? null;
+const find = () => rail()?.querySelector<HTMLInputElement>('[data-testid="find"]') ?? null;
+/** Find's label, read by a screen reader. */
+const findLabel = () => find()?.closest("label")?.querySelector(".sr-only")?.textContent;
 
 test("the scratch matter is never a row of the list: only the foot's row opens it, titled Scratch matter", async () => {
   await mount(today([A, SCRATCH, B]));
@@ -180,6 +183,10 @@ test("without a NextHost: one group, No date yet, newest first; no Pinned, and f
   await act(async () => type(find() as HTMLInputElement, "Asha"));
   expect(names()).toEqual([]);
   expect(rail()?.textContent).toContain("No matter matches 'Asha'.");
+  // it promises only what it searches: names
+  expect(findLabel()).toBe("Find a matter by its name");
+  expect(rail()?.textContent).toContain("Search covers names.");
+  expect(rail()?.textContent).not.toContain("client");
 });
 
 test("with a NextHost: find by client, Pinned above the dates, and Recent by last opened", async () => {
@@ -199,6 +206,74 @@ test("with a NextHost: find by client, Pinned above the dates, and Recent by las
   await act(async () => type(find() as HTMLInputElement, "asha"));
   expect(names()).toEqual([A.name]);
   expect(rowOf(A.name)?.textContent).toContain("Client, Asha Rao");
+  // names and clients, never case numbers
+  expect(findLabel()).toBe("Find a matter by its name or client");
+  await act(async () => type(find() as HTMLInputElement, "zzz"));
+  expect(rail()?.textContent).toContain("Search covers names and clients.");
+  expect(rail()?.textContent).not.toContain("case number");
+});
+
+test("Recent shows the five matters opened last", async () => {
+  const list = [1, 2, 3, 4, 5, 6, 7].map((n) =>
+    detailed({ matter: uuid(n, 2), name: `Matter ${n}`, kind: "folder" }, { last_opened: n * 10 }),
+  );
+  await mount(withNext(() => list));
+  await act(async () => find()?.focus());
+  expect(headings()).toEqual(["Recent"]);
+  expect(names()).toEqual(["Matter 7", "Matter 6", "Matter 5", "Matter 4", "Matter 3"]);
+});
+
+test("the empty rail has no Find: nothing to find", async () => {
+  await mount(today([SCRATCH]));
+  expect(rail()?.textContent).toContain("No matters yet");
+  expect(find()).toBeNull();
+});
+
+test("the open matter's row says nothing of its work, which is in view; the others say theirs", async () => {
+  await mount(
+    withNext(() => [
+      detailed(A, { status: "working", last_opened: 10 }),
+      detailed(B, { status: "working" }),
+    ]),
+  );
+  expect(title()).toBe(A.name);
+  expect(rowOf(A.name)?.dataset["state"]).toBe("idle");
+  expect(said(A.name)).not.toContain("Answering.");
+  expect(rowOf(B.name)?.dataset["state"]).toBe("working");
+});
+
+test("a stop on another day says its day and its time", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const now = new Date(2026, 10, 4, 11, 0).getTime();
+  vi.setSystemTime(now);
+  const at = new Date(2026, 10, 2, 16, 31).getTime();
+  const { day, time } = clockOf(at, now, localZone(), "en");
+  expect(day).not.toBe("");
+  await mount(
+    withNext(() => [detailed(A, { last_opened: 1 }), detailed(B, { status: { stopped: { at } } })]),
+  );
+  expect(said(B.name)).toContain(`Stopped on ${day} at ${time}`);
+});
+
+test("a row's folder, under the pointer, is isolated: a right-to-left override can't reorder it", async () => {
+  const spoof = "Documents/a\u202Efdp.exe";
+  await mount(withNext(() => [detailed(A, { folder_display: spoof })]));
+  expect(rowOf(A.name)?.getAttribute("title")).toBe(`\u2068${spoof}\u2069`);
+});
+
+test("with H5 the open matter's row carries its actions' chevron, reached by keyboard", async () => {
+  await mount(withNext(() => [detailed(A, { last_opened: 10 }), detailed(B)]));
+  const more = rail()?.querySelector<HTMLButtonElement>(".room-house-more");
+  expect(more?.getAttribute("aria-label")).toBe(`Actions for ${A.name}`);
+  await act(async () => more?.click());
+  await settle();
+  const items = [...document.querySelectorAll('[role="menuitem"], [role="menuitemcheckbox"]')];
+  expect(items.map((i) => i.textContent)).toEqual(
+    expect.arrayContaining([
+      expect.stringContaining("Pin to the top"),
+      expect.stringContaining("Remove from the list"),
+    ]),
+  );
 });
 
 test("Remove from the list sends forget_matter and the row leaves; without a NextHost the row has no menu", async () => {

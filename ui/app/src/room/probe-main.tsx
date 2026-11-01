@@ -76,7 +76,7 @@ const transport = new FakeTransport({
       for (const message of stream()) transport.deliver(message);
     });
   },
-  next: fakeNext({ matters: () => matters, papers, location: "~/Documents/Clauseo" }),
+  next: fakeNext({ matters: () => matters, papers, location: "Documents/Clauseo" }),
 });
 
 // the page's query over the settings, before the first render, so night never starts as day; and the hooks the
