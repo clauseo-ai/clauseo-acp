@@ -132,6 +132,12 @@ pub(crate) mod scratch {
 
     use super::NEXT_TEMP;
 
+    /// `rel` (`/`-separated) under `base`, joined one component at a time.
+    pub(crate) fn under(base: &std::path::Path, rel: &str) -> PathBuf {
+        rel.split('/')
+            .fold(base.to_path_buf(), |path, part| path.join(part))
+    }
+
     /// A folder of this test's own under the temp folder, removed on drop.
     pub(crate) struct Scratch(pub(crate) PathBuf);
 
@@ -144,9 +150,15 @@ pub(crate) mod scratch {
             Scratch(dir)
         }
 
+        /// `rel` (`/`-separated) under the folder, joined one component at a time, so it is
+        /// spelled with the OS's own separator and compares equal to a path the code built.
+        pub(crate) fn path(&self, rel: &str) -> PathBuf {
+            under(&self.0, rel)
+        }
+
         /// Writes `contents` to `rel`, making its folders.
         pub(crate) fn file(&self, rel: &str, contents: &str) -> PathBuf {
-            let path = self.0.join(rel);
+            let path = self.path(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, contents).unwrap();
             path
@@ -154,7 +166,7 @@ pub(crate) mod scratch {
 
         /// Makes the folder `rel` and its parents.
         pub(crate) fn dir(&self, rel: &str) -> PathBuf {
-            let path = self.0.join(rel);
+            let path = self.path(rel);
             std::fs::create_dir_all(&path).unwrap();
             path
         }
@@ -162,7 +174,7 @@ pub(crate) mod scratch {
         /// A link at `rel` to `target` (Unix).
         #[cfg(unix)]
         pub(crate) fn link(&self, rel: &str, target: &std::path::Path) -> PathBuf {
-            let path = self.0.join(rel);
+            let path = self.path(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::os::unix::fs::symlink(target, &path).unwrap();
             path

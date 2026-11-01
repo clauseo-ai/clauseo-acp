@@ -42,7 +42,7 @@ fn codex_home_is_forced_over_inherited_and_settings_values_in_any_case() {
         ("HOME", "/home/lawyer"),
     ]
     .map(|(name, value)| (OsString::from(name), OsString::from(value)));
-    let run_dir = scratch.0.join("data/limits/run");
+    let run_dir = scratch.path("data/limits/run");
     let home = scratch.dir("data/codex-home");
     let Prepared::Spec(spec) = prepare(&launch, &run_dir, &home, inherited.into_iter()).unwrap()
     else {
@@ -106,8 +106,8 @@ fn codex_launch(scratch: &Scratch) -> AgentLaunch {
 fn a_missing_codex_home_is_signed_out_and_nothing_is_made() {
     let scratch = Scratch::new("codex-home-missing");
     let launch = codex_launch(&scratch);
-    let run_dir = scratch.0.join("data/limits/run");
-    let home = scratch.0.join("data/codex-home");
+    let run_dir = scratch.path("data/limits/run");
+    let home = scratch.path("data/codex-home");
     let prepared = prepare(&launch, &run_dir, &home, std::iter::empty()).unwrap();
     assert!(matches!(prepared, Prepared::SignedOut), "{prepared:?}");
     assert!(!home.exists());
@@ -118,7 +118,7 @@ fn a_missing_codex_home_is_signed_out_and_nothing_is_made() {
 fn a_relative_codex_home_is_refused_and_nothing_is_made() {
     let scratch = Scratch::new("codex-home-relative");
     let launch = codex_launch(&scratch);
-    let run_dir = scratch.0.join("data/limits/run");
+    let run_dir = scratch.path("data/limits/run");
     let relative = std::path::Path::new("data/codex-home");
     let err = prepare(&launch, &run_dir, relative, std::iter::empty()).unwrap_err();
     assert!(err.ends_with("is not an absolute path"), "{err}");
@@ -129,7 +129,7 @@ fn a_relative_codex_home_is_refused_and_nothing_is_made() {
 fn a_codex_home_that_is_a_file_or_a_link_is_refused() {
     let scratch = Scratch::new("codex-home-bad");
     let launch = codex_launch(&scratch);
-    let run_dir = scratch.0.join("data/limits/run");
+    let run_dir = scratch.path("data/limits/run");
     let file = scratch.file("data/codex-home", "");
     let err = prepare(&launch, &run_dir, &file, std::iter::empty()).unwrap_err();
     assert!(err.ends_with("is not a folder"), "{err}");

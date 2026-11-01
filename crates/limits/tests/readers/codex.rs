@@ -15,13 +15,13 @@ use clauseo_protocol::AgentKind;
 use futures::executor::block_on;
 use futures::future::join;
 
-use crate::harness::{CODEX_JS, FAKE_OPENAI_KEY, Play, Setup, SharedTimer, TestLauncher};
+use crate::harness::{CODEX_JS, FAKE_OPENAI_KEY, Play, Setup, SharedTimer, TestLauncher, under};
 
 /// A Codex setup whose install holds `codex.js` in the install's `node_modules`.
 fn codex_setup() -> (Setup, PathBuf) {
     let setup = Setup::new();
     Setup::file(&setup.codex_script(), "");
-    let codex_js = setup.install().join("node_modules").join(CODEX_JS);
+    let codex_js = under(&setup.install().join("node_modules"), CODEX_JS);
     Setup::file(&codex_js, "");
     setup.codex_settings(&setup.codex_script());
     crate::write::create_dir_all(&setup.codex_home()).unwrap();
@@ -175,10 +175,13 @@ fn the_spec_runs_codex_js_app_server_with_codex_home_forced() {
 #[test]
 fn codex_acps_own_codex_js_wins_over_the_installs() {
     let (setup, _) = codex_setup();
-    let own = setup
-        .install()
-        .join("node_modules/@zed-industries/codex-acp/node_modules")
-        .join(CODEX_JS);
+    let own = under(
+        &under(
+            &setup.install(),
+            "node_modules/@zed-industries/codex-acp/node_modules",
+        ),
+        CODEX_JS,
+    );
     Setup::file(&own, "");
     let (_, launcher) = read_once(&setup, Play::Scenario("codex-silent"));
     let specs = launcher.specs();
@@ -208,9 +211,9 @@ fn no_codex_js_is_refused_and_nothing_launched() {
 fn a_linked_openai_codex_package_is_refused() {
     let setup = Setup::new();
     Setup::file(&setup.codex_script(), "");
-    let real = setup.root.join("store/codex");
-    Setup::file(&real.join("bin/codex.js"), "");
-    let openai = setup.install().join("node_modules/@openai");
+    let real = under(&setup.root, "store/codex");
+    Setup::file(&under(&real, "bin/codex.js"), "");
+    let openai = under(&setup.install(), "node_modules/@openai");
     crate::write::create_dir_all(&openai).unwrap();
     crate::write::symlink(&real, &openai.join("codex")).unwrap();
     setup.codex_settings(&setup.codex_script());
