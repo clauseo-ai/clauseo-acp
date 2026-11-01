@@ -1,11 +1,13 @@
 // A transport for tests and the room's probe build (room/probe-main.tsx): the same channel reader and subscriptions as
 // the Tauri one, with the host replaced by a recorder. `deliver` plays a channel message as the bridge would send it;
 // `host` scripts the answers. It counts no messages: that bookkeeping is the desktop transport's own. With `host.next` it also answers the calls the host
-// doesn't have yet (room/host-next.ts), which the desktop transport never sends.
+// doesn't have yet (room/host-next.ts), which the desktop transport never sends, and `appEvent` plays H4's events.
 import type {
+  AppEvent,
   NextCommand,
   NextHost,
   NextHostSource,
+  NextOutcome,
   NextQuery,
   NextQueryResult,
   Papers,
@@ -54,8 +56,11 @@ export type FakeCall =
 /** Scripted answers to the calls the host doesn't have yet (room/host-next.ts). */
 export type FakeNextHost = {
   query: (query: NextQuery) => NextQueryResult | Promise<NextQueryResult>;
-  /** Answers each command; throwing refuses it. Without it every command is done. */
-  command?: (command: NextCommand) => void | Promise<void>;
+  /** Answers each command; throwing refuses it. Without it, or returning nothing, the command is done; create_matter
+   * gives the outcome it returns. */
+  command?: (
+    command: NextCommand,
+  ) => void | NextOutcome | Promise<void> | Promise<NextOutcome | undefined>;
 };
 
 export type FakeHost = {
@@ -65,7 +70,7 @@ export type FakeHost = {
   /** Answers each subscribe; throwing refuses it. */
   subscribe?: (stream: StreamId, after: ViewPosition | null) => void;
   platform?: DisplayInfo["platform"];
-  /** With it, the fake is a NextHost (room/host-next.ts): H7's and H8's calls, answered from here. */
+  /** With it, the fake is a NextHost (room/host-next.ts): the rows the host doesn't have yet, answered from here. */
   next?: FakeNextHost;
 };
 
@@ -81,6 +86,7 @@ export class FakeTransport implements HostTransport, NextHostSource {
   readonly #subs: Subscriptions;
   readonly #dispatched = new Set<(command: CommandEnvelope) => void>();
   readonly #settingsHeard = new Set<(settings: Settings) => void>();
+  readonly #appHeard = new Set<(event: AppEvent) => void>();
   readonly #next: NextHost = {
     listPapers: async (matter) => {
       const result = await this.#nextQuery({ list_papers: { matter } });
@@ -93,17 +99,32 @@ export class FakeTransport implements HostTransport, NextHostSource {
       return result.settings;
     },
     setUiSettings: async (patch) => {
-      const command: NextCommand = { set_ui_settings: { patch } };
-      this.calls.push({ call: "next_command", command });
-      try {
-        await this.host.next?.command?.(command);
-      } catch (error) {
-        throw toHostError(error);
-      }
+      await this.#nextCommand({ set_ui_settings: { patch } });
     },
     onSettingsChanged: (listener) => {
       this.#settingsHeard.add(listener);
       return () => this.#settingsHeard.delete(listener);
+    },
+    listMatters: async () => {
+      const result = await this.#nextQuery("list_matters");
+      if (!("matters" in result)) throw internalError("list_matters answered without matters");
+      return result.matters;
+    },
+    listThreads: async (matter) => {
+      const result = await this.#nextQuery({ list_threads: { matter } });
+      if (!("threads" in result)) throw internalError("list_threads answered without threads");
+      return result.threads;
+    },
+    getDefaultLocation: async () => {
+      const result = await this.#nextQuery("get_default_location");
+      if (!("default_location" in result))
+        throw internalError("get_default_location answered without default_location");
+      return result.default_location.display;
+    },
+    matters: (command) => this.#nextCommand(command),
+    subscribeApp: (listener) => {
+      this.#appHeard.add(listener);
+      return () => this.#appHeard.delete(listener);
     },
   };
 
@@ -153,6 +174,20 @@ export class FakeTransport implements HostTransport, NextHostSource {
   /** Plays `settings_changed` as the host would send it. */
   settingsChanged(settings: Settings): void {
     for (const listener of this.#settingsHeard) listener(settings);
+  }
+
+  /** Plays one app event (H4) as the host would send it to every window. */
+  appEvent(event: AppEvent): void {
+    for (const listener of this.#appHeard) listener(event);
+  }
+
+  async #nextCommand(command: NextCommand): Promise<NextOutcome> {
+    this.calls.push({ call: "next_command", command });
+    try {
+      return (await this.host.next?.command?.(command)) ?? "done";
+    } catch (error) {
+      throw toHostError(error);
+    }
   }
 
   async #nextQuery(query: NextQuery): Promise<NextQueryResult> {
