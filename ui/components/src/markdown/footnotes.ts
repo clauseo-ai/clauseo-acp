@@ -31,6 +31,30 @@ export function footnoteLabelsIn(text: string): readonly string[] {
   return [...found];
 }
 
+const DEFINES = /\[\^((?:[^\s[\]\\]|\\[^\s])+)\]:/g;
+const OWN = /^[ \t]*(?:>[ \t]*)*\[\^((?:[^\s[\]\\]|\\[^\s])+)\]:/gm;
+
+/**
+ * What `text` may define, as identifiers: `defines`, each `[^label]:` anywhere (more than its notes,
+ * never fewer); `own`, each at the start of a line after quote markers, the notes it most likely holds
+ * itself (checked against its parse before a placeholder is left out for one); `links`, whether a `]:`
+ * is left once those are taken out, so the text may hold a link definition.
+ */
+export function definedIn(text: string): {
+  defines: ReadonlySet<string>;
+  own: ReadonlySet<string>;
+  links: boolean;
+} {
+  const defines = new Set<string>();
+  const own = new Set<string>();
+  if (!text.includes("]:")) return { defines, own, links: false };
+  for (const match of text.matchAll(DEFINES))
+    if (match[1]!.length <= MAX_LABEL) defines.add(identifierOf(match[1]!));
+  for (const match of text.matchAll(OWN))
+    if (match[1]!.length <= MAX_LABEL) own.add(identifierOf(match[1]!));
+  return { defines, own, links: text.replace(DEFINES, "").includes("]:") };
+}
+
 /** The identifier micromark gives a label (normalised, case folded, in lower case). */
 export function identifierOf(label: string): string {
   return label.toLowerCase().toUpperCase().toLowerCase();

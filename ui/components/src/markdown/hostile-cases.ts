@@ -244,4 +244,30 @@ export const CASES: HostileCase[] = [
   { id: "open-star-runs", markdown: "x " + "*a ".repeat(4000) },
   { id: "open-underscore-runs", markdown: "_a ".repeat(4000) },
   { id: "open-brackets", markdown: "[".repeat(16_000) },
+  // Footnotes. Each label a block calls but does not define costs micromark a placeholder definition, and
+  // each note is a block and a view: 2,000 labels in one paragraph (past MAX_PENDING while streaming),
+  // 60 notes, the longest label, 8,000 `[^` and a chain of notes that each cite the next. (300 notes cost
+  // about 8.5 times prose of their length, mostly one parse per block; see the PR.)
+  {
+    id: "footnote-many-labels",
+    markdown: Array.from({ length: 2000 }, (_, index) => `[^n${index}]`).join(" "),
+  },
+  {
+    id: "footnote-many-notes",
+    markdown:
+      Array.from({ length: 60 }, (_, index) => `Claim ${index}[^n${index}].`).join(" ") +
+      "\n\n" +
+      Array.from({ length: 60 }, (_, index) => `[^n${index}]: Note ${index}.`).join("\n\n"),
+  },
+  {
+    id: "footnote-long-label",
+    markdown: `See[^${"a".repeat(999)}].\n\n[^${"a".repeat(999)}]: Long.`,
+  },
+  { id: "footnote-unclosed", markdown: "[^".repeat(8000) },
+  {
+    id: "footnote-chain",
+    markdown:
+      "Start[^n0].\n\n" +
+      Array.from({ length: 50 }, (_, index) => `[^n${index}]: Then[^n${index + 1}].`).join("\n\n"),
+  },
 ];
