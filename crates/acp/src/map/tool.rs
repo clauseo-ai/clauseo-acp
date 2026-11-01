@@ -1,6 +1,6 @@
 //! Tool calls: kinds, statuses, content and locations.
 
-use std::path::{Component, Path};
+use std::path::Path;
 
 use agent_client_protocol::schema::v1 as acp;
 use clauseo_protocol::{
@@ -149,25 +149,9 @@ fn path_location(path: &Path, line: Option<u32>, cwd: Option<&Path>) -> Option<T
         path
     };
     Some(ToolLocation::Inside {
-        path: matter_path(relative)?,
+        path: MatterPath::from_relative(relative)?,
         line,
     })
-}
-
-/// `relative`'s parts joined with `/`, when each is a plain name and the result is a valid
-/// matter path.
-fn matter_path(relative: &Path) -> Option<MatterPath> {
-    let mut joined = String::new();
-    for part in relative.components() {
-        let Component::Normal(part) = part else {
-            return None;
-        };
-        if !joined.is_empty() {
-            joined.push('/');
-        }
-        joined.push_str(part.to_str()?);
-    }
-    MatterPath::new(&joined).ok()
 }
 
 fn outside(path: &Path) -> ToolLocation {

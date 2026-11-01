@@ -144,7 +144,7 @@ reported it.
 | Tool call touches a location outside the matter | `ToolLocation::Outside` on the `ViewEntry::ToolCall` the permission's `tool_call` names | display text, flagged |
 | Permission answered | `PermissionState::Resolved` with `PermissionChoice::Selected` | option id and kind, by whom (`Principal::LocalDesktop`) |
 | Permission cancelled | `PermissionState::Resolved` with `PermissionChoice::Cancelled` | by whom |
-| Permission refused because a program holds the file open (`held_open`): "Word has Brief.docx open. Close it in Word or save a copy, then ask again." | `PermissionState::Resolved` with `held_open` set; the choice is the reject option, or `PermissionChoice::Cancelled` when none was offered | the matter path a program holds open (Word, Excel or PowerPoint by an owner file, or any program on Windows); the lawyer was not asked |
+| Permission refused because a program holds the file open (`held_open`): "Word has Brief.docx open. Close it in Word or save a copy, then ask again." | `PermissionState::Resolved` with `held_open` set; the choice is the reject-once option, or `PermissionChoice::Cancelled` when none was offered | the matter path a program holds open (Word, Excel or PowerPoint by an owner file, or any program on Windows); the lawyer was not asked |
 | Permission expired | `PermissionState::Expired` | one reason below |
 | Permission expired: the agent exited | `ExpiryReason::AgentExited` | the request |
 | Permission expired: the turn ended | `ExpiryReason::TurnEnded` | the request |

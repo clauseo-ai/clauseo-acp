@@ -264,24 +264,34 @@ fn permission(params: Value) -> Result<PermissionRequest, agent_client_protocol:
 }
 
 /// The paths a permission request names, read from the JSON: every `toolCall.locations[].path`,
-/// then `toolCall.rawInput.file_path` and `toolCall.rawInput.notebook_path` (Claude's Edit, Write
+/// every `toolCall.content[].path` of a `diff` entry (Codex's file changes), then
+/// `toolCall.rawInput.file_path` and `toolCall.rawInput.notebook_path` (Claude's Edit, Write
 /// and `NotebookEdit` inputs), each when it is a string, in that order, without repeats, as the
 /// agent wrote them (absolute, or relative to the session's `cwd`). Nothing else of `rawInput`
 /// is read. A path the SDK's decode would refuse never gets this far.
 fn permission_paths(params: &Value) -> Vec<PathBuf> {
     let tool_call = params.get("toolCall");
-    let locations = tool_call
-        .and_then(|call| call.get("locations"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|location| location.get("path"));
+    let list = |key: &str| {
+        tool_call
+            .and_then(|call| call.get(key))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+    };
+    let locations = list("locations").filter_map(|location| location.get("path"));
+    let diffs = list("content")
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("diff"))
+        .filter_map(|item| item.get("path"));
     let raw_input = tool_call.and_then(|call| call.get("rawInput"));
     let inputs = ["file_path", "notebook_path"]
         .into_iter()
         .filter_map(|key| raw_input.and_then(|input| input.get(key)));
     let mut paths: Vec<PathBuf> = Vec::new();
-    for path in locations.chain(inputs).filter_map(Value::as_str) {
+    for path in locations
+        .chain(diffs)
+        .chain(inputs)
+        .filter_map(Value::as_str)
+    {
         let path = PathBuf::from(path);
         if !paths.contains(&path) {
             paths.push(path);

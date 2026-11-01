@@ -37,10 +37,10 @@ pub enum AcpEvent {
         acp_tool_call_id: CompactString,
         /// The options the agent offered, in its order.
         options: Vec<PermissionOption>,
-        /// The paths the request names: every `toolCall.locations[].path`, then
-        /// `rawInput.file_path` and `rawInput.notebook_path` when they are strings, without
-        /// repeats, as the agent wrote them (absolute, or relative to the session's `cwd`).
-        /// Empty when it names none.
+        /// The paths the request names: every `toolCall.locations[].path`, every diff's
+        /// `path`, then `rawInput.file_path` and `rawInput.notebook_path`, when they are
+        /// strings, without repeats, as the agent wrote them (absolute, or relative to the
+        /// session's `cwd`). Empty when it names none.
         paths: Vec<PathBuf>,
     },
     /// The agent asks the lawyer for input. Answer with `AcpClient::answer_elicitation`.

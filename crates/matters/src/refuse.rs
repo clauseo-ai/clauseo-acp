@@ -196,7 +196,7 @@ fn is_macos_volume_key(key: &[OsString]) -> bool {
 /// The comparison keys of `path`: its components, case-folded on macOS and Windows, with the
 /// Windows verbatim prefix forms made plain. On macOS a key starting with
 /// `/System/Volumes/Data` comes twice: as it is and without those three parts.
-fn spellings(path: &Path) -> Vec<Vec<OsString>> {
+pub(crate) fn spellings(path: &Path) -> Vec<Vec<OsString>> {
     let key: Vec<OsString> = path.components().map(component_key).collect();
     let mut keys = Vec::with_capacity(2);
     #[cfg(target_os = "macos")]

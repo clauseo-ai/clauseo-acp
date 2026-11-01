@@ -13,7 +13,7 @@ use std::thread::{self, JoinHandle};
 use clauseo_matters::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, HeldOpen, ImportWarning, Imported,
     Limits, Matter, MissingReason, NewMatter, OsProbe, Restore, RestorePlan, Restored, Retention,
-    Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, held_open,
+    Settings, TimelineEntry, TurnMeta, UndoRequest, Undone, held_open_at,
 };
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, FileChange, FileDecision, ImportSummary, MatterId, MatterPath,
@@ -121,11 +121,12 @@ pub(crate) enum MatterJob {
         from: CheckpointId,
         scope: RestoreRequest,
     },
-    /// The first of `paths` (matter paths in `folder`) that Word or another program has open,
-    /// by `clauseo_matters::held_open`. Needs no open matter.
+    /// The first of `paths` (as the agent named them: absolute, or relative to `folder`) that
+    /// lies in `folder` and that Word or another program holds open, by
+    /// `clauseo_matters::held_open_at`. Needs no open matter.
     HeldOpen {
         folder: PathBuf,
-        paths: Vec<MatterPath>,
+        paths: Vec<PathBuf>,
     },
 }
 
@@ -369,7 +370,7 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
         MatterJob::HeldOpen { folder, paths } => MatterReply::HeldOpen(
             paths
                 .into_iter()
-                .find_map(|path| held_open(&folder, &path).map(|held| (path, held))),
+                .find_map(|path| held_open_at(&folder, &path)),
         ),
     }
 }

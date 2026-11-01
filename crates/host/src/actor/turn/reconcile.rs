@@ -35,7 +35,7 @@ use super::super::Actor;
 use super::super::input::{Input, MatterTag};
 use super::close::{Expiries, TurnClose};
 use super::out::Out;
-use super::{JobKind, LogFor, Then, TurnInput, TurnJob, end, matter_of, state, updates};
+use super::{JobKind, LogFor, Then, TurnInput, TurnJob, end, matter_of, state};
 use crate::error::Error;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
 use crate::sent::SentView;
@@ -332,13 +332,13 @@ fn turn_paths(log: &[Envelope], turn: TurnId) -> BTreeSet<MatterPath> {
             && started.turn == turn
         {
             tools.insert(started.tool_call);
-            updates::note_paths(&mut paths, &started.locations, &started.content);
+            crate::sent::note_paths(&mut paths, &started.locations, &started.content);
         } else if let DomainEvent::ToolCallUpdated(updated) = &envelope.event
             && tools.contains(&updated.tool_call)
         {
             let locations = updated.patch.locations.as_deref().unwrap_or_default();
             let content = updated.patch.content.as_deref().unwrap_or_default();
-            updates::note_paths(&mut paths, locations, content);
+            crate::sent::note_paths(&mut paths, locations, content);
         }
     }
     paths

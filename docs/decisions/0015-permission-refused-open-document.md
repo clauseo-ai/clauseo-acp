@@ -15,12 +15,19 @@ more fact: the file.
 
 ## Decision
 
-- When a permission request arrives in the live turn and a path it names, inside the matter
-  folder, is a file a program holds open (`clauseo_matters::held_open`: an Office owner file
-  beside it, from Word, Excel or PowerPoint, or on Windows a sharing violation from any
-  program), the host answers it without asking the lawyer: the request's reject-once option,
-  else its first reject option, else `cancelled`. One commit logs `PermissionRequested` and
-  `PermissionResolved`; the agent hears the answer once it is durable.
+- When a permission request arrives in the live turn and a path it names (its locations, its
+  diffs, Claude's `file_path` or `notebook_path`; naming none, the paths its tool call named),
+  inside the matter folder, is a file a program holds open, the host answers it without asking
+  the lawyer: the request's reject-once option, else `cancelled`. A reject-always option is
+  never taken: it may leave a lasting rule in the agent the lawyer never chose. One commit logs
+  `PermissionRequested` and `PermissionResolved`; the agent hears the answer once it is durable.
+- The check is `clauseo_matters::held_open_at`, on the matter thread: the path is resolved into
+  the folder by `matter_path_in` (both canonicalised with `dunce`, a missing file through its
+  parent, compared by components ignoring case on macOS and Windows, the text compared only when
+  that fails), then `held_open` looks for an Office owner file beside it (Word, Excel or
+  PowerPoint), or on Windows a sharing violation from any program. Claude Code works in the
+  resolved folder, so its paths are physical even when the matter was picked through a symlink.
+  The pre-write guard calls the same function.
 - `PermissionResolved` gains `held_open: Option<MatterPath>`, left out when `None`, set only
   on such a refusal. It is not named for Word: the same check catches Excel's and PowerPoint's
   owner files and, on Windows, any program's sharing violation, so a Word name would be untrue
@@ -30,11 +37,11 @@ more fact: the file.
 - This is additive under 0002's Freeze rules: a new `Option` field left out when `None`, so
   `schema_version` stays 1, rows written before decode with `None`, and an older reader skips
   the field. No new enum, so no row in 0002's enum table and no frozen corpus entry.
-- Rejected: an open enum `reason` field (`{"reason": {"held_open": {"path": ..}}}`). It reads better
-  once a second reason exists, but none is planned, and a new open enum brings a table row,
+- Rejected: an open enum `reason` field (`{"reason": {"held_open": {"path": ..}}}`). It reads
+  better once a second reason exists, but none is planned, and a new open enum brings a table row,
   corpus files and coverage tests for one variant. A second reason later adds its own optional
   field, or this record is superseded by one that introduces the enum.
-- Rejected: a new `Principal` or `PermissionChoice` variant. The choice really is the reject
+- Rejected: a new `Principal` or `PermissionChoice` variant. The choice really is the reject-once
   option the agent offered, and the answer really came from this computer.
 
 ## Consequences
@@ -43,7 +50,7 @@ more fact: the file.
   likeliest holder in a matter, so its copy may name Word.
 - ACP gives the agent no text with a rejection: the model sees only that the edit was rejected.
   The pre-write guard through Claude's PreToolUse hook (the second part of #162) gives the model
-  the reason; it calls the same `held_open`.
+  the reason; it calls the same `held_open_at`.
 - Writes the agent makes without a permission request (Claude's acceptEdits inside the folder,
   Codex's workspace-write and agent modes, any shell command) are not covered here.
 

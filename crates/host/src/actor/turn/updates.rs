@@ -7,8 +7,7 @@ use clauseo_acp::{AcpEvent, AgentUpdate, MessageRole, Origin};
 use clauseo_protocol::{
     AgentSessionId, CommandsAvailable, CompactString, CompactionStatus, ConfigOptionsReplaced,
     ContentBlock, DomainEvent, MessageId, ModeChanged, Notice, PlanReplaced, RenameSource,
-    StreamId, TextKind, ThreadId, ThreadRenamed, Title, ToolCallContent, ToolCallPatch,
-    ToolLocation, TurnId, UsageUpdated,
+    StreamId, TextKind, ThreadId, ThreadRenamed, Title, ToolCallPatch, TurnId, UsageUpdated,
 };
 use clauseo_store::BlobIn;
 
@@ -107,21 +106,7 @@ fn handle(actor: &mut Actor, thread: ThreadId, event: AcpEvent) {
             origin,
             update,
         } => on_update(actor, thread, &session, origin, update),
-        AcpEvent::PermissionRequested {
-            session,
-            key,
-            acp_tool_call_id,
-            options,
-            paths,
-        } => {
-            let ask = asks::PermissionAsk {
-                session,
-                key,
-                acp_tool_call_id,
-                options,
-            };
-            asks::on_permission(actor, thread, ask, &paths);
-        }
+        event @ AcpEvent::PermissionRequested { .. } => asks::on_permission(actor, thread, event),
         AcpEvent::ElicitationRequested {
             session,
             key,
@@ -326,7 +311,7 @@ fn tool_call(
         return Ok(());
     }
     if let Some(current) = current(actor, thread) {
-        note_paths(&mut current.tool_paths, &call.locations, &call.content);
+        crate::sent::note_paths(&mut current.tool_paths, &call.locations, &call.content);
     }
     let id = actor.ids.mint(actor.clock.now().wall)?;
     let (built, _fields) = build::tool_call_started(turn, id, call);
@@ -355,7 +340,7 @@ fn tool_update(
             if let Some(current) = current(actor, thread) {
                 let locations = patch.locations.as_deref().unwrap_or_default();
                 let content = patch.content.as_deref().unwrap_or_default();
-                note_paths(&mut current.tool_paths, locations, content);
+                crate::sent::note_paths(&mut current.tool_paths, locations, content);
             }
         }
         Context::Outside { replay: false } => {}
@@ -382,30 +367,6 @@ pub(super) fn known_tool(
             .tool_call(session, acp_id)
             .map(|(id, _)| id)
     })
-}
-
-/// Adds the matter paths a tool call names (its in-matter locations and diffs).
-pub(super) fn note_paths(
-    paths: &mut std::collections::BTreeSet<clauseo_protocol::MatterPath>,
-    locations: &[ToolLocation],
-    content: &[ToolCallContent],
-) {
-    let diffs = content.iter().filter_map(|item| match item {
-        ToolCallContent::Diff { path, .. } => Some(path),
-        ToolCallContent::Text { .. }
-        | ToolCallContent::Content { .. }
-        | ToolCallContent::Unknown { .. } => None,
-    });
-    for location in locations.iter().chain(diffs) {
-        match location {
-            ToolLocation::Inside { path, .. } => {
-                if !paths.contains(path) {
-                    paths.insert(path.clone());
-                }
-            }
-            ToolLocation::Outside { .. } | ToolLocation::Unknown { .. } => {}
-        }
-    }
 }
 
 /// An update that needs no turn: logged as its event.

@@ -48,6 +48,9 @@ mod compare;
 mod reopen;
 
 #[cfg(test)]
+#[path = "matters/held_open_at.rs"]
+mod held_open_at;
+#[cfg(test)]
 #[path = "matters/owner_file.rs"]
 mod owner_file;
 
