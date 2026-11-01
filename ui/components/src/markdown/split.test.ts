@@ -245,3 +245,12 @@ test("CRLF and CR line endings split like LF", () => {
     htmlOf(createAnswer("t").update("a\n\nb\nc", false)),
   );
 });
+
+test("a finished block's view holds its own source, not the streaming text that parsed the same", () => {
+  const answer = createAnswer("t");
+  const [streamed] = answer.update("The **key", true);
+  const [finished] = answer.update("The **key**", false);
+  expect(streamed?.source).toBe("The **key");
+  expect(finished?.input).toBe(streamed?.input);
+  expect(finished?.source).toBe("The **key**");
+});
