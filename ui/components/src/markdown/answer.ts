@@ -516,7 +516,9 @@ export function createAnswer(scope: string): Answer {
           streaming: true,
         }));
       });
-      const notes = notesOf(numbering, streaming ? entries[last]!.footnotes : NO_FOOTNOTES);
+      // An empty answer (every streamed answer starts as one) has no blocks, so no tail.
+      const tail = streaming ? entries[last] : undefined;
+      const notes = notesOf(numbering, tail ? tail.footnotes : NO_FOOTNOTES);
       lastViews = notes ? [...blockViews, notes] : blockViews;
       lastBlocks = blocks;
       lastEntries = entries;

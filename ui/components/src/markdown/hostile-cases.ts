@@ -299,4 +299,6 @@ export const CASES: HostileCase[] = [
   },
   { id: "footnote-deep-list", markdown: `x[^a]\n\n[^a]: ${"- ".repeat(1000)}x`, text: ["- - - x"] },
   { id: "footnote-deeper-list", markdown: `[^a]: ${"- ".repeat(3000)}` },
+  // Every streamed answer starts empty; #115 made the streaming render of "" throw.
+  { id: "empty", markdown: "" },
 ];
