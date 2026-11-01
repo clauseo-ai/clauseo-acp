@@ -3,7 +3,7 @@
 // dates come in as props.
 import { useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import { Button } from "../ui/button.tsx";
-import { searchBox, searchInput } from "../ui/recipes.ts";
+import { searchBoxOpen, searchInput } from "../ui/recipes.ts";
 import { IconNewMatter, IconScratchMatter, IconSearch } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
 import { useDisplay } from "../lib/display.ts";
@@ -77,7 +77,7 @@ function FindField({
   const room = useRoom();
   const label = mt(w.lang, "Find a matter by its name, client or case number");
   return (
-    <label className={cn(searchBox, "w-full min-w-0 room-find")}>
+    <label className={cn(searchBoxOpen, "w-full min-w-0 room-find")}>
       <IconSearch size={16} />
       <span className="sr-only">{label}</span>
       <input
