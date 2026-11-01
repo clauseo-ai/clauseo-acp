@@ -58,7 +58,7 @@ export function railStates(open: MatterSummary, scratch: MatterSummary, now: num
     detailed({ matter: uuid(n, 2), name, kind: "folder" }, over);
   return [
     detailed(open, { status: "working", next_date: iso(1), last_opened: now }),
-    m(2, "Acme Traders v. State Bank of India", { status: "needs_answer", next_date: iso(1) }),
+    m(2, "Kapoor Exports v. State Bank of India", { status: "needs_answer", next_date: iso(1) }),
     m(3, "Rao v. Union of India", { status: "needs_permission", next_date: iso(sunday + 2) }),
     m(4, "Mehta Builders v. Kapoor", { status: "ready", next_date: iso(sunday + 3) }),
     m(5, "In re Gupta Textiles", {
