@@ -8,8 +8,8 @@
 //!   waits for `HostHandle::shutdown` and `HostJoin::join` on their own thread, then exits.
 //! - Nine async commands (`commands.rs`), each granted by its own permission in
 //!   `capabilities/main.json` and listed in `build.rs`'s `AppManifest`. Beside them that file
-//!   grants only the six core window commands of the room's title bar (`window_frame.rs`,
-//!   `docs/decisions/0015-window-frame.md`).
+//!   grants only the two window commands of Tauri's drag script, and the room build adds the
+//!   caption buttons' four on Windows and Linux (`window_frame.rs`, 0015).
 //!   Every argument is checked in Rust first, and every host call runs as `LocalDesktop`.
 //!   The `e2e` build adds `perf_channel_bytes` (`e2e.rs`, granted by `capabilities/e2e.json`),
 //!   and the `marks` build `marks_memory` and `marks_finish` (`marks.rs`,
@@ -140,6 +140,8 @@ pub fn run() -> tauri::Result<()> {
             // The scoreboard commands' capabilities, in the e2e and marks builds only.
             #[cfg(feature = "e2e")]
             e2e::grant_scoreboard(app)?;
+            // The caption buttons' window commands, in the room build on Windows and Linux.
+            window_frame::grant_caption_commands(app)?;
             start_host(app)?;
             open_main_window(app)?;
             Ok(())

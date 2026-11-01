@@ -106,6 +106,10 @@ pub(crate) const NATIVE_BUTTON_W: f64 = 14.0;
 /// Its height, in points.
 #[cfg(any(target_os = "macos", test))]
 pub(crate) const NATIVE_BUTTON_H: f64 = 16.0;
+/// From one native light's left edge to the next, in points (macOS 27, measured): the box the
+/// page keeps for them, `--lights-native-w`, follows from it.
+#[cfg(test)]
+pub(crate) const NATIVE_PITCH: f64 = 23.0;
 /// How far the native close button's frame stands above the bottom of its title bar, in points
 /// (macOS 27, measured). The inset (`inset_traffic_lights` in wry and tao) keeps it: it sets the
 /// title bar's height to the button's height plus `y`, so the button's top lands `y` minus this
