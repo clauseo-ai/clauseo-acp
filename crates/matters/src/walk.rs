@@ -76,9 +76,7 @@ pub(crate) fn classify(
 /// or do not make a [`MatterPath`] (with a warning). An entry gone before its stat is skipped,
 /// and so is a subfolder gone before it is read. A subfolder that does not read (permission
 /// denied, say, or not downloaded) is listed in [`Listing::unread`], with a warning unless it
-/// is not downloaded; so is one that lists but cannot be entered (an entry's stat is denied, as
-/// for mode `0o444`), with the same warning and nothing of it kept from the listing. The root
-/// not reading, or not entering, is an error. Returns `Ok(None)` once `cancel` is
+/// is not downloaded; the root not reading is an error. Returns `Ok(None)` once `cancel` is
 /// set (checked before each folder and each entry). `guard`'s probe tells cloud-only files;
 /// the guard keeps a listing from downloading a folder.
 pub(crate) fn walk(
@@ -92,99 +90,110 @@ pub(crate) fn walk(
         probe: guard.probe(),
         cap,
         cancel,
-        progress,
-        found: Vec::new(),
+        unread: Vec::new(),
     };
-    let mut unread = Vec::new();
+    let mut found = Vec::new();
+    let mut items = Vec::new();
     // Folders still to read: absolute path and path relative to `root` ("" for the root).
     let mut pending = vec![(root.to_path_buf(), String::new())];
     while let Some((dir, relative)) = pending.pop() {
-        if walker.cancelled() {
+        if !walker.read_folder(&dir, relative, &mut items)? {
             return Ok(None);
         }
-        #[cfg(test)]
-        let listed = crate::no_download::fault::read_dir(&dir).and_then(|()| fs::read_dir(&dir));
-        #[cfg(not(test))]
-        let listed = fs::read_dir(&dir);
-        let entries = match listed {
-            Ok(entries) => entries,
-            Err(err) if relative.is_empty() => return Err(Error::io("read folder", &dir, err)),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
-            Err(err) if not_downloaded(&err) => {
-                tracing::info!(path = %dir.display(), "kept a folder that is not downloaded as it was");
-                unread.push(relative);
-                continue;
-            }
-            Err(err) => {
-                tracing::warn!(path = %dir.display(), error = %err, "skipped a folder that does not read");
-                unread.push(relative);
-                continue;
-            }
-        };
-        // Subfolders found in this folder are pushed after this mark, so a folder that turns
-        // out not to enter can drop them again.
-        let mark = pending.len();
-        let found = walker.found.len();
-        for entry in entries {
-            if walker.cancelled() {
-                return Ok(None);
-            }
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(err) if relative.is_empty() => {
-                    return Err(Error::io("read folder", &dir, err));
+        for item in items.drain(..) {
+            match item {
+                Item::File(entry, path) => {
+                    if let Some(file) = walker.stat(&entry, path)? {
+                        progress(&file);
+                        found.push(file);
+                    }
                 }
-                Err(err) if not_downloaded(&err) => {
-                    tracing::info!(path = %dir.display(), "kept a folder that is not downloaded as it was");
-                    unread.push(relative);
-                    break;
-                }
-                Err(err) => {
-                    tracing::warn!(path = %dir.display(), error = %err, "stopped reading a folder");
-                    unread.push(relative);
-                    break;
-                }
-            };
-            match walker.entry(&entry, &relative)? {
-                Entry::Skip => {}
-                Entry::Folder(path, sub) => pending.push((path, sub)),
-                Entry::Denied(err) if relative.is_empty() => {
-                    return Err(Error::io("stat", entry.path(), err));
-                }
-                Entry::Denied(err) => {
-                    // Lists but cannot be entered: kept as unread, the same as a folder that
-                    // does not list, so one such folder does not stop the checkpoint.
-                    tracing::warn!(path = %dir.display(), error = %err, "skipped a folder that does not read");
-                    pending.truncate(mark);
-                    walker.found.truncate(found);
-                    unread.push(relative);
-                    break;
-                }
+                Item::Folder(dir, relative) => pending.push((dir, relative)),
             }
         }
     }
-    let mut files = walker.found;
-    files.sort_unstable_by(|a, b| a.path.as_str().as_bytes().cmp(b.path.as_str().as_bytes()));
+    found.sort_unstable_by(|a, b| a.path.as_str().as_bytes().cmp(b.path.as_str().as_bytes()));
+    let mut unread = walker.unread;
     unread.sort_unstable();
-    Ok(Some(Listing { files, unread }))
+    Ok(Some(Listing {
+        files: found,
+        unread,
+    }))
 }
 
-/// What [`Walker::entry`] made of one entry.
-enum Entry {
-    /// Recorded as a file, or left out.
-    Skip,
-    /// A folder to read: its absolute path and its path relative to the root.
+/// The first `limit + 1` files [`walk`] would list, in its order, by the same rules: each
+/// folder's entries are taken in path-byte order (a folder `a` as `a/`, so `a.txt` comes
+/// before what it holds and `a0` after), so the files come out sorted and the walk stops at
+/// the file past `limit`, never reading a folder that sorts after it nor taking the stat of
+/// a file that does (a folder is sorted by its entries' names and types, which reading it
+/// gives). [`Listing::unread`] holds the subfolders it found unreadable before it stopped.
+pub(crate) fn walk_first(
+    root: &Path,
+    guard: &NoDownload<'_>,
+    cap: u64,
+    limit: usize,
+) -> Result<Listing, Error> {
+    let mut walker = Walker {
+        probe: guard.probe(),
+        cap,
+        cancel: None,
+        unread: Vec::new(),
+    };
+    let mut found = Vec::new();
+    let mut items = Vec::new();
+    let mut pending = vec![Item::Folder(root.to_path_buf(), String::new())];
+    while let Some(next) = pending.pop() {
+        match next {
+            Item::File(entry, path) => {
+                if let Some(file) = walker.stat(&entry, path)? {
+                    found.push(file);
+                    if found.len() > limit {
+                        break;
+                    }
+                }
+            }
+            Item::Folder(dir, relative) => {
+                // No cancel flag, so the read always finishes.
+                walker.read_folder(&dir, relative, &mut items)?;
+                items.sort_unstable_by(|a, b| a.sort_key().cmp(b.sort_key()));
+                pending.extend(items.drain(..).rev());
+            }
+        }
+    }
+    let mut unread = walker.unread;
+    unread.sort_unstable();
+    Ok(Listing {
+        files: found,
+        unread,
+    })
+}
+
+/// One entry of a folder that the walk keeps.
+enum Item {
+    /// A regular file whose stat is not taken yet, and its path relative to the root.
+    File(DirEntry, MatterPath),
+    /// A subfolder to read: absolute path and path relative to the root.
     Folder(std::path::PathBuf, String),
-    /// Its stat was denied: the folder it is in lists but cannot be entered.
-    Denied(io::Error),
+}
+
+impl Item {
+    /// The bytes it sorts by: a file's path, or a folder's with `/` after it, which sorts
+    /// every path under the folder where the folder's own name would.
+    fn sort_key(&self) -> impl Iterator<Item = u8> + '_ {
+        let (path, slash) = match self {
+            Self::File(_, path) => (path.as_str(), None),
+            Self::Folder(_, relative) => (relative.as_str(), Some(b'/')),
+        };
+        path.bytes().chain(slash)
+    }
 }
 
 struct Walker<'a> {
     probe: &'a dyn PlaceholderProbe,
     cap: u64,
     cancel: Option<&'a AtomicBool>,
-    progress: &'a mut dyn FnMut(&Found),
-    found: Vec<Found>,
+    /// The subfolders that did not read, in the order found.
+    unread: Vec<String>,
 }
 
 impl Walker<'_> {
@@ -192,64 +201,120 @@ impl Walker<'_> {
         self.cancel.is_some_and(|flag| flag.load(Ordering::Relaxed))
     }
 
-    /// Handles one entry of a folder whose path relative to the root is `parent`: records a
-    /// file, returns a folder to read, or says the entry's stat was denied.
-    fn entry(&mut self, entry: &DirEntry, parent: &str) -> Result<Entry, Error> {
-        let os_name = entry.file_name();
-        let path = entry.path();
-        let Some(name) = os_name.to_str() else {
-            tracing::warn!(path = %path.display(), "skipped a name that is not UTF-8");
-            return Ok(Entry::Skip);
-        };
-        let file_type = match entry.file_type() {
-            Ok(file_type) => file_type,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Entry::Skip),
-            Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
-                return Ok(Entry::Denied(err));
-            }
-            Err(err) => return Err(Error::io("stat", &path, err)),
-        };
-        let is_dir = file_type.is_dir();
-        if rules::is_excluded(name, is_dir) || (!is_dir && !file_type.is_file()) {
-            return Ok(Entry::Skip);
+    /// Reads the folder `dir`, whose path relative to the root is `relative` ("" for the root),
+    /// adding its kept entries to `items`. `Ok(false)` once cancelled. A subfolder gone is
+    /// skipped; one that does not read, or stops reading, goes in `unread` (what it gave so far
+    /// stays in `items`); the root not reading is an error.
+    fn read_folder(
+        &mut self,
+        dir: &Path,
+        relative: String,
+        items: &mut Vec<Item>,
+    ) -> Result<bool, Error> {
+        if self.cancelled() {
+            return Ok(false);
         }
-        let relative = if parent.is_empty() {
-            name.to_owned()
-        } else {
-            format!("{parent}/{name}")
-        };
-        let matter_path = match MatterPath::new(&relative) {
-            Ok(matter_path) => matter_path,
+        #[cfg(test)]
+        let listed = crate::no_download::fault::read_dir(dir).and_then(|()| fs::read_dir(dir));
+        #[cfg(not(test))]
+        let listed = fs::read_dir(dir);
+        let entries = match listed {
+            Ok(entries) => entries,
+            Err(err) if relative.is_empty() => return Err(Error::io("read folder", dir, err)),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(true),
+            Err(err) if not_downloaded(&err) => {
+                tracing::info!(path = %dir.display(), "kept a folder that is not downloaded as it was");
+                self.unread.push(relative);
+                return Ok(true);
+            }
             Err(err) => {
-                tracing::warn!(path = %path.display(), error = %err, "skipped a path");
-                return Ok(Entry::Skip);
+                tracing::warn!(path = %dir.display(), error = %err, "skipped a folder that does not read");
+                self.unread.push(relative);
+                return Ok(true);
             }
         };
-        if is_dir {
-            return Ok(Entry::Folder(path, relative));
+        for entry in entries {
+            if self.cancelled() {
+                return Ok(false);
+            }
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) if relative.is_empty() => {
+                    return Err(Error::io("read folder", dir, err));
+                }
+                Err(err) if not_downloaded(&err) => {
+                    tracing::info!(path = %dir.display(), "kept a folder that is not downloaded as it was");
+                    self.unread.push(relative);
+                    break;
+                }
+                Err(err) => {
+                    tracing::warn!(path = %dir.display(), error = %err, "stopped reading a folder");
+                    self.unread.push(relative);
+                    break;
+                }
+            };
+            if let Some(item) = entry_item(entry, &relative)? {
+                items.push(item);
+            }
         }
+        Ok(true)
+    }
+
+    /// The file `entry` at `path` with its stat, as [`classify`] makes it: `None` when it
+    /// is gone or no longer a regular file.
+    fn stat(&self, entry: &DirEntry, path: MatterPath) -> Result<Option<Found>, Error> {
+        let absolute = entry.path();
         let metadata = match entry.metadata() {
             Ok(metadata) => metadata,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Entry::Skip),
-            Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
-                return Ok(Entry::Denied(err));
-            }
-            Err(err) => return Err(Error::io("stat", &path, err)),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(Error::io("stat", &absolute, err)),
         };
         // The entry may have been replaced by something else since it was listed.
-        let Some(kind) = classify(self.probe, &path, &metadata, self.cap) else {
-            return Ok(Entry::Skip);
+        let Some(kind) = classify(self.probe, &absolute, &metadata, self.cap) else {
+            return Ok(None);
         };
-        let found = Found {
-            path: matter_path,
+        Ok(Some(Found {
+            path,
             stat: Stat::from_metadata(&metadata),
             len: metadata.len(),
             kind,
-        };
-        (self.progress)(&found);
-        self.found.push(found);
-        Ok(Entry::Skip)
+        }))
     }
+}
+
+/// Makes one entry of a folder whose path relative to the root is `parent` into a file or
+/// a folder to read, or `None` when the walk skips it.
+fn entry_item(entry: DirEntry, parent: &str) -> Result<Option<Item>, Error> {
+    let os_name = entry.file_name();
+    let Some(name) = os_name.to_str() else {
+        tracing::warn!(path = %entry.path().display(), "skipped a name that is not UTF-8");
+        return Ok(None);
+    };
+    let file_type = match entry.file_type() {
+        Ok(file_type) => file_type,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(Error::io("stat", entry.path(), err)),
+    };
+    let is_dir = file_type.is_dir();
+    if rules::is_excluded(name, is_dir) || (!is_dir && !file_type.is_file()) {
+        return Ok(None);
+    }
+    let relative = if parent.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{parent}/{name}")
+    };
+    let matter_path = match MatterPath::new(&relative) {
+        Ok(matter_path) => matter_path,
+        Err(err) => {
+            tracing::warn!(path = %entry.path().display(), error = %err, "skipped a path");
+            return Ok(None);
+        }
+    };
+    if is_dir {
+        return Ok(Some(Item::Folder(entry.path(), relative)));
+    }
+    Ok(Some(Item::File(entry, matter_path)))
 }
 
 #[cfg(test)]

@@ -38,5 +38,9 @@ harness = false
 name = "read"
 harness = false
 
+[[bench]]
+name = "papers"
+harness = false
+
 [lints]
 workspace = true

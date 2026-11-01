@@ -27,7 +27,8 @@
 //!   [`Matter::restore`] restores a version ([`Restore`], [`RestoreFiles`], [`Restored`]) and
 //!   [`Matter::preview_restore`] says what it would do ([`RestorePlan`]); [`Matter::compare`]
 //!   ([`CompareSide`]), [`Matter::files_at`] ([`VersionFile`]) and [`Matter::read_file`] read
-//!   versions and take `&self`.
+//!   versions and take `&self`; [`Matter::papers`] lists the folder as it is now ([`PaperList`],
+//!   [`Paper`]) by the checkpoint walk's rules.
 //! - [`held_open`]: whether Word (or, on Windows, any program) has a file of the folder open
 //!   ([`HeldOpen`]), by the rule undo and restore refuse with; [`held_open_at`] takes a path
 //!   as an agent names it, resolved into the folder by [`matter_path_in`]. The host asks it
@@ -101,6 +102,7 @@ mod history;
 mod locks;
 mod matter;
 mod no_download;
+mod papers;
 mod probe;
 mod refuse;
 mod restore;
@@ -119,6 +121,7 @@ mod writeback;
 pub use error::{Error, MissingReason, Refusal};
 pub use locks::{HeldOpen, held_open, held_open_at, matter_path_in};
 pub use matter::Matter;
+pub use papers::{Paper, PaperList};
 pub use probe::{OsProbe, PlaceholderProbe};
 pub use refuse::same_or_nested;
 pub use scan::scan;
