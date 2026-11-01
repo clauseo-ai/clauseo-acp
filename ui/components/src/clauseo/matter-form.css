@@ -41,6 +41,10 @@
     color: var(--primary);
     overflow-wrap: anywhere;
   }
+  /* a line from the caller or the form's own check, said plainly in the primary tone, as the room says a refusal */
+  .matter-form-error {
+    @apply text-small-row text-primary;
+  }
   .matter-form-change {
     flex: none;
     margin-top: calc(-1 * var(--s1));

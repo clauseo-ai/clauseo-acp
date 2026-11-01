@@ -41,7 +41,7 @@ const type = async (input: HTMLInputElement | undefined, value: string) => {
 const folderFor = (name: string) => `Documents/Clauseo/${name}`;
 
 test("Create the matter waits for a name, then gives the host the words trimmed", async () => {
-  const made: string[][] = [];
+  const made: (string | null)[][] = [];
   await mount(<NewMatterForm folderFor={folderFor} onCreate={(...a) => made.push(a)} />);
   expect(button("Create the matter")?.disabled).toBe(true);
   const [name, client, next] = [
@@ -56,7 +56,7 @@ test("Create the matter waits for a name, then gives the host the words trimmed"
     "Documents/Clauseo/Acme Ltd v. State",
   );
   await act(async () => button("Create the matter")?.click());
-  expect(made).toEqual([["Acme Ltd v. State", "Acme Ltd", "3 March 2027"]]);
+  expect(made).toEqual([["Acme Ltd v. State", "Acme Ltd", "3 March 2027", "2027-03-03"]]);
 });
 
 test("Change takes the folder the picker gives, and keeps it when the picker gives none", async () => {
@@ -86,6 +86,132 @@ test("the dialog opens with focus on the name, and Cancel closes it", async () =
   expect(document.activeElement?.tagName).toBe("INPUT");
   expect(document.activeElement?.closest("[role=dialog]")).not.toBeNull();
   await act(async () => button("Cancel")?.click());
+  expect(changes).toEqual([false]);
+});
+
+/** A promise and the hands that settle it, so a test holds a picker or a create open. */
+function held<T>() {
+  let resolve: (v: T) => void = () => {};
+  let reject: (e: unknown) => void = () => {};
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+test("without details, the form asks only the name, and gives no client or date", async () => {
+  const made: unknown[][] = [];
+  await mount(
+    <NewMatterForm
+      details={false}
+      name="Acme"
+      client="Old"
+      next="nonsense"
+      onCreate={(...a) => made.push(a)}
+    />,
+  );
+  expect(document.querySelectorAll(".matter-form input")).toHaveLength(1);
+  await act(async () => button("Create the matter")?.click());
+  expect(made).toEqual([["Acme", "", "", null]]);
+});
+
+test("a next date that doesn't read says how to write it and holds Create back", async () => {
+  await mount(<NewMatterForm name="Acme" onCreate={() => {}} />);
+  const next = document.querySelectorAll<HTMLInputElement>(".matter-form input")[2];
+  await type(next, "next Tuesday");
+  expect(document.querySelector(".matter-form-error")?.textContent).toBe(
+    "Write the date as 30 October 2026.",
+  );
+  expect(next?.getAttribute("aria-invalid")).toBe("true");
+  expect(button("Create the matter")?.disabled).toBe(true);
+  await type(next, "30 October 2026");
+  expect(document.querySelector(".matter-form-error")).toBeNull();
+  expect(button("Create the matter")?.disabled).toBe(false);
+});
+
+test("folder null shows Change alone; Change waits for the picker, and a cancel keeps what was there", async () => {
+  const pick = held<string | null>();
+  const asked: string[] = [];
+  await mount(
+    <NewMatterForm
+      folder={null}
+      name="Acme"
+      testIds={{ name: "matter-name", existing: "matter-existing", create: "create-matter" }}
+      pickFolder={(current) => {
+        asked.push(current);
+        return pick.promise;
+      }}
+      onCreate={() => {}}
+    />,
+  );
+  expect(document.querySelector("[data-testid=matter-name]")?.tagName).toBe("INPUT");
+  expect(document.querySelector("[data-testid=create-matter]")).not.toBeNull();
+  expect(document.querySelector(".matter-form-path")).toBeNull();
+  expect(document.querySelector(".matter-form-folder-words")?.textContent).toBe("");
+  const change = document.querySelector<HTMLButtonElement>("[data-testid=matter-existing]");
+  await act(async () => change?.click());
+  expect(asked).toEqual([""]);
+  expect(change?.disabled).toBe(true);
+  await act(async () => pick.resolve("~/Documents/Acme"));
+  expect(document.querySelector(".matter-form-path")?.textContent).toBe("~/Documents/Acme");
+  expect(change?.disabled).toBe(false);
+  await act(async () => change?.click());
+  expect(asked).toEqual(["", "~/Documents/Acme"]);
+});
+
+test("a picker that gives nothing keeps the folder line hidden", async () => {
+  await mount(
+    <NewMatterForm folder={null} name="Acme" pickFolder={async () => null} onCreate={() => {}} />,
+  );
+  await act(async () => button("Change")?.click());
+  expect(document.querySelector(".matter-form-path")).toBeNull();
+});
+
+test("Create stands pressed while the create runs, and the caller's error shows as an alert", async () => {
+  const run = held<void>();
+  let calls = 0;
+  await mount(
+    <NewMatterForm
+      name="Acme"
+      folder={null}
+      error="Clauseo couldn't create the matter. Try again, or choose another folder."
+      onCreate={() => {
+        calls += 1;
+        return run.promise;
+      }}
+    />,
+  );
+  expect(document.querySelector("[role=alert]")?.textContent).toBe(
+    "Clauseo couldn't create the matter. Try again, or choose another folder.",
+  );
+  await act(async () => button("Create the matter")?.click());
+  const create = button("Create the matter");
+  expect(create?.disabled).toBe(true);
+  expect(create?.getAttribute("aria-busy")).toBe("true");
+  await act(async () => create?.click());
+  expect(calls).toBe(1);
+  await act(async () => run.reject(new Error("refused")));
+  expect(button("Create the matter")?.disabled).toBe(false);
+});
+
+test("the dialog closes only when an async create succeeds", async () => {
+  const changes: boolean[] = [];
+  let answer: unknown = false;
+  await mount(
+    <NewMatterDialog
+      open
+      name="Acme"
+      details={false}
+      folder={null}
+      onOpenChange={(o) => changes.push(o)}
+      onCreate={async () => answer}
+    />,
+  );
+  await act(async () => button("Create the matter")?.click());
+  expect(changes).toEqual([]);
+  answer = undefined;
+  await act(async () => button("Create the matter")?.click());
   expect(changes).toEqual([false]);
 });
 

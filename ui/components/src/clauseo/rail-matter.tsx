@@ -28,6 +28,8 @@ import { MATTER_MARK, matterStatus, type MatterState } from "./rail-words.ts";
 export type { MatterState };
 
 export type MatterRowProps = {
+  /** Optional: the matter's id. The rail keys its rows by it, falling back to the name. */
+  id?: string | undefined;
   /** The matter's name as filed: English in both languages. */
   name: string;
   /** Its note, in the language: "Recovery suit, for the plaintiff". */
@@ -35,9 +37,10 @@ export type MatterRowProps = {
   hint: string;
   current?: boolean;
   state?: MatterState;
-  /** The clock time a state names, in English: "4:32 pm" expected, or "4:31 pm" stopped. */
+  /** The clock time a state names, in English: "4:32 pm" expected, "4:31 pm" stopped, or the limit's reset. Working
+   * with none says "Answering."; the limit with none says the reset wasn't given. */
   at?: string;
-  /** Paused only: the reset's day, in the language, when it isn't today, as for the weekly limit. */
+  /** Paused and limit only: the reset's day, in the language, when it isn't today, as for the weekly limit. */
   day?: string;
   /** Pinned above every date group. Its menu's Pin to the top shows it ticked. */
   pinned?: boolean | undefined;
@@ -49,9 +52,15 @@ export type MatterRowProps = {
   unprotected?: boolean | undefined;
   /** The row pressed: the room moves to this matter. */
   onOpen?: () => void;
-  /** Its actions, from the context menu or, on the current matter, the chevron at its end. */
+  /** Its actions, from the context menu or, on the current matter, the chevron at its end. Each shows only with its
+   * handler: Pin to the top with onPin, Locate folder with onLocate while the folder has moved, Show in Finder (or
+   * Explorer) with onReveal, Remove from the list with onRemove. With none of them, the row has no menu at all. */
   onPin?: ((pinned: boolean) => void) | undefined;
   onLocate?: (() => void) | undefined;
+  onReveal?: (() => void) | undefined;
+  onRemove?: (() => void) | undefined;
+  /** Optional: test ids; row goes on the row's button, which carries data-state. */
+  testIds?: { row?: string } | undefined;
   /** The current matter's conversations, opened beneath it, with New conversation. */
   conversations?: readonly ConversationRowProps[] | undefined;
   onNewConversation?: (() => void) | undefined;
@@ -59,45 +68,55 @@ export type MatterRowProps = {
 
 /** A matter's actions: pin it to the top, show its folder in the computer's own file manager, or find a folder that
  * moved, and take it off the list, which leaves the folder where it is. */
-function MatterActions({
-  name,
-  pinned,
-  state,
-  onPin,
-  onLocate,
-}: Pick<MatterRowProps, "name" | "pinned" | "state" | "onPin" | "onLocate">) {
+type ActionProps = Pick<
+  MatterRowProps,
+  "name" | "pinned" | "state" | "onPin" | "onLocate" | "onReveal" | "onRemove"
+>;
+
+/** Whether the row has any action to show: each item stands only with its handler. */
+const hasActions = ({ state, onPin, onLocate, onReveal, onRemove }: ActionProps) =>
+  onPin !== undefined ||
+  (state === "moved" && onLocate !== undefined) ||
+  onReveal !== undefined ||
+  onRemove !== undefined;
+
+function MatterActions({ name, pinned, state, onPin, onLocate, onReveal, onRemove }: ActionProps) {
   const { lang, platform } = useDisplay();
   const moved = state === "moved";
+  const locate = moved ? onLocate : undefined;
+  const above = onPin !== undefined || locate !== undefined || onReveal !== undefined;
   return (
     <>
-      <MenuGroup>
-        <MenuGroupLabel lang="en">{name}</MenuGroupLabel>
-        <MenuCheckboxItem
-          label={ui(lang, "Pin to the top")}
-          checked={pinned === true}
-          onCheckedChange={(on) => onPin?.(on)}
+      {above && (
+        <MenuGroup>
+          <MenuGroupLabel lang="en">{name}</MenuGroupLabel>
+          {onPin !== undefined && (
+            <MenuCheckboxItem
+              label={ui(lang, "Pin to the top")}
+              checked={pinned === true}
+              onCheckedChange={(on) => onPin(on)}
+            />
+          )}
+          {locate !== undefined && <MenuItem label={ui(lang, "Locate folder")} onClick={locate} />}
+          {onReveal !== undefined && (
+            <MenuItem label={ui(lang, revealKey(platform))} disabled={moved} onClick={onReveal} />
+          )}
+        </MenuGroup>
+      )}
+      {above && onRemove !== undefined && <MenuSeparator />}
+      {onRemove !== undefined && (
+        <MenuItem
+          label={ui(lang, "Remove from the list")}
+          note={ui(lang, "The folder and its papers stay where they are.")}
+          onClick={onRemove}
         />
-        {moved && (
-          <MenuItem
-            label={ui(lang, "Locate folder")}
-            {...(onLocate === undefined ? {} : { onClick: onLocate })}
-          />
-        )}
-        <MenuItem label={ui(lang, revealKey(platform))} disabled={moved} />
-      </MenuGroup>
-      <MenuSeparator />
-      <MenuItem
-        label={ui(lang, "Remove from the list")}
-        note={ui(lang, "The folder and its papers stay where they are.")}
-      />
+      )}
     </>
   );
 }
 
 /** The same actions on a press of the context key or a right-click anywhere on the row. */
-function RowContextMenu(
-  p: Pick<MatterRowProps, "name" | "pinned" | "state" | "onPin" | "onLocate">,
-) {
+function RowContextMenu(p: ActionProps) {
   const layer = useLayer();
   return (
     <ContextMenu.Portal container={layer}>
@@ -130,6 +149,7 @@ function RowWords({
   // waiting on the lawyer, or an answer waiting to be opened: the status line speaks up
   const news =
     state === "question" || state === "permission" || state === "ready" || state === "paused";
+  // limit stays muted: nothing for the lawyer to choose, only a time to wait for
   return (
     <>
       <span className="room-matter-name">
@@ -188,12 +208,16 @@ export function MatterRow({
   onOpen,
   onPin,
   onLocate,
+  onReveal,
+  onRemove,
+  testIds,
   conversations,
   onNewConversation,
 }: MatterRowProps) {
   const w = useWords();
   const status = matterStatus(w.lang, state, at, day);
-  const actions = { name, pinned, state, onPin, onLocate };
+  const actions: ActionProps = { name, pinned, state, onPin, onLocate, onReveal, onRemove };
+  const menu = hasActions(actions);
   const button = (
     <button
       type="button"
@@ -201,6 +225,7 @@ export function MatterRow({
       title={hint}
       aria-current={current ? "page" : undefined}
       data-state={state}
+      data-testid={testIds?.row}
       onClick={onOpen}
     >
       <RowWords
@@ -219,24 +244,26 @@ export function MatterRow({
       <li className="room-house">
         <div className="room-house-head">
           {button}
-          <Menu>
-            <MenuTrigger
-              render={
-                <Button
-                  kind="quiet"
-                  size="small"
-                  shape="icon"
-                  className="room-house-more data-popup-open:bg-press"
-                />
-              }
-              aria-label={ui(w.lang, "Actions for {name}", { name })}
-            >
-              <IconMore size={16} />
-            </MenuTrigger>
-            <MenuPopup align="start">
-              <MatterActions {...actions} />
-            </MenuPopup>
-          </Menu>
+          {menu && (
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button
+                    kind="quiet"
+                    size="small"
+                    shape="icon"
+                    className="room-house-more data-popup-open:bg-press"
+                  />
+                }
+                aria-label={ui(w.lang, "Actions for {name}", { name })}
+              >
+                <IconMore size={16} />
+              </MenuTrigger>
+              <MenuPopup align="start">
+                <MatterActions {...actions} />
+              </MenuPopup>
+            </Menu>
+          )}
         </div>
         <ConversationList
           matter={name}
@@ -246,7 +273,7 @@ export function MatterRow({
       </li>
     );
   }
-  if (onPin === undefined && onLocate === undefined) return <li>{button}</li>;
+  if (!menu) return <li>{button}</li>;
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger render={<li />}>{button}</ContextMenu.Trigger>
