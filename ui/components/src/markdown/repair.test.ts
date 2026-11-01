@@ -6,7 +6,7 @@ import spec from "commonmark-spec/spec.txt?raw";
 import { createAnswer } from "./answer.ts";
 import { LEGAL } from "./legal-fixture.ts";
 import { endOf, parse } from "./parse.ts";
-import { repairTail } from "./repair.ts";
+import { MAX_CLOSERS, repairTail } from "./repair.ts";
 import { examplesOf, htmlOf } from "./spec-fixture.ts";
 import { createSplitter } from "./split.ts";
 
@@ -83,6 +83,22 @@ test.each([
     expect(tail(text)).toBe(html);
   },
 );
+
+test("only the innermost four openers get closers: closing all of `*a `×2,000 made the parse quadratic", () => {
+  // The hostile cases no longer catch this alone (nesting.ts's limits keep them under 8 times prose), so
+  // the limit is pinned here: four is every nesting prose needs (see MAX_CLOSERS).
+  expect(MAX_CLOSERS).toBe(4);
+  const input = `x ${"*a ".repeat(2000)}`;
+  let parses = 0;
+  const repaired = repairTail(input, 0, (text) => {
+    parses++;
+    return parse(text);
+  });
+  // The closers go after the last `a`, before the trailing space; the text before them is as written.
+  expect(repaired).toBe(`${input.trimEnd()}${"*".repeat(MAX_CLOSERS)} `);
+  expect(parses).toBe(1);
+  expect(tail(input).match(/<em>/g)).toHaveLength(MAX_CLOSERS);
+});
 
 test("a run nesting.ts cut short gets no closer: a signature line's underscores stay underscores", () => {
   const html = tail(`Signature: ${"_".repeat(70)}`);
