@@ -29,6 +29,10 @@ export const ids = {
    * `aria-current="page"` on the open matter. The scratch matter's foot row is not one.
    */
   matterRow: "matter-row",
+  /** Room: the rail's find field (shown once there is a matter to find). */
+  find: "find",
+  /** Room: Matters on the toolbar, which opens and folds the rail below 1200 px. */
+  railToggle: "rail-toggle",
   /** The open matter's name; in the internal window also "Opening…" or "No matter". */
   matter: "matter",
   /** The open matter's threads. */
@@ -88,16 +92,13 @@ export function window(page: Page) {
     matterRows: id(ids.matterRow),
     /** Room: the rail row of the matter named `name` (its text also holds its status). */
     matterRow: (name: string): Locator => id(ids.matterRow).filter({ hasText: name }),
-    /**
-     * Room: the rail's find field, the rail's one search box (it has no test id: the parts'
-     * FindField takes none).
-     */
-    findMatter: page.getByRole("searchbox"),
+    /** Room: the rail's find field. */
+    findMatter: id(ids.find),
     /**
      * Room: Matters on the toolbar, which unfolds the rail below 1200 px (the e2e window opens at
-     * Tauri's default 800 x 600, so the rail starts folded). Found by its class: it has no test id.
+     * Tauri's default 800 x 600, so the rail starts folded).
      */
-    railToggle: page.locator(".room-rail-toggle"),
+    railToggle: id(ids.railToggle),
     matter: id(ids.matter),
     threadSelect: id(ids.threadSelect),
     newThread: id(ids.newThread),

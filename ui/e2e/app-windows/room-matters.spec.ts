@@ -64,8 +64,8 @@ test("find filters the rows and Enter opens the first", async ({ app }) => {
 test.describe("a matter left while its turn runs", () => {
   test.use({ scenario: "cancel-unanswered" });
 
-  // Needs U3: the room has no composer until U3's work fills the centre slot (composer, send,
-  // cancel). Turn this into `test` when U3 lands.
+  // Moved to U3's done-when: the room has no composer until U3's work fills the centre slot
+  // (composer, send, cancel). U3 turns this into `test`.
   test.fixme("says Answering. on its row, and its turn can still be cancelled", async ({ app }) => {
     const w = window(app.page);
     await twoMatters(w);
