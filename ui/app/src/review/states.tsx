@@ -2,16 +2,22 @@
 import { EmptyPapers } from "@clauseo/components/clauseo/empty.tsx";
 import { RoomScopeProvider } from "@clauseo/components/clauseo/room-scope-provider.tsx";
 import { RoomToolbar } from "@clauseo/components/clauseo/room-toolbar.tsx";
+import type { Lang } from "@clauseo/components/lib/display.ts";
 
 const nothing = () => {};
 
-/** The room's toolbar as the frame shows it: the matter's name over an empty line, no plan, nothing to undo, the rail
- * folded behind Matters. */
-export function RoomFrameToolbar({ title }: { title: string }) {
+/** The room's toolbar as the frame shows it (src/room/): the computer's own window chrome, no search, Versions or plan,
+ * the matter's name over an empty line, the rail folded behind Matters. A matter's name is in English in both
+ * languages; the frame's own words, such as "No matters yet", take the page's language (titleLang). */
+export function RoomFrameToolbar({ title, titleLang = "en" }: { title: string; titleLang?: Lang }) {
   return (
     <RoomScopeProvider>
       <RoomToolbar
+        chrome="os"
+        search={false}
+        versions={false}
         title={title}
+        titleLang={titleLang}
         titleHint=""
         nextDate=""
         caseNo=""
@@ -28,12 +34,12 @@ export function RoomFrameToolbar({ title }: { title: string }) {
   );
 }
 
-/** The wall of a matter with no papers yet. */
+/** The wall of a matter with no papers yet, as the frame shows it: the title alone. */
 export function RoomFrameWall() {
   return (
     <RoomScopeProvider>
       <aside className="review-wall">
-        <EmptyPapers />
+        <EmptyPapers body={false} />
       </aside>
     </RoomScopeProvider>
   );
