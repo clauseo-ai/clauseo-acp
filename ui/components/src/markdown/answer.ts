@@ -5,14 +5,23 @@
 //
 // Footnotes (later): the place to plug them in is `documentOf` (gather footnote definitions and the order
 // of first reference across blocks, like the link definitions here), `inputOf` (placeholder definitions for
-// the labels a block references) and the mdast-to-hast handlers in `toView`.
+// the labels a block references, found like its link labels, so its view changes only when they do) and
+// the mdast-to-hast handlers in `toView`.
 import type { ElementContent, Root as Hast, RootContent, Text } from "hast";
-import type { Definition, Root } from "mdast";
+import type { Root } from "mdast";
 import { sanitize } from "hast-util-sanitize";
 import { toHast } from "mdast-util-to-hast";
 import type { Handler } from "mdast-util-to-hast";
 import remend from "remend";
-import { definitionPrefix, definitionsIn, mayDefine, mayReference } from "./definitions.ts";
+import {
+  definitionLines,
+  definitionsIn,
+  labelsIn,
+  mayDefine,
+  mayReference,
+  prefixFor,
+} from "./definitions.ts";
+import type { DefinitionLine, DefinitionLines } from "./definitions.ts";
 import { capNesting, deeperThan, MAX_TREE_DEPTH } from "./nesting.ts";
 import { endOf, parse } from "./parse.ts";
 import { SCHEMA } from "./schema.ts";
@@ -59,7 +68,10 @@ function scopeFootnoteLabel(nodes: readonly (RootContent | ElementContent)[], sc
 /** A block shown as its source, in plain text: what a block that cannot render safely falls back to. */
 export function plainText(source: string): Hast {
   const text: Text = { type: "text", value: source.trimEnd() };
-  return { type: "root", children: [{ type: "element", tagName: "p", properties: {}, children: [text] }] };
+  return {
+    type: "root",
+    children: [{ type: "element", tagName: "p", properties: {}, children: [text] }],
+  };
 }
 
 /** A cache that keeps only what the last update used, once it holds more than twice that. */
@@ -76,6 +88,10 @@ function createCache<V>() {
       }
       return value;
     },
+    /** Mark `key` as used by this update without looking it up. */
+    keep(key: string) {
+      used.add(key);
+    },
     sweep() {
       if (map.size > 2 * used.size + 16)
         for (const key of map.keys()) if (!used.has(key)) map.delete(key);
@@ -91,7 +107,9 @@ function createCache<V>() {
 export function createAnswer(scope: string): Answer {
   const trees = createCache<Root>();
   const ends = createCache<BlockEnd>();
-  const owned = createCache<readonly Definition[]>();
+  const owned = createCache<readonly DefinitionLine[]>();
+  const labels = createCache<readonly string[]>();
+  const inputs = createCache<{ prefix: string; input: string }>();
   const views = createCache<BlockView>();
   const tree = (source: string) => trees.get(source, () => parse(source));
   const split = createSplitter((block) => ends.get(block, () => endOf(block, tree(block))));
@@ -114,22 +132,51 @@ export function createAnswer(scope: string): Answer {
       }
     });
 
-  /** Each block's own definitions; while streaming, the last block's do not count yet. */
-  const documentOf = (blocks: readonly string[], counted: number) => {
-    const perBlock: (readonly Definition[])[] = [];
+  /**
+   * The document's definitions, from each block's own; while streaming, the last block's do not count yet.
+   * Built again only when some block's definitions changed.
+   */
+  let lastPerBlock: (readonly DefinitionLine[])[] = [];
+  let lastLines: DefinitionLines = new Map();
+  const documentOf = (blocks: readonly string[], counted: number): DefinitionLines => {
+    const perBlock: (readonly DefinitionLine[])[] = [];
     for (let index = 0; index < counted; index++) {
       const block = blocks[index]!;
-      if (mayDefine(block)) perBlock.push(owned.get(block, () => definitionsIn(tree(block))));
+      if (mayDefine(block))
+        perBlock.push(owned.get(block, () => definitionsIn(tree(block), block)));
     }
-    return { definitions: definitionPrefix(perBlock) };
+    const same =
+      perBlock.length === lastPerBlock.length &&
+      perBlock.every((definitions, index) => definitions === lastPerBlock[index]);
+    if (!same) lastLines = definitionLines(perBlock);
+    lastPerBlock = perBlock;
+    return lastLines;
   };
 
-  const inputOf = (source: string, document: { definitions: string }) =>
-    document.definitions !== "" && mayReference(source) ? document.definitions + source : source;
+  /**
+   * A block's parse input: the block, after the definitions of the labels it uses. The same prefix gives
+   * the same input string, so a finished block's lookups stay cheap.
+   */
+  const inputOf = (source: string, lines: DefinitionLines): string => {
+    if (lines.size === 0 || !mayReference(source)) return source;
+    const prefix = prefixFor(
+      labels.get(source, () => labelsIn(source)),
+      lines,
+    );
+    if (prefix === "") return source;
+    const known = inputs.get(source, () => ({ prefix, input: prefix + source }));
+    if (known.prefix !== prefix) {
+      known.prefix = prefix;
+      known.input = prefix + source;
+    }
+    return known.input;
+  };
 
   let lastText: string | undefined;
   let lastStreaming = true;
   let lastViews: readonly BlockView[] = [];
+  let lastBlocks: readonly string[] = [];
+  let lastLinesUsed: DefinitionLines | undefined;
   return {
     update(raw, streaming) {
       if (raw === lastText && streaming === lastStreaming) return lastViews;
@@ -141,14 +188,24 @@ export function createAnswer(scope: string): Answer {
         blocks = [text];
       }
       const last = blocks.length - 1;
-      const document = documentOf(blocks, streaming ? last : blocks.length);
+      const lines = documentOf(blocks, streaming ? last : blocks.length);
+      // A block finished last time, unchanged, under the same definitions: its view as it was.
+      const reusable = lines === lastLinesUsed ? lastBlocks.length - (lastStreaming ? 1 : 0) : 0;
+      const previous = lastViews;
       lastViews = blocks.map((block, index) => {
-        const source = streaming && index === last ? remend(block) : block;
-        return toView(block, inputOf(source, document));
+        const tail = streaming && index === last;
+        const before = previous[index];
+        if (before && index < reusable && !tail && block === lastBlocks[index]) {
+          views.keep(before.input);
+          return before;
+        }
+        return toView(block, inputOf(tail ? remend(block) : block, lines));
       });
+      lastBlocks = blocks;
+      lastLinesUsed = lines;
       lastText = raw;
       lastStreaming = streaming;
-      for (const cache of [trees, ends, owned, views]) cache.sweep();
+      for (const cache of [trees, ends, owned, labels, inputs, views]) cache.sweep();
       return lastViews;
     },
   };

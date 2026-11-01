@@ -9,8 +9,12 @@
 // task-list classes (`contains-task-list`, `task-list-item`), which GFM's reference output does not have.
 import type { ElementContent, Properties, Root, RootContent } from "hast";
 import { fromHtml } from "hast-util-from-html";
+import { sanitize } from "hast-util-sanitize";
 import { toHtml } from "hast-util-to-html";
+import { toHast } from "mdast-util-to-hast";
 import { createAnswer } from "./answer.ts";
+import { parse } from "./parse.ts";
+import { SCHEMA } from "./schema.ts";
 
 export type Example = { example: number; section: string; markdown: string; html: string };
 
@@ -136,4 +140,17 @@ export function streamed(markdown: string, size: number): string {
 /** The chunk sizes each example is streamed in: one character at a time for short ones, then fixed chunks. */
 export function chunkingsFor(markdown: string): number[] {
   return markdown.length <= 400 ? [0, 1, 3, 16] : [0, 3, 16];
+}
+
+/** The answer as one block, without the splitter: what rendering block by block must reproduce. */
+export function unsplit(text: string): string {
+  return toHtml(
+    sanitize(
+      toHast(parse(text), {
+        clobberPrefix: "spec-",
+        handlers: { html: (_, node) => ({ type: "text", value: node.value }) },
+      }),
+      SCHEMA,
+    ) as Root,
+  );
 }
