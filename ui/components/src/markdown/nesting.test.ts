@@ -131,6 +131,26 @@ test("a paragraph keeps 32 `[` open, 64 `]` with none open, and no `[` open over
   expect(capNesting(fresh)).toBe(fresh);
 });
 
+test.each([
+  ["33 code spans holding `[`", "Use `[` ".repeat(33) + "then [a](u)."],
+  ["a fence of 40 `[` lines", `\`\`\`\n${"x = a[\n".repeat(40)}\`\`\`\nSee [docs](u).`],
+  ["a fence of 100 `[` lines", `\`\`\`\n${"x = a[\n".repeat(100)}\`\`\`\nSee [docs](u).`],
+  ["a `~~~` fence of 40 `[` lines", `~~~\n${"x = a[\n".repeat(40)}~~~\nSee [docs](u).`],
+])("brackets in code do not use up the paragraph's limit: %s, then a link", (_, text) => {
+  const views = createAnswer("t").update(text, false);
+  const links = views.reduce((total, view) => total + count(view.hast, "a"), 0);
+  expect(links).toBe(1);
+  expect(hasStandIn(views.map((view) => JSON.stringify(view.hast)).join(""))).toBe(false);
+});
+
+test("a backtick micromark does not read as code cannot hide more than 64 brackets from the limits", () => {
+  const hidden = `<a title="\`">${"[".repeat(100)}a\``;
+  expect(capNesting(hidden)).toContain(hide("["));
+  // An indented fence line is no fence: it does not start the count again.
+  const indented = `${"[".repeat(MAX_OPEN_BRACKETS)}\n    \`\`\`\n[a`;
+  expect(capNesting(indented)).toContain(hide("["));
+});
+
 test("links still work past the bracket limits, and every cut bracket reads as written", () => {
   const text = `${"[".repeat(40)}a${"]".repeat(40)} then [ok](https://b.example/) and [${"x".repeat(1200)}](/far)`;
   const [view] = createAnswer("t").update(text, false);

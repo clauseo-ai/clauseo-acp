@@ -49,6 +49,8 @@ export const MAX_UNMATCHED_BRACKETS = 64;
  * 999 is also the longest reference label.
  */
 export const MAX_BRACKET_SPAN = 1000;
+/** The brackets in code spans a paragraph may leave uncounted (`Use \`[\`` in prose, a short fenced block). */
+export const MAX_CODE_BRACKETS = 64;
 /** Levels of mdast below a block's root: 32 nested lists are 64 (list and item), plus their inline content. */
 export const MAX_TREE_DEPTH = 128;
 
@@ -195,14 +197,69 @@ function capRuns(text: string): string {
   return copied === 0 ? text : out + text.slice(copied);
 }
 
-/** An escape, a bracket, or a line break with the next line's quote markers and indentation. */
-const BRACKETS = /\\[\s\S]|[[\]]|\n[ \t>]*/g;
+/** An escape, a bracket, a backtick run, or a line break with the next line's quote markers and indentation. */
+const BRACKETS = /\\[\s\S]|[[\]]|`+|\n[ \t>]*/g;
+const FENCE = /^(?:`{3,}|~{3,})/;
+
+/**
+ * Whether a fence starts at `next`, after the line break, quote markers and indentation `prefix`: indented
+ * at most 3 columns past the last quote marker and its optional space (more is an indented line, which
+ * does not end a paragraph).
+ */
+function fenceAt(text: string, prefix: string, next: number): boolean {
+  const marker = prefix.lastIndexOf(">");
+  let indent = 0;
+  for (let at = marker >= 0 ? marker + 1 : 1; at < prefix.length; at++)
+    indent += prefix[at] === "\t" ? 4 : 1;
+  return indent <= (marker >= 0 ? 4 : 3) && FENCE.test(text.slice(next, next + 3));
+}
+
+/** The `[` and `]` in `text[start, end)`. */
+function bracketsIn(text: string, start: number, end: number): number {
+  let count = 0;
+  for (let at = start; at < end; at++) {
+    const char = text.charCodeAt(at);
+    if (char === 91 || char === 93) count++;
+  }
+  return count;
+}
+const PARAGRAPH_END = /\n[ \t>]*(?:\n|$)/g;
+
+/**
+ * Where the code span opened by the backtick run at `at` ends (after its closing run of the same length,
+ * before the paragraph ends), or -1. `missing` remembers, per run length, up to where no closing run
+ * exists, so a paragraph of unclosed backticks is searched once per length.
+ */
+function codeSpanEnd(
+  text: string,
+  at: number,
+  length: number,
+  missing: Map<number, number>,
+): number {
+  const from = at + length;
+  if ((missing.get(length) ?? -1) >= from) return -1;
+  PARAGRAPH_END.lastIndex = from;
+  const end = PARAGRAPH_END.exec(text)?.index ?? text.length;
+  let search = from;
+  for (;;) {
+    const found = text.indexOf("`", search);
+    if (found < 0 || found >= end) break;
+    let stop = found;
+    while (text.charCodeAt(stop) === 96 /* ` */) stop++;
+    if (stop - found === length) return stop;
+    search = stop;
+  }
+  missing.set(length, end);
+  return -1;
+}
 
 /**
  * Every paragraph's brackets in bounds: a `[` past MAX_OPEN_BRACKETS open, a `[` still open
  * MAX_BRACKET_SPAN characters on (not counting the quote markers and indentation that start each line), and
- * a `]` with none open past MAX_UNMATCHED_BRACKETS of them, become text. The count is approximate (a
- * bracket in a code span counts), which only matters past the limits.
+ * a `]` with none open past MAX_UNMATCHED_BRACKETS of them, become text. Brackets in a code span do not
+ * count, and a blank line or a code fence line starts the count again. The count is still approximate (a
+ * fenced block's lines count, as text, unless its fence closes before a blank line), which only matters
+ * past the limits.
  */
 function capBrackets(text: string): string {
   if (!text.includes("[") && !text.includes("]")) return text;
@@ -211,6 +268,8 @@ function capBrackets(text: string): string {
   const open: { at: number; skipped: number }[] = [];
   let unmatched = 0;
   let skipped = 0;
+  const missing = new Map<number, number>();
+  let inCode = 0;
   /** Cut every `[` still open that `at` is more than the span past. */
   const expire = (at: number) => {
     let kept = 0;
@@ -224,7 +283,18 @@ function capBrackets(text: string): string {
   for (let match = BRACKETS.exec(text); match; match = BRACKETS.exec(text)) {
     const token = match[0];
     const at = match.index;
-    if (token === "]") {
+    if (token[0] === "`") {
+      const end = codeSpanEnd(text, at, token.length, missing);
+      if (end >= 0) {
+        // Brackets in a code span are no label starts, but only MAX_CODE_BRACKETS a paragraph go uncounted:
+        // a backtick micromark reads otherwise (in raw HTML, say) must not hide thousands of them.
+        const inside = bracketsIn(text, at, end);
+        if (inCode + inside <= MAX_CODE_BRACKETS) {
+          inCode += inside;
+          BRACKETS.lastIndex = end;
+        }
+      }
+    } else if (token === "]") {
       expire(at);
       if (open.length > 0) open.pop();
       else if (unmatched < MAX_UNMATCHED_BRACKETS) unmatched++;
@@ -236,10 +306,11 @@ function capBrackets(text: string): string {
     } else if (token[0] === "\n") {
       expire(at);
       const next = at + token.length;
-      if (next >= text.length || text[next] === "\n") {
-        // A blank line (or a blank quote line) ends the paragraph.
+      if (next >= text.length || text[next] === "\n" || fenceAt(text, token, next)) {
+        // A blank line (or a blank quote line) ends the paragraph; a fence line starts or ends code.
         open.length = 0;
         unmatched = 0;
+        inCode = 0;
       }
       skipped += token.length;
     }
