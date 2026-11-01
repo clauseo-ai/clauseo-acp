@@ -42,7 +42,11 @@ first three through and calls the fourth:
   read's raw stdout to a callback, so its live tests can record the vendors' answers, redacted,
   under `target/g16/`. Without it the stdout passes as before; R16 never sets it. It exists only with
   the `live-tap` feature, which only `limits`' own dev-dependency turns on, so a crate that
-  wants it must add the feature in a reviewed `Cargo.toml`.
+  wants it must add the feature in a reviewed `Cargo.toml`. That holds per package: once the
+  host depends on `limits`, workspace runs (`clippy --workspace --all-targets`,
+  `nextest --workspace`) build `limits` with the tap on, while ci.yml's per-package
+  `cargo clippy -p clauseo-desktop --all-targets` and release builds still catch a production
+  caller.
 - `at_limit(agent, now)`: a row whose `resets_at` is at or before `now` never counts, even when
   no deadline swept it because nobody watched. R16 asks at a turn stop, outside watching. A
   Codex `reached` plan window (any reason but credits and the spend cap) ends with its rows: once

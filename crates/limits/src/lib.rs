@@ -27,7 +27,12 @@
 //!   `CODEX_CONFIG` for codex-acp reuses.
 //! - Hidden, for G16's live tests only (`tests/live.rs`): `ProcessReaders::with_stdout_tap` and
 //!   `StdoutTap`, a copy of each read's raw, unredacted stdout. They exist only with the
-//!   `live-tap` feature, which only this crate's own dev-dependency turns on.
+//!   `live-tap` feature, which only this crate's own dev-dependency turns on. That holds per
+//!   package: once another crate depends on `clauseo-limits`, a workspace run
+//!   (`cargo clippy --workspace --all-targets`, `cargo nextest run --workspace`) builds the
+//!   library with the tap on for every crate. A per-package build still catches a production
+//!   caller: ci.yml's `cargo clippy -p clauseo-desktop --all-targets --features marks` and every
+//!   release build compile `limits` without it.
 //!
 //! # Invariants
 //!

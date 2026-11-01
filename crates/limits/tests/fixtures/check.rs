@@ -174,10 +174,12 @@ fn example_com_follows(after: &[u8]) -> bool {
     }
 }
 
-/// True for a byte that cannot be part of an email: ASCII whitespace, a control byte, a quote,
-/// or one of `<>()[]{},;:/\`. Any other byte, non-ASCII included, can.
+/// True for a byte that cannot be part of an email: ASCII whitespace, a control byte, `"`, a
+/// backtick, or one of `<>()[]{},;:/\@`. Any other byte can, non-ASCII included, and so can `'`
+/// (`o'brien@corp.com` is one email, not `o'` and an email). The redactor matches emails with
+/// this same rule (`email_at`).
 pub(crate) fn delimits(byte: u8) -> bool {
-    byte.is_ascii_whitespace() || byte.is_ascii_control() || b"\"'`<>()[]{},;:/\\@".contains(&byte)
+    byte.is_ascii_whitespace() || byte.is_ascii_control() || b"\"`<>()[]{},;:/\\@".contains(&byte)
 }
 
 /// The email whose `@` is at `at`: its start, its end (after the domain, without trailing dots)

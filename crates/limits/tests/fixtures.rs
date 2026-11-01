@@ -93,6 +93,10 @@ mod tests {
                 r#"{"e":"@example.community"}"#.to_owned(),
             ),
             (
+                "email/apostrophe.json",
+                r#"{"e":"o'brien@corp.com"}"#.to_owned(),
+            ),
+            (
                 "email/accent.json",
                 r#"{"e":"José.Pérez@bücher.de"}"#.to_owned(),
             ),

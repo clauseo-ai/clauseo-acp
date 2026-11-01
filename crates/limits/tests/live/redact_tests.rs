@@ -56,7 +56,7 @@ fn hostile_samples_lose_every_email_uuid_path_and_key() {
     let uuid = uuid();
     let home = mac_home("someone");
     let message = format!(
-        "failed for José.Pérez@corp.com and a@bücher.de (id {uuid}) reading {home}/auth, see C:\\Users\\someone\\x"
+        "failed for José.Pérez@corp.com, o'brien@corp.com and a@bücher.de (id {uuid}) reading {home}/auth, see C:\\Users\\someone\\x"
     );
     let mut by_email = serde_json::Map::new();
     by_email.insert("boss@corp.com".to_owned(), 1.into());
@@ -69,7 +69,7 @@ fn hostile_samples_lose_every_email_uuid_path_and_key() {
         redacted,
         serde_json::json!({
             "ok": false,
-            "message": "failed for test@example.com and test@example.com (id redacted-1) reading \
+            "message": "failed for test@example.com, test@example.com and test@example.com (id redacted-1) reading \
                         redacted-path, see redacted-path",
             "byEmail": {"test@example.com": 1, "redacted-1": 2},
         })
