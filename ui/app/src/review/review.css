@@ -1,0 +1,130 @@
+/* The dev-only copy review's stylesheet: the design system's and every part's sheet, for the frames, and the list's
+   own plain classes (no Tailwind utilities, so nothing here could reach the app's CSS). */
+@import "../styles/system.css";
+@import "@clauseo/components/clauseo/parts.css";
+
+/* ---------- the list ---------- */
+.review-page {
+  max-width: 1024px;
+  margin: 0 auto;
+  padding: 16px 16px 48px;
+  box-sizing: border-box;
+}
+.review-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--divide);
+}
+.review-head h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+.review-count {
+  margin: 0;
+  flex: 1 1 320px;
+  color: var(--muted);
+}
+.review-toggle {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--divide-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--primary);
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.review-toggle[aria-pressed="true"] {
+  background: var(--inset);
+}
+.review-item {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--divide);
+  scroll-margin-top: 8px;
+}
+.review-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.review-item-head h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-family: ui-monospace, monospace;
+  user-select: all;
+}
+.review-status {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  background: var(--inset);
+}
+.review-status[data-status="approved"] {
+  background: var(--green-tint);
+  color: var(--green-text);
+}
+.review-status[data-status="change"],
+.review-status[data-status="changed"] {
+  background: var(--red-tint);
+  color: var(--red-text);
+}
+.review-where {
+  font-size: 0.875rem;
+  user-select: all;
+}
+.review-screen {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.review-text {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 12px 0;
+}
+.review-text dt {
+  color: var(--muted);
+}
+.review-text dd {
+  margin: 0;
+}
+.review-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.review-figure {
+  margin: 0;
+  min-width: 0;
+}
+.review-figure figcaption {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  margin-bottom: 4px;
+}
+.review-frame {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--divide-strong);
+  border-radius: 6px;
+}
+
+/* ---------- one frame's state ---------- */
+.review-cell {
+  padding: 8px;
+}
+.review-wall {
+  max-width: 360px;
+}
+[data-review-mark] {
+  outline: 2px dashed var(--yellow);
+  outline-offset: 2px;
+}
+.review-missing {
+  padding: 8px;
+}
