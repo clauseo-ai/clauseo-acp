@@ -89,6 +89,63 @@ fn reached_plan_window_gives_plan_window_on_the_tightest_window() {
 }
 
 #[test]
+fn reached_plan_window_ends_once_every_window_is_past_its_reset_without_a_watcher() {
+    let windows = vec![
+        resetting(five_hour(60.0), at(10)),
+        resetting(seven_day(30.0), at(15)),
+    ];
+    let model = codex_reached(windows, LimitStopReason::PlanWindow);
+    assert_eq!(
+        model.next_deadline(),
+        None,
+        "nobody watches, so no sweep runs"
+    );
+    let hit = LimitHit {
+        window: Some("seven_day".to_owned()),
+        resets_at: Some(at(15)),
+        reason: LimitStopReason::PlanWindow,
+    };
+    assert_eq!(
+        model.at_limit(CODEX, at(12)),
+        Some(hit),
+        "one window still runs"
+    );
+    assert_eq!(
+        model.at_limit(CODEX, at(20)),
+        None,
+        "#204: every reset has passed"
+    );
+}
+
+#[test]
+fn reached_plan_window_stands_while_a_window_has_no_reset_time() {
+    let windows = vec![resetting(five_hour(60.0), at(10)), seven_day(30.0)];
+    let model = codex_reached(windows, LimitStopReason::PlanWindow);
+    let hit = LimitHit {
+        window: Some("seven_day".to_owned()),
+        resets_at: None,
+        reason: LimitStopReason::PlanWindow,
+    };
+    assert_eq!(model.at_limit(CODEX, at(20)), Some(hit));
+}
+
+#[test]
+fn reached_credits_and_spend_cap_stand_past_every_reset() {
+    for reason in [
+        LimitStopReason::WorkspaceCredits,
+        LimitStopReason::WorkspaceSpendCap,
+    ] {
+        let model = codex_reached(vec![resetting(five_hour(20.0), at(10))], reason);
+        let hit = LimitHit {
+            window: None,
+            resets_at: None,
+            reason,
+        };
+        assert_eq!(model.at_limit(CODEX, at(20)), Some(hit), "{reason:?}");
+    }
+}
+
+#[test]
 fn reached_temporary_without_windows_gives_plan_window_on_no_window() {
     let model = codex_reached(vec![], LimitStopReason::Temporary);
     let hit = LimitHit {

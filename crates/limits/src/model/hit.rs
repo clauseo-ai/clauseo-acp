@@ -7,9 +7,10 @@ use crate::view::tightest;
 
 /// The limit `state`'s agent is at, at `now`, if any. Rows past their reset never count:
 /// those a sweep marked, and those whose reset time is `now` or earlier, since no sweep runs
-/// while nobody watches. An agent with no account still has hits from its shown rows
-/// (`LiveOnly` after a failed read or `MethodMissing`), so the host gets the reset time of the
-/// stopped turn; with no row and no reached limit (which only a good read sets, with the
+/// while nobody watches. A reached plan window ends with its rows, once every shown row is past
+/// its reset; credits and the spend cap stand. An agent with no account still has hits from its
+/// shown rows (`LiveOnly` after a failed read or `MethodMissing`), so the host gets the reset time
+/// of the stopped turn; with no row and no reached limit (which only a good read sets, with the
 /// account), the answer is `None`.
 pub(crate) fn at_limit(state: &AgentState, now: Timestamp) -> Option<LimitHit> {
     if state.source == LimitSource::NotApplicable {
@@ -27,6 +28,10 @@ pub(crate) fn at_limit(state: &AgentState, now: Timestamp) -> Option<LimitHit> {
             Some(hit(at_limit_row, reason))
         }
         _ if at_limit_row.is_some() => Some(hit(at_limit_row, LimitStopReason::PlanWindow)),
+        // A plan window resets with time: once every shown row is past its reset, the reached
+        // limit the read gave has passed with them (#204). With no row there is nothing to time
+        // it by, so it stands until the next read.
+        Some(_) if !state.visible_rows().is_empty() && current().next().is_none() => None,
         Some(_) => Some(hit(tightest(current()), LimitStopReason::PlanWindow)),
         None => None,
     }
