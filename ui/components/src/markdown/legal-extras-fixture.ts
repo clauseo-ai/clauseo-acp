@@ -102,9 +102,12 @@ export const EXTRA_RAW: readonly string[] = [
   "\n: ",
 ];
 
-/** Paragraphs that show syntax characters on purpose, exactly as written. */
+/** Paragraphs that show syntax characters or tags on purpose, exactly as written (X1's literal, X12). */
 export const LITERALS: readonly string[] = [
   "The escrow holds 2^10 shares, the code samples are in C++, and a == b stays as typed.",
+  "This Agreement is made on <insert date> between <Party A> and <Party B>.",
+  "यह अनुबंध <insert date> को <Party A> और <Party B> के बीच किया गया है।",
+  "இந்த ஒப்பந்தம் <insert date> அன்று <Party A> மற்றும் <Party B> இடையே செய்யப்படுகிறது.",
 ];
 
 const CITATIONS =
