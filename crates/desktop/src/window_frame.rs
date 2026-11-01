@@ -18,6 +18,9 @@
 //!   maximises or restores and closes it, and asks whether it is maximised, with the four of
 //!   `capabilities/frame.json` ([`CAPTION_PERMISSIONS`]), which [`grant_caption_commands`] adds
 //!   at setup. Nothing here adds a command.
+//! - The native controls stand at fixed places, so the page keeps its side: in the room build
+//!   the toolbar stays at the window's top at every size, the caption buttons flush top right,
+//!   the lights' box fixed (`responsive.css`, `data-frame="own"`; 0015).
 //! - Tauri's window commands take a `label`, so they reach every window of the app: `main` must
 //!   stay the only one until the record says otherwise (0015; a test counts the builders).
 
