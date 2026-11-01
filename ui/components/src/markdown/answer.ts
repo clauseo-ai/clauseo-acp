@@ -22,7 +22,14 @@ import {
   prefixFor,
 } from "./definitions.ts";
 import type { DefinitionLine, DefinitionLines } from "./definitions.ts";
-import { capNesting, deeperThan, MAX_TREE_DEPTH } from "./nesting.ts";
+import {
+  capNesting,
+  deeperThan,
+  hasStandIns,
+  MAX_TREE_DEPTH,
+  restore,
+  restoreText,
+} from "./nesting.ts";
 import { endOf, parse } from "./parse.ts";
 import { SCHEMA } from "./schema.ts";
 import { createSplitter } from "./split.ts";
@@ -132,16 +139,19 @@ export function createAnswer(scope: string): Answer {
   /**
    * A block's view. A tree too deep to walk safely, or any error on the way, shows the block's source as
    * plain text instead: one bad block never takes the answer down (markdown.tsx adds an error boundary).
+   * `source` and `input` are as capped (nesting.ts); the view's `source` and text are as written.
    */
   const toView = (source: string, input: string): BlockView =>
     views.get(input, () => {
-      const fallback = { source, input, hast: plainText(source), streaming: false };
+      const shown = restore(source);
+      const fallback = { source: shown, input, hast: plainText(shown), streaming: false };
       try {
         const root = tree(input);
         if (deeperThan(root, MAX_TREE_DEPTH)) return fallback;
         const hast = toHast(root, options) as Hast;
         if (input.includes("[^")) scopeFootnoteLabel(hast.children, scope);
-        return { source, input, hast: sanitize(hast, SCHEMA) as Hast, streaming: false };
+        if (hasStandIns(input)) restoreText(hast);
+        return { source: shown, input, hast: sanitize(hast, SCHEMA) as Hast, streaming: false };
       } catch {
         return fallback;
       }
