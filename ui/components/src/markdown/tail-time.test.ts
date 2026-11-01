@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { createAnswer } from "./answer.ts";
 import { CASES } from "./hostile-cases.ts";
 
-// The hostile cases of tail repair may not freeze the answer, by PR #107's rule (its
+// The hostile cases of tail repair and footnotes may not freeze the answer, by PR #107's rule (its
 // hostile-time.test.ts, which covers every case once both are on main): one update of the model may cost
 // at most RATIO times one update of ordinary prose of the same length, measured in the same run (a loaded
 // machine slows both), and at least FLOOR_MS (tiny cases are all noise). Checked finished, and at every
@@ -22,6 +22,11 @@ const IDS = new Set([
   "open-star-runs",
   "open-underscore-runs",
   "open-brackets",
+  "footnote-many-labels",
+  "footnote-many-notes",
+  "footnote-long-label",
+  "footnote-unclosed",
+  "footnote-chain",
 ]);
 
 /** The prefix lengths a case streams through: every delta, or both ends of a long case. */

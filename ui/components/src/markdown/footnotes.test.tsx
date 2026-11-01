@@ -179,6 +179,29 @@ test("when a note arrives, only the blocks that reference it get a new view", ()
   expect(fourth.at(-1)?.notes).toBe(true);
 });
 
+test("a note's own block is parsed as it is, with no placeholder for the label it defines", () => {
+  const views = createAnswer("t").update("Claim[^a].\n\n[^a]: The note cites[^a] itself.\n", true);
+  const note = views.find((view) => view.source.startsWith("[^a]:"));
+  expect(note?.input).toBe(note?.source);
+});
+
+test("a label that looks defined but sits in code still gets its placeholder, so it shows a number", () => {
+  const text = "- See[^a].\n\n  ```\n  [^a]: not a note\n  ```\n\nMore";
+  render(text, true);
+  expect(host.querySelector("sup[data-footnote-pending]")?.textContent).toBe("1");
+  expect(host.textContent).not.toContain("See[^a]");
+});
+
+test("streaming, a block calling more than 64 undefined labels shows the rest as written until a note arrives", () => {
+  const refs = Array.from({ length: 70 }, (_, index) => `[^n${index}]`).join(" ");
+  const answer = createAnswer("t");
+  const before = htmlOf(answer.update(`${refs}\n\nTail`, true));
+  expect(before.match(/data-footnote-pending/g)).toHaveLength(64);
+  expect(before).toContain("[^n64]");
+  const after = htmlOf(answer.update(`${refs}\n\n[^n69]: Late note.\n\nTail`, true));
+  expect(after).toContain('href="#t-fn-n69"');
+});
+
 test("a finished answer re-rendered with no change keeps every view", () => {
   const answer = createAnswer("t");
   const first = answer.update(DOC, false);

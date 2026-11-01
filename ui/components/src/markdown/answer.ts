@@ -19,6 +19,7 @@ import {
 } from "./definitions.ts";
 import type { DefinitionLine, DefinitionLines } from "./definitions.ts";
 import {
+  definedIn,
   footnoteLabelsIn,
   footnotesIn,
   identifierOf,
@@ -120,9 +121,19 @@ type Entry = {
   readonly from: number;
   readonly labels: readonly string[];
   readonly footnotes: Footnotes;
+  /** Some labels it calls got no placeholder, past MAX_PENDING: its input depends on the notes that exist. */
+  readonly capped: boolean;
   key: string;
   viewInput: string;
 };
+
+/**
+ * While streaming, the labels of one block that get a placeholder though no block defines them yet (each
+ * shows as a pending number). Every placeholder costs micromark a definition (about 0.1 ms in Node), so a
+ * block calling 2,000 labels took 250 ms an update; past this many, the rest show as written until a note
+ * for them arrives. An answer's block cites a handful.
+ */
+const MAX_PENDING = 64;
 
 /** A cache key for an object, by identity. */
 function createIds() {
@@ -145,12 +156,25 @@ export function createAnswer(scope: string): Answer {
   const owned = createCache<readonly DefinitionLine[]>();
   const labels = createCache<readonly string[]>();
   const noteLabels = createCache<readonly string[]>();
+  const defines = createCache<ReturnType<typeof definedIn>>();
   const inputs = createCache<{ prefix: string; input: string }>();
   const facts = createCache<Footnotes>();
   const repairs = createCache<{ text: string | undefined }>();
   const views = createCache<BlockView>();
   const tails = createCache<BlockView>();
-  const caches = [trees, ends, owned, labels, noteLabels, inputs, facts, repairs, views, tails];
+  const caches = [
+    trees,
+    ends,
+    owned,
+    labels,
+    noteLabels,
+    defines,
+    inputs,
+    facts,
+    repairs,
+    views,
+    tails,
+  ];
   const idOf = createIds();
   // Whether a parse met a named character reference before the full table had loaded (entities.ts).
   let missed = false;
@@ -202,7 +226,11 @@ export function createAnswer(scope: string): Answer {
     const perBlock: (readonly DefinitionLine[])[] = [];
     for (let index = 0; index < counted; index++) {
       const block = blocks[index]!;
-      if (mayDefine(block))
+      // A block whose only `]:` are footnote definitions holds no link definition: not parsed for one.
+      if (
+        mayDefine(block) &&
+        (!block.includes("[^") || defines.get(block, () => definedIn(block)).links)
+      )
         perBlock.push(owned.get(block, () => definitionsIn(tree(block), block)));
     }
     const same =
@@ -236,25 +264,94 @@ export function createAnswer(scope: string): Answer {
     return known.input;
   };
 
-  /** A block's entry: its input with every label it may call, and the footnotes its parse shows. */
-  const entryOf = (source: string, lines: DefinitionLines): Entry => {
+  /**
+   * The identifiers some block may define (definedIn), rebuilt only when a block's set changed: what a
+   * finished render gives placeholders for, and what streaming gives one past MAX_PENDING.
+   */
+  let lastDefines: ReadonlySet<string>[] = [];
+  let lastDefined: ReadonlySet<string> = new Set();
+  const documentNotesOf = (blocks: readonly string[]): ReadonlySet<string> => {
+    const perBlock: ReadonlySet<string>[] = [];
+    for (const block of blocks)
+      if (block.includes("[^")) {
+        const found = defines.get(block, () => definedIn(block)).defines;
+        if (found.size > 0) perBlock.push(found);
+      }
+    const same =
+      perBlock.length === lastDefines.length &&
+      perBlock.every((found, index) => found === lastDefines[index]);
+    if (!same) lastDefined = new Set(perBlock.flatMap((found) => [...found]));
+    lastDefines = perBlock;
+    return lastDefined;
+  };
+
+  /**
+   * A block's entry: its input with a placeholder for each label it calls but does not define itself, and
+   * the footnotes its parse shows. A finished render needs placeholders only for labels some block may
+   * define (the rest are text); streaming, for every label, the undefined ones up to MAX_PENDING. A block
+   * that defines all it calls (a note) is parsed as it is, with no placeholder.
+   */
+  const entryOf = (
+    source: string,
+    lines: DefinitionLines,
+    defined: ReadonlySet<string>,
+    streaming: boolean,
+  ): Entry => {
     const called = noteLabels.get(source, () => footnoteLabelsIn(source));
-    const input = inputOf(source, lines, called);
+    if (called.length === 0) {
+      const input = inputOf(source, lines, called);
+      const from = input.length - source.length;
+      const base = { source, input, from, labels: called, footnotes: NO_FOOTNOTES, capped: false };
+      return { ...base, key: input, viewInput: input };
+    }
+    const { own } = defines.get(source, () => definedIn(source));
+    let pending = 0;
+    let capped = false;
+    const needs = (label: string, trusted: ReadonlySet<string>) => {
+      const id = identifierOf(label);
+      if (trusted.has(id)) return false;
+      if (defined.has(id)) return true;
+      if (!streaming) return false;
+      if (pending >= MAX_PENDING) {
+        capped = true;
+        return false;
+      }
+      pending++;
+      return true;
+    };
+    let needed = called.filter((label) => needs(label, own));
+    let input = inputOf(source, lines, needed);
+    let footnotes = facts.get(input, () =>
+      footnotesIn(tree(input), input, input.length - source.length),
+    );
+    // A label left out for a note of its own that the parse does not show (one in a code block): again,
+    // with it.
+    if (own.size > 0 && needed.length < called.length) {
+      const shown = new Set(footnotes.notes.map((note) => note.id));
+      if ([...own].some((id) => !shown.has(id))) {
+        pending = 0;
+        capped = false;
+        needed = called.filter((label) => needs(label, shown));
+        input = inputOf(source, lines, needed);
+        const from = input.length - source.length;
+        footnotes = facts.get(input, () => footnotesIn(tree(input), input, from));
+      }
+    }
     const from = input.length - source.length;
-    const footnotes =
-      called.length === 0
-        ? NO_FOOTNOTES
-        : facts.get(input, () => footnotesIn(tree(input), input, from));
-    return { source, input, from, labels: called, footnotes, key: input, viewInput: input };
+    return { source, input, from, labels: needed, footnotes, capped, key: input, viewInput: input };
   };
 
   /** The streaming last block's entry: its text after tail repair. */
-  const tailEntryOf = (source: string, lines: DefinitionLines): Entry => {
-    const raw = entryOf(source, lines);
+  const tailEntryOf = (
+    source: string,
+    lines: DefinitionLines,
+    defined: ReadonlySet<string>,
+  ): Entry => {
+    const raw = entryOf(source, lines, defined, true);
     const repaired = repairs.get(raw.input, () => ({
       text: repairTail(raw.input, raw.from, tree),
     })).text;
-    return repaired === undefined ? raw : entryOf(repaired, lines);
+    return repaired === undefined ? raw : entryOf(repaired, lines, defined, true);
   };
 
   /**
@@ -308,6 +405,7 @@ export function createAnswer(scope: string): Answer {
   let lastEntries: readonly Entry[] = [];
   let lastSignatures: readonly string[] = [];
   let lastLinesUsed: DefinitionLines | undefined;
+  let lastDefinedUsed: ReadonlySet<string> | undefined;
   return {
     update(raw, streaming) {
       if (!entities && characterEntitiesLoaded()) {
@@ -329,19 +427,25 @@ export function createAnswer(scope: string): Answer {
       }
       const last = blocks.length - 1;
       const lines = documentOf(blocks, streaming ? last : blocks.length);
+      const defined = documentNotesOf(blocks);
       // A block finished last time, unchanged, under the same definitions: its entry as it was.
       const reusable = lines === lastLinesUsed ? lastBlocks.length - (lastStreaming ? 1 : 0) : 0;
       const entries = blocks.map((block, index): Entry => {
         const before = lastEntries[index];
-        if (streaming && index === last) return tailEntryOf(block, lines);
-        if (before && index < reusable && block === lastBlocks[index]) {
-          for (const cache of [noteLabels, labels, inputs]) cache.keep(block);
+        if (streaming && index === last) return tailEntryOf(block, lines, defined);
+        if (
+          before &&
+          index < reusable &&
+          block === lastBlocks[index] &&
+          (!before.capped || defined === lastDefinedUsed)
+        ) {
+          for (const cache of [noteLabels, defines, labels, inputs]) cache.keep(block);
           facts.keep(before.input);
           // Kept parsed: a note arriving re-renders the blocks that call it without parsing them again.
           if (before.footnotes.refs.length > 0) trees.keep(before.input);
           return before;
         }
-        return entryOf(block, lines);
+        return entryOf(block, lines, defined, streaming);
       });
       const numbering = numberFootnotes(
         entries.map((entry) => entry.footnotes),
@@ -377,6 +481,7 @@ export function createAnswer(scope: string): Answer {
       lastEntries = entries;
       lastSignatures = numbering.blocks.map((block) => block.signature);
       lastLinesUsed = lines;
+      lastDefinedUsed = defined;
       lastText = raw;
       lastStreaming = streaming;
       for (const cache of caches) cache.sweep();
