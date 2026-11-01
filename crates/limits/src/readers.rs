@@ -101,7 +101,10 @@ impl<T: Timer + Clone + Send + Sync + 'static> ProcessReaders<T> {
     /// sets `CODEX_HOME` to it last, over any inherited or settings variable of that name in any
     /// case: codex-acp merges the user's `~/.codex/config.toml` (MCP servers, plugins, hooks,
     /// rules) unless `CODEX_HOME` is a separate folder, so Clauseo owns one, and Codex signs in
-    /// separately inside Clauseo. Nothing here reads inside it. The Claude reader ignores it.
+    /// separately inside Clauseo. Nothing here makes it or reads inside it: the sign-in (S12's,
+    /// later) creates it, and the host (R16) passes it. While it is missing a Codex read is
+    /// `SignedOut` without a launch (the app-server refuses a missing `CODEX_HOME`, and no login
+    /// can be there); a link or a file there fails the read. The Claude reader ignores it.
     pub fn new(
         effective: &Effective,
         codex_home: PathBuf,

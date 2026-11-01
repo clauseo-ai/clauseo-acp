@@ -1,0 +1,4 @@
+{"scenario":"codex-stderr-heavy","description":"The Codex app-server writes about 200 KiB to stderr, past the 64 KiB pipe buffer, then a line echoing the fake OPENAI_API_KEY the test sets in settings env, then exits 1. The reader must drain stderr and report the redacted tail."}
+{"stderr":{"line":"codex app-server: stderr filler line to fill the pipe buffer past sixty-four KiB ..............","repeat":2000}}
+{"note":"The value is the fake key the test puts in settings env; the tail must show [redacted].","stderr":{"line":"codex app-server: the key fakeOpenAiKey0123456 was refused"}}
+{"exit":{"code":1}}

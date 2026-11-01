@@ -8,7 +8,8 @@ use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use clauseo_process::{AgentStdin, LaunchSpec, Launched, Launcher, Timer};
-use futures::future::{Either, join, select};
+use futures::channel::oneshot;
+use futures::future::{Either, join, maybe_done, pending, select};
 use futures::{AsyncRead, AsyncReadExt as _};
 
 /// The most bytes a reader takes for its one line; a longer line is malformed.
@@ -37,6 +38,13 @@ pub(crate) enum Ran<R> {
         /// What the talk returned.
         talked: R,
     },
+    /// The talk got its answer, but the program had not exited [`GRACE`] later; the handle was
+    /// dropped, which kills the tree, and the answer is kept. There is no exit report, so no
+    /// stderr tail.
+    Lingered {
+        /// What the talk returned.
+        talked: R,
+    },
 }
 
 /// Launches `spec` and runs `talk` on its stdin and stdout, beside the stderr pump and the wait
@@ -44,9 +52,11 @@ pub(crate) enum Ran<R> {
 /// is then read to its end and dropped, so the program never blocks on a full pipe.
 ///
 /// The stderr tail is read once the exit is in and both pipes have ended (`process`'s order), so
-/// it holds the last lines. When `answered` says the talk got its answer, those pipe ends get only
-/// [`GRACE`] after the exit: a descendant that left the group and holds a pipe open cannot turn a
-/// good read into a timeout. Without an answer the run waits for them up to the deadline.
+/// it holds the last lines. Once `answered` says the talk has its answer, the exit and the pipe
+/// ends get only [`GRACE`] more: a program that lingers, or a descendant that left the group and
+/// holds a pipe open, cannot turn a good read into a timeout. With the exit in, the run reports
+/// it ([`Ran::Exited`]); without, it drops the handle and keeps the answer ([`Ran::Lingered`]).
+/// Without an answer the run waits for all of them up to the deadline.
 pub(crate) async fn run<T, F, Fut, R>(
     launcher: &dyn Launcher,
     spec: &LaunchSpec,
@@ -76,37 +86,56 @@ where
         let work = pin!(async {
             // The talk's answer, as soon as it has one; stdout then drains beside the exit wait.
             let answer: Mutex<Option<R>> = Mutex::new(None);
+            let (answer_in, answer_signal) = oneshot::channel::<()>();
             let stdout_side = async {
                 let (talked, stdout) = talk(stdin, Box::new(stdout)).await;
                 *answer.lock().unwrap_or_else(PoisonError::into_inner) = Some(talked);
+                answer_in.send(()).unwrap_or_default();
                 drain_stdout(stdout).await;
             };
             let stderr_side = async { note_stderr_end(stderr.drain().await) };
             let mut pipes = pin!(async {
                 join(stdout_side, stderr_side).await;
             });
-            let exit = pin!(handle.exited());
-            let (report, pipes_open) = match select(exit, pipes.as_mut()).await {
-                Either::Left((report, _)) => (report, true),
-                Either::Right(((), exit)) => (exit.await, false),
-            };
-            if pipes_open {
-                let answered = answer
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .as_ref()
-                    .is_some_and(&answered);
-                if !answered {
-                    pipes.await;
-                } else if !settle(pipes, timer, GRACE).await {
-                    tracing::debug!("a reader's pipes stayed open after its exit; answer kept");
+            let mut exit = pin!(maybe_done(handle.exited()));
+            let signal = pin!(async {
+                // A talk dropped before its answer never signals.
+                if answer_signal.await.is_err() {
+                    pending::<()>().await;
                 }
-            }
+            });
+            let everything = join(exit.as_mut(), pipes.as_mut());
+            let ended = match select(everything, signal).await {
+                Either::Left(_) => true,
+                Either::Right(((), everything)) => {
+                    let has_answer = answer
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .as_ref()
+                        .is_some_and(&answered);
+                    let everything = async {
+                        everything.await;
+                    };
+                    if has_answer {
+                        settle(everything, timer, GRACE).await
+                    } else {
+                        everything.await;
+                        true
+                    }
+                }
+            };
             let talked = answer
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .take()
                 .unwrap_or_default();
+            let Some(report) = exit.as_mut().take_output() else {
+                tracing::debug!("a reader lingered after its answer; its tree is killed");
+                return Ran::Lingered { talked };
+            };
+            if !ended {
+                tracing::debug!("a reader's pipes stayed open after its exit; answer kept");
+            }
             Ran::Exited {
                 code: report.code(),
                 stderr_tail: report.stderr_tail(),
@@ -119,7 +148,7 @@ where
         }
     };
     // The talk, the pump and the exit wait are dropped by now; dropping the handle kills the
-    // tree.
+    // tree (after an exit the tree was killed already, and nothing more is sent).
     ran.unwrap_or_else(|| {
         drop(handle);
         Ran::TimedOut

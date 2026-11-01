@@ -26,6 +26,14 @@ pub enum Error {
         /// What is wrong with it.
         what: String,
     },
+    /// Clauseo's Codex home is there but is a link or not a folder.
+    #[error("the Codex home {} {what}", path.display())]
+    CodexHome {
+        /// The folder.
+        path: PathBuf,
+        /// What is wrong with it.
+        what: String,
+    },
     /// A file step failed.
     #[error("could not {what} {}: {source}", path.display())]
     Io {

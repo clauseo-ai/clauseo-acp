@@ -167,6 +167,25 @@ fn stdout_past_the_pipe_buffer_is_drained_to_its_end() {
 }
 
 #[test]
+fn a_helper_that_lingers_after_its_line_is_killed_and_its_line_kept() {
+    let setup = ready_setup();
+    let launcher = TestLauncher::new(Play::Scenario("claude-linger"));
+    let timer = SharedTimer::default();
+    let reader = setup.readers(&launcher, &timer);
+    let (outcome, ()) = block_on(join(reader.read(AgentKind::Claude), async {
+        assert_eq!(timer.0.next_armed().await, Duration::from_secs(25));
+        assert_eq!(timer.0.next_armed().await, Duration::from_secs(1));
+        assert!(timer.0.fire(), "the grace after the line ends the wait");
+    }));
+    let ReadOutcome::Usage { limits, .. } = outcome else {
+        panic!("not usage: {outcome:?}");
+    };
+    assert_eq!(limits.account.0, "max.user@example.com");
+    #[cfg(unix)]
+    launcher.wait_stdout_closed();
+}
+
+#[test]
 fn the_deadline_is_25_seconds_and_kills_the_tree() {
     let setup = ready_setup();
     let launcher = TestLauncher::new(Play::Hold);

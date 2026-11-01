@@ -135,6 +135,7 @@ fn limit_window(id: &str, window: &RateLimitWindow, plan_type: &PlanType) -> Opt
         used_percent: Finite::new(f64::from(used))?,
         resets_at: window
             .resets_at
+            .filter(|&secs| secs > 0)
             .and_then(|secs| secs.checked_mul(1000))
             .and_then(|ms| Timestamp::new(ms).ok()),
         duration_mins: mins.and_then(|mins| u32::try_from(mins).ok()),

@@ -64,7 +64,8 @@ pub(crate) async fn read<T: Timer>(
     codex_home: &Path,
 ) -> ReadOutcome {
     let spec = match prepare(launch, run_dir, codex_home, std::env::vars_os()) {
-        Ok(spec) => spec,
+        Ok(Prepared::Spec(spec)) => spec,
+        Ok(Prepared::SignedOut) => return ReadOutcome::SignedOut,
         Err(message) => return ReadOutcome::Failed(ReadFailure::LaunchFailed(message)),
     };
     let ran = run(
@@ -83,10 +84,27 @@ pub(crate) async fn read<T: Timer>(
     match ran {
         Ran::LaunchFailed(message) => ReadOutcome::Failed(ReadFailure::LaunchFailed(message)),
         Ran::TimedOut => ReadOutcome::Failed(ReadFailure::TimedOut),
+        // Every answer came: they stand whatever the exit.
+        Ran::Exited {
+            talked: Talked::Answered(answers),
+            code,
+            ..
+        } => {
+            if code != Some(0) {
+                tracing::debug!(
+                    ?code,
+                    "the Codex app-server exited non-zero after its answers"
+                );
+            }
+            outcome(*answers)
+        }
+        Ran::Lingered {
+            talked: Talked::Answered(answers),
+        } => outcome(*answers),
         Ran::Exited {
             code, stderr_tail, ..
         } if code != Some(0) => ReadOutcome::Failed(ReadFailure::Exited { code, stderr_tail }),
-        Ran::Exited { talked, .. } => match talked {
+        Ran::Exited { talked, .. } | Ran::Lingered { talked } => match talked {
             Talked::Answered(answers) => outcome(*answers),
             Talked::Failed(err) => malformed(failure_reason(&err)),
             Talked::Nothing => malformed("no answer"),
@@ -94,24 +112,40 @@ pub(crate) async fn read<T: Timer>(
     }
 }
 
+/// What [`prepare`] found.
+#[derive(Debug)]
+pub(crate) enum Prepared {
+    /// The app-server's spec.
+    Spec(LaunchSpec),
+    /// The Codex home is missing: no login can be there, and the app-server would refuse it.
+    SignedOut,
+}
+
 /// The app-server's spec: settings `command` running `<codex.js> app-server` in `run_dir`, with
 /// the `inherited` environment under the agent's settings variables and `CODEX_HOME` forced to
-/// `codex_home`. Makes `run_dir` if it is missing (nothing in Clauseo writes there); on a refused
-/// path or run folder it writes nothing. Writes no helper.
+/// `codex_home`. A missing `codex_home` is [`Prepared::SignedOut`]; one that is a link or not a
+/// folder is refused. It is never made, and nothing inside it is read. Makes `run_dir` if it is
+/// missing (nothing in Clauseo writes there); on a refused path, home or run folder it writes
+/// nothing. Writes no helper.
 pub(crate) fn prepare(
     launch: &AgentLaunch,
     run_dir: &Path,
     codex_home: &Path,
     inherited: impl Iterator<Item = (OsString, OsString)>,
-) -> Result<LaunchSpec, String> {
+) -> Result<Prepared, String> {
     let (located, codex_js) = paths::codex_js(launch).map_err(|err| err.to_string())?;
+    if !paths::check_codex_home(codex_home).map_err(|err| err.to_string())? {
+        return Ok(Prepared::SignedOut);
+    }
     paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
     write::create_dir_all(run_dir).map_err(|err| err.to_string())?;
     paths::check_run_dir(run_dir).map_err(|err| err.to_string())?;
     let forced = (OsStr::new(CODEX_HOME), codex_home.as_os_str());
     let env = spec_env(&launch.env, inherited, Some(forced));
     let args = vec![codex_js.into_os_string(), OsString::from("app-server")];
-    LaunchSpec::new(located.program, args, env, run_dir.to_owned()).map_err(|err| err.to_string())
+    LaunchSpec::new(located.program, args, env, run_dir.to_owned())
+        .map(Prepared::Spec)
+        .map_err(|err| err.to_string())
 }
 
 /// The talk over the app-server's stdin and stdout: `initialize` (which sends `initialized`),
