@@ -13,8 +13,8 @@
 
 use clauseo_protocol::{
     CompactString, CompactionChanged, CompactionStatus, ContentAppended, ContentBlock, Delivery,
-    INLINE_LIMIT_BYTES, MessageId, TextKind, TextOrBlob, ToolCallContent, ToolCallId,
-    ToolCallPatch, ToolCallStarted, ToolCallUpdated, TurnId, UserMessage, escaped_len,
+    INLINE_LIMIT_BYTES, MessageId, QueuedPromptEdited, TextKind, TextOrBlob, ToolCallContent,
+    ToolCallId, ToolCallPatch, ToolCallStarted, ToolCallUpdated, TurnId, UserMessage, escaped_len,
 };
 use clauseo_store::BlobIn;
 
@@ -188,6 +188,22 @@ pub(crate) fn user_message(
         acp_message_id,
         content,
         delivery,
+    })
+}
+
+/// Builds `QueuedPromptEdited`, placing its content blocks' `TextOrBlob` fields as
+/// [`user_message`] does.
+pub(crate) fn queued_prompt_edited(
+    turn: TurnId,
+    message: MessageId,
+    mut content: Vec<ContentBlock>,
+) -> Built<QueuedPromptEdited> {
+    let mut fit = Fit::new(INLINE_LIMIT_BYTES);
+    fit.blocks(&mut content);
+    fit.built(QueuedPromptEdited {
+        turn,
+        message,
+        content,
     })
 }
 

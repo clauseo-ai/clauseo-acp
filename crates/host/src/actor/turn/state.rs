@@ -1,6 +1,8 @@
 //! The constructors of a turn's in-memory state: a new current turn, and the ways a turn ends.
 
-use clauseo_protocol::{ContentBlock, DetachReason, ErrorCode, ExpiryReason, StopReason, TurnId};
+use clauseo_protocol::{
+    ContentBlock, DetachReason, ErrorCode, ExpiryReason, MessageId, StopReason, TurnId,
+};
 
 use super::{Current, End, TurnPhase};
 
@@ -50,9 +52,10 @@ impl End {
 }
 
 impl Current {
-    pub(super) fn new(turn: TurnId, prompt: Vec<ContentBlock>) -> Self {
+    pub(super) fn new(turn: TurnId, message: MessageId, prompt: Vec<ContentBlock>) -> Self {
         Self {
             turn,
+            message,
             prompt,
             phase: TurnPhase::Accepting,
             cancelled: false,

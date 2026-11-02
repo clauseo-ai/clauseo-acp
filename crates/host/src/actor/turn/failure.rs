@@ -17,7 +17,7 @@ use clauseo_protocol::{StopReason, StreamId, ThreadId, TurnFailed, TurnId};
 use super::super::{Actor, limits};
 use super::close::TurnClose;
 use super::state::STORE_DETAIL;
-use super::{Closing, Then, TurnPhase, cancel, current, state, steps, undo};
+use super::{Closing, Then, TurnPhase, cancel, current, queue, state, steps, undo};
 use crate::error::Error;
 use crate::pipeline::Failure;
 
@@ -110,17 +110,20 @@ pub(super) fn closing_sent(
     }
 }
 
-/// The commit ending `turn` is durable; a stop at the limit that waited for it is logged.
+/// The commit ending `turn` is durable: a stop at the limit that waited for it is logged, and
+/// the thread's queue moves on or holds by the turn's stop.
 pub(super) fn on_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
-    if let Some(state) = state(actor, thread)
-        && state
-            .closing
-            .as_ref()
-            .is_some_and(|closing| closing.close.turn == turn)
-    {
-        state.closing = None;
+    let Some(state) = state(actor, thread) else {
+        return;
+    };
+    let closed = state
+        .closing
+        .take_if(|closing| closing.close.turn == turn)
+        .map(|closing| closing.close.stop);
+    if let Some(stop) = closed {
         // A stop at the limit decided while this end was not durable is logged now.
         limits::retry_stops(actor, thread, false);
+        queue::on_turn_closed(actor, thread, turn, stop);
     }
 }
 

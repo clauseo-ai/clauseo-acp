@@ -8,7 +8,7 @@ use clauseo_protocol::{
 
 use super::super::Actor;
 use super::super::commands::CommandCtx;
-use super::{agents, answers, cancel, steps, undo};
+use super::{agents, answers, cancel, queue, undo};
 
 /// A command of the turn path with its thread pulled out: `run_command` builds one from each
 /// turn variant of `HostCommand`, so a variant it routes here without an arm below does not
@@ -39,6 +39,17 @@ pub(crate) enum TurnCommand {
         turn: TurnId,
         files: Vec<FileDecision>,
     },
+    EditQueuedPrompt {
+        turn: TurnId,
+        text: String,
+    },
+    RemoveQueuedPrompt {
+        turn: TurnId,
+    },
+    SendQueuedNow {
+        turn: TurnId,
+    },
+    ResumeQueue,
 }
 
 /// A turn command, after its shape, principal and receipt checks passed and its thread is
@@ -48,7 +59,23 @@ pub(crate) fn command(actor: &mut Actor, ctx: &CommandCtx, thread: ThreadId, com
     let ctx = *ctx;
     let done = match command {
         TurnCommand::SendPrompt { content, delivery } => {
-            steps::send_prompt(actor, ctx, thread, content, delivery.into())
+            queue::send_prompt(actor, ctx, thread, content, delivery)
+        }
+        TurnCommand::EditQueuedPrompt { turn, text } => {
+            queue::edit(actor, ctx, thread, turn, text);
+            Ok(())
+        }
+        TurnCommand::RemoveQueuedPrompt { turn } => {
+            queue::remove(actor, ctx, thread, turn);
+            Ok(())
+        }
+        TurnCommand::SendQueuedNow { turn } => {
+            queue::send_now(actor, ctx, thread, turn);
+            Ok(())
+        }
+        TurnCommand::ResumeQueue => {
+            queue::resume(actor, ctx, thread);
+            Ok(())
         }
         TurnCommand::Cancel => cancel::cancel_command(actor, ctx, thread),
         TurnCommand::AnswerPermission { request, option_id } => {

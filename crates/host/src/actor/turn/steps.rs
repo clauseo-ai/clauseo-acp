@@ -1,4 +1,5 @@
-//! The steps of a turn: the prompt's commit (step 1), the writer queue (step 3), the
+//! The steps of a turn: the prompt's commit (step 1, once `queue.rs` decides the prompt starts
+//! now), the writer queue (step 3), the
 //! before-turn checkpoint and the `TurnStarted` commit (step 4), and the end of a turn that
 //! never started (a failed launch or checkpoint). The prompt itself (step 5) is in
 //! `prompt.rs`; steps 6 to 8 are in `end.rs`.
@@ -8,8 +9,8 @@ use std::path::Path;
 use clauseo_matters::{CheckpointOutcome, TurnMeta};
 use clauseo_protocol::{
     CheckpointKind, CheckpointRecorded, CommandOutcome, ContentBlock, Delivery, ErrorCode,
-    MatterId, OutsideEdits, PromptBlock, StopReason, StreamId, ThreadId, TurnFailed, TurnId,
-    TurnQueued, TurnStarted,
+    MatterId, OutsideEdits, PromptBlock, SteerOutcome, SteerResolved, StopReason, StreamId,
+    ThreadId, TurnFailed, TurnId, TurnQueued, TurnStarted,
 };
 
 use super::super::commands::{AfterCommand, CommandCtx};
@@ -29,34 +30,10 @@ use crate::file_link;
 use crate::matter_worker::{MatterJob, TurnCheckpoint};
 use crate::pipeline::MatterEvent;
 
-/// Step 1: `SendPrompt` on a thread with no current turn logs `UserMessage` with the receipt.
-pub(super) fn send_prompt(
-    actor: &mut Actor,
-    ctx: CommandCtx,
-    thread: ThreadId,
-    content: Vec<PromptBlock>,
-    delivery: Delivery,
-) -> Result<(), Error> {
-    refuse_busy(actor, thread)?;
-    let blocks = prompt_blocks(actor, thread, content)?;
-    let stream = StreamId::Thread(thread);
-    actor.with_loaded(
-        stream,
-        Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
-            let done = loaded.and_then(|()| accept(actor, ctx, thread, blocks, delivery));
-            if let Err(error) = done {
-                actor.finish_command(ctx.id, Err(error));
-            }
-            actor.release(stream);
-        }),
-    );
-    Ok(())
-}
-
-/// `command.invalid` for an archived thread; `thread.turn_running` while a turn is current,
-/// while the last turn's end is not durable, or while the thread's own undo holds the writer
-/// (a turn queued behind its own thread would wait on nothing it can see).
-fn refuse_busy(actor: &Actor, thread: ThreadId) -> Result<(), Error> {
+/// `command.invalid` for an archived thread; `thread.turn_running` while the thread's own undo
+/// holds the writer (a turn queued behind its own thread would wait on nothing it can see, and
+/// the undo's note must be durable before the next prompt).
+pub(super) fn refuse_unsendable(actor: &Actor, thread: ThreadId) -> Result<(), Error> {
     let entry = actor.check_thread(thread)?;
     if entry.row.archived {
         return Err(Error::refused(
@@ -68,10 +45,10 @@ fn refuse_busy(actor: &Actor, thread: ThreadId) -> Result<(), Error> {
         .matters
         .get(&entry.row.matter)
         .is_some_and(|matter| matter.turns.holder == Some(Holder::Thread(thread)));
-    if entry.turn.current.is_some() || entry.turn.closing.is_some() || own_undo {
+    if own_undo {
         return Err(Error::refused(
             ErrorCode::ThreadTurnRunning,
-            "a turn is running in this thread; wait for it or cancel it",
+            "an undo is running in this thread; wait for it",
         ));
     }
     Ok(())
@@ -79,7 +56,7 @@ fn refuse_busy(actor: &Actor, thread: ThreadId) -> Result<(), Error> {
 
 /// The prompt's blocks as content: text as it is, a file as a link to it. A file must lie in
 /// the thread's matter folder, else `command.invalid`.
-fn prompt_blocks(
+pub(super) fn prompt_blocks(
     actor: &Actor,
     thread: ThreadId,
     content: Vec<PromptBlock>,
@@ -121,14 +98,16 @@ fn prompt_blocks(
         .collect()
 }
 
-fn accept(
+/// Step 1 for a prompt that starts now (no current turn, nothing queued ahead of it): one commit
+/// of `UserMessage` and the receipt, and for a steer that cannot be real
+/// `SteerResolved { SentNow }`; the turn launches once it is durable.
+pub(super) fn accept(
     actor: &mut Actor,
     ctx: CommandCtx,
     thread: ThreadId,
     blocks: Vec<ContentBlock>,
     delivery: Delivery,
 ) -> Result<(), Error> {
-    refuse_busy(actor, thread)?;
     let now = actor.now().wall;
     let turn: TurnId = actor.ids.mint(now)?;
     let message = actor.ids.mint(now)?;
@@ -138,9 +117,18 @@ fn accept(
     let mut out = Out::new(actor, thread, Some(ctx.id))?;
     out.push(actor, built.value)?;
     out.draft.blobs(built.blobs);
+    if delivery == Delivery::Steer {
+        let outcome = SteerOutcome::SentNow { turn };
+        let resolved = SteerResolved {
+            message,
+            outcome,
+            aside: Vec::new(),
+        };
+        out.push(actor, resolved)?;
+    }
     out.draft.receipt(ctx.receipt(Some(stream), outcome, now));
     let held = state(actor, thread).ok_or_else(|| lost("a thread"))?;
-    held.current = Some(Box::new(Current::new(turn, blocks)));
+    held.current = Some(Box::new(Current::new(turn, message, blocks)));
     let tag = Tag::Command {
         id: ctx.id,
         outcome,
@@ -158,7 +146,8 @@ fn accept(
     sent
 }
 
-/// The `UserMessage` is durable: step 2, the agent.
+/// The `UserMessage` is durable, or a queued turn moved to the head (`queue.rs`): step 2, the
+/// agent.
 pub(super) fn on_accepted(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     let shutting = host_stopping(actor);
     let Some(current) = current(actor, thread).filter(|current| current.turn == turn) else {
