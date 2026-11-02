@@ -105,10 +105,16 @@ fn session_failure_ends_turn_at_limit() {
         "{}",
         events.dump()
     );
+    // `fake-agent` has no kind, so no read will come: the stop rides in the end commit.
     let ended_at = events
         .position(|e| matches!(e, DomainEvent::TurnEnded(_)))
         .unwrap();
-    assert!(events.position(is_stop).unwrap() > ended_at);
+    let stop_at = events.position(is_stop).unwrap();
+    assert_eq!(stop_at, ended_at + 1, "{}", events.dump());
+    assert_eq!(
+        events.batch[ended_at], events.batch[stop_at],
+        "not one commit"
+    );
     host.shutdown();
 }
 
