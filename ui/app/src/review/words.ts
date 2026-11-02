@@ -9,6 +9,7 @@ import { mt, type MatterKey } from "@clauseo/components/lib/words-matters.ts";
 import { rt, type RoomKey } from "@clauseo/components/lib/words-room.ts";
 import { rdt, type ReaderKey } from "@clauseo/components/lib/words-reader.ts";
 import { brk, type BreakKey } from "@clauseo/components/lib/words-breaks.ts";
+import { st, type SettingsKey } from "@clauseo/components/lib/words-settings.ts";
 import { startup, type StartupKey } from "@clauseo/components/lib/words-startup.ts";
 import { th, type ThreadKey } from "@clauseo/components/lib/words-thread.ts";
 import { ui, type UiKey } from "@clauseo/components/lib/words-ui.ts";
@@ -103,4 +104,10 @@ export const breakWords = (key: BreakKey): WordsRef => ({
   file: "lib/words-breaks.ts",
   key,
   text: (lang) => brk(lang, key),
+});
+
+export const settingsWords = (key: SettingsKey): WordsRef => ({
+  file: "lib/words-settings.ts",
+  key,
+  text: (lang) => st(lang, key),
 });

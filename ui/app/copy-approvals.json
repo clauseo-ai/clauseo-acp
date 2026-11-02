@@ -1418,5 +1418,173 @@
     "status": "approved",
     "at": "2026-11-03",
     "by": "design"
+  },
+  "U11-01": {
+    "en": "Sections",
+    "hi": "अनुभाग",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-02": {
+    "en": "Language",
+    "hi": "भाषा",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-03": {
+    "en": "Appearance",
+    "hi": "दिखावट",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-04": {
+    "en": "About",
+    "hi": "परिचय",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-05": {
+    "en": "{theme}, text size {n}",
+    "hi": "{theme}, अक्षरों का आकार {n}",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-06": {
+    "en": "Version {version}",
+    "hi": "संस्करण {version}",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-08": {
+    "en": "The language of every word on screen. Papers, quotes and case names stay as filed.",
+    "hi": "स्क्रीन के हर शब्द की भाषा। दस्तावेज़, उद्धरण और मामलों के नाम वैसे ही रहते हैं जैसे दर्ज हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-09": {
+    "en": "How Clauseo looks on this computer.",
+    "hi": "इस कंप्यूटर पर Clauseo कैसा दिखे।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-10": {
+    "en": "Changes at once, and everything stays where it was.",
+    "hi": "तुरंत बदलती है, और सब कुछ वहीं रहता है जहाँ था।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-11": {
+    "en": "Day",
+    "hi": "दिन",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-12": {
+    "en": "Night",
+    "hi": "रात",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-13": {
+    "en": "Theme",
+    "hi": "थीम",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-14": {
+    "en": "Follow the computer",
+    "hi": "कंप्यूटर के अनुसार",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-15": {
+    "en": "Text size",
+    "hi": "अक्षरों का आकार",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-16": {
+    "en": "Every word on screen grows or shrinks with it.",
+    "hi": "स्क्रीन के सभी शब्द इसके साथ बड़े या छोटे होते हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-17": {
+    "en": "Reduced motion",
+    "hi": "कम हलचल",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-18": {
+    "en": "Every change lands at once, and nothing moves.",
+    "hi": "हर बदलाव तुरंत दिखता है और कुछ भी हिलता नहीं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-19": {
+    "en": "Lite mode",
+    "hi": "सादा मोड",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-20": {
+    "en": "Takes away every shadow and all motion.",
+    "hi": "सभी छायाएँ और सारी हलचल हटा देता है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-21": {
+    "en": "On",
+    "hi": "चालू",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-22": {
+    "en": "Always, on this computer",
+    "hi": "इस कंप्यूटर पर हमेशा",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-23": {
+    "en": "Off",
+    "hi": "बंद",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-24": {
+    "en": "Never, even over a remote desktop",
+    "hi": "कभी नहीं, रिमोट डेस्कटॉप पर भी नहीं",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-25": {
+    "en": "Settings",
+    "hi": "सेटिंग्स",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
   }
 }

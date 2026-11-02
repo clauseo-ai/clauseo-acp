@@ -1,0 +1,8 @@
+/* The settings window's stylesheet: the design system's, then the sheets of the parts it shows, in clauseo/parts.css's
+   order: the frame's corner lights (shell.css) and the window itself (settings-window.css). main.tsx imports
+   it, so the review page, which renders SettingsApp too, keeps its own sheet. Tests are not sources, so their classes never reach the shipped CSS. */
+@import "../styles/system.css";
+@import "@clauseo/components/clauseo/shell.css";
+@import "@clauseo/components/clauseo/settings-window.css";
+@source ".";
+@source not "./**/*.test.*";

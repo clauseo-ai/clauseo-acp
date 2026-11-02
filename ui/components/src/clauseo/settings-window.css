@@ -1,0 +1,202 @@
+/* The settings window (settings-window.tsx) and the rows of its sections. Settings is a window of its own, so the frame
+   fills it: the sections down the side on the bare ground, the open section on the work's raised surface, concentric
+   with the window's corner. Every value comes from a token. Linux takes Windows' chrome: a rule for the title bar keys on any platform but the
+   Mac. */
+@layer components {
+  .set-win {
+    position: relative;
+    width: 100%;
+    height: var(--view-h);
+    height: var(--view-dh);
+    display: grid;
+    grid-template-columns: var(--set-side-w) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    background: var(--ground);
+    overflow: hidden;
+  }
+  .set-win:not([data-platform="mac"]) {
+    grid-template-rows: var(--size-caption-h) minmax(0, 1fr);
+  }
+  .set-win-bar {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-left: var(--s4);
+  }
+  .set-win-title {
+    @apply text-small text-primary;
+  }
+  .set-win-lights {
+    position: absolute;
+    top: var(--s5);
+    left: var(--s5);
+  }
+  .set-side {
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    padding: var(--s12) var(--s3) var(--s4);
+  }
+  .set-win:not([data-platform="mac"]) .set-side {
+    padding-top: var(--s3);
+  }
+  .set-side-title {
+    @apply text-small stretch-voice font-ui text-quiet;
+    padding: 0 var(--s3);
+    margin-bottom: var(--s2);
+  }
+  .set-nav {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s0-5);
+  }
+  /* a section, as a matter stands on the rail: its name, and where it stands beneath */
+  .set-nav-row {
+    width: 100%;
+    display: grid;
+    text-align: left;
+    padding: var(--s1-5) var(--s3);
+    border-radius: var(--r-tile);
+    background: transparent;
+    transition:
+      background-color var(--dur-quick) var(--ease-arrive),
+      box-shadow var(--dur-quick) var(--ease-arrive);
+    @apply is-hover:bg-ground-hover is-active:bg-ground-press;
+  }
+  .set-nav-row.set-nav-row[aria-current="page"] {
+    background: var(--tile-hover);
+    box-shadow: var(--e0);
+  }
+  .set-nav-name {
+    @apply text-ui text-muted;
+  }
+  .set-nav-row[aria-current="page"] .set-nav-name {
+    @apply text-primary font-chip;
+  }
+  .set-nav-note {
+    @apply text-small text-quiet;
+  }
+  /* the section on the work's raised surface, concentric with the window's corner */
+  .set-pane {
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    margin: var(--s2) var(--s2) var(--s2) 0;
+    background: var(--surface);
+    border-radius: var(--r-control);
+    box-shadow: var(--e2);
+  }
+  .set-win:not([data-platform="mac"]) .set-pane {
+    margin-top: 0;
+    border-radius: var(--r-label);
+  }
+  .set-pane-inner {
+    display: grid;
+    gap: var(--s7);
+    max-width: calc(var(--set-measure) + 2 * var(--s10));
+    margin: 0 auto;
+    padding: var(--s8) var(--s10) var(--s10);
+    animation: set-fade var(--dur-quick) var(--ease-arrive) backwards;
+  }
+  .set-pane-head {
+    display: grid;
+    gap: var(--s2);
+  }
+  .set-pane-title {
+    @apply text-title font-chrome stretch-voice tracking-title text-primary;
+  }
+  .set-pane-lead {
+    @apply text-ui-loose text-muted;
+  }
+
+  /* ---------- a group, its plate and its rows ---------- */
+  .set-group {
+    display: grid;
+    gap: var(--s2);
+    min-width: 0;
+  }
+  .set-group-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s1) var(--s4);
+  }
+  .set-group-title {
+    @apply text-ui font-chip stretch-voice tracking-head text-primary;
+  }
+  .set-group-note,
+  .set-note {
+    @apply text-small text-muted;
+  }
+  .set-note {
+    margin-top: var(--s0-5);
+  }
+  .set-plate {
+    display: grid;
+    border-radius: var(--r-card);
+    background: var(--well);
+    box-shadow: var(--set-in-field);
+  }
+  .set-row {
+    padding: var(--s3) var(--s4);
+    min-width: 0;
+  }
+  .set-row + .set-row {
+    box-shadow: inset 0 var(--hairline) 0 var(--divide-mid);
+  }
+  .set-choice {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s2) var(--s4);
+  }
+  .set-choice-words {
+    min-width: 0;
+    flex: 1 1 var(--size-menu);
+  }
+
+  /* ---------- about ---------- */
+  .set-about {
+    display: grid;
+    justify-items: start;
+    gap: var(--s3);
+  }
+
+  @variant max-mid {
+    .set-win {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+    .set-win:not([data-platform="mac"]) {
+      grid-template-rows: var(--size-caption-h) auto minmax(0, 1fr);
+    }
+    .set-side {
+      padding-top: var(--s10);
+    }
+    .set-nav {
+      flex-direction: row;
+      flex-wrap: wrap;
+    }
+    .set-nav-row {
+      width: auto;
+    }
+    .set-nav-note {
+      display: none;
+    }
+    .set-pane {
+      margin-left: var(--s2);
+    }
+    .set-pane-inner {
+      padding: var(--s6) var(--s5) var(--s8);
+    }
+  }
+}
+
+@keyframes set-fade {
+  from {
+    opacity: 0;
+  }
+}
