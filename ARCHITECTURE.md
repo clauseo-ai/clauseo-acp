@@ -17,7 +17,7 @@ Clauseo app process (Rust)
         |                                   |
         | system webview                    | ACP over stdio
         v                                   v
-  React UI (thin patch store)     sandbox (Seatbelt / bubblewrap / MXC or sandbox user)
+  React UI (thin patch store)     sandbox (Seatbelt / MXC or sandbox user)
                                     Node adapter (claude-agent-acp / codex-acp)
                                       Claude Code binary / Codex app-server
                                     reads and writes only the matter folder; network only via the proxy
@@ -86,7 +86,7 @@ to write instead.
 | `fake_agent` | Scripted ACP agent for tests | agent-client-protocol, serde, serde_json | | exists |
 | `cli` | Headless client for agents and CI | host, settings | tauri | planned |
 | `transport_ws` | Dev and test only WebSocket transport, random token | host | tauri | planned |
-| `sandbox` | Policy model, tier detection, per-OS launchers, egress proxy, denial detection | protocol, process, serde, tracing, dunce | tauri, host | exists |
+| `sandbox` | Policy model, tier detection, per-OS launchers, egress proxy, denial detection | protocol, process, thiserror, tracing, serde, dunce, async-process, async-io, futures, serde_json | tauri, host | exists |
 | `agents` | Agent registry, Node runtime, silent installs, sign-in runs, idle stop and resume | protocol, process, sandbox, settings | tauri | planned |
 | `profile` | Clauseo profile translated into each agent's native options and files | protocol, settings | tauri | planned |
 | `legal` | Case-law and regulator data clients and parsers | protocol | tauri | planned |

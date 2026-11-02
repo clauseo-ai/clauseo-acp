@@ -28,7 +28,7 @@ pub const PROTECTED_NAMES: [&str; 8] = [
 
 /// The instruction file write-denied at any depth of the matter, in any letter case: Claude
 /// loads a nested `CLAUDE.md` when it works in that folder. Stricter than the brief's "at the
-/// matter root" (decision 0027, for Rohan to confirm).
+/// matter root" (decision 0038, for Rohan to confirm).
 pub const INSTRUCTIONS_AT_ANY_DEPTH: &str = "CLAUDE.md";
 
 /// Whether `path` is `prefix` or under it. On macOS, whose volumes are case-insensitive by
