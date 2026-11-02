@@ -341,54 +341,60 @@ export function Composer<V extends string = string>({
             area.current?.focus();
           }}
         >
-          {gate !== undefined ? (
-            gate
-          ) : (
+          {gate}
+          {gate === undefined && (
             <>
               {papers.length > 0 && <PaperChips papers={papers} onRemove={onRemovePaper} />}
               <label className="sr-only" htmlFor={fieldId}>
                 {placeholder ?? w.t("Ask about this matter")}
               </label>
-              <textarea
-                id={fieldId}
-                ref={(node) => {
-                  area.current = node;
-                  return room.nodes.slot("field")(node);
-                }}
-                rows={1}
-                defaultValue={initialText}
-                disabled={disabled}
-                data-testid={testIds?.field}
-                placeholder={placeholder ?? w.t("Ask about this matter")}
-                onInput={changed}
-                onCompositionStart={() => {
-                  composing.current = true;
-                }}
-                onCompositionEnd={() => {
-                  composing.current = false;
-                }}
-                onBlur={() => {
-                  // a composition the engine ended without its compositionend must not hold Enter for good
-                  composing.current = false;
-                }}
-                onKeyDown={(e) => {
-                  if (onKeyCommand?.(e) === true) {
-                    e.preventDefault();
-                    return;
-                  }
-                  if (e.key !== "Enter" || e.shiftKey) return;
-                  // an input method's Enter commits its candidate: the engine's, never a send
-                  const key = {
-                    key: e.key,
-                    shiftKey: e.shiftKey,
-                    isComposing: composing.current || e.nativeEvent.isComposing,
-                    keyCode: e.keyCode,
-                  };
-                  if (!sendsOnEnter(key)) return;
-                  e.preventDefault();
-                  onAsk?.(e.currentTarget.value);
-                }}
-              />
+            </>
+          )}
+          {/* under a gate the field stays, hidden, so the words typed and the engine's undo for them are there
+              again when the gate goes */}
+          <textarea
+            hidden={gate !== undefined}
+            id={fieldId}
+            ref={(node) => {
+              area.current = node;
+              return room.nodes.slot("field")(node);
+            }}
+            rows={1}
+            defaultValue={initialText}
+            disabled={disabled}
+            data-testid={testIds?.field}
+            placeholder={placeholder ?? w.t("Ask about this matter")}
+            onInput={changed}
+            onCompositionStart={() => {
+              composing.current = true;
+            }}
+            onCompositionEnd={() => {
+              composing.current = false;
+            }}
+            onBlur={() => {
+              // a composition the engine ended without its compositionend must not hold Enter for good
+              composing.current = false;
+            }}
+            onKeyDown={(e) => {
+              if (onKeyCommand?.(e) === true) {
+                e.preventDefault();
+                return;
+              }
+              if (e.key !== "Enter" || e.shiftKey) return;
+              // an input method's Enter commits its candidate: the engine's, never a send
+              const key = {
+                key: e.key,
+                shiftKey: e.shiftKey,
+                isComposing: composing.current || e.nativeEvent.isComposing,
+                keyCode: e.keyCode,
+              };
+              if (!sendsOnEnter(key)) return;
+              e.preventDefault();
+              onAsk?.(e.currentTarget.value);
+            }}
+          />
+          {gate === undefined && (
+            <>
               {onAddPapers !== undefined && (
                 <Button
                   kind="quiet"
