@@ -22,6 +22,7 @@
 # The agreement text, entity coverage and CI must be approved by the company.
 /CLA.md               @ro-hansolo
 /cla/entities/        @ro-hansolo
+# The workflows and the path-gating scripts decide which required steps run.
 /.github/             @ro-hansolo
 
 # Policy: the files that set lints, compiler flags, dependencies, bans, budgets, hooks, the

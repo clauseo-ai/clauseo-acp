@@ -42,10 +42,15 @@ concurrency:
 jobs:
   comment:
     name: comment
-    # A run whose jobs were all skipped uploaded nothing: scoreboard on a pull request without
-    # the `scoreboard` label (each push, each other label). It starts no comment job, so it costs no
-    # runner.
-    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'skipped'
+    # Only a run that finished, passed or failed, starts a comment job; any other run starts none and
+    # costs no runner. A failed run still updates the comment: a reducer-bench regression fails CI,
+    # and that is when the comment must show it. A skipped run uploaded nothing: scoreboard on a pull
+    # request without the `scoreboard` label (each push, each other label). A cancelled run (a newer
+    # push, or a queue cleared by hand) left partial artifacts, and the run that replaces it edits
+    # the comment.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
