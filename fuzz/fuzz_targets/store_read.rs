@@ -147,6 +147,7 @@ fn fixture() -> &'static Fixture {
             archived: false,
             created: fixture_time(0),
             updated: fixture_time(events.len() as u64),
+            seen_seq: None,
         };
         let command: CommandId = "01900000-0000-7000-8000-0000000000aa".parse().unwrap();
         let blob = BlobIn::new(BLOB.to_vec());

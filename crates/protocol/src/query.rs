@@ -9,8 +9,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::open_enum::open_unit_enum;
 use crate::{
     AgentId, AgentKind, BlobHash, CheckpointId, ClientName, CompactString, Count, Date, Error,
-    FileChange, FileRefId, MatterId, MatterKind, MatterPath, MatterStatus, RestoreRequest, Seq,
-    SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp, ViewEntry,
+    FileChange, FileRefId, LastStop, MatterId, MatterKind, MatterPath, MatterStatus,
+    RestoreRequest, Seq, SettingsView, SkippedFile, StreamId, ThreadId, ThreadStatus, Timestamp,
+    ViewEntry,
 };
 
 /// Most entries one `PageEntries` returns: the size of a `Reset`'s view window (about 200 recent
@@ -331,6 +332,22 @@ pub struct ThreadSummary {
     /// missing reads as `false`.
     #[serde(default)]
     pub queue_held: bool,
+    /// Whether the lawyer has seen how its last turn ended: true when no turn ended after its
+    /// last `MarkSeen` (or none ended at all). Missing (an older host's answer) reads as `true`.
+    #[serde(default = "seen_default")]
+    pub seen: bool,
+    /// How and when its last turn ended, once one has. Known for every thread the host has
+    /// loaded since it started (at start-up, every thread not archived in a listed matter).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_stop: Option<LastStop>,
+    /// The time of the newest event in its stream.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_activity: Option<Timestamp>,
+}
+
+/// What a missing `ThreadSummary::seen` reads as: nothing to show.
+const fn seen_default() -> bool {
+    true
 }
 
 /// Part of a blob as UTF-8 text cut to whole characters.

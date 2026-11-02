@@ -19,7 +19,9 @@
 //! [`CommandOutcome`]) and read with a [`HostQuery`] ([`QueryResult`]). The display
 //! settings cross as [`SettingsView`] and [`UiPatch`], mirrors of `clauseo-settings`' `ui`
 //! section. A matter's rail details are [`ClientName`], [`Date`] and [`MatterStatus`] on
-//! [`MatterSummary`], changed with [`FieldChange`]s. Subscribers receive
+//! [`MatterSummary`], changed with [`FieldChange`]s; a thread's seen mark and [`LastStop`] are on
+//! [`ThreadSummary`], and app subscribers get both lists as [`MattersChanged`] and
+//! [`ThreadsChanged`]. Subscribers receive
 //! [`HostEvent`]s: [`PatchBatch`]es of [`ViewPatch`]es over [`ViewEntry`]s (keyed by
 //! [`ViewEntry::id`], sorted by [`ViewEntry::order`]), or envelopes; [`Subscribe`],
 //! [`SubscribeEvents`] and [`Ack`] are the subscription calls' parameters. The serde
@@ -137,6 +139,7 @@ mod error_code;
 mod event;
 mod ids;
 mod limits;
+mod lists;
 mod matter;
 mod number;
 mod open_enum;
@@ -207,6 +210,7 @@ wire_types! {
         LimitWindow, LimitWindowView, LimitsView, MeterTone, PlanLabel, StaleReason,
         UnavailableReason, WindowFreshness, WindowKind,
     },
+    lists::{LastStop, MattersChanged, ThreadsChanged},
     matter::{CheckpointKind, FileChoice, FileDecision, ImportSummary, MatterKind, RestoreScope},
     number::{Count, Cursor, Finite, Seq, Timestamp},
     patch::{

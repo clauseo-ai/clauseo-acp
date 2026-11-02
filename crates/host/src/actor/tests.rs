@@ -104,7 +104,9 @@ fn replay(events: &mut EventSubscription) -> (Vec<&'static str>, Vec<u64>, Seq) 
             other @ (HostEvent::Patches(_)
             | HostEvent::AccountLimitsChanged(_)
             | HostEvent::LimitsViewChanged(_)
-            | HostEvent::SettingsChanged(_)) => panic!("unexpected {other:?}"),
+            | HostEvent::SettingsChanged(_)
+            | HostEvent::MattersChanged(_)
+            | HostEvent::ThreadsChanged(_)) => panic!("unexpected {other:?}"),
         }
     }
 }

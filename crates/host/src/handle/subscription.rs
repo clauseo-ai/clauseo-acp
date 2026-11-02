@@ -123,18 +123,20 @@ pub struct Subscription(Feed<EncodedEvent>);
 pub struct EventSubscription(Feed<HostEvent>);
 
 /// An app subscription: the app-wide `HostEvent`s that belong to no stream, as
-/// [`EncodedEvent`]s, each serialised once and shared by every app subscriber. Today that is
-/// `SettingsChanged`, after every change of the settings; the matter list, thread summaries
-/// and notices are to come here too (the limits have their own subscription). A subscription
-/// carries no window identity, so every app subscriber gets every app event: a window that
-/// wants only the summaries of threads it has not opened drops the others itself. No stream's
-/// patches or envelopes ever come here, and no app event goes to a stream's subscribers.
+/// [`EncodedEvent`]s, each serialised once and shared by every app subscriber: `SettingsChanged`
+/// after every change of the settings, `MattersChanged` when matters on the list change, come or
+/// go, and `ThreadsChanged` when a matter's threads change or come; notices are to come here too
+/// (the limits have their own subscription). A subscription carries no window identity, so
+/// every app subscriber gets every app event: a window that wants only the summaries of threads
+/// it has not opened drops the others itself. No stream's patches or envelopes ever come here,
+/// and no app event goes to a stream's subscribers.
 ///
-/// It starts with nothing: subscribe first, then read the current state (`GetSettings`); the
-/// host answers calls in order, so no change falls between the two. A subscriber whose channel
-/// is full gets nothing more until it has drained it, then gets the current state at once (one
-/// `SettingsChanged`), so it misses steps but never ends on a stale view. Ends when the host
-/// stops; dropping it unsubscribes.
+/// It starts with the current state, whole: one `SettingsChanged`, one `MattersChanged` with
+/// `all` set, and one `ThreadsChanged` with `all` set per matter in the list's order, so a
+/// window needs no separate read and no change falls between the two; the partial rows that
+/// follow build on it. A subscriber whose channel is full gets nothing more until it has drained
+/// it, then gets the same whole state at once, so it misses steps but never ends on a stale
+/// view. Ends when the host stops; dropping it unsubscribes.
 #[derive(Debug)]
 pub struct AppSubscription(Feed<EncodedEvent>);
 

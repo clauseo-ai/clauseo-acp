@@ -18,7 +18,10 @@
 //!   activity, `ForgetMatter` (which deletes nothing; an import of the folder brings the matter
 //!   back), a new matter in the default location (`GetDefaultLocation` shows where), and one
 //!   error code per refused folder.
-//!   `docs/decisions/0022-matters-for-the-rail.md` records the rules.
+//!   `docs/decisions/0022-matters-for-the-rail.md` records the rules. Each thread's seen mark
+//!   (`MarkSeen`, `actor/seen.rs`) and last stop, and the matter list and thread lists sent to
+//!   app subscribers as their rows change (`actor/app_lists.rs`):
+//!   `docs/decisions/0023-seen-marks-and-app-lists.md`.
 //! - The profile hook: [`ProfileHook`], with [`NoProfile`] as the default. Its `_meta` goes on
 //!   `session/new` and `session/load`, and its variables into each launch, with the host's
 //!   switches over them.
@@ -66,7 +69,8 @@
 //!   every subscriber of the stream (or of the limits); [`EncodedEvent::json`] is sent on as it
 //!   is and [`EncodedEvent::decode`] gives the type back. [`EventSubscription`] yields typed
 //!   `HostEvent`s: the replay, one `CaughtUp`, then live `Events`. [`AppSubscription`]
-//!   yields the app-wide events of no stream as [`EncodedEvent`]s: `SettingsChanged` today.
+//!   yields the app-wide events of no stream as [`EncodedEvent`]s: `SettingsChanged`,
+//!   `MattersChanged` and `ThreadsChanged`, starting with the current state of each.
 //! - `HostQuery::ListAgents` lists the settings agents with their kinds.
 //! - The display settings: `HostQuery::GetSettings` reads them and `HostCommand::SetUiSettings`
 //!   changes them through `Effective::apply_ui_patch`, on the actor; a patch naming a key policy

@@ -71,7 +71,7 @@ fn a_schema_1_database_opens_and_lists_its_matters_with_the_defaults() {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
     assert_eq!(version, i64::from(SCHEMA));
-    assert_eq!(SCHEMA, 2);
+    assert_eq!(SCHEMA, 3);
     drop(conn);
     let store = dir.open();
     assert_eq!(block_on(store.matters()).unwrap(), vec![detailed]);

@@ -7,8 +7,8 @@
 
 use clauseo_matters::CompareSide;
 use clauseo_protocol::{
-    AgentId, AgentKind, AgentSummary, CheckpointId, CompactString, ErrorCode, HostQuery, MatterId,
-    Principal, QueryResult, StreamId, ThreadStatus, ThreadSummary, ViewEntry,
+    AgentId, AgentKind, AgentSummary, CheckpointId, ErrorCode, HostQuery, MatterId, Principal,
+    QueryResult, StreamId, ViewEntry,
 };
 
 use std::path::PathBuf;
@@ -41,7 +41,7 @@ pub(super) fn query(
         HostQuery::ListThreads { matter } => {
             let listed = actor
                 .check_matter(matter)
-                .map(|_| list_threads(actor, matter));
+                .map(|_| super::rail::thread_summaries(actor, matter));
             let _gone = reply.send(listed.map(QueryResult::Threads));
         }
         HostQuery::PageEntries {
@@ -240,36 +240,4 @@ pub(super) fn own_versions(
         }
     }
     Ok(())
-}
-
-/// The threads of `matter`, each with the status of its header: the loaded state's, or
-/// the header kept when it was last unloaded, or from its row.
-fn list_threads(actor: &Actor, matter: MatterId) -> Vec<ThreadSummary> {
-    actor
-        .threads
-        .values()
-        .filter(|thread| thread.row.matter == matter)
-        .map(|thread| {
-            let loaded = actor
-                .loaded(StreamId::Thread(thread.row.id))
-                .and_then(|loaded| loaded.state.as_thread())
-                .and_then(|state| state.header());
-            let header = loaded.or(thread.header.as_ref());
-            let row_status = if thread.row.archived {
-                ThreadStatus::Archived
-            } else {
-                ThreadStatus::Idle
-            };
-            ThreadSummary {
-                thread: thread.row.id,
-                matter,
-                title: header
-                    .and_then(|header| header.title.clone())
-                    .or_else(|| thread.row.title.as_deref().map(CompactString::from)),
-                agent: thread.row.agent.clone(),
-                status: header.map_or(row_status, |header| header.status),
-                queue_held: false,
-            }
-        })
-        .collect()
 }

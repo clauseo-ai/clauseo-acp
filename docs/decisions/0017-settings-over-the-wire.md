@@ -88,7 +88,8 @@ and `limits`' `AccountLimitsChanged` (R16).
 
 ## Status
 
-proposed
+proposed; since 0023 an app subscription starts with the current state (the settings, the
+matter list and each thread list, whole) instead of empty, and its catch-up carries the lists too
 
 ## Date
 

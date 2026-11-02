@@ -1,13 +1,15 @@
 //! Each matter's status in `ListMatters`, from its threads, at the interface: working, a
 //! permission, a question, an answer ready, a stop, a pause at the limit, the precedence when
-//! threads differ, `OpenMatter` clearing what ended before it, and a restart.
+//! threads differ, `MarkSeen` clearing what ended before it (and `OpenMatter` not), and a
+//! restart.
 
 use std::time::Duration;
 
 use clauseo_host::Clock as _;
 
 use clauseo_protocol::{
-    CommandOutcome, DomainEvent, HostCommand, MatterId, MatterStatus, StopReason, StreamId,
+    CommandOutcome, DomainEvent, HostCommand, LastStop, MatterId, MatterStatus, StopReason,
+    StreamId,
 };
 
 use crate::permissions::{KINDS_ANSWERS, PERM, answer_from, until_first_request};
@@ -31,7 +33,7 @@ fn status(host: &Running, matter: MatterId) -> MatterStatus {
 }
 
 #[test]
-fn working_then_stopped_then_idle_once_opened() {
+fn working_then_stopped_then_idle_once_seen() {
     let dir = Dir::new(
         "status_working_stopped",
         &[(FAKE, Scenario::Bundled("cancel-unanswered"))],
@@ -52,12 +54,34 @@ fn working_then_stopped_then_idle_once_opened() {
         panic!("not stopped: {:?}", status(&host, matter));
     };
     assert_eq!(at, host.clock.now().wall);
+    let row = host.threads(matter).remove(0);
+    assert!(!row.seen, "a stop not seen yet");
+    assert_eq!(
+        row.last_stop,
+        Some(LastStop {
+            reason: StopReason::Cancelled,
+            at
+        })
+    );
     host.clock.advance(Duration::from_secs(1));
     host.ok(HostCommand::OpenMatter { matter });
     assert_eq!(
         status(&host, matter),
+        MatterStatus::Stopped { at },
+        "opening the matter is not seeing the thread"
+    );
+    host.ok(HostCommand::MarkSeen { thread });
+    assert_eq!(
+        status(&host, matter),
         MatterStatus::Idle,
-        "the stop came before the opening"
+        "the stop came before the mark"
+    );
+    let row = host.threads(matter).remove(0);
+    assert!(row.seen);
+    assert_eq!(
+        row.last_stop.map(|stop| stop.at),
+        Some(at),
+        "the stop stays"
     );
     host.shutdown();
 }
@@ -85,17 +109,14 @@ fn a_permission_then_an_answer_ready_which_survives_a_restart() {
     let host = dir.start(1);
     assert_eq!(status(&host, matter), MatterStatus::Ready);
     assert_eq!(
-        host.ok(HostCommand::OpenMatter { matter }),
+        host.ok(HostCommand::MarkSeen { thread }),
         CommandOutcome::Done
     );
     assert_eq!(status(&host, matter), MatterStatus::Idle);
     host.shutdown();
     let host = dir.start(2);
-    assert_eq!(
-        status(&host, matter),
-        MatterStatus::Idle,
-        "opened stays opened"
-    );
+    assert_eq!(status(&host, matter), MatterStatus::Idle, "seen stays seen");
+    assert!(host.threads(matter).remove(0).seen);
     host.shutdown();
 }
 

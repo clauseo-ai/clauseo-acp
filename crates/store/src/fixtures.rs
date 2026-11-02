@@ -117,6 +117,7 @@ pub fn thread_row() -> ThreadRow {
         archived: false,
         created: time(0),
         updated: time(EVENTS),
+        seen_seq: None,
     }
 }
 

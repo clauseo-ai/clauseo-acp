@@ -1,6 +1,8 @@
 //! The matter rail's data: each matter's [`MatterSummary`] for `ListMatters` (its details, its
-//! last activity, its folder for display and its status), the status rule, and the times the
-//! host keeps for it from every returned commit.
+//! last activity, its folder for display and its status), each thread's [`ThreadSummary`] for
+//! `ListThreads` (its status, seen mark, last stop and last activity), the status rule, and the
+//! times and stops the host keeps for them from every returned commit. `app_lists.rs` sends
+//! the same rows to app subscribers when they change.
 //!
 //! The status is computed each time it is asked, from what the host holds for each thread: its
 //! header's status (the loaded state's, or the one kept when it was unloaded), whether a
@@ -13,11 +15,20 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use clauseo_protocol::{
-    DomainEvent, Envelope, FolderState, MatterId, MatterStatus, MatterSummary, StopReason,
-    StreamId, ThreadStatus, Timestamp,
+    CompactString, DomainEvent, Envelope, FolderState, LastStop, MatterId, MatterStatus,
+    MatterSummary, Seq, StopReason, StreamId, ThreadStatus, ThreadSummary, Timestamp,
 };
 
-use super::{Actor, MatterEntry};
+use super::{Actor, MatterEntry, ThreadEntry};
+
+/// How and when a thread's last turn ended, and the `seq` of its `TurnEnded`, which the seen
+/// mark is compared with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Stop {
+    pub(crate) reason: StopReason,
+    pub(crate) at: Timestamp,
+    pub(crate) seq: Seq,
+}
 
 /// What the status rule needs of one thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +39,8 @@ pub(crate) struct ThreadFacts {
     pub(crate) permission_pending: bool,
     /// How and when its last turn ended.
     pub(crate) last_stop: Option<(StopReason, Timestamp)>,
+    /// The lawyer has seen that ending (`MarkSeen` after it), or there is none.
+    pub(crate) seen: bool,
 }
 
 /// The rank of each status when threads differ: the first that any thread gives wins. A
@@ -47,11 +60,9 @@ fn rank(status: MatterStatus) -> u8 {
 }
 
 /// One thread's own status. An archived thread says nothing (`None`). A thread that runs nothing
-/// says how its last turn ended, if that was after `opened` (the matter's `last_opened`; no
-/// opening means every end counts): `end_turn` is `Ready`, any other ending `Stopped`, since
-/// the answer did not finish as asked.
-fn thread_status(facts: &ThreadFacts, opened: Option<Timestamp>) -> Option<MatterStatus> {
-    let after_opened = |at: Timestamp| opened.is_none_or(|opened| at > opened);
+/// says how its last turn ended while the lawyer has not seen it (no `MarkSeen` since):
+/// `end_turn` is `Ready`, any other ending `Stopped`, since the answer did not finish as asked.
+fn thread_status(facts: &ThreadFacts) -> Option<MatterStatus> {
     match facts.status {
         ThreadStatus::Archived => None,
         ThreadStatus::NeedsYou if facts.permission_pending => Some(MatterStatus::NeedsPermission),
@@ -64,24 +75,21 @@ fn thread_status(facts: &ThreadFacts, opened: Option<Timestamp>) -> Option<Matte
         }
         ThreadStatus::Idle | ThreadStatus::AgentExited | ThreadStatus::IdleStopped => {
             Some(match facts.last_stop {
-                Some((StopReason::EndTurn, at)) if after_opened(at) => MatterStatus::Ready,
-                Some((_, at)) if after_opened(at) => MatterStatus::Stopped { at },
+                Some((StopReason::EndTurn, _)) if !facts.seen => MatterStatus::Ready,
+                Some((_, at)) if !facts.seen => MatterStatus::Stopped { at },
                 Some(_) | None => MatterStatus::Idle,
             })
         }
     }
 }
 
-/// The matter's status over `threads`, opened last at `opened`: the highest-ranked thread status
-/// ([`rank`]); among paused threads the earliest known reset, and among stopped ones the latest
-/// stop. `Idle` with no thread.
-pub(crate) fn matter_status(
-    threads: impl IntoIterator<Item = ThreadFacts>,
-    opened: Option<Timestamp>,
-) -> MatterStatus {
+/// The matter's status over `threads`: the highest-ranked thread status ([`rank`]); among
+/// paused threads the earliest known reset, and among stopped ones the latest stop. `Idle` with
+/// no thread.
+pub(crate) fn matter_status(threads: impl IntoIterator<Item = ThreadFacts>) -> MatterStatus {
     let mut best = MatterStatus::Idle;
     for facts in threads {
-        let Some(status) = thread_status(&facts, opened) else {
+        let Some(status) = thread_status(&facts) else {
             continue;
         };
         best = match (best, status) {
@@ -157,6 +165,135 @@ fn same_component(a: &std::ffi::OsStr, b: &std::ffi::OsStr) -> bool {
     }
 }
 
+/// Whether the lawyer has seen how `thread`'s last turn ended: no stop, or one at or before its
+/// seen mark.
+pub(crate) fn seen(thread: &ThreadEntry) -> bool {
+    thread
+        .last_stop
+        .is_none_or(|stop| thread.row.seen_seq.is_some_and(|mark| stop.seq <= mark))
+}
+
+/// What the rail reads of one thread: its header (the loaded state's, else the one kept when it
+/// was unloaded), whether a permission waits, and its status.
+struct Read<'a> {
+    header: Option<&'a clauseo_protocol::HeaderEntry>,
+    permission_pending: bool,
+    status: ThreadStatus,
+}
+
+fn read<'a>(actor: &'a Actor, thread: &'a ThreadEntry) -> Read<'a> {
+    let loaded = actor.loaded(StreamId::Thread(thread.row.id));
+    let header = loaded
+        .and_then(|loaded| loaded.state.as_thread())
+        .and_then(|state| state.header())
+        .or(thread.header.as_ref());
+    let status = match header {
+        Some(header) => header.status,
+        None if thread.row.archived => ThreadStatus::Archived,
+        None => ThreadStatus::Idle,
+    };
+    Read {
+        header,
+        permission_pending: loaded.is_some_and(|loaded| loaded.sent.permissions().next().is_some()),
+        status,
+    }
+}
+
+/// What the status rule needs of `thread`.
+pub(crate) fn thread_facts(actor: &Actor, thread: &ThreadEntry) -> ThreadFacts {
+    let read = read(actor, thread);
+    ThreadFacts {
+        status: read.status,
+        permission_pending: read.permission_pending,
+        last_stop: thread.last_stop.map(|stop| (stop.reason, stop.at)),
+        seen: seen(thread),
+    }
+}
+
+/// `thread`'s row, as `ListThreads` answers and `ThreadsChanged` carries, and whether a
+/// permission of it waits (which the row does not show but the matter's status does).
+pub(crate) fn thread_summary(actor: &Actor, thread: &ThreadEntry) -> (ThreadSummary, bool) {
+    let read = read(actor, thread);
+    let summary = ThreadSummary {
+        thread: thread.row.id,
+        matter: thread.row.matter,
+        title: read
+            .header
+            .and_then(|header| header.title.clone())
+            .or_else(|| thread.row.title.as_deref().map(CompactString::from)),
+        agent: thread.row.agent.clone(),
+        status: read.status,
+        queue_held: false,
+        seen: seen(thread),
+        last_stop: thread.last_stop.map(|stop| LastStop {
+            reason: stop.reason,
+            at: stop.at,
+        }),
+        last_activity: actor.tails.get(&StreamId::Thread(thread.row.id)).copied(),
+    };
+    (summary, read.permission_pending)
+}
+
+/// The threads of `matter`, in `ListThreads`' order (by id, which is by creation).
+pub(crate) fn thread_summaries(actor: &Actor, matter: MatterId) -> Vec<ThreadSummary> {
+    actor
+        .threads
+        .values()
+        .filter(|thread| thread.row.matter == matter)
+        .map(|thread| thread_summary(actor, thread).0)
+        .collect()
+}
+
+/// The newer of two optional times.
+fn newest(a: Option<Timestamp>, b: Option<Timestamp>) -> Option<Timestamp> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (a, b) => a.or(b),
+    }
+}
+
+/// One matter's row from its threads' facts and their newest activity.
+fn matter_row(
+    actor: &Actor,
+    entry: &MatterEntry,
+    facts: Vec<ThreadFacts>,
+    activity: Option<Timestamp>,
+) -> MatterSummary {
+    let row = &entry.row;
+    let own = actor.tails.get(&StreamId::Matter(row.id)).copied();
+    MatterSummary {
+        matter: row.id,
+        name: row.name.clone(),
+        kind: row.kind,
+        last_activity: newest(own, activity),
+        client: row.client.clone(),
+        next_date: row.next_date,
+        pinned: row.pinned,
+        last_opened: row.last_opened,
+        status: matter_status(facts),
+        folder_display: folder_display(Path::new(&row.folder_path), &actor.home_spellings),
+        // Filled in off the actor by `ListMatters` (`folder_state.rs`).
+        folder_state: FolderState::Found,
+    }
+}
+
+/// The row of the listed matter `matter` alone: one pass over the threads.
+pub(crate) fn matter_summary(actor: &Actor, matter: MatterId) -> Option<MatterSummary> {
+    let entry = actor.matters.get(&matter)?;
+    let mut facts = Vec::new();
+    let mut activity = None;
+    for thread in actor
+        .threads
+        .values()
+        .filter(|thread| thread.row.matter == matter)
+    {
+        let ts = actor.tails.get(&StreamId::Thread(thread.row.id)).copied();
+        activity = newest(activity, ts);
+        facts.push(thread_facts(actor, thread));
+    }
+    Some(matter_row(actor, entry, facts, activity))
+}
+
 /// Every matter on the list, oldest first, as `ListMatters` answers.
 pub(crate) fn summaries(actor: &Actor) -> Vec<MatterSummary> {
     let mut facts: BTreeMap<MatterId, Vec<ThreadFacts>> = BTreeMap::new();
@@ -170,71 +307,54 @@ pub(crate) fn summaries(actor: &Actor) -> Vec<MatterSummary> {
             let newest = activity.entry(matter).or_insert(ts);
             *newest = (*newest).max(ts);
         }
-        let loaded = actor.loaded(StreamId::Thread(thread.row.id));
-        let header = loaded
-            .and_then(|loaded| loaded.state.as_thread())
-            .and_then(|state| state.header())
-            .or(thread.header.as_ref());
-        let status = match header {
-            Some(header) => header.status,
-            None if thread.row.archived => ThreadStatus::Archived,
-            None => ThreadStatus::Idle,
-        };
-        facts.entry(matter).or_default().push(ThreadFacts {
-            status,
-            permission_pending: loaded
-                .is_some_and(|loaded| loaded.sent.permissions().next().is_some()),
-            last_stop: thread.last_stop,
-        });
+        facts
+            .entry(matter)
+            .or_default()
+            .push(thread_facts(actor, thread));
     }
     let mut rows: Vec<&MatterEntry> = actor.matters.values().collect();
     rows.sort_by_key(|entry| (entry.row.created, entry.row.id));
     rows.into_iter()
         .map(|entry| {
-            let row = &entry.row;
-            let own = actor.tails.get(&StreamId::Matter(row.id)).copied();
-            let last_activity = match (own, activity.get(&row.id).copied()) {
-                (Some(a), Some(b)) => Some(a.max(b)),
-                (a, b) => a.or(b),
-            };
-            MatterSummary {
-                matter: row.id,
-                name: row.name.clone(),
-                kind: row.kind,
-                last_activity,
-                client: row.client.clone(),
-                next_date: row.next_date,
-                pinned: row.pinned,
-                last_opened: row.last_opened,
-                status: matter_status(facts.remove(&row.id).unwrap_or_default(), row.last_opened),
-                folder_display: folder_display(Path::new(&row.folder_path), &actor.home_spellings),
-                // Filled in off the actor by `ListMatters` (`folder_state.rs`).
-                folder_state: FolderState::Found,
-            }
+            let id = entry.row.id;
+            let threads = facts.remove(&id).unwrap_or_default();
+            matter_row(actor, entry, threads, activity.get(&id).copied())
         })
         .collect()
 }
 
 /// Keeps what the rail needs from durable envelopes: each stream's newest time, and each
-/// thread's last `TurnEnded`.
+/// thread's last `TurnEnded` (every turn ends with one, at the limit and failed ones too); and
+/// marks each thread touched, for `app_lists.rs`.
 pub(crate) fn note_commit(actor: &mut Actor, envelopes: &[Envelope]) {
     for envelope in envelopes {
         let newest = actor.tails.entry(envelope.stream).or_insert(envelope.ts);
         *newest = (*newest).max(envelope.ts);
-        if let (StreamId::Thread(thread), DomainEvent::TurnEnded(ended)) =
-            (envelope.stream, &envelope.event)
+        let StreamId::Thread(thread) = envelope.stream else {
+            continue;
+        };
+        actor.lists.touch_thread(thread);
+        if let DomainEvent::TurnEnded(ended) = &envelope.event
             && let Some(entry) = actor.threads.get_mut(&thread)
         {
-            entry.last_stop = Some((ended.stop, envelope.ts));
+            entry.last_stop = Some(Stop {
+                reason: ended.stop,
+                at: envelope.ts,
+                seq: envelope.seq,
+            });
         }
     }
 }
 
 /// How and when the last turn in a thread's folded state ended: its newest step.
-pub(crate) fn last_step(state: &clauseo_reducer::ThreadState) -> Option<(StopReason, Timestamp)> {
+pub(crate) fn last_step(state: &clauseo_reducer::ThreadState) -> Option<Stop> {
     state.entries().values().rev().find_map(|entry| {
         if let clauseo_protocol::ViewEntry::Step(step) = entry {
-            Some((step.stop, step.ts))
+            Some(Stop {
+                reason: step.stop,
+                at: step.ts,
+                seq: step.order,
+            })
         } else {
             None
         }

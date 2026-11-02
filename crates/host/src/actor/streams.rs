@@ -224,6 +224,7 @@ pub(crate) fn release(actor: &mut Actor, stream: StreamId) {
         if let Some(stop) = super::rail::last_step(state) {
             entry.last_stop = Some(stop);
         }
+        actor.lists.touch_thread(thread);
     }
 }
 

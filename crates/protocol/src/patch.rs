@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AccountLimits, Cursor, EntryId, Envelope, HeaderEntry, LimitsView, MatterHeaderEntry,
-    MessageId, Seq, SettingsView, StreamId, ViewEntry, ViewEpoch,
+    MattersChanged, MessageId, Seq, SettingsView, StreamId, ThreadsChanged, ViewEntry, ViewEpoch,
 };
 
 /// One change to a stream's view, at its cursor.
@@ -142,6 +142,13 @@ pub enum HostEvent {
     /// The display settings changed: the whole view after the change. App-wide, never part of
     /// a stream: it reaches app subscribers only.
     SettingsChanged(SettingsView),
+    /// Rows of the matter list changed, came or went; or, with `all`, the whole list. App-wide:
+    /// it reaches app subscribers only.
+    MattersChanged(MattersChanged),
+    /// Rows of one matter's thread list changed or came; or, with `all`, the matter's whole
+    /// list. App-wide: it reaches app subscribers only, each of which drops the rows of threads
+    /// it has open.
+    ThreadsChanged(ThreadsChanged),
 }
 
 /// Where a view subscriber stands: an epoch and the last cursor it applied.

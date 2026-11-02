@@ -182,6 +182,8 @@ impl Bridge {
             | HostCommand::AnswerElicitation { .. }
             | HostCommand::RenameThread { .. }
             | HostCommand::ArchiveThread { .. }
+            // H6: names a thread only.
+            | HostCommand::MarkSeen { .. }
             | HostCommand::UndoStep { .. }
             | HostCommand::RestoreVersion { .. }
             | HostCommand::SetUiSettings { .. }

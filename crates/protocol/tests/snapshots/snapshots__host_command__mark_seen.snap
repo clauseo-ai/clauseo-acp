@@ -1,0 +1,9 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: "HostCommand::MarkSeen { thread: thread_id(2) }"
+---
+{
+  "mark_seen": {
+    "thread": "01900000-0000-7000-8000-000000000002"
+  }
+}

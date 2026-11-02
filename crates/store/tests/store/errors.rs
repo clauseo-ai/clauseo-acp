@@ -66,6 +66,7 @@ fn error_codes_map() {
         archived: false,
         created: ts(0),
         updated: ts(0),
+        seen_seq: None,
     };
     let constraint = block_on(store.commit(Commit {
         thread: Some(row),

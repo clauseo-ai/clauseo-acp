@@ -43,3 +43,6 @@ mod reopen;
 #[cfg(test)]
 #[path = "store/rows.rs"]
 mod rows;
+#[cfg(test)]
+#[path = "store/seen.rs"]
+mod seen;

@@ -16,10 +16,11 @@ pub const LOCK_FILE: &str = "state.sqlite.lock";
 const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0001_init.sql"),
     include_str!("migrations/0002_matter_details.sql"),
+    include_str!("migrations/0003_thread_seen.sql"),
 ];
 
 /// The schema version this build writes, the number of the last migration.
-pub const SCHEMA: u32 = 2;
+pub const SCHEMA: u32 = 3;
 
 /// Statements each connection keeps prepared; the writer uses about twenty.
 const STATEMENT_CACHE: usize = 32;

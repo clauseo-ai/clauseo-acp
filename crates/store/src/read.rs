@@ -295,7 +295,7 @@ pub(crate) fn tail_times(conn: &Connection) -> Result<Vec<(StreamId, Timestamp)>
 pub(crate) fn threads(conn: &Connection, matter: MatterId) -> Result<Vec<ThreadRow>, Error> {
     let mut statement = conn.prepare_cached(
         "SELECT id, matter_id, agent_id, title, acp_session_id, archived, created_ms, \
-         updated_ms FROM threads WHERE matter_id = ?1 ORDER BY updated_ms DESC, id",
+         updated_ms, seen_seq FROM threads WHERE matter_id = ?1 ORDER BY updated_ms DESC, id",
     )?;
     let mut rows = statement.query([matter.to_string()])?;
     let mut out = Vec::new();
@@ -312,6 +312,7 @@ pub(crate) fn threads(conn: &Connection, matter: MatterId) -> Result<Vec<ThreadR
             archived: row.get(5)?,
             created: timestamp(row, 6)?,
             updated: timestamp(row, 7)?,
+            seen_seq: seen_seq(row, 8)?,
         });
     }
     Ok(out)
@@ -366,6 +367,19 @@ fn optional_timestamp(row: &Row<'_>, column: usize) -> Result<Option<Timestamp>,
         .map(|millis| {
             Timestamp::new(millis)
                 .map_err(|error| Error::corrupt(format!("a time {millis}: {error}")))
+        })
+        .transpose()
+}
+
+/// A thread's `seen_seq`: `NULL` is never seen; a value that is no `seq` is `store.corrupt`.
+fn seen_seq(row: &Row<'_>, column: usize) -> Result<Option<Seq>, Error> {
+    let stored: Option<i64> = row.get(column)?;
+    stored
+        .map(|stored| {
+            u64::try_from(stored)
+                .ok()
+                .and_then(|seq| Seq::new(seq).ok())
+                .ok_or_else(|| Error::corrupt(format!("a seen seq {stored}")))
         })
         .transpose()
 }

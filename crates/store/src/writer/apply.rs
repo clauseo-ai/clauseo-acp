@@ -210,11 +210,12 @@ fn put_rows(conn: &Connection, commit: &Commit) -> Result<(), Error> {
     if let Some(thread) = &commit.thread {
         conn.prepare_cached(
             "INSERT INTO threads (id, matter_id, agent_id, title, acp_session_id, archived, \
-             created_ms, updated_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+             created_ms, updated_ms, seen_seq) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
              ON CONFLICT (id) DO UPDATE SET matter_id = excluded.matter_id, \
              agent_id = excluded.agent_id, title = excluded.title, \
              acp_session_id = excluded.acp_session_id, archived = excluded.archived, \
-             created_ms = excluded.created_ms, updated_ms = excluded.updated_ms",
+             created_ms = excluded.created_ms, updated_ms = excluded.updated_ms, \
+             seen_seq = excluded.seen_seq",
         )?
         .execute(params![
             thread.id.to_string(),
@@ -225,6 +226,9 @@ fn put_rows(conn: &Connection, commit: &Commit) -> Result<(), Error> {
             thread.archived,
             thread.created.as_millis(),
             thread.updated.as_millis(),
+            thread
+                .seen_seq
+                .map(|seq| i64::try_from(seq.get()).unwrap_or(i64::MAX)),
         ])?;
     }
     if !commit.checkpoints.is_empty() {

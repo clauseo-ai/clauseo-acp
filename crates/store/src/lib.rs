@@ -3,8 +3,9 @@
 //!
 //! # Owns
 //!
-//! `state.sqlite` in the folder the caller passes: schema version 2 and its numbered
-//! migrations (`PRAGMA user_version`; `0002_matter_details.sql` adds a matter's details), the
+//! `state.sqlite` in the folder the caller passes: schema version 3 and its numbered
+//! migrations (`PRAGMA user_version`; `0002_matter_details.sql` adds a matter's details,
+//! `0003_thread_seen.sql` a thread's seen mark), the
 //! pragmas, the stored `MessagePack` envelope, the exclusive lock (`state.sqlite.lock`), the
 //! private file mode, and the mapping of every disk failure to `store.disk_full`,
 //! `store.corrupt` or `store.io`.

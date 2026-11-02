@@ -174,6 +174,8 @@ pub(crate) fn finish_command(
     let Some(pending) = actor.commands.remove(&id) else {
         return;
     };
+    // Matter rows change only by commands; the app lists compare every row at the next flush.
+    actor.lists.touch_all();
     let mut waiters = pending.waiters.into_iter();
     let Some(first) = waiters.next() else {
         return;
@@ -225,6 +227,7 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
         HostCommand::RelocateMatter { matter, folder } => {
             super::relocate::relocate_matter(actor, ctx, matter, folder);
         }
+        HostCommand::MarkSeen { thread } => super::seen::mark_seen(actor, ctx, thread),
         HostCommand::CreateThread { matter, agent } => {
             let done = create_thread(actor, ctx, matter, agent);
             if let Err(error) = done {
@@ -379,7 +382,7 @@ pub(crate) fn check_thread(actor: &Actor, thread: ThreadId) -> Result<&ThreadEnt
 
 /// The thread `thread` of a matter on the list, for a command that names it:
 /// `command.unknown_thread` for an unknown thread or one of a forgotten matter.
-fn listed_thread(actor: &Actor, thread: ThreadId) -> Result<&ThreadEntry, Error> {
+pub(super) fn listed_thread(actor: &Actor, thread: ThreadId) -> Result<&ThreadEntry, Error> {
     let entry = actor.check_thread(thread)?;
     if actor.matters.contains_key(&entry.row.matter) {
         Ok(entry)
@@ -428,6 +431,7 @@ fn create_thread(
         archived: false,
         created: now.wall,
         updated: now.wall,
+        seen_seq: None,
     };
     let event = DomainEvent::ThreadCreated(ThreadCreated {
         matter,

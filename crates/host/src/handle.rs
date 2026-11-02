@@ -171,9 +171,9 @@ impl HostHandle {
     /// Subscribes `principal` to the app-wide events, those of no stream (see
     /// [`AppSubscription`] for what comes and the rules). It checks the principal as
     /// [`HostHandle::subscribe`] does: one this version does not know is
-    /// `transport.unauthorized`. Each subscriber has its own `bounded(1024)` channel; a full
-    /// one gets the current state once it has drained. Every subscription ends when the host
-    /// stops.
+    /// `transport.unauthorized`. The first frames are the current state; each subscriber has its
+    /// own `bounded(1024)` channel; a full one gets the current state again once it has drained.
+    /// Every subscription ends when the host stops.
     pub async fn subscribe_app(&self, principal: Principal) -> Result<AppSubscription, HostError> {
         self.call(|reply| Request::SubscribeApp { principal, reply })
             .await

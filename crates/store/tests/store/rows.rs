@@ -203,6 +203,7 @@ fn thread_row(n: u64, matter: MatterId, updated: i64) -> ThreadRow {
         archived: n.is_multiple_of(2),
         created: ts(1),
         updated: ts(updated),
+        seen_seq: None,
     }
 }
 

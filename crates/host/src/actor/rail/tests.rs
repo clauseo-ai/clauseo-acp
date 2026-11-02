@@ -1,5 +1,5 @@
-//! The status rule as a table: one row per case, the threads' facts and the last opening in, the
-//! matter's status out. And the folder as the rail shows it.
+//! The status rule as a table: one row per case, the threads' facts (their seen marks included)
+//! in, the matter's status out. And the folder as the rail shows it.
 
 use std::path::{Path, PathBuf};
 
@@ -16,13 +16,24 @@ fn thread(status: ThreadStatus) -> ThreadFacts {
         status,
         permission_pending: false,
         last_stop: None,
+        seen: true,
     }
 }
 
+/// A thread whose last turn ended with `stop` at `n`, not seen since.
 fn ended(stop: StopReason, n: i64) -> ThreadFacts {
     ThreadFacts {
         last_stop: Some((stop, at(n))),
+        seen: false,
         ..thread(ThreadStatus::Idle)
+    }
+}
+
+/// `facts`, seen since its last turn ended.
+fn seen(facts: ThreadFacts) -> ThreadFacts {
+    ThreadFacts {
+        seen: true,
+        ..facts
     }
 }
 
@@ -39,8 +50,8 @@ fn paused(resets: Option<i64>) -> ThreadFacts {
     })
 }
 
-/// A row: its name, the threads' facts, the last opening, the status expected.
-type Row = (&'static str, Vec<ThreadFacts>, Option<i64>, MatterStatus);
+/// A row: its name, the threads' facts, the status expected.
+type Row = (&'static str, Vec<ThreadFacts>, MatterStatus);
 
 /// Rows of one thread that runs, waits or is new.
 fn one_thread_rows() -> Vec<Row> {
@@ -51,11 +62,10 @@ fn one_thread_rows() -> Vec<Row> {
         .unwrap(),
     };
     vec![
-        ("no thread", vec![], None, MatterStatus::Idle),
+        ("no thread", vec![], MatterStatus::Idle),
         (
             "a new thread",
             vec![thread(ThreadStatus::Idle)],
-            None,
             MatterStatus::Idle,
         ),
         (
@@ -64,49 +74,36 @@ fn one_thread_rows() -> Vec<Row> {
                 status: ThreadStatus::Archived,
                 ..ended(StopReason::EndTurn, 5)
             }],
-            None,
             MatterStatus::Idle,
         ),
         (
             "starting",
             vec![thread(ThreadStatus::Starting)],
-            None,
             MatterStatus::Working,
         ),
         (
             "running",
             vec![thread(ThreadStatus::Running)],
-            None,
             MatterStatus::Working,
         ),
         (
             "queued behind another thread",
             vec![thread(queued)],
-            None,
             MatterStatus::Working,
         ),
         (
             "a permission",
             vec![permission()],
-            None,
             MatterStatus::NeedsPermission,
         ),
         (
             "a question",
             vec![thread(ThreadStatus::NeedsYou)],
-            None,
             MatterStatus::NeedsAnswer,
         ),
         (
-            "finished, never opened",
+            "finished, not seen",
             vec![ended(StopReason::EndTurn, 5)],
-            None,
-            MatterStatus::Ready,
-        ),
-        (
-            "finished after the opening",
-            vec![ended(StopReason::EndTurn, 5)],
-            Some(4),
             MatterStatus::Ready,
         ),
     ]
@@ -116,45 +113,38 @@ fn one_thread_rows() -> Vec<Row> {
 fn ending_rows() -> Vec<Row> {
     vec![
         (
-            "finished before the opening",
-            vec![ended(StopReason::EndTurn, 5)],
-            Some(5),
+            "finished, seen",
+            vec![seen(ended(StopReason::EndTurn, 5))],
             MatterStatus::Idle,
         ),
         (
             "cancelled",
             vec![ended(StopReason::Cancelled, 7)],
-            None,
             MatterStatus::Stopped { at: at(7) },
         ),
         (
-            "cancelled before the opening",
-            vec![ended(StopReason::Cancelled, 7)],
-            Some(8),
+            "cancelled, seen",
+            vec![seen(ended(StopReason::Cancelled, 7))],
             MatterStatus::Idle,
         ),
         (
             "failed",
             vec![ended(StopReason::Failed, 7)],
-            None,
             MatterStatus::Stopped { at: at(7) },
         ),
         (
             "cut off at max tokens",
             vec![ended(StopReason::MaxTokens, 7)],
-            None,
             MatterStatus::Stopped { at: at(7) },
         ),
         (
             "refused",
             vec![ended(StopReason::Refusal, 7)],
-            None,
             MatterStatus::Stopped { at: at(7) },
         ),
         (
             "an ending from a newer Clauseo",
             vec![ended(StopReason::Unknown, 7)],
-            None,
             MatterStatus::Stopped { at: at(7) },
         ),
         (
@@ -163,13 +153,11 @@ fn ending_rows() -> Vec<Row> {
                 status: ThreadStatus::AgentExited,
                 ..ended(StopReason::EndTurn, 5)
             }],
-            None,
             MatterStatus::Ready,
         ),
         (
             "paused, reset known",
             vec![paused(Some(90))],
-            None,
             MatterStatus::PausedAtLimit {
                 resets_at: Some(at(90)),
             },
@@ -177,7 +165,6 @@ fn ending_rows() -> Vec<Row> {
         (
             "paused, reset not given",
             vec![paused(None)],
-            None,
             MatterStatus::PausedAtLimit { resets_at: None },
         ),
     ]
@@ -189,7 +176,6 @@ fn precedence_rows() -> Vec<Row> {
         (
             "two paused: the earliest reset",
             vec![paused(Some(90)), paused(None), paused(Some(60))],
-            None,
             MatterStatus::PausedAtLimit {
                 resets_at: Some(at(60)),
             },
@@ -200,7 +186,6 @@ fn precedence_rows() -> Vec<Row> {
                 ended(StopReason::Cancelled, 7),
                 ended(StopReason::Failed, 9),
             ],
-            None,
             MatterStatus::Stopped { at: at(9) },
         ),
         (
@@ -212,25 +197,21 @@ fn precedence_rows() -> Vec<Row> {
                 thread(ThreadStatus::NeedsYou),
                 permission(),
             ],
-            None,
             MatterStatus::NeedsPermission,
         ),
         (
             "a question outranks a pause",
             vec![paused(Some(1)), thread(ThreadStatus::NeedsYou)],
-            None,
             MatterStatus::NeedsAnswer,
         ),
         (
             "a pause outranks an answer ready",
             vec![ended(StopReason::EndTurn, 5), paused(None)],
-            None,
             MatterStatus::PausedAtLimit { resets_at: None },
         ),
         (
             "an answer ready outranks work",
             vec![thread(ThreadStatus::Running), ended(StopReason::EndTurn, 5)],
-            None,
             MatterStatus::Ready,
         ),
         (
@@ -239,22 +220,19 @@ fn precedence_rows() -> Vec<Row> {
                 ended(StopReason::Cancelled, 7),
                 thread(ThreadStatus::Running),
             ],
-            None,
             MatterStatus::Working,
         ),
         (
             "a stop outranks idle",
             vec![thread(ThreadStatus::Idle), ended(StopReason::Cancelled, 7)],
-            None,
             MatterStatus::Stopped { at: at(7) },
         ),
         (
             "a stop seen, an answer not",
             vec![
-                ended(StopReason::Cancelled, 3),
+                seen(ended(StopReason::Cancelled, 3)),
                 ended(StopReason::EndTurn, 9),
             ],
-            Some(5),
             MatterStatus::Ready,
         ),
     ]
@@ -263,8 +241,8 @@ fn precedence_rows() -> Vec<Row> {
 #[test]
 fn the_status_rule_table() {
     let rows = [one_thread_rows(), ending_rows(), precedence_rows()].concat();
-    for (name, threads, opened, expected) in rows {
-        assert_eq!(matter_status(threads, opened.map(at)), expected, "{name}");
+    for (name, threads, expected) in rows {
+        assert_eq!(matter_status(threads), expected, "{name}");
     }
 }
 

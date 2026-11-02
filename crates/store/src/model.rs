@@ -196,6 +196,9 @@ pub struct ThreadRow {
     pub created: Timestamp,
     /// When it last changed.
     pub updated: Timestamp,
+    /// The thread's last `seq` when the lawyer last saw it (`MarkSeen`); `None` before the
+    /// first (schema 3; a thread from before schema 3 starts seen up to its last `seq` then).
+    pub seen_seq: Option<Seq>,
 }
 
 /// A checkpoint: the git commit behind a `CheckpointRecorded` event.
