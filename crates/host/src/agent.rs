@@ -9,6 +9,7 @@ pub(crate) mod codex;
 pub(crate) mod data_folder;
 pub(crate) mod loads;
 mod spec;
+pub(crate) mod title;
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
