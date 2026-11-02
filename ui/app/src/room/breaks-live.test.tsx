@@ -29,7 +29,7 @@ afterEach(async () => {
 const QUESTION = "Summarise the notice to the bank.";
 const field = () => h!.one("composer") as HTMLTextAreaElement;
 const H10: Script["next"] = { parts: ["restart"], query: () => ({ threads: [] }) };
-const status = (s: "running" | "idle" | "agent_exited"): ViewEntry => {
+const status = (s: "starting" | "running" | "idle" | "agent_exited"): ViewEntry => {
   const head = header();
   head.header!.status = s;
   return head;
@@ -86,6 +86,52 @@ test("Claude stopping mid-answer: the stopped line with its time and no Restart,
   expect(h.sent("send_prompt").map((c) => c.content[0]?.text?.text)).toEqual([QUESTION, QUESTION]);
   expect(h.one("agent-stopped")).toBeNull();
   expect(h.one("working")).not.toBeNull();
+});
+
+test("a relaunch that fails before its turn starts: the second question stays, its failed step card shows, the thread settles to Idle", async () => {
+  let sends = 0;
+  h = await asked({
+    dispatch: (command) => {
+      if (command.send_prompt === undefined) return defaultOutcome(command);
+      sends += 1;
+      return { prompt_accepted: { turn: uuid(sends, 4), message: uuid(sends, 5) } };
+    },
+  });
+  h.deliver(failed("agent.exited"));
+  await h.settle();
+  // asking again: the host takes the question as a new turn, and the relaunch fails before that turn starts (0002)
+  await h.key({ key: "Enter", keyCode: 13 });
+  const second = uuid(2, 4);
+  const again = userMessage(10, 2, QUESTION);
+  again.user_message!.turn = second;
+  h.deliver([upsert(again), upsert(status("starting"))]);
+  await h.settle();
+  h.deliver([
+    upsert(step(11, { turn: second, stop: "failed", failure: "agent.exited", ts: Date.now() })),
+    upsert(status("idle")),
+  ]);
+  await h.settle();
+  expect(h.all("message-user").map((m) => m.textContent)).toEqual([
+    expect.stringContaining(QUESTION),
+    expect.stringContaining(QUESTION),
+  ]);
+  expect(h.all("message-agent").map((m) => m.textContent)).toEqual(["Clause nine requires notice"]);
+  const steps = h.all("turn-stopped");
+  expect(steps.map((s) => [s.dataset["stopReason"], s.dataset["failure"]])).toEqual([
+    ["failed", "agent.exited"],
+    ["failed", "agent.exited"],
+  ]);
+  // each stop shows its mark where it stopped
+  expect(steps.map((s) => s.querySelector('[data-testid="stopped-here"]') !== null)).toEqual([
+    true,
+    true,
+  ]);
+  // settled: no turn runs, so Ask is back, and the new break's line and question come back
+  expect(h.one("cancel")).toBeNull();
+  expect(h.one("send")).not.toBeNull();
+  expect(h.one("working")).toBeNull();
+  expect(h.one("agent-stopped")?.dataset["code"]).toBe("agent.exited");
+  expect(field().value).toBe(QUESTION);
 });
 
 test("the question comes back without moving the lawyer's focus from a field elsewhere", async () => {
