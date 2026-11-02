@@ -22,8 +22,9 @@
 #   names only the target, and that night's corpus is not uploaded.
 #   Moving crash reports private before the private beta: clauseo-ai/clauseo-acp-private#180.
 # - The fuzz job can read the repo and its Actions runs (to find and download the corpus), and
-#   nothing else. Only the report job can write, and only to issues. It checks out nothing, runs no code from the repo, and posts the fuzz job's text only
-#   in the shapes nightly.sh writes. No secrets are used.
+#   nothing else. Only the report job can write, and only to issues. It checks out nothing, runs
+#   no code from the repo, and posts the fuzz job's text only in the shapes nightly.sh writes. No
+#   secrets are used.
 name: fuzz
 
 on:
@@ -85,9 +86,11 @@ jobs:
         working-directory: fuzz
         run: cargo fuzz build --fuzz-dir . -O --debug-assertions
 
-      # Only runs of this workflow on main are looked at (schedule, or dispatched with main as the
-      # ref), newest first; the first with an unexpired fuzz-corpus artifact is used. This run is
-      # still in progress, so it is not among them.
+      # Only runs of this workflow on main are looked at, schedule or dispatched with main as the
+      # ref, newest first; the first with an unexpired fuzz-corpus artifact is used. The event is
+      # filtered by the API: a fork's pull request can start runs of a fuzz.yml it changed, and
+      # with them on the list they could push main's runs out of it. This run is still in progress,
+      # so it is not among them. If the download fails, the run starts from the seeds.
       - name: Download the newest corpus from main
         id: corpus
         env:
@@ -96,14 +99,20 @@ jobs:
         run: |
           set -euo pipefail
           from=""
-          runs=$(gh run list --workflow fuzz.yml --branch main --status completed --limit 30 \
-            --json databaseId,headBranch,event \
-            --jq '.[] | select(.headBranch == "main" and (.event == "schedule" or .event == "workflow_dispatch")) | .databaseId')
+          runs=$(for event in schedule workflow_dispatch; do
+            query="branch=main&event=$event&status=completed&per_page=30"
+            gh api "repos/$GH_REPO/actions/workflows/fuzz.yml/runs?$query" \
+              --jq ".workflow_runs[] | select(.head_branch == \"main\" and .event == \"$event\"
+                and .head_repository.full_name == \"$GH_REPO\") | \"\\(.created_at) \\(.id)\""
+          done | sort -r | cut -d ' ' -f 2)
           for run in $runs; do
             if [[ -n $(gh api "repos/$GH_REPO/actions/runs/$run/artifacts" \
               --jq '.artifacts[] | select(.name == "fuzz-corpus" and (.expired | not)) | .id') ]]; then
-              gh run download "$run" --name fuzz-corpus --dir fuzz/corpus
-              from=$run
+              if gh run download "$run" --name fuzz-corpus --dir fuzz/corpus; then
+                from=$run
+              else
+                rm -rf fuzz/corpus
+              fi
               break
             fi
           done
@@ -123,7 +132,11 @@ jobs:
           fi
           ./nightly.sh "$((10#$FUZZ_SECONDS))"
           {
-            echo "Corpus: ${CORPUS_RUN:+the artifact of run }${CORPUS_RUN:-none on main, so the run started from fuzz/seeds/}"
+            if [[ -n $CORPUS_RUN ]]; then
+              echo "Corpus: the artifact of run $CORPUS_RUN"
+            else
+              echo "Corpus: none on main, so the run started from fuzz/seeds/"
+            fi
             echo
             cat out/summary.md
           } >>"$GITHUB_STEP_SUMMARY"
