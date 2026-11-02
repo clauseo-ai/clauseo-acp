@@ -30,9 +30,18 @@ Measured on Linux x64 on 2026-11-02 with Node 24.22.0 and npm 11.19.1:
 **The crate.** `clauseo-agents` depends on `protocol` (`AgentId`), `process`, `settings`,
 `serde`, `serde_json`, `futures`, `async-channel`, `async-io`, `ureq` (rustls, the platform
 verifier, blocking, on the install's own thread), `sha2`, `base64`, `flate2`, `tar`, `zip`,
-`thiserror` and `dunce`, with `nix` on Unix and `windows` on Windows for the free disk space. It
-never depends on `sandbox`: installs run outside it. It has no tokio. Idle stop and resume are
-`host`'s (R20b).
+`thiserror` and `dunce`, with `nix` on Unix and `windows` on Windows. It also depends on
+`rustls`, the one ureq uses, to classify TLS errors and for the test proxy's server side. Beyond
+the brief's list are `rustls`, `thiserror`, `dunce`, and `nix` and `windows` (the free disk
+space, and the Windows proxy setting read from the registry). `rcgen` comes only with the
+`test-support` feature, for the TLS-inspecting test proxy. It never depends on `sandbox`:
+installs run outside it. It has no tokio and no tauri. Idle stop and resume are `host`'s (R20b).
+
+**Agreed deviations from the brief.** Rohan agreed to each of these:
+- The derived lock follows `peerDependencies` as well (see Context).
+- An install makes three tries, with waits of 2 s and then 8 s. The brief said 2 s, 8 s and 30 s.
+- `Blocked` and `DiskFull` stop at once, with no retry.
+- TLS trusts the OS's store (the platform verifier) unless the agent has a CA file.
 
 **The pins.** `snapshot.rs` embeds G16's two files with `include_str!`. Each agent gets a
 derived pair: a `package.json` with that agent's one root dependency (plus the `@openai/codex`
@@ -70,7 +79,10 @@ snapshot refuses an agent id named `runtime`, `downloads`, `npm-cache` or `signi
 (`dunce::canonicalize`). It is used only if the result is a regular file, `node --version`
 (through the launcher, 10 s at most) reports v22 or later, and npm's `npm-cli.js` sits beside it
 (`../lib/node_modules/npm/bin/npm-cli.js` on Unix, `node_modules\npm\bin\npm-cli.js` on Windows).
-Otherwise the pinned archive is downloaded and checked by SHA-256. It is extracted into a temp
+Otherwise the pinned archive is downloaded and checked by SHA-256. On Linux with musl and no
+usable Node of the user's, the install fails at once (kind `failed`, no retry). Its log says the
+downloaded Node is a glibc build and Node 22 or later must be installed. Musl users bring their
+own Node. It is extracted into a temp
 folder beside `runtime/<name>`, with the archive's top folder stripped and no link, absolute path
 or `..` entry, then renamed into place. A runtime folder is complete only when its own
 `clauseo-runtime.json` (the archive's SHA-256) is there.
@@ -88,15 +100,17 @@ present), the crate fetches `resolved` itself:
 - TLS uses rustls with the OS's trust store (the platform verifier), so a CA that IT installed is
   trusted. With an agent's `network.ca_certs` file, that file's certificates are the roots.
 
-The crate then runs `node <npm-cli.js> cache add <absolute paths…> --cache <npm-cache>` in
-batches. Next comes `node <npm-cli.js> ci --offline --ignore-scripts --no-bin-links --no-audit
---no-fund --cache <npm-cache> --userconfig <agents/npmrc, empty> --update-notifier=false
---logs-max=0` in `install/.tmp-<hash>-<n>`. Each npm run gets `NODE_OPTIONS` set empty, and
-`--proxy`, `--https-proxy` and `--cafile` when they are set (npm makes no network call with
-`--offline`). The temp folder is renamed to `<hash>`, and the receipt is written last. npm runs
-as `node npm-cli.js`, never `npm.cmd`, which `LaunchSpec::new` refuses. Every child starts
-through the `process::Launcher` the crate is given. After `Ready`, the install's tarballs, the
-Node archive and the npm cache are removed.
+The crate then runs `node <npm-cli.js> cache add <absolute paths…>` in batches of 40. Next comes
+`node <npm-cli.js> ci` in `install/.tmp-<hash>-<n>`. Both get `--cache <npm-cache> --userconfig
+<agents/npmrc, empty> --update-notifier=false --logs-max=0`, plus `--proxy`, `--https-proxy` and
+`--cafile` when they are set. `ci` adds `--offline --ignore-scripts --no-bin-links --no-audit
+--no-fund`, so it makes no network call. Each npm run gets `NODE_OPTIONS` set empty, and
+`NODE_EXTRA_CA_CERTS` when the agent has a CA file. Each run is raced against a pause and a
+10-minute timeout. Only npm's `npm error code X` line reaches the log, redacted. An `ENOSPC`
+code is `DiskFull`. The temp folder is renamed to `<hash>`, and the receipt is written last. npm
+runs as `node npm-cli.js`, never `npm.cmd`, which `LaunchSpec::new` refuses. Every child starts
+through the `process::Launcher` the crate is given. Just before `Ready` is sent, the install's
+tarballs, the Node archive and the npm cache are removed.
 
 **The receipt** (`clauseo-receipt.json`) records schema 1, the agent id, the adapter version,
 the lock hash, the Node path and version, the platform, and `installed_at` in Unix seconds. A
@@ -106,22 +120,28 @@ from them then. If the receipt's Node is gone or below 22 at start, the install 
 downloaded Node.
 
 **Progress** is bytes received and the total for the agent, with Node's archive inside the total
-and never named. Totals come from each file's `Content-Length`, or from its size for a file
-already here. A `Downloading` event goes out at most every 250 ms on the clock's monotonic
-reading, and states go out on an `async-channel`. `Missing` carries the bytes an install would
-download.
+and never named. The total adds Node's archive size from the snapshot, each package's size once
+its response's `Content-Length` arrives (or the file is already here), and the snapshot's size
+row standing in for the packages not sized yet. A `Downloading` event goes out at most every
+250 ms on the clock's monotonic reading, and the first and the completing events always go out.
+States go out on an `async-channel`. `Missing` carries the bytes an install would download.
 
 **Failures.** One install makes up to three tries:
 - `Offline`: name resolution fails, or connect fails with no route (network or host unreachable,
   network down, connect timeout). The install waits 30 s on the timer and tries again, with no try
   counted, until it succeeds or is paused.
-- `Blocked`: a 403 or 407, a TLS failure, or an HTML page. It stops at once, since a retry would
-  meet the same proxy.
+- `Blocked`: a 403 or 407, a TLS failure, or an HTML page. It stops at once with no retry, since
+  a retry would meet the same proxy.
 - `DiskFull`: the free space at the data folder is below the need before the first try (checked
-  again before each retry), or `ENOSPC` while writing. It carries the need and the free space in
-  MB.
+  again before each retry), or `ENOSPC` while writing. It stops at once with no retry. It carries
+  the need and the free space in MB.
 - `Failed`: anything else, after three tries, with back-off 2 s and then 8 s. That includes a
   third integrity mismatch and a non-zero `npm ci`.
+
+A download reports a `FetchKind`, internal to the crate: `Offline`, `Blocked`, `DiskFull`,
+`Integrity`, `Cancelled` or `Failed`. The public `FailureKind` has four: `Offline`, `Blocked`,
+`DiskFull` and `Failed`. `Integrity` counts as a try and becomes `Failed` after the third.
+`Cancelled` ends quietly as `Paused`.
 
 Each failure carries an `InstallLog`: "Clauseo download log", "agent: {id}", "received: {n} of
 {total} MB", "result: {kind} after {n} tries", the failing host and HTTP status, and redacted
@@ -134,7 +154,9 @@ plus Node's archive and unpacked size when Node is downloaded, plus 10 %.
 **One download at a time.** `install` for one agent pauses any other agent's running install
 where it is (`Paused`, which keeps its partial files). It resumes on its own `install`. A second
 `install` of an agent already installing starts nothing. Jobs run one after another: a new job
-starts its work only after a paused one has stopped.
+starts its work only after a paused one has stopped. There is one worker thread plus a thread per
+install, and a job lock makes the jobs run one after another. Every job event is sent under the
+lock `pause` takes, and dropped once the job is paused or superseded.
 
 **Firm IT mode.**
 1. An id in `managed` (policy sets `agents.<id>`) is IT's runtime. Nothing is installed for it
@@ -142,9 +164,9 @@ starts its work only after a paused one has stopped.
 2. An offline bundle folder (`install.bundle`, R20's setting) holds `node/<Node's archive name>`
    and `npm/<sha512 hex>.tgz`. It is read instead of the network, with the same checks, and a
    missing file fails the install. Making a bundle is S25's.
-3. A firm npm mirror (`install.registry`, R20's setting): each `resolved` URL's
-   `https://registry.npmjs.org/` prefix is replaced by the mirror's base, and the integrity check
-   is unchanged.
+3. A firm npm mirror (`install.registry`, R20's setting): `mirror_url` replaces each `resolved`
+   URL's snapshot registry base (`https://registry.npmjs.org/` in the build) with the mirror's
+   base. A URL off that base is refused. The integrity check is unchanged.
 4. Proxy and CA: the proxy is R17's `network.upstream_proxy` or `HTTPS_PROXY` (the caller picks
    which), and the CA is R17's `network.ca_certs` entry for the agent. `retry(agent,
    use_system_proxy: true)` adds the OS's static proxy setting (Windows' Internet Settings,
