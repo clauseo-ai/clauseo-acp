@@ -3,6 +3,14 @@
 //!
 //! # Owns
 //!
+//! - The policy ([`Policy`], built by [`Policy::builder`]): the matter and state folders, the
+//!   runtime, read-only and allowed paths, the notes folder, the credential link, Claude's login
+//!   store, hidden paths, loopback ports, the Keychain switch, and what is write-denied in the
+//!   matter ([`PROTECTED_NAMES`], every `.git`, over-cap files). Every path in it is canonical
+//!   and every refusal of [`PolicyBuilder::build`] holds. R17 decides which paths go in.
+//! - The walk of the matter ([`scan_matter`], [`scan_links`]): links that lead outside it and
+//!   every `.git`, one walk per launch.
+//! - Tier detection ([`detect`], cached; [`probe`], uncached): [`Tier`] and [`NoSandbox`].
 //! - The denial types every stage C task uses ([`Denial`], [`Access`], [`PathClass`],
 //!   [`HostRefusal`], [`Reachability`]), the per-launch [`DenialSink`], and the rate cap
 //!   ([`CappedSink`]: at most [`DENIALS_PER_WINDOW`] per [`DENIAL_WINDOW`], the excess folded
@@ -11,24 +19,49 @@
 //!
 //! # Interface
 //!
+//! - [`Policy::builder`]`(matter, state)`, then [`PolicyBuilder`]'s `runtime`, `read`,
+//!   `allowed_folder`, `read_only_in_state`, `notes`, `credential_link`, `claude_store`,
+//!   `hidden`, `proxy_port` (once per loopback listener), `loopback` ([`Loopback`]),
+//!   `keychain`, `over_cap`, `links`, `scan` (a [`MatterScan`] the caller already has),
+//!   `home`, and `build`. Accessors carry the builder's names, plus [`Policy::tmpdir`] and
+//!   [`Policy::read_only_in_matter`] ([`PathRule`]s); [`Policy::claude_store`] gives a
+//!   [`ClaudeStore`] with its allowed names ([`CLAUDE_STORE_FILES`],
+//!   [`CLAUDE_STORE_LOCK_FOLDERS`]).
+//! - [`Policy::check_allowed_folder`]: R18 runs it before a card; `build` runs it on each
+//!   allowed folder. [`Policy::classify`]: the [`PathClass`] of a refused path, for a watcher.
+//! - [`scan_links`]`(matter) -> Vec<`[`LinkFinding`]`>` ([`LinkKind`]), and [`scan_matter`],
+//!   which also lists every `.git` and the folders `.git` files name.
+//! - [`detect`] and [`probe`] return a [`Detection`]: tier A on macOS when Seatbelt applies a
+//!   profile, C with [`NoSandbox::NotBuilt`] on Windows until S15, C with
+//!   [`NoSandbox::UnsupportedOs`] elsewhere.
 //! - [`DenialSink`]: `denied` for each denial, `upstream` for the proxy's reachability. `Arc` of
 //!   a sink is a sink. [`CappedSink::new`] wraps one on the real clock, [`CappedSink::with_clock`]
 //!   on any [`Clock`]; [`CappedSink::tick`] delivers a held count from the owner's timer.
 //!
 //! # Invariants
 //!
+//! - A built [`Policy`] holds only canonical paths, and none of its refusals apply: no
+//!   relative path; the matter is not `/` or the home folder and meets no hidden path; the
+//!   state folder and the matter do not nest; the notes folder and the credential link are not
+//!   in the matter; each allowed folder passes [`Policy::check_allowed_folder`].
+//! - The credential link and the Claude store's names are never resolved: only the link path
+//!   enters the policy, never the lawyer's login path behind it.
+//! - The walk never follows a link and never goes into a `.git` folder.
 //! - Time is an input: the rate cap reads only its [`Clock`]; [`SystemClock::new`] is the one
-//!   read of the real clock.
-//! - A sink gets every denial that passes the cap, with no dedupe; the cap calls the inner sink
-//!   with no lock held.
+//!   read of the real clock. A sink gets every denial that passes the cap, with no dedupe; the
+//!   cap calls the inner sink with no lock held.
+//! - Detection runs its probe at most once per process; the probe is the one process this
+//!   crate starts outside a launcher.
 //!
 //! # Depends on
 //!
-//! `protocol` (error codes), `process` (launch errors), `serde` (denials as JSON).
+//! `protocol` (error codes), `process` (launch errors), `serde` (denials and findings as JSON),
+//! `tracing` (skipped folders, a failed probe), `dunce` (canonical paths without `\\?\`).
 //!
 //! # Start reading
 //!
-//! `denial.rs`, then `error.rs`.
+//! `policy.rs` (the builder and accessors), `policy/build.rs` (canonicalising and the
+//! refusals), `links.rs`, `detect.rs`, `denial.rs`, then `error.rs`.
 
 #![deny(
     clippy::indexing_slicing,
@@ -39,10 +72,21 @@
 )]
 
 mod denial;
+mod detect;
 mod error;
+mod links;
+mod policy;
+#[cfg(test)]
+mod test_support;
 
 pub use denial::{
     Access, CappedSink, Clock, DENIAL_WINDOW, DENIALS_PER_WINDOW, Denial, DenialSink, HostRefusal,
     PathClass, Reachability, SystemClock,
 };
+pub use detect::{Detection, NoSandbox, Tier, detect, probe};
 pub use error::Error;
+pub use links::{LinkFinding, LinkKind, MatterScan, scan_links, scan_matter};
+pub use policy::{
+    CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore, Loopback, PROTECTED_NAMES,
+    PathRule, Policy, PolicyBuilder,
+};

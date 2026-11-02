@@ -98,9 +98,6 @@ crates/store/src/fixtures.rs - clippy::expect_used
 crates/store/tests/store/write.rs - clippy::disallowed_methods
 crates/store/benches/common/dir.rs - clippy::disallowed_methods
 crates/store/benches/reopen.rs - clippy::unwrap_used
-
-# Added by S14: the rate cap's one real clock.
-crates/sandbox/src/denial.rs SystemClock::new clippy::disallowed_methods
 crates/store/benches/commit.rs - clippy::unwrap_used
 
 # Added by R8: matters' write module, its tests' and bench's write modules, a unit test's symlink,
@@ -166,3 +163,10 @@ fuzz/fuzz_targets/protocol_decode.rs - clippy::disallowed_methods
 fuzz/fuzz_targets/reducer_snapshot.rs - clippy::disallowed_methods
 fuzz/fuzz_targets/settings_parse.rs - clippy::disallowed_methods
 fuzz/fuzz_targets/store_read.rs - clippy::disallowed_methods
+
+# Added by S14: the rate cap's one real clock, the tests' write module, the Seatbelt probe at
+# host start, and the by-hand measurement of the matter walk.
+crates/sandbox/src/denial.rs SystemClock::new clippy::disallowed_methods
+crates/sandbox/src/test_support.rs - clippy::disallowed_methods
+crates/sandbox/src/detect.rs seatbelt::run clippy::disallowed_methods
+crates/sandbox/src/links/tests.rs walk_of_fifty_thousand_files clippy::disallowed_methods
