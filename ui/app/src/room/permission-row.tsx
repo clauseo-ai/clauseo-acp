@@ -74,8 +74,9 @@ function Permission({
           if (code === "permission.not_pending") return setAsked({ answer: a, sent: true });
           flying.current = false;
           setAsked(null);
-          // a confirm the lawyer declined says nothing: the prompt is simply back
-          if (code !== "transport.unauthorized") setError(errorWords(lang, code));
+          // a confirm the lawyer declined (only Always for this matter opens one) says nothing: the prompt is simply
+          // back. Any other refusal, unauthorized included, says why
+          if (a !== "always" || code !== "transport.unauthorized") setError(errorWords(lang, code));
         },
       );
     },

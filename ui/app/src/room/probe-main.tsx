@@ -3,7 +3,8 @@
 // a question, a permission, an answer ready, stopped, the limit with and without a reset, a moved folder, pinned, and
 // each date group), its papers, and the scripted stream (testing/stream-script.ts) played to whatever subscribes; with
 // ?thread=permission the stream ends, before its step, with the agent's permission requests: a pending prompt on a
-// paper above one answered once and done. The page's query sets its display for this page only (theme=night,
+// paper above one answered once and done; with ?confirm=1 as well, the host holds every answer, so the probe can press
+// Always for this matter and find the prompt confirming (the OS line up, the answers waiting). The page's query sets its display for this page only (theme=night,
 // lang=hi, lite=1, motion=reduced, size=18), as the WebKit probe (scripts/webkit-probe.swift) asks for it, and
 // window.__clauseoDisplay and __clauseoAxe are set (dev-hooks.ts).
 // Not shipped.
@@ -51,6 +52,8 @@ const page = new URLSearchParams(location.search);
 /** ?thread=permission: the turn stops short of its step, waiting on the lawyer, at a pending prompt to save a new
  * version of a paper, above one answered once whose call completed. */
 const asking = page.get("thread") === "permission";
+/** ?confirm=1: answer_permission never answers, as while the OS's own confirm is up. */
+const holding = asking && page.get("confirm") === "1";
 
 /** The agent's permission requests the turn ends with on ?thread=permission: a pending prompt above an answered one. */
 const PERMISSIONS: ViewPatchBody[] = [
@@ -107,6 +110,8 @@ const transport = new FakeTransport({
   },
   next: fakeNext({ matters: () => matters, papers, location: "Documents/Clauseo" }),
 });
+
+if (holding) transport.answerPermission = () => new Promise<void>(() => {});
 
 // the page's query over the settings, before the first render, so night never starts as day; and the hooks the
 // by-hand checks use, so the WebKit probe can run window.__clauseoAxe() as it would run in the app

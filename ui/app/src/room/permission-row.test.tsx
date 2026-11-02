@@ -2,6 +2,7 @@
 // The agent's permission requests and elicitations in the room's live thread (permission-row.tsx), over FakeTransport:
 // the answers and their keys from the composer, the confirm for allow_always, refusals, folded lines, and which prompt
 // takes the keys.
+import { act } from "react";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { th } from "@clauseo/components/lib/words-thread.ts";
@@ -15,6 +16,7 @@ import type {
   ToolCallEntry,
   ViewEntry,
 } from "../transport/protocol.ts";
+import { FakeTransport } from "../transport/fake-transport.ts";
 import { mountRoom, type Harness } from "./thread/harness.ts";
 
 let h: Harness | null = null;
@@ -22,6 +24,7 @@ afterEach(async () => {
   await h?.unmount();
   h = null;
   document.body.replaceChildren();
+  vi.restoreAllMocks();
 });
 
 const opt = (option_id: string, kind: PermissionOption["kind"]): PermissionOption => ({
@@ -122,6 +125,8 @@ test("Escape answers reject_once", async () => {
 });
 
 test("Cmd or Ctrl with Enter answers allow_always, saying the OS asks to confirm while the call is pending", async () => {
+  // a Mac: Linux has no confirm dialog to name
+  vi.spyOn(FakeTransport.prototype, "displayInfo").mockResolvedValue({ platform: "mac" });
   h = await room([perm(3, 1)]);
   let done: () => void = () => {};
   const spy = vi
@@ -129,7 +134,8 @@ test("Cmd or Ctrl with Enter answers allow_always, saying the OS asks to confirm
     .mockImplementation(() => new Promise<void>((resolve) => (done = resolve)));
   await h.key({ key: "Enter", ctrlKey: true });
   expect(spy).toHaveBeenCalledWith(expect.anything(), request(1), "opt-always");
-  expect(prompt()?.textContent).toContain("is asking you to confirm.");
+  expect(prompt()?.textContent).toContain("macOS is asking you to confirm.");
+  expect(prompt()?.dataset["confirming"]).toBeDefined();
   done();
   await h.settle();
   expect(prompt()?.textContent).not.toContain("is asking you to confirm.");
@@ -151,6 +157,33 @@ test("a confirm declined (transport.unauthorized) puts the prompt back, pending,
   // and it answers again
   await h.key({ key: "Escape" });
   expect(spy).toHaveBeenLastCalledWith(expect.anything(), request(1), "opt-deny");
+});
+
+test("transport.unauthorized for any answer but Always for this matter shows its words", async () => {
+  h = await room([perm(3, 1)]);
+  vi.spyOn(h.transport, "answerPermission").mockRejectedValueOnce(
+    hostError("transport.unauthorized"),
+  );
+  await h.click(h.one("permission-allow_once"));
+  expect(prompt()?.dataset["state"]).toBe("pending");
+  expect(prompt()?.textContent).toContain(errorWords("en", "transport.unauthorized"));
+});
+
+test("answered elsewhere first (permission.not_pending): no error line, nothing more is sent, and the entry folds", async () => {
+  h = await room([perm(3, 1)]);
+  const spy = vi
+    .spyOn(h.transport, "answerPermission")
+    .mockRejectedValue(hostError("permission.not_pending"));
+  await h.key({ key: "Enter" });
+  expect(spy).toHaveBeenCalledTimes(1);
+  for (const code of ["permission.not_pending", "internal"])
+    expect(prompt()?.textContent).not.toContain(errorWords("en", code));
+  await h.key({ key: "Escape" });
+  await h.click(h.one("permission-reject_once"));
+  expect(spy).toHaveBeenCalledTimes(1);
+  h.deliver([upsert(perm(3, 1, { state: chose("reject_once") }))]);
+  expect(prompt()?.dataset["state"]).toBe("resolved");
+  expect(answers()).toEqual([]);
 });
 
 test("another refusal shows its words under the answers, and the prompt can answer again", async () => {
@@ -270,6 +303,67 @@ test("only the oldest pending prompt takes the keys; once it folds, the next one
     [request(2), "opt-deny"],
     [request(3), "opt-once"],
   ]);
+});
+
+/** A keydown on an element, as the lawyer's key would land there. */
+async function keyOn(el: Element | null, init: KeyboardEventInit): Promise<void> {
+  if (el === null) throw new Error("nothing to press a key on");
+  await act(async () => {
+    el.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+  });
+  await h!.settle();
+}
+
+test("once A folds B takes the keys, yet Enter on the page with words in the field answers nothing and the words stay", async () => {
+  h = await room([perm(3, 1), perm(4, 2)]);
+  await h.click(h.all("permission")[0]!.querySelector('[data-testid="permission-allow_once"]'));
+  h.deliver([upsert(perm(3, 1, { state: chose("allow_once") }))]);
+  await h.type("and the lease");
+  await act(async () => (document.activeElement as HTMLElement | null)?.blur());
+  expect(document.activeElement).toBe(document.body);
+  await keyOn(document.body, { key: "Enter" });
+  expect(h.transport.only("answer_permission").map((c) => c.request)).toEqual([request(1)]);
+  expect(h.one("composer")).toHaveProperty("value", "and the lease");
+  // with the field empty, the page's Enter is B's
+  await h.type("");
+  await keyOn(document.body, { key: "Enter" });
+  expect(h.transport.only("answer_permission").map((c) => c.request)).toEqual([
+    request(1),
+    request(2),
+  ]);
+});
+
+test("a held Enter, repeating across A's fold, answers only A", async () => {
+  h = await room([perm(3, 1), perm(4, 2)]);
+  await h.key({ key: "Enter" });
+  await h.key({ key: "Enter", repeat: true });
+  h.deliver([upsert(perm(3, 1, { state: chose("allow_once") }))]);
+  expect(h.all("permission")[1]?.dataset["state"]).toBe("pending");
+  await h.key({ key: "Enter", repeat: true });
+  await h.key({ key: "Enter", repeat: true });
+  expect(h.transport.only("answer_permission").map((c) => c.request)).toEqual([request(1)]);
+});
+
+test("after an answer focus is in the composer's field, by click and by key", async () => {
+  h = await room([perm(3, 1), perm(4, 2)]);
+  const field = h.one("composer");
+  const once = h
+    .all("permission")[0]!
+    .querySelector<HTMLElement>('[data-testid="permission-allow_once"]')!;
+  await act(async () => once.focus());
+  await h.click(once);
+  expect(document.activeElement).toBe(field);
+  h.deliver([upsert(perm(3, 1, { state: chose("allow_once") }))]);
+  const deny = h
+    .all("permission")[1]!
+    .querySelector<HTMLElement>('[data-testid="permission-reject_once"]')!;
+  await act(async () => deny.focus());
+  await keyOn(deny, { key: "Escape" });
+  expect(h.transport.only("answer_permission").map((c) => c.option)).toEqual([
+    "opt-once",
+    "opt-deny",
+  ]);
+  expect(document.activeElement).toBe(field);
 });
 
 test("an elicitation: a question for you, the agent's words isolated, Stop the answer; never its URL; then only its words", async () => {

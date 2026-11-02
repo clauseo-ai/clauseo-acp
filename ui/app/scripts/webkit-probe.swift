@@ -16,7 +16,8 @@
 // the moved row its ring, the form's folder line one line, and the scratch matter, opened, its raised row. The
 // agent's permission requests (?thread=permission) are loaded at every width in both looks and run through axe: the
 // page answers once it also shows a pending prompt with its four answers above one answered once, and neither prompt
-// scrolls sideways.
+// scrolls sideways. With ?confirm=1 as well, Always for this matter is pressed and held, and the page answers once the
+// prompt is confirming (data-confirming and its OS line), at 1280 px and under the frozen axe run.
 //
 // Usage, from ui/app: pnpm build:probe, then serve dist-probe/ with `pnpm exec vite preview --mode probe` (port 4173),
 // then pnpm probe:webkit. PROBE_ORIGIN names another server; PROBE_SHOTS names a folder to save a PNG of each page
@@ -228,6 +229,22 @@ for (theme, lang) in looks {
                 setup: "Object.freeze(Object.prototype);")
   axe.measure = permissionMeasured
   runs.append(axe)
+  // Always for this matter, pressed, its answer held (?confirm=1): the OS's confirm line up and the answers waiting;
+  // at the widest size, and under axe with Object.prototype frozen
+  let cq = q + "&confirm=1"
+  let confirming = rendered + settled + " && (window.__alwaysPressed || (window.__alwaysPressed = true," +
+    " document.querySelector('[data-testid=\"permission-allow_always\"]').click(), false))" +
+    " && (function (p) { return p.dataset.confirming !== undefined && p.querySelector('.perm-confirming') !== null" +
+    " && p.querySelector('.perm-actions[inert]') !== null; })" +
+    "(document.querySelector('[data-testid=\"permission\"]'))"
+  var held = Run(name: "permission confirming \(theme) \(lang)", url: URL(string: "\(origin)/\(cq)")!, width: 1280,
+                 height: 800, rendered: confirming, setup: "")
+  held.measure = permissionMeasured
+  runs.append(held)
+  var heldAxe = Run(name: "permission confirming \(theme) \(lang), frozen, axe", url: URL(string: "\(origin)/\(cq)")!,
+                    width: 1280, height: 800, rendered: confirming + axeRun, setup: "Object.freeze(Object.prototype);")
+  heldAxe.measure = permissionMeasured
+  runs.append(heldAxe)
 }
 
 // Listens for errors from the first moment, before the page's own scripts run.
