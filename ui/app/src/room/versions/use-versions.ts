@@ -59,8 +59,11 @@ export type VersionsSlots = {
   /** For the toolbar's Versions and Undo pair; writing: Undo waits, faint, as while Clauseo writes: Versions is open
    * and nothing in the matter can be undone. */
   toolbar: { onVersions: () => void; versionsOpen: boolean; onUndo: () => void; writing: boolean };
-  /** Closes Versions: the rail comes back. */
-  close: () => void;
+  /** Whether Versions may close: false while its dialog asks or a restore or undo runs. Always true when shut. */
+  canLeave: boolean;
+  /** Closes Versions through its controller (VersionsController.leave): the rail comes back. While a dialog asks or an
+   * act runs it does nothing and says false; true once Versions is shut. */
+  close: () => boolean;
 };
 
 export function useVersions({
@@ -141,8 +144,14 @@ export function useVersions({
       (error: unknown) => console.warn(`Versions' chunk did not load: ${String(error)}`),
     );
   };
-  // one function for the room's life, so the room's New conversation key needn't listen again each render
-  const close = useCallback(() => setSession(null), []);
+  // one function while Versions stays open or shut, so the room's New conversation key needn't listen again each render
+  const close = useCallback(() => {
+    if (live?.controller.leave() === false) return false;
+    setSession(null);
+    return true;
+  }, [live]);
+  const leavable = () => live?.controller.canLeave() ?? true;
+  const canLeave = useSyncExternalStore(watch, leavable, leavable);
   // whether the open Versions found nothing to undo: the toolbar's Undo waits
   const nothing = () => {
     const s = live?.controller.snapshot();
@@ -161,6 +170,7 @@ export function useVersions({
         onUndo: () => show(true),
         writing: false,
       },
+      canLeave: true,
       close,
     };
   const { mod, controller } = live;
@@ -197,6 +207,7 @@ export function useVersions({
       onUndo: () => show(true),
       writing: undoWaits,
     },
+    canLeave,
     close,
   };
 }

@@ -108,8 +108,9 @@ export function RoomRail({
   /** A conversation was opened, or a new one started, from the rail: the folded rail closes, and the field takes the
    * focus the conversations ask for. */
   onConversation: () => void;
-  /** Heard just before New conversation starts one from the rail: the room ends Versions, back to now. */
-  onStartNew?: (() => void) | undefined;
+  /** Heard just before New conversation starts one from the rail: the room ends Versions, back to now. False: Versions
+   * can't end yet (its dialog asks, or a restore or undo runs), and no conversation starts. */
+  onStartNew?: (() => boolean) | undefined;
   newMatterRef: Ref<HTMLButtonElement>;
   /** Escape inside the rail. */
   onEscape: () => void;
@@ -145,7 +146,9 @@ export function RoomRail({
               w.lang,
             ),
             onNewConversation: () => {
-              onStartNew?.();
+              // the button stays as it is rather than greying: Versions' dialog is modal and stands while its act
+              // runs, so the rail can't be pressed then anyway; this only guards it, and nothing happens
+              if (onStartNew?.() === false) return;
               conversations.startNew();
               onConversation();
             },
