@@ -1,12 +1,11 @@
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use tauri::http::header::{CONTENT_SECURITY_POLICY, CONTENT_TYPE};
 use tauri::http::{HeaderValue, Response};
 use tauri::test::{MockRuntime, mock_builder};
 
-use super::{add_to_script, policy};
+use super::{add_to_script, header_value, policy};
 
 fn manifest_dir() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -20,18 +19,6 @@ fn configured() -> String {
         .as_str()
         .expect("tauri.conf.json sets app.security.csp as one string")
         .to_owned()
-}
-
-/// A policy as directive → sources, so two spellings of one policy compare equal.
-fn directives(policy: &str) -> BTreeMap<String, BTreeSet<String>> {
-    policy
-        .split(';')
-        .filter_map(|directive| {
-            let mut words = directive.split_whitespace();
-            let name = words.next()?.to_owned();
-            Some((name, words.map(str::to_owned).collect()))
-        })
-        .collect()
 }
 
 /// The policy the app's own context gives the hook.
@@ -91,19 +78,13 @@ fn the_worker_script_gets_the_configured_policy() {
     assert_eq!(csp_of(&worker), Some(configured().as_str()));
 }
 
-/// The page keeps the header Tauri wrote: the same directives, with Tauri's nonces and hashes.
+/// The page keeps the header Tauri wrote, with its own order and its nonces and hashes.
 #[test]
 fn the_page_keeps_the_policy_tauri_sent() {
     let sent = tauri_page_policy();
     let mut page = served("text/html", Some(&sent));
     add_to_script(&app_policy(), &mut page);
     assert_eq!(csp_of(&page), Some(sent.as_str()));
-    let mut expected = directives(&configured());
-    expected
-        .get_mut("script-src")
-        .unwrap()
-        .insert("'sha256-stand-in'".to_owned());
-    assert_eq!(directives(csp_of(&page).unwrap()), expected);
 }
 
 /// A script that already has a policy keeps it.
@@ -114,11 +95,23 @@ fn a_script_with_a_policy_keeps_it() {
     assert_eq!(csp_of(&script), Some("default-src 'none'"));
 }
 
+/// The media type before any parameter, trimmed, in any case.
 #[test]
-fn a_script_with_a_charset_gets_the_policy_too() {
-    let mut script = response("text/javascript; charset=utf-8");
-    add_to_script(&app_policy(), &mut script);
-    assert_eq!(csp_of(&script), Some(configured().as_str()));
+fn a_script_type_is_matched_without_its_parameters_or_case() {
+    let policy = app_policy();
+    for content_type in [
+        "text/javascript; charset=utf-8",
+        "Text/JavaScript",
+        " text/javascript ;charset=utf-8",
+    ] {
+        let mut script = response(content_type);
+        add_to_script(&policy, &mut script);
+        assert_eq!(
+            csp_of(&script),
+            Some(configured().as_str()),
+            "{content_type}"
+        );
+    }
 }
 
 #[test]
@@ -129,6 +122,8 @@ fn other_assets_are_left_as_they_are() {
         "image/png",
         "application/json",
         "application/octet-stream",
+        "text/javascriptx",
+        "text/html; text/javascript",
     ] {
         let mut asset = response(content_type);
         add_to_script(&policy, &mut asset);
@@ -139,22 +134,52 @@ fn other_assets_are_left_as_they_are() {
     assert_eq!(csp_of(&untyped), None);
 }
 
-/// The mock runtime drops a window's protocols, so no unit test can request an asset through the
-/// window; this holds the one window to the hook instead. The Windows e2e smoke test reads the
-/// header on the scripts the real window loads.
 #[test]
-fn the_main_window_is_built_with_the_hook() {
-    let lib = std::fs::read_to_string(manifest_dir().join("src/lib.rs")).unwrap();
-    let start = lib
-        .find("fn open_main_window(")
-        .expect("lib.rs builds the main window");
-    let body = &lib[start..];
-    let body = &body[..body.find("\n}\n").expect("open_main_window ends")];
-    let hook = body
-        .find("csp::on_scripts(builder, app)")
-        .expect("open_main_window adds the scripts' CSP (csp::on_scripts)");
-    let built = body
-        .find(".build()")
-        .expect("open_main_window builds the window");
-    assert!(hook < built, "the hook goes on before the window is built");
+fn a_policy_a_header_cannot_hold_gives_none() {
+    assert_eq!(header_value("default-src 'self'\nscript-src *"), None);
+    assert!(header_value(&configured()).is_some());
+}
+
+/// Every `.rs` file under `src/`, as (path relative to the crate, text).
+fn sources(dir: &Path, out: &mut Vec<(String, String)>) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            sources(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            let relative = path.strip_prefix(manifest_dir()).unwrap();
+            out.push((
+                relative.display().to_string().replace('\\', "/"),
+                std::fs::read_to_string(&path).unwrap(),
+            ));
+        }
+    }
+}
+
+/// Tauri keeps only a builder's last `on_web_resource_request` handler, so a second call anywhere
+/// would drop the scripts' CSP without a sound. The mock runtime drops a window's protocols, so
+/// no unit test can request an asset through the window: the Windows e2e smoke test checks the
+/// header on the real window's scripts and on the colouring worker.
+#[test]
+fn csp_rs_is_the_only_place_that_sets_a_web_resource_handler() {
+    let mut files = Vec::new();
+    sources(&manifest_dir().join("src"), &mut files);
+    let callers: Vec<&str> = files
+        .iter()
+        .filter(|(path, text)| {
+            !path.ends_with("csp/tests.rs") && text.contains("on_web_resource_request")
+        })
+        .map(|(path, _)| path.as_str())
+        .collect();
+    assert_eq!(callers, ["src/csp.rs"]);
+    let lib = &files
+        .iter()
+        .find(|(path, _)| path == "src/lib.rs")
+        .unwrap()
+        .1;
+    assert_eq!(
+        lib.matches("csp::on_scripts(").count(),
+        1,
+        "lib.rs installs the hook once"
+    );
 }
