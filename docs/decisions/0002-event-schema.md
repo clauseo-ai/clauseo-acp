@@ -187,10 +187,24 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `MatterHeader` | `matter_header:<matter id>` |
 | `Version` | `version:<checkpoint id>` |
 
-The reducer writes a `Step` only for a turn that started (its `turn_started` is in the stream),
-when that turn ends. A turn that ends without starting, a queued prompt removed or cancelled before
-its turn, gets no step card, only its user message's `UserMessageStatus::Removed`: it ran nothing
-and changed no file, so a card would have nothing to show or undo.
+The reducer writes a `Step` for a turn that started (its `turn_started` is in the stream), when
+that turn ends, and for a turn that ends `Failed` without starting (its agent's launch, its
+session's start or its before-turn checkpoint failed): that turn keeps its user message as sent,
+and its step card holds the failure's code and the `turn_ended` time, as any failed turn's card
+does, and it settles the thread's status as a failed turn does. A turn cancelled before it
+starts, a queued prompt removed or cancelled before its turn, gets no step card, only its user
+message's `UserMessageStatus::Removed`: the lawyer took it back, it ran nothing and changed no
+file, so a card would have nothing to show or undo.
+
+The failed case changed after v1 (U10's report, clauseo-ai/clauseo-acp-private#158): a relaunch
+that failed (the agent exited on `session/load`, `session/new` failed, or the program did not
+start) ended its turn with `turn_failed` and `turn_ended { failed }`, as the host's relaunch tests
+pin (`relaunch.rs` in `host`'s interface tests), but the reducer showed no card, dropped the code and
+marked the prompt removed, so the room showed nothing: the lawyer's question gone and no stop.
+No event changes; the fold does. `REDUCER_SCHEMA_VERSION` goes from 2 to 3, so a snapshot
+folded under the old rule is passed over and the thread's whole log is folded once at its next
+reopen, as for 0018's bump (that note gives the cost: on iris-vm about 31 ms instead of 7 ms for
+20,000 events, once per thread).
 
 A `Step` entry has no `undo_possible` field. The UI derives it from the step alone, as
 `checkpoint_after` exists and the step is not undone (`StepEntry::undo_possible` states the same

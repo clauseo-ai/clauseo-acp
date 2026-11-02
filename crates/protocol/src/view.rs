@@ -179,8 +179,8 @@ view_entries! {
         Permission(PermissionEntry, request: PermissionRequestId) = "permission",
         /// An elicitation.
         Elicitation(ElicitationEntry, elicitation: ElicitationId) = "elicitation",
-        /// The step card: one per ended turn that started. A turn that ends without starting
-        /// (removed from the queue) gets none.
+        /// The step card: one per ended turn that started or failed before it started. A turn
+        /// cancelled before it starts (removed from the queue) gets none.
         Step(StepEntry, turn: TurnId) = "step",
         /// A turn stopped at the usage limit: the at-limit card.
         LimitStop(LimitStopEntry, turn: TurnId) = "limit_stop",
