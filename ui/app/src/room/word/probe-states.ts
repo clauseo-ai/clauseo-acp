@@ -3,7 +3,8 @@
 // and general the host refuses every undo_step with matter.file_locked, so pressing Undo shows the lock's lines under
 // the note: Word's lines for the one Word document (lock), or the error map's line for two files (general). On open the
 // note names one Word document the wall lists, so it offers "Open in Word"; on tile the probe focuses that document's
-// tile on the wall, for its tooltip. Only the probe build imports this file. Not shipped.
+// tile on the wall, for its tooltip, and on tile-top the same with the petition first on the wall, on its top row,
+// where the tooltip has the least room above it. Only the probe build imports this file. Not shipped.
 import {
   batch,
   event,
@@ -26,12 +27,16 @@ import type {
 import type { ThreadInfo } from "../host-next.ts";
 
 /** Which Word page the probe loads: the lock's lines for one Word document, the general lock line for two files, the
- * note's "Open in Word", or the wall's Word tile with its tooltip. */
-export type WordPage = "lock" | "general" | "open" | "tile";
+ * note's "Open in Word", or the wall's Word tile with its tooltip, mid-wall or on the top row. */
+export type WordPage = "lock" | "general" | "open" | "tile" | "tile-top";
 
 /** ?word=… as the probe reads it; any other value is no Word page. */
 export function wordPageOf(value: string | null): WordPage | null {
-  return value === "lock" || value === "general" || value === "open" || value === "tile"
+  return value === "lock" ||
+    value === "general" ||
+    value === "open" ||
+    value === "tile" ||
+    value === "tile-top"
     ? value
     : null;
 }
@@ -40,9 +45,14 @@ export function wordPageOf(value: string | null): WordPage | null {
 export const PETITION = "Petition to quash.docx";
 const REPLY = "papers/Reply to the notice.docx";
 
-/** The wall's files on a Word page: the probe's five, the complaint swapped for the petition. */
-export const wordFiles = (files: readonly string[]): string[] =>
-  files.map((name) => (name === "Complaint under section 138.docx" ? PETITION : name));
+/** The wall's files on a Word page: the probe's five, the complaint swapped for the petition; on tile-top the
+ * petition comes first, on the wall's top row. */
+export function wordFiles(files: readonly string[], page: WordPage): string[] {
+  const swapped = files.map((name) =>
+    name === "Complaint under section 138.docx" ? PETITION : name,
+  );
+  return page === "tile-top" ? [PETITION, ...swapped.filter((name) => name !== PETITION)] : swapped;
+}
 
 /** The refusal of a program holding a file, as the host sends it. */
 export const LOCKED: HostError = { code: "matter.file_locked", message: "held", retryable: true };

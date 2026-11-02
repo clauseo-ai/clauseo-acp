@@ -203,9 +203,9 @@ test("Word holding a file: the dialog names it with Try again, the page says why
   expect(dialog()?.textContent).toContain("Close '\u2068notes.docx\u2069' in Word to restore it.");
   expect(h.one("dialog-try-again")).not.toBeNull();
   expect(h.one("dialog-confirm")).toBeNull();
-  // under the dialog, the page says why by the refusal's code
+  // the dialog says which file Word holds; the band under it doesn't add the general line
   const page = [...document.body.querySelectorAll(".ver-room-band")].map((n) => n.textContent);
-  expect(page.join(" ")).toContain(errorWords("en", "matter.file_locked"));
+  expect(page.join(" ")).not.toContain(errorWords("en", "matter.file_locked"));
 
   held = false;
   await h.click(h.one("dialog-try-again"));

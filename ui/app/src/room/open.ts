@@ -7,14 +7,23 @@ import { toHostError, type HostTransport } from "../transport/host-transport.ts"
 import type { MatterId } from "../transport/protocol.ts";
 import type { Papers } from "./host-next.ts";
 
-/** Runs an open or show call: a declined confirm is silent, any other refusal a console warning. */
-export async function quietly(name: string, call: Promise<void>): Promise<void> {
+/** Runs an open or show call and gives its refusal's code: null when it went through or the lawyer declined the
+ * confirm; any other refusal also goes to the console. For a caller with a place to say why, such as the change note. */
+export async function refusalOf(name: string, call: Promise<void>): Promise<string | null> {
   try {
     await call;
+    return null;
   } catch (error) {
     const e = toHostError(error);
-    if (e.code !== "transport.unauthorized") console.warn(`${name} failed: ${JSON.stringify(e)}`);
+    if (e.code === "transport.unauthorized") return null;
+    console.warn(`${name} failed: ${JSON.stringify(e)}`);
+    return e.code;
   }
+}
+
+/** Runs an open or show call: a declined confirm is silent, any other refusal a console warning. */
+export async function quietly(name: string, call: Promise<void>): Promise<void> {
+  await refusalOf(name, call);
 }
 
 /** The papers the wall last listed, and whose they are. */

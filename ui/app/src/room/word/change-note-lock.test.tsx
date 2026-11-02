@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 // U3's direct Undo meeting a lock, over FakeTransport: an undo of one Word document refused with matter.file_locked
 // names it in Word's lines under the change note; any other lock shows the error map's line; Try again, in Undo's
-// place, sends the same undo_step with a new command_id; and axe finds nothing on the lock's lines.
+// place, sends the same undo_step with a new command_id; focus goes to Try again as the lines come and back to Undo,
+// or the note, as they go; and axe finds nothing on the lock's lines.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -188,3 +189,79 @@ for (const language of ["en", "hi"] as const) {
     expect(found).toEqual([]);
   }, 20_000);
 }
+
+/** Focuses a button and presses it, as the keyboard does. */
+async function pressFocused(room: Harness, testId: string): Promise<void> {
+  const button = room.one(testId);
+  await act(async () => button?.focus());
+  expect(document.activeElement).toBe(button);
+  await press(room, testId);
+}
+
+test("focus: Undo pressed from the keyboard and refused with the lock goes to Try again, not the page", async () => {
+  h = await noteOf(["Reply.docx"], () => LOCKED);
+  await pressFocused(h, "undo");
+  expect(h.one("undo")).toBeNull();
+  expect(document.activeElement).toBe(h.one("word-lock-retry"));
+});
+
+test("focus: a Try again that lands goes back to Undo as the lines go", async () => {
+  let held = true;
+  h = await noteOf(["Reply.docx"], () => (held ? LOCKED : null));
+  await pressFocused(h, "undo");
+  held = false;
+  await pressFocused(h, "word-lock-retry");
+  expect(lock()).toBeNull();
+  expect(h.one("undo")).not.toBeNull();
+  expect(document.activeElement).toBe(h.one("undo"));
+});
+
+test("focus: a Try again refused otherwise goes back to Undo, beside the error line", async () => {
+  let refusal: HostError = LOCKED;
+  h = await noteOf(["Reply.docx"], () => refusal);
+  await pressFocused(h, "undo");
+  refusal = { code: "store.io", message: "x", retryable: true };
+  await pressFocused(h, "word-lock-retry");
+  expect(lock()).toBeNull();
+  expect(h.one("files-changed")?.querySelector('[data-testid="error"]')).not.toBeNull();
+  expect(document.activeElement).toBe(h.one("undo"));
+});
+
+test("focus: the host saying the changes are undone while the lines stand takes focus to the note", async () => {
+  h = await noteOf(["Reply.docx"], () => LOCKED);
+  await pressFocused(h, "undo");
+  expect(document.activeElement).toBe(h.one("word-lock-retry"));
+  h.deliver([reset([changed(["Reply.docx"], { undone: true })])]);
+  await h.settle();
+  expect(lock()).toBeNull();
+  const note = h.one("files-changed")?.querySelector(".change-note");
+  expect(note?.textContent).toContain(th("en", "You undid Clauseo's changes to 1 paper."));
+  expect(document.activeElement).toBe(note);
+});
+
+test("focus: lines going while the lawyer is elsewhere leave focus where it is", async () => {
+  let held = true;
+  let release: () => void = () => {};
+  const waiting = new Promise<void>((resolve) => (release = resolve));
+  h = await mountRoom({
+    dispatch: async (command) => {
+      if (command.undo_step !== undefined) {
+        if (held) throw LOCKED;
+        await waiting;
+      }
+      return defaultOutcome(command);
+    },
+  });
+  h.deliver([reset([changed(["Reply.docx"])])]);
+  await pressFocused(h, "undo");
+  held = false;
+  await pressFocused(h, "word-lock-retry");
+  // while the undo is on its way, the lawyer moves on
+  const elsewhere = document.createElement("button");
+  document.body.append(elsewhere);
+  await act(async () => elsewhere.focus());
+  await act(async () => release());
+  await h.settle();
+  expect(lock()).toBeNull();
+  expect(document.activeElement).toBe(elsewhere);
+});

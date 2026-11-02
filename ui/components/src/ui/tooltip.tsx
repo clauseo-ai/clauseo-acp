@@ -18,11 +18,15 @@ export function Tooltip({
   content,
   children,
   side = "top",
+  fixed = false,
 }: {
   content: ReactNode;
   /** The trigger: one element that can take focus. */
   children: ReactElement;
   side?: "top" | "bottom";
+  /** Placed against the window, not the page: for a trigger inside a box that scrolls and clips (the wall), where a
+   * tooltip placed in the box would be cut off at its edge. It still mounts in the page's layer. */
+  fixed?: boolean;
 }) {
   // it mounts in the page's layer, inside the main landmark, as menus do
   const layer = useLayer();
@@ -30,7 +34,12 @@ export function Tooltip({
     <BaseTooltip.Root>
       <BaseTooltip.Trigger render={children} delay={500} />
       <BaseTooltip.Portal container={layer}>
-        <BaseTooltip.Positioner side={side} sideOffset={8} collisionPadding={8}>
+        <BaseTooltip.Positioner
+          side={side}
+          sideOffset={8}
+          collisionPadding={8}
+          positionMethod={fixed ? "fixed" : "absolute"}
+        >
           <BaseTooltip.Popup className={tip}>{content}</BaseTooltip.Popup>
         </BaseTooltip.Positioner>
       </BaseTooltip.Portal>

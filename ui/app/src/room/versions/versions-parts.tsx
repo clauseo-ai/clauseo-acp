@@ -242,9 +242,13 @@ export function VersionsCentre({
       });
   }
   // a refusal says why on the page, by its code: under the band at now, as the band's note looking back; a running
-  // answer says so in the waiting line instead
+  // answer says so in the waiting line instead, and the dialog's Word stage says which file Word holds, so the band
+  // doesn't say a paper is open too
   const failure =
-    s.failed !== null && s.failed !== "matter.turn_running" && s.failed !== "thread.turn_running"
+    s.failed !== null &&
+    s.failed !== "matter.turn_running" &&
+    s.failed !== "thread.turn_running" &&
+    s.ask?.stage !== "word"
       ? failedLine(lang, s.failed)
       : null;
   if (failure !== null) notices.push(failure);

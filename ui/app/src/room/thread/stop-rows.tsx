@@ -1,8 +1,9 @@
 // How a turn ended, in the thread: the step (its stop line, and the change note with Undo when it changed papers) and
 // the stop at the usage limit with its reset. An Undo refused because a program holds a file shows the lock's lines
 // under the note, with Try again in Undo's place (word/word-lock.tsx); a note naming one Word document the wall lists
-// offers "Open in Word" while its changes stand (word/open-in-word.ts).
-import { lazy, Suspense, useState } from "react";
+// offers "Open in Word" while its changes stand (word/open-in-word.ts), and says why in its error line when the open
+// fails. Focus follows the lock: to Try again when the lines come, back to Undo (or the note) when they go.
+import { lazy, Suspense, useLayoutEffect, useRef, useState } from "react";
 import { late } from "@clauseo/components/lib/late.ts";
 import { ChangeNote } from "@clauseo/components/clauseo/change-note.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
@@ -41,6 +42,9 @@ function Changed({ entry }: { entry: StepEntry }) {
   // one undo at a time: Undo waits while the host answers the first
   const [pending, setPending] = useState(false);
   const { openerFor } = useWordOpen();
+  // a failed Open in Word, by its code, for the note's error line
+  const [openFailed, setOpenFailed] = useState<string | null>(null);
+  const box = useRef<HTMLDivElement>(null);
   const papers = entry.files.map((f) => f.path);
   const edited = entry.files.find((f) => f.may_include_lawyer_edits)?.path ?? null;
   const undoable = entry.checkpoint_after !== undefined;
@@ -50,7 +54,17 @@ function Changed({ entry }: { entry: StepEntry }) {
   const openers = entry.undone
     ? []
     : papers.map(openerFor).filter((o): o is WordOpener => o !== null);
-  const open = openers.length === 1 ? openers[0] : undefined;
+  const opener = openers.length === 1 ? openers[0] : undefined;
+  const open =
+    opener === undefined
+      ? undefined
+      : {
+          label: opener.label,
+          onOpen: () => {
+            setOpenFailed(null);
+            void opener.onOpen().then(setOpenFailed);
+          },
+        };
   // a refusal again keeps what it said until the host answers: a lock stays a lock, another code replaces it
   const send = () => {
     if (pending) return;
@@ -65,10 +79,28 @@ function Changed({ entry }: { entry: StepEntry }) {
   const onUndo = () => {
     if (pending) return;
     setRefused(null);
+    setOpenFailed(null);
     send();
   };
+  // the lines going take Try again with them: focus that was on it, or fell to the page, goes back to Undo, or to
+  // the note when Undo isn't back (WordLock takes focus to Try again as the lines come)
+  const wasLocked = useRef(locked);
+  useLayoutEffect(() => {
+    const was = wasLocked.current;
+    wasLocked.current = locked;
+    const note = box.current;
+    if (!was || locked || note === null) return;
+    const at = document.activeElement;
+    if (at !== null && at !== document.body && !note.contains(at)) return;
+    const back =
+      note.querySelector<HTMLElement>('[data-testid="undo"]') ??
+      note.querySelector<HTMLElement>(".change-note");
+    back?.focus();
+  }, [locked]);
+  const undoRefusal = refused === null || locked ? null : refused;
+  const shown = undoRefusal ?? openFailed;
   return (
-    <div data-testid="files-changed">
+    <div data-testid="files-changed" ref={box}>
       <ChangeNote
         papers={papers}
         editedSince={edited}
@@ -76,9 +108,7 @@ function Changed({ entry }: { entry: StepEntry }) {
         {...(undoable && !locked ? { onUndo } : {})}
         {...(open === undefined ? {} : { open })}
         undoDisabled={busy || pending}
-        error={
-          refused === null || locked ? null : { words: errorWords(w.lang, refused), code: refused }
-        }
+        error={shown === null ? null : { words: errorWords(w.lang, shown), code: shown }}
         testIds={{ paper: "file-changed", undo: "undo", error: "error", open: "open-in-word" }}
       />
       {locked && (
@@ -88,6 +118,7 @@ function Changed({ entry }: { entry: StepEntry }) {
             code={LOCKED}
             pending={busy || pending}
             onRetry={send}
+            focusOnMount
             testIds={{ block: "word-lock", retry: "word-lock-retry" }}
           />
         </Suspense>
