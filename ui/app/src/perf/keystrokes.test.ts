@@ -58,7 +58,11 @@ describe("KeystrokeRecorder", () => {
     fire(document.querySelector("#other")!, "keydown", 5); // not the composer
     const sample = r.stop();
     expect(sample.latency_ms).toEqual([24, 16]);
-    expect(sample.handler_ms).toEqual([5, 0.75]);
+    // the entries' processing is the difference of two times offset by the event's timeStamp, a float that changes
+    // run to run, so the sum can come out as 4.999…: equal to 1e-9 ms
+    expect(sample.handler_ms).toHaveLength(2);
+    expect(sample.handler_ms![0]).toBeCloseTo(5, 9);
+    expect(sample.handler_ms![1]).toBeCloseTo(0.75, 9);
     expect(sample.entry_share).toBe(0.5);
   });
 
