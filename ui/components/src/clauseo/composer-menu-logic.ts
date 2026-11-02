@@ -33,6 +33,26 @@ export function keepHighlight(items: readonly SlashCommand[], name: string | nul
   return i === -1 ? 0 : i;
 }
 
+/** Where the run that starts at `from` ends: at the next whitespace, or the field's end. A pick replaces the whole
+ * run, so `/re|view` picked as review is `/review `, not `/review view`. */
+export function runEnd(value: string, from: number): number {
+  let end = from;
+  while (end < value.length && !WS.test(value[end] ?? "")) end += 1;
+  return end;
+}
+
+/** The rows' element ids, from the list's id and each command's name, so a list replaced under the highlight says the
+ * new row (aria-activedescendant changes with it). A name the agent lists twice gets a count after it. */
+export function optionIds(list: string, items: readonly SlashCommand[]): string[] {
+  const seen = new Map<string, number>();
+  return items.map((c) => {
+    const n = seen.get(c.name) ?? 0;
+    seen.set(c.name, n + 1);
+    const id = `${list}-${encodeURIComponent(c.name)}`;
+    return n === 0 ? id : `${id}~${n}`;
+  });
+}
+
 /** The text a pick puts in place of the trigger: the slash and the name, and a space unless one follows already. */
 export function picked(command: SlashCommand, following: string | undefined): string {
   const text = `/${command.name}`;

@@ -80,6 +80,9 @@ const HI = {
   "Remove {title}": "{title} हटाएँ",
   // the composer's `/` menu, the agent's commands, named for assistive technology
   Commands: "कमांड",
+  // and said politely as the menu opens, for a screen reader
+  "1 command": "1 कमांड",
+  "{n} commands": "{n} कमांड",
   // the plan in the status line, for a plan other than Claude
   "Uses your {name} plan": "आपके {name} प्लान का उपयोग करता है",
   // empty states

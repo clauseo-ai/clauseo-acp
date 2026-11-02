@@ -293,13 +293,16 @@ test("without the agent's commands, / is a character: no list, no menu; a list t
   await focus();
   await edit("/");
   expect(menu()).toBeNull();
-  // an empty list, as before the agent sends one: no menu either
+  // an empty list, as before the agent sends one: no menu either, and the field claims no list
   await rerender(composer({ commands: [] }));
+  expect(field().hasAttribute("aria-autocomplete")).toBe(false);
+  expect(field().hasAttribute("aria-haspopup")).toBe(false);
   await edit("/r");
   expect(menu()).toBeNull();
   // the agent's list arriving while the field has the focus: the next / opens it
   await rerender(composer({}));
   await act(settled);
+  expect(field().getAttribute("aria-haspopup")).toBe("listbox");
   await edit("/r");
   expect(names()).toEqual(["/review", "/restart"]);
 });
@@ -314,4 +317,93 @@ test("a gate closes the menu and hides the field from the room", async () => {
   expect(scope?.nodes.get("field")).toBeNull();
   await rerender(composer({}));
   expect(scope?.nodes.get("field")).toBe(field());
+});
+
+test("a list that arrives under an old /re run, the field focused, opens nothing; the next letter typed opens it", async () => {
+  await mount(composer({ commands: [] }));
+  await focus();
+  await edit("/re");
+  expect(menu()).toBeNull();
+  // the agent's list lands while the caret still stands in the run typed before it: old words, no menu
+  await rerender(composer({}));
+  await act(settled);
+  expect(menu()).toBeNull();
+  expect(field().hasAttribute("data-menu")).toBe(false);
+  // a fresh insertion is the lawyer's: it opens
+  await edit("/res");
+  expect(names()).toEqual(["/restart"]);
+});
+
+test("while an input method composes, Enter and the arrows are its own: no pick, no send, the lit row stays", async () => {
+  const onAsk = vi.fn();
+  await mount(composer({ onAsk }));
+  await focus();
+  await edit("/");
+  expect(lit()?.textContent).toContain("/review");
+  await compose("compositionstart");
+  expect(await key("ArrowDown", { isComposing: true })).toBe(false);
+  expect(await key("Enter", { isComposing: true })).toBe(false);
+  await compose("compositionend");
+  // a key the engine holds (keyCode 229), its composition flag aside
+  expect(await key("ArrowDown", { keyCode: 229 })).toBe(false);
+  expect(await key("Enter", { keyCode: 229 })).toBe(false);
+  expect(lit()?.textContent).toContain("/review");
+  expect(field().value).toBe("/");
+  expect(onAsk).not.toHaveBeenCalled();
+  expect(menu()).not.toBeNull();
+});
+
+test("a pick replaces the slash's whole run; a modified Enter is no pick, but the composer's own key", async () => {
+  engine();
+  const onAsk = vi.fn();
+  await mount(composer({ onAsk }));
+  await focus();
+  await edit("/review the lease", { caret: 3 });
+  expect(names()).toEqual(["/review", "/restart"]);
+  for (const mod of ["ctrlKey", "metaKey", "altKey"]) await key("Enter", { [mod]: true });
+  expect(field().value).toBe("/review the lease");
+  expect(onAsk.mock.calls).toEqual([
+    ["/review the lease"],
+    ["/review the lease"],
+    ["/review the lease"],
+  ]);
+  expect(await key("ArrowDown")).toBe(true);
+  expect(await key("Enter")).toBe(true);
+  expect(field().value).toBe("/restart the lease");
+});
+
+test("rows are named by their command: a list that puts another row under the highlight says the new row", async () => {
+  await mount(composer({}));
+  await focus();
+  await edit("/re");
+  const first = field().getAttribute("aria-activedescendant");
+  expect(first).toBe(lit()?.id);
+  await rerender(composer({ commands: [COMMANDS[1]!, COMMANDS[0]!] }));
+  // the highlight is kept by name, on the row now second, and the field names that row
+  expect(lit()?.textContent).toContain("/review");
+  expect(field().getAttribute("aria-activedescendant")).toBe(first);
+  await rerender(composer({ commands: [COMMANDS[1]!] }));
+  expect(lit()?.textContent).toContain("/restart");
+  expect(field().getAttribute("aria-activedescendant")).not.toBe(first);
+  expect(field().getAttribute("aria-activedescendant")).toBe(lit()?.id);
+});
+
+test("a polite live region says how many commands the menu opened with, then the lit one's name as the arrows move", async () => {
+  await mount(composer({}));
+  await focus();
+  const live = () => document.querySelector<HTMLElement>('[aria-live="polite"]');
+  expect(live()?.textContent).toBe("");
+  const region = live();
+  await edit("/");
+  expect(live()?.textContent).toBe("3 commands");
+  // the same node, there before the menu opened: a region added with its words in may be heard saying nothing
+  expect(live()).toBe(region);
+  await key("ArrowDown");
+  expect(live()?.textContent).toBe("/restart");
+  await edit("/c");
+  expect(live()?.textContent).toBe("/compact");
+  await key("Escape");
+  expect(live()?.textContent).toBe("");
+  await edit("/c /comp");
+  expect(live()?.textContent).toBe("1 command");
 });
