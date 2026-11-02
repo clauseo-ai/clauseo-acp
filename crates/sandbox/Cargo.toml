@@ -35,11 +35,12 @@ clauseo-fake_agent = { path = "../fake_agent" }
 # ManualTimer, so the shutdown test decides when the ladder's waits end.
 clauseo-process = { path = "../process", features = ["test-support"] }
 
-# The jail tests drive the launched programs, and wait for a jailed tree's exits with kqueue.
+# The jail tests drive the launched programs, wait for a jailed tree's exits with kqueue, and
+# open a pty outside the jail (`term`, and `fs` for its name).
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 async-io = { workspace = true }
 futures = { workspace = true }
-nix = { workspace = true, features = ["event"] }
+nix = { workspace = true, features = ["event", "term", "fs"] }
 
 [lints]
 workspace = true

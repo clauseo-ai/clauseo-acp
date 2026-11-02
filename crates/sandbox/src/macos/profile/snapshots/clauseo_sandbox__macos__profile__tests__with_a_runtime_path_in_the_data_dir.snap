@@ -14,8 +14,9 @@ expression: w.render(&policy)
 ; seatbelt_read_only_platform_defaults.sbpl, commit 1a604d58da344c84528fecd5b5154105f597d70b
 ; (https://github.com/openai/codex), Copyright OpenAI, licensed under the Apache License 2.0
 ; (https://www.apache.org/licenses/LICENSE-2.0). Changes: Codex's base gives full read access and
-; this file lists system locations instead; no tty but the controlling one and the jail's own
-; ptys; no syslog socket; no DNS (agents reach hosts through the proxy, which resolves names).
+; this file lists system locations instead; no terminal but the ptys the jail opens itself (not
+; even the controlling one, /dev/tty, whose TIOCSTI could type into a tester's shell); no syslog
+; socket; no DNS (agents reach hosts through the proxy, which resolves names).
 
 ; Processes. Children inherit the jail, so running any program is allowed; what it can touch
 ; is not.
@@ -161,14 +162,14 @@ expression: w.render(&policy)
   (literal "/dev/urandom")
   (literal "/dev/zero")
   (literal "/dev/autofs_nowait"))
-; The null device, the controlling terminal and the DTrace helper Node opens at start.
+; The null device and the DTrace helper Node opens at start.
 (allow file-read* file-write-data file-ioctl
   (literal "/dev/null")
-  (literal "/dev/tty")
   (literal "/dev/dtracehelper"))
 ; The process's own descriptors (a shell's process substitution).
 (allow file-read-data file-write-data (subpath "/dev/fd"))
-; ptys the jail opens itself (openpty): never a terminal the lawyer has open.
+; ptys the jail opens itself (openpty, `script`): the kernel gives a pty opened through
+; /dev/ptmx in the jail the pty extension, so another terminal of the same user is refused.
 (allow pseudo-tty)
 (allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))
 (allow file-read* file-write* file-ioctl
@@ -185,6 +186,10 @@ expression: w.render(&policy)
 (allow file-read* process-exec file-map-executable
   (subpath (param "RUNTIME_0")))
 
+; The user's text-encoding preference, which CoreFoundation reads at start.
+(allow file-read*
+  (literal (param "CF_USER_TEXT_ENCODING")))
+
 ; The folders above every allowed path: metadata only, so paths resolve.
 (allow file-read-metadata
   (path-ancestors (param "MATTER"))
@@ -200,6 +205,7 @@ expression: w.render(&policy)
   (subpath (param "READ_ONLY_4"))
   (subpath (param "READ_ONLY_5"))
   (subpath (param "READ_ONLY_6"))
+  (subpath (param "READ_ONLY_7"))
   (with message "clauseo-4242-7"))
 ; Their folders cannot be renamed, which would carry them out of their rules.
 (deny file-write-unlink
@@ -210,6 +216,11 @@ expression: w.render(&policy)
   (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_4")))
   (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_5")))
   (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_6")))
+  (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_7")))
+  (with message "clauseo-4242-7"))
+; Claude's instruction file at any depth, in any letter case.
+(deny file-write*
+  (require-all (subpath (param "MATTER")) (regex #"/[cC][lL][aA][uU][dD][eE]\.[mM][dD]$"))
   (with message "clauseo-4242-7"))
 
 ; Hidden paths: the data dir, other matters and state folders, refused folders.
@@ -228,6 +239,12 @@ expression: w.render(&policy)
   (path-ancestors (param "STATE"))
   (path-ancestors (param "RUNTIME_0")))
 
+; The matter, state and notes folders themselves: not removed, not replaced.
+(deny file-write-unlink file-write-create
+  (literal (param "MATTER"))
+  (literal (param "STATE"))
+  (with message "clauseo-4242-7"))
+
 ; Network: the proxy's loopback ports only; no DNS (the proxy resolves names).
 (allow network-outbound
   (remote unix-socket (subpath (param "BROWSER_RUN"))))
@@ -239,13 +256,15 @@ expression: w.render(&policy)
 MATTER = <root>/matter
 STATE = <root>/data/agent-state/m1/codex
 RUNTIME_0 = <root>/data/agents/codex-acp
+CF_USER_TEXT_ENCODING = <root>/home/.CFUserTextEncoding
 READ_ONLY_0 = <root>/matter/.agents
 READ_ONLY_1 = <root>/matter/.claude
 READ_ONLY_2 = <root>/matter/.clauseo
 READ_ONLY_3 = <root>/matter/.codex
 READ_ONLY_4 = <root>/matter/.mcp.json
 READ_ONLY_5 = <root>/matter/AGENTS.md
-READ_ONLY_6 = <root>/matter/CLAUDE.md
+READ_ONLY_6 = <root>/matter/CLAUDE.local.md
+READ_ONLY_7 = <root>/matter/CLAUDE.md
 HIDDEN_0 = <root>/data
 HIDDEN_1 = <root>/elsewhere
 BROWSER_RUN = <root>/data/agent-state/m1/codex/browser/run

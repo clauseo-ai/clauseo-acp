@@ -14,8 +14,9 @@ expression: w.render(&policy)
 ; seatbelt_read_only_platform_defaults.sbpl, commit 1a604d58da344c84528fecd5b5154105f597d70b
 ; (https://github.com/openai/codex), Copyright OpenAI, licensed under the Apache License 2.0
 ; (https://www.apache.org/licenses/LICENSE-2.0). Changes: Codex's base gives full read access and
-; this file lists system locations instead; no tty but the controlling one and the jail's own
-; ptys; no syslog socket; no DNS (agents reach hosts through the proxy, which resolves names).
+; this file lists system locations instead; no terminal but the ptys the jail opens itself (not
+; even the controlling one, /dev/tty, whose TIOCSTI could type into a tester's shell); no syslog
+; socket; no DNS (agents reach hosts through the proxy, which resolves names).
 
 ; Processes. Children inherit the jail, so running any program is allowed; what it can touch
 ; is not.
@@ -161,14 +162,14 @@ expression: w.render(&policy)
   (literal "/dev/urandom")
   (literal "/dev/zero")
   (literal "/dev/autofs_nowait"))
-; The null device, the controlling terminal and the DTrace helper Node opens at start.
+; The null device and the DTrace helper Node opens at start.
 (allow file-read* file-write-data file-ioctl
   (literal "/dev/null")
-  (literal "/dev/tty")
   (literal "/dev/dtracehelper"))
 ; The process's own descriptors (a shell's process substitution).
 (allow file-read-data file-write-data (subpath "/dev/fd"))
-; ptys the jail opens itself (openpty): never a terminal the lawyer has open.
+; ptys the jail opens itself (openpty, `script`): the kernel gives a pty opened through
+; /dev/ptmx in the jail the pty extension, so another terminal of the same user is refused.
 (allow pseudo-tty)
 (allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))
 (allow file-read* file-write* file-ioctl
@@ -180,6 +181,10 @@ expression: w.render(&policy)
 (allow file-read* file-write*
   (subpath (param "MATTER"))
   (subpath (param "STATE")))
+
+; The user's text-encoding preference, which CoreFoundation reads at start.
+(allow file-read*
+  (literal (param "CF_USER_TEXT_ENCODING")))
 
 ; The folders above every allowed path: metadata only, so paths resolve.
 (allow file-read-metadata
@@ -198,6 +203,7 @@ expression: w.render(&policy)
   (subpath (param "READ_ONLY_7"))
   (subpath (param "READ_ONLY_8"))
   (subpath (param "READ_ONLY_9"))
+  (subpath (param "READ_ONLY_10"))
   (with message "clauseo-4242-7"))
 ; Their folders cannot be renamed, which would carry them out of their rules.
 (deny file-write-unlink
@@ -211,6 +217,11 @@ expression: w.render(&policy)
   (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_7")))
   (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_8")))
   (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_9")))
+  (require-all (vnode-type DIRECTORY) (path-ancestors (param "READ_ONLY_10")))
+  (with message "clauseo-4242-7"))
+; Claude's instruction file at any depth, in any letter case.
+(deny file-write*
+  (require-all (subpath (param "MATTER")) (regex #"/[cC][lL][aA][uU][dD][eE]\.[mM][dD]$"))
   (with message "clauseo-4242-7"))
 
 ; Links that lead outside the matter, and where they lead.
@@ -231,6 +242,12 @@ expression: w.render(&policy)
 (allow file-read-metadata
   (path-ancestors (param "STATE")))
 
+; The matter, state and notes folders themselves: not removed, not replaced.
+(deny file-write-unlink file-write-create
+  (literal (param "MATTER"))
+  (literal (param "STATE"))
+  (with message "clauseo-4242-7"))
+
 ; Read-only in the state folder: config the host rewrites before each launch.
 (deny file-write*
   (subpath (param "STATE_READ_ONLY_0"))
@@ -249,6 +266,7 @@ expression: w.render(&policy)
 ;; parameters
 MATTER = <root>/matter
 STATE = <root>/data/agent-state/m1/codex
+CF_USER_TEXT_ENCODING = <root>/home/.CFUserTextEncoding
 READ_ONLY_0 = <root>/matter/big.pdf
 READ_ONLY_1 = <root>/matter/.agents
 READ_ONLY_2 = <root>/matter/.claude
@@ -257,8 +275,9 @@ READ_ONLY_4 = <root>/matter/.codex
 READ_ONLY_5 = <root>/matter/.git
 READ_ONLY_6 = <root>/matter/.mcp.json
 READ_ONLY_7 = <root>/matter/AGENTS.md
-READ_ONLY_8 = <root>/matter/CLAUDE.md
-READ_ONLY_9 = <root>/matter/sub/.git
+READ_ONLY_8 = <root>/matter/CLAUDE.local.md
+READ_ONLY_9 = <root>/matter/CLAUDE.md
+READ_ONLY_10 = <root>/matter/sub/.git
 LINK_0 = <root>/matter/to-secret
 LINK_TARGET_0 = <root>/elsewhere/secret.txt
 HIDDEN_0 = <root>/data

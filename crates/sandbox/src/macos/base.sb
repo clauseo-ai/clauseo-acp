@@ -7,8 +7,9 @@
 ; seatbelt_read_only_platform_defaults.sbpl, commit 1a604d58da344c84528fecd5b5154105f597d70b
 ; (https://github.com/openai/codex), Copyright OpenAI, licensed under the Apache License 2.0
 ; (https://www.apache.org/licenses/LICENSE-2.0). Changes: Codex's base gives full read access and
-; this file lists system locations instead; no tty but the controlling one and the jail's own
-; ptys; no syslog socket; no DNS (agents reach hosts through the proxy, which resolves names).
+; this file lists system locations instead; no terminal but the ptys the jail opens itself (not
+; even the controlling one, /dev/tty, whose TIOCSTI could type into a tester's shell); no syslog
+; socket; no DNS (agents reach hosts through the proxy, which resolves names).
 
 ; Processes. Children inherit the jail, so running any program is allowed; what it can touch
 ; is not.
@@ -154,14 +155,14 @@
   (literal "/dev/urandom")
   (literal "/dev/zero")
   (literal "/dev/autofs_nowait"))
-; The null device, the controlling terminal and the DTrace helper Node opens at start.
+; The null device and the DTrace helper Node opens at start.
 (allow file-read* file-write-data file-ioctl
   (literal "/dev/null")
-  (literal "/dev/tty")
   (literal "/dev/dtracehelper"))
 ; The process's own descriptors (a shell's process substitution).
 (allow file-read-data file-write-data (subpath "/dev/fd"))
-; ptys the jail opens itself (openpty): never a terminal the lawyer has open.
+; ptys the jail opens itself (openpty, `script`): the kernel gives a pty opened through
+; /dev/ptmx in the jail the pty extension, so another terminal of the same user is refused.
 (allow pseudo-tty)
 (allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))
 (allow file-read* file-write* file-ioctl

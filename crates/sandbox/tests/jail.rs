@@ -40,3 +40,13 @@ mod tree;
 #[cfg(target_os = "macos")]
 #[path = "jail/watcher.rs"]
 mod watcher;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/links.rs"]
+mod links;
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+#[path = "jail/devices.rs"]
+mod devices;

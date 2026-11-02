@@ -64,6 +64,12 @@ impl TempDir {
     }
 }
 
+/// Removes the file at `path`.
+#[cfg(unix)]
+pub(crate) fn remove(path: &Path) {
+    std::fs::remove_file(path).unwrap();
+}
+
 impl Drop for TempDir {
     fn drop(&mut self) {
         // Never panic in a drop that may run while a test unwinds.
