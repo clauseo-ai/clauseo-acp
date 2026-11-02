@@ -90,7 +90,10 @@ fn same_title_on_a_second_start_logs_nothing_new() {
     events.drain_ready();
     // Both turns failed at session/new, so the second start did happen.
     let auth_failures = events.count(|event| {
-        matches!(event, DomainEvent::TurnFailed(failed) if failed.code == ErrorCode::AgentAuthRequired)
+        matches!(
+            event,
+            DomainEvent::TurnFailed(failed) if failed.code == ErrorCode::AgentAuthRequired
+        )
     });
     assert_eq!(auth_failures, 2, "{}", events.dump());
     assert_eq!(events.count(named("Fake Agent")), 1, "{}", events.dump());
