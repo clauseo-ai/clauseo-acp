@@ -1082,5 +1082,61 @@
     "at": "2026-11-02",
     "by": "Rohan",
     "note": "Rohan, on the review page, 15:35 (built from U10 4cb9f249)"
+  },
+  "H11-01": {
+    "en": "Open this link in your browser?",
+    "hi": "यह कड़ी ब्राउज़र में खोलें?",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page, 15:35"
+  },
+  "H11-02": {
+    "en": "The link goes to {host}.",
+    "hi": "यह कड़ी {host} पर जाती है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page, 15:35"
+  },
+  "H11-03": {
+    "en": "Open link",
+    "hi": "कड़ी खोलें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page, 15:35"
+  },
+  "H11-04": {
+    "en": "Cancel",
+    "hi": "रद्द करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page, 15:35"
+  },
+  "H11-05": {
+    "en": "Write an email?",
+    "hi": "ईमेल लिखें?",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page, 15:35"
+  },
+  "H11-06": {
+    "en": "Your email app will open a new message to {address}.",
+    "hi": "आपका ईमेल ऐप {address} के लिए नया संदेश खोलेगा।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page, 15:35"
+  },
+  "H11-07": {
+    "en": "Open email app",
+    "hi": "ईमेल ऐप खोलें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page, 15:35"
   }
 }
