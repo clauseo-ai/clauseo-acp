@@ -224,7 +224,7 @@ fn past_the_cap_the_driver_pauses_and_resubscribes_once_acks_catch_up() {
             }
         }
         ViewPatchBody::Reset { view_window } => match &view_window.header {
-            Some(StreamHeader::Thread(header)) => header.clone(),
+            Some(StreamHeader::Thread(header)) => (**header).clone(),
             other => panic!("no thread header: {other:?}"),
         },
         other => panic!("neither the tail nor a Reset: {other:?}"),

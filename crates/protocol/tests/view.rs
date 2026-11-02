@@ -224,7 +224,7 @@ fn patches_round_trip() {
                 cursor: Cursor::new(2).unwrap(),
                 body: ViewPatchBody::Reset {
                     view_window: Box::new(ViewWindow {
-                        header: Some(StreamHeader::Thread(header_entry())),
+                        header: Some(StreamHeader::Thread(Box::new(header_entry()))),
                         entries: vec![ViewEntry::ToolCall(Box::new(tool_call()))],
                         has_older: false,
                     }),
@@ -344,7 +344,10 @@ fn a_snapshot_header_is_only_a_header_entry() {
         |header: &str| format!(r#"{{"header":{header},"entries":[],"has_older":false}}"#);
     let thread = serde_json::to_string(&header()).unwrap();
     let decoded: ViewWindow = serde_json::from_str(&snapshot(&thread)).unwrap();
-    assert_eq!(decoded.header, Some(StreamHeader::Thread(header_entry())));
+    assert_eq!(
+        decoded.header,
+        Some(StreamHeader::Thread(Box::new(header_entry())))
+    );
     let matter = MatterHeaderEntry {
         order: seq(1),
         matter: matter_id(2),

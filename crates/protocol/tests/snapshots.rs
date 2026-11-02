@@ -137,7 +137,7 @@ fn view_epoch(n: u64) -> ViewEpoch {
 #[cfg(test)]
 fn view_window() -> ViewWindow {
     ViewWindow {
-        header: Some(StreamHeader::Thread(header_entry())),
+        header: Some(StreamHeader::Thread(Box::new(header_entry()))),
         entries: vec![ViewEntry::AgentText(agent_text_entry())],
         has_older: true,
     }
