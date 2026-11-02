@@ -75,14 +75,22 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
     const stays = [
       added_since.length === 0
         ? null
-        : vt(lang, "'{papers}', added since, stays.", {
-            papers: listOf(lang, added_since.map(name)),
-          }),
+        : vt(
+            lang,
+            added_since.length === 1
+              ? "'{papers}', added since, stays."
+              : "'{papers}', added since, stay.",
+            { papers: listOf(lang, added_since.map(name)) },
+          ),
       kept.length === 0
         ? null
-        : vt(lang, "'{papers}' can't be restored and stays as it is.", {
-            papers: listOf(lang, kept.map(name)),
-          }),
+        : vt(
+            lang,
+            kept.length === 1
+              ? "'{papers}' can't be restored and stays as it is."
+              : "'{papers}' can't be restored and stay as they are.",
+            { papers: listOf(lang, kept.map(name)) },
+          ),
     ].filter((x) => x !== null);
     return {
       kind: "confirm",
@@ -165,7 +173,7 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
         title: name(f.path),
         at:
           later === undefined
-            ? vt(lang, "It may hold your own edits")
+            ? vt(lang, "Changed during the answer, though Clauseo didn't say it was changing it.")
             : later.who.kind === "clauseo"
               ? vt(lang, "Changed by Clauseo at {time}", { time: timeOf(lang, later) })
               : vt(lang, "Changed by you, outside Clauseo, at {time}", {
@@ -219,11 +227,27 @@ export const failedLine = (lang: Lang, code: string): BandNotice => ({
   text: errorWords(lang, code),
 });
 
-/** The not-saved line: which paper Clauseo changed, and that the change couldn't be kept as a version. */
-export const unsavedLine = (lang: Lang, u: Unsaved): string =>
-  vt(lang, "Clauseo changed {paper}, and the change couldn't be kept as a version.", {
-    paper: fileName(u.paper),
-  });
+/** The not-saved line: which paper Clauseo changed and when, that the change couldn't be kept as a version, and that
+ * the paper stands as Clauseo left it. A change on another day says its day. */
+export function unsavedLine(lang: Lang, s: Snapshot, u: Unsaved): string {
+  const { time, day } = clockOf(u.ts, s.now, s.zone, lang);
+  const paper = fileName(u.paper);
+  return day === ""
+    ? vt(
+        lang,
+        "Clauseo changed {paper} at {time}, and the change couldn't be kept as a version. {paper} stands as Clauseo left it.",
+        { paper, time: clock(lang, time) },
+      )
+    : vt(
+        lang,
+        "Clauseo changed {paper} at {time} on {day}, and the change couldn't be kept as a version. {paper} stands as Clauseo left it.",
+        { paper, time: clock(lang, time), day },
+      );
+}
 
-/** The not-saved row's time, from its step (H17), in English for the panel's clock. */
-export const unsavedAt = (s: Snapshot, u: Unsaved): string => at(s, u.ts);
+/** The not-saved row's time, from its step (H17), in English for the panel's clock, and its day when not today (in
+ * the language). */
+export const unsavedAt = (lang: Lang, s: Snapshot, u: Unsaved): { at: string; day: string } => ({
+  at: at(s, u.ts),
+  day: clockOf(u.ts, s.now, s.zone, lang).day,
+});

@@ -32,8 +32,8 @@ import {
 } from "./versions-model.ts";
 
 /** A version that couldn't be kept, shown at the top of the timeline where it would have stood; at: its clock time,
- * when the host gives one. */
-export type Unsaved = { at?: string; who: string; why: string };
+ * when the host gives one; day: its day, when it isn't today ("Tuesday"). */
+export type Unsaved = { at?: string; day?: string; who: string; why: string };
 
 /** A clock time holds together on its line: "4:28 pm" never breaks before "pm". */
 const hold = (time: string) => time.replace(/ (am|pm)$/, "\u00a0$1");
@@ -204,7 +204,11 @@ export function VersionPanel({
             <ul className="ver-entries">
               <li className="ver-unsaved">
                 <span className="ver-entry-time">
-                  {unsaved.at === undefined ? "" : w.clock(unsaved.at)}
+                  {unsaved.at === undefined
+                    ? ""
+                    : unsaved.day === undefined || unsaved.day === ""
+                      ? w.clock(unsaved.at)
+                      : `${unsaved.day} ${w.clock(unsaved.at)}`}
                 </span>
                 <span className="ver-entry-who">
                   <Say>{unsaved.who}</Say>

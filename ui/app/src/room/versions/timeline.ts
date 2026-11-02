@@ -128,7 +128,7 @@ function whoOf(v: VersionEntry, input: TimelineInput, afterTurn: ReadonlyMap<Tur
     case "restore":
       return { kind: "restore", to: input.restores.get(v.checkpoint) ?? "" };
     case "import":
-      return { kind: "import", n: input.header?.import?.files ?? 0 };
+      return { kind: "import", n: input.header?.import?.files ?? null };
     default:
       return { kind: "unknown" };
   }

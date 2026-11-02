@@ -82,9 +82,13 @@ for (const [name, path, pdf] of [
     const sheet = document.body.querySelector(".ver-pdf");
     expect(sheet).not.toBeNull();
     expect(sheet?.textContent).toContain(path);
-    const sentence = "A PDF shows only whether it changed. Open each to read it.";
+    const sentence = "A PDF shows only whether it changed.";
     if (pdf) expect(document.body.textContent).toContain(sentence);
     else expect(document.body.textContent).not.toContain(sentence);
+    // with no way to open the file, nothing asks the lawyer to open it
+    expect(document.body.textContent).not.toContain("Open each to read it.");
+    // a PDF shows both sides; a document whose words can't be compared yet, its title and whether it changed alone
+    expect(sheet?.querySelector(".ver-pdf-pair") !== null).toBe(pdf);
   });
 }
 

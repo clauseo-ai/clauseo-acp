@@ -4,12 +4,16 @@
 // and the row and band line for a change that couldn't be kept as a version.
 import { clock } from "@clauseo/components/lib/words.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
+import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { loadVersions } from "./use-versions.ts";
 import { THREAD, TURN, uuid } from "../../testing/stream-script.ts";
 import type { CheckpointKind, ViewEntry } from "../../transport/protocol.ts";
 import { clockOf, localZone } from "../when.ts";
 import {
   file,
+  matterReset,
+  MATTER_STREAM,
   mountVersions,
   NOON,
   stepEntry,
@@ -185,7 +189,54 @@ test("a turn's change that couldn't be kept as a version shows on the timeline a
     clock("en", clockOf(ts, Date.now(), localZone(), "en").time),
   );
   const notices = [...document.body.querySelectorAll(".ver-notice")].map((n) => n.textContent);
+  const at = clock("en", clockOf(ts, Date.now(), localZone(), "en").time);
   expect(notices).toContain(
-    "Clauseo changed \u2068brief.txt\u2069, and the change couldn't be kept as a version.",
+    `Clauseo changed \u2068brief.txt\u2069 at ${at}, and the change couldn't be kept as a version. \u2068brief.txt\u2069 stands as Clauseo left it.`,
   );
+});
+
+test("a change that couldn't be kept, made on an earlier day, says its day on the row and under the band", async () => {
+  const ts = NOON - 2 * 86_400_000;
+  h = await mountVersions(
+    [version(1, "import")],
+    [stepEntry(20, { files: [file("brief.txt")], ts })],
+  );
+  await h.openVersions();
+  const { time, day } = clockOf(ts, Date.now(), localZone(), "en");
+  expect(day).not.toBe("");
+  expect(h.one("versions")?.querySelector(".ver-unsaved .ver-entry-time")?.textContent).toBe(
+    `${day} ${clock("en", time)}`,
+  );
+  const notices = [...document.body.querySelectorAll(".ver-notice")].map((n) => n.textContent);
+  expect(notices).toContain(
+    `Clauseo changed \u2068brief.txt\u2069 at ${clock("en", time)} on ${day}, and the change couldn't be kept as a version. \u2068brief.txt\u2069 stands as Clauseo left it.`,
+  );
+});
+
+test("an import says how many documents it brought in, one in the singular, and none where the count is unknown", async () => {
+  for (const [imported, words] of [
+    [1, "Imported 1 document"],
+    [null, "Imported the matter's documents"],
+  ] as const) {
+    h = await mountVersions([
+      version(1, "import"),
+      version(2, "outside_edits", { files: [file("a.txt")] }),
+    ]);
+    await h.click(h.host.querySelector(".room-pair button[aria-expanded]"));
+    await act(async () => void (await loadVersions()));
+    await h.settle();
+    const reset = matterReset(
+      [version(1, "import"), version(2, "outside_edits", { files: [file("a.txt")] })],
+      imported ?? 0,
+    );
+    if (imported === null && reset.reset !== undefined) {
+      const header = reset.reset.view_window.header;
+      if (header !== undefined && "matter_header" in header && header.matter_header !== undefined)
+        delete header.matter_header.import;
+    }
+    await h.deliver(MATTER_STREAM, [reset]);
+    expect(whoText(rowOf(h, "cp1"))).toBe(words);
+    await h.unmount();
+    h = null;
+  }
 });

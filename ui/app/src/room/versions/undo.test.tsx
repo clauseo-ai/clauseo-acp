@@ -62,6 +62,13 @@ test("Keep current is chosen for a file that may hold the lawyer's edits, and th
   const a = choiceRow("a.docx");
   expect(pressed(a, "Keep current")).toBe("true");
   expect(pressed(a, "Undo anyway")).toBe("false");
+  // the row says more than the heading: what the watcher saw, not a guess repeated
+  expect(dialog()?.querySelector(".ver-edited-head")?.textContent).toBe(
+    "1 document may hold your own edits.",
+  );
+  expect(a?.querySelector(".ver-edited-at")?.textContent).toBe(
+    "Changed during the answer, though Clauseo didn't say it was changing it.",
+  );
   expect(h.one("dialog-confirm")?.getAttribute("aria-disabled")).toBeNull();
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("undo_step")).toEqual([

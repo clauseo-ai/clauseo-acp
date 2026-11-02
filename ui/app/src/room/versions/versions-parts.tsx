@@ -117,7 +117,7 @@ export function VersionsRail({
         u === null
           ? null
           : {
-              at: unsavedAt(s, u),
+              ...unsavedAt(w.lang, s, u),
               who: vt(w.lang, "Clauseo, in {conversation}", {
                 conversation: conversationOf(w.lang, s, u.thread),
               }),
@@ -195,7 +195,7 @@ export function VersionsCentre({
 
   const notices: BandNotice[] = [];
   if (look.kind === "now") {
-    if (s.unsaved !== null) notices.push({ tone: "failed", text: unsavedLine(lang, s.unsaved) });
+    if (s.unsaved !== null) notices.push({ tone: "failed", text: unsavedLine(lang, s, s.unsaved) });
     const done = s.done;
     // the restored line's Undo, once the host's marker says the restore was written
     const restore = done === null ? null : restoreOf(s, done);

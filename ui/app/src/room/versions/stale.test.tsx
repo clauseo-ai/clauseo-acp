@@ -193,3 +193,25 @@ test("two files of one name in the restore dialog show their paths, isolated fro
     "3 documents will change: \u2068a/brief.txt\u2069, \u2068b/brief.txt\u2069 and \u2068memo.docx\u2069. You can undo this.",
   );
 });
+
+test("the restore dialog says what stays in the plural for two documents, in the singular for one", async () => {
+  h = await mountVersions(VERSIONS, STEPS, {
+    query: answering({
+      preview_restore: {
+        restore_preview: {
+          changes: [file("brief.txt")],
+          added_since: ["r.docx", "s.docx"],
+          kept: ["a.pdf", "b.pdf"],
+          locked: [],
+        },
+      },
+    }),
+  });
+  await h.openVersions();
+  await h.lookAt("cp2");
+  await h.click(h.one("version-restore"));
+  const note = dialog()?.querySelector(".ver-dialog-note")?.textContent ?? "";
+  expect(note).toContain("', added since, stay.");
+  expect(note).toContain("' can't be restored and stay as they are.");
+  expect(note).not.toContain("stays");
+});
