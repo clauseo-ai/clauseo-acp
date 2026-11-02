@@ -21,9 +21,11 @@
 //! A restart gives each stream a new restart id; events from an older restart's subscription
 //! are dropped, so a stream never mixes two subscriptions.
 //!
-//! The app-wide feed (`subscribe_app`) shares the channel and the count, with no position: a
-//! pause drops it too, and a pause's end or a watchdog fire restarts it, for the driver to take
-//! ([`take_app_restart`](WindowState::take_app_restart)) and send the current state first.
+//! The feeds of no stream ([`Feed`]: the app-wide events of `subscribe_app`, and the limits the
+//! bridge follows from `open_stream` on) share the channel and the count, with no position: a
+//! pause drops them too, and a pause's end or a watchdog fire restarts them, for the driver to
+//! take ([`Feeds::take_restarts`]) and start again with the
+//! current state first.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::Duration;
@@ -31,6 +33,10 @@ use std::time::Duration;
 use clauseo_protocol::{Ack, Cursor, StreamId, ViewEpoch};
 
 use crate::frame::{self, Frame};
+
+mod feeds;
+
+pub(crate) use feeds::{Feed, Feeds};
 
 /// The most bytes a window may have unacknowledged before it pauses.
 pub(crate) const UNACKED_CAP: u64 = 256 * 1024;
@@ -142,15 +148,8 @@ pub(crate) struct WindowState {
     rearm_at: u64,
     /// The streams the window follows.
     streams: BTreeMap<StreamId, Followed>,
-    /// The app-wide feed, when the window follows it.
-    app: Option<AppFollowed>,
-}
-
-/// The followed app-wide feed: its current restart id, and whether a restart is untaken.
-#[derive(Debug, Clone, Copy)]
-struct AppFollowed {
-    restart_id: u64,
-    restart_due: bool,
+    /// The feeds of no stream the window follows.
+    feeds: Feeds,
 }
 
 impl WindowState {
@@ -168,7 +167,7 @@ impl WindowState {
             progress_at: Duration::ZERO,
             rearm_at: 0,
             streams: BTreeMap::new(),
-            app: None,
+            feeds: Feeds::default(),
         }
     }
 
@@ -189,40 +188,21 @@ impl WindowState {
         restart_id
     }
 
-    /// Follows the app-wide feed (or restarts it), as [`follow`](Self::follow) a stream.
-    pub(crate) fn follow_app(&mut self) -> u64 {
+    /// Follows `feed` (or restarts it), as [`follow`](Self::follow) a stream.
+    pub(crate) fn follow_feed(&mut self, feed: Feed) -> u64 {
         self.last_restart_id += 1;
-        let restart_id = self.last_restart_id;
-        self.app = Some(AppFollowed {
-            restart_id,
-            restart_due: false,
-        });
-        restart_id
+        self.feeds.follow(feed, self.last_restart_id);
+        self.last_restart_id
     }
 
-    /// Stops following the app-wide feed when `restart_id` (one whose host subscription
-    /// failed) is still current. Returns whether it did.
-    pub(crate) fn unfollow_app_restart(&mut self, restart_id: u64) -> bool {
-        self.is_current_app(restart_id) && self.app.take().is_some()
+    /// The feeds the window follows.
+    pub(crate) fn feeds(&self) -> &Feeds {
+        &self.feeds
     }
 
-    /// Whether `restart_id` is the app-wide feed's current subscription.
-    pub(crate) fn is_current_app(&self, restart_id: u64) -> bool {
-        self.app.is_some_and(|app| app.restart_id == restart_id)
-    }
-
-    /// The app-wide feed's current restart id; `None` when the window does not follow it.
-    #[cfg(test)]
-    pub(crate) fn app_restart_id(&self) -> Option<u64> {
-        self.app.map(|app| app.restart_id)
-    }
-
-    /// The app-wide feed's restart id, once, when a pause's end or the watchdog restarted it
-    /// since the last call: the driver subscribes again and sends the current state first.
-    pub(crate) fn take_app_restart(&mut self) -> Option<u64> {
-        let app = self.app.as_mut().filter(|app| app.restart_due)?;
-        app.restart_due = false;
-        Some(app.restart_id)
+    /// The feeds the window follows, to unfollow one or take their restarts.
+    pub(crate) fn feeds_mut(&mut self) -> &mut Feeds {
+        &mut self.feeds
     }
 
     /// Stops following `stream`. Returns whether it was followed.
@@ -299,9 +279,15 @@ impl WindowState {
         })
     }
 
-    /// [`forward`](Self::forward) for the app-wide feed's subscription `restart_id`, untimed.
-    pub(crate) fn forward_app(&mut self, restart_id: u64, json: &str, now: Duration) -> Forward {
-        if self.paused || !self.is_current_app(restart_id) {
+    /// [`forward`](Self::forward) for `feed`'s subscription `restart_id`, untimed.
+    pub(crate) fn forward_feed(
+        &mut self,
+        feed: Feed,
+        restart_id: u64,
+        json: &str,
+        now: Duration,
+    ) -> Forward {
+        if self.paused || !self.feeds.is_current(feed, restart_id) {
             return Forward::Drop;
         }
         self.frame_and_count(now, |id| frame::messages(json, id))
@@ -470,15 +456,11 @@ impl WindowState {
 
     /// Ends a pause and gives every followed stream a new restart id from its last position.
     /// A failed stream's next retry moves to a full wait from `now`, so the clock does not
-    /// restart it a second time. The app-wide feed, when followed, gets a new restart id too,
-    /// for [`take_app_restart`](Self::take_app_restart).
+    /// restart it a second time. Each followed feed gets a new restart id too, for
+    /// [`Feeds::take_restarts`].
     fn restart_all(&mut self, now: Duration) -> Vec<Restart> {
         self.paused = false;
-        if let Some(app) = self.app.as_mut() {
-            self.last_restart_id += 1;
-            app.restart_id = self.last_restart_id;
-            app.restart_due = true;
-        }
+        self.feeds.restart_all(&mut self.last_restart_id);
         let mut restarts = Vec::with_capacity(self.streams.len());
         for (stream, followed) in &mut self.streams {
             self.last_restart_id += 1;

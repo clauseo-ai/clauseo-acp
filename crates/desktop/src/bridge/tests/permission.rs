@@ -9,7 +9,7 @@ use uuid::Uuid;
 use super::{MAIN, block_on};
 use crate::bridge::{MODE_OPTIONS, needs_confirm};
 use crate::dialogs::{BoxFuture, Confirm};
-use crate::test_support::{Messages, Scratch, collector, stream};
+use crate::test_support::{Messages, Scratch, open, stream};
 
 /// A confirm that answers `self.0`, and must not be asked when `self.0` is `None`.
 struct Answers(Option<bool>);
@@ -61,8 +61,7 @@ fn answer_permission_checks_the_option_and_confirms_always_allow() {
     let host = scratch.start(Vec::new());
     let thread = host.thread();
     let bridge = host.bridge();
-    let (channel, messages) = collector();
-    block_on(bridge.open_stream(MAIN, channel)).unwrap();
+    let messages = open(&bridge, MAIN);
     block_on(bridge.subscribe(MAIN, stream(thread), None)).unwrap();
     host.run(HostCommand::SendPrompt {
         thread,
@@ -122,8 +121,7 @@ fn answer_permission_refuses_the_plan_exit_options_that_change_the_mode() {
     let host = scratch.start(Vec::new());
     let thread = host.thread();
     let bridge = host.bridge();
-    let (channel, messages) = collector();
-    block_on(bridge.open_stream(MAIN, channel)).unwrap();
+    let messages = open(&bridge, MAIN);
     block_on(bridge.subscribe(MAIN, stream(thread), None)).unwrap();
     host.run(HostCommand::SendPrompt {
         thread,

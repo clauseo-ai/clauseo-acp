@@ -25,7 +25,10 @@
 //!   the `e2e` build an event with its receive time, `timed`). At most
 //!   256 KB unacknowledged per window; a 5 s watchdog that fires once per stall.
 //!   `docs/decisions/0012-desktop-bridge.md` records the commands, the capability and the message
-//!   format. Never Tauri events.
+//!   format. Never Tauri events. Opening a window's channel follows the limits on it
+//!   (`HostHandle::subscribe_limits`), counted and restarted like the window's other messages.
+//! - A window's native focus dispatches `RefreshLimits { agent: None, why: Shown }` from Rust;
+//!   the host throttles it.
 //! - The `main` window's scripts carry `app.security.csp` like its page, the colouring worker's
 //!   included: Tauri sends the header with `.html` only (`csp.rs`).
 //! - No command takes a path: folders come from the native dialog drawn in Rust (`dialogs.rs`),
@@ -72,7 +75,9 @@ use clauseo_settings::{
 use host_start::{HostCell, HostStart};
 pub use pre_write_guard::guard_requested;
 use rust_only::PluginRustOnly;
-use tauri::{App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    App, AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+};
 
 /// Bumped by `cargo xtask buildtime` to time an edit to this crate. Nothing reads it.
 pub const BUILDTIME_MARKER: u64 = 0;
@@ -154,6 +159,11 @@ pub fn run() -> tauri::Result<()> {
             #[cfg(feature = "marks")]
             marks::marks_finish,
         ])
+        .on_window_event(|window, event| {
+            if let WindowEvent::Focused(true) = event {
+                refresh_limits_on_focus(window.app_handle());
+            }
+        })
         .setup(|app| {
             // The scoreboard commands' capabilities, in the e2e and marks builds only.
             #[cfg(feature = "e2e")]
@@ -290,6 +300,21 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     window_size::paint_first_frame(&window);
     window_frame::after_build(&window);
     Ok(())
+}
+
+/// A window got focus: the bridge asks the host to read the limits older than 5 minutes
+/// (`Bridge::shown`), in a task, so the event loop never waits on the host. Focus lost does
+/// nothing. A failed dispatch is logged and dropped: the next focus asks again.
+fn refresh_limits_on_focus<R: Runtime>(app: &AppHandle<R>) {
+    let app = app.clone();
+    drop(tauri::async_runtime::spawn(async move {
+        let Some(bridge) = app.try_state::<Bridge>() else {
+            return;
+        };
+        if let Err(error) = bridge.shown().await {
+            tracing::warn!(%error, "a window's focus did not refresh the limits");
+        }
+    }));
 }
 
 /// Brings the first instance's window forward when the app is launched again.

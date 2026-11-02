@@ -14,7 +14,7 @@ use clauseo_protocol::{
     Ack, AgentChoiceId, CommandEnvelope, CommandId, CommandOutcome, ErrorCode, FolderRefId,
     HostCommand, HostError, HostQuery, Language, MAX_PAGE_ENTRIES, MatterSource, PageLimit,
     PermissionEntry, PermissionKind, PermissionRequestId, PermissionState, Principal, QueryResult,
-    StreamId, ThreadId, ViewEntry, ViewPosition,
+    RefreshWhy, StreamId, ThreadId, ViewEntry, ViewPosition,
 };
 use tauri::ipc::Channel;
 
@@ -27,7 +27,7 @@ mod pump;
 mod window;
 
 use pump::Window;
-use window::AckError;
+use window::{AckError, Feed};
 
 /// The principal of every call: the desktop app on this computer.
 const PRINCIPAL: Principal = Principal::LocalDesktop;
@@ -129,6 +129,28 @@ impl Bridge {
         self.host().await?.dispatch(checked.into_envelope()).await
     }
 
+    /// A window got focus: `RefreshLimits { agent: None, why: Shown }`, from Rust. The host
+    /// reads only limits older than 5 minutes, so the bridge does not throttle it.
+    pub(crate) async fn shown(&self) -> Result<CommandOutcome, HostError> {
+        let shown = HostCommand::RefreshLimits {
+            agent: None,
+            why: RefreshWhy::Shown,
+        };
+        self.run(shown).await
+    }
+
+    /// Runs `command`, which the bridge itself makes, under a new command id.
+    async fn run(&self, command: HostCommand) -> Result<CommandOutcome, HostError> {
+        let command_id =
+            CommandId::new(uuid::Uuid::now_v7()).map_err(HostError::invalid_command)?;
+        let envelope = CommandEnvelope {
+            command_id,
+            command,
+        };
+        let checked = envelope.validate().map_err(HostError::invalid_command)?;
+        self.host().await?.dispatch(checked.into_envelope()).await
+    }
+
     /// Whether the window may send `command`: an allow-list, one arm per host command and no
     /// catch-all, so a command the host adds does not compile here until the bridge rules on it
     /// (`docs/decisions/0019-app-stream-to-the-window.md`). Refuses what goes another way
@@ -163,7 +185,8 @@ impl Bridge {
             | HostCommand::UndoStep { .. }
             | HostCommand::RestoreVersion { .. }
             | HostCommand::SetUiSettings { .. }
-            // R16: wired in the host phase; the window's "Try again" sends it.
+            // The window's "Try again" sends it; a window's focus sends `Shown` from Rust
+            // (`Bridge::shown`), not through here.
             | HostCommand::RefreshLimits { .. } => Ok(()),
             HostCommand::AnswerPermission { .. } => Err(invalid(
                 "a permission is answered with answer_permission, not dispatch",
@@ -215,7 +238,8 @@ impl Bridge {
             .ok_or_else(|| invalid(format!("window {label} has not opened its stream")))
     }
 
-    /// Makes `channel` the window's one channel. A window that had one (a page reload) drops
+    /// Makes `channel` the window's one channel, and follows the limits on it: the host sends
+    /// the current view first, then each change. A window that had one (a page reload) drops
     /// it and every subscription it had. Calls that wait together for the host's start (a
     /// reload while it starts) wake in any order: the one that arrived last wins, so a dead
     /// page's channel never replaces the new page's.
@@ -226,13 +250,16 @@ impl Bridge {
     ) -> Result<(), HostError> {
         // Numbered before the wait: the order the calls arrived in, not the order they wake.
         let number = self.opens.fetch_add(1, Ordering::Relaxed);
-        let window = Window::open(self.host().await?.clone(), channel);
+        let host = self.host().await?;
+        let window = Window::open(host.clone(), channel);
         let mut windows = lock(&self.windows);
         let newer = windows.get(label).is_some_and(|(kept, _)| *kept > number);
         // A later call's window is in place: this one, a dead page's, is dropped instead.
         let old = if newer {
             Some(window)
         } else {
+            // Only the kept window follows the limits: a dropped one's channel is dead.
+            pump::follow_limits(host, &window);
             windows
                 .insert(label.to_owned(), (number, window))
                 .map(|(_, old)| old)
@@ -259,14 +286,14 @@ impl Bridge {
             .inspect_err(|_| pump::forget(&window, restart))
     }
 
-    /// Follows the app-wide events on the window's channel (`pump::follow_app`).
+    /// Follows the app-wide events on the window's channel (`pump::follow_feed`).
     pub(crate) async fn subscribe_app(&self, label: &str) -> Result<(), HostError> {
         let window = self.window(label)?;
         let host = self.host().await?;
-        let restart = pump::follow_app(&window);
-        pump::start_app(host, &window, restart, false)
+        let restart = pump::follow_feed(&window, Feed::App);
+        pump::start_feed(host, &window, Feed::App, restart, false)
             .await
-            .inspect_err(|_| pump::forget_app(&window, restart))
+            .inspect_err(|_| pump::forget_feed(&window, Feed::App, restart))
     }
 
     /// Stops following `stream` on the window's channel.
@@ -336,18 +363,12 @@ impl Bridge {
                 "the lawyer declined to always allow",
             ));
         }
-        let command_id =
-            CommandId::new(uuid::Uuid::now_v7()).map_err(HostError::invalid_command)?;
-        let answer = CommandEnvelope {
-            command_id,
-            command: HostCommand::AnswerPermission {
-                thread,
-                request,
-                option_id: option,
-            },
+        let answer = HostCommand::AnswerPermission {
+            thread,
+            request,
+            option_id: option,
         };
-        let checked = answer.validate().map_err(HostError::invalid_command)?;
-        self.host().await?.dispatch(checked.into_envelope()).await?;
+        self.run(answer).await?;
         Ok(())
     }
 
