@@ -166,12 +166,14 @@ fn security_keys_misnamed(
     let mut found = Vec::new();
     for key in SECURITY_KEYS {
         let section = key.split('.').next().unwrap_or(key);
-        // An unknown name about the key's topic. Not an agent's key, and not an entry inside the
-        // list (`mcp.servers.<name>`): a bad entry is left out and the rest of the list stands.
+        // An unknown name about the key's topic, other than an agent's key. This runs before
+        // `typed`, so a bad entry inside a valid list (`mcp.servers.<name>`) is not reported
+        // yet and stays a warning that drops that entry; a name the firm wrote as
+        // `mcp.servers.<name>` itself, at the top level, inside the section or as a registry
+        // value, does lock.
         let about = |name: &str| {
             kind_of(name).is_none()
                 && !name.starts_with("agents.")
-                && !name.starts_with(&format!("{key}."))
                 && name.to_ascii_lowercase().contains(section)
         };
         let from_raws = raws
