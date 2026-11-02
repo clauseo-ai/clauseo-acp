@@ -1,4 +1,4 @@
-// The open conversation's plan, for the words that name it (agent.launch_failed: words-errors.ts's launchFailedKey).
+// The open conversation's plan, for the words that name it (the agent.* codes: words-errors.ts's plannedKey).
 // The room gives it (room.tsx, knownPlan's answer for the open conversation's agent) around Work, so the working line,
 // the composer and the thread's rows read the same one.
 import { createContext, use } from "react";

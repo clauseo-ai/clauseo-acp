@@ -294,7 +294,7 @@ test("in Hindi the region tags English names, as the line's words do", async () 
   expect(region?.querySelector('[lang="en"]')?.textContent).toBe("Claude");
 });
 
-// agent.launch_failed names the open conversation's plan (words-errors.ts's launchFailedKey): its kind read off the
+// agent.launch_failed names the open conversation's plan (words-errors.ts's plannedKey): its kind read off the
 // thread's agent, Codex's as ChatGPT, and an agent of no kind (a settings file's own id) as Clauseo's conversation
 test.each([
   ["codex-acp", "en", "ChatGPT didn't start. Your question is kept."],
@@ -317,3 +317,15 @@ test.each([
     expect(h.one("turn-stopped")?.textContent).toContain(said);
   },
 );
+
+// the other agent.* codes that name Claude take the plan by the same path: the step's row in a Codex thread
+test.each([
+  ["agent.auth_required", "Sign in to ChatGPT in Codex first. Your question is kept."],
+  ["agent.protocol_error", "ChatGPT sent something Clauseo can't read."],
+] as const)("a Codex thread's %s names ChatGPT on the step's row", async (code, said) => {
+  const agent = "codex-acp";
+  h = await asked({ threads: [{ ...summary(), agent }], next: H10 }, agent);
+  h.deliver(failed(code, Date.now(), agent));
+  await h.settle();
+  expect(h.one("turn-stopped")?.textContent).toContain(said);
+});
