@@ -200,9 +200,13 @@ export function VersionsCentre({
           : {}),
       });
   }
-  // a refusal says why on the page, by its code; a running answer says so in the waiting line instead
-  if (s.failed !== null && s.failed !== "matter.turn_running" && s.failed !== "thread.turn_running")
-    notices.push(failedLine(lang, s.failed));
+  // a refusal says why on the page, by its code: under the band at now, as the band's note looking back; a running
+  // answer says so in the waiting line instead
+  const failure =
+    s.failed !== null && s.failed !== "matter.turn_running" && s.failed !== "thread.turn_running"
+      ? failedLine(lang, s.failed)
+      : null;
+  if (failure !== null) notices.push(failure);
 
   const changes = s.compare?.changes ?? null;
   const inView = changes?.find((f) => f.path === doc) ?? changes?.[0];
@@ -223,7 +227,7 @@ export function VersionsCentre({
                 did: didOf(lang, shown, fileName),
                 comparing: look.kind === "back" && look.comparing,
                 undoable: takesBack(s, shown),
-                note: null,
+                note: failure?.text ?? null,
               }
         }
         notices={notices}

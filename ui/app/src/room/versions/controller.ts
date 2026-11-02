@@ -434,7 +434,8 @@ export class VersionsController {
         ...(choices === null ? {} : { choices }),
       },
     );
-    if (ok)
+    // false is a refusal; any checkpoint, or none ("" for a bare done), is the undo made
+    if (ok !== false)
       this.#set({
         ask: null,
         look: { kind: "now" },
