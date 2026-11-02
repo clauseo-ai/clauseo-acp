@@ -30,17 +30,37 @@ psl = { workspace = true }
 getrandom = { workspace = true }
 base64 = { workspace = true }
 subtle = { workspace = true }
+# The egress proxy's upstream: proxy URLs, and the logs of an ignored setting or a failed lookup.
+# (url and tracing are listed above.)
 
 # The watcher (src/macos/watch.rs): `log stream` started as a child, its ndjson lines read on a
 # thread of its own with a once-a-second tick, each line parsed as JSON.
+# The upstream lookup's proxy settings and PAC runs (src/proxy/upstream/macos.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 async-process = { workspace = true }
 serde_json = { workspace = true }
+objc2-cf-network = { workspace = true, features = ["std", "CFProxySupport"] }
+objc2-core-foundation = { workspace = true, features = [
+  "CFArray",
+  "CFDate",
+  "CFDictionary",
+  "CFError",
+  "CFNumber",
+  "CFRunLoop",
+  "CFStream",
+  "CFString",
+  "CFURL",
+] }
 
 # The proxy's listeners bind with SO_EXCLUSIVEADDRUSE (src/ports.rs).
+# The upstream lookup's WinHTTP calls (src/proxy/upstream/windows.rs).
 [target.'cfg(windows)'.dependencies]
 socket2 = { workspace = true }
-windows = { workspace = true, features = ["Win32_Networking_WinSock"] }
+windows = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_Networking_WinHttp",
+  "Win32_Networking_WinSock",
+] }
 
 [dev-dependencies]
 # The denials' JSON shape, `run_sandboxed --print-spec`, and the proxy example's JSON lines.
