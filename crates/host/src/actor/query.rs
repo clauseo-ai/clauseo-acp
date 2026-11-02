@@ -3,11 +3,15 @@
 //! (`CompareVersions`, `PreviewRestore`) or a store read on a task of its own (`ReadBlob`).
 
 use clauseo_protocol::{
-    CheckpointId, CompactString, ErrorCode, HostQuery, MatterId, MatterSummary, Principal,
-    QueryResult, StreamId, ThreadStatus, ThreadSummary, ViewEntry,
+    CheckpointId, CompactString, ErrorCode, FolderState, HostQuery, MatterId, MatterSummary,
+    Principal, QueryResult, StreamId, ThreadStatus, ThreadSummary, ViewEntry,
 };
 
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use super::Actor;
+use super::folder_state::folder_states;
 use super::input::{MatterTag, Reply};
 use super::streams::StreamSlot;
 use futures::task::LocalSpawnExt;
@@ -29,18 +33,7 @@ pub(super) fn query(
         return;
     }
     match *query {
-        HostQuery::ListMatters => {
-            let matters = actor
-                .matters
-                .values()
-                .map(|matter| MatterSummary {
-                    matter: matter.row.id,
-                    name: matter.row.name.clone(),
-                    kind: matter.row.kind,
-                })
-                .collect();
-            let _gone = reply.send(Ok(QueryResult::Matters(matters)));
-        }
+        HostQuery::ListMatters => list_matters(actor, reply),
         HostQuery::ListThreads { matter } => {
             let listed = actor
                 .check_matter(matter)
@@ -154,6 +147,36 @@ fn matter_query(
             actor.release(stream);
         }),
     );
+}
+
+/// `ListMatters`: the rows from memory, each folder's state read off the actor
+/// (`folder_state.rs`), answered from a task of its own.
+fn list_matters(actor: &Actor, reply: Reply<QueryResult>) {
+    let (mut matters, folders): (Vec<MatterSummary>, Vec<PathBuf>) = actor
+        .matters
+        .values()
+        .map(|matter| {
+            let summary = MatterSummary {
+                matter: matter.row.id,
+                name: matter.row.name.clone(),
+                kind: matter.row.kind,
+                folder_state: FolderState::Found,
+            };
+            (summary, PathBuf::from(&matter.row.folder_path))
+        })
+        .unzip();
+    let clock = Arc::clone(&actor.clock);
+    let running = Arc::clone(&actor.stats_running);
+    let spawned = actor.spawner.spawn_local(async move {
+        let states = folder_states(folders, clock, running).await;
+        for (summary, state) in matters.iter_mut().zip(states) {
+            summary.folder_state = state;
+        }
+        let _gone = reply.send(Ok(QueryResult::Matters(matters)));
+    });
+    if let Err(error) = spawned {
+        tracing::error!(%error, "the host pool refused a matter list");
+    }
 }
 
 /// `command.invalid` unless every checkpoint is a version in `matter`'s loaded timeline.

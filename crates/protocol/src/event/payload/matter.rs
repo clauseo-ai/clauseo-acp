@@ -151,6 +151,16 @@ pub struct OutsideEdits {
     pub files: Vec<FileChange>,
 }
 
+/// The lawyer located the matter's folder after it moved ("Locate folder"): the history now
+/// follows `folder`, whose `.clauseo/matter.json` names this matter. Logged in the same commit
+/// that stores `folder` as the matter's path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct MatterRelocated {
+    /// The folder's path as the host stores it (display only; commands never name it).
+    pub folder: String,
+}
+
 /// An earlier version was restored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

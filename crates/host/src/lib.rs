@@ -10,7 +10,8 @@
 //!   versions rules and the reason for each choice.
 //! - The next `seq` of every stream, the patch window and epoch of every loaded stream, and the
 //!   sent view of what is in flight to the store.
-//! - One `clauseo-matter` thread per open matter and one `clauseo-snapshot` thread.
+//! - One `clauseo-matter` thread per open matter, one `clauseo-snapshot` thread, and a
+//!   short-lived `clauseo-stat` thread per `ListMatters` that reads each matter's folder state.
 //! - The Scratch matter: a first start creates it.
 //! - The profile hook: [`ProfileHook`], with [`NoProfile`] as the default. Its `_meta` goes on
 //!   `session/new` and `session/load`, and its variables into each launch, with the host's

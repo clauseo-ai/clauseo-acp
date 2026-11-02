@@ -6,7 +6,7 @@ use clauseo_matters::{CheckpointOutcome, DEFAULT_MARKER, NewMatter, TurnMeta};
 use clauseo_protocol::{CheckpointId, MatterId, ThreadId, Timestamp, TurnId};
 use uuid::Uuid;
 
-use super::{MatterJob, MatterReply, MatterWorker, matter_settings};
+use super::{MatterJob, MatterReply, MatterWorker, Registry, Relink, matter_settings};
 use crate::write;
 
 /// A valid v7 UUID, distinct per `n`.
@@ -163,4 +163,97 @@ fn a_job_before_any_matter_is_an_internal_error() {
         "{reply:?}"
     );
     worker.stop().unwrap();
+}
+
+/// A worker whose replies come back on the returned channel.
+fn worker(root: &std::path::Path) -> (MatterWorker<u32>, mpsc::Receiver<MatterReply>) {
+    let (tx, rx) = mpsc::channel::<MatterReply>();
+    let worker = MatterWorker::<u32>::start(
+        matter_settings(&root.join("data")),
+        Box::new(move |_tag, reply| tx.send(reply).unwrap()),
+    )
+    .unwrap();
+    (worker, rx)
+}
+
+/// `Open` of `id` in `folder`, with a relink and an empty registry.
+fn open_with_relink(id: MatterId, folder: &std::path::Path, at: Timestamp) -> MatterJob {
+    MatterJob::Open {
+        id,
+        folder: folder.to_owned(),
+        relink: Some(Box::new(Relink {
+            created_at: at,
+            registry: Registry {
+                refused: Vec::new(),
+                others: Vec::new(),
+            },
+        })),
+    }
+}
+
+#[test]
+fn the_first_open_spends_the_relink_whatever_it_finds() {
+    let root = test_dir("relink-spent");
+    let folder = root.join("matter");
+    let away = root.join("away");
+    let marker = folder.join(".clauseo/matter.json");
+    let at = Timestamp::new(1_790_000_000_000).unwrap();
+    let id = MatterId::new(v7(2)).unwrap();
+    let (made, replies) = worker(&root);
+    let new = NewMatter {
+        id,
+        folder: folder.clone(),
+        created_at: at,
+        marker: DEFAULT_MARKER,
+        checkpoint: CheckpointId::new(v7(1)).unwrap(),
+    };
+    made.send(MatterJob::Create(new), 0).unwrap();
+    assert!(matches!(
+        replies.recv().unwrap(),
+        MatterReply::Created(Ok(_))
+    ));
+    made.stop().unwrap();
+
+    // A deleted marker in the recorded folder is written again by the first open.
+    write::remove_file(&marker).unwrap();
+    let (relinks, replies) = worker(&root);
+    relinks.send(open_with_relink(id, &folder, at), 0).unwrap();
+    let reply = replies.recv().unwrap();
+    assert!(matches!(reply, MatterReply::Opened(Ok(_))), "{reply:?}");
+    assert!(marker.exists());
+    relinks.stop().unwrap();
+
+    // A first open that finds no folder spends it: when the folder comes back without its
+    // marker, a later open does not write one.
+    write::rename(&folder, &away).unwrap();
+    let (spent, replies) = worker(&root);
+    spent.send(open_with_relink(id, &folder, at), 0).unwrap();
+    let reply = replies.recv().unwrap();
+    let MatterReply::Opened(Err(error)) = reply else {
+        panic!("{reply:?}")
+    };
+    assert_eq!(
+        error.code(),
+        clauseo_protocol::ErrorCode::MatterFolderMissing
+    );
+    write::rename(&away, &folder).unwrap();
+    write::remove_file(&marker).unwrap();
+    let meta = TurnMeta {
+        checkpoint: CheckpointId::new(v7(3)).unwrap(),
+        thread: ThreadId::new(v7(10)).unwrap(),
+        turn: TurnId::new(v7(11)).unwrap(),
+        at,
+    };
+    spent.send(MatterJob::BeforeTurn(meta), 0).unwrap();
+    let reply = replies.recv().unwrap();
+    let MatterReply::BeforeTurn(Err(error)) = reply else {
+        panic!("{reply:?}")
+    };
+    assert_eq!(
+        error.code(),
+        clauseo_protocol::ErrorCode::MatterFolderMissing
+    );
+    assert!(!marker.exists(), "a later open wrote matter.json");
+    spent.stop().unwrap();
+    write::remove_dir_all(&root).unwrap();
 }

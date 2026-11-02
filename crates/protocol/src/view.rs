@@ -217,7 +217,9 @@ impl ViewEntry {
             Self::AgentContent(e) => block_len(&e.block),
             Self::Marker(e) => match &e.kind {
                 MarkerKind::Compaction { summary, .. } => optional_len(summary.as_ref()),
-                MarkerKind::StepUndone { .. } | MarkerKind::VersionRestored { .. } => 0,
+                MarkerKind::StepUndone { .. }
+                | MarkerKind::VersionRestored { .. }
+                | MarkerKind::MatterRelocated { .. } => 0,
             },
             Self::Header(_)
             | Self::AgentText(_)

@@ -10,7 +10,9 @@ mod thread;
 mod tool;
 mod turn;
 
-pub use matter::{CheckpointRecorded, MatterCreated, OutsideEdits, VersionRestored};
+pub use matter::{
+    CheckpointRecorded, MatterCreated, MatterRelocated, OutsideEdits, VersionRestored,
+};
 pub use thread::{
     AgentSessionAttached, AgentSessionDetached, CommandsAvailable, CompactionChanged,
     ConfigOptionsReplaced, ModeChanged, Notice, PlanReplaced, ThreadArchived, ThreadCreated,

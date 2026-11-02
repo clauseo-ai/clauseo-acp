@@ -127,6 +127,7 @@ An unknown kind has no row and no answer (`None`): its envelope's `stream` decid
 | `checkpoint_recorded` | checkpoint, kind, thread?, turn? | matters, through the host | yes | M |
 | `outside_edits` | checkpoint, files | matters, through the host | yes | M |
 | `version_restored` | from, checkpoint, scope | host, matters | yes | M |
+| `matter_relocated` | folder | host, matters | yes | M |
 | `patches` (`HostEvent`) | `PatchBatch`: stream, epoch, patches | host | no | the subscribed stream |
 | `events` (`HostEvent`) | envelopes, replayed then live | host | no | the subscribed stream |
 | `caught_up` (`HostEvent`) | stream, last_seq; once per `SubscribeEvents`, between replay and live | host | no | the subscribed stream |

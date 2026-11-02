@@ -25,11 +25,11 @@ use crate::open_enum::{UnknownKind, serialize_one_key};
 pub use payload::{
     AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
     CompactionChanged, ConfigOptionsReplaced, ContentAppended, ElicitationExpired,
-    ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, ModeChanged, Notice,
-    OutsideEdits, PermissionExpired, PermissionRequested, PermissionResolved, PlanReplaced,
-    QueuedPromptEdited, SteerResolved, StepUndone, TextAppended, ThreadArchived, ThreadCreated,
-    ThreadRenamed, ToolCallStarted, ToolCallUpdated, TurnEnded, TurnFailed, TurnQueued,
-    TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage, VersionRestored,
+    ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterRelocated,
+    ModeChanged, Notice, OutsideEdits, PermissionExpired, PermissionRequested, PermissionResolved,
+    PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone, TextAppended, ThreadArchived,
+    ThreadCreated, ThreadRenamed, ToolCallStarted, ToolCallUpdated, TurnEnded, TurnFailed,
+    TurnQueued, TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage, VersionRestored,
 };
 
 /// `true` for the `matter` stream, `false` for `thread`; any other word does not compile.
@@ -265,6 +265,8 @@ domain_events! {
     OutsideEdits(OutsideEdits) = "outside_edits", matter;
     /// An earlier version was restored (matter stream; host, matters).
     VersionRestored(VersionRestored) = "version_restored", matter;
+    /// The matter's folder was located after it moved (matter stream; host, matters).
+    MatterRelocated(MatterRelocated) = "matter_relocated", matter;
 }
 
 // The boxed variants also convert from the bare payload, so a caller never boxes by hand.

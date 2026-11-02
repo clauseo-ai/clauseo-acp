@@ -68,6 +68,11 @@ pub(crate) enum AfterCommand {
     Row {
         before: Box<ThreadRow>,
     },
+    /// A relocated matter: its row names `folder` once durable.
+    Relocated {
+        matter: MatterId,
+        folder: String,
+    },
     /// A turn command's continuation.
     Turn(turn::TurnTag),
     /// The commit logging a restore of this matter.
@@ -157,6 +162,7 @@ pub(crate) fn finish_command(
     id: CommandId,
     result: Result<CommandOutcome, Error>,
 ) {
+    actor.claims.remove(&id);
     let Some(pending) = actor.commands.remove(&id) else {
         return;
     };
@@ -179,6 +185,9 @@ fn run_command(actor: &mut Actor, ctx: &CommandCtx, command: HostCommand) {
     match command {
         HostCommand::CreateMatter { name, source } => {
             super::matters::create_matter(actor, ctx, &name, source);
+        }
+        HostCommand::RelocateMatter { matter, folder } => {
+            super::relocate::relocate_matter(actor, ctx, matter, folder);
         }
         HostCommand::CreateThread { matter, agent } => {
             let done = create_thread(actor, ctx, matter, agent);
@@ -285,6 +294,9 @@ pub(super) fn command_committed(
             if let Some(entry) = actor.threads.get_mut(&before.id) {
                 entry.row = *before;
             }
+        }
+        (AfterCommand::Relocated { matter, folder }, outcome) => {
+            super::relocate::committed(actor, matter, folder, outcome.is_ok());
         }
         (
             AfterCommand::Nothing

@@ -6,6 +6,7 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
+use crate::open_enum::open_unit_enum;
 use crate::{
     AgentId, BlobHash, CheckpointId, CompactString, Count, Error, FileChange, MatterId, MatterKind,
     MatterPath, RestoreRequest, Seq, SettingsView, StreamId, ThreadId, ThreadStatus, ViewEntry,
@@ -182,6 +183,30 @@ pub struct MatterSummary {
     pub name: String,
     /// How it was made.
     pub kind: MatterKind,
+    /// Whether its folder is where the host last recorded it, as of this list; missing reads
+    /// as `found`.
+    #[serde(default)]
+    pub folder_state: FolderState,
+}
+
+open_unit_enum! {
+    /// Whether a matter's folder is where the host recorded it. One `stat` per matter when the
+    /// host lists matters: it says nothing about the folder's `.clauseo/matter.json`.
+    pub enum FolderState {
+        /// A folder is there.
+        Found,
+        /// No folder is there (moved, deleted, or its drive is not mounted): the matter offers
+        /// "Locate folder" (`RelocateMatter`).
+        Missing,
+    }
+    test mod folder_state;
+}
+
+/// What an older host, which sent no state, means: the folder is taken as found.
+impl Default for FolderState {
+    fn default() -> Self {
+        Self::Found
+    }
 }
 
 /// One thread in a list.

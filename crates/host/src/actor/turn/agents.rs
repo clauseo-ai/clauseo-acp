@@ -60,6 +60,11 @@ pub(super) struct Agent {
     pub(super) waiting: Vec<Waiting>,
     /// Work that came while it was stopping: a new agent takes it after `Ended`.
     after_stop: Vec<Waiting>,
+    /// The matter folder it was started in, its working directory.
+    folder: PathBuf,
+    /// It is being stopped to start again in its matter's new folder: its detach is
+    /// `Restarting`.
+    restarting: bool,
     /// The attached session.
     pub(super) session: Option<AgentSessionId>,
     pub(super) rate: RateCap<RatedUpdate>,
@@ -110,8 +115,8 @@ fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
     if let Some(reason) = held {
         log_detach(actor, thread, reason);
     }
-    let link = match launch(actor, thread) {
-        Ok(link) => link,
+    let (link, folder) = match launch(actor, thread) {
+        Ok(launched) => launched,
         Err(error) => {
             for item in waiting {
                 fail_waiting(actor, thread, &item, &error);
@@ -132,6 +137,8 @@ fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
         info: None,
         waiting,
         after_stop: Vec::new(),
+        folder,
+        restarting: false,
         session: None,
         rate: RateCap::new(),
         rate_armed: false,
@@ -157,7 +164,7 @@ fn next_agent_id() -> u64 {
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
 /// variables, then the profile hook's with the host's switches over them), in the matter folder.
-fn launch(actor: &Actor, thread: ThreadId) -> Result<AgentLink, Error> {
+fn launch(actor: &Actor, thread: ThreadId) -> Result<(AgentLink, PathBuf), Error> {
     let row = &actor.check_thread(thread)?.row;
     let folder = PathBuf::from(&actor.check_matter(row.matter)?.row.folder_path);
     let settings = actor.effective.agent(row.agent.as_str()).ok_or_else(|| {
@@ -167,19 +174,53 @@ fn launch(actor: &Actor, thread: ThreadId) -> Result<AgentLink, Error> {
         )
     })?;
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
-    let spec = agent::launch_spec(settings, hook, std::env::vars_os(), folder)?;
+    let spec = agent::launch_spec(settings, hook, std::env::vars_os(), folder.clone())?;
     let post = actor.post.clone();
     let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
         // The actor may be gone by then.
         let _gone = post.try_send(Input::Agent { thread, input });
     });
-    agent::start(
+    let link = agent::start(
         &actor.spawner,
         actor.launcher.as_ref(),
         &spec,
         Arc::clone(&actor.clock),
         post,
-    )
+    )?;
+    Ok((link, folder))
+}
+
+/// Step 4 for a turn whose agent was started in another folder than its matter's row now names
+/// (the matter was relocated since): stops that agent and starts a new one in the new folder for
+/// the turn, which goes back to step 2 and keeps the writer. `false` when the agent's folder is
+/// the matter's, or there is no running agent.
+pub(super) fn restart_if_moved(actor: &mut Actor, thread: ThreadId, turn: TurnId) -> bool {
+    let Ok(row) = actor.check_thread(thread).map(|entry| entry.row.matter) else {
+        return false;
+    };
+    let Ok(folder) = actor
+        .check_matter(row)
+        .map(|entry| PathBuf::from(&entry.row.folder_path))
+    else {
+        return false;
+    };
+    let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
+        return false;
+    };
+    if agent.folder == folder || agent.stage == Stage::Stopping {
+        return false;
+    }
+    tracing::info!(%thread, "the matter moved; its agent starts again in the new folder");
+    agent.link.stop();
+    agent.stage = Stage::Stopping;
+    agent.restarting = true;
+    let waiting = std::mem::take(&mut agent.waiting);
+    agent.after_stop.extend(waiting);
+    agent.after_stop.push(Waiting::Turn(turn));
+    if let Some(current) = current(actor, thread) {
+        current.phase = TurnPhase::Launching;
+    }
+    true
 }
 
 /// Runs an agent call as a task that posts its result.
@@ -312,6 +353,7 @@ pub(super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
         session,
         waiting,
         after_stop,
+        restarting,
         ..
     } = *agent;
     let reason = match ended {
@@ -320,7 +362,11 @@ pub(super) fn on_ended(actor: &mut Actor, thread: ThreadId, ended: Ended) {
             if step == StopStep::Unresponsive {
                 tracing::warn!(%thread, ?report, "the agent did not exit after its kill");
             }
-            DetachReason::Closed
+            if restarting {
+                DetachReason::Restarting
+            } else {
+                DetachReason::Closed
+            }
         }
     };
     let exited = Error::refused(ErrorCode::AgentExited, "the agent exited");

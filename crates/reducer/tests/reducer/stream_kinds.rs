@@ -2,10 +2,10 @@
 //! own kind, and a state gives the thread's or the matter's state only for its own kind.
 
 use clauseo_protocol::{
-    CheckpointKind, CheckpointRecorded, DomainEvent, MatterCreated, MatterKind, OutsideEdits,
-    RestoreScope, VersionRestored,
+    CheckpointKind, CheckpointRecorded, DomainEvent, MarkerKind, MatterCreated, MatterKind,
+    MatterRelocated, OutsideEdits, RestoreScope, VersionRestored, ViewEntry,
 };
-use clauseo_reducer::{Anomaly, apply};
+use clauseo_reducer::{Anomaly, ViewChange, apply};
 
 use crate::fixtures::{
     Log, file_changes, matter_versions, prompt_stream, thread_created, user_message,
@@ -45,7 +45,7 @@ fn matter_event_on_a_thread_stream_is_reported_by_its_kind() {
     log.push(thread_created().unwrap()).unwrap();
     let mut state = fold(log.events());
     let (checkpoint, from) = (log.fresh().unwrap(), log.fresh().unwrap());
-    let events: [(DomainEvent, &str); 4] = [
+    let events: [(DomainEvent, &str); 5] = [
         (
             MatterCreated::new("Smith v Jones", MatterKind::Scratch, None)
                 .unwrap()
@@ -75,6 +75,13 @@ fn matter_event_on_a_thread_stream_is_reported_by_its_kind() {
             .into(),
             "version_restored",
         ),
+        (
+            MatterRelocated {
+                folder: "/work/Smith v Jones".to_owned(),
+            }
+            .into(),
+            "matter_relocated",
+        ),
     ];
     for (event, kind) in events {
         let before = state.clone();
@@ -86,6 +93,39 @@ fn matter_event_on_a_thread_stream_is_reported_by_its_kind() {
         );
         assert_eq!(state.entries(), before.entries());
     }
+}
+
+#[test]
+fn matter_relocated_folds_to_a_marker_in_the_matter_view() {
+    let mut log = Log::matter(21).unwrap();
+    let created = MatterCreated::new("Smith v Jones", MatterKind::Folder, None).unwrap();
+    log.push(created).unwrap();
+    let mut state = fold(log.events());
+    let folder = "/work/moved/Smith v Jones".to_owned();
+    let envelope = log
+        .push(MatterRelocated {
+            folder: folder.clone(),
+        })
+        .unwrap();
+    let out = apply(&mut state, &envelope).unwrap();
+    assert!(out.anomalies.is_empty(), "{:?}", out.anomalies);
+    let marker = match out.changes.as_slice() {
+        [ViewChange::Upsert(entry)] => match entry.as_ref() {
+            ViewEntry::Marker(marker) => marker.clone(),
+            other => panic!("not a marker: {other:?}"),
+        },
+        other => panic!("changes: {other:?}"),
+    };
+    assert_eq!(marker.order, envelope.seq);
+    assert_eq!(marker.event, envelope.event_id);
+    assert_eq!(marker.kind, MarkerKind::MatterRelocated { folder });
+    assert!(
+        state
+            .entries()
+            .values()
+            .any(|entry| *entry == ViewEntry::Marker(marker.clone())),
+        "the marker is not in the state's entries"
+    );
 }
 
 #[test]

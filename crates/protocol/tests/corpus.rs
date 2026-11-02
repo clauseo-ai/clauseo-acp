@@ -65,13 +65,22 @@ const V1: Corpus = (
 /// in `corpus/added/<kind>-<variant>.jsonl` and `.msgpack`, `<kind>` being the event that holds it.
 /// Each is written `("added/<name>", include_bytes!(..jsonl), include_bytes!(..msgpack),
 /// (length, hash), (length, hash))`.
-const ADDED_AFTER_V1: &[Corpus] = &[(
-    "added/turn_failed-SettingsLocked",
-    include_bytes!("corpus/added/turn_failed-SettingsLocked.jsonl"),
-    include_bytes!("corpus/added/turn_failed-SettingsLocked.msgpack"),
-    (339, 0x49bd_0daf_8ff8_f75b),
-    (240, 0x12c1_6072_ca6b_e315),
-)];
+const ADDED_AFTER_V1: &[Corpus] = &[
+    (
+        "added/turn_failed-SettingsLocked",
+        include_bytes!("corpus/added/turn_failed-SettingsLocked.jsonl"),
+        include_bytes!("corpus/added/turn_failed-SettingsLocked.msgpack"),
+        (339, 0x49bd_0daf_8ff8_f75b),
+        (240, 0x12c1_6072_ca6b_e315),
+    ),
+    (
+        "added/matter_relocated",
+        include_bytes!("corpus/added/matter_relocated.jsonl"),
+        include_bytes!("corpus/added/matter_relocated.msgpack"),
+        (291, 0xa3e2_fa0b_b295_75ad),
+        (220, 0x14ba_06d0_9664_8de4),
+    ),
+];
 
 /// V1, then every file in [`ADDED_AFTER_V1`].
 fn every_corpus() -> Vec<Corpus> {

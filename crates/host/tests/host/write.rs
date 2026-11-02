@@ -31,3 +31,13 @@ pub(crate) fn write(path: &Path, bytes: &[u8]) {
     }
     std::fs::write(path, bytes).unwrap();
 }
+
+/// `fs::rename`: the lawyer moving a folder.
+pub(crate) fn rename(from: &Path, to: &Path) {
+    std::fs::rename(from, to).unwrap();
+}
+
+/// `fs::remove_file`.
+pub(crate) fn remove_file(path: &Path) {
+    std::fs::remove_file(path).unwrap();
+}
