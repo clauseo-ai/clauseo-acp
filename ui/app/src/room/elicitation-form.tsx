@@ -38,6 +38,7 @@ import {
   type FieldProblem,
   type FieldValue,
   type TextField,
+  BAD_NUMBER,
   ELICITATION_TEST_IDS,
 } from "./elicitation-schema.ts";
 import { useAgentPlan } from "./thread/agent-plan.ts";
@@ -101,9 +102,11 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
       // the thread, but never another question's form: the first question on the page keeps it
       (thread?.contains(now) === true && now.closest(`[data-testid="${T.form}"]`) === null);
     if (!free) return;
+    // the first field's own chosen option, else its first control
+    const field = fieldsRef.current?.firstElementChild;
     const first =
-      fieldsRef.current?.querySelector<HTMLElement>("input:checked") ??
-      fieldsRef.current?.querySelector<HTMLElement>("input, textarea") ??
+      field?.querySelector<HTMLElement>("input:checked") ??
+      field?.querySelector<HTMLElement>("input, textarea") ??
       null;
     first?.focus({ preventScroll: true });
     // as it appears only: the room's scope stays the same for the row's life
@@ -142,7 +145,9 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
   }, [busy, respond]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "Enter" || e.nativeEvent.isComposing || e.defaultPrevented) return;
+    // never an IME's Enter (keyCode 229 in WebKit) nor a held one, as composer-keys.ts and permission-keys.ts
+    if (e.key !== "Enter" || e.repeat || e.defaultPrevented) return;
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
     const t = e.target;
     if (t instanceof HTMLTextAreaElement) {
       if (!e.metaKey && !e.ctrlKey) return;
@@ -208,6 +213,11 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
       >
         <bdi>{message}</bdi>
       </p>
+      {form === null && (
+        <p className="perm-kept mt-s2" data-testid={T.unsupported}>
+          <Say>{w.th("This question can't be shown here. Decline, or Stop the answer.")}</Say>
+        </p>
+      )}
       {form !== null && (
         <div ref={fieldsRef} className="mt-s3 pl-(--perm-indent) grid gap-s4">
           {form.fields.map((f, i) => (
@@ -247,15 +257,16 @@ export function ElicitationForm({ elicitation, message, schema }: Props) {
           <Say>{w.th("Choose an answer to send, or Decline to go on without one.")}</Say>
         </p>
       )}
-      {error ? (
-        <p
-          className="perm-error text-small text-quiet mt-(--s2) pl-(--perm-indent)"
-          role="status"
-          data-testid={T.error}
-        >
-          <Say>{error}</Say>
-        </p>
-      ) : null}
+      {/* always there, so a refusal's words are announced as they arrive */}
+      <p
+        className={
+          error ? "perm-error text-small text-quiet mt-(--s2) pl-(--perm-indent)" : undefined
+        }
+        role="status"
+        data-testid={T.error}
+      >
+        {error ? <Say>{error}</Say> : null}
+      </p>
     </div>
   );
 }
@@ -340,6 +351,8 @@ function FieldView({ field: f, index, ctx }: { field: Field; index: number; ctx:
                 type="checkbox"
                 className={`${NATIVE} rounded-label`}
                 checked={ctx.draft[f.key] === true}
+                required={f.required || undefined}
+                aria-required={f.required || undefined}
                 onChange={(e) => ctx.set(f.key, e.currentTarget.checked)}
                 aria-describedby={ids(descId)}
                 data-testid={T.input(f.key)}
@@ -349,6 +362,7 @@ function FieldView({ field: f, index, ctx }: { field: Field; index: number; ctx:
           </span>
           <span className="min-w-0 text-ui font-ui text-primary">
             <bdi>{nameOf(f)}</bdi>
+            {f.required && <Marker>{ctx.required}</Marker>}
           </span>
         </label>
         {desc}
@@ -395,7 +409,10 @@ function Typed({
         min={f.minimum ?? undefined}
         max={f.maximum ?? undefined}
         className={`${textControl} h-control`}
-        onChange={(e) => ctx.set(f.key, e.currentTarget.value)}
+        // words the input can't read as a number come as "", kept as BAD_NUMBER so the field doesn't hold. onInput too:
+        // from "" to "abc" the value stays "", and React's onChange hears no change
+        onChange={(e) => ctx.set(f.key, numberOf(e.currentTarget))}
+        onInput={(e) => ctx.set(f.key, numberOf(e.currentTarget))}
       />
     ) : (
       <TextControl field={f} common={common} ctx={ctx} />
@@ -412,6 +429,9 @@ function Typed({
     </div>
   );
 }
+
+/** A number field's words, or BAD_NUMBER where the input can't read them. */
+const numberOf = (input: HTMLInputElement) => (input.validity.badInput ? BAD_NUMBER : input.value);
 
 type Common = {
   id: string;
