@@ -241,6 +241,8 @@ export default defineConfig(({ mode }) => {
             name: "app",
             include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
             environment: "node",
+            // each test waits for the room's late imports (src/room/late.ts)
+            setupFiles: ["src/testing/setup.ts"],
           },
         },
         {

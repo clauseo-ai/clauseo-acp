@@ -6,6 +6,7 @@ import { guessPlatform, hostPlatform } from "../platform.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import { createDisplayStore, type DisplayStore } from "./display-store.ts";
 import { nextHostOf, type UiSettings } from "./host-next.ts";
+import { late } from "./late.ts";
 
 let connected: { transport: HostTransport; store: DisplayStore } | null = null;
 
@@ -20,8 +21,11 @@ function pageStorage(): Storage | null {
 
 /** Whether this build carries the hooks for checks by hand: the dev server, or a build made with
  * VITE_CLAUSEO_HAND_CHECKS=1 (the room's e2e build, the probe build). Settled when the build is made, so any other
- * build has neither the hooks' chunk nor axe-core's: never a release build. */
-const HAND_CHECKS = import.meta.env.DEV || import.meta.env.VITE_CLAUSEO_HAND_CHECKS === "1";
+ * build has neither the hooks' chunk nor axe-core's: never a release build. Not under vitest (mode "test"), where DEV
+ * is true too: no test uses them, and they would load in every file that mounts the room. */
+const HAND_CHECKS =
+  (import.meta.env.DEV && import.meta.env.MODE !== "test") ||
+  import.meta.env.VITE_CLAUSEO_HAND_CHECKS === "1";
 
 /** Starts the room's display for a transport, once: a second call with the same transport (Strict Mode's second
  * render) gives the same store; another transport replaces it. `override` holds settings for this page only, never
@@ -52,7 +56,7 @@ export function connectRoom(
   );
   // its own chunk, so a release build's initial JS doesn't carry it
   if (HAND_CHECKS) {
-    import("./dev-hooks.ts").then(
+    late(import("./dev-hooks.ts")).then(
       (hooks) => hooks.installDevHooks(store),
       (error: unknown) => console.warn(`the dev hooks did not load: ${String(error)}`),
     );
