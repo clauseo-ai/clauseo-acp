@@ -369,6 +369,90 @@ for size in [16, 20] {
   runs.append(axe)
 }
 
+// Word (U9: ?word=lock, general, open, tile, and ?versions=word; word/probe-states.ts, versions/probe-states.tsx) at
+// every width in both looks, and under axe with Object.prototype frozen. lock and general press the change note's Undo,
+// which the host refuses with matter.file_locked, and answer once the lock's block stands under the note with Try
+// again in Undo's place: Word's two lines for the one Word document (lock), the error map's one line for two files
+// (general). open answers once the note offers "Open in Word"; tile focuses the petition's tile on the wall and answers
+// once its tooltip shows the tile's words. versions=word picks the newest turn, presses Undo and the dialog's Undo, and
+// answers once the dialog shows Word's stage (Try again, no alert, no confirm). Measured as every page is, and for a
+// block, note, tooltip or dialog that scrolls sideways, a line cut off, or a tooltip outside the window.
+let wordMeasured = "(function () { var errs = " + measured + ";" +
+  " document.querySelectorAll('[data-testid=\"files-changed\"], [data-testid=\"word-lock\"], [role=\"dialog\"]').forEach(function (p) {" +
+  " if (p.scrollWidth > p.clientWidth + 1) errs.push('layout: ' + (p.dataset.testid || 'the dialog') + ' scrolls sideways, ' + p.scrollWidth + ' px in ' + p.clientWidth); });" +
+  " document.querySelectorAll('[data-testid=\"word-lock\"] p, [data-testid=\"word-lock\"] button, [data-testid=\"files-changed\"] [data-testid=\"open-in-word\"], [role=\"dialog\"] h2, [role=\"dialog\"] p, [role=\"dialog\"] button').forEach(function (e) {" +
+  " if (e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1) errs.push('layout: cut off, ' + e.textContent.slice(0, 40) + ' ' + e.scrollWidth + 'x' + e.scrollHeight + ' in ' + e.clientWidth + 'x' + e.clientHeight); });" +
+  " var tip = window.__wordTip; if (tip) { var r = tip.getBoundingClientRect();" +
+  " if (r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight) errs.push('layout: the tooltip leaves the window, ' + [r.left, r.top, r.right, r.bottom].map(Math.round).join(','));" +
+  " if (tip.scrollWidth > tip.clientWidth + 1) errs.push('layout: the tooltip scrolls sideways'); }" +
+  dialogDrawn + " return errs; })()"
+/** The room with its five tiles and its look, and the change note in the thread. */
+let wordRoom = { (theme: String, lang: String) in
+  "document.querySelector('#root main.room-centre') !== null" +
+    " && (document.querySelector('[data-testid=\"matter\"]')?.textContent ?? '') !== ''" +
+    " && document.querySelectorAll('#root aside.room-pane li.tile').length === 5" +
+    " && document.documentElement.dataset.theme === '\(theme)' && document.documentElement.lang === '\(lang)'" +
+    " && document.querySelector('[data-testid=\"files-changed\"]') !== null"
+}
+/** The note in view, for the PNG, once its key shows. */
+let noteInView = " && (window.__noteShown || (window.__noteShown = true, document.querySelector('[data-testid=\"files-changed\"]').scrollIntoView({ block: 'center' }), true))"
+let pressNoteUndo = press + "('note-undo', '[data-testid=\"files-changed\"] [data-testid=\"undo\"]')"
+let wordKey: [String: String] = [
+  "lock": pressNoteUndo + " && (function (b) { return b !== null && b.querySelectorAll('p').length === 2" +
+    " && b.querySelector('[data-testid=\"word-lock-retry\"]') !== null" +
+    " && document.querySelector('[data-testid=\"files-changed\"] [data-testid=\"undo\"]') === null; })" +
+    "(document.querySelector('[data-testid=\"word-lock\"]'))" + noteInView,
+  "general": pressNoteUndo + " && (function (b) { return b !== null && b.querySelectorAll('p').length === 1" +
+    " && b.dataset.code === 'matter.file_locked' && b.querySelector('[data-testid=\"word-lock-retry\"]') !== null; })" +
+    "(document.querySelector('[data-testid=\"word-lock\"]'))" + noteInView,
+  "open": "document.querySelector('[data-testid=\"files-changed\"] [data-testid=\"open-in-word\"]') !== null" +
+    " && document.querySelector('[data-testid=\"files-changed\"] [data-testid=\"undo\"]') !== null" + noteInView,
+  // the petition's tile, focused: its tooltip holds the words its sr-only line gives assistive technology
+  "tile": "(function () { var face = Array.prototype.find.call(document.querySelectorAll('aside.room-pane [data-testid=\"open-in-word\"]')," +
+    " function (f) { return f.textContent.indexOf('Petition') !== -1; }); if (!face) return false;" +
+    " if (document.activeElement !== face) face.focus();" +
+    " var words = document.getElementById(face.getAttribute('aria-describedby') || '')?.textContent ?? '';" +
+    " var tip = Array.prototype.find.call(document.querySelectorAll('[data-open]'), function (e) { return e !== face && !e.contains(face) && e.textContent === words; });" +
+    " if (!tip || words === '') return false; window.__wordTip = tip; return true; })()",
+]
+let wordPages = ["lock", "general", "open", "tile"]
+let versionsWordKey = pressVersions + " && " + pressNewest + " && " + pressUndo + " && " +
+  press + "('confirm', '[role=\"dialog\"] [data-testid=\"dialog-confirm\"]')" +
+  " && document.querySelector('[role=\"dialog\"] [data-testid=\"dialog-try-again\"]') !== null" +
+  " && document.querySelector('[role=\"dialog\"] [role=\"alert\"]') === null" +
+  " && document.querySelector('[role=\"dialog\"] [data-testid=\"dialog-confirm\"]') === null"
+for (theme, lang) in looks {
+  for (w, h) in sizes {
+    for page in wordPages {
+      var run = Run(name: "word \(page) \(theme) \(lang)", url: URL(string: "\(origin)/?word=\(page)&theme=\(theme)&lang=\(lang)")!,
+                    width: w, height: h, rendered: wordRoom(theme, lang) + " && " + wordKey[page]! + settledVersions, setup: "")
+      run.measure = wordMeasured
+      runs.append(run)
+    }
+    var run = Run(name: "versions word \(theme) \(lang)", url: URL(string: "\(origin)/?versions=word&theme=\(theme)&lang=\(lang)")!,
+                  width: w, height: h, rendered: versionsRoom(theme, lang) + " && " + versionsWordKey + settledVersions, setup: "")
+    run.measure = wordMeasured
+    runs.append(run)
+  }
+  for page in wordPages {
+    var axe = Run(name: "word \(page) \(theme) \(lang), frozen, axe", url: URL(string: "\(origin)/?word=\(page)&theme=\(theme)&lang=\(lang)")!,
+                  width: 1280, height: 800, rendered: wordRoom(theme, lang) + " && " + wordKey[page]! + settledVersions + axeRun,
+                  setup: "Object.freeze(Object.prototype);")
+    axe.measure = wordMeasured
+    runs.append(axe)
+  }
+  var axe = Run(name: "versions word \(theme) \(lang), frozen, axe", url: URL(string: "\(origin)/?versions=word&theme=\(theme)&lang=\(lang)")!,
+                width: 1280, height: 800, rendered: versionsRoom(theme, lang) + " && " + versionsWordKey + settledVersions + axeRun,
+                setup: "Object.freeze(Object.prototype);")
+  axe.measure = wordMeasured
+  runs.append(axe)
+}
+// PROBE_ONLY: only the pages whose name starts with one of its comma-separated prefixes (such as "word,versions word")
+if let only = ProcessInfo.processInfo.environment["PROBE_ONLY"] {
+  let prefixes = only.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+  runs = runs.filter { run in prefixes.contains { run.name.hasPrefix($0) } }
+}
+
 // Listens for errors from the first moment, before the page's own scripts run.
 let listen = """
 window.__probe = { errs: [] };

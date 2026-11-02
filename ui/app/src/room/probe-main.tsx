@@ -7,14 +7,22 @@
 // Always for this matter and find the prompt confirming (the OS line up, the answers waiting). The page's query sets its display for this page only (theme=night,
 // lang=hi, lite=1, motion=reduced, size=18), as the WebKit probe (scripts/webkit-probe.swift) asks for it, and
 // window.__clauseoDisplay and __clauseoAxe are set (dev-hooks.ts).
-// With ?versions=panel, band, undo, restore, wait or newest, the room has Versions open over the matter's history
+// With ?versions=panel, band, undo, restore, wait, newest or word, the room has Versions open over the matter's history
 // (probe-states.tsx): the timeline with its kinds of row, a past version selected, its undo or restore dialog, the
-// conversation running, or the newest turn picked.
+// conversation running, the newest turn picked, or its undo refused because Word holds the file.
+// With ?word=lock, general, open or tile (word/probe-states.ts), the open conversation's last turn changed papers and
+// the wall lists two Word documents: the change note's Undo refused with the lock (Word's lines for one Word document,
+// or the general line for two files), the note's "Open in Word", or the wall's Word tile, for its tooltip.
 // Not shipped.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "../App.tsx";
-import type { HostEvent, MatterSummary, ViewPatchBody } from "../transport/protocol.ts";
+import type {
+  CommandOutcome,
+  HostEvent,
+  MatterSummary,
+  ViewPatchBody,
+} from "../transport/protocol.ts";
 import { FakeTransport } from "../transport/fake-transport.ts";
 import {
   batch,
@@ -36,6 +44,7 @@ import { detailed, fakeNext, railStates } from "./fake-next.ts";
 import type { MatterInfo, PaperSummary } from "./host-next.ts";
 import { connectRoom } from "./start.ts";
 import { versionsHost, versionsPageOf } from "./versions/probe-states.tsx";
+import { LOCKED, wordFiles, wordHost, wordPageOf } from "./word/probe-states.ts";
 
 const FILES = [
   "Notice to the bank.pdf",
@@ -45,14 +54,19 @@ const FILES = [
   "Bank statement, March 2001.pdf",
 ];
 
-const papers: PaperSummary[] = FILES.map((name, i) => ({
+const page = new URLSearchParams(location.search);
+
+/** ?word=…: the Word pages (word/probe-states.ts), in place of the scripted stream, with the petition on the wall. */
+const wordPage = wordPageOf(page.get("word"));
+const wording = wordPage === null ? null : wordHost(wordPage);
+
+const papers: PaperSummary[] = (wording === null ? FILES : wordFiles(FILES)).map((name, i) => ({
   file: uuid(i + 1, 8),
   path: `papers/${name}`,
   size: 40_000 + i * 1_000,
   modified: 1_730_380_000_000 + i * 60_000,
 }));
 
-const page = new URLSearchParams(location.search);
 /** ?thread=permission: the turn stops short of its step, waiting on the lawyer, at a pending prompt to save a new
  * version of a paper, above one answered once whose call completed. */
 const asking = page.get("thread") === "permission";
@@ -100,11 +114,18 @@ const matters: MatterInfo[] = noMatters
 /** ?versions=…: the matter's Versions (probe-states.tsx), in place of the scripted stream. */
 const versionsPage = versionsPageOf(page.get("versions"));
 const versioning = versionsPage === null ? null : versionsHost(versionsPage);
+/** The page's host for Versions or Word, where it has one. */
+const staged = versioning ?? wording;
 
 const transport = new FakeTransport({
   platform: "mac",
+  // on the pages whose undo meets a lock, every undo_step is refused with matter.file_locked
+  dispatch: (envelope): CommandOutcome => {
+    if (staged?.refusesUndo === true && envelope.command.undo_step !== undefined) throw LOCKED;
+    return "done";
+  },
   query: (query) => {
-    const answer = versioning?.query(query);
+    const answer = staged?.query(query);
     if (answer !== undefined) return answer;
     // ?thread=permission: the turn's thread, so the room subscribes to it and shows the prompts
     if (asking && typeof query === "object" && query.list_threads !== undefined)
@@ -115,14 +136,19 @@ const transport = new FakeTransport({
   },
   subscribe: (streamId) => {
     queueMicrotask(() => {
-      if (versioning !== null) {
-        for (const message of versioning.subscribe(streamId)) transport.deliver(message);
+      if (staged !== null) {
+        for (const message of staged.subscribe(streamId)) transport.deliver(message);
         return;
       }
       for (const message of stream()) transport.deliver(message);
     });
   },
-  next: fakeNext({ matters: () => matters, papers, location: "Documents/Clauseo" }),
+  next: fakeNext({
+    matters: () => matters,
+    papers,
+    location: "Documents/Clauseo",
+    threads: () => wording?.threads ?? [],
+  }),
 });
 
 if (holding) transport.answerPermission = () => new Promise<void>(() => {});
