@@ -170,7 +170,8 @@ fn next_agent_id() -> u64 {
 /// The launch itself: the spec from the settings (inherited environment, the agent's
 /// variables, then the profile hook's with the host's switches over them, then what the host
 /// forces for the agent's kind), in the matter folder. A Codex agent is refused in a folder
-/// holding `.codex` (#184) before anything starts, and its home is made first.
+/// holding `.codex` (#184) before anything starts, and its home and its `config.toml` are made
+/// first.
 fn launch(actor: &Actor, thread: ThreadId) -> Result<(AgentLink, PathBuf), Error> {
     let row = &actor.check_thread(thread)?.row;
     let folder = PathBuf::from(&actor.check_matter(row.matter)?.row.folder_path);
@@ -184,6 +185,7 @@ fn launch(actor: &Actor, thread: ThreadId) -> Result<(AgentLink, PathBuf), Error
         agent::codex::refuse_codex_folder(&agent::codex::session_folder(&folder))?;
         let home = actor.effective.locations().agent_home(row.agent.as_str());
         agent::codex::make_home(&home)?;
+        agent::codex::write_home_config(&home)?;
         agent::codex::launch_env(&home, &settings.env, codex_hooks(actor))
     } else {
         BTreeMap::new()

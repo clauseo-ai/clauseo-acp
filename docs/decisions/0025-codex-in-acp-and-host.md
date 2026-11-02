@@ -65,6 +65,19 @@ agent message text to one that does not (`:29655-29658`, `:44519-44523`). It nev
   lists the skills. The only
   keys a settings `CODEX_CONFIG` contributes are `model` and `model_reasoning_effort`, so a
   by-hand check can pick the cheapest model while no settings value can undo a switch.
+- **The home's `config.toml`.** codex-acp gives `CODEX_CONFIG` only to the session and starts
+  the app-server with `-c` for hooks alone (`dist/index.js:45590-45601`), so app-server starts
+  from the home's own `config.toml`, where plugins are on by default. G8a saw every start sync a
+  plugin cache into `CODEX_HOME/plugins` (176 folders, 57 skills; openai/codex `rust-v0.162.1`
+  `core-plugins/src/manager.rs:2814-2824`) whose skills reached the command list, and #203 saw
+  that sync fetch `github.com/openai/plugins`. So at each launch, after making the home, the host
+  writes `<agent_home>/config.toml` with every `CODEX_OVERRIDES` switch as a TOML dotted key,
+  under a header saying Clauseo manages it and edits are replaced: atomically (temp file and
+  rename), 0600 on Unix, over whatever is there. It reads and touches nothing else in the home
+  (`auth.json` is Codex's). `CODEX_CONFIG` stays: it reaches the session, the file reaches
+  start-up. The hooks table never goes in the file: the guard's trust entry is keyed by the
+  session-flags source, so a hook read from the file would be keyed by its path and silently
+  not run.
 - **Every agent** is launched without the host's inherited `GIT_*` variables.
 - **The hooks seam.** `actor/turn/agents.rs`'s `codex_hooks` gives the `hooks` object that goes
   into `CODEX_CONFIG`, from `agent::loads::codex_hook_config` once #162 part 2 lands; until then

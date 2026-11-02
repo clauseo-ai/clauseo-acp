@@ -113,6 +113,50 @@ fn toml_value(text: &str) -> Value {
     }
 }
 
+/// The header of the `config.toml` the host writes in a Codex agent's home.
+const HOME_CONFIG_HEADER: &str = "# Clauseo manages this file. It is written again each time \
+     Clauseo starts Codex, and any edit is replaced.\n# The switches Clauseo turns off for Codex's \
+     app-server at start-up (clauseo_limits::CODEX_OVERRIDES).\n";
+
+/// The `config.toml` text for a Codex agent's home: [`HOME_CONFIG_HEADER`], then each of
+/// `clauseo_limits::CODEX_OVERRIDES` as a TOML dotted key (each override is already TOML:
+/// `key=value` as Codex's `-c` takes it).
+pub(crate) fn home_config() -> String {
+    let mut text = HOME_CONFIG_HEADER.to_owned();
+    for set in clauseo_limits::CODEX_OVERRIDES {
+        if let Some((key, value)) = set.split_once('=') {
+            text.push_str(key);
+            text.push_str(" = ");
+            text.push_str(value);
+            text.push('\n');
+        }
+    }
+    text
+}
+
+/// Writes [`home_config`] to `<home>/config.toml`, atomically and 0600 on Unix, over whatever is
+/// there. codex-acp 2.2.2 gives `CODEX_CONFIG` only to the session (as each thread's `config`)
+/// and starts the app-server with `-c` for hooks alone (`dist/index.js:45590-45601`), so
+/// app-server starts from this file: without it plugins are on, and every start syncs a plugin
+/// cache into `CODEX_HOME/plugins` (G8a counted 176 folders and 57 skills;
+/// `core-plugins/src/manager.rs:2814-2824` at `rust-v0.162.1`), fetched from
+/// `github.com/openai/plugins` (#203), whose skills reach the session's command list. Nothing
+/// else in the home is read or touched: `auth.json` and the rest are Codex's.
+///
+/// The hooks table never goes in this file, only through `CODEX_CONFIG`: the guard's trust entry
+/// is keyed by the session-flags source (`/<session-flags>/config.toml:pre_tool_use:0:0`), so a
+/// hook written here would be keyed by this file's path, its `trusted_hash` would not match,
+/// and Codex would silently not run it.
+pub(crate) fn write_home_config(home: &Path) -> Result<(), Error> {
+    let path = home.join("config.toml");
+    crate::write::replace_private_file(&path, home_config().as_bytes()).map_err(|error| {
+        Error::refused(
+            ErrorCode::AgentLaunchFailed,
+            format!("the agent's config {}: {error}", path.display()),
+        )
+    })
+}
+
 /// #184: codex-acp marks every session root `trusted` (`dist/index.js:35450-35455`), so a
 /// `.codex/` in the matter folder would load as project config (its MCP servers, hooks, model
 /// and sandbox switches). A Codex agent is refused in a folder holding a `.codex` entry of any

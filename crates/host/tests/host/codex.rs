@@ -444,6 +444,18 @@ fn codex_guard_trusted_runs_the_turn() {
     events.assert_no_mismatch();
     assert_eq!(events.turn_ended(turn).unwrap().stop, StopReason::EndTurn);
     assert_eq!(events.turn_text(turn), "Guarded.");
+    // The hooks went through CODEX_CONFIG only: the home's config.toml has no hooks table, or
+    // the guard's session-flags trust key would not match.
+    let written = std::fs::read_to_string(
+        dir.data_dir()
+            .join("agents")
+            .join(CODEX)
+            .join("home")
+            .join("config.toml"),
+    )
+    .unwrap();
+    assert!(written.contains("features.plugins = false"), "{written}");
+    assert!(!written.contains("hooks"), "{written}");
     host.shutdown();
 }
 

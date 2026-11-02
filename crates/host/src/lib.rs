@@ -21,7 +21,8 @@
 //!   off. When Claude Code's enterprise `managed-mcp.json` is present, none of its servers and
 //!   no strict config go: the firm controls MCP there.
 //! - What a Codex agent is launched with (`agent/codex.rs`): its ask mode
-//!   (`INITIAL_AGENT_MODE=workspace-write`), its home under the data folder as `CODEX_HOME`, a
+//!   (`INITIAL_AGENT_MODE=workspace-write`), its home under the data folder as `CODEX_HOME` with a
+//!   `config.toml` of the same switches for app-server's start-up, a
 //!   `CODEX_CONFIG` with `clauseo_limits::CODEX_OVERRIDES` and the hooks seam's object, and no
 //!   MCP filtering, over any settings value; its refusal in a folder holding `.codex` (#184);
 //!   and, before its first prompt, `session/set_mode` to the ask mode and the guard's trust check.
