@@ -133,10 +133,20 @@ impl Launcher for SeatbeltLauncher {
 }
 
 /// Makes `<state>/tmp` if it is missing; the state folder exists (the policy checked it).
+/// Only the folder itself is made, never through a link: an agent of an earlier launch may
+/// have put a symbolic link there, and this process is outside the jail.
 #[expect(
     clippy::disallowed_methods,
     reason = "the launcher's one file change: the agent's TMPDIR inside its own state folder"
 )]
 fn make_tmpdir(path: &Path) -> io::Result<()> {
-    std::fs::create_dir_all(path)
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => Ok(()),
+        Ok(_) => Err(io::Error::other(format!(
+            "{} is not a folder",
+            path.display()
+        ))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => std::fs::create_dir(path),
+        Err(error) => Err(error),
+    }
 }
