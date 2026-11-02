@@ -34,6 +34,7 @@ import {
   withoutPlaceholders,
 } from "./footnotes.ts";
 import type { Footnotes, Numbering } from "./footnotes.ts";
+import { createCache, createIds, createJoiner, createVariants } from "./cache.ts";
 import { characterEntitiesLoaded, characterReferenceMisses } from "./entities.ts";
 import {
   capNesting,
@@ -113,36 +114,6 @@ export function plainText(source: string): Hast {
   };
 }
 
-/** A cache that keeps only what the last update used, once it holds more than twice that. */
-function createCache<V>() {
-  const map = new Map<string, V>();
-  let used = new Set<string>();
-  return {
-    get(key: string, make: () => V): V {
-      used.add(key);
-      let value = map.get(key);
-      if (value === undefined) {
-        value = make();
-        map.set(key, value);
-      }
-      return value;
-    },
-    /** Mark `key` as used by this update without looking it up. */
-    keep(key: string) {
-      used.add(key);
-    },
-    /** Forget every entry whose key holds `text`. */
-    forget(text: string) {
-      for (const key of map.keys()) if (key.includes(text)) map.delete(key);
-    },
-    sweep() {
-      if (map.size > 2 * used.size + 16)
-        for (const key of map.keys()) if (!used.has(key)) map.delete(key);
-      used = new Set();
-    },
-  };
-}
-
 /**
  * What one block needs for its view: its parse input with every footnote label it may call (`input`, from
  * offset `from`), its footnotes, its labels, and the view's input and cache key of the last update.
@@ -166,17 +137,6 @@ type Entry = {
  * for them arrives. An answer's block cites a handful.
  */
 const MAX_PENDING = 64;
-
-/** A cache key for an object, by identity. */
-function createIds() {
-  const ids = new WeakMap<object, number>();
-  let next = 0;
-  return (value: object) => {
-    let id = ids.get(value);
-    if (id === undefined) ids.set(value, (id = next++));
-    return id;
-  };
-}
 
 /**
  * The model of one answer. `scope` is the answer's own part of every id it generates (a transcript shows
@@ -492,26 +452,12 @@ export function createAnswer(scope: string): Answer {
   );
 
   /** A view as a block that continues the paragraph before (BlockView's `continues`), the same object each time. */
-  const continuing = new WeakMap<BlockView, BlockView>();
-  const continuingOf = (view: BlockView): BlockView => {
-    let known = continuing.get(view);
-    if (!known) continuing.set(view, (known = { ...view, continues: true }));
-    return known;
-  };
-
-  /**
-   * A paragraph's parts joined (joinParts), the same string each update while its parts are the same
-   * strings: a finished block's caches and views are found by it without hashing a new copy every update.
-   */
-  let joinedBefore = new Map<string, { parts: readonly string[]; joined: string }>();
-  let joinedNow = new Map<string, { parts: readonly string[]; joined: string }>();
-  const joinOf = (parts: readonly string[]): string => {
-    let known = joinedBefore.get(parts[0]!);
-    if (known?.parts.length !== parts.length || known.parts.some((part, at) => part !== parts[at]))
-      known = { parts, joined: parts.join("") };
-    joinedNow.set(parts[0]!, known);
-    return known.joined;
-  };
+  const continuingOf = createVariants((view: BlockView): BlockView => ({
+    ...view,
+    continues: true,
+  }));
+  /** A paragraph's parts joined (joinParts), the same string while its parts are the same strings. */
+  const joinOf = createJoiner();
 
   let lastText: string | undefined;
   let lastStreaming = true;
@@ -621,8 +567,7 @@ export function createAnswer(scope: string): Answer {
       lastText = raw;
       lastStreaming = streaming;
       for (const cache of caches) cache.sweep();
-      joinedBefore = joinedNow;
-      joinedNow = new Map();
+      joinOf.sweep();
       return lastViews;
     },
   };
