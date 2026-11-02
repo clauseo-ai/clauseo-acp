@@ -41,9 +41,16 @@ awk -v files="$FILES" '
 
 failed=0
 for file in $FILES; do
+  # A failed listing (a broken config, a package that does not exist) stops here: its stderr,
+  # cargo-mutants' own error, goes straight to the log, and only stdout is counted.
+  status=0
+  listed=$(cargo mutants --list --config "$out" "${packages[@]}" --file "$file") || status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "::error::cargo mutants --list exited $status for $file"
+    exit "$status"
+  fi
   # tr: cargo on Windows may end its lines with CRLF.
-  count=$(cargo mutants --list --config "$out" "${packages[@]}" --file "$file" \
-    | tr -d '\r' | grep -c . || true)
+  count=$(printf '%s' "$listed" | tr -d '\r' | grep -c . || true)
   echo "$file: $count mutants"
   if [ "$count" -eq 0 ]; then
     echo "::error::$file gives no mutant with $out; check the path and the exclusions"
