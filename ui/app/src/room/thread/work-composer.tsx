@@ -51,8 +51,12 @@ export function WorkComposer({
     if (disabled || busy || text.trim() === "") return;
     const asked = text;
     void onAsk(asked).then((ok) => {
+      if (!ok) return;
       // words typed while it went keep their place
-      if (ok) setText((now) => (now === asked ? "" : now));
+      setText((now) => (now === asked ? "" : now));
+      // and an accepted question is no draft: the drafts outlive this composer, so this holds when the lawyer has
+      // gone to another matter while the question went
+      if (matter !== null && drafts.get(matter) === asked) drafts.delete(matter);
     });
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {

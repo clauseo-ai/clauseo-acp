@@ -4,26 +4,31 @@
 //
 // Pages hold only while they join the live window: a Reset (a host restart, or a subscriber that fell behind, in the
 // same epoch or a new one) can start the window later than it started when the pages were taken, and the entries
-// between would be in neither. So pages belong to the stream, the epoch and the window's first entry as it was when
-// they went in; when the window starts later, or the epoch changes, they are dropped and paging starts again from the
-// new window.
+// between would be in neither. So pages belong to the stream and to the window as it was when they went in
+// (`moves`); when the epoch changes, or a Reset starts the window later, they are dropped and paging starts again
+// from the new window. A `remove` of the window's first entries starts it later too, but loses nothing: the pages
+// stay. The two are told apart by the new first entry: a remove leaves it the very object the window held before,
+// among its first entries; a Reset brings every entry as a new object. (Should one of those entries have been
+// replaced by an upsert since the id list last changed, a remove reads as a Reset: the pages are asked for again,
+// nothing lost.)
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStreamPart } from "../../store/hooks.ts";
 import type { ViewStore } from "../../store/store.ts";
-import { orderOf, type StreamView } from "../../store/view.ts";
+import { entryIdOf, orderOf, type StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
-import type { StreamId, ViewEntry, ViewEpoch } from "../../transport/protocol.ts";
+import type { EntryId, StreamId, ViewEntry, ViewEpoch } from "../../transport/protocol.ts";
 
 /** Entries a page asks for. */
 export const PAGE = 50;
 /** How close to the top, in px, counts as the top. */
 const TOP = 8;
+/** How many of the window's first entries the picture keeps: a remove of more at once reads as a Reset. */
+const HEAD = 16;
 
 type Pages = {
   stream: StreamId;
-  epoch: ViewEpoch | null;
-  /** The live window's first order when the pages went in: they join it. */
-  anchor: number;
+  /** The window's moves when they went in (`moves`): they join the window while it hasn't moved since. */
+  moved: number;
   entries: readonly ViewEntry[];
   done: boolean;
 };
@@ -32,11 +37,36 @@ type Pages = {
 const scrolls = (el: HTMLElement) => getComputedStyle(el).overflowY !== "visible";
 
 const pickEpoch = (v: StreamView | undefined) => v?.epoch ?? null;
-const pickFirst = (v: StreamView | undefined): number | null => {
-  const id = v?.ids[0];
-  const entry = id === undefined ? undefined : v!.entries.get(id);
-  return entry === undefined ? null : orderOf(entry);
-};
+const firstOf = (v: StreamView): ViewEntry | undefined =>
+  v.ids[0] === undefined ? undefined : v.entries.get(v.ids[0]);
+
+/** A pick counting the times the live window moved away from what pages joined: a new epoch, or a Reset that starts
+ * it later. It keeps its picture of the window between calls and reads a view again only when its id list or epoch
+ * is new, so asked twice of one view it answers the same. */
+function moves(): (v: StreamView | undefined) => number {
+  let count = 0;
+  let ids: readonly EntryId[] | null = null;
+  let epoch: ViewEpoch | null = null;
+  let first: number | null = null;
+  let head = new Map<EntryId, ViewEntry>();
+  return (v) => {
+    if (v === undefined || (v.ids === ids && v.epoch === epoch)) return count;
+    const entry = firstOf(v);
+    const order = entry === undefined ? null : orderOf(entry);
+    const later = order !== null && first !== null && order > first;
+    const kept = entry !== undefined && head.get(entryIdOf(entry)) === entry;
+    if (ids !== null && (v.epoch !== epoch || (later && !kept))) count += 1;
+    ids = v.ids;
+    epoch = v.epoch;
+    first = order;
+    head = new Map();
+    for (const id of v.ids.slice(0, HEAD)) {
+      const e = v.entries.get(id);
+      if (e !== undefined) head.set(id, e);
+    }
+    return count;
+  };
+}
 
 export type Older = {
   readonly entries: readonly ViewEntry[];
@@ -54,15 +84,9 @@ export function useOlder(
   const [pages, setPages] = useState<Pages | null>(null);
   const [loading, setLoading] = useState(false);
   const epoch = useStreamPart(store, stream, pickEpoch);
-  const first = useStreamPart(store, stream, pickFirst);
-  const own =
-    pages !== null &&
-    pages.stream === stream &&
-    pages.epoch === epoch &&
-    first !== null &&
-    first <= pages.anchor
-      ? pages
-      : null;
+  const [pickMoved] = useState(moves);
+  const moved = useStreamPart(store, stream, pickMoved);
+  const own = pages !== null && pages.stream === stream && pages.moved === moved ? pages : null;
   const asking = useRef(false);
   /** Where a page was refused: no asking again there until the epoch changes or the view leaves the top. */
   const refusedAt = useRef<string | null>(null);
@@ -76,8 +100,7 @@ export function useOlder(
     const view = store.view(stream);
     const oldest =
       own?.entries[0] ?? (view?.ids[0] === undefined ? undefined : view.entries.get(view.ids[0]));
-    const anchor = own?.anchor ?? first;
-    if (oldest === undefined || anchor === null) return;
+    if (oldest === undefined) return;
     asking.current = true;
     setLoading(true);
     transport
@@ -94,8 +117,7 @@ export function useOlder(
                 : document.documentElement.scrollHeight;
           setPages({
             stream,
-            epoch,
-            anchor,
+            moved,
             entries: [...got, ...(own?.entries ?? [])],
             done: got.length < PAGE,
           });
@@ -109,7 +131,7 @@ export function useOlder(
         asking.current = false;
         setLoading(false);
       });
-  }, [transport, store, stream, epoch, first, place, hasOlder, own, scroller]);
+  }, [transport, store, stream, moved, place, hasOlder, own, scroller]);
 
   // the rows below the new page stay where the lawyer was reading
   useLayoutEffect(() => {

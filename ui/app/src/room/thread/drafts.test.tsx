@@ -33,13 +33,12 @@ const type = async (text: string) =>
     field().dispatchEvent(new Event("input", { bubbles: true }));
   });
 
-test("a matter's draft is there again after a visit to another matter; an emptied field keeps nothing", async () => {
-  const drafts: Drafts = new Map();
+function room(drafts: Drafts) {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   // as room.tsx renders Work: keyed by the matter, so each matter's composer is a new one
-  const show = (matter: MatterId) =>
+  const show = (matter: MatterId, onAsk: (text: string) => Promise<boolean> = async () => false) =>
     act(async () =>
       root!.render(
         <WorkComposer
@@ -50,12 +49,25 @@ test("a matter's draft is there again after a visit to another matter; an emptie
           busy={false}
           refused={null}
           failed={null}
-          onAsk={async () => false}
+          onAsk={onAsk}
           onStop={() => {}}
           onRetry={() => {}}
         />,
       ),
     );
+  return show;
+}
+
+const enter = () =>
+  act(async () => {
+    field().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", keyCode: 13, bubbles: true, cancelable: true }),
+    );
+  });
+
+test("a matter's draft is there again after a visit to another matter; an emptied field keeps nothing", async () => {
+  const drafts: Drafts = new Map();
+  const show = room(drafts);
   await show(A);
   await type("What does clause nine say?");
   await show(B);
@@ -70,4 +82,27 @@ test("a matter's draft is there again after a visit to another matter; an emptie
   await show(A);
   await show(B);
   expect(field().value).toBe("");
+});
+
+test("a question accepted after the lawyer left its matter doesn't come back as the draft; a refused one does", async () => {
+  const drafts: Drafts = new Map();
+  const show = room(drafts);
+  let accept: (ok: boolean) => void = () => {};
+  const held = () => new Promise<boolean>((resolve) => (accept = resolve));
+  await show(A, held);
+  await type("What does clause nine say?");
+  await enter();
+  // off to another matter while send_prompt is on its way: A's composer is gone
+  await show(B);
+  await act(async () => accept(true));
+  await show(A, held);
+  expect(field().value).toBe("");
+  expect(drafts.has(A)).toBe(false);
+  // refused: the question is kept, as the refusal's words promise
+  await type("And clause ten?");
+  await enter();
+  await show(B);
+  await act(async () => accept(false));
+  await show(A);
+  expect(field().value).toBe("And clause ten?");
 });

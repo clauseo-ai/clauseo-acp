@@ -5,7 +5,7 @@ import { act } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { reset, STREAM, upsert, userMessage, agentText } from "../../testing/stream-script.ts";
 import { entryIdOf, orderOf } from "../../store/view.ts";
-import type { HostError, HostQuery, ViewEntry } from "../../transport/protocol.ts";
+import type { HostError, HostQuery, ViewEntry, ViewPatchBody } from "../../transport/protocol.ts";
 import { mountRoom, type Harness } from "./harness.ts";
 
 let h: Harness | null = null;
@@ -36,6 +36,7 @@ const pageAsks = () =>
   h!.transport
     .only("query")
     .filter((c) => typeof c.query === "object" && "page_entries" in c.query);
+const remove = (entry_id: string): ViewPatchBody => ({ remove: { entry_id } });
 const shownIds = () =>
   [...h!.host.querySelectorAll<HTMLElement>("[data-entry-id]")].map((r) => r.dataset["entryId"]);
 
@@ -54,6 +55,26 @@ test("a Reset whose window starts later than the pages joined drops them and pag
     page_entries: { stream: STREAM, before_order: 9, limit: 50 },
   });
   expect(shownIds()).toEqual(TWELVE.map(entryIdOf));
+});
+
+test("a remove of the window's first entries keeps the pages: nothing is asked again and the history stays", async () => {
+  h = await mountRoom({ query: pageOf });
+  h.deliver([windowOf(7, 10)]);
+  await h.settle();
+  expect(pageAsks()).toHaveLength(1);
+  // the first two live entries go, one patch at a time and then in one batch with an upsert after them
+  h.deliver([remove(entryIdOf(TWELVE[6]!))]);
+  await h.settle();
+  h.deliver([remove(entryIdOf(TWELVE[7]!)), upsert(TWELVE[10]!)]);
+  await h.settle();
+  expect(pageAsks()).toHaveLength(1);
+  expect(shownIds()).toEqual([...TWELVE.slice(0, 6), ...TWELVE.slice(8, 11)].map(entryIdOf));
+  // a Reset that starts the window later after all that still drops them, and pages the gap back in
+  h.deliver([windowOf(11, 12)]);
+  await h.settle();
+  expect(pageAsks().at(-1)?.query).toEqual({
+    page_entries: { stream: STREAM, before_order: 11, limit: 50 },
+  });
 });
 
 test("a refused page isn't asked again at the top; leaving the top and coming back asks once more", async () => {
