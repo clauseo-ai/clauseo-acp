@@ -14,8 +14,8 @@ use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
 use clauseo_protocol::{
     AccountLimits, AccountRef, AgentKind, AgentLimitsView, AtLimitBehaviour, Billing,
     CommandOutcome, Finite, Freshness, HostCommand, HostEvent, LimitSource, LimitWindow,
-    LimitsView, MeterTone, PlanLabel, Principal, RefreshWhy, StreamId, ThreadId, Timestamp,
-    WindowFreshness, WindowKind,
+    LimitsView, MeterTone, PlanLabel, Principal, RefreshWhy, StaleReason, StreamId, ThreadId,
+    Timestamp, WindowFreshness, WindowKind,
 };
 use clauseo_store::{Store, StoreOptions};
 use futures::{FutureExt, StreamExt};
@@ -232,7 +232,7 @@ fn start_shows_stored_limits_stale_and_reads_each_agent() {
     let dir = Dir::new(
         "start_shows_stored_limits_stale_and_reads_each_agent",
         &[
-            (CLAUDE, Scenario::Bundled("prompt-stream")),
+            (CLAUDE, Scenario::Bundled("limit-warning")),
             (CODEX, Scenario::Bundled("codex-handshake")),
         ],
     );
@@ -258,6 +258,19 @@ fn start_shows_stored_limits_stale_and_reads_each_agent() {
     assert_eq!(claude.freshness, Freshness::Stale, "{view:?}");
     assert_eq!(claude.checked_at, Some(at(-3600)));
     assert_eq!(entry(&view, AgentKind::Codex).freshness, Freshness::Loading);
+
+    // A live signal publishes the stored account as the model holds it: aged, its time kept.
+    let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
+    turn(&host, thread);
+    let (limits, _) = feed.changed("the live signal");
+    assert_eq!(
+        limits.source,
+        LimitSource::Stale {
+            checked_at: at(-3600),
+            reason: StaleReason::Aged,
+        }
+    );
+    assert_eq!(reads.count(AgentKind::Claude), 1, "the start-up read runs");
 
     reads.answer(
         AgentKind::Claude,
