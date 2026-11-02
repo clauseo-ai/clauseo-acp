@@ -52,6 +52,15 @@ const HI = {
   "Allow once": "एक बार अनुमति दें",
   "Always for this matter": "इस मामले के लिए हमेशा",
   "Don't allow": "अनुमति न दें",
+  // drafts for Rohan (U4): the fourth answer, the ask line when the agent names no paper, and the folded lines when
+  // nothing was saved or the question is gone; each first sentence matches the folded lines below
+  "Don't allow for this matter": "इस मामले के लिए अनुमति न दें",
+  "Clauseo asks before going on.": "आगे बढ़ने से पहले Clauseo आपसे पूछता है।",
+  "No longer waiting for an answer.": "अब उत्तर की प्रतीक्षा नहीं है।",
+  "Allowed once.": "एक बार अनुमति दी गई।",
+  "Allowed for this matter.": "इस मामले के लिए अनुमति दी गई।",
+  "Not allowed.": "अनुमति नहीं दी गई।",
+  "Not allowed for this matter.": "इस मामले के लिए अनुमति नहीं दी गई।",
   // what the answered prompt says: what the lawyer decided first, then what Clauseo did, in the past tense
   "Allowed once. Clauseo saved a new version of {paper}.":
     "एक बार अनुमति दी गई। Clauseo ने {paper} का नया संस्करण सहेजा।",
