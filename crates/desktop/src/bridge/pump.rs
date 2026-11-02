@@ -324,6 +324,8 @@ fn spawn_app_restart(host: &HostHandle, window: &Arc<Mutex<Window>>, restart_id:
 
 /// The current settings as the `settings_changed` event's text, read after the subscription it
 /// goes before.
+// TODO(H4): drop this read, and `start_app`'s `current`, once the host sends its own catch-up
+// frames first after `subscribe_app` (the `all: true` lists and a first `settings_changed`).
 async fn current_settings(host: &HostHandle) -> Result<String, HostError> {
     let QueryResult::Settings(settings) = host.query(PRINCIPAL, HostQuery::GetSettings).await?
     else {

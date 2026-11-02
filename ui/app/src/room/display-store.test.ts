@@ -262,6 +262,19 @@ test("with a NextHost the store follows settings_changed", async () => {
   expect(store.display().lang).toBe("en");
 });
 
+test("a repeated settings_changed with the same values shows nothing new and sends nothing back", async () => {
+  // the bridge's frame after a restart and, once H4 lands, the host's catch-up frame may both arrive
+  const { transport, store, shown, saved } = withHost();
+  await settled();
+  const before = shown.length;
+  transport.settingsChanged(HOST_SETTINGS);
+  transport.settingsChanged({ ...HOST_SETTINGS, ui: { ...HOST_SETTINGS.ui } });
+  expect(shown.length).toBe(before);
+  expect(store.ui()).toEqual(HOST_SETTINGS.ui);
+  expect(transport.only("next_command")).toEqual([]);
+  expect(saved()).toBeUndefined();
+});
+
 test("without a host no key is locked", () => {
   expect(harness().store.locked()).toEqual([]);
 });
