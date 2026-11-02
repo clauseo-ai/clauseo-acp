@@ -13,11 +13,11 @@ mod answers;
 mod asks;
 mod cancel;
 mod close;
-mod codex_start;
 mod end;
 mod failure;
 mod inputs;
 mod known;
+mod launch_checks;
 mod out;
 mod prompt;
 mod reconcile;
@@ -61,8 +61,8 @@ const CANCEL_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 pub(crate) struct TurnState {
     /// The thread's agent, from its launch until its tasks post `Ended`.
     agent: Option<Box<agents::Agent>>,
-    /// A Codex launch whose file checks run off the actor, before its agent exists.
-    codex_start: Option<Box<codex_start::Preparing>>,
+    /// A launch whose folder checks run off the actor, before its agent exists.
+    preparing: Option<Box<launch_checks::Preparing>>,
     /// The thread's current turn: accepted and not ended.
     current: Option<Box<Current>>,
     /// Text not durable yet.
@@ -274,8 +274,8 @@ pub(crate) fn turn_input(actor: &mut Actor, input: TurnInput) {
             agent,
             reply,
         } => agents::on_reply(actor, thread, agent, reply),
-        TurnInput::CodexPrepared { thread, id, result } => {
-            codex_start::on_prepared(actor, thread, id, result);
+        TurnInput::Prepared { thread, id, result } => {
+            launch_checks::on_prepared(actor, thread, id, result);
         }
         TurnInput::Log {
             thread,
@@ -419,7 +419,7 @@ pub(crate) fn busy(actor: &Actor) -> bool {
         let state = &entry.turn;
         state.reconciling
             || state.agent.is_some()
-            || state.codex_start.is_some()
+            || state.preparing.is_some()
             || state.current.as_ref().is_some_and(|current| {
                 matches!(
                     current.phase,
@@ -495,7 +495,7 @@ pub(crate) fn keeps_loaded(actor: &Actor, thread: ThreadId) -> bool {
     actor.threads.get(&thread).is_some_and(|entry| {
         let state = &entry.turn;
         state.agent.is_some()
-            || state.codex_start.is_some()
+            || state.preparing.is_some()
             || state.current.is_some()
             || state.reconciling
             || state

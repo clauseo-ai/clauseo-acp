@@ -2,8 +2,8 @@
 //! entry (a folder, a file, or reached through a linked matter folder), on start, on reopen
 //! (through `session/load` and `session/resume`) and before a later prompt of the same
 //! agent; Claude in such a folder runs. A folder with no `.codex` runs Codex
-//! (`codex::codex_handshake_streams_in_workspace_write`). And a matter folder that overlaps
-//! the agent's home is refused.
+//! (`codex::codex_handshake_streams_in_workspace_write`). And any agent is refused in a matter
+//! folder that is or holds the data folder, or overlaps its `agents` folder.
 
 use std::sync::Arc;
 
@@ -139,17 +139,14 @@ fn a_codex_folder_appearing_mid_session_fails_the_next_prompt_unsent() {
     host.shutdown();
 }
 
-/// A matter folder that holds the agent's home (the data folder's `agents` folder) is refused
-/// at launch with `matter.folder_refused`, and its words name no path.
-#[test]
-fn a_matter_folder_holding_the_agent_home_is_refused() {
-    let dir = codex_dir("codex_refused_home", "codex-handshake");
-    let agents = dir.data().join("agents");
-    write::create_dir_all(&agents);
-    let launcher = Recording::new(&dir);
+/// Asserts that `agent`, in a thread of a matter at `folder`, is refused at launch with
+/// `matter.folder_refused` and words that name no path, and that nothing was launched.
+fn assert_refused_in_data(dir: &Dir, folder: &std::path::Path, agent: &str) {
+    write::create_dir_all(folder);
+    let launcher = Recording::new(dir);
     let envs = Arc::clone(&launcher.envs);
     let host = dir.start_launching(0, Arc::new(launcher), |config| config);
-    let (_, events, turn) = turn_in(&host, &agents, CODEX);
+    let (_, events, turn) = turn_in(&host, folder, agent);
     let failed = turn_failed(&events, turn)
         .unwrap_or_else(|| panic!("no TurnFailed of {turn}: {}", events.dump()));
     assert_eq!(
@@ -162,6 +159,26 @@ fn a_matter_folder_holding_the_agent_home_is_refused() {
     assert!(!detail.contains(&*dir.data().to_string_lossy()), "{detail}");
     host.shutdown();
     assert_eq!(envs.lock().unwrap().len(), 0, "the agent was launched");
+}
+
+/// Any agent, Claude included, is refused at launch in a matter at the data folder's `agents`
+/// folder, which holds every agent's home. (Import already refuses the data folder itself; the
+/// unit tests in `agent/data_folder.rs` cover it.)
+#[test]
+fn claude_in_a_matter_holding_the_agent_homes_is_refused() {
+    let dir = Dir::new(
+        "claude_refused_agents",
+        &[("claude-acp", Scenario::Bundled("prompt-stream"))],
+    );
+    assert_refused_in_data(&dir, &dir.data().join("agents"), "claude-acp");
+}
+
+/// A Codex agent is refused in a matter that is another agent's home.
+#[test]
+fn codex_in_a_sibling_agents_home_is_refused() {
+    let dir = codex_dir("codex_refused_sibling_home", "codex-handshake");
+    let home = dir.data().join("agents").join("claude-acp").join("home");
+    assert_refused_in_data(&dir, &home, CODEX);
 }
 
 #[cfg(unix)]

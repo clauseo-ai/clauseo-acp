@@ -21,7 +21,7 @@ pub(super) fn prompt(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             Some((
                 (
                     agent.id,
-                    agent.codex.as_ref().map(|codex| codex.folder.clone()),
+                    agent.codex.is_some().then(|| agent.folder.clone()),
                 ),
                 agent.link.client.clone(),
                 agent.link.fence(),

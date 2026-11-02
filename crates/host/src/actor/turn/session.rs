@@ -86,10 +86,7 @@ pub(super) fn on_replay_log(
         Err(error) => tracing::warn!(%thread, %error, "no log for replay dedupe"),
     }
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
-    let check = codex::prepare::recheck(
-        clock,
-        agent.codex.as_ref().map(|codex| codex.folder.clone()),
-    );
+    let check = codex::prepare::recheck(clock, agent.codex.is_some().then(|| agent.folder.clone()));
     call(actor, thread, id, async move {
         if let Err(error) = check.await {
             return AgentReply::Refused(error);
@@ -125,10 +122,7 @@ fn resume_session(actor: &mut Actor, thread: ThreadId) {
         return;
     };
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
-    let check = codex::prepare::recheck(
-        clock,
-        agent.codex.as_ref().map(|codex| codex.folder.clone()),
-    );
+    let check = codex::prepare::recheck(clock, agent.codex.is_some().then(|| agent.folder.clone()));
     call(actor, thread, id, async move {
         if let Err(error) = check.await {
             return AgentReply::Refused(error);
@@ -162,10 +156,7 @@ pub(super) fn new_session(actor: &mut Actor, thread: ThreadId) {
         return;
     };
     let (id, client, fence) = (agent.id, agent.link.client.clone(), agent.link.fence());
-    let check = codex::prepare::recheck(
-        clock,
-        agent.codex.as_ref().map(|codex| codex.folder.clone()),
-    );
+    let check = codex::prepare::recheck(clock, agent.codex.is_some().then(|| agent.folder.clone()));
     call(actor, thread, id, async move {
         if let Err(error) = check.await {
             return AgentReply::Refused(error);
