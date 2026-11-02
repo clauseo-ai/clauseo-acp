@@ -300,12 +300,13 @@ async fn prepare(
 /// 0.89.1 starts it in the user's own `permissions.defaultMode` (or a resumed transcript's
 /// mode), which `_meta` cannot override (see `agent/loads.rs`). So `session/set_mode` goes
 /// first, before any prompt, through [`prepare`]; a failed switch fails the launch, so no
-/// prompt runs in the user's mode. A session already in it attaches now, and so does one whose
-/// agent offers no such mode, with a warning. On load this also resets a mode the lawyer
-/// reached in the session (see [`agent::loads::CLAUDE_MODE`]).
+/// prompt runs in the user's mode. A session already in it attaches now. One that reports no
+/// modes, or offers no such mode, fails the launch ([`claude_no_mode`]): the host could not
+/// tell or change the mode it runs in. On load this also resets a mode the lawyer reached in
+/// the session (see [`agent::loads::CLAUDE_MODE`]).
 fn claude_start(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded: bool) {
     let Some(modes) = start.modes.as_ref() else {
-        return attach(actor, thread, start, loaded);
+        return claude_no_mode(actor, thread, "reported no modes");
     };
     if modes.current == agent::loads::CLAUDE_MODE {
         return attach(actor, thread, start, loaded);
@@ -316,13 +317,7 @@ fn claude_start(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded
         .any(|mode| mode.id == agent::loads::CLAUDE_MODE);
     let mode = AgentChoiceId::new(agent::loads::CLAUDE_MODE);
     let (true, Ok(mode)) = (offered, mode) else {
-        tracing::warn!(
-            %thread,
-            current = %modes.current,
-            "the Claude session offers no \"{}\" mode: it stays in the mode it started in",
-            agent::loads::CLAUDE_MODE
-        );
-        return attach(actor, thread, start, loaded);
+        return claude_no_mode(actor, thread, "offered no \"default\" mode");
     };
     tracing::info!(%thread, from = %modes.current, "switching the Claude session to Clauseo's mode");
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
@@ -335,6 +330,20 @@ fn claude_start(actor: &mut Actor, thread: ThreadId, start: SessionStart, loaded
         fence.await;
         AgentReply::Prepared { loaded, result }
     });
+}
+
+/// Fails the launch of a Claude session whose mode the host cannot set to [`CLAUDE_MODE`]:
+/// `why` says what the agent's answer lacked.
+fn claude_no_mode(actor: &mut Actor, thread: ThreadId, why: &str) {
+    let error = Error::refused(
+        ErrorCode::AgentProtocolError,
+        format!(
+            "Claude Code {why}, so Clauseo cannot run it in its \"{}\" mode and sent no message",
+            agent::loads::CLAUDE_MODE
+        ),
+    );
+    tracing::warn!(%thread, %error, "the Claude session cannot run in Clauseo's mode");
+    launch_failed(actor, thread, &error);
 }
 
 /// The session is up: one commit of `AgentSessionAttached`, the thread row, the session's mode

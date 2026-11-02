@@ -2,11 +2,12 @@
 //! a user's `permissions.defaultMode` (`acceptEdits` here) on `session/new`, a resumed
 //! transcript's `bypassPermissions` on `session/load`. The host sends `session/set_mode default`
 //! before the first prompt, with `allowDangerouslySkipPermissions: false` in `_meta` (the
-//! scenarios check both), and `SetMode` still works after the start. A failed switch sends no
-//! prompt.
+//! scenarios check both), and `SetMode` still works after the start. A failed switch, an
+//! answer with no modes and one offering no `default` each fail the launch before any prompt.
 
 use clauseo_protocol::{
-    AgentChoiceId, CommandOutcome, DomainEvent, HostCommand, StopReason, StreamId, ThreadId,
+    AgentChoiceId, CommandOutcome, DomainEvent, ErrorCode, HostCommand, StopReason, StreamId,
+    ThreadId,
 };
 
 use crate::observe::Events;
@@ -72,12 +73,10 @@ fn a_claude_session_switches_to_default_before_its_first_prompt_and_on_load() {
     host.shutdown();
 }
 
-#[test]
-fn a_failed_switch_to_default_sends_no_prompt() {
-    let dir = Dir::new(
-        "claude_mode_refused",
-        &[(CLAUDE, Scenario::Local("claude-mode-refused"))],
-    );
+/// Plays `scenario` to a turn that must fail before any prompt with `code`, with no mode
+/// logged.
+fn fails_before_prompt(test: &str, scenario: &'static str, code: ErrorCode) {
+    let dir = Dir::new(test, &[(CLAUDE, Scenario::Local(scenario))]);
     let host = dir.start(0);
     let (_, thread, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], CLAUDE);
     let mut events = host.events(StreamId::Thread(thread));
@@ -85,7 +84,42 @@ fn a_failed_switch_to_default_sends_no_prompt() {
     let ended = events.until_turn_ended(turn);
     events.assert_no_mismatch();
     assert_eq!(ended.stop, StopReason::Failed, "{}", events.dump());
+    let failed = events
+        .events()
+        .find_map(|event| match event {
+            DomainEvent::TurnFailed(failed) if failed.turn == turn => Some(failed.code),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no TurnFailed: {}", events.dump()));
+    assert_eq!(failed, code, "{}", events.dump());
     assert_eq!(events.turn_text(turn), "");
     assert!(modes(&events).is_empty(), "{}", events.dump());
     host.shutdown();
+}
+
+#[test]
+fn a_failed_switch_to_default_sends_no_prompt() {
+    fails_before_prompt(
+        "claude_mode_refused",
+        "claude-mode-refused",
+        ErrorCode::AgentProtocolError,
+    );
+}
+
+#[test]
+fn a_session_with_no_modes_fails_before_any_prompt() {
+    fails_before_prompt(
+        "claude_mode_none",
+        "claude-mode-none",
+        ErrorCode::AgentProtocolError,
+    );
+}
+
+#[test]
+fn a_session_offering_no_default_mode_fails_before_any_prompt() {
+    fails_before_prompt(
+        "claude_mode_no_default",
+        "claude-mode-no-default",
+        ErrorCode::AgentProtocolError,
+    );
 }

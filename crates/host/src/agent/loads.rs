@@ -119,11 +119,15 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///
 /// - `claudeCode.options.env.ENABLE_CLAUDEAI_MCP_SERVERS`: `"false"`.
 /// - `claudeCode.options.allowDangerouslySkipPermissions`: `false`. claude-agent-acp 0.89.1 then
-///   starts a session whose user settings (or resumed transcript) say `bypassPermissions` in
-///   `default` instead, and offers no bypass mode, nor the plan-exit options that switch to it
-///   (`acp-agent.js:7212-7214`, `permissions/modes.js` `resolvePermissionMode`). Another
-///   starting mode (`acceptEdits`, `auto`, `plan`) is switched to [`CLAUDE_MODE`] after the
+///   offers no bypass mode, nor the plan-exit options that switch to it, and never starts a
+///   session in it: a settings `defaultMode` of `bypassPermissions` becomes `default`, and a
+///   resumed transcript's `bypassPermissions` is rejected, falling back to the settings'
+///   `defaultMode`, which may be `acceptEdits` (`acp-agent.js:7212-7219`,
+///   `session-mode.js:22-35`, `permissions/modes.js` `resolvePermissionMode`). Whatever mode it
+///   then starts in (`acceptEdits`, `auto`, `plan`) is switched to [`CLAUDE_MODE`] after the
 ///   start, since `_meta` cannot set it.
+/// - `claudeCode.options.settings.permissions.ask`: [`CLAUDE_ASK_TOOLS`] appended (INTERIM,
+///   [`ask_before_broad_tools`]).
 /// - `claudeCode.options.extraArgs`: `setting-sources` and [`MODE_FLAGS`] taken out, in both
 ///   forms the SDK turns into a flag (`{"setting-sources": "…"}` and
 ///   `{"setting-sources=…": null}`), since an extra flag goes after the SDK's own and would win.
@@ -155,6 +159,7 @@ pub(crate) fn session_meta(
     env.insert(CLAUDE_AI_MCP_VAR.to_owned(), Value::from("false"));
     options.insert("env".to_owned(), Value::Object(env));
     options.insert(ALLOW_BYPASS_OPTION.to_owned(), Value::Bool(false));
+    ask_before_broad_tools(&mut options);
     let (strict, sources) = match control {
         McpControl::Clauseo => (true, CLAUDE_SETTING_SOURCES),
         McpControl::Managed => (false, CLAUDE_MANAGED_SETTING_SOURCES),
@@ -197,6 +202,52 @@ pub(crate) fn session_meta(
 fn is_flag(flag: &str, name: &str) -> bool {
     flag.strip_prefix(name)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('='))
+}
+
+/// INTERIM (clauseo-acp-private#162, part C): the tools whose every call asks the lawyer, as
+/// flag-settings `permissions.ask` rules, so the lawyer's personal Claude `permissions.allow`
+/// rules (user settings load: [`CLAUDE_SETTING_SOURCES`]) cannot approve them unseen. A flag
+/// tier cannot clear the user's `allow`: Claude Code merges every settings tier and joins
+/// arrays (CLI 2.1.293, `settingsMergeCustomizer`: `if(Array.isArray(e)&&Array.isArray(n))
+/// return D([...e,...n])`, applied per source as `e.merged=pB(e.merged,r,S4)`; byte offsets
+/// 205422283 and 205382394 of `@anthropic-ai/claude-agent-sdk-linux-x64@0.3.293`'s `claude`).
+/// A tool-wide ask rule wins over an allow rule: the permission check takes it before the
+/// tool's own check, where content rules such as `Bash(*)` match, and answers `ask` unless
+/// that check denies (`async function GA` at byte 215711496, `Fln` at 215710735). Not deny
+/// rules: the lawyer still decides. The cost: every call of these tools asks, a read-only
+/// `ls` included.
+///
+/// Stage D (clauseo-acp-private#285) gives every session Clauseo's own `CLAUDE_CONFIG_DIR`,
+/// so nothing from `~/.claude` loads; R20 removes this then. Until then the user's own hooks
+/// still run.
+pub(crate) const CLAUDE_ASK_TOOLS: [&str; 6] = [
+    "Bash",
+    "Edit",
+    "Write",
+    "MultiEdit",
+    "NotebookEdit",
+    "WebFetch",
+];
+
+/// INTERIM: [`CLAUDE_ASK_TOOLS`] appended to `options.settings.permissions.ask`, after the
+/// hook's own rules and without repeats; a hook value at `settings`, `permissions` or `ask`
+/// of another type is replaced. R20 removes this with Stage D.
+fn ask_before_broad_tools(options: &mut Map<String, Value>) {
+    let mut settings = take_object(options, "settings");
+    let mut permissions = take_object(&mut settings, "permissions");
+    let mut ask = match permissions.remove("ask") {
+        Some(Value::Array(rules)) => rules,
+        _ => Vec::new(),
+    };
+    for tool in CLAUDE_ASK_TOOLS {
+        let rule = Value::from(tool);
+        if !ask.contains(&rule) {
+            ask.push(rule);
+        }
+    }
+    permissions.insert("ask".to_owned(), Value::Array(ask));
+    settings.insert("permissions".to_owned(), Value::Object(permissions));
+    options.insert("settings".to_owned(), Value::Object(settings));
 }
 
 /// The claude-agent-acp option that, `false`, keeps `bypassPermissions` out of a session.

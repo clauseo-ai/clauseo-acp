@@ -184,7 +184,7 @@ fn assert_refused_in_data(dir: &Dir, place: &std::path::Path, agent: &str) {
 fn claude_in_a_matter_holding_the_agent_homes_is_refused() {
     let dir = Dir::new(
         "claude_refused_agents",
-        &[("claude-acp", Scenario::Bundled("prompt-stream"))],
+        &[("claude-acp", Scenario::Bundled("claude-prompt-stream"))],
     );
     assert_refused_in_data(&dir, &dir.data().join("agents"), "claude-acp");
 }
@@ -216,7 +216,7 @@ fn a_linked_matter_folder_holding_codex_is_refused() {
 fn claude_in_a_folder_with_codex_runs() {
     let dir = Dir::new(
         "claude_beside_codex_folder",
-        &[("claude-acp", Scenario::Bundled("prompt-stream"))],
+        &[("claude-acp", Scenario::Bundled("claude-prompt-stream"))],
     );
     let folder = dir.folder(
         "m",

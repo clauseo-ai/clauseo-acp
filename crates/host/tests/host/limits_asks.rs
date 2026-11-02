@@ -183,7 +183,7 @@ fn an_agent_that_exits_with_its_permission_pending_lets_the_read_start() {
 fn an_elicitation_holds_the_read_until_it_is_answered() {
     let mut asked = asked(
         "an_elicitation_holds_the_read_until_it_is_answered",
-        Scenario::Bundled("elicitation-form"),
+        Scenario::Bundled("claude-elicitation-form"),
     );
     asked.answer_elicitation(r#"{"party":"Tenant"}"#);
     asked.assert_read_started("the answer");
@@ -218,7 +218,7 @@ fn an_accepted_url_elicitation_holds_the_read_until_it_is_complete() {
 fn a_second_subscriber_gets_the_current_view_alone() {
     let dir = Dir::new(
         "a_second_subscriber_gets_the_current_view_alone",
-        &[(CLAUDE, Scenario::Bundled("prompt-stream"))],
+        &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
     );
     let reads = Reads::new();
     let host = start(&dir, &reads);

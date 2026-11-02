@@ -6,9 +6,9 @@ use clauseo_settings::{Effective, Locations, SystemFiles};
 use serde_json::{Map, Value, json};
 
 use super::{
-    ALLOW_BYPASS_OPTION, CLAUDE_AI_MCP_VAR, CLAUDE_MANAGED_SETTING_SOURCES, CLAUDE_MODE,
-    CLAUDE_SETTING_SOURCES, GUARD_MATCHER, GuardHook, McpControl, guard_entry, launch_env,
-    mcp_control, mcp_servers, session_meta,
+    ALLOW_BYPASS_OPTION, CLAUDE_AI_MCP_VAR, CLAUDE_ASK_TOOLS, CLAUDE_MANAGED_SETTING_SOURCES,
+    CLAUDE_MODE, CLAUDE_SETTING_SOURCES, GUARD_MATCHER, GuardHook, McpControl, guard_entry,
+    launch_env, mcp_control, mcp_servers, session_meta,
 };
 use crate::write;
 
@@ -29,6 +29,7 @@ fn with_no_hook_the_meta_is_the_switches() {
             "settingSources": CLAUDE_SETTING_SOURCES,
             "allowDangerouslySkipPermissions": false,
             "env": {"ENABLE_CLAUDEAI_MCP_SERVERS": "false"},
+            "settings": {"permissions": {"ask": CLAUDE_ASK_TOOLS}},
         }}})
     );
     assert_eq!(CLAUDE_SETTING_SOURCES, ["user"]);
@@ -61,7 +62,10 @@ fn the_switches_win_over_the_hook_and_every_other_hook_key_stays() {
                     "settingSources": ["user"],
                     "allowDangerouslySkipPermissions": false,
                     "model": "opus",
-                    "settings": {"syncClaudeAiPlugins": false},
+                    "settings": {
+                        "syncClaudeAiPlugins": false,
+                        "permissions": {"ask": CLAUDE_ASK_TOOLS},
+                    },
                     "env": {"ENABLE_CLAUDEAI_MCP_SERVERS": "false", "FIRM": "1"},
                 },
             },
@@ -161,6 +165,7 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
             "syncClaudeAiPlugins": false,
             "disableAllHooks": false,
             "hooks": {"PreToolUse": [firm, entry], "Stop": []},
+            "permissions": {"ask": CLAUDE_ASK_TOOLS},
         })
     );
     for hook in [
@@ -176,7 +181,11 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
         ));
         assert_eq!(
             meta["claudeCode"]["options"]["settings"],
-            json!({"disableAllHooks": false, "hooks": {"PreToolUse": [entry]}}),
+            json!({
+                "disableAllHooks": false,
+                "hooks": {"PreToolUse": [entry]},
+                "permissions": {"ask": CLAUDE_ASK_TOOLS},
+            }),
             "{hook}"
         );
     }

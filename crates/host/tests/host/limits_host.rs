@@ -233,7 +233,7 @@ fn start_shows_stored_limits_stale_and_reads_each_agent() {
     let dir = Dir::new(
         "start_shows_stored_limits_stale_and_reads_each_agent",
         &[
-            (CLAUDE, Scenario::Bundled("limit-warning")),
+            (CLAUDE, Scenario::Bundled("claude-limit-warning")),
             (CODEX, Scenario::Bundled("codex-handshake")),
         ],
     );
@@ -289,7 +289,7 @@ fn start_shows_stored_limits_stale_and_reads_each_agent() {
 fn live_warning_publishes_the_limits_and_a_near_meter() {
     let dir = Dir::new(
         "live_warning_publishes_the_limits_and_a_near_meter",
-        &[(CLAUDE, Scenario::Bundled("limit-warning"))],
+        &[(CLAUDE, Scenario::Bundled("claude-limit-warning"))],
     );
     let reads = Reads::new();
     let host = start(&dir, &reads);
@@ -352,7 +352,7 @@ fn codex_turn_end_reads_at_most_once_a_minute() {
 fn claude_turn_end_reads_once_the_last_read_is_ten_minutes_old() {
     let dir = Dir::new(
         "claude_turn_end_reads_once_the_last_read_is_ten_minutes_old",
-        &[(CLAUDE, Scenario::Bundled("prompt-stream"))],
+        &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
     );
     let reads = Reads::new();
     let host = start(&dir, &reads);
@@ -380,7 +380,7 @@ fn claude_turn_end_reads_once_the_last_read_is_ten_minutes_old() {
 fn refresh_shown_reads_old_data_and_try_again_reads_unless_in_flight() {
     let dir = Dir::new(
         "refresh_shown_reads_old_data_and_try_again_reads_unless_in_flight",
-        &[(CLAUDE, Scenario::Bundled("prompt-stream"))],
+        &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
     );
     let reads = Reads::new();
     let host = start(&dir, &reads);
@@ -432,7 +432,7 @@ fn refresh_shown_reads_old_data_and_try_again_reads_unless_in_flight() {
 fn refresh_waits_for_a_pending_permission() {
     let dir = Dir::new(
         "refresh_waits_for_a_pending_permission",
-        &[(CLAUDE, Scenario::Bundled("permission-kinds"))],
+        &[(CLAUDE, Scenario::Bundled("claude-permission-kinds"))],
     );
     let reads = Reads::new();
     let host = start(&dir, &reads);
@@ -475,7 +475,7 @@ fn refresh_waits_for_a_pending_permission() {
 fn deadlines_run_only_with_a_subscriber() {
     let dir = Dir::new(
         "deadlines_run_only_with_a_subscriber",
-        &[(CLAUDE, Scenario::Bundled("prompt-stream"))],
+        &[(CLAUDE, Scenario::Bundled("claude-prompt-stream"))],
     );
     let mut stored = plan(AgentKind::Claude, 40.0, Some(at(1800)));
     stored.source = LimitSource::Fresh {

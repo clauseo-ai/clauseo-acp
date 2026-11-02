@@ -12,7 +12,7 @@ fn list_agents_answers_each_valid_id_with_its_kind() {
         &[
             (FAKE, Scenario::Bundled("prompt-stream")),
             (CODEX, Scenario::Bundled("codex-handshake")),
-            ("claude-acp", Scenario::Bundled("prompt-stream")),
+            ("claude-acp", Scenario::Bundled("claude-prompt-stream")),
             ("Bad_ID", Scenario::Bundled("prompt-stream")),
         ],
     );

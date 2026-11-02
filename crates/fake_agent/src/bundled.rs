@@ -32,7 +32,13 @@ bundled! {
         "auth-required-titled",
         "cancel-late-updates",
         "cancel-unanswered",
+        "claude-elicitation-form",
         "claude-hindi-answer",
+        "claude-limit-rejected",
+        "claude-limit-warning",
+        "claude-permission-kinds",
+        "claude-prompt-stream",
+        "claude-session-failure",
         "codex-auth-required",
         "codex-files",
         "codex-handshake",
@@ -79,7 +85,7 @@ bundled! {
         "unknown-update",
         "usage",
     ],
-    common: ["codex-handshake", "handshake"],
+    common: ["claude-handshake", "codex-handshake", "handshake"],
 }
 
 /// The text of bundled scenario `name`.
