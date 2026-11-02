@@ -2,8 +2,8 @@
 //! TLS crate, async runtime or tauri may be reachable through a dependency of `clauseo-mcp`, on any
 //! target. The test reads the lockfile and runs no cargo, so it needs no network and no downloads.
 //!
-//! The lockfile merges dependency kinds and lists every target's packages, so the walk is a superset
-//! of what ships. That is stricter, which suits a ban.
+//! The lockfile merges dependency kinds and lists every target's packages, so the walk is a
+//! superset of what ships. That is stricter, which suits a ban.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
