@@ -283,6 +283,62 @@ fn a_restart_before_the_read_logs_the_stop_once_at_start_up() {
 }
 
 #[test]
+fn a_crash_while_two_stops_wait_logs_one_for_each_at_start_up() {
+    let mut rig = Rig::new(
+        "a_crash_while_two_stops_wait_logs_one_for_each_at_start_up",
+        CLAUDE,
+        AgentKind::Claude,
+        Scenario::Local("session-failure-twice"),
+    );
+    let first = rig.turn();
+    until_reads(&rig.host, &rig.reads, AgentKind::Claude, 2);
+    // The second turn starts and stops while the first one's stop still waits.
+    let second = rig.turn();
+    assert_eq!(
+        rig.events.turn_ended(second).unwrap().stop,
+        StopReason::AtLimit
+    );
+    assert_eq!(stops(&rig.events), [], "{}", rig.events.dump());
+    let Rig {
+        dir, host, thread, ..
+    } = rig;
+    host.abort();
+
+    let empty = |turn| TurnStoppedAtLimit {
+        turn,
+        window: None,
+        resets_at: None,
+        reason: LimitStopReason::PlanWindow,
+    };
+    let host = start(&dir, 1, &Reads::new());
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until("two TurnStoppedAtLimit", |e| e.count(is_stop) == 2);
+    host.settle();
+    events.drain_ready();
+    assert_eq!(
+        stops(&events),
+        [empty(first), empty(second)],
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+
+    let host = start(&dir, 2, &Reads::new());
+    host.settle();
+    let mut events = host.events(StreamId::Thread(thread));
+    events.until_caught_up();
+    host.settle();
+    events.drain_ready();
+    assert_eq!(
+        stops(&events),
+        [empty(first), empty(second)],
+        "{}",
+        events.dump()
+    );
+    host.shutdown();
+}
+
+#[test]
 fn stop_with_a_reset_stays_in_the_end_commit_then_reads() {
     let mut rig = Rig::new(
         "stop_with_a_reset_stays_in_the_end_commit_then_reads",
