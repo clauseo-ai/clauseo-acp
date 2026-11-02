@@ -8,7 +8,6 @@ import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
 import { Thread } from "@clauseo/components/clauseo/thread.tsx";
 import { th } from "@clauseo/components/lib/words-thread.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
-import { MarkdownHostContext, type MarkdownHost } from "@clauseo/components/markdown/host.ts";
 import { useEntry, useEntryIds, useStreamPart, useViewStore } from "../../store/hooks.ts";
 import { entryIdOf, orderOf, type StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
@@ -18,13 +17,6 @@ import { exchangesOf, isQuestion, sameIds } from "./ids.ts";
 import { useHasOlder, useLatestQuestion } from "./live.ts";
 import { useOlder } from "./older.ts";
 import { PagedRow, Row } from "./rows.tsx";
-
-/** What a link or reference in an answer does when clicked: nothing yet, as #123's transcript has it. The app has
- * no open_external or open_reference command, and the renderer cancels every click, so the webview never navigates. */
-const ANSWER_HOST: MarkdownHost = {
-  openExternal() {},
-  openReference() {},
-};
 
 /** The answer's meta line: "Clauseo", with its turn's time once the turn's step is in (the step's `ts`), alone
  * before it. */
@@ -170,22 +162,20 @@ export const ThreadList = memo(function ThreadList({ transport, stream, busy }: 
     // it rests once there is something to rest on: a reopened thread's view arrives after the mount, and the thread
     // settles on its latest answer then. The log is busy until the first view lands and while an older page goes in,
     // so a screen reader doesn't read a whole reopened history, or a page put in above, as news
-    <MarkdownHostContext value={ANSWER_HOST}>
-      <Thread
-        question={question}
-        who={w.t("You")}
-        live={busy}
-        resting={!busy && ids.length > 0}
-        busy={(stream !== null && !landed) || older.loading}
-      >
-        {older.entries.length > 0 && (
-          <OlderPages entries={older.entries} below={first === undefined ? null : orderOf(first)} />
-        )}
-        {stream !== null &&
-          groups.map((g, i) => (
-            <LiveExchange key={g[0]} ids={g} stream={stream} latest={i === groups.length - 1} />
-          ))}
-      </Thread>
-    </MarkdownHostContext>
+    <Thread
+      question={question}
+      who={w.t("You")}
+      live={busy}
+      resting={!busy && ids.length > 0}
+      busy={(stream !== null && !landed) || older.loading}
+    >
+      {older.entries.length > 0 && (
+        <OlderPages entries={older.entries} below={first === undefined ? null : orderOf(first)} />
+      )}
+      {stream !== null &&
+        groups.map((g, i) => (
+          <LiveExchange key={g[0]} ids={g} stream={stream} latest={i === groups.length - 1} />
+        ))}
+    </Thread>
   );
 });

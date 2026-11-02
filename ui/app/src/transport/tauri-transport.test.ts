@@ -95,6 +95,39 @@ describe("TauriTransport", () => {
     await expect(t.pickFolder()).resolves.toBeNull();
   });
 
+  test("open_external, open_file and reveal send their argument and resolve to nothing", async () => {
+    const t = new TauriTransport({ warn: () => {} });
+    await expect(t.openExternal("https://example.com/a")).resolves.toBeUndefined();
+    await expect(t.openFile("ref-1")).resolves.toBeUndefined();
+    await expect(t.reveal({ matter: "m-1" })).resolves.toBeUndefined();
+    await expect(t.reveal("app_data")).resolves.toBeUndefined();
+    const sent = invoked.filter((i) =>
+      ["open_external", "open_file", "reveal"].includes(i.command),
+    );
+    expect(sent).toEqual([
+      { command: "open_external", args: { url: "https://example.com/a" } },
+      { command: "open_file", args: { file: "ref-1" } },
+      { command: "reveal", args: { target: { matter: "m-1" } } },
+      { command: "reveal", args: { target: "app_data" } },
+    ]);
+  });
+
+  test("a declined confirm and a refused open or reveal reject with the host's error", async () => {
+    const declined = { code: "transport.unauthorized", message: "declined", retryable: false };
+    const missing = { code: "matter.folder_missing", message: "gone", retryable: false };
+    answers.set("open_external", () => Promise.reject(declined));
+    answers.set("open_file", () => Promise.reject(missing));
+    answers.set("reveal", () => Promise.reject("command reveal not allowed"));
+    const t = new TauriTransport({ warn: () => {} });
+    await expect(t.openExternal("https://example.com")).rejects.toEqual(declined);
+    await expect(t.openFile("ref-1")).rejects.toEqual(missing);
+    await expect(t.reveal("app_data")).rejects.toEqual({
+      code: "internal",
+      message: "command reveal not allowed",
+      retryable: false,
+    });
+  });
+
   test("one channel per transport; batches reach the stream's subscriber", async () => {
     const { got, send } = await rig("thread:x");
     expect(invoked.filter((i) => i.command === "subscribe").map((i) => i.args)).toEqual([
