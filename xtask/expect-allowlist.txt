@@ -263,3 +263,4 @@ crates/agents/src/disk.rs free_at unsafe_code
 crates/agents/src/sysproxy/windows.rs - unsafe_code
 crates/agents/src/sysproxy.rs system_proxy clippy::unused_async
 crates/agents/src/sysproxy.rs system_proxy clippy::unused_async
+crates/agents/examples/install.rs mb clippy::cast_precision_loss
