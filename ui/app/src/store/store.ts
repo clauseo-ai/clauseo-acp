@@ -86,13 +86,22 @@ export function createViewStore(transport: HostTransport, options: StoreOptions)
       }
     }
     if (changed) notify();
+    // each run on its own: one that throws drops neither the others nor the acks, and the first error is thrown last
     const due = runs;
     runs = [];
-    for (const run of due) run();
+    let failure: { error: unknown } | null = null;
+    for (const run of due) {
+      try {
+        run();
+      } catch (error) {
+        failure ??= { error };
+      }
+    }
     for (const stream of applied) {
       const position = positionOf(views.get(stream));
       if (position !== null) transport.ack(stream, position);
     }
+    if (failure !== null) throw failure.error;
   };
 
   const subscriberFor = (stream: StreamId): BatchSubscriber => {
