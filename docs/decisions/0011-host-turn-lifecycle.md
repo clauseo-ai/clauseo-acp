@@ -245,7 +245,14 @@ publishing `HostEvent::AccountLimitsChanged`. The restart supervisor comes with 
 the queue and steer came with H9 (above). The profile hook is called at each session start
 (clauseo-acp-private#123), and
 a session gets only the MCP servers the lawyer turned on (clauseo-acp-private#160):
-`crates/host/src/agent/loads.rs` holds the switches and their reasons.
+`crates/host/src/agent/loads.rs` holds the switches and their reasons. A Claude session runs in
+the `default` permission mode whatever the user's own `permissions.defaultMode` says: every
+session's `_meta` sends `allowDangerouslySkipPermissions: false`, and a session that starts in
+another mode gets `session/set_mode default` before its first prompt, or its launch fails
+(clauseo-acp-private#162). Known gap: the lawyer's personal Claude Code allow rules and user
+hooks still apply to Clauseo sessions until stage D's R20 gives each session Clauseo's own
+`CLAUDE_CONFIG_DIR` (clauseo-acp-private#285). Flag-tier ask rules could cover the allow rules
+until then, but were dropped: every `Bash` call would prompt.
 
 ## Status
 

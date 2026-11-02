@@ -1,7 +1,7 @@
-{"scenario":"guard-hook-none","description":"Without the pre-write guard configured: session/new carries no hooks and no disableAllHooks under settings (only the interim ask rules), so no hook; then one prompt","on_stdin_close":"exit"}
+{"scenario":"guard-hook-none","description":"Without the pre-write guard configured: session/new carries no settings object, so no hook; then one prompt","on_stdin_close":"exit"}
 {"expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
 {"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
-{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","_meta":{"claudeCode":{"options":{"strictMcpConfig":true}}}},"off":["/_meta/claudeCode/options/settings/hooks","/_meta/claudeCode/options/settings/disableAllHooks"]}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}","_meta":{"claudeCode":{"options":{"strictMcpConfig":true}}}},"off":["/_meta/claudeCode/options/settings"]}}
 {"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
 {"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
 {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Done."}}}}
