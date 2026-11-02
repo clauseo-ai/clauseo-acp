@@ -23,10 +23,10 @@ fn list_agents_is_a_plain_string_and_answers_agents() {
     ]);
     assert_eq!(
         serde_json::to_string(&answer).unwrap(),
-        r#"{"agents":[{"id":"codex-acp","kind":"codex"},{"id":"fake-agent","kind":null}]}"#
+        r#"{"agents":[{"id":"codex-acp","kind":"codex"},{"id":"fake-agent"}]}"#
     );
     round_trips(&answer);
-    // An older reader's summary without `kind` still reads, as no kind.
-    let bare: AgentSummary = serde_json::from_str(r#"{"id":"claude-acp"}"#).unwrap();
+    // A `null` kind reads as no kind too.
+    let bare: AgentSummary = serde_json::from_str(r#"{"id":"claude-acp","kind":null}"#).unwrap();
     assert_eq!(bare.kind, None);
 }
