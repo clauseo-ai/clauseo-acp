@@ -6,7 +6,7 @@
 // back into the field when the field is empty. Each conversation keeps its own words (the drafts, by its key); on a new
 // conversation the status line offers the plan to ask with, until its first question fixes it, and otherwise names the
 // plan the conversation uses. `/` opens the menu of the agent's commands, as the thread's header lists them.
-import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import {
   Composer,
   type ComposerHandle,
@@ -102,6 +102,12 @@ export function WorkComposer({
   // Ask then sends nothing, Queue sends; emptying the field lowers it
   const wait = useOtherWait(others?.conversations ?? null, draftKey);
   const [raised, setRaised] = useState(false);
+  // Queue pressed: Stop the other takes the focus back until the message waits (queue.tsx)
+  const stopWanted = useRef(false);
+  const isStopWanted = useCallback(() => stopWanted.current, []);
+  const setStopWanted = useCallback((wanted: boolean) => {
+    stopWanted.current = wanted;
+  }, []);
   if (raised && wait === null) setRaised(false);
   // the field holds the words, not React: each change goes straight to the conversation's draft
   const keep = (text: string) => {
@@ -220,6 +226,8 @@ export function WorkComposer({
                 onQueue={queueNow}
                 onFocusField={() => field.current?.focus()}
                 onRefused={others.onRefused}
+                stopWanted={isStopWanted}
+                onStopWanted={setStopWanted}
               />
             )}
           </>

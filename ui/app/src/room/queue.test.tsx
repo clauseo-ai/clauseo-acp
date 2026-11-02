@@ -187,6 +187,38 @@ test("after Queue the focus is on Stop the other, never the page", async () => {
   expect(document.activeElement).toBe(h.one("stop-other"));
 });
 
+test("from a new conversation, focus comes back to Stop the other once the message waits, though it fell to the page as the thread was made", async () => {
+  // CI's order: Queue pressed, then the thread is made and the row switches, then the send is accepted; meanwhile the
+  // focus falls to the page (and the accepted send's clear would take an unfocused page's focus into the field)
+  let made: (o: CommandOutcome) => void = () => {};
+  let accepted: (o: CommandOutcome) => void = () => {};
+  h = await mountRoom({
+    threads: [row(OTHER, "running", TITLE)],
+    dispatch: (command) =>
+      command.create_thread !== undefined
+        ? new Promise<CommandOutcome>((resolve) => (made = resolve))
+        : command.send_prompt !== undefined
+          ? new Promise<CommandOutcome>((resolve) => (accepted = resolve))
+          : defaultOutcome(command),
+  });
+  await h.click(h.one("new-conversation"));
+  await raise();
+  queueButton()!.focus();
+  await h.click(queueButton());
+  expect(document.activeElement).toBe(h.one("stop-other"));
+  (document.activeElement as HTMLElement).blur();
+  await act(async () => made({ thread_created: { thread: THREAD } }));
+  await h.settle();
+  await act(async () => accepted(defaultOutcome({ send_prompt: { thread: THREAD, content: [] } })));
+  await h.settle();
+  // the user_message makes it starting, then the host queues it behind the other
+  h.deliver([reset([], headerOf(THREAD, "starting"))]);
+  await h.settle();
+  h.deliver([upsert(headerOf(THREAD, { queued: { behind: OTHER } }))]);
+  await h.settle();
+  expect(document.activeElement).toBe(h.one("stop-other"));
+});
+
 test("the wait stays mounted from Queue through starting to queued behind the other", async () => {
   h = await mountWith("running");
   h.deliver([reset([], headerOf(THREAD, "idle"))]);
