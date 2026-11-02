@@ -20,6 +20,7 @@ export function SegmentedSwitch<V extends string>({
   onValueChange,
   className,
   disabled = false,
+  describedBy,
 }: (
   | {
       /** Names the switch for assistive technology, in the room's words. */
@@ -32,6 +33,8 @@ export function SegmentedSwitch<V extends string>({
       label?: never;
     }
 ) & {
+  /** The id of a line that says more about the choice, such as who manages a locked one. */
+  describedBy?: string | undefined;
   value: V;
   options: readonly SegmentOption<V>[];
   onValueChange: (value: V) => void;
@@ -42,6 +45,7 @@ export function SegmentedSwitch<V extends string>({
     <ToggleGroup
       aria-label={label}
       aria-labelledby={labelledBy}
+      aria-describedby={describedBy}
       value={[value]}
       disabled={disabled}
       onValueChange={(next) => {

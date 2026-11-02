@@ -1586,5 +1586,27 @@
     "status": "approved",
     "at": "2026-11-02",
     "by": "design"
+  },
+  "U11-26": {
+    "en": "How it looks",
+    "hi": "यह कैसा दिखता है",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-27": {
+    "en": "A strong case, because the complaint names Mr. Sharma only as a director.",
+    "hi": "मामला मज़बूत है, क्योंकि शिकायत में श्री शर्मा को केवल निदेशक के रूप में नामित किया गया है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U11-07": {
+    "en": "Managed by your organisation",
+    "hi": "आपके संगठन द्वारा प्रबंधित",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, in the PR #185 design review: fits every locked row"
   }
 }

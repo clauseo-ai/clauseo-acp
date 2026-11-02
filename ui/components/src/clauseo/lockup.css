@@ -1,0 +1,16 @@
+/* Clauseo's lockup (lockup.tsx): the word in the primary tone, the comma in brick, the night brick by night. */
+@layer components {
+  .lockup {
+    display: block;
+    height: auto;
+  }
+  .lockup-word {
+    fill: var(--primary);
+  }
+  .lockup-mark {
+    fill: var(--brand);
+  }
+  :root[data-theme="night"] .lockup-mark {
+    fill: var(--brand-night);
+  }
+}

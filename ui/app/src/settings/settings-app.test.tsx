@@ -274,10 +274,69 @@ test("a key the host locks disables its row, which says who manages it and sends
   expect(el.querySelector('[data-testid="managed"]')).toBeNull();
 });
 
+test("every locked control names its managed line in aria-describedby: switches, the select and the radio group", async () => {
+  history.replaceState(null, "", "/settings.html#appearance");
+  const all = ["ui.theme", "ui.font_size", "ui.lite", "ui.motion", "ui.language"];
+  const { el } = await mount(withHost({ ...HOST, locked: all }));
+  /** The text of the elements an element's aria-describedby names, joined. */
+  const described = (node: Element | null | undefined) =>
+    (node?.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .filter((id) => id !== "")
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+  const managed = "Managed by your organisation";
+  expect(el.querySelectorAll('[data-testid="managed"]')).toHaveLength(4);
+  expect(described(el.querySelector('[aria-label="Theme"]'))).toBe(managed);
+  expect(described(el.querySelector('[aria-label="Reduced motion"]'))).toBe(managed);
+  expect(described(el.querySelector('[role="combobox"]'))).toBe(managed);
+  // the radio group keeps its own line first
+  expect(described(el.querySelector('[role="radiogroup"]'))).toBe(
+    `Takes away every shadow and all motion. ${managed}`,
+  );
+  await section(el, "Language");
+  expect(described(el.querySelector('[aria-label="Language"]'))).toBe(managed);
+});
+
+test("a control that is not locked names no managed line", async () => {
+  history.replaceState(null, "", "/settings.html#appearance");
+  const { el } = await mount(withHost());
+  expect(el.querySelector('[aria-label="Theme"]')?.hasAttribute("aria-describedby")).toBe(false);
+  expect(el.querySelector('[role="combobox"]')?.hasAttribute("aria-describedby")).toBe(false);
+});
+
+test("Appearance opens with the design's preview: three papers as filed and the answer's line, hidden from assistive technology", async () => {
+  history.replaceState(null, "", "/settings.html#appearance");
+  const { el } = await mount();
+  const preview = el.querySelector(".set-preview");
+  expect(preview?.getAttribute("aria-hidden")).toBe("true");
+  expect(preview?.closest("section")?.querySelector("h3")?.textContent).toBe("How it looks");
+  expect([...el.querySelectorAll(".set-preview-title")].map((t) => t.textContent)).toEqual([
+    "Form DIR-12",
+    "Board minutes",
+    "Legal notice",
+  ]);
+  expect(el.querySelector(".set-preview-work")?.textContent).toBe(
+    "A strong case, because the complaint names Mr. Sharma only as a director.",
+  );
+  await section(el, "Language");
+  await press(side(el, "Language", "हिन्दी"));
+  await section(el, "दिखावट");
+  expect(el.querySelector(".set-preview-work")?.textContent).toBe(
+    "मामला मज़बूत है, क्योंकि शिकायत में श्री शर्मा को केवल निदेशक के रूप में नामित किया गया है।",
+  );
+  // papers keep their filed titles
+  expect(el.querySelector(".set-preview-title")?.textContent).toBe("Form DIR-12");
+});
+
 test("About shows the build's version, and its line beside the section says it too", async () => {
   history.replaceState(null, "", "/settings.html#about");
   const { el } = await mount();
   expect(el.querySelector('[data-testid="settings-version"]')?.textContent).toBe("Version 9.8.7");
+  // Clauseo's lockup above it, named for assistive technology
+  const logo = el.querySelector('.set-about svg[role="img"]');
+  expect(logo?.getAttribute("aria-label")).toBe("Clauseo");
+  expect(logo?.querySelectorAll("path")).toHaveLength(2);
   expect(el.querySelector('[aria-current="page"] .set-nav-note')?.textContent).toBe(
     "Version 9.8.7",
   );

@@ -71,6 +71,7 @@ export function RadioSetting<V extends string>({
   choices,
   onValueChange,
   disabled = false,
+  describedBy,
   className,
 }: {
   label: string;
@@ -79,6 +80,8 @@ export function RadioSetting<V extends string>({
   choices: readonly RadioChoice<V>[];
   onValueChange: (value: V) => void;
   disabled?: boolean;
+  /** The id of a further line that describes the group, after its note, such as who manages a locked one. */
+  describedBy?: string | undefined;
   className?: string;
 }) {
   const noteId = useId();
@@ -88,7 +91,7 @@ export function RadioSetting<V extends string>({
         render={
           <RadioGroup
             value={value}
-            aria-describedby={noteId}
+            aria-describedby={describedBy === undefined ? noteId : `${noteId} ${describedBy}`}
             onValueChange={(next) => {
               const chosen = choices.find((c) => c.value === next);
               if (chosen !== undefined) onValueChange(chosen.value);
