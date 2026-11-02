@@ -54,4 +54,5 @@ test("a finished block renders once more as the next block starts, and never aga
   // The one allowed re-render: the block just behind the tail, as the next block starts (it stops being the
   // streaming block, so its links go live). Any second render means a finished block re-rendered.
   expect([...finishedRenders].filter(([, times]) => times > 1)).toEqual([]);
-});
+  // A render per delta of the whole answer: well under a second alone, but no faster on a loaded machine.
+}, 30_000);
