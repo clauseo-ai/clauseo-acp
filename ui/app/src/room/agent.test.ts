@@ -42,7 +42,6 @@ test("agentFor: a matter with no conversation takes the setting, else DEFAULT_AG
 });
 
 test("planName: Claude Code's ids are Claude, Codex's are ChatGPT, others as they are", () => {
-  expect(planName("claude")).toBe("Claude");
   expect(planName("claude-acp")).toBe("Claude");
   expect(planName("codex")).toBe("ChatGPT");
   expect(planName("codex-acp")).toBe("ChatGPT");
@@ -93,22 +92,22 @@ test("planOptions: one agent is no choice, so none; no agents, none", () => {
 });
 
 test("S4: a listed agent with no kind is named by its id's prefix", () => {
-  expect(planName("claude", [{ id: "claude" }])).toBe("Claude");
+  expect(planName("claude-acp", [{ id: "claude-acp" }])).toBe("Claude");
   expect(planName("codex", [{ id: "codex" }])).toBe("ChatGPT");
 });
 
 test("S4: planOptions offers only agents with a plan to name", () => {
   expect(
-    planOptions([{ id: "claude" }, { id: "codex-acp", kind: "codex" }, { id: "fake-agent" }]),
+    planOptions([{ id: "claude-acp" }, { id: "codex-acp", kind: "codex" }, { id: "fake-agent" }]),
   ).toEqual([
-    { value: "claude", label: "Claude" },
+    { value: "claude-acp", label: "Claude" },
     { value: "codex-acp", label: "ChatGPT" },
   ]);
   expect(planOptions([{ id: "claude-acp", kind: "claude" }, { id: "fake-agent" }])).toEqual([]);
 });
 
 test("knownPlan: a kind's plan, and none for an agent of no kind", () => {
-  expect(knownPlan("claude")).toBe("Claude");
+  expect(knownPlan("claude-acp")).toBe("Claude");
   expect(knownPlan("work-plan", [{ id: "work-plan", kind: "codex" }])).toBe("ChatGPT");
   expect(knownPlan("fake-agent", [{ id: "fake-agent" }])).toBeNull();
 });

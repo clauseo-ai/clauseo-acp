@@ -38,12 +38,16 @@ const MADE = uuid(9, 1);
 const thread = (id: ThreadId, over: Partial<ThreadSummary> = {}): ThreadSummary => ({
   thread: id,
   matter: THE_MATTER.matter,
-  agent: "claude",
+  agent: "claude-acp",
   status: "idle",
   ...over,
 });
 
-const headerOf = (id: ThreadId, status: ThreadStatus, agent: AgentId = "claude"): ViewEntry => ({
+const headerOf = (
+  id: ThreadId,
+  status: ThreadStatus,
+  agent: AgentId = "claude-acp",
+): ViewEntry => ({
   header: {
     order: 1,
     thread: id,
@@ -81,7 +85,7 @@ test("New conversation sends nothing; its first Enter runs create_thread, send_p
   await h.key({ key: "Enter", keyCode: 13 });
   await h.settle();
   expect(kinds()).toEqual(["create_thread", "send_prompt", "rename_thread"]);
-  expect(h.sent("create_thread")).toEqual([{ matter: THE_MATTER.matter, agent: "claude" }]);
+  expect(h.sent("create_thread")).toEqual([{ matter: THE_MATTER.matter, agent: "claude-acp" }]);
   expect(h.sent("send_prompt")[0]?.thread).toBe(MADE);
   expect(h.sent("rename_thread")).toEqual([{ thread: MADE, title: titleOf(question) }]);
   // the draft became the thread, its row titled, still current

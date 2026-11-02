@@ -37,7 +37,7 @@ export const thread = (
   id: ThreadId,
   over: Partial<ThreadSummary> = {},
   matter: MatterId = A.matter,
-): ThreadSummary => ({ thread: id, matter, agent: "claude", status: "idle", ...over });
+): ThreadSummary => ({ thread: id, matter, agent: "claude-acp", status: "idle", ...over });
 
 export const info = (
   id: ThreadId,
@@ -133,7 +133,7 @@ const headerOf = (
     order: 1,
     thread: id,
     matter: A.matter,
-    agent: over.agent ?? "claude",
+    agent: over.agent ?? "claude-acp",
     status,
     ...(over.title === undefined ? {} : { title: over.title }),
     config_options: [],
