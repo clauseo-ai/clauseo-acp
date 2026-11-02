@@ -113,10 +113,7 @@ function Answer({ id, text, streaming }: { id: EntryId; text: string; streaming:
       className={REPLY}
       aria-busy={streaming ? true : undefined}
     >
-      {/* the renderer throws on a streaming answer with no blocks yet (markdown/answer.ts reads the last block's
-          footnotes), so an answer that has no words yet isn't streaming */}
-      {/* #123 (b20e196e) fixes that throw: drop this workaround on rebase */}
-      <Markdown text={text} streaming={streaming && text.trim() !== ""} />
+      <Markdown text={text} streaming={streaming} />
     </div>
   );
 }
