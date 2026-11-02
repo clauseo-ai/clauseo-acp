@@ -11,8 +11,9 @@ use futures::future::{Either, select, try_join};
 
 use crate::proxy::Verdict;
 use crate::proxy::head::{self, read_head, within};
+use crate::proxy::load::SocketSlot;
 use crate::proxy::relay::{Stream, pump};
-use crate::proxy::server::{Counts, Ctx, SocketSlot, Way};
+use crate::proxy::server::{Counts, Ctx, Way};
 use crate::proxy::target::Target;
 
 /// Opens the connection `way` names, under the connect timeout, and counts it for
@@ -20,7 +21,7 @@ use crate::proxy::target::Target;
 /// lives. `Err` is the status to answer: 502, 503 when the caps are full, or 504 on the
 /// timeout.
 pub(crate) async fn dial(ctx: &Ctx, way: &Way) -> Result<(Stream, SocketSlot), u16> {
-    let Some(slot) = ctx.socket_slot() else {
+    let Some(slot) = ctx.load.socket(&ctx.limits) else {
         tracing::info!("egress: too many open sockets; no origin connection");
         return Err(503);
     };
