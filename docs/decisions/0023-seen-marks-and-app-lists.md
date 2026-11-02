@@ -57,8 +57,21 @@ must land before or with the first partial row.
   the read and the stream. A subscriber whose channel filled gets the same frames once it has
   drained, instead of what it missed, then partial rows resume. That meets 0017's condition: the
   whole form is the first thing on every stream and comes again before any partial row after a
-  gap. The channel stays `bounded`, filled with `try_send`: a slow window never holds up the
-  actor.
+  gap.
+- **The whole state goes outside the channel.** The first frames and every catch-up are 2 + one
+  per matter, which can exceed the subscriber's channel (1,024 places; a smaller one in tests).
+  Sent through the channel, an oversized catch-up would fill it, mark the subscriber lagged, and
+  be resent whole after every drain, so it would never finish. So the actor puts the whole state
+  in the subscription's front queue (`handle::Front`), which the subscription reads before its
+  channel; the state is already in memory, and the queue holds one catch-up at a time (it is
+  filled only when the channel is empty: at subscribe, and after a drain, when nothing was sent
+  meanwhile). Events sent while part of it is unread queue behind it in the same queue, under
+  the same lock that decides whether it is empty, so none overtakes it through the channel; past
+  a channel's worth behind it the subscriber lags as on a full channel and is caught up once it
+  has read everything. Live partial rows still go through the `bounded` channel, filled with
+  `try_send`: a slow window never holds up the actor. The other option, sizing each channel
+  for the frames plus its capacity, was not taken: the matter count grows after the channel is
+  made, and `async_channel` cannot grow a bounded channel.
 - **When a row goes out.** A row goes out when a field the rail shows changes: status (a
   permission waiting counts, though the thread row does not show it), `seen`, `last_stop`,
   title, `pinned`, `client`, `next_date`, `last_opened`, name, `folder_display`, `queue_held`,
@@ -84,8 +97,8 @@ must land before or with the first partial row.
 - The window must call `MarkSeen` when the lawyer has seen a thread's ending (opening the
   thread, or reading its last turn); until then the matter shows ready or stopped.
 - A lagging window gets whole lists, which grow with the number of matters and threads: one
-  `ThreadsChanged` per matter. With 1,024 places a host with more than about 1,000 matters
-  would lag on the first frames themselves and catch up once drained.
+  `ThreadsChanged` per matter, held in the front queue whole whatever the channel's capacity,
+  so memory per lagging window grows with the lists.
 - A row change by a command lands at the command's answer, after its commit is durable; a
   failed commit sends nothing, since the comparison sees the row as it was.
 - A rollback of a thread row command (a failed `MarkSeen`, rename or archive commit) puts the

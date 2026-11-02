@@ -3,10 +3,17 @@
 //! flag; the stream, once it has drained the channel, asks the actor to catch it up (a `Reset`
 //! for a view subscription, a refill from the store for an event subscription, the current state
 //! for an app subscription, the current limits view for a limits subscription).
+//!
+//! An app subscription also reads a [`Front`] queue before its channel: the current state the
+//! actor puts there whole (its first frames, and each catch-up), which may hold more events than
+//! the channel has places, so a catch-up always arrives whole however many matters there are.
+//! While any of it is unread, the actor queues what follows behind it, up to the channel's
+//! capacity more; past that the subscriber lags again and is caught up once it has read it all.
 
+use std::collections::VecDeque;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll};
 
 use clauseo_protocol::{HostEvent, StreamId};
@@ -39,6 +46,54 @@ impl Lag {
     /// The subscription's side: whether the flag was up, lowering it.
     fn take(&self) -> bool {
         self.lagged.swap(false, Ordering::AcqRel)
+    }
+}
+
+/// The queue an app subscription reads before its channel: a catch-up, whole, and what the actor
+/// sent behind it while it was unread. Shared by the actor and the subscription; both hold the
+/// lock only to move events, so whether the queue is empty and what is pushed or popped are
+/// decided together, and nothing queued behind a catch-up can overtake it through the channel.
+#[derive(Debug, Default)]
+pub(crate) struct Front {
+    queue: Mutex<VecDeque<EncodedEvent>>,
+    waker: AtomicWaker,
+}
+
+impl Front {
+    fn lock(&self) -> MutexGuard<'_, VecDeque<EncodedEvent>> {
+        // A panic while holding the lock leaves a queue of whole events: still usable.
+        self.queue.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The actor's side: `events` replace what is queued, and the subscription is woken. The
+    /// actor calls it only when the channel is empty (a new subscriber, or one that drained it).
+    pub(crate) fn fill(&self, events: Vec<EncodedEvent>) {
+        let mut queue = self.lock();
+        queue.clear();
+        queue.extend(events);
+        drop(queue);
+        self.waker.wake();
+    }
+
+    /// The actor's side: queues `event` behind a catch-up still being read. `None` when nothing
+    /// is queued (the event goes through the channel); `Some(false)` when `limit` events are
+    /// already queued (the subscriber lags).
+    pub(crate) fn push_behind(&self, event: &EncodedEvent, limit: usize) -> Option<bool> {
+        let mut queue = self.lock();
+        if queue.is_empty() {
+            return None;
+        }
+        if queue.len() >= limit {
+            return Some(false);
+        }
+        queue.push_back(event.clone());
+        drop(queue);
+        self.waker.wake();
+        Some(true)
+    }
+
+    fn pop(&self) -> Option<EncodedEvent> {
+        self.lock().pop_front()
     }
 }
 
@@ -138,7 +193,10 @@ pub struct EventSubscription(Feed<HostEvent>);
 /// it, then gets the same whole state at once, so it misses steps but never ends on a stale
 /// view. Ends when the host stops; dropping it unsubscribes.
 #[derive(Debug)]
-pub struct AppSubscription(Feed<EncodedEvent>);
+pub struct AppSubscription {
+    feed: Feed<EncodedEvent>,
+    front: Arc<Front>,
+}
 
 /// The actor's end of a new subscription: the sender it fills and the shared flag.
 pub(crate) struct Sink<T> {
@@ -191,14 +249,20 @@ impl Subscription {
 }
 
 impl AppSubscription {
-    /// An app subscription with a channel of `capacity`, and the actor's end of it.
+    /// An app subscription with a channel of `capacity`, and the actor's ends of it: the channel
+    /// and the front queue.
     pub(crate) fn new(
         actor: async_channel::Sender<Input>,
         id: SubId,
         capacity: usize,
-    ) -> (Self, Sink<EncodedEvent>) {
+    ) -> (Self, Sink<EncodedEvent>, Arc<Front>) {
         let (feed, sink) = feed(actor, Topic::App, id, capacity);
-        (Self(feed), sink)
+        let front = Arc::new(Front::default());
+        let subscription = Self {
+            feed,
+            front: Arc::clone(&front),
+        };
+        (subscription, sink, front)
     }
 }
 
@@ -226,7 +290,13 @@ impl Stream for AppSubscription {
     type Item = EncodedEvent;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<EncodedEvent>> {
-        self.get_mut().0.poll_next(cx)
+        let this = self.get_mut();
+        // Register first, then look, so a fill between the two still wakes us.
+        this.front.waker.register(cx.waker());
+        if let Some(event) = this.front.pop() {
+            return Poll::Ready(Some(event));
+        }
+        this.feed.poll_next(cx)
     }
 }
 

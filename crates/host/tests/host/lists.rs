@@ -283,7 +283,7 @@ fn a_lagged_subscriber_gets_the_whole_lists_then_partial_rows() {
         config.with_app_subscription_capacity(SMALL_CAPACITY)
     });
     let (matter, _, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], FAKE);
-    // The first frames (settings, matters, two thread lists) fill the four places exactly.
+    // The first frames (settings, matters, two thread lists) come whole, past the channel.
     let (mut sub, first) = subscribe_app(&host);
     assert_eq!(first.len(), SMALL_CAPACITY);
     // Five changes: four fill the channel, the fifth finds it full.
@@ -340,5 +340,133 @@ fn a_lagged_subscriber_gets_the_whole_lists_then_partial_rows() {
         pinned: Some(false),
     });
     assert_eq!(after(&host, &mut sub), [row_of(&host, matter)]);
+    host.shutdown();
+}
+
+/// A channel with fewer places than the whole state has frames.
+const TINY_CAPACITY: usize = 3;
+
+/// Reads `n` events from `sub`, waiting for each.
+fn take(sub: &mut clauseo_host::AppSubscription, n: usize) -> Vec<HostEvent> {
+    crate::support::wait("the app events", async {
+        use futures::StreamExt as _;
+        let mut taken = Vec::new();
+        while taken.len() < n {
+            let item = sub.next().await.expect("the app stream ended");
+            taken.push(crate::settings::decode(&item));
+        }
+        taken
+    })
+}
+
+#[test]
+fn the_whole_state_arrives_whole_when_it_has_more_frames_than_the_channel_has_places() {
+    let dir = Dir::new(
+        "lists_tiny_channel",
+        &[(FAKE, Scenario::Bundled("prompt-stream"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_app_subscription_capacity(TINY_CAPACITY)
+    });
+    let (matter, _, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], FAKE);
+    // Two matters: four frames for three places. They all come, in order, with no lag.
+    let (mut sub, first) = subscribe_app(&host);
+    assert_eq!(first.len(), TINY_CAPACITY + 1, "{first:?}");
+    assert!(matches!(
+        first.as_slice(),
+        [
+            HostEvent::SettingsChanged(_),
+            HostEvent::MattersChanged(MattersChanged { all: true, .. }),
+            HostEvent::ThreadsChanged(ThreadsChanged { all: true, .. }),
+            HostEvent::ThreadsChanged(ThreadsChanged { all: true, .. }),
+        ]
+    ));
+    // Then partial rows, through the channel.
+    let pin = |pinned| HostCommand::UpdateMatter {
+        matter,
+        client: FieldChange::Keep,
+        next_date: FieldChange::Keep,
+        pinned: Some(pinned),
+    };
+    host.ok(pin(true));
+    assert_eq!(after(&host, &mut sub), [row_of(&host, matter)]);
+
+    // A lag: three changes fill the channel, the fourth finds it full. Once drained, the whole
+    // state (four frames again) arrives whole, and partial rows resume after it.
+    for pinned in [false, true, false, true] {
+        host.ok(pin(pinned));
+    }
+    host.settle();
+    assert_eq!(take(&mut sub, TINY_CAPACITY).len(), TINY_CAPACITY);
+    let caught = take(&mut sub, TINY_CAPACITY + 1);
+    let [
+        HostEvent::SettingsChanged(_),
+        HostEvent::MattersChanged(list),
+        HostEvent::ThreadsChanged(one),
+        HostEvent::ThreadsChanged(two),
+    ] = caught.as_slice()
+    else {
+        panic!("not the whole state: {caught:?}");
+    };
+    assert!(list.all && one.all && two.all);
+    assert_eq!(list.matters, host.matters());
+    host.ok(pin(false));
+    assert_eq!(after(&host, &mut sub), [row_of(&host, matter)]);
+    host.settle();
+    assert_eq!(ready(&mut sub), [], "nothing more");
+    host.shutdown();
+}
+
+#[test]
+fn rows_sent_while_the_first_frames_are_unread_come_after_them() {
+    let dir = Dir::new(
+        "lists_behind_first_frames",
+        &[(FAKE, Scenario::Bundled("prompt-stream"))],
+    );
+    let host = dir.start_with(0, |config| {
+        config.with_app_subscription_capacity(TINY_CAPACITY)
+    });
+    let (matter, _, _) = matter_with_thread(&dir, &host, "m", &[("a.txt", "x\n")], FAKE);
+    let mut sub = crate::support::wait(
+        "subscribe_app",
+        host.handle
+            .subscribe_app(clauseo_protocol::Principal::LocalDesktop),
+    )
+    .unwrap();
+    // Two changes before the window reads anything: they queue behind the four frames.
+    for pinned in [true, false] {
+        host.ok(HostCommand::UpdateMatter {
+            matter,
+            client: FieldChange::Keep,
+            next_date: FieldChange::Keep,
+            pinned: Some(pinned),
+        });
+    }
+    host.settle();
+    let events = ready(&mut sub);
+    let pins: Vec<(bool, Vec<bool>)> = matters_changed(&events)
+        .iter()
+        .map(|changed| {
+            (
+                changed.all,
+                changed
+                    .matters
+                    .iter()
+                    .filter(|row| row.matter == matter)
+                    .map(|row| row.pinned)
+                    .collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        pins,
+        [
+            (true, vec![false]),
+            (false, vec![true]),
+            (false, vec![false])
+        ],
+        "{events:?}"
+    );
+    assert_eq!(events.len(), TINY_CAPACITY + 1 + 2);
     host.shutdown();
 }
