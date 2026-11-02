@@ -421,6 +421,18 @@ impl Rig {
         crate::write::write_file(&self.scratch_file(name), text.as_bytes()).unwrap();
     }
 
+    /// Runs shutdown until the actor would exit, leaving the store open to read.
+    pub(super) fn shut_down(&mut self) {
+        shutdown::begin_shutdown(&mut self.actor, None);
+        loop {
+            if self.actor.settle().is_some() {
+                return;
+            }
+            let input = self.next();
+            self.actor.on_input(input);
+        }
+    }
+
     /// Shuts the host down and closes the store.
     pub(super) fn finish(self) {
         drop(self.close());
