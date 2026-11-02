@@ -83,6 +83,9 @@ const HI = {
   "This answer doesn't fit the question.": "यह उत्तर प्रश्न से मेल नहीं खाता।",
   "Choose an answer to send, or Decline to go on without one.":
     "भेजने के लिए कोई उत्तर चुनें, या बिना उत्तर के आगे बढ़ने के लिए अस्वीकार करें।",
+  // a question whose form Clauseo can't draw: the two ways on
+  "This question can't be shown here. Decline, or Stop the answer.":
+    "यह प्रश्न यहाँ नहीं दिखाया जा सकता। अस्वीकार करें, या उत्तर रोकें।",
   // the change note
   "Clauseo changed {n} papers.": "Clauseo ने {n} दस्तावेज़ बदले।",
   "Clauseo changed 1 paper.": "Clauseo ने 1 दस्तावेज़ बदला।",
