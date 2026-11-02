@@ -473,6 +473,40 @@ fn codex_guard_trusted_runs_the_turn() {
     host.shutdown();
 }
 
+/// With only the guard program set (as the desktop app sets it), the codex hooks seam gives
+/// `codex_hook_config`'s real value: `CODEX_CONFIG.hooks.PreToolUse` holds exactly one group, the
+/// guard's, and the session start passes the trust check with it.
+#[test]
+fn codex_launch_carries_the_real_guard_hook_and_passes_the_trust_check() {
+    const PROGRAM: &str = "/opt/clauseo/clauseo-desktop";
+    let dir = codex_dir("codex_real_guard", "codex-hook-trusted");
+    let launcher = Recording::new(&dir);
+    let envs = Arc::clone(&launcher.envs);
+    let host = dir.start_launching(0, Arc::new(launcher), |config| {
+        config.with_pre_write_guard(std::path::PathBuf::from(PROGRAM))
+    });
+    let (_, events, turn) = one_turn(&dir, &host, CODEX);
+    events.assert_no_mismatch();
+    assert_eq!(events.turn_ended(turn).unwrap().stop, StopReason::EndTurn);
+    assert_eq!(events.turn_text(turn), "Guarded.");
+    host.shutdown();
+
+    let envs = envs.lock().unwrap();
+    let [codex] = envs.as_slice() else {
+        panic!("one launch, not {}", envs.len());
+    };
+    let config: Value = serde_json::from_str(&var(codex, "CODEX_CONFIG").unwrap()).unwrap();
+    let expected = clauseo_host::codex_hook_config(std::path::Path::new(PROGRAM)).unwrap();
+    assert_eq!(config["hooks"], expected);
+    let groups = config["hooks"]["PreToolUse"].as_array().unwrap();
+    assert_eq!(groups.len(), 1, "{groups:?}");
+    assert_eq!(groups[0]["matcher"], "apply_patch|Write|Edit|Bash");
+    assert_eq!(
+        groups[0]["hooks"][0]["command"],
+        format!("'{PROGRAM}' --pre-write-guard")
+    );
+}
+
 #[test]
 fn codex_guard_untrusted_fails_before_any_prompt() {
     let dir = codex_dir("codex_hook_untrusted", "codex-hook-untrusted");

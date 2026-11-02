@@ -5,7 +5,7 @@ use std::path::Path;
 
 use serde_json::json;
 
-use super::{Fixture, deny, guard_json};
+use super::{Fixture, deny, guard_json, guard_with};
 #[cfg(unix)]
 use crate::write;
 
@@ -84,7 +84,8 @@ fn a_codex_patch_moving_out_of_the_codex_folder_is_refused() {
 }
 
 /// A patch elsewhere in the matter, and a `.codex` folder outside it, are not refused by the
-/// `.codex` rule; nor are Claude's tools and Bash, which keep the held-file rule alone.
+/// `.codex` rule; nor are Claude's tools and Bash (the hook with `--matter`), which keep the
+/// held-file rule alone.
 #[test]
 fn the_codex_folder_rule_covers_only_codex_patches_into_the_matters_folder() {
     let fx = Fixture::new("codex-elsewhere");
@@ -107,10 +108,48 @@ fn the_codex_folder_rule_covers_only_codex_patches_into_the_matters_folder() {
         guard_json(&fx.hook("Write", &json!({"file_path": inside, "content": "x"}))),
         ""
     );
-    assert_eq!(
-        guard_json(&fx.hook("Bash", &json!({"command": "touch .codex/config.toml"}))),
-        ""
-    );
+    let matter = fx.path("m");
+    for tool in ["Bash", "PowerShell"] {
+        let hook = fx.hook(tool, &json!({"command": "touch .codex/config.toml"}));
+        assert_eq!(
+            guard_with(&["--matter", &matter], hook.to_string().as_bytes()),
+            "",
+            "{tool}"
+        );
+    }
+}
+
+/// Under Codex's hook (no `--matter`), a `Bash` command naming a `.codex` folder is refused,
+/// writes and reads alike, relative or absolute, once shell punctuation is off; a name that only
+/// starts with `.codex` is not.
+#[test]
+fn a_codex_shell_command_naming_a_codex_folder_is_refused() {
+    let fx = Fixture::new("codex-shell");
+    let absolute = fx.path("m/.codex/config.toml");
+    for command in [
+        "touch .codex/config.toml".to_owned(),
+        "echo x > .codex/config.toml".to_owned(),
+        "echo x>>.Codex/config.toml".to_owned(),
+        "cat .codex/config.toml".to_owned(),
+        "mkdir -p .codex && cp /tmp/c.toml .codex/".to_owned(),
+        format!("cp /tmp/c.toml '{absolute}';"),
+        "cd sub/../.codex; ls".to_owned(),
+    ] {
+        assert_eq!(
+            guard_json(&fx.hook("Bash", &json!({"command": command}))),
+            codex_refused(),
+            "{command}"
+        );
+    }
+    let argv = json!({"command": ["bash", "-lc", "printf x > .codex/hooks.json"]});
+    assert_eq!(guard_json(&fx.hook("Bash", &argv)), codex_refused());
+    for command in ["cat .codexrc", "ls notes/codex.md", "echo codex"] {
+        assert_eq!(
+            guard_json(&fx.hook("Bash", &json!({"command": command}))),
+            "",
+            "{command}"
+        );
+    }
 }
 
 /// A Codex patch into the matter's `.codex` folder through a symlink to it is refused.

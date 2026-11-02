@@ -103,7 +103,8 @@ pub(crate) fn mcp_control(managed: &Path) -> McpControl {
 ///   `claudeCode.options.settings.hooks.PreToolUse`, after any entries the hook put there, and
 ///   `settings.disableAllHooks: false`, so a user's own `disableAllHooks` (user settings load)
 ///   cannot turn it off: `--settings` outranks user settings (Claude Code's settings
-///   precedence). A hook value at `settings`, `hooks` or `PreToolUse` of another type is
+///   precedence). It also turns the user's own hooks back on when their `disableAllHooks` had
+///   them off. A hook value at `settings`, `hooks` or `PreToolUse` of another type is
 ///   replaced.
 pub(crate) fn session_meta(
     hook: Option<Map<String, Value>>,

@@ -58,8 +58,8 @@ const SESSION_FLAGS_KEY: &str = r"C:\<session-flags>\config.toml:pre_tool_use:0:
 ///
 /// The hash is for the OS this runs on, as Codex computes it on the same machine. `None` when
 /// `program` is no UTF-8 string, or (Windows) holds a `"` or `%`, which `cmd.exe` cannot take
-/// inside quotes: no hook rather than one that runs something else. Not wired yet: R15 merges it
-/// into `CODEX_CONFIG`.
+/// inside quotes: no hook rather than one that runs something else. The codex hooks seam
+/// (`actor::turn::agents`, `codex_hooks`) puts it in each Codex launch's `CODEX_CONFIG`.
 pub fn codex_hook_config(program: &Path) -> Option<Value> {
     let program = program.to_str()?;
     let command = format!("{} {}", posix_quoted(program), crate::pre_write_guard::FLAG);
