@@ -350,6 +350,11 @@ pub enum MarkerKind {
         /// What was put back.
         scope: RestoreScope,
     },
+    /// The matter's folder was located after it moved (matter stream): "Found at {folder}".
+    MatterRelocated {
+        /// The folder's path as the host stores it (display only).
+        folder: String,
+    },
     /// The agent compacted its context (thread stream).
     Compaction {
         /// Started or completed.
@@ -360,7 +365,7 @@ pub enum MarkerKind {
     },
 }
 
-/// An undo, a restore or a compaction. Entry id `marker:<event>`.
+/// An undo, a restore, a located folder or a compaction. Entry id `marker:<event>`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 pub struct MarkerEntry {

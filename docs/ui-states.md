@@ -94,6 +94,7 @@ entries page in on scroll through `HostQuery::PageEntries`, which returns `Query
 | Compaction started and completed | `ViewEntry::Marker` with `MarkerKind::Compaction`: `CompactionStatus::Started`, `CompactionStatus::Completed` | summary (inline or blob) when completed |
 | Undo marker | `ViewEntry::Marker` with `MarkerKind::StepUndone` | the step's turn, the new checkpoint, restored paths, kept paths |
 | Restore marker | `ViewEntry::Marker` with `MarkerKind::VersionRestored` | the version restored from, the new checkpoint, scope |
+| Located folder marker ("Found at ...") | `ViewEntry::Marker` with `MarkerKind::MatterRelocated` | the folder's path |
 
 ## 3. Step card
 

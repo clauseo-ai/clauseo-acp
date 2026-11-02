@@ -38,6 +38,9 @@ mod mcp;
 #[path = "host/permissions.rs"]
 mod permissions;
 #[cfg(test)]
+#[path = "host/relocate.rs"]
+mod relocate;
+#[cfg(test)]
 #[path = "host/restart.rs"]
 mod restart;
 #[cfg(test)]

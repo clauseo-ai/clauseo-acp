@@ -18,9 +18,9 @@ use clauseo_host::{Host, HostConfig, HostHandle, HostJoin, ManualClock, Sequenti
 use clauseo_process::{Launcher, PassthroughLauncher, SpawnOptions};
 use clauseo_protocol::{
     AgentId, CommandEnvelope, CommandId, CommandOutcome, Cursor, DeliveryRequest, ErrorCode,
-    HostCommand, HostError, HostQuery, MatterId, MatterSource, MatterSummary, MessageId, Principal,
-    PromptBlock, QueryResult, Seq, StreamId, ThreadId, ThreadStatus, ThreadSummary, Timestamp,
-    Title, TurnId, ViewEpoch,
+    FolderRefId, HostCommand, HostError, HostQuery, MatterId, MatterSource, MatterSummary,
+    MessageId, Principal, PromptBlock, QueryResult, Seq, StreamId, ThreadId, ThreadStatus,
+    ThreadSummary, Timestamp, Title, TurnId, ViewEpoch,
 };
 use clauseo_settings::{Effective, FilePolicy, Locations, SystemFiles};
 use futures::future::Either;
@@ -156,6 +156,11 @@ impl Dir {
             write::write(&folder.join(path), content.as_bytes());
         }
         folder
+    }
+
+    /// The data folder (the test's root).
+    pub(crate) fn data_dir(&self) -> &Path {
+        &self.root
     }
 
     /// The config of run `run` (its clock starts `run` hours after [`START_MS`]).
@@ -327,6 +332,15 @@ impl Running {
             CommandOutcome::MatterCreated { matter } => matter,
             other => panic!("CreateMatter answered {other:?}"),
         }
+    }
+
+    /// Registers `folder` as a folder ref, as the desktop's folder picker does.
+    pub(crate) fn folder_ref(&self, folder: &Path) -> FolderRefId {
+        wait(
+            "register_folder",
+            self.handle.register_folder(folder.to_owned()),
+        )
+        .unwrap()
     }
 
     /// A thread of `agent` in `matter`.

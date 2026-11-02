@@ -97,6 +97,7 @@ pub(crate) fn fold(state: &mut ThreadState, envelope: &Envelope, out: &mut Appli
         DomainEvent::CheckpointRecorded(_) => wrong_stream(out, "checkpoint_recorded"),
         DomainEvent::OutsideEdits(_) => wrong_stream(out, "outside_edits"),
         DomainEvent::VersionRestored(_) => wrong_stream(out, "version_restored"),
+        DomainEvent::MatterRelocated(_) => wrong_stream(out, "matter_relocated"),
     }
 }
 

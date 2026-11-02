@@ -1,5 +1,7 @@
 //! Matters: `CreateMatter` (a new folder or an import), the Scratch matter on the first start,
-//! and each matter's worker thread, started and opened on first use.
+//! and each matter's worker thread, started and opened on first use (relinking a deleted
+//! `matter.json` once, when no other matter claims the folder). `RelocateMatter` is in
+//! `relocate.rs`.
 //!
 //! A matter's worker starts lazily: at start-up the host only lists matters, and the first
 //! turn or undo of a matter starts its thread and opens it. Most matters are not touched in a
@@ -21,7 +23,9 @@ use super::commands::{AfterCommand, CommandCtx};
 use super::input::{Input, MatterTag};
 use super::{Actor, MatterEntry, Tag, turn};
 use crate::error::Error;
-use crate::matter_worker::{ImportEnd, MatterJob, MatterReply, MatterWorker, matter_settings};
+use crate::matter_worker::{
+    ImportEnd, MatterJob, MatterReply, MatterWorker, Registry, Relink, matter_settings,
+};
 use crate::pipeline::{Draft, Failure, MatterEvent};
 
 /// The Scratch matter's name.
@@ -38,7 +42,10 @@ pub(crate) struct PendingMatter {
 }
 
 /// Starts a worker for matter `matter`, posting its replies to the actor.
-fn start_worker(actor: &Actor, matter: MatterId) -> Result<MatterWorker<MatterTag>, Error> {
+pub(super) fn start_worker(
+    actor: &Actor,
+    matter: MatterId,
+) -> Result<MatterWorker<MatterTag>, Error> {
     let post = actor.post.clone();
     MatterWorker::start(
         matter_settings(actor.effective.data_dir()),
@@ -55,15 +62,24 @@ pub(crate) fn matter_worker(
 ) -> Result<&MatterWorker<MatterTag>, Error> {
     let started = match actor.check_matter(matter)?.worker {
         Some(_) => None,
-        None => Some(start_worker(actor, matter)?),
+        None => Some((start_worker(actor, matter)?, registry(actor, matter))),
     };
     let entry = actor
         .matters
         .get_mut(&matter)
         .ok_or_else(|| Error::Internal(format!("matter {matter} vanished")))?;
-    if let Some(worker) = started {
+    if let Some((worker, registry)) = started {
         let folder = PathBuf::from(&entry.row.folder_path);
-        worker.send(MatterJob::Open { id: matter, folder }, MatterTag::Open)?;
+        let relink = Relink {
+            created_at: entry.row.created,
+            registry,
+        };
+        let open = MatterJob::Open {
+            id: matter,
+            folder,
+            relink: Some(Box::new(relink)),
+        };
+        worker.send(open, MatterTag::Open)?;
         actor.work.matter_jobs += 1;
         entry.worker = Some(worker);
     }
@@ -71,6 +87,30 @@ pub(crate) fn matter_worker(
         .worker
         .as_ref()
         .ok_or_else(|| Error::Internal(format!("matter {matter} has no worker")))
+}
+
+/// What a folder for `matter` is checked against: the folders import refuses, every other
+/// registered matter's folder, and the folders other commands are making matters of.
+pub(super) fn registry(actor: &Actor, matter: MatterId) -> Registry {
+    let rows = actor
+        .matters
+        .values()
+        .map(|entry| (entry.row.id, PathBuf::from(&entry.row.folder_path)));
+    let claimed = actor.claims.values().cloned();
+    Registry {
+        refused: refused_folders(actor),
+        others: rows
+            .chain(claimed)
+            .filter(|(id, _)| *id != matter)
+            .collect(),
+    }
+}
+
+/// The folders import refuses: the configured ones and the data folder.
+fn refused_folders(actor: &Actor) -> Vec<PathBuf> {
+    let mut refused = actor.refused_folders.clone();
+    refused.push(actor.effective.data_dir().to_path_buf());
+    refused
 }
 
 /// Starts a new matter's worker with its create or import job.
@@ -93,11 +133,9 @@ fn begin_matter(
     let worker = start_worker(actor, new.id)?;
     let cancel = Arc::new(AtomicBool::new(false));
     let job = if import {
-        let mut refused = actor.refused_folders.clone();
-        refused.push(actor.effective.data_dir().to_path_buf());
         MatterJob::Import {
             new: new.clone(),
-            refused,
+            refused: refused_folders(actor),
             cancel: Arc::clone(&cancel),
         }
     } else {
@@ -134,6 +172,8 @@ pub(super) fn create_matter(
     });
     match begun {
         Ok(pending) => {
+            let claim = (pending.new.id, pending.new.folder.clone());
+            actor.claims.insert(ctx.id, claim);
             if let Some(command) = actor.commands.get_mut(&ctx.id) {
                 command.matter = Some(pending);
             }
@@ -245,6 +285,9 @@ pub(super) fn on_matter_reply(
                 tracing::warn!(%matter, %error, "could not open a matter; it is tried again");
             }
         }
+        MatterTag::Relocate { command, folder } => {
+            super::relocate::located(actor, matter, command, &folder, reply);
+        }
         MatterTag::Turn(job) => turn::matter_reply(actor, matter, job, reply),
         MatterTag::Restore(ask) => {
             if let MatterReply::Restored(result) = reply {
@@ -271,7 +314,8 @@ pub(super) fn on_matter_reply(
                 | MatterReply::BeforeTurn(_)
                 | MatterReply::AfterTurn(_)
                 | MatterReply::Undone(_)
-                | MatterReply::Restored(_)) => Err(Error::Internal(format!(
+                | MatterReply::Restored(_)
+                | MatterReply::Located(_)) => Err(Error::Internal(format!(
                     "a query answered with another job's reply: {other:?}"
                 ))),
             };
@@ -393,6 +437,7 @@ fn made(reply: MatterReply) -> Result<(CommitId, Option<ImportSummary>), Error> 
             ImportEnd::Cancelled => Err(Error::Closed),
         },
         MatterReply::Opened(_)
+        | MatterReply::Located(_)
         | MatterReply::BeforeTurn(_)
         | MatterReply::AfterTurn(_)
         | MatterReply::Undone(_)

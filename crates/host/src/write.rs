@@ -28,3 +28,15 @@ pub(crate) fn remove_dir_all(path: &Path) -> io::Result<()> {
 pub(crate) fn write_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     std::fs::write(path, bytes)
 }
+
+/// Renames `from` to `to`. For unit tests: the lawyer moving a folder.
+#[cfg(test)]
+pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::rename(from, to)
+}
+
+/// Removes the file `path`. For unit tests.
+#[cfg(test)]
+pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
+    std::fs::remove_file(path)
+}

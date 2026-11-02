@@ -212,16 +212,21 @@ pub(super) fn on_launched(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             .get_mut(&matter)
             .ok_or_else(|| lost("a matter"))?
             .turns;
-        let Some(holder) = turns.holder else {
-            turns.holder = Some(Holder::Thread(thread));
-            before_turn(actor, thread, turn);
-            return Ok(());
-        };
-        // A restore belongs to no thread: a turn waiting for one is logged behind its own
-        // thread, the form start-up reconciliation uses too.
-        let holder = match holder {
-            Holder::Thread(holder) => holder,
-            Holder::Restore => thread,
+        let holder = match turns.holder {
+            None => {
+                turns.holder = Some(Holder::Thread(thread));
+                before_turn(actor, thread, turn);
+                return Ok(());
+            }
+            // Its agent was started again at step 4 (the matter moved): it kept the writer.
+            Some(Holder::Thread(holder)) if holder == thread => {
+                before_turn(actor, thread, turn);
+                return Ok(());
+            }
+            Some(Holder::Thread(holder)) => holder,
+            // A restore or a relocate belongs to no thread: the turn is logged behind its own
+            // thread, the form start-up reconciliation uses too.
+            Some(Holder::Restore | Holder::Relocate) => thread,
         };
         turns.queue.push_back(thread);
         if let Some(current) = current(actor, thread) {
@@ -283,6 +288,9 @@ pub(super) fn end_unstarted(
 
 /// Step 4: the before-turn checkpoint on the matter's thread.
 pub(super) fn before_turn(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
+    if agents::restart_if_moved(actor, thread, turn) {
+        return;
+    }
     if let Some(current) = current(actor, thread) {
         current.phase = TurnPhase::Checkpointing;
     }

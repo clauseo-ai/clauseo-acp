@@ -72,6 +72,7 @@ fn take_writer(actor: &mut Actor, matter: MatterId) -> Result<(), Error> {
         .turns;
     let message = match turns.holder {
         Some(Holder::Restore) => "a restore is running in this matter; wait for it",
+        Some(Holder::Relocate) => "the matter's folder is being located; wait for it",
         Some(Holder::Thread(_)) => "a turn is running in this matter; wait for it or cancel it",
         None if turns.queue.is_empty() => {
             turns.holder = Some(Holder::Restore);

@@ -187,8 +187,8 @@ wire_types! {
     event::{
         AgentSessionAttached, AgentSessionDetached, CheckpointRecorded, CommandsAvailable,
         CompactionChanged, ConfigOptionsReplaced, ContentAppended, DomainEvent, ElicitationExpired,
-        ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, ModeChanged,
-        Notice, OutsideEdits, PermissionExpired, PermissionRequested, PermissionResolved,
+        ElicitationRequested, ElicitationResolved, FilesChanged, MatterCreated, MatterRelocated,
+        ModeChanged, Notice, OutsideEdits, PermissionExpired, PermissionRequested, PermissionResolved,
         PlanReplaced, QueuedPromptEdited, SteerResolved, StepUndone, TextAppended, ThreadArchived,
         ThreadCreated, ThreadRenamed, ToolCallStarted, ToolCallUpdated, TurnEnded, TurnFailed,
         TurnQueued, TurnStarted, TurnStoppedAtLimit, UsageUpdated, UserMessage, VersionRestored,
@@ -211,7 +211,8 @@ wire_types! {
         ViewPatch, ViewPatchBody, ViewPosition, ViewWindow,
     },
     query::{
-        BlobRange, HostQuery, MatterSummary, PageLimit, QueryResult, ReadLen, RestorePreview,
+        BlobRange, FolderState, HostQuery, MatterSummary, PageLimit, QueryResult, ReadLen,
+        RestorePreview,
         ThreadSummary,
     },
     raw::{RawPayload},

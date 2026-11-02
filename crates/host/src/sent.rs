@@ -127,6 +127,7 @@ impl Layer {
             DomainEvent::ThreadCreated(_)
             | DomainEvent::ThreadRenamed(_)
             | DomainEvent::ThreadArchived(_)
+            | DomainEvent::MatterRelocated(_)
             | DomainEvent::TurnQueued(_)
             | DomainEvent::QueuedPromptEdited(_)
             | DomainEvent::SteerResolved(_)

@@ -1,8 +1,8 @@
 //! The fold of a matter's stream: its header and its Versions timeline.
 
 use clauseo_protocol::{
-    DomainEvent, EntryId, Envelope, MarkerEntry, MarkerKind, MatterHeaderEntry, VersionEntry,
-    ViewEntry,
+    DomainEvent, EntryId, Envelope, MarkerEntry, MarkerKind, MatterHeaderEntry, OutsideEdits,
+    VersionEntry, ViewEntry,
 };
 
 use crate::Applied;
@@ -57,39 +57,20 @@ pub(crate) fn fold(state: &mut MatterState, envelope: &Envelope, out: &mut Appli
                 .push(ViewChange::Upsert(Box::new(entry.clone())));
             state.entries.insert(seq, entry);
         }
-        DomainEvent::OutsideEdits(event) => {
-            let found = state.versions.get(&event.checkpoint).copied();
-            let Some(ViewEntry::Version(version)) =
-                found.and_then(|order| state.entries.get_mut(&order))
-            else {
-                out.anomalies.push(Anomaly::UnknownReference {
-                    event: "outside_edits",
-                    target: EntryId::Version(event.checkpoint),
-                });
-                return;
-            };
-            if version.files != event.files {
-                event.files.clone_into(&mut version.files);
-                out.changes
-                    .push(ViewChange::Upsert(Box::new(ViewEntry::Version(
-                        version.clone(),
-                    ))));
-            }
-        }
+        DomainEvent::OutsideEdits(event) => outside_edits(state, event, out),
         DomainEvent::VersionRestored(event) => {
-            let entry = ViewEntry::Marker(MarkerEntry {
-                order: seq,
-                event: envelope.event_id,
-                kind: MarkerKind::VersionRestored {
-                    from: event.from,
-                    checkpoint: event.checkpoint,
-                    scope: event.scope.clone(),
-                },
-                ts: envelope.ts,
-            });
-            out.changes
-                .push(ViewChange::Upsert(Box::new(entry.clone())));
-            state.entries.insert(seq, entry);
+            let kind = MarkerKind::VersionRestored {
+                from: event.from,
+                checkpoint: event.checkpoint,
+                scope: event.scope.clone(),
+            };
+            marker(state, envelope, kind, out);
+        }
+        DomainEvent::MatterRelocated(event) => {
+            let kind = MarkerKind::MatterRelocated {
+                folder: event.folder.clone(),
+            };
+            marker(state, envelope, kind, out);
         }
         DomainEvent::ThreadCreated(_)
         | DomainEvent::ThreadRenamed(_)
@@ -140,4 +121,37 @@ fn thread_kind(event: &DomainEvent) -> &'static str {
         .copied()
         .find(|known| *known == kind)
         .unwrap_or("unknown")
+}
+
+/// Adds the marker `kind` of `envelope`'s event to the timeline.
+fn marker(state: &mut MatterState, envelope: &Envelope, kind: MarkerKind, out: &mut Applied) {
+    let entry = ViewEntry::Marker(MarkerEntry {
+        order: envelope.seq,
+        event: envelope.event_id,
+        kind,
+        ts: envelope.ts,
+    });
+    out.changes
+        .push(ViewChange::Upsert(Box::new(entry.clone())));
+    state.entries.insert(envelope.seq, entry);
+}
+
+/// Puts the files of `OutsideEdits` on the version that captured them.
+fn outside_edits(state: &mut MatterState, event: &OutsideEdits, out: &mut Applied) {
+    let found = state.versions.get(&event.checkpoint).copied();
+    let Some(ViewEntry::Version(version)) = found.and_then(|order| state.entries.get_mut(&order))
+    else {
+        out.anomalies.push(Anomaly::UnknownReference {
+            event: "outside_edits",
+            target: EntryId::Version(event.checkpoint),
+        });
+        return;
+    };
+    if version.files != event.files {
+        event.files.clone_into(&mut version.files);
+        out.changes
+            .push(ViewChange::Upsert(Box::new(ViewEntry::Version(
+                version.clone(),
+            ))));
+    }
 }

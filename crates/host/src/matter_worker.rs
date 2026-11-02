@@ -12,8 +12,8 @@ use std::thread::{self, JoinHandle};
 
 use clauseo_matters::{
     Checkpoint, CheckpointOutcome, CommitId, CompareSide, ImportWarning, Imported, Limits, Matter,
-    NewMatter, OsProbe, Restore, RestorePlan, Restored, Retention, Settings, TimelineEntry,
-    TurnMeta, UndoRequest, Undone,
+    MissingReason, NewMatter, OsProbe, Restore, RestorePlan, Restored, Retention, Settings,
+    TimelineEntry, TurnMeta, UndoRequest, Undone,
 };
 use clauseo_protocol::{
     CheckpointId, CheckpointKind, FileChange, FileDecision, ImportSummary, MatterId, MatterPath,
@@ -71,8 +71,22 @@ pub(crate) enum MatterJob {
         cancel: Arc<AtomicBool>,
     },
     /// `Matter::open`. When it fails, the worker keeps the id and folder and tries the open
-    /// again before the next job that needs the matter.
-    Open { id: MatterId, folder: PathBuf },
+    /// again before the next job that needs the matter. With `relink`, the first open, if it
+    /// finds `matter.json` deleted or unreadable, calls `Matter::relink` instead (see [`open`]).
+    Open {
+        id: MatterId,
+        folder: PathBuf,
+        relink: Option<Box<Relink>>,
+    },
+    /// "Locate folder": the registry check, then `Matter::locate` from `folder`. Answered as
+    /// [`MatterReply::Located`]. On a refusal the matter is opened again from `current`, its
+    /// recorded folder, before the next job that needs it.
+    Locate {
+        id: MatterId,
+        folder: PathBuf,
+        current: PathBuf,
+        registry: Registry,
+    },
     /// The before-turn checkpoint.
     BeforeTurn(TurnMeta),
     /// The after-turn checkpoint with the paths the turn's tool calls named, and the turn's
@@ -131,6 +145,8 @@ pub(crate) enum MatterReply {
     Imported(Result<ImportEnd, Error>),
     /// The open matter's last checkpoint.
     Opened(Result<Option<CheckpointId>, Error>),
+    /// The located matter's last checkpoint.
+    Located(Result<Option<CheckpointId>, Error>),
     BeforeTurn(Result<TurnCheckpoint, Error>),
     AfterTurn(Result<TurnCheckpoint, Error>),
     Undone(Result<Box<Undone>, Error>),
@@ -176,7 +192,12 @@ enum Slot {
     /// No matter yet.
     Empty,
     /// The last open failed; tried again before the next job that needs the matter.
-    Unopened { id: MatterId, folder: PathBuf },
+    Unopened {
+        id: MatterId,
+        folder: PathBuf,
+        /// Taken by the first open, whatever it finds.
+        relink: Option<Box<Relink>>,
+    },
     /// The matter.
     Open(Box<Matter>),
 }
@@ -266,10 +287,16 @@ fn handle(settings: &Settings, slot: &mut Slot, job: MatterJob) -> MatterReply {
             refused,
             cancel,
         } => MatterReply::Imported(import(settings, slot, new, &refused, &cancel)),
-        MatterJob::Open { id, folder } => {
-            *slot = Slot::Unopened { id, folder };
+        MatterJob::Open { id, folder, relink } => {
+            *slot = Slot::Unopened { id, folder, relink };
             MatterReply::Opened(open(settings, slot).map(|matter| matter.last_checkpoint()))
         }
+        MatterJob::Locate {
+            id,
+            folder,
+            current,
+            registry,
+        } => MatterReply::Located(locate(settings, slot, id, &folder, current, &registry)),
         MatterJob::BeforeTurn(meta) => {
             MatterReply::BeforeTurn(open(settings, slot).and_then(|matter| {
                 let checkpoint = matter.before_turn(&meta)?;
@@ -487,9 +514,29 @@ fn import(
 }
 
 /// The open matter, opening it first when the last open failed.
+///
+/// The first open after the job that gave a [`Relink`], when it finds `matter.json` deleted or
+/// unreadable, calls `Matter::relink` (which writes it again only in the folder the history
+/// records), after checking that no other registered matter claims the folder. The first open
+/// spends the relink whatever it finds; every later open is answered as it is.
 fn open<'s>(settings: &Settings, slot: &'s mut Slot) -> Result<&'s mut Matter, Error> {
-    if let Slot::Unopened { id, folder } = slot {
-        let matter = Matter::open(settings.clone(), *id, folder)?;
+    if let Slot::Unopened { id, folder, relink } = slot {
+        // Spent by this open whatever it finds: a later open may meet a folder another matter
+        // has claimed since the registry was taken.
+        let relink = relink.take();
+        let matter = match Matter::open(settings.clone(), *id, folder) {
+            Ok(matter) => matter,
+            Err(
+                error @ clauseo_matters::Error::FolderMissing {
+                    reason: MissingReason::NoMatterJson | MissingReason::Unreadable,
+                    ..
+                },
+            ) => match relink {
+                Some(relink) => relink_matter(settings, *id, folder, &relink, error)?,
+                None => return Err(error.into()),
+            },
+            Err(error) => return Err(error.into()),
+        };
         *slot = Slot::Open(Box::new(matter));
     }
     match slot {
@@ -499,6 +546,11 @@ fn open<'s>(settings: &Settings, slot: &'s mut Slot) -> Result<&'s mut Matter, E
         )),
     }
 }
+
+mod relocate;
+
+pub(crate) use relocate::{Registry, Relink};
+use relocate::{locate, relink_matter};
 
 #[cfg(test)]
 mod tests;

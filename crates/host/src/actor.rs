@@ -38,9 +38,11 @@ use crate::snapshot::SnapshotWorker;
 
 mod app;
 mod commands;
+mod folder_state;
 pub(crate) mod input;
 mod matters;
 mod query;
+mod relocate;
 mod settings;
 mod shutdown;
 mod startup;
@@ -101,6 +103,11 @@ pub(crate) struct Actor {
     pub(crate) app_subs: Vec<app::AppSub>,
     pub(crate) commands: BTreeMap<CommandId, PendingCommand>,
     pub(crate) folders: BTreeMap<FolderRefId, PathBuf>,
+    /// Folders a command is making a matter of (a create, an import, a relocate), by command,
+    /// until it is answered: the registry check counts them as the matters they will be.
+    pub(crate) claims: BTreeMap<CommandId, (MatterId, PathBuf)>,
+    /// Matter folders whose `ListMatters` stat is still running (`folder_state.rs`).
+    pub(crate) stats_running: folder_state::Running,
     pub(crate) files: BTreeMap<FileRefId, PathBuf>,
     pub(crate) next_sub: u64,
     pub(crate) work: Work,

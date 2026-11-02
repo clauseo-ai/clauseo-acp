@@ -15,15 +15,16 @@ use clauseo_protocol::{
     ConfigOptionsReplaced, ContentAppended, ContentBlock, ContentId, Cost, Deliverable, Delivery,
     DetachReason, DomainEvent, ElicitationExpired, ElicitationOutcome, ElicitationRequest,
     ElicitationRequested, ElicitationResolved, ErrorCode, ExpiryReason, FileChange, FilesChanged,
-    ImportSummary, LimitStopReason, MatterCreated, MatterKind, ModeChanged, Notice, NoticeLevel,
-    OutsideEdits, PermissionChoice, PermissionExpired, PermissionKind, PermissionOption,
-    PermissionRequested, PermissionResolved, PlanEntry, PlanPriority, PlanReplaced, PlanStatus,
-    Principal, PromptCapabilities, QueuedPromptEdited, RawFrom, RenameSource, RestoreScope,
-    SessionCapabilities, SkippedFile, SkippedFileReason, SteerOutcome, SteerResolved,
-    SteeringCapability, StepUndone, StopReason, TextAppended, TextKind, TextOrBlob, ThreadArchived,
-    ThreadCreated, ThreadRenamed, Timestamp, ToolCallContent, ToolCallPatch, ToolCallStarted,
-    ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation, TurnEnded, TurnFailed, TurnQueued,
-    TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated, UserMessage, VersionRestored,
+    ImportSummary, LimitStopReason, MatterCreated, MatterKind, MatterRelocated, ModeChanged,
+    Notice, NoticeLevel, OutsideEdits, PermissionChoice, PermissionExpired, PermissionKind,
+    PermissionOption, PermissionRequested, PermissionResolved, PlanEntry, PlanPriority,
+    PlanReplaced, PlanStatus, Principal, PromptCapabilities, QueuedPromptEdited, RawFrom,
+    RenameSource, RestoreScope, SessionCapabilities, SkippedFile, SkippedFileReason, SteerOutcome,
+    SteerResolved, SteeringCapability, StepUndone, StopReason, TextAppended, TextKind, TextOrBlob,
+    ThreadArchived, ThreadCreated, ThreadRenamed, Timestamp, ToolCallContent, ToolCallPatch,
+    ToolCallStarted, ToolCallStatus, ToolCallUpdated, ToolKind, ToolLocation, TurnEnded,
+    TurnFailed, TurnQueued, TurnStarted, TurnStoppedAtLimit, TurnUsage, UsageUpdated, UserMessage,
+    VersionRestored,
 };
 
 use crate::fixtures::{
@@ -428,6 +429,10 @@ fn matter_events() -> Vec<DomainEvent> {
             scope: RestoreScope::Files {
                 paths: vec![path("a.docx")],
             },
+        }
+        .into(),
+        MatterRelocated {
+            folder: "/Users/asha/Documents/Clauseo/Smith v Jones".to_owned(),
         }
         .into(),
     ]

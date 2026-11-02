@@ -213,6 +213,7 @@ mod domain_event {
         CheckpointRecorded => checkpoint_recorded: event("checkpoint_recorded");
         OutsideEdits => outside_edits: event("outside_edits");
         VersionRestored => version_restored: event("version_restored");
+        MatterRelocated => matter_relocated: event("matter_relocated");
         Unknown => unknown: unknown_event("later_kind", raw(r#"{"z":1,"a":[true]}"#));
     } }
 
@@ -238,6 +239,10 @@ mod host_command {
         CreateMatter => create_matter: HostCommand::CreateMatter {
             name: title("Smith v Jones"),
             source: MatterSource::NewFolder { folder: folder_ref_id(1) },
+        };
+        RelocateMatter => relocate_matter: HostCommand::RelocateMatter {
+            matter: matter_id(1),
+            folder: folder_ref_id(2),
         };
         CreateThread => create_thread: HostCommand::CreateThread {
             matter: matter_id(1),

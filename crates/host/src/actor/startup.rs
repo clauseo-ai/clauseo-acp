@@ -89,6 +89,8 @@ pub(super) async fn open(
         app_subs: Vec::new(),
         commands: BTreeMap::new(),
         folders: BTreeMap::new(),
+        claims: BTreeMap::new(),
+        stats_running: std::sync::Arc::default(),
         files: BTreeMap::new(),
         next_sub: 0,
         work: Work::default(),

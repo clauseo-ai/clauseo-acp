@@ -94,7 +94,7 @@ struct Closing {
 /// A matter's turn state: who holds its writer and who waits for it. One per matter.
 #[derive(Debug, Default)]
 pub(crate) struct MatterTurns {
-    /// The turn, undo or restore holding the writer.
+    /// The turn, undo, restore or relocate holding the writer.
     holder: Option<Holder>,
     /// Threads whose turns wait for the writer, first come first served.
     queue: VecDeque<ThreadId>,
@@ -106,11 +106,14 @@ pub(crate) struct MatterTurns {
 
 /// What holds a matter's writer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Holder {
+pub(crate) enum Holder {
     /// A thread's turn or undo.
     Thread(ThreadId),
     /// A `RestoreVersion`, which belongs to no thread.
     Restore,
+    /// A `RelocateMatter`, which belongs to no thread: from its checks until its commit returns
+    /// or it is refused.
+    Relocate,
 }
 
 /// The current turn of a thread.
@@ -414,6 +417,53 @@ pub(crate) fn turn_running(actor: &Actor, thread: ThreadId) -> bool {
         .threads
         .get(&thread)
         .is_some_and(|entry| entry.turn.current.is_some() || entry.turn.closing.is_some())
+}
+
+/// Whether `matter`'s writer is taken or soon wanted: a turn or an undo holds it, a turn waits
+/// for it, or a thread of the matter has a turn, an undo not yet logged or a start-up repair in
+/// progress (`matter.turn_running` for `RelocateMatter`).
+pub(crate) fn writer_busy(actor: &Actor, matter: MatterId) -> bool {
+    let held = actor
+        .matters
+        .get(&matter)
+        .is_some_and(|entry| entry.turns.holder.is_some() || !entry.turns.queue.is_empty());
+    held || actor
+        .threads
+        .values()
+        .filter(|entry| entry.row.matter == matter)
+        .any(|entry| {
+            let state = &entry.turn;
+            state.current.is_some()
+                || state.closing.is_some()
+                || state.undo.is_some()
+                || state.reconciling
+        })
+}
+
+/// Takes `matter`'s writer for a relocate when it is free (see [`writer_busy`]); `false` when
+/// it is not.
+pub(crate) fn hold_for_relocate(actor: &mut Actor, matter: MatterId) -> bool {
+    if writer_busy(actor, matter) {
+        return false;
+    }
+    match actor.matters.get_mut(&matter) {
+        Some(entry) => {
+            entry.turns.holder = Some(Holder::Relocate);
+            true
+        }
+        None => false,
+    }
+}
+
+/// The relocate holding `matter`'s writer is done: the next queued turn takes it.
+pub(crate) fn release_relocate(actor: &mut Actor, matter: MatterId) {
+    let held = actor
+        .matters
+        .get(&matter)
+        .is_some_and(|entry| entry.turns.holder == Some(Holder::Relocate));
+    if held {
+        end::pass_writer(actor, matter);
+    }
 }
 
 /// Whether `thread`'s stream must stay loaded: a live agent, an open turn, a repair, an end
