@@ -67,6 +67,9 @@ mod settings;
 #[cfg(test)]
 #[path = "host/subscribe.rs"]
 mod subscribe;
+#[cfg(all(test, unix))]
+#[path = "host/symlink.rs"]
+mod symlink;
 #[cfg(test)]
 #[path = "host/turn.rs"]
 mod turn;

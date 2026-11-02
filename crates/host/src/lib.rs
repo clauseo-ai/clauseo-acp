@@ -56,6 +56,8 @@
 //! - The display settings: `HostQuery::GetSettings` reads them and `HostCommand::SetUiSettings`
 //!   changes them through `Effective::apply_ui_patch`, on the actor; a patch naming a key policy
 //!   locks is `settings.locked`. `docs/decisions/0017-settings-over-the-wire.md` records it.
+//! - [`session_folder`]: the canonical spelling of a matter folder that an agent session
+//!   works in (its process's folder and its `cwd`), for whatever else must compare with it.
 //! - [`Error`] wraps the errors of `protocol`, `store`, `matters`, `process`, `acp`, `reducer`
 //!   and `settings`, plus `Closed` and `Internal`; [`Error::code`] gives its `ErrorCode`, and
 //!   every public call returns it as a `HostError`. After shutdown or a host panic, calls and
@@ -134,6 +136,7 @@ mod view;
 mod window;
 mod write;
 
+pub use agent::session_folder;
 #[cfg(feature = "test-support")]
 pub use clock::ManualClock;
 pub use clock::{Clock, Now, SystemClock};

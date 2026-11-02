@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -13,7 +13,10 @@ use futures::executor::LocalPool;
 use futures::future::{pending, ready};
 use futures::task::LocalSpawnExt;
 
-use super::{AgentInput, AgentLink, Ended, PUMP_END_BOUND, StopStep, launch_spec, settle, start};
+use super::{
+    AgentInput, AgentLink, Ended, PUMP_END_BOUND, StopStep, launch_spec, session_folder, settle,
+    start,
+};
 use crate::clock::ManualClock;
 
 /// A 20-character fake GitHub token, as the test's "inherited" environment holds it.
@@ -372,4 +375,28 @@ fn settle_waits_for_the_pipes_at_most_the_bound() {
 
     // Pipes that end first settle at once, with no time passing.
     assert!(pool.run_until(settle(ready(()), &clock)));
+}
+
+/// A folder reached through a symlink gives its real path; one that does not exist gives back
+/// the stored spelling, untouched.
+#[cfg(unix)]
+#[test]
+fn session_folder_is_the_real_path() {
+    let root = std::env::temp_dir().join(format!(
+        "clauseo-host-unit-session-folder-{}",
+        std::process::id()
+    ));
+    crate::write::remove_dir_all(&root).unwrap();
+    let real = root.join("real");
+    crate::write::create_dir_all(&real).unwrap();
+    let link = root.join("link");
+    crate::write::symlink(&real, &link).unwrap();
+    let resolved = dunce::canonicalize(&real).unwrap();
+    assert_eq!(session_folder(&link), resolved);
+    assert_eq!(session_folder(&link.join("..").join("real")), resolved);
+    assert_eq!(session_folder(&resolved), resolved);
+    let missing = root.join("gone").join("..").join("matter");
+    assert_eq!(session_folder(&missing), missing);
+    assert_eq!(session_folder(Path::new("")), Path::new(""));
+    crate::write::remove_dir_all(&root).unwrap();
 }

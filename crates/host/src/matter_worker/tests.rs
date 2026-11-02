@@ -1,12 +1,12 @@
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
 use clauseo_matters::{CheckpointOutcome, DEFAULT_MARKER, NewMatter, TurnMeta};
-use clauseo_protocol::{CheckpointId, MatterId, ThreadId, Timestamp, TurnId};
+use clauseo_protocol::{CheckpointId, MatterId, MatterPath, ThreadId, Timestamp, TurnId};
 use uuid::Uuid;
 
-use super::{MatterJob, MatterReply, MatterWorker, Registry, Relink, matter_settings};
+use super::{MatterJob, MatterReply, MatterWorker, Registry, Relink, matter_settings, tool_paths};
+use crate::sent::TurnPaths;
 use crate::write;
 
 /// A valid v7 UUID, distinct per `n`.
@@ -84,7 +84,7 @@ fn create_then_checkpoints_on_the_matter_thread() {
         .send(
             MatterJob::AfterTurn {
                 meta: meta(4),
-                tool_paths: BTreeSet::new(),
+                tool_paths: TurnPaths::default(),
                 before: Some(root_checkpoint),
             },
             3,
@@ -115,7 +115,7 @@ fn create_then_checkpoints_on_the_matter_thread() {
         .send(
             MatterJob::AfterTurn {
                 meta: meta(5),
-                tool_paths: BTreeSet::new(),
+                tool_paths: TurnPaths::default(),
                 before: Some(root_checkpoint),
             },
             4,
@@ -255,5 +255,44 @@ fn the_first_open_spends_the_relink_whatever_it_finds() {
     );
     assert!(!marker.exists(), "a later open wrote matter.json");
     spent.stop().unwrap();
+}
+
+/// An `Outside` place that resolves into the matter on the disk (through a symlink to it, with
+/// `..`, a file the turn created) counts as the matter path it names; one that lies elsewhere,
+/// or does not resolve, does not.
+#[cfg(unix)]
+#[test]
+fn tool_paths_resolve_outside_spellings_into_the_matter() {
+    let root = test_dir("tool-paths");
+    let real = root.join("real");
+    write::create_dir_all(&real.join("notes")).unwrap();
+    write::write_file(&real.join("brief.txt"), b"Clause 4\n").unwrap();
+    write::write_file(&root.join("elsewhere.txt"), b"x\n").unwrap();
+    let link = root.join("link");
+    write::symlink(&real, &link).unwrap();
+    let matter = |path: &str| MatterPath::new(path).unwrap();
+    let text = |path: PathBuf| path.display().to_string();
+    let paths = TurnPaths {
+        inside: [matter("kept.txt")].into(),
+        outside: [
+            text(link.join("brief.txt")),
+            text(real.join("..").join("real").join("notes").join("new.txt")),
+            "../real/brief.txt".to_owned(),
+            text(root.join("elsewhere.txt")),
+            text(root.join("gone").join("a.txt")),
+        ]
+        .into(),
+    };
+    // The matter folder as the lawyer picked it, through the link.
+    let found = tool_paths(&link, paths);
+    assert_eq!(
+        found,
+        [
+            matter("brief.txt"),
+            matter("kept.txt"),
+            matter("notes/new.txt")
+        ]
+        .into()
+    );
     write::remove_dir_all(&root).unwrap();
 }

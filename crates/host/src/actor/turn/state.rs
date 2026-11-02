@@ -1,7 +1,5 @@
 //! The constructors of a turn's in-memory state: a new current turn, and the ways a turn ends.
 
-use std::collections::BTreeSet;
-
 use clauseo_protocol::{ContentBlock, DetachReason, ErrorCode, ExpiryReason, StopReason, TurnId};
 
 use super::{Current, End, TurnPhase};
@@ -59,7 +57,7 @@ impl Current {
             phase: TurnPhase::Accepting,
             cancelled: false,
             limit: None,
-            tool_paths: BTreeSet::new(),
+            tool_paths: crate::sent::TurnPaths::default(),
             checkpoint_before: None,
             prompt_call: None,
             cancel_timer: None,

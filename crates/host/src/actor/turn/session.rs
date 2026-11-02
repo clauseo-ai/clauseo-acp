@@ -191,7 +191,9 @@ fn session_loads(
 
 fn folder(actor: &Actor, thread: ThreadId) -> Result<PathBuf, Error> {
     let matter = actor.check_thread(thread)?.row.matter;
-    Ok(PathBuf::from(&actor.check_matter(matter)?.row.folder_path))
+    Ok(crate::agent::session_folder(std::path::Path::new(
+        &actor.check_matter(matter)?.row.folder_path,
+    )))
 }
 
 /// The session is up. A Codex agent's session first runs [`prepare`]'s checks; any other

@@ -228,7 +228,14 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launche
         &[]
     };
     let inherited = std::env::vars_os();
-    let spec = agent::launch_spec(settings, hook, forced, dropped, inherited, folder.clone())?;
+    let spec = agent::launch_spec(
+        settings,
+        hook,
+        forced,
+        dropped,
+        inherited,
+        agent::session_folder(&folder),
+    )?;
     let post = actor.post.clone();
     let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
         // The actor may be gone by then.
