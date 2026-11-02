@@ -53,6 +53,9 @@ mod limits;
 #[path = "host/limits_host.rs"]
 mod limits_host;
 #[cfg(test)]
+#[path = "host/limits_pending.rs"]
+mod limits_pending;
+#[cfg(test)]
 #[path = "host/limits_stop.rs"]
 mod limits_stop;
 #[cfg(test)]

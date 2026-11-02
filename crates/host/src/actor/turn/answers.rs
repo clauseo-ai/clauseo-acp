@@ -91,6 +91,7 @@ fn send_answer(
             then @ (Then::Launch(_)
             | Then::Started(_)
             | Then::Closing(_)
+            | Then::LimitStop(_)
             | Then::Undone
             | Then::Permission { .. }
             | Then::CancelPermission { .. }

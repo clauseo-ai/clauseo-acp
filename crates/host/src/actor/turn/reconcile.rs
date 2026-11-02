@@ -107,7 +107,9 @@ pub(super) fn reconcile(actor: &mut Actor, thread: ThreadId) {
             resets_at: None,
             reason: LimitStopReason::PlanWindow,
         };
-        log_limit_stop(actor, thread, stopped);
+        if let Err(error) = log_limit_stop(actor, thread, stopped) {
+            tracing::warn!(%thread, %turn, %error, "start-up repair did not log a stop at the limit");
+        }
     }
     let needs = actor
         .loaded(stream)

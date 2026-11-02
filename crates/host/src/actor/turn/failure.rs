@@ -14,7 +14,7 @@
 
 use clauseo_protocol::{StopReason, StreamId, ThreadId, TurnFailed, TurnId};
 
-use super::super::Actor;
+use super::super::{Actor, limits};
 use super::close::TurnClose;
 use super::state::STORE_DETAIL;
 use super::{Closing, Then, TurnPhase, cancel, current, state, steps, undo};
@@ -53,6 +53,7 @@ pub(super) fn on_store_failure(actor: &mut Actor, thread: ThreadId, failure: &Fa
 pub(super) fn on_unblocked(actor: &mut Actor, thread: ThreadId) {
     retry_closing(actor, thread);
     undo::retry(actor, thread);
+    limits::retry_stops(actor, thread, true);
     let Some(current) = current(actor, thread) else {
         return;
     };
@@ -109,7 +110,7 @@ pub(super) fn closing_sent(
     }
 }
 
-/// The commit ending `turn` is durable.
+/// The commit ending `turn` is durable; a stop at the limit that waited for it is logged.
 pub(super) fn on_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
     if let Some(state) = state(actor, thread)
         && state
@@ -118,6 +119,8 @@ pub(super) fn on_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId) {
             .is_some_and(|closing| closing.close.turn == turn)
     {
         state.closing = None;
+        // A stop at the limit decided while this end was not durable is logged now.
+        limits::retry_stops(actor, thread, false);
     }
 }
 

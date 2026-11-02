@@ -60,7 +60,7 @@ const CANCEL_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// How long a Codex turn whose prompt failed waits for a limits read before it ends: the Codex
 /// reader's own timeout.
-const LIMIT_READ_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+pub(crate) const LIMIT_READ_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// A thread's turn state: its current turn, its agent, its text buffers and its undo note. One
 /// per thread, made with `Default` when the thread is loaded from the store or created.
@@ -215,6 +215,8 @@ enum Then {
     Started(TurnId),
     /// The commit holding the `TurnEnded` of `turn`: forget its closing record.
     Closing(TurnId),
+    /// The commit logging `turn`'s stop at the limit after its read: forget the pending stop.
+    LimitStop(TurnId),
     /// The commit logging an undo: update the note, let the writer go.
     Undone,
     /// A permission answer: tell the agent.
@@ -360,6 +362,9 @@ pub(crate) fn committed(actor: &mut Actor, tag: TurnTag, outcome: Result<(), &Fa
         (Then::Closing(turn), Err(failed)) => {
             failure::on_closing_failed(actor, thread, turn, failed);
         }
+        (Then::LimitStop(turn), outcome) => {
+            super::limits::stop_committed(actor, thread, turn, outcome.is_ok());
+        }
         (Then::Undone, Ok(())) => undo::on_logged(actor, thread),
         (Then::Undone, Err(_)) => undo::on_failed(actor, thread),
         (Then::Permission { agent, key, option }, Ok(())) => {
@@ -503,7 +508,7 @@ pub(crate) fn release_relocate(actor: &mut Actor, matter: MatterId) {
 }
 
 /// Whether `thread`'s stream must stay loaded: a live agent, an open turn, a repair, an end
-/// that may still be retried.
+/// that may still be retried, a stop at the limit not logged yet.
 pub(crate) fn keeps_loaded(actor: &Actor, thread: ThreadId) -> bool {
     actor.threads.get(&thread).is_some_and(|entry| {
         let state = &entry.turn;
@@ -515,7 +520,21 @@ pub(crate) fn keeps_loaded(actor: &Actor, thread: ThreadId) -> bool {
                 .closing
                 .as_ref()
                 .is_some_and(|closing| !closing.retried)
+    }) || super::limits::holds_stop(actor, thread)
+}
+
+/// Whether the commit holding `turn`'s `TurnEnded` is not durable yet (`thread`'s closing
+/// record is that turn's).
+pub(crate) fn closing(actor: &Actor, thread: ThreadId, turn: TurnId) -> bool {
+    actor.threads.get(&thread).is_some_and(|entry| {
+        let closing = entry.turn.closing.as_ref();
+        closing.is_some_and(|closing| closing.close.turn == turn)
     })
+}
+
+/// Whether `thread`'s stream is blocked by a failed commit.
+pub(crate) fn stream_blocked(actor: &Actor, thread: ThreadId) -> bool {
+    failure::blocked(actor, thread)
 }
 
 /// Whether `matter`'s stream, once loaded to check a reused checkpoint, stays loaded: while a
