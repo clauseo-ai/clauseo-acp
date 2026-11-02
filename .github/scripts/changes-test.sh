@@ -56,10 +56,10 @@ check "$T $T $F $T" crates/desktop/src/lib.rs
 check "$T $T $F $T" crates/host/src/session.rs
 check "$T $T $F $T" crates/fake_agent/src/main.rs
 check "$T $T $F $T" crates/acp/Cargo.toml
+check "$T $T $F $T" crates/limits/src/lib.rs
+check "$T $T $F $T" crates/codex_appserver/src/lib.rs
 # Rust outside the app: the build matrix, no smoke.
-check "$T $F $F $T" crates/limits/src/lib.rs
 check "$T $F $F $T" crates/reducer_bench/benches/apply.rs
-check "$T $F $F $T" crates/codex_appserver/src/lib.rs
 check "$T $F $F $F" xtask/src/main.rs
 check "$T $F $F $F" .config/nextest.toml
 check "$T $F $F $T" budgets.toml
