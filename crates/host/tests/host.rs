@@ -56,6 +56,9 @@ mod papers;
 #[path = "host/permissions.rs"]
 mod permissions;
 #[cfg(test)]
+#[path = "host/relaunch.rs"]
+mod relaunch;
+#[cfg(test)]
 #[path = "host/relocate.rs"]
 mod relocate;
 #[cfg(test)]
