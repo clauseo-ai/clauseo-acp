@@ -185,11 +185,15 @@ fn session_loads(
 ) -> Result<(serde_json::Map<String, serde_json::Value>, Vec<McpServer>), Error> {
     let agent = &actor.check_thread(thread)?.row.agent;
     let control = agent::loads::mcp_control(&actor.managed_mcp);
-    let meta = agent::loads::session_meta(
-        actor.profile.session_meta(agent),
-        control,
-        actor.pre_write_guard.as_deref(),
-    );
+    let matter = folder(actor, thread)?;
+    let guard = actor
+        .pre_write_guard
+        .as_deref()
+        .map(|program| agent::loads::GuardHook {
+            program,
+            matter: &matter,
+        });
+    let meta = agent::loads::session_meta(actor.profile.session_meta(agent), control, guard);
     Ok((meta, agent::loads::mcp_servers(&actor.effective, control)))
 }
 

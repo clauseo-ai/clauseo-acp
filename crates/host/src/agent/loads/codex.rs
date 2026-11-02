@@ -7,6 +7,12 @@
 //!   on Windows `commandWindows` runs as `%COMSPEC% /C "<command>"` (else `cmd.exe`)
 //!   (`hooks/src/engine/command_runner.rs`, `build_command`, `default_shell_program`). So the
 //!   program is quoted: POSIX single quotes for `command`, double quotes for `commandWindows`.
+//! - The hook passes no `--matter`: Codex's hook input `cwd` is the turn's working folder
+//!   (`core/src/hook_runtime.rs`, `tool_hook_cwd`: the local environment's cwd, else the turn's),
+//!   which a command's `cd` does not move, so the guard takes the matter from it, and the value
+//!   stays one per config. The guard refuses with exit 2 and the reason on stderr, which Codex
+//!   blocks on (`hooks/src/events/pre_tool_use.rs`, `Some(2)`), whatever a login shell prints to
+//!   stdout.
 //! - A hook from session flags runs only when trusted. The value trusts itself with a `state`
 //!   entry under the hook's key, `<session-flags layer path>:pre_tool_use:0:0`, whose
 //!   `trusted_hash` is the hash Codex computes for the hook (`hooks/src/engine/discovery.rs`,

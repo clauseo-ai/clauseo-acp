@@ -7,7 +7,7 @@ use serde_json::{Map, Value, json};
 
 use super::{
     CLAUDE_AI_MCP_VAR, CLAUDE_MANAGED_SETTING_SOURCES, CLAUDE_SETTING_SOURCES, GUARD_MATCHER,
-    McpControl, guard_entry, launch_env, mcp_control, mcp_servers, session_meta,
+    GuardHook, McpControl, guard_entry, launch_env, mcp_control, mcp_servers, session_meta,
 };
 use crate::write;
 
@@ -80,36 +80,48 @@ fn a_hook_value_that_is_not_an_object_is_replaced() {
     }
 }
 
-/// The guard's entry: the exec form, the matcher and the timeout, appended after the hook's own
-/// entries; a hook value of another type at `settings`, `hooks` or `PreToolUse` is replaced.
+/// The guard's entry: the exec form with `--matter <folder>`, the matcher and the timeout,
+/// appended after the hook's own entries, with `disableAllHooks: false` beside them; a hook value
+/// of another type at `settings`, `hooks` or `PreToolUse` is replaced, and a hook's
+/// `disableAllHooks: true` is overridden.
 #[test]
 fn the_guard_entry_is_appended_after_the_hooks_entries() {
     let program = std::env::temp_dir()
         .join("Clauseo O'Brien")
         .join("clauseo-desktop");
+    let matter = std::env::temp_dir().join("Matters").join("Smith v Jones");
+    let guard = Some(GuardHook {
+        program: &program,
+        matter: &matter,
+    });
     let entry = json!({
-        "matcher": GUARD_MATCHER,
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell",
         "hooks": [{
             "type": "command",
             "command": program.to_str().unwrap(),
-            "args": ["--pre-write-guard"],
+            "args": ["--pre-write-guard", "--matter", matter.to_str().unwrap()],
             "timeout": 10,
         }],
     });
-    assert_eq!(guard_entry(&program), Some(entry.clone()));
+    assert_eq!(
+        GUARD_MATCHER,
+        "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell"
+    );
+    assert_eq!(guard_entry(&program, &matter), Some(entry.clone()));
     let firm = json!({"matcher": "Read", "hooks": [{"type": "command", "command": "firm"}]});
     let hook = object(&json!({"claudeCode": {"options": {"settings": {
         "syncClaudeAiPlugins": false,
+        "disableAllHooks": true,
         "hooks": {"PreToolUse": [firm], "Stop": []},
     }}}}));
-    let meta = Value::Object(session_meta(
-        Some(hook),
-        McpControl::Clauseo,
-        Some(&program),
-    ));
+    let meta = Value::Object(session_meta(Some(hook), McpControl::Clauseo, guard));
     assert_eq!(
         meta["claudeCode"]["options"]["settings"],
-        json!({"syncClaudeAiPlugins": false, "hooks": {"PreToolUse": [firm, entry], "Stop": []}})
+        json!({
+            "syncClaudeAiPlugins": false,
+            "disableAllHooks": false,
+            "hooks": {"PreToolUse": [firm, entry], "Stop": []},
+        })
     );
     for hook in [
         json!({"claudeCode": {"options": {"settings": "none"}}}),
@@ -119,11 +131,11 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
         let meta = Value::Object(session_meta(
             Some(object(&hook)),
             McpControl::Managed,
-            Some(&program),
+            guard,
         ));
         assert_eq!(
-            meta["claudeCode"]["options"]["settings"]["hooks"]["PreToolUse"],
-            json!([entry]),
+            meta["claudeCode"]["options"]["settings"],
+            json!({"disableAllHooks": false, "hooks": {"PreToolUse": [entry]}}),
             "{hook}"
         );
     }
@@ -131,14 +143,21 @@ fn the_guard_entry_is_appended_after_the_hooks_entries() {
     assert_eq!(meta["claudeCode"]["options"].get("settings"), None);
 }
 
-/// A program path that is not UTF-8 cannot go in JSON: no entry, rather than a lossy one.
+/// A program or matter path that is not UTF-8 cannot go in JSON: no entry, rather than a lossy
+/// one.
 #[cfg(unix)]
 #[test]
-fn a_program_path_that_is_not_utf8_gets_no_entry() {
+fn a_path_that_is_not_utf8_gets_no_entry() {
     use std::os::unix::ffi::OsStrExt;
-    let program = std::path::Path::new(std::ffi::OsStr::from_bytes(b"/opt/clauseo-\xff"));
-    assert_eq!(guard_entry(program), None);
-    let meta = Value::Object(session_meta(None, McpControl::Clauseo, Some(program)));
+    let odd = std::path::Path::new(std::ffi::OsStr::from_bytes(b"/opt/clauseo-\xff"));
+    let plain = std::path::Path::new("/opt/clauseo");
+    assert_eq!(guard_entry(odd, plain), None);
+    assert_eq!(guard_entry(plain, odd), None);
+    let guard = Some(GuardHook {
+        program: odd,
+        matter: plain,
+    });
+    let meta = Value::Object(session_meta(None, McpControl::Clauseo, guard));
     assert_eq!(meta["claudeCode"]["options"].get("settings"), None);
 }
 

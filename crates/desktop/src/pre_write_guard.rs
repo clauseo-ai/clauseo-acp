@@ -1,7 +1,8 @@
 //! The pre-write guard's fast path: `main` asks [`guard_requested`] before anything else starts,
-//! and on yes runs `clauseo_host::pre_write_guard::run` on stdin and stdout and exits with its
-//! code: no Tauri, no logging, no settings read. Claude Code's `PreToolUse` hook starts the app
-//! this way before each file edit and shell command (`HostConfig::with_pre_write_guard`).
+//! and on yes runs `clauseo_host::pre_write_guard::run` with the remaining arguments on stdin
+//! and stderr and exits with its code: no Tauri, no logging, no settings read. Claude Code's
+//! `PreToolUse` hook starts the app this way before each file edit and shell command
+//! (`HostConfig::with_pre_write_guard`).
 
 use std::ffi::OsStr;
 

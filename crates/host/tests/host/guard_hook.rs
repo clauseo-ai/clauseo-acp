@@ -50,7 +50,7 @@ fn prompt_to_end(host: &Running, thread: clauseo_protocol::ThreadId, text: &str)
 }
 
 #[test]
-fn the_guard_entry_goes_after_the_hooks_own_on_new_and_load() {
+fn the_guard_entry_goes_after_the_hooks_own_and_survives_a_bad_hook_on_load() {
     let dir = Dir::new("guard_hook", &[(FAKE, Scenario::Local("guard-hook-new"))]);
     let firm =
         json!({"matcher": "Read", "hooks": [{"type": "command", "command": "/opt/firm/audit"}]});
