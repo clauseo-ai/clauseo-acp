@@ -4,7 +4,7 @@ Clauseo is a desktop ACP client for lawyers: a Rust session host, a thin Tauri 2
 The lawyer brings their own agent (Claude Code or Codex). This file is for coding agents and people
 alike. `CLAUDE.md` imports it, so Claude Code and Codex read the same rules.
 
-Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means the coding agent reading this. Use the words in `GLOSSARY.md` exactly.
+Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" is the coding agent reading this. Use the words in `GLOSSARY.md` exactly.
 
 ## Read next
 
@@ -13,7 +13,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - `CONTRIBUTING.md`: the steps from task to merge.
 - `docs/review-lessons.md`: rules from past reviews, each with the defect it prevents.
 - The contract at the top of each crate you touch (`//!` in `lib.rs`).
-- Plans and task briefs live in the private repo, `../clauseo-acp-private` (start at its `START-HERE.md`); outside contributors will not have it, so this repo must make sense without it.
+- Plans and task briefs are in the private repo `../clauseo-acp-private` (start at `START-HERE.md`); outside contributors lack it, so this repo must make sense without it.
 
 ## Commands
 
@@ -38,22 +38,22 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - `crates/process`: starts an agent in its own process tree, shuts it down and kills the tree; the `Launcher` seam.
 - `crates/protocol`: types crossing the host boundary, no I/O. See `docs/decisions/`, `docs/ui-states.md`.
 - `crates/reducer`: the pure fold from events to state and view changes, and snapshots; its gungraun bench is `crates/reducer_bench` (Linux).
+- `crates/sandbox`: the agent jail: policy, link scan, tiers, denials, launchers.
 - `crates/settings`: settings, data folders and the policy layer.
 - `crates/store`: the event log, snapshots, blobs and receipts in one SQLite file.
 - `ui/app`: the React app, the room (`src/room/`); `ui/components`: tokens, words, parts. New strings: `ui/app/src/review/registry.tsx`. Tauri APIs only in `ui/app/src/transport`.
 - `ui/e2e`: Playwright tests of the real app over CDP on Windows, and the speed scoreboard's code. `cargo xtask check` typechecks it and runs its unit tests; no lint or write rule yet (#86).
-- `xtask`: checks, build timing, budgets. Builds without any app crate. Frozen: no new checks.
+- `xtask`: checks, build timing, budgets. Builds with no app crate. Frozen: no new checks.
 
 ## Never
 
-- Never add `tauri` or `tokio` to a core crate (see "Never depends on" in `ARCHITECTURE.md`). Tauri is about 90% of cold build time, and the core must run without a window.
+- Never add `tauri` or `tokio` to a core crate (see "Never depends on" in `ARCHITECTURE.md`). Tauri is about 90% of cold build time; the core must run without a window.
 - Never add a Tauri plugin or a webview permission beyond 0012, 0015, 0019 and 0026. The plugin set is fixed (a change forces a near-cold rebuild); permissions widen XSS reach.
-- Never write a sync `#[tauri::command]` or stream through Tauri events. Sync commands block the UI
-  thread; events go to every webview. Use async commands and one `ipc::Channel` per window.
-- Never read or write the real app data folder, `~/.claude` or `~/.codex`. Those hold a lawyer's data and agent credentials.
+- Never write a sync `#[tauri::command]` or stream through Tauri events. Sync commands block the UI thread; events go to every webview. Use async commands and one `ipc::Channel` per window.
+- Never read or write the real app data folder, `~/.claude` or `~/.codex`. They hold a lawyer's data and agent credentials.
 - Never kill a process by name. Kill only the PID you started.
 - Never open a `.env` file or print a secret.
-- Never create or edit CLA.md or anything in cla/. Signing is done by the person, never by an agent.
+- Never create or edit CLA.md or anything in cla/. Signing is the person's, never an agent's.
 
 ## Rules the checks enforce
 
@@ -86,24 +86,24 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - The blank app is the control for every memory and start-up budget. Keep it blank.
 - Product code takes every speed or memory win, however small. The same few paths run all day:
   streaming an answer to the screen, saving each event, versioning the matter after every turn,
-  reopening long conversations. Many small savings there make the app feel instant, the way a car
-  maker that shaves a few grams off every part ends up with a much lighter car. When two ways to do
+  reopening long conversations. Many small savings there make the app feel instant, as a carmaker
+  shaving a few grams off every part ends up with a much lighter car. When two ways to do
   something on a product path both meet the brief, measure both and keep the faster, even when the
   gap is tiny. Under Performance, list what you compared, the machine, the medians, what you kept.
-- Tooling, CI, docs and tests are exempt: keep them correct and simple, and do not benchmark them.
+- Tooling, CI, docs and tests are exempt: keep them correct and simple; do not benchmark them.
 
 ## How you work
 
 - One worktree per task, on its own branch. Never share `target/` between worktrees.
 - Commit with `git commit -s`.
-- Report what you verified, with the command and its result, and what you did not verify.
-- In the pull request, list every difference from the brief (or the issue, when there is no brief)
+- Report what you verified (the command, its result) and what you did not.
+- In the pull request, list every difference from the brief (or the issue, if there is no brief)
   under Deviations and every code path you never ran (Windows, SIGKILL, a missing tool) under Not
   verified. Update both after each review.
 - Give each fact one home: a version, a key list, a policy string, a type, a rule's wording. Derive
   the rest from it; where two files cannot share it, add a test that fails when they disagree.
-- Touch the files your brief lists. If you need another, change it and list it under Deviations. If the brief is wrong, stop and say so.
-- When you review a pull request, follow the review bar in `CONTRIBUTING.md`.
+- Touch the files your brief lists; change any other you need and list it under Deviations. If the brief is wrong, stop and say so.
+- When reviewing a pull request, follow the review bar in `CONTRIBUTING.md`.
 - Do not merge. A person reviews and merges.
 
 ## Definition of done
@@ -112,7 +112,7 @@ Words: "agent" means the lawyer's ACP agent (Claude Code, Codex). "You" means th
 - Every acceptance check in the brief passes, with output in the pull request.
 - Tests sit at the interface and include a failing case.
 - Docs you changed still pass the doc checks.
-- Every comment, doc, help text, test name and PR sentence about what you changed is still true, and claims only what a test or command showed.
+- Every comment, doc, help text, test name and PR sentence about what you changed is still true and claims only what a test or command showed.
 
 ## Changing this file
 
