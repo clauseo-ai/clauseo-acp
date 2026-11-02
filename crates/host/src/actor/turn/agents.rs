@@ -15,7 +15,7 @@ use clauseo_protocol::{
 use super::super::Actor;
 use super::super::commands::CommandCtx;
 use super::super::input::Input;
-use super::codex_start::{self, Prepared};
+use super::launch_checks::{self, Prepared};
 use super::out::Out;
 use super::{
     AgentReply, End, Then, TurnInput, TurnPhase, current, end, host_stopping, lost, session, state,
@@ -62,7 +62,7 @@ pub(super) struct Agent {
     /// Work that came while it was stopping: a new agent takes it after `Ended`.
     after_stop: Vec<Waiting>,
     /// The matter folder it was started in, its working directory.
-    folder: PathBuf,
+    pub(super) folder: PathBuf,
     /// It is being stopped to start again in its matter's new folder: its detach is
     /// `Restarting`.
     restarting: bool,
@@ -95,8 +95,9 @@ pub(super) struct Agent {
 /// What a Codex agent's launch recorded.
 #[derive(Debug)]
 pub(super) struct CodexAgent {
-    /// The matter folder as resolved through links at the launch: each prompt and session
-    /// call checks it for `.codex` first, and `_codex/hooks/list` names it.
+    /// The matter folder as resolved through links at the launch: `_codex/hooks/list` names
+    /// it. Each prompt and session call checks the stored folder for `.codex` first, resolved
+    /// again.
     pub(super) folder: PathBuf,
     /// A hooks object went into its `CODEX_CONFIG`, so its session start checks that Codex
     /// trusts the guard.
@@ -110,8 +111,8 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
         return;
     };
     match state.agent.as_deref_mut() {
-        None => match state.codex_start.as_deref_mut() {
-            // A Codex launch's preparation runs: the work waits for it.
+        None => match state.preparing.as_deref_mut() {
+            // The launch's folder checks run: the work waits for them.
             Some(preparing) => preparing.waiting.push(waiting),
             None => start(actor, thread, vec![waiting]),
         },
@@ -123,8 +124,8 @@ pub(super) fn ensure(actor: &mut Actor, thread: ThreadId, waiting: Waiting) {
     }
 }
 
-/// Launches `thread`'s agent and sends `initialize`; a Codex agent's file checks and writes go
-/// off the actor first (`codex_start.rs`).
+/// Launches `thread`'s agent and sends `initialize`, its folder checks (and a Codex agent's
+/// writes) off the actor first (`launch_checks.rs`).
 fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
     if host_stopping(actor) {
         fail_all(actor, thread, waiting, &Error::Closed);
@@ -135,19 +136,15 @@ fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
     if let Some(reason) = held {
         log_detach(actor, thread, reason);
     }
-    if codex_start::is_codex(actor, thread) {
-        codex_start::prepare(actor, thread, waiting);
-        return;
-    }
-    launch_now(actor, thread, waiting, None);
+    launch_checks::prepare(actor, thread, waiting);
 }
 
-/// The launch on the actor, with a Codex agent's `prepared` folder and home, and `initialize`.
+/// The launch on the actor, with what its checks found (`prepared`), and `initialize`.
 pub(super) fn launch_now(
     actor: &mut Actor,
     thread: ThreadId,
     waiting: Vec<Waiting>,
-    prepared: Option<Prepared>,
+    prepared: Prepared,
 ) {
     let (link, folder, codex) = match launch(actor, thread, prepared) {
         Ok(launched) => launched,
@@ -201,10 +198,9 @@ type Launched = (AgentLink, PathBuf, Option<CodexAgent>);
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
 /// variables, then the profile hook's with the host's switches over them, then what the host
-/// forces for the agent's kind), in the matter folder. A Codex agent comes `prepared`: its
-/// `.codex` refusal (#184), its home and its `config.toml` are done, and it runs in the folder
-/// that was checked.
-fn launch(actor: &Actor, thread: ThreadId, prepared: Option<Prepared>) -> Result<Launched, Error> {
+/// forces for the agent's kind), in the matter folder that was checked (`prepared`). A Codex
+/// agent's `.codex` refusal (#184), its home and its `config.toml` are done by then.
+fn launch(actor: &Actor, thread: ThreadId, prepared: Prepared) -> Result<Launched, Error> {
     let row = &actor.check_thread(thread)?.row;
     let settings = actor.effective.agent(row.agent.as_str()).ok_or_else(|| {
         Error::refused(
@@ -212,7 +208,8 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Option<Prepared>) -> Result
             format!("no agent {} in the settings", row.agent),
         )
     })?;
-    let (folder, forced, codex) = if let Some(prepared) = prepared {
+    let folder = prepared.stored;
+    let (forced, codex) = if let Some(prepared) = prepared.codex {
         let hooks = codex_hooks(actor);
         let guard = hooks.is_some();
         let forced = agent::codex::launch_env(&prepared.home, &settings.env, hooks);
@@ -220,10 +217,9 @@ fn launch(actor: &Actor, thread: ThreadId, prepared: Option<Prepared>) -> Result
             folder: prepared.folder,
             guard,
         };
-        (prepared.stored, forced, Some(codex))
+        (forced, Some(codex))
     } else {
-        let folder = PathBuf::from(&actor.check_matter(row.matter)?.row.folder_path);
-        (folder, BTreeMap::new(), None)
+        (BTreeMap::new(), None)
     };
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
     let dropped: &[&str] = if codex.is_some() {

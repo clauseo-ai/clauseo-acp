@@ -1,5 +1,6 @@
-//! A Codex agent's file system checks and writes, off the actor: its launch preparation
-//! ([`super::prepare_launch`]) and the `.codex` re-check before each prompt and session call.
+//! A launch's file system checks and writes, off the actor: every agent's data-folder refusal,
+//! a Codex agent's launch preparation ([`super::prepare_launch`]) and its `.codex` re-check
+//! before each prompt and session call.
 //! As `actor/folder_state.rs` does for matter folders, each runs on a `clauseo-codex-fs`
 //! thread that sends its answer back over a channel, and the caller waits at most
 //! [`PREPARE_WAIT`] on the host's clock. A stat that hangs (a network share that does not
@@ -15,15 +16,15 @@ use futures::future::{Either, select};
 use crate::clock::Clock;
 use crate::error::Error;
 
-/// How long a Codex launch or turn waits for its file system work.
+/// How long a launch or a Codex turn waits for its file system work.
 pub(crate) const PREPARE_WAIT: Duration = Duration::from_secs(5);
 
 /// The name of the threads that do it.
 const THREAD_NAME: &str = "clauseo-codex-fs";
 
-/// Runs `work` on a new `clauseo-codex-fs` thread and gives its answer, or
-/// `agent.launch_failed` when it has not answered within [`PREPARE_WAIT`] on `clock` (the
-/// thread is left to finish on its own), could not start, or panicked.
+/// Runs `work` on a new `clauseo-codex-fs` thread and gives its answer; `matter.folder_missing`
+/// when it has not answered within [`PREPARE_WAIT`] on `clock` (the thread is left to finish on
+/// its own), and `agent.launch_failed` when it could not start or panicked.
 pub(crate) async fn off_actor<T: Send + 'static>(
     clock: Arc<dyn Clock>,
     work: impl FnOnce() -> Result<T, Error> + Send + 'static,
@@ -47,26 +48,42 @@ pub(crate) async fn off_actor<T: Send + 'static>(
             Err(not_ready())
         }
         Either::Right(((), _)) => {
-            tracing::warn!("Codex's file checks did not answer in time; the start fails");
-            Err(not_ready())
+            tracing::warn!("the matter folder's checks did not answer in time; the call fails");
+            Err(too_late())
         }
     }
 }
 
-/// The `.codex` re-check of a Codex agent's `folder` before a prompt or a session call, off the
-/// actor; `None` (any other agent) passes at once, with no thread.
-pub(crate) async fn recheck(clock: Arc<dyn Clock>, folder: Option<PathBuf>) -> Result<(), Error> {
-    match folder {
-        Some(folder) => off_actor(clock, move || super::refuse_codex_folder(&folder)).await,
+/// The `.codex` re-check of a Codex agent's matter folder before a prompt or a session call, off
+/// the actor: `stored`, the folder the agent runs in, is resolved through links again each
+/// time, so a link pointed elsewhere since the launch is checked where it now points. `None`
+/// (any other agent) passes at once, with no thread.
+pub(crate) async fn recheck(clock: Arc<dyn Clock>, stored: Option<PathBuf>) -> Result<(), Error> {
+    match stored {
+        Some(stored) => {
+            off_actor(clock, move || {
+                super::refuse_codex_folder(&super::session_folder(&stored))
+            })
+            .await
+        }
         None => Ok(()),
     }
 }
 
-/// The failure when the checks did not answer.
+/// The failure when the checks did not answer in time: the folder may be a share that does not
+/// answer, and the agent may be running already, so not "didn't start".
+fn too_late() -> Error {
+    Error::refused(
+        ErrorCode::MatterFolderMissing,
+        "Clauseo couldn't check the matter's folder in time.",
+    )
+}
+
+/// The failure when the checks' thread could not start or ended without an answer.
 fn not_ready() -> Error {
     Error::refused(
         ErrorCode::AgentLaunchFailed,
-        "Clauseo couldn't check the matter's folder for Codex in time.",
+        "Clauseo couldn't check the matter's folder.",
     )
 }
 

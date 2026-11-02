@@ -73,6 +73,28 @@ pub(crate) fn replace_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> 
     renamed
 }
 
+/// Removes the temp files a crashed [`replace_private_file`] of `path` left beside it
+/// (`<name>.clauseo-*.new`), best effort: one that cannot be removed stays, and the write goes
+/// on with its own fresh name.
+pub(crate) fn sweep_temp_files(path: &Path) {
+    let (Some(folder), Some(name)) = (path.parent(), path.file_name()) else {
+        return;
+    };
+    let mut prefix = name.to_owned();
+    prefix.push(".clauseo-");
+    let prefix = prefix.as_encoded_bytes();
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let bytes = name.as_encoded_bytes();
+        if bytes.starts_with(prefix) && bytes.ends_with(b".new") {
+            drop(std::fs::remove_file(entry.path()));
+        }
+    }
+}
+
 /// Removes `path` and everything under it; a missing folder is fine. For unit tests' temp folders.
 #[cfg(test)]
 pub(crate) fn remove_dir_all(path: &Path) -> io::Result<()> {

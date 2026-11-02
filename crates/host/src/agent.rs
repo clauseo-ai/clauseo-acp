@@ -6,6 +6,7 @@
 //! event forwarder to end, reads the exit report, and posts [`Ended`] after the agent's last event.
 
 pub(crate) mod codex;
+pub(crate) mod data_folder;
 pub(crate) mod loads;
 mod spec;
 

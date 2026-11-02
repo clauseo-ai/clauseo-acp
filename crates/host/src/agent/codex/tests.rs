@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use super::{
     config, guard_trusted, home_config, launch_env, make_home, prepare_launch, refuse_codex_folder,
-    refuse_home_overlap, session_folder, write_home_config,
+    session_folder, write_home_config,
 };
 use crate::write;
 
@@ -142,10 +142,11 @@ fn a_codex_entry_of_any_kind_refuses_the_folder() {
 }
 
 /// A `.codex` stat that fails for another reason than not-found (here a folder the user may
-/// not search) counts as present. Skipped as root, who may search it anyway.
+/// not search) fails closed as `matter.folder_missing`, not as a `.codex` to rename. Skipped
+/// as root, who may search it anyway.
 #[cfg(unix)]
 #[test]
-fn a_stat_that_fails_counts_as_a_codex_folder() {
+fn a_stat_that_fails_fails_closed_as_folder_missing() {
     let root = scratch("refuse-locked");
     let locked = root.join("locked");
     write::create_dir_all(&locked).unwrap();
@@ -157,7 +158,7 @@ fn a_stat_that_fails_counts_as_a_codex_folder() {
     if as_root {
         return;
     }
-    assert_eq!(refused.unwrap_err().code(), ErrorCode::MatterCodexFolder);
+    assert_eq!(refused.unwrap_err().code(), ErrorCode::MatterFolderMissing);
 }
 
 /// A matter stored as a link resolves to the folder it names, and that folder's `.codex` counts.
@@ -223,6 +224,30 @@ fn make_home_makes_a_private_folder() {
     write::remove_dir_all(&other).unwrap();
 }
 
+/// Two launches making the same home at once on a fresh data folder both succeed: one's
+/// `AlreadyExists` is not a failure.
+#[test]
+fn concurrent_make_home_calls_both_succeed() {
+    for round in 0..40 {
+        let root = scratch(&format!("home-race-{round}"));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let racers: Vec<_> = (0..2)
+            .map(|_| {
+                let (root, barrier) = (root.clone(), std::sync::Arc::clone(&barrier));
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    make_home(&root, &home_in(&root))
+                })
+            })
+            .collect();
+        for racer in racers {
+            racer.join().unwrap().unwrap();
+        }
+        assert!(home_in(&root).is_dir());
+        write::remove_dir_all(&root).unwrap();
+    }
+}
+
 /// A link at `agents` or at `agents/<id>` is refused, and nothing is made where it points.
 #[cfg(unix)]
 #[test]
@@ -260,45 +285,6 @@ fn make_home_follows_a_linked_data_folder() {
     write::remove_dir_all(&root).unwrap();
 }
 
-/// A matter folder that is the home, holds it (the data folder, its `agents` folder) or sits
-/// inside it is refused; a folder beside the data folder is not.
-#[test]
-fn a_matter_folder_overlapping_the_home_is_refused() {
-    let root = scratch("overlap");
-    let data = root.join("data");
-    write::create_dir_all(&data).unwrap();
-    let home = home_in(&data);
-    make_home(&data, &home).unwrap();
-    write::create_dir_all(&home.join("rules")).unwrap();
-    let beside = root.join("matter");
-    write::create_dir_all(&beside).unwrap();
-    for folder in [
-        data.clone(),
-        data.join("agents"),
-        home.clone(),
-        home.join("rules"),
-    ] {
-        let resolved = session_folder(&folder);
-        let error = refuse_home_overlap(&resolved, &home).unwrap_err();
-        assert_eq!(
-            error.code(),
-            ErrorCode::MatterFolderRefused,
-            "{}",
-            folder.display()
-        );
-        assert!(
-            !error.to_string().contains(&*root.to_string_lossy()),
-            "{error}"
-        );
-    }
-    assert!(refuse_home_overlap(&session_folder(&beside), &home).is_ok());
-    // A name that only starts like the home's is not inside it.
-    let lookalike = data.join("agents").join("codex-acp").join("home2");
-    write::create_dir_all(&lookalike).unwrap();
-    assert!(refuse_home_overlap(&session_folder(&lookalike), &home).is_ok());
-    write::remove_dir_all(&root).unwrap();
-}
-
 /// The whole preparation: a `.codex` refuses before the home is made; otherwise it makes the
 /// home and its `config.toml` and gives the folder resolved through links.
 #[test]
@@ -315,9 +301,6 @@ fn prepare_launch_checks_then_makes_the_home() {
     let folder = prepare_launch(&matter, &data, &home_in(&data)).unwrap();
     assert_eq!(folder, dunce::canonicalize(&matter).unwrap());
     assert!(home_in(&data).join("config.toml").is_file());
-    // The data folder as a matter is refused, with the home made by then.
-    let error = prepare_launch(&data, &data, &home_in(&data)).unwrap_err();
-    assert_eq!(error.code(), ErrorCode::MatterFolderRefused);
     write::remove_dir_all(&root).unwrap();
 }
 
@@ -399,5 +382,30 @@ fn an_identical_home_config_is_not_written_again() {
     write_home_config(&home).unwrap();
     assert!(std::fs::symlink_metadata(&path).unwrap().is_file());
     assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), home_config());
+    write::remove_dir_all(&root).unwrap();
+}
+
+/// Before a write, temp files a crashed write left beside `config.toml` are removed; other
+/// files stay.
+#[test]
+fn stale_temp_files_are_swept_before_a_write() {
+    let root = scratch("home-config-sweep");
+    let home = home_in(&root);
+    make_home(&root, &home).unwrap();
+    for stale in [
+        "config.toml.clauseo-1-0.new",
+        "config.toml.clauseo-99999-7.new",
+    ] {
+        write::write_file(&home.join(stale), b"half").unwrap();
+    }
+    write::write_file(&home.join("auth.json"), b"{}").unwrap();
+    write::write_file(&home.join("other.clauseo-1-0.new"), b"x").unwrap();
+    write_home_config(&home).unwrap();
+    let mut names: Vec<String> = std::fs::read_dir(&home)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["auth.json", "config.toml", "other.clauseo-1-0.new"]);
     write::remove_dir_all(&root).unwrap();
 }

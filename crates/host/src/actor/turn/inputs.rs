@@ -16,11 +16,11 @@ pub(crate) enum TurnInput {
         agent: u64,
         reply: AgentReply,
     },
-    /// A Codex launch's preparation `id` (`codex_start.rs`) answered.
-    CodexPrepared {
+    /// A launch's folder checks `id` (`launch_checks.rs`) answered.
+    Prepared {
         thread: ThreadId,
         id: u64,
-        result: Result<super::codex_start::Prepared, crate::error::Error>,
+        result: Result<super::launch_checks::Prepared, crate::error::Error>,
     },
     /// A whole-log read of `thread`'s stream for `why`.
     Log {

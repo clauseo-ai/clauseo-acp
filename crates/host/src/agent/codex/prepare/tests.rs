@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use clauseo_protocol::{ErrorCode, Timestamp};
 
-use super::{PREPARE_WAIT, off_actor};
+use super::{PREPARE_WAIT, off_actor, recheck};
 use crate::ManualClock;
 
 fn clock() -> ManualClock {
@@ -47,6 +47,25 @@ fn a_hung_check_fails_closed_at_the_deadline() {
         clock.advance(PREPARE_WAIT);
     };
     let (result, ()) = futures::executor::block_on(futures::future::join(hung, move_on));
-    assert_eq!(result.unwrap_err().code(), ErrorCode::AgentLaunchFailed);
+    assert_eq!(result.unwrap_err().code(), ErrorCode::MatterFolderMissing);
     drop(release);
+}
+
+/// The re-check resolves the stored folder again: a matter stored as a link that now points at
+/// a folder holding `.codex` is refused.
+#[cfg(unix)]
+#[test]
+fn the_recheck_resolves_a_linked_matter_again() {
+    let root = std::env::temp_dir().join(format!("clauseo-recheck-{}", std::process::id()));
+    crate::write::remove_dir_all(&root).unwrap();
+    crate::write::create_dir_all(&root.join("clean")).unwrap();
+    crate::write::create_dir_all(&root.join("other/.codex")).unwrap();
+    let link = root.join("link");
+    crate::write::symlink(&root.join("clean"), &link).unwrap();
+    let check = || futures::executor::block_on(recheck(Arc::new(clock()), Some(link.clone())));
+    assert!(check().is_ok());
+    crate::write::remove_file(&link).unwrap();
+    crate::write::symlink(&root.join("other"), &link).unwrap();
+    assert_eq!(check().unwrap_err().code(), ErrorCode::MatterCodexFolder);
+    crate::write::remove_dir_all(&root).unwrap();
 }
