@@ -286,6 +286,13 @@ pub struct AgentLimitsView {
     /// When they were read (for "Updated 25 min ago").
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub checked_at: Option<Timestamp>,
+    /// The next read the model has planned. In this stage only a shown reset time, so the
+    /// settings page can say when the numbers refresh.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub next_read_at: Option<Timestamp>,
+    /// Who bills a pay-as-you-go account; `None` for a plan.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub provider: Option<BillingProvider>,
 }
 
 /// Plan or pay as you go, for the view.

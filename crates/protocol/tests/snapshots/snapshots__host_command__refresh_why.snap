@@ -1,0 +1,8 @@
+---
+source: crates/protocol/tests/snapshots.rs
+expression: whys
+---
+[
+  "shown",
+  "try_again"
+]

@@ -20,13 +20,18 @@ pub mod examples;
 #[path = "support/entries.rs"]
 pub mod entries;
 
+use std::collections::BTreeMap;
+
 use clauseo_protocol::{
     AccountLimits,
     AccountRef,
     AgentKind,
+    AgentLimitsView,
     AppendTarget,
     AtLimitBehaviour,
     Billing,
+    BillingKind,
+    BillingProvider,
     ClientName,
     ConfigValue,
     ContentBlock,
@@ -41,6 +46,7 @@ use clauseo_protocol::{
     FieldChange,
     FileChoice,
     FileDecision,
+    Freshness,
     HostCommand,
     HostError,
     HostEvent,
@@ -48,12 +54,16 @@ use clauseo_protocol::{
     Language,
     LimitSource,
     LimitWindow,
+    LimitWindowView,
+    LimitsView,
     Lite,
     MatterSource,
+    MeterTone,
     Motion,
     PatchBatch,
     PlanLabel,
     PromptBlock,
+    RefreshWhy,
     RestoreRequest,
     SettingsView,
     StreamHeader,
@@ -70,6 +80,7 @@ use clauseo_protocol::{
     ViewPatch,
     ViewPatchBody,
     ViewWindow,
+    WindowFreshness,
     WindowKind,
 };
 use entries::{agent_text_entry, every_entry, header_entry};
@@ -156,6 +167,46 @@ fn account_limits() -> AccountLimits {
             checked_at: Timestamp::new(1_760_000_000_000).unwrap(),
         },
     }
+}
+
+/// The limits view of two agents: Claude on a plan, with a next read planned, and Codex on pay as
+/// you go, billed by `OpenAI`, so both new fields are set.
+#[cfg(test)]
+fn limits_view() -> LimitsView {
+    let claude = AgentLimitsView {
+        plan: Some("Max".to_owned()),
+        billing: BillingKind::Plan,
+        meter: None,
+        windows: vec![LimitWindowView {
+            id: "five_hour".to_owned(),
+            kind: WindowKind::Session,
+            label: "5-hour".to_owned(),
+            used_percent: Some(finite(82.5)),
+            tone: MeterTone::Near,
+            resets_at: Some(Timestamp::new(1_760_000_000_000).unwrap()),
+            freshness: WindowFreshness::Fresh,
+        }],
+        at_limit_text: "When you reach a limit, Claude pauses until it resets.".to_owned(),
+        freshness: Freshness::Fresh,
+        checked_at: Some(Timestamp::new(1_759_999_000_000).unwrap()),
+        next_read_at: Some(Timestamp::new(1_760_000_000_000).unwrap()),
+        provider: None,
+    };
+    let codex = AgentLimitsView {
+        plan: None,
+        billing: BillingKind::PayAsYouGo,
+        meter: None,
+        windows: vec![],
+        at_limit_text: "This account pays as it goes, so no plan limits apply.".to_owned(),
+        freshness: Freshness::NotApplicable,
+        checked_at: None,
+        next_read_at: None,
+        provider: Some(BillingProvider::OpenAi),
+    };
+    LimitsView(BTreeMap::from([
+        (AgentKind::Claude, claude),
+        (AgentKind::Codex, codex),
+    ]))
 }
 
 /// A `FilesChanged`-free patch batch with one `AppendText` patch.
@@ -327,7 +378,30 @@ mod host_command {
                 ..UiPatch::default()
             },
         };
+        RefreshLimits => refresh_limits: HostCommand::RefreshLimits {
+            agent: Some(AgentKind::Claude),
+            why: RefreshWhy::Shown,
+        };
     } }
+
+    /// `RefreshLimits` for every agent (no `agent` field), from a "Try again".
+    #[test]
+    fn refresh_limits_every_agent() {
+        let command = HostCommand::RefreshLimits {
+            agent: None,
+            why: RefreshWhy::TryAgain,
+        };
+        insta::assert_json_snapshot!("refresh_limits_every_agent", command);
+        round_trips(&command);
+    }
+
+    /// Each `RefreshWhy` value, in order.
+    #[test]
+    fn refresh_why() {
+        let whys = [RefreshWhy::Shown, RefreshWhy::TryAgain];
+        insta::assert_json_snapshot!("refresh_why", whys);
+        round_trips(&whys);
+    }
 }
 
 mod view_patch {
@@ -412,6 +486,7 @@ mod host_event {
         AccountLimitsChanged => account_limits_changed: HostEvent::AccountLimitsChanged(
             account_limits(),
         );
+        LimitsViewChanged => limits_view_changed: HostEvent::LimitsViewChanged(limits_view());
         SettingsChanged => settings_changed: HostEvent::SettingsChanged(SettingsView {
             ui: UiSettings {
                 theme: Theme::Dark,
