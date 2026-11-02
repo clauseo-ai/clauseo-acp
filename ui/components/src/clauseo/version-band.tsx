@@ -32,6 +32,9 @@ export type BandLook = {
   undoable: boolean;
   /** A plain note on this version, such as a file too large to keep versions. */
   note?: string | null;
+  /** Optional: the newest version, which the room already stands at: only Undo this change is offered, since there is
+   * nothing to compare, restore or go back to. */
+  now?: boolean;
 };
 
 /** A line under the bar at now: what just happened, or what failed, said plainly, with its one way on. */
@@ -173,41 +176,47 @@ export function VersionBand({
           )}
         </p>
         {/* key caps stand on inline prompts only: Escape is named to assistive technology and under the pointer */}
-        <Button
-          kind="quiet"
-          size="small"
-          className="ver-back"
-          ref={backRef}
-          aria-keyshortcuts="Escape"
-          title="Esc"
-          onClick={onBack}
-        >
-          <IconBackToAnswer size={16} />
-          {w.v("Back to now")}
-        </Button>
+        {look.now !== true && (
+          <Button
+            kind="quiet"
+            size="small"
+            className="ver-back"
+            ref={backRef}
+            aria-keyshortcuts="Escape"
+            title="Esc"
+            onClick={onBack}
+          >
+            <IconBackToAnswer size={16} />
+            {w.v("Back to now")}
+          </Button>
+        )}
       </div>
       <div className="ver-band-row">
         <div className="ver-actions">
-          <Button
-            kind="tone"
-            size="small"
-            aria-pressed={look.comparing}
-            className="ver-compare"
-            onClick={onCompare}
-          >
-            <IconOpen size={16} />
-            {w.v("Compare with now")}
-          </Button>
-          <WaitingButton
-            waiting={waiting !== null}
-            className="ver-restore"
-            testId={testIds?.restore}
-            describedBy={wait}
-            onClick={onRestore}
-          >
-            <IconUndo size={16} />
-            {w.v("Restore this version")}
-          </WaitingButton>
+          {look.now !== true && (
+            <>
+              <Button
+                kind="tone"
+                size="small"
+                aria-pressed={look.comparing}
+                className="ver-compare"
+                onClick={onCompare}
+              >
+                <IconOpen size={16} />
+                {w.v("Compare with now")}
+              </Button>
+              <WaitingButton
+                waiting={waiting !== null}
+                className="ver-restore"
+                testId={testIds?.restore}
+                describedBy={wait}
+                onClick={onRestore}
+              >
+                <IconUndo size={16} />
+                {w.v("Restore this version")}
+              </WaitingButton>
+            </>
+          )}
           {look.undoable && (
             <WaitingButton
               waiting={waiting !== null}

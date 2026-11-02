@@ -11,8 +11,9 @@ import type {
 } from "../../transport/protocol.ts";
 import type { Timeline } from "./timeline.ts";
 
-/** Where the room stands: at now, or looking back at a version, comparing it with the folder now or not. */
-export type Look = { kind: "now" } | { kind: "back"; id: string; comparing: boolean };
+/** Where the room stands: at now (id: the newest version, a turn's, picked on the timeline for its Undo), or looking
+ * back at a version, comparing it with the folder now or not. */
+export type Look = { kind: "now"; id?: string } | { kind: "back"; id: string; comparing: boolean };
 
 /** An undo of one turn's change, with the lawyer's choice for each of its files. */
 type UndoAsk = { act: "undo"; id: string; choices: ReadonlyMap<string, FileChoice> };

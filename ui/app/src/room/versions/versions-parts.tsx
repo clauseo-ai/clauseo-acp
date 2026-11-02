@@ -167,7 +167,10 @@ export function VersionsCentre({
   const room = useRoom();
   const { s, cal, history } = useVersions(c, lang);
   const look = s.look;
-  const shown = look.kind === "back" ? history.find((v) => v.id === look.id) : undefined;
+  // looking back at a version, or at now with the newest picked: a turn's change whose Undo the band offers
+  const picked = look.id === undefined ? undefined : history.find((v) => v.id === look.id);
+  const atNewest = look.kind === "now" && picked !== undefined && takesBack(s, picked);
+  const shown = look.kind === "back" || atNewest ? picked : undefined;
   const waiting = waitingOf(lang, s);
   // the line that says Restore and Undo wait, which every waiting act points to
   const waitId = useId();
@@ -176,7 +179,7 @@ export function VersionsCentre({
 
   // Escape comes back to now, from anywhere in the room but a field or a dialog
   useEffect(() => {
-    if (look.kind !== "back" || s.ask !== null) return;
+    if (shown === undefined || s.ask !== null) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
       const t = e.target;
@@ -191,7 +194,7 @@ export function VersionsCentre({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [c, look.kind, s.ask, room]);
+  }, [c, shown, s.ask, room]);
 
   const notices: BandNotice[] = [];
   if (look.kind === "now") {
@@ -244,7 +247,8 @@ export function VersionsCentre({
           shown === undefined
             ? null
             : {
-                line: asItStood(lang, cal, shown),
+                line: atNewest ? w.v("Now") : asItStood(lang, cal, shown),
+                now: atNewest,
                 who: whoOf(lang, cal, shown, history),
                 did: didOf(lang, shown, fileName),
                 comparing: look.kind === "back" && look.comparing,

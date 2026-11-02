@@ -5,7 +5,16 @@
 import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { THREAD, TURN } from "../../testing/stream-script.ts";
-import { file, mountVersions, NOON, stepEntry, version, type VersionsHarness } from "./testing.ts";
+import {
+  answering,
+  dialog,
+  file,
+  mountVersions,
+  NOON,
+  stepEntry,
+  version,
+  type VersionsHarness,
+} from "./testing.ts";
 
 /** A media query whose match the test sets, telling its listeners. */
 function stubMedia(matches: boolean) {
@@ -74,4 +83,26 @@ test("on a wide window the panel stays as a version is picked, and widening a mi
   expect(h.one("versions")).toBeNull();
   await media.set(false);
   expect(h.one("versions")).not.toBeNull();
+});
+
+test("in the e2e's 1028 by 779 window, picking a version closes the panel and the band's Restore is reachable", async () => {
+  stubMedia(true);
+  h = await mountVersions(VERSIONS, STEPS, {
+    query: answering({
+      preview_restore: {
+        restore_preview: { changes: [file("brief.txt")], added_since: [], kept: [], locked: [] },
+      },
+    }),
+  });
+  (
+    globalThis as { happyDOM?: { setViewport: (v: { width: number; height: number }) => void } }
+  ).happyDOM?.setViewport({ width: 1028, height: 779 });
+  await h.openVersions();
+  await h.lookAt("cp2");
+  // nothing of the panel stands over the band: no Close of the panel, and Restore asks for its preview
+  expect(h.one("versions")).toBeNull();
+  expect(document.body.querySelector(".ver-panel")).toBeNull();
+  await h.click(h.one("version-restore"));
+  expect(h.queried("preview_restore")).toHaveLength(1);
+  expect(dialog()).not.toBeNull();
 });
