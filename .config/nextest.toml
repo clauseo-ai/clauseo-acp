@@ -20,6 +20,12 @@ slow-timeout = { period = "10s", terminate-after = 16 }
 filter = 'package(clauseo-limits) & binary(live)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# The sandbox's 20,000-link jail tests write 40,000 files each before they time the walk and
+# the jailed start (about 8 s on an idle Mac mini); 90 s still ends a hung one.
+[[profile.default.overrides]]
+filter = 'package(clauseo-sandbox) & binary(jail) & test(/twenty_thousand/)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
 [profile.ci]
 retries = 0                        # flakes are bugs; reproduce with SEED
 failure-output = "immediate-final"

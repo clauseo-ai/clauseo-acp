@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use super::*;
 
 /// A line as `log stream --style ndjson` writes it (the spike's sample, cut to the fields the
@@ -25,6 +27,7 @@ fn a_read_denial_parses() {
         found,
         LogDenial {
             tag: "clauseo-12-0".to_owned(),
+            repeats: 0,
             process: "cat".to_owned(),
             pid: 44443,
             operation: "file-read-data".to_owned(),
@@ -63,17 +66,10 @@ fn a_path_with_spaces_newlines_and_a_tag_keeps_the_last_line_as_the_tag() {
 }
 
 #[test]
-fn untagged_duplicate_and_odd_lines_are_ignored() {
+fn untagged_and_odd_lines_are_ignored() {
     // No tag: another app's denial, or a rule without a message.
     assert_eq!(
         parse(&line("Sandbox: cat(1) deny(1) file-read-data /x")),
-        None
-    );
-    // The log's fold of repeats from one process.
-    assert_eq!(
-        parse(&line(
-            "299 duplicate reports for Sandbox: bash(68116) deny(1) file-write-create /w\nclauseo-1-0"
-        )),
         None
     );
     // A tag of the wrong shape, the header line, and JSON without a message.
@@ -117,4 +113,62 @@ fn only_data_reads_and_writes_are_reported() {
     ] {
         assert_eq!(access(op), None, "{op}");
     }
+}
+
+/// A sink that keeps what it gets.
+#[derive(Default)]
+struct Keep(Mutex<Vec<Denial>>);
+
+impl DenialSink for Keep {
+    fn denied(&self, d: Denial) {
+        self.0.lock().unwrap().push(d);
+    }
+}
+
+#[test]
+fn the_logs_fold_of_repeats_reaches_the_sink_as_dropped_and_devices_do_not() {
+    let folded = parse(&line(
+        "299 duplicate reports for Sandbox: bash(68116) deny(1) file-write-create /w\nclauseo-1-0",
+    ))
+    .unwrap();
+    assert_eq!(folded.repeats, 299);
+    assert_eq!(folded.operation, "file-write-create");
+    assert_eq!(folded.target, "/w");
+    let one = parse(&line(
+        "1 duplicate report for Sandbox: cat(5) deny(1) file-read-data /r\nclauseo-1-0",
+    ))
+    .unwrap();
+    assert_eq!(one.repeats, 1);
+    // A path holding the marker is a plain report.
+    let plain = parse(&line(
+        "Sandbox: cat(5) deny(1) file-read-data /a 2 duplicate reports for b\nclauseo-1-0",
+    ))
+    .unwrap();
+    assert_eq!(plain.repeats, 0);
+    assert_eq!(plain.target, "/a 2 duplicate reports for b");
+
+    let dir = crate::test_support::TempDir::new("watch-fold");
+    dir.dir("m");
+    dir.dir("s");
+    let policy = Policy::builder(dir.path().join("m"), dir.path().join("s"))
+        .home(dir.path().join("home"))
+        .build()
+        .unwrap();
+    let keep = Arc::new(Keep::default());
+    let inner: Arc<dyn DenialSink> = Arc::clone(&keep) as Arc<dyn DenialSink>;
+    let sink: LaunchSink = crate::CappedSink::new(inner);
+    report(&folded, &policy, &sink);
+    // A fold of denials the watcher does not report (metadata) passes nothing on.
+    let metadata = LogDenial {
+        operation: "file-read-metadata".to_owned(),
+        ..folded
+    };
+    report(&metadata, &policy, &sink);
+    // A device is never reported: every shell asks for /dev/tty.
+    let tty = parse(&line(
+        "Sandbox: sh(5) deny(1) file-read-data /dev/tty\nclauseo-1-0",
+    ))
+    .unwrap();
+    report(&tty, &policy, &sink);
+    assert_eq!(*keep.0.lock().unwrap(), [Denial::Dropped { count: 299 }]);
 }

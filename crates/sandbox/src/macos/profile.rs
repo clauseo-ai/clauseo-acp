@@ -20,6 +20,10 @@ const BASE: &str = include_str!("base.sb");
 /// Every tag starts with this, so one log predicate finds every launch's denials.
 pub(crate) const TAG_PREFIX: &str = "clauseo-";
 
+/// [`INSTRUCTIONS_AT_ANY_DEPTH`](crate::INSTRUCTIONS_AT_ANY_DEPTH) as a path-free pattern on
+/// the last name, each letter in both cases (Seatbelt's regex has no case flag).
+const INSTRUCTIONS_REGEX: &str = "/[cC][lL][aA][uU][dD][eE]\\.[mM][dD]$";
+
 /// The longest tag the profile takes.
 const TAG_MAX: usize = 64;
 
@@ -177,6 +181,7 @@ impl Writer {
         self.keychain(policy, &p);
         self.denies(policy, &p);
         self.allow_again(&p);
+        self.fixed_folders(&p);
         self.read_only_state(&p);
         self.network(policy);
     }
@@ -199,6 +204,14 @@ impl Writer {
             "file-read* process-exec file-map-executable",
             &runtime,
         );
+
+        if let Some(home) = policy.home() {
+            self.note(
+                "\n; The user's text-encoding preference, which CoreFoundation reads at start.",
+            );
+            let encoding = self.param("CF_USER_TEXT_ENCODING", &home.join(".CFUserTextEncoding"));
+            self.rule("allow", "file-read*", &[literal(&encoding)]);
+        }
 
         self.note("\n; Read paths and allowed folders: read only.");
         let mut read = self.subpaths(&p.read);
@@ -266,11 +279,22 @@ impl Writer {
         self.rule("deny", "file-write*", &read_only);
         self.note("; Their folders cannot be renamed, which would carry them out of their rules.");
         self.rule("deny", "file-write-unlink", &parents);
+        self.note("; Claude's instruction file at any depth, in any letter case.");
+        self.rule(
+            "deny",
+            "file-write*",
+            &[format!(
+                "(require-all (subpath (param \"MATTER\")) (regex #\"{INSTRUCTIONS_REGEX}\"))"
+            )],
+        );
 
         self.note("\n; Links that lead outside the matter, and where they lead.");
         let mut links = Vec::new();
-        for (i, finding) in policy.links().iter().enumerate() {
+        for (i, finding) in policy.links_outside_link_folders().enumerate() {
             links.push(literal(&self.param(&format!("LINK_{i}"), &finding.path)));
+        }
+        for (i, folder) in policy.link_folders().iter().enumerate() {
+            links.push(subpath(&self.param(&format!("LINK_FOLDER_{i}"), folder)));
         }
         for (name, target) in &p.link_targets {
             links.push(subpath(&self.param(name, target)));
@@ -304,6 +328,18 @@ impl Writer {
         self.rule("allow", "file-read*", &read);
         let above = self.reallowed_ancestors(p);
         self.rule("allow", "file-read-metadata", &above);
+    }
+
+    /// The matter, state and notes folders themselves cannot be removed or made again: a
+    /// subpath rule matches the folder too, so without this an agent could put a symbolic link
+    /// in its place for the next launch to follow.
+    fn fixed_folders(&mut self, p: &Params) {
+        self.note("\n; The matter, state and notes folders themselves: not removed, not replaced.");
+        let mut filters = vec![literal("(param \"MATTER\")"), literal("(param \"STATE\")")];
+        if p.notes.is_some() {
+            filters.push(literal("(param \"NOTES\")"));
+        }
+        self.rule("deny", "file-write-unlink file-write-create", &filters);
     }
 
     /// Read-only paths in the state folder, last of the file rules.

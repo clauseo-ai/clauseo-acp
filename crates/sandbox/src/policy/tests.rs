@@ -2,6 +2,8 @@ use super::*;
 use crate::test_support::TempDir;
 
 mod allowed;
+mod links;
+mod reallowed;
 
 /// A matter, a state folder, a home and a data dir side by side in a temp folder.
 struct World {
@@ -156,8 +158,17 @@ fn the_matter_may_not_be_the_root_or_the_home_folder() {
         Policy::builder(w.at("home"), w.at("state"))
             .home(w.at("home"))
             .build(),
-        "the matter may not be the home folder",
+        "the matter may not equal or hold the home folder",
         &w.at("home"),
+    );
+    // A matter that holds the home folder (here, the temp folder holding it).
+    w.dir.dir("home/state");
+    refused(
+        Policy::builder(w.dir.path(), w.at("home/state"))
+            .home(w.at("home"))
+            .build(),
+        "the matter may not equal or hold the home folder",
+        w.dir.path(),
     );
 }
 
@@ -196,7 +207,7 @@ fn notes_and_the_credential_link_may_not_be_in_the_matter() {
         w.builder()
             .credential_link(w.at("matter/auth.json"))
             .build(),
-        "the credential link may not be inside the matter",
+        "the credential link must be inside the state folder",
         &w.at("matter/auth.json"),
     );
 }

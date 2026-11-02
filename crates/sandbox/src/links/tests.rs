@@ -79,15 +79,52 @@ fn hard_links_are_found_without_a_target() {
 
 #[cfg(unix)]
 #[test]
-fn a_git_folder_is_recorded_but_not_walked() {
+fn a_git_folder_is_walked_for_hard_links_only() {
     let dir = TempDir::new("links-git");
     let secret = dir.file("outside/secret.txt", "s");
     dir.dir("matter/deep/.git/objects");
     dir.hard_link("matter/deep/.git/objects/pack", &secret);
+    // Inside a .git: a symbolic link out and a nested .git name give nothing.
+    dir.symlink("matter/deep/.git/out", &secret);
+    dir.dir("matter/deep/.git/modules/m/.git");
     let scan = scan_matter(&dir.path().join("matter")).unwrap();
     let matter = canon(&dir.path().join("matter"));
-    assert!(scan.links().is_empty(), "{:?}", scan.links());
+    assert_eq!(
+        scan.links(),
+        [LinkFinding {
+            path: matter.join("deep/.git/objects/pack"),
+            kind: LinkKind::HardLink,
+            target: None,
+        }]
+    );
     assert_eq!(scan.git(), [matter.join("deep/.git")]);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_whose_every_name_is_in_the_matter_is_not_a_finding() {
+    let dir = TempDir::new("links-inside");
+    let original = dir.file("matter/a.txt", "a");
+    dir.dir("matter/sub/.git");
+    dir.hard_link("matter/sub/b.txt", &original);
+    dir.hard_link("matter/sub/.git/c", &original);
+    // A file with two names in the matter and a third outside: every name in the matter is
+    // a finding.
+    let shared = dir.file("matter/d.txt", "d");
+    dir.hard_link("matter/sub/e.txt", &shared);
+    dir.hard_link("outside-e.txt", &shared);
+    let scan = scan_matter(&dir.path().join("matter")).unwrap();
+    let matter = canon(&dir.path().join("matter"));
+    let found: Vec<&Path> = scan.links().iter().map(|f| f.path.as_path()).collect();
+    assert_eq!(found, [matter.join("d.txt"), matter.join("sub/e.txt")]);
+    assert_eq!(
+        scan.linked,
+        [vec![
+            matter.join("a.txt"),
+            matter.join("sub/.git/c"),
+            matter.join("sub/b.txt"),
+        ]]
+    );
 }
 
 #[test]

@@ -104,5 +104,6 @@ pub use macos::SeatbeltLauncher;
 pub use macos::SeatbeltProfile;
 pub use policy::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
-    Loopback, PROTECTED_NAMES, PathRule, Policy, PolicyBuilder,
+    INSTRUCTIONS_AT_ANY_DEPTH, LINK_RULES_MAX, Loopback, PROTECTED_NAMES, PathRule, Policy,
+    PolicyBuilder,
 };

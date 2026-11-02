@@ -262,3 +262,42 @@ fn args_are_the_text_then_each_parameter() {
     pair.push(path);
     assert_eq!(args[3], pair);
 }
+
+#[test]
+fn many_findings_stay_within_the_link_rule_budget() {
+    let w = World::new("profile-many-links");
+    let mut findings = Vec::new();
+    for folder in 0..100 {
+        w.dir.dir(&format!("matter/linked/d{folder}"));
+        for file in 0..200 {
+            findings.push(LinkFinding {
+                path: w.at(&format!("matter/linked/d{folder}/f{file}.txt")),
+                kind: LinkKind::HardLink,
+                target: None,
+            });
+        }
+    }
+    let policy = w
+        .builder()
+        .scan(crate::MatterScan::default())
+        .links(findings)
+        .build()
+        .unwrap();
+    let profile = SeatbeltProfile::new(&policy, TAG).unwrap();
+    let link_params = profile
+        .params()
+        .iter()
+        .filter(|(name, _)| name.starts_with("LINK_"))
+        .count();
+    assert_eq!(link_params, 100);
+    assert!(link_params <= crate::LINK_RULES_MAX);
+    assert!(
+        profile
+            .text()
+            .contains("(subpath (param \"LINK_FOLDER_99\"))")
+    );
+    assert!(!profile.text().contains("(param \"LINK_0\")"));
+    // The whole argument list stays far from the 1 MB argument limit.
+    let bytes: usize = profile.args().iter().map(|a| a.len()).sum();
+    assert!(bytes < 64 * 1024, "{bytes} bytes");
+}

@@ -181,14 +181,16 @@ fn start(generation: u64) -> std::io::Result<ChildStdout> {
 }
 
 /// Reads lines until the stream ends, reporting each denial and ticking the sinks once a
-/// second. The first line (`Filtering the log data using ...`) tells the first registration
-/// the watcher is ready.
+/// second. The tick is one interval timer for the whole read, so lines that arrive faster than
+/// once a second do not hold it back. The first line (`Filtering the log data using ...`)
+/// tells the first registration the watcher is ready.
 fn read(stdout: ChildStdout, started: &mpsc::Sender<()>) {
     let mut lines = BufReader::new(stdout).lines();
+    let mut ticks = async_io::Timer::interval(TICK);
     async_io::block_on(async {
         loop {
             let next = lines.next();
-            let tick = async_io::Timer::after(TICK);
+            let tick = ticks.next();
             pin_mut!(next);
             match select(next, tick).await {
                 Either::Left((Some(Ok(line)), _)) => {
@@ -239,7 +241,31 @@ fn deliver(line: &str) {
     let Some((policy, sink)) = entry else {
         return;
     };
+    report(&found, &policy, &sink);
+}
+
+/// Reports `found` to its launch's `sink`: a file denial as [`Denial::Path`] classified by
+/// `policy`, the log's fold of repeated file denials as [`Denial::Dropped`]; network and
+/// other denials only to the log. A device (`/dev/...`) is never reported: it is nothing the
+/// lawyer can allow, and every shell asks for `/dev/tty`, which the jail refuses.
+fn report(found: &LogDenial, policy: &Policy, sink: &LaunchSink) {
+    if found.target.starts_with("/dev/") {
+        tracing::debug!(
+            tag = %found.tag,
+            process = %found.process,
+            operation = %found.operation,
+            target = %found.target,
+            "the jail refused a device"
+        );
+        return;
+    }
     match access(&found.operation) {
+        Some(_) if found.repeats > 0 => {
+            // The log's fold of repeats: the first report went out; the rest are a count.
+            sink.denied(Denial::Dropped {
+                count: found.repeats,
+            });
+        }
         Some(access) => {
             let path = PathBuf::from(&found.target);
             let class = policy.classify(&path, access);
@@ -289,6 +315,8 @@ fn access(operation: &str) -> Option<Access> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LogDenial {
     tag: String,
+    /// For the log's `<n> duplicate reports for ...` line, `n`; else 0.
+    repeats: u32,
     process: String,
     pid: u32,
     operation: String,
@@ -296,9 +324,10 @@ struct LogDenial {
 }
 
 /// Parses one ndjson line of `log stream`. The message reads
-/// `Sandbox: <name>(<pid>) deny(<n>) <operation> <target>`, then a newline and the tag. Lines
-/// of the form `<n> duplicate reports for ...`, which the log writes when one process repeats
-/// a denial, are ignored: the first report already went out.
+/// `Sandbox: <name>(<pid>) deny(<n>) <operation> <target>`, then a newline and the tag. A line
+/// of the form `<n> duplicate reports for Sandbox: ...`, which the log writes when one process
+/// repeats a denial, parses with `repeats` set to `n`: the first report already went out, and
+/// the repeats reach the sink as one [`Denial::Dropped`].
 fn parse(line: &str) -> Option<LogDenial> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
     let message = value.get("eventMessage")?.as_str()?;
@@ -306,6 +335,7 @@ fn parse(line: &str) -> Option<LogDenial> {
     if !valid_tag(tag) {
         return None;
     }
+    let (repeats, report) = repeats(report)?;
     let report = report.strip_prefix("Sandbox: ")?;
     let (who, rest) = report.split_once(") deny(")?;
     let (process, pid) = who.rsplit_once('(')?;
@@ -314,11 +344,26 @@ fn parse(line: &str) -> Option<LogDenial> {
     let (operation, target) = rest.split_once(' ')?;
     Some(LogDenial {
         tag: tag.to_owned(),
+        repeats,
         process: process.to_owned(),
         pid,
         operation: operation.to_owned(),
         target: target.to_owned(),
     })
+}
+
+/// Splits `<n> duplicate report(s) for <report>` into `n` and the report; any other report
+/// comes back whole with 0. `None` for a count too large to hold.
+fn repeats(report: &str) -> Option<(u32, &str)> {
+    for marker in [" duplicate reports for ", " duplicate report for "] {
+        if let Some((n, rest)) = report.split_once(marker)
+            && !n.is_empty()
+            && n.bytes().all(|b| b.is_ascii_digit())
+        {
+            return Some((n.parse().ok()?, rest));
+        }
+    }
+    Some((0, report))
 }
 
 /// Whether `tag` has the shape the launcher makes.

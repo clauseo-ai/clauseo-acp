@@ -260,3 +260,135 @@ fn a_linked_tmpdir_stops_the_launch_and_nothing_is_made_outside() {
     assert!(error.to_string().contains("TMPDIR"), "{error}");
     assert!(!w.at("outside/made-by-host").exists());
 }
+
+#[test]
+fn the_matter_state_and_notes_folders_cannot_be_replaced() {
+    let w = World::new();
+    w.file("m1/brief.txt", "m1\n");
+    w.file("data/agent-state/m1/notes/n.txt", "mine\n");
+    let (launcher, _) = launcher(w.builder().build().unwrap());
+    let m1 = w.at("m1");
+    // The review's cases P (notes) and Q (state), and the same for the matter: remove the
+    // folder and put a link to another matter in its place, or move it aside. (The `ln`
+    // makes its link inside the folder, which still exists; the check is that the folder
+    // itself is still a folder.)
+    let replace = r#"cd /; rm -rf "$1" && echo "REMOVED $1"; ln -s "$2" "$1"; mv "$1" "$1.old" && echo "MOVED $1"; exit 0"#;
+    for rel in [
+        "data/agent-state/m1/notes",
+        "data/agent-state/m1/codex",
+        "m1",
+    ] {
+        let folder = w.at(rel);
+        let out = sh(
+            &launcher,
+            &m1,
+            replace,
+            &[folder.to_str().unwrap(), w.at("m2").to_str().unwrap()],
+        );
+        assert!(!out.stdout.contains("REMOVED"), "{rel}: {out:#?}");
+        assert!(!out.stdout.contains("MOVED"), "{rel}: {out:#?}");
+        assert!(
+            out.stderr.contains("Operation not permitted"),
+            "{rel}: {out:#?}"
+        );
+        let meta = std::fs::symlink_metadata(&folder).unwrap();
+        assert!(meta.is_dir(), "{rel} is no longer a folder");
+    }
+    // The folders themselves still take `mkdir -p`, as an agent's runtime does at start.
+    let state = w.at("data/agent-state/m1/codex");
+    let notes = w.at("data/agent-state/m1/notes");
+    sh(
+        &launcher,
+        &m1,
+        r#"mkdir -p "$1" "$2" "$3" && printf ok > "$2/again.txt""#,
+        &[
+            state.to_str().unwrap(),
+            notes.to_str().unwrap(),
+            m1.to_str().unwrap(),
+        ],
+    )
+    .assert_ok();
+    // The next build sees the same folders.
+    let next = w.builder().build().unwrap();
+    assert_eq!(
+        next.notes(),
+        Some(dunce::canonicalize(&notes).unwrap().as_path())
+    );
+    // Had a link got there (an earlier build, or by hand), the next build refuses it.
+    w.dir("elsewhere");
+    w.symlink("m2", "elsewhere/notes");
+    let error = w
+        .builder()
+        .notes(w.at("elsewhere/notes"))
+        .build()
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("may not be a symbolic link"),
+        "{error}"
+    );
+}
+
+#[test]
+fn claude_md_cannot_be_made_or_changed_at_any_depth() {
+    let w = World::new();
+    w.file("m1/x/CLAUDE.md", "the lawyer's\n");
+    w.file("m1/x/draft.txt", "draft\n");
+    let (launcher, _) = launcher(w.builder().build().unwrap());
+    let m1 = w.at("m1");
+    let names = [
+        "sub/CLAUDE.md",
+        "a/b/claude.md",
+        "sub/Claude.MD",
+        "CLAUDE.local.md",
+        "claude.LOCAL.md",
+    ];
+    let out = sh(&launcher, &m1, CREATE_EACH, &names);
+    assert!(!out.stdout.contains("MADE"), "{out:#?}");
+    for name in names {
+        assert!(!m1.join(name).exists(), "{name} was made");
+    }
+    // An existing one: no append, no replacing it by a rename, no removing it.
+    for script in [
+        "printf x >> x/CLAUDE.md",
+        "mv x/draft.txt x/CLAUDE.md",
+        "rm x/CLAUDE.md",
+        "ln -s draft.txt sub-link && mv sub-link x/claude.md",
+    ] {
+        sh(&launcher, &m1, script, &[]).assert_refused();
+    }
+    assert_eq!(
+        std::fs::read_to_string(m1.join("x/CLAUDE.md")).unwrap(),
+        "the lawyer's\n"
+    );
+    // Names that only contain it are the lawyer's files.
+    let out = sh(
+        &launcher,
+        &m1,
+        CREATE_EACH,
+        &["sub/notCLAUDE.md", "sub/CLAUDE.md.txt"],
+    );
+    assert_eq!(out.stdout.matches("MADE").count(), 2, "{out:#?}");
+}
+
+#[test]
+fn a_hard_link_inside_git_to_an_outside_file_cannot_be_read() {
+    let w = World::new();
+    w.file("m1/.git/HEAD", "ref: refs/heads/main\n");
+    w.dir("m1/.git/objects");
+    w.hard_link("outside/secret.txt", "m1/.git/objects/pack-secret");
+    let policy = w.builder().build().unwrap();
+    assert_eq!(policy.links().len(), 1, "{:?}", policy.links());
+    let (launcher, _) = launcher(policy);
+    let m1 = w.at("m1");
+    let out = run(
+        &launcher,
+        "/bin/cat",
+        &[".git/objects/pack-secret"],
+        &m1,
+        &[],
+    );
+    out.assert_refused();
+    assert!(!out.stdout.contains("secret"), "{out:#?}");
+    // The rest of .git is still readable.
+    run(&launcher, "/bin/cat", &[".git/HEAD"], &m1, &[]).assert_ok();
+}

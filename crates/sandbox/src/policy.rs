@@ -7,19 +7,59 @@ use crate::links::{LinkFinding, MatterScan};
 use crate::{Access, Error, PathClass};
 
 mod build;
+mod links;
+
+pub use links::LINK_RULES_MAX;
 
 /// Names write-denied at the matter root whether or not they exist, so the agent cannot plant
 /// config or instructions that load next session (shared ruling 12, private issue #184).
-/// `.clauseo/matter.json` is written by the host.
-pub const PROTECTED_NAMES: [&str; 7] = [
+/// `.clauseo/matter.json` is written by the host. `CLAUDE.local.md` is Claude's untracked
+/// instruction file, loaded like `CLAUDE.md`.
+pub const PROTECTED_NAMES: [&str; 8] = [
     ".codex",
     ".claude",
     ".agents",
     ".clauseo",
     ".mcp.json",
     "CLAUDE.md",
+    "CLAUDE.local.md",
     "AGENTS.md",
 ];
+
+/// The instruction file write-denied at any depth of the matter, in any letter case: Claude
+/// loads a nested `CLAUDE.md` when it works in that folder. Stricter than the brief's "at the
+/// matter root" (decision 0027, for Rohan to confirm).
+pub const INSTRUCTIONS_AT_ANY_DEPTH: &str = "CLAUDE.md";
+
+/// Whether `path` is `prefix` or under it. On macOS, whose volumes are case-insensitive by
+/// default, names compare without ASCII case, as the kernel resolves them (`DATA/x` is under
+/// `data`); Unicode normalisation (NFD and NFC forms of one name) is not folded. Elsewhere the
+/// comparison is exact.
+pub(crate) fn under(path: &Path, prefix: &Path) -> bool {
+    if cfg!(target_os = "macos") {
+        let mut names = path.components();
+        prefix.components().all(|want| {
+            names
+                .next()
+                .is_some_and(|got| got.as_os_str().eq_ignore_ascii_case(want.as_os_str()))
+        })
+    } else {
+        path.starts_with(prefix)
+    }
+}
+
+/// Whether `a` and `b` are the same path, by [`under`]'s comparison.
+pub(crate) fn same(a: &Path, b: &Path) -> bool {
+    under(a, b) && a.components().count() == b.components().count()
+}
+
+/// Whether `path` is a [`INSTRUCTIONS_AT_ANY_DEPTH`] file in `matter`, in any letter case.
+pub(crate) fn instruction_file(matter: &Path, path: &Path) -> bool {
+    under(path, matter)
+        && path
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case(INSTRUCTIONS_AT_ANY_DEPTH))
+}
 
 /// The files of Claude's login store the jail lets the agent read, write and create, in the
 /// folder given to [`PolicyBuilder::claude_store`]: the store itself (the Keychain's fallback
@@ -68,11 +108,12 @@ impl PathRule {
         }
     }
 
-    /// Whether the rule covers `path`.
+    /// Whether the rule covers `path`; on macOS names compare without ASCII case, as the
+    /// kernel resolves them on a case-insensitive volume.
     pub fn covers(&self, path: &Path) -> bool {
         match self {
-            PathRule::Literal(rule) => path == rule,
-            PathRule::Subpath(rule) => path.starts_with(rule),
+            PathRule::Literal(rule) => same(path, rule),
+            PathRule::Subpath(rule) => under(path, rule),
         }
     }
 }
@@ -114,11 +155,8 @@ impl ClaudeStore {
 
     /// Whether `path` is one of the allowed names or under a lock folder.
     fn covers(&self, path: &Path) -> bool {
-        self.files().iter().any(|file| path == file)
-            || self
-                .lock_folders()
-                .iter()
-                .any(|lock| path.starts_with(lock))
+        self.files().iter().any(|file| same(path, file))
+            || self.lock_folders().iter().any(|lock| under(path, lock))
     }
 }
 
@@ -142,6 +180,7 @@ pub struct Policy {
     keychain: bool,
     over_cap: Vec<PathBuf>,
     links: Vec<LinkFinding>,
+    link_folders: Vec<PathBuf>,
     read_only_in_matter: Vec<PathRule>,
 }
 
@@ -264,38 +303,59 @@ impl Policy {
         &self.over_cap
     }
 
-    /// Links in the matter that lead outside it; read and write are denied on each path and
-    /// target.
+    /// Links in the matter that lead outside it, canonical; read and write are denied on each
+    /// path (or the link folder that holds it) and target.
     pub fn links(&self) -> &[LinkFinding] {
         &self.links
+    }
+
+    /// Folders in the matter denied read and write in place of the findings under them, so the
+    /// profile holds at most [`LINK_RULES_MAX`] link rules; empty unless the findings would
+    /// pass it. See [`PolicyBuilder::build`].
+    pub fn link_folders(&self) -> &[PathBuf] {
+        &self.link_folders
+    }
+
+    /// The findings no link folder holds: the ones that get a rule of their own.
+    pub fn links_outside_link_folders(&self) -> impl Iterator<Item = &LinkFinding> {
+        self.links.iter().filter(|finding| {
+            !self
+                .link_folders
+                .iter()
+                .any(|folder| finding.path.starts_with(folder))
+        })
     }
 
     /// Everything write-denied in the matter, sorted: each of [`PROTECTED_NAMES`] at the root
     /// (a subpath rule, so a protected folder that already exists is read-only inside too),
     /// each `.git` found at any depth (subpath), each folder a `.git` file names inside the
-    /// matter (subpath), and each over-cap file (literal).
+    /// matter (subpath), and each over-cap file (literal). A [`INSTRUCTIONS_AT_ANY_DEPTH`] file
+    /// at any depth is write-denied too, by one pattern rule in the profile, not listed here.
     pub fn read_only_in_matter(&self) -> &[PathRule] {
         &self.read_only_in_matter
     }
 
     /// Why `path` (canonical, as the policy's paths are) was refused `access`, for the denial
-    /// watcher: [`PathClass::LinkTarget`] on or under a link finding's path or target;
+    /// watcher: [`PathClass::LinkTarget`] on or under a link finding's path or target, or under
+    /// a link folder;
     /// [`PathClass::Hidden`] under a hidden path that nothing allows again;
     /// [`PathClass::ReadOnly`] for a write to a read-only path (protected names, `.git`,
-    /// over-cap files, read-only paths in the state folder, allowed folders, runtime, read);
-    /// otherwise [`PathClass::Outside`].
+    /// over-cap files, nested `CLAUDE.md`, read-only paths in the state folder, allowed
+    /// folders, runtime, read); otherwise [`PathClass::Outside`]. On macOS names compare
+    /// without ASCII case, as the kernel's checks do on a case-insensitive volume, so
+    /// `.GIT/config` is read-only and `DATA/x` hidden.
     pub fn classify(&self, path: &Path, access: Access) -> PathClass {
         let on_link = self.links.iter().any(|finding| {
-            path.starts_with(&finding.path)
+            under(path, &finding.path)
                 || finding
                     .target
                     .as_ref()
-                    .is_some_and(|target| path.starts_with(target))
-        });
+                    .is_some_and(|target| under(path, target))
+        }) || self.link_folders.iter().any(|folder| under(path, folder));
         if on_link {
             return PathClass::LinkTarget;
         }
-        if !self.allowed_again(path) && self.hidden.iter().any(|h| path.starts_with(h)) {
+        if !self.allowed_again(path) && self.hidden.iter().any(|h| under(path, h)) {
             return PathClass::Hidden;
         }
         if access == Access::Write && self.read_only(path) {
@@ -317,28 +377,32 @@ impl Policy {
 
     /// Whether a rule after the hidden paths allows `path` again.
     fn allowed_again(&self, path: &Path) -> bool {
-        let under = |p: &PathBuf| path.starts_with(p);
-        path.starts_with(&self.state)
-            || self.notes.as_ref().is_some_and(under)
-            || self.credential_link.as_deref() == Some(path)
+        let inside = |p: &PathBuf| under(path, p);
+        under(path, &self.state)
+            || self.notes.as_ref().is_some_and(inside)
+            || self
+                .credential_link
+                .as_deref()
+                .is_some_and(|link| same(path, link))
             || self
                 .claude_store
                 .as_ref()
                 .is_some_and(|store| store.covers(path))
-            || self.runtime.iter().any(under)
-            || self.read.iter().any(under)
+            || self.runtime.iter().any(inside)
+            || self.read.iter().any(inside)
     }
 
     /// Whether `path` may be read but not written.
     fn read_only(&self, path: &Path) -> bool {
-        let under = |p: &PathBuf| path.starts_with(p);
+        let inside = |p: &PathBuf| under(path, p);
         self.read_only_in_matter
             .iter()
             .any(|rule| rule.covers(path))
-            || self.read_only_in_state.iter().any(under)
-            || self.allowed_folders.iter().any(under)
-            || self.runtime.iter().any(under)
-            || self.read.iter().any(under)
+            || instruction_file(&self.matter, path)
+            || self.read_only_in_state.iter().any(inside)
+            || self.allowed_folders.iter().any(inside)
+            || self.runtime.iter().any(inside)
+            || self.read.iter().any(inside)
     }
 }
 
@@ -448,13 +512,26 @@ impl PolicyBuilder {
     ///   files keep their own name: the folder they are in is canonicalised and the name
     ///   appended, so a link's target never enters the policy. Hidden paths need not exist:
     ///   the longest existing ancestor is canonicalised and the rest appended.
-    /// - The matter may not be `/` or the home folder, nor equal, hold or sit inside a hidden
-    ///   path. The state folder and the matter may not be one inside the other (or the same).
-    ///   The notes folder and the credential link may not be inside the matter. Read-only
-    ///   paths in the state folder must be inside it; over-cap files inside the matter.
+    /// - The matter, state folder and notes folder may not themselves be symbolic links (an
+    ///   agent could have put one in place of its own folder last session).
+    /// - The matter may not be `/` or equal or hold the home folder, nor equal, hold or sit
+    ///   inside a hidden path. The state folder and the matter may not be one inside the other
+    ///   (or the same); the state folder may not equal or hold a hidden path. The notes folder
+    ///   may not be inside the matter, hold it, or equal or hold a hidden path. The credential
+    ///   link must be inside the state folder. Runtime and read paths may not be `/` or equal
+    ///   or hold the home folder, the matter or a hidden path (inside one is fine: that is why
+    ///   they are allowed again). Read-only paths in the state folder must be inside it;
+    ///   over-cap files inside the matter.
     /// - Each allowed folder passes [`Policy::check_allowed_folder`].
     /// - Without [`PolicyBuilder::scan`], the matter is walked here
-    ///   ([`scan_matter`](crate::scan_matter)).
+    ///   ([`scan_matter`](crate::scan_matter)). Every finding (the walk's and
+    ///   [`PolicyBuilder::links`]') is canonicalised, and one outside the matter is refused. A
+    ///   file whose names are all in the matter is not a finding unless it joins a write-denied
+    ///   name to a writable one; then the writable names are.
+    /// - At most [`LINK_RULES_MAX`] link rules (finding paths and distinct targets): past it,
+    ///   findings give way to [`Policy::link_folders`], nearest folder first, never the matter
+    ///   root or a folder holding a `.git`; if that cannot fit, the build is refused with the
+    ///   count. Seatbelt fails to compile a profile with a few thousand such rules.
     /// - Proxy ports and [`Loopback::Ports`] are sorted and de-duplicated.
     pub fn build(self) -> Result<Policy, Error> {
         build::build(self)
