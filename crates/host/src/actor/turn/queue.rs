@@ -179,6 +179,9 @@ fn route(
     let queued = queue(actor, thread).is_some_and(|queue| !queue.is_empty());
     match (delivery, running) {
         (DeliveryRequest::Queue, None) if !queued => {
+            if let Some(queue) = queue(actor, thread) {
+                queue.held = false;
+            }
             steps::accept(actor, ctx, thread, blocks, delivery.into())
         }
         (DeliveryRequest::Queue, _) => append(actor, ctx, thread, blocks),
@@ -376,7 +379,10 @@ pub(super) fn on_turn_closed(actor: &mut Actor, thread: ThreadId, turn: TurnId, 
     };
     let removed = queue.removed.take_if(|removed| *removed == turn).is_some();
     let forced = queue.turns.front().is_some_and(|head| head.forced);
-    if !forced && !removed && stop != StopReason::EndTurn {
+    if queue.is_empty() {
+        // Nothing waits: the next prompt starts at once, and a queue it starts moves on.
+        queue.held = false;
+    } else if !forced && !removed && stop != StopReason::EndTurn {
         queue.held = true;
     }
     move_on(actor, thread);
