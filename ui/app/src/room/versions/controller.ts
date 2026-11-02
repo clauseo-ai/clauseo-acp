@@ -246,15 +246,19 @@ export class VersionsController {
   #look(id: string | null): void {
     const last = this.#snap.timeline.history.at(-1)?.id;
     const at = id === null || id === last ? null : id;
+    // the newest version is now; a turn's stays picked, so the band can offer its Undo
+    const newest = id !== null && id === last && this.meta(id)?.kind === "after_turn" ? id : null;
     const look: Look =
       at === null
-        ? { kind: "now" }
+        ? newest === null
+          ? { kind: "now" }
+          : { kind: "now", id: newest }
         : {
             kind: "back",
             id: at,
             comparing: this.#snap.look.kind === "back" && this.#snap.look.comparing,
           };
-    this.#hold(at === null ? undefined : this.meta(at));
+    this.#hold(this.meta(at ?? newest ?? ""));
     this.#set({ look, done: null, failed: null, compare: null });
     if (look.kind === "back" && look.comparing) void this.#compare(look.id);
   }
@@ -349,8 +353,7 @@ export class VersionsController {
         this.#fromToolbar = null;
         return;
       }
-      const look = this.#snap.look;
-      const there = look.kind === "back" && look.id === next.id;
+      const there = this.#snap.look.id === next.id;
       if (next.kind === "ready") {
         this.#undoNewest = false;
         if (!there) this.#look(next.id);

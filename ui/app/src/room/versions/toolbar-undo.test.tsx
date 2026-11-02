@@ -104,3 +104,27 @@ test("with Versions open, Cancel in the dialog the toolbar's Undo opened goes ba
   expect(h.one("versions")).not.toBeNull();
   expect(rowOf(h, "cp1")?.getAttribute("aria-current")).toBe("true");
 });
+
+test("picking the newest version, a turn's, keeps the room at now and offers that turn's Undo alone in the band", async () => {
+  // the conversation's later turn is the newest version
+  const NEWEST = VERSIONS.slice(0, 3);
+  h = await mountVersions(NEWEST, [
+    stepEntry(5, { files: [file("brief.txt")], checkpoint_after: "cp2" }),
+    stepEntry(9, { turn: LATER, files: [file("memo.docx")], checkpoint_after: "cp3" }),
+  ]);
+  await h.openVersions();
+  expect(document.body.querySelector(".ver-band")).toBeNull();
+  await h.lookAt("cp3");
+  // still now: the newest row is current, and there is nothing to restore, compare or go back to
+  expect(rowOf(h, "cp3")?.getAttribute("aria-current")).toBe("true");
+  expect(document.body.querySelector(".ver-line")?.textContent).toBe("Now");
+  expect(h.one("version-restore")).toBeNull();
+  expect(h.button("Compare with now")).toBeNull();
+  expect(h.button("Back to now")).toBeNull();
+  await h.click(h.one("version-undo"));
+  expect(dialog()?.textContent).toMatch(/^Undo the change Clauseo made at .+ today\?/);
+  await h.click(h.one("dialog-confirm"));
+  expect(h.sent("undo_step")).toEqual([
+    { thread: THREAD, turn: LATER, files: [{ path: "memo.docx", choice: "undo" }] },
+  ]);
+});
