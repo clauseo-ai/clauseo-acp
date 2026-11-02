@@ -68,6 +68,10 @@ const HI = {
     "उस प्रश्न का उत्तर पहले ही दिया जा चुका है, या उसका समय निकल गया है।",
   "Those answers don't fit the question.": "ये उत्तर प्रश्न से मेल नहीं खाते।",
   "Claude didn't start. Your question is kept.": "Claude शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
+  // agent.launch_failed for a thread on the ChatGPT plan (Codex), and for an agent of no kind (launchFailedKey)
+  "ChatGPT didn't start. Your question is kept.": "ChatGPT शुरू नहीं हुआ। आपका प्रश्न रखा गया है।",
+  "Clauseo couldn't start this conversation. Your question is kept.":
+    "Clauseo यह बातचीत शुरू नहीं कर सका। आपका प्रश्न रखा गया है।",
   "Claude sent something Clauseo can't read.": "Claude ने कुछ ऐसा भेजा जिसे Clauseo पढ़ नहीं सकता।",
   "Sign in to Claude first. Your question is kept.":
     "पहले Claude में साइन इन करें। आपका प्रश्न रखा गया है।",
@@ -164,8 +168,20 @@ export function errorSentence(lang: Lang, key: ErrorKey): string {
   return key === STOPPED ? th(lang, key) : own(lang, key);
 }
 
-/** A code's sentence in the language; a code this version doesn't know reads as "unknown", which reads as "internal". */
-export function errorWords(lang: Lang, code: string): string {
+/** agent.launch_failed's sentence for the thread's plan, as the app's knownPlan (room/agent.ts) names it: "ChatGPT"
+ * names ChatGPT, null (an agent of no kind) names Clauseo as the one that couldn't start the conversation, and "Claude" or a plan not known (undefined) keeps
+ * Claude's. */
+export function launchFailedKey(plan?: string | null): ErrorKey {
+  if (plan === null) return "Clauseo couldn't start this conversation. Your question is kept.";
+  if (plan === "ChatGPT") return "ChatGPT didn't start. Your question is kept.";
+  return ERROR_WORDS["agent.launch_failed"];
+}
+
+/** A code's sentence in the language; a code this version doesn't know reads as "unknown", which reads as "internal".
+ * `plan` is the thread's plan, for the codes whose sentence names it (agent.launch_failed: launchFailedKey); a caller
+ * that doesn't know the thread leaves it out. */
+export function errorWords(lang: Lang, code: string, plan?: string | null): string {
+  if (code === "agent.launch_failed") return errorSentence(lang, launchFailedKey(plan));
   const known = Object.hasOwn(ERROR_WORDS, code) ? ERROR_WORDS[code as ErrorCode] : null;
   return errorSentence(lang, known ?? ERROR_WORDS.unknown);
 }

@@ -30,6 +30,7 @@ import {
   toolCallIdOf,
 } from "./permission-model.ts";
 import { KeyedRequestContext } from "./permission-keyed.ts";
+import { useAgentPlan } from "./thread/agent-plan.ts";
 import { useThreadActions } from "./thread/session.ts";
 
 /** The space above a row under another in its section (rows.tsx's ROW). */
@@ -59,6 +60,7 @@ function Permission({
   const flying = useRef(false);
   const pending = m.state === "pending";
   const lang = w.lang;
+  const plan = useAgentPlan();
   const onAnswer = useCallback(
     (a: PermissionAnswer) => {
       const offer = m.offers.find((o) => o.answer === a);
@@ -76,11 +78,12 @@ function Permission({
           setAsked(null);
           // a confirm the lawyer declined (only Always for this matter opens one) says nothing: the prompt is simply
           // back. Any other refusal, unauthorized included, says why
-          if (a !== "always" || code !== "transport.unauthorized") setError(errorWords(lang, code));
+          if (a !== "always" || code !== "transport.unauthorized")
+            setError(errorWords(lang, code, plan));
         },
       );
     },
-    [m, answer, entry.request, lang],
+    [m, answer, entry.request, lang, plan],
   );
   return (
     <div data-entry-id={id} className={ROW}>

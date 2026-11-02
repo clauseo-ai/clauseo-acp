@@ -19,6 +19,7 @@ import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import type { EntryId } from "../../transport/protocol.ts";
 import type { BreakLine } from "../thread-break.ts";
+import { useAgentPlan } from "./agent-plan.ts";
 import type { Drafts } from "./session.ts";
 
 export function WorkComposer({
@@ -66,6 +67,7 @@ export function WorkComposer({
   onStop: () => void;
 }) {
   const w = useWords();
+  const agentPlan = useAgentPlan();
   const field = useRef<ComposerHandle>(null);
   useImperativeHandle(
     ref,
@@ -113,7 +115,12 @@ export function WorkComposer({
     failed ??
     (refused !== null
       ? {
-          state: { kind: "wait", words: errorWords(w.lang, refused), pill: null, code: refused },
+          state: {
+            kind: "wait",
+            words: errorWords(w.lang, refused, agentPlan),
+            pill: null,
+            code: refused,
+          },
           testId: "error",
         }
       : busy

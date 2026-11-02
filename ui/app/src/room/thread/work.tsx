@@ -14,6 +14,7 @@ import type { AvailableCommand, MatterSummary, ThreadId } from "../../transport/
 import { nextHostOf } from "../host-next.ts";
 import { KeyedRequestContext, keyedRequest } from "../permission-keyed.ts";
 import { refillOf, useBreakLines, useStoppedLine, useThreadBreak } from "../thread-break.ts";
+import { useAgentPlan } from "./agent-plan.ts";
 import { LazyThreadList, loadThread } from "./chunk.ts";
 import { useBusy } from "./live.ts";
 import {
@@ -96,7 +97,17 @@ export function Work({
   const { brk, live } = useThreadBreak(store, stream);
   const restart = useMemo(() => nextHostOf(transport).restart, [transport]);
   const lines = useBreakLines();
-  const stopped = useStoppedLine({ lang, brk, live, busy, thread: session.thread, restart, lines });
+  const agentPlan = useAgentPlan();
+  const stopped = useStoppedLine({
+    lang,
+    brk,
+    live,
+    busy,
+    thread: session.thread,
+    restart,
+    lines,
+    plan: agentPlan,
+  });
   const retry = () => {
     if (stream !== null) store.retry(stream);
   };
@@ -133,12 +144,12 @@ export function Work({
           failed === null
             ? null
             : lines !== null
-              ? lines.streamFailedLine(lang, failed, retry)
+              ? lines.streamFailedLine(lang, failed, retry, agentPlan)
               : // the thread's chunk never came in (chunk.ts's NoThread): the code's words, never no line
                 {
                   state: {
                     kind: "wait",
-                    words: errorWords(lang, failed.code),
+                    words: errorWords(lang, failed.code, agentPlan),
                     pill: null,
                     code: failed.code,
                   },

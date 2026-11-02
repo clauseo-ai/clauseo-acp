@@ -15,6 +15,7 @@ import { toHostError } from "../../transport/host-transport.ts";
 import { StoppedMark } from "../stopped-mark.tsx";
 import { takesMark } from "../thread-break.ts";
 import type { EntryId, LimitStopEntry, StepEntry } from "../../transport/protocol.ts";
+import { useAgentPlan } from "./agent-plan.ts";
 import { isoOf, whenOf } from "./clock.ts";
 import { useBusy } from "./live.ts";
 import { useThreadActions } from "./session.ts";
@@ -38,6 +39,7 @@ function Changed({ entry }: { entry: StepEntry }) {
   const w = useWords();
   const { undo, sentTurn, stream } = useThreadActions();
   const busy = useBusy(stream, sentTurn);
+  const plan = useAgentPlan();
   const [refused, setRefused] = useState<string | null>(null);
   // one undo at a time: Undo waits while the host answers the first
   const [pending, setPending] = useState(false);
@@ -108,7 +110,7 @@ function Changed({ entry }: { entry: StepEntry }) {
         {...(undoable && !locked ? { onUndo } : {})}
         {...(open === undefined ? {} : { open })}
         undoDisabled={busy || pending}
-        error={shown === null ? null : { words: errorWords(w.lang, shown), code: shown }}
+        error={shown === null ? null : { words: errorWords(w.lang, shown, plan), code: shown }}
         testIds={{ paper: "file-changed", undo: "undo", error: "error", open: "open-in-word" }}
       />
       {locked && (
@@ -135,6 +137,7 @@ function Changed({ entry }: { entry: StepEntry }) {
 export function StepRow({ id, entry }: { id: EntryId; entry: StepEntry }) {
   const w = useWords();
   const line = stopLine(entry);
+  const plan = useAgentPlan();
   return (
     <div
       data-testid="turn-stopped"
@@ -146,7 +149,9 @@ export function StepRow({ id, entry }: { id: EntryId; entry: StepEntry }) {
       {takesMark(entry) && <StoppedMark ts={entry.ts} />}
       {line !== null && !takesMark(entry) && (
         <p className={QUIET} data-code={line.code}>
-          <Say>{line.kind === "error" ? errorWords(w.lang, line.code) : th(w.lang, line.key)}</Say>
+          <Say>
+            {line.kind === "error" ? errorWords(w.lang, line.code, plan) : th(w.lang, line.key)}
+          </Say>
         </p>
       )}
       {entry.files.length > 0 && <Changed entry={entry} />}

@@ -17,7 +17,7 @@ import {
 } from "../testing/stream-script.ts";
 import type { ErrorCode, ViewEntry } from "../transport/protocol.ts";
 import { stamp } from "./thread/clock.ts";
-import { defaultOutcome, mountRoom, type Harness, type Script } from "./thread/harness.ts";
+import { defaultOutcome, mountRoom, summary, type Harness, type Script } from "./thread/harness.ts";
 
 let h: Harness | null = null;
 afterEach(async () => {
@@ -29,14 +29,15 @@ afterEach(async () => {
 const QUESTION = "Summarise the notice to the bank.";
 const field = () => h!.one("composer") as HTMLTextAreaElement;
 const H10: Script["next"] = { parts: ["restart"], query: () => ({ threads: [] }) };
-const status = (s: "starting" | "running" | "idle" | "agent_exited"): ViewEntry => {
+const status = (s: "starting" | "running" | "idle" | "agent_exited", agent?: string): ViewEntry => {
   const head = header();
   head.header!.status = s;
+  if (agent !== undefined) head.header!.agent = agent;
   return head;
 };
 
-/** The room with an empty thread, the question asked and under way with its first chunk. */
-async function asked(script: Script = {}): Promise<Harness> {
+/** The room with an empty thread, the question asked and under way with its first chunk; its header names `agent`. */
+async function asked(script: Script = {}, agent?: string): Promise<Harness> {
   const room = await mountRoom(script);
   room.deliver([reset([])]);
   await room.type(QUESTION);
@@ -44,14 +45,14 @@ async function asked(script: Script = {}): Promise<Harness> {
   room.deliver([
     upsert(userMessage(5, 1, QUESTION)),
     upsert(agentText(6, 1, "Clause nine requires notice")),
-    upsert(status("running")),
+    upsert(status("running", agent)),
   ]);
   return room;
 }
 
-const failed = (failure: ErrorCode, ts = Date.now()) => [
+const failed = (failure: ErrorCode, ts = Date.now(), agent?: string) => [
   upsert(step(9, { stop: "failed", failure, ts })),
-  upsert(status(failure === "agent.exited" ? "agent_exited" : "idle")),
+  upsert(status(failure === "agent.exited" ? "agent_exited" : "idle", agent)),
 ];
 
 test("Claude stopping mid-answer: the stopped line with its time and no Restart, the answer so far kept, the question back in the empty field", async () => {
@@ -292,3 +293,27 @@ test("in Hindi the region tags English names, as the line's words do", async () 
   expect(region?.textContent).toContain(errorWords("hi", "agent.launch_failed"));
   expect(region?.querySelector('[lang="en"]')?.textContent).toBe("Claude");
 });
+
+// agent.launch_failed names the open conversation's plan (words-errors.ts's launchFailedKey): its kind read off the
+// thread's agent, Codex's as ChatGPT, and an agent of no kind (a settings file's own id) as Clauseo's conversation
+test.each([
+  ["codex-acp", "en", "ChatGPT didn't start. Your question is kept."],
+  ["codex-acp", "hi", "ChatGPT शुरू नहीं हुआ। आपका प्रश्न रखा गया है।"],
+  ["claude-acp", "en", "Claude didn't start. Your question is kept."],
+  ["claude-acp", "hi", "Claude शुरू नहीं हुआ। आपका प्रश्न रखा गया है।"],
+  ["my-agent", "en", "Clauseo couldn't start this conversation. Your question is kept."],
+  ["my-agent", "hi", "Clauseo यह बातचीत शुरू नहीं कर सका। आपका प्रश्न रखा गया है।"],
+] as const)(
+  "a thread on %s that didn't start says so for its plan, in %s",
+  async (agent, language, said) => {
+    h = await asked(
+      { threads: [{ ...summary(), agent }], next: H10, display: { language } },
+      agent,
+    );
+    h.deliver(failed("agent.launch_failed", Date.now(), agent));
+    await h.settle();
+    // the working line, with Restart, and the step's row in the thread
+    expect(h.one("agent-stopped")?.textContent).toContain(said);
+    expect(h.one("turn-stopped")?.textContent).toContain(said);
+  },
+);

@@ -4,7 +4,13 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { clock } from "./words.ts";
-import { ERROR_WORDS, errorSentence, errorWords, type ErrorCode } from "./words-errors.ts";
+import {
+  ERROR_WORDS,
+  errorSentence,
+  errorWords,
+  launchFailedKey,
+  type ErrorCode,
+} from "./words-errors.ts";
 import { frame } from "./words-frame.ts";
 import { lim, type LimitKey } from "./words-limits.ts";
 import { th, type ThreadKey } from "./words-thread.ts";
@@ -75,6 +81,12 @@ test("every error code has a sentence with Hindi, and none says agent", () => {
   const codes = Object.keys(ERROR_WORDS) as ErrorCode[];
   expect(codes.length).toBeGreaterThan(30);
   for (const c of codes) sound(errorWords("en", c), errorWords("hi", c));
+  // and the sentences a thread's plan picks (agent.launch_failed's, for ChatGPT and for an agent of no kind)
+  for (const plan of ["ChatGPT", null])
+    sound(
+      errorWords("en", "agent.launch_failed", plan),
+      errorWords("hi", "agent.launch_failed", plan),
+    );
 });
 
 test("a stopped Claude and an interrupted thread read as the thread's own stop, with its one Hindi", () => {
@@ -83,6 +95,28 @@ test("a stopped Claude and an interrupted thread read as the thread's own stop, 
     expect(errorWords("en", c)).toBe(stopped);
     expect(errorWords("hi", c)).toBe(th("hi", stopped));
   }
+});
+
+test("agent.launch_failed names the thread's plan: ChatGPT's, the agent for no kind, Claude's otherwise", () => {
+  const code = "agent.launch_failed";
+  expect(errorWords("en", code, "ChatGPT")).toBe("ChatGPT didn't start. Your question is kept.");
+  expect(errorWords("hi", code, "ChatGPT")).toBe("ChatGPT शुरू नहीं हुआ। आपका प्रश्न रखा गया है।");
+  expect(errorWords("en", code, null)).toBe(
+    "Clauseo couldn't start this conversation. Your question is kept.",
+  );
+  expect(errorWords("hi", code, null)).toBe(
+    "Clauseo यह बातचीत शुरू नहीं कर सका। आपका प्रश्न रखा गया है।",
+  );
+  const claude = "Claude didn't start. Your question is kept.";
+  // a caller that doesn't know the thread, or a Claude thread, keeps the approved line
+  for (const plan of ["Claude", undefined]) {
+    expect(errorWords("en", code, plan)).toBe(claude);
+    expect(errorWords("hi", code, plan)).toBe("Claude शुरू नहीं हुआ। आपका प्रश्न रखा गया है।");
+  }
+  expect(errorWords("en", code)).toBe(claude);
+  expect(launchFailedKey()).toBe(ERROR_WORDS[code]);
+  // the plan touches no other code
+  expect(errorWords("en", "store.io", "ChatGPT")).toBe(errorWords("en", "store.io"));
 });
 
 test("a code this version doesn't know reads as unknown's sentence, which is internal's", () => {

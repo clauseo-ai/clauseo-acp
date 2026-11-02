@@ -47,6 +47,7 @@ import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { Papers, PapersHost } from "./host-next.ts";
 import { knownPlan } from "./agent.ts";
+import { AgentPlanContext } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
 import { Matters, type MattersView } from "./matters.ts";
 import { NewMatter } from "./new-matter.tsx";
@@ -245,10 +246,12 @@ function RoomFrame({
   // the plan the open conversation uses, on the status line: its thread's, or the one a draft would run
   // nothing while the matter's list loads (its agent isn't known yet), or for an agent of no kind
   const openRow = talks.rows.find((r) => r.key === talks.open);
-  const planOfOpen =
+  // undefined where not known, so a launch failure's words (AgentPlanContext) keep Claude's line there
+  const agentPlan =
     open === null || talks.open === null || talks.phase === "loading"
-      ? null
+      ? undefined
       : knownPlan(openRow?.agent ?? talks.agent, talks.agents);
+  const planOfOpen = agentPlan ?? null;
   const plan = planOfOpen === null ? "" : th(w.lang, "Uses your {name} plan", { name: planOfOpen });
   // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
   // frame's words stand in its place
@@ -389,18 +392,20 @@ function RoomFrame({
             {/* one thread's state per conversation: each starts its own; with no matter open, the composer waits */}
             <MarkdownHostContext value={answers}>
               <WordOpenContext value={word}>
-                <Work
-                  key={talks.open ?? open?.matter ?? "none"}
-                  transport={transport}
-                  matter={open}
-                  drafts={drafts}
-                  draftKey={talks.open}
-                  conversation={link}
-                  choice={choice}
-                  plan={plan}
-                  focus={talks.focus?.n ?? null}
-                  onThread={matters.onThread}
-                />
+                <AgentPlanContext value={agentPlan}>
+                  <Work
+                    key={talks.open ?? open?.matter ?? "none"}
+                    transport={transport}
+                    matter={open}
+                    drafts={drafts}
+                    draftKey={talks.open}
+                    conversation={link}
+                    choice={choice}
+                    plan={plan}
+                    focus={talks.focus?.n ?? null}
+                    onThread={matters.onThread}
+                  />
+                </AgentPlanContext>
               </WordOpenContext>
             </MarkdownHostContext>
           </StoreContext>
