@@ -448,6 +448,20 @@ test("the key does nothing while an input method composes, nor with no matter op
   expect(e.defaultPrevented || m.defaultPrevented).toBe(false);
 });
 
+test("the key goes by the letter the layout gives, and by its place only where the layout gives no Latin letter", async () => {
+  h = await mountRoom({ threads: [thread(T1, { title: "Lease notice" })] });
+  // Dvorak: the key in N's place is B, so Ctrl+B is not New conversation
+  expect(await newKey({ key: "b", code: "KeyN" })).toBe(false);
+  expect(newRow()).toBeUndefined();
+  // Dvorak's own N, in another place
+  expect(await newKey({ key: "n", code: "KeyL" })).toBe(true);
+  expect(newRow()).toBeDefined();
+  await h.click(rowOf("Lease notice"));
+  // a Devanagari layout gives no Latin letter: N's place stands for it
+  expect(await newKey({ key: "ल", code: "KeyN" })).toBe(true);
+  expect(newRow()).toBeDefined();
+});
+
 /* ---------- a draft's line, the status line's plan ---------- */
 
 const paper = (i: number, path: string): PaperSummary =>
@@ -502,6 +516,14 @@ test("the status line names the open conversation's plan, and a draft's", async 
   expect(planSwitch()).not.toBeNull();
   expect(planSwitch()?.closest('[role="status"]')).toBeNull();
   expect(h.host.querySelector("p .room-plan-seg, p [role=group]")).toBeNull();
+});
+
+test("an agent of no kind names no plan on the status line", async () => {
+  h = await mountRoom({
+    threads: [thread(T1, { title: "Lease notice", agent: "fake-agent" })],
+    next: withAgents([{ id: "fake-agent" }]),
+  });
+  expect(h.host.querySelector(".room-status-plan")?.textContent ?? "").toBe("");
 });
 
 test("a stop on another day says nothing on its row; one today says when", async () => {
