@@ -245,7 +245,7 @@ export function createAnswer(scope: string): Answer {
       const hast = toHast(root, { ...options, handlers }) as Hast;
       // A `<` nesting.ts made text at a line's start may be a tag again (markCutTags).
       const tags = input.includes("<") || input.includes(CUT_LESS_THAN);
-      if (tags) markCutTags(hast);
+      if (tags) markCutTags(hast, input);
       if (hasStandIns(input)) restoreText(hast);
       if (tags) pairTags(hast, streaming);
       const slugs = anchorHeadings(hast, scope);
@@ -440,7 +440,7 @@ export function createAnswer(scope: string): Answer {
         else {
           const raw = noteHast(scope, numbering, id, options);
           // The note's own text, and the link definitions from other blocks it carries, may hold some.
-          markCutTags(raw);
+          markCutTags(raw, note.source, note.node.position?.start.offset ?? 0);
           if (hasStandIns(note.source) || note.definitions.length > 0) restoreText(raw);
           pairTags(raw, false);
           hast = sanitize(raw, SCHEMA) as Hast;
