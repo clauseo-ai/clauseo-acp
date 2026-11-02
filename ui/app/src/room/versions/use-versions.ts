@@ -2,7 +2,7 @@
 // matter, and its chunk (versions-chunk.ts), loaded the first time the lawyer presses Versions or Undo. While open, the
 // timeline stands where the rail stood (the room renders `rail` in the rail's place) and the band over the work
 // (`centre`); closing it, or opening another matter, brings the rail back.
-import { createElement, useEffect, useState, type ReactNode } from "react";
+import { createElement, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Platform } from "@clauseo/components/lib/display.ts";
 import { late } from "@clauseo/components/lib/late.ts";
 import type { ViewStore } from "../../store/store.ts";
@@ -10,28 +10,25 @@ import type { HostTransport } from "../../transport/host-transport.ts";
 import type { MatterId } from "../../transport/protocol.ts";
 import type { Papers } from "../host-next.ts";
 import type { VersionsController } from "./controller.ts";
-import { standInsOf, type StandIns } from "./stand-ins.ts";
+import { NO_STAND_INS, type StandIns } from "./stand-ins.ts";
 
 type Chunk = typeof import("./versions-chunk.ts");
 
 let chunk: Promise<Chunk> | null = null;
 
-/** Loads Versions' chunk and its sheet, once. */
+/** Loads Versions' chunk, once, and its sheet: a sheet that failed is asked for again on the next open. */
 export function loadVersions(): Promise<Chunk> {
-  chunk ??= late(
-    import("./versions-chunk.ts").then(
-      async (m) => {
-        await m.loadSheet();
-        return m;
-      },
-      (error: unknown) => {
-        // Versions stays shut, and the next press tries again
-        chunk = null;
-        throw error;
-      },
-    ),
+  chunk ??= import("./versions-chunk.ts").catch((error: unknown) => {
+    // Versions stays shut, and the next press tries again
+    chunk = null;
+    throw error;
+  });
+  return late(
+    chunk.then(async (m) => {
+      await m.loadSheet();
+      return m;
+    }),
   );
-  return chunk;
 }
 
 export type VersionsSlots = {
@@ -43,6 +40,8 @@ export type VersionsSlots = {
   centre: ReactNode;
   /** For the toolbar's Versions and Undo pair. */
   toolbar: { onVersions: () => void; versionsOpen: boolean; onUndo: () => void };
+  /** Closes Versions: the rail comes back. */
+  close: () => void;
 };
 
 export function useVersions({
@@ -51,27 +50,31 @@ export function useVersions({
   matter,
   papers,
   platform,
-  standIns: given,
+  standIns = NO_STAND_INS,
 }: {
   transport: HostTransport;
   store: ViewStore;
   matter: MatterId | null;
   papers: Papers | null;
   platform: Platform;
-  /** Optional, for tests and the review page: the host changes still to land. The transport's own by default. */
+  /** Optional, for tests and the review page: the host changes still to land. None by default. */
   standIns?: StandIns;
 }): VersionsSlots {
-  const [own] = useState(() => standInsOf(transport));
-  const standIns = given ?? own;
   // the open Versions: its chunk, and its controller for the matter it opened on
   const [session, setSession] = useState<{
     matter: MatterId;
     mod: Chunk;
     controller: VersionsController;
   } | null>(null);
-  // Versions belongs to the matter it opened on: opening another closes it
+  // Versions belongs to the matter it opened on: opening another closes it, and coming back finds it closed
+  if (session !== null && session.matter !== matter) setSession(null);
   const live = session !== null && session.matter === matter ? session : null;
   useEffect(() => live?.controller.start(), [live]);
+  // the open matter, for a chunk that loads after the lawyer has moved on
+  const current = useRef(matter);
+  useEffect(() => {
+    current.current = matter;
+  }, [matter]);
 
   /** Opens Versions on the open matter, once its chunk is in; undo: and asks to undo the newest change. */
   const show = (undo: boolean) => {
@@ -82,6 +85,7 @@ export function useVersions({
     }
     loadVersions().then(
       (mod) => {
+        if (current.current !== matter) return;
         const controller = new mod.VersionsController(transport, store, matter);
         if (undo) controller.undoNewest();
         setSession({ matter, mod, controller });
@@ -97,6 +101,7 @@ export function useVersions({
       rail: null,
       centre: null,
       toolbar: { onVersions: () => show(false), versionsOpen: false, onUndo: () => show(true) },
+      close,
     };
   const { mod, controller } = live;
   return {
@@ -104,5 +109,6 @@ export function useVersions({
     rail: createElement(mod.VersionsRail, { controller, platform, standIns, onClose: close }),
     centre: createElement(mod.VersionsCentre, { controller, standIns, fileRef }),
     toolbar: { onVersions: close, versionsOpen: true, onUndo: () => show(true) },
+    close,
   };
 }

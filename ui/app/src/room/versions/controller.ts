@@ -1,11 +1,11 @@
 // Versions' state for one open matter: the timeline, read from the matter's stream with the conversations' titles and
-// statuses, and the lawyer's acts on it, each through the host: undo_step for one turn's change, restore_version for a
-// whole version (and for undoing a restore: the version just before it), preview_restore for what a restore would
-// write, compare_versions for what differs from the folder now. A small store the parts read with
-// useSyncExternalStore: every change makes a new snapshot, and nothing changes it but the host's answers, the view
-// store's flushes and the lawyer's acts, so it runs no timer and reads no clock at rest.
+// statuses (conversations.ts), and the lawyer's acts on it, each through the host: undo_step for one turn's change,
+// restore_version for a whole version, after preview_restore has said what it would write (undoing a restore too: the
+// dialog asks to restore the version just before it), compare_versions for what differs from the folder now. A small
+// store the parts read with useSyncExternalStore: every change makes a new snapshot, and nothing changes it but the
+// host's answers, the view store's flushes and the lawyer's acts, so it runs no timer and reads no clock at rest.
 import type { ViewStore } from "../../store/store.ts";
-import { streamOf } from "../../store/view.ts";
+import { streamOf, type StreamView } from "../../store/view.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import { toHostError } from "../../transport/host-transport.ts";
 import type {
@@ -15,29 +15,32 @@ import type {
   RestorePreview,
   StepEntry,
   ThreadId,
-  ThreadStatus,
-  ThreadSummary,
   TurnId,
-  VersionEntry,
   ViewEntry,
 } from "../../transport/protocol.ts";
-import { matterStreamOf, orderOf, pageBefore, readMatter } from "../matter-stream.ts";
+import { matterStreamOf, readMatter } from "../matter-stream.ts";
 import { localZone } from "../when.ts";
+import { Conversations } from "./conversations.ts";
+import { movedPast, pageBack, unsavedOf, type Own } from "./reading.ts";
 import {
   changedSince,
   defaultChoices,
-  isBusy,
+  sameChanges,
   type Ask,
   type Done,
   type Look,
+  type Outcome,
   type Snapshot,
   type Unsaved,
 } from "./state.ts";
-import { before, timelineOf, undoable, type Timeline, type VersionMeta } from "./timeline.ts";
+import { timelineOf, undoable, type Timeline, type VersionMeta } from "./timeline.ts";
 
 export type { Ask, Done, Look, Snapshot, Unsaved };
 
 const EMPTY: Timeline = { history: [], meta: new Map() };
+
+type UndoAsk = Extract<Ask, { act: "undo" }>;
+type RestoreAsk = Extract<Ask, { act: "restore" }>;
 
 export class VersionsController {
   readonly #transport: HostTransport;
@@ -47,25 +50,36 @@ export class VersionsController {
   #snap: Snapshot;
   readonly #listeners = new Set<() => void>();
   #stops: (() => void)[] = [];
-  #older: ViewEntry[] = [];
-  #paging = false;
+  readonly #talks: Conversations;
+  /** The matter's older pages, for the epoch they were read in: a Reset starts the reading again. */
+  #older: { epoch: string; entries: ViewEntry[] } | null = null;
+  /** The epoch whose older pages are being read. */
+  #paging: string | null = null;
   readonly #pagedSteps = new Map<TurnId, StepEntry>();
-  #threads: readonly ThreadSummary[] = [];
-  #listing: Promise<void> | null = null;
-  #listAgain = false;
   #held: { thread: ThreadId; release: () => void } | null = null;
   #seeking: TurnId | null = null;
   #sig = "";
-  #cursor: number | null = null;
+  #at: string | null = null;
   /** Undo was asked for from the toolbar: the dialog opens once the newest undoable step is in. */
   #undoNewest = false;
   #acting = false;
+  /** The newest preview asked for: one that comes back after a newer ask, or after the dialog closed, is dropped. */
+  #asked = 0;
+  /** The matter's entries as an act was sent: the line saying what it did goes once an entry not its own comes. */
+  #base: ReadonlySet<string> = new Set();
+  #doneBy: { base: ReadonlySet<string>; own: Own } | null = null;
+  /** As the last refusal said an answer runs: the next list_threads' number, and how many conversations had rested. */
+  #refusedAt = { list: 0, rests: 0 };
 
   constructor(transport: HostTransport, store: ViewStore, matter: MatterId) {
     this.#transport = transport;
     this.#store = store;
     this.matter = matter;
     this.#stream = matterStreamOf(matter);
+    this.#talks = new Conversations(transport, store, matter, () => {
+      this.#sig = "";
+      this.#read();
+    });
     this.#snap = {
       ready: false,
       timeline: EMPTY,
@@ -78,6 +92,7 @@ export class VersionsController {
       unsaved: null,
       compare: null,
       titles: new Map(),
+      restores: new Map(),
       now: Date.now(),
       zone: localZone(),
     };
@@ -99,11 +114,12 @@ export class VersionsController {
   start(): () => void {
     this.#stops.push(this.#store.watch(this.#stream));
     this.#stops.push(this.#store.subscribe(() => this.#read()));
-    this.#list();
+    this.#talks.list();
     this.#read();
     return () => {
       for (const stop of this.#stops) stop();
       this.#stops = [];
+      this.#talks.stop();
       this.#held?.release();
       this.#held = null;
     };
@@ -116,39 +132,43 @@ export class VersionsController {
     return e?.step ?? this.#pagedSteps.get(turn);
   };
 
-  #statusOf(t: ThreadSummary): ThreadStatus {
-    const h = this.#store.view(streamOf(t.thread))?.header;
-    return h !== undefined && h !== null && "header" in h && h.header !== undefined
-      ? h.header.status
-      : t.status;
-  }
-
   /** Re-reads what the store holds, and makes a new snapshot only when something Versions shows changed. */
   #read(): void {
     const view = this.#store.view(this.#stream);
-    const statuses = this.#threads.map((t) => JSON.stringify(this.#statusOf(t))).join(",");
+    const talks = this.#talks;
+    talks.read();
+    const statuses = talks.threads.map((t) => JSON.stringify(talks.statusOf(t))).join(",");
     const held = this.#held === null ? null : this.#store.view(streamOf(this.#held.thread));
     const sig = [
       view?.epoch,
       view?.cursor,
-      this.#older.length,
+      this.#older?.epoch,
+      this.#older?.entries.length,
       statuses,
-      this.#threads.length,
+      talks.threads.length,
+      talks.listed,
       held?.cursor,
       this.#pagedSteps.size,
     ].join("|");
     if (sig === this.#sig) return;
     this.#sig = sig;
-    if (view?.cursor !== undefined && view.cursor !== null && view.cursor !== this.#cursor) {
-      const moved = this.#cursor !== null;
-      this.#cursor = view.cursor;
-      // a new version or marker: a turn began or ended somewhere in the matter, so the conversations' statuses moved
-      if (moved) this.#list();
-      if (moved && this.#snap.refused) this.#snap = { ...this.#snap, refused: false };
+    const epoch = view?.epoch ?? null;
+    const at = view?.cursor == null ? null : `${epoch}:${view.cursor}`;
+    if (at !== null && at !== this.#at) {
+      const moved = this.#at !== null;
+      this.#at = at;
+      // a new version or marker: a turn began or ended somewhere in the matter, so the conversations' statuses moved,
+      // and what a restore would write may have too
+      if (moved) {
+        talks.list();
+        this.#repreview();
+      }
     }
-    if (view?.hasOlder === true && this.#older.length === 0) void this.#pageMatter(view);
-    const read = readMatter(view, this.#older);
-    const titles = new Map(this.#threads.map((t) => [t.thread, t.title ?? ""]));
+    if (this.#older !== null && this.#older.epoch !== epoch) this.#older = null;
+    if (view !== undefined && epoch !== null && view.hasOlder && this.#older === null)
+      void this.#pageMatter(view, epoch);
+    const read = readMatter(view, this.#older?.entries ?? []);
+    const titles = new Map(talks.threads.map((t) => [t.thread, t.title ?? ""]));
     const now = Date.now();
     const timeline = timelineOf({
       versions: read.versions,
@@ -160,86 +180,46 @@ export class VersionsController {
       now,
       zone: this.#snap.zone,
     });
-    const busy = this.#threads.find((t) => isBusy(this.#statusOf(t)))?.thread ?? null;
-    this.#versions = read.versions;
+    const busy = talks.busy();
+    // a refusal said an answer runs: it stands until a list_threads asked after it, or a conversation coming to rest,
+    // leaves none running
+    const settled =
+      busy === null &&
+      (talks.listed >= this.#refusedAt.list || talks.rests > this.#refusedAt.rests);
     this.#set({
-      ready: view?.epoch !== null && view?.epoch !== undefined,
+      ready: epoch !== null,
       timeline,
       busy,
+      refused: this.#snap.refused && !settled,
       titles,
+      restores: read.restores,
       now,
-      unsaved: this.#unsavedOf(),
+      unsaved: unsavedOf(this.#store, talks.threads),
+      done: this.#doneAfter(this.#snap.done, view),
     });
     this.#seek();
     if (this.#undoNewest) this.#openNewestUndo();
   }
 
-  #versions: readonly VersionEntry[] = [];
-
-  /** The newest step of a held conversation with files and no version after it. */
-  #unsavedOf(): Unsaved | null {
-    let found: { order: number; u: Unsaved } | null = null;
-    for (const t of this.#threads) {
-      const view = this.#store.view(streamOf(t.thread));
-      if (view === undefined) continue;
-      for (const id of view.ids) {
-        if (!id.startsWith("step:")) continue;
-        const step = view.entries.get(id)?.step;
-        const first = step?.files[0];
-        if (step === undefined || first === undefined || step.checkpoint_after !== undefined)
-          continue;
-        if (found === null || step.order > found.order)
-          found = { order: step.order, u: { thread: t.thread, paper: first.path, ts: step.ts } };
-      }
-    }
-    return found?.u ?? null;
+  /** The line for the room's last act stands until the matter's stream gains an entry not the act's own. */
+  #doneAfter(done: Done | null, view: StreamView | undefined): Done | null {
+    const by = this.#doneBy;
+    if (done === null || by === null || view === undefined || !movedPast(view, by.base, by.own))
+      return done;
+    this.#doneBy = null;
+    return null;
   }
 
-  /** Every older page of the matter's stream, once: the timeline lists every version. */
-  async #pageMatter(view: { ids: readonly string[]; entries: ReadonlyMap<string, ViewEntry> }) {
-    if (this.#paging) return;
-    this.#paging = true;
-    const first = view.ids[0] === undefined ? undefined : view.entries.get(view.ids[0]);
-    let before = first === undefined ? null : orderOf(first);
-    const older: ViewEntry[] = [];
-    try {
-      while (before !== null) {
-        const page = await pageBefore(this.#transport, this.#stream, before);
-        older.unshift(...page.entries);
-        const oldest = page.entries[0];
-        before = page.more && oldest !== undefined ? orderOf(oldest) : null;
-      }
-    } catch (error: unknown) {
-      console.warn(`page_entries failed: ${JSON.stringify(error)}`);
-    }
-    this.#older = older;
-    this.#paging = false;
+  /** Every older page of the matter's stream for an epoch, once: the timeline lists every version. A page read for an
+   * epoch a Reset has replaced is dropped, and the new epoch's are read. */
+  async #pageMatter(view: StreamView, epoch: string): Promise<void> {
+    if (this.#paging === epoch) return;
+    this.#paging = epoch;
+    const older = await pageBack(this.#transport, this.#stream, view);
+    if (this.#paging === epoch) this.#paging = null;
+    if (this.#store.view(this.#stream)?.epoch === epoch) this.#older = { epoch, entries: older };
+    this.#sig = "";
     this.#read();
-  }
-
-  /** list_threads, one at a time; asked again while one runs, it runs once more after. */
-  #list(): void {
-    if (this.#listing !== null) {
-      this.#listAgain = true;
-      return;
-    }
-    this.#listing = this.#transport
-      .query({ list_threads: { matter: this.matter } })
-      .then(
-        (r) => {
-          if ("threads" in r) this.#threads = r.threads;
-        },
-        (error: unknown) => console.warn(`list_threads failed: ${JSON.stringify(error)}`),
-      )
-      .finally(() => {
-        this.#listing = null;
-        this.#sig = "";
-        this.#read();
-        if (this.#listAgain) {
-          this.#listAgain = false;
-          this.#list();
-        }
-      });
   }
 
   /* ---------- looking back ---------- */
@@ -248,9 +228,15 @@ export class VersionsController {
     return this.#snap.timeline.meta.get(id);
   }
 
-  /** Looks at a version, or at now (null, or the newest). Choosing a turn's version holds its conversation and pages
-   * back to its step, so Undo has its files. */
+  /** The lawyer looks at a version, or at now (null, or the newest): a pending Undo from the toolbar is dropped. */
   look(id: string | null): void {
+    this.#undoNewest = false;
+    this.#asked += 1;
+    this.#look(id);
+  }
+
+  /** Choosing a turn's version holds its conversation and pages back to its step, so Undo has its files. */
+  #look(id: string | null): void {
     const last = this.#snap.timeline.history.at(-1)?.id;
     const at = id === null || id === last ? null : id;
     const look: Look =
@@ -277,7 +263,8 @@ export class VersionsController {
     this.#seek();
   }
 
-  /** Pages the held conversation back until the sought step is in. */
+  /** Pages the held conversation back until the sought step is in; paged to its start without it, a pending Undo from
+   * the toolbar is dropped. */
   #seek(): void {
     const held = this.#held;
     const turn = this.#seeking;
@@ -290,22 +277,13 @@ export class VersionsController {
     const view = this.#store.view(stream);
     if (view === undefined || view.epoch === null || !view.hasOlder) return;
     this.#seeking = null;
-    const first = view.ids[0] === undefined ? undefined : view.entries.get(view.ids[0]);
-    void (async () => {
-      let before = first === undefined ? null : orderOf(first);
-      try {
-        while (before !== null && !this.#pagedSteps.has(turn)) {
-          const page = await pageBefore(this.#transport, stream, before);
-          for (const e of page.entries)
-            if (e.step !== undefined) this.#pagedSteps.set(e.step.turn, e.step);
-          const oldest = page.entries[0];
-          before = page.more && oldest !== undefined ? orderOf(oldest) : null;
-        }
-      } catch (error: unknown) {
-        console.warn(`page_entries failed: ${JSON.stringify(error)}`);
-      }
+    void pageBack(this.#transport, stream, view, (page) => {
+      for (const e of page) if (e.step !== undefined) this.#pagedSteps.set(e.step.turn, e.step);
+      return this.#pagedSteps.has(turn);
+    }).then(() => {
+      if (!this.#pagedSteps.has(turn)) this.#undoNewest = false;
       this.#read();
-    })();
+    });
   }
 
   /** Compare with now: on, it asks what differs between the version and the folder now. */
@@ -337,15 +315,8 @@ export class VersionsController {
     const m = this.meta(id);
     if (!undoable(m) || m?.step == null) return;
     const since = changedSince(this.#snap.timeline, id);
-    this.#set({
-      ask: {
-        act: "undo",
-        stage: "confirm",
-        id,
-        choices: defaultChoices(m.step, new Set(since.keys())),
-      },
-      failed: null,
-    });
+    const choices = defaultChoices(m.step, new Set(since.keys()));
+    this.#set({ ask: { act: "undo", id, choices, stage: "confirm", failed: null }, failed: null });
   }
 
   /** The toolbar's Undo: looks at the newest turn's version and opens its undo dialog once its step is in. */
@@ -366,11 +337,11 @@ export class VersionsController {
     }
     const m = meta.get(newest.id);
     if (m?.step === null) {
-      if (this.#seeking === null && this.#held?.thread !== m.thread) this.look(newest.id);
+      if (this.#seeking === null && this.#held?.thread !== m.thread) this.#look(newest.id);
       return;
     }
     this.#undoNewest = false;
-    if (this.#snap.look.kind !== "back" || this.#snap.look.id !== newest.id) this.look(newest.id);
+    if (this.#snap.look.kind !== "back" || this.#snap.look.id !== newest.id) this.#look(newest.id);
     this.askUndo(newest.id);
   }
 
@@ -382,23 +353,60 @@ export class VersionsController {
     this.#set({ ask: { ...ask, choices } });
   }
 
-  /** Opens the restore dialog for a version, with what restoring it would write now. */
-  async askRestore(id: string): Promise<void> {
+  async #preview(id: string): Promise<RestorePreview | null> {
+    const r = await this.#transport.query({
+      preview_restore: { matter: this.matter, checkpoint: id, scope: "matter" },
+    });
+    return "restore_preview" in r ? r.restore_preview : null;
+  }
+
+  /** Opens the restore dialog for a version, with what restoring it would write now; undoes: the restore this one
+   * takes back. Only the newest ask opens it. */
+  async askRestore(id: string, undoes: string | null = null): Promise<void> {
+    this.#asked += 1;
+    const asked = this.#asked;
     try {
-      const r = await this.#transport.query({
-        preview_restore: { matter: this.matter, checkpoint: id, scope: "matter" },
-      });
-      if (!("restore_preview" in r)) return;
+      const preview = await this.#preview(id);
+      if (asked !== this.#asked || preview === null) return;
       this.#set({
-        ask: { act: "restore", stage: "confirm", id, preview: r.restore_preview },
+        ask: { act: "restore", id, preview, undoes, stage: "confirm", failed: null },
         failed: null,
       });
     } catch (e) {
-      this.#refused(toHostError(e).code, null);
+      if (asked === this.#asked) await this.#refused(toHostError(e).code);
     }
   }
 
+  /** The matter moved while the restore dialog asks: what restoring writes now replaces the list it showed. */
+  #repreview(): void {
+    const ask = this.#snap.ask;
+    if (ask?.act !== "restore" || ask.stage !== "confirm" || this.#acting) return;
+    this.#asked += 1;
+    const asked = this.#asked;
+    this.#preview(ask.id).then(
+      (preview) => {
+        const now = this.#snap.ask;
+        if (asked !== this.#asked || preview === null) return;
+        if (now?.act === "restore" && now.stage === "confirm" && now.id === ask.id)
+          this.#set({ ask: { ...now, preview } });
+      },
+      (error: unknown) => console.warn(`preview_restore failed: ${JSON.stringify(error)}`),
+    );
+  }
+
+  /** Undoes a restore by restoring the version shown just before it, through the restore dialog, which lists what
+   * that writes now. Only a restore version can be undone this way. */
+  undoRestore(checkpoint: string): void {
+    if (this.meta(checkpoint)?.kind !== "restore" || this.#acting) return;
+    const { history } = this.#snap.timeline;
+    const i = history.findIndex((v) => v.id === checkpoint);
+    const prior = i > 0 ? history[i - 1] : undefined;
+    if (prior !== undefined) void this.askRestore(prior.id, checkpoint);
+  }
+
   close(): void {
+    this.#asked += 1;
+    this.#undoNewest = false;
     this.#set({ ask: null });
   }
 
@@ -407,77 +415,91 @@ export class VersionsController {
     const ask = this.#snap.ask;
     if (ask === null || this.#acting) return;
     if (ask.act === "undo") await this.#undo(ask);
-    else await this.#restore(ask.id, ask.stage === "confirm" ? ask.preview : null);
+    else await this.#restore(ask);
   }
 
-  async #undo(ask: { id: string; choices?: ReadonlyMap<string, FileChoice> | undefined }) {
+  async #undo(ask: UndoAsk): Promise<void> {
     const m = this.meta(ask.id);
     const step = m?.step;
     if (m?.thread === undefined || step == null) return;
-    const choices = ask.choices ?? null;
+    const { id, choices } = ask;
     const files = step.files.map((f) => ({
       path: f.path,
-      choice: choices?.get(f.path) ?? ("undo" as FileChoice),
+      choice: choices.get(f.path) ?? ("undo" as FileChoice),
     }));
     // undo_step needs at least one file to put back: with every file kept the act waits (the dialog holds it)
     if (!files.some((f) => f.choice === "undo")) return;
     const papers = files.filter((f) => f.choice === "undo").map((f) => f.path);
-    const ok = await this.#act(
-      { undo_step: { thread: m.thread, turn: step.turn, files } },
-      // the file a program may hold: undo_step's refusal doesn't name it, so only an undo of one file can say which
-      papers.length === 1 ? (papers[0] ?? "") : "",
-      {
-        act: "undo",
-        stage: "word",
-        id: ask.id,
-        file: "",
-        ...(choices === null ? {} : { choices }),
-      },
+    const outcome = await this.#act({ undo_step: { thread: m.thread, turn: step.turn, files } });
+    if (outcome.kind === "refused") {
+      // undo_step's refusal doesn't name the file a program holds: an undo of one file can only mean that one; with
+      // more, the dialog keeps the lawyer's choices, says why, and offers Try again
+      const only = papers.length === 1 ? papers[0] : undefined;
+      await this.#refused(outcome.code, () =>
+        only === undefined
+          ? { act: "undo", id, choices, stage: "confirm", failed: outcome.code }
+          : { act: "undo", id, choices, stage: "word", file: only },
+      );
+      return;
+    }
+    this.#finish(
+      { kind: "undidChange", of: m.ts, papers },
+      { checkpoint: outcome.kind === "wrote" ? outcome.checkpoint : null, turn: step.turn },
     );
-    // false is a refusal; any checkpoint, or none ("" for a bare done), is the undo made
-    if (ok !== false)
-      this.#set({
-        ask: null,
-        look: { kind: "now" },
-        done: { kind: "undidChange", of: m.ts, papers },
-      });
   }
 
-  async #restore(id: string, preview: RestorePreview | null): Promise<void> {
-    const n = preview?.changes.length ?? 0;
-    // the file a program holds: the preview names it; failing that, a restore of one file can only mean that one
-    const locked =
-      preview?.locked[0] ?? (preview?.changes.length === 1 ? (preview.changes[0]?.path ?? "") : "");
-    const ask = this.#snap.ask;
-    const done = await this.#act(
-      { restore_version: { matter: this.matter, checkpoint: id, scope: "matter" } },
-      locked,
-      ask ?? { act: "restore", stage: "word", id, file: locked },
+  async #restore(ask: RestoreAsk): Promise<void> {
+    const { id, preview, undoes } = ask;
+    const outcome = await this.#act({
+      restore_version: { matter: this.matter, checkpoint: id, scope: "matter" },
+    });
+    if (outcome.kind === "refused") {
+      await this.#refused(outcome.code, () => this.#lockedRestore(ask, outcome.code));
+      return;
+    }
+    this.#finish(
+      undoes === null
+        ? { kind: "restored", to: id, n: preview.changes.length, outcome }
+        : { kind: "undidRestore", at: this.meta(id)?.ts ?? this.#snap.now },
+      { checkpoint: outcome.kind === "wrote" ? outcome.checkpoint : null, turn: null },
     );
-    if (done !== false)
-      this.#set({
-        ask: null,
-        look: { kind: "now" },
-        done: { kind: "restored", to: id, n, checkpoint: done },
-      });
   }
 
-  /** Undoes a restore: restores the version just before it. */
-  async undoRestore(checkpoint: string): Promise<void> {
-    const prior = before(this.#versions, checkpoint);
-    if (prior === null || this.#acting) return;
-    const done = await this.#act(
-      { restore_version: { matter: this.matter, checkpoint: prior.checkpoint, scope: "matter" } },
-      "",
-      null,
-    );
-    if (done !== false)
-      this.#set({ ask: null, look: { kind: "now" }, done: { kind: "undidRestore", at: prior.ts } });
+  /** The dialog after a program refused a restore its file: the file the preview names, or the only file the restore
+   * writes; failing both, the file a preview asked again names. Naming none, the dialog stays with what restoring
+   * writes, says why, and offers Try again. */
+  async #lockedRestore(ask: RestoreAsk, code: string): Promise<Ask> {
+    const { id, undoes } = ask;
+    let preview = ask.preview;
+    let file =
+      preview.locked[0] ?? (preview.changes.length === 1 ? preview.changes[0]?.path : undefined);
+    if (file === undefined) {
+      try {
+        preview = (await this.#preview(id)) ?? preview;
+      } catch (error: unknown) {
+        console.warn(`preview_restore failed: ${JSON.stringify(error)}`);
+      }
+      file = preview.locked[0];
+    }
+    return file === undefined
+      ? { act: "restore", id, preview, undoes, stage: "confirm", failed: code }
+      : { act: "restore", id, preview, undoes, stage: "word", file };
   }
 
-  /** Sends one act; resolves with the checkpoint it wrote, or false when the host refused it. */
-  async #act(command: HostCommand, file: string, ask: Ask | null): Promise<string | false> {
+  /** An act done: back at now, with the line saying what it did. */
+  #finish(done: Done, own: Own): void {
+    this.#doneBy = { base: this.#base, own };
+    this.#set({
+      ask: null,
+      look: { kind: "now" },
+      done: this.#doneAfter(done, this.#store.view(this.#stream)),
+    });
+  }
+
+  /** Sends one act; resolves with what it wrote, or the code the host refused it with. */
+  async #act(command: HostCommand): Promise<Outcome | { kind: "refused"; code: string }> {
     this.#acting = true;
+    this.#base = new Set(this.#store.view(this.#stream)?.ids ?? []);
     try {
       const outcome = await this.#transport.dispatch({
         command_id: crypto.randomUUID(),
@@ -485,58 +507,66 @@ export class VersionsController {
       });
       this.#set({ failed: null });
       if (typeof outcome === "object" && "step_undone" in outcome)
-        return outcome.step_undone.checkpoint;
+        return { kind: "wrote", checkpoint: outcome.step_undone.checkpoint };
       if (typeof outcome === "object" && "version_restored" in outcome)
-        return outcome.version_restored.checkpoint;
-      return "";
+        return { kind: "wrote", checkpoint: outcome.version_restored.checkpoint };
+      return { kind: "nothing" };
     } catch (e) {
-      this.#refused(toHostError(e).code, ask === null ? null : { ...ask, file });
-      return false;
+      return { kind: "refused", code: toHostError(e).code };
     } finally {
       this.#acting = false;
     }
   }
 
-  #refused(code: string, ask: (Ask & { file: string }) | null): void {
+  /** Says why the host refused; locked: the dialog to show when a program holds a file. */
+  async #refused(code: string, locked?: () => Ask | Promise<Ask>): Promise<void> {
     if (code === "matter.turn_running" || code === "thread.turn_running") {
       // an answer runs after all: Restore and Undo wait, and the conversations' statuses are read again
+      this.#refusedAt = { list: this.#talks.next, rests: this.#talks.rests };
       this.#set({ failed: code, refused: true });
-      this.#list();
+      this.#talks.list();
       return;
     }
-    if (code === "matter.file_locked" && ask !== null && ask.file !== "") {
-      // a program holds the file: the dialog says which, with Try again, and the page says why
-      this.#set({
-        failed: code,
-        ask: {
-          act: ask.act,
-          stage: "word",
-          id: ask.id,
-          file: ask.file,
-          ...(ask.act === "undo" && ask.choices !== undefined ? { choices: ask.choices } : {}),
-        },
-      });
+    if (code === "matter.file_locked" && locked !== undefined) {
+      // a program holds a file: the dialog says which, with Try again, and the page says why
+      this.#asked += 1;
+      const asked = this.#asked;
+      const ask = await locked();
+      if (asked === this.#asked) this.#set({ failed: code, ask });
       return;
     }
     this.#set({ failed: code, ask: null });
   }
 
-  /** Try again, from the dialog that says a program holds the file. */
+  /** Try again, from the dialog that says a program holds a file, or that the act failed. */
   async tryAgain(): Promise<void> {
     const ask = this.#snap.ask;
-    if (ask?.stage !== "word" || this.#acting) return;
-    if (ask.act === "restore") {
-      // what the restore writes may have changed while the file was held: ask again, then restore
-      try {
-        const r = await this.#transport.query({
-          preview_restore: { matter: this.matter, checkpoint: ask.id, scope: "matter" },
-        });
-        await this.#restore(ask.id, "restore_preview" in r ? r.restore_preview : null);
-      } catch (e) {
-        this.#refused(toHostError(e).code, ask);
-      }
-    } else {
+    if (ask === null || this.#acting || (ask.stage === "confirm" && ask.failed === null)) return;
+    if (ask.act === "undo") {
       await this.#undo(ask);
+      return;
     }
+    // what the restore writes may have changed while it waited: asked again, a different list goes back to the
+    // dialog for the lawyer to read, and the same goes ahead
+    this.#asked += 1;
+    const asked = this.#asked;
+    let preview: RestorePreview | null;
+    try {
+      preview = await this.#preview(ask.id);
+    } catch (e) {
+      if (asked === this.#asked) await this.#refused(toHostError(e).code, () => ask);
+      return;
+    }
+    if (asked !== this.#asked || preview === null) return;
+    const next: RestoreAsk = {
+      act: "restore",
+      id: ask.id,
+      preview,
+      undoes: ask.undoes,
+      stage: "confirm",
+      failed: null,
+    };
+    if (sameChanges(ask.preview, preview)) await this.#restore(next);
+    else this.#set({ ask: next, failed: null });
   }
 }

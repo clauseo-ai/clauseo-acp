@@ -95,7 +95,7 @@ const PREVIEW: RestorePreview = {
   locked: [],
 };
 
-test("the restore dialog lists exactly the preview's files, restores, and its Undo restores the version before", async () => {
+test("the restore dialog lists exactly the preview's files, restores, and its Undo asks to restore the version before", async () => {
   h = await mountVersions(VERSIONS, STEPS, {
     query: answering({ preview_restore: { restore_preview: PREVIEW } }),
     dispatch: (c) =>
@@ -155,6 +155,15 @@ test("the restore dialog lists exactly the preview's files, restores, and its Un
   ).toBe(`Restore to ${at2} today`);
 
   await h.click(done?.querySelector(".ver-restored-undo"));
+  // the Undo asks first, with what restoring the version before writes now
+  expect(queried(h, "preview_restore").at(-1)).toEqual({
+    preview_restore: { matter: MATTER, checkpoint: "cp3", scope: "matter" },
+  });
+  expect(describedBy()).toBe(
+    "2 documents will change: brief.txt and notes.docx. You can undo this.",
+  );
+  expect(h.sent("restore_version")).toHaveLength(1);
+  await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toEqual([
     { matter: MATTER, checkpoint: "cp2", scope: "matter" },
     { matter: MATTER, checkpoint: "cp3", scope: "matter" },

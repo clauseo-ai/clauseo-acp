@@ -1,7 +1,7 @@
-// What Versions can do only once a host change lands, each an optional method of one seam. The desktop host supplies
-// none of them, so each affordance is absent there, never a button that fails; FakeTransport-backed tests and the copy
-// review page supply them. H11's open_file and reveal take the shapes H11's lead gave: when H11 adds them to
-// HostTransport, the room passes them here (`standInsOf` below) and nothing in Versions changes.
+// What Versions can do only once a host change lands, each an optional method of one seam. The room passes none by
+// default, so each affordance is absent in the desktop app, never a button that fails; tests and the copy review page
+// pass theirs to the room explicitly. H11 adds openFile and reveal to HostTransport: then the room passes the
+// transport's own (stand-ins.test.ts fails if their types drift from these meanwhile), and nothing in Versions changes.
 import type { FileRefId, MatterId } from "../../transport/protocol.ts";
 
 /** What H11's reveal shows: a matter's folder, or Clauseo's own data folder, where versions are kept. */
@@ -20,23 +20,3 @@ export type StandIns = {
 
 /** No stand-ins: the desktop host's today. */
 export const NO_STAND_INS: StandIns = {};
-
-const KEYS = [
-  "openFile",
-  "reveal",
-  "versionsFolder",
-  "diskUse",
-] as const satisfies readonly (keyof StandIns)[];
-
-/** The stand-ins a transport carries, by duck type: a transport with H11's methods (or a test's or the review page's
- * fake with any of these) brings them, bound to it. The desktop transport has none today. */
-export function standInsOf(transport: object): StandIns {
-  const t = transport as Partial<Record<keyof StandIns, unknown>>;
-  const out: Record<string, unknown> = {};
-  for (const key of KEYS) {
-    const method = t[key];
-    if (typeof method === "function")
-      out[key] = (method as (...a: never[]) => unknown).bind(transport);
-  }
-  return out as StandIns;
-}

@@ -186,10 +186,3 @@ export const undoable = (m: VersionMeta | undefined): boolean =>
   m.step.checkpoint_after !== undefined &&
   !m.step.undone &&
   m.step.files.length > 0;
-
-/** The version just before one, by its place in the matter's versions (shown or not): what undoing a restore goes
- * back to. */
-export function before(versions: readonly VersionEntry[], checkpoint: string): VersionEntry | null {
-  const i = versions.findIndex((v) => v.checkpoint === checkpoint);
-  return i > 0 ? (versions[i - 1] ?? null) : null;
-}

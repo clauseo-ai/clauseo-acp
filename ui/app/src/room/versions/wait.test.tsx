@@ -4,11 +4,11 @@
 // line never says when the answer is expected, in either language.
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { header, STREAM, THREAD, TURN, upsert } from "../../testing/stream-script.ts";
-import type { ThreadStatus, ViewEntry } from "../../transport/protocol.ts";
+import { streamOf } from "../../store/view.ts";
+import { header, reset, STREAM, THREAD, TURN, upsert } from "../../testing/stream-script.ts";
+import type { ThreadStatus, ThreadSummary, ViewEntry } from "../../transport/protocol.ts";
 import {
   file,
-  MATTER_STREAM,
   mountVersions,
   NOON,
   OTHER,
@@ -48,6 +48,12 @@ const headerIn = (status: ThreadStatus): ViewEntry => {
   return e.header === undefined ? e : { header: { ...e.header, status } };
 };
 
+/** The other conversation's header, in a status. */
+const otherHeader = (status: "idle" | "running"): ViewEntry => {
+  const e = header(status);
+  return e.header === undefined ? e : { header: { ...e.header, thread: OTHER } };
+};
+
 const BUSY: [string, ThreadStatus][] = [
   ["starting", "starting"],
   ["running", "running"],
@@ -79,14 +85,21 @@ for (const [name, status] of BUSY) {
 
 const refusal = { code: "matter.turn_running", message: "the host's own words", retryable: true };
 
-test("after undo_step is refused because an answer runs, Restore and Undo wait until the matter moves on", async () => {
+test("after undo_step is refused because an answer runs, Restore and Undo wait until a list_threads asked after it says none does", async () => {
+  const later: { answer?: (r: { threads: ThreadSummary[] }) => void } = {};
+  let refusedYet = false;
   h = await mountVersions(VERSIONS, STEPS, {
+    query: (q) =>
+      typeof q === "object" && q.list_threads !== undefined && refusedYet
+        ? new Promise((resolve) => (later.answer = resolve))
+        : undefined,
     dispatch: () => {
+      refusedYet = true;
       throw refusal;
     },
   });
   await h.openVersions();
-  await lookAt(h, "cp2");
+  await h.lookAt("cp2");
   expect(h.one("versions-wait")).toBeNull();
   await h.click(h.one("version-undo"));
   await h.click(h.one("dialog-confirm"));
@@ -95,10 +108,51 @@ test("after undo_step is refused because an answer runs, Restore and Undo wait u
   expect(h.one("versions-wait")?.textContent).toBe(errorWords("en", "matter.turn_running"));
   expect(document.body.textContent).not.toContain(refusal.message);
   expect(h.one("dialog-confirm")?.getAttribute("aria-disabled")).toBe("true");
-  // a new version on the matter's stream: a turn ended, and Restore and Undo go ahead again
-  await h.deliver(MATTER_STREAM, [upsert(version(4, "outside_edits", { files: [file("x.txt")] }))]);
+  // the conversations read again after the refusal: none runs now, and Restore and Undo go ahead again
+  later.answer?.({ threads: [thread()] });
+  await h.settle();
   expect(h.one("versions-wait")).toBeNull();
   expect(h.one("dialog-confirm")?.getAttribute("aria-disabled")).toBeNull();
+});
+
+test("after a refusal, a conversation list_threads calls running is held until its header rests, with nothing new on the matter's stream", async () => {
+  let running = false;
+  h = await mountVersions(VERSIONS, STEPS, {
+    // the room opens the newest conversation: the other one is listed only once it runs
+    query: (q) =>
+      typeof q === "object" && q.list_threads !== undefined
+        ? {
+            threads: running
+              ? [thread(THREAD, "Notes"), thread(OTHER, "Draft reply", "running")]
+              : [thread(THREAD, "Notes")],
+          }
+        : undefined,
+    dispatch: () => {
+      running = true;
+      throw refusal;
+    },
+  });
+  await h.openVersions();
+  await h.lookAt("cp2");
+  await h.click(h.one("version-undo"));
+  await h.click(h.one("dialog-confirm"));
+  waits(h);
+  expect(h.one("versions-wait")?.textContent).toBe(
+    "Restore and Undo wait until the answer in Draft reply is done.",
+  );
+  // Versions holds the running conversation's stream, which the room doesn't otherwise
+  const other = streamOf(OTHER);
+  expect(h.transport.only("subscribe").some((c) => c.stream === other)).toBe(true);
+  await h.deliver(other, [reset([], otherHeader("running"))]);
+  waits(h);
+  // the turn changed no file: its header rests, the matter's stream stays still, and the buttons come back
+  await h.deliver(other, [upsert(otherHeader("idle"))]);
+  expect(h.one("versions-wait")).toBeNull();
+  for (const id of ["version-undo", "version-restore"])
+    expect(h.one(id)?.getAttribute("aria-disabled"), id).toBeNull();
+  // and the hold is let go
+  expect(h.transport.only("unsubscribe").some((c) => c.stream === other)).toBe(true);
+  expect(h.store.view(other)).toBeUndefined();
 });
 
 test("after restore_version is refused because an answer runs, the line names the conversation list_threads says runs", async () => {

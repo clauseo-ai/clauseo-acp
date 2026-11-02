@@ -3,7 +3,7 @@
 // undo always puts at least one file back, and the toolbar's Undo opens the dialog for the newest change.
 import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { THREAD, TURN } from "../../testing/stream-script.ts";
+import { STREAM, THREAD, TURN, upsert } from "../../testing/stream-script.ts";
 import type { ViewEntry } from "../../transport/protocol.ts";
 import {
   file,
@@ -126,4 +126,23 @@ test("the toolbar's Undo opens Versions on the newest turn's change, with its un
   ]);
   // done: back at now, saying what went back
   expect(document.body.textContent).toMatch(/Undid the change at .+\. brief\.txt went back/);
+});
+
+test("the toolbar's Undo waiting for its step is dropped once the lawyer picks another version", async () => {
+  // the newest turn's step isn't in the conversation's window yet
+  h = await mountVersions(VERSIONS, []);
+  await h.click(h.host.querySelector(".room-pair .room-undo"));
+  await act(async () => void (await loadVersions()));
+  await h.settle();
+  await h.deliver(MATTER_STREAM, [matterReset(VERSIONS)]);
+  expect(rowOf(h, "cp2")?.getAttribute("aria-current")).toBe("true");
+  expect(dialog()).toBeNull();
+  // the lawyer moves on to the import
+  await h.click(rowOf(h, "cp1"));
+  // the step comes in late: no dialog opens, and the room stays where the lawyer looks
+  await h.deliver(STREAM, [
+    upsert(stepEntry(5, { files: [file("brief.txt")], checkpoint_after: "cp2" })),
+  ]);
+  expect(dialog()).toBeNull();
+  expect(rowOf(h, "cp1")?.getAttribute("aria-current")).toBe("true");
 });

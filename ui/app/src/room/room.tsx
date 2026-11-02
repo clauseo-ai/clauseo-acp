@@ -32,6 +32,7 @@ import { NewMatter } from "./new-matter.tsx";
 import { LocateGate, MovedFolder } from "./moved.tsx";
 import { RoomRail } from "./rail.tsx";
 import { ScratchLine } from "./scratch-line.tsx";
+import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
 import type { Drafts } from "./thread/session.ts";
 import { Work } from "./thread/work.tsx";
@@ -71,16 +72,19 @@ const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 export function Room({
   transport,
   windowControls,
+  standIns,
 }: {
   transport: HostTransport;
   /** Optional, for tests: the window's controls in place of Tauri's, which the room makes itself inside the desktop
    * app. */
   windowControls?: WindowControls | null | undefined;
+  /** Optional, for tests and the review page: what Versions can do once host changes land (versions/stand-ins.ts). */
+  standIns?: StandIns | undefined;
 }) {
   return (
     <RoomScopeProvider>
       <PartsRoot>
-        <RoomFrame transport={transport} windowControls={windowControls} />
+        <RoomFrame transport={transport} windowControls={windowControls} standIns={standIns} />
       </PartsRoot>
     </RoomScopeProvider>
   );
@@ -89,9 +93,11 @@ export function Room({
 function RoomFrame({
   transport,
   windowControls,
+  standIns,
 }: {
   transport: HostTransport;
   windowControls: WindowControls | null | undefined;
+  standIns: StandIns | undefined;
 }) {
   const w = useWords();
   const room = useRoom();
@@ -146,6 +152,7 @@ function RoomFrame({
     matter: open?.matter ?? null,
     papers,
     platform,
+    ...(standIns === undefined ? {} : { standIns }),
   });
   const title =
     open !== null
@@ -179,7 +186,11 @@ function RoomFrame({
         history={[]}
         canUndo={false}
         railOpen={railOpen}
-        onRail={() => setRailOpen((open) => !open)}
+        onRail={() => {
+          // the rail's place holds Versions' timeline: Matters closes it, and the rail comes back
+          versions.close();
+          setRailOpen((open) => !open);
+        }}
         railWaits={railWaits(view)}
         railRef={railToggle}
         testIds={{ title: "matter", rail: "rail-toggle" }}

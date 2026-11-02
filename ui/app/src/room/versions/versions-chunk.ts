@@ -9,26 +9,28 @@ export { VersionsCentre, VersionsRail } from "./versions-parts.tsx";
 let loading: Promise<void> | null = null;
 
 /** Versions' sheet as a stylesheet link from the app's own origin (the CSP's style-src 'self'); resolves once it has
- * loaded, or failed, so the parts never draw unstyled for a frame. Tests, which draw no styles, load none. */
-export function loadSheet(): Promise<void> {
+ * loaded, or failed, so the parts never draw unstyled for a frame. A sheet that failed is asked for again at the next
+ * call. Tests load none, unless they ask for the sheet itself (`always`). */
+export function loadSheet(always = false): Promise<void> {
+  if (import.meta.env.MODE === "test" && !always) return Promise.resolve();
   if (loading !== null) return loading;
-  loading =
-    import.meta.env.MODE === "test"
-      ? Promise.resolve()
-      : new Promise<void>((resolve) => {
-          const link = document.createElement("link");
-          link.rel = "stylesheet";
-          link.href = sheet;
-          link.addEventListener("load", () => resolve(), { once: true });
-          link.addEventListener(
-            "error",
-            () => {
-              console.warn("Versions' stylesheet did not load");
-              resolve();
-            },
-            { once: true },
-          );
-          document.head.append(link);
-        });
+  loading = new Promise<void>((resolve) => {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = sheet;
+    link.addEventListener("load", () => resolve(), { once: true });
+    link.addEventListener(
+      "error",
+      () => {
+        // Versions opens unstyled this once; the next open asks for the sheet again
+        console.warn("Versions' stylesheet did not load");
+        link.remove();
+        loading = null;
+        resolve();
+      },
+      { once: true },
+    );
+    document.head.append(link);
+  });
   return loading;
 }

@@ -23,6 +23,17 @@ import { fileName } from "./timeline.ts";
 export const conversationOf = (lang: Lang, s: Snapshot, thread: ThreadId): string =>
   s.titles.get(thread) || mt(lang, "New conversation");
 
+/** The versions as the parts show them: one made in a conversation without a title names a new conversation, as
+ * conversationOf does. */
+export const named = (lang: Lang, history: readonly Version[]): readonly Version[] =>
+  history.some((v) => v.who.kind === "clauseo" && v.who.conversation === "")
+    ? history.map((v) =>
+        v.who.kind === "clauseo" && v.who.conversation === ""
+          ? { ...v, who: { ...v.who, conversation: mt(lang, "New conversation") } }
+          : v,
+      )
+    : history;
+
 /** A moment's clock time in English, "4:31 pm", for the words' {time} slots, which put it in the language. */
 const at = (s: Snapshot, ts: Timestamp) => clockOf(ts, s.now, s.zone, "en").time;
 
@@ -36,6 +47,14 @@ export function waitingOf(lang: Lang, s: Snapshot): string | null {
   return s.refused ? errorWords(lang, "matter.turn_running") : null;
 }
 
+/** Each file's name in a dialog, by its path: the name alone, or, where two of the dialog's files share a name, the
+ * whole path, isolated from the words around it. */
+export function namesOf(paths: readonly string[]): (path: string) => string {
+  const count = new Map<string, number>();
+  for (const p of new Set(paths)) count.set(fileName(p), (count.get(fileName(p)) ?? 0) + 1);
+  return (p) => ((count.get(fileName(p)) ?? 0) > 1 ? `\u2068${p}\u2069` : fileName(p));
+}
+
 /** "{when}" of a version by its id, for the dialogs' titles. */
 const versionOf = (s: Snapshot, id: string): Version | undefined =>
   s.timeline.history.find((v) => v.id === id);
@@ -46,19 +65,23 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
   if (ask.stage === "word") return { kind: "word", act: ask.act, file: fileName(ask.file) };
   const v = versionOf(s, ask.id);
   if (v === undefined) return null;
+  // a refusal that named no file: the dialog stays as it was, says why, and offers Try again
+  const failed = ask.failed === null ? null : errorWords(lang, ask.failed);
   if (ask.act === "restore") {
-    const changed = ask.preview.changes.map((c) => fileName(c.path));
+    const { changes, added_since, kept } = ask.preview;
+    const name = namesOf([...changes.map((c) => c.path), ...added_since, ...kept]);
+    const changed = changes.map((c) => name(c.path));
     const papers = listOf(lang, changed);
     const stays = [
-      ask.preview.added_since.length === 0
+      added_since.length === 0
         ? null
         : vt(lang, "'{papers}', added since, stays.", {
-            papers: listOf(lang, ask.preview.added_since.map(fileName)),
+            papers: listOf(lang, added_since.map(name)),
           }),
-      ask.preview.kept.length === 0
+      kept.length === 0
         ? null
         : vt(lang, "'{papers}' can't be restored and stays as it is.", {
-            papers: listOf(lang, ask.preview.kept.map(fileName)),
+            papers: listOf(lang, kept.map(name)),
           }),
     ].filter((x) => x !== null);
     return {
@@ -83,11 +106,13 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
       stays: stays.length === 0 ? null : stays.join(" "),
       edited: [],
       editedHead: null,
+      failed,
     };
   }
   const meta = s.timeline.meta.get(ask.id);
   const files = meta?.step?.files ?? [];
-  const back = files.filter((f) => ask.choices.get(f.path) === "undo").map((f) => fileName(f.path));
+  const name = namesOf(files.map((f) => f.path));
+  const back = files.filter((f) => ask.choices.get(f.path) === "undo").map((f) => name(f.path));
   const since = changedSince(s.timeline, ask.id);
   // the rows: each file kept by default, a file changed again since saying by whom and when, one that may hold the
   // lawyer's own edits saying so
@@ -137,7 +162,7 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
       const later = by === undefined ? undefined : versionOf(s, by);
       return {
         id: f.path,
-        title: fileName(f.path),
+        title: name(f.path),
         at:
           later === undefined
             ? vt(lang, "It may hold your own edits")
@@ -149,6 +174,7 @@ export function askOf(lang: Lang, cal: Calendar, s: Snapshot, ask: Ask | null): 
         choice: ask.choices.get(f.path) ?? "keep",
       };
     }),
+    failed,
   };
 }
 
