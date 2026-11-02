@@ -11,8 +11,11 @@ publish.workspace = true
 clauseo-protocol = { path = "../protocol" }
 clauseo-process = { path = "../process" }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 # Denials print as JSON lines in the examples and travel to `host` (R18).
 serde = { workspace = true, features = ["derive"] }
+# clippy.toml bans std's canonicalize in favour of dunce's.
+dunce = { workspace = true }
 
 [dev-dependencies]
 # The denials' JSON shape.
