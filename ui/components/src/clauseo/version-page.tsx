@@ -220,8 +220,8 @@ export function PdfSheet({
       {pdf && (
         <p className="ver-pdf-note">
           <Say>{w.v("A PDF shows only whether it changed.")}</Say>
-          {/* the way to read each stands only where the sheet can open them */}
-          {onOpen !== undefined && (
+          {/* the way to read each stands only where the sheet can open both */}
+          {onOpen !== undefined && openable === "both" && (
             <>
               {" "}
               <Say>{w.v("Open each to read it.")}</Say>

@@ -410,13 +410,13 @@
     flex: none;
     margin-top: var(--s0-5);
   }
-  /* over the sticky day headings and the raised work: the card's positioner, which moves by transform and so
-     stands as a layer of its own, takes the floating layer's place */
-  /* the popover's title, as the matter's allows card sets its own (edge.css), without that sheet */
+  /* the popover's title, set as the matter's allows card sets its own (edge.css), without that sheet; flush with
+     the lines under it, which the allows card's inset rows are not */
   .ver-where-title {
     @apply text-ui stretch-voice font-chip text-primary tracking-head;
-    padding: 0 var(--s2);
   }
+  /* over the sticky day headings and the raised work: the card's positioner, which moves by transform and so
+     stands as a layer of its own, takes the floating layer's place */
   .ver-where {
     padding: var(--s4) var(--s5) var(--s4);
     display: grid;

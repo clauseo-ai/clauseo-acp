@@ -371,6 +371,10 @@ test("a PDF's sheet asks the lawyer to open each only where it can open them, an
   expect(document.querySelectorAll(".ver-pdf-side")).toHaveLength(2);
   await act(async () => root?.render(sheet({ onOpen: () => undefined })));
   expect(words()).toContain("A PDF shows only whether it changed. Open each to read it.");
+  // only the file as it is now can open: "each" would promise a second button
+  await act(async () => root?.render(sheet({ onOpen: () => undefined, openable: "now" })));
+  expect(words()).toContain("A PDF shows only whether it changed.");
+  expect(words()).not.toContain("Open each to read it.");
   // a document whose words can't be compared yet, with nothing to say of either side: the title and the state alone
   await act(async () => root?.render(sheet({ pdf: false })));
   expect(document.querySelectorAll(".ver-pdf-side")).toHaveLength(0);
