@@ -10,6 +10,7 @@ fn listed(access: Access) -> bool {
         | Access::Subscribe
         | Access::SubscribeEvents
         | Access::SubscribeApp
+        | Access::SubscribeLimits
         | Access::Ack
         | Access::RegisterFolder
         | Access::RegisterFile
@@ -43,6 +44,7 @@ fn entry_points_name_every_access() {
         Access::Subscribe,
         Access::SubscribeEvents,
         Access::SubscribeApp,
+        Access::SubscribeLimits,
         Access::Ack,
         Access::RegisterFolder,
         Access::RegisterFile,

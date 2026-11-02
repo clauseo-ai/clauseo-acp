@@ -45,6 +45,7 @@ use crate::error::Error;
 use crate::matter_worker::MatterReply;
 use crate::pipeline::Failure;
 
+pub(crate) use asks::asks_pending;
 pub(crate) use inputs::{AgentReply, LogFor, TurnInput};
 pub(crate) use out::flush_text;
 pub(crate) use restore::{

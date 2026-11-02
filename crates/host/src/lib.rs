@@ -49,21 +49,22 @@
 //!   [`Launcher`](clauseo_process::Launcher); [`HostConfig::with_profile_hook`],
 //!   [`HostConfig::with_refused_folders`], [`HostConfig::with_home_folder`],
 //!   [`HostConfig::with_managed_mcp_path`], [`HostConfig::with_pre_write_guard`],
-//!   [`HostConfig::with_clock`] and [`HostConfig::with_ids`] set the rest). It returns once
+//!   [`HostConfig::with_clock`], [`HostConfig::with_ids`] and
+//!   [`HostConfig::with_limits_reader`] set the rest). It returns once
 //!   start-up is done: the store is open in `Effective::data_dir()`, the Scratch matter exists,
 //!   and start-up reconciliation has committed. A second start on the same data folder fails
 //!   with `store.locked`.
 //! - [`HostHandle`], `Clone` and `Send`: [`HostHandle::dispatch`], [`HostHandle::query`],
 //!   [`HostHandle::subscribe`], [`HostHandle::subscribe_events`],
-//!   [`HostHandle::subscribe_app`], [`HostHandle::ack`],
+//!   [`HostHandle::subscribe_app`], [`HostHandle::subscribe_limits`], [`HostHandle::ack`],
 //!   [`HostHandle::register_folder`], [`HostHandle::register_file`],
 //!   [`HostHandle::locate_file`] and [`HostHandle::matter_folder`] (the desktop's `open_file`
 //!   and `reveal`, 0026; the local desktop only), and [`HostHandle::shutdown`]. Each call is
 //!   one request over a `bounded(256)` channel with a `futures` oneshot for the reply.
 //!   [`HostJoin::join`] waits for the thread to end.
 //! - [`Subscription`] yields [`EncodedEvent`]s: each `HostEvent` serialised once and shared by
-//!   every subscriber of the stream; [`EncodedEvent::json`] is sent on as it is and
-//!   [`EncodedEvent::decode`] gives the type back. [`EventSubscription`] yields typed
+//!   every subscriber of the stream (or of the limits); [`EncodedEvent::json`] is sent on as it
+//!   is and [`EncodedEvent::decode`] gives the type back. [`EventSubscription`] yields typed
 //!   `HostEvent`s: the replay, one `CaughtUp`, then live `Events`. [`AppSubscription`]
 //!   yields the app-wide events of no stream as [`EncodedEvent`]s: `SettingsChanged` today.
 //! - `HostQuery::ListAgents` lists the settings agents with their kinds.
@@ -89,8 +90,13 @@
 //!   [`pre_write_guard::DENY`] with the reason on stderr; [`pre_write_guard::FLAG`] (then
 //!   `--matter <folder>`) is what the hook passes. It runs in the hook's own process, with no
 //!   host thread.
-//! - Stage B's `limits` plugs in as a new actor input and publishes the existing
-//!   `HostEvent::AccountLimitsChanged` to app subscribers (`actor/app.rs`'s `publish`).
+//! - The limits (`actor/limits.rs`): the host owns the `clauseo_limits::Limits` model, starts
+//!   its reads on the actor's pool (the reader is [`HostConfig::with_limits_reader`]'s, by
+//!   default `clauseo_limits::ProcessReaders`), feeds it live rate-limit signals, turn ends,
+//!   pending questions and `RefreshLimits`, keeps one timer at its next deadline, stores each
+//!   changed `AccountLimits` (never in the log), and publishes `AccountLimitsChanged` and
+//!   `LimitsViewChanged` to limits subscribers ([`HostHandle::subscribe_limits`], a
+//!   [`Subscription`]).
 //!
 //! # Invariants
 //!
@@ -114,9 +120,9 @@
 //! # Depends on
 //!
 //! `protocol`, `reducer`, `store`, `matters`, `process`, `acp`, `settings`, `limits` (its
-//! `CODEX_OVERRIDES`), `async-channel`, `async-io`, `futures`, `uuid`, `serde_json`, `tracing`,
-//! `thiserror`, `dunce` and `sha2` (the Codex hook's trust hash, 0024). Never `tauri`, `tokio`
-//! or `agents`.
+//! model, its readers and `CODEX_OVERRIDES`), `async-channel`, `async-io`, `futures`, `uuid`,
+//! `serde_json`, `tracing`, `thiserror`, `dunce` and `sha2` (the Codex hook's trust hash, 0024).
+//! Never `tauri`, `tokio` or `agents`.
 //!
 //! # Start reading
 //!

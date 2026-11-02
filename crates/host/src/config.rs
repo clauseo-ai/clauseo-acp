@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use clauseo_limits::ReadLimits;
 use clauseo_process::Launcher;
 use clauseo_protocol::AgentId;
 use clauseo_settings::{Effective, PlatformDirs as _, SystemDirs};
@@ -57,6 +58,7 @@ pub struct HostConfig {
     app_capacity: usize,
     codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
     pre_write_guard: Option<PathBuf>,
+    limits_reader: Option<Arc<dyn ReadLimits>>,
 }
 
 /// A `HostConfig` taken apart by the host thread.
@@ -73,6 +75,8 @@ pub(crate) struct ConfigParts {
     pub(crate) app_capacity: usize,
     pub(crate) codex_hooks: Option<serde_json::Map<String, serde_json::Value>>,
     pub(crate) pre_write_guard: Option<PathBuf>,
+    /// The limits reader a caller set; `None` builds the default at start-up.
+    pub(crate) limits_reader: Option<Arc<dyn ReadLimits>>,
 }
 
 impl HostConfig {
@@ -92,6 +96,7 @@ impl HostConfig {
             managed_mcp: crate::agent::loads::managed_mcp_path(),
             codex_hooks: None,
             pre_write_guard: None,
+            limits_reader: None,
         }
     }
 
@@ -151,6 +156,15 @@ impl HostConfig {
         self
     }
 
+    /// What reads each agent account's plan usage (default: `clauseo_limits::ProcessReaders`
+    /// over the settings, the launcher, the host clock and the Codex home the host launches
+    /// `codex-acp` with, `<data folder>/agents/codex-acp/home`). The host spawns each read on
+    /// its pool and never waits on one.
+    pub fn with_limits_reader(mut self, reader: Arc<dyn ReadLimits>) -> Self {
+        self.limits_reader = Some(reader);
+        self
+    }
+
     /// The byte cap of each stream's patch window, for tests that push a subscriber out of it.
     #[cfg(feature = "test-support")]
     pub fn with_patch_window_bytes(mut self, bytes: usize) -> Self {
@@ -189,6 +203,7 @@ impl HostConfig {
             managed_mcp: self.managed_mcp,
             codex_hooks: self.codex_hooks,
             pre_write_guard: self.pre_write_guard,
+            limits_reader: self.limits_reader,
         }
     }
 }

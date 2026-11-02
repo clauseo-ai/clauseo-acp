@@ -2,7 +2,7 @@
 //! actor fills with `try_send`. When the channel was full the actor stops sending and raises a
 //! flag; the stream, once it has drained the channel, asks the actor to catch it up (a `Reset`
 //! for a view subscription, a refill from the store for an event subscription, the current state
-//! for an app subscription).
+//! for an app subscription, the current limits view for a limits subscription).
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -14,6 +14,7 @@ use futures::Stream;
 use futures::task::AtomicWaker;
 
 use crate::actor::input::{Input, SubId};
+use crate::actor::limits::LimitsInput;
 use crate::encode::EncodedEvent;
 
 /// The capacity of each subscription's channel.
@@ -41,11 +42,12 @@ impl Lag {
     }
 }
 
-/// What a subscription follows: one stream, or the app-wide events.
+/// What a subscription follows: one stream, the app-wide events, or the limits.
 #[derive(Debug, Clone, Copy)]
 enum Topic {
     Stream(StreamId),
     App,
+    Limits,
 }
 
 impl Topic {
@@ -54,6 +56,7 @@ impl Topic {
         match self {
             Self::Stream(stream) => Input::Drained { stream, id },
             Self::App => Input::AppDrained { id },
+            Self::Limits => Input::Limits(LimitsInput::Drained { id }),
         }
     }
 
@@ -62,6 +65,7 @@ impl Topic {
         match self {
             Self::Stream(stream) => Input::Unsubscribed { stream, id },
             Self::App => Input::AppUnsubscribed { id },
+            Self::Limits => Input::Limits(LimitsInput::Unsubscribed { id }),
         }
     }
 }
@@ -103,6 +107,11 @@ impl<T> Drop for Feed<T> {
 /// A view subscription: the stream's patches as [`EncodedEvent`]s, each a `HostEvent::Patches`
 /// serialised once and shared by every subscriber. It starts with the tail after the position
 /// asked for, or a `Reset`. Ends when the host stops.
+///
+/// `HostHandle::subscribe_limits` returns one too, following the limits instead of a stream:
+/// first the current `LimitsViewChanged`, then for each change one `AccountLimitsChanged` per
+/// changed account and one `LimitsViewChanged`. One whose channel was full gets nothing until
+/// it has drained it, then the current `LimitsViewChanged`.
 #[derive(Debug)]
 pub struct Subscription(Feed<EncodedEvent>);
 
@@ -115,11 +124,11 @@ pub struct EventSubscription(Feed<HostEvent>);
 
 /// An app subscription: the app-wide `HostEvent`s that belong to no stream, as
 /// [`EncodedEvent`]s, each serialised once and shared by every app subscriber. Today that is
-/// `SettingsChanged`, after every change of the settings; the matter list, thread summaries,
-/// notices and `AccountLimitsChanged` are to come here too. A subscription carries no window
-/// identity, so every app subscriber gets every app event: a window that wants only the
-/// summaries of threads it has not opened drops the others itself. No stream's patches or
-/// envelopes ever come here, and no app event goes to a stream's subscribers.
+/// `SettingsChanged`, after every change of the settings; the matter list, thread summaries
+/// and notices are to come here too (the limits have their own subscription). A subscription
+/// carries no window identity, so every app subscriber gets every app event: a window that
+/// wants only the summaries of threads it has not opened drops the others itself. No stream's
+/// patches or envelopes ever come here, and no app event goes to a stream's subscribers.
 ///
 /// It starts with nothing: subscribe first, then read the current state (`GetSettings`); the
 /// host answers calls in order, so no change falls between the two. A subscriber whose channel
@@ -166,6 +175,15 @@ impl Subscription {
         id: SubId,
     ) -> (Self, Sink<EncodedEvent>) {
         let (feed, sink) = feed(actor, Topic::Stream(stream), id, SUBSCRIPTION_CAPACITY);
+        (Self(feed), sink)
+    }
+
+    /// A limits subscription and the actor's end of it.
+    pub(crate) fn limits(
+        actor: async_channel::Sender<Input>,
+        id: SubId,
+    ) -> (Self, Sink<EncodedEvent>) {
+        let (feed, sink) = feed(actor, Topic::Limits, id, SUBSCRIPTION_CAPACITY);
         (Self(feed), sink)
     }
 }

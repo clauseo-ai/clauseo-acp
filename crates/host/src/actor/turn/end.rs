@@ -8,8 +8,8 @@ use clauseo_protocol::{
     MatterId, StopReason, StreamId, ThreadId, TurnId,
 };
 
-use super::super::Actor;
 use super::super::input::MatterTag;
+use super::super::{Actor, limits};
 use super::agents;
 use super::close::{Expiries, TurnClose};
 use super::out::Out;
@@ -123,6 +123,7 @@ pub(super) fn end_turn(actor: &mut Actor, thread: ThreadId, mut end: End) {
         agent.elicitations.clear();
         agent.url_elicitations.clear();
     }
+    limits::asking_changed(actor);
     let sent = (|| -> Result<(), Error> {
         let matter = matter_of(actor, thread)?;
         let now = actor.now().wall;
@@ -177,6 +178,7 @@ pub(super) fn on_after_turn(
         (Some(_), StopReason::EndTurn, None) => StopReason::AtLimit,
         (_, stop, _) => stop,
     };
+    limits::turn_ended_in(actor, thread, stop == StopReason::AtLimit);
     let mut close = TurnClose::new(turn, stop);
     // Expiries step 6 could not log (its commit failed, the stream rolled back).
     close.expiries = Expiries::Pending(end.expiry);

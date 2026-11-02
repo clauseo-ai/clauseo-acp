@@ -40,6 +40,7 @@ mod app;
 mod commands;
 mod folder_state;
 pub(crate) mod input;
+pub(crate) mod limits;
 mod locate;
 mod matter_details;
 mod matters;
@@ -123,6 +124,8 @@ pub(crate) struct Actor {
     pub(crate) event_subs: BTreeMap<StreamId, Vec<EventSub>>,
     /// The app subscribers, in the order they came.
     pub(crate) app_subs: Vec<app::AppSub>,
+    /// The limits model, its reader, timer and subscribers (`limits.rs`).
+    pub(crate) limits: limits::LimitsHost,
     pub(crate) commands: BTreeMap<CommandId, PendingCommand>,
     pub(crate) folders: BTreeMap<FolderRefId, PathBuf>,
     /// Folders a command is making a matter of (a create, an import, a relocate), by command,
@@ -312,13 +315,18 @@ impl Actor {
 
     /// Posts `timer` after `delay` on the host clock. Abort the handle to disarm it.
     pub(crate) fn arm_timer(&self, delay: Duration, timer: turn::TurnTimer) -> AbortHandle {
+        self.post_after(delay, Input::Timer(timer))
+    }
+
+    /// Posts `input` after `delay` on the host clock. Abort the handle to disarm it.
+    pub(crate) fn post_after(&self, delay: Duration, input: Input) -> AbortHandle {
         let (handle, registration) = AbortHandle::new_pair();
         let after = self.clock.after(delay);
         let post = self.post.clone();
         let task = Abortable::new(
             async move {
                 after.await;
-                let _gone = post.try_send(Input::Timer(timer));
+                let _gone = post.try_send(input);
             },
             registration,
         );
@@ -399,6 +407,9 @@ impl Actor {
                 reply,
             } => subs::subscribe_events(self, &principal, stream, after_seq, reply),
             Request::SubscribeApp { principal, reply } => app::subscribe(self, &principal, reply),
+            Request::SubscribeLimits { principal, reply } => {
+                limits::subscribe(self, &principal, reply);
+            }
             Request::Ack {
                 principal,
                 stream,
@@ -472,6 +483,7 @@ impl Actor {
             Input::Unsubscribed { stream, id } => subs::on_unsubscribed(self, stream, id),
             Input::AppDrained { id } => app::on_drained(self, id),
             Input::AppUnsubscribed { id } => app::on_unsubscribed(self, id),
+            Input::Limits(input) => limits::on_input(self, input),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {
