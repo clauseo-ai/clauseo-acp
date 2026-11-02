@@ -1,7 +1,7 @@
 //! A Codex agent (`codex-acp`, played by the `codex-*` scenarios): its ask mode before the first
 //! prompt, its launch variables, `session/resume`, the guard's trust check, and its file
-//! changes, permissions, limit and sign-in failures through the host. The `.codex` refusal and
-//! `ListAgents` are in `codex_folder.rs`.
+//! changes, permissions, limit and sign-in failures through the host. The `.codex` refusal is in
+//! `codex_folder.rs`, `ListAgents` in `list_agents.rs` and the plans in `codex_plans.rs`.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;

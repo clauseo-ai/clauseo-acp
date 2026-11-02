@@ -32,11 +32,17 @@ mod codex;
 #[path = "host/codex_folder.rs"]
 mod codex_folder;
 #[cfg(test)]
+#[path = "host/codex_plans.rs"]
+mod codex_plans;
+#[cfg(test)]
 #[path = "host/commands.rs"]
 mod commands;
 #[cfg(test)]
 #[path = "host/limits.rs"]
 mod limits;
+#[cfg(test)]
+#[path = "host/list_agents.rs"]
+mod list_agents;
 #[cfg(test)]
 #[path = "host/mcp.rs"]
 mod mcp;
