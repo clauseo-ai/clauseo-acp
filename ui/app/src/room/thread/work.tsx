@@ -31,6 +31,7 @@ export function Work({
   draftKey,
   conversation,
   choice,
+  plan = "",
   focus = null,
   onThread,
 }: {
@@ -44,6 +45,8 @@ export function Work({
   conversation: ConversationLink;
   /** A new conversation's plan choice, before its first question. */
   choice?: PlanChoice | undefined;
+  /** The status line's plan words ("Uses your Claude plan"), "" for none. */
+  plan?: string;
   /** A request for the field's focus (New conversation, or a conversation pressed): each new number takes it. */
   focus?: number | null;
   /** Hears the open thread: null until there is one. */
@@ -54,7 +57,13 @@ export function Work({
   useEffect(() => {
     if (focus !== null) field.current?.focus();
   }, [focus]);
-  const session = useThreadSession(transport, store, matter?.matter ?? null, conversation);
+  const session = useThreadSession(
+    transport,
+    store,
+    matter?.matter ?? null,
+    conversation,
+    draftKey,
+  );
   const stream = session.actions.stream;
   useWatch(store, stream);
   const busy = useBusy(stream, session.sentTurn);
@@ -92,6 +101,7 @@ export function Work({
         drafts={drafts}
         draftKey={draftKey}
         choice={choice}
+        plan={plan}
         disabled={matter === null}
         busy={busy}
         refused={session.refused}

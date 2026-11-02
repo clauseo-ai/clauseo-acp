@@ -104,7 +104,7 @@ test("create with the draft open: create_thread once, and the thread keeps the d
   const { talks, sent } = await rig(today(() => [thread(T1)]));
   talks.startNew();
   const key = talks.view().open;
-  const made = await talks.create();
+  const made = await talks.create(talks.view().open ?? "");
   expect(made).toBe(MADE);
   expect(sent("create_thread")).toEqual([{ matter: A.matter, agent: "claude" }]);
   const view = talks.view();
@@ -114,14 +114,14 @@ test("create with the draft open: create_thread once, and the thread keeps the d
   expect(view.rows[0]).toMatchObject({ key, thread: MADE, agent: "claude" });
   expect(view.rows).toHaveLength(2);
   // the open conversation now has its thread: create doesn't make another
-  expect(await talks.create()).toBe(MADE);
+  expect(await talks.create(talks.view().open ?? "")).toBe(MADE);
   expect(sent("create_thread")).toHaveLength(1);
 });
 
 test("a matter with no threads: the draft it opens keeps its key once create makes the thread", async () => {
   const { talks } = await rig(today(() => []));
   const key = talks.view().open;
-  await talks.create();
+  await talks.create(talks.view().open ?? "");
   expect(talks.view().open).toBe(key);
   expect(talks.view().thread).toBe(MADE);
   expect(talks.view().rows.map((r) => r.key)).toEqual([key]);
@@ -133,7 +133,7 @@ test("create while the list loads waits for it, and returns the thread it reopen
   const { talks, sent, settle } = await rig(today(() => held));
   expect(talks.view().phase).toBe("loading");
   const key = talks.view().open;
-  const made = talks.create();
+  const made = talks.create(talks.view().open ?? "");
   answer([thread(T1)]);
   expect(await made).toBe(T1);
   await settle();
@@ -154,7 +154,7 @@ test("a failed list is read again by create, which then makes the thread", async
   );
   expect(talks.view().phase).toBe("failed");
   expect(talks.view().refused).not.toBeNull();
-  expect(await talks.create()).toBe(MADE);
+  expect(await talks.create(talks.view().open ?? "")).toBe(MADE);
   expect(listReads()).toBe(2);
   expect(sent("create_thread")).toHaveLength(1);
   expect(talks.view().phase).toBe("ready");
@@ -168,14 +168,14 @@ test("a list that fails again: create rejects and makes nothing", async () => {
       throw new Error("the host is busy");
     }),
   );
-  await expect(talks.create()).rejects.toBeDefined();
+  await expect(talks.create(talks.view().open ?? "")).rejects.toBeDefined();
   expect(sent("create_thread")).toEqual([]);
 });
 
 test("the agent create_thread names: the plan chosen, else the newest thread's, else DEFAULT_AGENT", async () => {
   // nothing to go by
   const none = await rig(today(() => []));
-  await none.talks.create();
+  await none.talks.create(none.talks.view().open ?? "");
   expect(none.sent("create_thread")).toEqual([{ matter: A.matter, agent: DEFAULT_AGENT }]);
   // the newest thread's, archived or not
   const newest = await rig(
@@ -183,14 +183,14 @@ test("the agent create_thread names: the plan chosen, else the newest thread's, 
   );
   newest.talks.startNew();
   expect(newest.talks.view().agent).toBe("codex");
-  await newest.talks.create();
+  await newest.talks.create(newest.talks.view().open ?? "");
   expect(newest.sent("create_thread")).toEqual([{ matter: A.matter, agent: "codex" }]);
   // the lawyer's choice over both
   const chosen = await rig(today(() => [thread(T1, { agent: "codex" })]));
   chosen.talks.startNew();
   chosen.talks.choose("claude-acp");
   expect(chosen.talks.view().agent).toBe("claude-acp");
-  await chosen.talks.create();
+  await chosen.talks.create(chosen.talks.view().open ?? "");
   expect(chosen.sent("create_thread")).toEqual([{ matter: A.matter, agent: "claude-acp" }]);
 });
 
@@ -198,7 +198,7 @@ test("the agent create_thread names: the plan chosen, else the newest thread's, 
 
 test("sent: rename_thread with the title the message gives, once per thread", async () => {
   const { talks, sent, settle } = await rig(today(() => []));
-  const made = await talks.create();
+  const made = await talks.create(talks.view().open ?? "");
   const text = "What does   clause nine of the lease say about notice?";
   talks.sent(made, text);
   talks.sent(made, "And clause ten?");
@@ -226,7 +226,7 @@ test("sent: no rename when the header already has a title (an agent's rename sta
 
 test("sent: nothing when the message gives no title", async () => {
   const { talks, sent, settle } = await rig(today(() => []));
-  const made = await talks.create();
+  const made = await talks.create(talks.view().open ?? "");
   talks.sent(made, "\u200b\u200b\u200b");
   await settle();
   expect(sent("rename_thread")).toEqual([]);
@@ -414,4 +414,161 @@ test("switching matters follows the open one, and going back reopens the convers
   expect(talks.view().matter).toBe(B.matter);
   expect(talks.view().open).toBe(T2);
   expect(talks.view().thread).toBe(T2);
+});
+
+/* ---------- review round 1 ---------- */
+
+test("S1: back in a matter, its open conversation is marked seen again (focused, with the matters part)", async () => {
+  const lists: Record<MatterId, ThreadInfo[]> = {
+    [A.matter]: [info(T1)],
+    [B.matter]: [info(T2, {}, B.matter)],
+  };
+  const { matters, settle, marks } = await rig(
+    next((m) => lists[m] ?? [], [detailed(A, { last_opened: 10 }), detailed(B)]),
+    () => true,
+  );
+  expect(marks()).toEqual([{ mark_seen: { thread: T1 } }]);
+  matters.open(B.matter);
+  await settle();
+  expect(marks().at(-1)).toEqual({ mark_seen: { thread: T2 } });
+  matters.open(A.matter);
+  await settle();
+  expect(marks().at(-1)).toEqual({ mark_seen: { thread: T1 } });
+  expect(marks().filter((c) => "mark_seen" in c && c.mark_seen.thread === T1)).toHaveLength(2);
+});
+
+/** A list whose first read fails and whose second waits for the test's answer. */
+function failThenHold() {
+  let answer: (threads: ThreadSummary[]) => void = () => {};
+  let reads = 0;
+  const host = today(() => {
+    reads += 1;
+    if (reads === 1) throw new Error("the host is busy");
+    return new Promise<ThreadSummary[]>((resolve) => (answer = resolve));
+  });
+  return { host, answer: (threads: ThreadSummary[]) => answer(threads) };
+}
+
+test("S2: create(key) makes the thread for that key, even when New conversation opened meanwhile", async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const { host, answer } = failThenHold();
+  const { talks, sent, settle } = await rig(host);
+  expect(talks.view().phase).toBe("failed");
+  const keyA = talks.view().open as string;
+  const made = talks.create(keyA);
+  talks.startNew();
+  const draft = talks.view().open as string;
+  expect(draft).not.toBe(keyA);
+  // the draft's plan is its own: the thread for A doesn't take it
+  talks.choose("codex-acp");
+  answer([]);
+  expect(await made).toBe(MADE);
+  await settle();
+  expect(sent("create_thread")).toEqual([{ matter: A.matter, agent: DEFAULT_AGENT }]);
+  const view = talks.view();
+  expect(view.open).toBe(draft);
+  expect(view.drafting).toBe(true);
+  expect(view.rows.map((r) => [r.key, r.thread])).toEqual([
+    [draft, null],
+    [keyA, MADE],
+  ]);
+  expect(view.agent).toBe("codex-acp");
+});
+
+test("S3: a list read that predates a thread the room made keeps it listed and open", async () => {
+  let answer: ((threads: ThreadSummary[]) => void) | null = null;
+  let reads = 0;
+  const { talks, matters, settle } = await rig(
+    today(
+      (m) => {
+        if (m !== B.matter) return [];
+        reads += 1;
+        if (reads === 1) return [];
+        return new Promise<ThreadSummary[]>((resolve) => (answer = resolve));
+      },
+      [A, B],
+    ),
+  );
+  expect(talks.view().matter).toBe(B.matter);
+  matters.open(A.matter);
+  await settle();
+  matters.open(B.matter);
+  await settle();
+  // B's second read is on its way; the first send makes the thread meanwhile
+  expect(answer).not.toBeNull();
+  const key = talks.view().open as string;
+  expect(await talks.create(key)).toBe(MADE);
+  answer!([]);
+  await settle();
+  const view = talks.view();
+  expect(threadsOf(view.rows)).toEqual([MADE]);
+  expect(view.thread).toBe(MADE);
+  expect(view.open).toBe(key);
+});
+
+test("S5: a thread made whose question was never accepted is archived when left with nothing typed", async () => {
+  const { talks, sent, settle } = await rig(today(() => [thread(T1)]));
+  const t1 = talks.view().open as string;
+  talks.startNew();
+  const key = talks.view().open as string;
+  await talks.create(key);
+  talks.open(t1);
+  await settle();
+  expect(sent("archive_thread")).toEqual([{ thread: MADE }]);
+  expect(threadsOf(talks.view().rows)).toEqual([T1]);
+});
+
+test("S5: with words typed it stays, and once a question is accepted it is never archived", async () => {
+  const { talks, drafts, sent, settle } = await rig(today(() => [thread(T1)]));
+  const t1 = talks.view().open as string;
+  talks.startNew();
+  const key = talks.view().open as string;
+  await talks.create(key);
+  drafts.set(key, "Summarise the lease");
+  talks.open(t1);
+  await settle();
+  expect(sent("archive_thread")).toEqual([]);
+  expect(threadsOf(talks.view().rows)).toEqual([MADE, T1]);
+  // accepted, then left with nothing typed: kept
+  talks.open(key);
+  talks.sent(MADE, "Summarise the lease");
+  drafts.delete(key);
+  talks.open(t1);
+  await settle();
+  expect(sent("archive_thread")).toEqual([]);
+  expect(threadsOf(talks.view().rows)).toEqual([MADE, T1]);
+});
+
+test("N1: a plan chosen while the list failed is the one create_thread names after the re-read", async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const { host, answer } = failThenHold();
+  const { talks, sent } = await rig(host);
+  expect(talks.view().phase).toBe("failed");
+  const key = talks.view().open as string;
+  talks.choose("codex-acp");
+  const made = talks.create(key);
+  answer([]);
+  expect(await made).toBe(MADE);
+  expect(sent("create_thread")).toEqual([{ matter: A.matter, agent: "codex-acp" }]);
+});
+
+test("N2: words of whitespace only leave the drafts map with their draft", async () => {
+  const { talks, drafts } = await rig(today(() => [thread(T1)]));
+  const t1 = talks.view().open as string;
+  talks.startNew();
+  const key = talks.view().open as string;
+  drafts.set(key, "   ");
+  talks.open(t1);
+  expect(drafts.has(key)).toBe(false);
+  expect(threadsOf(talks.view().rows)).toEqual([T1]);
+});
+
+test("opening the conversation already open asks for the field's focus again", async () => {
+  const { talks } = await rig(today(() => [thread(T1)]));
+  const key = talks.view().open as string;
+  const before = talks.view().focus?.n ?? 0;
+  talks.open(key);
+  expect(talks.view().focus).toEqual({ key, n: before + 1 });
+  talks.open(key);
+  expect(talks.view().focus?.n).toBe(before + 2);
 });
