@@ -14,8 +14,8 @@ use futures::future::{pending, ready};
 use futures::task::LocalSpawnExt;
 
 use super::{
-    AgentInput, AgentLink, Ended, PUMP_END_BOUND, StopStep, launch_spec, session_folder, settle,
-    start,
+    AgentInput, AgentLink, Ended, PUMP_END_BOUND, StopStep, keep_canonical, launch_spec,
+    session_folder, settle, start,
 };
 use crate::clock::ManualClock;
 
@@ -399,4 +399,30 @@ fn session_folder_is_the_real_path() {
     assert_eq!(session_folder(&missing), missing);
     assert_eq!(session_folder(Path::new("")), Path::new(""));
     crate::write::remove_dir_all(&root).unwrap();
+}
+
+/// A canonical path that kept Windows' verbatim prefix (a UNC share, a mapped drive, or any
+/// `\\?\` form `dunce` left) gives back the stored spelling; any other gives the canonical one.
+/// Text only, so it runs on every OS.
+#[test]
+fn keep_canonical_refuses_a_verbatim_path() {
+    let stored = Path::new(r"Z:\Matters\Lease");
+    let kept = |canonical: &str| keep_canonical(Path::new(canonical), stored);
+    assert_eq!(kept(r"\\?\UNC\srv\share\Matters\Lease"), stored);
+    assert_eq!(kept(r"\\?\C:\Matters\Lease"), stored);
+    assert_eq!(kept(r"C:\Matters\Lease"), Path::new(r"C:\Matters\Lease"));
+    assert_eq!(kept(r"\\srv\share\Lease"), Path::new(r"\\srv\share\Lease"));
+    assert_eq!(kept("/private/tmp/lease"), Path::new("/private/tmp/lease"));
+}
+
+/// Windows: a local folder's session spelling carries no `\\?\` prefix (the case `dunce` strips).
+#[cfg(windows)]
+#[test]
+fn session_folder_of_a_local_folder_is_not_verbatim() {
+    let folder = session_folder(&std::env::temp_dir());
+    assert!(
+        !folder.as_os_str().as_encoded_bytes().starts_with(br"\\?\"),
+        "{folder:?}"
+    );
+    assert!(folder.is_absolute(), "{folder:?}");
 }
