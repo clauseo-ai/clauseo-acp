@@ -331,12 +331,11 @@ export function noteHast(scope: string, numbering: Numbering, id: string, option
   const back = backReferences(scope, id, index, numbering.total.get(id) ?? 0);
   let last: ElementContent | undefined;
   for (const child of content) if (child.type === "element") last = child;
-  if (last?.type === "element" && last.tagName === "p") {
-    const end = last.children.at(-1);
-    if (end?.type === "text") end.value += " ";
-    else last.children.push({ type: "text", value: " " });
-    last.children.push(...back);
-  } else content.push(...back);
+  // The space before them is a text node of its own: added to the note's last text, it made a closing
+  // tag there (`[^n]: A <script>y</script>`) no tag to inline-tags.ts, which matches a tag's whole text.
+  if (last?.type === "element" && last.tagName === "p")
+    last.children.push({ type: "text", value: " " }, ...back);
+  else content.push(...back);
   const item: Element = {
     type: "element",
     tagName: "li",

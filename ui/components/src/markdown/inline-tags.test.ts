@@ -240,3 +240,12 @@ test("a tag cut at a line's start (nesting.ts) is a tag only where micromark rea
   const note = html("A[^n].\n\n[^n]: B\n<script &#62;x</script> y");
   expect(note).toContain("&#x3C;script >x&#x3C;/script> y");
 });
+
+test("a closing tag at the end of a note pairs as it does in the body (the back-references' space is apart)", () => {
+  const markup = html("A[^n].\n\n[^n]: Note <script>y</script>");
+  expect(markup).not.toContain("script");
+  expect(markup).toMatch(/Note y <a [^>]*data-footnote-backref/);
+  expect(html("A[^n].\n\n[^n]: Note <sup>y</sup>")).toMatch(
+    /Note <sup>y<\/sup> <a [^>]*data-footnote-backref/,
+  );
+});
