@@ -208,8 +208,8 @@ pub struct AgentSummary {
     /// Its id, as a thread names it.
     pub id: AgentId,
     /// What it is ([`AgentKind::of`]); `None` for an id that names no known agent, such as
-    /// `fake-agent`.
-    #[serde(default)]
+    /// `fake-agent`. Left out of the JSON when `None`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub kind: Option<AgentKind>,
 }
 
