@@ -7,8 +7,8 @@
 # settings.json starts fake_agent on that test's scenario as agents.claude, and a scratch
 # E2E_MATTER_DIR (ui/e2e/app-windows/scratch.ts), so no run touches the runner's real data folder.
 # The job scoreboard-windows plays the speed scoreboard (R13, ui/e2e/app-windows/scoreboard.spec.ts)
-# on windows-2025 and uploads scoreboard-windows.json as the artifact scoreboard-windows, which the
-# pull request's scoreboard comment reads (scoreboard-comment.yml).
+# with smoke's app on windows-2025 and uploads scoreboard-windows.json as the artifact
+# scoreboard-windows, which the pull request's scoreboard comment reads (scoreboard-comment.yml).
 #
 # - No version is written here, as in ci.yml: Rust comes from rust-toolchain.toml, pnpm from
 #   "packageManager" and Node from "engines.node" in ui/package.json, Playwright from
@@ -18,7 +18,8 @@
 # - The smoke test's app is a release build with LTO off and 16 codegen units
 #   (CARGO_PROFILE_RELEASE_* below): optimised, panic=abort and a GUI exe like the shipped app,
 #   about 4 times faster to build than full LTO with a warm cache (ci-perfmax's notes). The
-#   scoreboard measures the full-LTO build, as main's baselines always have, so it builds its own.
+#   scoreboard plays this same build on pull requests and main; scoreboard.yml plays the full-LTO
+#   build nightly, on demand and on labelled pull requests.
 # - Every action is pinned by commit SHA, with its tag in a comment.
 
 name: e2e-windows
@@ -29,7 +30,8 @@ name: e2e-windows
 # - `app`: the pull request touches the app: the desktop crate, the crates it runs on and
 #   fake_agent, ui/, Cargo.toml, Cargo.lock, the Rust config, or CI itself. The smoke steps run.
 # - `product`: it touches product code (crates/, ui/, Cargo.toml, Cargo.lock: the paths for which
-#   scoreboard-comment.yml comments, comment.ts's isProductPath). scoreboard-windows runs.
+#   scoreboard-comment.yml comments, comment.ts's isProductPath). With `app`, scoreboard-windows
+#   plays smoke's build.
 # A pull request that touches neither starts smoke and skips every step, so the check reports in
 # seconds. A path no rule knows, or a failed decision, runs everything, so the check always
 # reports. smoke is never skipped as a whole: a job skipped that way reports under the literal name
@@ -103,7 +105,9 @@ jobs:
     name: smoke (${{ matrix.runner }})
     needs: e2e-changes
     if: ${{ !cancelled() }}
-    runs-on: ${{ matrix.runner }}
+    # A pull request that leaves the app alone only skips, on an ubuntu runner, which starts faster
+    # than a Windows one. A failed e2e-changes runs everything on Windows.
+    runs-on: ${{ (github.event_name == 'pull_request' && needs.e2e-changes.result == 'success' && needs.e2e-changes.outputs.app != 'true') && 'ubuntu-24.04' || matrix.runner }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -228,25 +232,40 @@ jobs:
           path: ${{ env.OUT }}
           if-no-files-found: warn
 
+      # The app and fake_agent scoreboard-windows plays (x64 only), kept one day.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ env.RUN == 'true' && matrix.runner == 'windows-2025' && !cancelled() && steps.build.outcome == 'success' && steps.fake_agent.outcome == 'success' }}
+        with:
+          name: e2e-app-${{ matrix.target }}
+          path: |
+            ${{ env.E2E_APP }}
+            ${{ env.E2E_FAKE_AGENT }}
+          if-no-files-found: error
+          retention-days: 1
+
   # The speed scoreboard (R13): one warm-up and three measured plays of fake_agent's scoreboard
-  # session, each a fresh launch, normal mode (ui/e2e/app-windows/scoreboard.spec.ts), on the
-  # full-LTO release build with the e2e feature, as main's baselines were measured. Its own job
-  # beside smoke, on pull requests that touch product code and on every push to main, nightly
-  # and on demand. Its numbers report and alert and never block a merge: the job is not a required
-  # check, and continue-on-error keeps a failure from turning the run red (a red run on main would
-  # hide that run's numbers from the comment, which reads main's successful runs only). The comment
-  # then shows this pull request's Windows numbers as not run.
+  # session, each a fresh launch, normal mode (ui/e2e/app-windows/scoreboard.spec.ts). It plays
+  # smoke's app and fake_agent (the artifact e2e-app-x86_64-pc-windows-msvc), so it builds nothing:
+  # pull requests and main measure the same LTO-off release build, and the comment compares like
+  # with like. scoreboard.yml plays a full-LTO build nightly, on demand and on pull requests labelled
+  # `scoreboard`, for the absolute numbers. Runs on pull requests that touch the app's product code
+  # and on every push to main, nightly and on demand. Its numbers report and alert and never block
+  # a merge: the job is not a required check, and continue-on-error keeps a failure from turning
+  # the run red (a red run on main would hide that run's numbers from the comment, which reads
+  # main's successful runs only). The comment then shows this pull request's Windows numbers as
+  # not run.
   scoreboard-windows:
     name: scoreboard-windows
-    needs: e2e-changes
-    if: ${{ !cancelled() && (needs.e2e-changes.result != 'success' || needs.e2e-changes.outputs.product == 'true') }}
+    needs: [e2e-changes, smoke]
+    if: >-
+      ${{ !cancelled() && needs.smoke.result != 'skipped'
+      && (needs.e2e-changes.result != 'success'
+      || (needs.e2e-changes.outputs.app == 'true' && needs.e2e-changes.outputs.product == 'true')) }}
     runs-on: windows-2025
     continue-on-error: true
-    # About 8 minutes of build, then the four plays (about 2.5 minutes in smoke before, run
-    # 41383564166 and earlier) with room for slow ones.
-    timeout-minutes: 45
+    # The four plays took about 2.5 minutes inside smoke (run 41383564166 and earlier).
+    timeout-minutes: 30
     env:
-      TARGET: x86_64-pc-windows-msvc
       E2E_APP: ${{ github.workspace }}/target/x86_64-pc-windows-msvc/release/clauseo-desktop.exe
       E2E_FAKE_AGENT: ${{ github.workspace }}/target/x86_64-pc-windows-msvc/release/fake_agent.exe
       SCOREBOARD_OUT: ${{ github.workspace }}/scoreboard-out
@@ -258,10 +277,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install the Rust toolchain from rust-toolchain.toml, and the target
-        run: |
-          rustup toolchain install
-          rustup target add "$TARGET"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: e2e-app-x86_64-pc-windows-msvc
+          path: target/x86_64-pc-windows-msvc/release
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
@@ -273,21 +292,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
 
-      # Its own key: the full-LTO release build shares no dependency builds with smoke's.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: scoreboard-windows
-          cache-bin: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
       - name: Install the ui workspace
         run: pnpm -C ui install --frozen-lockfile
-
-      - name: Build the app with the e2e feature (full LTO)
-        run: pnpm -C ui tauri build --no-bundle --features e2e --target "$TARGET"
-
-      - name: Build fake_agent
-        run: cargo build --release --locked -p clauseo-fake_agent --target "$TARGET"
 
       - name: Speed scoreboard
         run: |

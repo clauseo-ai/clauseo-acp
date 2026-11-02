@@ -335,15 +335,15 @@ test("an artifact comes from the newest head run that has it, not the newest run
   );
 });
 
-test("a macOS artifact is pending while any scoreboard-macos run is in progress, not only the newest", async () => {
+test("a macOS artifact is pending while any scoreboard run is in progress, not only the newest", async () => {
   // A label started the real run (in progress, 301); a newer run (302) for the same head was
   // skipped by the job's condition and completed without an artifact.
   const gh = world().route(
     `/repos/${REPO}/actions/runs?head_sha=${HEAD}&event=pull_request&per_page=100`,
     {
       workflow_runs: [
-        wfRun(302, ".github/workflows/scoreboard-macos.yml"),
-        wfRun(301, ".github/workflows/scoreboard-macos.yml", { status: "in_progress" }),
+        wfRun(302, ".github/workflows/scoreboard.yml"),
+        wfRun(301, ".github/workflows/scoreboard.yml", { status: "in_progress" }),
         wfRun(101, ".github/workflows/ci.yml"),
         wfRun(102, ".github/workflows/e2e-windows.yml"),
       ],
@@ -359,13 +359,13 @@ test("a macOS artifact is pending while any scoreboard-macos run is in progress,
   );
 });
 
-test("a macOS artifact is pending while the newest scoreboard-macos run is in progress", async () => {
+test("a macOS artifact is pending while the newest scoreboard run is in progress", async () => {
   // A label added to the pull request started a run that has not uploaded yet.
   const gh = world().route(
     `/repos/${REPO}/actions/runs?head_sha=${HEAD}&event=pull_request&per_page=100`,
     {
       workflow_runs: [
-        wfRun(301, ".github/workflows/scoreboard-macos.yml", { status: "in_progress" }),
+        wfRun(301, ".github/workflows/scoreboard.yml", { status: "in_progress" }),
         wfRun(101, ".github/workflows/ci.yml"),
         wfRun(102, ".github/workflows/e2e-windows.yml"),
       ],
@@ -387,7 +387,7 @@ test("a missing artifact is not run when no run has it and every watched run is 
     `/repos/${REPO}/actions/runs?head_sha=${HEAD}&event=pull_request&per_page=100`,
     {
       workflow_runs: [
-        wfRun(301, ".github/workflows/scoreboard-macos.yml"),
+        wfRun(301, ".github/workflows/scoreboard.yml"),
         wfRun(101, ".github/workflows/ci.yml"),
         wfRun(102, ".github/workflows/e2e-windows.yml"),
       ],
@@ -404,12 +404,12 @@ test("a missing artifact is not run when no run has it and every watched run is 
 });
 
 test("a run of another watched workflow in progress does not make a macOS artifact pending", async () => {
-  // CI is still running, and the newest scoreboard-macos run (skipped, no label) has completed.
+  // CI is still running, and the newest scoreboard run (skipped, no label) has completed.
   const gh = world().route(
     `/repos/${REPO}/actions/runs?head_sha=${HEAD}&event=pull_request&per_page=100`,
     {
       workflow_runs: [
-        wfRun(301, ".github/workflows/scoreboard-macos.yml"),
+        wfRun(301, ".github/workflows/scoreboard.yml"),
         wfRun(101, ".github/workflows/ci.yml", { status: "in_progress" }),
         wfRun(102, ".github/workflows/e2e-windows.yml"),
       ],
@@ -432,7 +432,7 @@ test("artifacts are listed newest run first and only until every name is found",
     `/repos/${REPO}/actions/runs?head_sha=${HEAD}&event=pull_request&per_page=100`,
     {
       workflow_runs: [
-        wfRun(105, ".github/workflows/scoreboard-macos.yml"),
+        wfRun(105, ".github/workflows/scoreboard.yml"),
         wfRun(102, ".github/workflows/e2e-windows.yml"),
         wfRun(101, ".github/workflows/ci.yml"),
       ],

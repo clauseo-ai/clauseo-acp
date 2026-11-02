@@ -1,5 +1,5 @@
 // The scoreboard-comment workflow's script: finds the pull request a finished CI, e2e-windows or
-// scoreboard-macos run belongs to, reads that head's artifacts and main's, and creates or edits
+// scoreboard run belongs to, reads that head's artifacts and main's, and creates or edits
 // the one comment marked <!-- scoreboard -->. Run by `.github/workflows/scoreboard-comment.yml`
 // from main's copy of this folder, never the pull request's:
 //
@@ -28,7 +28,7 @@ import { MARKER, renderComment, type RenderInput, type Source } from "./render.t
 export const WATCHED = [
   ".github/workflows/ci.yml",
   ".github/workflows/e2e-windows.yml",
-  ".github/workflows/scoreboard-macos.yml",
+  ".github/workflows/scoreboard.yml",
 ];
 /** Each artifact the comment reads; the file inside is `<name>.json`. */
 export const ARTIFACTS = {
@@ -39,7 +39,7 @@ export const ARTIFACTS = {
 /** The workflow file whose runs upload each artifact, by the same keys as {@link ARTIFACTS}. */
 export const PRODUCERS = {
   windows: ".github/workflows/e2e-windows.yml",
-  macos: ".github/workflows/scoreboard-macos.yml",
+  macos: ".github/workflows/scoreboard.yml",
   reducer: ".github/workflows/ci.yml",
 } as const;
 /** The most bytes an artifact may have, zipped or unzipped. */
@@ -295,7 +295,7 @@ export async function run(gh: GitHub, ctx: Context): Promise<Outcome> {
   if (!product) return { action: "skip", reason: `pull request #${pr} changes no product code` };
 
   // This head's runs of the watched workflows, newest first. Every one is kept: a label on a pull
-  // request starts a new scoreboard-macos run for the same head, most without an artifact.
+  // request starts a new scoreboard run for the same head, most without an artifact.
   const headRuns: Run[] = [];
   const listed = await page(
     gh,
