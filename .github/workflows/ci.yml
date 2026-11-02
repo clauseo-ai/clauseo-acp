@@ -282,6 +282,13 @@ jobs:
         if: env.BUILD == 'true' && matrix.native && runner.os != 'Linux'
         run: cargo nextest run --workspace --profile ci --no-tests=pass
 
+      # The desktop crate's tests with the marks feature (the speed scoreboard's build), here on
+      # main where a failure turns the run red, with their macOS-only cases. On a pull request the
+      # Linux job runs them, off the macOS runner (ci-perfmax's notes: up to about 60 s there).
+      - name: Test the desktop crate with the marks feature
+        if: env.BUILD == 'true' && matrix.target == 'aarch64-apple-darwin' && env.RELEASE == 'true'
+        run: cargo nextest run -p clauseo-desktop --features marks --profile ci --no-tests=pass
+
       # Twice: tauri's generate_context! writes each compressed asset into the crate's OUT_DIR
       # while that crate compiles, and only if the file is missing (tauri-codegen 2.7.3,
       # embedded_assets.rs:355). On a fresh OUT_DIR cargo then finds the asset newer than the start
@@ -293,7 +300,11 @@ jobs:
         run: |
           cargo nextest run --workspace --profile ci --no-tests=pass --no-run
           cargo nextest run --workspace --profile ci --no-tests=pass --no-run
+          cargo nextest run -p clauseo-desktop --features marks --profile ci --no-tests=pass --no-run
 
+      # The desktop crate's tests run a second time with the marks feature (the speed scoreboard's
+      # build): its portable cases on every run, so a pull request without the `scoreboard` label
+      # still tests them; the macOS job runs the macOS ones on main.
       # A new network namespace with only loopback, entered as root and then dropped back to the
       # runner user, without its supplementary groups (docker's socket would reach the network) and
       # with no_new_privs (sudo could otherwise nsenter back out). sudo may replace PATH, HOME and
@@ -314,6 +325,7 @@ jobs:
               }
               echo "uid inside the namespace: $(as_runner id -u)"
               as_runner cargo nextest run --workspace --profile ci --no-tests=pass
+              as_runner cargo nextest run -p clauseo-desktop --features marks --profile ci --no-tests=pass
             '
 
       # `tauri build` turns on `custom-protocol`, so the binary embeds ui/app/dist (a plain

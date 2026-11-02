@@ -4,8 +4,8 @@
 #
 # - scoreboard-macos: the `marks` build of the app plays fake_agent's scoreboard session by itself,
 #   one warm-up and three measured launches (ui/e2e/scoreboard/macos.ts), and the job uploads
-#   scoreboard-macos.json as the artifact scoreboard-macos. It also runs the desktop crate's tests
-#   and clippy with the marks feature. Every push to main, nightly, on demand, and pull requests
+#   scoreboard-macos.json as the artifact scoreboard-macos. The marks feature's clippy and tests
+#   run in ci.yml (macOS build job and Linux build job), where a failure counts. Every push to main, nightly, on demand, and pull requests
 #   labelled `scoreboard`: macOS runners are capped at 5 for the whole org, and their queue was the
 #   slowest part of a pull request's checks, so an unlabelled pull request takes at most one
 #   (ci.yml's `build (aarch64-apple-darwin)`, which also clippies the marks feature).
@@ -93,23 +93,6 @@ jobs:
 
       - name: Build fake_agent
         run: cargo build --release --locked -p clauseo-fake_agent
-
-      # The desktop crate's marks-only code and tests, which no other job compiles. After the app
-      # build, which writes the ui/app/dist the crate embeds.
-      - name: Install nextest at its pin
-        uses: ./.github/actions/install-pinned-tools
-        with:
-          tools: cargo-nextest
-
-      # The permission tests start fake_agent from target/debug (test_support.rs), which only a
-      # workspace run builds, so the dev build comes first; the release one above is for the plays.
-      - name: Test the desktop crate with the marks feature
-        run: |
-          cargo build --locked -p clauseo-fake_agent
-          cargo nextest run -p clauseo-desktop --features marks --locked --profile ci
-
-      - name: clippy the desktop crate with the marks feature
-        run: cargo clippy -p clauseo-desktop --all-targets --features marks --locked -- -D warnings
 
       # Plain Node, no install: macos.ts imports Node's own modules and ui/e2e files only.
       - name: Speed scoreboard
