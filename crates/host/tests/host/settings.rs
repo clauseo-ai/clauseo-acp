@@ -273,41 +273,54 @@ fn an_unknown_principal_may_not_subscribe_to_the_app() {
     host.shutdown();
 }
 
+/// The app subscription capacity the slow-subscriber test sets, so a few changes fill it.
+const SMALL_CAPACITY: usize = 4;
+
+/// The font size of each `SettingsChanged` in `events`.
+fn font_sizes(events: &[HostEvent]) -> Vec<u8> {
+    events
+        .iter()
+        .map(|event| match event {
+            HostEvent::SettingsChanged(view) => view.ui.font_size,
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect()
+}
+
 #[test]
 fn a_slow_app_subscriber_is_caught_up_with_the_current_settings() {
     let dir = Dir::new("settings_app_slow", &[]);
-    let host = dir.start(0);
+    let host = dir.start_with(0, |config| {
+        config.with_app_subscription_capacity(SMALL_CAPACITY)
+    });
     let mut slow = app(&host);
-    // One more change than the channel holds (1024), then one the full channel cannot take.
-    let sizes = (0..1025).map(|n| if n % 2 == 0 { 15 } else { 17 });
-    for size in sizes.chain([19]) {
+    let mut other = app(&host);
+    // 14 to 17 fill each channel, 18 finds it full and marks it lagged, 19 is not sent to it.
+    for size in 14..=19 {
         host.ok(set(UiPatch {
             font_size: Some(size),
             ..UiPatch::default()
         }));
     }
     host.settle();
-    // The channel's 1024, then, once drained, the settings as they are now.
+    // The channel's four, then, once drained, the settings as they are now: 19, never 18.
     let received = wait("the slow subscriber's events", async {
         let mut received = Vec::new();
-        while received.len() < 1025 {
+        while received.len() < SMALL_CAPACITY + 1 {
             let item = slow.next().await.expect("the app stream ended");
             received.push(decode(&item));
         }
         received
     });
-    let sizes: Vec<u8> = received
-        .iter()
-        .map(|event| match event {
-            HostEvent::SettingsChanged(view) => view.ui.font_size,
-            other => panic!("unexpected {other:?}"),
-        })
-        .collect();
-    assert!(sizes[..1024].iter().step_by(2).all(|&size| size == 15));
-    assert!(sizes[1..1024].iter().step_by(2).all(|&size| size == 17));
-    assert_eq!(sizes[1024], 19);
+    assert_eq!(font_sizes(&received), [14, 15, 16, 17, 19]);
     host.settle();
     assert_eq!(ready(&mut slow), []);
+    // The other subscriber lagged on its own; draining it catches it up the same way.
+    let mut caught = ready(&mut other);
+    assert_eq!(font_sizes(&caught), [14, 15, 16, 17]);
+    let next = wait("the other subscriber's catch-up", other.next()).expect("ended");
+    caught.push(decode(&next));
+    assert_eq!(font_sizes(&caught), [14, 15, 16, 17, 19]);
     host.shutdown();
 }
 

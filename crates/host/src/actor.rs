@@ -90,6 +90,8 @@ pub(crate) struct Actor {
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) ids: Ids,
     pub(crate) window_cap: usize,
+    /// The capacity of each app subscription's channel.
+    pub(crate) app_capacity: usize,
     pub(crate) encoder: Encoder,
     pub(crate) matters: BTreeMap<MatterId, MatterEntry>,
     pub(crate) threads: BTreeMap<ThreadId, ThreadEntry>,

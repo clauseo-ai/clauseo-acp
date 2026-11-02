@@ -136,8 +136,13 @@ pub(crate) struct Sink<T> {
 }
 
 /// Builds the two ends of a subscription of `topic` with id `id`.
-fn feed<T>(actor: async_channel::Sender<Input>, topic: Topic, id: SubId) -> (Feed<T>, Sink<T>) {
-    let (tx, rx) = async_channel::bounded(SUBSCRIPTION_CAPACITY);
+fn feed<T>(
+    actor: async_channel::Sender<Input>,
+    topic: Topic,
+    id: SubId,
+    capacity: usize,
+) -> (Feed<T>, Sink<T>) {
+    let (tx, rx) = async_channel::bounded(capacity);
     let lag = Arc::new(Lag::default());
     let sink = Sink {
         items: tx,
@@ -160,18 +165,19 @@ impl Subscription {
         stream: StreamId,
         id: SubId,
     ) -> (Self, Sink<EncodedEvent>) {
-        let (feed, sink) = feed(actor, Topic::Stream(stream), id);
+        let (feed, sink) = feed(actor, Topic::Stream(stream), id, SUBSCRIPTION_CAPACITY);
         (Self(feed), sink)
     }
 }
 
 impl AppSubscription {
-    /// An app subscription and the actor's end of it.
+    /// An app subscription with a channel of `capacity`, and the actor's end of it.
     pub(crate) fn new(
         actor: async_channel::Sender<Input>,
         id: SubId,
+        capacity: usize,
     ) -> (Self, Sink<EncodedEvent>) {
-        let (feed, sink) = feed(actor, Topic::App, id);
+        let (feed, sink) = feed(actor, Topic::App, id, capacity);
         (Self(feed), sink)
     }
 }
@@ -183,7 +189,7 @@ impl EventSubscription {
         stream: StreamId,
         id: SubId,
     ) -> (Self, Sink<HostEvent>) {
-        let (feed, sink) = feed(actor, Topic::Stream(stream), id);
+        let (feed, sink) = feed(actor, Topic::Stream(stream), id, SUBSCRIPTION_CAPACITY);
         (Self(feed), sink)
     }
 }

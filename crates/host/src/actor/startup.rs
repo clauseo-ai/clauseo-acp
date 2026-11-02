@@ -80,6 +80,7 @@ pub(super) async fn open(
         clock: parts.clock,
         ids: Ids::new(parts.ids),
         window_cap: parts.patch_window_bytes,
+        app_capacity: parts.app_capacity,
         encoder: Encoder::new(),
         matters,
         threads,

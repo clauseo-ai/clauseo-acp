@@ -49,7 +49,8 @@
 //!   `join` return `internal`.
 //! - [`Clock`] ([`SystemClock`], [`Now`]) and [`IdSource`] ([`RandomV7`]) are the host's only
 //!   sources of time and ids. The `test-support` feature adds `ManualClock`, `SequentialIds`,
-//!   `HostConfig::with_patch_window_bytes`, `EncodedEvent::ptr_eq` and
+//!   `HostConfig::with_patch_window_bytes`, `HostConfig::with_app_subscription_capacity`,
+//!   `EncodedEvent::ptr_eq` and
 //!   `HostHandle::abort_for_test`, which ends the thread with no flush and no graceful stop.
 //! - Stage B's `limits` plugs in as a new actor input and publishes the existing
 //!   `HostEvent::AccountLimitsChanged` to app subscribers (`actor/app.rs`'s `publish`).
