@@ -235,7 +235,8 @@ for (theme, lang) in looks {
   let confirming = rendered + settled + " && (window.__alwaysPressed || (window.__alwaysPressed = true," +
     " document.querySelector('[data-testid=\"permission-allow_always\"]').click(), false))" +
     " && (function (p) { return p.dataset.confirming !== undefined && p.querySelector('.perm-confirming') !== null" +
-    " && p.querySelector('.perm-actions[inert]') !== null; })" +
+    " && p.querySelector('.perm-actions[inert]') === null" +
+    " && p.querySelector('.perm-actions [aria-disabled=\"true\"]') !== null; })" +
     "(document.querySelector('[data-testid=\"permission\"]'))"
   var held = Run(name: "permission confirming \(theme) \(lang)", url: URL(string: "\(origin)/\(cq)")!, width: 1280,
                  height: 800, rendered: confirming, setup: "")

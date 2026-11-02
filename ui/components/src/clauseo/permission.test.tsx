@@ -305,14 +305,22 @@ test.each([
   expect(onAnswer).not.toHaveBeenCalled();
 });
 
-test("busy or confirming, the answers are inert", async () => {
-  await show({ busy: true });
-  expect($(".perm-actions").hasAttribute("inert")).toBe(true);
-  await act(async () => root?.unmount());
-  host?.remove();
-  await show();
-  expect($(".perm-actions").hasAttribute("inert")).toBe(false);
-});
+test.each([
+  ["busy", { busy: true }],
+  ["confirming", { confirming: true }],
+] as const)(
+  "%s, the answers are disabled, never inert, and a click on one answers nothing",
+  async (_name, props: Props) => {
+    const onAnswer = await show(props);
+    expect($(".perm-actions").hasAttribute("inert")).toBe(false);
+    const buttons = [...(host?.querySelectorAll<HTMLButtonElement>(".perm button") ?? [])];
+    expect(buttons.map((b) => b.getAttribute("aria-disabled"))).toEqual(["true", "true", "true"]);
+    await act(async () => buttons[0]?.click());
+    expect(onAnswer).not.toHaveBeenCalled();
+    await again({});
+    expect([...(host?.querySelectorAll(".perm [aria-disabled]") ?? [])]).toHaveLength(0);
+  },
+);
 
 test("Every change is kept shows by default and describes the prompt, and hides when kept is false", async () => {
   await show();

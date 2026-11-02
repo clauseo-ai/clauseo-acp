@@ -81,13 +81,13 @@ export function PermissionPrompt({
   const room = useRoom();
   const rootRef = useRef<HTMLDivElement>(null);
   // the latest answer handler and offer, so a caller's new closure or array doesn't re-register the listener
-  const latest = useRef({ onAnswer, offered });
+  const latest = useRef({ onAnswer, offered, held: busy || confirming });
   useEffect(() => {
-    latest.current = { onAnswer, offered };
+    latest.current = { onAnswer, offered, held: busy || confirming };
   });
 
-  // Focus inside the prompt goes back to the room's field after an answer, and when the prompt goes inert or folds.
-  // Whether it was inside is tracked by focus and blur, since inert blurs the button and the fold removes it: a removed
+  // Focus inside the prompt goes back to the room's field after an answer, and when the prompt is held or folds.
+  // Whether it was inside is tracked by focus and blur, since the fold removes the button: a removed
   // button's blur never reaches React, so the note survives the fold.
   const focusInside = useRef(false);
   const away = state !== "pending" || busy || confirming;
@@ -100,6 +100,8 @@ export function PermissionPrompt({
   }, [away, room]);
   const answer = useCallback(
     (a: PermissionAnswer) => {
+      // busy or confirming, the answers are held: a press on one does nothing
+      if (latest.current.held) return;
       const inside = rootRef.current?.contains(document.activeElement) === true;
       latest.current.onAnswer(a);
       if (inside) room.nodes.get("field")?.focus();
@@ -222,7 +224,8 @@ export function PermissionPrompt({
           <Say>{w.t("Every change is kept.")}</Say>
         </p>
       ) : null}
-      <div className="perm-actions" inert={busy || confirming ? true : undefined}>
+      {/* held, never inert: an inert row leaves the thread's scroller nothing to focus */}
+      <div className="perm-actions">
         {shown.map((a) => {
           const withKey = keys && a !== "never";
           return (
@@ -232,6 +235,7 @@ export function PermissionPrompt({
               size="small"
               aria-keyshortcuts={withKey && keysOn ? shortcut(a) : undefined}
               data-testid={testIds?.answer(a)}
+              aria-disabled={busy || confirming ? true : undefined}
               onClick={() => answer(a)}
             >
               <span className="deva-nudge">{w.th(LABEL[a])}</span>
