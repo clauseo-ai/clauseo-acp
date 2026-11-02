@@ -87,6 +87,8 @@ pub(crate) fn fold(state: &mut MatterState, envelope: &Envelope, out: &mut Appli
         | DomainEvent::ContentAppended(_)
         | DomainEvent::ToolCallStarted(_)
         | DomainEvent::ToolCallUpdated(_)
+        | DomainEvent::WebSearchRecorded(_)
+        | DomainEvent::PageVisited(_)
         | DomainEvent::PermissionRequested(_)
         | DomainEvent::PermissionResolved(_)
         | DomainEvent::PermissionExpired(_)

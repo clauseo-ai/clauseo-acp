@@ -42,8 +42,12 @@ pub(crate) fn fold(state: &mut ThreadState, envelope: &Envelope, out: &mut Appli
             });
         }
         // An attach changes nothing yet: the next prompt gives the status. Going back to `Idle`
-        // after an exit is a restart transition, not folded yet.
-        DomainEvent::AgentSessionAttached(_) | DomainEvent::Unknown { .. } => {}
+        // after an exit is a restart transition, not folded yet. The web events are logged only:
+        // no view entry yet, so they change nothing either.
+        DomainEvent::AgentSessionAttached(_)
+        | DomainEvent::WebSearchRecorded(_)
+        | DomainEvent::PageVisited(_)
+        | DomainEvent::Unknown { .. } => {}
         DomainEvent::AgentSessionDetached(event) => turn::detached(state, &event.reason, out),
         DomainEvent::UserMessage(event) => turn::user_message(state, seq, ts, event, out),
         DomainEvent::TurnQueued(event) => turn::turn_queued(state, event, out),

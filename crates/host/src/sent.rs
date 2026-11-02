@@ -211,6 +211,8 @@ impl Layer {
             | DomainEvent::TurnStoppedAtLimit(_)
             | DomainEvent::TurnEnded(_)
             | DomainEvent::StepUndone(_)
+            | DomainEvent::WebSearchRecorded(_)
+            | DomainEvent::PageVisited(_)
             | DomainEvent::MatterCreated(_)
             | DomainEvent::CheckpointRecorded(_)
             | DomainEvent::OutsideEdits(_)

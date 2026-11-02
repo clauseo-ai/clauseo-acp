@@ -47,6 +47,10 @@ mod held_open;
 #[path = "events/constructors.rs"]
 mod constructors;
 
+#[cfg(test)]
+#[path = "events/web.rs"]
+mod web;
+
 use clauseo_protocol::{
     DomainEvent, ElicitationRequest, ElicitationRequested, Envelope, MAX_RAW_DEPTH,
     MAX_RAW_ENCODE_DEPTH, PromptBlock, RawPayload, SCHEMA_VERSION, StopReason, StreamId,

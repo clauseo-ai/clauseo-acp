@@ -136,6 +136,41 @@ const ADDED_AFTER_V1: &[Corpus] = &[
         (257, 0xe029_cb0b_9067_8a4b),
         (185, 0x151e_09ed_77c7_f901),
     ),
+    (
+        "added/web_search_recorded",
+        include_bytes!("corpus/added/web_search_recorded.jsonl"),
+        include_bytes!("corpus/added/web_search_recorded.msgpack"),
+        (566, 0x36e2_cbab_c16a_a810),
+        (404, 0x31ee_3936_6896_4c05),
+    ),
+    (
+        "added/page_visited",
+        include_bytes!("corpus/added/page_visited.jsonl"),
+        include_bytes!("corpus/added/page_visited.msgpack"),
+        (1426, 0xca09_da47_8521_4f6b),
+        (961, 0x90d5_dd09_a9b0_f317),
+    ),
+    (
+        "added/page_visited-WebFetch",
+        include_bytes!("corpus/added/page_visited-WebFetch.jsonl"),
+        include_bytes!("corpus/added/page_visited-WebFetch.msgpack"),
+        (451, 0x06bd_9470_7cc0_fe72),
+        (299, 0xdcce_8605_8d1e_287b),
+    ),
+    (
+        "added/page_visited-CodexOpenPage",
+        include_bytes!("corpus/added/page_visited-CodexOpenPage.jsonl"),
+        include_bytes!("corpus/added/page_visited-CodexOpenPage.msgpack"),
+        (478, 0x00db_931b_45da_1995),
+        (322, 0x1968_b84e_52a8_fa45),
+    ),
+    (
+        "added/page_visited-Browser",
+        include_bytes!("corpus/added/page_visited-Browser.jsonl"),
+        include_bytes!("corpus/added/page_visited-Browser.msgpack"),
+        (497, 0xeafe_632d_4336_348e),
+        (342, 0xeb50_4eff_8250_86eb),
+    ),
 ];
 
 /// V1, then every file in [`ADDED_AFTER_V1`].
