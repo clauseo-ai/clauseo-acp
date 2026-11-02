@@ -14,6 +14,7 @@ import { toHtml } from "hast-util-to-html";
 import { toHast } from "mdast-util-to-hast";
 import { createAnswer, HANDLERS } from "./answer.ts";
 import { pairTags } from "./inline-tags.ts";
+import { capNesting, hasStandIns, restoreText } from "./nesting.ts";
 import { parse } from "./parse.ts";
 import { SCHEMA } from "./schema.ts";
 import { anchorHeadings, headingId, numberSlugs, withSlugs } from "./slugs.ts";
@@ -212,10 +213,14 @@ const FOOTER_SCHEMA = {
 /**
  * The answer as one block, without the splitter: what rendering block by block must reproduce. Its
  * footnotes section's heading gets the answer's scope, as every generated id does in ours (remark-rehype
- * gives it the fixed id `footnote-label`). Inline tags and heading anchors as the renderer makes them.
+ * gives it the fixed id `footnote-label`). Inline tags and heading anchors as the renderer makes them, and
+ * the input within nesting.ts's limits, as the renderer's is (so an HTML block of kinds 1 to 5 never
+ * starts, in one piece either).
  */
 export function unsplit(text: string): string {
-  const hast = toHast(parse(text), { clobberPrefix: "spec-", handlers: HANDLERS }) as Root;
+  const capped = capNesting(text);
+  const hast = toHast(parse(capped), { clobberPrefix: "spec-", handlers: HANDLERS }) as Root;
+  if (hasStandIns(capped)) restoreText(hast);
   pairTags(hast, false);
   // The answer's headings get anchors, remark-rehype's footer heading does not (the renderer draws its own).
   const body: Root = {

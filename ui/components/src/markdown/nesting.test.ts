@@ -33,7 +33,7 @@ const SPACE_NESTING = Array.from(
 const LONG_RUNS = "*".repeat(5000) + "a" + "*".repeat(5000);
 const hide = (text: string) => text.split("").map(standIn).join("");
 
-const hasStandIn = (text: string) => /[\uFDD1-\uFDDE]/.test(text);
+const hasStandIn = (text: string) => /[\uFDD1-\uFDDF]/.test(text);
 
 function count(node: Hast, tagName: string): number {
   let total = 0;
@@ -215,6 +215,47 @@ test("what the limits insert never shows: code, link URLs and text read as writt
 
 test("a stand-in in the input is dropped, so every one the renderer sees is its own", () => {
   expect(capNesting(`a${hide("*")}b*`)).toBe("ab*");
+});
+
+test.each([
+  "<!-- a note",
+  "<pre>",
+  "<script src=x>",
+  "<STYLE",
+  "<textarea>",
+  "<?php",
+  "<!DOCTYPE",
+  "<![CDATA[",
+  "  <!--",
+  "> <pre>",
+  "- <!--",
+  "1. > <?x",
+])(
+  "%s, left open, starts no HTML block: it shows as written, and the Markdown after it renders",
+  (opener) => {
+    const text = `Intro.\n\n${opener}\n\n## Heading\n\n**bold** and \`<pre>\`\n\n- item\n`;
+    expect(capNesting(text)).toBe(text.replace(opener, opener.replace("<", hide("<"))));
+    for (const streaming of [true, false]) {
+      const views = createAnswer("t").update(text, streaming);
+      // Split after the opener's block, as after any paragraph, quote or list.
+      expect(views.slice(-3).map((view) => view.source)).toEqual([
+        "## Heading\n\n",
+        "**bold** and `<pre>`\n\n",
+        "- item\n",
+      ]);
+      const root: Root = { type: "root", children: views.flatMap((view) => view.hast.children) };
+      expect(textOf(root)).toContain(opener.replace(/^[ >\-1.]+/, ""));
+      expect(count(root, "h2")).toBe(1);
+      expect(count(root, "strong")).toBe(1);
+      expect(count(root, "li")).toBe(opener.startsWith("-") || opener.startsWith("1.") ? 2 : 1);
+      expect(hasStandIn(textOf(root))).toBe(false);
+    }
+  },
+);
+
+test("an HTML block's opener after text on its line, or not one of kinds 1 to 5, is left alone", () => {
+  const text = "a <pre>\n\n<div>\n\n<prefix>\n\n<!1\n\n<span>\n\n    \n";
+  expect(capNesting(text)).toBe(text);
 });
 
 test.each([

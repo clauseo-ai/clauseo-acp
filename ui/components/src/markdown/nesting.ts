@@ -15,6 +15,12 @@
 //   MAX_UNMATCHED_BRACKETS `]` with none open; past those a bracket is text.
 // - A definition list keeps its first MAX_DEFINITIONS definitions; the `:` of each one after that is text,
 //   so the rest of a longer glossary shows as paragraphs with a visible `: `.
+// - The `<` that would start an HTML block of kinds 1 to 5 (CommonMark 4.6: `<script`, `<pre`, `<style`,
+//   `<textarea`, `<!--`, `<?`, `<!` and a letter, `<![CDATA[`) at the start of a line is text. Such a block
+//   runs on to its end marker, across blank lines, so one left open (an agent's unclosed `<pre>` or `<!--`)
+//   took in the rest of the answer: shown as raw text, one block the splitter cannot cut, parsed whole on
+//   every update. Raw HTML only ever shows as text here, so the line reads the same, and what follows it
+//   parses as Markdown.
 // - After parsing, a block whose tree is still deeper than MAX_TREE_DEPTH shows its source as plain text
 //   (answer.ts).
 // Each cut replaces the character that would open a container or delimit emphasis by a stand-in, a
@@ -64,13 +70,13 @@ export const MAX_DEFINITIONS = 32;
 /** Levels of mdast below a block's root: 32 nested lists are 64 (list and item), plus their inline content. */
 export const MAX_TREE_DEPTH = 128;
 
-/** The characters a cut replaces, and their stand-ins, the noncharacters U+FDD1 to U+FDDB. */
-const CUT = "*_-+>.) \t~[]=:";
+/** The characters a cut replaces, and their stand-ins, the noncharacters U+FDD1 to U+FDDF. */
+const CUT = "*_-+>.) \t~[]=:<";
 const STAND_IN =
-  "\uFDD1\uFDD2\uFDD3\uFDD4\uFDD5\uFDD6\uFDD7\uFDD8\uFDD9\uFDDA\uFDDB\uFDDC\uFDDD\uFDDE";
-const STAND_INS = /[\uFDD1-\uFDDE]/g;
-/** A stand-in in a URL, which micromark percent-encodes (U+FDD1 is EF B7 91, U+FDDE is EF B7 9E). */
-const ENCODED_STAND_INS = /%EF%B7%9([1-9A-E])/gi;
+  "\uFDD1\uFDD2\uFDD3\uFDD4\uFDD5\uFDD6\uFDD7\uFDD8\uFDD9\uFDDA\uFDDB\uFDDC\uFDDD\uFDDE\uFDDF";
+const STAND_INS = /[\uFDD1-\uFDDF]/g;
+/** A stand-in in a URL, which micromark percent-encodes (U+FDD1 is EF B7 91, U+FDDF is EF B7 9F). */
+const ENCODED_STAND_INS = /%EF%B7%9([1-9A-F])/gi;
 
 /** `char` (one of CUT) as its stand-in. */
 export function standIn(char: string): string {
@@ -85,7 +91,7 @@ export function hasStandIns(value: string): boolean {
 
 /**
  * hasStandIns for a whole answer, which capNesting is given on every update: one indexOf per stand-in is
- * a vectorised scan, and in Node all fourteen take 24 µs on an 80 KB memo, where STAND_INS' character
+ * a vectorised scan, and in Node fourteen took 24 µs on an 80 KB memo, where STAND_INS' character
  * class takes 57 µs (on the 30 KB legal answer, 9 µs against 21).
  */
 function answerHasStandIns(text: string): boolean {
@@ -418,10 +424,26 @@ function capDefinitions(text: string): string {
   return changed ? lines.join("\n") : text;
 }
 
+/**
+ * The `<` that starts an HTML block of kinds 1 to 5, at the start of a line after any container prefix
+ * (quote markers, list markers, spaces and tabs). It may also match a line that is no such block (one in
+ * an indented code block, or indented 4 columns past its list item): the stand-in is put back in code and
+ * text alike, so that reads the same. Each alternative of the prefix starts with its own character, so a
+ * failed match backtracks once per prefix character.
+ */
+const HTML_BLOCK_START =
+  /(?<=^|\n)(?:[ \t>]|[-+*][ \t]|\d{1,9}[.)][ \t])*<(?=(?:script|pre|style|textarea)(?:[ \t>\n]|$)|!--|\?|![A-Za-z]|!\[CDATA\[)/gi;
+
+/** No HTML block of kinds 1 to 5 can start (HTML_BLOCK_START). */
+function capHtmlBlocks(text: string): string {
+  if (!text.includes("<")) return text;
+  return text.replace(HTML_BLOCK_START, (start) => start.slice(0, -1) + standIn("<"));
+}
+
 /** `text` within every limit above: what the splitter and the parser see. */
 export function capNesting(text: string): string {
   const clean = answerHasStandIns(text) ? text.replace(STAND_INS, "") : text;
-  return capDefinitions(capBrackets(capRuns(capPrefixes(clean))));
+  return capDefinitions(capBrackets(capRuns(capPrefixes(capHtmlBlocks(clean)))));
 }
 
 /** `value` with the characters capNesting replaced put back. */
