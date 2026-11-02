@@ -17,6 +17,7 @@ import type {
 } from "../../transport/protocol.ts";
 import { matterStreamOf, readMatter } from "../matter-stream.ts";
 import { localZone } from "../when.ts";
+import { wordLock } from "../word/lock.ts";
 import { Conversations } from "./conversations.ts";
 import {
   DoneWatch,
@@ -460,16 +461,16 @@ export class VersionsController {
     const papers = files.filter((f) => f.choice === "undo").map((f) => f.path);
     const outcome = await this.#act({ undo_step: { thread: m.thread, turn: step.turn, files } });
     if (outcome.kind === "refused") {
-      // undo_step's refusal doesn't name the file a program holds: an undo of one file can only mean that one; with
-      // more, the dialog keeps the lawyer's choices, says why, and offers Try again
-      const only = papers.length === 1 ? papers[0] : undefined;
+      // undo_step's refusal doesn't name the file a program holds: an undo of one Word document can only mean Word holds
+      // that one (word/lock.ts); otherwise the dialog keeps the lawyer's choices, says why, and offers Try again
+      const word = wordLock(outcome.code, papers);
       await this.#refused(
         outcome.code,
         outcome.current
           ? () =>
-              only === undefined
+              word === null
                 ? { act: "undo", id, choices, stage: "confirm", failed: outcome.code }
-                : { act: "undo", id, choices, stage: "word", file: only }
+                : { act: "undo", id, choices, stage: "word", file: word }
           : undefined,
       );
       return;

@@ -12,7 +12,9 @@
 // one closes it too, and the field takes the focus. Matters carries the court-yellow dot while another matter waits on
 // the lawyer. Cmd+N on the Mac, Ctrl+N elsewhere, starts a new conversation in the open matter; until its first
 // question, the reading column's top says what it reads, once the matter's papers are counted. A link or paper in an
-// answer opens through the host (open.ts, H11), and so does a matter row's Show in Finder.
+// answer opens through the host (open.ts, H11), and so does a matter row's Show in Finder; a Word document's tile, and a
+// change note naming one, open it in Word (word/open-in-word.ts). Versions opens and shows files through the
+// transport's own open_file and reveal unless a test or the review page passes stand-ins.
 import {
   lazy,
   Suspense,
@@ -53,6 +55,7 @@ import { RoomRail } from "./rail.tsx";
 import { ScratchLine } from "./scratch-line.tsx";
 import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
+import { useWordOpeners, WordOpenContext } from "./word/open-in-word.ts";
 import { clockOf } from "./when.ts";
 import type { Drafts } from "./thread/session.ts";
 import { Work } from "./thread/work.tsx";
@@ -93,6 +96,17 @@ function useAnswerHost(
   const host = useMemo(() => new AnswerHost(transport, matter), [transport, matter]);
   useEffect(() => host.show(listed), [host, listed]);
   return host;
+}
+
+/** What Versions opens and shows files with in the desktop app: the transport's own (H11). */
+function useTransportStandIns(transport: HostTransport): StandIns {
+  return useMemo(
+    () => ({
+      openFile: (file) => transport.openFile(file),
+      reveal: (target) => transport.reveal(target),
+    }),
+    [transport],
+  );
 }
 
 /** Whether a matter the lawyer isn't looking at waits on them, with a question or for permission: Matters' dot. The
@@ -193,6 +207,8 @@ function RoomFrame({
   const listed = usePapers(matters.next.papers, open?.matter ?? null);
   const papers = listed?.papers ?? null;
   const answers = useAnswerHost(transport, open?.matter ?? null, listed);
+  const word = useWordOpeners(transport, listed, w.lang);
+  const ownStandIns = useTransportStandIns(transport);
   const { platform } = useDisplay();
   /** The folded rail closes, and focus goes back to Matters, which opened it. */
   const fold = () => {
@@ -255,7 +271,7 @@ function RoomFrame({
     matter: open?.matter ?? null,
     papers,
     platform,
-    ...(standIns === undefined ? {} : { standIns }),
+    standIns: standIns ?? ownStandIns,
   });
   const title =
     open !== null
@@ -371,18 +387,20 @@ function RoomFrame({
             )}
             {/* one thread's state per conversation: each starts its own; with no matter open, the composer waits */}
             <MarkdownHostContext value={answers}>
-              <Work
-                key={talks.open ?? open?.matter ?? "none"}
-                transport={transport}
-                matter={open}
-                drafts={drafts}
-                draftKey={talks.open}
-                conversation={link}
-                choice={choice}
-                plan={plan}
-                focus={talks.focus?.n ?? null}
-                onThread={matters.onThread}
-              />
+              <WordOpenContext value={word}>
+                <Work
+                  key={talks.open ?? open?.matter ?? "none"}
+                  transport={transport}
+                  matter={open}
+                  drafts={drafts}
+                  draftKey={talks.open}
+                  conversation={link}
+                  choice={choice}
+                  plan={plan}
+                  focus={talks.focus?.n ?? null}
+                  onThread={matters.onThread}
+                />
+              </WordOpenContext>
             </MarkdownHostContext>
           </StoreContext>
         )}
@@ -393,14 +411,25 @@ function RoomFrame({
             <EmptyPapers body={false} />
           ) : (
             <ol className="facade facade-names">
-              {papers.papers.map((paper) => (
-                <PaperTile
-                  key={paper.file}
-                  id={paper.file}
-                  state="uncited"
-                  title={fileName(paper.path)}
-                />
-              ))}
+              {papers.papers.map((paper) => {
+                const opener = word.openerFor(paper.path);
+                return (
+                  <PaperTile
+                    key={paper.file}
+                    id={paper.file}
+                    state="uncited"
+                    title={fileName(paper.path)}
+                    {...(opener === null
+                      ? {}
+                      : {
+                          onTurn: opener.onOpen,
+                          tip: opener.label,
+                          label: opener.label,
+                          testIds: { face: "open-in-word" },
+                        })}
+                  />
+                );
+              })}
             </ol>
           ))}
       </aside>

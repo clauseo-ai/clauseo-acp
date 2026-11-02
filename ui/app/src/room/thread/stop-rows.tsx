@@ -1,6 +1,9 @@
 // How a turn ended, in the thread: the step (its stop line, and the change note with Undo when it changed papers) and
-// the stop at the usage limit with its reset.
-import { useState } from "react";
+// the stop at the usage limit with its reset. An Undo refused because a program holds a file shows the lock's lines
+// under the note, with Try again in Undo's place (word/word-lock.tsx); a note naming one Word document the wall lists
+// offers "Open in Word" while its changes stand (word/open-in-word.ts).
+import { lazy, Suspense, useState } from "react";
+import { late } from "@clauseo/components/lib/late.ts";
 import { ChangeNote } from "@clauseo/components/clauseo/change-note.tsx";
 import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
@@ -15,6 +18,15 @@ import { isoOf, whenOf } from "./clock.ts";
 import { useBusy } from "./live.ts";
 import { useThreadActions } from "./session.ts";
 import { resetPassed, stopLine } from "./stops.ts";
+import { wordLock } from "../word/lock.ts";
+import { useWordOpen, type WordOpener } from "../word/open-in-word.ts";
+
+/** The lock's lines, from Versions' chunk, which holds their words: loaded on the first lock. */
+const WordLock = lazy(() =>
+  late(import("../versions/versions-chunk.ts")).then((m) => ({ default: m.WordLock })),
+);
+
+const LOCKED = "matter.file_locked";
 
 const QUIET = "text-small text-quiet";
 /** The space above a row under another in its section, on the spacing tokens; first in its section, the thread's own
@@ -28,27 +40,58 @@ function Changed({ entry }: { entry: StepEntry }) {
   const [refused, setRefused] = useState<string | null>(null);
   // one undo at a time: Undo waits while the host answers the first
   const [pending, setPending] = useState(false);
+  const { openerFor } = useWordOpen();
+  const papers = entry.files.map((f) => f.path);
   const edited = entry.files.find((f) => f.may_include_lawyer_edits)?.path ?? null;
   const undoable = entry.checkpoint_after !== undefined;
-  const onUndo = () => {
+  // a program holds a file: the lock's lines stand under the note, and Try again takes Undo's place
+  const locked = refused === LOCKED && !entry.undone;
+  // the one Word document the note names that the wall lists, while the changes stand
+  const openers = entry.undone
+    ? []
+    : papers.map(openerFor).filter((o): o is WordOpener => o !== null);
+  const open = openers.length === 1 ? openers[0] : undefined;
+  // a refusal again keeps what it said until the host answers: a lock stays a lock, another code replaces it
+  const send = () => {
     if (pending) return;
     setPending(true);
-    setRefused(null);
     undo(entry)
-      .catch((e: unknown) => setRefused(toHostError(e).code))
+      .then(
+        () => setRefused(null),
+        (e: unknown) => setRefused(toHostError(e).code),
+      )
       .finally(() => setPending(false));
+  };
+  const onUndo = () => {
+    if (pending) return;
+    setRefused(null);
+    send();
   };
   return (
     <div data-testid="files-changed">
       <ChangeNote
-        papers={entry.files.map((f) => f.path)}
+        papers={papers}
         editedSince={edited}
         state={entry.undone ? "undone" : "changed"}
-        {...(undoable ? { onUndo } : {})}
+        {...(undoable && !locked ? { onUndo } : {})}
+        {...(open === undefined ? {} : { open })}
         undoDisabled={busy || pending}
-        error={refused === null ? null : { words: errorWords(w.lang, refused), code: refused }}
-        testIds={{ paper: "file-changed", undo: "undo", error: "error" }}
+        error={
+          refused === null || locked ? null : { words: errorWords(w.lang, refused), code: refused }
+        }
+        testIds={{ paper: "file-changed", undo: "undo", error: "error", open: "open-in-word" }}
       />
+      {locked && (
+        <Suspense fallback={null}>
+          <WordLock
+            file={wordLock(LOCKED, papers)}
+            code={LOCKED}
+            pending={busy || pending}
+            onRetry={send}
+            testIds={{ block: "word-lock", retry: "word-lock-retry" }}
+          />
+        </Suspense>
+      )}
       {!undoable && (
         <p className={QUIET} data-code="matter.checkpoint_failed">
           <Say>{errorWords(w.lang, "matter.checkpoint_failed")}</Say>

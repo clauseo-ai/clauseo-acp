@@ -252,7 +252,10 @@ test("with H8 the wall has one tile per file, named by its file name, with no pa
   // a facade of names: its rows keep no room for a page or a chip (wall.css)
   expect(pane()?.querySelector("ol.facade")?.classList.contains("facade-names")).toBe(true);
   const tiles = [...(pane()?.querySelectorAll("ol.facade > li.tile") ?? [])];
-  expect(tiles.map((tile) => tile.textContent)).toEqual(["Notice to the bank.pdf", "Reply.docx"]);
+  expect(tiles.map((tile) => tile.querySelector(".tile-title")?.textContent)).toEqual([
+    "Notice to the bank.pdf",
+    "Reply.docx",
+  ]);
   expect(pane()?.querySelector(".tile-no")).toBeNull();
   expect(pane()?.querySelector(".tile-foot")).toBeNull();
 });
@@ -341,9 +344,10 @@ test("H8 before H5: with only the papers part the wall has its tiles and the rai
   await mount(transport);
   expect(title()?.textContent).toBe(NEWER.name);
   expect(host?.querySelectorAll("[data-testid=matter-row]")).toHaveLength(2);
-  expect([...(pane()?.querySelectorAll("li.tile") ?? [])].map((t) => t.textContent)).toEqual([
-    "Reply.docx",
-  ]);
+  // its name; a Word document's tile also says, to screen readers, that it opens in Word (word/open-in-word.test.tsx)
+  expect(
+    [...(pane()?.querySelectorAll("li.tile .tile-title") ?? [])].map((t) => t.textContent),
+  ).toEqual(["Reply.docx"]);
   expect(transport.only("next_query").map((q) => q.query)).toEqual([
     { list_papers: { matter: NEWER.matter } },
   ]);

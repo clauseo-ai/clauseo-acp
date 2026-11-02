@@ -66,7 +66,7 @@ for (const language of ["en", "hi"] as const) {
                 changes: [file("brief.txt"), file("notes.docx")],
                 added_since: ["new.txt"],
                 kept: [],
-                locked: ["brief.txt"],
+                locked: ["notes.docx"],
               },
             }
           : undefined,

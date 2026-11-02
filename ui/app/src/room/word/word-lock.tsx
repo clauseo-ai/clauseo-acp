@@ -1,0 +1,64 @@
+// Under the change note, when a program holds a file the direct Undo must write: Word's lines when the undo writes one
+// Word document (lock.ts), the error map's line for the code otherwise, and Try again. It rides in Versions' chunk
+// (versions-chunk.ts), which holds Versions' words: stop-rows.tsx loads it from there on the first lock, so the thread's
+// chunk carries none of those words and most notes never load them.
+import { Say } from "@clauseo/components/clauseo/say.tsx";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
+import { errorWords } from "@clauseo/components/lib/words-errors.ts";
+import { vt } from "@clauseo/components/lib/words-versions.ts";
+import { Button } from "@clauseo/components/ui/button.tsx";
+import { fileName } from "../versions/timeline.ts";
+
+export function WordLock({
+  file,
+  code,
+  pending,
+  onRetry,
+  testIds,
+}: {
+  /** The matter-relative path of the Word document held, or null when the room can't say which file it is. */
+  file: string | null;
+  /** The refusal's code, for the error map's line when no file is named. */
+  code: string;
+  /** Try again waits, faint but focusable, while its undo is on its way. */
+  pending: boolean;
+  onRetry: () => void;
+  testIds?: { block?: string; retry?: string };
+}) {
+  const { lang } = useDisplay();
+  return (
+    <div
+      role="alert"
+      data-code={code}
+      data-testid={testIds?.block}
+      className="mt-(--s2) flex max-w-measure min-w-0 flex-col items-start gap-(--s1) wrap-break-word"
+    >
+      {file === null ? (
+        <p className="text-small text-primary">
+          <Say>{errorWords(lang, code)}</Say>
+        </p>
+      ) : (
+        <>
+          <p className="text-small text-primary">
+            <Say>
+              {vt(lang, "Close '{file}' in Word to undo the change.", { file: fileName(file) })}
+            </Say>
+          </p>
+          <p className="text-small text-quiet">
+            <Say>{vt(lang, "Word holds the file while it is open. Nothing has changed yet.")}</Say>
+          </p>
+        </>
+      )}
+      <Button
+        kind="quiet"
+        size="small"
+        disabled={pending}
+        focusableWhenDisabled
+        data-testid={testIds?.retry}
+        onClick={onRetry}
+      >
+        <span className="deva-nudge">{vt(lang, "Try again")}</span>
+      </Button>
+    </div>
+  );
+}

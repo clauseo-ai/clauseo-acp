@@ -1,12 +1,14 @@
 // @vitest-environment happy-dom
-// The stand-ins seam: the room takes stand-ins only as passed to it, never from methods a transport happens to carry;
-// and each stand-in keeps the type HostTransport gives a method of the same name, so H11's openFile and reveal can
-// replace them unchanged.
+// The stand-ins seam: without stand-ins the room lends Versions the transport's own openFile and reveal (H11), and
+// stand-ins passed to the room replace them; each stand-in keeps the type HostTransport gives a method of the same
+// name.
 import { afterEach, expect, expectTypeOf, test } from "vitest";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { FileRefId } from "../../transport/protocol.ts";
 import type { StandIns } from "./stand-ins.ts";
-import { mountVersions, version, type VersionsHarness } from "./testing.ts";
+import { THREAD, TURN, uuid } from "../../testing/stream-script.ts";
+import { fakeNext } from "../fake-next.ts";
+import { file, mountVersions, stepEntry, version, type VersionsHarness } from "./testing.ts";
 
 /** Exactly the same type, both ways. */
 type Same<A, B> =
@@ -45,16 +47,15 @@ const showButton = () =>
     (b.textContent ?? "").startsWith("Show in"),
   );
 
-test("a transport that carries reveal lends Versions nothing; the stand-ins passed to the room do", async () => {
-  const shown: unknown[] = [];
-  h = await mountVersions([version(1, "import")], [], {
-    carries: { reveal: async (t: unknown) => void shown.push(t) },
-  });
+test("without stand-ins Show reveals through the transport; stand-ins passed to the room replace it", async () => {
+  h = await mountVersions([version(1, "import")], []);
   await h.openVersions();
   await h.click(document.body.querySelector(".ver-foot"));
-  expect(showButton()).toBeUndefined();
+  await h.click(showButton());
+  expect(h.transport.only("reveal").map((c) => c.target)).toEqual(["app_data"]);
   await h.unmount();
 
+  const shown: unknown[] = [];
   h = await mountVersions([version(1, "import")], [], {
     standIns: { reveal: async (t) => void shown.push(t) },
   });
@@ -62,4 +63,33 @@ test("a transport that carries reveal lends Versions nothing; the stand-ins pass
   await h.click(document.body.querySelector(".ver-foot"));
   await h.click(showButton());
   expect(shown).toEqual(["app_data"]);
+  expect(h.transport.only("reveal")).toEqual([]);
+});
+
+test("without stand-ins Open now opens the file through the transport's open_file, by the wall's file ref", async () => {
+  const ref = uuid(1, 8);
+  h = await mountVersions(
+    [
+      version(1, "import"),
+      version(2, "after_turn", { thread: THREAD, turn: TURN }),
+      version(3, "outside_edits", { files: [file("exhibit.pdf")] }),
+    ],
+    [stepEntry(5, { files: [file("exhibit.pdf")], checkpoint_after: "cp2" })],
+    {
+      query: (q) =>
+        typeof q === "object" && q.compare_versions !== undefined
+          ? { file_changes: [file("exhibit.pdf")] }
+          : undefined,
+      next: fakeNext({
+        matters: () => [],
+        papers: [{ file: ref, path: "exhibit.pdf", size: 10, modified: 0 }],
+        parts: ["papers"],
+      }),
+    },
+  );
+  await h.openVersions();
+  await h.lookAt("cp2");
+  await h.click(h.button("Compare with now"));
+  await h.click(h.button("Open now"));
+  expect(h.transport.only("open_file")).toEqual([{ call: "open_file", file: ref }]);
 });
