@@ -89,8 +89,11 @@ impl Asked {
             .unwrap()
     }
 
-    /// Answers the second permission request; the first stays pending.
-    fn answer_second_permission(&mut self) {
+    /// Answers the second permission request, then the third the agent asks once it has that
+    /// answer; the first stays pending. The count sits between the two: the third request
+    /// proves the actor took the second answer, and the agent ends its turn or exits only
+    /// after the third answer, so nothing else can have released a read by then.
+    fn answer_second_and_third_permissions(&mut self) {
         answer_from(
             &self.host,
             &mut self.events,
@@ -98,11 +101,21 @@ impl Asked {
             1,
             &["allow-once"],
         );
+        self.events.until("permission request 3", |e| {
+            e.permission_requests().len() > 2
+        });
         self.host.settle();
         assert_eq!(
             self.reads.count(AgentKind::Claude),
             1,
             "no read while the first request is pending"
+        );
+        answer_from(
+            &self.host,
+            &mut self.events,
+            self.thread,
+            2,
+            &["allow-once"],
         );
     }
 
@@ -123,7 +136,7 @@ fn a_turn_that_ends_with_its_permission_pending_lets_the_read_start() {
         "a_turn_that_ends_with_its_permission_pending_lets_the_read_start",
         Scenario::Local("permission-then-end"),
     );
-    asked.answer_second_permission();
+    asked.answer_second_and_third_permissions();
     asked.events.until_turn_ended(asked.turn);
     asked.assert_read_started("the turn's end");
     asked.host.shutdown();
@@ -158,7 +171,7 @@ fn an_agent_that_exits_with_its_permission_pending_lets_the_read_start() {
         "an_agent_that_exits_with_its_permission_pending_lets_the_read_start",
         Scenario::Local("permission-then-exit"),
     );
-    asked.answer_second_permission();
+    asked.answer_second_and_third_permissions();
     asked.events.until_turn_ended(asked.turn);
     asked.assert_read_started("the agent's exit");
     asked.host.shutdown();
