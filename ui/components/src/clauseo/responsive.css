@@ -199,10 +199,13 @@
     border-radius: var(--r-surface);
     box-shadow: var(--e2);
     margin: 0 var(--s2);
+    /* the page scrolls here and the thread is as tall as its content: no size containment, no layer */
+    contain: none;
   }
   .room-thread-inner {
     padding: var(--s5) var(--s4) var(--s6);
     gap: var(--s6);
+    will-change: auto;
   }
   .room-pane {
     order: 2;
