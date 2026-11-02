@@ -84,6 +84,9 @@
   .room-conv.room-conv[aria-current] {
     background: var(--surface);
     box-shadow: var(--e0);
+  }
+  /* its words keep clear of its chevron, only where the chevron is drawn */
+  .room-conv-item:has(.room-conv-more) .room-conv[aria-current] {
     padding-right: var(--mat-conv-more);
   }
   .room-conv-title {

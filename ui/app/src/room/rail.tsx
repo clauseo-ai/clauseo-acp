@@ -37,11 +37,12 @@ function stateWords(
 }
 
 /** The open matter's conversations as ConversationList takes them. A draft takes the plan it would run. A row's moment
- * goes into the lawyer's clock here, as the matters' do; one on another day keeps its time only, since the row has no
- * room for a day. */
+ * goes into the lawyer's clock here, as the matters' do. A stop on another day says nothing: the row has no room for a
+ * day, and "Stopped at 4:34 pm" alone would read as today, while "Stopped at" with no time reads as nothing. */
 function conversationRows(
   talks: ConversationsView,
   conversations: Conversations,
+  onConversation: () => void,
   now: number,
   zone: string,
   lang: Lang,
@@ -50,21 +51,26 @@ function conversationRows(
   const titleOf = (row: ConversationRow | undefined) => row?.title ?? untitled;
   return talks.rows.map((row) => {
     const words = rowWords(row);
+    const stopped = words.state === "stopped" ? clockOf(words.at, now, zone, lang) : null;
+    const state = stopped !== null && stopped.day !== "" ? "idle" : words.state;
     const extra =
       words.state === "waiting"
         ? { behind: titleOf(talks.rows.find((r) => r.thread === words.behind)) }
-        : words.state === "stopped"
-          ? { at: clockOf(words.at, now, zone, lang).time }
+        : stopped !== null && state === "stopped"
+          ? { at: stopped.time }
           : {};
     return {
       id: row.key,
       title: titleOf(row),
       agent: planName(row.agent ?? talks.agent, talks.agents),
-      state: words.state,
+      state,
       ...extra,
       current: row.key === talks.open,
       testId: "conversation",
-      onOpen: () => conversations.open(row.key),
+      onOpen: () => {
+        conversations.open(row.key);
+        onConversation();
+      },
     };
   });
 }
@@ -84,6 +90,7 @@ export function RoomRail({
   open,
   onNewMatter,
   onMoved,
+  onConversation,
   newMatterRef,
   onEscape,
 }: {
@@ -97,6 +104,9 @@ export function RoomRail({
   onNewMatter: () => void;
   /** A matter was opened from the rail. */
   onMoved: () => void;
+  /** A conversation was opened, or a new one started, from the rail: the folded rail closes, and the field takes the
+   * focus the conversations ask for. */
+  onConversation: () => void;
   newMatterRef: Ref<HTMLButtonElement>;
   /** Escape inside the rail. */
   onEscape: () => void;
@@ -123,8 +133,18 @@ export function RoomRail({
       // the open matter's conversations, once its list is in
       ...(current && talks.matter === m.matter && talks.phase !== "loading"
         ? {
-            conversations: conversationRows(talks, conversations, now, zone, w.lang),
-            onNewConversation: () => conversations.startNew(),
+            conversations: conversationRows(
+              talks,
+              conversations,
+              onConversation,
+              now,
+              zone,
+              w.lang,
+            ),
+            onNewConversation: () => {
+              conversations.startNew();
+              onConversation();
+            },
             conversationPlan: talks.plan,
             newConversationTestId: "new-conversation",
           }

@@ -79,6 +79,7 @@ const HI = {
   "Papers for this question": "इस प्रश्न के दस्तावेज़",
   "Remove {title}": "{title} हटाएँ",
   // the plan in the status line, for a plan other than Claude
+  "Uses your {name} plan": "आपके {name} प्लान का उपयोग करता है",
   // empty states
   "Clauseo has read this matter's {n} papers.": "Clauseo ने इस मामले के {n} दस्तावेज़ पढ़ लिए हैं।",
   "Ask the first question below. Each answer cites the paper and page it relies on.":

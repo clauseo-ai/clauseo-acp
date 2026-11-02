@@ -8,6 +8,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu.tsx";
 import { Button } from "../ui/button.tsx";
 import { IconMore, IconNewMatter } from "../icons/icons.tsx";
 import { cn } from "../lib/cn.ts";
+import { useDisplay } from "../lib/display.ts";
 import { useMatterWords } from "../lib/words-matters.ts";
 import { conversationStatus, type ConversationState } from "./rail-words.ts";
 import { Say } from "./say.tsx";
@@ -148,6 +149,7 @@ export function ConversationList({
   newTestId?: string | undefined;
 }) {
   const w = useMatterWords();
+  const { platform } = useDisplay();
   // the plan is named only on a conversation whose plan differs from the matter's own: the plan of its first
   // conversation, which most of its conversations keep, so the most common one, the first listed on a tie
   const count = (a: string) => conversations.filter((c) => c.agent === a).length;
@@ -169,7 +171,9 @@ export function ConversationList({
         className="room-conv room-conv-new"
         onClick={onNew}
         data-testid={newTestId}
-        aria-keyshortcuts="Meta+N Control+N"
+        // the shortcut, named under the pointer and to assistive technology, as Settings names its own
+        title={platform === "mac" ? "⌘N" : "Ctrl+N"}
+        aria-keyshortcuts={platform === "mac" ? "Meta+N" : "Control+N"}
       >
         <IconNewMatter size={14} className="room-conv-new-icon" />
         <span className="deva-nudge">{w.m("New conversation")}</span>

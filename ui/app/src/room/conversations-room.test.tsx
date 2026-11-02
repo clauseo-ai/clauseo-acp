@@ -15,8 +15,8 @@ import type {
 } from "../transport/protocol.ts";
 import { titleOf } from "./conversation-title.ts";
 import { Conversations } from "./conversations.ts";
-import { fakeNext } from "./fake-next.ts";
-import type { AgentSummary } from "./host-next.ts";
+import { detailed, fakeNext } from "./fake-next.ts";
+import type { AgentSummary, PaperSummary, ThreadInfo } from "./host-next.ts";
 import { RetryFromHere } from "./retry-from-here.tsx";
 import { ThreadActionsContext, type ThreadActions } from "./thread/session.ts";
 import { clockOf } from "./when.ts";
@@ -370,4 +370,151 @@ test("with one agent listed the switch never shows", async () => {
   await h.click(h.one("new-conversation"));
   expect(newRow()).toBeDefined();
   expect(planSwitch()).toBeNull();
+});
+
+/* ---------- the folded rail, New conversation's key ---------- */
+
+const rail = () => h!.host.querySelector("nav.room-rail");
+
+test("below 1200 px a row pressed or New conversation folds the raised rail, and the field takes the focus", async () => {
+  h = await mountRoom({
+    threads: [thread(T1, { title: "Lease notice" }), thread(T2, { title: "Indemnity" })],
+  });
+  await h.click(h.one("rail-toggle"));
+  expect(rail()?.hasAttribute("data-open")).toBe(true);
+  await h.click(rowOf("Lease notice"));
+  expect(rail()?.hasAttribute("data-open")).toBe(false);
+  expect(document.activeElement).toBe(field());
+  await h.click(h.one("rail-toggle"));
+  expect(rail()?.hasAttribute("data-open")).toBe(true);
+  await h.click(h.one("new-conversation"));
+  expect(rail()?.hasAttribute("data-open")).toBe(false);
+  expect(newRow()?.getAttribute("aria-current")).toBe("true");
+  expect(document.activeElement).toBe(field());
+});
+
+/** Cmd+N on the Mac, Ctrl+N elsewhere, as New conversation's title names it; returns whether it was prevented. */
+async function newKey(over: KeyboardEventInit = {}): Promise<boolean> {
+  const mac = h!.one("new-conversation")?.title === "⌘N";
+  const e = new KeyboardEvent("keydown", {
+    key: "n",
+    code: "KeyN",
+    bubbles: true,
+    cancelable: true,
+    ...(mac ? { metaKey: true } : { ctrlKey: true }),
+    ...over,
+  });
+  await act(async () => void document.body.dispatchEvent(e));
+  await h!.settle();
+  return e.defaultPrevented;
+}
+
+test("Cmd+N or Ctrl+N starts a new conversation and sends nothing; New conversation names the key", async () => {
+  h = await mountRoom({ threads: [thread(T1, { title: "Lease notice" })] });
+  expect(["⌘N", "Ctrl+N"]).toContain(h.one("new-conversation")?.title);
+  await h.click(h.one("rail-toggle"));
+  expect(newRow()).toBeUndefined();
+  expect(await newKey()).toBe(true);
+  expect(newRow()?.getAttribute("aria-current")).toBe("true");
+  expect(rail()?.hasAttribute("data-open")).toBe(false);
+  expect(document.activeElement).toBe(field());
+  expect(kinds()).toEqual([]);
+});
+
+test("the key does nothing while an input method composes, nor with no matter open", async () => {
+  h = await mountRoom({ threads: [thread(T1, { title: "Lease notice" })] });
+  expect(await newKey({ isComposing: true })).toBe(false);
+  expect(await newKey({ keyCode: 229 })).toBe(false);
+  expect(newRow()).toBeUndefined();
+  await h.unmount();
+  const start = vi.spyOn(Conversations.prototype, "startNew");
+  h = await mountRoom({ matters: [] });
+  const e = new KeyboardEvent("keydown", {
+    key: "n",
+    code: "KeyN",
+    bubbles: true,
+    cancelable: true,
+    ctrlKey: true,
+  });
+  const m = new KeyboardEvent("keydown", {
+    key: "n",
+    code: "KeyN",
+    bubbles: true,
+    cancelable: true,
+    metaKey: true,
+  });
+  await act(async () => void (document.body.dispatchEvent(e), document.body.dispatchEvent(m)));
+  expect(start).not.toHaveBeenCalled();
+  expect(e.defaultPrevented || m.defaultPrevented).toBe(false);
+});
+
+/* ---------- a draft's line, the status line's plan ---------- */
+
+const paper = (i: number, path: string): PaperSummary =>
+  ({ file: uuid(i, 8), path, size: 1000, modified: 1_730_000_000_000 }) as PaperSummary;
+const draftLine = () => h!.one("new-conversation-line");
+
+test("a new conversation says what it reads once the papers are counted; nothing without them", async () => {
+  h = await mountRoom({
+    threads: [thread(T1, { title: "Lease notice" })],
+    next: fakeNext({
+      matters: () => [],
+      papers: [paper(1, "lease.pdf"), paper(2, "notice.pdf"), paper(3, "reply.pdf")],
+      parts: ["papers"],
+    }),
+  });
+  expect(draftLine()).toBeNull();
+  await h.click(h.one("new-conversation"));
+  expect(draftLine()?.textContent).toBe("A new conversation. It reads this matter's 3 papers.");
+  await h.click(rowOf("Lease notice"));
+  expect(draftLine()).toBeNull();
+  await h.unmount();
+  // without the papers part the count is unknown: no line
+  h = await mountRoom({ threads: [thread(T1, { title: "Lease notice" })] });
+  await h.click(h.one("new-conversation"));
+  expect(newRow()).toBeDefined();
+  expect(draftLine()).toBeNull();
+});
+
+test("the status line names the open conversation's plan, and a draft's", async () => {
+  h = await mountRoom({
+    threads: [
+      thread(T1, { title: "Lease notice", agent: "claude-acp" }),
+      thread(T2, { title: "Indemnity", agent: "codex-acp" }),
+    ],
+    next: withAgents(TWO),
+  });
+  const planWords = () => h!.host.querySelector(".room-status-plan")?.textContent;
+  expect(planWords()).toBe("Uses your ChatGPT plan");
+  await h.click(rowOf("Lease notice"));
+  expect(planWords()).toBe("Uses your Claude plan");
+  // a draft with two plans shows the switch, not the words, and the switch is no live region
+  await h.click(h.one("new-conversation"));
+  expect(planSwitch()).not.toBeNull();
+  expect(planSwitch()?.closest('[role="status"]')).toBeNull();
+  expect(h.host.querySelector("p .room-plan-seg, p [role=group]")).toBeNull();
+});
+
+test("a stop on another day says nothing on its row; one today says when", async () => {
+  const day = 24 * 60 * 60 * 1000;
+  const info = (id: ThreadId, title: string, at: number): ThreadInfo => ({
+    ...thread(id, { title }),
+    seen: false,
+    last_stop: { reason: "cancelled", at },
+  });
+  h = await mountRoom({
+    next: fakeNext({
+      matters: () => [detailed(THE_MATTER)],
+      threads: () => [
+        info(T1, "Lease notice", Date.now() - 2 * day),
+        info(T2, "Indemnity", Date.now()),
+        { ...thread(T3, { title: "Reply" }), seen: true },
+      ],
+    }),
+  });
+  expect(rowOf("Reply")?.getAttribute("aria-current")).toBe("true");
+  expect(rowOf("Lease notice")?.getAttribute("data-state")).toBe("idle");
+  expect(rowOf("Lease notice")?.title).toBe("Lease notice");
+  expect(rowOf("Indemnity")?.getAttribute("data-state")).toBe("stopped");
+  expect(rowOf("Indemnity")?.title).toContain("Stopped at");
 });
