@@ -12,8 +12,13 @@ use crate::error::Error;
 /// The spec for `agent`, run in `cwd` (the matter folder).
 ///
 /// The env map holds the `inherited` environment (the host's own, read at launch) minus every
-/// name an agent or hook variable also names, then the agent's variables minus those the hook
-/// names, then the hook's. Names are compared ignoring ASCII case: on Windows `PATH` and `Path`
+/// `GIT_*` variable and every name an agent, hook or forced variable also names, then the
+/// agent's variables minus those the hook or `forced` names, then the hook's minus those
+/// `forced` names, then `forced`: what the host sets for the agent's kind (a Codex agent's
+/// mode, home and config, `agent/codex.rs`), which nothing in the settings can override. No
+/// inherited `GIT_*` reaches any agent: a `GIT_DIR` or `GIT_WORK_TREE` the host was started
+/// with would point the agent's git at another repository (agents never see a git repository
+/// through the environment). Names are compared ignoring ASCII case: on Windows `PATH` and `Path`
 /// are one variable and `Command::envs` keeps whichever comes last in the map's order, so an
 /// inherited `Path` left beside the agent's `PATH` would win. The child's environment is the
 /// same as with the agent's and hook's variables alone, since the inherited ones are what the
@@ -22,21 +27,29 @@ use crate::error::Error;
 /// out of the stderr tail. Never `Debug`-print the spec: it holds those secrets.
 pub(crate) fn launch_spec(
     agent: &AgentLaunch,
-    hook_env: BTreeMap<OsString, OsString>,
+    mut hook_env: BTreeMap<OsString, OsString>,
+    forced: BTreeMap<OsString, OsString>,
     inherited: impl Iterator<Item = (OsString, OsString)>,
     cwd: PathBuf,
 ) -> Result<LaunchSpec, Error> {
+    hook_env.retain(|name, _| !names(&forced, name));
     let own: Vec<(OsString, OsString)> = agent
         .env
         .iter()
         .map(|(name, value)| (OsString::from(name), OsString::from(value)))
-        .filter(|(name, _)| !names(&hook_env, name))
+        .filter(|(name, _)| !names(&hook_env, name) && !names(&forced, name))
         .collect();
     let mut env: BTreeMap<OsString, OsString> = inherited
-        .filter(|(name, _)| !names(&hook_env, name) && !own.iter().any(|(own, _)| same(own, name)))
+        .filter(|(name, _)| {
+            !is_git(name)
+                && !names(&hook_env, name)
+                && !names(&forced, name)
+                && !own.iter().any(|(own, _)| same(own, name))
+        })
         .collect();
     env.extend(own);
     env.extend(hook_env);
+    env.extend(forced);
     let args = agent.args.iter().map(OsString::from).collect();
     Ok(LaunchSpec::new(
         PathBuf::from(&agent.command),
@@ -44,6 +57,13 @@ pub(crate) fn launch_spec(
         env,
         cwd,
     )?)
+}
+
+/// Whether `name` is a `GIT_*` variable, ignoring ASCII case (Windows does).
+fn is_git(name: &OsStr) -> bool {
+    name.as_encoded_bytes()
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"GIT_"))
 }
 
 /// Whether `map` holds `name`, ignoring ASCII case.

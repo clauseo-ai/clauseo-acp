@@ -28,9 +28,16 @@ pub(crate) enum TurnInput {
 #[derive(Debug)]
 pub(crate) enum AgentReply {
     Initialized(Result<AgentInfo, clauseo_acp::Error>),
+    /// `session/load`, `session/resume` or `session/new` returned; `loaded` for the first
+    /// two, which continue the stored session.
     Session {
         loaded: bool,
         result: Result<SessionStart, clauseo_acp::Error>,
+    },
+    /// A Codex session's checks before its attach (the ask mode, the guard's trust) ended.
+    Prepared {
+        loaded: bool,
+        result: Result<SessionStart, crate::error::Error>,
     },
     Prompt {
         turn: TurnId,

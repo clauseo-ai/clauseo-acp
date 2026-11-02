@@ -20,6 +20,7 @@ clauseo-matters = { path = "../matters" }
 clauseo-process = { path = "../process" }
 clauseo-acp = { path = "../acp" }
 clauseo-settings = { path = "../settings" }
+clauseo-limits = { path = "../limits" }
 async-channel = { workspace = true, features = ["std"] }
 async-io = { workspace = true }
 # `executor` for `LocalPool` (QR11.2); the root line's default features include it already.

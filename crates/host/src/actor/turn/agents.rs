@@ -8,8 +8,9 @@ use std::sync::Arc;
 
 use clauseo_acp::{AcpEvent, AgentInfo, MessageRole, PendingKey};
 use clauseo_protocol::{
-    AgentChoiceId, AgentSessionDetached, AgentSessionId, CompactString, ConfigValue, DetachReason,
-    ElicitationId, ErrorCode, MessageId, PermissionRequestId, StreamId, ThreadId, TurnId,
+    AgentChoiceId, AgentKind, AgentSessionDetached, AgentSessionId, CompactString, ConfigValue,
+    DetachReason, ElicitationId, ErrorCode, MessageId, PermissionRequestId, StreamId, ThreadId,
+    TurnId,
 };
 
 use super::super::Actor;
@@ -84,6 +85,9 @@ pub(super) struct Agent {
     pub(super) replay: Option<SentView>,
     /// Replayed updates, held until the session is attached.
     pub(super) replayed: Vec<AcpEvent>,
+    /// A Codex session's checks run before its attach: every update is held with the replayed
+    /// ones meanwhile, so none is logged before `AgentSessionAttached`.
+    pub(super) preparing: bool,
 }
 
 /// Runs `waiting` once `thread`'s agent has a session, launching the agent first.
@@ -150,6 +154,7 @@ fn start(actor: &mut Actor, thread: ThreadId, waiting: Vec<Waiting>) {
         compaction: BTreeMap::new(),
         replay: None,
         replayed: Vec::new(),
+        preparing: false,
     };
     if let Some(state) = state(actor, thread) {
         state.agent = Some(Box::new(agent));
@@ -163,7 +168,9 @@ fn next_agent_id() -> u64 {
 }
 
 /// The launch itself: the spec from the settings (inherited environment, the agent's
-/// variables, then the profile hook's with the host's switches over them), in the matter folder.
+/// variables, then the profile hook's with the host's switches over them, then what the host
+/// forces for the agent's kind), in the matter folder. A Codex agent is refused in a folder
+/// holding `.codex` (#184) before anything starts, and its home is made first.
 fn launch(actor: &Actor, thread: ThreadId) -> Result<(AgentLink, PathBuf), Error> {
     let row = &actor.check_thread(thread)?.row;
     let folder = PathBuf::from(&actor.check_matter(row.matter)?.row.folder_path);
@@ -173,8 +180,16 @@ fn launch(actor: &Actor, thread: ThreadId) -> Result<(AgentLink, PathBuf), Error
             format!("no agent {} in the settings", row.agent),
         )
     })?;
+    let forced = if AgentKind::of(&row.agent) == Some(AgentKind::Codex) {
+        agent::codex::refuse_codex_folder(&agent::codex::session_folder(&folder))?;
+        let home = actor.effective.locations().agent_home(row.agent.as_str());
+        agent::codex::make_home(&home)?;
+        agent::codex::launch_env(&home, &settings.env, codex_hooks(actor))
+    } else {
+        BTreeMap::new()
+    };
     let hook = agent::loads::launch_env(actor.profile.launch_env(&row.agent));
-    let spec = agent::launch_spec(settings, hook, std::env::vars_os(), folder.clone())?;
+    let spec = agent::launch_spec(settings, hook, forced, std::env::vars_os(), folder.clone())?;
     let post = actor.post.clone();
     let post: Rc<dyn Fn(agent::AgentInput)> = Rc::new(move |input| {
         // The actor may be gone by then.
@@ -188,6 +203,15 @@ fn launch(actor: &Actor, thread: ThreadId) -> Result<(AgentLink, PathBuf), Error
         post,
     )?;
     Ok((link, folder))
+}
+
+/// THE CODEX HOOKS SEAM: the `hooks` object a Codex agent's `CODEX_CONFIG` carries, with its
+/// `state` trust entry and `trusted_hash`. The iris thread's `agent::loads::codex_hook_config`
+/// (clauseo-acp-private#162 part 2) fills it: whichever of R15 and #162 lands second wires it
+/// here. Until then it is `None` (tests set one through `HostConfig::with_codex_hooks`), and
+/// with `None` the session start skips the guard's trust check.
+pub(super) fn codex_hooks(actor: &Actor) -> Option<serde_json::Map<String, serde_json::Value>> {
+    actor.codex_hooks.clone()
 }
 
 /// Step 4 for a turn whose agent was started in another folder than its matter's row now names
@@ -252,7 +276,8 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         AgentReply::Mode { ctx, mode, result } => {
             super::answers::on_mode(actor, thread, ctx, same, &mode, result);
         }
-        AgentReply::Initialized(_) | AgentReply::Session { .. } if !same => {}
+        AgentReply::Initialized(_) | AgentReply::Session { .. } | AgentReply::Prepared { .. }
+            if !same => {}
         AgentReply::Initialized(Ok(info)) => session::on_initialized(actor, thread, info),
         AgentReply::Initialized(Err(error))
         | AgentReply::Session {
@@ -262,12 +287,23 @@ pub(super) fn on_reply(actor: &mut Actor, thread: ThreadId, id: u64, reply: Agen
         AgentReply::Session {
             result: Ok(start),
             loaded,
+        } => session::on_started(actor, thread, start, loaded),
+        AgentReply::Prepared {
+            result: Ok(start),
+            loaded,
         } => session::attach(actor, thread, start, loaded),
+        AgentReply::Prepared {
+            result: Err(error), ..
+        } => launch_failed(actor, thread, &error),
         AgentReply::Session {
             result: Err(error),
             loaded: true,
         } => {
-            tracing::warn!(%thread, %error, "session/load failed; starting a new session");
+            tracing::warn!(
+                %thread,
+                %error,
+                "session/load or session/resume failed; starting a new session"
+            );
             // The old session's replay belongs to no session the new one knows.
             if let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) {
                 agent.replayed.clear();
