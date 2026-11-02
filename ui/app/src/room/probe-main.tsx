@@ -7,6 +7,8 @@
 // Always for this matter and find the prompt confirming (the OS line up, the answers waiting). The page's query sets its display for this page only (theme=night,
 // lang=hi, lite=1, motion=reduced, size=18), as the WebKit probe (scripts/webkit-probe.swift) asks for it, and
 // window.__clauseoDisplay and __clauseoAxe are set (dev-hooks.ts).
+// With ?versions=panel, band, undo, restore or wait, the room has Versions open over the matter's history (probe-states.tsx):
+// the timeline with its kinds of row, a past version selected, its undo or restore dialog, or the conversation running.
 // Not shipped.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -32,6 +34,7 @@ import { installDevHooks, queryPatch } from "./dev-hooks.ts";
 import { detailed, fakeNext, railStates } from "./fake-next.ts";
 import type { MatterInfo, PaperSummary } from "./host-next.ts";
 import { connectRoom } from "./start.ts";
+import { versionsHost, versionsPageOf } from "./versions/probe-states.tsx";
 
 const FILES = [
   "Notice to the bank.pdf",
@@ -93,9 +96,15 @@ const matters: MatterInfo[] = noMatters
     ? railStates(OPEN, SCRATCH, Date.now())
     : [detailed(OPEN), detailed(SCRATCH)];
 
+/** ?versions=…: the matter's Versions (probe-states.tsx), in place of the scripted stream. */
+const versionsPage = versionsPageOf(page.get("versions"));
+const versioning = versionsPage === null ? null : versionsHost(versionsPage);
+
 const transport = new FakeTransport({
   platform: "mac",
   query: (query) => {
+    const answer = versioning?.query(query);
+    if (answer !== undefined) return answer;
     // ?thread=permission: the turn's thread, so the room subscribes to it and shows the prompts
     if (asking && typeof query === "object" && query.list_threads !== undefined)
       return {
@@ -103,8 +112,12 @@ const transport = new FakeTransport({
       };
     throw new Error(`the probe's host is a NextHost: it answers no ${JSON.stringify(query)}`);
   },
-  subscribe: () => {
+  subscribe: (streamId) => {
     queueMicrotask(() => {
+      if (versioning !== null) {
+        for (const message of versioning.subscribe(streamId)) transport.deliver(message);
+        return;
+      }
       for (const message of stream()) transport.deliver(message);
     });
   },
