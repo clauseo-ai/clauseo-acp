@@ -125,7 +125,9 @@ test("the toolbar's Undo opens Versions on the newest turn's change, with its un
     { thread: THREAD, turn: TURN, files: [{ path: "brief.txt", choice: "undo" }] },
   ]);
   // done: back at now, saying what went back
-  expect(document.body.textContent).toMatch(/Undid the change at .+\. brief\.txt went back/);
+  expect(document.body.textContent).toMatch(
+    /Undid the change at .+\. \u2068brief\.txt\u2069 went back/,
+  );
 });
 
 test("the toolbar's Undo waiting for its step is dropped once the lawyer picks another version", async () => {

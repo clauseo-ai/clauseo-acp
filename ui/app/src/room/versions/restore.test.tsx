@@ -112,10 +112,10 @@ test("the restore dialog lists exactly the preview's files, restores, and its Un
   ]);
   expect(dialog()?.textContent).toContain(`Restore the matter to how it was at ${at2} today?`);
   expect(describedBy()).toBe(
-    "2 documents will change: brief.txt and notes.docx. You can undo this.",
+    "2 documents will change: \u2068brief.txt\u2069 and \u2068notes.docx\u2069. You can undo this.",
   );
   expect(dialog()?.querySelector(".ver-dialog-note")?.textContent).toBe(
-    "'new.txt', added since, stays.",
+    "'\u2068new.txt\u2069', added since, stays.",
   );
   // the step's own file list is not the dialog's: only the preview's two files are named
   expect(dialog()?.textContent).not.toContain("other.txt");
@@ -160,7 +160,7 @@ test("the restore dialog lists exactly the preview's files, restores, and its Un
     preview_restore: { matter: MATTER, checkpoint: "cp3", scope: "matter" },
   });
   expect(describedBy()).toBe(
-    "2 documents will change: brief.txt and notes.docx. You can undo this.",
+    "2 documents will change: \u2068brief.txt\u2069 and \u2068notes.docx\u2069. You can undo this.",
   );
   expect(h.sent("restore_version")).toHaveLength(1);
   await h.click(h.one("dialog-confirm"));
@@ -196,7 +196,7 @@ test("Word holding a file: the dialog names it with Try again, the page says why
   await h.click(h.one("version-restore"));
   await h.click(h.one("dialog-confirm"));
   expect(h.sent("restore_version")).toHaveLength(1);
-  expect(dialog()?.textContent).toContain("Close 'brief.txt' in Word to restore it.");
+  expect(dialog()?.textContent).toContain("Close '\u2068brief.txt\u2069' in Word to restore it.");
   expect(h.one("dialog-try-again")).not.toBeNull();
   expect(h.one("dialog-confirm")).toBeNull();
   // under the dialog, the page says why by the refusal's code
