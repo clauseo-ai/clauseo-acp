@@ -50,7 +50,7 @@ const CANONICAL: Record<AgentKind, AgentId> = { claude: DEFAULT_AGENT, codex: "c
 /** An agent's kind: the one the host lists for it (R15's ListAgents), else read off its id (Claude Code's begin
  * `claude`, Codex's `codex`), for an agent the list doesn't hold or lists with no kind (#154 gives a kind to
  * `claude-acp` and `codex-acp` only, so an older settings file's `claude` lists without one); none for any other id. */
-function kindOf(agent: AgentId, agents: readonly AgentSummary[]): AgentKind | undefined {
+export function kindOf(agent: AgentId, agents: readonly AgentSummary[]): AgentKind | undefined {
   const listed = agents.find((a) => a.id === agent);
   if (listed?.kind !== undefined) return listed.kind;
   if (agent.startsWith("claude")) return "claude";
@@ -64,24 +64,55 @@ function groupOf(agent: AgentId, agents: readonly AgentSummary[]): string {
   return kindOf(agent, agents) ?? `agent:${agent}`;
 }
 
-/** The agent the matter uses most, counted by kind (see the top of this file); a tie goes to the kind used most
- * recently. The result is the most recently used agent of that kind; null with no conversation. */
+/** The matter's winning group, counted by kind (see the top of this file), a tie going to the group used most recently:
+ * its kind (none for an agent of no kind) and its conversations; null with no conversation. Every conversation counts,
+ * listed or not: a matter whose conversations ran `claude` before R15's rename still uses the Claude plan. */
+function winner(
+  threads: readonly Used[],
+  agents: readonly AgentSummary[],
+): { kind: AgentKind | undefined; members: Used[]; last: Used } | null {
+  const uses = new Map<string, { members: Used[]; last: Used }>();
+  for (const t of threads) {
+    const group = groupOf(t.agent, agents);
+    const u = uses.get(group);
+    if (u === undefined) uses.set(group, { members: [t], last: t });
+    else {
+      u.members.push(t);
+      if (later(t, u.last)) u.last = t;
+    }
+  }
+  let best: { members: Used[]; last: Used } | null = null;
+  for (const u of uses.values())
+    if (
+      best === null ||
+      u.members.length > best.members.length ||
+      (u.members.length === best.members.length && later(u.last, best.last))
+    )
+      best = u;
+  return best === null ? null : { ...best, kind: kindOf(best.last.agent, agents) };
+}
+
+/** The agent a new conversation runs by the matter's use: the winning group's most recently used agent. Where the host
+ * lists agents, only a listed one: the group's most recent listed agent, else its kind's option (choiceOf: the
+ * canonical or first listed id), else null, so a conversation never starts on an id the settings no longer hold (a
+ * pre-rename `claude` beside today's `claude-acp`). Null with no conversation. */
 export function mostUsed(
   threads: readonly Used[],
   agents: readonly AgentSummary[] = [],
 ): AgentId | null {
-  const uses = new Map<string, { n: number; last: Used }>();
-  for (const t of threads) {
-    const group = groupOf(t.agent, agents);
-    const u = uses.get(group);
-    if (u === undefined) uses.set(group, { n: 1, last: t });
-    else uses.set(group, { n: u.n + 1, last: later(t, u.last) ? t : u.last });
-  }
-  let best: { n: number; last: Used } | null = null;
-  for (const u of uses.values())
-    if (best === null || u.n > best.n || (u.n === best.n && later(u.last, best.last))) best = u;
-  return best?.last.agent ?? null;
+  const won = winner(threads, agents);
+  if (won === null) return null;
+  if (agents.length === 0) return won.last.agent;
+  let listed: Used | undefined;
+  for (const t of won.members)
+    if (isListed(t.agent, agents) && (listed === undefined || later(t, listed))) listed = t;
+  if (listed !== undefined) return listed.agent;
+  return won.kind === undefined ? null : (choiceOf(won.kind, agents, []) ?? null);
 }
+
+/** Whether the host lists `agent`. */
+const isListed = (agent: AgentId, agents: readonly AgentSummary[]): boolean =>
+  agents.some((a) => a.id === agent);
 
 /** The agent a conversation runs when nothing else names one: DEFAULT_AGENT, unless the host lists agents and does not
  * list that one. Then it is the Claude plan's agent, else the first listed agent with a kind, else the first listed,
@@ -122,12 +153,12 @@ export function matterPlan(
   threads: readonly Used[],
   agents: readonly AgentSummary[] = [],
 ): string | undefined {
-  const agent = mostUsed(threads, agents);
-  return agent === null ? undefined : planName(agent, agents);
+  const won = winner(threads, agents);
+  return won === null ? undefined : planName(won.last.agent, agents);
 }
 
-/** The agent a plan option stands for: the id of that kind the matter used most recently (from `threads`); else the
- * kind's canonical id if the host lists it; else the first listed id of the kind. Undefined when the host lists no
+/** The agent a plan option stands for: the listed id of that kind the matter used most recently (from `threads`); else
+ * the kind's canonical id if the host lists it; else the first listed id of the kind. Undefined when the host lists no
  * agent of the kind. */
 function choiceOf(
   kind: AgentKind,
@@ -138,7 +169,7 @@ function choiceOf(
   if (listed.length === 0) return undefined;
   let used: Used | undefined;
   for (const t of threads)
-    if (kindOf(t.agent, agents) === kind && (used === undefined || later(t, used))) used = t;
+    if (listed.includes(t.agent) && (used === undefined || later(t, used))) used = t;
   if (used !== undefined) return used.agent;
   return listed.includes(CANONICAL[kind]) ? CANONICAL[kind] : listed[0];
 }
