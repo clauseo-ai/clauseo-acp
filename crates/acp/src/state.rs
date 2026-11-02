@@ -129,6 +129,10 @@ pub(crate) struct SessionState {
     pub(crate) origin: Origin,
     /// The turn whose `session/prompt` waits for its response.
     pub(crate) prompt: Option<TurnId>,
+    /// The plan id of the item plan shown, the one updated last (`plan_update`): a
+    /// `plan_removed` of it empties the plan. No other plan's entries are kept, since only the
+    /// shown plan's removal changes what the host shows.
+    pub(crate) shown_plan: Option<CompactString>,
 }
 
 impl SessionState {
@@ -137,6 +141,7 @@ impl SessionState {
             cwd,
             origin,
             prompt: None,
+            shown_plan: None,
         }
     }
 }

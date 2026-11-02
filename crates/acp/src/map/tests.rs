@@ -18,7 +18,15 @@ fn map_update(mut update: Value, cwd: Option<&Path>) -> Vec<AcpEvent> {
     let quarantined = quarantine_unknown_blocks(&mut update);
     let decoded: acp::SessionUpdate = serde_json::from_value(update).unwrap();
     let mut out = Vec::new();
-    super::update(session(), Origin::Idle, decoded, cwd, quarantined, &mut out);
+    let mut shown = None;
+    super::update(
+        session(),
+        Origin::Idle,
+        decoded,
+        (cwd, &mut shown),
+        quarantined,
+        &mut out,
+    );
     out
 }
 

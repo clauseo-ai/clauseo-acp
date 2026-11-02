@@ -32,6 +32,10 @@ pub(crate) enum Command {
         request: LoadSession,
         reply: Reply<SessionStart>,
     },
+    ResumeSession {
+        request: LoadSession,
+        reply: Reply<SessionStart>,
+    },
     Prompt {
         session: AgentSessionId,
         turn: TurnId,
@@ -71,6 +75,10 @@ pub(crate) enum Command {
         session: AgentSessionId,
         mode_id: AgentChoiceId,
         reply: Reply<()>,
+    },
+    CodexHooksList {
+        cwd: std::path::PathBuf,
+        reply: Reply<serde_json::Value>,
     },
 }
 
@@ -129,6 +137,14 @@ impl AcpClient {
     /// [`Origin::Replay`](crate::Origin::Replay).
     pub async fn load_session(&self, request: LoadSession) -> Result<SessionStart, Error> {
         self.call(|reply| Command::LoadSession { request, reply })
+            .await
+    }
+
+    /// `session/resume` (ACP v1, stable): the agent takes the session back without replaying
+    /// it, so no update comes with [`Origin::Replay`](crate::Origin::Replay). Send it only to an
+    /// agent whose `sessionCapabilities.resume` is set.
+    pub async fn resume_session(&self, request: LoadSession) -> Result<SessionStart, Error> {
+        self.call(|reply| Command::ResumeSession { request, reply })
             .await
     }
 
@@ -248,6 +264,20 @@ impl AcpClient {
             reply,
         })
         .await
+    }
+
+    /// codex-acp's `_codex/hooks/list` for the folder `cwd` (`dist/index.js:39927-39933`,
+    /// params `{"cwd": …}` at `:45631-45635`). The answer is codex-acp's as it is: the app-server
+    /// `hooks/list` entry for `cwd` with `hooks` cut to the session-flags ones (from
+    /// `CODEX_CONFIG`), each with a `key`, a `currentHash` and a `trustStatus`. Only for an
+    /// agent that is codex-acp: any other answers method-not-found ([`Error::Rpc`]).
+    pub async fn codex_hooks_list(
+        &self,
+        cwd: &std::path::Path,
+    ) -> Result<serde_json::Value, Error> {
+        let cwd = cwd.to_owned();
+        self.call(|reply| Command::CodexHooksList { cwd, reply })
+            .await
     }
 
     /// How many frames the frame tap dropped because it was full or closed.

@@ -1,4 +1,4 @@
-//! Session state: plans, commands, modes, config options, notices, capabilities.
+//! Session state: plans (whole and by plan id), commands, modes, config options, notices, capabilities.
 
 use std::collections::BTreeMap;
 
@@ -31,6 +31,37 @@ pub(crate) fn plan(entries: Vec<acp::PlanEntry>) -> Vec<PlanEntry> {
             },
         })
         .collect()
+}
+
+/// An item plan's `plan_update` (codex-acp sends them): it becomes the shown plan, as
+/// `AgentUpdate::Plan`. A markdown or file plan waits for a protocol type, so it gives `None`
+/// (the caller warns) and the shown plan stays.
+pub(crate) fn plan_update(
+    update: acp::PlanUpdate,
+    shown: &mut Option<CompactString>,
+) -> Option<AgentUpdate> {
+    match update.plan {
+        acp::PlanUpdateContent::Items(items) => {
+            *shown = Some(CompactString::from(&*items.plan_id.0));
+            Some(AgentUpdate::Plan(plan(items.entries)))
+        }
+        // Markdown, file, or a kind newer than schema 1.11.0.
+        _ => None,
+    }
+}
+
+/// A `plan_removed`: of the shown plan, an empty `AgentUpdate::Plan`; of any other plan,
+/// nothing, since nothing of it shows.
+pub(crate) fn plan_removed(
+    removed: &acp::PlanRemoved,
+    shown: &mut Option<CompactString>,
+) -> Option<AgentUpdate> {
+    if shown.as_deref() == Some(&*removed.plan_id.0) {
+        *shown = None;
+        Some(AgentUpdate::Plan(Vec::new()))
+    } else {
+        None
+    }
 }
 
 pub(crate) fn commands(commands: Vec<acp::AvailableCommand>) -> Vec<AvailableCommand> {
