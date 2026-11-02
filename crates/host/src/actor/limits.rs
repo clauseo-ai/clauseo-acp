@@ -10,9 +10,13 @@
 //!   only logged) and published as `AccountLimitsChanged`. The actions of one input publish
 //!   each `AccountLimitsChanged`, then one `LimitsViewChanged` when any action changed the view.
 //! - The timer waits for [`Limits::next_deadline`] on the host clock. It is replaced only when
-//!   that time moves, and a fire carries the generation it was armed with, so a fire that raced
-//!   a re-arm is ignored. The model gives no deadline while nobody watches, so with no limits
-//!   subscriber no limits timer is armed.
+//!   that time moves. Taking it (a fire, a re-arm, a cancel) moves the generation on, and a fire
+//!   carries the generation it was armed with, so a fire that raced a re-arm or a cancel is
+//!   ignored, and so is any fire while nobody watches. The model gives no deadline while nobody
+//!   watches, so with no limits subscriber no limits timer is armed.
+//! - The timer counts on the host clock's monotonic time, which stops while the computer
+//!   sleeps: every input first feeds the `Deadline` of an armed timer whose wall time has
+//!   passed, so a wake-up's first input sweeps before anything else.
 //! - Subscribers follow `app.rs`'s rules (bounded channel, `try_send`, a full one is caught up
 //!   with the current view once it drains). The first one turns `Watching` on, and its view is
 //!   the first event it gets; a later one gets the current view alone; the last one to go turns
@@ -145,6 +149,11 @@ pub(super) fn start(actor: &mut Actor, cached: Vec<AccountLimits>) {
             agents.push(kind);
         }
     }
+    start_with(actor, cached, agents);
+}
+
+/// [`start`] for these agents.
+fn start_with(actor: &mut Actor, cached: Vec<AccountLimits>, agents: Vec<AgentKind>) {
     if agents.is_empty() {
         return;
     }
@@ -166,10 +175,10 @@ pub(super) fn on_input(actor: &mut Actor, input: LimitsInput) {
             super::turn::limits_read(actor, agent);
         }
         LimitsInput::Deadline { generation } => {
-            if generation != actor.limits.generation {
+            if generation != actor.limits.generation || !actor.limits.watching {
                 return;
             }
-            actor.limits.timer = None;
+            take_timer(actor);
             feed(actor, ModelInput::Deadline);
         }
         LimitsInput::StopWait { thread, turn } => stops::on_wait_over(actor, thread, turn),
@@ -304,6 +313,16 @@ fn kind_of(actor: &Actor, thread: ThreadId) -> Option<AgentKind> {
 /// re-arms the timer. Does nothing with no model.
 fn feed(actor: &mut Actor, input: ModelInput) {
     let now = actor.now().wall;
+    let overdue = actor
+        .limits
+        .timer
+        .as_ref()
+        .is_some_and(|(_, at)| *at <= now);
+    if overdue && !matches!(input, ModelInput::Deadline) {
+        // The timer missed its wall time (the computer slept): the sweep goes first.
+        take_timer(actor);
+        feed(actor, ModelInput::Deadline);
+    }
     let Some(model) = actor.limits.model.as_mut() else {
         return;
     };
@@ -426,16 +445,54 @@ fn rearm(actor: &mut Actor, now: Timestamp) {
     if deadline == armed {
         return;
     }
-    if let Some((timer, _)) = actor.limits.timer.take() {
-        timer.abort();
-    }
+    take_timer(actor);
     let Some(at) = deadline else {
         return;
     };
-    actor.limits.generation = actor.limits.generation.wrapping_add(1);
     let generation = actor.limits.generation;
     let millis = at.as_millis().saturating_sub(now.as_millis()).max(0);
     let delay = Duration::from_millis(u64::try_from(millis).unwrap_or(0));
     let handle = actor.post_after(delay, Input::Limits(LimitsInput::Deadline { generation }));
     actor.limits.timer = Some((handle, at));
+}
+
+/// Takes the armed timer, if any, and moves the generation on, so that a fire of it already
+/// posted is stale.
+fn take_timer(actor: &mut Actor) {
+    if let Some((timer, _)) = actor.limits.timer.take() {
+        timer.abort();
+    }
+    actor.limits.generation = actor.limits.generation.wrapping_add(1);
+}
+
+/// Test access to what the module keeps to itself.
+#[cfg(test)]
+pub(crate) mod for_tests {
+    use std::sync::Arc;
+
+    use clauseo_limits::ReadLimits;
+    use clauseo_protocol::{AccountLimits, AgentKind};
+
+    use super::{Actor, start_with};
+
+    /// Starts limits again with `reader`, `cached` and `agents`, whatever the settings say.
+    pub(crate) fn start(
+        actor: &mut Actor,
+        reader: Arc<dyn ReadLimits>,
+        cached: Vec<AccountLimits>,
+        agents: Vec<AgentKind>,
+    ) {
+        actor.limits.reader = reader;
+        start_with(actor, cached, agents);
+    }
+
+    /// The generation of the timer, and whether one is armed.
+    pub(crate) fn timer(actor: &Actor) -> (u64, bool) {
+        (actor.limits.generation, actor.limits.timer.is_some())
+    }
+
+    /// Whether the model was told someone watches.
+    pub(crate) fn watching(actor: &Actor) -> bool {
+        actor.limits.watching
+    }
 }
