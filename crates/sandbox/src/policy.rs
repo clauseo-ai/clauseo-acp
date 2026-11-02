@@ -314,6 +314,9 @@ impl Policy {
     /// allow rule of the policy covers (runtime, read, allowed folders, state, notes, the Claude
     /// store, the credential link). A target nothing allows is refused by the default deny
     /// already, and one that holds an allowed path gets no rule (it would deny that path).
+    /// Only the policy's own allows count: a target under the profile's base system reads,
+    /// the text-encoding preference or the Keychain folders gets no rule, since the assistant
+    /// may read those files by their own path anyway; the link itself stays denied.
     pub fn link_targets(&self) -> &[PathBuf] {
         &self.link_targets
     }
