@@ -834,12 +834,12 @@
     "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
   },
   "U8-03": {
-    "en": "Clauseo changed {paper}, and the change couldn't be kept as a version.",
-    "hi": "Clauseo ने {paper} बदला, पर यह बदलाव संस्करण के रूप में नहीं रखा जा सका।",
+    "en": "Clauseo changed {paper} at {time}, and the change couldn't be kept as a version. {paper} stands as Clauseo left it.",
+    "hi": "Clauseo ने {time} बजे {paper} बदला, पर यह बदलाव संस्करण के रूप में नहीं रखा जा सका। {paper} वैसा ही है जैसा Clauseo ने छोड़ा।",
     "status": "approved",
     "at": "2026-11-02",
     "by": "Rohan",
-    "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
+    "note": "Rohan, on the review page (built from U8 edccb807), \"approve u8\""
   },
   "U8-04": {
     "en": "Not kept as a version.",
@@ -902,12 +902,12 @@
     "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
   },
   "U8-12": {
-    "en": "It may hold your own edits",
-    "hi": "इसमें आपके अपने बदलाव हो सकते हैं",
+    "en": "Changed during the answer, though Clauseo didn't say it was changing it.",
+    "hi": "जवाब के दौरान बदला गया, हालाँकि Clauseo ने इसे बदलने की बात नहीं कही।",
     "status": "approved",
     "at": "2026-11-02",
     "by": "Rohan",
-    "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
+    "note": "Rohan, on the review page (built from U8 edccb807), \"approve u8\""
   },
   "U8-13": {
     "en": "1 document may hold your own edits.",
@@ -932,6 +932,62 @@
     "at": "2026-11-02",
     "by": "Rohan",
     "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
+  },
+  "U8-16": {
+    "en": "Clauseo changed {paper} at {time} on {day}, and the change couldn't be kept as a version. {paper} stands as Clauseo left it.",
+    "hi": "Clauseo ने {day} को {time} बजे {paper} बदला, पर यह बदलाव संस्करण के रूप में नहीं रखा जा सका। {paper} वैसा ही है जैसा Clauseo ने छोड़ा।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 edccb807), \"approve u8\""
+  },
+  "U8-17": {
+    "en": "Imported 1 document",
+    "hi": "1 दस्तावेज़ आयात किया गया",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 edccb807), \"approve u8\""
+  },
+  "U8-18": {
+    "en": "Imported the matter's documents",
+    "hi": "मामले के दस्तावेज़ आयात किए गए",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 edccb807), \"approve u8\""
+  },
+  "U8-19": {
+    "en": "A PDF shows only whether it changed.",
+    "hi": "PDF के बारे में केवल इतना दिखता है कि वह बदला या नहीं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 edccb807), \"approve u8\""
+  },
+  "U8-20": {
+    "en": "Open each to read it.",
+    "hi": "पढ़ने के लिए हर एक को खोलें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 edccb807), \"approve u8\""
+  },
+  "U8-21": {
+    "en": "'{papers}' can't be restored and stay as they are.",
+    "hi": "'{papers}' पुनर्स्थापित नहीं हो सकते और जैसे हैं वैसे ही रहेंगे।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 edccb807), \"approve u8\""
+  },
+  "U8-22": {
+    "en": "'{papers}', added since, stay.",
+    "hi": "बाद में जोड़े गए '{papers}' बने रहेंगे।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 edccb807), \"approve u8\""
   },
   "U10-01": {
     "en": "The answer stopped at {time}. Your question and the answer so far are kept.",
