@@ -102,6 +102,22 @@ export const BUDGET_NOTE =
   "machine runners (the Windows one renders without a GPU); the metric's own row is the release limit, " +
   "measured on a laptop (stage F).";
 
+/**
+ * The line under each scoreboard table that says what its start-up rows measure (#173). Windows
+ * and macOS both measure a warm start, by different means.
+ */
+export const START_NOTE: Record<Os, string> = {
+  windows:
+    "Start-up rows marked warm measure a later launch of the installed app: the warm-up launch makes " +
+    "WebView2's profile (`WEBVIEW2_USER_DATA_FOLDER`) and the three measured launches reuse it; the " +
+    "app's own data and matter folders are new for each launch. A cold row would measure a first " +
+    "launch, on a fresh profile per launch; this table has none.",
+  macos:
+    "Start-up rows marked warm measure a later launch here too: WKWebView has no profile folder the " +
+    "harness can set, and WebKit keeps the app's website data between launches, so the measured " +
+    "launches follow the warm-up's. The app's own data and matter folders are new for each launch.",
+};
+
 /** The flags of one row: over its budget, more than 10% worse than main, both, or none. */
 export function flags(pr: number | null, main: number | null, limit: number | null): string[] {
   const out: string[] = [];
@@ -193,7 +209,7 @@ function scoreboardSection(input: RenderInput, os: Os): string[] {
         `${flagged.length > 0 ? `⚠️ ${flagged.join(", ")}` : ""} |`,
     );
   }
-  lines.push("", BUDGET_NOTE);
+  lines.push("", BUDGET_NOTE, "", START_NOTE[os]);
   return lines;
 }
 

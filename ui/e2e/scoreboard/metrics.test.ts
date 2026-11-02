@@ -12,6 +12,7 @@ import {
   METRICS,
   RAW_RUN_KEYS,
   isReportOnly,
+  startOf,
   droppedFramesPer10s,
   median,
   parseRawRun,
@@ -330,4 +331,18 @@ test("parseReducerSummaries drops a case whose name could inject Markdown", () =
   expect(() =>
     parseReducerSummaries(JSON.stringify({ schema: 1, cases: new Array(65).fill({}) })),
   ).toThrow("more than 64 cases");
+});
+
+test("a start-up metric names its start (warm or cold) in its id, its label and its `start`", () => {
+  for (const metric of METRICS) {
+    const start = startOf(metric);
+    const named = /^(warm|cold)_start/.exec(metric.id)?.[1] ?? null;
+    expect(start, metric.id).toBe(named);
+    if (start !== null) expect(metric.label, metric.id).toMatch(new RegExp(`, ${start}$`));
+    else expect(metric.label, metric.id).not.toMatch(/\b(warm|cold)\b/);
+  }
+  // The scoreboard's one start-up metric is the warm start (#173).
+  expect(METRICS.filter((m) => startOf(m) !== null).map((m) => [m.id, startOf(m)])).toEqual([
+    ["warm_start_interactive", "warm"],
+  ]);
 });

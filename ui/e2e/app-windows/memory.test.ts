@@ -2,7 +2,16 @@
 // app needed.
 
 import { expect, test } from "@playwright/test";
-import { isSettled, parseCommit, treeMemory, walkTree, type Reading, type Row } from "./memory.ts";
+import {
+  browserProcesses,
+  isSettled,
+  parseCommit,
+  treeMemory,
+  walkTree,
+  type Reading,
+  type Row,
+  type TreeProcess,
+} from "./memory.ts";
 
 function row(
   pid: number,
@@ -119,4 +128,28 @@ test("reads a commit total from PowerShell's line, and null from an empty or oth
   expect(parseCommit("")).toBeNull();
   expect(parseCommit("  ")).toBeNull();
   expect(parseCommit("Get-Process : Cannot find a process")).toBeNull();
+});
+
+test("the browser process is the msedgewebview2.exe without --type=", () => {
+  const proc = (pid: number, name: string, commandLine: string | null): TreeProcess => ({
+    pid,
+    name,
+    commandLine,
+    privateWorkingSetBytes: null,
+    commitBytes: 0,
+  });
+  const tree = [
+    proc(10, "clauseo-desktop.exe", "clauseo-desktop.exe"),
+    proc(
+      11,
+      "msedgewebview2.exe",
+      '"C:\\x\\msedgewebview2.exe" --embedded-browser-webview=1 --remote-debugging-port=0',
+    ),
+    proc(12, "msedgewebview2.exe", '"C:\\x\\msedgewebview2.exe" --type=renderer'),
+    proc(13, "msedgewebview2.exe", "msedgewebview2.exe --type=gpu-process"),
+    proc(14, "msedgewebview2.exe", null),
+  ];
+  expect(browserProcesses(tree).map((entry) => entry.pid)).toEqual([11]);
+  // A launch that joined a browser an earlier launch left has none in its own tree.
+  expect(browserProcesses(tree.filter((entry) => entry.pid !== 11))).toEqual([]);
 });

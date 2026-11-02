@@ -1,6 +1,11 @@
 // The speed scoreboard on Windows (R13): fake_agent's `scoreboard` session played into the e2e
 // build, once to warm up and three times measured, each play a fresh launch on its own scratch
 // CLAUSEO_DATA_DIR and E2E_MATTER_DIR (one test per play, so the fixture gives each its folders).
+// Start-up is a warm start, a later launch of the installed app: every play runs on one WebView2
+// profile (`profile: "warm"`, fixture.ts), which the warm-up play makes and the measured plays
+// reuse (#173). Each measured play checks that it started its own browser process and that the
+// profile carries no page storage but the display settings' cache, which every play's same
+// settings fill the same way (`expectNoCarriedState`).
 // The page's perf API (`window.__clauseoPerf`, ui/app/src/perf/, loaded only in the e2e and marks
 // builds) records the marks, the frames, chunk-to-paint and the keystrokes; this spec drives the
 // session, reads memory with memory.ts and builds one RawRun (scoreboard/metrics.ts) per play. The
@@ -38,10 +43,10 @@ import {
 } from "../scoreboard/session.ts";
 import { test, type App } from "./fixture.ts";
 import { expectTurnEnded, openMatter } from "./flow.ts";
-import { processTree, settle, treeMemory } from "./memory.ts";
+import { browserProcesses, processTree, settle, treeMemory } from "./memory.ts";
 import { window as appWindow, type Window as AppWindow } from "./selectors.ts";
 
-test.use({ scenario: SCENARIO, agentArgs: PACE_ARGS });
+test.use({ scenario: SCENARIO, agentArgs: PACE_ARGS, profile: "warm" });
 // One play after another; a failed play skips the rest, since the result needs every run.
 test.describe.configure({ mode: "serial" });
 
@@ -128,6 +133,46 @@ async function scrollUpAndDown(page: Page, w: AppWindow): Promise<void> {
   }
 }
 
+/**
+ * The only page storage a play may find in the reused profile: the room's display settings cache
+ * (ui/app/src/room/display-store.ts, `DISPLAY_KEY`), which holds the host's last answer for the
+ * next start's first frame. Every play's settings.json is the same, so every play writes and reads
+ * the same value.
+ */
+const CARRIED_KEYS: readonly string[] = ["clauseo.display"];
+
+/** What the page keeps in the WebView2 profile beyond the run: its storage, by name. */
+interface PageStorage {
+  localStorage: string[];
+  sessionStorage: string[];
+  indexedDB: string[];
+  caches: string[];
+}
+
+/** Reads the page's storage names. */
+async function pageStorage(page: Page): Promise<PageStorage> {
+  return await page.evaluate(async () => ({
+    localStorage: Object.keys(localStorage).sort(),
+    sessionStorage: Object.keys(sessionStorage).sort(),
+    indexedDB: (await indexedDB.databases()).map((db) => db.name ?? "").sort(),
+    caches: typeof caches === "undefined" ? [] : (await caches.keys()).sort(),
+  }));
+}
+
+/**
+ * Fails a play whose reused profile carries state that could change what it does or measures:
+ * any page storage but {@link CARRIED_KEYS} (a draft, a reopened matter, a cache the app added).
+ */
+function expectNoCarriedState(storage: PageStorage): void {
+  expect(
+    {
+      ...storage,
+      localStorage: storage.localStorage.filter((key) => !CARRIED_KEYS.includes(key)),
+    },
+    "page storage a reused WebView2 profile would carry into the next play",
+  ).toEqual({ localStorage: [], sessionStorage: [], indexedDB: [], caches: [] });
+}
+
 /** SCOREBOARD_OUT, or null when unset. */
 function outFolder(): string | null {
   const out = process.env["SCOREBOARD_OUT"];
@@ -161,7 +206,13 @@ async function play(app: App, stop: (app: App) => Promise<void>, n: number): Pro
   // the private working set of the whole tree.
   const cdp = await page.context().newCDPSession(page);
   const idleMemory = await test.step("idle memory", async () => {
-    const pids = (await processTree(app.pid)).map((entry) => entry.pid);
+    const tree = await processTree(app.pid);
+    // One browser of its own: a launch that joined the browser an earlier launch left on the
+    // reused profile would have none in its tree, and its start-up and memory would not be its own.
+    expect(browserProcesses(tree), "WebView2 browser processes in this launch's tree").toHaveLength(
+      1,
+    );
+    const pids = tree.map((entry) => entry.pid);
     const settled = await settle(pids, SETTLE_MAX_MS);
     if (!settled.settled) {
       process.stdout.write(`[scoreboard] idle memory not settled after ${settled.ms} ms\n`);
@@ -193,6 +244,8 @@ async function play(app: App, stop: (app: App) => Promise<void>, n: number): Pro
     };
   });
   if (startup.t0EpochMs === null) throw new Error("the page has no __CLAUSEO_PERF__.t0EpochMs");
+  // Before the session, so it shows what the profile brought in, not what this play adds.
+  const storage = await pageStorage(page);
 
   await openMatter(w);
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
@@ -241,9 +294,8 @@ async function play(app: App, stop: (app: App) => Promise<void>, n: number): Pro
   } satisfies RawRun;
   // Written before the checks, so a run they refuse can still be read.
   writeRunFile(playName(n), raw);
-  writeRunFile(
-    `${playName(n)}.debug`,
-    playDebug({
+  writeRunFile(`${playName(n)}.debug`, {
+    ...playDebug({
       bytesBefore: before,
       bytesAfter: after,
       answerTextBytes: sample.answer_text_bytes,
@@ -260,8 +312,11 @@ async function play(app: App, stop: (app: App) => Promise<void>, n: number): Pro
         connectedEpochMs: performance.timeOrigin + app.connectedAt,
       }),
     }),
-  );
+    // Which WebView2 profile the play ran on, which launch on it, and the storage it found there.
+    webview_profile: { profile: app.profile, launch: app.profileLaunch, storage },
+  });
   const run = parseRawRun(raw);
+  if (app.profileLaunch > 1) expectNoCarriedState(storage);
   await stop(app);
   return run;
 }
@@ -274,6 +329,9 @@ for (let n = 1; n <= WARMUP_RUNS + MEASURED_RUNS; n++) {
     app,
     apps,
   }) => {
+    // A warm start: the warm-up made the WebView2 profile, and every measured play reuses it.
+    if (!warmup)
+      expect(app.profileLaunch, "launches on this play's WebView2 profile").toBeGreaterThan(1);
     const run = await play(app, (a) => apps.stop(a, "close"), n);
     if (!warmup) measured.push(run);
   });

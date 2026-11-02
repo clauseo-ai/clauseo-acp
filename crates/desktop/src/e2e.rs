@@ -4,7 +4,8 @@
 //!   Playwright can attach with `connectOverCDP`. The port is 0, so the browser binds a free port
 //!   itself and writes it on the first line of `EBWebView/DevToolsActivePort` in its user data
 //!   folder (`WEBVIEW2_USER_DATA_FOLDER`), where the harness reads it. The file appears once the
-//!   browser listens, after the window is built; the harness polls for it.
+//!   browser listens, after the window is built; the harness polls for it. On a reused folder
+//!   (the scoreboard's warm profile) the harness deletes the last launch's file first.
 //! - On every OS, `pick_folder` returns the folder in `E2E_MATTER_DIR` instead of drawing the
 //!   folder dialog, and the "always allow" confirm answers `E2E_CONFIRM_ALWAYS` (`accept` or
 //!   `decline`) instead of drawing its dialog. Either variable unset or empty (any other value,

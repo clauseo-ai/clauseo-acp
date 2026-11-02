@@ -1,8 +1,15 @@
 // The real app on Windows under Playwright. The e2e build (`--features e2e`) opens WebView2's
 // DevTools port on a port the browser picks, which it writes to `EBWebView/DevToolsActivePort` in
-// its data folder; the fixture starts the app with a new WebView2 data folder, reads the port
-// from that file, attaches with `connectOverCDP`, hands the test the app's page, then closes the
+// its data folder; the fixture starts the app with a WebView2 data folder, reads the port from
+// that file, attaches with `connectOverCDP`, hands the test the app's page, then closes the
 // connection, ends the app's whole process tree by its PID and deletes the folders.
+//
+// The WebView2 data folder (`WEBVIEW2_USER_DATA_FOLDER`, the profile) is new for every launch by
+// default, as on a user's first launch. A spec that measures a later launch of the installed app
+// sets `test.use({ profile: "warm" })`: the worker's first launch makes one profile and every
+// later launch reuses it (scratch.ts, `Profile`; #173 found 0.8 to 0.9 s of a fresh profile's
+// start in WebView2's first request). Before each reuse the fixture waits until no browser holds
+// the profile and deletes the last launch's port file, so it never attaches to a stale port.
 //
 // Every launch runs on the test's scratch folders (scratch.ts): `CLAUSEO_DATA_DIR` is a new data
 // folder, never the real one, and `E2E_MATTER_DIR` the matter folder. A spec picks fake_agent's
@@ -30,11 +37,16 @@ import { chromium, test as base, type Browser, type Page } from "@playwright/tes
 import { closeWindow } from "./close.ts";
 import {
   fakeAgentPath,
+  launchProfile,
   makeScratch,
+  portFile,
+  readyReusedProfile,
   removeScratch,
   scratchEnv,
-  webviewFolder,
+  warmProfile,
+  type Profile,
   type Scratch,
+  type WarmProfile,
 } from "./scratch.ts";
 
 /** The time from starting the app to having its page: the port file, connecting, the page. */
@@ -67,8 +79,12 @@ export interface App {
   startedAt: number;
   /** `performance.now()` once the CDP connection to its webview was made. */
   connectedAt: number;
-  /** The temporary WebView2 data folder (`WEBVIEW2_USER_DATA_FOLDER`), new for each launch. */
+  /** The temporary WebView2 data folder (`WEBVIEW2_USER_DATA_FOLDER`). */
   userDataFolder: string;
+  /** `fresh`: the folder is new for this launch; `warm`: one folder per worker, reused. */
+  profile: Profile;
+  /** Which launch on `userDataFolder`: 1 when it was new, above 1 when an earlier launch left it. */
+  profileLaunch: number;
   /** Which launch on this test's folders: 1 for the first. */
   launch: number;
 }
@@ -79,7 +95,10 @@ export type Stop = "close" | "kill";
 /** Launches of the app on one test's scratch folders. */
 export interface Apps {
   scratch: Scratch;
-  /** Starts the app once more on the same data and matter folders, with a new WebView2 folder. */
+  /**
+   * Starts the app once more on the same data and matter folders, with a new WebView2 folder (or,
+   * with `profile: "warm"`, the worker's reused one).
+   */
   start(): Promise<App>;
   /**
    * Ends a launch and waits for it to exit. `close` posts WM_CLOSE to the app's window (close.ts)
@@ -121,16 +140,16 @@ function entries(folder: string): string {
 
 /**
  * The port from the first line of `<userDataFolder>/EBWebView/DevToolsActivePort`, which WebView2
- * writes once it listens on the port that `--remote-debugging-port=0` let it pick. The folder is
- * new for each launch, so the file is never left from an earlier one. Rejects if the app does not
- * start, exits, or writes no file within the setup time.
+ * writes once it listens on the port that `--remote-debugging-port=0` let it pick. The file is never
+ * left from an earlier launch: the folder is new, or `readyReusedProfile` deleted it before the
+ * app started. Rejects if the app does not start, exits, or writes no file within the setup time.
  */
 async function readPort(
   child: ChildProcess,
   userDataFolder: string,
   deadline: number,
 ): Promise<number> {
-  const file = join(userDataFolder, "EBWebView", "DevToolsActivePort");
+  const file = portFile(userDataFolder);
   let failure: Error | undefined;
   const onError = (error: Error): void => {
     failure = new Error(`the app did not start: ${appPath()}`, { cause: error });
@@ -265,9 +284,20 @@ interface Launched {
   browser: Browser | undefined;
 }
 
-/** Starts the app on `scratch` as launch number `launch`. */
-async function launch(scratch: Scratch, n: number, owned: Set<Launched>): Promise<App> {
-  const userDataFolder = webviewFolder(scratch, n);
+/** Starts the app on `scratch` as launch number `launch`, on a `profile` WebView2 data folder. */
+async function launch(
+  scratch: Scratch,
+  n: number,
+  owned: Set<Launched>,
+  profile: Profile,
+  warm: WarmProfile,
+): Promise<App> {
+  const chosen = launchProfile(profile, scratch, n, warm);
+  const userDataFolder = chosen.folder;
+  if (chosen.launch > 1) {
+    // Before startedAt: the wait is the launch before's exit, not this launch's start-up.
+    await readyReusedProfile(userDataFolder);
+  }
   const startedAt = performance.now();
   const deadline = startedAt + SETUP_TIMEOUT_MS;
   const child = spawn(appPath(), [], {
@@ -297,6 +327,8 @@ async function launch(scratch: Scratch, n: number, owned: Set<Launched>): Promis
     startedAt,
     connectedAt,
     userDataFolder,
+    profile: chosen.profile,
+    profileLaunch: chosen.launch,
     launch: n,
   };
   return launched.app;
@@ -348,12 +380,40 @@ export interface AppOptions {
   matterFiles: Readonly<Record<string, string>>;
   /** More fake_agent arguments after the scenario (the scoreboard's `--pace-ms 5`). */
   agentArgs: readonly string[];
+  /**
+   * The WebView2 profile of each launch: `fresh` (the default) a new one, as on a first launch;
+   * `warm` the worker's one, reused, as on a later launch (the scoreboard's warm start).
+   */
+  profile: Profile;
 }
 
-export const test = base.extend<AppOptions & { scratch: Scratch; apps: Apps; app: App }>({
+export const test = base.extend<
+  AppOptions & { scratch: Scratch; apps: Apps; app: App },
+  { warmProfile: WarmProfile }
+>({
   scenario: [null, { option: true }],
   matterFiles: [{}, { option: true }],
   agentArgs: [[], { option: true }],
+  profile: ["fresh", { option: true }],
+
+  // One per worker, so it outlives each test's scratch folders; made only when a warm launch asks.
+  warmProfile: [
+    async ({}, use) => {
+      const warm = warmProfile();
+      try {
+        await use(warm);
+      } finally {
+        if (process.env["E2E_KEEP_SCRATCH"] === "1") {
+          if (warm.launches > 0) {
+            process.stdout.write(`warm WebView2 profile kept in ${warm.folder()}\n`);
+          }
+        } else {
+          warm.remove();
+        }
+      }
+    },
+    { scope: "worker" },
+  ],
 
   scratch: async ({ scenario, matterFiles, agentArgs }, use) => {
     const scratch = makeScratch({ scenario, matterFiles, agentArgs }, () =>
@@ -370,14 +430,14 @@ export const test = base.extend<AppOptions & { scratch: Scratch; apps: Apps; app
     }
   },
 
-  apps: async ({ scratch }, use) => {
+  apps: async ({ scratch, profile, warmProfile: warm }, use) => {
     const owned = new Set<Launched>();
     let launches = 0;
     const apps: Apps = {
       scratch,
       start: async () => {
         launches += 1;
-        return await launch(scratch, launches, owned);
+        return await launch(scratch, launches, owned, profile, warm);
       },
       stop: async (app, how = "kill") => {
         const launched = [...owned].find((entry) => entry.app === app);
