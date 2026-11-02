@@ -1,11 +1,11 @@
 //! Versions: `RestoreVersion` (files written, the restore's events, the note on the next
-//! prompt, a restore with nothing to write, the refusals), `CompareVersions`, and the
-//! `CheckpointRow` the store keeps for every checkpoint.
+//! prompt, a restore with nothing to write, the refusals), `CompareVersions` (two versions, and
+//! a version with the folder now), and the `CheckpointRow` the store keeps for every checkpoint.
 
 use clauseo_protocol::{
-    ChangeKind, CheckpointId, CheckpointKind, CommandOutcome, DomainEvent, ErrorCode, HostCommand,
-    HostQuery, MatterId, MatterPath, QueryResult, RestoreRequest, RestoreScope, StopReason,
-    StreamId,
+    ChangeKind, CheckpointId, CheckpointKind, CommandOutcome, DomainEvent, ErrorCode, FileChange,
+    HostCommand, HostQuery, MatterId, MatterPath, QueryResult, RestoreRequest, RestoreScope,
+    StopReason, StreamId,
 };
 use clauseo_store::{Store, StoreOptions};
 
@@ -71,7 +71,7 @@ fn restore_writes_files_notes_next_prompt_and_rows_survive() {
         .query(HostQuery::CompareVersions {
             matter,
             from: import,
-            to: after,
+            to: Some(after),
         })
         .unwrap();
     let QueryResult::FileChanges(changes) = compared else {
@@ -278,5 +278,109 @@ fn restore_and_preview_refused_for_another_matter_or_a_bad_scope() {
             .unwrap_err();
         assert_eq!(error.code(), ErrorCode::CommandInvalid, "{why}: {error}");
     }
+    host.shutdown();
+}
+
+/// The changes of a `CompareVersions` answer as `(path, kind)`, in the order the answer gives.
+fn changes_of(answer: &QueryResult) -> Vec<(String, ChangeKind)> {
+    let QueryResult::FileChanges(changes) = answer else {
+        panic!("CompareVersions answered {answer:?}");
+    };
+    changes
+        .iter()
+        .map(|change: &FileChange| (change.path().as_str().to_owned(), change.change().clone()))
+        .collect()
+}
+
+#[test]
+fn compare_with_the_folder_now_lists_edits_adds_and_deletes_outside_a_turn() {
+    let dir = Dir::new(
+        "compare_with_the_folder_now_lists_edits_adds_and_deletes_outside_a_turn",
+        &[(FAKE, Scenario::Bundled("prompt-stream"))],
+    );
+    let host = dir.start(0);
+    let (matter, _, folder) = matter_with_thread(
+        &dir,
+        &host,
+        "m",
+        &[("brief.txt", "x\n"), ("gone.txt", "bye\n")],
+        FAKE,
+    );
+    let import = matter_events(&host, matter)
+        .checkpoint(CheckpointKind::Import)
+        .unwrap();
+
+    // The lawyer edits, adds and deletes files with no turn running.
+    write::write(&folder.join("brief.txt"), b"x, edited\n");
+    write::write(&folder.join("added.txt"), b"new\n");
+    write::remove_file(&folder.join("gone.txt"));
+
+    // No `to` means the folder now; `null` means the same.
+    let answer = host
+        .query(HostQuery::CompareVersions {
+            matter,
+            from: import,
+            to: None,
+        })
+        .unwrap();
+    assert_eq!(
+        changes_of(&answer),
+        [
+            ("added.txt".to_owned(), ChangeKind::Added),
+            ("brief.txt".to_owned(), ChangeKind::Modified),
+            ("gone.txt".to_owned(), ChangeKind::Deleted),
+        ]
+    );
+    host.shutdown();
+}
+
+#[test]
+fn compare_with_the_folder_now_is_empty_when_nothing_changed() {
+    let dir = Dir::new(
+        "compare_with_the_folder_now_is_empty_when_nothing_changed",
+        &[(FAKE, Scenario::Bundled("prompt-stream"))],
+    );
+    let host = dir.start(0);
+    let (matter, _, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let import = matter_events(&host, matter)
+        .checkpoint(CheckpointKind::Import)
+        .unwrap();
+
+    let answer = host
+        .query(HostQuery::CompareVersions {
+            matter,
+            from: import,
+            to: None,
+        })
+        .unwrap();
+    assert_eq!(answer, QueryResult::FileChanges(Vec::new()));
+    host.shutdown();
+}
+
+#[test]
+fn compare_with_the_folder_now_refuses_a_version_of_another_matter() {
+    let dir = Dir::new(
+        "compare_with_the_folder_now_refuses_a_version_of_another_matter",
+        &[(FAKE, Scenario::Bundled("prompt-stream"))],
+    );
+    let host = dir.start(0);
+    let (matter, _, _) = matter_with_thread(&dir, &host, "m", &[("brief.txt", "x\n")], FAKE);
+    let (other, _, _) = matter_with_thread(&dir, &host, "o", &[("brief.txt", "y\n")], FAKE);
+    let foreign = matter_events(&host, other)
+        .checkpoint(CheckpointKind::Import)
+        .unwrap();
+
+    let error = host
+        .query(HostQuery::CompareVersions {
+            matter,
+            from: foreign,
+            to: None,
+        })
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::CommandInvalid, "{error}");
+    assert!(
+        error.to_string().contains("not a version of this matter"),
+        "{error}"
+    );
     host.shutdown();
 }

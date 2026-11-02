@@ -1,7 +1,9 @@
 //! Queries: answered from host memory (`ListMatters`, `ListThreads`, `GetSettings`), a
 //! loaded stream (`PageEntries`), a loaded stream and then the matter's thread
-//! (`CompareVersions`, `PreviewRestore`) or a store read on a task of its own (`ReadBlob`).
+//! (`CompareVersions`, with a version or the folder now, and `PreviewRestore`) or a store
+//! read on a task of its own (`ReadBlob`).
 
+use clauseo_matters::CompareSide;
 use clauseo_protocol::{
     CheckpointId, CompactString, ErrorCode, FolderState, HostQuery, MatterId, MatterSummary,
     Principal, QueryResult, StreamId, ThreadStatus, ThreadSummary, ViewEntry,
@@ -66,10 +68,15 @@ pub(super) fn query(
             );
         }
         HostQuery::CompareVersions { matter, from, to } => {
+            // `to: None` is the folder now: nothing is stored, and only `from` is checked.
+            let (versions, to) = match to {
+                Some(to) => (vec![from, to], CompareSide::Checkpoint(to)),
+                None => (vec![from], CompareSide::Folder),
+            };
             matter_query(
                 actor,
                 matter,
-                [from, to],
+                versions,
                 MatterJob::Compare { from, to },
                 reply,
             );
@@ -87,7 +94,7 @@ pub(super) fn query(
                 from: checkpoint,
                 scope: scope.clone(),
             };
-            matter_query(actor, matter, [checkpoint, checkpoint], job, reply);
+            matter_query(actor, matter, vec![checkpoint], job, reply);
         }
         HostQuery::GetSettings => {
             let view = super::settings::view(&actor.effective);
@@ -112,13 +119,12 @@ pub(super) fn query(
 }
 
 /// A query R8 answers (`CompareVersions`, `PreviewRestore`): checks on the loaded matter
-/// stream that both checkpoints are the matter's, then sends `job` to the matter's thread,
-/// whose answer goes to `reply` (`matters.rs`). The compare query names two checkpoints, so
-/// R8's compare with the folder (`CompareSide::Folder`) is not reachable from here.
+/// stream that each of `versions` is the matter's, then sends `job` to the matter's thread,
+/// whose answer goes to `reply` (`matters.rs`).
 fn matter_query(
     actor: &mut Actor,
     matter: MatterId,
-    versions: [CheckpointId; 2],
+    versions: Vec<CheckpointId>,
     job: MatterJob,
     reply: Reply<QueryResult>,
 ) {
@@ -131,7 +137,7 @@ fn matter_query(
         stream,
         Box::new(move |actor: &mut Actor, loaded: Result<(), Error>| {
             let checked = loaded
-                .and_then(|()| own_versions(actor, matter, versions))
+                .and_then(|()| own_versions(actor, matter, &versions))
                 .and_then(|()| actor.matter_worker(matter));
             match checked {
                 // A refused send drops the tag and with it `reply`: the caller sees the host
@@ -183,13 +189,13 @@ fn list_matters(actor: &Actor, reply: Reply<QueryResult>) {
 pub(super) fn own_versions(
     actor: &Actor,
     matter: MatterId,
-    checkpoints: [CheckpointId; 2],
+    checkpoints: &[CheckpointId],
 ) -> Result<(), Error> {
     let state = actor
         .loaded(StreamId::Matter(matter))
         .and_then(|loaded| loaded.state.as_matter())
         .ok_or_else(|| Error::Internal(format!("matter {matter} is not loaded")))?;
-    for checkpoint in checkpoints {
+    for &checkpoint in checkpoints {
         let known = state.entries().values().any(|entry| {
             matches!(entry, ViewEntry::Version(version) if version.checkpoint == checkpoint)
         });
