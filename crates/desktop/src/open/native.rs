@@ -69,8 +69,8 @@ fn default_app(kind: &str) -> Result<Option<String>, HostError> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn default_app(_kind: &str) -> Result<Option<String>, HostError> {
-    Ok(None)
+fn default_app(_kind: &str) -> Option<String> {
+    None
 }
 
 /// An `internal` failure: the OS did not open what it was asked to.
@@ -94,7 +94,10 @@ impl<R: Runtime> Opener for NativeOpener<R> {
         let path = path.to_str().ok_or_else(|| {
             HostError::new(ErrorCode::CommandInvalid, "the file's name is not Unicode")
         })?;
+        #[cfg(target_os = "macos")]
         let app = default_app(kind)?;
+        #[cfg(not(target_os = "macos"))]
+        let app = default_app(kind);
         self.app
             .opener()
             .open_path(path, app.as_deref())
