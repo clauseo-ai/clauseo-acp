@@ -45,8 +45,8 @@ pub(crate) fn plan_update(
             *shown = Some(CompactString::from(&*items.plan_id.0));
             Some(AgentUpdate::Plan(plan(items.entries)))
         }
-        // Markdown, file, or a kind newer than schema 1.11.0.
-        _ => None,
+        // A kind newer than schema 1.11.0 waits as markdown and file plans do.
+        acp::PlanUpdateContent::Markdown(_) | acp::PlanUpdateContent::File(_) | _ => None,
     }
 }
 

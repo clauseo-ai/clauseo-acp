@@ -47,7 +47,11 @@ pub(super) fn on_event(actor: &mut Actor, thread: ThreadId, event: Box<AcpEvent>
                 ..
             } => true,
             AcpEvent::Update { .. } => agent.preparing,
-            _ => false,
+            AcpEvent::PermissionRequested { .. }
+            | AcpEvent::ElicitationRequested { .. }
+            | AcpEvent::ElicitationCompleted { .. }
+            | AcpEvent::Limit { .. }
+            | AcpEvent::Warning { .. } => false,
         }
     {
         agent.replayed.push(*event);
