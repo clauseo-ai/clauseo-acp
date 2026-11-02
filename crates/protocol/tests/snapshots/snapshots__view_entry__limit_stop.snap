@@ -8,6 +8,7 @@ expression: "entry(\"limit_stop\")"
     "turn": "01900000-0000-7000-8000-000000000006",
     "window": "five_hour",
     "resets_at": 1760000000000,
-    "reason": "plan_window"
+    "reason": "plan_window",
+    "ts": 1760000004000
   }
 }

@@ -2,8 +2,8 @@
 
 use clauseo_protocol::{
     DetachReason, EntryId, EventId, FilesChanged, LimitStopEntry, MarkerKind, Seq, StepEntry,
-    StepUndone, ThreadStatus, TurnEnded, TurnFailed, TurnId, TurnQueued, TurnStoppedAtLimit,
-    UserMessage, UserMessageEntry, UserMessageStatus, ViewEntry,
+    StepUndone, ThreadStatus, Timestamp, TurnEnded, TurnFailed, TurnId, TurnQueued,
+    TurnStoppedAtLimit, UserMessage, UserMessageEntry, UserMessageStatus, ViewEntry,
 };
 
 use super::{insert_marker, insert_new, not_yet, set, set_status, set_vec};
@@ -61,6 +61,7 @@ pub(super) fn detached(state: &mut ThreadState, reason: &DetachReason, out: &mut
 pub(super) fn user_message(
     state: &mut ThreadState,
     seq: Seq,
+    ts: Timestamp,
     event: &UserMessage,
     out: &mut Applied,
 ) {
@@ -81,6 +82,7 @@ pub(super) fn user_message(
         status: UserMessageStatus::Sent,
         edited: false,
         steer: None,
+        ts,
     };
     push_user_upsert(&mut out.changes, &entry);
     state.index.users.insert(event.message, seq);
@@ -151,6 +153,7 @@ pub(super) fn turn_failed(state: &mut ThreadState, event: &TurnFailed, out: &mut
 pub(super) fn stopped_at_limit(
     state: &mut ThreadState,
     seq: Seq,
+    ts: Timestamp,
     event: &TurnStoppedAtLimit,
     out: &mut Applied,
 ) {
@@ -168,6 +171,7 @@ pub(super) fn stopped_at_limit(
         window: event.window.clone(),
         resets_at: event.resets_at,
         reason: event.reason,
+        ts,
     };
     insert_new(state, seq, ViewEntry::LimitStop(entry), out);
     if state.turn == Some(event.turn) {
@@ -183,7 +187,13 @@ pub(super) fn stopped_at_limit(
 /// (0002); it leaves the status, but for `Starting` from that turn's own prompt, or `Queued` from
 /// its wait for another thread's writer, while no turn runs, which settles (to `Idle` unless the
 /// lawyer is asked). A second `TurnEnded` of a turn with a step is [`Anomaly::Duplicate`].
-pub(super) fn turn_ended(state: &mut ThreadState, seq: Seq, event: &TurnEnded, out: &mut Applied) {
+pub(super) fn turn_ended(
+    state: &mut ThreadState,
+    seq: Seq,
+    ts: Timestamp,
+    event: &TurnEnded,
+    out: &mut Applied,
+) {
     if state.index.steps.contains_key(&event.turn) {
         out.anomalies.push(Anomaly::Duplicate {
             event: "turn_ended",
@@ -220,6 +230,7 @@ pub(super) fn turn_ended(state: &mut ThreadState, seq: Seq, event: &TurnEnded, o
         checkpoint_after: event.checkpoint_after,
         undone: false,
         usage: event.usage,
+        ts,
     };
     state.index.steps.insert(event.turn, seq);
     insert_new(state, seq, ViewEntry::Step(entry), out);
@@ -256,6 +267,7 @@ pub(super) fn step_undone(
     state: &mut ThreadState,
     seq: Seq,
     event_id: EventId,
+    ts: Timestamp,
     event: &StepUndone,
     out: &mut Applied,
 ) {
@@ -273,7 +285,7 @@ pub(super) fn step_undone(
         restored: event.restored.clone(),
         kept: event.kept.clone(),
     };
-    insert_marker(state, seq, event_id, kind, out);
+    insert_marker(state, seq, event_id, ts, kind, out);
 }
 
 fn update_step(

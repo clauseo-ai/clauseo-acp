@@ -92,6 +92,8 @@ pub struct UserMessageEntry {
     /// Where a steered message went, once resolved.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub steer: Option<SteerOutcome>,
+    /// When it was sent (display only; the `UserMessage` envelope's `ts`).
+    pub ts: Timestamp,
 }
 
 /// An answer or a thought, as one text. Entry id `agent_text:<message>`.
@@ -200,6 +202,10 @@ pub struct PermissionEntry {
     pub deliverable: Deliverable,
     /// Where it stands.
     pub state: PermissionState,
+    /// When it was answered or cancelled (display only; the `PermissionResolved` envelope's
+    /// `ts`). `None` while pending and after it expired.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub answered_at: Option<Timestamp>,
 }
 
 /// Where an elicitation stands.
@@ -235,6 +241,10 @@ pub struct ElicitationEntry {
     pub request: ElicitationRequest,
     /// Where it stands.
     pub state: ElicitationState,
+    /// When it was answered (display only; the `ElicitationResolved` envelope's `ts`). `None`
+    /// while pending and after it expired.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub answered_at: Option<Timestamp>,
 }
 
 /// The step card of an ended turn that started; the reducer writes none for a turn that ends
@@ -263,6 +273,9 @@ pub struct StepEntry {
     /// The turn's token usage, if the agent reported it.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub usage: Option<TurnUsage>,
+    /// When the turn ended (display only; the `TurnEnded` envelope's `ts`). A turn that has
+    /// not ended has no step; after a crash, start-up repair's `TurnEnded` gives the time.
+    pub ts: Timestamp,
 }
 
 impl StepEntry {
@@ -292,6 +305,8 @@ pub struct LimitStopEntry {
     pub resets_at: Option<Timestamp>,
     /// Which limit.
     pub reason: LimitStopReason,
+    /// When the turn stopped (display only; the `TurnStoppedAtLimit` envelope's `ts`).
+    pub ts: Timestamp,
 }
 
 /// A notice. Entry id `notice:<event>`.
@@ -306,6 +321,8 @@ pub struct NoticeEntry {
     pub level: NoticeLevel,
     /// The text.
     pub text: String,
+    /// When it was logged (display only; the `Notice` envelope's `ts`).
+    pub ts: Timestamp,
 }
 
 /// What a marker records.
@@ -353,6 +370,8 @@ pub struct MarkerEntry {
     pub event: EventId,
     /// What it records.
     pub kind: MarkerKind,
+    /// When that event was logged (display only; its envelope's `ts`).
+    pub ts: Timestamp,
 }
 
 /// A matter's header. Entry id `matter_header:<matter>`.

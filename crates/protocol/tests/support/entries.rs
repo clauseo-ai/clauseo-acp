@@ -84,6 +84,7 @@ fn thread_entries() -> Vec<ViewEntry> {
             status: UserMessageStatus::Queued,
             edited: false,
             steer: None,
+            ts: Timestamp::new(1_760_000_001_000).unwrap(),
         }),
         ViewEntry::AgentText(agent_text_entry()),
         ViewEntry::AgentContent(AgentContentEntry {
@@ -134,6 +135,7 @@ fn approval_entries() -> Vec<ViewEntry> {
                 },
                 by: Principal::LocalDesktop,
             },
+            answered_at: Some(Timestamp::new(1_760_000_002_000).unwrap()),
         }),
         ViewEntry::Elicitation(ElicitationEntry {
             order: seq(7),
@@ -145,6 +147,7 @@ fn approval_entries() -> Vec<ViewEntry> {
             state: ElicitationState::Expired {
                 reason: ExpiryReason::TurnEnded,
             },
+            answered_at: None,
         }),
     ]
 }
@@ -162,6 +165,7 @@ fn turn_entries() -> Vec<ViewEntry> {
             checkpoint_after: Some(checkpoint_id(14)),
             undone: false,
             usage: None,
+            ts: Timestamp::new(1_760_000_003_000).unwrap(),
         }),
         ViewEntry::LimitStop(LimitStopEntry {
             order: seq(9),
@@ -169,12 +173,14 @@ fn turn_entries() -> Vec<ViewEntry> {
             window: Some("five_hour".to_owned()),
             resets_at: Some(Timestamp::new(1_760_000_000_000).unwrap()),
             reason: LimitStopReason::PlanWindow,
+            ts: Timestamp::new(1_760_000_004_000).unwrap(),
         }),
         ViewEntry::Notice(NoticeEntry {
             order: seq(10),
             event: event_id(21),
             level: NoticeLevel::Warning,
             text: "Context nearly full".to_owned(),
+            ts: Timestamp::new(1_760_000_005_000).unwrap(),
         }),
         ViewEntry::Marker(MarkerEntry {
             order: seq(11),
@@ -185,6 +191,7 @@ fn turn_entries() -> Vec<ViewEntry> {
                 restored: vec![path("a.docx")],
                 kept: vec![],
             },
+            ts: Timestamp::new(1_760_000_006_000).unwrap(),
         }),
     ]
 }

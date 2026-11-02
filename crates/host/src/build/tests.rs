@@ -1,8 +1,8 @@
 use clauseo_protocol::{
     AgentContentEntry, CompactString, CompactionStatus, ContentBlock, Delivery, EventId,
-    INLINE_LIMIT_BYTES, MessageId, PREVIEW_BYTES, Seq, TextKind, TextOrBlob, ToolCallContent,
-    ToolCallEntry, ToolCallId, ToolCallPatch, ToolCallStatus, ToolKind, TurnId, UserMessageEntry,
-    UserMessageStatus, ViewEntry,
+    INLINE_LIMIT_BYTES, MessageId, PREVIEW_BYTES, Seq, TextKind, TextOrBlob, Timestamp,
+    ToolCallContent, ToolCallEntry, ToolCallId, ToolCallPatch, ToolCallStatus, ToolKind, TurnId,
+    UserMessageEntry, UserMessageStatus, ViewEntry,
 };
 use clauseo_store::BlobIn;
 use proptest::prelude::*;
@@ -317,6 +317,7 @@ fn user_message_and_agent_content_match_view_counts() {
         status: UserMessageStatus::Sent,
         edited: false,
         steer: None,
+        ts: Timestamp::ZERO,
     });
     assert_eq!(entry.inline_len(), 3_000);
 

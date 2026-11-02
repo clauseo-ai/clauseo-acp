@@ -85,6 +85,7 @@ pub(crate) fn fold(state: &mut MatterState, envelope: &Envelope, out: &mut Appli
                     checkpoint: event.checkpoint,
                     scope: event.scope.clone(),
                 },
+                ts: envelope.ts,
             });
             out.changes
                 .push(ViewChange::Upsert(Box::new(entry.clone())));

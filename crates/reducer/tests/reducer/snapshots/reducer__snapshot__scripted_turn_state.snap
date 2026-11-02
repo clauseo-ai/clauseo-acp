@@ -53,7 +53,8 @@ expression: fold(&scripted_turn().unwrap())
             }
           ],
           "status": "sent",
-          "edited": false
+          "edited": false,
+          "ts": 2000
         }
       },
       {
@@ -493,7 +494,8 @@ expression: fold(&scripted_turn().unwrap())
               },
               "by": "local_desktop"
             }
-          }
+          },
+          "answered_at": 256000
         }
       },
       {
@@ -1016,7 +1018,8 @@ expression: fold(&scripted_turn().unwrap())
             "total": 30,
             "input": 20,
             "output": 10
-          }
+          },
+          "ts": 571000
         }
       }
     ],

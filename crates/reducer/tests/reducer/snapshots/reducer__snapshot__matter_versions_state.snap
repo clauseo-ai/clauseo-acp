@@ -122,7 +122,8 @@ expression: fold(&matter_versions().unwrap())
                 }
               }
             }
-          }
+          },
+          "ts": 10000
         }
       }
     ]

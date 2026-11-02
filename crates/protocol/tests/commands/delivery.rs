@@ -4,7 +4,7 @@
 
 use clauseo_protocol::{
     CommandEnvelope, ContentBlock, Delivery, DeliveryRequest, HostCommand, RawPayload, Seq,
-    UserMessage, UserMessageEntry, UserMessageStatus,
+    Timestamp, UserMessage, UserMessageEntry, UserMessageStatus,
 };
 
 use super::fixtures::{entry, message_id, packed_raw, round_trips, thread_id, turn_id};
@@ -70,6 +70,7 @@ fn queue_has_one_wire_form() {
         status: UserMessageStatus::Queued,
         edited: false,
         steer: None,
+        ts: Timestamp::ZERO,
     };
     let queued = serde_json::to_string(&message(Delivery::Queue)).unwrap();
     assert!(!queued.contains("delivery"), "{queued}");

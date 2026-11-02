@@ -4,7 +4,7 @@ description: "The snapshot shape changed: bump REDUCER_SCHEMA_VERSION (crates/re
 expression: "Snapshot::of(&every)"
 ---
 {
-  "reducer_schema": 1,
+  "reducer_schema": 2,
   "state": {
     "thread": {
       "thread": "01900000-0000-7000-8000-000c00000000",
@@ -37,7 +37,8 @@ expression: "Snapshot::of(&every)"
               }
             ],
             "status": "sent",
-            "edited": false
+            "edited": false,
+            "ts": 2000
           }
         },
         {
@@ -125,7 +126,8 @@ expression: "Snapshot::of(&every)"
                 },
                 "by": "local_desktop"
               }
-            }
+            },
+            "answered_at": 9000
           }
         },
         {
@@ -156,7 +158,8 @@ expression: "Snapshot::of(&every)"
                 "outcome": "accepted",
                 "by": "local_desktop"
               }
-            }
+            },
+            "answered_at": 12000
           }
         },
         {
@@ -164,7 +167,8 @@ expression: "Snapshot::of(&every)"
             "order": 13,
             "event": "01900000-0000-7000-8000-000c00000015",
             "level": "warning",
-            "text": "Context is nearly full."
+            "text": "Context is nearly full.",
+            "ts": 13000
           }
         },
         {
@@ -178,7 +182,8 @@ expression: "Snapshot::of(&every)"
                   "inline": "Earlier: the lease review."
                 }
               }
-            }
+            },
+            "ts": 14000
           }
         },
         {
@@ -210,14 +215,16 @@ expression: "Snapshot::of(&every)"
               "total": 30,
               "input": 20,
               "output": 10
-            }
+            },
+            "ts": 16000
           }
         },
         {
           "limit_stop": {
             "order": 17,
             "turn": "01900000-0000-7000-8000-000c00000002",
-            "reason": "temporary"
+            "reason": "temporary",
+            "ts": 17000
           }
         },
         {
@@ -233,7 +240,8 @@ expression: "Snapshot::of(&every)"
                 ],
                 "kept": []
               }
-            }
+            },
+            "ts": 18000
           }
         }
       ],
