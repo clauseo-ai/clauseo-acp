@@ -1,153 +1,30 @@
 // conversations.ts over FakeTransport, with and without a NextHost: the rows and the one that opens, the draft New
-// conversation makes, create_thread on the first send and the rename after it, each row's words, the headers and H4's
-// events that keep the rows current, H6's seen marks, and following the open matter.
-import { afterEach, expect, test, vi } from "vitest";
-import type { Batch } from "../store/batch.ts";
-import { createViewStore } from "../store/store.ts";
-import { batch, event, reset, uuid } from "../testing/stream-script.ts";
-import { FakeTransport, type FakeHost, type FakeNextHost } from "../transport/fake-transport.ts";
-import type {
-  AgentId,
-  CommandOutcome,
-  HostCommand,
-  MatterId,
-  MatterSummary,
-  ThreadId,
-  ThreadStatus,
-  ThreadSummary,
-  ViewEntry,
-} from "../transport/protocol.ts";
+// conversation makes, create_thread on the first send and the rename after it, the headers and H4's events that keep the
+// rows current, H6's seen marks, and following the open matter. A row's words are in conversation-status.test.ts; retry
+// from here is in conversations-retry.test.ts.
+import { expect, test, vi } from "vitest";
+import type { MatterId, ThreadSummary } from "../transport/protocol.ts";
 import { DEFAULT_AGENT } from "./agent.ts";
+import { rowWords } from "./conversation-status.ts";
 import { titleOf } from "./conversation-title.ts";
-import { Conversations, rowWords, type ConversationRow } from "./conversations.ts";
-import { detailed, fakeNext } from "./fake-next.ts";
+import {
+  A,
+  B,
+  info,
+  MADE,
+  next,
+  play,
+  rig,
+  stops,
+  T1,
+  T2,
+  T3,
+  thread,
+  threadsOf,
+  today,
+} from "./conversations-rig.ts";
+import { detailed } from "./fake-next.ts";
 import type { ThreadInfo } from "./host-next.ts";
-import { Matters } from "./matters.ts";
-
-const A: MatterSummary = { matter: uuid(1, 2), name: "Acme Ltd v. State", kind: "folder" };
-const B: MatterSummary = { matter: uuid(2, 2), name: "Sharma v. State of Delhi", kind: "folder" };
-const T1 = uuid(1, 1);
-const T2 = uuid(2, 1);
-const T3 = uuid(3, 1);
-const MADE = uuid(9, 1);
-
-const thread = (
-  id: ThreadId,
-  over: Partial<ThreadSummary> = {},
-  matter: MatterId = A.matter,
-): ThreadSummary => ({ thread: id, matter, agent: "claude", status: "idle", ...over });
-
-const info = (
-  id: ThreadId,
-  over: Partial<ThreadInfo> = {},
-  matter: MatterId = A.matter,
-): ThreadInfo => ({ ...thread(id, {}, matter), seen: true, ...over });
-
-let stops: (() => void)[] = [];
-afterEach(() => {
-  for (const stop of stops.splice(0)) stop();
-  vi.restoreAllMocks();
-});
-
-/** A started Matters and Conversations over one fake host, with a store whose frames run by hand. */
-async function rig(host: FakeHost, focused: () => boolean = () => false) {
-  const transport = new FakeTransport(host);
-  const pending: (() => void)[] = [];
-  const manual: Batch = (flush) => {
-    pending.push(flush);
-    return () => {};
-  };
-  const store = createViewStore(transport, { batch: () => manual });
-  const matters = new Matters(transport, store, manual);
-  stops.push(matters.start());
-  const drafts = new Map<string, string>();
-  const talks = new Conversations(transport, store, matters, drafts, focused);
-  stops.push(talks.start());
-  const settle = async () => {
-    for (let i = 0; i < 4; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
-    pending.splice(0).forEach((f) => f());
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  };
-  await settle();
-  /** The commands dispatched, by kind. */
-  const sent = <K extends keyof HostCommand>(kind: K) =>
-    transport
-      .only("dispatch")
-      .map((c) => c.command.command[kind])
-      .filter((c) => c !== undefined) as NonNullable<HostCommand[K]>[];
-  const listReads = () =>
-    transport.only("query").filter((c) => typeof c.query === "object" && "list_threads" in c.query)
-      .length +
-    transport
-      .only("next_query")
-      .filter((c) => typeof c.query === "object" && "list_threads" in c.query).length;
-  const marks = () =>
-    transport
-      .only("next_command")
-      .map((c) => c.command)
-      .filter((c) => "mark_seen" in c);
-  return { transport, store, matters, talks, drafts, settle, sent, listReads, marks };
-}
-
-/** Today's host: list_matters, list_threads per matter, create_thread making MADE, every other command done. */
-function today(
-  threads: (matter: MatterId) => ThreadSummary[] | Promise<ThreadSummary[]>,
-  matters: MatterSummary[] = [A],
-  dispatch: (command: HostCommand) => CommandOutcome = (command) =>
-    command.create_thread !== undefined ? { thread_created: { thread: MADE } } : "done",
-): FakeHost {
-  return {
-    query: async (query) => {
-      if (query === "list_matters") return { matters };
-      if (typeof query === "object" && query.list_threads !== undefined)
-        return { threads: await threads(query.list_threads.matter) };
-      throw new Error(`not scripted: ${JSON.stringify(query)}`);
-    },
-    dispatch: (envelope) => dispatch(envelope.command),
-  };
-}
-
-/** A NextHost with the matters, app and agents parts: A, opened last, with these threads. */
-function next(threads: (matter: MatterId) => ThreadInfo[], matters = [detailed(A)]): FakeHost {
-  return {
-    next: fakeNext({ matters: () => matters, threads }),
-    dispatch: (envelope) =>
-      envelope.command.create_thread !== undefined ? { thread_created: { thread: MADE } } : "done",
-  };
-}
-
-const headerOf = (
-  id: ThreadId,
-  status: ThreadStatus,
-  over: { title?: string; agent?: AgentId } = {},
-): ViewEntry => ({
-  header: {
-    order: 1,
-    thread: id,
-    matter: A.matter,
-    agent: over.agent ?? "claude",
-    status,
-    ...(over.title === undefined ? {} : { title: over.title }),
-    config_options: [],
-    commands: [],
-    plan: [],
-  },
-});
-
-/** Plays a reset of a thread's view holding only this header, at cursor `at`. */
-function play(
-  transport: FakeTransport,
-  id: ThreadId,
-  status: ThreadStatus,
-  at: number,
-  over: { title?: string; agent?: AgentId } = {},
-) {
-  transport.deliver(
-    event(batch(at, [reset([], headerOf(id, status, over))], uuid(1, 3), `thread:${id}`)),
-  );
-}
-
-const threadsOf = (rows: readonly ConversationRow[]) => rows.map((r) => r.thread);
 
 /* ---------- the list ---------- */
 
@@ -355,32 +232,6 @@ test("sent: nothing when the message gives no title", async () => {
   expect(sent("rename_thread")).toEqual([]);
 });
 
-/* ---------- a row's words ---------- */
-
-test("rowWords for every status, and H6's marks over idle", () => {
-  const words = (status: ThreadStatus, over: Partial<ConversationRow> = {}) =>
-    rowWords({ status, ...over });
-  expect(words("starting")).toEqual({ state: "working" });
-  expect(words("running")).toEqual({ state: "working" });
-  expect(words("needs_you")).toEqual({ state: "question" });
-  expect(words({ queued: { behind: T2 } })).toEqual({ state: "waiting", behind: T2 });
-  expect(words("idle")).toEqual({ state: "idle" });
-  expect(words({ paused_at_limit: { resets_at: 5 } })).toEqual({ state: "idle" });
-  expect(words("agent_exited")).toEqual({ state: "idle" });
-  expect(words("idle_stopped")).toEqual({ state: "idle" });
-  const unseen = (reason: NonNullable<ConversationRow["last_stop"]>["reason"]) =>
-    words("idle", { seen: false, last_stop: { reason, at: 42 } });
-  expect(unseen("end_turn")).toEqual({ state: "ready" });
-  expect(unseen("cancelled")).toEqual({ state: "stopped", at: 42 });
-  expect(unseen("failed")).toEqual({ state: "idle" });
-  expect(words("idle", { seen: true, last_stop: { reason: "end_turn", at: 42 } })).toEqual({
-    state: "idle",
-  });
-  expect(words("idle", { seen: true, last_stop: { reason: "cancelled", at: 42 } })).toEqual({
-    state: "idle",
-  });
-});
-
 /* ---------- live headers ---------- */
 
 test("a listed thread's header updates its row's title and status", async () => {
@@ -563,90 +414,4 @@ test("switching matters follows the open one, and going back reopens the convers
   expect(talks.view().matter).toBe(B.matter);
   expect(talks.view().open).toBe(T2);
   expect(talks.view().thread).toBe(T2);
-});
-
-/* ---------- H13: Retry from here ---------- */
-
-const QUESTION = uuid(1, 5);
-
-/** Today's threads, with H13's stand-in alone: retry_from makes RETRIED, or is refused. */
-function retrying(
-  threads: ThreadSummary[],
-  answer: NonNullable<FakeNextHost["command"]>,
-): FakeHost {
-  return {
-    ...today(() => threads),
-    next: {
-      parts: ["retry"],
-      query: () => {
-        throw new Error("no next query here");
-      },
-      command: answer,
-    },
-  };
-}
-
-const RETRIED = uuid(8, 1);
-
-test("retry: retry_from with the thread and question; the new thread is listed with the source's agent and opens, with the line's facts", async () => {
-  const { talks, transport, settle } = await rig(
-    retrying(
-      [thread(T1, { title: "Lease notice", agent: "codex" }), thread(T2, { title: "Indemnity" })],
-      (command) => ("retry_from" in command ? { thread_created: { thread: RETRIED } } : undefined),
-    ),
-  );
-  expect(talks.view().canRetry).toBe(true);
-  expect(talks.view().retried).toBeNull();
-  talks.open(T1);
-  await talks.retry(T1, QUESTION, 1_000);
-  await settle();
-  expect(transport.only("next_command").map((c) => c.command)).toEqual([
-    { retry_from: { thread: T1, message: QUESTION } },
-  ]);
-  const view = talks.view();
-  expect(view.thread).toBe(RETRIED);
-  expect(view.open).toBe(RETRIED);
-  expect(view.rows.find((r) => r.thread === RETRIED)).toMatchObject({
-    key: RETRIED,
-    agent: "codex",
-  });
-  expect(view.retried).toEqual({ from: T1, title: "Lease notice", at: 1_000 });
-  // back to the first: no line there
-  talks.open(T1);
-  expect(talks.view().retried).toBeNull();
-});
-
-test("retry from the thread that opened first: the line names that conversation by the key the room gave it", async () => {
-  const { talks } = await rig(
-    retrying([thread(T1, { title: "Lease notice" })], () => ({
-      thread_created: { thread: RETRIED },
-    })),
-  );
-  const first = talks.view().open;
-  expect(first).not.toBe(T1);
-  await talks.retry(T1, QUESTION, 7);
-  expect(talks.view().retried).toEqual({ from: first, title: "Lease notice", at: 7 });
-});
-
-test("without H13's part canRetry is false and retry rejects, sending nothing", async () => {
-  const { talks, transport } = await rig(today(() => [thread(T1)]));
-  expect(talks.view().canRetry).toBe(false);
-  await expect(talks.retry(T1, QUESTION, 1)).rejects.toBeDefined();
-  expect(transport.only("next_command")).toEqual([]);
-});
-
-test("a refused retry rejects and opens nothing", async () => {
-  const { talks, settle } = await rig(
-    retrying([thread(T1), thread(T2)], () => {
-      throw new Error("the host refused");
-    }),
-  );
-  const before = talks.view();
-  await expect(talks.retry(T2, QUESTION, 1)).rejects.toBeDefined();
-  await settle();
-  const after = talks.view();
-  expect(after.open).toBe(before.open);
-  expect(after.thread).toBe(T2);
-  expect(threadsOf(after.rows)).toEqual([T2, T1]);
-  expect(after.retried).toBeNull();
 });
