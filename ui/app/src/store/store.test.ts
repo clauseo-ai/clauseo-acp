@@ -210,3 +210,22 @@ test("inFrame's runs are dropped on dispose", () => {
   store.flush();
   expect(ran).toBe(0);
 });
+
+test("an inFrame run that throws drops neither the other runs nor the acks; the first error is thrown after", () => {
+  const { transport, store, frame } = rig();
+  store.watch(STREAM);
+  transport.deliver(START);
+  const ran: string[] = [];
+  store.inFrame(() => {
+    ran.push("first");
+    throw new Error("first");
+  });
+  store.inFrame(() => {
+    ran.push("second");
+    throw new Error("second");
+  });
+  store.inFrame(() => ran.push("third"));
+  expect(frame).toThrow("first");
+  expect(ran).toEqual(["first", "second", "third"]);
+  expect(transport.only("ack")).toHaveLength(1);
+});
