@@ -527,13 +527,12 @@ export class Conversations {
   #agentOf(m: MatterState, key: string | null = m.open): AgentId {
     const chosen = m.draft !== null && m.draft.key === key ? m.draft.chosen : null;
     const threads = [...m.threads.values()].filter((t) => t.status !== "archived");
-    return agentFor({ chosen, setting: null, threads });
+    return agentFor({ chosen, setting: null, threads, agents: this.#agents });
   }
 
   #make(): ConversationsView {
     const m = this.#current;
     const agents = this.#agents;
-    const options = planOptions(agents);
     if (m === null)
       return {
         matter: null,
@@ -545,13 +544,14 @@ export class Conversations {
         drafting: false,
         plan: undefined,
         agents,
-        options,
-        agent: agentFor({ chosen: null, setting: null, threads: [] }),
+        options: planOptions(agents),
+        agent: agentFor({ chosen: null, setting: null, threads: [], agents }),
         focus: null,
         canRetry: this.#next.retry !== null,
         retried: null,
       };
     const listed = [...m.threads.values()].filter((t) => t.status !== "archived").sort(newestFirst);
+    const options = planOptions(agents, listed);
     const rows: ConversationRow[] = listed.map((t) => ({
       key: m.keys.get(t.thread) ?? t.thread,
       thread: t.thread,
