@@ -58,7 +58,9 @@ test("a play's settings start fake_agent on the scoreboard scenario at --pace-ms
   const settings = JSON.parse(readFileSync(join(scratch.dataDir, "settings.json"), "utf8"));
   expect(settings).toEqual({
     matters: { default_location: scratch.mattersDir },
-    agents: { claude: { command: agent, args: ["--scenario", "scoreboard", "--pace-ms", "5"] } },
+    agents: {
+      "claude-acp": { command: agent, args: ["--scenario", "scoreboard", "--pace-ms", "5"] },
+    },
   });
   const env = playEnv(scratch);
   expect(env).toEqual({

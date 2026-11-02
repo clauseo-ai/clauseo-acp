@@ -203,6 +203,17 @@ export type AgentSessionDetached = {
  */
 export type AgentSessionId = string;
 
+/**  One agent in the settings, for `ListAgents`. */
+export type AgentSummary = {
+	/**  Its id, as a thread names it. */
+	id: AgentId,
+	/**
+	 *  What it is ([`AgentKind::of`]); `None` for an id that names no known agent, such as
+	 *  `fake-agent`. Left out of the JSON when `None`.
+	 */
+	kind?: AgentKind,
+};
+
 /**  An answer or a thought, as one text. Entry id `agent_text:<message>`. */
 export type AgentTextEntry = {
 	/**  The `seq` of the message's first text. */
@@ -1497,7 +1508,9 @@ export type HostQuery =
 ({ list_papers: {
 	/**  The matter. */
 	matter: MatterId,
-} }) & { compare_versions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never };
+} }) & { compare_versions?: never; list_threads?: never; page_entries?: never; preview_restore?: never; read_blob?: never } | 
+/**  The agents in the settings, for a new thread's choice of agent. */
+"list_agents";
 
 /**
  *  What the first checkpoint of a folder matter found. Counts are at most `u32::MAX`; `bytes`
@@ -2230,19 +2243,19 @@ export type PromptCapabilities = {
 /**  A query's answer. */
 export type QueryResult = 
 /**  For `ListMatters`. */
-({ matters: MatterSummary[] }) & { blob?: never; entries?: never; file_changes?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
+({ matters: MatterSummary[] }) & { agents?: never; blob?: never; entries?: never; file_changes?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
 /**  For `ListThreads`. */
-({ threads: ThreadSummary[] }) & { blob?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never } | 
+({ threads: ThreadSummary[] }) & { agents?: never; blob?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never } | 
 /**  For `PageEntries`, newest last; fewer than `limit` means none older is left. */
-({ entries: ViewEntry[] }) & { blob?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
+({ entries: ViewEntry[] }) & { agents?: never; blob?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
 /**  For `CompareVersions`. */
-({ file_changes: FileChange[] }) & { blob?: never; entries?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
+({ file_changes: FileChange[] }) & { agents?: never; blob?: never; entries?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
 /**  For `PreviewRestore`. */
-({ restore_preview: RestorePreview }) & { blob?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; settings?: never; threads?: never } | 
+({ restore_preview: RestorePreview }) & { agents?: never; blob?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; settings?: never; threads?: never } | 
 /**  For `ReadBlob`. */
-({ blob: BlobRange }) & { entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
+({ blob: BlobRange }) & { agents?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never } | 
 /**  For `GetSettings`. */
-({ settings: SettingsView }) & { blob?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; threads?: never } | 
+({ settings: SettingsView }) & { agents?: never; blob?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; threads?: never } | 
 /**
  *  For `ListPapers`: the matter's folder as it is now, by the rules a checkpoint versions
  *  it by (the same excluded names, size cap and cloud-only files).
@@ -2267,7 +2280,9 @@ export type QueryResult =
 	 *  where `<folder>/` sorts).
 	 */
 	truncated: boolean,
-} }) & { blob?: never; entries?: never; file_changes?: never; matters?: never; restore_preview?: never; settings?: never; threads?: never };
+} }) & { agents?: never; blob?: never; entries?: never; file_changes?: never; matters?: never; restore_preview?: never; settings?: never; threads?: never } | 
+/**  For `ListAgents`: one per settings agent whose id is a valid [`AgentId`], sorted by id. */
+({ agents: AgentSummary[] }) & { blob?: never; entries?: never; file_changes?: never; matters?: never; papers?: never; restore_preview?: never; settings?: never; threads?: never };
 
 /**  A queued prompt's content was replaced; the turn keeps its id and its place. */
 export type QueuedPromptEdited = {

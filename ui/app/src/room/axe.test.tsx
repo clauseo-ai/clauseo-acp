@@ -150,7 +150,7 @@ function transportFor(scene: Scene): FakeTransport {
           threads:
             thread === undefined
               ? []
-              : [{ thread: THREAD, matter: MATTER, agent: "claude", status: "needs_you" }],
+              : [{ thread: THREAD, matter: MATTER, agent: "claude-acp", status: "needs_you" }],
         };
       return { matters };
     },

@@ -342,7 +342,7 @@ async function end(launched: Launched, how: Stop): Promise<void> {
 
 /** Options a spec sets with `test.use`. */
 export interface AppOptions {
-  /** The fake_agent scenario `agents.claude` plays, or null for none (smoke, control). */
+  /** The fake_agent scenario `agents.claude-acp` plays, or null for none (smoke, control). */
   scenario: string | null;
   /** The matter folder's files at the start, `/`-separated relative path to content. */
   matterFiles: Readonly<Record<string, string>>;

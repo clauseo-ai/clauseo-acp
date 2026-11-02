@@ -80,7 +80,7 @@ test("the first Ask makes one thread, even on a double Enter, then sends; the fi
   expect(field().value).toBe("Summarise the indemnity clause");
   await act(async () => release());
   await h.settle();
-  expect(h.sent("create_thread")).toEqual([{ matter: THE_MATTER.matter, agent: "claude" }]);
+  expect(h.sent("create_thread")).toEqual([{ matter: THE_MATTER.matter, agent: "claude-acp" }]);
   expect(h.sent("send_prompt")).toEqual([
     { thread: THREAD, content: [{ text: { text: "Summarise the indemnity clause" } }] },
   ]);

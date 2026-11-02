@@ -1,7 +1,7 @@
 // The folders one test gives the app, so it never touches the real data or Documents folders: a
 // temporary root holding the data folder (`CLAUSEO_DATA_DIR`, with a `settings.json` whose
 // `matters.default_location` is the scratch `matters/` folder, where the host makes its Scratch
-// matter, and, with a scenario, whose `agents.claude` starts `fake_agent` on it), the matter folder
+// matter, and, with a scenario, whose `agents.claude-acp` starts `fake_agent` on it), the matter folder
 // (`E2E_MATTER_DIR`, which the e2e build's pick_folder returns instead of opening the dialog), and
 // one WebView2 data folder per launch.
 // Pure file work, no app: scratch.test.ts runs it on any OS.
@@ -21,8 +21,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
-/** The settings key the window's threads use: `agents.claude`. */
-export const AGENT_ID = "claude";
+/** The settings key the window's threads use: `agents.claude-acp`. */
+export const AGENT_ID = "claude-acp";
 
 /** What a test asks of its folders. */
 export interface ScratchOptions {
@@ -49,7 +49,7 @@ export interface Scratch {
 }
 
 /**
- * The `agents` section that starts `command --scenario <scenario> [...extra]` as `agents.claude`.
+ * The `agents` section that starts `command --scenario <scenario> [...extra]` as `agents.claude-acp`.
  */
 export function agentSettings(
   command: string,

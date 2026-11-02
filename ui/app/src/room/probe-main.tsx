@@ -99,7 +99,7 @@ const transport = new FakeTransport({
     // ?thread=permission: the turn's thread, so the room subscribes to it and shows the prompts
     if (asking && typeof query === "object" && query.list_threads !== undefined)
       return {
-        threads: [{ thread: THREAD, matter: MATTER, agent: "claude", status: "needs_you" }],
+        threads: [{ thread: THREAD, matter: MATTER, agent: "claude-acp", status: "needs_you" }],
       };
     throw new Error(`the probe's host is a NextHost: it answers no ${JSON.stringify(query)}`);
   },
