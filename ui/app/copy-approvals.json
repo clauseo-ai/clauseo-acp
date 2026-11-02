@@ -825,6 +825,30 @@
     "at": "2026-11-02",
     "by": "design"
   },
+  "U8-02": {
+    "en": "Restore and Undo wait until the answer in {conversation} is done.",
+    "hi": "'{conversation}' का उत्तर पूरा होने तक पुनर्स्थापन और पूर्ववत प्रतीक्षा करेंगे।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
+  },
+  "U8-03": {
+    "en": "Clauseo changed {paper}, and the change couldn't be kept as a version.",
+    "hi": "Clauseo ने {paper} बदला, पर यह बदलाव संस्करण के रूप में नहीं रखा जा सका।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
+  },
+  "U8-04": {
+    "en": "Not kept as a version.",
+    "hi": "संस्करण के रूप में नहीं रखा गया।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
+  },
   "U8-05": {
     "en": "Undo the restore",
     "hi": "पुनर्स्थापन पूर्ववत करें",
@@ -846,12 +870,68 @@
     "at": "2026-11-02",
     "by": "design"
   },
+  "U8-08": {
+    "en": "Changed since {time} today",
+    "hi": "आज {time} बजे के बाद बदला गया",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
+  },
   "U8-09": {
     "en": "As it was at {time} on {date}",
     "hi": "जैसा {date} को {time} बजे था",
     "status": "approved",
     "at": "2026-11-02",
     "by": "design"
+  },
+  "U8-10": {
+    "en": "As it was at {time} today",
+    "hi": "जैसा आज {time} बजे था",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
+  },
+  "U8-11": {
+    "en": "'{papers}' can't be restored and stays as it is.",
+    "hi": "'{papers}' पुनर्स्थापित नहीं हो सकता और जैसा है वैसा ही रहेगा।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
+  },
+  "U8-12": {
+    "en": "It may hold your own edits",
+    "hi": "इसमें आपके अपने बदलाव हो सकते हैं",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
+  },
+  "U8-13": {
+    "en": "1 document may hold your own edits.",
+    "hi": "1 दस्तावेज़ में आपके अपने बदलाव हो सकते हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
+  },
+  "U8-14": {
+    "en": "{n} documents may hold your own edits.",
+    "hi": "{n} दस्तावेज़ों में आपके अपने बदलाव हो सकते हैं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
+  },
+  "U8-15": {
+    "en": "Choose for each document.",
+    "hi": "हर दस्तावेज़ के लिए चुनें।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "Rohan",
+    "note": "Rohan, on the review page (built from U8 5993ce60), 15:35"
   },
   "U10-01": {
     "en": "The answer stopped at {time}. Your question and the answer so far are kept.",
