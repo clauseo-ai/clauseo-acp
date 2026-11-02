@@ -324,7 +324,7 @@ test("only a used-up plan window is the plan's limit; without a reset the row sa
   expect(plan?.textContent).not.toContain("Limit reached.");
 });
 
-test("a notice is a quiet line; markers, versions, permissions and elicitations show nothing and break nothing", async () => {
+test("a notice is a quiet line; a marker shows nothing and breaks nothing; a permission shows its prompt", async () => {
   h = await mountRoom();
   h.deliver([
     reset([
@@ -361,7 +361,9 @@ test("a notice is a quiet line; markers, versions, permissions and elicitations 
   expect(h.one("notice")?.textContent).toBe("Claude Code was updated.");
   expect(h.one("notice")?.dataset["level"]).toBe("warning");
   expect(h.one("message-agent")?.textContent).toBe("Still here");
-  expect(h.host.querySelectorAll("[data-entry-id]")).toHaveLength(3);
+  // a permission offering nothing this version knows: its prompt, with no answer to give
+  expect(h.one("permission")?.querySelector("button")).toBeNull();
+  expect(h.host.querySelectorAll("[data-entry-id]")).toHaveLength(4);
 });
 
 test("an inline raster image shows through Image; an attachment is named; anything else is one line", async () => {

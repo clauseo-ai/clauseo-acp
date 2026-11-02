@@ -3,9 +3,10 @@
 // their own (chunk.ts, list.tsx), started as Work mounts; the session opens the thread only once it is in, so the
 // rows never wait for it. The composer and the transcript's box are here, for the first paint.
 import { Suspense, useEffect } from "react";
-import { useStreamError, useViewStore, useWatch } from "../../store/hooks.ts";
+import { useStreamError, useStreamPart, useViewStore, useWatch } from "../../store/hooks.ts";
 import type { HostTransport } from "../../transport/host-transport.ts";
 import type { MatterSummary, ThreadId } from "../../transport/protocol.ts";
+import { KeyedRequestContext, keyedRequest } from "../permission-model.ts";
 import { LazyThreadList, loadThread } from "./chunk.ts";
 import { useBusy } from "./live.ts";
 import { ThreadActionsContext, useThreadSession, type Drafts } from "./session.ts";
@@ -31,6 +32,8 @@ export function Work({
   useWatch(store, stream);
   const busy = useBusy(stream, session.sentTurn);
   const failed = useStreamError(store, stream);
+  // the one prompt that takes the keys, read here once a change rather than by every row
+  const keyed = useStreamPart(store, stream, keyedRequest);
   useEffect(() => onThread?.(session.thread), [onThread, session.thread]);
   // the thread's chunk, in memory before the first view or the first answer, with a matter or without
   useEffect(() => void loadThread(), []);
@@ -42,7 +45,9 @@ export function Work({
         <div data-testid="transcript" className="flex min-h-0 flex-1 flex-col max-mid:order-1">
           {/* empty until the thread's chunk is in: its arrival is one commit */}
           <Suspense fallback={null}>
-            <LazyThreadList transport={transport} stream={stream} busy={busy} />
+            <KeyedRequestContext value={keyed}>
+              <LazyThreadList transport={transport} stream={stream} busy={busy} />
+            </KeyedRequestContext>
           </Suspense>
         </div>
       </ThreadActionsContext>
