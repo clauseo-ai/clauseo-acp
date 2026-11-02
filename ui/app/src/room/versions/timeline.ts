@@ -193,13 +193,25 @@ export const undoable = (m: VersionMeta | undefined): boolean =>
   !m.step.undone &&
   m.step.files.length > 0;
 
-/** What the toolbar's Undo takes back: the newest turn's version whose change can be undone (ready), walking newest
- * first past each turn whose step is in and can't be undone; a turn whose step isn't in yet, and wasn't sought in vain
- * (`missing`), stops the walk until it is paged in (unknown). Null when nothing can be undone. */
+/** Whether a version is a restore the host marked (`restores`) with a version before it: Undo restores that one. */
+export const undoesAsRestore = (
+  t: Timeline,
+  restores: ReadonlyMap<string, string>,
+  id: string,
+): boolean => t.meta.get(id)?.kind === "restore" && restores.has(id) && t.history[0]?.id !== id;
+
+/** What the toolbar's Undo takes back: the newest version when it is a marked restore (restore); else the newest
+ * turn's version whose change can be undone (ready), walking newest first past each turn whose step is in and can't be
+ * undone; a turn whose step isn't in yet, and wasn't sought in vain (`missing`), stops the walk until it is paged in
+ * (unknown). Null when nothing can be undone. */
 export function newestUndo(
   t: Timeline,
   missing: ReadonlySet<TurnId>,
-): { kind: "ready" | "unknown"; id: string } | null {
+  restores: ReadonlyMap<string, string>,
+): { kind: "ready" | "unknown" | "restore"; id: string } | null {
+  const last = t.history.at(-1)?.id;
+  if (last !== undefined && undoesAsRestore(t, restores, last))
+    return { kind: "restore", id: last };
   for (let i = t.history.length - 1; i >= 0; i -= 1) {
     const id = t.history[i]?.id ?? "";
     const m = t.meta.get(id);
