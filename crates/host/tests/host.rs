@@ -20,6 +20,9 @@ mod support;
 mod write;
 
 #[cfg(test)]
+#[path = "host/agent_name.rs"]
+mod agent_name;
+#[cfg(test)]
 #[path = "host/blobs.rs"]
 mod blobs;
 #[cfg(test)]

@@ -2,15 +2,17 @@
 //! it (after reading the thread's whole log for replay dedupe), else `session/resume` when it
 //! offers that (nothing is replayed), else `session/new`; for a Codex agent the checks before
 //! its first prompt (the ask mode, the guard's trust); then the attach commit, the held replay
-//! and the work that waited.
+//! and the work that waited. When `initialize` gave the agent a title, its name is logged first
+//! (`AgentNamed`, `log_agent_name`), so a failed `session/new` leaves it in the thread.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use clauseo_acp::{AcpClient, AgentInfo, LoadSession, McpServer, NewSession, SessionStart};
 use clauseo_protocol::{
-    AgentChoiceId, AgentKind, AgentSessionAttached, CompactString, ConfigOptionsReplaced, Envelope,
-    ErrorCode, ModeChanged, Notice, NoticeLevel, StreamId, ThreadId, ViewEntry,
+    AgentChoiceId, AgentKind, AgentNamed, AgentSessionAttached, CompactString,
+    ConfigOptionsReplaced, Envelope, ErrorCode, ModeChanged, Notice, NoticeLevel, StreamId,
+    ThreadId, ViewEntry,
 };
 
 use super::super::Actor;
@@ -33,11 +35,14 @@ pub(super) fn on_initialized(actor: &mut Actor, thread: ThreadId, info: AgentInf
         .and_then(|entry| entry.row.acp_session_id.clone());
     let loads = info.capabilities.load_session && stored.is_some();
     let resumes = !loads && info.capabilities.session.resume && stored.is_some();
+    let name = info.title.as_deref().and_then(agent::title::clean_title);
     let Some(agent) = state(actor, thread).and_then(|state| state.agent.as_deref_mut()) else {
         return;
     };
     agent.info = Some(info);
     agent.stage = Stage::Loading;
+    // Before the session starts, so a `session/new` that fails leaves the name in the log first.
+    log_agent_name(actor, thread, name);
     if resumes {
         resume_session(actor, thread);
         return;
@@ -380,6 +385,38 @@ fn attach_commit(
     entry.row.updated = now;
     out.draft.thread_row(entry.row.clone());
     out.send(actor, Then::Nothing)
+}
+
+/// The name the thread's header holds: from the loaded stream, else from the header the actor
+/// kept when the stream was unloaded.
+fn held_name(actor: &Actor, thread: ThreadId) -> Option<CompactString> {
+    let entry = actor.threads.get(&thread)?;
+    let header = actor
+        .loaded(StreamId::Thread(thread))
+        .and_then(|loaded| loaded.state.as_thread())
+        .and_then(|state| state.header())
+        .or(entry.header.as_ref())?;
+    header.agent_name.clone()
+}
+
+/// Logs `AgentNamed` for `thread` when `name` is set and differs from the name its header holds,
+/// so a restart with the same agent logs nothing. A failed commit is logged and left out: the
+/// name is display text, and the session goes on without it.
+fn log_agent_name(actor: &mut Actor, thread: ThreadId, name: Option<CompactString>) {
+    let Some(name) = name else {
+        return;
+    };
+    if held_name(actor, thread).as_ref() == Some(&name) {
+        return;
+    }
+    let logged = (|| -> Result<(), Error> {
+        let mut out = Out::new(actor, thread, None)?;
+        out.push(actor, AgentNamed { agent_name: name })?;
+        out.send(actor, Then::Nothing)
+    })();
+    if let Err(error) = logged {
+        tracing::warn!(%thread, %error, "the agent's name was not logged");
+    }
 }
 
 /// Whether the thread has turns before its current one.
