@@ -2,14 +2,15 @@
 // on: Compare, and Undo, each when the caller gives it. A refused undo says why in a quiet line beside Undo. When a
 // paper was edited after Clauseo's change, Undo asks first, in the alert dialog, with Keep current as the safe choice.
 import { Fragment, lazy, Suspense, useState } from "react";
+import { late } from "../lib/late.ts";
 import { Button } from "../ui/button.tsx";
 import { IconOpen, IconPaperBookPage, IconUndo } from "../icons/icons.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
 import { Say } from "./say.tsx";
 
-const loadAsk = () => import("./change-note-ask.tsx");
+const loadAsk = () => late(import("./change-note-ask.tsx"));
 /** The dialog Undo opens when a paper changed since: its own chunk, as most notes never ask. */
-const UndoAsk = lazy(() => loadAsk().then((m) => ({ default: m.UndoAsk })));
+const UndoAsk = lazy(() => late(loadAsk().then((m) => ({ default: m.UndoAsk }))));
 
 /** Clauseo's changes standing, or undone by the lawyer. */
 export type ChangeState = "changed" | "undone";

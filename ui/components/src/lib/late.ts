@@ -1,7 +1,7 @@
-// The room's own late imports, the chunks it loads after the first render (the thread's chunk, the dev hooks), kept
-// while they are on their way. Nothing in the app waits on them here; the tests do (src/testing/setup.ts): each test
-// ends only once every import it started has landed, so none finishes, or warns, after its file's environment is
-// gone.
+// The late imports, the chunks loaded after the first render (the parts' lazy pieces, the room's thread chunk and dev
+// hooks), kept while they are on their way. Nothing in the app waits on them here; the tests do
+// (src/testing/setup.ts): each test ends only once every import it started has landed, so none finishes, or logs,
+// after its file's environment is gone.
 
 const loading = new Set<Promise<unknown>>();
 
@@ -12,6 +12,9 @@ export function late<T>(load: Promise<T>): Promise<T> {
   load.then(done, done);
   return load;
 }
+
+/** Whether a late import is on its way. */
+export const pending = (): boolean => loading.size > 0;
 
 /** Resolves once no late import is on its way, those that started while it waited included. */
 export async function settled(): Promise<void> {

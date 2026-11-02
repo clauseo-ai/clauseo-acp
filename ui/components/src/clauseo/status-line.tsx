@@ -1,6 +1,7 @@
 // The status line on the composer's top edge: how long the answer took, the plan the questions go to, and the
 // prepared draft's hint while its Ready card is out of view.
 import { lazy, Suspense, useLayoutEffect, useRef, type PointerEvent } from "react";
+import { late } from "../lib/late.ts";
 import { Kbd } from "../ui/kbd.tsx";
 import { SegmentedSwitch } from "../ui/segmented.tsx";
 import { motionAllowed, useDisplay } from "../lib/display.ts";
@@ -33,7 +34,7 @@ export type PlanChoice<V extends string = string> = {
 /** The plan's select, loaded only for a status line that offers a choice. Until it is in, the plan stands as the
  * status line's own words, as the select's trigger does at rest. */
 const PlanTrigger = lazy(() =>
-  import("./plan-trigger.tsx").then((m) => ({ default: m.PlanTrigger })),
+  late(import("./plan-trigger.tsx").then((m) => ({ default: m.PlanTrigger }))),
 ) as unknown as typeof import("./plan-trigger.tsx").PlanTrigger;
 
 /** The status line on the composer's top edge: "Took 38 seconds", a dot, "Uses your Claude plan", and the ready hint

@@ -241,8 +241,8 @@ export default defineConfig(({ mode }) => {
             name: "app",
             include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
             environment: "node",
-            // each test waits for the room's late imports (src/room/late.ts)
-            setupFiles: ["src/testing/setup.ts"],
+            // each test waits for its late imports (ui/components/src/lib/late.ts)
+            setupFiles: ["../components/src/testing/setup.ts"],
           },
         },
         {
@@ -254,6 +254,7 @@ export default defineConfig(({ mode }) => {
             root: "../components",
             include: ["src/**/*.test.{ts,tsx}"],
             environment: "node",
+            setupFiles: ["src/testing/setup.ts"],
           },
         },
       ],

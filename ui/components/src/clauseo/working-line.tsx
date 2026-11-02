@@ -5,6 +5,7 @@
 // only when the host says something. Errors stand on the same well, in concrete and never in red, because red means
 // the other side. The field below keeps what the lawyer wrote.
 import { lazy, Suspense, type ReactNode } from "react";
+import { late } from "../lib/late.ts";
 import { Button } from "../ui/button.tsx";
 import { IconChecking, IconFold } from "../icons/icons.tsx";
 import { useThreadWords } from "../lib/words-thread.ts";
@@ -135,7 +136,7 @@ export function WorkingTime({ state }: { state: WorkingState }) {
 
 /** The details an error folds open, with the row's Details trigger: its own chunk, since most rows have none. */
 const WorkingDetails = lazy(() =>
-  import("./working-details.tsx").then((m) => ({ default: m.WorkingDetails })),
+  late(import("./working-details.tsx").then((m) => ({ default: m.WorkingDetails }))),
 );
 
 /** The row itself, the well's top. */
