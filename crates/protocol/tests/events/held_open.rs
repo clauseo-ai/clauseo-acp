@@ -1,4 +1,4 @@
-//! `PermissionResolved.held_open` (decision record 0015): a matter path when the host refused
+//! `PermissionResolved.held_open` (decision record 0021): a matter path when the host refused
 //! the request because a program holds that file open, left out otherwise, and an entry
 //! written before the field existed decodes with `None`.
 
