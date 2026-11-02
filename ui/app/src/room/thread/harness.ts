@@ -20,7 +20,7 @@ import type {
 import type { UiSettings } from "../host-next.ts";
 import { Room } from "../room.tsx";
 import { connectRoom } from "../start.ts";
-import { loadMarkdown } from "./markdown.ts";
+import { loadThread } from "./chunk.ts";
 import { stubFonts } from "./testing.ts";
 
 export const THE_MATTER: MatterSummary = {
@@ -49,7 +49,7 @@ export type Script = {
   /** Answers any other query. */
   query?: (query: HostQuery) => QueryResult;
   display?: Partial<UiSettings>;
-  /** Whether mounting waits for the Markdown renderer's chunk (markdown.ts); true by default. */
+  /** Whether mounting waits for the thread's chunk (chunk.ts: the list, its rows and the renderer); true by default. */
   waitForRenderer?: boolean;
   /** Hears every commit of the room. */
   onRender?: ProfilerOnRenderCallback;
@@ -68,7 +68,7 @@ export type Harness = {
   host: HTMLElement;
   /** Delivers one batch at the next cursors and runs a frame. The first must hold the Reset. */
   deliver: (bodies: ViewPatchBody[]) => void;
-  /** As `deliver`, inside an awaited act: for a render that may suspend (the renderer's chunk still loading), whose
+  /** As `deliver`, inside an awaited act: for a render that may suspend (the thread's chunk still loading), whose
    * retry React schedules only for an act it can wait on. */
   deliverAwaited: (bodies: ViewPatchBody[]) => Promise<void>;
   /** Lets the host's answers and React settle. */
@@ -118,8 +118,8 @@ export async function mountRoom(script: Script = {}): Promise<Harness> {
   );
   const settle = () => act(flushAll);
   await settle();
-  // Work started the renderer's chunk as it mounted
-  if (script.waitForRenderer !== false) await act(async () => void (await loadMarkdown()));
+  // Work started the thread's chunk as it mounted
+  if (script.waitForRenderer !== false) await act(async () => void (await loadThread()));
   let cursor = 1;
   const field = () => host.querySelector<HTMLTextAreaElement>('[data-testid="composer"]');
   return {

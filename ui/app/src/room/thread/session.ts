@@ -17,10 +17,15 @@ import type {
   TurnId,
 } from "../../transport/protocol.ts";
 import { turnRunning } from "./live.ts";
+import { loadThread } from "./chunk.ts";
 
 /** The agent every thread the room starts runs: `agents.claude` in the user settings, until U6 lets the lawyer choose
  * (as R12's internal window, internal/session.ts). */
 export const AGENT = "claude";
+
+/** Each matter's words in the composer's field, kept above the matter's Work, so leaving a matter and coming back
+ * finds them where the lawyer left them (a refused send promises "Your question is kept."). */
+export type Drafts = Map<MatterId, string>;
 
 /** What the rows can do and need to know: Undo, and the turn sent last (busy until its end is in the view). */
 export type ThreadActions = {
@@ -77,11 +82,14 @@ export function useThreadSession(
     [transport],
   );
 
-  /** The thread to reopen, once: a failed lookup is asked again by the next Ask. */
+  /** The thread to reopen, once: a failed lookup is asked again by the next Ask. The thread's chunk (the list, its rows and the
+   * Markdown renderer, chunk.ts) loads alongside: the thread opens only once it is in, so no row renders, and the
+   * thread never settles or pages, before it. */
   const find = useCallback((): Promise<ThreadId | null> => {
     if (matter === null) return Promise.resolve(null);
     if (lookup.current !== null) return lookup.current;
-    const asked = transport.query({ list_threads: { matter } }).then((result) => {
+    const listed = transport.query({ list_threads: { matter } });
+    const asked = Promise.all([listed, loadThread()]).then(([result]) => {
       const pick = pickReopenThread(result.threads ?? []);
       if (pick !== null && open.current === null) adopt(pick.thread);
       return open.current;

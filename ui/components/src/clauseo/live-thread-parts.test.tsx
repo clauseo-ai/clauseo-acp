@@ -11,6 +11,7 @@ import { QuestionLine, Who } from "./answer.tsx";
 import { ChangeNote } from "./change-note.tsx";
 import { Composer, type ComposerProps } from "./composer.tsx";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
+import { Thread } from "./thread.tsx";
 import { WorkingLine } from "./working-line.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -79,10 +80,56 @@ test("while busy the Stop test id lands on Stop", async () => {
 });
 
 test("disabled, the field, Add papers and Ask take nothing, whatever the field holds", async () => {
-  await mount(composer({ text: "What did the bank know?", disabled: true, testIds: IDS }));
+  await mount(
+    composer({
+      text: "What did the bank know?",
+      disabled: true,
+      testIds: IDS,
+      onAddPapers: () => {},
+    }),
+  );
   expect((byId("composer") as HTMLTextAreaElement | null)?.disabled).toBe(true);
   expect((byId("send") as HTMLButtonElement | null)?.disabled).toBe(true);
   expect(document.querySelector<HTMLButtonElement>(".room-field-add")?.disabled).toBe(true);
+});
+
+test("Add papers shows only with its handler, and a press reaches it", async () => {
+  const onAddPapers = vi.fn();
+  await mount(composer({}));
+  expect(document.querySelector(".room-field-add")).toBeNull();
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount(composer({ onAddPapers }));
+  await act(async () => document.querySelector<HTMLButtonElement>(".room-field-add")?.click());
+  expect(onAddPapers).toHaveBeenCalledOnce();
+});
+
+test("a status line with nothing to say isn't drawn; with a plan it is", async () => {
+  await mount(<Composer took={null} plan="" hint={null} />);
+  expect(document.querySelector(".room-status")).toBeNull();
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount(composer({}));
+  expect(txt(document.querySelector(".room-status"))).toBe("Uses your Claude plan");
+});
+
+test("the thread is marked busy while rows go in at once, and not otherwise", async () => {
+  await mount(
+    <>
+      <Thread question="Q" who="You" busy>
+        <p />
+      </Thread>
+    </>,
+  );
+  expect(document.querySelector('[role="log"]')?.getAttribute("aria-busy")).toBe("true");
+  await act(async () => root?.unmount());
+  host?.remove();
+  await mount(
+    <Thread question="Q" who="You">
+      <p />
+    </Thread>,
+  );
+  expect(document.querySelector('[role="log"]')?.hasAttribute("aria-busy")).toBe(false);
 });
 
 test("line={false} leaves no room's line at all", async () => {
@@ -171,8 +218,13 @@ test("Compare and Undo show only when given", async () => {
 test("Undo can be held off while Clauseo works", async () => {
   const onUndo = vi.fn();
   await mount(<ChangeNote papers={PAPERS} testIds={NOTE_IDS} onUndo={onUndo} undoDisabled />);
-  expect((byId("undo") as HTMLButtonElement | null)?.disabled).toBe(true);
-  await act(async () => byId("undo")?.click());
+  const undo = byId("undo");
+  // dimmed but still in the tab order
+  expect(undo?.getAttribute("aria-disabled")).toBe("true");
+  expect(undo?.hasAttribute("disabled")).toBe(false);
+  undo?.focus();
+  expect(document.activeElement).toBe(undo);
+  await act(async () => undo?.click());
   expect(onUndo).not.toHaveBeenCalled();
 });
 
@@ -223,6 +275,10 @@ async function openDialog(onUndo: () => void) {
     />,
   );
   await act(async () => byId("undo")?.click());
+  // the dialog's own chunk comes in on first use
+  await act(async () => {
+    await import("./change-note-ask.tsx");
+  });
   expect(onUndo).not.toHaveBeenCalled();
 }
 
@@ -231,6 +287,13 @@ test("with a paper edited since, Undo asks first, and Undo anyway undoes", async
   await openDialog(onUndo);
   await act(async () => button("Undo anyway")?.click());
   expect(onUndo).toHaveBeenCalledOnce();
+});
+
+test("the dialog's title sets the paper's name apart, so a right-to-left name can't reorder it", async () => {
+  await openDialog(vi.fn());
+  expect(document.body.textContent).toContain(
+    "\u2068Notice to the bank.docx\u2069 changed after Clauseo's edit.",
+  );
 });
 
 test("with a paper edited since, Keep current sends nothing", async () => {

@@ -106,6 +106,7 @@ test("while Clauseo answers, the field's row holds Add papers and Stop alone; it
     composer({
       busy: true,
       onStop,
+      onAddPapers: () => {},
       acts: (
         <div className="test-acts">
           <button type="button">Queue</button>

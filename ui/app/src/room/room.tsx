@@ -32,6 +32,7 @@ import { NewMatter } from "./new-matter.tsx";
 import { LocateGate, MovedFolder } from "./moved.tsx";
 import { RoomRail } from "./rail.tsx";
 import { ScratchLine } from "./scratch-line.tsx";
+import type { Drafts } from "./thread/session.ts";
 import { Work } from "./thread/work.tsx";
 import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
 import { useWindowFrame } from "../window/use-window-frame.ts";
@@ -109,6 +110,8 @@ function RoomFrame({
   const shared = use(StoreContext);
   const [store] = useState(() => shared ?? createViewStore(transport, { batch: () => frameBatch }));
   const [matters] = useState(() => new Matters(transport, store));
+  // each matter's composer draft, kept here, above Work's key, so it outlives a visit to another matter
+  const [drafts] = useState<Drafts>(() => new Map());
   useEffect(() => matters.start(), [matters]);
   const view = useSyncExternalStore(matters.subscribe, matters.view, matters.view);
   const open = view.open;
@@ -210,6 +213,7 @@ function RoomFrame({
               key={open?.matter ?? "none"}
               transport={transport}
               matter={open}
+              drafts={drafts}
               onThread={matters.onThread}
             />
           </StoreContext>

@@ -1,17 +1,11 @@
 // The status line on the composer's top edge: how long the answer took, the plan the questions go to, and the
 // prepared draft's hint while its Ready card is out of view.
-import { useLayoutEffect, useRef, type PointerEvent } from "react";
-import { Select as BaseSelect } from "@base-ui/react/select";
+import { lazy, Suspense, useLayoutEffect, useRef, type PointerEvent } from "react";
 import { Kbd } from "../ui/kbd.tsx";
 import { SegmentedSwitch } from "../ui/segmented.tsx";
-import { useLayer } from "../ui/layer-context.ts";
-import { raised, row } from "../ui/recipes-overlays.ts";
-import { IconGoodLaw } from "../icons/icons.tsx";
-import { cn } from "../lib/cn.ts";
 import { motionAllowed, useDisplay } from "../lib/display.ts";
 import { useWords } from "../lib/words.ts";
 import { ui } from "../lib/words-ui.ts";
-import { useThreadWords } from "../lib/words-thread.ts";
 import { useWide } from "./layout.ts";
 import { nextStatusFit, type StatusFit } from "./logic.ts";
 import { dur, ease } from "./motion.ts";
@@ -36,58 +30,11 @@ export type PlanChoice<V extends string = string> = {
   segmented?: readonly { value: V; label: string }[];
 };
 
-/** "Uses your Claude plan" on the status line, which opens the plan to ask with. At rest it is the status line's
- * own words, unchanged; under the pointer or focused it takes a quiet fill. */
-function PlanTrigger<V extends string>({ plan, choice }: { plan: string; choice: PlanChoice<V> }) {
-  const w = useThreadWords();
-  const layer = useLayer();
-  return (
-    <BaseSelect.Root
-      items={choice.options}
-      value={choice.value}
-      onValueChange={(next) => {
-        const chosen = choice.options.find((o) => o.value === next);
-        if (chosen !== undefined) choice.onValueChange(chosen.value);
-      }}
-    >
-      <BaseSelect.Trigger
-        className="room-status-plan room-plan"
-        aria-label={`${plan}. ${w.ui("Plan to ask with")}`}
-      >
-        <Say>{plan}</Say>
-      </BaseSelect.Trigger>
-      <BaseSelect.Portal container={layer}>
-        <BaseSelect.Positioner
-          alignItemWithTrigger={false}
-          positionMethod="fixed"
-          side="top"
-          align="start"
-          sideOffset={6}
-          collisionPadding={8}
-          className="z-20"
-        >
-          <BaseSelect.Popup className={raised({ width: "select" })}>
-            <BaseSelect.List>
-              {choice.options.map((o) => (
-                <BaseSelect.Item
-                  key={o.value}
-                  value={o.value}
-                  label={o.label}
-                  className={cn(row, "justify-between")}
-                >
-                  <BaseSelect.ItemText className="deva-nudge">{o.label}</BaseSelect.ItemText>
-                  <BaseSelect.ItemIndicator className="flex-none text-primary">
-                    <IconGoodLaw size={16} />
-                  </BaseSelect.ItemIndicator>
-                </BaseSelect.Item>
-              ))}
-            </BaseSelect.List>
-          </BaseSelect.Popup>
-        </BaseSelect.Positioner>
-      </BaseSelect.Portal>
-    </BaseSelect.Root>
-  );
-}
+/** The plan's select, loaded only for a status line that offers a choice. Until it is in, the plan stands as the
+ * status line's own words, as the select's trigger does at rest. */
+const PlanTrigger = lazy(() =>
+  import("./plan-trigger.tsx").then((m) => ({ default: m.PlanTrigger })),
+) as unknown as typeof import("./plan-trigger.tsx").PlanTrigger;
 
 /** The status line on the composer's top edge: "Took 38 seconds", a dot, "Uses your Claude plan", and the ready hint
  * at its right while the Ready card is out of view. Before the first answer it holds the plan alone. It never
@@ -191,7 +138,15 @@ export function StatusLine<V extends string>({
             />
           </span>
         ) : (
-          <PlanTrigger plan={plan} choice={choice} />
+          <Suspense
+            fallback={
+              <span className="room-status-plan room-plan">
+                <Say>{plan}</Say>
+              </span>
+            }
+          >
+            <PlanTrigger plan={plan} choice={choice} />
+          </Suspense>
         )}
       </p>
       {hint !== null && (

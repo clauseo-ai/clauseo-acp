@@ -385,4 +385,189 @@
   .room-pin-text {
     @apply text-ui-loose font-accepted;
   }
+  /* ---------- the answer's Markdown: what the renderer emits, set in the reply type on the tokens ---------- */
+  .reply-text [data-clauseo="markdown"] {
+    overflow-wrap: anywhere;
+  }
+  .reply-text
+    [data-clauseo="markdown"]
+    :is(p, ul, ol, dl, blockquote, pre, table, hr, h1, h2, h3, h4, h5, h6) {
+    margin: 0;
+  }
+  .reply-text [data-clauseo="markdown"] > * + *,
+  .reply-text [data-clauseo="markdown"] :is(li, blockquote, dd, .footnotes) > * + * {
+    margin-top: var(--s3);
+  }
+  .reply-text [data-clauseo="markdown"] :is(h1, h2, h3, h4, h5, h6) {
+    font-weight: var(--w-chip);
+    color: var(--primary);
+  }
+  .reply-text [data-clauseo="markdown"] > * + :is(h1, h2, h3, h4, h5, h6) {
+    margin-top: var(--s5);
+  }
+  .reply-text [data-clauseo="markdown"] h1 {
+    font-size: var(--t22);
+    line-height: var(--lh-title);
+  }
+  .reply-text [data-clauseo="markdown"] h2 {
+    font-size: var(--t18);
+    line-height: var(--lh-read);
+  }
+  .reply-text [data-clauseo="markdown"] :is(h3, h4, h5, h6) {
+    font-size: inherit;
+    line-height: inherit;
+  }
+  .reply-text [data-clauseo="markdown"] :is(h5, h6) {
+    color: var(--muted);
+  }
+  .reply-text [data-clauseo="markdown"] ol {
+    list-style-type: decimal;
+    padding-left: var(--s6);
+  }
+  .reply-text [data-clauseo="markdown"] ul {
+    list-style-type: disc;
+    padding-left: var(--s6);
+  }
+  .reply-text [data-clauseo="markdown"] :is(ul, ol) :is(ul, ol) {
+    margin-top: var(--s1);
+  }
+  .reply-text [data-clauseo="markdown"] li + li {
+    margin-top: var(--s1);
+  }
+  .reply-text [data-clauseo="markdown"] li::marker {
+    color: var(--muted);
+  }
+  /* a task item: its disabled checkbox stands where the marker would */
+  .reply-text [data-clauseo="markdown"] li:has(> input[type="checkbox"]:first-child) {
+    list-style-type: none;
+  }
+  .reply-text [data-clauseo="markdown"] li > input[type="checkbox"] {
+    margin: 0 var(--s2) 0 calc(-1 * var(--s5));
+    vertical-align: middle;
+  }
+  .reply-text [data-clauseo="markdown"] blockquote {
+    padding-left: var(--s4);
+    border-left: var(--hairline) solid var(--ring-kbd);
+    color: var(--muted);
+  }
+  .reply-text [data-clauseo="markdown"] hr {
+    border: 0;
+    border-top: var(--hairline) solid var(--ring-kbd);
+  }
+  .reply-text [data-clauseo="markdown"] code[data-clauseo="inline-code"] {
+    font-family: var(--font-code);
+    font-size: var(--t15);
+    padding: 0 var(--s1);
+    border-radius: var(--r-ref);
+    background: var(--well);
+  }
+  /* a code block on the well: the code-* colours are made for it; long lines scroll inside it */
+  .reply-text [data-clauseo="markdown"] pre[data-clauseo="code"] {
+    font-family: var(--font-code);
+    font-size: var(--t13);
+    line-height: var(--lh-small);
+    padding: var(--s3) var(--s4);
+    border-radius: var(--r-control);
+    background: var(--well);
+    overflow-x: auto;
+    white-space: pre;
+    overflow-wrap: normal;
+  }
+  .reply-text [data-clauseo="markdown"] pre code {
+    font: inherit;
+    padding: 0;
+    background: none;
+  }
+  /* a wide table scrolls sideways inside the answer; long cells wrap. Cells keep the renderer's inline alignment */
+  .reply-text [data-clauseo="markdown"] table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: var(--t15);
+    line-height: var(--lh-ui);
+  }
+  .reply-text [data-clauseo="markdown"] :is(th, td) {
+    padding: var(--s1-5) var(--s3);
+    border-bottom: var(--hairline) solid var(--ring-kbd);
+    min-width: var(--s12);
+    vertical-align: top;
+    text-align: start;
+  }
+  .reply-text [data-clauseo="markdown"] th {
+    font-weight: var(--w-chip);
+  }
+  .reply-text [data-clauseo="markdown"] a[data-clauseo="link"],
+  .reply-text [data-clauseo="markdown"] :is([data-clauseo="citation"], [data-clauseo="paper"]) {
+    text-decoration-line: underline;
+    text-decoration-thickness: var(--hairline);
+    text-underline-offset: var(--ref-offset);
+    text-decoration-color: var(--ref-line);
+    cursor: pointer;
+  }
+  .reply-text [data-clauseo="markdown"] [data-clauseo="citation"] {
+    text-decoration-color: var(--ref-line-quiet);
+  }
+  .reply-text [data-clauseo="markdown"] [data-clauseo="link-host"] {
+    color: var(--muted);
+    font-size: var(--t13);
+  }
+  .reply-text [data-clauseo="markdown"] [data-clauseo="image"][data-blocked] {
+    display: inline-block;
+    padding: var(--s1) var(--s2);
+    border-radius: var(--r-chip);
+    background: var(--well);
+    color: var(--muted);
+    font-size: var(--t13);
+  }
+  .reply-text [data-clauseo="markdown"] :is(sup, sub) {
+    font-size: var(--t12);
+    line-height: 0;
+  }
+  .reply-text [data-clauseo="markdown"] sup[data-footnote-pending] {
+    color: var(--muted);
+  }
+  .reply-text [data-clauseo="markdown"] .footnotes {
+    margin-top: var(--s6);
+    padding-top: var(--s3);
+    border-top: var(--hairline) solid var(--ring-kbd);
+    font-size: var(--t13);
+    line-height: var(--lh-small);
+    color: var(--muted);
+  }
+  .reply-text [data-clauseo="markdown"] mark {
+    background: var(--well-strong);
+    color: inherit;
+  }
+  .reply-text [data-clauseo="markdown"] :is(del, s) {
+    text-decoration-line: line-through;
+  }
+  .reply-text [data-clauseo="markdown"] :is(ins, u) {
+    text-decoration-line: underline;
+    text-decoration-thickness: var(--hairline);
+  }
+  .reply-text [data-clauseo="markdown"] small {
+    font-size: var(--t13);
+  }
+  .reply-text [data-clauseo="markdown"] kbd {
+    display: inline-grid;
+    place-items: center;
+    min-width: var(--size-kbd-w);
+    height: var(--size-kbd);
+    padding: 0 var(--s1);
+    border-radius: var(--r-kbd);
+    box-shadow: inset 0 0 0 var(--hairline) var(--ring-kbd);
+    color: var(--muted);
+    font-size: var(--t13);
+    line-height: 1;
+  }
+  .reply-text [data-clauseo="markdown"] dt {
+    font-weight: var(--w-chip);
+  }
+  .reply-text [data-clauseo="markdown"] dd {
+    margin: var(--s1) 0 0 var(--s6);
+  }
+  .reply-text [data-clauseo="markdown"] :is(h1, h2, h3, h4, h5, h6)[id] {
+    scroll-margin-top: var(--s12);
+  }
 }

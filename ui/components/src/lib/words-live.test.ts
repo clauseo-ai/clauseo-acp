@@ -27,6 +27,7 @@ const LIMITS: readonly LimitKey[] = [
   "Resets {time}",
   "Resets {day} {time}",
   "Limit reached. Reset not given.",
+  "Reset not given.",
   "Usage limit reached",
   "Try again",
 ];

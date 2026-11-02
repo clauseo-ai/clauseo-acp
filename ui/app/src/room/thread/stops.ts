@@ -1,7 +1,7 @@
 // The one line a step says for how its turn ended. end_turn and at_limit say nothing: a finished answer needs no
 // words, and the limit's own row explains a stop at the limit. A failed turn says its failure's sentence.
 import type { ThreadKey } from "@clauseo/components/lib/words-thread.ts";
-import type { StepEntry } from "../../transport/protocol.ts";
+import type { StepEntry, Timestamp } from "../../transport/protocol.ts";
 
 export type StopLine =
   | { kind: "thread"; key: ThreadKey; code?: undefined }
@@ -22,4 +22,10 @@ export function stopLine(step: StepEntry): StopLine | null {
       // end_turn, at_limit, and a stop from a newer Clauseo
       return null;
   }
+}
+
+/** The limit's reset as its row says it: only while it is still to come. A reset at or before `now` is over, and
+ * "Resets Saturday" would read as a limit still in force, so the row shows its headline alone. */
+export function resetShown(resets: Timestamp | undefined, now: number): Timestamp | null {
+  return resets !== undefined && resets > now ? resets : null;
 }

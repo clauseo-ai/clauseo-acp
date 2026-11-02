@@ -31,6 +31,7 @@ import { connectRoom } from "../start.ts";
 import { defaultOutcome, summary, THE_MATTER } from "./harness.ts";
 import { latestOutput } from "./ids.ts";
 import { stubFonts } from "./testing.ts";
+import { loadThread } from "./chunk.ts";
 
 // Each row gets its own Profiler, inside a memo boundary that matches the real row's, so a row's onRender fires only
 // when that row's subtree renders.
@@ -104,7 +105,9 @@ test("500 chunks and 20 tool calls into the room's thread: one commit a frame, n
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  act(() =>
+  // awaited: Work's transcript suspends on the thread's chunk as it mounts, and only an act React can wait on lets the
+  // room's effects run past it
+  await act(async () =>
     root!.render(
       createElement(
         StrictMode,
@@ -118,8 +121,9 @@ test("500 chunks and 20 tool calls into the room's thread: one commit a frame, n
     ),
   );
   await settle();
-  // Work started the renderer's chunk as it mounted; it is in memory before the first answer
-  await act(() => vi.dynamicImportSettled());
+  // Work started the thread's chunk as it mounted; the thread opens once it is in, before the first answer
+  await act(async () => void (await loadThread()));
+  await settle();
   const stream = transport.only("subscribe")[0]?.stream;
   expect(stream).toBe(`thread:${summary().thread}`);
   const prompt = userMessage(5, 1, "What does clause nine say?");

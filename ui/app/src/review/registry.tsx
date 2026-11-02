@@ -29,7 +29,6 @@ import {
 } from "./words.ts";
 import type { NextErrorCode } from "../room/host-next.ts";
 import { ERROR_WORDS, type ErrorKey } from "@clauseo/components/lib/words-errors.ts";
-import type { ThreadKey } from "@clauseo/components/lib/words-thread.ts";
 import { agentText, step, toolCall, TURN, userMessage, uuid } from "../testing/stream-script.ts";
 import type { ErrorCode, StepEntry, ViewEntry } from "../transport/protocol.ts";
 
@@ -82,25 +81,43 @@ const limit = (reason: string, resets_at?: number): ViewEntry => ({
 
 const thread = (state: ThreadState) => () => <RoomOver host={() => threadHost(state)} />;
 
-/** One entry per sentence of words-errors.ts that is its own: the first code for each, refused on a send. */
-const ERRORS: [ErrorCode, Exclude<ErrorKey, ThreadKey>][] = [];
-for (const [code, key] of Object.entries(ERROR_WORDS) as [ErrorCode, ErrorKey][]) {
-  if (key === "The answer stopped. Your question and the answer so far are kept.") continue;
-  if (!ERRORS.some(([, k]) => k === key)) ERRORS.push([code, key]);
-}
+/** One entry per error code, "U3-err-<code>", refused on a send: an id that names its code never moves when a code
+ * is added. Codes whose sentence is U3-07's (words-thread.ts's) need no entry of their own. */
+const ERRORS: Entry[] = (Object.entries(ERROR_WORDS) as [ErrorCode, ErrorKey][]).flatMap(
+  ([code, key]) =>
+    key === "The answer stopped. Your question and the answer so far are kept."
+      ? []
+      : [
+          {
+            id: `U3-err-${code}`,
+            words: errorWords(key),
+            screen: "room/composer",
+            render: () => (
+              <RoomAsking
+                host={() => threadHost({ entries: [QUESTION, ANSWER, ended()], refuse: code })}
+                question="And clause ten?"
+              />
+            ),
+          },
+        ],
+);
 
-const U3: Omit<Entry, "id">[] = [
+/** U3's entries, each id written as it is: an id never moves when an entry is added or taken out. */
+const U3: Entry[] = [
   {
+    id: "U3-01",
     words: frameWords("Answering."),
     screen: "room/composer",
     render: thread({ entries: [QUESTION, PARTIAL], status: "running" }),
   },
   {
+    id: "U3-02",
     words: threadWords("Failed"),
     screen: "room/thread",
     render: thread({ entries: [QUESTION, toolCall(7, 1, "failed"), ANSWER, ended()] }),
   },
   {
+    id: "U3-03",
     words: threadWords("Stopped"),
     screen: "room/thread",
     render: thread({
@@ -108,21 +125,25 @@ const U3: Omit<Entry, "id">[] = [
     }),
   },
   {
+    id: "U3-04",
     words: threadWords("You stopped the answer. The answer so far is kept."),
     screen: "room/thread",
     render: thread({ entries: [QUESTION, PARTIAL, ended({ stop: "cancelled" })] }),
   },
   {
+    id: "U3-05",
     words: threadWords("The answer stopped at its limit, before it finished."),
     screen: "room/thread",
     render: thread({ entries: [QUESTION, PARTIAL, ended({ stop: "max_tokens" })] }),
   },
   {
+    id: "U3-06",
     words: threadWords("This question was declined, so there is no answer."),
     screen: "room/thread",
     render: thread({ entries: [QUESTION, ended({ stop: "refusal" })] }),
   },
   {
+    id: "U3-07",
     words: threadWords("The answer stopped. Your question and the answer so far are kept."),
     screen: "room/thread",
     render: thread({
@@ -130,16 +151,19 @@ const U3: Omit<Entry, "id">[] = [
     }),
   },
   {
+    id: "U3-08",
     words: threadWords("Your question"),
     screen: "room/thread",
     render: thread({ entries: [QUESTION, ANSWER, ended()] }),
   },
   {
+    id: "U3-09",
     words: threadWords("Clauseo's answer"),
     screen: "room/thread",
     render: thread({ entries: [QUESTION, ANSWER, ended()] }),
   },
   {
+    id: "U3-10",
     words: threadWords("Attached: {name}"),
     screen: "room/thread",
     render: thread({
@@ -151,6 +175,7 @@ const U3: Omit<Entry, "id">[] = [
     }),
   },
   {
+    id: "U3-11",
     words: threadWords("Something here can't be shown in the thread."),
     screen: "room/thread",
     render: thread({
@@ -162,50 +187,48 @@ const U3: Omit<Entry, "id">[] = [
     }),
   },
   {
+    id: "U3-12",
     words: threadWords("Clauseo changed 1 paper."),
     screen: "room/thread",
     render: thread({ entries: [QUESTION, ANSWER, paper(false)] }),
   },
   {
+    id: "U3-13",
     words: threadWords("You undid Clauseo's changes to 1 paper."),
     screen: "room/thread",
     render: thread({ entries: [QUESTION, ANSWER, paper(true)] }),
   },
   {
+    id: "U3-14",
     words: limitWords("Resets {time}"),
     screen: "room/thread",
     render: thread({ entries: [QUESTION, PARTIAL, limit("plan_window", atLocal(0, 23, 59))] }),
   },
   {
+    id: "U3-15",
     words: limitWords("Resets {day} {time}"),
     screen: "room/thread",
     render: thread({ entries: [QUESTION, PARTIAL, limit("plan_window", atLocal(2, 9, 0))] }),
   },
   {
-    words: limitWords("Limit reached. Reset not given."),
-    screen: "room/thread",
-    render: thread({ entries: [QUESTION, PARTIAL, limit("plan_window")] }),
-  },
-  {
+    id: "U3-17",
     words: limitWords("Try again"),
     screen: "room/composer",
     render: thread({ entries: [QUESTION, PARTIAL], lose: "agent.exited" }),
   },
   {
+    id: "U3-18",
     words: limitWords("Usage limit reached"),
     screen: "room/thread",
     render: thread({ entries: [QUESTION, PARTIAL, limit("workspace_credits", atLocal(2, 9, 0))] }),
   },
-  ...ERRORS.map(([code, key]) => ({
-    words: errorWords(key),
-    screen: "room/composer",
-    render: () => (
-      <RoomAsking
-        host={() => threadHost({ entries: [QUESTION, ANSWER, ended()], refuse: code })}
-        question="And clause ten?"
-      />
-    ),
-  })),
+  // U3-16 was "Limit reached. Reset not given.", the toolbar's sentence, which the limit row no longer says
+  {
+    id: "U3-48",
+    words: limitWords("Reset not given."),
+    screen: "room/thread",
+    render: thread({ entries: [QUESTION, PARTIAL, limit("plan_window")] }),
+  },
 ];
 
 /* ---------- U2: the rail and matters ---------- */
@@ -273,8 +296,8 @@ export const REGISTRY: readonly Entry[] = [
     screen: "room/wall",
     render: () => <RoomOver host={() => roomHost([MATTER], [])} />,
   },
-  // U3-01 onward, in order
-  ...U3.map((entry, i) => ({ id: `U3-${String(i + 1).padStart(2, "0")}`, ...entry })),
+  ...U3,
+  ...ERRORS,
   {
     id: "U2-01",
     words: frameWords("Add a matter's folder."),

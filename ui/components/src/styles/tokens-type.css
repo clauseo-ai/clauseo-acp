@@ -14,6 +14,8 @@
     "Anek Devanagari", "Anek Latin Hi", "Nirmala UI", "Kohinoor Devanagari", system-ui, sans-serif;
   --font-num: "Anek Latin", "Anek Devanagari", "Segoe UI", system-ui, sans-serif;
   --font: var(--font-latin);
+  /* code in an answer: the system's own monospace, the one place the page's face gives way */
+  --font-code: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
 
   /* one fixed scale, in small increments, in rem on a 16 px root */
   --t12: 0.75rem; /* a chip's words */

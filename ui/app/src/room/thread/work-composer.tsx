@@ -2,7 +2,7 @@
 // sendsOnEnter: Shift+Enter breaks the line, and an input method's composing Enter is its own); the field keeps its
 // words until the host accepts the question, and after a refusal. The working line says "Answering." while busy, and
 // stands for an error by its code: a lost stream, with Try again, before a refused command.
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import { Composer } from "@clauseo/components/clauseo/composer.tsx";
 import { sendsOnEnter } from "@clauseo/components/clauseo/composer-keys.ts";
 import type { WorkingState } from "@clauseo/components/clauseo/working-line.tsx";
@@ -11,8 +11,12 @@ import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { lim } from "@clauseo/components/lib/words-limits.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { Button } from "@clauseo/components/ui/button.tsx";
+import type { MatterId } from "../../transport/protocol.ts";
+import type { Drafts } from "./session.ts";
 
 export function WorkComposer({
+  drafts,
+  matter,
   disabled,
   busy,
   refused,
@@ -21,6 +25,9 @@ export function WorkComposer({
   onStop,
   onRetry,
 }: {
+  /** The room's drafts, by matter: the field starts with this matter's and keeps it there as it changes. */
+  drafts: Drafts;
+  matter: MatterId | null;
   /** No matter is open. */
   disabled: boolean;
   busy: boolean;
@@ -34,7 +41,12 @@ export function WorkComposer({
   onRetry: () => void;
 }) {
   const w = useWords();
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => (matter === null ? "" : (drafts.get(matter) ?? "")));
+  useEffect(() => {
+    if (matter === null) return;
+    if (text === "") drafts.delete(matter);
+    else drafts.set(matter, text);
+  }, [drafts, matter, text]);
   const ask = () => {
     if (disabled || busy || text.trim() === "") return;
     const asked = text;

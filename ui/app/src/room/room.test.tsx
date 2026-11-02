@@ -22,6 +22,7 @@ import { createViewStore } from "../store/store.ts";
 import { Room } from "./room.tsx";
 import { stubFonts } from "./thread/testing.ts";
 import { connectRoom } from "./start.ts";
+import { loadThread } from "./thread/chunk.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 stubFonts();
@@ -81,6 +82,8 @@ async function mount(
   await act(async () => root?.render(inStore(transport, windowControls)));
   // list_matters, then list_papers
   await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  // the thread's chunk, which Work started as it mounted
+  await act(async () => void (await loadThread()));
 }
 
 afterEach(async () => {

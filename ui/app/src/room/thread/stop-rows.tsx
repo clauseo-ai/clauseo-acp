@@ -12,11 +12,12 @@ import type { EntryId, LimitStopEntry, StepEntry } from "../../transport/protoco
 import { isoOf, whenOf } from "./clock.ts";
 import { useBusy } from "./live.ts";
 import { useThreadActions } from "./session.ts";
-import { stopLine } from "./stops.ts";
+import { resetShown, stopLine } from "./stops.ts";
 
 const QUIET = "text-small text-quiet";
-/** The space above a row under the answer's words, on the spacing tokens. */
-const ROW = "mt-(--s3)";
+/** The space above a row under another in its section, on the spacing tokens; first in its section, the thread's own
+ * gap between sections stands alone. */
+const ROW = "not-first:mt-(--s3)";
 
 function Changed({ entry }: { entry: StepEntry }) {
   const w = useWords();
@@ -77,11 +78,13 @@ export function StepRow({ id, entry }: { id: EntryId; entry: StepEntry }) {
 
 export function LimitStopRow({ id, entry }: { id: EntryId; entry: LimitStopEntry }) {
   const w = useWords();
-  const usage = entry.reason === "workspace_credits" || entry.reason === "workspace_spend_cap";
-  const resets = entry.resets_at;
-  // "today" as the row first showed: no clock runs to move it
+  // only a used-up plan window is the plan's limit: a temporary rate limit, or one this version doesn't know, leaves
+  // the plan as it was
+  const plan = entry.reason === "plan_window";
+  // "now" as the row first showed: no clock runs to move it
   const [now] = useState(Date.now);
-  const when = resets === undefined ? null : whenOf(w.lang, resets, now);
+  const shown = resetShown(entry.resets_at, now);
+  const when = shown === null ? null : whenOf(w.lang, shown, now);
   return (
     <div
       data-testid="limit-stop"
@@ -91,21 +94,24 @@ export function LimitStopRow({ id, entry }: { id: EntryId; entry: LimitStopEntry
       className={ROW}
     >
       <p>
-        <Say>{usage ? lim(w.lang, "Usage limit reached") : w.t("Claude plan limit reached")}</Say>
+        <Say>{plan ? w.t("Claude plan limit reached") : lim(w.lang, "Usage limit reached")}</Say>
       </p>
-      <p className={QUIET}>
-        {resets === undefined || when === null ? (
-          <Say>{lim(w.lang, "Limit reached. Reset not given.")}</Say>
-        ) : (
-          <time data-testid="limit-resets-at" dateTime={isoOf(resets)}>
+      {entry.resets_at === undefined && (
+        <p className={QUIET}>
+          <Say>{lim(w.lang, "Reset not given.")}</Say>
+        </p>
+      )}
+      {shown !== null && when !== null && (
+        <p className={QUIET}>
+          <time data-testid="limit-resets-at" dateTime={isoOf(shown)}>
             <Say>
               {when.day === null
                 ? lim(w.lang, "Resets {time}", { time: when.time })
                 : lim(w.lang, "Resets {day} {time}", { day: when.day, time: when.time })}
             </Say>
           </time>
-        )}
-      </p>
+        </p>
+      )}
     </div>
   );
 }
