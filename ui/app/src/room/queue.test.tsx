@@ -83,15 +83,22 @@ const head = () =>
   wait()
     ?.querySelector(".queue-wait-head")
     ?.textContent?.replace(/\u00a0/g, " ");
+/** The composer's working line's words; once sent it names the other, as the panel's heading no longer does. */
+const working = () =>
+  h!
+    .one("working")
+    ?.textContent?.replace(/\u00a0/g, " ")
+    .trim();
 const queueButton = () => h!.one("queue") as HTMLButtonElement | null;
 const disabled = (b: HTMLButtonElement | null) =>
   b?.disabled === true || b?.getAttribute("aria-disabled") === "true";
 
-test("queued behind another: the wait names its title with no time, and offers Stop the other, no Queue", async () => {
+test("queued behind another: the working line names the title with no time; the panel drops its heading and offers Stop the other, no Queue", async () => {
   h = await mountWith("running");
   h.deliver([reset([], headerOf(THREAD, { queued: { behind: OTHER } }))]);
   await h.settle();
-  expect(head()).toBe(`Waiting for '${TITLE}' to finish.`);
+  expect(working()).toBe(`Waiting for '${TITLE}' to finish.`);
+  expect(head()).toBeUndefined();
   expect(wait()?.textContent).not.toMatch(/\d|\bby\b|pm|am/);
   expect(h.one("stop-other")).not.toBeNull();
   expect(queueButton()).toBeNull();
@@ -107,7 +114,7 @@ test("the title is the one the host names in behind, though another conversation
     ],
   });
   // THIRD sorts above THREAD and opens: it waits behind OTHER, as the list says
-  expect(head()).toBe(`Waiting for '${TITLE}' to finish.`);
+  expect(working()).toBe(`Waiting for '${TITLE}' to finish.`);
 });
 
 /** Words in the field, then Ask's Enter: with another conversation holding the matter, this raises the wait. */
@@ -117,7 +124,6 @@ async function raise(text = QUESTION) {
   await h!.key({ key: "Enter", keyCode: 13 });
 }
 const field = () => h!.one("composer") as HTMLTextAreaElement;
-const said = () => h!.one("other-wait-said")?.textContent ?? null;
 const READY = "One conversation changes a matter's papers at a time. Your message is ready to go.";
 /** What the composer's one status region says of its working line. */
 const composerSaid = () =>
@@ -195,12 +201,12 @@ test("the wait stays mounted from Queue through starting to queued behind the ot
   h.deliver([upsert(headerOf(THREAD, "starting"))]);
   await h.settle();
   expect(wait()).toBe(node);
-  expect(head()).toBe(`Waiting for '${TITLE}' to finish.`);
+  expect(working()).toBe(`Waiting for '${TITLE}' to finish.`);
   expect(queueButton()).toBeNull();
   h.deliver([upsert(headerOf(THREAD, { queued: { behind: OTHER } }))]);
   await h.settle();
   expect(wait()).toBe(node);
-  expect(head()).toBe(`Waiting for '${TITLE}' to finish.`);
+  expect(working()).toBe(`Waiting for '${TITLE}' to finish.`);
 });
 
 test("once sent, the working line says the wait, never Answering.", async () => {
@@ -220,7 +226,7 @@ test("starting while the other is only starting too keeps the wait, so it doesn'
   h = await mountWith("starting");
   h.deliver([reset([], headerOf(THREAD, "starting"))]);
   await h.settle();
-  expect(head()).toBe(`Waiting for '${TITLE}' to finish.`);
+  expect(working()).toBe(`Waiting for '${TITLE}' to finish.`);
   expect(queueButton()).toBeNull();
 });
 
@@ -231,17 +237,34 @@ test("starting with no other conversation holding shows no wait", async () => {
   expect(wait()).toBeNull();
 });
 
-test("the status region mounts empty and is filled as the wait comes; once queued the composer's line says it", async () => {
+test("the status region is there before the wait and only its words change: raised, then quiet once queued", async () => {
   h = await mountWith("running");
+  const region = h.one("other-wait-said");
+  expect(region?.getAttribute("role")).toBe("status");
+  expect(region?.textContent).toBe("");
+  expect(wait()).toBeNull();
   await raise();
-  expect(said()).toBe(`Waiting for '${TITLE}' to finish. ${READY}`);
-  // no name on the section repeating the words
+  expect(h.one("other-wait-said")).toBe(region);
+  expect(region?.textContent).toBe(`Waiting for '${TITLE}' to finish. ${READY}`);
+  // no name on the section repeating the words, and no region of its own
   expect(wait()?.getAttribute("aria-label")).toBeNull();
+  expect(wait()?.querySelector('[role="status"]')).toBeNull();
   await h.click(queueButton());
   h.deliver([reset([], headerOf(THREAD, { queued: { behind: OTHER } }))]);
   await h.settle();
-  expect(said()).toBe("");
+  expect(h.one("other-wait-said")).toBe(region);
+  expect(region?.textContent).toBe("");
   expect(composerSaid()).toContain(`Waiting for '${TITLE}' to finish.`);
+});
+
+test("accepted before the row says starting, the working line already says the wait", async () => {
+  // the host accepts, and no header has come yet: the composer is busy on its sent turn, the row still idle
+  h = await mountWith("running");
+  await raise();
+  await h.click(queueButton());
+  expect(h.sent("send_prompt")).toHaveLength(1);
+  expect(working()).toBe(`Waiting for '${TITLE}' to finish.`);
+  expect(working()).not.toContain("Answering.");
 });
 
 test("Stop the other sends cancel for the thread it waits behind, never for the open one", async () => {

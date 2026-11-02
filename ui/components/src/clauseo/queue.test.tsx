@@ -280,31 +280,15 @@ test("without onQueue only Stop the other shows; a disabled Queue takes no press
   expect(pressed).toEqual([]);
 });
 
-test("the status region mounts empty and says the wait with Queue; silent without; the section repeats no name", async () => {
-  await mount(
-    <OtherConversationWait
-      title="Draft plaint"
-      onQueue={none}
-      onStopOther={none}
-      testIds={{ section: "other-wait", said: "said" }}
-    />,
+test("without the heading the wait keeps its second line and Stop the other; it names nothing twice", async () => {
+  await mount(<OtherConversationWait title="Draft plaint" heading={false} onStopOther={none} />);
+  expect(document.querySelector(".queue-wait-head")).toBeNull();
+  expect(txt(document.querySelector(".queue-say"))).toBe(
+    "One conversation changes a matter's papers at a time. Your message is ready to go.",
   );
-  const region = document.querySelector('[data-testid="said"]');
-  expect(region?.getAttribute("role")).toBe("status");
-  expect(region?.textContent).toBe(
-    "Waiting for 'Draft plaint' to finish. One conversation changes a matter's papers at a time. Your message is ready to go.",
-  );
-  expect(
-    document.querySelector('[data-testid="other-wait"]')?.getAttribute("aria-label"),
-  ).toBeNull();
-  // the visible line is no second live region
-  expect(document.querySelector(".queue-wait-head")?.getAttribute("role")).toBeNull();
-  await act(async () =>
-    root?.render(
-      <OtherConversationWait title="Draft plaint" onStopOther={none} testIds={{ said: "said" }} />,
-    ),
-  );
-  expect(document.querySelector('[data-testid="said"]')?.textContent).toBe("");
+  expect([...document.querySelectorAll("button")].map((x) => txt(x))).toEqual(["Stop the other"]);
+  expect(document.querySelector(".queue-wait")?.getAttribute("aria-label")).toBeNull();
+  expect(document.querySelector('[role="status"]')).toBeNull();
 });
 
 test("the title-only wait has its Hindi", () => {

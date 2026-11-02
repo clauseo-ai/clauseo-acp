@@ -15,14 +15,10 @@ import { toHostError, type HostTransport } from "../transport/host-transport.ts"
 import type { ErrorCode } from "../transport/protocol.ts";
 import type { OtherWait as Wait } from "./queue-model.ts";
 
-const TEST_IDS = {
-  section: "other-wait",
-  stop: "stop-other",
-  queue: "queue",
-  said: "other-wait-said",
-} as const;
+const TEST_IDS = { section: "other-wait", stop: "stop-other", queue: "queue" } as const;
 
-/** The wait for `wait`'s conversation: Stop the other, and Queue until the message has gone. */
+/** The wait for `wait`'s conversation: Stop the other, and Queue and the line naming the other until the message has
+ * gone, when the working line names it. */
 export function OtherWait({
   transport,
   wait,
@@ -85,6 +81,7 @@ export function OtherWait({
       queueDisabled={empty}
       onStopOther={stopOther}
       stopRef={stop}
+      heading={queueable}
       testIds={TEST_IDS}
     />
   );
