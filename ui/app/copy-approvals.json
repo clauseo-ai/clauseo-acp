@@ -1166,5 +1166,19 @@
     "status": "approved",
     "at": "2026-11-02",
     "by": "design"
+  },
+  "U6-05": {
+    "en": "A new conversation. It reads this matter's {n} papers.",
+    "hi": "एक नई बातचीत। यह इस मामले के {n} दस्तावेज़ पढ़ती है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U6-06": {
+    "en": "Uses your {name} plan",
+    "hi": "आपके {name} प्लान का उपयोग करता है",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
   }
 }

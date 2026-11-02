@@ -4,7 +4,8 @@
 // stands for an error by its code: a lost stream (with Try again when its code is retryable), then a refused command,
 // then "Answering.", then an answer Claude stopped giving (thread-break.ts). The stopped question comes back into the
 // field when the field is empty. Each conversation keeps its own words (the drafts, by its key); on a new conversation
-// the status line offers the plan to ask with, until its first question fixes it.
+// the status line offers the plan to ask with, until its first question fixes it, and otherwise names the plan the
+// conversation uses.
 import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
 import {
   Composer,
@@ -24,6 +25,7 @@ export function WorkComposer({
   drafts,
   draftKey,
   choice,
+  plan = "",
   disabled,
   busy,
   refused,
@@ -41,6 +43,8 @@ export function WorkComposer({
   draftKey: string | null;
   /** A new conversation's plan choice, before its first question; absent once fixed, or with one plan. */
   choice?: PlanChoice | undefined;
+  /** The status line's plan words, "Uses your Claude plan"; "" for none. Not drawn while the choice stands. */
+  plan?: string;
   /** No matter is open. */
   disabled: boolean;
   busy: boolean;
@@ -116,7 +120,7 @@ export function WorkComposer({
       key={draftKey ?? "none"}
       ref={field}
       took={null}
-      plan=""
+      plan={plan}
       {...(choice === undefined ? {} : { choice })}
       hint={null}
       working={line?.state ?? null}

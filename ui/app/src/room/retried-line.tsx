@@ -21,7 +21,7 @@ export function RetriedLine({
 }) {
   const { lang } = useWords();
   return (
-    <p className="flex flex-wrap items-center gap-x-s2 gap-y-s1 text-small-row text-muted">
+    <p className="flex max-w-measure flex-wrap items-center gap-x-s2 gap-y-s1 text-small-row text-muted">
       <IconUndo size={16} className="flex-none" />
       <span className="min-w-0 flex-1">
         <Say>

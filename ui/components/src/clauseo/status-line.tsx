@@ -59,7 +59,7 @@ export function StatusLine<V extends string>({
   const { lang, textSize } = useDisplay();
   const wide = useWide();
   const box = useRef<HTMLDivElement>(null);
-  const line = useRef<HTMLParagraphElement>(null);
+  const line = useRef<HTMLDivElement>(null);
   const tookRef = useRef<HTMLSpanElement>(null);
   const goRef = useRef<HTMLSpanElement>(null);
   const hadTook = useRef(took !== null);
@@ -116,18 +116,23 @@ export function StatusLine<V extends string>({
   };
   return (
     <div className="room-status" ref={box} hidden={hidden}>
-      <p className="room-status-line" ref={line} role="status">
-        {took !== null && (
-          <span className="room-status-took" ref={tookRef}>
-            <b>{took}</b>
-            <i className="room-dot" aria-hidden="true" />
-          </span>
-        )}
-        {choice === undefined ? (
-          <span className="room-status-plan">
-            <Say>{plan}</Say>
-          </span>
-        ) : choice.segmented !== undefined ? (
+      {/* a div, since the plan's switch is no phrasing content; only the words are a live region, never the switch,
+          their box drawn as none so the line lays them out as its own */}
+      <div className="room-status-line" ref={line}>
+        <span className="contents" role="status">
+          {took !== null && (
+            <span className="room-status-took" ref={tookRef}>
+              <b>{took}</b>
+              <i className="room-dot" aria-hidden="true" />
+            </span>
+          )}
+          {choice === undefined && (
+            <span className="room-status-plan">
+              <Say>{plan}</Say>
+            </span>
+          )}
+        </span>
+        {choice === undefined ? null : choice.segmented !== undefined ? (
           <span className="room-status-plan room-status-seg">
             <span className="deva-nudge">{ui(lang, "Plan to ask with")}</span>
             <SegmentedSwitch<V>
@@ -149,7 +154,7 @@ export function StatusLine<V extends string>({
             <PlanTrigger plan={plan} choice={choice} />
           </Suspense>
         )}
-      </p>
+      </div>
       {hint !== null && (
         <button
           type="button"

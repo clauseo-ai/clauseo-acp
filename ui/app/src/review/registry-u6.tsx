@@ -1,6 +1,7 @@
-// U6's copy review entries (retrying from a question): apart from registry.tsx, as registry-u4.tsx is. Each string
+// U6's copy review entries: apart from registry.tsx, as registry-u4.tsx is. Retrying from a question, each string
 // over the parts that show it, on their own, inside the room's providers: the room doesn't yet make a retry (H13
-// lands later), so no room state shows these.
+// lands later), so no room state shows these. A new conversation's line and the status line's plan, in the room over
+// a host with H8's papers and no threads yet, so the matter opens on a new conversation.
 import { QuestionLine } from "@clauseo/components/clauseo/answer.tsx";
 import { RoomScopeProvider } from "@clauseo/components/clauseo/room-scope-provider.tsx";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
@@ -8,7 +9,10 @@ import { RetriedLine } from "../room/retried-line.tsx";
 import { RetryFromHere } from "../room/retry-from-here.tsx";
 import { ThreadActionsContext, type ThreadActions } from "../room/thread/session.ts";
 import type { Entry } from "./entry.ts";
-import { matterWords } from "./words.ts";
+import type { PaperSummary } from "../room/host-next.ts";
+import { MATTER, roomHost } from "./hosts.ts";
+import { RoomOver } from "./states.tsx";
+import { matterWords, threadWords } from "./words.ts";
 import { uuid } from "../testing/stream-script.ts";
 
 /** A retry that does nothing: the review shows the parts, the host isn't asked. */
@@ -48,6 +52,14 @@ const retry = () => (
   </RoomScopeProvider>
 );
 
+/** A matter's papers, three of them, for the new conversation's count. */
+const PAPERS: PaperSummary[] = ["Plaint.pdf", "Written statement.pdf", "Lease deed.pdf"].map(
+  (path, i) => ({ file: uuid(i + 1, 8), path, size: 1000, modified: 1_730_000_000_000 }),
+);
+
+/** The room on a matter with no conversation yet: a new one, before its first question. */
+const fresh = () => <RoomOver host={() => roomHost([MATTER], PAPERS)} />;
+
 /** U6's entries, each id written as it is: an id never moves when an entry is added or taken out. */
 export const U6: Entry[] = [
   {
@@ -77,5 +89,17 @@ export const U6: Entry[] = [
     ),
     screen: "matters/retry",
     render: retry,
+  },
+  {
+    id: "U6-05",
+    words: matterWords("A new conversation. It reads this matter's {n} papers."),
+    screen: "matters/new-conversation",
+    render: fresh,
+  },
+  {
+    id: "U6-06",
+    words: threadWords("Uses your {name} plan"),
+    screen: "matters/new-conversation",
+    render: fresh,
   },
 ];

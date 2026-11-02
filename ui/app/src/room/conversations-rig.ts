@@ -1,6 +1,7 @@
 // Shared setup for the conversations tests: a started Matters and Conversations over a FakeTransport, with the fixtures.
 // Not shipped: only tests import it, and its afterEach runs in each file that imports it.
 import { afterEach, vi } from "vitest";
+import { settled } from "@clauseo/components/lib/late.ts";
 import type { Batch } from "../store/batch.ts";
 import { createViewStore } from "../store/store.ts";
 import { batch, event, reset, uuid } from "../testing/stream-script.ts";
@@ -65,7 +66,10 @@ export async function rig(host: FakeHost, focused: () => boolean = () => false) 
   const talks = new Conversations(transport, store, matters, drafts, focused);
   stops.push(talks.start());
   const settle = async () => {
-    for (let i = 0; i < 4; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    // the answers in, then the late imports they started (sent()'s conversation-title), however deep the chain
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     pending.splice(0).forEach((f) => f());
     await new Promise((resolve) => setTimeout(resolve, 0));
   };

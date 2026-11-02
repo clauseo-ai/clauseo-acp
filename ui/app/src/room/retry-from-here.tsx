@@ -32,7 +32,9 @@ export function RetryFromHere({
       kind="quiet"
       size="small"
       className={
-        shown ? "mt-s1" : "mt-s1 opacity-0 focus-visible:opacity-100 [:hover>&]:opacity-100"
+        shown
+          ? "mt-s1"
+          : "mt-s1 opacity-0 focus-visible:opacity-100 [:hover>&]:opacity-100 [@media(hover:none)]:opacity-100"
       }
       title={mt(
         lang,

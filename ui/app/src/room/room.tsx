@@ -7,10 +7,12 @@
 // lights over the corner lights' place on it, inside the desktop app; elsewhere (tests, the probe, a browser) the
 // buttons log their presses and the lights are painted. Until U12 there is no plan, until a host query no search, and
 // until H5 nothing under a matter's title (the scratch matter's line stands). The wall
-// lists H8's papers (host-next.ts's papers part, which the desktop gives through host-wire.ts). Folded, the rail closes on Escape and on opening a
-// matter or making one, and focus goes back to Matters; Matters carries the court-yellow dot while another matter
-// waits on the lawyer. A link or paper in an answer opens through the host (open.ts, H11), and so does a matter row's
-// Show in Finder.
+// lists H8's papers (host-next.ts's papers part, which the desktop gives through host-wire.ts). Folded, the rail closes
+// on Escape and on opening a matter or making one, and focus goes back to Matters; opening a conversation or starting
+// one closes it too, and the field takes the focus. Matters carries the court-yellow dot while another matter waits on
+// the lawyer. Cmd+N on the Mac, Ctrl+N elsewhere, starts a new conversation in the open matter; until its first
+// question, the reading column's top says what it reads, once the matter's papers are counted. A link or paper in an
+// answer opens through the host (open.ts, H11), and so does a matter row's Show in Finder.
 import {
   lazy,
   Suspense,
@@ -30,6 +32,8 @@ import { RoomToolbar } from "@clauseo/components/clauseo/room-toolbar.tsx";
 import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
+import { th } from "@clauseo/components/lib/words-thread.ts";
+import { Say } from "@clauseo/components/clauseo/say.tsx";
 import { useWords } from "@clauseo/components/lib/words.ts";
 import { MarkdownHostContext, type MarkdownHost } from "@clauseo/components/markdown/host.ts";
 import { PartsRoot } from "@clauseo/components/ui/root.tsx";
@@ -39,6 +43,7 @@ import { createViewStore } from "../store/store.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { Papers, PapersHost } from "./host-next.ts";
+import { planName } from "./agent.ts";
 import { Conversations } from "./conversations.ts";
 import { Matters, type MattersView } from "./matters.ts";
 import { NewMatter } from "./new-matter.tsx";
@@ -188,16 +193,46 @@ function RoomFrame({
   const listed = usePapers(matters.next.papers, open?.matter ?? null);
   const papers = listed?.papers ?? null;
   const answers = useAnswerHost(transport, open?.matter ?? null, listed);
+  const { platform } = useDisplay();
   /** The folded rail closes, and focus goes back to Matters, which opened it. */
   const fold = () => {
     if (!railOpen) return;
     setRailOpen(false);
     railToggle.current?.focus();
   };
+  // New conversation's key, while a matter's conversations are in and no dialog holds the keys; an input method's
+  // composing key is its own
+  const mac = platform === "mac";
+  const canStart =
+    open !== null &&
+    !view.folderMissing &&
+    !newOpen &&
+    talks.matter === open.matter &&
+    talks.phase !== "loading";
+  useEffect(() => {
+    if (!canStart) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229 || e.altKey || e.shiftKey) return;
+      if (e.code !== "KeyN" && e.key.toLowerCase() !== "n") return;
+      if (mac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return;
+      e.preventDefault();
+      conversations.startNew();
+      setRailOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [canStart, mac, conversations]);
+  // the plan the open conversation uses, on the status line: its thread's, or the one a draft would run
+  const openRow = talks.rows.find((r) => r.key === talks.open);
+  const plan =
+    open === null || talks.open === null
+      ? ""
+      : th(w.lang, "Uses your {name} plan", {
+          name: planName(openRow?.agent ?? talks.agent, talks.agents),
+        });
   // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
   // frame's words stand in its place
   const scratch = open?.kind === "scratch";
-  const { platform } = useDisplay();
   // the window's own controls, inside the desktop app only
   const [controls] = useState(() =>
     windowControls !== undefined
@@ -274,6 +309,7 @@ function RoomFrame({
             setNewOpen(true);
           }}
           onMoved={fold}
+          onConversation={() => setRailOpen(false)}
           onEscape={fold}
           newMatterRef={newMatter}
         />
@@ -312,6 +348,19 @@ function RoomFrame({
                 />
               </Suspense>
             )}
+            {/* a new conversation, before its first question: what it reads, once the papers are counted */}
+            {talks.drafting && !scratch && papers !== null && papers.papers.length > 0 && (
+              <p
+                className="mx-auto box-content max-w-measure px-thread-pad pt-s7 pb-s4 text-center text-reply text-primary"
+                data-testid="new-conversation-line"
+              >
+                <Say>
+                  {mt(w.lang, "A new conversation. It reads this matter's {n} papers.", {
+                    n: papers.papers.length,
+                  })}
+                </Say>
+              </p>
+            )}
             {/* one thread's state per conversation: each starts its own; with no matter open, the composer waits */}
             <MarkdownHostContext value={answers}>
               <Work
@@ -322,6 +371,7 @@ function RoomFrame({
                 draftKey={talks.open}
                 conversation={link}
                 choice={choice}
+                plan={plan}
                 focus={talks.focus?.n ?? null}
                 onThread={matters.onThread}
               />

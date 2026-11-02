@@ -68,6 +68,9 @@ const HI = {
   "A new conversation, with a summary of this one and a link back.":
     "एक नई बातचीत, इस बातचीत के सारांश और इस पर लौटने की कड़ी के साथ।",
   "Waiting for '{title}'": "'{title}' की प्रतीक्षा में",
+  // a new conversation before its first message, at the reading column's top
+  "A new conversation. It reads this matter's {n} papers.":
+    "एक नई बातचीत। यह इस मामले के {n} दस्तावेज़ पढ़ती है।",
   // H13: Retry from here on one of the lawyer's questions, the line a retried conversation opens with, and its way
   // back to the first
   "Retry from here": "यहाँ से फिर पूछें",
