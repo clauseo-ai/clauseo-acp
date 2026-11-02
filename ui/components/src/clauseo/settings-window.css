@@ -165,7 +165,9 @@
     gap: var(--s3);
   }
 
-  @variant max-mid {
+  /* the window is the viewport: its side of sections stands at its own 960 px and down to where side and pane still
+     fit in Hindi at text size 20 (breakpoint-side); narrower, the sections make a row over the pane */
+  @variant max-side {
     .set-win {
       grid-template-columns: minmax(0, 1fr);
       grid-template-rows: auto minmax(0, 1fr);

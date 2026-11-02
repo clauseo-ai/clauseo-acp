@@ -12,6 +12,8 @@
   --breakpoint-narrow: 480px;
   --breakpoint-mid: 1000px;
   --breakpoint-wide: 1200px;
+  /* the settings window keeps its side of sections, with their notes, down to here; below it they make a top row */
+  --breakpoint-side: 640px;
 
   /* colour */
   --color-page: var(--page);
