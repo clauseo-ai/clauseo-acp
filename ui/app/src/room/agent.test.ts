@@ -1,7 +1,7 @@
 // agent.ts: the agent a new conversation runs, the plan name a row shows, the matter's plan, and the composer's plan options.
 import { expect, test } from "vitest";
 import type { AgentSummary } from "./host-next.ts";
-import { agentFor, DEFAULT_AGENT, matterPlan, planName, planOptions } from "./agent.ts";
+import { agentFor, DEFAULT_AGENT, knownPlan, matterPlan, planName, planOptions } from "./agent.ts";
 
 // v7 UUID strings: the greater string is the newer thread
 const T1 = "00000000-0000-7000-8000-000000000001";
@@ -86,4 +86,10 @@ test("S4: planOptions offers only agents with a plan to name", () => {
     { value: "codex-acp", label: "ChatGPT" },
   ]);
   expect(planOptions([{ id: "claude-acp", kind: "claude" }, { id: "fake-agent" }])).toEqual([]);
+});
+
+test("knownPlan: a kind's plan, and none for an agent of no kind", () => {
+  expect(knownPlan("claude")).toBe("Claude");
+  expect(knownPlan("work-plan", [{ id: "work-plan", kind: "codex" }])).toBe("ChatGPT");
+  expect(knownPlan("fake-agent", [{ id: "fake-agent" }])).toBeNull();
 });

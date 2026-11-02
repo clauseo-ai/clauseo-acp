@@ -46,6 +46,12 @@ function kindOf(agent: AgentId, agents: readonly AgentSummary[]): AgentKind | un
   return undefined;
 }
 
+/** The plan of an agent's kind, "Claude" or "ChatGPT"; null for an agent of no kind, which has no plan to name. */
+export function knownPlan(agent: AgentId, agents: readonly AgentSummary[] = []): string | null {
+  const kind = kindOf(agent, agents);
+  return kind === undefined ? null : PLAN[kind];
+}
+
 /** The plan a row names for an agent, by its kind: "Claude" or "ChatGPT". An agent of no kind is shown by its id, in
  * English. */
 export function planName(agent: AgentId, agents: readonly AgentSummary[] = []): string {

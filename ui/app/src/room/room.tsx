@@ -43,7 +43,7 @@ import { createViewStore } from "../store/store.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { Papers, PapersHost } from "./host-next.ts";
-import { planName } from "./agent.ts";
+import { knownPlan } from "./agent.ts";
 import { Conversations } from "./conversations.ts";
 import { Matters, type MattersView } from "./matters.ts";
 import { NewMatter } from "./new-matter.tsx";
@@ -213,7 +213,10 @@ function RoomFrame({
     if (!canStart) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229 || e.altKey || e.shiftKey) return;
-      if (e.code !== "KeyN" && e.key.toLowerCase() !== "n") return;
+      // the letter the layout gives (Dvorak's N is N, its Ctrl+B is not); the key's place only where the layout gives no
+      // Latin letter (Devanagari, Cyrillic)
+      const key = e.key.toLowerCase();
+      if (/^[a-z]$/.test(key) ? key !== "n" : e.code !== "KeyN") return;
       if (mac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return;
       e.preventDefault();
       conversations.startNew();
@@ -223,13 +226,13 @@ function RoomFrame({
     return () => document.removeEventListener("keydown", onKey);
   }, [canStart, mac, conversations]);
   // the plan the open conversation uses, on the status line: its thread's, or the one a draft would run
+  // nothing while the matter's list loads (its agent isn't known yet), or for an agent of no kind
   const openRow = talks.rows.find((r) => r.key === talks.open);
-  const plan =
-    open === null || talks.open === null
-      ? ""
-      : th(w.lang, "Uses your {name} plan", {
-          name: planName(openRow?.agent ?? talks.agent, talks.agents),
-        });
+  const planOfOpen =
+    open === null || talks.open === null || talks.phase === "loading"
+      ? null
+      : knownPlan(openRow?.agent ?? talks.agent, talks.agents);
+  const plan = planOfOpen === null ? "" : th(w.lang, "Uses your {name} plan", { name: planOfOpen });
   // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
   // frame's words stand in its place
   const scratch = open?.kind === "scratch";
@@ -348,7 +351,10 @@ function RoomFrame({
                 />
               </Suspense>
             )}
-            {/* a new conversation, before its first question: what it reads, once the papers are counted */}
+            {/* a new conversation, before its first question: what it reads, once the papers are counted. A matter with
+                no conversation yet shows the same line: the design's FirstQuestion (empty.tsx: "Clauseo has read this
+                matter's {n} papers.", and that each answer cites its page) goes here once stage D reads the papers
+                ahead and answers carry citations; until then those are promises the room can't keep */}
             {talks.drafting && !scratch && papers !== null && papers.papers.length > 0 && (
               <p
                 className="mx-auto box-content max-w-measure px-thread-pad pt-s7 pb-s4 text-center text-reply text-primary"
