@@ -216,10 +216,28 @@ function ownCopy(block: string): string {
 }
 
 /**
- * One splitter per answer: its state is the previous split, which the next call extends. Lexing starts
- * again at a block start that is not a paragraph's cut (marked would read the part after one as a block
- * of its own, which it is not), so a long paragraph is lexed whole on every update, as it was before it
- * was cut; its parts that did not change keep their strings.
+ * The block of the last split that the new text changes: the last one whose start, and everything before
+ * it, the new text keeps (the last block when the text only grew). Each earlier start is tried at twice the
+ * distance of the one before, so a change far back costs a few prefix comparisons, not one per block.
+ */
+function changedBlock(text: string, input: string, starts: readonly number[]): number {
+  let block = starts.length - 1;
+  if (block <= 0 || text.startsWith(input)) return Math.max(block, 0);
+  for (let step = 1; block > 0 && !text.startsWith(input.slice(0, starts[block])); step *= 2)
+    block = Math.max(0, block - step);
+  return block;
+}
+
+/**
+ * One splitter per answer: its state is the previous split, which the next call extends. Every block
+ * before the one the text changes in, but the last of them, is kept (when the text grows, every block but
+ * the last two). The text may change before its end, not only grow: capNesting decides a character by what
+ * follows it, so the `=` that ended the last update is text and becomes a capped stand-in once a second
+ * `=` arrives past MAX_SEQUENCES. Splitting the whole answer again then took 12.6 s in JavaScriptCore for
+ * the 540 KB hostile corpus (marked's lexer on the whole text; 0.4 s in V8), one flush every 48 characters
+ * of `"a==b==".repeat(3000)`. Lexing starts again at a block start that is not a paragraph's cut (marked
+ * would read the part after one as a block of its own, which it is not), so a long paragraph is lexed whole
+ * on every update, as it was before it was cut; its parts that did not change keep their strings.
  */
 export function createSplitter(endOf: EndOf): (text: string) => readonly string[] {
   let input = "";
@@ -229,7 +247,7 @@ export function createSplitter(endOf: EndOf): (text: string) => readonly string[
   return (text) => {
     if (text === input && blocks.length > 0) return blocks;
     const grows = text.startsWith(input);
-    let keep = blocks.length > 2 && grows ? blocks.length - 2 : 0;
+    let keep = Math.max(0, changedBlock(text, input, starts) - 1);
     while (keep > 0 && soft[keep]) keep--;
     const from = keep > 0 ? (starts[keep] ?? 0) : 0;
     const found = text.length > 0 ? startsFrom(text, from, endOf) : { at: [], soft: [] };
