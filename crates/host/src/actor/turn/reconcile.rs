@@ -3,13 +3,14 @@
 //! after-turn checkpoint and ends `TurnFailed { thread.interrupted }` (a checkpoint R8 made
 //! whose record the log lost is recorded with the turn's changes, `known.rs`); a turn that never
 //! started stays queued, held behind its own thread; an attached session is detached. A turn
-//! with a `TurnEnded` is never touched, so each repair happens once, with one exception: a
-//! thread whose last step stopped `AtLimit` with no `TurnStoppedAtLimit` for its turn (the read
-//! that was to give its reset time was lost with the restart, or its commit failed) gets one,
-//! with no window or reset time and the reason `PlanWindow`, in a commit of its own. Both are
-//! read from the loaded state (a snapshot keeps its steps and limit cards), and once that event
-//! is logged the card exists, so this too happens once. It runs only at start-up, when no
-//! pending stop of `limits.rs` can exist.
+//! with a `TurnEnded` is never touched, so each repair happens once, with one exception: every
+//! step of the thread that stopped `AtLimit` with no `TurnStoppedAtLimit` for its turn (the
+//! read that was to give its reset time was lost with a crash, or its commit failed) gets one,
+//! with no window or reset time and the reason `PlanWindow`, in a commit of its own. Not only
+//! the last step: a later turn of the thread may have started, and ended, while an earlier
+//! turn's stop still waited. Both are read from the loaded state (a snapshot keeps its steps and
+//! limit cards), and once that event is logged the card exists, so this too happens once. It
+//! runs only at start-up, when no pending stop of `limits.rs` can exist.
 //!
 //! A turn whose end ran but was never logged (it failed twice) freed the writer, so other
 //! threads' turns in the matter may have run, and one may still be open too. The started turns
@@ -99,8 +100,9 @@ pub(super) fn reconcile(actor: &mut Actor, thread: ThreadId) {
     let unstopped = actor
         .loaded(stream)
         .and_then(|loaded| loaded.state.as_thread())
-        .and_then(stop_not_logged);
-    if let Some(turn) = unstopped {
+        .map(stops_not_logged)
+        .unwrap_or_default();
+    for turn in unstopped {
         let stopped = TurnStoppedAtLimit {
             turn,
             window: None,
@@ -157,20 +159,22 @@ fn open_turn(state: &ThreadState) -> Option<(TurnId, bool)> {
     Some((turn, started))
 }
 
-/// The turn of the thread's last step when that step stopped `AtLimit` and the turn has no
-/// `TurnStoppedAtLimit`.
-fn stop_not_logged(state: &ThreadState) -> Option<TurnId> {
-    let mut last = None;
+/// The turns of the thread's steps that stopped `AtLimit` with no `TurnStoppedAtLimit`, in the
+/// order of their steps.
+fn stops_not_logged(state: &ThreadState) -> Vec<TurnId> {
+    let mut stopped = Vec::new();
     let mut cards: BTreeSet<TurnId> = BTreeSet::new();
     for entry in state.entries().values() {
         if let ViewEntry::Step(step) = entry {
-            last = Some((step.turn, step.stop));
+            if step.stop == StopReason::AtLimit && !stopped.contains(&step.turn) {
+                stopped.push(step.turn);
+            }
         } else if let ViewEntry::LimitStop(card) = entry {
             cards.insert(card.turn);
         }
     }
-    let (turn, stop) = last?;
-    (stop == StopReason::AtLimit && !cards.contains(&turn)).then_some(turn)
+    stopped.retain(|turn| !cards.contains(turn));
+    stopped
 }
 
 fn has_pending(state: &ThreadState) -> bool {
