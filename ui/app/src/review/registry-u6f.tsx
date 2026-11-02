@@ -1,7 +1,10 @@
 // U6f's copy review entries (ids U6F-nn: the review's ids take capitals only, status.ts): the agent.* sentences that
-// name Claude, said for the open conversation's plan (words-errors.ts's plannedKey). Each is the real refusal on a
-// send, as U3-err-agent.* shows Claude's, in a thread whose agent is Codex (the ChatGPT plan) or an agent of no kind (a
-// settings file's own id).
+// name Claude, said for the open conversation's agent (words-errors.ts's plannedKey). Each is the real refusal on a
+// send, as U3-err-agent.* shows Claude's, in a thread whose agent is Codex (the ChatGPT plan) or an agent of no kind,
+// named by its settings id. The nameless lines (U6F-09 to U6F-12) show only where no name is known at all, which the
+// room never has today (a thread always names its agent's id), so they render by themselves.
+import type { Lang } from "@clauseo/components/lib/display.ts";
+import { errorWords as sentence } from "@clauseo/components/lib/words-errors.ts";
 import type { AgentId, ErrorCode } from "../transport/protocol.ts";
 import { agentText, step, userMessage } from "../testing/stream-script.ts";
 import type { Entry } from "./entry.ts";
@@ -21,6 +24,13 @@ const refused = (code: ErrorCode, agent: AgentId) => () => (
   />
 );
 
+/** A nameless line, alone: no thread the room opens lacks a name, so it is shown as the sentence the room would say. */
+const nameless = (code: ErrorCode) => (lang: Lang) => (
+  <main lang={lang} className="grid min-h-dvh place-items-center bg-page p-(--s4)">
+    <p className="max-w-[36rem] text-center">{sentence(lang, code, null)}</p>
+  </main>
+);
+
 /** U6f's entries, each id written as it is: an id never moves when an entry is added or taken out. */
 export const U6F: Entry[] = [
   {
@@ -31,9 +41,9 @@ export const U6F: Entry[] = [
   },
   {
     id: "U6F-02",
-    words: errorWords("Clauseo couldn't start this conversation. Your question is kept."),
+    words: errorWords("{name} didn't start. Your question is kept."),
     screen: "room/composer",
-    render: refused("agent.launch_failed", "my-agent"),
+    render: refused("agent.launch_failed", "gemini"),
   },
   {
     id: "U6F-03",
@@ -43,9 +53,9 @@ export const U6F: Entry[] = [
   },
   {
     id: "U6F-04",
-    words: errorWords("Clauseo got a reply it can't read."),
+    words: errorWords("{name} sent something Clauseo can't read."),
     screen: "room/composer",
-    render: refused("agent.protocol_error", "my-agent"),
+    render: refused("agent.protocol_error", "gemini"),
   },
   {
     id: "U6F-05",
@@ -55,9 +65,9 @@ export const U6F: Entry[] = [
   },
   {
     id: "U6F-06",
-    words: errorWords("This conversation needs a sign-in first. Your question is kept."),
+    words: errorWords("Sign in to {name} first. Your question is kept."),
     screen: "room/composer",
-    render: refused("agent.auth_required", "my-agent"),
+    render: refused("agent.auth_required", "gemini"),
   },
   {
     id: "U6F-07",
@@ -67,10 +77,32 @@ export const U6F: Entry[] = [
   },
   {
     id: "U6F-08",
-    words: errorWords(
-      "Clauseo doesn't work with the program this conversation uses, in this version.",
-    ),
+    words: errorWords("This version of {name} doesn't work with Clauseo."),
     screen: "room/composer",
-    render: refused("agent.unsupported_version", "my-agent"),
+    render: refused("agent.unsupported_version", "gemini"),
+  },
+  {
+    id: "U6F-09",
+    words: errorWords("The AI didn't start. Your question is kept."),
+    screen: "room/composer",
+    render: nameless("agent.launch_failed"),
+  },
+  {
+    id: "U6F-10",
+    words: errorWords("The AI sent something Clauseo can't read."),
+    screen: "room/composer",
+    render: nameless("agent.protocol_error"),
+  },
+  {
+    id: "U6F-11",
+    words: errorWords("Sign in to the AI first. Your question is kept."),
+    screen: "room/composer",
+    render: nameless("agent.auth_required"),
+  },
+  {
+    id: "U6F-12",
+    words: errorWords("This version of the AI doesn't work with Clauseo."),
+    screen: "room/composer",
+    render: nameless("agent.unsupported_version"),
   },
 ];
