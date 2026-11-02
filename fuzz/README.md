@@ -56,8 +56,8 @@ cargo fuzz run --fuzz-dir . -O --debug-assertions <target> <file>
 
 `seeds/<target>` holds at most 150 files and 1 MiB per target. They were picked from the corpora of
 earlier fuzzing campaigns: a libFuzzer merge kept the inputs that add coverage, and the ones adding
-the most features stayed. The nightly corpus lives in the Actions cache. The seeds only start it
-when the cache is empty. To refresh a target's seeds, merge a grown corpus into an empty folder
+the most features stayed. The nightly corpus is an artifact of the newest fuzz run on main (see the
+workflow's header). The seeds only start it when there is none. To refresh a target's seeds, merge a grown corpus into an empty folder
 with `-merge=1` and keep the result under the same caps.
 
 ## Cargo.lock
