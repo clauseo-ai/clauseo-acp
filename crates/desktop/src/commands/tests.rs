@@ -46,6 +46,7 @@ fn app(bridge: Bridge) -> (tauri::App<MockRuntime>, WebviewWindow<MockRuntime>) 
     crate::e2e::grant_scoreboard(&app).unwrap();
     app.manage(bridge);
     app.manage(crate::open::AppData(std::env::temp_dir()));
+    app.manage(crate::open::OpenGates::default());
     let window = WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::default())
         .build()
         .unwrap();

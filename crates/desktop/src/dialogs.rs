@@ -7,8 +7,10 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use futures::channel::oneshot;
-use tauri::{AppHandle, Runtime};
-use tauri_plugin_dialog::{DialogExt as _, MessageDialogButtons, MessageDialogKind};
+use tauri::{AppHandle, Manager as _, Runtime};
+use tauri_plugin_dialog::{
+    DialogExt as _, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
+};
 
 /// A boxed future, so the traits stay object safe.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -30,6 +32,45 @@ const CONFIRM_TITLE: &str = "Always allow?";
 const CONFIRM_MESSAGE: &str = "The agent will do actions like this one without asking you again.";
 const CONFIRM_OK: &str = "Always allow";
 const CONFIRM_CANCEL: &str = "Cancel";
+
+/// The buttons of a confirm: `cancel` first, so it is the default and focused button (Return
+/// and Enter on both OSes, Space on Windows) and a stray key never accepts. `ok` second.
+pub(crate) fn cancel_first(ok: &str, cancel: &str) -> MessageDialogButtons {
+    MessageDialogButtons::OkCancelCustom(cancel.to_owned(), ok.to_owned())
+}
+
+/// Whether a confirm drawn with [`cancel_first`] was accepted: only a press of the `ok` button.
+/// Cancel, Escape, closing the dialog and anything else decline.
+pub(crate) fn accepted(result: &MessageDialogResult, ok: &str) -> bool {
+    matches!(result, MessageDialogResult::Custom(label) if label == ok)
+}
+
+/// Draws a native confirm on `app`, over the main window, with [`cancel_first`]'s buttons, and
+/// answers [`accepted`]. A dialog that never answers (the app closing) counts as declined.
+pub(crate) fn confirm<R: Runtime>(
+    app: &AppHandle<R>,
+    kind: MessageDialogKind,
+    title: String,
+    message: String,
+    ok: String,
+    cancel: &str,
+) -> BoxFuture<'static, bool> {
+    let (tx, rx) = oneshot::channel();
+    let mut dialog = app
+        .dialog()
+        .message(message)
+        .title(title)
+        .kind(kind)
+        .buttons(cancel_first(&ok, cancel));
+    if let Some(main) = app.get_webview_window(crate::MAIN_WINDOW) {
+        dialog = dialog.parent(&main);
+    }
+    dialog.show_with_result(move |result| {
+        // The command may have gone; then nobody reads the answer.
+        let _gone = tx.send(accepted(&result, &ok));
+    });
+    Box::pin(async move { rx.await.unwrap_or(false) })
+}
 
 /// The native folder dialog, drawn by Rust.
 pub(crate) struct NativePicker<R: Runtime> {
@@ -76,20 +117,16 @@ impl<R: Runtime> Confirm for NativeConfirm<R> {
         if let Some(answer) = crate::e2e::confirm_always() {
             return Box::pin(async move { answer });
         }
-        let (tx, rx) = oneshot::channel();
-        self.app
-            .dialog()
-            .message(CONFIRM_MESSAGE)
-            .title(CONFIRM_TITLE)
-            .kind(MessageDialogKind::Warning)
-            .buttons(MessageDialogButtons::OkCancelCustom(
-                CONFIRM_OK.to_owned(),
-                CONFIRM_CANCEL.to_owned(),
-            ))
-            .show(move |ok| {
-                let _gone = tx.send(ok);
-            });
-        // A dialog that never answers (the app closing) counts as declined.
-        Box::pin(async move { rx.await.unwrap_or(false) })
+        confirm(
+            &self.app,
+            MessageDialogKind::Warning,
+            CONFIRM_TITLE.to_owned(),
+            CONFIRM_MESSAGE.to_owned(),
+            CONFIRM_OK.to_owned(),
+            CONFIRM_CANCEL,
+        )
     }
 }
+
+#[cfg(test)]
+mod tests;

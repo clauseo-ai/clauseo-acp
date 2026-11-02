@@ -69,6 +69,10 @@ windows = { workspace = true, features = [
   "Win32_UI_WindowsAndMessaging",
 ] }
 
+# open_file's default app for a type on macOS (src/open/mac_app.rs): CFString and CFURL.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-foundation = { workspace = true, features = ["CFString", "CFURL"] }
+
 [dev-dependencies]
 # The TypeScript bindings (src/commands/bindings.rs) are written by a unit test, so tauri-specta,
 # specta and protocol's `specta` feature stay out of the app: the commands carry

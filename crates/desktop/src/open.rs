@@ -6,6 +6,10 @@
 //! matter, never by a path. The host, the confirm and the OS sit behind traits, so tests run
 //! without a window and never open anything.
 
+mod gate;
+mod link;
+#[cfg(target_os = "macos")]
+mod mac_app;
 mod native;
 #[cfg(test)]
 mod tests;
@@ -19,18 +23,18 @@ use serde::Deserialize;
 
 use crate::dialogs::BoxFuture;
 
+pub(crate) use gate::{AFTER_DECLINE, BETWEEN_OPENS, Now, OpenGates, now};
+#[cfg(test)]
+pub(crate) use link::MAX_LINK_BYTES;
+pub(crate) use link::{Destination, Link, check_link};
 pub(crate) use native::{NativeLinkConfirm, NativeOpener};
 pub(crate) use words::LinkWords;
 
-/// The longest link `open_external` takes, in bytes.
-pub(crate) const MAX_LINK_BYTES: usize = 2048;
-
-/// The longest mail address list a mailto link may show in the confirm, in bytes.
-const MAX_MAIL_SHOWN: usize = 254;
-
 /// The file types `open_file` opens, lower case, without the dot: documents, sheets, slides
-/// and images. Nothing that runs code when opened: no programs, scripts, shortcuts, web pages,
-/// or Office files with macros (`docm`, `xlsm`, `pptm`, `dotm`).
+/// and images. Nothing the OS runs itself: no programs, scripts, shortcuts or web pages, and no
+/// Office files with macros by name (`docm`, `xlsm`, `pptm`, `dotm`). A document's own app
+/// runs what its own policy allows (an old `doc` or `xls` can carry macros, an `rtf`
+/// embedded objects).
 pub(crate) const DOCUMENT_TYPES: &[&str] = &[
     "doc", "docx", "dotx", "rtf", "odt", "pdf", "txt", "md", "csv", "xls", "xlsx", "ods", "ppt",
     "pptx", "odp", "png", "jpg", "jpeg", "gif", "heic", "tif", "tiff",
@@ -49,24 +53,6 @@ pub(crate) enum RevealTarget {
     Matter(MatterId),
     /// Clauseo's app data folder: the event store, the version store and the settings.
     AppData,
-}
-
-/// Where a link goes, for the confirm.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Destination {
-    /// An https or http link to this host (with its port when the link names one).
-    Web(String),
-    /// A mailto link to these addresses, as the link wrote them.
-    Mail(String),
-}
-
-/// A link `open_external` may open: the URL to hand the OS, and where it goes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Link {
-    /// The URL as the `url` crate writes it back.
-    pub(crate) url: String,
-    /// Where it goes, as the confirm names it.
-    pub(crate) destination: Destination,
 }
 
 /// The host's side: what a file ref names, and where a matter's folder is.
@@ -89,8 +75,10 @@ pub(crate) trait LinkConfirm: Send + Sync {
 pub(crate) trait Opener: Send + Sync {
     /// Opens `url` in the default browser or mail app.
     fn open_url(&self, url: &str) -> Result<(), HostError>;
-    /// Opens the file `path` with its default app.
-    fn open_path(&self, path: &Path) -> Result<(), HostError>;
+    /// Opens the file `path` with the default app for files of `kind` (its extension, checked,
+    /// lower case): on macOS that app by name, so what opens is a document in it whatever the
+    /// path has become since the check.
+    fn open_path(&self, path: &Path, kind: &str) -> Result<(), HostError>;
     /// Shows `path` selected in its parent folder, in Finder or File Explorer.
     fn reveal(&self, path: &Path) -> Result<(), HostError>;
 }
@@ -100,87 +88,21 @@ fn invalid(message: impl Into<String>) -> HostError {
     HostError::new(ErrorCode::CommandInvalid, message)
 }
 
-/// Checks `text` is a link `open_external` may open: at most [`MAX_LINK_BYTES`], https or http
-/// with a host and no user name or password, or mailto with one or more plain addresses.
-/// Anything else is `command.invalid`.
-pub(crate) fn check_link(text: &str) -> Result<Link, HostError> {
-    if text.len() > MAX_LINK_BYTES {
-        return Err(invalid(format!(
-            "a link of {} bytes is over the {MAX_LINK_BYTES} byte limit",
-            text.len()
-        )));
-    }
-    let url = url::Url::parse(text).map_err(|error| invalid(format!("not a link: {error}")))?;
-    let destination = match url.scheme() {
-        "https" | "http" => Destination::Web(web_host(&url)?),
-        "mailto" => Destination::Mail(mail_addresses(&url)?),
-        other => {
-            return Err(invalid(format!(
-                "links of the scheme {other} do not open; only https, http and mailto do"
-            )));
-        }
-    };
-    Ok(Link {
-        url: url.as_str().to_owned(),
-        destination,
-    })
-}
-
-/// The host an https or http link goes to, as ASCII (an international name in its `xn--`
-/// form, so the confirm cannot show a look-alike), with the port when the link names one.
-fn web_host(url: &url::Url) -> Result<String, HostError> {
-    if !url.username().is_empty() || url.password().is_some() {
-        return Err(invalid("a link with a user name or password does not open"));
-    }
-    let host = url
-        .host_str()
-        .filter(|host| !host.is_empty())
-        .ok_or_else(|| invalid("a web link without a host does not open"))?;
-    Ok(match url.port() {
-        Some(port) => format!("{host}:{port}"),
-        None => host.to_owned(),
-    })
-}
-
-/// The addresses a mailto link writes to, decoded. Only printable ASCII without spaces, at most
-/// [`MAX_MAIL_SHOWN`] bytes, and at least one `@`: the confirm shows them, so nothing that
-/// could hide or reorder text (controls, bidirectional marks, look-alike letters) gets there.
-fn mail_addresses(url: &url::Url) -> Result<String, HostError> {
-    let decoded = percent_decode(url.path())
-        .ok_or_else(|| invalid("a mailto link whose address does not decode does not open"))?;
-    let plain = decoded.bytes().all(|byte| byte.is_ascii_graphic());
-    if decoded.is_empty() || decoded.len() > MAX_MAIL_SHOWN || !plain || !decoded.contains('@') {
-        return Err(invalid(
-            "a mailto link opens only to plain addresses of at most 254 characters",
-        ));
-    }
-    Ok(decoded)
-}
-
-/// `text` with each `%XX` decoded, when the result is UTF-8.
-fn percent_decode(text: &str) -> Option<String> {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut at = 0;
-    while let Some(&byte) = bytes.get(at) {
-        if byte == b'%' {
-            let hex = bytes.get(at + 1..at + 3)?;
-            let hex = std::str::from_utf8(hex).ok()?;
-            out.push(u8::from_str_radix(hex, 16).ok()?);
-            at += 3;
-        } else {
-            out.push(byte);
-            at += 1;
-        }
-    }
-    String::from_utf8(out).ok()
+/// A document `check_document` let through: its resolved path and its type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Document {
+    /// The path with symlinks and `..` followed: what opens.
+    pub(crate) path: PathBuf,
+    /// Its extension, lower case: one of [`DOCUMENT_TYPES`].
+    pub(crate) kind: String,
 }
 
 /// Checks `path` is a document `open_file` may open: it and `folder` resolve (symlinks and `..`
-/// followed), it lies in `folder`, it is a file (not a folder, so not a macOS app bundle), and
-/// its type is one of [`DOCUMENT_TYPES`]. Answers the resolved path, which is what opens.
-/// `matter.folder_missing` when the folder does not resolve; `command.invalid` otherwise.
-pub(crate) fn check_document(path: &Path, folder: &Path) -> Result<PathBuf, HostError> {
+/// followed), it lies in `folder`, it is a file (not a folder, so not a macOS app bundle), it
+/// is not marked as a program (no execute bit, on macOS and Linux), and its type is one of
+/// [`DOCUMENT_TYPES`]. `matter.folder_missing` when the folder does not resolve;
+/// `command.invalid` otherwise.
+pub(crate) fn check_document(path: &Path, folder: &Path) -> Result<Document, HostError> {
     let folder = dunce::canonicalize(folder).map_err(|error| {
         HostError::new(
             ErrorCode::MatterFolderMissing,
@@ -192,11 +114,19 @@ pub(crate) fn check_document(path: &Path, folder: &Path) -> Result<PathBuf, Host
     if !path.starts_with(&folder) {
         return Err(invalid("the file is not inside its matter's folder"));
     }
-    let is_file = std::fs::metadata(&path)
-        .map_err(|error| invalid(format!("the file does not read: {error}")))?
-        .is_file();
-    if !is_file {
+    let metadata = std::fs::metadata(&path)
+        .map_err(|error| invalid(format!("the file does not read: {error}")))?;
+    if !metadata.is_file() {
         return Err(invalid("only files open, not folders"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        if metadata.permissions().mode() & 0o111 != 0 {
+            return Err(invalid(
+                "a file marked as a program does not open from Clauseo",
+            ));
+        }
     }
     let kind = path
         .extension()
@@ -208,7 +138,7 @@ pub(crate) fn check_document(path: &Path, folder: &Path) -> Result<PathBuf, Host
             "files of the type \"{kind}\" do not open from Clauseo"
         )));
     }
-    Ok(path)
+    Ok(Document { path, kind })
 }
 
 /// Opens an https `url` in the default browser with no confirm, for Rust's own callers only
@@ -230,19 +160,23 @@ pub(crate) fn open_url_unconfirmed(opener: &dyn Opener, url: &str) -> Result<(),
     opener.open_url(&link.url)
 }
 
-/// `open_external`: checks `url` (`check_link`), asks the lawyer in `language`, and opens it.
-/// Declined, nothing opens and the call fails with `transport.unauthorized`.
+/// `open_external` for a checked `link`: asks the lawyer in `language`, through `gate` (one
+/// confirm at a time, none for [`AFTER_DECLINE`] after a decline: `command.conflict`), and
+/// opens it. Declined, nothing opens and the call fails with `transport.unauthorized`.
 pub(crate) async fn open_external(
     confirm: &dyn LinkConfirm,
     opener: &dyn Opener,
+    gate: &gate::Gate,
+    now: Now<'_>,
     language: Language,
-    url: &str,
+    link: &Link,
 ) -> Result<(), HostError> {
-    let link = check_link(url)?;
+    let pass = gate.enter(now())?;
     if !confirm
         .confirm_link(LinkWords::new(&link.destination, language))
         .await
     {
+        pass.quiet_for(now(), AFTER_DECLINE);
         return Err(HostError::new(
             ErrorCode::TransportUnauthorized,
             "the lawyer declined to open the link",
@@ -251,15 +185,21 @@ pub(crate) async fn open_external(
     opener.open_url(&link.url)
 }
 
-/// `open_file`: asks the host what `file` names, checks it (`check_document`) and opens it.
+/// `open_file`: through `gate` (one at a time, at most one per [`BETWEEN_OPENS`]:
+/// `command.conflict`), asks the host what `file` names, checks it (`check_document`) and
+/// opens it with the default app for its type.
 pub(crate) async fn open_file(
     locate: &dyn Locate,
     opener: &dyn Opener,
+    gate: &gate::Gate,
+    now: Now<'_>,
     file: FileRefId,
 ) -> Result<(), HostError> {
+    let pass = gate.enter(now())?;
+    pass.quiet_for(now(), BETWEEN_OPENS);
     let located = locate.locate_file(file).await?;
-    let path = check_document(&located.path, &located.folder)?;
-    opener.open_path(&path)
+    let document = check_document(&located.path, &located.folder)?;
+    opener.open_path(&document.path, &document.kind)
 }
 
 /// `reveal`: shows the matter's folder, or `app_data`, selected in its parent folder.

@@ -64,15 +64,21 @@ converted document. From there they can call any IPC command the page can reach.
   matter's folder or the app data folder ([0026](decisions/0026-open-and-reveal.md))
 - `built` for "always allow", the folder picker and external links: escalations only through
   native dialogs drawn by Rust, never a webview confirm; `designed` for the rest
-- `built`: Links go through one `open_external`: https, http with a host and no credentials, or
-  mailto with plain addresses, after a native confirm that names the host in ASCII (`xn--` for an
-  international name); declined is `transport.unauthorized` ([0026](decisions/0026-open-and-reveal.md))
+- `built`: Links go through one `open_external`: https or http to a public host (no credentials,
+  no localhost, loopback, private or link-local address, no overlong name), or mailto to plain
+  `local@domain` addresses with at most a subject and a body, after a native confirm that names the
+  host in ASCII (`xn--` for an international name) or the addresses. Cancel is the default button,
+  one confirm shows at a time and none for a second after a decline; declined is
+  `transport.unauthorized` ([0026](decisions/0026-open-and-reveal.md))
 - `built`: `open_file` opens only a file the host issued a ref for, inside the folder of the matter
-  that owns the ref (checked by the host and again by the desktop on the resolved path), a regular
-  file of a listed document type, never a program, script, shortcut, web page, macro file or app
-  bundle; `reveal` shows a folder selected in its parent and never launches it. Known gap: a
-  process that can write the matter folder can swap a folder on the path for a link between the
-  check and the open (the agent, until the sandbox) ([0026](decisions/0026-open-and-reveal.md))
+  that owns it (checked by the host and again by the desktop on the resolved path), a regular file
+  with no execute bit, of a listed document type, at most one a second; on macOS in the type's
+  default app, named, so a file swapped for a link opens as a document, never as a program. `reveal`
+  shows a folder selected in its parent and never launches it. Known gap: a process that can write
+  the matter folder (the agent, until the sandbox) can swap the file or a folder on its path for a
+  link between the check and the open, and so open a document of a listed type outside the matter;
+  and script in the page can open the matter's documents without a click
+  ([0026](decisions/0026-open-and-reveal.md))
 - `designed`: The webview never navigates (no navigation guard yet; every link click is cancelled
   in the renderer)
 - `designed`: Markdown renders without raw HTML; DOMPurify only on the few HTML-string paths

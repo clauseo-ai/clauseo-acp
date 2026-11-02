@@ -92,6 +92,24 @@ fn a_file_outside_its_matters_folder_is_refused() {
     host.shutdown();
 }
 
+/// A link inside the matter's folder to a file outside it: the host's own check refuses it,
+/// before the desktop's.
+#[cfg(unix)]
+#[test]
+fn a_link_out_of_the_matters_folder_is_refused() {
+    let dir = Dir::new("locate_link_out", &[]);
+    let host = dir.start(0);
+    let folder = dir.folder("acme", &[("brief.txt", "b")]);
+    let elsewhere = dir.folder("elsewhere", &[("x.docx", "x")]);
+    host.create_matter("acme", &folder);
+    let link = folder.join("linked.docx");
+    write::symlink(&elsewhere.join("x.docx"), &link);
+    let linked = register(&host, link);
+    let error = locate(&host, linked).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::CommandInvalid, "{error}");
+    host.shutdown();
+}
+
 #[test]
 fn a_ref_is_checked_again_when_asked() {
     let dir = Dir::new("locate_moved", &[]);

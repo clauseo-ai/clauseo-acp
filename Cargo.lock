@@ -833,6 +833,7 @@ dependencies = [
  "dunce",
  "futures",
  "memchr",
+ "objc2-core-foundation",
  "serde",
  "serde_json",
  "specta",

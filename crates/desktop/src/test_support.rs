@@ -106,6 +106,18 @@ impl Scratch {
         path
     }
 
+    /// Marks the file `rel` under the scratch folder as a program (mode 0755).
+    #[cfg(unix)]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test set-up writes its scratch folder; the desktop crate has no write module"
+    )]
+    pub(crate) fn executable(&self, rel: &str) {
+        use std::os::unix::fs::PermissionsExt as _;
+        let path = self.root.join(rel);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
     /// Makes `rel` under the scratch folder a symbolic link to `target`, and answers its path.
     #[cfg(unix)]
     #[expect(
