@@ -26,9 +26,10 @@
 //!   256 KB unacknowledged per window; a 5 s watchdog that fires once per stall.
 //!   `docs/decisions/0012-desktop-bridge.md` records the commands, the capability and the message
 //!   format. Never Tauri events. Opening a window's channel follows the limits on it
-//!   (`HostHandle::subscribe_limits`), counted and restarted like the window's other messages.
-//! - A window's native focus dispatches `RefreshLimits { agent: None, why: Shown }` from Rust;
-//!   the host throttles it.
+//!   (`HostHandle::subscribe_limits`), counted and restarted like the window's other messages;
+//!   a restart sends the current view only, never the account changes it missed.
+//! - The `main` window's native focus dispatches `RefreshLimits { agent: None, why: Shown }`
+//!   from Rust; the host throttles it.
 //! - The `main` window's scripts carry `app.security.csp` like its page, the colouring worker's
 //!   included: Tauri sends the header with `.html` only (`csp.rs`).
 //! - No command takes a path: folders come from the native dialog drawn in Rust (`dialogs.rs`),
@@ -159,11 +160,8 @@ pub fn run() -> tauri::Result<()> {
             #[cfg(feature = "marks")]
             marks::marks_finish,
         ])
-        .on_window_event(|window, event| {
-            if let WindowEvent::Focused(true) = event {
-                refresh_limits_on_focus(window.app_handle());
-            }
-        })
+        // The task is short and bounded (one host command), like the bridge's others.
+        .on_window_event(|window, event| drop(on_window_event(window, event)))
         .setup(|app| {
             // The scoreboard commands' capabilities, in the e2e and marks builds only.
             #[cfg(feature = "e2e")]
@@ -302,19 +300,24 @@ fn open_main_window(app: &App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// A window got focus: the bridge asks the host to read the limits older than 5 minutes
-/// (`Bridge::shown`), in a task, so the event loop never waits on the host. Focus lost does
-/// nothing. A failed dispatch is logged and dropped: the next focus asks again.
-fn refresh_limits_on_focus<R: Runtime>(app: &AppHandle<R>) {
-    let app = app.clone();
-    drop(tauri::async_runtime::spawn(async move {
-        let Some(bridge) = app.try_state::<Bridge>() else {
-            return;
-        };
-        if let Err(error) = bridge.shown().await {
-            tracing::warn!(%error, "a window's focus did not refresh the limits");
+/// A window event: the `main` window's focus, the only window with a channel and so the only
+/// one showing limits, asks the host to read the limits older than 5 minutes (`Bridge::shown`),
+/// in a task, so the event loop never waits on the host. Focus lost does nothing. Returns the
+/// task, for tests. A failed dispatch is dropped: the desktop has no log yet, and the next focus
+/// asks again.
+fn on_window_event<R: Runtime>(
+    window: &tauri::Window<R>,
+    event: &WindowEvent,
+) -> Option<tauri::async_runtime::JoinHandle<()>> {
+    if window.label() != MAIN_WINDOW || !matches!(event, WindowEvent::Focused(true)) {
+        return None;
+    }
+    let app = window.app_handle().clone();
+    Some(tauri::async_runtime::spawn(async move {
+        if let Some(bridge) = app.try_state::<Bridge>() {
+            let _dropped = bridge.shown().await;
         }
-    }));
+    }))
 }
 
 /// Brings the first instance's window forward when the app is launched again.

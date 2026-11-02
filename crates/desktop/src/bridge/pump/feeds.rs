@@ -9,7 +9,9 @@
 //!   needs their current lists, unless the host makes a subscription's first frame `all: true`.
 //! - The limits (`HostHandle::subscribe_limits`), which `open_stream` follows. The host starts
 //!   every limits subscription with the current `limits_view_changed`, so a restart needs no
-//!   read and nothing is replayed.
+//!   read and nothing is replayed. After a pause or a watchdog renewal the window so gets only
+//!   the current view, never the `account_limits_changed` it missed: the view must carry
+//!   everything the window shows of the limits.
 //!
 //! The host refuses either only once it has stopped, so a failed restart is not retried: the
 //! window stops following the feed.

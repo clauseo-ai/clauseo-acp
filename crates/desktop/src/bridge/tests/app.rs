@@ -146,3 +146,24 @@ fn a_watchdog_fire_resubscribes_and_sends_the_settings_then() {
     block_on(bridge.dispatch(set_theme(Theme::Light))).unwrap();
     assert_eq!(settings(messages.next_event()).ui.theme, Theme::Light);
 }
+
+/// A reload (a second `open_stream`) drops the old window's limits pump, so its host
+/// subscription goes at once; the new window follows the limits from its own first view.
+#[test]
+fn a_reload_drops_the_limits_feed() {
+    let scratch = Scratch::new("limits-reload", &[]);
+    let host = scratch.start(Vec::new());
+    let bridge = host.bridge();
+    let old = open(&bridge, MAIN);
+    let dropped = pump::feed_dropped(&bridge.window(MAIN).unwrap(), Feed::Limits).unwrap();
+    // `open` checks the new window's first message is the view.
+    let _new = open(&bridge, MAIN);
+    // The pump never sees another event, so only the abort can end it.
+    assert_eq!(
+        dropped.recv_timeout(Duration::from_secs(20)),
+        Err(RecvTimeoutError::Disconnected),
+        "the old window's limits pump outlived the reload"
+    );
+    assert_eq!(old.limits_received(), 1);
+    assert_eq!(old.drain(), Vec::<String>::new());
+}

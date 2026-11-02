@@ -1,5 +1,5 @@
-//! The limits on each window's channel (`open_stream` follows them), and the refresh a window's
-//! focus asks for (`Bridge::shown`). A scripted reader stands in for the limits readers: it
+//! The limits on each window's channel (`open_stream` follows them), and the refresh the main
+//! window's focus asks for (`on_window_event` in `lib.rs`, then `Bridge::shown`). A scripted reader stands in for the limits readers: it
 //! records each read and answers only when the test says, so no reader process starts.
 
 use std::collections::VecDeque;
@@ -12,6 +12,8 @@ use clauseo_host::ManualClock;
 use clauseo_limits::{ReadFailure, ReadLimits, ReadOutcome};
 use clauseo_protocol::{AgentKind, LimitsView, Timestamp};
 use futures::channel::oneshot;
+use tauri::test::{MockRuntime, mock_builder};
+use tauri::{Manager as _, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 use super::*;
 use crate::test_support::{Messages, Running};
@@ -178,4 +180,44 @@ fn a_focus_refresh_reads_limits_older_than_five_minutes() {
         2,
         "a focus 5 minutes after the last read reads"
     );
+}
+
+/// The app's window-event handler, on the mock runtime: only the `main` window's
+/// `Focused(true)` dispatches the refresh, and it reads once. Focus lost, or another window's
+/// focus, starts no task.
+#[test]
+fn only_the_main_window_s_focus_dispatches_a_shown_refresh() {
+    let scratch = Scratch::with_limits("limits-focus-event");
+    let (host, reads, clock) = start(&scratch);
+    let bridge = host.bridge();
+    let messages = open(&bridge, MAIN);
+    reads.answer(ReadOutcome::SignedOut);
+    let _changed = next_view(&messages);
+    let app = mock_builder()
+        .build(crate::context::<MockRuntime>())
+        .unwrap();
+    app.manage(bridge);
+    let window = |label: &str| {
+        WebviewWindowBuilder::new(&app, label, WebviewUrl::default())
+            .build()
+            .unwrap()
+    };
+    let (main, other) = (window(crate::MAIN_WINDOW), window("other"));
+    let focus = |window: &WebviewWindow<MockRuntime>, focused: bool| {
+        crate::on_window_event(&window.as_ref().window(), &WindowEvent::Focused(focused))
+    };
+    clock.advance(SHOWN_AFTER);
+
+    assert!(
+        focus(&main, false).is_none(),
+        "focus lost dispatches nothing"
+    );
+    assert!(
+        focus(&other, true).is_none(),
+        "another window dispatches nothing"
+    );
+    let task = focus(&main, true).expect("the main window's focus dispatches");
+    block_on(task).unwrap();
+    // The host starts the read as it takes the command, so the count is final once it answers.
+    assert_eq!(reads.count(), 2, "one read for one focus");
 }
