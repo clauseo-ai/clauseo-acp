@@ -818,6 +818,41 @@
     "by": "Rohan",
     "note": "Rohan, on the review page: a design string in place (built from U4 f96fdf40)"
   },
+  "U8-01": {
+    "en": "Version history is kept on this computer.",
+    "hi": "संस्करणों का इतिहास इसी कंप्यूटर पर रहता है।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U8-05": {
+    "en": "Undo the restore",
+    "hi": "पुनर्स्थापन पूर्ववत करें",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U8-06": {
+    "en": "No changes since then.",
+    "hi": "तब से कोई बदलाव नहीं।",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U8-07": {
+    "en": "Changed since {time} on {date}",
+    "hi": "{date} को {time} बजे के बाद बदला गया",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
+  "U8-09": {
+    "en": "As it was at {time} on {date}",
+    "hi": "जैसा {date} को {time} बजे था",
+    "status": "approved",
+    "at": "2026-11-02",
+    "by": "design"
+  },
   "U10-01": {
     "en": "The answer stopped at {time}. Your question and the answer so far are kept.",
     "hi": "उत्तर {time} बजे रुक गया। आपका प्रश्न और अब तक का उत्तर रखे गए हैं।",

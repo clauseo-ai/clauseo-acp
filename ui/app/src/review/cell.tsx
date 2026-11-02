@@ -9,7 +9,8 @@ export function Cell({ id, lang }: { id: string; lang: Lang }) {
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (entry === undefined || root.current === null) return;
-    const el = root.current;
+    // the whole frame's body, not the cell alone: a dialog stands in a portal outside the cell
+    const el = root.current.ownerDocument.body;
     const text = entry.words.text(lang);
     // the state fills in as its scripted host answers; mark again on each change of content (marks are attributes,
     // which this doesn't watch, so marking never wakes it)

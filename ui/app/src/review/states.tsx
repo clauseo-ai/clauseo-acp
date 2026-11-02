@@ -86,6 +86,40 @@ export function RoomPressing({ host, press }: { host: () => FakeTransport; press
   );
 }
 
+/** The room inside its view store, and the controls `clicks` names (CSS selectors, in order), each pressed once it
+ * shows and isn't waiting: for a state some presses in, such as Versions open, a version chosen and its Restore. The
+ * selectors read the whole document, as a dialog stands outside the room. */
+export function RoomClicking({
+  host,
+  clicks,
+}: {
+  host: () => FakeTransport;
+  clicks: readonly string[];
+}) {
+  // how far along, kept across Strict Mode's second run, so no control is pressed twice
+  const done = useRef(0);
+  useEffect(() => {
+    const tap = () => {
+      const selector = clicks[done.current];
+      if (selector === undefined) return;
+      const target = document.querySelector<HTMLElement>(selector);
+      if (target === null || target.getAttribute("aria-disabled") === "true") return;
+      done.current += 1;
+      target.click();
+    };
+    // a tick as well as each change: a control can show before what it acts on has arrived
+    const tick = setInterval(tap, 100);
+    const watch = new MutationObserver(tap);
+    watch.observe(document.body, { subtree: true, childList: true });
+    tap();
+    return () => {
+      clearInterval(tick);
+      watch.disconnect();
+    };
+  }, [clicks]);
+  return <RoomOver host={host} />;
+}
+
 /** The room over `host`, then `steps` taken in order as the lawyer would, each once the last has settled. */
 export function RoomAfter({ host, steps }: { host: () => FakeTransport; steps: readonly Step[] }) {
   const [transport] = useState(host);
