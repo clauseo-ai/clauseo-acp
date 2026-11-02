@@ -201,8 +201,7 @@ export function VersionsCentre({
         return;
       if (!keyIsMine(room, t)) return;
       e.preventDefault();
-      if (onAway !== null && t instanceof Element && t.closest('[data-testid="versions"]') !== null)
-        onAway();
+      if (onAway !== null && t instanceof Element && t.closest(".ver-panel") !== null) onAway();
       else c.look(null);
     };
     document.addEventListener("keydown", onKey);

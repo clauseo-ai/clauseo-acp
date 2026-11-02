@@ -41,6 +41,23 @@ export async function pageBack(
   return older;
 }
 
+/** What Versions reads of a conversation's stream, as one string: its steps, each by id with whether it is undone,
+ * kept as a version and how many files it changed, and the markers of its undone steps. Streamed text, tool calls and
+ * the rest of the conversation change none of it, so they make no new snapshot. */
+export function stepsSig(view: StreamView | undefined): string {
+  if (view === undefined) return "";
+  let out = String(view.epoch);
+  for (const id of view.ids) {
+    if (id.startsWith("step:")) {
+      const s = view.entries.get(id)?.step;
+      out += `|${id}:${s?.undone}:${s?.checkpoint_after}:${s?.files.length}`;
+    } else if (id.startsWith("marker:") && view.entries.get(id)?.marker?.kind.step_undone) {
+      out += `|${id}`;
+    }
+  }
+  return out;
+}
+
 /** The newest step of a held conversation with files and no version after it. */
 export function unsavedOf(store: ViewStore, threads: readonly ThreadSummary[]): Unsaved | null {
   let found: { order: number; u: Unsaved } | null = null;

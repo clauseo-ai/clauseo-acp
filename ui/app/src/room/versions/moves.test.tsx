@@ -2,12 +2,14 @@
 // What a move of the matter does to what Versions shows: a newest version picked at now is looked back at once a newer
 // one lands; the undo dialog keeps each file changed since, unless the lawyer chose for it; the comparison is asked
 // for again; a newest turn's step that came a flush late takes the toolbar's dialog; a step undone in a conversation
-// the room holds counts; and the answers that can't be read, or that come after Cancel, say so or stay quiet.
+// the room holds counts, while its streamed text makes no new snapshot; and the answers that can't be read, or that
+// come after Cancel, say so or stay quiet.
 import { errorWords } from "@clauseo/components/lib/words-errors.ts";
 import { act } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { STREAM, THREAD, TURN, upsert, uuid } from "../../testing/stream-script.ts";
+import { agentText, STREAM, THREAD, TURN, upsert, uuid } from "../../testing/stream-script.ts";
 import type { FileChange, RestorePreview, ViewEntry } from "../../transport/protocol.ts";
+import { VersionsController } from "./controller.ts";
 import {
   answering,
   dialog,
@@ -185,4 +187,31 @@ test("Cancel while a restore is on its way: Word refusing it afterwards opens no
   await act(async () => refuse({ code: "matter.file_locked", message: "held", retryable: true }));
   await h.settle();
   expect(dialog()).toBeNull();
+});
+
+test("streamed text with Versions open makes no new snapshot; a new step, and a step becoming undone, each make one", async () => {
+  // the controller Versions opens with, caught as it starts (the spy keeps start's own work)
+  const caught = vi.spyOn(VersionsController.prototype, "start");
+  h = await mountVersions(VERSIONS, STEPS);
+  await h.openVersions();
+  const started = caught.mock.contexts as VersionsController[];
+  caught.mockRestore();
+  expect(started).toHaveLength(1);
+  let published = 0;
+  started[0]?.subscribe(() => {
+    published += 1;
+  });
+  // an answer streams in the conversation: its text grows, frame by frame
+  await h.deliver(STREAM, [upsert(agentText(20, 1, "Draft"))]);
+  await h.deliver(STREAM, [upsert(agentText(20, 1, "Draft reply to the bank"))]);
+  expect(published).toBe(0);
+  // the turn ends with a step
+  await h.deliver(STREAM, [upsert(stepEntry(30, { turn: LATER, files: [file("memo.docx")] }))]);
+  expect(published).toBeGreaterThan(0);
+  published = 0;
+  // an older step is undone
+  await h.deliver(STREAM, [
+    upsert(stepEntry(5, { files: [file("brief.txt")], checkpoint_after: "cp2", undone: true })),
+  ]);
+  expect(published).toBeGreaterThan(0);
 });
