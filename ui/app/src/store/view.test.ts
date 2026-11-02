@@ -142,6 +142,17 @@ describe("applyBatch", () => {
   });
 });
 
+test("the header helper carries the commands it is given, and none by default", () => {
+  // the probe's COMMANDS (room/probe-main.tsx) is not importable here, as that module mounts the room; this is the same shape
+  const commands = [
+    { name: "review", description: "Review the open document" },
+    { name: "research", description: "Research a point of law", input_hint: "the question" },
+  ];
+  expect(header("idle", commands).header?.commands).toEqual(commands);
+  expect(header("idle").header?.commands).toEqual([]);
+  expect(header().header?.commands).toEqual([]);
+});
+
 test("entry ids and streams keep protocol's text forms", () => {
   expect(streamOf("t1")).toBe("thread:t1");
   const entry: ViewEntry = toolCall(1, 3, "pending");
