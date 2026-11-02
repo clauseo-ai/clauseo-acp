@@ -1,0 +1,10 @@
+{"scenario":"word-one-docx","description":"One turn that edits Petition.docx alone, with a tool_call naming it. The test seeds Petition.docx with 'Petition draft' first; the plain bytes stand for a Word document, since the app only looks at the name. Undo of the turn is refused while Word holds Petition.docx.","on_stdin_close":"exit"}
+{"note":"The handshake of common/handshake.jsonl, inline: a scenario read from a path includes from the common folder beside it, and this folder has none.","expect":{"method":"initialize","as":"init","params":{"protocolVersion":1}}}
+{"respond":{"to":"init","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[],"agentInfo":{"name":"fake_agent","version":"0.0.0"}}}}
+{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"new","result":{"sessionId":"sess-1"}}}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"write_file":{"path":"Petition.docx","content":"Petition final\n"}}
+{"update":{"update":{"sessionUpdate":"tool_call","toolCallId":"t1-edit-petition","title":"Edit Petition.docx","name":"Edit","kind":"edit","status":"completed","content":[{"type":"diff","path":"{{cwd}}/Petition.docx","oldText":"Petition draft\n","newText":"Petition final\n"}],"locations":[{"path":"{{cwd}}/Petition.docx"}]}}}
+{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Edited the petition."}}}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
