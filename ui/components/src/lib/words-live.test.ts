@@ -82,10 +82,12 @@ test("every error code has a sentence with Hindi, and none says agent", () => {
   const codes = Object.keys(ERROR_WORDS) as ErrorCode[];
   expect(codes.length).toBeGreaterThan(30);
   for (const c of codes) sound(errorWords("en", c), errorWords("hi", c));
-  // and the sentences a thread's plan picks (the agent.* codes', for ChatGPT and for an agent of no kind)
+  // and the sentences a thread's agent picks (the agent.* codes'): ChatGPT's, a named agent's with a sample name, so
+  // our own words around the slot are checked (a settings id itself is the lawyer's label, shown as written), and the
+  // nameless one
   for (const c of PLANNED_CODES)
-    for (const plan of ["ChatGPT", null])
-      sound(errorWords("en", c, plan), errorWords("hi", c, plan));
+    for (const agent of [CODEX, named("Gemini"), named(null)])
+      sound(errorWords("en", c, agent), errorWords("hi", c, agent));
 });
 
 test("a stopped Claude and an interrupted thread read as the thread's own stop, with its one Hindi", () => {
@@ -95,6 +97,11 @@ test("a stopped Claude and an interrupted thread read as the thread's own stop, 
     expect(errorWords("hi", c)).toBe(th("hi", stopped));
   }
 });
+
+/** A thread's agent as errorWords takes it. */
+const CODEX = { kind: "codex", name: "codex-acp" } as const;
+const CLAUDE = { kind: "claude", name: "claude-acp" } as const;
+const named = (name: string | null) => ({ kind: undefined, name });
 
 // [code, ChatGPT's English and Hindi, a named agent's (gemini) English and Hindi, the nameless English and Hindi]
 const PLANNED_LINES = [
@@ -139,16 +146,19 @@ const PLANNED_LINES = [
 test.each(PLANNED_LINES)(
   "%s names the thread's agent: ChatGPT's line, a named agent's, the nameless one, Claude's otherwise",
   (code, en, hi, namedEn, namedHi, namelessEn, namelessHi) => {
-    expect(errorWords("en", code, "ChatGPT")).toBe(en);
-    expect(errorWords("hi", code, "ChatGPT")).toBe(hi);
-    expect(errorWords("en", code, "gemini")).toBe(namedEn);
-    expect(errorWords("hi", code, "gemini")).toBe(namedHi);
+    expect(errorWords("en", code, CODEX)).toBe(en);
+    expect(errorWords("hi", code, CODEX)).toBe(hi);
+    expect(errorWords("en", code, named("gemini"))).toBe(namedEn);
+    expect(errorWords("hi", code, named("gemini"))).toBe(namedHi);
     for (const none of [null, "", "  "]) {
-      expect(errorWords("en", code, none)).toBe(namelessEn);
-      expect(errorWords("hi", code, none)).toBe(namelessHi);
+      expect(errorWords("en", code, named(none))).toBe(namelessEn);
+      expect(errorWords("hi", code, named(none))).toBe(namelessHi);
     }
+    // the kind picks the line, never the name: an agent of no kind whose id reads like a plan is named by it
+    expect(errorWords("en", code, named("ChatGPT"))).toBe(namedEn.replace("gemini", "ChatGPT"));
+    expect(errorWords("en", code, named("Claude"))).toBe(namedEn.replace("gemini", "Claude"));
     // a Claude thread, or a caller that doesn't know the thread, keeps the approved line
-    for (const agent of ["Claude", undefined]) {
+    for (const agent of [CLAUDE, undefined]) {
       expect(errorWords("en", code, agent)).toBe(ERROR_WORDS[code]);
       expect(errorWords("hi", code, agent)).toBe(errorWords("hi", code));
       expect(plannedKey(code, agent).key).toBe(ERROR_WORDS[code]);
@@ -158,10 +168,14 @@ test.each(PLANNED_LINES)(
 );
 
 test("an agent's name fills no other code", () => {
-  expect(errorWords("en", "store.io", "ChatGPT")).toBe(errorWords("en", "store.io"));
-  expect(errorWords("en", "store.io", "gemini")).toBe(errorWords("en", "store.io"));
-  expect(errorWords("en", "thread.interrupted", "gemini")).toBe(
+  expect(errorWords("en", "store.io", CODEX)).toBe(errorWords("en", "store.io"));
+  expect(errorWords("en", "store.io", named("gemini"))).toBe(errorWords("en", "store.io"));
+  expect(errorWords("en", "thread.interrupted", named("gemini"))).toBe(
     errorWords("en", "thread.interrupted"),
+  );
+  // a settings id is shown as the lawyer wrote it, even one the words' own rules would ban
+  expect(errorWords("en", "agent.launch_failed", named("my-agent"))).toBe(
+    "my-agent didn't start. Your question is kept.",
   );
 });
 

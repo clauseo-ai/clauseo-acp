@@ -46,7 +46,8 @@ import { createViewStore } from "../store/store.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
 import type { MatterId } from "../transport/protocol.ts";
 import type { Papers, PapersHost } from "./host-next.ts";
-import { knownPlan } from "./agent.ts";
+import type { AgentName } from "@clauseo/components/lib/words-errors.ts";
+import { kindOf, knownPlan } from "./agent.ts";
 import { AgentPlanContext } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
 import { Matters, type MattersView } from "./matters.ts";
@@ -263,12 +264,12 @@ function RoomFrame({
     open === null || talks.open === null || talks.phase === "loading"
       ? null
       : knownPlan(openAgent, talks.agents);
-  // the agent as the error words name it (AgentPlanContext): its plan, else its own name, the settings id (the only
-  // name the room has); undefined where not known, so those words keep Claude's line there
-  const agentPlan =
+  // the agent as the error words name it (AgentPlanContext): its kind, and its own name, the settings id (the only name
+  // the room has); undefined where not known, so those words keep Claude's line there
+  const agentPlan: AgentName =
     open === null || talks.open === null || talks.phase === "loading"
       ? undefined
-      : (planOfOpen ?? openAgent);
+      : { kind: kindOf(openAgent, talks.agents), name: openAgent };
   const plan = planOfOpen === null ? "" : th(w.lang, "Uses your {name} plan", { name: planOfOpen });
   // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
   // frame's words stand in its place

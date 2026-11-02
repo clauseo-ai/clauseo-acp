@@ -7,7 +7,7 @@
 // Latin script.
 import type { Lang } from "./display.ts";
 import { wordsOf } from "./words-core.ts";
-import { errorWords, type ErrorCode } from "./words-errors.ts";
+import { errorWords, type AgentName, type ErrorCode } from "./words-errors.ts";
 
 const HI = {
   // the working line, when Claude stopped mid-answer: its time is when the host saw Claude's process end
@@ -40,14 +40,14 @@ const NO_TRY: Partial<Record<ErrorCode, BreakKey>> = {
 };
 
 /** The line for a stream that failed: that the thread stopped coming in, then its code's sentence; without Try again
- * (`retryable` false), a sentence that doesn't tell the lawyer to try again. `plan` is the thread's, as errorWords takes it. */
+ * (`retryable` false), a sentence that doesn't tell the lawyer to try again. `agent` is the thread's, as errorWords takes it. */
 export function streamFailedWords(
   lang: Lang,
   code: string,
   retryable: boolean,
-  plan?: string | null,
+  agent?: AgentName,
 ): string {
   const quiet = retryable || !Object.hasOwn(NO_TRY, code) ? undefined : NO_TRY[code as ErrorCode];
-  const said = quiet === undefined ? errorWords(lang, code, plan) : brk(lang, quiet);
+  const said = quiet === undefined ? errorWords(lang, code, agent) : brk(lang, quiet);
   return `${brk(lang, "This conversation stopped updating in this window.")} ${said}`;
 }

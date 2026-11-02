@@ -27,7 +27,9 @@ const refused = (code: ErrorCode, agent: AgentId) => () => (
 /** A nameless line, alone: no thread the room opens lacks a name, so it is shown as the sentence the room would say. */
 const nameless = (code: ErrorCode) => (lang: Lang) => (
   <main lang={lang} className="grid min-h-dvh place-items-center bg-page p-(--s4)">
-    <p className="max-w-[36rem] text-center">{sentence(lang, code, null)}</p>
+    <p className="max-w-[36rem] text-center">
+      {sentence(lang, code, { kind: undefined, name: null })}
+    </p>
   </main>
 );
 
