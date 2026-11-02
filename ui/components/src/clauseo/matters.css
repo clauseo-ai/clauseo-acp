@@ -186,6 +186,11 @@
   .queue[data-held] .queue-say {
     color: var(--primary);
   }
+  /* a refused press's words, on their own line under the head's */
+  .queue-note {
+    display: block;
+    margin-top: var(--s0-5);
+  }
   .queue-next {
     flex: none;
   }
