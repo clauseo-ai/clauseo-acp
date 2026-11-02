@@ -8,6 +8,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { TooltipProvider } from "../ui/tooltip.tsx";
 import { DEFAULT_DISPLAY, showDisplay } from "../lib/display.ts";
 import { Composer, type ComposerHandle, type ComposerProps } from "./composer.tsx";
+import { EdgePrompt } from "./edge.tsx";
 import { fromComposer } from "./composer-keys.ts";
 import { RoomScopeProvider } from "./room-scope-provider.tsx";
 import { useRoom } from "./room-scope.ts";
@@ -60,6 +61,7 @@ afterEach(async () => {
   scope = null;
   showDisplay(DEFAULT_DISPLAY);
   Reflect.deleteProperty(document, "execCommand");
+  vi.unstubAllGlobals();
 });
 
 const composer = (p: Partial<ComposerProps>) => (
@@ -112,6 +114,8 @@ test("the field starts with its words, keeps what is typed through a render, and
   // other words given later are not the field's: it was read once, as the field mounted
   await rerender(composer({ initialText: "Other words", onInput, busy: false }));
   expect(field().value).toBe("What did the bank know?");
+  // nor is it written as the field's defaultValue (its text child), which React would rewrite on each commit
+  expect(field().defaultValue).toBe("Draft");
   await type("   ");
   expect(ask().disabled).toBe(true);
 });
@@ -152,6 +156,19 @@ test("a composition the engine never ended doesn't hold Enter past the field's b
   });
   expect(await key({ key: "Enter", keyCode: 13 })).toBe(true);
   expect(onAsk).toHaveBeenCalledOnce();
+});
+
+test("while an input method composes, onKeyCommand hears no key: each is the input method's", async () => {
+  const onKeyCommand = vi.fn(() => true);
+  await mount(composer({ onKeyCommand }));
+  expect(await key({ key: "Escape", isComposing: true })).toBe(false);
+  expect(await key({ key: "Escape", keyCode: 229 })).toBe(false);
+  await compose("compositionstart");
+  expect(await key({ key: "Escape", keyCode: 27 })).toBe(false);
+  await compose("compositionend");
+  expect(onKeyCommand).not.toHaveBeenCalled();
+  expect(await key({ key: "Escape", keyCode: 27 })).toBe(true);
+  expect(onKeyCommand).toHaveBeenCalledOnce();
 });
 
 test("onKeyCommand hears keys first: a key it takes is prevented, and an Enter it takes asks nothing", async () => {
@@ -207,6 +224,62 @@ test("clear never takes the focus from where the lawyer is; the words go in plac
   elsewhere.remove();
 });
 
+test("after a press on Ask, clear takes the focus back to the field and empties it as one undoable step", async () => {
+  const calls = engine();
+  const ref = createRef<ComposerHandle>();
+  await mount(composer({ ref, initialText: "Asked" }));
+  ask().focus();
+  await act(async () => ref.current?.clear("Asked"));
+  expect(calls).toEqual([["delete", undefined]]);
+  expect(field().value).toBe("");
+  expect(document.activeElement).toBe(field());
+  // WebKit on macOS leaves a clicked button unfocused: focus on nothing is taken back too
+  await type("Asked again");
+  field().blur();
+  expect(document.activeElement).toBe(document.body);
+  await act(async () => ref.current?.clear("Asked again"));
+  expect(calls.at(-1)).toEqual(["delete", undefined]);
+  expect(document.activeElement).toBe(field());
+});
+
+test("clear(only) clears only while the field holds exactly that", async () => {
+  const ref = createRef<ComposerHandle>();
+  await mount(composer({ ref, initialText: "Asked" }));
+  await type("Asked, and more");
+  await act(async () => ref.current?.clear("Asked"));
+  expect(field().value).toBe("Asked, and more");
+});
+
+test("a clear asked for while an input method composes waits for its end, and then only if nothing was composed", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout"] });
+  try {
+    const calls = engine();
+    const onInput = vi.fn();
+    const ref = createRef<ComposerHandle>();
+    await mount(composer({ ref, onInput, initialText: "Asked" }));
+    field().focus();
+    await compose("compositionstart");
+    await act(async () => ref.current?.clear("Asked"));
+    // nothing touched inside the composition
+    expect(calls).toEqual([]);
+    expect(field().value).toBe("Asked");
+    await compose("compositionend");
+    await act(async () => vi.runAllTimers());
+    expect(calls).toEqual([["delete", undefined]]);
+    expect(field().value).toBe("");
+    // a composition that put words in: the field no longer holds the question, so it stays
+    await type("Asked");
+    await compose("compositionstart");
+    await act(async () => ref.current?.clear("Asked"));
+    await type("Asked न");
+    await compose("compositionend");
+    await act(async () => vi.runAllTimers());
+    expect(field().value).toBe("Asked न");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("where the engine refuses its editing, setText still puts the words in and tells the room", async () => {
   const calls = engine(false);
   const onInput = vi.fn();
@@ -240,6 +313,24 @@ test("the field stands in the room's field slot, and a capture listener reads it
 });
 
 test("a gate keeps the words: typed, gated, ungated, the same field is back with them and its undo, Ask with it", async () => {
+  // the fit's size observer: it must keep watching the one field, never let go of it across the gate
+  const watched: { targets: Element[]; gone: boolean }[] = [];
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      seen = { targets: [] as Element[], gone: false };
+      constructor() {
+        watched.push(this.seen);
+      }
+      observe(t: Element) {
+        this.seen.targets.push(t);
+      }
+      unobserve() {}
+      disconnect() {
+        this.seen.gone = true;
+      }
+    },
+  );
   const onInput = vi.fn();
   const gate = <button type="button">Sign in</button>;
   await mount(composer({ onInput }));
@@ -260,4 +351,30 @@ test("a gate keeps the words: typed, gated, ungated, the same field is back with
   // nothing changed the words, so the room's draft heard nothing
   expect(onInput).not.toHaveBeenCalled();
   expect(scope?.nodes.get("field")).toBe(before);
+  expect(watched.some((o) => o.targets.includes(before) && !o.gone)).toBe(true);
+});
+
+test("an edge prompt answers Enter from the empty composer ahead of it, and never over words, whose Enter asks", async () => {
+  const onAsk = vi.fn();
+  const onAllow = vi.fn();
+  await mount(
+    <>
+      <EdgePrompt
+        kind="folder"
+        place="Documents/Precedents"
+        state={{ kind: "pending" }}
+        keys
+        onAllow={onAllow}
+        onRefuse={() => {}}
+      />
+      {composer({ onAsk })}
+    </>,
+  );
+  expect(await key({ key: "Enter", keyCode: 13 })).toBe(true);
+  expect(onAllow).toHaveBeenCalledOnce();
+  expect(onAsk).not.toHaveBeenCalled();
+  await type("And clause ten?");
+  expect(await key({ key: "Enter", keyCode: 13 })).toBe(true);
+  expect(onAllow).toHaveBeenCalledOnce();
+  expect(onAsk).toHaveBeenCalledExactlyOnceWith("And clause ten?");
 });

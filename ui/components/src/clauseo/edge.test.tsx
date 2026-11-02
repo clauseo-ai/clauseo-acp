@@ -11,16 +11,37 @@ import { AllowedList, WorkspaceLine } from "./allowed.tsx";
 import { EdgePrompt, RefusalPause } from "./edge.tsx";
 import { OsDialogPreview } from "./os-dialog.tsx";
 import { NotProtectedNote } from "./protection.tsx";
+import { RoomScopeProvider } from "./room-scope-provider.tsx";
+import { useRoom } from "./room-scope.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: ReturnType<typeof createRoot> | null = null;
 
+/** The room's composer field, as the room hands it to its nodes: the keys answer only while it is empty. */
+function Field() {
+  const room = useRoom();
+  return (
+    <form data-composer="">
+      <textarea ref={room.nodes.slot<HTMLTextAreaElement>("field")} />
+    </form>
+  );
+}
+
 async function show(node: ReactNode) {
   const host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(async () => root?.render(<StrictMode>{node}</StrictMode>));
+  await act(async () =>
+    root?.render(
+      <StrictMode>
+        <RoomScopeProvider>
+          {node}
+          <Field />
+        </RoomScopeProvider>
+      </StrictMode>,
+    ),
+  );
 }
 
 afterEach(async () => {
@@ -79,6 +100,35 @@ test("a folder beyond the matter: the thread asks, Allow hands it to the compute
   // Enter from where nothing is focused answers too
   await key(document.body, "Enter");
   expect(onAllow).toHaveBeenCalledTimes(2);
+});
+
+test("the keys answer from the composer's empty field, or with nothing focused while it is empty; never over words", async () => {
+  const onAllow = vi.fn();
+  const onRefuse = vi.fn();
+  await show(
+    <EdgePrompt
+      kind="folder"
+      place="Documents/Precedents"
+      state={{ kind: "pending" }}
+      keys
+      onAllow={onAllow}
+      onRefuse={onRefuse}
+    />,
+  );
+  const area = one<HTMLTextAreaElement>("form[data-composer] textarea");
+  // the composer prevents its own Enter: the prompt hears it first, in the capture phase
+  area.addEventListener("keydown", (e) => e.preventDefault());
+  await key(area, "Enter");
+  expect(onAllow).toHaveBeenCalledTimes(1);
+  area.value = "And clause ten?";
+  await key(area, "Enter");
+  await key(area, "Escape");
+  await key(document.body, "Enter");
+  expect(onAllow).toHaveBeenCalledTimes(1);
+  expect(onRefuse).not.toHaveBeenCalled();
+  area.value = "";
+  await key(area, "Escape");
+  expect(onRefuse).toHaveBeenCalledTimes(1);
 });
 
 test.each([
