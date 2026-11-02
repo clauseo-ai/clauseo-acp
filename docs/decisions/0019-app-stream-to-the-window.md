@@ -30,10 +30,12 @@ host added later reached the page without anyone deciding it should.
   does not compile in `crates/desktop` until the bridge rules on it.
   - `admit` refuses `AnswerPermission`, `SetMode`, `SetConfigOption`, and a `CreateMatter` whose
     folder ref this run's `pick_folder` did not issue, as before, all with `command.invalid`.
-  - Slots wait as comments for `ListPapers` (#131), `RelocateMatter` (#135), H5 and H20's
-    `UpdateMatter`, `OpenMatter` and `ForgetMatter`, and H20's `GetDefaultLocation`.
-    `RelocateMatter` will take only a folder ref this run's `pick_folder` issued, as
-    `CreateMatter` does. H20's `CreateMatter` source `default_location` carries no folder ref and
+  - H3's `RelocateMatter` (#135) takes only a folder ref this run's `pick_folder` issued, the
+    same check, refused with `command.invalid` before the host. The rest of H3 (the
+    `matter_relocated` event and `MatterSummary.folder_state`) rides the existing streams and
+    reads and needs no rule here.
+  - Slots wait as comments for `ListPapers` (#131), H5 and H20's `UpdateMatter`, `OpenMatter`
+    and `ForgetMatter`, and H20's `GetDefaultLocation`. H20's `CreateMatter` source `default_location` carries no folder ref and
     passes; the folder-ref check stays on `new_folder` and `existing_folder`.
 - **One new command, `subscribe_app()`.** It takes no arguments, and it needs `open_stream` first
   (otherwise it fails with `command.invalid`).

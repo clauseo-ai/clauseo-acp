@@ -43,6 +43,8 @@ fn every_command_and_read_the_windows_send_today_is_admitted() {
         json!({"undo_step": {"thread": thread, "turn": turn,
             "files": [{"path": "brief.docx", "choice": "undo"}]}}),
         json!({"set_ui_settings": {"patch": {"theme": "dark"}}}),
+        // The room's "Locate folder" (H3), with a folder this run's picker issued.
+        json!({"relocate_matter": {"matter": matter, "folder": folder}}),
     ];
     for body in commands {
         let admitted = bridge.admit(&command(body.clone()));
@@ -74,6 +76,7 @@ fn every_refused_command_is_refused_before_open_stream() {
             "source": {"existing_folder": {"folder": not_picked}}}})),
         command(json!({"create_matter": {"name": "Smith v Jones",
             "source": {"new_folder": {"folder": not_picked}}}})),
+        command(json!({"relocate_matter": {"matter": host.scratch(), "folder": not_picked}})),
         command(json!({"answer_permission": {"thread": thread,
             "request": Uuid::now_v7(), "option_id": "allow"}})),
         command(json!({"set_mode": {"thread": thread, "mode_id": "bypassPermissions"}})),
