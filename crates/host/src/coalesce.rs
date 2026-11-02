@@ -194,21 +194,31 @@ impl ThreadText {
 
     /// The display flush at `now`: hands `show` the unshown text of each message, in
     /// first-delta order, and marks it shown once `show` returns `Ok`. The first error stops the
-    /// flush; the text not shown stays for the next one.
+    /// flush; the text not shown stays for the next one. Only a flush that showed some text opens
+    /// a new window: a durable flush with everything already shown (the one a new message's first
+    /// delta runs, rule 3) leaves the window as it was, so an answer after a thought still leads.
     pub(crate) fn flush_display<E>(
         &mut self,
         now: Duration,
         mut show: impl FnMut(DisplayText<'_>) -> Result<(), E>,
     ) -> Result<(), E> {
         self.display_armed = false;
-        self.last_display = Some(now);
+        let mut result = Ok(());
+        let mut showed = false;
         for held in &mut self.held {
             if let Some(text) = held.unshown() {
-                show(text)?;
+                if let Err(error) = show(text) {
+                    result = Err(error);
+                    break;
+                }
                 held.shown = held.text.len();
+                showed = true;
             }
         }
-        Ok(())
+        if showed {
+            self.last_display = Some(now);
+        }
+        result
     }
 
     /// The durable flush at `now`: runs the display flush through `show` (so it counts as a

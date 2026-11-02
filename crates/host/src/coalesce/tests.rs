@@ -270,3 +270,36 @@ fn overtaken_display_timer_shows_nothing() {
         "nothing held, nothing due"
     );
 }
+
+#[test]
+fn answer_after_a_thought_leads_though_its_first_delta_closes_the_batch() {
+    let mut text = ThreadText::new();
+    // The thought is shown as it comes.
+    assert!(text.push(ms(0), delta(0, "thinking")).display_now);
+    assert_eq!(shown(&mut text, ms(0)).len(), 1);
+    // 100 ms on, the answer's first delta closes the held batch first (rule 3): a durable flush
+    // that shows nothing, since the thought is all shown. It must not open a new window.
+    assert!(text.is_new_message(message(1)));
+    let events = text
+        .flush_durable(ms(100), |_| -> Result<(), ()> {
+            panic!("everything was shown already")
+        })
+        .unwrap();
+    assert_eq!(texts(&events), vec![(message(0), "thinking")]);
+    let pushed = text.push(ms(100), delta(1, "The answer"));
+    assert!(
+        pushed.display_now,
+        "the answer's first token waits for no timer"
+    );
+    assert_eq!(pushed.display_at, None);
+}
+
+#[test]
+fn a_flush_that_shows_nothing_keeps_the_window() {
+    let mut text = ThreadText::new();
+    let _pushed = text.push(ms(0), delta(1, "a"));
+    assert_eq!(shown(&mut text, ms(0)).len(), 1);
+    // An empty display flush at 10 ms changes nothing: a delta at 20 ms is past the 0 ms window.
+    assert_eq!(shown(&mut text, ms(10)), Vec::new());
+    assert!(text.push(ms(20), delta(1, "b")).display_now);
+}
