@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import { createAnswer } from "./answer.ts";
 import { CASES } from "./hostile-cases.ts";
 import type { HostileCase } from "./hostile-cases.ts";
+import { sliceOfThisFile } from "./hostile-slice-fixture.ts";
 
 // No hostile case may freeze the answer. One update of the model (split, definitions, parse, sanitise)
 // may cost at most RATIO times what one update of a single paragraph of ordinary prose of the same length
@@ -68,13 +69,18 @@ function streamedTo(markdown: string, previous: number, end: number): number {
 /** How many hostile-time-<k>.timed.test.ts files there are; file k times the cases at k-1, k-1 + TIME_FILES, ... */
 export const TIME_FILES = 3;
 
-/** The cases hostile-time-<file>.timed.test.ts times (file counts from 1). */
+/** The cases hostile-time-<file>.timed.test.ts times (file counts from 1), for hostile-blocks.test.ts's guard. */
 export function timeSlice(file: number): HostileCase[] {
   return CASES.filter((_, index) => index % TIME_FILES === file - 1);
 }
 
-/** Registers the ratio test of every case in timeSlice(file). */
-export function timeCases(file: number): void {
+/**
+ * Registers the ratio test of every case in timeSlice(k), k from the name of the hostile-time-<k>.timed.test.ts
+ * being collected (hostile-dom-fixture.tsx's sliceOfThisFile). Called with nothing, so a file can neither pick
+ * another slice nor drop a case from its own.
+ */
+export function timeThisSlice(): void {
+  const file = sliceOfThisFile("hostile-time-", ".timed.test.ts", TIME_FILES);
   test.each(timeSlice(file).map((c) => [c.id, c] as const))(
     "%s: no update costs more than 8 times as much as ordinary prose of its length",
     (_, c) => {

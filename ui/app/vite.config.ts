@@ -213,7 +213,10 @@ function bareDynamicImports(): Plugin {
 
 /** The test files that time the code: vitest's components-timed project, a group of its own. */
 const TIMED = "src/**/*.timed.test.ts";
-/** The sequence.groupOrder of every other project: after components-timed (0) has finished. */
+/**
+ * The sequence.groupOrder of every other project: after components-timed (0) has finished. A new project needs it too:
+ * without it, it is group 0 and runs beside the timed files.
+ */
 const AFTER_TIMED = 1;
 
 /**

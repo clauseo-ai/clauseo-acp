@@ -7,6 +7,7 @@ import { act } from "react";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import { characterEntitiesLoaded } from "./entities.ts";
 import { CASES } from "./hostile-cases.ts";
+import { takesWholeSlice } from "./hostile-slice-fixture.ts";
 import {
   casesNode,
   catchPayloads,
@@ -53,6 +54,17 @@ const html = (el: Element) => el.innerHTML.replaceAll(/\bmd_r_[0-9a-z]+_/g, "md-
 /** The cases without an `&`, finished and streaming, as they rendered before the table loaded. */
 const before = new Map<string, string>();
 
+// The first state's renders, and `before` from them, for the whole file: every test below can run alone (`-t`).
+beforeAll(() => {
+  expect(characterEntitiesLoaded()).toBe(false);
+  for (const streaming of [true, false]) {
+    surface(streaming).render(casesNode(CASES, streaming));
+    for (const c of CASES.filter((c) => !hasReference(c)))
+      before.set(`${c.id} (streaming ${streaming})`, html(section(streaming, c.id)));
+  }
+  // Two renders of the corpus: what the per-render tests had, 30 s, not the hooks' default 10 s.
+}, 30_000);
+
 test("the corpus holds G4's 28 cases and the ones added since, each with its own id", () => {
   expect(CASES[27]?.id).toBe("unterminated-fence");
   expect(CASES).toHaveLength(109);
@@ -62,10 +74,17 @@ test("the corpus holds G4's 28 cases and the ones added since, each with its own
 test("the stream files between them stream every case once before the table loads; this file the rest after", () => {
   const sliced = Array.from({ length: STREAM_FILES }, (_, k) => streamSlice(k + 1)).flat();
   expect(sliced.map((c) => c.id).sort()).toEqual(CASES.map((c) => c.id).sort());
-  const files = Object.keys(import.meta.glob("./hostile-stream-*.test.tsx"));
-  expect(files.sort()).toEqual(
+  // Files 1 to STREAM_FILES, each taking the slice its own name gives, whole.
+  const sources = import.meta.glob<string>("./hostile-stream-*.test.tsx", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  });
+  expect(Object.keys(sources).sort()).toEqual(
     Array.from({ length: STREAM_FILES }, (_, k) => `./hostile-stream-${k + 1}.test.tsx`),
   );
+  for (const [file, source] of Object.entries(sources))
+    expect(takesWholeSlice(source, "streamThisSlice", "streamSlice"), file).toBe(true);
   // The cases the second state streams: the character references, numeric ones too.
   expect(CASES.filter(hasReference).map((c) => c.id)).toEqual(
     expect.arrayContaining([
@@ -79,16 +98,10 @@ test("the stream files between them stream every case once before the table load
 
 describe.each(["not loaded", "loaded"] as const)("entity table %s", (state) => {
   beforeAll(async () => {
+    if (state === "not loaded") return expect(characterEntitiesLoaded()).toBe(false);
     // Mounted answers re-render when the table arrives, and are rendered again here.
-    if (state === "loaded") await loadTable();
-    expect(characterEntitiesLoaded()).toBe(state === "loaded");
-    for (const streaming of [true, false]) {
-      surface(streaming).render(casesNode(CASES, streaming));
-      if (state === "not loaded")
-        for (const c of CASES.filter((c) => !hasReference(c)))
-          before.set(`${c.id} (streaming ${streaming})`, html(section(streaming, c.id)));
-    }
-    // Two renders of the corpus: what the per-render tests had, 30 s, not the hooks' default 10 s.
+    await loadTable();
+    for (const streaming of [true, false]) surface(streaming).render(casesNode(CASES, streaming));
   }, 30_000);
 
   test.each([true, false])(
