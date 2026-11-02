@@ -1,8 +1,8 @@
 import { brotliCompressSync } from "node:zlib";
-import { build, createServer, resolveConfig, type Rolldown } from "vite";
+import { createBuilder, createServer, resolveConfig, type Rolldown } from "vite";
 import { afterEach, expect, test, vi } from "vitest";
 import tauriConf from "../../../crates/desktop/tauri.conf.json" with { type: "json" };
-import { BARE_CHUNKS, devCsp, metaCsp, unwrapPreloads } from "../vite.config.ts";
+import { BARE_CHUNKS, devCsp, metaCsp, PAGES, unwrapPreloads } from "../vite.config.ts";
 
 /** A test that runs a whole Vite build: several seconds on a CI runner, past vitest's 5 s default. */
 const BUILD = { timeout: 60_000 };
@@ -52,11 +52,56 @@ test("the dev CSP refuses a production CSP without a directive it adds to", () =
   );
 });
 
-test("the build's only input is index.html, so the dev-only gallery stays out of the shipped bundle", async () => {
+test("the build's only inputs are index.html and settings.html, each its own build, so the dev-only pages stay out of the shipped bundle", async () => {
   const config = await resolveConfig({ configFile: "vite.config.ts", logLevel: "silent" }, "build");
-  expect(config.build.rolldownOptions.input).toBeUndefined();
+  const inputs = Object.fromEntries(
+    Object.entries(config.environments).map(([name, env]) => [
+      name,
+      env.build.rolldownOptions.input,
+    ]),
+  );
+  expect(inputs).toEqual({
+    client: { index: PAGES.index },
+    settings: { settings: PAGES.settings },
+  });
+  expect(PAGES.index.endsWith("/ui/app/index.html")).toBe(true);
+  expect(PAGES.settings.endsWith("/ui/app/settings.html")).toBe(true);
   expect(config.build.assetsInlineLimit).toBe(0);
+  expect(config.environments["settings"]?.build.assetsInlineLimit).toBe(0);
 });
+
+// Each page's first load is one chunk of its own, holding nothing of the other page: the room loads no settings code,
+// and the settings window none of the room's frame, only the display store and the transport both use.
+test(
+  "each page's first load is one chunk, and neither page's holds the other's code",
+  BUILD,
+  async () => {
+    const { pages } = await builtWith();
+    expect(Object.keys(pages).sort()).toEqual(["index.html", "settings.html"]);
+    const first = (page: string) => {
+      const built = pages[page]!;
+      const files = [...built.html.matchAll(/(?:src|href)="\/(assets\/[^"]+\.js)"/g)].map(
+        (m) => m[1],
+      );
+      return files.map((file) => built.chunks.find((c) => c.fileName === file)!);
+    };
+    const room = first("index.html");
+    const settings = first("settings.html");
+    expect(room.map((c) => c.isEntry)).toEqual([true]);
+    expect(settings.map((c) => c.isEntry)).toEqual([true]);
+    expect(room[0]!.imports).toEqual([]);
+    expect(settings[0]!.imports).toEqual([]);
+    const modules = (chunk: Rolldown.OutputChunk) =>
+      chunk.moduleIds.map((id) => id.split("/src/")[1] ?? id);
+    expect(modules(room[0]!).filter((id) => id.startsWith("settings/"))).toEqual([]);
+    expect(modules(room[0]!)).toContain("room/room.tsx");
+    expect(modules(settings[0]!)).toContain("settings/main.tsx");
+    expect(modules(settings[0]!)).toContain("room/display-store.ts");
+    for (const frame of ["room/room.tsx", "room/rail.tsx", "main.tsx", "App.tsx"])
+      expect(modules(settings[0]!)).not.toContain(frame);
+    expect(settings[0]!.code).not.toContain("room-window");
+  },
+);
 
 // The perf module (src/perf/) loads only in the e2e and marks builds; a release page must not pay for it. This builds
 // the app in memory and checks the perf code sits in its own chunk, imported with a bare import() from the entry
@@ -67,7 +112,7 @@ test(
   BUILD,
   async () => {
     // as `vite build` runs it (builtWith): under vitest's NODE_ENV=test the build would be a dev one, with the hooks
-    const { chunks } = await builtWith();
+    const { chunks } = (await builtWith()).pages["index.html"]!;
     const entry = chunks.find((c) => c.isEntry);
     const perf = chunks.find((c) => c.fileName.startsWith("assets/perf-"));
     expect(entry).toBeDefined();
@@ -233,22 +278,44 @@ test("isLazyShared is false for a name no chunk has, and for a chunk nothing imp
   expect(isLazyShared("assets/list.js", chunks, FIRST, [list])).toBe(false);
 });
 
-/** A build in memory under `mode`, its chunks, its other files and its index.html. */
+/** One environment's build: its chunks, its other files and its page. */
+type Built = {
+  chunks: Rolldown.OutputChunk[];
+  files: (Rolldown.OutputChunk | Rolldown.OutputAsset)[];
+  html: string;
+};
+
+/** A build in memory under `mode`, every environment as `vite build` builds it: each page's build by its HTML file's
+ * name, and every chunk and file of them all, with index.html's text. */
 async function builtWith(mode?: string) {
   // as `vite build` runs it: vitest's NODE_ENV=test would make the build a development one (import.meta.env.DEV)
   vi.stubEnv("NODE_ENV", "production");
-  const out = (await build({
+  const builder = await createBuilder({
     configFile: "vite.config.ts",
     logLevel: "silent",
     ...(mode === undefined ? {} : { mode }),
     build: { write: false },
-  })) as Rolldown.RolldownOutput | Rolldown.RolldownOutput[];
-  const files = (Array.isArray(out) ? out : [out]).flatMap((o) => o.output);
-  const chunks = files.filter((c): c is Rolldown.OutputChunk => c.type === "chunk");
-  const page = files.find(
-    (f): f is Rolldown.OutputAsset => f.type === "asset" && f.fileName === "index.html",
-  );
-  return { chunks, files, html: String(page?.source ?? "") };
+  });
+  const pages: Record<string, Built> = {};
+  for (const environment of Object.values(builder.environments)) {
+    const out = (await builder.build(environment)) as
+      | Rolldown.RolldownOutput
+      | Rolldown.RolldownOutput[];
+    const files = (Array.isArray(out) ? out : [out]).flatMap((o) => o.output);
+    const chunks = files.filter((c): c is Rolldown.OutputChunk => c.type === "chunk");
+    const htmls = files.filter(
+      (f): f is Rolldown.OutputAsset => f.type === "asset" && f.fileName.endsWith(".html"),
+    );
+    expect(htmls.length, environment.name).toBe(1);
+    pages[htmls[0]!.fileName] = { chunks, files, html: String(htmls[0]!.source) };
+  }
+  const all = Object.values(pages);
+  return {
+    pages,
+    chunks: all.flatMap((p) => p.chunks),
+    files: all.flatMap((p) => p.files),
+    html: pages["index.html"]?.html ?? "",
+  };
 }
 
 // the page's charset first, inside the HTML prescan's 1024 bytes, then the CSP before any script, style or link
@@ -301,8 +368,18 @@ test(
   "the release build is the room under the meta CSP, with no review page, hooks or axe-core chunk",
   BUILD,
   async () => {
-    const { html, chunks, files } = await builtWith();
+    const { html, chunks, files, pages } = await builtWith();
     expect(unescape(META.exec(html)?.[1] ?? "")).toBe(metaCsp(tauriConf.app.security.csp));
+    // the settings window's page under the same policy; no other page is built (gallery, parts, review)
+    expect(unescape(META.exec(pages["settings.html"]?.html ?? "")?.[1] ?? "")).toBe(
+      metaCsp(tauriConf.app.security.csp),
+    );
+    expect(
+      files
+        .filter((f) => f.fileName.endsWith(".html"))
+        .map((f) => f.fileName)
+        .sort(),
+    ).toEqual(["index.html", "settings.html"]);
     expect(chunks.some((c) => c.moduleIds.some((id) => id.includes("/src/room/")))).toBe(true);
     expect(chunks.some((c) => c.code.includes("room-window"))).toBe(true);
     expect(files.some((f) => f.fileName.endsWith(".css"))).toBe(true);
@@ -344,7 +421,8 @@ test(
       "build",
     );
     expect(config.build.outDir).toBe("dist-probe");
-    const { html, chunks } = await builtWith("probe");
+    const { html, chunks, pages } = await builtWith("probe");
+    expect(Object.keys(pages)).toEqual(["index.html"]);
     expect(unescape(META.exec(html)?.[1] ?? "")).toBe(metaCsp(tauriConf.app.security.csp));
     const entry = chunks.find((c) => c.isEntry);
     const modules = entry?.moduleIds ?? [];

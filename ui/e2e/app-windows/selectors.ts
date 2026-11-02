@@ -113,7 +113,12 @@ export const ids = {
   queue: "queue",
   /** The composer's working line while a turn runs or waits ("Answering.", or the wait behind another). */
   working: "working",
+  /** Settings at the rail's foot: opens the settings window, or brings it forward when open. */
+  openSettings: "open-settings",
 } as const;
+
+/** The settings window's page: the last part of its URL path (crates/desktop's settings window). */
+export const SETTINGS_PAGE = "settings.html";
 
 /** The `data-kind` of a version row: the matter's CheckpointKind in snake_case. */
 export type VersionKind =
@@ -259,7 +264,24 @@ export function window(page: Page) {
     queue: (panel: Locator): Locator => panel.getByTestId(ids.queue),
     /** The composer's working line. */
     working: id(ids.working),
+    openSettings: id(ids.openSettings),
   };
 }
 
 export type Window = ReturnType<typeof window>;
+
+/** The settings window's elements on its `page`. Its controls carry no test ids: they are found by role and their
+ * English names, as the settings sections (ui/app/src/settings/sections/) label them. */
+export function settingsWindow(page: Page) {
+  return {
+    /** Appearance in the section list. */
+    appearance: page
+      .getByRole("navigation", { name: "Sections", exact: true })
+      .getByRole("button", { name: /^Appearance/ }),
+    /** One side of Theme's segmented switch (a Base UI toggle group: a group of pressed buttons). */
+    theme: (name: "Follow the computer" | "Day" | "Night"): Locator =>
+      page
+        .getByRole("group", { name: "Theme", exact: true })
+        .getByRole("button", { name, exact: true }),
+  };
+}

@@ -14,7 +14,8 @@
 // question, the reading column's top says what it reads, once the matter's papers are counted. A link or paper in an
 // answer opens through the host (open.ts, H11), and so does a matter row's Show in Finder; a Word document's tile, and a
 // change note naming one, open it in Word (word/open-in-word.ts). Versions opens and shows files through the
-// transport's own open_file and reveal unless a test or the review page passes stand-ins.
+// transport's own open_file and reveal unless a test or the review page passes stand-ins. Settings opens in its own
+// window from the rail's foot and on Ctrl+, (⌘, on the Mac, settings-key.ts), where the host has that window.
 import {
   lazy,
   Suspense,
@@ -52,9 +53,10 @@ import { AgentPlanContext } from "./thread/agent-plan.ts";
 import { Conversations } from "./conversations.ts";
 import { Matters, type MattersView } from "./matters.ts";
 import { NewMatter } from "./new-matter.tsx";
-import { AnswerHost, type ListedPapers } from "./open.ts";
+import { AnswerHost, quietly, type ListedPapers } from "./open.ts";
 import { LocateGate, MovedFolder } from "./moved.tsx";
 import { RoomRail } from "./rail.tsx";
+import { useSettingsKey } from "./settings-key.ts";
 import { ScratchLine } from "./scratch-line.tsx";
 import type { StandIns } from "./versions/stand-ins.ts";
 import { useVersions } from "./versions/use-versions.ts";
@@ -259,6 +261,15 @@ function RoomFrame({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [canStart, mac, conversations, endVersions]);
+  // Settings, in a window of its own, from the rail's foot and on its key: only where the host has that window. A
+  // refusal goes to the console, as an open or show does (open.ts)
+  const [openSettings] = useState(() => {
+    const open = transport.openSettings;
+    return open === undefined
+      ? undefined
+      : () => void quietly("open_settings", open.call(transport));
+  });
+  useSettingsKey(openSettings, mac);
   // the plan the open conversation uses, on the status line: its thread's, or the one a draft would run
   // nothing while the matter's list loads (its agent isn't known yet), or for an agent of no kind
   const openRow = talks.rows.find((r) => r.key === talks.open);
@@ -348,6 +359,7 @@ function RoomFrame({
           onStartNew={versions.close}
           onEscape={fold}
           newMatterRef={newMatter}
+          onSettings={openSettings}
         />
       )}
       <NewMatter

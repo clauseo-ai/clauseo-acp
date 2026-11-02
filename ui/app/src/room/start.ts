@@ -1,23 +1,12 @@
-// The room's start, before its first render: its display settings on <html> (display-store.ts), data-frame="own" on
-// <html> for the frame contract (responsive.css), the host's OS, and in dev and e2e builds the hooks for checks by hand
-// (dev-hooks.ts).
-import { showDisplay, startDisplay } from "@clauseo/components/lib/display.ts";
+// The room's start, before its first render: the window's display (display/connect.ts, shared with settings.html), and
+// in dev and e2e builds the hooks for checks by hand (dev-hooks.ts).
 import { late } from "@clauseo/components/lib/late.ts";
-import { guessPlatform, hostPlatform } from "../platform.ts";
+import { connectDisplay } from "../display/connect.ts";
 import type { HostTransport } from "../transport/host-transport.ts";
-import { createDisplayStore, type DisplayStore } from "./display-store.ts";
-import { nextHostOf, type UiSettings } from "./host-next.ts";
+import type { DisplayStore } from "./display-store.ts";
+import type { UiSettings } from "./host-next.ts";
 
 let connected: { transport: HostTransport; store: DisplayStore } | null = null;
-
-/** localStorage, or null where reaching it throws (storage turned off). */
-function pageStorage(): Storage | null {
-  try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    return null;
-  }
-}
 
 /** Whether this build carries the hooks for checks by hand: the dev server, or a build made with
  * VITE_CLAUSEO_HAND_CHECKS=1 (the room's e2e build, the probe build). Settled when the build is made, so any other
@@ -36,24 +25,8 @@ export function connectRoom(
 ): DisplayStore {
   if (connected?.transport === transport) return connected.store;
   connected?.store.dispose();
-  const store = createDisplayStore({
-    storage: pageStorage(),
-    matchMedia: typeof matchMedia === "function" ? (query) => matchMedia(query) : null,
-    host: nextHostOf(transport).settings,
-    start: startDisplay,
-    show: showDisplay,
-    // the first frame lays out for the webview's own OS; display_info confirms it or corrects it
-    platform: guessPlatform(),
-    ...(override === undefined ? {} : { override }),
-  });
+  const { store } = connectDisplay(transport, { override });
   connected = { transport, store };
-  // the room draws its own frame, the toolbar as the title bar: responsive.css's frame contract keys on this
-  document.documentElement.dataset.frame = "own";
-  // The window's chrome follows the OS the host reports; nothing on the page waits for it.
-  hostPlatform(transport).then(
-    (platform) => store.setPlatform(platform),
-    (error: unknown) => console.warn(`display_info failed: ${JSON.stringify(error)}`),
-  );
   // its own chunk, so a release build's initial JS doesn't carry it
   if (HAND_CHECKS) {
     late(import("./dev-hooks.ts")).then(
