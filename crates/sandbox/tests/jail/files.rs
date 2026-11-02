@@ -242,3 +242,21 @@ fn notes_of_another_matter_cannot_be_read() {
     )
     .assert_ok();
 }
+
+#[test]
+fn a_linked_tmpdir_stops_the_launch_and_nothing_is_made_outside() {
+    let w = World::new();
+    // An earlier agent left `<state>/tmp` as a link to a folder that does not exist.
+    w.symlink("outside/made-by-host", "data/agent-state/m1/codex/tmp");
+    let (launcher, _) = launcher(w.builder().build().unwrap());
+    let spec = clauseo_process::LaunchSpec::new(
+        "/usr/bin/true".into(),
+        Vec::new(),
+        std::collections::BTreeMap::new(),
+        w.at("m1"),
+    )
+    .unwrap();
+    let error = clauseo_process::Launcher::launch(&launcher, &spec).unwrap_err();
+    assert!(error.to_string().contains("TMPDIR"), "{error}");
+    assert!(!w.at("outside/made-by-host").exists());
+}

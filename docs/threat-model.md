@@ -112,17 +112,28 @@ anything the agent starts.
 
 **What stops them.**
 
-- `designed`: An OS jail per tier: tier A is Seatbelt (macOS), bubblewrap (Linux) or MXC (Windows);
-  tier B is a sandbox user on Windows; tier C has no sandbox
-- `designed`: The agent reads and writes only the matter folder and a per-matter agent state folder;
-  it reads its own runtime, read-only
-- `designed`: Its credential file is linked into the state folder, never copied or read by Clauseo;
-  sign-in runs outside the sandbox
-- `designed`: Any `.git` already in the folder and any file over the size cap are read-only to the
-  agent
-- `designed`: Clauseo's version store is outside the matter folder and invisible to the agent
-- `designed`: A blocked path becomes a denial event and a card; widening access restarts the agent
-  only if the lawyer accepts
+- `designed`: An OS jail per tier: tier A is Seatbelt (macOS) or MXC (Windows); tier B is a
+  sandbox user on Windows; tier C has no sandbox, and Linux stays at tier C (bubblewrap is Later)
+- `built` (macOS): Seatbelt through `/usr/bin/sandbox-exec`, with a profile generated from the
+  policy in which every path is a parameter, never profile text
+  ([0027](decisions/0027-sandbox.md)); `designed`: the host runs every agent through it (R17)
+- `built` (macOS): The agent reads and writes only the matter folder, its state folder and the
+  matter's notes folder; it reads and runs its own runtime, reads listed system locations (nothing
+  under `/Users`, `/private/var/folders`, `/private/tmp` or `/Volumes`), and reaches the network
+  only through the proxy's loopback port; other matters, their state and notes, the data dir and
+  the version store are denied after every allow
+- `built` (macOS): Its credential file is linked into the state folder and only the link is
+  allowed; for Claude only the store's own files and lock folders are allowed, and the folder
+  cannot be listed; `designed`: the link itself and sign-in outside the sandbox (R17)
+- `built` (macOS): Any `.git` already in the matter, the folder a `gitdir:` file names, files over
+  the size cap, and `.codex/`, `.claude/`, `.agents/`, `.clauseo/`, `.mcp.json`, `CLAUDE.md` and
+  `AGENTS.md` at the matter root (existing or not, in any letter case) are read-only, and their
+  folders cannot be renamed
+- `built` (macOS): A symbolic or hard link in the matter that leads outside it is denied, and so is
+  where it leads
+- `built` (macOS): A refused file read or write reaches a denial sink through the unified log
+  watcher; `designed`: the denial event and card, and widening access restarts the agent only if
+  the lawyer accepts (R18)
 
 ## Egress proxy
 
