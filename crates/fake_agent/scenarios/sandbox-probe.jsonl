@@ -1,0 +1,10 @@
+{"scenario":"sandbox-probe","description":"Two sessions for the jail test (crates/sandbox/tests/jail/agent.rs): in the first (cwd the matter) the prompt writes probe/in-matter.txt; in the second (cwd the matter's notes folder) the prompt writes from-the-jail.txt. A refused write exits 3 before the turn ends","on_stdin_close":"exit"}
+{"include":"handshake.jsonl"}
+{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}
+{"write_file":{"path":"probe/in-matter.txt","content":"written in the jail\n"}}
+{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}
+{"note":"The second session's cwd is the notes folder, so its file step writes there.","expect":{"method":"session/new","as":"notes","params":{"cwd":"{{any}}"}}}
+{"respond":{"to":"notes","result":{"sessionId":"sess-2"}}}
+{"expect":{"method":"session/prompt","as":"p2","params":{"sessionId":"sess-2"}}}
+{"write_file":{"path":"from-the-jail.txt","content":"a note\n"}}
+{"respond":{"to":"p2","result":{"stopReason":"end_turn"}}}

@@ -37,6 +37,18 @@
 //! - [`DenialSink`]: `denied` for each denial, `upstream` for the proxy's reachability. `Arc` of
 //!   a sink is a sink. [`CappedSink::new`] wraps one on the real clock, [`CappedSink::with_clock`]
 //!   on any [`Clock`]; [`CappedSink::tick`] delivers a held count from the owner's timer.
+//! - [`SeatbeltProfile::new`]`(policy, tag)` (every target): the profile text and its `-D`
+//!   parameters; every policy path is a parameter, and the text holds only rules, port numbers
+//!   and the tag. Rules: `src/macos/profile.rs` and `src/macos/base.sb`.
+//! - macOS: [`SeatbeltLauncher::new`]`(policy, opts, denials)` is a `process::Launcher`. Each
+//!   launch runs `/usr/bin/sandbox-exec -p <profile> -D NAME=path ... <program> <args>` through
+//!   `spawn_in_tree`, with the agent's variables plus `TMPDIR=<state>/tmp` (made if missing).
+//!   Denials reach `denials` through a [`CappedSink`]. The first launch registers the launcher
+//!   with the one host-wide watcher (`/usr/bin/log stream`, started with the first launcher
+//!   and stopped with the last); dropping the launcher unregisters it, so the host keeps the
+//!   launcher alive while its agent runs. The watcher reports file-data reads and writes as
+//!   [`Denial::Path`] and only logs network denials. A watcher that fails to start or dies is
+//!   logged and started again at most once a minute; launches run either way.
 //!
 //! # Invariants
 //!
@@ -75,6 +87,7 @@ mod denial;
 mod detect;
 mod error;
 mod links;
+mod macos;
 mod policy;
 #[cfg(test)]
 mod test_support;
@@ -86,6 +99,9 @@ pub use denial::{
 pub use detect::{Detection, NoSandbox, Tier, detect, probe};
 pub use error::Error;
 pub use links::{LinkFinding, LinkKind, MatterScan, scan_links, scan_matter};
+#[cfg(target_os = "macos")]
+pub use macos::SeatbeltLauncher;
+pub use macos::SeatbeltProfile;
 pub use policy::{
     CLAUDE_STORE_BESIDE_LOCK_SUFFIX, CLAUDE_STORE_FILES, CLAUDE_STORE_LOCK_FOLDERS, ClaudeStore,
     Loopback, PROTECTED_NAMES, PathRule, Policy, PolicyBuilder,

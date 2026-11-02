@@ -63,6 +63,7 @@ bundled! {
         "plan",
         "prompt-stream",
         "queue-two-prompts",
+        "sandbox-probe",
         "scoreboard",
         "send-now",
         "session-failure",
