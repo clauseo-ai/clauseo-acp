@@ -50,6 +50,7 @@ mod papers;
 mod query;
 mod rail;
 mod relocate;
+pub(crate) mod scan;
 mod seen;
 mod settings;
 mod shutdown;
@@ -147,6 +148,10 @@ pub(crate) struct Actor {
     /// subscribers (`app_lists.rs`): in memory only, never logged. A matter with none reads
     /// `found`; a relocate and a forget drop its entry.
     pub(crate) folder_states: BTreeMap<MatterId, clauseo_protocol::FolderState>,
+    /// The folder scans whose thread has not ended (`scan.rs`).
+    pub(crate) scans: scan::Scans,
+    /// The walk each scan runs: `clauseo_matters::scan_folder`, or a test's stand-in.
+    pub(crate) scan_walk: scan::Walk,
     /// Matter folders whose `ListMatters` stat is still running (`folder_state.rs`).
     pub(crate) stats_running: folder_state::Running,
     pub(crate) files: papers::FileRefs,
@@ -507,6 +512,7 @@ impl Actor {
             Input::AppUnsubscribed { id } => app::on_unsubscribed(self, id),
             Input::Limits(input) => limits::on_input(self, input),
             Input::FolderStates(states) => query::on_folder_states(self, states),
+            Input::Scan(input) => scan::on_input(self, input),
             // The loop handles an abort before it gets here.
             #[cfg(feature = "test-support")]
             Input::Abort(reply) => {

@@ -106,7 +106,8 @@ fn replay(events: &mut EventSubscription) -> (Vec<&'static str>, Vec<u64>, Seq) 
             | HostEvent::LimitsViewChanged(_)
             | HostEvent::SettingsChanged(_)
             | HostEvent::MattersChanged(_)
-            | HostEvent::ThreadsChanged(_)) => panic!("unexpected {other:?}"),
+            | HostEvent::ThreadsChanged(_)
+            | HostEvent::FolderScanned(_)) => panic!("unexpected {other:?}"),
         }
     }
 }

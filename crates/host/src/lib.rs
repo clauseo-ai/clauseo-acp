@@ -11,7 +11,9 @@
 //! - The next `seq` of every stream, the patch window and epoch of every loaded stream, and the
 //!   sent view of what is in flight to the store.
 //! - One `clauseo-matter` thread per open matter, one `clauseo-snapshot` thread, and a
-//!   short-lived `clauseo-stat` thread per `ListMatters` that reads each matter's folder state.
+//!   short-lived `clauseo-stat` thread per `ListMatters` that reads each matter's folder state,
+//!   and a short-lived `clauseo-scan` thread per `ScanFolder` (one at a time) that walks the
+//!   folder before it becomes a matter and posts its counts back.
 //! - The Scratch matter: a first start creates it.
 //! - The matter rail (`actor/rail.rs`, `actor/matter_details.rs`): each matter's details on
 //!   its row (`UpdateMatter`, `OpenMatter`), its status computed from its threads, its last

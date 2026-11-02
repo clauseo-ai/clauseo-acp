@@ -184,6 +184,7 @@ pub struct HostConfig {
     pre_write_guard: Option<PathBuf>,
     limits_reader: Option<Arc<dyn ReadLimits>>,
     wiring: LaunchWiring,
+    scan_walk: crate::actor::scan::Walk,
 }
 
 /// A `HostConfig` taken apart by the host thread.
@@ -203,6 +204,7 @@ pub(crate) struct ConfigParts {
     /// The limits reader a caller set; `None` builds the default at start-up.
     pub(crate) limits_reader: Option<Arc<dyn ReadLimits>>,
     pub(crate) wiring: LaunchWiring,
+    pub(crate) scan_walk: crate::actor::scan::Walk,
 }
 
 impl HostConfig {
@@ -224,6 +226,7 @@ impl HostConfig {
             pre_write_guard: None,
             limits_reader: None,
             wiring: LaunchWiring::default(),
+            scan_walk: crate::actor::scan::os_walk(),
         }
     }
 
@@ -377,6 +380,14 @@ impl HostConfig {
         self.wiring.path_prepend.as_deref()
     }
 
+    /// The walk folder scans run instead of `clauseo_matters::scan_folder`, for tests that
+    /// step a scan by hand.
+    #[cfg(test)]
+    pub(crate) fn with_scan_walk(mut self, walk: crate::actor::scan::Walk) -> Self {
+        self.scan_walk = walk;
+        self
+    }
+
     /// Takes the config apart.
     pub(crate) fn into_parts(self) -> ConfigParts {
         ConfigParts {
@@ -394,6 +405,7 @@ impl HostConfig {
             pre_write_guard: self.pre_write_guard,
             limits_reader: self.limits_reader,
             wiring: self.wiring,
+            scan_walk: self.scan_walk,
         }
     }
 }
