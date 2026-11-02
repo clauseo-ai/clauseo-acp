@@ -102,7 +102,7 @@ export const streamOf = (thread: ThreadId): StreamId => `thread:${thread}`;
 export const entryId = (kind: Kind, id: string): EntryId => `${kind}:${id}`;
 
 /** The entry's kind: its one key. */
-export function kindOf(entry: ViewEntry): Kind {
+function kindOf(entry: ViewEntry): Kind {
   for (const key in entry) return key as Kind;
   throw new Error("a view entry has no kind");
 }
