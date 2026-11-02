@@ -31,6 +31,13 @@ const NEW_THREAD: readonly ThreadKey[] = [
   "Something here can't be shown in the thread.",
   "Clauseo changed 1 paper.",
   "You undid Clauseo's changes to 1 paper.",
+  "Send the answer",
+  "Decline",
+  "Other",
+  "Required",
+  "Answer this question.",
+  "This answer doesn't fit the question.",
+  "Choose an answer to send, or Decline to go on without one.",
 ];
 const LIMITS: readonly LimitKey[] = [
   "Resets {time}",
