@@ -9,12 +9,13 @@
 // shows its surface only until H8 (host-next.ts's papers part). Folded, the rail closes on Escape and on opening a
 // matter or making one, and focus goes back to Matters; Matters carries the court-yellow dot while another matter
 // waits on the lawyer.
-import { use, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { use, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { EmptyPapers } from "@clauseo/components/clauseo/empty.tsx";
 import { PaperTile } from "@clauseo/components/clauseo/paper-tile.tsx";
 import { useRoom } from "@clauseo/components/clauseo/room-scope.ts";
 import { RoomScopeProvider } from "@clauseo/components/clauseo/room-scope-provider.tsx";
 import { RoomToolbar } from "@clauseo/components/clauseo/room-toolbar.tsx";
+import { useDisplay } from "@clauseo/components/lib/display.ts";
 import { frame } from "@clauseo/components/lib/words-frame.ts";
 import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { useWords } from "@clauseo/components/lib/words.ts";
@@ -28,7 +29,7 @@ import type { Papers, PapersHost } from "./host-next.ts";
 import { Matters, type MattersView } from "./matters.ts";
 import { NewMatter } from "./new-matter.tsx";
 import { RoomRail } from "./rail.tsx";
-import { tauriWindowControls } from "../transport/window-controls.ts";
+import { tauriWindowControls, type WindowControls } from "../transport/window-controls.ts";
 import { useWindowFrame } from "../window/use-window-frame.ts";
 
 /** The matter's papers from H8, or null: before they arrive, without H8, or when the read fails. */
@@ -61,17 +62,31 @@ const railWaits = (view: MattersView): boolean =>
 const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 /** The room: its own scope, and Base UI's CSP mode for everything inside it, so no part writes a style element. */
-export function Room({ transport }: { transport: HostTransport }) {
+export function Room({
+  transport,
+  windowControls,
+}: {
+  transport: HostTransport;
+  /** Optional, for tests: the window's controls in place of Tauri's, which the room makes itself inside the desktop
+   * app. */
+  windowControls?: WindowControls | null | undefined;
+}) {
   return (
     <RoomScopeProvider>
       <PartsRoot>
-        <RoomFrame transport={transport} />
+        <RoomFrame transport={transport} windowControls={windowControls} />
       </PartsRoot>
     </RoomScopeProvider>
   );
 }
 
-function RoomFrame({ transport }: { transport: HostTransport }) {
+function RoomFrame({
+  transport,
+  windowControls,
+}: {
+  transport: HostTransport;
+  windowControls: WindowControls | null | undefined;
+}) {
   const w = useWords();
   const room = useRoom();
   const { nodes } = room;
@@ -104,9 +119,19 @@ function RoomFrame({ transport }: { transport: HostTransport }) {
   // a matter's name as filed is English in both languages, the scratch matter's is the room's own; with no matter, the
   // frame's words stand in its place
   const scratch = open?.kind === "scratch";
+  const { platform } = useDisplay();
   // the window's own controls, inside the desktop app only
-  const [controls] = useState(() => (transport.kind === "tauri" ? tauriWindowControls() : null));
-  const caption = useWindowFrame(controls);
+  const [controls] = useState(() =>
+    windowControls !== undefined
+      ? windowControls
+      : transport.kind === "tauri"
+        ? tauriWindowControls()
+        : null,
+  );
+  // the caption buttons' commands, off the Mac: its own lights need none, and capabilities/frame.json grants none
+  // there, so asking whether the window is maximised would only be refused, on every resize
+  const wired = useMemo(() => (platform === "mac" ? null : controls), [platform, controls]);
+  const caption = useWindowFrame(wired);
   const title =
     open !== null
       ? scratch

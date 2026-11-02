@@ -335,8 +335,17 @@ fn main_is_the_only_window_the_app_builds() {
     let builders: Vec<String> = files
         .iter()
         .flat_map(|(path, text)| {
-            let count =
-                text.matches("WindowBuilder::").count() + text.matches("WebviewBuilder::").count();
+            // Every way tauri 2.12.4 builds a window or a webview.
+            let count = [
+                "WindowBuilder::",
+                "WebviewBuilder::",
+                "WebviewWindow::builder(",
+                "Window::builder(",
+                "Webview::builder(",
+            ]
+            .iter()
+            .map(|spelling| text.matches(spelling).count())
+            .sum::<usize>();
             std::iter::repeat_n(path.clone(), count)
         })
         .collect();

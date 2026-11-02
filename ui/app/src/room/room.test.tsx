@@ -11,6 +11,7 @@ import { t } from "@clauseo/components/lib/words.ts";
 import { vt } from "@clauseo/components/lib/words-versions.ts";
 import { afterEach, expect, test, vi } from "vitest";
 import type { MatterSummary } from "../transport/protocol.ts";
+import type { WindowControls } from "../transport/window-controls.ts";
 import { FakeTransport, type FakeHost } from "../transport/fake-transport.ts";
 import { uuid } from "../testing/stream-script.ts";
 import { detailed, fakeNext } from "./fake-next.ts";
@@ -55,12 +56,18 @@ function fake(
   return new FakeTransport(h);
 }
 
-async function mount(transport: FakeTransport, display: Partial<UiSettings> = {}) {
+async function mount(
+  transport: FakeTransport,
+  display: Partial<UiSettings> = {},
+  windowControls?: WindowControls,
+) {
   connectRoom(transport, display);
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  await act(async () => root?.render(<Room transport={transport} />));
+  await act(async () =>
+    root?.render(<Room transport={transport} windowControls={windowControls} />),
+  );
   // list_matters, then list_papers
   await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 }
@@ -379,4 +386,45 @@ test("the keyboard at the folded width: a row opened folds the rail and focus go
   );
   expect(rail()?.hasAttribute("data-open")).toBe(false);
   expect(document.activeElement).toBe(toggle());
+});
+
+/** Window controls that count their calls. */
+const countingControls = () =>
+  ({
+    minimise: vi.fn(async () => {}),
+    toggleMaximise: vi.fn(async () => {}),
+    close: vi.fn(async () => {}),
+    isMaximised: vi.fn(async () => false),
+  }) satisfies WindowControls;
+
+/** Two resizes, each with its animation frame run. */
+async function resizeTwice() {
+  for (let i = 0; i < 2; i++) {
+    await act(async () => window.dispatchEvent(new Event("resize")));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+  }
+}
+
+test("on the Mac the room asks the window nothing: its own lights need no window commands", async () => {
+  vi.stubGlobal("navigator", { platform: "MacIntel", userAgent: "Macintosh" });
+  try {
+    const controls = countingControls();
+    await mount(fake([NEWER], undefined, "mac"), {}, controls);
+    await resizeTwice();
+    expect(controls.isMaximised).not.toHaveBeenCalled();
+    expect(host?.querySelector(".room-lights[data-native]")).not.toBeNull();
+    expect(host?.querySelector(".room-caption")).toBeNull();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test("on Windows the room's caption buttons follow the window and reach it", async () => {
+  const controls = countingControls();
+  await mount(fake([NEWER], undefined, "windows"), {}, controls);
+  await resizeTwice();
+  expect(controls.isMaximised).toHaveBeenCalled();
+  const minimise = host?.querySelector<HTMLButtonElement>(".room-caption button");
+  await act(async () => minimise?.click());
+  expect(controls.minimise).toHaveBeenCalledTimes(1);
 });

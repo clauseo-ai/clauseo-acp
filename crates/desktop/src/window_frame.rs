@@ -3,7 +3,8 @@
 //!
 //! Contract:
 //! - The frame is chosen at compile time from `VITE_CLAUSEO_WINDOW`, the variable that also
-//!   switches the page (`ui/app/src/window/`): `room` gives `Own`, anything else or unset `Os`.
+//!   switches the page (`ui/app/src/room-build.ts`, and `App.tsx`'s inline copy, which
+//!   `room-build.test.ts` holds to it): `room` gives `Own`, anything else or unset `Os`.
 //!   rustc tracks `option_env!`, so the crate rebuilds when it changes, and one `pnpm tauri
 //!   dev` or `tauri build` sets both halves. The window is built with its frame, so nothing
 //!   flashes at start. U5 removes the switch on both sides.
