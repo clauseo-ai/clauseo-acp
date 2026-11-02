@@ -105,23 +105,18 @@ impl Bridge {
     /// catch-all, so a command the host adds does not compile here until the bridge rules on it
     /// (`docs/decisions/0019-app-stream-to-the-window.md`). Refuses what goes another way
     /// (`AnswerPermission`), what may not come from the window at all (`SetMode`,
-    /// `SetConfigOption`), and a `CreateMatter` whose folder ref this run's `pick_folder` did
-    /// not issue.
+    /// `SetConfigOption`), and a `CreateMatter` or `RelocateMatter` whose folder ref this run's
+    /// `pick_folder` did not issue.
     fn admit(&self, command: &HostCommand) -> Result<(), HostError> {
         match command {
             HostCommand::CreateMatter { source, .. } => {
                 let (MatterSource::NewFolder { folder } | MatterSource::ExistingFolder { folder }) =
                     source;
-                if !lock(&self.issued).contains(folder) {
-                    return Err(invalid(format!(
-                        "folder ref {folder} was not picked in this run"
-                    )));
-                }
-                Ok(())
+                self.picked(*folder)
             }
-            // Slots, once they merge. H3's `RelocateMatter` (#135) takes only a folder ref this
-            // run's `pick_folder` issued, as `CreateMatter` does. H5 and H20's `UpdateMatter`,
-            // `OpenMatter` and `ForgetMatter` name a matter only. H20's `CreateMatter` source
+            HostCommand::RelocateMatter { folder, .. } => self.picked(*folder),
+            // Slots, once they merge. H5 and H20's `UpdateMatter`, `OpenMatter` and
+            // `ForgetMatter` name a matter only. H20's `CreateMatter` source
             // `default_location` carries no folder ref and passes; the check above stays on
             // `new_folder` and `existing_folder`.
             HostCommand::CreateThread { .. }
@@ -147,6 +142,17 @@ impl Bridge {
             HostCommand::SetMode { .. } | HostCommand::SetConfigOption { .. } => Err(invalid(
                 "modes and config options are not settable from the window yet",
             )),
+        }
+    }
+
+    /// Whether this run's `pick_folder` issued `folder`: `command.invalid` when it did not.
+    fn picked(&self, folder: FolderRefId) -> Result<(), HostError> {
+        if lock(&self.issued).contains(&folder) {
+            Ok(())
+        } else {
+            Err(invalid(format!(
+                "folder ref {folder} was not picked in this run"
+            )))
         }
     }
 
