@@ -1,0 +1,206 @@
+//! The install folders: one `<hash>` per agent with only its own packages, an incomplete
+//! folder redone, no links, and a Node below 22 on `PATH` passed over.
+
+use std::collections::BTreeSet;
+
+use clauseo_agents::{InstallState, Installed};
+
+use crate::support::{
+    A_PACKAGES, B_PACKAGES, Events, Fixture, agent_a, agent_b, links_under, tarball_path,
+};
+use crate::write;
+
+/// Installs `agent` and gives its `Installed`.
+fn install_ready(
+    agents: &clauseo_agents::Agents,
+    events: &Events,
+    agent: &clauseo_protocol::AgentId,
+) -> Installed {
+    agents.install(agent);
+    let (_, last) = events.until_end(agent);
+    assert!(matches!(last, InstallState::Ready { .. }), "{last:?}");
+    agents.installed(agent).unwrap()
+}
+
+/// The tarball paths requested so far, from request `from` on.
+fn paths_since(fx: &Fixture, from: usize) -> BTreeSet<String> {
+    fx.registry.requests()[from..]
+        .iter()
+        .map(|request| request.path.clone())
+        .collect()
+}
+
+#[test]
+fn each_agent_fetches_only_its_own_packages_into_its_own_hash_folder() {
+    let fx = Fixture::new("separate");
+    let (agents, events) = fx.start();
+    events.first_states();
+    let a = install_ready(&agents, &events, &agent_a());
+    let after_a = fx.registry.requests().len();
+    let want_a: BTreeSet<String> = A_PACKAGES.iter().map(|n| tarball_path(n)).collect();
+    assert_eq!(paths_since(&fx, 0), want_a);
+    let b = install_ready(&agents, &events, &agent_b());
+    let want_b: BTreeSet<String> = B_PACKAGES.iter().map(|n| tarball_path(n)).collect();
+    assert_eq!(paths_since(&fx, after_a), want_b);
+    assert_ne!(a.folder.file_name(), b.folder.file_name());
+    for (installed, root, other) in [
+        (&a, "adapter-a", "adapter-b"),
+        (&b, "adapter-b", "adapter-a"),
+    ] {
+        assert!(installed.folder.join("clauseo-receipt.json").is_file());
+        assert!(installed.script.is_file(), "{}", installed.script.display());
+        assert!(installed.folder.join("node_modules").join(root).is_dir());
+        assert!(!installed.folder.join("node_modules").join(other).exists());
+    }
+    assert!(a.folder.join("node_modules/peer-a").is_dir());
+    assert!(a.folder.join("node_modules/dep-a").is_dir());
+    assert!(b.folder.join("node_modules/dep-b").is_dir());
+}
+
+#[test]
+fn a_folder_with_no_receipt_is_redone() {
+    let fx = Fixture::new("no-receipt");
+    let hash = fx
+        .config
+        .snapshot
+        .install_hash(&agent_a(), fx.config.platform)
+        .unwrap();
+    let folder = fx.install_root(&agent_a()).join(&hash);
+    write::write(&folder.join("node_modules/adapter-a/stale.js"), "stale").unwrap();
+    let tmp = fx.install_root(&agent_a()).join(format!(".tmp-{hash}-1"));
+    write::write(&tmp.join("package.json"), "{}").unwrap();
+    let (agents, events) = fx.start();
+    let (a, _) = events.first_states();
+    assert!(matches!(a, InstallState::Missing { .. }), "{a:?}");
+    assert!(!folder.exists());
+    assert!(!tmp.exists());
+    let installed = install_ready(&agents, &events, &agent_a());
+    assert_eq!(installed.folder, folder);
+    assert!(folder.join("clauseo-receipt.json").is_file());
+    assert!(!folder.join("node_modules/adapter-a/stale.js").exists());
+
+    // A fresh start finds the receipt: Ready at once, with no request.
+    drop(agents);
+    let before = fx.registry.requests().len();
+    let (again, events) = fx.start();
+    let (a, _) = events.first_states();
+    assert!(matches!(a, InstallState::Ready { .. }), "{a:?}");
+    assert_eq!(again.installed(&agent_a()), Some(installed));
+    assert_eq!(fx.registry.requests().len(), before);
+}
+
+#[test]
+fn no_install_folder_holds_a_link() {
+    let fx = Fixture::new("links");
+    let (agents, events) = fx.start();
+    events.first_states();
+    let a = install_ready(&agents, &events, &agent_a());
+    let b = install_ready(&agents, &events, &agent_b());
+    assert_eq!(
+        links_under(&fx.data.path().join("agents")),
+        Vec::<std::path::PathBuf>::new()
+    );
+    for installed in [a, b] {
+        assert!(!installed.folder.join("node_modules/.bin").exists());
+    }
+    // After Ready the install's downloads and npm's cache are gone.
+    let downloads = fx.data.path().join("agents/downloads");
+    let left: Vec<_> = std::fs::read_dir(&downloads)
+        .map(|dir| dir.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default();
+    assert_eq!(left, Vec::<std::path::PathBuf>::new());
+    assert!(!fx.data.path().join("agents/npm-cache").exists());
+}
+
+#[cfg(unix)]
+mod node_20 {
+    use std::io::Write as _;
+
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+
+    use super::install_ready;
+    use crate::support::{
+        A_PACKAGES, BASE, Fixture, NODE_VERSION, agent_a, node_entry, node_path, platform,
+        real_node, snapshot,
+    };
+    use crate::write;
+    use clauseo_agents::InstallState;
+
+    /// A Node archive wrapping the real Node: `bin/node` a script that execs it, and an
+    /// `npm-cli.js` that requires the real one.
+    fn wrapper_archive() -> Vec<u8> {
+        let (program, cli) = real_node();
+        let top = format!("node-v{NODE_VERSION}-{}", platform().node_name());
+        let node = format!("#!/bin/sh\nexec '{}' \"$@\"\n", program.display());
+        let npm = format!(
+            "require({});\n",
+            serde_json::to_string(&cli.display().to_string()).unwrap()
+        );
+        let mut tar = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
+        for (path, bytes, mode) in [
+            ("bin/node", node.as_bytes(), 0o755),
+            ("lib/node_modules/npm/bin/npm-cli.js", npm.as_bytes(), 0o644),
+        ] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(u64::try_from(bytes.len()).unwrap());
+            header.set_mode(mode);
+            header.set_mtime(0);
+            tar.append_data(&mut header, format!("{top}/{path}"), bytes)
+                .unwrap();
+        }
+        let mut gz = tar.into_inner().unwrap();
+        gz.flush().unwrap();
+        gz.finish().unwrap()
+    }
+
+    #[test]
+    fn a_node_20_on_path_is_not_used() {
+        let mut fx = Fixture::new("node20");
+        let fake = fx.data.path().join("fake-node20");
+        write::write_executable(&fake.join("bin/node"), "#!/bin/sh\necho v20.11.0\n").unwrap();
+        write::write(&fake.join("lib/node_modules/npm/bin/npm-cli.js"), "").unwrap();
+        fx.config.node_search.path = Some(fake.join("bin").into_os_string());
+        let archive = wrapper_archive();
+        let entry = node_entry(Some(&archive));
+        fx.registry.route(&node_path(&entry), archive.clone());
+        fx.config.snapshot = snapshot(BASE, entry, 10_000);
+
+        let (agents, events) = fx.start();
+        let (a, _) = events.first_states();
+        let packages: usize = A_PACKAGES.iter().map(|n| fx.tarballs[n].len()).sum();
+        let want = u64::try_from(packages + archive.len()).unwrap();
+        assert_eq!(
+            a,
+            InstallState::Missing {
+                download_bytes: want
+            }
+        );
+
+        let installed = install_ready(&agents, &events, &agent_a());
+        let runtime = fx
+            .data
+            .path()
+            .join("agents/runtime")
+            .join(format!("node-v{NODE_VERSION}-{}", platform().node_name()));
+        assert_eq!(installed.node, runtime.join("bin/node"));
+        let receipt = std::fs::read(installed.folder.join("clauseo-receipt.json")).unwrap();
+        let receipt: serde_json::Value = serde_json::from_slice(&receipt).unwrap();
+        assert_eq!(
+            receipt["node"],
+            runtime.join("bin/node").display().to_string()
+        );
+        assert_eq!(receipt["node_version"], format!("v{NODE_VERSION}"));
+        assert!(runtime.join("clauseo-runtime.json").is_file());
+        assert!(
+            fx.registry
+                .requests()
+                .iter()
+                .any(|r| r.path == node_path_of(&fx))
+        );
+    }
+
+    fn node_path_of(fx: &Fixture) -> String {
+        node_path(fx.config.snapshot.node())
+    }
+}

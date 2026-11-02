@@ -27,13 +27,15 @@ Measured on Linux x64 on 2026-11-02 with Node 24.22.0 and npm 11.19.1:
 
 ## Decision
 
-**The crate.** `clauseo-agents` depends on `protocol` (`AgentId`), `process`, `settings`,
-`serde`, `serde_json`, `futures`, `async-channel`, `async-io`, `ureq` (rustls, the platform
-verifier, blocking, on the install's own thread), `sha2`, `base64`, `flate2`, `tar`, `zip`,
-`thiserror` and `dunce`, with `nix` on Unix and `windows` on Windows. It also depends on
-`rustls`, the one ureq uses, to classify TLS errors and for the test proxy's server side. Beyond
-the brief's list are `rustls`, `thiserror`, `dunce`, and `nix` and `windows` (the free disk
-space, and the Windows proxy setting read from the registry). `rcgen` comes only with the
+**The crate.** `clauseo-agents` depends on `protocol` (`AgentId`), `process`, `serde`,
+`serde_json`, `futures`, `async-channel`, `ureq` (rustls, the platform verifier, blocking, on
+the install's own thread), `sha2`, `base64`, `flate2`, `tar`, `zip`, `thiserror` and `dunce`,
+with `nix` on Unix and `windows` on Windows. It also depends on `rustls`, the one ureq uses, to
+classify TLS errors and for the test proxy's server side. Beyond the brief's list are `rustls`,
+`thiserror`, `dunce`, and `nix` and `windows` (the free disk space, and the Windows proxy
+setting read from the registry). The brief's `settings` and `async-io` are not normal
+dependencies: the caller passes `Locations::data_dir` in, and timers come through
+`process::Timer`. Only the example uses `settings` (a dev-dependency). `rcgen` comes only with the
 `test-support` feature, for the TLS-inspecting test proxy. It never depends on `sandbox`:
 installs run outside it. It has no tokio and no tauri. Idle stop and resume are `host`'s (R20b).
 

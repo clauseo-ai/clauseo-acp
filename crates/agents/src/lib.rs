@@ -25,7 +25,7 @@
 //!
 //! # Interface
 //!
-//! - `Agents::start(config, launcher, timer)` gives an `Agents` and the `Receiver` of
+//! - [`Agents::start`]`(config, launcher, timer)` gives an [`Agents`] and the `Receiver` of
 //!   [`AgentsEvent`]s; `install`, `pause`, `retry(agent, use_system_proxy)`, `state` and
 //!   `installed`.
 //! - [`AgentsConfig`], [`InstallConfig`], [`NodeSearch`], [`Clock`] and [`SystemClock`].
@@ -44,14 +44,17 @@
 //!   outside any sandbox, as `node <script>`: never `npm.cmd`, a shell or a `PATH` lookup.
 //! - No log holds a URL's user name or password, raw npm output, or a path outside the data
 //!   folder.
+//! - Callers never wait on I/O: the work runs on the worker thread and one thread per install.
+//!   Installs run one after another, and a paused install sends nothing after its `Paused`.
 //! - Nothing runs while the app is idle once installs are done.
 //!
 //! # Depends on
 //!
-//! `protocol` (`AgentId`), `process`, `settings`, `serde`, `serde_json`, `futures`,
-//! `async-channel`, `async-io`, `ureq` (rustls, blocking, on its own thread), `sha2`, `base64`,
-//! `flate2`, `tar`, `zip`, `thiserror`, `dunce`; `nix` on Unix and `windows` on Windows (free
-//! disk space). Never `sandbox`, `tauri` or `tokio`.
+//! `protocol` (`AgentId`), `process`, `serde`, `serde_json`, `futures`, `async-channel`,
+//! `ureq` (rustls, blocking, on the install's own thread), `rustls`, `sha2`, `base64`, `flate2`,
+//! `tar`, `zip`, `thiserror`, `dunce`; `nix` on Unix and `windows` on Windows (free disk space,
+//! the Windows proxy setting); `rcgen` with `test-support` only. Never `sandbox`, `tauri` or
+//! `tokio`.
 //!
 //! # Start reading
 //!
