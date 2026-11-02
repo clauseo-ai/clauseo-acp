@@ -28,14 +28,17 @@ use tauri::async_runtime;
 use super::{Feed, Forward, Window};
 use crate::bridge::{PRINCIPAL, lock};
 
-/// Which app-feed events a window's channel carries: an allow-list keyed on its label (0028).
-/// `main` carries them all; any other window `settings_changed` alone, so the settings window
-/// never gets the matter and thread lists (0023), nor an app event the host adds later.
+/// Which feed events a window's channel carries: an allow-list keyed on its label (0028).
+/// `main` carries them all; any other window the app feed's `settings_changed` alone, so the
+/// settings window never gets the matter and thread lists (0023), an app event the host adds
+/// later, or a limits event: `open_stream` follows the limits for `main` alone, and a limits
+/// feed on another window would still send nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppEvents {
-    /// Every app event: `main`.
+    /// Every app and limits event: `main`.
     All,
-    /// `settings_changed` only: the settings window, and any other label.
+    /// The app feed's `settings_changed` only, no limits: the settings window, and any other
+    /// label.
     SettingsOnly,
 }
 
@@ -52,9 +55,10 @@ impl AppEvents {
     /// Whether an event of `feed`, as the host encoded it, goes on the channel. Checked before
     /// it is counted, so an ack counts only what the window received. The host writes each
     /// event as its one key first (`{"settings_changed":...}`), so the key's prefix names it.
-    fn carries(self, feed: Feed, json: &str) -> bool {
+    pub(in crate::bridge) fn carries(self, feed: Feed, json: &str) -> bool {
         match (feed, self) {
-            (Feed::Limits, _) | (Feed::App, Self::All) => true,
+            (_, Self::All) => true,
+            (Feed::Limits, Self::SettingsOnly) => false,
             (Feed::App, Self::SettingsOnly) => json.starts_with(r#"{"settings_changed":"#),
         }
     }
