@@ -16,7 +16,7 @@ import { mt } from "@clauseo/components/lib/words-matters.ts";
 import { listOf, vt } from "@clauseo/components/lib/words-versions.ts";
 import type { ThreadId, Timestamp } from "../../transport/protocol.ts";
 import { clockOf } from "../when.ts";
-import { changedSince, type Ask, type Done, type Snapshot, type Unsaved } from "./controller.ts";
+import { changedSince, type Ask, type Done, type Snapshot, type Unsaved } from "./state.ts";
 import { fileName } from "./timeline.ts";
 
 /** A conversation's name as list_threads gives it; one without a title is a new conversation. */
