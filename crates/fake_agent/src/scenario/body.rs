@@ -5,7 +5,9 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
-use super::{Expect, ExpectResponse, FileOp, OnStdinClose, Reply, StepKind, Wait};
+use super::{
+    Branch, BranchStep, Expect, ExpectResponse, FileOp, OnStdinClose, Reply, StepKind, Wait,
+};
 use crate::{EXIT_LOAD, EXIT_MISMATCH};
 
 /// The most times one `stderr` step may repeat its line. Well above every bundled scenario (200)
@@ -51,6 +53,7 @@ enum StepBody {
     Expect(ExpectBody),
     ExpectResponse(ExpectResponseBody),
     All(Vec<Map<String, Value>>),
+    OneOf(Vec<Vec<Value>>),
     Respond(RespondBody),
     Update(UpdateBody),
     Notify(NotifyBody),
@@ -193,6 +196,7 @@ pub(super) fn step(value: Value) -> Result<Body, String> {
         StepBody::Expect(b) => (StepKind::Wait(Wait::Expect(expect(b)?)), false),
         StepBody::ExpectResponse(b) => (StepKind::Wait(Wait::Response(expect_response(b)?)), false),
         StepBody::All(items) => (StepKind::All(all(items)?), false),
+        StepBody::OneOf(branches) => (StepKind::OneOf(one_of(branches)?), false),
         StepBody::Respond(b) => {
             let reply = reply("respond", b.result, b.error)?;
             (StepKind::Respond { to: b.to, reply }, b.raw)
@@ -308,6 +312,62 @@ fn all(items: Vec<Map<String, Value>>) -> Result<Vec<Wait>, String> {
             }
         })
         .collect()
+}
+
+/// A `one_of` list: each branch is a non-empty list of steps whose first step is an `expect`.
+/// A branch may hold another `one_of`, but not an `include`.
+fn one_of(branches: Vec<Vec<Value>>) -> Result<Vec<Branch>, String> {
+    if branches.is_empty() {
+        return Err("one_of: the list of branches is empty".to_owned());
+    }
+    branches
+        .into_iter()
+        .enumerate()
+        .map(|(index, steps)| {
+            branch(steps).map_err(|m| format!("one_of: branch {}: {m}", index + 1))
+        })
+        .collect()
+}
+
+fn branch(steps: Vec<Value>) -> Result<Branch, String> {
+    let mut steps = steps.into_iter();
+    let Some(first) = steps.next() else {
+        return Err("the branch is empty".to_owned());
+    };
+    let key = step_key(&first);
+    let Parsed::Step(StepKind::Wait(Wait::Expect(first))) =
+        step(first).map_err(|m| format!("step 1: {m}"))?.kind
+    else {
+        return Err(format!(
+            "step 1 is `{key}`; a branch must start with an `expect`"
+        ));
+    };
+    let rest = steps
+        .enumerate()
+        .map(|(index, value)| {
+            let number = index + 2;
+            match step(value).map_err(|m| format!("step {number}: {m}"))? {
+                Body {
+                    kind: Parsed::Step(kind),
+                    raw,
+                } => Ok(BranchStep { kind, raw }),
+                Body {
+                    kind: Parsed::Include(_),
+                    ..
+                } => Err(format!("step {number}: a branch may not include")),
+            }
+        })
+        .collect::<Result<_, String>>()?;
+    Ok(Branch { first, rest })
+}
+
+/// The step key of a step line that parsed: its one key other than `note`.
+fn step_key(value: &Value) -> String {
+    value
+        .as_object()
+        .and_then(|map| map.keys().find(|key| *key != "note"))
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn stderr(b: StderrBody) -> Result<StepKind, String> {

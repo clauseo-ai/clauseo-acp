@@ -165,3 +165,128 @@ fn pace_zero_never_pauses() {
     assert_eq!(lines.len(), 3);
     assert!(pauses.is_empty(), "{pauses:?}");
 }
+
+/// A `one_of` on `session/new` or `session/load`, then one prompt both branches answer.
+fn new_or_load() -> Scenario {
+    scenario_of(&[
+        r#"{"one_of":[
+            [{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}},
+             {"respond":{"to":"new","result":{"sessionId":"sess-1"}}}],
+            [{"expect":{"method":"session/load","as":"load","params":{"sessionId":"sess-1"}}},
+             {"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-0","content":{"type":"text","text":"Replayed."}}}},
+             {"respond":{"to":"load","result":{}}}]
+        ]}"#
+        .replace('\n', "")
+        .as_str(),
+        r#"{"expect":{"method":"session/prompt","as":"p1","params":{"sessionId":"sess-1"}}}"#,
+        r#"{"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}"#,
+    ])
+}
+
+const NEW: &str =
+    r#"{"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/w","mcpServers":[]}}"#;
+const LOAD: &str = r#"{"jsonrpc":"2.0","id":1,"method":"session/load","params":{"sessionId":"sess-1","cwd":"/w","mcpServers":[]}}"#;
+
+#[test]
+fn one_of_takes_the_session_new_branch_and_goes_on_after_it() {
+    let (stop, lines) = play(&new_or_load(), &format!("{NEW}\n{PROMPT}\n"));
+    assert_eq!(outcome(stop), None);
+    assert_eq!(
+        lines,
+        [
+            json!({"jsonrpc": "2.0", "id": 1, "result": {"sessionId": "sess-1"}}),
+            json!({"jsonrpc": "2.0", "id": 2, "result": {"stopReason": "end_turn"}}),
+        ]
+    );
+}
+
+#[test]
+fn one_of_takes_the_session_load_branch_and_goes_on_after_it() {
+    let (stop, lines) = play(&new_or_load(), &format!("{LOAD}\n{PROMPT}\n"));
+    assert_eq!(outcome(stop), None);
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    // The branch's update goes to the session the load named.
+    assert_eq!(lines[0]["params"]["sessionId"], "sess-1");
+    assert_eq!(lines[0]["params"]["update"]["content"]["text"], "Replayed.");
+    assert_eq!(lines[1], json!({"jsonrpc": "2.0", "id": 1, "result": {}}));
+    assert_eq!(lines[2]["result"]["stopReason"], "end_turn");
+}
+
+#[test]
+fn one_of_with_no_matching_branch_is_a_mismatch() {
+    let (stop, lines) = play(&new_or_load(), &format!("{PROMPT}\n"));
+    assert_eq!(
+        outcome(stop).as_deref(),
+        Some(
+            "t.jsonl:2: expected one of: request session/new, request session/load; got \
+             session/prompt"
+        )
+    );
+    assert!(lines.is_empty(), "{lines:?}");
+    // The right method with the wrong params names the params, as `expect` does.
+    let other = LOAD.replace("sess-1", "sess-9");
+    let (stop, _) = play(&new_or_load(), &format!("{other}\n"));
+    assert_eq!(
+        outcome(stop).as_deref(),
+        Some("t.jsonl:2: session/load params: /sessionId: expected \"sess-1\", got \"sess-9\"")
+    );
+}
+
+/// With one branch, a mismatch reads exactly as the same `expect` step's does.
+#[test]
+fn one_of_with_one_branch_fails_as_expect_does() {
+    let expect = r#"{"expect":{"method":"session/new","as":"new"}}"#;
+    let alone = scenario_of(&[expect]);
+    let wrapped = scenario_of(&[&format!(r#"{{"one_of":[[{expect}]]}}"#)]);
+    let input = format!("{PROMPT}\n");
+    let (alone, _) = play(&alone, &input);
+    let (wrapped, _) = play(&wrapped, &input);
+    assert_eq!(
+        outcome(wrapped).as_deref(),
+        Some("t.jsonl:2: expected request session/new, got session/prompt")
+    );
+    assert_eq!(
+        outcome(alone).as_deref(),
+        Some("t.jsonl:2: expected request session/new, got session/prompt")
+    );
+}
+
+#[test]
+fn a_nested_one_of_plays_inside_its_branch() {
+    let scenario = scenario_of(&[&r#"{"one_of":[[
+        {"expect":{"method":"session/new","as":"new"}},
+        {"one_of":[
+            [{"expect":{"method":"session/prompt","as":"p1","params":{"prompt":[{"text":"a"}]}}},
+             {"respond":{"to":"p1","result":{"stopReason":"end_turn"}}}],
+            [{"expect":{"method":"session/prompt","as":"p2"}},
+             {"respond":{"to":"p2","result":{"stopReason":"cancelled"}}}]
+        ]}
+    ]]}"#
+        .replace('\n', "")]);
+    let prompt = |text: &str| {
+        format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{{"sessionId":"sess-1","prompt":[{{"type":"text","text":"{text}"}}]}}}}"#
+        )
+    };
+    for (text, stop_reason) in [("a", "end_turn"), ("b", "cancelled")] {
+        let (stop, lines) = play(&scenario, &format!("{NEW}\n{}\n", prompt(text)));
+        assert_eq!(outcome(stop), None);
+        assert_eq!(lines[0]["result"]["stopReason"], stop_reason, "{text}");
+    }
+}
+
+#[test]
+fn pace_counts_updates_across_a_branch() {
+    let update = r#"{"update":{"update":{"sessionUpdate":"agent_message_chunk","messageId":"m-answer-1","content":{"type":"text","text":"Clause."}},"session":"sess-1"}}"#;
+    let one_of = format!(
+        r#"{{"one_of":[[{{"expect":{{"method":"session/prompt","as":"p1"}}}},{update},{update}]]}}"#
+    );
+    let scenario = scenario_of(&[update, &one_of, update]);
+    let pace = Duration::from_millis(7);
+    let (stop, lines, pauses) = play_paced(&scenario, &format!("{PROMPT}\n"), pace);
+    assert_eq!(outcome(stop), None);
+    assert_eq!(lines.len(), 4);
+    // Before the branch's second update and before the update after the one_of; the branch's
+    // first update follows its expect.
+    assert_eq!(pauses, [pace, pace]);
+}

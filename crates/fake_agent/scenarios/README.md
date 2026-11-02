@@ -16,6 +16,7 @@ The code lives in `crates/fake_agent/src/`.
 - [Steps](#steps)
 - [Patterns](#patterns)
 - [Labels and ids](#labels-and-ids)
+- [Branches: `one_of`](#branches-one_of)
 - [Includes](#includes)
 - [`raw` and SDK validation](#raw-and-sdk-validation)
 - [Running](#running)
@@ -73,6 +74,7 @@ a `respond` step sent, or of the last `session/load` request an `expect` matched
 | `expect` | `method`: string. `as`: string, the label (see [Labels](#labels-and-ids)). `params`: optional pattern. `off`: optional list of JSON pointers, default `[]`. | Reads the next client line. It must be a request with this `method` when `as` is set, or a notification with this `method` when it is not. Its `params` must match the pattern and every `off` pointer must be off (see [Patterns](#patterns)). Without `params`, any params match. A matched request is remembered under its label. | `as` is present for every method except `session/cancel` and `$/cancel_request`, and absent for those two. The label is not used twice. Every `off` pointer starts with `/`. |
 | `expect_response` | `id`: string. One of `result` or `error`: a pattern. | Reads the next client line. It must be a response to the agent's request `id`, of the same kind (result or error), and match the pattern. | `id` names an earlier `request` step. Exactly one of `result` and `error`. |
 | `all` | A non-empty list. Each item is `{"expect": {...}}` or `{"expect_response": {...}}`. | Reads client lines until every item has matched once, in any order. Each line must match one item that has not matched yet. | Each item as for its own step. The list is not empty. Labels from the items count only after the whole `all` step. |
+| `one_of` | A non-empty list of branches. Each branch is a non-empty list of steps whose first step is an `expect`. | Reads the next client line and plays the first branch whose first `expect` matches it (as that `expect` would, label included), then the rest of that branch, then the step after the `one_of`. No branch matching is a mismatch. See [Branches](#branches-one_of). | Each step as for its own kind. No empty list, no empty branch, every branch starts with `expect`, no `include` in a branch. A branch's labels and request ids stay inside it. |
 | `respond` | `to`: label. One of `result` or `error`. `raw`: optional bool, default `false`. | Sends a response to the request labelled `to`, with that request's `id` (string or number, as the client sent it). `{{cwd}}` is replaced in the value. A result for `session/new` with a `sessionId` sets the current session. | `to` names an earlier `expect` label and is not answered twice. Exactly one of `result` and `error`. Unless `raw`: the value survives the SDK type of the labelled method's response, or `Error` for `error`. |
 | `update` | `update`: object, the `update` of a `session/update`. `session`: optional session id, default the current session. `raw`: optional bool, default `false`. | Sends the notification `session/update` with `params` `{"sessionId": ..., "update": ...}`. `{{cwd}}` is replaced. Fails (exit 3) when there is no `session` and no current session. | Unless `raw`: the update survives the SDK's `SessionUpdate`. |
 | `notify` | `method`: string. `params`: optional. `raw`: optional bool, default `false`. | Sends a notification. Leaves `params` out when it is not given. `{{cwd}}` is replaced. | Unless `raw`: `method` is one of `session/update`, `elicitation/complete` and `$/cancel_request`, and `params` survive its SDK type. |
@@ -159,12 +161,53 @@ system, terminal and subagent capabilities out, or turned off:
   `expect` except for the two notifications the client sends, `session/cancel` and
   `$/cancel_request`, which must not have one. Without `as`, an `expect` matches only a
   notification; with it, only a request. Labels are unique in the scenario, includes counted:
-  a scenario that includes `handshake.jsonl` cannot reuse `init` or `new`.
+  a scenario that includes `handshake.jsonl` cannot reuse `init` or `new`. The branches of a
+  `one_of` are the exception: see [Branches](#branches-one_of).
 - A label need not be answered. Leaving a request unanswered is how `cancel-unanswered` tests
   the client's fallback.
 - **`request.id`** is the id the agent sends, always as a JSON string. Ids are unique in the
   scenario. `expect_response.id` must name an earlier `request` step; the client's response
   must carry that id as the same string.
+
+## Branches: `one_of`
+
+A scenario plays from its first step on every launch. `one_of` lets one file answer more than one
+opening, such as `session/new` on the first launch and `session/load` when the client relaunches
+the agent and resumes the session. Beside `all`, which takes several messages in any order,
+`one_of` takes one message and picks what follows from it.
+
+The bundled scenario `exit-mid-turn-then-load` uses it for an agent that stops and is relaunched:
+after `session/new` it plays `exit-mid-turn` (one chunk, 200 stderr lines, exit 1); after
+`session/load` of `sess-1` it replays that chunk, answers the load, then answers the next prompt
+with `Second answer.` and ends the turn. Shortened:
+
+```json
+{"one_of":[
+  [{"expect":{"method":"session/new","as":"new","params":{"cwd":"{{any}}"}}},{"respond":{"to":"new","result":{"sessionId":"sess-1"}}},{"exit":{"code":1}}],
+  [{"expect":{"method":"session/load","as":"load","params":{"sessionId":"sess-1","cwd":"{{any}}"}}},{"respond":{"to":"load","result":{}}}]
+]}
+```
+
+The step is one line in the file; it is wrapped here to read.
+
+- The branches are tried in order, and the first whose first `expect` matches the client line
+  wins: method, kind (request or notification), `params` pattern and `off` pointers, the same
+  matching an `expect` step does. Two branches may expect the same method with different
+  `params`.
+- No branch matching is a mismatch (exit 3). The message is the params mismatch of the first
+  branch that expects this method, if any, else `expected one of: request session/new, request
+  session/load; got session/prompt`. With one branch it reads exactly as that `expect` would.
+- A branch may hold any step, another `one_of` included, but not `include`.
+- Every step inside a `one_of`, its branches' steps included, reports the `one_of`'s line, in
+  load errors and mismatches. A load error inside a branch names the branch and the step, such
+  as `t.jsonl:4: one_of: branch 2: step 1 is \`respond\`; a branch must start with an \`expect\``.
+- Each branch is checked from what came before the `one_of`. A branch may answer an earlier
+  label, and two branches may use the same label or request id. A label or request id set in a
+  branch cannot be used after the `one_of`: a later `respond` or `expect_response` cannot name
+  it (only one branch ran), and a later step cannot reuse it. An earlier label that any branch
+  answers counts as answered after the `one_of`.
+- `one_of` keeps no state between launches: each launch picks by the message it gets. A scenario
+  that must answer the same message differently on two launches cannot be written with it.
 
 ## Includes
 
@@ -294,7 +337,8 @@ CLAUSEO_REGENERATE_SCOREBOARD=1 cargo nextest run -p clauseo-fake_agent scoreboa
 2. Write the header on line 1: `scenario` equal to `<name>`, a `description` that says what the
    client must do, and `on_stdin_close`.
 3. Start with `{"include":"handshake.jsonl"}` unless the scenario tests the opening itself
-   (as `initialize-caps` and `load-replay` do) or needs no handshake (`grandchild`). Do not
+   (as `initialize-caps` and `load-replay` do), branches on it (`exit-mid-turn-then-load`), or
+   needs no handshake (`grandchild`). Do not
    reuse its labels `init` and `new`.
 4. Write the steps. Give every client request an `as` label and answer it with `respond`. Give
    every agent `request` a unique `id` and wait for the answer with `expect_response`. Use

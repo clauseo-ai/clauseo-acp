@@ -43,6 +43,7 @@ bundled! {
         "elicitation-form",
         "elicitation-url",
         "exit-mid-turn",
+        "exit-mid-turn-then-load",
         "files-multi-turn",
         "files-one-turn",
         "grandchild",

@@ -1,9 +1,9 @@
-//! `prompt-stream`, `malformed-line` and `exit-mid-turn`.
+//! `prompt-stream`, `malformed-line`, `exit-mid-turn` and `exit-mid-turn-then-load`.
 
 use clauseo_fake_agent::{EXIT_MISMATCH, EXIT_OK};
 use serde_json::json;
 
-use crate::harness::{Agent, Scratch, prompt, result, update};
+use crate::harness::{Agent, Scratch, prompt, request, result, update};
 
 fn chunk(kind: &str, id: &str, text: &str) -> serde_json::Value {
     update(
@@ -102,4 +102,72 @@ fn exit_mid_turn_code_and_stderr() {
     assert!(lines.iter().all(|line| line.len() + 1 == 40), "{lines:?}");
     assert_eq!(finished.stderr.len(), 8000);
     assert!(finished.stderr.len() > 4096);
+}
+
+/// Two launches of `exit-mid-turn-then-load`, as a host relaunching a stopped agent makes: the
+/// first, after `session/new`, exits mid-turn; the second, after `session/load`, answers.
+#[test]
+fn exit_mid_turn_then_load_answers_after_the_relaunch() {
+    let dir = Scratch::new("exit_mid_turn_then_load");
+    let mut first = Agent::start("exit-mid-turn-then-load", dir.path());
+    first.handshake(&dir.cwd());
+    first.send(&prompt(2, "Go"));
+    first.expect_line(&chunk(
+        "agent_message_chunk",
+        "m-answer-1",
+        "Starting on the answer.",
+    ));
+    assert_eq!(first.expect_exit(1).stderr.lines().count(), 200);
+
+    let mut second = Agent::start("exit-mid-turn-then-load", dir.path());
+    second.send(&request(
+        0,
+        "initialize",
+        json!({"protocolVersion": 1, "clientCapabilities": {}}),
+    ));
+    assert_eq!(
+        second.read_line()["result"]["agentCapabilities"]["loadSession"],
+        true
+    );
+    second.send(&request(
+        1,
+        "session/load",
+        json!({"sessionId": "sess-1", "cwd": dir.cwd(), "mcpServers": []}),
+    ));
+    second.expect_line(&chunk(
+        "agent_message_chunk",
+        "m-answer-1",
+        "Starting on the answer.",
+    ));
+    second.expect_line(&result(1, json!({})));
+    second.send(&prompt(2, "Go on"));
+    second.expect_line(&chunk(
+        "agent_message_chunk",
+        "m-answer-2",
+        "Second answer.",
+    ));
+    second.expect_line(&result(2, json!({"stopReason": "end_turn"})));
+    assert_eq!(second.expect_exit(EXIT_OK).stderr, "");
+}
+
+#[test]
+fn exit_mid_turn_then_load_refuses_a_load_of_another_session() {
+    let dir = Scratch::new("exit_mid_turn_then_load_other");
+    let mut agent = Agent::start("exit-mid-turn-then-load", dir.path());
+    agent.send(&request(
+        0,
+        "initialize",
+        json!({"protocolVersion": 1, "clientCapabilities": {}}),
+    ));
+    agent.read_line();
+    agent.send(&request(
+        1,
+        "session/load",
+        json!({"sessionId": "sess-2", "cwd": dir.cwd(), "mcpServers": []}),
+    ));
+    assert_eq!(
+        agent.expect_exit(EXIT_MISMATCH).stderr,
+        "fake_agent: exit-mid-turn-then-load.jsonl:4: session/load params: /sessionId: expected \
+         \"sess-1\", got \"sess-2\"\n"
+    );
 }
