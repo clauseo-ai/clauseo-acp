@@ -10,6 +10,8 @@
 // - A polite live region says how many commands the menu opened with, then the highlighted one's name as the arrows
 //   move: a textarea takes no combobox role, and VoiceOver follows aria-activedescendant reliably only on one.
 // - It stands at the caret, placed again as the window resizes or anything scrolls while it is open.
+// - A pick is a token (composer-tokens.ts), held and drawn from this chunk as long as the menu lives; a `/` that starts
+//   a token is no trigger.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/cn.ts";
@@ -29,6 +31,7 @@ import {
   slashAt,
   type Slash,
 } from "./composer-menu-logic.ts";
+import { holdTokens, type Tokens } from "./composer-tokens.ts";
 
 /** What the field shows of the open menu: its list's id and the highlighted row's, for aria-controls and
  * aria-activedescendant; null while it's closed. */
@@ -42,6 +45,7 @@ export function CommandMenu({
   composing,
   held,
   onShown,
+  sync,
   testIds,
 }: {
   field: HTMLTextAreaElement;
@@ -53,6 +57,8 @@ export function CommandMenu({
    * then emptied, so the menu mounting again never reads old words. */
   held: RefObject<string | null>;
   onShown: (shown: MenuShown) => void;
+  /** Where the composer finds how to read the field again after it set the words in place, with no input event. */
+  sync?: { current: (() => void) | null } | undefined;
   testIds?: { menu?: string | undefined; item?: string | undefined } | undefined;
 }) {
   const w = useThreadWords();
@@ -70,6 +76,9 @@ export function CommandMenu({
   const shown = useRef<MenuShown>(null);
   // what the live region says: the count as the menu opens, then the highlighted row's name
   const [said, setSaid] = useState("");
+  // the picks, as tokens, and the overlay that draws them behind the field
+  const cover = useRef<HTMLDivElement>(null);
+  const tokens = useRef<Tokens | null>(null);
 
   const setOpen = (next: Open | null) => {
     const was = now.current.open;
@@ -96,7 +105,12 @@ export function CommandMenu({
     if (composing.current) return;
     const cur = now.current.open;
     if (field.selectionStart !== field.selectionEnd) return setOpen(null);
-    const slash = slashAt(field.value, field.selectionEnd);
+    const found = slashAt(field.value, field.selectionEnd);
+    // a picked command's own slash opens nothing
+    const slash =
+      found !== null && tokens.current?.now().some((t) => t.start === found.at) === true
+        ? null
+        : found;
     if (slash === null) {
       dismissed.current = null;
       return setOpen(null);
@@ -120,6 +134,7 @@ export function CommandMenu({
     const text = picked(command, field.value[end]);
     setOpen(null);
     picking.current = true;
+    tokens.current?.expect(cur.slash.at, `/${command.name}`);
     try {
       field.focus();
       field.setSelectionRange(cur.slash.at, end);
@@ -137,6 +152,26 @@ export function CommandMenu({
   };
   const pickRef = useRef(pick);
   pickRef.current = pick;
+
+  // the tokens, held from here, their listeners on the field before the menu's, so the menu reads them moved; the
+  // composer's in-place edits read through `sync`
+  useEffect(() => {
+    const el = cover.current;
+    if (el === null) return;
+    const t = holdTokens(
+      field,
+      el,
+      composing,
+      now.current.commands.map((c) => c.name),
+    );
+    tokens.current = t;
+    if (sync !== undefined) sync.current = t.sync;
+    return () => {
+      t.stop();
+      tokens.current = null;
+      if (sync !== undefined && sync.current === t.sync) sync.current = null;
+    };
+  }, [field, composing, sync]);
 
   useEffect(() => {
     const onInput = (e: Event) => {
@@ -208,8 +243,10 @@ export function CommandMenu({
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // the agent's list replaced while the menu is open: read again, the highlighted row kept by its name
+  // the agent's list replaced: a token whose command has gone is plain text; and while the menu is open, read again,
+  // the highlighted row kept by its name
   useEffect(() => {
+    tokens.current?.names(commands.map((c) => c.name));
     if (now.current.open !== null) refreshRef.current(false);
   }, [commands]);
 
@@ -263,11 +300,14 @@ export function CommandMenu({
       {said}
     </span>
   );
+  // the tokens' boxes, behind the field's words; holdTokens fills it, React never does
+  const overlay = <div ref={cover} className="room-field-tokens" aria-hidden="true" />;
   // one tree open or closed, so the live region is the same node throughout and is heard as it changes
   const ids = open === null ? [] : optionIds(list, open.items);
   return (
     <>
       {live}
+      {overlay}
       {open !== null &&
         createPortal(
           <div
