@@ -3,9 +3,10 @@
 // options); the "Start new conversations with" setting (H7's default-agent key, which U11 sets; not on the wire yet,
 // so null today); the agent of the matter's newest thread; else DEFAULT_AGENT. Agent ids are the settings' keys
 // (`agents.<id>`), which R15 renames from `claude` to `claude-acp`, so nothing here keys on an id but DEFAULT_AGENT,
-// and the plan names go by the id's start.
-import type { AgentId, ThreadSummary } from "../transport/protocol.ts";
-import type { AgentInfo } from "./host-next.ts";
+// and the plan names go by the agent's kind (R15's `AgentSummary`), read off the id's start only for an agent the list
+// doesn't hold.
+import type { AgentId, AgentKind, ThreadSummary } from "../transport/protocol.ts";
+import type { AgentSummary } from "./host-next.ts";
 
 /** The agent when nothing else says: the e2e settings' `agents.claude` (ui/e2e/app-windows/scratch.ts's AGENT_ID).
  * When `claude-acp` reaches settings, this and AGENT_ID change in one PR. */
@@ -31,12 +32,24 @@ export function agentFor({ chosen, setting, threads }: AgentInputs): AgentId {
   return newest?.agent ?? DEFAULT_AGENT;
 }
 
-/** The plan a row names for an agent: Claude Code's ids begin `claude`, Codex's `codex`. An id that is neither is
- * shown as it is, in English. */
-export function planName(agent: AgentId): string {
-  if (agent.startsWith("claude")) return "Claude";
-  if (agent.startsWith("codex")) return "ChatGPT";
-  return agent;
+/** Each kind's plan, as the rows and the composer's choice name it. */
+const PLAN: Record<AgentKind, string> = { claude: "Claude", codex: "ChatGPT" };
+
+/** An agent's kind: the one the host lists for it (R15's ListAgents), else read off its id (Claude Code's begin
+ * `claude`, Codex's `codex`), for a thread whose agent the list doesn't hold; none for any other id. */
+function kindOf(agent: AgentId, agents: readonly AgentSummary[]): AgentKind | undefined {
+  const listed = agents.find((a) => a.id === agent);
+  if (listed !== undefined) return listed.kind;
+  if (agent.startsWith("claude")) return "claude";
+  if (agent.startsWith("codex")) return "codex";
+  return undefined;
+}
+
+/** The plan a row names for an agent, by its kind: "Claude" or "ChatGPT". An agent of no kind is shown by its id, in
+ * English. */
+export function planName(agent: AgentId, agents: readonly AgentSummary[] = []): string {
+  const kind = kindOf(agent, agents);
+  return kind === undefined ? agent : PLAN[kind];
 }
 
 /** The plan a matter's rows are measured against (rail-conversations.tsx's `plan`): its oldest thread's, by id. A row
@@ -44,15 +57,16 @@ export function planName(agent: AgentId): string {
  * U6 takes the first, the one the host knows. */
 export function matterPlan(
   threads: readonly Pick<ThreadSummary, "thread" | "agent">[],
+  agents: readonly AgentSummary[] = [],
 ): string | undefined {
   let oldest: Pick<ThreadSummary, "thread" | "agent"> | null = null;
   for (const t of threads) if (oldest === null || t.thread < oldest.thread) oldest = t;
-  return oldest === null ? undefined : planName(oldest.agent);
+  return oldest === null ? undefined : planName(oldest.agent, agents);
 }
 
-/** The composer's plan choice for a new conversation, from the agents the host lists (R15): one option per agent that
- * is set up, labelled by its plan; none when there is only one to choose. */
-export function planOptions(agents: readonly AgentInfo[]): { value: AgentId; label: string }[] {
-  const options = agents.map((a) => ({ value: a.agent, label: planName(a.agent) }));
+/** The composer's plan choice for a new conversation, from the agents the host lists (R15), each labelled by its
+ * kind's plan; none when there is only one to choose. */
+export function planOptions(agents: readonly AgentSummary[]): { value: AgentId; label: string }[] {
+  const options = agents.map((a) => ({ value: a.id, label: planName(a.id, agents) }));
   return options.length > 1 ? options : [];
 }
