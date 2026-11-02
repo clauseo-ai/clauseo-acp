@@ -68,6 +68,7 @@ export function VersionsRail({
   standIns,
   onClose,
   onPicked,
+  focusOnOpen,
 }: {
   controller: VersionsController;
   platform: Platform;
@@ -75,6 +76,8 @@ export function VersionsRail({
   onClose: () => void;
   /** After a pick: on a mid window, the panel goes away. */
   onPicked: () => void;
+  /** Brought back over the work on a mid window: the panel takes the focus as it opens. */
+  focusOnOpen: boolean;
 }) {
   const w = useVersionWords();
   const { s, cal, history } = useVersions(c, w.lang);
@@ -134,6 +137,7 @@ export function VersionsRail({
         />
       }
       testIds={{ panel: "versions", entry: "version" }}
+      focusOnOpen={focusOnOpen}
       kindOf={(v) => meta.get(v.id)?.kind ?? "unknown"}
     />
   );
@@ -187,8 +191,8 @@ export function VersionsCentre({
     if (away && (at === null || at === document.body)) lead.current?.focus();
   }, [away]);
 
-  // Escape comes back to now, from anywhere in the room but a field or a dialog; from inside a panel standing over
-  // the band, it puts the panel away first
+  // Escape comes back to now, from anywhere in the room but a field or a dialog; while a panel stands over the band,
+  // wherever the focus is, it puts the panel away first and keeps the look
   useEffect(() => {
     if (shown === undefined || s.ask !== null) return;
     const onKey = (e: KeyboardEvent) => {
@@ -201,7 +205,7 @@ export function VersionsCentre({
         return;
       if (!keyIsMine(room, t)) return;
       e.preventDefault();
-      if (onAway !== null && t instanceof Element && t.closest(".ver-panel") !== null) onAway();
+      if (onAway !== null) onAway();
       else c.look(null);
     };
     document.addEventListener("keydown", onKey);

@@ -170,3 +170,44 @@ test("in the e2e's 1028 by 779 window, picking a version closes the panel and th
   expect(h.queried("preview_restore")).toHaveLength(1);
   expect(dialog()).not.toBeNull();
 });
+
+test("Enter on the band's Versions N brings the panel back with the focus on the picked row", async () => {
+  stubMedia(true);
+  h = await mountVersions(VERSIONS, STEPS);
+  await h.openVersions();
+  await h.lookAt("cp2");
+  const button = lead();
+  button?.focus();
+  expect(document.activeElement).toBe(button);
+  // Enter on a button presses it
+  await act(async () => {
+    button?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  await h.click(button);
+  const panel = h.one("versions");
+  expect(panel).not.toBeNull();
+  const row = h.all("version").find((r) => r.dataset["checkpoint"] === "cp2");
+  expect(document.activeElement).toBe(row);
+  expect(panel?.contains(document.activeElement)).toBe(true);
+});
+
+test("on a mid window, Escape with the focus on the page puts the reopened panel away and keeps the look", async () => {
+  stubMedia(true);
+  h = await mountVersions(VERSIONS, STEPS);
+  await h.openVersions();
+  await h.lookAt("cp2");
+  await h.click(lead());
+  expect(h.one("versions")).not.toBeNull();
+  (document.activeElement as HTMLElement | null)?.blur();
+  expect(document.activeElement).toBe(document.body);
+  await act(async () => {
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  expect(h.one("versions")).toBeNull();
+  expect(h.one("version-restore")).not.toBeNull();
+  // with the panel away, Escape comes back to now
+  await act(async () => {
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  });
+  expect(h.one("version-restore")).toBeNull();
+});
