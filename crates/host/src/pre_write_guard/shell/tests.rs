@@ -9,6 +9,8 @@ fn walk(segments: &[&str], escape: Escape) -> Folders {
         reached: vec![PathBuf::from("/m")],
         unknown: false,
         pushed: 0,
+        linear: Some(PathBuf::from("/m")),
+        linear_pushed: Vec::new(),
     };
     for segment in segments {
         let words: Vec<String> = segment.split(' ').map(str::to_owned).collect();
@@ -18,17 +20,12 @@ fn walk(segments: &[&str], escape: Escape) -> Folders {
 }
 
 /// Reached `paths`, in order, and whether the folder is unknown.
-fn reached(paths: &[&str], unknown: bool) -> Folders {
-    Folders {
-        reached: paths.iter().map(PathBuf::from).collect(),
-        unknown,
-        pushed: 0,
-    }
+fn reached(paths: &[&str], unknown: bool) -> (Vec<PathBuf>, bool) {
+    (paths.iter().map(PathBuf::from).collect(), unknown)
 }
 
-fn without_pushes(mut folders: Folders) -> Folders {
-    folders.pushed = 0;
-    folders
+fn without_pushes(folders: Folders) -> (Vec<PathBuf>, bool) {
+    (folders.reached, folders.unknown)
 }
 
 #[cfg(unix)]
@@ -62,7 +59,7 @@ fn a_cd_adds_each_folder_it_may_reach() {
         "pushd +1",
         "pushd -1",
     ] {
-        assert!(w(&[unknown]).unknown, "{unknown}");
+        assert!(w(&[unknown]).1, "{unknown}");
     }
     // Unknown stays set, and an absolute folder is still added.
     assert_eq!(
@@ -73,11 +70,11 @@ fn a_cd_adds_each_folder_it_may_reach() {
         w(&["pushd D", "cd E", "popd"]),
         reached(&["/m", "/m/D", "/m/E", "/m/D/E"], false)
     );
-    assert!(w(&["popd"]).unknown);
+    assert!(w(&["popd"]).1);
     // Too many folders: unknown.
     let many: Vec<String> = (0..5).map(|i| format!("cd d{i}")).collect();
     let many: Vec<&str> = many.iter().map(String::as_str).collect();
-    assert!(w(&many).unknown);
+    assert!(w(&many).1);
 }
 
 #[cfg(unix)]
@@ -140,4 +137,40 @@ fn scripts_handed_to_another_shell_are_found() {
     assert_eq!(script(&words(&["bash", "script.sh"]), posix), None);
     assert_eq!(script(&words(&["bash", "--norc", "x"]), posix), None);
     assert_eq!(script(&words(&["python", "-c", "x"]), posix), None);
+}
+
+/// The "every change ran" folder is followed past the cap, and lost only at a change it cannot
+/// follow.
+#[cfg(unix)]
+#[test]
+fn the_folder_if_every_change_ran_is_always_followed() {
+    let posix = Escape::Backslash;
+    let linear = |segments: &[&str]| walk(segments, posix).linear;
+    let many = [
+        "cd a",
+        "cd ..",
+        "cd b",
+        "cd ..",
+        "cd c",
+        "cd ..",
+        "cd d",
+        "cd ..",
+        "cd D/deeper",
+    ];
+    let folders = walk(&many, posix);
+    assert!(folders.unknown, "past the cap");
+    assert_eq!(folders.linear, Some(PathBuf::from("/m/D/deeper")));
+    assert_eq!(linear(&["cd ~", "cd x"]), None);
+    assert_eq!(
+        linear(&["cd ~", "cd /m/x", "cd y"]),
+        Some(PathBuf::from("/m/x/y"))
+    );
+    assert_eq!(
+        linear(&["pushd D", "cd E", "popd"]),
+        Some(PathBuf::from("/m"))
+    );
+    let ps = |segments: &[&str]| walk(segments, Escape::Backtick).linear;
+    assert_eq!(ps(&["cd D\\E", "cd.."]), Some(PathBuf::from("/m/D")));
+    assert_eq!(ps(&["cd\\"]), Some(PathBuf::from("/")));
+    assert_eq!(ps(&["CD.."]), Some(PathBuf::from("/")));
 }

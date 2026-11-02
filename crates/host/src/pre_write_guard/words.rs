@@ -11,11 +11,13 @@ pub(crate) enum Escape {
 }
 
 /// One simple command's words, or a heredoc body's (`command` false: its lines are data, not
-/// commands, but their words still name files).
+/// commands, but their words still name files), and the targets of its output redirections
+/// (`>x`, `>>x`, `2>x`, `&>x`; a duplication such as `2>&1` as `&1`), which are words too.
 #[derive(Debug, Default)]
 pub(crate) struct Segment {
     pub(crate) words: Vec<String>,
     pub(crate) command: bool,
+    pub(crate) redirects: Vec<String>,
 }
 
 /// A shell command's words, grouped by the simple command (segment) each belongs to, the first
@@ -70,7 +72,15 @@ impl Segments {
             _ => self.list.push(Segment {
                 words: Vec::new(),
                 command,
+                redirects: Vec::new(),
             }),
+        }
+    }
+
+    /// Notes `target` as an output redirection of the last segment.
+    fn redirect(&mut self, target: String) {
+        if let Some(last) = self.list.last_mut() {
+            last.redirects.push(target);
         }
     }
 
@@ -87,9 +97,9 @@ impl Segments {
 ///   everything but the escape before `"`, the escape itself, `$`, `` ` `` or a newline (a
 ///   backslash under [`Escape::Backslash`]); the escape outside quotes keeps the next character;
 ///   an escaped newline joins the lines. Under [`Escape::Backslash`], `$'…'` is read as its
-///   quoted text with the basic escapes (`\n`, `\t`, `\\`, `\'`, …). An unclosed quote ends with
-///   the command.
-/// - An unquoted `#` at a word's start begins a comment, to the end of the line.
+///   quoted text with bash's escapes ([`ansi_c_char`]). An unclosed quote ends with the command.
+/// - An unquoted `#` at a word's start begins a comment, to the end of the line; under
+///   [`Escape::Backtick`], `<#` begins a block comment, to `#>`.
 /// - Unquoted `<` and `>` end a word and are dropped (`cat>Contract.docx<x` is three words), as
 ///   is an `&` or `|` that belongs to a redirection (`2>&1`, `&>x`, `>|x`).
 /// - A new segment starts at each unquoted newline, `;`, `&`, `&&`, `|`, `||`, `|&`, `(` and
@@ -108,6 +118,7 @@ pub(crate) fn shell_segments(command: &str, escape: Escape, segments: &mut Segme
         word: String::new(),
         in_word: false,
         awaiting_delimiter: None,
+        redirecting: None,
         heredocs: Vec::new(),
     };
     segments.split();
@@ -124,6 +135,8 @@ struct Scanner<'a> {
     in_word: bool,
     /// After `<<` or `<<-`: the next word is a heredoc's delimiter; whether tabs are stripped.
     awaiting_delimiter: Option<bool>,
+    /// After `>`: the next word is a redirection's target; whether it duplicates a descriptor.
+    redirecting: Option<bool>,
     /// Heredocs whose bodies start after this line: delimiter, tabs stripped.
     heredocs: Vec<(String, bool)>,
 }
@@ -162,6 +175,9 @@ impl Scanner<'_> {
                 }
                 (Quote::None, '&') => {
                     self.end_word(segments);
+                    if prev == '>' {
+                        self.redirecting = Some(true);
+                    }
                     if self.chars.peek() == Some(&'&') {
                         self.chars.next();
                         segments.split();
@@ -178,7 +194,20 @@ impl Scanner<'_> {
                         segments.split();
                     }
                 }
-                (Quote::None, '>') => self.end_word(segments),
+                (Quote::None, '>') => {
+                    self.end_word(segments);
+                    self.redirecting = Some(false);
+                }
+                (Quote::None, '<') if self.escape == '`' && self.chars.peek() == Some(&'#') => {
+                    self.end_word(segments);
+                    let mut last = ' ';
+                    for next in self.chars.by_ref() {
+                        if last == '#' && next == '>' {
+                            break;
+                        }
+                        last = next;
+                    }
+                }
                 (Quote::None, '<') => {
                     self.end_word(segments);
                     if self.chars.peek() == Some(&'<') {
@@ -227,8 +256,8 @@ impl Scanner<'_> {
                     _ => self.word.push(self.escape),
                 },
                 (Quote::AnsiC, '\\') => {
-                    if let Some(next) = self.chars.next() {
-                        self.word.push(ansi_c_escape(next));
+                    if let Some(decoded) = ansi_c_char(&mut self.chars) {
+                        self.word.push(decoded);
                     }
                 }
                 (Quote::None | Quote::Single | Quote::Double | Quote::AnsiC, c) => {
@@ -250,10 +279,18 @@ impl Scanner<'_> {
         }
         self.in_word = false;
         let word = std::mem::take(&mut self.word);
-        match self.awaiting_delimiter.take() {
-            Some(dash) => self.heredocs.push((word, dash)),
-            None => segments.push(word),
+        if let Some(dash) = self.awaiting_delimiter.take() {
+            self.heredocs.push((word, dash));
+            return;
         }
+        if let Some(duplicate) = self.redirecting.take() {
+            segments.redirect(if duplicate {
+                format!("&{word}")
+            } else {
+                word.clone()
+            });
+        }
+        segments.push(word);
     }
 
     /// Reads the bodies of the heredocs the line just ended opened, each into a segment that is
@@ -291,10 +328,26 @@ impl Scanner<'_> {
     }
 }
 
-/// The character `\x` stands for in ANSI-C quoting (`$'…'`), for the basic escapes; any other
-/// `x` stands for itself.
-fn ansi_c_escape(c: char) -> char {
-    match c {
+/// The character an ANSI-C escape (`$'…'`) stands for, read from `chars` just after its
+/// backslash, as bash reads it: `\n`, `\t`, `\r`, `\a`, `\b`, `\e`, `\f`, `\v`, `\xHH` (one or two
+/// hex digits), `\NNN` (one to three octal digits), `\uHHHH` and `\UHHHHHHHH` (up to four or eight
+/// hex digits); any other character stands for itself. `None` at the end of the text.
+pub(crate) fn ansi_c_char(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<char> {
+    let c = chars.next()?;
+    let mut number = |radix: u32, most: usize, first: Option<char>| {
+        let mut value: u32 = first.and_then(|d| d.to_digit(radix)).unwrap_or(0);
+        let mut count = usize::from(first.is_some());
+        while count < most {
+            let Some(digit) = chars.peek().and_then(|d| d.to_digit(radix)) else {
+                break;
+            };
+            value = value.saturating_mul(radix).saturating_add(digit);
+            chars.next();
+            count += 1;
+        }
+        (count > 0).then(|| char::from_u32(value).unwrap_or('\u{fffd}'))
+    };
+    Some(match c {
         'n' => '\n',
         't' => '\t',
         'r' => '\r',
@@ -303,8 +356,12 @@ fn ansi_c_escape(c: char) -> char {
         'e' | 'E' => '\u{1b}',
         'f' => '\u{c}',
         'v' => '\u{b}',
+        'x' => number(16, 2, None).unwrap_or('x'),
+        'u' => number(16, 4, None).unwrap_or('u'),
+        'U' => number(16, 8, None).unwrap_or('U'),
+        '0'..='7' => number(8, 3, Some(c)).unwrap_or(c),
         other => other,
-    }
+    })
 }
 
 /// The file names `word` may hold, each when not empty: the word without trailing `;`, `|` or
@@ -329,184 +386,4 @@ pub(crate) fn candidates(word: &str) -> impl Iterator<Item = &str> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{Escape, Segments, candidates, shell_segments};
-
-    fn segments(command: &str, limit: usize, escape: Escape) -> Vec<Vec<String>> {
-        let mut segments = Segments::new(limit);
-        shell_segments(command, escape, &mut segments);
-        segments
-            .iter()
-            .map(|segment| {
-                let mut words = segment.words.clone();
-                if !segment.command {
-                    words.insert(0, "(body)".to_owned());
-                }
-                words
-            })
-            .collect()
-    }
-
-    fn split(command: &str, limit: usize, escape: Escape) -> Vec<String> {
-        segments(command, limit, escape).concat()
-    }
-
-    #[test]
-    fn posix_words_split_the_simple_shell_way() {
-        let posix = Escape::Backslash;
-        assert_eq!(
-            split(r#"cp  'a b' "c \"d\" \$e \x" f\ g '' h"#, 64, posix),
-            ["cp", "a b", r#"c "d" $e \x"#, "f g", "", "h"]
-        );
-        assert_eq!(split("a 'b c", 64, posix), ["a", "b c"]);
-        assert_eq!(split("a b c d", 2, posix), ["a", "b"]);
-        assert_eq!(split("trailing\\", 64, posix), ["trailing"]);
-        assert_eq!(split("  \t\n ", 64, posix), Vec::<String>::new());
-    }
-
-    #[test]
-    fn commands_split_into_segments_at_unquoted_operators() {
-        let posix = Escape::Backslash;
-        assert_eq!(
-            segments(
-                "mkdir -p D && cd D;echo 'a;b' \"c && d\" >|x | tee y||z\nw 2>&1 & v |& u",
-                64,
-                posix
-            ),
-            [
-                vec!["mkdir", "-p", "D"],
-                vec!["cd", "D"],
-                vec!["echo", "a;b", "c && d", "x"],
-                vec!["tee", "y"],
-                vec!["z"],
-                vec!["w", "2", "1"],
-                vec!["v"],
-                vec!["u"],
-            ]
-        );
-        assert_eq!(
-            segments("(cd D && x) ; { cd E; } &>log", 64, posix),
-            [
-                vec!["cd", "D"],
-                vec!["x"],
-                vec!["{", "cd", "E"],
-                vec!["}", "log"]
-            ]
-        );
-        assert_eq!(
-            segments("a\\;b ; ;; c", 64, posix),
-            [vec!["a;b"], vec!["c"]]
-        );
-        assert_eq!(segments("a; b; c", 2, posix), [vec!["a"], vec!["b"]]);
-        assert_eq!(
-            segments(
-                "Set-Location D; Set-Content ..\\C.docx hi; & { sl E }",
-                64,
-                Escape::Backtick
-            ),
-            [
-                vec!["Set-Location", "D"],
-                vec!["Set-Content", r"..\C.docx", "hi"],
-                vec!["{", "sl", "E", "}"]
-            ]
-        );
-    }
-
-    #[test]
-    fn redirections_comments_continuations_and_ansi_c_quotes_are_read() {
-        let posix = Escape::Backslash;
-        assert_eq!(
-            split(">Contract.docx&true", 64, posix),
-            ["Contract.docx", "true"]
-        );
-        assert_eq!(
-            segments("cat>Contract.docx<x", 64, posix),
-            [vec!["cat", "Contract.docx", "x"]]
-        );
-        assert_eq!(
-            segments("cd D # ; cd /tmp\necho a#b", 64, posix),
-            [vec!["cd", "D"], vec!["echo", "a#b"]]
-        );
-        assert_eq!(
-            segments("echo hi > Con\\\ntract.docx \"a\\\nb\"", 64, posix),
-            [vec!["echo", "hi", "Contract.docx", "ab"]]
-        );
-        assert_eq!(
-            split(r"echo $'Con\x74ract.docx' $'a\'b\n' x$'y'", 64, posix),
-            ["echo", "Conx74ract.docx", "a'b\n", "xy"]
-        );
-        // PowerShell has no ANSI-C quotes, and its backtick joins lines.
-        assert_eq!(
-            split("Set-Content $'a' Con`\ntract.docx", 64, Escape::Backtick),
-            ["Set-Content", "$a", "Contract.docx"]
-        );
-    }
-
-    #[test]
-    fn heredoc_bodies_are_not_commands() {
-        let posix = Escape::Backslash;
-        assert_eq!(
-            segments(
-                "cat <<'EOF' > x\ncd /tmp\nEOF\necho hi; cat <<-END\n\tcd /\n\tEND\nls <<<here",
-                64,
-                posix
-            ),
-            [
-                vec!["cat", "x"],
-                vec!["(body)", "cd", "/tmp"],
-                vec!["echo", "hi"],
-                vec!["cat"],
-                vec!["(body)", "cd", "/"],
-                vec!["ls", "here"],
-            ]
-        );
-        // An unclosed heredoc runs to the end.
-        assert_eq!(
-            segments("cat <<E\ncd x", 64, posix),
-            [vec!["cat"], vec!["(body)", "cd", "x"]]
-        );
-    }
-    #[test]
-    fn powershell_words_keep_backslashes_and_escape_with_backticks() {
-        let ps = Escape::Backtick;
-        assert_eq!(
-            split(
-                r#"Set-Content C:\m\Contract.docx "a `"b`" \x" a` b"#,
-                64,
-                ps
-            ),
-            ["Set-Content", r"C:\m\Contract.docx", r#"a "b" \x"#, "a b"]
-        );
-    }
-
-    #[test]
-    fn candidates_drop_shell_punctuation_around_a_name() {
-        fn all(word: &str) -> Vec<&str> {
-            candidates(word).collect()
-        }
-        assert_eq!(all("Contract.docx;"), ["Contract.docx"]);
-        assert_eq!(all("Contract.docx&&"), ["Contract.docx"]);
-        assert_eq!(all(">Contract.docx"), [">Contract.docx", "Contract.docx"]);
-        assert_eq!(all(">>Contract.docx"), [">>Contract.docx", "Contract.docx"]);
-        assert_eq!(all(">|Contract.docx"), [">|Contract.docx", "Contract.docx"]);
-        assert_eq!(all("2>Contract.docx"), ["2>Contract.docx", "Contract.docx"]);
-        assert_eq!(
-            all("--out=Contract.docx"),
-            ["--out=Contract.docx", "Contract.docx"]
-        );
-        assert_eq!(
-            all("-Path:Contract.docx"),
-            ["-Path:Contract.docx", "Contract.docx"]
-        );
-        assert_eq!(
-            all(r#"-LiteralPath:"C:\m\Contract.docx""#),
-            [
-                r#"-LiteralPath:"C:\m\Contract.docx""#,
-                r"C:\m\Contract.docx"
-            ]
-        );
-        assert_eq!(all("a:b"), ["a:b"]);
-        assert_eq!(all("-Force:"), ["-Force:"]);
-        assert_eq!(all(";"), Vec::<&str>::new());
-    }
-}
+mod tests;

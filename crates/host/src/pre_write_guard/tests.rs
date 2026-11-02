@@ -207,7 +207,7 @@ fn bash_not_naming_a_held_file_is_let_through() {
         "ls -la",
         "rm Free.docx sub/Note.txt",
         "cat Contract",
-        "echo 'Contract.docx is open'",
+        "echo 'Contract is open'",
         "cp *.docx /tmp",
     ] {
         assert_eq!(
@@ -218,18 +218,23 @@ fn bash_not_naming_a_held_file_is_let_through() {
     }
 }
 
-/// Only the first [`MAX_WORDS`] words are looked at.
+/// Only the first [`MAX_WORDS`] words are looked at as paths; past them, the name backstop
+/// still refuses a command naming a held file that is not a plain read.
 #[test]
-fn bash_words_past_the_limit_are_not_checked() {
+fn bash_words_past_the_limit_are_caught_by_the_name_backstop() {
     let fx = Fixture::new("bash-limit");
     let filler = vec!["x"; MAX_WORDS - 2].join(" ");
-    let inside = format!("echo {filler} Contract.docx");
-    let past = format!("echo {filler} more Contract.docx");
-    assert_eq!(
-        guard_json(&fx.hook("Bash", &json!({"command": inside}))),
-        deny("Contract.docx")
-    );
-    assert_eq!(guard_json(&fx.hook("Bash", &json!({"command": past}))), "");
+    for command in [
+        format!("echo {filler} Contract.docx"),
+        format!("echo {filler} more Contract.docx"),
+    ] {
+        assert_eq!(
+            guard_json(&fx.hook("Bash", &json!({"command": command}))),
+            deny("Contract.docx")
+        );
+    }
+    let read = format!("cat {filler} more Contract.docx");
+    assert_eq!(guard_json(&fx.hook("Bash", &json!({"command": read}))), "");
 }
 
 #[test]
@@ -458,6 +463,7 @@ fn bash_punctuation_around_a_held_name_is_stripped() {
     }
 }
 
+mod backstop;
 mod codex;
 mod fixtures;
 mod gaps;

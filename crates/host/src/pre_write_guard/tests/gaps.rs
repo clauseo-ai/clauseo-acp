@@ -214,13 +214,13 @@ fn a_huge_word_or_path_is_read_quickly() {
         let back = format!("{}Contract.docx", "sub/../".repeat(150_000));
         // Still long once `..` is resolved by its text: the review's slow case.
         let up = format!("{}../Contract.docx", "Drafts/".repeat(150_000));
-        for (tool, input) in [
-            ("Write", json!({"file_path": up})),
-            ("Bash", bash(&format!("echo hi > {up}"))),
-            ("Write", json!({"file_path": deep})),
-            ("Bash", bash(&format!("echo hi > {deep}"))),
-        ] {
-            assert_eq!(guard_json(&fx.hook(tool, &input)), "", "{tool}");
+        for path in [&up, &deep] {
+            assert_eq!(
+                guard_json(&fx.hook("Write", &json!({"file_path": path}))),
+                ""
+            );
+            // The name backstop sees `Contract.docx` in the text.
+            assert_refused(&fx, "Bash", &bash(&format!("echo hi > {path}")));
         }
         assert_refused(&fx, "Write", &json!({"file_path": back}));
         assert_refused(&fx, "Bash", &bash(&format!("echo hi > {back}")));
